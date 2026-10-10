@@ -4,6 +4,41 @@ import { WebSocketServer, type WebSocket } from 'ws';
 import { createAgentRemoteRelay } from '../relay.js';
 import { createRemoteHostUplinkClient, type RemoteHostUplinkClientOptions } from './remote-host-uplink-client.js';
 
+it.each([true, false])('routes create through the trusted existing callback only with acknowledged v2=%s', async acknowledged => {
+  const server = new WebSocketServer({ host: '127.0.0.1', port: 0 });
+  await new Promise<void>(resolve => server.once('listening', resolve));
+  closeables.push(() => new Promise<void>(resolve => { for (const socket of server.clients) socket.terminate(); server.close(() => resolve()); }));
+  const origin = `http://127.0.0.1:${(server.address() as { port: number }).port}`;
+  const authority = { version: 1 as const, origin, issuer: 'https://issuer.example', namespace: 'tenant', ownerSubject: 'owner' };
+  const responses: Array<{ status: number; body: string }> = [];
+  let connection!: WebSocket;
+  server.on('connection', socket => {
+    connection = socket;
+    socket.on('message', data => {
+      const message = JSON.parse(data.toString());
+      if (message.type === 'register') socket.send(JSON.stringify({ uplinkVersion: 2, type: 'registered', hostId: 'host', heartbeat: { intervalMs: 30000, timeoutMs: 10000 },
+        ...(acknowledged ? { successionEnrollment: authority, successionEnrollmentVersion: 2 } : {}) }));
+      if (message.type === 'rpc_response') responses.push(message);
+    });
+  });
+  const relay = createAgentRemoteRelay({ providers: [] }); closeables.push(() => relay.close());
+  const trusted: unknown[] = [], ordinary: unknown[] = [];
+  const client = createRemoteHostUplinkClient({ relay, installationId: 'machine', name: 'Machine', remoteKey: 'key', providers: [], url: origin.replace('http:', 'ws:') + '/ws/remote-host',
+    resolveSession: () => undefined, control: async request => { ordinary.push(request); return { status: 200, body: 'ordinary' }; },
+    successionEnrollment: { control: async (request, context) => { expect(context.installationId).toBe('machine'); trusted.push({ request, context }); context.installationId = 'mutated'; return { status: 200, body: 'trusted' }; } } });
+  closeables.push(() => client.close()); await client.ready;
+  for (const requestId of ['first', 'second']) {
+    connection.send(JSON.stringify({ uplinkVersion: 2, type: 'rpc_request', requestId, method: 'POST', path: '/remote/create', sessionId: 'proposal', body: '{"context":"forged"}' }));
+    await until(() => responses.length === (requestId === 'first' ? 1 : 2));
+  }
+  expect(responses.map(response => response.body)).toEqual(acknowledged ? ['trusted', 'trusted'] : ['ordinary', 'ordinary']);
+  if (acknowledged) {
+    expect(ordinary).toEqual([]);
+    expect(trusted).toEqual(['first', 'second'].map(requestId => ({ request: { requestId, method: 'POST', path: '/remote/create', sessionId: 'proposal', body: '{"context":"forged"}', operationScope: JSON.stringify([origin.replace('http:', 'ws:'), 'host', 'machine']) },
+      context: { authority, installationId: 'mutated', successionEnrollmentVersion: 2 } })));
+  } else expect(trusted).toEqual([]);
+});
+
 const closeables: Array<() => Promise<void>> = [];
 afterEach(async () => { for (const close of closeables.splice(0).reverse()) await close(); });
 

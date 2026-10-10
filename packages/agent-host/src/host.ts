@@ -7,10 +7,11 @@ import { SessionSuccessionService, type SessionSuccessionPorts } from './session
 import { captureSuccessionTimeline } from './session-succession-capture.js';
 import { SuccessionPreparationRejected } from './local-succession-preparation.js';
 import { SessionSuccessionBoundary } from './session-succession-boundary.js';
-import type { SessionSuccessionStore } from './session-succession-store.js';
+import { SOURCE_WITNESS_RESULT_BYTES, validSourceWitnessIdentity, type SessionSuccessionStore } from './session-succession-store.js';
+import { jsonBytes } from './succession-persistence.js';
 import type { SessionSuccessionContextStore } from './session-succession-context.js';
 import type { SessionSuccessionCoordinator } from './session-succession.js';
-import { nativeSessionRefKey, isSuccessionRequest, type NativeSessionRef, type TrustedSuccessionContext } from '@orchardworks/agent-remote-protocol';
+import { nativeSessionRefKey, isNativeSessionRef, isSuccessionRequest, type NativeSessionRef, type TrustedSuccessionContext } from '@orchardworks/agent-remote-protocol';
 import { TpmCoordinator, type TpmOptions } from './tpm.js';
 import { isTpmCreate, isTpmAction } from '@orchardworks/agent-remote-protocol';
 import { SessionBindings, SessionBindingError } from '@orchardworks/agent-remote-relay';
@@ -39,6 +40,11 @@ export interface AgentHostWorkspace { id: string; name: string; path: string }
 export interface AgentHostDirectory {
   readonly providerId: string;
   readonly supportsSourceReferences?: boolean;
+  /** Adapter-owned pre-effect promise for this exact create mode: the authoritative native reader ID
+   * has nonempty trim, <=512 UTF-16 units and a valid same-controller/provider NativeSessionRef.
+   * Must cover every selected downstream mode while create can run; mutable uncertified modes return false.
+   * Independent of source-tool availability, projection certification and source-grant durability. */
+  supportsBoundedSourceCreate?(input: Parameters<AgentHostDirectory['create']>[0]): Promise<boolean>;
   validateSessionRename?(nativeSessionId: string, title: string): Promise<void>;
   sessionTitle?(nativeSessionId: string): Promise<string | undefined>;
   renameSession?(nativeSessionId: string, title: string): Promise<string>;
@@ -529,7 +535,7 @@ export function createAgentHostRuntime(options: AgentHostRuntimeOptions): AgentH
       return { agent, release() { if (released) return; released = true; release(); parent?.release(); } };
     } catch (error) { release(); parent?.release(); throw error; }
   }
-  async function project(providerId: string, proposedAgentId: string, nativeSessionId: string, parentNativeSessionId?: string, takeOver?: string, takeoverAdmitted = false, takeoverScope = 'host:takeover'): Promise<Binding> {
+  async function project(providerId: string, proposedAgentId: string, nativeSessionId: string, parentNativeSessionId?: string, takeOver?: string, takeoverAdmitted = false, takeoverScope = 'host:takeover', qualifiedResult = false): Promise<Binding> {
     await successionReady;
     const existing = bindings.getByNative(providerId, nativeSessionId);
     if (takeOver && !takeoverAdmitted) {
@@ -538,6 +544,9 @@ export function createAgentHostRuntime(options: AgentHostRuntimeOptions): AgentH
         () => project(providerId, proposedAgentId, nativeSessionId, parentNativeSessionId, takeOver, true, takeoverScope));
     }
     return bindings.bind({ providerId, agentId: proposedAgentId, nativeSessionId, ...(parentNativeSessionId ? { parentNativeSessionId } : {}) }, {
+      ...(qualifiedResult ? { validateResult(binding: Binding) {
+        if (![binding.agentId, binding.nativeSessionId].every(boundedSourceIdentity)) throw new Error('Qualified source projection selected an unbounded canonical identity after native creation; the full Host witness remains available for reconciliation.');
+      } } : {}),
       discard: binding => relay.closeAgent(binding.agentId),
       attach: async binding => {
       proposedAgentId = binding.agentId;
@@ -591,7 +600,7 @@ export function createAgentHostRuntime(options: AgentHostRuntimeOptions): AgentH
       },
     });
   }
-  async function create(request: RemoteHostControlRequest, payload: Record<string, unknown>): Promise<AgentRemoteHttpResult> {
+  async function create(request: RemoteHostControlRequest, payload: Record<string, unknown>, context?: TrustedSuccessionContext): Promise<AgentRemoteHttpResult> {
     const providerId = string(payload.providerId, 'providerId');
     const operationId = string(payload.operationId, 'operationId');
     const proposedAgentId = request.sessionId;
@@ -615,21 +624,26 @@ export function createAgentHostRuntime(options: AgentHostRuntimeOptions): AgentH
       ...(typeof payload.reasoningEffort === 'string' ? { reasoningEffort: payload.reasoningEffort } : {}),
       ...(typeof payload.planning === 'boolean' ? { planning: payload.planning } : {}),
     };
+    const selected = registration(providerId), directory = selected.directory;
+    const scope = operationScope(request);
+    const qualified = context?.successionEnrollmentVersion === 2 && !!settings.sourceNativeSessionId && !!enrollment;
+    const sourceReader = settings.sourceNativeSessionId ? nativeRef({ providerId, nativeSessionId: settings.sourceNativeSessionId }) : undefined;
     // An exact durable source result is forward recovery, including after cache expiry/restart.
-    const savedCreation = settings.sourceNativeSessionId && enrollment
-      ? await enrollment.sourceResult(operationScope(request), operationId, nativeRef({ providerId, nativeSessionId: settings.sourceNativeSessionId }), settings) : undefined;
+    const savedCreation = sourceReader && enrollment ? await enrollment.sourceResult(scope, operationId, sourceReader, settings, directory) : undefined;
+    // A pending witness is uncertainty, even if a producer certificate later disappears.
+    if (qualified && !savedCreation) enrollment!.assertSourceCreateAvailable(scope, operationId, sourceReader!, settings);
+    const maximumResultBytes = savedCreation ? Math.max(1, jsonBytes(savedCreation.reader.nativeSessionId)) : qualified ? SOURCE_WITNESS_RESULT_BYTES : 1024;
     const nativeSessionId = await operationCache.execute<string>({
       operationId,
-      scope: operationScope(request),
+      scope,
       kind: 'create_agent',
       target: providerId,
       parameters: { ...settings, ...(source ? { creationSource: source } : {}) },
     }, {
       mutationTargets: targets.map(nativeSessionRefKey),
       admit: entry => savedCreation ? undefined : successionBoundary?.admit(targets, entry.key),
-      run: (entry, work) => successionBoundary ? successionBoundary.run({ operationId, kind: 'execute_command', parameters: {}, maximumResultBytes: 1024 }, operationScope(request), work, entry) : work(),
+      run: (entry, work) => successionBoundary ? successionBoundary.run({ operationId, kind: 'execute_command', parameters: {}, maximumResultBytes }, scope, work, entry) : work(),
       validate: async () => {
-        const directory = registration(providerId).directory;
         if (source) await authorizeSuccessionRead(source, source);
         if (editing && !directory.supportsPromptEditing) throw new HostRequestError(400, 'unsupported_configuration', 'Prompt editing is unavailable on this Host/provider. Update the Controller.');
         if (settings.sourceNativeSessionId && !directory.supportsSourceReferences) throw new HostRequestError(400, 'unsupported_configuration', 'This Host/provider does not support source-session tools. Update the Host or use /fork.');
@@ -649,21 +663,25 @@ export function createAgentHostRuntime(options: AgentHostRuntimeOptions): AgentH
         if (bindings.isReserved(proposedAgentId)) {
           throw new HostRequestError(409, 'session_binding_conflict', 'The proposed Agent identity is already reserved.');
         }
+        if (qualified && !savedCreation) {
+          if (!validSourceWitnessIdentity(scope, operationId) || !boundedSourceIdentity(proposedAgentId) || !isNativeSessionRef(sourceReader)) throw new HostRequestError(400, 'invalid_request', 'Qualified source witness and proposed Agent identities must fit their reviewed bounds.');
+          if (await directory.supportsBoundedSourceCreate?.(settings) !== true) throw new HostRequestError(400, 'unsupported_configuration', 'This directory create mode has not certified bounded source results.');
+        }
       },
       beforeDispatch: () => { if (!savedCreation) successionBoundary?.recheck(targets); },
       dispatch: entry => {
         if (savedCreation) return Promise.resolve(savedCreation.reader.nativeSessionId);
-        const create = () => directoryNativeEffect(entry, targets.map(nativeSessionRefKey), evidence => registration(providerId).directory.create(settings, evidence));
+        const create = () => directoryNativeEffect(entry, targets.map(nativeSessionRefKey), evidence => directory.create(settings, evidence));
         const work = () => settings.sourceNativeSessionId && enrollment
-          ? enrollment.sourceMutation(operationScope(request), operationId, nativeRef({providerId, nativeSessionId:settings.sourceNativeSessionId}), settings, create,
-            async id => (await registration(providerId).directory.sourceReferences?.())?.some(grant => grant.nativeSessionId === id && grant.sourceNativeSessionId === settings.sourceNativeSessionId) === true) : create();
+          ? enrollment.sourceMutation(scope, operationId, sourceReader!, settings, create,
+            async id => (await directory.sourceReferences?.())?.some(grant => grant.nativeSessionId === id && grant.sourceNativeSessionId === settings.sourceNativeSessionId) === true, qualified, directory) : create();
         return work();
       },
-      maximumResultBytes: 1024,
+      maximumResultBytes,
     });
-    return json(200, publicBinding(await tracked(project(providerId, proposedAgentId, nativeSessionId))));
+    return json(200, publicBinding(await tracked(project(providerId, proposedAgentId, nativeSessionId, undefined, undefined, false, undefined, qualified && !savedCreation))));
   }
-  async function control(request: RemoteHostControlRequest): Promise<AgentRemoteHttpResult> {
+  async function control(request: RemoteHostControlRequest, context?: TrustedSuccessionContext): Promise<AgentRemoteHttpResult> {
     const requestId = request.requestId && /^[a-zA-Z0-9-]{1,80}$/.test(request.requestId) ? request.requestId : randomUUID();
     const operation = request.path === '/remote/attach' || request.path === '/remote/child/attach' ? 'session_attach'
       : request.path === '/remote/create' ? 'session_create' : request.method === 'GET' ? 'catalog_read' : 'host_control';
@@ -673,12 +691,12 @@ export function createAgentHostRuntime(options: AgentHostRuntimeOptions): AgentH
         ...(status === undefined ? {} : { status }), ...(code ? { code } : {}) }); } catch { /* Diagnostics cannot change request outcomes. */ }
     };
     diagnostic('host_request_started');
-    const result = await controlRequest(request);
+    const result = await controlRequest(request, context);
     const data = result.status >= 400 ? JSON.parse(result.body) : {};
     diagnostic('host_request_completed', result.status, typeof data.code === 'string' ? data.code : undefined);
     return result.status >= 400 ? { ...result, body: JSON.stringify({ ...data, requestId }) } : result;
   }
-  async function controlRequest(request: RemoteHostControlRequest): Promise<AgentRemoteHttpResult> {
+  async function controlRequest(request: RemoteHostControlRequest, context?: TrustedSuccessionContext): Promise<AgentRemoteHttpResult> {
     try {
       await successionReady;
       if (closed) throw new HostRequestError(503, 'host_closed', 'Agent Host is closed.');
@@ -863,7 +881,7 @@ export function createAgentHostRuntime(options: AgentHostRuntimeOptions): AgentH
           });
           return json(200, { results });
         }
-        if (url.pathname === '/remote/create') return await create(request, payload);
+        if (url.pathname === '/remote/create') return await create(request, payload, context);
         if (url.pathname === '/remote/attach' || url.pathname === '/remote/child/attach') {
           if (!request.sessionId) throw new HostRequestError(400, 'invalid_request', 'A proposed Agent identity is required.');
           const providerId = string(payload.providerId, 'providerId');
@@ -951,9 +969,13 @@ export function createAgentHostRuntime(options: AgentHostRuntimeOptions): AgentH
   const enrollFromRelay = async (request: RemoteHostControlRequest, context: TrustedSuccessionContext) => {
     if (!options.succession?.enrollment || !enrollment || closed || draining) return json(403, { code: 'succession_enrollment_unavailable', error: 'Trusted succession enrollment is unavailable.' });
     await tpm?.ready;
+    if (request.path === '/remote/create') {
+      if (request.method !== 'POST' || context.installationId !== successionConfig!.controllerId) return json(403, { code: 'succession_enrollment_unavailable', error: 'Succession Controller authority does not match.' });
+      return control(request, structuredClone(context));
+    }
     return enrollment.control(request, context);
   };
-  return { relay, addRegistration, control, enrollFromRelay, executeOperation, acquireSession, setRelayConnected: idle.setConnected,
+  return { relay, addRegistration, control: request => control(request), enrollFromRelay, executeOperation, acquireSession, setRelayConnected: idle.setConnected,
     beginControllerRestart() {
       if (closed || draining) return false;
       // An owner-confirmed update closes admission immediately. Shutdown and the
@@ -988,6 +1010,7 @@ function operationErrorStatus(code: string): number {
   return 400;
 }
 function string(value: unknown, field: string): string { if (typeof value !== 'string' || !value) throw new HostRequestError(400, 'invalid_request', `${field} is required.`); return value; }
+function boundedSourceIdentity(value: unknown): value is string { return typeof value === 'string' && !!value.trim() && value.length <= 512; }
 function body(value: string | undefined): Record<string, unknown> { try { const parsed: unknown = JSON.parse(value ?? ''); if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) return parsed as Record<string, unknown>; } catch {} throw new HostRequestError(400, 'invalid_request', 'Remote Host body is invalid.'); }
 function json(status: number, value: unknown): AgentRemoteHttpResult { return { status, body: JSON.stringify(value) }; }
 function positiveTimeout(value: number): number { if (!Number.isSafeInteger(value) || value < 1) throw new RangeError('Agent Host shutdown timeout must be a positive integer.'); return value; }

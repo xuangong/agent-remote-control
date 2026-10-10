@@ -3,7 +3,7 @@ import { isRelationChangeReservation, isRelationChangeReceipt, relationChangeKey
 import { mkdir, readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { createHash } from 'node:crypto';
-import { assertSuccessionCapacity, isReservation, jsonBytes, largestSuccessionId, largestSuccessionRef, publishSuccessionState, reservationBytes, SuccessionPublicationUnknown } from './succession-persistence.js';
+import { assertSuccessionCapacity, isReservation, jsonBytes, largestSuccessionId, largestSuccessionRef, publishSuccessionState, reservationBytes, SuccessionCapacityError, SuccessionPublicationUnknown } from './succession-persistence.js';
 import { successionAuthorityKey, successionFreezeKey, isNativeSessionRef, isSuccessionAssociationAuthority, isSuccessionAssociationFreeze, type SuccessionAssociationAuthority, type SuccessionAssociationFreeze, type NativeSessionRef, isPrimaryRole, isPreparedSuccession, isSuccessionParticipant, isSuccessionRecord, isSuccessionRequest, nativeSessionRefKey,
   type PrimaryRole, type SuccessionParticipant, type SuccessionPhase, type SuccessionRecord, type SuccessionRequest } from '@orchardworks/agent-remote-protocol';
 
@@ -28,17 +28,20 @@ export interface SuccessionRoleState {
   participants: SuccessionParticipant[];
 }
 export interface SourceAssociationResult { id: string; fingerprint: string; scope: string; operationId: string; source: NativeSessionRef; reader: NativeSessionRef }
+export interface SourceWitnessDescriptor { version: 1; scope: string; operationId: string }
 export interface AssociationRecovery { createKey: string; createFingerprint: string }
-interface StoreState { version: 5; associationResults: SourceAssociationResult[]; roles: SuccessionRoleState[]; associationAdmissions: Array<{ id: string; fingerprint: string; source: NativeSessionRef; sourceReader?: true; recovery?: AssociationRecovery }> }
+interface StoreState { version: 6; associationResults: SourceAssociationResult[]; roles: SuccessionRoleState[]; associationAdmissions: Array<{ id: string; fingerprint: string; source: NativeSessionRef; sourceReader?: true; recovery?: AssociationRecovery; sourceWitness?: SourceWitnessDescriptor }> }
 type Advance = Pick<SuccessionRecord, 'phase'> & Partial<Pick<SuccessionRecord, 'to' | 'prepared' | 'failureCode'>>;
 const terminal = (phase: SuccessionPhase) => ['committed', 'rejected', 'cancelled'].includes(phase);
 const fingerprint = (request: SuccessionRequest) => JSON.stringify([request.operationId, request.roleId, request.expectedRevision, nativeSessionRefKey(request.from), request.targetProviderId ?? request.from.providerId]);
 const maxBytes = 8 * 1024 * 1024;
+/** The cache retains the native-ID string, whose reviewed 512-unit JSON maximum is 3074 bytes. */
+export const SOURCE_WITNESS_RESULT_BYTES = jsonBytes(largestSuccessionId);
 
 /** One owning Controller serializes role decisions; publication follows atomic file replacement. */
 export class SessionSuccessionStore {
   readonly ready: Promise<void>;
-  private state: StoreState = { version: 5, roles: [], associationAdmissions: [], associationResults: [] };
+  private state: StoreState = { version: 6, roles: [], associationAdmissions: [], associationResults: [] };
   private tail: Promise<unknown> = Promise.resolve();
   private loaded = false;
   private writeFailure?: SuccessionPublicationUnknown;
@@ -198,17 +201,22 @@ export class SessionSuccessionStore {
   lineage(item: SuccessionRoleState): NativeSessionRef[] {
     return [item.role.origin, ...item.operations.filter(operation => operation.phase === 'committed').map(operation => operation.to!)];
   }
-  admitAssociation(id: string, fingerprint: string, source: NativeSessionRef, sourceReader = false, recovery?: AssociationRecovery): Promise<void> {
-    source = structuredClone(source); recovery = structuredClone(recovery);
+  assertAssociationAvailable(id: string, fingerprint: string): void {
+    this.assertReadable();
+    const prior = this.state.associationAdmissions.find(item => item.id === id);
+    if (prior) throw new Error(prior.fingerprint === fingerprint ? 'Source association outcome is unresolved.' : 'Source association identity conflict.');
+  }
+  admitAssociation(id: string, fingerprint: string, source: NativeSessionRef, sourceReader = false, recovery?: AssociationRecovery, sourceWitness?: SourceWitnessDescriptor): Promise<void> {
+    source = structuredClone(source); recovery = structuredClone(recovery); sourceWitness = structuredClone(sourceWitness);
     return this.mutate(state => {
       const prior = state.associationAdmissions.find(item => item.id === id);
       if (prior) throw new Error(prior.fingerprint === fingerprint ? 'Source association outcome is unresolved.' : 'Source association identity conflict.');
       const role = state.roles.find(item => this.lineage(item).some(ref => nativeSessionRefKey(ref) === nativeSessionRefKey(source)));
       if (role?.relationChanges?.some(change => change.phase !== 'released') || role?.enrollments?.some(receipt => !role.releasedEnrollments?.includes(receipt.token)) || role?.operations.some(operation => !terminal(operation.phase))) throw new Error('Source associations are reserved by succession.');
       if (role && nativeSessionRefKey(role.role.current) !== nativeSessionRefKey(source)) throw new Error('Source session has been superseded.');
-      if (sourceReader && state.associationResults.length + state.associationAdmissions.filter(item => item.sourceReader).length >= 1024) throw new Error('Source creation result storage is full.');
-      if (state.associationAdmissions.length >= 1024) throw new Error('Source association admission storage is full. Resolve unsettled operations.');
-      state.associationAdmissions.push({ id, fingerprint, source, ...(sourceReader ? { sourceReader: true as const } : {}), ...(recovery ? { recovery } : {}) });
+      if (sourceReader && state.associationResults.length + state.associationAdmissions.filter(item => item.sourceReader).length >= 1024) throw new SourceAssociationCapacityError('Source creation result storage is full.');
+      if (state.associationAdmissions.length >= 1024) throw new SourceAssociationCapacityError('Source association admission storage is full. Resolve unsettled operations.');
+      state.associationAdmissions.push({ id, fingerprint, source, ...(sourceReader ? { sourceReader: true as const } : {}), ...(recovery ? { recovery } : {}), ...(sourceWitness !== undefined ? { sourceWitness } : {}) });
     });
   }
   sourceResult(id: string, fingerprint: string): SourceAssociationResult | undefined {
@@ -222,6 +230,7 @@ export class SessionSuccessionStore {
     return this.mutate(state => {
       const admission = state.associationAdmissions.find(item => item.id === input.id);
       if (!admission?.sourceReader || admission.fingerprint !== input.fingerprint || nativeSessionRefKey(admission.source) !== nativeSessionRefKey(input.source)) throw new Error('Source creation admission changed.');
+      if (admission.sourceWitness && (admission.sourceWitness.scope !== input.scope || admission.sourceWitness.operationId !== input.operationId)) throw new Error('Source creation witness identity changed.');
       if (state.associationResults.length >= 1024 || state.associationResults.some(item => item.id === input.id)) throw new Error('Source creation result storage is full or conflicting.');
       state.associationResults.push(input);
       state.associationAdmissions = state.associationAdmissions.filter(item => item.id !== input.id);
@@ -452,7 +461,21 @@ export class SessionSuccessionStore {
     for (const item of state.roles) for (const progress of item.localPreparations ?? []) progress.reservedBytes = reservationBytes(this.preparationGrowth(item, progress));
   }
   private checkCapacity(state: StoreState): void {
-    assertSuccessionCapacity(state, state.roles.reduce((total, item) => total + (item.localPreparations ?? []).reduce((sum, progress) => sum + Number(progress.reservedBytes), 0), 0));
+    let remaining = 0;
+    const reserve = (bytes: number) => {
+      if (!Number.isSafeInteger(bytes) || bytes < 0 || !Number.isSafeInteger(remaining + bytes)) throw new SuccessionCapacityError();
+      remaining += bytes;
+    };
+    for (const item of state.roles) for (const progress of item.localPreparations ?? []) reserve(Number(progress.reservedBytes));
+    for (const admission of state.associationAdmissions) if (admission.sourceWitness) {
+      const { scope, operationId } = admission.sourceWitness;
+      const future: SourceAssociationResult = { id: admission.id, fingerprint: admission.fingerprint, scope, operationId,
+        source: admission.source, reader: { controllerId: admission.source.controllerId, providerId: admission.source.providerId, nativeSessionId: largestSuccessionId } };
+      // Full append plus one comma takes no credit for the admission removed at completion.
+      reserve(jsonBytes(future) + 1);
+    }
+    if (!Number.isSafeInteger(jsonBytes(state) + remaining)) throw new SuccessionCapacityError();
+    assertSuccessionCapacity(state, remaining);
   }
 
   /** Unknown outcomes may advance only after the coordinator has reconciled their saved phase. */
@@ -538,10 +561,16 @@ export class SessionSuccessionStore {
     }
   }
   private validate(state: StoreState): void {
-    if (!state || state.version !== 5 || !Array.isArray(state.roles) || state.roles.length > 1024) throw new Error('Unsupported succession storage format/version.');
+    if (!state || state.version !== 6 || !Array.isArray(state.roles) || state.roles.length > 1024) throw new Error('Unsupported succession storage format/version.');
     if (!Array.isArray(state.associationAdmissions) || state.associationAdmissions.length > 1024 || new Set(state.associationAdmissions.map(item => item.id)).size !== state.associationAdmissions.length
       || state.associationAdmissions.some(item => !item.id || !item.fingerprint || item.id.length > 512 || item.fingerprint.length > 512 || !isNativeSessionRef(item.source) || item.sourceReader !== undefined && item.sourceReader !== true || item.recovery !== undefined && (typeof item.recovery.createKey !== 'string' || !item.recovery.createKey || item.recovery.createKey.length > 16384 || !/^[a-f0-9]{64}$/.test(item.recovery.createFingerprint)))) throw new Error('Invalid source association admission.');
-    if (!Array.isArray(state.associationResults) || state.associationResults.length > 1024 || new Set(state.associationResults.map(item => item.id)).size !== state.associationResults.length || state.associationResults.some(item => !item.id || !item.fingerprint || typeof item.scope !== 'string' || !item.scope || item.scope.length > 16384 || !item.operationId || item.operationId.length > 512 || !isNativeSessionRef(item.source) || !isNativeSessionRef(item.reader) || item.source.controllerId !== item.reader.controllerId || item.source.providerId !== item.reader.providerId || nativeSessionRefKey(item.source) === nativeSessionRefKey(item.reader))) throw new Error('Invalid source creation result.');
+    for (const admission of state.associationAdmissions) if (admission.sourceWitness !== undefined) {
+      const witness = admission.sourceWitness;
+      if (!admission.sourceReader || !witness || typeof witness !== 'object' || Array.isArray(witness) || Object.keys(witness).some(name => !['version', 'scope', 'operationId'].includes(name))
+        || witness.version !== 1 || !validSourceWitnessIdentity(witness.scope, witness.operationId)
+        || admission.id !== sourceWitnessId(witness.scope, witness.operationId)) throw new Error('Invalid source witness admission.');
+    }
+    if (!Array.isArray(state.associationResults) || state.associationResults.length > 1024 || new Set(state.associationResults.map(item => item.id)).size !== state.associationResults.length || state.associationResults.some(item => Object.keys(item).some(name => !['id', 'fingerprint', 'scope', 'operationId', 'source', 'reader'].includes(name)) || !item.id || !item.fingerprint || !validSourceWitnessIdentity(item.scope, item.operationId) || !isNativeSessionRef(item.source) || !isNativeSessionRef(item.reader) || item.source.controllerId !== item.reader.controllerId || item.source.providerId !== item.reader.providerId || nativeSessionRefKey(item.source) === nativeSessionRefKey(item.reader))) throw new Error('Invalid source creation result.');
     if (state.associationResults.length + state.associationAdmissions.filter(item => item.sourceReader).length > 1024) throw new Error('Source creation result reservations exceed storage capacity.');
     const roles = new Set<string>(), operations = new Set<string>(), executors = new Set<string>();
     for (const item of state.roles) {
@@ -610,12 +639,14 @@ export class SessionSuccessionStore {
     if (Buffer.byteLength(text) > maxBytes) throw new Error('Succession storage size limit exceeded.');
     const parsed = JSON.parse(text);
     const legacyPreparation = [1, 2, 3].includes(parsed.version);
-    const migrated = legacyPreparation || parsed.version === 4;
-    if (migrated && parsed.roles.some((item: SuccessionRoleState) => item.enrollments?.some(freeze => freeze.version !== 1))) throw new Error('Legacy storage cannot certify a bounded freeze.');
+    const legacyProjection = legacyPreparation || parsed.version === 4;
+    const migrated = legacyProjection || parsed.version === 5;
+    if (migrated && parsed.associationAdmissions?.some((item: StoreState['associationAdmissions'][number]) => item.sourceWitness !== undefined)) throw new Error('Legacy storage cannot certify a source witness.');
+    if (legacyProjection && parsed.roles.some((item: SuccessionRoleState) => item.enrollments?.some(freeze => freeze.version !== 1))) throw new Error('Legacy storage cannot certify a bounded freeze.');
     if (legacyPreparation && parsed.roles.some((item: SuccessionRoleState) => item.localPreparations !== undefined)) throw new Error('Ambiguous legacy preparation evidence.');
     if (parsed.version === 1 && (parsed.associationAdmissions !== undefined || parsed.associationResults !== undefined || parsed.roles.some((item: SuccessionRoleState) => item.associationAuthority || item.enrollments || item.releasedEnrollments))) throw new Error('Ambiguous legacy association storage.');
     if ((parsed.version === 1 || parsed.version === 2) && parsed.roles.some((item: SuccessionRoleState) => item.relationChanges !== undefined)) throw new Error('Ambiguous legacy relation change storage.');
-    const state: StoreState = migrated ? { ...parsed, version: 5, associationAdmissions: parsed.version === 1 ? [] : parsed.associationAdmissions, associationResults: parsed.version === 1 ? [] : parsed.associationResults } : parsed; this.validate(state);
+    const state: StoreState = migrated ? { ...parsed, version: 6, associationAdmissions: parsed.version === 1 ? [] : parsed.associationAdmissions, associationResults: parsed.version === 1 ? [] : parsed.associationResults } : parsed; this.validate(state);
     let changed = migrated;
     for (const item of state.roles) for (const op of item.operations) if (!terminal(op.phase) && op.phase !== 'unknown') {
       op.resumePhase = op.phase as SuccessionRecord['resumePhase']; op.phase = 'unknown';
@@ -630,6 +661,15 @@ export class SessionSuccessionStore {
     try { await publishSuccessionState(this.directory, 'state.json', state); }
     catch (error) { if (error instanceof SuccessionPublicationUnknown) this.writeFailure = error; throw error; }
   }
+}
+
+export function validSourceWitnessIdentity(scope: unknown, operationId: unknown): boolean {
+  return typeof scope === 'string' && scope.length > 0 && scope.length <= 16384
+    && typeof operationId === 'string' && operationId.length > 0 && operationId.length <= 512;
+}
+export const sourceWitnessId = (scope: string, operationId: string): string => createHash('sha256').update(JSON.stringify([scope, operationId])).digest('hex');
+class SourceAssociationCapacityError extends SuccessionCapacityError {
+  constructor(message: string) { super(); this.message = message; }
 }
 
 export class SuccessionProjectionCapacityError extends Error {

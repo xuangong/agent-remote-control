@@ -17,6 +17,8 @@ export class SessionBindingError extends Error {
 /** Integrations own native attachment and disposal; this service owns identity and publication. */
 export interface SessionBindingExtension {
   canonical?: boolean;
+  /** Per-call acceptance of the owner's selected canonical identity, including pending joins. */
+  validateResult?(binding: SessionBinding): void;
   attach(binding: SessionBinding): Promise<void>;
   discard?(binding: SessionBinding): Promise<void>;
 }
@@ -45,6 +47,7 @@ export class SessionBindings {
       throw new SessionBindingError('session_binding_conflict', 'Native session identity or ownership conflicts with this binding.');
     }
     const binding: SessionBinding = prior ?? Object.freeze({ ...request });
+    extension.validateResult?.(binding);
     const publicTarget = this.agents.get(binding.agentId);
     const reservation = this.reservedAgents.get(binding.agentId);
     if (publicTarget && key(publicTarget) !== identity || reservation && reservation !== identity) {

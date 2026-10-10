@@ -1,6 +1,7 @@
 import * as fs from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { createHash } from 'node:crypto';
 import { afterEach, expect, test, vi } from 'vitest';
 import { SessionSuccessionStore } from './session-succession-store.js';
 import { SessionSuccessionContextStore } from './session-succession-context.js';
@@ -16,6 +17,41 @@ afterEach(async () => { vi.mocked(fs.open).mockReset(); const original = await v
 const ref = (nativeSessionId: string) => ({ controllerId: 'host', providerId: 'fixture', nativeSessionId });
 const request = { operationId: 'op', roleId: 'role', expectedRevision: 1, from: ref('A') };
 async function root() { const directory = await fs.mkdtemp(join(tmpdir(), 'succession-durable-')); roots.push(directory); return directory; }
+
+test('source complete-result pre-rename failure retains the exact admission and its restart-reconstructed allowance', async () => {
+  const directory = await root(), store = new SessionSuccessionStore(directory); await store.ready;
+  const sourceWitness = { version: 1 as const, scope: 'scope', operationId: 'source-operation' };
+  const id = createHash('sha256').update(JSON.stringify([sourceWitness.scope, sourceWitness.operationId])).digest('hex');
+  await store.admitAssociation(id, 'fingerprint', ref('A'), true, undefined, sourceWitness);
+  const prior = await fs.readFile(join(directory, 'state.json'), 'utf8');
+  vi.mocked(fs.open).mockRejectedValueOnce(new Error('temporary result write unavailable'));
+  await expect(store.completeSourceAssociation({ id, fingerprint: 'fingerprint', scope: 'scope', operationId: 'source-operation', source: ref('A'), reader: ref('\ud800'.repeat(512)) })).rejects.toMatchObject({ code: 'succession_publication_rejected' });
+  expect(store.sourceResult(id, 'fingerprint')).toBeUndefined(); expect(await fs.readFile(join(directory, 'state.json'), 'utf8')).toBe(prior);
+  const restored = new SessionSuccessionStore(directory); await restored.ready;
+  await expect(restored.admitAssociation(id, 'fingerprint', ref('A'), true, undefined, sourceWitness)).rejects.toThrow(/unresolved/);
+  await restored.completeSourceAssociation({ id, fingerprint: 'fingerprint', scope: 'scope', operationId: 'source-operation', source: ref('A'), reader: ref('\ud800'.repeat(512)) });
+  expect(restored.sourceResult(id, 'fingerprint')!.reader).toEqual(ref('\ud800'.repeat(512)));
+});
+
+test('source complete-result directory-sync uncertainty withholds in-memory settlement until exact restart readback', async () => {
+  const directory = await root(), store = new SessionSuccessionStore(directory); await store.ready;
+  const sourceWitness = { version: 1 as const, scope: 'scope', operationId: 'source-operation' };
+  const id = createHash('sha256').update(JSON.stringify([sourceWitness.scope, sourceWitness.operationId])).digest('hex');
+  await store.admitAssociation(id, 'fingerprint', ref('A'), true, undefined, sourceWitness);
+  const original = await vi.importActual<typeof fs>('node:fs/promises');
+  vi.mocked(fs.open).mockImplementation(async (...args) => {
+    const file = await original.open(...args);
+    if (args[0] === directory && args[1] === 'r') vi.spyOn(file, 'sync').mockRejectedValue(new Error('source result durability unknown'));
+    return file;
+  });
+  await expect(store.completeSourceAssociation({ id, fingerprint: 'fingerprint', scope: 'scope', operationId: 'source-operation', source: ref('A'), reader: ref('B') })).rejects.toMatchObject({ code: 'succession_publication_unknown' });
+  expect(() => store.sourceResult(id, 'fingerprint')).toThrow(/unknown|restart/i);
+  await expect(store.settleAssociation(id, 'fingerprint')).rejects.toThrow(/unknown|restart/i);
+  vi.mocked(fs.open).mockImplementation(original.open);
+  const restored = new SessionSuccessionStore(directory); await restored.ready;
+  expect(restored.sourceResult(id, 'fingerprint')!.reader).toEqual(ref('B'));
+  expect(JSON.parse(await fs.readFile(join(directory, 'state.json'), 'utf8')).associationAdmissions).toEqual([]);
+});
 
 test('role directory-sync uncertainty poisons reads and admission until restart readback', async () => {
   const directory = await root(), store = new SessionSuccessionStore(directory); await store.ready;

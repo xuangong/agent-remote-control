@@ -2,6 +2,29 @@ import { expect, it } from 'vitest';
 import { SessionBindings } from './session-bindings.js';
 
 const target = { providerId: 'provider', nativeSessionId: 'native', agentId: 'public' };
+const bounded = (binding: { agentId: string; nativeSessionId: string }) => {
+  if ([binding.agentId, binding.nativeSessionId].some(id => !id.trim() || id.length > 512)) throw new Error('Unbounded result');
+};
+it.each([false, true])('validates the selected canonical identity before joining pending=%s without cancelling ordinary attachment', async pending => {
+  const registry = new SessionBindings();
+  let release!: () => void;
+  const gate = new Promise<void>(resolve => { release = resolve; });
+  const ordinary = registry.bind({ ...target, agentId: 'wide'.repeat(200) }, { attach: () => gate });
+  if (!pending) { release(); await ordinary; }
+  await expect(registry.bind({ ...target, agentId: 'short-proposal' }, { validateResult: bounded, attach: async () => { throw new Error('must not attach'); } })).rejects.toThrow('Unbounded result');
+  expect(registry.isReserved('wide'.repeat(200))).toBe(true);
+  release(); await ordinary;
+  expect(registry.getByNative('provider', 'native')!.agentId).toBe('wide'.repeat(200));
+});
+it.each([false, true])('preserves a different bounded canonical alias with pending=%s', async pending => {
+  const registry = new SessionBindings();
+  let release!: () => void;
+  const gate = new Promise<void>(resolve => { release = resolve; });
+  const ordinary = registry.bind(target, { attach: () => gate });
+  if (!pending) { release(); await ordinary; }
+  const qualified = registry.bind({ ...target, agentId: 'proposal' }, { validateResult: bounded, attach: async () => {} });
+  release(); expect((await qualified).agentId).toBe('public'); await ordinary;
+});
 it('reserves both identities before native attachment and joins compatible callers', async () => {
   const registry = new SessionBindings();
   let resume!: () => void;

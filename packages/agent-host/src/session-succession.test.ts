@@ -60,7 +60,8 @@ test('prepares once, gates both executors, then admits only the committed succes
 
 test.each(['token', 'snapshot', 'enrolled-to-local', 'local-to-enrolled'] as const)('in-flight preparation rejects changed %s identity before begin while exact retries join', async change => {
   const f = await fixture(); const generation = f.store.generation;
-  const freeze: SuccessionAssociationFreeze = { version: 1, token: 'freeze',
+  f.access.supportsBoundedProjection = async () => true;
+  const freeze: SuccessionAssociationFreeze = { version: 2, maxProjectionBytes: 64 * 1024, token: 'freeze',
     authority: { version: 1, origin: 'https://relay.test', issuer: 'relay', namespace: 'tenant', ownerSubject: 'owner' },
     controllerId: source.controllerId, request, associationRevision: 0, lineage: [source], relations: [] };
   let entered!: () => void, resume!: () => void;

@@ -62,6 +62,14 @@ export function protectHostDirectory(directory: AgentHostDirectory, policy: Host
     await allowedWorkspace(policy, workspace);
   };
   directory.setSourceAccessCheck?.(checkSource);
+  async function createInput(input: Parameters<AgentHostDirectory['create']>[0]) {
+    const selected = input.workspaceId === undefined ? undefined : (await directory.workspaces()).find(workspace => workspace.id === input.workspaceId);
+    if (input.workspaceId !== undefined && !selected) throw new HostExecutionPolicyError('Unknown local Host workspace.');
+    const cwd = await allowedWorkspace(policy, input.cwd ?? selected?.path ?? policy.defaultWorkspace);
+    if (input.sourceNativeSessionId) await checkSource(input.sourceNativeSessionId);
+    if (input.editNativeSessionId) await checkSource(input.editNativeSessionId);
+    return { ...input, cwd };
+  }
   const sessions = new WeakMap<AgentSession, AgentSession>();
   async function protect(session: AgentSession): Promise<AgentSession> {
     try { await allowedWorkspace(policy, (await session.runtimeInfo()).cwd); }
@@ -94,6 +102,9 @@ export function protectHostDirectory(directory: AgentHostDirectory, policy: Host
   return {
     providerId: directory.providerId,
     supportsSourceReferences: directory.supportsSourceReferences,
+    ...(directory.supportsBoundedSourceCreate ? { async supportsBoundedSourceCreate(input: Parameters<AgentHostDirectory['create']>[0]) {
+      return directory.supportsBoundedSourceCreate!(await createInput(input));
+    } } : {}),
     requiresController: directory.requiresController?.bind(directory),
     supportsPromptEditing: directory.supportsPromptEditing,
     async validateSessionRename(id: string, title: string) { await checkSource(id); await directory.validateSessionRename?.(id, title); },
@@ -124,12 +135,7 @@ export function protectHostDirectory(directory: AgentHostDirectory, policy: Host
     },
     ...(directory.models ? { models: directory.models.bind(directory) } : {}),
     async create(input, evidence) {
-      const selected = input.workspaceId === undefined ? undefined : (await directory.workspaces()).find(workspace => workspace.id === input.workspaceId);
-      if (input.workspaceId !== undefined && !selected) throw new HostExecutionPolicyError('Unknown local Host workspace.');
-      const cwd = await allowedWorkspace(policy, input.cwd ?? selected?.path ?? policy.defaultWorkspace);
-      if (input.sourceNativeSessionId) await checkSource(input.sourceNativeSessionId);
-      if (input.editNativeSessionId) await checkSource(input.editNativeSessionId);
-      return directory.create({ ...input, cwd }, evidence);
+      return directory.create(await createInput(input), evidence);
     },
     async open(nativeSessionId, options) {
       await checkSource(nativeSessionId);

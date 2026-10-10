@@ -3,6 +3,35 @@
 Date: 2026-10-10. Audience: the next implementation session or maintainer.
 Status: partially implemented; no usable end-to-end handoff yet.
 
+## Host source-witness checkpoint (2026-10-10)
+
+Task9C0 passed independent source-spec and quality review. Role-file 6 retains a
+versioned source-witness descriptor and recomputes its complete future-result
+allowance on every mutation and restart. Qualified v2 creation uses the same
+policy-wrapped directory for certification, creation and grant verification;
+exact saved results recover before fresh certification. The existing binding
+owner validates the actual canonical result without changing ordinary aliases.
+
+Root verified the 15-file freeze and freshly passed 163 Host tests, 19 Relay
+tests, both affected typechecks, the Relay build and the actual role-file5
+writer rejection of version 6. No real directory received a producer certificate.
+Post-effect canonical projection failure retains the exact witness and remains
+unknown; it cannot repeat native creation. Relay aggregate/atomic completion,
+source-grant durability, native readiness and product work remain separate gates.
+
+The implementer's broad Host command accidentally collected real-native local
+fixtures despite the slice's no-native constraint. The report preserves that
+incident, the failed broad results and missing independent descendant/temporary
+resource cleanup evidence. Later validation uses explicit test-file lists. Four
+stale v1 Host fixtures were migrated and revalidated; the unchanged Relay
+planning-command and Copilot local interrupt failures remain whole-branch
+acceptance concerns. Source approval does not erase those historical failures.
+
+Next is 9C1's derived Relay capacity and immutable freeze admission, followed by
+9C2/9C3 terminal/recovery consumers, 9D durable grant barriers and 9E local Worker
+acceptance. Production capability and SQL effect guards remain closed. No merge,
+push, deployment, installation or user-service change is authorized here.
+
 ## Complete SQL codec checkpoint (2026-10-10)
 
 Task9B passed independent spec/quality review without findings. SQL metadata

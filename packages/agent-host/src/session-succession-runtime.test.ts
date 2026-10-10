@@ -39,7 +39,7 @@ async function fixture(enableTpm=false,enrollment=false,setup?:(root:string)=>Pr
  supports:async()=>supported,supportsBoundedProjection:async()=>bounded,
  inspect:async source=>{if(!coverage)throw new Error('Native queue and work coverage unavailable');return {cwd:root,idle:source.nativeSessionId!==busy,managed:true,pendingInputs:0,pendingInteractions:0,activeChildren:0};},
  createIdle:async()=>{creates++;await beforeIdleCreate();const id=String.fromCharCode(65+creates);sessions.set(id,new Native(id,root));return ref(id);},reconcileDelivery:async()=>undefined,
- }},registrations:[{adapter:{descriptor:{providerId:'fixture',displayName:'Fixture',...(enableTpm?{sessionExtensions:{instructions:true,tools:true}}:{})},createSession:async()=>{throw new Error('unexpected');},resumeSession:async()=>{throw new Error('unexpected');},readSessionHistory:async()=>({entries:[]})},directory:{providerId:'fixture',supportsSourceReferences:true,list:()=>[],workspaces:()=>[],create:async config=>{if(config.sourceNativeSessionId){await beforeSourceCreate();const id=`source-${++sourceCreates}`;sessions.set(id,new Native(id,root));grants.push({nativeSessionId:id,sourceNativeSessionId:config.sourceNativeSessionId});if(loseSourceCreation)throw new Error('Unknown native creation');return id;}if(!enableTpm){if(!snapshots)throw new Error('unexpected');snapshotConfigurations.push(config);const id=`snapshot-${snapshotConfigurations.length}`;sessions.set(id,new Native(id,root));return id;}tpmConfigurations.push(config);const id=`tpm-${tpmConfigurations.length}`;sessions.set(id,new Native(id,root));if(loseTpmCreation)throw new Error('Native creation response was lost');return id;},open:async id=>sessions.get(id)!,sessionWorkspace:async()=>root,sourceReferences:async()=>{await beforeGrants();return structuredClone(grants);},setSourceBindingReader:()=>{},close:async()=>{await Promise.all([...sessions.values()].map(session=>session.dispose()));}}}, ...additional]});
+ }},registrations:[{adapter:{descriptor:{providerId:'fixture',displayName:'Fixture',...(enableTpm?{sessionExtensions:{instructions:true,tools:true}}:{})},createSession:async()=>{throw new Error('unexpected');},resumeSession:async()=>{throw new Error('unexpected');},readSessionHistory:async()=>({entries:[]})},directory:{providerId:'fixture',supportsSourceReferences:true,supportsBoundedSourceCreate:async()=>true,list:()=>[],workspaces:()=>[],create:async config=>{if(config.sourceNativeSessionId){await beforeSourceCreate();const id=`source-${++sourceCreates}`;sessions.set(id,new Native(id,root));grants.push({nativeSessionId:id,sourceNativeSessionId:config.sourceNativeSessionId});if(loseSourceCreation)throw new Error('Unknown native creation');return id;}if(!enableTpm){if(!snapshots)throw new Error('unexpected');snapshotConfigurations.push(config);const id=`snapshot-${snapshotConfigurations.length}`;sessions.set(id,new Native(id,root));return id;}tpmConfigurations.push(config);const id=`tpm-${tpmConfigurations.length}`;sessions.set(id,new Native(id,root));if(loseTpmCreation)throw new Error('Native creation response was lost');return id;},open:async id=>sessions.get(id)!,sessionWorkspace:async()=>root,sourceReferences:async()=>{await beforeGrants();return structuredClone(grants);},setSourceBindingReader:()=>{},close:async()=>{await Promise.all([...sessions.values()].map(session=>session.dispose()));}}}, ...additional]});
  let host=createHost();
  const createServer=()=>createAgentRemoteHttpServer(host.relay,{websocketAuthorizer:{authenticate:()=>({subject:'owner'}),authorize:()=>true}});
  let server=createServer();let address=await server.listen(0);
@@ -246,7 +246,7 @@ test('authenticated broker enrollment derives a role, freezes associations and c
     expect(committed).toMatchObject({record:{phase:'committed'},role:{current:ref('B'),revision:2},locator:{hostId:transport.hostId,providerId:'fixture',nativeSessionId:'B'}});
     expect(transport.saved().associations?.freezes[0]).toMatchObject({released:'committed',projection:{role:{current:ref('B')}}});
     const state=JSON.parse(await readFile(join(f.root,'roles','state.json'),'utf8'));
-    expect(state).toMatchObject({version:5,roles:[{associationAuthority:transport.authority,enrollments:[{request:{operationId:input.operationId}}]}]});
+    expect(state).toMatchObject({version:6,roles:[{associationAuthority:transport.authority,enrollments:[{request:{operationId:input.operationId}}]}]});
   } finally {await transport.close();await f.close();}
 });
 
@@ -488,9 +488,18 @@ test('lost source creation response recovers its original durable result without
   const transport=await enrollmentTransport(f,initial);
   try {
     const input={providerId:'fixture',operationId:'00000000-0000-4000-8000-000000000002',sourceNativeSessionId:'A',conversationKind:'side'};
+    f.beforeSourceCreate(async () => {
+      expect(transport.saved().associations!.admissions).toHaveLength(1);
+      const hostState = JSON.parse(await readFile(join(f.root, 'roles', 'state.json'), 'utf8'));
+      expect(hostState.associationAdmissions[0]).toMatchObject({ source: ref('A'), sourceReader: true,
+        sourceWitness: { version: 1, operationId: input.operationId, scope: JSON.stringify([transport.authority.origin.replace('http:', 'ws:'), transport.hostId, 'controller']) } });
+      expect(hostState.associationResults).toEqual([]);
+    });
     transport.dropCreationResponse();
     expect((await transport.request(`/v1/remote/hosts/${transport.hostId}/create`,input))!.status).toBe(504);
     expect(f.sourceCreates()).toBe(1);expect(transport.saved().associations!.admissions).toHaveLength(1);
+    const hostCompleted = JSON.parse(await readFile(join(f.root, 'roles', 'state.json'), 'utf8'));
+    expect(hostCompleted.associationAdmissions).toEqual([]); expect(hostCompleted.associationResults[0]).toMatchObject({ source: ref('A'), reader: ref('source-1'), operationId: input.operationId });
     expect((await transport.action('prepare',{providerId:'fixture',nativeSessionId:'A',operationId:'blocked-reader',expectedRevision:1}))!.status).toBe(409);
     await transport.restart(f.restart);
     expect((await transport.request(`/v1/remote/hosts/${transport.hostId}/create`,{...input,model:'changed'}))!.status).toBe(409);

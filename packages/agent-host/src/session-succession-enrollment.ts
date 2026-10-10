@@ -3,11 +3,12 @@ import { sourceParticipantId } from './source-participant.js';
 import { realpath } from 'node:fs/promises';
 import { createHash, randomUUID } from 'node:crypto';
 import { AgentOperationRejectedError } from '@orchardworks/agent-provider-sdk';
-import { successionAuthorityKey, successionFreezeKey, isSuccessionAssociationFreeze, nativeSessionRefKey, type NativeSessionRef, type TrustedSuccessionContext, type SuccessionParticipant, type SuccessionAssociationFreeze } from '@orchardworks/agent-remote-protocol';
+import { successionAuthorityKey, successionFreezeKey, isSuccessionAssociationFreeze, isNativeSessionRef, nativeSessionRefKey, type NativeSessionRef, type TrustedSuccessionContext, type SuccessionParticipant, type SuccessionAssociationFreeze } from '@orchardworks/agent-remote-protocol';
 import type { AgentRemoteHttpResult, RemoteHostControlRequest } from '@orchardworks/agent-remote-relay';
-import type { AgentHostProviderRegistration } from './host.js';
+import type { AgentHostDirectory, AgentHostProviderRegistration } from './host.js';
+import { SuccessionCapacityError } from './succession-persistence.js';
 import type { TpmRecord } from './tpm-store.js';
-import { SuccessionProjectionCapacityError, SuccessionProjectionInvariantError } from './session-succession-store.js';
+import { sourceWitnessId, SuccessionProjectionCapacityError, SuccessionProjectionInvariantError } from './session-succession-store.js';
 import type { AssociationRecovery } from './session-succession-store.js';
 import type { SessionSuccessionService } from './session-succession-service.js';
 export type EnrollmentMutation = <T>(scope: string, operationId: string, kind: string, targets: readonly NativeSessionRef[], parameters: unknown,
@@ -146,26 +147,37 @@ export class SessionSuccessionEnrollment {
     if (!parameters || typeof parameters !== 'object' || Array.isArray(parameters) || Object.entries(parameters).some(([name,value]) => !['sourceNativeSessionId','cwd','workspaceId','model','reasoningEffort','planning'].includes(name) || !['string','boolean'].includes(typeof value))) throw new Error('Invalid source creation parameters.');
     return createHash('sha256').update(JSON.stringify([key(source),Object.entries(parameters).sort(([a],[b])=>a.localeCompare(b))])).digest('hex');
   }
-  async sourceResult(scope: string, operationId: string, source: NativeSessionRef, parameters: unknown) {
+  async sourceResult(scope: string, operationId: string, source: NativeSessionRef, parameters: unknown, selectedDirectory?: AgentHostDirectory) {
     await this.service.ready;
-    const id=createHash('sha256').update(JSON.stringify([scope,operationId])).digest('hex');
+    const id=sourceWitnessId(scope,operationId);
     const result=this.service.store.sourceResult(id,this.sourceFingerprint(source,parameters));
     if (!result) return undefined;
-    const directory=this.registrations().find(item=>item.directory.providerId===source.providerId)?.directory;
+    if (result.scope !== scope || result.operationId !== operationId || key(result.source) !== key(source)) throw new Error('Persisted source creation witness does not match the exact request.');
+    const directory=selectedDirectory ?? this.registrations().find(item=>item.directory.providerId===source.providerId)?.directory;
     if (!(await directory?.sourceReferences?.())?.some(grant=>grant.nativeSessionId===result.reader.nativeSessionId && grant.sourceNativeSessionId===source.nativeSessionId)) throw new Error('Persisted source creation no longer has its durable native grant.');
     return result;
   }
-  async sourceMutation(scope: string, operationId: string, source: NativeSessionRef, parameters: unknown, dispatch: () => Promise<string>, verify: (nativeId:string)=>Promise<boolean>): Promise<string> {
-    const previous=await this.sourceResult(scope,operationId,source,parameters);
+  assertSourceCreateAvailable(scope: string, operationId: string, source: NativeSessionRef, parameters: unknown): void {
+    this.service.store.assertAssociationAvailable(sourceWitnessId(scope, operationId), this.sourceFingerprint(source, parameters));
+  }
+  async sourceMutation(scope: string, operationId: string, source: NativeSessionRef, parameters: unknown, dispatch: () => Promise<string>, verify: (nativeId:string)=>Promise<boolean>, qualified = false, directory?: AgentHostDirectory): Promise<string> {
+    const previous=await this.sourceResult(scope,operationId,source,parameters,directory);
     if (previous) return previous.reader.nativeSessionId;
     this.service.coordinator.assertAdmission(source);
-    const id=createHash('sha256').update(JSON.stringify([scope,operationId])).digest('hex'),fingerprint=this.sourceFingerprint(source,parameters);
-    await this.service.store.admitAssociation(id,fingerprint,source,true);
+    const id=sourceWitnessId(scope,operationId),fingerprint=this.sourceFingerprint(source,parameters);
+    try { await this.service.store.admitAssociation(id,fingerprint,source,true,undefined,qualified ? { version: 1, scope, operationId } : undefined); }
+    catch (error) {
+      // Only the owning pre-write capacity check proves a fresh callback was never entered.
+      if (qualified && error instanceof SuccessionCapacityError) throw new AgentOperationRejectedError('operation_capacity_exceeded', error.message);
+      throw error;
+    }
     let nativeId:string;
     try { nativeId=await dispatch(); }
     catch(error) {if(error instanceof AgentOperationRejectedError)await this.service.store.settleAssociation(id,fingerprint);throw error;}
+    const reader = { controllerId: source.controllerId, providerId: source.providerId, nativeSessionId: nativeId };
+    if (qualified && (typeof nativeId !== 'string' || !nativeId.trim() || nativeId.length > 512 || !isNativeSessionRef(reader))) throw new Error('Source producer violated its certified native-ID bound. Complete result cannot be retained under that contract; admission and native/grant evidence remain unresolved.');
     if(!await verify(nativeId))throw new Error('Durable source association evidence is unavailable; admission remains unresolved.');
-    await this.service.store.completeSourceAssociation({id,fingerprint,scope,operationId,source,reader:{...source,nativeSessionId:nativeId}});
+    await this.service.store.completeSourceAssociation({id,fingerprint,scope,operationId,source,reader});
     return nativeId;
   }
   async tpmSource(source: NativeSessionRef): Promise<NativeSessionRef> {

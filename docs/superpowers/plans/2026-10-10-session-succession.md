@@ -434,8 +434,13 @@ no production capability is enabled by these scripted fixtures.
   baseline-reader rejection. Independent spec/quality review approved the slice.
   Sync failure remains unknown durability, not rollback. Production effect guards
   remain closed; isolated codec success is not admission or native certification.
-- [ ] Reserve complete Host source-result witnesses before qualified creation,
+- [x] Reserve complete Host source-result witnesses before qualified creation,
   bind the producer certificate to the actual directory and preserve exact recovery.
+  Task9C0 uses role-file 6 and a restart-derived complete-witness allowance. Source
+  review and quality passed; Root freshly passed 163 Host tests, 19 Relay tests,
+  both typechecks and the actual prior-writer rejection check. The broad run was
+  not all-green and accidentally included native fixtures; retain that execution
+  incident and the unverified cleanup boundary in whole-branch acceptance.
 - [ ] Integrate the Relay feature envelope, exact codec costs, outcome/slot/revision
   allowances and atomic source completion before allowing effectful SQL succession.
 - [ ] Review role/context durable-file write consistency and record the actual

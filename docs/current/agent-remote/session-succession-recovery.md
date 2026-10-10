@@ -28,7 +28,7 @@ succession state does not copy a workspace, process, credentials or native sessi
 
 | State | Checkpoint format | Supported upgrade behavior |
 | --- | --- | --- |
-| Controller role state | Version 5 | Versions 1 through 4 retain explicit migration rules; legacy receipts gain no invented projection budget or creation evidence |
+| Controller role state | Version 6 | Versions 1 through 5 retain explicit migration rules; legacy receipts gain no invented projection budget, source-witness reservation or creation evidence |
 | Pending context | Version 2 | Reads version 1 attachments; new target-independent preparations share attachment capacity, and delivery-state recovery remains independent of role state |
 | Relay outer state | Version 9 with association-v5 writers; version 8 adds Host recovery metadata; version 7 adds Favorites succession progress | Legacy outer versions 2 through 8 retain explicit inner-format rules and complete-lineage validation; no applied progress, budget or native result is fabricated |
 | Cloudflare SQL snapshot | Metadata format 3; record/envelope/manifest format 1 | Format 2 migrates atomically on the first complete commit; old readers reject 3. This physical format does not enable effectful succession |
@@ -70,6 +70,30 @@ and receipt. Saved prepare/status/reconcile/commit/release cannot conceal that
 defect as success. Recovery never creates another candidate to fit a ceiling.
 No production allowance supplier or native producer certificate is enabled by
 this contract; aggregate SQL admission and real producer certification remain pending.
+
+## Source-witness admission
+
+Fresh qualified source-reader creation retains
+`sourceWitness: { version: 1, scope, operationId }` in the existing Host admission.
+The role-file owner reserves the complete future result plus one array comma,
+without credit for the admission removed at completion. Every mutation and
+restart recomputes that allowance alongside local-preparation reservations;
+ordinary mutations cannot spend it. Complete result and admission removal share
+one awaited file mutation. Unknown publication remains fenced until reopen.
+
+The trusted acknowledged-v2 route requires a separate certificate from the
+actual policy-wrapped directory before native creation. No real directory is
+certified by this checkpoint. Local/legacy routes retain their existing policy;
+an exact saved result and matching grant recover before fresh certification.
+Old pending admissions receive no invented descriptor or permission to recreate.
+
+The bounded native ID has at most 512 UTF-16 units and at most 3074 JSON bytes.
+The binding owner checks the actual canonical result for fresh qualified output,
+preserving legal aliases. This post-effect check does not guarantee successful
+projection: a wider existing canonical identity leaves the witness retained and
+the operation unresolved. Exact recovery never silently rewrites its identity.
+Source-grant sync and Relay completion allowances are separate pending contracts;
+matching visible grant data does not prove power-loss durability.
 
 ## Recover from facts, not elapsed time
 

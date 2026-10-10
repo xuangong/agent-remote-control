@@ -152,7 +152,9 @@ export function createRemoteHostUplinkClient(options: RemoteHostUplinkClientOpti
       control: request => request.path === '/remote/succession/enrollment'
         ? options.successionEnrollment && successionContext ? options.successionEnrollment.control({ ...request, ...(operationScope ? { operationScope } : {}) }, structuredClone(successionContext))
           : { status: 403, body: JSON.stringify({ code: 'succession_enrollment_unavailable', error: 'Succession v2 enrollment was not acknowledged. Retain saved records until the Relay is upgraded.' }) }
-        : options.control({ ...request, ...(operationScope ? { operationScope } : {}) }),
+        : request.method === 'POST' && request.path === '/remote/create' && options.successionEnrollment && successionContext
+          ? options.successionEnrollment.control({ ...request, ...(operationScope ? { operationScope } : {}) }, structuredClone(successionContext))
+          : options.control({ ...request, ...(operationScope ? { operationScope } : {}) }),
       executeOperation: (agent, operation, work) => {
         if (!operationScope) throw new Error('Remote Host operation scope is unavailable before registration.');
         return (options.operationExecutor?.(operationScope) ?? options.relay.executeOperation(operationScope))(agent, operation, work);

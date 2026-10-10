@@ -1,5 +1,6 @@
 import { AgentOperationRejectedError, prepareAgentOperation, bindAgentSessionTools } from '@orchardworks/agent-provider-sdk';
 import { preparePromptEdit, type CodexPromptEditTarget } from './prompt-edit.js';
+import { prepareNativeFork } from './session-fork.js';
 import type { AgentSessionExtensions, AgentSessionTool } from '@orchardworks/agent-provider-sdk';
 import { codexMessageInput, type CodexInput } from './message-content.js';
 import { discoverCodexCommands, expandCodexPrompt, readCodexCommandDocumentation } from './commands.js';
@@ -407,6 +408,38 @@ export class CodexAppServerSession implements AgentSession {
     });
     session.setThreadFromResponse(response, 'thread/start');
     session.finishBootstrap([], new Map());
+    return session;
+  }
+
+  static async forkSession(
+    transport: CodexAppServerTransport,
+    nativeSessionId: string,
+    codexHome?: string,
+    restrictedNative = false,
+    recoveryPlan?: CodexSharedRecoveryPlan,
+  ): Promise<CodexAppServerSession> {
+    const session = new CodexAppServerSession(transport, {}, codexHome, undefined, restrictedNative, recoveryPlan);
+    await session.initialize();
+    const boundary = await prepareNativeFork(transport, nativeSessionId);
+    const response = await transport.request('thread/fork', {
+      threadId: nativeSessionId, cwd: boundary.cwd, excludeTurns: true,
+      config: { 'features.default_mode_request_user_input': true },
+      ...(restrictedNative ? { sandbox: 'workspace-write', approvalPolicy: 'never' } : {}),
+    });
+    session.setThreadFromResponse(response, 'thread/fork');
+    if (session.threadId === nativeSessionId || session.config.cwd !== boundary.cwd) throw new Error('Codex did not confirm an independent fork in the same working directory.');
+    const history = await readCodexHistoryPage(transport, session.threadId!, { metadata: response });
+    const turns = history.thread.turns;
+    if (!Array.isArray(turns) || (turns.at(-1)?.id ?? null) !== boundary.lastTurnId
+      || turns.length > 0 && !['completed', 'interrupted', 'failed'].includes(String(turns.at(-1)?.status))) {
+      throw new Error('Codex did not confirm a settled inherited history boundary. Inspect the candidate before retrying.');
+    }
+    session.olderHistoryCursor = history.historyCursor;
+    session.runtime.inspectHistory(session.threadId!, history);
+    session.finishBootstrap(
+      projectCodexThreadHistory(history, session.threadId!, { images: session.images, cwd: session.config.cwd }),
+      collectCodexThreadHistoryItems(history, session.threadId!), undefined, false, history,
+    );
     return session;
   }
 

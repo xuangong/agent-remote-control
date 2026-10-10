@@ -111,3 +111,21 @@ it('uses a newly installed binding reader in an already-open native source tool'
     expect(await directory.sourceReferences!()).toMatchObject([{ nativeSessionId: 'ask', sourceNativeSessionId: 'A' }]);
   } finally { lines.close(); await directory.close(); await rm(root, { recursive: true, force: true }); }
 });
+
+it('retains a native fork as a new primary session but refuses to fork a source-bound Ask', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'source-native-fork-'));
+  const native = createScriptedAppServer({
+    'thread/start': () => ({ thread: { id: 'ask' } }),
+    'thread/read': () => ({ thread: { id: 'A', cwd: root } }),
+    'thread/turns/list': () => ({ data: [{ id: 't', status: 'completed', items: [] }], nextCursor: null }),
+    'thread/fork': () => ({ thread: { id: 'B', cwd: root } }),
+  });
+  const directory = createCodexSessionDirectory(new CodexAppServerProvider({ spawn: () => native.child }), [], new SessionReferenceStore(root));
+  try {
+    expect(await directory.forkSession!('A')).toBe('B');
+    expect((await (await directory.open('B')).runtimeInfo()).sessionId).toBe('B');
+    const grants = new SessionReferenceStore(root);
+    await grants.set({ sourceNativeSessionId: 'A', systemPrompt: 'Source reference', handle: { providerId: 'codex', sessionId: 'ask', opaque: '{}' } });
+    await expect(directory.forkSession!('ask')).rejects.toThrow(/side|Ask/i);
+  } finally { await directory.close(); await rm(root, { recursive: true, force: true }); }
+});

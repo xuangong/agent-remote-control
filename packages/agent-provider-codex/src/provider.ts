@@ -153,6 +153,20 @@ export class CodexAppServerProvider implements AgentProviderAdapter {
     finally { await transport.dispose(); }
   }
 
+  async forkSession(nativeSessionId: string): Promise<AgentSession> {
+    const transport = await this.createTransport();
+    try {
+      const session = await CodexAppServerSession.forkSession(transport, nativeSessionId, this.options.env?.CODEX_HOME,
+        this.options.restrictedNative, this.sharedRecoveryPlan());
+      this.sessions.add(session);
+      session.onRuntimeClosed(() => this.sessions.delete(session));
+      return session;
+    } catch (error) {
+      await transport.dispose();
+      throw runtimeError(error, this.options.connectionMode === 'shared');
+    }
+  }
+
   async forkForPromptEdit(target: CodexPromptEditTarget): Promise<AgentSession> {
     const transport = await this.createTransport();
     try {

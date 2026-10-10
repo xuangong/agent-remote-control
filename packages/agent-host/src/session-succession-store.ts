@@ -146,7 +146,7 @@ export class SessionSuccessionStore {
   private validateRecord(record: SuccessionRecord): void {
     if (!isSuccessionRecord(record)) throw new Error('Invalid succession record.');
     if (record.to && nativeSessionRefKey(record.to) === nativeSessionRefKey(record.from)) throw new Error('Invalid succession target.');
-    if (['quiescing', 'transferring', 'ready', 'committed'].includes(record.phase) && !record.to) throw new Error('Succession target is missing.');
+    if (['transferring', 'ready', 'committed'].includes(record.phase) && !record.to) throw new Error('Succession target is missing.');
     if (record.phase === 'unknown' ? !record.resumePhase : record.resumePhase !== undefined) throw new Error('Invalid unknown succession phase.');
     if (['ready', 'committed'].includes(record.phase) && !record.prepared) throw new Error('Succession preparation is missing.');
     if (record.phase === 'committed' ? record.committedRevision !== record.expectedRevision + 1 : record.committedRevision !== undefined) throw new Error('Invalid succession commit revision.');

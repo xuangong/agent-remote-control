@@ -41,6 +41,8 @@ export interface AgentHostDirectory {
   setSourceAccessCheck?(check: (nativeSessionId: string) => Promise<void>): void;
   setSourceBindingReader?(reader: import('./session-reference.js').SourceBindingReader): void;
   sourceReferences?(): Promise<Array<{ nativeSessionId: string; sourceNativeSessionId: string }>>;
+  /** Native history copy only; role succession and task ownership are separate. */
+  forkSession?(nativeSessionId: string): Promise<string>;
   list(): Promise<readonly RemoteSessionSummary[]> | readonly RemoteSessionSummary[];
   workspaces(): Promise<readonly AgentHostWorkspace[]> | readonly AgentHostWorkspace[];
   models?(): Promise<unknown> | unknown;

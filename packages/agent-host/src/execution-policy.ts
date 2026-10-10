@@ -106,6 +106,10 @@ export function protectHostDirectory(directory: AgentHostDirectory, policy: Host
     setSessionHandoffHandler: directory.setSessionHandoffHandler?.bind(directory),
     setSourceBindingReader: directory.setSourceBindingReader?.bind(directory),
     sourceReferences: directory.sourceReferences?.bind(directory),
+    ...(directory.forkSession ? { async forkSession(nativeSessionId: string) {
+      await checkSource(nativeSessionId);
+      return directory.forkSession!(nativeSessionId);
+    } } : {}),
     async list() {
       const entries = await directory.list();
       return (await Promise.all(entries.map(async entry => {

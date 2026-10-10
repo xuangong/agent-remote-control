@@ -9,7 +9,7 @@ import { requireSessionExtensionIdentity, sessionExtensionIdentity } from './ses
 
 /** Keeps new native sessions alive before and after their relay projection is attached. */
 export function createCodexSessionDirectory(
-  provider: Pick<CodexAppServerProvider, 'listSessions' | 'createSession' | 'resumeSession' | 'openChildSession'> & Partial<Pick<CodexAppServerProvider, 'inspectSessionOwner' | 'releaseSessionOwner' | 'readSessionTitle' | 'renameSession' | 'readSessionHistory' | 'readSessionWorkspace' | 'canReleaseSession' | 'reconcileIdleSession' | 'forkForPromptEdit' | 'validatePromptEdit'>>,
+  provider: Pick<CodexAppServerProvider, 'listSessions' | 'createSession' | 'resumeSession' | 'openChildSession'> & Partial<Pick<CodexAppServerProvider, 'inspectSessionOwner' | 'releaseSessionOwner' | 'readSessionTitle' | 'renameSession' | 'readSessionHistory' | 'readSessionWorkspace' | 'canReleaseSession' | 'reconcileIdleSession' | 'forkSession' | 'forkForPromptEdit' | 'validatePromptEdit'>>,
   workspaces: readonly AgentHostWorkspace[],
   references?: SessionReferenceStore,
 ): AgentHostDirectory {
@@ -86,6 +86,12 @@ export function createCodexSessionDirectory(
     setSourceAccessCheck(check) { sourceAccessCheck = check; },
     setSourceBindingReader(reader) { sourceBindingReader = reader; },
     sourceReferences: () => references?.list() ?? Promise.resolve([]),
+    ...(provider.forkSession ? { async forkSession(nativeSessionId: string) {
+      if (closed) throw new Error('Codex directory is closed.');
+      await sourceAccessCheck?.(nativeSessionId);
+      if (await references?.get(nativeSessionId)) throw new Error('Primary handoff is unavailable in side or Ask conversations.');
+      return remember(await provider.forkSession!(nativeSessionId));
+    } } : {}),
     list() { if (closed) throw new Error('Codex directory is closed.'); return discovery ??= discover().finally(() => { discovery = undefined; }); },
     workspaces: () => [...workspaces],
     async create(input) {

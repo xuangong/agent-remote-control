@@ -1,6 +1,7 @@
 # Same-host session succession
 
-Status: Approved direction; implementation not started.
+Status: Implementation in progress. Durable roles and source binding primitives
+are implemented; production coordination, TPM and product integration are pending.
 
 ## Outcome and scope
 
@@ -150,26 +151,27 @@ Implement one concrete local preparation module and its result type. No alternat
 mode, remote endpoint, empty migration implementation or configurable migration
 framework is needed for this release.
 
-## Context transfer
+## Context preparation
 
-V1 uses an explicitly described normalized-history copy, matching the existing
-context-fork semantics. It creates a new session, never presents this as a full
-native fork, and records omitted/truncated categories. Reject incomplete capture.
-Capture occurs after source admission is gated and execution is quiescent.
-Move shared capture/formatting into a reusable module rather than running a
-browser-owned transfer workflow. Preserve source boundaries and native settings
-that the target actually supports; never silently increase permissions.
+Implementation inspection found that the shared provider API cannot preload a
+normalized-history message while guaranteeing that tools will not start work.
+The implementation therefore prioritizes a verified native history fork for Codex.
+This working choice was disclosed during implementation; no provider is enabled
+in the product until the complete handoff contract is wired and verified.
 
-Creation alone must not start implementation work. The context-preparation turn,
-if required by the provider, must support a tools-disabled acknowledgement and
-settle before commit. A provider unable to prepare context without unbounded side
-effects is unavailable for V1. Preserve the preparation operation receipt; a
-timeout does not authorize sending the context again.
+Fork only after source admission is gated and execution is quiescent. Verify a new
+native identity in the same cwd and the inherited latest settled turn boundary.
+The native fork must not send `turn/start`, modify the predecessor or claim to
+transfer native children, callbacks or running work. Preserve native settings and
+recheck the actual successor's readiness. A creation timeout remains unknown and
+does not authorize another fork. Preparing a native fork includes copying history;
+the following transfer stage verifies it rather than sending that history again.
 
-Context compaction through an authored handover summary and a dedicated native
-full-fork path are separate future strategies. Their availability does not change
-role, navigation or recovery contracts. No reduction in context size is promised
-by the normalized-copy strategy.
+The existing `/fork` command retains its normalized-history copy behavior. A
+normalized-copy handoff fallback remains unavailable until its preparation can
+be guaranteed not to start implementation work. Other providers and authored
+handover summaries need their own validated preparation strategies. Neither native
+forking nor normalized copying promises reduced context size.
 
 ## Coordinator and commit
 
@@ -193,14 +195,14 @@ cross-machine prepare/commit protocol. Browser synchronization is recovery of a
 local committed decision, not participation in its transaction.
 
 1. Validate authority, provider capability, source role revision and canonical cwd.
-   Persist intent and reserve one succession for the role. Prepare an empty target
-   and retain its native identity before attaching it.
+   Persist intent and reserve one succession for the role before native creation.
 2. Gate new source input at Controller admission, including TPM and stale-browser
    requests. Wait for active turns, pending interactions, native queued input and
    owned child work to settle. Do not force-cancel work or assume idle proves this.
    Adapters must report the required facts; unknown state blocks commitment.
 3. Freeze the association set against new source-bound creation/unlink races;
-   concurrent changes receive a retryable conflict. Capture and deliver context,
+   concurrent changes receive a retryable conflict. Create the native fork and
+   retain its native identity before attaching it. Verify the copied context,
    verify target readiness and recheck the source generation and role revision.
 4. Atomically persist the new `current`, revision and committed receipt in one
    Controller record. Durable prepared overlays allow enrolled grants and TPM

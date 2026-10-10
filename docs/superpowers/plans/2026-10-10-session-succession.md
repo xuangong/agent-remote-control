@@ -135,12 +135,25 @@ expect((await fixture.readSource({ cursor: pageA.nextCursor })).sourceSessionId)
 
 ## Task 3: Local handoff coordinator and admission boundary
 
+Status: In progress. Local coordinator and readiness policy have fixture coverage;
+Codex native history fork passed an isolated native test with a loopback model
+service and no new model request during fork. Production admission, binding-reader
+installation, durable cursor-key provisioning and recovery endpoints remain open.
+Do not mark this task complete or expose a product capability yet.
+Checkpoint verification: seven affected Host suites passed 50 tests; the Codex
+suite passed 412 tests with 12 environment-dependent skips before the final
+unsettled-candidate regression was added. The final focused fork/prompt-edit/native
+run passed 23 tests. Native tests used a temporary profile and loopback service;
+no active user daemon or deployed environment was replaced.
+
 **Create:** `packages/agent-host/src/session-succession.ts` and `.test.ts`;
 `packages/agent-host/src/local-succession-preparation.ts` and `.test.ts`.
 **Modify:** `packages/agent-host/src/host.ts`, `directory.ts`,
-`execution-policy.ts`; extract the existing normalized history capture/formatting
-from Lab `src/session-forks.ts` into an appropriately shared module while keeping
-the current `/fork` behavior and tests unchanged.
+`execution-policy.ts`; Codex `src/provider.ts` and `src/session.ts`.
+**Create:** Codex `src/session-fork.ts`, `src/session-fork.test.ts` and
+`src/session-fork.local.test.ts`. Keep the existing normalized `/fork` unchanged.
+The shared API cannot guarantee a tools-disabled context preload, so use the
+verified native fork preparation path first; no silent message-copy fallback.
 
 **Interfaces:** `SessionSuccessionCoordinator.prepare(request)`,
 `status(operationId)`, `commit(operationId, expectedRevision)` and
@@ -163,6 +176,13 @@ state, never a browser-supplied readiness assertion. No strategy registry is nee
   their relation revision. Do not create auxiliary successors in this mode.
 - [ ] Verify candidate context delivery and readiness before the atomic commit.
   Never reuse the context-copy path as proof of full native context inheritance.
+- [x] Implement native Codex fork without a model turn; validate its new identity,
+  cwd and inherited boundary. Scripted fork/prompt-edit regressions: 22 passed.
+- [x] Run an isolated native fork test with the installed Codex binary and loopback
+  Responses service: one test passed; three source prompts were retained, model
+  request count stayed at three and predecessor history remained unchanged.
+- [x] Implement local coordinator recovery tests for unknown creation/transfer,
+  changed source boundary, busy target, cancellation and restart revalidation.
 - [ ] Add restart/cancellation cases at every phase. Retain unknown effects and
   created candidates; reject mutation to the superseded source after commit.
 - [ ] Run Host, fork and native-ownership regressions and commit

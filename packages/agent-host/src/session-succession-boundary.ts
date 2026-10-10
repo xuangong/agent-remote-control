@@ -24,6 +24,16 @@ export class SessionSuccessionBoundary {
     return this.context.run({ operationId, operation }, work);
   }
   pending(target: NativeSessionRef): number { return this.inFlight.get(nativeSessionRefKey(target)) ?? 0; }
+  async mutate<T>(target: NativeSessionRef, work: () => Promise<T>): Promise<T> {
+    this.validate(target);
+    const key = nativeSessionRefKey(target);
+    this.inFlight.set(key, this.pending(target) + 1);
+    try { return await work(); }
+    finally {
+      const count = this.pending(target) - 1;
+      if (count) this.inFlight.set(key, count); else this.inFlight.delete(key);
+    }
+  }
   private validate(target: NativeSessionRef): void {
     try { this.assertAdmission(target); }
     catch (error) { throw new AgentOperationRejectedError('succession_admission_closed', error instanceof Error ? error.message : 'Session handoff admission is closed.'); }
@@ -34,11 +44,7 @@ export class SessionSuccessionBoundary {
       const value = Reflect.get(native, property, native);
       if (typeof value !== 'function') return value;
       if (!mutations.has(String(property))) return value.bind(native);
-      return async (...args: unknown[]) => {
-        boundary.validate(address);
-        const key = nativeSessionRefKey(address);
-        boundary.inFlight.set(key, boundary.pending(address) + 1);
-        try {
+      return (...args: unknown[]) => boundary.mutate(address, async () => {
           if (property === 'sendMessage') return await boundary.send(address, args[0] as string, undefined, args[1] as AgentMessageOptions | undefined,
             (text, _parts, options) => options === undefined ? native.sendMessage(text) : native.sendMessage(text, options));
           if (property === 'sendMessageContent') {
@@ -52,11 +58,7 @@ export class SessionSuccessionBoundary {
           }
           boundary.validate(address);
           return await Reflect.apply(value, native, args);
-        } finally {
-          const count = boundary.pending(address) - 1;
-          if (count) boundary.inFlight.set(key, count); else boundary.inFlight.delete(key);
-        }
-      };
+      });
     } });
   }
   private async send(target: NativeSessionRef, text: string, parts: readonly AgentInputPart[] | undefined, options: AgentMessageOptions | undefined,

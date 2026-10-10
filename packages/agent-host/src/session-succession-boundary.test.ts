@@ -83,3 +83,15 @@ test('keeps native exceptions unknown while subsequent input rejection is defini
  await expect(f.boundary.run(operation('other'), 'browser', () => session.sendMessage('second'))).rejects.toBeInstanceOf(AgentOperationRejectedError);
  expect(f.contexts.read('handoff').deliveries).toHaveLength(1);
 });
+
+test('counts directory work until completion and rejects stale source metadata mutations', async () => {
+ const f=await fixture(); let finish!:()=>void;
+ const gate=new Promise<void>(resolve=>{finish=resolve;});
+ const work=f.boundary.mutate(ref('B'),()=>gate);
+ expect(f.boundary.pending(ref('B'))).toBe(1);
+ finish(); await work;
+ expect(f.boundary.pending(ref('B'))).toBe(0);
+ f.supersede();
+ await expect(f.boundary.mutate(ref('B'),async()=>{f.messages.push('rename');})).rejects.toBeInstanceOf(AgentOperationRejectedError);
+ expect(f.messages).toEqual([]);
+});

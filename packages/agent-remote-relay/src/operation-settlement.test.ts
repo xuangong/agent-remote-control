@@ -57,3 +57,39 @@ it('rejects writable public wires without a runtime settlement service', async (
     expect(dispatch).not.toHaveBeenCalled();
   } finally { wire.close(); }
 }, 10000);
+
+it('rechecks Host admission at queued native dispatch and preserves operation context', async () => {
+  const { AsyncLocalStorage } = await import('node:async_hooks');
+  const cache = createOperationCache();
+  const context = new AsyncLocalStorage<string>();
+  const target = agent();
+  let reserved = false;
+  let releaseQueue!: () => void;
+  const queue = new Promise<void>(resolve => { releaseQueue = resolve; });
+  target.runOperation = async (work, beforeDispatch) => { await queue; beforeDispatch?.(); return work(); };
+  const received: string[] = [];
+  const execute = createOperationExecutor(cache, 'device-A', {
+    beforeDispatch: () => { if (reserved) throw new Error('Reserved for succession'); },
+    dispatch: (_agent, request, scope, work) => context.run(`${scope}:${request.operationId}`, work),
+  });
+  try {
+    const result = execute(target, operation, { dispatch: async () => { received.push(context.getStore()!); } });
+    reserved = true; releaseQueue();
+    await expect(result).rejects.toMatchObject({ code: 'operation_rejected' });
+    expect(received).toEqual([]);
+    reserved = false;
+    await execute(target, { ...operation, operationId: '00000000-0000-4000-8000-000000000002' }, { dispatch: async () => { received.push(context.getStore()!); } });
+    expect(received).toEqual(['device-A:00000000-0000-4000-8000-000000000002']);
+  } finally { await cache.close(); }
+}, 10000);
+
+it('applies final admission even for an Agent without a native operation scheduler', async () => {
+  const cache = createOperationCache(); let called = false;
+  const execute = createOperationExecutor(cache, 'scope', {
+    beforeDispatch: () => { throw new Error('Superseded'); },
+  });
+  try {
+    await expect(execute(agent(), operation, { dispatch: async () => { called = true; } })).rejects.toMatchObject({ code: 'operation_rejected' });
+    expect(called).toBe(false);
+  } finally { await cache.close(); }
+}, 10000);

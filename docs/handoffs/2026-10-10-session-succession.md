@@ -3,6 +3,34 @@
 Date: 2026-10-10. Audience: the next implementation session or maintainer.
 Status: partially implemented; no usable end-to-end handoff yet.
 
+## Native crash evidence checkpoint (2026-10-10)
+
+Task8A passed scoped independent spec/quality review after isolating its native
+experiment entry and output path. Claude SDK 0.3.247 / bundled native 2.1.247
+cannot resume the exact empty B after the tested zero-input postcommit crash.
+The independent lost-ack case does retain one exact user UUID/recipient/content
+in public history. Passing tests assert these observed classifications; they do
+not certify Claude durable succession. No seed, resend or replacement B was added.
+
+Root verified five frozen source files and retained artifact hashes, then freshly
+ran the dedicated entry: two cases passed in 8.38 seconds. Ordinary collection
+with the generic executable configured skipped both cases and wrote no output.
+Claude typecheck and diff check passed. The dedicated entry has a 120-second
+process-group deadline; cases/hooks are 30/10 seconds with one worker. Root's
+separate evidence is `.tmp/root-task8a-fix1-native-observations.json`; final
+independent review is the plan workspace's `task-8a-fix1-review.md`.
+Compatibility update/check passed with
+`b4b43a629a5dfbde13afb4adc84892f80b71a9fd3bd26e94090a2e4df17eadde`.
+
+Next run the minimal existing OpenCode `/session` API crash experiment from
+`task-8c-implementation-brief.md` and its read-only preflight. Do not convert to
+the separate `/api/session` execution stack. Then apply the prepared common
+admission slice `task-8b1-implementation-brief.md`, followed by 8B2's settings,
+directory/provenance and ownership wiring. Native readiness/evidence integration,
+complete SQL persistence and client composition still block release. No merge,
+push, deployment, package publication, global install or user-service changes
+are authorized by this checkpoint.
+
 ## Local preparation checkpoint (2026-10-10)
 
 Task7B passed independent scoped spec/quality review. Role v4 and context v2 save

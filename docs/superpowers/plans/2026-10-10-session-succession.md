@@ -368,6 +368,12 @@ certification and complete mutation admission remain Task8.
 
 ## Task 8: Native evidence and one real provider mode
 
+Status: Task8A's isolated Claude crash evidence is reviewed and verified. Empty
+postcommit B fails exact cold resume; lost-ack U survives in public history.
+Claude durable succession is not certified. Next: Task8C's existing OpenCode
+execution API probe, then 8B1 common operation/reservation and 8B2 entry-point
+wiring. The plan workspace contains their exact briefs. None enables production.
+
 - [ ] Enforce idle-only admission: reject working, queued, approval, active-child,
   disconnected and unknown states immediately. No draining, native pause or
   automatic waiting handoff; revalidate under the input gate before commit.

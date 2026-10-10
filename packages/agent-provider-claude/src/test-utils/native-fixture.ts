@@ -20,7 +20,9 @@ export async function nativeFixture(handler: (body: any, response: ServerRespons
   const home = await mkdtemp(join(tmpdir(), 'claude-control-home-'));
   const cwd = await realpath(await mkdtemp(join(tmpdir(), 'claude-control-workspace-')));
   const bodies: any[] = [];
+  const requests: { method: string | undefined; path: string | undefined }[] = [];
   const server = createServer((request, response) => {
+    requests.push({ method: request.method, path: request.url });
     const chunks: Buffer[] = [];
     request.on('data', (chunk) => chunks.push(Buffer.from(chunk)));
     request.on('end', () => {
@@ -31,7 +33,7 @@ export async function nativeFixture(handler: (body: any, response: ServerRespons
   });
   server.listen(0, '127.0.0.1'); await once(server, 'listening');
   const address = server.address(); if (!address || typeof address === 'string') throw new Error('Missing address');
-  return { cwd, home, bodies, options: { executable: process.env.AGENT_CLAUDE_TEST_EXECUTABLE ?? 'claude', requestTimeoutMs: 5000,
+  return { cwd, home, bodies, requests, options: { executable: process.env.AGENT_CLAUDE_TEST_EXECUTABLE ?? 'claude', requestTimeoutMs: 5000,
     env: { CLAUDE_CONFIG_DIR: home, ANTHROPIC_BASE_URL: `http://127.0.0.1:${address.port}`, ANTHROPIC_API_KEY: 'local-claude-test',
       ANTHROPIC_AUTH_TOKEN: undefined, CLAUDE_CODE_OAUTH_TOKEN: undefined, CLAUDE_CODE_USE_BEDROCK: undefined,
       CLAUDE_CODE_USE_VERTEX: undefined, CLAUDE_CODE_USE_FOUNDRY: undefined, DISABLE_NON_ESSENTIAL_TRAFFIC: '1',

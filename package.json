@@ -21,6 +21,7 @@
     "ardb": "node packages/agent-remote-debugger/dist/cli.js",
     "agent-remote-controller": "node packages/agent-host/dist/cli.js",
     "test:claude": "node scripts/run-tests.mjs claude",
+    "test:claude:succession-evidence": "node scripts/run-tests.mjs claude-succession-evidence",
     "test:opencode": "node scripts/run-tests.mjs opencode",
     "test:opencode:native": "node scripts/run-tests.mjs opencode-native",
     "test:copilot": "node scripts/run-tests.mjs copilot",

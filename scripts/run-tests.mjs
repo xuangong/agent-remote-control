@@ -1,7 +1,16 @@
 import { spawn } from 'node:child_process';
+import { isAbsolute } from 'node:path';
 import { packageManager } from './lib/package-manager.mjs';
 
 const mode = process.argv[2] ?? 'unit';
+const successionEvidence = mode === 'claude-succession-evidence';
+if (successionEvidence) {
+  if (process.platform !== 'darwin' || process.arch !== 'arm64' || Number(process.versions.node.split('.')[0]) !== 26) {
+    throw new Error('The Claude succession evidence experiment requires macOS arm64 and Node 26.');
+  }
+  if (!isAbsolute(process.env.AGENT_CLAUDE_TEST_EXECUTABLE ?? '')) throw new Error('Set an absolute AGENT_CLAUDE_TEST_EXECUTABLE for the installed SDK-bundled Claude 2.1.247.');
+  if (!isAbsolute(process.env.AGENT_CLAUDE_SUCCESSION_EVIDENCE_OUTPUT ?? '')) throw new Error('Set AGENT_CLAUDE_SUCCESSION_EVIDENCE_OUTPUT to a new absolute JSON output path.');
+}
 if (mode === 'claude' && !process.env.AGENT_CLAUDE_TEST_EXECUTABLE) throw new Error('Set AGENT_CLAUDE_TEST_EXECUTABLE to Claude Code 2.1.247 or newer for native Claude tests.');
 if (mode === 'codex-shared' && !process.env.AGENT_REMOTE_SHARED_CODEX_TEST_EXECUTABLE) throw new Error('Set AGENT_REMOTE_SHARED_CODEX_TEST_EXECUTABLE to the native Codex executable for shared-runtime tests.');
 const commands = {
@@ -20,6 +29,7 @@ const commands = {
   'controller-updates-relay': ['--filter', '@orchardworks/agent-remote-cloudflare', 'exec', 'vitest', 'run', 'test/controller-updates.test.ts', '--testTimeout=30000', '--hookTimeout=30000', '--maxWorkers=1'],
   cloudflare: ['--filter', '@orchardworks/agent-remote-cloudflare', 'run', 'test', '--hookTimeout=30000'],
   claude: ['--filter', '@orchardworks/agent-provider-claude', 'exec', 'vitest', 'run', '--testTimeout=10000', '--hookTimeout=15000', '--maxWorkers=1'],
+  'claude-succession-evidence': ['--filter', '@orchardworks/agent-provider-claude', 'exec', 'vitest', 'run', 'src/native-succession-evidence.local.test.ts', '--testTimeout=30000', '--hookTimeout=10000', '--maxWorkers=1'],
   copilot: ['--filter', '@orchardworks/agent-provider-copilot', 'run', 'test', '--hookTimeout=30000'],
   setup: ['exec', 'node', '--test', '--test-timeout=60000', 'scripts/dsh-debug.test.mjs', 'scripts/start.test.mjs', 'scripts/relay-local.test.mjs', 'scripts/controller/entrypoint.test.mjs', 'scripts/controller/create-host.test.mjs', 'scripts/controller/install.test.mjs'],
   unit: ['-r', 'run', 'test', '--hookTimeout=30000'],
@@ -27,7 +37,8 @@ const commands = {
   conformance: ['--filter', '@orchardworks/agent-remote-lab', 'run', 'test:conformance'],
 };
 if (!(mode in commands)) throw new Error(`Unknown test suite: ${mode}`);
-const child = spawn(...packageManager('pnpm', commands[mode]), { stdio: 'inherit', windowsHide: true, detached: process.platform !== 'win32' });
+const child = spawn(...packageManager('pnpm', commands[mode]), { stdio: 'inherit', windowsHide: true, detached: process.platform !== 'win32',
+  env: { ...process.env, AGENT_CLAUDE_SUCCESSION_EVIDENCE: successionEvidence ? '1' : undefined } });
 function stop(signal) {
   try {
     if (process.platform === 'win32') spawn('taskkill', ['/PID', String(child.pid), '/T', '/F'], { windowsHide: true, stdio: 'ignore' }).on('error', () => child.kill(signal));
@@ -36,10 +47,11 @@ function stop(signal) {
     if (error.code !== 'ESRCH') throw error;
   }
 }
+const outerDeadlineMs = successionEvidence ? 120_000 : 540_000;
 const deadline = setTimeout(() => {
-  process.stderr.write(`${mode} suite exceeded its 540 second deadline.\n`);
+  process.stderr.write(`${mode} suite exceeded its ${outerDeadlineMs / 1000} second deadline.\n`);
   stop('SIGKILL');
-}, 540_000);
+}, outerDeadlineMs);
 process.once('SIGINT', () => stop('SIGINT'));
 process.once('SIGTERM', () => stop('SIGTERM'));
 child.once('error', (error) => { clearTimeout(deadline); console.error(error); process.exitCode = 1; });

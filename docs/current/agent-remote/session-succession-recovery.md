@@ -63,6 +63,29 @@ A terminal Host decision alone does not authorize releasing the other side's
 reservation. Old A-to-B status remains A-to-B evidence after a later B-to-C;
 current navigation can independently resolve C.
 
+## Native evidence checkpoint
+
+An isolated macOS experiment on 2026-10-10 used Claude Agent SDK 0.3.247 and
+its bundled Claude Code 2.1.247 with a loopback model fixture. Empty initialization
+sent no input or model request. After saving a probe-local role decision and
+killing the owned native process, one fresh exact-ID resume failed with
+`No conversation found with session ID`. The committed role/context remained
+recorded. This mode does not satisfy the empty-candidate crash-recovery contract;
+missing public metadata alone was not treated as proof of non-creation.
+
+A separate input experiment persisted the exact user UUID, recipient and composed
+content before one dispatch, held the substantive response and killed the owned
+process. Fresh public history returned exactly that user record without resume
+or resend. This establishes positive text-input materialization for the tested
+cut, not completed task execution, generic queue readiness or provider certification.
+Do not use that result to waive empty-candidate recovery or enable succession.
+
+The dedicated `test:claude:succession-evidence` entry requires explicit executable
+and a new evidence output path; ordinary test collection skips it. Its supported
+platform/runtime and fixed versions are checked before native startup. Each run
+keeps separate evidence. Full Host admission, native readiness integration,
+deployed storage and product acceptance remain release gates.
+
 ## Local preparation and cancellation
 
 Preparation saves bounded normalized history before calling native create. The

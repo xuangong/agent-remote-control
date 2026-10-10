@@ -29,11 +29,13 @@ async function fixture() {
       if (failCreation) throw new Error('Response lost after native creation');
       return target;
     },
-    transfer: async (from, to, operationId) => {
-      effects.push(`transfer:${from.nativeSessionId}:${to.nativeSessionId}:${operationId}`);
+    capture: async (from, operationId) => {
+      effects.push(`capture:${from.nativeSessionId}:${operationId}`);
       if (failTransfer) throw new Error('Context receipt lost');
-      return { epoch: 'e', seq: 4, capturedAt: '2026-10-10T00:00:00.000Z' };
+      return { operationId: operationId.slice(0, -8), roleId: 'role', roleRevision: 2, source: from, text: '[]', itemCount: 0, boundary: { epoch: 'e', seq: 4 }, capturedAt: '2026-10-10T00:00:00.000Z' };
     },
+    saveContext: async () => {},
+    bind: async (operationId, to) => { effects.push(`bind:${to.nativeSessionId}:${operationId}`); },
   };
   const preparation = new LocalSuccessionPreparation('host', 'codex', access);
   const coordinator = new SessionSuccessionCoordinator(store, preparation);
@@ -44,7 +46,7 @@ async function fixture() {
 test('prepares once, gates both executors, then admits only the committed successor', async () => {
   const f = await fixture();
   await Promise.all([f.coordinator.prepare(request), f.coordinator.prepare(request)]);
-  expect(f.effects).toEqual(['create:A:op:create', 'transfer:A:B:op:context']);
+  expect(f.effects).toEqual(['capture:A:op:context', 'create:A:op:create', 'bind:B:op']);
   expect(f.coordinator.status('op').phase).toBe('ready');
   expect(() => f.coordinator.assertAdmission(source)).toThrow(/handoff/i);
   expect(() => f.coordinator.assertAdmission(target)).toThrow(/ready|handoff/i);
@@ -77,16 +79,16 @@ test('retains unknown creation and does not dispatch it again after retries or r
   const restored = new SessionSuccessionStore(join(f.root, 'state')); await restored.ready;
   const coordinator = new SessionSuccessionCoordinator(restored, f.preparation);
   expect((await coordinator.prepare(request)).phase).toBe('unknown');
-  expect(f.effects).toEqual(['create:A:op:create']);
+  expect(f.effects).toEqual(['capture:A:op:context', 'create:A:op:create']);
   expect(() => coordinator.assertAdmission(source)).toThrow(/handoff/i);
-  await expect(coordinator.cancel('op')).rejects.toThrow(/unknown|reconcil/i);
+  expect((await coordinator.cancel('op')).phase).toBe('cancelled');
 });
 
-test('retains an ambiguous context transfer with the actual candidate identity', async () => {
+test('rejects failed capture before candidate creation', async () => {
   const f = await fixture(); f.loseTransfer();
-  expect(await f.coordinator.prepare(request)).toMatchObject({ phase: 'unknown', to: target, resumePhase: 'transferring' });
+  expect(await f.coordinator.prepare(request)).toMatchObject({ phase: 'rejected' });
   await f.coordinator.prepare(request);
-  expect(f.effects).toEqual(['create:A:op:create', 'transfer:A:B:op:context']);
+  expect(f.effects).toEqual(['capture:A:op:context']);
   expect(f.store.read('role').role.current.nativeSessionId).toBe('A');
 });
 
@@ -102,7 +104,7 @@ test('cancelling a ready candidate retains its identity and reopens the predeces
   expect(await f.coordinator.cancel('op')).toMatchObject({ phase: 'cancelled', to: target });
   expect(() => f.coordinator.assertAdmission(source)).not.toThrow();
   await expect(f.coordinator.commit('op', 1)).rejects.toThrow(/ready/i);
-  expect(f.effects).toHaveLength(2);
+  expect(f.effects).toHaveLength(3);
 });
 
 test('a ready candidate can be reconciled after restart without copying context again', async () => {
@@ -112,7 +114,7 @@ test('a ready candidate can be reconciled after restart without copying context 
   expect(coordinator.status('op').phase).toBe('unknown');
   expect((await coordinator.reconcileReady('op')).phase).toBe('ready');
   expect((await coordinator.commit('op', 1)).committedRevision).toBe(2);
-  expect(f.effects).toEqual(['create:A:op:create', 'transfer:A:B:op:context']);
+  expect(f.effects).toEqual(['capture:A:op:context', 'create:A:op:create', 'bind:B:op', 'bind:B:op']);
 });
 
 test('a ready candidate that became busy cannot be committed or silently interrupted', async () => {
@@ -120,7 +122,7 @@ test('a ready candidate that became busy cannot be committed or silently interru
   f.targetState.idle = false;
   await expect(f.coordinator.commit('op', 1)).rejects.toThrow(/pending|finish/i);
   expect(f.store.read('role').role.current.nativeSessionId).toBe('A');
-  expect(f.effects).toHaveLength(2);
+  expect(f.effects).toHaveLength(3);
 });
 
 test('requires durable attachment verification before ready and again before commit', async () => {
@@ -174,5 +176,5 @@ test('refuses commit if durable state changes while attachment verification awai
 test('retains actual candidate identity before rejecting a wrong provider result', async () => {
   const f = await fixture(); f.access.create = async () => ({ ...target, providerId: 'wrong' });
   expect(await f.coordinator.prepare(request)).toMatchObject({ phase: 'rejected', to: { ...target, providerId: 'wrong' }, failureCode: 'succession_target_provider_mismatch' });
-  expect(f.effects).toEqual([]);
+  expect(f.effects).toEqual(['capture:A:op:context']);
 });

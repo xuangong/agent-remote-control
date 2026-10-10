@@ -1,6 +1,6 @@
-import type { SessionSuccessionContextStore, SuccessionContextRecord } from './session-succession-context.js';
+import type { SessionSuccessionContextStore, SuccessionContextRecord, SuccessionContextPreparation } from './session-succession-context.js';
 import { realpath } from 'node:fs/promises';
-import { nativeSessionRefKey, type NativeSessionRef, type PreparedSuccession, type PrimaryRole } from '@orchardworks/agent-remote-protocol';
+import { type NativeSessionRef, type PreparedSuccession, type PrimaryRole } from '@orchardworks/agent-remote-protocol';
 
 export interface SuccessionReadiness {
   cwd: string;
@@ -15,12 +15,13 @@ export interface SuccessionReadiness {
 export interface LocalSuccessionAccess {
   /** Unknown ownership, pending input or child state must not be reported as quiescent. */
   inspect(session: NativeSessionRef): Promise<SuccessionReadiness>;
-  /** Creates only a candidate. Neither this call nor transfer may start implementation work. */
+  /** Certifies that preparation and idle creation never send input or start work. */
   supports(source: NativeSessionRef, targetProviderId: string): Promise<boolean>;
   verifyAttachment(prepared: PreparedSuccession): Promise<void>;
   create(source: NativeSessionRef, operationId: string, targetProviderId: string): Promise<NativeSessionRef>;
-  /** Must settle context preparation before returning; thrown unknown effects are never replayed. */
-  transfer(source: NativeSessionRef, target: NativeSessionRef, operationId: string): Promise<PreparedSuccession['capture']>;
+  capture(source: NativeSessionRef, operationId: string): Promise<SuccessionContextPreparation>;
+  saveContext(context: SuccessionContextPreparation): Promise<void>;
+  bind(operationId: string, target: NativeSessionRef): Promise<void>;
 }
 export class SuccessionPreparationRejected extends Error {
   constructor(readonly code: string, message: string) { super(message); }
@@ -48,15 +49,15 @@ export class LocalSuccessionPreparation {
     if (actual !== role.workspace.canonicalCwd) throw new SuccessionPreparationRejected('succession_workspace_changed', 'Handoff requires the same canonical working directory.');
     return state;
   }
-  async create(role: PrimaryRole, operationId: string, targetProviderId = role.current.providerId): Promise<NativeSessionRef> {
+  async supports(role: PrimaryRole, targetProviderId = role.current.providerId): Promise<void> {
     if (!await this.access.supports(role.current, targetProviderId)) throw new SuccessionPreparationRejected('succession_unsupported_provider', 'The selected provider pair does not support safe succession.');
-    const target = await this.access.create(role.current, `${operationId}:create`, targetProviderId);
-    if (nativeSessionRefKey(target) === nativeSessionRefKey(role.current)) throw new SuccessionPreparationRejected('succession_identity_conflict', 'The successor must be an independent session.');
-    return target;
   }
-  transfer(role: PrimaryRole, target: NativeSessionRef, operationId: string): Promise<PreparedSuccession['capture']> {
-    return this.access.transfer(role.current, target, `${operationId}:context`);
+  create(role: PrimaryRole, operationId: string, targetProviderId = role.current.providerId): Promise<NativeSessionRef> {
+    return this.access.create(role.current, `${operationId}:create`, targetProviderId);
   }
+  capture(role: PrimaryRole, operationId: string): Promise<SuccessionContextPreparation> { return this.access.capture(role.current, `${operationId}:context`); }
+  saveContext(context: SuccessionContextPreparation): Promise<void> { return this.access.saveContext(context); }
+  bind(operationId: string, target: NativeSessionRef): Promise<void> { return this.access.bind(operationId, target); }
   /** Consumers inherit these raw rows, never an already composed context prefix. */
   pendingContext(source: NativeSessionRef): SuccessionContextRecord | undefined {
     const context = this.contexts?.forTarget(source);

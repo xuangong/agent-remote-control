@@ -71,7 +71,7 @@ async function startHost(root: string) {
   const sessions = new Map(['A', 'B'].map(id => [id, new NativeSession(id, root)]));
   const unexpectedPreparation = async (): Promise<never> => { throw new Error('No preparation during send'); };
   const coordinator = new SessionSuccessionCoordinator(store, new LocalSuccessionPreparation('controller', 'fixture', {
-    inspect: unexpectedPreparation, create: unexpectedPreparation, transfer: unexpectedPreparation,
+    inspect: unexpectedPreparation, create: unexpectedPreparation, capture: unexpectedPreparation, saveContext: unexpectedPreparation, bind: unexpectedPreparation,
     supports: async () => true, verifyAttachment: async () => {},
   }));
   const host = createAgentHostRuntime({
@@ -186,7 +186,7 @@ test('real WebSocket sends inject context and reject later input and the superse
     await running?.close();
     await rm(root, { recursive: true, force: true });
   }
-}, 15000);
+});
 
 test('disconnected and cold-restarted clients recover the original receipt without another native send', async () => {
   const root = await realpath(await mkdtemp(join(tmpdir(), 'arc-succession-restart-')));
@@ -218,4 +218,4 @@ test('disconnected and cold-restarted clients recover the original receipt witho
     await running?.close();
     await rm(root, { recursive: true, force: true });
   }
-}, 15000);
+});

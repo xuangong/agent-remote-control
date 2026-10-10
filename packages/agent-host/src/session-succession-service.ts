@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import type { AgentHistoryPage, AgentHistoryQuery } from '@orchardworks/agent-provider-sdk';
 import { nativeSessionRefKey, serializeNormalizedHistory, type NativeSessionRef, type PreparedSuccession, type PrimaryRole, type ProjectedTimelineEntry, type SuccessionRequest, type TimelineCursor } from '@orchardworks/agent-remote-protocol';
 import { LocalSuccessionPreparation, type SuccessionReadiness } from './local-succession-preparation.js';
-import { SessionSuccessionContextStore, type SuccessionContextDelivery } from './session-succession-context.js';
+import { SessionSuccessionContextStore, type SuccessionContextDelivery, type SuccessionContextPreparation } from './session-succession-context.js';
 import { SessionSuccessionStore } from './session-succession-store.js';
 import { SessionSuccessionCoordinator } from './session-succession.js';
 import { SessionSourceBindings } from './session-source-binding.js';
@@ -36,7 +36,9 @@ export class SessionSuccessionService {
     const preparation = new LocalSuccessionPreparation(controllerId, '', {
       inspect: source => ports.inspect(source), supports: (source, targetProvider) => ports.supports(source, targetProvider),
       create: (source, operationId, targetProvider) => ports.createIdle(source, operationId, targetProvider),
-      transfer: (source, target, operationId) => this.capture(source, target, operationId),
+      capture: (source, operationId) => this.capture(source, operationId),
+      saveContext: context => this.contexts.prepare(context),
+      bind: async (operationId, target) => { await this.contexts.bind(operationId, target); },
       verifyAttachment: prepared => this.verifyAttachment(prepared),
     }, this.contexts);
     this.coordinator = new SessionSuccessionCoordinator(this.store, preparation);
@@ -66,10 +68,10 @@ export class SessionSuccessionService {
     await this.contexts.reconcile(operationId, { ...evidence, operationId: delivery.operationId, target: delivery.target, roleRevision: delivery.roleRevision });
     return evidence.outcome === 'materialized';
   }
-  private async capture(source: NativeSessionRef, target: NativeSessionRef, contextOperationId: string): Promise<PreparedSuccession['capture']> {
+  private async capture(source: NativeSessionRef, contextOperationId: string): Promise<SuccessionContextPreparation> {
     if (!contextOperationId.endsWith(':context')) throw new Error('Invalid succession context operation identity.');
     const operationId = contextOperationId.slice(0, -':context'.length), operation = this.store.operation(operationId);
-    if (nativeSessionRefKey(operation.from) !== nativeSessionRefKey(source) || !operation.to || nativeSessionRefKey(operation.to) !== nativeSessionRefKey(target)) throw new Error('Succession capture routing changed.');
+    if (nativeSessionRefKey(operation.from) !== nativeSessionRefKey(source)) throw new Error('Succession capture routing changed.');
     const pending = this.contexts.forTarget(source);
     if (pending && ['accepted', 'unknown', 'dispatching'].includes(pending.state)) throw new Error('Reconcile unresolved source context before succession.');
     let capture: PreparedSuccession['capture'], history: { text: string; itemCount: number; shortenedToolCount?: number };
@@ -82,10 +84,9 @@ export class SessionSuccessionService {
       history = serializeNormalizedHistory(snapshot.entries);
       capture = { ...snapshot.boundary, capturedAt: snapshot.capturedAt };
     }
-    await this.contexts.attach({ operationId, roleId: operation.roleId, roleRevision: operation.expectedRevision + 1,
-      source, target, capturedAt: capture.capturedAt, boundary: {epoch:capture.epoch,seq:capture.seq}, ...history,
-      ...(pending?.state === 'pending' ? { inheritedFrom: { operationId: pending.operationId, source: pending.source, boundary: pending.boundary, capturedAt: pending.capturedAt } } : {}) });
-    return capture;
+    return { operationId, roleId: operation.roleId, roleRevision: operation.expectedRevision + 1,
+      source, capturedAt: capture.capturedAt, boundary: {epoch:capture.epoch,seq:capture.seq}, ...history,
+      ...(pending?.state === 'pending' ? { inheritedFrom: { operationId: pending.operationId, source: pending.source, boundary: pending.boundary, capturedAt: pending.capturedAt } } : {}) };
   }
   private async verifyAttachment(prepared: PreparedSuccession): Promise<void> {
     const attachment = this.contexts.read(prepared.operationId);

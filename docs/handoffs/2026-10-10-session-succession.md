@@ -3,6 +3,31 @@
 Date: 2026-10-10. Audience: the next implementation session or maintainer.
 Status: partially implemented; no usable end-to-end handoff yet.
 
+## Local preparation checkpoint (2026-10-10)
+
+Task7B passed independent scoped spec/quality review. Role v4 and context v2 save
+captured history and finite recovery capacity before one native create. Explicit
+cancellation can settle certified zero-task unknown creation while preserving
+late orphan evidence. Known candidates can be revalidated after restart without
+another create. Both stores separate pre-publication failure from uncertain
+post-rename publication and poison the latter until reopening. Legacy records gain
+no inferred zero-task evidence. First-input capacity remains a separate admission.
+
+Root verified all 13 frozen source hashes, 137 tests across 12 files, Controller
+typecheck and diff check. The real HTTP/WS cases use scripted native ports; they
+do not certify a production provider. Logs: `.tmp/root-task7b-tests.log` and
+`.tmp/root-task7b-typecheck.log`. Review: the plan workspace's `task-7b-review.md`.
+Compatibility update/check passed with
+`992563ea276c95d46691c0dca51f4a7a41ef1085429e7cd34c98f9f8d2e1eb48`.
+
+Next is Task8A's isolated native evidence probe. Reuse earlier Claude public UUID
+history/reinitialize findings and test the unverified postcommit-before-first-input
+crash window, then lost-ack first-input materialization. The exact brief is
+`task-8a-implementation-brief.md` in the plan workspace. Full ARC gate, native
+evidence integration, complete SQL codec and client composition remain incomplete.
+SQL capacity evidence is recorded in `task-9-capacity-evidence.md`; a pending row
+fitting storage does not prove its later full committed evidence will fit.
+
 ## Host revocation checkpoint (2026-10-10)
 
 Task7A passed independent scoped review after correcting legacy pre-effect
@@ -19,9 +44,8 @@ compatibility hash is `ec8161d6b15e89132fbebc960940a34137e39ad26d13bec01d10be4a1
 These are scripted native ports over real HTTP/WS and durable file restart, not
 native provider certification. Root logs are `.tmp/root-task7a-*.log`.
 
-Next source slice is Task7B, governed by its exact brief and the plan ledger:
-capture/reserve before create, justified local failure recovery, and explicit
-zero-task unknown-create abandonment. Task7 overall remains in progress.
+Task7B subsequently completed capture/reserve before create, justified local
+failure recovery and explicit zero-task unknown-create abandonment; see above.
 
 ## Architecture review adjustment in progress (2026-10-10)
 
@@ -56,8 +80,8 @@ prevents commit. See the latest spec and ledger rulings rather than older prefli
 reports which required native global exclusion. The user also approved explicit
 abandonment of a certified zero-task creation: terminal cancellation must persist
 before releasing A, preserve known/unknown/late orphan evidence, and prevent every
-late commit or dispatch by that operation. This is Task7B implementation work,
-not an implemented recovery path yet. Unknown input and role commit/persistence
+late commit or dispatch by that operation. Task7B implements this local recovery
+path; real provider certification remains open. Unknown input and role commit/persistence
 cannot use it. Each attempt fixes its new candidate and settings; no automatic
 waiting/retry, rollback after commit, or delayed continuation is introduced.
 

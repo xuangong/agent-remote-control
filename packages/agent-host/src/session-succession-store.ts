@@ -1,12 +1,23 @@
 import { sourceParticipantId } from './source-participant.js';
 import { isRelationChangeReservation, isRelationChangeReceipt, relationChangeKey, type RelationChangeReservation, type RelationChangeReceipt } from '@orchardworks/agent-remote-protocol';
-import { mkdir, open, readFile, rename, unlink } from 'node:fs/promises';
+import { mkdir, readFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { createHash, randomUUID } from 'node:crypto';
+import { createHash } from 'node:crypto';
+import { assertSuccessionCapacity, isReservation, jsonBytes, largestSuccessionId, largestSuccessionRef, publishSuccessionState, reservationBytes, SuccessionPublicationUnknown } from './succession-persistence.js';
 import { successionAuthorityKey, successionFreezeKey, isNativeSessionRef, isSuccessionAssociationAuthority, isSuccessionAssociationFreeze, type SuccessionAssociationAuthority, type SuccessionAssociationFreeze, type NativeSessionRef, isPrimaryRole, isPreparedSuccession, isSuccessionParticipant, isSuccessionRecord, isSuccessionRequest, nativeSessionRefKey,
   type PrimaryRole, type SuccessionParticipant, type SuccessionPhase, type SuccessionRecord, type SuccessionRequest } from '@orchardworks/agent-remote-protocol';
 
+export interface LocalSuccessionProgress {
+  operationId: string;
+  reservedBytes: string;
+  stage?: 'not-started' | 'create-started' | 'candidate-known';
+  createOperationId?: string;
+  zeroInputAndTask?: true;
+  capture?: NonNullable<SuccessionRecord['prepared']>['capture'];
+  orphanCandidate?: NativeSessionRef;
+}
 export interface SuccessionRoleState {
+  localPreparations?: LocalSuccessionProgress[];
   relationChanges?: RelationChangeReceipt[];
   associationAuthority?: SuccessionAssociationAuthority;
   enrollments?: SuccessionAssociationFreeze[];
@@ -18,7 +29,7 @@ export interface SuccessionRoleState {
 }
 export interface SourceAssociationResult { id: string; fingerprint: string; scope: string; operationId: string; source: NativeSessionRef; reader: NativeSessionRef }
 export interface AssociationRecovery { createKey: string; createFingerprint: string }
-interface StoreState { version: 3; associationResults: SourceAssociationResult[]; roles: SuccessionRoleState[]; associationAdmissions: Array<{ id: string; fingerprint: string; source: NativeSessionRef; sourceReader?: true; recovery?: AssociationRecovery }> }
+interface StoreState { version: 4; associationResults: SourceAssociationResult[]; roles: SuccessionRoleState[]; associationAdmissions: Array<{ id: string; fingerprint: string; source: NativeSessionRef; sourceReader?: true; recovery?: AssociationRecovery }> }
 type Advance = Pick<SuccessionRecord, 'phase'> & Partial<Pick<SuccessionRecord, 'to' | 'prepared' | 'failureCode'>>;
 const terminal = (phase: SuccessionPhase) => ['committed', 'rejected', 'cancelled'].includes(phase);
 const fingerprint = (request: SuccessionRequest) => JSON.stringify([request.operationId, request.roleId, request.expectedRevision, nativeSessionRefKey(request.from), request.targetProviderId ?? request.from.providerId]);
@@ -27,35 +38,45 @@ const maxBytes = 8 * 1024 * 1024;
 /** One owning Controller serializes role decisions; publication follows atomic file replacement. */
 export class SessionSuccessionStore {
   readonly ready: Promise<void>;
-  private state: StoreState = { version: 3, roles: [], associationAdmissions: [], associationResults: [] };
+  private state: StoreState = { version: 4, roles: [], associationAdmissions: [], associationResults: [] };
   private tail: Promise<unknown> = Promise.resolve();
   private loaded = false;
+  private writeFailure?: SuccessionPublicationUnknown;
   private revision = 0;
   private pendingReaderGeneration = -1;
   private pendingReaders = new Set<string>();
   constructor(private readonly directory: string) { this.ready = this.restore(); }
-  get generation(): number { return this.revision; }
+  get generation(): number { this.assertReadable(); return this.revision; }
+
+  private assertReadable(): void {
+    if (this.writeFailure) throw this.writeFailure;
+    if (!this.loaded) throw new Error('Session succession store is not ready.');
+  }
+  progress(operationId: string): LocalSuccessionProgress | undefined {
+    this.assertReadable();
+    return structuredClone(this.state.roles.flatMap(item => item.localPreparations ?? []).find(item => item.operationId === operationId));
+  }
 
   read(roleId: string): SuccessionRoleState {
-    if (!this.loaded) throw new Error('Session succession store is not ready.');
+    this.assertReadable();
     return structuredClone(this.findRole(this.state, roleId));
   }
   operation(operationId: string): SuccessionRecord {
-    if (!this.loaded) throw new Error('Session succession store is not ready.');
+    this.assertReadable();
     return structuredClone(this.findOperation(this.state, operationId));
   }
   all(): SuccessionRoleState[] {
-    if (!this.loaded) throw new Error('Session succession store is not ready.');
+    this.assertReadable();
     return structuredClone(this.state.roles);
   }
 
   relationChange(operationId: string): RelationChangeReceipt | undefined {
-    if (!this.loaded) throw new Error('Session succession store is not ready.');
+    this.assertReadable();
     const receipt = this.state.roles.flatMap(item => item.relationChanges ?? []).find(item => item.reservation.operationId === operationId);
     return receipt && structuredClone(receipt);
   }
   readerAssociationState(reader: NativeSessionRef): { pending: boolean } {
-    if (!this.loaded) throw new Error('Session succession store is not ready.');
+    this.assertReadable();
     if (this.pendingReaderGeneration !== this.generation) {
       this.pendingReaders = new Set(this.state.roles.flatMap(item => (item.relationChanges ?? []).filter(change => change.phase !== 'released').map(change => nativeSessionRefKey(change.reservation.readerRef))));
       this.pendingReaderGeneration = this.generation;
@@ -191,7 +212,7 @@ export class SessionSuccessionStore {
     });
   }
   sourceResult(id: string, fingerprint: string): SourceAssociationResult | undefined {
-    if (!this.loaded) throw new Error('Session succession store is not ready.');
+    this.assertReadable();
     const result = this.state.associationResults.find(item => item.id === id);
     if (result && result.fingerprint !== fingerprint) throw new Error('Source creation identity conflict.');
     return result && structuredClone(result);
@@ -222,7 +243,7 @@ export class SessionSuccessionStore {
       state.associationAdmissions = state.associationAdmissions.filter(item => item.id !== id);
     });
   }
-  beginEnrolled(freeze: SuccessionAssociationFreeze, participants: SuccessionParticipant[], generation: number): Promise<SuccessionRecord> {
+  beginEnrolled(freeze: SuccessionAssociationFreeze, participants: SuccessionParticipant[], generation: number, local = false): Promise<SuccessionRecord> {
     const receipt = structuredClone(freeze), enrolled = structuredClone(participants);
     return this.mutate(state => {
       if (!isSuccessionAssociationFreeze(receipt)) throw new Error('Invalid association receipt.');
@@ -241,7 +262,7 @@ export class SessionSuccessionStore {
       const lineage = this.lineage(item);
       if (JSON.stringify(lineage.map(nativeSessionRefKey)) !== JSON.stringify(receipt.lineage.map(nativeSessionRefKey))) throw new Error('Primary role lineage changed.');
       if (state.associationAdmissions.some(admission => lineage.some(ref => nativeSessionRefKey(ref) === nativeSessionRefKey(admission.source)))) throw new Error('Source association outcome is unresolved.');
-      const record = this.beginRecord(state, receipt.request);
+      const record = this.beginRecord(state, receipt.request, local);
       item.associationAuthority = receipt.authority;
       (item.enrollments ??= []).push(receipt);
       item.participants = enrolled; item.associationRevision++;
@@ -283,14 +304,14 @@ export class SessionSuccessionStore {
       if (!item.releasedEnrollments?.includes(receipt.token)) (item.releasedEnrollments ??= []).push(receipt.token);
     });
   }
-  begin(request: SuccessionRequest): Promise<SuccessionRecord> {
+  begin(request: SuccessionRequest, local = false): Promise<SuccessionRecord> {
     const input = structuredClone(request);
     return this.mutate(state => {
       if (this.findRole(state, input.roleId).associationAuthority) throw new Error('An authenticated association reservation is required.');
-      return this.beginRecord(state, input);
+      return this.beginRecord(state, input, local);
     });
   }
-  private beginRecord(state: StoreState, input: SuccessionRequest): SuccessionRecord {
+  private beginRecord(state: StoreState, input: SuccessionRequest, local = false): SuccessionRecord {
     if (!isSuccessionRequest(input)) throw new Error('Invalid succession request.');
     const prior = state.roles.flatMap(item => item.operations).find(op => op.operationId === input.operationId);
     if (prior) {
@@ -304,7 +325,106 @@ export class SessionSuccessionStore {
     if (item.operations.length >= 512) throw new Error('Succession history is full.');
     const now = new Date().toISOString();
     const record: SuccessionRecord = { ...input, phase: 'preparing', startedAt: now, updatedAt: now };
-    item.operations.push(record); return record;
+    item.operations.push(record);
+    (item.localPreparations ??= []).push({ operationId: record.operationId, reservedBytes: '00000000', ...(local ? { stage: 'not-started' as const } : {}) });
+    return record;
+  }
+
+  savePreparation(operationId: string, capture: NonNullable<SuccessionRecord['prepared']>['capture']): Promise<void> {
+    const saved = structuredClone(capture);
+    return this.mutate(state => {
+      const record = this.findOperation(state, operationId), progress = this.localProgress(state, record);
+      if (record.phase !== 'preparing' || progress.stage !== 'not-started') throw new Error('Local preparation stage changed.');
+      Object.assign(progress, { capture: saved, createOperationId: `${operationId}:create`, zeroInputAndTask: true });
+    });
+  }
+  startCreation(operationId: string): Promise<void> {
+    return this.mutate(state => {
+      const record = this.findOperation(state, operationId), progress = this.localProgress(state, record);
+      if (record.phase !== 'preparing' || progress.stage !== 'not-started' || !progress.capture || !progress.zeroInputAndTask) throw new Error('Native creation was not prepared.');
+      progress.stage = 'create-started'; record.phase = 'quiescing'; record.updatedAt = new Date().toISOString();
+    });
+  }
+  saveCandidate(operationId: string, target: NativeSessionRef): Promise<SuccessionRecord> {
+    const candidate = structuredClone(target);
+    return this.mutate(state => {
+      if (!isNativeSessionRef(candidate)) throw new Error('Invalid native candidate identity.');
+      const record = this.findOperation(state, operationId), progress = this.localProgress(state, record);
+      if (progress.stage !== 'create-started' || !progress.zeroInputAndTask) throw new Error('Native candidate has no creation request.');
+      if (record.phase === 'cancelled') {
+        if (progress.orphanCandidate && nativeSessionRefKey(progress.orphanCandidate) !== nativeSessionRefKey(candidate)) throw new Error('Orphan candidate identity changed.');
+        progress.orphanCandidate = candidate; return record;
+      }
+      if (terminal(record.phase)) throw new Error('Succession is already terminal.');
+      if (nativeSessionRefKey(candidate) === nativeSessionRefKey(record.from)) throw new Error('Native candidate is the source session.');
+      progress.stage = 'candidate-known'; record.to = candidate; record.phase = 'transferring';
+      delete record.resumePhase; record.updatedAt = new Date().toISOString(); return record;
+    });
+  }
+  settlePreparation(operationId: string, phase: 'rejected' | 'cancelled' | 'unknown', failureCode?: string): Promise<SuccessionRecord> {
+    return this.mutate(state => {
+      const record = this.findOperation(state, operationId), progress = this.localProgress(state, record);
+      if (terminal(record.phase)) return record;
+      if (!progress.stage) throw new Error('Legacy unknown preparation requires native reconciliation.');
+      if (phase !== 'unknown' && progress.stage === 'create-started' && (phase !== 'cancelled' || !progress.zeroInputAndTask)) throw new Error('Unknown creation remains reserved.');
+      if (phase === 'unknown') {
+        if (record.phase !== 'unknown') record.resumePhase = record.phase as SuccessionRecord['resumePhase'];
+      } else delete record.resumePhase;
+      record.phase = phase; record.updatedAt = new Date().toISOString();
+      if (failureCode) record.failureCode = failureCode;
+      return record;
+    });
+  }
+  revalidateCandidate(operationId: string): Promise<SuccessionRecord> {
+    return this.mutate(state => {
+      const record = this.findOperation(state, operationId), progress = this.localProgress(state, record);
+      if (record.phase !== 'unknown' || progress.stage !== 'candidate-known' || !record.to || !progress.capture) throw new Error('No saved candidate can be revalidated.');
+      record.phase = 'transferring'; delete record.resumePhase; return record;
+    });
+  }
+  private localProgress(state: StoreState, record: SuccessionRecord): LocalSuccessionProgress {
+    const item = this.findRole(state, record.roleId);
+    let progress = item.localPreparations?.find(value => value.operationId === record.operationId);
+    if (!progress) {
+      progress = { operationId: record.operationId, reservedBytes: '00000000' };
+      (item.localPreparations ??= []).push(progress);
+    }
+    return progress;
+  }
+
+  /** Compute finite representation growth from the actual role, request and participants. */
+  private preparationGrowth(item: SuccessionRoleState, progress: LocalSuccessionProgress): number {
+    const record = item.operations.find(value => value.operationId === progress.operationId)!;
+    const current = jsonBytes({ record, progress });
+    const release = item.enrollments?.find(value => value.request.operationId === record.operationId);
+    const releaseGrowth = release && !item.releasedEnrollments?.includes(release.token)
+      ? jsonBytes({ ...item, releasedEnrollments: [...(item.releasedEnrollments ?? []), release.token] }) - jsonBytes(item) : 0;
+    if (terminal(record.phase)) {
+      const orphan = record.phase === 'cancelled' && progress.stage === 'create-started' && !progress.orphanCandidate
+        ? jsonBytes({ record, progress: { ...progress, orphanCandidate: largestSuccessionRef } }) - current : 0;
+      return Math.max(0, orphan) + releaseGrowth;
+    }
+    const to = record.to ?? largestSuccessionRef;
+    const capture = progress.capture ?? record.prepared?.capture ?? { epoch: largestSuccessionId, seq: Number.MAX_SAFE_INTEGER, capturedAt: largestSuccessionId };
+    const request: SuccessionRequest = { operationId: record.operationId, roleId: record.roleId, expectedRevision: record.expectedRevision, from: record.from,
+      ...(record.targetProviderId ? { targetProviderId: record.targetProviderId } : {}) };
+    const prepared = record.prepared ?? { ...request, to, workspace: item.role.workspace, associationRevision: item.associationRevision, participants: item.participants, capture };
+    const futureProgress = progress.stage ? { ...progress, stage: 'candidate-known', capture, createOperationId: `${record.operationId}:create`, zeroInputAndTask: true } : progress;
+    const future = { ...record, to, prepared, updatedAt: '2000-01-01T00:00:00.000Z', phase: 'unknown', resumePhase: 'transferring', failureCode: largestSuccessionId };
+    const readyGrowth = jsonBytes({ record: future, progress: futureProgress }) - current;
+    const committed = { ...future, phase: 'committed', committedRevision: record.expectedRevision + 1 };
+    delete (committed as Partial<typeof future>).resumePhase;
+    const roleGrowth = Math.max(0, jsonBytes({ ...item.role, current: to, revision: record.expectedRevision + 1 }) - jsonBytes(item.role));
+    const commitGrowth = jsonBytes({ record: committed, progress: futureProgress }) - current + roleGrowth;
+    const cancelled = { ...record, phase: 'cancelled', updatedAt: '2000-01-01T00:00:00.000Z', failureCode: largestSuccessionId };
+    const orphanProgress = progress.stage ? { ...progress, stage: 'create-started', capture, createOperationId: `${record.operationId}:create`, zeroInputAndTask: true, orphanCandidate: largestSuccessionRef } : progress;
+    return Math.max(0, readyGrowth, commitGrowth, jsonBytes({ record: cancelled, progress: orphanProgress }) - current) + releaseGrowth;
+  }
+  private updateReservations(state: StoreState): void {
+    for (const item of state.roles) for (const progress of item.localPreparations ?? []) progress.reservedBytes = reservationBytes(this.preparationGrowth(item, progress));
+  }
+  private checkCapacity(state: StoreState): void {
+    assertSuccessionCapacity(state, state.roles.reduce((total, item) => total + (item.localPreparations ?? []).reduce((sum, progress) => sum + Number(progress.reservedBytes), 0), 0));
   }
 
   /** Unknown outcomes may advance only after the coordinator has reconciled their saved phase. */
@@ -313,6 +433,7 @@ export class SessionSuccessionStore {
     return this.mutate(state => {
       const record = this.findOperation(state, operationId);
       if (record.phase !== expectedPhase) throw new Error('Succession phase changed.');
+      this.localProgress(state, record);
       if (terminal(record.phase) || patch.phase === 'committed') throw new Error('Invalid succession phase transition.');
       if (record.phase === 'unknown') {
         if (patch.phase !== record.resumePhase) throw new Error('Reconcile the unknown succession phase before continuing.');
@@ -363,9 +484,9 @@ export class SessionSuccessionStore {
   }
   private mutate<T>(change: (state: StoreState) => T): Promise<T> {
     const next = this.tail.catch(() => undefined).then(async () => {
-      await this.ready;
+      await this.ready; this.assertReadable();
       const state = structuredClone(this.state), result = change(state);
-      this.validate(state);
+      this.updateReservations(state); this.validate(state); this.checkCapacity(state);
       if (JSON.stringify(state) !== JSON.stringify(this.state)) { await this.write(state); this.state = state; this.revision++; }
       return structuredClone(result);
     });
@@ -389,7 +510,7 @@ export class SessionSuccessionStore {
     }
   }
   private validate(state: StoreState): void {
-    if (!state || state.version !== 3 || !Array.isArray(state.roles) || state.roles.length > 1024) throw new Error('Unsupported succession storage format/version.');
+    if (!state || state.version !== 4 || !Array.isArray(state.roles) || state.roles.length > 1024) throw new Error('Unsupported succession storage format/version.');
     if (!Array.isArray(state.associationAdmissions) || state.associationAdmissions.length > 1024 || new Set(state.associationAdmissions.map(item => item.id)).size !== state.associationAdmissions.length
       || state.associationAdmissions.some(item => !item.id || !item.fingerprint || item.id.length > 512 || item.fingerprint.length > 512 || !isNativeSessionRef(item.source) || item.sourceReader !== undefined && item.sourceReader !== true || item.recovery !== undefined && (typeof item.recovery.createKey !== 'string' || !item.recovery.createKey || item.recovery.createKey.length > 16384 || !/^[a-f0-9]{64}$/.test(item.recovery.createFingerprint)))) throw new Error('Invalid source association admission.');
     if (!Array.isArray(state.associationResults) || state.associationResults.length > 1024 || new Set(state.associationResults.map(item => item.id)).size !== state.associationResults.length || state.associationResults.some(item => !item.id || !item.fingerprint || typeof item.scope !== 'string' || !item.scope || item.scope.length > 16384 || !item.operationId || item.operationId.length > 512 || !isNativeSessionRef(item.source) || !isNativeSessionRef(item.reader) || item.source.controllerId !== item.reader.controllerId || item.source.providerId !== item.reader.providerId || nativeSessionRefKey(item.source) === nativeSessionRefKey(item.reader))) throw new Error('Invalid source creation result.');
@@ -426,6 +547,31 @@ export class SessionSuccessionStore {
         if (op.phase === 'committed') { current = op.to!; revision++; }
       }
       if (pending > 1 || revision !== item.role.revision || nativeSessionRefKey(current) !== executor) throw new Error('Invalid current succession state.');
+      if (item.localPreparations !== undefined) {
+        if (!Array.isArray(item.localPreparations) || item.localPreparations.length > 512 || new Set(item.localPreparations.map(value => value.operationId)).size !== item.localPreparations.length) throw new Error('Invalid local succession progress.');
+        for (const progress of item.localPreparations) {
+          const record = item.operations.find(value => value.operationId === progress.operationId);
+          if (!record || Object.keys(progress).some(name => !['operationId', 'reservedBytes', 'stage', 'createOperationId', 'zeroInputAndTask', 'capture', 'orphanCandidate'].includes(name))
+            || !isReservation(progress.reservedBytes) || progress.reservedBytes !== reservationBytes(this.preparationGrowth(item, progress))) throw new Error('Invalid local succession reservation.');
+          if (!progress.stage) {
+            if (Object.keys(progress).some(name => !['operationId', 'reservedBytes'].includes(name))) throw new Error('Legacy progress cannot certify native creation.');
+            continue;
+          }
+          if (!['not-started', 'create-started', 'candidate-known'].includes(progress.stage)) throw new Error('Invalid local preparation stage.');
+          if (progress.zeroInputAndTask !== undefined && progress.zeroInputAndTask !== true || (progress.createOperationId !== undefined || progress.zeroInputAndTask !== undefined || progress.capture !== undefined)
+            && (progress.createOperationId !== `${record.operationId}:create` || progress.zeroInputAndTask !== true || !progress.capture)) throw new Error('Invalid local creation certification.');
+          if (progress.capture && !isPreparedSuccession({ operationId: record.operationId, roleId: record.roleId, expectedRevision: record.expectedRevision, from: record.from,
+            to: record.to ?? { ...record.from, nativeSessionId: 'validation-candidate' }, workspace: item.role.workspace, associationRevision: item.associationRevision, participants: item.participants, capture: progress.capture })) throw new Error('Invalid local captured boundary.');
+          if (progress.stage === 'not-started' && (record.to || record.prepared || !['preparing', 'unknown', 'cancelled', 'rejected'].includes(record.phase) || record.resumePhase && record.resumePhase !== 'preparing')) throw new Error('Contradictory precreate progress.');
+          if (progress.stage !== 'not-started' && !progress.zeroInputAndTask) throw new Error('Native creation lacks saved certification.');
+          if (progress.stage === 'create-started' && (record.to || record.prepared || !['quiescing', 'unknown', 'cancelled'].includes(record.phase) || record.resumePhase && record.resumePhase !== 'quiescing')) throw new Error('Contradictory unknown creation.');
+          if (progress.stage === 'candidate-known' && (!record.to || ['preparing', 'quiescing'].includes(record.phase)
+            || record.resumePhase && !['transferring', 'ready'].includes(record.resumePhase)
+            || record.resumePhase === 'ready' && !record.prepared
+            || record.prepared && JSON.stringify(record.prepared.capture) !== JSON.stringify(progress.capture))) throw new Error('Contradictory known candidate.');
+          if (progress.orphanCandidate && (record.phase !== 'cancelled' || progress.stage !== 'create-started' || !isNativeSessionRef(progress.orphanCandidate))) throw new Error('Invalid orphan candidate evidence.');
+        }
+      }
     }
   }
   private async restore(): Promise<void> {
@@ -435,26 +581,23 @@ export class SessionSuccessionStore {
     catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; this.loaded = true; return; }
     if (Buffer.byteLength(text) > maxBytes) throw new Error('Succession storage size limit exceeded.');
     const parsed = JSON.parse(text);
-    const migrated = parsed.version === 1 || parsed.version === 2;
+    const migrated = [1, 2, 3].includes(parsed.version);
+    if (migrated && parsed.roles.some((item: SuccessionRoleState) => item.localPreparations !== undefined)) throw new Error('Ambiguous legacy preparation evidence.');
     if (parsed.version === 1 && (parsed.associationAdmissions !== undefined || parsed.associationResults !== undefined || parsed.roles.some((item: SuccessionRoleState) => item.associationAuthority || item.enrollments || item.releasedEnrollments))) throw new Error('Ambiguous legacy association storage.');
-    if (migrated && parsed.roles.some((item: SuccessionRoleState) => item.relationChanges !== undefined)) throw new Error('Ambiguous legacy relation change storage.');
-    const state: StoreState = migrated ? { ...parsed, version: 3, associationAdmissions: parsed.version === 1 ? [] : parsed.associationAdmissions, associationResults: parsed.version === 1 ? [] : parsed.associationResults } : parsed; this.validate(state);
+    if ((parsed.version === 1 || parsed.version === 2) && parsed.roles.some((item: SuccessionRoleState) => item.relationChanges !== undefined)) throw new Error('Ambiguous legacy relation change storage.');
+    const state: StoreState = migrated ? { ...parsed, version: 4, associationAdmissions: parsed.version === 1 ? [] : parsed.associationAdmissions, associationResults: parsed.version === 1 ? [] : parsed.associationResults } : parsed; this.validate(state);
     let changed = migrated;
     for (const item of state.roles) for (const op of item.operations) if (!terminal(op.phase) && op.phase !== 'unknown') {
       op.resumePhase = op.phase as SuccessionRecord['resumePhase']; op.phase = 'unknown';
       op.failureCode = 'succession_recovery_required'; changed = true;
     }
+    this.updateReservations(state); this.checkCapacity(state);
     if (changed) await this.write(state);
     this.state = state; this.loaded = true; this.revision++;
   }
   private async write(state: StoreState): Promise<void> {
-    const text = JSON.stringify(state);
-    if (Buffer.byteLength(text) > maxBytes) throw new Error('Succession storage size limit exceeded.');
-    const target = join(this.directory, 'state.json'), temporary = `${target}.${randomUUID()}.tmp`;
-    try {
-      const file = await open(temporary, 'wx', 0o600);
-      try { await file.writeFile(text); await file.sync(); } finally { await file.close(); }
-      await rename(temporary, target);
-    } finally { await unlink(temporary).catch(error => { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; }); }
+    this.checkCapacity(state);
+    try { await publishSuccessionState(this.directory, 'state.json', state); }
+    catch (error) { if (error instanceof SuccessionPublicationUnknown) this.writeFailure = error; throw error; }
   }
 }

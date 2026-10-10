@@ -28,8 +28,8 @@ succession state does not copy a workspace, process, credentials or native sessi
 
 | State | Checkpoint format | Supported upgrade behavior |
 | --- | --- | --- |
-| Controller role state | Version 3 | Committed versions 1 and 2 migrate with empty relation-change arrays; version 1 also receives empty admission/result arrays; ambiguous legacy association fields reject |
-| Pending context | Independently versioned context store | Use its validator and delivery-state recovery; never derive it from role state |
+| Controller role state | Version 4 | Versions 1 through 3 retain their existing migration rules; private preparation stages and reservations do not fabricate legacy creation evidence |
+| Pending context | Version 2 | Reads version 1 attachments; new target-independent preparations share attachment capacity, and delivery-state recovery remains independent of role state |
 | Relay outer state | Version 8 with Host recovery metadata; version 7 with Favorites succession progress; otherwise version 6 with associations | Legacy outer versions 2 through 7 retain explicit inner-format rules and complete-lineage validation; no applied Favorites progress or native result is fabricated |
 | Broker association state | Version 4 | Versions 1 through 3 migrate only with valid complete committed lineage; earlier additive relation-change/reset migrations remain explicit |
 | Favorites succession progress | Version 1, requiring Relay7 or later | Bounded pending/applied acknowledgements identify an exact committed freeze and contiguous role revision; this is store progress, not another commit authority |
@@ -47,11 +47,13 @@ version number or delete recovery fields to make a previous binary accept them.
 | Persisted situation | Permitted behavior |
 | --- | --- |
 | Prepared and ready in the same verified runtime | Revalidate source/candidate and capture boundary before commit; cancellation retains the native candidate |
-| Ready when the Host restarts | Restore as unknown; reconcile only if the original captured boundary and candidate can be certified again |
-| History epoch changed after restart | Keep unknown and the admission fence; do not assume identical-looking history proves the old boundary |
+| New-format precreate state when the Host restarts | Explicitly settle the interrupted local preparation without creating a candidate |
+| New-format candidate-known or ready state when the Host restarts | Restore as unknown; explicitly revalidate the saved context and candidate without creating again, or cancel while retaining candidate evidence |
+| Captured history boundary cannot be revalidated before commit | Do not commit; a definite local rejection or supported cancellation retains the unused candidate and releases the source only after terminal persistence |
 | Host committed, Relay projection failed or response was lost | Read the exact durable decision, persist its projection, then acknowledge the saved association receipt; never roll back to the predecessor |
 | Source creation returned and its exact result was durably recorded | Verify scope, operation, parameters, full native identities and original grant; attach that reader without another native create |
-| Native effect has no durable result witness | Retain unknown; a matching grant alone is not proof of that operation |
+| Certified zero-input/zero-task creation has no result witness | Explicit cancellation may settle the handoff intent after its terminal fence is saved; candidate existence can remain unknown |
+| Other native effect has no durable result witness | Retain unknown; a matching grant alone is not proof of that operation |
 | First-input dispatch accepted or uncertain | Keep its actual recipient and operation identity; do not replay or retarget it automatically |
 | TPM recovery rejected before native access | Settle only the rejected recovery admission; retain the original unresolved creation |
 | TPM recovery failed after native access or during outcome persistence | Keep the unresolved admission until matching evidence settles it |
@@ -60,6 +62,30 @@ Association release follows a durable Relay decision and exact Host acknowledgem
 A terminal Host decision alone does not authorize releasing the other side's
 reservation. Old A-to-B status remains A-to-B evidence after a later B-to-C;
 current navigation can independently resolve C.
+
+## Local preparation and cancellation
+
+Preparation saves bounded normalized history before calling native create. The
+private role record distinguishes not-started, create-started and candidate-known,
+and saves the exact creation identity and zero-task guarantee for that attempt.
+Legacy phases alone cannot supply those facts. Binding moves the saved context
+preparation into an attachment; it does not capture again or send native input.
+
+Cancellation can settle a certified create while its call is still pending. The
+terminal decision must persist before releasing the source. A late result only
+adds bounded orphan evidence; it cannot bind context, commit, recreate, send input
+or automatically delete the unused native session. A failed terminal write keeps
+the prior reservation. Unknown role publication and first-input delivery do not
+use this cancellation rule.
+
+Both local stores retain their 8 MiB limit. Preparations and attachments share 512
+slots; each attachment retains at most 512 input deliveries. Preparation admits
+actual context plus finite binding/terminal/recovery growth. First input separately
+admits its actual serialized content and finite settlement before dispatch, with
+the existing 1 MiB raw-input limit. Capacity rejection leaves context pending for
+a smaller explicitly submitted input. Native proof is checked at its actual size;
+an oversized proof leaves the old accepted/unknown receipt unchanged. No retained
+history is deleted to make room, and no arbitrary future-input capacity is promised.
 
 ## Authenticated committed replay
 
@@ -245,6 +271,9 @@ with all retained state versions and must not undo native effects.
 Current tests cover process reconstruction, exact replay, lost responses and
 selected persistence failures. They do not certify abrupt power loss, arbitrary
 filesystem failure, automatic backup restoration or native-provider process
-recovery. Context writes sync the containing directory where supported; the role
-store checkpoint uses a synced temporary file and atomic rename. Do not describe
-these different guarantees as a cross-store durable transaction.
+recovery. Both role and context writes sync the file and containing directory
+where supported. Pre-publication failure is distinct from uncertain publication
+after rename; the latter poisons reads and writes in that process until durable
+reopening. Windows keeps the existing unsupported-directory-sync exception and
+does not gain a stronger power-loss guarantee. These separate files, TPM state
+and Relay storage are not a cross-store durable transaction.

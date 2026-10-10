@@ -2,6 +2,7 @@ import { mkdtemp, readFile, readdir, realpath, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { once } from 'node:events';
+import { createServer } from 'node:http';
 import { createHash } from 'node:crypto';
 import { expect, test } from 'vitest';
 import WebSocket, { WebSocketServer } from 'ws';
@@ -29,18 +30,18 @@ async function fixture(enableTpm=false,enrollment=false,setup?:(root:string)=>Pr
  if(!enrollment) await store.createRole({id:'role',revision:1,origin:ref('A'),current:ref('A'),workspace:{controllerId:'controller',canonicalCwd:root}});
  const grants:Array<{nativeSessionId:string;sourceNativeSessionId:string}>=[];let beforeGrants=async()=>{};
  await setup?.(root);
- const sessions=new Map([['A',new Native('A',root)]]);const tpmConfigurations:AgentSessionConfig[]=[];let creates=0,sourceCreates=0,supported=true,busy='',loseTpmCreation=false,loseSourceCreation=false;let beforeSourceCreate=async()=>{};
+ const sessions=new Map([['A',new Native('A',root)]]);const tpmConfigurations:AgentSessionConfig[]=[];let creates=0,sourceCreates=0,supported=true,busy='',loseTpmCreation=false,loseSourceCreation=false;let beforeSourceCreate=async()=>{};let beforeIdleCreate=async()=>{};
  const createHost=()=>createAgentHostRuntime({...(enableTpm?{tpm:{stateDirectory:join(root,'tpm'),tickMs:20}}:{}),succession:{controllerId:'controller',...(enrollment?{enrollment:true as const}:{}),stateDirectory:root,native:{
  supports:async()=>supported,
  inspect:async source=>({cwd:root,idle:source.nativeSessionId!==busy,managed:true,pendingInputs:0,pendingInteractions:0,activeChildren:0}),
- createIdle:async()=>{creates++;const id=String.fromCharCode(65+creates);sessions.set(id,new Native(id,root));return ref(id);},reconcileDelivery:async()=>undefined,
+ createIdle:async()=>{creates++;await beforeIdleCreate();const id=String.fromCharCode(65+creates);sessions.set(id,new Native(id,root));return ref(id);},reconcileDelivery:async()=>undefined,
  }},registrations:[{adapter:{descriptor:{providerId:'fixture',displayName:'Fixture',...(enableTpm?{sessionExtensions:{instructions:true,tools:true}}:{})},createSession:async()=>{throw new Error('unexpected');},resumeSession:async()=>{throw new Error('unexpected');},readSessionHistory:async()=>({entries:[]})},directory:{providerId:'fixture',supportsSourceReferences:true,list:()=>[],workspaces:()=>[],create:async config=>{if(config.sourceNativeSessionId){await beforeSourceCreate();const id=`source-${++sourceCreates}`;sessions.set(id,new Native(id,root));grants.push({nativeSessionId:id,sourceNativeSessionId:config.sourceNativeSessionId});if(loseSourceCreation)throw new Error('Unknown native creation');return id;}if(!enableTpm)throw new Error('unexpected');tpmConfigurations.push(config);const id=`tpm-${tpmConfigurations.length}`;sessions.set(id,new Native(id,root));if(loseTpmCreation)throw new Error('Native creation response was lost');return id;},open:async id=>sessions.get(id)!,sessionWorkspace:async()=>root,sourceReferences:async()=>{await beforeGrants();return structuredClone(grants);},setSourceBindingReader:()=>{},close:async()=>{await Promise.all([...sessions.values()].map(session=>session.dispose()));}}}]});
  let host=createHost();
  const createServer=()=>createAgentRemoteHttpServer(host.relay,{websocketAuthorizer:{authenticate:()=>({subject:'owner'}),authorize:()=>true}});
  let server=createServer();let address=await server.listen(0);
  const restart=async()=>{await server.close();await host.close();for(const [id,previous] of sessions){const next=new Native(id,root);next.sent.push(...previous.sent);sessions.set(id,next);}host=createHost();server=createServer();address=await server.listen(0);};
  const control=async(action:string,body:unknown)=>{const result=await host.control({method:'POST',path:`/remote/succession/${action}`,sessionId:'owner',body:JSON.stringify(body)});return {status:result.status,payload:JSON.parse(result.body)};};
- return {root,sessions,get host(){return host;},restart,loseSourceCreation:()=>{loseSourceCreation=true;},sourceCreates:()=>sourceCreates,beforeSourceCreate:(hook:()=>Promise<void>)=>{beforeSourceCreate=hook;},loseTpmCreation:(value:boolean)=>{loseTpmCreation=value;},grants,beforeGrants:(hook:()=>Promise<void>)=>{beforeGrants=hook;},tpmConfigurations,control,attach:async(id:string)=>JSON.parse((await host.control({method:'POST',path:'/remote/attach',sessionId:id,body:JSON.stringify({providerId:'fixture',nativeSessionId:id})})).body),get url(){return address.url;},creates:()=>creates,unsupported:()=>{supported=false;},busy:(id:string)=>{busy=id;},close:async()=>{await server.close();await host.close();await rm(root,{recursive:true,force:true});}};
+ return {root,sessions,get host(){return host;},restart,loseSourceCreation:()=>{loseSourceCreation=true;},sourceCreates:()=>sourceCreates,beforeIdleCreate:(hook:()=>Promise<void>)=>{beforeIdleCreate=hook;},beforeSourceCreate:(hook:()=>Promise<void>)=>{beforeSourceCreate=hook;},loseTpmCreation:(value:boolean)=>{loseTpmCreation=value;},grants,beforeGrants:(hook:()=>Promise<void>)=>{beforeGrants=hook;},tpmConfigurations,control,attach:async(id:string)=>JSON.parse((await host.control({method:'POST',path:'/remote/attach',sessionId:id,body:JSON.stringify({providerId:'fixture',nativeSessionId:id})})).body),get url(){return address.url;},creates:()=>creates,unsupported:()=>{supported=false;},busy:(id:string)=>{busy=id;},close:async()=>{await server.close();await host.close();await rm(root,{recursive:true,force:true});}};
 }
 const request={operationId:'handoff',roleId:'role',expectedRevision:1,from:ref('A')};
 /** Each send uses a fresh authenticated connection and closes it before returning. */
@@ -104,15 +105,15 @@ test('real Host prepares and commits without execution then dispatches its first
  expect(f.sessions.get('B')!.sent[0]).toContain('quoted conversation history');expect(f.sessions.get('B')!.sent[0]).toContain('continue');expect(f.sessions.get('B')!.sent[0]).toContain('Original requirement');
  expect(await f.control('reconcile',{operationId:'handoff'})).toMatchObject({status:200,payload:{materialized:false}});
  }finally{await f.close();}
-},15000);
+});
 test('unsupported pair and a busy source fail before idle candidate creation',async()=>{
  const f=await fixture();try{f.unsupported();expect((await f.control('prepare',request)).payload.phase).toBe('rejected');expect(f.creates()).toBe(0);}finally{await f.close();}
  const g=await fixture();try{g.busy('A');expect((await g.control('prepare',request)).payload.phase).toBe('rejected');expect(g.creates()).toBe(0);}finally{await g.close();}
-},15000);
+});
 test('a busy candidate prevents readiness and later source work prevents commit',async()=>{
  const f=await fixture();try{f.busy('B');expect((await f.control('prepare',request)).payload.phase).toBe('rejected');expect(f.creates()).toBe(1);expect(f.sessions.get('B')!.sent).toEqual([]);}finally{await f.close();}
  const g=await fixture();try{expect((await g.control('prepare',request)).payload.phase).toBe('ready');g.busy('A');expect((await g.control('commit',{operationId:'handoff',expectedRevision:1})).status).toBe(409);}finally{await g.close();}
-},15000);
+});
 
 test('real Host TPM first postcommit main input consumes durable context once and preserves its own session',async()=>{
   const f=await fixture(true);
@@ -153,17 +154,27 @@ test('real Host TPM first postcommit main input consumes durable context once an
     expect(f.sessions.get('B')!.sent).toHaveLength(1);expect(f.sessions.get('A')!.sent).toEqual([]);
     expect(f.tpmConfigurations).toHaveLength(1);expect((await current()).tpmNativeSessionId).toBe(tpmId);
   } finally { await f.close(); }
-},15000);
+});
 
 async function enrollmentTransport(f: Awaited<ReturnType<typeof fixture>>, initial?: RemoteHostBrokerState, options:{installationId?:string;enrollment?:boolean}={}) {
-  const server = new WebSocketServer({ host: '127.0.0.1', port: 0 }); await once(server, 'listening');
-  const origin = `http://127.0.0.1:${(server.address() as {port:number}).port}`;
+  const http = createServer((incoming, response) => {
+    void (async () => {
+      const chunks: Buffer[] = []; for await (const chunk of incoming) chunks.push(Buffer.from(chunk));
+      const result = await broker.handleRequest(new Request(origin + incoming.url!, { method: incoming.method, body: Buffer.concat(chunks).toString() }),
+        { principalSubject: () => String(incoming.headers['x-test-subject'] ?? 'owner') });
+      response.writeHead(result?.status ?? 404, result ? Object.fromEntries(result.headers) : {});
+      response.end(result ? await result.text() : '');
+    })().catch(error => { response.writeHead(500); response.end(String(error)); });
+  });
+  const server = new WebSocketServer({ server: http });
+  http.listen(0, '127.0.0.1'); await once(http, 'listening', { signal: AbortSignal.timeout(3000) });
+  const origin = `http://127.0.0.1:${(http.address() as {port:number}).port}`;
   const authority = { version: 1 as const, origin, issuer: 'https://issuer.example', namespace: 'tenant', ownerSubject: 'owner' };
   let saved: RemoteHostBrokerState | undefined; let dropCreationResponse=false;const createRequests=new Set<string>();let failProjection = false, failBinding=false; let beforeControl=async(_input:{action?:string;freeze?:unknown})=>{};
   const makeBroker=(initialState?:RemoteHostBrokerState)=>createHostBroker({ origin, ownerSubject: 'owner', durable: true, successionEnrollment: authority, initialState,
     onStateChange: async state => { if (failProjection && state.associations?.freezes.some(item => item.released)) throw new Error('Projection storage unavailable'); if(failBinding&&state.bindings.some(item=>item.sourceRelation))throw new Error('Binding storage unavailable'); saved = structuredClone(state); }, rpcTimeoutMs: 2000 });
   let broker=makeBroker(initial);
-  const request = (path:string, body:unknown, subject='owner') => broker.handleRequest(new Request(origin+path, {method:'POST',body:JSON.stringify(body)}), {principalSubject:()=>subject});
+  const request = (path:string, body:unknown, subject='owner') => fetch(origin+path, {method:'POST',body:JSON.stringify(body),headers:{'x-test-subject':subject},signal:AbortSignal.timeout(5000)});
   server.on('connection', async (socket, incoming) => {
     const upgrade = await broker.prepareUpgrade(new Request(origin+incoming.url!, { headers: {authorization:incoming.headers.authorization!} }));
     if (!upgrade || upgrade instanceof Response) { socket.close(1008); return; }
@@ -177,7 +188,7 @@ async function enrollmentTransport(f: Awaited<ReturnType<typeof fixture>>, initi
     control:f.host.control,...(options.enrollment===false?{}:{successionEnrollment:{control:async(request,context)=>{const result=await f.host.enrollFromRelay(request,context);await beforeControl(JSON.parse(request.body??'{}'));return result;}}})});};
   let client=await connect();const {hostId}=await client.ready;
   return {get client(){return client;},get broker(){return broker;},authority,request,hostId,restart:async(beforeConnect?:()=>Promise<void>)=>{await client.close();broker.close();await beforeConnect?.();broker=makeBroker(saved);client=await connect();await client.ready;},failBinding:(value:boolean)=>{failBinding=value;},dropCreationResponse:()=>{dropCreationResponse=true;},beforeControl:(hook:typeof beforeControl)=>{beforeControl=hook;},failProjection:(value:boolean)=>{failProjection=value;},saved:()=>structuredClone(saved!),action:(action:string,input:unknown,subject='owner')=>request(`/v1/remote/hosts/${hostId}/succession/${action}`,input,subject),
-    close:async()=>{await client.close();broker.close();for(const socket of server.clients)socket.terminate();await new Promise<void>(resolve=>server.close(()=>resolve()));}};
+    close:async()=>{await client.close();broker.close();for(const socket of server.clients)socket.terminate();await new Promise<void>(resolve=>server.close(()=>resolve()));await new Promise<void>(resolve=>http.close(()=>resolve()));}};
 }
 
 test('authenticated broker enrollment derives a role, freezes associations and commits over a real uplink',async()=>{
@@ -196,9 +207,36 @@ test('authenticated broker enrollment derives a role, freezes associations and c
     expect(committed).toMatchObject({record:{phase:'committed'},role:{current:ref('B'),revision:2},locator:{hostId:transport.hostId,providerId:'fixture',nativeSessionId:'B'}});
     expect(transport.saved().associations?.freezes[0]).toMatchObject({released:'committed',projection:{role:{current:ref('B')}}});
     const state=JSON.parse(await readFile(join(f.root,'roles','state.json'),'utf8'));
-    expect(state).toMatchObject({version:3,roles:[{associationAuthority:transport.authority,enrollments:[{request:{operationId:input.operationId}}]}]});
+    expect(state).toMatchObject({version:4,roles:[{associationAuthority:transport.authority,enrollments:[{request:{operationId:input.operationId}}]}]});
   } finally {await transport.close();await f.close();}
-},15000);
+});
+
+test('real HTTP and WebSocket cancel a blocked create without activating its late candidate', async () => {
+  const f = await fixture(false, true), transport = await enrollmentTransport(f);
+  let enter!: () => void, release!: () => void;
+  const entered = new Promise<void>(resolve => { enter = resolve; }), blocked = new Promise<void>(resolve => { release = resolve; });
+  f.beforeIdleCreate(async () => { enter(); await blocked; });
+  const input = { operationId: 'cancel-blocked', providerId: 'fixture', nativeSessionId: 'A', expectedRevision: 1 };
+  const preparing = transport.action('prepare', input);
+  try {
+    await entered;
+    const a = await f.attach('A');
+    expect((await sendOverWebSocket(f.url, a.agentId, 'blocked input', '00000000-0000-4000-8000-000000000080')).type).toBe('protocol_error');
+    const cancelled = await transport.action('cancel', { operationId: input.operationId });
+    expect(await cancelled.json()).toMatchObject({ record: { phase: 'cancelled' } });
+    expect(transport.saved().associations!.freezes[0]!.released).toBe('cancelled');
+    release(); expect(await (await preparing).json()).toMatchObject({ record: { phase: 'cancelled' } });
+    expect((await sendOverWebSocket(f.url, a.agentId, 'continue A', '00000000-0000-4000-8000-000000000081')).type).toBe('command_acknowledged');
+    expect(f.sessions.get('B')!.sent).toEqual([]);
+    expect(await (await transport.action('reconcile', { operationId: input.operationId })).json()).toMatchObject({ record: { phase: 'cancelled' } });
+    expect(await (await transport.action('prepare', input)).json()).toMatchObject({ record: { phase: 'cancelled' } });
+    expect(f.creates()).toBe(1);
+    const contexts = JSON.parse(await readFile(join(f.root, 'contexts', 'context.json'), 'utf8'));
+    expect(contexts.attachments).toEqual([]); expect(contexts.preparations).toHaveLength(1);
+    const roles = JSON.parse(await readFile(join(f.root, 'roles', 'state.json'), 'utf8'));
+    expect(roles.roles[0].localPreparations[0].orphanCandidate).toEqual(ref('B'));
+  } finally { release(); await preparing.catch(() => undefined); await transport.close(); await f.close(); }
+});
 
 
 test('old operation replay preserves A to B to C',async()=>{
@@ -211,14 +249,17 @@ test('old operation replay preserves A to B to C',async()=>{
     const released=await store();
     expect(released.read(released.all()[0]!.role.id).releasedEnrollments).toHaveLength(1);
     const projection=structuredClone(transport.saved().associations!.freezes[0]!.projection);
-    expect((await transport.action('prepare',{...input,operationId:'second',nativeSessionId:'B',expectedRevision:2}))!.status).toBe(200);
-    expect((await transport.action('commit',{operationId:'second'}))!.status).toBe(200);
+    const second = await transport.action('prepare',{...input,operationId:'second',nativeSessionId:'B',expectedRevision:2});
+    expect(await second!.json()).toMatchObject({record:{phase:'ready'}});
+    const secondCommit = await transport.action('commit',{operationId:'second'});
+    expect(await secondCommit!.json()).toMatchObject({record:{phase:'committed'},role:{revision:3}});
     const replay=await transport.action('status',{operationId:'first'});
     expect(replay!.status).toBe(200);
-    expect(await replay!.json()).toMatchObject({record:{operationId:'first',committedRevision:2},role:{revision:3,current:ref('C')},locator:{nativeSessionId:'C'}});
+    expect(await replay!.json()).toMatchObject({record:{operationId:'first',committedRevision:2},role:{revision:2,current:ref('B')},locator:{nativeSessionId:'B'}});
     expect(transport.saved().associations!.freezes[0]!.projection).toEqual(projection);
+    const current = await store(); expect(current.all()[0]!.role).toMatchObject({revision:3,current:ref('C')});
   }finally{await transport.close();await f.close();}
-},15000);
+});
 
 
 test('broker persistence failure keeps a committed Host decision fenced across restart',async()=>{
@@ -239,7 +280,7 @@ test('broker persistence failure keeps a committed Host decision fenced across r
     expect(released.all()[0]!.releasedEnrollments).toHaveLength(1);
     expect(f.creates()).toBe(1);
   }finally{await transport.close();await f.close();}
-},15000);
+});
 
 
 test('pre-begin validation failure can be durably cancelled without late preparation effects',async()=>{
@@ -259,7 +300,7 @@ test('pre-begin validation failure can be durably cancelled without late prepara
     expect(restored.operation(input.operationId).phase).toBe('cancelled');
     expect(restored.all()[0]!.releasedEnrollments).toHaveLength(1);
   }finally{await transport.close();await f.close();}
-},15000);
+});
 
 test('cancellation serializes ahead of a delayed pre-begin grant snapshot',async()=>{
   const f=await fixture(false,true);const transport=await enrollmentTransport(f);
@@ -273,7 +314,7 @@ test('cancellation serializes ahead of a delayed pre-begin grant snapshot',async
     expect(await (await preparing)!.json()).toMatchObject({record:{phase:'cancelled'}});
     expect(f.creates()).toBe(0);
   }finally{resume();await transport.close();await f.close();}
-},15000);
+});
 
 
 function coldAssociations(): RemoteHostBrokerState {
@@ -300,7 +341,7 @@ test('cold complete grants enroll only linked direct readers and preserve immuta
     expect(transport.saved().bindings).toEqual(before);
     expect(f.sessions.size).toBe(2);
   }finally{await transport.close();await f.close();}
-},15000);
+});
 
 test('cancelling the first reservation restores ordinary relationship updates',async()=>{
   const f=await fixture(false,true);const transport=await enrollmentTransport(f,coldAssociations());
@@ -311,7 +352,7 @@ test('cancelling the first reservation restores ordinary relationship updates',a
     await transport.broker.updateSessionRelation('owner',{hostId:transport.hostId,providerId:'fixture',nativeSessionId:'side',sourceNativeSessionId:'A',id:'side-relation',linked:false,expectedRevision:0});
     expect(transport.saved().bindings.find(item=>item.nativeSessionId==='side')!.sourceRelation!.linked).toBe(false);
   }finally{await transport.close();await f.close();}
-},15000);
+});
 
 
 test.each(['source','revision','provider'] as const)('concurrent different %s cannot reuse one frozen operation identity',async conflict=>{
@@ -328,7 +369,7 @@ test.each(['source','revision','provider'] as const)('concurrent different %s ca
     const selected=transport.saved().associations!.freezes[0]!.receipt.request;
     expect(f.creates()).toBe(selected.targetProviderId==='other'?0:1);
   }finally{release();await transport.close();await f.close();}
-},15000);
+});
 
 
 test.each([false,true])('unknown TPM creation retains exact admission and paused work without browser bindings (existing role %s)',async(existingRole)=>{
@@ -365,7 +406,7 @@ test.each([false,true])('unknown TPM creation retains exact admission and paused
     expect(transport.saved().bindings).toEqual([]);
     expect(f.tpmConfigurations).toHaveLength(1);
   }finally{await transport.close();await f.close();}
-},15000);
+});
 
 
 test('completed persisted TPM is enrolled without attaching its native session',async()=>{
@@ -383,7 +424,7 @@ test('completed persisted TPM is enrolled without attaching its native session',
     const work=JSON.parse(await readFile(join(f.root,'tpm','completed-work.json'),'utf8')).work;
     expect(work).toMatchObject({phase:'completed',document:'Approved plan',evidence:['verified']});
   }finally{await transport.close();await f.close();}
-},15000);
+});
 
 
 test('past and future expected revisions fail before any broker freeze or Host preparation',async()=>{
@@ -400,7 +441,7 @@ test('past and future expected revisions fail before any broker freeze or Host p
     expect((await transport.action('prepare',{...input,operationId:'valid-second',nativeSessionId:'B'}))!.status).toBe(200);
     expect(prepares).toBe(2);
   }finally{await transport.close();await f.close();}
-},15000);
+});
 
 
 test('lost source creation response recovers its original durable result without native replay',async()=>{
@@ -424,7 +465,7 @@ test('lost source creation response recovers its original durable result without
     expect(transport.saved().bindings.find(item=>item.nativeSessionId==='source-1')!.sourceRelation).toMatchObject({id:'00000000-0000-4000-8000-000000000002',sourceNativeSessionId:'A',kind:'side'});
     expect((await transport.action('prepare',{providerId:'fixture',nativeSessionId:'A',operationId:'known-reader',expectedRevision:1}))!.status).toBe(200);
   }finally{await transport.close();await f.close();}
-},15000);
+});
 
 
 test('broker binding persistence failure recovers from the Host result after broker restart',async()=>{
@@ -440,7 +481,7 @@ test('broker binding persistence failure recovers from the Host result after bro
     expect(recovered!.status,JSON.stringify(await recovered!.clone().json())).toBe(200);
     expect(f.sourceCreates()).toBe(1);expect(transport.saved().associations!.admissions).toEqual([]);
   }finally{await transport.close();await f.close();}
-},15000);
+});
 
 test('native source creation and succession freeze have symmetric admission fences',async()=>{
   const f=await fixture(false,true);const initial=coldAssociations();initial.bindings=initial.bindings.filter(item=>item.nativeSessionId==='A');
@@ -458,7 +499,7 @@ test('native source creation and succession freeze have symmetric admission fenc
     const direct=await f.host.control({method:'POST',path:'/remote/create',sessionId:'bypass',body:JSON.stringify({providerId:'fixture',sourceNativeSessionId:'A',operationId:'00000000-0000-4000-8000-000000000006'})});
     expect(direct.status,direct.body).toBe(400);expect(JSON.parse(direct.body!).code).toBe('succession_admission_closed');expect(f.sourceCreates()).toBe(1);
   }finally{release();await transport.close();await f.close();}
-},15000);
+});
 
 
 test('an unknown native creation without a result witness stays frozen and is never recreated',async()=>{
@@ -475,7 +516,7 @@ test('an unknown native creation without a result witness stays frozen and is ne
     const state=JSON.parse(await readFile(join(f.root,'roles','state.json'),'utf8'));
     expect(state.associationAdmissions).toHaveLength(1);expect(state.associationResults).toEqual([]);
   }finally{await transport.close();await f.close();}
-},15000);
+});
 
 
 test.each([{installationId:'foreign'},{enrollment:false}])('mismatched Controller or unnegotiated peer fails before native creation: %j',async options=>{
@@ -484,7 +525,7 @@ test.each([{installationId:'foreign'},{enrollment:false}])('mismatched Controlle
     expect((await transport.action('prepare',{providerId:'fixture',nativeSessionId:'A',operationId:'forbidden-peer',expectedRevision:1}))!.status).toBe(409);
     expect(f.creates()).toBe(0);expect(transport.saved().associations!.freezes).toEqual([]);
   }finally{await transport.close();await f.close();}
-},15000);
+});
 
 test('replacing the association authority never takes over a previously bound role',async()=>{
   const f=await fixture(false,true);let transport=await enrollmentTransport(f);
@@ -496,10 +537,10 @@ test('replacing the association authority never takes over a previously bound ro
     expect((await transport.action('prepare',{...input,operationId:'replacement-authority'}))!.status).toBe(409);
     expect(f.creates()).toBe(1);expect(transport.saved().associations!.freezes).toEqual([]);
   }finally{await transport.close();await f.close();}
-},15000);
+});
 
 
-test('a full Host and broker restart preserves the frozen receipt when capture evidence cannot be revalidated',async()=>{
+test('a full Host and broker restart safely rejects a known candidate when capture cannot be revalidated',async()=>{
   const f=await fixture(false,true);f.grants.push(...[{nativeSessionId:'side',sourceNativeSessionId:'A'},{nativeSessionId:'ask',sourceNativeSessionId:'A'},{nativeSessionId:'unlinked',sourceNativeSessionId:'A'},{nativeSessionId:'nested',sourceNativeSessionId:'side'}]);
   const transport=await enrollmentTransport(f,coldAssociations());
   try {
@@ -514,13 +555,13 @@ test('a full Host and broker restart preserves the frozen receipt when capture e
     const blocked=await f.host.control({method:'POST',path:'/remote/create',sessionId:'blocked-restart',body:JSON.stringify({providerId:'fixture',sourceNativeSessionId:'A',operationId:'00000000-0000-4000-8000-000000000007'})});
     expect(blocked.status).toBe(400);expect(f.sourceCreates()).toBe(0);
     const reconciled=await transport.action('reconcile',{operationId:input.operationId});
-    expect(reconciled!.status).toBe(409);
-    expect(await reconciled!.json()).toMatchObject({code:'succession_enrollment_failed',error:'Source history changed beyond the captured handoff boundary.'});
-    expect((await (await transport.action('status',{operationId:input.operationId}))!.json()).record.phase).toBe('unknown');
-    expect(transport.saved().associations!.freezes[0]!.released).toBeUndefined();
+    expect(reconciled!.status).toBe(200);
+    expect(await reconciled!.json()).toMatchObject({record:{phase:'rejected',to:ref('B'),failureCode:'succession_boundary_changed'}});
+    expect((await (await transport.action('status',{operationId:input.operationId}))!.json()).record.phase).toBe('rejected');
+    expect(transport.saved().associations!.freezes[0]!.released).toBe('rejected');
     expect(f.creates()).toBe(1);
   }finally{await transport.close();await f.close();}
-},15000);
+});
 
 
 test('a revision-rejected TPM recovery cannot leave an unresolved association admission',async()=>{
@@ -538,7 +579,7 @@ test('a revision-rejected TPM recovery cannot leave an unresolved association ad
     expect(recovered.status,recovered.body).toBe(200);
     expect(JSON.parse(await readFile(join(f.root,'roles','state.json'),'utf8')).associationAdmissions).toEqual([]);
   }finally{await f.close();}
-},15000);
+});
 
 
 test('a TPM recovery failure after native access retains its unresolved admission',async()=>{
@@ -555,7 +596,7 @@ test('a TPM recovery failure after native access retains its unresolved admissio
     const repeated=await f.host.control({method:'POST',path:'/remote/tpm/action',body});
     expect(repeated.status).toBe(409);expect(JSON.parse(repeated.body).error).toMatch(/unresolved/);expect(inspections).toBe(1);
   }finally{await f.close();}
-},15000);
+});
 
 test('trusted postcommit unlink and relink reconcile cold direct readers and keep nested Ask fixed', async () => {
   const f = await fixture(false, true); const transport = await enrollmentTransport(f, coldAssociations());
@@ -577,7 +618,7 @@ test('trusted postcommit unlink and relink reconcile cold direct readers and kee
     expect(JSON.parse(await readFile(join(f.root,'roles','state.json'),'utf8')).roles[0].participants.map((row:{after:{nativeSessionId:string}})=>row.after.nativeSessionId).sort()).toEqual(['ask','side']);
     expect(f.grants).toEqual(original);
   } finally { await transport.close(); await f.close(); }
-},15000);
+});
 
 test.each(['relation_reserve','relation_apply','relation_release'])('lost %s response keeps exact operation recoverable across both restarts', async lostAction => {
   const f = await fixture(false, true); const initial = coldAssociations(); initial.bindings = initial.bindings.filter(row=>['A','side'].includes(row.nativeSessionId));
@@ -602,7 +643,7 @@ test.each(['relation_reserve','relation_apply','relation_release'])('lost %s res
     expect(state.roles[0].associationRevision).toBe(2);expect(state.roles[0].participants).toEqual([]);expect(state.roles[0].relationChanges[0].phase).toBe('released');
     expect(f.creates()).toBe(1);expect(f.sourceCreates()).toBe(0);
   } finally {await transport.close();await f.close();}
-},15000);
+});
 
 test('metadata persistence failure after Host reserve remains recoverable without false success', async () => {
   const f=await fixture(false,true), initial=coldAssociations();initial.bindings=initial.bindings.filter(row=>['A','side'].includes(row.nativeSessionId));const transport=await enrollmentTransport(f,initial);
@@ -617,7 +658,7 @@ test('metadata persistence failure after Host reserve remains recoverable withou
     transport.failBinding(false);transport.beforeControl(async()=>{});await transport.restart(f.restart);
     expect(await transport.broker.reconcileSessionRelationChange('owner',{hostId:transport.hostId,operationId:'failed-metadata'})).toMatchObject({operation:{phase:'committed'}});
   } finally {await transport.close();await f.close();}
-},15000);
+});
 
 test('missing durable grant rejects reserve and retains the exact Broker edit for later reconcile', async () => {
   const f=await fixture(false,true), initial=coldAssociations();initial.bindings=initial.bindings.filter(row=>['A','side'].includes(row.nativeSessionId));const transport=await enrollmentTransport(f,initial);
@@ -633,7 +674,7 @@ test('missing durable grant rejects reserve and retains the exact Broker edit fo
     f.grants.push(grant);
     expect(await transport.broker.reconcileSessionRelationChange('owner',{hostId:transport.hostId,operationId:'missing-grant'})).toMatchObject({operation:{phase:'committed'}});
   } finally {await transport.close();await f.close();}
-},15000);
+});
 
 test('a current-B native reader stays fixed until the next B-to-C frozen enrollment',async()=>{
   const f=await fixture(false,true),transport=await enrollmentTransport(f);
@@ -647,11 +688,12 @@ test('a current-B native reader stays fixed until the next B-to-C frozen enrollm
     expect(JSON.parse(await readFile(join(f.root,'roles','state.json'),'utf8')).roles[0].participants).toEqual([]);
     expect(transport.broker.sessionRelations('owner')[0]).toMatchObject({nativeSourceRef:ref('B'),sourceBinding:{kind:'fixed',source:ref('B')},source:{nativeSessionId:'B'},hostLocator:{hostId:transport.hostId,controllerId:'controller'}});
     expect((await transport.action('prepare',{operationId:'second',providerId:'fixture',nativeSessionId:'B',expectedRevision:2}))!.status).toBe(200);
-    expect((await transport.action('commit',{operationId:'second'}))!.status).toBe(200);
+    const secondCommit = await transport.action('commit',{operationId:'second'});
+    expect(await secondCommit!.json()).toMatchObject({record:{phase:'committed'},role:{revision:3}});
     expect(transport.broker.sessionRelations('owner')[0]).toMatchObject({nativeSourceRef:ref('B'),sourceBinding:{kind:'primary_role'},source:{nativeSessionId:'C'}});
     expect(f.sourceCreates()).toBe(1);expect(f.grants).toEqual([{nativeSessionId:reader.nativeSessionId,sourceNativeSessionId:'B'}]);
   }finally{await transport.close();await f.close();}
-},15000);
+});
 
 test('a competing edit between describe and reserve rejects before persisting a stale Host clock',async()=>{
   const f=await fixture(false,true),transport=await enrollmentTransport(f,coldAssociations());
@@ -667,7 +709,7 @@ test('a competing edit between describe and reserve rejects before persisting a 
     expect(transport.saved().associations!.relationChanges.map(row=>row.reservation.operationId)).toEqual(['fast-edit']);
     expect(await transport.broker.updateSessionRelation('owner',side)).toMatchObject({operation:{phase:'committed'}});
   }finally{await transport.close();await f.close();}
-},15000);
+});
 
 test('concurrent exact same-ID relation describes join the saved operation before catalog drift checks',async()=>{
  const f=await fixture(false,true),initial=coldAssociations();initial.bindings=initial.bindings.filter(row=>['A','side'].includes(row.nativeSessionId));const transport=await enrollmentTransport(f,initial);
@@ -679,7 +721,7 @@ test('concurrent exact same-ID relation describes join the saved operation befor
   const a=transport.broker.updateSessionRelation('owner',input),b=transport.broker.updateSessionRelation('owner',input);await described;release();
   const results=await Promise.all([a,b]);expect(results[0]).toEqual(results[1]);expect(transport.saved().associations!.relationChanges).toHaveLength(1);expect(transport.saved().bindings.find(row=>row.nativeSessionId==='side')!.sourceRelation!.revision).toBe(1);
  }finally{await transport.close();await f.close();}
-},15000);
+});
 
 
 test('durable exact pre-effect reset fences a delayed absent operation before reserve and after restart',async()=>{
@@ -704,4 +746,4 @@ test('durable exact pre-effect reset fences a delayed absent operation before re
   expect(transport.saved().associations!.relationChanges).toHaveLength(1);
   expect(await transport.broker.resetSessionRelationChange('owner',{...input,operationId:'fresh-edit',expectedRoleRevision:3})).toMatchObject({operation:{phase:'committed'}});
  }finally{release?.();await transport.close();await f.close();}
-},15000);
+});

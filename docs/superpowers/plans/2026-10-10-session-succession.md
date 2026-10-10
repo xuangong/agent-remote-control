@@ -344,23 +344,26 @@ certify cross-host readiness, execution authority transfer or migration recovery
 
 ## Task 7: Recovery and access-revocation boundaries
 
-Status: In progress after the user-approved review of `c55661e`.
+Status: Scoped implementation and independent review complete. Task7A covers
+revocation/recovery; Task7B covers local preparation, cancellation and capacity.
+Root verified Task7B with 137 tests / 12 files and Controller typecheck. Native
+certification and complete mutation admission remain Task8.
 
 - [x] Keep Host access revocation independent of immutable succession history.
   Revoke credentials/connections without deleting committed evidence or restoring
   predecessor authority. Define pending-operation and late-response behavior;
   no old credential may publish or recover new access after revocation.
-- [ ] Distinguish definite preparation failures from unknown native effects.
+- [x] Distinguish definite preparation failures from unknown native effects.
   A known candidate followed by failed bounded read/serialization must not leave
   the source permanently reserved. Retain candidates and original operation IDs.
-- [ ] Preflight/reserve bounded context and recovery capacity before native create.
+- [x] Preflight/reserve bounded context and recovery capacity before native create.
   Keep committed/unknown evidence intact; never remove records merely to unlock.
-- [ ] Support safe cancellation/forward recovery at justified local phases,
+- [x] Support safe cancellation/forward recovery at justified local phases,
   including restart. For certified zero-task creation, allow explicit durable
   abandonment retaining native uncertainty and late orphan evidence; fence the
   cancelled operation permanently from commit or replay. Unknown input and commit
   persistence still require reconciliation, never a blind retry.
-- [ ] Run affected real-transport, capacity and recovery tests with both deadlines,
+- [x] Run affected real-transport, capacity and recovery tests with both deadlines,
   obtain scoped review, update compatibility and commit locally.
 
 ## Task 8: Native evidence and one real provider mode

@@ -39,6 +39,8 @@ export interface AgentHostDirectory {
   sessionReleased?(nativeSessionId: string): Promise<void> | void;
   sessionWorkspace?(nativeSessionId: string): Promise<string | undefined>;
   setSourceAccessCheck?(check: (nativeSessionId: string) => Promise<void>): void;
+  setSourceBindingReader?(reader: import('./session-reference.js').SourceBindingReader): void;
+  sourceReferences?(): Promise<Array<{ nativeSessionId: string; sourceNativeSessionId: string }>>;
   list(): Promise<readonly RemoteSessionSummary[]> | readonly RemoteSessionSummary[];
   workspaces(): Promise<readonly AgentHostWorkspace[]> | readonly AgentHostWorkspace[];
   models?(): Promise<unknown> | unknown;

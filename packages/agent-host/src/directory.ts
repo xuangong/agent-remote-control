@@ -1,6 +1,6 @@
 import { AgentSessionInUseError } from '@orchardworks/agent-provider-sdk';
 import { NativeSessionOwnerError } from './native-session-owner.js';
-import { SessionReferenceStore, sourceSessionExtensions } from './session-reference.js';
+import { SessionReferenceStore, sourceSessionExtensions, type SourceBindingReader } from './session-reference.js';
 import { randomUUID } from 'node:crypto';
 import type { CodexAppServerProvider, CodexSessionSummary } from '@orchardworks/agent-provider-codex';
 import type { AgentPersistenceHandle, AgentSession, AgentHistoryQuery } from '@orchardworks/agent-provider-sdk';
@@ -18,10 +18,21 @@ export function createCodexSessionDirectory(
   let discovery: Promise<CodexSessionSummary[]> | undefined;
   let closed = false;
   let sourceAccessCheck: ((nativeSessionId: string) => Promise<void>) | undefined;
+  let sourceBindingReader: SourceBindingReader | undefined;
   async function readSource(id: string, query: AgentHistoryQuery) {
     if (closed) throw new Error('Codex directory is closed.');
     await sourceAccessCheck?.(id);
     return provider.readSessionHistory!(id, query);
+  }
+  function sourceExtensions(source: string, reader: () => string | undefined) {
+    return sourceSessionExtensions(source, readSource, async query => {
+      if (sourceBindingReader) {
+        const id = reader(); if (!id) throw new Error('Source reader identity is not ready.');
+        return sourceBindingReader(id, source, query, readSource);
+      }
+      if (query.sourceContext) throw new Error('Source context is unavailable on this Host.');
+      return { ...await readSource(source, query), sourceSessionId: source };
+    });
   }
   async function discover(): Promise<CodexSessionSummary[]> {
     const summaries = new Map<string, CodexSessionSummary>();
@@ -73,6 +84,8 @@ export function createCodexSessionDirectory(
     supportsSourceReferences: !!references && !!provider.readSessionHistory,
     ...(provider.readSessionWorkspace ? { sessionWorkspace: provider.readSessionWorkspace.bind(provider) } : {}),
     setSourceAccessCheck(check) { sourceAccessCheck = check; },
+    setSourceBindingReader(reader) { sourceBindingReader = reader; },
+    sourceReferences: () => references?.list() ?? Promise.resolve([]),
     list() { if (closed) throw new Error('Codex directory is closed.'); return discovery ??= discover().finally(() => { discovery = undefined; }); },
     workspaces: () => [...workspaces],
     async create(input) {
@@ -88,13 +101,15 @@ export function createCodexSessionDirectory(
       const cwd = input.cwd ?? selected?.path ?? workspaces[0]?.path;
       const { sourceNativeSessionId, ...config } = input;
       if (sourceNativeSessionId && (!references || !provider.readSessionHistory)) throw new Error('Source references are unavailable on this Host.');
-      const extensions = sourceNativeSessionId ? sourceSessionExtensions(sourceNativeSessionId, readSource) : {};
+      let readerId: string | undefined;
+      const extensions = sourceNativeSessionId ? sourceExtensions(sourceNativeSessionId, () => readerId) : {};
       const systemPrompt = [config.systemPrompt, extensions.systemPrompt].filter(Boolean).join('\n\n');
       const nativeConfig = { ...config, ...extensions, sessionId: randomUUID(), ...(cwd ? { cwd } : {}),
         ...(systemPrompt ? { systemPrompt } : {}) };
       const identity = sessionExtensionIdentity(nativeConfig);
       const session = await provider.createSession(nativeConfig);
       const id = await remember(session, identity);
+      readerId = id;
       if (extensions.tools?.length || config.tools?.length) controllerTools.add(id);
       if (sourceNativeSessionId) {
         try { await references!.set({ sourceNativeSessionId, systemPrompt, handle: opened.get(id)!.handle }); }
@@ -109,7 +124,7 @@ export function createCodexSessionDirectory(
       if (reusable && options?.extensions === undefined) return existing.session;
       const grant = await references?.get(nativeSessionId);
       if (grant && !provider.readSessionHistory) throw new Error('Source history tools are unavailable on this Host.');
-      const extensions = grant ? sourceSessionExtensions(grant.sourceNativeSessionId, readSource) : undefined;
+      const extensions = grant ? sourceExtensions(grant.sourceNativeSessionId, () => nativeSessionId) : undefined;
       const resumedExtensions = extensions || options?.extensions ? { ...(extensions ? { tools: extensions.tools, systemPrompt: grant!.systemPrompt } : {}),
         ...options?.extensions, tools: [...(extensions?.tools ?? []), ...(options?.extensions?.tools ?? [])] } : undefined;
       if (reusable) {

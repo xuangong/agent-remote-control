@@ -1,10 +1,15 @@
 import { mkdir, open, readFile, rename, unlink } from 'node:fs/promises';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
-import { isPrimaryRole, isPreparedSuccession, isSuccessionRecord, isSuccessionRequest, nativeSessionRefKey,
-  type PrimaryRole, type SuccessionPhase, type SuccessionRecord, type SuccessionRequest } from '@orchardworks/agent-remote-protocol';
+import { isPrimaryRole, isPreparedSuccession, isSuccessionParticipant, isSuccessionRecord, isSuccessionRequest, nativeSessionRefKey,
+  type PrimaryRole, type SuccessionParticipant, type SuccessionPhase, type SuccessionRecord, type SuccessionRequest } from '@orchardworks/agent-remote-protocol';
 
-export interface SuccessionRoleState { role: PrimaryRole; operations: SuccessionRecord[] }
+export interface SuccessionRoleState {
+  role: PrimaryRole;
+  operations: SuccessionRecord[];
+  associationRevision: number;
+  participants: SuccessionParticipant[];
+}
 interface StoreState { version: 1; roles: SuccessionRoleState[] }
 type Advance = Pick<SuccessionRecord, 'phase'> & Partial<Pick<SuccessionRecord, 'to' | 'prepared' | 'failureCode'>>;
 const terminal = (phase: SuccessionPhase) => ['committed', 'rejected', 'cancelled'].includes(phase);
@@ -17,7 +22,9 @@ export class SessionSuccessionStore {
   private state: StoreState = { version: 1, roles: [] };
   private tail: Promise<unknown> = Promise.resolve();
   private loaded = false;
+  private revision = 0;
   constructor(private readonly directory: string) { this.ready = this.restore(); }
+  get generation(): number { return this.revision; }
 
   read(roleId: string): SuccessionRoleState {
     if (!this.loaded) throw new Error('Session succession store is not ready.');
@@ -38,7 +45,20 @@ export class SessionSuccessionStore {
       if (!isPrimaryRole(input) || input.revision !== 1 || nativeSessionRefKey(input.origin) !== nativeSessionRefKey(input.current)) throw new Error('Invalid initial primary role.');
       if (state.roles.some(item => item.role.id === input.id || nativeSessionRefKey(item.role.current) === nativeSessionRefKey(input.current))) throw new Error('Primary role already exists.');
       if (state.roles.length >= 1024) throw new Error('Primary role storage is full.');
-      state.roles.push({ role: input, operations: [] }); return input;
+      state.roles.push({ role: input, operations: [], associationRevision: 0, participants: [] }); return input;
+    });
+  }
+
+  /** Called with Controller-verified relationships, never an unverified browser participant list. */
+  setParticipants(roleId: string, expectedRevision: number, associationRevision: number, participants: SuccessionParticipant[]): Promise<SuccessionRoleState> {
+    const input = structuredClone(participants);
+    return this.mutate(state => {
+      const item = this.findRole(state, roleId);
+      if (item.role.revision !== expectedRevision || item.associationRevision !== associationRevision) throw new Error('Primary role association revision changed.');
+      if (item.operations.some(op => !terminal(op.phase))) throw new Error('Primary role is reserved by a succession in progress.');
+      if (JSON.stringify(item.participants) === JSON.stringify(input)) return item;
+      if (item.associationRevision >= Number.MAX_SAFE_INTEGER) throw new Error('Primary association revision is exhausted.');
+      item.participants = input; item.associationRevision++; return item;
     });
   }
 
@@ -92,6 +112,7 @@ export class SessionSuccessionStore {
       const item = this.findRole(state, record.roleId);
       if (item.role.revision !== record.expectedRevision || nativeSessionRefKey(item.role.current) !== nativeSessionRefKey(record.from)) throw new Error('Primary role revision changed.');
       if (item.role.revision >= Number.MAX_SAFE_INTEGER) throw new Error('Primary role revision is exhausted.');
+      if (record.prepared.associationRevision !== item.associationRevision || JSON.stringify(record.prepared.participants) !== JSON.stringify(item.participants)) throw new Error('Primary role association snapshot changed.');
       if (state.roles.some(other => other !== item && nativeSessionRefKey(other.role.current) === nativeSessionRefKey(record.to!))) throw new Error('Succession target already executes another role.');
       item.role.current = structuredClone(record.to);
       item.role.workspace = structuredClone(record.prepared.workspace);
@@ -117,7 +138,7 @@ export class SessionSuccessionStore {
       await this.ready;
       const state = structuredClone(this.state), result = change(state);
       this.validate(state);
-      if (JSON.stringify(state) !== JSON.stringify(this.state)) { await this.write(state); this.state = state; }
+      if (JSON.stringify(state) !== JSON.stringify(this.state)) { await this.write(state); this.state = state; this.revision++; }
       return structuredClone(result);
     });
     this.tail = next; return next;
@@ -144,6 +165,9 @@ export class SessionSuccessionStore {
     const roles = new Set<string>(), operations = new Set<string>(), executors = new Set<string>();
     for (const item of state.roles) {
       if (!item || !isPrimaryRole(item.role) || !Array.isArray(item.operations) || item.operations.length > 512 || roles.has(item.role.id)) throw new Error('Invalid primary role record.');
+      if (!Number.isSafeInteger(item.associationRevision) || item.associationRevision < 0 || !Array.isArray(item.participants)
+        || item.participants.length > 1024 || !item.participants.every(isSuccessionParticipant)
+        || new Set(item.participants.map(participant => participant.relationId)).size !== item.participants.length) throw new Error('Invalid primary role participants.');
       roles.add(item.role.id);
       const executor = nativeSessionRefKey(item.role.current);
       if (executors.has(executor)) throw new Error('Duplicate primary executor.');
@@ -172,7 +196,7 @@ export class SessionSuccessionStore {
       op.failureCode = 'succession_recovery_required'; changed = true;
     }
     if (changed) await this.write(state);
-    this.state = state; this.loaded = true;
+    this.state = state; this.loaded = true; this.revision++;
   }
   private async write(state: StoreState): Promise<void> {
     const text = JSON.stringify(state);

@@ -106,3 +106,12 @@ test('rejects a future persisted format rather than overwriting it', async () =>
   await writeFile(join(directory, file), JSON.stringify(saved));
   await expect(new SessionSuccessionStore(directory).ready).rejects.toThrow(/format|version/i);
 });
+
+test('freezes association changes during preparation and rejects a stale association snapshot', async () => {
+  const { store } = await fixture();
+  await store.setParticipants('role', 1, 0, [{ relationId: 'ask', kind: 'ask', before: target, after: target }]);
+  await ready(store);
+  await expect(store.setParticipants('role', 1, 1, [])).rejects.toThrow(/progress|reserved/i);
+  await expect(store.commit('op')).rejects.toThrow(/association/i);
+  expect(store.read('role').role.current.nativeSessionId).toBe('A');
+});

@@ -85,3 +85,29 @@ it('restores idle source sessions with native saved settings and the granted sou
     expect(await restored.runtimeInfo()).toMatchObject({ sessionId: 'side', cwd: '/new', model: 'new-model' });
   } finally { await directory.close(); await rm(root, { recursive: true, force: true }); }
 });
+
+it('uses a newly installed binding reader in an already-open native source tool', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'source-live-binding-'));
+  const native = createScriptedAppServer({ 'thread/start': () => ({ thread: { id: 'ask' } }), 'thread/items/list': () => ({ data: [] }) });
+  const history = createScriptedAppServer({ 'thread/items/list': () => ({ data: [] }) });
+  let spawns = 0;
+  const provider = new CodexAppServerProvider({ spawn: () => spawns++ === 0 ? native.child : history.child });
+  const directory = createCodexSessionDirectory(provider, [], new SessionReferenceStore(root));
+  const lines = createInterface({ input: native.child.stdin });
+  try {
+    await directory.create({ sourceNativeSessionId: 'A' });
+    directory.setSourceBindingReader!(async (reader, original, query, read) => {
+      if (reader !== 'ask' || original !== 'A') throw new Error('Wrong source binding identity');
+      return { ...await read('B', query), sourceSessionId: 'B', sourceRoleId: 'role', sourceRoleRevision: 2 };
+    });
+    const response = new Promise<any>(resolve => lines.on('line', line => { const value = JSON.parse(line); if (value.id === 'read-after-handoff') resolve(value); }));
+    native.child.stdout.write(JSON.stringify({ id: 'read-after-handoff', method: 'item/tool/call', params: {
+      threadId: 'ask', turnId: 't', callId: 'call', tool: 'read_source_session', arguments: {},
+    } }) + '\n');
+    const result = (await response).result;
+    expect(result.success).toBe(true);
+    expect(JSON.parse(result.contentItems[0].text)).toMatchObject({ sourceSessionId: 'B', sourceRoleId: 'role', sourceRoleRevision: 2 });
+    expect(history.requests.find(request => request.method === 'thread/items/list')?.params).toMatchObject({ threadId: 'B' });
+    expect(await directory.sourceReferences!()).toMatchObject([{ nativeSessionId: 'ask', sourceNativeSessionId: 'A' }]);
+  } finally { lines.close(); await directory.close(); await rm(root, { recursive: true, force: true }); }
+});

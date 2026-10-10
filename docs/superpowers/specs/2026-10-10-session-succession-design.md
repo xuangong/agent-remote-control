@@ -123,6 +123,7 @@ type PreparedSuccession = {
   from: NativeSessionRef;
   to: NativeSessionRef;
   workspace: PrimaryRole['workspace'];
+  capture: { epoch: string; seq: number; capturedAt: string };
   participants: Array<{
     relationId: string;
     kind: 'side' | 'ask' | 'tpm';

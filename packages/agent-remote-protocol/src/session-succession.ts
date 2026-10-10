@@ -39,5 +39,6 @@ export const isPrimaryRole = (value: unknown): value is PrimaryRole => Value.Che
 export const isSourceBinding = (value: unknown): value is SourceBinding => Value.Check(SourceBinding, value);
 export const isSuccessionRequest = (value: unknown): value is SuccessionRequest => Value.Check(SuccessionRequest, value);
 export const isPreparedSuccession = (value: unknown): value is PreparedSuccession => Value.Check(PreparedSuccession, value);
+export const isSuccessionParticipant = (value: unknown): value is SuccessionParticipant => Value.Check(SuccessionParticipant, value);
 export const isSuccessionRecord = (value: unknown): value is SuccessionRecord => Value.Check(SuccessionRecord, value);
 export const nativeSessionRefKey = (ref: NativeSessionRef): string => JSON.stringify([ref.controllerId, ref.providerId, ref.nativeSessionId]);

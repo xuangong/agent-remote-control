@@ -97,6 +97,12 @@ expect(store.read(request.roleId).role.current).toEqual(first.to);
 
 ## Task 2: Source bindings that follow the primary role
 
+Status: Complete at the source-binding boundary. Six affected Host suites passed
+38 tests, including a live scripted native-tool callback and distinct history
+transport. The production coordinator will install these readers in Task 3.
+Enrollment checks durable grants and the complete relation list; committed role
+state keeps a revisioned participant set for later creation/unlink changes.
+
 **Modify:** `packages/agent-host/src/session-reference.ts`, `directory.ts`,
 `session-reference.test.ts`, and supported provider directory integrations.
 **Create:** `packages/agent-host/src/session-source-binding.ts` and `.test.ts`.
@@ -107,15 +113,15 @@ expect(store.read(request.roleId).role.current).toEqual(first.to);
 relations, including unloaded grants. Publication occurs only through Task 1's
 commit; fixed grants remain supported. New role grants include immutable origin.
 
-- [ ] Add tests with one live tool instance reading A, committing A -> B, then
+- [x] Add tests with one live tool instance reading A, committing A -> B, then
   reading B without recreating the Ask session. A continuation must still read A.
-- [ ] Add tests for long-text offsets, old turn IDs, nested Side Ask, unlinked
+- [x] Add tests for long-text offsets, old turn IDs, nested Side Ask, unlinked
   grants, unauthorized lineage reads and restart of an enrolled grant.
-- [ ] Implement per-query resolution instead of native-ID capture. Return actual
+- [x] Implement per-query resolution instead of native-ID capture. Return actual
   source/revision metadata; validate lineage access on each read.
-- [ ] Enroll linked source grants and share the same resolver with creation.
+- [x] Enroll linked source grants and share the same resolver with creation.
   Legacy runtime extensions that cannot participate reject preparation clearly.
-- [ ] Run source-reference/provider regressions and commit
+- [x] Run source-reference/provider regressions and commit
   `feat: follow primary succession in source references`.
 
 Expected behavior, using the test fixture's tool wrapper:

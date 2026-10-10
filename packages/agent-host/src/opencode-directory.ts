@@ -1,4 +1,4 @@
-import { SessionReferenceStore, sourceSessionExtensions } from './session-reference.js';
+import { SessionReferenceStore, sourceSessionExtensions, type SourceBindingReader } from './session-reference.js';
 import { randomUUID } from 'node:crypto';
 import type { OpenCodeAgentProvider, OpenCodeSessionSummary } from '@orchardworks/agent-provider-opencode';
 import type { AgentSession, AgentHistoryQuery, AgentPersistenceHandle } from '@orchardworks/agent-provider-sdk';
@@ -15,10 +15,21 @@ export function createOpenCodeSessionDirectory(provider: OpenCodeDirectoryProvid
   let closed = false;
   let closing: Promise<void> | undefined;
   let sourceAccessCheck: ((nativeSessionId: string) => Promise<void>) | undefined;
+  let sourceBindingReader: SourceBindingReader | undefined;
   function assertOpen() { if (closed) throw new Error('OpenCode directory is closed.'); }
   async function readSource(id: string, query: AgentHistoryQuery) {
     assertOpen(); await sourceAccessCheck?.(id);
     return provider.readSessionHistory!(id, query);
+  }
+  function sourceExtensions(source: string, reader: () => string | undefined) {
+    return sourceSessionExtensions(source, readSource, async query => {
+      if (sourceBindingReader) {
+        const id = reader(); if (!id) throw new Error('Source reader identity is not ready.');
+        return sourceBindingReader(id, source, query, readSource);
+      }
+      if (query.sourceContext) throw new Error('Source context is unavailable on this Host.');
+      return { ...await readSource(source, query), sourceSessionId: source };
+    });
   }
   async function summary(id: string): Promise<OpenCodeSessionSummary | undefined> { assertOpen(); return provider.getSession(id); }
   async function remember(session: AgentSession): Promise<string> {
@@ -34,6 +45,8 @@ export function createOpenCodeSessionDirectory(provider: OpenCodeDirectoryProvid
     requiresController: id => controllerTools.has(id),
     supportsPromptEditing: !!provider.forkForPromptEdit,
     setSourceAccessCheck(check) { sourceAccessCheck = check; },
+    setSourceBindingReader(reader) { sourceBindingReader = reader; },
+    sourceReferences: () => references?.list() ?? Promise.resolve([]),
     async validatePromptEdit(target) {
       assertOpen();
       if (!provider.validatePromptEdit) throw new Error('OpenCode prompt editing is unavailable.');
@@ -83,12 +96,14 @@ export function createOpenCodeSessionDirectory(provider: OpenCodeDirectoryProvid
       const source = input.sourceNativeSessionId;
       if (source && (!callbacksAvailable || !references || !provider.readSessionHistory)) throw new Error('OpenCode source references require a connected native callback plugin.');
       if (source) { await sourceAccessCheck?.(source); if (!await summary(source)) throw new Error('OpenCode source session was not found.'); }
-      const extensions = source ? sourceSessionExtensions(source, readSource) : {};
+      let readerId: string | undefined;
+      const extensions = source ? sourceExtensions(source, () => readerId) : {};
       const systemPrompt = [config.systemPrompt, extensions.systemPrompt].filter(Boolean).join('\n\n');
       const tools = [...(config.tools ?? []), ...(extensions.tools ?? [])];
       const session = await provider.createSession({ ...config, sessionId: randomUUID(), ...(cwd ? { cwd } : {}),
         ...(systemPrompt ? { systemPrompt } : {}), ...(tools.length ? { tools } : {}) });
       const id = await remember(session);
+      readerId = id;
       if (tools.length) controllerTools.add(id);
       if (source) {
         try { await references!.set({ sourceNativeSessionId: source, systemPrompt, handle: opened.get(id)!.handle }); }
@@ -105,7 +120,7 @@ export function createOpenCodeSessionDirectory(provider: OpenCodeDirectoryProvid
       const grant = await references?.get(id);
       if (grant && (!callbacksAvailable || !provider.readSessionHistory)) throw new Error('OpenCode source references require a connected native callback plugin.');
       if (grant) { await sourceAccessCheck?.(grant.sourceNativeSessionId); if (!await summary(grant.sourceNativeSessionId)) throw new Error('OpenCode source session was not found.'); }
-      const extensions = grant ? sourceSessionExtensions(grant.sourceNativeSessionId, readSource) : undefined;
+      const extensions = grant ? sourceExtensions(grant.sourceNativeSessionId, () => id) : undefined;
       const session = await provider.resumeSession({ providerId: 'opencode', sessionId: id, opaque: JSON.stringify({ cwd: native.cwd }) },
         extensions ? { tools: extensions.tools, systemPrompt: grant!.systemPrompt } : undefined);
       await remember(session); if (extensions?.tools?.length) controllerTools.add(id); return session;

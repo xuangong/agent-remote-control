@@ -13,7 +13,7 @@ import { createSecurityPolicy } from './security.js';
 import { authenticationCallback } from './auth-callback.js';
 import { controllerPath, readControllerLocation } from './controller-location.js';
 import { createHash, randomBytes } from 'node:crypto';
-import { createHostBroker, type RemoteHostBrokerState } from './broker.js';
+import { createHostBroker, type RemoteHostBrokerState, type HostBrokerOptions } from './broker.js';
 import { createGatewayControlVerifier } from './control.js';
 import { SharingError } from './host-sharing.js';
 import { createGatewaySessions } from './sessions.js';
@@ -37,6 +37,8 @@ import { gatewayCookieName, readGatewayCookie, validateGatewayOrigin, verifyGate
 export interface HostedRelayOptions extends GatewayAuthOptions {
   /** Unpublished integration; native readiness remains independently required. */
   successionEnrollment?: true;
+  /** No default allowance: production preparation remains disabled until aggregate admission owns selection. */
+  successionProjectionAllowance?: HostBrokerOptions['successionProjectionAllowance'];
   previewOrigin?: string;
   previewDomain?: string;
   storage?: RelayStateStore;
@@ -233,7 +235,7 @@ export function createHostedRelay(options: HostedRelayOptions) {
       if (tenants.size >= (options.maxTenants ?? 64)) return undefined;
       const broker = createHostBroker({ origin: auth.origin, publicUrl: auth.origin, keyLifetimeMs: options.keyLifetimeMs,
         ownerSubject: grant.subject, durable, initialState, diagnostics,
-        ...(options.successionEnrollment ? { successionEnrollment: { version: 1, origin: auth.origin, issuer: auth.issuer, namespace: grant.namespace, ownerSubject: grant.subject } as const } : {}),
+        ...(options.successionEnrollment ? { successionEnrollment: { version: 1, origin: auth.origin, issuer: auth.issuer, namespace: grant.namespace, ownerSubject: grant.subject } as const, successionProjectionAllowance: options.successionProjectionAllowance } : {}),
         userStreamCount: subject => [...tenants.values()].reduce((sum, owned) => sum + owned.broker.activeStreamCount(subject), 0),
         onStateChange: async broker => { await state.mutate(draft => {
           const previous = draft.tenants.find(value => value.namespace === grant.namespace);

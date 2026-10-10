@@ -3,6 +3,30 @@
 Date: 2026-10-10. Audience: the next implementation session or maintainer.
 Status: partially implemented; no usable end-to-end handoff yet.
 
+## Bounded projection checkpoint (2026-10-10)
+
+Task9A passed independent spec/quality review with no findings. New enrollment
+requires feature-v2 acknowledgement, an immutable freeze-v2 byte ceiling, a Relay
+allowance selector and an adapter-backed bounded producer certificate. Authority
+v1, uplink v2, context v2 and committed projection v1 remain unchanged. Host role
+file v5, Broker associations v5 and outer Relay v9 fence older writers while
+preserving exact legacy freeze-v1 recovery without invented budgets.
+
+The Host measures the complete conservative committed projection after staging
+all participants and the association revision, then rechecks the saved ceiling
+before `create-started`. Private file growth is a separate check. Committed
+output invariant failures retain full evidence and remain explicit on saved
+authenticated recovery paths; they cannot cause repeated native creation.
+
+Root verified all 24 frozen source files and the complete patch, then freshly
+passed 161 tests in 11 files and 50 adjacent tests in 5 files. Protocol/Relay/Hosted
+builds, Host/Hosted typechecks and diff checks passed. Reports, source manifest
+and scoped review are in the plan workspace; fresh logs use
+`.tmp/root-task9a-*.log`. Real producer certification, Relay aggregate allowance,
+SQL codec and product integration remain separate gates. Next is Task9B's complete
+SQL representation, followed by Host source-witness admission and Relay admission.
+Production capability and effectful SQL succession remain disabled.
+
 ## Shared mutation admission checkpoint (2026-10-10)
 
 Task8B1 and its first fix round passed independent spec/quality review. The
@@ -65,8 +89,8 @@ and builds also passed. No production revision check was weakened. Logs are
 `.tmp/root-task8b2b-*.log` and `.tmp/root-task8b2b-fix1-*.log`; reviews and source
 manifests remain in the plan workspace.
 
-Next is Task9A's negotiated projection ceiling, followed by the prepared SQL and
-product slices. Native readiness/evidence integration remains a separate gate;
+Task9A's negotiated projection ceiling is recorded above; the prepared SQL and
+product slices follow. Native readiness/evidence integration remains a separate gate;
 no complete provider, production capability or end-to-end handoff is certified.
 
 ## Native crash evidence checkpoint (2026-10-10)

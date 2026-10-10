@@ -91,7 +91,7 @@ export interface AgentHostRuntimeOptions {
   succession?: { controllerId: string; enrollment?: true } & ({
     stateDirectory: string;
     /** Adapter-owned evidence. No provider is inferred to support succession from idle status. */
-    native?: Pick<SessionSuccessionPorts, 'supports' | 'createIdle' | 'reconcileDelivery'> & {
+    native?: Pick<SessionSuccessionPorts, 'supports' | 'supportsBoundedProjection' | 'createIdle' | 'reconcileDelivery'> & {
       inspect: (source: NativeSessionRef) => Promise<Omit<import('./local-succession-preparation.js').SuccessionReadiness, 'boundary' | 'inFlightInputs'>>;
     };
   } | {
@@ -283,6 +283,10 @@ export function createAgentHostRuntime(options: AgentHostRuntimeOptions): AgentH
         if (options.providerEnabled?.(targetProviderId) === false || !target.adapter.readSessionHistory
           || !target.directory.setSourceBindingReader || !target.directory.sourceReferences) return false;
         return await nativeSuccession?.supports(source, targetProviderId) === true;
+      },
+      async supportsBoundedProjection(source, targetProviderId) {
+        await authorizeSuccessionRead(source, source);
+        return await nativeSuccession?.supportsBoundedProjection?.(source, targetProviderId) === true;
       },
       async inspect(source) {
         if (!nativeSuccession) throw new SuccessionPreparationRejected('succession_unsupported_provider', 'This provider has not certified quiescent succession.');

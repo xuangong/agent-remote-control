@@ -49,7 +49,7 @@ async function fixture(configure?: (state: HostedRelayState) => void, recentAuth
   configure?.(initial);
   let relay: ReturnType<typeof createHostedRelay>;
   let failSave = false, failAfterSave = false;
-  const start = (initial: unknown) => createHostedRelay({ ...auth, successionEnrollment: true, scheduler: { schedule() {}, cancel() {} }, storage: { initial,
+  const start = (initial: unknown) => createHostedRelay({ ...auth, successionEnrollment: true, successionProjectionAllowance: () => 2 * 1024 * 1024, scheduler: { schedule() {}, cancel() {} }, storage: { initial,
     async commit(value) { if (failSave) throw new Error('disk unavailable'); await writeFile(path, JSON.stringify(value)); if (failAfterSave) throw new Error('Lost persistence acknowledgement'); } } });
   relay = start(initial); await writeFile(path, JSON.stringify(initial));
   const websockets = new WebSocketServer({ noServer: true });
@@ -103,11 +103,11 @@ test('does not expose owner successors to another authenticated namespace', asyn
   expect(await response.json()).toEqual({ version: 1, successions: [], nextCursor: null });
   expect((await f.request('v1/session-successions/operation?roleId=role&operationId=op-2', 'viewer')).status).toBe(403);
 }, 10000);
-test('authorizes historical recovery only in the owning namespace and retains Relay8 favorite progress', async () => {
+test('authorizes historical recovery only in the owning namespace and retains favorite progress through Relay9 migration', async () => {
   const f = await fixture(undefined, true);
   expect((await f.request('v1/remote/hosts/mapped-host/revoke', 'owner', {})).status).toBe(200);
   const revoked = await f.saved();
-  expect(revoked.version).toBe(8);
+  expect(revoked.version).toBe(9);
   expect(revoked.tenants[0]!.broker.associations!.freezes).toHaveLength(2);
   expect(revoked.tenants[0]!.broker.hosts).toEqual([]);
   expect(revoked.tenants[0]!.favoritesSuccession!.receipts.every(receipt => receipt.status === 'pending')).toBe(true);
@@ -117,7 +117,7 @@ test('authorizes historical recovery only in the owning namespace and retains Re
   expect(foreign.status).toBe(403);
   const pairing = await f.request('v1/remote/pairings', 'owner', { recoverHostId: 'mapped-host' });
   expect(pairing.status).toBe(201); expect((await pairing.json()).recovery.hostId).toBe('mapped-host');
-  const saved = await f.saved(); expect(saved.version).toBe(8); expect(validateRelayState(saved, f.auth)).toEqual(saved);
+  const saved = await f.saved(); expect(saved.version).toBe(9); expect(validateRelayState(saved, f.auth)).toEqual(saved);
   await f.restart();
   expect((await f.request('v1/remote/pairings')).status).toBe(200);
   expect((await f.saved()).tenants[0]!.broker.associations).toEqual(revoked.tenants[0]!.broker.associations);
@@ -164,14 +164,14 @@ test('requires renewed owner authority after restart and rejects contradictory C
   expect(() => validateRelayState(contradictory, f.auth)).toThrow(/state/);
 }, 10000);
 
-async function controller(f: Awaited<ReturnType<typeof fixture>>, failAtCommit = false, malformed = false) {
+async function controller(f: Awaited<ReturnType<typeof fixture>>, failAtCommit = false, malformed = false, enrollmentVersion = 2) {
   const effects = { prepare: 0, commit: 0, input: 0, release: 0, rpc: [] as string[] };
   const saved = (await f.saved()).tenants[0]!.broker.associations!.freezes;
   const operations = new Map<string, any>(saved.filter(row => row.projection).map(row => [row.receipt.request.operationId, structuredClone(row.projection!.receipt)]));
   let revision = saved.filter(row => row.projection).length + 1;
   const sockets: any[] = [];
   async function connect() {
-    const socket = new WebSocket(f.origin.replace('http', 'ws') + '/ws/remote-host?successionEnrollment=1', { headers: { authorization: 'Bearer ' + f.credential } }); sockets.push(socket);
+    const socket = new WebSocket(f.origin.replace('http', 'ws') + `/ws/remote-host?successionEnrollment=${enrollmentVersion}`, { headers: { authorization: 'Bearer ' + f.credential } }); sockets.push(socket);
     socket.on('message', (data: { toString(): string }) => {
       const message = JSON.parse(data.toString());
       if (message.type === 'heartbeat') { socket.send(JSON.stringify({ uplinkVersion: 2, type: 'heartbeat_ack', nonce: message.nonce })); return; }
@@ -203,7 +203,7 @@ async function controller(f: Awaited<ReturnType<typeof fixture>>, failAtCommit =
     expect((await registered).successionEnrollment.ownerSubject).toBe('owner');
   }
   await connect();
-  return { effects, connect };
+  return { effects, connect, seed: (record: any) => { operations.set(record.operationId, structuredClone(record)); } };
 }
 test('publishes authenticated Controller terminal readback from durable state before response and keeps exact replay after later commits', async () => {
   const f = await fixture(state => { state.tenants[0]!.broker.associations!.freezes = []; });
@@ -275,7 +275,7 @@ test('atomically projects legacy A through C and preserves the stable slot witho
   const f = await fixture(state => { state.sessionStars = [favorite()]; state.favoritesTrees = [{ subject: 'owner', revision: 4, folders: [] }]; });
   const result = await f.request('v1/favorites'); expect(result.status).toBe(200);
   expect(await result.json()).toMatchObject({ revision: 5, stars: [{ nativeSessionId: 'C', favoriteId: 'favorite-A', starredAt: 100, folderId: null, order: 0 }] });
-  expect(await f.saved()).toMatchObject({ version: 7, tenants: [{ favoritesSuccession: { version: 1, receipts: [{ status: 'applied' }, { status: 'applied' }] } }] });
+  expect(await f.saved()).toMatchObject({ version: 9, tenants: [{ favoritesSuccession: { version: 1, receipts: [{ status: 'applied' }, { status: 'applied' }] } }] });
   await f.request('v1/favorites'); await f.restart(); await f.request('v1/favorites');
   expect((await f.saved()).favoritesTrees![0]!.revision).toBe(5);
   expect((await (await f.request('v1/session-successions/operation?roleId=role&operationId=op-2')).json()).to.nativeSessionId).toBe('B');
@@ -460,3 +460,21 @@ test('concurrent stale browser edits conflict after pending legacy projection an
   expect(fresh.map(result => result.status).sort()).toEqual([200, 409]);
   expect((await f.saved()).favoritesTrees![0]!.revision).toBe(2);
 }, 10000);
+
+test.each([1,2])('feature %s recovers an exact saved v1 ready candidate without preparing another native candidate', async enrollmentVersion => {
+  let candidate: any;
+  const f = await fixture(state => {
+    const row=state.tenants[0]!.broker.associations!.freezes[0]!;candidate=structuredClone(row.projection!.receipt);
+    candidate.phase='ready';delete candidate.committedRevision;
+    delete row.released;delete row.projection;state.tenants[0]!.broker.associations!.freezes=[row];
+  });
+  const native=await controller(f,false,false,enrollmentVersion);native.seed(candidate);
+  const before=(await f.saved()).tenants[0]!.broker.associations!.freezes[0]!.receipt;
+  expect((await f.request('v1/remote/hosts/mapped-host/succession/prepare','owner',{operationId:'op-2',providerId:'fixture',nativeSessionId:'A',expectedRevision:1})).status).toBe(200);
+  expect(native.effects.prepare).toBe(0);
+  expect((await f.request('v1/remote/hosts/mapped-host/succession/commit','owner',{operationId:'op-2'})).status).toBe(200);
+  expect((await f.saved()).tenants[0]!.broker.associations!.freezes[0]!.receipt).toEqual(before);
+  expect(before.version).toBe(1);expect(before).not.toHaveProperty('maxProjectionBytes');
+  expect(native.effects.prepare).toBe(0);expect(native.effects.commit).toBe(1);expect(native.effects.release).toBe(1);
+  if(enrollmentVersion===1)expect((await f.request('v1/remote/hosts/mapped-host/succession/prepare','owner',{operationId:'new-operation',providerId:'fixture',nativeSessionId:'B',expectedRevision:2})).status).toBe(409);
+},10000);

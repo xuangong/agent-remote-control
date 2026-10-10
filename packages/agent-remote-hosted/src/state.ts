@@ -21,7 +21,7 @@ import { decodeRemoteHostUplinkMessage, isControllerIdentity, isHostEnvironment,
 
 export interface SavedGatewaySession { hash: string; grant: GatewayGrant; sessionExpiresAt: number; id?: string; label?: string; createdAt?: number; lastSeenAt?: number; browserId?: string; activity?: number[] }
 export interface HostedRelayState {
-  version: 2 | 3 | 4 | 5 | 6 | 7 | 8;
+  version: 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9;
   securityEvents?: SecurityEvent[];
   sessionStars?: SavedSessionStar[];
   favoritesTrees?: SavedFavoritesTree[];
@@ -78,7 +78,8 @@ function validBroker(value: unknown): value is RemoteHostBrokerState {
 }
 export function validateRelayState(value: unknown, auth: GatewayAuthOptions): HostedRelayState {
   const invalid = () => { throw new Error('Invalid or unsupported Relay state.'); };
-  if (!record(value) || ![2, 3, 4, 5, 6, 7, 8].includes(value.version) || !record(value.config) || value.config.origin !== auth.origin || value.config.issuer !== auth.issuer) return invalid();
+  if (!record(value) || ![2, 3, 4, 5, 6, 7, 8, 9].includes(value.version) || !record(value.config) || value.config.origin !== auth.origin || value.config.issuer !== auth.issuer) return invalid();
+  if (value.version < 9 && Array.isArray(value.tenants) && value.tenants.some((tenant: any) => tenant?.broker?.associations?.version === 5)) return invalid();
   if (value.version < 8 && Array.isArray(value.tenants) && value.tenants.some((tenant: any) => record(tenant?.broker) && hasHostRecoveryMetadata(tenant.broker as RemoteHostBrokerState))) return invalid();
   if (value.version < 6 && Array.isArray(value.tenants) && value.tenants.some((tenant: any) => tenant?.broker?.associations?.version === 4)) return invalid();
   if (value.version < 5 && Array.isArray(value.tenants) && value.tenants.some((tenant: any) => tenant?.broker?.associations?.version === 3)) return invalid();
@@ -143,9 +144,9 @@ export function createRelayState(auth: GatewayAuthOptions, storage: RelayStateSt
         const draft = structuredClone(current); const result = change(draft);
         if (draft.tenants.some(tenant => tenant.broker.associations)) {
           for (const tenant of draft.tenants) if (tenant.broker.associations) tenant.broker.associations = migrateBrokerAssociations(tenant.broker.associations);
-          draft.version = current.version === 8 || draft.version === 8 || draft.tenants.some(tenant => hasHostRecoveryMetadata(tenant.broker)) ? 8 : draft.tenants.some(tenant => tenant.favoritesSuccession) ? 7 : 6;
+          draft.version = 9;
         }
-        if (draft.tenants.some(tenant => hasHostRecoveryMetadata(tenant.broker))) draft.version = 8;
+        if (draft.version < 9 && draft.tenants.some(tenant => hasHostRecoveryMetadata(tenant.broker))) draft.version = 8;
         try { await storage?.commit(draft); }
         catch (error) { unavailable = true; failed(); throw error; }
         current = draft; published(); return result;

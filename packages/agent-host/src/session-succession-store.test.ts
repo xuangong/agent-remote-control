@@ -119,7 +119,7 @@ test('freezes association changes during preparation and rejects a stale associa
 test('atomically enrolls a frozen association receipt and refuses unresolved source admissions across restart', async () => {
   const { store, directory } = await fixture();
   const authority = { version: 1 as const, origin: 'https://relay.example', issuer: 'https://issuer.example', namespace: 'tenant', ownerSubject: 'owner' };
-  const freeze = { version: 1 as const, token: 'freeze', authority, controllerId: source.controllerId, request, associationRevision: 4, lineage: [source], relations: [] };
+  const freeze = { version: 2 as const, maxProjectionBytes: 8 * 1024 * 1024, token: 'freeze', authority, controllerId: source.controllerId, request, associationRevision: 4, lineage: [source], relations: [] };
   await store.admitAssociation('create', 'fingerprint', source);
   await expect(store.begin(request, true)).rejects.toThrow(/unresolved/);
   await expect(store.beginEnrolled(freeze, [], store.generation)).rejects.toThrow(/unresolved/);
@@ -143,9 +143,9 @@ test('migrates legacy storage explicitly and rejects admission races or authorit
   const legacy = JSON.parse(await readFile(path, 'utf8')); legacy.version = 1; delete legacy.associationAdmissions; delete legacy.associationResults;
   await writeFile(path, JSON.stringify(legacy));
   const restored = new SessionSuccessionStore(directory); await restored.ready;
-  expect(JSON.parse(await readFile(path, 'utf8')).version).toBe(4);
+  expect(JSON.parse(await readFile(path, 'utf8')).version).toBe(5);
   const authority = { version: 1 as const, origin: 'https://relay.example', issuer: 'https://issuer.example', namespace: 'tenant', ownerSubject: 'owner' };
-  const freeze = { version: 1 as const, token: 'freeze', authority, controllerId: source.controllerId, request, associationRevision: 1, lineage: [source], relations: [] };
+  const freeze = { version: 2 as const, maxProjectionBytes: 8 * 1024 * 1024, token: 'freeze', authority, controllerId: source.controllerId, request, associationRevision: 1, lineage: [source], relations: [] };
   const before = restored.generation;
   await restored.admitAssociation('create', 'fingerprint', source); await restored.settleAssociation('create', 'fingerprint');
   await expect(restored.beginEnrolled(freeze, [], before)).rejects.toThrow(/changed/);
@@ -170,7 +170,7 @@ test('copies source identities before queued association mutations', async () =>
   expect(saved.associationAdmissions[0].source).toEqual(source);
   admitted.nativeSessionId = 'changed-again';
   const authority={version:1 as const,origin:'https://relay.example',issuer:'https://issuer.example',namespace:'tenant',ownerSubject:'owner'};
-  const freeze={version:1 as const,token:'alias-check',authority,controllerId:source.controllerId,request,associationRevision:0,lineage:[source],relations:[]};
+  const freeze={version:2 as const,maxProjectionBytes:8*1024*1024,token:'alias-check',authority,controllerId:source.controllerId,request,associationRevision:0,lineage:[source],relations:[]};
   await expect(store.beginEnrolled(freeze,[],store.generation)).rejects.toThrow(/unresolved/);
   expect(store.read(created.id).role.origin.nativeSessionId).toBe('new');
 });
@@ -178,7 +178,7 @@ test('copies source identities before queued association mutations', async () =>
 test('accepts semantically identical frozen receipts with reordered JSON object fields', async () => {
   const { store } = await fixture();
   const authority = { version: 1 as const, origin: 'https://relay.example', issuer: 'https://issuer.example', namespace: 'tenant', ownerSubject: 'owner' };
-  const freeze = { version: 1 as const, token: 'freeze', authority, controllerId: source.controllerId, request, associationRevision: 1, lineage: [source], relations: [] };
+  const freeze = { version: 2 as const, maxProjectionBytes: 8 * 1024 * 1024, token: 'freeze', authority, controllerId: source.controllerId, request, associationRevision: 1, lineage: [source], relations: [] };
   await store.beginEnrolled(freeze, [], store.generation);
   const reordered = { ...freeze, authority: { ownerSubject: authority.ownerSubject, namespace: authority.namespace, issuer: authority.issuer, origin: authority.origin, version: authority.version }, lineage: [{ nativeSessionId: source.nativeSessionId, providerId: source.providerId, controllerId: source.controllerId }] };
   expect((await store.beginEnrolled(reordered, [], store.generation)).operationId).toBe('op');
@@ -191,7 +191,7 @@ test('accepts semantically identical frozen receipts with reordered JSON object 
 test('terminal enrolled decisions stay fenced across restart until the exact durable release', async () => {
   const {store,directory}=await fixture();
   const authority={version:1 as const,origin:'https://relay.example',issuer:'https://issuer.example',namespace:'tenant',ownerSubject:'owner'};
-  const freeze={version:1 as const,token:'release-token',authority,controllerId:source.controllerId,request,associationRevision:0,lineage:[source],relations:[]};
+  const freeze={version:2 as const,maxProjectionBytes:8*1024*1024,token:'release-token',authority,controllerId:source.controllerId,request,associationRevision:0,lineage:[source],relations:[]};
   await store.beginEnrolled(freeze,[],store.generation);
   await expect(store.releaseEnrollment(freeze)).rejects.toThrow(/Unknown/);
   await store.advance('op','preparing',{phase:'cancelled'});
@@ -276,5 +276,5 @@ test('migrates valid version 2 while rejecting missing or null durable admission
   await writeFile(path,JSON.stringify(invalid));await expect(new SessionSuccessionStore(directory).ready).rejects.toThrow(/admission|result/);
  }
  await writeFile(path,JSON.stringify(saved));const migrated=new SessionSuccessionStore(directory);await migrated.ready;
- expect(JSON.parse(await readFile(path,'utf8')).version).toBe(4);expect(migrated.read('role').role.current).toEqual(source);
+ expect(JSON.parse(await readFile(path,'utf8')).version).toBe(5);expect(migrated.read('role').role.current).toEqual(source);
 });

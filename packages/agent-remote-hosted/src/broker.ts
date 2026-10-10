@@ -4,7 +4,7 @@ import type { RelationChangeReset, BrokerRelationChange } from './relation-chang
 import { isDeepStrictEqual } from 'node:util';
 import { retainedHostIdentities, type HostRecoverySelection, type RevokedHost } from './host-recovery.js';
 import { validBrokerAssociations, migrateBrokerAssociations, type BrokerAssociationState } from './succession-associations.js';
-import { isNativeSessionRef, isPrimaryRole, isSuccessionRecord, nativeSessionRefKey, successionFreezeKey, successionAuthorityKey, type NativeSessionRef, type SuccessionAssociationFreeze, type PrimaryRole, type SuccessionRecord } from '@orchardworks/agent-remote-protocol';
+import { isNativeSessionRef, isPrimaryRole, isSuccessionRecord, nativeSessionRefKey, successionFreezeKey, successionAuthorityKey, type NativeSessionRef, type SuccessionAssociationFreeze, type BoundedSuccessionAssociationFreeze, type PrimaryRole, type SuccessionRecord } from '@orchardworks/agent-remote-protocol';
 import { type SuccessionAssociationAuthority, isSuccessionAssociationAuthority } from '@orchardworks/agent-remote-protocol';
 import { isTpmAction, isTpmCreate, isTpmList, isTpmWork } from '@orchardworks/agent-remote-protocol';
 import { validSessionRelationUpdate, validSourceRelation, type SourceRelation, type SessionRelation } from './session-relations.js';
@@ -28,7 +28,7 @@ type RpcResponse = { status: number; body: string; requestId?: string };
 type ProviderDescriptor = { providerId: string; displayName: string; promptEditing?: true; sessionRename?: true; daemonControl?: true };
 type DeviceCredential = { recovery?: HostRecoverySelection; pairingId?: string; purpose?: PairingPurpose; claimedAt?: number; expires: number; installationId?: string; kind?: 'device'; requiresRotation?: boolean };
 type Host = {
-  successionEnrollment?: boolean;
+  successionEnrollmentVersion?: 1 | 2;
   providerManagement?: true;
   tpmManagement?: true;
   connectionId?: string; stopDiagnostics?(): void;
@@ -60,6 +60,8 @@ export interface RemoteHostBrokerState {
 export interface HostBrokerOptions {
   /** Internal opt-in; only a Gateway-authenticated tenant can supply this authority. */
   successionEnrollment?: SuccessionAssociationAuthority;
+  /** Pure synchronous selection inside associationChange; absent until aggregate admission is enabled. */
+  successionProjectionAllowance?: (state: Readonly<BrokerAssociationState>, freeze: Omit<BoundedSuccessionAssociationFreeze, 'maxProjectionBytes'>) => number;
   diagnostics?: DiagnosticJournal;
   ownerSubject?: string;
   userStreamCount?(subject: string): number;
@@ -116,7 +118,7 @@ export function createHostBroker(options: HostBrokerOptions) {
     const binding = bindings.get(value.agentId);
     if (binding) { completedCreations.set(key, value); creations.set(key, { fingerprint: value.fingerprint, result: Promise.resolve(binding) }); }
   }
-  let associations = migrateBrokerAssociations(options.initialState?.associations ?? { version: 4, revision: 0, admissions: [], freezes: [], relationChanges: [], relationResets: [] });
+  let associations = migrateBrokerAssociations(options.initialState?.associations ?? { version: 5, revision: 0, admissions: [], freezes: [], relationChanges: [], relationResets: [] });
   function snapshot(): RemoteHostBrokerState {
     return { ...(revokedHosts ? { revokedHosts: structuredClone(revokedHosts) } : {}), ...(options.successionEnrollment || options.initialState?.associations ? { associations: structuredClone(associations) } : {}), pairings: structuredClone(pairings), previews: previews.snapshot(), ...(options.ownerSubject ? { sharing: sharing.snapshot() } : {}), keys: [...keys].map(([key, value]) => [key, structuredClone(value)]),
       hosts: [...hosts.values()].map(({ id, installationId, name, providers, legacyDsh, credentialRotation, gatewayKeyRequested, environment, pairingPurpose, controller, providerManagement, tpmManagement }) => ({ ...(tpmManagement ? { tpmManagement } : {}), ...(providerManagement ? { providerManagement } : {}), ...(controller ? { controller } : {}), ...(pairingPurpose ? { pairingPurpose } : {}), ...(environment ? { environment } : {}), id, installationId, name, providers, legacyDsh, ...(credentialRotation ? {credentialRotation} : {}), ...(gatewayKeyRequested ? { gatewayKeyRequested } : {}) })),
@@ -201,7 +203,7 @@ export function createHostBroker(options: HostBrokerOptions) {
   const associationSource = (host: Host, providerId: string, nativeSessionId: string): NativeSessionRef => ({ controllerId: host.installationId, providerId, nativeSessionId });
   async function associationRpc(host: Host, input: unknown): Promise<Record<string, any>> {
     const generation = host.generation; assertHostCurrent(host);
-    if (!options.successionEnrollment || !host.successionEnrollment) throw new BrokerError(409, 'succession_enrollment_unavailable', 'Trusted succession enrollment was not negotiated.');
+    if (!options.successionEnrollment || !host.successionEnrollmentVersion) throw new BrokerError(409, 'succession_enrollment_unavailable', 'Trusted succession enrollment was not negotiated.');
     const response = await rpc(host, 'POST', '/remote/succession/enrollment', undefined, JSON.stringify(input));
     assertHostCurrent(host, generation);
     let payload: Record<string, any>;
@@ -211,7 +213,7 @@ export function createHostBroker(options: HostBrokerOptions) {
   }
   async function successionAction(host: Host, action: string, input: Record<string, unknown>) {
     const generation = host.generation; assertHostCurrent(host);
-    if (!options.successionEnrollment || !host.successionEnrollment) throw new BrokerError(409, 'succession_enrollment_unavailable', 'Trusted succession enrollment was not negotiated.');
+    if (!options.successionEnrollment || !host.successionEnrollmentVersion) throw new BrokerError(409, 'succession_enrollment_unavailable', 'Trusted succession enrollment was not negotiated.');
     const allowed = action === 'prepare' ? ['operationId', 'providerId', 'nativeSessionId', 'expectedRevision', 'targetProviderId'] : ['operationId'];
     if (Object.keys(input).some(name => !allowed.includes(name))) throw new BrokerError(400, 'invalid_succession_request', 'Only source selection and operation identity may be supplied.');
     const operationId = required(input.operationId, 'operationId');
@@ -228,6 +230,7 @@ export function createHostBroker(options: HostBrokerOptions) {
       if (frozen) {
         assertSameRequest(frozen.receipt);
       } else {
+        if (host.successionEnrollmentVersion !== 2 || !options.successionProjectionAllowance) throw new BrokerError(409, 'succession_preparation_unavailable', 'New succession preparation requires negotiated v2 and projection admission.');
         const described = await associationRpc(host, { action: 'describe', providerId, nativeSessionId });
         if (!isPrimaryRole(described.role) || !Array.isArray(described.lineage) || described.role.revision !== input.expectedRevision || described.role.current.controllerId !== host.installationId || nativeSessionRefKey(described.role.current) !== nativeSessionRefKey(source)) throw new BrokerError(409, 'invalid_host_response', 'The current primary role could not be verified.');
         frozen = await associationChange(state => {
@@ -237,17 +240,21 @@ export function createHostBroker(options: HostBrokerOptions) {
           if (state.freezes.filter(item => item.receipt.request.roleId === described.role.id).length >= 512) throw new BrokerError(409, 'succession_role_capacity', 'Succession role history is full; reconcile existing operations.');
           for (const ref of described.lineage as NativeSessionRef[]) assertAssociationOpen(ref);
           if (state.admissions.some(admission => described.lineage.some((ref: NativeSessionRef) => nativeSessionRefKey(ref) === nativeSessionRefKey(admission.source)))) throw new BrokerError(409, 'association_outcome_unknown', 'Settle source creation before succession.');
-          const receipt: SuccessionAssociationFreeze = { version: 1, token: randomUUID(), authority: options.successionEnrollment!, controllerId: host.installationId,
+          const proposal: Omit<BoundedSuccessionAssociationFreeze, 'maxProjectionBytes'> = { version: 2, token: randomUUID(), authority: options.successionEnrollment!, controllerId: host.installationId,
             request: { operationId, roleId: described.role.id, expectedRevision: input.expectedRevision as number, from: source, ...(targetProviderId ? { targetProviderId } : {}) },
             associationRevision: state.revision, lineage: described.lineage,
             relations: [...bindings.values()].filter(binding => binding.hostId === host.id && binding.sourceRelation).map(binding => ({
               relationId: binding.sourceRelation!.id, kind: binding.sourceRelation!.kind, readerRef: associationSource(host, binding.providerId, binding.nativeSessionId),
               sourceRef: binding.sourceRelation!.nativeSourceRef ?? associationSource(host, binding.providerId, binding.sourceRelation!.sourceNativeSessionId), linked: binding.sourceRelation!.linked ?? true, revision: binding.sourceRelation!.revision ?? 0,
             })) };
+          const maxProjectionBytes = options.successionProjectionAllowance!(structuredClone(state), structuredClone(proposal));
+          if (!Number.isSafeInteger(maxProjectionBytes) || maxProjectionBytes < 1) throw new BrokerError(409, 'succession_projection_capacity_exceeded', 'No valid committed projection allowance is available.');
+          const receipt: SuccessionAssociationFreeze = { ...proposal, version: 2, maxProjectionBytes };
           const result = { hostId: host.id, receipt }; state.freezes.push(result); return result;
         });
       }
     }
+    if (frozen?.receipt.version === 2 && host.successionEnrollmentVersion !== 2) throw new BrokerError(409, 'succession_enrollment_unavailable', 'Saved bounded succession requires negotiated v2 recovery.');
     if (!frozen) throw new BrokerError(404, 'succession_not_found', 'No frozen succession operation exists.');
     if (successionAuthorityKey(frozen.receipt.authority) !== successionAuthorityKey(options.successionEnrollment!)) throw new BrokerError(409, 'succession_authority_changed', 'The frozen authority requires reconciliation.');
     if (frozen.released === 'committed' && frozen.projection && ['status', 'reconcile', 'commit'].includes(action)) {
@@ -525,7 +532,7 @@ export function createHostBroker(options: HostBrokerOptions) {
     }
     host.streams.clear();
   }
-  function register(socket: RelaySocket, credential: DeviceCredential, context: BrokerRequestContext, credentialHash: string, enrollmentRequested = false) {
+  function register(socket: RelaySocket, credential: DeviceCredential, context: BrokerRequestContext, credentialHash: string, enrollmentRequested?: 1 | 2) {
     let host: Host | undefined;
     let pendingCredential: {hash: string; value: DeviceCredential} | undefined;
     let issuing: Promise<void> | undefined;
@@ -563,7 +570,7 @@ export function createHostBroker(options: HostBrokerOptions) {
     function registered() {
       if (retired || !host || host.socket !== socket) return;
       host.tunnelToken ??= randomBytes(32).toString('base64url');
-      send(host, { uplinkVersion: 2, type: 'registered', hostId: host.id, ...(host.successionEnrollment && options.successionEnrollment ? { successionEnrollment: options.successionEnrollment } : {}), pairingPurpose: host.pairingPurpose ?? (host.gatewayKeyRequested ? 'gateway-setup' : 'host-only'), heartbeat, tunnelToken: host.tunnelToken });
+      send(host, { uplinkVersion: 2, type: 'registered', hostId: host.id, ...(host.successionEnrollmentVersion && options.successionEnrollment ? { successionEnrollment: options.successionEnrollment, ...(host.successionEnrollmentVersion === 2 ? { successionEnrollmentVersion: 2 as const } : {}) } : {}), pairingPurpose: host.pairingPurpose ?? (host.gatewayKeyRequested ? 'gateway-setup' : 'host-only'), heartbeat, tunnelToken: host.tunnelToken });
       if (retired || host.socket !== socket) return;
       host.ready = true;
       if (!heartbeatStarted) {
@@ -650,7 +657,7 @@ export function createHostBroker(options: HostBrokerOptions) {
             host = existing ?? { ...next, generation: 0, pending: new Map(), streams: new Map() };
             hosts.set(host.id, host);
             if (host.socket) { const previous = host.socket; disconnected(host, previous, 'connection_replaced', 1012); previous.close(1012, 'Host connection replaced'); }
-            Object.assign(host, next); host.successionEnrollment = enrollmentRequested && !!options.successionEnrollment; host.connectionId=randomUUID(); host.generation += 1; clearTimeout(timer);
+            Object.assign(host, next); host.successionEnrollmentVersion = options.successionEnrollment ? enrollmentRequested : undefined; host.connectionId=randomUUID(); host.generation += 1; clearTimeout(timer);
             if (!retired && socket.readyState === RELAY_SOCKET_OPEN) {
               host.socket = socket;
               host.issueCredential = message.credentialRotation ? () => issueCredential(false) : undefined;
@@ -1414,7 +1421,7 @@ export function createHostBroker(options: HostBrokerOptions) {
       return { accept(client: RelaySocket) {
         if (unavailable || keys.get(hash!) !== key || key.claimedAt !== undefined || key.expires <= now()) { client.close(1008, 'Device credential revoked'); return; }
         track(client);
-        register(client, key, context, hash!, url.searchParams.get('successionEnrollment') === '1');
+        register(client, key, context, hash!, url.searchParams.get('successionEnrollment') === '2' ? 2 : url.searchParams.get('successionEnrollment') === '1' ? 1 : undefined);
       } };
     }
     const match = /^\/v1\/sessions\/([^/]+)\/events$/.exec(url.pathname);

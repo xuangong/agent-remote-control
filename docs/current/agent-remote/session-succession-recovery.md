@@ -28,19 +28,47 @@ succession state does not copy a workspace, process, credentials or native sessi
 
 | State | Checkpoint format | Supported upgrade behavior |
 | --- | --- | --- |
-| Controller role state | Version 4 | Versions 1 through 3 retain their existing migration rules; private preparation stages and reservations do not fabricate legacy creation evidence |
+| Controller role state | Version 5 | Versions 1 through 4 retain explicit migration rules; legacy receipts gain no invented projection budget or creation evidence |
 | Pending context | Version 2 | Reads version 1 attachments; new target-independent preparations share attachment capacity, and delivery-state recovery remains independent of role state |
-| Relay outer state | Version 8 with Host recovery metadata; version 7 with Favorites succession progress; otherwise version 6 with associations | Legacy outer versions 2 through 7 retain explicit inner-format rules and complete-lineage validation; no applied Favorites progress or native result is fabricated |
-| Broker association state | Version 4 | Versions 1 through 3 migrate only with valid complete committed lineage; earlier additive relation-change/reset migrations remain explicit |
+| Relay outer state | Version 9 with association-v5 writers; version 8 adds Host recovery metadata; version 7 adds Favorites succession progress | Legacy outer versions 2 through 8 retain explicit inner-format rules and complete-lineage validation; no applied progress, budget or native result is fabricated |
+| Broker association state | Version 5 | Versions 1 through 4 retain explicit migrations and valid complete committed lineage; saved freeze-v1 identities remain unchanged |
+| Enrollment freeze | Version 2 for new preparation | Requires an immutable positive safe-integer `maxProjectionBytes`; exact saved version-1 recovery remains supported without retrofitting a budget |
 | Favorites succession progress | Version 1, requiring Relay7 or later | Bounded pending/applied acknowledgements identify an exact committed freeze and contiguous role revision; this is store progress, not another commit authority |
 | Host recovery metadata | Revoked Host mappings and targeted invitations, requiring Relay8 | Owner recovery binds Host ID, installation ID and revocation ID; previous credentials, bindings and sharing grants are not restored |
 
 An unpublished experimental Controller version-2 file without
 `associationResults` is rejected, not migrated. Future or malformed versions also
 fail closed. Broker association version 2 requires at least Relay outer version 4; Broker
-association version 3 requires outer version 5; version 4 requires outer version 6. Favorites progress requires outer version 7. New safety fields must not be
+association version 3 requires outer version 5; version 4 requires outer version 6;
+version 5 requires outer version 9. Favorites progress requires outer version 7. New safety fields must not be
 hidden behind an older version number. An older writer must not overwrite a newer format. Do not edit a
 version number or delete recovery fields to make a previous binary accept them.
+
+## Negotiated projection bound
+
+New preparation requires explicit enrollment-feature v2 acknowledgement, a Relay
+allowance selector and a supported adapter's bounded candidate/capture producer
+certificate. Authentication authority remains v1 and the uplink envelope remains
+v2. An upgraded Host requests feature 2 without silently downgrading on an older
+Relay; ordinary connectivity remains available, while succession recovery there
+stays unavailable until the Relay is upgraded. A feature-v1 Host on an upgraded
+Relay receives no new strict-envelope field and can recover exact saved v1 work,
+but cannot start a new preparation.
+
+The ceiling measures the complete UTF-8 serialization of
+`JSON.stringify({version:1,role,receipt})`, including repeated references and
+optional recovery fields. Host admission checks a conservative bound after the
+complete participant snapshot and association revision are staged, then checks
+the saved ceiling again before publishing `create-started`. Its separate private
+file-growth reservation remains authoritative. A refusal leaves any existing
+Relay freeze available to the established cancel/readback/release path.
+
+An output invariant violation after commit reports
+`succession_projection_invariant_failed` and preserves the entire committed role
+and receipt. Saved prepare/status/reconcile/commit/release cannot conceal that
+defect as success. Recovery never creates another candidate to fit a ceiling.
+No production allowance supplier or native producer certificate is enabled by
+this contract; aggregate SQL admission and complete persistence remain pending.
 
 ## Recover from facts, not elapsed time
 

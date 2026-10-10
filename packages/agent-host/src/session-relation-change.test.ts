@@ -21,7 +21,7 @@ async function fixture() {
   const participant = { relationId: sourceParticipantId(reader, 'side'), kind: 'side' as const, before: reader, after: reader };
   const tpm = { relationId: 'tpm:work', kind: 'tpm' as const, before: ref('T'), after: ref('T') };
   const request = { roleId: 'role', operationId: 'succession', expectedRevision: 1, from: ref('A'), targetProviderId: 'other' };
-  const freeze = { version: 1 as const, authority, token: 'freeze', controllerId: 'controller', request, associationRevision: 0, lineage: [ref('A')], relations: [] };
+  const freeze = { version: 2 as const, maxProjectionBytes: 8 * 1024 * 1024, authority, token: 'freeze', controllerId: 'controller', request, associationRevision: 0, lineage: [ref('A')], relations: [] };
   await store.beginEnrolled(freeze, [participant, tpm], store.generation);
   await store.advance('succession', 'preparing', { phase: 'quiescing', to: ref('A', 'other') });
   await store.advance('succession', 'quiescing', { phase: 'transferring' });

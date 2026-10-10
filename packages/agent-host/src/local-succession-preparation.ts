@@ -17,6 +17,8 @@ export interface LocalSuccessionAccess {
   inspect(session: NativeSessionRef): Promise<SuccessionReadiness>;
   /** Certifies that preparation and idle creation never send input or start work. */
   supports(source: NativeSessionRef, targetProviderId: string): Promise<boolean>;
+  /** Explicit producer certificate: every candidate ref field and capture string fits 512 UTF-16 units; capture seq is a nonnegative safe integer. */
+  supportsBoundedProjection?(source: NativeSessionRef, targetProviderId: string): Promise<boolean>;
   verifyAttachment(prepared: PreparedSuccession): Promise<void>;
   create(source: NativeSessionRef, operationId: string, targetProviderId: string): Promise<NativeSessionRef>;
   capture(source: NativeSessionRef, operationId: string): Promise<SuccessionContextPreparation>;
@@ -51,6 +53,9 @@ export class LocalSuccessionPreparation {
   }
   async supports(role: PrimaryRole, targetProviderId = role.current.providerId): Promise<void> {
     if (!await this.access.supports(role.current, targetProviderId)) throw new SuccessionPreparationRejected('succession_unsupported_provider', 'The selected provider pair does not support safe succession.');
+  }
+  async supportsBoundedProjection(role: PrimaryRole, targetProviderId = role.current.providerId): Promise<void> {
+    if (await this.access.supportsBoundedProjection?.(role.current, targetProviderId) !== true) throw new SuccessionPreparationRejected('succession_bounded_producer_unavailable', 'The selected adapters have not certified bounded candidate and capture producers.');
   }
   create(role: PrimaryRole, operationId: string, targetProviderId = role.current.providerId): Promise<NativeSessionRef> {
     return this.access.create(role.current, `${operationId}:create`, targetProviderId);

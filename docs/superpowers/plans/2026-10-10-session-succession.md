@@ -384,8 +384,9 @@ passed independent review. Root's initial Host 419/420 exposed a TPM rename
 fixture reading revision before acceptance publication; the controlled uplink
 regression now verifies that ordering. Root freshly passed 134 affected tests
 after the fix, in addition to Hosted 122, Protocol 236 and Lab 13 beforehand;
-affected builds/typechecks passed. Next is the prepared Task9A projection-ceiling
-contract. Native readiness integration and later storage/product gates remain;
+affected builds/typechecks passed. Task9A's projection-ceiling contract also passed
+independent review and Root's fresh 211 tests across 16 files, three builds and two
+typechecks. Native readiness integration and later storage/product gates remain;
 no production capability is enabled by these scripted fixtures.
 
 - [x] Add entry-bound synchronous admission, bounded opt-in mutation retention,
@@ -419,6 +420,9 @@ no production capability is enabled by these scripted fixtures.
 
 ## Task 9: Complete deployed storage support
 
+- [x] Establish negotiated freeze-v2 projection ceilings, exact legacy recovery,
+  bounded Host pre-effect checks and explicit old-writer fences. Task9A keeps
+  aggregate admission, complete SQL storage and real provider enablement gated.
 - [ ] Implement complete versioned Cloudflare SQL encode/decode for Broker
   associations, relation changes/resets, exact freeze evidence and Favorites
   progress, preserving the existing outer transaction and durability boundary.

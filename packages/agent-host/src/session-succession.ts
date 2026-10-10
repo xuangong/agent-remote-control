@@ -26,6 +26,10 @@ export class SessionSuccessionCoordinator {
     return this.prepareRequest(request, JSON.stringify(['local', requestKey(request)]), () => this.store.begin(request, true));
   }
   async prepareEnrolled(freeze: SuccessionAssociationFreeze, participants: SuccessionParticipant[], generation: number): Promise<SuccessionRecord> {
+    if (!this.store.read(freeze.request.roleId).enrollments?.some(saved => saved.request.operationId === freeze.request.operationId)) {
+      if (freeze.version !== 2) throw new Error('New succession preparation requires a bounded v2 freeze.');
+      await this.preparation.supportsBoundedProjection(this.store.read(freeze.request.roleId).role, freeze.request.targetProviderId);
+    }
     return this.prepareRequest(freeze.request, JSON.stringify(['enrolled', successionFreezeKey(freeze)]), () => this.store.beginEnrolled(freeze, participants, generation, true));
   }
   private async prepareRequest(request: SuccessionRequest, identity: string, begin: () => Promise<SuccessionRecord>): Promise<SuccessionRecord> {
@@ -138,7 +142,7 @@ export class SessionSuccessionCoordinator {
   async commit(operationId: string, expectedRevision: number): Promise<SuccessionRecord> {
     const record = this.store.operation(operationId);
     if (record.expectedRevision !== expectedRevision) throw new Error('Succession revision changed.');
-    if (record.phase === 'committed') return record;
+    if (record.phase === 'committed') { this.store.assertCommittedProjection(operationId); return record; }
     if (record.phase !== 'ready' || !record.prepared) throw new Error('Succession is not ready.');
     const generation = this.store.generation;
     await this.preparation.verify(this.store.read(record.roleId).role, record.prepared);

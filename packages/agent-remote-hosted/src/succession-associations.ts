@@ -2,7 +2,7 @@ import { validCommittedSuccessionLineage } from './session-successions.js';
 import { validRelationChangeReset, validBrokerRelationChange, type RelationChangeReset, type BrokerRelationChange } from './relation-changes.js';
 import { isCommittedSuccessionProjection, isNativeSessionRef, isSuccessionAssociationFreeze, type CommittedSuccessionProjection, type NativeSessionRef, type SuccessionAssociationFreeze } from '@orchardworks/agent-remote-protocol';
 export interface BrokerAssociationState {
-  version: 4;
+  version: 5;
   relationResets: RelationChangeReset[];
   relationChanges: BrokerRelationChange[];
   revision: number;
@@ -11,7 +11,7 @@ export interface BrokerAssociationState {
 }
 export function validBrokerAssociations(value: unknown): value is BrokerAssociationState {
   const state = value as BrokerAssociationState;
-  return !!state && state.version === 4 && Number.isSafeInteger(state.revision) && state.revision >= 0
+  return !!state && state.version === 5 && Number.isSafeInteger(state.revision) && state.revision >= 0
     && Array.isArray(state.relationResets) && state.relationResets.length <= 1024 && state.relationResets.every(validRelationChangeReset)
     && new Set(state.relationResets.map(item => item.intent.operationId)).size === state.relationResets.length
     && Array.isArray(state.relationChanges) && state.relationChanges.length <= 1024 && state.relationChanges.every(validBrokerRelationChange)
@@ -40,6 +40,10 @@ export function migrateBrokerAssociations(value: unknown): BrokerAssociationStat
     candidate = { ...candidate, version: 3, relationResets: [] };
   }
   if (candidate?.version === 3) candidate = { ...candidate, version: 4 };
+  if (candidate?.version === 4) {
+    if ((candidate as unknown as BrokerAssociationState).freezes?.some(row => row.receipt.version !== 1)) throw new Error('Legacy association storage cannot certify a bounded freeze.');
+    candidate = { ...candidate, version: 5 };
+  }
   if (!validBrokerAssociations(candidate)) throw new Error('Invalid durable association state.');
   return candidate;
 }

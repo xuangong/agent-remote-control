@@ -9,11 +9,11 @@ test('association persistence upgrades version 2 atomically and rejects a downgr
   let saved:HostedRelayState|undefined;
   const state=createRelayState(auth,{initial:emptyRelayState(auth),commit:async value=>{saved=structuredClone(value);}},()=>{},()=>{});
   await state.mutate(draft=>{draft.tenants.push(tenant());});
-  expect(saved!.version).toBe(6);
+  expect(saved!.version).toBe(9);
   expect(validateRelayState(saved,auth).tenants[0]!.broker.associations).toBeDefined();
   expect(()=>validateRelayState({...saved,version:2},auth)).toThrow(/unsupported/);
   const restored=createRelayState(auth,{initial:saved,commit:async()=>{}},()=>{},()=>{});
-  expect(restored.read().version).toBe(6);
+  expect(restored.read().version).toBe(9);
 });
 
 test('failed association persistence publishes neither version upgrade nor reservation',async()=>{
@@ -32,7 +32,7 @@ test('migrates association version 1 explicitly and rejects disguised relation r
   let saved:HostedRelayState|undefined;
   const restored=createRelayState(auth,{initial:legacy,commit:async value=>{saved=structuredClone(value);}},()=>{},()=>{});
   await restored.mutate(()=>{});
-  expect(saved!.version).toBe(6);expect(saved!.tenants[0]!.broker.associations).toMatchObject({version:4,relationChanges:[],relationResets:[]});
+  expect(saved!.version).toBe(9);expect(saved!.tenants[0]!.broker.associations).toMatchObject({version:5,relationChanges:[],relationResets:[]});
   const disguised=structuredClone(legacy);(disguised.tenants[0]!.broker.associations as unknown as {relationChanges:unknown}).relationChanges=[];
   expect(()=>validateRelayState(disguised,auth)).toThrow();
   expect(()=>validateRelayState({...saved,version:3},auth)).toThrow();
@@ -42,15 +42,27 @@ test('migrates association version 1 explicitly and rejects disguised relation r
 
 test('association v2 migrates required arrays but rejects disguised or absent reset evidence',()=>{
  const legacy={version:2,revision:0,admissions:[],freezes:[],relationChanges:[]};
- expect(migrateBrokerAssociations(legacy)).toMatchObject({version:4,relationResets:[]});
+ expect(migrateBrokerAssociations(legacy)).toMatchObject({version:5,relationResets:[]});
  expect(()=>migrateBrokerAssociations({...legacy,relationResets:[]})).toThrow();
  expect(()=>migrateBrokerAssociations({...legacy,relationChanges:null})).toThrow();
  expect(()=>migrateBrokerAssociations({...legacy,version:3})).toThrow();
  const intent={version:1 as const,operationId:'edit',authority:{version:1 as const,origin:auth.origin,issuer:auth.issuer,namespace:'tenant',ownerSubject:'owner'},hostId:'host',controllerId:'controller',readerRef:{controllerId:'controller',providerId:'fixture',nativeSessionId:'side'},sourceRef:{controllerId:'controller',providerId:'fixture',nativeSessionId:'A'},relationId:'side',linked:false,expectedRelationRevision:0,expectedRoleRevision:2};
- const state={...legacy,version:4,relationResets:[{version:1,phase:'pre_effect',intent}]};
+ const state={...legacy,version:5,relationResets:[{version:1,phase:'pre_effect',intent}]};
  expect(validBrokerAssociations(state)).toBe(true);
  expect(validBrokerAssociations({...state,relationResets:[...state.relationResets,...state.relationResets]})).toBe(false);
  expect(validBrokerAssociations({...state,relationResets:Array.from({length:1025},(_,index)=>({version:1,phase:'pre_effect',intent:{...intent,operationId:String(index)}}))})).toBe(false);
  expect(validBrokerAssociations({...state,relationResets:[{version:1,phase:'pre_effect',intent:{...intent,readerRef:{...intent.readerRef,controllerId:'foreign'}}}]})).toBe(false);
  expect(validBrokerAssociations({...state,relationChanges:null})).toBe(false);
+});
+
+test('bounded allowance semantics fence association v4 and outer Relay v8 writers', async () => {
+  let saved: HostedRelayState | undefined;
+  const state = createRelayState(auth, { commit: async value => { saved = structuredClone(value); } }, () => {}, () => {});
+  await state.mutate(draft => { draft.tenants.push(tenant()); });
+  expect(saved!.version).toBe(9);
+  expect(saved!.tenants[0]!.broker.associations!.version).toBe(5);
+  expect(() => validateRelayState({ ...saved, version: 8 }, auth)).toThrow();
+  const source = { controllerId: 'controller', providerId: 'fixture', nativeSessionId: 'A' };
+  const bounded = { version: 2, maxProjectionBytes: 50000, token: 'token', authority: { version: 1, origin: auth.origin, issuer: auth.issuer, namespace: 'tenant', ownerSubject: 'owner' }, controllerId: 'controller', request: { operationId: 'op', roleId: 'role', from: source, expectedRevision: 1 }, associationRevision: 0, lineage: [source], relations: [] };
+  expect(() => migrateBrokerAssociations({ version: 4, revision: 0, relationChanges: [], relationResets: [], admissions: [], freezes: [{ hostId: 'host', receipt: bounded }] })).toThrow();
 });

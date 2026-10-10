@@ -115,7 +115,7 @@ export function createRemoteHostUplinkClient(options: RemoteHostUplinkClientOpti
     diagnose({ event: 'connecting', connectionId, registered: false });
     options.onStateChange?.('connecting');
     const endpoint = new URL(options.url);
-    if (options.successionEnrollment) endpoint.searchParams.set('successionEnrollment', '1');
+    if (options.successionEnrollment) endpoint.searchParams.set('successionEnrollment', '2');
     const socket = new WebSocket(endpoint, {
       headers: { authorization: `Bearer ${remoteKey}` },
       maxPayload: UPLINK_MAX_FRAME_BYTES,
@@ -125,6 +125,7 @@ export function createRemoteHostUplinkClient(options: RemoteHostUplinkClientOpti
     });
     let registered = false;
     let registeredHostId: string | undefined;
+    let registeredEnrollmentIdentity: string | undefined;
     let retired = false;
     let registrationDeadline: ReturnType<typeof setTimeout> | undefined;
     let heartbeatDeadline: ReturnType<typeof setTimeout> | undefined;
@@ -150,7 +151,7 @@ export function createRemoteHostUplinkClient(options: RemoteHostUplinkClientOpti
       imageScope: () => { if (!operationScope) throw new Error('Image scope is unavailable before Host registration.'); return operationScope; },
       control: request => request.path === '/remote/succession/enrollment'
         ? options.successionEnrollment && successionContext ? options.successionEnrollment.control({ ...request, ...(operationScope ? { operationScope } : {}) }, structuredClone(successionContext))
-          : { status: 403, body: JSON.stringify({ code: 'succession_authority_required', error: 'Succession enrollment was not negotiated.' }) }
+          : { status: 403, body: JSON.stringify({ code: 'succession_enrollment_unavailable', error: 'Succession v2 enrollment was not acknowledged. Retain saved records until the Relay is upgraded.' }) }
         : options.control({ ...request, ...(operationScope ? { operationScope } : {}) }),
       executeOperation: (agent, operation, work) => {
         if (!operationScope) throw new Error('Remote Host operation scope is unavailable before registration.');
@@ -235,7 +236,7 @@ export function createRemoteHostUplinkClient(options: RemoteHostUplinkClientOpti
         return;
       }
       if (registered && decoded.value.type === 'registered') {
-        if ((decoded.value.successionEnrollment && successionAuthorityKey(decoded.value.successionEnrollment)) !== (successionContext?.authority && successionAuthorityKey(successionContext.authority)) || decoded.value.hostId !== registeredHostId
+        if ((decoded.value.successionEnrollment && JSON.stringify([successionAuthorityKey(decoded.value.successionEnrollment), decoded.value.successionEnrollmentVersion])) !== registeredEnrollmentIdentity || decoded.value.hostId !== registeredHostId
           || decoded.value.heartbeat?.intervalMs !== cloudHeartbeat?.intervalMs
           || decoded.value.heartbeat?.timeoutMs !== cloudHeartbeat?.timeoutMs) retire({ reason: 'protocol_error' });
         return;
@@ -246,11 +247,12 @@ export function createRemoteHostUplinkClient(options: RemoteHostUplinkClientOpti
         clearTimeout(registrationDeadline);
         registered = true;
         registeredHostId = decoded.value.hostId;
+        registeredEnrollmentIdentity = decoded.value.successionEnrollment && JSON.stringify([successionAuthorityKey(decoded.value.successionEnrollment), decoded.value.successionEnrollmentVersion]);
         operationScope = JSON.stringify([new URL(options.url).origin, registeredHostId, options.installationId]);
-        if (options.successionEnrollment && decoded.value.successionEnrollment) {
+        if (options.successionEnrollment && decoded.value.successionEnrollment && decoded.value.successionEnrollmentVersion === 2) {
           const relayOrigin = new URL(options.url); relayOrigin.protocol = relayOrigin.protocol === 'wss:' ? 'https:' : 'http:';
           if (decoded.value.successionEnrollment.origin !== relayOrigin.origin) { retire({ reason: 'protocol_error' }); return; }
-          successionContext = { authority: decoded.value.successionEnrollment, installationId: options.installationId };
+          successionContext = { authority: decoded.value.successionEnrollment, installationId: options.installationId, successionEnrollmentVersion: 2 };
         }
         cloudHeartbeat = decoded.value.heartbeat;
         resetCloudDeadline();

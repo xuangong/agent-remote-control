@@ -12,6 +12,11 @@ import { SessionSourceBindings } from './session-source-binding.js';
 export interface SessionSuccessionPorts {
   /** Certifies zero-turn creation, normalized capture, quiescence and routed source-binding support for both adapters. */
   supports(source: NativeSessionRef, targetProviderId: string): Promise<boolean>;
+  /** Before effect, certifies valid public candidate/capture schemas: createIdle ref fields and captureTimeline/inspect epoch/capturedAt strings
+   * are nonempty, at most 512 UTF-16 units, and capture seq is a nonnegative safe integer.
+   * The certificate must come from the supported adapter mode, not post-create validation.
+   * Missing/false keeps new v2 preparation disabled; legacy recovery uses supports alone. */
+  supportsBoundedProjection?(source: NativeSessionRef, targetProviderId: string): Promise<boolean>;
   inspect(source: NativeSessionRef): Promise<SuccessionReadiness>;
   createIdle(source: NativeSessionRef, operationId: string, targetProviderId: string): Promise<NativeSessionRef>;
   /** One complete normalized snapshot frozen at an authoritative boundary; reject incomplete pages. */
@@ -35,6 +40,7 @@ export class SessionSuccessionService {
     this.contexts = new SessionSuccessionContextStore(join(directory, 'contexts'));
     const preparation = new LocalSuccessionPreparation(controllerId, '', {
       inspect: source => ports.inspect(source), supports: (source, targetProvider) => ports.supports(source, targetProvider),
+      supportsBoundedProjection: (source, targetProvider) => ports.supportsBoundedProjection?.(source, targetProvider) ?? Promise.resolve(false),
       create: (source, operationId, targetProvider) => ports.createIdle(source, operationId, targetProvider),
       capture: (source, operationId) => this.capture(source, operationId),
       saveContext: context => this.contexts.prepare(context),

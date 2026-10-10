@@ -55,7 +55,7 @@ test('concurrent unrelated role writes preserve actual participant, terminal and
   await store.createRole({ id: 'role', revision: 1, origin: ref('A'), current: ref('A'), workspace: { controllerId: 'host', canonicalCwd: directory } });
   const path = join(directory, 'state.json'), before = JSON.parse(await readFile(path, 'utf8'));
   const participants = Array.from({ length: 10 }, (_, index) => ({ relationId: `${index}-引号"\\`.repeat(30), kind: 'tpm' as const, before: ref(`reader-${index}`), after: ref(`reader-${index}`) }));
-  const freeze = { version: 1 as const, token: 'token-中\\"'.repeat(20), authority: { version: 1 as const, origin: 'https://relay.example', issuer: 'https://issuer.example', namespace: 'tenant', ownerSubject: 'owner' }, controllerId: 'host', request, associationRevision: 0, lineage: [ref('A')], relations: [] };
+  const freeze = { version: 2 as const, maxProjectionBytes: 8 * 1024 * 1024, token: 'token-中\\"'.repeat(20), authority: { version: 1 as const, origin: 'https://relay.example', issuer: 'https://issuer.example', namespace: 'tenant', ownerSubject: 'owner' }, controllerId: 'host', request, associationRevision: 0, lineage: [ref('A')], relations: [] };
   await store.beginEnrolled(freeze, participants, store.generation, true);
   const admitted = JSON.parse(await readFile(path, 'utf8'));
   const reserved = Number(admitted.roles[0].localPreparations[0].reservedBytes), actualGrowth = jsonBytes(admitted) - jsonBytes(before);

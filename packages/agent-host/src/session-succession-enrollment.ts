@@ -7,6 +7,7 @@ import { successionAuthorityKey, successionFreezeKey, isSuccessionAssociationFre
 import type { AgentRemoteHttpResult, RemoteHostControlRequest } from '@orchardworks/agent-remote-relay';
 import type { AgentHostProviderRegistration } from './host.js';
 import type { TpmRecord } from './tpm-store.js';
+import { SuccessionProjectionCapacityError, SuccessionProjectionInvariantError } from './session-succession-store.js';
 import type { AssociationRecovery } from './session-succession-store.js';
 import type { SessionSuccessionService } from './session-succession-service.js';
 export type EnrollmentMutation = <T>(scope: string, operationId: string, kind: string, targets: readonly NativeSessionRef[], parameters: unknown,
@@ -88,6 +89,7 @@ export class SessionSuccessionEnrollment {
       if (Object.keys(input).some(name => !['action', 'freeze'].includes(name)) || !isSuccessionAssociationFreeze(input.freeze)) throw new Error('A complete frozen association receipt is required.');
       const freeze: SuccessionAssociationFreeze = input.freeze;
       if (freeze.controllerId !== this.controllerId || successionAuthorityKey(freeze.authority) !== successionAuthorityKey(context.authority)) throw new Error('Frozen association authority does not match this connection.');
+      if (freeze.version === 2 && context.successionEnrollmentVersion !== 2) return json(409, { code: 'succession_enrollment_unavailable', error: 'Bounded succession requires acknowledged v2.' });
       await this.authorize(freeze.request.from);
       const state = this.service.store.read(freeze.request.roleId);
       const saved = state.enrollments?.find(receipt => receipt.request.operationId === freeze.request.operationId);
@@ -96,6 +98,7 @@ export class SessionSuccessionEnrollment {
         let record;
         if (saved) record = this.service.coordinator.status(freeze.request.operationId);
         else {
+          if (context.successionEnrollmentVersion !== 2 || freeze.version !== 2) return json(409, { code: 'succession_preparation_unavailable', error: 'New preparation requires acknowledged v2 and a bounded freeze.' });
           const generation = this.service.store.generation;
           const grants = [];
           for (const { directory } of this.registrations()) {
@@ -119,6 +122,7 @@ export class SessionSuccessionEnrollment {
           }
           record = await this.service.coordinator.prepareEnrolled(freeze, participants, generation);
         }
+        this.service.store.assertCommittedProjection(freeze.request.operationId);
         return json(200, { record, role: this.service.store.read(state.role.id).role, freeze });
       }
       if (!saved && input.action === 'cancel') {
@@ -127,13 +131,15 @@ export class SessionSuccessionEnrollment {
       }
       if (!saved) throw new Error('Frozen association receipt is not enrolled.');
       let record = this.service.coordinator.status(freeze.request.operationId);
+      this.service.store.assertCommittedProjection(record.operationId);
       if (input.action === 'commit') record = await this.service.commit(record.operationId, freeze.request.expectedRevision);
       else if (input.action === 'cancel') record = await this.service.coordinator.cancel(record.operationId);
       else if (input.action === 'reconcile') record = await this.service.coordinator.reconcileReady(record.operationId);
       else if (input.action === 'release') await this.service.store.releaseEnrollment(freeze);
       else if (input.action !== 'status') throw new Error('Invalid enrollment action.');
+      this.service.store.assertCommittedProjection(record.operationId);
       return json(200, { record, role: this.service.store.read(state.role.id).role, freeze });
-    } catch (error) { return json(409, { code: 'succession_enrollment_failed', error: error instanceof Error ? error.message : 'Succession enrollment failed.' }); }
+    } catch (error) { return json(409, { code: error instanceof SuccessionProjectionCapacityError || error instanceof SuccessionProjectionInvariantError ? error.code : 'succession_enrollment_failed', error: error instanceof Error ? error.message : 'Succession enrollment failed.' }); }
   }
 
   private sourceFingerprint(source: NativeSessionRef, parameters: unknown): string {

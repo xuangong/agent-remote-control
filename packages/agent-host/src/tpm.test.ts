@@ -41,7 +41,7 @@ class SessionManager {
 }
 const fixtures: Array<{ coordinator: TpmCoordinator; directory: string }> = [];
 afterEach(async () => { for (const f of fixtures.splice(0)) { await f.coordinator.close(); await rm(f.directory, { recursive: true, force: true }); } });
-async function fixture(queueMessage = false) {
+async function fixture(queueMessage = false, tickMs = 1_000_000) {
   const directory = await mkdtemp(join(tmpdir(), 'arc-tpm-coordinator-'));
   const sessions = new Map<string, SessionManager>([['main', new SessionManager('main', queueMessage)]]);
   let now = 1_000_000; let available = true; let supported = ['codex']; let createFailure: Error | undefined;
@@ -59,7 +59,7 @@ async function fixture(queueMessage = false) {
     },
     async execute(_agent, _operation, work) { await work.validate?.(); work.beforeDispatch?.(); return work.dispatch(); },
   };
-  const options = { stateDirectory: directory, now: () => now, tickMs: 1_000_000, heartbeatMs: 1000, waitingHeartbeatMs: 5000, minimumReviewMs: 30, coalesceMs: 5 };
+  const options = { stateDirectory: directory, now: () => now, tickMs, heartbeatMs: 1000, waitingHeartbeatMs: 5000, minimumReviewMs: 30, coalesceMs: 5 };
   let coordinator = new TpmCoordinator(options, access); fixtures.push({ coordinator, directory }); await coordinator.ready;
   const input = { providerId: 'codex', mainNativeSessionId: 'main', title: 'Deliver isolated work', requirement: 'Agree on scope and deliver evidence.', operationId: 'create-one' };
   const create = async (operationId = input.operationId) => {
@@ -551,4 +551,52 @@ it('pauses automation on takeover of the current cross-provider main but not its
   await f.coordinator.handoff('codex', 'main'); expect((await f.coordinator.get(work.id)).paused).toBe(false);
   await f.coordinator.handoff('other', 'successor'); expect((await f.coordinator.get(work.id)).paused).toBe(true);
   expect(f.sessions.get('successor')!.leases).toBe(0);
+}, 10000);
+
+it('retains queued evidence when enqueue reaches the intent count limit', async () => {
+  const f = await fixture(true); const route = successionRouting(f); const work = await f.create();
+  const intent = await f.call(work, 'send_main_message', { operationId: 'queued-limit', purpose: 'consultation', text: 'Keep queued recipient' });
+  await waitMessages(f.sessions.get('main')!, 1);
+  await f.coordinator.store.update(work.id, undefined, record => {
+    const queued = record.work.outbox!.find(item => item.id === intent.id)!;
+    record.work.outbox = [queued, ...Array.from({ length: 199 }, (_, i) => ({ ...queued, id: `settled-${i}`, acceptance: 'started' as const }))];
+  });
+  await f.call(work, 'send_main_message', { operationId: 'new-at-limit', purpose: 'consultation', text: 'Another request' });
+  expect((await f.coordinator.get(work.id)).outbox!.some(item => item.id === intent.id)).toBe(true);
+  expect(f.coordinator.hasUnsettledMain(route.origin)).toBe(true);
+}, 10000);
+
+it.each(['bind', 'resolve'] as const)('isolates a failed role %s and retries it while another work continues background scheduling', async failure => {
+  const f = await fixture(); successionRouting(f); const bad = await f.create(); const good = await f.create('good-work');
+  await f.acknowledge(bad); await f.acknowledge(good);
+  await f.coordinator.store.update(bad.id, undefined, record => {
+    record.work.mainBinding = failure === 'bind' ? { kind: 'fixed', source: { ...record.work.mainSessionRef!, nativeSessionId: 'bad-origin' } }
+      : { ...record.work.mainBinding!, kind: 'primary_role', roleId: 'missing-role' } as any;
+  });
+  const original = f.access.mainRouting!.resolve; const bind = f.access.mainRouting!.bind; let broken = true; let failures = 0;
+  f.access.mainRouting!.bind = async (providerId, nativeSessionId) => {
+    if (broken && nativeSessionId === 'bad-origin') { failures++; throw new Error('Primary role unavailable'); }
+    return bind(providerId, nativeSessionId);
+  };
+  f.access.mainRouting!.resolve = binding => {
+    if (broken && binding.kind === 'primary_role' && binding.roleId === 'missing-role') { failures++; throw new Error('Primary role unavailable'); }
+    return original(binding);
+  };
+  f.advance(1000); await f.coordinator.tick();
+  await waitMessages(f.sessions.get(good.tpmNativeSessionId!)!, 2);
+  const listed = await f.coordinator.list();
+  expect(listed.works.find(work => work.id === bad.id)?.health).toContain('Primary role unavailable');
+  expect((await f.coordinator.get(bad.id)).health).toContain('Primary role unavailable');
+  const attempts = failures; await f.coordinator.tick(); expect(failures).toBe(attempts);
+  broken = false; f.advance(30_001); await f.coordinator.tick();
+  await waitMessages(f.sessions.get(bad.tpmNativeSessionId!)!, 2);
+}, 10000);
+
+it('surfaces background scheduler rejection and recovers on a later timer tick', async () => {
+  const f = await fixture(false, 30); const work = await f.create();
+  const available = f.access.available; let failure = true;
+  f.access.available = () => { if (failure) throw new Error('Availability probe failed'); return available(); };
+  await expect.poll(async () => (await f.coordinator.get(work.id)).health, { interval: 5 }).toContain('Background TPM scheduling failed: Availability probe failed');
+  failure = false;
+  await expect.poll(async () => (await f.coordinator.get(work.id)).health, { interval: 5 }).toBeUndefined();
 }, 10000);

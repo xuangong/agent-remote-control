@@ -39,3 +39,30 @@ test('retains admitted full targets after recovery and refuses to rewrite their 
   await expect(restored.update(value.work.id, undefined, item => { item.work.outbox![0]!.resolvedTarget!.nativeSessionId = 'successor'; })).rejects.toThrow(/recipient|destination/i);
   expect(restored.get(value.work.id).work.outbox![0]!.resolvedTarget).toEqual(target);
 });
+
+test('preserves queued admission evidence when settled messages exceed the byte budget', async () => {
+  const path = await mkdtemp(join(tmpdir(), 'arc-tpm-')); dirs.push(path);
+  const store = new TpmStore(path); await store.ready; const value = record(); value.creation = 'accepted';
+  const queued = { id: 'queued', target: 'main' as const, status: 'accepted' as const, acceptance: 'queued' as const, text: 'Keep admission evidence', purpose: 'implementation', createdAt: value.work.createdAt,
+    resolvedTarget: { controllerId: 'controller', providerId: 'codex', nativeSessionId: 'main' }, roleRevision: 1 };
+  value.work.outbox!.push(queued); await store.insert(value);
+  for (let i = 0; i < 8; i++) await store.update(value.work.id, undefined, item => {
+    item.work.outbox!.push({ ...queued, id: `settled-${i}`, acceptance: 'started', text: 'x'.repeat(65536) });
+  });
+  expect(store.get(value.work.id).work.outbox?.find(intent => intent.id === queued.id)).toEqual(queued);
+  const restored = new TpmStore(path); await restored.ready;
+  expect(restored.get(value.work.id).work.outbox?.find(intent => intent.id === queued.id)).toEqual(queued);
+});
+
+test('rejects capacity exhaustion without discarding existing queued recipients', async () => {
+  const path = await mkdtemp(join(tmpdir(), 'arc-tpm-')); dirs.push(path);
+  const store = new TpmStore(path); await store.ready; const value = record(); value.creation = 'accepted';
+  value.work.outbox = Array.from({ length: 7 }, (_, i) => ({ id: `queued-${i}`, target: 'main', status: 'accepted', acceptance: 'queued', text: 'x'.repeat(65536), purpose: 'implementation', createdAt: value.work.createdAt,
+    resolvedTarget: { controllerId: 'controller', providerId: 'codex', nativeSessionId: 'main' }, roleRevision: 1 }));
+  await store.insert(value); const before = store.get(value.work.id);
+  const outcome = await store.update(value.work.id, undefined, item => { item.work.outbox!.push({ ...item.work.outbox![0]!, id: 'overflow' }); }).then(() => 'accepted', error => String(error));
+  expect(outcome).toMatch(/budget.*full/);
+  expect(store.get(value.work.id)).toEqual(before);
+  const restored = new TpmStore(path); await restored.ready;
+  expect(restored.get(value.work.id).work.outbox).toEqual(before.work.outbox);
+});

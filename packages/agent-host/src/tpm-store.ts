@@ -1,7 +1,7 @@
 import { mkdir, open, readdir, readFile, rename, unlink } from 'node:fs/promises';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
-import { isTpmWork, nativeSessionRefKey, type TpmWork } from '@orchardworks/agent-remote-protocol';
+import { isTpmWork, nativeSessionRefKey, type TpmWork, type TpmIntent } from '@orchardworks/agent-remote-protocol';
 import { initialTpmTodo } from './tpm-role.js';
 
 export interface TpmRecord {
@@ -23,12 +23,14 @@ export interface TpmRecord {
   actions: Record<string, { fingerprint: string; revision: number }>;
 }
 
+export const isTpmIntentSettled = (intent: TpmIntent): boolean => intent.status === 'rejected' || intent.status === 'accepted' && intent.acceptance !== 'queued';
+
 const OUTBOX_MAX_BYTES = 512 * 1024;
 function boundOutbox(record: TpmRecord): void {
   const outbox = record.work.outbox;
   if (!outbox) return;
   while (Buffer.byteLength(JSON.stringify(outbox)) > OUTBOX_MAX_BYTES) {
-    const index = outbox.findIndex(intent => ['accepted', 'rejected'].includes(intent.status) && intent.id !== record.reviewIntentId);
+    const index = outbox.findIndex(intent => isTpmIntentSettled(intent) && intent.id !== record.reviewIntentId);
     if (index < 0) throw new Error('The pending message size budget is full. Resolve pending communication before adding more.');
     outbox.splice(index, 1);
   }

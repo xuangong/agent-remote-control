@@ -4,7 +4,7 @@ import { AgentOperationRejectedError, bindAgentSessionTools } from '@orchardwork
 import { isTpmAction, isTpmCreate, sessionOperationAvailability, type TpmAction, type TpmCreate, type TpmIntent, type TpmWork, type TpmList, type NativeSessionRef, type SourceBinding, nativeSessionRefKey } from '@orchardworks/agent-remote-protocol';
 import { OperationCacheError, type AgentManagerEvent, type RemoteHostSessionLease, type SessionWireOperationExecutor } from '@orchardworks/agent-remote-relay';
 import { sessionHeartbeatInterval, sessionHeartbeatInstructions, sessionHeartbeatTools } from './session-heartbeat.js';
-import { TpmStore, type TpmRecord } from './tpm-store.js';
+import { TpmStore, isTpmIntentSettled, type TpmRecord } from './tpm-store.js';
 import { initialTpmTodo, tpmInstructions, tpmReviewPrompt, tpmPlaceholderTitle } from './tpm-role.js';
 import { changeSessionTodo, confirmSessionTodo, invalidateSessionTodoApproval, currentSessionTodo, sessionTodoComplete, sessionTodoInstructions, sessionTodoTools } from './session-todo.js';
 
@@ -48,6 +48,8 @@ export class TpmCoordinator {
   private readonly attaching = new Map<string, Promise<Attachment>>();
   private readonly workers = new Map<string, Promise<void>>();
   private readonly retries = new Map<string, number>();
+  private readonly failures = new Map<string, string>();
+  private schedulerFailure?: string;
   private readonly reviewReservations = new Set<string>();
   private scanCursor = 0;
   private management: Promise<unknown> = Promise.resolve();
@@ -60,8 +62,8 @@ export class TpmCoordinator {
     this.ready = this.store.ready;
     void this.ready.then(() => {
       if (this.closed) return;
-      this.timer = setInterval(() => { void this.tick(); }, options.tickMs ?? 1000); this.timer.unref?.();
-      void this.tick();
+      this.timer = setInterval(() => { this.scheduleTick(); }, options.tickMs ?? 1000); this.timer.unref?.();
+      this.scheduleTick();
     }).catch(() => { /* Control requests expose recovery failure; do not start partial automation. */ });
   }
   async list(cursor?: string): Promise<TpmList> {
@@ -70,7 +72,7 @@ export class TpmCoordinator {
     const supportedProviders = this.access.supportedProviders();
     const catalog: TpmList = { supported: supportedProviders.length > 0, supportedProviders, works: [] };
     await this.reconcileMainBindings();
-    const works = this.store.all().map(record => record.work).filter(work => cursor === undefined || work.id > cursor).sort((a, b) => a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
+    const works = this.store.all().map(record => this.visibleWork(record.work)).filter(work => cursor === undefined || work.id > cursor).sort((a, b) => a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
     for (const work of works) {
       const summary: TpmWork = { ...work, detailsOmitted: true, todo: undefined, todoRevision: work.todo?.revision, document: '', acceptance: '', evidence: [],
         outbox: work.outbox?.filter(intent => ['prepared', 'dispatching', 'unknown'].includes(intent.status)).map(({ error: _error, ...intent }) => ({ ...intent, purpose: intent.purpose.slice(0, 64), text: '[Details omitted; open work details.]' })) };
@@ -83,7 +85,7 @@ export class TpmCoordinator {
     }
     return catalog;
   }
-  async get(id: string): Promise<TpmWork> { await this.ready; await this.reconcileMainBinding(id); return this.store.get(id).work; }
+  async get(id: string): Promise<TpmWork> { await this.ready; await this.reconcileMainBindingSafely(id); return this.visibleWork(this.store.get(id).work); }
   /** Call after ready. Queue acceptance remains unsettled without native execution evidence. */
   hasUnsettledMain(target: NativeSessionRef): boolean {
     return this.store.all().some(record => (record.work.outbox ?? []).some(intent => {
@@ -129,7 +131,7 @@ export class TpmCoordinator {
         } catch (error) {
           await this.store.update(id, undefined, record => { if (record.creation !== 'accepted') record.creation = 'unknown'; record.work.health = shortError(error); });
         }
-        void this.tick(); return this.store.get(id).work;
+        this.scheduleTick(); return this.store.get(id).work;
       } finally { main.release(); }
     });
   }
@@ -205,7 +207,7 @@ export class TpmCoordinator {
         const keys = Object.keys(record.actions); for (const old of keys.slice(0, Math.max(0, keys.length - 200))) delete record.actions[old];
       });
       if (!active(updated.work)) this.detach(input.id);
-      void this.tick(); return updated.work;
+      this.scheduleTick(); return updated.work;
     });
   }
   async handoff(providerId: string, nativeSessionId: string): Promise<void> {
@@ -232,10 +234,8 @@ export class TpmCoordinator {
       if (this.attachments.has(record.work.id) && !record.work.outbox?.some(intent => intent.status === 'prepared') && record.work.nextCheckAt > this.now()) continue;
       if (this.workers.size >= 2) break;
       this.scanCursor = (index + 1) % records.length;
-      const work = this.process(record.work.id).catch(async error => {
-        this.retries.set(record.work.id, this.now() + 30_000);
-        await this.store.update(record.work.id, undefined, item => { item.work.health = shortError(error); }).catch(() => undefined);
-      }).finally(() => { this.workers.delete(record.work.id); });
+      const work = this.process(record.work.id).then(() => this.clearFailure(record.work.id))
+        .catch(error => this.recordFailure(record.work.id, error)).finally(() => { this.workers.delete(record.work.id); });
       this.workers.set(record.work.id, work);
     }
     await Promise.allSettled([...this.workers.values()]);
@@ -254,9 +254,35 @@ export class TpmCoordinator {
     const result = this.management.catch(() => undefined).then(() => this.ready).then(work); this.management = result; return result;
   }
   private detach(id: string) { this.attachments.get(id)?.release(); this.attachments.delete(id); }
+  private scheduleTick(): void {
+    void this.tick().then(() => { this.schedulerFailure = undefined; }, error => {
+      this.schedulerFailure = `Background TPM scheduling failed: ${shortError(error)}`.slice(0, 2048);
+    });
+  }
+  private visibleWork(work: TpmWork): TpmWork {
+    const health = this.failures.get(work.id) ?? this.schedulerFailure;
+    return health ? { ...work, health } : work;
+  }
+  private async recordFailure(id: string, error: unknown): Promise<void> {
+    const message = shortError(error);
+    this.retries.set(id, this.now() + 30_000); this.failures.set(id, message);
+    this.detach(id);
+    try { await this.store.update(id, undefined, item => { item.work.health = message; }); }
+    catch (persistenceError) { this.failures.set(id, `${message} Health persistence failed: ${shortError(persistenceError)}`.slice(0, 2048)); }
+  }
+  private async clearFailure(id: string): Promise<void> {
+    const message = this.failures.get(id);
+    if (message && this.store.get(id).work.health === message) await this.store.update(id, undefined, item => { if (item.work.health === message) delete item.work.health; });
+    this.failures.delete(id); this.retries.delete(id);
+  }
+  private async reconcileMainBindingSafely(id: string): Promise<void> {
+    if (!this.access.mainRouting || (this.retries.get(id) ?? 0) > this.now()) return;
+    try { await this.reconcileMainBinding(id); await this.clearFailure(id); }
+    catch (error) { await this.recordFailure(id, error); }
+  }
   private async reconcileMainBindings(): Promise<void> {
     if (!this.access.mainRouting) return;
-    for (const record of this.store.all()) await this.reconcileMainBinding(record.work.id);
+    for (const record of this.store.all()) await this.reconcileMainBindingSafely(record.work.id);
   }
   private async reconcileMainBinding(id: string): Promise<TpmMainResolution | undefined> {
     const routing = this.access.mainRouting;
@@ -454,7 +480,7 @@ export class TpmCoordinator {
       const outbox = record.work.outbox ??= [];
       const existing = outbox.find(intent => intent.id === operationId);
       if (existing) { if (existing.target !== target || existing.text !== text || existing.purpose !== purpose) throw new Error('Message operation identity was reused with different input.'); result = existing; return; }
-      while (outbox.length >= 200) { const index = outbox.findIndex(intent => ['accepted', 'rejected'].includes(intent.status) && intent.id !== record.reviewIntentId); if (index < 0) throw new Error('Too many pending messages. Resolve them before adding more.'); outbox.splice(index, 1); }
+      while (outbox.length >= 200) { const index = outbox.findIndex(intent => isTpmIntentSettled(intent) && intent.id !== record.reviewIntentId); if (index < 0) throw new Error('Too many pending messages. Resolve them before adding more.'); outbox.splice(index, 1); }
       result = { ...todo, id: operationId, target, purpose, text, status: 'prepared', createdAt: new Date(this.now()).toISOString() }; outbox.push(result);
     });
     return result!;
@@ -545,7 +571,7 @@ export class TpmCoordinator {
         this.assertTodoDispatch(record, input.todoStepId, record.work.todo?.planRevision, input.purpose);
         const message = `[TPM ${id}; todo ${input.todoStepId}; spec revision ${record.work.documentRevision}; ${input.purpose}]\n${input.text}\n\nReply with evidence relevant to this work. Do not infer that unrelated main-session work belongs to it.`;
         const intent = await this.enqueue(id, 'main', purpose, message, messageId, { todoStepId: input.todoStepId, todoPlanRevision: record.work.todo!.planRevision });
-        void this.tick(); return intent;
+        this.scheduleTick(); return intent;
       }),
       tool('update_work', 'Record your delivery assessment and acknowledge this review. Set title when the conversation establishes the objective. User-set titles are preserved. Completion requires explicit acceptance criteria and evidence. Does not change user pause.', {
         revision: integer, phase: { type: 'string', enum: ['clarifying', 'ready', 'implementing', 'validating', 'completed'] }, waiting: { type: 'string', enum: ['none', 'user', 'main_session'] },

@@ -3,6 +3,67 @@
 Date: 2026-10-10. Audience: the next implementation session or maintainer.
 Status: partially implemented; no usable end-to-end handoff yet.
 
+## Continuation checkpoint (2026-10-10)
+
+This section supersedes the older implementation checkpoint and next-priority
+ordering below. The approved design and release restrictions remain unchanged.
+Inspect live Git status before continuing: later commits may extend this checkpoint.
+
+Implemented and committed since the original handoff:
+
+- `9d903d9`, `9bdbe7f`, `660aa91`: shared bounded normalized history, durable
+  pending context and first-input dispatch, identity-safe receipts, actual
+  started/queued/handled acceptance, and explicit unknown delivery after restart.
+- `3c139a5`, `419d032`, `ace82e9`: full-reference routed source history, signed
+  pinned cursors, attachment reads, cross-provider preparation checks, durable
+  service/signing-key provisioning, and non-nested B-to-C pending context.
+- `8439a02`: validated committed projection schema and hosted persistence helper.
+  The actual broker/product projection is not wired yet.
+- `57039ce`, `e44a30b`: real WebSocket receipt/restart tests and complete Host
+  prepare/commit/first-input tests using a native fixture.
+- `6254dec`: final native mutation fencing, in-flight mutation accounting and
+  stable complete normalized timeline capture. Fresh focused verification:
+  17 Host tests and 5 operation-settlement tests passed.
+- `86a6932`, `875be25`: role-aware TPM reads/admissions, pinned actual recipient
+  and role revision, queued receipt retention under capacity pressure, independent
+  per-work routing recovery and handled background scheduler failures. Repair
+  verification: 68 tests and Controller typecheck passed; scoped re-review passed.
+
+No real provider pair has been certified. Explicit native evidence ports exist,
+but `idle` alone must not enable succession. Fixture success demonstrates Host
+coordination/transport behavior, not Codex, Copilot, Claude or OpenCode readiness.
+TPM accepted/queued intents now correctly retain their blocking evidence; a
+native-evidence reconciliation path for those ordinary TPM queue receipts is
+still required before enabling the feature. A later idle snapshot must not be
+used to erase that evidence or reinterpret queued acceptance as completion.
+
+The Host/TPM integration is now committed in `93648f2`: routed source reads,
+internal control routes, final mutation/first-input integration, and a full Host
+TPM-first-input regression. The helper preserves bounded/filterable legacy pages
+and their actual source snapshot (without persistence handles). Signed cursors
+inherit omitted query fields and reject explicit mismatches.
+
+`9939800` fixes two concrete TPM integration defects discovered by that regression:
+non-UUID tool intent IDs are mapped deterministically at the execution boundary
+without changing durable outbox identity, and accepted native creation plus the
+initial intent are published in one store transaction so a review cannot race
+ahead of the user's initial requirement. Deterministic race tests cover creation
+with and without a requirement. Final focused verification: six suites, 79 tests
+passed; Controller typecheck and scoped reviews passed. Compatibility update/check
+also passed. These tests use a native fixture, not a certified real provider.
+
+The next substantial backend gap, now in implementation, is trusted association enrollment/freeze.
+Relay owns linked Side/Ask metadata; Host owns native grants and TPM records.
+Runtime does not yet reconcile and atomically reserve their complete snapshot.
+Separate `setParticipants` and `begin` cannot provide that guarantee. Include
+cold readers, nested/unlinked relationships and all TPM works, and fence concurrent
+create/import/link/unlink; unknown outcomes must not release a reservation.
+Do not expose the existing internal succession control routes as a usable feature.
+
+After that: real adapter evidence/certification, authenticated broker projection,
+product reference replacement/recovery, then browser/native acceptance. No merge,
+push, publish, deployment, or user-service replacement has occurred.
+
 ## Start here
 
 The implementation belongs to **Agent Remote Control**, not Copilot API Gateway.

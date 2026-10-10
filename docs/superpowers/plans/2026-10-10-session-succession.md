@@ -135,13 +135,17 @@ expect((await fixture.readSource({ cursor: pageA.nextCursor })).sourceSessionId)
 
 ## Task 3: Local handoff coordinator and admission boundary
 
-Status: In progress. The approved direction now uses normalized history with
-Host-owned deferred first-input injection. Earlier same-provider readiness and
-source-binding code need revision; their existing tests do not certify provider
-switching. Codex native history fork was experimentally verified but is no longer
-the generic handoff preparation path. Production admission, binding-reader
-installation, durable cursor-key provisioning and recovery endpoints remain open.
-Do not mark this task complete or expose a product capability yet.
+Status: In progress. Shared normalized history, durable pending first-input
+delivery, full-ref readers, durable cursor-key provisioning and Host admission
+fences are implemented. Internal prepare/commit/reconcile routes and the TPM
+dispatch integration passed focused runtime verification (`93648f2`). The real
+Host TPM test also exposed operation-identity and initialization-race defects;
+`9939800` fixes both, with six affected suites passing 79 tests. Trusted complete relation enrollment,
+atomic association reservation and native provider certification remain open.
+Codex native history fork was experimentally verified but is no longer the
+generic handoff preparation path. Do not mark this task complete or expose a
+product capability yet. See the continuation checkpoint in the handoff for
+current commits and evidence; the following numbers are earlier checkpoints.
 Checkpoint verification: seven affected Host suites passed 50 tests; the Codex
 suite passed 412 tests with 12 environment-dependent skips before the final
 unsettled-candidate regression was added. The final focused fork/prompt-edit/native
@@ -160,9 +164,9 @@ attachment and idle candidate, not model acknowledgement or native materializati
 
 ### Approved direction follow-up
 
-- [ ] Extract shared normalized history serialization, byte/entry limits and
+- [x] Extract shared normalized history serialization, byte/entry limits and
   truncation/provenance metadata without a Host dependency on browser modules.
-- [ ] Persist pending context and first-input delivery state on the Controller;
+- [x] Persist pending context and first-input delivery state on the Controller;
   retain receipt/attachment consistency across crash and storage failure.
 - [ ] Compose context at one serialized dispatch boundary for user, multi-device,
   TPM and execution-capable command input. Fence bypass paths and uncertain sends.
@@ -173,7 +177,7 @@ attachment and idle candidate, not model acknowledgement or native materializati
   Reject unsupported provider pairs before creation. Preserve native namespaces.
 - [ ] Map supported settings with explicit semantics; do not copy opaque provider
   values or silently broaden permissions. Keep auxiliary sessions unchanged.
-- [ ] Define pending-attachment reads and cursors; preserve context across A -> B
+- [x] Define pending-attachment reads and cursors; preserve context across A -> B
   -> C before B's first input, without duplicate or nested context injection.
 - [ ] Test concurrent first inputs, definite rejection, unknown acceptance,
   disconnect, restart and TPM first dispatch. Never automatically replay unknown.

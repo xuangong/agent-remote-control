@@ -73,4 +73,10 @@ describe('durable succession first input', () => {
     expect(count).toBe(1);
   });
 
+  it('accepts idempotent attachment writes with reordered nested properties', async () => {
+    const { store } = await setup();
+    const reordered = { ...attachment, source: { nativeSessionId: 'A', providerId: 'codex', controllerId: 'host' }, boundary: { seq: 3, epoch: 'epoch' } };
+    expect((await store.attach(reordered)).state).toBe('pending');
+  });
+
 });

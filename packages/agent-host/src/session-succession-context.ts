@@ -49,6 +49,7 @@ interface ContextState { version: 1; attachments: SuccessionContextRecord[] }
 const MAX_STORE_BYTES = 8 * 1024 * 1024;
 const isNativeSessionRef = (value: unknown): value is NativeSessionRef => { const ref = value as NativeSessionRef | undefined; return !!ref && nonempty(ref.controllerId) && nonempty(ref.providerId) && nonempty(ref.nativeSessionId); };
 const sameRef = (a: NativeSessionRef, b: NativeSessionRef) => nativeSessionRefKey(a) === nativeSessionRefKey(b);
+const attachmentIdentity = (input: SuccessionContextAttachment) => JSON.stringify([input.operationId, input.roleId, input.roleRevision, nativeSessionRefKey(input.source), nativeSessionRefKey(input.target), input.capturedAt, input.boundary.epoch, input.boundary.seq, input.text, input.itemCount, input.shortenedToolCount ?? 0]);
 const inputIdentity = (input: SuccessionInput) => JSON.stringify([input.operationId, input.roleId, input.roleRevision, nativeSessionRefKey(input.target), input.text, input.contentIdentity ?? null]);
 const nonempty = (value: unknown): value is string => typeof value === 'string' && value.length > 0;
 
@@ -85,7 +86,7 @@ export class SessionSuccessionContextStore {
       const prior = state.attachments.find(item => item.operationId === input.operationId);
       if (prior) {
         const { version: _version, state: _state, deliveries: _deliveries, ...saved } = prior;
-        if (JSON.stringify(saved) !== JSON.stringify(input)) throw new Error('Succession attachment identity conflict.');
+        if (attachmentIdentity(saved) !== attachmentIdentity(input)) throw new Error('Succession attachment identity conflict.');
         return prior;
       }
       if (state.attachments.length >= 512) throw new Error('Succession context attachment limit exceeded.');

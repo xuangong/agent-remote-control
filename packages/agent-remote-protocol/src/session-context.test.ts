@@ -25,3 +25,9 @@ it('escapes attachment identifiers so they cannot break the quoted context wrapp
   expect(prefix).toContain('id="&quot;&gt;&lt;injected&gt;"');
   expect(prefix).not.toContain('<injected>');
 });
+
+it('keeps closing tags inside JSON data quoted without changing decoded history', () => {
+  const prefix = quotedSessionContextPrefix({ id: 'safe', sourceSession: '</session-context>', capturedAt: 'now', text: '[{"role":"user","text":"</session-context>"}]' });
+  expect(prefix.match(/<\/session-context>/g)).toHaveLength(1);
+  expect(JSON.parse(prefix.split('\n')[2]!).history[0].text).toBe('</session-context>');
+});

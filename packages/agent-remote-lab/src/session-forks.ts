@@ -59,7 +59,7 @@ export function referenceForkContext(source: OpenedSession): SourceReferenceCont
 
 export function contextPrefix(record: SessionFork): string {
   if (record.mode === 'reference') return `<source-session-reference>${JSON.stringify({ id: record.id, sourceSession: record.source.nativeSessionId })}</source-session-reference>\n\n`;
-  return quotedSessionContextPrefix({ ...record, sourceSession: record.source.nativeSessionId });
+  return quotedSessionContextPrefix({ ...record, sourceSession: record.source.nativeSessionId }, false);
 }
 
 export function forkDisplayState(state: AgentReplicaState | undefined, record?: SessionFork): AgentReplicaState | undefined {

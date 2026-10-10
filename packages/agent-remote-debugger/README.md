@@ -206,15 +206,22 @@ ardb
 TPM commands use the same Host control API as the browser, through the exported
 `RemoteHostControlClient`. Work records, background reviews and native sessions
 remain Controller-owned after the CLI exits. Host owners can list, create, read,
-pause, resume, check, reopen and resolve uncertain work operations. Shared Host
+rename, archive, unarchive, pause, resume, check, reopen and resolve uncertain work operations. Shared Host
 users cannot manage another owner's work records.
 
 ```bash
 ardb tpm list HOST_ID --relay http://127.0.0.1:5910 --json
+# Start a conversation before deciding the scope or title.
+ardb tpm create HOST_ID --provider codex --main-session NATIVE_MAIN_SESSION_ID \
+  --relay RELAY_URL --cookie-file COOKIE_FILE
+# Optional: seed a known requirement and title.
 ardb tpm create HOST_ID "Deliver the agreed change" --provider codex \
   --main-session NATIVE_MAIN_SESSION_ID --title "Delivery" \
   --operation-id CREATE_OPERATION_ID --timeout 50000 --json
 ardb tpm show HOST_ID WORK_ID --json
+ardb tpm rename HOST_ID WORK_ID --title "Mobile reconnect" --revision 2 --json
+ardb tpm archive HOST_ID WORK_ID --revision 3 --json
+ardb tpm unarchive HOST_ID WORK_ID --revision 4 --json
 ardb tpm pause HOST_ID WORK_ID --revision 3 --operation-id PAUSE_OPERATION_ID --json
 ardb tpm resume HOST_ID WORK_ID --revision 4 --json
 ardb tpm check HOST_ID WORK_ID --revision 5 --json

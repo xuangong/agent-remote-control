@@ -16,9 +16,10 @@ import { tpmPhaseLabel } from './TpmMenu.js';
 
 /** The floating shell controls presentation; the ordinary conversation owns input and recovery. */
 export function TpmWorkspace({ item, session, replica, visible, storageScope, triggerRef, transport, draftBinding, busy, attaching, error, navigation,
-  onClose, onShowList, onOpenMain, onAction, onResolve, onRetry, onConfirmTodo }: {
+  onClose, onShowList, onOpenMain, onRename, onAction, onResolve, onRetry, onConfirmTodo }: {
   item: TpmItem; session?: OpenedSession; replica?: AgentReplica; visible: boolean; storageScope: string; triggerRef: RefObject<HTMLButtonElement>;
   transport: RemoteAgentTransport; draftBinding: DraftBinding; busy?: boolean; attaching?: boolean; error?: string; navigation?: SessionViewNavigationFactory;
+  onRename?(title: string): Promise<unknown>;
   onClose(): void; onShowList(): void; onOpenMain(): void; onAction(action: TpmAction): Promise<unknown>;
   onConfirmTodo?(decision: SessionTodoDecision): Promise<unknown>;
   onResolve(intentId: string, resolution: 'accepted' | 'rejected', nativeSessionId?: string): Promise<unknown>; onRetry(): void;
@@ -26,6 +27,28 @@ export function TpmWorkspace({ item, session, replica, visible, storageScope, tr
   const panel = useRef<HTMLElement>(null);
   const returnFocus = useRef<HTMLElement | null>(null);
   const [documentVisible, setDocumentVisible] = useState(false);
+  const [editingTitle, setEditingTitle] = useState(false);
+  const [titleDraft, setTitleDraft] = useState('');
+  const [savingTitle, setSavingTitle] = useState(false);
+  const [titleError, setTitleError] = useState<string>();
+  const titleInput = useRef<HTMLInputElement>(null);
+  const titleButton = useRef<HTMLButtonElement>(null);
+  const renameInFlight = useRef(false);
+  const wasEditingTitle = useRef(false);
+  useLayoutEffect(() => {
+    if (editingTitle) { titleInput.current?.select(); wasEditingTitle.current = true; }
+    else if (wasEditingTitle.current && !savingTitle) { titleButton.current?.focus(); wasEditingTitle.current = false; }
+  }, [editingTitle, savingTitle]);
+  const cancelRename = () => setEditingTitle(false);
+  async function saveTitle() {
+    const title = titleDraft.trim();
+    if (!title || !onRename || renameInFlight.current) return;
+    if (title === item.work.title) { cancelRename(); return; }
+    renameInFlight.current = true; setSavingTitle(true); setTitleError(undefined);
+    try { await onRename(title); cancelRename(); }
+    catch (error) { setTitleError(error instanceof Error ? error.message : 'Could not rename the TPM session.'); }
+    finally { renameInFlight.current = false; setSavingTitle(false); }
+  }
   const [actionError, setActionError] = useState<string>();
   const [verifiedSessionId, setVerifiedSessionId] = useState('');
   useAskPosition(panel, triggerRef, JSON.stringify([storageScope, 'tpm', item.key]));
@@ -59,11 +82,22 @@ export function TpmWorkspace({ item, session, replica, visible, storageScope, tr
   const creationUnresolved = work.creationStatus === 'unknown' || work.creationStatus === 'abandoned';
   return <div className="lab-ask-viewport lab-tpm-viewport" hidden={!visible}>
     <section ref={panel} className="lab-ask-window lab-tpm-window" role="dialog" aria-label={`TPM: ${work.title}`} aria-modal="false" tabIndex={-1}>
-      <header className="lab-ask-heading lab-tpm-heading"><div><span className="lab-tpm-eyebrow">TPM · {item.hostName}</span><strong title={work.title}>{work.title}</strong></div>
-        <div className="lab-ask-controls"><button type="button" aria-label="Back to TPM works" title="Back to works" onClick={onShowList}>Works</button><button type="button" aria-label="Minimize TPM" title="Minimize TPM" onClick={onClose}>×</button></div>
+      <header className="lab-ask-heading lab-tpm-heading"><div><span className="lab-tpm-eyebrow">TPM · {item.hostName}</span>{onRename ? <button ref={titleButton} type="button" className="lab-tpm-title-button" aria-label="Rename TPM session" title={work.title} disabled={!!unavailable || savingTitle} onClick={() => { setTitleDraft(work.title); setTitleError(undefined); setEditingTitle(true); }}><strong>{work.title}</strong><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" aria-hidden="true"><path d="m16 3 5 5-12 12-6 1 1-6ZM14 5l5 5" /></svg></button> : <strong title={work.title}>{work.title}</strong>}</div>
+        <div className="lab-ask-controls">{work.phase === 'completed' ? <button type="button" disabled={!!unavailable} aria-label={work.archived ? 'Restore TPM session' : 'Archive TPM session'} title={work.archived ? 'Restore TPM session' : 'Archive TPM session'} onClick={() => run(async () => {
+          await onAction(work.archived ? 'unarchive' : 'archive');
+          if (!work.archived) onShowList();
+        })}><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M4 8v12h16V8M3 3h18v5H3z" /><path d={work.archived ? 'M12 17v-6m-3 3 3-3 3 3' : 'M9 12h6'} /></svg></button> : null}<button type="button" aria-label="Back to TPM works" title="Back to works" onClick={onShowList}>Works</button><button type="button" aria-label="Minimize TPM" title="Minimize TPM" onClick={onClose}>×</button></div>
       </header>
+      {editingTitle ? <form className="lab-tpm-name-editor" onSubmit={event => { event.preventDefault(); void saveTitle(); }} onKeyDown={event => {
+        if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); if (!savingTitle) cancelRename(); }
+      }}>
+        <label>Name<input ref={titleInput} aria-label="TPM session name" maxLength={256} required value={titleDraft} disabled={savingTitle} onChange={event => setTitleDraft(event.target.value)} /></label>
+        <div><button type="button" disabled={savingTitle} onClick={cancelRename}>Cancel</button><button type="submit" disabled={savingTitle || !!unavailable || !titleDraft.trim()}>{savingTitle ? 'Saving…' : 'Save'}</button></div>
+        {titleError ? <p role="alert">{titleError}</p> : null}
+      </form> : null}
       <div className="lab-tpm-work-status">
         <span className="lab-tpm-phase" data-tpm-phase={work.phase}>{tpmPhaseLabel[work.phase]}</span>
+        {work.archived ? <span>Archived</span> : null}
         {work.paused ? <span>Background follow-up paused</span> : null}
         {work.waiting === 'user' ? <span className="lab-tpm-needs-user">Waiting for your decision</span> : work.waiting === 'main_session' ? <span>Waiting for main-session progress</span> : null}
         {work.health ? <span className="lab-tpm-health">{work.health}</span> : null}{!item.online ? <span className="lab-tpm-health">Host offline</span> : null}
@@ -73,6 +107,7 @@ export function TpmWorkspace({ item, session, replica, visible, storageScope, tr
         <button type="button" aria-pressed={!documentVisible} onClick={() => setDocumentVisible(false)}>Conversation</button>
         <button type="button" aria-label="Plan & acceptance" aria-pressed={documentVisible} onClick={() => setDocumentVisible(true)}>Plan & acceptance</button>
         {work.phase === 'completed' ? <button className="lab-tpm-reopen" type="button" aria-label="Reopen work" disabled={unavailable || creationUnresolved} onClick={() => run(() => onAction('reopen'))}>Reopen work</button> : null}
+
       </nav>
       {work.summary || work.nextAction ? <details className="lab-tpm-progress"><summary title={work.summary || work.nextAction}>{work.summary || work.nextAction}</summary>{work.summary && work.nextAction ? <small>Next: {work.nextAction}</small> : null}</details> : null}
       {work.creationStatus === 'unknown' ? <details className="lab-tpm-uncertain" open>

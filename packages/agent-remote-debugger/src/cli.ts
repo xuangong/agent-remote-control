@@ -149,9 +149,10 @@ Commands:
   replay <session.jsonl> [--open] [--port <0-65535>]
   provider list
   tpm list <host-id>
-  tpm create <host-id> [requirement] --provider <provider-id> --main-session <native-session-id> --title <title> [--file <path|->] [--operation-id <id>]
+  tpm create <host-id> [requirement] --provider <provider-id> --main-session <native-session-id> [--title <title>] [--file <path|->] [--operation-id <id>]
   tpm show <host-id> <work-id>
-  tpm <pause|resume|check|reopen> <host-id> <work-id> --revision <revision> [--operation-id <id>]
+  tpm rename <host-id> <work-id> --title <title> --revision <revision> [--operation-id <id>]
+  tpm <pause|resume|check|reopen|archive|unarchive> <host-id> <work-id> --revision <revision> [--operation-id <id>]
   tpm resolve <host-id> <work-id> --revision <revision> --intent-id <id> --resolution <accepted|rejected> [--native-session <id>] [--operation-id <id>]
   session create <agent-id> --provider <provider-id> [--provider-session-id <id>] [--cwd <path>] [--model <model>] [--reasoning-effort <effort>] [--system-prompt <text>] [--planning <on|off>]
   session resume <agent-id> --persistence-file <path|->

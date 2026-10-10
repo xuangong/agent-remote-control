@@ -6,7 +6,7 @@ A TPM is a normal agent session accountable for one agreed work item. It clarifi
 
 Use `/tpm` or the View menu to show or hide the global TPM entry. `/tpm on`, `/tpm off`, `/tpm enable`, and `/tpm disable` are also supported. Without an explicit saved preference it is visible on coarse-pointer/mobile devices and hidden on desktop, independently of Track.
 
-Select a supported main session and create a work with a title and requirement. The TPM begins by discussing the need and agreed scope. Opening a work displays the ordinary Session View and full composer in an Ask-style workspace. Desktop workspaces can be resized; small screens use an overlay. Conversation is primary. **Plan & acceptance** opens the TPM-maintained Markdown document, which can remain empty while the need is still being clarified. The document is not automatically an approved specification.
+Select a supported main session and choose **New TPM session** to open a conversation directly. No title or requirement form is needed. Unnamed sessions receive a color-and-flower placeholder such as **Amber Iris**. Click the title and pencil to rename at any time; user-chosen names are preserved by automated work updates. A vague intention is enough: use the conversation for research, requirements and solution design, then follow implementation through acceptance. The objective and plan can evolve as discussion makes them clearer. The TPM asks what the user wants and waits for their reply; it must not infer an assignment from main-session activity. Once discussion establishes the objective, it sets a concise work title through `update_work`. API callers can still supply an optional title and initial requirement. The catalog refreshes automatically, including when the menu opens or the window regains focus. Opening a work displays the ordinary Session View and full composer in an Ask-style workspace. Desktop workspaces can be resized; small screens use an overlay. Conversation is primary. **Plan & acceptance** opens the TPM-maintained Markdown document, which can remain empty while the need is still being clarified. The document is not automatically an approved specification.
 
 Closing, minimizing, changing sessions, or hiding TPM view preserves drafts and does not stop automatic follow-up. The product does not expose heartbeat controls. Talk to the TPM to discuss progress or change direction. Work progress and native runtime status are separate facts. A main session finishing unrelated work never marks the TPM work complete.
 
@@ -15,6 +15,8 @@ Every conversation, including main, Side, Ask, and TPM, uses the ordinary Sessio
 TPM composes the standard [session companions](session-companions.md): a sequential execution list, explicit user confirmation, and heartbeat. Open **Todo** inside the Session View to inspect the current step and remaining work. Confirmation shows the concrete proposal and provides **Agree** and **Needs changes**. The model cannot approve these steps itself. Chat remains available while a decision is pending; conversational discussion alone does not record approval.
 
 The initial list covers clarification, plan agreement, implementation, verification, user acceptance and reporting. TPM can edit remaining steps at boundaries, while completed history stays intact. Revisions to an approved plan require fresh agreement. The expanded list overlays the current view without moving the timeline or composer.
+
+Completed work can be archived from its workspace. Archiving retains conversation, documents and evidence, removes it from the active menu count, and places it in the collapsed **Archived** list. Open an archived work to view it or restore it. Restoring leaves the work completed; **Reopen** explicitly starts further follow-up and also removes the archive marker. Unfinished work cannot be archived.
 
 ## Background behavior
 
@@ -31,7 +33,7 @@ Tools can only access this work and its bound main session:
 - `read_work`: current requirement, assessment, pending intents, plan, and document versions.
 - `read_main_session`: authoritative state and bounded, paginated history; search is explicitly limited to the returned page.
 - `send_main_message`: persist a current-step consultation, implementation request, or acceptance feedback without interruption; recheck the step and applicable user approval before native dispatch.
-- `update_work`: revision-checked assessment; completion requires every todo step, acceptance criteria and evidence.
+- `update_work`: revision-checked assessment and optional work title; completion requires every todo step, acceptance criteria and evidence.
 - `write_work_document`: update the work document and retain bounded document versions.
 - `schedule_check`: request an earlier review within Controller limits.
 - `read_todo_list`, `revise_todo_list`, `update_todo_step`, `complete_todo_step`, `request_todo_confirmation`: the standard sequential list toolkit. These do not expose a user-approval operation to the model.

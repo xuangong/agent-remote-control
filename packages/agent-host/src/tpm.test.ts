@@ -334,3 +334,56 @@ it.each(['started', 'queued', 'handled', undefined] as const)('preserves native 
   const current = await f.coordinator.get(work.id); const settled = current.outbox?.find(value => value.id === intent.id);
   expect(settled?.acceptance).toBe(disposition); expect(current.phase).toBe('clarifying');
 }, 10000);
+
+it('starts an unspecified TPM conversation and persists its name after clarification', async () => {
+  const f = await fixture();
+  const input = { providerId: 'codex', mainNativeSessionId: 'main', operationId: 'blank-session' };
+  const created = await f.coordinator.create(input, 'browser-scope');
+  expect(created).toMatchObject({ title: expect.stringMatching(/^[A-Z][a-z]+ [A-Z][a-z]+$/), phase: 'clarifying', waiting: 'user', summary: '', document: '' });
+  const native = f.sessions.get(created.tpmNativeSessionId!)!;
+  await waitMessages(native, 1);
+  expect(native.messages[0]!.text).toContain('No requirement has been provided yet');
+  expect(f.sessions.get('main')!.messages).toEqual([]);
+  const duplicate = await f.coordinator.create(input, 'browser-scope');
+  expect(duplicate.id).toBe(created.id);
+  expect(f.creates).toHaveLength(1);
+  const current = await f.coordinator.get(created.id);
+  await f.call(current, 'update_work', { revision: current.revision, title: 'Improve session search', phase: 'clarifying', waiting: 'user', summary: 'Discussing search scope', nextAction: 'Agree on acceptance criteria' });
+  expect((await f.coordinator.list()).works[0]!.title).toBe('Improve session search');
+  await f.restart();
+  expect((await f.coordinator.get(created.id)).title).toBe('Improve session search');
+});
+
+it('preserves manual names across model updates, retries and restart', async () => {
+  const f = await fixture(); const work = await f.create();
+  const rename = { id: work.id, revision: work.revision, operationId: 'rename-one', action: 'rename' as const, title: '  Mobile reconnect  ' };
+  const renamed = await f.coordinator.action(rename, 'owner');
+  expect(renamed.title).toBe('Mobile reconnect');
+  expect(renamed.phase).toBe(work.phase);
+  expect((await f.coordinator.action(rename, 'owner')).revision).toBe(renamed.revision);
+  await expect(f.coordinator.action({ ...rename, operationId: 'stale', title: 'Stale name' }, 'owner')).rejects.toThrow('changed');
+  await f.call(renamed, 'update_work', { revision: renamed.revision, title: 'Model suggestion', phase: 'clarifying', waiting: 'user', summary: 'Scope discussed', nextAction: 'Wait for input' });
+  expect((await f.coordinator.get(work.id)).title).toBe('Mobile reconnect');
+  await f.restart();
+  const restored = await f.coordinator.get(work.id);
+  expect(restored.title).toBe('Mobile reconnect');
+  expect((await f.call(restored, 'read_work', {})).titleSetByUser).toBe(true);
+});
+it('archives only completed work, retaining the conversation and allowing restore or reopen', async () => {
+  const f = await fixture(); const work = await f.create();
+  await expect(f.coordinator.action({ id: work.id, revision: work.revision, operationId: 'early', action: 'archive' }, 'owner')).rejects.toThrow('Complete this work');
+  await f.call(work, 'write_work_document', { revision: work.revision, document: 'Accepted scope', acceptance: 'Verified' });
+  while (await f.advanceTodo(work)) { /* Complete all tasks and explicit user confirmations. */ }
+  const completed = await f.acknowledge(work, { phase: 'completed', acceptance: 'Verified', evidence: ['Checks passed'] });
+  const input = { id: work.id, revision: completed.revision, operationId: 'archive', action: 'archive' as const };
+  const archived = await f.coordinator.action(input, 'owner');
+  expect(archived).toMatchObject({ archived: true, phase: 'completed', tpmNativeSessionId: work.tpmNativeSessionId, evidence: ['Checks passed'] });
+  expect((await f.coordinator.action(input, 'owner')).revision).toBe(archived.revision);
+  await f.restart();
+  expect((await f.coordinator.list()).works[0]).toMatchObject({ archived: true, id: work.id });
+  const restored = await f.coordinator.action({ id: work.id, revision: archived.revision, operationId: 'restore', action: 'unarchive' }, 'owner');
+  expect(restored).toMatchObject({ archived: false, phase: 'completed' });
+  const again = await f.coordinator.action({ id: work.id, revision: restored.revision, operationId: 'archive-again', action: 'archive' }, 'owner');
+  const reopened = await f.coordinator.action({ id: work.id, revision: again.revision, operationId: 'reopen', action: 'reopen' }, 'owner');
+  expect(reopened).toMatchObject({ archived: false, phase: 'clarifying' });
+});

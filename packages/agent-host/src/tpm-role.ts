@@ -1,4 +1,19 @@
+import { randomInt } from 'node:crypto';
 import { createSessionTodo } from './session-todo.js';
+
+const colors = ['Amber', 'Azure', 'Coral', 'Crimson', 'Golden', 'Indigo', 'Ivory', 'Jade', 'Lilac', 'Mint', 'Pearl', 'Rose', 'Ruby', 'Silver', 'Teal', 'Violet'];
+const flowers = ['Aster', 'Camellia', 'Dahlia', 'Daisy', 'Freesia', 'Gardenia', 'Hibiscus', 'Iris', 'Jasmine', 'Lily', 'Lotus', 'Magnolia', 'Orchid', 'Peony', 'Poppy', 'Tulip'];
+
+export function tpmPlaceholderTitle(existing: readonly string[]): string {
+  const used = new Set(existing);
+  const names = colors.flatMap(color => flowers.map(flower => `${color} ${flower}`));
+  const available = names.filter(name => !used.has(name));
+  if (available.length) return available[randomInt(available.length)]!;
+  const base = names[randomInt(names.length)]!;
+  let suffix = 2;
+  while (used.has(`${base} ${suffix}`)) suffix++;
+  return `${base} ${suffix}`;
+}
 
 export function initialTpmTodo() {
   return createSessionTodo([
@@ -14,7 +29,7 @@ export function initialTpmTodo() {
 /** Appended to native instructions; native safety and workspace policy remain authoritative. */
 export function tpmInstructions(workId: string): string {
   return `You are the TPM accountable for delivery of work ${workId}.
-Help the user understand, clarify and decompose the need. Discuss alternatives, constraints and acceptance criteria. Maintain a concise PRD/spec with write_work_document. Read read_work before changing work state; use its current revision.
+Provide a dedicated conversation for research, requirements, solution design and end-to-end delivery follow-up. Users may arrive with only a vague intention; help them explore, clarify and decompose it. Let the objective, title and proposal evolve with discussion instead of treating the initial description as a fixed assignment. A new session may have no requirement yet. Ask what the user wants, then wait; do not invent an objective from main-session activity. Once discussion establishes the objective, set a concise title through update_work. The initial color-and-flower title is only a placeholder. Preserve a title explicitly chosen by the user (read_work reports titleSetByUser). Discuss alternatives, constraints and acceptance criteria. Maintain a concise PRD/spec with write_work_document. Read read_work before changing work state; use its current revision.
 Use the optional standard todo toolkit as your execution plan. Read read_todo_list first and advance only its current step. Replan at completed-step boundaries when new information changes the remaining work. Include todoStepId when messaging main. Implementation requires explicit approval of the current plan and specification. Complete every step before reporting the work completed. A request for changes is not approval; revise the proposal and request confirmation again.
 You coordinate implementation with the bound main session using read_main_session and send_main_message. You do not implement product code yourself. Never use shell/file-edit tools to implement it. This role does not grant additional native permissions.
 Distinguish consultation from implementation requests. Obtain user agreement on scope before requesting implementation. Routine coordination within that agreed scope is authorized; return new scope or consequential unresolved choices to the user. Do not approve tool requests, cancel, interrupt, take over, or change settings of the main session.

@@ -5,7 +5,7 @@ import { isTpmAction, isTpmCreate, sessionOperationAvailability, type TpmAction,
 import { OperationCacheError, type AgentManagerEvent, type RemoteHostSessionLease, type SessionWireOperationExecutor } from '@orchardworks/agent-remote-relay';
 import { sessionHeartbeatInterval, sessionHeartbeatInstructions, sessionHeartbeatTools } from './session-heartbeat.js';
 import { TpmStore, type TpmRecord } from './tpm-store.js';
-import { initialTpmTodo, tpmInstructions, tpmReviewPrompt } from './tpm-role.js';
+import { initialTpmTodo, tpmInstructions, tpmReviewPrompt, tpmPlaceholderTitle } from './tpm-role.js';
 import { changeSessionTodo, confirmSessionTodo, invalidateSessionTodoApproval, currentSessionTodo, sessionTodoComplete, sessionTodoInstructions, sessionTodoTools } from './session-todo.js';
 
 export interface TpmOptions {
@@ -89,17 +89,20 @@ export class TpmCoordinator {
       const main = await this.access.acquire(input.providerId, input.mainNativeSessionId);
       try {
         const id = randomUUID(); const timestamp = new Date(this.now()).toISOString();
-        await this.store.insert({ version: 1, createKey: key, createFingerprint: hash, creation: 'prepared', requirement: input.requirement,
-          dirty: true, lastReviewAt: 0, actions: {}, work: { id, revision: 1, title: input.title, providerId: input.providerId,
-            mainNativeSessionId: input.mainNativeSessionId, phase: 'clarifying', waiting: 'none', paused: false,
-            summary: input.requirement.slice(0, 2048), nextAction: 'Clarify requirements and agree on a delivery plan.', document: '', acceptance: '', evidence: [],
+        await this.store.insert({ version: 1, createKey: key, createFingerprint: hash, creation: 'prepared', requirement: input.requirement ?? '', titleSetByUser: !!input.title,
+          dirty: true, lastReviewAt: 0, actions: {}, work: { id, revision: 1, title: input.title ?? tpmPlaceholderTitle(this.store.all().map(record => record.work.title)), providerId: input.providerId,
+            mainNativeSessionId: input.mainNativeSessionId, phase: 'clarifying', waiting: input.requirement ? 'none' : 'user', paused: false,
+            summary: input.requirement?.slice(0, 2048) ?? '', nextAction: 'Clarify requirements and agree on a delivery plan.', document: '', acceptance: '', evidence: [],
             createdAt: timestamp, updatedAt: timestamp, nextCheckAt: this.now(), outbox: [] } });
         await this.store.update(id, undefined, record => { record.creation = 'dispatching'; });
         try {
           this.admit(input.providerId);
           const nativeId = await this.access.create(input.providerId, main.agent.snapshot().payload.runtimeInfo.cwd, this.boundExtensions(id));
           await this.store.update(id, undefined, record => { record.creation = 'accepted'; record.work.tpmNativeSessionId = nativeId; });
-          await this.enqueue(id, 'tpm', 'initial', `TPM work: ${input.title}\n\nUser requirement:\n${input.requirement}\n\nBegin by understanding the user's need and discussing the plan. Read read_work and call update_work to persist your assessment.`);
+          const introduction = input.requirement
+            ? `User requirement:\n${input.requirement}\n\nBegin by understanding the user's need and discussing the plan.`
+            : 'No requirement has been provided yet. Briefly ask the user what they want to accomplish, then wait for their reply. Do not infer a task from the main session or contact it before the user explains their need.';
+          await this.enqueue(id, 'tpm', 'initial', `${introduction}\n\nRead read_work and call update_work to persist your assessment.`);
         } catch (error) {
           await this.store.update(id, undefined, record => { if (record.creation !== 'accepted') record.creation = 'unknown'; record.work.health = shortError(error); });
         }
@@ -125,7 +128,12 @@ export class TpmCoordinator {
         await this.access.recover(previous.work.providerId, nativeId, this.boundExtensions(input.id));
       }
       const updated = await this.store.update(input.id, input.action === 'confirm_todo' ? undefined : input.revision, record => {
-        if (input.action === 'confirm_todo') {
+        if (input.action === 'rename') {
+          record.work.title = input.title.trim(); record.titleSetByUser = true;
+        } else if (input.action === 'archive' || input.action === 'unarchive') {
+          if (record.work.phase !== 'completed') throw new Error('Complete this work before archiving it.');
+          record.work.archived = input.action === 'archive';
+        } else if (input.action === 'confirm_todo') {
           if (!record.work.todo || !active(record.work)) throw new Error('This work is not accepting todo confirmations.');
           record.work.todo = confirmSessionTodo(record.work.todo, input.confirmation);
           if (input.confirmation.decision === 'approve') record.approvedSpecification = fingerprint([record.work.document, record.work.acceptance]);
@@ -153,6 +161,7 @@ export class TpmCoordinator {
           if (record.creation === 'abandoned') throw new Error('This work creation was abandoned. Create a new work item.');
           if (unknown(record)) throw new Error('Resolve unknown operation outcomes before continuing.');
           if (input.action === 'reopen') {
+            record.work.archived = false;
             if (record.work.phase === 'completed') {
               const todo = record.work.todo;
               const fresh = initialTpmTodo();
@@ -410,7 +419,7 @@ export class TpmCoordinator {
           ? record.documentHistory?.find(version => version.revision === input.documentRevision) : undefined;
         if (input.documentRevision !== undefined && input.documentRevision !== record.work.documentRevision && !historical) throw new Error('The requested work document revision is unavailable.');
         return { ...record.work, outbox: record.work.outbox?.map(intent => ['accepted', 'rejected'].includes(intent.status) ? { ...intent, text: '[Settled message text omitted.]' } : intent),
-          ...(historical ? { document: historical.document, acceptance: historical.acceptance, evidence: historical.evidence ?? [] } : {}), requirement: record.requirement, creation: record.creation,
+          ...(historical ? { document: historical.document, acceptance: historical.acceptance, evidence: historical.evidence ?? [] } : {}), requirement: record.requirement, creation: record.creation, titleSetByUser: !!record.titleSetByUser,
           documentRevision: input.documentRevision ?? record.work.documentRevision, documentVersions: (record.documentHistory ?? []).map(version => ({ revision: version.revision })) };
       }),
       tool('read_main_session', 'Read authoritative main-session state and bounded paginated history. Use the returned cursor to continue; a search filters only the returned page.', {
@@ -448,14 +457,14 @@ export class TpmCoordinator {
         const intent = await this.enqueue(id, 'main', purpose, message, messageId, { todoStepId: input.todoStepId, todoPlanRevision: record.work.todo!.planRevision });
         void this.tick(); return intent;
       }),
-      tool('update_work', 'Record your delivery assessment and acknowledge this review. Completion requires explicit acceptance criteria and evidence. Does not change user pause.', {
+      tool('update_work', 'Record your delivery assessment and acknowledge this review. Set title when the conversation establishes the objective. User-set titles are preserved. Completion requires explicit acceptance criteria and evidence. Does not change user pause.', {
         revision: integer, phase: { type: 'string', enum: ['clarifying', 'ready', 'implementing', 'validating', 'completed'] }, waiting: { type: 'string', enum: ['none', 'user', 'main_session'] },
-        summary: short, nextAction: short, acceptance: text, evidence: { type: 'array', items: short, maxItems: 100 },
+        title: { type: 'string', minLength: 1, maxLength: 256, pattern: '\\S' }, summary: short, nextAction: short, acceptance: text, evidence: { type: 'array', items: short, maxItems: 100 },
       }, ['revision', 'phase', 'waiting', 'summary', 'nextAction'], async input => {
         const result = await this.store.update(id, input.revision, record => {
           if (record.work.phase === 'completed' && input.phase !== 'completed') throw new Error('Reopen completed work explicitly before changing its delivery phase.');
           if (input.acceptance !== undefined && input.acceptance !== record.work.acceptance && record.work.todo) record.work.todo = invalidateSessionTodoApproval(record.work.todo);
-          for (const key of ['phase', 'waiting', 'summary', 'nextAction', 'acceptance', 'evidence'] as const) if (input[key] !== undefined) (record.work as any)[key] = input[key];
+          for (const key of ['title', 'phase', 'waiting', 'summary', 'nextAction', 'acceptance', 'evidence'] as const) if (input[key] !== undefined && (key !== 'title' || !record.titleSetByUser)) (record.work as any)[key] = input[key];
           if (record.work.phase === 'completed' && (!record.work.acceptance.trim() || !record.work.evidence.length)) throw new Error('Completion requires acceptance criteria and work-specific evidence.');
           if (record.work.phase === 'completed' && (!record.work.todo || !sessionTodoComplete(record.work.todo))) throw new Error('Complete every todo step before completing the work.');
           if (record.work.todo && currentSessionTodo(record.work.todo)?.kind === 'confirmation') record.work.waiting = 'user';

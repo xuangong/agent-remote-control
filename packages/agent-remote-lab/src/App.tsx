@@ -1548,7 +1548,7 @@ function AppContent({
         busy={!!tpm.busy} attaching={tpm.attaching[key] || tpm.detailsLoading[key]} error={tpm.detailErrors[key] ?? tpm.attachmentErrors[key]}
         onClose={tpm.close} onShowList={() => { tpm.close(); tpmTriggerRef.current?.click(); }}
         onOpenMain={() => { tpm.close(); void openSession({ hostId: item.hostId, providerId: item.work.providerId, nativeSessionId: item.work.mainNativeSessionId, title: sessionEntries.find(entry => entry.hostId === item.hostId && entry.providerId === item.work.providerId && entry.nativeSessionId === item.work.mainNativeSessionId)?.title ?? 'Main session' }); }}
-        onAction={action => tpm.action(key, action)} onConfirmTodo={decision => tpm.confirmTodo(key, decision)} onResolve={(id, resolution, nativeSessionId) => tpm.resolve(key, id, resolution, nativeSessionId)} onRetry={() => void tpm.open(key)} />;
+        onRename={title => tpm.rename(key, title)} onAction={action => tpm.action(key, action)} onConfirmTodo={decision => tpm.confirmTodo(key, decision)} onResolve={(id, resolution, nativeSessionId) => tpm.resolve(key, id, resolution, nativeSessionId)} onRetry={() => void tpm.open(key)} />;
     })}
     {compactLayout ? <nav className="lab-mobile-navigation" aria-label="Session navigation" {...backgroundInert}>
       <button ref={sessionsTriggerRef} type="button" aria-label="Open sessions" aria-haspopup="dialog" aria-expanded={contextOpen} aria-controls="lab-context" onClick={() => { openContext(true); }}>Sessions</button>

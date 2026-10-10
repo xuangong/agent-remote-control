@@ -12,11 +12,18 @@ test('TPM management envelopes permit only declared methods and routes', () => {
 });
 test('TPM request contracts reject arbitrary extensions and invalid revisions', () => {
   const create = { providerId: 'codex', mainNativeSessionId: 'main', title: 'Work', requirement: 'Deliver feature', operationId: 'create' };
+  expect(isTpmCreate({ providerId: 'codex', mainNativeSessionId: 'main', operationId: 'create' })).toBe(true);
+  expect(isTpmCreate({ ...create, title: '' })).toBe(false);
+  expect(isTpmCreate({ ...create, requirement: '' })).toBe(false);
   expect(isTpmCreate(create)).toBe(true); expect(isTpmCreate({ ...create, tools: [] })).toBe(false);
   expect(isTpmCreate({ ...create, requirement: '中'.repeat(16000) })).toBe(true);
   expect(isTpmCreate({ ...create, requirement: '中'.repeat(16001) })).toBe(false);
   expect(isTpmCreate({ ...create, requirement: '\u0000'.repeat(16000) })).toBe(false);
   const action = { id: 'work', revision: 1, operationId: 'pause', action: 'pause' };
+  expect(isTpmAction({ ...action, action: 'rename', title: 'Amber Iris' })).toBe(true);
+  expect(isTpmAction({ ...action, action: 'rename', title: '  ' })).toBe(false);
+  expect(isTpmAction({ ...action, action: 'archive' })).toBe(true);
+  expect(isTpmAction({ ...action, action: 'unarchive' })).toBe(true);
   expect(isTpmAction(action)).toBe(true); expect(isTpmAction({ ...action, revision: 0 })).toBe(false);
   expect(isTpmAction({ ...action, action: 'resolve', intentId: 'creation', resolution: 'accepted', nativeSessionId: 'native' })).toBe(true);
   expect(isTpmAction({ ...action, action: 'resolve' })).toBe(false);

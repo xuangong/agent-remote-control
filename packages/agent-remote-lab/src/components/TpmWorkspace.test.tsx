@@ -152,3 +152,42 @@ it('offers an explicit reopen for completed work', async () => {
   await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="Reopen work"]')!.click());
   expect(actions).toEqual(['reopen']);
 });
+it('renames inline, keeps failed edits and cancels without closing the conversation', async () => {
+  const rename = vi.fn().mockRejectedValueOnce(new Error('Host disconnected')).mockResolvedValue(undefined);
+  const close = vi.fn();
+  function Harness() {
+    const trigger = useRef<HTMLButtonElement>(null);
+    return <TpmWorkspace item={item} visible storageScope="tpm-rename" triggerRef={trigger}
+      transport={{} as RemoteAgentTransport} draftBinding={{ store: new DraftStore('tpm-rename'), key: item.key }}
+      onClose={close} onShowList={() => {}} onOpenMain={() => {}} onRename={rename} onAction={async () => {}} onResolve={async () => {}} onRetry={() => {}} />;
+  }
+  const container = await render(<Harness />);
+  await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="Rename TPM session"]')!.click());
+  const input = container.querySelector<HTMLInputElement>('[aria-label="TPM session name"]')!;
+  await act(async () => { Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(input, '  Mobile search  '); input.dispatchEvent(new Event('input', { bubbles: true })); });
+  const form = container.querySelector<HTMLFormElement>('.lab-tpm-name-editor')!;
+  await act(async () => form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })));
+  expect(rename).toHaveBeenCalledWith('Mobile search');
+  expect(form.textContent).toContain('Host disconnected');
+  expect(input.value).toBe('  Mobile search  ');
+  await act(async () => form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })));
+  expect(container.querySelector('.lab-tpm-name-editor')).toBeNull();
+  expect(close).not.toHaveBeenCalled();
+  await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="Rename TPM session"]')!.click());
+  await act(async () => container.querySelector('input')!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })));
+  expect(container.querySelector('.lab-tpm-name-editor')).toBeNull();
+  expect(close).not.toHaveBeenCalled();
+});
+it.each([false, true])('archives or restores completed work without changing the native session (archived=%s)', async archived => {
+  const actions: string[] = []; const showList = vi.fn();
+  function Harness() {
+    const trigger = useRef<HTMLButtonElement>(null);
+    return <TpmWorkspace item={{ ...item, work: { ...item.work, phase: 'completed', archived, outbox: [] } }} visible storageScope="tpm-archive" triggerRef={trigger}
+      transport={{} as RemoteAgentTransport} draftBinding={{ store: new DraftStore('tpm-archive'), key: item.key }}
+      onClose={() => {}} onShowList={showList} onOpenMain={() => {}} onAction={async action => { actions.push(action); }} onResolve={async () => {}} onRetry={() => {}} />;
+  }
+  const container = await render(<Harness />);
+  await act(async () => container.querySelector<HTMLButtonElement>(`[aria-label="${archived ? 'Restore' : 'Archive'} TPM session"]`)!.click());
+  expect(actions).toEqual([archived ? 'unarchive' : 'archive']);
+  expect(showList).toHaveBeenCalledTimes(archived ? 0 : 1);
+});

@@ -26,13 +26,20 @@ it('runs TPM list/create/read/actions on the authorized Host path using existing
       ['tpm', 'list', 'host-one'], ['tpm', 'show', 'host-one', 'work-one'],
       ['tpm', 'create', 'host-one', 'Ship', '--provider', 'codex', '--main-session', 'main', '--title', 'Delivery', '--operation-id', 'create-one'],
       ...['pause', 'resume', 'check', 'reopen'].map(action => ['tpm', action, 'host-one', 'work-one', '--revision', '1', '--operation-id', action + '-one']),
+      ['tpm', 'create', 'host-one', '--provider', 'codex', '--main-session', 'main', '--operation-id', 'blank-one'],
+      ...['archive', 'unarchive'].map(action => ['tpm', action, 'host-one', 'work-one', '--revision', '1', '--operation-id', action + '-one']),
+      ['tpm', 'rename', 'host-one', 'work-one', '--title', 'Amber Iris', '--revision', '1', '--operation-id', 'rename-one'],
       ['tpm', 'resolve', 'host-one', 'work-one', '--revision', '1', '--intent-id', 'intent-one', '--resolution', 'rejected', '--operation-id', 'resolve-one'],
     ]) expect(await runCli([...command, ...options], result.io, { subscribeSigint: () => () => {} })).toBe(0);
-    expect(calls).toHaveLength(8);
+    expect(calls).toHaveLength(12);
     expect(calls.every(call => call.path?.startsWith('/u/tenant/v1/remote/hosts/host-one/tpm'))).toBe(true);
     expect(calls.every(call => call.cookie === '__Host-arc_session=private-session-secret' && call.origin === base)).toBe(true);
     expect(JSON.parse(calls[2]!.body)).toEqual({ providerId: 'codex', mainNativeSessionId: 'main', title: 'Delivery', requirement: 'Ship', operationId: 'create-one' });
     expect(JSON.parse(calls[3]!.body)).toEqual({ action: 'pause', revision: 1, operationId: 'pause-one', id: 'work-one' });
+    expect(JSON.parse(calls[7]!.body)).toEqual({ providerId: 'codex', mainNativeSessionId: 'main', operationId: 'blank-one' });
+    expect(JSON.parse(calls[8]!.body)).toMatchObject({ action: 'archive', id: 'work-one' });
+    expect(JSON.parse(calls[9]!.body)).toMatchObject({ action: 'unarchive', id: 'work-one' });
+    expect(JSON.parse(calls[10]!.body)).toMatchObject({ action: 'rename', title: 'Amber Iris', id: 'work-one' });
     expect(result.stdout.join('')).not.toContain('private-session-secret'); expect(result.stderr).toEqual([]);
   } finally { server.closeAllConnections(); await new Promise<void>(resolve => server.close(() => resolve())); }
 }, 10000);

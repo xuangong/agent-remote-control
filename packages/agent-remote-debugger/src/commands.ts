@@ -42,7 +42,7 @@ export async function executeCommand(
   try {
     const path = invocation.path.join(' ');
     switch (path) {
-      case 'tpm list': case 'tpm create': case 'tpm show': case 'tpm pause': case 'tpm resume': case 'tpm check': case 'tpm reopen': case 'tpm resolve': return await context.tpm(invocation.path[1]!);
+      case 'tpm list': case 'tpm create': case 'tpm show': case 'tpm pause': case 'tpm resume': case 'tpm check': case 'tpm reopen': case 'tpm resolve': case 'tpm rename': case 'tpm archive': case 'tpm unarchive': return await context.tpm(invocation.path[1]!);
       case 'provider list': return await context.listProviders();
       case 'session create': return await context.createSession();
       case 'session resume': return await context.resumeSession();
@@ -102,7 +102,7 @@ class CommandContext {
 
   async tpm(action: string): Promise<void> {
     const common = ['relay', 'origin', 'cookie-file', 'timeout', 'format', 'json'];
-    this.validateOptions(...common, ...(action === 'create' ? ['provider', 'main-session', 'title', 'file', 'operation-id'] : action === 'list' || action === 'show' ? [] : ['revision', 'operation-id', ...(action === 'resolve' ? ['intent-id', 'resolution', 'native-session'] : [])]));
+    this.validateOptions(...common, ...(action === 'create' ? ['provider', 'main-session', 'title', 'file', 'operation-id'] : action === 'list' || action === 'show' ? [] : ['revision', 'operation-id', ...(action === 'rename' ? ['title'] : []), ...(action === 'resolve' ? ['intent-id', 'resolution', 'native-session'] : [])]));
     this.requireFormat('text', 'json');
     const hostId = this.invocation.positionals[0];
     if (!hostId) throw new DebuggerError(2, 'host_id_required', 'A Host ID is required.', false);
@@ -139,12 +139,16 @@ class CommandContext {
     if (action === 'list') return this.result(await this.withinDeadline(() => client.tpmList(hostId, options)));
     if (action === 'show') return this.result(await this.withinDeadline(() => client.tpmWork(hostId, this.invocation.positionals[1]!, options)));
     if (action === 'create') {
-      const providerId = requiredOption(this.invocation, 'provider'), mainNativeSessionId = requiredOption(this.invocation, 'main-session'), title = requiredOption(this.invocation, 'title');
-      const requirement = await this.withinDeadline(() => readTextInput(this.invocation.positionals[1], stringOption(this.invocation, 'file'), this.io, this.signal));
+      const providerId = requiredOption(this.invocation, 'provider'), mainNativeSessionId = requiredOption(this.invocation, 'main-session'), title = stringOption(this.invocation, 'title');
+      const file = stringOption(this.invocation, 'file');
+      const requirement = this.invocation.positionals[1] !== undefined || file !== undefined
+        ? await this.withinDeadline(() => readTextInput(this.invocation.positionals[1], file, this.io, this.signal)) : undefined;
       return this.result(await this.withinDeadline(() => client.tpmCreate(hostId, { providerId, mainNativeSessionId, title, requirement, operationId }, options)));
     }
     let input: TpmActionInput;
-    if (action === 'resolve') {
+    if (action === 'rename') {
+      input = { action, title: requiredOption(this.invocation, 'title'), revision: revision!, operationId };
+    } else if (action === 'resolve') {
       const intentId = requiredOption(this.invocation, 'intent-id'), resolution = requiredOption(this.invocation, 'resolution');
       if (resolution !== 'accepted' && resolution !== 'rejected') throw new DebuggerError(2, 'invalid_resolution', 'Resolution must be accepted or rejected.', false);
       const nativeSessionId = stringOption(this.invocation, 'native-session');
@@ -152,7 +156,7 @@ class CommandContext {
       if (nativeSessionId && (intentId !== 'creation' || resolution !== 'accepted')) throw new DebuggerError(2, 'invalid_native_session', 'Option --native-session applies only to accepted creation resolution.', false);
       input = { action, revision: revision!, operationId, intentId, resolution, ...(nativeSessionId ? { nativeSessionId } : {}) };
     } else {
-      if (action !== 'pause' && action !== 'resume' && action !== 'check' && action !== 'reopen') throw new DebuggerError(2, 'unknown_command', 'TPM action is unavailable.', false);
+      if (action !== 'pause' && action !== 'resume' && action !== 'check' && action !== 'reopen' && action !== 'archive' && action !== 'unarchive') throw new DebuggerError(2, 'unknown_command', 'TPM action is unavailable.', false);
       input = { action, revision: revision!, operationId };
     }
     this.result(await this.withinDeadline(() => client.tpmAction(hostId, this.invocation.positionals[1]!, input, options)));

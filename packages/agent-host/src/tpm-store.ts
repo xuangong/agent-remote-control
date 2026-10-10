@@ -11,6 +11,7 @@ export interface TpmRecord {
   createFingerprint: string;
   creation: 'prepared' | 'dispatching' | 'accepted' | 'unknown' | 'abandoned';
   requirement: string;
+  titleSetByUser?: boolean;
   documentHistory?: Array<{ revision: number; document: string; acceptance: string; evidence?: string[] }>;
   dirty: boolean;
   changeVersion?: number;

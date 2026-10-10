@@ -33,19 +33,16 @@ it('opens a global work without changing the main view and distinguishes deliver
   expect(h.state().sessions[h.state().selected!]!.nativeSessionId).toBe('tpm');
   expect(h.creates).toEqual([]);
 });
-it('creates a work from the selected main with a title and requirement', async () => {
+it('creates and opens a TPM session directly without requiring a title or requirement', async () => {
   const h = harness({ supported: true, supportedProviders: ['codex'], works: [] });
   const container = await render(<h.Harness />);
   await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="TPM works"]')!.click());
-  expect(container.textContent).toContain('No TPM works yet');
+  expect(container.querySelector('[aria-label="Refresh TPM works"]')).toBeNull();
+  expect(container.querySelector('form')).toBeNull();
   await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="Create TPM work"]')!.click());
-  for (const [label, value] of [['Work title', 'Search'], ['Requirement', 'Find items']] as const) {
-    const input = container.querySelector<HTMLInputElement | HTMLTextAreaElement>(`[aria-label="${label}"]`)!;
-    await act(async () => { Object.getOwnPropertyDescriptor(label === 'Requirement' ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype, 'value')!.set!.call(input, value); input.dispatchEvent(new Event('input', { bubbles: true })); });
-  }
-  await act(async () => container.querySelector<HTMLFormElement>('form')!.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })));
-  expect(h.creates).toMatchObject([{ host: 'host', providerId: 'codex', mainNativeSessionId: 'main', title: 'Search', requirement: 'Find items' }]);
+  expect(h.creates).toEqual([{ host: 'host', providerId: 'codex', mainNativeSessionId: 'main', operationId: expect.any(String) }]);
   expect(h.state().expanded).toBe(true);
+  expect(h.state().sessions[h.state().selected!]!.nativeSessionId).toBe('tpm');
 });
 it('explains an unavailable Controller without offering misleading creation', async () => {
   const h = harness({ supported: false, works: [] });
@@ -53,4 +50,18 @@ it('explains an unavailable Controller without offering misleading creation', as
   await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="TPM works"]')!.click());
   expect(container.textContent).toContain('TPM is unavailable');
   expect(container.querySelector('[aria-label="Create TPM work"]')).toBeNull();
+});
+
+it('keeps archived sessions accessible without counting them as active or showing attention', async () => {
+  const h = harness({ supported: true, supportedProviders: ['codex'], works: [{ ...work, archived: true, phase: 'completed', waiting: 'none' }] });
+  const container = await render(<h.Harness />);
+  expect(container.querySelector('.lab-tpm-count')!.textContent).toBe('0');
+  await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="TPM works"]')!.click());
+  const archive = container.querySelector<HTMLDetailsElement>('.lab-tpm-archived')!;
+  expect(archive.open).toBe(false);
+  expect(archive.textContent).toContain('Archived (1)');
+  expect(container.querySelector('.lab-tpm-panel > .lab-tpm-list')!.children.length).toBe(0);
+  await act(async () => archive.querySelector('summary')!.click());
+  await act(async () => archive.querySelector<HTMLButtonElement>('[data-tpm-work]')!.click());
+  expect(h.state().expanded).toBe(true);
 });

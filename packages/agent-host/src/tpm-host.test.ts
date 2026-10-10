@@ -84,8 +84,13 @@ it('creates a scoped TPM over the real Host uplink and keeps shared observation 
     uplink: { url: broker.url, remoteKey: 'isolated-process-key' } });
   try {
     await host.ready;
-    const created = await broker.rpc('POST', '/remote/tpm/create', { providerId: 'codex', mainNativeSessionId: 'main', title: 'Persistent background work', requirement: 'Agree scope and verify delivery.', operationId: 'create-operation' });
+    const created = await broker.rpc('POST', '/remote/tpm/create', { providerId: 'codex', mainNativeSessionId: 'main', operationId: 'create-operation' });
     expect(created.status).toBe(200); expect(created.body.tpmNativeSessionId).toBe('tpm-1');
+    expect(created.body).toMatchObject({ title: expect.stringMatching(/^[A-Z][a-z]+ [A-Z][a-z]+$/), waiting: 'user' });
+    await expect.poll(() => sessions.get('tpm-1')!.sent.length).toBe(1);
+    const beforeRename = await broker.rpc('GET', '/remote/tpm/work?id=' + created.body.id);
+    const renamed = await broker.rpc('POST', '/remote/tpm/action', { id: created.body.id, revision: beforeRename.body.revision, operationId: 'rename-operation', action: 'rename', title: 'Investigate mobile reconnect' });
+    expect(renamed.status).toBe(200); expect(renamed.body.title).toBe('Investigate mobile reconnect');
     const workId = created.body.id; const native = sessions.get('tpm-1')!;
     await expect.poll(() => native.sent.length).toBe(1);
     const attached = await broker.rpc('POST', '/remote/attach', { providerId: 'codex', nativeSessionId: 'main' }, 'browser-main'); expect(attached.status).toBe(200);

@@ -5,7 +5,7 @@ import type { TpmActionInput } from '@orchardworks/agent-remote-web/headless';
 import type { OpenedSession } from '../directory-client.js';
 import type { SessionEntry } from '../session-tree.js';
 
-export type TpmAction = 'pause' | 'resume' | 'reopen' | 'check';
+export type TpmAction = 'pause' | 'resume' | 'reopen' | 'check' | 'archive' | 'unarchive';
 export interface TpmService {
   tpmList(hostId: string): Promise<TpmList>;
   tpmWork(hostId: string, id: string): Promise<TpmWork>;
@@ -17,7 +17,7 @@ export interface TpmItem { key: string; hostId: string; hostName: string; online
 interface Catalog extends TpmList { error?: string }
 export function tpmKey(hostId: string, id: string): string { return JSON.stringify([hostId, id]); }
 function meaningful(work: TpmWork): string {
-  return JSON.stringify([work.title, work.phase, work.waiting, work.paused, work.summary, work.nextAction,
+  return JSON.stringify([work.title, work.phase, work.waiting, work.paused, work.archived, work.summary, work.nextAction,
     work.todoRevision ?? work.todo?.revision, work.documentRevision ?? [work.document, work.acceptance, work.evidence], work.health, work.creationStatus,
     work.outbox?.filter(intent => intent.status === 'unknown' || intent.status === 'rejected').map(intent => [intent.id, intent.target, intent.status, intent.error])]);
 }
@@ -85,7 +85,7 @@ export function useTpmWork(service: TpmService | undefined, hosts: readonly TpmH
     const changes: Record<string, boolean> = {};
     for (const work of records) {
       const key = tpmKey(hostId, work.id), fingerprint = meaningful(work), previous = observed.current.get(key);
-      if (latest.current.presentationVisible && latest.current.expanded && latest.current.selected === key) changes[key] = false;
+      if (work.archived || (latest.current.presentationVisible && latest.current.expanded && latest.current.selected === key)) changes[key] = false;
       else if (previous !== undefined && previous !== fingerprint) changes[key] = true;
       observed.current.set(key, fingerprint);
     }
@@ -250,17 +250,16 @@ export function useTpmWork(service: TpmService | undefined, hosts: readonly TpmH
     const catalog = latest.current.catalogs[hostId];
     return !!host?.online && host.access !== 'shared' && !!catalog?.supported && !catalog.error && !!catalog.supportedProviders?.includes(main.providerId);
   }, [service, enabled]);
-  const create = useCallback(async (main: SessionEntry, title: string, requirement: string) => {
+  const create = useCallback(async (main: SessionEntry, title?: string, requirement?: string) => {
     if (!canCreate(main) || !service) throw new Error('TPM creation is unavailable for this session.');
-    if (!title.trim() || !requirement.trim()) throw new Error('Enter a title and requirement.');
     if (mutation.current) throw new Error('Wait for the current TPM operation.');
     mutation.current = true; setBusy('create'); setError(undefined);
     try {
       const hostId = main.hostId ?? 'local';
-      const intent = JSON.stringify([hostId, main.providerId, main.nativeSessionId, title.trim(), requirement.trim()]);
+      const intent = JSON.stringify([hostId, main.providerId, main.nativeSessionId, title?.trim(), requirement?.trim()]);
       const operationId = creationIntents.current.get(intent) ?? crypto.randomUUID();
       creationIntents.current.set(intent, operationId);
-      const work = await service.tpmCreate(hostId, { providerId: main.providerId, mainNativeSessionId: main.nativeSessionId, title: title.trim(), requirement: requirement.trim(), operationId });
+      const work = await service.tpmCreate(hostId, { providerId: main.providerId, mainNativeSessionId: main.nativeSessionId, ...(title?.trim() ? { title: title.trim() } : {}), ...(requirement?.trim() ? { requirement: requirement.trim() } : {}), operationId });
       if (!authorized(hostId, service)) throw new Error('Workspace access changed before the TPM result arrived.');
       creationIntents.current.delete(intent);
       update(hostId, work);
@@ -269,7 +268,7 @@ export function useTpmWork(service: TpmService | undefined, hosts: readonly TpmH
     } catch (error) { if (latest.current.service === service) setError(message(error)); throw error; }
     finally { mutation.current = false; setBusy(undefined); }
   }, [canCreate, service, update, open, authorized]);
-  const mutate = useCallback(async (key: string, input: { action: TpmAction } | { action: 'confirm_todo'; confirmation: SessionTodoDecision } | { action: 'resolve'; intentId: string; resolution: 'accepted' | 'rejected'; nativeSessionId?: string }) => {
+  const mutate = useCallback(async (key: string, input: { action: TpmAction } | { action: 'rename'; title: string } | { action: 'confirm_todo'; confirmation: SessionTodoDecision } | { action: 'resolve'; intentId: string; resolution: 'accepted' | 'rejected'; nativeSessionId?: string }) => {
     const item = find(key);
     if (!service || !enabled || !item?.online) throw new Error('The TPM Controller is unavailable.');
     if (mutation.current) throw new Error('Wait for the current TPM operation.');
@@ -284,10 +283,11 @@ export function useTpmWork(service: TpmService | undefined, hosts: readonly TpmH
       throw error;
     } finally { mutation.current = false; setBusy(undefined); }
   }, [service, enabled, find, update, refresh, authorized]);
+  const rename = useCallback((key: string, title: string) => mutate(key, { action: 'rename', title: title.trim() }), [mutate]);
   const action = useCallback((key: string, action: TpmAction) => mutate(key, { action }), [mutate]);
   const resolve = useCallback((key: string, intentId: string, resolution: 'accepted' | 'rejected', nativeSessionId?: string) => mutate(key, { action: 'resolve', intentId, resolution, ...(nativeSessionId ? { nativeSessionId } : {}) }), [mutate]);
   const confirmTodo = useCallback((key: string, confirmation: SessionTodoDecision) => mutate(key, { action: 'confirm_todo', confirmation }), [mutate]);
   const close = useCallback(() => setExpanded(false), []);
   return { works, catalogs: visibleCatalogs, loading, sessions: sameScope ? sessions : {}, attaching, attachmentErrors, detailsLoading, detailErrors, selected, opened: sameScope ? opened : [], expanded, busy, error,
-    available: !!service && enabled, canCreate, create, action, resolve, confirmTodo, open, close, refresh };
+    available: !!service && enabled, canCreate, create, action, rename, resolve, confirmTodo, open, close, refresh };
 }

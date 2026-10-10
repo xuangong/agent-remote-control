@@ -3,19 +3,22 @@
 .lab-tpm-floating[hidden], .lab-tpm-viewport[hidden], .lab-tpm-document[hidden], .lab-tpm-conversation[hidden] { display: none; }
 .lab-tpm-floating > .lab-session-popover-trigger { display: flex; align-items: center; gap: 7px; min-height: 44px; }
 .lab-tpm-count { color: var(--obs-text-secondary); font-size: 12px; font-variant-numeric: tabular-nums; }
-.lab-tpm-panel { overflow: auto; }
-.lab-tpm-list .lab-session-row { align-items: flex-start; gap: 12px; padding-block: 12px; }
+.lab-tpm-panel { overflow: auto; overscroll-behavior: contain; }
+.lab-tpm-panel .lab-directory-heading > button { flex: none; }
+.lab-tpm-panel .lab-control-note { overflow-wrap: anywhere; }
+.lab-tpm-list { display: grid; grid-template-columns: minmax(0, 1fr); list-style: none; margin: 0; padding: 0; }
+.lab-tpm-list > li + li { border-top: 1px solid var(--obs-border); }
+.lab-tpm-list .lab-session-row { flex-direction: row; align-items: flex-start; gap: 12px; padding-block: 12px; }
+.lab-tpm-list .lab-session-row > .lab-tracked-description { flex: 1; flex-direction: column; align-items: flex-start; min-width: 0; width: auto; }
+.lab-tpm-list .lab-tracked-description strong { color: var(--obs-text); }
+.lab-tpm-list .lab-session-row > .lab-tpm-markers { width: auto; max-width: 40%; align-items: flex-end; }
+.lab-tpm-list .lab-tpm-markers small { white-space: normal; overflow-wrap: anywhere; text-align: right; }
 .lab-tpm-list strong { overflow: hidden; text-overflow: ellipsis; }
 .lab-tpm-list .lab-tpm-summary { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .lab-tpm-markers { display: flex; flex-direction: column; align-items: flex-end; gap: 5px; flex: none; font-size: 11px; }
 .lab-tpm-needs-user { color: var(--obs-warning); font-weight: 600; }
 .lab-tpm-health { color: var(--obs-danger); }
-.lab-tpm-create-trigger { width: 100%; margin-block: 8px; white-space: normal; text-align: left; }
-.lab-tpm-create { display: grid; gap: 12px; padding: 12px 0 4px; border-top: 1px solid var(--obs-border); }
-.lab-tpm-create label { display: grid; gap: 6px; font-size: 12px; font-weight: 600; }
-.lab-tpm-create :is(input, textarea) { width: 100%; min-width: 0; padding: 8px 10px; border: 1px solid var(--obs-control-border); border-radius: 8px; background: var(--obs-canvas); color: var(--obs-text); font-size: 16px; }
-.lab-tpm-create > div { display: flex; justify-content: flex-end; gap: 8px; }
-.lab-tpm-create [role="alert"] { color: var(--obs-danger); font-size: 12px; }
+.lab-tpm-create-trigger { width: 100%; margin-top: 8px; min-height: 44px; }
 .lab-tpm-viewport { position: fixed; inset: var(--lab-viewport-top, 0px) 0 auto; height: var(--lab-viewport-height, 100dvh); z-index: 145; }
 .lab-tpm-heading > div:first-child { min-width: 0; display: grid; gap: 2px; }
 .lab-tpm-heading strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 15px; }
@@ -53,3 +56,15 @@
   .lab-tpm-conversation { padding-bottom: env(safe-area-inset-bottom, 0px); }
   .lab-tpm-progress { max-height: 72px; }
 }
+
+.lab-tpm-title-button { display: flex; align-items: center; gap: 7px; max-width: 100%; min-width: 0; min-height: 36px; padding: 0; border: 0; background: transparent; text-align: left; }
+.lab-tpm-title-button svg { flex: none; color: var(--obs-text-secondary); }
+.lab-tpm-name-editor { display: grid; gap: 8px; padding: 10px 16px; border-bottom: 1px solid var(--obs-border); }
+.lab-tpm-name-editor label { display: grid; gap: 4px; font-size: 12px; }
+.lab-tpm-name-editor input { min-width: 0; width: 100%; padding: 8px; font-size: 16px; border: 1px solid var(--obs-control-border); border-radius: 6px; background: var(--obs-canvas); color: var(--obs-text); }
+.lab-tpm-name-editor > div { display: flex; justify-content: flex-end; gap: 8px; }
+.lab-tpm-name-editor button { min-height: 44px; }
+.lab-tpm-name-editor p { margin: 0; color: var(--obs-danger); font-size: 12px; overflow-wrap: anywhere; }
+.lab-tpm-archived { margin-top: 8px; color: var(--obs-text-secondary); font-size: 12px; }
+.lab-tpm-archived > summary { cursor: pointer; padding-block: 10px; }
+@media (pointer: coarse) { .lab-tpm-title-button { min-height: 44px; } }

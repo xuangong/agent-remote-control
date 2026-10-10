@@ -103,7 +103,8 @@ async function restoredFixture(options: Partial<import('./broker.js').HostBroker
     const message = JSON.parse(data); if (message.type === 'registered') resolve(message.hostId);
   }));
   prepared.accept(pair.server);
-  pair.native.send('{"uplinkVersion":2,"type":"register","installationId":"restored-installation","name":"Restored Host","providers":[{"providerId":"codex","displayName":"Codex"}]}');
+  pair.native.send(JSON.stringify({ uplinkVersion: 2, type: 'register', installationId: 'restored-installation', name: 'Restored Host',
+    providers: options.initialState?.hosts[0]?.providers ?? restoredState.hosts[0]!.providers }));
   expect(await registered).toBe('host');
   return { broker, native: pair.native };
 }
@@ -717,6 +718,104 @@ it('authorizes source references before quota reservation and binds create ident
   expect(calls).toHaveLength(1);
   expect((await create('side-native'))?.status).toBe(409);
 });
+
+it.each(['side', 'ask', 'edit'] as const)('recovers a baseline owner %s creation with implicit or redundant explicit provenance without native replay', async kind => {
+  const settings = kind === 'edit' ? { editNativeSessionId: 'native-session', editTurnId: 'turn', editMessageId: 'message' }
+    : { conversationKind: kind, sourceNativeSessionId: 'native-session' };
+  const state = structuredClone(restoredState);
+  state.hosts[0]!.providers[0]!.promptEditing = true;
+  state.bindings.push({ hostId: 'host', providerId: 'codex', nativeSessionId: 'created-native', agentId: 'created-agent' });
+  state.creations.push([JSON.stringify(['host', 'codex', operationOne]), {
+    fingerprint: JSON.stringify({ providerId: 'codex', cwd: null, workspaceId: null, model: null, reasoningEffort: null, planning: null, ...settings }),
+    agentId: 'created-agent',
+  }]);
+  const { broker, native } = await restoredFixture({ initialState: state, ownerSubject: 'alice' });
+  const paths: string[] = [];
+  native.onMessage(data => {
+    const message = JSON.parse(data); if (message.type !== 'rpc_request') return;
+    paths.push(message.path);
+    native.send(JSON.stringify({ uplinkVersion: 2, type: 'rpc_response', requestId: message.requestId, status: 200,
+      body: JSON.stringify({ agentId: 'created-agent', nativeSessionId: 'created-native' }) }));
+  });
+  const create = (extra: Record<string, unknown> = {}) => broker.handleRequest(new Request('https://relay.example/v1/remote/hosts/host/create', {
+    method: 'POST', body: JSON.stringify({ providerId: 'codex', operationId: operationOne, ...settings, ...extra }),
+  }), { principalSubject: () => 'alice' });
+  for (const extra of [{}, { creationSource: { providerId: 'codex', nativeSessionId: 'native-session' } }]) {
+    const response = await create(extra);
+    expect(response?.status, await response?.clone().text()).toBe(200);
+    expect(await response!.json()).toEqual({ agentId: 'created-agent', nativeSessionId: 'created-native' });
+  }
+  expect((await create({ cwd: '/changed' }))?.status).toBe(409);
+  expect((await create({ creationSource: { providerId: 'codex', nativeSessionId: 'different' } }))?.status).toBe(400);
+  expect(paths).toEqual(['/remote/attach']);
+}, 5000);
+
+it.each(['side', 'ask', 'edit'] as const)('preserves baseline shared %s completed and unresolved reservations without native replay', async kind => {
+  for (const completed of [true, false]) {
+    const settings = kind === 'edit' ? { editNativeSessionId: 'native-session', editTurnId: 'turn', editMessageId: 'message' }
+      : { conversationKind: kind, sourceNativeSessionId: 'native-session' };
+    const state = structuredClone(restoredState);
+    state.hosts[0]!.providers[0]!.promptEditing = true;
+    state.bindings[0]!.creatorSubject = 'bob';
+    if (completed) state.bindings.push({ hostId: 'host', providerId: 'codex', nativeSessionId: 'created-native', agentId: 'created-agent', creatorSubject: 'bob' });
+    state.sharing = { grants: [{ hostId: 'host', subject: 'bob', label: 'Bob', sessionLimit: 2, revoked: false }], reservations: [{
+      key: JSON.stringify(['host', 'bob', 'codex', operationOne]), hostId: 'host', subject: 'bob',
+      fingerprint: JSON.stringify({ providerId: 'codex', ...settings }), nativeRequestId: operationTwo,
+      ...(completed ? { agentId: 'created-agent' } : {}),
+    }] };
+    const { broker, native } = await restoredFixture({ initialState: state, ownerSubject: 'alice' });
+    const paths: string[] = [];
+    native.onMessage(data => {
+      const message = JSON.parse(data); if (message.type !== 'rpc_request') return;
+      paths.push(message.path);
+      native.send(JSON.stringify({ uplinkVersion: 2, type: 'rpc_response', requestId: message.requestId, status: 200,
+        body: JSON.stringify({ agentId: 'created-agent', nativeSessionId: 'created-native' }) }));
+    });
+    const create = (extra: Record<string, unknown> = {}) => broker.handleRequest(new Request('https://relay.example/v1/remote/hosts/host/create', {
+      method: 'POST', body: JSON.stringify({ providerId: 'codex', operationId: operationOne, ...settings, ...extra }),
+    }), { principalSubject: () => 'bob' });
+    for (const extra of [{}, { creationSource: { providerId: 'codex', nativeSessionId: 'native-session' } }]) {
+      const response = await create(extra);
+      expect(response?.status, await response?.clone().text()).toBe(completed ? 200 : 409);
+      expect(await response!.json()).toMatchObject(completed ? { agentId: 'created-agent', nativeSessionId: 'created-native' } : { code: 'creation_outcome_unknown' });
+    }
+    expect((await create({ cwd: '/changed' }))?.status).toBe(409);
+    expect((await create({ creationSource: { providerId: 'codex', nativeSessionId: 'different' } }))?.status).toBe(400);
+    expect(paths).toEqual(completed ? ['/remote/attach'] : []);
+  }
+}, 10000);
+
+it.each(['alice', 'bob'])('retains actual snapshot provenance conflicts for a persisted %s creation without native replay', async subject => {
+  const state = structuredClone(restoredState);
+  state.bindings[0]!.creatorSubject = subject;
+  state.bindings.push({ hostId: 'host', providerId: 'codex', nativeSessionId: 'other-source', agentId: 'other-agent', creatorSubject: subject },
+    { hostId: 'host', providerId: 'codex', nativeSessionId: 'created-native', agentId: 'created-agent', creatorSubject: subject });
+  const creationSource = { providerId: 'codex', nativeSessionId: 'native-session' };
+  if (subject === 'alice') state.creations.push([JSON.stringify(['host', 'codex', operationOne]), {
+    fingerprint: JSON.stringify({ providerId: 'codex', cwd: null, workspaceId: null, model: null, reasoningEffort: null, planning: null, creationSource }),
+    agentId: 'created-agent',
+  }]);
+  else state.sharing = { grants: [{ hostId: 'host', subject, label: 'Bob', sessionLimit: 2, revoked: false }], reservations: [{
+    key: JSON.stringify(['host', subject, 'codex', operationOne]), hostId: 'host', subject,
+    fingerprint: JSON.stringify({ providerId: 'codex', creationSource }), nativeRequestId: operationTwo, agentId: 'created-agent',
+  }] };
+  const { broker, native } = await restoredFixture({ initialState: state, ownerSubject: 'alice' });
+  const paths: string[] = [];
+  native.onMessage(data => {
+    const message = JSON.parse(data); if (message.type !== 'rpc_request') return;
+    paths.push(message.path);
+    native.send(JSON.stringify({ uplinkVersion: 2, type: 'rpc_response', requestId: message.requestId, status: 200,
+      body: JSON.stringify({ agentId: 'created-agent', nativeSessionId: 'created-native' }) }));
+  });
+  const create = (source: typeof creationSource) => broker.handleRequest(new Request('https://relay.example/v1/remote/hosts/host/create', {
+    method: 'POST', body: JSON.stringify({ providerId: 'codex', operationId: operationOne, creationSource: source }),
+  }), { principalSubject: () => subject });
+  expect((await create(creationSource))?.status).toBe(200);
+  const changed = await create({ providerId: 'codex', nativeSessionId: 'other-source' });
+  expect(changed?.status).toBe(409);
+  expect(await changed!.json()).toMatchObject({ code: subject === 'alice' ? 'request_conflict' : 'operation_conflict' });
+  expect(paths).toEqual(['/remote/attach']);
+}, 5000);
 
 it('forwards explicit native takeover and public ownership errors through a previously opened binding',async()=>{
   const {broker,native}=await restoredFixture();

@@ -4,6 +4,23 @@ import type { AddressInfo } from 'node:net';
 import { expect, it } from 'vitest';
 import { RemoteHostClient, SessionDirectoryClient } from './directory-client.js';
 
+it('forwards captured snapshot provenance through hosted and legacy local create requests', async () => {
+  const bodies: unknown[] = [];
+  const server = createServer(async (request, response) => {
+    let body='';for await(const chunk of request)body+=String(chunk);
+    bodies.push(JSON.parse(body));response.setHeader('content-type','application/json');response.end(JSON.stringify({agentId:'new',nativeSessionId:'created'}));
+  });
+  await new Promise<void>(resolve=>server.listen(0,'127.0.0.1',resolve));
+  try {
+    const origin=`http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+    const creationSource={providerId:'codex',nativeSessionId:'captured-source'};
+    for(const hostId of ['paired-host','local']) {
+      await new SessionDirectoryClient(origin,fetch,hostId).create('copilot','snapshot',{creationSource,cwd:'/workspace'});
+    }
+    expect(bodies).toEqual(Array(2).fill({providerId:'copilot',operationId:'snapshot',creationSource,cwd:'/workspace'}));
+  } finally {server.closeAllConnections();await new Promise<void>(resolve=>server.close(()=>resolve()));}
+},5000);
+
 it('requests fresh Controller discovery only for a manual refresh', async () => {
   const paths: string[] = [];
   const server = createServer((request, response) => {

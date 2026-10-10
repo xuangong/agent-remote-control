@@ -104,6 +104,7 @@ export function protectHostDirectory(directory: AgentHostDirectory, policy: Host
     canReleaseSession: directory.canReleaseSession?.bind(directory),
     sessionReleased: directory.sessionReleased?.bind(directory),
     setSessionHandoffHandler: directory.setSessionHandoffHandler?.bind(directory),
+    setSessionHandoffAdmission: directory.setSessionHandoffAdmission?.bind(directory),
     setSourceBindingReader: directory.setSourceBindingReader?.bind(directory),
     sourceReferences: directory.sourceReferences?.bind(directory),
     ...(directory.forkSession ? { async forkSession(nativeSessionId: string) {
@@ -122,13 +123,13 @@ export function protectHostDirectory(directory: AgentHostDirectory, policy: Host
       }))).filter((entry): entry is NonNullable<typeof entry> => entry !== undefined);
     },
     ...(directory.models ? { models: directory.models.bind(directory) } : {}),
-    async create(input) {
+    async create(input, evidence) {
       const selected = input.workspaceId === undefined ? undefined : (await directory.workspaces()).find(workspace => workspace.id === input.workspaceId);
       if (input.workspaceId !== undefined && !selected) throw new HostExecutionPolicyError('Unknown local Host workspace.');
       const cwd = await allowedWorkspace(policy, input.cwd ?? selected?.path ?? policy.defaultWorkspace);
       if (input.sourceNativeSessionId) await checkSource(input.sourceNativeSessionId);
       if (input.editNativeSessionId) await checkSource(input.editNativeSessionId);
-      return directory.create({ ...input, cwd });
+      return directory.create({ ...input, cwd }, evidence);
     },
     async open(nativeSessionId, options) {
       await checkSource(nativeSessionId);

@@ -1,4 +1,4 @@
-import {acquireNativeSession, inspectNativeOwner, NativeSessionOwnerError, type NativeSessionLease, type NativeOwnerDiagnostic, type NativeOwnerIdentity} from './native-session-owner.js';
+import {acquireNativeSession, inspectNativeOwner, NativeSessionOwnerError, type NativeSessionLease, type NativeOwnerDiagnostic, type NativeOwnerIdentity, type NativeHandoffGrant} from './native-session-owner.js';
 import { randomUUID } from 'node:crypto';
 import type {RemoteSessionSummary} from '@orchardworks/agent-remote-relay';
 import type { AgentHistoryQuery, AgentPersistenceHandle, AgentProviderAdapter, AgentSession, AgentSessionExtensions } from '@orchardworks/agent-provider-sdk';
@@ -39,6 +39,7 @@ export function createManagedStdioDirectory(
   let sourceAccessCheck: ((id: string) => Promise<void>) | undefined;
   let sourceBindingReader: SourceBindingReader | undefined;
   let onHandoff: ((id: string, next: NativeOwnerIdentity) => Promise<void>) | undefined;
+  let onHandoffAdmission: ((id: string, current: NativeOwnerIdentity, next: NativeOwnerIdentity) => NativeHandoffGrant) | undefined;
   const loading = new Map<string, Promise<AgentSession>>();
   async function lease(id: string, takeOver?: string) {
     if (!ownership) return undefined;
@@ -91,7 +92,7 @@ export function createManagedStdioDirectory(
       // A directory shutdown may have started before this transfer request.
       await releaseNative();
       return 'requested';
-    }, next => { void onHandoff?.(id, next).catch(error => ownership?.onDiagnostic?.({event: 'native_handoff_notification_failed', providerId, sessionId: id, generation: owner.generation, at: new Date().toISOString(), outcome: String(error)})); });
+    }, next => { void onHandoff?.(id, next).catch(error => ownership?.onDiagnostic?.({event: 'native_handoff_notification_failed', providerId, sessionId: id, generation: owner.generation, at: new Date().toISOString(), outcome: String(error)})); }, next => onHandoffAdmission ? onHandoffAdmission(id, { kind: 'controller', generation: owner.generation }, next) : { completed() {}, failed() {} });
     const managedSession = new Proxy(session, {get(target, key) {
       if (key === 'dispose') return dispose;
       const value = Reflect.get(target, key, target);
@@ -234,7 +235,7 @@ export function createManagedStdioDirectory(
       },
     } : {}),
     ...(provider.sessionWorkspace ? {sessionWorkspace: provider.sessionWorkspace.bind(provider)} : {}),
-    async create(input) {
+    async create(input, evidence) {
       if (closed) throw new Error(`${displayName} directory is closed.`);
       const selected = input.workspaceId === undefined ? undefined : workspaces.find(({ id }) => id === input.workspaceId);
       if (input.workspaceId !== undefined && !selected) throw new Error(`Unknown ${displayName} workspace.`);
@@ -246,7 +247,9 @@ export function createManagedStdioDirectory(
       const extensions = composeExtensions(inputConfig, sourceNativeSessionId ? sourceExtensions(sourceNativeSessionId, () => readerId, () => readerSession) : {});
       const config = { ...inputConfig, ...extensions, sessionId: randomUUID(), ...(cwd ? { cwd } : {}) };
       const identity = sessionExtensionIdentity(config);
-      const id = await remember(await provider.createSession(config), undefined, identity);
+      const native = await provider.createSession(config);
+      evidence?.completed();
+      const id = await remember(native, undefined, identity);
       const entry = opened.get(id)!;
       if (config.tools?.length) controllerTools.add(id);
       if (sourceNativeSessionId) {
@@ -260,6 +263,7 @@ export function createManagedStdioDirectory(
       return id;
     },
     setSessionHandoffHandler(handler) { onHandoff = handler; },
+    setSessionHandoffAdmission(handler) { onHandoffAdmission = handler; },
     async open(nativeSessionId, options) {
       if (closed) throw new Error(`${displayName} directory is closed.`);
       const pending = loading.get(nativeSessionId);

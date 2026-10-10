@@ -1452,6 +1452,7 @@ function AppContent({
         } else options = { ...(agent.cwd ? { cwd: agent.cwd } : {}), ...(agent.model && source.providerId !== 'dsh' ? { model: agent.model } : {}),
           ...(agent.capabilities.planning && source.providerId !== 'dsh' ? { planning: agent.runtimeInfo.planning?.active === true } : {}) };
         if (context.mode === 'reference') { options.sourceNativeSessionId = source.nativeSessionId; options.conversationKind = 'side'; }
+        else options.creationSource = { providerId: source.providerId, nativeSessionId: source.nativeSessionId };
         record = forkStore.prepare(context, options, settings, key);
         forkReservation.current = { key, record };
       }

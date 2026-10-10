@@ -26,7 +26,8 @@ export class SessionSuccessionBoundary {
     private readonly assertAdmission: (target: NativeSessionRef) => void,
     private readonly resolveRole: (target: NativeSessionRef) => RoleDestination | undefined,
     private readonly cache?: OperationCache,
-    private readonly assertHostState: (target: NativeSessionRef, boundary?: TimelineCursor, allowMissing?: boolean) => void = () => {}) {
+    private readonly assertHostState: (target: NativeSessionRef, boundary?: TimelineCursor, allowMissing?: boolean) => void = () => {},
+    private readonly assertAssociationReservation: (target: NativeSessionRef) => void = assertAdmission) {
     this.dispatcher = new SessionSuccessionInputDispatcher(contexts);
   }
   run<T>(operation: SessionWireOperation, scope: string, work: () => Promise<T>, entry?: MutationEntry): Promise<T> {
@@ -45,9 +46,31 @@ export class SessionSuccessionBoundary {
   }
   admit(targets: readonly NativeSessionRef[], operationKey: string): () => void {
     for (const target of targets) this.validate(target);
+    return this.recordAdmission(targets, operationKey);
+  }
+  /** Only fresh metadata relation reservations use this narrower admission. */
+  admitAssociation(targets: readonly NativeSessionRef[], operationKey: string): () => void {
+    for (const target of targets) this.validate(target, true);
+    return this.recordAdmission(targets, operationKey);
+  }
+  private recordAdmission(targets: readonly NativeSessionRef[], operationKey: string): () => void {
     if (this.admissions.has(operationKey)) throw new AgentOperationRejectedError('operation_conflict', 'This operation is already admitted.');
     this.admissions.set(operationKey, new Set(targets.map(nativeSessionRefKey)));
     return () => { this.admissions.delete(operationKey); };
+  }
+  /** Revalidate captured targets immediately before a nested durable/native mutation. */
+  recheck(targets: readonly NativeSessionRef[]): void {
+    this.recheckTargets(targets, false);
+  }
+  recheckAssociation(targets: readonly NativeSessionRef[]): void {
+    this.recheckTargets(targets, true);
+  }
+  private recheckTargets(targets: readonly NativeSessionRef[], association: boolean): void {
+    const entry = this.currentEntry();
+    for (const target of targets) {
+      if (entry && !entry.targets.includes(nativeSessionRefKey(target))) throw new AgentOperationRejectedError('invalid_operation_target', 'Mutation target is outside this operation admission.');
+      this.validate(target, association);
+    }
   }
   checkSource(target: NativeSessionRef): void {
     if (this.pending(target) || this.cache?.hasUnsettledMutation(nativeSessionRefKey(target))) throw new Error('Session has unsettled Host mutations.');
@@ -165,10 +188,10 @@ export class SessionSuccessionBoundary {
       throw error;
     }
   }
-  private validate(target: NativeSessionRef): void {
+  private validate(target: NativeSessionRef, association = false): void {
     try {
       if ([...this.reservations.values()].some(targets => targets.has(nativeSessionRefKey(target)))) throw new Error('Session is reserved for handoff.');
-      this.assertAdmission(target);
+      if (association) this.assertAssociationReservation(target); else this.assertAdmission(target);
     }
     catch (error) { throw new AgentOperationRejectedError('succession_admission_closed', error instanceof Error ? error.message : 'Session handoff admission is closed.'); }
   }

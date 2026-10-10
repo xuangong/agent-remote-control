@@ -94,13 +94,15 @@ export function createCodexSessionDirectory(
     } } : {}),
     list() { if (closed) throw new Error('Codex directory is closed.'); return discovery ??= discover().finally(() => { discovery = undefined; }); },
     workspaces: () => [...workspaces],
-    async create(input) {
+    async create(input, evidence) {
       if (closed) throw new Error('Codex directory is closed.');
       if (input.editNativeSessionId) {
         if (!provider.forkForPromptEdit || !input.editTurnId || !input.editMessageId) throw new Error('Native prompt editing is unavailable.');
         await sourceAccessCheck?.(input.editNativeSessionId);
         if (await references?.get(input.editNativeSessionId)) throw new Error('Editing previous prompts is unavailable in side or Ask conversations.');
-        return remember(await provider.forkForPromptEdit({ nativeSessionId: input.editNativeSessionId, turnId: input.editTurnId, messageId: input.editMessageId }));
+        const native = await provider.forkForPromptEdit({ nativeSessionId: input.editNativeSessionId, turnId: input.editTurnId, messageId: input.editMessageId });
+        evidence?.completed();
+        return remember(native);
       }
       const selected = input.workspaceId === undefined ? undefined : workspaces.find(({ id }) => id === input.workspaceId);
       if (input.workspaceId !== undefined && !selected) throw new Error('Unknown Codex workspace.');
@@ -114,6 +116,7 @@ export function createCodexSessionDirectory(
         ...(systemPrompt ? { systemPrompt } : {}) };
       const identity = sessionExtensionIdentity(nativeConfig);
       const session = await provider.createSession(nativeConfig);
+      evidence?.completed();
       const id = await remember(session, identity);
       readerId = id;
       if (extensions.tools?.length || config.tools?.length) controllerTools.add(id);

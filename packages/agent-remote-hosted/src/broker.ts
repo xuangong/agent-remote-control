@@ -1,3 +1,4 @@
+import { isCreationSource, type CreationSource } from '@orchardworks/agent-remote-protocol';
 import { relationChangeKey, isRelationChangeReceipt, type RelationChangeReservation, type RelationChangeReceipt } from '@orchardworks/agent-remote-protocol';
 import type { RelationChangeReset, BrokerRelationChange } from './relation-changes.js';
 import { isDeepStrictEqual } from 'node:util';
@@ -772,7 +773,7 @@ export function createHostBroker(options: HostBrokerOptions) {
     assertHostCurrent(host); const admittedGeneration = host.generation;
     const providerId = host.legacyDsh ? 'dsh' : required(body.providerId, 'providerId');
     if (!host.providers.some((provider) => provider.providerId === providerId)) throw new BrokerError(400, 'invalid_provider', 'The selected provider is unavailable on this Host.');
-    if (host.legacyDsh && action === 'create' && ['cwd', 'model', 'reasoningEffort', 'planning', 'sourceNativeSessionId', 'editNativeSessionId', 'editTurnId', 'editMessageId'].some((key) => body[key] !== undefined)) {
+    if (host.legacyDsh && action === 'create' && ['cwd', 'model', 'reasoningEffort', 'planning', 'creationSource', 'sourceNativeSessionId', 'editNativeSessionId', 'editTurnId', 'editMessageId'].some((key) => body[key] !== undefined)) {
       throw new BrokerError(400, 'unsupported_configuration', 'This Host uses native model settings and a registered workspace.');
     }
     if (host.legacyDsh && action === 'child/attach') throw new BrokerError(400, 'unsupported_operation', 'This Host does not support native child attachment.');
@@ -783,7 +784,7 @@ export function createHostBroker(options: HostBrokerOptions) {
     const key = JSON.stringify([host.id, providerId, action === 'create' ? required(body.operationId, 'operationId') : nativeSessionId]);
     const source = action === 'create' && typeof body.sourceNativeSessionId === 'string' ? associationSource(host, providerId, body.sourceNativeSessionId) : undefined;
     const admissionId = createHash('sha256').update(key).digest('hex');
-    const admissionFingerprint = createHash('sha256').update(JSON.stringify([providerId, Object.entries(body).sort(([a],[b])=>a.localeCompare(b))])).digest('hex');
+    const admissionFingerprint = createHash('sha256').update(JSON.stringify([providerId, Object.entries(body).filter(([name]) => name !== 'creationSource').sort(([a],[b])=>a.localeCompare(b))])).digest('hex');
     const trackAssociation = !!source && (!!options.successionEnrollment || !!options.initialState?.associations);
     const operation = () => {
       const existingBinding = attaching ? nativeBindings.get(key) : undefined;
@@ -799,7 +800,7 @@ export function createHostBroker(options: HostBrokerOptions) {
           ? { nativeSessionId, ...(body.workspaceId === undefined ? {} : { workspaceId: required(body.workspaceId, 'workspaceId') }) }
           : action === 'create'
             ? { providerId, operationId: required(body.operationId, 'operationId'),
-                ...optionalSettings(body, ['cwd', 'workspaceId', 'model', 'reasoningEffort', 'planning', 'sourceNativeSessionId', 'editNativeSessionId', 'editTurnId', 'editMessageId']) }
+                ...optionalSettings(body, ['cwd', 'workspaceId', 'model', 'reasoningEffort', 'planning', 'creationSource', 'sourceNativeSessionId', 'editNativeSessionId', 'editTurnId', 'editMessageId']) }
             : { providerId, nativeSessionId, ...(parentNativeSessionId ? { parentNativeSessionId } : {}), ...(body.takeOver === undefined ? {} : {takeOver: required(body.takeOver, 'takeOver')}) };
         if (source) assertAssociationCreationOpen(source);
         let recoverSource = false;
@@ -831,7 +832,7 @@ export function createHostBroker(options: HostBrokerOptions) {
           try { detail = JSON.parse(result.body); } catch { /* Preserve the status if the host did not return JSON. */ }
           throw new BrokerError(result.status, typeof detail.code === 'string' ? detail.code : 'host_rejected', typeof detail.error === 'string' ? detail.error : 'The Remote Host rejected the operation.', result.status < 500 && [
             'invalid_request', 'invalid_provider', 'unsupported_configuration', 'invalid_operation_id',
-            'operation_capacity_exceeded', 'operation_result_too_large', 'operation_rejected',
+            'operation_capacity_exceeded', 'operation_result_too_large', 'operation_rejected', 'succession_admission_closed',
           ].includes(String(detail.code)), result.requestId);
         }
         let returned: Record<string, unknown> = {};
@@ -890,7 +891,7 @@ export function createHostBroker(options: HostBrokerOptions) {
       await recoverBinding(host, binding); return binding;
     }
     const fingerprint = JSON.stringify({ providerId, cwd: body.cwd ?? null, workspaceId: body.workspaceId ?? null,
-      model: body.model ?? null, reasoningEffort: body.reasoningEffort ?? null, planning: body.planning ?? null, ...optionalSettings(body, ['conversationKind', 'sourceNativeSessionId', 'editNativeSessionId', 'editTurnId', 'editMessageId']) });
+      model: body.model ?? null, reasoningEffort: body.reasoningEffort ?? null, planning: body.planning ?? null, ...creationFingerprintSettings(body, ['conversationKind', 'creationSource', 'sourceNativeSessionId', 'editNativeSessionId', 'editTurnId', 'editMessageId']) });
     let existing = creations.get(key);
     if (existing && existing.fingerprint !== fingerprint) throw new BrokerError(409, 'request_conflict', 'This request identity was already used with different settings.');
     if (!existing) {
@@ -927,12 +928,21 @@ export function createHostBroker(options: HostBrokerOptions) {
       if (body.sourceNativeSessionId !== undefined || ['editNativeSessionId', 'editTurnId', 'editMessageId'].some(key => typeof body[key] !== 'string' || !(body[key] as string).trim())) throw new BrokerError(400, 'invalid_request', 'A complete native prompt identity is required.');
       if (!host.providers.some(provider => provider.providerId === body.providerId && provider.promptEditing)) throw new BrokerError(400, 'unsupported_configuration', 'Prompt editing is unavailable on this Host. Update the Controller.');
     }
-    if (action === 'create' && (body.sourceNativeSessionId !== undefined || body.editNativeSessionId !== undefined)) {
-      requireAccess(host.id, subject);
-      const sourceId = required(body.editNativeSessionId ?? body.sourceNativeSessionId, 'sourceNativeSessionId');
-      const providerId = required(body.providerId, 'providerId');
-      const source = nativeBindings.get(JSON.stringify([host.id, providerId, sourceId]));
-      if (!source || !sessionAllowed(source, subject)) throw new SharingError(403, 'session_forbidden', 'Source session access is unavailable. Open an accessible source session first.');
+    if (action === 'create') {
+      if (body.creationSource !== undefined && !isCreationSource(body.creationSource)) throw new BrokerError(400, 'invalid_request', 'A strict creation source is required.');
+      const legacy = body.editNativeSessionId ?? body.sourceNativeSessionId;
+      const provenance: CreationSource | undefined = body.creationSource === undefined
+        ? legacy === undefined ? undefined : { providerId: required(body.providerId, 'providerId'), nativeSessionId: required(legacy, 'sourceNativeSessionId') }
+        : body.creationSource;
+      if (provenance && legacy !== undefined && (provenance.providerId !== body.providerId || provenance.nativeSessionId !== legacy)) throw new BrokerError(400, 'invalid_request', 'Creation source contradicts the native source identity.');
+      if (provenance) {
+        if (!host.providers.some(provider => provider.providerId === provenance.providerId)) throw new BrokerError(400, 'invalid_provider', 'The source provider is unavailable on this Host.');
+        requireAccess(host.id, subject);
+        const source = nativeBindings.get(JSON.stringify([host.id, provenance.providerId, provenance.nativeSessionId]));
+        if (!source || !sessionAllowed(source, subject)) throw new SharingError(403, 'session_forbidden', 'Source session access is unavailable. Open an accessible source session first.');
+        // Canonicalize before both create ledgers; inferred legacy source is semantically identical.
+        body = { ...body, creationSource: { providerId: provenance.providerId, nativeSessionId: provenance.nativeSessionId } };
+      }
     }
     if (owner(subject)) return mutate(host, action, body);
     requireAccess(host.id, subject);
@@ -961,9 +971,9 @@ export function createHostBroker(options: HostBrokerOptions) {
       throw new SharingError(403, 'session_forbidden', 'Only your own sessions can be attached.');
     }
     if (!host.providers.some(provider => provider.providerId === providerId)) throw new SharingError(400, 'invalid_provider', 'The selected provider is unavailable on this Host.');
-    if (host.legacyDsh && ['cwd', 'model', 'reasoningEffort', 'planning', 'sourceNativeSessionId', 'editNativeSessionId', 'editTurnId', 'editMessageId'].some(key => body[key] !== undefined)) throw new SharingError(400, 'unsupported_configuration', 'This Host uses native settings.');
+    if (host.legacyDsh && ['cwd', 'model', 'reasoningEffort', 'planning', 'creationSource', 'sourceNativeSessionId', 'editNativeSessionId', 'editTurnId', 'editMessageId'].some(key => body[key] !== undefined)) throw new SharingError(400, 'unsupported_configuration', 'This Host uses native settings.');
     const operationId = required(body.operationId, 'operationId');
-    const fingerprint = JSON.stringify({ providerId, ...optionalSettings(body, ['conversationKind', 'cwd', 'workspaceId', 'model', 'reasoningEffort', 'planning', 'sourceNativeSessionId', 'editNativeSessionId', 'editTurnId', 'editMessageId']) });
+    const fingerprint = JSON.stringify({ providerId, ...creationFingerprintSettings(body, ['conversationKind', 'cwd', 'workspaceId', 'model', 'reasoningEffort', 'planning', 'creationSource', 'sourceNativeSessionId', 'editNativeSessionId', 'editTurnId', 'editMessageId']) });
     const reservation = await changeSharing(draft => { assertHostCurrent(host, generation); return draft.reserve(host.id, subject!, providerId, operationId, fingerprint); });
     if (!reservation.fresh) {
       const completedId = reservation.agentId ?? completedCreations.get(JSON.stringify([host.id, providerId, reservation.nativeRequestId]))?.agentId;
@@ -1696,14 +1706,24 @@ function requiredHostIdentity(value: unknown, name: string): string {
   if (typeof value !== 'string' || !value.trim() || value.length > 512) throw new BrokerError(502, 'invalid_host_response', `The Remote Host returned an invalid ${name}.`);
   return value;
 }
-function optionalSettings(body: Record<string, unknown>, names: readonly string[]): Record<string, string | boolean> {
-  const result: Record<string, string | boolean> = {};
+function creationFingerprintSettings(body: Record<string, unknown>, names: readonly string[]): Record<string, string | boolean | CreationSource> {
+  const settings = optionalSettings(body, names);
+  // Validated legacy source/edit fields already uniquely determine provenance.
+  // Keep their persisted identity unchanged, including redundant explicit input.
+  if (body.sourceNativeSessionId !== undefined || body.editNativeSessionId !== undefined) delete settings.creationSource;
+  return settings;
+}
+function optionalSettings(body: Record<string, unknown>, names: readonly string[]): Record<string, string | boolean | CreationSource> {
+  const result: Record<string, string | boolean | CreationSource> = {};
   for (const name of names) {
     const value = body[name];
     if (value === undefined) continue;
     if (name === 'planning') {
       if (typeof value !== 'boolean') throw new BrokerError(400, 'invalid_request', 'planning must be a boolean.');
       result[name] = value;
+    } else if (name === 'creationSource') {
+      if (!isCreationSource(value)) throw new BrokerError(400, 'invalid_request', 'A strict creation source is required.');
+      result[name] = { providerId: value.providerId, nativeSessionId: value.nativeSessionId };
     } else result[name] = required(value, name);
   }
   return result;

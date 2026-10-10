@@ -40,10 +40,10 @@ test('retains admitted full targets after recovery and refuses to rewrite their 
   expect(restored.get(value.work.id).work.outbox![0]!.resolvedTarget).toEqual(target);
 });
 
-test('preserves queued admission evidence when settled messages exceed the byte budget', async () => {
+test.each(['queued',undefined] as const)('preserves %s admission evidence when settled messages exceed the byte budget', async acceptance => {
   const path = await mkdtemp(join(tmpdir(), 'arc-tpm-')); dirs.push(path);
   const store = new TpmStore(path); await store.ready; const value = record(); value.creation = 'accepted';
-  const queued = { id: 'queued', target: 'main' as const, status: 'accepted' as const, acceptance: 'queued' as const, text: 'Keep admission evidence', purpose: 'implementation', createdAt: value.work.createdAt,
+  const queued = { id: 'queued', target: 'main' as const, status: 'accepted' as const, ...(acceptance ? {acceptance} : {}), text: 'Keep admission evidence', purpose: 'implementation', createdAt: value.work.createdAt,
     resolvedTarget: { controllerId: 'controller', providerId: 'codex', nativeSessionId: 'main' }, roleRevision: 1 };
   value.work.outbox!.push(queued); await store.insert(value);
   for (let i = 0; i < 8; i++) await store.update(value.work.id, undefined, item => {
@@ -52,7 +52,7 @@ test('preserves queued admission evidence when settled messages exceed the byte 
   expect(store.get(value.work.id).work.outbox?.find(intent => intent.id === queued.id)).toEqual(queued);
   const restored = new TpmStore(path); await restored.ready;
   expect(restored.get(value.work.id).work.outbox?.find(intent => intent.id === queued.id)).toEqual(queued);
-});
+},5000);
 
 test('rejects capacity exhaustion without discarding existing queued recipients', async () => {
   const path = await mkdtemp(join(tmpdir(), 'arc-tpm-')); dirs.push(path);

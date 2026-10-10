@@ -81,13 +81,15 @@ export function createOpenCodeSessionDirectory(provider: OpenCodeDirectoryProvid
       }
       assertOpen(); return [...entries.values()];
     },
-    async create(input) {
+    async create(input, evidence) {
       assertOpen();
       if (input.editNativeSessionId) {
         if (!provider.forkForPromptEdit || !input.editTurnId || !input.editMessageId) throw new Error('OpenCode prompt editing requires a complete native prompt identity.');
         await sourceAccessCheck?.(input.editNativeSessionId);
         if (await references?.get(input.editNativeSessionId)) throw new Error('Editing previous prompts is unavailable in side or Ask conversations.');
-        return remember(await provider.forkForPromptEdit({ nativeSessionId: input.editNativeSessionId, turnId: input.editTurnId, messageId: input.editMessageId }));
+        const native = await provider.forkForPromptEdit({ nativeSessionId: input.editNativeSessionId, turnId: input.editTurnId, messageId: input.editMessageId });
+        evidence?.completed();
+        return remember(native);
       }
       const selected = input.workspaceId === undefined ? undefined : workspaces.find(workspace => workspace.id === input.workspaceId);
       if (input.workspaceId !== undefined && !selected) throw new Error('Unknown OpenCode workspace.');
@@ -102,6 +104,7 @@ export function createOpenCodeSessionDirectory(provider: OpenCodeDirectoryProvid
       const tools = [...(config.tools ?? []), ...(extensions.tools ?? [])];
       const session = await provider.createSession({ ...config, sessionId: randomUUID(), ...(cwd ? { cwd } : {}),
         ...(systemPrompt ? { systemPrompt } : {}), ...(tools.length ? { tools } : {}) });
+      evidence?.completed();
       const id = await remember(session);
       readerId = id;
       if (tools.length) controllerTools.add(id);

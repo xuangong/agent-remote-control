@@ -378,9 +378,15 @@ reviewed and verified, including its four review fixes. Root ran 280 tests in
 15 files before review and 174 tests in eight files after the fixes; affected
 build/typechecks passed. Task8B2A setting intent/effect lifetime is also reviewed,
 including the ordinary receipt-expiry fix. Root freshly ran 153 tests before
-review and 60 affected tests after the fix; build/typechecks passed. Next: 8B2B
-directory/provenance/ownership wiring. The plan workspace contains its exact
-briefs. None enables production or claims complete Host admission.
+review and 60 affected tests after the fix; build/typechecks passed. Task8B2B
+directory/provenance/association/owner wiring and its compatibility/fixture fixes
+passed independent review. Root's initial Host 419/420 exposed a TPM rename
+fixture reading revision before acceptance publication; the controlled uplink
+regression now verifies that ordering. Root freshly passed 134 affected tests
+after the fix, in addition to Hosted 122, Protocol 236 and Lab 13 beforehand;
+affected builds/typechecks passed. Next is the prepared Task9A projection-ceiling
+contract. Native readiness integration and later storage/product gates remain;
+no production capability is enabled by these scripted fixtures.
 
 - [x] Add entry-bound synchronous admission, bounded opt-in mutation retention,
   source/candidate reservation and final serialized recheck to the existing
@@ -389,7 +395,7 @@ briefs. None enables production or claims complete Host admission.
   with prepared intents visible but nonblocking.
 - [x] Retain setting intent/effect lifetime and restore each intent's Host and
   manager operation contexts; UI timeout is not native-effect settlement.
-- [ ] Complete directory/provenance, association and native-owner admission.
+- [x] Complete directory/provenance, association and native-owner admission.
 
 - [ ] Enforce idle-only admission: reject working, queued, approval, active-child,
   disconnected and unknown states immediately. No draining, native pause or

@@ -16,13 +16,14 @@ function harness(providerId: 'codex' | 'claude' | 'copilot') {
   const resumed: (AgentSessionExtensions | undefined)[] = [];
   let disposals = 0;
   let pauseResume: (() => Promise<void>) | undefined;
+  let rejectRuntimeInfo=false;
   function native(bound: AgentSessionExtensions = {}): AgentSession {
     let closed = false;
     return {
       capabilities: { history: true, sendMessage: true, steer: false, cancel: false, readResource: false,
         interactions: { question: false, planApproval: false, toolApproval: false } },
       async *observe() { yield { type: 'history_boundary' }; },
-      async runtimeInfo() { return { providerId, sessionId: 'native', status: closed ? 'closed' : 'idle',
+      async runtimeInfo() { if(rejectRuntimeInfo)throw new Error('Local runtime publication unavailable');return { providerId, sessionId: 'native', status: closed ? 'closed' : 'idle',
         persistence: { providerId, sessionId: 'native', opaque: '{}' } }; },
       async sendMessage() { await bound.tools?.[0]?.execute({ revision: 1 }); },
       async respondToInteraction() {},
@@ -39,9 +40,17 @@ function harness(providerId: 'codex' | 'claude' | 'copilot') {
   const directory = providerId === 'codex'
     ? createCodexSessionDirectory({ ...methods, listSessions: async () => ({ sessions: [] }) }, [])
     : createManagedStdioDirectory(providerId, providerId, { ...methods, listSessions: async () => [] }, []);
-  return { directory, created, resumed, disposals: () => disposals,
+  return { directory, created, resumed, disposals: () => disposals, failRuntimeInfo:()=>{rejectRuntimeInfo=true;},
     pauseResume: (pause: () => Promise<void>) => { pauseResume = pause; } };
 }
+
+it.each(['codex','claude','copilot'] as const)('%s reports native create completion before local runtime publication failure',async providerId=>{
+  const h=harness(providerId);let completed=false;h.failRuntimeInfo();
+  try {
+    await expect(h.directory.create({}, {completed(){completed=true;}})).rejects.toThrow(/Local runtime publication/);
+    expect(completed).toBe(true);expect(h.created).toHaveLength(1);
+  }finally{await h.directory.close();}
+},5000);
 
 it.each(['codex', 'claude', 'copilot'] as const)('%s rejects binding TPM extensions to a cached ordinary runtime', async providerId => {
   const h = harness(providerId); const calls: string[] = [];

@@ -204,7 +204,7 @@ it('refuses oversized pending outboxes without dropping prepared communication',
 
 it('evicts settled communication before refusing a new pending message budget', async () => {
   const f = await fixture(); const item = record('settled-budget', 0, 900000);
-  item.work.outbox = [0, 1, 2].map(index => ({ id: `settled-${index}`, target: 'main' as const, purpose: 'implementation', text: '中'.repeat(48000), status: 'accepted' as const, createdAt: '2026' }));
+  item.work.outbox = [0, 1, 2].map(index => ({ id: `settled-${index}`, target: 'main' as const, purpose: 'implementation', text: '中'.repeat(48000), status: 'accepted' as const, acceptance:'started' as const, createdAt: '2026' }));
   await f.coordinator.store.insert(item); await f.tick(); f.statuses.set('main-settled-budget', 'running');
   const send = (await f.coordinator.extensions('codex', 'tpm-settled-budget'))!.tools!.find(tool => tool.name === 'send_main_message')!;
   const todo = (await f.coordinator.get('settled-budget')).todo!;

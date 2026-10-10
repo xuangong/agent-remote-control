@@ -1,7 +1,7 @@
 import { isRelationChangeReservation, relationChangeKey, type RelationChangeReservation } from '@orchardworks/agent-remote-protocol';
 import { sourceParticipantId } from './source-participant.js';
 import { realpath } from 'node:fs/promises';
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { AgentOperationRejectedError } from '@orchardworks/agent-provider-sdk';
 import { successionAuthorityKey, successionFreezeKey, isSuccessionAssociationFreeze, nativeSessionRefKey, type NativeSessionRef, type TrustedSuccessionContext, type SuccessionParticipant, type SuccessionAssociationFreeze } from '@orchardworks/agent-remote-protocol';
 import type { AgentRemoteHttpResult, RemoteHostControlRequest } from '@orchardworks/agent-remote-relay';
@@ -9,6 +9,8 @@ import type { AgentHostProviderRegistration } from './host.js';
 import type { TpmRecord } from './tpm-store.js';
 import type { AssociationRecovery } from './session-succession-store.js';
 import type { SessionSuccessionService } from './session-succession-service.js';
+export type EnrollmentMutation = <T>(scope: string, operationId: string, kind: string, targets: readonly NativeSessionRef[], parameters: unknown,
+  dispatch: () => Promise<T>, validate?: () => Promise<void>) => Promise<T>;
 const key = nativeSessionRefKey;
 const json = (status: number, value: unknown): AgentRemoteHttpResult => ({ status, body: JSON.stringify(value) });
 
@@ -16,7 +18,7 @@ const json = (status: number, value: unknown): AgentRemoteHttpResult => ({ statu
 export class SessionSuccessionEnrollment {
   constructor(private readonly service: SessionSuccessionService, private readonly controllerId: string,
     private readonly registrations: () => AgentHostProviderRegistration[], private readonly works: () => TpmRecord[],
-    private readonly authorize: (source: NativeSessionRef) => Promise<void>) {}
+    private readonly authorize: (source: NativeSessionRef) => Promise<void>, private readonly admitMutation: EnrollmentMutation) {}
 
   async control(request: RemoteHostControlRequest, context: TrustedSuccessionContext): Promise<AgentRemoteHttpResult> {
     try {
@@ -30,29 +32,37 @@ export class SessionSuccessionEnrollment {
         const saved = this.service.store.relationChange(reservation.operationId);
         if (saved && relationChangeKey(saved.reservation) !== relationChangeKey(reservation)) throw new Error('Relation operation identity conflict.');
         const authorize = async () => { for (const ref of [reservation.readerRef, reservation.sourceRef, reservation.current]) await this.authorize(ref); };
-        await authorize();
-        if (input.action === 'relation_status') return json(200, { receipt: saved ?? null });
+        if (input.action === 'relation_status') { await authorize(); return json(200, { receipt: saved ?? null }); }
         if (!['relation_reserve', 'relation_apply', 'relation_release'].includes(input.action)) throw new Error('Invalid relation action.');
-        const generation = this.service.store.generation;
-        if (input.action === 'relation_reserve' && !saved || input.action === 'relation_apply' && saved?.phase === 'reserved') {
-          const grants = [];
-          for (const { directory } of this.registrations()) {
-            if (!directory.sourceReferences) throw new Error('A provider cannot certify its complete durable source grants.');
-            for (const grant of await directory.sourceReferences()) grants.push({ ...grant,
-              readerRef: { controllerId: this.controllerId, providerId: directory.providerId, nativeSessionId: grant.nativeSessionId },
-              sourceRef: { controllerId: this.controllerId, providerId: directory.providerId, nativeSessionId: grant.sourceNativeSessionId } });
-          }
-          this.service.bindings(reservation.sourceRef.providerId).sourceParticipants(reservation.roleId,
-            reservation.relations.map(row => ({ ...row, relationId: sourceParticipantId(row.readerRef, row.relationId), nativeSessionId: row.readerRef.nativeSessionId, sourceNativeSessionId: row.sourceRef.nativeSessionId })), grants);
+        let generation = this.service.store.generation;
+        const validate = async () => {
+          generation = this.service.store.generation;
           await authorize();
-        }
-        let receipt;
-        if (input.action === 'relation_reserve') receipt = await this.service.store.reserveRelationChange(reservation, generation);
-        else if (input.action === 'relation_apply') receipt = await this.service.store.applyRelationChange(reservation, generation);
-        else {
+          if (input.action === 'relation_reserve' && !saved || input.action === 'relation_apply' && saved?.phase === 'reserved') {
+            const grants = [];
+            for (const { directory } of this.registrations()) {
+              if (!directory.sourceReferences) throw new Error('A provider cannot certify its complete durable source grants.');
+              for (const grant of await directory.sourceReferences()) grants.push({ ...grant,
+                readerRef: { controllerId: this.controllerId, providerId: directory.providerId, nativeSessionId: grant.nativeSessionId },
+                sourceRef: { controllerId: this.controllerId, providerId: directory.providerId, nativeSessionId: grant.sourceNativeSessionId } });
+            }
+            this.service.bindings(reservation.sourceRef.providerId).sourceParticipants(reservation.roleId,
+              reservation.relations.map(row => ({ ...row, relationId: sourceParticipantId(row.readerRef, row.relationId), nativeSessionId: row.readerRef.nativeSessionId, sourceNativeSessionId: row.sourceRef.nativeSessionId })), grants);
+            await authorize();
+          }
+        };
+        const change = async () => {
+          if (input.action === 'relation_reserve') return this.service.store.reserveRelationChange(reservation, generation);
+          if (input.action === 'relation_apply') return this.service.store.applyRelationChange(reservation, generation);
           if (!Number.isSafeInteger(input.associationRevision)) throw new Error('An exact applied revision is required.');
-          receipt = await this.service.store.releaseRelationChange(reservation, input.associationRevision);
-        }
+          return this.service.store.releaseRelationChange(reservation, input.associationRevision);
+        };
+        const receipt = input.action === 'relation_reserve' && !saved
+          // The readable store owns replay; a trusted metadata-only observation may
+          // revalidate after a pre-effect rejection without changing durable identity.
+          ? await this.admitMutation(`host:relation:${successionAuthorityKey(context.authority)}:admission-attempt:${randomUUID()}`, reservation.operationId, 'relation_reserve',
+            [reservation.readerRef, reservation.sourceRef, reservation.current], { reservation }, change, validate)
+          : await (async () => { await validate(); return change(); })();
         return json(200, { receipt });
       }
       if (input.action === 'source-result') {

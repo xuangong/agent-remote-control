@@ -17,7 +17,7 @@ class NativeSession implements AgentSession {
   private sequence = 0;
   private queued: ProviderStreamItem[] = [{ type: 'history_boundary' }];
   private wake?: () => void;
-  constructor(readonly id: string, private readonly cwd: string) {}
+  constructor(readonly id: string, private readonly cwd: string, private readonly receiptGate?: Promise<void>) {}
   async *observe() {
     this.observed++;
     while (!this.closed) {
@@ -32,6 +32,7 @@ class NativeSession implements AgentSession {
     this.sent.push(text); this.status = 'running';
     this.emit({ type: 'turn_started', provider: 'codex', turnId: 'review' });
     this.emit({ type: 'runtime_updated', provider: 'codex', runtimeInfo: await this.runtimeInfo(), activeTurnId: 'review' });
+    if (this.receiptGate) await this.receiptGate;
     return { disposition: 'started' as const };
   }
   async finish() {
@@ -69,11 +70,12 @@ async function uplink() {
   };
 }
 
-it('creates a scoped TPM over the real Host uplink and keeps shared observation and heartbeat after disconnect', async () => {
+it.each([false, true])('creates a scoped TPM over the real Host uplink and keeps shared observation and heartbeat after disconnect (delayed receipt: %s)', async delayedReceipt => {
   const root = await realpath(await mkdtemp(join(tmpdir(), 'arc-tpm-host-'))); const broker = await uplink();
+  let releaseReceipt!: () => void; const receiptGate = new Promise<void>(resolve => { releaseReceipt = resolve; });
   let now = 1_000_000; const sessions = new Map<string, NativeSession>(); const configurations: AgentSessionConfig[] = [];
   const directory: AgentHostDirectory = { providerId: 'codex', list: async () => [], workspaces: async () => [],
-    async create(config) { const id = `tpm-${configurations.length + 1}`; configurations.push({ ...config, sessionId: id }); sessions.set(id, new NativeSession(id, root)); return id; },
+    async create(config) { const id = `tpm-${configurations.length + 1}`; configurations.push({ ...config, sessionId: id }); sessions.set(id, new NativeSession(id, root, delayedReceipt ? receiptGate : undefined)); return id; },
     async open(id) { let session = sessions.get(id); if (!session || session.closed) { session = new NativeSession(id, root); sessions.set(id, session); } return session; },
     async close() { await Promise.all([...sessions.values()].map(session => session.dispose())); } };
   const host = createAgentHost({ installationId: 'tpm-test', name: 'Isolated TPM Host', registrations: [{ directory,
@@ -85,12 +87,25 @@ it('creates a scoped TPM over the real Host uplink and keeps shared observation 
   try {
     await host.ready;
     const created = await broker.rpc('POST', '/remote/tpm/create', { providerId: 'codex', mainNativeSessionId: 'main', operationId: 'create-operation' });
-    expect(created.status).toBe(200); expect(created.body.tpmNativeSessionId).toBe('tpm-1');
+    expect(created.status, JSON.stringify(created.body)).toBe(200); expect(created.body.tpmNativeSessionId).toBe('tpm-1');
     expect(created.body).toMatchObject({ title: expect.stringMatching(/^[A-Z][a-z]+ [A-Z][a-z]+$/), waiting: 'user' });
-    await expect.poll(() => sessions.get('tpm-1')!.sent.length).toBe(1);
-    const beforeRename = await broker.rpc('GET', '/remote/tpm/work?id=' + created.body.id);
+    await expect.poll(() => sessions.get('tpm-1')!.sent.length, { timeout: 3000 }).toBe(1);
+    let beforeRename = await broker.rpc('GET', '/remote/tpm/work?id=' + created.body.id);
+    const earlierRevision = beforeRename.body.revision;
+    if (delayedReceipt) expect(beforeRename.body.outbox).toEqual([expect.objectContaining({ purpose: 'initial', status: 'dispatching' })]);
+    releaseReceipt();
+    await expect.poll(async () => {
+      beforeRename = await broker.rpc('GET', '/remote/tpm/work?id=' + created.body.id);
+      expect(beforeRename.status, JSON.stringify(beforeRename.body)).toBe(200);
+      return beforeRename.body.outbox?.find((intent: { purpose: string }) => intent.purpose === 'initial');
+    }, { timeout: 3000 }).toMatchObject({ status: 'accepted', acceptance: 'started' });
+    if (delayedReceipt) {
+      expect(beforeRename.body.revision).toBeGreaterThan(earlierRevision);
+      const staleRename = await broker.rpc('POST', '/remote/tpm/action', { id: created.body.id, revision: earlierRevision, operationId: 'stale-rename-operation', action: 'rename', title: 'Stale rename' });
+      expect(staleRename, JSON.stringify(staleRename.body)).toMatchObject({ status: 409, body: { code: 'tpm_request_failed', error: 'TPM work changed. Refresh before applying this change.' } });
+    }
     const renamed = await broker.rpc('POST', '/remote/tpm/action', { id: created.body.id, revision: beforeRename.body.revision, operationId: 'rename-operation', action: 'rename', title: 'Investigate mobile reconnect' });
-    expect(renamed.status).toBe(200); expect(renamed.body.title).toBe('Investigate mobile reconnect');
+    expect(renamed.status, JSON.stringify({ beforeRename: beforeRename.body, renamed: renamed.body })).toBe(200); expect(renamed.body.title).toBe('Investigate mobile reconnect');
     const workId = created.body.id; const native = sessions.get('tpm-1')!;
     await expect.poll(() => native.sent.length).toBe(1);
     const attached = await broker.rpc('POST', '/remote/attach', { providerId: 'codex', nativeSessionId: 'main' }, 'browser-main'); expect(attached.status).toBe(200);
@@ -105,7 +120,7 @@ it('creates a scoped TPM over the real Host uplink and keeps shared observation 
     now += 1000; await expect.poll(() => native.sent.length).toBe(2);
     expect(native.sent[1]).toContain('Heartbeat check'); expect(sessions.get('main')!.closed).toBe(false);
     expect(sessions.get('main')!.observed).toBe(1); expect(native.observed).toBe(1);
-  } finally { await host.close(); await broker.close(); await rm(root, { recursive: true, force: true }); }
+  } finally { releaseReceipt(); await host.close(); await broker.close(); await rm(root, { recursive: true, force: true }); }
 }, 10000);
 
 

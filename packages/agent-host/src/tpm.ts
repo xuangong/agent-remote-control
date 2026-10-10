@@ -146,6 +146,27 @@ export class TpmCoordinator {
       } finally { main.release(); }
     });
   }
+  /** Preflight recovery without opening or inspecting the supplied native session. */
+  validateCreationRecovery(input: TpmAction, scope: string): void {
+    if (input.action !== 'resolve' || input.intentId !== 'creation' || input.resolution !== 'accepted') return;
+    const previous = this.store.get(input.id), settled = previous.actions[fingerprint([scope, input.operationId])];
+    if (settled) {
+      if (settled.fingerprint !== fingerprint(input)) throw new AgentOperationRejectedError('tpm_action_conflict', 'The operation identity was reused with different input.');
+      return;
+    }
+    const nativeId = input.nativeSessionId;
+    try {
+      if (previous.work.revision !== input.revision) throw new Error('TPM work changed. Refresh before applying this change.');
+      if (previous.creation !== 'unknown') throw new Error('The uncertain creation was not found.');
+      if (!nativeId) throw new Error('A verified native session identity is required to resolve creation.');
+      if (nativeId === previous.work.mainNativeSessionId || this.store.all().some(record => record.work.id !== input.id && record.work.providerId === previous.work.providerId
+        && [record.work.mainNativeSessionId, record.work.tpmNativeSessionId].includes(nativeId))) throw new Error('The recovered session is already bound to a main session or another TPM work.');
+      if (!this.access.recover) throw new Error('This Controller cannot safely recover TPM creation.');
+      this.admit(previous.work.providerId);
+    } catch (error) {
+      throw new AgentOperationRejectedError('tpm_recovery_rejected', error instanceof Error ? error.message : 'TPM recovery was rejected before native dispatch.');
+    }
+  }
   async action(input: TpmAction, scope: string): Promise<TpmWork> {
     if (!isTpmAction(input)) throw new Error('Invalid TPM action.');
     return this.manage(async () => {
@@ -154,17 +175,7 @@ export class TpmCoordinator {
       if (settled) { if (settled.fingerprint !== hash) throw new AgentOperationRejectedError('tpm_action_conflict', 'The operation identity was reused with different input.'); return previous.work; }
       if (input.action === 'resolve' && input.intentId === 'creation' && input.resolution === 'accepted') {
         const nativeId = input.nativeSessionId;
-        try {
-          if (previous.work.revision !== input.revision) throw new Error('TPM work changed. Refresh before applying this change.');
-          if (previous.creation !== 'unknown') throw new Error('The uncertain creation was not found.');
-          if (!nativeId) throw new Error('A verified native session identity is required to resolve creation.');
-          if (nativeId === previous.work.mainNativeSessionId || this.store.all().some(record => record.work.id !== input.id && record.work.providerId === previous.work.providerId
-            && [record.work.mainNativeSessionId, record.work.tpmNativeSessionId].includes(nativeId))) throw new Error('The recovered session is already bound to a main session or another TPM work.');
-          if (!this.access.recover) throw new Error('This Controller cannot safely recover TPM creation.');
-          this.admit(previous.work.providerId);
-        } catch (error) {
-          throw new AgentOperationRejectedError('tpm_recovery_rejected', error instanceof Error ? error.message : 'TPM recovery was rejected before native dispatch.');
-        }
+        this.validateCreationRecovery(input, scope);
         await this.access.recover!(previous.work.providerId, nativeId!, this.boundExtensions(input.id));
       }
       const updated = await this.store.update(input.id, input.action === 'confirm_todo' ? undefined : input.revision, record => {

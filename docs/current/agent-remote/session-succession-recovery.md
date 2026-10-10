@@ -102,10 +102,30 @@ Wire authorization is checked before acceptance; a later page disconnect or
 control-lease replacement does not cancel accepted work. Share revocation prevents
 new requests and closes streams, without retroactively undoing accepted intents.
 
-This checkpoint covers wired session operations, complete stop-route target sets,
-enrolled association admission and setting intent/effect lifetime. Remaining
-directory and association writes, and native ownership are subsequent slices;
-the shared mechanism alone is not complete Host exclusion or provider readiness.
+Directory create/rename and source-derived operations use the same entry through
+validation, native completion and result/grant publication. Snapshot
+`creationSource` is request-only concrete provenance: it authorizes the source on
+its own provider, without creating source tools or a role-following association.
+Equivalent legacy source/edit provenance preserves existing persisted creation
+fingerprints. Changed snapshot provenance still conflicts; unknown receipts do
+not permit another native create.
+
+Fresh relation metadata admission captures reader, immutable source, current role
+and native-family refs. A superseded source alone does not prevent unlink/relink,
+but transient and durable nonterminal reservations do. Trusted metadata attempts
+without an exact Host receipt may repeat safe validation after a missing grant is
+repaired; the durable operation and reservation never change. Exact saved results
+retain their existing forward recovery, and unknown store publication stays closed.
+
+Native owner transfer obtains a synchronous grant before owner fields, stop or
+projection cleanup change, holding its family through publication. Its bounded
+receipt timeout retains uncertain effects, including later known completion.
+Ordinary immediate takeover can interrupt working; it does not inherit succession's
+idle requirement. Read attachment and security cleanup retain their existing paths.
+
+These reviewed slices cover the Host entry points, but do not certify complete
+native readiness or independent writers. Native evidence, SQL persistence and
+product recovery remain separate gates; production succession stays disabled.
 
 ## Native evidence checkpoint
 

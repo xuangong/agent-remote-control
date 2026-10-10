@@ -142,6 +142,7 @@ export function createSessionDirectory(providers: readonly AgentProviderAdapter[
           if (url.pathname === '/v1/remote/child/attach') return send(response, 200, await attach(relay, providerId, required(body.nativeSessionId, 'nativeSessionId'), required(body.parentNativeSessionId, 'parentNativeSessionId')));
           if (url.pathname === '/v1/remote/attach') return send(response, 200, await attach(relay, providerId, required(body.nativeSessionId, 'nativeSessionId')));
           if (url.pathname === '/v1/remote/create') {
+            if (body.creationSource !== undefined) throw new DirectoryError(400, 'unsupported_configuration', 'Snapshot source admission is unavailable in the legacy local directory. Use a paired Host.');
             const operationId = required(body.operationId, 'operationId');
             const config: Partial<AgentSessionConfig> & { workspaceId?: string; sourceNativeSessionId?: string } = {};
             for (const key of ['cwd', 'workspaceId', 'model', 'reasoningEffort', 'sourceNativeSessionId'] as const) {

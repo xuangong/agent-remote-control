@@ -191,6 +191,12 @@ export class SessionSuccessionCoordinator {
     if (reason === 'superseded') throw new Error('This session has been superseded. Open its current successor.');
   }
 
+  /** Metadata relationships retain immutable source grants after succession. */
+  assertReservation(session: NativeSessionRef): void {
+    this.refreshAdmission();
+    if (this.admissionBlocks.get(nativeSessionRefKey(session)) === 'reserved') throw new Error('This session is reserved for handoff.');
+  }
+
   private refreshAdmission(): void {
     if (this.admissionGeneration === this.store.generation) return;
     const blocks = new Map<string, 'reserved' | 'superseded'>();
@@ -202,7 +208,7 @@ export class SessionSuccessionCoordinator {
           blocks.set(from, 'reserved');
           if (record.to) blocks.set(nativeSessionRefKey(record.to), 'reserved');
         }
-        if (record.phase === 'committed' && from !== current) blocks.set(from, 'superseded');
+        if (record.phase === 'committed' && from !== current && blocks.get(from) !== 'reserved') blocks.set(from, 'superseded');
       }
     }
     this.admissionBlocks = blocks; this.admissionGeneration = this.store.generation;

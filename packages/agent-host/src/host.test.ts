@@ -85,7 +85,7 @@ describe('Agent Host runtime', () => {
     const codex = fixture('codex');
     const validatePromptEdit = vi.fn(async () => { throw new Error('Only the first prompt of a turn can be edited.'); });
     const host = createAgentHostRuntime({ registrations: [{ adapter: codex.adapter,
-      directory: { ...codex.directory, supportsPromptEditing: true, validatePromptEdit } }] });
+      directory: { ...codex.directory, supportsPromptEditing: true, validatePromptEdit, sessionWorkspace:async()=>tmpdir() } }] });
     try {
       const request = { method: 'POST' as const, path: '/remote/create', sessionId: 'branch', body: JSON.stringify({
         providerId: 'codex', operationId: operationId('edit-rejected'), editNativeSessionId: 'source', editTurnId: 'turn', editMessageId: 'steer',
@@ -99,7 +99,7 @@ describe('Agent Host runtime', () => {
 
   it('deduplicates a complete prompt edit and rejects reuse for a different turn', async () => {
     const codex = fixture('codex');
-    const host = createAgentHostRuntime({ registrations: [{ adapter: codex.adapter, directory: { ...codex.directory, supportsPromptEditing: true } }] });
+    const host = createAgentHostRuntime({ registrations: [{ adapter: codex.adapter, directory: { ...codex.directory, supportsPromptEditing: true, sessionWorkspace:async()=>tmpdir() } }] });
     try {
       const input = { providerId: 'codex', operationId: operationId('edit'), editNativeSessionId: 'source', editTurnId: 'turn', editMessageId: 'message' };
       const request = (body: unknown) => host.control({ method: 'POST', path: '/remote/create', sessionId: 'branch', body: JSON.stringify(body) });

@@ -42,10 +42,32 @@ the four-file fix diff were verified. Logs are
 `.tmp/root-task8b2a-{build,relay-tests,host-tests,runtime-tests,typecheck}.log`
 and `.tmp/root-task8b2a-fix1-*.log`; the plan workspace retains both reviews.
 
-Next is Task8B2B: directory provenance, remaining association writes and native ownership.
-Ordinary immediate takeover may still interrupt working; only succession requires
-idle admission. Native evidence integration, deployed SQL and product composition
-remain open. No whole-Host exclusion or production capability is claimed yet.
+Task8B2B and its first fix round passed independent spec/quality review.
+Directory create/rename, source-derived operations, relationship reservations and
+native owner transfer now use the same cache/boundary. Request-only snapshot
+provenance authorizes the concrete source provider without adding source grants.
+Equivalent legacy source/edit provenance preserves old persisted create identities;
+unknown shared creation receipts still cannot replay native creation.
+
+Metadata-only relation changes retain immutable source references after succession
+but reject every affected active reservation. Exact saved relation recovery keeps
+its durable identity. Native owner transfer obtains a synchronous grant before
+owner fields or stop change; ordinary immediate takeover can still interrupt
+working, while succession requires idle admission.
+
+Root verified all 30 frozen sources and the four-file fix diff. Fresh verification
+passed Hosted 122, Protocol 236 and Lab 13 tests; the initial Host run was 419/420.
+The failure was TPM rename using a revision read before initial acceptance was
+published. A controlled real-uplink test proves stale revision refusal and fresh
+revision success. Root then freshly passed all 134 affected tests in five files,
+the Hosted build and both affected typechecks; earlier four-package typechecks
+and builds also passed. No production revision check was weakened. Logs are
+`.tmp/root-task8b2b-*.log` and `.tmp/root-task8b2b-fix1-*.log`; reviews and source
+manifests remain in the plan workspace.
+
+Next is Task9A's negotiated projection ceiling, followed by the prepared SQL and
+product slices. Native readiness/evidence integration remains a separate gate;
+no complete provider, production capability or end-to-end handoff is certified.
 
 ## Native crash evidence checkpoint (2026-10-10)
 
@@ -77,8 +99,8 @@ evidence and review live in the plan workspace. There was one create and one
 input, U appeared once, and reconciliation issued zero model requests.
 No callback-enabled production profile or complete readiness was certified.
 
-The common admission and setting slices are now reviewed as recorded above.
-Continue with 8B2B's directory/provenance and ownership wiring.
+The common admission, setting and directory/ownership slices are now reviewed as
+recorded above. Continue with the prepared Task9A storage contract.
 Native readiness/evidence integration,
 complete SQL persistence and client composition still block release. No merge,
 push, deployment, package publication, global install or user-service changes

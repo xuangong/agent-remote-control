@@ -11,11 +11,13 @@ interface NativeSessionKey { root:string; providerId:string; sessionId:string }
 export class NativeSessionOwnerError extends Error {
   constructor(readonly code:string, message:string, readonly owner?:NativeOwnerIdentity) {super(message);}
 }
+export interface NativeHandoffGrant { completed(outcome: NativeHandoffOutcome): void; failed(): void }
+export type NativeHandoffAdmission = (next: NativeOwnerIdentity) => NativeHandoffGrant;
 export interface NativeSessionLease {
   readonly generation:string;
   readonly active:boolean;
   readonly previousOutcome?:NativeHandoffOutcome;
-  activate(stop:(next: NativeOwnerIdentity)=>Promise<NativeHandoffOutcome>, transferred?: (next: NativeOwnerIdentity) => void):void;
+  activate(stop:(next: NativeOwnerIdentity)=>Promise<NativeHandoffOutcome>, transferred?: (next: NativeOwnerIdentity) => void, admission?: NativeHandoffAdmission):void;
   release():Promise<void>;
 }
 export interface NativeOwnerDiagnostic { event:string; providerId:string; sessionId:string; generation:string; at:string; outcome?:string }
@@ -53,6 +55,7 @@ export async function acquireNativeSession(options:NativeSessionKey & {kind:Nati
   const reservation=(id:string)=>path+'.reservation-'+id;
   let owned=false, active=false, released=false, stop:((next: NativeOwnerIdentity)=>Promise<NativeHandoffOutcome>)|undefined;
   let transferred: ((next: NativeOwnerIdentity) => void) | undefined;
+  let admission: NativeHandoffAdmission | undefined;
   let transfer:Promise<NativeHandoffOutcome>|undefined, successor:string|undefined, previousOutcome:NativeHandoffOutcome|undefined;
   const diagnose=(event:string,outcome?:string)=> {try {options.onDiagnostic?.({event,providerId:options.providerId,sessionId:options.sessionId,generation,at:new Date().toISOString(),...(outcome?{outcome}:{})});}catch{}};
   const server=createServer((req,res)=> {
@@ -66,6 +69,9 @@ export async function acquireNativeSession(options:NativeSessionKey & {kind:Nati
       if(successor && successor!==next.generation){send(409,{code:'native_owner_changed'});return;}
       if(!transfer) {
         if(!owned||!active||!stop){send(409,{code:'native_owner_busy'});return;}
+        let grant: NativeHandoffGrant | undefined;
+        try { grant = admission?.(identity(next)); } catch { send(409,{code:'succession_admission_closed'}); return; }
+        if (admission && !grant) {send(409,{code:'succession_admission_closed'});return;}
         successor=next.generation; active=false; diagnose('native_handoff_started');
         transfer=(async()=>{
           try {
@@ -79,8 +85,8 @@ export async function acquireNativeSession(options:NativeSessionKey & {kind:Nati
               }
               replace(path,{...next,outcome}); unlinkSync(reservation(next.generation));
             });
-            owned=false; try {transferred?.(identity(next));} catch {} diagnose('native_handoff_completed',outcome); return outcome;
-          }catch(error){diagnose('native_handoff_failed','unknown');if(!owned){server.close();server.closeIdleConnections();}throw error;}
+            owned=false; grant?.completed(outcome); try {transferred?.(identity(next));} catch {} diagnose('native_handoff_completed',outcome); return outcome;
+          }catch(error){grant?.failed();diagnose('native_handoff_failed','unknown');if(!owned){server.close();server.closeIdleConnections();}throw error;}
         })();
       }
       try {const outcome=await transfer; res.once('finish',()=>{server.close();server.closeIdleConnections();}); send(200,{outcome});}catch{send(409,{code:'native_handoff_unknown'});}
@@ -125,7 +131,7 @@ export async function acquireNativeSession(options:NativeSessionKey & {kind:Nati
   }
   return {
     generation,get active(){return active;},get previousOutcome(){return previousOutcome;},
-    activate(callback, onTransferred){transferred=onTransferred;if(!owned||released||successor)throw new Error('Native lease is unavailable.');stop=callback;active=true;},
+    activate(callback, onTransferred, admit){transferred=onTransferred;admission=admit;if(!owned||released||successor)throw new Error('Native lease is unavailable.');stop=callback;active=true;},
     async release(){
       if(released)return;released=true;active=false;
       await transfer?.catch(()=>undefined);

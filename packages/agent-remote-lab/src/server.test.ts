@@ -1,3 +1,4 @@
+// @vitest-environment node
 import { afterEach, describe, expect, it } from 'vitest';
 
 import { createProtocolValidationServer } from './server.js';
@@ -7,7 +8,7 @@ describe('createProtocolValidationServer', () => {
 
   afterEach(async () => {
     await Promise.all(servers.splice(0).map((server) => server.close()));
-  });
+  },5000);
 
   it('requires providers and the exact browser Origin at the shared composition boundary', () => {
     const server = createProtocolValidationServer({
@@ -53,6 +54,17 @@ describe('createProtocolValidationServer', () => {
       type: 'protocol_error', payload: { code: 'provider_not_found' },
     });
   });
+
+  it('explicitly refuses provenance in the legacy local HTTP directory before native creation', async () => {
+    let creates=0;
+    const server=createProtocolValidationServer({labOrigin:'http://127.0.0.1:5175',providers:[{
+      descriptor:{providerId:'fixture',displayName:'Fixture'},createSession:async()=>{creates++;throw new Error('unexpected');},resumeSession:async()=>{throw new Error('unexpected');},
+    }]});servers.push(server);
+    const {url}=await server.http.listen(0,'127.0.0.1');
+    const response=await fetch(`${url}/v1/remote/create`,{method:'POST',headers:{'content-type':'application/json'},
+      body:JSON.stringify({providerId:'fixture',operationId:'snapshot',creationSource:{providerId:'fixture',nativeSessionId:'source'}}),signal:AbortSignal.timeout(3000)});
+    expect(response.status).toBe(400);expect(await response.json()).toMatchObject({code:'unsupported_configuration'});expect(creates).toBe(0);
+  },5000);
 
   async function startServer(): Promise<{ url: string }> {
     const server = createProtocolValidationServer({

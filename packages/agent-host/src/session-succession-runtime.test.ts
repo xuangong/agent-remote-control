@@ -196,7 +196,7 @@ test('authenticated broker enrollment derives a role, freezes associations and c
     expect(committed).toMatchObject({record:{phase:'committed'},role:{current:ref('B'),revision:2},locator:{hostId:transport.hostId,providerId:'fixture',nativeSessionId:'B'}});
     expect(transport.saved().associations?.freezes[0]).toMatchObject({released:'committed',projection:{role:{current:ref('B')}}});
     const state=JSON.parse(await readFile(join(f.root,'roles','state.json'),'utf8'));
-    expect(state).toMatchObject({version:2,roles:[{associationAuthority:transport.authority,enrollments:[{request:{operationId:input.operationId}}]}]});
+    expect(state).toMatchObject({version:3,roles:[{associationAuthority:transport.authority,enrollments:[{request:{operationId:input.operationId}}]}]});
   } finally {await transport.close();await f.close();}
 },15000);
 
@@ -296,7 +296,7 @@ test('cold complete grants enroll only linked direct readers and preserve immuta
     const update={hostId:transport.hostId,providerId:'fixture',nativeSessionId:'side',sourceNativeSessionId:'A',id:'side-relation',linked:false,expectedRevision:0};
     await expect(transport.broker.updateSessionRelation('owner',update)).rejects.toThrow(/reserved/);
     expect((await transport.action('commit',{operationId:'cold'}))!.status).toBe(200);
-    await expect(transport.broker.updateSessionRelation('owner',update)).rejects.toThrow(/relationship updates/);
+    await expect(transport.broker.updateSessionRelation('owner',update)).rejects.toThrow(/operation identity/);
     expect(transport.saved().bindings).toEqual(before);
     expect(f.sessions.size).toBe(2);
   }finally{await transport.close();await f.close();}
@@ -324,7 +324,9 @@ test.each(['source','revision','provider'] as const)('concurrent different %s ca
     const changed=conflict==='source'?{nativeSessionId:'X'}:conflict==='revision'?{expectedRevision:2}:{targetProviderId:'other'};
     const results=await Promise.all([transport.action('prepare',input),transport.action('prepare',{...input,...changed})]);
     expect(results.map(result=>result!.status).sort()).toEqual([200,409]);
-    expect(prepares).toBe(1);expect(f.creates()).toBe(1);
+    expect(prepares).toBe(1);
+    const selected=transport.saved().associations!.freezes[0]!.receipt.request;
+    expect(f.creates()).toBe(selected.targetProviderId==='other'?0:1);
   }finally{release();await transport.close();await f.close();}
 },15000);
 
@@ -553,4 +555,153 @@ test('a TPM recovery failure after native access retains its unresolved admissio
     const repeated=await f.host.control({method:'POST',path:'/remote/tpm/action',body});
     expect(repeated.status).toBe(409);expect(JSON.parse(repeated.body).error).toMatch(/unresolved/);expect(inspections).toBe(1);
   }finally{await f.close();}
+},15000);
+
+test('trusted postcommit unlink and relink reconcile cold direct readers and keep nested Ask fixed', async () => {
+  const f = await fixture(false, true); const transport = await enrollmentTransport(f, coldAssociations());
+  try {
+    f.grants.push(...[{nativeSessionId:'side',sourceNativeSessionId:'A'},{nativeSessionId:'ask',sourceNativeSessionId:'A'},{nativeSessionId:'unlinked',sourceNativeSessionId:'A'},{nativeSessionId:'nested',sourceNativeSessionId:'side'}]);
+    expect((await transport.action('prepare',{operationId:'relations',providerId:'fixture',nativeSessionId:'A',expectedRevision:1}))!.status).toBe(200);
+    expect((await transport.action('commit',{operationId:'relations'}))!.status).toBe(200);
+    const original = structuredClone(f.grants);
+    const input = { hostId:transport.hostId,providerId:'fixture',nativeSessionId:'side',sourceNativeSessionId:'A',id:'side-relation',linked:false,expectedRevision:0,operationId:'unlink-side',expectedRoleRevision:2 };
+    const result = await transport.broker.updateSessionRelation('owner', input);
+    expect(result).toMatchObject({operation:{phase:'committed',reservation:{operationId:'unlink-side'}}});
+    expect(await transport.broker.updateSessionRelation('owner', input)).toEqual(result);
+    const state = JSON.parse(await readFile(join(f.root,'roles','state.json'),'utf8'));
+    expect(state.roles[0].participants.map((row:{after:{nativeSessionId:string}})=>row.after.nativeSessionId)).toEqual(['ask']);
+    expect(state.roles[0].relationChanges[0].phase).toBe('released');
+    expect(f.grants).toEqual(original); expect(f.sessions.size).toBe(2);
+    expect(transport.saved().bindings.find(row=>row.nativeSessionId==='side')!.sourceRelation).toMatchObject({id:'side-relation',sourceNativeSessionId:'A',linked:false,revision:1});
+    await transport.broker.updateSessionRelation('owner',{...input,operationId:'relink-side',linked:true,expectedRevision:1});
+    expect(JSON.parse(await readFile(join(f.root,'roles','state.json'),'utf8')).roles[0].participants.map((row:{after:{nativeSessionId:string}})=>row.after.nativeSessionId).sort()).toEqual(['ask','side']);
+    expect(f.grants).toEqual(original);
+  } finally { await transport.close(); await f.close(); }
+},15000);
+
+test.each(['relation_reserve','relation_apply','relation_release'])('lost %s response keeps exact operation recoverable across both restarts', async lostAction => {
+  const f = await fixture(false, true); const initial = coldAssociations(); initial.bindings = initial.bindings.filter(row=>['A','side'].includes(row.nativeSessionId));
+  const transport = await enrollmentTransport(f, initial);
+  try {
+    f.grants.push({nativeSessionId:'side',sourceNativeSessionId:'A'});
+    await transport.action('prepare',{operationId:'relations',providerId:'fixture',nativeSessionId:'A',expectedRevision:1}); await transport.action('commit',{operationId:'relations'});
+    let lost = false; transport.beforeControl(async input => { if(input.action===lostAction&&!lost){lost=true;throw new Error('Response was lost after durable Host write');} });
+    const input={hostId:transport.hostId,providerId:'fixture',nativeSessionId:'side',sourceNativeSessionId:'A',id:'side-relation',linked:false,expectedRevision:0,operationId:'recover-edit',expectedRoleRevision:2};
+    await expect(transport.broker.updateSessionRelation('owner',input)).rejects.toThrow();
+    expect(transport.saved().associations!.relationChanges![0].phase).not.toBe('committed');
+    const metadataCommitted = transport.saved().bindings.find(row=>row.nativeSessionId==='side')!.sourceRelation!.revision===1;
+    expect(metadataCommitted).toBe(lostAction!=='relation_reserve');
+    expect(transport.broker.sessionRelations('owner')[0]).toMatchObject({source:{nativeSessionId:'A'},navigationSource:{hostId:transport.hostId,nativeSessionId:'B'}});
+    const competing=await transport.action('prepare',{operationId:'blocked',providerId:'fixture',nativeSessionId:'B',expectedRevision:2});expect(competing!.status).toBe(409);
+    transport.beforeControl(async()=>{}); await transport.restart(f.restart);
+    expect(await transport.broker.resetSessionRelationChange('owner',input)).toMatchObject({operation:{phase:'committed'}});
+    expect(transport.saved().associations!.relationResets).toEqual([]);
+    expect(transport.broker.sessionRelations('owner')[0]!.navigationSource).toBeUndefined();
+    expect(transport.saved().bindings.find(row=>row.nativeSessionId==='side')!.sourceRelation!.revision).toBe(1);
+    const state=JSON.parse(await readFile(join(f.root,'roles','state.json'),'utf8'));
+    expect(state.roles[0].associationRevision).toBe(2);expect(state.roles[0].participants).toEqual([]);expect(state.roles[0].relationChanges[0].phase).toBe('released');
+    expect(f.creates()).toBe(1);expect(f.sourceCreates()).toBe(0);
+  } finally {await transport.close();await f.close();}
+},15000);
+
+test('metadata persistence failure after Host reserve remains recoverable without false success', async () => {
+  const f=await fixture(false,true), initial=coldAssociations();initial.bindings=initial.bindings.filter(row=>['A','side'].includes(row.nativeSessionId));const transport=await enrollmentTransport(f,initial);
+  try {
+    f.grants.push({nativeSessionId:'side',sourceNativeSessionId:'A'});
+    await transport.action('prepare',{operationId:'relations',providerId:'fixture',nativeSessionId:'A',expectedRevision:1});await transport.action('commit',{operationId:'relations'});
+    const input={hostId:transport.hostId,providerId:'fixture',nativeSessionId:'side',sourceNativeSessionId:'A',id:'side-relation',linked:false,expectedRevision:0,operationId:'failed-metadata',expectedRoleRevision:2};
+    transport.beforeControl(async value=>{if(value.action==='relation_reserve')transport.failBinding(true);});
+    await expect(transport.broker.updateSessionRelation('owner',input)).rejects.toThrow(/storage/);
+    expect(transport.saved().bindings.find(row=>row.nativeSessionId==='side')!.sourceRelation!.linked).toBe(true);
+    expect(JSON.parse(await readFile(join(f.root,'roles','state.json'),'utf8')).roles[0].relationChanges[0].phase).toBe('reserved');
+    transport.failBinding(false);transport.beforeControl(async()=>{});await transport.restart(f.restart);
+    expect(await transport.broker.reconcileSessionRelationChange('owner',{hostId:transport.hostId,operationId:'failed-metadata'})).toMatchObject({operation:{phase:'committed'}});
+  } finally {await transport.close();await f.close();}
+},15000);
+
+test('missing durable grant rejects reserve and retains the exact Broker edit for later reconcile', async () => {
+  const f=await fixture(false,true), initial=coldAssociations();initial.bindings=initial.bindings.filter(row=>['A','side'].includes(row.nativeSessionId));const transport=await enrollmentTransport(f,initial);
+  try {
+    const grant={nativeSessionId:'side',sourceNativeSessionId:'A'};f.grants.push(grant);
+    await transport.action('prepare',{operationId:'relations',providerId:'fixture',nativeSessionId:'A',expectedRevision:1});await transport.action('commit',{operationId:'relations'});
+    f.grants.splice(0);
+    const input={hostId:transport.hostId,providerId:'fixture',nativeSessionId:'side',sourceNativeSessionId:'A',id:'side-relation',linked:false,expectedRevision:0,operationId:'missing-grant',expectedRoleRevision:2};
+    await expect(transport.broker.updateSessionRelation('owner',input)).rejects.toThrow(/native grant/);
+    expect(transport.saved().bindings.find(row=>row.nativeSessionId==='side')!.sourceRelation!.linked).toBe(true);
+    expect(transport.saved().associations!.relationChanges[0].phase).toBe('reserved');
+    expect(()=>transport.broker.sessionRelationChangeStatus('viewer',{hostId:transport.hostId,operationId:'missing-grant'})).toThrow();
+    f.grants.push(grant);
+    expect(await transport.broker.reconcileSessionRelationChange('owner',{hostId:transport.hostId,operationId:'missing-grant'})).toMatchObject({operation:{phase:'committed'}});
+  } finally {await transport.close();await f.close();}
+},15000);
+
+test('a current-B native reader stays fixed until the next B-to-C frozen enrollment',async()=>{
+  const f=await fixture(false,true),transport=await enrollmentTransport(f);
+  try {
+    await transport.action('prepare',{operationId:'first',providerId:'fixture',nativeSessionId:'A',expectedRevision:1});await transport.action('commit',{operationId:'first'});
+    await transport.request(`/v1/remote/hosts/${transport.hostId}/attach`,{providerId:'fixture',nativeSessionId:'B'});
+    const response=await transport.request(`/v1/remote/hosts/${transport.hostId}/create`,{providerId:'fixture',sourceNativeSessionId:'B',conversationKind:'side',conversationId:'current-b-side',operationId:'00000000-0000-4000-8000-000000000021'});
+    expect(response!.status).toBe(200);
+    const reader=transport.saved().bindings.find(row=>row.sourceRelation?.id==='00000000-0000-4000-8000-000000000021')!;
+    expect(reader.sourceRelation!.nativeSourceRef).toEqual(ref('B'));
+    expect(JSON.parse(await readFile(join(f.root,'roles','state.json'),'utf8')).roles[0].participants).toEqual([]);
+    expect(transport.broker.sessionRelations('owner')[0]).toMatchObject({nativeSourceRef:ref('B'),sourceBinding:{kind:'fixed',source:ref('B')},source:{nativeSessionId:'B'},hostLocator:{hostId:transport.hostId,controllerId:'controller'}});
+    expect((await transport.action('prepare',{operationId:'second',providerId:'fixture',nativeSessionId:'B',expectedRevision:2}))!.status).toBe(200);
+    expect((await transport.action('commit',{operationId:'second'}))!.status).toBe(200);
+    expect(transport.broker.sessionRelations('owner')[0]).toMatchObject({nativeSourceRef:ref('B'),sourceBinding:{kind:'primary_role'},source:{nativeSessionId:'C'}});
+    expect(f.sourceCreates()).toBe(1);expect(f.grants).toEqual([{nativeSessionId:reader.nativeSessionId,sourceNativeSessionId:'B'}]);
+  }finally{await transport.close();await f.close();}
+},15000);
+
+test('a competing edit between describe and reserve rejects before persisting a stale Host clock',async()=>{
+  const f=await fixture(false,true),transport=await enrollmentTransport(f,coldAssociations());
+  try {
+    f.grants.push(...[{nativeSessionId:'side',sourceNativeSessionId:'A'},{nativeSessionId:'ask',sourceNativeSessionId:'A'},{nativeSessionId:'unlinked',sourceNativeSessionId:'A'},{nativeSessionId:'nested',sourceNativeSessionId:'side'}]);
+    await transport.action('prepare',{operationId:'first',providerId:'fixture',nativeSessionId:'A',expectedRevision:1});await transport.action('commit',{operationId:'first'});
+    let enter!:()=>void,release!:()=>void;const entered=new Promise<void>(resolve=>{enter=resolve;}),gate=new Promise<void>(resolve=>{release=resolve;});let first=true;
+    transport.beforeControl(async input=>{if(input.action==='describe'&&first){first=false;enter();await gate;}});
+    const side={hostId:transport.hostId,providerId:'fixture',nativeSessionId:'side',sourceNativeSessionId:'A',id:'side-relation',linked:false,expectedRevision:0,operationId:'slow-edit',expectedRoleRevision:2};
+    const slow=transport.broker.updateSessionRelation('owner',side);void slow.catch(()=>{});await entered;
+    await transport.broker.updateSessionRelation('owner',{...side,nativeSessionId:'unlinked',id:'unlinked-relation',linked:true,operationId:'fast-edit'});
+    release();await expect(slow).rejects.toThrow(/changed|catalog/);
+    expect(transport.saved().associations!.relationChanges.map(row=>row.reservation.operationId)).toEqual(['fast-edit']);
+    expect(await transport.broker.updateSessionRelation('owner',side)).toMatchObject({operation:{phase:'committed'}});
+  }finally{await transport.close();await f.close();}
+},15000);
+
+test('concurrent exact same-ID relation describes join the saved operation before catalog drift checks',async()=>{
+ const f=await fixture(false,true),initial=coldAssociations();initial.bindings=initial.bindings.filter(row=>['A','side'].includes(row.nativeSessionId));const transport=await enrollmentTransport(f,initial);
+ try{
+  f.grants.push({nativeSessionId:'side',sourceNativeSessionId:'A'});await transport.action('prepare',{operationId:'first',providerId:'fixture',nativeSessionId:'A',expectedRevision:1});await transport.action('commit',{operationId:'first'});
+  let entered!:()=>void,release!:()=>void,count=0;const described=new Promise<void>(resolve=>{entered=resolve;}),gate=new Promise<void>(resolve=>{release=resolve;});
+  transport.beforeControl(async input=>{if(input.action==='describe'){count++;if(count===2)entered();await gate;}});
+  const input={hostId:transport.hostId,providerId:'fixture',nativeSessionId:'side',sourceNativeSessionId:'A',id:'side-relation',linked:false,expectedRevision:0,operationId:'same-edit',expectedRoleRevision:2};
+  const a=transport.broker.updateSessionRelation('owner',input),b=transport.broker.updateSessionRelation('owner',input);await described;release();
+  const results=await Promise.all([a,b]);expect(results[0]).toEqual(results[1]);expect(transport.saved().associations!.relationChanges).toHaveLength(1);expect(transport.saved().bindings.find(row=>row.nativeSessionId==='side')!.sourceRelation!.revision).toBe(1);
+ }finally{await transport.close();await f.close();}
+},15000);
+
+
+test('durable exact pre-effect reset fences a delayed absent operation before reserve and after restart',async()=>{
+ const f=await fixture(false,true),initial=coldAssociations();initial.bindings=initial.bindings.filter(row=>['A','side'].includes(row.nativeSessionId));const transport=await enrollmentTransport(f,initial);
+ let release!:()=>void;
+ try{
+  f.grants.push({nativeSessionId:'side',sourceNativeSessionId:'A'});await transport.action('prepare',{operationId:'first',providerId:'fixture',nativeSessionId:'A',expectedRevision:1});await transport.action('commit',{operationId:'first'});
+  let entered!:()=>void;const described=new Promise<void>(resolve=>{entered=resolve;}),gate=new Promise<void>(resolve=>{release=resolve;});let first=true,reserves=0;
+  transport.beforeControl(async input=>{if(input.action==='relation_reserve')reserves++;if(input.action==='describe'&&first){first=false;entered();await gate;}});
+  const input={hostId:transport.hostId,providerId:'fixture',nativeSessionId:'side',sourceNativeSessionId:'A',id:'side-relation',linked:false,expectedRevision:0,operationId:'reset-old-edit',expectedRoleRevision:2};
+  const slow=transport.broker.updateSessionRelation('owner',input);void slow.catch(()=>{});await described;
+  expect(()=>transport.broker.sessionRelationChangeStatus('owner',input)).toThrow(/No pending/);
+  await transport.action('prepare',{operationId:'second',providerId:'fixture',nativeSessionId:'B',expectedRevision:2});await transport.action('commit',{operationId:'second'});
+  const reset=await transport.broker.resetSessionRelationChange('owner',input);expect(reset).toMatchObject({reset:{phase:'pre_effect',intent:{operationId:input.operationId}}});
+  await expect(transport.broker.resetSessionRelationChange('other',input)).rejects.toThrow(/owner|access/);
+  await expect(transport.broker.resetSessionRelationChange('owner',{...input,linked:true})).rejects.toThrow(/identity/);
+  release();await expect(slow).rejects.toThrow(/reset/);expect(reserves).toBe(0);expect(transport.saved().associations!.relationChanges).toEqual([]);
+  transport.beforeControl(async()=>{});await transport.restart(f.restart);
+  await expect(transport.broker.updateSessionRelation('owner',input)).rejects.toThrow(/reset/);
+  expect(await transport.broker.resetSessionRelationChange('owner',input)).toEqual(reset);
+  await transport.broker.updateSessionRelation('owner',{...input,operationId:'fresh-edit',expectedRoleRevision:3});
+  expect(transport.saved().associations!.relationChanges).toHaveLength(1);
+  expect(await transport.broker.resetSessionRelationChange('owner',{...input,operationId:'fresh-edit',expectedRoleRevision:3})).toMatchObject({operation:{phase:'committed'}});
+ }finally{release?.();await transport.close();await f.close();}
 },15000);

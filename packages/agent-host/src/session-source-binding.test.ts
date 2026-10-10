@@ -150,7 +150,7 @@ test('attachment cursors remain pinned after materialization and authorize every
   await contexts.reconcile('op-1', { operationId: 'first', target: ref('B'), roleRevision: 2, outcome: 'materialized', nativeEvidence: 'native-proof' });
   expect((await bindings.read('Q', 'A', {}, f.read)).sourceRepresentation).toBe('native');
   expect((await bindings.read('Q', 'A', { sourceContext: pending.sourceContext }, f.read)).entries[0]!.text).toBe('captured old');
-  denied = true; await expect(bindings.read('Q', 'A', { sourceContext: pending.sourceContext }, f.read)).rejects.toThrow('denied'); expect(checks).toBe(4);
+  denied = true; await expect(bindings.read('Q', 'A', { sourceContext: pending.sourceContext }, f.read)).rejects.toThrow('denied'); expect(checks).toBe(7);
 });
 
 test('stored attachments require authorization and full reader identities cannot collide', async () => {
@@ -182,4 +182,18 @@ test('paginates captured rows and preserves raw history across another successio
   expect((await bindings.read('Q', 'A', { query: 'needle' }, f.read)).entries[0]!.text).toBe('old needle');
   expect((await bindings.read('Q', 'A', { cursor: first.nextCursor }, f.read)).sourceRef).toEqual(ref('B'));
   expect(contexts.read('op-2').text).toBe(raw);
+});
+
+test('a fixed current-B grant retains exact B attachment reads after unlink', async () => {
+  const f = await fixture(); await f.commit();
+  const { SessionSuccessionContextStore } = await import('./session-succession-context.js');
+  const contexts = new SessionSuccessionContextStore(join(f.directory, 'fixed-b-contexts')); await contexts.ready;
+  await contexts.attach({ operationId:'op-1',roleId:'role',roleRevision:2,source:ref('A'),target:ref('B'),capturedAt:'2026-10-10T00:00:00Z',boundary:{epoch:'e',seq:5},text:'[{"role":"user","text":"B attachment"}]',itemCount:1 });
+  const bindings = new SessionSourceBindings(f.store,'host','codex',f.key,{contexts,authorizeRead:async()=>{}});
+  await f.store.setParticipants('role',2,f.store.read('role').associationRevision,[{relationId:'fixed-B',kind:'side',before:ref('reader-B'),after:ref('reader-B')}]);
+  const signed = await bindings.read('reader-B','B',{},f.read);
+  await f.store.setParticipants('role',2,f.store.read('role').associationRevision,[]);
+  expect((await bindings.read('reader-B','B',{sourceContext:signed.sourceContext},f.read)).entries[0]!.text).toBe('B attachment');
+  expect((await bindings.read('reader-B','B',{},f.read)).entries[0]!.text).toBe('B attachment');
+  await expect(bindings.read('reader-B','A',{sourceContext:signed.sourceContext},f.read)).rejects.toThrow();
 });

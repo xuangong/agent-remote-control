@@ -142,7 +142,7 @@ test('migrates legacy storage explicitly and rejects admission races or authorit
   const legacy = JSON.parse(await readFile(path, 'utf8')); legacy.version = 1; delete legacy.associationAdmissions; delete legacy.associationResults;
   await writeFile(path, JSON.stringify(legacy));
   const restored = new SessionSuccessionStore(directory); await restored.ready;
-  expect(JSON.parse(await readFile(path, 'utf8')).version).toBe(2);
+  expect(JSON.parse(await readFile(path, 'utf8')).version).toBe(3);
   const authority = { version: 1 as const, origin: 'https://relay.example', issuer: 'https://issuer.example', namespace: 'tenant', ownerSubject: 'owner' };
   const freeze = { version: 1 as const, token: 'freeze', authority, controllerId: source.controllerId, request, associationRevision: 1, lineage: [source], relations: [] };
   const before = restored.generation;
@@ -265,4 +265,15 @@ test('reserves bounded native-result capacity before dispatch while keeping TPM 
   await reopened.completeSourceAssociation({id:'first',fingerprint:'fingerprint',scope:'scope',operationId:'first',source,reader:target});
   expect(JSON.parse(await readFile(path,'utf8')).associationResults).toHaveLength(1024);
   await expect(reopened.admitAssociation('fourth','fingerprint',source,true)).rejects.toThrow(/result storage is full/);
+});
+
+test('migrates valid version 2 while rejecting missing or null durable admissions and results',async()=>{
+ const {directory}=await fixture(),path=join(directory,'state.json'),saved=JSON.parse(await readFile(path,'utf8'));
+ saved.version=2;
+ for(const field of ['associationAdmissions','associationResults'])for(const missing of ['absent','null']){
+  const invalid=structuredClone(saved);if(missing==='absent')delete invalid[field];else invalid[field]=null;
+  await writeFile(path,JSON.stringify(invalid));await expect(new SessionSuccessionStore(directory).ready).rejects.toThrow(/admission|result/);
+ }
+ await writeFile(path,JSON.stringify(saved));const migrated=new SessionSuccessionStore(directory);await migrated.ready;
+ expect(JSON.parse(await readFile(path,'utf8')).version).toBe(3);expect(migrated.read('role').role.current).toEqual(source);
 });

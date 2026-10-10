@@ -1,3 +1,5 @@
+import { isRelationChangeReservation, relationChangeKey, type RelationChangeReservation } from '@orchardworks/agent-remote-protocol';
+import { sourceParticipantId } from './source-participant.js';
 import { realpath } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
 import { AgentOperationRejectedError } from '@orchardworks/agent-provider-sdk';
@@ -21,6 +23,38 @@ export class SessionSuccessionEnrollment {
       await this.service.ready;
       if (request.method !== 'POST' || context.installationId !== this.controllerId) throw new Error('Succession Controller authority does not match.');
       const input = JSON.parse(request.body ?? '{}');
+      if (typeof input.action === 'string' && input.action.startsWith('relation_')) {
+        if (Object.keys(input).some(name => !['action', 'reservation', 'associationRevision'].includes(name)) || !isRelationChangeReservation(input.reservation)) throw new Error('A strict relation reservation is required.');
+        const reservation: RelationChangeReservation = input.reservation;
+        if (reservation.controllerId !== this.controllerId || successionAuthorityKey(reservation.authority) !== successionAuthorityKey(context.authority)) throw new Error('Relation authority does not match this connection.');
+        const saved = this.service.store.relationChange(reservation.operationId);
+        if (saved && relationChangeKey(saved.reservation) !== relationChangeKey(reservation)) throw new Error('Relation operation identity conflict.');
+        const authorize = async () => { for (const ref of [reservation.readerRef, reservation.sourceRef, reservation.current]) await this.authorize(ref); };
+        await authorize();
+        if (input.action === 'relation_status') return json(200, { receipt: saved ?? null });
+        if (!['relation_reserve', 'relation_apply', 'relation_release'].includes(input.action)) throw new Error('Invalid relation action.');
+        const generation = this.service.store.generation;
+        if (input.action === 'relation_reserve' && !saved || input.action === 'relation_apply' && saved?.phase === 'reserved') {
+          const grants = [];
+          for (const { directory } of this.registrations()) {
+            if (!directory.sourceReferences) throw new Error('A provider cannot certify its complete durable source grants.');
+            for (const grant of await directory.sourceReferences()) grants.push({ ...grant,
+              readerRef: { controllerId: this.controllerId, providerId: directory.providerId, nativeSessionId: grant.nativeSessionId },
+              sourceRef: { controllerId: this.controllerId, providerId: directory.providerId, nativeSessionId: grant.sourceNativeSessionId } });
+          }
+          this.service.bindings(reservation.sourceRef.providerId).sourceParticipants(reservation.roleId,
+            reservation.relations.map(row => ({ ...row, relationId: sourceParticipantId(row.readerRef, row.relationId), nativeSessionId: row.readerRef.nativeSessionId, sourceNativeSessionId: row.sourceRef.nativeSessionId })), grants);
+          await authorize();
+        }
+        let receipt;
+        if (input.action === 'relation_reserve') receipt = await this.service.store.reserveRelationChange(reservation, generation);
+        else if (input.action === 'relation_apply') receipt = await this.service.store.applyRelationChange(reservation, generation);
+        else {
+          if (!Number.isSafeInteger(input.associationRevision)) throw new Error('An exact applied revision is required.');
+          receipt = await this.service.store.releaseRelationChange(reservation, input.associationRevision);
+        }
+        return json(200, { receipt });
+      }
       if (input.action === 'source-result') {
         if (!request.operationScope || Object.keys(input).some(name => !['action','providerId','operationId','sourceNativeSessionId','parameters'].includes(name)) || typeof input.operationId !== 'string' || typeof input.providerId !== 'string' || typeof input.sourceNativeSessionId !== 'string') throw new Error('Invalid source recovery identity.');
         const source = {controllerId:this.controllerId,providerId:input.providerId,nativeSessionId:input.sourceNativeSessionId};
@@ -39,7 +73,7 @@ export class SessionSuccessionEnrollment {
         const role = await this.service.store.ensureRole(source, await realpath(cwd));
         const state = this.service.store.read(role.id);
         if (state.associationAuthority && successionAuthorityKey(state.associationAuthority) !== successionAuthorityKey(context.authority)) throw new Error('Primary role belongs to another association authority.');
-        return json(200, { role, lineage: this.service.store.lineage(state) });
+        return json(200, { role, lineage: this.service.store.lineage(state), relationUpdates: 1, associationRevision: state.associationRevision, sourceParticipants: state.participants.filter(row => row.kind !== 'tpm').map(row => ({ relationId: row.relationId, kind: row.kind, readerRef: row.after })) });
       }
       if (Object.keys(input).some(name => !['action', 'freeze'].includes(name)) || !isSuccessionAssociationFreeze(input.freeze)) throw new Error('A complete frozen association receipt is required.');
       const freeze: SuccessionAssociationFreeze = input.freeze;
@@ -61,7 +95,7 @@ export class SessionSuccessionEnrollment {
               sourceRef: { controllerId: this.controllerId, providerId: directory.providerId, nativeSessionId: grant.sourceNativeSessionId } });
           }
           const participants: SuccessionParticipant[] = this.service.bindings(freeze.request.from.providerId).sourceParticipants(state.role.id,
-            freeze.relations.map(relation => ({ ...relation, relationId: `source:${createHash('sha256').update(JSON.stringify([key(relation.readerRef), relation.relationId])).digest('hex')}`, nativeSessionId: relation.readerRef.nativeSessionId, sourceNativeSessionId: relation.sourceRef.nativeSessionId })), grants)
+            freeze.relations.map(relation => ({ ...relation, relationId: sourceParticipantId(relation.readerRef, relation.relationId), nativeSessionId: relation.readerRef.nativeSessionId, sourceNativeSessionId: relation.sourceRef.nativeSessionId })), grants)
             .filter(participant => participant.kind !== 'tpm');
           const lineage = new Set(freeze.lineage.map(key));
           for (const item of this.works()) {

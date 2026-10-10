@@ -2,8 +2,10 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import { act } from 'react';
 import { afterEach, expect, it } from 'vitest';
 import type { SessionRelation } from '@orchardworks/agent-remote-hosted/session-relations';
-import { render } from '../test/setup.js';
-import { ForkStore, referenceForkContext } from '../session-forks.js';
+import { ForkEntries } from '../components/ForkReference.js';
+import { useState, useEffect } from 'react';
+import { render, unmount } from '../test/setup.js';
+import { sideNavigationSource, ForkStore, referenceForkContext } from '../session-forks.js';
 import { useSessionRelations } from './useSessionRelations.js';
 
 const source = { hostId: 'host', providerId: 'codex', nativeSessionId: 'main', agentId: 'main-agent', title: 'Main' };
@@ -198,4 +200,156 @@ it('keeps hosted snapshot forks local because they have no shared reference rela
   await act(async () => relations.setLinked(sides.get(record.id), false));
   expect(new ForkStore(baseUrl).linked()).toEqual([]);
   expect(methods).not.toContain('PATCH');
+});
+
+it('retains a coordinated edit identity across a lost response and remount with a changed displayed provider', async () => {
+  const original={controllerId:'controller',providerId:'codex',nativeSessionId:'main'};
+  let shared:SessionRelation[]=[{...side,nativeSourceRef:original,sourceBinding:{kind:'primary_role',roleId:'role',origin:original},roleRevision:2,source:{...source,providerId:'claude',nativeSessionId:'B'},hostLocator:{hostId:'host',controllerId:'controller'}}];
+  const patches:Record<string,unknown>[]=[];let lost=true;
+  const baseUrl=await serve(async(request,response)=>{
+    if(request.method==='PATCH'){
+      const input=await body(request);patches.push(input);
+      if(lost){lost=false;response.destroy();return;}
+      shared=[{...shared[0]!,source:source,sourceBinding:{kind:'fixed',source:original},linked:false,revision:1}];
+    }
+    reply(response,shared);
+  });
+  const first=await mount(baseUrl);await expect(first.relations.setLinked(first.sides.get('side'),false)).rejects.toThrow(/confirm/);
+  const second=await mount(baseUrl,new ForkStore(baseUrl));
+  await act(async()=>second.relations.setLinked(second.sides.get('side'),false));
+  expect(patches).toHaveLength(2);expect(patches[0]!.operationId).toBeTypeOf('string');expect(patches[1]!.operationId).toBe(patches[0]!.operationId);
+  expect(patches[0]).toMatchObject({sourceNativeSessionId:'main',expectedRoleRevision:2});expect(second.sides.get('side')).toMatchObject({linked:false,revision:1,nativeSourceRef:original});
+});
+
+it('reconcile clears the pending edit from memory and disk before the next opposite intent',async()=>{
+  const nativeSourceRef={controllerId:'controller',providerId:'codex',nativeSessionId:'main'};
+  let shared:SessionRelation[]=[{...side,nativeSourceRef,hostLocator:{hostId:'host',controllerId:'controller'},sourceBinding:{kind:'primary_role',roleId:'role',origin:nativeSourceRef},roleRevision:2}];
+  let pendingId='',lost=true;const ids:string[]=[];
+  const baseUrl=await serve(async(request,response)=>{
+    if(request.url!.endsWith('/reconcile')){
+      const input=await body(request);expect(input.operationId).toBe(pendingId);
+      shared=[{...shared[0]!,linked:false,revision:1,sourceBinding:{kind:'fixed',source:nativeSourceRef},operation:{operationId:pendingId,phase:'committed'}}];
+      response.writeHead(200,{'content-type':'application/json'}).end(JSON.stringify({relations:shared,operation:{reservation:{operationId:pendingId},phase:'committed'}}));return;
+    }
+    if(request.method==='PATCH'){
+      const input=await body(request);ids.push(input.operationId as string);
+      if(lost){lost=false;pendingId=input.operationId as string;response.destroy();return;}
+      shared=[{...shared[0]!,linked:true,revision:2,operation:{operationId:input.operationId as string,phase:'committed'}}];
+    }
+    reply(response,shared);
+  });
+  const {sides,relations}=await mount(baseUrl);
+  await expect(relations.setLinked(sides.get('side'),false)).rejects.toThrow(/confirm/);
+  await act(async()=>relations.reconcile(sides.get('side')));
+  await act(async()=>relations.setLinked(sides.get('side'),true));
+  expect(ids[1]).not.toBe(ids[0]);expect(sides.get('side').linked).toBe(true);
+});
+
+
+it('keeps equal relation IDs independently addressable across providers and Hosts', async () => {
+  const origin = {controllerId:'controller',providerId:'codex',nativeSessionId:'main'};
+  const shared: SessionRelation[] = [
+    {...side,nativeSourceRef:origin,hostLocator:{hostId:'host',controllerId:'controller'},sourceBinding:{kind:'primary_role',roleId:'role',origin},roleRevision:2},
+    {...side,target:{...side.target,providerId:'claude'},nativeSourceRef:origin,hostLocator:{hostId:'host',controllerId:'controller'},sourceBinding:{kind:'primary_role',roleId:'role',origin},roleRevision:2},
+    {...side,source:{...side.source,hostId:'other'},target:{...side.target,hostId:'other'},nativeSourceRef:{...origin,controllerId:'other-controller'},sourceBinding:{kind:'primary_role',roleId:'other-role',origin:{...origin,controllerId:'other-controller'}},roleRevision:2,hostLocator:{hostId:'other',controllerId:'other-controller'}},
+  ];
+  const patches:Record<string,unknown>[]=[];
+  const baseUrl=await serve(async(request,response)=>{if(request.method==='PATCH'){patches.push(await body(request));response.destroy();return;}reply(response,shared);});
+  const first=await mount(baseUrl);
+  expect(first.sides.all()).toHaveLength(3);
+  for(const record of first.sides.all()) await expect(first.relations.setLinked(record,false)).rejects.toThrow(/confirm/);
+  expect(new Set(patches.map(input=>input.operationId)).size).toBe(3);
+  const second=await mount(baseUrl,new ForkStore(baseUrl));
+  for(const record of second.sides.all()) await expect(second.relations.setLinked(record,false)).rejects.toThrow(/confirm/);
+  expect(patches.slice(3).map(input=>input.operationId)).toEqual(patches.slice(0,3).map(input=>input.operationId));
+});
+
+it('serializes recovery and preserves a new lost edit across delayed recovery and remount', async()=>{
+  const origin={controllerId:'controller',providerId:'codex',nativeSessionId:'main'};
+  let shared:SessionRelation[]=[{...side,nativeSourceRef:origin,hostLocator:{hostId:'host',controllerId:'controller'},sourceBinding:{kind:'primary_role',roleId:'role',origin},roleRevision:2}];
+  let held:ServerResponse|undefined,oldId=''; let entered!:()=>void;
+  const started=new Promise<void>(resolve=>{entered=resolve;});const patches:Record<string,unknown>[]=[];
+  const baseUrl=await serve(async(request,response)=>{
+    if(request.url!.endsWith('/reconcile')){held=response;entered();return;}
+    if(request.method==='PATCH'){const input=await body(request);patches.push(input);oldId ||= input.operationId as string;response.destroy();return;}
+    reply(response,shared);
+  });
+  const first=await mount(baseUrl);
+  await expect(first.relations.setLinked(first.sides.get('side'),false)).rejects.toThrow(/confirm/);
+  const recovering=first.relations.reconcile(first.sides.get('side'));void recovering.catch(()=>{});await started;
+  await expect(Promise.race([first.relations.reconcile(first.sides.get('side')),new Promise((_,reject)=>setTimeout(()=>reject(new Error('Concurrent recovery was not rejected')),100))])).rejects.toThrow(/already/);
+  shared=[{...shared[0]!,linked:false,revision:1,operation:{operationId:oldId,phase:'committed'}}];
+  held!.writeHead(200,{'content-type':'application/json'}).end(JSON.stringify({relations:shared,operation:{reservation:{operationId:oldId},phase:'committed'}}));
+  await act(async()=>recovering);
+  await expect(first.relations.setLinked(first.sides.get('side'),true)).rejects.toThrow(/confirm/);
+  const newId=patches[1]!.operationId;expect(newId).not.toBe(oldId);
+  const second=await mount(baseUrl,new ForkStore(baseUrl));
+  await expect(second.relations.setLinked(second.sides.get('side'),true)).rejects.toThrow(/confirm/);
+  expect(patches[2]!.operationId).toBe(newId);
+});
+
+
+it('keeps lost pending unlink reachable in Side entries after refresh and remount, recovers and accepts a new intent',async()=>{
+  const origin={controllerId:'controller',providerId:'codex',nativeSessionId:'main'};
+  const current={...source,providerId:'claude',nativeSessionId:'B',agentId:'B-agent'};
+  let shared:SessionRelation[]=[{...side,source:current,nativeSourceRef:origin,hostLocator:{hostId:'host',controllerId:'controller'},sourceBinding:{kind:'primary_role',roleId:'role',origin},roleRevision:2}];
+  let operationId='';const ids:string[]=[];
+  const baseUrl=await serve(async(request,response)=>{
+    if(request.url!.endsWith('/reconcile')){
+      shared=[{...shared[0]!,navigationSource:undefined,operation:{operationId,phase:'committed'}}];
+      response.writeHead(200,{'content-type':'application/json'}).end(JSON.stringify({relations:shared,operation:{reservation:{operationId},phase:'committed'}}));return;
+    }
+    if(request.method==='PATCH'){
+      const input=await body(request);ids.push(input.operationId as string);operationId=input.operationId as string;
+      shared=[{...shared[0]!,source:ids.length===1?source:current,navigationSource:ids.length===1?current:undefined,linked:input.linked as boolean,revision:(shared[0]!.revision??0)+1,operation:{operationId,phase:ids.length===1?'metadata_committed':'committed'}}];
+      if(ids.length===1){response.destroy();return;}
+    }
+    reply(response,shared);
+  });
+  let recovered:Promise<void>|undefined;let relations!:ReturnType<typeof useSessionRelations>;let sides=new ForkStore(baseUrl);const uiAsks=new ForkStore(baseUrl+'ui-ask');
+  function Harness(){const [,update]=useState(0);relations=useSessionRelations(baseUrl,true,sides,uiAsks);
+    useEffect(()=>sides.subscribe(()=>update(value=>value+1)),[sides]);
+    return <ForkEntries forks={sides.linked().filter(record=>sideNavigationSource(record).agentId==='B-agent')} onOpen={()=>{}} onUnlink={record=>relations.setLinked(record,false)} onRecover={record=>recovered=relations.reconcile(record)}/>;
+  }
+  const first=await render(<Harness/>);await act(async()=>relations());
+  await act(async()=>first.querySelector<HTMLButtonElement>('.lab-fork-menu-trigger')!.click());
+  await act(async()=>document.querySelector<HTMLButtonElement>('[role="menuitem"]')!.click());
+  await act(async()=>relations());expect(sides.linked()).toHaveLength(1);
+  await unmount(first);sides=new ForkStore(baseUrl);
+  const second=await render(<Harness/>);await act(async()=>relations());
+  expect(second.textContent).toContain('Side');expect(sides.all()[0]!.source).toEqual(source);expect(sideNavigationSource(sides.all()[0]!)).toEqual(current);
+  await act(async()=>second.querySelector<HTMLButtonElement>('.lab-fork-menu-trigger')!.click());
+  const recovery=document.querySelector<HTMLButtonElement>('[role="menuitem"]')!;expect(recovery.textContent).toBe('Retry link change');
+  await act(async()=>{recovery.click();await recovered;});expect(sides.linked()).toEqual([]);
+  await act(async()=>relations.setLinked(sides.all()[0]!,true));expect(ids[1]).not.toBe(ids[0]);expect(sides.linked()).toHaveLength(1);
+});
+
+
+it('retains stale role intent after bare absence or failed reset and retires it only after exact durable reset',async()=>{
+  const origin={controllerId:'controller',providerId:'codex',nativeSessionId:'main'};
+  let shared:SessionRelation[]=[{...side,nativeSourceRef:origin,hostLocator:{hostId:'host',controllerId:'controller'},sourceBinding:{kind:'primary_role',roleId:'role',origin},roleRevision:2}];
+  const patches:Record<string,unknown>[]=[],resets:Record<string,unknown>[]=[];let resetFails=true;
+  const baseUrl=await serve(async(request,response)=>{
+    if(request.url!.endsWith('/reconcile')){response.writeHead(404).end();return;}
+    if(request.url!.endsWith('/reset')){
+      const input=await body(request);resets.push(input);
+      if(resetFails){response.writeHead(503).end();return;}
+      response.writeHead(200,{'content-type':'application/json'}).end(JSON.stringify({relations:shared,reset:{version:1,phase:'pre_effect',intent:{version:1,operationId:input.operationId,
+        hostId:'host',controllerId:'controller',readerRef:{...origin,nativeSessionId:'side'},sourceRef:origin,relationId:'side',linked:input.linked,
+        expectedRelationRevision:input.expectedRevision,expectedRoleRevision:input.expectedRoleRevision}}}));return;
+    }
+    if(request.method==='PATCH'){
+      patches.push(await body(request));shared=[{...shared[0]!,roleRevision:3}];response.writeHead(409,{'content-type':'application/json'}).end(JSON.stringify({relations:shared,code:'invalid_host_response'}));return;
+    }
+    reply(response,shared);
+  });
+  const first=await mount(baseUrl);
+  await expect(first.relations.setLinked(first.sides.get('side'),false)).rejects.toThrow(/changed/);
+  await expect(first.relations.reconcile(first.sides.get('side'))).rejects.toThrow(/pending/);
+  await expect(first.relations.setLinked(first.sides.get('side'),false)).rejects.toThrow(/changed/);
+  expect(patches[1]).toMatchObject({operationId:patches[0]!.operationId,expectedRoleRevision:2});
+  resetFails=false;await act(async()=>first.relations.reconcile(first.sides.get('side')));
+  await expect(first.relations.setLinked(first.sides.get('side'),false)).rejects.toThrow(/changed/);
+  expect(patches[2]!.operationId).not.toBe(patches[0]!.operationId);expect(patches[2]!.expectedRoleRevision).toBe(3);
+  expect(resets[0]).toMatchObject({operationId:patches[0]!.operationId,expectedRoleRevision:2});
 });

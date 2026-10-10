@@ -92,7 +92,7 @@ import { SideConversation } from './components/SideConversation.js';
 import { SessionAsk } from './components/SessionAsk.js';
 import { useAskConversations } from './hooks/useAskConversations.js';
 import { ForkEntries, ForkReference } from './components/ForkReference.js';
-import { referenceForkContext, captureForkContext, forkDisplayState, ForkStore, type SessionFork } from './session-forks.js';
+import { sideNavigationSource, sideLinkVisible, referenceForkContext, captureForkContext, forkDisplayState, ForkStore, type SessionFork } from './session-forks.js';
 import { CollapsedConversations } from './components/CollapsedConversations.js';
 import { expandedSideRange, sidePath, type SideSelections } from './side-tree.js';
 import { configureFork, forkActions, forkCommands, sendForkInput } from './fork-actions.js';
@@ -537,7 +537,7 @@ function AppContent({
       const savedSide = savedComposition?.path[index];
       if (!savedSide) { finishComposition(); return; }
       const source = recovered[index - 1]!;
-      const isUnlinked = () => forkStore.all().some(record => record.linked === false && record.target
+      const isUnlinked = () => forkStore.all().some(record => !sideLinkVisible(record) && record.target
         && sessionKey(record.source) === sessionKey(source) && sessionKey(record.target) === sessionKey(savedSide));
       const target = new SessionDirectoryClient(baseUrl, undefined, savedSide.hostId ?? 'local');
       cancellations.push(restoreSession({
@@ -1025,14 +1025,18 @@ function AppContent({
   const primaryExpanded = detachedSideRoot ? !!stackRoot && expandedKeys.has(sessionKey(stackRoot)) : stackRange.start === 0;
   const addressSession = stackPath.find((session) => sessionKey(session) === sideFocus) ?? visibleStackRoot;
   const refreshRelations = useSessionRelations(baseUrl, userScoped && accessReady, forkStore, ask.store, addressSession ? sessionKey(addressSession) : undefined, userScoped);
+  const pendingSideSources = useRef(new Map<string, OpenedSession>());
   useLayoutEffect(() => {
     for (const record of forkStore.all()) {
-      if (record.linked !== false || !record.target || appliedUnlinks.get(record.id) === (record.revision ?? 0)) continue;
+      if (record.navigationSource) pendingSideSources.current.set(record.id,record.navigationSource);
+      if (sideLinkVisible(record) || !record.target || appliedUnlinks.get(record.id) === (record.revision ?? 0)) continue;
       appliedUnlinks.set(record.id, record.revision ?? 0);
-      trackedViews.unlink(record.source, record.target);
-      nextSideRequest(record.source);
+      const navigationSource = pendingSideSources.current.get(record.id) ?? record.source;
+      pendingSideSources.current.delete(record.id);
+      trackedViews.unlink(navigationSource, record.target);
+      nextSideRequest(navigationSource);
       if (!visibleStackRoot) continue;
-      const sourceKey = sessionKey(record.source), targetKey = sessionKey(record.target);
+      const sourceKey = sessionKey(navigationSource), targetKey = sessionKey(record.target);
       const current = { primary: visibleStackRoot, selections: sideSelections, focus: sideFocus, anchor: sideAnchor };
       const next = unlinkSideView(current, sourceKey, targetKey);
       if (next === current) continue;
@@ -1276,7 +1280,7 @@ function AppContent({
   function closeSide(session: OpenedSession): void {
     letterRequest.current?.abort();
     const record = forkStore.find(session);
-    const source = record?.source ?? stackPath.find(candidate => sideSelections[sessionKey(candidate)] === sessionKey(session));
+    const source = record ? sideNavigationSource(record) : stackPath.find(candidate => sideSelections[sessionKey(candidate)] === sessionKey(session));
     if (!source) return;
     nextSideRequest(source);
     setSideSelections((current) => ({ ...current, [sessionKey(source)]: null }));
@@ -1403,9 +1407,10 @@ function AppContent({
   async function openFork(record: SessionFork): Promise<void> {
     cancelCompositionRecovery();
     letterRequest.current?.abort();
-    if (!record.target || !directory || forkStore.get(record.id).linked === false) return;
+    if (!record.target || !directory || !sideLinkVisible(forkStore.get(record.id))) return;
     const saved = record.target;
-    const request = nextSideRequest(record.source);
+    const source = sideNavigationSource(record);
+    const request = nextSideRequest(source);
     const target = (saved.hostId ?? 'local') === selectedHost.id ? directory : new SessionDirectoryClient(baseUrl, undefined, saved.hostId);
     try {
       const result = await target.attach(saved.providerId, saved.nativeSessionId);
@@ -1413,9 +1418,9 @@ function AppContent({
       forkStore.bind(record.id, session);
       await configureFork(transport, forkStore, forkStore.get(record.id));
       rememberSession(session);
-      if (sideRequests.current.get(sessionKey(record.source)) === request && forkStore.get(record.id).linked !== false && session.agentId !== activeAgentId) selectSide(record.source, session);
+      if (sideRequests.current.get(sessionKey(source)) === request && sideLinkVisible(forkStore.get(record.id)) && session.agentId !== activeAgentId) selectSide(source, session);
     } catch (error) {
-      if (sideRequests.current.get(sessionKey(record.source)) === request) setFailure(message(error, 'Forked session could not be opened.'));
+      if (sideRequests.current.get(sessionKey(source)) === request) setFailure(message(error, 'Forked session could not be opened.'));
     }
   }
 
@@ -1463,7 +1468,7 @@ function AppContent({
       rememberSession(source); rememberSession(session);
       setDirectoryRevision((value) => value + 1);
       if (args.trim()) messageDrafts.set(session.agentId, args.trim());
-      if (id === 'console:side' && forkStore.get(record.id).linked !== false) selectSide(source, session);
+      if (id === 'console:side' && sideLinkVisible(forkStore.get(record.id))) selectSide(source, session);
       if (args.trim() && forkStore.get(record.id).delivery !== 'sent') {
         setForkInputStatus({ agentId: session.agentId, pending: true });
         try { await sendForkInput(transport, forkStore, forkStore.get(record.id), args.trim()); }
@@ -1742,8 +1747,8 @@ function AppContent({
                 if (!opened) throw new Error('Session navigation changed before native restoration was confirmed.');
               }, options);
             }} /> : undefined}
-          composerContext={boundFork ? <ForkReference fork={boundFork} onOpen={revealSession} onUnlink={unlinkSide} /> : undefined}
-          composerNotice={<ForkEntries forks={forkStore.linked().filter((fork) => fork.target && (fork.source.agentId === activeAgentId || (activeOpened && sessionKey(fork.source) === sessionKey(activeOpened))))} selectedChild={stackRoot ? sideSelections[sessionKey(stackRoot)] : undefined} onOpen={(fork) => void openFork(fork)} onUnlink={unlinkSide} />}
+          composerContext={boundFork ? <ForkReference fork={boundFork} onOpen={revealSession} onUnlink={unlinkSide} onRecover={record => refreshRelations.reconcile(record)} /> : undefined}
+          composerNotice={<ForkEntries forks={forkStore.linked().filter((fork) => fork.target && (sideNavigationSource(fork).agentId === activeAgentId || (activeOpened && sessionKey(sideNavigationSource(fork)) === sessionKey(activeOpened))))} selectedChild={stackRoot ? sideSelections[sessionKey(stackRoot)] : undefined} onOpen={(fork) => void openFork(fork)} onUnlink={unlinkSide} onRecover={record => refreshRelations.reconcile(record)} />}
           sessionManager={<>{!compactLayout && stackRoot ? <StarButton session={stackRoot} favorites={favorites} /> : null}<SessionHeadingActions sessionKey={stackRoot ? sessionKey(stackRoot) : activeAgentId}>{!compactLayout && directory && currentSession ? <ChatSessionManager current={currentSession} entries={sessionEntries} busy={transitioning || hostOffline} onOpen={(item) => void openSession(item)} /> : null}<nav className="lab-conversation-history" aria-label="Conversation history">
             <button type="button" aria-label="Back to previous conversation" title="Back" disabled={transitioning || hostOffline || !conversationHistory.canBack} onClick={conversationHistory.back}>←</button>
             <button type="button" aria-label="Forward to next conversation" title="Forward" disabled={transitioning || hostOffline || !conversationHistory.canForward} onClick={conversationHistory.forward}>→</button>
@@ -1765,7 +1770,7 @@ function AppContent({
         </div>
         {sideSessions.filter((session) => !stackRoot || sessionKey(session) !== sessionKey(stackRoot)).map((session) => <SideConversation
           headingMode={compactLayout ? 'toolbar' : 'inline'}
-          key={sessionKey(session)} session={session} replica={replicaFor(session.agentId)} standalone={sessionKey(session) === detachedSideRoot} onUnlink={unlinkSide}
+          key={sessionKey(session)} session={session} replica={replicaFor(session.agentId)} standalone={sessionKey(session) === detachedSideRoot} onUnlink={unlinkSide} onRecover={record => refreshRelations.reconcile(record)}
           onRenameTitle={sessionKey(session) === detachedSideRoot ? renamePrimaryTitle : undefined}
           navigation={viewNavigation} renderAsk={renderAsk} transport={transport} store={forkStore} onActivityChange={observeSideActivity}
           headingStart={!primaryExpanded && session.agentId === stackPath[stackRange.start]?.agentId ? <div ref={setSessionViewTarget} className="lab-global-view-slot" /> : undefined}

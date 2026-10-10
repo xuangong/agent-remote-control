@@ -3,6 +3,45 @@
 Date: 2026-10-10. Audience: the next implementation session or maintainer.
 Status: partially implemented; no usable end-to-end handoff yet.
 
+## Ordinary relationship update checkpoint (2026-10-10)
+
+The trusted enrollment/native-result recovery baseline is committed as `00f6af9`.
+The ordinary postcommit relationship slice passed scoped review and local
+verification. Check Git and the plan ledger for its checkpoint commit.
+This checkpoint supersedes older statements below that ordinary edits simply fail.
+
+- Host preserves immutable grants and updates one exact reader participant through
+  reserved/applied/released receipts. Source reads recheck gates across awaited I/O.
+  Native sends, TPM participants and admitted recipients are not retargeted.
+- Broker serializes reservation, metadata commitment and exact Host readback/release.
+  Current-B reader creation starts fixed B and joins the next B-to-C enrollment.
+  An old A grant is not silently promoted to B authority.
+- Browser recovery identities use complete reader/Host/relation scope. A pending
+  Side edit remains reachable after refresh and exposes its existing recovery
+  action. Pending navigation is separate from immutable source/read authorization.
+- An absent operation alone cannot retire an in-flight request. Only an exact
+  durable pre-effect reset record fences a never-reserved intent. Any existing
+  reservation remains reconcile-only, with no rollback or automatic replay.
+- Host role state is version 3, Broker associations version 3 and Relay outer state
+  version 5. Explicit migrations preserve older valid formats; ambiguous versions
+  fail closed. See the [recovery guide](../current/agent-remote/session-succession-recovery.md).
+
+The final review packages are the slice-4 and slice-5 increments;
+`.tmp/association-updates-navigation-review.md` closes the final navigation finding.
+Root ran 265 affected tests across the frozen backend/client and final navigation
+checks; whole-workspace typecheck and compatibility update/check passed.
+Exact commands are recorded in `.tmp/association-updates-slice-4.md` and
+`.tmp/association-updates-slice-5.md`.
+Root verification logs use `.tmp/association-root-final-*.log`. These remain
+fixture/transport evidence; no native provider pair or complete product workflow
+is certified. General succession capability and its user entry point stay disabled.
+
+Continue sequentially with the bounded Claude source-reader/managed
+stdio extension brief, authenticated product projection and native certification.
+The native pending-work/queue evidence gap remains explicit; do not infer it from
+idle or a successful history read. No merge, push, deployment or user-service
+replacement is authorized by this continuation.
+
 ## Continuation checkpoint (2026-10-10)
 
 This section supersedes the older implementation checkpoint and next-priority
@@ -406,11 +445,11 @@ All paths below are relative to the worktree root.
 | Product references | `packages/agent-remote-lab/src/App.tsx`, `tracking-state.ts`, `session-composition.ts`, `hooks/useSessionTracking.tsx`, `hooks/useAskConversations.ts` |
 | Optional native fork experiment | `packages/agent-provider-codex/src/session-fork.ts`, `session.ts`, `provider.ts` and fork tests |
 
-The Host `operationLifecycle.admit` currently checks draining; succession gating
-is not wired there. Inspect `SessionWireAgent.timelineCursor()` for a projection
-boundary and the native snapshot/runtime fields for authoritative readiness.
-`SessionSourceBindings` requires a supplied signing key of at least 32 bytes;
-production persistence/loading is still missing.
+The Host admission and final native-dispatch boundaries now include succession
+gating. `SessionWireAgent.timelineCursor()` supplies the projection boundary;
+native readiness still requires explicit adapter evidence. `SessionSuccessionService`
+loads and provisions the durable 32-byte source-cursor signing key. Neither this
+wiring nor its fixture tests certify a production provider pair.
 
 ## Verification evidence and how to continue
 

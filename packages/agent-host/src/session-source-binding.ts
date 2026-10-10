@@ -96,6 +96,7 @@ export class SessionSourceBindings {
   private async readSource(reader: string | NativeSessionRef, originalSource: string | NativeSessionRef, input: SourceHistoryQuery,
     read: (nativeSessionId: string, query: AgentHistoryQuery) => Promise<AgentHistoryPage>, role?: RoleSource): Promise<SourceHistoryPage> {
     const readerRef = this.ref(reader), originalRef = this.ref(originalSource);
+    if (!role) this.assertReaderOpen(readerRef);
     const readerKey = typeof reader === 'string' ? reader : nativeSessionRefKey(readerRef);
     const originalKey = typeof originalSource === 'string' ? originalSource : nativeSessionRefKey(originalRef);
     const resolved = role ?? this.resolveSource(readerRef, originalRef);
@@ -118,13 +119,19 @@ export class SessionSourceBindings {
     }
     if (input.textOffset !== undefined) query.textOffset = input.textOffset;
     await this.options.authorizeRead?.(readerRef, selected.source);
+    this.checkSelected(readerRef, originalRef, selected, role);
     const candidate = this.options.contexts?.forTarget(selected.source);
     const attachment = pinned?.representation === 'attachment'
       ? this.options.contexts?.read(pinned.attachmentId!)
       : !pinned && candidate?.state !== 'materialized' ? candidate : undefined;
     if (pinned?.representation === 'attachment' && !attachment) throw new Error('Pinned source attachment is unavailable.');
     if (attachment && (!this.options.authorizeRead || !sameRef(attachment.target, selected.source)
-      || attachment.roleId !== selected.roleId || attachment.roleRevision !== selected.roleRevision)) throw new Error('Source attachment requires authorized matching routing.');
+      || selected.roleId !== undefined && (attachment.roleId !== selected.roleId || attachment.roleRevision !== selected.roleRevision))) throw new Error('Source attachment requires authorized matching routing.');
+    if (attachment) {
+      const provenance = this.store.read(attachment.roleId);
+      if (!provenance.operations.some(operation => operation.phase === 'committed' && operation.operationId === attachment.operationId
+        && operation.committedRevision === attachment.roleRevision && sameRef(operation.to!, attachment.target) && sameRef(operation.from, attachment.source))) throw new Error('Source attachment has no matching durable succession provenance.');
+    }
     let result: AgentHistoryPage;
     if (attachment) result = this.readAttachment(attachment, query);
     else if (this.options.readRouted) result = await this.options.readRouted(selected.source, query);
@@ -132,9 +139,12 @@ export class SessionSourceBindings {
       if (selected.source.providerId !== this.providerId) throw new Error('Cross-provider source reads require a routed reader.');
       result = await read(selected.source.nativeSessionId, query);
     }
+    this.checkSelected(readerRef, originalRef, selected, role);
+    await this.options.authorizeRead?.(readerRef, selected.source);
+    this.checkSelected(readerRef, originalRef, selected, role);
     const base: SourceCursor = { version: 1, reader: readerKey, originalSource: originalKey, kind: 'context', source: selected.source,
       representation: attachment ? 'attachment' : 'native', ...(attachment ? { attachmentId: attachment.operationId } : {}),
-      ...(selected.roleId ? { roleId: selected.roleId, roleRevision: selected.roleRevision } : {}) };
+      ...(attachment ? { roleId: attachment.roleId, roleRevision: attachment.roleRevision } : selected.roleId ? { roleId: selected.roleId, roleRevision: selected.roleRevision } : {}) };
     const { nextCursor: nativeCursor, ...content } = result;
     return { ...content, sourceRef: selected.source, sourceRepresentation: base.representation,
       ...(attachment ? { sourceProvenance: { operationId: attachment.operationId, source: attachment.source, capturedAt: attachment.capturedAt, boundary: attachment.boundary, ...(attachment.inheritedFrom ? { inheritedFrom: attachment.inheritedFrom } : {}) } } : {}), sourceSessionId: selected.source.nativeSessionId,
@@ -153,6 +163,7 @@ export class SessionSourceBindings {
     return { ...ref };
   }
   resolveSource(reader: string | NativeSessionRef, originalSource: string | NativeSessionRef): RoleSource {
+    this.assertReaderOpen(this.ref(reader));
     this.refresh();
     const source = this.ref(originalSource), readerRef = this.ref(reader);
     const role = this.readers.get(nativeSessionRefKey(readerRef));
@@ -190,7 +201,20 @@ export class SessionSourceBindings {
     }
     this.readers = readers; this.generation = this.store.generation;
   }
-  private authorizePinned(current: RoleSource, pinned: ResolvedSource): void {
+  private assertReaderOpen(reader: NativeSessionRef): void {
+    if (this.store.readerAssociationState(reader).pending) throw new Error('Source relationship update is pending; reader is reserved.');
+  }
+  private checkSelected(reader: NativeSessionRef, original: NativeSessionRef, selected: ResolvedSource, role?: RoleSource): void {
+    if (role) {
+      const state = role.roleId && this.store.read(role.roleId);
+      const current = state ? { source: state.role.current, roleId: state.role.id, roleRevision: state.role.revision, lineage: new Set(this.store.lineage(state).map(nativeSessionRefKey)) } : role;
+      this.authorizePinned(current, selected); return;
+    }
+    this.assertReaderOpen(reader);
+    this.authorizePinned(this.resolveSource(reader, original), selected);
+  }
+  private authorizePinned(current: RoleSource, pinned: ResolvedSource & { representation?: string }): void {
+    if (!current.roleId && sameRef(current.source, pinned.source)) return;
     if (pinned.source.controllerId !== this.controllerId
       || !current.lineage.has(nativeSessionRefKey(pinned.source))
       || pinned.roleId !== undefined && (pinned.roleId !== current.roleId || pinned.roleRevision! > current.roleRevision!)) throw new Error('Source cursor is outside the current authorized relationship.');

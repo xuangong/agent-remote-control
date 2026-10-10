@@ -1,4 +1,4 @@
-import { validBrokerAssociations } from './succession-associations.js';
+import { validBrokerAssociations, migrateBrokerAssociations } from './succession-associations.js';
 import { validSavedSessionSuccessions, type SavedSessionSuccession } from './session-successions.js';
 import { validSourceRelation } from './session-relations.js';
 import { MAX_SESSION_TITLES } from './session-titles.js';
@@ -19,7 +19,7 @@ import { decodeRemoteHostUplinkMessage, isControllerIdentity, isHostEnvironment,
 
 export interface SavedGatewaySession { hash: string; grant: GatewayGrant; sessionExpiresAt: number; id?: string; label?: string; createdAt?: number; lastSeenAt?: number; browserId?: string; activity?: number[] }
 export interface HostedRelayState {
-  version: 2 | 3;
+  version: 2 | 3 | 4 | 5;
   securityEvents?: SecurityEvent[];
   sessionStars?: SavedSessionStar[];
   favoritesTrees?: SavedFavoritesTree[];
@@ -50,7 +50,7 @@ function unique<T>(values: T[], key: (value: T) => string) { return new Set(valu
 function validBroker(value: unknown): value is RemoteHostBrokerState {
   if (!record(value) || !Array.isArray(value.keys) || value.keys.length > 128 || !Array.isArray(value.hosts) || value.hosts.length > 128 ||
     !Array.isArray(value.bindings) || value.bindings.length > 4096 || !Array.isArray(value.creations) || value.creations.length > 4096) return false;
-  if (value.associations !== undefined && !validBrokerAssociations(value.associations)) return false;
+  if (value.associations !== undefined) { try { migrateBrokerAssociations(value.associations); } catch { return false; } }
   if (value.pairings !== undefined && !validPairingHistory(value.pairings)) return false;
   if (value.previews !== undefined && (!Array.isArray(value.previews) || value.previews.length > 128 || !value.previews.every((entry: unknown) => record(entry) && string(entry.hostId)
     && value.hosts.some((host: any) => host.id === entry.hostId) && Array.isArray(entry.pendingRemovals) && entry.pendingRemovals.length <= 1024 && entry.pendingRemovals.every((id: unknown) => string(id))
@@ -72,7 +72,9 @@ function validBroker(value: unknown): value is RemoteHostBrokerState {
 }
 export function validateRelayState(value: unknown, auth: GatewayAuthOptions): HostedRelayState {
   const invalid = () => { throw new Error('Invalid or unsupported Relay state.'); };
-  if (!record(value) || ![2, 3].includes(value.version) || !record(value.config) || value.config.origin !== auth.origin || value.config.issuer !== auth.issuer) return invalid();
+  if (!record(value) || ![2, 3, 4, 5].includes(value.version) || !record(value.config) || value.config.origin !== auth.origin || value.config.issuer !== auth.issuer) return invalid();
+  if (value.version < 5 && Array.isArray(value.tenants) && value.tenants.some((tenant: any) => tenant?.broker?.associations?.version === 3)) return invalid();
+  if (value.version < 4 && Array.isArray(value.tenants) && value.tenants.some((tenant: any) => tenant?.broker?.associations?.version === 2)) return invalid();
   if (value.version === 2 && Array.isArray(value.tenants) && value.tenants.some((tenant: any) => tenant?.broker?.associations !== undefined)) return invalid();
   if (!Array.isArray(value.sessions) || value.sessions.length > 1024 || !Array.isArray(value.tenants) || !Array.isArray(value.loginChallenges) || value.loginChallenges.length > 4096 || !Array.isArray(value.consumedProofs) || value.consumedProofs.length > 10000) return invalid();
   if (!value.sessions.every((session: unknown) => record(session) && /^[a-f0-9]{64}$/.test(session.hash) && time(session.sessionExpiresAt) && record(session.grant) && string(session.grant.subject) && session.grant.namespace === namespace(auth.issuer, session.grant.subject) && time(session.grant.expiresAt) && typeof session.grant.ticket === 'string' && string(session.grant.nonce) && string(session.grant.continuation, 6000) && time(session.grant.sessionExpiresAt) && (session.id === undefined || string(session.id, 128)) && (session.browserId === undefined || validBrowserId(session.browserId)) && (session.activity === undefined || (Array.isArray(session.activity) && session.activity.length <= 8 && session.activity.every(time))) && (session.label === undefined || string(session.label, 128)) && (session.createdAt === undefined || time(session.createdAt)) && (session.lastSeenAt === undefined || time(session.lastSeenAt)) && (session.grant.authenticatedAt === undefined || time(session.grant.authenticatedAt))) ||
@@ -127,7 +129,10 @@ export function createRelayState(auth: GatewayAuthOptions, storage: RelayStateSt
       const operation = queue.then(async () => {
         assertAvailable();
         const draft = structuredClone(current); const result = change(draft);
-        if (draft.tenants.some(tenant => tenant.broker.associations)) draft.version = 3;
+        if (draft.tenants.some(tenant => tenant.broker.associations)) {
+          for (const tenant of draft.tenants) if (tenant.broker.associations) tenant.broker.associations = migrateBrokerAssociations(tenant.broker.associations);
+          draft.version = 5;
+        }
         try { await storage?.commit(draft); }
         catch (error) { unavailable = true; failed(); throw error; }
         current = draft; published(); return result;

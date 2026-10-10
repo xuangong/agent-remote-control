@@ -144,7 +144,10 @@ Host TPM test also exposed operation-identity and initialization-race defects;
 relation enrollment, atomic association reservation and exact creation-result
 recovery now passed scoped reviews and fixture integration. The final restart/TPM
 increment passed 96 tests; whole-workspace typecheck and compatibility checks passed.
-Trusted ordinary postcommit relationship edits and native certification remain open.
+Trusted ordinary postcommit relationship edits passed scoped review and local
+verification, including exact pre-effect reset and reachable Side recovery. Native
+certification and complete product projection remain open. See the latest handoff
+checkpoint for current evidence; this does not complete Task 3.
 Codex native history fork was experimentally verified but is no longer the
 generic handoff preparation path. Do not mark this task complete or expose a
 product capability yet. See the continuation checkpoint in the handoff for

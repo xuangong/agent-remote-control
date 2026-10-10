@@ -1,5 +1,7 @@
+import { relationChangeKey, isRelationChangeReceipt, type RelationChangeReservation, type RelationChangeReceipt } from '@orchardworks/agent-remote-protocol';
+import type { RelationChangeReset, BrokerRelationChange } from './relation-changes.js';
 import { isDeepStrictEqual } from 'node:util';
-import { validBrokerAssociations, type BrokerAssociationState } from './succession-associations.js';
+import { validBrokerAssociations, migrateBrokerAssociations, type BrokerAssociationState } from './succession-associations.js';
 import { isNativeSessionRef, isPrimaryRole, isSuccessionRecord, nativeSessionRefKey, successionFreezeKey, successionAuthorityKey, type NativeSessionRef, type SuccessionAssociationFreeze, type PrimaryRole, type SuccessionRecord } from '@orchardworks/agent-remote-protocol';
 import { type SuccessionAssociationAuthority, isSuccessionAssociationAuthority } from '@orchardworks/agent-remote-protocol';
 import { isTpmAction, isTpmCreate, isTpmList, isTpmWork } from '@orchardworks/agent-remote-protocol';
@@ -110,8 +112,7 @@ export function createHostBroker(options: HostBrokerOptions) {
     const binding = bindings.get(value.agentId);
     if (binding) { completedCreations.set(key, value); creations.set(key, { fingerprint: value.fingerprint, result: Promise.resolve(binding) }); }
   }
-  let associations: BrokerAssociationState = structuredClone(options.initialState?.associations ?? { version: 1, revision: 0, admissions: [], freezes: [] });
-  if (!validBrokerAssociations(associations)) throw new Error('Invalid durable association state.');
+  let associations = migrateBrokerAssociations(options.initialState?.associations ?? { version: 3, revision: 0, admissions: [], freezes: [], relationChanges: [], relationResets: [] });
   function snapshot(): RemoteHostBrokerState {
     return { ...(options.successionEnrollment || options.initialState?.associations ? { associations: structuredClone(associations) } : {}), pairings: structuredClone(pairings), previews: previews.snapshot(), ...(options.ownerSubject ? { sharing: sharing.snapshot() } : {}), keys: [...keys].map(([key, value]) => [key, { ...value }]),
       hosts: [...hosts.values()].map(({ id, installationId, name, providers, legacyDsh, credentialRotation, gatewayKeyRequested, environment, pairingPurpose, controller, providerManagement, tpmManagement }) => ({ ...(tpmManagement ? { tpmManagement } : {}), ...(providerManagement ? { providerManagement } : {}), ...(controller ? { controller } : {}), ...(pairingPurpose ? { pairingPurpose } : {}), ...(environment ? { environment } : {}), id, installationId, name, providers, legacyDsh, ...(credentialRotation ? {credentialRotation} : {}), ...(gatewayKeyRequested ? { gatewayKeyRequested } : {}) })),
@@ -163,6 +164,7 @@ export function createHostBroker(options: HostBrokerOptions) {
     });
   }
   function assertAssociationOpen(source: NativeSessionRef) {
+    if (associations.relationChanges.some(item => item.phase !== 'committed' && item.reservation.lineage.some(ref => nativeSessionRefKey(ref) === nativeSessionRefKey(source)))) throw new BrokerError(409, 'relation_change_pending', 'Source relationships are reserved by a pending edit.', true);
     if (associations.freezes.some(item => !item.released && item.receipt.lineage.some(ref => nativeSessionRefKey(ref) === nativeSessionRefKey(source)))) throw new BrokerError(409, 'succession_associations_frozen', 'Source relationships are reserved by succession.', true);
   }
   function assertAssociationMutable(source: NativeSessionRef): void {
@@ -170,6 +172,11 @@ export function createHostBroker(options: HostBrokerOptions) {
     if (associations.freezes.some(item => item.projection && [...item.receipt.lineage, item.projection.role.current].some(ref => nativeSessionRefKey(ref) === nativeSessionRefKey(source)))) {
       throw new BrokerError(409, 'succession_relationship_updates_unavailable', 'Trusted relationship updates are not enabled for this primary role.');
     }
+  }
+  function assertAssociationCreationOpen(source: NativeSessionRef) {
+    assertAssociationOpen(source);
+    const current = associations.freezes.filter(row => row.projection && [...row.receipt.lineage, row.projection.role.current].some(ref => nativeSessionRefKey(ref) === nativeSessionRefKey(source))).at(-1)?.projection?.role.current;
+    if (current && nativeSessionRefKey(current) !== nativeSessionRefKey(source)) throw new BrokerError(409, 'session_superseded', 'Source session has been superseded.', true);
   }
   const associationSource = (host: Host, providerId: string, nativeSessionId: string): NativeSessionRef => ({ controllerId: host.installationId, providerId, nativeSessionId });
   async function associationRpc(host: Host, input: unknown): Promise<Record<string, any>> {
@@ -210,7 +217,7 @@ export function createHostBroker(options: HostBrokerOptions) {
             associationRevision: state.revision, lineage: described.lineage,
             relations: [...bindings.values()].filter(binding => binding.hostId === host.id && binding.sourceRelation).map(binding => ({
               relationId: binding.sourceRelation!.id, kind: binding.sourceRelation!.kind, readerRef: associationSource(host, binding.providerId, binding.nativeSessionId),
-              sourceRef: associationSource(host, binding.providerId, binding.sourceRelation!.sourceNativeSessionId), linked: binding.sourceRelation!.linked ?? true, revision: binding.sourceRelation!.revision ?? 0,
+              sourceRef: binding.sourceRelation!.nativeSourceRef ?? associationSource(host, binding.providerId, binding.sourceRelation!.sourceNativeSessionId), linked: binding.sourceRelation!.linked ?? true, revision: binding.sourceRelation!.revision ?? 0,
             })) };
           const result = { hostId: host.id, receipt }; state.freezes.push(result); return result;
         });
@@ -237,6 +244,137 @@ export function createHostBroker(options: HostBrokerOptions) {
     if (['committed', 'rejected', 'cancelled'].includes(result.record.phase)) await associationRpc(host, { action: 'release', freeze: frozen.receipt });
     return { record: result.record, role: result.role, locator: { hostId: host.id, providerId: result.role.current.providerId, nativeSessionId: result.role.current.nativeSessionId } };
   }
+  function relationAccess(subject: string, reservation: RelationChangeReservation) {
+    requireOwner(subject);
+    const host = requireHost(reservation.hostId);
+    if (host.installationId !== reservation.controllerId || !options.successionEnrollment || successionAuthorityKey(options.successionEnrollment) !== successionAuthorityKey(reservation.authority)) throw new SharingError(403, 'session_forbidden', 'Relation authority is unavailable.');
+    const binding = nativeBindings.get(JSON.stringify([host.id, reservation.readerRef.providerId, reservation.readerRef.nativeSessionId]));
+    const source = nativeBindings.get(JSON.stringify([host.id, reservation.sourceRef.providerId, reservation.sourceRef.nativeSessionId]));
+    if (!binding || !source || !sessionAllowed(binding, subject) || !sessionAllowed(source, subject) || !hostAllowed(host.id, subject) || !host.providers.some(row => row.providerId === reservation.current.providerId)) throw new SharingError(403, 'session_forbidden', 'Session access is unavailable.');
+    const relation = binding.sourceRelation;
+    const nativeSource = relation?.nativeSourceRef ?? associationSource(host, binding.providerId, relation?.sourceNativeSessionId ?? '');
+    if (!relation || relation.id !== reservation.relationId || relation.kind !== reservation.kind || nativeSessionRefKey(nativeSource) !== nativeSessionRefKey(reservation.sourceRef)) throw new SharingError(409, 'relation_conflict', 'The immutable source relationship changed.');
+    return { host, binding, relation };
+  }
+  function savedRelationOperation(subject: string, selection: { hostId: string; operationId: string }) {
+    const saved = associations.relationChanges.find(row => row.reservation.hostId === selection.hostId && row.reservation.operationId === selection.operationId);
+    if (!saved) throw new SharingError(404, 'relation_change_not_found', 'No pending relationship operation exists.');
+    relationAccess(subject, saved.reservation); return saved;
+  }
+  async function relationHostStatus(subject: string, saved: BrokerRelationChange): Promise<RelationChangeReceipt | undefined> {
+    const { host } = relationAccess(subject, saved.reservation);
+    const result = await associationRpc(host, { action: 'relation_status', reservation: saved.reservation });
+    if (result.receipt === null) return undefined;
+    if (!isRelationChangeReceipt(result.receipt) || relationChangeKey(result.receipt.reservation) !== relationChangeKey(saved.reservation)) throw new BrokerError(502, 'invalid_host_response', 'Exact relation receipt could not be verified.');
+    return result.receipt;
+  }
+  const relationContinuations = new Map<string, Promise<{ operation: BrokerRelationChange }>>();
+  function continueRelationChange(subject: string, initial: BrokerRelationChange): Promise<{ operation: BrokerRelationChange }> {
+    const key = initial.reservation.operationId, existing = relationContinuations.get(key);
+    if (existing) return existing;
+    const running = (async () => {
+      let saved = savedRelationOperation(subject, initial.reservation), reservation = saved.reservation;
+      if (saved.phase === 'committed') return { operation: structuredClone(saved) };
+      let receipt = await relationHostStatus(subject, saved);
+      if (!receipt) {
+        if (saved.phase !== 'reserved') throw new BrokerError(409, 'relation_host_outcome_unknown', 'Committed metadata requires its durable Host reservation.');
+        await associationRpc(relationAccess(subject, reservation).host, { action: 'relation_reserve', reservation });
+        receipt = await relationHostStatus(subject, saved);
+        if (!receipt) throw new BrokerError(409, 'relation_host_outcome_unknown', 'Host reservation remains unknown.');
+      }
+      if (saved.phase === 'reserved') {
+        if (receipt.phase !== 'reserved' || receipt.associationRevision !== reservation.associationRevision) throw new BrokerError(409, 'relation_receipt_conflict', 'Host reservation outcome changed.');
+        await commit(draft => {
+          const { binding, relation } = relationAccess(subject, reservation);
+          const next = structuredClone(associations), operation = next.relationChanges.find(row => row.reservation.operationId === key)!;
+          if (operation.phase !== 'reserved' || relation.revision !== undefined && relation.revision !== reservation.expectedRelationRevision || (relation.linked ?? true) !== reservation.previousLinked) throw new SharingError(409, 'relation_conflict', 'Relationship revision changed.');
+          const changed = { ...relation, nativeSourceRef: reservation.sourceRef, linked: reservation.linked, revision: reservation.expectedRelationRevision + 1 };
+          operation.phase = 'metadata_committed'; operation.hostReceipt = receipt; next.revision++;
+          if (!validBrokerAssociations(next)) throw new BrokerError(409, 'association_capacity', 'Association storage is full or invalid.');
+          draft.associations = next; draft.bindings.find(row => row.agentId === binding.agentId)!.sourceRelation = changed;
+          return { value: undefined, publish() { associations = next; binding.sourceRelation = changed; } };
+        });
+        saved = savedRelationOperation(subject, reservation);
+      }
+      if (receipt.phase === 'reserved') {
+        await associationRpc(relationAccess(subject, reservation).host, { action: 'relation_apply', reservation });
+        receipt = await relationHostStatus(subject, saved);
+      }
+      const expectedAssociationRevision = reservation.associationRevision + Number(reservation.previousMember !== reservation.linked);
+      if (!receipt || receipt.phase === 'reserved' || receipt.associationRevision !== expectedAssociationRevision) throw new BrokerError(409, 'relation_host_outcome_unknown', 'Applied relation overlay could not be verified.');
+      await associationChange(state => {
+        const { relation } = relationAccess(subject, reservation);
+        if ((relation.revision ?? 0) !== reservation.expectedRelationRevision + 1 || (relation.linked ?? true) !== reservation.linked) throw new SharingError(409, 'relation_conflict', 'Committed relationship metadata changed.');
+        const operation = state.relationChanges.find(row => row.reservation.operationId === key)!;
+        if (operation.phase !== 'committed') { operation.phase = 'overlay_applied'; operation.hostReceipt = receipt; }
+      });
+      saved = savedRelationOperation(subject, reservation);
+      if (receipt.phase !== 'released') {
+        await associationRpc(relationAccess(subject, reservation).host, { action: 'relation_release', reservation, associationRevision: receipt.associationRevision });
+        receipt = await relationHostStatus(subject, saved);
+      }
+      if (!receipt || receipt.phase !== 'released' || receipt.associationRevision !== expectedAssociationRevision) throw new BrokerError(409, 'relation_host_outcome_unknown', 'Released relation overlay could not be verified.');
+      await associationChange(state => { relationAccess(subject, reservation); const operation = state.relationChanges.find(row => row.reservation.operationId === key)!; operation.phase = 'committed'; operation.hostReceipt = receipt; });
+      return { operation: structuredClone(savedRelationOperation(subject, reservation)) };
+    })();
+    relationContinuations.set(key, running); void running.finally(() => relationContinuations.delete(key)).catch(() => undefined); return running;
+  }
+  function relationIntent(subject: string, input: import('./session-relations.js').SessionRelationUpdate): RelationChangeReset['intent'] {
+    requireOwner(subject);
+    if (!input.operationId || input.expectedRoleRevision === undefined) throw new SharingError(409, 'relation_operation_required', 'Retain an operation identity and current role revision for this edit.');
+    const host = requireHost(input.hostId);
+    const binding = nativeBindings.get(JSON.stringify([host.id, input.providerId, input.nativeSessionId]));
+    const relation = binding?.sourceRelation;
+    if (!relation || relation.kind !== 'side' || relation.id !== input.id || relation.sourceNativeSessionId !== input.sourceNativeSessionId) throw new SharingError(409, 'relation_conflict', 'The immutable source relationship changed.');
+    const sourceRef = relation.nativeSourceRef ?? associationSource(host, binding!.providerId, relation.sourceNativeSessionId);
+    const source = nativeBindings.get(JSON.stringify([host.id, sourceRef.providerId, sourceRef.nativeSessionId]));
+    if (!options.successionEnrollment || !binding || !source || !sessionAllowed(binding, subject) || !sessionAllowed(source, subject)
+      || !hostAllowed(host.id, subject) || !host.providers.some(row => row.providerId === binding.providerId)) throw new SharingError(403, 'session_forbidden', 'Relation authority is unavailable.');
+    return { version: 1, operationId: input.operationId, authority: options.successionEnrollment, hostId: host.id, controllerId: host.installationId,
+      readerRef: associationSource(host,binding.providerId,binding.nativeSessionId), sourceRef, relationId: relation.id, linked: input.linked,
+      expectedRelationRevision: input.expectedRevision, expectedRoleRevision: input.expectedRoleRevision };
+  }
+  function assertExactRelationIntent(intent: RelationChangeReset['intent'], reservation: RelationChangeReservation | RelationChangeReset['intent']) {
+    const expected = { version: 1, operationId: reservation.operationId, authority: reservation.authority, hostId: reservation.hostId, controllerId: reservation.controllerId,
+      readerRef: reservation.readerRef, sourceRef: reservation.sourceRef, relationId: reservation.relationId, linked: reservation.linked,
+      expectedRelationRevision: reservation.expectedRelationRevision, expectedRoleRevision: reservation.expectedRoleRevision };
+    if (!isDeepStrictEqual(intent, expected)) throw new SharingError(409, 'relation_identity_conflict', 'Relationship operation identity changed.');
+  }
+  function assertRelationNotReset(state: BrokerAssociationState, intent: RelationChangeReset['intent']) {
+    const reset = state.relationResets.find(row => row.intent.operationId === intent.operationId);
+    if (reset) { assertExactRelationIntent(intent, reset.intent); throw new SharingError(409, 'relation_change_reset', 'This exact relationship edit was safely reset before any effect.'); }
+  }
+  async function reserveRelationUpdate(subject: string, input: import('./session-relations.js').SessionRelationUpdate, host: Host, projection: PrimaryRole) {
+    requireOwner(subject);
+    if (!input.operationId || input.expectedRoleRevision === undefined) throw new SharingError(409, 'relation_operation_required', 'Retain an operation identity and current role revision for this edit.');
+    const intent = relationIntent(subject,input);
+    assertRelationNotReset(associations,intent);
+    const previous = associations.relationChanges.find(row => row.reservation.operationId === input.operationId);
+    const sameIntent = (saved: BrokerRelationChange) => assertExactRelationIntent(intent,saved.reservation);
+    if (previous) { sameIntent(previous); relationAccess(subject, previous.reservation); return continueRelationChange(subject, previous); }
+    const catalogGeneration = associations.revision;
+    const described = await associationRpc(host, { action: 'describe', providerId: projection.current.providerId, nativeSessionId: projection.current.nativeSessionId });
+    if (described.relationUpdates !== 1) throw new BrokerError(409, 'succession_relationship_updates_unavailable', 'Trusted relationship updates were not negotiated.');
+    if (!isPrimaryRole(described.role) || described.role.id !== projection.id || described.role.revision !== input.expectedRoleRevision || nativeSessionRefKey(described.role.current) !== nativeSessionRefKey(projection.current) || !Number.isSafeInteger(described.associationRevision) || !Array.isArray(described.sourceParticipants)) throw new BrokerError(409, 'invalid_host_response', 'Current relation role could not be verified.');
+    const saved = await associationChange(state => {
+      const duplicate = state.relationChanges.find(row => row.reservation.operationId === input.operationId); if (duplicate) { sameIntent(duplicate); return duplicate; }
+      assertRelationNotReset(state,relationIntent(subject,input));
+      if (state.revision !== catalogGeneration) throw new SharingError(409, 'relation_catalog_changed', 'Source relationship catalog changed during Host description. Retry before reserving.');
+      if (state.relationChanges.length >= 1024 || state.revision > Number.MAX_SAFE_INTEGER - 8) throw new BrokerError(409, 'association_capacity', 'Relation operation capacity is exhausted.');
+      for (const ref of described.lineage as NativeSessionRef[]) assertAssociationOpen(ref);
+      if (state.admissions.some(row => described.lineage.some((ref: NativeSessionRef) => nativeSessionRefKey(ref) === nativeSessionRefKey(row.source)))) throw new SharingError(409, 'association_outcome_unknown', 'Settle source creation before editing relationships.');
+      const binding = nativeBindings.get(JSON.stringify([host.id,input.providerId,input.nativeSessionId])), relation = binding?.sourceRelation;
+      if (!relation || relation.id !== input.id || relation.kind !== 'side' || relation.sourceNativeSessionId !== input.sourceNativeSessionId || (relation.revision ?? 0) !== input.expectedRevision) throw new SharingError(409, 'relation_conflict', 'This side relationship changed.');
+      const sourceRef = relation.nativeSourceRef ?? associationSource(host, binding!.providerId, relation.sourceNativeSessionId);
+      const reservation: RelationChangeReservation = { version:1,operationId:input.operationId!,token:randomUUID(),authority:options.successionEnrollment!,hostId:host.id,controllerId:host.installationId,roleId:described.role.id,expectedRoleRevision:described.role.revision,origin:described.role.origin,current:described.role.current,lineage:described.lineage,associationRevision:described.associationRevision,catalogRevision:state.revision,
+        relationId:relation.id,kind:relation.kind,readerRef:associationSource(host,binding!.providerId,binding!.nativeSessionId),sourceRef,expectedRelationRevision:input.expectedRevision,previousLinked:relation.linked??true,linked:input.linked,previousMember:described.sourceParticipants.some((row:{readerRef:NativeSessionRef})=>nativeSessionRefKey(row.readerRef)===nativeSessionRefKey(associationSource(host,binding!.providerId,binding!.nativeSessionId))),
+        relations:[...bindings.values()].filter(row=>row.hostId===host.id&&row.sourceRelation).map(row=>({relationId:row.sourceRelation!.id,kind:row.sourceRelation!.kind,readerRef:associationSource(host,row.providerId,row.nativeSessionId),sourceRef:row.sourceRelation!.nativeSourceRef??associationSource(host,row.providerId,row.sourceRelation!.sourceNativeSessionId),linked:row.sourceRelation!.linked??true,revision:row.sourceRelation!.revision??0})) };
+      relationAccess(subject,reservation);
+      const operation: BrokerRelationChange={reservation,phase:'reserved'};state.relationChanges.push(operation);return operation;
+    });
+    return continueRelationChange(subject,saved);
+  }
+
   function changeSharing<T>(change: (draft: HostSharing) => T): Promise<T> {
     return commit(state => {
       const draft = new HostSharing(state.sharing, () => {});
@@ -604,10 +742,10 @@ export function createHostBroker(options: HostBrokerOptions) {
             ? { providerId, operationId: required(body.operationId, 'operationId'),
                 ...optionalSettings(body, ['cwd', 'workspaceId', 'model', 'reasoningEffort', 'planning', 'sourceNativeSessionId', 'editNativeSessionId', 'editTurnId', 'editMessageId']) }
             : { providerId, nativeSessionId, ...(parentNativeSessionId ? { parentNativeSessionId } : {}), ...(body.takeOver === undefined ? {} : {takeOver: required(body.takeOver, 'takeOver')}) };
-        if (source) assertAssociationMutable(source);
+        if (source) assertAssociationCreationOpen(source);
         let recoverSource = false;
         if (trackAssociation) await associationChange(state => {
-          assertAssociationMutable(source!);
+          assertAssociationCreationOpen(source!);
           const previous = state.admissions.find(item => item.id === admissionId);
           if (previous) {
             if (previous.fingerprint !== admissionFingerprint) throw new BrokerError(409, 'association_outcome_unknown', 'Source creation identity changed.');
@@ -650,7 +788,7 @@ export function createHostBroker(options: HostBrokerOptions) {
         if (body.conversationKind && actualNativeSessionId === body.sourceNativeSessionId) throw new BrokerError(409, 'native_identity_conflict', 'The new conversation cannot be its own source.');
         const nativeKey = JSON.stringify([host.id, providerId, actualNativeSessionId]);
         return commit(draft => {
-          if (source) assertAssociationMutable(source);
+          if (source) assertAssociationCreationOpen(source);
           if (trackAssociation) {
             draft.associations = structuredClone(associations);
             draft.associations.admissions = draft.associations.admissions.filter(item => item.id !== admissionId);
@@ -664,7 +802,7 @@ export function createHostBroker(options: HostBrokerOptions) {
           if (!byAgent && !byNative && bindings.size >= 4096) throw new BrokerError(429, 'capacity_exceeded', 'The local session binding registry is full.');
           const binding = byAgent ?? byNative ?? { hostId: host.id, providerId, nativeSessionId: actualNativeSessionId, agentId,
             generation: host.generation, ...(creatorSubject ? { creatorSubject } : {}), ...(parentNativeSessionId ? { parentNativeSessionId } : {}),
-            ...(action === 'create' && body.conversationKind ? { sourceRelation: { id: String(body.conversationId), kind: body.conversationKind as 'side' | 'ask', sourceNativeSessionId: String(body.sourceNativeSessionId), createdAt: new Date(now()).toISOString() } } : {}) };
+            ...(action === 'create' && body.conversationKind ? { sourceRelation: { id: String(body.conversationId), kind: body.conversationKind as 'side' | 'ask', sourceNativeSessionId: String(body.sourceNativeSessionId), nativeSourceRef: associationSource(host, providerId, String(body.sourceNativeSessionId)), createdAt: new Date(now()).toISOString() } } : {}) };
           if (binding.parentNativeSessionId !== parentNativeSessionId) throw new BrokerError(409, 'session_binding_conflict', 'The native session parent conflicts with its existing binding.');
           if (creatorSubject && binding.creatorSubject !== creatorSubject) throw new BrokerError(409, 'session_binding_conflict', 'The native session belongs to another user.');
           const { generation: _generation, recovery: _recovery, ...saved } = binding;
@@ -1296,15 +1434,37 @@ export function createHostBroker(options: HostBrokerOptions) {
     sessionRelations(subject: string): SessionRelation[] {
       const result: SessionRelation[] = [];
       for (const binding of bindings.values()) {
-        const relation = binding.sourceRelation;
-        if (!relation || !sessionAllowed(binding, subject)) continue;
-        const source = nativeBindings.get(JSON.stringify([binding.hostId, binding.providerId, relation.sourceNativeSessionId]));
-        if (!source || !sessionAllowed(source, subject)) continue;
-        const identity = (value: Binding, title: string) => ({ hostId: value.hostId, providerId: value.providerId, nativeSessionId: value.nativeSessionId, agentId: value.agentId, title });
-        result.push({ id: relation.id, kind: relation.kind, createdAt: relation.createdAt, linked: relation.linked ?? true, revision: relation.revision ?? 0,
-          source: identity(source, 'Source session'), target: identity(binding, relation.kind === 'ask' ? 'Ask' : 'Side') });
+        const relation = binding.sourceRelation, host = hosts.get(binding.hostId);
+        if (!relation || !host || !sessionAllowed(binding, subject)) continue;
+        const nativeSourceRef = relation.nativeSourceRef ?? associationSource(host, binding.providerId, relation.sourceNativeSessionId);
+        const fixed = nativeBindings.get(JSON.stringify([binding.hostId,nativeSourceRef.providerId,nativeSourceRef.nativeSessionId]));
+        if (!fixed || !sessionAllowed(fixed,subject)) continue;
+        const operation = associations.relationChanges.filter(row => row.reservation.hostId === host.id && row.reservation.relationId === relation.id && nativeSessionRefKey(row.reservation.readerRef) === nativeSessionRefKey(associationSource(host,binding.providerId,binding.nativeSessionId))).at(-1);
+        const latest = associations.freezes.filter(row => row.hostId === host.id && row.projection
+          && [...row.receipt.lineage, row.projection.role.current].some(ref => nativeSessionRefKey(ref) === nativeSessionRefKey(nativeSourceRef))).at(-1);
+        const projection = latest?.projection;
+        const enrolled = latest?.receipt.relations.some(value => value.relationId === relation.id && value.linked
+          && nativeSessionRefKey(value.readerRef) === nativeSessionRefKey(associationSource(host,binding.providerId,binding.nativeSessionId)));
+        const pending = operation && operation.phase !== 'committed';
+        const role = projection?.role ?? (operation ? { id:operation.reservation.roleId,origin:operation.reservation.origin,current:operation.reservation.current,revision:operation.reservation.expectedRoleRevision } : undefined);
+        const follows = (relation.linked ?? true) && !pending && !!role && (enrolled || operation?.phase === 'committed' && operation.reservation.linked);
+        const selected = follows ? role!.current : nativeSourceRef;
+        if (!host.providers.some(row => row.providerId === selected.providerId)) continue;
+        const resolved = nativeBindings.get(JSON.stringify([binding.hostId,selected.providerId,selected.nativeSessionId]));
+        if (resolved && !sessionAllowed(resolved,subject)) continue;
+        const navigationRef = operation?.reservation.current;
+        const navigationBinding = navigationRef ? nativeBindings.get(JSON.stringify([host.id,navigationRef.providerId,navigationRef.nativeSessionId])) : undefined;
+        const identity = (value: Binding, title: string) => ({ hostId:value.hostId,providerId:value.providerId,nativeSessionId:value.nativeSessionId,agentId:value.agentId,title });
+        if (!resolved && !owner(subject)) continue;
+        result.push({id:relation.id,kind:relation.kind,createdAt:relation.createdAt,linked:relation.linked??true,revision:relation.revision??0,nativeSourceRef,
+          hostLocator:{hostId:host.id,controllerId:host.installationId}, sourceBinding:follows?{kind:'primary_role',roleId:role!.id,origin:role!.origin}:{kind:'fixed',source:nativeSourceRef},
+          ...(pending && navigationRef && host.providers.some(row=>row.providerId===navigationRef.providerId)
+            && (navigationBinding ? sessionAllowed(navigationBinding,subject) : owner(subject))
+            ? {navigationSource:navigationBinding?identity(navigationBinding,'Source session'):{hostId:host.id,providerId:navigationRef.providerId,nativeSessionId:navigationRef.nativeSessionId,agentId:'',title:'Source session'}} : {}),
+          ...(role?{roleRevision:role.revision}:{}), ...(operation?{operation:{operationId:operation.reservation.operationId,phase:operation.phase}}:{}),
+          source:resolved?identity(resolved,'Source session'):{hostId:host.id,providerId:selected.providerId,nativeSessionId:selected.nativeSessionId,agentId:'',title:'Source session'},target:identity(binding,relation.kind==='ask'?'Ask':'Side')});
       }
-      return result.sort((a, b) => a.createdAt.localeCompare(b.createdAt) || a.id.localeCompare(b.id));
+      return result.sort((a,b)=>a.createdAt.localeCompare(b.createdAt)||a.id.localeCompare(b.id));
     },
     async importSessionRelation(subject: string, input: Record<string, unknown>): Promise<void> {
       if (!validSourceRelation(input) || typeof input.hostId !== 'string' || typeof input.providerId !== 'string' || typeof input.nativeSessionId !== 'string') {
@@ -1334,10 +1494,17 @@ export function createHostBroker(options: HostBrokerOptions) {
         return { value: undefined, publish() { if (draft.associations) associations = draft.associations; binding!.sourceRelation = saved.sourceRelation; } };
       });
     },
-    async updateSessionRelation(subject: string, input: unknown): Promise<void> {
+    async updateSessionRelation(subject: string, input: unknown): Promise<void | { operation: BrokerRelationChange }> {
       if (!validSessionRelationUpdate(input)) throw new SharingError(400, 'invalid_relation', 'A complete session relation and current revision are required.');
       const host = hosts.get(input.hostId);
-      if (host) assertAssociationMutable(associationSource(host, input.providerId, input.sourceNativeSessionId));
+      if (host) {
+        const nativeRelation = nativeBindings.get(JSON.stringify([host.id,input.providerId,input.nativeSessionId]))?.sourceRelation;
+        const source = nativeRelation?.nativeSourceRef ?? associationSource(host,input.providerId,input.sourceNativeSessionId);
+        if (input.operationId && associations.relationResets.some(row=>row.intent.operationId===input.operationId)) assertRelationNotReset(associations,relationIntent(subject,input));
+        const projection = associations.freezes.filter(row => row.hostId === host.id && row.projection && [...row.receipt.lineage, row.projection.role.current].some(ref => nativeSessionRefKey(ref) === nativeSessionRefKey(source))).at(-1)?.projection;
+        if (projection) return reserveRelationUpdate(subject, input, host, projection.role);
+        assertAssociationMutable(source);
+      }
       await commit(draft => {
         if (host) assertAssociationMutable(associationSource(host, input.providerId, input.sourceNativeSessionId));
         const binding = nativeBindings.get(JSON.stringify([input.hostId, input.providerId, input.nativeSessionId]));
@@ -1358,6 +1525,22 @@ export function createHostBroker(options: HostBrokerOptions) {
         return { value: undefined, publish() { if (draft.associations) associations = draft.associations; binding.sourceRelation = next; } };
       });
     },
+    async resetSessionRelationChange(subject: string, input: unknown): Promise<{ reset: RelationChangeReset } | { operation: BrokerRelationChange }> {
+      if (!validSessionRelationUpdate(input)) throw new SharingError(400,'invalid_relation','An exact retained relationship intent is required.');
+      const selected = await associationChange(state => {
+        const intent = relationIntent(subject,input);
+        const existing = state.relationChanges.find(row => row.reservation.operationId === intent.operationId);
+        if (existing) { assertExactRelationIntent(intent,existing.reservation); relationAccess(subject,existing.reservation); return { operation: existing }; }
+        const previous = state.relationResets.find(row => row.intent.operationId === intent.operationId);
+        if (previous) { assertExactRelationIntent(intent,previous.intent); return { reset: previous }; }
+        if (state.relationResets.length >= 1024) throw new SharingError(409,'association_capacity','Relationship reset capacity is exhausted.');
+        const reset: RelationChangeReset = { version: 1, phase: 'pre_effect', intent };
+        state.relationResets.push(reset); return { reset };
+      });
+      return selected.operation ? continueRelationChange(subject,selected.operation) : { reset: structuredClone(selected.reset!) };
+    },
+    sessionRelationChangeStatus(subject: string, selection: { hostId: string; operationId: string }) { return { operation: structuredClone(savedRelationOperation(subject, selection)) }; },
+    reconcileSessionRelationChange(subject: string, selection: { hostId: string; operationId: string }) { return continueRelationChange(subject, savedRelationOperation(subject, selection)); },
     canAccessSession: (agentId: string, subject: string) => { const binding = bindings.get(agentId); return !!binding && sessionAllowed(binding, subject); },
     async manageShares(subject: string, hostId: string, action: 'shares' | 'share' | 'revoke-share', targetSubject?: string, targetLabel?: string, sessionLimit?: number) {
       assertAvailable();

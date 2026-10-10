@@ -7,21 +7,21 @@ import { useConversationSession } from '../hooks/useConversationSession.js';
 import { type AgentReplica, type AgentReplicaState, type RemoteAgentTransport } from '@orchardworks/agent-remote-web';
 import type { AgentCommandResult } from '@orchardworks/agent-remote-protocol';
 import type { OpenedSession } from '../directory-client.js';
-import { forkDisplayState, type ForkStore, type SessionFork } from '../session-forks.js';
+import { sideNavigationSource, sideLinkVisible, forkDisplayState, type ForkStore, type SessionFork } from '../session-forks.js';
 import { forkActions, forkCommands } from '../fork-actions.js';
 import { ForkEntries, ForkReference } from './ForkReference.js';
 import { LabWorkbench } from './LabWorkbench.js';
 import { sessionKey } from '../session-tree.js';
 import type { SessionViewNavigationFactory } from '../session-view-navigation.js';
 
-export function SideConversation({ session, replica: cachedReplica, transport, store, draft, draftBinding, onDraftChange, onClose, onOpenSource, onFork, onOpenFork, onUnlink, standalone = false, onFocus, onActivityChange, initialInput, visible = true, expanded = true, focused = true, position = 1, selectedChild, navigation, renderAsk, headingStart, headingMode, onRenameTitle }: {
+export function SideConversation({ session, replica: cachedReplica, transport, store, draft, draftBinding, onDraftChange, onClose, onOpenSource, onFork, onOpenFork, onUnlink, onRecover, standalone = false, onFocus, onActivityChange, initialInput, visible = true, expanded = true, focused = true, position = 1, selectedChild, navigation, renderAsk, headingStart, headingMode, onRenameTitle }: {
   navigation?: SessionViewNavigationFactory;
   headingStart?: ReactNode;
   headingMode?: 'inline' | 'toolbar';
   onRenameTitle?(): void;
   renderAsk?(source: OpenedSession, state: AgentReplicaState | undefined): ReactNode;
   replica?: AgentReplica;
-  standalone?: boolean; onUnlink?(fork: SessionFork): Promise<void>;
+  standalone?: boolean; onUnlink?(fork: SessionFork): Promise<void>; onRecover?(fork: SessionFork): Promise<void>;
   expanded?: boolean; focused?: boolean; position?: number; selectedChild?: string | null;
   initialInput?: { pending: boolean; error?: string };
   session: OpenedSession; transport: RemoteAgentTransport; store: ForkStore; draftBinding?: DraftBinding; draft?: string; onDraftChange?(text: string): void;
@@ -52,8 +52,8 @@ export function SideConversation({ session, replica: cachedReplica, transport, s
         <svg className="lab-side-back-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="m14 6-6 6 6 6" /></svg>
         <span className="lab-side-back-label" aria-hidden="true">Back</span><span className="lab-side-close-icon" aria-hidden="true">×</span>
       </button>}</>}
-      composerContext={record && record.linked !== false ? <ForkReference fork={record} onOpen={onOpenSource} onUnlink={onUnlink} /> : undefined}
-      composerNotice={<>{initialInput?.pending ? <p className="lab-control-note" role="status">Sending the first branch message…</p> : initialInput?.error ? <p className="lab-control-note" role="alert">{initialInput.error}</p> : null}<ForkEntries forks={store.linked().filter((fork) => fork.target && sessionKey(fork.source) === sessionKey(session))} selectedChild={selectedChild} onOpen={onOpenFork} onUnlink={onUnlink} /></>}
+      composerContext={record && sideLinkVisible(record) ? <ForkReference fork={record} onOpen={onOpenSource} onUnlink={onUnlink} onRecover={onRecover} /> : undefined}
+      composerNotice={<>{initialInput?.pending ? <p className="lab-control-note" role="status">Sending the first branch message…</p> : initialInput?.error ? <p className="lab-control-note" role="alert">{initialInput.error}</p> : null}<ForkEntries forks={store.linked().filter((fork) => fork.target && sessionKey(sideNavigationSource(fork)) === sessionKey(session))} selectedChild={selectedChild} onOpen={onOpenFork} onUnlink={onUnlink} onRecover={onRecover} /></>}
       consoleCommands={status === 'ready' && !initialInput?.pending && state?.agent?.capabilities.sendMessage && state.agent.capabilities.history ? forkCommands : []}
       onExecuteConsoleCommand={(id, args) => { if (!state || status !== 'ready' || initialInput?.pending) return Promise.reject(new Error('The side session is not ready.')); return onFork(state, session, id, args); }} /></CommunicationNavigationContext.Provider>
     {renderAsk?.(session, state)}

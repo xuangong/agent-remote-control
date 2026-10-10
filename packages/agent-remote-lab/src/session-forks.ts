@@ -1,4 +1,4 @@
-import { serializeNormalizedHistory, quotedSessionContextPrefix } from '@orchardworks/agent-remote-protocol';
+import { nativeSessionRefKey, serializeNormalizedHistory, quotedSessionContextPrefix } from '@orchardworks/agent-remote-protocol';
 import type { SessionRelation } from '@orchardworks/agent-remote-hosted/session-relations';
 import { conversationLocalStorage } from './conversation-storage.js';
 import type { AgentSessionSetting, ProjectedTimelineEntry, TimelineCursor } from '@orchardworks/agent-remote-protocol';
@@ -22,6 +22,13 @@ export type SessionFork = ForkContext & ForkDelivery;
 interface ForkDelivery {
   /** Shared navigation only; this browser does not own the creation or first-input ledger. */
   remote?: boolean;
+  nativeSourceRef?: import('@orchardworks/agent-remote-protocol').NativeSessionRef;
+  sourceBinding?: import('@orchardworks/agent-remote-protocol').SourceBinding;
+  roleRevision?: number;
+  relationOperation?: SessionRelation['operation'];
+  hostLocator?: SessionRelation['hostLocator'];
+  navigationSource?: SessionRelation['navigationSource'];
+  relationEditPending?: boolean;
   /** Navigation can be detached without changing provenance or first-input delivery. */
   linked?: boolean;
   revision?: number;
@@ -40,7 +47,7 @@ interface ForkDelivery {
   settings: Pick<AgentSessionSetting, 'id' | 'value'>[];
 }
 const MAX_CONTEXT_ENTRIES = 20_000;
-interface ForkNavigation { source: string; linked: boolean; revision: number; relationId?: string }
+interface ForkNavigation { source: string; controllerId?: string; linked: boolean; revision: number; relationId?: string }
 
 /** A single projection freezes lifecycle updates together with their original entries. */
 export async function captureForkContext(transport: Pick<RemoteAgentTransport, 'fetchTimeline'>, source: OpenedSession): Promise<SnapshotForkContext> {
@@ -58,7 +65,7 @@ export function referenceForkContext(source: OpenedSession): SourceReferenceCont
 }
 
 export function contextPrefix(record: SessionFork): string {
-  if (record.mode === 'reference') return `<source-session-reference>${JSON.stringify({ id: record.id, sourceSession: record.source.nativeSessionId })}</source-session-reference>\n\n`;
+  if (record.mode === 'reference') return `<source-session-reference>${JSON.stringify({ id: record.remote ? record.relationId ?? record.id : record.id, sourceSession: record.source.nativeSessionId })}</source-session-reference>\n\n`;
   return quotedSessionContextPrefix({ ...record, sourceSession: record.source.nativeSessionId }, false);
 }
 
@@ -105,20 +112,27 @@ export class ForkStore {
     for (const record of this.shared.values()) if (!localIds.has(record.id) && !localTargets.has(sessionKey(record.target!))) records.push(record);
     return records.sort((left, right) => left.capturedAt.localeCompare(right.capturedAt));
   }
-  linked(): readonly SessionFork[] { return this.all().filter(record => record.linked !== false); }
+  linked(): readonly SessionFork[] { return this.all().filter(record => sideLinkVisible(record)); }
   setSharedRelations(relations: readonly SessionRelation[]): void {
-    const previous = new Map([...this.shared.values()].map(record => [sessionKey(record.target!), record]));
+    const previous = new Map([...this.shared.values()].map(record => [record.id, record]));
     const local = new Map(this.all().filter(record => !record.remote && record.target).map(record => [sessionKey(record.target!), record]));
     const records = relations.map((relation): SessionFork => {
-      const record: SessionFork = { id: relation.id, relationId: relation.id, mode: 'reference', source: relation.source, target: relation.target,
+      const record: SessionFork = { id: relationViewKey(relation), relationId: relation.id, mode: 'reference', source: relation.source, target: relation.target,
+        navigationSource:relation.navigationSource,hostLocator:relation.hostLocator,nativeSourceRef:relation.nativeSourceRef,sourceBinding:relation.sourceBinding,roleRevision:relation.roleRevision,relationOperation:relation.operation,
         capturedAt: relation.createdAt, remote: true, linked: relation.linked !== false, revision: relation.revision ?? 0,
-        delivery: 'pending', options: { sourceNativeSessionId: relation.source.nativeSessionId }, settings: [] };
-      const earlier = previous.get(sessionKey(relation.target));
+        delivery: 'pending', options: { sourceNativeSessionId: relation.nativeSourceRef?.nativeSessionId ?? relation.source.nativeSessionId }, settings: [] };
+      const earlier = previous.get(record.id);
       const stored = this.readNavigation(record);
-      for (const navigation of [earlier && sessionKey(earlier.source) === sessionKey(record.source) ? earlier : undefined, stored]) {
-        if (navigation && (navigation.revision ?? 0) > record.revision!) {
+      for (const navigation of [earlier && (earlier.relationId===record.relationId || sessionKey(earlier.source)===sessionKey(record.source)) ? earlier : undefined, stored]) {
+        if (navigation && ((navigation.revision ?? 0) > record.revision! || navigation === earlier && (navigation.revision ?? 0) === record.revision && (earlier.roleRevision ?? 0) > (record.roleRevision ?? 0))) {
           record.linked = navigation.linked !== false; record.revision = navigation.revision ?? 0;
+          if (navigation===earlier) {record.source=earlier!.source;record.sourceBinding=earlier!.sourceBinding;record.nativeSourceRef=earlier!.nativeSourceRef;record.roleRevision=earlier!.roleRevision;record.relationOperation=earlier!.relationOperation;}
         }
+      }
+      const phase = (operation: SessionRelation['operation']) => operation ? ['reserved','metadata_committed','overlay_applied','committed'].indexOf(operation.phase) : -1;
+      if (earlier && earlier.id===record.id && earlier.revision===record.revision && earlier.roleRevision===record.roleRevision
+        && earlier.relationOperation?.operationId===record.relationOperation?.operationId && phase(earlier.relationOperation)>phase(record.relationOperation)) {
+        record.relationOperation=earlier.relationOperation;
       }
       const delivery = local.get(sessionKey(relation.target));
       if (delivery && sessionKey(delivery.source) === sessionKey(record.source)) {
@@ -136,21 +150,23 @@ export class ForkStore {
     try { value = JSON.parse(this.storage?.getItem(this.key + id) ?? 'null'); }
     catch { /* Shared navigation remains usable without browser persistence. */ }
     if (!validRecord(value) && this.shared.has(id)) return this.shared.get(id)!;
+    const matches = [...this.shared.values()].filter(record => record.relationId === id);
+    if (!validRecord(value) && matches.length === 1) return matches[0]!;
     if (!validRecord(value)) throw new Error('The fork context is unavailable.');
     return this.withSharedNavigation(value);
   }
   private withSharedNavigation(record: SessionFork): SessionFork {
     const relation = record.target ? [...this.shared.values()].find(item => sessionKey(item.target!) === sessionKey(record.target!)
-      && sessionKey(item.source) === sessionKey(record.source)) : undefined;
+      && (item.relationId===record.relationId || item.nativeSourceRef?.nativeSessionId===record.options.sourceNativeSessionId && item.nativeSourceRef?.providerId===record.source.providerId || sessionKey(item.source)===sessionKey(record.source))) : undefined;
     const stored = this.readNavigation(record);
     const navigation = relation && (!stored || (relation.revision ?? 0) >= stored.revision) ? relation : stored;
-    return navigation ? { ...record, relationId: navigation.relationId, linked: navigation.linked !== false, revision: navigation.revision ?? 0 } : record;
+    return navigation ? { ...record, ...(relation?{source:relation.source,navigationSource:relation.navigationSource,hostLocator:relation.hostLocator,nativeSourceRef:relation.nativeSourceRef,sourceBinding:relation.sourceBinding,roleRevision:relation.roleRevision,relationOperation:relation.relationOperation,relationEditPending:relation.relationEditPending}:{}), relationId: navigation.relationId, linked: navigation.linked !== false, revision: navigation.revision ?? 0 } : record;
   }
   private readNavigation(record: SessionFork): ForkNavigation | undefined {
     if (!record.target) return;
     try {
       const value = JSON.parse(this.storage?.getItem(this.navigationKey + sessionKey(record.target)) ?? 'null') as ForkNavigation | null;
-      if (value && value.source === sessionKey(record.source) && typeof value.linked === 'boolean'
+      if (value && value.source === sessionKey(record.source) && (!record.hostLocator || value.controllerId === record.hostLocator.controllerId) && typeof value.linked === 'boolean'
         && Number.isSafeInteger(value.revision) && value.revision >= 0
         && (value.relationId === undefined || typeof value.relationId === 'string')) return value;
     } catch { /* Shared in-memory navigation remains available when persistence is denied. */ }
@@ -158,9 +174,16 @@ export class ForkStore {
   private saveNavigation(record: SessionFork, linked: boolean, revision: number): void {
     if (!record.target || !this.storage) throw new Error('The side link could not be saved. Free browser storage before continuing.');
     const key = this.navigationKey + sessionKey(record.target);
-    const value: ForkNavigation = { source: sessionKey(record.source), linked, revision, relationId: record.relationId };
+    const value: ForkNavigation = { source: sessionKey(record.source), ...(record.hostLocator?{controllerId:record.hostLocator.controllerId}:{}), linked, revision, relationId: record.relationId };
     try { if (this.storage.getItem(key) !== JSON.stringify(value)) this.storage.setItem(key, JSON.stringify(value)); }
     catch { throw new Error('The side link could not be saved. Free browser storage before continuing.'); }
+  }
+  setRelationEditPending(id: string, pending: boolean): void {
+    const local = this.shared.has(id) ? undefined : this.get(id);
+    const record = this.shared.get(id) ?? [...this.shared.values()].find(item=>local?.target && sessionKey(item.target!)===sessionKey(local.target) && item.relationId===local.relationId);
+    if (!record || !!record.relationEditPending === pending) return;
+    this.shared.set(record.id,{...record,relationEditPending:pending});
+    for (const listener of this.listeners) listener();
   }
   setLinked(id: string, linked: boolean, expectedRevision = 0): void {
     const record = this.get(id);
@@ -234,3 +257,14 @@ function validRecord(value: unknown): value is SessionFork {
   if (typeof record.text !== 'string' || !record.boundary || typeof record.boundary.epoch !== 'string' || !Number.isSafeInteger(record.boundary.seq)) return false;
   try { return Array.isArray(JSON.parse(record.text)); } catch { return false; }
 }
+
+/** Local view identity never replaces the protocol relation or native delivery identity. */
+function relationViewKey(relation: SessionRelation): string {
+  return relation.hostLocator ? `relation:${JSON.stringify([relation.hostLocator.hostId,relation.hostLocator.controllerId,relation.target.providerId,relation.target.nativeSessionId,relation.id])}` : relation.id;
+}
+export function sideLinkPending(record: SessionFork): boolean {
+  return !!record.relationEditPending || !!record.relationOperation && record.relationOperation.phase !== 'committed';
+}
+export function sideLinkVisible(record: SessionFork): boolean { return record.linked !== false || sideLinkPending(record); }
+
+export function sideNavigationSource(record: SessionFork): OpenedSession { return record.navigationSource ?? record.source; }

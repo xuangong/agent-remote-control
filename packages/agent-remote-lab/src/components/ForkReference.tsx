@@ -2,15 +2,15 @@ import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState, type 
 import { createPortal } from 'react-dom';
 import type { OpenedSession } from '../directory-client.js';
 import { sessionKey } from '../session-tree.js';
-import type { SessionFork } from '../session-forks.js';
+import { sideLinkPending, sideLinkVisible, type SessionFork } from '../session-forks.js';
 
 export function ForkIcon() {
   return <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true"><circle cx="4" cy="3" r="1.75" /><circle cx="12" cy="3" r="1.75" /><circle cx="4" cy="13" r="1.75" /><path d="M4 4.75v6.5M12 4.75v1a3 3 0 0 1-3 3H4" /></svg>;
 }
 type UnlinkSide = (fork: SessionFork) => Promise<void>;
 
-export function ForkReference({ fork, onOpen, onUnlink }: { fork: SessionFork; onOpen(session: OpenedSession): void; onUnlink?: UnlinkSide }) {
-  if (fork.linked === false) return null;
+export function ForkReference({ fork, onOpen, onUnlink, onRecover }: { fork: SessionFork; onOpen(session: OpenedSession): void; onUnlink?: UnlinkSide; onRecover?: UnlinkSide }) {
+  if (!sideLinkVisible(fork)) return null;
   return <details className="lab-fork-reference">
     <summary className="agent-skill-tag" title={`Context from ${fork.source.nativeSessionId}`}>
       <span className="lab-fork-symbol" aria-hidden="true">&amp;<span><ForkIcon /></span></span>
@@ -26,18 +26,18 @@ export function ForkReference({ fork, onOpen, onUnlink }: { fork: SessionFork; o
       </>}
       <code>{fork.source.nativeSessionId}</code>
       <button type="button" onClick={() => onOpen(fork.source)}>Open source session</button>
-      {onUnlink ? <UnlinkAction fork={fork} onUnlink={onUnlink} /> : null}
+      {onUnlink ? <UnlinkAction fork={fork} onUnlink={onUnlink} onRecover={onRecover} /> : null}
     </div>
   </details>;
 }
-export function ForkEntries({ forks, onOpen, onUnlink, selectedChild }: { forks: readonly SessionFork[]; onOpen(fork: SessionFork): void; onUnlink?: UnlinkSide; selectedChild?: string | null }) {
-  const linked = forks.filter(fork => fork.linked !== false);
+export function ForkEntries({ forks, onOpen, onUnlink, onRecover, selectedChild }: { forks: readonly SessionFork[]; onOpen(fork: SessionFork): void; onUnlink?: UnlinkSide; onRecover?: UnlinkSide; selectedChild?: string | null }) {
+  const linked = forks.filter(sideLinkVisible);
   if (!linked.length) return null;
   return <nav className="lab-fork-entries" aria-label="Forked sessions"><span className="lab-side-list-label">Sides · {linked.length}</span>{linked.map((fork, index) =>
-    <ForkEntry key={fork.id} fork={fork} index={index} selectedChild={selectedChild} onOpen={onOpen} onUnlink={onUnlink} />)}</nav>;
+    <ForkEntry key={fork.id} fork={fork} index={index} selectedChild={selectedChild} onOpen={onOpen} onUnlink={onUnlink} onRecover={onRecover} />)}</nav>;
 }
 
-function ForkEntry({ fork, index, selectedChild, onOpen, onUnlink }: { fork: SessionFork; index: number; selectedChild?: string | null; onOpen(fork: SessionFork): void; onUnlink?: UnlinkSide }) {
+function ForkEntry({ fork, index, selectedChild, onOpen, onUnlink, onRecover }: { fork: SessionFork; index: number; selectedChild?: string | null; onOpen(fork: SessionFork): void; onUnlink?: UnlinkSide; onRecover?: UnlinkSide }) {
   const [open, setOpen] = useState(false);
   const trigger = useRef<HTMLButtonElement>(null);
   const menuId = useId();
@@ -50,7 +50,7 @@ function ForkEntry({ fork, index, selectedChild, onOpen, onUnlink }: { fork: Ses
       <button type="button" className="lab-fork-menu-trigger" ref={trigger} aria-label={`Actions for ${label}`} title={`Actions for ${label}`}
         aria-haspopup="menu" aria-expanded={open} aria-controls={open ? menuId : undefined} onClick={() => setOpen(value => !value)}>⋯</button>
       {open ? <ForkMenu id={menuId} label={`Actions for ${label}`} trigger={trigger} close={close} dismiss={dismiss}>
-        <UnlinkAction fork={fork} onUnlink={onUnlink} onComplete={close} menu />
+        <UnlinkAction fork={fork} onUnlink={onUnlink} onRecover={onRecover} onComplete={close} menu />
       </ForkMenu> : null}
     </> : null}
   </span>;
@@ -90,19 +90,21 @@ function ForkMenu({ id, label, trigger, close, dismiss, children }: { id: string
   </div>, document.body);
 }
 
-function UnlinkAction({ fork, onUnlink, onComplete, menu = false }: { fork: SessionFork; onUnlink: UnlinkSide; onComplete?(): void; menu?: boolean }) {
+function UnlinkAction({ fork, onUnlink, onRecover, onComplete, menu = false }: { fork: SessionFork; onUnlink: UnlinkSide; onRecover?: UnlinkSide; onComplete?(): void; menu?: boolean }) {
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string>();
   const inFlight = useRef(false);
+  const recovering = sideLinkPending(fork);
   const unlink = async () => {
     if (inFlight.current) return;
     inFlight.current = true; setPending(true); setError(undefined);
-    try { await onUnlink(fork); onComplete?.(); }
+    try { if (recovering) { if (!onRecover) throw new Error('Refresh workspace access before retrying this link change.'); await onRecover(fork); } else await onUnlink(fork); onComplete?.(); }
     catch (error) { setError(error instanceof Error ? error.message : 'Unable to unlink this side session. Try again.'); }
     finally { inFlight.current = false; setPending(false); }
   };
   return <>
-    <button type="button" className="lab-fork-unlink" role={menu ? 'menuitem' : undefined} disabled={pending} onClick={() => void unlink()}>{pending ? 'Unlinking…' : 'Unlink side session'}</button>
+    <button type="button" className="lab-fork-unlink" role={menu ? 'menuitem' : undefined} disabled={pending} onClick={() => void unlink()}>{pending ? recovering ? 'Checking link change…' : 'Unlinking…' : recovering ? 'Retry link change' : 'Unlink side session'}</button>
+    {recovering ? <p className="lab-control-note" role="status">Link change pending confirmation.</p> : null}
     {error ? <p className="lab-fork-action-error" role="alert">{error}</p> : null}
   </>;
 }

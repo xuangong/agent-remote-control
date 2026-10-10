@@ -260,6 +260,13 @@ pending without blocking native commit evidence. Root verified 48 affected Hoste
 tests, 12 Cloudflare tests and whole-workspace typecheck. The SQL guard prevents
 loss but full SQL persistence and all client stores remain outstanding.
 
+The first client prerequisite is scoped-reviewed: observable terminal text writes,
+current-text retry and a failure-only existing Workbench consumer. Root freshly
+verified 95 tests in 10 files and whole-workspace typecheck. Draft keys/schema are
+unchanged; page-local saved revisions and page-only retention do not establish
+cross-reload or multi-store recovery. Cold composition/App integration is next,
+then authenticated replay/Track, rich drafts, Ask/Side and historical navigation.
+
 **Create:** hosted `src/session-successions.ts` and `.test.ts`;
 Lab `src/session-succession.ts`, `.test.ts`,
 `src/hooks/useSessionSuccession.tsx` and `.test.tsx`.

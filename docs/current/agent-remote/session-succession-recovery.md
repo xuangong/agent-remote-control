@@ -96,6 +96,19 @@ The transport cache is not durable authority or proof that every product store
 has applied a revision. Server Favorites progress is described below; client
 Track/Ask/draft replacement and browser acceptance remain separate work.
 
+## Client text persistence boundary
+
+Queued recovery writes are not saved acknowledgements. A write result identifies
+completed wrapper calls and reports serialization or partial storage failures.
+Cancelled/superseded writes cannot acknowledge recovery. Protected clear-on-close
+policy reports page-only retention, not refresh or disk durability. Draft-store
+revisions are page-local and must not be reused as cross-reload recovery revisions.
+
+On text save failure the existing Workbench keeps editing available and shows
+Retry. Keep the page open until recovery succeeds; retry saves the current text.
+Scope retirement fences both writes and late result publication. This prerequisite
+does not yet move drafts between native sessions or complete multi-store projection.
+
 ## Atomic server Favorites projection
 
 The owning tenant's committed Broker snapshot, Favorites replacement and exact

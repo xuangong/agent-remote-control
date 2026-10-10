@@ -8,6 +8,7 @@ import { WorkspaceVscodeLink } from './HostVscodeTunnel.js';
 import { needsReauthentication } from '../security-client.js';
 import { ReauthenticationNotice } from './ReauthenticationNotice.js';
 import { useSessionDisplayPreferences } from '../hooks/useSessionDisplayPreferences.js';
+import { DraftRecoveryNotice } from './DraftRecoveryNotice.js';
 export type { SessionViewActions as LabWorkbenchActions } from '@orchardworks/agent-remote-web/react';
 
 /** Product policy is supplied around the same session renderer used by ARDB. */
@@ -25,6 +26,7 @@ export function LabWorkbench({ draftBinding, defaultDisplayMode, ...props }: Com
       : props.onExecuteConsoleCommand ? props.onExecuteConsoleCommand(id, args) : Promise.reject(new Error('Unknown console command.')) : props.onExecuteConsoleCommand}
     displayPreferences={displayPreferences} onDisplayPreferencesChange={onDisplayPreferencesChange}
     readingPositions={positions} draftScope={positions?.scope}
+    composerNotice={<>{props.composerNotice}{draftBinding ? <DraftRecoveryNotice binding={draftBinding} /> : null}</>}
     messageDraft={draftBinding ? draft.text : props.messageDraft} onMessageDraftChange={draftBinding ? draft.set : props.onMessageDraftChange}
     workspaceLink={<WorkspaceVscodeLink workspace={props.state?.agent?.cwd} />}
     isAuthenticationError={needsReauthentication} authenticationNotice={<ReauthenticationNotice />}

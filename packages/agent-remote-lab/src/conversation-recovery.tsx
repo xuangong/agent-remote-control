@@ -1,5 +1,5 @@
 import { conversationLocalStorage, conversationSessionStorage } from './conversation-storage.js';
-import { cancelRecoveryWrites, flushRecoveryWrites, queueRecoveryWrite } from './recovery-writes.js';
+import { cancelRecoveryWrites, flushRecoveryWrites, queueRecoveryWrite, type RecoveryWriteHandle } from './recovery-writes.js';
 import { createContext } from 'react';
 import { controllerPath, readControllerLocation, type ControllerLocation } from '@orchardworks/agent-remote-hosted/controller-location';
 import { clearImageDraftScope } from '@orchardworks/agent-remote-web/browser';
@@ -37,8 +37,11 @@ export function readDrafts(scope: string): Record<string, string> {
   } catch { return {}; }
 }
 
-export function saveDrafts(scope: string, drafts: Record<string, string>): void {
-  queueRecoveryWrite(`${prefix}${scope}:drafts`, () => JSON.stringify(drafts));
+export function saveDrafts(scope: string, drafts: Record<string, string>): RecoveryWriteHandle {
+  const generation = recoveryGeneration(scope);
+  return queueRecoveryWrite(`${prefix}${scope}:drafts`, () => JSON.stringify(drafts), {
+    isCurrent: () => generation === recoveryGeneration(scope),
+  });
 }
 
 export function clearConversationRecovery(scope?: string): void {

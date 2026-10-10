@@ -3,6 +3,35 @@
 Date: 2026-10-10. Audience: the next implementation session or maintainer.
 Status: partially implemented; no usable end-to-end handoff yet.
 
+## Client text persistence checkpoint (2026-10-10)
+
+The first client prerequisite passed independent scoped spec/quality review.
+Check Git for the checkpoint after `6a4ed7d`. Recovery writes expose terminal
+results for actual storage completion, failure, cancellation and supersession.
+Successful page-only retention is distinguished from session/local storage writes.
+Partial writes remain failures. Generation fences prevent retired scope writes
+and late results; retry serializes current text, not a failed older snapshot.
+
+The existing Workbench shows a small nonblocking failure notice and Retry only
+when text saving fails. Normal editing keeps the existing batching and per-key
+subscriptions. Draft keys/schema are unchanged. This is not succession store
+projection, cross-reload revision accounting or a claim of physical disk durability.
+
+Evidence: `.tmp/succession-client-writes-report.md`, eight-file frozen manifest and
+`.tmp/succession-client-writes-review.md` (spec PASS, quality Approved, no confirmed
+findings). Implementer ran 218 tests in 14 files. Root freshly verified all hashes,
+95 tests in 10 files and whole-workspace typecheck. Root logs are
+`.tmp/succession-client-writes-root-{tests,typecheck}.log`. Mounted jsdom Workbench
+coverage is not actual-browser or native provider certification.
+
+Next: cold composition intent and its actual App consumer, followed by scoped
+authenticated replay/Track/navigation, rich draft collision recovery, Ask/Side
+attachment preservation and historical Favorites/browser acceptance. The detailed
+preflight is `.tmp/succession-client-projection-preflight.md`; its first slice is
+now complete, not the full client plan. SQL codec and native readiness remain
+release gates. Capability/UI stays disabled; no merge, push, deployment or service
+replacement is included.
+
 ## Atomic server Favorites checkpoint (2026-10-10)
 
 Task5's server Favorites slice passed independent scoped spec/quality review.

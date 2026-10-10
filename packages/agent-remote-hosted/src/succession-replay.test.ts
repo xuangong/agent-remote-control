@@ -8,7 +8,9 @@ import { createRequire } from 'node:module';
 import { afterEach, expect, test } from 'vitest';
 import { createHostedRelay } from './gateway.js';
 import { createHostBroker, type HostBrokerOptions } from './broker.js';
-import { deriveSuccessionCapacity } from './succession-capacity.js';
+import { assertSuccessionCapacity, deriveSuccessionCapacity } from './succession-capacity.js';
+import { projectSuccessionFavorites } from './favorites-succession.js';
+import { codecState } from '../../agent-remote-cloudflare/test/storage-codec-fixture.js';
 import { encodeSqlSnapshot, quoteSqlRecord, SQL_SNAPSHOT_FORMAT, SQL_RECORD_FORMAT, SQL_CHUNK_BYTES } from '../../agent-remote-cloudflare/src/storage-codec.js';
 import { createRelayState, emptyRelayState, validateRelayState, type HostedRelayState } from './state.js';
 import { decodeSessionChannelServerMessage, type CommittedSuccessionProjection, type SuccessionAssociationFreeze } from '@orchardworks/agent-remote-protocol';
@@ -104,6 +106,7 @@ async function fixture(configure?: (state: HostedRelayState) => void, recentAuth
     queuedControls: () => queuedControls,
     select: (selector: NonNullable<HostBrokerOptions['successionProjectionAllowance']>) => { select = selector; },
     writes: () => writes,
+    policyFailure: () => { beforeCommit = async value => { const oversized = structuredClone(value); (oversized.tenants[0]!.broker.associations as any).padding = 'x'.repeat(8388608); assertSuccessionCapacity(oversized, encodingCosts!); }; },
     hold: (matches: (value: HostedRelayState) => boolean) => {
       let enter!: () => void, release!: () => void;
       const entered = new Promise<void>(resolve => { enter = resolve; }), waiting = new Promise<void>(resolve => { release = resolve; });
@@ -1031,4 +1034,155 @@ test('shared source recovery rechecks access after readback before native attach
   expect((await f.request('fixture/revoke-share', 'owner', { targetSubject: 'viewer' })).status).toBe(200);
   const revoked = (await f.saved()).tenants[0]!.broker; release(); expect((await retry).status).toBe(403);
   expect(host.effects).toEqual({ create: 1, attach: 0, readback: 1 }); expect((await f.saved()).tenants[0]!.broker).toEqual(revoked);
+}, 10000);
+
+function recoveredIdentity(state: HostedRelayState) {
+  const broker = state.tenants[0]!.broker;
+  broker.associations = { version: 5, revision: 0, admissions: [], freezes: [], relationChanges: [], relationResets: [] };
+  const recovery = { hostId: 'mapped-host', installationId: 'installation', revocationId: '00000000-0000-4000-8000-000000000001' };
+  broker.revokedHosts = [{ ...recovery, revokedAt: 1 }];
+  broker.pairings = [{ id: 'recovered', purpose: 'host-only', createdAt: 1, expiresAt: 100, usedAt: 2, hostId: recovery.hostId, hostName: 'Host', recovery }];
+  state.version = 9;
+}
+function fillFeatureBudget(state: HostedRelayState) {
+  const costs = { measureSnapshot: (value: Readonly<HostedRelayState>) => ({ snapshotFormat: 3, recordFormat: 1, chunkBytes: SQL_CHUNK_BYTES,
+    costs: encodeSqlSnapshot(value as HostedRelayState, { ...state.config, secret: 's'.repeat(32) }).costs }), quoteRecord: quoteSqlRecord };
+  const associations = state.tenants[0]!.broker.associations as any; associations.padding = '';
+  associations.padding = 'x'.repeat(8388608 - deriveSuccessionCapacity(state, costs).featureCharge);
+  for (let index = 0; index < 3; index++) associations.padding = associations.padding.slice(0, associations.padding.length - Math.max(0, deriveSuccessionCapacity(state, costs).featureCharge - 8388608));
+  expect(deriveSuccessionCapacity(state, costs).featureCharge).toBe(8388608);
+}
+async function recoveryPeer(f: Awaited<ReturnType<typeof fixture>>, key = f.credential) {
+  const socket = new WebSocket(f.origin.replace('http', 'ws') + '/ws/remote-host?successionEnrollment=2', { headers: { authorization: 'Bearer ' + key } });
+  const messages: any[] = [];
+  socket.on('message', (data: { toString(): string }) => {
+    const value = JSON.parse(data.toString()); messages.push(value);
+    if (value.type === 'heartbeat') socket.send(JSON.stringify({ uplinkVersion: 2, type: 'heartbeat_ack', nonce: value.nonce }));
+  });
+  await once(socket, 'open', { signal: AbortSignal.timeout(3000) });
+  socket.send(JSON.stringify({ uplinkVersion: 2, type: 'register', installationId: 'installation', name: 'Host', credentialRotation: true, providers: [{ providerId: 'fixture', displayName: 'Fixture' }] }));
+  await until(() => messages.some(row => row.type === 'registered') || socket.readyState !== 1);
+  return { socket, messages, ack: () => socket.send(JSON.stringify({ uplinkVersion: 2, type: 'credential_saved' })) };
+}
+
+test('recovery rotation unknown sync keeps complete overlap through old-key reconnect without issuing again', async () => {
+  const f = await fixture(recoveredIdentity, true, true, true), peer = await recoveryPeer(f);
+  f.failAfterWrite();
+  expect((await f.request('v1/remote/hosts/mapped-host/rotate', 'owner', {})).status).toBe(503);
+  const unknown = (await f.saved()).tenants[0]!.broker.keys;
+  expect(unknown).toHaveLength(2); expect(peer.messages.filter(row => row.type === 'credential_issued')).toHaveLength(0);
+  f.recover(); await f.restart(); const old = await recoveryPeer(f);
+  expect((await f.saved()).tenants[0]!.broker.keys).toEqual(unknown);
+  expect((await f.request('v1/remote/hosts/mapped-host/rotate', 'owner', {})).status).toBe(409);
+  expect(old.messages.filter(row => row.type === 'credential_issued')).toHaveLength(0);
+  expect((await f.saved()).tenants[0]!.broker.keys).toEqual(unknown);
+  expect((await f.request('v1/remote/hosts/mapped-host/revoke', 'owner', {})).status).toBe(200);
+  expect((await f.saved()).tenants[0]!.broker.keys).toEqual([]);
+}, 10000);
+
+test('full-budget fresh recovery invitation refuses before key publication without poisoning unrelated requests', async () => {
+  const f = await fixture(state => { recoveredIdentity(state); const broker = state.tenants[0]!.broker; broker.hosts = []; broker.keys = [];
+    broker.revokedHosts![0]!.revocationId = '00000000-0000-4000-8000-000000000002'; fillFeatureBudget(state); }, true, true, true);
+  const before = await f.saved(), writes = f.writes();
+  const response = await f.request('v1/remote/pairings', 'owner', { recoverHostId: 'mapped-host' });
+  expect(response.status).toBe(409); expect(await response.text()).not.toContain('arc_');
+  expect(f.writes()).toBe(writes); expect(await f.saved()).toEqual(before);
+  expect((await f.request('v1/remote/hosts')).status).toBe(200);
+}, 10000);
+
+test('original recovery connection acknowledges only its exact durable overlap and a stale connection cannot clear it', async () => {
+  const f = await fixture(recoveredIdentity, true, true, true), peer = await recoveryPeer(f);
+  expect((await f.request('v1/remote/hosts/mapped-host/rotate', 'owner', {})).status).toBe(200);
+  await until(() => peer.messages.some(row => row.type === 'credential_issued'));
+  const key = peer.messages.find(row => row.type === 'credential_issued').credential;
+  const overlap = (await f.saved()).tenants[0]!.broker.keys; expect(overlap).toHaveLength(2);
+  const held = f.hold(state => state.tenants[0]!.broker.keys.length === 1);
+  peer.ack(); await held.entered;
+  expect((await f.saved()).tenants[0]!.broker.keys).toEqual(overlap);
+  held.release(); await until(() => peer.messages.filter(row => row.type === 'registered').length === 2);
+  const completed = (await f.saved()).tenants[0]!.broker.keys;
+  expect(completed.map(([hash]) => hash)).toEqual([createHash('sha256').update(key).digest('hex')]);
+  const current = await recoveryPeer(f, key);
+  expect((await f.request('v1/remote/hosts/mapped-host/rotate', 'owner', {})).status).toBe(200);
+  await until(() => current.messages.some(row => row.type === 'credential_issued'));
+  const pending = (await f.saved()).tenants[0]!.broker.keys; expect(pending).toHaveLength(2);
+  await f.restart(); const reconnected = await recoveryPeer(f, key);
+  reconnected.ack(); await until(() => reconnected.socket.readyState !== 1);
+  expect((await f.saved()).tenants[0]!.broker.keys).toEqual(pending);
+  await f.replaceSaved(state => state.tenants[0]!.broker.keys.reverse()); await f.restart(); await recoveryPeer(f, key);
+  expect((await f.request('v1/remote/hosts/mapped-host/rotate', 'owner', {})).status).toBe(409);
+  expect((await f.saved()).tenants[0]!.broker.keys).toEqual([...pending].reverse());
+}, 10000);
+
+test('full feature budget revoke retains complete history and quota without ordinary-row funding', async () => {
+  const f = await fixture(state => {
+    const broker = state.tenants[0]!.broker, recovery = { hostId: 'mapped-host', installationId: 'installation', revocationId: '00000000-0000-4000-8000-000000000001' };
+    const retained = codecState({ ...state.config, secret: 's'.repeat(32) }).tenants[0]!.broker.associations!;
+    broker.associations!.relationChanges = retained.relationChanges.filter(row => row.phase === 'committed');
+    broker.associations!.relationResets = retained.relationResets;
+    broker.revokedHosts = [{ ...recovery, revokedAt: 1 }];
+    broker.pairings = [{ id: 'unused-retained', purpose: 'host-only', createdAt: 1, expiresAt: 8640000000000000, recovery }];
+    broker.sharing = { grants: [{ hostId: 'mapped-host', subject: 'viewer', label: 'Viewer', sessionLimit: 2, revoked: false }],
+      reservations: [{ key: 'retained-quota', hostId: 'mapped-host', subject: 'viewer', fingerprint: 'full receipt', nativeRequestId: 'request', agentId: 'prior-agent' }] };
+    broker.bindings = [{ hostId: 'mapped-host', providerId: 'fixture', agentId: 'ordinary-agent', nativeSessionId: 'C' }];
+    broker.creations = [['ordinary-create', { fingerprint: 'complete ordinary creation', agentId: 'ordinary-agent' }]];
+    state.sessionStars = [favorite()]; state.favoritesTrees = [{ subject: 'owner', revision: 0, folders: [] }]; state.version = 9; broker.associations!.version = 5; projectSuccessionFavorites(state, 'owner', false); fillFeatureBudget(state);
+  }, true, true, true);
+  const before = await f.saved();
+  expect((await f.request('v1/remote/hosts/mapped-host/revoke', 'owner', {})).status).toBe(200);
+  const saved = await f.saved(), broker = saved.tenants[0]!.broker;
+  expect(broker.hosts).toEqual([]); expect(broker.keys).toEqual([]); expect(broker.bindings).toEqual([]); expect(broker.creations).toEqual([]);
+  expect(broker.associations).toEqual(before.tenants[0]!.broker.associations);
+  expect(saved.tenants[0]!.favoritesSuccession).toEqual(before.tenants[0]!.favoritesSuccession);
+  expect(broker.sharing!.reservations).toEqual(before.tenants[0]!.broker.sharing!.reservations); expect(broker.sharing!.grants[0]!.revoked).toBe(true);
+  expect(broker.pairings![0]!.revokedAt).toBeTypeOf('number'); expect(broker.revokedHosts).toHaveLength(1);
+  expect((await f.request('v1/remote/hosts/mapped-host/revoke', 'owner', {})).status).toBe(404);
+  expect(await f.saved()).toEqual(saved);
+  expect((await f.request('v1/remote/pairings', 'owner', { recoverHostId: 'mapped-host' })).status).toBe(409);
+  expect((await f.request('v1/remote/hosts')).status).toBe(200);
+  expect((await f.saved()).tenants[0]!.broker).toEqual(broker);
+}, 10000);
+
+for (const failure of ['brand', 'producer-bound'] as const) test(`terminal ${failure} remains fail-closed with exact native evidence and no release`, async () => {
+  const f = await fixture(state => { state.tenants[0]!.broker.associations!.freezes = []; }, false, true);
+  if (failure === 'producer-bound') f.select(() => 1);
+  const native = await controller(f);
+  expect((await f.request('v1/remote/hosts/mapped-host/succession/prepare', 'owner', { operationId: 'op-2', providerId: 'fixture', nativeSessionId: 'A', expectedRevision: 1 })).status).toBe(200);
+  const before = (await f.saved()).tenants[0]!.broker.associations;
+  if (failure === 'brand') f.policyFailure();
+  expect((await f.request('v1/remote/hosts/mapped-host/succession/commit', 'owner', { operationId: 'op-2' })).status).toBeGreaterThanOrEqual(500);
+  expect((await f.saved()).tenants[0]!.broker.associations).toEqual(before);
+  expect(native.effects).toMatchObject({ commit: 1, input: 1, release: 0 });
+  expect((await f.request('v1/remote/hosts/mapped-host/succession/reconcile', 'owner', { operationId: 'op-2' })).status).toBeGreaterThanOrEqual(500);
+  expect(native.effects).toMatchObject({ commit: 1, input: 1, release: 0 });
+}, 10000);
+
+test('new recovery rotation at the feature ceiling refuses before issuing a usable overlap key', async () => {
+  const f = await fixture(state => {
+    recoveredIdentity(state); state.tenants[0]!.broker.keys[0]![1].expires = Number.MAX_SAFE_INTEGER;
+    Object.assign(state.tenants[0]!.broker.hosts[0]!, { pairingPurpose: 'host-only', credentialRotation: true });
+    fillFeatureBudget(state);
+  }, true, true, true);
+  const peer = await recoveryPeer(f), before = await f.saved(), writes = f.writes();
+  expect((await f.request('v1/remote/hosts/mapped-host/rotate', 'owner', {})).status).toBe(409);
+  expect(peer.messages.filter(row => row.type === 'credential_issued')).toEqual([]); expect(peer.socket.readyState).toBe(1);
+  expect(f.writes()).toBe(writes); expect(await f.saved()).toEqual(before);
+  expect((await f.request('v1/remote/hosts')).status).toBe(200);
+}, 10000);
+
+for (const phase of ['rejected', 'cancelled'] as const) test(`durable ${phase} decision consumes its transition once after retention completes`, async () => {
+  const f = await fixture(state => { state.tenants[0]!.broker.associations!.freezes = []; }, false, true), native = await controller(f);
+  const prepared = await (await f.request('v1/remote/hosts/mapped-host/succession/prepare', 'owner', { operationId: 'op-2', providerId: 'fixture', nativeSessionId: 'A', expectedRevision: 1 })).json();
+  native.seed({ ...prepared.record, phase });
+  const before = (await f.saved()).tenants[0]!.broker.associations!, held = f.hold(state => state.tenants[0]!.broker.associations!.freezes[0]?.released === phase);
+  let replied = false;
+  const pending = f.request('v1/remote/hosts/mapped-host/succession/status', 'owner', { operationId: 'op-2' }).then(response => { replied = true; return response; });
+  await held.entered; expect(replied).toBe(false); expect(native.effects.release).toBe(0);
+  expect((await f.saved()).tenants[0]!.broker.associations).toEqual(before);
+  held.release(); expect((await pending).status).toBe(200);
+  const settled = (await f.saved()).tenants[0]!.broker.associations!;
+  expect(settled.revision).toBe(before.revision + 1); expect(settled.freezes[0]!.released).toBe(phase);
+  expect(settled.freezes[0]!.projection).toBeUndefined(); expect((await f.saved()).tenants[0]!.favoritesSuccession).toBeUndefined();
+  expect((await f.request('v1/remote/hosts/mapped-host/succession/status', 'owner', { operationId: 'op-2' })).status).toBe(200);
+  expect((await f.saved()).tenants[0]!.broker.associations).toEqual(settled); expect(native.effects.commit).toBe(0);
 }, 10000);

@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { retainedHostIdentities } from './host-recovery.js';
+import { currentRecoveryWorkflows, retainedHostIdentities, retainedRecoveryInstallations } from './host-recovery.js';
 import { MAX_PAIRING_HISTORY } from './pairing-keys.js';
 import type { HostedRelayState } from './state.js';
 import type { BrokerAssociationState } from './succession-associations.js';
@@ -70,10 +70,12 @@ export interface SuccessionCapacity {
 function ordinaryView(state: Readonly<HostedRelayState>): HostedRelayState {
   const ordinary = structuredClone(state);
   for (const tenant of ordinary.tenants) {
+    const recoveryInstallations = retainedRecoveryInstallations(tenant.broker);
     delete tenant.favoritesSuccession;
     delete tenant.broker.associations;
     delete tenant.broker.revokedHosts;
-    tenant.broker.keys = tenant.broker.keys.filter(([, key]) => key.recovery === undefined);
+    tenant.broker.keys = tenant.broker.keys.filter(([, key]) => key.recovery === undefined
+      && !(key.kind === 'device' && key.installationId && recoveryInstallations.has(key.installationId)));
     if (tenant.broker.pairings !== undefined) tenant.broker.pairings = tenant.broker.pairings.filter(pairing => pairing.recovery === undefined);
   }
   return ordinary;
@@ -253,13 +255,12 @@ export function deriveSuccessionCapacity(state: Readonly<HostedRelayState>, enco
       }
     }
     const recoveryKeys = broker.keys.filter(([, key]) => key.recovery !== undefined);
-    const recoveryInstallations = new Set(recoveryKeys.map(([, key]) => key.recovery!.installationId));
-    for (const installationId of recoveryInstallations) {
-      const recovery = recoveryKeys.find(([, key]) => key.recovery!.installationId === installationId)![1].recovery!;
+    for (const recovery of currentRecoveryWorkflows(broker)) {
+      const installationId = recovery.installationId;
       const claimGrowth = Math.max(0, ...recoveryKeys.filter(([, key]) => key.recovery!.installationId === installationId).map(([hash, key]) =>
         key.claimedAt === undefined ? charge(quote('deviceKey', owner, hash, bytes({ ...key, claimedAt: MAX }))) - charge(requireCurrent('deviceKey', owner, hash)) : 0));
       remainingBytes = sum(remainingBytes, claimGrowth);
-      if (!broker.hosts.some(host => host.installationId === installationId)) {
+      if (!broker.hosts.some(host => host.id === recovery.hostId && host.installationId === installationId)) {
         slots.hostSlots++;
         insertion('host', owner, recovery.hostId, recoveryHostBound(recovery.hostId, installationId));
         brokerHeader(reference('host', owner, recovery.hostId));

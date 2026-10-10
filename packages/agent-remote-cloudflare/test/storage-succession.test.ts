@@ -404,3 +404,111 @@ for (const failure of ['hold', 'rollback', 'unknown-sync'] as const) test(`exact
     finally { recovered.broker.close(); await restarted.close(); }
   } finally { release?.(); peer.broker.close(); await relay.close(); }
 }, 10000);
+
+for (const consumer of ['terminal', 'favorites', 'invitation', 'registration', 'rotation', 'acknowledgment', 'revoke'] as const) {
+  for (const failure of ['hold', 'rollback', 'unknown-sync'] as const) test(`retention ${consumer} fences Node SQL publication through ${failure}`, async () => {
+    const { retentionState, retentionPeer } = await import('./retention-consumption-fixture.js');
+    const initial = retentionState(auth, true);
+    if (consumer === 'invitation' || consumer === 'registration') {
+      const broker = initial.tenants[0]!.broker; broker.hosts = []; broker.keys = [];
+      broker.revokedHosts![0]!.revocationId = '00000000-0000-4000-8000-000000000002';
+    }
+    const f = fixture(true); await f.store.commit(initial);
+    const encoding = { measureSnapshot: (state: Readonly<HostedRelayState>) => ({ snapshotFormat: 3, recordFormat: 1, chunkBytes: SQL_CHUNK_BYTES, costs: encodeSqlSnapshot(state as HostedRelayState, auth).costs }), quoteRecord: quoteSqlRecord };
+    let publications = 0;
+    const relay = createRelayState(auth, { initial, commit: value => f.store.commit(value) }, () => {}, () => { publications++; }, encoding);
+    const peer = retentionPeer(relay, auth);
+    let invitationKey = '';
+    if (consumer === 'registration') invitationKey = (await (await peer.invitation())!.json()).key;
+    else if (consumer !== 'invitation') await peer.connect();
+    if (consumer === 'favorites' || consumer === 'revoke') expect((await peer.terminal())?.status).toBe(200);
+    if (consumer === 'acknowledgment') expect((await peer.rotate())?.status).toBe(200);
+    const before = structuredClone(relay.read()), brokerBefore = peer.broker.snapshot(), counts = peer.counts(), published = publications, physical = f.snapshot();
+    let enter!: () => void, release!: () => void;
+    const entered = new Promise<void>(resolve => { enter = resolve; });
+    if (failure === 'rollback') for (const operation of ['INSERT', 'UPDATE', 'DELETE']) f.db.exec(`CREATE TRIGGER fail_retention_${operation} BEFORE ${operation} ON relay_snapshot_manifests BEGIN SELECT RAISE(ABORT, 'retention rollback'); END`);
+    else f.storage.sync = async () => {
+      f.storage.sync = async () => {}; enter();
+      if (failure === 'unknown-sync') throw new Error('unknown retention sync');
+      await new Promise<void>(resolve => { release = resolve; });
+    };
+    const action = () => consumer === 'terminal' ? peer.terminal() : consumer === 'favorites' ? peer.apply() : consumer === 'invitation' ? peer.invitation()
+      : consumer === 'registration' ? peer.connect(invitationKey) : consumer === 'rotation' ? peer.rotate() : consumer === 'acknowledgment' ? peer.acknowledge() : peer.revoke();
+    let replied = false;
+    const pending = action().then(value => { replied = true; return value; }, error => error);
+    try {
+      if (failure === 'hold') {
+        await entered; expect(replied).toBe(false); expect(relay.read()).toEqual(before); expect(peer.broker.snapshot()).toEqual(brokerBefore);
+        expect(peer.counts()).toMatchObject({ releases: counts.releases, issued: counts.issued, registered: counts.registered }); expect(publications).toBe(published);
+        const held = reopen(f.storage).initial;
+        if (consumer === 'terminal') expect(held.tenants[0]).toMatchObject({ favoritesSuccession: { receipts: [{ status: 'pending' }] }, broker: { associations: { freezes: [{ released: 'committed', projection: { version: 1 } }] } } });
+        release(); await pending;
+      } else {
+        await pending;
+        expect(relay.read()).toEqual(before); expect(peer.broker.snapshot()).toEqual(brokerBefore); expect(publications).toBe(published);
+        expect(peer.counts()).toMatchObject({ releases: counts.releases, issued: counts.issued, registered: counts.registered });
+        if (failure === 'rollback') {
+          expect(f.snapshot()).toBe(physical);
+          for (const operation of ['INSERT', 'UPDATE', 'DELETE']) f.db.exec(`DROP TRIGGER fail_retention_${operation}`);
+        }
+      }
+      const restored = reopen(f.storage).initial;
+      if (failure === 'rollback') expect(restored).toEqual(before);
+      else if (consumer === 'terminal' || consumer === 'favorites') {
+        expect(restored.tenants[0]!.broker.associations!.freezes[0]!.projection).toBeDefined();
+        expect(restored.tenants[0]!.favoritesSuccession!.receipts[0]!.status).toBe(consumer === 'terminal' ? 'pending' : 'applied');
+        expect(restored.sessionStars![0]!.nativeSessionId).toBe(consumer === 'terminal' ? 'A' : 'B');
+      } else if (consumer === 'invitation') expect(restored.tenants[0]!.broker.pairings).toHaveLength(2);
+      else if (consumer === 'registration') expect(restored.tenants[0]!.broker.hosts[0]).toMatchObject({ id: 'mapped-host', credentialRotation: true });
+      else if (consumer === 'rotation') expect(restored.tenants[0]!.broker.keys).toHaveLength(2);
+      else if (consumer === 'acknowledgment') expect(restored.tenants[0]!.broker.keys).toHaveLength(1);
+      else {
+        expect(restored.tenants[0]!.broker.hosts).toEqual([]); expect(restored.tenants[0]!.broker.keys).toEqual([]);
+        expect(restored.tenants[0]!.broker.associations).toEqual(before.tenants[0]!.broker.associations);
+        expect(restored.tenants[0]!.favoritesSuccession).toEqual(before.tenants[0]!.favoritesSuccession);
+        expect(restored.tenants[0]!.broker.sharing).toEqual(before.tenants[0]!.broker.sharing);
+      }
+      peer.close(); await relay.close(); f.storage.sync = async () => {};
+      const reopened = createRelayState(auth, reopen(f.storage), () => {}, () => {}, encoding), recovered = retentionPeer(reopened, auth);
+      try {
+        if (consumer === 'terminal' || consumer === 'favorites') {
+          await recovered.connect(); expect((await recovered.terminal())?.status).toBe(200);
+          await recovered.apply(); const applied = structuredClone(reopened.read()); await recovered.apply();
+          expect(reopened.read()).toEqual(applied); expect(applied.tenants[0]!.favoritesSuccession!.receipts[0]!.status).toBe('applied');
+        } else if (consumer === 'rotation' && failure !== 'rollback') {
+          const overlap = structuredClone(reopened.read().tenants[0]!.broker.keys); await recovered.connect();
+          expect(reopened.read().tenants[0]!.broker.keys).toEqual(overlap);
+          expect((await recovered.rotate())?.status).toBe(409); expect(recovered.counts().issued).toBe(0);
+        }
+      } finally { recovered.close(); await reopened.close(); }
+    } finally { release?.(); peer.close(); await relay.close(); }
+  }, 15000);
+}
+
+test('full recovery registration construction fits the saved claim and ends only future Host growth', async () => {
+  const { retentionState, retentionPeer } = await import('./retention-consumption-fixture.js');
+  const { deriveSuccessionCapacity } = await import('../../agent-remote-hosted/src/succession-capacity.js');
+  const initial = retentionState(auth, true), broker = initial.tenants[0]!.broker;
+  broker.hosts = []; broker.keys = []; broker.revokedHosts![0]!.revocationId = '00000000-0000-4000-8000-000000000002';
+  const f = fixture(true); await f.store.commit(initial);
+  const encoding = { measureSnapshot: (state: Readonly<HostedRelayState>) => ({ snapshotFormat: 3, recordFormat: 1, chunkBytes: SQL_CHUNK_BYTES, costs: encodeSqlSnapshot(state as HostedRelayState, auth).costs }), quoteRecord: quoteSqlRecord };
+  const relay = createRelayState(auth, { initial, commit: value => f.store.commit(value) }, () => {}, () => {}, encoding), peer = retentionPeer(relay, auth);
+  try {
+    const invitation = await (await peer.invitation())!.json(), before = structuredClone(relay.read()), capacity = deriveSuccessionCapacity(before, encoding);
+    expect(capacity.tenants[0]).toMatchObject({ hostSlots: 1, credentialSlots: 1 });
+    const label = '\ud800'.repeat(160), tool = { id: label, name: label, status: 'not-found' };
+    const metadata = { name: '\ud800'.repeat(512), environment: { detectedAt: 1.7976931348623157e308,
+      os: { platform: label, name: label, arch: label, release: label }, wsl: false, container: false,
+      shell: { name: label, source: 'environment' }, shells: Array(16).fill(tool), browsers: Array(16).fill(tool), vscode: { status: 'not-found' } },
+      controller: { version: '999999999.999999999.999999999', revision: 'f'.repeat(40), platform: '\ud800'.repeat(32), arch: '\ud800'.repeat(32), nodeMajor: 100, remoteUpdate: false },
+      providerManagement: true, tpmManagement: true, providers: Array.from({ length: 64 }, (_, index) => ({ providerId: '\ud800'.repeat(510) + String(index).padStart(2, '0'), displayName: '\ud800'.repeat(512), promptEditing: true, sessionRename: true, daemonControl: true })) };
+    await peer.connect(invitation.key, metadata);
+    const saved = reopen(f.storage).initial;
+    expect(saved.tenants[0]!.broker.hosts[0]).toMatchObject(metadata);
+    expect(deriveSuccessionCapacity(saved, encoding).tenants[0]).toMatchObject({ hostSlots: 0, credentialSlots: 0 });
+    const total = (state: HostedRelayState) => encodeSqlSnapshot(state, auth).costs.reduce((sum, row) => sum + row.byteLength + row.manifestBytes, 0);
+    expect(total(saved) - total(before)).toBeLessThanOrEqual(capacity.remainingBytes);
+    expect(peer.counts().issued).toBe(1); await peer.acknowledge(); expect(peer.counts().registered).toBe(1);
+    expect(reopen(f.storage).initial.tenants[0]!.broker.hosts[0]).toMatchObject(metadata);
+  } finally { peer.close(); await relay.close(); }
+}, 15000);

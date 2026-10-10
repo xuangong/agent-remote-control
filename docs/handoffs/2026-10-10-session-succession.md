@@ -3,6 +3,35 @@
 Date: 2026-10-10. Audience: the next implementation session or maintainer.
 Status: partially implemented; no usable end-to-end handoff yet.
 
+## Terminal and recovery consumption checkpoint (2026-10-11)
+
+Task 9C3 passed independent spec and quality review without retained findings.
+The existing terminal projection/Favorites transaction is reused. Current
+recovery identities retain complete missing registration/issuance allowances;
+actual device overlap and invitation history remain charged. Complete saved
+Host/device records do not reserve permanent future rotations. Explicit fresh
+pairing/rotation refusals stay pre-effect; terminal and uncertain storage outcomes
+retain their original evidence and failure classification.
+
+Credential publication and acknowledgment validate the original Host, connection,
+generation and saved key. Reconnect after an interrupted recovery rotation
+preserves overlap, refuses another issuance and can require explicit revoke and
+targeted recovery. It cannot infer old/new key order from retained rows alone.
+Full-budget revoke removes access while retaining complete succession, relation,
+Favorites and quota/history evidence.
+
+Root freshly passed 172 Hosted and 90 Cloudflare cases plus both typechecks.
+The 42 Node/Worker consumer fault cases are included in the 262 total. Hosted
+recovery tests use real HTTP/WebSocket with a direct Broker fixture; terminal
+tests use the normal Gateway fixture. Node/Worker storage cases use real SQLite
+and Miniflare/workerd with deterministic fake protocol peers. Rejected sync is
+unknown durability, not rollback. No native provider was run.
+
+Next is 9D Host source-grant/cursor file barriers, then 9E local Worker operating
+measurements and product integration. Default SQL effects, native suppliers and
+production capability remain disabled. No merge, push, deployment, installation
+or user-service change is authorized here.
+
 ## Atomic source completion checkpoint (2026-10-11)
 
 Task 9C2 passed independent spec and quality review after one scoped fix round.
@@ -27,11 +56,9 @@ sync/reopen through actual Node and isolated workerd consumers. Unknown sync
 durability is not described as rollback. The unchanged capacity-only tests retain
 their earlier 14-test verification; no native fixture was run in this slice.
 
-Next is Task 9C3: complete terminal/Favorites consumption, recovery invitation,
-registration/rotation and full-budget revocation. Then continue 9D Host grant
-barriers, 9E local Worker measurements and product integration. Default SQL
-effects, native suppliers and production capability remain disabled. No merge,
-push, deployment, installation or user-service change is authorized here.
+The terminal/Favorites/recovery continuation is now covered by the checkpoint
+above. Host grant barriers, local Worker measurements and product integration
+remain separate gates; none of these scoped checks enables production.
 
 ## Relay accounting checkpoint (2026-10-11)
 
@@ -63,8 +90,8 @@ checks. Review suggestion T9C1-M1 remains on the whole-branch list: independentl
 measure payload bytes in the all-record escaped-tuple quote test rather than
 derive them from the quote helper's framing. No incorrect current quote was found.
 
-The checkpoint above completes9C2's atomic source/relation consumers and
-pre-effect claims.9C3 completes terminal/Favorites/recovery consumers, followed by9D/9E and
+The later checkpoints above complete 9C2's atomic source/relation consumers and
+9C3's terminal/Favorites/recovery consumers. They are followed by 9D/9E and
 product integration. Default SQL effects, native suppliers and production
 capability remain disabled. The9C0 execution incident below remains unresolved
 as an independent cleanup claim; no native fixture was run for9C1.

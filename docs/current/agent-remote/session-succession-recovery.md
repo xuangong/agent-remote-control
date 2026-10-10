@@ -357,6 +357,32 @@ recovery of that historical Host. Recovery identity capacity is reserved when
 admitting new succession authority so access revocation does not need a new slot.
 Do not delete historical records to free capacity.
 
+Current recovery completion is derived from the complete credential identity or
+used invitation matching the current Host, installation and revocation marker.
+Missing Host metadata or a device key retains the applicable full construction
+and collection/header allowance. Complete saved Host/device records end only
+that future construction allowance. Actual distinct recovery device rows and
+invitation history remain fully charged; historical use alone does not reserve
+every future rotation or grant new authority. Contradictory identities require
+reconciliation rather than silently dropping their evidence.
+
+Each requested rotation admits its full old/new-key overlap before publishing
+the new credential. Only the original connection's exact pending credential,
+Host generation and saved key row can acknowledge completion and remove old
+keys. Reconnect/restart preserves retained recovery overlap; possession of one
+key does not prove which key is newer. When the original volatile identity is
+lost, further issuance reports `rotation_pending` and explicit revoke followed
+by targeted recovery can be required. No secret is persisted to guess that order.
+
+Terminal projection and Favorites progress remain one outer mutation, with
+runtime publication, successful reply and Host release after storage completion.
+Transaction abort retains the preceding complete snapshot. Rejected sync is
+unknown durability: keep the original identity and validate the complete state
+exposed by fresh reopening, without repeating creation or credential issuance.
+The isolated Node/Worker consumer tests verify these publication boundaries;
+they do not establish physical reservation, external Gateway rollback or
+power-loss durability.
+
 ## Client text persistence boundary
 
 Queued recovery writes are not saved acknowledgements. A write result identifies

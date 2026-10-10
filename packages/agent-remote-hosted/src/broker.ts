@@ -2,7 +2,7 @@ import { isCreationSource, type CreationSource } from '@orchardworks/agent-remot
 import { relationChangeKey, isRelationChangeReceipt, type RelationChangeReservation, type RelationChangeReceipt } from '@orchardworks/agent-remote-protocol';
 import type { RelationChangeReset, BrokerRelationChange } from './relation-changes.js';
 import { isDeepStrictEqual } from 'node:util';
-import { retainedHostIdentities, type HostRecoverySelection, type RevokedHost } from './host-recovery.js';
+import { retainedHostIdentities, retainedRecoveryInstallations, type HostRecoverySelection, type RevokedHost } from './host-recovery.js';
 import { validBrokerAssociations, migrateBrokerAssociations, type BrokerAssociationState } from './succession-associations.js';
 import { isNativeSessionRef, isPrimaryRole, isSuccessionRecord, nativeSessionRefKey, successionFreezeKey, successionAuthorityKey, type NativeSessionRef, type SuccessionAssociationFreeze, type BoundedSuccessionAssociationFreeze, type PrimaryRole, type SuccessionRecord } from '@orchardworks/agent-remote-protocol';
 import { type SuccessionAssociationAuthority, isSuccessionAssociationAuthority } from '@orchardworks/agent-remote-protocol';
@@ -646,7 +646,9 @@ export function createHostBroker(options: HostBrokerOptions) {
           if (options.durable && invitation) savedCredential.claimedAt = now();
           if (options.durable) {
             if (!savedCredential.requiresRotation) savedCredential.expires = Number.MAX_SAFE_INTEGER;
-            draft.keys = draft.keys.filter(([hash, key]) => hash === credentialHash || key.installationId !== message.installationId);
+            // Reconnection proves possession of this key, not which overlapping recovery key was saved.
+            const retainOverlap = credential.kind === 'device' && retainedRecoveryInstallations(draft).has(message.installationId);
+            if (!retainOverlap) draft.keys = draft.keys.filter(([hash, key]) => hash === credentialHash || key.installationId !== message.installationId);
           }
           const existing = [...hosts.values()].find(value => value.installationId === message.installationId);
           const historical = [...retainedIdentities()].find(([, installationId]) => installationId === message.installationId);
@@ -682,7 +684,7 @@ export function createHostBroker(options: HostBrokerOptions) {
             Object.assign(host, next); host.successionEnrollmentVersion = options.successionEnrollment ? enrollmentRequested : undefined; host.connectionId=randomUUID(); host.generation += 1; clearTimeout(timer);
             if (!retired && socket.readyState === RELAY_SOCKET_OPEN) {
               host.socket = socket;
-              host.issueCredential = message.credentialRotation ? () => issueCredential(false) : undefined;
+              host.issueCredential = message.credentialRotation ? () => issueCredential(false, true) : undefined;
               if (!options.durable || !message.credentialRotation || credential.kind === 'device') {
                 registered();
               }
@@ -696,9 +698,12 @@ export function createHostBroker(options: HostBrokerOptions) {
       if (host.socket !== socket) return;
       if (message.type === 'credential_saved') {
         if (!pendingCredential) return closeConnection(1008, 'No pending device credential');
-        const pending = pendingCredential;
+        const pending = pendingCredential, currentHost = host, generation = host.generation;
         await commit(draft => {
-          if (!host || host.socket !== socket || !draft.keys.some(([hash]) => hash === pending.hash)) throw new BrokerError(401, 'device_revoked', 'Device credential is unavailable.');
+          assertHostCurrent(currentHost, generation);
+          if (retired || currentHost.socket !== socket || keys.get(credentialHash) !== credential || pendingCredential !== pending
+            || !draft.keys.some(([hash, key]) => hash === pending.hash && isDeepStrictEqual(key, pending.value)
+              && key.installationId === currentHost.installationId)) throw new BrokerError(401, 'device_revoked', 'Device credential is unavailable.');
           draft.keys = draft.keys.filter(([hash, value]) => value.installationId !== host!.installationId || hash === pending.hash);
           return {value:undefined,publish() {
             for (const [hash,value] of keys) if (value.installationId === host!.installationId && hash !== pending.hash) keys.delete(hash);
@@ -740,22 +745,34 @@ export function createHostBroker(options: HostBrokerOptions) {
         closeConnection(code, code === 1011 ? 'Host message could not be processed' : (error as Error).message);
       }
     }
-    async function issueCredential(consumeInvitation: boolean): Promise<void> {
+    async function issueCredential(consumeInvitation: boolean, preEffect = false): Promise<void> {
       if (issuing) return issuing;
       if (pendingCredential) throw new BrokerError(409, 'rotation_pending', 'A device credential is awaiting confirmation.');
       const value = `arc_device_${randomBytes(32).toString('base64url')}`;
       const nextHash = keyHash(value);
+      const currentHost = host, generation = host?.generation;
       const operation = commit(draft => {
-        if (!host || host.socket !== socket || keys.get(credentialHash) !== credential) throw new BrokerError(401, 'device_revoked', 'Device is no longer connected.');
+        if (!currentHost || retired || currentHost.socket !== socket || keys.get(credentialHash) !== credential) throw new BrokerError(401, 'device_revoked', 'Device is no longer connected.');
+        assertHostCurrent(currentHost, generation);
+        if (!consumeInvitation && retainedRecoveryInstallations(draft).has(currentHost.installationId)
+          && draft.keys.filter(([, key]) => key.installationId === currentHost.installationId && key.kind === 'device').length > 1) {
+          throw new BrokerError(409, 'rotation_pending', 'Retained recovery credentials require explicit reconciliation.');
+        }
         if (draft.keys.length >= 128 && !consumeInvitation) throw new BrokerError(429, 'capacity_exceeded', 'Too many device credentials.');
-        const next: DeviceCredential = {expires:Number.MAX_SAFE_INTEGER,installationId:host.installationId,kind:'device'};
+        const next: DeviceCredential = {expires:Number.MAX_SAFE_INTEGER,installationId:currentHost.installationId,kind:'device'};
         if (consumeInvitation) draft.keys = draft.keys.filter(([hash]) => hash !== credentialHash);
         draft.keys.push([nextHash,next]);
         return {value:undefined,publish() {
           keys.set(nextHash,next); pendingCredential = {hash:nextHash,value:next};
           if (consumeInvitation) {keys.delete(credentialHash);credentialHash=nextHash;credential=next;}
         }};
-      }).then(() => { if (host?.socket === socket) send(host, {uplinkVersion:2,type:'credential_issued',credential:value}); });
+      // A requested rotation has produced no new usable authorization before this commit.
+      // Invitation consumption follows registration and retains terminal fail-closed handling.
+      }, preEffect).then(() => {
+        if (!currentHost || retired || currentHost.socket !== socket || pendingCredential?.hash !== nextHash || !keys.has(nextHash)) return;
+        assertHostCurrent(currentHost, generation);
+        send(currentHost, {uplinkVersion:2,type:'credential_issued',credential:value});
+      });
       issuing=operation;
       try {await operation;} finally {issuing=undefined;}
     }
@@ -1388,7 +1405,8 @@ export function createHostBroker(options: HostBrokerOptions) {
           sharing = new HostSharing(draft.sharing, () => {});
           keys.set(keyHash(key), credential); options.onPairing?.(key, expires);
         } };
-      });
+      // No key or access removal is published, and no external grant effect occurs, before admission.
+      }, true);
       return json(201, { ...visiblePairing(item, now()), key, serverUrl: options.publicUrl ?? context.serverUrl ?? new URL(request.url).origin,
         ...(options.durable && options.publicUrl ? { command: `export AGENT_HOST_SERVER='${options.publicUrl.replaceAll("'", "'\\''")}'\nexport AGENT_HOST_REMOTE_KEY='${key}'\nagent-remote-controller start` } : {}) });
     }

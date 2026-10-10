@@ -454,9 +454,17 @@ no production capability is enabled by these scripted fixtures.
   source, including five new transport regressions. Default production gates
   remain closed; the direct Broker revoke test does not claim the same Gateway
   control-proof schedule.
-- [ ] Complete terminal/Favorites/recovery consumption and fault acceptance (9C3).
+- [x] Complete terminal/Favorites/recovery consumption and fault acceptance (9C3).
+  Independent spec/quality review approved the slice without findings. Root
+  freshly passed 172 Hosted and 90 Cloudflare cases, including 42 Node/Worker
+  consumer fault cases, and both typechecks. Complete terminal evidence and
+  Favorites progress share the existing outer commit; current recovery claims
+  and actual key overlap survive uncertain publication. Restarted overlap can
+  require explicit recovery rather than another automatic key issuance.
 - [ ] Review role/context durable-file write consistency and record the actual
   process-crash versus power-loss guarantees without unsupported claims.
+- [ ] Complete the separate local Worker operating-envelope checkpoint (9E),
+  reporting measured cases and unavailable telemetry without production limits.
 
 ## Task 10: Product identities and recoverable composition
 

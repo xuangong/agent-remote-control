@@ -48,3 +48,29 @@ export function hasHostRecoveryMetadata(state: RemoteHostBrokerState): boolean {
   return state.revokedHosts !== undefined || Array.isArray(state.keys) && state.keys.some(item => Array.isArray(item) && item[1]?.recovery !== undefined)
     || Array.isArray(state.pairings) && state.pairings.some(item => item?.recovery !== undefined);
 }
+
+/** Retained recovery history identifies actual device rows, not permission for another issuance. */
+export function retainedRecoveryInstallations(state: RemoteHostBrokerState): Set<string> {
+  return new Set([
+    ...(state.revokedHosts ?? []).map(row => row.installationId),
+    ...(state.pairings ?? []).flatMap(row => row.recovery ? [row.recovery.installationId] : []),
+    ...state.keys.flatMap(([, key]) => key.recovery ? [key.recovery.installationId] : []),
+  ]);
+}
+
+/** Missing completion evidence keeps one claim for the exact current workflow identity. */
+export function currentRecoveryWorkflows(state: RemoteHostBrokerState): HostRecoverySelection[] {
+  const workflows = new Map<string, HostRecoverySelection>();
+  const add = (recovery: HostRecoverySelection) => {
+    const marker = state.revokedHosts?.find(row => row.hostId === recovery.hostId);
+    if (!marker || marker.installationId !== recovery.installationId || marker.revocationId !== recovery.revocationId) throw new Error('Recovery workflow requires reconciliation.');
+    workflows.set(JSON.stringify([recovery.hostId, recovery.installationId, recovery.revocationId]), recovery);
+  };
+  for (const [, key] of state.keys) if (key.recovery) add(key.recovery);
+  for (const pairing of state.pairings ?? []) {
+    const recovery = pairing.recovery;
+    if (recovery && pairing.usedAt !== undefined && state.revokedHosts?.some(marker => marker.hostId === recovery.hostId
+      && marker.installationId === recovery.installationId && marker.revocationId === recovery.revocationId)) add(recovery);
+  }
+  return [...workflows.values()];
+}

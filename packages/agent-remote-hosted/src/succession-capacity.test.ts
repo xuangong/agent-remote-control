@@ -254,3 +254,67 @@ test('derives every missing progress slot and retains the full supported Host id
   retained.tenants[0]!.broker.revokedHosts.push({ hostId: 'overflow-host', installationId: 'overflow-installation', revocationId: '00000000-0000-4000-8000-000000000001' });
   expect(() => createRelayState(auth, { initial: retained, async commit() {} }, () => {}, () => {}, costs)).toThrow(/state|identity|capacity/i);
 }, 10000);
+
+function currentRecovery() {
+  const state = fullInventory(), broker = state.tenants[0]!.broker;
+  broker.associations!.freezes = []; broker.associations!.admissions = []; broker.associations!.relationChanges = [];
+  delete state.tenants[0]!.favoritesSuccession;
+  broker.keys = []; broker.pairings = broker.pairings!.filter(row => row.usedAt !== undefined);
+  return state;
+}
+
+test('current used recovery identity retains missing completion claims without inventing future rotations', () => {
+  const state = currentRecovery(), broker = state.tenants[0]!.broker, recovery = broker.pairings![0]!.recovery!;
+  expect(deriveSuccessionCapacity(state, costs).tenants[0]).toMatchObject({ hostSlots: 1, credentialSlots: 1 });
+  broker.hosts.push({ id: recovery.hostId, installationId: recovery.installationId, name: 'Recovered', providers: [], legacyDsh: false });
+  expect(deriveSuccessionCapacity(state, costs).tenants[0]).toMatchObject({ hostSlots: 0, credentialSlots: 1 });
+  broker.keys.push(['c'.repeat(64), { expires: Number.MAX_SAFE_INTEGER, installationId: recovery.installationId, kind: 'device' }]);
+  const complete = deriveSuccessionCapacity(state, costs);
+  expect(complete.tenants[0]).toMatchObject({ hostSlots: 0, credentialSlots: 0 });
+  const before = total(state);
+  broker.keys.push(['d'.repeat(64), { expires: Number.MAX_SAFE_INTEGER, installationId: recovery.installationId, kind: 'device', extra: 'complete retained overlap' } as any]);
+  const overlap = deriveSuccessionCapacity(state, costs);
+  expect(overlap.retainedBytes - complete.retainedBytes).toBe(total(state) - before);
+  expect(overlap.tenants[0]).toMatchObject({ hostSlots: 0, credentialSlots: 0 });
+  broker.keys.shift();
+  expect(deriveSuccessionCapacity(state, costs).featureCharge).toBeLessThan(overlap.featureCharge);
+  broker.keys = []; broker.hosts = broker.hosts.filter(row => row.id !== recovery.hostId);
+  broker.revokedHosts![0]!.revocationId = '00000000-0000-4000-8000-000000000002';
+  expect(deriveSuccessionCapacity(state, costs).tenants[0]).toMatchObject({ hostSlots: 0, credentialSlots: 0 });
+  broker.keys.push(['e'.repeat(64), { expires: 100, requiresRotation: true, purpose: 'host-only', installationId: recovery.installationId, recovery }]);
+  expect(() => deriveSuccessionCapacity(state, costs)).toThrow(/state/);
+}, 10000);
+
+for (const blocker of ['authority', 'mapping', 'tree', 'revision'] as const) test(`pending Favorites ${blocker} preserves complete projection and recomputes ordinary growth`, async () => {
+  const state = fullInventory(), tenant = state.tenants[0]!;
+  tenant.broker.associations!.freezes = tenant.broker.associations!.freezes.slice(0, 1);
+  tenant.broker.associations!.admissions = []; tenant.broker.associations!.relationChanges = []; delete tenant.favoritesSuccession;
+  state.sessionStars = [{ subject: 'owner', hostId: 'mapped-host', providerId: 'fixture', nativeSessionId: 'A', title: 'Before', starredAt: 1 }];
+  state.favoritesTrees = [];
+  if (blocker === 'mapping') tenant.broker.hosts[0]!.providers = [];
+  if (blocker === 'tree') state.favoritesTrees = Array.from({ length: 1024 }, (_, index) => ({ subject: 'other-' + index, revision: 0, folders: [] }));
+  if (blocker === 'revision') state.favoritesTrees = [{ subject: 'owner', revision: Number.MAX_SAFE_INTEGER, folders: [] }];
+  let saved: HostedRelayState | undefined;
+  const relay = createRelayState(auth, { initial: state, async commit(value) { saved = structuredClone(value); } }, () => {}, () => {}, costs);
+  await relay.mutate(draft => { projectSuccessionFavorites(draft, 'owner', blocker !== 'authority'); });
+  expect(saved!.tenants[0]!.favoritesSuccession!.receipts[0]!.status).toBe('pending');
+  expect(saved!.tenants[0]!.broker.associations!.freezes[0]).toEqual(tenant.broker.associations!.freezes[0]);
+  const identity = saved!.tenants[0]!.favoritesSuccession!.receipts[0]!, before = deriveSuccessionCapacity(saved!, costs);
+  await relay.mutate(draft => {
+    draft.sessionStars![0]!.title = '\ud800'.repeat(512);
+    draft.sessionStars!.push(...Array.from({ length: 255 }, (_, index) => ({ subject: 'owner', hostId: 'mapped-host', providerId: 'fixture', nativeSessionId: 'ordinary-' + index, title: 'Ordinary', workspace: '/preserved/' + index, starredAt: index + 2 })));
+    draft.sessionTitles = [{ hostId: 'mapped-host', providerId: 'fixture', nativeSessionId: 'B', title: 'Authoritative target', revision: 1 }]; draft.sessionTitleRevision = 1;
+  });
+  expect(deriveSuccessionCapacity(saved!, costs).remainingBytes).toBeGreaterThan(before.remainingBytes);
+  const restored = createRelayState(auth, { initial: saved, async commit(value) { saved = structuredClone(value); } }, () => {}, () => {}, costs);
+  await restored.mutate(draft => {
+    draft.tenants[0]!.broker.hosts[0]!.providers = [{ providerId: 'fixture', displayName: 'Fixture' }];
+    draft.favoritesTrees = []; projectSuccessionFavorites(draft, 'owner', true);
+  });
+  expect(saved!.sessionStars![0]).toMatchObject({ nativeSessionId: 'B', title: 'Authoritative target' });
+  expect(saved!.sessionStars).toHaveLength(256); expect(saved!.sessionStars!.every(star => star.favoriteId !== undefined)).toBe(true);
+  expect(saved!.sessionStars![1]!.workspace).toBe('/preserved/0');
+  expect(saved!.tenants[0]!.favoritesSuccession!.receipts[0]).toEqual({ ...identity, status: 'applied' });
+  const applied = structuredClone(saved); await restored.mutate(draft => { projectSuccessionFavorites(draft, 'owner', true); }); expect(saved).toEqual(applied);
+  await relay.close(); await restored.close();
+}, 10000);

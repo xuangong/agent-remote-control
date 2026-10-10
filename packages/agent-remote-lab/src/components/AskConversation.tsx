@@ -3,19 +3,19 @@ import { useEffect, useLayoutEffect, useRef, type RefObject, type ReactNode } fr
 import type { AgentReplica, RemoteAgentTransport } from '@orchardworks/agent-remote-web';
 import { CommunicationNavigationContext } from '@orchardworks/agent-remote-web/react';
 import type { SessionViewNavigationFactory } from '../session-view-navigation.js';
-import type { AskEntry, AskInput, AskInputSender } from '../hooks/useAskConversations.js';
+import { isAskAttached, askParticipantKey, type AskEntry, type AskInput, type AskInputSender } from '../hooks/useAskConversations.js';
 import { useConversationSession } from '../hooks/useConversationSession.js';
-import type { ForkStore, SessionFork } from '../session-forks.js';
+import type { SessionFork } from '../session-forks.js';
 import { sessionKey } from '../session-tree.js';
 import { useAskPosition } from '../hooks/useAskPosition.js';
 import { askCommand } from '../fork-actions.js';
 import { LabWorkbench } from './LabWorkbench.js';
 import { AskResize } from './AskResize.js';
 
-export function AskConversation({ entry, store, replica, transport, draftBinding, onClose, onToggleEnabled, onClean, onRetry, onSendInput, triggerRef, storageScope, navigation }: {
+export function AskConversation({ entry, replica, transport, draftBinding, onClose, onToggleEnabled, onClean, onRetry, onSendInput, onDiscardInput, triggerRef, storageScope, navigation }: {
   navigation?: SessionViewNavigationFactory;
-  storageScope: string; triggerRef: RefObject<HTMLButtonElement>; entry: AskEntry; store: ForkStore; replica?: AgentReplica; transport: RemoteAgentTransport;
-  draftBinding: DraftBinding; onClose(): void; onToggleEnabled(): void; onClean(): void; onRetry(): void; onSendInput(id: string, send: AskInputSender): void;
+  storageScope: string; triggerRef: RefObject<HTMLButtonElement>; entry: AskEntry; replica?: AgentReplica; transport: RemoteAgentTransport;
+  draftBinding: DraftBinding; onClose(): void; onToggleEnabled(): void; onClean(): void; onRetry(): void; onSendInput(id: string, send: AskInputSender): void; onDiscardInput(id: string): void;
 }) {
   const panel = useRef<HTMLElement>(null);
   const returnFocus = useRef<HTMLElement | null>(null);
@@ -49,9 +49,11 @@ export function AskConversation({ entry, store, replica, transport, draftBinding
     <button type="button" aria-label="Minimize Ask" title="Minimize Ask" onClick={onClose}>×</button>
   </div>;
   return <div className="lab-ask-viewport"><section className="lab-ask-window" role="dialog" aria-label="Ask" aria-modal="false" tabIndex={-1} ref={panel}>
-    {entry.inputs?.length ? <div className="lab-ask-waiting" role="status">Waiting to send: {entry.inputs.map(input => input.text).join(" · ")}</div> : null}
+    {entry.inputs?.length ? <div className="lab-ask-waiting" role="status">Waiting to send: {entry.inputs.map(input => <div key={input.id}>
+      {input.text}<button type="button" aria-label="Discard saved question" onClick={() => onDiscardInput(input.id)}>Discard</button>
+    </div>)}</div> : null}
     {entry.error ? <div className="lab-ask-error" role="alert">{entry.error}<button type="button" disabled={busy} onClick={onRetry}>Retry</button></div> : null}
-    {entry.attached && entry.record?.target ? <AskChat key={entry.record.id} record={store.get(entry.record.id)} inputs={entry.error ? undefined : entry.inputs} onSendInput={onSendInput} replica={replica} transport={transport}
+    {isAskAttached(entry) ? <AskChat key={askParticipantKey(entry.record!)} record={entry.record!} inputs={entry.error ? undefined : entry.inputs} onSendInput={onSendInput} replica={replica} transport={transport}
       navigation={navigation} onToggleEnabled={onToggleEnabled} busy={busy} draftBinding={draftBinding} tools={tools} /> : <>
       <header className="lab-ask-heading"><strong>Ask</strong>{tools}</header>
       {busy || !entry.error ? <div className="lab-ask-opening" role="status">{busy ? 'Opening Ask…' : 'Ask about this conversation.'}</div> : null}

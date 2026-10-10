@@ -486,8 +486,14 @@ no production capability is enabled by these scripted fixtures.
   and fresh 20 revocation / 21 history tests plus complete Lab typecheck passed.
   Stable Side edit navigation survives source changes without retargeting unknown
   input. Ask native routing and full state migration remain separate below.
-- [ ] Route existing Ask targets by their own complete native locator; preserve
-  native identity, nested attachment and draft/window state across provider change.
+- [x] Route existing Ask targets by their own complete native locator; confirm
+  attachment and fence saved question delivery to its original recipient/operation.
+  Task 10B passed independent spec/quality review after one scoped fix round;
+  Root freshly passed 131 tests and complete Lab main/e2e typecheck. Transport
+  replacement preserves saved input for explicit Retry; mismatched or unowned
+  questions remain visible with a checked per-question Discard action.
+- [ ] Preserve complete nested attachment and draft/window state across provider
+  change using the stable owners and recovery in Task 10C.
 - [ ] Introduce stable pane slots and target intent independent of attachment;
   attach failure keeps B as target without displaying A as B or resetting layout.
 - [ ] Complete scoped replay/Track/navigation, independent text/image conflicts,

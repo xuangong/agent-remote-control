@@ -3,6 +3,28 @@
 Date: 2026-10-10. Audience: the next implementation session or maintainer.
 Status: partially implemented; no usable end-to-end handoff yet.
 
+## Ask routing and retained-input checkpoint (2026-10-11)
+
+Task 10B passed independent spec and quality review after one scoped fix round.
+Root freshly passed five suites / 131 tests and the complete Lab main/e2e
+typecheck against the frozen source. Real local HTTP fixtures verify native
+locator routing; this is not live-provider or full-browser certification.
+
+Existing Ask sessions attach through their own Host/provider/native locator.
+Confirmed attachment, concrete sender identity and saved input ownership must
+agree before a question can be handed off. Transport retirement preserves a
+saved question on its original operation; explicit Retry reuses that operation.
+An unsaved retired submission rejects so the submitting draft remains intact.
+Questions with absent or mismatched ownership remain visible and can be discarded
+individually only after successful persistence. Late callbacks cannot recreate
+discarded input or mutate a replacement window. StrictMode setup renews the
+effect lifetime, and local creation/configuration keeps checked raw provenance.
+
+Task 10C still owns stable window/association owners, complete text/image draft
+retention, preferences, geometry and application recovery. Native D1/D2 evidence,
+product/browser and whole-branch acceptance remain open. Production capability,
+SQL effects and native suppliers stay gated.
+
 ## Product provenance checkpoint (2026-10-11)
 
 Task 10A passed independent spec and quality review after two scoped fix rounds.
@@ -20,7 +42,8 @@ retains its target across source projection and reload using complete stable
 Host/Controller/relation/original-source evidence. Shared-only views acquire no
 local delivery ledger. Legacy incomplete evidence remains conservative.
 
-Ask native routing and complete recoverable composition remain Tasks 10B/10C.
+Ask native routing is covered by the newer Task 10B checkpoint above; complete
+recoverable composition remains Task 10C.
 Native D1/D2 evidence, product/browser and whole-branch acceptance remain open.
 Production capability, SQL effects and native suppliers stay gated.
 
@@ -40,8 +63,8 @@ sample; evidence-write failure remains explicit. No production code changed.
 Measured values and limitations are in
 `docs/current/agent-remote/session-succession-operating-evidence.md`.
 
-Task 10A provenance work is recorded in the newer checkpoint above. Tasks
-10B/10C close Ask routing and recoverable product composition; native evidence
+Task 10A provenance and Task 10B routing are recorded in the newer checkpoints
+above. Task 10C closes recoverable product composition; native evidence
 and complete product/browser acceptance remain separate gates.
 
 ## Host grant and cursor implementation checkpoint (2026-10-11)

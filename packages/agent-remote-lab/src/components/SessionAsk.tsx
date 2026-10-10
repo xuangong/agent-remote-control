@@ -1,7 +1,7 @@
 import { useEffect, useRef } from 'react';
 import type { AgentReplica, AgentReplicaState, RemoteAgentTransport } from '@orchardworks/agent-remote-web';
 import type { OpenedSession } from '../directory-client.js';
-import type { useAskConversations } from '../hooks/useAskConversations.js';
+import { isAskAttached, askParticipantKey, type useAskConversations } from '../hooks/useAskConversations.js';
 import type { SessionObservation } from '../tracking-state.js';
 import type { SessionViewNavigationFactory } from '../session-view-navigation.js';
 import { sessionKey } from '../session-tree.js';
@@ -19,6 +19,8 @@ export function SessionAsk({ source, state, ask, visible, available, canRestore,
   const trigger = useRef<HTMLButtonElement>(null);
   const key = sessionKey(source);
   const entry = ask.entryFor(source);
+  const attached = isAskAttached(entry);
+  const participant = entry.record ? askParticipantKey(entry.record) : undefined;
   const enabled = ask.isEnabled(source);
   const expanded = ask.isOpen(source);
   useEffect(() => {
@@ -29,9 +31,10 @@ export function SessionAsk({ source, state, ask, visible, available, canRestore,
   return <>
     <AskButton triggerRef={trigger} storageScope={JSON.stringify([storageScope, key])} hidden={expanded} disabled={!available || (!state?.agent && !entry.record?.target)}
       observation={entry.record?.target ? observations[sessionKey(entry.record.target)] : undefined} onOpen={() => onOpen()} />
-    {expanded ? <AskConversation entry={entry} store={ask.store} storageScope={JSON.stringify([storageScope, key])}
-      transport={transport} replica={entry.attached && entry.record?.target ? replicaFor(entry.record.target.agentId) : undefined}
-      triggerRef={trigger} navigation={navigation} onSendInput={(id, send) => ask.sendInput(key, id, send)}
+    {expanded ? <AskConversation entry={entry} storageScope={JSON.stringify([storageScope, key])}
+      transport={transport} replica={attached && entry.record?.target ? replicaFor(entry.record.target.agentId) : undefined}
+      triggerRef={trigger} navigation={navigation} onSendInput={(id, send) => ask.sendInput(key, id, send, participant)}
+      onDiscardInput={id => ask.discardInput(key, id)}
       draftBinding={{ store: ask.drafts, key }} onClose={() => ask.close(source)} onToggleEnabled={() => ask.toggle(source)}
       onClean={() => onOpen(true)} onRetry={() => onOpen()} /> : null}
   </>;

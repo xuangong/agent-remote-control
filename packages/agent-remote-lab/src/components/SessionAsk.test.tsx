@@ -6,7 +6,7 @@ import { replicaState } from '../test/fixtures.js';
 import { DraftStore } from '../draft-store.js';
 import { ForkStore, referenceForkContext } from '../session-forks.js';
 import { sessionKey } from '../session-tree.js';
-import type { AskEntry } from '../hooks/useAskConversations.js';
+import { askParticipantKey, type AskEntry } from '../hooks/useAskConversations.js';
 import { SessionAsk } from './SessionAsk.js';
 
 type AskProps = ComponentProps<typeof SessionAsk>;
@@ -21,7 +21,7 @@ function fixture(entries: AskEntry[]) {
   const ask = {
     entryFor: (session: typeof source) => values.get(sessionKey(session))!, isEnabled: () => true, isOpen: () => true,
     restore, drafts: new DraftStore('session-ask-focus'), store: new ForkStore('session-ask-focus', sessionStorage),
-    close: vi.fn(), toggle: vi.fn(), sendInput: vi.fn(),
+    close: vi.fn(), toggle: vi.fn(), sendInput: vi.fn(), discardInput: vi.fn(),
   } as unknown as AskProps['ask'];
   const props: Omit<AskProps, 'source'> = {
     ask, visible: true, available: true, canRestore: false, storageScope: 'session-ask-focus',
@@ -133,7 +133,7 @@ it('mounts the ordinary Ask session only after attachment succeeds', async () =>
   let attach!: () => void;
   function Harness() {
     const [, changed] = useState(0);
-    attach = () => { entry.attached = true; entry.restoring = false; changed(value => value + 1); };
+    attach = () => { entry.attached = true; entry.attachedParticipant = askParticipantKey(entry.record!); entry.restoring = false; changed(value => value + 1); };
     return <SessionAsk {...props} source={source} replicaFor={replicaFor} transport={transport} />;
   }
   const container = await render(<Harness />);
@@ -143,4 +143,52 @@ it('mounts the ordinary Ask session only after attachment succeeds', async () =>
   expect(connect).toHaveBeenCalledOnce();
   expect(container.querySelector('[aria-label="Ask draft"]')).toBeNull();
   expect(container.querySelector<HTMLTextAreaElement>('[data-testid="prompt-input"]')?.value).toBe('Continue this question');
+});
+
+it('keeps a different target behind the attachment gate even when its record id matches the confirmed participant', async () => {
+  const entry: AskEntry = { source, attached: true, attachedParticipant: JSON.stringify(['same-record', JSON.stringify(['local', 'codex', 'side'])]),
+    record: { mode: 'reference', source, id: 'same-record', capturedAt: '2026-10-10T00:00:00.000Z', delivery: 'pending', options: {}, settings: [],
+      target: { ...sibling, providerId: 'claude' } } };
+  const { ask, props } = fixture([entry]);
+  ask.drafts.set(sessionKey(source), 'Keep the replacement draft');
+  const replicaFor = vi.fn(props.replicaFor);
+  const connect = vi.fn();
+  const container = await render(<SessionAsk {...props} source={source} replicaFor={replicaFor} transport={{ ...props.transport, connect }} />);
+  expect(replicaFor).not.toHaveBeenCalled();
+  expect(connect).not.toHaveBeenCalled();
+  expect(container.querySelector<HTMLTextAreaElement>('[aria-label="Ask draft"]')?.value).toBe('Keep the replacement draft');
+});
+
+it('mounts the confirmed concrete Ask record instead of a refreshed store target with the same relation id', async () => {
+  const entry: AskEntry = { source, attached: true };
+  const { ask, props } = fixture([entry]);
+  const record = ask.store.prepare(referenceForkContext(source), { sourceNativeSessionId: source.nativeSessionId });
+  ask.store.bind(record.id, { ...sibling, title: 'Confirmed Ask' });
+  entry.record = ask.store.get(record.id);
+  entry.attachedParticipant = askParticipantKey(entry.record);
+  const replacement = { ...sibling, agentId: 'replacement-agent', providerId: 'claude', title: 'Replacement Ask' };
+  ask.store.get = () => ({ ...entry.record!, target: replacement });
+  const connected: string[] = [];
+  const transport = { ...props.transport, connect: (agentId: string) => { connected.push(agentId); return { close: () => {}, send: () => {} }; },
+    onDiagnostic: () => () => {}, onProtocolMessage: () => () => {} };
+  const replicaFor = vi.fn(() => new AgentReplica());
+  await render(<SessionAsk {...props} source={source} replicaFor={replicaFor} transport={transport} />);
+  expect(connected).toEqual(['side-agent']);
+  expect(replicaFor).toHaveBeenCalledWith('side-agent');
+});
+
+
+it('shows each blocked saved question and routes explicit discard to that source and selected input', async () => {
+  const entry: AskEntry = { source, error: 'The original Ask recipient is unavailable.', inputs: [
+    { id: 'first-question', text: 'First retained question' }, { id: 'second-question', text: 'Second retained question' },
+  ] };
+  const { ask, props } = fixture([entry]);
+  const container = await render(<SessionAsk {...props} source={source} />);
+  expect(container.textContent).toContain('First retained question');
+  expect(container.textContent).toContain('Second retained question');
+  const discard = container.querySelectorAll<HTMLButtonElement>('[aria-label="Discard saved question"]');
+  expect(discard).toHaveLength(2);
+  await act(async () => { discard[1]!.click(); });
+  expect(ask.discardInput).toHaveBeenCalledExactlyOnceWith(sessionKey(source), 'second-question');
+  expect(ask.sendInput).not.toHaveBeenCalled();
 });

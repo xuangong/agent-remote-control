@@ -3,6 +3,27 @@
 Date: 2026-10-10. Audience: the next implementation session or maintainer.
 Status: partially implemented; no usable end-to-end handoff yet.
 
+## Local Worker operating checkpoint (2026-10-11)
+
+Task 9E passed independent spec and quality review after one finalization fix.
+Root freshly passed all 24 declared operating sequences, five failure-record
+tests and both production/fixture typechecks on the final source. The unchanged
+shared accounting fixture had separately passed 27 tests, and the ordinary
+test entry passed a focused sample without relying on ignored plan artifacts.
+
+The real Miniflare Worker/SQLite fixture covers six bounded datasets, exact
+restart readback, admitted terminal/Favorites/recovery consumption, pre-effect
+capacity refusal, transaction rollback and uncertain post-sync publication.
+Cleanup failure now retains the primary failure and still attempts to save the
+sample; evidence-write failure remains explicit. No production code changed.
+Measured values and limitations are in
+`docs/current/agent-remote/session-succession-operating-evidence.md`.
+
+Task 10A next separates immutable local fork delivery provenance from current
+navigation. Tasks 10B/10C then close Ask target routing and recoverable product
+composition. Native D1/D2 evidence, product/browser and whole-branch acceptance
+remain open. Production capability, SQL effects and native suppliers stay gated.
+
 ## Host grant and cursor implementation checkpoint (2026-10-11)
 
 Task 9D passed independent spec and quality review without retained findings.
@@ -35,8 +56,8 @@ Implementer evidence uses owned temporary filesystem fixtures, scripted native
 protocol peers and real local HTTP/WebSocket tests with both deadlines. It does
 not certify OS-crash, power-loss, new ancestor-entry sync, native-provider support
 or product readiness. Selected Windows directory-sync exceptions remain explicit.
-Root owns review, final verification, compatibility and local checkpoint. Task9E
-measurements, production enablement and native/product acceptance remain pending.
+Task 9E's separate local measurements are recorded above. Production enablement
+and native/product acceptance remain pending.
 
 ## Terminal and recovery consumption checkpoint (2026-10-11)
 
@@ -62,8 +83,8 @@ tests use the normal Gateway fixture. Node/Worker storage cases use real SQLite
 and Miniflare/workerd with deterministic fake protocol peers. Rejected sync is
 unknown durability, not rollback. No native provider was run.
 
-The reviewed 9D implementation above is followed by 9E local Worker operating
-measurements and product integration. Default SQL effects, native suppliers and
+The reviewed 9D/9E checkpoints above are followed by product integration.
+Default SQL effects, native suppliers and
 production capability remain disabled. No merge, push, deployment, installation
 or user-service change is authorized here.
 

@@ -28,7 +28,7 @@ export function retentionState(auth: GatewayAuthOptions, recovery = false) {
 /** Actual Broker consumer with a deterministic protocol peer; no native provider or credential disk. */
 export function retentionPeer(relay: RelayState, auth: GatewayAuthOptions) {
   const initial = relay.read().tenants[0]!;
-  let authorized = false, releases = 0, statuses = 0, issued = 0, registered = 0;
+  let authorized = false, releases = 0, statuses = 0, issued = 0, registered = 0, creates = 0;
   const messages: any[] = [], sockets: RelaySocket[] = [];
   let active: { send(message: unknown): Promise<void>; socket: RelaySocket } | undefined;
   const broker = createHostBroker({ origin: auth.origin, ownerSubject: 'owner', durable: true, initialState: initial.broker,
@@ -48,6 +48,7 @@ export function retentionPeer(relay: RelayState, auth: GatewayAuthOptions) {
         if (message.type === 'credential_issued') { issued++; return; }
         if (message.type === 'heartbeat') { void send({ uplinkVersion: 2, type: 'heartbeat_ack', nonce: message.nonce }); return; }
         if (message.type !== 'rpc_request') return;
+        if (message.path === '/remote/create') creates++;
         const input = JSON.parse(message.body ?? '{}');
         if (input.action === 'release') releases++; else statuses++;
         const projection = structuredClone(codecState(auth).tenants[0]!.broker.associations!.freezes[0]!.projection!);
@@ -64,8 +65,9 @@ export function retentionPeer(relay: RelayState, auth: GatewayAuthOptions) {
     await send({ uplinkVersion: 2, type: 'register', installationId: 'installation', name: 'Host', credentialRotation: true, providers: [{ providerId: 'fixture', displayName: 'Fixture' }], ...metadata });
   }
   const request = (path: string, body: unknown = {}) => broker.handleRequest(new Request(auth.origin + path, { method: 'POST', body: JSON.stringify(body) }), { principalSubject: () => 'owner' });
-  return { broker, connect, messages, counts: () => ({ releases, statuses, issued, registered }),
+  return { broker, connect, messages, counts: () => ({ releases, statuses, issued, registered, creates }),
     terminal: () => request('/v1/remote/hosts/mapped-host/succession/reconcile', { operationId: 'op-2' }),
+    admission: () => request('/v1/remote/hosts/mapped-host/create', { providerId: 'fixture', operationId: 'operating-refused', sourceNativeSessionId: 'B', conversationKind: 'ask' }),
     rotate: () => request('/v1/remote/hosts/mapped-host/rotate'),
     revoke: () => request('/v1/remote/hosts/mapped-host/revoke'),
     invitation: () => request('/v1/remote/pairings', { recoverHostId: 'mapped-host' }),

@@ -467,8 +467,14 @@ no production capability is enabled by these scripted fixtures.
   rename uncertainty fences the owner, and cleanup preserves the first cause.
   Controlled fault/reopen evidence does not certify OS crash, power loss, Windows
   equivalence, ancestor-directory persistence or live multi-process writers.
-- [ ] Complete the separate local Worker operating-envelope checkpoint (9E),
+- [x] Complete the separate local Worker operating-envelope checkpoint (9E),
   reporting measured cases and unavailable telemetry without production limits.
+  Independent spec/quality review passed after preserving sample evidence across
+  cleanup failures. Root freshly passed all 24 declared sequences, five finalizer
+  checks and both production/fixture typechecks; the unchanged shared fixture and
+  portable default entry had separately passed 27 tests and one focused sample.
+  Real Worker SQLite and a fake Host peer do not certify native providers,
+  production resource limits, OS crash or power-loss behavior.
 
 ## Task 10: Product identities and recoverable composition
 

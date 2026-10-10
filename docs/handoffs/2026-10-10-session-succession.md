@@ -3,6 +3,40 @@
 Date: 2026-10-10. Audience: the next implementation session or maintainer.
 Status: partially implemented; no usable end-to-end handoff yet.
 
+## Claude managed source-directory checkpoint (2026-10-10)
+
+The managed stdio integration passed independent scoped review after one correction
+for post-await source/reader authorization. Check Git for its checkpoint after
+`6396b09`. Claude factory now provisions a canonical-profile-scoped durable source
+store; source support requires both that store and a public history reader.
+
+Creation confirms actual runtime/provider/persistence identity and saves the grant
+before activating source callbacks. Cold open rebuilds source tools and saved base
+instructions, composes caller/TPM callbacks, preserves native saved settings, and
+rejects conflicting tool/prompt contracts. Arbitrary JavaScript callbacks are not
+persisted; callers supply them again. Startup source callbacks explicitly reject
+until real identity is confirmed. Managed content input now respects the existing
+native ownership fence, including Copilot's shared directory path.
+
+Reads use the current router each time and verify exact reader/session ownership
+before and after awaited results. Local source access is rechecked after history
+and validation awaits. Disposal, transfer, same-ID reopen or revocation cannot
+release the old callback's result. No read is silently retried or retargeted.
+
+Evidence: `.tmp/claude-managed-directory-report.md`, initial scoped review and
+`.tmp/claude-managed-directory-fix1-review.md`. Root verified all eight frozen files,
+ran nine Host suites (122 tests), three Claude/MCP suites (21 tests), and whole-
+workspace typecheck. MCP uses a mocked Query with the real provider/MCP bridge;
+this is not native producer certification. The catalog/history checkpoint below
+remains unchanged.
+
+Next work is Task 5 authenticated hosted replay/projection, then store/App
+replacement and native evidence. Prepared briefs are
+`.tmp/succession-hosted-replay-brief.md` and
+`.tmp/product-succession-projection-brief.md`. Resolve the duplicate unused replay
+helper versus saved Broker projections before implementing a single authority.
+General succession remains disabled; no complete native provider pair is certified.
+
 ## Claude source-history checkpoint (2026-10-10)
 
 The adapter-only public history reader passed independent scoped spec/quality
@@ -25,7 +59,7 @@ Root verified the six-file manifest and freshly ran nine affected suites (62 tes
 and Claude typecheck. Native-named tests use isolated transcripts and the real
 public SDK worker, not a native CLI/model or a user session.
 
-Next implement brief items 3–5 in `.tmp/claude-source-reader-slice-brief.md`:
+The later managed checkpoint above implements brief items 3–5 in `.tmp/claude-source-reader-slice-brief.md`:
 managed stdio durable grants, restored/composed extensions, dynamic source routing,
 and the content-send ownership fence. Adapt tool guidance for unavailable turn
 identity. No source-reference directory capability or succession readiness is

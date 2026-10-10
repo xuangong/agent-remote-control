@@ -99,6 +99,27 @@ A new reader created from current B may initially retain a fixed B binding. The
 next B-to-C freeze validates and enrolls its real grant. Importing an old A reader
 alone does not grant it current-B authority.
 
+## Managed Claude source grants
+
+Claude source grants are scoped by the canonical native profile and provider.
+The optional explicit reference directory is useful for isolated Host deployments
+and tests. Include it with the complete recovery set. Grants contain the actual
+native persistence identity and saved base prompt/instructions, not arbitrary
+JavaScript callbacks or a native readiness certificate.
+
+New private grants distinguish an omitted base system prompt from an explicitly
+empty prompt with `systemPromptProvided`. Legacy grants without that marker keep
+their previous truthy-string interpretation. Invalid marker types/combinations
+reject; do not edit fields to force recovery. Caller/TPM callbacks must be supplied
+again after restart, while source callbacks are rebuilt from the grant. Native
+saved model/permission settings are not overwritten from the grant handle.
+
+Startup callbacks reject until actual native identity is confirmed and the grant
+is saved. Read results are gated again after awaited history/routing and validation:
+a disposed, transferred, replaced or unauthorized reader cannot release old data.
+This preserves source-read authority; it does not settle native sends or certify
+that the native session has no pending work.
+
 ## Backup and rollback boundary
 
 Before any separately authorized deployment, preserve a coherent backup of the

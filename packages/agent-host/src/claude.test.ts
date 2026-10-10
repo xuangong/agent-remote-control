@@ -1,8 +1,9 @@
-import { chmod, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { chmod, mkdtemp, rm, writeFile, symlink } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { createClaudeHostRegistration } from './claude.js';
+import { SessionReferenceStore } from './session-reference.js';
 
 const roots: string[] = [];
 afterEach(async () => { await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true }))); });
@@ -44,3 +45,18 @@ describe('Claude Host registration', () => {
     await registration.directory.close();
   });
 });
+
+it('reads an explicit provider-scoped source store through native profile aliases', async () => {
+  const profile = await mkdtemp(join(tmpdir(), 'claude-reference-profile-')); roots.push(profile);
+  const aliasRoot = await mkdtemp(join(tmpdir(), 'claude-reference-alias-')); roots.push(aliasRoot);
+  const alias = join(aliasRoot, 'profile'); await symlink(profile, alias);
+  const references = join(profile, 'test-references');
+  await new SessionReferenceStore(references, 'claude').set({ sourceNativeSessionId: 'source', systemPrompt: 'role', handle: { providerId: 'claude', sessionId: 'reader', opaque: '{}' } });
+  const one = await createClaudeHostRegistration({ executable: await executable('2.1.247 (Claude Code)', profile), claudeHome: profile, referenceDirectory: references });
+  const two = await createClaudeHostRegistration({ executable: await executable('2.1.247 (Claude Code)', alias), claudeHome: alias, referenceDirectory: references });
+  try {
+    expect(one.directory.supportsSourceReferences).toBe(true); expect(two.directory.supportsSourceReferences).toBe(true);
+    expect(await one.directory.sourceReferences!()).toEqual([{ nativeSessionId: 'reader', sourceNativeSessionId: 'source' }]);
+    expect(await two.directory.sourceReferences!()).toEqual(await one.directory.sourceReferences!());
+  } finally { await one.directory.close(); await two.directory.close(); }
+}, 10000);

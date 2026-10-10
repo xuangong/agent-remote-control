@@ -155,3 +155,18 @@ it('prepares native rename through managed ownership and never takes over a CLI 
     await directory.validateSessionRename!('session', 'Renamed');expect(opens).toBe(1);
   } finally {await cli.release();await directory.close();await rm(root,{recursive:true,force:true});}
 });
+
+it.each(['claude', 'copilot'])('fences transferred %s content input before it reaches the native adapter', async providerId => {
+  const root = await mkdtemp(join(tmpdir(), 'arc-stdio-content-')); let inputs = 0;
+  const key = { root, providerId, sessionId: 'reader' };
+  const native: AgentSession = { capabilities: { history: true, sendMessage: true, steer: false, cancel: false, readResource: false, interactions: { question: false, toolApproval: false, planApproval: false } },
+    async *observe() { yield { type: 'history_boundary' }; }, async runtimeInfo() { return { providerId, sessionId: 'reader', status: 'idle', persistence: { providerId, sessionId: 'reader', opaque: '{}' } }; },
+    async sendMessage() {}, async sendMessageContent() { inputs++; }, async respondToInteraction() {}, async dispose() {} };
+  const directory = createManagedStdioDirectory(providerId, providerId, { listSessions: async () => [], createSession: async () => native, resumeSession: async () => native, releaseSession: async () => {} }, [], { root });
+  let cli: Awaited<ReturnType<typeof acquireNativeSession>> | undefined;
+  try {
+    const session = await directory.open('reader'); await session.sendMessageContent!([{ type: 'text', text: 'allowed' }]); expect(inputs).toBe(1);
+    const owner = await inspectNativeOwner(key); cli = await acquireNativeSession({ ...key, kind: 'native_cli', takeOver: owner!.generation }); cli.activate(async () => 'requested');
+    await expect(session.sendMessageContent!([{ type: 'text', text: 'stale' }])).rejects.toThrow(/control|ownership/i); expect(inputs).toBe(1);
+  } finally { await cli?.release(); await directory.close(); await rm(root, { recursive: true, force: true }); }
+}, 10000);

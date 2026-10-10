@@ -1,4 +1,5 @@
 import {join} from 'node:path';
+import {createHash} from 'node:crypto';
 import {homedir} from 'node:os';
 import {mkdir, realpath} from 'node:fs/promises';
 import { sanitizeNativeEnvironment } from './execution-policy.js';
@@ -7,6 +8,7 @@ import { promisify } from 'node:util';
 import { nativeInvocation, resolveNativeExecutable } from './platform/executables/index.js';
 import { createClaudeSessionDirectory } from './claude-directory.js';
 import type { AgentHostProviderRegistration, AgentHostWorkspace } from './host.js';
+import {SessionReferenceStore} from './session-reference.js';
 
 export interface ClaudeHostRegistrationOptions {
   executable?: string;
@@ -16,6 +18,7 @@ export interface ClaudeHostRegistrationOptions {
   onDiagnostic?: (line: string) => void;
   workspaces?: readonly AgentHostWorkspace[];
   claudeHome?: string;
+  referenceDirectory?: string;
 }
 export async function createClaudeHostRegistration(options: ClaudeHostRegistrationOptions = {}): Promise<AgentHostProviderRegistration> {
   const env: NodeJS.ProcessEnv = { ...sanitizeNativeEnvironment(options.env ?? {}), ...(options.claudeHome ? { CLAUDE_CONFIG_DIR: options.claudeHome } : {}) };
@@ -29,6 +32,9 @@ export async function createClaudeHostRegistration(options: ClaudeHostRegistrati
   const provider = new ClaudeAgentProvider({ executable, env, restrictedNative: options.restrictedNative, requestTimeoutMs: options.requestTimeoutMs, onDiagnostic: options.onDiagnostic });
   const profile = env.CLAUDE_CONFIG_DIR ?? join(env.HOME ?? env.USERPROFILE ?? homedir(), '.claude');
   await mkdir(profile, {recursive: true});
-  const ownership = {root: join(await realpath(profile), '.arc-session-owners'), onDiagnostic: (event: unknown) => options.onDiagnostic?.(JSON.stringify(event))};
-  return { nativePermissionControl: true, adapter: provider, directory: createClaudeSessionDirectory(provider, options.workspaces ?? [], ownership) };
+  const canonicalProfile = await realpath(profile);
+  const ownership = {root: join(canonicalProfile, '.arc-session-owners'), onDiagnostic: (event: unknown) => options.onDiagnostic?.(JSON.stringify(event))};
+  const scope = createHash('sha256').update(canonicalProfile).digest('hex');
+  const references = new SessionReferenceStore(options.referenceDirectory ?? join(homedir(), '.agent-remote-control', 'session-references', 'claude', scope), 'claude');
+  return { nativePermissionControl: true, adapter: provider, directory: createClaudeSessionDirectory(provider, options.workspaces ?? [], ownership, references) };
 }

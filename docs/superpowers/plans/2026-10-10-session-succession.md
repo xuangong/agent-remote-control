@@ -1,0 +1,226 @@
+# Same-host Session Succession Implementation Plan
+
+> **For agentic workers:** Use superpowers:executing-plans to implement this plan task-by-task in the existing isolated worktree. Steps use checkbox syntax for tracking. No parallel agent work is required.
+
+**Goal:** Replace the primary session with a successor on the same Host and in the same working directory, preserving all user-facing attachments and avoiding duplicate execution.
+
+**Architecture:** One local Controller owns a stable primary role and a recoverable succession operation. Source tools and TPM resolve that role; Relay and browser project the committed revision into existing navigation and preferences. This is not a machine/workspace migration or a distributed workflow engine.
+
+**Tech Stack:** TypeScript, existing provider SDK and Remote contracts, Controller persistence, React, Vitest, Playwright, pnpm.
+
+**Spec:** `docs/superpowers/specs/2026-10-10-session-succession-design.md`
+
+## Global constraints
+
+- V1 requires the same Controller, provider and canonical working directory.
+- No workspace copy, remote file synchronization, machine migration, credential transfer, deployment or distributed execution coordinator.
+- Keep native execution in adapters, role coordination in Controller, authorized projections in Relay and presentation in the product.
+- Use `SessionSuccession`; do not repurpose native ownership `SessionHandoff` or prompt-edit sibling events.
+- Preserve unrelated sessions, services and worktrees. Source, comments and docs remain English.
+- New behavior remains unavailable until the full source, dispatch and projection contract is supported.
+- No automatic replay after unknown creation/delivery outcomes. No automatic deletion of native sessions.
+- No publish, push or deployment in this implementation plan.
+
+## Status and verification setup
+
+- [x] Inspect source ownership, relation persistence, favourites, Track and Ask storage.
+- [x] Record the approved design and the same-machine simplification.
+- [ ] Implement Tasks 1–6, marking each complete only with recorded evidence.
+
+Base: `cc3f359`; worktree: `.worktrees/session-succession`; branch: `feat/session-succession`.
+This documentation stage does not install dependencies or run runtime tests.
+At implementation start run `pnpm install --frozen-lockfile`, then build workspace
+dependencies and establish the affected suites' baseline. Inspect package-local
+AGENTS.md files before modifying their scope.
+
+Use the root test runner for outer and per-test deadlines:
+
+```sh
+NODE_OPTIONS=--no-experimental-webstorage pnpm test
+pnpm test:conformance
+pnpm test:e2e e2e/session-succession.spec.ts
+pnpm typecheck
+pnpm compatibility:update
+pnpm compatibility:check
+```
+
+The new browser file is introduced in Task 6. During development use focused
+package suites with explicit per-test/hook deadlines and a process deadline;
+finish with the root runners. Native tests needing an executable or credentials
+must be reported separately from fixture results. Do not replace a running Host
+to obtain a passing test.
+
+## Task 1: Role identity and local durable decision
+
+**Create:** `packages/agent-remote-protocol/src/session-succession.ts` and `.test.ts`;
+`packages/agent-host/src/session-succession-store.ts` and `.test.ts`.
+**Modify:** protocol `src/index.ts` to export the new validated contracts.
+
+**Interfaces:** Implement `NativeSessionRef`, `PrimaryRole` and `SourceBinding`
+from the spec. Define `SuccessionRequest` with `operationId`, `roleId`,
+`expectedRevision` and `from`; `SuccessionRecord` carries the request, optional
+`to`, `phase`, `resumePhase` for unknown outcomes, capture metadata and public
+failure code. Define `SessionSuccessionStore.read(roleId)`,
+`begin(request)` and `commit(operationId)`; begin returns the existing same-input
+record, rejects conflicting reuse and reserves the expected role revision.
+
+- [ ] Write store tests for same-ID retries, conflicting fingerprints, concurrent
+  begins, stale revisions, A -> B -> C and reopening persisted committed state.
+- [ ] Run the new tests and confirm the missing behavior fails.
+- [ ] Implement validated versioned records, a single-writer serialized mutation
+  path and atomic replacement of the role plus operation receipt. Keep indexes
+  in memory and preserve recovery records across restart.
+- [ ] Exercise a torn temporary write: the old committed record remains valid;
+  a committed revision is never reconstructed from an uncommitted candidate.
+- [ ] Run protocol/store suites and commit `feat: persist primary session succession`.
+
+Core observable expectation:
+
+```ts
+await store.begin(request);
+// After the coordinator has persisted its ready target:
+const first = await store.commit(request.operationId);
+const duplicate = await store.commit(request.operationId);
+expect(duplicate).toEqual(first);
+expect(store.read(request.roleId).role.current).toEqual(first.to);
+```
+
+## Task 2: Source bindings that follow the primary role
+
+**Modify:** `packages/agent-host/src/session-reference.ts`, `directory.ts`,
+`session-reference.test.ts`, and supported provider directory integrations.
+**Create:** `packages/agent-host/src/session-source-binding.ts` and `.test.ts`.
+
+**Interfaces:** `resolveSource(binding, continuation?)` returns the actual
+`NativeSessionRef`, role revision and a validated pinned query context.
+`enrollSources(roleId, expectedRevision)` prepares a durable overlay for linked
+relations, including unloaded grants. Publication occurs only through Task 1's
+commit; fixed grants remain supported. New role grants include immutable origin.
+
+- [ ] Add tests with one live tool instance reading A, committing A -> B, then
+  reading B without recreating the Ask session. A continuation must still read A.
+- [ ] Add tests for long-text offsets, old turn IDs, nested Side Ask, unlinked
+  grants, unauthorized lineage reads and restart of an enrolled grant.
+- [ ] Implement per-query resolution instead of native-ID capture. Return actual
+  source/revision metadata; validate lineage access on each read.
+- [ ] Enroll linked source grants and share the same resolver with creation.
+  Legacy runtime extensions that cannot participate reject preparation clearly.
+- [ ] Run source-reference/provider regressions and commit
+  `feat: follow primary succession in source references`.
+
+Expected behavior, using the test fixture's tool wrapper:
+
+```ts
+const pageA = await fixture.readSource({ limit: 1 });
+await fixture.commitSuccessor('B');
+expect((await fixture.readSource({ limit: 1 })).sourceSessionId).toBe('B');
+expect((await fixture.readSource({ cursor: pageA.nextCursor })).sourceSessionId).toBe('A');
+```
+
+## Task 3: Local handoff coordinator and admission boundary
+
+**Create:** `packages/agent-host/src/session-succession.ts` and `.test.ts`.
+**Modify:** `packages/agent-host/src/host.ts`, `directory.ts`,
+`execution-policy.ts`; extract the existing normalized history capture/formatting
+from Lab `src/session-forks.ts` into an appropriately shared module while keeping
+the current `/fork` behavior and tests unchanged.
+
+**Interfaces:** `SessionSuccessionCoordinator.prepare(request)`,
+`status(operationId)`, `commit(operationId, expectedRevision)` and
+`cancel(operationId)`. Mutating methods return the persisted `SuccessionRecord`.
+An adapter reports authoritative readiness and a supported context-preparation
+path; unsupported or unknown readiness is not success.
+
+- [ ] Test a complete same-cwd A -> B transition, wrong cwd/Host/provider rejection,
+  creation success followed by attachment failure and a lost creation response.
+- [ ] Test source admission against a racing direct send, native queue, approval,
+  child work and an independently owned writer. Reserve before capturing context.
+- [ ] Persist phase and operation receipts; create a candidate without launching
+  implementation work; transfer bounded context at the frozen source boundary.
+- [ ] Verify candidate context delivery and readiness before the atomic commit.
+  Never reuse the context-copy path as proof of full native context inheritance.
+- [ ] Add restart/cancellation cases at every phase. Retain unknown effects and
+  created candidates; reject mutation to the superseded source after commit.
+- [ ] Run Host, fork and native-ownership regressions and commit
+  `feat: coordinate same-host session handoff`.
+
+## Task 4: TPM binding and send settlement
+
+**Modify:** `packages/agent-host/src/tpm.ts`, `tpm-store.ts`, their tests and
+`packages/agent-remote-protocol/src/tpm.ts`.
+
+**Interfaces:** TPM gains an optional primary role binding. An admitted intent
+records `resolvedTarget: NativeSessionRef` and `roleRevision: number`; existing
+intent identity/status/acceptance retain their meaning. All main reads and new
+send admissions use Task 2's resolver and Task 3's role gate.
+
+- [ ] Test several works sharing A, including a paused work and a work with no
+  open browser. After commit, all new main reads/dispatches resolve B.
+- [ ] Test `prepared`, `dispatching`, `accepted`, queued and `unknown` intents.
+  Only never-admitted intents may acquire B as their first actual destination.
+- [ ] Bind and reconcile leases/subscriptions through the role; serialize the
+  last dispatch validation with succession commit. Preserve scheduler limits.
+- [ ] Prove an unknown A send cannot become a B send after restart or retry.
+- [ ] Run TPM transport/store/Host regressions and commit
+  `feat: preserve TPM delivery across session succession`.
+
+## Task 5: Relay projection and complete product replacement
+
+**Create:** hosted `src/session-successions.ts` and `.test.ts`;
+Lab `src/session-succession.ts`, `.test.ts`,
+`src/hooks/useSessionSuccession.tsx` and `.test.tsx`.
+**Modify:** hosted `src/state.ts`, `broker.ts`, `favorites.ts`,
+`session-relations.ts`; Lab `src/App.tsx`, `tracking-state.ts`,
+`session-composition.ts`, `session-forks.ts`,
+`hooks/useSessionTracking.tsx`, `hooks/useAskConversations.ts` and corresponding tests.
+
+**Interfaces:** Relay accepts only authenticated Controller committed projections
+and offers revision-based snapshot/replay. The product's
+`applySuccession(projection, currentState)` returns one coherent next in-memory
+state plus idempotent persistence operations. The hook owns recovery, not the
+renderer. Keep prompt-edit `session_migrated` behavior separate.
+
+- [ ] Add replacement tests that preserve favourite ID/folder/order, Track order,
+  Side selections, Ask native ID, preference state, geometry and drafts.
+- [ ] Test A -> B -> C with stale A -> B replay, disconnected devices and a crash
+  between local-store writes. Current roles never revert from stale snapshots.
+- [ ] Implement authorized shared projections and local revision-based recovery.
+  Preserve each device's layout and scope updates to the enrolled role.
+- [ ] Add duplicate B entries and conflicting drafts. Keep A's navigation slot;
+  preserve independent drafts and native-bound pending sends visibly.
+- [ ] Ordinary navigation resolves the successor; explicit history resolves A.
+  Old notifications retain exact event identity. Sharing does not grant B access.
+- [ ] Run favourites, relations, Track, Ask, composition and prompt-edit suites;
+  commit `feat: replace session references after handoff`.
+
+## Task 6: Entry point, end-to-end recovery and release evidence
+
+**Create:** `packages/agent-remote-lab/e2e/session-succession.spec.ts` and
+`packages/agent-remote-lab/src/server/session-succession-transport.test.ts`.
+**Modify:** the existing primary Session View action wiring in `App.tsx`,
+`docs/current/agent-remote/lab.md`, `session-boundaries.md`, provider capability
+documentation, recorded fixtures and `compatibility.json`.
+
+- [ ] Expose Handoff for an eligible primary session, state the same Host/cwd and
+  context-copy semantics, and display progress plus recoverable failures.
+  Disable unsupported combinations based on capabilities, not guessed versions.
+- [ ] Real-transport tests cover broker/Controller reconnect, lost responses,
+  authorization, stale requests, two racing clients and late old-source input.
+- [ ] Desktop/mobile tests cover Favourites -> primary -> Side -> Ask -> Track,
+  handoff, reload and second handoff, asserting preserved auxiliary identities.
+- [ ] Validate a supported native provider in an isolated profile/workspace.
+  Record actual context recall, source-tool retargeting and no duplicate execution.
+- [ ] Run the verification commands above; distinguish environment-dependent
+  native tests from fixture success. Record every unresolved failure explicitly.
+- [ ] Document durable-state version compatibility, backups, precommit cancel and
+  postcommit forward recovery before considering a separately authorized release.
+- [ ] Update this checklist with evidence and commit
+  `feat: expose and verify same-host session handoff`.
+
+## Review coverage
+
+Tasks 1/3 own authority, quiescence, operation identity and recovery. Task 2 owns
+source semantics and access. Task 4 owns all TPM works and settled destinations.
+Task 5 owns every visible reference and device-local preservation. Task 6 verifies
+the complete user path, compatibility and native behavior. No task adds file or
+environment migration. Do not mark the feature complete with only UI replacement.

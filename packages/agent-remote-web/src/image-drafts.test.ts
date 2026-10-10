@@ -201,3 +201,11 @@ it('uses memory for private image drafts, clears persisted bytes, and fences wri
     expect(drafts.result).toBe(0); expect(images.result).toBe(0);
   } finally { db.close(); persistent = true; configureImageDraftPersistence(() => true); }
 });
+
+it('reports actual image write retention and cancellation independently of upload readiness', async () => {
+  const value = draft('checked-result');
+  expect(await writeImageDraft(value)).toEqual({ status: 'saved', retention: 'local' });
+  const generation = imageDraftScopeGeneration(value.scope);
+  await clearImageDraftScope(value.scope);
+  expect(await writeImageDraft(value, generation)).toEqual({ status: 'cancelled', retention: 'page' });
+});

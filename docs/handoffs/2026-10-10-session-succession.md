@@ -3,6 +3,32 @@
 Date: 2026-10-10. Audience: the next implementation session or maintainer.
 Status: partially implemented; no usable end-to-end handoff yet.
 
+## Recoverable local composition checkpoint (2026-10-11)
+
+Task 10C1 passed independent spec and quality review after one scoped fix round.
+Root freshly passed 264 affected Lab tests across 16 suites and complete main/e2e
+typechecks on the final freeze. Unchanged Web retains round0 verification of 71
+tests and its typecheck, including the real WebSocket image A/B/C receipt case.
+
+The callable composition layer separates stable pane and Ask owners from desired
+native targets. Four checked participants use three bounded metadata documents;
+incomplete storage, conflicting edits and unread state retain their evidence and
+cannot report complete application. Track duplicates lose navigation only after
+independent content/window owners are retained. Text, image and display bindings
+are separate from concrete native queue, outbox and recipient identities.
+
+The review fixes recover initially unread Ask windows while preserving explicit
+local open/close choices, fence document edits through checkpoint completion, and
+keep absent display preferences distinct from a user-selected default. A failed
+final completion preserves current edits and an incomplete marker without rolling
+back a newer role revision. Corrective disk writes still require current authority
+and writable storage; these checks are not cross-tab CAS.
+
+Task 10C2 must consume these APIs in App, verify the actual native binding, publish
+Track changes, preserve history intent and connect authorized Favorites progress.
+Product/browser acceptance and native D1/D2 work remain open. No production
+capability, SQL effects or native supplier is enabled by this checkpoint.
+
 ## Ask routing and retained-input checkpoint (2026-10-11)
 
 Task 10B passed independent spec and quality review after one scoped fix round.

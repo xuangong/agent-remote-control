@@ -69,3 +69,53 @@ it('keeps a different selected sibling when another side is unlinked', () => {
   views.unlink(parent, side);
   expect(views.get(parent)).toEqual(saved);
 });
+
+it('retains stable track snapshots and rejects a restore over a newer same-tab selection', () => {
+  const views = new TrackedSessionViews();
+  views.select(parent); views.remember(view(child), [parent], [parent, child]);
+  const before = views.snapshot();
+  views.select(child);
+  expect(views.restore(before, before.editRevision)).toBe(false);
+  expect(views.snapshot().selected).toBe(sessionKey(child));
+  const fresh = new TrackedSessionViews();
+  expect(fresh.restore(before, 0)).toBe(true);
+  expect(fresh.get(parent)?.primary.nativeSessionId).toBe('child');
+  before.views[0]!.view.primary.title = 'External mutation';
+  expect(fresh.get(parent)?.primary.title).toBe('Review');
+});
+it('keeps stable view owners through remember and retain after a native replacement', () => {
+  const views = new TrackedSessionViews();
+  const a = { hostId: 'host', providerId: 'codex', nativeSessionId: 'A', agentId: 'runtime-A', title: 'A' };
+  const b = { ...a, nativeSessionId: 'B', agentId: 'runtime-B', title: 'B' };
+  views.remember({ primary: a, selections: {} }, [a], [a]); views.bindOwner(a, 'entry-A');
+  views.bindOwner(b, 'entry-A'); views.select(b, 'entry-A');
+  views.remember({ primary: b, selections: {}, focus: sessionKey(b) }, [b], [b]);
+  views.retain([b]);
+  expect(views.getByOwner('entry-A')).toMatchObject({ primary: b, focus: sessionKey(b) });
+  expect(views.get(b)).toEqual(views.getByOwner('entry-A'));
+  expect(views.snapshot().selected).toBe('entry-A');
+});
+
+it('restores the parent owner when a remembered mobile child is the primary view', () => {
+  const parent = { hostId: 'host', providerId: 'codex', nativeSessionId: 'parent', title: 'Parent' };
+  const child = { ...parent, nativeSessionId: 'child', parentNativeSessionId: 'parent' };
+  const views = new TrackedSessionViews();
+  views.bindOwner(parent, 'stable-parent'); views.select(parent);
+  views.remember({ primary: child, selections: {}, focus: sessionKey(child) }, [parent], [parent, child]);
+  const restored = new TrackedSessionViews();
+  expect(restored.restore(views.snapshot(), 0)).toBe(true);
+  expect(restored.get(parent)?.primary).toEqual(child);
+  restored.retain([parent]);
+  expect(restored.getByOwner('stable-parent')?.focus).toBe(sessionKey(child));
+});
+
+it('removes a projected self-link while retaining the duplicate view and its independent descendants', () => {
+  const a = { ...parent, nativeSessionId: 'A' }, b = { ...parent, nativeSessionId: 'B' }, c = { ...parent, nativeSessionId: 'C' };
+  const views = new TrackedSessionViews(); views.select(a);
+  views.remember({ primary: a, selections: { [sessionKey(a)]: sessionKey(b), [sessionKey(b)]: sessionKey(c) }, focus: sessionKey(c) }, [a, b], [a, b, c]);
+  views.select(b); views.remember({ primary: b, selections: { [sessionKey(b)]: sessionKey(c) }, focus: sessionKey(c) }, [a, b], [a, b, c]);
+  views.projectOwner(a, b, 'stable-A');
+  expect(views.getByOwner('stable-A')?.selections[sessionKey(b)]).toBeNull();
+  expect(views.getByOwner('stable-A')?.focus).toBe(sessionKey(b));
+  expect(views.getByOwner(sessionKey(b))?.selections[sessionKey(b)]).toBe(sessionKey(c));
+});

@@ -1,5 +1,5 @@
 import { useCallback, useSyncExternalStore } from 'react';
-import { readDrafts, saveDrafts, recoveryGeneration } from './conversation-recovery.js';
+import { readDraftsChecked, saveDrafts, recoveryGeneration, type CheckedDraftRead } from './conversation-recovery.js';
 import { flushRecoveryWrites, type RecoveryWriteHandle, type RecoveryWriteResult } from './recovery-writes.js';
 
 export interface DraftPersistenceState { revision: number; savedRevision: number; result?: RecoveryWriteResult }
@@ -16,7 +16,39 @@ export class DraftStore {
   private latestWrite?: RecoveryWriteHandle;
   private result?: RecoveryWriteResult;
   private failed = false;
-  constructor(private readonly scope: string) { this.drafts = readDrafts(scope); this.generation = recoveryGeneration(scope); }
+  private initialization: CheckedDraftRead;
+  constructor(private readonly scope: string) {
+    this.initialization = readDraftsChecked(scope);
+    this.drafts = this.initialization.status === 'ready' ? this.initialization.drafts : {};
+    this.generation = recoveryGeneration(scope);
+  }
+  inspect(key: string) {
+    const current = this.generation === recoveryGeneration(this.scope);
+    return { ...this.snapshot(key), status: !current ? 'cancelled' as const : this.initialization.status,
+      persistence: this.persistence() };
+  }
+  retryRead(): boolean {
+    if (this.generation !== recoveryGeneration(this.scope)) return false;
+    const read = readDraftsChecked(this.scope);
+    if (read.status !== 'ready') { this.initialization = read; return false; }
+    for (const [key, value] of Object.entries(read.drafts)) if (!this.revisions.has(key)) {
+      this.drafts[key] = value;
+      for (const listener of this.listeners.get(key) ?? []) listener();
+    }
+    this.initialization = read;
+    if (this.revision) this.save();
+    return true;
+  }
+  async flushCurrent(key: string, revision: number, isCurrent: () => boolean): Promise<RecoveryWriteResult> {
+    const current = () => isCurrent() && this.generation === recoveryGeneration(this.scope) && this.snapshot(key).revision === revision;
+    if (!current()) return { status: 'cancelled', ticket: 0 };
+    if (this.initialization.status === 'failed') return { status: 'failed', ticket: 0, error: this.initialization.error, sessionWritten: false, localWritten: false };
+    this.save(current);
+    const write = this.latestWrite!;
+    flushRecoveryWrites(`agent-remote:recovery:${this.scope}:drafts`);
+    const result = await write.completion;
+    return current() ? result : { status: 'cancelled', ticket: write.ticket };
+  }
   get(key: string): string { return this.drafts[key] ?? ''; }
   set(key: string, text: string): void {
     if (this.generation !== recoveryGeneration(this.scope) || this.get(key) === text) return;
@@ -37,14 +69,22 @@ export class DraftStore {
   }
   /** Explicit retries serialize current text, retaining the ordinary typing batch. */
   flush(): RecoveryWriteResult | undefined {
-    if (this.generation !== recoveryGeneration(this.scope) || !this.latestWrite) return;
+    if (this.generation !== recoveryGeneration(this.scope)) return;
+    if (this.initialization.status === 'failed' && !this.retryRead()) { this.save(); return this.result; }
+    if (!this.latestWrite) return this.result;
     if (this.latestWrite.result && this.latestWrite.result.status !== 'saved') this.save();
     flushRecoveryWrites(`agent-remote:recovery:${this.scope}:drafts`);
     return this.latestWrite!.result;
   }
-  private save(): void {
+  private save(isCurrent: () => boolean = () => true): void {
+    if (this.initialization.status !== 'ready') {
+      this.failed = true;
+      this.result = { status: 'failed', ticket: 0, error: this.initialization.error, sessionWritten: false, localWritten: false };
+      this.notifyPersistence();
+      return;
+    }
     const revision = this.revision;
-    const handle = saveDrafts(this.scope, this.drafts);
+    const handle = saveDrafts(this.scope, this.drafts, isCurrent);
     this.latestWrite = handle;
     void handle.completion.then(result => {
       if (this.generation !== recoveryGeneration(this.scope)) return;

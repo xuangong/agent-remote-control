@@ -5,7 +5,7 @@ import { RemoteActivityClient, type RemoteAgentTransport } from '@orchardworks/a
 import { SessionDirectoryClient, type OpenedSession } from '../directory-client.js';
 import { sessionKey } from '../session-tree.js';
 import type { SessionStar } from '../session-stars-client.js';
-import { MAX_TRACKED_SESSIONS, nextObservation, readTrackedSessions, saveTrackedSessions, type SessionObservation } from '../tracking-state.js';
+import { MAX_TRACKED_SESSIONS, nextObservation, readTrackedSessions, saveTrackedSessions, type SessionObservation, patchTrackedSessions, trackingEditRevision, type TrackedSessionPatch, type LocalTrackedSession } from '../tracking-state.js';
 import { useFeedbackToast } from '../components/Toast.js';
 import { restoreSession } from '../session-restoration.js';
 
@@ -171,13 +171,13 @@ export function useSessionTracking(baseUrl: string, transport: RemoteAgentTransp
       .sort((a, b) => a.createdAt - b.createdAt).map(value => [sessionKey(value.from), value]));
     setSelection(value => {
       if (value.scope !== baseUrl || !value.sessions.some(item => replacements.has(sessionKey(item)))) return value;
-      const next = new Map<string, SessionStar>();
+      const next = new Map<string, LocalTrackedSession>();
       for (const item of value.sessions) {
         let updated = item;
         const visited = new Set<string>();
         for (let replacement = replacements.get(sessionKey(updated)); replacement && !visited.has(replacement.id); replacement = replacements.get(sessionKey(updated))) {
           visited.add(replacement.id);
-          updated = { hostId: replacement.to.hostId, providerId: replacement.to.providerId, nativeSessionId: replacement.to.nativeSessionId,
+          updated = { ...item, parentNativeSessionId: undefined, hostId: replacement.to.hostId, providerId: replacement.to.providerId, nativeSessionId: replacement.to.nativeSessionId,
             title: item.title, starredAt: item.starredAt, ...(item.workspace ? { workspace: item.workspace } : {}) };
         }
         next.set(sessionKey(updated), updated);
@@ -221,9 +221,13 @@ export function useSessionTracking(baseUrl: string, transport: RemoteAgentTransp
       return next;
     });
   }, [baseUrl, enabled, setObservations, auxiliaryKeys, readCursors]);
+  function project(patches: readonly TrackedSessionPatch[], expectedRevision: number, isCurrent: () => boolean, retainedDuplicates: readonly string[] = []) {
+    // Projection persists navigation intent. The later explicit consumer owns attachment.
+    return patchTrackedSessions(baseUrl, patches, expectedRevision, isCurrent, retainedDuplicates);
+  }
   const observers = useMemo(() => observedSessions.map(({ session, liveAgentId }) => <SessionObserver key={`${baseUrl}:${sessionKey(session)}:${retries[sessionKey(session)] ?? 0}`} session={session} liveAgentId={liveAgentId} baseUrl={baseUrl} transport={transport} update={update} enabled={enabled} />), [observedSessions, baseUrl, transport, update, retries, enabled]);
   useFeedbackToast('Session tracking', error);
-  return { reorder, reconcileFavorites, rename, replace, sessions, backgroundSessions, observations, error, toggle, retry, acknowledge, observers };
+  return { project, editRevision: () => trackingEditRevision(baseUrl), reorder, reconcileFavorites, rename, replace, sessions, backgroundSessions, observations, error, toggle, retry, acknowledge, observers };
 }
 export type SessionTracking = ReturnType<typeof useSessionTracking>;
 

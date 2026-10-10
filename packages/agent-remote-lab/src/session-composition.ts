@@ -3,6 +3,9 @@ import { conversationSessionStorage } from './conversation-storage.js';
 import { flushRecoveryWrites, queueRecoveryWrite } from './recovery-writes.js';
 import { sessionKey } from './session-tree.js';
 
+export * from './session-composition-model.js';
+export * from './session-composition-application.js';
+
 export interface SessionComposition {
   path: OpenedSession[];
   focus?: string;

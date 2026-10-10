@@ -1,3 +1,4 @@
+import type { ImageDraftBinding, ImageDraftRecipient } from '../image-drafts.js';
 import { remoteSessionState, type RemoteSessionState } from '../client/session-state.js';
 import type { ResourceResponseState } from '@orchardworks/agent-remote-protocol';
 import { useEffect, useId, useLayoutEffect, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
@@ -42,6 +43,8 @@ export interface AgentComposerProps {
   visible?: boolean;
   activityVisible?: boolean;
   draftScope?: string;
+  imageDraftBinding?: ImageDraftBinding;
+  imageRecipient?: ImageDraftRecipient;
   onUploadImage?: UploadImage;
   onSendMessageContent?(content: readonly MessagePart[], options?: AgentMessageOptions & { imageDigests?: Readonly<Record<string, string>> }): Promise<void>;
   draft?: string;
@@ -72,7 +75,7 @@ interface Draft {
   feedback?: { kind: 'success' | 'error'; message: string; delivery?: boolean };
 }
 
-export function AgentComposer({ sessionState: suppliedSessionState, readOnly: forcedReadOnly = false, readOnlyLabel, readOnlyNotice, readOnlyCollapsed = false, state, sessionControls, renderSessionSettingError, sessionKey, disabled = false, disabledLabel, recovering = false, draft: controlledDraft, onDraftChange, onSendMessage, onCancel, onSetSessionSetting, onListCommands, onExecuteCommand, onInspectCommand, onRequestResource, onResolveResource, attachments, consoleCommands = [], onExecuteConsoleCommand, visible = true, activityVisible = visible, draftScope, onUploadImage, onSendMessageContent }: AgentComposerProps) {
+export function AgentComposer({ sessionState: suppliedSessionState, readOnly: forcedReadOnly = false, readOnlyLabel, readOnlyNotice, readOnlyCollapsed = false, state, sessionControls, renderSessionSettingError, sessionKey, disabled = false, disabledLabel, recovering = false, draft: controlledDraft, onDraftChange, onSendMessage, onCancel, onSetSessionSetting, onListCommands, onExecuteCommand, onInspectCommand, onRequestResource, onResolveResource, attachments, consoleCommands = [], onExecuteConsoleCommand, visible = true, activityVisible = visible, draftScope, imageDraftBinding, imageRecipient, onUploadImage, onSendMessageContent }: AgentComposerProps) {
   const controlId = `composer-${useId().replace(/:/gu, '')}`;
   const drafts = useRef(new Map<string, Draft>());
   const agentId = sessionKey ?? state?.agent?.id ?? '';
@@ -109,7 +112,7 @@ export function AgentComposer({ sessionState: suppliedSessionState, readOnly: fo
   const terminal = state?.agent?.status === 'failed' || state?.agent?.status === 'closed';
   const canWait = (session.recovering || recovering || disabled || controlChecking || runtimeConnection?.state === 'reconnecting' || runtimeConnection?.state === 'restoring') && Boolean(state?.agent) && !readOnly && !terminal && runtimeConnection?.state !== 'unavailable';
   const richEnabled = Boolean(capabilities?.imageInput);
-  const imageDraft = useImageDraft({ scope: draftScope, sessionKey: agentId, text, enabled: richEnabled, active: visible && ready && !readOnly, upload: onUploadImage,
+  const imageDraft = useImageDraft({ scope: draftScope, sessionKey: agentId, binding: imageDraftBinding, recipient: imageRecipient, text, enabled: richEnabled, active: visible && ready && !readOnly, upload: onUploadImage,
     onTextChange: value => { currentDraft.text = value; onDraftChange?.(value); refresh(count => count + 1); } });
   const hasImages = richEnabled && imageDraft.hasImages;
   const hasContent = richEnabled ? draftHasContent(imageDraft.parts) : Boolean(text.trim());
@@ -138,8 +141,12 @@ export function AgentComposer({ sessionState: suppliedSessionState, readOnly: fo
     && state?.agent?.status !== 'failed' && state?.agent?.status !== 'closed' && !interruptRequested;
 
   const dispatchReady = ready && !readOnly && !terminal && !operationBusy && session.operations.send_message.allowed;
-  const latest = useRef({ agentId, dispatchReady, onSendMessage, onSendMessageContent, onUploadImage });
-  latest.current = { agentId, dispatchReady, onSendMessage, onSendMessageContent, onUploadImage };
+  const latest = useRef({ agentId, dispatchReady, onSendMessage, onSendMessageContent, onUploadImage, imageRecipient });
+  latest.current = { agentId, dispatchReady, onSendMessage, onSendMessageContent, onUploadImage, imageRecipient };
+  const richPreparations = useRef(new Map<AbortController, ImageDraftRecipient>());
+  for (const [abort, owner] of richPreparations.current) {
+    if (imageRecipient?.identity !== owner.identity || imageRecipient?.lifetime !== owner.lifetime || !owner.isCurrent()) abort.abort();
+  }
   function deferMessage(): void {
     const submitted = currentDraft.text;
     const parts = imageDraft.parts.map(part => ({ ...part }));
@@ -152,23 +159,38 @@ export function AgentComposer({ sessionState: suppliedSessionState, readOnly: fo
       text: containsImages ? parts.map(part => part.type === 'text' ? part.text : `[${part.label}]`).join('') : submitted,
       ready() {
         const current = latest.current;
-        return current.agentId === agentId && current.dispatchReady && Boolean(containsImages ? current.onSendMessageContent && current.onUploadImage : current.onSendMessage);
+        return current.agentId === agentId && (!containsImages || (!imageDraftBinding || !!current.imageRecipient) && (!imageRecipient || current.imageRecipient?.identity === imageRecipient.identity && current.imageRecipient.isCurrent())) && current.dispatchReady && Boolean(containsImages ? current.onSendMessageContent && current.onUploadImage : current.onSendMessage);
       },
       async send(signal, dispatch) {
         signal.throwIfAborted();
+        const selectedRecipient = latest.current.imageRecipient;
+        const preparation = new AbortController();
+        const abortPreparation = () => preparation.abort();
+        signal.addEventListener('abort', abortPreparation, { once: true });
+        if (selectedRecipient) richPreparations.current.set(preparation, selectedRecipient);
+        const checkRecipient = () => {
+          signal.throwIfAborted(); preparation.signal.throwIfAborted();
+          if (selectedRecipient && (!selectedRecipient.isCurrent() || latest.current.imageRecipient?.identity !== selectedRecipient.identity
+            || latest.current.imageRecipient?.lifetime !== selectedRecipient.lifetime)) throw new Error('The image recipient changed. Retry for the current connection.');
+        };
+        try {
+        checkRecipient();
         const upload = latest.current.onUploadImage!;
+        const richSend = latest.current.onSendMessageContent;
+        const textSend = latest.current.onSendMessage;
         const attachments: Record<string, Awaited<ReturnType<UploadImage>>> = {};
         for (const [id, image] of Object.entries(images)) {
           if (!image.blob) throw new Error('Local image bytes are missing. Copy the message and attach the image again.');
-          attachments[id] = await upload(image.blob, image.uploadId, { signal });
-          signal.throwIfAborted();
+          attachments[id] = await upload(image.blob, image.uploadId, { signal: preparation.signal });
+          checkRecipient();
         }
         const content = containsImages ? snapshotContent(parts, attachments) : undefined;
         if (!dispatch()) return;
-        if (content) await latest.current.onSendMessageContent!(content, {
+        if (content) await richSend!(content, {
           imageDigests: Object.fromEntries(Object.values(attachments).map(image => [image.attachmentId, image.sha256])),
         });
-        else await latest.current.onSendMessage!(submitted.trim());
+        else await textSend!(submitted.trim());
+        } finally { richPreparations.current.delete(preparation); signal.removeEventListener('abort', abortPreparation); }
       },
     });
     setText('');
@@ -308,7 +330,8 @@ export function AgentComposer({ sessionState: suppliedSessionState, readOnly: fo
     const submitted = currentDraft.text;
     const submittedParts = imageDraft.parts;
     const content = hasImages ? imageDraft.snapshot() : undefined;
-    const imageDigests = content ? Object.fromEntries(Object.values(imageDraft.images).flatMap(image => image.attachment ? [[image.attachment.attachmentId, image.attachment.sha256]] : [])) : undefined;
+    const imageDigests = content ? imageDraft.digests() : undefined;
+    const ownsImageEdit = imageDraft.captureEdit();
     currentDraft.pending = kind;
     currentDraft.feedback = undefined;
     refresh((value) => value + 1);
@@ -316,13 +339,13 @@ export function AgentComposer({ sessionState: suppliedSessionState, readOnly: fo
       if (content) await onSendMessageContent!(content, { ...(kind === 'queue' ? { delivery: 'next_turn' as const } : {}), imageDigests });
       else if (kind === 'queue') await action!(submitted.trim(), { delivery: 'next_turn' });
       else await action!(submitted.trim());
-      if (currentDraft.text === submitted && (!content || imageDraft.parts === submittedParts)) {
+      if (currentDraft.text === submitted && (!richEnabled || ownsImageEdit() && imageDraft.parts === submittedParts)) {
         if (richEnabled) imageDraft.setText(''); else { currentDraft.text = ''; if (currentAgent.current === agentId) onDraftChange?.(''); }
       }
       currentDraft.feedback = { kind: 'success', message: kind === 'send' ? 'Message sent.' : 'Message queued by Provider.', delivery: true };
       if (currentAgent.current === agentId) focusRequested.current = agentId;
     } catch (error) {
-      if (content && error && typeof error === 'object' && 'code' in error && error.code === 'invalid_image_input') {
+      if (content && ownsImageEdit() && error && typeof error === 'object' && 'code' in error && error.code === 'invalid_image_input') {
         imageDraft.rejectAttachments(content, 'The Host could not use this image. Retry the upload, replace it, or remove it.');
       }
       currentDraft.feedback = { kind: 'error', message: error instanceof Error ? error.message : 'Agent command failed.' };

@@ -1,5 +1,6 @@
 import { useLayoutEffect, type RefObject } from 'react';
-import { conversationLocalStorage } from '../conversation-storage.js';
+import { clearCacheOnClose, conversationLocalStorage } from '../conversation-storage.js';
+import { recoveryGeneration } from '../conversation-recovery.js';
 
 interface Position { x: number; y: number }
 interface WindowSize { width: number; height: number }
@@ -13,6 +14,56 @@ const isSize = (value: unknown): value is WindowSize => !!value && typeof value 
   && 'width' in value && typeof value.width === 'number' && Number.isFinite(value.width) && value.width > 0
   && 'height' in value && typeof value.height === 'number' && Number.isFinite(value.height) && value.height > 0;
 
+export interface AskPositionSnapshot { status: 'ready' | 'failed' | 'cancelled' | 'pending'; revision: number; position?: Position; size?: WindowSize; retention: 'page' | 'local' }
+interface PositionEntry extends AskPositionSnapshot { initialized: boolean; dirty: boolean; generation: number }
+const positions = new Map<string, PositionEntry>();
+/** This only scopes cleanup; it supplies no authorization. */
+export function askGeometryRecoveryScope(scope: string): string {
+  try { const value: unknown = JSON.parse(scope); if (Array.isArray(value) && typeof value[0] === 'string') return value[0]; } catch { /* Legacy standalone geometry scopes remain exact. */ }
+  return scope;
+}
+function readGeometry(scope: string): { position?: Position; size?: WindowSize } {
+  const position: unknown = JSON.parse(conversationLocalStorage.getItem(`agent-remote-ask:${scope}:window-position`) ?? 'null');
+  const size: unknown = JSON.parse(conversationLocalStorage.getItem(`agent-remote-ask:${scope}:window-size`) ?? 'null');
+  if (position !== null && !isPosition(position) || size !== null && !isSize(size)) throw new Error('Invalid Ask geometry.');
+  return { ...(position === null ? {} : { position: position as Position }), ...(size === null ? {} : { size: size as WindowSize }) };
+}
+function positionEntry(scope: string): PositionEntry {
+  const generation = recoveryGeneration(askGeometryRecoveryScope(scope));
+  let entry = positions.get(scope);
+  if (entry?.generation === generation && entry.dirty) return entry;
+  const previous = entry?.generation === generation ? entry : undefined;
+  entry = previous ?? { revision: 0, initialized: false, dirty: false, generation, status: 'ready', retention: clearCacheOnClose() ? 'page' : 'local' };
+  try {
+    const saved = readGeometry(scope);
+    if (entry.initialized && JSON.stringify([entry.position, entry.size]) !== JSON.stringify([saved.position, saved.size])) entry.revision++;
+    entry.position = saved.position; entry.size = saved.size; entry.initialized = true; entry.status = 'ready';
+  }
+  catch { entry.initialized = false; entry.status = 'failed'; entry.retention = 'page'; }
+  positions.set(scope, entry); return entry;
+}
+function positionSnapshot(entry: PositionEntry): AskPositionSnapshot { return { status: entry.status, revision: entry.revision, ...(entry.position ? { position: { ...entry.position } } : {}), ...(entry.size ? { size: { ...entry.size } } : {}), retention: entry.retention }; }
+export function inspectAskPosition(scope: string): AskPositionSnapshot { return positionSnapshot(positionEntry(scope)); }
+export function flushAskPosition(scope: string, revision: number, isCurrent: () => boolean): AskPositionSnapshot {
+  const entry = positionEntry(scope), current = () => isCurrent() && entry.generation === recoveryGeneration(askGeometryRecoveryScope(scope)) && positions.get(scope) === entry && entry.revision === revision;
+  if (!current()) return { ...positionSnapshot(entry), status: 'cancelled', retention: 'page' };
+  try {
+    if (!entry.initialized) { readGeometry(scope); entry.initialized = true; }
+    if (entry.dirty) {
+      if (entry.position) conversationLocalStorage.setItem(`agent-remote-ask:${scope}:window-position`, JSON.stringify(entry.position));
+      if (!current()) return { ...positionSnapshot(entry), status: 'cancelled', retention: 'page' };
+      if (entry.size) conversationLocalStorage.setItem(`agent-remote-ask:${scope}:window-size`, JSON.stringify(entry.size));
+    }
+    if (!current()) return { ...positionSnapshot(entry), status: 'cancelled', retention: 'page' };
+    entry.dirty = false; entry.status = 'ready'; entry.retention = clearCacheOnClose() ? 'page' : 'local';
+  } catch { entry.initialized = false; entry.status = 'failed'; entry.retention = 'page'; }
+  return positionSnapshot(entry);
+}
+function rememberPosition(scope: string, position?: Position, size?: WindowSize): PositionEntry {
+  const entry = positionEntry(scope); entry.position = position && { ...position }; entry.size = size && { ...size };
+  entry.revision++; entry.dirty = true; entry.status = 'pending'; entry.retention = 'page'; return entry;
+}
+
 /** Ask stays within its source view, retaining that view's floating geometry when space allows. */
 export function useAskPosition(panel: RefObject<HTMLElement>, anchor: RefObject<HTMLElement>, storageScope: string) {
   useLayoutEffect(() => {
@@ -20,22 +71,14 @@ export function useAskPosition(panel: RefObject<HTMLElement>, anchor: RefObject<
     const trigger = anchor.current;
     const viewport = element?.parentElement;
     if (!element || !trigger || !viewport) return;
-    const positionKey = `agent-remote-ask:${storageScope}:window-position`;
-    const sizeKey = `agent-remote-ask:${storageScope}:window-size`;
+    const savedGeometry = positionEntry(storageScope);
+    const geometryCurrent = () => savedGeometry.generation === recoveryGeneration(askGeometryRecoveryScope(storageScope));
     let floating = false;
-    let manual: Position | undefined;
-    let preferredSize: WindowSize | undefined;
+    let manual: Position | undefined = savedGeometry.position;
+    let preferredSize: WindowSize | undefined = savedGeometry.size;
     let appliedSize: WindowSize | undefined;
     let drag: { id: number; start: Position; origin: Position; moved: boolean } | undefined;
     let resize: { id: number; start: Position; origin: Position; size: WindowSize; preferred: WindowSize; moved: boolean } | undefined;
-    try {
-      const saved: unknown = JSON.parse(conversationLocalStorage.getItem(positionKey) ?? 'null');
-      if (isPosition(saved)) manual = saved;
-    } catch { /* Keep usable defaults when storage is unavailable. */ }
-    try {
-      const saved: unknown = JSON.parse(conversationLocalStorage.getItem(sizeKey) ?? 'null');
-      if (isSize(saved)) preferredSize = saved;
-    } catch { /* Keep usable defaults when storage is unavailable. */ }
 
     const positionWindow = (next: Position) => {
       const bounds = viewport.getBoundingClientRect();
@@ -86,10 +129,9 @@ export function useAskPosition(panel: RefObject<HTMLElement>, anchor: RefObject<
       });
     };
     const persist = () => {
-      try {
-        if (manual) conversationLocalStorage.setItem(positionKey, JSON.stringify(manual));
-        if (preferredSize) conversationLocalStorage.setItem(sizeKey, JSON.stringify(preferredSize));
-      } catch { /* Keep the geometry for this mounted view. */ }
+      if (!geometryCurrent()) return;
+      const entry = rememberPosition(storageScope, manual, preferredSize);
+      flushAskPosition(storageScope, entry.revision, geometryCurrent);
     };
     const finish = (event: PointerEvent) => {
       const gesture = drag ?? resize;
@@ -131,6 +173,7 @@ export function useAskPosition(panel: RefObject<HTMLElement>, anchor: RefObject<
         element.dataset.dragging = 'true';
         manual = positionWindow({ x: drag.origin.x + dx, y: drag.origin.y + dy });
       }
+      if (geometryCurrent()) rememberPosition(storageScope, manual, preferredSize);
     };
     const keydown = (event: KeyboardEvent) => {
       if (!floating || drag || resize || event.altKey || event.ctrlKey || event.metaKey

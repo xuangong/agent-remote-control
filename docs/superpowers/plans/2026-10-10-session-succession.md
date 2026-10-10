@@ -494,6 +494,12 @@ no production capability is enabled by these scripted fixtures.
   questions remain visible with a checked per-question Discard action.
 - [ ] Preserve complete nested attachment and draft/window state across provider
   change using the stable owners and recovery in Task 10C.
+  The callable 10C1 layer is implemented and independently approved after one
+  scoped fix round. Root freshly passed 264 Lab tests and main/e2e typechecks;
+  unchanged Web retains 71 tests and its typecheck from the verified round0.
+  Unknown window reads, checkpoint-completion edits and absent display defaults
+  have regressions. This item remains open until 10C2 product wiring and browser
+  acceptance verify actual complete-state replacement.
 - [ ] Introduce stable pane slots and target intent independent of attachment;
   attach failure keeps B as target without displaying A as B or resetting layout.
 - [ ] Complete scoped replay/Track/navigation, independent text/image conflicts,

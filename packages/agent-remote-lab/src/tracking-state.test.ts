@@ -1,5 +1,5 @@
 import { expect, it } from 'vitest';
-import { nextObservation, readTrackedSessions, saveTrackedSessions } from './tracking-state.js';
+import { nextObservation, readTrackedSessions, saveTrackedSessions, readTrackedSessionsChecked, patchTrackedSessions, trackingEditRevision } from './tracking-state.js';
 const session = { hostId: 'host', providerId: 'codex', nativeSessionId: 'native', title: 'My session', starredAt: 1 };
 it('keeps tracking on this client and isolates different user namespaces', () => {
   saveTrackedSessions('alice', [session]);
@@ -106,4 +106,26 @@ it('honors content already read in a replacement epoch even when activity catche
   expect(caughtUp.changed).toBe(false);
   const unseen = nextObservation(caughtUp, { connection: 'ready', activity: 'idle', cursor: { epoch: 'new', seq: 4 } }, readCursor);
   expect(unseen.changed).toBe(true);
+});
+
+it('retains local stable metadata through legacy save and patches only the affected entry', () => {
+  const scope = 'stable-tracks';
+  const a = { ...session, entryId: 'slot-a', successionRole: { controllerId: 'controller', roleId: 'successionRole', revision: 1 } };
+  saveTrackedSessions(scope, [a, { ...session, nativeSessionId: 'X', title: 'Independent', entryId: 'slot-x' }]);
+  saveTrackedSessions(scope, [{ ...session, title: 'Renamed' }, { ...session, nativeSessionId: 'X', title: 'Externally renamed', entryId: 'slot-x' }]);
+  const before = readTrackedSessionsChecked(scope);
+  expect(before.status).toBe('ready');
+  expect(readTrackedSessions(scope)[0]).toMatchObject({ entryId: 'slot-a', successionRole: a.successionRole });
+  const result = patchTrackedSessions(scope, [{ entryId: 'slot-a', from: session, to: { ...session, nativeSessionId: 'B' } }], trackingEditRevision(scope), () => true);
+  expect(result.status).toBe('saved');
+  expect(readTrackedSessions(scope)).toMatchObject([{ entryId: 'slot-a', nativeSessionId: 'B', title: 'Renamed' }, { entryId: 'slot-x', title: 'Externally renamed' }]);
+});
+it('rejects stale same-tab Track work and refuses to overwrite damaged Track data', () => {
+  const scope = 'guarded-tracks'; saveTrackedSessions(scope, [{ ...session, entryId: 'a' }]);
+  const revision = trackingEditRevision(scope); saveTrackedSessions(scope, [{ ...session, title: 'New edit', entryId: 'a' }]);
+  expect(patchTrackedSessions(scope, [], revision, () => true).status).toBe('cancelled');
+  localStorage.setItem(`agent-remote-tracking:${scope}`, '{damaged');
+  expect(readTrackedSessionsChecked(scope).status).toBe('failed');
+  expect(patchTrackedSessions(scope, [], trackingEditRevision(scope), () => true).status).toBe('failed');
+  expect(localStorage.getItem(`agent-remote-tracking:${scope}`)).toBe('{damaged');
 });

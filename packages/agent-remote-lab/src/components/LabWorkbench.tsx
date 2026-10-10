@@ -7,18 +7,18 @@ import { useBoundDraft, type DraftBinding } from '../draft-store.js';
 import { WorkspaceVscodeLink } from './HostVscodeTunnel.js';
 import { needsReauthentication } from '../security-client.js';
 import { ReauthenticationNotice } from './ReauthenticationNotice.js';
-import { useSessionDisplayPreferences } from '../hooks/useSessionDisplayPreferences.js';
+import { useSessionDisplayPreferences, type DisplayPreferenceBinding } from '../hooks/useSessionDisplayPreferences.js';
 import { DraftRecoveryNotice } from './DraftRecoveryNotice.js';
 export type { SessionViewActions as LabWorkbenchActions } from '@orchardworks/agent-remote-web/react';
 
 /** Product policy is supplied around the same session renderer used by ARDB. */
-export function LabWorkbench({ draftBinding, defaultDisplayMode, ...props }: ComponentProps<typeof SessionWorkbench> & { draftBinding?: DraftBinding }) {
+export function LabWorkbench({ draftBinding, displayBinding, defaultDisplayMode, ...props }: ComponentProps<typeof SessionWorkbench> & { draftBinding?: DraftBinding; displayBinding?: DisplayPreferenceBinding }) {
   const trackCommand = useContext(TrackViewScope);
   const tpmCommand = useContext(TpmViewScope);
   const positions = useContext(RecoveryScope);
   const draft = useBoundDraft(draftBinding);
-  const [displayPreferences, onDisplayPreferencesChange] = useSessionDisplayPreferences(positions?.scope,
-    props.draftSessionKey ?? props.state?.agent?.runtimeInfo.sessionId ?? props.attachingAgentId, defaultDisplayMode);
+  const [displayPreferences, onDisplayPreferencesChange] = useSessionDisplayPreferences(displayBinding?.scope ?? positions?.scope,
+    displayBinding?.key ?? props.draftSessionKey ?? props.state?.agent?.runtimeInfo.sessionId ?? props.attachingAgentId, defaultDisplayMode);
   return <SessionWorkbench {...props}
     consoleCommands={trackCommand || tpmCommand ? [...(trackCommand ? [TrackViewCommand] : []), ...(tpmCommand ? [TpmViewCommand] : []), ...(props.consoleCommands ?? [])] : props.consoleCommands}
     onExecuteConsoleCommand={trackCommand || tpmCommand ? (id, args) => id === TrackViewCommand.id && trackCommand ? trackCommand(args)

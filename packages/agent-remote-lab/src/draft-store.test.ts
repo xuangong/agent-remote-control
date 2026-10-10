@@ -81,3 +81,25 @@ it('retains an earlier completed revision when a newer edit fails before its cal
   expect(store.hasSaveError('two')).toBe(true);
   expect(store.persistence()).toMatchObject({ revision: 2, savedRevision: 1, result: { status: 'failed' } });
 });
+
+it('keeps an unread text owner unknown and does not overwrite it with a new page edit', async () => {
+  const scope = 'checked-denied';
+  conversationSessionStorage.setItem(`agent-remote:recovery:${scope}:drafts`, JSON.stringify({ A: 'Retained A', B: 'Independent B' }));
+  const denied = vi.spyOn(conversationSessionStorage, 'getItem').mockImplementation(() => { throw new Error('Denied'); });
+  const store = new DraftStore(scope);
+  expect(store.inspect('A').status).toBe('failed');
+  store.set('A', 'New A');
+  expect((await store.flushCurrent('A', store.snapshot('A').revision, () => true)).status).toBe('failed');
+  denied.mockRestore();
+  expect(store.retryRead()).toBe(true);
+  expect(store.inspect('A').text).toBe('New A');
+  expect(store.inspect('B').text).toBe('Independent B');
+  expect((await store.flushCurrent('A', store.snapshot('A').revision, () => true)).status).toBe('saved');
+});
+it('does not certify a text edit after a newer edit or scope retirement', async () => {
+  const store = new DraftStore('checked-current'); store.set('A', 'First');
+  const revision = store.snapshot('A').revision;
+  store.set('A', 'Second');
+  expect((await store.flushCurrent('A', revision, () => true)).status).toBe('cancelled');
+  expect((await store.flushCurrent('A', store.snapshot('A').revision, () => false)).status).toBe('cancelled');
+});

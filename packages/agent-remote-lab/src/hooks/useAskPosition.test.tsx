@@ -2,7 +2,7 @@ import { act, useRef } from 'react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { render, unmount } from '../test/setup.js';
 import { conversationLocalStorage } from '../conversation-storage.js';
-import { useAskPosition } from './useAskPosition.js';
+import { useAskPosition, inspectAskPosition, flushAskPosition } from './useAskPosition.js';
 
 const observers = new Set<() => void>();
 const bounds = new Map<string, { width: number; height: number }>();
@@ -115,4 +115,16 @@ it('clamps resized windows to the source view and restores preferred height afte
   const before = geometry(panel);
   await key(handle, 'ArrowRight');
   expect(geometry(panel)).toEqual(before);
+});
+it('retains the latest failed geometry after unmount and retries only current edits', async () => {
+  bounds.set('failed-geometry', { width: 1000, height: 800 });
+  const container = await render(<Harness scope="failed-geometry" />);
+  const denied = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => { throw new Error('Denied'); });
+  await key(container.querySelector('.lab-ask-resize')!, 'ArrowLeft');
+  const snapshot = inspectAskPosition('failed-geometry');
+  expect(snapshot).toMatchObject({ status: 'failed', size: { width: 430 }, retention: 'page' });
+  await unmount(container); denied.mockRestore();
+  expect(flushAskPosition('failed-geometry', snapshot.revision, () => false).status).toBe('cancelled');
+  expect(flushAskPosition('failed-geometry', snapshot.revision, () => true)).toMatchObject({ status: 'ready', size: { width: 430 }, retention: 'local' });
+  expect(JSON.parse(localStorage.getItem('agent-remote-ask:failed-geometry:window-size')!)).toMatchObject({ width: 430 });
 });

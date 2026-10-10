@@ -284,3 +284,78 @@ it('uses public synchronization and operation admission without legacy disabled 
   expect(view.send).toHaveBeenCalledExactlyOnceWith('Wait for synchronization');
   expect(view.container.querySelector('textarea')!.value).toBe('Another draft');
 });
+
+const retainedImageState = { ...state, agent: { ...state.agent!, capabilities: { ...state.agent!.capabilities,
+  imageInput: { mediaTypes: ['image/png' as const], maxImages: 8, maxImageBytes: 10485760, maxMessageBytes: 20971520 },
+} } };
+const retainedImageBinding = { scope: '', key: 'composer-retained-owner' };
+const imageRecipient = (identity: string) => ({ identity, lifetime: {}, isCurrent: () => true });
+const receipt = (attachmentId: string) => ({ attachmentId, sha256: 'a'.repeat(64), mediaType: 'image/png' as const, byteLength: 1, imageDimensions: { width: 1, height: 1 } });
+async function pasteImage(container: HTMLElement, text = '') {
+  Range.prototype.getClientRects = () => [] as unknown as DOMRectList;
+  Range.prototype.getBoundingClientRect = () => new DOMRect();
+  const event = new Event('paste', { bubbles: true, cancelable: true });
+  Object.defineProperty(event, 'clipboardData', { value: { files: text ? [] : [new File(['x'], 'x.png', { type: 'image/png' })], getData: () => text } });
+  await act(async () => container.querySelector('[role="textbox"]')!.dispatchEvent(event));
+}
+it.each(['success', 'failure'])('preserves B edits when an A rich send settles with %s under the same storage owner', async outcome => {
+  let settle!: () => void;
+  const send = vi.fn(() => new Promise<void>((resolve, reject) => { settle = () => outcome === 'success' ? resolve() : reject(Object.assign(new Error('Old rejection'), { code: 'invalid_image_input' })); }));
+  const view = await setup({ state: retainedImageState, disabled: false, recovering: false, sessionKey: 'A', imageDraftBinding: retainedImageBinding,
+    imageRecipient: imageRecipient('A'), onUploadImage: async () => receipt('A'), onSendMessageContent: send });
+  await pasteImage(view.container); await view.click();
+  expect(send).toHaveBeenCalledOnce();
+  await view.update({ sessionKey: 'B', imageRecipient: imageRecipient('B'), onUploadImage: async () => receipt('B') });
+  await pasteImage(view.container, 'B edit');
+  await act(async () => settle());
+  expect(view.container.querySelector('[data-image-id]')).not.toBeNull();
+  expect(view.container.querySelector('[role="textbox"]')?.textContent).toContain('B edit');
+  expect(view.container.textContent).not.toContain('The Host could not use this image');
+});
+it('uses only the current recipient receipt and digest after storage-owner-preserving navigation', async () => {
+  const send = vi.fn(async () => {});
+  const view = await setup({ state: retainedImageState, disabled: false, recovering: false, sessionKey: 'A', imageDraftBinding: retainedImageBinding,
+    imageRecipient: imageRecipient('A'), onUploadImage: async () => receipt('A'), onSendMessageContent: send });
+  await pasteImage(view.container);
+  let finish!: (value: ReturnType<typeof receipt>) => void;
+  await view.update({ sessionKey: 'B', imageRecipient: imageRecipient('B'), onUploadImage: () => new Promise(resolve => { finish = resolve; }) });
+  await view.click(); expect(send).not.toHaveBeenCalled();
+  await act(async () => finish(receipt('B')));
+  expect(view.container.querySelector<HTMLButtonElement>('[data-testid="prompt-submit"]')!.disabled, view.container.textContent ?? '').toBe(false);
+  await act(async () => view.container.querySelector('[data-testid="prompt-submit"]')!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })));
+  await view.click();
+  expect(send).toHaveBeenCalledExactlyOnceWith([{ type: 'image', attachmentId: 'B', label: 'image #1' }], { imageDigests: { B: 'a'.repeat(64) } });
+});
+
+it('keeps the concrete waiting queue visible and recoverable when only the native client lifetime changes', async () => {
+  const a = imageRecipient('native-A');
+  const view = await setup({ imageRecipient: a });
+  await view.type('Retained pending message'); await view.click();
+  expect(view.notice()?.textContent).toContain('Retained pending message');
+  await view.update({ imageRecipient: imageRecipient('native-A') });
+  expect(view.notice()?.textContent).toContain('Retained pending message');
+  await view.update({ disabled: false, recovering: false });
+  expect(view.send).toHaveBeenCalledExactlyOnceWith('Retained pending message');
+});
+
+it('preserves B text when an A plain-text send settles in an image-capable composer sharing K', async () => {
+  let finish!: () => void;
+  const send = vi.fn(() => new Promise<void>(resolve => { finish = resolve; }));
+  const view = await setup({ state: retainedImageState, disabled: false, recovering: false, sessionKey: 'A', imageDraftBinding: retainedImageBinding,
+    imageRecipient: imageRecipient('A'), onSendMessage: send });
+  await pasteImage(view.container, 'A question'); await view.click();
+  expect(send).toHaveBeenCalledExactlyOnceWith('A question');
+  await view.update({ sessionKey: 'B', imageRecipient: imageRecipient('B') });
+  await pasteImage(view.container, 'B draft');
+  const edited = view.container.querySelector('[role="textbox"]')!.textContent;
+  await act(async () => finish());
+  expect(view.container.querySelector('[role="textbox"]')!.textContent).toBe(edited);
+  expect(edited).toContain('B draft');
+});
+
+it('clears a successful plain-text send in the current fixed image-capable session', async () => {
+  const view = await setup({ state: retainedImageState, disabled: false, recovering: false });
+  await pasteImage(view.container, 'Current question'); await view.click();
+  expect(view.send).toHaveBeenCalledExactlyOnceWith('Current question');
+  expect(view.container.querySelector('[role="textbox"]')!.textContent).toBe('');
+});

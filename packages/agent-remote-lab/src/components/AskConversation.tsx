@@ -11,8 +11,11 @@ import { useAskPosition } from '../hooks/useAskPosition.js';
 import { askCommand } from '../fork-actions.js';
 import { LabWorkbench } from './LabWorkbench.js';
 import { AskResize } from './AskResize.js';
+import type { ImageDraftBinding, ImageDraftRecipient } from '@orchardworks/agent-remote-web/browser';
+import type { DisplayPreferenceBinding } from '../hooks/useSessionDisplayPreferences.js';
+interface AskStorageBindings { imageDraftBinding?: ImageDraftBinding; imageRecipient?: ImageDraftRecipient; displayBinding?: DisplayPreferenceBinding }
 
-export function AskConversation({ entry, replica, transport, draftBinding, onClose, onToggleEnabled, onClean, onRetry, onSendInput, onDiscardInput, triggerRef, storageScope, navigation }: {
+export function AskConversation({ entry, replica, transport, draftBinding, onClose, onToggleEnabled, onClean, onRetry, onSendInput, onDiscardInput, triggerRef, storageScope, navigation, ...storageBindings }: AskStorageBindings & {
   navigation?: SessionViewNavigationFactory;
   storageScope: string; triggerRef: RefObject<HTMLButtonElement>; entry: AskEntry; replica?: AgentReplica; transport: RemoteAgentTransport;
   draftBinding: DraftBinding; onClose(): void; onToggleEnabled(): void; onClean(): void; onRetry(): void; onSendInput(id: string, send: AskInputSender): void; onDiscardInput(id: string): void;
@@ -54,7 +57,7 @@ export function AskConversation({ entry, replica, transport, draftBinding, onClo
     </div>)}</div> : null}
     {entry.error ? <div className="lab-ask-error" role="alert">{entry.error}<button type="button" disabled={busy} onClick={onRetry}>Retry</button></div> : null}
     {isAskAttached(entry) ? <AskChat key={askParticipantKey(entry.record!)} record={entry.record!} inputs={entry.error ? undefined : entry.inputs} onSendInput={onSendInput} replica={replica} transport={transport}
-      navigation={navigation} onToggleEnabled={onToggleEnabled} busy={busy} draftBinding={draftBinding} tools={tools} /> : <>
+      navigation={navigation} onToggleEnabled={onToggleEnabled} busy={busy} draftBinding={draftBinding} tools={tools} {...storageBindings} /> : <>
       <header className="lab-ask-heading"><strong>Ask</strong>{tools}</header>
       {busy || !entry.error ? <div className="lab-ask-opening" role="status">{busy ? 'Opening Ask…' : 'Ask about this conversation.'}</div> : null}
       <AskDraft binding={draftBinding} />
@@ -63,7 +66,7 @@ export function AskConversation({ entry, replica, transport, draftBinding, onClo
   </section></div>;
 }
 
-function AskChat({ record, inputs, onSendInput, replica, transport, draftBinding, tools, busy, onToggleEnabled, navigation }: {
+function AskChat({ record, inputs, onSendInput, replica, transport, draftBinding, tools, busy, onToggleEnabled, navigation, ...storageBindings }: AskStorageBindings & {
   navigation?: SessionViewNavigationFactory;
   onToggleEnabled(): void; record: SessionFork; inputs?: AskInput[]; onSendInput(id: string, send: AskInputSender): void; replica?: AgentReplica; transport: RemoteAgentTransport;
   draftBinding: DraftBinding; tools: ReactNode; busy?: boolean;
@@ -83,7 +86,7 @@ function AskChat({ record, inputs, onSendInput, replica, transport, draftBinding
       return {};
     }}
     sessionStatus={status} attachingAgentId={session.agentId} actions={actions}
-    draftSessionKey={sessionKey(session)} draftBinding={draftBinding}
+    draftSessionKey={sessionKey(session)} draftBinding={draftBinding} {...storageBindings}
     questionDrafts={questions} onQuestionDraftChange={(id, value) => setQuestions(current => ({ ...current, [id]: value }))}
     conversationPath={<strong className="agent-session-title" data-session-status={state?.agent?.status}>Ask</strong>}
     sessionManager={tools} /></CommunicationNavigationContext.Provider>;

@@ -1,6 +1,13 @@
 import type { ImageUploadReceipt } from '@orchardworks/agent-remote-protocol';
 import type { DraftPart } from './react/composer-document.js';
 
+/** Opaque persistence identity; it never identifies a native upload recipient. */
+export interface ImageDraftBinding { scope: string; key: string }
+/** Supplied by the native client owner, never inferred from a draft key. */
+export interface ImageDraftRecipient { identity: string; lifetime: object; isCurrent(): boolean }
+
+export type ImageDraftWriteResult = { status: 'saved'; retention: 'page' | 'local' } | { status: 'cancelled'; retention: 'page' };
+
 export interface DraftImage {
   imageId: string;
   blob?: Blob;
@@ -18,6 +25,69 @@ export interface ImageDraft {
   images: Record<string, DraftImage>;
   nextLabel: number;
 }
+export interface ImageDraftStorageSnapshot {
+  status: 'ready' | 'pending' | 'failed' | 'cancelled';
+  revision: number; savedRevision: number; retention: 'page' | 'local'; draft?: ImageDraft;
+}
+export interface ImageDraftStorageHandle {
+  snapshot(): ImageDraftStorageSnapshot;
+  flush(expectedRevision: number, isCurrent: () => boolean): Promise<ImageDraftStorageSnapshot>;
+}
+const draftWriters = new Map<string, Set<ImageDraftStorageHandle>>();
+const bindingIdentity = (binding: ImageDraftBinding) => JSON.stringify([binding.scope, binding.key]);
+export function imageDraftRetention(key: string): 'page' | 'local' {
+  return !persistentDrafts() || privateDraftKeys.has(key) ? 'page' : 'local';
+}
+/** A released editor remains inspectable until its final current write has settled. */
+const releasedWriters = new Set<ImageDraftStorageHandle>();
+export function registerImageDraftWriter(binding: ImageDraftBinding, handle: ImageDraftStorageHandle): () => void {
+  const key = bindingIdentity(binding);
+  const writers = draftWriters.get(key) ?? new Set<ImageDraftStorageHandle>();
+  const remove = () => { writers.delete(registered); releasedWriters.delete(registered); if (!writers.size && draftWriters.get(key) === writers) draftWriters.delete(key); };
+  const registered: ImageDraftStorageHandle = {
+    snapshot: () => handle.snapshot(),
+    async flush(revision, isCurrent) {
+      const result = await handle.flush(revision, isCurrent);
+      if (releasedWriters.has(registered) && (result.status === 'cancelled' && handle.snapshot().status === 'cancelled' || result.status === 'ready' && result.savedRevision === result.revision)) remove();
+      return result;
+    },
+  };
+  writers.add(registered); draftWriters.set(key, writers);
+  return () => {
+    releasedWriters.add(registered);
+    void registered.flush(handle.snapshot().revision, () => true).catch(() => { /* The released current draft remains available for explicit retention retry. */ });
+  };
+}
+/** A replacement editor hydrates only after the released editor's final write settles. */
+export async function flushReleasedImageDraftWriters(binding: ImageDraftBinding): Promise<void> {
+  const writers = draftWriters.get(bindingIdentity(binding));
+  for (const writer of [...writers ?? []]) {
+    if (!releasedWriters.has(writer)) continue;
+    const result = await writer.flush(writer.snapshot().revision, () => true);
+    if (!(result.status === 'cancelled' && writer.snapshot().status === 'cancelled') && (result.status !== 'ready' || result.savedRevision !== result.revision)) throw new Error('The previous image editor still has unsaved content.');
+  }
+}
+/** Reads current editors before disk; conflicting writers are unknown, never empty. */
+export async function inspectImageDraft(binding: ImageDraftBinding): Promise<ImageDraftStorageHandle> {
+  const key = bindingIdentity(binding), writers = draftWriters.get(key);
+  if (writers?.size === 1) return [...writers][0]!;
+  const generation = imageDraftScopeGeneration(binding.scope);
+  const retention = imageDraftRetention(binding.key);
+  let snapshot: ImageDraftStorageSnapshot = { status: 'failed', revision: 0, savedRevision: -1, retention: 'page' };
+  if (!writers?.size) {
+    try {
+      const draft = await readImageDraft(binding.key);
+      if (generation !== imageDraftScopeGeneration(binding.scope)) snapshot = { ...snapshot, status: 'cancelled' };
+      else if (!draft || draft.scope === binding.scope) snapshot = { status: 'ready', revision: 0, savedRevision: 0, retention, ...(draft ? { draft: copyDraft(draft) } : {}) };
+    } catch { /* A failed read cannot certify empty retained content. */ }
+  }
+  const current = () => generation === imageDraftScopeGeneration(binding.scope) && draftWriters.get(key) === writers;
+  return {
+    snapshot: () => current() ? snapshot : { ...snapshot, status: 'cancelled' },
+    async flush(revision, isCurrent) { return current() && isCurrent() && revision === snapshot.revision ? snapshot : { ...snapshot, status: 'cancelled' }; },
+  };
+}
+
 let persistentDrafts = () => true;
 let persistenceGeneration = 0;
 const memoryDrafts = new Map<string, ImageDraft>();
@@ -208,13 +278,14 @@ export async function readImageDraft(key: string): Promise<ImageDraft | undefine
   rememberDraft(draft);
   return draft;
 }
-export async function writeImageDraft(draft: ImageDraft, generation = imageDraftScopeGeneration(draft.scope)): Promise<void> {
-  if (generation !== imageDraftScopeGeneration(draft.scope)) return;
+export async function writeImageDraft(draft: ImageDraft, generation = imageDraftScopeGeneration(draft.scope)): Promise<ImageDraftWriteResult> {
+  if (generation !== imageDraftScopeGeneration(draft.scope)) return { status: 'cancelled', retention: 'page' };
   const referenced = new Set(draft.parts.flatMap(part => part.type === 'image' ? [part.imageId] : []));
   draft = { ...draft, images: Object.fromEntries(Object.entries(draft.images).filter(([id]) => referenced.has(id))) };
   rememberDraft(draft);
-  if (!persistentDrafts()) return;
+  if (!persistentDrafts()) return { status: 'saved', retention: 'page' };
   const retentionGeneration = persistenceGeneration;
+  let written = false;
   const save = async (record: ImageDraft) => {
     await transaction('readwrite', (store, images) => {
       if (!persistentDrafts() || retentionGeneration !== persistenceGeneration || generation !== imageDraftScopeGeneration(draft.scope)) return () => undefined;
@@ -236,11 +307,12 @@ export async function writeImageDraft(draft: ImageDraft, generation = imageDraft
       }
       const previous = store.get(draft.key);
       previous.onsuccess = () => {
+        if (previous.result && previous.result.scope !== draft.scope) { writeError = new Error('The image draft belongs to another storage scope.'); store.transaction.abort(); return; }
         for (const image of Object.values((previous.result as ImageDraft | undefined)?.images ?? {}) as StoredDraftImage[]) {
           if (image.blobKey && !retained.has(image.blobKey)) images.delete(image.blobKey);
         }
       };
-      store.put(metadata);
+      store.put(metadata); written = true;
       return () => undefined;
     }).catch(error => { throw writeError ?? error; });
   };
@@ -248,6 +320,8 @@ export async function writeImageDraft(draft: ImageDraft, generation = imageDraft
   // Persist portable binary values from the outset: some WebKit backends can
   // stall a transaction while preparing Blob records. Convert each Blob once.
   await save(await withBinaryImages(draft));
+  return written && generation === imageDraftScopeGeneration(draft.scope) && retentionGeneration === persistenceGeneration && persistentDrafts()
+    ? { status: 'saved', retention: 'local' } : { status: 'cancelled', retention: 'page' };
 }
 /** Clear only the explicitly signed-out account/relay scope. */
 export async function clearImageDraftScope(scope: string): Promise<void> {

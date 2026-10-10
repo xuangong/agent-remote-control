@@ -1,4 +1,4 @@
-import { conversationLocalStorage, conversationSessionStorage } from '../conversation-storage.js';
+import { clearCacheOnClose, conversationLocalStorage, conversationSessionStorage } from '../conversation-storage.js';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { AgentReplicaState, RemoteAgentTransport } from '@orchardworks/agent-remote-web';
 import { SessionDirectoryClient, type CreateSessionOptions, type OpenedSession } from '../directory-client.js';
@@ -6,6 +6,14 @@ import { ForkStore, currentForkSource, referenceForkContext, type SessionFork } 
 import { configureFork } from '../fork-actions.js';
 import { DraftStore } from '../draft-store.js';
 import { sessionKey } from '../session-tree.js';
+import { readAskOwnerIndex, saveAskOwnerIndex, type AskAssociationOwner, type AskOwnerIndexDocument } from '../session-composition-model.js';
+import { flushRecoveryWrites } from '../recovery-writes.js';
+import { recoveryGeneration } from '../conversation-recovery.js';
+import { inspectAskDock, flushAskDock } from './useAskDock.js';
+import { inspectAskPosition, flushAskPosition } from './useAskPosition.js';
+import { inspectSessionDisplayPreferences, flushSessionDisplayPreferences } from './useSessionDisplayPreferences.js';
+import { inspectImageDraft } from '@orchardworks/agent-remote-web/browser';
+import type { CompositionParticipantResult } from '../session-composition-application.js';
 
 export type AskInputSender = (text: string, operationId: string) => Promise<unknown>;
 interface AskInputOwner { recordId: string; target?: string; creation?: string }
@@ -18,7 +26,7 @@ export function askParticipantKey(record: SessionFork): string {
 export function isAskAttached(entry?: AskEntry): boolean {
   return !!entry?.attached && !!entry.record?.target && entry.attachedParticipant === askParticipantKey(entry.record);
 }
-interface AskOpenOptions { synchronize?: () => Promise<void>; restoring?: AbortController }
+interface AskOpenOptions { synchronize?: () => Promise<void>; restoring?: AbortController; associationOwner?: string }
 
 export function useAskConversations(baseUrl: string, transport: RemoteAgentTransport, directory?: SessionDirectoryClient, selectedHostId = 'local', onCreated?: () => void) {
   const preparations = useRef(new Map<string, AbortController>());
@@ -29,6 +37,30 @@ export function useAskConversations(baseUrl: string, transport: RemoteAgentTrans
     try { return conversationSessionStorage; } catch { return undefined; }
   }, [baseUrl]);
   const store = useMemo(() => new ForkStore(`ask:${baseUrl}`, storage), [baseUrl, storage]);
+  const association = useMemo(() => {
+    const read = readAskOwnerIndex(baseUrl);
+    const document: AskOwnerIndexDocument = read.status === 'ready' ? read.document : { version: 1, scope: baseUrl, editRevision: 0, owners: [] };
+    return { document, adopted: new Set(document.owners.map(owner => owner.id)), readable: read.status === 'ready' || read.status === 'missing', edits: new Map<string, number>(), epochs: new Map<string, number>(), generation: recoveryGeneration(baseUrl), indexSaved: true };
+  }, [baseUrl, store]);
+  const associationOwner = (key: string) => association.document.owners.find(owner => owner.id === key);
+  const ownerEditRevision = (key: string) => association.edits.get(key) ?? 0;
+  const edited = (key: string) => association.edits.set(key, ownerEditRevision(key) + 1);
+  const keyFor = (source: OpenedSession, owner?: string): string => {
+    if (owner && !associationOwner(owner)) throw new Error('The Ask association owner is unavailable.');
+    return owner ?? sessionKey(source);
+  };
+  const suffix = (key: string) => associationOwner(key)?.legacySourceKey ?? key;
+  const matchesSource = (record: SessionFork, key: string) => {
+    const owner = associationOwner(key);
+    return owner ? owner.records?.some(reference => reference.id === record.id && (reference.target === undefined ? !record.remote : !!record.target && sessionKey(record.target) === reference.target))
+      || sessionKey(record.source) === owner.legacySourceKey : sessionKey(currentForkSource(record)) === key;
+  };
+  function persistOwnerIndex(isCurrent: () => boolean) {
+    const handle = saveAskOwnerIndex(association.document, () => association.readable && association.generation === recoveryGeneration(baseUrl) && isCurrent());
+    flushRecoveryWrites(`agent-remote:recovery:${baseUrl}:ask-owners-v1`);
+    association.indexSaved = handle.result?.status === 'saved';
+    return handle;
+  }
   const owners = useMemo(() => ({ current: { active: true } }), [store, transport]);
   useEffect(() => {
     const owner = { active: true };
@@ -40,58 +72,74 @@ export function useAskConversations(baseUrl: string, transport: RemoteAgentTrans
       for (const entry of entries.values()) entry.busy = false;
     };
   }, [owners]);
-  const inputsKey = (key: string) => `agent-remote-ask:${baseUrl}:inputs:${key}`;
+  const inputsKey = (key: string) => `agent-remote-ask:${associationOwner(key)?.stateScope ?? baseUrl}:inputs:${suffix(key)}`;
+  const inputFailures = useMemo(() => new Set<string>(), [store]);
   function savedInputs(key: string): AskInput[] {
     try {
       const saved: unknown = JSON.parse(storage?.getItem(inputsKey(key)) ?? '[]');
-      return Array.isArray(saved) ? saved.filter((input): input is AskInput => input && typeof input.id === 'string' && typeof input.text === 'string') : [];
-    } catch { return []; }
+      if (!Array.isArray(saved) || !saved.every(input => input && typeof input.id === 'string' && typeof input.text === 'string')) throw new Error('Invalid saved Ask questions.');
+      inputFailures.delete(suffix(key)); return saved;
+    } catch { inputFailures.add(suffix(key)); return []; }
   }
   function saveInputs(key: string, inputs: AskInput[]) {
     if (!storage) throw new Error('Ask could not save the question. Enable browser storage before sending.');
+    if (inputFailures.has(suffix(key))) throw new Error('The original Ask questions could not be read. Restore browser storage before changing this queue.');
     if (inputs.length) storage.setItem(inputsKey(key), JSON.stringify(inputs));
     else storage.removeItem(inputsKey(key));
   }
   const entries = useMemo(() => new Map<string, AskEntry>(), [store]);
   const [revision, refresh] = useState(0);
   const windowKey = `agent-remote-ask:${baseUrl}:open-windows`;
+  function readWindowKeys(): string[] {
+    if (!storage) throw new Error('Ask window storage unavailable.');
+    const raw = storage.getItem(windowKey);
+    if (raw === null) {
+      const previous = storage.getItem(`agent-remote-ask:${baseUrl}:open`);
+      return previous ? [previous] : [];
+    }
+    const saved: unknown = JSON.parse(raw);
+    if (!Array.isArray(saved) || !saved.every(key => typeof key === 'string')) throw new Error('Invalid Ask windows.');
+    return saved;
+  }
+  const windowOwner = (key: string) => association.document.owners.find(owner => owner.legacySourceKey === key)?.id ?? key;
   const windows = useMemo(() => {
-    let expanded: string[] = [];
-    try {
-      const saved: unknown = JSON.parse(storage?.getItem(windowKey) ?? 'null');
-      if (Array.isArray(saved)) expanded = saved.filter((key): key is string => typeof key === 'string');
-      else {
-        const previous = storage?.getItem(`agent-remote-ask:${baseUrl}:open`);
-        if (previous) expanded = [previous];
-      }
-    } catch { /* Keep Ask usable without window-state persistence. */ }
-    return { expanded: new Set(expanded), restoring: new Set(expanded), controllers: new Map<string, AbortController>(), preferences: new Map<string, boolean>() };
+    let expanded: string[] = [], initialized = false;
+    try { expanded = readWindowKeys(); initialized = true; }
+    catch { /* Unknown saved windows remain untouched until a checked recovery. */ }
+    const ownerKeys = expanded.map(windowOwner);
+    return { expanded: new Set(ownerKeys), restoring: new Set(ownerKeys), initialized, revision: 0,
+      edits: new Map<string, boolean>(), controllers: new Map<string, AbortController>(), preferences: new Map<string, boolean>() };
   }, [baseUrl, storage]);
   useEffect(() => () => { for (const controller of windows.controllers.values()) controller.abort(); }, [windows]);
-  function isOpen(source: OpenedSession) { return windows.expanded.has(sessionKey(source)); }
-  function isEnabled(source: OpenedSession): boolean {
-    const key = sessionKey(source);
+  function isOpen(source: OpenedSession, associationOwner?: string) { return windows.expanded.has(keyFor(source, associationOwner)); }
+  function isEnabled(source: OpenedSession, associationOwner?: string): boolean {
+    const key = keyFor(source, associationOwner);
     if (windows.preferences.has(key)) return windows.preferences.get(key)!;
     let saved: string | null = null;
-    try { saved = conversationLocalStorage.getItem(`agent-remote-ask:${baseUrl}:enabled:${key}`) ?? localStorage.getItem('agent-remote-ask-enabled'); }
+    try { saved = conversationLocalStorage.getItem(`agent-remote-ask:${baseUrl}:enabled:${suffix(key)}`) ?? localStorage.getItem('agent-remote-ask-enabled'); }
     catch { /* The current source remains usable without preferences. */ }
-    return saved !== null ? saved === 'true' : !!entryFor(source).record?.remote;
+    return saved !== null ? saved === 'true' : !!entryFor(source, associationOwner).record?.remote;
   }
   function setOpen(key: string, expanded: boolean) {
+    edited(key); windows.revision++;
+    if (!windows.initialized) windows.edits.set(suffix(key), expanded);
     windows.controllers.get(key)?.abort();
     windows.controllers.delete(key);
     windows.restoring.delete(key);
     if (expanded) windows.expanded.add(key); else windows.expanded.delete(key);
     try {
-      storage?.setItem(windowKey, JSON.stringify([...windows.expanded]));
-      storage?.removeItem(`agent-remote-ask:${baseUrl}:open`);
+      if (windows.initialized) {
+        storage?.setItem(windowKey, JSON.stringify([...windows.expanded].map(suffix)));
+        storage?.removeItem(`agent-remote-ask:${baseUrl}:open`);
+      }
     } catch { /* Keep the current window usable when storage is unavailable. */ }
     refresh(value => value + 1);
   }
-  function setEnabled(source: OpenedSession, enabled: boolean) {
-    const key = sessionKey(source);
+  function setEnabled(source: OpenedSession, enabled: boolean, associationOwner?: string) {
+    const key = keyFor(source, associationOwner);
+    edited(key);
     windows.preferences.set(key, enabled);
-    try { conversationLocalStorage.setItem(`agent-remote-ask:${baseUrl}:enabled:${key}`, String(enabled)); }
+    try { conversationLocalStorage.setItem(`agent-remote-ask:${baseUrl}:enabled:${suffix(key)}`, String(enabled)); }
     catch { /* Keep this source preference for the current page. */ }
     if (!enabled) {
       setOpen(key, false);
@@ -100,21 +148,39 @@ export function useAskConversations(baseUrl: string, transport: RemoteAgentTrans
     }
     refresh(value => value + 1);
   }
-  function toggle(source: OpenedSession) { setEnabled(source, !isEnabled(source)); }
-  function close(source: OpenedSession) {
-    const key = sessionKey(source);
+  function toggle(source: OpenedSession, associationOwner?: string) { setEnabled(source, !isEnabled(source, associationOwner), associationOwner); }
+  function close(source: OpenedSession, associationOwner?: string) {
+    const key = keyFor(source, associationOwner);
     setOpen(key, false);
     resumeRequested.current.delete(key);
     preparations.current.get(key)?.abort();
   }
   const drafts = useMemo(() => new DraftStore(`${baseUrl}:ask`), [baseUrl]);
+  const draftStores = useMemo(() => new Map([[`${baseUrl}:ask`, drafts]]), [drafts, baseUrl]);
+  function draftBinding(key: string) {
+    const binding = associationOwner(key)?.text ?? { scope: `${baseUrl}:ask`, key };
+    let store = draftStores.get(binding.scope);
+    if (!store) { store = new DraftStore(binding.scope); draftStores.set(binding.scope, store); }
+    return { store, key: binding.key };
+  }
   useEffect(() => store.subscribe(() => refresh(value => value + 1)), [store]);
   function update(key: string, change: Partial<AskEntry>) {
+    edited(key);
     entries.set(key, { ...entries.get(key)!, ...change });
+    const owner = associationOwner(key);
+    if (owner) {
+      let changed = false;
+      for (const record of [change.record, change.pending]) if (record) {
+        const reference = { id: record.id, ...(record.target ? { target: sessionKey(record.target) } : {}) };
+        if (!owner.records?.some(existing => existing.id === reference.id && existing.target === reference.target)) { owner.records = [...(owner.records ?? []), reference]; changed = true; }
+      }
+      if (changed) { association.document.editRevision++; persistOwnerIndex(() => owners.current.active); }
+    }
     refresh(value => value + 1);
   }
   function setDraft(key: string, text: string) {
-    drafts.set(key, text);
+    edited(key);
+    const binding = draftBinding(key); binding.store.set(binding.key, text);
   }
   function sendInput(key: string, id: string, send: AskInputSender, participant?: string) {
     const entry = entries.get(key);
@@ -153,11 +219,11 @@ export function useAskConversations(baseUrl: string, transport: RemoteAgentTrans
     });
     if (changed) { saveInputs(key, inputs); update(key, { inputs }); }
   }
-  function entryFor(source: OpenedSession) {
-    const key = sessionKey(source);
+  function entryFor(source: OpenedSession, associationOwner?: string) {
+    const key = keyFor(source, associationOwner);
     let entry = entries.get(key);
     if (!entry) {
-      const saved = store.all().filter(record => sessionKey(currentForkSource(record)) === key).reverse();
+      const saved = store.all().filter(record => matchesSource(record, key)).reverse();
       entry = { source, restoring: windows.restoring.has(key), restoreOnly: windows.restoring.has(key), inputs: savedInputs(key), record: saved.find(record => record.target && !record.creationKey), pending: saved.find(record => !!record.creationKey) };
       entries.set(key, entry);
     }
@@ -171,7 +237,7 @@ export function useAskConversations(baseUrl: string, transport: RemoteAgentTrans
     if (entry.pending) return entry;
     const records = store.all().filter(record => record.target && !record.creationKey);
     const retained = entry.record && records.find(record => askParticipantKey(record) === askParticipantKey(entry.record!));
-    const candidates = records.filter(record => sessionKey(currentForkSource(record)) === key);
+    const candidates = records.filter(record => matchesSource(record, key));
     const latest = isAskAttached(entry) && windows.expanded.has(key)
       ? retained ?? records.find(record => record.id === entry.record!.id) : candidates.at(-1) ?? retained;
     if (latest) {
@@ -181,23 +247,24 @@ export function useAskConversations(baseUrl: string, transport: RemoteAgentTrans
     }
     return entry.record?.remote ? { ...entry, record: undefined, attached: false } : entry;
   }
-  function restore(source: OpenedSession, synchronize: () => Promise<void>) {
-    const key = sessionKey(source);
+  function restore(source: OpenedSession, synchronize: () => Promise<void>, associationOwner?: string) {
+    const key = keyFor(source, associationOwner);
+    const epoch = association.epochs.get(key);
     const previous = windows.controllers.get(key);
-    if (!isEnabled(source) || !windows.restoring.has(key) || previous && !previous.signal.aborted || !windows.expanded.has(key) || !directory) return;
+    if (!isEnabled(source, associationOwner) || !windows.restoring.has(key) || previous && !previous.signal.aborted || !windows.expanded.has(key) || !directory) return;
     const owner = owners.current;
     const preparation = new AbortController();
     windows.controllers.set(key, preparation);
-    const retained = entryFor(source);
+    const retained = entryFor(source, associationOwner);
     let participant = askOwnerKey(retained);
-    const ownsRestore = () => owner.active && windows.controllers.get(key) === preparation && askOwnerKey(entries.get(key)) === participant;
+    const ownsRestore = () => owner.active && association.epochs.get(key) === epoch && windows.controllers.get(key) === preparation && askOwnerKey(entries.get(key)) === participant;
     update(key, { restoring: true, restoreOnly: true, error: undefined });
     void synchronize().then(async () => {
-      if (!ownsRestore() || preparation.signal.aborted || !windows.expanded.has(key) || !isEnabled(source)) return;
+      if (!ownsRestore() || preparation.signal.aborted || !windows.expanded.has(key) || !isEnabled(source, associationOwner)) return;
       const latest = withLatestRecord(key, entries.get(key)!);
       update(key, latest);
       participant = askOwnerKey(latest);
-      await open(undefined, source, '', false, { restoring: preparation });
+      await open(undefined, source, '', false, { restoring: preparation, associationOwner });
     }).catch(error => {
       if (ownsRestore() && !preparation.signal.aborted) update(key, { error: error instanceof Error ? error.message : 'Ask could not restore. Retry to reconnect.' });
     }).finally(() => {
@@ -210,17 +277,23 @@ export function useAskConversations(baseUrl: string, transport: RemoteAgentTrans
     });
     return () => preparation.abort();
   }
-  async function open(sourceState: AgentReplicaState | undefined, source: OpenedSession, args = '', clean = false, { synchronize, restoring }: AskOpenOptions = {}) {
-    if (!restoring) setEnabled(source, true);
-    const key = sessionKey(source);
-    let entry = entryFor(source);
+  async function open(sourceState: AgentReplicaState | undefined, source: OpenedSession, args = '', clean = false, { synchronize, restoring, associationOwner }: AskOpenOptions = {}) {
+    if (!restoring) setEnabled(source, true, associationOwner);
+    const key = keyFor(source, associationOwner);
+    const epoch = association.epochs.get(key);
+    let entry = entryFor(source, associationOwner);
     if (!restoring) setOpen(key, true);
     if (entry.busy) {
+      if (associationOwner && preparations.current.get(key)?.signal.aborted) {
+        await preparationSettlements.current.get(key);
+        if (association.epochs.get(key) !== epoch || !owners.current.active || !windows.expanded.has(key)) return {};
+        return open(sourceState, source, args, clean, { synchronize, restoring, associationOwner });
+      }
       if (preparations.current.get(key)?.signal.aborted && !args.trim() && !clean) {
         if (restoring) {
           await preparationSettlements.current.get(key);
-          if (restoring.signal.aborted || !isEnabled(source) || !windows.expanded.has(key)) return {};
-          return open(sourceState, source, '', false, { synchronize, restoring });
+          if (restoring.signal.aborted || !isEnabled(source, associationOwner) || !windows.expanded.has(key)) return {};
+          return open(sourceState, source, '', false, { synchronize, restoring, associationOwner });
         }
         resumeRequested.current.add(key);
         return {};
@@ -229,16 +302,18 @@ export function useAskConversations(baseUrl: string, transport: RemoteAgentTrans
     }
     if (clean && entry.inputs?.length) throw new Error('Wait for the saved Ask question to send before clearing.');
     if (!directory) throw new Error('Open the source session before starting Ask.');
-    const draftAtStart = drafts.get(key);
+    const textBinding = draftBinding(key);
+    const draftAtStart = textBinding.store.get(textBinding.key);
     update(key, { busy: true, restoring: !!restoring, error: undefined });
     const owner = owners.current;
     const preparation = restoring ?? new AbortController();
     let participant = entry.pending ?? entry.record;
-    const ownsEntry = () => owner.active && preparations.current.get(key) === preparation
+    const ownsEntry = () => owner.active && association.epochs.get(key) === epoch && preparations.current.get(key) === preparation
       && askOwnerKey(entries.get(key)) === askOwnerKey({ record: participant });
     const requireCurrent = () => {
       preparation.signal.throwIfAborted();
       if (!ownsEntry()) throw new Error('The Ask participant changed. Retry the current Ask.');
+      if (associationOwner && !association.indexSaved) throw new Error('Ask could not retain its association owner. Free browser storage and retry.');
     };
     const question: AskInput | undefined = args.trim() ? { id: crypto.randomUUID(), text: args.trim() } : undefined;
     let queued = false;
@@ -280,7 +355,7 @@ export function useAskConversations(baseUrl: string, transport: RemoteAgentTrans
           ...(agent.capabilities.planning ? { planning: agent.runtimeInfo.planning?.active === true } : {}) };
         const settings = (agent.runtimeInfo.settings ?? []).filter(setting => setting.mutable && setting.scope === 'session' && setting.value !== null).map(({ id, value }) => ({ id, value }));
         requireCurrent();
-        record = store.prepare(referenceForkContext(source), options, settings, key);
+        record = store.prepare(referenceForkContext(source), options, settings, suffix(key));
         update(key, { pending: record });
         participant = record;
       }
@@ -329,7 +404,7 @@ export function useAskConversations(baseUrl: string, transport: RemoteAgentTrans
       if (askParticipantKey(record) !== askParticipantKey(participant)) throw new Error('The Ask participant changed. Retry the current Ask.');
       update(key, { record, pending: undefined, attached: true, attachedParticipant: askParticipantKey(record), restoreOnly: false });
       participant = record;
-      if (replacing && drafts.get(key) === draftAtStart) setDraft(key, '');
+      if (replacing && textBinding.store.get(textBinding.key) === draftAtStart) setDraft(key, '');
       onCreated?.();
       return {};
     } catch (error) {
@@ -347,13 +422,152 @@ export function useAskConversations(baseUrl: string, transport: RemoteAgentTrans
       if (preparationSettlements.current.get(key) === settlement) preparationSettlements.current.delete(key);
       if (current) update(key, { busy: false });
       finishPreparation();
-      if (current && resumeRequested.current.delete(key) && isEnabled(source) && windows.expanded.has(key)) {
-        void open(sourceState, source, '', false, { synchronize }).catch(() => {});
+      if (current && resumeRequested.current.delete(key) && isEnabled(source, associationOwner) && windows.expanded.has(key)) {
+        void open(sourceState, source, '', false, { synchronize, associationOwner }).catch(() => {});
       }
     }
   }
 
-  return { revision, isEnabled, isOpen, toggle, store, entries, entryFor, drafts, setDraft, sendInput, discardInput, restore, open, close };
+  async function adoptAssociationOwner(descriptor: AskAssociationOwner, source: OpenedSession, isCurrent: () => boolean) {
+    const active = () => owners.current.active && association.generation === recoveryGeneration(baseUrl) && isCurrent();
+    if (!active() || !association.readable || descriptor.stateScope !== baseUrl) return { status: 'failed' as const, retention: 'page' as const };
+    const existing = associationOwner(descriptor.id);
+    if (existing) {
+      const { records: _existingRecords, ...existingBinding } = existing;
+      const { records: _nextRecords, ...nextBinding } = descriptor;
+      if (JSON.stringify(existingBinding) !== JSON.stringify(nextBinding)) return { status: 'conflict' as const, retention: 'page' as const };
+      if (association.adopted.has(descriptor.id)) {
+        const saved = await persistOwnerIndex(active).completion;
+        return saved.status === 'saved' && active() ? { status: 'applied' as const, retention: saved.retention } : { status: 'failed' as const, retention: 'page' as const };
+      }
+    }
+    if (association.document.owners.some(owner => owner.id !== descriptor.id && owner.stateScope === descriptor.stateScope && owner.legacySourceKey === descriptor.legacySourceKey)) return { status: 'conflict' as const, retention: 'page' as const };
+    const legacyKey = descriptor.legacySourceKey;
+    if (legacyKey !== sessionKey(source)) return { status: 'conflict' as const, retention: 'page' as const };
+    const retained = entryFor(source);
+    const epoch = ownerEditRevision(legacyKey);
+    const references = [retained.record, retained.pending].filter((record): record is SessionFork => !!record).map(record => ({ id: record.id, ...(record.target ? { target: sessionKey(record.target) } : {}) }));
+    if (!existing) association.document.owners.push({ ...descriptor, ...(references.length ? { records: references } : {}) }); association.document.editRevision++;
+    const saved = await persistOwnerIndex(() => active() && ownerEditRevision(legacyKey) === epoch).completion;
+    if (saved.status !== 'saved' || !active() || ownerEditRevision(legacyKey) !== epoch) return { status: 'failed' as const, retention: 'page' as const };
+    const key = descriptor.id; association.adopted.add(key);
+    association.epochs.set(key, (association.epochs.get(key) ?? 0) + 1); edited(key);
+    entries.delete(legacyKey); entries.set(key, { ...retained, source });
+    for (const set of [windows.expanded, windows.restoring, resumeRequested.current]) if (set.delete(legacyKey)) set.add(key);
+    const controller = windows.controllers.get(legacyKey); controller?.abort(); windows.controllers.delete(legacyKey);
+    if (windows.preferences.has(legacyKey)) { windows.preferences.set(key, windows.preferences.get(legacyKey)!); windows.preferences.delete(legacyKey); }
+    const preparation = preparations.current.get(legacyKey), settlement = preparationSettlements.current.get(legacyKey);
+    preparation?.abort(); preparations.current.delete(legacyKey); preparationSettlements.current.delete(legacyKey);
+    if (preparation && settlement) {
+      preparations.current.set(key, preparation); preparationSettlements.current.set(key, settlement);
+      void settlement.then(() => {
+        if (preparations.current.get(key) === preparation) { preparations.current.delete(key); const current = entries.get(key); if (current) update(key, { busy: false }); }
+        if (preparationSettlements.current.get(key) === settlement) preparationSettlements.current.delete(key);
+      });
+    } else update(key, { busy: false, restoring: false });
+    refresh(value => value + 1);
+    return { status: 'applied' as const, retention: saved.retention };
+  }
+  function applySourceProjection(key: string, source: OpenedSession, expectedRevision: number, isCurrent: () => boolean) {
+    if (!associationOwner(key) || !association.indexSaved || !owners.current.active || association.generation !== recoveryGeneration(baseUrl) || !isCurrent() || ownerEditRevision(key) !== expectedRevision) return { status: 'pending' as const, retention: 'page' as const };
+    const entry = entryFor(source, key);
+    association.epochs.set(key, (association.epochs.get(key) ?? 0) + 1);
+    preparations.current.get(key)?.abort(); windows.controllers.get(key)?.abort();
+    resumeRequested.current.delete(key);
+    update(key, { ...entry, source, busy: false, restoring: false });
+    return { status: 'applied' as const, retention: 'page' as const };
+  }
+  function ownerIndex(): AskOwnerIndexDocument { return JSON.parse(JSON.stringify(association.document)) as AskOwnerIndexDocument; }
+  async function retainAssociationOwners(keys: readonly string[], isCurrent: () => boolean): Promise<CompositionParticipantResult> {
+    const edits = keys.map(key => [key, ownerEditRevision(key)] as const), indexRevision = association.document.editRevision, windowRevision = windows.revision;
+    const checks: Array<() => boolean> = [];
+    const retainedCurrent = () => owners.current.active && association.generation === recoveryGeneration(baseUrl)
+      && association.document.editRevision === indexRevision && windows.revision === windowRevision && edits.every(([key, revision]) => ownerEditRevision(key) === revision) && checks.every(check => check());
+    const current = () => isCurrent() && retainedCurrent();
+    const retentions: Array<'page' | 'session' | 'local'> = [];
+    if (!association.readable || !current()) return { status: 'pending', retention: 'page', code: 'ask_owner_currentness' };
+    try {
+      if (!storage) throw new Error('Storage unavailable.');
+      // A checked enumeration proves no-record owners, without the forgiving ledger view.
+      const prefix = `agent-remote-forks:ask:${baseUrl}:record:`;
+      for (let index = 0; index < storage.length; index++) { const key = storage.key(index); if (key?.startsWith(prefix)) store.getLocalForEffect(key.slice(prefix.length)); }
+      const open = readWindowKeys();
+      if (!windows.initialized) {
+        const recovered = new Set(open);
+        for (const [key, expanded] of windows.edits) if (expanded) recovered.add(key); else recovered.delete(key);
+        for (const key of recovered) {
+          const owner = windowOwner(key);
+          windows.expanded.add(owner);
+          if (!windows.edits.has(key)) {
+            windows.restoring.add(owner);
+            if (entries.has(owner)) update(owner, { restoring: true, restoreOnly: true });
+          }
+        }
+        windows.initialized = true; windows.edits.clear(); windows.revision++;
+        refresh(value => value + 1);
+        return { status: 'pending', retention: 'page', code: 'ask_windows_recovered' };
+      }
+      for (const key of keys) {
+        const owner = associationOwner(key); if (!owner || !association.adopted.has(key)) throw new Error('Ask owner unavailable.');
+        const unread = inputFailures.has(suffix(key));
+        const saved = savedInputs(key); if (inputFailures.has(suffix(key))) throw new Error('Ask question read failed.');
+        const entry = entries.get(key);
+        if (unread) {
+          // Failed reads never made the empty placeholder an authoritative queue.
+          if (entry) update(key, { inputs: saved });
+          return { status: 'pending', retention: 'page', code: 'ask_questions_recovered' };
+        }
+        if (entry?.inputs) saveInputs(key, entry.inputs); else saveInputs(key, saved);
+        for (const reference of owner.records ?? []) {
+          const record = store.getLocalForEffect(reference.id);
+          if (!record) {
+            const remote = store.all().find(record => record.remote && record.id === reference.id && record.target && sessionKey(record.target) === reference.target);
+            if (!remote) throw new Error('Ask ledger reference unavailable.');
+          } else if (reference.target !== undefined && (!record.target || sessionKey(record.target) !== reference.target)) throw new Error('Ask ledger reference changed.');
+        }
+        const preferenceKey = `agent-remote-ask:${baseUrl}:enabled:${owner.legacySourceKey}`;
+        const enabled = conversationLocalStorage.getItem(preferenceKey);
+        if (enabled !== null && enabled !== 'true' && enabled !== 'false') throw new Error('Invalid Ask preference.');
+        if (windows.preferences.has(key)) conversationLocalStorage.setItem(preferenceKey, String(windows.preferences.get(key)));
+        const text = draftBinding(key);
+        if (text.store.inspect(text.key).status === 'failed') text.store.retryRead();
+        const textSnapshot = text.store.inspect(text.key);
+        if (textSnapshot.status !== 'ready') throw new Error('Ask draft read failed.');
+        checks.push(() => text.store.inspect(text.key).status === 'ready' && text.store.snapshot(text.key).revision === textSnapshot.revision);
+        const textResult = await text.store.flushCurrent(text.key, textSnapshot.revision, current);
+        if (!current()) return { status: 'pending', retention: 'page', code: 'ask_owner_edit' };
+        if (textResult.status !== 'saved') throw new Error('Ask draft write failed.');
+        retentions.push(textResult.retention);
+        const dock = inspectAskDock(owner.geometryScope), position = inspectAskPosition(owner.geometryScope);
+        checks.push(() => inspectAskDock(owner.geometryScope).revision === dock.revision && inspectAskPosition(owner.geometryScope).revision === position.revision);
+        const dockResult = flushAskDock(owner.geometryScope, dock.revision, current), positionResult = flushAskPosition(owner.geometryScope, position.revision, current);
+        if (dockResult.status !== 'ready' || positionResult.status !== 'ready') throw new Error('Ask geometry retention incomplete.');
+        retentions.push(dockResult.retention, positionResult.retention);
+        if (owner.display) {
+          const display = inspectSessionDisplayPreferences(owner.display), result = flushSessionDisplayPreferences(owner.display, display.revision, current);
+          if (result.status !== 'ready') throw new Error('Ask display retention incomplete.');
+          checks.push(() => inspectSessionDisplayPreferences(owner.display!).revision === display.revision); retentions.push(result.retention);
+        }
+        if (owner.image) {
+          const image = await inspectImageDraft(owner.image), snapshot = image.snapshot();
+          if (!current()) return { status: 'pending', retention: 'page', code: 'ask_owner_edit' };
+          checks.push(() => image.snapshot().revision === snapshot.revision && image.snapshot().status !== 'cancelled');
+          const result = await image.flush(snapshot.revision, current);
+          if (!current()) return { status: 'pending', retention: 'page', code: 'ask_owner_edit' };
+          if (result.status !== 'ready' || result.savedRevision !== result.revision) throw new Error('Ask image retention incomplete.'); retentions.push(result.retention);
+        }
+      }
+      if (!current()) return { status: 'pending', retention: 'page', code: 'ask_owner_edit' };
+      storage.setItem(windowKey, JSON.stringify([...windows.expanded].map(suffix)));
+      const result = await persistOwnerIndex(current).completion;
+      if (!current()) return { status: 'pending', retention: 'page', code: 'ask_owner_edit' };
+      if (result.status !== 'saved') throw new Error('Ask owner index write failed.');
+      retentions.push(result.retention, clearCacheOnClose() ? 'page' : 'session');
+      return { status: 'applied', retention: retentions.includes('page') ? 'page' : retentions.includes('session') ? 'session' : 'local', retainedCurrent };
+    } catch { return { status: 'failed', retention: 'page', code: 'ask_retention' }; }
+  }
+  return { revision, isEnabled, isOpen, toggle, store, entries, entryFor, drafts, draftBinding, setDraft, sendInput, discardInput, restore, open, close,
+    associationOwner, ownerEditRevision, ownerIndex, adoptAssociationOwner, applySourceProjection, retainAssociationOwners };
 }
 
 async function waitForAskRelations(synchronize: () => Promise<void>, signal: AbortSignal): Promise<void> {

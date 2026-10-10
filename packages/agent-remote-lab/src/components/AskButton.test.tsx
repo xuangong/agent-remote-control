@@ -3,6 +3,7 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { render, unmount } from '../test/setup.js';
 import { conversationLocalStorage } from '../conversation-storage.js';
 import { AskButton } from './AskButton.js';
+import { inspectAskDock, flushAskDock } from '../hooks/useAskDock.js';
 
 const rect = (x: number, y: number, width: number, height: number) => ({ x, y, left: x, top: y, right: x + width, bottom: y + height, width, height, toJSON: () => ({}) });
 const sizes = new Map<string, { width: number; height: number }>();
@@ -156,4 +157,18 @@ it('keeps restored heights reachable in a very short view', async () => {
   expect(button.getBoundingClientRect().bottom).toBe(180);
   await key(button, 'ArrowUp', true);
   expect(button.getBoundingClientRect().top).toBe(100);
+});
+it('retains failed dock edits after unmount and refuses damaged or stale retention', async () => {
+  const container = await render(<Harness scope="failed-dock" />);
+  const denied = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => { throw new Error('Denied'); });
+  await key(container.querySelector('button')!, 'ArrowLeft');
+  const snapshot = inspectAskDock('failed-dock');
+  expect(snapshot).toMatchObject({ status: 'failed', edge: 'left', retention: 'page' });
+  await unmount(container); denied.mockRestore();
+  expect(flushAskDock('failed-dock', snapshot.revision, () => false).status).toBe('cancelled');
+  expect(flushAskDock('failed-dock', snapshot.revision, () => true)).toMatchObject({ status: 'ready', edge: 'left', retention: 'local' });
+  localStorage.setItem('agent-remote-ask:damaged-dock:dock-top', 'bad');
+  expect(inspectAskDock('damaged-dock').status).toBe('failed');
+  expect(flushAskDock('damaged-dock', 0, () => true).status).toBe('failed');
+  expect(localStorage.getItem('agent-remote-ask:damaged-dock:dock-top')).toBe('bad');
 });

@@ -857,3 +857,157 @@ it('does not recreate a saved question or bind native state after workspace unmo
   expect(conversationSessionStorage.getItem(key)).toBeNull();
   expect(f.current().store.getLocal(operation.id)?.target).toBeUndefined();
 });
+it('adopts an Ask owner without native work and keeps original suffixes after source projection', async () => {
+  const fixture = await setup(); const ask = fixture.current(); const key = sessionKey(source);
+  const owner = { id: 'ask-owner-A', sourceSlot: 'slot-A', stateScope: baseUrl, legacySourceKey: key, geometryScope: JSON.stringify([baseUrl, key]), text: { scope: `${baseUrl}:ask`, key } };
+  const requests = fixture.requests.length;
+  await act(async () => { expect((await ask.adoptAssociationOwner(owner, source, () => true)).status).toBe('applied'); });
+  const next = { ...source, nativeSessionId: 'B', agentId: 'runtime-B' };
+  await act(async () => { expect(ask.applySourceProjection(owner.id, next, ask.ownerEditRevision(owner.id), () => true).status).toBe('applied'); });
+  expect(fixture.requests).toHaveLength(requests);
+  expect(ask.entryFor(next, owner.id)).toMatchObject({ source: next, attached: true, record: { source, target: { nativeSessionId: 'ask-native' } } });
+  expect(ask.isOpen(next, owner.id)).toBe(true);
+  expect(ask.draftBinding(owner.id).store.get(key)).toBe('Unsent Ask draft');
+  await act(async () => ask.close(next, owner.id));
+  expect(ask.isOpen(next, owner.id)).toBe(false);
+  await fixture.reload(); const restored = fixture.current();
+  expect(restored.ownerIndex().owners).toMatchObject([owner]);
+  expect(restored.ownerIndex().owners[0]!.records).toEqual([{ id: ask.entryFor(next, owner.id).record!.id, target: sessionKey(ask.entryFor(next, owner.id).record!.target!) }]);
+  expect(restored.entryFor(next, owner.id).record?.target?.nativeSessionId).toBe('ask-native');
+  expect(restored.draftBinding(owner.id).store.get(key)).toBe('Unsent Ask draft');
+});
+
+it('retains an original pending creation while retiring its adopted window callbacks', async () => {
+  const fixture = await setup(); const finish = fixture.pauseCreate();
+  let opening!: Promise<unknown>;
+  await act(async () => { opening = fixture.current().open(state, source, 'saved question', true); });
+  const original = fixture.current().entryFor(source).pending!; const key = sessionKey(source);
+  const owner = { id: 'pending-owner', sourceSlot: 'slot-A', stateScope: baseUrl, legacySourceKey: key, geometryScope: JSON.stringify([baseUrl, key]), text: { scope: `${baseUrl}:ask`, key } };
+  await act(async () => { await fixture.current().adoptAssociationOwner(owner, source, () => true); });
+  const next = { ...source, nativeSessionId: 'B', agentId: 'runtime-B' };
+  await act(async () => { const ask = fixture.current(); ask.applySourceProjection(owner.id, next, ask.ownerEditRevision(owner.id), () => true); finish(); await opening; });
+  expect(fixture.current().store.getLocal(original.id)?.target?.nativeSessionId).toBe('ask-native');
+  expect(fixture.current().entryFor(next, owner.id)).toMatchObject({ source: next, inputs: [{ text: 'saved question' }] });
+  expect(fixture.current().entryFor(next, owner.id).record?.id).not.toBe(original.id);
+  expect(fixture.current().store.getLocal(original.id)?.creationKey).toBe(original.creationKey);
+  expect(fixture.requests.filter(request => request.path.endsWith('/create'))).toHaveLength(2);
+});
+
+it('recovers unread questions before retaining a closed no-record owner and never replaces them with empty UI state', async () => {
+  const fixture = await setup(); const ask = fixture.current();
+  const closed = { ...source, nativeSessionId: 'no-record', agentId: 'closed-runtime' }, key = sessionKey(closed);
+  const inputsKey = `agent-remote-ask:${baseUrl}:inputs:${key}`;
+  const originalQuestions = [{ id: 'original', text: 'Preserve the unanswered question' }];
+  conversationSessionStorage.setItem(inputsKey, JSON.stringify(originalQuestions));
+  const originalRead = conversationSessionStorage.getItem.bind(conversationSessionStorage);
+  const denied = vi.spyOn(conversationSessionStorage, 'getItem').mockImplementation(value => { if (value === inputsKey) throw new Error('Unavailable'); return originalRead(value); });
+  expect(ask.entryFor(closed).inputs).toEqual([]);
+  const owner = { id: 'closed-owner', sourceSlot: 'closed-slot', stateScope: baseUrl, legacySourceKey: key, geometryScope: JSON.stringify([baseUrl, key]), text: { scope: `${baseUrl}:ask`, key } };
+  await act(async () => { await ask.adoptAssociationOwner(owner, closed, () => true); });
+  denied.mockRestore();
+  const requestCount = fixture.requests.length;
+  await act(async () => { expect((await ask.retainAssociationOwners([owner.id], () => true)).status).toBe('pending'); });
+  expect(ask.entryFor(closed, owner.id).inputs).toEqual(originalQuestions);
+  expect(JSON.parse(conversationSessionStorage.getItem(inputsKey)!)).toEqual(originalQuestions);
+  await act(async () => { expect((await ask.retainAssociationOwners([owner.id], () => true)).status).toBe('applied'); });
+  expect(ask.isOpen(closed, owner.id)).toBe(false);
+  expect(ask.ownerIndex().owners.find(value => value.id === owner.id)?.records ?? []).toEqual([]);
+  expect(fixture.requests).toHaveLength(requestCount);
+});
+
+it('rechecks earlier owner text edits while retaining a later closed owner', async () => {
+  const fixture = await setup(), ask = fixture.current();
+  const sources = [source, { ...source, nativeSessionId: 'closed-two', agentId: 'closed-two' }];
+  const owners = sources.map((value, i) => ({ id: `retained-${i}`, sourceSlot: `slot-${i}`, stateScope: baseUrl,
+    legacySourceKey: sessionKey(value), geometryScope: JSON.stringify([baseUrl, sessionKey(value)]), text: { scope: `${baseUrl}:ask`, key: sessionKey(value) } }));
+  await act(async () => { for (const [index, owner] of owners.entries()) await ask.adoptAssociationOwner(owner, sources[index]!, () => true); });
+  const first = ask.draftBinding(owners[0]!.id), second = ask.draftBinding(owners[1]!.id);
+  let finish!: () => void, entered = false; const held = new Promise<void>(resolve => { finish = resolve; });
+  const flush = second.store.flushCurrent.bind(second.store);
+  const pause = vi.spyOn(second.store, 'flushCurrent').mockImplementation(async (key, revision, current) => {
+    const result = await flush(key, revision, current);
+    if (key === second.key) { entered = true; await held; }
+    return result;
+  });
+  let retention!: ReturnType<typeof ask.retainAssociationOwners>;
+  await act(async () => { retention = ask.retainAssociationOwners(owners.map(owner => owner.id), () => true); });
+  expect(entered).toBe(true);
+  await act(async () => { first.store.set(first.key, 'New bound-composer edit'); finish(); expect((await retention).status).toBe('pending'); });
+  pause.mockRestore();
+  await act(async () => { expect((await ask.retainAssociationOwners(owners.map(owner => owner.id), () => true)).status).toBe('applied'); });
+  expect(first.store.get(first.key)).toBe('New bound-composer edit');
+});
+
+it('retains an Ask-on-Side owner independently when only the primary source is projected', async () => {
+  const fixture = await setup();
+  const side = { ...source, nativeSessionId: 'independent-side', agentId: 'side-runtime' };
+  await act(async () => { await fixture.current().open(state, side); });
+  const ask = fixture.current();
+  const owners = [source, side].map((value, i) => ({ id: `branch-${i}`, sourceSlot: `slot-${i}`, stateScope: baseUrl,
+    legacySourceKey: sessionKey(value), geometryScope: JSON.stringify([baseUrl, sessionKey(value)]), text: { scope: `${baseUrl}:ask`, key: sessionKey(value) } }));
+  await act(async () => { await ask.adoptAssociationOwner(owners[0]!, source, () => true); await ask.adoptAssociationOwner(owners[1]!, side, () => true); ask.close(side, owners[1]!.id); });
+  const original = ask.entryFor(side, owners[1]!.id), record = original.record!, requestCount = fixture.requests.length;
+  const next = { ...source, nativeSessionId: 'B', agentId: 'B' };
+  await act(async () => {
+    expect((await ask.retainAssociationOwners(owners.map(owner => owner.id), () => true)).status).toBe('applied');
+    expect(ask.applySourceProjection(owners[0]!.id, next, ask.ownerEditRevision(owners[0]!.id), () => true).status).toBe('applied');
+  });
+  expect(ask.entryFor(side, owners[1]!.id)).toMatchObject({ source: side, record });
+  expect(ask.store.getLocal(record.id)?.source).toEqual(side);
+  expect(ask.isOpen(side, owners[1]!.id)).toBe(false); expect(fixture.requests).toHaveLength(requestCount);
+});
+
+it('retries failed owner-index adoption without losing the original window or starting native work', async () => {
+  const fixture = await setup(), ask = fixture.current(), key = sessionKey(source);
+  const owner = { id: 'retry-index', sourceSlot: 'slot-A', stateScope: baseUrl, legacySourceKey: key, geometryScope: JSON.stringify([baseUrl, key]), text: { scope: `${baseUrl}:ask`, key } };
+  const originalWrite = conversationSessionStorage.setItem.bind(conversationSessionStorage);
+  const denied = vi.spyOn(conversationSessionStorage, 'setItem').mockImplementation((key, value) => { if (key.endsWith(':ask-owners-v1')) throw new Error('Full'); originalWrite(key, value); });
+  await act(async () => { expect((await ask.adoptAssociationOwner(owner, source, () => true)).status).toBe('failed'); });
+  expect(ask.isOpen(source)).toBe(true);
+  const requests = fixture.requests.length;
+  denied.mockRestore();
+  await act(async () => { expect((await ask.adoptAssociationOwner(owner, source, () => true)).status).toBe('applied'); });
+  expect(ask.isOpen(source, owner.id)).toBe(true); expect(ask.entryFor(source, owner.id).record?.target?.nativeSessionId).toBe('ask-native');
+  expect(fixture.requests).toHaveLength(requests);
+});
+
+
+it.each([false, true])('recovers an initially unread window set without losing untouched windows or local edits: %s', async localEdits => {
+  const untouched = { ...source, nativeSessionId: 'untouched-window', agentId: 'untouched' };
+  const opened = { ...source, nativeSessionId: 'new-window', agentId: 'new' };
+  const key = sessionKey(source), windowKey = `agent-remote-ask:${baseUrl}:open-windows`;
+  const originalWindows = [key, sessionKey(untouched)];
+  conversationSessionStorage.setItem(windowKey, JSON.stringify(originalWindows));
+  const originalRead = conversationSessionStorage.getItem.bind(conversationSessionStorage);
+  const denied = vi.spyOn(conversationSessionStorage, 'getItem').mockImplementation(value => {
+    if (value === windowKey) throw new Error('Window read unavailable'); return originalRead(value);
+  });
+  const request = vi.fn(async () => Response.json({ agentId: 'new-ask', nativeSessionId: 'new-ask-native' }));
+  const directory = new SessionDirectoryClient(baseUrl, request);
+  const transport = {} as import('@orchardworks/agent-remote-web').RemoteAgentTransport;
+  let ask!: ReturnType<typeof useAskConversations>;
+  function Harness() { ask = useAskConversations(baseUrl, transport, directory); return null; }
+  let container = await render(<Harness />);
+  const owner = { id: 'unread-window-owner', sourceSlot: 'slot-A', stateScope: baseUrl, legacySourceKey: key,
+    geometryScope: JSON.stringify([baseUrl, key]), text: { scope: `${baseUrl}:ask`, key } };
+  await act(async () => { expect((await ask.adoptAssociationOwner(owner, source, () => true)).status).toBe('applied'); });
+  expect(ask.isOpen(source, owner.id)).toBe(false);
+  if (localEdits) await act(async () => { ask.close(source, owner.id); await ask.open(state, opened); });
+  expect(JSON.parse(originalRead(windowKey)!)).toEqual(originalWindows);
+  const requests = request.mock.calls.length;
+  denied.mockRestore();
+  await act(async () => { expect((await ask.retainAssociationOwners([owner.id], () => true)).status).toBe('pending'); });
+  expect(ask.isOpen(source, owner.id)).toBe(!localEdits);
+  expect(ask.isOpen(untouched)).toBe(true);
+  expect(ask.isOpen(opened)).toBe(localEdits);
+  expect(JSON.parse(conversationSessionStorage.getItem(windowKey)!)).toEqual(originalWindows);
+  await act(async () => { expect((await ask.retainAssociationOwners([owner.id], () => true)).status).toBe('applied'); });
+  const expected = localEdits ? [sessionKey(untouched), sessionKey(opened)] : originalWindows;
+  expect(new Set(JSON.parse(conversationSessionStorage.getItem(windowKey)!))).toEqual(new Set(expected));
+  expect(request).toHaveBeenCalledTimes(requests);
+  await unmount(container); container = await render(<Harness />);
+  expect(ask.isOpen(source, owner.id)).toBe(!localEdits);
+  expect(ask.isOpen(untouched)).toBe(true);
+  expect(ask.isOpen(opened)).toBe(localEdits);
+  expect(request).toHaveBeenCalledTimes(requests);
+});

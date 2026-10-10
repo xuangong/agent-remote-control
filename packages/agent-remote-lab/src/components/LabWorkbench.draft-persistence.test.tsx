@@ -55,3 +55,23 @@ it('does not rerender an unrelated workbench on normal text saves', async () => 
   expect(input(view.querySelector('[data-view="second"]')!).value).toBe('');
   expect(view.querySelector('[role="alert"]')).toBeNull();
 });
+
+it('exposes an initial read failure and uses the existing Retry to merge untouched saved keys', async () => {
+  const scope = 'initial-draft-read';
+  const key = `agent-remote:recovery:${scope}:drafts`;
+  conversationSessionStorage.setItem(key, JSON.stringify({ one: 'Old text', untouched: 'Keep this draft' }));
+  const original = conversationSessionStorage.getItem.bind(conversationSessionStorage);
+  const read = vi.spyOn(conversationSessionStorage, 'getItem').mockImplementation(value => {
+    if (value === key) throw new Error('Temporary read failure');
+    return original(value);
+  });
+  const store = new DraftStore(scope);
+  const view = await render(<LabWorkbench state={replicaState} sessionStatus="ready" actions={{}} draftBinding={{ store, key: 'one' }} />);
+  await type(view, 'New unsaved text');
+  expect(view.querySelector('[role="alert"]')?.textContent).toContain('Draft is not saved');
+  expect(input(view).disabled).toBe(false);
+  read.mockRestore();
+  await act(async () => view.querySelector<HTMLButtonElement>('button[aria-label="Retry saving draft"]')!.click());
+  expect(readDrafts(scope)).toEqual({ one: 'New unsaved text', untouched: 'Keep this draft' });
+  expect(view.querySelector('[role="alert"]')).toBeNull();
+});

@@ -28,6 +28,16 @@ export function saveLastSession(scope: string, location: ControllerLocation): vo
   catch { /* The current conversation remains usable without storage. */ }
 }
 
+export type CheckedDraftRead = { status: 'ready'; drafts: Record<string, string> } | { status: 'failed'; error: unknown };
+export function readDraftsChecked(scope: string): CheckedDraftRead {
+  flushRecoveryWrites(`${prefix}${scope}:drafts`);
+  try {
+    const value: unknown = JSON.parse(conversationSessionStorage.getItem(`${prefix}${scope}:drafts`) ?? '{}');
+    if (!value || typeof value !== 'object' || Array.isArray(value) || !Object.values(value).every(text => typeof text === 'string')) throw new Error('Saved text drafts are damaged.');
+    return { status: 'ready', drafts: value as Record<string, string> };
+  } catch (error) { return { status: 'failed', error }; }
+}
+
 export function readDrafts(scope: string): Record<string, string> {
   flushRecoveryWrites(`${prefix}${scope}:drafts`);
   try {
@@ -37,10 +47,10 @@ export function readDrafts(scope: string): Record<string, string> {
   } catch { return {}; }
 }
 
-export function saveDrafts(scope: string, drafts: Record<string, string>): RecoveryWriteHandle {
+export function saveDrafts(scope: string, drafts: Record<string, string>, isCurrent: () => boolean = () => true): RecoveryWriteHandle {
   const generation = recoveryGeneration(scope);
   return queueRecoveryWrite(`${prefix}${scope}:drafts`, () => JSON.stringify(drafts), {
-    isCurrent: () => generation === recoveryGeneration(scope),
+    isCurrent: () => isCurrent() && generation === recoveryGeneration(scope),
   });
 }
 

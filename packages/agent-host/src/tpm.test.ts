@@ -387,3 +387,168 @@ it('archives only completed work, retaining the conversation and allowing restor
   const reopened = await f.coordinator.action({ id: work.id, revision: again.revision, operationId: 'reopen', action: 'reopen' }, 'owner');
   expect(reopened).toMatchObject({ archived: false, phase: 'clarifying' });
 });
+
+function successionRouting(f: Awaited<ReturnType<typeof fixture>>) {
+  const origin = { controllerId: 'controller', providerId: 'codex', nativeSessionId: 'main' };
+  let target = origin; let revision = 1;
+  const acquired: Array<{ providerId: string; nativeSessionId: string }> = [];
+  f.access.mainRouting = {
+    async bind() { return { kind: 'primary_role', roleId: 'primary', origin }; },
+    resolve() { return { target, roleRevision: revision }; },
+    async acquire(ref) { acquired.push(ref); return f.access.acquire(ref.providerId, ref.nativeSessionId); },
+    assertCurrent(_binding, ref, roleRevision) {
+      if (JSON.stringify(ref) !== JSON.stringify(target) || roleRevision !== revision) throw new Error('Primary role changed.');
+    },
+  };
+  return { acquired, origin, get target() { return target; },
+    commit(id: string, providerId = 'other') { target = { ...origin, providerId, nativeSessionId: id }; revision++; f.sessions.set(id, new SessionManager(id)); },
+  };
+}
+
+it('follows succession for every work and subscription while preserving paused work and TPM identities', async () => {
+  const f = await fixture(); const route = successionRouting(f);
+  const one = await f.create(); const two = await f.create('create-two');
+  const paused = await f.coordinator.action({ id: two.id, revision: (await f.coordinator.get(two.id)).revision, operationId: 'pause-two', action: 'pause' }, 'owner');
+  route.commit('successor'); await f.coordinator.tick();
+  const works = await f.coordinator.list();
+  for (const work of works.works) {
+    expect(work.mainNativeSessionId).toBe('successor');
+    expect(work.mainSessionRef).toEqual(route.target);
+    expect(work.mainBinding).toEqual({ kind: 'primary_role', roleId: 'primary', origin: route.origin });
+    expect(work.providerId).toBe('codex');
+  }
+  expect((await f.coordinator.get(two.id)).todo).toEqual(paused.todo);
+  expect((await f.coordinator.get(two.id)).paused).toBe(true);
+  expect((await f.coordinator.get(one.id)).tpmNativeSessionId).toBe(one.tpmNativeSessionId);
+  expect((await f.coordinator.get(one.id)).outbox![0]!.resolvedTarget).toEqual({ ...route.origin, nativeSessionId: one.tpmNativeSessionId });
+  expect(f.sessions.get('main')!.leases).toBe(0);
+  expect(f.sessions.get('main')!.listeners.size).toBe(0);
+  expect(f.sessions.get('successor')!.listeners.size).toBe(1);
+  f.access.mainRouting!.read = async binding => {
+    const resolved = f.access.mainRouting!.resolve(binding); const lease = await f.access.mainRouting!.acquire(resolved.target);
+    try { return { state: lease.agent.snapshot().payload, sourceRef: resolved.target }; } finally { lease.release(); }
+  };
+  const read = await f.call(one, 'read_main_session', {});
+  expect(read.state.id).toBe('successor');
+  expect(route.acquired.at(-1)).toEqual(route.target);
+}, 10000);
+
+it('admits a prepared main intent once to the successor and durably pins the full recipient', async () => {
+  const f = await fixture(); const route = successionRouting(f); const work = await f.create();
+  f.sessions.get('main')!.setStatus('running');
+  const intent = await f.call(work, 'send_main_message', { operationId: 'prepared-before-succession', purpose: 'consultation', text: 'Assess the scope' });
+  await f.coordinator.tick();
+  expect((await f.coordinator.get(work.id)).outbox?.find(item => item.id === intent.id)?.status).toBe('prepared');
+  route.commit('successor'); await f.coordinator.tick();
+  await waitMessages(f.sessions.get('successor')!, 1);
+  const admitted = (await f.coordinator.get(work.id)).outbox!.find(item => item.id === intent.id)!;
+  expect(admitted).toMatchObject({ status: 'accepted', resolvedTarget: route.target, roleRevision: 2 });
+  expect(f.sessions.get('main')!.messages).toEqual([]);
+  route.commit('third'); await f.coordinator.tick(); await f.restart(); await f.coordinator.tick();
+  expect((await f.coordinator.get(work.id)).outbox!.find(item => item.id === intent.id)!.resolvedTarget).toEqual(admitted.resolvedTarget);
+  expect(f.sessions.get('third')!.messages).toEqual([]);
+}, 10000);
+
+it.each(['dispatching', 'unknown', 'accepted', 'queued'] as const)('never retargets %s main delivery after succession and restart', async status => {
+  const f = await fixture(true); const route = successionRouting(f); const work = await f.create();
+  const intent = await f.call(work, 'send_main_message', { operationId: 'pinned', purpose: 'consultation', text: 'Assess once' });
+  await waitMessages(f.sessions.get('main')!, 1);
+  await f.coordinator.close();
+  await f.coordinator.store.update(work.id, undefined, record => {
+    const item = record.work.outbox!.find(value => value.id === intent.id)!;
+    item.status = status === 'queued' ? 'accepted' : status;
+    if (status === 'queued') item.acceptance = 'queued';
+  });
+  route.commit('successor'); await f.restart(); await f.coordinator.tick();
+  const restored = (await f.coordinator.get(work.id)).outbox!.find(item => item.id === intent.id)!;
+  expect(restored.resolvedTarget).toEqual(route.origin); expect(restored.roleRevision).toBe(1);
+  expect(restored.status).toBe(status === 'dispatching' ? 'unknown' : status === 'queued' ? 'accepted' : status);
+  await f.call(work, 'send_main_message', { operationId: 'pinned', purpose: 'consultation', text: 'Assess once' });
+  expect(f.sessions.get('successor')!.messages).toEqual([]);
+  expect(f.sessions.get('main')!.messages).toHaveLength(1);
+}, 10000);
+
+it('rejects a claimed intent when succession commits before final native dispatch without replaying it', async () => {
+  const f = await fixture(); const route = successionRouting(f); const work = await f.create();
+  const original = f.access.execute;
+  f.access.execute = async (agent, operation, execution) => {
+    if (agent.agentId === 'main') {
+      const persisted = (await f.coordinator.get(work.id)).outbox!.find(item => item.id === operation.operationId)!;
+      expect(persisted).toMatchObject({ status: 'dispatching', resolvedTarget: route.origin, roleRevision: 1 });
+      route.commit('successor');
+    }
+    return original(agent, operation, execution);
+  };
+  const intent = await f.call(work, 'send_main_message', { operationId: 'commit-race', purpose: 'consultation', text: 'Check once' });
+  await expect.poll(async () => (await f.coordinator.get(work.id)).outbox?.find(item => item.id === intent.id)?.status).toBe('rejected');
+  expect(f.sessions.get('main')!.messages).toEqual([]); expect(f.sessions.get('successor')!.messages).toEqual([]);
+  await f.coordinator.tick();
+  expect((await f.coordinator.get(work.id)).outbox!.find(item => item.id === intent.id)!.resolvedTarget).toEqual(route.origin);
+}, 10000);
+
+it('enrolls existing fixed and legacy paused works when their main acquires a role', async () => {
+  const f = await fixture(); const route = successionRouting(f);
+  const bind = f.access.mainRouting!.bind;
+  f.access.mainRouting!.bind = async () => ({ kind: 'fixed', source: route.origin });
+  const work = await f.create();
+  const intent = await f.call(work, 'send_main_message', { operationId: 'before-role', purpose: 'consultation', text: 'Old receipt' });
+  await waitMessages(f.sessions.get('main')!, 1);
+  await f.coordinator.action({ id: work.id, revision: (await f.coordinator.get(work.id)).revision, operationId: 'pause', action: 'pause' }, 'owner');
+  f.access.mainRouting!.bind = bind; route.commit('successor'); await f.coordinator.tick();
+  const current = await f.coordinator.get(work.id);
+  expect(current.mainBinding?.kind).toBe('primary_role'); expect(current.paused).toBe(true);
+  expect(current.outbox!.find(item => item.id === intent.id)!.resolvedTarget).toEqual(route.origin);
+  expect(f.sessions.get('successor')!.messages).toEqual([]);
+}, 10000);
+
+it('reports uncertain and queued main recipients to readiness using their pinned addresses', async () => {
+  const f = await fixture(true); const route = successionRouting(f); const work = await f.create();
+  const intent = await f.call(work, 'send_main_message', { operationId: 'queued-readiness', purpose: 'consultation', text: 'Assess once' });
+  await waitMessages(f.sessions.get('main')!, 1);
+  expect(f.coordinator.hasUnsettledMain(route.origin)).toBe(true);
+  route.commit('successor'); await f.coordinator.tick();
+  expect(f.coordinator.hasUnsettledMain(route.target)).toBe(false);
+  for (const status of ['dispatching', 'unknown'] as const) {
+    await f.coordinator.store.update(work.id, undefined, record => { record.work.outbox!.find(item => item.id === intent.id)!.status = status; });
+    expect(f.coordinator.hasUnsettledMain(route.origin)).toBe(true);
+  }
+  await f.coordinator.store.update(work.id, undefined, record => { record.work.outbox!.find(item => item.id === intent.id)!.status = 'rejected'; });
+  expect(f.coordinator.hasUnsettledMain(route.origin)).toBe(false);
+}, 10000);
+
+it('requires the contextual reader after succession and passes signed source cursors without native reinterpretation', async () => {
+  const f = await fixture(); const route = successionRouting(f); const work = await f.create();
+  route.commit('successor');
+  await expect(f.call(work, 'read_main_session', {})).rejects.toThrow(/contextual|context.*read/i);
+  const queries: Record<string, unknown>[] = [];
+  f.access.mainRouting!.read = async (_binding, input) => {
+    queries.push(input);
+    return { sourceRef: route.origin, sourceRoleRevision: 1, sourceRepresentation: 'pending_context', entries: [{ text: 'Captured predecessor history' }], cursor: 'signed-next', sourceContext: 'signed-source' };
+  };
+  const input = { cursor: 'signed-old', sourceContext: 'signed-source', turnId: 'turn', textOffset: 10, limit: 5 };
+  const page = await f.call(work, 'read_main_session', input);
+  expect(queries).toEqual([input]); expect(page.sourceRef).toEqual(route.origin);
+  expect(page.entries[0].text).toBe('Captured predecessor history');
+  expect(f.sessions.get('successor')!.messages).toEqual([]);
+}, 10000);
+
+it('pins legacy unknown receipts before enrolling a work whose main already succeeded', async () => {
+  const f = await fixture(true); const work = await f.create();
+  const intent = await f.call(work, 'send_main_message', { operationId: 'legacy-unknown', purpose: 'consultation', text: 'Legacy uncertain delivery' });
+  await waitMessages(f.sessions.get('main')!, 1); await f.coordinator.close();
+  await f.coordinator.store.update(work.id, undefined, record => { record.work.outbox!.find(item => item.id === intent.id)!.status = 'unknown'; });
+  const route = successionRouting(f); route.commit('successor'); await f.restart(); await f.coordinator.tick();
+  const restored = (await f.coordinator.get(work.id)).outbox!.find(item => item.id === intent.id)!;
+  expect(restored.resolvedTarget).toEqual(route.origin);
+  expect(restored.roleRevision).toBeUndefined();
+  expect(f.coordinator.hasUnsettledMain(route.origin)).toBe(true); expect(f.coordinator.hasUnsettledMain(route.target)).toBe(false);
+  expect(f.sessions.get('successor')!.messages).toEqual([]);
+}, 10000);
+
+it('pauses automation on takeover of the current cross-provider main but not its historical predecessor', async () => {
+  const f = await fixture(); const route = successionRouting(f); const work = await f.create();
+  route.commit('successor'); await f.coordinator.tick();
+  await f.coordinator.handoff('codex', 'main'); expect((await f.coordinator.get(work.id)).paused).toBe(false);
+  await f.coordinator.handoff('other', 'successor'); expect((await f.coordinator.get(work.id)).paused).toBe(true);
+  expect(f.sessions.get('successor')!.leases).toBe(0);
+}, 10000);

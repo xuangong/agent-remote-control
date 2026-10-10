@@ -1,7 +1,7 @@
 import { mkdir, open, readdir, readFile, rename, unlink } from 'node:fs/promises';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
-import { isTpmWork, type TpmWork } from '@orchardworks/agent-remote-protocol';
+import { isTpmWork, nativeSessionRefKey, type TpmWork } from '@orchardworks/agent-remote-protocol';
 import { initialTpmTodo } from './tpm-role.js';
 
 export interface TpmRecord {
@@ -58,7 +58,16 @@ export class TpmStore {
       const record = this.get(id);
       if (revision !== undefined && record.work.revision !== revision) throw new Error('TPM work changed. Refresh before applying this change.');
       const artifact = { revision: record.work.documentRevision ?? record.work.revision, document: record.work.document, acceptance: record.work.acceptance, evidence: structuredClone(record.work.evidence) };
+      const recipients = new Map((record.work.outbox ?? []).filter(intent => intent.resolvedTarget).map(intent => [intent.id, {
+        target: nativeSessionRefKey(intent.resolvedTarget!), roleRevision: intent.roleRevision,
+      }]));
       change(record);
+      for (const intent of record.work.outbox ?? []) {
+        const recipient = recipients.get(intent.id);
+        if (recipient && (!intent.resolvedTarget || nativeSessionRefKey(intent.resolvedTarget) !== recipient.target || intent.roleRevision !== recipient.roleRevision)) {
+          throw new Error('An admitted TPM recipient cannot change.');
+        }
+      }
       if (artifact.document !== record.work.document || artifact.acceptance !== record.work.acceptance || JSON.stringify(artifact.evidence) !== JSON.stringify(record.work.evidence)) {
         const history = record.documentHistory ??= []; history.push(artifact);
         if (history.length > 20) history.splice(0, history.length - 20);

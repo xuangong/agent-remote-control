@@ -27,3 +27,15 @@ test('serializes revision checks and does not mutate memory after rejected write
   expect(store.get('test-work').work.summary).toBe('one');
   expect(() => store.get('../escape')).toThrow();
 });
+
+test('retains admitted full targets after recovery and refuses to rewrite their destination', async () => {
+  const path = await mkdtemp(join(tmpdir(), 'arc-tpm-')); dirs.push(path);
+  const store = new TpmStore(path); await store.ready; const value = record(); value.creation = 'accepted';
+  const target = { controllerId: 'controller', providerId: 'codex', nativeSessionId: 'main' };
+  value.work.outbox!.push({ id: 'send', target: 'main', status: 'dispatching', text: 'implement', purpose: 'implementation', createdAt: value.work.createdAt, resolvedTarget: target, roleRevision: 1 });
+  await store.insert(value);
+  const restored = new TpmStore(path); await restored.ready;
+  expect(restored.get(value.work.id).work.outbox![0]).toMatchObject({ status: 'unknown', resolvedTarget: target, roleRevision: 1 });
+  await expect(restored.update(value.work.id, undefined, item => { item.work.outbox![0]!.resolvedTarget!.nativeSessionId = 'successor'; })).rejects.toThrow(/recipient|destination/i);
+  expect(restored.get(value.work.id).work.outbox![0]!.resolvedTarget).toEqual(target);
+});

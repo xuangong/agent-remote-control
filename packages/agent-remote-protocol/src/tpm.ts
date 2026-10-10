@@ -1,6 +1,7 @@
 import { Type, type Static } from '@sinclair/typebox';
 import { Value } from '@sinclair/typebox/value';
 import { SessionTodoList, SessionTodoDecision } from './session-todo.js';
+import { NativeSessionRef, SourceBinding } from './session-succession.js';
 
 const object = { additionalProperties: false } as const;
 const id = Type.String({ minLength: 1, maxLength: 128 });
@@ -14,6 +15,7 @@ export const TpmIntent = Type.Object({
   acceptance: Type.Optional(Type.Union([Type.Literal('started'), Type.Literal('queued'), Type.Literal('handled')])),
   purpose: short, text, createdAt: id, error: Type.Optional(short),
   todoStepId: Type.Optional(id), todoPlanRevision: Type.Optional(revision),
+  resolvedTarget: Type.Optional(NativeSessionRef), roleRevision: Type.Optional(revision),
 }, object);
 export type TpmIntent = Static<typeof TpmIntent>;
 export const TpmWork = Type.Object({
@@ -22,6 +24,7 @@ export const TpmWork = Type.Object({
   creationStatus: Type.Optional(Type.Union((['prepared', 'dispatching', 'accepted', 'unknown', 'abandoned'] as const).map(value => Type.Literal(value)))),
   id, revision, title: Type.String({ minLength: 1, maxLength: 256 }), providerId: id,
   mainNativeSessionId: id, tpmNativeSessionId: Type.Optional(id),
+  mainBinding: Type.Optional(SourceBinding), mainSessionRef: Type.Optional(NativeSessionRef),
   phase: Type.Union((['clarifying', 'ready', 'implementing', 'validating', 'completed'] as const).map(value => Type.Literal(value))),
   waiting: Type.Union((['none', 'user', 'main_session'] as const).map(value => Type.Literal(value))),
   archived: Type.Optional(Type.Boolean()), paused: Type.Boolean(), summary: short, nextAction: short, document: text, acceptance: text,

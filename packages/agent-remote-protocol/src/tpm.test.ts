@@ -34,3 +34,17 @@ test('work catalog round trips separate delivery, native identity, acceptance an
   expect(isTpmWork(work)).toBe(true); expect(isTpmList(JSON.parse(JSON.stringify({ supported: true, supportedProviders: ['codex'], works: [work] })))).toBe(true);
   expect(isTpmWork({ ...work, phase: 'running' })).toBe(false);
 });
+
+test('round trips role-bound work with a cross-provider current main and a pinned predecessor receipt', () => {
+  const origin = { controllerId: 'controller', providerId: 'codex', nativeSessionId: 'main' };
+  const current = { ...origin, providerId: 'copilot', nativeSessionId: 'successor' };
+  const work = { id: 'work', revision: 3, title: 'Work', providerId: 'codex', mainNativeSessionId: 'successor', tpmNativeSessionId: 'tpm',
+    mainBinding: { kind: 'primary_role', roleId: 'primary', origin }, mainSessionRef: current,
+    phase: 'implementing', waiting: 'main_session', paused: false, summary: '', nextAction: '', document: '', acceptance: '', evidence: [], createdAt: 'now', updatedAt: 'now', nextCheckAt: 10,
+    outbox: [{ id: 'send', target: 'main', status: 'unknown', purpose: 'implementation', text: 'Build', createdAt: 'now', resolvedTarget: origin, roleRevision: 1 }] };
+  expect(isTpmWork(JSON.parse(JSON.stringify(work)))).toBe(true);
+  expect(isTpmWork({ ...work, mainSessionRef: { nativeSessionId: 'successor' } })).toBe(false);
+  expect(isTpmWork({ ...work, mainBinding: { kind: 'primary_role', roleId: 'primary' } })).toBe(false);
+  expect(isTpmWork({ ...work, outbox: [{ ...work.outbox[0], resolvedTarget: { ...origin, controllerId: '' } }] })).toBe(false);
+  expect(isTpmWork({ ...work, outbox: [{ ...work.outbox[0], roleRevision: 0 }] })).toBe(false);
+});

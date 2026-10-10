@@ -13,7 +13,7 @@ export interface SuccessionRoleState {
 interface StoreState { version: 1; roles: SuccessionRoleState[] }
 type Advance = Pick<SuccessionRecord, 'phase'> & Partial<Pick<SuccessionRecord, 'to' | 'prepared' | 'failureCode'>>;
 const terminal = (phase: SuccessionPhase) => ['committed', 'rejected', 'cancelled'].includes(phase);
-const fingerprint = (request: SuccessionRequest) => JSON.stringify([request.operationId, request.roleId, request.expectedRevision, nativeSessionRefKey(request.from)]);
+const fingerprint = (request: SuccessionRequest) => JSON.stringify([request.operationId, request.roleId, request.expectedRevision, nativeSessionRefKey(request.from), request.targetProviderId ?? request.from.providerId]);
 const maxBytes = 8 * 1024 * 1024;
 
 /** One owning Controller serializes role decisions; publication follows atomic file replacement. */
@@ -104,10 +104,12 @@ export class SessionSuccessionStore {
     });
   }
 
-  commit(operationId: string): Promise<SuccessionRecord> {
+  commit(operationId: string, expectedGeneration?: number): Promise<SuccessionRecord> {
     return this.mutate(state => {
+      if (expectedGeneration !== undefined && expectedGeneration !== this.generation) throw new Error('Succession state changed during commit verification.');
       const record = this.findOperation(state, operationId);
       if (record.phase === 'committed') return record;
+      if (record.to && record.to.providerId !== (record.targetProviderId ?? record.from.providerId)) throw new Error('Succession target provider does not match the request.');
       if (record.phase !== 'ready' || !record.prepared || !record.to) throw new Error('Succession is not ready to commit.');
       const item = this.findRole(state, record.roleId);
       if (item.role.revision !== record.expectedRevision || nativeSessionRefKey(item.role.current) !== nativeSessionRefKey(record.from)) throw new Error('Primary role revision changed.');

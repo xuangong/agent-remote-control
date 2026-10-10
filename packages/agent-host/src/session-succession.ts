@@ -28,12 +28,13 @@ export class SessionSuccessionCoordinator {
       const state = this.store.read(record.roleId);
       await this.preparation.check(state.role);
       await this.store.advance(operationId, 'preparing', { phase: 'quiescing' });
-      target = await this.preparation.create(state.role, operationId);
+      target = await this.preparation.create(state.role, operationId, record.targetProviderId);
       await this.store.advance(operationId, 'quiescing', { phase: 'transferring', to: target });
+      if (target.providerId !== (record.targetProviderId ?? record.from.providerId)) throw new SuccessionPreparationRejected('succession_target_provider_mismatch', 'The candidate provider does not match the selected provider.');
       await this.preparation.check(state.role, target);
       const capture = await this.preparation.transfer(state.role, target, operationId);
       const prepared = { operationId, roleId: record.roleId, expectedRevision: record.expectedRevision,
-        from: record.from, to: target, workspace: state.role.workspace,
+        from: record.from, ...(record.targetProviderId ? { targetProviderId: record.targetProviderId } : {}), to: target, workspace: state.role.workspace,
         associationRevision: state.associationRevision, participants: state.participants, capture };
       await this.preparation.verify(state.role, prepared);
       return await this.store.advance(operationId, 'transferring', { phase: 'ready', prepared });
@@ -53,8 +54,9 @@ export class SessionSuccessionCoordinator {
     if (record.expectedRevision !== expectedRevision) throw new Error('Succession revision changed.');
     if (record.phase === 'committed') return record;
     if (record.phase !== 'ready' || !record.prepared) throw new Error('Succession is not ready.');
+    const generation = this.store.generation;
     await this.preparation.verify(this.store.read(record.roleId).role, record.prepared);
-    return this.store.commit(operationId);
+    return this.store.commit(operationId, generation);
   }
 
   /** Only a persisted, fully prepared candidate can be revalidated without replaying effects. */

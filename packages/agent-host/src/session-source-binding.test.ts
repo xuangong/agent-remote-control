@@ -123,7 +123,7 @@ test('routes cross-provider successors by complete address and pins the original
   await f.commit();
   const state = f.store.read('role');
   const to = { ...ref('A'), providerId: 'claude' };
-  const request = { operationId: 'cross', roleId: 'role', expectedRevision: 2, from: ref('B') };
+  const request = { operationId: 'cross', roleId: 'role', expectedRevision: 2, from: ref('B'), targetProviderId: 'claude' };
   await f.store.begin(request); await f.store.advance('cross', 'preparing', { phase: 'quiescing', to });
   await f.store.advance('cross', 'quiescing', { phase: 'transferring' });
   await f.store.advance('cross', 'transferring', { phase: 'ready', prepared: { ...request, to, workspace, participants: state.participants, associationRevision: state.associationRevision, capture: { epoch: 'e', seq: 3, capturedAt: '2026-10-10T00:00:00Z' } } });

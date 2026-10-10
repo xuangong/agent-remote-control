@@ -15,7 +15,7 @@ export const SourceBinding = Type.Union([
   Type.Object({ kind: Type.Literal('primary_role'), roleId: id, origin: NativeSessionRef }, object),
 ]);
 export type SourceBinding = Static<typeof SourceBinding>;
-const request = { operationId: id, roleId: id, expectedRevision: revision, from: NativeSessionRef };
+const request = { operationId: id, roleId: id, expectedRevision: revision, from: NativeSessionRef, targetProviderId: Type.Optional(id) };
 export const SuccessionRequest = Type.Object(request, object);
 export type SuccessionRequest = Static<typeof SuccessionRequest>;
 export const SuccessionParticipant = Type.Object({ relationId: id,

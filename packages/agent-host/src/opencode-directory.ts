@@ -4,13 +4,15 @@ import type { OpenCodeAgentProvider, OpenCodeSessionSummary } from '@orchardwork
 import type { AgentSession, AgentHistoryQuery, AgentPersistenceHandle } from '@orchardworks/agent-provider-sdk';
 import type { RemoteSessionSummary } from '@orchardworks/agent-remote-relay';
 import type { AgentHostDirectory, AgentHostWorkspace } from './host.js';
+import { successionCreationHandle } from './local-succession-preparation.js';
+import { serializeAgentEmptyCreationResult } from '@orchardworks/agent-provider-sdk';
 
 type OpenCodeDirectoryProvider = Pick<OpenCodeAgentProvider, 'listSessions' | 'getSession' | 'createSession' | 'resumeSession' | 'renameSession' | 'close'>
   & Partial<Pick<OpenCodeAgentProvider, 'forkForPromptEdit' | 'validatePromptEdit' | 'openChildSession' | 'readSessionHistory'>>;
 
 /** The native server owns all work; directory lifetime only controls local subscriptions. */
 export function createOpenCodeSessionDirectory(provider: OpenCodeDirectoryProvider, workspaces: readonly AgentHostWorkspace[], references?: SessionReferenceStore, callbacksAvailable = false): AgentHostDirectory {
-  const opened = new Map<string, { session: AgentSession; handle: AgentPersistenceHandle; createdAt: string; verifiedParent?: string }>();
+  const opened = new Map<string, { session: AgentSession; handle: AgentPersistenceHandle; createdAt: string; verifiedParent?: string; nativeCreation?: string }>();
   const controllerTools = new Set<string>();
   let closed = false;
   let closing: Promise<void> | undefined;
@@ -121,17 +123,25 @@ export function createOpenCodeSessionDirectory(provider: OpenCodeDirectoryProvid
     },
     async open(id, options) {
       assertOpen();
+      const creationHandle = options?.nativeCreation ? successionCreationHandle('opencode', id, options.nativeCreation) : undefined;
+      const creationIdentity = options?.nativeCreation ? serializeAgentEmptyCreationResult(options.nativeCreation) : undefined;
       if (options?.takeOver) throw new Error('OpenCode uses shared session control; takeover is unavailable.');
       const existing = opened.get(id);
-      if (existing && (await existing.session.runtimeInfo()).status !== 'closed') return existing.session;
+      if (existing && (await existing.session.runtimeInfo()).status !== 'closed') {
+        if (creationIdentity && existing.nativeCreation !== creationIdentity) throw new Error('Existing attachment does not match the original native creation evidence.');
+        return existing.session;
+      }
       const native = await summary(id); if (!native) throw new Error('OpenCode session was not found.');
       const grant = await references?.get(id);
       if (grant && (!callbacksAvailable || !provider.readSessionHistory)) throw new Error('OpenCode source references require a connected native callback plugin.');
       if (grant) { await sourceAccessCheck?.(grant.sourceNativeSessionId); if (!await summary(grant.sourceNativeSessionId)) throw new Error('OpenCode source session was not found.'); }
       const extensions = grant ? sourceExtensions(grant.sourceNativeSessionId, () => id) : undefined;
-      const session = await provider.resumeSession({ providerId: 'opencode', sessionId: id, opaque: JSON.stringify({ cwd: native.cwd }) },
+      const session = await provider.resumeSession(creationHandle ?? { providerId: 'opencode', sessionId: id, opaque: JSON.stringify({ cwd: native.cwd }) },
         extensions ? { tools: extensions.tools, systemPrompt: grant!.systemPrompt } : undefined);
-      await remember(session); if (extensions?.tools?.length) controllerTools.add(id); return session;
+      const resumed = await remember(session);
+      if (resumed !== id) { opened.delete(resumed); await session.dispose(); throw new Error('Native creation attachment identity changed.'); }
+      if (creationIdentity) opened.get(id)!.nativeCreation = creationIdentity;
+      if (extensions?.tools?.length) controllerTools.add(id); return session;
     },
     async openChild(parentNativeSessionId, nativeSessionId) {
       assertOpen();

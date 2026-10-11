@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, expect, test } from 'vitest';
 import { SessionSuccessionService, type SessionSuccessionPorts } from './session-succession-service.js';
+import { AgentOperationRejectedError, AGENT_NATIVE_EVIDENCE_REASONS, type AgentEmptyCreationResult } from '@orchardworks/agent-provider-sdk';
 
 const roots: string[] = [];
 afterEach(async () => { await Promise.all(roots.splice(0).map(root => rm(root, { recursive: true, force: true }))); });
@@ -161,6 +162,43 @@ test('late candidate read cannot bind context after cancellation', async () => {
 
 const capture = { epoch: 'e', seq: 1, capturedAt: '2026-10-10T00:00:00Z' };
 const creation = { status: 'created' as const, handle: { providerId: 'fixture', sessionId: 'B', opaque: 'original\nopaque' } };
+test('selects native creation before durable preparation and retains its original result', async () => {
+  const f = await fixture(); let creates = 0;
+  f.ports.selectNativeCreation = async (_source, identity, provider) => {
+    expect(identity).toBe('handoff:create'); expect(provider).toBe('fixture');
+    expect(f.service.store.progress('handoff')?.capture).toBeUndefined();
+    return async () => {
+      creates++; expect(f.service.store.progress('handoff')?.nativeCreation).toBeDefined();
+      return creation;
+    };
+  };
+  expect((await f.service.prepare(request)).phase).toBe('ready');
+  expect(f.service.store.progress('handoff')?.nativeCreation?.outcome).toEqual(creation);
+  expect(creates).toBe(1); expect(f.creates()).toBe(0);
+});
+test.each(['known_rejected', 'unknown', 'typed', 'generic'] as const)('native creation %s never reads or binds a candidate', async kind => {
+  const f = await fixture(), inspect = f.ports.inspect; let reads = 0;
+  f.ports.inspect = async source => { if (source.nativeSessionId === 'B') reads++; return inspect(source); };
+  f.ports.selectNativeCreation = async () => async () => {
+    if (kind === 'typed') throw new AgentOperationRejectedError('native_evidence_unavailable', AGENT_NATIVE_EVIDENCE_REASONS.native_evidence_unavailable);
+    if (kind === 'generic') throw new Error('response lost');
+    return { status: kind, ...(kind === 'known_rejected' ? { handle: creation.handle } : {}), code: 'native_evidence_outcome_unknown', reason: AGENT_NATIVE_EVIDENCE_REASONS.native_evidence_outcome_unknown } as AgentEmptyCreationResult;
+  };
+  const result = await f.service.prepare(request);
+  expect(result.phase).toBe(kind === 'typed' || kind === 'known_rejected' ? 'rejected' : 'unknown');
+  expect(reads).toBe(0); expect(f.creates()).toBe(0); expect(f.service.contexts.forTarget(ref('B'))).toBeUndefined();
+});
+test('cancelled native creation retains late evidence without candidate revival', async () => {
+  const f = await fixture(), entered = deferred<void>(), returned = deferred<AgentEmptyCreationResult>();
+  f.ports.selectNativeCreation = async () => async () => { entered.resolve(); return returned.promise; };
+  const running = f.service.prepare(request);
+  try {
+    await entered.promise; expect((await f.service.coordinator.cancel('handoff')).phase).toBe('cancelled');
+    returned.resolve(creation); expect((await running).phase).toBe('cancelled');
+    expect(f.service.store.progress('handoff')).toMatchObject({ orphanCandidate: ref('B'), nativeCreation: { outcome: creation } });
+    expect(f.service.contexts.forTarget(ref('B'))).toBeUndefined();
+  } finally { returned.resolve(creation); await running.catch(() => undefined); }
+});
 async function evidencePreparation() {
   const f = await fixture(); await f.service.store.begin(request, true);
   await f.service.store.savePreparation('handoff', capture, true);

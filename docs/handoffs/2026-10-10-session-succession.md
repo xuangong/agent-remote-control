@@ -3,6 +3,30 @@
 Date: 2026-10-10. Audience: the next implementation session or maintainer.
 Status: partially implemented; no usable end-to-end handoff yet.
 
+## Native evidence Host consumption checkpoint (2026-10-11)
+
+D2B passed independent spec and quality review after fixing the cancelled late
+candidate lookup. Root verified the two-file repair delta and all frozen source
+and evidence identities. Fresh repair validation passed 76 runtime tests, the
+original failing orphan regression and the Host source typecheck. Unchanged
+initial D2B suites retain their verified results; they were not rerun for this fix.
+
+Host now selects the optional creation route before creation, retains the original
+creation envelope through verified attachment, and dispatches the one composed
+first input through its original operation after durable witness publication.
+Materialization readback stays separate from queue/effect settlement. Actual
+source/candidate facades, leases and validity tokens remain held through the
+synchronous assertion inside the final store mutation. Nested evidence calls
+retain execution-policy checks. Cancelled late candidates use the same original
+creation restrictions before workspace lookup or open, including after restart.
+
+Next are the remaining product and joined Host/Gateway/App acceptance cases,
+plus real scoped native suppliers and certification. The full A-to-B-to-C browser
+chain will share the real Host fixture with the final action tests. Native
+readiness covers ARC admissions and declared authoritative observations; it does
+not require a global native-client lock or a new owned product mode. Production
+capability and SQL effects remain disabled. No release action is implied.
+
 ## Durable native evidence checkpoint (2026-10-11)
 
 D2A passed independent spec and quality review after one scoped correction.
@@ -20,11 +44,9 @@ and the complete reserved durable growth. Known rejection, unknown and definite
 pre-request rejection remain distinct. A synchronous assertion now runs inside
 the final queued store mutation before its first state change.
 
-Next is D2B: connect verified original-handle attachment, first-input dispatch and
-readback through existing Host operation accounting; retain exact leased Session
-facades and validity tokens through the final commit assertion. Remaining Task
-5/6 and whole-branch acceptance follow. Production capability, SQL effects and
-real native suppliers remain disabled. No native certification, merge, push,
+D2B consumption is covered by the newer checkpoint above. Remaining Task
+5/6, real native integration and whole-branch acceptance follow. Production
+capability, SQL effects and real native suppliers remain disabled. No native certification, merge, push,
 deployment or installation is implied by this checkpoint.
 
 ## Optional native evidence checkpoint (2026-10-11)

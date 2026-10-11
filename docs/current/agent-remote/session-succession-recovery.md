@@ -313,6 +313,18 @@ candidate but does not authorize opening it. Unknown outcome identifies no
 candidate; only a typed definite pre-request rejection can use the separate
 `not_dispatched` terminal result. Exact repeats cannot replace these outcomes.
 
+Host consumes that same original envelope before candidate workspace lookup or
+attachment, including a cancelled late candidate retained only as an orphan.
+Known rejection remains non-resumable after restart. Explicitly opening a
+successful orphan requires the original verified handle and never revives the
+cancelled role transition.
+
+Optional first-input preparation composes context and text once, persists its
+witness, then dispatches under the original Host mutation identity. Restored
+unknown delivery is inspected without preparing or resending. The actual leased
+source/candidate facades and observation tokens stay current through the final
+synchronous store assertion; materialization does not settle their queued effects.
+
 Cancellation can settle a certified create while its call is still pending. The
 terminal decision must persist before releasing the source. A late result only
 adds bounded orphan evidence; it cannot bind context, commit, recreate, send input

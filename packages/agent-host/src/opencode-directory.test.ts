@@ -3,6 +3,7 @@ import { expect, it } from 'vitest';
 import type { AgentCapabilities, AgentSession, AgentSessionConfig } from '@orchardworks/agent-provider-sdk';
 import { createOpenCodeSessionDirectory } from './opencode-directory.js';
 import { createHostExecutionPolicy, protectHostDirectory } from './execution-policy.js';
+import { AGENT_NATIVE_EVIDENCE_REASONS } from '@orchardworks/agent-provider-sdk';
 
 const capabilities: AgentCapabilities = { history: true, sendMessage: true, steer: false,
   cancel: true, readResource: false, interactions: { question: true, planApproval: false, toolApproval: true } };
@@ -74,3 +75,30 @@ it('disposes initialization that completes after directory shutdown', async () =
   await directory.close(); release(); await expect(pending).rejects.toThrow(/closed/i);
   expect((await f.sessions[0]!.runtimeInfo()).status).toBe('closed'); expect(f.counts().aborts).toBe(0);
 }, 10000);
+
+it('resumes the exact creation handle and refuses recovery evidence before any lookup', async () => {
+  const f = fixture(); let gets = 0; const received: unknown[] = [];
+  const resume = f.provider.resumeSession;
+  f.provider.resumeSession = async handle => { received.push(handle); return resume(handle); };
+  const get = f.provider.getSession; f.provider.getSession = async id => { gets++; return get(id); };
+  const directory = createOpenCodeSessionDirectory(f.provider, []);
+  const nativeCreation = { status: 'created' as const, handle: { providerId: 'opencode', sessionId: 'native', opaque: 'original creation evidence' } };
+  try {
+    await expect(directory.open('native', { nativeCreation: { ...nativeCreation, status: 'known_rejected', code: 'native_evidence_stale', reason: AGENT_NATIVE_EVIDENCE_REASONS.native_evidence_stale } })).rejects.toThrow(/creation|resum/i);
+    expect(gets).toBe(0); expect(received).toEqual([]);
+    const session = await directory.open('native', { nativeCreation });
+    expect(received).toEqual([nativeCreation.handle]);
+    expect(await directory.open('native', { nativeCreation })).toBe(session);
+    expect(received).toHaveLength(1);
+    await expect(directory.open('native', { nativeCreation: { ...nativeCreation, handle: { ...nativeCreation.handle, opaque: 'other evidence' } } })).rejects.toThrow(/attachment|creation/i);
+  } finally { await directory.close(); }
+});
+
+it('does not let an ordinary attachment stand in for verified creation evidence', async () => {
+  const f = fixture(); const directory = createOpenCodeSessionDirectory(f.provider, []);
+  try {
+    await directory.open('native');
+    await expect(directory.open('native', { nativeCreation: { status: 'created', handle: { providerId: 'opencode', sessionId: 'native', opaque: 'creation' } } })).rejects.toThrow(/attachment|creation/i);
+    expect(f.counts().resumes).toBe(1);
+  } finally { await directory.close(); }
+});

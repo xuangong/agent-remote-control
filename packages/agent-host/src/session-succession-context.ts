@@ -395,7 +395,8 @@ export interface SuccessionNativeDispatchResult { outcome: 'accepted' | 'rejecte
 /** Own this once per Controller and route execution-capable inputs through it at the last native boundary. */
 export class SessionSuccessionInputDispatcher {
   constructor(private readonly store: SessionSuccessionContextStore) {}
-  dispatch(input: SuccessionInput, validateAdmission: () => Promise<void>, nativeDispatch: (input: SuccessionInput, contextPrefix: string) => Promise<SuccessionNativeDispatchResult>): Promise<SuccessionContextDelivery> {
+  dispatch(input: SuccessionInput, validateAdmission: () => Promise<void>, nativeDispatch: (input: SuccessionInput, contextPrefix: string, witness?: AgentPreparedTextInput) => Promise<SuccessionNativeDispatchResult>,
+    prepareInput?: (input: SuccessionInput) => Promise<AgentPreparedTextInput>): Promise<SuccessionContextDelivery> {
     const admitted = structuredClone(input);
     return this.store.serialized(admitted.target, async () => {
       await this.store.ready;
@@ -407,15 +408,17 @@ export class SessionSuccessionInputDispatcher {
         return prior;
       }
       await validateAdmission();
-      const delivery = await this.store.begin(attachment.operationId, admitted);
-      const prefix = delivery.includesContext ? quotedSessionContextPrefix({ id: attachment.operationId, sourceSession: attachment.source.nativeSessionId,
+      if (attachment.deliveries.some(item => ['dispatching', 'accepted', 'unknown'].includes(item.state))) throw new AgentOperationRejectedError('succession_delivery_unresolved', 'Succession input delivery is unresolved.');
+      const prefix = attachment.state !== 'materialized' ? quotedSessionContextPrefix({ id: attachment.operationId, sourceSession: attachment.source.nativeSessionId,
         capturedAt: attachment.capturedAt, text: attachment.text, shortenedToolCount: attachment.shortenedToolCount }) : '';
       const text = prefix + admitted.text;
+      const witness = await prepareInput?.({ ...admitted, text });
+      const delivery = await this.store.begin(attachment.operationId, admitted, witness);
       // The Host must fence queued work again after durable reservation, before the native call.
       try { await validateAdmission(); }
       catch (error) { await this.store.settle(attachment.operationId, admitted.operationId, 'rejected'); throw error; }
       let result: SuccessionNativeDispatchResult;
-      try { result = await nativeDispatch({ ...admitted, text }, prefix); }
+      try { result = await nativeDispatch({ ...admitted, text }, prefix, delivery.preparedInput?.witness); }
       catch (error) {
         await this.store.settle(attachment.operationId, admitted.operationId, 'unknown');
         throw error;

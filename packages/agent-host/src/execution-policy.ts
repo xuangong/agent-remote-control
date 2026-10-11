@@ -1,7 +1,8 @@
 import { realpath, stat } from 'node:fs/promises';
 import { isAbsolute, relative, resolve, sep } from 'node:path';
-import type { AgentRuntimeInfo, AgentSession } from '@orchardworks/agent-provider-sdk';
+import type { AgentRuntimeInfo, AgentSession, AgentSessionNativeEvidence } from '@orchardworks/agent-provider-sdk';
 import type { AgentHostDirectory } from './host.js';
+import { successionCreationHandle } from './local-succession-preparation.js';
 
 /** Trusted local admission policy. A cwd check is not a filesystem sandbox. */
 export interface HostExecutionPolicy {
@@ -76,7 +77,18 @@ export function protectHostDirectory(directory: AgentHostDirectory, policy: Host
     catch (error) { await session.dispose().catch(() => undefined); throw error; }
     const existing = sessions.get(session);
     if (existing) return existing;
+    const evidence = session.nativeEvidence;
+    const protectedEvidence = evidence ? new Proxy({} as AgentSessionNativeEvidence, { get(_target, key) {
+      const value = Reflect.get(evidence, key, evidence);
+      if (typeof value !== 'function') return value;
+      if (['prepareInput', 'dispatchInput', 'inspectInput'].includes(String(key))) return async (...args: unknown[]) => {
+        await allowedWorkspace(policy, (await session.runtimeInfo()).cwd);
+        return Reflect.apply(value, evidence, args);
+      };
+      return value.bind(evidence);
+    } }) : undefined;
     const wrapper = new Proxy(session, { get(target, key) {
+      if (key === 'nativeEvidence') return protectedEvidence;
       if (key === 'runtimeInfo') return async () => protectedInfo(await target.runtimeInfo(), policy);
       if (key === 'observe') return async function* () {
         for await (const item of target.observe()) yield item.type === 'observation' && item.event.type === 'runtime_updated'
@@ -84,7 +96,7 @@ export function protectHostDirectory(directory: AgentHostDirectory, policy: Host
       };
       const value = Reflect.get(target, key, target) as unknown;
       if (typeof value !== 'function') return value;
-      if (['sendMessage', 'steer', 'setPlanning', 'setSessionSetting', 'executeCommand', 'respondToInteraction', 'readResource'].includes(String(key))) {
+      if (['sendMessage', 'sendMessageContent', 'steer', 'setPlanning', 'setSessionSetting', 'executeCommand', 'respondToInteraction', 'readResource'].includes(String(key))) {
         return async (...args: unknown[]) => {
           const info = await target.runtimeInfo();
           await allowedWorkspace(policy, info.cwd);
@@ -109,6 +121,10 @@ export function protectHostDirectory(directory: AgentHostDirectory, policy: Host
     supportsPromptEditing: directory.supportsPromptEditing,
     async validateSessionRename(id: string, title: string) { await checkSource(id); await directory.validateSessionRename?.(id, title); },
     ...(directory.sessionTitle ? { async sessionTitle(id: string) { await checkSource(id); return directory.sessionTitle!(id); } } : {}),
+    ...(directory.sessionWorkspace ? { async sessionWorkspace(id: string) {
+      const cwd = await directory.sessionWorkspace!(id);
+      return allowedWorkspace(policy, cwd);
+    } } : {}),
     ...(directory.renameSession ? { async renameSession(id: string, title: string) { await checkSource(id); return directory.renameSession!(id, title); } } : {}),
     async validatePromptEdit(target) { await checkSource(target.nativeSessionId); await directory.validatePromptEdit?.(target); },
     reconcileIdleSession: directory.reconcileIdleSession?.bind(directory),
@@ -138,6 +154,7 @@ export function protectHostDirectory(directory: AgentHostDirectory, policy: Host
       return directory.create(await createInput(input), evidence);
     },
     async open(nativeSessionId, options) {
+      if (options?.nativeCreation) successionCreationHandle(directory.providerId, nativeSessionId, options.nativeCreation);
       await checkSource(nativeSessionId);
       return protect(await directory.open(nativeSessionId, options));
     },

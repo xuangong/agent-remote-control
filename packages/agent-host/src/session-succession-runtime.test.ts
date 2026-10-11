@@ -10,6 +10,8 @@ import { createHostBroker, type RemoteHostBrokerState } from '../../agent-remote
 import { PROTOCOL_VERSION, type ServerMessage, type TpmWork } from '@orchardworks/agent-remote-protocol';
 import { createRemoteHostUplinkClient, createAgentRemoteHttpServer } from '@orchardworks/agent-remote-relay';
 import type { AgentSession, AgentSessionConfig, AgentCapabilities, AgentInputAcceptance, ProviderStreamItem } from '@orchardworks/agent-provider-sdk';
+import { serializeAgentPreparedTextInput, parseAgentPreparedTextInput, AGENT_NATIVE_EVIDENCE_REASONS, type AgentPreparedTextInput, type AgentSessionNativeEvidence, type AgentEmptyCreationResult } from '@orchardworks/agent-provider-sdk';
+import { directoryOperationId } from './directory-mutation.js';
 import { createAgentHostRuntime } from './host.js';
 import { TpmStore } from './tpm-store.js';
 import { SessionSuccessionStore } from './session-succession-store.js';
@@ -20,34 +22,236 @@ class Native implements AgentSession {
  capabilities:AgentCapabilities={history:true,sendMessage:true,steer:false,cancel:false,readResource:false,interactions:{question:false,toolApproval:false,planApproval:false}};
  constructor(readonly id:string,readonly cwd:string,readonly providerId='fixture'){}
  async runtimeInfo(){return {providerId:this.providerId,sessionId:this.id,status:'idle' as const,cwd:this.cwd};}
- sent:string[]=[];cancels=0;async cancel(){this.cancels++;}private stop?:()=>void;
+ sent:string[]=[];cancels=0;disposals=0;async cancel(){this.cancels++;}private stop?:()=>void;
  async *observe():AsyncIterable<ProviderStreamItem>{if(this.id==='A') yield {type:'observation',sourceKey:'history-user',occurredAt:1,delivery:'history',event:{type:'timeline',provider:'fixture',item:{type:'user_message',text:'Original requirement'}}};yield {type:'history_boundary'};await new Promise<void>(resolve=>{this.stop=resolve;});}
  async sendMessage(text:string):Promise<AgentInputAcceptance | void>{this.sent.push(text);return {disposition:'queued' as const};}
  async respondToInteraction(){}
- async dispose(){this.stop?.();}
+ async dispose(){this.disposals++;this.stop?.();}
 }
-async function fixture(enableTpm=false,enrollment=false,setup?:(root:string)=>Promise<void>, snapshots=false){
+class EvidenceNative extends Native {
+ epoch = 0; preparations = 0; inspections = 0; captures = 0; dispatches = 0; materialized = false; unresolved = false;
+ dispatchFailure = false; afterInspect = () => {}; beforeCapture = () => {};
+ nativeEvidence: AgentSessionNativeEvidence = {
+  availability: () => ({ status: 'configured', version: 1 }),
+  captureValidity: () => { this.beforeCapture(); this.captures++; if (this.unresolved) throw new Error('unresolved native input'); return { epoch: this.epoch } as never; },
+  isCurrent: token => (token as unknown as {epoch:number}).epoch === this.epoch,
+  prepareInput: async (parts, options) => {
+   this.preparations++; const text=(parts[0] as {text:string}).text;
+   return parseAgentPreparedTextInput(serializeAgentPreparedTextInput({ version:1,providerId:this.providerId,nativeSessionId:this.id,nativeInputId:`U-${this.preparations}`,cwd:this.cwd,
+    store:{authorityId:'authority',storeId:'store'},parts:[{type:'text',text}],content:{encoding:'utf-8',bytes:Buffer.byteLength(text),sha256:createHash('sha256').update(text).digest('hex')},
+    selections:{model:'provider/model',agent:'agent',...(options?.delivery ? {delivery:'immediate' as const} : {})} }));
+  },
+  dispatchInput: async witness => { this.dispatches++;this.sent.push(witness.parts[0].text);this.unresolved=true;this.epoch++;if(this.dispatchFailure)throw new Error('response lost'); },
+  inspectInput: async witness => {
+   this.inspections++;this.afterInspect();
+   if(!this.materialized)return {status:'unknown',code:'native_evidence_readback_missing',reason:AGENT_NATIVE_EVIDENCE_REASONS.native_evidence_readback_missing};
+   const {delivery:_delivery,...selections}=witness.selections;
+   return {status:'materialized',proof:{version:1,providerId:this.providerId,nativeSessionId:this.id,nativeInputId:witness.nativeInputId,cwd:this.cwd,store:witness.store,
+    witnessSha256:createHash('sha256').update(serializeAgentPreparedTextInput(witness)).digest('hex'),contentSha256:witness.content.sha256,nativeSelectionsSha256:createHash('sha256').update(JSON.stringify(selections)).digest('hex')}};
+  },
+ };
+ override async dispose(){this.epoch++;await super.dispose();}
+}
+async function fixture(enableTpm=false,enrollment=false,setup?:(root:string)=>Promise<void>, snapshots=false,evidence=false,policy=false){
  const root=await realpath(await mkdtemp(join(tmpdir(),'arc-succession-runtime-')));
  const store=new SessionSuccessionStore(join(root,'roles'));await store.ready;
  if(!enrollment) await store.createRole({id:'role',revision:1,origin:ref('A'),current:ref('A'),workspace:{controllerId:'controller',canonicalCwd:root}});
  const grants:Array<{nativeSessionId:string;sourceNativeSessionId:string}>=[];let beforeGrants=async()=>{};
  await setup?.(root);
- const sessions=new Map([['A',new Native('A',root)]]);const tpmConfigurations:AgentSessionConfig[]=[];const snapshotConfigurations:AgentSessionConfig[]=[];let creates=0,sourceCreates=0,supported=true,bounded=true,coverage=true,busy='',loseTpmCreation=false,loseSourceCreation=false;let beforeSourceCreate=async()=>{};let beforeIdleCreate=async()=>{};
+ const sessions=new Map<string,Native>([['A',evidence?new EvidenceNative('A',root):new Native('A',root)]]);const tpmConfigurations:AgentSessionConfig[]=[];const snapshotConfigurations:AgentSessionConfig[]=[];let creates=0,sourceCreates=0,supported=true,bounded=true,coverage=true,busy='',loseTpmCreation=false,loseSourceCreation=false;let beforeSourceCreate=async()=>{};let beforeIdleCreate=async()=>{};
+ const creationOptions: unknown[]=[],workspaceReads:string[]=[];let evidenceCreates=0,allowIdleRelease=false;let creationResult: AgentEmptyCreationResult | undefined; let beforeNativeInspect=async(_id:string)=>{};
+ const providerEvidence = evidence ? { availability:()=>({status:'configured' as const,version:1 as const}),async createEmpty(config:Pick<AgentSessionConfig,'sessionId'|'cwd'>):Promise<AgentEmptyCreationResult>{evidenceCreates++;expect(config).toEqual({sessionId:directoryOperationId('handoff:create'),cwd:root});await beforeIdleCreate();sessions.set('B',new EvidenceNative('B',root));return creationResult ?? {status:'created',handle:{providerId:'fixture',sessionId:'B',opaque:'original complete handle'}};} } : undefined;
  const otherSession = new Native('other-A', root, 'other');
  const additional = snapshots ? [{adapter:{descriptor:{providerId:'other',displayName:'Other'},createSession:async()=>{throw new Error('unexpected');},resumeSession:async()=>{throw new Error('unexpected');},readSessionHistory:async()=>({entries:[]})},directory:{providerId:'other',list:()=>[],workspaces:()=>[],create:async()=>{throw new Error('unexpected');},open:async(id:string)=>{if(id!=='other-A')throw new Error('missing source');return otherSession;},sessionWorkspace:async(id:string)=>{if(id!=='other-A')throw new Error('missing source');return root;},sourceReferences:async()=>[],setSourceBindingReader:()=>{},close:()=>otherSession.dispose()}}] : [];
- const createHost=()=>createAgentHostRuntime({...(enableTpm?{tpm:{stateDirectory:join(root,'tpm'),tickMs:20}}:{}),succession:{controllerId:'controller',...(enrollment?{enrollment:true as const}:{}),stateDirectory:root,native:{
+ const createHost=()=>createAgentHostRuntime({...(evidence?{idleGraceMs:20}:{}),...(policy?{executionPolicy:{defaultWorkspace:root,allowedWorkspaceRoots:[root],lockPermissions:false}}:{}),...(enableTpm?{tpm:{stateDirectory:join(root,'tpm'),tickMs:20}}:{}),succession:{controllerId:'controller',...(enrollment?{enrollment:true as const}:{}),stateDirectory:root,native:{
  supports:async()=>supported,supportsBoundedProjection:async()=>bounded,
- inspect:async source=>{if(!coverage)throw new Error('Native queue and work coverage unavailable');return {cwd:root,idle:source.nativeSessionId!==busy,managed:true,pendingInputs:0,pendingInteractions:0,activeChildren:0};},
+ inspect:async source=>{await beforeNativeInspect(source.nativeSessionId);if(!coverage)throw new Error('Native queue and work coverage unavailable');return {cwd:root,idle:source.nativeSessionId!==busy,managed:true,pendingInputs:0,pendingInteractions:0,activeChildren:0};},
  createIdle:async()=>{creates++;await beforeIdleCreate();const id=String.fromCharCode(65+creates);sessions.set(id,new Native(id,root));return ref(id);},reconcileDelivery:async()=>undefined,
- }},registrations:[{adapter:{descriptor:{providerId:'fixture',displayName:'Fixture',...(enableTpm?{sessionExtensions:{instructions:true,tools:true}}:{})},createSession:async()=>{throw new Error('unexpected');},resumeSession:async()=>{throw new Error('unexpected');},readSessionHistory:async()=>({entries:[]})},directory:{providerId:'fixture',supportsSourceReferences:true,supportsBoundedSourceCreate:async()=>true,list:()=>[],workspaces:()=>[],create:async config=>{if(config.sourceNativeSessionId){await beforeSourceCreate();const id=`source-${++sourceCreates}`;sessions.set(id,new Native(id,root));grants.push({nativeSessionId:id,sourceNativeSessionId:config.sourceNativeSessionId});if(loseSourceCreation)throw new Error('Unknown native creation');return id;}if(!enableTpm){if(!snapshots)throw new Error('unexpected');snapshotConfigurations.push(config);const id=`snapshot-${snapshotConfigurations.length}`;sessions.set(id,new Native(id,root));return id;}tpmConfigurations.push(config);const id=`tpm-${tpmConfigurations.length}`;sessions.set(id,new Native(id,root));if(loseTpmCreation)throw new Error('Native creation response was lost');return id;},open:async id=>sessions.get(id)!,sessionWorkspace:async()=>root,sourceReferences:async()=>{await beforeGrants();return structuredClone(grants);},setSourceBindingReader:()=>{},close:async()=>{await Promise.all([...sessions.values()].map(session=>session.dispose()));}}}, ...additional]});
+ }},registrations:[{adapter:{nativeEvidence:providerEvidence,descriptor:{providerId:'fixture',displayName:'Fixture',...(enableTpm?{sessionExtensions:{instructions:true,tools:true}}:{})},createSession:async()=>{throw new Error('unexpected');},resumeSession:async()=>{throw new Error('unexpected');},readSessionHistory:async()=>({entries:[]})},directory:{providerId:'fixture',canReleaseSession:()=>allowIdleRelease,supportsSourceReferences:true,supportsBoundedSourceCreate:async()=>true,list:()=>[],workspaces:()=>[],create:async config=>{if(config.sourceNativeSessionId){await beforeSourceCreate();const id=`source-${++sourceCreates}`;sessions.set(id,new Native(id,root));grants.push({nativeSessionId:id,sourceNativeSessionId:config.sourceNativeSessionId});if(loseSourceCreation)throw new Error('Unknown native creation');return id;}if(!enableTpm){if(!snapshots)throw new Error('unexpected');snapshotConfigurations.push(config);const id=`snapshot-${snapshotConfigurations.length}`;sessions.set(id,new Native(id,root));return id;}tpmConfigurations.push(config);const id=`tpm-${tpmConfigurations.length}`;sessions.set(id,new Native(id,root));if(loseTpmCreation)throw new Error('Native creation response was lost');return id;},open:async(id,options)=>{creationOptions.push(options?.nativeCreation);return sessions.get(id)!;},sessionWorkspace:async(id)=>{workspaceReads.push(id);return root;},sourceReferences:async()=>{await beforeGrants();return structuredClone(grants);},setSourceBindingReader:()=>{},close:async()=>{await Promise.all([...sessions.values()].map(session=>session.dispose()));}}}, ...additional]});
  let host=createHost();
  const createServer=()=>createAgentRemoteHttpServer(host.relay,{websocketAuthorizer:{authenticate:()=>({subject:'owner'}),authorize:()=>true}});
  let server=createServer();let address=await server.listen(0);
- const restart=async()=>{await server.close();await host.close();for(const [id,previous] of sessions){const next=new Native(id,root);next.sent.push(...previous.sent);sessions.set(id,next);}host=createHost();server=createServer();address=await server.listen(0);};
+ const restart=async()=>{await server.close();await host.close();for(const [id,previous] of sessions){const next=evidence?new EvidenceNative(id,root):new Native(id,root);next.sent.push(...previous.sent);sessions.set(id,next);}host=createHost();server=createServer();address=await server.listen(0);};
  const control=async(action:string,body:unknown)=>{const result=await host.control({method:'POST',path:`/remote/succession/${action}`,sessionId:'owner',body:JSON.stringify(body)});return {status:result.status,payload:JSON.parse(result.body)};};
- return {root,sessions,snapshotConfigurations,providerDescriptors:[{providerId:'fixture',displayName:'Fixture'},...(snapshots?[{providerId:'other',displayName:'Other'}]:[])],get host(){return host;},restart,loseSourceCreation:()=>{loseSourceCreation=true;},sourceCreates:()=>sourceCreates,beforeIdleCreate:(hook:()=>Promise<void>)=>{beforeIdleCreate=hook;},beforeSourceCreate:(hook:()=>Promise<void>)=>{beforeSourceCreate=hook;},loseTpmCreation:(value:boolean)=>{loseTpmCreation=value;},grants,beforeGrants:(hook:()=>Promise<void>)=>{beforeGrants=hook;},tpmConfigurations,control,attach:async(id:string)=>JSON.parse((await host.control({method:'POST',path:'/remote/attach',sessionId:id,body:JSON.stringify({providerId:'fixture',nativeSessionId:id})})).body),get url(){return address.url;},creates:()=>creates,unsupported:()=>{supported=false;},unbounded:()=>{bounded=false;},unavailableCoverage:()=>{coverage=false;},busy:(id:string)=>{busy=id;},close:async()=>{await server.close();await host.close();await rm(root,{recursive:true,force:true});}};
+ return {root,sessions,creationOptions,workspaceReads,allowIdleRelease:()=>{allowIdleRelease=true;},evidenceCreates:()=>evidenceCreates,creationResult:(value:AgentEmptyCreationResult)=>{creationResult=value;},beforeNativeInspect:(hook:typeof beforeNativeInspect)=>{beforeNativeInspect=hook;},snapshotConfigurations,providerDescriptors:[{providerId:'fixture',displayName:'Fixture'},...(snapshots?[{providerId:'other',displayName:'Other'}]:[])],get host(){return host;},restart,loseSourceCreation:()=>{loseSourceCreation=true;},sourceCreates:()=>sourceCreates,beforeIdleCreate:(hook:()=>Promise<void>)=>{beforeIdleCreate=hook;},beforeSourceCreate:(hook:()=>Promise<void>)=>{beforeSourceCreate=hook;},loseTpmCreation:(value:boolean)=>{loseTpmCreation=value;},grants,beforeGrants:(hook:()=>Promise<void>)=>{beforeGrants=hook;},tpmConfigurations,control,attach:async(id:string)=>JSON.parse((await host.control({method:'POST',path:'/remote/attach',sessionId:id,body:JSON.stringify({providerId:'fixture',nativeSessionId:id})})).body),get url(){return address.url;},creates:()=>creates,unsupported:()=>{supported=false;},unbounded:()=>{bounded=false;},unavailableCoverage:()=>{coverage=false;},busy:(id:string)=>{busy=id;},close:async()=>{await server.close();await host.close();await rm(root,{recursive:true,force:true});}};
 }
 const request={operationId:'handoff',roleId:'role',expectedRevision:1,from:ref('A')};
+test.each([false,true])('Host native evidence dispatch and independent readback preserve uncertainty, lost response %s',async lost=>{
+ const f=await fixture(false,false,undefined,false,true,true);
+ try{
+  expect((await f.control('prepare',request)).payload.phase).toBe('ready');
+  expect(f.creates()).toBe(0);expect(f.evidenceCreates()).toBe(1);
+  expect(f.creationOptions).toContainEqual({status:'created',handle:{providerId:'fixture',sessionId:'B',opaque:'original complete handle'}});
+  expect((await f.control('commit',{operationId:'handoff',expectedRevision:1})).payload.phase).toBe('committed');
+  const b=f.sessions.get('B') as EvidenceNative;b.dispatchFailure=lost;
+  const attached=await f.attach('B'),id='00000000-0000-4000-8000-000000000901';
+  const sent=await sendOverWebSocket(f.url,attached.agentId,'continue',id);
+  expect(sent.type).toBe(lost?'protocol_error':'command_acknowledged');expect(b.dispatches).toBe(1);expect(b.preparations).toBe(1);
+  const contextPath=join(f.root,'contexts','context.json');const before=await readFile(contextPath,'utf8');
+  expect(JSON.parse(before).attachments[0].deliveries[0].preparedInput.witness.nativeInputId).toBe('U-1');
+  const captures=b.captures;
+  expect((await f.control('reconcile',{operationId:'handoff'})).payload.materialized).toBe(false);
+  expect(await readFile(contextPath,'utf8')).toBe(before);
+  b.materialized=true;
+  expect((await f.control('reconcile',{operationId:'handoff'})).payload.materialized).toBe(true);
+  expect(b.captures).toBe(captures);expect(b.inspections).toBe(2);expect(b.dispatches).toBe(1);
+  await sendOverWebSocket(f.url,attached.agentId,'continue',id);expect(b.dispatches).toBe(1);expect(b.preparations).toBe(1);
+  b.unresolved=false;
+  expect((await f.control('prepare',{...request,operationId:'next',expectedRevision:2,from:ref('B')})).payload.phase).toBe('rejected');
+  expect(f.evidenceCreates()).toBe(1);
+ }finally{await f.close();}
+});
+test('Host refuses a known-rejected creation before candidate workspace reads or open',async()=>{
+ const f=await fixture(false,false,undefined,false,true);
+ try{
+  f.creationResult({status:'known_rejected',handle:{providerId:'fixture',sessionId:'B',opaque:'recovery only'},code:'native_evidence_stale',reason:AGENT_NATIVE_EVIDENCE_REASONS.native_evidence_stale});
+  expect((await f.control('prepare',request)).payload.phase).toBe('rejected');
+  expect(f.creationOptions).not.toContainEqual(expect.objectContaining({status:'known_rejected'}));
+  expect((await f.attach('B')).error).toBeDefined();
+  expect(f.creationOptions).toEqual([undefined]);
+  expect(f.workspaceReads).not.toContain('B');
+ }finally{await f.close();}
+});
+test.each(['known_rejected', 'created'] as const)('Host preserves cancelled late %s creation evidence during explicit attach and restore', async status => {
+ const f = await fixture(false, false, undefined, false, true, true);
+ let release = () => {}; let entered = false;
+ let running: ReturnType<typeof f.control> | undefined;
+ const gate = new Promise<void>(resolve => { release = resolve; });
+ try {
+  const handle = { providerId: 'fixture', sessionId: 'B', opaque: 'original cancelled creation handle' };
+  const outcome: AgentEmptyCreationResult = status === 'created' ? { status, handle } : {
+   status, handle, code: 'native_evidence_stale', reason: AGENT_NATIVE_EVIDENCE_REASONS.native_evidence_stale,
+  };
+  f.creationResult(outcome);
+  f.beforeIdleCreate(async () => { entered = true; await gate; });
+  running = f.control('prepare', request);
+  await expect.poll(() => entered, { timeout: 1500 }).toBe(true);
+  expect((await f.control('cancel', { operationId: 'handoff' })).payload.phase).toBe('cancelled');
+  release();
+  expect((await running).payload.phase).toBe('cancelled');
+
+  const rolePath = join(f.root, 'roles', 'state.json');
+  const contextPath = join(f.root, 'contexts', 'context.json');
+  const savedRoles = await readFile(rolePath, 'utf8');
+  const savedContext = await readFile(contextPath, 'utf8');
+  const state = JSON.parse(savedRoles).roles[0];
+  expect(state.role).toMatchObject({ current: ref('A'), revision: 1 });
+  expect(state.operations[0].phase).toBe('cancelled');
+  expect(state.operations[0].to).toBeUndefined();
+  expect(state.localPreparations[0].orphanCandidate).toEqual(ref('B'));
+  expect(state.localPreparations[0].nativeCreation.outcome).toEqual(outcome);
+  expect(JSON.parse(savedContext).attachments).toEqual([]);
+  f.sessions.set('ordinary', new Native('ordinary', f.root));
+
+  for (const restored of [false, true]) {
+   if (restored) await f.restart();
+   const b = f.sessions.get('B')!;
+   const runtimeInfo = b.runtimeInfo.bind(b);
+   const persistence = { providerId: 'fixture', sessionId: 'B', opaque: 'ordinary runtime handle' };
+   b.runtimeInfo = async () => ({ ...await runtimeInfo(), persistence });
+   const openCount = f.creationOptions.length, readCount = f.workspaceReads.length;
+   const attached = await f.host.control({ method: 'POST', path: '/remote/attach', sessionId: 'B',
+    body: JSON.stringify({ providerId: 'fixture', nativeSessionId: 'B' }) });
+   if (status === 'known_rejected') {
+    expect(attached.status).toBeGreaterThanOrEqual(400);
+    expect(f.workspaceReads.slice(readCount)).not.toContain('B');
+    expect(f.creationOptions.slice(openCount)).toEqual([]);
+   } else {
+    expect(attached.status).toBe(200);
+    expect(JSON.parse(attached.body)).toMatchObject({ nativeSessionId: 'B' });
+    expect(f.creationOptions.slice(openCount)).toEqual([outcome]);
+    expect((await b.runtimeInfo() as { persistence?: unknown }).persistence).toEqual(persistence);
+   }
+   const ordinaryOpenCount = f.creationOptions.length;
+   expect((await f.attach('ordinary')).nativeSessionId).toBe('ordinary');
+   expect(f.creationOptions.slice(ordinaryOpenCount)).toEqual([undefined]);
+   expect(await readFile(rolePath, 'utf8')).toBe(savedRoles);
+   expect(await readFile(contextPath, 'utf8')).toBe(savedContext);
+   expect([...f.sessions.values()].flatMap(session => session.sent)).toEqual([]);
+   expect(f.evidenceCreates()).toBe(1);
+   expect(f.creates()).toBe(0);
+  }
+ } finally { release(); await running?.catch(() => undefined); await f.close(); }
+});
+test('Host reopens the saved creation handle after restart without replaying creation',async()=>{
+ const f=await fixture(false,false,undefined,false,true);
+ try{
+  expect((await f.control('prepare',request)).payload.phase).toBe('ready');
+  const original=f.creationOptions.find(Boolean);await f.restart();
+  expect((await f.attach('B')).agentId).toBeTruthy();
+  expect(f.creationOptions.at(-1)).toEqual(original);expect(f.evidenceCreates()).toBe(1);expect(f.creates()).toBe(0);
+ }finally{await f.close();}
+});
+test('Host refuses an unavailable evidence channel instead of dispatching through ordinary input',async()=>{
+ const f=await fixture(false,false,undefined,false,true);
+ try{
+  expect((await f.control('prepare',request)).payload.phase).toBe('ready');
+  expect((await f.control('commit',{operationId:'handoff',expectedRevision:1})).payload.phase).toBe('committed');
+  const b=f.sessions.get('B') as EvidenceNative;
+  b.nativeEvidence.availability=()=>({status:'unavailable',code:'native_evidence_unavailable',reason:AGENT_NATIVE_EVIDENCE_REASONS.native_evidence_unavailable});
+  const attached=await f.attach('B');
+  expect((await sendOverWebSocket(f.url,attached.agentId,'continue','00000000-0000-4000-8000-000000000902')).type).toBe('protocol_error');
+  expect(b.sent).toEqual([]);expect(b.preparations).toBe(0);
+ }finally{await f.close();}
+});
+test('Host retains the source token across candidate reads and refuses stale facts at final commit',async()=>{
+ const f=await fixture(false,false,undefined,false,true);
+ try{
+  expect((await f.control('prepare',request)).payload.phase).toBe('ready');
+  const a=f.sessions.get('A') as EvidenceNative, b=f.sessions.get('B') as EvidenceNative;
+  f.beforeNativeInspect(async id=>{if(id==='B')a.epoch++;});
+  expect((await f.control('commit',{operationId:'handoff',expectedRevision:1})).status).toBe(409);
+  expect(a.captures).toBeGreaterThan(0);expect(b.captures).toBeGreaterThan(0);
+  expect(JSON.parse(await readFile(join(f.root,'roles','state.json'),'utf8')).roles[0].role.current).toEqual(ref('A'));
+ }finally{await f.close();}
+});
+test('Host rejects a replaced projection with the same native B even when tokens claim current',async()=>{
+ const f=await fixture(false,false,undefined,false,true);let proceed!:()=>void;
+ try{
+  expect((await f.control('prepare',request)).payload.phase).toBe('ready');
+  const old=await f.attach('B'),b=f.sessions.get('B') as EvidenceNative; b.nativeEvidence.isCurrent=()=>true;
+  let enter!:()=>void;const entered=new Promise<void>(resolve=>{enter=resolve;}),gate=new Promise<void>(resolve=>{proceed=resolve;});
+  f.beforeNativeInspect(async id=>{if(id==='B'){enter();await gate;}});
+  const committing=f.control('commit',{operationId:'handoff',expectedRevision:1});
+  await entered;await f.host.relay.closeAgent(old.agentId);expect((await f.attach('B')).agentId).toBe(old.agentId);
+  proceed();expect((await committing).status).toBe(409);
+ }finally{proceed?.();await f.close();}
+});
+test.each(['commit', 'partial-acquisition'] as const)('Host releases actual native leases after %s',async phase=>{
+ const f=await fixture(false,false,undefined,false,true);let proceed:()=>void=()=>{};let spy:ReturnType<typeof vi.spyOn>|undefined;
+ try{
+  expect((await f.control('prepare',request)).payload.phase).toBe('ready');
+  const a=f.sessions.get('A') as EvidenceNative,b=f.sessions.get('B') as EvidenceNative;
+  if(phase==='partial-acquisition') {
+   b.beforeCapture=()=>{throw new Error('candidate evidence capture failed');};
+   expect((await f.control('commit',{operationId:'handoff',expectedRevision:1})).status).toBe(409);
+   f.allowIdleRelease();
+  } else {
+   let enter!:()=>void;const entered=new Promise<void>(resolve=>{enter=resolve;}),gate=new Promise<void>(resolve=>{proceed=resolve;});
+   const original=SessionSuccessionStore.prototype.commit;
+   spy=vi.spyOn(SessionSuccessionStore.prototype,'commit').mockImplementation(async function(...args){enter();await gate;return original.apply(this,args);});
+   const committing=f.control('commit',{operationId:'handoff',expectedRevision:1});
+   await entered;f.allowIdleRelease();await new Promise(resolve=>setTimeout(resolve,75));
+   expect(a.disposals).toBe(0);expect(b.disposals).toBe(0);
+   proceed();expect((await committing).payload.phase).toBe('committed');
+  }
+  await expect.poll(()=>a.disposals,{timeout:1000}).toBe(1);await expect.poll(()=>b.disposals,{timeout:1000}).toBe(1);
+ }finally{proceed();spy?.mockRestore();await f.close();}
+});
+test('Host independent evidence readback rechecks the protected attachment workspace',async()=>{
+ const f=await fixture(false,false,undefined,false,true,true);
+ try{
+  expect((await f.control('prepare',request)).payload.phase).toBe('ready');
+  expect((await f.control('commit',{operationId:'handoff',expectedRevision:1})).payload.phase).toBe('committed');
+  const attached=await f.attach('B'),b=f.sessions.get('B') as EvidenceNative;
+  await sendOverWebSocket(f.url,attached.agentId,'continue','00000000-0000-4000-8000-000000000903');
+  const before=await readFile(join(f.root,'contexts','context.json'),'utf8');
+  b.runtimeInfo=async()=>({providerId:'fixture',sessionId:'B',status:'idle',cwd:'/'});
+  expect((await f.control('reconcile',{operationId:'handoff'})).status).not.toBe(200);
+  expect(b.inspections).toBe(0);expect(b.dispatches).toBe(1);
+  expect(await readFile(join(f.root,'contexts','context.json'),'utf8')).toBe(before);
+ }finally{await f.close();}
+});
 /** Each send uses a fresh authenticated connection and closes it before returning. */
 async function sendOverWebSocket(url: string, agentId: string, text: string, operationId: string, subject = 'owner', content = false) {
   const socket = new WebSocket(`${url.replace('http', 'ws')}/v1/sessions/${agentId}/events`, {
@@ -246,7 +450,7 @@ test('authenticated broker enrollment derives a role, freezes associations and c
     expect(committed).toMatchObject({record:{phase:'committed'},role:{current:ref('B'),revision:2},locator:{hostId:transport.hostId,providerId:'fixture',nativeSessionId:'B'}});
     expect(transport.saved().associations?.freezes[0]).toMatchObject({released:'committed',projection:{role:{current:ref('B')}}});
     const state=JSON.parse(await readFile(join(f.root,'roles','state.json'),'utf8'));
-    expect(state).toMatchObject({version:6,roles:[{associationAuthority:transport.authority,enrollments:[{request:{operationId:input.operationId}}]}]});
+    expect(state).toMatchObject({version:7,roles:[{associationAuthority:transport.authority,enrollments:[{request:{operationId:input.operationId}}]}]});
   } finally {await transport.close();await f.close();}
 });
 

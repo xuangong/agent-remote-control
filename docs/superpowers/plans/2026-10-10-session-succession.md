@@ -419,9 +419,16 @@ no production capability is enabled by these scripted fixtures.
   capacity13 and SDK typecheck remain valid. Two actual prior-reader tests verify
   role6/context2 rejection of new-writer files without mutation. This durable
   representation does not activate the optional producer or certify readiness.
-- [ ] Complete native readiness evidence and D2B Host consumption: verified
-  original-handle attachment, original operation effect/readback routing, and
-  exact leased facade/token retention through the final commit assertion.
+- [x] Complete D2B Host consumption: verified original-handle attachment, original
+  operation effect/readback routing, and exact leased facade/token retention
+  through the final commit assertion. Independent spec/quality review passed
+  after fixing cancelled late-candidate lookup. Root freshly passed runtime76,
+  the original orphan regression and Host source typecheck. Other initial D2B
+  affected suites retain their verified results. This does not certify native
+  readiness or install real evidence suppliers.
+- [ ] Complete scoped native readiness evidence and real suppliers. Coverage is
+  ARC-originated admissions plus authoritative observations in the supported
+  profile; absence of a global native-client lock is not a blocker.
 - [ ] Treat unspecified acceptance as unknown disposition in TPM; settle native
   queued inputs from authoritative evidence, not later idle or text matching.
 - [ ] Preserve operation/candidate/input evidence across lost responses and restart.

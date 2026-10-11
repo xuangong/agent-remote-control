@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { createHash } from 'node:crypto';
 import { afterEach, expect, test, vi } from 'vitest';
 import { SessionSuccessionStore } from './session-succession-store.js';
-import { SessionSuccessionContextStore } from './session-succession-context.js';
+import { SessionSuccessionContextStore, SessionSuccessionInputDispatcher } from './session-succession-context.js';
 import { SessionSuccessionCoordinator } from './session-succession.js';
 import { LocalSuccessionPreparation } from './local-succession-preparation.js';
 import { SessionReferenceStore } from './session-reference.js';
@@ -356,4 +356,64 @@ test.each(['role-temporary', 'role-directory', 'context-temporary', 'context-dir
     if (temporary) expect(restored.read('op').deliveries).toEqual([]);
     else { expect(restored.delivery('input')).toMatchObject({ state: 'unknown', preparedInput: { witness } }); expect(Number(restored.delivery('input')!.reservedBytes)).toBeGreaterThan(0); }
   }
+});
+
+test.each(['temporary', 'directory'] as const)('prepared dispatcher never executes after %s publication failure and never replays after restart', async phase => {
+  const directory = await root(), original = await vi.importActual<typeof fs>('node:fs/promises');
+  const store = new SessionSuccessionContextStore(directory); await store.ready;
+  await store.attach({operationId:'op',roleId:'role',roleRevision:2,source:ref('A'),target:ref('B'),capturedAt:'2026-10-10T00:00:00Z',boundary:{epoch:'e',seq:1},text:'[]',itemCount:0});
+  let preparations = 0, effects = 0;
+  const prepare = async ({text}:{text:string}) => {
+    preparations++; return {version:1 as const,providerId:'fixture',nativeSessionId:'B',nativeInputId:'U',cwd:directory,store:{authorityId:'authority',storeId:'store'},parts:[{type:'text' as const,text}] as const,
+      content:{encoding:'utf-8' as const,bytes:Buffer.byteLength(text),sha256:createHash('sha256').update(text).digest('hex')},selections:{}};
+  };
+  const dispatch = async () => { effects++; return {outcome:'accepted' as const}; };
+  const input = {operationId:'input',roleId:'role',roleRevision:2,target:ref('B'),text:'continue'};
+  if(phase==='temporary')vi.mocked(fs.open).mockRejectedValueOnce(new Error('temporary unavailable'));
+  else vi.mocked(fs.open).mockImplementation(async(...args)=>{const file=await original.open(...args);if(args[0]===directory&&args[1]==='r')vi.spyOn(file,'sync').mockRejectedValue(new Error('publication unknown'));return file;});
+  await expect(new SessionSuccessionInputDispatcher(store).dispatch(input,async()=>{},dispatch,prepare)).rejects.toMatchObject({code:phase==='temporary'?'succession_publication_rejected':'succession_publication_unknown'});
+  expect(preparations).toBe(1);expect(effects).toBe(0);
+  vi.mocked(fs.open).mockImplementation(original.open);
+  const restored = new SessionSuccessionContextStore(directory);await restored.ready;
+  if(phase==='directory') {
+    expect(await new SessionSuccessionInputDispatcher(restored).dispatch(input,async()=>{},dispatch,prepare)).toMatchObject({state:'unknown',preparedInput:{witness:{nativeInputId:'U'}}});
+    expect(preparations).toBe(1);expect(effects).toBe(0);
+  } else expect(restored.read('op').deliveries).toEqual([]);
+});
+
+test.each(['stale', 'publication-unknown', 'success'] as const)('coordinator holds verification until its actual queued %s commit finishes', async outcome => {
+  const directory = await fs.realpath(await root());
+  let held = 0, released = 0, current = true, checks = 0;
+  const readiness = {cwd:directory,idle:true,managed:true,pendingInputs:0,inFlightInputs:0,pendingInteractions:0,activeChildren:0,boundary:{epoch:'e',seq:1}};
+  const ports: SessionSuccessionPorts = {...unusedPorts,supports:async()=>true,inspect:async()=>readiness,createIdle:async()=>ref('B'),
+    captureTimeline:async()=>({entries:[],boundary:{epoch:'e',seq:1},capturedAt:'2026-10-10T00:00:00Z'}),
+    retainVerification:async()=>{held++;return {inspect:async()=>{expect(held).toBe(1);return readiness;},assertCurrent(){checks++;expect(held).toBe(1);if(!current)throw new Error('retained native attachment changed');},release(){held--;released++;}};}};
+  const service=new SessionSuccessionService(directory,'host',ports);await service.ready;
+  await service.createRole({id:'role',revision:1,origin:ref('A'),current:ref('A'),workspace:{controllerId:'host',canonicalCwd:directory}});
+  expect((await service.prepare(request)).phase).toBe('ready');expect(held).toBe(0);expect(released).toBe(1);
+  const original=await vi.importActual<typeof fs>('node:fs/promises');
+  let enter!:()=>void, releaseWriter!:()=>void, commitQueued!:()=>void;
+  const entered=new Promise<void>(resolve=>{enter=resolve;}),gate=new Promise<void>(resolve=>{releaseWriter=resolve;}),queued=new Promise<void>(resolve=>{commitQueued=resolve;});
+  let first=true;
+  vi.mocked(fs.open).mockImplementation(async(...args)=>{
+    if(first&&args[1]==='wx'){first=false;enter();await gate;throw new Error('unrelated writer refused');}
+    const file=await original.open(...args);
+    if(outcome==='publication-unknown'&&args[0]===join(directory,'roles')&&args[1]==='r')vi.spyOn(file,'sync').mockRejectedValue(new Error('commit publication unknown'));
+    return file;
+  });
+  const writing=service.store.ensureRole(ref('unrelated'),directory).catch(error=>error);
+  const commit=service.store.commit.bind(service.store);
+  vi.spyOn(service.store,'commit').mockImplementation((...args)=>{const result=commit(...args);commitQueued();return result;});
+  let committing:Promise<unknown>=Promise.resolve();
+  try {
+    await enteredWithinDeadline(entered);
+    committing=service.commit('op',1);const observed=committing.catch(error=>error);
+    await enteredWithinDeadline(queued);expect(held).toBe(1);expect(released).toBe(1);
+    const before=checks;if(outcome==='stale')current=false;
+    releaseWriter();await writing;const result=await observed;
+    expect(checks).toBe(before+1);expect(held).toBe(0);expect(released).toBe(2);
+    if(outcome==='stale'){expect(result).toMatchObject({message:'retained native attachment changed'});expect(service.store.read('role').role.current).toEqual(ref('A'));}
+    else if(outcome==='publication-unknown')expect(result).toMatchObject({code:'succession_publication_unknown'});
+    else expect(result).toMatchObject({phase:'committed'});
+  }finally{releaseWriter();await Promise.allSettled([writing,committing]);}
 });

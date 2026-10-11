@@ -2,6 +2,7 @@ import { isNativeSessionRef, nativeSessionRefKey, successionFreezeKey, type Nati
 import { LocalSuccessionPreparation, SuccessionPreparationRejected } from './local-succession-preparation.js';
 import { SessionSuccessionStore } from './session-succession-store.js';
 import { SuccessionPublicationUnknown } from './succession-persistence.js';
+import { AgentOperationRejectedError, AGENT_NATIVE_EVIDENCE_REASONS, type AgentNativeEvidenceCode } from '@orchardworks/agent-provider-sdk';
 
 export interface SuccessionAdmission {
   checkSource(source: NativeSessionRef): void;
@@ -86,13 +87,14 @@ export class SessionSuccessionCoordinator {
       await this.preparation.check(state.role);
       await this.preparation.supports(state.role, record.targetProviderId);
       if (this.stopped(operationId)) return this.store.operation(operationId);
+      const nativeCreate = await this.preparation.selectNativeCreation(state.role, operationId, record.targetProviderId);
       const context = await this.preparation.capture(state.role, operationId);
       await this.serialized(operationId, async () => {
         if (this.stopped(operationId)) return;
         if (context.operationId !== operationId || context.roleId !== record.roleId || context.roleRevision !== record.expectedRevision + 1
           || nativeSessionRefKey(context.source) !== nativeSessionRefKey(record.from)) throw new Error('Captured succession context identity changed.');
         await this.preparation.saveContext(context);
-        await this.store.savePreparation(operationId, { ...context.boundary, capturedAt: context.capturedAt });
+        await this.store.savePreparation(operationId, { ...context.boundary, capturedAt: context.capturedAt }, !!nativeCreate);
       });
       if (this.stopped(operationId)) return this.store.operation(operationId);
       const source = await this.preparation.check(state.role);
@@ -101,10 +103,31 @@ export class SessionSuccessionCoordinator {
         if (this.stopped(operationId)) return undefined;
         await this.store.startCreation(operationId);
         // Wrapping the promise lets cancellation proceed while native creation is unresolved.
-        return { result: this.preparation.create(state.role, operationId, record.targetProviderId) };
+        return { result: Promise.resolve().then(async () => nativeCreate ? nativeCreate() : this.preparation.create(state.role, operationId, record.targetProviderId)) };
       });
       if (!started) return this.store.operation(operationId);
-      const target = await started.result;
+      let result;
+      try { result = await started.result; }
+      catch (error) {
+        if (nativeCreate && error instanceof AgentOperationRejectedError && typeof error.code === 'string' && Object.hasOwn(AGENT_NATIVE_EVIDENCE_REASONS, error.code)) {
+          await this.serialized(operationId, () => this.store.rejectCreationBeforeDispatch(operationId, error.code as AgentNativeEvidenceCode));
+        }
+        throw error;
+      }
+      if (nativeCreate) {
+        const outcome = result as Awaited<ReturnType<typeof nativeCreate>>;
+        let conflict = false, registrationError: unknown;
+        if (outcome.status === 'created' || outcome.status === 'known_rejected') {
+          try { conflict = this.admission?.registerCandidate(operationId, { controllerId: record.from.controllerId, providerId: outcome.handle.providerId, nativeSessionId: outcome.handle.sessionId }).conflict ?? false; }
+          catch (error) { registrationError = error; }
+        }
+        await this.serialized(operationId, () => this.store.saveCreationResult(operationId, outcome));
+        if (this.stopped(operationId) || outcome.status !== 'created') return this.store.operation(operationId);
+        if (registrationError) throw registrationError;
+        if (conflict) throw new SuccessionPreparationRejected('succession_candidate_busy', 'Candidate has conflicting Host mutations.');
+        return await this.finishCandidate(operationId);
+      }
+      const target = result as NativeSessionRef;
       if (!isNativeSessionRef(target) || nativeSessionRefKey(target) === nativeSessionRefKey(record.from)) throw new Error('Native creation returned an invalid candidate identity.');
       const conflict = this.admission?.registerCandidate(operationId, target).conflict;
       await this.serialized(operationId, async () => { await this.store.saveCandidate(operationId, target); });
@@ -116,6 +139,7 @@ export class SessionSuccessionCoordinator {
   private async finishCandidate(operationId: string): Promise<SuccessionRecord> {
     const record = this.store.operation(operationId), progress = this.store.progress(operationId), state = this.store.read(record.roleId);
     if (!record.to || progress?.stage !== 'candidate-known' || !progress.capture) throw new Error('Saved candidate preparation is incomplete.');
+    if (progress.nativeCreation && progress.nativeCreation.outcome?.status !== 'created') throw new Error('Native creation evidence is not resumable.');
     if (record.to.providerId !== (record.targetProviderId ?? record.from.providerId)) throw new SuccessionPreparationRejected('succession_target_provider_mismatch', 'The candidate provider does not match the selected provider.');
     await this.preparation.check(state.role, record.to);
     await this.serialized(operationId, async () => {
@@ -126,9 +150,11 @@ export class SessionSuccessionCoordinator {
     const prepared = { operationId, roleId: record.roleId, expectedRevision: record.expectedRevision, from: record.from,
       ...(record.targetProviderId ? { targetProviderId: record.targetProviderId } : {}), to: record.to, workspace: state.role.workspace,
       associationRevision: state.associationRevision, participants: state.participants, capture: progress.capture };
-    await this.preparation.verify(state.role, prepared);
-    return this.serialized(operationId, async () => this.stopped(operationId)
-      ?? await this.store.advance(operationId, 'transferring', { phase: 'ready', prepared }));
+    const verification = await this.preparation.verify(state.role, prepared);
+    try {
+      return await this.serialized(operationId, async () => { verification.assertCurrent(); return this.stopped(operationId)
+        ?? await this.store.advance(operationId, 'transferring', { phase: 'ready', prepared }); });
+    } finally { verification.release(); }
   }
   private async failPreparation(operationId: string, error: unknown): Promise<SuccessionRecord> {
     if (error instanceof SuccessionPublicationUnknown) throw error;
@@ -145,11 +171,13 @@ export class SessionSuccessionCoordinator {
     if (record.phase === 'committed') { this.store.assertCommittedProjection(operationId); return record; }
     if (record.phase !== 'ready' || !record.prepared) throw new Error('Succession is not ready.');
     const generation = this.store.generation;
-    await this.preparation.verify(this.store.read(record.roleId).role, record.prepared);
-    return this.serialized(operationId, async () => {
-      this.admission?.assertCommit(operationId, record.prepared!.capture);
-      return this.releaseTerminal(await this.store.commit(operationId, generation));
-    });
+    const verification = await this.preparation.verify(this.store.read(record.roleId).role, record.prepared);
+    try {
+      return await this.serialized(operationId, async () => this.releaseTerminal(await this.store.commit(operationId, generation, () => {
+        this.admission?.assertCommit(operationId, record.prepared!.capture);
+        verification.assertCurrent();
+      })));
+    } finally { verification.release(); }
   }
   /** Explicitly read-verify saved local data; recovery never replays native creation. */
   async reconcileReady(operationId: string): Promise<SuccessionRecord> {

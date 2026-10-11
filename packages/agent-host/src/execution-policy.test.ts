@@ -46,6 +46,25 @@ it('locks permission controls in runtime and events while allowing model changes
   await session.setSessionSetting!('model', 'large'); expect(f.calls).toEqual(['open', 'model']);
   f.info.cwd = f.outside; await expect(session.sendMessage('hello')).rejects.toThrow(/workspace/i);
 });
+
+it('protects nested native evidence calls while preserving synchronous attachment tokens', async () => {
+  const f = await fixture(), raw = await f.source.open('session'); const token = {};
+  const nested = { availability: () => ({ status: 'configured', version: 1 }),
+    captureValidity() { expect(this).toBe(nested); return token; }, isCurrent(value: unknown) { expect(this).toBe(nested); return value === token; },
+    async prepareInput() { expect(this).toBe(nested); f.calls.push('prepare'); },
+    async dispatchInput() { expect(this).toBe(nested); f.calls.push('dispatch'); },
+    async inspectInput() { expect(this).toBe(nested); f.calls.push('inspect'); } };
+  Object.freeze(nested);
+  Object.defineProperty(raw, 'nativeEvidence', { value: nested, configurable: true });
+  const wrapped = await f.directory.open('session'); const evidence = wrapped.nativeEvidence!;
+  expect(evidence.captureValidity()).toBe(token); expect(evidence.isCurrent(token as never)).toBe(true);
+  await evidence.prepareInput([]); await evidence.dispatchInput({} as never); await evidence.inspectInput({} as never);
+  expect(f.calls.slice(-3)).toEqual(['prepare', 'dispatch', 'inspect']);
+  f.info.cwd = f.outside;
+  for (const call of [() => evidence.prepareInput([]), () => evidence.dispatchInput({} as never), () => evidence.inspectInput({} as never)]) await expect(call()).rejects.toThrow(/workspace/i);
+  expect(f.calls.filter(call => ['prepare', 'dispatch', 'inspect'].includes(call))).toHaveLength(3);
+  expect(evidence.isCurrent(token as never)).toBe(true);
+});
 it('opens an allowed session by authoritative workspace metadata even when absent from discovery', async () => {
   const f = await fixture();
   const directory = protectHostDirectory({ ...f.source,

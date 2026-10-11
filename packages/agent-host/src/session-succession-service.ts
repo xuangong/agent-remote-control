@@ -3,7 +3,7 @@ import { link, mkdir, open, readFile, unlink } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { AgentHistoryPage, AgentHistoryQuery } from '@orchardworks/agent-provider-sdk';
 import { nativeSessionRefKey, serializeNormalizedHistory, type NativeSessionRef, type PreparedSuccession, type PrimaryRole, type ProjectedTimelineEntry, type SuccessionRequest, type TimelineCursor } from '@orchardworks/agent-remote-protocol';
-import { LocalSuccessionPreparation, type SuccessionReadiness } from './local-succession-preparation.js';
+import { LocalSuccessionPreparation, type NativeSuccessionCreate, type RetainedSuccessionVerification, type SuccessionReadiness } from './local-succession-preparation.js';
 import { SessionSuccessionContextStore, type SuccessionContextDelivery, type SuccessionContextPreparation } from './session-succession-context.js';
 import { SessionSuccessionStore } from './session-succession-store.js';
 import { SessionSuccessionCoordinator } from './session-succession.js';
@@ -20,6 +20,8 @@ export interface SessionSuccessionPorts {
   supportsBoundedProjection?(source: NativeSessionRef, targetProviderId: string): Promise<boolean>;
   inspect(source: NativeSessionRef): Promise<SuccessionReadiness>;
   createIdle(source: NativeSessionRef, operationId: string, targetProviderId: string): Promise<NativeSessionRef>;
+  selectNativeCreation?(source: NativeSessionRef, operationId: string, targetProviderId: string): Promise<NativeSuccessionCreate | undefined>;
+  retainVerification?(prepared: PreparedSuccession): Promise<RetainedSuccessionVerification>;
   /** One complete normalized snapshot frozen at an authoritative boundary; reject incomplete pages. */
   captureTimeline(source: NativeSessionRef): Promise<{ entries: readonly ProjectedTimelineEntry[]; boundary: TimelineCursor; capturedAt: string }>;
   authorizeRead(reader: NativeSessionRef, source: NativeSessionRef): Promise<void>;
@@ -43,6 +45,8 @@ export class SessionSuccessionService {
       inspect: source => ports.inspect(source), supports: (source, targetProvider) => ports.supports(source, targetProvider),
       supportsBoundedProjection: (source, targetProvider) => ports.supportsBoundedProjection?.(source, targetProvider) ?? Promise.resolve(false),
       create: (source, operationId, targetProvider) => ports.createIdle(source, operationId, targetProvider),
+      selectNativeCreation: (source, operationId, targetProvider) => ports.selectNativeCreation?.(source, operationId, targetProvider) ?? Promise.resolve(undefined),
+      ...(ports.retainVerification ? { retainVerification: (prepared: PreparedSuccession) => ports.retainVerification!(prepared) } : {}),
       capture: (source, operationId) => this.capture(source, operationId),
       saveContext: context => this.contexts.prepare(context),
       bind: async (operationId, target) => { await this.contexts.bind(operationId, target); },

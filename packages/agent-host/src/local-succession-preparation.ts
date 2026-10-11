@@ -1,6 +1,24 @@
 import type { SessionSuccessionContextStore, SuccessionContextRecord, SuccessionContextPreparation } from './session-succession-context.js';
 import { realpath } from 'node:fs/promises';
 import { type NativeSessionRef, type PreparedSuccession, type PrimaryRole } from '@orchardworks/agent-remote-protocol';
+import { parseAgentEmptyCreationResult, serializeAgentEmptyCreationResult, type AgentEmptyCreationResult, type AgentPersistenceHandle } from '@orchardworks/agent-provider-sdk';
+
+export interface SuccessionVerification {
+  assertCurrent(): void;
+  release(): void;
+}
+export interface RetainedSuccessionVerification extends SuccessionVerification {
+  inspect(session: NativeSessionRef): Promise<SuccessionReadiness>;
+}
+export type NativeSuccessionCreate = () => Promise<AgentEmptyCreationResult>;
+/** Host-private envelope check. Opaque native contents remain adapter-owned. */
+export function successionCreationHandle(providerId: string, nativeSessionId: string, result: AgentEmptyCreationResult): AgentPersistenceHandle {
+  const saved = parseAgentEmptyCreationResult(serializeAgentEmptyCreationResult(result));
+  if (saved.status !== 'created' || saved.handle.providerId !== providerId || saved.handle.sessionId !== nativeSessionId) {
+    throw new SuccessionPreparationRejected('succession_creation_not_resumable', 'Native creation evidence does not authorize this attachment.');
+  }
+  return saved.handle;
+}
 
 export interface SuccessionReadiness {
   cwd: string;
@@ -21,6 +39,8 @@ export interface LocalSuccessionAccess {
   supportsBoundedProjection?(source: NativeSessionRef, targetProviderId: string): Promise<boolean>;
   verifyAttachment(prepared: PreparedSuccession): Promise<void>;
   create(source: NativeSessionRef, operationId: string, targetProviderId: string): Promise<NativeSessionRef>;
+  selectNativeCreation?(source: NativeSessionRef, operationId: string, targetProviderId: string): Promise<NativeSuccessionCreate | undefined>;
+  retainVerification?(prepared: PreparedSuccession): Promise<RetainedSuccessionVerification>;
   capture(source: NativeSessionRef, operationId: string): Promise<SuccessionContextPreparation>;
   saveContext(context: SuccessionContextPreparation): Promise<void>;
   bind(operationId: string, target: NativeSessionRef): Promise<void>;
@@ -32,13 +52,13 @@ export class SuccessionPreparationRejected extends Error {
 /** Reuse this Controller and canonical workspace; adapter capabilities gate each provider pair. */
 export class LocalSuccessionPreparation {
   constructor(private readonly controllerId: string, private readonly providerId: string, private readonly access: LocalSuccessionAccess, private readonly contexts?: SessionSuccessionContextStore) {}
-  async check(role: PrimaryRole, session = role.current): Promise<SuccessionReadiness> {
+  async check(role: PrimaryRole, session = role.current, inspect = (target: NativeSessionRef) => this.access.inspect(target)): Promise<SuccessionReadiness> {
     if (session.controllerId !== this.controllerId
       || role.current.controllerId !== this.controllerId
       || role.workspace.controllerId !== this.controllerId) throw new SuccessionPreparationRejected('succession_local_only', 'Handoff requires the same Host.');
     const context = this.pendingContext(session);
     if (context && ['dispatching', 'accepted', 'unknown'].includes(context.state)) throw new SuccessionPreparationRejected('succession_context_unknown', 'Reconcile the first input before another succession.');
-    const state = await this.access.inspect(session);
+    const state = await inspect(session);
     if (state.idle !== true || state.managed !== true || state.pendingInputs !== 0 || state.inFlightInputs !== 0 || state.pendingInteractions !== 0 || state.activeChildren !== 0) {
       throw new SuccessionPreparationRejected('succession_not_quiescent', 'Finish pending input, approvals and child work before handoff. Native ownership must be confirmed.');
     }
@@ -60,6 +80,9 @@ export class LocalSuccessionPreparation {
   create(role: PrimaryRole, operationId: string, targetProviderId = role.current.providerId): Promise<NativeSessionRef> {
     return this.access.create(role.current, `${operationId}:create`, targetProviderId);
   }
+  selectNativeCreation(role: PrimaryRole, operationId: string, targetProviderId = role.current.providerId): Promise<NativeSuccessionCreate | undefined> {
+    return this.access.selectNativeCreation?.(role.current, `${operationId}:create`, targetProviderId) ?? Promise.resolve(undefined);
+  }
   capture(role: PrimaryRole, operationId: string): Promise<SuccessionContextPreparation> { return this.access.capture(role.current, `${operationId}:context`); }
   saveContext(context: SuccessionContextPreparation): Promise<void> { return this.access.saveContext(context); }
   bind(operationId: string, target: NativeSessionRef): Promise<void> { return this.access.bind(operationId, target); }
@@ -68,12 +91,18 @@ export class LocalSuccessionPreparation {
     const context = this.contexts?.forTarget(source);
     return context?.state === 'materialized' ? undefined : context;
   }
-  async verify(role: PrimaryRole, prepared: PreparedSuccession): Promise<void> {
+  async verify(role: PrimaryRole, prepared: PreparedSuccession): Promise<SuccessionVerification> {
     await this.access.verifyAttachment(prepared);
-    const source = await this.check(role);
-    await this.check(role, prepared.to);
-    if (source.boundary.epoch !== prepared.capture.epoch || source.boundary.seq !== prepared.capture.seq) {
-      throw new SuccessionPreparationRejected('succession_boundary_changed', 'Source history changed beyond the captured handoff boundary.');
-    }
+    const retained = await this.access.retainVerification?.(prepared);
+    try {
+      const inspect = retained ? (target: NativeSessionRef) => retained.inspect(target) : undefined;
+      const source = await this.check(role, role.current, inspect);
+      await this.check(role, prepared.to, inspect);
+      if (source.boundary.epoch !== prepared.capture.epoch || source.boundary.seq !== prepared.capture.seq) {
+        throw new SuccessionPreparationRejected('succession_boundary_changed', 'Source history changed beyond the captured handoff boundary.');
+      }
+      retained?.assertCurrent();
+      return retained ?? { assertCurrent() {}, release() {} };
+    } catch (error) { retained?.release(); throw error; }
   }
 }

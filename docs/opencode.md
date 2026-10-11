@@ -1,38 +1,68 @@
 # OpenCode shared provider
 
-OpenCode uses the official JavaScript SDK over HTTP and SSE. Its native server owns sessions and running tasks; Controller and ARDB are clients. The normal product Session View, Favorites, Track and native session rename are reused.
+OpenCode uses the official JavaScript SDK over HTTP and SSE. Its native server owns sessions and running tasks; Controller and ARDB are clients. Controller can manage the local server's lifecycle without changing this shared-session model. The normal product Session View, Favorites, Track and native session rename are reused.
 
-## Start the native server
+## Use the managed local server
 
 Install OpenCode and configure its model/provider credentials using OpenCode's own tooling. This integration does not supply model credentials or reuse another provider's login.
 
-Start an independent server on the Host machine:
+With the usual Controller already running, no separate `opencode serve` command is required. At startup and during its every-minute provider scan, Controller checks `http://127.0.0.1:4096`. If no service is listening and a supported OpenCode CLI is installed, it starts an authenticated, loopback-only server. **Settings → Hosts → Agent providers → Detect again** requests another scan. An absent CLI is reported as unavailable; Controller does not install or upgrade OpenCode.
 
 ```sh
-OPENCODE_SERVER_PASSWORD='choose-a-local-password' opencode serve --hostname 127.0.0.1 --port 4096
+agent-remote-controller opencode server status
 ```
 
-Keep this process running, or manage it with your operating system's service manager. The Controller does not silently start, restart or upgrade OpenCode. Binding to loopback keeps the native HTTP interface local; the existing Controller/Relay connection supplies remote access.
+The existing Controller login-startup mechanism provides recovery after a reboot: when Controller starts again, provider discovery starts the missing local server. It does not add a separate machine-wide OpenCode startup service. Native model credentials remain in OpenCode's own profile. Binding to loopback keeps the native HTTP interface local; the existing Controller/Relay connection supplies remote access.
 
-PowerShell:
-
-```powershell
-$env:OPENCODE_SERVER_PASSWORD = 'choose-a-local-password'
-opencode serve --hostname 127.0.0.1 --port 4096
-```
-
-## Configure Controller
-
-Set these variables in the Controller's local environment before running the usual Controller start/connect command:
+Manage this server from any terminal using the same Controller state directory:
 
 ```sh
-export AGENT_HOST_OPENCODE_URL=http://127.0.0.1:4096
+agent-remote-controller opencode server start
+agent-remote-controller opencode server stop
+agent-remote-controller opencode server restart
+agent-remote-controller opencode server status
+```
+
+`stop` persists a local opt-out so the next provider scan or Controller restart does not immediately start it again. `start` clears that opt-out. `restart` is an explicit stop/start operation and can interrupt native work. Website provider disable only stops discovery and new admission; it does not stop a running native server or task.
+
+Stopping, disconnecting or updating Controller leaves the managed OpenCode server running. When the native process exits unexpectedly, a later provider scan may start a replacement, but it never replays uncertain input or resumes an interrupted task automatically. A process that is still alive but fails health checks is reported for diagnosis; Controller does not restart it automatically.
+
+On Linux under the Controller's systemd user service, the OpenCode supervisor runs in a separate user scope so service cleanup does not kill it. In a manual or container launch, the surrounding supervisor defines process lifetime. A user logout, container stop or operating-system shutdown can still end native tasks; login recovery restarts the server process, not unfinished work.
+
+On Windows, a Job Object owns the native process and its descendants and follows the OpenCode supervisor's lifetime, rather than the Controller's. Stopping the managed server or losing its supervisor closes the job; updating Controller alone does not close it. Windows PowerShell is required for the job launcher.
+
+## External servers and configuration
+
+A healthy existing server on the default endpoint is reused without changing its credentials or taking process ownership. Controller's server `stop` and `restart` commands do not terminate an external server. If it requires authentication, configure the matching native credentials locally:
+
+```sh
 export AGENT_HOST_OPENCODE_PASSWORD='choose-a-local-password'
 # Optional: defaults to opencode, matching the native server.
 export AGENT_HOST_OPENCODE_USERNAME=opencode
 ```
 
-Controller detects a reachable, healthy OpenCode server (1.18.18 or newer) automatically. Website Settings can disable it per Host; detecting it does not start the server or change its credentials. The URL defaults to `http://127.0.0.1:4096`; it must not contain credentials, a query or a fragment. Basic credentials stay in local configuration, never in persistence handles or public events. Controller's existing workspace admission policy still applies to each native session's actual directory, including direct-ID opens.
+For a managed server, Controller generates a password once and retains it in an endpoint-specific private configuration under its state directory. It reuses that password across discovery scans, Controller upgrades and native restarts. A separate token protects local lifecycle management. Neither credential enters persistence handles, public events, browser configuration or recordings. On Windows, keep the state directory protected by the current user's ACLs; Unix file modes do not configure Windows ACLs.
+
+`AGENT_HOST_OPENCODE` selects a CLI executable explicitly. On macOS and Linux, discovery checks Controller's PATH and common installer locations: `~/.opencode/bin`, `~/.local/bin`, `/opt/homebrew/bin`, `/usr/local/bin` and `/usr/bin`. It does not source shell startup files. Windows uses native executable/npm entry resolution. Set the override for another installation location or a custom wrapper.
+
+`AGENT_HOST_OPENCODE_URL` selects an explicit HTTP endpoint without embedded credentials, a query or a fragment. A custom endpoint remains externally managed by default. For an isolated test or advanced local setup, `AGENT_HOST_OPENCODE_AUTO_START=1` explicitly authorizes Controller to manage a custom loopback endpoint:
+
+```sh
+export AGENT_HOST_OPENCODE_URL=http://127.0.0.1:14096
+export AGENT_HOST_OPENCODE_AUTO_START=1
+```
+
+`AGENT_HOST_OPENCODE_AUTO_START=0` disables automatic startup; an already running healthy server can still be discovered. This setting is separate from website provider disable and the persistent `server stop` preference. Automatic management never binds a public network address.
+
+Controller only registers a healthy, supported server (1.18.18 or newer). A port conflict, authentication failure, unsupported version or failed startup produces a diagnostic reason. The requested endpoint is fixed: Controller never accepts OpenCode's fallback to another port, because that would change the native session namespace. It only terminates a failed startup that it owns, never an unrelated listener. Controller's existing workspace admission policy still applies to each native session's actual directory, including direct-ID opens.
+
+To keep full external lifecycle ownership even after a server exit, set `AGENT_HOST_OPENCODE_AUTO_START=0` in Controller's local configuration. Start and supervise OpenCode yourself and set the matching Controller URL and credentials:
+
+```sh
+OPENCODE_SERVER_PASSWORD='choose-a-local-password' opencode serve --hostname 127.0.0.1 --port 4096
+```
+
+In PowerShell, set `$env:OPENCODE_SERVER_PASSWORD = 'choose-a-local-password'` before running the same `opencode serve` command. Keep the service running under your chosen supervisor.
 
 OpenCode is a shared runtime. As with Codex shared, its native execution policy is trusted by default. `AGENT_HOST_OPENCODE_TRUST_SHARED=0` requests the Host's restricted policy instead. An external server cannot enforce that additional sandbox, so a restricted registration is rejected explicitly; the Controller does not claim restrictions it cannot enforce. Explicit full-control Host configuration can also authorize native execution.
 
@@ -42,9 +72,9 @@ OpenCode is a shared runtime. As with Codex shared, its native execution policy 
 agent-remote-controller opencode resume <native-session-id>
 ```
 
-This wrapper reads the Controller's configured endpoint and credentials and runs native `opencode attach`. `AGENT_HOST_OPENCODE` optionally selects the CLI executable. `resume --last` attaches with native `--continue`. Running the wrapper without arguments opens the attached TUI for the current directory.
+This wrapper reads the Controller's configured endpoint and credentials, including generated managed-server credentials, and runs native `opencode attach`. `resume --last` attaches with native `--continue`. Running the wrapper without arguments opens the attached TUI for the current directory.
 
-Direct native usage also works:
+Direct native usage also works when you provide the configured server credentials:
 
 ```sh
 OPENCODE_SERVER_PASSWORD='choose-a-local-password' opencode attach http://127.0.0.1:4096 --session <native-session-id>
@@ -63,6 +93,8 @@ pnpm ardb server --provider opencode --cwd /path/to/project --open --jsonl > ses
 ```
 
 The floating Live provider selector also includes OpenCode. It uses server-side configuration; credentials and native endpoint selection are not browser inputs. Use the existing persistence-handle export/resume path (`--persistence-file`) to reopen an existing native session. ARDB observation, controls, recording and playback use the existing Remote protocol.
+
+Native callback plugin installation remains explicit. Automatic server management does not install the plugin, rewrite global OpenCode configuration, or restart an existing server to load it. Follow [OpenCode callbacks](opencode-callbacks.md) when enabling Host callback tools or Ask source references.
 
 ## Capabilities and recovery
 

@@ -1,8 +1,10 @@
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, expect, it } from 'vitest';
+import { createServer } from 'node:net';
+import { afterEach, expect, it, vi } from 'vitest';
 import { runOpenCodeCommand } from './opencode-command.js';
+import { ensureOpenCodeServerConfig, openCodeServerLocation } from './opencode-server-state.js';
 const roots: string[] = [];
 afterEach(async () => { await Promise.all(roots.splice(0).map(root => rm(root, { recursive: true, force: true }))); });
 async function fixture() {
@@ -31,4 +33,32 @@ it('keeps native commands and explicit alternate attachments free of saved serve
   const f = await fixture();
   expect(await f.run(['attach', 'http://127.0.0.1:4999'])).toEqual({ code: 0, args: ['attach', 'http://127.0.0.1:4999'] });
   expect(await f.run(['--version'], { NATIVE_EXIT: '23' })).toEqual({ code: 23, args: ['--version'] });
+}, 10000);
+
+it('loads generated managed server credentials for resume without leaking them to alternate native commands', async () => {
+  const f = await fixture();
+  const env = { AGENT_HOST_OPENCODE_URL: 'http://127.0.0.1:4899' };
+  const location = openCodeServerLocation(f.root, env);
+  await ensureOpenCodeServerConfig(location.directory, location.url, { ...env, AGENT_HOST_OPENCODE_USERNAME: 'local', AGENT_HOST_OPENCODE_PASSWORD: 'local-secret' });
+  const saved = JSON.parse(await readFile(join(f.root, 'connection.json'), 'utf8'));
+  delete saved.environment.AGENT_HOST_OPENCODE_USERNAME;
+  delete saved.environment.AGENT_HOST_OPENCODE_PASSWORD;
+  await writeFile(join(f.root, 'connection.json'), JSON.stringify(saved));
+  expect(await f.run(['resume', 'session'])).toMatchObject({ username: 'local', password: 'local-secret' });
+  expect(await f.run(['--version'])).toEqual({ code: 0, args: ['--version'] });
+}, 10000);
+
+it('handles lifecycle command validation without forwarding it to the native CLI', async () => {
+  const f = await fixture();
+  await expect(runOpenCodeCommand(['server', 'destroy'], f.root, {})).rejects.toThrow('start|stop|restart|status');
+  const port = createServer();
+  await new Promise<void>(resolve => port.listen(0, '127.0.0.1', resolve));
+  const endpoint = `http://127.0.0.1:${(port.address() as { port: number }).port}`;
+  await new Promise<void>((resolve, reject) => port.close(error => error ? reject(error) : resolve()));
+  const output = vi.spyOn(process.stdout, 'write').mockImplementation(() => true);
+  try {
+    // An external endpoint with no server is a read-only status check.
+    expect(await runOpenCodeCommand(['server', 'status'], f.root, { AGENT_HOST_OPENCODE_URL: endpoint })).toBe(0);
+    expect(JSON.parse(String(output.mock.calls[0]![0]))).toMatchObject({ running: false, ownership: 'none', autoStart: false });
+  } finally { output.mockRestore(); }
 }, 10000);

@@ -76,6 +76,14 @@ test('installs the tarball independently and manages a paired daemon from a path
     { cwd: directory, timeout: 120000, maxBuffer: 4 * 1024 * 1024 });
   assert.match((await run(['--help'])).stdout, /Usage: agent-remote-controller/);
   assert.match((await run(['--help'])).stdout, /autostart/);
+  if (process.env.AGENT_OPENCODE_TEST_EXECUTABLE) {
+    const managed = await exec(process.execPath, ['--test', '--test-timeout=60000', join(root, 'scripts/opencode-managed-server-native.test.mjs')], {
+      cwd: directory, env: { ...env, AGENT_OPENCODE_TEST_EXECUTABLE: process.env.AGENT_OPENCODE_TEST_EXECUTABLE,
+        AGENT_HOST_TEST_CLI: join(packageRoot, 'dist/cli.js') }, timeout: 70000, maxBuffer: 128 * 1024,
+    });
+    assert.match(managed.stdout, /pass 1/);
+    t.diagnostic('Installed Controller package passed the isolated native OpenCode lifecycle smoke.');
+  }
   if (windows) {
     const shim = await exec(process.env.ComSpec ?? 'cmd.exe', ['/d', '/s', '/c', `""${bin}" --help"`],
       { cwd: directory, env, windowsVerbatimArguments: true, timeout: 10000 });

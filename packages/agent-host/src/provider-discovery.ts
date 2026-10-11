@@ -1,4 +1,5 @@
 import { prepareSharedCodex } from './codex-shared-startup.js';
+import { OpenCodeServerError, prepareOpenCodeServer } from './opencode-server.js';
 import { randomUUID } from 'node:crypto';
 import { mkdir, readFile } from 'node:fs/promises';
 import { join } from 'node:path';
@@ -22,6 +23,7 @@ export interface HostProviderDiscovery {
 export async function createHostProviderDiscovery(options: {
   stateDir: string; env: NodeJS.ProcessEnv; onDiagnostic?: (line: string) => void;
   create?: (providerId: string) => Promise<AgentHostProviderRegistration>;
+  prepare?: () => Promise<unknown>;
 }): Promise<HostProviderDiscovery> {
   const path = join(options.stateDir, 'provider-settings.json');
   let disabled: string[] = [];
@@ -44,24 +46,40 @@ export async function createHostProviderDiscovery(options: {
     if (providerId === 'codex') await prepareSharedCodex(options.stateDir, options.env);
     return (await createHostRegistrations({ ...options.env, AGENT_HOST_PROVIDERS: providerId, AGENT_HOST_PROVIDER_DISCOVERY: '1' }, options.onDiagnostic))[0]!;
   });
+  const prepare = options.prepare ?? (options.create ? async () => undefined
+    : () => prepareOpenCodeServer(options.stateDir, options.env, { onDiagnostic: options.onDiagnostic }));
   function publish() { revision = randomUUID(); for (const listener of listeners) listener(); }
   async function scan() {
     const before = JSON.stringify(hostProviderIds.map(id => states.get(id)));
     await Promise.all(hostProviderIds.map(async providerId => {
-      const existing = registrations.find(item => item.directory.providerId === providerId);
       if (disabled.includes(providerId)) { states.set(providerId, { providerId, displayName: names[providerId]!, state: 'disabled' }); return; }
-      if (existing) { states.set(providerId, { providerId, displayName: names[providerId]!, state: 'enabled' }); return; }
       try {
+        if (providerId === 'opencode') {
+          if ((options.env.AGENT_HOST_OPENCODE_TRUST_SHARED ?? '1') !== '1' && options.env.AGENT_HOST_TRUSTED_FULL_CONTROL !== '1') {
+            throw new OpenCodeServerError('opencode_execution_restricted', 'OpenCode shared server permissions cannot be restricted by the Host. Explicitly trust the native server permissions to connect.');
+          }
+          await prepare();
+        }
+        const existing = registrations.find(item => item.directory.providerId === providerId);
+        if (existing) {
+          const changed = states.get(providerId)?.state !== 'enabled';
+          states.set(providerId, { providerId, displayName: names[providerId]!, state: 'enabled' });
+          if (changed) options.onDiagnostic?.(JSON.stringify({ event: 'provider_discovered', providerId, outcome: 'available' }));
+          return;
+        }
         const value = await create(providerId);
         if (closed) { await value.directory.close(); return; }
         try { register?.(value); } catch (error) { await value.directory.close(); throw error; }
         registrations.push(value);
         states.set(providerId, { providerId, displayName: names[providerId]!, state: 'enabled' });
         options.onDiagnostic?.(JSON.stringify({ event: 'provider_discovered', providerId, outcome: 'available' }));
-      } catch {
-        const changed = states.get(providerId)?.state !== 'unavailable';
-        states.set(providerId, { providerId, displayName: names[providerId]!, state: 'unavailable', reason: 'No supported installation or reachable service was found. Check the native version and Controller environment.' });
-        if (changed) options.onDiagnostic?.(JSON.stringify({ event: 'provider_discovered', providerId, outcome: 'unavailable' }));
+      } catch (error) {
+        const known = providerId === 'opencode' && error instanceof OpenCodeServerError ? error : undefined;
+        const reason = known?.message ?? 'No supported installation or reachable service was found. Check the native version and Controller environment.';
+        const previous = states.get(providerId);
+        const changed = previous?.state !== 'unavailable' || previous.reason !== reason;
+        states.set(providerId, { providerId, displayName: names[providerId]!, state: 'unavailable', reason });
+        if (changed) options.onDiagnostic?.(JSON.stringify({ event: 'provider_discovered', providerId, outcome: 'unavailable', ...(known ? { code: known.code, reason } : {}) }));
       }
     }));
     registrations.sort((left, right) => hostProviderIds.indexOf(left.directory.providerId as typeof hostProviderIds[number]) - hostProviderIds.indexOf(right.directory.providerId as typeof hostProviderIds[number]));
@@ -71,7 +89,7 @@ export async function createHostProviderDiscovery(options: {
   await scan();
   return {
     registrations, snapshot,
-    enabled: id => !disabled.includes(id) && registrations.some(item => item.directory.providerId === id),
+    enabled: id => states.get(id)?.state === 'enabled',
     refresh: () => serialize(scan),
     subscribe(listener) { listeners.add(listener); return () => { listeners.delete(listener); }; },
     onRegistration(listener) { register = listener; },

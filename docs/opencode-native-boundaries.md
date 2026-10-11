@@ -53,7 +53,7 @@ A safe Host callback implementation needs an explicitly installed native plugin 
 - Reject unregistered sessions and recheck source workspace access on every read.
 - Restore or revoke grants on resume, disconnect, and close, and report unavailable callbacks clearly.
 
-The bridge uses native `context.sessionID`, a private process-local authenticated loopback endpoint, and per-session callback bindings. The adapter connects to an independently managed server and never silently modifies its plugins or restarts it. Ask/source references become available only after explicit plugin setup and capability detection. Reads remain dynamic, enforce the current source workspace policy, and do not replace history with a prompt snapshot. See [callback setup](opencode-callbacks.md). Native questions and permission approvals use their existing native APIs independently of this plugin.
+The bridge uses native `context.sessionID`, a private process-local authenticated loopback endpoint, and per-session callback bindings. The adapter connects to a shared server that may be externally supervised or managed by Controller. Plugin installation remains explicit, and callback setup never automatically restarts a server to load it. Ask/source references become available only after explicit plugin setup and capability detection. Reads remain dynamic, enforce the current source workspace policy, and do not replace history with a prompt snapshot. See [callback setup](opencode-callbacks.md). Native questions and permission approvals use their existing native APIs independently of this plugin.
 
 ## Prompt edit uses an independent native fork
 

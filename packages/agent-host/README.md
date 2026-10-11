@@ -2,7 +2,7 @@
 
 The `@orchardworks/agent-remote-controller` npm package provides the
 `agent-remote-controller` command. It runs the local Agent Host and connects
-Codex, Claude Code and GitHub Copilot sessions to a Relay for the browser
+Codex, Claude Code, GitHub Copilot and OpenCode sessions to a Relay for the browser
 controller. Supports macOS, Linux and native Windows with Node.js 22 or newer. No repository
 checkout or pnpm is needed after installation. The npm package declares
 `darwin`, `linux` and `win32`. The package contains the latest bundled provider
@@ -146,7 +146,9 @@ Old saved `AGENT_HOST_PROVIDERS` lists no longer restrict discovery. That variab
 still selects which CLIs are initialized by an explicitly requested Gateway setup.
 Executable/profile/server overrides remain supported. A supported installation
 is not proof of native authentication; sign in through the native CLI as needed.
-Detection does not log in, run prompts, install agents, or start a native server.
+Detection does not log in, run prompts or install agents. It can start a missing
+default local Codex daemon or OpenCode server using the installed native CLI;
+existing healthy shared runtimes are reused.
 Provider updates reach the Relay without restarting sessions or the Host uplink.
 
 Codex must be 0.148.0 or newer, Claude Code 2.1.247 or newer; newer
@@ -167,13 +169,14 @@ If the desired CLI is not on PATH, set the executable explicitly before start:
 ```sh
 export AGENT_HOST_CODEX=/absolute/path/to/codex
 export AGENT_HOST_CLAUDE=/absolute/path/to/claude
+export AGENT_HOST_OPENCODE=/absolute/path/to/opencode
 # Optional override of the packaged Copilot CLI:
 export AGENT_HOST_COPILOT=/absolute/path/to/copilot
 ```
 
 Optional profile settings are `AGENT_REMOTE_CODEX_HOME`,
 `AGENT_HOST_CLAUDE_HOME` and `AGENT_HOST_COPILOT_HOME`.
-Only the requested providers are started; no model prompt is submitted at launch.
+Disabled providers are not started; no model prompt is submitted at launch.
 
 Once registration succeeds, the Host privately retains its connection and
 provider settings. Later starts can use the saved settings without the key in
@@ -196,7 +199,7 @@ agent-remote-controller foreground        # Run in this terminal instead; Ctrl+C
 
 On macOS, the first `start` enables login startup by default. A per-user LaunchAgent starts the Controller after login and restarts it if the process exits. This runs in the logged-in user's session, not before login. Saved connection and provider settings are reused, and the heartbeat mechanism reconnects when the network returns. `foreground` does not configure login startup.
 
-`stop` unloads the running service before shutting down, so it stays stopped for the current login session and releases the Controller's connections and owned native resources. The login-startup preference remains enabled: a later `start` or the next login can start it again. Shared native daemons remain owned by their original applications and are not terminated. Stopping or restarting the Controller can interrupt active work; persisted native history is retained.
+`stop` unloads the running service before shutting down, so it stays stopped for the current login session and releases the Controller's connections and owned native resources. The login-startup preference remains enabled: a later `start` or the next login can start it again. Shared native daemons, including the separately supervised managed OpenCode server, are not terminated by Controller shutdown. Stopping or restarting the Controller can interrupt active work in its private native runtimes; persisted native history is retained.
 
 `autostart disable` stops a supervisor-managed Controller and persistently disables login startup. Later `start` commands respect that choice and run a manual background daemon until `autostart enable` is used. If a manual daemon is already running, enabling login startup preserves it and takes effect on the next login; stop it and start again to use the system supervisor immediately. Keep the same `AGENT_HOST_STATE_DIR` when managing an installation.
 
@@ -268,7 +271,7 @@ For a user-owned npm prefix on Windows, add the prefix itself to PATH (not its
 
 On Linux, `start` uses a **systemd user service** by default when `systemctl --user` can reach the current user's manager. It installs `agent-remote-controller-<state-directory-hash>.service` under `${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user`, enables login startup, and starts the service. Use the same user, `HOME`, `XDG_CONFIG_HOME`, and `AGENT_HOST_STATE_DIR` for all lifecycle commands; the configuration directory must be one that the user's systemd manager searches. Do not run the CLI with `sudo`. Install Node and the Controller in persistent locations: the service stores absolute executable paths and the current PATH, and does not source shell startup files. Reinstall the service with `start` after changing those paths.
 
-The service restarts an exited Controller after ten seconds. `stop` stops it without disabling future startup; `autostart disable` removes the service and persists the opt-out. `status` identifies `supervisor: systemd`; `autostart status` separately reports the saved preference, installed unit, user-manager availability, and enabled service. Unit metadata contains paths, not pairing credentials. Credentials and provider settings stay in the private state directory. The same bounded `agent-host.log` is used on both operating systems. systemd gives the Controller time to release its resources and then kills any remaining processes in the service's cgroup; external shared daemons are outside this ownership boundary.
+The service restarts an exited Controller after ten seconds. `stop` stops it without disabling future startup; `autostart disable` removes the service and persists the opt-out. `status` identifies `supervisor: systemd`; `autostart status` separately reports the saved preference, installed unit, user-manager availability, and enabled service. Unit metadata contains paths, not pairing credentials. Credentials and provider settings stay in the private state directory. The same bounded `agent-host.log` is used on both operating systems. systemd gives the Controller time to release its resources and then kills any remaining processes in the service's cgroup. Managed OpenCode runs in a separate user scope so a Controller stop or update does not kill it; external shared daemons are also outside this ownership boundary. A user logout or shutdown can still end user services and scopes.
 
 A user service normally starts when the user logs in. For a server that must start at boot without login and keep running after logout, an administrator can enable lingering for that account:
 
@@ -552,16 +555,58 @@ Creation failures retain their uncertain operation identity even when a file-lim
 
 ## OpenCode shared server
 
-Start `opencode serve --hostname 127.0.0.1 --port 4096` independently. Controller
-automatically discovers a healthy supported server. Set `AGENT_HOST_OPENCODE_URL` (default
-`http://127.0.0.1:4096`) and, when enabled on the native server,
-`AGENT_HOST_OPENCODE_USERNAME` / `AGENT_HOST_OPENCODE_PASSWORD` in the Controller
-local configuration. Model credentials belong to OpenCode's own configuration.
+Install OpenCode and configure its model credentials with the native CLI. Controller
+checks the default `http://127.0.0.1:4096` endpoint at startup and every minute. If
+it is absent and a supported CLI is installed, Controller starts a loopback server
+with HTTP authentication. A missing CLI stays unavailable; Controller never
+installs or upgrades it. **Settings → Hosts → Agent providers → Detect again**
+requests a fresh scan. The existing Controller login startup starts a missing
+server again after a reboot.
+
+The generated native password is retained once per endpoint in private Controller
+state and reused across scans, upgrades and server restarts. Local lifecycle
+management uses a separate token. Model credentials remain in OpenCode's native
+configuration. `AGENT_HOST_OPENCODE` optionally selects the CLI executable.
+On macOS/Linux, discovery checks PATH and then `~/.opencode/bin`, `~/.local/bin`,
+`/opt/homebrew/bin`, `/usr/local/bin` and `/usr/bin`; it does not source shell
+startup files. Windows uses native executable/npm entry resolution.
+
+```sh
+agent-remote-controller opencode server status
+agent-remote-controller opencode server start
+agent-remote-controller opencode server stop
+agent-remote-controller opencode server restart
+```
+
+`stop` persistently suppresses automatic startup until `start` clears that preference.
+An explicit `restart` can interrupt native tasks. Disabling OpenCode in website
+Settings pauses discovery and new admission without stopping existing native work.
+An exited managed process can be started again by the next provider scan, including
+when the provider is already registered. A still-running process that fails health
+checks is reported rather than restarted automatically. Interrupted tasks and
+uncertain inputs are never automatically replayed.
+
+A healthy existing server is reused without taking process ownership; lifecycle
+`stop` and `restart` do not terminate it. Configure matching
+`AGENT_HOST_OPENCODE_USERNAME` / `AGENT_HOST_OPENCODE_PASSWORD` if the existing
+server requires authentication. Custom `AGENT_HOST_OPENCODE_URL` endpoints are
+externally managed by default. `AGENT_HOST_OPENCODE_AUTO_START=1` explicitly
+authorizes management of a custom loopback endpoint; `AGENT_HOST_OPENCODE_AUTO_START=0`
+disables automatic startup. URLs cannot contain credentials, a query or a fragment.
+Management never binds a public network address or silently changes the requested
+port. Port conflicts, authentication failures and startup failures produce
+diagnostic reasons without killing an unrelated listener.
 
 `agent-remote-controller opencode resume <session-id>` attaches the native TUI to
-that same server. `AGENT_HOST_OPENCODE` optionally selects its CLI executable.
+that same server, using the configured or generated native credentials.
 Browser sessions use shared control and never require takeover. Disconnecting,
-releasing subscriptions or updating Controller does not stop native tasks.
+releasing subscriptions, stopping or updating Controller does not stop its shared
+OpenCode tasks. On Linux with systemd, the separate user scope preserves that
+lifetime; a containing VM, container, user session or operating system can still
+terminate its processes.
+On Windows, the native process tree belongs to a Job Object tied to the separate
+OpenCode supervisor. Stopping that supervisor closes the job; Controller updates
+do not. The job launcher requires Windows PowerShell.
 
 Shared native permissions are trusted by default, as for Codex shared. Set
 `AGENT_HOST_OPENCODE_TRUST_SHARED=0` to require the Host execution policy instead;
@@ -573,23 +618,28 @@ input, steer and native prompt editing preserve the legacy native history. A
 separate next-turn queue is not advertised. Settings select the native model/agent
 for the next prompt.
 
-Host callback tools and Ask source references additionally require an explicit
-native plugin setup. With the installed Controller, create a new private directory:
+Host callback tools and Ask source references still require an explicit native
+plugin setup. Automatic server management does not install or enable the plugin.
+With the installed Controller, create a new private directory:
 
 ```sh
 agent-remote-controller opencode callbacks setup "$HOME/.agent-remote-control/opencode-callbacks"
 ```
 
-Start the independently managed native server with the generated configuration:
+For an externally supervised server, start it with the generated configuration
+and its chosen native password on a separate unused port. This example leaves
+the default managed server and its persisted credentials unchanged:
 
 ```sh
 OPENCODE_CONFIG="$HOME/.agent-remote-control/opencode-callbacks/opencode-arc.json" \
-  opencode serve --hostname 127.0.0.1 --port 4096
+  OPENCODE_SERVER_PASSWORD='choose-a-local-password' \
+  opencode serve --hostname 127.0.0.1 --port 14096
 ```
 
 Set `AGENT_HOST_OPENCODE_CALLBACK_CONFIG` to
 `$HOME/.agent-remote-control/opencode-callbacks/callback.json` for the Controller,
-with `AGENT_HOST_OPENCODE_URL=http://127.0.0.1:4096`. The plugin comes from the
+with `AGENT_HOST_OPENCODE_URL=http://127.0.0.1:14096` and the matching
+`AGENT_HOST_OPENCODE_PASSWORD`. The plugin comes from the
 installed package; no source checkout is needed. This command never edits global
 OpenCode configuration or restarts a running server. Existing target directories
 are rejected without overwriting their files. Loading the plugin into an existing

@@ -1,6 +1,6 @@
 # OpenCode Host callbacks and Ask
 
-Ordinary OpenCode sessions only require an independently managed native server. Host callback tools and Ask source references additionally require the bundled ARC native plugin. The Controller never modifies global OpenCode configuration or restarts that server.
+Ordinary OpenCode sessions use a shared native server, either externally supervised or [managed by Controller](opencode.md). Host callback tools and Ask source references additionally require the bundled ARC native plugin. Callback setup never modifies global OpenCode configuration or automatically restarts a server to load the plugin.
 
 ## Explicit setup
 
@@ -12,11 +12,12 @@ agent-remote-controller opencode callbacks setup "$HOME/.agent-remote-control/op
 
 The command creates `arc-bridge-plugin.mjs` and `opencode-arc.json`, then prints `nativeConfigPath` and `configPath`. It rejects an existing target directory without replacing any files. The plugin is bundled inside the Controller package and does not reference the source checkout. Keep this directory private to the local user.
 
-When starting your native server, select that additional configuration explicitly:
+When starting your externally supervised native server, select that additional configuration explicitly. Use a separate unused port so the default managed server and its persisted credentials remain unchanged:
 
 ```sh
 OPENCODE_CONFIG="$HOME/.agent-remote-control/opencode-callbacks/opencode-arc.json" \
-  opencode serve --hostname 127.0.0.1 --port 4096
+  OPENCODE_SERVER_PASSWORD='choose-a-local-password' \
+  opencode serve --hostname 127.0.0.1 --port 14096
 ```
 
 An already running server needs an operator-controlled restart to load its plugin. OpenCode may install its own plugin SDK on first load, so allow its initial dependency setup to finish. The ARC plugin itself bundles its schema dependency.
@@ -25,7 +26,8 @@ Configure the Controller to use the same native endpoint and rendezvous path:
 
 ```sh
 export AGENT_HOST_PROVIDERS=opencode
-export AGENT_HOST_OPENCODE_URL=http://127.0.0.1:4096
+export AGENT_HOST_OPENCODE_URL=http://127.0.0.1:14096
+export AGENT_HOST_OPENCODE_PASSWORD='choose-a-local-password'
 export AGENT_HOST_OPENCODE_CALLBACK_CONFIG="$HOME/.agent-remote-control/opencode-callbacks/callback.json"
 agent-remote-controller foreground
 ```

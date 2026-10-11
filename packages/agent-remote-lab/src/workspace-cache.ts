@@ -42,11 +42,7 @@ function pruneSnapshots(scope: string): void {
     if (!raw || raw.length > maxCharacters || total + raw.length > maxTotalCharacters || retained.has(key)) continue;
     retained.add(key); total += raw.length;
   }
-  const keys: string[] = [];
-  for (let index = 0, count = conversationLocalStorage.length; index < count; index++) {
-    const key = conversationLocalStorage.key(index);
-    if (key?.startsWith(prefix)) keys.push(key);
-  }
+  const keys = conversationLocalStorage.keys().filter(key => key.startsWith(prefix));
   // Separate-tab writes and failed index updates may leave unreferenced bodies.
   // This cache is disposable; never retain those bodies at the expense of drafts.
   for (const key of keys) if (!retained.has(key)) conversationLocalStorage.removeItem(key);

@@ -68,6 +68,83 @@ function readEarlier() {
   });
 }
 
+function upwardGesture(kind: 'wheel' | 'touch'): () => void {
+  let y = 100;
+  if (kind === 'touch') viewport().dispatchEvent(Object.assign(new Event('touchstart', { bubbles: true }), { touches: [{ clientY: y }] }));
+  return () => {
+    if (kind === 'wheel') viewport().dispatchEvent(new WheelEvent('wheel', { deltaY: -20, bubbles: true }));
+    else viewport().dispatchEvent(Object.assign(new Event('touchmove', { bubbles: true }), { touches: [{ clientY: y += 20 }] }));
+  };
+}
+
+describe.each(['top', 'bottom'] as const)('%s-origin reading gestures', (scrollOrigin) => {
+  it.each(['wheel', 'touch'] as const)('avoids measuring a paused %s gesture and remembers the final scrolled position', (kind) => {
+    act(() => root.render(<Surface scrollOrigin={scrollOrigin} />));
+    let moveUp!: () => void;
+    const measure = vi.spyOn(viewport(), 'getBoundingClientRect');
+    act(() => { moveUp = upwardGesture(kind); moveUp(); });
+    expect(measure).toHaveBeenCalled();
+    expect(positions.get('epoch-one')).toMatchObject({ following: false, anchor: { key: 'epoch-one:9', offset: 0 } });
+
+    act(() => {
+      viewport().scrollTop = scrollOrigin === 'top' ? 860 : -40;
+      viewport().dispatchEvent(new Event('scroll'));
+    });
+    expect(positions.get('epoch-one')?.anchor).toMatchObject({ key: 'epoch-one:8', offset: -60 });
+    measure.mockClear();
+    act(() => { moveUp(); moveUp(); });
+    expect(measure).not.toHaveBeenCalled();
+    act(() => {
+      viewport().scrollTop = scrollOrigin === 'top' ? 840 : -60;
+      viewport().dispatchEvent(new Event('scroll'));
+    });
+    expect(positions.get('epoch-one')?.anchor).toMatchObject({ key: 'epoch-one:8', offset: -40 });
+    measure.mockClear();
+    act(() => moveUp());
+    expect(measure).not.toHaveBeenCalled();
+    act(() => {
+      viewport().scrollTop = scrollOrigin === 'top' ? 820 : -80;
+      viewport().dispatchEvent(new Event('scroll'));
+    });
+    expect(positions.get('epoch-one')?.anchor).toMatchObject({ key: 'epoch-one:8', offset: -20 });
+
+    act(() => root.unmount());
+    root = createRoot(container);
+    act(() => root.render(<Surface scrollOrigin={scrollOrigin} />));
+    expect(viewport().scrollTop).toBe(scrollOrigin === 'top' ? 820 : -80);
+  });
+
+  it.each(['wheel', 'touch'] as const)('prefetches during a paused %s gesture before its scroll event and preserves the latest anchor after prepending', async (kind) => {
+    let finish!: () => void;
+    const load = vi.fn(() => new Promise<void>((resolve) => { finish = resolve; }));
+    const history = { hasOlder: true, cursor: '0', load };
+    act(() => root.render(<Surface scrollOrigin={scrollOrigin} history={history} />));
+    let moveUp!: () => void;
+    act(() => { moveUp = upwardGesture(kind); moveUp(); });
+    expect(load).not.toHaveBeenCalled();
+
+    viewport().scrollTop = scrollOrigin === 'top' ? 590 : -310;
+    await act(async () => moveUp());
+    expect(load).toHaveBeenCalledTimes(1);
+    expect(positions.get('epoch-one')?.anchor).toMatchObject({ key: 'epoch-one:5', offset: -90 });
+    act(() => {
+      viewport().scrollTop = scrollOrigin === 'top' ? 570 : -330;
+      viewport().dispatchEvent(new Event('scroll'));
+      moveUp();
+    });
+    expect(positions.get('epoch-one')?.anchor).toMatchObject({ key: 'epoch-one:5', offset: -70 });
+    expect(load).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      root.render(<Surface scrollOrigin={scrollOrigin} history={{ ...history, cursor: '-10' }} firstIndex={-10} entryCount={20} />);
+      finish();
+    });
+    expect(viewport().scrollTop).toBe(scrollOrigin === 'top' ? 1570 : -330);
+    expect(positions.get('epoch-one')?.anchor).toMatchObject({ key: 'epoch-one:5', offset: -70 });
+    expect(load).toHaveBeenCalledTimes(1);
+  });
+});
+
 describe('useTimelineScroll reading memory', () => {
   it('reveals an inspected entry and keeps it anchored when more activity arrives', () => {
     let controls!: ReturnType<typeof useTimelineScroll>;

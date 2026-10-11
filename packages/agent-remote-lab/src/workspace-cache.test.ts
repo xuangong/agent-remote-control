@@ -115,3 +115,18 @@ it('cleans a newly written body when its index write fails and keeps the previou
   expect(readWorkspaceSnapshot(scope, target)?.agent?.runtimeInfo.sessionId).toBe(target.nativeSessionId);
   expect(readWorkspaceSnapshot(scope, { ...target, nativeSessionId: 'failed' })).toBeUndefined();
 });
+it('bounds storage inventory scans independently of the number of saved conversation keys', () => {
+  for (let index = 0; index < 200; index++) localStorage.setItem(`agent-remote:recovery:other:outbox:${index}`, 'retained');
+  saveWorkspaceSnapshot(scope, target, replicaState);
+  const keys = Object.keys;
+  let inventories = 0;
+  const spy = vi.spyOn(Object, 'keys').mockImplementation(value => {
+    if (value === localStorage) inventories++;
+    return keys(value);
+  });
+  try { saveWorkspaceSnapshot(scope, target, replicaState); }
+  finally { spy.mockRestore(); }
+  expect(inventories).toBeLessThanOrEqual(2);
+  expect(readWorkspaceSnapshot(scope, target)?.agent?.id).toBe(replicaState.agent?.id);
+  expect(localStorage.getItem('agent-remote:recovery:other:outbox:199')).toBe('retained');
+});

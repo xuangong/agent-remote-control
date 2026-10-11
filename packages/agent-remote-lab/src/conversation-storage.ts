@@ -18,7 +18,8 @@ class ConversationStorage implements Storage {
   private readonly memory = new Map<string, string>();
   private readonly privateKeys = new Set<string>();
   constructor(private readonly disk: () => Storage) {}
-  private keys(): string[] {
+  /** Capture one key inventory for bulk operations instead of rebuilding it for each key(index). */
+  keys(): string[] {
     if (clearCacheOnClose()) return [...this.memory.keys()];
     return [...new Set([...Object.keys(this.disk()).filter(isContentKey), ...this.privateKeys])];
   }

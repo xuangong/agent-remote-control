@@ -3,8 +3,7 @@ import { createRoot } from 'react-dom/client';
 import { AgentReplica } from '@orchardworks/agent-remote-web';
 import { LabWorkbench } from '../src/components/LabWorkbench.js';
 import { replicaState } from '../src/test/fixtures.js';
-import '../src/app.css';
-import '@orchardworks/agent-remote-web/styles.css';
+import '../src/session-view-styles.js';
 
 const count = Number(new URLSearchParams(location.search).get('count') || 100);
 const paragraph = 'The session keeps its workspace and native runtime. Review the implementation and preserve the current reading position. ';

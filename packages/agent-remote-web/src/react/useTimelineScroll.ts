@@ -256,7 +256,11 @@ export function useTimelineScroll(identity: string, visible = true, positions?: 
   }
 
   function onWheel(event: WheelEvent<HTMLDivElement>): void {
-    if (event.deltaY < 0) { historyIntent.current = true; pauseFollowing(); prefetchHistory(); }
+    if (event.deltaY < 0) {
+      historyIntent.current = true;
+      if (following.current) pauseFollowing();
+      prefetchHistory();
+    }
   }
 
   function onKeyDown(event: KeyboardEvent<HTMLDivElement>): void {
@@ -268,7 +272,11 @@ export function useTimelineScroll(identity: string, visible = true, positions?: 
   function onTouchMove(event: TouchEvent<HTMLDivElement>): void {
     if (event.defaultPrevented) return;
     const y = event.touches[0]?.clientY;
-    if (y !== undefined && touchY.current !== undefined && y > touchY.current) { historyIntent.current = true; pauseFollowing(); prefetchHistory(); }
+    if (y !== undefined && touchY.current !== undefined && y > touchY.current) {
+      historyIntent.current = true;
+      if (following.current) pauseFollowing();
+      prefetchHistory();
+    }
     touchY.current = y;
   }
 

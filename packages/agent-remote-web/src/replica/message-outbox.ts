@@ -1,8 +1,10 @@
-import type { UserMessagePart } from '@orchardworks/agent-remote-protocol';
+import type { ProjectedTimelineEntry, UserMessagePart } from '@orchardworks/agent-remote-protocol';
 import type { AgentReplicaState, OutgoingMessage } from './types.js';
 
 /** A native echo can arrive before acknowledgement or later through history recovery. */
 export class MessageOutbox {
+  private readonly digests = new WeakMap<object, { text: string; pending: boolean; value?: string }>();
+  constructor(private readonly onDigest: () => void = () => {}) {}
 
   create(state: AgentReplicaState, agentId: string, text: string, delivery?: OutgoingMessage['delivery'], operationId?: string, rich?: Pick<OutgoingMessage, 'content' | 'imageDigests'>): OutgoingMessage {
     return { id: `outgoing-${crypto.randomUUID()}`, operationId, agentId, text, ...(rich ? structuredClone(rich) : {}), delivery, status: 'sending',
@@ -12,7 +14,10 @@ export class MessageOutbox {
   reconcile(state: AgentReplicaState): AgentReplicaState {
     const outgoing = state.outgoingMessages;
     if (!outgoing?.length) return state;
-    const consumed = new Map<string, number>();
+    // Hash only candidate echoes. A completed digest rechecks the current replica,
+    // so an asynchronous result cannot settle an obsolete epoch or submission.
+    if (!this.prepareDigests(state)) return state;
+    const consumed = new Set<number>();
     let changed = false;
     const remaining: OutgoingMessage[] = [];
     for (const message of outgoing) {
@@ -24,25 +29,58 @@ export class MessageOutbox {
         } else remaining.push(message);
         continue;
       }
-      // Providers do not echo the Relay request ID. Match only new user entries,
-      // consuming each occurrence once so repeated identical sends stay distinct.
-      const key = outgoingKey(message);
-      const echo = key === undefined ? undefined : state.timeline.entries.find(entry => entry.seqStart > message.afterSeq
-        && entry.item.type === 'user_message' && echoKey(entry.item.text, entry.item.content) === key
-        && entry.seqStart > (consumed.get(key!) ?? -1));
+      // A complete echo is assigned once, including mixed prepared and plain text.
+      const echo = state.timeline.entries.find(entry => entry.seqStart > message.afterSeq
+        && !consumed.has(entry.seqStart) && !message.consumedEchoSeqs?.includes(entry.seqStart)
+        && this.matches(message, entry));
       if (echo) {
-        consumed.set(key!, echo.seqStart);
+        consumed.add(echo.seqStart);
         changed = true;
       } else remaining.push(message);
     }
-    // Retain the consumed cursor with each identical input so a page restart
-    // cannot reuse an earlier echo for a different pending submission.
+    // A late ACK can reveal that a different caller text prepared the same echo.
+    // Retain consumed occurrences even before that evidence arrives or after reload.
     const pending = remaining.map(message => {
-      const seq = consumed.get(outgoingKey(message) ?? '');
-      if (message.status === 'failed' || message.epoch !== state.timeline.epoch || seq === undefined || seq <= message.afterSeq) return message;
-      return { ...message, afterSeq: seq };
+      if (message.agentId !== state.agent?.id || message.status === 'failed' || message.epoch !== state.timeline.epoch || !consumed.size) return message;
+      const afterSeq = state.timeline.entries.reduce((seq, entry) => consumed.has(entry.seqStart) && this.matches(message, entry)
+        ? Math.max(seq, entry.seqStart) : seq, message.afterSeq);
+      const consumedEchoSeqs = [...new Set([...(message.consumedEchoSeqs ?? []), ...consumed])].filter(seq => seq > afterSeq);
+      return { ...message, afterSeq, consumedEchoSeqs };
     });
     return changed ? { ...state, outgoingMessages: pending } : state;
+  }
+
+  private matches(message: OutgoingMessage, entry: ProjectedTimelineEntry): boolean {
+    if (entry.item.type !== 'user_message') return false;
+    if (message.submittedTextSha256 !== undefined) {
+      return !message.content?.some(part => part.type === 'image') && !entry.item.content?.some(part => part.type === 'image')
+        && this.digests.get(entry.item)?.value === message.submittedTextSha256;
+    }
+    const key = outgoingKey(message);
+    return key !== undefined && echoKey(entry.item.text, entry.item.content) === key;
+  }
+
+  private prepareDigests(state: AgentReplicaState): boolean {
+    const candidates = state.outgoingMessages?.filter(message => message.submittedTextSha256 !== undefined
+      && message.agentId === state.agent?.id && message.epoch === state.timeline.epoch && message.status !== 'failed'
+      && !message.content?.some(part => part.type === 'image')) ?? [];
+    if (!candidates.length) return true;
+    let ready = true;
+    for (const { item, seqStart } of state.timeline.entries) {
+      if (item.type !== 'user_message' || item.content?.some(part => part.type === 'image')
+        || !candidates.some(message => seqStart > message.afterSeq && !message.consumedEchoSeqs?.includes(seqStart))) continue;
+      let digest = this.digests.get(item);
+      if (!digest || digest.text !== item.text) {
+        digest = { text: item.text, pending: true };
+        this.digests.set(item, digest);
+        const retained = digest;
+        void Promise.resolve().then(() => crypto.subtle.digest('SHA-256', new TextEncoder().encode(retained.text)))
+          .then(value => { retained.value = Array.from(new Uint8Array(value), byte => byte.toString(16).padStart(2, '0')).join(''); }, () => {})
+          .then(() => { retained.pending = false; this.onDigest(); });
+      }
+      if (digest.pending) ready = false;
+    }
+    return ready;
   }
 }
 

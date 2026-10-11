@@ -1,10 +1,10 @@
 import { flushSync } from 'react-dom';
 import { useEffect, useMemo, useReducer, useRef } from 'react';
-import type { SessionSuccessionReplay } from '@orchardworks/agent-remote-protocol';
+import { isSessionSuccessionCurrent, isSessionSuccessionReplay, nativeSessionRefKey, type SessionSuccessionCurrent, type SessionSuccessionReplay } from '@orchardworks/agent-remote-protocol';
 import { remoteSessionState, watchPageResume, type AgentReplica, type AgentReplicaState, type RemoteAgentTransport, type RemoteSessionClient, type RemoteSessionState } from '@orchardworks/agent-remote-web';
 import type { ImageDraftRecipient } from '@orchardworks/agent-remote-web/browser';
 import type { ControllerLocation } from '@orchardworks/agent-remote-hosted/controller-location';
-import { SessionDirectoryClient, type OpenedSession } from '../directory-client.js';
+import { SessionDirectoryClient, type OpenedSession, type SuccessionActionResult } from '../directory-client.js';
 import { restoreSession } from '../session-restoration.js';
 import { sessionKey, type SessionEntry } from '../session-tree.js';
 import { recoveryGeneration } from '../conversation-recovery.js';
@@ -16,11 +16,12 @@ import type { TrackedSessionView } from '../tracked-session-views.js';
 import type { SessionTracking } from './useSessionTracking.js';
 import { isAskAttached, askParticipantKey, type useAskConversations } from './useAskConversations.js';
 import type { SessionStars } from './useSessionStars.js';
+import { canonicalJson } from '../session-composition.js';
 
 type Selection = Pick<SessionEntry, 'hostId' | 'providerId' | 'nativeSessionId' | 'title'> & Partial<Pick<OpenedSession, 'agentId' | 'parentAgentId' | 'parentNativeSessionId' | 'createdAt'>> & { viewId?: string };
 interface NativeBinding {
   session: OpenedSession & { viewId: string }; client: RemoteSessionClient; replica: AgentReplica;
-  isCurrent(): boolean; recipient?: ImageDraftRecipient; retireRecipient(): void; resumeRecipient(): void; stop(): void;
+  isCurrent(): boolean; isSynchronized(): boolean; recipient?: ImageDraftRecipient; retireRecipient(): void; resumeRecipient(): void; stop(): void;
 }
 interface DesiredSelection {
   slot: CompositionSlot; target: CompositionLocator; revision: number; operationId?: string; roleKey?: string;
@@ -39,6 +40,37 @@ interface SuccessionOptions {
 }
 const selectionFor = compositionSelection;
 const unavailable = (code: string): CompositionParticipantResult => ({ status: 'pending', retention: 'page', code });
+
+export interface SessionSuccessionHistoryNavigation {
+  roleKey: string; history: boolean; session: SessionEntry; current: SessionEntry;
+  predecessor?: SessionEntry; ancestors: SessionEntry[];
+}
+/** Historical addresses require a complete, authorized chain through its confirmed current role. */
+export function sessionSuccessionHistory({ scope, replays, current, selected, intent, titles }: {
+  scope: string; replays: readonly SessionSuccessionReplay[]; current?: SessionSuccessionCurrent;
+  selected: SessionEntry; intent?: 'history'; titles?: ReadonlyMap<string, string>;
+}): SessionSuccessionHistoryNavigation | undefined {
+  if (!isSessionSuccessionCurrent(current)) return;
+  const chain = replays.filter(replay => replay.projection.role.id === current.role.id && replay.to.hostId === current.locator.hostId
+    && replay.projection.role.current.controllerId === current.role.current.controllerId).sort((left, right) => left.projection.role.revision - right.projection.role.revision);
+  if (!chain.length || !chain.every(isSessionSuccessionReplay)) return;
+  for (let index = 0; index < chain.length; index++) {
+    const replay = chain[index]!, previous = chain[index - 1];
+    if (canonicalJson(replay.projection.role.origin) !== canonicalJson(current.role.origin)
+      || canonicalJson(replay.projection.role.workspace) !== canonicalJson(current.role.workspace)) return;
+    if (previous ? previous.projection.role.revision !== replay.projection.receipt.expectedRevision
+      || nativeSessionRefKey(previous.projection.role.current) !== nativeSessionRefKey(replay.projection.receipt.from)
+      : replay.projection.receipt.expectedRevision !== 1 || nativeSessionRefKey(replay.projection.receipt.from) !== nativeSessionRefKey(current.role.origin)) return;
+  }
+  if (canonicalJson(chain.at(-1)!.projection.role) !== canonicalJson(current.role)) return;
+  const targets = [chain[0]!.from, ...chain.map(replay => replay.to)];
+  const keys = targets.map(sessionKey), index = keys.indexOf(sessionKey(selected));
+  if (new Set(keys).size !== keys.length || index < 0 || intent !== 'history' && index !== targets.length - 1) return;
+  const resolve = (target: typeof targets[number]): SessionEntry => ({ ...target, title: titles?.get(sessionKey(target))?.trim() || target.nativeSessionId });
+  return { roleKey: compositionRoleKey({ scope, hostId: current.locator.hostId, controllerId: current.role.current.controllerId, roleId: current.role.id }),
+    history: intent === 'history' && index < targets.length - 1, session: resolve(targets[index]!), current: resolve(current.locator),
+    predecessor: index > 0 ? resolve(targets[index - 1]!) : undefined, ancestors: targets.slice(0, Math.max(0, index - 1)).reverse().map(resolve) };
+}
 
 /** Product ownership and binding glue. Composition participants perform no native work. */
 export function useSessionSuccession(options: SuccessionOptions) {
@@ -61,7 +93,11 @@ export function useSessionSuccession(options: SuccessionOptions) {
       takeover: undefined as { generation?: string; restored?: () => void } | undefined,
       attached: undefined as OpenedSession | undefined,
       result: undefined as CompositionParticipantResult | undefined, error: undefined as string | undefined,
+      discoveryError: undefined as string | undefined,
       replays: [] as SessionSuccessionReplay[], attempted: new Set<string>(), activeAttempt: undefined as string | undefined,
+      historyEvidence: new Map<string, { replays: SessionSuccessionReplay[]; current: SessionSuccessionCurrent }>(),
+      historyTitles: new Map<string, string>(),
+      refreshObservers: new Set<() => void>(),
       favoritesHints: new Map<string, { revision: number; operationId: string; status: string }>(),
       metadata: undefined as AbortController | undefined, attachment: undefined as AbortController | undefined,
       navigation: undefined as AbortController | undefined,
@@ -80,7 +116,10 @@ export function useSessionSuccession(options: SuccessionOptions) {
   const live = () => currentRuntime.current === runtime && runtime.mounted && runtime.authority.active
     && latest.current.scope === options.scope && latest.current.transport === options.transport
     && latest.current.enabled && recoveryGeneration(options.scope) === runtime.generation;
-  const publish = () => { if (currentRuntime.current === runtime && runtime.mounted) render(); };
+  const publish = () => {
+    for (const observer of runtime.refreshObservers) observer();
+    if (currentRuntime.current === runtime && runtime.mounted) render();
+  };
   function retireBinding(next?: Selection) {
     const key = next && sessionKey(next), previous = runtime.binding;
     if (runtime.navigationLease?.key !== key) { runtime.navigationLease?.release(); runtime.navigationLease = undefined; }
@@ -134,6 +173,15 @@ export function useSessionSuccession(options: SuccessionOptions) {
     return write.completion;
   }
   function slotTitle(slot: CompositionSlot): string { return slot.metadata?.title ?? 'Session'; }
+  function rememberHistoryTitles(sessions: readonly SessionEntry[]): boolean {
+    let changed = false;
+    for (const session of sessions) {
+      const title = session.title.trim(), key = sessionKey(session);
+      if (!title || title === 'Session' || runtime.historyTitles.get(key) === title) continue;
+      runtime.historyTitles.set(key, title); changed = true;
+    }
+    return changed;
+  }
   function captureLayout() {
     if (!live() || !runtime.readable || runtime.intent === 'history' || runtime.result?.status !== 'applied') return;
     if (sideSlots().some(slot => !runtime.sides.has(slot.id))) return;
@@ -327,7 +375,7 @@ export function useSessionSuccession(options: SuccessionOptions) {
         if (!current() || confirmed) return;
         runtime.error = 'The native session identity could not be confirmed.'; binding.stop(); publish();
       }, 15000);
-      const binding: NativeBinding = { session, client: lease.client, replica: lease.replica, isCurrent: viewCurrent,
+      const binding: NativeBinding = { session, client: lease.client, replica: lease.replica, isCurrent: viewCurrent, isSynchronized: synchronized,
         resumeRecipient() { update(); },
         retireRecipient() { if (imageLifetime) imageLifetime.active = false; imageLifetime = undefined; binding.recipient = undefined; },
         stop() { if (stopped) return; stopped = true; clearTimeout(confirmationDeadline); if (imageLifetime) imageLifetime.active = false; for (const stop of stops) stop(); lease.release(); } };
@@ -340,7 +388,11 @@ export function useSessionSuccession(options: SuccessionOptions) {
           binding.recipient = { identity: JSON.stringify([options.scope, desired.slot.id, desired.revision, desired.target, session.agentId]), lifetime,
             isCurrent: () => lifetime.active && imageLifetime === lifetime && imageCurrent() && lease.replica.getState().timeline.epoch === epoch };
         }
-        if (synchronized() && !confirmed) {
+        const nativeReady = synchronized();
+        if (nativeReady) clearTimeout(confirmationDeadline);
+        // Replay owns the composition until its participants settle. An earlier native
+        // attachment must not invalidate that read by publishing its binding metadata.
+        if (nativeReady && !confirmed && !runtime.discovering && runtime.result?.status === 'applied') {
           confirmed = true; clearTimeout(confirmationDeadline); runtime.error = undefined;
           desired.slot.metadata = compositionSessionMetadata(session);
           runtime.document.editRevision++; save();
@@ -375,7 +427,8 @@ export function useSessionSuccession(options: SuccessionOptions) {
     runtime.metadata?.abort(); const controller = new AbortController(); runtime.metadata = controller;
     const current = () => live() && runtime.authority === authority && runtime.sequence === sequence && !controller.signal.aborted;
     const request = { signal: AbortSignal.any([controller.signal, AbortSignal.timeout(20000)]) };
-    runtime.discovering = true; runtime.discovered = false; publish();
+    runtime.discovering = true; runtime.discovered = false; runtime.historyEvidence.clear();
+    rememberHistoryTitles(runtime.document.slots.map(selectionFor)); publish();
     try {
       if (!runtime.readable) throw new Error('Saved session composition is unreadable or unsupported. Its original data has been preserved.');
       if (runtime.result && 'code' in runtime.result && runtime.result.code === 'invalid_view') throw new Error('The selected session view no longer matches this session.');
@@ -393,6 +446,21 @@ export function useSessionSuccession(options: SuccessionOptions) {
       if (runtime.selection && runtime.intent !== 'history' && !runtime.selectedSlot) runtime.selectedSlot = ensureView(runtime.selection).id;
       if (runtime.selectedSlot && !runtime.document.slots.some(slot => slot.id === runtime.selectedSlot)) throw new Error('The selected session view is no longer available.');
       if (runtime.intent === 'history' && runtime.selection) {
+        const roles = new Map(all.filter(replay => [replay.from, replay.to].some(target => sessionKey(target) === sessionKey(runtime.selection!))).map(replay => [
+          compositionRoleKey({ scope: options.scope, hostId: replay.to.hostId, controllerId: replay.projection.role.current.controllerId, roleId: replay.projection.role.id }), replay,
+        ]));
+        for (const [key, replay] of roles) {
+          try {
+            const role = await options.transport.fetchSessionSuccessionCurrent!(replay.projection.role.id, request);
+            if (!current()) return;
+            const navigation = sessionSuccessionHistory({ scope: options.scope, replays: all, current: role, selected: runtime.selection, intent: 'history' });
+            if (navigation?.roleKey === key) {
+              const replays = all.filter(item => compositionRoleKey({ scope: options.scope, hostId: item.to.hostId,
+                controllerId: item.projection.role.current.controllerId, roleId: item.projection.role.id }) === key);
+              runtime.historyEvidence.set(key, { replays, current: role });
+            }
+          } catch { if (!current()) return; }
+        }
         let slot = slotFor(runtime.selection, true);
         if (!slot) { slot = createHistorySlot(compositionOriginId(runtime.selection, true), { hostId: runtime.selection.hostId ?? 'local', native: { providerId: runtime.selection.providerId, nativeSessionId: runtime.selection.nativeSessionId } }, options.scope);
           slot.metadata = compositionSessionMetadata(runtime.selection);
@@ -421,16 +489,22 @@ export function useSessionSuccession(options: SuccessionOptions) {
           if (!current()) return;
           runtime.trackPublication = undefined;
           const applicationInstance = application(replay);
+          let verifiedCurrent: SessionSuccessionCurrent | undefined;
+          const verifiedChain: SessionSuccessionReplay[] = [];
           const result = await applicationInstance.recover(replay.projection.role.id, {
             fetchSessionSuccessionOperation: (roleId, operationId) => options.transport.fetchSessionSuccessionOperation!(roleId, operationId, request),
             fetchSessionSuccessionCurrent: async roleId => {
               const value = await options.transport.fetchSessionSuccessionCurrent!(roleId, request);
+              verifiedCurrent = value;
               if (current() && runtime.desired?.roleKey === compositionRoleKey({ scope: options.scope, hostId: value.locator.hostId, controllerId: value.role.current.controllerId, roleId }) && value.locator.hostId === replay.to.hostId && value.role.current.controllerId === replay.projection.role.current.controllerId) {
                 selectDesired(runtime.desired.slot, { hostId: value.locator.hostId, native: value.role.current }, value.role.revision, undefined, runtime.desired.roleKey);
               }
               return value;
             },
-            fetchSessionSuccessions: query => options.transport.fetchSessionSuccessions!(query, request),
+            fetchSessionSuccessions: async query => {
+              const page = await options.transport.fetchSessionSuccessions!(query, request);
+              verifiedChain.push(...page.successions); return page;
+            },
           }, { selectedSlot: runtime.selectedSlot, isCurrent: current });
           if (!current()) return;
           const publication = runtime.trackPublication as { revision: number; retainedCurrent(): boolean; context: CompositionApplicationContext } | undefined;
@@ -445,6 +519,7 @@ export function useSessionSuccession(options: SuccessionOptions) {
             else if (JSON.stringify(latest.current.tracking().sessions) !== JSON.stringify(refreshed.sessions)) accepted = unavailable('track_publish_uncommitted');
           }
           const roleKey = compositionRoleKey({ scope: options.scope, hostId: replay.to.hostId, controllerId: replay.projection.role.current.controllerId, roleId: replay.projection.role.id });
+          if (accepted.status === 'applied' && verifiedCurrent) runtime.historyEvidence.set(roleKey, { replays: verifiedChain, current: verifiedCurrent });
           if (runtime.desired?.slot.intent.kind === 'role' && runtime.desired.slot.intent.roleKey === roleKey) runtime.result = accepted;
           if (accepted.status !== 'applied') localResult = accepted;
         }
@@ -461,7 +536,11 @@ export function useSessionSuccession(options: SuccessionOptions) {
       if (!current()) return;
       runtime.discovered = true;
       if (!runtime.desired) runtime.active = false;
-      if (runtime.desired && runtime.result?.status !== 'applied') runtime.error = `Session composition needs synchronization (${runtime.result?.code ?? 'pending'}).`;
+      if (runtime.desired && runtime.result?.status !== 'applied') runtime.error = runtime.discoveryError = `Session composition needs synchronization (${runtime.result?.code ?? 'pending'}).`;
+      else {
+        if (runtime.error === runtime.discoveryError) runtime.error = undefined;
+        runtime.discoveryError = undefined;
+      }
       if (runtime.desired && runtime.result?.status === 'applied') {
         runtime.layoutRevision++;
         void attachDesired();
@@ -472,15 +551,23 @@ export function useSessionSuccession(options: SuccessionOptions) {
           runtime.unsupported = true;
           queueMicrotask(() => { if (current()) void discover(); });
         } else {
-          runtime.error = error instanceof Error ? error.message : 'Session succession could not be recovered.';
+          runtime.error = runtime.discoveryError = error instanceof Error ? error.message : 'Session succession could not be recovered.';
           if (runtime.result && 'code' in runtime.result && runtime.result.code === 'invalid_view') runtime.discovered = true;
           else runtime.result = unavailable('replay_unavailable');
         }
       }
-    } finally { if (current()) { if (runtime.result?.status !== 'applied') runtime.navigationLease?.release(); runtime.discovering = false; publish(); } }
+    } finally {
+      if (current()) {
+        if (runtime.result?.status !== 'applied') runtime.navigationLease?.release();
+        runtime.discovering = false;
+        runtime.binding?.resumeRecipient();
+        publish();
+      }
+    }
   }
   async function open(selection: Selection, intent?: 'history', keepOriginal?: boolean, slotId?: string, takeOver?: string, onRestoring?: () => void, attached?: OpenedSession, restoreLayout = false): Promise<boolean> {
     if (!live()) return false;
+    rememberHistoryTitles([selection]);
     runtime.navigation?.abort(); runtime.navigation = undefined;
     if (intent === 'history') {
       const request = new AbortController(), sequence = runtime.sequence;
@@ -526,6 +613,57 @@ export function useSessionSuccession(options: SuccessionOptions) {
     runtime.active = true; publish();
     await discover();
     return runtime.active;
+  }
+  async function refreshCommitted(operationId: string): Promise<void> {
+    if (!live()) throw new Error('Workspace access is required to refresh this Handoff.');
+    await discover();
+    if (!live()) throw new Error('Workspace access changed while refreshing this Handoff.');
+    const matches = [...runtime.historyEvidence.entries()].filter(([, evidence]) => evidence.replays.some(replay => replay.projection.receipt.operationId === operationId));
+    if (matches.length !== 1) throw new Error(runtime.error ?? 'The committed Handoff could not be verified. Refresh its current role again.');
+    const [roleKey, evidence] = matches[0]!;
+    const checkpoint = runtime.document.roles.find(role => compositionRoleKey(role) === roleKey);
+    if (!checkpoint || checkpoint.appliedRevision !== evidence.current.role.revision || checkpoint.desired.committedRevision !== evidence.current.role.revision) {
+      throw new Error(runtime.error ?? 'The committed Handoff still needs local synchronization.');
+    }
+    await confirmRestoredBinding(target => runtime.desired?.roleKey === roleKey
+      || evidence.replays.some(replay => [replay.from, replay.to].some(locator => sessionKey(locator) === sessionKey(target))));
+  }
+  async function refreshSettled(result: SuccessionActionResult, source: OpenedSession): Promise<void> {
+    if (result.record.phase === 'committed') return refreshCommitted(result.record.operationId);
+    if (!['cancelled', 'rejected'].includes(result.record.phase)
+      || sessionKey({ hostId: source.hostId, ...result.record.from }) !== sessionKey(source)) {
+      throw new Error('The Handoff outcome does not confirm the original conversation.');
+    }
+    if (!live()) throw new Error('Workspace access is required to restore this conversation.');
+    await discover();
+    if (!live()) throw new Error('Workspace access changed while restoring this conversation.');
+    const roleKey = compositionRoleKey({ scope: options.scope, hostId: source.hostId ?? 'local', controllerId: result.role.current.controllerId, roleId: result.role.id });
+    const evidence = runtime.historyEvidence.get(roleKey);
+    if (nativeSessionRefKey(result.role.current) !== nativeSessionRefKey(result.record.from) && !evidence) {
+      throw new Error('The original conversation has moved. Refresh its current role before continuing.');
+    }
+    await confirmRestoredBinding(target => runtime.desired?.roleKey === roleKey || sessionKey(target) === sessionKey(source)
+      || sessionKey(target) === sessionKey({ hostId: source.hostId, ...result.role.current }));
+  }
+  function confirmRestoredBinding(related: (target: Pick<SessionEntry, 'hostId' | 'providerId' | 'nativeSessionId'>) => boolean): Promise<void> {
+    return new Promise<void>((resolve, reject) => {
+      const finish = (error?: Error) => {
+        clearTimeout(deadline); runtime.refreshObservers.delete(check);
+        if (error) reject(error); else resolve();
+      };
+      const check = () => {
+        if (!live()) { finish(new Error('Workspace access changed while refreshing this Handoff.')); return; }
+        const desired = runtime.desired;
+        const target = desired && { hostId: desired.target.hostId, ...desired.target.native };
+        if (!target || !related(target)) { finish(); return; }
+        if (runtime.discovering) return;
+        if (runtime.error) { finish(new Error(runtime.error)); return; }
+        if (runtime.result?.status !== 'applied') { finish(new Error('The conversation layout still needs synchronization.')); return; }
+        if (runtime.binding?.isCurrent() && runtime.binding.isSynchronized() && sessionKey(runtime.binding.session) === sessionKey(target)) finish();
+      };
+      const deadline = setTimeout(() => finish(new Error('The current native session has not been confirmed. Retry the session connection.')), 16000);
+      runtime.refreshObservers.add(check); check();
+    });
   }
   function leave() {
     runtime.navigation?.abort(); runtime.navigation = undefined;
@@ -654,6 +792,7 @@ export function useSessionSuccession(options: SuccessionOptions) {
     });
     return () => {
       runtime.mounted = false; runtime.sequence++; runtime.navigation?.abort(); runtime.metadata?.abort(); runtime.attachment?.abort(); runtime.binding?.stop();
+      for (const observer of runtime.refreshObservers) observer();
       runtime.navigationLease?.release();
       if (runtime.activeAttempt) runtime.attempted.delete(runtime.activeAttempt);
       runtime.activeAttempt = undefined; runtime.binding = undefined; stop?.(); resume(); stopConnections();
@@ -665,6 +804,12 @@ export function useSessionSuccession(options: SuccessionOptions) {
   const desired = runtime.desired, selection = runtime.selection;
   const selected: SessionEntry | undefined = desired ? { hostId: desired.target.hostId, providerId: desired.target.native.providerId, nativeSessionId: desired.target.native.nativeSessionId,
     title: desired.title, ...(bound ? { agentId: bound.session.agentId } : {}) } : undefined;
+  const historyCandidates = live() && runtime.discovered && !runtime.discovering && runtime.result?.status === 'applied' && selected
+    ? [...runtime.historyEvidence.entries()].filter(([key]) => !desired?.roleKey || desired.roleKey === key).flatMap(([, evidence]) => {
+      const navigation = sessionSuccessionHistory({ scope: options.scope, ...evidence, selected, intent: runtime.intent, titles: runtime.historyTitles });
+      return navigation ? [navigation] : [];
+    }) : [];
+  const historyNavigation = historyCandidates.length === 1 ? historyCandidates[0] : undefined;
   function localViews() {
     const localIds = new Set(desired && runtime.intent !== 'history' ? [desired.slot.id] : []);
     for (let size = -1; size !== localIds.size;) {
@@ -681,12 +826,14 @@ export function useSessionSuccession(options: SuccessionOptions) {
     isCurrent: () => !!runtime.binding?.isCurrent(), open,
     restore: (session: OpenedSession) => open(session, undefined, undefined, undefined, undefined, undefined, undefined, true),
     openAttached: (session: OpenedSession, restoreLayout = false) => open(session, undefined, undefined, undefined, undefined, undefined, session, restoreLayout),
-    leave, refresh: discover, canPrune, observeFavorites,
+    leave, refresh: discover, refreshCommitted, refreshSettled, canPrune, observeFavorites,
     retry,
     ownerFor, localViews, ensureView, save,
-    navigationIntent: { sessionIntent: runtime.intent, keepOriginal: runtime.keepOriginal },
+    navigationIntent: { sessionIntent: runtime.intent, keepOriginal: runtime.keepOriginal }, historyNavigation,
+    observeHistoryTitles: (sessions: readonly SessionEntry[]) => { if (live() && runtime.readable && rememberHistoryTitles(sessions)) publish(); },
     updateTitles: (sessions: readonly SessionEntry[]) => {
       if (!live() || !runtime.readable) return;
+      const historyChanged = rememberHistoryTitles(sessions);
       const titles = new Map(sessions.map(session => [sessionKey(session), session.title]));
       let changed = false;
       for (const slot of runtime.document.slots) {
@@ -698,6 +845,7 @@ export function useSessionSuccession(options: SuccessionOptions) {
         const side = runtime.sides.get(slot.id); if (side) side.title = title;
       }
       if (changed) { runtime.document.editRevision++; save(); }
+      else if (historyChanged) publish();
     },
     rememberSide: (session: OpenedSession & { viewId: string }) => {
       const slot = explicitSlot(session, session.viewId);

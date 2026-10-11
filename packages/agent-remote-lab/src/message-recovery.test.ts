@@ -28,3 +28,18 @@ it('restores the ordered image content and identity needed for an exact retry', 
   recoverMessages(restored, 'relay', 'rich-session', 'new-agent')();
   expect(restored.getState().outgoingMessages).toMatchObject([{ content, imageDigests, agentId: 'new-agent', status: 'unconfirmed' }]);
 });
+
+it('validates retained prepared-text evidence without discarding other recoverable input', () => {
+  const message = { id: 'prepared', agentId: 'old-agent', text: 'Continue', epoch: 'epoch-one', afterSeq: 0,
+    status: 'awaiting_echo', submittedTextSha256: 'a'.repeat(64), consumedEchoSeqs: [1, 3] };
+  localStorage.setItem('agent-remote:recovery:relay:outbox:prepared-session', JSON.stringify([
+    message, { ...message, id: 'bad-digest', submittedTextSha256: 'bad' },
+    { ...message, id: 'bad-sequences', consumedEchoSeqs: '1' },
+    { ...message, id: 'bad-sequence', consumedEchoSeqs: [-1] },
+  ]));
+  const restored = new AgentReplica();
+  recoverMessages(restored, 'relay', 'prepared-session', 'new-agent')();
+  expect(restored.getState().outgoingMessages).toEqual([expect.objectContaining({
+    id: 'prepared', agentId: 'new-agent', submittedTextSha256: 'a'.repeat(64), consumedEchoSeqs: [1, 3],
+  })]);
+});

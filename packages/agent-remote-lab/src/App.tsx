@@ -24,6 +24,9 @@ import { useSessionStars } from './hooks/useSessionStars.js';
 import type { StarInput } from './session-stars-client.js';
 import { loadSuccessionIntent, saveSuccessionIntent, clearSuccessionIntent, type SessionSuccessionIntent } from './session-succession-intent.js';
 import { SessionSuccessionDialog } from './components/SessionSuccessionDialog.js';
+import { SessionSuccessionHistory } from './components/SessionSuccessionHistory.js';
+import { useSuccessionContext } from './hooks/useSuccessionContext.js';
+import { handoffCommand, handoffProvider } from './handoff-command.js';
 import { RenameSessionDialog } from './components/favorites/RenameSessionDialog.js';
 import { SessionTitle } from './components/SessionTitle.js';
 import { useSessionCatchUp } from './hooks/useSessionCatchUp.js';
@@ -844,6 +847,7 @@ function AppContent({
     return [...entries.values()];
   }, [observedSessionEntries, sideSessions, sideActivity, state?.agent?.id]);
   useEffect(() => {
+    succession.observeHistoryTitles(sessionEntries);
     succession.updateTitles(sessionEntries.filter(item => !!item.parentNativeSessionId));
     const childTitles = new Map(sessionEntries.filter((item) => item.parentNativeSessionId).map((item) => [sessionKey(item), item.title]));
     setOpenedSessions((current) => {
@@ -1455,22 +1459,61 @@ function AppContent({
     return submittedClient;
   }
 
-  const [successionDialog, setSuccessionDialog] = useState<{ scope: string; source: OpenedSession; directory: SessionDirectoryClient; resume?: SessionSuccessionIntent['operation']; cancelRequested?: boolean; visible?: boolean } | undefined>(() => {
+  const [successionDialog, setSuccessionDialog] = useState<{ scope: string; source: OpenedSession; directory: SessionDirectoryClient; resume?: SessionSuccessionIntent['operation']; cancelRequested?: boolean; visible?: boolean; initialProvider?: string } | undefined>(() => {
     const saved = loadSuccessionIntent(baseUrl);
     return saved ? { scope: baseUrl, source: saved.source, resume: saved.operation, cancelRequested: saved.cancelRequested, visible: true, directory: new SessionDirectoryClient(baseUrl, undefined, saved.source.hostId) } : undefined;
   });
+  const primaryInputKey = JSON.stringify([baseUrl, stackRoot && sessionKey(stackRoot)]);
+  const [pendingPrimaryInput, setPendingPrimaryInput] = useState<{ key: string; count: number }>();
+  const reportPendingPrimaryInput = useCallback((count: number) => setPendingPrimaryInput(current =>
+    current?.key === primaryInputKey && current.count === count ? current : { key: primaryInputKey, count }), [primaryInputKey]);
+  const pendingPrimaryCount = pendingPrimaryInput?.key === primaryInputKey ? pendingPrimaryInput.count : 0;
+  const successionInputReason = successionDialog && stackRoot && sessionKey(successionDialog.source) === sessionKey(stackRoot) && pendingPrimaryCount > 0
+    ? 'Send or remove pending messages before handing off this conversation.' : undefined;
+  const [successionGated, setSuccessionGated] = useState(() => !!loadSuccessionIntent(baseUrl));
   const canHandoffPrimary = !successionDialog && !!directory && userScoped && accessReady && !hostOffline && status === 'ready'
-    && primaryIsBound && !transitioning && !!stackRoot && !stackRoot.parentNativeSessionId
+    && primaryIsBound && !transitioning && !detachedSideRoot && !boundFork && !sessionState.readOnly && !!stackRoot && !stackRoot.parentNativeSessionId
     && navigationIntent.sessionIntent !== 'history' && remoteHosts.some(host => host.id === stackRoot.hostId && host.access !== 'shared' && host.online);
   function assertSuccessionAccess() {
     if (!accessReadyRef.current || successionDialog?.scope !== baseUrl
       || !userScoped || !remoteHosts.some(host => host.id === successionDialog?.source.hostId && host.access !== 'shared' && host.online)) throw new Error('Authorized Host access is required to recover this Handoff.');
   }
-  const primaryHandoffAction = canHandoffPrimary ? () => {
-    if (successionDialog) return;
-    assertSourceCurrent(stackRoot!);
-    setSuccessionDialog({ scope: baseUrl, source: stackRoot!, visible: true, directory: new SessionDirectoryClient(baseUrl, undefined, stackRoot!.hostId) });
-  } : undefined;
+  async function executePrimaryCommand(id: string, args: string): Promise<AgentCommandResult> {
+    if (id === handoffCommand.id) {
+      const initialProvider = handoffProvider(args);
+      if (!canHandoffPrimary || !stackRoot) throw new Error('Handoff is available on the current main conversation with authorized Host access.');
+      assertSourceCurrent(stackRoot);
+      setSuccessionDialog({ scope: baseUrl, source: stackRoot, visible: true, initialProvider, directory: new SessionDirectoryClient(baseUrl, undefined, stackRoot.hostId) });
+      return {};
+    }
+    if (!state || status !== 'ready' || hostOffline) throw new Error('Wait for this session to finish synchronizing.');
+    return createFork(state, activeOpened, id, args);
+  }
+  const primarySuccessionGated = successionGated && successionDialog?.scope === baseUrl && !!stackRoot &&
+    (sessionKey(stackRoot) === sessionKey(successionDialog.source) || succession.desired?.operationId === successionDialog.resume?.operationId && !!successionDialog.resume);
+  const contextTarget = succession.desired?.target.native;
+  const successionContext = useSuccessionContext({ directory, operationId: succession.desired?.operationId,
+    target: contextTarget?.controllerId ? { ...contextTarget, controllerId: contextTarget.controllerId } : undefined, enabled: userScoped && accessReady && !hostOffline && navigationIntent.sessionIntent !== 'history',
+    refreshKey: `${state?.timeline.epoch}:${state?.timeline.entries.at(-1)?.seqEnd}:${pendingPrimaryCount}`,
+  });
+  const successionProgress = successionDialog ? <SessionSuccessionDialog
+    source={successionDialog.source} directory={successionDialog.directory}
+    blockedReason={successionInputReason}
+    initialProvider={successionDialog.initialProvider} visible={successionDialog.visible}
+    resume={successionDialog.resume} resumeCancellation={successionDialog.cancelRequested}
+    onGatedChange={setSuccessionGated}
+    onOpen={() => setSuccessionDialog(current => current ? { ...current, visible: true } : current)}
+    onIntent={(operation, cancelRequested) => {
+      saveSuccessionIntent(successionDialog.scope, { source: successionDialog.source, operation, cancelRequested });
+      setSuccessionGated(true);
+      setSuccessionDialog(current => current ? { ...current, resume: operation, cancelRequested } : current);
+    }}
+    assertAccess={assertSuccessionAccess} assertSource={() => { assertSuccessionAccess(); assertSourceCurrent(successionDialog.source); }}
+    onSettled={async result => { assertSuccessionAccess(); await succession.refreshSettled(result, successionDialog.source); }}
+    onClose={retain => {
+      if (retain) setSuccessionDialog(current => current ? { ...current, visible: false } : current);
+      else { clearSuccessionIntent(successionDialog.scope); setSuccessionGated(false); setSuccessionDialog(undefined); }
+    }} /> : undefined;
 
   const clientActions: AppActions = actions ?? {
     takeControl: options => commandClient().takeControl(options),
@@ -1723,14 +1766,19 @@ function AppContent({
           handoff={handoff}
           draftSessionKey={succession.selected ? sessionKey(succession.selected) : stackRoot ? sessionKey(stackRoot) : activeAgentId}
           draftOnly={succession.active && !succession.isCurrent()}
+          mutationBlocked={primarySuccessionGated}
+          onPendingInputChange={reportPendingPrimaryInput}
+          pendingFirstInputContext={successionContext && successionContext.state !== 'materialized' ? { state: successionContext.state, onRetry: successionContext.onRetry } : undefined}
+          headingContext={succession.historyNavigation ? <SessionSuccessionHistory navigation={succession.historyNavigation} onOpen={(session, intent) => openSession(session, undefined, undefined, false, undefined, intent)} /> : undefined}
+          composerStatus={successionProgress}
           imageDraftBinding={stackRoot ? succession.document.slots.find(slot => slot.id === viewKey(stackRoot))!.owners.image : undefined}
           imageRecipient={succession.imageRecipient}
           displayBinding={succession.desired?.slot.owners.display}
           onInspectEntry={key => inspectTimelineEntry(key, 'trace')}
           revealEntry={activeAgentId && letterReveals[activeAgentId] || (traceRequest?.view === 'workbench' ? traceRequest : undefined)}
-          state={forkDisplayState(state, boundFork)} sessionStatus={!accessReady ? 'connecting' : hostOffline ? 'disconnected' : status} attachingAgentId={attachingAgentId} actions={forkInputStatus?.pending && forkInputStatus.agentId === activeAgentId ? { deleteMessage: conversationActions.deleteMessage } : { ...availableConversationActions, handoffSession: primaryHandoffAction }} visible={activeView === 'workbench' && primaryExpanded}
-          consoleCommands={status === 'ready' && !hostOffline && directory && state?.agent?.capabilities.sendMessage && state.agent.capabilities.history ? forkCommands : []}
-          onExecuteConsoleCommand={(id, args) => state && status === 'ready' && !hostOffline ? createFork(state, activeOpened, id, args) : Promise.reject(new Error('Wait for this session to finish synchronizing.'))}
+          state={forkDisplayState(state, boundFork)} sessionStatus={!accessReady ? 'connecting' : hostOffline ? 'disconnected' : status} attachingAgentId={attachingAgentId} actions={forkInputStatus?.pending && forkInputStatus.agentId === activeAgentId ? { deleteMessage: conversationActions.deleteMessage } : availableConversationActions} visible={activeView === 'workbench' && primaryExpanded}
+          consoleCommands={[...(status === 'ready' && !hostOffline && directory && state?.agent?.capabilities.sendMessage && state.agent.capabilities.history ? forkCommands : []), ...(canHandoffPrimary ? [handoffCommand] : [])]}
+          onExecuteConsoleCommand={executePrimaryCommand}
           nativeTakeover={nativeTakeover ? <SessionControlNotice
             control={{access: 'read_only', available: false, nativeOwner: nativeTakeover.owner}}
             handoff={openingHandoff?.getState(nativeTakeover.owner.generation)}
@@ -1797,15 +1845,10 @@ function AppContent({
           resolveSessionLink={primaryNavigation.resolveSessionLink} onLoadOlder={!hostOffline ? conversationActions.loadOlder : undefined} />
       </section>
     </PreviewWorkspace>
-    {successionDialog && !successionDialog.visible ? <button type="button" onClick={() => setSuccessionDialog({ ...successionDialog, visible: true })}>Recover Handoff</button> : null}
-    {successionDialog?.visible ? <SessionSuccessionDialog source={successionDialog.source} directory={successionDialog.directory}
-      resume={successionDialog.resume} resumeCancellation={successionDialog.cancelRequested} onIntent={(operation, cancelRequested) => {
-        saveSuccessionIntent(successionDialog.scope, { source: successionDialog.source, operation, cancelRequested });
-        setSuccessionDialog(current => current ? { ...current, resume: operation, cancelRequested } : current);
-      }}
-      assertAccess={assertSuccessionAccess} assertSource={() => { assertSuccessionAccess(); assertSourceCurrent(successionDialog.source); }}
-      onCommitted={async () => { assertSuccessionAccess(); await succession.refresh(); }} onClose={retain => { if (retain) setSuccessionDialog({ ...successionDialog, visible: false });
-        else { clearSuccessionIntent(successionDialog.scope); setSuccessionDialog(undefined); } }} /> : null}
+    {successionDialog && (activeView !== 'workbench' || !primaryExpanded) ? <button type="button" onClick={() => {
+      setActiveView('workbench'); if (stackRoot) revealSession(stackRoot);
+      setSuccessionDialog(current => current ? { ...current, visible: true } : current);
+    }}>Recover Handoff</button> : null}
     {renamingSession?.scope === baseUrl ? <RenameSessionDialog favorites={favorites} session={renamingSession.session}
       onRenamed={session => { applySessionTitle(session); setDirectoryRevision(value => value + 1); }} onClose={() => setRenamingSession(undefined)} /> : null}
     <SupportingRail

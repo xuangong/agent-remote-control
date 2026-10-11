@@ -5,7 +5,7 @@ import { SessionViewFrame } from './SessionViewFrame.js';
 import { useFeedbackToast, useToastAnchor } from './Toast.js';
 import type { ImageUploadReceipt, MessagePart, ResourceResponseState } from '@orchardworks/agent-remote-protocol';
 import type { AgentCommand, AgentCommandResult, AgentMessageOptions } from '@orchardworks/agent-remote-protocol';
-import { memo, useContext, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { memo, useContext, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type ComponentProps, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import type {
   AgentInteractionResponse,
@@ -31,7 +31,7 @@ import type { TraceEntryRequest } from '../trace-model.js';
 
 export type LabWorkbenchActions = SessionViewActions;
 
-export function SessionWorkbench({ todo, displayPreferences, onDisplayPreferencesChange, defaultDisplayMode = 'preview', sessionState: suppliedSessionState, handoff, workspaceLink, readingPositions: suppliedReadingPositions, draftScope, imageDraftBinding, imageRecipient, isAuthenticationError = noAuthenticationError, authenticationNotice, renderSessionSettingError, readOnly: recordingReadOnly = false, draftOnly = false, onInspectEntry, revealEntry, state, sessionStatus: connectionStatus, attachingAgentId, actions: suppliedActions, visible = true, questionDrafts, onQuestionDraftChange, messageDraft, draftSessionKey, onMessageDraftChange, onOpenChildSession, childrenFor, resolveSessionLink, conversationPath, headingStart, headingMode = 'inline', sessionManager, composerContext, composerNotice, nativeTakeover, consoleCommands, onExecuteConsoleCommand }: { todo?: SessionTodoPanelProps; displayPreferences?: SessionDisplayPreferences; onDisplayPreferencesChange?(preferences: SessionDisplayPreferences): void; defaultDisplayMode?: TimelineDisplayMode; sessionState?: RemoteSessionState; handoff?: SessionHandoffState; readOnly?: boolean; draftOnly?: boolean; workspaceLink?: ReactNode; readingPositions?: TimelineReadingPositions; draftScope?: string; imageDraftBinding?: ImageDraftBinding; imageRecipient?: ImageDraftRecipient; isAuthenticationError?(error: unknown): boolean; authenticationNotice?: ReactNode; renderSessionSettingError?(error: unknown): ReactNode; onInspectEntry?: (key: string) => void; revealEntry?: TraceEntryRequest; composerContext?: ReactNode; composerNotice?: ReactNode; nativeTakeover?: ReactNode; consoleCommands?: readonly (AgentCommand & { aliases?: readonly string[] })[]; onExecuteConsoleCommand?(id: string, args: string): Promise<AgentCommandResult>; state?: AgentReplicaState; sessionStatus: RemoteSessionStatus; attachingAgentId?: string; actions: LabWorkbenchActions; conversationPath?: ReactNode; headingStart?: ReactNode; headingMode?: 'inline' | 'toolbar'; sessionManager?: ReactNode; resolveSessionLink?: SessionLinkResolver; childrenFor?: (nativeSessionId: string) => readonly AgentChildSessionView[]; onOpenChildSession?: (child: AgentChildSessionView) => void | Promise<void>; visible?: boolean; draftSessionKey?: string; messageDraft?: string; onMessageDraftChange?(text: string): void; questionDrafts?: Readonly<Record<string, QuestionDraft>>; onQuestionDraftChange?: (requestId: string, draft: QuestionDraft) => void }) {
+export function SessionWorkbench({ todo, displayPreferences, onDisplayPreferencesChange, defaultDisplayMode = 'preview', sessionState: suppliedSessionState, handoff, workspaceLink, readingPositions: suppliedReadingPositions, draftScope, imageDraftBinding, imageRecipient, isAuthenticationError = noAuthenticationError, authenticationNotice, renderSessionSettingError, readOnly: recordingReadOnly = false, draftOnly = false, mutationBlocked = false, pendingFirstInputContext, onPendingInputChange, onInspectEntry, revealEntry, state, sessionStatus: connectionStatus, attachingAgentId, actions: suppliedActions, visible = true, questionDrafts, onQuestionDraftChange, messageDraft, draftSessionKey, onMessageDraftChange, onOpenChildSession, childrenFor, resolveSessionLink, conversationPath, headingStart, headingMode = 'inline', sessionManager, headingContext, composerContext, composerNotice, composerStatus, nativeTakeover, consoleCommands, onExecuteConsoleCommand }: { todo?: SessionTodoPanelProps; displayPreferences?: SessionDisplayPreferences; onDisplayPreferencesChange?(preferences: SessionDisplayPreferences): void; defaultDisplayMode?: TimelineDisplayMode; sessionState?: RemoteSessionState; handoff?: SessionHandoffState; readOnly?: boolean; draftOnly?: boolean; mutationBlocked?: boolean; pendingFirstInputContext?: ComponentProps<typeof DraftComposer>['pendingFirstInputContext']; onPendingInputChange?(count: number): void; workspaceLink?: ReactNode; readingPositions?: TimelineReadingPositions; draftScope?: string; imageDraftBinding?: ImageDraftBinding; imageRecipient?: ImageDraftRecipient; isAuthenticationError?(error: unknown): boolean; authenticationNotice?: ReactNode; renderSessionSettingError?(error: unknown): ReactNode; onInspectEntry?: (key: string) => void; revealEntry?: TraceEntryRequest; composerContext?: ReactNode; composerNotice?: ReactNode; composerStatus?: ReactNode; headingContext?: ReactNode; nativeTakeover?: ReactNode; consoleCommands?: readonly (AgentCommand & { aliases?: readonly string[] })[]; onExecuteConsoleCommand?(id: string, args: string): Promise<AgentCommandResult>; state?: AgentReplicaState; sessionStatus: RemoteSessionStatus; attachingAgentId?: string; actions: LabWorkbenchActions; conversationPath?: ReactNode; headingStart?: ReactNode; headingMode?: 'inline' | 'toolbar'; sessionManager?: ReactNode; resolveSessionLink?: SessionLinkResolver; childrenFor?: (nativeSessionId: string) => readonly AgentChildSessionView[]; onOpenChildSession?: (child: AgentChildSessionView) => void | Promise<void>; visible?: boolean; draftSessionKey?: string; messageDraft?: string; onMessageDraftChange?(text: string): void; questionDrafts?: Readonly<Record<string, QuestionDraft>>; onQuestionDraftChange?: (requestId: string, draft: QuestionDraft) => void }) {
   const displayScope = draftSessionKey ?? state?.agent?.runtimeInfo.sessionId ?? attachingAgentId;
   const [localDisplay, setLocalDisplay] = useState(() => ({ scope: displayScope, value: { mode: defaultDisplayMode, lettersVisible: true } }));
   let localPreferences = localDisplay.value;
@@ -61,7 +61,7 @@ export function SessionWorkbench({ todo, displayPreferences, onDisplayPreference
   const controlReadOnly = !draftOnly && (!!nativeTakeover || session.readOnly);
   const readOnly = recordingReadOnly || controlReadOnly;
   const { actions: suppliedFeedbackActions, reauthenticate } = useActionFeedback(suppliedActions, state?.agent?.id, isAuthenticationError);
-  const actions: LabWorkbenchActions = draftOnly ? {} : readOnly ? { searchTimeline: suppliedFeedbackActions.searchTimeline, loadSearchMatch: suppliedFeedbackActions.loadSearchMatch, loadOlder: suppliedFeedbackActions.loadOlder, requestResource: suppliedFeedbackActions.requestResource, resolveResource: suppliedFeedbackActions.resolveResource, deleteMessage: suppliedFeedbackActions.deleteMessage } : session.synchronized ? { ...suppliedFeedbackActions,
+  const actions: LabWorkbenchActions = draftOnly ? {} : readOnly || mutationBlocked ? { searchTimeline: suppliedFeedbackActions.searchTimeline, loadSearchMatch: suppliedFeedbackActions.loadSearchMatch, loadOlder: suppliedFeedbackActions.loadOlder, requestResource: suppliedFeedbackActions.requestResource, resolveResource: suppliedFeedbackActions.resolveResource, deleteMessage: suppliedFeedbackActions.deleteMessage } : session.synchronized ? { ...suppliedFeedbackActions,
     retryMessage: session.operations.send_message.allowed ? suppliedFeedbackActions.retryMessage : undefined,
     editPrompt: session.operations.send_message.allowed ? suppliedFeedbackActions.editPrompt : undefined,
     cancel: session.operations.cancel.allowed ? suppliedFeedbackActions.cancel : undefined,
@@ -92,7 +92,7 @@ export function SessionWorkbench({ todo, displayPreferences, onDisplayPreference
   const failureInTimeline = !!nativeFailure?.turnId && state?.timeline.entries.some(entry =>
     entry.turnId === nativeFailure.turnId && entry.item.type === 'error' && entry.item.message === nativeFailure.message);
   const runtimeConnection = session.runtime;
-  const runtimeMutationDisabled = !session.operations.interaction_response.allowed;
+  const runtimeMutationDisabled = mutationBlocked || !session.operations.interaction_response.allowed;
   const runtimeNotice = runtimeConnection?.state === 'reconnecting'
     ? 'Native runtime is reconnecting. Changes are temporarily unavailable.'
     : runtimeConnection?.state === 'restoring'
@@ -129,17 +129,19 @@ export function SessionWorkbench({ todo, displayPreferences, onDisplayPreference
     : activity === 'running' ? 'Working'
     : 'Ready';
   const viewOptions = <SessionViewOptions key={displayScope} preferences={preferences} onChange={changeDisplayPreferences} />;
-  const handoffAction = actions.handoffSession ? <button type="button" onClick={actions.handoffSession}>Handoff</button> : null;
-  const tools = <>{sessionManager}{handoffAction}{viewOptions}</>;
+  const tools = <>{sessionManager}{viewOptions}</>;
   const layoutClass = [todo ? 'lab-workbench-with-todo' : '', selectedCommand ? 'lab-command-details-open' : '', headingMode === 'toolbar' ? 'lab-workbench-toolbar-heading' : ''].filter(Boolean).join(' ');
   return <TimelineDisplay.Provider value={preferences.mode}><TimelineLettersVisible.Provider value={preferences.lettersVisible}><SessionViewFrame className={layoutClass}>
+    <div className="lab-workbench-heading-group" hidden={headingMode === 'toolbar' && !headingContext}>
     <SessionHeading hidden={headingMode === 'toolbar'}
       leading={headingMode === 'inline' ? <>{headingStart}{workspaceLink}{viewOptions}</> : undefined}
-      trailing={headingMode === 'inline' ? <>{sessionManager}{handoffAction}<span className="lab-conversation-status">{hasReplica ? activityLabel : isAttaching ? loadingLabel : 'Awaiting Agent'}</span></> : undefined}>
+      trailing={headingMode === 'inline' ? <>{sessionManager}<span className="lab-conversation-status">{hasReplica ? activityLabel : isAttaching ? loadingLabel : 'Awaiting Agent'}</span></> : undefined}>
         {conversationPath}
         <h2 hidden={!!conversationPath} className="agent-session-title" data-session-status={activity}>{hasReplica ? 'Conversation' : isAttaching ? `${sessionStatus === 'catching_up' ? 'Loading conversation' : 'Opening session'} ${attachingAgentId}` : 'Ready for a session'}</h2>
     </SessionHeading>
-    {todo ? <SessionTodoPanel key={displayScope} {...todo} disabled={todo.disabled || readOnly} /> : null}
+    {headingContext}
+    </div>
+    {todo ? <SessionTodoPanel key={displayScope} {...todo} disabled={todo.disabled || readOnly || mutationBlocked} /> : null}
     <PreviewDock sessionId={state?.agent?.id ?? attachingAgentId} />
     <WorkbenchTimeline toolsTargetRef={setTimelineToolsTarget} toolsCollapsible={headingMode === 'toolbar'} toolsScope={displayScope} nativeTakeover={!!nativeTakeover} readOnly={readOnly} state={state} sessionStatus={sessionStatus} attachingAgentId={attachingAgentId}
       visible={visible} readingPositions={readingPositions} actions={actions} revealEntry={revealEntry}
@@ -147,6 +149,8 @@ export function SessionWorkbench({ todo, displayPreferences, onDisplayPreference
       onInspectEntry={onInspectEntry} onOpenChildSession={onOpenChildSession} childrenFor={childrenFor} resolveSessionLink={resolveSessionLink}
       questionDrafts={questionDrafts} onQuestionDraftChange={onQuestionDraftChange} />
     {headingMode === 'toolbar' && timelineToolsTarget ? createPortal(tools, timelineToolsTarget) : null}
+    <div className="lab-composer-region">
+    {composerStatus}
     <div ref={toastAnchor} className="lab-composer-dock" hidden={!state?.agent && !nativeTakeover && !draftOnly} data-collapsed={composerHidden || undefined}>
       <div hidden={composerHidden}>
         {composerContext}
@@ -165,12 +169,15 @@ export function SessionWorkbench({ todo, displayPreferences, onDisplayPreference
           <DraftComposer
             sessionState={session}
             draftOnly={draftOnly}
+            mutationBlocked={mutationBlocked}
+            onPendingInputChange={onPendingInputChange}
+            pendingFirstInputContext={pendingFirstInputContext}
             readOnly={readOnly}
             readOnlyCollapsed={composerHidden}
             readOnlyLabel={controlReadOnly && !recordingReadOnly ? 'Read only' : undefined}
             readOnlyNotice={!draftOnly && (nativeTakeover ?? (!recordingReadOnly && controlReadOnly && state?.sessionControl ? <SessionControlNotice handoff={handoff ?? session.handoff} control={state.sessionControl} connected={sessionStatus === 'ready'} onTakeControl={suppliedActions.takeControl} /> : undefined))}
-            consoleCommands={!readOnly && sessionStatus === 'ready' ? consoleCommands : []}
-            onExecuteConsoleCommand={!readOnly && sessionStatus === 'ready' ? onExecuteConsoleCommand : undefined}
+            consoleCommands={!readOnly && !mutationBlocked && sessionStatus === 'ready' ? consoleCommands : []}
+            onExecuteConsoleCommand={!readOnly && !mutationBlocked && sessionStatus === 'ready' ? onExecuteConsoleCommand : undefined}
             sessionControls={state?.agent && !draftOnly ? <PlanningControl sessionState={session} key={state.agent.id} state={state} sessionStatus={sessionStatus} onSetPlanning={actions.setPlanning} /> : null}
             state={state}
             sessionKey={draftSessionKey ?? state?.agent?.id}
@@ -178,14 +185,14 @@ export function SessionWorkbench({ todo, displayPreferences, onDisplayPreference
             imageDraftBinding={imageDraftBinding} imageRecipient={imageRecipient}
             visible={visible}
             activityVisible={visible && !composerHidden}
-            onSendMessageContent={readOnly ? undefined : suppliedFeedbackActions.sendMessageContent}
+            onSendMessageContent={readOnly || mutationBlocked ? undefined : suppliedFeedbackActions.sendMessageContent}
             onUploadImage={visible ? actions.uploadImage : undefined}
             draft={messageDraft}
             onDraftChange={onMessageDraftChange}
             disabled={sessionStatus !== 'ready'}
             disabledLabel={activityLabel}
             recovering={!readOnly && !runtimeError && session.recovering}
-            onSendMessage={readOnly ? undefined : suppliedFeedbackActions.sendMessage}
+            onSendMessage={readOnly || mutationBlocked ? undefined : suppliedFeedbackActions.sendMessage}
             onCancel={actions.cancel}
             onSetSessionSetting={actions.setSessionSetting}
             renderSessionSettingError={renderSessionSettingError}
@@ -197,6 +204,7 @@ export function SessionWorkbench({ todo, displayPreferences, onDisplayPreference
           />
         </div>
       </div>
+    </div>
     </div>
     {selectedCommand && state ? <AgentCommandDetails key={`${state.agent?.id}:${selectedCommand.id}`} command={selectedCommand} resources={state.resources}
       onRequestResource={actions.requestResource} onResolveResource={actions.resolveResource}

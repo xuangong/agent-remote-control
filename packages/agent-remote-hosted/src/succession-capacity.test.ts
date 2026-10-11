@@ -4,6 +4,7 @@ import { createHash } from 'node:crypto';
 import { expect, test } from 'vitest';
 import { createRelayState, emptyRelayState, type HostedRelayState } from './state.js';
 import { deriveSuccessionCapacity, isSuccessionCapacityError, type SuccessionEncodingCosts } from './succession-capacity.js';
+import { validBrokerAssociations } from './succession-associations.js';
 import { encodeSqlSnapshot, quoteSqlRecord, SQL_SNAPSHOT_FORMAT, SQL_RECORD_FORMAT, SQL_CHUNK_BYTES } from '../../agent-remote-cloudflare/src/storage-codec.js';
 
 const auth = { origin: 'https://relay.example', issuer: 'https://issuer.example', secret: 's'.repeat(32) };
@@ -78,6 +79,26 @@ test('defers unresolved saved one without changing its identity or storage', () 
   expect(() => createRelayState(auth, { initial: state, async commit() { writes++; } }, () => {}, () => {}, costs)).toThrow(/bound|legacy/i);
   expect(writes).toBe(0); expect(JSON.stringify(state)).toBe(before);
   expect(createRelayState(auth, { initial: state, async commit() {} }, () => {}, () => {}).read()).toEqual(state);
+}, 10000);
+
+test('reserves only durable cancellation for an explicit v1 cancellation fence', async () => {
+  const state = initial(), row = state.tenants[0]!.broker.associations!.freezes[0]!;
+  const { maxProjectionBytes: _allowance, ...receipt } = row.receipt as Extract<typeof row.receipt, { version: 2 }>;
+  row.receipt = { ...receipt, version: 1 }; Object.assign(row, { cancelOnly: true });
+  const associations = state.tenants[0]!.broker.associations!;
+  expect(validBrokerAssociations(associations)).toBe(true);
+  expect(validBrokerAssociations({ ...associations, freezes: [{ ...row, cancelOnly: false }] })).toBe(false);
+  expect(validBrokerAssociations({ ...associations, freezes: [{ ...row, released: 'committed' }] })).toBe(false);
+  expect(validBrokerAssociations({ ...associations, freezes: [{ ...row, receipt: { ...row.receipt, version: 2, maxProjectionBytes: 65536 } }] })).toBe(false);
+  const before = deriveSuccessionCapacity(state, costs);
+  expect(before.tenants[0]).toMatchObject({ remainingAssociationRevisions: 1, progressSlots: 0 });
+  const saved: HostedRelayState[] = [];
+  const relay = createRelayState(auth, { initial: state, async commit(value) { saved.push(structuredClone(value)); } }, () => {}, () => {}, costs);
+  await relay.mutate(draft => { draft.tenants[0]!.broker.associations!.freezes[0]!.released = 'cancelled'; draft.tenants[0]!.broker.associations!.revision++; });
+  const settled = deriveSuccessionCapacity(saved[0]!, costs);
+  expect(settled.retainedBytes).toBeLessThanOrEqual(before.featureCharge);
+  expect(settled.tenants[0]).toMatchObject({ remainingAssociationRevisions: 0, progressSlots: 0 });
+  expect(createRelayState(auth, { initial: saved[0], async commit() {} }, () => {}, () => {}, costs).read()).toEqual(saved[0]);
 }, 10000);
 
 function fullInventory() {

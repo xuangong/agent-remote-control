@@ -52,6 +52,30 @@ test('commits role and receipt together and retains A -> B -> C history across r
   await expect(restored.begin({ ...request, operationId: 'stale' })).rejects.toThrow(/revision|changed/i);
 });
 
+test('retains an unenrolled cancellation at its original historical revision across restart', async () => {
+  const { store, directory } = await fixture();
+  await ready(store); await store.commit('op');
+  const authority = { version: 1 as const, origin: 'https://relay.example', issuer: 'https://issuer.example', namespace: 'owner', ownerSubject: 'owner' };
+  const original = { ...request, operationId: 'late-original', targetProviderId: 'codex' };
+  const freeze = { version: 1 as const, token: 'cancel-only', authority, controllerId: source.controllerId, request: original, associationRevision: 0, lineage: [source, target], relations: [] };
+  const cancelled = await store.cancelUnenrolled(freeze);
+  expect(cancelled).toMatchObject({ ...original, phase: 'cancelled' });
+  expect(cancelled).not.toHaveProperty('to'); expect(cancelled).not.toHaveProperty('prepared');
+  expect(store.read('role').role).toMatchObject({ revision: 2, current: target });
+  await store.releaseEnrollment(freeze);
+  const restored = new SessionSuccessionStore(directory); await restored.ready;
+  expect(await restored.cancelUnenrolled(freeze)).toEqual(cancelled);
+  expect(restored.read('role').releasedEnrollments).toContain(freeze.token);
+  await expect(restored.commit(original.operationId)).rejects.toThrow(/ready/i);
+  await expect(restored.cancelUnenrolled({ ...freeze, request: { ...original, targetProviderId: 'other' } })).rejects.toThrow(/receipt/i);
+  await expect(restored.cancelUnenrolled({ ...freeze, token: 'wrong-revision', request: { ...original, operationId: 'wrong-revision', expectedRevision: 2 } })).rejects.toThrow(/revision/i);
+  await expect(restored.cancelUnenrolled({ ...freeze, token: 'future', request: { ...original, operationId: 'future', expectedRevision: 3 } })).rejects.toThrow(/revision/i);
+  const saved = JSON.parse(await readFile(join(directory, 'state.json'), 'utf8'));
+  saved.roles[0].operations.find((operation: { operationId: string }) => operation.operationId === original.operationId).phase = 'rejected';
+  await writeFile(join(directory, 'state.json'), JSON.stringify(saved));
+  await expect(new SessionSuccessionStore(directory).ready).rejects.toThrow(/history/i);
+}, 10000);
+
 test('rejects commit without verified preparation and cannot rewrite a persisted target', async () => {
   const { store } = await fixture(); await store.begin(request);
   await expect(store.commit('op')).rejects.toThrow(/ready/i);

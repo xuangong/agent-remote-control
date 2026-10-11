@@ -22,7 +22,7 @@ class JoinedNative implements AgentSession {
     interactions: { question: false, toolApproval: false, planApproval: false } };
   sent: string[] = []; epoch = 0; preparations = 0; stop?: () => void;
   queue: ProviderStreamItem[] = []; closed = false; sequence = 0;
-  constructor(readonly id: string, readonly cwd: string) {}
+  constructor(readonly id: string, readonly cwd: string, private readonly omitDispatchAcceptance = false) {}
   async runtimeInfo() { return { providerId: 'fixture', sessionId: this.id, status: 'idle' as const, cwd: this.cwd, persistence: {providerId:'fixture',sessionId:this.id,opaque:'joined-fixture'} }; }
   async *observe(): AsyncIterable<ProviderStreamItem> {
     yield { type: 'observation', sourceKey: `history-${this.id}`, occurredAt: 1, delivery: 'history',
@@ -48,7 +48,10 @@ class JoinedNative implements AgentSession {
         inputId: `${this.id}-U-${++this.preparations}`, cwd: this.cwd, authority: { kind: 'trusted-service', authorityId: 'joined', namespaceId: 'owned' },
         parts: [{ type: 'text', text }], content: { encoding: 'utf-8', bytes: Buffer.byteLength(text), sha256: hash(text) }, selections: { model: 'fixture/model' } }));
     },
-    dispatchInput: async witness => { this.sent.push(witness.parts[0].text); this.emitInput(witness.parts[0].text); this.epoch++; return { disposition: 'started' }; },
+    dispatchInput: async witness => {
+      this.sent.push(witness.parts[0].text); this.emitInput(witness.parts[0].text); this.epoch++;
+      if (!this.omitDispatchAcceptance) return { disposition: 'started' };
+    },
     inspectInput: async witness => ({ status: 'materialized', execution: { disposition: 'started', nativeExecutionId: `${witness.inputId}-R` }, proof: { version: 2, providerId: 'fixture', nativeSessionId: this.id,
       inputId: witness.inputId, nativeInputId: witness.inputId, cwd: this.cwd, authority: witness.authority, witnessSha256: hash(serializeAgentPreparedTextInput(witness)),
       contentSha256: witness.content.sha256, nativeSelectionsSha256: hash(JSON.stringify(witness.selections)) } }),
@@ -56,17 +59,18 @@ class JoinedNative implements AgentSession {
 }
 
 /** Real owned Host, enrollment/uplink, durable Gateway and App; native execution is fake. */
-export async function joinedFixture() {
+export async function joinedFixture(options: { omitDispatchAcceptance?: boolean; rejectFirstPreparation?: boolean } = {}) {
   const root = await realpath(await mkdtemp(join(tmpdir(), 'arc-joined-browser-')));
-  const sessions = new Map(['A', 'S', 'T'].map(id => [id, new JoinedNative(id, root)]));
+  const sessions = new Map(['A', 'S', 'T'].map(id => [id, new JoinedNative(id, root, options.omitDispatchAcceptance)]));
   const grants: Array<{ nativeSessionId: string; sourceNativeSessionId: string }> = [];
   let auxiliaryCreates = 0;
   let creates = 0, beforeCreate = async () => {}, dropCommit = false;
+  let rejectProjection = options.rejectFirstPreparation === true;
   const makeHost = () => createAgentHostRuntime({ idleGraceMs: 20, executionPolicy: { defaultWorkspace: root, allowedWorkspaceRoots: [root], lockPermissions: false },
     succession: { controllerId: 'joined-controller', enrollment: true, stateDirectory: root },
     registrations: [{ adapter: { descriptor: { providerId: 'fixture', displayName: 'Joined provider', sessionExtensions: { instructions: true, tools: true } },
       nativeEvidence: { availability: () => ({ status: 'configured', version: 2 }), createEmpty: async () => {
-        const id = String.fromCharCode(66 + creates++); await beforeCreate(); sessions.set(id, new JoinedNative(id, root));
+        const id = String.fromCharCode(66 + creates++); await beforeCreate(); sessions.set(id, new JoinedNative(id, root, options.omitDispatchAcceptance));
         return { status: 'created' as const, handle: { providerId: 'fixture', sessionId: id, opaque: `joined-${id}` } };
       } }, createSession: async () => { throw new Error('Unexpected adapter create'); }, resumeSession: async () => { throw new Error('Unexpected adapter resume'); }, readSessionHistory: async () => ({ entries: [] }) },
       directory: { providerId: 'fixture', supportsSourceReferences: true, supportsBoundedSourceCreate: async () => true,
@@ -98,12 +102,17 @@ export async function joinedFixture() {
     hosts: [], bindings: [], creations: [] } });
   let saved: HostedRelayState = initial;
   const makeGateway = () => createHostedRelay({ ...auth, successionEnrollment: true,
+    ...(options.rejectFirstPreparation ? { successionProjectionAllowance: () => {
+      if (rejectProjection) { rejectProjection = false; return 0; }
+      return 2 * 1024 * 1024;
+    } } : {}),
     successionEncodingCosts: { measureSnapshot(state) { return { snapshotFormat: SQL_SNAPSHOT_FORMAT, recordFormat: SQL_RECORD_FORMAT, chunkBytes: SQL_CHUNK_BYTES,
       costs: encodeSqlSnapshot(state as HostedRelayState, auth).costs }; }, quoteRecord: quoteSqlRecord },
     storage: { initial: saved, async commit(value) { saved = structuredClone(value); } }, scheduler: { schedule() {}, cancel() {} } });
   let gateway = makeGateway();
   const serve = await createGatewayStaticPages(resolve('dist'), { origin });
   const actions: Array<{ action: string; body: Record<string, unknown>; result?: unknown }> = [];
+  const enrollmentActions: Array<{ action: string; operationId?: string }> = [];
   server.on('request', (incoming, outgoing) => { void (async () => {
     const request = webRequest(incoming, new URL(incoming.url!, origin));
     const action = /\/succession\/(\w+)/.exec(incoming.url!)?.[1];
@@ -126,11 +135,17 @@ export async function joinedFixture() {
   })(); });
   const connect = () => createRemoteHostUplinkClient({ relay: host.relay, url: origin.replace('http:', 'ws:') + '/ws/remote-host',
     remoteKey: credential, installationId: 'joined-controller', name: 'Joined Host', providers: [{ providerId: 'fixture', displayName: 'Joined provider' }],
-    resolveSession: host.resolveSession, acquireSession: host.acquireSession, control: host.control,
-    successionEnrollment: { control: host.enrollFromRelay } });
+    resolveSession: host.resolveSession, acquireSession: host.acquireSession,
+    control: request => request.method === 'GET' && request.path === '/remote/vscode-tunnel'
+      ? Promise.resolve({ status: 200, body: JSON.stringify({ status: 'unavailable', processAlive: false, revision: 0 }) }) : host.control(request),
+    successionEnrollment: { control: (request, context) => {
+      const input = JSON.parse(request.body ?? '{}');
+      enrollmentActions.push({ action: input.action, operationId: input.freeze?.request?.operationId });
+      return host.enrollFromRelay(request, context);
+    } } });
   let uplink = connect(); const { hostId } = await uplink.ready;
   const action = async (context: BrowserContext, name: string, body: unknown) => context.request.post(`${scope}v1/remote/hosts/${hostId}/succession/${name}`, { headers: { origin }, data: body });
-  return { root, origin, scope, hostId, sessions, actions, creates: () => creates, action,
+  return { root, origin, scope, hostId, sessions, actions, enrollmentActions, creates: () => creates, gatewayState: () => structuredClone(saved), action,
     gateCreate(hook: () => Promise<void>) { beforeCreate = hook; }, dropCommitResponse() { dropCommit = true; },
     async state() { return JSON.parse(await readFile(join(root, 'roles', 'state.json'), 'utf8')); },
     async contextState() { return JSON.parse(await readFile(join(root, 'contexts', 'context.json'), 'utf8')); },
@@ -162,7 +177,7 @@ export async function joinedFixture() {
     async restart() {
       dropCommit = false;
       await uplink.close(); await gateway.close(); await host.close();
-      for (const [id, old] of sessions) { const next = new JoinedNative(id, root); next.sent.push(...old.sent); sessions.set(id, next); }
+      for (const [id, old] of sessions) { const next = new JoinedNative(id, root, options.omitDispatchAcceptance); next.sent.push(...old.sent); sessions.set(id, next); }
       host = makeHost(); gateway = makeGateway(); uplink = connect(); await uplink.ready;
     },
     async close() {

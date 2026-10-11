@@ -10,6 +10,26 @@ The logical Session View includes headless observation, native-derived state, op
 
 Product `LabWorkbench` wraps the shared `SessionWorkbench` with draft storage, reading positions, account error presentation and workspace links. ARDB uses the same renderer and the Web hook directly. Replay remains explicitly read-only even when supplied mutation callbacks. The renderer remains in Lab with its presentation dependencies; package movement is not required to establish the dependency boundary.
 
+Primary role Handoff retains a product operation gate until both its durable
+decision and the affected conversation binding are confirmed. A `committed`,
+`cancelled` or `rejected` result alone does not reopen sending or settings. The
+composition must be applied and the exact native binding must be current and
+synchronized. Commit follows authorized current-role replay; cancellation and
+rejection restore the original source unless separate committed-lineage evidence
+establishes a later current role. Deferring messages, executing native commands
+and starting another Handoff remain gated, while local draft editing stays available.
+
+Automatic Handoff status checks are bounded and keep the same operation ID.
+Unknown outcomes and exhausted checks retain that identity and gate. A failed or
+timed-out terminal refresh offers **Retry refresh** for observation, projection
+and connection restoration without repeating the mutation. Explicit cancellation
+supplies the complete original preparation identity so the authenticated Broker
+can retain a cancellation-only fence even when no prepare freeze exists. Missing
+status alone cannot clear the gate. See
+[Session succession recovery](session-succession-recovery.md) for this durable
+role transition contract; the native-control interruption scope below retains its
+separate process-local semantics.
+
 ## Implementation extensions
 
 | Extension | Implementation supplies | Common module maintains |
@@ -57,6 +77,8 @@ A resolved input operation confirms acceptance by the adapter delivery channel, 
 `sendMessage`, `sendMessageContent`, and `steer` may return `AgentInputAcceptance` from native evidence. Its `disposition` describes only the submitted input: `started` (accepted to start a run), `queued` (accepted into the native queue, not guaranteed to remain queued), or `handled` (consumed without starting a run for that input). Returning `void` preserves the legacy unknown disposition. No acceptance result changes execution, active turn, or interaction validity.
 
 The shared manager preserves this result, and SessionWire stores it inside the process-local operation settlement before returning `command_acknowledged.payload.inputAcceptance`. Duplicate operations receive the same acceptance; they do not re-read current runtime state or dispatch again. Invalid acceptance after dispatch is an unknown outcome, not a confirmed rejection.
+
+Prepared text may include `command_acknowledged.payload.submittedTextSha256`: the SHA-256 of the exact submitted UTF-8 text, without trimming or newline normalization. The Host derives it from the durably validated prepared-input witness when adding handoff history and attaches it before the shared operation cache retains the result. This evidence is independent of native `inputAcceptance`, including adapters returning `void`. The client retains this digest and confirms delivery only against a complete text-only native user echo in the same agent/epoch after the outgoing cursor. Each echo can confirm one pending send, including mixed plain/prepared inputs and reload recovery. The digest alone proves neither native materialization nor execution/completion, and does not change `disposition`. Missing acknowledgement retains uncertainty; ordinary inputs without the extension preserve their existing matching behavior. Receivers on the entire route must support this optional strict-schema field.
 
 ARDB `send/steer --wait idle` normally requires post-command execution progress before accepting idle. For `handled` input it waits for actual session idleness without requiring a new run. Existing independent work still has to settle. The shared Remote client removes the handled input's local outgoing placeholder because a user-message echo is not required; authoritative timeline entries are unaffected.
 

@@ -24,6 +24,18 @@ test('strict public action results retain the original receipt and optional reso
   expect(isSuccessionActionResult({ ...result, freeze: {} })).toBe(false);
 });
 
+test('context status is strictly bound to the committed operation and native successor', () => {
+  const target = { ...source, nativeSessionId: 'B' };
+  const record = { operationId: 'op', roleId: 'role', expectedRevision: 1, from: source, to: target, phase: 'committed', committedRevision: 2, startedAt: 'now', updatedAt: 'now' };
+  const result = { record, role: { ...role, current: target, revision: 2 }, context: { operationId: 'op', target, state: 'pending' } };
+  expect(isSuccessionActionResult(result)).toBe(true);
+  for (const state of ['dispatching', 'accepted', 'unknown', 'materialized']) expect(isSuccessionActionResult({ ...result, context: { ...result.context, state } })).toBe(true);
+  for (const context of [{ ...result.context, operationId: 'other' }, { ...result.context, target: source }, { ...result.context, state: 'ready' }, { ...result.context, text: 'private history' }]) {
+    expect(isSuccessionActionResult({ ...result, context })).toBe(false);
+  }
+  expect(isSuccessionActionResult({ ...result, record: { ...record, phase: 'ready' } })).toBe(false);
+});
+
 test('accepts complete role identities without treating placement as identity', () => {
   expect(isPrimaryRole({ id: 'role', revision: 1, origin: source, current: source, workspace })).toBe(true);
   expect(isPrimaryRole({ id: 'role', revision: 1, origin: source,

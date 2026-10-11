@@ -300,7 +300,7 @@ export class SessionSuccessionStore {
       if (item.associationAuthority && successionAuthorityKey(item.associationAuthority) !== successionAuthorityKey(receipt.authority)) throw new Error('Primary role belongs to another association authority.');
       if (item.enrollments?.some(value => !item.releasedEnrollments?.includes(value.token))) throw new Error('Previous association reservation has not been released.');
       if (JSON.stringify(this.lineage(item).map(nativeSessionRefKey)) !== JSON.stringify(receipt.lineage.map(nativeSessionRefKey))) throw new Error('Primary role lineage changed.');
-      const record = this.beginRecord(state, receipt.request, false, true);
+      const record = this.beginRecord(state, receipt.request, false, receipt.version === 1 ? 'historical' : 'current');
       record.phase = 'cancelled';
       item.associationAuthority = receipt.authority;
       (item.enrollments ??= []).push(receipt);
@@ -324,7 +324,7 @@ export class SessionSuccessionStore {
       return this.beginRecord(state, input, local);
     });
   }
-  private beginRecord(state: StoreState, input: SuccessionRequest, local = false, cancelling = false): SuccessionRecord {
+  private beginRecord(state: StoreState, input: SuccessionRequest, local = false, cancelling?: 'current' | 'historical'): SuccessionRecord {
     if (!isSuccessionRequest(input)) throw new Error('Invalid succession request.');
     const prior = state.roles.flatMap(item => item.operations).find(op => op.operationId === input.operationId);
     if (prior) {
@@ -332,7 +332,8 @@ export class SessionSuccessionStore {
       return prior;
     }
     const item = this.findRole(state, input.roleId);
-    if (item.role.revision !== input.expectedRevision || nativeSessionRefKey(item.role.current) !== nativeSessionRefKey(input.from)) throw new Error('Primary role revision changed.');
+    const source = cancelling === 'historical' ? this.lineage(item)[input.expectedRevision - 1] : item.role.current;
+    if (cancelling !== 'historical' && item.role.revision !== input.expectedRevision || !source || nativeSessionRefKey(source) !== nativeSessionRefKey(input.from)) throw new Error('Primary role revision changed.');
     const lineage = new Set(this.lineage(item).map(nativeSessionRefKey));
     if (!cancelling && state.associationAdmissions.some(admission => lineage.has(nativeSessionRefKey(admission.source)))) throw new Error('Source association outcome is unresolved.');
     if (item.relationChanges?.some(change => change.phase !== 'released')) throw new Error('Primary role associations are reserved.');
@@ -651,12 +652,21 @@ export class SessionSuccessionStore {
       if (executors.has(executor)) throw new Error('Duplicate primary executor.');
       executors.add(executor);
       let current = item.role.origin, revision = 1, pending = 0;
+      const history = [item.role.origin];
       for (const op of item.operations) {
         this.validateRecord(op);
-        if (op.roleId !== item.role.id || operations.has(op.operationId) || op.expectedRevision !== revision || nativeSessionRefKey(op.from) !== nativeSessionRefKey(current)) throw new Error('Invalid succession history.');
+        const enrollment = item.enrollments?.find(receipt => receipt.request.operationId === op.operationId);
+        const progress = item.localPreparations?.find(value => value.operationId === op.operationId);
+        const historicalCancellation = op.phase === 'cancelled' && !op.to && !op.prepared && enrollment?.version === 1
+          && progress && Object.keys(progress).every(name => ['operationId', 'reservedBytes'].includes(name))
+          && op.expectedRevision <= revision && history[op.expectedRevision - 1]
+          && nativeSessionRefKey(op.from) === nativeSessionRefKey(history[op.expectedRevision - 1]!)
+          && JSON.stringify(enrollment.lineage.map(nativeSessionRefKey)) === JSON.stringify(history.map(nativeSessionRefKey));
+        if (op.roleId !== item.role.id || operations.has(op.operationId) || !historicalCancellation
+          && (op.expectedRevision !== revision || nativeSessionRefKey(op.from) !== nativeSessionRefKey(current))) throw new Error('Invalid succession history.');
         operations.add(op.operationId);
         if (!terminal(op.phase)) pending++;
-        if (op.phase === 'committed') { current = op.to!; revision++; }
+        if (op.phase === 'committed') { current = op.to!; revision++; history.push(current); }
       }
       if (pending > 1 || revision !== item.role.revision || nativeSessionRefKey(current) !== executor) throw new Error('Invalid current succession state.');
       if (item.localPreparations !== undefined) {

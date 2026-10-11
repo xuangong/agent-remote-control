@@ -7,7 +7,7 @@ export interface BrokerAssociationState {
   relationChanges: BrokerRelationChange[];
   revision: number;
   admissions: Array<{ id: string; fingerprint: string; source: NativeSessionRef }>;
-  freezes: Array<{ hostId: string; receipt: SuccessionAssociationFreeze; released?: 'committed' | 'rejected' | 'cancelled'; projection?: CommittedSuccessionProjection }>;
+  freezes: Array<{ hostId: string; receipt: SuccessionAssociationFreeze; cancelOnly?: true; released?: 'committed' | 'rejected' | 'cancelled'; projection?: CommittedSuccessionProjection }>;
 }
 export function validBrokerAssociations(value: unknown): value is BrokerAssociationState {
   const state = value as BrokerAssociationState;
@@ -23,6 +23,7 @@ export function validBrokerAssociations(value: unknown): value is BrokerAssociat
     && new Set(state.admissions.map(item => item.id)).size === state.admissions.length
     && Array.isArray(state.freezes) && state.freezes.length <= 1024
     && state.freezes.every(item => typeof item.hostId === 'string' && item.hostId.length > 0 && isSuccessionAssociationFreeze(item.receipt)
+      && (item.cancelOnly === undefined || item.cancelOnly === true && item.receipt.version === 1 && (item.released === undefined || item.released === 'cancelled') && item.projection === undefined)
       && (item.released === undefined || ['committed', 'rejected', 'cancelled'].includes(item.released))
       && (item.released === 'committed' ? isCommittedSuccessionProjection(item.projection) && item.projection!.receipt.operationId === item.receipt.request.operationId : item.projection === undefined))
     && new Set(state.freezes.map(item => item.receipt.token)).size === state.freezes.length

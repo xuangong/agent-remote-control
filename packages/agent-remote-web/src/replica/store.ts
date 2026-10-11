@@ -9,6 +9,7 @@ import type {
   ResourceResponse,
   ResourceUpdate,
   TimelineResourceBindingReplacement,
+  AgentInputAcceptance,
 } from '@orchardworks/agent-remote-protocol';
 
 import {
@@ -31,7 +32,7 @@ export class AgentReplica {
   private state = createReplicaState();
   private readonly listeners = new Set<() => void>();
   private readonly historyListeners = new Set<(epoch: string, direction: HistoryPage['payload']['direction']) => void>();
-  private readonly outbox = new MessageOutbox();
+  private readonly outbox = new MessageOutbox(() => this.replace(this.outbox.reconcile(this.state)));
 
   setSessionControl(control: AgentReplicaState['sessionControl']): void {
     this.replace({ ...this.state, sessionControl: control });
@@ -69,13 +70,25 @@ export class AgentReplica {
   retryMessage(id: string, operationId: string): void {
     this.replace({ ...this.state, outgoingMessages: this.state.outgoingMessages?.map(message => message.id === id
       ? { ...message, operationId, retryRequiresNewOperation: false, status: 'sending', error: undefined,
+          submittedTextSha256: message.operationId === operationId ? message.submittedTextSha256 : undefined,
+          consumedEchoSeqs: message.operationId === operationId ? message.consumedEchoSeqs : undefined,
           epoch: this.state.timeline.epoch,
-          afterSeq: message.epoch === this.state.timeline.epoch && message.status === 'unconfirmed' ? message.afterSeq : this.state.timeline.nextSeq - 1 }
+          afterSeq: message.operationId === operationId && message.epoch === this.state.timeline.epoch && message.status === 'unconfirmed'
+            ? message.afterSeq : this.state.timeline.nextSeq - 1 }
       : message) });
   }
 
   deleteMessage(id: string): void {
     this.replace({ ...this.state, outgoingMessages: this.state.outgoingMessages?.filter(message => message.id !== id) });
+  }
+
+  acknowledgeMessage(id: string, acceptance?: AgentInputAcceptance, submittedTextSha256?: string): void {
+    if (acceptance?.disposition === 'handled') { this.deleteMessage(id); return; }
+    this.replace({ ...this.state, outgoingMessages: this.state.outgoingMessages?.map(message => message.id === id && message.status !== 'failed'
+      ? { ...message, submittedTextSha256: submittedTextSha256 ?? message.submittedTextSha256,
+          status: message.status === 'unconfirmed' ? 'unconfirmed' : 'awaiting_echo',
+          error: message.status === 'unconfirmed' ? message.error : undefined }
+      : message) });
   }
 
   updateMessage(id: string, status: OutgoingMessage['status'], error?: string, retryRequiresNewOperation?: boolean): void {

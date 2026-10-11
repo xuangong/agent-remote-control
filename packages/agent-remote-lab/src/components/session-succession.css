@@ -1,0 +1,25 @@
+.lab-handoff-chooser .lab-handoff-source { color: var(--obs-text); }
+.lab-handoff-workspace { color: var(--obs-text-secondary); overflow-wrap: anywhere; }
+.lab-handoff-chooser .lab-handoff-workspace { margin-top: -6px; font-size: 12px; }
+.lab-handoff-chooser .lab-handoff-context { max-width: 65ch; color: var(--obs-text-secondary); line-height: 1.5; }
+.lab-handoff-chooser [role="alert"], .lab-handoff-details [role="alert"] { color: var(--obs-danger); }
+.lab-handoff-notice { color: var(--obs-text); background: var(--obs-surface); border: 1px solid var(--obs-border); border-radius: var(--obs-radius-sm); padding: 10px 12px; font-size: 12px; line-height: 1.5; }
+.lab-handoff-summary { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.lab-handoff-message { min-width: 0; }
+.lab-handoff-message p { margin: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.lab-handoff-quick-actions { display: flex; align-items: center; flex-wrap: wrap; justify-content: flex-end; gap: 6px; flex-shrink: 0; }
+.lab-handoff-quick-actions button { min-height: 30px; padding: 4px 8px; color: var(--obs-action); border-color: transparent; background: transparent; font-size: 12px; }
+.lab-handoff-quick-actions button:hover { background: var(--obs-surface-selected); }
+.lab-handoff-details { margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--obs-border); color: var(--obs-text-secondary); }
+.lab-handoff-details p { margin: 8px 0; max-width: 72ch; overflow-wrap: anywhere; }
+.lab-handoff-details dl { display: grid; gap: 4px; margin: 0; }
+.lab-handoff-details dl > div { display: grid; grid-template-columns: 5.5rem minmax(0, 1fr); gap: 8px; }
+.lab-handoff-details dt { color: var(--obs-text-secondary); }
+.lab-handoff-details dd { margin: 0; font-family: var(--obs-mono); font-size: 11px; overflow-wrap: anywhere; }
+.lab-handoff-controls { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+.lab-handoff-controls button { min-height: 30px; padding: 4px 8px; font-size: 12px; }
+@media (max-width: 640px) {
+  .lab-handoff-summary { gap: 6px; }
+  .lab-handoff-quick-actions { margin-left: auto; }
+  .lab-handoff-quick-actions button, .lab-handoff-controls button { min-height: 40px; }
+}

@@ -101,13 +101,22 @@ it('reopens a collapsed runtime notice group when the same search result is requ
   expect(container.querySelector(target)?.textContent).toContain('Second runtime notice');
 });
 
-it('offers the supplied Handoff only on a synchronized writable Session View', async () => {
-  const handoffSession = vi.fn();
-  const ready = await render(<SessionWorkbench state={replicaState} sessionStatus="ready" actions={{ handoffSession }} />);
-  const handoff = [...ready.querySelectorAll('button')].find(button => button.textContent === 'Handoff');
-  expect(handoff).toBeDefined(); await act(async () => handoff!.click()); expect(handoffSession).toHaveBeenCalledOnce();
-  for (const props of [{ readOnly: true }, { draftOnly: true }, { sessionStatus: 'catching_up' as const }]) {
-    const blocked = await render(<SessionWorkbench state={replicaState} sessionStatus="ready" actions={{ handoffSession }} {...props} />);
-    expect([...blocked.querySelectorAll('button')].some(button => button.textContent === 'Handoff')).toBe(false);
-  }
+it('retains an editable draft and history tools while handoff blocks native mutations', async () => {
+  const sendMessage = vi.fn(), setSessionSetting = vi.fn(), executeCommand = vi.fn();
+  const view = await render(<SessionWorkbench state={replicaState} sessionStatus="ready" mutationBlocked
+    messageDraft="Keep working on this draft" composerStatus={<p>Handing off…</p>}
+    actions={{ sendMessage, setSessionSetting, executeCommand }} />);
+  expect(view.querySelector<HTMLTextAreaElement>('[data-testid="prompt-input"]')).toMatchObject({ value: 'Keep working on this draft', disabled: false });
+  const send = view.querySelector<HTMLButtonElement>('[data-testid="prompt-submit"]')!;
+  expect(send.disabled).toBe(true); await act(async () => send.click());
+  expect(view.querySelector('[aria-label="Search this session"]')).not.toBeNull();
+  expect(view.querySelector('[aria-label="Take control"]')).toBeNull();
+  expect(view.textContent).toContain('Handing off…');
+  expect(sendMessage).not.toHaveBeenCalled(); expect(setSessionSetting).not.toHaveBeenCalled(); expect(executeCommand).not.toHaveBeenCalled();
+}, 5000);
+
+it('keeps handoff recovery visible before a native session is available', async () => {
+  const view = await render(<SessionWorkbench sessionStatus="disconnected" actions={{}} composerStatus={<p>Confirming the original handoff</p>} />);
+  const notice = [...view.querySelectorAll('p')].find(item => item.textContent === 'Confirming the original handoff')!;
+  expect(notice).toBeDefined(); expect(notice.closest('[hidden]')).toBeNull();
 }, 5000);

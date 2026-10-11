@@ -78,6 +78,25 @@ async function fixture(enableTpm=false,enrollment=false,setup?:(root:string)=>Pr
  return {root,sessions,providerEvidence,creationOptions,resumeOptions,workspaceReads,allowIdleRelease:()=>{allowIdleRelease=true;},evidenceCreates:()=>evidenceCreates,creationResult:(value:AgentEmptyCreationResult)=>{creationResult=value;},beforeNativeInspect:(hook:typeof beforeNativeInspect)=>{beforeNativeInspect=hook;},snapshotConfigurations,providerDescriptors:[{providerId:'fixture',displayName:'Fixture'},...(snapshots?[{providerId:'other',displayName:'Other'}]:[])],get host(){return host;},restart,loseSourceCreation:()=>{loseSourceCreation=true;},sourceCreates:()=>sourceCreates,beforeIdleCreate:(hook:()=>Promise<void>)=>{beforeIdleCreate=hook;},beforeSourceCreate:(hook:()=>Promise<void>)=>{beforeSourceCreate=hook;},loseTpmCreation:(value:boolean)=>{loseTpmCreation=value;},grants,beforeGrants:(hook:()=>Promise<void>)=>{beforeGrants=hook;},tpmConfigurations,control,attach:async(id:string)=>JSON.parse((await host.control({method:'POST',path:'/remote/attach',sessionId:id,body:JSON.stringify({providerId:'fixture',nativeSessionId:id})})).body),get url(){return address.url;},creates:()=>creates,unsupported:()=>{supported=false;},unbounded:()=>{bounded=false;},unavailableCoverage:()=>{coverage=false;},busy:(id:string)=>{busy=id;},close:async()=>{await server.close();await host.close();await rm(root,{recursive:true,force:true});}};
 }
 const request={operationId:'handoff',roleId:'role',expectedRevision:1,from:ref('A')};
+test.each([undefined, 'started'] as const)('prepared first WebSocket input acknowledges exact submitted text with native acceptance %s', async disposition => {
+ const f=await fixture(false,false,undefined,false,true);
+ try {
+  expect((await f.control('prepare',request)).payload.phase).toBe('ready');
+  await f.control('commit',{operationId:'handoff',expectedRevision:1});
+  const b=f.sessions.get('B') as EvidenceNative;
+  const dispatch=b.nativeEvidence.dispatchInput;
+  b.nativeEvidence.dispatchInput=async witness=>{await dispatch(witness);return disposition ? {disposition} : undefined;};
+  const attached=await f.attach('B'), operationId='00000000-0000-4000-8000-000000009221';
+  const ack=await sendOverWebSocket(f.url,attached.agentId,'Continue 原文\r\n',operationId);
+  expect(b.sent[0]).toContain('quoted conversation history');
+  expect(b.sent[0]).toContain('Continue 原文\r\n');
+  expect(ack).toMatchObject({type:'command_acknowledged',payload:{submittedTextSha256:createHash('sha256').update(b.sent[0]!).digest('hex')}});
+  if (ack.type !== 'command_acknowledged') throw new Error('Missing input acknowledgement');
+  expect(ack.payload.inputAcceptance).toEqual(disposition ? {disposition} : undefined);
+  expect(await sendOverWebSocket(f.url,attached.agentId,'Continue 原文\r\n',operationId)).toMatchObject(ack);
+  expect(b.dispatches).toBe(1);
+ } finally {await f.close();}
+});
 test.each([false,true])('Host native evidence dispatch and independent readback preserve uncertainty, lost response %s',async lost=>{
  const f=await fixture(false,false,undefined,false,true,true);
  try{
@@ -476,6 +495,27 @@ test('public description validates authority and source, exposes blocking facts 
   } finally {await transport.close();await f.close();}
 });
 
+test('public context status reads durable Host state and requires native materialization across reconnect', async () => {
+  const f = await fixture(false, true, undefined, false, true), transport = await enrollmentTransport(f);
+  const input = { operationId: 'handoff', providerId: 'fixture', nativeSessionId: 'A', expectedRevision: 1 };
+  const status = async () => await (await transport.action('status', { operationId: input.operationId, includeContext: true })).json();
+  try {
+    expect((await transport.action('prepare', input)).status).toBe(200);
+    expect((await transport.action('commit', { operationId: input.operationId })).status).toBe(200);
+    expect(await status()).toMatchObject({ context: { operationId: 'handoff', target: ref('B'), state: 'pending' } });
+    await transport.restart(f.restart);
+    expect(await status()).toMatchObject({ context: { target: ref('B'), state: 'pending' } });
+    const attached = await f.attach('B'), b = f.sessions.get('B') as EvidenceNative;
+    await sendOverWebSocket(f.url, attached.agentId, 'Continue once', '00000000-0000-4000-8000-000000009201');
+    expect(await status()).toMatchObject({ context: { state: 'accepted' } });
+    expect(b.dispatches).toBe(1);
+    b.materialized = true;
+    expect(await status()).toMatchObject({ context: { operationId: 'handoff', target: ref('B'), state: 'materialized' } });
+    expect(b.dispatches).toBe(1);
+    expect(await status()).toMatchObject({ context: { state: 'materialized' } });
+  } finally { await transport.close(); await f.close(); }
+}, 15000);
+
 test('real HTTP and WebSocket cancel a blocked create without activating its late candidate', async () => {
   const f = await fixture(false, true), transport = await enrollmentTransport(f);
   let enter!: () => void, release!: () => void;
@@ -539,8 +579,16 @@ test('broker persistence failure keeps a committed Host decision fenced across r
     expect(transport.saved().associations!.freezes[0]!.released).toBeUndefined();
     expect(blocked.all()[0]!.releasedEnrollments).toBeUndefined();
     transport.failProjection(false);await transport.restart(f.restart);
-    expect((await transport.action('status',{operationId:'first'}))!.status).toBe(200);
+    let contextReadAfterProjection=false;
+    transport.beforeControl(async input=>{if((input as {includeContext?:boolean}).includeContext)contextReadAfterProjection=transport.saved().associations!.freezes[0]!.released==='committed';});
+    const response=await transport.action('status',{operationId:'first',includeContext:true});
+    expect(response.status).toBe(200);
+    const recovered=await response.json();
+    expect(recovered).toMatchObject({record:{phase:'committed'},context:{operationId:'first',target:ref('B'),state:'pending'}});
+    expect(contextReadAfterProjection).toBe(true);
     expect(transport.saved().associations!.freezes[0]!.released).toBe('committed');
+    expect(transport.saved().associations!.freezes[0]!.projection).toEqual({version:1,role:recovered.role,receipt:recovered.record});
+    expect(await (await transport.action('status',{operationId:'first'})).json()).not.toHaveProperty('context');
     const released=new SessionSuccessionStore(join(f.root,'roles'));await released.ready;
     expect(released.all()[0]!.releasedEnrollments).toHaveLength(1);
     expect(f.creates()).toBe(1);

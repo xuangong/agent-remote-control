@@ -61,12 +61,22 @@ Conversation styling gives adjacent tool, reasoning, and compaction entries comp
 
 ### Primary session handoff
 
-The primary Session View's session actions expose **Handoff** to an authorized
-owner. The Host supplies current role/revision, working directory, available
-targets and eligibility. Only an idle source with no pending work or unsettled
+An authorized owner enters `/handoff` in the primary Session View composer, or
+`/handoff <provider>` to request a target. The chooser defaults to the current
+provider and shows the working directory. An unavailable requested target requires
+an explicit selection before continuing. Choose **Hand off** to start; progress
+appears above the composer, and success opens the current conversation
+automatically. **Details** contains diagnostic and recovery controls.
+Send or remove pending messages before starting another handoff. Draft text and
+unsent attachments remain in the composer when opening the chooser from its command menu.
+
+The Host supplies current role/revision, working directory, available targets
+and eligibility. Only an idle source with no pending work or unsettled
 ARC writes can proceed. Preparation creates an empty successor; commit changes
 the stable role without a model turn. Its first real input carries the captured
-normalized history once. Supported native configuration is documented in
+normalized history once. This first input requires plain text and immediate
+delivery; attachments and queued delivery wait until it is confirmed. Supported
+native configuration is documented in
 [Session succession recovery](session-succession-recovery.md). Codex, Claude Code,
 Copilot and OpenCode use the same action and capability checks; provider-specific
 native evidence determines eligibility. Cross-provider handoff carries normalized
@@ -79,14 +89,35 @@ and attachment path used by ordinary navigation. One composition document owns
 the primary pane, Side, Track and Ask relationships; the old layout metadata is
 imported once. Existing auxiliary sessions retain their native identity and draft
 owners. Explicit history keeps its concrete predecessor target, and already
-admitted sends never move to a successor.
+admitted sends never move to a successor. **Continued from** opens the predecessor
+for read-only inspection, and **Earlier history** lists older sessions. Choose
+**Return to current** before sending another message.
 
 The tab retains a single Handoff operation across reload and lost replies. A
 requested cancellation suppresses later automatic commit even if cancellation's
-reply fails. **Hide Handoff** keeps uncertain work reachable through **Recover
-Handoff**, including when its original source is no longer current or online.
-Recovery queries the same operation; a missing response never triggers another
-create or input. A committed decision always recovers forward.
+reply fails. The inline notice survives hiding its details and reappears after
+reload, including when the original source is no longer current or online.
+Bounded automatic status checks observe the same operation while page visibility
+and Host access permit. **Details** offers manual status, reconciliation and
+cancellation; recovery never recreates a candidate or automatically commits an
+uncertain result. Exhausted checks stop and display a manual recovery prompt.
+Focus or visibility changes do not restart an exhausted round; an explicit
+recovery action continues the same operation. **Cancel Handoff** carries its
+complete original preparation identity and can settle an intent even when the
+Broker never retained a prepare freeze. A missing-operation response alone does
+not unlock the conversation.
+
+Confirmed commit, cancellation and rejection keep the affected primary
+conversation gated until its local projection and exact native binding are
+confirmed and synchronized. Commit follows the verified current role;
+cancellation or rejection restores the original conversation, or a separately
+verified later committed role. Sending or deferring messages, changing settings,
+executing native commands and starting another Handoff stay disabled, while draft
+editing remains available. A failed or timed-out refresh retains the decision
+and offers **Retry refresh**, which repeats observation and connection restoration
+without repeating a mutation. A cancelled or rejected operation offers **Done**
+only after the binding checks succeed. Unknown outcomes retain their original
+operation and cannot be dismissed as complete.
 
 ```mermaid
 flowchart LR

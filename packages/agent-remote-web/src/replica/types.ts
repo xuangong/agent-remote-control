@@ -42,6 +42,9 @@ export interface OutgoingMessage {
   readonly text: string;
   readonly content?: readonly MessagePart[];
   readonly imageDigests?: Readonly<Record<string, string>>;
+  readonly submittedTextSha256?: string;
+  /** Echoes already assigned to another local send in this epoch. Retained across reload. */
+  readonly consumedEchoSeqs?: readonly number[];
   readonly delivery?: 'immediate' | 'next_turn';
   readonly status: 'sending' | 'awaiting_echo' | 'unconfirmed' | 'failed';
   readonly error?: string;

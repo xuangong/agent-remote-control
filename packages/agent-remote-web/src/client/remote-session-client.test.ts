@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
+import { createHash, webcrypto } from 'node:crypto';
 import type {
   AgentSnapshot,
   AgentStreamMessage,
@@ -1196,6 +1197,131 @@ it.each(['started', 'queued', 'handled'] as const)('settles %s input using accep
     else expect(f.replica.getState().outgoingMessages).toMatchObject([{ status: 'awaiting_echo' }]);
     expect(f.replica.getState().agent).toEqual(before);
     expect(f.replica.getState().timeline.entries).toEqual([]);
+  } finally { f.client.stop(); }
+});
+
+it.each([false, true])('confirms exact Host-prepared text with its full native echo (echo first: %s)', async echoFirst => {
+  const originalCrypto = globalThis.crypto;
+  vi.stubGlobal('crypto', webcrypto);
+  const f = await outgoingFixture({ requestId: () => 'prepared-send' });
+  const fullText = 'Quoted history\nPrevious 原文\n\nContinue\r\n';
+  try {
+    const send = f.client.sendMessage('Continue\r\n');
+    if (echoFirst) f.echo(1, fullText);
+    f.transport.emit({ protocolVersion: '1.7.0', type: 'command_acknowledged', payload: {
+      requestId: 'prepared-send', agentId: 'agent-one', command: 'send_message',
+      submittedTextSha256: createHash('sha256').update(fullText).digest('hex'),
+    } } as ServerMessage);
+    await send;
+    if (!echoFirst) {
+      f.echo(1, fullText.replace('\r\n', '\n'));
+      await new Promise(resolve => setTimeout(resolve, 20));
+      expect(f.replica.getState().outgoingMessages).toHaveLength(1);
+      f.echo(2, fullText);
+    }
+    await vi.waitFor(() => expect(f.replica.getState().outgoingMessages).toEqual([]));
+    expect(f.replica.getState().timeline.entries.at(-1)?.item).toMatchObject({ type: 'user_message', text: fullText });
+  } finally { f.client.stop(); vi.stubGlobal('crypto', originalCrypto); }
+});
+
+it('persists prepared-text evidence and does not reuse an echo consumed before its acknowledgement', async () => {
+  const originalCrypto = globalThis.crypto;
+  vi.stubGlobal('crypto', webcrypto);
+  let request = 0;
+  const f = await outgoingFixture({ requestId: () => `prepared-${++request}` });
+  const fullText = 'Quoted history\n\nContinue';
+  try {
+    const first = f.client.sendMessage('Continue');
+    const second = f.client.sendMessage(fullText);
+    const sends = f.transport.sent.filter(message => message.type === 'send_message');
+    f.echo(1, fullText);
+    f.acknowledge(sends[1]!.payload.requestId);
+    await second;
+    f.transport.emit({ protocolVersion: '1.7.0', type: 'command_acknowledged', payload: {
+      requestId: sends[0]!.payload.requestId, agentId: 'agent-one', command: 'send_message',
+      submittedTextSha256: createHash('sha256').update(fullText).digest('hex'),
+    } } as ServerMessage);
+    await first;
+    await new Promise(resolve => setTimeout(resolve, 20));
+    expect(f.replica.getState().outgoingMessages).toHaveLength(1);
+    const retained = structuredClone(f.replica.getState().outgoingMessages!);
+    expect(retained[0]).toMatchObject({ submittedTextSha256: createHash('sha256').update(fullText).digest('hex') });
+    const restored = new AgentReplica();
+    restored.applySnapshot(snapshot());
+    restored.applyHistory(page('tail', f.replica.getState().timeline.entries));
+    restored.restoreMessages(retained);
+    await new Promise(resolve => setTimeout(resolve, 20));
+    expect(restored.getState().outgoingMessages).toHaveLength(1);
+    const message = live(2, fullText);
+    message.payload.event = { type: 'timeline', providerId: 'provider-neutral', item: { type: 'user_message', text: fullText }, resources: [] };
+    restored.applyStream(message);
+    await vi.waitFor(() => expect(restored.getState().outgoingMessages).toEqual([]));
+  } finally { f.client.stop(); vi.stubGlobal('crypto', originalCrypto); }
+});
+
+it('retains a prepared echo with lost acknowledgement and never resends it automatically', async () => {
+  const f = await outgoingFixture({ scheduleReconnect: () => () => undefined });
+  try {
+    const send = f.client.sendMessage('Continue');
+    f.transport.disconnect();
+    await expect(send).rejects.toMatchObject({ code: 'connection_disconnected' });
+    f.replica.applyHistory(page('after', [userHistoryEntry(1, 'Quoted history\n\nContinue')]));
+    expect(f.replica.getState().outgoingMessages).toMatchObject([{ text: 'Continue', status: 'unconfirmed' }]);
+    expect(f.transport.sent.filter(message => message.type === 'send_message')).toHaveLength(1);
+  } finally { f.client.stop(); }
+});
+
+it('keeps prepared input uncertain after an epoch change and clears its evidence for a new retry', async () => {
+  const f = await outgoingFixture({ requestId: () => 'prepared-epoch' });
+  const fullText = 'Quoted history\n\nContinue';
+  try {
+    const send = f.client.sendMessage('Continue');
+    f.replica.applyHistory(page('tail', [userHistoryEntry(1, fullText)], { epoch: 'replacement' }));
+    f.transport.emit({ protocolVersion: '1.7.0', type: 'command_acknowledged', payload: {
+      requestId: 'prepared-epoch', agentId: 'agent-one', command: 'send_message',
+      submittedTextSha256: createHash('sha256').update(fullText).digest('hex'),
+    } } as ServerMessage);
+    await send;
+    const retained = f.replica.getState().outgoingMessages![0]!;
+    expect(retained).toMatchObject({ status: 'unconfirmed', submittedTextSha256: createHash('sha256').update(fullText).digest('hex') });
+    f.replica.retryMessage(retained.id, 'new-operation');
+    expect(f.replica.getState().outgoingMessages![0]).toMatchObject({ submittedTextSha256: undefined, consumedEchoSeqs: undefined });
+  } finally { f.client.stop(); }
+});
+
+it('starts a new attempt after the current cursor instead of reusing a consumed plain echo', async () => {
+  const f = await outgoingFixture();
+  try {
+    const prepared = f.replica.beginMessage('agent-one', 'Continue', undefined, 'prepared');
+    f.replica.acknowledgeMessage(prepared, undefined, createHash('sha256').update('History\n\nContinue').digest('hex'));
+    f.replica.beginMessage('agent-one', 'Continue', undefined, 'plain');
+    f.echo(1, 'Continue');
+    await vi.waitFor(() => expect(f.replica.getState().outgoingMessages).toHaveLength(1));
+    f.replica.updateMessage(prepared, 'unconfirmed', 'Unknown previous attempt', true);
+    f.replica.retryMessage(prepared, 'new-operation');
+    expect(f.replica.getState().outgoingMessages).toMatchObject([{ id: prepared, afterSeq: 1, status: 'sending', submittedTextSha256: undefined }]);
+    f.echo(2, 'Continue');
+    expect(f.replica.getState().outgoingMessages).toEqual([]);
+  } finally { f.client.stop(); }
+});
+
+it('ignores an old acknowledgement after the same outgoing row starts a new operation', async () => {
+  let request = 0;
+  const f = await outgoingFixture({ requestId: () => `attempt-${++request}` });
+  try {
+    const first = f.client.sendMessage('Continue');
+    const firstRequest = f.transport.sent.filter(message => message.type === 'send_message')[0]!;
+    const id = f.replica.getState().outgoingMessages![0]!.id;
+    f.replica.applyHistory(page('tail', [], { epoch: 'replacement' }));
+    const second = f.client.retryMessage(id);
+    const secondRequest = f.transport.sent.filter(message => message.type === 'send_message')[1]!;
+    f.transport.emit({ protocolVersion: '1.7.0', type: 'command_acknowledged', payload: {
+      requestId: firstRequest.payload.requestId, agentId: 'agent-one', command: 'send_message',
+      submittedTextSha256: createHash('sha256').update('Old history\n\nContinue').digest('hex'),
+    } } as ServerMessage);
+    await first;
+    expect(f.replica.getState().outgoingMessages).toMatchObject([{ id, operationId: secondRequest.payload.operationId, status: 'sending', submittedTextSha256: undefined }]);
+    f.acknowledge(secondRequest.payload.requestId); await second;
   } finally { f.client.stop(); }
 });
 

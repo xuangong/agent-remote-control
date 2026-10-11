@@ -21,3 +21,16 @@ it('preserves authoritative input acceptance without requiring it from legacy ad
   }
   expect(decodeServerMessage(JSON.stringify({ ...message, payload: { ...message.payload, inputAcceptance: { disposition: 'completed' } } })).status).toBe('rejected');
 });
+
+it('carries a bounded exact submitted-text digest without changing input disposition', () => {
+  const message = { protocolVersion: PROTOCOL_VERSION, type: 'command_acknowledged', payload: {
+    requestId: 'r', agentId: 'a', command: 'send_message',
+    submittedTextSha256: 'a'.repeat(64),
+  } };
+  expect(decodeServerMessage(JSON.stringify(message))).toMatchObject({ status: 'ok', value: message });
+  for (const submittedTextSha256 of ['', 'a'.repeat(63), 'A'.repeat(64), 'z'.repeat(64)]) {
+    expect(decodeServerMessage(JSON.stringify({ ...message, payload: { ...message.payload,
+      submittedTextSha256,
+    } })).status).toBe('rejected');
+  }
+});

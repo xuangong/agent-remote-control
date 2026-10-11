@@ -61,6 +61,19 @@ export class SessionSuccessionBoundary {
       return work();
     });
   }
+  /** Attach Host preparation evidence before the shared operation cache retains its result. */
+  inputResult<T>(target: NativeSessionRef, operation: SessionWireOperation, scope: string, result: T): T {
+    if (operation.kind !== 'send_message') return result;
+    // Internal callers retain native acceptance results instead of wire acknowledgement wrappers.
+    if (!result || typeof result !== 'object' || Array.isArray(result) || !('accepted' in result) || result.accepted !== true) return result;
+    const operationId = createHash('sha256').update(JSON.stringify([scope, operation.operationId])).digest('hex');
+    const delivery = this.contexts.delivery(operationId);
+    if (!delivery?.preparedInput) return result;
+    if (nativeSessionRefKey(delivery.target) !== nativeSessionRefKey(target) || !['accepted', 'materialized'].includes(delivery.state)) {
+      throw new Error('Prepared input result does not match its admitted submission.');
+    }
+    return { ...result, submittedTextSha256: delivery.preparedInput.witness.content.sha256 };
+  }
   close(): Promise<void> {
     if (this.closePromise) return this.closePromise;
     this.unsubscribeDelivery(); this.unsubscribeSettlement?.(); this.preparedInvocations.clear();

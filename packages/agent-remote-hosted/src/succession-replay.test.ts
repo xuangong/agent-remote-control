@@ -90,6 +90,7 @@ async function fixture(configure?: (state: HostedRelayState) => void, recentAuth
     const state = createRelayState(auth, storage, () => {}, () => {}, encodingCosts);
     const broker = createHostBroker({ origin, ownerSubject: 'owner', durable: true, initialState: state.read().tenants[0]!.broker,
       successionEnrollment: { version: 1, origin, issuer: auth.issuer, namespace: namespace('owner'), ownerSubject: 'owner' },
+      successionProjectionAllowance: context => select?.(context) ?? 2 * 1024 * 1024,
       onStateChange: value => state.mutate(draft => { draft.tenants[0]!.broker = value; }) });
     return { prepareUpgrade: broker.prepareUpgrade, async close() { broker.close(); await broker.settled(); await state.close(); }, async fetch(request: Request) {
       const url = new URL(request.url); url.pathname = url.pathname.replace(/^\/u\/[^/]+/, '');
@@ -227,7 +228,7 @@ test('requires renewed owner authority after restart and rejects contradictory C
 }, 10000);
 
 async function controller(f: Awaited<ReturnType<typeof fixture>>, failAtCommit = false, malformed = false, enrollmentVersion = 2) {
-  const effects = { prepare: 0, commit: 0, input: 0, release: 0, rpc: [] as string[], receivedFreezes: [] as unknown[] };
+  const effects = { prepare: 0, cancel: 0, commit: 0, input: 0, release: 0, rpc: [] as string[], receivedFreezes: [] as unknown[] };
   const saved = (await f.saved()).tenants[0]!.broker.associations!.freezes;
   const operations = new Map<string, any>(saved.filter(row => row.projection).map(row => [row.receipt.request.operationId, structuredClone(row.projection!.receipt)]));
   let revision = saved.filter(row => row.projection).length + 1;
@@ -248,6 +249,9 @@ async function controller(f: Awaited<ReturnType<typeof fixture>>, failAtCommit =
           result = { role: { id: 'role', revision, origin: ref('A'), current: sequenceRef(revision - 1), workspace }, lineage: Array.from({ length: revision }, (_, index) => sequenceRef(index)) };
         } else {
           const freeze = input.freeze; effects.receivedFreezes.push(structuredClone(freeze)); const request = freeze.request; let record = operations.get(request.operationId);
+          if (input.action === 'prepare' && !record && freeze.version !== 2) {
+            socket.send(JSON.stringify({ uplinkVersion: 2, type: 'rpc_response', requestId: message.requestId, status: 409, body: JSON.stringify({ code: 'succession_preparation_unavailable', error: 'A new preparation requires a bounded freeze.' }) })); return;
+          }
           if (input.action === 'prepare' && !record && decline) {
             socket.send(JSON.stringify({ uplinkVersion: 2, type: 'rpc_response', requestId: message.requestId, status: 409, body: JSON.stringify({ code: 'succession_projection_capacity_exceeded', error: 'Complete participant projection exceeds the admitted ceiling.' }) })); return;
           }
@@ -255,6 +259,12 @@ async function controller(f: Awaited<ReturnType<typeof fixture>>, failAtCommit =
             effects.prepare++; record = { ...request, phase: 'ready', to: ref(request.expectedRevision === 1 ? 'B' : 'C'), startedAt: 'now', updatedAt: 'now',
               prepared: { ...request, to: ref(request.expectedRevision === 1 ? 'B' : 'C'), workspace, associationRevision: 1, participants: [], capture: { epoch: 'e', seq: 1, capturedAt: 'now' } } };
             operations.set(request.operationId, record);
+          }
+          if (input.action === 'cancel') {
+            if (record?.phase === 'committed') {
+              socket.send(JSON.stringify({ uplinkVersion: 2, type: 'rpc_response', requestId: message.requestId, status: 409, body: JSON.stringify({ code: 'succession_enrollment_failed', error: 'Committed succession cannot be cancelled.' }) })); return;
+            }
+            effects.cancel++; record = { ...(record ?? { ...request, startedAt: 'now', updatedAt: 'now' }), phase: 'cancelled' }; operations.set(request.operationId, record);
           }
           if (input.action === 'commit' && record.phase !== 'committed') { effects.commit++; effects.input++; record.phase = 'committed'; record.committedRevision = ++revision; if (failAtCommit) f.fail(); }
           if (input.action === 'release') effects.release++;
@@ -599,6 +609,126 @@ test('freezes one exact quote with the real Host and post-staging Broker revisio
   expect(native.effects.receivedFreezes.length).toBeGreaterThan(1);
   expect(native.effects.receivedFreezes.every(receipt => JSON.stringify(receipt) === JSON.stringify(exact))).toBe(true);
   expect((await f.request('v1/remote/hosts/mapped-host/succession/prepare', 'owner', { ...input, targetProviderId: 'different' })).status).toBe(409);
+}, 10000);
+
+test('durably cancels an unregistered operation while its original describe is pending', async () => {
+  const f = await fixture(state => { state.tenants[0]!.broker.associations!.freezes = []; }, false, true, true);
+  const native = await controller(f), description = native.holdDescribe();
+  const input = { operationId: 'cancel-pending', providerId: 'fixture', nativeSessionId: 'A', expectedRevision: 1, targetProviderId: 'fixture' };
+  const pending = f.request('v1/remote/hosts/mapped-host/succession/prepare', 'owner', input);
+  await Promise.race([description.entered, pending.then(async response => { throw new Error(`Prepare completed before describe: ${response.status} ${await response.clone().text()}`); })]);
+  const persistence = f.hold(state => state.tenants[0]!.broker.associations!.freezes.some(row => row.receipt.request.operationId === input.operationId));
+  let replied = false;
+  const cancelling = f.request('v1/remote/hosts/mapped-host/succession/cancel', 'owner', input).then(response => { replied = true; return response; });
+  await Promise.race([persistence.entered, cancelling.then(async response => { throw new Error(`Cancel completed before persistence: ${response.status} ${await response.clone().text()}`); })]);
+  expect(replied).toBe(false); expect(native.effects.cancel).toBe(0); expect(native.effects.prepare).toBe(0);
+  expect((await f.saved()).tenants[0]!.broker.associations!.freezes).toEqual([]);
+  persistence.release();
+  const response = await cancelling; expect(response.status).toBe(200);
+  expect(await response.json()).toMatchObject({ record: { operationId: input.operationId, expectedRevision: 1, from: ref('A'), phase: 'cancelled' }, role: { revision: 1, current: ref('A') } });
+  description.release(); const late = await pending; expect(late.status).toBe(200); expect((await late.json()).record.phase).toBe('cancelled');
+  const frozen = (await f.saved()).tenants[0]!.broker.associations!.freezes;
+  expect(frozen).toHaveLength(1); expect(frozen[0]).toMatchObject({ cancelOnly: true, released: 'cancelled', receipt: { version: 1, request: { operationId: input.operationId, expectedRevision: 1, from: ref('A'), targetProviderId: 'fixture' } } });
+  expect(frozen[0]!.receipt).not.toHaveProperty('maxProjectionBytes');
+  expect(native.effects).toMatchObject({ prepare: 0, commit: 0, input: 0 });
+  await f.restart(); await native.connect();
+  expect((await f.request('v1/remote/hosts/mapped-host/succession/prepare', 'owner', input)).status).toBe(200);
+  expect((await f.saved()).tenants[0]!.broker.associations!.freezes).toEqual(frozen);
+  expect(native.effects.prepare).toBe(0);
+}, 10000);
+
+test('cancels a projection admission rejection using its exact original identity without requoting', async () => {
+  const f = await fixture(state => { state.tenants[0]!.broker.associations!.freezes = []; }, false, true), native = await controller(f);
+  const input = { operationId: 'cancel-capacity', providerId: 'fixture', nativeSessionId: 'A', expectedRevision: 1 };
+  let quotes = 0; f.select(() => { quotes++; return 0; });
+  expect((await f.request('v1/remote/hosts/mapped-host/succession/prepare', 'owner', input)).status).toBe(409);
+  expect((await f.request('v1/remote/hosts/mapped-host/succession/status', 'owner', { operationId: input.operationId })).status).toBe(404);
+  expect((await f.request('v1/remote/hosts/mapped-host/succession/cancel', 'owner', { operationId: input.operationId })).status).toBe(404);
+  expect((await f.request('v1/remote/hosts/mapped-host/succession/cancel', 'owner', { operationId: input.operationId, providerId: 'fixture' })).status).toBe(400);
+  const cancelled = await f.request('v1/remote/hosts/mapped-host/succession/cancel', 'owner', input);
+  expect(cancelled.status, await cancelled.clone().text()).toBe(200); expect((await cancelled.json()).record.phase).toBe('cancelled'); expect(quotes).toBe(1);
+  for (const changed of [{ ...input, expectedRevision: 2 }, { ...input, targetProviderId: 'other' }, { ...input, nativeSessionId: 'B' }]) {
+    const rejected = await f.request('v1/remote/hosts/mapped-host/succession/cancel', 'owner', changed);
+    expect(rejected.status).toBe(409); expect((await rejected.json()).code).toBe('succession_identity_conflict');
+  }
+  expect(native.effects).toMatchObject({ prepare: 0, commit: 0, input: 0 });
+}, 10000);
+
+test('cancels an unenrolled stale revision only against its durable historical source', async () => {
+  const f = await fixture(undefined, false, true), native = await controller(f);
+  const input = { operationId: 'cancel-old-selection', providerId: 'fixture', nativeSessionId: 'A', expectedRevision: 1 };
+  expect((await f.request('v1/remote/hosts/mapped-host/succession/prepare', 'owner', input)).status).toBe(409);
+  const invalid = await f.request('v1/remote/hosts/mapped-host/succession/cancel', 'owner', { ...input, expectedRevision: 2 });
+  expect(invalid.status).toBe(409);
+  const response = await f.request('v1/remote/hosts/mapped-host/succession/cancel', 'owner', input); expect(response.status).toBe(200);
+  expect(await response.json()).toMatchObject({ record: { operationId: input.operationId, expectedRevision: 1, from: ref('A'), phase: 'cancelled' }, role: { revision: 3, current: ref('C') } });
+  const saved = (await f.saved()).tenants[0]!.broker.associations!.freezes;
+  expect(saved.at(-1)).toMatchObject({ receipt: { version: 1, lineage: [ref('A'), ref('B'), ref('C')] }, released: 'cancelled' });
+  await f.restart(); await native.connect();
+  const late = await f.request('v1/remote/hosts/mapped-host/succession/prepare', 'owner', input); expect(late.status).toBe(200); expect((await late.json()).record.phase).toBe('cancelled');
+  expect(native.effects).toMatchObject({ prepare: 0, commit: 0, input: 0 });
+}, 10000);
+
+test('keeps registered cancellation semantics and never rolls back a committed operation', async () => {
+  const f = await fixture(state => { state.tenants[0]!.broker.associations!.freezes = []; }, false, true), native = await controller(f);
+  const input = { operationId: 'registered', providerId: 'fixture', nativeSessionId: 'A', expectedRevision: 1 };
+  expect((await f.request('v1/remote/hosts/mapped-host/succession/prepare', 'owner', input)).status).toBe(200);
+  expect((await f.request('v1/remote/hosts/mapped-host/succession/cancel', 'owner', input)).status).toBe(200);
+  const next = { ...input, operationId: 'committed' };
+  expect((await f.request('v1/remote/hosts/mapped-host/succession/prepare', 'owner', next)).status).toBe(200);
+  expect((await f.request('v1/remote/hosts/mapped-host/succession/commit', 'owner', { operationId: next.operationId })).status).toBe(200);
+  const before = (await f.saved()).tenants[0]!.broker.associations!.freezes;
+  expect((await f.request('v1/remote/hosts/mapped-host/succession/cancel', 'owner', next)).status).toBe(409);
+  expect((await f.saved()).tenants[0]!.broker.associations!.freezes).toEqual(before);
+  expect(native.effects).toMatchObject({ prepare: 2, cancel: 1, commit: 1, input: 1 });
+}, 10000);
+
+test('cannot report cancellation when its durable fence cannot be written', async () => {
+  const f = await fixture(state => { state.tenants[0]!.broker.associations!.freezes = []; }, false, true, true), native = await controller(f);
+  const input = { operationId: 'cancel-storage-failure', providerId: 'fixture', nativeSessionId: 'A', expectedRevision: 1 }, before = await f.saved();
+  f.fail();
+  expect((await f.request('v1/remote/hosts/mapped-host/succession/cancel', 'owner', input)).status).toBeGreaterThanOrEqual(500);
+  expect((await f.saved()).tenants[0]!.broker.associations).toEqual(before.tenants[0]!.broker.associations);
+  expect(native.effects).toMatchObject({ prepare: 0, cancel: 0, commit: 0, input: 0 });
+}, 10000);
+
+test('requires revision headroom for the final cancellation before retaining its fence', async () => {
+  const f = await fixture(state => { const associations = state.tenants[0]!.broker.associations!; associations.freezes = []; associations.revision = Number.MAX_SAFE_INTEGER - 1; }, false, true), native = await controller(f);
+  const before = (await f.saved()).tenants[0]!.broker.associations;
+  const response = await f.request('v1/remote/hosts/mapped-host/succession/cancel', 'owner', { operationId: 'cancel-no-headroom', providerId: 'fixture', nativeSessionId: 'A', expectedRevision: 1 });
+  expect(response.status).toBe(409); expect((await response.json()).code).toBe('association_capacity');
+  expect((await f.saved()).tenants[0]!.broker.associations).toEqual(before);
+  expect(native.effects).toMatchObject({ prepare: 0, cancel: 0, commit: 0, input: 0 });
+}, 10000);
+
+test('recovers a persisted cancellation fence after acknowledgement loss without allowing a late prepare', async () => {
+  const f = await fixture(state => { state.tenants[0]!.broker.associations!.freezes = []; }, false, true, true), native = await controller(f);
+  const input = { operationId: 'cancel-ack-loss', providerId: 'fixture', nativeSessionId: 'A', expectedRevision: 1 };
+  f.failAfterWrite();
+  expect((await f.request('v1/remote/hosts/mapped-host/succession/cancel', 'owner', input)).status).toBeGreaterThanOrEqual(500);
+  const persisted = (await f.saved()).tenants[0]!.broker.associations!.freezes[0]!;
+  expect(persisted).toMatchObject({ cancelOnly: true, receipt: { version: 1, request: { operationId: input.operationId } } });
+  expect(persisted.released).toBeUndefined(); expect(native.effects.cancel).toBe(0);
+  f.recover(); await f.restart(); await native.connect();
+  const late = await f.request('v1/remote/hosts/mapped-host/succession/prepare', 'owner', input);
+  expect(late.status).toBe(409); expect((await late.json()).code).toBe('succession_preparation_unavailable'); expect(native.effects.prepare).toBe(0);
+  const cancelled = await f.request('v1/remote/hosts/mapped-host/succession/cancel', 'owner', input);
+  expect(cancelled.status).toBe(200); expect((await cancelled.json()).record.phase).toBe('cancelled');
+  expect((await f.saved()).tenants[0]!.broker.associations!.freezes[0]).toEqual({ ...persisted, released: 'cancelled' });
+}, 10000);
+
+test('waits for another frozen operation before retaining an immutable cancellation lineage', async () => {
+  const f = await fixture(state => { state.tenants[0]!.broker.associations!.freezes = []; }, false, true), native = await controller(f);
+  const active = { operationId: 'active', providerId: 'fixture', nativeSessionId: 'A', expectedRevision: 1 }, pendingCancel = { ...active, operationId: 'cancel-after-active' };
+  expect((await f.request('v1/remote/hosts/mapped-host/succession/prepare', 'owner', active)).status).toBe(200);
+  const blocked = await f.request('v1/remote/hosts/mapped-host/succession/cancel', 'owner', pendingCancel);
+  expect(blocked.status).toBe(409); expect((await blocked.json()).code).toBe('succession_associations_frozen');
+  expect((await f.saved()).tenants[0]!.broker.associations!.freezes).toHaveLength(1); expect(native.effects.cancel).toBe(0);
+  expect((await f.request('v1/remote/hosts/mapped-host/succession/commit', 'owner', { operationId: active.operationId })).status).toBe(200);
+  const cancelled = await f.request('v1/remote/hosts/mapped-host/succession/cancel', 'owner', pendingCancel);
+  expect(cancelled.status).toBe(200); expect((await cancelled.json()).record).toMatchObject({ operationId: pendingCancel.operationId, from: ref('A'), expectedRevision: 1, phase: 'cancelled' });
+  expect((await f.saved()).tenants[0]!.broker.associations!.freezes[1]).toMatchObject({ cancelOnly: true, receipt: { lineage: [ref('A'), ref('B')] }, released: 'cancelled' });
+  expect(native.effects).toMatchObject({ prepare: 1, cancel: 1, commit: 1, input: 1 });
 }, 10000);
 
 test('refuses a stale immutable quote after an ordinary star overtakes it and keeps both queues usable', async () => {

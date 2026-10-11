@@ -81,8 +81,10 @@ For a repeatable live Session View, two-client observation, recording and replay
 
 ## Session succession
 
-OpenCode provides the initial native implementation for same-Host, same-directory
-Session View **Handoff**. This capability is narrower than ordinary server support:
+OpenCode supports same-Host, same-directory handoff through `/handoff` in the
+primary Session View composer. Use `/handoff opencode` to request OpenCode as the
+target, then confirm **Hand off** in the provider chooser. Progress appears above
+the composer. This capability is narrower than ordinary server support:
 it requires the reviewed 1.18.x contract from 1.18.18, background subagents disabled,
 current agent/model/variant selections, native observation and the explicitly
 connected [callback plugin](opencode-callbacks.md) for source references. Unsupported
@@ -91,8 +93,10 @@ or incomplete facts produce an eligibility reason instead of creating a candidat
 The Host accepts Handoff only while idle with no queued input, pending interaction,
 active child work or unsettled ARC mutation. Preparation creates exactly one empty
 successor with validated native selections; prepare/commit send no model input.
-The first real input receives normalized history once. Independent native clients
-remain outside ARC's mutation exclusion. This is a role transition, not native
+The first real input receives normalized history once and must use plain text
+with immediate delivery; attachments and queued delivery wait until that input
+is confirmed. Independent native clients remain outside ARC's mutation exclusion.
+This is a role transition, not native
 process takeover or workspace rollback.
 
 The adapter uses the configured trusted service namespace and fresh native facts.

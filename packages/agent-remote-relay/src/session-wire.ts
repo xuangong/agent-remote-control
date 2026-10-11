@@ -339,7 +339,7 @@ export function createSessionWire(
               : await boundAgent.sendMessage(payload.text, delivery);
             return inputOperationResult(acceptance);
           } });
-          sendMessage(commandAcknowledgement(payload.requestId, boundAgent.agentId, 'send_message', result.inputAcceptance));
+          sendMessage(commandAcknowledgement(payload.requestId, boundAgent.agentId, 'send_message', result.inputAcceptance, result.submittedTextSha256));
           return;
         }
         case 'steer': {
@@ -569,7 +569,7 @@ export function createSessionWire(
   }
 }
 
-function inputOperationResult(acceptance: AgentInputAcceptance | void): { accepted: true; inputAcceptance?: AgentInputAcceptance } {
+function inputOperationResult(acceptance: AgentInputAcceptance | void): { accepted: true; inputAcceptance?: AgentInputAcceptance; submittedTextSha256?: string } {
   if (acceptance === undefined) return { accepted: true };
   // Invalid evidence after native dispatch cannot be settled as a confirmed rejection.
   if (!acceptance || !['started', 'queued', 'handled'].includes(acceptance.disposition)) {
@@ -583,11 +583,13 @@ function commandAcknowledgement(
   agentId: string,
   command: 'send_message' | 'steer' | 'cancel' | 'set_planning' | 'set_session_setting' | 'interaction_response',
   inputAcceptance?: AgentInputAcceptance,
+  submittedTextSha256?: string,
 ): Extract<ServerMessage, { type: 'command_acknowledged' }> {
   return {
     protocolVersion: PROTOCOL_VERSION,
     type: 'command_acknowledged',
-    payload: { requestId, agentId, command, ...(inputAcceptance ? { inputAcceptance } : {}) },
+    payload: { requestId, agentId, command, ...(inputAcceptance ? { inputAcceptance } : {}),
+      ...(submittedTextSha256 === undefined ? {} : { submittedTextSha256 }) },
   };
 }
 

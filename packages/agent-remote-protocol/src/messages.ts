@@ -151,6 +151,8 @@ export const CommandAcknowledgementMessage = Strict({
     requestId: NonEmptyString,
     agentId: NonEmptyString,
     inputAcceptance: Type.Optional(AgentInputAcceptance),
+    /** Host-prepared exact UTF-8 text. Correlates a complete echo, independently of native disposition. */
+    submittedTextSha256: Type.Optional(Type.String({ pattern: '^[a-f0-9]{64}$', minLength: 64, maxLength: 64 })),
     command: Type.Union([
       Type.Literal('send_message'), Type.Literal('steer'), Type.Literal('cancel'), Type.Literal('set_planning'), Type.Literal('set_session_setting'),
       Type.Literal('interaction_response'),

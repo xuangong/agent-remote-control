@@ -1,5 +1,6 @@
 // @vitest-environment node
 import { createServer } from 'node:http';
+import { createHash } from 'node:crypto';
 import { WebSocket, WebSocketServer } from 'ws';
 import { expect, it, vi } from 'vitest';
 import { PROTOCOL_VERSION, type HistoryPage, type ServerMessage } from '@orchardworks/agent-remote-protocol';
@@ -7,17 +8,18 @@ import { AgentReplica } from '../replica/store.js';
 import { HttpWebSocketTransport } from './http-websocket-transport.js';
 import { RemoteSessionClient } from './remote-session-client.js';
 
-it('recovers an omitted live echo through HTTP without reconnecting or resending on the real session channel', async () => {
+it.each([false, true])('recovers an omitted live echo through HTTP without reconnecting or resending (prepared text: %s)', async prepared => {
   let sends = 0;
   let connections = 0;
   const reads: URL[] = [];
+  const submittedText = `${prepared ? 'Quoted previous history\n\n' : ''}Recover my message`;
   const history = (requestId: string): HistoryPage => ( { protocolVersion: PROTOCOL_VERSION, type: 'timeline_page', payload: {
       requestId, agentId: 'one', direction: sends ? 'after' : 'tail', epoch: 'epoch-one',
       reset: false, staleCursor: false, gap: false, error: null,
       window: { minSeq: sends ? 1 : 0, maxSeq: sends ? 1 : 0, nextSeq: sends ? 2 : 1 },
       startCursor: sends ? { epoch: 'epoch-one', seq: 1 } : null,
       endCursor: sends ? { epoch: 'epoch-one', seq: 1 } : null, hasOlder: false, hasNewer: false,
-      entries: sends ? [{ providerId: 'test', item: { type: 'user_message', text: 'Recover my message' },
+      entries: sends ? [{ providerId: 'test', item: { type: 'user_message', text: submittedText },
         timestamp: '2026-09-25T00:00:00.000Z', seqStart: 1, seqEnd: 1,
         sourceSeqRanges: [{ startSeq: 1, endSeq: 1 }], collapsed: [], resources: [] }] : [],
     } });
@@ -52,7 +54,8 @@ it('recovers an omitted live echo through HTTP without reconnecting or resending
         sends++;
         // The authoritative history contains the input, but its live event is omitted.
         emit({ protocolVersion: PROTOCOL_VERSION, type: 'command_acknowledged',
-          payload: { requestId: frame.message.payload.requestId, agentId: 'one', command: 'send_message' } });
+          payload: { requestId: frame.message.payload.requestId, agentId: 'one', command: 'send_message',
+            ...(prepared ? { submittedTextSha256: createHash('sha256').update(submittedText).digest('hex') } : {}) } });
       }
     });
     socket.send(JSON.stringify({ protocolVersion: PROTOCOL_VERSION, type: 'ready' }));
@@ -72,7 +75,7 @@ it('recovers an omitted live echo through HTTP without reconnecting or resending
     await client.sendMessage('Recover my message');
     expect(replica.getState().outgoingMessages).toMatchObject([{ status: 'awaiting_echo' }]);
     await vi.waitFor(() => expect(replica.getState().outgoingMessages).toEqual([]), { timeout: 12_000, interval: 25 });
-    expect(replica.getState().timeline.entries[0]?.item).toMatchObject({ type: 'user_message', text: 'Recover my message' });
+    expect(replica.getState().timeline.entries[0]?.item).toMatchObject({ type: 'user_message', text: submittedText });
     expect(reads).toHaveLength(1);
     expect(reads[0]?.searchParams.get('direction')).toBe('after');
     expect(reads[0]?.searchParams.get('seq')).toBe('0');

@@ -371,6 +371,10 @@ export function createAgentHostRuntime(options: AgentHostRuntimeOptions): AgentH
       return successionBoundary.admit([target], entry.key);
     },
     run: (_agent, operation, scope, entry, work) => successionBoundary ? successionBoundary.run(operation, scope, work, entry) : work(),
+    dispatch: async (agent, operation, scope, work) => {
+      const result = await work();
+      return successionBoundary ? successionBoundary.inputResult(nativeRef(bindingFor(agent)), operation, scope, result) : result;
+    },
     retain: agent => idle.retain(bindingFor(agent).agentId),
     uncertain: agent => { uncertainAgents.add(bindingFor(agent).agentId); },
   }, ...(options.inputImages ? { inputImageStore: new InputImageStore(options.inputImages) } : {}) });

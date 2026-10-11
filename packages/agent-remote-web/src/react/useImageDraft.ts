@@ -19,18 +19,20 @@ export function useImageDraft({ scope: suppliedScope, sessionKey, text, enabled,
   }
   const current = entry;
   const receiptOwners = useRef(new WeakMap<DraftImage, object>());
-  const recipientState = useRef<{ key: string; scope?: string; identity?: string; lifetime?: object; active: boolean; enabled: boolean; allowed: boolean; token: object; abort?: AbortController }>();
+  const recipientState = useRef<{ key: string; scope?: string; identity?: string; lifetime?: object; active: boolean; enabled: boolean; allowed: boolean; token: object; documentToken: object; abort?: AbortController }>();
   const allowed = !binding || !!recipient && !!recipient.identity && recipient.isCurrent();
   let selected = recipientState.current;
-  if (!selected || selected.key !== key || selected.scope !== scope || selected.identity !== recipient?.identity || selected.lifetime !== recipient?.lifetime
-    || selected.active !== active || selected.enabled !== enabled || selected.allowed !== allowed) {
+  const sameDocument = selected?.key === key && selected.scope === scope && selected.identity === recipient?.identity
+    && selected.lifetime === recipient?.lifetime && selected.enabled === enabled && selected.allowed === allowed;
+  if (!selected || !sameDocument || selected.active !== active) {
     selected?.abort?.abort();
-    selected = { key, scope, identity: recipient?.identity, lifetime: recipient?.lifetime, active, enabled, allowed, token: {} };
+    selected = { key, scope, identity: recipient?.identity, lifetime: recipient?.lifetime, active, enabled, allowed, token: {}, documentToken: sameDocument ? selected!.documentToken : {} };
     recipientState.current = selected;
   }
   const recipientOwner = selected;
-  const recipientCurrent = () => recipientState.current === recipientOwner && allowed && active && enabled
+  const documentCurrent = () => recipientState.current?.documentToken === recipientOwner.documentToken && allowed && enabled
     && (!recipient || recipient.isCurrent()) && current.generation === imageDraftScopeGeneration(scope ?? '');
+  const recipientCurrent = () => recipientState.current === recipientOwner && active && documentCurrent();
   const eligible = (image?: DraftImage) => !!image && image.status === 'ready' && recipientCurrent()
     && receiptOwners.current.get(image) === recipientOwner.token;
 
@@ -228,7 +230,7 @@ export function useImageDraft({ scope: suppliedScope, sessionKey, text, enabled,
     storageBusy: Boolean(current.restoring || current.saving), retryStorage,
     ready: current.draft.parts.every(part => part.type === 'text' || eligible(images[part.imageId])),
     hasImages,
-    captureEdit() { const revision = current.revision; return () => recipientCurrent() && currentKey.current === entryKey && current.revision === revision; },
+    captureEdit() { const revision = current.revision; return () => mounted.current && documentCurrent() && currentKey.current === entryKey && current.revision === revision; },
     digests() { return Object.fromEntries(Object.values(images).flatMap(image => eligible(image) && image.attachment ? [[image.attachment.attachmentId, image.attachment.sha256]] : [])); },
     setParts(parts: readonly DraftPart[]) {
       const imageIds = (parts: readonly DraftPart[]) => parts.flatMap(part => part.type === 'image' ? [part.imageId] : []).join(',');

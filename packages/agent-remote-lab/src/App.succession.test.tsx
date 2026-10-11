@@ -8,7 +8,7 @@ import { configureImageDraftPersistence, inspectImageDraft, readImageDraft, writ
 import { HttpWebSocketTransport } from '@orchardworks/agent-remote-web';
 import { CommunicationNavigationContext, type CommunicationNavigation } from '@orchardworks/agent-remote-web/react';
 import { App, type LabTransport } from './App.js';
-import { SessionDirectoryClient, type OpenedSession } from './directory-client.js';
+import { SessionDirectoryClient, type OpenedSession, type SuccessionActionResult, type SuccessionDescription } from './directory-client.js';
 import { DraftStore } from './draft-store.js';
 import { replicaState } from './test/fixtures.js';
 import { readCompositionDocument, initializeCompositionDocument, saveCompositionDocument } from './session-composition.js';
@@ -49,7 +49,7 @@ function committed(from = 'A', to = 'B', revision = 2, roleId = 'primary', provi
       receipt: { ...request, to: native(to, providerId), phase: 'committed', committedRevision: revision, startedAt: 'now', updatedAt: 'now',
         prepared: { ...request, to: native(to, providerId), workspace, associationRevision: 1, participants: [], capture: { epoch: 'epoch', seq: 1, capturedAt: 'now' } } } } };
 }
-async function failureFixture(advanceDuringRecovery = false, nativeIdentity?: string | null, strict = false, flags = '', setup?: { chain?: SessionSuccessionReplay[]; replayFailure?: string; selected?: string; providerId?: string; userScoped?: boolean; favorites?: FavoritesSnapshot; holdRelationsInitially?: boolean; preserveNativeState?: boolean; children?: AgentChildSession[]; timeline?: ProjectedTimelineEntry[]; seed?(scope: string, source: OpenedSession): void | Promise<void> }) {
+async function failureFixture(advanceDuringRecovery = false, nativeIdentity?: string | null, strict = false, flags = '', setup?: { chain?: SessionSuccessionReplay[]; replayFailure?: string; selected?: string; providerId?: string; userScoped?: boolean; favorites?: FavoritesSnapshot; holdRelationsInitially?: boolean; preserveNativeState?: boolean; children?: AgentChildSession[]; timeline?: ProjectedTimelineEntry[]; nativeStatus?: 'idle' | 'running'; successionDescription?: SuccessionDescription; successionStatus?(): SuccessionActionResult; seed?(scope: string, source: OpenedSession): void | Promise<void> }) {
   configureImageDraftPersistence(() => false);
   const requests: Array<{ url: string; body?: Record<string, unknown> }> = [];
   const providerId = setup?.providerId ?? 'recorded';
@@ -65,6 +65,7 @@ async function failureFixture(advanceDuringRecovery = false, nativeIdentity?: st
   let relationsGate: Promise<void> | undefined, releaseRelations: (() => void) | undefined;
   if (setup?.holdRelationsInitially) relationsGate = new Promise(resolve => { releaseRelations = resolve; });
   const attachmentGates = new Map<string, Promise<void>>();
+  let currentGate: Promise<void> | undefined;
   let replayGate: Promise<void> | undefined;
   let releaseReplay: (() => void) | undefined;
   const server: Server = createServer(async (request, response) => {
@@ -76,6 +77,7 @@ async function failureFixture(advanceDuringRecovery = false, nativeIdentity?: st
     if (url.pathname.includes('/session-successions') && replayFailure) { response.writeHead(404, { 'content-type': 'application/json' }); response.end(JSON.stringify({ code: replayFailure, error: 'Fixture succession route unavailable.' })); return; }
     let value: unknown;
     if (url.pathname.endsWith('/session-successions/current')) {
+      if (currentGate) await currentGate;
       if (advanceDuringRecovery && chain.length === 1) chain.push(committed('B', 'C', 3));
       const current = chain.filter(item => item.projection.role.id === url.searchParams.get('roleId')).at(-1)!;
       value = { version: 1, role: current.projection.role, locator: current.to };
@@ -85,6 +87,8 @@ async function failureFixture(advanceDuringRecovery = false, nativeIdentity?: st
       if (Number(url.searchParams.get('limit')) > 64) { response.statusCode = 400; value = { error: 'Replay page limit exceeded.' }; }
       else value = { version: 1, successions: url.searchParams.has('roleId') ? chain.filter(item => item.projection.role.id === url.searchParams.get('roleId')) : chain, nextCursor: null };
     }
+    else if (url.pathname.endsWith('/succession/describe') && setup?.successionDescription) value = setup.successionDescription;
+    else if (url.pathname.endsWith('/succession/status') && setup?.successionStatus) value = setup.successionStatus();
     else if (url.pathname.endsWith('/create')) { if (createGate) await createGate; value = { agentId: 'agent-S', nativeSessionId: 'S' }; }
     else if (url.pathname.endsWith('/session-relations')) { if (relationsGate) await relationsGate; value = { relations: [] }; }
     else if (url.pathname.endsWith('/favorites') && favorites) value = favorites;
@@ -103,8 +107,8 @@ async function failureFixture(advanceDuringRecovery = false, nativeIdentity?: st
     }
     else if (url.pathname.endsWith('/snapshot')) {
       const agentId = decodeURIComponent(url.pathname.split('/').at(-2)!);
-      value = { protocolVersion: PROTOCOL_VERSION, type: 'agent_snapshot', payload: { ...replicaState.agent, id: agentId, providerId, pendingInteractions: pendingInteractions(agentId),
-        runtimeInfo: { ...replicaState.agent!.runtimeInfo, providerId, childSessions: setup?.children, sessionId: agentId === 'agent-B' ? nativeIdentity : nativeFor(agentId), connection: { state: 'connected' } } } };
+      value = { protocolVersion: PROTOCOL_VERSION, type: 'agent_snapshot', payload: { ...replicaState.agent, id: agentId, providerId, status: setup?.nativeStatus ?? 'idle', pendingInteractions: pendingInteractions(agentId),
+        runtimeInfo: { ...replicaState.agent!.runtimeInfo, providerId, status: setup?.nativeStatus ?? 'idle', childSessions: setup?.children, sessionId: agentId === 'agent-B' ? nativeIdentity : nativeFor(agentId), connection: { state: 'connected' } } } };
     }
     else if (url.pathname.endsWith('/catalog')) value = { sessions: [], revision: '1', nextCursor: null };
     else { response.statusCode = 404; value = { error: 'Fixture service unavailable.' }; }
@@ -129,7 +133,7 @@ async function failureFixture(advanceDuringRecovery = false, nativeIdentity?: st
       if (frame.type === 'subscribe') {
         emit({ protocolVersion: PROTOCOL_VERSION, type: 'negotiated', sessionControl: true });
         const update = (identity: string | null, connection: 'connected' | 'restoring' = 'connected') => emit({ protocolVersion: PROTOCOL_VERSION, type: 'agent_snapshot', payload: {
-          ...replicaState.agent, id: frame.agentId, providerId, pendingInteractions: pendingInteractions(agentId), runtimeInfo: { ...replicaState.agent!.runtimeInfo, providerId, childSessions: setup?.children, sessionId: identity, connection: { state: connection } },
+          ...replicaState.agent, id: frame.agentId, providerId, status: setup?.nativeStatus ?? 'idle', pendingInteractions: pendingInteractions(agentId), runtimeInfo: { ...replicaState.agent!.runtimeInfo, providerId, status: setup?.nativeStatus ?? 'idle', childSessions: setup?.children, sessionId: identity, connection: { state: connection } },
         } });
         const active = activeUpdates.get(agentId) ?? new Set(); activeUpdates.set(agentId, active); active.add(update); callbacks.set(frame.subscriptionId, update);
         updates.push(update); updatesByAgent.set(agentId, (identity, connection) => { for (const callback of activeUpdates.get(agentId) ?? []) callback(identity, connection); });
@@ -179,10 +183,11 @@ async function failureFixture(advanceDuringRecovery = false, nativeIdentity?: st
     setNativeIdentity(identity: string | null) { nativeIdentity = identity; },
     rebind(nativeSessionId: string, agentId: string) { nativeBindings.set(nativeSessionId, agentId); },
     setFavorites(snapshot: FavoritesSnapshot) { favorites = snapshot; },
-    failReplay(code: string) { replayFailure = code; },
+    failReplay(code?: string) { replayFailure = code; },
     holdCreate() { createGate = new Promise(resolve => { releaseCreate = resolve; }); return () => { releaseCreate?.(); createGate = undefined; }; },
     holdRelations() { relationsGate ??= new Promise(resolve => { releaseRelations = resolve; }); return () => { releaseRelations?.(); relationsGate = undefined; }; },
     holdAttach(nativeSessionId: string) { let release!: () => void; attachmentGates.set(nativeSessionId, new Promise(resolve => { release = resolve; })); return () => { attachmentGates.delete(nativeSessionId); release(); }; },
+    holdCurrent() { let release!: () => void; currentGate = new Promise(resolve => { release = resolve; }); return () => { currentGate = undefined; release(); }; },
     pauseReplay() { replayGate = new Promise(resolve => { releaseReplay = resolve; }); return () => { releaseReplay?.(); replayGate = undefined; }; },
     notify(replay: SessionSuccessionReplay) { for (const socket of sockets.clients) socket.send(JSON.stringify({ protocolVersion: PROTOCOL_VERSION, type: 'session_succession_committed', succession: replay })); },
   };
@@ -191,6 +196,387 @@ async function failureFixture(advanceDuringRecovery = false, nativeIdentity?: st
 async function settleApp(assertion: () => void) {
   await vi.waitFor(async () => { await act(async () => { await new Promise(resolve => setTimeout(resolve, 20)); }); assertion(); });
 }
+
+function successionHistoryLink(view: HTMLElement, nativeSessionId: string): HTMLAnchorElement {
+  const link = [...view.querySelectorAll<HTMLAnchorElement>('.lab-succession-history a')]
+    .find(link => new URL(link.href).searchParams.get('session') === nativeSessionId);
+  expect(link).toBeDefined(); return link!;
+}
+
+it('opens predecessor A from current B, reloads its concrete history and returns to B without moving draft ownership', async () => {
+  const real = successionHooks.useSessionSuccession;
+  let succession!: ReturnType<typeof real>;
+  vi.spyOn(successionHooks, 'useSessionSuccession').mockImplementation((...args) => { succession = real(...args); return succession; });
+  const f = await failureFixture(false, 'B');
+  await settleApp(() => expect(succession.binding?.session.nativeSessionId).toBe('B'));
+  const currentSlot = succession.desired!.slot.id, owners = structuredClone(succession.desired!.slot.owners);
+  const oldLink = successionHistoryLink(f.view, 'A');
+  expect(new URL(oldLink.href).searchParams.get('intent')).toBe('history');
+  expect(new URL(oldLink.href).searchParams.has('agent')).toBe(false);
+  await act(async () => oldLink.click());
+  await settleApp(() => expect(succession.binding?.session.nativeSessionId).toBe('A'));
+  expect(new URL(window.location.href).searchParams.get('intent')).toBe('history');
+  expect(succession.desired!.slot.intent.kind).toBe('history');
+  expect(succession.document.slots.find(slot => slot.id === currentSlot)?.owners).toEqual(owners);
+  expect(f.view.querySelector('[data-testid="prompt-input"]')?.textContent).toBe('');
+  await f.reload();
+  await settleApp(() => expect(succession.binding?.session.nativeSessionId).toBe('A'));
+  const returnLink = successionHistoryLink(f.view, 'B');
+  expect(returnLink.textContent).toBe('Return to current');
+  expect(new URL(returnLink.href).searchParams.has('intent')).toBe(false);
+  await act(async () => returnLink.click());
+  await settleApp(() => expect(succession.binding?.session.nativeSessionId).toBe('B'));
+  expect(new URL(window.location.href).searchParams.has('intent')).toBe(false);
+  expect(succession.desired!.slot.id).toBe(currentSlot);
+  expect(succession.desired!.slot.owners).toEqual(owners);
+  expect(f.view.querySelector('[data-testid="prompt-input"]')?.textContent).toBe('A local draft');
+  expect(f.requests.some(request => request.url.endsWith('/create'))).toBe(false);
+  expect(f.frames.some(frame => ['send_message', 'execute_command', 'image_upload_begin'].includes(frame.message?.type ?? ''))).toBe(false);
+}, 10000);
+
+it('shows A-B-C handoff history once in reverse order while ordinary A navigation still resolves current C', async () => {
+  const real = successionHooks.useSessionSuccession, realHistory = historyHooks.useConversationHistory;
+  let succession!: ReturnType<typeof real>, open!: Parameters<typeof realHistory>[2];
+  vi.spyOn(successionHooks, 'useSessionSuccession').mockImplementation((...args) => { succession = real(...args); return succession; });
+  vi.spyOn(historyHooks, 'useConversationHistory').mockImplementation((...args) => { open = args[2]; return realHistory(...args); });
+  const f = await failureFixture(false, 'B', false, '', { chain: [committed(), committed('B', 'C', 3)] });
+  await settleApp(() => expect(succession.binding?.session.nativeSessionId).toBe('C'));
+  const nav = f.view.querySelector('.lab-succession-history')!;
+  expect([...nav.querySelectorAll<HTMLAnchorElement>('a')].map(link => new URL(link.href).searchParams.get('session'))).toEqual(['B', 'A']);
+  expect(nav.querySelector('details')?.open).toBe(false);
+  expect(nav.querySelectorAll('a')).toHaveLength(2);
+  await act(async () => successionHistoryLink(f.view, 'B').click());
+  await settleApp(() => expect(succession.binding?.session.nativeSessionId).toBe('B'));
+  expect(new URL(window.location.href).searchParams.get('intent')).toBe('history');
+  await act(async () => successionHistoryLink(f.view, 'C').click());
+  await settleApp(() => expect(succession.binding?.session.nativeSessionId).toBe('C'));
+  await act(async () => f.view.querySelector<HTMLElement>('.lab-succession-history summary')!.click());
+  expect(f.view.querySelector<HTMLDetailsElement>('.lab-succession-history details')?.open).toBe(true);
+  await act(async () => successionHistoryLink(f.view, 'A').click());
+  await settleApp(() => expect(succession.binding?.session.nativeSessionId).toBe('A'));
+  await f.reload();
+  await settleApp(() => expect(succession.binding?.session.nativeSessionId).toBe('A'));
+  await act(async () => successionHistoryLink(f.view, 'C').click());
+  await settleApp(() => expect(succession.binding?.session.nativeSessionId).toBe('C'));
+  await act(async () => { expect(await open({ hostId: 'host', providerId: 'recorded', nativeSessionId: 'A', title: 'Original A link' })).toBe(true); });
+  await settleApp(() => expect(succession.binding?.session.nativeSessionId).toBe('C'));
+  expect(new URL(window.location.href).searchParams.get('session')).toBe('C');
+  expect(new URL(window.location.href).searchParams.has('intent')).toBe(false);
+  expect(f.frames.some(frame => ['send_message', 'execute_command', 'image_upload_begin'].includes(frame.message?.type ?? ''))).toBe(false);
+}, 10000);
+
+it('removes handoff navigation when fresh authorized replay is denied', async () => {
+  const real = successionHooks.useSessionSuccession;
+  let succession!: ReturnType<typeof real>;
+  vi.spyOn(successionHooks, 'useSessionSuccession').mockImplementation((...args) => { succession = real(...args); return succession; });
+  const f = await failureFixture(false, 'B');
+  await settleApp(() => expect(succession.binding?.session.nativeSessionId).toBe('B'));
+  successionHistoryLink(f.view, 'A');
+  f.failReplay('succession_not_found');
+  await act(async () => { await succession.refresh(); });
+  expect(succession.historyNavigation).toBeUndefined();
+  expect(f.view.querySelector('.lab-succession-history')).toBeNull();
+}, 10000);
+
+it('waits for the selected native successor before reporting a committed refresh complete', async () => {
+  const real = successionHooks.useSessionSuccession;
+  let succession!: ReturnType<typeof real>;
+  vi.spyOn(successionHooks, 'useSessionSuccession').mockImplementation((...args) => { succession = real(...args); return succession; });
+  const f = await failureFixture(false, 'B', false, '', { chain: [] });
+  await settleApp(() => expect(succession.binding?.session.nativeSessionId).toBe('A'));
+  const replay = committed(); f.chain.push(replay);
+  const release = f.holdAttach('B');
+  let outcome = 'pending', failure: unknown, pending!: Promise<void>;
+  try {
+    await act(async () => { pending = succession.refreshCommitted(replay.projection.receipt.operationId).then(() => { outcome = 'confirmed'; }, error => { outcome = 'failed'; failure = error; }); });
+    await settleApp(() => expect(f.requests.some(request => request.url.endsWith('/attach') && request.body?.nativeSessionId === 'B')).toBe(true));
+    expect(outcome).toBe('pending');
+    await act(async () => release());
+    await settleApp(() => expect(outcome).toBe('confirmed'));
+    await pending;
+    expect(failure).toBeUndefined(); expect(succession.binding?.session.nativeSessionId).toBe('B');
+  } finally { release(); }
+}, 10000);
+
+it('finishes committed recovery when an earlier native attachment synchronizes during replay', async () => {
+  const real = successionHooks.useSessionSuccession;
+  let succession!: ReturnType<typeof real>;
+  let options!: Parameters<typeof real>[0];
+  vi.spyOn(successionHooks, 'useSessionSuccession').mockImplementation((...args) => { options = args[0]; succession = real(...args); return succession; });
+  const f = await failureFixture(false, 'B');
+  const releaseAttach = f.holdAttach('B');
+  let releaseCurrent = () => {};
+  try {
+    await settleApp(() => expect(f.requests.some(request => request.url.endsWith('/attach') && request.body?.nativeSessionId === 'B')).toBe(true));
+    releaseCurrent = f.holdCurrent();
+    const currentRequests = f.requests.filter(request => request.url.includes('/session-successions/current')).length;
+    let outcome = 'pending', failure: unknown;
+    await act(async () => { void succession.refreshCommitted('primary-op-2').then(() => { outcome = 'confirmed'; }, error => { outcome = 'failed'; failure = error; }); });
+    await settleApp(() => expect(f.requests.filter(request => request.url.includes('/session-successions/current')).length).toBeGreaterThan(currentRequests));
+    await act(async () => releaseAttach());
+    await settleApp(() => {
+      const connection = options.connections.find({ hostId: 'host', providerId: 'recorded', nativeSessionId: 'B' });
+      expect(connection?.replica.getState().timeline.initialized).toBe(true);
+      expect(connection?.client.getSessionState().synchronized).toBe(true);
+    });
+    await act(async () => releaseCurrent());
+    await settleApp(() => { expect(failure).toBeUndefined(); expect(outcome).toBe('confirmed'); });
+    expect(succession.error).toBeUndefined(); expect(succession.binding?.session.nativeSessionId).toBe('B');
+    expect(succession.document.roles[0]?.appliedRevision).toBe(2);
+    expect(f.requests.filter(request => request.url.endsWith('/attach') && request.body?.nativeSessionId === 'B')).toHaveLength(1);
+  } finally { releaseAttach(); releaseCurrent(); }
+}, 10000);
+
+it.each(['cancelled', 'rejected'] as const)('waits for the original native session to recover after a %s handoff', async phase => {
+  const real = successionHooks.useSessionSuccession;
+  let succession!: ReturnType<typeof real>;
+  vi.spyOn(successionHooks, 'useSessionSuccession').mockImplementation((...args) => { succession = real(...args); return succession; });
+  const f = await failureFixture(false, 'B', false, '', { chain: [] });
+  await settleApp(() => expect(succession.binding?.session.nativeSessionId).toBe('A'));
+  const binding = succession.binding!;
+  const source = binding.session;
+  const result: SuccessionActionResult = { role: { id: 'primary', revision: 1, origin: native('A'), current: native('A'),
+    workspace: { controllerId: 'installation', canonicalCwd: '/fixture' } },
+    record: { operationId: 'cancelled-op', roleId: 'primary', expectedRevision: 1, from: native('A'), phase, startedAt: 'now', updatedAt: 'now' } };
+  await act(async () => f.updatesByAgent.get('agent-A')!('A', 'restoring'));
+  await settleApp(() => expect(binding.client.getSessionState().recovering).toBe(true));
+  let outcome = 'pending', failure: unknown;
+  await act(async () => { void succession.refreshSettled(result, source).then(() => { outcome = 'confirmed'; }, error => { outcome = 'failed'; failure = error; }); });
+  await settleApp(() => expect(succession.discovering).toBe(false));
+  expect(outcome).toBe('pending');
+  expect(succession.binding?.client).toBe(binding.client);
+  await act(async () => f.updatesByAgent.get('agent-A')!('A', 'connected'));
+  await settleApp(() => { expect(failure).toBeUndefined(); expect(outcome).toBe('confirmed'); });
+  expect(f.requests.filter(request => request.url.endsWith('/attach') && request.body?.nativeSessionId === 'A')).toHaveLength(1);
+  expect(f.frames.some(frame => ['send_message', 'execute_command'].includes(frame.message?.type ?? ''))).toBe(false);
+}, 10000);
+
+it('does not complete a committed refresh while its previously confirmed native session is restoring', async () => {
+  const real = successionHooks.useSessionSuccession;
+  let succession!: ReturnType<typeof real>;
+  vi.spyOn(successionHooks, 'useSessionSuccession').mockImplementation((...args) => { succession = real(...args); return succession; });
+  const f = await failureFixture(false, 'B');
+  await settleApp(() => expect(succession.binding?.session.nativeSessionId).toBe('B'));
+  const binding = succession.binding!;
+  await act(async () => f.updatesByAgent.get('agent-B')!('B', 'restoring'));
+  await settleApp(() => expect(binding.client.getSessionState().recovering).toBe(true));
+  let outcome = 'pending', failure: unknown;
+  await act(async () => { void succession.refreshCommitted('primary-op-2').then(() => { outcome = 'confirmed'; }, error => { outcome = 'failed'; failure = error; }); });
+  await settleApp(() => expect(succession.discovering).toBe(false));
+  expect(outcome).toBe('pending');
+  await act(async () => f.updatesByAgent.get('agent-B')!('B', 'connected'));
+  await settleApp(() => { expect(failure).toBeUndefined(); expect(outcome).toBe('confirmed'); });
+  expect(succession.binding?.client).toBe(binding.client);
+}, 10000);
+
+it('allows a manual refresh to confirm the retained source after a native restoration deadline', async () => {
+  const real = successionHooks.useSessionSuccession;
+  let succession!: ReturnType<typeof real>;
+  vi.spyOn(successionHooks, 'useSessionSuccession').mockImplementation((...args) => { succession = real(...args); return succession; });
+  const f = await failureFixture(false, 'B', false, '', { chain: [] });
+  await settleApp(() => expect(succession.binding?.session.nativeSessionId).toBe('A'));
+  const binding = succession.binding!, source = binding.session;
+  const result: SuccessionActionResult = { role: { id: 'primary', revision: 1, origin: native('A'), current: native('A'),
+    workspace: { controllerId: 'installation', canonicalCwd: '/fixture' } },
+    record: { operationId: 'cancelled-op', roleId: 'primary', expectedRevision: 1, from: native('A'), phase: 'cancelled', startedAt: 'now', updatedAt: 'now' } };
+  await act(async () => f.updatesByAgent.get('agent-A')!('A', 'restoring'));
+  await settleApp(() => expect(binding.client.getSessionState().recovering).toBe(true));
+  const timeout = globalThis.setTimeout;
+  vi.spyOn(globalThis, 'setTimeout').mockImplementation(((callback: TimerHandler, delay?: number, ...args: unknown[]) =>
+    timeout(callback, delay === 16000 ? 100 : delay, ...args)) as typeof setTimeout);
+  let outcome = 'pending', failure: unknown;
+  await act(async () => { void succession.refreshSettled(result, source).then(() => { outcome = 'confirmed'; }, error => { outcome = 'failed'; failure = error; }); });
+  await settleApp(() => expect(outcome).toBe('failed'));
+  expect(failure).toBeInstanceOf(Error);
+  expect((failure as Error).message).toContain('Retry the session connection');
+  expect(succession.binding?.client).toBe(binding.client);
+  await act(async () => f.updatesByAgent.get('agent-A')!('A', 'connected'));
+  await settleApp(() => expect(binding.client.getSessionState().recovering).toBe(false));
+  await act(async () => { await succession.refreshSettled(result, source); });
+  expect(succession.binding?.client).toBe(binding.client);
+  expect(f.requests.filter(request => request.url.endsWith('/attach') && request.body?.nativeSessionId === 'A')).toHaveLength(1);
+  expect(f.requests.some(request => /succession\/(prepare|commit)/.test(request.url))).toBe(false);
+}, 10000);
+
+it('retries a failed metadata refresh without retaining its old error on a healthy native binding', async () => {
+  const real = successionHooks.useSessionSuccession;
+  let succession!: ReturnType<typeof real>;
+  vi.spyOn(successionHooks, 'useSessionSuccession').mockImplementation((...args) => { succession = real(...args); return succession; });
+  const f = await failureFixture(false, 'B');
+  await settleApp(() => expect(succession.binding?.session.nativeSessionId).toBe('B'));
+  const binding = succession.binding!;
+  f.failReplay('temporary_failure');
+  await act(async () => { await expect(succession.refreshCommitted('primary-op-2')).rejects.toThrow('Fixture succession route unavailable'); });
+  f.failReplay();
+  await act(async () => { await expect(succession.refreshCommitted('primary-op-2')).resolves.toBeUndefined(); });
+  expect(succession.error).toBeUndefined();
+  expect(succession.binding?.client).toBe(binding.client);
+  expect(f.requests.filter(request => request.url.endsWith('/attach') && request.body?.nativeSessionId === 'B')).toHaveLength(1);
+}, 10000);
+
+it.each(['denied', 'missing-operation', 'native-unavailable'] as const)('rejects a committed refresh with %s evidence instead of reporting success', async reason => {
+  const real = successionHooks.useSessionSuccession;
+  let succession!: ReturnType<typeof real>;
+  vi.spyOn(successionHooks, 'useSessionSuccession').mockImplementation((...args) => { succession = real(...args); return succession; });
+  const f = await failureFixture(false, reason === 'native-unavailable' ? undefined : 'B');
+  await settleApp(() => reason === 'native-unavailable' ? expect(succession.error).toBe('Fixture successor unavailable.') : expect(succession.binding?.session.nativeSessionId).toBe('B'));
+  if (reason === 'denied') f.failReplay('succession_not_found');
+  await act(async () => { await expect(succession.refreshCommitted(reason === 'missing-operation' ? 'missing-operation' : 'primary-op-2')).rejects.toThrow(); });
+}, 10000);
+
+it('confirms an older committed operation after C while leaving an unrelated selected session alone', async () => {
+  const real = successionHooks.useSessionSuccession;
+  let succession!: ReturnType<typeof real>;
+  vi.spyOn(successionHooks, 'useSessionSuccession').mockImplementation((...args) => { succession = real(...args); return succession; });
+  const f = await failureFixture(false, 'B', false, '', { chain: [committed(), committed('B', 'C', 3)] });
+  await settleApp(() => expect(succession.binding?.session.nativeSessionId).toBe('C'));
+  await act(async () => { await succession.open({ hostId: 'host', providerId: 'recorded', nativeSessionId: 'D', title: 'Independent D' }); });
+  await settleApp(() => expect(succession.binding?.session.nativeSessionId).toBe('D'));
+  await act(async () => { await succession.refreshCommitted('primary-op-2'); });
+  expect(succession.binding?.session.nativeSessionId).toBe('D');
+  expect(succession.document.roles[0]?.appliedRevision).toBe(3);
+  expect(new URL(window.location.href).searchParams.get('session')).toBe('D');
+  expect(f.frames.some(frame => ['send_message', 'execute_command'].includes(frame.message?.type ?? ''))).toBe(false);
+}, 10000);
+
+it('does not verify another role operation through the current historical role evidence', async () => {
+  const real = successionHooks.useSessionSuccession;
+  let succession!: ReturnType<typeof real>;
+  vi.spyOn(successionHooks, 'useSessionSuccession').mockImplementation((...args) => { succession = real(...args); return succession; });
+  const f = await failureFixture(false, 'B', false, '', { chain: [committed(), committed('X', 'Y', 2, 'side')] });
+  await settleApp(() => expect(succession.binding?.session.nativeSessionId).toBe('B'));
+  await act(async () => successionHistoryLink(f.view, 'A').click());
+  await settleApp(() => expect(succession.binding?.session.nativeSessionId).toBe('A'));
+  await act(async () => { await expect(succession.refreshCommitted('side-op-2')).rejects.toThrow(); });
+  expect(succession.binding?.session.nativeSessionId).toBe('A');
+}, 10000);
+
+async function handoffCommandFixture(options: { nativeStatus?: 'idle' | 'running'; context?: 'history' | 'child' } = {}) {
+  Object.defineProperty(HTMLDialogElement.prototype, 'showModal', { configurable: true, value() { this.open = true; } });
+  const real = workbenchComponents.LabWorkbench;
+  let primary!: ComponentProps<typeof real>;
+  vi.spyOn(workbenchComponents, 'LabWorkbench').mockImplementation(props => { primary = props; return real(props); });
+  const ref = native('A', 'opencode');
+  const description: SuccessionDescription = { role: { id: 'primary', revision: 1, origin: ref, current: ref,
+    workspace: { controllerId: 'installation', canonicalCwd: '/fixture' } },
+    targets: [{ providerId: 'opencode', displayName: 'OpenCode' }, { providerId: 'claude-code', displayName: 'Claude Code' }],
+    eligibility: options.nativeStatus === 'running' ? { status: 'blocked', code: 'busy', reason: 'The source is still working.' } : { status: 'ready' } };
+  const flags = options.context === 'history' ? '&intent=history' : options.context === 'child' ? '&parent=parent' : '';
+  const f = await failureFixture(false, 'B', false, flags, { chain: [], providerId: 'opencode', userScoped: true,
+    nativeStatus: options.nativeStatus, successionDescription: description,
+    seed(scope, source) { if (options.context === 'child') localStorage.setItem(`agent-remote-opened:${scope}`, JSON.stringify([{ ...source, parentNativeSessionId: 'parent' }])); } });
+  await settleApp(() => { expect(primary.state?.agent?.id).toBe('agent-A'); expect(primary.sessionStatus).toBe('ready'); });
+  return { ...f, get primary() { return primary; } };
+}
+
+it('opens the Handoff chooser from its command, resolves claude and sends no native input', async () => {
+  const f = await handoffCommandFixture();
+  expect(f.primary.consoleCommands?.some(command => command.id === 'console:handoff')).toBe(true);
+  await act(async () => { await f.primary.onExecuteConsoleCommand!('console:handoff', 'claude'); });
+  await settleApp(() => expect(document.querySelector<HTMLSelectElement>('dialog [aria-label="Successor provider"]')?.value).toBe('claude-code'));
+  expect(document.querySelector<HTMLButtonElement>('dialog button[type="submit"]')?.disabled).toBe(false);
+  expect(f.requests.find(request => request.url.endsWith('/succession/describe'))?.body).toEqual({ providerId: 'opencode', nativeSessionId: 'A' });
+  expect(f.requests.some(request => request.url.endsWith('/succession/prepare') || request.url.endsWith('/create'))).toBe(false);
+  expect(f.frames.some(frame => ['send_message', 'execute_command'].includes(frame.message?.type ?? ''))).toBe(false);
+  expect(new DraftStore(f.scope).get('agent-A')).toBe('A local draft');
+}, 10000);
+
+it.each(['claude extra', 'claude;codex'])('rejects malformed Handoff provider arguments %s before choosing or sending', async args => {
+  const f = await handoffCommandFixture();
+  await act(async () => { await expect(f.primary.onExecuteConsoleCommand!('console:handoff', args)).rejects.toThrow(); });
+  expect(document.querySelector('dialog')).toBeNull();
+  expect(f.requests.some(request => request.url.endsWith('/succession/describe'))).toBe(false);
+  expect(f.frames.some(frame => ['send_message', 'execute_command'].includes(frame.message?.type ?? ''))).toBe(false);
+}, 10000);
+
+it('does not silently replace an unavailable requested Handoff provider', async () => {
+  const f = await handoffCommandFixture();
+  let failure: unknown;
+  await act(async () => { try { await f.primary.onExecuteConsoleCommand!('console:handoff', 'missing-provider'); } catch (error) { failure = error; } });
+  if (failure) expect(document.querySelector('dialog')).toBeNull();
+  else {
+    await settleApp(() => expect(document.querySelector<HTMLSelectElement>('dialog [aria-label="Successor provider"]')?.value).toBe(''));
+    expect(document.querySelector<HTMLButtonElement>('dialog button[type="submit"]')?.disabled).toBe(true);
+    expect(document.querySelector('dialog')?.textContent).toContain('missing-provider');
+  }
+  expect(f.requests.some(request => request.url.endsWith('/succession/prepare'))).toBe(false);
+  expect(f.frames.some(frame => ['send_message', 'execute_command'].includes(frame.message?.type ?? ''))).toBe(false);
+}, 10000);
+
+it('opens Handoff while the native session is working and respects the Host blocked eligibility', async () => {
+  const f = await handoffCommandFixture({ nativeStatus: 'running' });
+  expect(f.primary.state?.agent?.status).toBe('running');
+  expect(f.primary.consoleCommands?.some(command => command.id === 'console:handoff')).toBe(true);
+  await act(async () => { await f.primary.onExecuteConsoleCommand!('console:handoff', ''); });
+  await settleApp(() => expect(document.querySelector('dialog')?.textContent).toContain('The source is still working.'));
+  expect(document.querySelector<HTMLButtonElement>('dialog button[type="submit"]')?.disabled).toBe(true);
+  expect(f.requests.some(request => request.url.endsWith('/succession/prepare'))).toBe(false);
+  expect(f.frames.some(frame => ['send_message', 'execute_command'].includes(frame.message?.type ?? ''))).toBe(false);
+}, 10000);
+
+it('keeps the Handoff chooser available while pending input blocks preparation and recovers when cleared', async () => {
+  const f = await handoffCommandFixture();
+  await act(async () => f.primary.onPendingInputChange!(2));
+  await act(async () => { await f.primary.onExecuteConsoleCommand!('console:handoff', ''); });
+  await settleApp(() => expect(document.querySelector<HTMLSelectElement>('dialog [aria-label="Successor provider"]')?.value).toBe('opencode'));
+  const submit = () => document.querySelector<HTMLButtonElement>('dialog button[type="submit"]')!;
+  expect(document.querySelector('dialog')?.textContent).toContain('Send or remove pending messages before handing off this conversation.');
+  expect(submit().disabled).toBe(true);
+  await act(async () => document.querySelector('dialog form')!.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })));
+  expect(f.requests.some(request => request.url.endsWith('/succession/prepare'))).toBe(false);
+  await act(async () => f.primary.onPendingInputChange!(0));
+  expect(submit().disabled).toBe(false);
+  await act(async () => f.primary.onPendingInputChange!(1));
+  expect(submit().disabled).toBe(true);
+  await act(async () => f.primary.onPendingInputChange!(0));
+  expect(submit().disabled).toBe(false);
+  expect(f.requests.some(request => request.url.endsWith('/succession/prepare'))).toBe(false);
+  expect(f.frames.some(frame => ['send_message', 'execute_command'].includes(frame.message?.type ?? ''))).toBe(false);
+  expect(new DraftStore(f.scope).get('agent-A')).toBe('A local draft');
+}, 10000);
+
+it('refreshes successor context after Composer delivery without waiting for a native timeline echo', async () => {
+  vi.stubGlobal('crypto', webcrypto);
+  const real = workbenchComponents.LabWorkbench;
+  let primary!: ComponentProps<typeof real>, reads = 0;
+  const pendingCounts: number[] = [];
+  vi.spyOn(workbenchComponents, 'LabWorkbench').mockImplementation(props => { primary = props; return real({ ...props,
+    onPendingInputChange: count => { pendingCounts.push(count); props.onPendingInputChange?.(count); },
+  }); });
+  const replay = committed();
+  let contextState: 'pending' | 'materialized' = 'pending';
+  const f = await failureFixture(false, 'B', false, '', { userScoped: true, successionStatus: () => {
+    reads++;
+    return { record: replay.projection.receipt, role: replay.projection.role,
+      context: { operationId: replay.projection.receipt.operationId, target: native('B'), state: contextState } };
+  } });
+  await settleApp(() => { expect(primary.state?.agent?.id).toBe('agent-B'); expect(primary.pendingFirstInputContext?.state).toBe('pending'); });
+  await act(async () => { await new Promise(resolve => setTimeout(resolve, 2200)); });
+  const observed = reads, timeline = structuredClone(primary.state!.timeline);
+  contextState = 'materialized';
+  expect(f.view.querySelector<HTMLButtonElement>('[data-testid="prompt-submit"]')!.disabled).toBe(false);
+  await act(async () => {
+    const button = f.view.querySelector<HTMLButtonElement>('[data-testid="prompt-submit"]')!;
+    button.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })); button.click();
+  });
+  expect([...f.view.querySelectorAll('.agent-composer [role="alert"]')].map(item => item.textContent)).toEqual([]);
+  await settleApp(() => expect(f.frames.filter(frame => frame.message?.type === 'send_message')).toHaveLength(1));
+  expect(pendingCounts).toContain(1);
+  await act(async () => { await new Promise(resolve => setTimeout(resolve, 2200)); });
+  expect(primary.pendingFirstInputContext).toBeUndefined();
+  expect(reads).toBeGreaterThan(observed);
+  expect(primary.state!.timeline).toEqual(timeline);
+  expect(f.requests.filter(request => request.url.endsWith('/succession/status')).every(request => request.body?.includeContext === true)).toBe(true);
+}, 10000);
+
+it.each(['history', 'child'] as const)('does not expose or execute Handoff from the %s native view', async context => {
+  const f = await handoffCommandFixture({ context });
+  expect(f.primary.consoleCommands?.some(command => command.id === 'console:handoff')).toBe(false);
+  await act(async () => { await expect(f.primary.onExecuteConsoleCommand!('console:handoff', '')).rejects.toThrow(); });
+  expect(document.querySelector('dialog')).toBeNull();
+  expect(f.requests.some(request => request.url.endsWith('/succession/describe') || request.url.endsWith('/succession/prepare'))).toBe(false);
+  expect(f.frames.some(frame => ['send_message', 'execute_command'].includes(frame.message?.type ?? ''))).toBe(false);
+}, 10000);
 
 it('old desktop A notification still opens concrete A history after B and C confirmation', async () => {
   const notices: Array<{ title: string; options: NotificationOptions; onclick?: () => void; close: ReturnType<typeof vi.fn> }> = [];
@@ -1241,3 +1627,53 @@ it('keeps post-upgrade view preferences and owners when opening the session in a
   expect(primary().querySelector<HTMLInputElement>('input[name^="session-display-"][value="content"]')!.checked).toBe(true);
   expect(f.frames.filter(frame => frame.message && ['send_message', 'execute_command', 'image_upload_begin'].includes(frame.message.type))).toEqual([]);
 });
+
+it('keeps a synchronized native binding alive past its confirmation deadline while replay is pending', async () => {
+  const real = successionHooks.useSessionSuccession;
+  let succession!: ReturnType<typeof real>, options!: Parameters<typeof real>[0];
+  vi.spyOn(successionHooks, 'useSessionSuccession').mockImplementation((...args) => { options = args[0]; succession = real(...args); return succession; });
+  const f = await failureFixture(false, 'B');
+  const releaseAttach = f.holdAttach('B');
+  let releaseCurrent = () => {};
+  const nativeSetTimeout = globalThis.setTimeout;
+  let shortenedDeadlines = 0;
+  const deadlineSpy = vi.spyOn(globalThis, 'setTimeout').mockImplementation((callback, delay, ...args) => {
+    if (delay === 15000) { shortenedDeadlines++; return nativeSetTimeout(callback, 200, ...args); }
+    return nativeSetTimeout(callback, delay, ...args);
+  });
+  try {
+    await settleApp(() => expect(f.requests.some(request => request.url.endsWith('/attach') && request.body?.nativeSessionId === 'B')).toBe(true));
+    releaseCurrent = f.holdCurrent();
+    const currentRequests = f.requests.filter(request => request.url.includes('/session-successions/current')).length;
+    let outcome = 'pending', failure: unknown;
+    await act(async () => { void succession.refreshCommitted('primary-op-2').then(() => { outcome = 'confirmed'; }, error => { outcome = 'failed'; failure = error; }); });
+    await settleApp(() => expect(f.requests.filter(request => request.url.includes('/session-successions/current')).length).toBeGreaterThan(currentRequests));
+    await act(async () => releaseAttach());
+    const nativeConnection = () => options.connections.find({ hostId: 'host', providerId: 'recorded', nativeSessionId: 'B' });
+    await settleApp(() => {
+      expect(nativeConnection()?.replica.getState().agent?.runtimeInfo.sessionId).toBe('B');
+      expect(nativeConnection()?.replica.getState().timeline.initialized).toBe(true);
+      expect(nativeConnection()?.client.getSessionState().synchronized).toBe(true);
+      expect(nativeConnection()?.client.getSessionState().runtime?.state).toBe('connected');
+      expect(nativeConnection()?.client.getSessionState().controlChecking).toBe(false);
+      expect(nativeConnection()?.client.getSessionState().recovering).toBe(false);
+    });
+    const synchronizedConnection = nativeConnection()!;
+    expect(shortenedDeadlines).toBe(1);
+    deadlineSpy.mockRestore();
+    expect(outcome).toBe('pending');
+    expect(succession.binding).toBeUndefined();
+    await act(async () => { await new Promise(resolve => nativeSetTimeout(resolve, 250)); });
+    expect(succession.error).toBeUndefined();
+    expect(outcome).toBe('pending');
+    expect(nativeConnection()).toBe(synchronizedConnection);
+    await act(async () => releaseCurrent());
+    await settleApp(() => { expect(failure).toBeUndefined(); expect(outcome).toBe('confirmed'); });
+    expect(succession.error).toBeUndefined();
+    expect(succession.binding?.isCurrent()).toBe(true);
+    expect(succession.binding?.client).toBe(synchronizedConnection.client);
+    expect(succession.binding?.session.nativeSessionId).toBe('B');
+    expect(succession.document.roles[0]?.appliedRevision).toBe(2);
+    expect(f.requests.filter(request => request.url.endsWith('/attach') && request.body?.nativeSessionId === 'B')).toHaveLength(1);
+  } finally { deadlineSpy.mockRestore(); releaseAttach(); releaseCurrent(); }
+}, 10000);

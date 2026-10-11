@@ -176,5 +176,11 @@ it('keeps Handoff description and all action requests scoped to one Host and ope
     expect(requests.map(item => item.path)).toEqual(['describe', 'prepare', 'commit', 'status', 'reconcile', 'cancel'].map(action => `/u/owner/v1/remote/hosts/my-host/succession/${action}`));
     expect(requests[0]!.body).toEqual({ providerId: 'opencode', nativeSessionId: 'A' });
     expect(requests.slice(2).map(item => item.body)).toEqual(Array(4).fill({ operationId: 'same-op' }));
+    const original = { operationId: 'same-op', providerId: 'opencode', nativeSessionId: 'A', expectedRevision: 8, targetProviderId: 'opencode' };
+    await client.successionAction('cancel', original.operationId, { original });
+    expect(requests.at(-1)).toEqual({ path: '/u/owner/v1/remote/hosts/my-host/succession/cancel', body: original });
+    await expect(client.successionAction('cancel', 'replacement-op', { original })).rejects.toThrow('original Handoff identity');
+    await expect(client.successionAction('commit', original.operationId, { original })).rejects.toThrow('original Handoff identity');
+    expect(requests).toHaveLength(7);
   } finally { server.closeAllConnections(); await new Promise<void>(resolve => server.close(() => resolve())); }
 }, 5000);

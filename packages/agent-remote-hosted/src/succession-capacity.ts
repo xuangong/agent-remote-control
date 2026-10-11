@@ -172,6 +172,10 @@ export function deriveSuccessionCapacity(state: Readonly<HostedRelayState>, enco
       if ([...roles.values()].some(count => count > 512)) violations.push('Succession role history is exhausted.');
       headerGrowth('associationHeader', owner, 'associations', bytes(associations.revision > MAX - slots.remainingAssociationRevisions ? MAX : sum(associations.revision, slots.remainingAssociationRevisions)) - bytes(associations.revision));
       for (const row of associations.freezes) {
+        if (row.cancelOnly) {
+          if (row.released === undefined) replacement('freeze', owner, row.receipt.token, bytes({ ...row, released: 'cancelled' }));
+          continue;
+        }
         if (row.receipt.version === 2 && row.projection && bytes(row.projection) > row.receipt.maxProjectionBytes) throw new Error('Succession projection bound invariant failed.');
         if (row.released === undefined) {
           if (row.receipt.version !== 2) throw new Error('Unresolved legacy succession has no finite projection bound.');
@@ -223,7 +227,7 @@ export function deriveSuccessionCapacity(state: Readonly<HostedRelayState>, enco
         if (binding?.sourceRelation) replacement('binding', owner, binding.agentId, bytes({ ...binding, sourceRelation: { ...binding.sourceRelation,
           nativeSourceRef: reservation.sourceRef, linked: reservation.linked, revision: reservation.expectedRelationRevision + 1 } }));
       }
-      const products = associations.freezes.filter(row => (row.released === undefined || row.released === 'committed')
+      const products = associations.freezes.filter(row => !row.cancelOnly && (row.released === undefined || row.released === 'committed')
         && tenant.favoritesSuccession?.receipts.find(entry => entry.token === row.receipt.token)?.status !== 'applied');
       if (products.length) {
         const stars = state.sessionStars?.filter(star => star.subject === tenant.subject) ?? [];

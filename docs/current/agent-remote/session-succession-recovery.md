@@ -21,9 +21,18 @@ also require the explicit [Host callback plugin](../../opencode-callbacks.md).
 The current [provider validation](../../handoffs/2026-10-11-succession-provider-validation.md)
 records pinned native versions, provider-specific evidence and recovery limits.
 
-The primary Session View offers **Handoff** through its session actions. The
-authorized Host describes the current role, revision, cwd, target providers and
-eligibility; preparation checks these facts again. It requires confirmed idle,
+Enter `/handoff` in the primary Session View composer, or `/handoff <provider>`
+to request a target provider. The compact chooser defaults to the current provider
+and shows the working directory. `claude` also matches an available Claude Code
+provider. An unavailable requested provider leaves the choice empty until the
+user selects an available target. Choose **Hand off** to prepare and commit;
+progress then appears above the composer. Successful handoff opens the current
+conversation and closes the chooser automatically.
+Pending messages block a new preparation until they are sent or removed; they
+do not block status checks, reconciliation, or cancellation of a retained operation.
+
+The authorized Host describes the current role, revision, cwd, target providers
+and eligibility; preparation checks these facts again. It requires confirmed idle,
 no queued input, approval, active child work or unsettled ARC mutation. It rejects
 immediately rather than waiting for work to finish. Ordinary ARC writes to the
 source and candidate are gated while the operation is active; this does not lock
@@ -36,18 +45,70 @@ corresponding live native evidence. Reading a saved transcript alone cannot
 establish that a runtime is idle or that an old interaction remains actionable.
 
 Preparation and commit send no model input. The first real successor input
-receives the captured normalized history once. Source references and TPM follow
-the stable role; concrete history and already admitted deliveries retain their
+receives the captured normalized history once. That first input must be plain
+text with immediate delivery; image attachments and queued delivery are not
+supported until its context delivery is confirmed. Subsequent inputs follow the
+provider's ordinary capabilities. An uncertain first input keeps its actual
+recipient and operation identity and is never automatically resent.
+
+The website requests `succession/status` with `includeContext: true` to read the
+Host's current context delivery evidence for that operation and native target.
+This optional observation is not stored in the frozen succession receipt.
+Offline or unavailable evidence preserves the first-input attachment restriction;
+only a confirmed `materialized` state removes it. Ordinary status recovery does
+not require this additional observation. The chooser also checks this browser's
+pending messages before preparation, since the Host cannot observe unsent local
+inputs.
+
+Source references and TPM follow the stable role; concrete history and already
+admitted deliveries retain their
 original native targets. Favorites, Track and the primary pane follow the new
 current session while existing Side/Ask sessions retain their own histories.
+The current conversation's **Continued from** link opens its predecessor, with
+older sessions under **Earlier history**. Opening that history retains the
+concrete old session and disables sending there; choose **Return to current**
+to continue.
 
 One workspace-scoped, tab-local intent retains the original operation, source and
 cancellation request across reload. Cancellation remains requested even when its
 HTTP response fails; a late ready response cannot make that page commit. An
-authoritative committed result still wins. **Hide Handoff** releases an unresolved
-dialog without deleting its intent; **Recover Handoff** reopens that same operation
-even if its old source is offline or retired. Generic 409/404 responses do not
-prove non-admission and never authorize another create or automatic resend.
+authoritative committed result still wins. A retained operation appears as an
+inline notice after reload, even when its old source is offline or retired.
+Automatic recovery performs bounded status checks while the page is visible and
+Host access is available. It never creates a new candidate, reconciles or retries
+commit automatically. Generic 409/404 responses do not prove non-admission and
+never authorize another create or automatic resend.
+When the bounded checks are exhausted, the notice says automatic checks stopped
+and directs the user to Details. Focus and visibility changes do not restart an
+exhausted round; the retained operation requires an explicit recovery action.
+
+Open **Details** for **Check status**, **Reconcile**, an explicitly available
+**Commit Handoff**, or **Cancel Handoff**. Cancellation is available while
+preparation is still pending. Hiding details preserves the notice and operation.
+Cancellation carries the complete original preparation identity: operation ID,
+source provider and native session, expected role revision, and target provider
+when selected. It also works when a projection-capacity or role-revision refusal
+left no Broker freeze. The authenticated Broker first retains a cancellation-only
+fence, then requires the Host's durable cancellation, readback and release. A 404
+alone never clears the operation or permits another preparation.
+
+A terminal decision is only the first part of recovery. After commit, authorized
+replay and local projection must be applied and the current native binding must
+be confirmed and synchronized. After cancellation or rejection, the original
+conversation must be usable again. If a separately verified committed lineage
+has already moved that role forward, recovery follows that lineage and confirms
+its current binding; terminal response metadata alone cannot redirect the view.
+Until these checks finish, sending or deferring messages, changing settings,
+executing native commands and starting another Handoff remain disabled for the
+affected primary conversation.
+Draft editing remains available.
+
+Refresh and native-binding confirmation have deadlines. A failed or timed-out
+refresh retains the terminal decision and offers **Retry refresh**, which repeats
+only observation, projection and connection restoration. It never repeats prepare,
+commit or cancel. A cancelled or rejected operation offers **Done** only after
+these checks succeed; an unknown or timed-out operation cannot be dismissed as
+complete. Hiding the notice's details preserves its gate and original operation.
 
 Upgrade the Controller, Relay and website together. The browser imports old
 composition metadata once, then uses one v2 view document and explicit owner
@@ -88,8 +149,8 @@ development files or a second browser runtime model.
 | Pending context | Version 3 | Reads valid versions 1 and 2; optional prepared-input records use attachment version 3. Preparations share attachment capacity, and delivery-state recovery remains independent of role state |
 | Relay outer state | Version 10 for configured succession accounting; version 9 with association-v5 writers; version 8 adds Host recovery metadata; version 7 adds Favorites succession progress | Restore10 requires complete encoding costs; successful accounting writes retain10. No-cost versions 2 through 9 preserve ordinary and exact saved recovery with explicit inner-format rules; no applied progress, budget or native result is fabricated |
 | Cloudflare SQL snapshot | Metadata format 3; record/envelope/manifest format 1 | Format 2 migrates atomically on the first complete commit; old readers reject 3. The production entry installs the complete codec and cost-backed enrollment |
-| Broker association state | Version 5 | Versions 1 through 4 retain explicit migrations and valid complete committed lineage; saved freeze-v1 identities remain unchanged |
-| Enrollment freeze | Version 2 for new preparation | Requires an immutable positive safe-integer `maxProjectionBytes`; exact saved version-1 recovery remains supported without retrofitting a budget |
+| Broker association state | Version 5 | Versions 1 through 4 retain explicit migrations and valid complete committed lineage; saved freeze-v1 identities remain unchanged. An optional `cancelOnly: true` on a Broker row identifies a v1 cancellation-only obligation and forbids a committed projection |
+| Enrollment freeze | Version 2 for new preparation | Requires an immutable positive safe-integer `maxProjectionBytes`; exact saved version-1 recovery and cancellation-only v1 enrollment remain supported without retrofitting a budget. A new v1 receipt cannot prepare a native candidate |
 | Favorites succession progress | Version 1, requiring Relay7 or later | Bounded pending/applied acknowledgements identify an exact committed freeze and contiguous role revision; this is store progress, not another commit authority |
 | Host recovery metadata | Revoked Host mappings and targeted invitations, requiring Relay8 | Owner recovery binds Host ID, installation ID and revocation ID; previous credentials, bindings and sharing grants are not restored |
 
@@ -97,9 +158,11 @@ An unpublished experimental Controller version-2 file without
 `associationResults` is rejected, not migrated. Future or malformed versions also
 fail closed. Broker association version 2 requires at least Relay outer version 4; Broker
 association version 3 requires outer version 5; version 4 requires outer version 6;
-version 5 requires outer version 9. Favorites progress requires outer version 7. New safety fields must not be
-hidden behind an older version number. An older writer must not overwrite a newer format. Do not edit a
-version number or delete recovery fields to make a previous binary accept them.
+version 5 requires outer version 9. Favorites progress requires outer version 7.
+An extension must preserve older readers' fail-closed behavior; incompatible
+safety semantics require a new format version. An older writer must not overwrite
+a newer format. Do not edit a version number or delete recovery fields to make a
+previous binary accept them.
 
 Role7 retains the original optional native creation outcome; context3 retains an
 evidence-v2 nested prepared-input witness and bounded latest confirmed recovery
@@ -154,6 +217,16 @@ preparation; exact queued duplicates perform no write or revision increment.
 Branded admission failure alone proves no earlier native-effect disposition:
 only explicitly pre-effect callers may report a safe, non-poisoning refusal.
 Post-native or unknown-durability failures preserve existing reconciliation rules.
+
+A new cancellation-only Broker row retains `cancelOnly: true` beside its v1
+receipt. It reserves the actual remaining cancellation bytes and association
+revision, without a projection or Favorites obligation. Unmarked unresolved v1
+receipts still lack a finite projection bound and fail accounting preflight.
+Another unreleased freeze on the lineage blocks a new cancellation fence before
+it is saved; the same original cancellation can be retried after that operation
+settles. Insufficient storage or revision headroom cannot produce cancellation
+success. A saved fence survives restart and prevents a late prepare from creating
+a candidate, even if the cancellation acknowledgement was lost.
 
 Configuration alone does not write storage. Its successful mutations, including
 ordinary-only changes, write outer10 without downgrading. Restore10 without both
@@ -239,6 +312,8 @@ Cleanup cannot hide the original initialization cause.
 
 | Persisted situation | Permitted behavior |
 | --- | --- |
+| Browser retains a preparation intent but the Broker has no freeze | Explicit cancellation supplies the original identity and retains a cancellation-only fence before Host cancellation; status 404 alone never releases the browser gate |
+| Terminal decision is known but the affected primary binding is not synchronized | Retain the decision and mutation gate; a failed or timed-out refresh offers an explicit observation/connection retry without repeating the mutation |
 | Prepared and ready in the same verified runtime | Revalidate source/candidate and capture boundary before commit; cancellation retains the native candidate |
 | New-format precreate state when the Host restarts | Explicitly settle the interrupted local preparation without creating a candidate |
 | New-format candidate-known or ready state when the Host restarts | Restore as unknown; explicitly revalidate the saved context and candidate without creating again, or cancel while retaining candidate evidence |
@@ -493,8 +568,10 @@ The tenant Broker freeze projection is the sole Relay commit authority. A legacy
 top-level `sessionSuccessions` mirror migrates only if every full saved projection
 exactly matches an authenticated committed freeze for that owner. Missing chain
 prefixes, unmatched mirrors and contradictory surviving identities fail closed;
-outer versions 6 and later forbid that duplicate field. Never synthesize a freeze from
-browser state or remove recovery evidence to make an older writer accept it.
+outer versions 6 and later forbid that duplicate field. Browser state cannot
+certify a preparation freeze or committed projection. The cancellation-only path
+validates the original selection against Host-owned lineage before retaining its
+fence. Never remove recovery evidence to make an older writer accept it.
 
 Replay uses a version-1 envelope containing the immutable committed projection
 and authorized `from`/`to` Host, provider and native-session locators. A locator is
@@ -696,6 +773,31 @@ is saved. Read results are gated again after awaited history/routing and validat
 a disposed, transferred, replaced or unauthorized reader cannot release old data.
 This preserves source-read authority; it does not settle native sends or certify
 that the native session has no pending work.
+
+## Prepared first-input echo recovery
+
+The first input keeps the complete history prefix in the authoritative native
+user message. The Host adds `command_acknowledged.payload.submittedTextSha256`
+from the durably validated prepared-input witness before the shared operation
+cache retains the result. This evidence is independent of native input
+acceptance, including adapters returning `void`. This is
+the SHA-256 of the exact submitted UTF-8 text, without trimming or newline
+normalization. It does not change `started`, `queued`, or `handled`, and is not
+native materialization, execution, or completion evidence.
+
+The Remote outbox retains the digest with the caller's original input and waits
+for the complete text-only native echo in the same agent and timeline epoch,
+after the saved sequence cursor. A prefix/suffix match, different whitespace,
+an image-containing message, or a matching echo in a replacement epoch cannot
+confirm that delivery. Echoes consumed by other local sends remain excluded
+across reload and late acknowledgements. Browser digest computation rechecks
+the current replica before settlement.
+
+A lost acknowledgement leaves the original uncertain input visible; the client
+does not resend automatically. A new explicit operation clears old submission
+evidence. Ordinary sends without a submitted-text digest retain their existing
+matching behavior. The optional acknowledgement field requires compatible
+strict-schema receivers throughout the route.
 
 ## Backup and rollback boundary
 

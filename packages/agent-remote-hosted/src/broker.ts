@@ -4,7 +4,7 @@ import type { RelationChangeReset, BrokerRelationChange } from './relation-chang
 import { isDeepStrictEqual } from 'node:util';
 import { retainedHostIdentities, retainedRecoveryInstallations, type HostRecoverySelection, type RevokedHost } from './host-recovery.js';
 import { validBrokerAssociations, migrateBrokerAssociations, type BrokerAssociationState } from './succession-associations.js';
-import { isNativeSessionRef, isPrimaryRole, isSuccessionRecord, isSuccessionDescription, nativeSessionRefKey, successionFreezeKey, successionAuthorityKey, type NativeSessionRef, type SuccessionAssociationFreeze, type BoundedSuccessionAssociationFreeze, type PrimaryRole, type SuccessionRecord } from '@orchardworks/agent-remote-protocol';
+import { isNativeSessionRef, isPrimaryRole, isSuccessionRecord, isSuccessionDescription, isSuccessionActionResult, nativeSessionRefKey, successionFreezeKey, successionAuthorityKey, type NativeSessionRef, type SuccessionAssociationFreeze, type BoundedSuccessionAssociationFreeze, type PrimaryRole, type SuccessionRecord, type SuccessionActionResult } from '@orchardworks/agent-remote-protocol';
 import { type SuccessionAssociationAuthority, isSuccessionAssociationAuthority } from '@orchardworks/agent-remote-protocol';
 import { isTpmAction, isTpmCreate, isTpmList, isTpmWork } from '@orchardworks/agent-remote-protocol';
 import { validSessionRelationUpdate, validSourceRelation, type SourceRelation, type SessionRelation } from './session-relations.js';
@@ -233,11 +233,13 @@ export function createHostBroker(options: HostBrokerOptions) {
       if (host.successionEnrollmentVersion !== 2 || !options.successionProjectionAllowance) result.eligibility = { status: 'unavailable', code: 'succession_preparation_unavailable', reason: 'New handoff requires the current Host and Relay capability.' };
       return result;
     }
-    const allowed = action === 'prepare' ? ['operationId', 'providerId', 'nativeSessionId', 'expectedRevision', 'targetProviderId'] : ['operationId'];
+    const selectionKeys = ['providerId', 'nativeSessionId', 'expectedRevision', 'targetProviderId'];
+    const allowed = action === 'prepare' || action === 'cancel' ? ['operationId', ...selectionKeys] : action === 'status' ? ['operationId', 'includeContext'] : ['operationId'];
     if (Object.keys(input).some(name => !allowed.includes(name))) throw new BrokerError(400, 'invalid_succession_request', 'Only source selection and operation identity may be supplied.');
+    if (input.includeContext !== undefined && input.includeContext !== true) throw new BrokerError(400, 'invalid_succession_request', 'Context status must be explicitly requested.');
     const operationId = required(input.operationId, 'operationId');
     let frozen = associations.freezes.find(item => item.hostId === host.id && item.receipt.request.operationId === operationId);
-    if (action === 'prepare') {
+    if (action === 'prepare' || action === 'cancel' && selectionKeys.some(name => Object.hasOwn(input, name))) {
       const providerId = required(input.providerId, 'providerId'), nativeSessionId = required(input.nativeSessionId, 'nativeSessionId');
       const source = associationSource(host, providerId, nativeSessionId);
       const targetProviderId = input.targetProviderId === undefined ? undefined : required(input.targetProviderId, 'targetProviderId');
@@ -249,9 +251,15 @@ export function createHostBroker(options: HostBrokerOptions) {
       if (frozen) {
         assertSameRequest(frozen.receipt);
       } else {
-        if (host.successionEnrollmentVersion !== 2 || !options.successionProjectionAllowance) throw new BrokerError(409, 'succession_preparation_unavailable', 'New succession preparation requires negotiated v2 and projection admission.');
+        if (action === 'prepare' && (host.successionEnrollmentVersion !== 2 || !options.successionProjectionAllowance)) throw new BrokerError(409, 'succession_preparation_unavailable', 'New succession preparation requires negotiated v2 and projection admission.');
         const described = await associationRpc(host, { action: 'describe', providerId, nativeSessionId });
-        if (!isPrimaryRole(described.role) || !Array.isArray(described.lineage) || described.role.revision !== input.expectedRevision || described.role.current.controllerId !== host.installationId || nativeSessionRefKey(described.role.current) !== nativeSessionRefKey(source)) throw new BrokerError(409, 'invalid_host_response', 'The current primary role could not be verified.');
+        if (!isPrimaryRole(described.role) || !Array.isArray(described.lineage) || described.role.current.controllerId !== host.installationId
+          || described.lineage.length !== described.role.revision || !described.lineage.every(isNativeSessionRef)
+          || nativeSessionRefKey(described.lineage[0]!) !== nativeSessionRefKey(described.role.origin)
+          || nativeSessionRefKey(described.lineage.at(-1)!) !== nativeSessionRefKey(described.role.current)
+          || !described.lineage[(input.expectedRevision as number) - 1]
+          || nativeSessionRefKey(described.lineage[(input.expectedRevision as number) - 1]!) !== nativeSessionRefKey(source)
+          || action === 'prepare' && described.role.revision !== input.expectedRevision) throw new BrokerError(409, 'invalid_host_response', 'The selected primary role revision could not be verified.');
         frozen = await commit(draft => {
           const state = structuredClone(associations);
           assertHostCurrent(host, generation);
@@ -259,6 +267,17 @@ export function createHostBroker(options: HostBrokerOptions) {
           if (duplicate) { assertSameRequest(duplicate.receipt); return { value: duplicate, unchanged: true, publish() {} }; }
           if (state.freezes.filter(item => item.receipt.request.roleId === described.role.id).length >= 512) throw new BrokerError(409, 'succession_role_capacity', 'Succession role history is full; reconcile existing operations.');
           for (const ref of described.lineage as NativeSessionRef[]) assertAssociationOpen(ref);
+          if (action === 'cancel') {
+            // A new v1 receipt cannot prepare a native candidate; retain it before asking the Host to cancel.
+            const receipt: SuccessionAssociationFreeze = { version: 1, token: randomUUID(), authority: options.successionEnrollment!, controllerId: host.installationId,
+              request: { operationId, roleId: described.role.id, expectedRevision: input.expectedRevision as number, from: source, ...(targetProviderId ? { targetProviderId } : {}) },
+              associationRevision: state.revision, lineage: described.lineage, relations: [] };
+            if (state.revision >= Number.MAX_SAFE_INTEGER) throw new BrokerError(409, 'association_capacity', 'Association revision is exhausted.');
+            state.revision++;
+            const result = { hostId: host.id, receipt, cancelOnly: true as const }; state.freezes.push(result);
+            assertAssociationCapacity(state); draft.associations = state;
+            return { value: result, publish() { associations = state; } };
+          }
           if (state.admissions.some(admission => described.lineage.some((ref: NativeSessionRef) => nativeSessionRefKey(ref) === nativeSessionRefKey(admission.source)))) throw new BrokerError(409, 'association_outcome_unknown', 'Settle source creation before succession.');
           const proposal: Omit<BoundedSuccessionAssociationFreeze, 'maxProjectionBytes'> = { version: 2, token: randomUUID(), authority: options.successionEnrollment!, controllerId: host.installationId,
             request: { operationId, roleId: described.role.id, expectedRevision: input.expectedRevision as number, from: source, ...(targetProviderId ? { targetProviderId } : {}) },
@@ -285,9 +304,19 @@ export function createHostBroker(options: HostBrokerOptions) {
     if (frozen?.receipt.version === 2 && host.successionEnrollmentVersion !== 2) throw new BrokerError(409, 'succession_enrollment_unavailable', 'Saved bounded succession requires negotiated v2 recovery.');
     if (!frozen) throw new BrokerError(404, 'succession_not_found', 'No frozen succession operation exists.');
     if (successionAuthorityKey(frozen.receipt.authority) !== successionAuthorityKey(options.successionEnrollment!)) throw new BrokerError(409, 'succession_authority_changed', 'The frozen authority requires reconciliation.');
+    const receipt = frozen.receipt;
+    async function withContextStatus(result: SuccessionActionResult): Promise<SuccessionActionResult> {
+      if (!input.includeContext || result.record.phase !== 'committed') return result;
+      const current = await associationRpc(host, { action: 'status', freeze: receipt, includeContext: true });
+      const observed = { ...result, ...(current.context === undefined ? {} : { context: current.context }) };
+      if (!current.freeze || successionFreezeKey(current.freeze) !== successionFreezeKey(receipt)
+        || !isDeepStrictEqual(current.record, result.record) || !isSuccessionActionResult(observed)) throw new BrokerError(502, 'invalid_host_response', 'The handoff context status could not be verified.');
+      return observed;
+    }
     if (frozen.released === 'committed' && frozen.projection && ['status', 'reconcile', 'commit'].includes(action)) {
       if (action !== 'status') await associationRpc(host, { action: 'release', freeze: frozen.receipt });
-      return { record: structuredClone(frozen.projection.receipt), role: structuredClone(frozen.projection.role), locator: { hostId: host.id, providerId: frozen.projection.role.current.providerId, nativeSessionId: frozen.projection.role.current.nativeSessionId } };
+      const result = { record: structuredClone(frozen.projection.receipt), role: structuredClone(frozen.projection.role), locator: { hostId: host.id, providerId: frozen.projection.role.current.providerId, nativeSessionId: frozen.projection.role.current.nativeSessionId } };
+      return withContextStatus(result);
     }
     const result = await associationRpc(host, { action, freeze: frozen.receipt });
     if (!isSuccessionRecord(result.record) || !isPrimaryRole(result.role) || !result.freeze || successionFreezeKey(result.freeze) !== successionFreezeKey(frozen.receipt)
@@ -307,7 +336,7 @@ export function createHostBroker(options: HostBrokerOptions) {
       });
     }
     if (['committed', 'rejected', 'cancelled'].includes(result.record.phase)) await associationRpc(host, { action: 'release', freeze: frozen.receipt });
-    return { record: result.record, role: result.role, locator: { hostId: host.id, providerId: result.role.current.providerId, nativeSessionId: result.role.current.nativeSessionId } };
+    return withContextStatus({ record: result.record, role: result.role, locator: { hostId: host.id, providerId: result.role.current.providerId, nativeSessionId: result.role.current.nativeSessionId } });
   }
   function relationAccess(subject: string, reservation: RelationChangeReservation) {
     requireOwner(subject);

@@ -46,12 +46,22 @@ export const SuccessionDescription = Type.Object({
   ]),
 }, object);
 export type SuccessionDescription = Static<typeof SuccessionDescription>;
+/** A current Host observation. Frozen succession receipts never retain delivery state. */
+export const SuccessionContextStatus = Type.Object({ operationId: id, target: NativeSessionRef,
+  state: Type.Union((['pending', 'dispatching', 'accepted', 'unknown', 'materialized'] as const).map(value => Type.Literal(value))),
+}, object);
+export type SuccessionContextStatus = Static<typeof SuccessionContextStatus>;
 export const SuccessionActionResult = Type.Object({ record: SuccessionRecord, role: PrimaryRole,
   locator: Type.Optional(Type.Object({ hostId: id, providerId: id, nativeSessionId: id }, object)),
+  context: Type.Optional(SuccessionContextStatus),
 }, object);
 export type SuccessionActionResult = Static<typeof SuccessionActionResult>;
 export const isSuccessionDescription = (value: unknown): value is SuccessionDescription => Value.Check(SuccessionDescription, value);
-export const isSuccessionActionResult = (value: unknown): value is SuccessionActionResult => Value.Check(SuccessionActionResult, value);
+export const isSuccessionActionResult = (value: unknown): value is SuccessionActionResult => {
+  if (!Value.Check(SuccessionActionResult, value)) return false;
+  const { record, context } = value as SuccessionActionResult;
+  return !context || record.phase === 'committed' && !!record.to && context.operationId === record.operationId && nativeSessionRefKey(context.target) === nativeSessionRefKey(record.to);
+};
 export const isNativeSessionRef = (value: unknown): value is NativeSessionRef => Value.Check(NativeSessionRef, value);
 export const isPrimaryRole = (value: unknown): value is PrimaryRole => Value.Check(PrimaryRole, value);
 export const isSourceBinding = (value: unknown): value is SourceBinding => Value.Check(SourceBinding, value);

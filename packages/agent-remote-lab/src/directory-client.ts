@@ -49,8 +49,9 @@ export class SessionDirectoryClient {
     if (!isSuccessionActionResult(value)) throw new Error('The Handoff result could not be verified. Check this operation.');
     return value;
   }
-  async successionAction(action: 'commit' | 'cancel' | 'status' | 'reconcile', operationId: string): Promise<SuccessionActionResult> {
-    const value = await this.request(`succession/${action}`, { operationId }, AbortSignal.timeout(50000));
+  async successionAction(action: 'commit' | 'cancel' | 'status' | 'reconcile', operationId: string, options?: { includeContext?: true; signal?: AbortSignal; original?: SuccessionPrepareInput }): Promise<SuccessionActionResult> {
+    if (options?.original && (action !== 'cancel' || options.original.operationId !== operationId)) throw new Error('Cancellation must retain its original Handoff identity.');
+    const value = await this.request(`succession/${action}`, { ...options?.original, operationId, ...(options?.includeContext ? { includeContext: true } : {}) }, options?.signal ?? AbortSignal.timeout(50000));
     if (!isSuccessionActionResult(value)) throw new Error('The Handoff result could not be verified. Check this operation.');
     return value;
   }

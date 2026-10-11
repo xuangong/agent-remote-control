@@ -80,13 +80,14 @@ export function TpmWorkspace({ item, session, replica, visible, storageScope, tr
   const work = item.work;
   const unavailable = !item.online || busy;
   const creationUnresolved = work.creationStatus === 'unknown' || work.creationStatus === 'abandoned';
+  const archiveLabel = work.archived ? 'Restore TPM session' : work.phase === 'completed' ? 'Archive TPM session' : 'Stop and archive TPM session';
   return <div className="lab-ask-viewport lab-tpm-viewport" hidden={!visible}>
     <section ref={panel} className="lab-ask-window lab-tpm-window" role="dialog" aria-label={`TPM: ${work.title}`} aria-modal="false" tabIndex={-1}>
       <header className="lab-ask-heading lab-tpm-heading"><div><span className="lab-tpm-eyebrow">TPM · {item.hostName}</span>{onRename ? <button ref={titleButton} type="button" className="lab-tpm-title-button" aria-label="Rename TPM session" title={work.title} disabled={!!unavailable || savingTitle} onClick={() => { setTitleDraft(work.title); setTitleError(undefined); setEditingTitle(true); }}><strong>{work.title}</strong><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" aria-hidden="true"><path d="m16 3 5 5-12 12-6 1 1-6ZM14 5l5 5" /></svg></button> : <strong title={work.title}>{work.title}</strong>}</div>
-        <div className="lab-ask-controls">{work.phase === 'completed' ? <button type="button" disabled={!!unavailable} aria-label={work.archived ? 'Restore TPM session' : 'Archive TPM session'} title={work.archived ? 'Restore TPM session' : 'Archive TPM session'} onClick={() => run(async () => {
+        <div className="lab-ask-controls"><button type="button" disabled={!!unavailable} aria-label={archiveLabel} title={archiveLabel} onClick={() => run(async () => {
           await onAction(work.archived ? 'unarchive' : 'archive');
           if (!work.archived) onShowList();
-        })}><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M4 8v12h16V8M3 3h18v5H3z" /><path d={work.archived ? 'M12 17v-6m-3 3 3-3 3 3' : 'M9 12h6'} /></svg></button> : null}<button type="button" aria-label="Back to TPM works" title="Back to works" onClick={onShowList}>Works</button><button type="button" aria-label="Minimize TPM" title="Minimize TPM" onClick={onClose}>×</button></div>
+        })}><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M4 8v12h16V8M3 3h18v5H3z" /><path d={work.archived ? 'M12 17v-6m-3 3 3-3 3 3' : 'M9 12h6'} /></svg></button><button type="button" aria-label="Back to TPM works" title="Back to works" onClick={onShowList}>Works</button><button type="button" aria-label="Minimize TPM" title="Minimize TPM" onClick={onClose}>×</button></div>
       </header>
       {editingTitle ? <form className="lab-tpm-name-editor" onSubmit={event => { event.preventDefault(); void saveTitle(); }} onKeyDown={event => {
         if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); if (!savingTitle) cancelRename(); }
@@ -97,9 +98,8 @@ export function TpmWorkspace({ item, session, replica, visible, storageScope, tr
       </form> : null}
       <div className="lab-tpm-work-status">
         <span className="lab-tpm-phase" data-tpm-phase={work.phase}>{tpmPhaseLabel[work.phase]}</span>
-        {work.archived ? <span>Archived</span> : null}
-        {work.paused ? <span>Background follow-up paused</span> : null}
-        {work.waiting === 'user' ? <span className="lab-tpm-needs-user">Waiting for your decision</span> : work.waiting === 'main_session' ? <span>Waiting for main-session progress</span> : null}
+        {work.archived ? <span>{work.phase === 'completed' ? 'Archived' : 'Stopped · Archived'}</span> : work.paused && work.phase !== 'completed' ? <span>Background follow-up paused</span> : null}
+        {!work.archived && !work.paused && work.phase !== 'completed' ? work.waiting === 'user' ? <span className="lab-tpm-needs-user">Waiting for your decision</span> : work.waiting === 'main_session' ? <span>Waiting for main-session progress</span> : null : null}
         {work.health ? <span className="lab-tpm-health">{work.health}</span> : null}{!item.online ? <span className="lab-tpm-health">Host offline</span> : null}
         <button className="lab-tpm-main-link" type="button" aria-label="Open main session" onClick={onOpenMain}>Main session ↗</button>
       </div>
@@ -107,6 +107,7 @@ export function TpmWorkspace({ item, session, replica, visible, storageScope, tr
         <button type="button" aria-pressed={!documentVisible} onClick={() => setDocumentVisible(false)}>Conversation</button>
         <button type="button" aria-label="Plan & acceptance" aria-pressed={documentVisible} onClick={() => setDocumentVisible(true)}>Plan & acceptance</button>
         {work.phase === 'completed' ? <button className="lab-tpm-reopen" type="button" aria-label="Reopen work" disabled={unavailable || creationUnresolved} onClick={() => run(() => onAction('reopen'))}>Reopen work</button> : null}
+        {!work.archived && work.paused && work.phase !== 'completed' ? <button className="lab-tpm-reopen" type="button" aria-label="Resume background follow-up" disabled={unavailable || creationUnresolved} onClick={() => run(() => onAction('resume'))}>Resume follow-up</button> : null}
 
       </nav>
       {work.summary || work.nextAction ? <details className="lab-tpm-progress"><summary title={work.summary || work.nextAction}>{work.summary || work.nextAction}</summary>{work.summary && work.nextAction ? <small>Next: {work.nextAction}</small> : null}</details> : null}
@@ -131,7 +132,7 @@ export function TpmWorkspace({ item, session, replica, visible, storageScope, tr
       </article>
       <div className="lab-tpm-conversation" hidden={documentVisible}>
         {session ? <TpmChat session={session} replica={replica} transport={transport} draftBinding={draftBinding} navigation={navigation} title={work.title}
-          todo={work.todo ? { list: work.todo, disabled: unavailable || work.paused, onConfirm: onConfirmTodo,
+          todo={work.todo ? { list: work.todo, disabled: unavailable || work.paused || work.archived, onConfirm: onConfirmTodo,
             context: work.document || work.acceptance ? <details><summary>Specification & acceptance</summary><MarkdownContent markdown={`${work.document}\n\n${work.acceptance}`} /></details> : undefined } : undefined} /> : <>
           <div className="lab-ask-opening" role="status">{attaching ? 'Opening TPM conversation…' : work.creationStatus === 'abandoned' ? 'This work was abandoned.' : work.tpmNativeSessionId ? 'The TPM conversation is unavailable. Retry attachment when the Controller is online.' : 'The TPM session has not been created. Review its work health before continuing.'}</div>
           <TpmDraft binding={draftBinding} />

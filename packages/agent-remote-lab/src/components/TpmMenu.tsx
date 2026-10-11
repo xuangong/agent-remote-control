@@ -30,15 +30,15 @@ export function TpmMenu({ tpm, main, visible, triggerRef, inert }: {
   const activeWorks = tpm.works.filter(item => !item.work.archived);
   const archivedWorks = tpm.works.filter(item => item.work.archived);
   const unread = activeWorks.filter(item => item.unread).length;
-  const needsUser = activeWorks.some(item => item.work.waiting === 'user');
+  const needsUser = activeWorks.some(item => !item.work.paused && item.work.phase !== 'completed' && item.work.waiting === 'user');
   const supported = Object.values(tpm.catalogs).some(catalog => catalog.supported);
   const renderWork = (item: (typeof tpm.works)[number]) => <li key={item.key}>
         <button type="button" className="lab-session-row" data-tpm-work={item.key} onClick={() => { close(); void tpm.open(item.key); }}>
           <span className="lab-tracked-description"><strong title={item.work.title}>{item.work.title}</strong>
-            <small><span data-tpm-phase={item.work.phase}>{tpmPhaseLabel[item.work.phase]}</span>{item.work.paused ? ' · Paused' : ''} · {item.hostName} · {item.work.providerId}</small>
+            <small><span data-tpm-phase={item.work.phase}>{tpmPhaseLabel[item.work.phase]}</span>{item.work.archived && item.work.phase !== 'completed' ? ' · Stopped' : item.work.paused && item.work.phase !== 'completed' ? ' · Paused' : ''} · {item.hostName} · {item.work.providerId}</small>
             {item.work.summary ? <small className="lab-tpm-summary">{item.work.summary}</small> : null}
           </span>
-          <span className="lab-tpm-markers">{item.work.waiting === 'user' ? <span className="lab-tpm-needs-user">Needs you</span> : item.work.waiting === 'main_session' ? <small>Waiting on main</small> : null}
+          <span className="lab-tpm-markers">{!item.work.archived && !item.work.paused && item.work.phase !== 'completed' ? item.work.waiting === 'user' ? <span className="lab-tpm-needs-user">Needs you</span> : item.work.waiting === 'main_session' ? <small>Waiting on main</small> : null : null}
             {item.unread ? <span className="lab-tracked-change" aria-label={`New activity in ${item.work.title}`}><span aria-hidden="true" />New</span> : null}
             {!item.online ? <small>Host offline</small> : item.work.health ? <small className="lab-tpm-health">{item.work.health}</small> : null}</span>
         </button>

@@ -16,7 +16,9 @@ TPM composes the standard [session companions](session-companions.md): a sequent
 
 The initial list covers clarification, plan agreement, implementation, verification, user acceptance and reporting. TPM can edit remaining steps at boundaries, while completed history stays intact. Revisions to an approved plan require fresh agreement. The expanded list overlays the current view without moving the timeline or composer.
 
-Completed work can be archived from its workspace. Archiving retains conversation, documents and evidence, removes it from the active menu count, and places it in the collapsed **Archived** list. Open an archived work to view it or restore it. Restoring leaves the work completed; **Reopen** explicitly starts further follow-up and also removes the archive marker. Unfinished work cannot be archived.
+Work can be stopped and archived from its workspace at any point, including while requirements are unclear or a todo is unfinished. Archiving pauses automatic follow-up, retains the actual phase, todo, conversation, documents and evidence, removes it from the active menu count, and places it in the collapsed **Archived** list. It does not claim completion. Messages still waiting in the Controller are rejected before dispatch; already dispatched native requests retain their real receipts and are not canceled. Open an archived work to read or restore it. Restoring leaves follow-up paused; resuming is a separate explicit action. **Reopen** explicitly starts further follow-up for completed work and also removes the archive marker.
+
+TPM also ends tracking itself when the agreed delivery is complete: after every todo task, required user confirmation and work-specific acceptance evidence, it reports the result and calls `complete_work`. Completed work remains visible for review until the user archives it. Neither closing the workspace nor the main session becoming idle completes the TPM work.
 
 ## Background behavior
 
@@ -34,6 +36,7 @@ Tools can only access this work and its bound main session:
 - `read_main_session`: authoritative state and bounded, paginated history; search is explicitly limited to the returned page.
 - `send_main_message`: persist a current-step consultation, implementation request, or acceptance feedback without interruption; recheck the step and applicable user approval before native dispatch.
 - `update_work`: revision-checked assessment and optional work title; completion requires every todo step, acceptance criteria and evidence.
+- `complete_work`: explicitly finish an accepted delivery and stop background follow-up through the same completion checks as `update_work`; does not archive it or bypass user confirmation.
 - `write_work_document`: update the work document and retain bounded document versions.
 - `schedule_check`: request an earlier review within Controller limits.
 - `read_todo_list`, `revise_todo_list`, `update_todo_step`, `complete_todo_step`, `request_todo_confirmation`: the standard sequential list toolkit. These do not expose a user-approval operation to the model.

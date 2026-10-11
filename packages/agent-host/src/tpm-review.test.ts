@@ -67,7 +67,8 @@ it('verifies and rebinds recovered creation before accepting its durable native 
   const f = await fixture(); const item = record('lost', 0, 0); item.creation = 'unknown'; delete item.work.tpmNativeSessionId;
   await f.coordinator.store.insert(item); await f.tick();
   const result = await f.coordinator.action({ id: 'lost', revision: 1, action: 'resolve', intentId: 'creation', resolution: 'accepted', nativeSessionId: 'recovered', operationId: 'resolve' }, 'scope');
-  expect(f.recovery).toHaveLength(1); expect(f.recovery[0]?.extensions.instructions).toContain('lost'); expect(f.recovery[0]?.extensions.tools?.length).toBe(11);
+  expect(f.recovery).toHaveLength(1); expect(f.recovery[0]?.extensions.instructions).toContain('lost');
+  expect(f.recovery[0]?.extensions.tools?.map(tool => tool.name)).toEqual(expect.arrayContaining(['read_work', 'update_work', 'complete_work', 'send_main_message', 'request_todo_confirmation']));
   expect(result.tpmNativeSessionId).toBe('recovered'); expect(result.paused).toBe(false);
   await f.tick(); expect(f.messages).toEqual(['recovered']);
 }, 10000);

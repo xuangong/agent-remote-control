@@ -45,7 +45,7 @@ function executionOperationId(intentId: string): string {
   const hex = bytes.toString('hex');
   return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
 }
-const active = (work: TpmWork) => !work.paused && work.phase !== 'completed';
+const active = (work: TpmWork) => !work.archived && !work.paused && work.phase !== 'completed';
 const unknown = (record: TpmRecord) => record.creation === 'unknown' || record.work.outbox?.some(intent => intent.status === 'unknown');
 const shortError = (error: unknown) => (error instanceof Error ? error.message : 'TPM operation failed.').slice(0, 2048);
 
@@ -182,8 +182,13 @@ export class TpmCoordinator {
         if (input.action === 'rename') {
           record.work.title = input.title.trim(); record.titleSetByUser = true;
         } else if (input.action === 'archive' || input.action === 'unarchive') {
-          if (record.work.phase !== 'completed') throw new Error('Complete this work before archiving it.');
           record.work.archived = input.action === 'archive';
+          if (record.work.archived) {
+            record.work.paused = true; record.dirty = false; delete record.reviewIntentId;
+            for (const intent of record.work.outbox ?? []) if (intent.status === 'prepared') {
+              intent.status = 'rejected'; intent.error = 'Work archived before this message was dispatched.';
+            }
+          }
         } else if (input.action === 'confirm_todo') {
           if (!record.work.todo || !active(record.work)) throw new Error('This work is not accepting todo confirmations.');
           record.work.todo = confirmSessionTodo(record.work.todo, input.confirmation);
@@ -209,6 +214,7 @@ export class TpmCoordinator {
           delete record.work.health;
           }
         } else {
+          if (record.work.archived && input.action !== 'reopen') throw new Error('Restore archived work before resuming its follow-up.');
           if (record.creation === 'abandoned') throw new Error('This work creation was abandoned. Create a new work item.');
           if (unknown(record)) throw new Error('Resolve unknown operation outcomes before continuing.');
           if (input.action === 'reopen') {
@@ -258,7 +264,7 @@ export class TpmCoordinator {
       if ((this.retries.get(record.work.id) ?? 0) > this.now() || !record.work.tpmNativeSessionId || unknown(record) || this.workers.has(record.work.id)) continue;
       // Retain every active binding, then spend worker slots only on pending or due work.
       if (this.attachments.has(record.work.id) && !record.work.outbox?.some(intent => intent.status === 'prepared') && record.work.nextCheckAt > this.now()) continue;
-      if (this.workers.size >= 2) break;
+      if ([...this.workers.keys()].filter(id => active(this.store.get(id).work)).length >= 2) break;
       this.scanCursor = (index + 1) % records.length;
       const work = this.process(record.work.id).then(() => this.clearFailure(record.work.id))
         .catch(error => this.recordFailure(record.work.id, error)).finally(() => { this.workers.delete(record.work.id); });
@@ -279,7 +285,7 @@ export class TpmCoordinator {
   private manage<T>(work: () => Promise<T>): Promise<T> {
     const result = this.management.catch(() => undefined).then(() => this.ready).then(work); this.management = result; return result;
   }
-  private detach(id: string) { this.attachments.get(id)?.release(); this.attachments.delete(id); }
+  private detach(id: string) { this.attachments.get(id)?.release(); this.attachments.delete(id); this.reviewReservations.delete(id); }
   private scheduleTick(): void {
     void this.tick().then(() => { this.schedulerFailure = undefined; }, error => {
       this.schedulerFailure = `Background TPM scheduling failed: ${shortError(error)}`.slice(0, 2048);
@@ -385,7 +391,7 @@ export class TpmCoordinator {
         const unsubscribeTpm = tpm.agent.subscribe(event => {
           if (event.type !== 'agent_stream' || event.delivery === 'history' || !['turn_completed', 'turn_failed', 'turn_canceled'].includes(event.event.type)) return;
           void this.store.update(id, undefined, item => {
-            if (!item.reviewIntentId) return;
+            if (!active(item.work) || !item.reviewIntentId) return;
             delete item.reviewIntentId;
             item.work.nextCheckAt = this.now() + this.heartbeat(item.work);
             item.work.health = 'The last review ended without updating work state. A heartbeat will check again.';
@@ -430,9 +436,10 @@ export class TpmCoordinator {
     } finally { this.reviewReservations.delete(id); }
   }
   private reserveReview(id: string): boolean {
+    if (!active(this.store.get(id).work)) return false;
     if (this.reviewReservations.has(id)) return true;
-    const occupied = new Set(this.reviewReservations);
-    for (const record of this.store.all()) if (record.reviewIntentId || this.attachments.get(record.work.id)?.tpm.agent.snapshot().payload.status === 'running') occupied.add(record.work.id);
+    const occupied = new Set([...this.reviewReservations].filter(workId => active(this.store.get(workId).work)));
+    for (const record of this.store.all()) if (active(record.work) && (record.reviewIntentId || this.attachments.get(record.work.id)?.tpm.agent.snapshot().payload.status === 'running')) occupied.add(record.work.id);
     if (!occupied.has(id) && occupied.size >= 2) return false;
     this.reviewReservations.add(id); return true;
   }
@@ -553,6 +560,21 @@ export class TpmCoordinator {
       throw new AgentOperationRejectedError('todo_approval_required', 'Implementation requires explicit user approval of the current plan and specification.');
     }
   }
+  private async assess(id: string, input: Record<string, any>): Promise<TpmWork> {
+    const result = await this.store.update(id, input.revision, record => {
+      if (record.work.archived) throw new Error('This work is archived. Restore and resume it before changing its assessment.');
+      if (record.work.phase === 'completed' && input.phase !== 'completed') throw new Error('Reopen completed work explicitly before changing its delivery phase.');
+      if (input.acceptance !== undefined && input.acceptance !== record.work.acceptance && record.work.todo) record.work.todo = invalidateSessionTodoApproval(record.work.todo);
+      for (const key of ['title', 'phase', 'waiting', 'summary', 'nextAction', 'acceptance', 'evidence'] as const) if (input[key] !== undefined && (key !== 'title' || !record.titleSetByUser)) (record.work as any)[key] = input[key];
+      if (record.work.phase === 'completed' && (!record.work.acceptance.trim() || !record.work.evidence.length)) throw new Error('Completion requires acceptance criteria and work-specific evidence.');
+      if (record.work.phase === 'completed' && (!record.work.todo || !sessionTodoComplete(record.work.todo))) throw new Error('Complete every todo step before completing the work.');
+      if (record.work.todo && currentSessionTodo(record.work.todo)?.kind === 'confirmation') record.work.waiting = 'user';
+      record.dirty = (record.changeVersion ?? 0) > (record.reviewVersion ?? 0); delete record.reviewIntentId; delete record.work.health;
+      if (active(record.work)) record.work.nextCheckAt = this.now() + (record.dirty ? this.options.coalesceMs ?? 2000 : this.heartbeat(record.work));
+    });
+    if (!active(result.work)) this.detach(id);
+    return result.work;
+  }
   private boundExtensions(id: string): AgentSessionExtensions {
     const integer = { type: 'integer', minimum: 1 };
     const text = { type: 'string', maxLength: 65536 };
@@ -634,23 +656,14 @@ export class TpmCoordinator {
       tool('update_work', 'Record your delivery assessment and acknowledge this review. Set title when the conversation establishes the objective. User-set titles are preserved. Completion requires explicit acceptance criteria and evidence. Does not change user pause.', {
         revision: integer, phase: { type: 'string', enum: ['clarifying', 'ready', 'implementing', 'validating', 'completed'] }, waiting: { type: 'string', enum: ['none', 'user', 'main_session'] },
         title: { type: 'string', minLength: 1, maxLength: 256, pattern: '\\S' }, summary: short, nextAction: short, acceptance: text, evidence: { type: 'array', items: short, maxItems: 100 },
-      }, ['revision', 'phase', 'waiting', 'summary', 'nextAction'], async input => {
-        const result = await this.store.update(id, input.revision, record => {
-          if (record.work.phase === 'completed' && input.phase !== 'completed') throw new Error('Reopen completed work explicitly before changing its delivery phase.');
-          if (input.acceptance !== undefined && input.acceptance !== record.work.acceptance && record.work.todo) record.work.todo = invalidateSessionTodoApproval(record.work.todo);
-          for (const key of ['title', 'phase', 'waiting', 'summary', 'nextAction', 'acceptance', 'evidence'] as const) if (input[key] !== undefined && (key !== 'title' || !record.titleSetByUser)) (record.work as any)[key] = input[key];
-          if (record.work.phase === 'completed' && (!record.work.acceptance.trim() || !record.work.evidence.length)) throw new Error('Completion requires acceptance criteria and work-specific evidence.');
-          if (record.work.phase === 'completed' && (!record.work.todo || !sessionTodoComplete(record.work.todo))) throw new Error('Complete every todo step before completing the work.');
-          if (record.work.todo && currentSessionTodo(record.work.todo)?.kind === 'confirmation') record.work.waiting = 'user';
-          record.dirty = (record.changeVersion ?? 0) > (record.reviewVersion ?? 0); delete record.reviewIntentId; delete record.work.health;
-          record.work.nextCheckAt = this.now() + (record.dirty ? this.options.coalesceMs ?? 2000 : this.heartbeat(record.work));
-        });
-        if (!active(result.work)) this.detach(id);
-        return result.work;
-      }),
+      }, ['revision', 'phase', 'waiting', 'summary', 'nextAction'], input => this.assess(id, input)),
+      tool('complete_work', 'Finish this delivery and stop automatic follow-up. Requires all todo tasks, explicit user confirmations, acceptance criteria, and work-specific evidence. Does not archive the conversation.', {
+        revision: integer, summary: short, acceptance: text, evidence: { type: 'array', items: short, minItems: 1, maxItems: 100 },
+      }, ['revision', 'summary', 'evidence'], input => this.assess(id, { ...input, phase: 'completed', waiting: 'none', nextAction: '' })),
       tool('write_work_document', 'Replace this work PRD/spec Markdown and acceptance criteria with a revision check. Does not write project files.', {
         revision: integer, document: text, acceptance: text,
       }, ['revision', 'document', 'acceptance'], async input => (await this.store.update(id, input.revision, record => {
+        if (record.work.archived) throw new Error('This work is archived. Restore and resume it before changing its document.');
         if (record.work.document !== input.document || record.work.acceptance !== input.acceptance) {
           if (record.work.todo) record.work.todo = invalidateSessionTodoApproval(record.work.todo);
           if (record.work.todo && currentSessionTodo(record.work.todo)?.kind === 'confirmation') record.work.waiting = 'user';

@@ -276,6 +276,17 @@ it('limits automatic reviews to two and serves another work when a slot settles'
   await f.acknowledge(one); await expect.poll(async () => { await f.coordinator.tick(); return third.messages.length; }).toBe(1);
 }, 10000);
 
+it('releases an archived review slot without interrupting its running native session', async () => {
+  const f = await fixture(); const one = await f.create('one'); await f.create('two');
+  const three = await f.coordinator.create({ ...f.input, operationId: 'three' }, 'browser-scope');
+  const third = f.sessions.get(three.tpmNativeSessionId!)!; const first = f.sessions.get(one.tpmNativeSessionId!)!;
+  await f.coordinator.tick(); expect(third.messages).toEqual([]);
+  const current = await f.coordinator.get(one.id);
+  await f.coordinator.action({ id: one.id, revision: current.revision, operationId: 'archive-one', action: 'archive' }, 'owner');
+  await expect.poll(async () => { await f.coordinator.tick(); return third.messages.length; }).toBe(1);
+  expect(first.payload.status).toBe('running'); expect(first.cancel).not.toHaveBeenCalled(); expect(first.leases).toBe(0);
+}, 10000);
+
 it('pauses every affected work on native takeover and keeps bound session callbacks scoped', async () => {
   const f = await fixture(); const work = await f.create();
   await f.coordinator.handoff('codex', 'main'); const paused = await f.coordinator.get(work.id);
@@ -369,9 +380,8 @@ it('preserves manual names across model updates, retries and restart', async () 
   expect(restored.title).toBe('Mobile reconnect');
   expect((await f.call(restored, 'read_work', {})).titleSetByUser).toBe(true);
 });
-it('archives only completed work, retaining the conversation and allowing restore or reopen', async () => {
+it('archives completed work, retaining the conversation and allowing restore or reopen', async () => {
   const f = await fixture(); const work = await f.create();
-  await expect(f.coordinator.action({ id: work.id, revision: work.revision, operationId: 'early', action: 'archive' }, 'owner')).rejects.toThrow('Complete this work');
   await f.call(work, 'write_work_document', { revision: work.revision, document: 'Accepted scope', acceptance: 'Verified' });
   while (await f.advanceTodo(work)) { /* Complete all tasks and explicit user confirmations. */ }
   const completed = await f.acknowledge(work, { phase: 'completed', acceptance: 'Verified', evidence: ['Checks passed'] });
@@ -387,6 +397,70 @@ it('archives only completed work, retaining the conversation and allowing restor
   const reopened = await f.coordinator.action({ id: work.id, revision: again.revision, operationId: 'reopen', action: 'reopen' }, 'owner');
   expect(reopened).toMatchObject({ archived: false, phase: 'clarifying' });
 });
+
+it('archives unfinished work immediately and never resumes its unsent messages on restore', async () => {
+  const f = await fixture(); let work = await f.create(); const main = f.sessions.get('main')!; const tpm = f.sessions.get(work.tpmNativeSessionId!)!;
+  main.setStatus('running');
+  const pending = await f.call(work, 'send_main_message', { operationId: 'unsent', purpose: 'consultation', text: 'An obsolete question' });
+  work = await f.coordinator.get(work.id);
+  const archived = await f.coordinator.action({ id: work.id, revision: work.revision, operationId: 'stop', action: 'archive' }, 'owner');
+  expect(archived).toMatchObject({ archived: true, paused: true, phase: work.phase, todo: work.todo, summary: work.summary });
+  expect(archived.outbox?.find(intent => intent.id === pending.id)).toMatchObject({ status: 'rejected', error: expect.stringMatching(/archived.*dispatch/i) });
+  expect(main.leases).toBe(0); expect(tpm.leases).toBe(0);
+  await expect(f.call(archived, 'update_work', { revision: archived.revision, phase: 'implementing', waiting: 'none', summary: 'Late review', nextAction: 'Keep working' })).rejects.toThrow(/archived/i);
+  main.setStatus('idle'); tpm.setStatus('idle'); await f.restart(); f.advance(10000); await f.coordinator.tick();
+  expect(main.messages).toEqual([]); expect(tpm.messages).toHaveLength(1);
+  const current = await f.coordinator.get(work.id);
+  await expect(f.coordinator.action({ id: work.id, revision: current.revision, operationId: 'resume-archived', action: 'resume' }, 'owner')).rejects.toThrow(/unarchive|restore/i);
+  const restored = await f.coordinator.action({ id: work.id, revision: current.revision, operationId: 'restore', action: 'unarchive' }, 'owner');
+  expect(restored).toMatchObject({ archived: false, paused: true, phase: work.phase });
+  await f.coordinator.tick(); expect(tpm.messages).toHaveLength(1);
+  await f.coordinator.action({ id: work.id, revision: restored.revision, operationId: 'resume', action: 'resume' }, 'owner');
+  await waitMessages(tpm, 2); expect(main.messages).toEqual([]);
+}, 10000);
+
+it.each([false, true])('archive settles only known pre-dispatch rejection and preserves uncertain native execution (dispatched=%s)', async dispatched => {
+  const f = await fixture(); const work = await f.create(); const main = f.sessions.get('main')!;
+  let entered = false; let release!: () => void; const barrier = new Promise<void>(resolve => { release = resolve; });
+  f.access.execute = async (_agent, _operation, operation) => {
+    if (dispatched) { operation.beforeDispatch?.(); await operation.dispatch(); }
+    entered = true; await barrier;
+    if (dispatched) throw new Error('Native receipt lost after archive');
+    operation.beforeDispatch?.(); return operation.dispatch();
+  };
+  const intent = await f.call(work, 'send_main_message', { operationId: 'archive-race', purpose: 'consultation', text: 'Inspect feasibility' });
+  try {
+    await expect.poll(() => entered).toBe(true);
+    const current = await f.coordinator.get(work.id);
+    const archived = await f.coordinator.action({ id: work.id, revision: current.revision, operationId: 'stop-race', action: 'archive' }, 'owner');
+    expect(archived.outbox?.find(value => value.id === intent.id)?.status).toBe('dispatching');
+  } finally { release(); }
+  await expect.poll(async () => (await f.coordinator.get(work.id)).outbox?.find(value => value.id === intent.id)?.status).toBe(dispatched ? 'unknown' : 'rejected');
+  expect(main.messages).toHaveLength(dispatched ? 1 : 0);
+  expect(main.cancel).not.toHaveBeenCalled();
+  await f.restart(); f.advance(10000); await f.coordinator.tick();
+  expect((await f.coordinator.get(work.id))).toMatchObject({ archived: true, paused: true, phase: work.phase });
+  expect(main.messages).toHaveLength(dispatched ? 1 : 0);
+}, 10000);
+
+it('lets the TPM explicitly complete delivery only after every task and user confirmation', async () => {
+  const f = await fixture(); const work = await f.create();
+  const complete = async () => f.call(work, 'complete_work', { revision: (await f.coordinator.get(work.id)).revision, summary: 'Delivered the agreed result', evidence: ['Verified acceptance evidence'] });
+  await expect(complete()).rejects.toThrow(/acceptance criteria/i);
+  await f.call(work, 'write_work_document', { revision: (await f.coordinator.get(work.id)).revision, document: 'Agreed scope', acceptance: 'Verified result' });
+  await f.advanceTodo(work);
+  await expect(complete()).rejects.toThrow(/todo/i);
+  expect((await f.coordinator.get(work.id)).todo!.steps.find(step => step.status !== 'completed')?.kind).toBe('confirmation');
+  while (await f.advanceTodo(work)) { /* Each user gate requires an explicit decision. */ }
+  const completed = await complete();
+  expect(completed).toMatchObject({ phase: 'completed', waiting: 'none', nextAction: '', summary: 'Delivered the agreed result' });
+  expect(f.sessions.get('main')!.leases).toBe(0);
+  f.sessions.get(work.tpmNativeSessionId!)!.setStatus('idle');
+  f.advance(10000); await f.coordinator.tick();
+  expect(f.sessions.get(work.tpmNativeSessionId!)!.messages).toHaveLength(1);
+  await f.restart(); await f.coordinator.tick();
+  expect(f.sessions.get(work.tpmNativeSessionId!)!.messages).toHaveLength(1);
+}, 10000);
 
 function successionRouting(f: Awaited<ReturnType<typeof fixture>>) {
   const origin = { controllerId: 'controller', providerId: 'codex', nativeSessionId: 'main' };

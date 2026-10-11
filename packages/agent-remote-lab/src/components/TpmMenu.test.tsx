@@ -52,14 +52,15 @@ it('explains an unavailable Controller without offering misleading creation', as
   expect(container.querySelector('[aria-label="Create TPM work"]')).toBeNull();
 });
 
-it('keeps archived sessions accessible without counting them as active or showing attention', async () => {
-  const h = harness({ supported: true, supportedProviders: ['codex'], works: [{ ...work, archived: true, phase: 'completed', waiting: 'none' }] });
+it.each(['completed', 'validating'] as const)('keeps archived %s sessions accessible without counting them as active or showing attention', async phase => {
+  const h = harness({ supported: true, supportedProviders: ['codex'], works: [{ ...work, archived: true, phase, paused: true }] });
   const container = await render(<h.Harness />);
   expect(container.querySelector('.lab-tpm-count')!.textContent).toBe('0');
   await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="TPM works"]')!.click());
   const archive = container.querySelector<HTMLDetailsElement>('.lab-tpm-archived')!;
   expect(archive.open).toBe(false);
   expect(archive.textContent).toContain('Archived (1)');
+  expect(archive.querySelector('.lab-tpm-needs-user')).toBeNull();
   expect(container.querySelector('.lab-tpm-panel > .lab-tpm-list')!.children.length).toBe(0);
   await act(async () => archive.querySelector('summary')!.click());
   await act(async () => archive.querySelector<HTMLButtonElement>('[data-tpm-work]')!.click());

@@ -136,11 +136,13 @@ it('presents an unwritten plan honestly and leaves follow-up scheduling to the T
   await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="Plan & acceptance"]')!.click());
   expect(container.querySelector('article')!.textContent).toContain('has not written a plan yet');
   const labels = [...container.querySelectorAll('button')].map(button => button.getAttribute('aria-label') ?? button.textContent);
-  expect(labels.some(label => /pause|resume|check|review progress/i.test(label ?? ''))).toBe(false);
+  expect(labels.some(label => /^pause|check|review progress/i.test(label ?? ''))).toBe(false);
+  expect(container.querySelector('[aria-label="Resume background follow-up"]')).not.toBeNull();
   expect(container.querySelector('[aria-label="Reopen work"]')).toBeNull();
+  expect(container.querySelector('.lab-tpm-work-status')?.textContent).not.toContain('Waiting for main-session progress');
 });
 it('offers an explicit reopen for completed work', async () => {
-  const completed: TpmItem = { ...item, work: { ...item.work, phase: 'completed', outbox: [] } };
+  const completed: TpmItem = { ...item, work: { ...item.work, phase: 'completed', paused: true, outbox: [] } };
   const actions: string[] = [];
   function Harness() {
     const trigger = useRef<HTMLButtonElement>(null);
@@ -149,6 +151,8 @@ it('offers an explicit reopen for completed work', async () => {
       onAction={async action => { actions.push(action); }} onResolve={async () => {}} onRetry={() => {}} />;
   }
   const container = await render(<Harness />);
+  expect(container.querySelector('.lab-tpm-work-status')?.textContent).not.toContain('paused');
+  expect(container.querySelector('.lab-tpm-work-status')?.textContent).not.toContain('Waiting');
   await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="Reopen work"]')!.click());
   expect(actions).toEqual(['reopen']);
 });
@@ -190,4 +194,40 @@ it.each([false, true])('archives or restores completed work without changing the
   await act(async () => container.querySelector<HTMLButtonElement>(`[aria-label="${archived ? 'Restore' : 'Archive'} TPM session"]`)!.click());
   expect(actions).toEqual([archived ? 'unarchive' : 'archive']);
   expect(showList).toHaveBeenCalledTimes(archived ? 0 : 1);
+});
+
+it('lets the user stop unfinished work with unknown delivery and explicitly resume after restoring it', async () => {
+  const actions: string[] = [];
+  let shownList = 0;
+  let fail = true;
+  function Harness() {
+    const trigger = useRef<HTMLButtonElement>(null);
+    const [work, setWork] = useState(item.work);
+    return <TpmWorkspace item={{ ...item, work }} visible storageScope="tpm-stop" triggerRef={trigger}
+      transport={{} as RemoteAgentTransport} draftBinding={{ store: new DraftStore('tpm-stop'), key: item.key }}
+      onClose={() => {}} onShowList={() => { shownList++; }} onOpenMain={() => {}} onAction={async action => {
+        actions.push(action);
+        if (fail) throw new Error('Host disconnected');
+        setWork(current => ({ ...current, archived: action === 'archive', paused: action !== 'resume' }));
+      }} onResolve={async () => { throw new Error('Stopping must not resolve unknown delivery.'); }} onRetry={() => {}} />;
+  }
+  const container = await render(<Harness />);
+  const stop = container.querySelector<HTMLButtonElement>('[aria-label="Stop and archive TPM session"]');
+  expect(stop).not.toBeNull();
+  await act(async () => stop!.click());
+  expect(container.querySelector('[role="alert"]')?.textContent).toContain('Host disconnected');
+  expect(shownList).toBe(0);
+  fail = false;
+  await act(async () => stop!.click());
+  expect(shownList).toBe(1);
+  expect(container.querySelector('.lab-tpm-work-status')?.textContent).toContain('Stopped');
+  expect(container.querySelector('.lab-tpm-work-status')?.textContent).not.toContain('Waiting for main');
+  expect(container.querySelector('[aria-label="Mark uncertain as accepted"]')).not.toBeNull();
+  await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="Restore TPM session"]')!.click());
+  expect(actions).toEqual(['archive', 'archive', 'unarchive']);
+  const resume = container.querySelector<HTMLButtonElement>('[aria-label="Resume background follow-up"]');
+  expect(resume).not.toBeNull();
+  await act(async () => resume!.click());
+  expect(actions.at(-1)).toBe('resume');
+  expect(container.querySelector('[aria-label="Resume background follow-up"]')).toBeNull();
 });

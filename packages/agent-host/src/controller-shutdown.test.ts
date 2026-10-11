@@ -28,6 +28,7 @@ it.each([
     env: { ...process.env, AGENT_HOST_STATE_DIR: root, AGENT_HOST_WORKSPACE: root,
       AGENT_HOST_SERVER: `http://127.0.0.1:${address.port}`, AGENT_HOST_REMOTE_KEY: 'shutdown-fixture-key',
       AGENT_HOST_PROVIDERS: 'codex', AGENT_HOST_CODEX: executable, AGENT_HOST_CODEX_CONNECTION: 'private',
+      AGENT_HOST_OPENCODE_URL: 'http://127.0.0.1:1', AGENT_HOST_OPENCODE_AUTO_START: '0',
       AGENT_HOST_MANAGED_UPDATES: '1', AGENT_HOST_SUPERVISOR: undefined, AGENT_HOST_LAUNCHD: undefined },
   });
   let ready = false, output = '';

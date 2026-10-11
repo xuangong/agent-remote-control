@@ -24,7 +24,8 @@ it('runs the Linux CLI without systemd, reconnects, and persists the manual star
   const codex = join(bin, 'codex');
   await writeFile(codex, '#!/bin/sh\necho codex-cli 0.148.0\n', { mode: 0o755 });
   const env = { HOME: directory, PATH: `${bin}:${process.env.PATH}`, NODE_OPTIONS: `--import=${platform}`,
-    AGENT_HOST_STATE_DIR: state, AGENT_HOST_PROVIDERS: 'codex', AGENT_HOST_CODEX: codex, AGENT_HOST_WORKSPACE: directory };
+    AGENT_HOST_STATE_DIR: state, AGENT_HOST_PROVIDERS: 'codex', AGENT_HOST_CODEX: codex, AGENT_HOST_WORKSPACE: directory,
+    AGENT_HOST_OPENCODE_URL: 'http://127.0.0.1:1', AGENT_HOST_OPENCODE_AUTO_START: '0' };
   const run = (args: string[], extra: Record<string, string> = {}) => exec(process.execPath,
     [launcher, ...args], { cwd: directory, env: { ...env, ...extra }, timeout: 15000 });
   const server = new WebSocketServer({ host: '127.0.0.1', port: 0 });

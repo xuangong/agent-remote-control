@@ -84,13 +84,13 @@ export function useImageDraft({ scope: suppliedScope, sessionKey, text, enabled,
     persist(immediate || !document); notify(); current.wake?.();
   }
   useEffect(() => {
-    if (current.inputText === text) return;
+    if (!enabled || current.inputText === text) return;
     current.inputText = text;
     if (current.draft.parts.some(part => part.type === 'image') || draftText(current.draft.parts) === text) return;
     current.draft.parts = text ? [{ type: 'text', text }] : [];
     current.revision++;
     changed();
-  }, [entryKey, text]);
+  }, [entryKey, text, enabled]);
   function restore(fromWriter = false): Promise<void> {
     if (!scope || current.restoring) return current.restoration ?? Promise.resolve();
     current.restoring = true;
@@ -136,7 +136,7 @@ export function useImageDraft({ scope: suppliedScope, sessionKey, text, enabled,
     while (current.saving && valid()) await current.saving;
     return valid() ? storageSnapshot() : { ...storageSnapshot(), status: 'cancelled' };
   }
-  useEffect(() => registerImageDraftWriter({ scope: scope ?? '', key }, { snapshot: storageSnapshot, flush: flushStorage }), [entryKey]);
+  useEffect(() => enabled ? registerImageDraftWriter({ scope: scope ?? '', key }, { snapshot: storageSnapshot, flush: flushStorage }) : undefined, [entryKey, enabled]);
   function retryStorage(): void {
     if (current.restoring || current.saving) return;
     if (current.readFailed || !current.hydrated) restore();

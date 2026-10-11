@@ -34,6 +34,7 @@ import * as starsHooks from './hooks/useSessionStars.js';
 import * as attentionHooks from './hooks/useSessionAttention.js';
 import type { FavoritesSnapshot } from './session-stars-client.js';
 import * as managerComponents from './components/ChatSessionManager.js';
+import { saveWorkspaceSnapshot } from './workspace-cache.js';
 
 function saveSessionComposition(scope: string, value: { path: OpenedSession[]; focus?: string; anchor?: string; addressKey: string }) {
   sessionStorage.setItem(`agent-remote:recovery:${scope}:composition`, JSON.stringify(value));
@@ -49,7 +50,7 @@ function committed(from = 'A', to = 'B', revision = 2, roleId = 'primary', provi
       receipt: { ...request, to: native(to, providerId), phase: 'committed', committedRevision: revision, startedAt: 'now', updatedAt: 'now',
         prepared: { ...request, to: native(to, providerId), workspace, associationRevision: 1, participants: [], capture: { epoch: 'epoch', seq: 1, capturedAt: 'now' } } } } };
 }
-async function failureFixture(advanceDuringRecovery = false, nativeIdentity?: string | null, strict = false, flags = '', setup?: { chain?: SessionSuccessionReplay[]; replayFailure?: string; selected?: string; providerId?: string; userScoped?: boolean; favorites?: FavoritesSnapshot; holdRelationsInitially?: boolean; preserveNativeState?: boolean; children?: AgentChildSession[]; timeline?: ProjectedTimelineEntry[]; nativeStatus?: 'idle' | 'running'; successionDescription?: SuccessionDescription; successionStatus?(): SuccessionActionResult; seed?(scope: string, source: OpenedSession): void | Promise<void> }) {
+async function failureFixture(advanceDuringRecovery = false, nativeIdentity?: string | null, strict = false, flags = '', setup?: { chain?: SessionSuccessionReplay[]; replayFailure?: string; selected?: string; providerId?: string; userScoped?: boolean; favorites?: FavoritesSnapshot; holdRelationsInitially?: boolean; holdReplayInitially?: boolean; preserveNativeState?: boolean; children?: AgentChildSession[]; timeline?: ProjectedTimelineEntry[]; nativeStatus?: 'idle' | 'running'; successionDescription?: SuccessionDescription; successionStatus?(): SuccessionActionResult; seed?(scope: string, source: OpenedSession): void | Promise<void> }) {
   configureImageDraftPersistence(() => false);
   const requests: Array<{ url: string; body?: Record<string, unknown> }> = [];
   const providerId = setup?.providerId ?? 'recorded';
@@ -68,6 +69,7 @@ async function failureFixture(advanceDuringRecovery = false, nativeIdentity?: st
   let currentGate: Promise<void> | undefined;
   let replayGate: Promise<void> | undefined;
   let releaseReplay: (() => void) | undefined;
+  if (setup?.holdReplayInitially) replayGate = new Promise(resolve => { releaseReplay = resolve; });
   const server: Server = createServer(async (request, response) => {
     const url = new URL(request.url!, 'http://fixture');
     let body: Record<string, unknown> | undefined;
@@ -188,7 +190,7 @@ async function failureFixture(advanceDuringRecovery = false, nativeIdentity?: st
     holdRelations() { relationsGate ??= new Promise(resolve => { releaseRelations = resolve; }); return () => { releaseRelations?.(); relationsGate = undefined; }; },
     holdAttach(nativeSessionId: string) { let release!: () => void; attachmentGates.set(nativeSessionId, new Promise(resolve => { release = resolve; })); return () => { attachmentGates.delete(nativeSessionId); release(); }; },
     holdCurrent() { let release!: () => void; currentGate = new Promise(resolve => { release = resolve; }); return () => { currentGate = undefined; release(); }; },
-    pauseReplay() { replayGate = new Promise(resolve => { releaseReplay = resolve; }); return () => { releaseReplay?.(); replayGate = undefined; }; },
+    pauseReplay() { replayGate ??= new Promise(resolve => { releaseReplay = resolve; }); return () => { releaseReplay?.(); replayGate = undefined; }; },
     notify(replay: SessionSuccessionReplay) { for (const socket of sockets.clients) socket.send(JSON.stringify({ protocolVersion: PROTOCOL_VERSION, type: 'session_succession_committed', succession: replay })); },
   };
 }
@@ -202,6 +204,146 @@ function successionHistoryLink(view: HTMLElement, nativeSessionId: string): HTML
     .find(link => new URL(link.href).searchParams.get('session') === nativeSessionId);
   expect(link).toBeDefined(); return link!;
 }
+
+function cachedConversation(nativeSessionId: string) {
+  return { ...replicaState, agent: { ...replicaState.agent!, id: `agent-${nativeSessionId}`,
+    runtimeInfo: { ...replicaState.agent!.runtimeInfo, sessionId: nativeSessionId } },
+  timeline: { ...replicaState.timeline, entries: [{ providerId: 'recorded', seqStart: 1, seqEnd: 1, timestamp: 'now', turnId: `${nativeSessionId}-turn`,
+    resources: [], collapsed: [], sourceSeqRanges: [{ startSeq: 1, endSeq: 1 }],
+    item: { type: 'assistant_message' as const, text: `Cached ${nativeSessionId} content` } }] } };
+}
+
+async function editVisiblePrompt(view: HTMLElement, text: string) {
+  const editor = view.querySelector<HTMLElement>('[data-testid="prompt-input"]')!;
+  await act(async () => {
+    if (editor instanceof HTMLTextAreaElement) Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!.call(editor, text);
+    else editor.textContent = text;
+    editor.dispatchEvent(new Event('input', { bubbles: true }));
+  });
+}
+
+it('shows exact cached content while replay and native attachment wait without granting control', async () => {
+  const real = successionHooks.useSessionSuccession;
+  let succession!: ReturnType<typeof real>;
+  vi.spyOn(successionHooks, 'useSessionSuccession').mockImplementation((...args) => { succession = real(...args); return succession; });
+  const f = await failureFixture(false, 'B', false, '', { holdReplayInitially: true, seed(scope) {
+    for (const nativeSessionId of ['A', 'B']) saveWorkspaceSnapshot(scope, { hostId: 'host', providerId: 'recorded', nativeSessionId }, cachedConversation(nativeSessionId));
+  } });
+  const releaseReplay = f.pauseReplay(), releaseAttach = f.holdAttach('B');
+  try {
+    await settleApp(() => expect(f.view.textContent).toContain('Cached A content'));
+    expect(succession.binding).toBeUndefined(); expect(succession.isCurrent()).toBe(false);
+    expect(succession.sessionState.connection).toBe('connecting');
+    expect(succession.sessionState.operations.send_message.allowed).toBe(false);
+    expect(f.requests.some(request => request.url.endsWith('/attach'))).toBe(false);
+    await act(async () => releaseReplay());
+    await settleApp(() => { expect(succession.selected?.nativeSessionId).toBe('B'); expect(f.view.textContent).toContain('Cached B content'); });
+    expect(f.view.textContent).not.toContain('Cached A content');
+    expect(succession.binding).toBeUndefined();
+    expect(f.frames.some(frame => frame.message?.type === 'send_message')).toBe(false);
+    await act(async () => releaseAttach());
+    await settleApp(() => { expect(succession.binding?.session.nativeSessionId).toBe('B'); expect(succession.sessionState.connection).toBe('ready'); });
+    expect(f.requests.filter(request => request.url.endsWith('/attach')).every(request => request.body?.nativeSessionId === 'B')).toBe(true);
+  } finally { releaseReplay(); releaseAttach(); }
+});
+
+it('retains edits made beside cached content before initial checks and native attachment finish', async () => {
+  const real = successionHooks.useSessionSuccession, realWorkbench = workbenchComponents.LabWorkbench;
+  let succession!: ReturnType<typeof real>, primary!: ComponentProps<typeof realWorkbench>;
+  vi.spyOn(successionHooks, 'useSessionSuccession').mockImplementation((...args) => { succession = real(...args); return succession; });
+  vi.spyOn(workbenchComponents, 'LabWorkbench').mockImplementation(props => { primary = props; return realWorkbench(props); });
+  const f = await failureFixture(false, 'B', false, '', { holdReplayInitially: true, seed(scope) {
+    saveWorkspaceSnapshot(scope, { hostId: 'host', providerId: 'recorded', nativeSessionId: 'A' }, cachedConversation('A'));
+  } });
+  const releaseReplay = f.pauseReplay(), releaseAttach = f.holdAttach('B');
+  try {
+    await settleApp(() => expect(f.view.textContent).toContain('Cached A content'));
+    const owner = primary.draftBinding;
+    expect(owner).toBeDefined();
+    expect(succession.binding).toBeUndefined();
+    await editVisiblePrompt(f.view, 'Edited before checks completed');
+    expect(owner!.store.get(owner!.key)).toBe('Edited before checks completed');
+    expect(f.view.querySelector('[data-testid="prompt-input"]')?.textContent).toBe('Edited before checks completed');
+    await act(async () => releaseReplay());
+    await settleApp(() => expect(succession.selected?.nativeSessionId).toBe('B'));
+    expect(primary.draftBinding).toEqual(owner);
+    expect(f.view.querySelector('[data-testid="prompt-input"]')?.textContent).toBe('Edited before checks completed');
+    await act(async () => releaseAttach());
+    await settleApp(() => expect(succession.binding?.session.nativeSessionId).toBe('B'));
+    expect(primary.draftBinding).toEqual(owner);
+    expect(f.view.querySelector('[data-testid="prompt-input"]')?.textContent).toBe('Edited before checks completed');
+    expect(f.frames.filter(frame => frame.message?.type === 'send_message')).toEqual([]);
+  } finally { releaseReplay(); releaseAttach(); }
+});
+
+it('retains the selected session draft while cached navigation waits for checks and binding', async () => {
+  const real = successionHooks.useSessionSuccession, realWorkbench = workbenchComponents.LabWorkbench;
+  let succession!: ReturnType<typeof real>, primary!: ComponentProps<typeof realWorkbench>;
+  vi.spyOn(successionHooks, 'useSessionSuccession').mockImplementation((...args) => { succession = real(...args); return succession; });
+  vi.spyOn(workbenchComponents, 'LabWorkbench').mockImplementation(props => { primary = props; return realWorkbench(props); });
+  const f = await failureFixture(false, 'B', false, '', { chain: [], seed(scope) {
+    saveWorkspaceSnapshot(scope, { hostId: 'host', providerId: 'recorded', nativeSessionId: 'C' }, cachedConversation('C'));
+  } });
+  await settleApp(() => expect(succession.binding?.session.nativeSessionId).toBe('A'));
+  const releaseReplay = f.pauseReplay(), releaseAttach = f.holdAttach('C');
+  try {
+    await act(async () => { void succession.open({ hostId: 'host', providerId: 'recorded', nativeSessionId: 'C', title: 'C' }); });
+    expect(f.view.textContent).toContain('Cached C content');
+    const owner = primary.draftBinding;
+    expect(owner).toBeDefined();
+    await editVisiblePrompt(f.view, 'C edit before connection');
+    expect(owner!.store.get(owner!.key)).toBe('C edit before connection');
+    expect(f.view.querySelector('[data-testid="prompt-input"]')?.textContent).toBe('C edit before connection');
+    await act(async () => releaseReplay());
+    await settleApp(() => expect(succession.desired?.target.native.nativeSessionId).toBe('C'));
+    expect(primary.draftBinding).toEqual(owner);
+    await act(async () => releaseAttach());
+    await settleApp(() => expect(succession.binding?.session.nativeSessionId).toBe('C'));
+    expect(primary.draftBinding).toEqual(owner);
+    expect(f.view.querySelector('[data-testid="prompt-input"]')?.textContent).toBe('C edit before connection');
+    expect(f.frames.filter(frame => frame.message?.type === 'send_message')).toEqual([]);
+  } finally { releaseReplay(); releaseAttach(); }
+});
+
+it('changes cached content immediately on session selection and clears it for uncached targets', async () => {
+  const real = successionHooks.useSessionSuccession;
+  let succession!: ReturnType<typeof real>;
+  vi.spyOn(successionHooks, 'useSessionSuccession').mockImplementation((...args) => { succession = real(...args); return succession; });
+  const f = await failureFixture(false, 'B', false, '', { chain: [], timeline: cachedConversation('A').timeline.entries, seed(scope) {
+    saveWorkspaceSnapshot(scope, { hostId: 'host', providerId: 'recorded', nativeSessionId: 'C' }, cachedConversation('C'));
+  } });
+  await settleApp(() => expect(succession.binding?.session.nativeSessionId).toBe('A'));
+  const release = f.pauseReplay();
+  let first!: Promise<boolean>, second!: Promise<boolean>;
+  try {
+    await act(async () => { first = succession.open({ hostId: 'host', providerId: 'recorded', nativeSessionId: 'C', title: 'C' }); });
+    expect(f.view.textContent).toContain('Cached C content');
+    expect(f.view.textContent).not.toContain('Cached A content');
+    expect(succession.binding).toBeUndefined();
+    await act(async () => { second = succession.open({ hostId: 'host', providerId: 'recorded', nativeSessionId: 'D', title: 'D' }); });
+    expect(succession.selected?.nativeSessionId).toBe('D');
+    expect(succession.state).toBeUndefined();
+    expect(f.view.textContent).not.toContain('Cached C content');
+    await act(async () => { release(); await Promise.all([first, second]); });
+    await settleApp(() => expect(succession.binding?.session.nativeSessionId).toBe('D'));
+  } finally { release(); }
+});
+
+it('keeps already visible content during workspace access recovery with no usable native binding', async () => {
+  const real = successionHooks.useSessionSuccession;
+  let succession!: ReturnType<typeof real>;
+  vi.spyOn(successionHooks, 'useSessionSuccession').mockImplementation((...args) => { succession = real(...args); return succession; });
+  const f = await failureFixture(false, 'B', false, '', { chain: [], timeline: cachedConversation('A').timeline.entries });
+  await settleApp(() => { expect(succession.binding?.session.nativeSessionId).toBe('A'); expect(f.view.textContent).toContain('Cached A content'); });
+  await act(async () => f.setAccessReady(false));
+  expect(succession.binding).toBeUndefined(); expect(succession.isCurrent()).toBe(false);
+  expect(f.view.textContent).toContain('Cached A content');
+  expect(succession.sessionState.operations.send_message.allowed).toBe(false);
+  const before = f.frames.filter(frame => frame.message?.type === 'send_message').length;
+  await act(async () => f.setAccessReady(true));
+  await settleApp(() => expect(succession.binding?.session.nativeSessionId).toBe('A'));
+  expect(f.frames.filter(frame => frame.message?.type === 'send_message')).toHaveLength(before);
+});
 
 it('opens predecessor A from current B, reloads its concrete history and returns to B without moving draft ownership', async () => {
   const real = successionHooks.useSessionSuccession;
@@ -257,7 +399,7 @@ it('shows A-B-C handoff history once in reverse order while ordinary A navigatio
   await f.reload();
   await settleApp(() => expect(succession.binding?.session.nativeSessionId).toBe('A'));
   await act(async () => successionHistoryLink(f.view, 'C').click());
-  await settleApp(() => expect(succession.binding?.session.nativeSessionId).toBe('C'));
+  await settleApp(() => expect(succession.binding?.session.nativeSessionId, succession.error).toBe('C'));
   await act(async () => { expect(await open({ hostId: 'host', providerId: 'recorded', nativeSessionId: 'A', title: 'Original A link' })).toBe(true); });
   await settleApp(() => expect(succession.binding?.session.nativeSessionId).toBe('C'));
   expect(new URL(window.location.href).searchParams.get('session')).toBe('C');
@@ -1396,7 +1538,7 @@ it('opens retained B and the role through local view entries without sharing the
   expect(primary().querySelector('[data-testid="prompt-input"]')?.textContent).toBe('A local draft'); assertAsk('T');
   expect(succession.binding!.client).toBe(originalClient);
   await clickView('Independent B');
-  await settleApp(() => { expect(succession.desired!.slot.id).toBe(independent.id); expect(succession.isCurrent()).toBe(true); });
+  await settleApp(() => { expect(succession.desired!.slot.id).toBe(independent.id); expect(succession.isCurrent(), succession.error).toBe(true); });
   expect(f.requests.filter(item => item.url.endsWith('/attach')).map(item => item.body?.nativeSessionId)).toEqual(['B']);
   await act(async () => { f.chain.push(committed('B', 'C', 3)); f.notify(f.chain[1]!); });
   await settleApp(() => expect(succession.document.roles[0]?.appliedRevision).toBe(3));

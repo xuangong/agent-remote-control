@@ -1,4 +1,108 @@
 import { expect, test } from '@playwright/test';
+import { showNewSession, showSessions } from './session-navigation';
+
+test('opens session links with the sidebar closed while the Host attachment is pending', async ({ page }) => {
+  let releaseAttachment!: () => void;
+  const attachmentGate = new Promise<void>(resolve => { releaseAttachment = resolve; });
+  let attachmentRequested = false;
+  await page.route('**/v1/remote/attach', async route => {
+    attachmentRequested = true;
+    await attachmentGate;
+    await route.continue();
+  });
+  try {
+    await page.goto('/?host=local&provider=recorded&session=recorded-welcome');
+    await expect(page.locator('.lab-shell')).toBeVisible();
+    await expect(page.locator('#lab-context')).toBeHidden();
+    await expect.poll(() => attachmentRequested).toBe(true);
+    await expect(page.locator('#lab-context')).toBeHidden();
+    releaseAttachment();
+    await expect(page.getByTestId('connection-summary')).toContainText('Ready');
+    await expect(page.getByTestId('timeline')).toBeVisible();
+    await expect(page.locator('#lab-context')).toBeHidden();
+    await showSessions(page);
+    await expect(page.locator('#lab-context')).toBeVisible();
+  } finally { releaseAttachment(); }
+});
+
+test('closes the sidebar when selecting a session and respects reopening it during attachment', async ({ page }) => {
+  let releaseAttachment!: () => void;
+  const attachmentGate = new Promise<void>(resolve => { releaseAttachment = resolve; });
+  let attachmentRequested = false;
+  await page.route('**/v1/remote/attach', async route => {
+    attachmentRequested = true;
+    await attachmentGate;
+    await route.continue();
+  });
+  try {
+    await page.goto('/');
+    const rail = page.locator('#lab-context');
+    await expect(rail).toBeVisible();
+    await rail.getByRole('region', { name: 'Discover sessions' }).locator('.lab-session-row').first().click();
+    await expect.poll(() => attachmentRequested).toBe(true);
+    await expect(rail).toBeHidden();
+    await showSessions(page);
+    await expect(rail).toBeVisible();
+    releaseAttachment();
+    await expect(page.getByTestId('connection-summary')).toContainText('Ready');
+    await expect(rail).toBeVisible();
+    await rail.getByRole('region', { name: 'Discover sessions' }).locator('.lab-session-row[aria-current="page"]').click();
+    await expect(rail).toBeHidden();
+    await expect(page.getByTestId('timeline')).toBeVisible();
+  } finally { releaseAttachment(); }
+});
+
+test('restores agent-only links with the sidebar closed', async ({ page }) => {
+  await page.goto('/?host=local&provider=recorded&session=recorded-welcome');
+  await expect(page.getByTestId('connection-summary')).toContainText('Ready');
+  const agentId = new URL(page.url()).searchParams.get('agent');
+  expect(agentId).toBeTruthy();
+  let releaseAttachment!: () => void;
+  const attachmentGate = new Promise<void>(resolve => { releaseAttachment = resolve; });
+  let attachmentRequested = false;
+  await page.route('**/v1/remote/attach', async route => {
+    attachmentRequested = true;
+    await attachmentGate;
+    await route.continue();
+  });
+  try {
+    await page.goto(`/?agent=${encodeURIComponent(agentId!)}`);
+    await expect(page.locator('.lab-shell')).toBeVisible();
+    await expect(page.locator('#lab-context')).toBeHidden();
+    await expect.poll(() => attachmentRequested).toBe(true);
+    await showSessions(page);
+    releaseAttachment();
+    await expect(page.getByTestId('connection-summary')).toContainText('Ready');
+    await expect(page.locator('#lab-context')).toBeVisible();
+  } finally { releaseAttachment(); }
+});
+
+test('closes the sidebar immediately when resuming a session', async ({ page }) => {
+  await page.goto('/?host=local&provider=recorded&session=recorded-welcome');
+  await expect(page.getByTestId('connection-summary')).toContainText('Ready');
+  await showNewSession(page);
+  const resume = page.getByTestId('session-resume');
+  await expect(resume).toBeEnabled();
+  let releaseAttachment!: () => void;
+  const attachmentGate = new Promise<void>(resolve => { releaseAttachment = resolve; });
+  let attachmentRequested = false;
+  await page.route('**/v1/remote/attach', async route => {
+    attachmentRequested = true;
+    await attachmentGate;
+    await route.continue();
+  });
+  try {
+    await resume.click();
+    await expect.poll(() => attachmentRequested).toBe(true);
+    await expect(page.locator('#lab-context')).toBeHidden();
+    await expect(page.getByTestId('timeline')).toBeVisible();
+    await showSessions(page);
+    releaseAttachment();
+    await expect(page.getByTestId('session-create')).toBeEnabled();
+    await expect(page.getByTestId('connection-summary')).toContainText('Ready');
+    await expect(page.locator('#lab-context')).toBeVisible();
+  } finally { releaseAttachment(); }
+});
 
 for (const viewport of [{ width: 393, height: 852 }, { width: 320, height: 568 }, { width: 844, height: 390 }]) {
   test(`mobile sidebar keeps discovery and navigation reachable at ${viewport.width}`, async ({ page }, info) => {
@@ -85,6 +189,8 @@ test('manages tracking from the sidebar favorites filter without row close butto
   const orphan = { ...star, nativeSessionId: 'removed', favoriteId: 'removed' };
   let stars = [star, other];
   await page.addInitScript(({ star, orphan }) => {
+    localStorage.setItem('agent-remote:track-view', 'true');
+    localStorage.setItem('agent-remote:tpm-view', 'false');
     localStorage.setItem(`agent-remote-tracking:${location.origin}/u/alice/`, JSON.stringify([star, orphan]));
   }, { star, orphan });
   await page.route('**/v1/session-migrations', route => route.fulfill({ json: { migrations: [] } }));
@@ -97,6 +203,8 @@ test('manages tracking from the sidebar favorites filter without row close butto
   await page.route('**/v1/remote/hosts/host/vscode-tunnel', route => route.fulfill({ json: { status: 'stopped', processAlive: false, revision: 0 } }));
   await page.route('**/v1/remote/hosts/host/previews', route => route.fulfill({ json: { revision: 1, registrations: [] } }));
   await page.goto('/e2e/fixtures/session-stars.html?sidebar=1');
+  await expect(page.locator('#lab-context')).toBeHidden();
+  await expect(page.getByTestId('timeline')).toBeVisible();
   const saved = () => page.evaluate(() => JSON.parse(localStorage.getItem(`agent-remote-tracking:${location.origin}/u/alice/`) ?? '[]').map((s: { nativeSessionId: string }) => s.nativeSessionId));
   await expect.poll(saved).toEqual(['tracked']);
   await page.getByRole('button', { name: 'Tracked sessions', exact: true }).click();
@@ -104,7 +212,7 @@ test('manages tracking from the sidebar favorites filter without row close butto
   await expect(page.locator('.lab-tracking-floating .lab-session-row')).toHaveCount(1);
   expect((await page.locator('.lab-tracking-floating .lab-session-row').boundingBox())!.width).toBeGreaterThan(150);
   await page.getByRole('button', { name: 'Close Tracked sessions', exact: true }).click();
-  if (info.project.use.isMobile) await page.getByRole('button', { name: 'Open sessions', exact: true }).click();
+  await showSessions(page);
   const rail = page.locator('#lab-context');
   await rail.getByRole('button', { name: 'Favorites', exact: true }).click();
   const filter = rail.getByRole('button', { name: 'Filter tracked favorites', exact: true });
@@ -150,6 +258,8 @@ test('reorders floating tracking rows without opening them, persists order, and 
     title: id === 'first' ? 'A long tracked session title that should fit the panel without horizontal scrolling' : id,
     starredAt: 1, favoriteId: id, folderId: null, order, available: true, online: true }));
   await page.addInitScript(stars => {
+    localStorage.setItem('agent-remote:track-view', 'true');
+    localStorage.setItem('agent-remote:tpm-view', 'false');
     const key = `agent-remote-tracking:${location.origin}/u/alice/`;
     if (!localStorage.getItem(key)) localStorage.setItem(key, JSON.stringify(stars));
   }, stars);

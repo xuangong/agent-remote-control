@@ -1,4 +1,12 @@
 import { expect, test } from '@playwright/test';
+import { showSessions } from './session-navigation';
+
+test.beforeEach(async ({ page }) => {
+  await page.addInitScript(() => {
+    localStorage.setItem('agent-remote:track-view', 'true');
+    localStorage.setItem('agent-remote:tpm-view', 'false');
+  });
+});
 
 test('opens live tracking without a second attach or background history downloads', async ({ page }, testInfo) => {
   const errors: string[] = []; page.on('pageerror', error => errors.push(error.message));
@@ -101,6 +109,7 @@ test('shares sidebar and title favorites while retaining only local activity tra
   await expect(page.getByRole('region', { name: 'Opened sessions' })).toHaveCount(0);
   await expect(page.locator('.lab-primary-conversation .lab-conversation-status')).toHaveText('Working');
   await page.getByTestId('prompt-input').fill('Keep my draft');
+  if (!mobile) await showSessions(page);
   const title = page.getByRole('button', { name: 'Favorites', exact: true });
   if (mobile) await title.click();
   await page.getByRole('button', { name: 'Star Research notes', exact: true }).last().click();

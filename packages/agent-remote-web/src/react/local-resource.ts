@@ -5,8 +5,8 @@ export interface MarkdownResourceContext {
   readonly scopeKey: string;
   readonly bindings: readonly ResourceBinding[];
   readonly resources: AgentReplicaState['resources'];
-  readonly resolveResource: (locator: string, sourceLocator?: string) => Promise<ResourceBinding>;
-  readonly requestResource: (binding: ResourceBinding) => Promise<void | ResourceResponseState>;
+  readonly resolveResource?: (locator: string, sourceLocator?: string) => Promise<ResourceBinding>;
+  readonly requestResource?: (binding: ResourceBinding) => Promise<void | ResourceResponseState>;
 }
 
 interface ResourceResolution { promise: Promise<ResourceBinding>; binding?: ResourceBinding }
@@ -26,6 +26,16 @@ export async function loadLocalResource(
   onResolved?: (binding: ResourceBinding) => void,
   fresh = false,
 ): Promise<{ binding: ResourceBinding; detail?: AgentReplicaState['resources'][string] }> {
+  // Display-only views can use loaded bytes without joining an older live request.
+  if (!context.resolveResource || !context.requestResource) {
+    const binding = cachedLocalResourceBinding(context, locator, sourceLocator);
+    const detail = binding && context.resources[binding.resourceId];
+    if (!binding || !detail || detail.status !== 'unavailable' && !(detail.status === 'available' && 'contentBase64' in detail)) {
+      throw new Error('Resource is not cached. Reconnect to load it.');
+    }
+    onResolved?.(binding);
+    return { binding, detail };
+  }
   const existing = !fresh && sourceLocator === undefined ? context.bindings.find(binding => binding.locator === locator && binding.status === 'available') : undefined;
   const resolveKey = JSON.stringify([context.scopeKey, sourceLocator ?? null, locator]);
   if (fresh) resolutions.delete(resolveKey);

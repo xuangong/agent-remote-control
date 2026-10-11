@@ -1,5 +1,4 @@
-import { showNewSession } from './session-navigation';
-import { toggleViewPanel } from './view-options';
+import { showNewSession, showSessions } from './session-navigation';
 import { expect, test } from '@playwright/test';
 import { createAgentRemoteRelay, createRemoteHostUplinkClient } from '@orchardworks/agent-remote-relay';
 import { createRecordedLabProvider } from '../src/server/recorded.js';
@@ -84,7 +83,7 @@ test(`selects ${selected.name} on a paired Host and creates through its real upl
     expect(creations[1]).toMatchObject({ providerId: selected.id, operationId: expect.any(String), cwd: '/native/project' });
     await side.getByRole('button', { name: 'Close side conversation' }).click();
     await uplink.close();
-    if (compact) await toggleViewPanel(page, 'Sidebar');
+    await showSessions(page);
     await expect(context().getByRole('region', { name: 'Lab scenario controls' })).toHaveCount(0);
     await expect(context().getByTestId('session-resume')).toBeDisabled();
     await showNewSession(page);

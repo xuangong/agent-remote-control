@@ -28,7 +28,7 @@ export interface TimelineItemRendererProps {
 
 export const TimelineItemRenderer = memo(function TimelineItemRenderer({ item, entry, messageGroup, resolveSessionLink, resources, resourceBindings, resourceScopeKey, onResourceResolve, onResourceRequest }: TimelineItemRendererProps) {
   const markdownResources = useMemo(() => (
-    resources && resourceBindings && resourceScopeKey && onResourceResolve && onResourceRequest
+    resources && resourceBindings && resourceScopeKey
       ? { scopeKey: resourceScopeKey, resources, bindings: resourceBindings, resolveResource: onResourceResolve, requestResource: onResourceRequest }
       : undefined
   ), [onResourceRequest, onResourceResolve, resourceBindings, resourceScopeKey, resources]);

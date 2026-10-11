@@ -7,16 +7,17 @@ export function createFilePreviewResourceContext(
   scopeKey: string,
 ): MarkdownResourceContext {
   const directoryEnd = Math.max(documentLocator.lastIndexOf('/'), documentLocator.lastIndexOf('\\')) + 1;
+  const resolveResource = context.resolveResource;
   return {
     ...context,
     scopeKey,
-    resolveResource(locator, source) {
+    resolveResource: resolveResource ? (locator, source) => {
       if (source !== documentLocator || !isRelativeLocator(documentLocator) || !isRelativeLocator(locator)) {
-        return context.resolveResource(locator, source === documentLocator ? localSourceLocator(source) : source);
+        return resolveResource(locator, source === documentLocator ? localSourceLocator(source) : source);
       }
       // Keep encoded characters and parent segments for the Host's path policy.
-      return context.resolveResource(documentLocator.slice(0, directoryEnd) + locator, sourceLocator);
-    },
+      return resolveResource(documentLocator.slice(0, directoryEnd) + locator, sourceLocator);
+    } : undefined,
   };
 }
 

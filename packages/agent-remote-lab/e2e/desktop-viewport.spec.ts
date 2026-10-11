@@ -1,5 +1,6 @@
 import { expect, test } from '@playwright/test';
 import { toggleViewPanel } from './view-options';
+import { showSessions } from './session-navigation';
 
 test('long sidebar content never scrolls the desktop workspace away from the viewport', async ({ page, isMobile }, info) => {
   test.skip(isMobile, 'Desktop sidebar scrolling');
@@ -11,6 +12,7 @@ test('long sidebar content never scrolls the desktop workspace away from the vie
   await page.route('**/v1/remote/hosts/host/vscode-tunnel', route => route.fulfill({ json: { status: 'stopped', processAlive: false, revision: 0 } }));
   await page.route('**/v1/remote/hosts/host/previews', route => route.fulfill({ json: { revision: 1, registrations: [] } }));
   await page.goto('/e2e/fixtures/session-stars.html');
+  await showSessions(page);
   const sidebar = page.locator('.lab-sidebar-content');
   await expect(sidebar.locator('.lab-favorite-list > li')).toHaveCount(18);
   const discovery = sidebar.getByRole('region', { name: 'Discover sessions' });

@@ -1,4 +1,5 @@
 import { expect, test, type Locator, type Page } from '@playwright/test';
+import { showSessions } from './session-navigation';
 
 const base = { hostId: 'host', providerId: 'recorded', title: 'Same session title', starredAt: 1, available: true, online: true, hostName: 'Work Mac' };
 async function setup(page: Page, title = base.title) {
@@ -38,6 +39,7 @@ test('aligns the desktop account and keeps long favorite titles on one line with
   const mobile = testInfo.project.name.includes('mobile');
   if (mobile) await page.getByRole('button', { name: 'Favorites', exact: true }).click();
   else {
+    await showSessions(page);
     const view = page.getByRole('button', { name: 'View options', exact: true });
     await view.click();
     const options = page.getByRole('region', { name: 'View options', exact: true });
@@ -71,7 +73,10 @@ test('untracks and unstars only the chosen identity when session titles are iden
   const { removed } = await setup(page);
   const mobile = testInfo.project.name.includes('mobile');
   if (mobile) await page.getByRole('button', { name: 'Favorites', exact: true }).click();
-  else await page.locator('#lab-context').getByRole('button', { name: 'Favorites', exact: true }).click();
+  else {
+    await showSessions(page);
+    await page.locator('#lab-context').getByRole('button', { name: 'Favorites', exact: true }).click();
+  }
   const tree = page.locator(mobile ? '.lab-title-favorites' : '#lab-context').getByRole('tree', { name: 'Favorites folders and sessions', exact: true });
   const first = tree.locator('[data-favorite-id="favorite-first"]'), second = tree.locator('[data-favorite-id="favorite-second"]');
   for (const row of [first, second]) await favoriteAction(page, row, 'Track');

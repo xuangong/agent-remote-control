@@ -2,6 +2,8 @@
 
 Hosted Side and Ask relationships belong to the Relay's product navigation layer, not Provider SDK ancestry or normalized Session View events. Opening the source on another device discovers the same target sessions. Mobile keeps its existing full-screen Side navigation and Ask overlay; layout, focus, drafts, outboxes and the Ask visibility preference stay local.
 
+On desktop, the divider between the two visible conversations adjusts their width. Drag it or use the arrow keys; double-click or press Enter to restore equal widths. The browser remembers the preferred proportion across reloads and nested Side navigation. Each pane keeps at least 320 pixels when space allows; a narrower workspace uses equal widths without horizontal overflow. Mobile retains a single visible conversation.
+
 ## Creation and discovery
 
 Hosted `POST /v1/remote/hosts/:hostId/create` accepts optional `conversationKind: "side" | "ask"` alongside `sourceNativeSessionId`. The Relay validates source access, includes the kind in creation deduplication and commits the relationship with the target binding. It does not forward this product metadata to the Controller. Shared-host creation preserves the original browser operation ID separately from the Host's quota reservation ID.

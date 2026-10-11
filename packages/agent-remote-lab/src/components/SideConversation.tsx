@@ -2,6 +2,7 @@ import { CommunicationNavigationContext } from '@orchardworks/agent-remote-web/r
 import type { DraftBinding } from '../draft-store.js';
 import { SessionLink } from './SessionLink.js';
 import { SessionTitle } from './SessionTitle.js';
+import { ConversationPane } from './ConversationSplit.js';
 import { useEffect, useRef, type ReactNode } from 'react';
 import { useConversationSession } from '../hooks/useConversationSession.js';
 import { type AgentReplica, type AgentReplicaState, type RemoteAgentTransport } from '@orchardworks/agent-remote-web';
@@ -43,7 +44,7 @@ export function SideConversation({ session, replica: cachedReplica, transport, s
   useEffect(() => { onActivityChange?.(session.agentId, activity); }, [session.agentId, activity, onActivityChange]);
   const record = store.find(session);
   const title = standalone ? session.title : record?.firstInput?.trim().slice(0, 72) || session.title;
-  return <aside className="lab-side-conversation lab-session-composition" aria-label="Side conversation" tabIndex={-1} ref={panel} onFocusCapture={onFocus} onClickCapture={onFocus} hidden={!expanded} style={{ order: position }}>
+  return <ConversationPane as="aside" position={position} className="lab-side-conversation lab-session-composition" aria-label="Side conversation" tabIndex={-1} ref={panel} onFocusCapture={onFocus} onClickCapture={onFocus} hidden={!expanded}>
     <CommunicationNavigationContext.Provider value={communication}><LabWorkbench {...viewNavigation} sessionState={sessionState} handoff={handoff} draftSessionKey={sessionKey(session)} state={forkDisplayState(state, record)} sessionStatus={status} attachingAgentId={session.agentId}
       visible={visible && expanded} actions={forkActions(actions, store, record, transport)} draftBinding={draftBinding} imageDraftBinding={imageDraftBinding} displayBinding={displayBinding} messageDraft={draft} onMessageDraftChange={onDraftChange}
       questionDrafts={questions} onQuestionDraftChange={(id, value) => setQuestions((current) => ({ ...current, [id]: value }))}
@@ -59,5 +60,5 @@ export function SideConversation({ session, replica: cachedReplica, transport, s
       consoleCommands={status === 'ready' && !initialInput?.pending && state?.agent?.capabilities.sendMessage && state.agent.capabilities.history ? forkCommands : []}
       onExecuteConsoleCommand={(id, args) => { if (!state || status !== 'ready' || initialInput?.pending) return Promise.reject(new Error('The side session is not ready.')); return onFork(state, session, id, args); }} /></CommunicationNavigationContext.Provider>
     {renderAsk?.(session, state)}
-  </aside>;
+  </ConversationPane>;
 }

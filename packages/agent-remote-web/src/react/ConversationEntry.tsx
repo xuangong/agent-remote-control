@@ -32,8 +32,8 @@ export const ConversationEntry = memo(function ConversationEntry({ entry, entryK
   scopeKey, resources, onEditPrompt, onInspectEntry, inspected, searchSelected, resolveSessionLink, onResourceResolve, onResourceRequest,
   previews, extension, noticeExpanded, noticeCount, onToggleNotice, noticeDetailsId, noticeControls }: ConversationEntryProps) {
   const collapsed = noticeExpanded === false;
-  const attachments = useMemo(() => messageResources(entry.item, entry.resources, contentOnly && !!onResourceResolve && !!onResourceRequest),
-    [entry.item, entry.resources, contentOnly, onResourceResolve, onResourceRequest]);
+  const attachments = useMemo(() => messageResources(entry.item, entry.resources, contentOnly),
+    [entry.item, entry.resources, contentOnly]);
   return <TimelineSearchReveal.Provider value={!!searchSelected}><TimelineEntry entryKey={entryKey}
     onEdit={onEditPrompt && entry.item.type === 'user_message' && entry.item.messageId && entry.turnId ? () => onEditPrompt(entry) : undefined}
     timestamp={entry.timestamp} sent={entry.item.type === 'user_message'} sequence={entry.seqStart}

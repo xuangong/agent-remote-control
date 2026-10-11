@@ -1,4 +1,4 @@
-import { showNewSession } from './session-navigation';
+import { showNewSession, showSessions } from './session-navigation';
 import { toggleViewPanel } from './view-options';
 import { expect, test, type Locator, type Page, type TestInfo } from '@playwright/test';
 import { readFile } from 'node:fs/promises';
@@ -154,8 +154,8 @@ function contextRail(page: Page, testInfo: TestInfo): Locator {
 }
 
 async function openContextForFixture(page: Page, testInfo: TestInfo): Promise<Locator> {
+  await showSessions(page);
   if (isCompact(testInfo)) {
-    await toggleViewPanel(page, 'Sidebar');
     await page.getByRole('button', { name: 'Settings', exact: true }).click();
   } else await page.getByRole('button', { name: 'Sidebar settings', exact: true }).click();
   return contextRail(page, testInfo);

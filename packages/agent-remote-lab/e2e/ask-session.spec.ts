@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
-import { showNewSession } from './session-navigation';
+import { showNewSession, showSessions } from './session-navigation';
 
 async function start(page: Page, enableAsk = true) {
   await page.goto('/');
@@ -421,6 +421,7 @@ test('desktop Ask opens within its source and leaves global navigation outside t
   test.skip(isMobile, 'Desktop contained overlay.');
   await page.setViewportSize({ width: 1440, height: 1000 });
   await start(page);
+  await showSessions(page);
   const owner = page.locator('.lab-primary-conversation');
   const button = page.getByRole('button', { name: 'Ask about this session', exact: true });
   await button.click();

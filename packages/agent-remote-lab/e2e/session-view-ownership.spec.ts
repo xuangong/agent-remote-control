@@ -321,6 +321,7 @@ test('account actions belong to the Header and View follows the visible owning t
   await expect(security).toBeHidden();
   await expect(signOut).toBeHidden();
   if (!isMobile) {
+    await setChromePanel(page, 'Sidebar', true);
     await expectBeforeTitle(globalView, page.locator('#lab-context .lab-rail-heading').getByText('Workspace', { exact: true }));
     await setChromePanel(page, 'Sidebar', false);
   }
@@ -347,7 +348,7 @@ test('account actions belong to the Header and View follows the visible owning t
   await setChromePanel(page, 'Header', true);
   await expect(security).toBeVisible();
   await expectBeforeTitle(globalView, header.locator('.lab-brand h1'));
-  await expect(draft).toHaveValue('Preserve this draft while moving the shell controls');
+  await expect(draft).toHaveText('Preserve this draft while moving the shell controls');
   await page.screenshot({ path: testInfo.outputPath('header-owned-account-actions.png') });
 });
 

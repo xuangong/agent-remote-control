@@ -1,5 +1,5 @@
 import { expect, test, type Locator, type Page } from '@playwright/test';
-import { showNewSession } from './session-navigation';
+import { showNewSession, showSessions } from './session-navigation';
 import { sessionLinkFixture } from './session-link-fixture';
 
 const primaryHistory = 'Keep the primary composition history';
@@ -224,7 +224,7 @@ for (const choice of ['primary', 'another session'] as const) {
       await fixture.primary.locator('.agent-message-assistant').last().click();
       await expect(page).toHaveURL(url => url.searchParams.get('session') === fixture.primaryIdentity.nativeSessionId);
     } else {
-      if (isMobile) await page.getByRole('button', { name: 'Open sessions', exact: true }).click();
+      await showSessions(page);
       await page.getByRole('navigation', { name: 'Sidebar sections' }).getByRole('button', { name: 'Sessions', exact: true }).click();
       const directory = page.getByRole('region', { name: 'Discover sessions', exact: true });
       const refresh = directory.getByRole('button', { name: 'Refresh', exact: true });

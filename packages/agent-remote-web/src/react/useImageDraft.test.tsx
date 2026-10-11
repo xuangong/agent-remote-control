@@ -1,7 +1,7 @@
 import { act } from 'react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import type { ImageDraft } from '../image-drafts.js';
-import { readImageDraft, writeImageDraft, inspectImageDraft } from '../image-drafts.js';
+import { readImageDraft, writeImageDraft, inspectImageDraft, configureImageDraftPersistence } from '../image-drafts.js';
 import { render, rerender, unmount } from '../test/setup.js';
 import { useImageDraft, type UploadImage } from './useImageDraft.js';
 vi.mock('../image-drafts.js', async importOriginal => ({ ...await importOriginal<typeof import('../image-drafts.js')>(), readImageDraft: vi.fn(), writeImageDraft: vi.fn(async () => ({ status: 'saved', retention: 'local' })) }));
@@ -13,7 +13,7 @@ function Harness({ session = 'a', active = true, scope, upload, text = '', enabl
 }
 const attachment = { attachmentId: 'a', sha256: 'a'.repeat(64), mediaType: 'image/png' as const, byteLength: 1, imageDimensions: { width: 1, height: 1 } };
 beforeEach(() => { vi.mocked(readImageDraft).mockReset().mockResolvedValue(undefined); vi.mocked(writeImageDraft).mockReset().mockResolvedValue({ status: 'saved', retention: 'local' }); });
-afterEach(() => vi.restoreAllMocks());
+afterEach(() => { configureImageDraftPersistence(() => true); vi.restoreAllMocks(); });
 
 it('does not overwrite a new edit when saved draft hydration finishes late', async () => {
   let resolve!: (value: ImageDraft) => void;
@@ -106,6 +106,43 @@ it('migrates updated text when capability becomes available and preserves existi
   const edited = draft.parts;
   await rerender(container, <Harness text="Late text-only recovery" />);
   expect(draft.parts).toEqual(edited);
+});
+
+it('does not claim an image storage owner for a text-only preview and restores it when enabled', async () => {
+  configureImageDraftPersistence(() => false);
+  const binding = { scope: 'preview-draft', key: 'preview-draft-key' };
+  const container = await render(<Harness binding={binding} enabled={false} text="Old text" />);
+  await rerender(container, <Harness binding={binding} enabled={false} text="Edited during recovery" />);
+  expect(writeImageDraft).not.toHaveBeenCalled();
+  const handle = await inspectImageDraft(binding);
+  expect(handle.snapshot()).toMatchObject({ status: 'ready', revision: 0, savedRevision: 0 });
+  await rerender(container, <Harness binding={binding} active={false} text="Edited during recovery" />);
+  expect(draft.parts).toEqual([{ type: 'text', text: 'Edited during recovery' }]);
+  const restored = await inspectImageDraft(binding);
+  await act(async () => {
+    const snapshot = restored.snapshot(), saved = await restored.flush(snapshot.revision, () => true);
+    expect(saved).toMatchObject({ status: 'ready', savedRevision: snapshot.revision, draft: { parts: [{ type: 'text', text: 'Edited during recovery' }] } });
+  });
+});
+
+it('finishes an existing image draft write when disabled and retains the image while inactive', async () => {
+  const binding = { scope: 'disabled-draft', key: 'disabled-image-key' };
+  const upload = vi.fn<UploadImage>();
+  const container = await render(<Harness binding={binding} active={false} upload={upload} />);
+  let finish!: () => void;
+  vi.mocked(writeImageDraft).mockImplementationOnce(() => new Promise(resolve => { finish = () => resolve({ status: 'saved', retention: 'local' }); }));
+  await act(async () => draft.setParts(draft.addFiles([new Blob(['x'], { type: 'image/png' })])));
+  const expected = draft.parts;
+  await act(async () => { window.dispatchEvent(new Event('pagehide')); });
+  await rerender(container, <Harness binding={binding} active={false} enabled={false} upload={upload} />);
+  expect(draft.parts).toEqual(expected);
+  await act(async () => finish());
+  await rerender(container, <Harness binding={binding} active={false} upload={upload} />);
+  expect(draft.parts).toEqual(expected);
+  expect(draft.hasImages).toBe(true);
+  expect(upload).not.toHaveBeenCalled();
+  const restored = await inspectImageDraft(binding), snapshot = restored.snapshot();
+  await act(async () => expect(await restored.flush(snapshot.revision, () => true)).toMatchObject({ status: 'ready', savedRevision: snapshot.revision }));
 });
 
 it('revalidates restored ready attachments and rechecks them after reconnect', async () => {

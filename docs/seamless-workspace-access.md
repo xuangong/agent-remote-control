@@ -6,6 +6,8 @@ Hosted browsers separate local presentation from server authorization. The stand
 
 A browser with confirmed access in the last 24 hours loads the application bundle and checks access concurrently. It immediately renders its last saved conversation, restores the draft and reading position, and keeps the same editor mounted while the authoritative session reconnects. Every successful access check or renewal starts a new 24-hour display window. Reading cached data does not extend it.
 
+Opening a session closes the product sidebar on desktop and mobile. An empty workspace keeps discovery visible, and users can reopen the sidebar while a session is connecting without a later readiness update closing it again. Session selection and succession checks can display the matching local conversation immediately. A confirmed successor replaces the predecessor preview with its own cache; a target without a cache clears the previous content. Drafts and view preferences belong to the local view throughout these checks, while native operations still require a confirmed binding.
+
 After the display window expires, a returning browser shows the workspace shell until authorization succeeds. First-time visitors retain the sign-in entry. Storage failures disable local recovery without preventing online use.
 
 On foreground recovery, a still-valid authority lease confirmed by this page keeps its business transport usable while `/auth/status` checks the current server lease. The Relay can renew browser grants while the page is suspended; status renews an expired server grant without forcing an upstream authority request for a current one. Scheduled proactive renewal still uses `/auth/refresh`. Missing or expired local authority pauses business traffic before session and directory resume listeners run. Storage metadata never supplies that authority.
@@ -19,8 +21,8 @@ A missing Agents session can automatically follow the existing Gateway authoriza
 ## Local storage and authority
 
 - Access metadata contains only the account display identity, workspace namespace, and last confirmation time. It contains no credential and grants no API permission.
-- The last conversation snapshot is isolated by account, Host, provider, and native session ID. It is bounded to 150 recent entries and 750,000 serialized characters; oversized history is reduced.
-- A saved snapshot is presentation data only. It is never inserted into the live replica or used as a transport subscription cursor. Pending approvals, resources, diagnostics, and outgoing messages are not restored from it.
+- Recent conversation snapshots are isolated by account, Host, provider, and native session ID. The cache keeps at most six sessions and 1,500,000 serialized characters in total, with up to 150 recent entries and 750,000 characters per session; oversized history is reduced. Writes after leaving a session are deferred so serialization does not block navigation.
+- A saved snapshot is presentation data only. It is never inserted into the live replica or used as a transport subscription cursor. Pending approvals, resources, diagnostics, and outgoing messages are not restored from disk. Reusing an existing in-memory replica can preserve already loaded resources without granting permission to fetch from the previous connection.
 - Draft/outbox recovery remains independent. Unconfirmed messages are not automatically replayed by access recovery.
 - Reading positions prefer tab storage, with a durable local fallback for fresh home-screen launches.
 - Sign-out, confirmed access denial, or a confirmed account change clears the relevant conversation recovery data and retires waiting business requests. Other tabs observe sign-out and account changes.

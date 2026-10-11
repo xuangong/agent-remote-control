@@ -1,4 +1,5 @@
 import { expect, test } from '@playwright/test';
+import { showSessions } from './session-navigation';
 
 for (const scenario of [
   { code: 'session_attach_timeout', status: 504, role: 'status', text: 'may still be opening' },
@@ -33,6 +34,7 @@ for (const scenario of [
     await expect(notice).toContainText(String(scenario.status));
     await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
     await page.screenshot({ path: testInfo.outputPath('connection-details.png'), fullPage: true });
+    await showSessions(page);
     await session.click();
     await expect(page.getByTestId('prompt-input')).toBeEnabled();
     await expect(notice).toHaveCount(0);

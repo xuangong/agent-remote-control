@@ -1,4 +1,4 @@
-import { showNewSession } from './session-navigation';
+import { showNewSession, showSessions } from './session-navigation';
 import { toggleViewPanel } from './view-options';
 import { expect, test, type Locator, type Page } from '@playwright/test';
 
@@ -42,6 +42,7 @@ test('opens session settings above the composer without moving the conversation'
 
 test('keeps one View entry in the visible title while toggling panels and preserving the chat', async ({ page }, testInfo) => {
   await openRecordedSession(page);
+  if (testInfo.project.name === 'chromium-desktop') await showSessions(page);
   const input = page.getByTestId('prompt-input');
   await input.fill('Keep this draft');
   const trigger = page.getByRole('button', { name: 'View options', exact: true });
@@ -86,7 +87,7 @@ test('keeps one View entry in the visible title while toggling panels and preser
     await assertReachable();
     await toggleViewPanel(page, 'Header');
   }
-  await expect(input).toHaveValue('Keep this draft');
+  await expect(input).toHaveText('Keep this draft');
   await page.getByRole('tab', { name: 'Trace', exact: true }).click();
   await toggleViewPanel(page, 'Header');
   await assertReachable();

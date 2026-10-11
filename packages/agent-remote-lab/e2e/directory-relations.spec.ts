@@ -1,8 +1,8 @@
 import { expect, test, type Page } from '@playwright/test';
-import { showNewSession } from './session-navigation';
+import { showNewSession, showSessions } from './session-navigation';
 
 async function showDirectory(page: Page) {
-  if ((page.viewportSize()?.width ?? 1280) <= 1180) await page.getByRole('button', { name: 'Open sessions', exact: true }).click();
+  await showSessions(page);
   await page.getByRole('navigation', { name: 'Sidebar sections' }).getByRole('button', { name: 'Sessions', exact: true }).click();
   const directory = page.getByRole('region', { name: 'Discover sessions', exact: true });
   await directory.getByRole('button', { name: 'Refresh', exact: true }).click();

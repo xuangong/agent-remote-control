@@ -1,4 +1,4 @@
-import { showNewSession } from './session-navigation';
+import { showNewSession, showSessions } from './session-navigation';
 import { toggleViewPanel } from './view-options';
 import { expect, test } from '@playwright/test';
 
@@ -13,6 +13,55 @@ async function start(page: import('@playwright/test').Page) {
   await expect(primary.locator('.agent-message-assistant').last()).toContainText('cobalt orchard');
   return primary;
 }
+
+test('resizes the visible conversation pair and restores its proportion after reload', async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== 'chromium-desktop', 'Requires two visible conversation windows.');
+  const primary = await start(page);
+  await primary.getByTestId('prompt-input').fill('/side Adjustable side');
+  await primary.getByTestId('prompt-input').press('Enter');
+  const side = page.getByRole('complementary', { name: 'Side conversation' });
+  await expect(side.locator('.agent-message-assistant').last()).toContainText('Adjustable side');
+  const divider = page.getByRole('separator', { name: 'Conversation widths' });
+  await expect(divider).toBeVisible();
+  const original = (await primary.boundingBox())!.width;
+  const handle = (await divider.boundingBox())!;
+  await page.mouse.move(handle.x + handle.width / 2, handle.y + handle.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(handle.x + handle.width / 2 + 120, handle.y + handle.height / 2, { steps: 6 });
+  await page.mouse.up();
+  await expect.poll(async () => (await primary.boundingBox())!.width).toBeGreaterThan(original + 100);
+  await divider.press('End');
+  expect((await side.boundingBox())!.width).toBeCloseTo(320, 0);
+  await divider.press('Home');
+  expect((await primary.boundingBox())!.width).toBeCloseTo(320, 0);
+  await divider.press('Enter');
+  expect((await primary.boundingBox())!.width).toBeCloseTo((await side.boundingBox())!.width, 0);
+  await divider.press('Shift+ArrowRight');
+  const preferredWidth = (await primary.boundingBox())!.width;
+  await page.reload();
+  await expect(divider).toBeVisible();
+  await expect.poll(async () => (await primary.boundingBox())!.width).toBeCloseTo(preferredWidth, 0);
+  await page.setViewportSize({ width: 1200, height: 900 });
+  await toggleViewPanel(page, 'Sidebar');
+  await toggleViewPanel(page, 'Replica Inspector');
+  await expect.poll(async () => (await primary.boundingBox())!.width + (await side.boundingBox())!.width).toBeLessThan(640);
+  expect(Math.abs((await primary.boundingBox())!.width - (await side.boundingBox())!.width)).toBeLessThanOrEqual(1);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(1200);
+  await toggleViewPanel(page, 'Replica Inspector');
+  await toggleViewPanel(page, 'Sidebar');
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await expect.poll(async () => (await primary.boundingBox())!.width).toBeCloseTo(preferredWidth, 0);
+  await page.setViewportSize({ width: 390, height: 844 });
+  await expect(divider).toHaveCount(0);
+  await expect(side).toBeVisible();
+  await expect(primary).toBeHidden();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await expect(divider).toBeVisible();
+  await expect(primary).toBeVisible();
+  await divider.dblclick();
+  expect((await primary.boundingBox())!.width).toBeCloseTo((await side.boundingBox())!.width, 0);
+});
 
 test('clicking either side-by-side conversation changes focus without moving the windows', async ({ page }, testInfo) => {
   test.skip(testInfo.project.name !== 'chromium-desktop', 'Requires two visible conversation windows.');
@@ -45,8 +94,8 @@ test('clicking either side-by-side conversation changes focus without moving the
   expect(await side.boundingBox()).toEqual(sideBox);
   await side.getByTestId('prompt-input').click();
   await expect(side.getByTestId('prompt-input')).toBeFocused();
-  await expect(side.getByTestId('prompt-input')).toHaveValue('Side draft');
-  await expect(primary.getByTestId('prompt-input')).toHaveValue('Main draft');
+  await expect(side.getByTestId('prompt-input')).toHaveText('Side draft');
+  await expect(primary.getByTestId('prompt-input')).toHaveText('Main draft');
 
   await side.getByTestId('prompt-input').fill('/side Nested side');
   await side.getByTestId('prompt-input').press('Enter');
@@ -62,6 +111,13 @@ test('clicking either side-by-side conversation changes focus without moving the
   await expect(primary).toBeHidden();
   expect(await parent.boundingBox()).toEqual(parentBox);
   expect(await nested.boundingBox()).toEqual(nestedBox);
+  const divider = page.getByRole('separator', { name: 'Conversation widths' });
+  const dividerBox = (await divider.boundingBox())!;
+  expect(dividerBox.x).toBeGreaterThan(parentBox!.x);
+  expect(Math.abs(dividerBox.x + dividerBox.width / 2 - nestedBox!.x)).toBeLessThanOrEqual(1);
+  await divider.press('ArrowLeft');
+  expect((await parent.boundingBox())!.width).toBeCloseTo(parentBox!.width - 10, 0);
+  expect((await nested.boundingBox())!.width).toBeCloseTo(nestedBox!.width + 10, 0);
 });
 
 test('selecting an opened side in discovery focuses its existing window', async ({ page }) => {
@@ -194,6 +250,7 @@ test('rejects a delayed fork input after the main conversation changes', async (
   await primary.getByTestId('prompt-input').fill('/fork');
   await primary.getByTestId('prompt-input').press('Enter');
   await expect(primary.getByRole('navigation', { name: 'Forked sessions' }).locator('button[aria-pressed]')).toHaveCount(1);
+  await showSessions(page);
   await page.getByRole('region', { name: 'Discover sessions' }).getByRole('button', { name: 'Refresh', exact: true }).click();
   await page.getByRole('region', { name: 'Discover sessions' }).getByRole('button').filter({ has: page.getByText('Fork of New session', { exact: true }) }).click();
   await expect(primary.locator('.lab-fork-reference summary')).toBeVisible();

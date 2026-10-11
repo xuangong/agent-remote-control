@@ -17,6 +17,7 @@ import type { SessionTracking } from './useSessionTracking.js';
 import { isAskAttached, askParticipantKey, type useAskConversations } from './useAskConversations.js';
 import type { SessionStars } from './useSessionStars.js';
 import { canonicalJson } from '../session-composition.js';
+import { readWorkspaceSnapshot, saveWorkspaceSnapshot, workspaceDisplayState } from '../workspace-cache.js';
 
 type Selection = Pick<SessionEntry, 'hostId' | 'providerId' | 'nativeSessionId' | 'title'> & Partial<Pick<OpenedSession, 'agentId' | 'parentAgentId' | 'parentNativeSessionId' | 'createdAt'>> & { viewId?: string };
 interface NativeBinding {
@@ -29,7 +30,9 @@ interface DesiredSelection {
 }
 interface SuccessionOptions {
   scope: string; transport: RemoteAgentTransport; enabled: boolean; initial?: ControllerLocation;
+  initialDisplayState?: AgentReplicaState;
   connections: ConversationConnections; replicaFor(id: string): AgentReplica;
+  cachedReplicaFor?(selection: Selection): AgentReplica | undefined;
   directory(hostId: string): SessionDirectoryClient;
   textStore(scope: string): DraftStore; tracking(): SessionTracking; ask(): ReturnType<typeof useAskConversations>;
   layout(): { path: OpenedSession[]; selections: Record<string, string | null>; focus?: string; anchor?: string; address?: string; collapsed: string[] };
@@ -90,6 +93,7 @@ export function useSessionSuccession(options: SuccessionOptions) {
       navigationLease: undefined as { key: string; release(): void } | undefined,
       intent: options.initial?.sessionIntent, keepOriginal: options.initial?.keepOriginal,
       desired: undefined as DesiredSelection | undefined, binding: undefined as NativeBinding | undefined,
+      display: undefined as { key: string; state?: AgentReplicaState; diskRead: boolean } | undefined,
       takeover: undefined as { generation?: string; restored?: () => void } | undefined,
       attached: undefined as OpenedSession | undefined,
       result: undefined as CompositionParticipantResult | undefined, error: undefined as string | undefined,
@@ -122,6 +126,12 @@ export function useSessionSuccession(options: SuccessionOptions) {
   };
   function retireBinding(next?: Selection) {
     const key = next && sessionKey(next), previous = runtime.binding;
+    if (live() && previous?.isCurrent()) {
+      const state = previous.replica.getState();
+      setTimeout(() => {
+        if (recoveryGeneration(options.scope) === runtime.generation) saveWorkspaceSnapshot(options.scope, previous.session, state);
+      }, 0);
+    }
     if (runtime.navigationLease?.key !== key) { runtime.navigationLease?.release(); runtime.navigationLease = undefined; }
     if (key && previous?.isCurrent() && sessionKey(previous.session) === key && !runtime.navigationLease) {
       const lease = latest.current.connections.acquire(previous.session.agentId, previous.replica, previous.session);
@@ -674,7 +684,7 @@ export function useSessionSuccession(options: SuccessionOptions) {
     const primary = runtime.intent !== 'history' && address && address.intent.kind !== 'history' && sessionKey(compositionSelection(address)) === sessionKey(requested)
       ? runtime.document.slots.find(slot => slot.id === runtime.document.primary) : undefined;
     runtime.selection = primary ? compositionSelection(primary) : requested;
-    runtime.selectedSlot = primary?.id;
+    runtime.selectedSlot = primary?.id ?? (runtime.readable && runtime.intent !== 'history' ? ensureView(requested).id : undefined);
   }
   function retry() {
     if (!live()) return;
@@ -802,8 +812,42 @@ export function useSessionSuccession(options: SuccessionOptions) {
   }, [runtime, options.enabled]);
   const bound = runtime.binding?.isCurrent() ? runtime.binding : undefined;
   const desired = runtime.desired, selection = runtime.selection;
+  const initial = options.initial?.providerId && options.initial.nativeSessionId
+    ? { ...options.initial, providerId: options.initial.providerId, nativeSessionId: options.initial.nativeSessionId, title: 'Session' } : undefined;
   const selected: SessionEntry | undefined = desired ? { hostId: desired.target.hostId, providerId: desired.target.native.providerId, nativeSessionId: desired.target.native.nativeSessionId,
-    title: desired.title, ...(bound ? { agentId: bound.session.agentId } : {}) } : undefined;
+    title: desired.title, ...(bound ? { agentId: bound.session.agentId } : {}) } : selection
+      ? { hostId: selection.hostId, providerId: selection.providerId, nativeSessionId: selection.nativeSessionId, title: selection.title }
+      : runtime.active ? initial : undefined;
+  // Local view ownership is available before native discovery or control checks.
+  // It may restore display preferences and drafts, but grants no native authority.
+  const displaySlot = runtime.active && runtime.readable && recoveryGeneration(options.scope) === runtime.generation
+    ? desired?.slot ?? runtime.document.slots.find(slot => slot.id === runtime.selectedSlot)
+      ?? (!runtime.initialStarted && initial && runtime.intent !== 'history' ? ensureView(initial) : undefined)
+    : undefined;
+  function displayState(): AgentReplicaState | undefined {
+    if (!runtime.active || !selected || recoveryGeneration(options.scope) !== runtime.generation) return;
+    const key = sessionKey(selected);
+    const matches = (state?: AgentReplicaState) => !!state?.agent && state.timeline.initialized
+      && state.agent.providerId === selected.providerId && state.agent.runtimeInfo.providerId === selected.providerId
+      && state.agent.runtimeInfo.sessionId === selected.nativeSessionId;
+    const binding = runtime.binding;
+    const connection = latest.current.connections.find(selected);
+    const observed = binding && sessionKey(binding.session) === key && binding.replica.getState().agent?.id === binding.session.agentId
+      ? binding.replica.getState() : connection && connection.replica.getState().agent?.id === connection.agentId ? connection.replica.getState()
+      : latest.current.cachedReplicaFor?.(selected)?.getState();
+    if (matches(observed)) runtime.display = { key, state: workspaceDisplayState(observed!), diskRead: true };
+    if (runtime.display?.key !== key) {
+      const initialDisplay = initial && sessionKey(initial) === key && matches(options.initialDisplayState) ? options.initialDisplayState : undefined;
+      runtime.display = { key, state: initialDisplay && workspaceDisplayState(initialDisplay), diskRead: false };
+    }
+    if (!runtime.display.diskRead && live()) {
+      runtime.display.state ??= readWorkspaceSnapshot(options.scope, selected);
+      runtime.display.diskRead = true;
+    }
+    return runtime.display.state;
+  }
+  const preview = displayState();
+  const visibleState = bound?.replica.getState() ?? preview;
   const historyCandidates = live() && runtime.discovered && !runtime.discovering && runtime.result?.status === 'applied' && selected
     ? [...runtime.historyEvidence.entries()].filter(([key]) => !desired?.roleKey || desired.roleKey === key).flatMap(([, evidence]) => {
       const navigation = sessionSuccessionHistory({ scope: options.scope, ...evidence, selected, intent: runtime.intent, titles: runtime.historyTitles });
@@ -819,8 +863,8 @@ export function useSessionSuccession(options: SuccessionOptions) {
     return localIds.size > 1 ? runtime.document.slots.filter(slot => localIds.has(slot.id)).map(slot => ({ slotId: slot.id, session: { ...selectionFor(slot), title: slotTitle(slot) } })) : [];
   }
   return {
-    active: runtime.active && (options.enabled || !!desired), discovering: options.enabled && (!runtime.discovered || runtime.discovering), document: runtime.document, desired, selected,
-    state: bound?.replica.getState(), sessionState: bound?.client.getSessionState() ?? remoteSessionState(undefined, desired ? 'connecting' : 'idle'),
+    active: runtime.active && (options.enabled || !!desired), discovering: options.enabled && (!runtime.discovered || runtime.discovering), document: runtime.document, desired, selected, displaySlot,
+    state: visibleState, sessionState: bound?.client.getSessionState() ?? remoteSessionState(undefined, runtime.active ? 'connecting' : 'idle'),
     layoutView, layoutRevision: runtime.layoutRevision, captureLayout, binding: bound, imageRecipient: bound?.recipient, error: runtime.error, result: runtime.result,
     observerReady: live() && runtime.discovered && !runtime.discovering && (!runtime.active || !!bound),
     isCurrent: () => !!runtime.binding?.isCurrent(), open,

@@ -13,16 +13,16 @@ installed-package lifecycle tests. The publish job waits for all three platforms
 exact Linux-built tarball using npm Trusted Publishing (OIDC) with provenance.
 No long-lived npm token is needed after initial setup.
 
-Publishing a non-prerelease GitHub Release with a `controller-vX.Y.Z` tag starts
-the workflow. Ordinary pushes and creating a tag alone do not publish. Manual
-runs must also target a release tag, not a branch. The tag must match the version
+The workflow starts only through an explicit `workflow_dispatch`. Publishing a
+GitHub Release, pushing commits, and creating tags do not start it. Manual
+runs must target a release tag, not a branch. The tag must match the version
 in `packages/agent-host/package.json`, and its commit must be on `main` history.
 Prerelease versions are deliberately excluded from this workflow.
 
 Before a release, update that package's version, refresh `pnpm-lock.yaml`, run
 `pnpm compatibility:update`, review the changes, and merge them to `main`.
-Create a tag at the intended commit, then publish its GitHub Release. A manual
-retry uses the same tag:
+Create a tag at the intended commit, publish its GitHub Release, then explicitly
+dispatch npm publication when requested. A manual retry uses the same tag:
 
 ```sh
 gh workflow run publish-controller.yml --ref controller-v0.1.0
@@ -52,8 +52,8 @@ bootstrap publication and configure trust directly.
    ```
 
    Alternatively use **Actions → Publish Controller to npm → Run workflow**,
-   select that tag, and enable the first-publication checkbox. Do not publish a
-   GitHub Release for the same version to trigger a second npm publication.
+   select that tag, and enable the first-publication checkbox. Publishing a
+   GitHub Release does not dispatch npm publication.
 5. Once npm confirms the package exists, configure its Trusted Publisher as below.
 6. Delete the GitHub bootstrap secret and revoke the temporary token in npm.
    Subsequent releases leave `bootstrap` false and use OIDC only. There is no

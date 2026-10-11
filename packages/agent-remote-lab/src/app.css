@@ -1213,6 +1213,12 @@ html[data-input-modality="pointer"] :focus { outline: none !important; }
 .lab-session-popover-panel .lab-directory-heading > button { width: 36px; height: 36px; }
 .lab-session-popover-panel .lab-directory-heading > .lab-favorites-scan { width: auto; height: auto; margin-left: auto; white-space: nowrap; }
 .lab-title-favorites { flex: 1; }
+.lab-title-favorites .lab-session-popover-panel { display: flex; flex-direction: column; overflow: hidden; }
+.lab-title-favorites .lab-session-popover-panel > .lab-directory-heading,
+.lab-title-favorites .lab-favorites-current,
+.lab-title-favorites .lab-favorites-toolbar { flex: none; }
+.lab-title-favorites .lab-favorites-manager { display: flex; flex-direction: column; min-height: 0; }
+.lab-title-favorites .lab-favorites-scroll { min-height: 0; }
 .lab-title-favorites > button,
 .lab-title-favorites > button:hover:not(:disabled) { width: 100%; padding-inline: 4px; border-color: transparent; background: transparent; box-shadow: none; color: var(--obs-text); }
 .lab-title-favorites > button:active:not(:disabled) { transform: none; }

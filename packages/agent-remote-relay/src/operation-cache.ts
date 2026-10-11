@@ -61,6 +61,7 @@ export interface OperationCache {
   execute<T>(descriptor: OperationDescriptor, work: OperationWork<T>): Promise<T>;
   hasUnsettledMutation(target: string): boolean;
   enableMutationTarget(target: string): () => void;
+  subscribeMutationSettlement(listener: (target: string) => void): () => void;
   close(): Promise<void>;
 }
 
@@ -122,6 +123,15 @@ export function createOperationCache(options: OperationCacheOptions = {}): Opera
       entry.mutation.receiptExpired = true;
       entries.delete(key);
       retainedBytes -= entry.bytes;
+    }
+  }
+
+  const settlementListeners = new Set<(target: string) => void>();
+  const unsettled = (target: string) => [...entries.values()].some(entry => entry.mutation.targets.includes(target)
+    && (entry.state === 'in_flight' || [...entry.mutation.handles].some(handle => handle.target === target)));
+  function notifySettled(targets: readonly string[]): void {
+    for (const target of targets) if (!unsettled(target)) for (const listener of settlementListeners) {
+      try { listener(target); } catch { /* Subscribers cannot change operation evidence. */ }
     }
   }
 
@@ -187,7 +197,12 @@ export function createOperationCache(options: OperationCacheOptions = {}): Opera
     try {
       try { release = work.admit?.(entry) || undefined; }
       catch (error) { return await perform({ ...work, validate: () => { throw error; } }); }
-      return await (work.run ? work.run(entry, () => perform(work)) : perform(work));
+      let entered = false;
+      try { return await (work.run ? work.run(entry, () => { entered = true; return perform(work); }) : perform(work)); }
+      catch (error) {
+        if (work.run && !entered) return await perform({ ...work, validate: () => { throw error; } });
+        throw error;
+      }
     } finally { try { release?.(); } catch { /* Cleanup cannot change the published receipt. */ } }
 
     async function perform(work: OperationWork<T>): Promise<T> {
@@ -246,7 +261,7 @@ export function createOperationCache(options: OperationCacheOptions = {}): Opera
     const mutation = prior.mutation;
     mutation.resultBytes = entry.bytes - entryBytes(key, 0);
     entries.set(key, { ...entry, bytes: prior.bytes, fingerprint, mutation });
-    account(key);
+    account(key); notifySettled(mutation.targets);
   }
   function accountedBytes(key: string, entry: CacheEntry): number {
     const mutation = entry.mutation;
@@ -275,7 +290,7 @@ export function createOperationCache(options: OperationCacheOptions = {}): Opera
       account(key);
       return {
         handle,
-        settled() { if (entries.get(key)?.mutation !== mutation) return; mutation.handles.delete(handle); account(key); },
+        settled() { if (entries.get(key)?.mutation !== mutation) return; mutation.handles.delete(handle); account(key); notifySettled([target]); },
         unresolved() { handle.state = 'unknown'; },
       };
     }
@@ -317,9 +332,9 @@ export function createOperationCache(options: OperationCacheOptions = {}): Opera
     execute,
     hasUnsettledMutation(target) {
       cleanup();
-      return [...entries.values()].some(entry => entry.mutation.targets.includes(target)
-        && (entry.state === 'in_flight' || [...entry.mutation.handles].some(handle => handle.target === target)));
+      return unsettled(target);
     },
+    subscribeMutationSettlement(listener) { settlementListeners.add(listener); return () => { settlementListeners.delete(listener); }; },
     enableMutationTarget(target) {
       enabledTargets.set(target, (enabledTargets.get(target) ?? 0) + 1);
       let released = false;
@@ -332,7 +347,7 @@ export function createOperationCache(options: OperationCacheOptions = {}): Opera
       clearInterval(timer);
       await Promise.allSettled([...entries.values()].flatMap((entry) => entry.state === 'in_flight' ? [entry.promise] : []));
       entries.clear();
-      enabledTargets.clear();
+      enabledTargets.clear(); settlementListeners.clear();
       retainedBytes = 0;
     },
   };

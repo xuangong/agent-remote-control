@@ -3,23 +3,29 @@ import {
   AGENT_NATIVE_EVIDENCE_LIMITS as limits, AGENT_NATIVE_EVIDENCE_REASONS as reasons, AgentOperationRejectedError, AgentNativeEvidenceOutcomeUnknownError,
   parseAgentPreparedTextInput, serializeAgentPreparedTextInput, parseAgentInputMaterialization, serializeAgentInputMaterialization,
   type AgentNativeEvidenceCode, type AgentNativeEvidenceAvailability, type AgentEmptySessionConfig, type AgentEmptyCreationResult,
-  type AgentProviderNativeEvidence, type AgentSessionNativeEvidence, type AgentNativeStoreIdentity, type AgentNativeValidityToken,
-  type AgentPreparedTextInput, type AgentInputMaterialization, type AgentInputPart, type AgentMessageOptions, type AgentPersistenceHandle,
+  type AgentProviderNativeEvidence, type AgentSessionNativeEvidence, type AgentNativeAuthorityScope, type AgentNativeValidityToken,
+  type AgentPreparedTextInput, type AgentInputMaterialization, type AgentInputPart, type AgentMessageOptions, type AgentPersistenceHandle, type AgentInputAcceptance, type AgentNativeReadiness,
 } from '@orchardworks/agent-provider-sdk';
 import type { GlobalEvent, Session } from '@opencode-ai/sdk/v2/client';
 import { OpenCodeTransport, OpenCodeRequestError } from './transport.js';
-import { openCodeModel } from './settings.js';
+import { nativeSelections, openCodeModel } from './settings.js';
 
-/** Private issuer contract. The issuer verifies this exact transport's durable store;
- * no production issuer is installed, and caller configuration cannot supply identity. */
+/** Private issuer for this transport's trusted service namespace and live observations. */
+export type OpenCodeNativeSelections = { model: string; agent: string; variant?: string };
 export interface OpenCodeNativeEvidenceVerifier {
-  captureStore(transport: OpenCodeTransport, cwd: string): { status: 'unavailable' } | { status: 'verified'; store: AgentNativeStoreIdentity; lease: object };
+  refresh(cwd: string, force?: boolean): Promise<void>;
+  targetSelections(cwd: string, selectionSourceSessionId?: string): Promise<OpenCodeNativeSelections>;
+  observeSession(native: Session): void;
+  activeDescendants?(nativeId: string, cwd: string, activeIds: readonly string[]): Promise<number>;
+  validateSelections(cwd: string, selections: OpenCodeNativeSelections): void;
+  relation(first: string, second: string): 'self' | 'related' | 'independent' | 'unknown';
+  captureAuthority(transport: OpenCodeTransport, cwd: string): { status: 'unavailable' } | { status: 'verified'; authority: AgentNativeAuthorityScope; lease: object };
   isCurrent(lease: object): boolean;
-  /** Scoped profile/observation continuity, distinct from durable store continuity. */
+  /** Scoped profile/observation continuity, distinct from stable service identity. */
   isObservationCurrent(lease: object): boolean;
   subscribe(invalidate: () => void): () => void;
 }
-type Lease = { store: AgentNativeStoreIdentity; token: object };
+type Lease = { authority: AgentNativeAuthorityScope; token: object };
 function reject(code: AgentNativeEvidenceCode): never { throw new AgentOperationRejectedError(code, reasons[code]); }
 const unknown = (code: AgentNativeEvidenceCode): AgentInputMaterialization & { status: 'unknown' } => ({ status: 'unknown', code, reason: reasons[code] });
 const hash = (text: string) => createHash('sha256').update(text, 'utf8').digest('hex');
@@ -35,23 +41,23 @@ function owned(value: unknown, required: string[], optional: string[] = []): ass
   if (Object.getOwnPropertySymbols(value).length || Object.values(descriptors).some(d => !('value' in d) || !d.enumerable)) reject('native_evidence_invalid');
   const keys = Object.keys(descriptors); if (required.some(key => !keys.includes(key)) || keys.some(key => !required.includes(key) && !optional.includes(key))) reject('native_evidence_invalid');
 }
-function store(value: unknown): AgentNativeStoreIdentity { owned(value, ['authorityId', 'storeId']); identity(value.authorityId); identity(value.storeId); return Object.freeze({ authorityId: value.authorityId, storeId: value.storeId }); }
+function authority(value: unknown): AgentNativeAuthorityScope { owned(value, ['kind', 'authorityId', 'namespaceId']); identity(value.authorityId); identity(value.namespaceId); if (value.kind !== 'trusted-service') reject('native_evidence_invalid'); return Object.freeze({ kind: 'trusted-service', authorityId: value.authorityId, namespaceId: value.namespaceId }); }
 
 class Authority {
   constructor(readonly transport: OpenCodeTransport, readonly verifier?: OpenCodeNativeEvidenceVerifier) {}
-  availability(): AgentNativeEvidenceAvailability { return this.verifier ? { status: 'configured', version: 1 } : { status: 'unavailable', code: 'native_evidence_unavailable', reason: reasons.native_evidence_unavailable }; }
+  availability(): AgentNativeEvidenceAvailability { return this.verifier ? { status: 'configured', version: 2 } : { status: 'unavailable', code: 'native_evidence_unavailable', reason: reasons.native_evidence_unavailable }; }
   capture(cwd: string, observation = false): Lease {
     if (!this.verifier) reject('native_evidence_unavailable');
-    let result: ReturnType<OpenCodeNativeEvidenceVerifier['captureStore']>;
-    try { result = this.verifier.captureStore(this.transport, cwd); } catch { reject('native_evidence_unavailable'); }
+    let result: ReturnType<OpenCodeNativeEvidenceVerifier['captureAuthority']>;
+    try { result = this.verifier.captureAuthority(this.transport, cwd); } catch { reject('native_evidence_unavailable'); }
     if (result.status !== 'verified' || !result.lease || typeof result.lease !== 'object') reject('native_evidence_unavailable');
-    const lease = { store: store(result.store), token: result.lease }; if (!this.current(lease, observation)) reject('native_evidence_stale'); return lease;
+    const lease = { authority: authority(result.authority), token: result.lease }; if (!this.current(lease, observation)) reject('native_evidence_stale'); return lease;
   }
   current(lease: Lease, observation = false): boolean { try { return !!this.verifier?.isCurrent(lease.token) && (!observation || this.verifier.isObservationCurrent(lease.token)); } catch { return false; } }
   check(lease: Lease, observation = false): void { if (!this.current(lease, observation)) reject('native_evidence_stale'); }
 }
-interface EmptyHandle { version: 1; kind: 'opencode.empty'; cwd: string; store: AgentNativeStoreIdentity; }
-function creationHandle(id: string, metadata: EmptyHandle | { version: 1; kind: 'opencode.empty-recovery'; expectedCwd: string; expectedStore: AgentNativeStoreIdentity; failureCode: AgentNativeEvidenceCode }): AgentPersistenceHandle {
+interface EmptyHandle { version: 2; kind: 'opencode.empty'; cwd: string; authority: AgentNativeAuthorityScope; selections: OpenCodeNativeSelections; }
+function creationHandle(id: string, metadata: EmptyHandle | { version: 2; kind: 'opencode.empty-recovery'; expectedCwd: string; expectedAuthority: AgentNativeAuthorityScope; failureCode: AgentNativeEvidenceCode }): AgentPersistenceHandle {
   const handle = { providerId: 'opencode', sessionId: id, opaque: canonical(metadata) }; if (Buffer.byteLength(canonical(handle)) > limits.handleBytes) reject('native_evidence_limit'); return handle;
 }
 export class OpenCodeProviderNativeEvidence implements AgentProviderNativeEvidence {
@@ -59,43 +65,56 @@ export class OpenCodeProviderNativeEvidence implements AgentProviderNativeEviden
   constructor(private readonly transport: OpenCodeTransport, verifier: OpenCodeNativeEvidenceVerifier | undefined, private readonly canonicalDirectory: (cwd: string) => Promise<string>, private readonly isOpen: () => boolean) { this.authority = new Authority(transport, verifier); }
   availability(): AgentNativeEvidenceAvailability { return this.authority.availability(); }
   async createEmpty(config: AgentEmptySessionConfig): Promise<AgentEmptyCreationResult> {
-    owned(config, ['sessionId'], ['cwd']); identity(config.sessionId); if (config.cwd !== undefined) directory(config.cwd);
+    owned(config, ['sessionId'], ['cwd', 'selectionSourceSessionId']); identity(config.sessionId); if (config.selectionSourceSessionId !== undefined) identity(config.selectionSourceSessionId); if (config.cwd !== undefined) directory(config.cwd);
     if (!this.isOpen() || this.transport.restricted) reject('native_evidence_admission');
     if (!this.authority.verifier) reject('native_evidence_unavailable');
     let cwd: string; try { cwd = await this.canonicalDirectory(config.cwd ?? process.cwd()); } catch { reject('native_evidence_invalid'); } directory(cwd);
+    await this.authority.verifier.refresh(cwd, true);
     const lease = this.authority.capture(cwd);
+    const selections = await this.authority.verifier.targetSelections(cwd, config.selectionSourceSessionId); this.authority.check(lease);
     // Escaping inside opaque is included before the sole effect, with the largest legal B/code.
-    for (const failureCode of Object.keys(reasons) as AgentNativeEvidenceCode[]) creationHandle('B'.repeat(limits.identityBytes), { version: 1, kind: 'opencode.empty-recovery', expectedCwd: cwd, expectedStore: lease.store, failureCode });
-    creationHandle('B'.repeat(limits.identityBytes), { version: 1, kind: 'opencode.empty', cwd, store: lease.store });
+    for (const failureCode of Object.keys(reasons) as AgentNativeEvidenceCode[]) creationHandle('B'.repeat(limits.identityBytes), { version: 2, kind: 'opencode.empty-recovery', expectedCwd: cwd, expectedAuthority: lease.authority, failureCode });
+    creationHandle('B'.repeat(limits.identityBytes), { version: 2, kind: 'opencode.empty', cwd, authority: lease.authority, selections });
     this.authority.check(lease); if (!this.isOpen()) reject('native_evidence_admission');
     let retained: string | undefined;
     try {
-      const native = await this.transport.request(() => this.transport.client.session.create({ directory: cwd }));
+      const selected = openCodeModel(selections.model)!;
+      const native = await this.transport.request(() => this.transport.client.session.create({ directory: cwd, agent: selections.agent, model: { providerID: selected.providerID, id: selected.modelID, ...(selections.variant ? { variant: selections.variant } : {}) } }));
       try { identity(native?.id); retained = native.id; } catch { return unknown('native_evidence_identity_unusable'); }
       this.authority.check(lease); if (!this.isOpen()) reject('native_evidence_admission');
       if (!native || typeof native.directory !== 'string') reject('native_evidence_invalid');
       const actual = await this.canonicalDirectory(native.directory); this.authority.check(lease);
       if (!this.isOpen() || actual !== cwd) reject('native_evidence_invalid');
-      return { status: 'created', handle: creationHandle(retained, { version: 1, kind: 'opencode.empty', cwd, store: lease.store }) };
+      this.authority.verifier.observeSession(native);
+      const confirmed = await this.transport.request(() => this.transport.client.session.get({ sessionID: retained!, directory: cwd }));
+      this.authority.check(lease);
+      if (confirmed.id !== retained || confirmed.directory !== cwd || !same(nativeSelections(confirmed), selections)) reject('native_evidence_invalid');
+      this.authority.verifier.observeSession(confirmed);
+      return { status: 'created', handle: creationHandle(retained, { version: 2, kind: 'opencode.empty', cwd, authority: lease.authority, selections }) };
     } catch (error) {
       if (!retained) return unknown('native_evidence_outcome_unknown');
       const code: AgentNativeEvidenceCode = error instanceof AgentOperationRejectedError && Object.hasOwn(reasons, error.code) ? error.code as AgentNativeEvidenceCode : 'native_evidence_invalid';
-      return { status: 'known_rejected', handle: creationHandle(retained, { version: 1, kind: 'opencode.empty-recovery', expectedCwd: cwd, expectedStore: lease.store, failureCode: code }), code, reason: reasons[code] };
+      return { status: 'known_rejected', handle: creationHandle(retained, { version: 2, kind: 'opencode.empty-recovery', expectedCwd: cwd, expectedAuthority: lease.authority, failureCode: code }), code, reason: reasons[code] };
     }
   }
   /** Returns undefined only for an ordinary legacy handle. Recovery envelopes never attach. */
-  async resume(handle: AgentPersistenceHandle, parsed: unknown): Promise<{ native: Session; cwd: string; validate(): void } | undefined> {
+  async resume(handle: AgentPersistenceHandle, parsed: unknown): Promise<{ native: Session; cwd: string; selections: OpenCodeNativeSelections; validate(): void } | undefined> {
     if (!parsed || typeof parsed !== 'object' || !('kind' in parsed)) return;
     if ((parsed as any).kind !== 'opencode.empty') reject('native_evidence_invalid');
     owned(handle, ['providerId', 'sessionId', 'opaque']); identity(handle.sessionId); bounded(handle.opaque, limits.handleBytes);
-    owned(parsed, ['version', 'kind', 'cwd', 'store']); const metadata: Record<string, any> = parsed; if (metadata.version !== 1 || handle.providerId !== 'opencode' || canonical(parsed) !== handle.opaque) reject('native_evidence_invalid');
-    directory(metadata.cwd); const expectedStore = store(metadata.store); creationHandle(handle.sessionId, { version: 1, kind: 'opencode.empty', cwd: metadata.cwd, store: expectedStore });
-    const lease = this.authority.capture(metadata.cwd); if (!same(lease.store, expectedStore)) reject('native_evidence_stale');
+    owned(parsed, ['version', 'kind', 'cwd', 'authority', 'selections']); const metadata: Record<string, any> = parsed; if (metadata.version !== 2 || handle.providerId !== 'opencode' || canonical(parsed) !== handle.opaque) reject('native_evidence_invalid');
+    owned(metadata.selections, ['model', 'agent'], ['variant']); for (const value of Object.values(metadata.selections)) bounded(value, limits.selectionBytes);
+    const originalSelections = metadata.selections as OpenCodeNativeSelections;
+    directory(metadata.cwd); const expectedAuthority = authority(metadata.authority); creationHandle(handle.sessionId, { version: 2, kind: 'opencode.empty', cwd: metadata.cwd, authority: expectedAuthority, selections: originalSelections });
+    await this.authority.verifier?.refresh(metadata.cwd, true);
+    const lease = this.authority.capture(metadata.cwd); if (!same(lease.authority, expectedAuthority)) reject('native_evidence_stale');
     const cwd = await this.canonicalDirectory(metadata.cwd); this.authority.check(lease); if (cwd !== metadata.cwd || !this.isOpen()) reject('native_evidence_stale');
     const native = await this.transport.request(() => this.transport.client.session.get({ sessionID: handle.sessionId, directory: cwd })); this.authority.check(lease);
-    if (native.id !== handle.sessionId) reject('native_evidence_invalid');
+    const selections = nativeSelections(native);
+    if (native.id !== handle.sessionId || !selections) reject('native_evidence_invalid');
     const actual = await this.canonicalDirectory(native.directory); this.authority.check(lease); if (actual !== cwd || !this.isOpen()) reject('native_evidence_stale');
-    return { native, cwd, validate: () => { this.authority.check(lease); if (!this.isOpen()) reject('native_evidence_stale'); } };
+    this.authority.verifier?.observeSession(native); this.authority.verifier?.validateSelections(cwd, selections);
+    return { native, cwd, selections, validate: () => { this.authority.check(lease); if (!this.isOpen()) reject('native_evidence_stale'); } };
   }
 }
 
@@ -106,8 +125,12 @@ interface SessionEvidencePorts {
   messageId(): string;
   writable(): void;
   canCapture(): boolean;
+  canInspect(): boolean;
+  readiness(): AgentNativeReadiness;
+  refreshReadiness(): Promise<void>;
   readable(): boolean;
   reserveInput(id: string): void;
+  releaseInput(id: string): void;
   scheduleRefresh(): void;
   canonicalDirectory(cwd: string): Promise<string>;
 }
@@ -140,7 +163,18 @@ function relevantMetadata(session: Session): string {
   return canonical(value);
 }
 
-const supportedEvents = new Set(['message.updated', 'message.part.updated', 'message.part.delta', 'message.removed', 'message.part.removed', 'session.status', 'session.idle', 'session.error', 'todo.updated', 'session.compacted', 'permission.asked', 'question.asked', 'permission.replied', 'question.rejected', 'question.replied', 'session.updated', 'session.deleted', 'session.next.agent.switched', 'session.next.model.switched']);
+const supportedEvents = new Set(['message.updated', 'message.part.updated', 'message.part.delta', 'message.removed', 'message.part.removed', 'session.status', 'session.idle', 'session.error', 'session.diff', 'todo.updated', 'session.compacted', 'permission.asked', 'question.asked', 'permission.replied', 'question.rejected', 'question.replied', 'session.created', 'session.updated', 'session.deleted', 'session.next.agent.switched', 'session.next.model.switched']);
+/** SDK sync envelopes carry the same native fact with an explicit schema revision. */
+export function nativeEvidenceEvent(global: GlobalEvent): { type: string; properties: Record<string, any> } | undefined {
+  const payload = global.payload as Record<string, any> | undefined;
+  if (!payload || typeof payload.type !== 'string') return;
+  if (payload.type !== 'sync') return { type: payload.type, properties: payload.properties ?? {} };
+  const sync = payload.syncEvent;
+  if (!sync || typeof sync.type !== 'string' || !sync.type.endsWith('.1') || sync.id !== payload.id || typeof sync.id !== 'string'
+    || !Number.isSafeInteger(sync.seq) || sync.seq < 0 || typeof sync.aggregateID !== 'string' || !sync.aggregateID
+    || !sync.data || typeof sync.data !== 'object' || Array.isArray(sync.data) || sync.data.sessionID !== sync.aggregateID) return;
+  return { type: sync.type.slice(0, -2), properties: sync.data };
+}
 export class OpenCodeSessionNativeEvidence implements AgentSessionNativeEvidence {
   private readonly authority: Authority;
   private revision = 0;
@@ -173,15 +207,15 @@ export class OpenCodeSessionNativeEvidence implements AgentSessionNativeEvidence
   beginEffect(): () => void { if (!this.authority.verifier) return () => {}; this.invalidate(); this.localEffects++; return () => { this.localEffects--; this.ports.scheduleRefresh(); }; }
   receive(global: GlobalEvent, current: Session | undefined, childIds: readonly string[]): void {
     if (!this.authority.verifier || this.disposed) return;
-    const event = global.payload as { type?: string; properties?: Record<string, any> } | undefined;
-    if (!event || typeof event.type !== 'string') { this.invalidate(true); return; }
+    const event = nativeEvidenceEvent(global);
+    if (!event) { this.invalidate(true); return; }
     if (event.type === 'server.connected' || event.type === 'server.heartbeat') return;
     const p = event.properties ?? {}; const nested = p.info ?? p.part;
     const sessionId = p.sessionID ?? nested?.sessionID ?? (event.type.startsWith('session.') ? nested?.id : undefined);
     if (sessionId !== this.ports.nativeId) {
-      if (nested?.parentID === this.ports.nativeId || childIds.includes(sessionId)) { this.invalidate(true); this.ports.scheduleRefresh(); return; }
-      // Without verified ancestry, a different session ID cannot prove irrelevance.
-      this.invalidate(true); return;
+      const relation = typeof sessionId === 'string' ? this.authority.verifier.relation(this.ports.nativeId, sessionId) : 'unknown';
+      if (relation === 'independent') return;
+      this.invalidate(); this.ports.scheduleRefresh(); return;
     }
     if (event.type === 'session.updated' && current && p.info) {
       try { if (relevantMetadata(current) === relevantMetadata(p.info)) return; } catch { /* Unknown metadata remains relevant. */ }
@@ -197,6 +231,13 @@ export class OpenCodeSessionNativeEvidence implements AgentSessionNativeEvidence
     if (this.readCurrent(fence) && native.id === this.ports.nativeId && native.directory === this.ports.cwd) { this.baseline = fence.revision; this.baselineLease = fence.lease; }
   }
   private clean(): boolean { return !this.disposed && !this.unsupported && this.baseline === this.revision && !!this.baselineLease && this.authority.current(this.baselineLease, true) && this.work === 0 && this.localEffects === 0 && this.ports.canCapture(); }
+  async inspectReadiness(): Promise<AgentNativeReadiness> {
+    if (!this.authority.verifier) reject('native_evidence_unavailable');
+    await this.authority.verifier?.refresh(this.ports.cwd, true);
+    await this.ports.refreshReadiness();
+    if (this.disposed || this.unsupported || this.baseline !== this.revision || !this.baselineLease || !this.authority.current(this.baselineLease, true) || this.work || this.localEffects || !this.ports.canInspect()) reject('native_evidence_stale');
+    this.selections(); return this.ports.readiness();
+  }
   captureValidity(): AgentNativeValidityToken {
     const lease = this.authority.capture(this.ports.cwd, true); if (!this.clean()) reject('native_evidence_stale');
     const token = Object.freeze(Object.create(null)) as AgentNativeValidityToken; this.tokens.set(token, { revision: this.revision, lease }); return token;
@@ -205,7 +246,9 @@ export class OpenCodeSessionNativeEvidence implements AgentSessionNativeEvidence
   private witness(value: AgentPreparedTextInput): AgentPreparedTextInput { return parseAgentPreparedTextInput(serializeAgentPreparedTextInput(value)); }
   private selections(delivery?: 'immediate'): AgentPreparedTextInput['selections'] {
     const values = this.ports.selections();
-    if (!values.model || !values.agent) reject('native_evidence_unsupported');
+    const actual = nativeSelections(this.ports.currentSession());
+    if (!actual || !same(actual, { model: values.model, agent: values.agent, ...(values.variant ? { variant: values.variant } : {}) })) reject('native_evidence_unsupported');
+    this.authority.verifier?.validateSelections(this.ports.cwd, actual);
     try { openCodeModel(values.model); } catch { reject('native_evidence_unsupported'); }
     for (const key of ['model', 'agent', 'variant'] as const) if (values[key] !== undefined) { bounded(values[key], limits.selectionBytes); if (/[\u0000-\u001f\u007f-\u009f]/u.test(values[key])) reject('native_evidence_invalid'); }
     if (values.system !== undefined) bounded(values.system, limits.systemBytes, true);
@@ -219,18 +262,20 @@ export class OpenCodeSessionNativeEvidence implements AgentSessionNativeEvidence
     if (options !== undefined) { owned(options, [], ['delivery']); if (options.delivery !== undefined && options.delivery !== 'immediate') reject('native_evidence_unsupported'); }
     const lease = this.authority.capture(this.ports.cwd, true); this.captureValidity();
     const selections = this.selections(options?.delivery as 'immediate' | undefined);
-    const input = this.witness({ version: 1, providerId: 'opencode', nativeSessionId: this.ports.nativeId, nativeInputId: this.ports.messageId(), cwd: this.ports.cwd, store: lease.store, parts: [{ type: 'text', text }], content: { encoding: 'utf-8', bytes: Buffer.byteLength(text), sha256: hash(text) }, selections });
+    const input = this.witness({ version: 2, providerId: 'opencode', nativeSessionId: this.ports.nativeId, inputId: this.ports.messageId(), cwd: this.ports.cwd, authority: lease.authority, parts: [{ type: 'text', text }], content: { encoding: 'utf-8', bytes: Buffer.byteLength(text), sha256: hash(text) }, selections });
     this.authority.check(lease, true); return input;
   }
-  private matches(witness: AgentPreparedTextInput, lease: Lease): void { if (witness.providerId !== 'opencode' || witness.nativeSessionId !== this.ports.nativeId || witness.cwd !== this.ports.cwd || !same(witness.store, lease.store)) reject('native_evidence_stale'); }
-  async dispatchInput(value: AgentPreparedTextInput): Promise<void> {
+  private matches(witness: AgentPreparedTextInput, lease: Lease): void { if (witness.providerId !== 'opencode' || witness.nativeSessionId !== this.ports.nativeId || witness.cwd !== this.ports.cwd || !same(witness.authority, lease.authority)) reject('native_evidence_stale'); }
+  async dispatchInput(value: AgentPreparedTextInput): Promise<AgentInputAcceptance | void> {
     const witness = this.witness(value); const lease = this.authority.capture(this.ports.cwd, true); this.matches(witness, lease);
     this.captureValidity(); if (!same(witness.selections, this.selections(witness.selections.delivery))) reject('native_evidence_stale');
-    this.ports.writable(); this.authority.check(lease, true); this.ports.reserveInput(witness.nativeInputId);
+    this.ports.writable(); this.authority.check(lease, true); this.ports.reserveInput(witness.inputId);
     const finish = this.beginEffect();
     try {
-      await this.transport.request(() => this.transport.client.session.promptAsync({ sessionID: this.ports.nativeId, directory: this.ports.cwd, messageID: witness.nativeInputId, parts: [{ type: 'text', text: witness.parts[0].text }], model: openCodeModel(witness.selections.model), agent: witness.selections.agent, ...(witness.selections.variant === undefined ? {} : { variant: witness.selections.variant }), ...(witness.selections.system === undefined ? {} : { system: witness.selections.system }) }));
+      await this.transport.request(() => this.transport.client.session.promptAsync({ sessionID: this.ports.nativeId, directory: this.ports.cwd, messageID: witness.inputId, parts: [{ type: 'text', text: witness.parts[0].text }], model: openCodeModel(witness.selections.model), agent: witness.selections.agent, ...(witness.selections.variant === undefined ? {} : { variant: witness.selections.variant }), ...(witness.selections.system === undefined ? {} : { system: witness.selections.system }) }));
       if (this.disposed || !this.authority.current(lease, true)) throw new AgentNativeEvidenceOutcomeUnknownError();
+      const inspected = await this.inspectInput(witness);
+      if (inspected.status === 'materialized' && inspected.execution) return { disposition: 'started' };
     } catch { throw new AgentNativeEvidenceOutcomeUnknownError(); } finally { finish(); }
   }
   async inspectInput(value: AgentPreparedTextInput): Promise<AgentInputMaterialization> {
@@ -247,11 +292,11 @@ export class OpenCodeSessionNativeEvidence implements AgentSessionNativeEvidence
       if (native.id !== witness.nativeSessionId) return inconclusive('native_evidence_readback_mismatch');
       const cwd = await this.ports.canonicalDirectory(native.directory); if (!this.readCurrent(fence)) return inconclusive('native_evidence_stale');
       if (cwd !== witness.cwd) return inconclusive('native_evidence_readback_mismatch');
-      const message = await this.transport.request(() => this.transport.client.session.message({ sessionID: this.ports.nativeId, messageID: witness.nativeInputId, directory: this.ports.cwd }));
+      const message = await this.transport.request(() => this.transport.client.session.message({ sessionID: this.ports.nativeId, messageID: witness.inputId, directory: this.ports.cwd }));
       if (!this.readCurrent(fence)) return inconclusive('native_evidence_stale');
       owned(message, ['info', 'parts']); owned(message.info, ['id', 'sessionID', 'role', 'time', 'agent', 'model'], ['system', 'summary']);
       const info = message.info;
-      if (info.id !== witness.nativeInputId || info.sessionID !== witness.nativeSessionId || info.role !== 'user') return inconclusive('native_evidence_readback_mismatch');
+      if (info.id !== witness.inputId || info.sessionID !== witness.nativeSessionId || info.role !== 'user') return inconclusive('native_evidence_readback_mismatch');
       owned(info.model, ['providerID', 'modelID'], ['variant']); owned(info.time, ['created']); if (!Number.isSafeInteger(info.time.created) || info.time.created < 0) return inconclusive('native_evidence_readback_mismatch');
       const selections = { model: `${info.model.providerID}/${info.model.modelID}`, agent: info.agent, ...('variant' in info.model ? { variant: info.model.variant } : {}), ...('system' in info ? { system: info.system } : {}) };
       const { delivery: _delivery, ...expected } = witness.selections;
@@ -260,10 +305,15 @@ export class OpenCodeSessionNativeEvidence implements AgentSessionNativeEvidence
       const part: unknown = message.parts[0]; owned(part, ['id', 'sessionID', 'messageID', 'type', 'text'], ['synthetic', 'ignored', 'time']); identity(part.id);
       if (part.synthetic !== undefined && part.synthetic !== false || part.ignored !== undefined && part.ignored !== false) return inconclusive('native_evidence_readback_mismatch');
       if (part.time !== undefined) { owned(part.time, ['start'], ['end']); for (const time of Object.values(part.time)) if (!Number.isSafeInteger(time) || (time as number) < 0) return inconclusive('native_evidence_readback_mismatch'); }
-      if (part.type !== 'text' || part.sessionID !== witness.nativeSessionId || part.messageID !== witness.nativeInputId || part.text !== witness.parts[0].text) return inconclusive('native_evidence_readback_mismatch');
+      if (part.type !== 'text' || part.sessionID !== witness.nativeSessionId || part.messageID !== witness.inputId || part.text !== witness.parts[0].text) return inconclusive('native_evidence_readback_mismatch');
       bounded(part.text, limits.textBytes, true); if (Buffer.byteLength(part.text) !== witness.content.bytes || hash(part.text) !== witness.content.sha256) return inconclusive('native_evidence_readback_mismatch');
-      const result: AgentInputMaterialization = { status: 'materialized', proof: { version: 1, providerId: witness.providerId, nativeSessionId: witness.nativeSessionId, nativeInputId: witness.nativeInputId, cwd: witness.cwd, store: witness.store, witnessSha256: hash(serializeAgentPreparedTextInput(witness)), contentSha256: witness.content.sha256, nativeSelectionsSha256: hash(canonical(expected)), nativePartIds: [part.id] } };
-      return parseAgentInputMaterialization(serializeAgentInputMaterialization(result));
+      const result: AgentInputMaterialization = { status: 'materialized', proof: { version: 2, providerId: witness.providerId, nativeSessionId: witness.nativeSessionId, inputId: witness.inputId, nativeInputId: witness.inputId, cwd: witness.cwd, authority: witness.authority, witnessSha256: hash(serializeAgentPreparedTextInput(witness)), contentSha256: witness.content.sha256, nativeSelectionsSha256: hash(canonical(expected)), nativePartIds: [part.id] } };
+      const nativeExecutionId = await readOpenCodeInputResponse(this.transport, this.ports.nativeId, this.ports.cwd, witness.inputId, () => this.readCurrent(fence));
+      if (!this.readCurrent(fence)) return inconclusive('native_evidence_stale');
+      if (nativeExecutionId) result.execution = { disposition: 'started', nativeExecutionId };
+      const verified = parseAgentInputMaterialization(serializeAgentInputMaterialization(result));
+      if (verified.status === 'materialized' && verified.execution) this.ports.releaseInput(witness.inputId);
+      return verified;
     } catch (error) {
       if (!this.readCurrent(fence)) return inconclusive('native_evidence_stale');
       if (error instanceof OpenCodeRequestError) return inconclusive(error.status === 404 ? 'native_evidence_readback_missing' : 'native_evidence_readback_failed');
@@ -271,4 +321,19 @@ export class OpenCodeSessionNativeEvidence implements AgentSessionNativeEvidence
     } finally { this.endWork(); }
   }
   dispose(): void { this.disposed = true; this.invalidate(); this.unsubscribe?.(); }
+}
+
+
+/** Exact U/R association proves this input started, independently of native idle/busy state. */
+export async function readOpenCodeInputResponse(transport: OpenCodeTransport, sessionID: string, directory: string, inputID: string, current: () => boolean): Promise<string | undefined> {
+  const user = await transport.request(() => transport.client.session.message({ sessionID, directory, messageID: inputID }));
+  if (!current() || user.info.role !== 'user' || user.info.id !== inputID || user.info.sessionID !== sessionID) return;
+  const history = await transport.request(() => transport.client.session.messages({ sessionID, directory, limit: 200 }));
+  if (!current()) return;
+  const started = (info: typeof history[number]['info']) => info.role === 'assistant' && info.sessionID === sessionID && info.parentID === inputID && info.summary !== true;
+  const response = history.find(message => started(message.info));
+  if (!response) return;
+  identity(response.info.id);
+  const exact = await transport.request(() => transport.client.session.message({ sessionID, directory, messageID: response.info.id }));
+  if (current() && started(exact.info) && exact.info.id === response.info.id) return exact.info.id;
 }

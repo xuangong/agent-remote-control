@@ -8,7 +8,7 @@ import {
 import type { RemoteTransportListener } from '@orchardworks/agent-remote-web';
 
 import { App, type LabTransport } from './App.js';
-import { render, unmount } from './test/setup.js';
+import { render, unmount, setPromptText, promptText } from './test/setup.js';
 import { replicaState } from './test/fixtures.js';
 import { SessionDirectoryClient } from './directory-client.js';
 
@@ -169,14 +169,7 @@ describe('App', () => {
           item: { type: 'assistant_message', text: agentId, messageId: 'reply' },
         }],
       } }),
-      connect: (agentId, listener) => {
-        queueMicrotask(() => listener.onMessage({ protocolVersion: PROTOCOL_VERSION, type: 'agent_snapshot', payload: { ...replicaState.agent!, id: agentId } }));
-        return { close: () => {}, send: message => {
-          if (message.type === 'timeline_subscription') queueMicrotask(() => listener.onMessage({ protocolVersion: PROTOCOL_VERSION,
-            type: 'timeline_subscribed', payload: { requestId: message.payload.requestId, agentIds: [agentId] },
-          }));
-        } };
-      },
+      connect: (agentId, listener) => readyConnection(agentId, listener),
     });
     const container = await render(<App transport={transport} />);
     await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="Inspect event #1 in Trace"]')!.click());
@@ -365,7 +358,7 @@ describe('App', () => {
     const container = await render(<App initialState={replicaState} initialSessionStatus={sessionStatus} actions={{ sendMessage }} />);
     const input = container.querySelector<HTMLTextAreaElement>('[data-testid="prompt-input"]')!;
     await act(async () => {
-      Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!.call(input, 'Wait for my connection');
+      setPromptText(input, 'Wait for my connection');
       input.dispatchEvent(new Event('input', { bubbles: true }));
     });
     const send = container.querySelector<HTMLButtonElement>('[data-testid="prompt-submit"]')!;
@@ -373,8 +366,8 @@ describe('App', () => {
     expect(container.querySelector<HTMLButtonElement>('[aria-label="Open chat commands"]')!.disabled).toBe(true);
     await act(async () => send.click());
     expect(container.querySelector('[data-testid="pending-send"]')?.textContent).toContain('Wait for my connection');
-    expect(input.value).toBe('');
-    expect(input.disabled).toBe(false);
+    expect(promptText(input)).toBe('');
+    expect(input.getAttribute('aria-disabled')).not.toBe('true');
     expect(sendMessage).not.toHaveBeenCalled();
   });
 
@@ -464,10 +457,10 @@ describe('App', () => {
     expect(trace.hidden).toBe(true);
 
     await act(async () => {
-      Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')?.set?.call(prompt, 'Keep this draft');
+      setPromptText(prompt, 'Keep this draft');
       prompt.dispatchEvent(new Event('input', { bubbles: true }));
     });
-    expect(prompt.value).toBe('Keep this draft');
+    expect(promptText(prompt)).toBe('Keep this draft');
     await act(async () => traceTab.click());
 
     expect(traceTab.getAttribute('aria-selected')).toBe('true');
@@ -476,7 +469,7 @@ describe('App', () => {
     expect(trace.textContent).toContain('epoch-1');
 
     await act(async () => workbenchTab.click());
-    expect((container.querySelector('[data-testid="prompt-input"]') as HTMLTextAreaElement).value).toBe('Keep this draft');
+    expect(promptText(container.querySelector<HTMLElement>('[data-testid="prompt-input"]')!)).toBe('Keep this draft');
   });
 
   it('uses one tab stop and standard arrow, Home, and End navigation for observatory views', async () => {
@@ -661,8 +654,8 @@ describe('App', () => {
     });
 
     expect(transport.resumeAgent).toHaveBeenCalledWith(expect.any(String), previousState.agent.persistence);
-    expect(container.querySelector('[data-testid="connection-summary"]')?.textContent).toContain('No active Agent');
-    expect((container.querySelector('.lab-composer-dock') as HTMLElement).hidden).toBe(true);
+    expect(container.querySelector('[data-testid="connection-summary"]')?.textContent).toContain('Opening session');
+    expect(container.querySelector('[aria-label="Agent timeline"]')).toBeNull();
     expect(container.querySelector('[data-testid="connection-status"]')?.textContent).toBe('Connecting');
   });
 
@@ -734,16 +727,16 @@ function labTransport(overrides: Partial<LabTransport> = {}): LabTransport {
     listProviders: async () => [{ providerId: 'recorded', displayName: 'Recorded semantic Provider' }],
     createAgent: async () => sessionResponse('created-agent'),
     resumeAgent: async () => sessionResponse('resumed-agent'),
-    fetchSnapshot: async () => ({
+    fetchSnapshot: async agentId => ({
       protocolVersion: PROTOCOL_VERSION,
       type: 'agent_snapshot',
-      payload: replicaState.agent!,
+      payload: { ...replicaState.agent!, id: agentId, runtimeInfo: { ...replicaState.agent!.runtimeInfo, sessionId: agentId === 'agent-1' ? 'recorded-session' : `session-${agentId}` } },
     }),
-    fetchTimeline: async () => ({
+    fetchTimeline: async agentId => ({
       protocolVersion: PROTOCOL_VERSION,
       type: 'timeline_page',
       payload: {
-        requestId: 'timeline-request', agentId: 'agent-1', epoch: 'epoch-1', direction: 'tail',
+        requestId: 'timeline-request', agentId, epoch: 'epoch-1', direction: 'tail',
         reset: false, staleCursor: false, gap: false,
         window: { minSeq: 1, maxSeq: 0, nextSeq: 1 }, startCursor: null, endCursor: null,
         entries: [], hasOlder: false, hasNewer: false, error: null,
@@ -754,6 +747,25 @@ function labTransport(overrides: Partial<LabTransport> = {}): LabTransport {
     onProtocolMessage: () => () => undefined,
     ...overrides,
   };
+}
+
+function readyConnection(agentId: string, listener: RemoteTransportListener, sessionId = agentId === 'agent-1' ? 'recorded-session' : `session-${agentId}`, providerId = 'recorded'): ReturnType<LabTransport['connect']> {
+  queueMicrotask(() => listener.onOpen());
+  return { close: () => {}, send: message => {
+    if (message.type === 'negotiate') {
+      listener.onMessage({ protocolVersion: PROTOCOL_VERSION, type: 'negotiated', sessionControl: true });
+      listener.onMessage({ protocolVersion: PROTOCOL_VERSION, type: 'session_control', payload: {
+        agentId, revision: 'control', access: 'control', available: false, token: 'control-token',
+      } });
+      listener.onMessage({ protocolVersion: PROTOCOL_VERSION, type: 'agent_snapshot', payload: {
+        ...replicaState.agent!, id: agentId, providerId, runtimeInfo: { ...replicaState.agent!.runtimeInfo, providerId, sessionId },
+      } });
+    } else if (message.type === 'session_control_request') listener.onMessage({ protocolVersion: PROTOCOL_VERSION, type: 'session_control', payload: {
+      agentId, requestId: message.payload.requestId, revision: 'control', access: 'control', available: false, token: 'control-token',
+    } });
+    else if (message.type === 'timeline_subscription') listener.onMessage({ protocolVersion: PROTOCOL_VERSION,
+      type: 'timeline_subscribed', payload: { requestId: message.payload.requestId, agentIds: [agentId] } });
+  } };
 }
 
 function sessionResponse(agentId: string): AgentSessionResponse {
@@ -786,17 +798,11 @@ it('keeps a confirmed title when an older session attachment finishes afterward'
   vi.spyOn(directory, 'workspaces').mockResolvedValue({ workspaces: [] });
   let receiveTitle!: Parameters<NonNullable<LabTransport['onSessionTitle']>>[0];
   const transport = labTransport({
+    fetchSnapshot: async agentId => ({ protocolVersion: PROTOCOL_VERSION, type: 'agent_snapshot', payload: {
+      ...replicaState.agent!, id: agentId, runtimeInfo: { ...replicaState.agent!.runtimeInfo, sessionId: agentId === 'target-agent' ? target.nativeSessionId : 'recorded-session' },
+    } }),
     onSessionTitle: listener => { receiveTitle = listener; return () => {}; },
-    connect: (agentId, listener) => {
-      queueMicrotask(() => listener.onMessage({ protocolVersion: PROTOCOL_VERSION, type: 'agent_snapshot', payload: {
-        ...replicaState.agent!, id: agentId,
-        runtimeInfo: { ...replicaState.agent!.runtimeInfo, sessionId: agentId === 'target-agent' ? target.nativeSessionId : 'recorded-session' },
-      } }));
-      return { close: () => {}, send: message => {
-        if (message.type === 'timeline_subscription') queueMicrotask(() => listener.onMessage({ protocolVersion: PROTOCOL_VERSION,
-          type: 'timeline_subscribed', payload: { requestId: message.payload.requestId, agentIds: [agentId] } }));
-      } };
-    },
+    connect: (agentId, listener) => readyConnection(agentId, listener, agentId === 'target-agent' ? target.nativeSessionId : 'recorded-session'),
   });
   window.history.replaceState(null, '', '/?agent=agent-1');
   try {
@@ -828,9 +834,9 @@ it('shows recovery waiting without a failure alert and clears it after a success
   const request = vi.fn().mockResolvedValueOnce(Response.json({ code: 'session_attach_timeout', error: 'Timeout', requestId: 'rpc-1' }, { status: 504 }))
     .mockResolvedValue(Response.json({ agentId: 'restored', nativeSessionId: 'native' }));
   vi.stubGlobal('fetch', request);
-  const connect = vi.fn(() => ({ send: () => undefined, close: () => undefined }));
+  const connect = vi.fn((agentId: string, listener: RemoteTransportListener) => readyConnection(agentId, listener, 'native', 'codex'));
   try {
-    const container = await render(<App transport={labTransport({ connect })} />);
+    const container = await render(<App transport={labTransport({ connect, fetchSnapshot: async agentId => ({ protocolVersion: PROTOCOL_VERSION, type: 'agent_snapshot', payload: { ...replicaState.agent!, id: agentId, providerId: 'codex', runtimeInfo: { providerId: 'codex', sessionId: 'native', status: 'idle' } } }) })} />);
     expect(container.querySelector('.lab-session-notice [role="status"]')?.textContent).toContain('may still be opening');
     expect(container.querySelector('.lab-session-notice [role="alert"]')).toBeNull();
     expect(connect).not.toHaveBeenCalled();
@@ -847,13 +853,13 @@ it('notifies a failed send without clearing the draft or replaying it after dism
   const container = await render(<App initialState={replicaState} initialSessionStatus="ready" actions={{ sendMessage }} />);
   const input = container.querySelector<HTMLTextAreaElement>('[data-testid="prompt-input"]')!;
   await act(async () => {
-    Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!.call(input, 'Keep this failed message');
+    setPromptText(input, 'Keep this failed message');
     input.dispatchEvent(new Event('input', { bubbles: true }));
   });
   await act(async () => container.querySelector<HTMLButtonElement>('[data-testid="prompt-submit"]')!.click());
   expect(container.querySelector('.lab-toast')?.textContent).toContain('The message was not accepted.');
   await act(async () => container.querySelector<HTMLButtonElement>('.lab-toast button')!.click());
-  expect(input.value).toBe('Keep this failed message');
+  expect(promptText(input)).toBe('Keep this failed message');
   expect(sendMessage).toHaveBeenCalledTimes(1);
   expect(container.querySelector('[role="alert"]')?.textContent).toContain('The message was not accepted.');
 });

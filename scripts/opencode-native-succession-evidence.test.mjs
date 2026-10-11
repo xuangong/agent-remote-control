@@ -125,6 +125,84 @@ test('OpenCode existing execution API crash evidence', { skip: !enabled, timeout
   }
 });
 
+
+test('OpenCode actual adapter preserves empty successors and settles ordinary and prepared inputs', { skip: process.env.AGENT_OPENCODE_ACTUAL_SUCCESSION !== '1', timeout: 90000 }, async t => {
+  const report = { startedAt: new Date().toISOString(), nativeRequests: [], modelRequests: [], processes: [], cases: [], cleanup: {} };
+  const originalFetch = globalThis.fetch;
+  let probe, provider;
+  try {
+    const environment = await preflight(); report.identity = environment.identity;
+    probe = await makeProbe(environment, report, true); await probe.verifyIsolation(t.signal); await probe.start(t.signal);
+    report.nativeEvents = [];
+    globalThis.fetch = async (...args) => {
+      const request = args[0], url = new URL(typeof request === 'string' || request instanceof URL ? request : request.url);
+      const response = await originalFetch(...args);
+      if (url.origin !== new URL(probe.adapterOptions.serverUrl).origin) return response;
+      report.nativeRequests.push({ owner: 'actual-adapter', path: url.pathname, method: request.method ?? args[1]?.method ?? 'GET', status: response.status });
+      if (url.pathname !== '/global/event' || !response.body) return response;
+      const reader = response.body.getReader(), decoder = new TextDecoder(); let pending = '';
+      return new Response(new ReadableStream({ async pull(controller) {
+        try {
+          const row = await reader.read(); if (row.done) { controller.close(); return; }
+          pending += decoder.decode(row.value, { stream: true });
+          const frames = pending.split('\n\n'); pending = frames.pop();
+          for (const frame of frames) for (const line of frame.split('\n')) if (line.startsWith('data: ')) {
+            try { report.nativeEvents.push(JSON.parse(line.slice(6))); } catch {}
+          }
+          controller.enqueue(row.value);
+        } catch (error) { controller.error(error); }
+      }, cancel: reason => reader.cancel(reason) }), { status: response.status, headers: response.headers });
+    };
+    const module = process.env.AGENT_OPENCODE_ADAPTER_MODULE ?? new URL('../packages/agent-provider-opencode/dist/provider.js', import.meta.url).href;
+    const { OpenCodeAgentProvider } = await import(module);
+    provider = new OpenCodeAgentProvider(probe.adapterOptions);
+    const ready = async session => until(async () => {
+      try { const facts = await session.nativeEvidence.inspectReadiness(); return facts.idle && facts.pendingInputs === 0 && facts.pendingInteractions === 0 && facts.activeChildren === 0; } catch { return false; }
+    }, t.signal, 8000, 'actual native readiness');
+    const make = async source => {
+      const before = report.modelRequests.length;
+      let created;
+      // Profile bootstrap can publish metadata while the first read is in flight.
+      // This exception occurs before create; no returned outcome may be retried.
+      await until(async () => {
+        try { created = await provider.nativeEvidence.createEmpty({ sessionId: randomUUID(), cwd: probe.cwd, ...(source ? { selectionSourceSessionId: source } : {}) }); return true; }
+        catch (error) { if (error.message !== 'Native profile changed during observation.') throw error; return false; }
+      }, t.signal, 8000, 'stable pre-create native profile');
+      assert.equal(created.status, 'created', JSON.stringify(created));
+      const session = await provider.resumeSession(created.handle); await ready(session);
+      assert.equal(report.modelRequests.length, before, 'Empty creation and attachment must execute zero tasks.');
+      const history = await probe.call('messages', { sessionID: created.handle.sessionId, directory: probe.cwd, limit: 100 }, t.signal);
+      assert.deepEqual(history, []); return { session, handle: created.handle };
+    };
+    const ordinary = async (session, text) => {
+      probe.input(text); let accepted = 0;
+      await session.sendMessage(text, { onAcceptance: value => { assert.deepEqual(value, { disposition: 'started' }); accepted++; } });
+      await until(() => accepted === 1, t.signal, 8000, 'ordinary exact U/R acceptance'); await ready(session);
+    };
+    const a = await make(); await ordinary(a.session, 'Count amber birch cedar.');
+    const b = await make(a.handle.sessionId);
+    const witness = await b.session.nativeEvidence.prepareInput([{ type: 'text', text: 'Quoted context: amber birch cedar. Continue counting.' }]);
+    probe.input(witness.parts[0].text); await b.session.nativeEvidence.dispatchInput(witness);
+    let materialized;
+    await until(async () => { materialized = await b.session.nativeEvidence.inspectInput(witness); return materialized.status === 'materialized' && materialized.execution?.disposition === 'started'; }, t.signal, 8000, 'prepared exact U/R');
+    await ready(b.session); await ordinary(b.session, 'Continue with dogwood elm fir.');
+    const c = await make(b.handle.sessionId);
+    const ids = [a.handle.sessionId, b.handle.sessionId, c.handle.sessionId]; assert.equal(new Set(ids).size, 3);
+    await provider.close(); provider = new OpenCodeAgentProvider(probe.adapterOptions);
+    const restored = await provider.resumeSession(c.handle); await ready(restored);
+    assert.equal((await restored.runtimeInfo()).sessionId, c.handle.sessionId);
+    assert.equal(report.nativeRequests.filter(row => row.owner === 'actual-adapter' && row.path === '/session' && row.method === 'POST').length, 3);
+    assert.equal(report.nativeRequests.filter(row => row.owner === 'actual-adapter' && row.path.endsWith('/prompt_async') && row.method === 'POST').length, 3);
+    report.cases.push({ kind: 'actual-adapter-A-input-B-first-input-B-input-C', classification: 'verified', ids, witness, materialized, exactEmptyRestored: true });
+  } finally {
+    await provider?.close(); globalThis.fetch = originalFetch; if (probe) await probe.cleanup();
+    report.finishedAt = new Date().toISOString();
+    const output = process.env.AGENT_OPENCODE_SUCCESSION_EVIDENCE_OUTPUT;
+    if (output && probe) await writeFile(output, JSON.stringify(probe.sanitize(report), null, 2) + '\n', { flag: 'wx' });
+    console.log(JSON.stringify({ cases: report.cases.map(({ kind, classification }) => ({ kind, classification })), cleanup: report.cleanup, output: output ?? null }));
+  }
+});
+
 async function bound(work, ms, label) {
   let timer;
   try { return await Promise.race([work, new Promise((_, reject) => { timer = setTimeout(() => reject(new Error(`${label} exceeded ${ms}ms`)), ms); })]); }
@@ -184,7 +262,7 @@ async function preflight() {
     identity: { executable: selected, executableSha256: expectedHash, sdkVersion, node: process.version, nodeExecutable: process.execPath, apiSurface: 'client.session via /session (SDK /v2/client import)' } };
 }
 
-async function makeProbe(environment, report) {
+async function makeProbe(environment, report, completeInputs = false) {
   const root = await realpath(await mkdtemp(join(tmpdir(), 'arc-opencode-succession-')));
   const cwd = join(root, 'project');
   const witnessPath = join(root, 'witness.json');
@@ -406,8 +484,8 @@ async function makeProbe(environment, report) {
         const classification = title ? 'auxiliary-title' : summary ? 'auxiliary-summary' : substantive ? 'substantive-user-turn' : 'unclassified';
         report.modelRequests.push({ classification, model: input.model, bodyDigest: digest(input), toolCount: input.tools?.length ?? 0, texts: texts.map(({ role, text }) => ({ role, length: text.length, digest: digest(text), excerpt: text.slice(0, 600) })) });
         response.writeHead(200, { 'Content-Type': 'text/event-stream' });
-        if (substantive) { held = response; response.flushHeaders(); return; }
-        if (!title && !summary) { response.flushHeaders(); return; }
+        if (substantive && !completeInputs) { held = response; response.flushHeaders(); return; }
+        if (!title && !summary && !substantive) { response.flushHeaders(); return; }
         for (const [delta, finish_reason] of [[{ role: 'assistant', content: 'Isolated fixture' }, null], [{}, 'stop']]) response.write(`data: ${JSON.stringify({ id: 'fixture', object: 'chat.completion.chunk', created: 1, model: 'fixture', choices: [{ index: 0, delta, finish_reason }] })}\n\n`);
         response.end('data: [DONE]\n\n');
       } catch (error) { report.fixtureError = error.message; response.destroy(); }
@@ -418,7 +496,7 @@ async function makeProbe(environment, report) {
     servers.push(allocator);
     base = await listen(allocator);
     await closeServer(allocator);
-    config = { model: 'arc/fixture', small_model: 'arc/fixture', enabled_providers: ['arc'],
+    config = { ...(completeInputs ? { default_agent: 'build' } : {}), model: 'arc/fixture', small_model: 'arc/fixture', enabled_providers: ['arc'],
       provider: { arc: { npm: '@ai-sdk/openai-compatible', options: { baseURL: `${modelBase}/v1`, apiKey: 'fixture-only' }, models: { fixture: { name: 'Fixture', limit: { context: 128000, output: 8192 } } } } },
       plugin: [], mcp: {}, instructions: [], permission: { '*': 'deny' }, tools: { '*': false }, share: 'disabled', autoupdate: false, snapshot: false, compaction: { auto: false },
       agent: Object.fromEntries(['plan', 'general', 'explore', 'title', 'summary', 'compaction'].map(name => [name, { disable: true }])) };
@@ -431,5 +509,5 @@ async function makeProbe(environment, report) {
     await writeFile(sandbox, `(version 1)\n(allow default)\n(deny network*)\n(allow network-inbound (local ip "localhost:${new URL(base).port}"))\n(allow network-bind (local ip "localhost:${new URL(base).port}"))\n(allow network-outbound (remote ip "localhost:${new URL(modelBase).port}"))\n(deny file-read* (subpath ${JSON.stringify(environment.deniedHome)}))\n(deny file-write* (subpath ${JSON.stringify(environment.deniedHome)}))\n`);
     report.sandboxProfile = await readFile(sandbox, 'utf8');
   } catch (error) { await cleanup(); throw error; }
-  return { cwd, witness, verifyIsolation, start, call, snapshots, assertConfig, persist, reload, kill, cleanup, dispatchWithLostResponse, heldIncomplete: () => Boolean(held && !held.writableEnded), proxyEvidence: () => ({ ...proxyState }), sanitize };
+  return { cwd, adapterOptions: { serverUrl: base, password, requestTimeoutMs: 4000 }, input: text => { inputText = text; }, witness, verifyIsolation, start, call, snapshots, assertConfig, persist, reload, kill, cleanup, dispatchWithLostResponse, heldIncomplete: () => Boolean(held && !held.writableEnded), proxyEvidence: () => ({ ...proxyState }), sanitize };
 }

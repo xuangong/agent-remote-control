@@ -1,13 +1,15 @@
 import {join} from 'node:path';
+import {createHash} from 'node:crypto';
 import {homedir} from 'node:os';
 import {mkdir, realpath} from 'node:fs/promises';
 import { sanitizeNativeEnvironment } from './execution-policy.js';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import { CopilotAgentProvider } from '@orchardworks/agent-provider-copilot';
+import { CopilotAgentProvider, type CopilotAgentProviderOptions } from '@orchardworks/agent-provider-copilot';
 import { copilotExecutable } from './copilot-executable.js';
 import { createCopilotSessionDirectory } from './copilot-directory.js';
 import type { AgentHostProviderRegistration, AgentHostWorkspace } from './host.js';
+import {SessionReferenceStore} from './session-reference.js';
 
 export interface CopilotHostRegistrationOptions {
   executable?: string;
@@ -16,6 +18,9 @@ export interface CopilotHostRegistrationOptions {
   requestTimeoutMs?: number;
   onDiagnostic?: (line: string) => void;
   workspaces?: readonly AgentHostWorkspace[];
+  referenceDirectory?: string;
+  nativeSessionConfig?: CopilotAgentProviderOptions['nativeSessionConfig'];
+  useLoggedInUser?: CopilotAgentProviderOptions['useLoggedInUser'];
 }
 
 export async function createCopilotHostRegistration(options: CopilotHostRegistrationOptions = {}): Promise<AgentHostProviderRegistration> {
@@ -30,9 +35,13 @@ export async function createCopilotHostRegistration(options: CopilotHostRegistra
   if (!supported) throw new Error(`Copilot executable must be GitHub Copilot CLI version 1.0.83 or newer; got ${stdout.trim() || 'unknown'}.`);
   const profile = env.COPILOT_HOME ?? join(env.HOME ?? env.USERPROFILE ?? homedir(), '.copilot');
   await mkdir(profile, {recursive: true});
-  const ownership = {root: join(await realpath(profile), '.arc-session-owners'), onDiagnostic: (event: unknown) => options.onDiagnostic?.(JSON.stringify(event))};
-  const provider = new CopilotAgentProvider({ executable, env, requestTimeoutMs: options.requestTimeoutMs, onDiagnostic: options.onDiagnostic });
+  const canonicalProfile = await realpath(profile);
+  const ownership = {root: join(canonicalProfile, '.arc-session-owners'), onDiagnostic: (event: unknown) => options.onDiagnostic?.(JSON.stringify(event))};
+  const scope = createHash('sha256').update(canonicalProfile).digest('hex');
+  const references = new SessionReferenceStore(options.referenceDirectory ?? join(homedir(), '.agent-remote-control', 'session-references', 'copilot', scope), 'copilot');
+  const provider = new CopilotAgentProvider({ executable, env, requestTimeoutMs: options.requestTimeoutMs, onDiagnostic: options.onDiagnostic,
+    nativeSessionConfig: options.nativeSessionConfig, useLoggedInUser: options.useLoggedInUser });
   try {
-    return { adapter: provider, directory: createCopilotSessionDirectory(provider, options.workspaces ?? [], ownership) };
+    return { adapter: provider, directory: createCopilotSessionDirectory(provider, options.workspaces ?? [], ownership, references) };
   } catch (error) { await provider.dispose(); throw error; }
 }

@@ -1,5 +1,5 @@
 import { expect, it } from 'vitest';
-import type { AgentSession, AgentSessionConfig, AgentSessionExtensions } from '@orchardworks/agent-provider-sdk';
+import type { AgentSession, AgentSessionConfig, AgentSessionExtensions, AgentPersistenceHandle, AgentSessionResumeOptions } from '@orchardworks/agent-provider-sdk';
 import { createCodexSessionDirectory } from './directory.js';
 import { createManagedStdioDirectory } from './stdio-directory.js';
 
@@ -14,6 +14,7 @@ function extensions(calls: string[], label = 'original'): AgentSessionExtensions
 function harness(providerId: 'codex' | 'claude' | 'copilot') {
   const created: AgentSessionConfig[] = [];
   const resumed: (AgentSessionExtensions | undefined)[] = [];
+  const resumes: Array<{handle: AgentPersistenceHandle; options?: AgentSessionResumeOptions}> = [];
   let disposals = 0;
   let pauseResume: (() => Promise<void>) | undefined;
   let rejectRuntimeInfo=false;
@@ -32,7 +33,8 @@ function harness(providerId: 'codex' | 'claude' | 'copilot') {
   }
   const methods = {
     async createSession(config: AgentSessionConfig) { created.push(config); return native(config); },
-    async resumeSession(_handle: unknown, bound?: AgentSessionExtensions) {
+    async resumeSession(handle: AgentPersistenceHandle, bound?: AgentSessionExtensions, options?: AgentSessionResumeOptions) {
+      resumes.push({handle, options});
       resumed.push(bound); await pauseResume?.(); return native(bound);
     },
     async openChildSession() { return native(); },
@@ -40,7 +42,7 @@ function harness(providerId: 'codex' | 'claude' | 'copilot') {
   const directory = providerId === 'codex'
     ? createCodexSessionDirectory({ ...methods, listSessions: async () => ({ sessions: [] }) }, [])
     : createManagedStdioDirectory(providerId, providerId, { ...methods, listSessions: async () => [] }, []);
-  return { directory, created, resumed, disposals: () => disposals, failRuntimeInfo:()=>{rejectRuntimeInfo=true;},
+  return { directory, created, resumed, resumes, disposals: () => disposals, failRuntimeInfo:()=>{rejectRuntimeInfo=true;},
     pauseResume: (pause: () => Promise<void>) => { pauseResume = pause; } };
 }
 
@@ -122,4 +124,21 @@ it.each(['claude', 'copilot'] as const)('%s checks extension identity after wait
     release(); await ordinary; await rejected;
     expect(h.resumed).toHaveLength(1); expect(h.disposals()).toBe(0); expect(calls).toEqual([]);
   } finally { release(); await h.directory.close(); }
+});
+
+
+it.each(['codex', 'claude', 'copilot'] as const)('%s binds original creation independently of updated empty settings', async providerId => {
+  const h = harness(providerId);
+  const handle = {providerId, sessionId:'native', opaque:'original empty descriptor'};
+  const nativeCreation = {status:'created' as const, handle};
+  const updated = {...handle, opaque:'latest confirmed empty settings'};
+  try {
+    const session = await h.directory.open('native', {nativeCreation, resumeHandle:updated, resumeOptions:{initializeEmpty:true}});
+    expect(h.resumes[0]?.handle).toEqual(updated);
+    if(providerId !== 'codex') expect(h.resumes[0]?.options).toEqual({initializeEmpty:true});
+    expect(await h.directory.open('native', {nativeCreation})).toBe(session);
+    await expect(h.directory.open('native', {nativeCreation:{...nativeCreation, handle:{...handle, opaque:'another descriptor'}}})).rejects.toThrow(/original native creation/);
+    await expect(h.directory.open('native', {nativeCreation, resumeHandle:{...updated, sessionId:'other'}})).rejects.toThrow(/authorize/);
+    expect(h.resumes).toHaveLength(1);
+  } finally {await h.directory.close();}
 });

@@ -1,16 +1,22 @@
 import { isNativeSessionRef, isSessionSuccessionReplay, type NativeSessionRef, type SessionSuccessionReplay } from '@orchardworks/agent-remote-protocol';
-import { conversationSessionStorage } from './conversation-storage.js';
+import { conversationLocalStorage, conversationSessionStorage } from './conversation-storage.js';
 import { recoveryGeneration } from './conversation-recovery.js';
 import { flushRecoveryWrites, queueRecoveryWrite, type RecoveryWriteHandle } from './recovery-writes.js';
+import type { OpenedSession } from './directory-client.js';
+import { sessionKey, type SessionEntry } from './session-tree.js';
 
 export const COMPOSITION_CAPACITY = { slots: 1024, askOwners: 1024, roles: 128, bytes: 1048576, tracks: 8 } as const;
 export interface StoreOwner { scope: string; key: string }
-export interface CompositionLocator { hostId: string; native: NativeSessionRef }
+/** A concrete native address can be selected before its Controller is observed. */
+export interface CompositionLocator { hostId: string; native: Omit<NativeSessionRef, 'controllerId'> & { controllerId?: string } }
 export type CompositionIntent =
   | { kind: 'fixed' | 'history'; target: CompositionLocator }
-  | { kind: 'legacy_fixed'; target: { hostId?: string; providerId: string; nativeSessionId: string } }
-  | { kind: 'role'; roleKey: string; revision: number; target: CompositionLocator };
-export interface CompositionSlot { id: string; intent: CompositionIntent; owners: { text: StoreOwner; image: StoreOwner; display: StoreOwner } }
+  | { kind: 'role'; roleKey: string; revision: number; target: { hostId: string; native: NativeSessionRef } };
+export interface CompositionSlot {
+  id: string; origin: { kind: 'fixed' | 'history'; target: CompositionLocator }; intent: CompositionIntent;
+  metadata?: Pick<OpenedSession, 'title' | 'parentAgentId' | 'parentNativeSessionId' | 'createdAt'> & { agentId?: string };
+  owners: { text: StoreOwner; image: StoreOwner; display: StoreOwner };
+}
 export type CompositionParticipant = 'composition' | 'track' | 'ask' | 'draftViews';
 export interface CompositionProgress { revision: number; status: 'pending' | 'applied' | 'failed' | 'conflict'; retention?: 'page' | 'session' | 'local'; code?: string }
 export interface RoleCheckpoint {
@@ -21,23 +27,22 @@ export interface RoleCheckpoint {
   documents: Record<CompositionParticipant, CompositionProgress>;
 }
 export interface CompositionDocument {
-  version: 1; scope: string; editRevision: number; slots: CompositionSlot[]; roles: RoleCheckpoint[];
+  version: 2; scope: string; editRevision: number; slots: CompositionSlot[]; roles: RoleCheckpoint[];
   edges: Array<{ source: string; target: string; selected: boolean }>;
-  collapsed: string[]; address?: string; focus?: string; anchor?: string;
+  collapsed: string[]; primary?: string; address?: string; focus?: string; anchor?: string;
   retained: Array<{ slot: string; against: string }>;
+  tracks: CompositionTrack[]; selectedTrack?: string; asks: AskAssociationOwner[];
 }
-export interface TrackCompanionDocument {
-  version: 1; scope: string; editRevision: number; selected?: string;
-  entries: Array<{ entryId: string; slotId: string }>;
-  views: Array<{ entryId: string; primarySlot: string; selections: Record<string, string | null>; focus?: string; anchor?: string }>;
+export interface CompositionTrack {
+  entryId: string; slotId: string;
+  view?: { primarySlot: string; selections: Record<string, string | null>; focus?: string; anchor?: string };
 }
-/** Existing suffixes are references, never renamed or inferred from an effective source. */
+/** Payloads remain in their existing stores; these are explicit storage pointers. */
 export interface AskAssociationOwner {
-  id: string; sourceSlot: string; stateScope: string; legacySourceKey: string; geometryScope: string;
-  text: StoreOwner; image?: StoreOwner; display?: StoreOwner;
+  id: string; sourceSlot: string; input: StoreOwner; geometryScope: string;
+  text: StoreOwner; image?: StoreOwner; display?: StoreOwner; open: boolean; enabled?: boolean;
   records?: Array<{ id: string; target?: string }>;
 }
-export interface AskOwnerIndexDocument { version: 1; scope: string; editRevision: number; owners: AskAssociationOwner[] }
 export type CompositionRead<T> = { status: 'missing' } | { status: 'ready'; document: T } | { status: 'unsupported' } | { status: 'failed'; error: unknown };
 
 const record = (value: unknown): value is Record<string, unknown> => !!value && typeof value === 'object' && !Array.isArray(value);
@@ -46,21 +51,26 @@ const counter = (value: unknown): value is number => Number.isSafeInteger(value)
 const requireValue = (ok: unknown): void => { if (!ok) throw new Error('Invalid composition metadata.'); };
 const native = (value: unknown): NativeSessionRef => { requireValue(isNativeSessionRef(value)); const ref = value as NativeSessionRef; return { controllerId: ref.controllerId, providerId: ref.providerId, nativeSessionId: ref.nativeSessionId }; };
 function owner(value: unknown): StoreOwner { requireValue(record(value) && text(value.scope) && text(value.key)); const item = value as StoreOwner; return { scope: item.scope, key: item.key }; }
-function locator(value: unknown): CompositionLocator { requireValue(record(value) && text(value.hostId)); const item = value as CompositionLocator; return { hostId: item.hostId, native: native(item.native) }; }
+function locator(value: unknown): CompositionLocator {
+  requireValue(record(value) && text(value.hostId)); const item = value as CompositionLocator;
+  requireValue(record(item.native) && text(item.native.providerId) && text(item.native.nativeSessionId) && (item.native.controllerId === undefined || text(item.native.controllerId)));
+  return { hostId: item.hostId, native: { providerId: item.native.providerId, nativeSessionId: item.native.nativeSessionId, ...(item.native.controllerId ? { controllerId: item.native.controllerId } : {}) } };
+}
 function intent(value: unknown): CompositionIntent {
   requireValue(record(value)); const item = value as Record<string, unknown>;
-  if (item.kind === 'legacy_fixed') {
-    requireValue(record(item.target) && text(item.target.providerId) && text(item.target.nativeSessionId) && (item.target.hostId === undefined || text(item.target.hostId)));
-    const target = item.target as { hostId?: string; providerId: string; nativeSessionId: string };
-    return { kind: 'legacy_fixed', target: { providerId: target.providerId, nativeSessionId: target.nativeSessionId, ...(target.hostId === undefined ? {} : { hostId: target.hostId }) } };
-  }
   const target = locator(item.target);
-  if (item.kind === 'role') { requireValue(text(item.roleKey) && counter(item.revision) && Number(item.revision) > 0); return { kind: 'role', target, roleKey: item.roleKey as string, revision: item.revision as number }; }
+  if (item.kind === 'role') { requireValue(text(item.roleKey) && counter(item.revision) && Number(item.revision) > 0); return { kind: 'role', target: { hostId: target.hostId, native: native(target.native) }, roleKey: item.roleKey as string, revision: item.revision as number }; }
   requireValue(item.kind === 'fixed' || item.kind === 'history'); return { kind: item.kind as 'fixed' | 'history', target };
 }
 function slot(value: unknown): CompositionSlot {
   requireValue(record(value) && text(value.id) && record(value.owners)); const item = value as CompositionSlot;
-  return { id: item.id, intent: intent(item.intent), owners: { text: owner(item.owners.text), image: owner(item.owners.image), display: owner(item.owners.display) } };
+  const metadata = item.metadata;
+  if (metadata) requireValue(record(metadata) && (metadata.agentId === undefined || text(metadata.agentId)) && typeof metadata.title === 'string'
+    && ['parentAgentId', 'parentNativeSessionId', 'createdAt'].every(key => metadata[key as keyof typeof metadata] === undefined || typeof metadata[key as keyof typeof metadata] === 'string'));
+  const origin = intent(item.origin), current = intent(item.intent);
+  requireValue(origin.kind !== 'role' && (origin.kind === 'history') === (current.kind === 'history'));
+  return { id: item.id, origin: origin as CompositionSlot['origin'], intent: current, owners: { text: owner(item.owners.text), image: owner(item.owners.image), display: owner(item.owners.display) },
+    ...(metadata ? { metadata: { ...(metadata.agentId ? { agentId: metadata.agentId } : {}), title: metadata.title, ...Object.fromEntries(['parentAgentId', 'parentNativeSessionId', 'createdAt'].filter(key => metadata[key as keyof typeof metadata] !== undefined).map(key => [key, metadata[key as keyof typeof metadata]])) } } : {}) };
 }
 function progress(value: unknown, revision: number): CompositionProgress {
   requireValue(record(value)); const item = value as CompositionProgress;
@@ -92,9 +102,9 @@ function optionalKeys(item: Record<string, unknown>, allowed: Set<string>, keys:
   for (const key of keys) if (item[key] !== undefined) { requireValue(text(item[key]) && allowed.has(item[key] as string)); result[key] = item[key] as string; }
   return result;
 }
-function parseComposition(value: unknown, scope: string): CompositionDocument {
+export function parseComposition(value: unknown, scope: string): CompositionDocument {
   requireValue(record(value)); const item = value as CompositionDocument;
-  requireValue(item.version === 1 && item.scope === scope && counter(item.editRevision));
+  requireValue(item.version === 2 && item.scope === scope && counter(item.editRevision));
   requireValue(Array.isArray(item.slots) && item.slots.length <= COMPOSITION_CAPACITY.slots && Array.isArray(item.roles) && item.roles.length <= COMPOSITION_CAPACITY.roles);
   const slots = item.slots.map(slot), roles = item.roles.map(value => checkpoint(value, scope));
   requireValue(slots.every(slot => Object.values(slot.owners).every(owner => owner.scope === scope || owner.scope === `${scope}:ask`)));
@@ -104,12 +114,21 @@ function parseComposition(value: unknown, scope: string): CompositionDocument {
   unique(item.collapsed); requireValue(item.collapsed.every(id => ids.has(id)));
   const retained = item.retained.map(entry => { requireValue(record(entry) && ids.has(entry.slot) && ids.has(entry.against) && entry.slot !== entry.against); return { slot: entry.slot, against: entry.against }; });
   unique(retained.map(entry => JSON.stringify([entry.slot, entry.against])));
-  return { version: 1, scope, editRevision: item.editRevision, slots, roles, edges, collapsed: [...item.collapsed], retained,
-    ...optionalKeys(item as unknown as Record<string, unknown>, ids, ['address', 'focus', 'anchor']) };
+  requireValue(Array.isArray(item.asks) && item.asks.length <= COMPOSITION_CAPACITY.askOwners && Array.isArray(item.tracks) && item.tracks.length <= COMPOSITION_CAPACITY.slots);
+  const asks = item.asks.map(askOwner); unique(asks.map(value => value.id)); unique(asks.map(value => value.sourceSlot));
+  requireValue(asks.every(value => ids.has(value.sourceSlot) && [value.input, value.text, value.image, value.display].every(value => !value || value.scope === scope || value.scope === `${scope}:ask`)));
+  const tracks = item.tracks.map(value => {
+    requireValue(record(value) && text(value.entryId) && ids.has(value.slotId));
+    return { entryId: value.entryId, slotId: value.slotId, ...(value.view ? { view: parseTrackedView(value.view, ids) } : {}) };
+  });
+  unique(tracks.map(value => value.entryId));
+  return { version: 2, scope, editRevision: item.editRevision, slots, roles, edges, collapsed: [...item.collapsed], retained, asks, tracks,
+    ...optionalKeys(item as unknown as Record<string, unknown>, ids, ['primary', 'address', 'focus', 'anchor']),
+    ...optionalKeys(item as unknown as Record<string, unknown>, new Set(tracks.map(value => value.entryId)), ['selectedTrack']) };
 }
 
 export function createCompositionDocument(scope: string, slots: CompositionSlot[] = []): CompositionDocument {
-  return { version: 1, scope, editRevision: 0, slots: slots.map(slot), roles: [], edges: [], collapsed: [], retained: [], ...(slots[0] ? { address: slots[0].id } : {}) };
+  return { version: 2, scope, editRevision: 0, slots: slots.map(slot), roles: [], edges: [], collapsed: [], retained: [], asks: [], tracks: [], ...(slots[0] ? { primary: slots[0].id, address: slots[0].id } : {}) };
 }
 export function compositionRoleKey(value: Pick<RoleCheckpoint, 'scope' | 'hostId' | 'controllerId' | 'roleId'>): string { return JSON.stringify([value.scope, value.hostId, value.controllerId, value.roleId]); }
 export function canonicalJson(value: unknown): string {
@@ -130,82 +149,205 @@ export async function createRoleCheckpoint(scope: string, replay: SessionSuccess
     appliedRevision: 0, documents: { composition: { revision, status: 'pending' }, track: { revision, status: 'pending' }, ask: { revision, status: 'pending' }, draftViews: { revision, status: 'pending' } } };
 }
 
-function parseTrackCompanion(value: unknown, scope: string): TrackCompanionDocument {
-  requireValue(record(value)); const item = value as TrackCompanionDocument;
-  requireValue(item.version === 1 && item.scope === scope && counter(item.editRevision) && Array.isArray(item.entries) && item.entries.length <= COMPOSITION_CAPACITY.tracks && Array.isArray(item.views) && item.views.length <= COMPOSITION_CAPACITY.slots);
-  const entries = item.entries.map(entry => { requireValue(record(entry) && text(entry.entryId) && text(entry.slotId)); return { entryId: entry.entryId, slotId: entry.slotId }; });
-  unique(entries.map(entry => entry.entryId));
-  const ids = new Set(entries.map(entry => entry.entryId));
-  const views = item.views.map(view => {
-    requireValue(record(view) && text(view.entryId) && text(view.primarySlot) && record(view.selections));
-    const selections: Record<string, string | null> = {};
-    for (const [source, target] of Object.entries(view.selections)) { requireValue(text(source) && (target === null || text(target))); Object.defineProperty(selections, source, { value: target, enumerable: true, writable: true, configurable: true }); }
-    requireValue((view.focus === undefined || text(view.focus)) && (view.anchor === undefined || text(view.anchor)));
-    return { entryId: view.entryId, primarySlot: view.primarySlot, selections, ...(view.focus === undefined ? {} : { focus: view.focus }), ...(view.anchor === undefined ? {} : { anchor: view.anchor }) };
-  });
-  unique(views.map(view => view.entryId));
-  return { version: 1, scope, editRevision: item.editRevision, entries, views, ...optionalKeys(item as unknown as Record<string, unknown>, ids, ['selected']) };
+function parseTrackedView(value: NonNullable<CompositionTrack['view']>, ids: Set<string>): NonNullable<CompositionTrack['view']> {
+  requireValue(record(value) && ids.has(value.primarySlot) && record(value.selections));
+  const selections: Record<string, string | null> = {};
+  for (const [source, target] of Object.entries(value.selections)) {
+    requireValue(ids.has(source) && (target === null || ids.has(target)));
+    Object.defineProperty(selections, source, { value: target, enumerable: true, writable: true, configurable: true });
+  }
+  return { primarySlot: value.primarySlot, selections, ...optionalKeys(value as unknown as Record<string, unknown>, ids, ['focus', 'anchor']) };
 }
 function askOwner(value: unknown): AskAssociationOwner {
   requireValue(record(value)); const item = value as AskAssociationOwner;
-  requireValue([item.id, item.sourceSlot, item.stateScope, item.legacySourceKey, item.geometryScope].every(text));
+  requireValue([item.id, item.sourceSlot, item.geometryScope].every(text) && typeof item.open === 'boolean'
+    && (item.enabled === undefined || typeof item.enabled === 'boolean'));
   requireValue(item.records === undefined || Array.isArray(item.records) && item.records.every(value => record(value) && text(value.id) && (value.target === undefined || text(value.target))));
-  return { id: item.id, sourceSlot: item.sourceSlot, stateScope: item.stateScope, legacySourceKey: item.legacySourceKey, geometryScope: item.geometryScope,
-    text: owner(item.text), ...(item.image === undefined ? {} : { image: owner(item.image) }), ...(item.display === undefined ? {} : { display: owner(item.display) }),
+  return { id: item.id, sourceSlot: item.sourceSlot, input: owner(item.input), geometryScope: item.geometryScope, open: item.open,
+    ...(item.enabled === undefined ? {} : { enabled: item.enabled }), text: owner(item.text),
+    ...(item.image === undefined ? {} : { image: owner(item.image) }), ...(item.display === undefined ? {} : { display: owner(item.display) }),
     ...(item.records === undefined ? {} : { records: item.records.map(value => ({ id: value.id, ...(value.target === undefined ? {} : { target: value.target }) })) }) };
 }
-function parseAskOwnerIndex(value: unknown, scope: string): AskOwnerIndexDocument {
-  requireValue(record(value)); const item = value as AskOwnerIndexDocument;
-  requireValue(item.version === 1 && item.scope === scope && counter(item.editRevision) && Array.isArray(item.owners) && item.owners.length <= COMPOSITION_CAPACITY.askOwners);
-  const owners = item.owners.map(askOwner); unique(owners.map(owner => owner.id));
-  requireValue(owners.every(owner => owner.stateScope === scope && owner.text.scope === `${scope}:ask`
-    && [owner.image, owner.display].every(value => !value || value.scope === scope || value.scope === `${scope}:ask`)));
-  return { version: 1, scope, editRevision: item.editRevision, owners };
-}
-type MetadataName = 'composition-v1' | 'track-views-v1' | 'ask-owners-v1';
-export const compositionMetadataKey = (scope: string, name: MetadataName): string => `agent-remote:recovery:${scope}:${name}`;
-function readMetadata<T>(scope: string, name: MetadataName, parse: (value: unknown, scope: string) => T): CompositionRead<T> {
-  const key = compositionMetadataKey(scope, name);
+export const compositionMetadataKey = (scope: string): string => `agent-remote:recovery:${scope}:composition-v2`;
+export function readCompositionDocument(scope: string): CompositionRead<CompositionDocument> {
   try {
-    flushRecoveryWrites(key);
+    const key = compositionMetadataKey(scope); flushRecoveryWrites(key);
     const raw = conversationSessionStorage.getItem(key);
     if (raw === null) return { status: 'missing' };
     requireValue(new TextEncoder().encode(raw).byteLength <= COMPOSITION_CAPACITY.bytes);
     const value: unknown = JSON.parse(raw);
-    if (record(value) && value.version !== 1) return { status: 'unsupported' };
-    return { status: 'ready', document: parse(value, scope) };
+    if (record(value) && value.version !== 2) return { status: 'unsupported' };
+    return { status: 'ready', document: parseComposition(value, scope) };
   } catch (error) { return { status: 'failed', error }; }
 }
-function saveMetadata<T extends { scope: string; editRevision: number }>(name: MetadataName, document: T, parse: (value: unknown, scope: string) => T, isCurrent: () => boolean): RecoveryWriteHandle {
-  const { scope, editRevision } = document, generation = recoveryGeneration(scope);
-  const key = compositionMetadataKey(scope, name);
+export function saveCompositionDocument(document: CompositionDocument, isCurrent: () => boolean): RecoveryWriteHandle {
+  const { scope, editRevision } = document, generation = recoveryGeneration(scope), key = compositionMetadataKey(scope);
   return queueRecoveryWrite(key, () => {
-    // Refuse an unsupported or damaged document at the final storage boundary.
     const existing = conversationSessionStorage.getItem(key);
     if (existing !== null) {
       requireValue(new TextEncoder().encode(existing).byteLength <= COMPOSITION_CAPACITY.bytes);
-      const previous = parse(JSON.parse(existing), scope);
-      requireValue(previous.editRevision <= editRevision);
+      requireValue(parseComposition(JSON.parse(existing), scope).editRevision <= editRevision);
     }
-    const encoded = JSON.stringify(parse(document, scope));
+    const encoded = JSON.stringify(parseComposition(document, scope));
     requireValue(new TextEncoder().encode(encoded).byteLength <= COMPOSITION_CAPACITY.bytes);
+    retainCompositionOwners(document, () => isCurrent() && generation === recoveryGeneration(scope) && document.editRevision === editRevision);
     return encoded;
   }, { isCurrent: () => isCurrent() && generation === recoveryGeneration(scope) && document.editRevision === editRevision });
 }
-export const readCompositionDocument = (scope: string): CompositionRead<CompositionDocument> => readMetadata(scope, 'composition-v1', parseComposition);
-export const saveCompositionDocument = (document: CompositionDocument, isCurrent: () => boolean): RecoveryWriteHandle => saveMetadata('composition-v1', document, parseComposition, isCurrent);
-export const readTrackCompanion = (scope: string): CompositionRead<TrackCompanionDocument> => readMetadata(scope, 'track-views-v1', parseTrackCompanion);
-export const saveTrackCompanion = (document: TrackCompanionDocument, isCurrent: () => boolean): RecoveryWriteHandle => saveMetadata('track-views-v1', document, parseTrackCompanion, isCurrent);
-export const readAskOwnerIndex = (scope: string): CompositionRead<AskOwnerIndexDocument> => readMetadata(scope, 'ask-owners-v1', parseAskOwnerIndex);
-export const saveAskOwnerIndex = (document: AskOwnerIndexDocument, isCurrent: () => boolean): RecoveryWriteHandle => saveMetadata('ask-owners-v1', document, parseAskOwnerIndex, isCurrent);
 
-/** Capture each existing concrete storage key independently at first enrollment. */
-export function adoptLegacySlot(id: string, session: { hostId?: string; providerId: string; nativeSessionId: string; agentId: string }, scope: string, concreteSessionKey: string): CompositionSlot {
-  return { id, intent: { kind: 'legacy_fixed', target: { ...(session.hostId === undefined ? {} : { hostId: session.hostId }), providerId: session.providerId, nativeSessionId: session.nativeSessionId } },
-    owners: { text: { scope, key: session.agentId }, image: { scope, key: JSON.stringify([scope, concreteSessionKey]) }, display: { scope, key: concreteSessionKey } } };
+export function compositionSelection(slot: CompositionSlot): SessionEntry {
+  return { hostId: slot.intent.target.hostId, providerId: slot.intent.target.native.providerId, nativeSessionId: slot.intent.target.native.nativeSessionId,
+    title: slot.metadata?.title ?? 'Session', ...(slot.metadata ?? {}) };
 }
-/** Explicit history is an independent visit, including its initially empty owners. */
+export function compositionSession(slot: CompositionSlot): (OpenedSession & { viewId: string }) | undefined {
+  if (!slot.metadata?.agentId) return;
+  return { ...compositionSelection(slot), ...slot.metadata, agentId: slot.metadata.agentId, viewId: slot.id };
+}
+export function compositionSessionMetadata(session: SessionEntry): NonNullable<CompositionSlot['metadata']> {
+  return { title: session.title, ...(session.agentId ? { agentId: session.agentId } : {}),
+    ...(session.parentAgentId ? { parentAgentId: session.parentAgentId } : {}),
+    ...(session.parentNativeSessionId ? { parentNativeSessionId: session.parentNativeSessionId } : {}),
+    ...(session.createdAt ? { createdAt: session.createdAt } : {}) };
+}
+export function createCompositionSlot(id: string, session: SessionEntry, scope: string, owners?: CompositionSlot['owners']): CompositionSlot {
+  const key = `view:${id}`;
+  const origin = { kind: 'fixed' as const, target: { hostId: session.hostId ?? 'local', native: { providerId: session.providerId, nativeSessionId: session.nativeSessionId } } };
+  return { id, origin, intent: structuredClone(origin),
+    metadata: compositionSessionMetadata(session),
+    owners: owners ?? { text: { scope, key }, image: { scope, key: JSON.stringify([scope, key]) }, display: { scope, key } } };
+}
+export function createAskOwner(slot: CompositionSlot, scope: string): AskAssociationOwner {
+  const key = `ask:${slot.id}`;
+  return { id: key, sourceSlot: slot.id, input: { scope, key: `agent-remote-ask:${scope}:inputs:${key}` }, geometryScope: JSON.stringify([scope, key]),
+    text: { scope: `${scope}:ask`, key }, image: { scope, key: JSON.stringify([scope, key]) }, display: { scope, key }, open: false, records: [] };
+}
 export function createHistorySlot(id: string, target: CompositionLocator, scope: string): CompositionSlot {
-  const key = `history:${id}`;
-  return { id, intent: { kind: 'history', target: locator(target) }, owners: { text: { scope, key }, image: { scope, key: JSON.stringify([scope, key]) }, display: { scope, key } } };
+  const result = createCompositionSlot(id, { hostId: target.hostId, ...target.native, title: 'Session' }, scope);
+  result.intent = { kind: 'history', target: locator(target) };
+  result.origin = structuredClone(result.intent);
+  return result;
+}
+
+/** Ordinary views have one durable origin; explicitly named slots remain independent. */
+export function compositionOriginId(source: Pick<SessionEntry, 'hostId' | 'providerId' | 'nativeSessionId'>, history = false): string {
+  return JSON.stringify(['view', history ? 'history' : 'fixed', source.hostId ?? 'local', source.providerId, source.nativeSessionId]);
+}
+
+interface CompositionOwnerRecord { version: 1; scope: string; slot: CompositionSlot; ask: AskAssociationOwner }
+const ownerPrefix = (scope: string) => `agent-remote:recovery:${scope}:composition-owner:`;
+const ownerKey = (scope: string, id: string) => `${ownerPrefix(scope)}${encodeURIComponent(id)}`;
+const askEnabledKey = (scope: string, id: string) => `agent-remote:recovery:${scope}:composition-ask-enabled:${encodeURIComponent(id)}`;
+const importKey = (scope: string) => `agent-remote:recovery:${scope}:composition-import-v2`;
+function staticAskOwner(value: AskAssociationOwner): AskAssociationOwner {
+  const { open: _open, enabled: _enabled, records: _records, ...pointers } = value;
+  return { ...pointers, open: false };
+}
+function ownerRecord(document: CompositionDocument, value: CompositionSlot): CompositionOwnerRecord {
+  return { version: 1, scope: document.scope, slot: { ...value, intent: structuredClone(value.origin) },
+    ask: staticAskOwner(document.asks.find(owner => owner.sourceSlot === value.id) ?? createAskOwner(value, document.scope)) };
+}
+function parseOwnerRecord(raw: string, scope: string): CompositionOwnerRecord {
+  requireValue(new TextEncoder().encode(raw).byteLength <= COMPOSITION_CAPACITY.bytes);
+  const value: unknown = JSON.parse(raw);
+  requireValue(record(value) && value.version === 1 && value.scope === scope);
+  const item = value as unknown as CompositionOwnerRecord;
+  const document = parseComposition({ ...createCompositionDocument(scope), slots: [item.slot], asks: [item.ask] }, scope);
+  requireValue(canonicalJson(document.slots[0]!.origin) === canonicalJson(document.slots[0]!.intent));
+  requireValue(canonicalJson(document.asks[0]) === canonicalJson(staticAskOwner(document.asks[0]!)));
+  return { version: 1, scope, slot: document.slots[0]!, ask: document.asks[0]! };
+}
+function immutableOwners(value: CompositionOwnerRecord): string {
+  const { metadata: _metadata, ...identity } = value.slot;
+  return canonicalJson({ slot: identity, ask: value.ask });
+}
+function readAskEnabled(scope: string, id: string): boolean | undefined {
+  const raw = conversationLocalStorage.getItem(askEnabledKey(scope, id));
+  requireValue(raw === null || raw === 'true' || raw === 'false');
+  return raw === null ? undefined : raw === 'true';
+}
+
+/** Persist only stable payload ownership. A tab never publishes its layout to another tab. */
+export function retainCompositionOwners(document: CompositionDocument, isCurrent: () => boolean): void {
+  const prefix = ownerPrefix(document.scope);
+  let count = 0, bytes = 0;
+  for (let index = 0; index < conversationLocalStorage.length; index++) {
+    const key = conversationLocalStorage.key(index);
+    if (!key?.startsWith(prefix)) continue;
+    const raw = conversationLocalStorage.getItem(key); requireValue(raw !== null);
+    count++; bytes += new TextEncoder().encode(raw!).byteLength;
+  }
+  const additions = document.slots.map(value => {
+    requireValue(isCurrent());
+    const next = ownerRecord(document, value), key = ownerKey(document.scope, value.id);
+    const existing = conversationLocalStorage.getItem(key);
+    if (existing !== null) requireValue(immutableOwners(parseOwnerRecord(existing, document.scope)) === immutableOwners(next));
+    const encoded = existing ?? JSON.stringify(next);
+    if (existing === null) { count++; bytes += new TextEncoder().encode(encoded).byteLength; }
+    return { next, key, encoded, enabled: document.asks.find(owner => owner.sourceSlot === value.id)?.enabled };
+  });
+  requireValue(count <= COMPOSITION_CAPACITY.slots && bytes <= COMPOSITION_CAPACITY.bytes);
+  for (const { next, key, encoded, enabled } of additions) {
+    requireValue(isCurrent());
+    conversationLocalStorage.setItem(key, encoded);
+    requireValue(conversationLocalStorage.getItem(key) === encoded);
+    // Reapply the current storage policy while preserving a newer user preference.
+    const currentEnabled = readAskEnabled(document.scope, next.ask.id) ?? enabled;
+    if (currentEnabled !== undefined) {
+      const key = askEnabledKey(document.scope, next.ask.id), encoded = String(currentEnabled);
+      requireValue(isCurrent()); conversationLocalStorage.setItem(key, encoded);
+      requireValue(conversationLocalStorage.getItem(key) === encoded);
+    }
+  }
+  requireValue(isCurrent());
+}
+
+export function restoreCompositionOwners(scope: string): CompositionDocument {
+  const prefix = ownerPrefix(scope), records: CompositionOwnerRecord[] = [];
+  let bytes = 0;
+  for (let index = 0; index < conversationLocalStorage.length; index++) {
+    const key = conversationLocalStorage.key(index);
+    if (!key?.startsWith(prefix)) continue;
+    const raw = conversationLocalStorage.getItem(key); requireValue(raw !== null);
+    bytes += new TextEncoder().encode(raw!).byteLength;
+    requireValue(bytes <= COMPOSITION_CAPACITY.bytes && records.length < COMPOSITION_CAPACITY.slots);
+    const value = parseOwnerRecord(raw!, scope);
+    requireValue(key === ownerKey(scope, value.slot.id)); records.push(value);
+  }
+  const document = createCompositionDocument(scope);
+  document.slots = records.map(value => value.slot);
+  document.asks = records.map(value => {
+    const enabled = readAskEnabled(scope, value.ask.id);
+    return { ...value.ask, ...(enabled === undefined ? {} : { enabled }) };
+  });
+  return parseComposition(document, scope);
+}
+
+/** Refresh user preferences at tab initialization without importing another tab's layout. */
+export function refreshCompositionAskPreferences(document: CompositionDocument): boolean {
+  let changed = false;
+  for (const owner of document.asks) {
+    const enabled = readAskEnabled(document.scope, owner.id);
+    if (owner.enabled === enabled) continue;
+    if (enabled === undefined) delete owner.enabled; else owner.enabled = enabled;
+    changed = true;
+  }
+  return changed;
+}
+
+export function saveCompositionAskEnabled(document: CompositionDocument, id: string, enabled: boolean, isCurrent: () => boolean): void {
+  const generation = recoveryGeneration(document.scope), current = () => isCurrent() && recoveryGeneration(document.scope) === generation;
+  requireValue(document.asks.some(owner => owner.id === id));
+  retainCompositionOwners(document, current);
+  const key = askEnabledKey(document.scope, id), encoded = String(enabled);
+  requireValue(current()); conversationLocalStorage.setItem(key, encoded);
+  requireValue(current() && conversationLocalStorage.getItem(key) === encoded);
+}
+
+export function compositionOwnersImported(scope: string): boolean {
+  const raw = conversationLocalStorage.getItem(importKey(scope));
+  requireValue(raw === null || raw === '2'); return raw !== null;
+}
+export function completeCompositionOwnerImport(scope: string, isCurrent: () => boolean): void {
+  requireValue(isCurrent()); conversationLocalStorage.setItem(importKey(scope), '2');
+  requireValue(isCurrent() && conversationLocalStorage.getItem(importKey(scope)) === '2');
 }

@@ -1,6 +1,6 @@
 import { realpath, stat } from 'node:fs/promises';
 import { isAbsolute, relative, resolve, sep } from 'node:path';
-import type { AgentRuntimeInfo, AgentSession, AgentSessionNativeEvidence } from '@orchardworks/agent-provider-sdk';
+import type { AgentRuntimeInfo, AgentSession, AgentSessionNativeEvidence, AgentPersistenceHandle } from '@orchardworks/agent-provider-sdk';
 import type { AgentHostDirectory } from './host.js';
 import { successionCreationHandle } from './local-succession-preparation.js';
 
@@ -57,8 +57,8 @@ function protectedInfo(info: AgentRuntimeInfo, policy: HostExecutionPolicy): Age
     setting.category === 'permissions' ? { ...setting, mutable: false, description: 'Locked by local Host execution policy.' } : setting) };
 }
 export function protectHostDirectory(directory: AgentHostDirectory, policy: HostExecutionPolicy): AgentHostDirectory {
-  const checkSource = async (id: string) => {
-    const workspace = directory.sessionWorkspace ? await directory.sessionWorkspace(id)
+  const checkSource = async (id: string, handle?: AgentPersistenceHandle) => {
+    const workspace = directory.sessionWorkspace ? await directory.sessionWorkspace(id, handle)
       : (await directory.list()).find(entry => entry.nativeSessionId === id)?.workspace;
     await allowedWorkspace(policy, workspace);
   };
@@ -89,7 +89,7 @@ export function protectHostDirectory(directory: AgentHostDirectory, policy: Host
     } }) : undefined;
     const wrapper = new Proxy(session, { get(target, key) {
       if (key === 'nativeEvidence') return protectedEvidence;
-      if (key === 'runtimeInfo') return async () => protectedInfo(await target.runtimeInfo(), policy);
+      if (key === 'runtimeInfo') return async (options?: Parameters<AgentSession['runtimeInfo']>[0]) => protectedInfo(await target.runtimeInfo(options), policy);
       if (key === 'observe') return async function* () {
         for await (const item of target.observe()) yield item.type === 'observation' && item.event.type === 'runtime_updated'
           ? { ...item, event: { ...item.event, runtimeInfo: protectedInfo(item.event.runtimeInfo, policy) } } : item;
@@ -121,8 +121,8 @@ export function protectHostDirectory(directory: AgentHostDirectory, policy: Host
     supportsPromptEditing: directory.supportsPromptEditing,
     async validateSessionRename(id: string, title: string) { await checkSource(id); await directory.validateSessionRename?.(id, title); },
     ...(directory.sessionTitle ? { async sessionTitle(id: string) { await checkSource(id); return directory.sessionTitle!(id); } } : {}),
-    ...(directory.sessionWorkspace ? { async sessionWorkspace(id: string) {
-      const cwd = await directory.sessionWorkspace!(id);
+    ...(directory.sessionWorkspace ? { async sessionWorkspace(id: string, handle?: AgentPersistenceHandle) {
+      const cwd = await directory.sessionWorkspace!(id, handle);
       return allowedWorkspace(policy, cwd);
     } } : {}),
     ...(directory.renameSession ? { async renameSession(id: string, title: string) { await checkSource(id); return directory.renameSession!(id, title); } } : {}),
@@ -154,8 +154,8 @@ export function protectHostDirectory(directory: AgentHostDirectory, policy: Host
       return directory.create(await createInput(input), evidence);
     },
     async open(nativeSessionId, options) {
-      if (options?.nativeCreation) successionCreationHandle(directory.providerId, nativeSessionId, options.nativeCreation);
-      await checkSource(nativeSessionId);
+      const handle = options?.nativeCreation ? successionCreationHandle(directory.providerId, nativeSessionId, options.nativeCreation) : undefined;
+      await checkSource(nativeSessionId, handle);
       return protect(await directory.open(nativeSessionId, options));
     },
     ...(directory.openChild ? { async openChild(parent: string, child: string) { return protect(await directory.openChild!(parent, child)); } } : {}),

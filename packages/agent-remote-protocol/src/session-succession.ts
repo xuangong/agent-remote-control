@@ -35,6 +35,23 @@ export const SuccessionRecord = Type.Object({ ...request, phase: SuccessionPhase
   failureCode: Type.Optional(id), committedRevision: Type.Optional(revision),
 }, object);
 export type SuccessionRecord = Static<typeof SuccessionRecord>;
+/** A current observation only; preparation must recheck every eligibility fact. */
+export const SuccessionDescription = Type.Object({
+  role: PrimaryRole,
+  targets: Type.Array(Type.Object({ providerId: id, displayName: id }, object), { maxItems: 128 }),
+  eligibility: Type.Union([
+    Type.Object({ status: Type.Literal('ready') }, object),
+    Type.Object({ status: Type.Union([Type.Literal('blocked'), Type.Literal('unavailable')]), code: id,
+      reason: Type.String({ minLength: 1, maxLength: 4096 }) }, object),
+  ]),
+}, object);
+export type SuccessionDescription = Static<typeof SuccessionDescription>;
+export const SuccessionActionResult = Type.Object({ record: SuccessionRecord, role: PrimaryRole,
+  locator: Type.Optional(Type.Object({ hostId: id, providerId: id, nativeSessionId: id }, object)),
+}, object);
+export type SuccessionActionResult = Static<typeof SuccessionActionResult>;
+export const isSuccessionDescription = (value: unknown): value is SuccessionDescription => Value.Check(SuccessionDescription, value);
+export const isSuccessionActionResult = (value: unknown): value is SuccessionActionResult => Value.Check(SuccessionActionResult, value);
 export const isNativeSessionRef = (value: unknown): value is NativeSessionRef => Value.Check(NativeSessionRef, value);
 export const isPrimaryRole = (value: unknown): value is PrimaryRole => Value.Check(PrimaryRole, value);
 export const isSourceBinding = (value: unknown): value is SourceBinding => Value.Check(SourceBinding, value);

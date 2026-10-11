@@ -102,3 +102,17 @@ it('does not let an ordinary attachment stand in for verified creation evidence'
     expect(f.counts().resumes).toBe(1);
   } finally { await directory.close(); }
 });
+
+it('forwards authorized extensions while retaining the original native creation handle', async () => {
+  const f = fixture(), calls: unknown[] = [];
+  const resume = f.provider.resumeSession;
+  f.provider.resumeSession = async (handle, extensions) => { calls.push({ handle, extensions }); return resume(handle); };
+  const directory = createOpenCodeSessionDirectory(f.provider, []);
+  const nativeCreation = { status: 'created' as const, handle: { providerId: 'opencode', sessionId: 'native', opaque: 'original' } };
+  const extensions = { systemPrompt: 'Authorized Host bootstrap', tools: [{ name: 'read_work', description: 'Read work', inputSchema: { type: 'object' }, execute: async () => 'work' }] };
+  try {
+    await directory.open('native', { nativeCreation, extensions });
+    expect(calls).toEqual([{ handle: nativeCreation.handle, extensions }]);
+    expect(directory.canReleaseSession?.('native')).toBe(false);
+  } finally { await directory.close(); }
+});

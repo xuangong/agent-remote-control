@@ -3,7 +3,7 @@ import { afterEach, expect, it, vi } from 'vitest';
 import { PROTOCOL_VERSION } from '@orchardworks/agent-remote-protocol';
 import { App } from './App.js';
 import { SessionDirectoryClient } from './directory-client.js';
-import { render } from './test/setup.js';
+import { render, setPromptText, promptText } from './test/setup.js';
 import { replicaState } from './test/fixtures.js';
 
 afterEach(() => {
@@ -19,6 +19,7 @@ async function setup({ used = 0, limit = 1, outcome = 'success', empty = false, 
   let quota = { used, limit };
   vi.stubGlobal('fetch', async (input: URL | string, init?: RequestInit) => {
     const url = new URL(String(input));
+    if (url.pathname.endsWith('/session-successions')) return Response.json({ code: 'route_not_found', error: 'Unsupported' }, { status: 404 });
     requests.push({ path: url.pathname, ...(init?.body ? { body: JSON.parse(String(init.body)) } : {}) });
     if (url.pathname === '/v1/providers') return Response.json({ protocolVersion: '1.7.0', type: 'provider_list', payload: { providers: [{ providerId: 'recorded', displayName: 'Recorded Provider' }] } });
     if (url.pathname.endsWith('/hosts')) return Response.json({ hosts: empty ? [] : [
@@ -55,9 +56,9 @@ async function setup({ used = 0, limit = 1, outcome = 'success', empty = false, 
 }
 
 async function sideCommand(container: HTMLElement): Promise<void> {
-  const input = container.querySelector<HTMLTextAreaElement>('[data-testid="workbench"] textarea')!;
+  const input = container.querySelector<HTMLTextAreaElement>('[data-testid="workbench"] [data-testid="prompt-input"]')!;
   await act(async () => {
-    Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!.call(input, '/side');
+    setPromptText(input, '/side');
     input.dispatchEvent(new Event('input', { bubbles: true }));
   });
   await act(async () => input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true })));

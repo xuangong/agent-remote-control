@@ -15,7 +15,10 @@ const snapshots = {
 };
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); window.localStorage.clear(); window.sessionStorage.clear(); window.history.replaceState(null, '', '/'); });
 async function setup(reject = false, options: { live?: boolean; deferChild?: boolean; restricted?: boolean; discover?: boolean; navigation?: boolean; nested?: boolean; images?: boolean; desktop?: boolean; letters?: boolean; rootReference?: boolean; directChild?: boolean; ask?: boolean } = {}) {
+  Range.prototype.getClientRects = () => [] as unknown as DOMRectList;
+  Range.prototype.getBoundingClientRect = () => new DOMRect();
   if (options.ask) localStorage.setItem('agent-remote-ask-enabled', 'true');
+  if (options.ask) localStorage.setItem('agent-remote-opened:http://localhost/', JSON.stringify([{ hostId: 'local', providerId: 'codex', nativeSessionId: 'native-parent', agentId: 'parent', title: 'Conversation' }]));
   if (options.ask) vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} });
   vi.stubGlobal('matchMedia', vi.fn((query: string) => ({ matches: options.desktop ? query.includes('min-width: 1181px') : query.includes('max-width: 1180px'), media: query, addEventListener() {}, removeEventListener() {}, addListener() {}, removeListener() {} })));
   let connections = 0;
@@ -97,6 +100,7 @@ async function setup(reject = false, options: { live?: boolean; deferChild?: boo
     </>;
   }
   const container = await render(<Harness />);
+  await vi.waitFor(async () => { await act(async () => { await new Promise(resolve => setTimeout(resolve, 20)); }); expect(container.querySelector('[data-testid="prompt-input"]')).not.toBeNull(); });
   return { container, attachments, resourceReads, sendMessage, respondToInteraction, releaseChild, resumeAgent, connections: () => connections };
 
 }
@@ -111,11 +115,23 @@ it('focuses the current discovered session without another attachment or stream 
   }
   expect(f.attachments).toEqual([]);
   expect(f.connections()).toBe(before);
-  expect(f.container.querySelector<HTMLTextAreaElement>('textarea')?.value).toBe('Keep current draft');
+  expect(promptText(f.container)).toBe('Keep current draft');
 });
+function promptText(container: ParentNode): string | undefined {
+  const input = container.querySelector<HTMLElement>('[data-testid="prompt-input"]');
+  return input instanceof HTMLTextAreaElement ? input.value : input?.textContent ?? undefined;
+}
+function promptDisabled(container: ParentNode): boolean {
+  const input = container.querySelector<HTMLElement>('[data-testid="prompt-input"]')!;
+  return input instanceof HTMLTextAreaElement ? input.disabled : input.getAttribute('contenteditable') !== 'true';
+}
 async function draft(container: HTMLElement, text: string) {
-  const input = container.querySelector<HTMLTextAreaElement>('textarea')!;
-  await act(async () => { Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!.call(input, text); input.dispatchEvent(new Event('input', { bubbles: true })); });
+  const input = container.querySelector<HTMLElement>('[data-testid="prompt-input"]')!;
+  await act(async () => {
+    if (input instanceof HTMLTextAreaElement) Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!.call(input, text);
+    else input.textContent = text;
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+  });
 }
 
 async function openAsk(container: HTMLElement) {
@@ -191,20 +207,20 @@ it('opens a native child through its loaded parent and restores each conversatio
   await act(async () => f.container.querySelector<HTMLButtonElement>('[data-child-session-id]')!.click());
   expect(f.attachments).toEqual([{ path: '/v1/remote/child/attach', body: { providerId: 'codex', parentNativeSessionId: 'native-parent', nativeSessionId: 'native-child' } }]);
   expect(f.container.querySelector('[aria-label="Conversation path"]')?.textContent).toContain('Review transport');
-  expect(f.container.querySelector<HTMLTextAreaElement>('textarea')?.value).toBe('');
-  expect(f.container.querySelector<HTMLTextAreaElement>('textarea')?.disabled).toBe(false);
+  expect(promptText(f.container)).toBe('');
+  expect(promptDisabled(f.container)).toBe(false);
   await draft(f.container, 'Child draft');
   await act(async () => f.container.querySelector<HTMLButtonElement>('[aria-label="Conversation path"] button')!.click());
-  expect(f.container.querySelector<HTMLTextAreaElement>('textarea')?.value).toBe('Parent draft');
+  expect(promptText(f.container)).toBe('Parent draft');
   await act(async () => f.container.querySelector<HTMLButtonElement>('[data-child-session-id]')!.click());
-  expect(f.container.querySelector<HTMLTextAreaElement>('textarea')?.value).toBe('Child draft');
+  expect(promptText(f.container)).toBe('Child draft');
 });
 it('keeps the parent conversation and draft visible when child attachment fails', async () => {
   const f = await setup(true);
   await draft(f.container, 'Keep my draft');
   await act(async () => f.container.querySelector<HTMLButtonElement>('[data-child-session-id]')!.click());
   expect(f.container.querySelector('[role="alert"]')?.textContent).toContain('Child is unavailable.');
-  expect(f.container.querySelector<HTMLTextAreaElement>('textarea')?.value).toBe('Keep my draft');
+  expect(promptText(f.container)).toBe('Keep my draft');
   expect(f.container.querySelector('[data-testid="connection-summary"]')?.textContent).toContain('parent');
 });
 
@@ -218,7 +234,7 @@ it('keeps a selected skill with its parent draft and restores it after returning
   expect(f.container.querySelector('[aria-label="Selected skill"]')).toBeNull();
   await act(async () => f.container.querySelector<HTMLButtonElement>('[aria-label="Conversation path"] button')!.click());
   expect(f.container.querySelector('[aria-label="Selected skill"]')?.textContent).toContain('inspect');
-  expect(f.container.querySelector<HTMLTextAreaElement>('textarea')?.value).toBe('Review this implementation');
+  expect(promptText(f.container)).toBe('Review this implementation');
 });
 
 it('keeps the initial native parent image draft when returning after directory registration', async () => {
@@ -250,7 +266,7 @@ it('uses child input capabilities while keeping its native approval actionable',
   const f = await setup(false, { restricted: true });
   await act(async () => f.container.querySelector<HTMLButtonElement>('[data-child-session-id]')!.click());
   const input = f.container.querySelector<HTMLTextAreaElement>('[data-testid="prompt-input"]')!;
-  expect(input.disabled).toBe(true);
+  expect(promptDisabled(f.container)).toBe(true);
   const hint = f.container.querySelector(`#${input.getAttribute('aria-describedby')}`)!;
   expect(hint.textContent).toBe('This session is read-only. Direct input is disabled.');
   expect(hint.classList.contains('agent-visually-hidden')).toBe(false);
@@ -260,7 +276,7 @@ it('uses child input capabilities while keeping its native approval actionable',
   await act(async () => approve!.click());
   expect(f.respondToInteraction).toHaveBeenCalledWith('child-plan', { kind: 'plan_approval', action: 'approve' });
   await act(async () => f.container.querySelector<HTMLButtonElement>('[aria-label="Conversation path"] button')!.click());
-  expect(f.container.querySelector<HTMLTextAreaElement>('[data-testid="prompt-input"]')!.disabled).toBe(false);
+  expect(promptDisabled(f.container)).toBe(false);
   expect(f.container.textContent).not.toContain('This session is read-only.');
   await draft(f.container, 'Parent input');
   expect(f.container.querySelector<HTMLButtonElement>('[data-testid="prompt-submit"]')?.disabled).toBe(false);
@@ -320,7 +336,7 @@ it('reattaches a resumable directory parent without creating another native runt
   await act(async () => f.container.querySelector<HTMLButtonElement>('[data-testid="session-resume"]')!.click());
   expect(f.attachments).toEqual([{ path: '/v1/remote/attach', body: { providerId: 'codex', nativeSessionId: 'native-parent' } }]);
   expect(f.resumeAgent).not.toHaveBeenCalled();
-  expect(f.container.querySelector<HTMLTextAreaElement>('textarea')?.value).toBe('Keep the root draft');
+  expect(promptText(f.container)).toBe('Keep the root draft');
   expect(f.container.querySelector('[data-testid="connection-summary"]')?.textContent).toContain('parent');
   await act(async () => f.container.querySelector<HTMLButtonElement>('[data-child-session-id]')!.click());
   expect(f.attachments.at(-1)).toEqual({ path: '/v1/remote/child/attach', body: { providerId: 'codex', parentNativeSessionId: 'native-parent', nativeSessionId: 'native-child' } });
@@ -397,10 +413,10 @@ it('navigates activity links between a parent and siblings with browser and conv
   ]);
   await act(async () => back().click());
   await waitForSession(f.container, 'child');
-  expect(f.container.querySelector('textarea')!.value).toBe('Child draft');
+  expect(promptText(f.container)).toBe('Child draft');
   await act(async () => window.history.back());
   await waitForSession(f.container, 'parent');
-  expect(f.container.querySelector('textarea')!.value).toBe('Parent draft');
+  expect(promptText(f.container)).toBe('Parent draft');
   expect(back().disabled).toBe(true);
   await act(async () => forward().click());
   await waitForSession(f.container, 'child');
@@ -453,8 +469,8 @@ it('opens desktop subagents side by side and preserves both drafts when focusing
   await draft(side, 'Child stays');
   await act(async () => primary.click());
   expect(side.hidden).toBe(false);
-  expect(primary.querySelector<HTMLTextAreaElement>('textarea')?.value).toBe('Parent stays');
-  expect(side.querySelector<HTMLTextAreaElement>('textarea')?.value).toBe('Child stays');
+  expect(promptText(primary)).toBe('Parent stays');
+  expect(promptText(side)).toBe('Child stays');
   await act(async () => side.querySelector<HTMLButtonElement>('.lab-side-close')!.click());
   expect(side.hidden).toBe(true); expect(primary.hidden).toBe(false);
 });
@@ -514,7 +530,7 @@ it('replaces the current mobile conversation with the letter recipient and prese
   expect(f.container.querySelector('.lab-side-conversation')).toBeNull();
   expect(primary.querySelector('[data-inspected="true"]')?.getAttribute('data-entry-key')).toContain('task-letter');
   await waitForSession(f.container, 'child');
-  expect(primary.querySelector<HTMLTextAreaElement>('textarea')?.value).not.toBe('Parent draft stays');
+  expect(promptText(primary)).not.toBe('Parent draft stays');
   await draft(primary, 'Child draft stays');
   await act(async () => {
     primary.querySelector<HTMLButtonElement>('[aria-label="Open letter from /root/review to /root"]')!.click();
@@ -524,12 +540,12 @@ it('replaces the current mobile conversation with the letter recipient and prese
   expect(primary.hidden).toBe(false);
   expect(f.container.querySelector('.lab-side-conversation')).toBeNull();
   expect(primary.querySelector('[data-inspected="true"]')?.getAttribute('data-entry-key')).toContain('reply-letter');
-  expect(primary.querySelector<HTMLTextAreaElement>('textarea')?.value).toBe('Parent draft stays');
+  expect(promptText(primary)).toBe('Parent draft stays');
   await act(async () => {
     primary.querySelector<HTMLButtonElement>('[aria-label="Open letter from /root to /root/review"]')!.click();
     await new Promise(resolve => setTimeout(resolve, 30));
   });
-  expect(primary.querySelector<HTMLTextAreaElement>('textarea')?.value).toBe('Child draft stays');
+  expect(promptText(primary)).toBe('Child draft stays');
 });
 it('opens the sender when the mobile view already belongs to the recipient', async () => {
   const f = await setup(false, { live: true, letters: true });
@@ -610,6 +626,14 @@ it('keeps the View Ask toggle scoped to the selected session and restores its pr
   expect(f.container.querySelector('.lab-primary-conversation [aria-label="Ask about this session"]')).not.toBeNull();
   await unmount(f.container);
   const restored = await setup(false, { live: true, desktop: true });
+  await act(async () => restored.container.querySelector<HTMLButtonElement>('[aria-label="View options"]')!.click());
+  expect(restored.container.querySelector<HTMLInputElement>('[data-view-control="ask"]')!.checked).toBe(false);
+  expect(restored.container.querySelector('.lab-primary-conversation [aria-label="Ask about this session"]')).not.toBeNull();
+  expect(restored.container.querySelector('.lab-side-conversation [aria-label="Ask about this session"]')).toBeNull();
+  await act(async () => {
+    const primary = restored.container.querySelector<HTMLElement>('.lab-primary-conversation')!;
+    primary.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true })); primary.click();
+  });
   await act(async () => restored.container.querySelector<HTMLButtonElement>('[aria-label="View options"]')!.click());
   expect(restored.container.querySelector<HTMLInputElement>('[data-view-control="ask"]')!.checked).toBe(true);
 });

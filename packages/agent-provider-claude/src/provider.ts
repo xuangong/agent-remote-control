@@ -1,9 +1,10 @@
 import { randomUUID } from 'node:crypto';
 import { realpath, stat } from 'node:fs/promises';
-import type { AgentHistoryPage, AgentHistoryQuery, AgentPersistenceHandle, AgentProviderAdapter, AgentSession, AgentSessionConfig, AgentSessionExtensions } from '@orchardworks/agent-provider-sdk';
+import type { AgentHistoryPage, AgentHistoryQuery, AgentPersistenceHandle, AgentProviderAdapter, AgentSession, AgentSessionConfig, AgentSessionExtensions, AgentSessionResumeOptions, AgentProviderNativeEvidence } from '@orchardworks/agent-provider-sdk';
 import { createClaudeCatalog, type ClaudeCatalog } from './catalog.js';
 import { ClaudeShutdownError, ClaudeAgentSession, type ClaudeSessionConfig, type ClaudeSessionOptions } from './session.js';
 import { record } from './projector.js';
+import { claudeEmptyHandle, readClaudeEmptyDescriptor, claudeEvidenceReject, validClaudeId } from './native-evidence.js';
 
 export interface ClaudeSessionSummary {
   nativeSessionId: string;
@@ -17,7 +18,21 @@ export interface ClaudeSessionSummary {
 export interface ClaudeAgentProviderOptions extends ClaudeSessionOptions { catalog?: ClaudeCatalog }
 
 export class ClaudeAgentProvider implements AgentProviderAdapter {
+  /** Ordinary create supplies a nonempty UUID; this does not bound resume, fork, or history. */
+  readonly createdSessionIdMaxLength: number = 36;
   readonly descriptor = { providerId: 'claude', displayName: 'Claude Code', sessionExtensions: { instructions: true, tools: true } };
+  readonly nativeEvidence: AgentProviderNativeEvidence = {
+    availability: () => ({ status: 'configured', version: 2 }),
+    createEmpty: async config => {
+      if (!validClaudeId(config.sessionId)) claudeEvidenceReject('native_evidence_invalid');
+      const cwd = await workspace(config.cwd);
+      if (this.sessions.has(config.sessionId) || this.loading.has(config.sessionId) || await this.catalog.info(config.sessionId)) claudeEvidenceReject('native_evidence_identity_unusable');
+      const source = config.selectionSourceSessionId ? this.sessions.get(config.selectionSourceSessionId) : undefined;
+      if (config.selectionSourceSessionId && !source) claudeEvidenceReject('native_evidence_unavailable');
+      const selections = source?.selectionConfig() ?? {};
+      return { status: 'created', handle: claudeEmptyHandle({ ...selections, sessionId: config.sessionId, cwd }, this.options) };
+    },
+  };
   private readonly catalog: ClaudeCatalog;
   private readonly sessions = new Map<string, ClaudeAgentSession>();
   private readonly loading = new Set<string>();
@@ -55,9 +70,11 @@ export class ClaudeAgentProvider implements AgentProviderAdapter {
       createdAt: new Date(entry.createdAt ?? entry.lastModified).toISOString(), updatedAt: new Date(entry.lastModified).toISOString(), state: 'unknown' }));
   }
 
-  async sessionWorkspace(sessionId: string): Promise<string | undefined> {
+  async sessionWorkspace(sessionId: string, handle?: AgentPersistenceHandle): Promise<string | undefined> {
+    if (handle && (handle.providerId !== 'claude' || handle.sessionId !== sessionId)) claudeEvidenceReject('native_evidence_invalid');
+    const descriptor = handle ? readClaudeEmptyDescriptor(handle, this.options) : undefined;
     const session = this.sessions.get(sessionId);
-    return session ? (await session.runtimeInfo()).cwd : (await this.catalog.info(sessionId))?.cwd;
+    return session ? (await session.runtimeInfo()).cwd : (await this.catalog.info(sessionId))?.cwd ?? descriptor?.cwd;
   }
 
   async releaseSession(sessionId: string): Promise<void> {
@@ -89,7 +106,7 @@ export class ClaudeAgentProvider implements AgentProviderAdapter {
     return session;
   }
 
-  async resumeSession(handle: AgentPersistenceHandle, extensions: AgentSessionExtensions = {}): Promise<AgentSession> {
+  async resumeSession(handle: AgentPersistenceHandle, extensions: AgentSessionExtensions = {}, resumeOptions: AgentSessionResumeOptions = {}): Promise<AgentSession> {
     if (handle.providerId !== 'claude') throw new Error('Claude persistence provider does not match.');
     if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(handle.sessionId)) throw new Error('Invalid Claude session identity.');
     const sessionId = handle.sessionId;
@@ -97,16 +114,19 @@ export class ClaudeAgentProvider implements AgentProviderAdapter {
     this.loading.add(sessionId);
     let session: ClaudeAgentSession | undefined;
     try {
+      const descriptor = readClaudeEmptyDescriptor(handle, this.options);
       const info = await this.catalog.info(sessionId);
-      if (!info) throw new Error('Claude native session is unavailable.');
-      const stored = readConfig(handle.opaque);
-      const cwd = info.cwd ?? stored.cwd;
+      if (!info && !(descriptor && resumeOptions.initializeEmpty === true)) throw new Error('Claude native session is unavailable.');
+      const stored = descriptor ? { ...descriptor.config } : readConfig(handle.opaque);
+      if (descriptor && info) delete stored.model;
+      const cwd = info?.cwd ?? stored.cwd;
+      if (descriptor && cwd !== descriptor.cwd) claudeEvidenceReject('native_evidence_stale');
       if (!cwd) throw new Error('Claude session workspace is unavailable.');
-      const messages = await this.catalog.messages(sessionId);
+      const messages = info ? await this.catalog.messages(sessionId) : [];
       session = await ClaudeAgentSession.open({ ...stored, ...extensions, sessionId, cwd: await workspace(cwd) },
-        { ...this.options, catalog: this.catalog, onDispose: () => {
+        { ...this.options, catalog: this.catalog, emptyDescriptor: Boolean(descriptor), restoreNativeModel: Boolean(descriptor && info), onDispose: () => {
           if (session && this.sessions.get(sessionId) === session) this.sessions.delete(sessionId);
-        } }, messages, true);
+        } }, messages, Boolean(info));
       this.sessions.set(sessionId, session);
       return session;
     } catch (error) {

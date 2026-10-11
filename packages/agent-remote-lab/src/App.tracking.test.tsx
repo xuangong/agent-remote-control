@@ -7,7 +7,7 @@ import { SessionStarsClient, type SessionStar } from './session-stars-client.js'
 import { readTrackedSessions, saveTrackedSessions } from './tracking-state.js';
 import { ForkStore, referenceForkContext } from './session-forks.js';
 import { replicaState } from './test/fixtures.js';
-import { render } from './test/setup.js';
+import { render, setPromptText, promptText } from './test/setup.js';
 import { WorkspaceReady } from './workspace-access.js';
 
 const baseUrl = 'http://localhost/u/alice/';
@@ -262,15 +262,15 @@ it('restores the child being read on mobile when returning to its tracked parent
   await f.open();
   await openChild(f.container, 'child');
   expect(new URLSearchParams(location.search).get('session')).toBe('child');
-  const input = f.container.querySelector<HTMLTextAreaElement>('textarea')!;
+  const input = f.container.querySelector<HTMLElement>('[data-testid="prompt-input"]')!;
   await act(async () => {
-    Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!.call(input, 'Unsent child draft');
+    setPromptText(input, 'Unsent child draft');
     input.dispatchEvent(new Event('input', { bubbles: true }));
   });
   await f.open(other.title);
   await f.open();
   expect(new URLSearchParams(location.search).get('session')).toBe('child');
-  expect(f.container.querySelector<HTMLTextAreaElement>('textarea')?.value).toBe('Unsent child draft');
+  expect(promptText(f.container.querySelector<HTMLElement>('[data-testid="prompt-input"]')!)).toBe('Unsent child draft');
 });
 
 it('opens the tracked mobile parent when it has new content instead of restoring its child', async () => {

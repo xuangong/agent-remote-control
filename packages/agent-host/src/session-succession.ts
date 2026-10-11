@@ -141,11 +141,12 @@ export class SessionSuccessionCoordinator {
     if (!record.to || progress?.stage !== 'candidate-known' || !progress.capture) throw new Error('Saved candidate preparation is incomplete.');
     if (progress.nativeCreation && progress.nativeCreation.outcome?.status !== 'created') throw new Error('Native creation evidence is not resumable.');
     if (record.to.providerId !== (record.targetProviderId ?? record.from.providerId)) throw new SuccessionPreparationRejected('succession_target_provider_mismatch', 'The candidate provider does not match the selected provider.');
-    await this.preparation.check(state.role, record.to);
     await this.serialized(operationId, async () => {
       if (this.stopped(operationId)) return;
       await this.preparation.bind(operationId, record.to!);
     });
+    if (this.stopped(operationId)) return this.store.operation(operationId);
+    await this.preparation.check(state.role, record.to);
     if (this.stopped(operationId)) return this.store.operation(operationId);
     const prepared = { operationId, roleId: record.roleId, expectedRevision: record.expectedRevision, from: record.from,
       ...(record.targetProviderId ? { targetProviderId: record.targetProviderId } : {}), to: record.to, workspace: state.role.workspace,

@@ -2,7 +2,7 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, expect, it, vi } from 'vitest';
-import { type AgentSessionExtensions } from '@orchardworks/agent-provider-sdk';
+import { AgentOperationRejectedError, type AgentMessageOptions, type AgentSessionExtensions } from '@orchardworks/agent-provider-sdk';
 import type { AgentManagerEvent, SessionWireAgent } from '@orchardworks/agent-remote-relay';
 import type { TpmWork } from '@orchardworks/agent-remote-protocol';
 import { TpmCoordinator, type TpmSessionAccess } from './tpm.js';
@@ -171,11 +171,11 @@ it.each([true, false])('queues or defers normal main input while busy without ca
   const plan = (await f.coordinator.get(work.id)).todo!;
   await f.call(work, 'update_todo_step', { revision: plan.revision, stepId: 'implement', status: 'in_progress', note: 'Implementation approved' });
   const intent = await f.call(work, 'send_main_message', { operationId: 'main-message', purpose: 'implementation', text: 'Implement the agreed scope.' });
-  if (queue) { await waitMessages(main, 1); expect(main.messages[0]?.options).toEqual({ delivery: 'next_turn' }); }
+  if (queue) { await waitMessages(main, 1); expect(main.messages[0]?.options).toMatchObject({ delivery: 'next_turn' }); }
   else {
     await f.coordinator.tick(); await f.coordinator.store.flush(); expect(main.messages).toEqual([]);
     expect((await f.coordinator.get(work.id)).outbox?.find(value => value.id === intent.id)?.status).toBe('prepared');
-    main.setStatus('idle'); await f.coordinator.tick(); await waitMessages(main, 1); expect(main.messages[0]?.options).toBeUndefined();
+    main.setStatus('idle'); await f.coordinator.tick(); await waitMessages(main, 1); expect((main.messages[0]?.options as AgentMessageOptions | undefined)?.delivery).toBeUndefined();
   }
   expect(main.messages[0]?.text).toContain(work.id); expect(main.cancel).not.toHaveBeenCalled(); expect(main.steer).not.toHaveBeenCalled();
   expect((await f.coordinator.get(work.id)).phase).toBe('clarifying');
@@ -656,4 +656,74 @@ it.each([true, false])('publishes the initial intent with native creation before
   const current = await f.coordinator.get(work.id);
   expect(current.outbox).toEqual([expect.objectContaining({ purpose: 'initial', status: 'accepted' })]);
   expect(f.sessions.get('main')!.messages).toEqual([]);
+}, 10000);
+
+
+it.each(['void', 'unknown', 'queued'] as const)('settles the original main intent after late acceptance following %s', async outcome => {
+  const f = await fixture(outcome === 'queued'); const route = successionRouting(f); const work = await f.create();
+  const main = f.sessions.get('main')!; let notify: AgentMessageOptions['onAcceptance'];
+  main.sendMessage = (async (text: string, options?: AgentMessageOptions) => {
+    main.messages.push({ text, options }); notify = options?.onAcceptance;
+    if (outcome === 'unknown') throw new Error('Native acknowledgement lost');
+    return outcome === 'queued' ? { disposition: 'queued' } : undefined;
+  }) as typeof main.sendMessage;
+  const execute = f.access.execute;
+  f.access.execute = (agent, operation, execution) => {
+    if (agent.agentId === 'main') expect(operation.parameters).toEqual({ text: expect.any(String), ...(outcome === 'queued' ? { options: { delivery: 'next_turn' } } : {}) });
+    return execute(agent, operation, execution);
+  };
+  const receipt = await f.call(work, 'send_main_message', { operationId: `late-${outcome}`, purpose: 'consultation', text: 'Assess once' });
+  await f.coordinator.tick();
+  const current = (await f.coordinator.get(work.id)).outbox!.find(item => item.id === receipt.id)!;
+  expect(current.status).toBe(outcome === 'unknown' ? 'unknown' : 'accepted');
+  expect(f.coordinator.hasUnsettledMain(route.origin)).toBe(true);
+  expect(notify).toBeTypeOf('function');
+  notify!({ disposition: 'queued' }); await f.coordinator.store.flush();
+  expect(f.coordinator.hasUnsettledMain(route.origin)).toBe(true);
+  notify!({ disposition: 'started' });
+  await expect.poll(() => f.coordinator.hasUnsettledMain(route.origin)).toBe(false);
+  const confirmed = await f.coordinator.get(work.id);
+  expect(confirmed.outbox!.find(item => item.id === receipt.id)).toMatchObject({ status: 'accepted', acceptance: 'started', resolvedTarget: route.origin, roleRevision: 1 });
+  expect(confirmed.outbox!.find(item => item.id === receipt.id)!.error).toBeUndefined();
+  notify!({ disposition: 'started' }); notify!({ disposition: 'queued' });
+  await new Promise<void>(resolve => setImmediate(resolve)); await f.coordinator.store.flush();
+  expect(f.coordinator.store.get(work.id).work.revision).toBe(confirmed.revision);
+  await f.coordinator.close();
+  await f.restart(); await f.coordinator.tick();
+  expect(f.coordinator.hasUnsettledMain(route.origin)).toBe(false);
+  expect(main.messages).toHaveLength(1);
+}, 10000);
+
+it.each(['void', 'queued', 'unknown', 'rejected'] as const)('preserves acceptance that precedes the %s response', async outcome => {
+  const f = await fixture(); const route = successionRouting(f); const work = await f.create();
+  const main = f.sessions.get('main')!;
+  main.sendMessage = (async (text: string, options?: AgentMessageOptions) => {
+    main.messages.push({ text, options }); options?.onAcceptance?.({ disposition: 'handled' });
+    if (outcome === 'unknown') throw new Error('Response lost after native acceptance');
+    if (outcome === 'rejected') throw new AgentOperationRejectedError('native_rejected', 'Late rejection');
+    return outcome === 'queued' ? { disposition: 'queued' } : undefined;
+  }) as typeof main.sendMessage;
+  const receipt = await f.call(work, 'send_main_message', { operationId: `early-${outcome}`, purpose: 'consultation', text: 'Assess once' });
+  await f.coordinator.tick();
+  const intent = (await f.coordinator.get(work.id)).outbox!.find(item => item.id === receipt.id)!;
+  expect(intent).toMatchObject({ status: 'accepted', acceptance: 'handled', resolvedTarget: route.origin, roleRevision: 1 });
+  expect(intent.error).toBeUndefined();
+  expect(f.coordinator.hasUnsettledMain(route.origin)).toBe(false); expect(main.messages).toHaveLength(1);
+}, 10000);
+
+it.each(['unknown', 'void'] as const)('does not manufacture acceptance after coordinator replacement with %s outcome', async outcome => {
+  const f = await fixture(); const route = successionRouting(f); const work = await f.create();
+  const main = f.sessions.get('main')!; let notify: AgentMessageOptions['onAcceptance'];
+  main.sendMessage = (async (text: string, options?: AgentMessageOptions) => {
+    main.messages.push({ text, options }); notify = options?.onAcceptance;
+    if (outcome === 'unknown') throw new Error('Native acknowledgement lost');
+  }) as typeof main.sendMessage;
+  const receipt = await f.call(work, 'send_main_message', { operationId: 'old-invocation', purpose: 'consultation', text: 'Assess once' });
+  await f.coordinator.tick();
+  expect(notify).toBeTypeOf('function');
+  await f.restart(); const before = await f.coordinator.get(work.id);
+  notify!({ disposition: 'started' }); await f.coordinator.tick();
+  expect((await f.coordinator.get(work.id)).outbox!.find(item => item.id === receipt.id)).toMatchObject({ status: outcome === 'unknown' ? 'unknown' : 'accepted', resolvedTarget: route.origin });
+  expect((await f.coordinator.get(work.id)).revision).toBe(before.revision);
+  expect(f.coordinator.hasUnsettledMain(route.origin)).toBe(true); expect(main.messages).toHaveLength(1);
 }, 10000);

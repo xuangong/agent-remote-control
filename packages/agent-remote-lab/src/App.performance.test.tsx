@@ -1,7 +1,7 @@
 import { act } from 'react';
 import { expect, it } from 'vitest';
 import { App } from './App.js';
-import { render } from './test/setup.js';
+import { render, setPromptText, promptText } from './test/setup.js';
 import { replicaState } from './test/fixtures.js';
 
 it('edits and restores a draft without reading unchanged conversation text', async () => {
@@ -15,11 +15,11 @@ it('edits and restores a draft without reading unchanged conversation text', asy
   const input = container.querySelector<HTMLTextAreaElement>('[data-testid="prompt-input"]')!;
   reads = 0;
   for (const text of ['A', 'A new', 'A new draft']) await act(async () => {
-    Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!.call(input, text);
+    setPromptText(input, text);
     input.dispatchEvent(new Event('input', { bubbles: true }));
   });
-  expect(input.value).toBe('A new draft');
+  expect(promptText(input)).toBe('A new draft');
   expect(reads).toBe(0);
   const restored = await render(<App initialState={state} initialSessionStatus="ready" actions={{}} />);
-  expect(restored.querySelector<HTMLTextAreaElement>('[data-testid="prompt-input"]')!.value).toBe('A new draft');
+  expect(promptText(restored.querySelector<HTMLTextAreaElement>('[data-testid="prompt-input"]')!)).toBe('A new draft');
 });

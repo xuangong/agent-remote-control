@@ -1,9 +1,9 @@
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { createHash, randomUUID } from 'node:crypto';
-import { AgentOperationRejectedError, type AgentSession, type AgentInputAcceptance, type AgentInputPart, type AgentMessageOptions, type AgentSessionNativeEvidence } from '@orchardworks/agent-provider-sdk';
+import { AgentOperationRejectedError, type AgentSession, type AgentInputAcceptance, type AgentInputPart, type AgentMessageOptions, type AgentSessionNativeEvidence, type AgentRuntimeInfo } from '@orchardworks/agent-provider-sdk';
 import { nativeSessionRefKey, type NativeSessionRef, type TimelineCursor } from '@orchardworks/agent-remote-protocol';
-import type { SessionWireOperation, OperationCache, MutationEntry, NativeEffectReservation, SessionSettingIntentLifecycle } from '@orchardworks/agent-remote-relay';
-import { SessionSuccessionContextStore, SessionSuccessionInputDispatcher } from './session-succession-context.js';
+import type { SessionWireOperation, OperationCache, MutationEntry, NativeEffectHandle, NativeEffectReservation, SessionSettingIntentLifecycle } from '@orchardworks/agent-remote-relay';
+import { isSuccessionDeliveryUnresolved, SessionSuccessionContextStore, SessionSuccessionInputDispatcher } from './session-succession-context.js';
 
 const mutations = new Set(['sendMessage', 'sendMessageContent', 'steer', 'cancel', 'respondToInteraction', 'setPlanning', 'setSessionSetting', 'executeCommand']);
 interface AdmittedOperation {
@@ -21,24 +21,80 @@ export class SessionSuccessionBoundary {
   private readonly dispatcher: SessionSuccessionInputDispatcher;
   private readonly admissions = new Map<string, ReadonlySet<string>>();
   private readonly reservations = new Map<string, Map<string, { target: NativeSessionRef; disable?: () => void }>>();
+  private readonly preparedInvocations = new Map<string, { target: string; effect?: NativeEffectHandle; onAcceptance?: AgentMessageOptions['onAcceptance'] }>();
+  private readonly unsubscribeDelivery: () => void;
+  private readonly unsubscribeSettlement?: () => void;
   private readonly enabled = new Map<string, () => void>();
+  private readonly coverageWrites = new Set<Promise<void>>();
+  private readonly recoveryWrites = new Set<Promise<unknown>>();
+  private coverageFailure?: Error;
+  private closePromise?: Promise<void>;
+  private coverageRetired = false;
   constructor(private readonly contexts: SessionSuccessionContextStore,
     private readonly assertAdmission: (target: NativeSessionRef) => void,
     private readonly resolveRole: (target: NativeSessionRef) => RoleDestination | undefined,
     private readonly cache?: OperationCache,
     private readonly assertHostState: (target: NativeSessionRef, boundary?: TimelineCursor, allowMissing?: boolean) => void = () => {},
     private readonly assertAssociationReservation: (target: NativeSessionRef) => void = assertAdmission,
-    private readonly requiresNativeEvidence: (target: NativeSessionRef) => boolean = () => false) {
+    private readonly requiresNativeEvidence: (target: NativeSessionRef) => boolean = () => false,
+    private readonly reconcileFirstInput?: (operationId: string) => Promise<void>) {
     this.dispatcher = new SessionSuccessionInputDispatcher(contexts);
+    this.unsubscribeSettlement = cache?.subscribeMutationSettlement(key => {
+      const target = this.targetFromKey(key);
+      if (target) void this.reconcileCoverage(target).catch(() => undefined);
+    });
+    this.unsubscribeDelivery = contexts.subscribeDelivery(delivery => {
+      if (delivery.state !== 'rejected' && !['started', 'handled'].includes(delivery.inputAcceptance?.disposition ?? '')) return;
+      const invocation = this.preparedInvocations.get(delivery.operationId);
+      if (!invocation || invocation.target !== nativeSessionRefKey(delivery.target)) return;
+      this.preparedInvocations.delete(delivery.operationId); invocation.effect?.settled();
+      if (delivery.state !== 'rejected' && delivery.inputAcceptance) invocation.onAcceptance?.(delivery.inputAcceptance);
+    });
   }
   run<T>(operation: SessionWireOperation, scope: string, work: () => Promise<T>, entry?: MutationEntry): Promise<T> {
     const operationId = createHash('sha256').update(JSON.stringify([scope, operation.operationId])).digest('hex');
-    return this.context.run({ operationId, operation, entry }, work);
+    return this.context.run({ operationId, operation, entry }, async () => {
+      for (const key of entry?.targets ?? []) {
+        const target = this.targetFromKey(key);
+        if (target) await this.contexts.markMutation(target, operationId);
+      }
+      return work();
+    });
   }
-  close(): void {
-    for (const id of this.reservations.keys()) this.releaseReservation(id);
-    for (const disable of this.enabled.values()) disable();
-    this.enabled.clear(); this.admissions.clear();
+  close(): Promise<void> {
+    if (this.closePromise) return this.closePromise;
+    this.unsubscribeDelivery(); this.unsubscribeSettlement?.(); this.preparedInvocations.clear();
+    return this.closePromise = (async () => {
+      try {
+        const drained = await Promise.allSettled([...this.coverageWrites, ...this.recoveryWrites]);
+        const failed = drained.find((result): result is PromiseRejectedResult => result.status === 'rejected');
+        if (failed) throw failed.reason;
+        if (this.coverageFailure) throw this.coverageFailure;
+      } finally {
+        this.retireCoverageEvidence();
+        for (const id of this.reservations.keys()) this.releaseReservation(id);
+        for (const disable of this.enabled.values()) disable();
+        this.enabled.clear(); this.admissions.clear();
+      }
+    })();
+  }
+  /** Once cache disposal begins, an empty cache cannot certify settled native work. */
+  retireCoverageEvidence(): void { this.coverageRetired = true; }
+  private targetFromKey(key: string): NativeSessionRef | undefined {
+    try {
+      const value = JSON.parse(key);
+      if (Array.isArray(value) && value.length === 3 && value.every(part => typeof part === 'string' && part)) return { controllerId: value[0], providerId: value[1], nativeSessionId: value[2] };
+    } catch { /* Non-native cache targets do not participate in succession. */ }
+  }
+  reconcileCoverage(target: NativeSessionRef): Promise<void> {
+    if (this.closePromise || this.coverageRetired) return Promise.reject(new Error('Session mutation coverage is closing.'));
+    const writing = this.contexts.clearMutation(target, () => !this.coverageRetired && !this.cache?.hasUnsettledMutation(nativeSessionRefKey(target)));
+    this.coverageWrites.add(writing);
+    void writing.then(() => { this.coverageWrites.delete(writing); }, error => {
+      this.coverageWrites.delete(writing);
+      this.coverageFailure ??= error instanceof Error ? error : new Error('Session mutation coverage could not be persisted.', { cause: error });
+    });
+    return writing;
   }
   currentEntry(): MutationEntry | undefined { return this.context.getStore()?.entry; }
   pending(target: NativeSessionRef): number {
@@ -56,6 +112,10 @@ export class SessionSuccessionBoundary {
   }
   private recordAdmission(targets: readonly NativeSessionRef[], operationKey: string): () => void {
     if (this.admissions.has(operationKey)) throw new AgentOperationRejectedError('operation_conflict', 'This operation is already admitted.');
+    for (const target of targets) {
+      const key = nativeSessionRefKey(target);
+      if (this.cache && !this.enabled.has(key)) this.enabled.set(key, this.cache.enableMutationTarget(key));
+    }
     this.admissions.set(operationKey, new Set(targets.map(nativeSessionRefKey)));
     return () => { this.admissions.delete(operationKey); };
   }
@@ -74,6 +134,7 @@ export class SessionSuccessionBoundary {
     }
   }
   checkSource(target: NativeSessionRef): void {
+    if (!this.contexts.coverageAvailable(target)) throw new Error('Session mutation coverage was lost across Controller restart.');
     if (this.pending(target) || this.cache?.hasUnsettledMutation(nativeSessionRefKey(target))) throw new Error('Session has unsettled Host mutations.');
     this.assertHostState(target, undefined, true);
   }
@@ -114,6 +175,7 @@ export class SessionSuccessionBoundary {
     }
   }
   private assertQuiescent(target: NativeSessionRef, boundary?: TimelineCursor): void {
+    if (!this.contexts.coverageAvailable(target)) throw new Error('Session mutation coverage was lost across Controller restart.');
     if (this.pending(target) || this.cache?.hasUnsettledMutation(nativeSessionRefKey(target))) throw new Error('Session has unsettled Host mutations.');
     this.assertHostState(target, boundary);
   }
@@ -162,6 +224,14 @@ export class SessionSuccessionBoundary {
       } catch (error) { release(); throw error; }
     });
   }
+  private async preparedEffect<T>(target: NativeSessionRef, operationId: string, onAcceptance: AgentMessageOptions['onAcceptance'], work: () => Promise<T>): Promise<T> {
+    this.validate(target);
+    await this.contexts.markPreparedMutation(target, operationId);
+    const effect = this.currentEntry()?.startNativeEffect(nativeSessionRefKey(target));
+    if (effect || onAcceptance) this.preparedInvocations.set(operationId, { target: nativeSessionRefKey(target), effect, onAcceptance });
+    try { return await work(); }
+    finally { effect?.unresolved(); }
+  }
   private async nativeEffect<T>(target: NativeSessionRef, input: boolean, work: () => Promise<T>): Promise<T> {
     this.validate(target);
     const effect = this.currentEntry()?.startNativeEffect(nativeSessionRefKey(target));
@@ -172,6 +242,22 @@ export class SessionSuccessionBoundary {
       return result;
     } catch (error) {
       if (error instanceof AgentOperationRejectedError) effect?.settled(); else effect?.unresolved();
+      throw error;
+    }
+  }
+  private async inputEffect(target: NativeSessionRef, options: AgentMessageOptions | undefined, work: (options: AgentMessageOptions | undefined) => Promise<AgentInputAcceptance | void>): Promise<AgentInputAcceptance | void> {
+    this.validate(target);
+    const effect = this.currentEntry()?.startNativeEffect(nativeSessionRefKey(target));
+    if (!effect) return work(options);
+    const confirm = (acceptance: AgentInputAcceptance) => {
+      if (acceptance.disposition === 'started' || acceptance.disposition === 'handled') effect.settled();
+    };
+    try {
+      const result = await work({ ...options, onAcceptance: acceptance => { confirm(acceptance); options?.onAcceptance?.(acceptance); } });
+      if (result) confirm(result);
+      effect.unresolved(); return result;
+    } catch (error) {
+      if (error instanceof AgentOperationRejectedError) effect.settled(); else effect.unresolved();
       throw error;
     }
   }
@@ -191,6 +277,7 @@ export class SessionSuccessionBoundary {
   }
   private validate(target: NativeSessionRef, association = false): void {
     try {
+      if (this.closePromise) throw new Error('Session dispatch boundary is closing.');
       if ([...this.reservations.values()].some(targets => targets.has(nativeSessionRefKey(target)))) throw new Error('Session is reserved for handoff.');
       if (association) this.assertAssociationReservation(target); else this.assertAdmission(target);
     }
@@ -199,6 +286,42 @@ export class SessionSuccessionBoundary {
   wrap(target: NativeSessionRef, session: AgentSession): AgentSession {
     const address = structuredClone(target), boundary = this;
     const evidence = session.nativeEvidence;
+    const retainsConfiguration = () => !boundary.closePromise && boundary.requiresNativeEvidence(address) && boundary.contexts.hasTarget(address);
+    let recoveryTail: Promise<unknown> = Promise.resolve();
+    const runtimeInfo = (options?: Parameters<AgentSession['runtimeInfo']>[0], retain = retainsConfiguration()): Promise<AgentRuntimeInfo> => {
+      if (!retain) return session.runtimeInfo(options);
+      // Read inside the serialized step: delayed runtime events cannot restore an older snapshot.
+      const current = recoveryTail.catch(() => undefined).then(async () => {
+        await boundary.contexts.reserveResumeHandle(address);
+        const info = await session.runtimeInfo(options);
+        if (!info.persistence) throw new Error('Native session recovery configuration is unavailable.');
+        await boundary.contexts.retainResumeHandle(address, info.persistence);
+        return info;
+      });
+      recoveryTail = current;
+      boundary.recoveryWrites.add(current);
+      void current.then(() => boundary.recoveryWrites.delete(current), () => boundary.recoveryWrites.delete(current));
+      return current;
+    };
+    const preserveSettings = <T>(work: () => Promise<T>): Promise<T> => {
+      if (!retainsConfiguration()) return work();
+      const current = (async () => {
+        try { await boundary.contexts.reserveResumeHandle(address); }
+        catch { throw new AgentOperationRejectedError('succession_capacity_unavailable', 'Session recovery configuration could not be reserved before dispatch.'); }
+        let outcome: { result: T } | { error: unknown };
+        try { outcome = { result: await work() }; }
+        catch (error) { outcome = { error }; }
+        // A native refusal can still report a different confirmed value. Retain that
+        // value before settling; an already admitted setter also drains during close.
+        try { await runtimeInfo(undefined, true); }
+        catch (cause) { throw new Error('Native settings settled but their recovery configuration could not be retained.', { cause }); }
+        if ('error' in outcome) throw outcome.error;
+        return outcome.result;
+      })();
+      boundary.recoveryWrites.add(current);
+      void current.then(() => boundary.recoveryWrites.delete(current), () => boundary.recoveryWrites.delete(current));
+      return current;
+    };
     const protectedEvidence = evidence ? new Proxy({} as AgentSessionNativeEvidence, { get(_target, property) {
       const value = Reflect.get(evidence, property, evidence);
       if (property === 'dispatchInput') return async (witness: Parameters<AgentSessionNativeEvidence['dispatchInput']>[0]) => {
@@ -212,6 +335,15 @@ export class SessionSuccessionBoundary {
     } }) : undefined;
     return new Proxy(session, { get(native, property) {
       if (property === 'nativeEvidence') return protectedEvidence;
+      if (property === 'runtimeInfo') return runtimeInfo;
+      if (property === 'observe') return async function* () {
+        if (retainsConfiguration()) await runtimeInfo();
+        for await (const item of native.observe()) {
+          if (item.type === 'observation' && item.event.type === 'runtime_updated' && retainsConfiguration()) await runtimeInfo();
+          yield item;
+        }
+      };
+      if (property === 'dispose') return async () => { try { await recoveryTail; } finally { await native.dispose(); } };
       const value = Reflect.get(native, property, native);
       if (typeof value !== 'function') return value;
       if (!mutations.has(String(property))) return value.bind(native);
@@ -223,18 +355,20 @@ export class SessionSuccessionBoundary {
         }
         return boundary.nativeMutation(address, async () => {
           if (property === 'sendMessage') return await boundary.send(address, args[0] as string, undefined, args[1] as AgentMessageOptions | undefined,
-            (text, _parts, options) => boundary.nativeEffect(address, true, () => options === undefined ? native.sendMessage(text) : native.sendMessage(text, options)), evidence);
+            (text, _parts, options) => boundary.inputEffect(address, options, actual => actual === undefined ? native.sendMessage(text) : native.sendMessage(text, actual)), evidence);
           if (property === 'sendMessageContent') {
             const parts = args[0] as readonly AgentInputPart[];
             return await boundary.send(address, parts.filter(part => part.type === 'text').map(part => part.text).join(''), parts, args[1] as AgentMessageOptions | undefined,
-              (_text, content, options) => boundary.nativeEffect(address, true, () => native.sendMessageContent!(content!, options)), evidence);
+              (_text, content, options) => boundary.inputEffect(address, options, actual => native.sendMessageContent!(content!, actual)), evidence);
           }
           const attachment = boundary.contexts.forTarget(address);
           if ((property === 'executeCommand' || property === 'steer') && attachment && attachment.state !== 'materialized') {
             throw new AgentOperationRejectedError('succession_context_pending', 'Send a message to deliver the pending handoff context before executing commands.');
           }
           boundary.validate(address);
-          if (property === 'setSessionSetting') return boundary.settingEffect(address, () => native.setSessionSetting!(args[0] as string, args[1] as string));
+          if (property === 'steer') return boundary.inputEffect(address, args[1] as AgentMessageOptions | undefined, actual => native.steer!(args[0] as string, actual));
+          if (property === 'setSessionSetting') return boundary.settingEffect(address, () => preserveSettings(() => native.setSessionSetting!(args[0] as string, args[1] as string)));
+          if (property === 'setPlanning') return boundary.nativeEffect(address, false, () => preserveSettings(() => native.setPlanning!(args[0] as boolean)));
           return await boundary.nativeEffect(address, property === 'steer', async () => Reflect.apply(value, native, args));
         });
       };
@@ -242,7 +376,10 @@ export class SessionSuccessionBoundary {
   }
   private async send(target: NativeSessionRef, text: string, parts: readonly AgentInputPart[] | undefined, options: AgentMessageOptions | undefined,
     send: (text: string, parts: readonly AgentInputPart[] | undefined, options: AgentMessageOptions | undefined) => Promise<AgentInputAcceptance | void>, evidence?: AgentSessionNativeEvidence): Promise<AgentInputAcceptance | void> {
-    const attachment = this.contexts.forTarget(target);
+    let attachment = this.contexts.forTarget(target);
+    if (attachment?.deliveries.some(item => item.preparedInput && isSuccessionDeliveryUnresolved(item))) {
+      await this.reconcileFirstInput?.(attachment.operationId); attachment = this.contexts.forTarget(target);
+    }
     if (!attachment) { this.validate(target); return send(text, parts, options); }
     const admitted = this.context.getStore();
     if (!admitted) throw new AgentOperationRejectedError('succession_operation_identity_required', 'An admitted operation identity is required for this successor.');
@@ -250,10 +387,13 @@ export class SessionSuccessionBoundary {
     if (!role || role.roleId !== attachment.roleId || role.roleRevision !== attachment.roleRevision) {
       throw new AgentOperationRejectedError('succession_not_committed', 'This candidate has not been committed as the current primary session.');
     }
-    const contentIdentity = createHash('sha256').update(JSON.stringify([parts ?? null, options ?? null])).digest('hex');
+    const { onAcceptance, ...selections } = options ?? {};
+    const nativeOptions = Object.keys(selections).length ? selections : undefined;
+    const contentIdentity = createHash('sha256').update(JSON.stringify([parts ?? null, nativeOptions ?? null])).digest('hex');
     const prior = this.contexts.delivery(admitted.operationId);
     if (attachment.state === 'materialized' && !prior) { this.validate(target); return send(text, parts, options); }
-    const prepared = evidence?.availability().status === 'configured' ? evidence : undefined;
+    const availability = evidence?.availability();
+    const prepared = availability?.status === 'configured' && availability.version === 2 ? evidence : undefined;
     if (!prior && !prepared && this.requiresNativeEvidence(target)) throw new AgentOperationRejectedError('native_evidence_unavailable', 'Native evidence for the prepared successor is unavailable.');
     const validate = async () => {
       this.recheck([target]);
@@ -266,7 +406,7 @@ export class SessionSuccessionBoundary {
         try {
           await validate();
           if (prepared && !witness) throw new Error('Prepared input witness was not durably retained.');
-          result = prepared ? await this.nativeEffect(target, true, () => prepared.dispatchInput(witness!))
+          result = prepared ? await this.preparedEffect(target, admitted.operationId, onAcceptance, () => prepared.dispatchInput(witness!))
             : await send(input.text, parts ? [...(prefix ? [{type: 'text' as const, text: prefix}] : []), ...parts] : undefined, options);
           return { outcome: 'accepted', ...(result ? { inputAcceptance: result } : {}) };
         } catch (error) {
@@ -274,10 +414,10 @@ export class SessionSuccessionBoundary {
           rejected = error; return { outcome: 'rejected' };
         }
       }, prepared ? async input => {
-        if (parts?.some(part => part.type !== 'text') || options && (Object.keys(options).some(key => key !== 'delivery') || options.delivery !== undefined && options.delivery !== 'immediate')) {
+        if (parts?.some(part => part.type !== 'text') || nativeOptions && (Object.keys(nativeOptions).some(key => key !== 'delivery') || nativeOptions.delivery !== undefined && nativeOptions.delivery !== 'immediate')) {
           throw new AgentOperationRejectedError('native_evidence_unsupported', 'Prepared first input requires text and immediate delivery.');
         }
-        return prepared.prepareInput([{ type: 'text', text: input.text }], options);
+        return prepared.prepareInput([{ type: 'text', text: input.text }], nativeOptions);
       } : undefined);
     if (rejected) throw rejected;
     if (delivery.state === 'unknown' || delivery.state === 'dispatching') throw new Error('The first handoff input has an unresolved delivery outcome. Reconcile native history before sending again.');

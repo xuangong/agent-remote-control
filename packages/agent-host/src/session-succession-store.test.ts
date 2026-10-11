@@ -91,7 +91,7 @@ test('a failed atomic replacement does not publish memory or damage the last sav
   const saved = await readFile(join(directory, file), 'utf8');
   await rm(join(directory, file)); await mkdir(join(directory, file));
   await expect(store.begin(request)).rejects.toThrow();
-  expect(store.read('role').operations).toEqual([]);
+  expect(() => store.read('role')).toThrow(/persistence outcome is unknown/i);
   await rm(join(directory, file), { recursive: true }); await writeFile(join(directory, file), saved);
   await writeFile(join(directory, `${file}.interrupted.tmp`), '{partial');
   const restored = new SessionSuccessionStore(directory); await restored.ready;
@@ -143,7 +143,7 @@ test('migrates legacy storage explicitly and rejects admission races or authorit
   const legacy = JSON.parse(await readFile(path, 'utf8')); legacy.version = 1; delete legacy.associationAdmissions; delete legacy.associationResults;
   await writeFile(path, JSON.stringify(legacy));
   const restored = new SessionSuccessionStore(directory); await restored.ready;
-  expect(JSON.parse(await readFile(path, 'utf8')).version).toBe(6);
+  expect(JSON.parse(await readFile(path, 'utf8')).version).toBe(7);
   const authority = { version: 1 as const, origin: 'https://relay.example', issuer: 'https://issuer.example', namespace: 'tenant', ownerSubject: 'owner' };
   const freeze = { version: 2 as const, maxProjectionBytes: 8 * 1024 * 1024, token: 'freeze', authority, controllerId: source.controllerId, request, associationRevision: 1, lineage: [source], relations: [] };
   const before = restored.generation;
@@ -238,8 +238,8 @@ test('failed native-result persistence retains admission and never publishes a r
   const path=join(directory,'state.json'),previous=await readFile(path,'utf8');
   await rm(path);await mkdir(path);
   await expect(store.completeSourceAssociation({id:'source-op',fingerprint:'fingerprint',scope:'scope',operationId:'source-op',source,reader:target})).rejects.toThrow();
-  expect(store.sourceResult('source-op','fingerprint')).toBeUndefined();
-  await expect(store.admitAssociation('source-op','fingerprint',source,true)).rejects.toThrow(/unresolved/);
+  expect(() => store.sourceResult('source-op','fingerprint')).toThrow(/persistence outcome is unknown/i);
+  await expect(store.admitAssociation('source-op','fingerprint',source,true)).rejects.toThrow(/persistence outcome is unknown/i);
   await rm(path,{recursive:true});await writeFile(path,previous);
   const restored=new SessionSuccessionStore(directory);await restored.ready;
   expect(restored.sourceResult('source-op','fingerprint')).toBeUndefined();
@@ -276,5 +276,5 @@ test('migrates valid version 2 while rejecting missing or null durable admission
   await writeFile(path,JSON.stringify(invalid));await expect(new SessionSuccessionStore(directory).ready).rejects.toThrow(/admission|result/);
  }
  await writeFile(path,JSON.stringify(saved));const migrated=new SessionSuccessionStore(directory);await migrated.ready;
- expect(JSON.parse(await readFile(path,'utf8')).version).toBe(6);expect(migrated.read('role').role.current).toEqual(source);
+ expect(JSON.parse(await readFile(path,'utf8')).version).toBe(7);expect(migrated.read('role').role.current).toEqual(source);
 });

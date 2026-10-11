@@ -13,6 +13,7 @@ async function setup(localProviders: 'ready' | 'empty' | 'error' = 'ready', disc
   const tunnelRequests: string[] = [];
   vi.stubGlobal('fetch', async (input: URL | string, init?: RequestInit) => {
     const url = new URL(String(input));
+    if (url.pathname.endsWith('/session-successions')) return Response.json({ code: 'route_not_found', error: 'Unsupported' }, { status: 404 });
     if (url.pathname.includes('/vscode-tunnel')) {
       tunnelRequests.push(url.pathname);
       return Response.json({ status: 'stopped', processAlive: false, revision: 0 });

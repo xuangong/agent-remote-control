@@ -15,7 +15,7 @@ async function fixture(purpose: 'host-only' | 'gateway-setup' | 'legacy' = 'gate
   const root = await mkdtemp(join(tmpdir(), 'arc-bootstrap-cli-'));
   cleanups.push(() => rm(root, { recursive: true, force: true }));
   const apiKey = 'sk_bootstrap_private_llm_credential'; const deviceKey = 'arc_device_saved_credential';
-  const sequence: string[] = []; const registrations: Array<{ installationId: string; providers: unknown[]; key?: string }> = [];
+  const sequence: string[] = []; const registrations: Array<{ installationId: string; providers: unknown[]; key?: string; successionEnrollment?: number }> = [];
   let status = 200; let nativeFails = false; let child: ChildProcess | undefined; let output = ''; let bootstrapKey: string | undefined;
   const server = createServer(async (request, response) => {
     request.resume();
@@ -37,7 +37,7 @@ async function fixture(purpose: 'host-only' | 'gateway-setup' | 'legacy' = 'gate
     socket.on('message', async raw => {
       const message = JSON.parse(raw.toString());
       if (message.type === 'register') {
-        registrations.push({ installationId: message.installationId, providers: message.providers, key: request.headers.authorization });
+        registrations.push({ installationId: message.installationId, providers: message.providers, key: request.headers.authorization, successionEnrollment: Number(new URL(request.url!, 'http://localhost').searchParams.get('successionEnrollment')) || undefined });
         sequence.push(message.providers.length ? 'providers' : 'enrollment');
         if (request.headers.authorization === 'Bearer invitation') socket.send(JSON.stringify({ uplinkVersion: 2, type: 'credential_issued', credential: deviceKey }));
         else sendRegistered(socket);
@@ -82,6 +82,8 @@ it('enrolls and saves the device before configuring Codex, then registers provid
   expect(f.bootstrapKey).toBe('Bearer ' + f.deviceKey);
   expect(f.registrations.map(value => value.key)).toEqual(['Bearer invitation', 'Bearer ' + f.deviceKey]);
   expect(f.registrations[0]?.installationId).toBe(f.registrations[1]?.installationId);
+  expect(f.registrations[0]?.successionEnrollment).toBeUndefined();
+  expect(f.registrations[1]?.successionEnrollment).toBe(2);
   const native = JSON.parse(await readFile(join(f.root, 'native.json'), 'utf8'));
   expect(native.home).toBe(join(f.root, 'gateway-codex')); expect(native.key).toBe(f.apiKey);
   expect(native.config).toContain('wire_api = "responses"');

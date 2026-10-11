@@ -8,10 +8,14 @@ import { randomUUID } from 'node:crypto';
 import { homedir } from 'node:os';
 import path from 'node:path';
 import { CodexSessionSettings } from './session-settings.js';
+import { CodexSessionNativeEvidence, codexEvidenceAuthority, codexEvidenceJson, codexEvidenceSelection, codexEvidenceTurnSettings,
+  readCodexEvidenceSettings, updateCodexEvidenceSettings, type CodexEvidenceSettings, type CodexEvidenceSource } from './native-evidence.js';
 import { isDeepStrictEqual } from 'node:util';
 
 import type {
   AgentCapabilities,
+  AgentInputAcceptance,
+  AgentPreparedTextInput,
   AgentInputPart,
   AgentCommand,
   AgentCommandResult,
@@ -75,6 +79,7 @@ interface StoredSessionConfig {
   systemPrompt?: string;
   instructions?: string;
   collaborationMode?: 'plan';
+  nativeSettings?: CodexEvidenceSettings;
 }
 
 interface NativePendingInteraction {
@@ -94,6 +99,9 @@ interface RawNotification {
 
 export class CodexAppServerSession implements AgentSession {
   readonly capabilities: AgentCapabilities = { ...CODEX_CAPABILITIES, interactions: { ...CODEX_CAPABILITIES.interactions } };
+  readonly nativeEvidence: CodexSessionNativeEvidence;
+  private nativeSettings: CodexEvidenceSettings | undefined;
+  private readonly nativeSettingsObservers = new Set<(settings: CodexEvidenceSettings) => void>();
 
   private readonly settings = new CodexSessionSettings();
   private changingSetting = false;
@@ -154,6 +162,26 @@ export class CodexAppServerSession implements AgentSession {
       (thread, history, buffered) => this.createNativeChild(thread, history, buffered), recoveryPlan);
     this.ownsRuntime = runtime === undefined;
     this.sharedInteractionIdentity = recoveryPlan ? randomUUID() : undefined;
+    this.nativeEvidence = new CodexSessionNativeEvidence({ authority: codexEvidenceAuthority(this.codexHome),
+      nativeId: () => this.threadId, cwd: () => this.config.cwd,
+      readable: () => this.ready && !this.restrictedNative && !this.disposed && !this.released && !this.transportFailure
+        && (!this.runtime.connectionInfo() || this.runtime.connectionInfo()?.state === 'connected'),
+      localReadiness: () => ({ idle: this.hasIdleState(), pendingInputs: Number(this.sendingMessage || this.startingTurn),
+        pendingInteractions: this.pendingInteractions.size + Number(this.commandInteractions.pending) }),
+      selections: () => this.nativeSettings ? codexEvidenceSelection(this.nativeSettings, sessionInstructions(this.config), this.buildCollaborationMode()) : undefined,
+      request: (method, params) => this.transport.request(method, params),
+      dispatch: witness => { this.assertMessageReady(); return this.startTurn(witness.parts[0].text, undefined, witness); },
+    });
+  }
+
+  async nativeEvidenceSourceSettings(nativeSessionId: string): Promise<CodexEvidenceSource | undefined> {
+    if (nativeSessionId !== this.threadId) return;
+    const readiness = await this.nativeEvidence.inspectReadiness();
+    if (!readiness.idle || readiness.pendingInputs || readiness.pendingInteractions || readiness.activeChildren) return;
+    return this.nativeSettings ? { ...structuredClone(this.nativeSettings),
+      ...(this.config.systemPrompt !== undefined ? { systemPrompt: this.config.systemPrompt } : {}),
+      ...(this.config.instructions !== undefined ? { instructions: this.config.instructions } : {}),
+      ...(this.config.collaborationMode ? { collaborationMode: this.config.collaborationMode } : {}) } : undefined;
   }
 
   private readonly runtime: CodexSessionRuntime;
@@ -196,15 +224,16 @@ export class CodexAppServerSession implements AgentSession {
     this.runtimeClosedListeners.clear();
   }
 
-  receiveNotification(method: string, params: unknown): void { this.handleNotification(method, params); }
+  receiveNotification(method: string, params: unknown): void { this.nativeEvidence.invalidate(); this.handleNotification(method, params); }
   receiveTermination(error: Error): void { this.handleTransportTermination(error); }
-  notifyChildrenChanged(): void { this.emitRuntimeUpdate(); }
+  notifyChildrenChanged(): void { this.nativeEvidence.invalidate(); this.emitRuntimeUpdate(); }
   childActivityStatus(): AgentRuntimeInfo['status'] {
     return this.pendingInteractions.size > 0 && this.runtimeStatus !== 'closed' && this.runtimeStatus !== 'failed'
       ? 'waiting' : this.runtimeStatus;
   }
 
   beginRecovery(reason: string): void {
+    this.nativeEvidence.invalidate();
     if (this.disposed) return;
     this.inputCapabilitiesRevision += 1;
     this.commandInteractions.clear();
@@ -218,6 +247,7 @@ export class CodexAppServerSession implements AgentSession {
   }
 
   replaceTransport(transport: CodexAppServerTransport, generation: number): void {
+    this.nativeEvidence.invalidate();
     this.transport = transport;
     this.interactionGeneration = generation;
     this.transportFailure = undefined;
@@ -230,6 +260,7 @@ export class CodexAppServerSession implements AgentSession {
   private tools: readonly AgentSessionTool[] = [];
 
   receiveRequest(method: string, params: unknown, id: string | number): Promise<unknown> {
+    this.nativeEvidence.invalidate();
     if (method === 'item/tool/call') return this.callTool(params);
     if (method === 'item/tool/requestUserInput' || method === 'tool/requestUserInput') return this.handleQuestionRequest(params, id);
     if (method === 'item/commandExecution/requestApproval') return this.handleToolRequest('command', params, id);
@@ -497,13 +528,28 @@ export class CodexAppServerSession implements AgentSession {
     session.threadId = handle.sessionId;
     session.runtime.registerRoot(handle.sessionId);
     await session.initialize();
+    const expectedNativeSettings = stored.nativeSettings ? structuredClone(stored.nativeSettings) : undefined;
+    const preparedCollaborationMode = stored.collaborationMode;
+    let hydrateEmpty = false;
+    if (expectedNativeSettings) {
+      try {
+        const page = await transport.request('thread/turns/list', { threadId: handle.sessionId, limit: 1, itemsView: 'summary' });
+        if (!isRecord(page) || !Array.isArray(page.data) || !Object.hasOwn(page, 'nextCursor')) {
+          throw new AgentOperationRejectedError('native_evidence_readback_failed', 'Codex did not confirm successor history.');
+        }
+        hydrateEmpty = page.data.length === 0 && !page.nextCursor;
+      } catch (error) {
+        if (!(error instanceof CodexAppServerRpcError) || error.code !== -32601) throw error;
+        hydrateEmpty = true;
+      }
+    }
     const resumed = await transport.request('thread/resume', {
       threadId: handle.sessionId,
-      excludeTurns: true,
+      excludeTurns: !hydrateEmpty,
       config: { 'features.default_mode_request_user_input': true },
       ...(restrictedNative ? { sandbox: 'workspace-write', approvalPolicy: 'never' } : {}),
       ...(stored.cwd ? { cwd: stored.cwd } : {}),
-      ...(stored.model ? { model: stored.model } : {}),
+      ...(!expectedNativeSettings && stored.model ? { model: stored.model } : {}),
       ...(sessionInstructions(stored) ? { developerInstructions: sessionInstructions(stored) } : {}),
     }).catch((error: unknown) => {
       if (error instanceof CodexAppServerRpcError && error.code === -32600
@@ -513,8 +559,21 @@ export class CodexAppServerSession implements AgentSession {
       throw sessionLookupError(error, handle.sessionId, 'thread/resume');
     });
     session.setThreadFromResponse(resumed, 'thread/resume');
+    if (hydrateEmpty) {
+      if (!isRecord(resumed) || !isRecord(resumed.thread) || !Array.isArray(resumed.thread.turns)) {
+        throw new AgentOperationRejectedError('native_evidence_readback_failed', 'Codex did not confirm successor history.');
+      }
+      if (resumed.thread.turns.length === 0 && expectedNativeSettings && codexEvidenceJson(session.nativeSettings) !== codexEvidenceJson(expectedNativeSettings)) {
+        await updateCodexEvidenceSettings(transport, handle.sessionId, expectedNativeSettings, listener => {
+          session.nativeSettingsObservers.add(listener);
+          return () => session.nativeSettingsObservers.delete(listener);
+        });
+      }
+    }
     const statusRevision = session.statusRevision;
-    const history = await readCodexHistoryPage(transport, handle.sessionId, { metadata: resumed });
+    const history = hydrateEmpty && isRecord(resumed) && isRecord(resumed.thread) && Array.isArray(resumed.thread.turns)
+      ? { thread: resumed.thread, historyCursor: undefined }
+      : await readCodexHistoryPage(transport, handle.sessionId, { metadata: resumed });
     session.olderHistoryCursor = history.historyCursor;
     if (session.statusRevision === statusRevision && isRecord(history) && isRecord(history.thread)) {
       const thread = history.thread;
@@ -531,6 +590,9 @@ export class CodexAppServerSession implements AgentSession {
       collectCodexThreadHistoryItems(history, handle.sessionId),
       undefined, false, history,
     );
+    if (hydrateEmpty && Array.isArray(history.thread.turns) && history.thread.turns.length === 0 && preparedCollaborationMode) {
+      await session.setPlanning(true);
+    }
     return session;
   }
 
@@ -566,19 +628,21 @@ export class CodexAppServerSession implements AgentSession {
     };
   }
 
-  async sendMessage(text: string, options?: AgentMessageOptions): Promise<void> {
+  async sendMessage(text: string, options?: AgentMessageOptions): Promise<AgentInputAcceptance | void> {
     return this.sendMessageContent([{ type: 'text', text }], options);
   }
 
-  async sendMessageContent(parts: readonly AgentInputPart[], options?: AgentMessageOptions): Promise<void> {
+  async sendMessageContent(parts: readonly AgentInputPart[], options?: AgentMessageOptions): Promise<AgentInputAcceptance | void> {
     this.assertMessageReady();
     if (options?.delivery === 'next_turn') throw new AgentOperationRejectedError('operation_rejected', 'Codex does not support next-turn message delivery.');
     if (this.sendingMessage) throw new AgentOperationRejectedError('operation_rejected', 'A Codex message is already being submitted.');
     this.sendingMessage = true;
+    this.nativeEvidence.invalidate();
+    const accept = (value: AgentInputAcceptance | void) => { if (value) options?.onAcceptance?.(value); return value; };
     try {
       const input = await prepareAgentOperation(() => codexMessageInput(parts));
       this.assertMessageReady();
-      if (!this.activeTurnId) return await this.startTurn(input);
+      if (!this.activeTurnId) return accept(await this.startTurn(input));
       let expectedTurnId = this.activeTurnId;
       for (let attempt = 0; ; attempt += 1) {
         const revision = this.statusRevision;
@@ -598,8 +662,7 @@ export class CodexAppServerSession implements AgentSession {
             this.statusRevision += 1;
             this.emitRuntimeUpdate();
             this.assertMessageReady();
-            await this.startTurn(input);
-            return;
+            return accept(await this.startTurn(input));
           }
           const mismatch = /^expected active turn id `([^`]+)` but found `([^`]+)`$/.exec(error.message);
           if (attempt > 0 || !mismatch || mismatch[1] !== expectedTurnId || mismatch[2] === expectedTurnId || this.statusRevision !== revision) throw error;
@@ -628,6 +691,7 @@ export class CodexAppServerSession implements AgentSession {
   }
 
   private async steerTurn(input: CodexInput[], expectedTurnId: string): Promise<void> {
+    this.nativeEvidence.invalidate();
     await this.transport.request('turn/steer', {
       threadId: this.threadId, expectedTurnId,
       input,
@@ -637,10 +701,11 @@ export class CodexAppServerSession implements AgentSession {
   async cancel(): Promise<void> {
     this.assertDirectInput();
     if (!this.activeTurnId) throw new AgentOperationRejectedError('operation_rejected', 'Codex has no active turn.');
+    this.nativeEvidence.invalidate();
     await this.transport.request('turn/interrupt', { threadId: this.threadId, turnId: this.activeTurnId });
   }
 
-  private async startTurn(message: string | CodexInput[], skill?: { name: string; path: string }): Promise<void> {
+  private async startTurn(message: string | CodexInput[], skill?: { name: string; path: string }, evidence?: AgentPreparedTextInput): Promise<AgentInputAcceptance | void> {
     this.assertDirectInput();
     if (!this.threadId) throw new AgentOperationRejectedError('operation_rejected', 'Codex session has no thread');
     if (typeof message === 'string' && !message.trim() && !skill) throw new AgentOperationRejectedError('operation_rejected', 'Codex message must not be empty');
@@ -649,6 +714,7 @@ export class CodexAppServerSession implements AgentSession {
     if (this.changingSetting || this.startingTurn || this.runtimeStatus === 'running') throw new AgentOperationRejectedError('operation_rejected', 'A Codex turn is already active');
     const collaborationMode = this.hasPendingModelSetting ? undefined : this.buildCollaborationMode();
     const statusRevision = this.statusRevision;
+    this.nativeEvidence.invalidate();
     this.startingTurn = true;
     try {
       const result = await this.transport.request('turn/start', {
@@ -657,6 +723,7 @@ export class CodexAppServerSession implements AgentSession {
         ...(!this.hasPendingModelSetting && this.config.model ? { model: this.config.model } : {}),
         ...(!this.hasPendingModelSetting && this.config.reasoningEffort ? { effort: this.config.reasoningEffort } : {}),
         ...(collaborationMode ? { collaborationMode } : {}),
+        ...(evidence ? { ...codexEvidenceTurnSettings(evidence), clientUserMessageId: evidence.inputId } : {}),
       });
       if (statusRevision === this.statusRevision && isRecord(result) && isRecord(result.turn) && readString(result.turn.id)) {
         this.runtimeStatus = 'running';
@@ -664,6 +731,7 @@ export class CodexAppServerSession implements AgentSession {
         this.statusRevision += 1;
         this.emitRuntimeUpdate();
       }
+      if (isRecord(result) && isRecord(result.turn) && readString(result.turn.id) && result.turn.status === 'inProgress') return { disposition: 'started' };
     } finally {
       this.startingTurn = false;
       this.notifySettingReadiness();
@@ -719,6 +787,7 @@ export class CodexAppServerSession implements AgentSession {
     }
     if (!liveTurnId && this.settings.describe(this.config.model, this.config.reasoningEffort).find((setting) => setting.id === id)?.value === value) return;
     this.changingSetting = true;
+    this.nativeEvidence.invalidate();
     if (!waitForConfirmation) {
       let liveApplied = false;
       try {
@@ -785,6 +854,7 @@ export class CodexAppServerSession implements AgentSession {
   }
 
   async setPlanning(active: boolean): Promise<void> {
+    this.nativeEvidence.invalidate();
     this.assertDirectInput();
     if (this.hasPendingModelSetting) throw new AgentOperationRejectedError('operation_rejected', 'Codex has pending model settings.');
     if (!this.capabilities.planning) throw new AgentOperationRejectedError('operation_rejected', 'Codex planning control is unsupported.');
@@ -813,6 +883,7 @@ export class CodexAppServerSession implements AgentSession {
   }
 
   async respondToInteraction(requestId: string, response: AgentInteractionResponse): Promise<void> {
+    this.nativeEvidence.invalidate();
     this.assertOpen();
     this.runtime.assertConnected();
     if (await this.commandInteractions.respond(requestId, response)) return;
@@ -841,6 +912,7 @@ export class CodexAppServerSession implements AgentSession {
   }
 
   async executeCommand(id: string, args: string): Promise<AgentCommandResult> {
+    this.nativeEvidence.invalidate();
     this.assertCommandIdle();
     if (this.restrictedNative && id === 'permissions') throw new AgentOperationRejectedError('operation_rejected', 'Native permission commands are locked by local Host policy.');
     if (this.executingCommand) throw new AgentOperationRejectedError('operation_rejected', 'A Codex command is already active.');
@@ -982,6 +1054,7 @@ export class CodexAppServerSession implements AgentSession {
 
   async dispose(): Promise<void> {
     if (this.disposed || this.released) return;
+    this.nativeEvidence.invalidate();
     if (!this.ownsRuntime) {
       this.released = true;
       this.observing = false;
@@ -1281,6 +1354,9 @@ export class CodexAppServerSession implements AgentSession {
 
   private applyThreadSettings(settings: Record<string, unknown>, notification = false): void {
     this.settingsRevision += 1;
+    this.nativeSettings = readCodexEvidenceSettings(settings, this.nativeSettings);
+    if (this.config.nativeSettings && this.nativeSettings) this.config.nativeSettings = structuredClone(this.nativeSettings);
+    if (this.nativeSettings) for (const observer of this.nativeSettingsObservers) observer(this.nativeSettings);
     this.settings.apply(settings);
     const cwd = readString(settings.cwd);
     const model = readString(settings.model);
@@ -1558,6 +1634,9 @@ function parseStoredConfig(opaque: string): StoredSessionConfig {
     throw new Error('Codex persistence handle contains invalid JSON');
   }
   if (!isRecord(parsed)) throw new Error('Codex persistence handle is invalid');
+  if ('kind' in parsed && parsed.kind !== 'codex.empty') throw new Error('Codex successor recovery handle cannot be opened.');
+  const nativeSettings = 'nativeSettings' in parsed ? readCodexEvidenceSettings(parsed.nativeSettings) : undefined;
+  if ('nativeSettings' in parsed && !nativeSettings) throw new Error('Codex successor settings are invalid.');
   return {
     ...(readString(parsed.cwd) ? { cwd: readString(parsed.cwd) } : {}),
     ...(readString(parsed.model) ? { model: readString(parsed.model) } : {}),
@@ -1565,6 +1644,7 @@ function parseStoredConfig(opaque: string): StoredSessionConfig {
     ...(readString(parsed.systemPrompt) ? { systemPrompt: readString(parsed.systemPrompt) } : {}),
     ...(readString(parsed.instructions) ? { instructions: readString(parsed.instructions) } : {}),
     ...(parsed.collaborationMode === 'plan' ? { collaborationMode: 'plan' as const } : {}),
+    ...(nativeSettings ? { nativeSettings } : {}),
   };
 }
 

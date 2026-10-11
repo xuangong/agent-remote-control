@@ -129,12 +129,13 @@ export function SessionWorkbench({ todo, displayPreferences, onDisplayPreference
     : activity === 'running' ? 'Working'
     : 'Ready';
   const viewOptions = <SessionViewOptions key={displayScope} preferences={preferences} onChange={changeDisplayPreferences} />;
-  const tools = <>{sessionManager}{viewOptions}</>;
+  const handoffAction = actions.handoffSession ? <button type="button" onClick={actions.handoffSession}>Handoff</button> : null;
+  const tools = <>{sessionManager}{handoffAction}{viewOptions}</>;
   const layoutClass = [todo ? 'lab-workbench-with-todo' : '', selectedCommand ? 'lab-command-details-open' : '', headingMode === 'toolbar' ? 'lab-workbench-toolbar-heading' : ''].filter(Boolean).join(' ');
   return <TimelineDisplay.Provider value={preferences.mode}><TimelineLettersVisible.Provider value={preferences.lettersVisible}><SessionViewFrame className={layoutClass}>
     <SessionHeading hidden={headingMode === 'toolbar'}
       leading={headingMode === 'inline' ? <>{headingStart}{workspaceLink}{viewOptions}</> : undefined}
-      trailing={headingMode === 'inline' ? <>{sessionManager}<span className="lab-conversation-status">{hasReplica ? activityLabel : isAttaching ? loadingLabel : 'Awaiting Agent'}</span></> : undefined}>
+      trailing={headingMode === 'inline' ? <>{sessionManager}{handoffAction}<span className="lab-conversation-status">{hasReplica ? activityLabel : isAttaching ? loadingLabel : 'Awaiting Agent'}</span></> : undefined}>
         {conversationPath}
         <h2 hidden={!!conversationPath} className="agent-session-title" data-session-status={activity}>{hasReplica ? 'Conversation' : isAttaching ? `${sessionStatus === 'catching_up' ? 'Loading conversation' : 'Opening session'} ${attachingAgentId}` : 'Ready for a session'}</h2>
     </SessionHeading>

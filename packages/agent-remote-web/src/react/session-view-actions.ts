@@ -10,6 +10,7 @@ import type { SessionTakeControlOptions } from '../client/session-control-extens
 export type { SessionTakeControlOptions } from '../client/session-control-extension.js';
 
 export interface SessionViewActions {
+  handoffSession?(): void;
   takeControl?(options?: SessionTakeControlOptions): Promise<void>;
   editPrompt?(entry: import('@orchardworks/agent-remote-protocol').ProjectedTimelineEntry): Promise<void>;
   searchTimeline?(query: string, options?: TimelineSearchOptions): Promise<TimelineSearchProgress>;

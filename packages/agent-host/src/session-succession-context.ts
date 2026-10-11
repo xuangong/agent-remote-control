@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { AgentOperationRejectedError, AGENT_NATIVE_EVIDENCE_LIMITS, parseAgentPreparedTextInput, serializeAgentPreparedTextInput, parseAgentInputMaterialization, serializeAgentInputMaterialization, type AgentPreparedTextInput, type AgentTextInputProof, type AgentInputAcceptance } from '@orchardworks/agent-provider-sdk';
+import { AgentOperationRejectedError, AGENT_NATIVE_EVIDENCE_LIMITS, parseAgentPreparedTextInput, serializeAgentPreparedTextInput, parseAgentInputMaterialization, serializeAgentInputMaterialization, type AgentPreparedTextInput, type AgentTextInputProof, type AgentInputAcceptance, type AgentPersistenceHandle, serializeAgentEmptyCreationResult } from '@orchardworks/agent-provider-sdk';
 import { mkdir, readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { isNativeSessionRef, isSuccessionRequest, nativeSessionRefKey, MAX_NORMALIZED_CONTEXT_BYTES, MAX_NORMALIZED_CONTEXT_ENTRIES, quotedSessionContextPrefix,
@@ -31,7 +31,7 @@ export interface SuccessionInput {
 }
 export type SuccessionDeliveryState = 'dispatching' | 'accepted' | 'unknown' | 'rejected' | 'materialized';
 export interface SuccessionPreparedInput {
-  version: 1;
+  version: 2;
   contextOperationId: string;
   contextIdentity: string;
   inputIdentity: string;
@@ -50,6 +50,9 @@ export interface SuccessionContextRecord extends SuccessionContextAttachment {
   version: 1 | 2 | 3;
   state: 'pending' | 'dispatching' | 'accepted' | 'unknown' | 'materialized';
   deliveries: SuccessionContextDelivery[];
+  /** Latest adapter-confirmed recovery configuration; independent of empty initialization permission. */
+  resumeHandle?: AgentPersistenceHandle;
+  resumeReservedBytes?: string;
 }
 export type SuccessionContextPreparation = Omit<SuccessionContextAttachment, 'target'>;
 interface ContextPreparationRecord extends SuccessionContextPreparation { version: 2; reservedBytes: string }
@@ -61,12 +64,16 @@ export interface SuccessionDeliveryEvidence {
   outcome: 'materialized' | 'not-dispatched';
   nativeEvidence: string;
 }
-interface ContextState { version: 3; attachments: SuccessionContextRecord[]; preparations?: ContextPreparationRecord[] }
+interface MutationCoverage { target: NativeSessionRef; operationId?: string; prepared?: true }
+interface ContextState { version: 3; attachments: SuccessionContextRecord[]; preparations?: ContextPreparationRecord[]; coverage?: MutationCoverage[] }
 const MAX_STORE_BYTES = 8 * 1024 * 1024;
 const sameRef = (a: NativeSessionRef, b: NativeSessionRef) => nativeSessionRefKey(a) === nativeSessionRefKey(b);
 const attachmentIdentity = (input: SuccessionContextAttachment) => JSON.stringify([input.operationId, input.roleId, input.roleRevision, nativeSessionRefKey(input.source), nativeSessionRefKey(input.target), input.capturedAt, input.boundary.epoch, input.boundary.seq, input.text, input.itemCount, input.shortenedToolCount ?? 0, input.inheritedFrom ? [input.inheritedFrom.operationId, nativeSessionRefKey(input.inheritedFrom.source), input.inheritedFrom.boundary.epoch, input.inheritedFrom.boundary.seq, input.inheritedFrom.capturedAt] : null]);
 const inputIdentity = (input: SuccessionInput) => JSON.stringify([input.operationId, input.roleId, input.roleRevision, nativeSessionRefKey(input.target), input.text, input.contentIdentity ?? null]);
 const hash = (text: string) => createHash('sha256').update(text).digest('hex');
+export function isSuccessionDeliveryUnresolved(delivery: SuccessionContextDelivery): boolean {
+  return ['dispatching', 'accepted', 'unknown'].includes(delivery.state) || !!delivery.preparedInput && delivery.state === 'materialized' && !['started', 'handled'].includes(delivery.inputAcceptance?.disposition ?? '');
+}
 const nonempty = (value: unknown): value is string => typeof value === 'string' && value.length > 0;
 
 /** Single-Controller ownership; snapshots are replaced atomically before native dispatch. */
@@ -74,17 +81,94 @@ export class SessionSuccessionContextStore {
   readonly ready: Promise<void>;
   private state: ContextState = { version: 3, attachments: [] };
   private loaded = false;
+  private readonly lostCoverage = new Set<string>();
   private writeFailure?: Error;
   private tail: Promise<unknown> = Promise.resolve();
+  private readonly deliveryListeners = new Set<(delivery: SuccessionContextDelivery) => void>();
+  subscribeDelivery(listener: (delivery: SuccessionContextDelivery) => void): () => void { this.deliveryListeners.add(listener); return () => { this.deliveryListeners.delete(listener); }; }
+  private publishedDelivery(delivery: SuccessionContextDelivery): SuccessionContextDelivery {
+    for (const listener of this.deliveryListeners) listener(structuredClone(delivery));
+    return delivery;
+  }
   private readonly dispatchTails = new Map<string, Promise<unknown>>();
   constructor(private readonly directory: string) { this.ready = this.restore(); }
+  /** A cold dirty marker cannot be repaired by idle state or by a later operation. */
+  coverageAvailable(target: NativeSessionRef): boolean {
+    this.assertReadable(); return !this.lostCoverage.has(nativeSessionRefKey(target));
+  }
+  markMutation(target: NativeSessionRef, operationId: string): Promise<void> {
+    const address = structuredClone(target);
+    return this.mutate(state => {
+      const prior = state.coverage?.find(item => sameRef(item.target, address));
+      if (prior) {
+        if (!this.lostCoverage.has(nativeSessionRefKey(address)) && prior.operationId !== operationId) { delete prior.operationId; delete prior.prepared; }
+      } else (state.coverage ??= []).push({ target: address, operationId });
+    });
+  }
+  markPreparedMutation(target: NativeSessionRef, operationId: string): Promise<void> {
+    return this.mutate(state => {
+      const marker = state.coverage?.find(item => sameRef(item.target, target));
+      if (marker?.operationId === operationId) marker.prepared = true;
+    });
+  }
+  async clearMutation(target: NativeSessionRef, isClean: () => boolean): Promise<void> {
+    const key = nativeSessionRefKey(target);
+    await this.mutate(state => {
+      const marker = state.coverage?.find(item => sameRef(item.target, target));
+      if (!marker || !isClean()) return;
+      if (this.lostCoverage.has(key)) {
+        const delivery = state.attachments.flatMap(item => item.deliveries).find(item => item.operationId === marker.operationId && sameRef(item.target, target));
+        if (!marker.prepared || !delivery?.preparedInput || isSuccessionDeliveryUnresolved(delivery)
+          || delivery.state !== 'rejected' && !['started', 'handled'].includes(delivery.inputAcceptance?.disposition ?? '')) return;
+      }
+      state.coverage = state.coverage!.filter(item => item !== marker);
+    });
+    if (!this.state.coverage?.some(item => sameRef(item.target, target))) this.lostCoverage.delete(key);
+  }
   read(operationId: string): SuccessionContextRecord {
     this.assertReadable();
     return structuredClone(this.find(this.state, operationId));
   }
+  hasTarget(target: NativeSessionRef): boolean {
+    this.assertReadable();
+    return this.state.attachments.some(item => sameRef(item.target, target));
+  }
   forTarget(target: NativeSessionRef): SuccessionContextRecord | undefined {
     this.assertReadable();
     return structuredClone(this.state.attachments.find(item => sameRef(item.target, target)));
+  }
+  canInitializeEmpty(target: NativeSessionRef): boolean {
+    const record = this.forTarget(target);
+    return this.coverageAvailable(target) && !!record && record.state === 'pending' && record.deliveries.every(item => item.state === 'rejected');
+  }
+  reserveResumeHandle(target: NativeSessionRef): Promise<void> {
+    this.assertReadable();
+    if (this.state.attachments.find(item => sameRef(item.target, target))?.resumeReservedBytes !== undefined) return Promise.resolve();
+    return this.mutate(state => {
+      const record = state.attachments.find(item => sameRef(item.target, target));
+      if (!record) throw new Error('Successor recovery configuration was not found.');
+      record.resumeReservedBytes = '00000000';
+    });
+  }
+  retainResumeHandle(target: NativeSessionRef, handle: AgentPersistenceHandle): Promise<void> {
+    this.assertReadable();
+    const saved = structuredClone(handle), current = this.state.attachments.find(item => sameRef(item.target, target));
+    if (current?.resumeReservedBytes !== undefined && JSON.stringify(current.resumeHandle) === JSON.stringify(saved)) return Promise.resolve();
+    return this.mutate(state => {
+      const record = state.attachments.find(item => sameRef(item.target, target));
+      if (!record) throw new Error('Successor recovery configuration was not found.');
+      if (!record.resumeReservedBytes) throw new Error('Recovery configuration capacity was not reserved.');
+      this.validateResumeHandle(record, saved);
+      record.resumeHandle = saved;
+    });
+  }
+  private validateResumeHandle(record: SuccessionContextRecord, handle: AgentPersistenceHandle): void {
+    if (handle.providerId !== record.target.providerId || handle.sessionId !== record.target.nativeSessionId) throw new Error('Recovery configuration identity mismatch.');
+    serializeAgentEmptyCreationResult({ status: 'created', handle });
+  }
+  private resumeGrowth(record: SuccessionContextRecord): number {
+    return AGENT_NATIVE_EVIDENCE_LIMITS.handleBytes + '"resumeHandle":,'.length
+      - (record.resumeHandle ? jsonBytes(record.resumeHandle) + '"resumeHandle":,'.length : 0);
   }
   delivery(operationId: string): SuccessionContextDelivery | undefined {
     this.assertReadable();
@@ -169,11 +253,11 @@ export class SessionSuccessionContextStore {
         if (inputIdentity(prior) !== inputIdentity(admitted) || prepared && (!prior.preparedInput || serializeAgentPreparedTextInput(prior.preparedInput.witness) !== serializeAgentPreparedTextInput(prepared))) throw new Error('Succession input identity conflict.');
         return prior;
       }
-      if (record.deliveries.some(item => ['dispatching', 'accepted', 'unknown'].includes(item.state))) throw new AgentOperationRejectedError('succession_delivery_unresolved', 'Succession input delivery is unresolved.');
+      if (record.deliveries.some(isSuccessionDeliveryUnresolved)) throw new AgentOperationRejectedError('succession_delivery_unresolved', 'Succession input delivery is unresolved.');
       if (record.deliveries.length >= 512) throw new Error('Succession input receipt limit exceeded.');
       const delivery: SuccessionContextDelivery = { ...admitted, state: 'dispatching', includesContext: record.state !== 'materialized', reservedBytes: '00000000' };
       if (prepared) {
-        delivery.preparedInput = { version: 1, contextOperationId: record.operationId, contextIdentity: hash(attachmentIdentity(record)), inputIdentity: hash(inputIdentity(admitted)), witness: prepared };
+        delivery.preparedInput = { version: 2, contextOperationId: record.operationId, contextIdentity: hash(attachmentIdentity(record)), inputIdentity: hash(inputIdentity(admitted)), witness: prepared };
         this.validatePreparedInput(record, delivery); record.version = 3;
       }
       record.deliveries.push(delivery);
@@ -192,7 +276,7 @@ export class SessionSuccessionContextStore {
       }
       if (delivery.includesContext) record.state = delivery.state === 'rejected' ? 'pending' : delivery.state;
       return delivery;
-    });
+    }).then(delivery => this.publishedDelivery(delivery));
   }
   /** Explicit adapter reconciliation; a transport receipt or ordinary empty history is insufficient. */
   reconcile(attachmentId: string, evidence: SuccessionDeliveryEvidence): Promise<SuccessionContextDelivery> {
@@ -204,15 +288,20 @@ export class SessionSuccessionContextStore {
       if (delivery.preparedInput) {
         this.validatePreparedInput(record, delivery);
         if (Object.keys(proof).some(key => !['operationId', 'target', 'roleRevision', 'outcome', 'nativeEvidence'].includes(key)) || proof.outcome !== 'materialized') throw new Error('Optional native evidence requires exact positive materialization.');
-        this.validatePositiveProof(delivery, proof.nativeEvidence);
+        const execution = this.validatePositiveProof(delivery, proof.nativeEvidence);
+        const previous = delivery.nativeEvidence ? parseAgentInputMaterialization(delivery.nativeEvidence) : undefined;
+        const current = parseAgentInputMaterialization(proof.nativeEvidence);
+        if (previous?.status === 'materialized' && current.status === 'materialized' && previous.proof.nativeInputId !== current.proof.nativeInputId) throw new Error('Native input evidence cannot be replaced.');
+        if (previous?.status === 'materialized' && previous.execution && JSON.stringify(previous.execution) !== JSON.stringify(execution)) throw new Error('Native execution evidence cannot be replaced or removed.');
+        if (execution) delivery.inputAcceptance = { disposition: execution.disposition };
       }
       const result = proof.outcome === 'materialized' ? 'materialized' : 'rejected';
       if (delivery.state === result && delivery.nativeEvidence === proof.nativeEvidence) return delivery;
-      if (!['accepted', 'unknown'].includes(delivery.state)) throw new Error('Succession delivery cannot be reconciled in its current state.');
+      if (!['accepted', 'unknown', ...(delivery.preparedInput ? ['materialized'] : [])].includes(delivery.state)) throw new Error('Succession delivery cannot be reconciled in its current state.');
       delivery.state = result; delivery.nativeEvidence = proof.nativeEvidence;
       if (delivery.includesContext) record.state = result === 'rejected' ? 'pending' : 'materialized';
       return delivery;
-    });
+    }).then(delivery => this.publishedDelivery(delivery));
   }
   private find(state: ContextState, operationId: string): SuccessionContextRecord {
     const record = state.attachments.find(item => item.operationId === operationId);
@@ -235,11 +324,11 @@ export class SessionSuccessionContextStore {
     }));
   }
   private preparedDeliveryGrowth(record: SuccessionContextRecord, delivery: SuccessionContextDelivery): number {
-    if (['rejected', 'materialized'].includes(delivery.state)) return 0;
+    if (delivery.state === 'rejected' || delivery.state === 'materialized' && !isSuccessionDeliveryUnresolved(delivery)) return 0;
     const proof = this.expectedProof(delivery.preparedInput!.witness);
-    const nativeEvidence = serializeAgentInputMaterialization({ status: 'materialized', proof: { ...proof, nativePartIds: ['p'.repeat(AGENT_NATIVE_EVIDENCE_LIMITS.identityBytes)] } });
+    const nativeEvidence = serializeAgentInputMaterialization({ status: 'materialized', proof: { ...proof, nativeInputId: 'U'.repeat(AGENT_NATIVE_EVIDENCE_LIMITS.identityBytes), nativePartIds: ['p'.repeat(AGENT_NATIVE_EVIDENCE_LIMITS.identityBytes)] }, execution: { disposition: 'started', nativeExecutionId: 'R'.repeat(AGENT_NATIVE_EVIDENCE_LIMITS.identityBytes) } });
     const current = jsonBytes({ state: record.state, delivery });
-    const acceptance = delivery.state === 'dispatching' ? { disposition: 'started' as const } : delivery.inputAcceptance;
+    const acceptance = { disposition: 'started' as const };
     const materialized = { ...delivery, state: 'materialized', nativeEvidence, ...(acceptance ? { inputAcceptance: acceptance } : {}) };
     const outcomes = [jsonBytes({ state: delivery.includesContext ? 'materialized' : record.state, delivery: materialized })];
     if (delivery.state === 'dispatching') for (const state of ['accepted', 'unknown', 'rejected'] as const) {
@@ -250,7 +339,7 @@ export class SessionSuccessionContextStore {
   }
   private validatePreparedInput(record: SuccessionContextRecord, delivery: SuccessionContextDelivery): void {
     const prepared = delivery.preparedInput!;
-    if (!prepared || prepared.version !== 1 || Object.keys(prepared).some(key => !['version', 'contextOperationId', 'contextIdentity', 'inputIdentity', 'witness'].includes(key))
+    if (!prepared || prepared.version !== 2 || Object.keys(prepared).some(key => !['version', 'contextOperationId', 'contextIdentity', 'inputIdentity', 'witness'].includes(key))
       || prepared.contextOperationId !== record.operationId || prepared.contextIdentity !== hash(attachmentIdentity(record)) || prepared.inputIdentity !== hash(inputIdentity(delivery))) throw new Error('Prepared input original binding mismatch.');
     serializeAgentPreparedTextInput(prepared.witness);
     const witness = prepared.witness;
@@ -258,27 +347,30 @@ export class SessionSuccessionContextStore {
       capturedAt: record.capturedAt, text: record.text, shortenedToolCount: record.shortenedToolCount }) : '';
     if (witness.providerId !== delivery.target.providerId || witness.nativeSessionId !== delivery.target.nativeSessionId || witness.parts[0].text !== prefix + delivery.text) throw new Error('Prepared native input does not match its target and composed text binding.');
   }
-  private expectedProof(witness: AgentPreparedTextInput): AgentTextInputProof {
+  private expectedProof(witness: AgentPreparedTextInput): Omit<AgentTextInputProof, 'nativeInputId' | 'nativePartIds'> {
     const canonical = parseAgentPreparedTextInput(serializeAgentPreparedTextInput(witness));
     const { delivery: _delivery, ...selections } = canonical.selections;
-    return { version: 1, providerId: canonical.providerId, nativeSessionId: canonical.nativeSessionId, nativeInputId: canonical.nativeInputId,
-      cwd: canonical.cwd, store: canonical.store, witnessSha256: hash(serializeAgentPreparedTextInput(canonical)), contentSha256: canonical.content.sha256, nativeSelectionsSha256: hash(JSON.stringify(selections)) };
+    return { version: 2, providerId: canonical.providerId, nativeSessionId: canonical.nativeSessionId, inputId: canonical.inputId,
+      cwd: canonical.cwd, authority: canonical.authority, witnessSha256: hash(serializeAgentPreparedTextInput(canonical)), contentSha256: canonical.content.sha256, nativeSelectionsSha256: hash(JSON.stringify(selections)) };
   }
-  private validatePositiveProof(delivery: SuccessionContextDelivery, encoded: string): void {
+  private validatePositiveProof(delivery: SuccessionContextDelivery, encoded: string) {
     const result = parseAgentInputMaterialization(encoded);
     if (result.status !== 'materialized') throw new Error('Native materialization remains unknown.');
-    const { nativePartIds: _parts, ...proof } = result.proof;
+    const { nativePartIds: _parts, nativeInputId, ...proof } = result.proof;
     const expected = this.expectedProof(delivery.preparedInput!.witness);
-    if (serializeAgentInputMaterialization({ status: 'materialized', proof }) !== serializeAgentInputMaterialization({ status: 'materialized', proof: expected })) throw new Error('Native materialization proof binding mismatch.');
+    if (serializeAgentInputMaterialization({ status: 'materialized', proof: { ...proof, nativeInputId } }) !== serializeAgentInputMaterialization({ status: 'materialized', proof: { ...expected, nativeInputId } })) throw new Error('Native materialization proof binding mismatch.');
+    return result.execution;
   }
   private updateReservations(state: ContextState): void {
     for (const preparation of state.preparations ?? []) preparation.reservedBytes = reservationBytes(this.bindingGrowth(preparation));
+    for (const record of state.attachments) if (record.resumeReservedBytes !== undefined) record.resumeReservedBytes = reservationBytes(this.resumeGrowth(record));
     for (const record of state.attachments) for (const delivery of record.deliveries) if (delivery.reservedBytes !== undefined) delivery.reservedBytes = reservationBytes(this.deliveryGrowth(record, delivery));
   }
   private checkCapacity(state: ContextState): void {
     let reserved = 0;
     const reserve = (bytes: number) => { if (!Number.isSafeInteger(bytes) || bytes < 0 || !Number.isSafeInteger(reserved + bytes)) throw new SuccessionCapacityError(); reserved += bytes; };
     for (const preparation of state.preparations ?? []) reserve(Number(preparation.reservedBytes));
+    for (const record of state.attachments) reserve(Number(record.resumeReservedBytes ?? 0));
     for (const record of state.attachments) for (const delivery of record.deliveries) reserve(Number(delivery.reservedBytes ?? 0));
     if (!Number.isSafeInteger(jsonBytes(state) + reserved)) throw new SuccessionCapacityError();
     assertSuccessionCapacity(state, reserved);
@@ -304,7 +396,7 @@ export class SessionSuccessionContextStore {
     if (Buffer.byteLength(record.text) > MAX_NORMALIZED_CONTEXT_BYTES) throw new Error('Succession context byte limit exceeded.');
     if (!isSuccessionRequest({ operationId: record.operationId, roleId: record.roleId, expectedRevision: record.roleRevision - 1, from: record.source })
       || record.capturedAt.length > 512 || record.boundary.epoch.length > 512 || /[\u0000-\u001f]/.test(record.boundary.epoch)) throw new Error('Invalid succession context identity.');
-    if (Object.keys(record).some(name => !['operationId', 'roleId', 'roleRevision', 'source', 'target', 'capturedAt', 'boundary', 'text', 'itemCount', 'shortenedToolCount', 'inheritedFrom', 'version', 'state', 'deliveries', 'reservedBytes'].includes(name))
+    if (Object.keys(record).some(name => !['operationId', 'roleId', 'roleRevision', 'source', 'target', 'capturedAt', 'boundary', 'text', 'itemCount', 'shortenedToolCount', 'inheritedFrom', 'version', 'state', 'deliveries', 'reservedBytes', 'resumeHandle', 'resumeReservedBytes'].includes(name))
       || Object.keys(record.boundary).some(name => !['epoch', 'seq'].includes(name))) throw new Error('Invalid succession context fields.');
     if (record.inheritedFrom && (!nonempty(record.inheritedFrom.operationId) || !isNativeSessionRef(record.inheritedFrom.source) || !nonempty(record.inheritedFrom.boundary?.epoch) || !Number.isSafeInteger(record.inheritedFrom.boundary.seq) || record.inheritedFrom.boundary.seq < 0 || !Number.isFinite(Date.parse(record.inheritedFrom.capturedAt)))) throw new Error('Invalid inherited succession provenance.');
     const rows: unknown = JSON.parse(record.text);
@@ -313,6 +405,16 @@ export class SessionSuccessionContextStore {
   private validate(state: ContextState): void {
     if (!state || state.version !== 3 || !Array.isArray(state.attachments) || state.preparations !== undefined && !Array.isArray(state.preparations)
       || state.attachments.length + (state.preparations?.length ?? 0) > 512) throw new Error('Unsupported succession context storage format/version.');
+    if (state.coverage !== undefined && (!Array.isArray(state.coverage) || state.coverage.length > 1024)) throw new Error('Invalid succession mutation coverage.');
+    const coverageTargets = new Set<string>();
+    for (const marker of state.coverage ?? []) {
+      if (!marker || !isNativeSessionRef(marker.target) || marker.operationId !== undefined && (!nonempty(marker.operationId) || marker.operationId.length > 256)
+        || marker.prepared !== undefined && (marker.prepared !== true || !marker.operationId)
+        || Object.keys(marker).some(key => !['target', 'operationId', 'prepared'].includes(key))) throw new Error('Invalid succession mutation coverage.');
+      const key = nativeSessionRefKey(marker.target);
+      if (coverageTargets.has(key)) throw new Error('Duplicate succession mutation coverage.');
+      coverageTargets.add(key);
+    }
     const ids = new Set<string>(), targets = new Set<string>(), deliveries = new Set<string>();
     const validateProvenance = (record: SuccessionContextPreparation) => {
       if (!record.inheritedFrom) return;
@@ -327,6 +429,9 @@ export class SessionSuccessionContextStore {
     }
     for (const record of state.attachments) {
       this.validateAttachment(record);
+      if (record.resumeHandle) this.validateResumeHandle(record, record.resumeHandle);
+      if (record.resumeReservedBytes !== undefined && (!isReservation(record.resumeReservedBytes)
+        || record.resumeReservedBytes !== reservationBytes(this.resumeGrowth(record)))) throw new Error('Invalid recovery configuration capacity reservation.');
       const target = nativeSessionRefKey(record.target);
       if (![1, 2, 3].includes(record.version) || ids.has(record.operationId) || targets.has(target) || !Array.isArray(record.deliveries) || record.deliveries.length > 512
         || 'reservedBytes' in record || !['pending', 'dispatching', 'accepted', 'unknown', 'materialized'].includes(record.state)) throw new Error('Invalid succession context record.');
@@ -343,11 +448,14 @@ export class SessionSuccessionContextStore {
         if (delivery.preparedInput !== undefined) {
           if (record.version !== 3 || delivery.reservedBytes === undefined) throw new Error('Optional input evidence requires its versioned reservation.');
           this.validatePreparedInput(record, delivery);
-          if (delivery.state === 'materialized') this.validatePositiveProof(delivery, delivery.nativeEvidence!);
+          if (delivery.state === 'materialized') {
+            const execution = this.validatePositiveProof(delivery, delivery.nativeEvidence!);
+            if (execution && delivery.inputAcceptance?.disposition !== execution.disposition) throw new Error('Native execution disposition differs from retained proof.');
+          }
           else if (delivery.nativeEvidence !== undefined) throw new Error('Unsettled native delivery cannot contain materialization proof.');
         }
         deliveries.add(delivery.operationId);
-        if (['dispatching', 'accepted', 'unknown'].includes(delivery.state)) unresolved++;
+        if (isSuccessionDeliveryUnresolved(delivery)) unresolved++;
         if (delivery.includesContext) {
           if (contextState !== 'pending') throw new Error('Invalid repeated succession context dispatch.');
           contextState = delivery.state === 'rejected' ? 'pending' : delivery.state;
@@ -377,12 +485,15 @@ export class SessionSuccessionContextStore {
     if (legacy && parsed.attachments?.some((record: SuccessionContextRecord) => record.version === 3 || record.deliveries?.some(delivery => delivery.preparedInput !== undefined))) throw new Error('Legacy context cannot certify optional native evidence.');
     const state: ContextState = legacy ? { ...parsed, version: 3 } : parsed;
     this.validate(state); let changed = legacy;
+    for (const record of state.attachments) if (record.resumeReservedBytes !== undefined) record.resumeReservedBytes = reservationBytes(this.resumeGrowth(record));
     for (const record of state.attachments) for (const delivery of record.deliveries) if (delivery.state === 'dispatching') {
       delivery.state = 'unknown'; if (delivery.includesContext) record.state = 'unknown'; changed = true;
     }
     this.updateReservations(state); this.checkCapacity(state);
     if (changed) await this.write(state);
-    this.state = state; this.loaded = true;
+    this.state = state;
+    for (const marker of state.coverage ?? []) this.lostCoverage.add(nativeSessionRefKey(marker.target));
+    this.loaded = true;
   }
   private async write(state: ContextState): Promise<void> {
     this.checkCapacity(state);
@@ -408,7 +519,7 @@ export class SessionSuccessionInputDispatcher {
         return prior;
       }
       await validateAdmission();
-      if (attachment.deliveries.some(item => ['dispatching', 'accepted', 'unknown'].includes(item.state))) throw new AgentOperationRejectedError('succession_delivery_unresolved', 'Succession input delivery is unresolved.');
+      if (attachment.deliveries.some(isSuccessionDeliveryUnresolved)) throw new AgentOperationRejectedError('succession_delivery_unresolved', 'Succession input delivery is unresolved.');
       const prefix = attachment.state !== 'materialized' ? quotedSessionContextPrefix({ id: attachment.operationId, sourceSession: attachment.source.nativeSessionId,
         capturedAt: attachment.capturedAt, text: attachment.text, shortenedToolCount: attachment.shortenedToolCount }) : '';
       const text = prefix + admitted.text;

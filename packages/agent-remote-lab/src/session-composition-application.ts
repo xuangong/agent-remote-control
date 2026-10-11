@@ -7,9 +7,9 @@ import type { DraftStore } from './draft-store.js';
 import { inspectSessionDisplayPreferences, flushSessionDisplayPreferences } from './hooks/useSessionDisplayPreferences.js';
 import { patchTrackedSessions, readTrackedSessionsChecked, trackingEditRevision, type TrackedSessionPatch } from './tracking-state.js';
 import { sessionKey } from './session-tree.js';
-import { projectTrackedSessionView, type TrackedSessionViews } from './tracked-session-views.js';
+
 import { canonicalJson, compositionRoleKey, createRoleCheckpoint, saveCompositionDocument,
-  readTrackCompanion, saveTrackCompanion, type TrackCompanionDocument,
+  compositionMetadataKey,
   type CompositionDocument, type CompositionProgress, type CompositionSlot, type RoleCheckpoint } from './session-composition-model.js';
 
 export interface CompositionAuthority { scope: string; hostId: string; controllerId: string; isCurrent(): boolean }
@@ -83,72 +83,24 @@ export async function retainCompositionDraftViews(context: CompositionApplicatio
   } catch { return failed('draft_retention'); }
 }
 
-/** Persist Track intent and tab-local view ownership without starting native observers. */
-export async function applyCompositionTrack(context: CompositionApplicationContext, views: TrackedSessionViews): Promise<CompositionParticipantResult> {
+/** The outer Track list follows its explicit view reference; layout is unchanged. */
+export async function applyCompositionTrack(context: CompositionApplicationContext): Promise<CompositionParticipantResult> {
   if (!context.isCurrent()) return pending('track_currentness');
-  const scope = context.document.scope, read = readTrackedSessionsChecked(scope), saved = readTrackCompanion(scope);
-  if (read.status !== 'ready' || saved.status === 'failed' || saved.status === 'unsupported') return failed('track_read');
-  const snapshot = views.snapshot();
-  const companion: TrackCompanionDocument = saved.status === 'ready' ? saved.document : { version: 1, scope, editRevision: 0, entries: [], views: [] };
+  const scope = context.document.scope, read = readTrackedSessionsChecked(scope);
+  if (read.status !== 'ready') return failed('track_read');
   const patches: TrackedSessionPatch[] = [], duplicates: string[] = [];
-  const slotFor = (entry: { hostId?: string; providerId: string; nativeSessionId: string }) => [...context.document.slots.filter(slot => slot.intent.kind !== 'role'), ...context.document.slots.filter(slot => slot.intent.kind === 'role')].find(slot => slot.intent.kind === 'legacy_fixed'
-    ? sessionKey(slot.intent.target) === sessionKey(entry)
-    : slot.intent.target.hostId === entry.hostId && slot.intent.target.native.providerId === entry.providerId && slot.intent.target.native.nativeSessionId === entry.nativeSessionId);
-  for (const entry of read.sessions) {
-    const existing = companion.entries.find(value => value.entryId === (entry.entryId ?? sessionKey(entry)));
-    const slot = slotFor(entry);
-    if (!existing && slot) companion.entries.push({ entryId: entry.entryId ?? sessionKey(entry), slotId: slot.id });
-  }
-  for (const slot of context.slots) {
-    if (slot.intent.kind !== 'role') continue;
-    const original = context.transitions[0]!.from;
-    const entry = read.sessions.find(entry => entry.entryId === slot.id || !entry.entryId && sessionKey(entry) === sessionKey(original));
+  for (const track of context.document.tracks) {
+    const entry = read.sessions.find(entry => (entry.entryId ?? sessionKey(entry)) === track.entryId);
     if (!entry) continue;
-    patches.push({ entryId: slot.id, from: entry, to: { hostId: slot.intent.target.hostId, providerId: slot.intent.target.native.providerId, nativeSessionId: slot.intent.target.native.nativeSessionId },
+    const slot = context.slots.find(slot => slot.id === track.slotId);
+    if (slot?.intent.kind === 'role') patches.push({ entryId: track.entryId, from: entry,
+      to: { hostId: slot.intent.target.hostId, providerId: slot.intent.target.native.providerId, nativeSessionId: slot.intent.target.native.nativeSessionId },
       successionRole: { controllerId: context.checkpoint.controllerId, roleId: context.checkpoint.roleId, revision: context.checkpoint.desired.committedRevision } });
-    companion.entries = companion.entries.filter(value => value.entryId !== sessionKey(entry) || value.entryId === slot.id);
-    if (!companion.entries.some(value => value.entryId === slot.id)) companion.entries.push({ entryId: slot.id, slotId: slot.id });
+    if (context.retained.some(slot => slot.id === track.slotId)) duplicates.push(track.entryId);
   }
-  for (const slot of context.retained) {
-    if (slot.intent.kind === 'history' || slot.intent.kind === 'role') continue;
-    const locator = slot.intent.kind !== 'legacy_fixed' ? { hostId: slot.intent.target.hostId, providerId: slot.intent.target.native.providerId, nativeSessionId: slot.intent.target.native.nativeSessionId } : slot.intent.target;
-    const entry = read.sessions.find(entry => entry.entryId === slot.id || !entry.entryId && sessionKey(entry) === sessionKey(locator));
-    if (entry) duplicates.push(entry.entryId ?? sessionKey(entry));
-    companion.entries = companion.entries.filter(entry => entry.slotId !== slot.id);
-  }
-  for (const remembered of snapshot.views) {
-    const patch = patches.find(patch => patch.entryId === remembered.entryId || sessionKey(patch.from) === remembered.entryId);
-    const entryId = patch?.entryId ?? remembered.entryId;
-    const owner = companion.entries.find(entry => entry.entryId === entryId) ?? (() => {
-      const slot = context.retained.find(slot => slot.id === entryId || slotFor(remembered.view.primary)?.id === slot.id);
-      return slot && { entryId, slotId: slot.id };
-    })();
-    if (!owner) return failed('track_view_owner');
-    const primary = patch && sessionKey(remembered.view.primary) === sessionKey(patch.from) ? owner.slotId
-      : slotFor(remembered.view.primary)?.id;
-    if (!primary) return failed('track_view_owner');
-    const projected = patch ? projectTrackedSessionView(remembered.view, patch.from, patch.to) : remembered.view;
-    const view = { entryId, primarySlot: primary, selections: { ...projected.selections }, ...(projected.focus ? { focus: projected.focus } : {}), ...(projected.anchor ? { anchor: projected.anchor } : {}) };
-    companion.views = [...companion.views.filter(value => value.entryId !== entryId), view];
-  }
-  if (snapshot.selected) companion.selected = patches.find(patch => patch.entryId === snapshot.selected || sessionKey(patch.from) === snapshot.selected)?.entryId ?? snapshot.selected;
-  if (companion.selected && !companion.entries.some(entry => entry.entryId === companion.selected)) {
-    const retained = companion.views.find(view => view.entryId === companion.selected);
-    companion.selected = context.document.retained.find(value => value.slot === retained?.primarySlot)?.against;
-  }
-  companion.editRevision++;
-  const current = () => context.isCurrent() && views.snapshot().editRevision === snapshot.editRevision;
-  // Retained owner references precede Track deletion. A crash retries the small patch.
-  const write = saveTrackCompanion(companion, current); flushRecoveryWrites(`agent-remote:recovery:${scope}:track-views-v1`);
-  const result = await write.completion;
-  if (!current()) return pending('track_view_edit');
-  if (result.status !== 'saved') return failed('track_companion_write');
-  const tracked = patchTrackedSessions(scope, patches, read.revision, current, duplicates);
-  if (tracked.status !== 'saved') return tracked.status === 'conflict' ? conflict('track_identity') : tracked.status === 'failed' ? failed('track_write') : pending('track_edit');
-  for (const patch of patches) views.projectOwner(patch.from, patch.to, patch.entryId);
-  if (snapshot.selected && duplicates.includes(snapshot.selected)) { const patch = patches.find(value => value.entryId === companion.selected); if (patch) views.select({ ...patch.to, title: '' }, patch.entryId); }
-  const viewRevision = views.snapshot().editRevision;
-  return { status: 'applied', retention: weakest([tracked.retention, result.retention]), retainedCurrent: () => trackingEditRevision(scope) === tracked.revision && views.snapshot().editRevision === viewRevision };
+  const result = patchTrackedSessions(scope, patches, read.revision, context.isCurrent, duplicates);
+  if (result.status !== 'saved') return result.status === 'conflict' ? conflict('track_identity') : result.status === 'failed' ? failed('track_write') : pending('track_edit');
+  return { status: 'applied', retention: result.retention, retainedCurrent: () => trackingEditRevision(scope) === result.revision };
 }
 function sameLineage(left: SessionSuccessionReplay, right: SessionSuccessionReplay): boolean {
   return left.to.hostId === right.from.hostId && left.projection.role.id === right.projection.role.id
@@ -177,14 +129,15 @@ export class SuccessionApplication {
     const editRevision = this.document.editRevision;
     const current = () => isCurrent() && this.document.editRevision === editRevision;
     const handle = saveCompositionDocument(this.document, current);
-    flushRecoveryWrites(`agent-remote:recovery:${this.document.scope}:composition-v1`);
+    flushRecoveryWrites(compositionMetadataKey(this.document.scope));
     const result = await handle.completion;
     if (!current()) return pending('retired');
     return result.status === 'saved' ? { status: 'applied', retention: result.retention } : result.status === 'failed' ? failed('checkpoint_write') : pending('checkpoint_cancelled');
   }
   apply(replay: SessionSuccessionReplay): Promise<CompositionParticipantResult> { return this.applyCommit(replay, [replay]); }
-  private async applyCommit(replay: SessionSuccessionReplay, transitions: readonly SessionSuccessionReplay[]): Promise<CompositionParticipantResult> {
+  private async applyCommit(replay: SessionSuccessionReplay, transitions: readonly SessionSuccessionReplay[], navigation?: { selectedSlot?: string; isCurrent(): boolean }): Promise<CompositionParticipantResult> {
     if (!this.allowed(replay)) return pending('authorization');
+    if (navigation?.selectedSlot && !this.document.slots.some(slot => slot.id === navigation.selectedSlot)) return pending('invalid_view');
     const key = compositionRoleKey({ scope: this.authority.scope, hostId: replay.to.hostId, controllerId: replay.projection.role.current.controllerId, roleId: replay.projection.role.id });
     const previous = this.document.roles.find(role => compositionRoleKey(role) === key);
     const revision = replay.projection.role.revision;
@@ -196,7 +149,7 @@ export class SuccessionApplication {
       else if (sameLineage(unfinished.at(-1)!, replay)) transitions = [...unfinished, replay];
     }
     const run = ++this.run, startingEditRevision = this.document.editRevision;
-    const active = () => this.current() && this.run === run;
+    const active = () => this.current() && this.run === run && (!navigation || navigation.isCurrent());
     let incoming: RoleCheckpoint;
     try { incoming = await createRoleCheckpoint(this.authority.scope, replay); } catch { return failed('invalid_replay'); }
     if (!active()) return pending('retired');
@@ -221,25 +174,26 @@ export class SuccessionApplication {
     for (const slot of this.document.slots) {
       const { intent } = slot;
       const enrolled = intent.kind === 'role' && intent.roleKey === key;
-      const enrollment = transitions[0]!;
-      const matches = intent.kind === 'fixed' && intent.target.hostId === enrollment.from.hostId && nativeSessionRefKey(intent.target.native) === nativeSessionRefKey(enrollment.projection.receipt.from);
-      const legacy = intent.kind === 'legacy_fixed' && intent.target.hostId === enrollment.from.hostId && intent.target.providerId === enrollment.from.providerId && intent.target.nativeSessionId === enrollment.from.nativeSessionId;
-      if (!enrolled && !matches && !legacy) continue;
+      const origin = replay.projection.role.origin;
+      const matches = intent.kind === 'fixed' && intent.target.hostId === replay.from.hostId
+        && intent.target.native.providerId === origin.providerId && intent.target.native.nativeSessionId === origin.nativeSessionId
+        && (!intent.target.native.controllerId || intent.target.native.controllerId === origin.controllerId);
+      if (!enrolled && !matches) continue;
       slot.intent = { kind: 'role', roleKey: key, revision, target: { hostId: replay.to.hostId, native: { ...replay.projection.role.current } } };
       affected.push(slot);
     }
     for (const activeSlot of affected) for (const slot of this.document.slots) {
       const intent = slot.intent;
-      const collision = transitions.some(transition => intent.kind === 'fixed'
-        ? intent.target.hostId === transition.to.hostId && nativeSessionRefKey(intent.target.native) === nativeSessionRefKey(transition.projection.role.current)
-        : intent.kind === 'legacy_fixed' && intent.target.hostId === transition.to.hostId && intent.target.providerId === transition.to.providerId && intent.target.nativeSessionId === transition.to.nativeSessionId);
+      const collision = intent.kind === 'fixed' && transitions.some(transition => intent.target.hostId === transition.to.hostId
+        && intent.target.native.providerId === transition.to.providerId && intent.target.native.nativeSessionId === transition.to.nativeSessionId
+        && (!intent.target.native.controllerId || intent.target.native.controllerId === transition.projection.role.current.controllerId));
       if (slot.id === activeSlot.id || !collision) continue;
       if (!this.document.retained.some(entry => entry.slot === slot.id && entry.against === activeSlot.id)) this.document.retained.push({ slot: slot.id, against: activeSlot.id });
     }
-    // Desired intent survives failure. The raw legacy and versioned documents remain intact.
+    // Desired intent survives failure without restoring a stale executor.
     let expectedEditRevision = ++this.document.editRevision;
     const retentionChecks: Array<() => boolean> = [];
-    const ownsCheckpoint = () => this.run === run && this.document.roles.includes(checkpoint) && checkpoint.desired.committedRevision === revision;
+    const ownsCheckpoint = () => this.run === run && (!navigation || navigation.isCurrent()) && this.document.roles.includes(checkpoint) && checkpoint.desired.committedRevision === revision;
     const currentDocument = () => active() && this.document.editRevision === expectedEditRevision && retentionChecks.every(check => check()) && ownsCheckpoint();
     let persisted = await this.persist(currentDocument);
     if (persisted.status !== 'applied') return persisted;
@@ -266,9 +220,10 @@ export class SuccessionApplication {
     if (!currentDocument()) return pending('local_edit');
     // Only checked owner retention can permit removal of duplicate navigation edges.
     for (const retained of this.document.retained.filter(entry => affected.some(slot => slot.id === entry.against))) {
+      if (retained.slot === navigation?.selectedSlot) continue;
       this.document.edges = this.document.edges.filter(edge => edge.source !== retained.slot && edge.target !== retained.slot);
       this.document.collapsed = this.document.collapsed.filter(slot => slot !== retained.slot);
-      for (const field of ['address', 'focus', 'anchor'] as const) if (this.document[field] === retained.slot) this.document[field] = retained.against;
+      for (const field of ['primary', 'address', 'focus', 'anchor'] as const) if (this.document[field] === retained.slot) this.document[field] = retained.against;
     }
     checkpoint.documents.composition = { revision, status: 'applied', retention: persisted.retention };
     const priorApplied = checkpoint.appliedRevision;
@@ -289,10 +244,10 @@ export class SuccessionApplication {
   }
 
   /** Revalidate hints and complete the entire authorized chain before changing enrollment. */
-  async recover(roleId: string, transport: CompositionRecoveryTransport): Promise<CompositionParticipantResult> {
+  async recover(roleId: string, transport: CompositionRecoveryTransport, navigation?: { selectedSlot?: string; isCurrent(): boolean }): Promise<CompositionParticipantResult> {
     if (!this.current()) return pending('authorization');
     const run = ++this.run, editRevision = this.document.editRevision;
-    const active = () => this.current() && this.run === run && this.document.editRevision === editRevision;
+    const active = () => this.current() && this.run === run && this.document.editRevision === editRevision && (!navigation || navigation.isCurrent());
     const checkpoint = this.document.roles.find(role => role.roleId === roleId && role.hostId === this.authority.hostId && role.controllerId === this.authority.controllerId);
     try {
       let pinned: SessionSuccessionReplay | undefined;
@@ -326,7 +281,7 @@ export class SuccessionApplication {
       if (!last || canonicalJson(last.projection.role) !== canonicalJson(current.role)) return pending('replay_gap');
       if (pinned && !chain.some(replay => canonicalJson(replay) === canonicalJson(pinned))) return conflict('pinned_replay');
       // Latest desired intent must survive failure in any earlier participant's retention.
-      return this.applyCommit(last, chain);
+      return this.applyCommit(last, chain, navigation);
     } catch { return pending('replay_unavailable'); }
   }
 }

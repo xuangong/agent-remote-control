@@ -1,6 +1,8 @@
 import { RemoteHostControlClient, RemoteHostControlError, type TpmActionInput } from '@orchardworks/agent-remote-web/headless';
 import type { TpmCreate, TpmList, TpmWork } from '@orchardworks/agent-remote-protocol';
 import { isHostProviderSettings, type HostProviderChange, type HostProviderSettings } from '@orchardworks/agent-remote-protocol';
+import { isSuccessionDescription, isSuccessionActionResult, type SuccessionDescription, type SuccessionActionResult } from '@orchardworks/agent-remote-protocol';
+export type { SuccessionDescription, SuccessionActionResult } from '@orchardworks/agent-remote-protocol';
 import type {NativeSessionOwner} from '@orchardworks/agent-remote-protocol';
 import { workspaceFetch } from './workspace-access.js';
 import { isCodexDaemonStatus, type CodexDaemonStatus, type CodexDaemonRestart } from '@orchardworks/agent-remote-protocol';
@@ -24,6 +26,7 @@ export interface OpenedSession { hostId?: string; agentId: string; providerId: s
 export class DirectoryError extends Error {
   constructor(message: string, readonly code?: string, readonly status?: number, readonly requestId?: string, readonly nativeOwner?: NativeSessionOwner) { super(message); }
 }
+export interface SuccessionPrepareInput { operationId: string; providerId: string; nativeSessionId: string; expectedRevision: number; targetProviderId?: string }
 export class SessionDirectoryClient {
   readonly cachedPages = new Map<string, SessionCatalogPage>();
   constructor(private readonly baseUrl: string, private readonly fetcher: typeof fetch = workspaceFetch, private readonly hostId = 'local') {}
@@ -35,6 +38,21 @@ export class SessionDirectoryClient {
     const data = await response.json();
     if (!response.ok) throw new DirectoryError(data.error ?? data.message ?? 'Session service is unavailable.', data.code, response.status, typeof data.requestId === 'string' ? data.requestId : undefined, data.nativeOwner);
     return data as T;
+  }
+  async describeSuccession(providerId: string, nativeSessionId: string): Promise<SuccessionDescription> {
+    const value = await this.request('succession/describe', { providerId, nativeSessionId }, AbortSignal.timeout(15000));
+    if (!isSuccessionDescription(value)) throw new Error('Handoff eligibility could not be verified.');
+    return value;
+  }
+  async prepareSuccession(input: SuccessionPrepareInput): Promise<SuccessionActionResult> {
+    const value = await this.request('succession/prepare', input, AbortSignal.timeout(50000));
+    if (!isSuccessionActionResult(value)) throw new Error('The Handoff result could not be verified. Check this operation.');
+    return value;
+  }
+  async successionAction(action: 'commit' | 'cancel' | 'status' | 'reconcile', operationId: string): Promise<SuccessionActionResult> {
+    const value = await this.request(`succession/${action}`, { operationId }, AbortSignal.timeout(50000));
+    if (!isSuccessionActionResult(value)) throw new Error('The Handoff result could not be verified. Check this operation.');
+    return value;
   }
   rename(providerId: string, nativeSessionId: string, title: string, operationId: string): Promise<{ title: string }> {
     return this.request('session/rename', { providerId, nativeSessionId, title, operationId }, AbortSignal.timeout(35000));

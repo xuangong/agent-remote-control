@@ -76,3 +76,14 @@ test('refuses a corrupt persisted cursor key rather than replacing historical cu
  await expect(restored.ready).rejects.toThrow('signing key');
  expect(await readFile(join(f.root,'state','source-cursor.key'),'utf8')).toBe('invalid');
 });
+
+test('description reuses native quiescence and bounded support without reserving or creating', async () => {
+ const f=await fixture(), role=f.service.store.read('role').role;
+ f.ports.supportsBoundedProjection=async(_source,target)=>target==='fixture';
+ const targets=[{providerId:'fixture',displayName:'Fixture'},{providerId:'other',displayName:'Other'}];
+ expect(await f.service.describe(role,ref('A'),targets)).toMatchObject({targets:[targets[0]],eligibility:{status:'ready'}});
+ f.ports.inspect=async()=>({cwd:f.root,idle:false,managed:true,pendingInputs:0,inFlightInputs:0,pendingInteractions:0,activeChildren:0,boundary:{epoch:'e',seq:1}});
+ expect(await f.service.describe(role,ref('A'),targets)).toMatchObject({targets:[targets[0]],eligibility:{status:'blocked',code:'succession_not_quiescent'}});
+ expect(await f.service.describe(role,ref('old'),targets)).toMatchObject({eligibility:{status:'unavailable',code:'session_superseded'}});
+ expect(f.created()).toBe(0);expect(f.captures()).toBe(0);expect(f.service.store.read('role').operations).toEqual([]);
+});

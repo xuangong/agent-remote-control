@@ -49,7 +49,7 @@ function fillRoles(state: any, desiredBytes: number) {
 
 test.each([0, 1])('qualified admission respects its complete future witness at %i bytes below exact fit', async shortfall => {
   const f = await fixture(), value = input('escaped', 'scope-"\\'.repeat(20));
-  const empty = { version: 6, roles: [], associationAdmissions: [], associationResults: [] };
+  const empty = { version: 7, roles: [], associationAdmissions: [], associationResults: [] };
   const admitted = { ...empty, associationAdmissions: [{ id: value.id, fingerprint: value.fingerprint, source: value.source, sourceReader: true, sourceWitness: value.sourceWitness }] };
   const admissionGrowth = jsonBytes(admitted) - jsonBytes(empty);
   const allowance = jsonBytes(result(value)) + 1;
@@ -119,7 +119,7 @@ test('version five legacy pending admissions migrate without synthetic witnesses
   await writeFile(f.path, JSON.stringify({ version: 5, roles: [], associationResults: [], associationAdmissions: [{ id: 'legacy', fingerprint: 'fingerprint', source: ref('source'), sourceReader: true }] }));
   const store = new SessionSuccessionStore(f.directory); await store.ready;
   const saved = JSON.parse(await readFile(f.path, 'utf8'));
-  expect(saved.version).toBe(6); expect(saved.associationAdmissions[0].sourceWitness).toBeUndefined();
+  expect(saved.version).toBe(7); expect(saved.associationAdmissions[0].sourceWitness).toBeUndefined();
   await expect(store.admitAssociation('legacy', 'fingerprint', ref('source'), true)).rejects.toThrow(/unresolved/);
   await store.completeSourceAssociation({ id: 'legacy', fingerprint: 'fingerprint', scope: 'legacy', operationId: 'legacy', source: ref('source'), reader: ref('reader') });
   expect(store.sourceResult('legacy', 'fingerprint')!.reader).toEqual(ref('reader'));

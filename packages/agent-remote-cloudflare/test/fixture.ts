@@ -25,13 +25,13 @@ export function event(socket: WebSocket, type: 'message' | 'close'): Promise<any
 }
 export const send = (socket: WebSocket, data: object) => socket.send(JSON.stringify({ uplinkVersion: 2, ...data }));
 
-export async function fixture(options: { completeCodec?: true; previewOrigin?: string; previewDomain?: string; controllerRelease?: Record<string, unknown>; controllerBridge?: Record<string, unknown>; controllerBridges?: Record<string, unknown>[]; workerVersionId?: string } = {}) {
+export async function fixture(options: { actualEntry?: true; completeCodec?: true; previewOrigin?: string; previewDomain?: string; controllerRelease?: Record<string, unknown>; controllerBridge?: Record<string, unknown>; controllerBridges?: Record<string, unknown>[]; workerVersionId?: string } = {}) {
   const directory = await mkdtemp(join(tmpdir(), 'arc-workers-'));
   closers.push(() => rm(directory, { recursive: true, force: true }));
-    const result = await build({ stdin: { contents: `
+    const result = await build({ stdin: { contents: options.actualEntry ? `export { default, RelayObject } from './src/worker.ts';` : `
       import { createHash } from 'node:crypto';
       import worker, { RelayObject } from './src/worker.ts';
-      import { SqliteRelayStore, TEST_ONLY_COMPLETE_SQL_CODEC } from './src/storage.ts';
+      import { SqliteRelayStore } from './src/storage.ts';
       import { createHostedRelay } from '@orchardworks/agent-remote-hosted';
       import { WorkerRelaySocket } from './src/socket.ts';
       export class TestRelayObject extends RelayObject {
@@ -41,7 +41,7 @@ export async function fixture(options: { completeCodec?: true; previewOrigin?: s
         }
         reopenCodec() {
           const auth = { origin: this.fixtureEnv.AGENT_REMOTE_RELAY_URL, issuer: this.fixtureEnv.AGENT_REMOTE_ISSUER, secret: this.fixtureEnv.AGENT_REMOTE_SIGNING_SECRET };
-          this.fixtureCodec = new SqliteRelayStore(this.fixtureContext.storage, auth, TEST_ONLY_COMPLETE_SQL_CODEC);
+          this.fixtureCodec = new SqliteRelayStore(this.fixtureContext.storage, auth);
           this.fixtureCore = createHostedRelay({ ...auth, storage: this.fixtureCodec, successionEnrollment: true, scheduler: { schedule() {}, cancel() {} } });
         }
         async fetch(request) {
@@ -53,7 +53,7 @@ export async function fixture(options: { completeCodec?: true; previewOrigin?: s
           }
           if (this.completeCodec && path === '/_fixture/codec/snapshot') {
             const auth = { origin: this.fixtureEnv.AGENT_REMOTE_RELAY_URL, issuer: this.fixtureEnv.AGENT_REMOTE_ISSUER, secret: this.fixtureEnv.AGENT_REMOTE_SIGNING_SECRET };
-            return Response.json(new SqliteRelayStore(this.fixtureContext.storage, auth, TEST_ONLY_COMPLETE_SQL_CODEC).initial);
+            return Response.json(new SqliteRelayStore(this.fixtureContext.storage, auth).initial);
           }
           if (path === '/_fixture/codec/physical') return Response.json({
             metadata: this.fixtureContext.storage.sql.exec('SELECT * FROM relay_metadata').toArray(),
@@ -99,7 +99,7 @@ export async function fixture(options: { completeCodec?: true; previewOrigin?: s
   let envSecret = secret;
   async function start() {
     mf = new Miniflare({ modules: true, script, compatibilityDate: '2026-06-01', compatibilityFlags: ['nodejs_compat'],
-      durableObjects: { RELAY: { className: 'TestRelayObject', useSQLite: true } }, durableObjectsPersist: join(directory, 'state'),
+      durableObjects: { RELAY: { className: options.actualEntry ? 'RelayObject' : 'TestRelayObject', useSQLite: true } }, durableObjectsPersist: join(directory, 'state'),
       bindings: { ...(options.workerVersionId ? { CF_VERSION_METADATA: { id: options.workerVersionId } } : {}), AGENT_REMOTE_RELAY_URL: origin, ...(options.previewDomain ? { AGENT_REMOTE_PREVIEW_DOMAIN: options.previewDomain } : {}), ...(options.previewOrigin ? { AGENT_REMOTE_PREVIEW_URL: options.previewOrigin } : {}), AGENT_REMOTE_ISSUER: issuer, AGENT_REMOTE_SIGNING_SECRET: envSecret },
       serviceBindings: { ASSETS: async request => new Response(new URL(request.url).pathname === '/index.html'
         ? '<!doctype html><html><head><title>Controller</title></head><body><script src="/assets/main.js"></script></body></html>' : 'asset',

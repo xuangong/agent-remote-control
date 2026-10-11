@@ -14,8 +14,10 @@ import { LabWorkbench } from './LabWorkbench.js';
 import { sessionKey } from '../session-tree.js';
 import type { SessionViewNavigationFactory } from '../session-view-navigation.js';
 
-export function SideConversation({ session, replica: cachedReplica, transport, store, draft, draftBinding, onDraftChange, onClose, onOpenSource, onFork, onOpenFork, onUnlink, onRecover, standalone = false, onFocus, onActivityChange, initialInput, visible = true, expanded = true, focused = true, position = 1, selectedChild, navigation, renderAsk, headingStart, headingMode, onRenameTitle }: {
+export function SideConversation({ session, replica: cachedReplica, transport, store, draft, draftBinding, imageDraftBinding, displayBinding, onDraftChange, onClose, onOpenSource, onFork, onOpenFork, onUnlink, onRecover, standalone = false, onFocus, onActivityChange, initialInput, visible = true, expanded = true, focused = true, position = 1, selectedChild, navigation, renderAsk, headingStart, headingMode, onRenameTitle }: {
   navigation?: SessionViewNavigationFactory;
+  imageDraftBinding?: import('@orchardworks/agent-remote-web/browser').ImageDraftBinding;
+  displayBinding?: import('../hooks/useSessionDisplayPreferences.js').DisplayPreferenceBinding;
   headingStart?: ReactNode;
   headingMode?: 'inline' | 'toolbar';
   onRenameTitle?(): void;
@@ -43,7 +45,7 @@ export function SideConversation({ session, replica: cachedReplica, transport, s
   const title = standalone ? session.title : record?.firstInput?.trim().slice(0, 72) || session.title;
   return <aside className="lab-side-conversation lab-session-composition" aria-label="Side conversation" tabIndex={-1} ref={panel} onFocusCapture={onFocus} onClickCapture={onFocus} hidden={!expanded} style={{ order: position }}>
     <CommunicationNavigationContext.Provider value={communication}><LabWorkbench {...viewNavigation} sessionState={sessionState} handoff={handoff} draftSessionKey={sessionKey(session)} state={forkDisplayState(state, record)} sessionStatus={status} attachingAgentId={session.agentId}
-      visible={visible && expanded} actions={forkActions(actions, store, record, transport)} draftBinding={draftBinding} messageDraft={draft} onMessageDraftChange={onDraftChange}
+      visible={visible && expanded} actions={forkActions(actions, store, record, transport)} draftBinding={draftBinding} imageDraftBinding={imageDraftBinding} displayBinding={displayBinding} messageDraft={draft} onMessageDraftChange={onDraftChange}
       questionDrafts={questions} onQuestionDraftChange={(id, value) => setQuestions((current) => ({ ...current, [id]: value }))}
       headingStart={headingStart}
       headingMode={headingMode}

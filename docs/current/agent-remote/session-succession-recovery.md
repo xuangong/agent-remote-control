@@ -1,8 +1,59 @@
 # Session succession state and recovery
 
-Status: implementation guidance, not an enabled product capability. No native
-provider pair is certified. This document records the current backend formats, including ordinary
-postcommit relationship updates. Update the format table when schemas change.
+Status: current implementation and recovery contract. The product action, Host
+coordinator and production Relay storage are connected. Codex, Claude Code,
+Copilot and OpenCode implement the evidence contract; each requested provider pair
+must pass current Host capability and readiness checks. Final provider-stage
+workspace gates passed; see the [validation report](../../handoffs/2026-10-11-succession-provider-validation.md).
+This does not imply deployment. Update the format table when schemas change.
+
+## Supported configuration and product entry
+
+Succession stays on the same Host and canonical working directory. Codex,
+Claude Code, Copilot and OpenCode provide native evidence v2; ordinary provider
+discovery alone does not establish Handoff eligibility. Both ends must provide
+the required evidence, source access and bounded projections. Cross-provider
+handoff transfers normalized context, not native credentials or runtime state.
+
+OpenCode retains its reviewed 1.18.x configuration from 1.18.18, with background
+subagents disabled and a connected observation stream. Its source references
+also require the explicit [Host callback plugin](../../opencode-callbacks.md).
+The current [provider validation](../../handoffs/2026-10-11-succession-provider-validation.md)
+records pinned native versions, provider-specific evidence and recovery limits.
+
+The primary Session View offers **Handoff** through its session actions. The
+authorized Host describes the current role, revision, cwd, target providers and
+eligibility; preparation checks these facts again. It requires confirmed idle,
+no queued input, approval, active child work or unsettled ARC mutation. It rejects
+immediately rather than waiting for work to finish. Ordinary ARC writes to the
+source and candidate are gated while the operation is active; this does not lock
+independent native clients outside ARC.
+
+Readiness comes from the adapter's current native observation, not a historical
+idle marker. Claude combines a complete Stop task/cron snapshot with the result
+for the exact input reporting no queued turns; the other adapters use their
+corresponding live native evidence. Reading a saved transcript alone cannot
+establish that a runtime is idle or that an old interaction remains actionable.
+
+Preparation and commit send no model input. The first real successor input
+receives the captured normalized history once. Source references and TPM follow
+the stable role; concrete history and already admitted deliveries retain their
+original native targets. Favorites, Track and the primary pane follow the new
+current session while existing Side/Ask sessions retain their own histories.
+
+One workspace-scoped, tab-local intent retains the original operation, source and
+cancellation request across reload. Cancellation remains requested even when its
+HTTP response fails; a late ready response cannot make that page commit. An
+authoritative committed result still wins. **Hide Handoff** releases an unresolved
+dialog without deleting its intent; **Recover Handoff** reopens that same operation
+even if its old source is offline or retired. Generic 409/404 responses do not
+prove non-admission and never authorize another create or automatic resend.
+
+Upgrade the Controller, Relay and website together. The browser imports old
+composition metadata once, then uses one v2 view document and explicit owner
+pointers. Layout, text drafts and Ask open state remain tab-local; retained image
+and preference ownership follows the configured storage policy. Do not maintain
+parallel live composition models or clear unknown operations during upgrade.
 
 ## State ownership
 
@@ -16,7 +67,7 @@ The configured succession state directory contains:
 | Relative path | Required recovery evidence |
 | --- | --- |
 | `roles/state.json` | Role lineage, revisions, decisions, enrolled relationships, exact source-creation results, relation-change receipts and unresolved admissions |
-| `contexts/context.json` | Captured normalized context and first-input delivery identity/outcome |
+| `contexts/context.json` | Captured normalized context, first-input witness/outcome, mutation coverage and latest confirmed recovery handle |
 | `source-cursor.key` | Signing key for existing source-history and context cursors |
 
 The complete recovery set also includes Controller installation identity, native
@@ -26,12 +77,17 @@ succession state does not copy a workspace, process, credentials or native sessi
 
 ## Format boundaries
 
+The table describes the current file parsers and retained recovery formats. It
+does not promise mixed-version live writers or a rolling upgrade. Deploy all
+components together; do not add compatibility branches for intermediate
+development files or a second browser runtime model.
+
 | State | Checkpoint format | Supported upgrade behavior |
 | --- | --- | --- |
 | Controller role state | Version 7 | Versions 1 through 6 retain explicit migration rules; legacy receipts gain no invented projection budget, source-witness reservation or optional native creation evidence |
 | Pending context | Version 3 | Reads valid versions 1 and 2; optional prepared-input records use attachment version 3. Preparations share attachment capacity, and delivery-state recovery remains independent of role state |
 | Relay outer state | Version 10 for configured succession accounting; version 9 with association-v5 writers; version 8 adds Host recovery metadata; version 7 adds Favorites succession progress | Restore10 requires complete encoding costs; successful accounting writes retain10. No-cost versions 2 through 9 preserve ordinary and exact saved recovery with explicit inner-format rules; no applied progress, budget or native result is fabricated |
-| Cloudflare SQL snapshot | Metadata format 3; record/envelope/manifest format 1 | Format 2 migrates atomically on the first complete commit; old readers reject 3. This physical format does not enable effectful succession |
+| Cloudflare SQL snapshot | Metadata format 3; record/envelope/manifest format 1 | Format 2 migrates atomically on the first complete commit; old readers reject 3. The production entry installs the complete codec and cost-backed enrollment |
 | Broker association state | Version 5 | Versions 1 through 4 retain explicit migrations and valid complete committed lineage; saved freeze-v1 identities remain unchanged |
 | Enrollment freeze | Version 2 for new preparation | Requires an immutable positive safe-integer `maxProjectionBytes`; exact saved version-1 recovery remains supported without retrofitting a budget |
 | Favorites succession progress | Version 1, requiring Relay7 or later | Bounded pending/applied acknowledgements identify an exact committed freeze and contiguous role revision; this is store progress, not another commit authority |
@@ -45,8 +101,11 @@ version 5 requires outer version 9. Favorites progress requires outer version 7.
 hidden behind an older version number. An older writer must not overwrite a newer format. Do not edit a
 version number or delete recovery fields to make a previous binary accept them.
 
-Role7 retains the original optional native creation outcome; context3 retains a
-versioned nested prepared-input witness. Older layouts carrying these new fields
+Role7 retains the original optional native creation outcome; context3 retains an
+evidence-v2 nested prepared-input witness and bounded latest confirmed recovery
+handle. The witness separates adapter `inputId`, proven `nativeInputId` and
+optional execution `nativeExecutionId`; the unpublished earlier witness schema
+is not a parallel supported writer. Older layouts carrying these new fields
 are rejected as ambiguous. The actual role6/context2 readers reject files written
 by the new stores and cannot overwrite them. This format support alone does not
 connect an optional native producer or enable succession.
@@ -74,9 +133,9 @@ An output invariant violation after commit reports
 `succession_projection_invariant_failed` and preserves the entire committed role
 and receipt. Saved prepare/status/reconcile/commit/release cannot conceal that
 defect as success. Recovery never creates another candidate to fit a ceiling.
-No production allowance supplier or native producer certificate is enabled by
-this contract. The derived accounting gate is implemented in isolation; atomic
-terminal consumers and real producer certification remain pending.
+The production Relay installs the existing allowance and atomic terminal
+consumers. Native producer readiness remains a separate adapter fact; the
+projection bound itself does not certify a native session.
 
 ## Relay accounting admission
 
@@ -101,9 +160,8 @@ ordinary-only changes, write outer10 without downgrading. Restore10 without both
 cost methods refuses before runtime availability; prior readers reject10 on
 restore/reload. No cross-version live-writer CAS is promised. No-cost outer<=9
 ordinary and exact legacy recovery remain supported, without fresh Hosted
-preparation. Source/relation consumers now use the atomic boundary below;
-terminal succession/Favorites and recovery consumption still need their separate
-integration and acceptance before production enablement.
+preparation. Source/relation and terminal succession/Favorites consumers use the
+atomic boundaries below. The production entry uses configured accounting.
 
 ## Atomic Relay source completion
 
@@ -139,10 +197,14 @@ ordinary mutations cannot spend it. Complete result and admission removal share
 one awaited file mutation. Unknown publication remains fenced until reopen.
 
 The trusted acknowledged-v2 route requires a separate certificate from the
-actual policy-wrapped directory before native creation. No real directory is
-certified by this checkpoint. Local/legacy routes retain their existing policy;
-an exact saved result and matching grant recover before fresh certification.
-Old pending admissions receive no invented descriptor or permission to recreate.
+actual policy-wrapped directory before native creation. Concrete Codex, Claude,
+Copilot and OpenCode adapters declare a native ID bound for ordinary creation;
+their directories certify only that path while open. Codex custom `spawn`
+producers, absent or invalid bounds, and edit/native-fork inputs are not
+certified. Source history, callbacks and durable grants remain independent
+requirements. Ordinary routes retain their existing policy; an exact saved
+result and matching grant recover before fresh certification. Old pending
+admissions receive no invented descriptor or permission to recreate.
 
 The bounded native ID has at most 512 UTF-16 units and at most 3074 JSON bytes.
 The binding owner checks the actual canonical result for fresh qualified output,
@@ -217,6 +279,20 @@ the same predicate. Prepared TPM intents remain visible but are not yet native
 work. Read-only inspection, handoff cancel/reconcile, unrelated sessions and
 security revocation remain available during a reservation.
 
+The original live TPM invocation subscribes to native acceptance through both
+ordinary sends and prepared first-input delivery. Late exact execution evidence
+updates its existing outbox intent without changing recipient, role revision or
+operation identity. Duplicate evidence and a later transport failure cannot undo
+confirmed execution. The callback is dispatch-local and is not serialized into
+public operation parameters, fingerprints or durable records.
+
+This notification is not a cross-restart receipt guarantee. If the Controller
+restarts with an accepted intent but no retained started/handled evidence, that
+intent remains unsettled and can prevent another handoff. Closed coordinators
+ignore old callbacks. There is no automatic replay, inference from later idle
+state, or new manual override for accepted-without-execution evidence. Preserve
+the record; do not delete it to force eligibility.
+
 Accepted settings reserve asynchronous work and a reusable future native-effect
 slot before acceptance. Every queued/deferred apply restores its original Host
 and Manager operation contexts and rechecks current admission/capability/value.
@@ -254,11 +330,44 @@ receipt timeout retains uncertain effects, including later known completion.
 Ordinary immediate takeover can interrupt working; it does not inherit succession's
 idle requirement. Read attachment and security cleanup retain their existing paths.
 
-These reviewed slices cover the Host entry points, but do not certify complete
-native readiness or independent writers. Native evidence, SQL admission and
-product recovery remain separate gates; production succession stays disabled.
+These boundaries cover Host entry points, not independent native writers. Native
+readiness, SQL admission and product recovery remain separate checks; passing one
+does not bypass another.
 
-## Native evidence checkpoint
+## Provider evidence and recovery
+
+Native evidence uses either a trusted service namespace or an owned runtime.
+One native observation serves both ordinary session state and evidence. Exact
+input materialization and positively correlated execution start are distinct;
+neither idle nor an uncorrelated assistant record settles an unknown input.
+
+Claude and Copilot allocate bounded empty descriptors without a model request.
+Only explicit Host `initializeEmpty` permission allows initializing that exact
+identity when its durable context is pending, all prior deliveries were rejected
+before dispatch, and mutation coverage is intact. Missing native history alone
+never authorizes initialization. Existing native history resumes normally.
+
+The original creation handle proves candidate identity. A separate latest
+confirmed handle retains subsequent settings throughout the lineage. Host
+reserves bounded storage before a setting change, then saves current adapter
+readback through the existing observation/runtime-info path. Native refusal can
+still confirm a different applied value; that value is retained before the error
+settles. Persistence failure remains uncertain. Shutdown drains admitted setting
+and recovery work before native cleanup. Pending setting targets are not saved as
+confirmed configuration.
+
+Codex binds native `clientId` to its user record and containing turn. Claude binds
+its exact user UUID and uses positive live correlation for execution; cold history
+can prove materialization without proving start. Copilot's native send receipt
+binds its user and turn-start events only in the original attachment; losing that
+binding can leave cold recovery unknown. No provider may replay merely to obtain
+missing evidence. See the current [provider validation](../../handoffs/2026-10-11-succession-provider-validation.md)
+for exact tested versions and separate validation layers.
+
+## Prior native research and OpenCode/common baseline
+
+These experiments explain the original constraints; the empty-descriptor
+implementation above supersedes the earlier Claude feasibility limit.
 
 An isolated macOS experiment on 2026-10-10 used Claude Agent SDK 0.3.247 and
 its bundled Claude Code 2.1.247 with a loopback model fixture. Empty initialization
@@ -296,7 +405,26 @@ isolated profile, restricted loopback sandbox and a 120-second outer deadline;
 an optional evidence output must be a new absolute path. Ordinary collection
 skips it. These results do not certify queue/work coverage, callback-enabled
 production configuration, multipart input, native completion, Host integration
-or power-loss durability. Capability remains disabled.
+or power-loss durability. The experiment alone does not enable capability.
+
+The prior baseline's actual-adapter test separately uses the installed OpenCode binary and
+the built production adapter, without an injected native verifier. It covers
+ordinary A input, empty B with exact selections, prepared first B input, ordinary
+B input, empty C and exact C resume through a new provider instance. Empty
+creation/attachment makes no model request. A callback-enabled native test also
+creates an empty B, restores its Host tools and sends one prepared input through
+the real plugin. Both use isolated profiles and a loopback model fixture, not a
+commercial model. Host/Gateway/browser and Cloudflare production-entry transport
+tests are separate evidence, not one combined native full-stack run.
+
+In that OpenCode baseline, authority is a trusted service namespace, never a
+process or database ownership assertion. Exact user U proves materialization only; a non-summary
+assistant R in B with parent U proves execution started, not task completion.
+HTTP 204, idle and an unrelated assistant message do not settle an input. The
+existing context store saves a dirty ARC-coverage marker before native effects.
+Cold restart cannot clear ordinary unknown coverage from a later idle snapshot;
+prepared delivery may recover only from its original persisted identity and exact
+native evidence. Process-local operation deduplication is not a restart guarantee.
 
 ## Local preparation and cancellation
 
@@ -331,6 +459,15 @@ adds bounded orphan evidence; it cannot bind context, commit, recreate, send inp
 or automatically delete the unused native session. A failed terminal write keeps
 the prior reservation. Unknown role publication and first-input delivery do not
 use this cancellation rule.
+
+For a known candidate, context binding precedes native readiness inspection so
+the Host can authorize zero-input initialization of an empty descriptor. A
+cancellation settled before binding prevents both binding and inspection. If
+binding has already completed, its durable context is retained across restart;
+late inspection cannot make the operation ready or committed. The retained
+descriptor does not grant input authority: first dispatch still requires the
+committed current role and revision and otherwise reports
+`succession_not_committed` without sending anything to the provider.
 
 Both local stores retain their 8 MiB limit. Preparations and attachments share 512
 slots; each attachment retains at most 512 input deliveries. Preparation admits
@@ -383,8 +520,9 @@ unsupported. Delivery and HTTP reads consume already persisted outer state and
 recheck current access; a failed outer write cannot publish a new projection.
 
 The transport cache is not durable authority or proof that every product store
-has applied a revision. Server Favorites progress is described below; client
-Track/Ask/draft replacement and browser acceptance remain separate work.
+has applied a revision. Server Favorites progress is described below; the client
+applies authorized revisions through its single composition owner. Stable view
+and payload owners preserve Track, Ask and drafts without retargeting queued sends.
 
 ## Host access revocation and explicit recovery
 
@@ -447,8 +585,9 @@ revisions are page-local and must not be reused as cross-reload recovery revisio
 
 On text save failure the existing Workbench keeps editing available and shows
 Retry. Keep the page open until recovery succeeds; retry saves the current text.
-Scope retirement fences both writes and late result publication. This prerequisite
-does not yet move drafts between native sessions or complete multi-store projection.
+Scope retirement fences both writes and late result publication. This primitive
+reports text persistence; the composition application owns draft-owner retention
+and the complete replacement projection described below.
 
 ## Atomic server Favorites projection
 
@@ -472,9 +611,8 @@ after uncertain persistence, never repeat native creation or input.
 Ordinary owner saves and removes for a committed predecessor reject with generic
 conflict, including current-tree-revision requests and unavailable successor
 mapping. A shared-only viewer retains its separately authorized concrete A; it
-acquires no B identity or access. Historical favorite schema and its navigation UI
-must be implemented together in the client slice. Other explicit historical
-addresses remain concrete.
+acquires no B identity or access. Historical favorite records and navigation retain
+explicit history intent. Other explicit historical addresses remain concrete.
 
 The complete Cloudflare SQL codec retains validated Relay/domain versions,
 ordered complete identities, optional presence, recovery credentials/history and
@@ -490,14 +628,13 @@ failure rolls back the SQL changes; sync rejection instead fences further writes
 until validated reopen of the complete snapshot actually exposed by storage.
 Neither outcome authorizes repeated native creation or input.
 
-The production store still accepts ordinary Relay2 state only and rejects
-succession/recovery state on restore and commit. An explicit constructor-only
-symbol permits isolated complete-codec fixtures; requests, stored state and
-production configuration cannot select it. The codec and Worker restart tests
-are complete. Derived feature admission and Host witness reservations have scoped
-verification. Host grant/cursor barriers passed independent review and fresh
-controlled fault/reopen verification (183 scoped Host tests and typecheck).
-Producer certification and combined acceptance remain required before enabling effects.
+The production `RelayObject` installs this complete codec and its trusted cost
+functions with succession enrollment enabled. The development-only constructor
+gate is removed. Default store validation, legacy SQL import, transaction and
+unknown-sync fences remain in the same implementation. Actual production-entry
+Miniflare tests exercise public prepare/commit, cold HTTP/WebSocket replay and
+Favorites continuity using a deterministic Host peer. They do not establish
+native-provider readiness, production resource limits or deployed availability.
 
 ## Ordinary relationship changes
 

@@ -166,6 +166,7 @@ it('installs across a session protocol change while retaining platform checks', 
   try {
     await updater.request(release.version, 'protocol-upgrade');
     await expect.poll(async () => (await updater.status()).phase).toBe('restarting');
+    await expect.poll(() => restart.mock.calls.length).toBe(1);
     expect(restart).toHaveBeenCalledWith(release.version);
   } finally { await updater.close(); }
 });

@@ -17,6 +17,7 @@ export class NativeInteractions {
   private readonly pending = new Map<string, Pending>();
   constructor(private readonly emit: (event: AgentStreamEvent) => void, private readonly rpc: () => CopilotSession['rpc'], private readonly call: <T>(operation: Promise<T>, label: string) => Promise<T>) {}
   get waiting(): boolean { return this.pending.size > 0; }
+  get pendingIds(): readonly string[] { return [...this.pending.keys()]; }
   trackTool(event: SessionEvent): void {
     if (event.type !== 'tool.execution_start') return;
     const owner = event.agentId ?? event.data.parentToolCallId;

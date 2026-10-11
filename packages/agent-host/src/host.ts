@@ -29,7 +29,7 @@ import { createVscodeTunnelManager, type VscodeTunnelOptions } from './vscode-tu
 import { createOperationCache, OperationCacheError, type OperationCacheOptions } from '@orchardworks/agent-remote-relay';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
-import type { AgentProviderAdapter, AgentSession, AgentSessionConfig, AgentSessionExtensions, AgentEmptyCreationResult, AgentNativeValidityToken } from '@orchardworks/agent-provider-sdk';
+import type { AgentProviderAdapter, AgentSession, AgentSessionConfig, AgentSessionExtensions, AgentEmptyCreationResult, AgentNativeValidityToken, AgentPersistenceHandle, AgentSessionResumeOptions } from '@orchardworks/agent-provider-sdk';
 import { AgentOperationRejectedError, AgentSessionInUseError, AgentRuntimeError, serializeAgentEmptyCreationResult, serializeAgentInputMaterialization } from '@orchardworks/agent-provider-sdk';
 import { PROTOCOL_VERSION, type HostEnvironment } from '@orchardworks/agent-remote-protocol';
 import { InputImageStore, type InputImageStoreOptions, createAgentRemoteRelay, createRemoteHostUplinkClient, type AgentRemoteHttpResult, type AgentRemoteRelay,
@@ -56,7 +56,7 @@ export interface AgentHostDirectory {
   canReleaseSession?(nativeSessionId: string): boolean;
   reconcileIdleSession?(nativeSessionId: string): Promise<boolean>;
   sessionReleased?(nativeSessionId: string): Promise<void> | void;
-  sessionWorkspace?(nativeSessionId: string): Promise<string | undefined>;
+  sessionWorkspace?(nativeSessionId: string, handle?: AgentPersistenceHandle): Promise<string | undefined>;
   setSourceAccessCheck?(check: (nativeSessionId: string) => Promise<void>): void;
   setSourceBindingReader?(reader: import('./session-reference.js').SourceBindingReader): void;
   sourceReferences?(): Promise<Array<{ nativeSessionId: string; sourceNativeSessionId: string }>>;
@@ -68,7 +68,7 @@ export interface AgentHostDirectory {
   create(input: Omit<AgentSessionConfig, 'sessionId'> & { workspaceId?: string; sourceNativeSessionId?: string; editNativeSessionId?: string; editTurnId?: string; editMessageId?: string }, evidence?: DirectoryMutationEvidence): Promise<string>;
   setSessionHandoffAdmission?(handler: (nativeSessionId: string, current: NativeOwnerIdentity, next: NativeOwnerIdentity) => NativeHandoffGrant): void;
   setSessionHandoffHandler?(handler: (nativeSessionId: string, next: NativeOwnerIdentity) => Promise<void>): void;
-  open(nativeSessionId: string, options?: { takeOver?: string; extensions?: AgentSessionExtensions; nativeCreation?: AgentEmptyCreationResult }): Promise<AgentSession>;
+  open(nativeSessionId: string, options?: { takeOver?: string; extensions?: AgentSessionExtensions; nativeCreation?: AgentEmptyCreationResult; resumeHandle?: AgentPersistenceHandle; resumeOptions?: AgentSessionResumeOptions }): Promise<AgentSession>;
   openChild?(parentNativeSessionId: string, nativeSessionId: string): Promise<AgentSession>;
   close(): Promise<void> | void;
 }
@@ -254,6 +254,10 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
   };
 }
 
+function hasCurrentNativeEvidence(owner: Pick<AgentProviderAdapter | AgentSession, 'nativeEvidence'>): boolean {
+  const evidence = owner.nativeEvidence?.availability(); return evidence?.status === 'configured' && evidence.version === 2;
+}
+
 interface Binding { agentId: string; providerId: string; nativeSessionId: string; parentNativeSessionId?: string }
 
 export function createAgentHostRuntime(options: AgentHostRuntimeOptions): AgentHostRuntime {
@@ -289,11 +293,13 @@ export function createAgentHostRuntime(options: AgentHostRuntimeOptions): AgentH
         const target = registration(targetProviderId);
         if (options.providerEnabled?.(targetProviderId) === false || !target.adapter.readSessionHistory
           || !target.directory.setSourceBindingReader || !target.directory.sourceReferences) return false;
-        return await nativeSuccession?.supports(source, targetProviderId) === true;
+        if (nativeSuccession) return await nativeSuccession.supports(source, targetProviderId) === true;
+        return target.directory.supportsSourceReferences === true && hasCurrentNativeEvidence(target.adapter) && hasCurrentNativeEvidence(registration(source.providerId).adapter);
       },
       async supportsBoundedProjection(source, targetProviderId) {
         await authorizeSuccessionRead(source, source);
-        return await nativeSuccession?.supportsBoundedProjection?.(source, targetProviderId) === true;
+        if (nativeSuccession) return await nativeSuccession.supportsBoundedProjection?.(source, targetProviderId) === true;
+        return boundedSourceIdentity(successionConfig.controllerId) && boundedSourceIdentity(targetProviderId) && hasCurrentNativeEvidence(registration(targetProviderId).adapter) && hasCurrentNativeEvidence(registration(source.providerId).adapter);
       },
       async inspect(source) {
         const lease = await acquireNative(source);
@@ -302,11 +308,11 @@ export function createAgentHostRuntime(options: AgentHostRuntimeOptions): AgentH
       async selectNativeCreation(source, operationId, targetProviderId) {
         await authorizeSuccessionRead(source, source);
         const evidence = registration(targetProviderId).adapter.nativeEvidence;
-        if (evidence?.availability().status !== 'configured') return undefined;
+        if (!hasCurrentNativeEvidence(registration(targetProviderId).adapter)) return undefined;
         const role = succession?.store.all().find(state => nativeSessionRefKey(state.role.current) === nativeSessionRefKey(source))?.role;
         if (!role) throw new Error('Native succession role is unavailable.');
-        const config = { sessionId: directoryOperationId(operationId), cwd: role.workspace.canonicalCwd };
-        return () => evidence.createEmpty(config);
+        const config = { sessionId: directoryOperationId(operationId), cwd: role.workspace.canonicalCwd, ...(source.providerId === targetProviderId ? { selectionSourceSessionId: source.nativeSessionId } : {}) };
+        return () => evidence!.createEmpty(config);
       },
       retainVerification,
       async createIdle(source, operationId, targetProviderId) {
@@ -331,7 +337,7 @@ export function createAgentHostRuntime(options: AgentHostRuntimeOptions): AgentH
         const lease = await acquireNative(delivery.target);
         try {
           const evidence = nativeAttachments.get(lease.agent)?.session.nativeEvidence;
-          if (!evidence) return undefined;
+          if (!evidence || evidence.availability().status !== 'configured' || (evidence.availability() as { version?: number }).version !== 2) return undefined;
           const result = await evidence.inspectInput(delivery.preparedInput.witness);
           return result.status === 'materialized' ? { outcome: 'materialized', nativeEvidence: serializeAgentInputMaterialization(result) } : undefined;
         } finally { lease.release(); }
@@ -349,7 +355,7 @@ export function createAgentHostRuntime(options: AgentHostRuntimeOptions): AgentH
     target => succession.coordinator.assertAdmission(target), target => {
       const role = succession.store.all().find(state => nativeSessionRefKey(state.role.current) === nativeSessionRefKey(target))?.role;
       return role ? { roleId: role.id, roleRevision: role.revision } : undefined;
-    }, operationCache, assertHandoffState, target => succession.coordinator.assertReservation(target), target => !!originalCreation(target)) : undefined;
+    }, operationCache, assertHandoffState, target => succession.coordinator.assertReservation(target), target => !!originalCreation(target), async operationId => { await successionService?.reconcileFirstInput(operationId); }) : undefined;
   succession?.coordinator.setAdmission(successionBoundary!);
   const relay = createAgentRemoteRelay({ providers: relayAdapters, operationCache, operationLifecycle: {
     settingIntent: (agent, accept) => successionBoundary ? successionBoundary.settingIntent(nativeRef(bindingFor(agent)), accept) : accept(),
@@ -457,19 +463,23 @@ export function createAgentHostRuntime(options: AgentHostRuntimeOptions): AgentH
   }
   async function authorizeSuccessionRead(reader: NativeSessionRef, source: NativeSessionRef): Promise<void> {
     for (const target of [reader, source]) {
-      originalCreation(target);
+      const creation = originalCreation(target);
       if (target.controllerId !== (successionConfig?.controllerId ?? options.controllerId ?? 'local')) throw new HostExecutionPolicyError('Source is outside this Controller.');
       if (options.providerEnabled?.(target.providerId) === false) throw new HostExecutionPolicyError('Source provider is disabled.');
       const directory = registration(target.providerId).directory;
-      const cwd = directory.sessionWorkspace ? await directory.sessionWorkspace(target.nativeSessionId)
+      const cwd = directory.sessionWorkspace ? await directory.sessionWorkspace(target.nativeSessionId, creation?.status === 'created' ? creation.handle : undefined)
         : (await directory.list()).find(item => item.nativeSessionId === target.nativeSessionId)?.workspace;
       if (!cwd) throw new HostExecutionPolicyError('Source workspace is unavailable.');
       if (options.executionPolicy) await allowedWorkspace(options.executionPolicy, cwd);
     }
   }
   async function inspectSuccession(source: NativeSessionRef, lease: RemoteHostSessionLease) {
-    if (!nativeSuccession) throw new SuccessionPreparationRejected('succession_unsupported_provider', 'This provider has not certified quiescent succession.');
-    const state = await nativeSuccession.inspect(source);
+    const session = nativeAttachments.get(lease.agent)?.session;
+    if (!nativeSuccession && (!session || !hasCurrentNativeEvidence(session))) throw new SuccessionPreparationRejected('succession_unsupported_provider', 'This provider has not certified quiescent succession.');
+    const context = succession?.contexts.forTarget(source);
+    if (context?.deliveries.some(item => item.preparedInput && !['started', 'handled'].includes(item.inputAcceptance?.disposition ?? '') && ['accepted', 'unknown', 'materialized'].includes(item.state))) await successionService?.reconcileFirstInput(context.operationId);
+    await successionBoundary?.reconcileCoverage(source);
+    const state = nativeSuccession ? await nativeSuccession.inspect(source) : { ...await session!.nativeEvidence!.inspectReadiness(), managed: succession!.contexts.coverageAvailable(source) };
     if (operationCache.hasUnsettledMutation(nativeSessionRefKey(source)) || tpm?.hasUnsettledMain(source)) {
       throw new SuccessionPreparationRejected('succession_delivery_unresolved', 'Reconcile unsettled operations before succession.');
     }
@@ -498,7 +508,7 @@ export function createAgentHostRuntime(options: AgentHostRuntimeOptions): AgentH
         const session = nativeAttachments.get(lease.agent)?.session;
         if (!session) throw new Error('Native succession attachment is unavailable.');
         const evidence = session.nativeEvidence;
-        if (requireEvidence && evidence?.availability().status !== 'configured') throw new Error('Native succession attachment evidence is unavailable.');
+        if (requireEvidence && !hasCurrentNativeEvidence(session)) throw new Error('Native succession attachment evidence is unavailable.');
         const token = requireEvidence ? evidence!.captureValidity() : undefined;
         entries.push({ target, lease, session, token });
       }
@@ -646,7 +656,7 @@ export function createAgentHostRuntime(options: AgentHostRuntimeOptions): AgentH
           }
         }
         const extensions = await tpm?.extensions(providerId, nativeSessionId);
-        const open = () => source.open(nativeSessionId, { ...(takeOver ? { takeOver } : {}), ...(extensions ? { extensions } : {}), ...(nativeCreation ? { nativeCreation } : {}) });
+        const open = () => source.open(nativeSessionId, { ...(takeOver ? { takeOver } : {}), ...(extensions ? { extensions } : {}), ...(nativeCreation ? { nativeCreation, resumeHandle: succession?.contexts.forTarget(nativeRef({ providerId, nativeSessionId }))?.resumeHandle, resumeOptions: { initializeEmpty: succession?.contexts.canInitializeEmpty(nativeRef({ providerId, nativeSessionId })) === true } } : {}) });
         const nativeSession = parentNativeSessionId === undefined ? await (takeOver
           ? directoryNativeEffect(successionBoundary?.currentEntry(), successionBoundary?.currentEntry()?.targets ?? [], async () => {
             try { return await open(); } catch (error) {
@@ -1069,15 +1079,19 @@ export function createAgentHostRuntime(options: AgentHostRuntimeOptions): AgentH
     cancelControllerRestart() { if (!closed) draining = false; },
     resolveSession(agentId) { idle.touch(agentId); return liveAgent(agentId); },
     close(): Promise<void> { return closePromise ??= (async () => {
-      closed = true;
+      closed = true; draining = true;
       await bounded(successionReady, shutdownTimeoutMs).catch(() => undefined);
       await bounded(tpm?.close() ?? Promise.resolve(), shutdownTimeoutMs).catch(() => undefined);
-      bindings.close();
-      const releasing = idle.close();
-      for (const catalog of catalogs.values()) catalog.dispose();
-      const cleanup = Promise.allSettled([releasing, relay.close(), ...[...registrations.values()].map(({ directory }) => Promise.resolve(directory.close())), ...pending]);
-      await bounded(cleanup, shutdownTimeoutMs);
-      successionBoundary?.close();
+      try {
+        await bounded(successionBoundary?.close() ?? Promise.resolve(), shutdownTimeoutMs);
+      } finally {
+        successionBoundary?.retireCoverageEvidence();
+        bindings.close();
+        const releasing = idle.close();
+        for (const catalog of catalogs.values()) catalog.dispose();
+        const cleanup = Promise.allSettled([releasing, relay.close(), ...[...registrations.values()].map(({ directory }) => Promise.resolve(directory.close())), ...pending]);
+        await bounded(cleanup, shutdownTimeoutMs);
+      }
     })(); } };
 }
 

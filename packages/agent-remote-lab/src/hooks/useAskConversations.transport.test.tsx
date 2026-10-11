@@ -7,6 +7,7 @@ import { conversationLocalStorage, conversationSessionStorage } from '../convers
 import { render, unmount } from '../test/setup.js';
 import { currentForkSource } from '../session-forks.js';
 import { sessionKey } from '../session-tree.js';
+import { createCompositionDocument, createCompositionSlot, createAskOwner } from '../session-composition.js';
 import { useAskConversations } from './useAskConversations.js';
 
 const servers: Server[] = [];
@@ -44,31 +45,43 @@ async function fixture(savedTarget: OpenedSession = target, source = current) {
   const directory = new SessionDirectoryClient(baseUrl, undefined, 'selected-host');
   const transport = {} as never;
   let ask!: ReturnType<typeof useAskConversations>;
-  function Harness() { ask = useAskConversations(baseUrl, transport, directory, 'selected-host'); return null; }
+  const document = createCompositionDocument(baseUrl);
+  function ownerFor(value: OpenedSession) {
+    const key = sessionKey(value);
+    let owner = document.asks.find(owner => owner.id === key);
+    if (!owner) {
+      const slot = createCompositionSlot(`view:${key}`, value, baseUrl); document.slots.push(slot);
+      owner = { ...createAskOwner(slot, baseUrl), id: key, text: { scope: `${baseUrl}:ask`, key } };
+      document.asks.push(owner); document.editRevision++;
+    }
+    return owner.id;
+  }
+  ownerFor(source);
+  function Harness() { ask = useAskConversations(document, transport, directory, 'selected-host'); return null; }
   let container = await render(<Harness />);
   const relation: SessionRelation = { id: 'retained-ask', kind: 'ask', createdAt: target.createdAt, source, target: savedTarget as SessionRelation['target'],
     hostLocator: { hostId: savedTarget.hostId ?? 'local', controllerId: 'ask-installation' },
     nativeSourceRef: { controllerId: 'ask-installation', providerId: 'codex', nativeSessionId: 'A' } };
   await act(async () => { ask.store.setSharedRelations([relation]); ask.setDraft(sessionKey(source), 'Retained question'); });
-  return { current: () => ask, requests, source, relation,
+  return { current: () => ask, requests, source, relation, ownerFor,
     responseId: (id?: string) => { responseId = id; }, fail: (message?: string) => { error = message; },
     reload: async () => { await unmount(container); container = await render(<Harness />); await act(async () => ask.store.setSharedRelations([relation])); } };
 }
 
 it('attaches a projected Ask using its own full Host/provider/native locator and preserves metadata on reload', async () => {
   const f = await fixture();
-  const record = f.current().entryFor(current).record!;
+  const record = f.current().entryFor(current, f.ownerFor(current)).record!;
   expect(f.requests).toEqual([]);
-  await act(async () => { await f.current().open(undefined, current); });
+  await act(async () => { await f.current().open(undefined, current, '', false, { associationOwner: f.ownerFor(current) }); });
   expect(f.requests).toEqual([{ path: '/v1/remote/hosts/ask-host/attach', body: { providerId: 'codex', nativeSessionId: 'X' } }]);
-  expect(f.current().entryFor(current)).toMatchObject({ attached: true, record: { id: record.id, target: { ...target, agentId: 'confirmed-X-agent' } } });
+  expect(f.current().entryFor(current, f.ownerFor(current))).toMatchObject({ attached: true, record: { id: record.id, target: { ...target, agentId: 'confirmed-X-agent' } } });
   expect(f.current().store.allLocal()).toEqual([]);
   await act(async () => f.current().store.setSharedRelations([{ ...f.relation, revision: 1, target: { ...target, agentId: 'refreshed-X-agent' } }]));
-  expect(f.current().entryFor(current).record?.id).toBe(record.id);
+  expect(f.current().entryFor(current, f.ownerFor(current)).record?.id).toBe(record.id);
   expect(f.requests).toHaveLength(1);
   await f.reload();
   expect(f.requests).toHaveLength(1);
-  await act(async () => { await f.current().open(undefined, current); });
+  await act(async () => { await f.current().open(undefined, current, '', false, { associationOwner: f.ownerFor(current) }); });
   expect(f.requests.at(-1)).toEqual(f.requests[0]);
   expect(f.current().drafts.get(sessionKey(current))).toBe('Retained question');
 });
@@ -76,14 +89,14 @@ it('attaches a projected Ask using its own full Host/provider/native locator and
 it('preserves requested X when attach omits the native result and rejects an explicit different native result', async () => {
   const f = await fixture();
   f.responseId();
-  await act(async () => { await f.current().open(undefined, current); });
-  expect(f.current().entryFor(current)).toMatchObject({ attached: true, record: { target: { ...target, agentId: 'confirmed-X-agent' } } });
+  await act(async () => { await f.current().open(undefined, current, '', false, { associationOwner: f.ownerFor(current) }); });
+  expect(f.current().entryFor(current, f.ownerFor(current))).toMatchObject({ attached: true, record: { target: { ...target, agentId: 'confirmed-X-agent' } } });
   f.responseId('wrong-native');
-  await act(async () => { await expect(f.current().open(undefined, current)).rejects.toThrow(/different|changed|match/i); });
-  expect(f.current().entryFor(current)).toMatchObject({ attached: false, busy: false, record: { target: { ...target, agentId: 'confirmed-X-agent' } } });
+  await act(async () => { await expect(f.current().open(undefined, current, '', false, { associationOwner: f.ownerFor(current) })).rejects.toThrow(/different|changed|match/i); });
+  expect(f.current().entryFor(current, f.ownerFor(current))).toMatchObject({ attached: false, busy: false, record: { target: { ...target, agentId: 'confirmed-X-agent' } } });
   expect(f.current().drafts.get(sessionKey(current))).toBe('Retained question');
   f.responseId('X');
-  await act(async () => { await f.current().open(undefined, current); });
+  await act(async () => { await f.current().open(undefined, current, '', false, { associationOwner: f.ownerFor(current) }); });
   expect(f.requests).toHaveLength(3);
   expect(f.requests.every(request => request.path === '/v1/remote/hosts/ask-host/attach' && request.body.providerId === 'codex' && request.body.nativeSessionId === 'X')).toBe(true);
 });
@@ -93,16 +106,16 @@ it.each([
   { saved: { ...target, hostId: 'other-host', providerId: 'claude' }, path: '/v1/remote/hosts/other-host/attach' },
 ])('normalizes omitted local Host and keeps identical native IDs distinct: $path', async ({ saved, path }) => {
   const f = await fixture(saved);
-  await act(async () => { await f.current().open(undefined, current); });
+  await act(async () => { await f.current().open(undefined, current, '', false, { associationOwner: f.ownerFor(current) }); });
   expect(f.requests).toEqual([{ path, body: { providerId: saved.providerId, nativeSessionId: 'X' } }]);
-  expect(f.current().entryFor(current).record?.target).toEqual({ ...saved, agentId: 'confirmed-X-agent' });
+  expect(f.current().entryFor(current, f.ownerFor(current)).record?.target).toEqual({ ...saved, agentId: 'confirmed-X-agent' });
 });
 
 it.each(['providerId', 'nativeSessionId'] as const)('rejects an incomplete saved %s without substituting the current source or running HTTP', async field => {
   const f = await fixture({ ...target, [field]: '' });
-  await act(async () => { await expect(f.current().open(undefined, current)).rejects.toThrow(/identity|locator|unavailable/i); });
+  await act(async () => { await expect(f.current().open(undefined, current, '', false, { associationOwner: f.ownerFor(current) })).rejects.toThrow(/identity|locator|unavailable/i); });
   expect(f.requests).toEqual([]);
-  expect(f.current().entryFor(current).attached).not.toBe(true);
+  expect(f.current().entryFor(current, f.ownerFor(current)).attached).not.toBe(true);
   expect(f.current().drafts.get(sessionKey(current))).toBe('Retained question');
 });
 
@@ -111,11 +124,11 @@ it('keeps nested Ask attached to Side S while only the primary ancestor moves', 
   const f = await fixture(target, side);
   const refreshedSide = { ...side, parentNativeSessionId: 'B' };
   await act(async () => f.current().store.setSharedRelations([{ ...f.relation, source: refreshedSide, revision: 1 }]));
-  const entry = f.current().entryFor(side);
+  const entry = f.current().entryFor(side, f.ownerFor(side));
   expect(sessionKey(currentForkSource(entry.record!))).toBe(sessionKey(side));
-  expect(f.current().entryFor(current).record).toBeUndefined();
+  expect(f.current().entryFor(current, f.ownerFor(current)).record).toBeUndefined();
   expect(f.requests).toEqual([]);
-  await act(async () => { await f.current().open(undefined, side); });
+  await act(async () => { await f.current().open(undefined, side, '', false, { associationOwner: f.ownerFor(side) }); });
   expect(f.requests).toEqual([{ path: '/v1/remote/hosts/ask-host/attach', body: { providerId: 'codex', nativeSessionId: 'X' } }]);
 });
 
@@ -126,11 +139,11 @@ it('routes explicit no-target retry to the checked original Host/provider/option
     creationSource: { providerId: 'codex', nativeSessionId: 'A' } };
   let pending!: import('../session-forks.js').SessionFork;
   await act(async () => { pending = f.current().store.prepare({ mode: 'reference', source: original, capturedAt: '2026-10-10T00:00:00.000Z' }, options, [], sessionKey(original)); });
-  const retained = f.current().entryFor(original);
+  const retained = f.current().entryFor(original, f.ownerFor(original));
   retained.pending = { ...pending, source: current, options: { model: 'projected-model' } };
   retained.source = current;
   expect(f.requests).toEqual([]);
-  await act(async () => { await f.current().open(undefined, original); });
+  await act(async () => { await f.current().open(undefined, original, '', false, { associationOwner: f.ownerFor(original) }); });
   expect(f.requests).toEqual([{ path: '/v1/remote/hosts/original-host/create', body: { providerId: 'codex', operationId: pending.id,
     conversationKind: 'ask', sourceNativeSessionId: 'A', model: 'original-model', cwd: '/original', creationSource: { providerId: 'codex', nativeSessionId: 'A' } } }]);
   expect(f.current().store.getLocal(pending.id)).toMatchObject({ source: original, options, settings: [], target: { hostId: 'original-host', providerId: 'codex', nativeSessionId: 'X' } });
@@ -139,16 +152,16 @@ it('routes explicit no-target retry to the checked original Host/provider/option
 
 it('retains the existing participant and its source-scoped state when shared navigation source moves again', async () => {
   const f = await fixture();
-  await act(async () => { await f.current().open(undefined, current); });
-  const confirmed = f.current().entryFor(current).record!;
+  await act(async () => { await f.current().open(undefined, current, '', false, { associationOwner: f.ownerFor(current) }); });
+  const confirmed = f.current().entryFor(current, f.ownerFor(current)).record!;
   const moved = { ...current, nativeSessionId: 'C', agentId: 'C-agent', title: 'Current C' };
   await act(async () => f.current().store.setSharedRelations([{ ...f.relation, source: moved, revision: 1 }]));
-  expect(f.current().entryFor(current)).toMatchObject({ attached: true, record: { id: confirmed.id, target: { ...target, agentId: 'confirmed-X-agent' } } });
-  expect(currentForkSource(f.current().entryFor(current).record!)).toEqual(moved);
-  expect(f.current().isOpen(current)).toBe(true);
-  expect(f.current().isEnabled(current)).toBe(true);
+  expect(f.current().entryFor(current, f.ownerFor(current))).toMatchObject({ attached: true, record: { id: confirmed.id, target: { ...target, agentId: 'confirmed-X-agent' } } });
+  expect(currentForkSource(f.current().entryFor(current, f.ownerFor(current)).record!)).toEqual(moved);
+  expect(f.current().isOpen(current, f.ownerFor(current))).toBe(true);
+  expect(f.current().isEnabled(current, f.ownerFor(current))).toBe(true);
   expect(f.current().drafts.get(sessionKey(current))).toBe('Retained question');
   expect(f.current().drafts.get(sessionKey(moved))).toBe('');
   expect(f.requests).toHaveLength(1);
-  expect(f.current().entryFor(moved).attached).not.toBe(true);
+  expect(f.current().entryFor(moved, f.ownerFor(moved)).attached).not.toBe(true);
 });

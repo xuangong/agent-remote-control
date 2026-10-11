@@ -12,13 +12,18 @@ import {isNativeInteraction} from './interaction-mapping.js';
 import {CopilotImages} from './images.js';
 import { NativeInteractions } from './interactions.js';
 import {copilotContextUsage, copilotSessionUsage} from './usage.js';
+import type {AgentSessionNativeEvidence, AgentNativeAuthorityScope} from '@orchardworks/agent-provider-sdk';
+import {CopilotSessionNativeEvidence, copilotEmptyHandle, type CopilotEmptyDescriptor, type CopilotNativeSelections} from './native-evidence.js';
 export class CopilotAgentSession implements AgentSession {
+  readonly nativeEvidence: AgentSessionNativeEvidence;
+  private readonly evidence: CopilotSessionNativeEvidence;
+  private descriptor?: CopilotEmptyDescriptor;
   readonly capabilities: AgentCapabilities = { imageInput: structuredClone(IMAGE_INPUT_CAPABILITIES), history: true, sendMessage: true, queueMessage: true, steer: true, cancel: true, readResource: true, commands: false, sessionSettings: false, interactions: {question: true, toolApproval: true, planApproval: false, form: true, externalAction: true} };
   readonly stream = new Channel<ProviderStreamItem>();
   private readonly projector: Projector;
   private readonly images: CopilotImages;
   private readonly seen = new Set<string>();
-  private readonly interactions = new NativeInteractions(event => this.emit(event), () => this.rpc, (operation, label) => this.call(operation, label));
+  private readonly interactions = new NativeInteractions(event => this.emit(event), () => this.rpc, (operation, label) => this.mutateNative(() => operation, label));
   private readonly children = new Map<string, CopilotChildSession>();
   private readonly resources = new Map<string, string>();
   private unsubscribe?: () => void;
@@ -39,16 +44,25 @@ export class CopilotAgentSession implements AgentSession {
   private todosSignature = '[]';
   private native!: CopilotSession;
   private info: AgentRuntimeInfo;
-  private constructor(private readonly config: AgentSessionConfig, private readonly options: CopilotAgentProviderOptions, private readonly onDispose: () => void) {
+  private constructor(private readonly config: AgentSessionConfig, private readonly options: CopilotAgentProviderOptions, private readonly onDispose: () => void, evidence: {authority:AgentNativeAuthorityScope;descriptor?:CopilotEmptyDescriptor}) {
     this.projector = new Projector(config.cwd);
     this.images = new CopilotImages(config.sessionId);
     this.info = {providerId: provider, sessionId: config.sessionId, status: 'idle', cwd: config.cwd, model: config.model, childSessions: [], persistence: {providerId: provider, sessionId: config.sessionId, opaque: JSON.stringify({cwd: config.cwd, systemPrompt: config.systemPrompt, instructions: config.instructions})}};
+    this.descriptor=evidence.descriptor?{...structuredClone(evidence.descriptor),systemPrompt:config.systemPrompt,instructions:config.instructions}:undefined;
+    if(this.descriptor) this.info.persistence=copilotEmptyHandle(this.descriptor);
+    this.evidence=new CopilotSessionNativeEvidence({sessionId:config.sessionId,cwd:config.cwd!,authority:evidence.authority,native:()=>this.native,isOpen:()=>!this.closed&&!!this.native,
+      call:(operation,label)=>this.call(operation,label),pendingInteractionIds:()=>this.interactions.pendingIds,system:()=>[config.systemPrompt,config.instructions].filter(Boolean).join('\n\n'),
+      confirmedToolApproval:()=>{const value=this.info.settings?.find(setting=>setting.id==='tool_approval_mode')?.value;return value==='ask'||value==='allow'?value:undefined;},
+      confirmedSelections:selections=>this.updatePreparedSelections(selections)});
+    this.nativeEvidence=Object.freeze<AgentSessionNativeEvidence>({availability:()=>this.evidence.availability(),inspectReadiness:()=>this.evidence.inspectReadiness(),prepareInput:(parts,options)=>this.evidence.prepareInput(parts,options),
+      dispatchInput:witness=>this.evidence.dispatchInput(witness),inspectInput:witness=>this.evidence.inspectInput(witness),captureValidity:()=>this.evidence.captureValidity(),isCurrent:token=>this.evidence.isCurrent(token)});
   }
-  static async open(client: CopilotClient, config: AgentSessionConfig, resume: boolean, options: CopilotAgentProviderOptions, onDispose: () => void): Promise<CopilotAgentSession> {
-    const self = new CopilotAgentSession(config, options, onDispose);
+  static async open(client: CopilotClient, config: AgentSessionConfig, resume: boolean, options: CopilotAgentProviderOptions, onDispose: () => void, evidence:{authority:AgentNativeAuthorityScope;descriptor?:CopilotEmptyDescriptor}): Promise<CopilotAgentSession> {
+    const self = new CopilotAgentSession(config, options, onDispose,evidence);
     const tools = bindAgentSessionTools(config.tools, () => self.assertOpen());
     const instructions = [config.systemPrompt, config.instructions].filter(Boolean).join('\n\n');
     const nativeConfig: SessionConfig = { ...options.nativeSessionConfig, sessionId: config.sessionId, workingDirectory: config.cwd, model: config.model, reasoningEffort: reasoningEffort(config.reasoningEffort), streaming: true, includeSubAgentStreamingEvents: true,
+      ...(!resume&&evidence.descriptor?{agent:evidence.descriptor.selections.agent,contextTier:evidence.descriptor.selections.contextTier as SessionConfig['contextTier']}:{}),
       systemMessage: instructions ? {mode: 'append', content: instructions} : undefined,
       ...(tools.length ? { tools: tools.map(({ name, description, inputSchema, execute }) => ({ name, description, parameters: inputSchema, handler: execute })) } : {}),
       onPermissionRequest: async () => ({kind: 'no-result'}),
@@ -62,6 +76,7 @@ export class CopilotAgentSession implements AgentSession {
       }).catch(error => options.onDiagnostic?.(`Copilot late session cleanup: ${String(error)}`));
       self.native = await self.call(opening, 'Open Copilot session');
       self.unsubscribe = self.native.on(event => {
+        self.evidence.accept(event);
         if (!event.agentId && !record(event.data).parentToolCallId && ['assistant.turn_start', 'assistant.idle', 'abort', 'session.error'].includes(event.type)) self.foregroundRevision++;
         self.interactions.accept(event); if (self.buffered) self.buffered.push(event); else self.accept(event, 'live'); });
       const history = await self.call(self.native.getEvents(), 'Read Copilot history');
@@ -95,6 +110,11 @@ export class CopilotAgentSession implements AgentSession {
       if (!processing && self.foregroundRevision === activityRevision) self.accept({type: 'assistant.idle', id: `activity-idle:${randomUUID()}`, parentId: null, timestamp: new Date().toISOString(), ephemeral: true, data: {}} as SessionEvent, 'live');
       self.emit({type: 'thread_started', provider, sessionId: config.sessionId});
       await self.refreshControls(); await self.initializePermissions(resume); await self.refreshMode();
+      if(!resume&&evidence.descriptor) {
+        const selected=evidence.descriptor.selections;
+        if(selected.mode!==self.info.mode) {await self.mutateNative(() => self.rpc.mode.set({mode:selected.mode}),'Restore Copilot mode');await self.refreshMode();if(self.info.mode!==selected.mode) throw new Error('Copilot did not confirm the prepared mode.');}
+        if(selected.toolApproval&&self.info.settings?.find(setting=>setting.id==='tool_approval_mode')?.value!==selected.toolApproval) await self.setSessionSetting('tool_approval_mode',selected.toolApproval);
+      }
       if (config.planning !== undefined) await self.setPlanning(config.planning);
       await self.refreshTodos(); await self.refreshChildren(); self.emitRuntime();
       self.scheduleUsageRefresh(true); void self.refreshInitialContext();
@@ -105,6 +125,18 @@ export class CopilotAgentSession implements AgentSession {
   get rpc(): CopilotSession['rpc'] { return this.native.rpc; }
   get isClosed() { return this.closed; }
   get cwd() { return this.config.cwd; }
+  async successionSelections() {return {selections:await this.evidence.emptySelections(),...(this.config.systemPrompt!==undefined?{systemPrompt:this.config.systemPrompt}:{}),...(this.config.instructions!==undefined?{instructions:this.config.instructions}:{})};}
+  private updatePreparedSelections(selections:CopilotNativeSelections):void {if(this.descriptor){this.descriptor={...this.descriptor,selections:{...selections}};this.info.persistence=copilotEmptyHandle(this.descriptor);}}
+  private updatePreparedControl(values:Partial<CopilotNativeSelections>):void {if(this.descriptor)this.updatePreparedSelections({...this.descriptor.selections,...values});}
+  beginNativeEffect():()=>void {return this.evidence.beginEffect();}
+  async mutateNative<T>(operation: () => Promise<T>, label: string): Promise<T> {
+    const finish = this.beginNativeEffect();
+    let pending: Promise<T>;
+    try { pending = operation(); } catch (error) { finish(); throw error; }
+    // Keep admission closed while a timed-out native mutation remains unsettled.
+    void pending.then(finish, finish);
+    return this.call(pending, label);
+  }
   observe(): AsyncIterable<ProviderStreamItem> { if (this.observed) throw new Error('Copilot observation already attached.'); this.observed = true; return this.stream; }
   emit(event: AgentStreamEvent): void { if (this.buffered) { this.deferredEvents.push(event); return; } if (!this.closed) this.stream.push({type: 'observation', sourceKey: `copilot:local:${randomUUID()}`, occurredAt: Date.now(), delivery: 'live', event}); }
   private emitRuntime() { this.emit({type: 'runtime_updated', provider, runtimeInfo: structuredClone({...this.info, status: this.info.status})}); }
@@ -137,13 +169,15 @@ export class CopilotAgentSession implements AgentSession {
       if (!this.updatingPermissions) {this.applyPermissions(null); this.emitRuntime();}
     }
     if (delivery === 'live' && event.type === 'session.mode_changed') {
-      this.info.mode = event.data.newMode; this.info.planning = {active: event.data.newMode === 'plan'}; this.emitRuntime();
+      this.info.mode = event.data.newMode; this.info.planning = {active: event.data.newMode === 'plan'};
+      this.updatePreparedControl({mode:event.data.newMode}); this.emitRuntime();
     }
     if (delivery === 'live' && event.type === 'session.todos_changed') void this.refreshTodos();
     if (delivery === 'live' && !owner && event.type === 'session.model_change') {
       // Preserve every native transition even if the model queue drains before readback.
       this.controlsRevision++;
       this.info.model = event.data.newModel;
+      this.updatePreparedControl({model:event.data.newModel});
       const setting = this.info.settings?.find(setting => setting.id === 'model');
       if (setting) setting.value = event.data.newModel;
       this.emitRuntime();
@@ -196,21 +230,21 @@ export class CopilotAgentSession implements AgentSession {
     }
   }
   async respondToInteraction(id: string, response: AgentInteractionResponse): Promise<void> {
-    await this.interactions.respond(id, response); this.emitRuntime();
+    const finish=this.beginNativeEffect();try {await this.interactions.respond(id, response); this.emitRuntime();} finally {finish();}
   }
   private assertOpen() { if (this.closed) throw new AgentOperationRejectedError('operation_rejected', 'Copilot session is closed.'); }
-  async sendMessage(text: string, options?: AgentMessageOptions): Promise<void> { this.assertOpen(); await this.call(this.native.send({prompt: text, mode: options?.delivery === 'next_turn' ? 'enqueue' : 'immediate'}), 'Copilot input'); }
+  async sendMessage(text: string, options?: AgentMessageOptions): Promise<void> { this.assertOpen();const finish=this.beginNativeEffect();try {await this.mutateNative(() => this.native.send({prompt: text, mode: options?.delivery === 'next_turn' ? 'enqueue' : 'immediate'}), 'Copilot input');} finally {finish();} }
   async sendMessageContent(parts: readonly AgentInputPart[], options?: AgentMessageOptions): Promise<void> {
     this.assertOpen();
     if (!parts.some(p => p.type === 'image')) return this.sendMessage(parts.flatMap(p => p.type === 'text' ? [p.text] : []).join('\n'), options);
     if (!this.capabilities.imageInput) throw new AgentOperationRejectedError('operation_rejected', 'The selected Copilot model does not advertise image input.');
     const input = await prepareAgentOperation(() => this.images.input(parts, this.capabilities.imageInput!));
     this.assertOpen();
-    await this.call(this.native.send({...input, mode: options?.delivery === 'next_turn' ? 'enqueue' : 'immediate'}), 'Copilot image input');
+    const finish=this.beginNativeEffect();try {await this.mutateNative(() => this.native.send({...input, mode: options?.delivery === 'next_turn' ? 'enqueue' : 'immediate'}), 'Copilot image input');} finally {finish();}
   }
   async steer(text: string): Promise<void> { await this.sendMessage(text, {delivery: 'immediate'}); }
-  async cancel(): Promise<void> { this.assertOpen(); await this.call(this.rpc.interruptMainTurn({}), 'Copilot cancellation');
-    this.interactions.cancelOwner(); this.emitRuntime();
+  async cancel(): Promise<void> { this.assertOpen();const finish=this.beginNativeEffect();try {await this.mutateNative(() => this.rpc.interruptMainTurn({}), 'Copilot cancellation');
+    this.interactions.cancelOwner(); this.emitRuntime();} finally {finish();}
   }
   private async refreshControls(): Promise<void> {
     const revision = ++this.controlsRevision;
@@ -218,6 +252,7 @@ export class CopilotAgentSession implements AgentSession {
       const [current, listing] = await Promise.all([this.call(this.rpc.model.getCurrent(), 'Copilot model'), this.call(this.rpc.model.list(), 'Copilot models')]);
       if (this.closed || revision !== this.controlsRevision) return;
       this.info.model = current.modelId;
+      if(current.modelId) this.updatePreparedControl({model:current.modelId,reasoningEffort:current.reasoningEffort,contextTier:current.contextTier});
       const permissions = this.info.settings?.filter(s => s.category === 'permissions') ?? [];
       this.info.settings = [...permissions, {id: 'model', category: 'model', label: 'Model', value: current.modelId ?? null, options: listing.list.map(record).filter(model => typeof model.id === 'string').map(model => ({value: model.id as string, label: typeof model.name === 'string' ? model.name : model.id as string})), mutable: true, scope: 'session'}];
       const model = listing.list.map(record).find(m => m.id === current.modelId);
@@ -252,6 +287,7 @@ export class CopilotAgentSession implements AgentSession {
     }
   }
   private applyPermissions(value: 'ask' | 'allow' | null): void {
+    this.updatePreparedControl({toolApproval:value??undefined});
     this.info.settings = [...(this.info.settings ?? []).filter(s => s.id !== 'tool_approval_mode'), {
       id: 'tool_approval_mode', category: 'permissions', label: 'Tool approvals', value, mutable: true, scope: 'session',
       description: 'Controls native tool approval. Path, URL, and managed permission rules are checked separately.',
@@ -265,16 +301,17 @@ export class CopilotAgentSession implements AgentSession {
   private async initializePermissions(resume: boolean): Promise<void> {
     try {
       // The stdio runtime exposes mutations but no tool-policy getter. Do not infer restored policy.
-      const result = await this.call(resume ? this.rpc.permissions.configure({}) : this.rpc.permissions.setApproveAll({enabled: false}), 'Copilot tool permissions');
+      const result = await this.mutateNative(() => resume ? this.rpc.permissions.configure({}) : this.rpc.permissions.setApproveAll({enabled: false}), 'Copilot tool permissions');
       if (result.success) this.applyPermissions(resume ? null : 'ask');
     } catch (error) {this.options.onDiagnostic?.(`Copilot permission controls unavailable: ${String(error)}`);}
   }
   async setSessionSetting(id: string, value: string): Promise<void | {status: 'pending'}> {
     this.assertOpen(); validateSessionSetting(this.info.settings, id, value);
+    const finish=this.beginNativeEffect();try {
     if (id === 'tool_approval_mode') {
       this.updatingPermissions = true;
       try {
-        const result = await this.call(this.rpc.permissions.setApproveAll({enabled: value === 'allow'}), 'Copilot tool permissions');
+        const result = await this.mutateNative(() => this.rpc.permissions.setApproveAll({enabled: value === 'allow'}), 'Copilot tool permissions');
         if (!result.success) throw new Error('Copilot did not confirm the requested tool approval mode.');
         this.applyPermissions(value as 'ask' | 'allow'); this.emitRuntime();
       } catch (error) {
@@ -284,20 +321,22 @@ export class CopilotAgentSession implements AgentSession {
       return;
     }
     if (id === 'reasoning_effort') {
-      await this.call(this.rpc.model.setReasoningEffort({reasoningEffort: value}), 'Copilot reasoning effort');
+      await this.mutateNative(() => this.rpc.model.setReasoningEffort({reasoningEffort: value}), 'Copilot reasoning effort');
       this.controlsRevision++;
     }
     else {
-      const result = await this.call(this.rpc.model.switchTo({modelId: value, deferIfModelChangeQueued: true}), 'Copilot model switch');
+      const result = await this.mutateNative(() => this.rpc.model.switchTo({modelId: value, deferIfModelChangeQueued: true}), 'Copilot model switch');
       this.controlsRevision++;
       // Native queue acceptance is not confirmation that the live model changed.
       if (result.deferred) return {status: 'pending'};
     }
     await this.refreshControls(); this.emitRuntime();
+    } finally {finish();}
   }
   private async refreshMode(): Promise<void> {
     try {
       this.info.mode = await this.call(this.rpc.mode.get(), 'Copilot mode');
+      this.updatePreparedControl({mode:this.info.mode as CopilotNativeSelections['mode']});
       this.info.planning = {active: this.info.mode === 'plan'};
       this.capabilities.planning = true; this.capabilities.interactions.planApproval = true;
     } catch (error) {this.options.onDiagnostic?.(`Copilot planning unavailable: ${String(error)}`);}
@@ -305,9 +344,10 @@ export class CopilotAgentSession implements AgentSession {
   async setPlanning(active: boolean): Promise<void> {
     this.assertOpen();
     if (!this.capabilities.planning) throw new AgentOperationRejectedError('operation_rejected', 'Copilot planning is unavailable.');
-    await this.call(this.rpc.mode.set({mode: active ? 'plan' : 'interactive'}), 'Copilot planning mode');
+    const finish=this.beginNativeEffect();try {await this.mutateNative(() => this.rpc.mode.set({mode: active ? 'plan' : 'interactive'}), 'Copilot planning mode');
     await this.refreshMode(); this.emitRuntime();
     if (this.info.planning?.active !== active) throw new Error('Copilot did not confirm the requested planning mode.');
+    } finally {finish();}
   }
   private refreshTodos(): Promise<void> {
     this.todosRefresh = this.todosRefresh.then(async () => {
@@ -337,16 +377,18 @@ export class CopilotAgentSession implements AgentSession {
     const command = (await prepareAgentOperation(() => this.listCommands())).find(command => command.id === id);
     if (!command) throw new AgentOperationRejectedError('operation_rejected', 'Unknown or disabled Copilot skill.');
     this.assertOpen();
-    const result = await this.call(this.rpc.commands.invoke({name: command.name, input: args}), 'Invoke Copilot skill');
+    const finish=this.beginNativeEffect();try {
+    const result = await this.mutateNative(() => this.rpc.commands.invoke({name: command.name, input: args}), 'Invoke Copilot skill');
     if (result.runtimeSettingsChanged) { await this.refreshControls(); this.emitRuntime(); }
     if (result.kind === 'agent-prompt') {
       if (result.mode && result.mode !== 'interactive') throw new Error('Copilot skill requested an unsupported agent mode.');
-      await this.call(this.native.send({prompt: result.prompt, displayPrompt: result.displayPrompt, mode: 'immediate'}), 'Send Copilot skill prompt');
+      await this.mutateNative(() => this.native.send({prompt: result.prompt, displayPrompt: result.displayPrompt, mode: 'immediate'}), 'Send Copilot skill prompt');
       return {text: result.notice};
     }
     if (result.kind === 'text') return {text: result.text};
     if (result.kind === 'completed') return {text: result.message};
     throw new Error('Copilot skill requires unsupported subcommand selection.');
+    } finally {finish();}
   }
   async readResource(locator: string) {
     this.assertOpen();
@@ -399,6 +441,7 @@ export class CopilotAgentSession implements AgentSession {
   }
   async dispose(): Promise<void> {
     if (this.closed) return; this.interactions.dispose(); this.images.stop(); this.closed = true; this.unsubscribe?.(); await Promise.allSettled([...this.children.values()].map(child => child.dispose()));
+    this.evidence.invalidate();
     clearTimeout(this.usageRefreshTimer); this.usageRefreshTimer = undefined;
     this.info.status = 'closed'; this.stream.close(); this.onDispose();
     if (this.native) await this.call(this.native.disconnect(), 'Disconnect Copilot session');

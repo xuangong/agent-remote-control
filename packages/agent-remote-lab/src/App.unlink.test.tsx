@@ -11,7 +11,7 @@ import { ForkStore, referenceForkContext } from './session-forks.js';
 import { createProtocolValidationServer } from './server.js';
 import { createRecordedLabProvider } from './server/recorded.js';
 import { replicaState } from './test/fixtures.js';
-import { render, unmount } from './test/setup.js';
+import { render, unmount, setPromptText, promptText } from './test/setup.js';
 
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); localStorage.clear(); sessionStorage.clear(); window.history.replaceState(null, '', '/'); });
 
@@ -58,7 +58,7 @@ it('does not reopen a side unlinked during configuration, while still delivering
       actions={{ sendMessage: async () => { throw new Error('The slash command must not send to its source.'); } }} />);
     const sourceInput = view.querySelector<HTMLTextAreaElement>('.lab-primary-conversation [data-testid="prompt-input"]')!;
     await act(async () => {
-      Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!.call(sourceInput, '/side Finish this requested task');
+      setPromptText(sourceInput, '/side Finish this requested task');
       sourceInput.dispatchEvent(new Event('input', { bubbles: true }));
     });
     await act(async () => view!.querySelector<HTMLButtonElement>('.lab-primary-conversation [data-testid="prompt-submit"]')!.click());

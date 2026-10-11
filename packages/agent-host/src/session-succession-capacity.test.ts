@@ -124,7 +124,7 @@ test.each(['accepted', 'unknown', 'restart'] as const)('optional %s keeps a comp
   const context = attachment('input'); await store.attach(context);
   const input = { operationId: 'delivery', roleId: 'input', roleRevision: 2, target: context.target, text: transition === 'unknown' ? '\u0000'.repeat(300000) : '\n"\\中'.repeat(200) };
   const text = quotedSessionContextPrefix({ id: context.operationId, sourceSession: context.source.nativeSessionId, capturedAt: context.capturedAt, text: context.text }) + input.text;
-  const witness = { version: 1 as const, providerId: 'fixture', nativeSessionId: context.target.nativeSessionId, nativeInputId: 'U', cwd: '\u0001'.repeat(4096), store: { authorityId: 'authority', storeId: 'store' },
+  const witness = { version: 2 as const, providerId: 'fixture', nativeSessionId: context.target.nativeSessionId, inputId: 'U', cwd: '\u0001'.repeat(4096), authority: { kind: 'trusted-service' as const, authorityId: 'authority', namespaceId: 'store' },
     parts: [{ type: 'text' as const, text }] as const, content: { encoding: 'utf-8' as const, bytes: Buffer.byteLength(text), sha256: hash(text) }, selections: {} };
   await store.begin('input', input, witness);
   if (transition !== 'restart') await store.settle('input', 'delivery', transition, transition === 'accepted' ? { disposition: 'started' } : undefined);
@@ -132,9 +132,9 @@ test.each(['accepted', 'unknown', 'restart'] as const)('optional %s keeps a comp
   let current = store;
   if (transition === 'restart') { current = new SessionSuccessionContextStore(directory); await current.ready; }
   const state = JSON.parse(await readFile(path, 'utf8')), delivery = state.attachments[0].deliveries[0];
-  const nativeEvidence = serializeAgentInputMaterialization({ status: 'materialized', proof: { version: 1, providerId: witness.providerId, nativeSessionId: witness.nativeSessionId, nativeInputId: witness.nativeInputId, cwd: witness.cwd, store: witness.store,
-    witnessSha256: hash(serializeAgentPreparedTextInput(witness)), contentSha256: witness.content.sha256, nativeSelectionsSha256: hash('{}'), nativePartIds: ['p'.repeat(256)] } });
-  const future = structuredClone(state); future.attachments[0].state = 'materialized'; Object.assign(future.attachments[0].deliveries[0], { state: 'materialized', nativeEvidence, reservedBytes: '00000000' });
+  const nativeEvidence = serializeAgentInputMaterialization({ status: 'materialized', proof: { version: 2, providerId: witness.providerId, nativeSessionId: witness.nativeSessionId, inputId: witness.inputId, nativeInputId: 'U'.repeat(256), cwd: witness.cwd, authority: witness.authority,
+    witnessSha256: hash(serializeAgentPreparedTextInput(witness)), contentSha256: witness.content.sha256, nativeSelectionsSha256: hash('{}'), nativePartIds: ['p'.repeat(256)] }, execution: { disposition: 'started', nativeExecutionId: 'R'.repeat(256) } });
+  const future = structuredClone(state); future.attachments[0].state = 'materialized'; Object.assign(future.attachments[0].deliveries[0], { state: 'materialized', nativeEvidence, inputAcceptance: { disposition: 'started' }, reservedBytes: '00000000' });
   const growth = encodedBytes(future) - encodedBytes(state);
   expect(Number(delivery.reservedBytes)).toBe(growth); expect(growth).toBeGreaterThan(28000);
   fillContextState(state, SUCCESSION_STORE_BYTES - growth); await writeFile(path, JSON.stringify(state));
@@ -144,9 +144,8 @@ test.each(['accepted', 'unknown', 'restart'] as const)('optional %s keeps a comp
   await full.reconcile('input', { operationId: 'delivery', target: context.target, roleRevision: 2, outcome: 'materialized', nativeEvidence });
   expect(Buffer.byteLength(await readFile(path, 'utf8'))).toBe(SUCCESSION_STORE_BYTES);
   const final = new SessionSuccessionContextStore(directory); await final.ready;
-  expect(final.delivery('delivery')).toMatchObject({ state: 'materialized', nativeEvidence, reservedBytes: '00000000' });
-  if (transition === 'accepted') expect(final.delivery('delivery')!.inputAcceptance).toEqual({ disposition: 'started' });
-  else expect(final.delivery('delivery')!.inputAcceptance).toBeUndefined();
+  expect(final.delivery('delivery')).toMatchObject({ state: 'materialized', nativeEvidence, inputAcceptance: { disposition: 'started' }, reservedBytes: '00000000' });
+  expect(final.delivery('delivery')!.inputAcceptance).toEqual({ disposition: 'started' });
 });
 
 test('optional admission rejects one byte beyond its full reachable representation without losing the pending context', async () => {
@@ -156,7 +155,7 @@ test('optional admission rejects one byte beyond its full reachable representati
   const path = join(directory, 'context.json'), before = JSON.parse(await readFile(path, 'utf8'));
   const input = { operationId: 'delivery', roleId: 'input', roleRevision: 2, target: context.target, text: 'work' };
   const text = quotedSessionContextPrefix({ id: context.operationId, sourceSession: context.source.nativeSessionId, capturedAt: context.capturedAt, text: context.text }) + input.text;
-  const witness = { version: 1 as const, providerId: 'fixture', nativeSessionId: context.target.nativeSessionId, nativeInputId: 'U', cwd: '/workspace', store: { authorityId: 'authority', storeId: 'store' }, parts: [{ type: 'text' as const, text }] as const,
+  const witness = { version: 2 as const, providerId: 'fixture', nativeSessionId: context.target.nativeSessionId, inputId: 'U', cwd: '/workspace', authority: { kind: 'trusted-service' as const, authorityId: 'authority', namespaceId: 'store' }, parts: [{ type: 'text' as const, text }] as const,
     content: { encoding: 'utf-8' as const, bytes: Buffer.byteLength(text), sha256: createHash('sha256').update(text).digest('hex') }, selections: {} };
   await store.begin('input', input, witness);
   const admitted = JSON.parse(await readFile(path, 'utf8'));

@@ -81,7 +81,7 @@ async function makeCase(kind: string) {
       messageTexts: texts.map((text: string) => ({ length: text.length, digest: digest(text), excerpt: text.slice(0, 800) })) });
     if (substantive) held = response;
     else if (title) nativeReply(response, [{ type: 'text', text: 'Isolated input persistence' }]);
-  });
+  }, { sessionTitles: 'manual' });
   const home = join(root, 'home');
   const xdg = ['config', 'cache', 'data'].map(name => join(root, `xdg-${name}`));
   await Promise.all([home, ...xdg].map(path => mkdir(path)));

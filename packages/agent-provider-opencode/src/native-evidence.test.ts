@@ -10,18 +10,26 @@ import { OpenCodeTransport } from './transport.js';
 
 const cleanups: Array<() => Promise<void>> = [];
 afterEach(async () => { const failures: unknown[] = []; for (const cleanup of cleanups.splice(0).reverse()) { try { await cleanup(); } catch (error) { failures.push(error); } } if (failures.length) throw new AggregateError(failures, 'Fixture cleanup failed.'); });
-async function fixture(configured = true) {
+async function fixture(configured: boolean | 'supplier' = true) {
   const temporary = await mkdtemp(join(tmpdir(), 'arc-native-evidence-'));
   cleanups.push(() => rm(temporary, { recursive: true, force: true }));
   const cwd = await realpath(temporary);
   const native: any = { id: 'ses_B', directory: cwd, title: 'Fixture', model: { providerID: 'test', id: 'model' }, agent: 'build', time: { created: 1, updated: 1 } };
+  const natives = new Map<string, any>([['ses_B', native]]);
+  const config: any = { default_agent: 'build', model: 'test/model' };
+  const capabilities = { backgroundSubagents: false };
   const requests: Array<{ method: string; path: string; body: any }> = [];
-  const streams = new Set<ServerResponse>(); const messages: any[] = [];
-  let createReply: any = native; let createHook: (() => void) | undefined; let promptStatus = 204; let sessionStatus = 200; let status = 'idle'; let readsBlocked: Promise<void> | undefined; let blockedReadPath: string | undefined;
+  const streams = new Set<ServerResponse>(); const messages: any[] = []; const statuses: Record<string, {type: string}> = {}; const permissions: any[] = []; const questions: any[] = [];
+  let createReply: any = native; let createHook: (() => void | Promise<void>) | undefined; let promptStatus = 204; let sessionStatus = 200; let status = 'idle'; let readsBlocked: Promise<void> | undefined; let blockedReadPath: string | undefined;
   let lease = Object.freeze({}); let current = true; let profile = true;
   const listeners = new Set<() => void>(); let bound: object | undefined;
   const verifier = {
-    captureStore(transport: object, directory: string) { if (bound && bound !== transport || directory !== cwd || !current) return { status: 'unavailable' as const }; bound = transport; return { status: 'verified' as const, store: { authorityId: 'fixture', storeId: 'owned-store' }, lease }; },
+    async refresh() {},
+    async targetSelections() { return { model: 'test/model', agent: 'build' }; },
+    observeSession() {},
+    validateSelections() {},
+    relation() { return 'unknown' as const; },
+    captureAuthority(transport: object, directory: string) { if (bound && bound !== transport || directory !== cwd || !current) return { status: 'unavailable' as const }; bound = transport; return { status: 'verified' as const, authority: { kind: 'trusted-service' as const, authorityId: 'fixture', namespaceId: 'owned-namespace' }, lease }; },
     isCurrent(token: object) { return current && token === lease; },
     isObservationCurrent(token: object) { return current && profile && token === lease; },
     subscribe(listener: () => void) { listeners.add(listener); return () => { listeners.delete(listener); }; },
@@ -33,33 +41,42 @@ async function fixture(configured = true) {
     let raw = ''; for await (const chunk of request) raw += chunk;
     const body = JSON.parse(raw || '{}'); requests.push({ method: request.method!, path, body });
     if (request.method === 'GET' && readsBlocked && (blockedReadPath === undefined || path === blockedReadPath)) await readsBlocked;
-    if (path === '/session' && request.method === 'POST') { createHook?.(); return json(createReply); }
+    if (path === '/global/health') return json({ healthy: true, version: '1.18.18' });
+    if (path === '/config') return json(config);
+    if (path === '/experimental/capabilities') return json(capabilities);
+    if (path === '/experimental/tool/ids') return json(['read', 'write', 'edit', 'bash', 'task']);
+    if (path === '/session' && request.method === 'POST') { await createHook?.(); return json(createReply); }
     if (path === '/session/ses_B/prompt_async') { if (promptStatus === 204) response.writeHead(204).end(); else json({ error: 'private native secret' }, promptStatus); return; }
     if (path === '/session/ses_B/abort') return json(true);
-    if (path === '/session/ses_B') return json(sessionStatus === 200 ? native : { error: 'Session read failed' }, sessionStatus);
+    if (/^\/session\/[^/]+$/.test(path) && natives.has(path.split('/')[2]!)) return json(sessionStatus === 200 ? natives.get(path.split('/')[2]!) : { error: 'Session read failed' }, sessionStatus);
     if (path === '/provider') return json({ connected: ['test'], default: {}, all: [{ id: 'test', name: 'Test', models: { model: { id: 'model', name: 'Model', limit: { context: 10000, output: 1000 } } } }] });
     if (path === '/agent') return json(['plan', 'build'].map(name => ({ name, mode: 'primary', permission: [] })));
-    if (path === '/session/status') return json({ ses_B: { type: status } });
+    if (path === '/session/status') return json({ ses_B: { type: status }, ...statuses });
     if (path === '/session/ses_B/message') return json(messages);
     if (path.startsWith('/session/ses_B/message/')) return json(messages.find(m => m.info.id === path.split('/').at(-1)) ?? {}, messages.some(m => m.info.id === path.split('/').at(-1)) ? 200 : 404);
-    if (['/permission', '/question', '/session/ses_B/todo', '/session/ses_B/children'].includes(path)) return json([]);
+    if (path === '/permission') return json(permissions);
+    if (path === '/question') return json(questions);
+    if (path === '/session/ses_B/children') return json([...natives.values()].filter(item => item.parentID === 'ses_B'));
+    if (path === '/session/ses_B/todo') return json([]);
     return json({}, 404);
   });
   await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
   cleanups.push(async () => { for (const stream of streams) stream.destroy(); server.closeAllConnections(); await new Promise<void>(resolve => server.close(() => resolve())); });
   const options = { serverUrl: `http://127.0.0.1:${(server.address() as import('node:net').AddressInfo).port}`, requestTimeoutMs: 1000 };
-  const provider = new OpenCodeAgentProvider(options, configured ? verifier : undefined);
+  const provider = new OpenCodeAgentProvider(options, configured === 'supplier' ? undefined : configured ? verifier : null);
   cleanups.push(() => provider.close());
-  const emit = (type: string, properties: any, id?: string) => { for (const stream of streams) stream.write(`data: ${JSON.stringify({ directory: cwd, payload: { type, properties, ...(id ? { id } : {}) } })}\n\n`); };
-  return { provider, native, requests, messages, cwd, emit, verifier, options,
-    create(reply: any, hook?: () => void) { createReply = reply; createHook = hook; },
+  const emitRaw = (payload: unknown) => { for (const stream of streams) stream.write(`data: ${JSON.stringify({ directory: cwd, payload })}\n\n`); };
+  const emit = (type: string, properties: any, id?: string) => emitRaw({ type, properties, ...(id ? { id } : {}) });
+  return { provider, native, requests, messages, cwd, emit, emitRaw, verifier, options, config, capabilities, statuses, permissions, questions,
+    addSession(id: string, parentID?: string) { const session = { ...native, id, ...(parentID ? { parentID } : {}) }; natives.set(id, session); return session; },
+    create(reply: any, hook?: () => void | Promise<void>) { createReply = reply; createHook = hook; },
     revoke() { current = false; for (const listener of listeners) listener(); },
     renew() { current = true; lease = Object.freeze({}); for (const listener of listeners) listener(); },
     loseProfile() { profile = false; for (const listener of listeners) listener(); },
     prompt(code: number) { promptStatus = code; }, sessionRead(code: number) { sessionStatus = code; }, setStatus(value: string) { status = value; },
     blockReads(path?: string) { let release!: () => void; blockedReadPath = path; readsBlocked = new Promise<void>(r => { release = r; }); return () => { readsBlocked = undefined; blockedReadPath = undefined; release(); }; },
     async open(extensions = {}) { return provider.resumeSession({ providerId: 'opencode', sessionId: 'ses_B', opaque: JSON.stringify({ cwd }) }, extensions); },
-    materialize(w: any, change: (message: any) => void = () => {}) { const [providerID, modelID] = w.selections.model.split('/'); const message = { info: { id: w.nativeInputId, sessionID: w.nativeSessionId, role: 'user', time: { created: 10 }, agent: w.selections.agent, model: { providerID, modelID, ...(w.selections.variant !== undefined ? { variant: w.selections.variant } : {}) }, ...(w.selections.system !== undefined ? { system: w.selections.system } : {}) }, parts: [{ id: 'prt_P', sessionID: w.nativeSessionId, messageID: w.nativeInputId, type: 'text', text: w.parts[0].text }] }; change(message); messages.push(message); return message; },
+    materialize(w: any, change: (message: any) => void = () => {}) { const [providerID, modelID] = w.selections.model.split('/'); const message = { info: { id: w.inputId, sessionID: w.nativeSessionId, role: 'user', time: { created: 10 }, agent: w.selections.agent, model: { providerID, modelID, ...(w.selections.variant !== undefined ? { variant: w.selections.variant } : {}) }, ...(w.selections.system !== undefined ? { system: w.selections.system } : {}) }, parts: [{ id: 'prt_P', sessionID: w.nativeSessionId, messageID: w.inputId, type: 'text', text: w.parts[0].text }] }; change(message); messages.push(message); return message; },
   };
 }
 const evidence = (owner: any) => owner.nativeEvidence;
@@ -74,8 +91,8 @@ test('default evidence is unavailable while ordinary sessions remain usable', as
 });
 test('empty creation sends only one create and resumes its verified identity separately', async () => {
   const f = await fixture(); const result = await evidence(f.provider).createEmpty({ sessionId: 'not-native', cwd: f.cwd });
-  expect(result).toMatchObject({ status: 'created', handle: { sessionId: 'ses_B' } }); expect(f.requests).toEqual([{ method: 'POST', path: '/session', body: {} }]);
-  expect(JSON.parse(result.handle.opaque)).toEqual({ version: 1, kind: 'opencode.empty', cwd: f.cwd, store: { authorityId: 'fixture', storeId: 'owned-store' } });
+  expect(result).toMatchObject({ status: 'created', handle: { sessionId: 'ses_B' } }); expect(f.requests).toEqual([{ method: 'POST', path: '/session', body: { agent: 'build', model: { providerID: 'test', id: 'model' } } }, { method: 'GET', path: '/session/ses_B', body: {} }]);
+  expect(JSON.parse(result.handle.opaque)).toEqual({ version: 2, kind: 'opencode.empty', cwd: f.cwd, authority: { kind: 'trusted-service' as const, authorityId: 'fixture', namespaceId: 'owned-namespace' }, selections: { model: 'test/model', agent: 'build' } });
   await f.provider.resumeSession(result.handle); expect(f.requests.some(r => r.path === '/session/ses_B')).toBe(true);
 });
 test.each(['directory', 'authority'])('retains usable B after post-create %s failure and recovery cannot attach', async kind => {
@@ -94,14 +111,14 @@ test('prepares exact immutable local text and dispatches its preallocated U once
   const parts = [{ type: 'text', text: '精确\n"text"' }]; const token = e.captureValidity(); const w = await e.prepareInput(parts, { delivery: 'immediate' }); parts[0]!.text = 'changed';
   expect(f.requests).toHaveLength(before); expect(e.isCurrent(token)).toBe(true); expect(Object.isFrozen(w.parts[0])).toBe(true);
   await expect(e.dispatchInput(w)).resolves.toBeUndefined(); const sends = f.requests.filter(r => r.path.endsWith('prompt_async'));
-  expect(sends).toHaveLength(1); expect(sends[0]!.body).toMatchObject({ messageID: w.nativeInputId, parts: [{ type: 'text', text: '精确\n"text"' }], model: { providerID: 'test', modelID: 'model' }, agent: 'build', system: '' });
+  expect(sends).toHaveLength(1); expect(sends[0]!.body).toMatchObject({ messageID: w.inputId, parts: [{ type: 'text', text: '精确\n"text"' }], model: { providerID: 'test', modelID: 'model' }, agent: 'build', system: '' });
   await expect(e.dispatchInput(w)).rejects.toBeInstanceOf(AgentOperationRejectedError); expect(e.isCurrent(token)).toBe(false);
 });
 test('exact materialization is inspectable during unresolved admission and never releases it', async () => {
   const f = await fixture(); const session = await f.open(); const e = evidence(session); const w = await e.prepareInput([{ type: 'text', text: 'body' }]); await e.dispatchInput(w);
   const m = f.materialize(w); f.setStatus('busy'); f.emit('message.updated', { info: m.info }); f.emit('session.status', { sessionID: 'ses_B', status: { type: 'busy' } });
   await waitFor(async () => (await session.runtimeInfo()).status === 'running');
-  await expect(e.inspectInput(w)).resolves.toMatchObject({ status: 'materialized', proof: { nativeInputId: w.nativeInputId, nativePartIds: ['prt_P'] } });
+  await expect(e.inspectInput(w)).resolves.toMatchObject({ status: 'materialized', proof: { inputId: w.inputId, nativePartIds: ['prt_P'] } });
   await session.cancel(); f.setStatus('idle'); f.emit('session.idle', { sessionID: 'ses_B' }); await new Promise(r => setTimeout(r, 150));
   await expect(session.sendMessage('must stay fenced')).rejects.toBeInstanceOf(AgentOperationRejectedError); expect(f.requests.filter(r => r.path.endsWith('prompt_async'))).toHaveLength(1);
 });
@@ -149,7 +166,7 @@ test.each(['session', 'message'])('inspection blocks capture until its unchanged
   const f = await fixture(); const session = await f.open(); const e = evidence(session);
   const witness = await e.prepareInput([{ type: 'text', text: 'exact' }]); f.materialize(witness);
   const token = e.captureValidity();
-  const path = kind === 'session' ? '/session/ses_B' : `/session/ses_B/message/${witness.nativeInputId}`;
+  const path = kind === 'session' ? '/session/ses_B' : `/session/ses_B/message/${witness.inputId}`;
   const release = f.blockReads(path); const before = f.requests.length; const reading = e.inspectInput(witness);
   let result;
   try {
@@ -157,7 +174,7 @@ test.each(['session', 'message'])('inspection blocks capture until its unchanged
     expect(() => e.captureValidity()).toThrow();
     expect(e.isCurrent(token)).toBe(false);
   } finally { release(); result = await reading; }
-  expect(result).toMatchObject({ status: 'materialized', proof: { nativeInputId: witness.nativeInputId } });
+  expect(result).toMatchObject({ status: 'materialized', proof: { inputId: witness.inputId } });
   expect(e.isCurrent(token)).toBe(true);
   expect(e.isCurrent(e.captureValidity())).toBe(true);
 });
@@ -191,7 +208,7 @@ test.each([
   if (kind !== 'missing') f.materialize(witness, message => { if (kind === 'mismatch') message.parts[0].text = 'different'; });
   if (kind === 'request') f.sessionRead(503);
   const token = e.captureValidity(); const before = f.requests.length;
-  const input = kind === 'store' ? { ...witness, store: { ...witness.store, storeId: 'other' } } : witness;
+  const input = kind === 'store' ? { ...witness, authority: { ...witness.authority, namespaceId: 'other' } } : witness;
   const result = await e.inspectInput(input);
   f.sessionRead(200);
   expect(result).toMatchObject({ status: 'unknown', code });
@@ -243,7 +260,12 @@ test('a changed actual dispatch selection rejects the previously prepared witnes
 
 test('escaped recovery envelope capacity is checked before the sole create request', async () => {
   const f = await fixture(); const transport = new OpenCodeTransport(f.options); cleanups.push(() => transport.close());
-  const verifier = { ...f.verifier, captureStore(t: OpenCodeTransport, _cwd: string) { return f.verifier.captureStore(t, f.cwd); } };
+  const verifier = {
+    async refresh() {},
+    async targetSelections() { return { model: 'test/model', agent: 'build' }; },
+    observeSession() {},
+    validateSelections() {},
+    relation() { return 'unknown' as const; }, ...f.verifier, captureAuthority(t: OpenCodeTransport, _cwd: string) { return f.verifier.captureAuthority(t, f.cwd); } };
   // An injected canonicalizer isolates encoding arithmetic; this path is never accessed.
   const e = new OpenCodeProviderNativeEvidence(transport, verifier, async () => '/' + '\u0001'.repeat(3000), () => true);
   await expect(e.createEmpty({ sessionId: 'local', cwd: f.cwd })).rejects.toMatchObject({ code: 'native_evidence_limit' }); expect(f.requests).toHaveLength(0);
@@ -260,7 +282,7 @@ test('unavailable optional operations do not trigger inspection requests or back
   expect((await e.inspectInput(w)).status).toBe('unknown'); await expect(e.dispatchInput(w)).rejects.toMatchObject({ code: 'native_evidence_unavailable' });
   await expect(e.prepareInput([{ type: 'text', text: 'x' }])).rejects.toMatchObject({ code: 'native_evidence_unavailable' }); expect(() => e.captureValidity()).toThrow(); expect(e.isCurrent({})).toBe(false);
   await new Promise(r => setTimeout(r, 150)); expect(f.requests).toHaveLength(before);
-  expect(Object.keys(e).sort()).toEqual(['availability', 'captureValidity', 'dispatchInput', 'inspectInput', 'isCurrent', 'prepareInput']);
+  expect(Object.keys(e).sort()).toEqual(['availability', 'captureValidity', 'dispatchInput', 'inspectInput', 'inspectReadiness', 'isCurrent', 'prepareInput']);
 });
 test('unclassified fields inside a summary diff invalidate the old token', async () => {
   const f = await fixture(); const session = await f.open(); const e = evidence(session); const token = e.captureValidity();
@@ -276,7 +298,7 @@ test('actual native sentinel-like variant and explicitly empty system remain exa
 test('assistant completion or failure and later idle never settle prepared-origin admission', async () => {
   const f = await fixture(); const session = await f.open(); const e = evidence(session); const w = await e.prepareInput([{ type: 'text', text: 'work' }]); await e.dispatchInput(w);
   const user = f.materialize(w); f.emit('message.updated', { info: user.info });
-  const assistant = { id: 'assistant', sessionID: 'ses_B', role: 'assistant', parentID: w.nativeInputId, time: { created: 11, completed: 12 }, finish: 'stop', error: { name: 'MessageAbortedError' }, modelID: 'model', providerID: 'test', agent: 'build', mode: 'build', path: { cwd: f.cwd, root: f.cwd }, cost: 0, tokens: { input: 1, output: 1, reasoning: 0, cache: { read: 0, write: 0 } } };
+  const assistant = { id: 'assistant', sessionID: 'ses_B', role: 'assistant', parentID: w.inputId, time: { created: 11, completed: 12 }, finish: 'stop', error: { name: 'MessageAbortedError' }, modelID: 'model', providerID: 'test', agent: 'build', mode: 'build', path: { cwd: f.cwd, root: f.cwd }, cost: 0, tokens: { input: 1, output: 1, reasoning: 0, cache: { read: 0, write: 0 } } };
   f.messages.push({ info: assistant, parts: [] }); f.emit('message.updated', { info: assistant }); f.emit('session.idle', { sessionID: 'ses_B' });
   await new Promise(r => setTimeout(r, 150)); await expect(session.sendMessage('second')).rejects.toBeInstanceOf(AgentOperationRejectedError); await expect(session.executeCommand('compact', '')).rejects.toBeInstanceOf(AgentOperationRejectedError);
   expect(f.requests.filter(r => r.path.endsWith('prompt_async'))).toHaveLength(1);
@@ -287,4 +309,129 @@ test('an older native history read invalidates scoped observation and blocks cap
   const release = f.blockReads(); const before = f.requests.length; const reading = session.readTimelineHistory('older');
   await waitFor(() => f.requests.length > before); expect(e.isCurrent(token)).toBe(false); expect(() => e.captureValidity()).toThrow(); release(); await reading;
   await waitFor(() => { try { e.captureValidity(); return true; } catch { return false; } }); expect(e.isCurrent(token)).toBe(false);
+});
+
+
+test('exact non-summary assistant readback settles only the prepared input that it started', async () => {
+  const f = await fixture(); const session = await f.open(); const e = evidence(session);
+  const w = await e.prepareInput([{ type: 'text', text: 'prepared task' }]); await e.dispatchInput(w);
+  f.materialize(w);
+  const assistant = { info: { id: 'msg_R', sessionID: 'ses_B', role: 'assistant', parentID: 'msg_other', summary: false, agent: 'build', mode: 'build', modelID: 'model', providerID: 'test', path: { cwd: f.cwd, root: f.cwd }, time: { created: 20 }, cost: 0, tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } } }, parts: [] };
+  f.messages.push(assistant);
+  expect((await e.inspectInput(w)).execution).toBeUndefined();
+  await expect(session.sendMessage('blocked')).rejects.toBeInstanceOf(AgentOperationRejectedError);
+  assistant.info.parentID = w.inputId; assistant.info.summary = true;
+  expect((await e.inspectInput(w)).execution).toBeUndefined();
+  assistant.info.summary = false;
+  await expect(e.inspectInput(w)).resolves.toMatchObject({ status: 'materialized', execution: { disposition: 'started', nativeExecutionId: 'msg_R' } });
+  await session.sendMessage('next ordinary input');
+  expect(f.requests.filter(request => request.path.endsWith('prompt_async'))).toHaveLength(2);
+});
+
+test('installed supplier creates a fixed empty native session and confirms it without input', async () => {
+  const f = await fixture('supplier');
+  const result = await f.provider.nativeEvidence.createEmpty({ sessionId: 'arc-local', cwd: f.cwd });
+  expect(result.status).toBe('created'); if (result.status !== 'created') return;
+  expect(f.requests.filter(r => r.method === 'POST')).toEqual([{ method: 'POST', path: '/session', body: { agent: 'build', model: { providerID: 'test', id: 'model' } } }]);
+  expect(f.requests.some(r => r.path === '/session/ses_B')).toBe(true);
+  expect(JSON.parse(result.handle.opaque)).toMatchObject({ version: 2, selections: { model: 'test/model', agent: 'build' }, authority: { kind: 'trusted-service', authorityId: 'opencode' } });
+  const session = await f.provider.resumeSession(result.handle);
+  expect(await session.nativeEvidence!.inspectReadiness()).toMatchObject({ cwd: f.cwd, idle: true, pendingInputs: 0, pendingInteractions: 0, activeChildren: 0 });
+  expect(f.requests.filter(r => r.path.endsWith('prompt_async'))).toHaveLength(0);
+});
+test('installed supplier refuses unknown defaults and uncovered background work before create', async () => {
+  for (const missing of ['default_agent', 'model', 'background']) {
+    const f = await fixture('supplier');
+    if (missing === 'background') f.capabilities.backgroundSubagents = true; else delete f.config[missing];
+    await expect(f.provider.nativeEvidence.createEmpty({ sessionId: 'arc-local', cwd: f.cwd })).rejects.toMatchObject({ code: 'native_evidence_unsupported' });
+    expect(f.requests.some(r => r.method === 'POST')).toBe(false);
+  }
+});
+
+
+test.each([204, 500])('ordinary input %s receipt settles only its exact native response and not idle or user presence', async status => {
+  const f = await fixture(); const session = await f.open(); const accepted: unknown[] = [];
+  f.prompt(status);
+  const send = session.sendMessage('ordinary input', { onAcceptance: value => accepted.push(value) });
+  if (status === 204) await expect(send).resolves.toBeUndefined(); else await expect(send).rejects.toThrow();
+  const request = f.requests.find(r => r.path.endsWith('prompt_async'))!;
+  const user = { info: { id: request.body.messageID, sessionID: 'ses_B', role: 'user', time: { created: 20 }, agent: 'build', model: { providerID: 'test', modelID: 'model' } }, parts: [] };
+  f.messages.push(user); f.setStatus('busy'); f.emit('message.updated', { info: user.info });
+  f.emit('session.status', { sessionID: 'ses_B', status: { type: 'busy' } });
+  await new Promise(r => setTimeout(r, 150)); expect(accepted).toEqual([]);
+  const response = { info: { id: 'msg_R', sessionID: 'ses_B', role: 'assistant', parentID: 'other', time: { created: 21 } }, parts: [] };
+  f.messages.push(response); f.setStatus('idle'); f.emit('message.updated', { info: response.info }); f.emit('session.idle', { sessionID: 'ses_B' });
+  await new Promise(r => setTimeout(r, 150)); expect(accepted).toEqual([]);
+  response.info.parentID = user.info.id; Object.assign(response.info, { summary: true });
+  f.emit('message.updated', { info: response.info }); await new Promise(r => setTimeout(r, 150)); expect(accepted).toEqual([]);
+  Object.assign(response.info, { summary: false }); f.emit('message.updated', { info: response.info });
+  await waitFor(() => accepted.length === 1); expect(accepted).toEqual([{ disposition: 'started' }]);
+  f.emit('message.updated', { info: response.info }); await new Promise(r => setTimeout(r, 150));
+  expect(accepted).toHaveLength(1); expect(f.requests.filter(r => r.path.endsWith('prompt_async'))).toHaveLength(1);
+  expect(f.requests.some(r => r.path === `/session/ses_B/message/${user.info.id}`)).toBe(true);
+  expect(f.requests.some(r => r.path === '/session/ses_B/message/msg_R')).toBe(true);
+});
+
+
+test('installed supplier inherits exact source selections without guessing absent defaults and tolerates independent B creation', async () => {
+  const f = await fixture('supplier'); delete f.config.default_agent; delete f.config.model;
+  f.addSession('ses_A');
+  f.create(f.native, async () => { f.emit('session.created', { info: f.native }); await new Promise(r => setTimeout(r, 20)); });
+  expect(await evidence(f.provider).createEmpty({ sessionId: 'local', cwd: f.cwd, selectionSourceSessionId: 'ses_A' })).toMatchObject({ status: 'created' });
+  expect(f.requests.filter(r => r.method === 'POST' && r.path === '/session')).toHaveLength(1);
+  expect(f.requests.some(r => r.path.endsWith('prompt_async'))).toBe(false);
+});
+test.each(['valid', 'wrong-version', 'wrong-aggregate'] as const)('installed supplier classifies native sync creation envelope %s', async variant => {
+  const f=await fixture('supplier');f.addSession('ses_A');
+  f.create(f.native, async()=>{
+    f.emit('session.created',{sessionID:'ses_B',info:f.native});
+    f.emitRaw({type:'sync',id:'evt_native',syncEvent:{id:'evt_native',type:variant==='wrong-version'?'session.created.2':'session.created.1',seq:0,aggregateID:variant==='wrong-aggregate'?'ses_other':'ses_B',data:{sessionID:'ses_B',info:f.native}}});
+    await new Promise(r=>setTimeout(r,20));
+  });
+  const result=await evidence(f.provider).createEmpty({sessionId:'local',cwd:f.cwd,selectionSourceSessionId:'ses_A'});
+  expect(result).toMatchObject({status:variant==='valid'?'created':'known_rejected',handle:{sessionId:'ses_B'}});
+  expect(f.requests.filter(r=>r.method==='POST'&&r.path==='/session')).toHaveLength(1);
+});
+test('native diff updates revoke a fence and allow a fresh authoritative baseline', async () => {
+  const f=await fixture('supplier'),session=await f.open(),e=evidence(session),token=e.captureValidity();
+  const release=f.blockReads();f.emit('session.diff',{sessionID:'ses_B',diff:[]});
+  await waitFor(()=>!e.isCurrent(token));release();
+  await waitFor(async()=>{try{return (await e.inspectReadiness()).idle;}catch{return false;}});
+  expect(e.isCurrent(e.captureValidity())).toBe(true);
+});
+test.each(['session.next.model.switched', 'session.next.agent.switched', 'catalog.updated', 'models-dev.refreshed', 'integration.connection.updated', 'reference.updated'])('installed supplier rejects a changed %s lease while retaining the one created B', async type => {
+  const f = await fixture('supplier'); f.addSession('ses_A');
+  f.create(f.native, async () => { f.emit(type, { sessionID: 'ses_A' }); await new Promise(r => setTimeout(r, 20)); });
+  expect(await evidence(f.provider).createEmpty({ sessionId: 'local', cwd: f.cwd, selectionSourceSessionId: 'ses_A' })).toMatchObject({ status: 'known_rejected', handle: { sessionId: 'ses_B' } });
+  expect(f.requests.filter(r => r.method === 'POST' && r.path === '/session')).toHaveLength(1);
+  expect(f.requests.some(r => r.path.endsWith('prompt_async'))).toBe(false);
+});
+test('installed supplier follows Session parentage rather than message parentID and recovers independent activity', async () => {
+  const f = await fixture('supplier'), session = await f.open(); const e = evidence(session);
+  f.addSession('ses_foreign');
+  f.emit('message.updated', { info: { id: 'msg_foreign', role: 'assistant', sessionID: 'ses_foreign', parentID: 'ses_B', time: { created: 1 } } });
+  await waitFor(async () => { try { await e.inspectReadiness(); return true; } catch { return false; } });
+  expect(e.isCurrent(e.captureValidity())).toBe(true);
+  expect(f.requests.some(r => r.path === '/session/ses_foreign')).toBe(true);
+});
+test('installed supplier includes active grandchild work and pending interactions in readiness', async () => {
+  const f = await fixture('supplier'), session = await f.open(); const e = evidence(session);
+  f.addSession('ses_child', 'ses_B'); f.addSession('ses_grandchild', 'ses_child'); f.statuses.ses_grandchild = { type: 'busy' };
+  let facts: any; await waitFor(async () => { try { facts = await e.inspectReadiness(); return true; } catch { return false; } });
+  expect(facts.activeChildren).toBe(1); expect(facts.idle).toBe(true);
+  delete f.statuses.ses_grandchild;
+  f.permissions.push({ id: 'permission_grand', sessionID: 'ses_grandchild', permission: 'bash', patterns: [], metadata: {}, always: [] });
+  await waitFor(async () => { try { facts = await e.inspectReadiness(); return facts.activeChildren === 1; } catch { return false; } });
+  f.permissions.splice(0); await waitFor(async () => { try { facts = await e.inspectReadiness(); return facts.activeChildren === 0; } catch { return false; } });
+});
+
+
+test('a creation handle restores current native selections after later model or agent changes', async () => {
+  const f = await fixture();
+  const result = await evidence(f.provider).createEmpty({ sessionId: 'local', cwd: f.cwd });
+  if (result.status !== 'created') throw new Error('Expected empty creation');
+  f.native.agent = 'plan';
+  const session = await f.provider.resumeSession(result.handle);
+  expect((await session.runtimeInfo()).mode).toBe('plan');
+  expect(f.requests.filter(request => request.method === 'POST' && request.path === '/session')).toHaveLength(1);
 });

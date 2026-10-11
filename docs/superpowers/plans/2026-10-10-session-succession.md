@@ -4,7 +4,7 @@
 
 **Goal:** Replace the primary session with a successor on the same Host and in the same working directory, preserving all user-facing attachments and avoiding duplicate execution.
 
-**Architecture:** One local Controller owns a stable primary role and a recoverable succession operation. Source tools and TPM resolve that role; Relay and browser project the committed revision into existing navigation and preferences. This is not a machine/workspace migration or a distributed workflow engine.
+**Architecture:** One local Controller owns a stable primary role and a recoverable succession operation. One browser composition document owns stable view bindings and layout; normal navigation and succession reuse the same Session View attachment path. Source tools and TPM resolve the role. Upgrade all components together; do not maintain parallel legacy models.
 
 **Tech Stack:** TypeScript, existing provider SDK and Remote contracts, Controller persistence, React, Vitest, Playwright, pnpm.
 
@@ -20,44 +20,94 @@
 - New behavior remains unavailable until the full source, dispatch and projection contract is supported.
 - No automatic replay after unknown creation/delivery outcomes. No automatic deletion of native sessions.
 - No publish, push or deployment in this implementation plan.
-- Keep local preparation separate from succession commitment and association projection. Reserve data boundaries for future cross-host migration; implement no cross-host migration policy or service.
+- Keep local preparation separate from succession commitment and association projection. Implement no cross-host migration policy or service.
+- Use a coordinated upgrade, a one-time user-state import and one supported runtime model. No mixed-version matrix, live dual writes, permanent legacy owner inference or generic migration framework.
 
-## Status and verification setup
+## Current completion checklist (2026-10-11)
 
-The user approved the architecture-review adjustments at `c55661e`. Execute
-Tasks 7–10 below before resuming the remaining Task 5/6 work. Earlier scoped
-checkpoints remain valid within their scope; they do not certify complete backend
-recovery or a production provider. Keep one source implementer and independent
-scoped review per slice; read-only preflight may run independently.
+The coordinated-upgrade decision replaces the old compatibility queue. Use this
+checklist for current delivery. Detailed historical tasks below document how the
+implementation developed; their earlier statuses and unchecked intermediate
+steps are not a second active work queue.
 
-- [x] Inspect source ownership, relation persistence, favourites, Track and Ask storage.
-- [x] Record the approved design and the same-machine simplification.
-- [x] Document future migration seams without expanding the local implementation scope.
-- [ ] Implement Tasks 1–6, marking each complete only with recorded evidence.
+- [x] One v2 composition document, explicit view/payload owners, one checked legacy
+  import, and no normal dual layout reads/writes or second connection manager.
+- [x] One evidence-v2 contract for Codex, Claude Code, Copilot and OpenCode on
+  existing transports; exact empty identity, confirmed selections and distinct
+  correlation/materialization/execution evidence.
+- [x] Host idle-only admission, source/candidate ARC mutation gates and unchanged
+  original candidate/input/operation recovery without replay.
+- [x] Production Controller startup and public authoritative describe/prepare/
+  commit/cancel/status/reconcile paths.
+- [x] Actual Cloudflare RelayObject codec, costs and enrollment, with production
+  Worker HTTP/WebSocket and cold storage tests.
+- [x] Primary Session View action, retained operation/cancellation and Hide/Recover
+  behavior through the existing composition/application boundary.
+- [x] Desktop/mobile joined Host/Gateway/App A -> B -> first input -> reload -> C;
+  concurrent clients, cancellation/late B, lost response/restart and stale A input.
+- [x] Isolated native evidence for Codex, Claude Code and Copilot, plus retained
+  OpenCode/callback baseline evidence; capabilities reject unverified pairs.
+- [x] Original empty descriptors, explicit initialization permission and bounded
+  latest confirmed recovery handles, using one native observation.
+- [x] Four-provider Host matrix: 16/16 real-WebSocket cases with controlled native
+  sessions; independent of real-provider executable tests.
+- [x] Resolve whole-branch review findings, including late input acceptance reaching
+  the original TPM outbox through ordinary and prepared first-input paths.
+- [ ] Complete final provider-stage build, typecheck, full tests, affected browser
+  acceptance, Controller package smoke and compatibility update/check.
+- [x] Refresh specification, recovery guide and handoff with current provider
+  scope and limits; report no deployment or user installation.
+- [ ] Record final source freeze and gate results in the
+  [provider validation report](../../handoffs/2026-10-11-succession-provider-validation.md).
 
-Base: `cc3f359`; worktree: `.worktrees/session-succession`; branch: `feat/session-succession`.
-Implementation started: dependencies installed with the frozen lockfile and Controller dependencies built.
-Baseline source-reference and TPM-store suites: 6 tests passed.
-At implementation start run `pnpm install --frozen-lockfile`, then build workspace
-dependencies and establish the affected suites' baseline. Inspect package-local
-AGENTS.md files before modifying their scope.
+Current provider production implementations are frozen and cross-reviewed with
+no remaining code blocker. Final workspace gates are in progress; the
+[provider completion plan](2026-10-11-succession-providers.md) owns this last phase.
 
-Use the root test runner for outer and per-test deadlines:
+The following results belong to the **prior OpenCode/common baseline**. Scoped
+reviews passed for composition, native/Host, product UI and production Cloudflare
+activation. Whole-branch review and its shutdown correction passed. That frozen
+recursive suite passed 5,518 tests with 29 skipped, joined browser
+acceptance passed six cases without skips, and Controller package smoke passed
+all three tests. Build, typecheck and compatibility checks passed. The existing
+consumer browser suite passed 17 cases with five desktop-only mobile skips.
+Native real-process evidence and fake-provider joined
+browser evidence are separate layers. Exact reports, source freezes and all
+failed attempts remain under `.superpowers/sdd/2026-10-10-session-succession/`.
+The concise [handoff](../../handoffs/2026-10-10-session-succession.md) names them;
+the [prior validation report](../../handoffs/2026-10-11-session-succession-validation.md)
+records that baseline artifact and execution boundaries. The implementation remains
+uncommitted and has not been deployed or installed into the user's environment.
+
+## Verification and ownership
+
+Base: `cc3f359`; worktree: `.worktrees/session-succession`; branch:
+`feat/session-succession`. Keep exclusive source ownership, serialize shared
+builds, and use the existing per-test and outer-deadline runners. Do not replace
+running user services. A release is a separate authorized operation.
 
 ```sh
-NODE_OPTIONS=--no-experimental-webstorage pnpm test
-pnpm test:conformance
-pnpm test:e2e e2e/session-succession.spec.ts
+pnpm build
 pnpm typecheck
-pnpm compatibility:update
+BORGEE_CODEX_TEST_EXECUTABLE=/absolute/path/to/codex-0.162.0 \
+AGENT_CLAUDE_TEST_EXECUTABLE=/absolute/path/to/sdk-bundled-claude-2.1.247 \
+NODE_OPTIONS=--no-experimental-webstorage npm_config_workspace_concurrency=1 pnpm test
 pnpm compatibility:check
+pnpm test:e2e e2e/session-succession.spec.ts e2e/session-succession-joined.spec.ts --project=chromium-desktop --project=chromium-mobile
+pnpm build:agent-remote-controller
+pnpm test:agent-remote-controller-package
 ```
 
-The new browser file is introduced in Task 6. During development use focused
-package suites with explicit per-test/hook deadlines and a process deadline;
-finish with the root runners. Native tests needing an executable or credentials
-must be reported separately from fixture results. Do not replace a running Host
-to obtain a passing test.
+Root build runs `compatibility:update`. Root tests include the conformance and
+Cloudflare files; avoid repeating identical successful suites. Native fixtures
+must select the matching installed SDK/CLI and isolated profiles; a PATH version
+mismatch is a validation error, not evidence of a succession regression. The
+final validation map records deadlines and exact commands.
+
+## Historical implementation checkpoints
+
+The checkpoints below retain earlier source and test evidence. Their statuses
+apply to their original freezes and are superseded by the current checklist.
 
 ## Task 1: Role identity and local durable decision
 
@@ -326,7 +376,7 @@ documentation, recorded fixtures and `compatibility.json`.
   enabling that backend: preserve outer version, Broker associations and per-store
   recovery progress atomically. The existing Relay2 codec does not encode these;
   a fail-closed guard is protection, not implementation or production acceptance.
-- [ ] Document durable-state version compatibility, backups, precommit cancel and
+- [ ] Document the coordinated upgrade/import, backups, precommit cancel and
   postcommit forward recovery before considering a separately authorized release.
 - [ ] Update this checklist with evidence and commit
   `feat: expose and verify same-host session handoff`.
@@ -336,7 +386,7 @@ documentation, recorded fixtures and `compatibility.json`.
 Tasks 1/3 own authority, quiescence, operation identity and recovery. Task 2 owns
 source semantics and access. Task 4 owns all TPM works and settled destinations.
 Task 5 owns every visible reference and device-local preservation. Task 6 verifies
-the complete user path, compatibility and native behavior. No task adds file or
+the complete current-version user path, import and native behavior. No task adds file or
 environment migration. Do not mark the feature complete with only UI replacement.
 The extension review checks that workspace placement, participant bindings and
 local preparation are separate from stable relationship identity. It does not
@@ -368,9 +418,11 @@ certification and complete mutation admission remain Task8.
 
 ## Task 8: Native evidence and one real provider mode
 
-Status: Task8A's isolated Claude crash evidence is reviewed and verified. Empty
-postcommit B fails exact cold resume; lost-ack U survives in public history.
-Claude durable succession is not certified. Task8C's isolated OpenCode 1.18.18
+Historical status: Task8A's isolated Claude crash evidence was reviewed and
+verified. Raw empty postcommit B failed exact cold resume; lost-ack U survived in
+public history. That probe did not certify Claude succession. The later provider
+stage supplies explicit empty descriptors and supersedes this feasibility limit.
+Task8C's isolated OpenCode 1.18.18
 existing `/session` API probe passed both empty-B and lost-ack-U crash cuts,
 independent review and Root's fresh verification. It proves raw native feasibility,
 not callback-enabled provider readiness. Task8B1 common operation/reservation is

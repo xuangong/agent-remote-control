@@ -5,7 +5,7 @@ import type { LabTransport } from './App.js';
 import type { TpmWork } from '@orchardworks/agent-remote-protocol';
 import { SessionDirectoryClient } from './directory-client.js';
 import { replicaState } from './test/fixtures.js';
-import { render } from './test/setup.js';
+import { render, setPromptText, promptText } from './test/setup.js';
 
 beforeEach(() => { vi.stubGlobal('ResizeObserver', class { observe() {} disconnect() {} }); });
 afterEach(() => { vi.unstubAllGlobals(); vi.restoreAllMocks(); localStorage.clear(); sessionStorage.clear(); });
@@ -14,7 +14,7 @@ it('runs TPM commands locally from the ordinary chatbox and exposes an independe
   const container = await render(<App initialState={replicaState} initialSessionStatus="ready" actions={{ sendMessage }} />);
   const input = container.querySelector<HTMLTextAreaElement>('[data-testid="prompt-input"]')!;
   await act(async () => {
-    Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!.call(input, '/tpm on');
+    setPromptText(input, '/tpm on');
     input.dispatchEvent(new Event('input', { bubbles: true }));
   });
   await act(async () => container.querySelector<HTMLButtonElement>('[data-testid="prompt-submit"]')!.click());

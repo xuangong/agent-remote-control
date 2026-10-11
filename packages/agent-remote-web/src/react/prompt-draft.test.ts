@@ -18,9 +18,9 @@ it('restores text and ordered image tags into the target draft without uploading
   ] }, context());
   expect(draft.parts.map(part => part.type)).toEqual(['text', 'image', 'text']);
   expect(draft.nextLabel).toBe(5);
-  const scope = 'prompt-draft'; const target = 'new-session';
-  expect(await savePromptDraft(scope, target, draft)).toBe('before  after');
-  const saved = await readImageDraft(JSON.stringify([scope, target]));
+  const scope = 'prompt-draft'; const target = 'image-owner:edited-view';
+  expect(await savePromptDraft({ scope, key: target }, draft)).toBe('before  after');
+  const saved = await readImageDraft(target);
   expect(saved?.parts).toEqual(draft.parts);
   expect(Object.values(saved!.images)[0]).toMatchObject({ status: 'pending', progress: 0 });
   expect(await readImageDraft(JSON.stringify([scope, 'original-session']))).toBeUndefined();

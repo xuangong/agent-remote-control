@@ -1,4 +1,5 @@
 import { createServer, type Server } from 'node:http';
+import { createHash, webcrypto } from 'node:crypto';
 import { act, StrictMode, useContext, useState, type ComponentProps } from 'react';
 import { WebSocket, WebSocketServer } from 'ws';
 import { afterEach, expect, it, vi } from 'vitest';
@@ -10,7 +11,9 @@ import { App, type LabTransport } from './App.js';
 import { SessionDirectoryClient, type OpenedSession } from './directory-client.js';
 import { DraftStore } from './draft-store.js';
 import { replicaState } from './test/fixtures.js';
-import { readCompositionDocument, readTrackCompanion, saveSessionComposition } from './session-composition.js';
+import { readCompositionDocument, initializeCompositionDocument, saveCompositionDocument } from './session-composition.js';
+import { TrackedSessionViews } from './tracked-session-views.js';
+import { flushRecoveryWrites } from './recovery-writes.js';
 import { render, unmount } from './test/setup.js';
 import * as trackingHooks from './hooks/useSessionTracking.js';
 import * as askHooks from './hooks/useAskConversations.js';
@@ -28,8 +31,13 @@ import * as historyHooks from './hooks/useConversationHistory.js';
 import { RecoveryScope, readLastSession, type ReadingPositions } from './conversation-recovery.js';
 import { WorkspaceReady } from './workspace-access.js';
 import * as starsHooks from './hooks/useSessionStars.js';
+import * as attentionHooks from './hooks/useSessionAttention.js';
 import type { FavoritesSnapshot } from './session-stars-client.js';
+import * as managerComponents from './components/ChatSessionManager.js';
 
+function saveSessionComposition(scope: string, value: { path: OpenedSession[]; focus?: string; anchor?: string; addressKey: string }) {
+  sessionStorage.setItem(`agent-remote:recovery:${scope}:composition`, JSON.stringify(value));
+}
 const cleanups: Array<() => Promise<void> | void> = [];
 afterEach(async () => { for (const stop of cleanups.splice(0).reverse()) await stop(); localStorage.clear(); sessionStorage.clear(); configureImageDraftPersistence(() => true); vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 const native = (nativeSessionId: string, providerId = 'recorded') => ({ controllerId: 'installation', providerId, nativeSessionId });
@@ -45,6 +53,8 @@ async function failureFixture(advanceDuringRecovery = false, nativeIdentity?: st
   configureImageDraftPersistence(() => false);
   const requests: Array<{ url: string; body?: Record<string, unknown> }> = [];
   const providerId = setup?.providerId ?? 'recorded';
+  const nativeBindings = new Map<string, string>();
+  const nativeFor = (agentId: string) => [...nativeBindings].find(([, binding]) => binding === agentId)?.[0] ?? agentId.slice('agent-'.length);
   const pendingInteractions = (agentId: string) => setup?.preserveNativeState && agentId === 'agent-A' ? [{ kind: 'question', requestId: 'question-A',
     questions: [{ questionId: 'one', header: 'Original question', prompt: 'Choose for A', selection: 'single', required: true,
       options: [{ value: 'web', label: 'Web' }], allowCustomText: false, allowDismiss: false }] }] : [];
@@ -80,7 +90,7 @@ async function failureFixture(advanceDuringRecovery = false, nativeIdentity?: st
     else if (url.pathname.endsWith('/favorites') && favorites) value = favorites;
     else if (url.pathname.endsWith('/attach')) {
       await attachmentGates.get(String(body!.nativeSessionId));
-      if (nativeIdentity !== undefined) value = { agentId: `agent-${body!.nativeSessionId}`, nativeSessionId: body!.nativeSessionId };
+      if (nativeIdentity !== undefined) value = { agentId: nativeBindings.get(String(body!.nativeSessionId)) ?? `agent-${body!.nativeSessionId}`, nativeSessionId: body!.nativeSessionId };
       else { response.statusCode = 503; value = { code: 'host_offline', error: 'Fixture successor unavailable.' }; }
     }
     else if (url.pathname.endsWith('/providers')) value = { protocolVersion: PROTOCOL_VERSION, type: 'provider_list', payload: { providers: [] } };
@@ -94,7 +104,7 @@ async function failureFixture(advanceDuringRecovery = false, nativeIdentity?: st
     else if (url.pathname.endsWith('/snapshot')) {
       const agentId = decodeURIComponent(url.pathname.split('/').at(-2)!);
       value = { protocolVersion: PROTOCOL_VERSION, type: 'agent_snapshot', payload: { ...replicaState.agent, id: agentId, providerId, pendingInteractions: pendingInteractions(agentId),
-        runtimeInfo: { ...replicaState.agent!.runtimeInfo, providerId, childSessions: setup?.children, sessionId: agentId === 'agent-B' ? nativeIdentity : agentId.slice('agent-'.length), connection: { state: 'connected' } } } };
+        runtimeInfo: { ...replicaState.agent!.runtimeInfo, providerId, childSessions: setup?.children, sessionId: agentId === 'agent-B' ? nativeIdentity : nativeFor(agentId), connection: { state: 'connected' } } } };
     }
     else if (url.pathname.endsWith('/catalog')) value = { sessions: [], revision: '1', nextCursor: null };
     else { response.statusCode = 404; value = { error: 'Fixture service unavailable.' }; }
@@ -123,7 +133,7 @@ async function failureFixture(advanceDuringRecovery = false, nativeIdentity?: st
         } });
         const active = activeUpdates.get(agentId) ?? new Set(); activeUpdates.set(agentId, active); active.add(update); callbacks.set(frame.subscriptionId, update);
         updates.push(update); updatesByAgent.set(agentId, (identity, connection) => { for (const callback of activeUpdates.get(agentId) ?? []) callback(identity, connection); });
-        update(agentId === 'agent-B' ? nativeIdentity ?? null : agentId.slice('agent-'.length));
+        update(agentId === 'agent-B' ? nativeIdentity ?? null : nativeFor(agentId));
         emit({ protocolVersion: PROTOCOL_VERSION, type: 'session_control', payload: { agentId: frame.agentId, revision: 'control', access: 'control', available: false, token: 'token' } });
       }
       if (frame.message?.type === 'session_control_request') emit({ protocolVersion: PROTOCOL_VERSION, type: 'session_control', payload: { agentId, requestId: frame.message.payload.requestId, revision: 'control', access: 'control', available: false, token: 'token' } });
@@ -160,11 +170,14 @@ async function failureFixture(advanceDuringRecovery = false, nativeIdentity?: st
     const [ready, setReady] = useState(true); setAccessReady = setReady;
     return <WorkspaceReady.Provider value={ready}>{app}</WorkspaceReady.Provider>;
   }
-  const view = await render(strict ? <StrictMode><Access /></StrictMode> : <Access />);
+  let view = await render(strict ? <StrictMode><Access /></StrictMode> : <Access />);
   cleanups.push(() => unmount(view));
-  return { scope, view, requests, chain, frames, updates, updatesByAgent, sockets,
+  return { scope, get view() { return view; }, requests, chain, frames, updates, updatesByAgent, sockets,
+    async reload(selected?: string) { await unmount(view); if (selected) window.history.replaceState(null, '', `/?host=host&provider=${providerId}&session=${selected}`); view = await render(<Access />); },
+    async newTab(selected: string) { await unmount(view); sessionStorage.clear(); window.history.replaceState(null, '', `/?host=host&provider=${providerId}&session=${selected}`); view = await render(<Access />); },
     setAccessReady(ready: boolean) { setAccessReady(ready); },
     setNativeIdentity(identity: string | null) { nativeIdentity = identity; },
+    rebind(nativeSessionId: string, agentId: string) { nativeBindings.set(nativeSessionId, agentId); },
     setFavorites(snapshot: FavoritesSnapshot) { favorites = snapshot; },
     failReplay(code: string) { replayFailure = code; },
     holdCreate() { createGate = new Promise(resolve => { releaseCreate = resolve; }); return () => { releaseCreate?.(); createGate = undefined; }; },
@@ -178,6 +191,62 @@ async function failureFixture(advanceDuringRecovery = false, nativeIdentity?: st
 async function settleApp(assertion: () => void) {
   await vi.waitFor(async () => { await act(async () => { await new Promise(resolve => setTimeout(resolve, 20)); }); assertion(); });
 }
+
+it('old desktop A notification still opens concrete A history after B and C confirmation', async () => {
+  const notices: Array<{ title: string; options: NotificationOptions; onclick?: () => void; close: ReturnType<typeof vi.fn> }> = [];
+  vi.stubGlobal('crypto', webcrypto);
+  vi.stubGlobal('Notification', class {
+    static permission = 'granted';
+    close = vi.fn();
+    constructor(readonly title: string, readonly options: NotificationOptions) { notices.push(this); }
+  });
+  const focus = vi.spyOn(window, 'focus').mockImplementation(() => {});
+  const realAttention = attentionHooks.useSessionAttention, realSuccession = successionHooks.useSessionSuccession;
+  const realWorkbench = workbenchComponents.LabWorkbench;
+  let attention!: ReturnType<typeof realAttention>, succession!: ReturnType<typeof realSuccession>, primary!: ComponentProps<typeof realWorkbench>;
+  const opened: unknown[] = [];
+  vi.spyOn(attentionHooks, 'useSessionAttention').mockImplementation((scope, active, open) => {
+    attention = realAttention(scope, active, session => { opened.push(structuredClone(session)); open(session); }); return attention;
+  });
+  vi.spyOn(successionHooks, 'useSessionSuccession').mockImplementation((...args) => { succession = realSuccession(...args); return succession; });
+  vi.spyOn(workbenchComponents, 'LabWorkbench').mockImplementation(props => { primary = props; return realWorkbench(props); });
+  let source!: OpenedSession;
+  const entry: ProjectedTimelineEntry = { providerId: 'recorded', seqStart: 1, seqEnd: 1, timestamp: 'now', turnId: 'A-turn', resources: [], collapsed: [], sourceSeqRanges: [{ startSeq: 1, endSeq: 1 }],
+    item: { type: 'assistant_message', text: 'Original A completion' } };
+  const f = await failureFixture(false, 'B', false, '', { chain: [], userScoped: true, timeline: [entry], seed(_scope, original) { source = original; } });
+  await settleApp(() => { expect(primary.state?.agent?.id).toBe('agent-A'); expect(primary.state?.timeline.initialized).toBe(true); expect(attention.enabled).toBe(true); });
+  const locator = structuredClone(source), cursor = { epoch: 'epoch-agent-A', seq: 1 };
+  await act(async () => {
+    await attention.notifier.observe(source, { connection: 'ready', activity: 'running', cursor: { ...cursor, seq: 0 } });
+    await attention.notifier.observe(source, { connection: 'ready', activity: 'idle', cursor });
+  });
+  expect(notices).toHaveLength(1);
+  const original = notices[0]!, receipt = createHash('sha256').update(JSON.stringify([f.scope, sessionKey(locator), 'idle', cursor])).digest('hex');
+  expect(original.options.tag).toBe(`arc:${receipt}`);
+  expect(JSON.parse(localStorage.getItem('agent-remote:notification-receipts')!)).toEqual([receipt]);
+  const receipts = localStorage.getItem('agent-remote:notification-receipts');
+  for (const replay of [committed(), committed('B', 'C', 3)]) {
+    f.chain.push(replay); await act(async () => f.notify(replay));
+    await settleApp(() => expect(succession.binding?.session.nativeSessionId).toBe(replay.to.nativeSessionId));
+  }
+  const beforeClick = f.requests.length;
+  await act(async () => original.onclick!());
+  await settleApp(() => { expect(primary.state?.agent?.id).toBe('agent-A'); expect(primary.state?.timeline.initialized).toBe(true); });
+  expect(opened).toEqual([locator]);
+  expect(source).toEqual(locator);
+  expect(original.options.tag).toBe(`arc:${receipt}`);
+  expect(localStorage.getItem('agent-remote:notification-receipts')).toBe(receipts);
+  expect(notices[0]).toBe(original);
+  expect(original.close).toHaveBeenCalledOnce(); expect(focus).toHaveBeenCalledOnce();
+  expect(new URL(window.location.href).searchParams.get('session')).toBe('A');
+  expect(new URL(window.location.href).searchParams.get('intent')).toBe('history');
+  expect(succession.desired?.slot.intent).toMatchObject({ kind: 'history', target: { native: { providerId: 'recorded', nativeSessionId: 'A' } } });
+  expect(succession.desired?.slot.owners.text.key).toMatch(/^view:/);
+  expect(f.view.textContent).toContain('Original A completion');
+  expect(f.view.querySelector('[data-testid="prompt-input"]')?.textContent).toBe('');
+  expect(f.requests.slice(beforeClick).filter(item => item.url.endsWith('/attach')).map(item => item.body?.nativeSessionId)).toEqual(['A']);
+  expect(f.frames.some(frame => ['send_message', 'execute_command', 'image_upload_begin'].includes(frame.message?.type ?? ''))).toBe(false);
+});
 
 it.each([false, true])('first complete A-B-C discovery retains the origin owners with independent B=%s', async independentB => {
   const real = successionHooks.useSessionSuccession;
@@ -201,7 +270,7 @@ it.each([false, true])('first complete A-B-C discovery retains the origin owners
   expect(image?.blob && await new Promise<string>((resolve, reject) => { const reader = new FileReader(); reader.onload = () => resolve(String(reader.result)); reader.onerror = () => reject(reader.error); reader.readAsText(image.blob!); })).toBe('Origin image bytes');
   if (independentB) {
     const slot = succession.document.slots.find(slot => slot.owners.text.key === independent.agentId)!;
-    expect(slot.intent).toMatchObject({ kind: 'legacy_fixed', target: { nativeSessionId: 'B' } });
+    expect(slot.intent).toMatchObject({ kind: 'fixed', target: { native: { nativeSessionId: 'B' } } });
     expect(slot.id).not.toBe(succession.desired!.slot.id);
     expect(new DraftStore(f.scope).get(independent.agentId)).toBe('Independent B draft');
     expect(succession.document.retained).toContainEqual({ slot: slot.id, against: succession.desired!.slot.id });
@@ -484,9 +553,9 @@ it('retains closed and nested Ask owners, and supplies T with its own replaceabl
     }
   } });
   await vi.waitFor(() => expect(succession.binding).toBeDefined());
-  const primaryOwner = succession.ownerFor(original)!;
+  const primaryOwner = succession.ownerFor(succession.desired!.slot.id);
   expect(primaryOwner).toBeDefined();
-  expect(succession.ownerFor(target)).toBeDefined();
+  expect(succession.ownerFor(succession.document.slots.find(slot => slot.owners.text.key === target.agentId)!.id)).toBeDefined();
   expect(ask.isOpen(original, primaryOwner)).toBe(false);
   expect(ask.entryFor(original, primaryOwner).record?.source).toEqual(original);
   expect(f.requests.filter(item => item.url.endsWith('/attach')).map(item => item.body?.nativeSessionId)).toEqual(['B']);
@@ -507,6 +576,8 @@ it('retains closed and nested Ask owners, and supplies T with its own replaceabl
     ask.close(original, primaryOwner);
     const record = ask.store.prepare(referenceForkContext(original), { sourceNativeSessionId: original.nativeSessionId });
     ask.store.bind(record.id, target); ask.store.markConfigured(record.id); ask.store.finishCreation(record.id);
+    succession.document.asks.find(owner => owner.id === primaryOwner)!.records!.push({ id: record.id, target: sessionKey(target) });
+    succession.document.editRevision++; succession.save();
     await ask.open(undefined, succession.binding!.session, '', false, { associationOwner: primaryOwner });
   });
   await vi.waitFor(() => expect(succession.recipientFor(target, primaryOwner)?.isCurrent()).toBe(true));
@@ -541,7 +612,8 @@ it('restores a selected Side path and focus while the primary changes from A to 
   } });
   await vi.waitFor(() => expect(succession.binding).toBeDefined());
   await vi.waitFor(() => expect(f.view.querySelector('.lab-side-conversation')).not.toBeNull());
-  expect(succession.layoutView()).toMatchObject({ primary: { nativeSessionId: 'B' }, sides: [side], focus: sessionKey(side), anchor: sessionKey(side) });
+  const sideId = succession.document.slots.find(slot => slot.intent.target.native.nativeSessionId === 'S')!.id;
+  expect(succession.layoutView()).toMatchObject({ primary: { nativeSessionId: 'B' }, sides: [side], focus: sideId, anchor: sideId });
   const saved = readCompositionDocument(f.scope);
   if (saved.status !== 'ready') throw new Error('Missing composition.');
   const sideSlot = saved.document.slots.find(slot => slot.owners.text.key === side.agentId)!;
@@ -586,7 +658,7 @@ it.each(['A', 'B'])('retains a completed old-source creation before rejecting ne
   expect(record.target).toMatchObject({ nativeSessionId: 'S', agentId: 'agent-S' });
   expect(record.configured).not.toBe(true); expect(record.delivery).toBe('pending');
   expect(configure).not.toHaveBeenCalled(); if (oldRecipient) expect(oldRecipient.isCurrent()).toBe(false);
-  await expect(oldPrimary.onExecuteConsoleCommand!('console:ask', 'late')).rejects.toThrow('source session changed');
+  await expect(oldPrimary.onExecuteConsoleCommand!('console:ask', 'late')).rejects.toThrow(/source session changed|view no longer matches/);
   await expect(oldPrimary.actions.sendMessage!('late native input')).rejects.toThrow();
   expect(f.frames.some(frame => ['send_message', 'execute_command'].includes(frame.message?.type ?? ''))).toBe(false);
   expect(new URL(window.location.href).searchParams.get('session')).toBe(current);
@@ -700,7 +772,7 @@ it.each(['edit resources', 'Ask relations'])('rejects a retired source after awa
 it.each(['retention failure', 'draft edit'])('retains independent B stores and selected Track through an Ask %s before publishing the role', async boundary => {
   const realAsk = askHooks.useAskConversations, realSuccession = successionHooks.useSessionSuccession;
   let ask!: ReturnType<typeof realAsk>, succession!: ReturnType<typeof realSuccession>, consumer!: Parameters<typeof realSuccession>[0];
-  let source!: OpenedSession, independent!: OpenedSession, seededViews = false, blocked = true, entered = false, release!: () => void;
+  let source!: OpenedSession, independent!: OpenedSession, blocked = true, entered = false, release!: () => void;
   const gate = new Promise<void>(resolve => { release = resolve; }); cleanups.push(release);
   vi.spyOn(askHooks, 'useAskConversations').mockImplementation((...args) => {
     ask = realAsk(...args); const value = ask;
@@ -716,12 +788,6 @@ it.each(['retention failure', 'draft edit'])('retains independent B stores and s
   });
   vi.spyOn(successionHooks, 'useSessionSuccession').mockImplementation((...args) => {
     consumer = args[0];
-    if (!seededViews) {
-      seededViews = true;
-      const entries = [source, independent].map((entry, index) => ({ ...entry, hostId: 'host', starredAt: index + 1 }));
-      for (const entry of entries) { consumer.views.select(entry); consumer.views.remember({ primary: entry, selections: {}, focus: sessionKey(entry), anchor: sessionKey(entry) }, entries, entries); }
-      consumer.views.select(independent);
-    }
     succession = realSuccession(...args); return succession;
   });
   const f = await failureFixture(false, 'B', false, '', { async seed(scope, original) {
@@ -738,6 +804,14 @@ it.each(['retention failure', 'draft edit'])('retains independent B stores and s
       const record = store.prepare(referenceForkContext(origin), { sourceNativeSessionId: origin.nativeSessionId });
       store.bind(record.id, { ...origin, nativeSessionId, agentId: `agent-${nativeSessionId}` }); store.markConfigured(record.id); store.finishCreation(record.id);
     }
+    const imported = initializeCompositionDocument(scope);
+    if (imported.status !== 'ready') throw new Error('Fixture import failed');
+    const views = new TrackedSessionViews(imported.document, () => {});
+    for (const entry of [source, independent]) {
+      const slot = imported.document.slots.find(slot => slot.owners.text.key === entry.agentId)!;
+      views.select(sessionKey(entry)); views.remember({ primarySlot: slot.id, selections: {}, focus: slot.id, anchor: slot.id });
+    }
+    saveCompositionDocument(imported.document, () => true); flushRecoveryWrites();
   } });
   await vi.waitFor(() => expect(entered).toBe(true));
   if (boundary === 'draft edit') {
@@ -746,8 +820,8 @@ it.each(['retention failure', 'draft edit'])('retains independent B stores and s
   await vi.waitFor(async () => { await act(async () => { await new Promise(resolve => setTimeout(resolve, 20)); }); expect(succession.error).toContain('needs synchronization'); });
   expect(consumer.tracking().sessions.map(entry => entry.nativeSessionId)).toEqual(['A', 'B']);
   expect(readTrackedSessions(f.scope).map(entry => entry.nativeSessionId)).toEqual(['A', 'B']);
-  expect(consumer.views.snapshot().selected).toBe(sessionKey(independent));
-  expect(consumer.views.get(independent)?.primary.nativeSessionId).toBe('B');
+  expect(succession.document.selectedTrack).toBe(sessionKey(independent));
+  expect(new TrackedSessionViews(succession.document, () => {}).get(sessionKey(independent))?.primary.nativeSessionId).toBe('B');
   const independentSlot = succession.document.slots.find(slot => slot.owners.text.key === independent.agentId)!;
   const independentImage = independentSlot.owners.image;
   const assertIndependentImage = async () => {
@@ -760,7 +834,7 @@ it.each(['retention failure', 'draft edit'])('retains independent B stores and s
   };
   await assertIndependentImage();
   expect(succession.document.retained.some(value => value.slot === independentSlot.id)).toBe(true);
-  const primaryOwner = succession.ownerFor(source)!, independentOwner = succession.ownerFor(independent)!;
+  const primaryOwner = succession.ownerFor(succession.document.slots.find(slot => slot.owners.text.key === source.agentId)!.id), independentOwner = succession.ownerFor(independentSlot.id);
   expect(primaryOwner).not.toBe(independentOwner);
   expect(ask.entryFor(source, primaryOwner).record?.target?.nativeSessionId).toBe('T');
   expect(ask.entryFor(independent, independentOwner).record?.target?.nativeSessionId).toBe('U');
@@ -768,20 +842,20 @@ it.each(['retention failure', 'draft edit'])('retains independent B stores and s
   expect(consumer.textStore(f.scope).get(independent.agentId)).toBe('Independent B draft');
   expect(f.requests.filter(item => item.url.endsWith('/attach'))).toEqual([]);
   expect(f.frames.filter(frame => frame.type === 'subscribe')).toEqual([]);
+  const trackedLayouts = structuredClone(succession.document.tracks.map(({ entryId, view }) => ({ entryId, view })));
   blocked = false; release();
   await act(async () => succession.retry());
   await vi.waitFor(async () => { await act(async () => { await new Promise(resolve => setTimeout(resolve, 20)); }); expect(succession.binding?.session.nativeSessionId).toBe('B'); });
   expect(consumer.tracking().sessions.map(entry => entry.nativeSessionId)).toEqual(['B']);
   await assertIndependentImage();
-  expect(consumer.views.snapshot().selected).toBe(sessionKey(source));
+  expect(succession.document.selectedTrack).toBe(sessionKey(independent));
+  expect(succession.document.tracks.map(({ entryId, view }) => ({ entryId, view }))).toEqual(trackedLayouts);
   expect(consumer.textStore(f.scope).get(independent.agentId)).toBe('Independent B draft');
   const text = boundary === 'draft edit' ? 'Edited while Ask retained' : 'A local draft';
   expect(f.view.querySelector('[data-testid="prompt-input"]')?.textContent).toBe(text);
   expect(ask.entryFor(independent, independentOwner).record?.source.nativeSessionId).toBe('B');
   expect(ask.entryFor(independent, independentOwner).record?.target?.nativeSessionId).toBe('U');
-  const companion = readTrackCompanion(f.scope);
-  if (companion.status !== 'ready') throw new Error('Track companion was not retained.');
-  expect(companion.document.views.map(view => view.primarySlot)).toEqual(expect.arrayContaining([sessionKey(source), independentSlot.id]));
+  expect(succession.document.tracks.map(track => track.view?.primarySlot)).toEqual(expect.arrayContaining([succession.desired!.slot.id, independentSlot.id]));
   expect(f.requests.filter(item => item.url.endsWith('/attach')).map(item => item.body?.nativeSessionId)).toEqual(['B']);
 });
 
@@ -847,9 +921,10 @@ it.each([['damaged', '{broken'], ['unsupported', JSON.stringify({ version: 99 })
 
 it('retains desired B and the editable owner when the composition checkpoint cannot be saved', async () => {
   const set = Storage.prototype.setItem;
-  const f = await failureFixture(false, 'B', false, '', { seed() {
+  const f = await failureFixture(false, 'B', false, '', { seed(scope) {
+    expect(initializeCompositionDocument(scope).status).toBe('ready');
     vi.spyOn(Storage.prototype, 'setItem').mockImplementation(function (this: Storage, key, value) {
-      if (key.endsWith(':composition-v1')) throw new Error('Fixture storage capacity reached');
+      if (key.endsWith(':composition-v2')) throw new Error('Fixture storage capacity reached');
       set.call(this, key, value);
     });
   } });
@@ -890,4 +965,279 @@ it('reconciles metadata on page resume without retrying an HTTP attachment failu
   await vi.waitFor(async () => { await act(async () => { await new Promise(resolve => setTimeout(resolve, 20)); }); expect(f.requests.filter(item => item.url.includes('/session-successions')).length).toBeGreaterThan(reads); });
   expect(f.requests.filter(item => item.url.endsWith('/attach')).map(item => item.body?.nativeSessionId)).toEqual(['B']);
   expect(f.view.textContent).toContain('Retry session');
+});
+
+it('opens retained B and the role through local view entries without sharing their owners or replacing the native connection', async () => {
+  const real = successionHooks.useSessionSuccession, realAsk = askHooks.useAskConversations;
+  let succession!: ReturnType<typeof real>, ask!: ReturnType<typeof realAsk>;
+  vi.spyOn(successionHooks, 'useSessionSuccession').mockImplementation((...args) => { succession = real(...args); return succession; });
+  vi.spyOn(askHooks, 'useAskConversations').mockImplementation((...args) => { ask = realAsk(...args); return ask; });
+  const f = await failureFixture(false, 'B', false, '', { async seed(scope, source) {
+    const independent = { ...source, nativeSessionId: 'B', agentId: 'agent-B', title: 'Independent B' };
+    localStorage.setItem(`agent-remote-opened:${scope}`, JSON.stringify([source, independent]));
+    const text = new DraftStore(scope); text.set(independent.agentId, 'Independent B draft'); text.flush();
+    const store = new ForkStore(`ask:${scope}`, sessionStorage), askText = new DraftStore(`${scope}:ask`);
+    for (const [origin, target] of [[source, 'T'], [independent, 'U']] as const) {
+      const record = store.prepare(referenceForkContext(origin), { sourceNativeSessionId: origin.nativeSessionId });
+      store.bind(record.id, { ...origin, nativeSessionId: target, agentId: `agent-${target}` }); store.markConfigured(record.id); store.finishCreation(record.id);
+      askText.set(sessionKey(origin), `Ask draft for ${target}`);
+    }
+    askText.flush();
+  } });
+  await settleApp(() => expect(succession.binding?.session.nativeSessionId).toBe('B'));
+  const originalSlot = succession.desired!.slot.id, originalClient = succession.binding!.client;
+  const independent = succession.document.slots.find(slot => slot.owners.text.key === 'agent-B')!;
+  const primary = () => f.view.querySelector('.lab-primary-conversation')!;
+  const clickView = async (title: string) => {
+    await act(async () => primary().querySelector<HTMLButtonElement>('.lab-chat-sessions-heading')!.click());
+    const row = [...primary().querySelectorAll<HTMLButtonElement>('.lab-chat-session-row')].find(button => button.textContent?.includes(title));
+    expect(row).toBeDefined(); expect(row!.disabled).toBe(false);
+    await act(async () => row!.click());
+  };
+  const assertAsk = (target: string) => {
+    const bound = succession.binding!.session, owner = succession.ownerFor(bound.viewId);
+    expect(succession.document.asks.find(value => value.id === owner)?.sourceSlot).toBe(succession.desired!.slot.id);
+    expect(ask.entryFor(bound, owner).record?.target?.nativeSessionId).toBe(target);
+    const draft = ask.draftBinding(owner); expect(draft.store.get(draft.key)).toBe(`Ask draft for ${target}`);
+  };
+  assertAsk('T');
+  await clickView('Independent B');
+  await settleApp(() => { expect(succession.desired!.slot.id).toBe(independent.id); expect(succession.isCurrent()).toBe(true); });
+  expect(primary().querySelector('[data-testid="prompt-input"]')?.textContent).toBe('Independent B draft'); assertAsk('U');
+  expect(succession.document.address).toBe(independent.id); expect(succession.binding!.client).toBe(originalClient);
+  await clickView('Retained primary');
+  await settleApp(() => { expect(succession.desired!.slot.id).toBe(originalSlot); expect(succession.isCurrent()).toBe(true); });
+  expect(primary().querySelector('[data-testid="prompt-input"]')?.textContent).toBe('A local draft'); assertAsk('T');
+  expect(succession.binding!.client).toBe(originalClient);
+  await clickView('Independent B');
+  await settleApp(() => { expect(succession.desired!.slot.id).toBe(independent.id); expect(succession.isCurrent()).toBe(true); });
+  expect(f.requests.filter(item => item.url.endsWith('/attach')).map(item => item.body?.nativeSessionId)).toEqual(['B']);
+  await act(async () => { f.chain.push(committed('B', 'C', 3)); f.notify(f.chain[1]!); });
+  await settleApp(() => expect(succession.document.roles[0]?.appliedRevision).toBe(3));
+  expect(succession.desired!.slot.id).toBe(independent.id); expect(succession.binding!.session.nativeSessionId).toBe('B'); assertAsk('U');
+  await clickView('Retained primary');
+  await settleApp(() => expect(succession.binding?.session.nativeSessionId).toBe('C'));
+  expect(succession.desired!.slot.id).toBe(originalSlot); assertAsk('T');
+  expect(primary().querySelector('[data-testid="prompt-input"]')?.textContent).toBe('A local draft');
+  expect(f.requests.filter(item => item.url.endsWith('/attach')).map(item => item.body?.nativeSessionId)).toEqual(['B', 'C']);
+  expect(f.frames.filter(frame => frame.message && ['send_message', 'execute_command', 'image_upload_begin'].includes(frame.message.type))).toEqual([]);
+});
+
+it.each(['missing', 'mismatched'])('rejects an explicit %s view without a native fallback or retry attachment', async kind => {
+  const real = successionHooks.useSessionSuccession;
+  let succession!: ReturnType<typeof real>;
+  vi.spyOn(successionHooks, 'useSessionSuccession').mockImplementation((...args) => { succession = real(...args); return succession; });
+  const f = await failureFixture(false, 'B');
+  await settleApp(() => expect(succession.binding?.session.nativeSessionId).toBe('B'));
+  const id = kind === 'missing' ? 'missing-slot' : succession.desired!.slot.id;
+  await act(async () => { expect(await succession.open({ hostId: 'host', providerId: 'recorded', nativeSessionId: kind === 'missing' ? 'B' : 'D', title: 'Rejected view' }, undefined, undefined, id)).toBe(true); });
+  expect(succession.error).toContain('no longer matches'); expect(succession.binding).toBeUndefined();
+  await act(async () => succession.retry());
+  await settleApp(() => expect(succession.discovering).toBe(false));
+  expect(succession.binding).toBeUndefined();
+  expect(f.requests.filter(item => item.url.endsWith('/attach')).map(item => item.body?.nativeSessionId)).toEqual(['B']);
+});
+
+it('reselecting an explicitly failed view retains its error until Retry', async () => {
+  const real = successionHooks.useSessionSuccession;
+  let succession!: ReturnType<typeof real>;
+  vi.spyOn(successionHooks, 'useSessionSuccession').mockImplementation((...args) => { succession = real(...args); return succession; });
+  const f = await failureFixture();
+  await settleApp(() => expect(succession.error).toBe('Fixture successor unavailable.'));
+  const id = succession.desired!.slot.id, target = succession.selected!;
+  await act(async () => { expect(await succession.open(target, undefined, undefined, id)).toBe(true); });
+  expect(succession.error).toBe('Fixture successor unavailable.');
+  expect(f.requests.filter(item => item.url.endsWith('/attach'))).toHaveLength(1);
+  f.setNativeIdentity('B');
+  await act(async () => succession.retry());
+  await settleApp(() => expect(succession.binding?.session.nativeSessionId).toBe('B'));
+  expect(f.requests.filter(item => item.url.endsWith('/attach'))).toHaveLength(2);
+});
+
+it.each([false, true])('restores the legacy Side primary without overriding explicit history intent %s', async history => {
+  const real = successionHooks.useSessionSuccession;
+  let succession!: ReturnType<typeof real>;
+  vi.spyOn(successionHooks, 'useSessionSuccession').mockImplementation((...args) => { succession = real(...args); return succession; });
+  await failureFixture(false, 'B', false, history ? '&intent=history' : '', { selected: 'B', seed(scope, source) {
+    const side = { ...source, nativeSessionId: 'B', agentId: 'agent-B', title: 'Side B' };
+    localStorage.setItem(`agent-remote-opened:${scope}`, JSON.stringify([source, side]));
+    saveSessionComposition(scope, { path: [source, side], focus: sessionKey(side), anchor: sessionKey(source), addressKey: sessionKey(side) });
+  } });
+  await settleApp(() => { expect(succession.binding?.session.nativeSessionId).toBe('B'); expect(succession.isCurrent()).toBe(true); });
+  expect(succession.desired?.slot.intent.kind).toBe(history ? 'history' : 'role');
+  if (!history) expect(succession.desired?.slot.owners.text.key).toBe('agent-A');
+});
+
+it.each(['B', 'D'])('restores the selected local owner only for a matching %s reload target and clears it on ordinary navigation', async selected => {
+  const real = successionHooks.useSessionSuccession;
+  let succession!: ReturnType<typeof real>;
+  vi.spyOn(successionHooks, 'useSessionSuccession').mockImplementation((...args) => { succession = real(...args); return succession; });
+  const f = await failureFixture(false, 'B', false, '', { seed(scope, source) {
+    const independent = { ...source, nativeSessionId: 'B', agentId: 'agent-B', title: 'Independent B' };
+    localStorage.setItem(`agent-remote-opened:${scope}`, JSON.stringify([source, independent]));
+    saveSessionComposition(scope, { path: [source, independent], focus: sessionKey(independent), anchor: sessionKey(source), addressKey: sessionKey(independent) });
+    const draft = new DraftStore(scope); draft.set(independent.agentId, 'Independent B draft'); draft.flush();
+  } });
+  await settleApp(() => expect(succession.binding?.session.nativeSessionId).toBe('B'));
+  const slot = succession.document.slots.find(value => value.owners.text.key === 'agent-B')!;
+  await act(async () => succession.open({ hostId: 'host', providerId: 'recorded', nativeSessionId: 'B', title: 'Independent B' }, undefined, undefined, slot.id));
+  await settleApp(() => { expect(succession.desired?.slot.id).toBe(slot.id); expect(succession.isCurrent()).toBe(true); });
+  expect(readCompositionDocument(f.scope)).toMatchObject({ status: 'ready', document: { address: slot.id } });
+  await f.reload(selected);
+  if (selected === 'B') {
+    await settleApp(() => { expect(succession.desired?.slot.id).toBe(slot.id); expect(succession.isCurrent()).toBe(true); });
+    expect(f.view.querySelector('[data-testid="prompt-input"]')?.textContent).toBe('Independent B draft');
+    await act(async () => succession.open({ hostId: 'host', providerId: 'recorded', nativeSessionId: 'B', title: 'Ordinary B' }));
+    await settleApp(() => { expect(succession.desired?.slot.owners.text.key).toBe('agent-A'); expect(succession.isCurrent()).toBe(true); });
+    expect(f.view.querySelector('[data-testid="prompt-input"]')?.textContent).toBe('A local draft');
+  } else {
+    await settleApp(() => expect(f.requests.filter(item => item.url.endsWith('/attach')).at(-1)?.body?.nativeSessionId).toBe('D'));
+    expect(succession.active).toBe(true); expect(succession.desired?.slot.intent).toMatchObject({ kind: 'fixed', target: { native: { nativeSessionId: 'D' } } });
+  }
+});
+
+
+it('reattaches a restored Side to its new runtime binding while preserving the view and draft owners', async () => {
+  const real = successionHooks.useSessionSuccession;
+  let succession!: ReturnType<typeof real>;
+  vi.spyOn(successionHooks, 'useSessionSuccession').mockImplementation((...args) => { succession = real(...args); return succession; });
+  const f = await failureFixture(false, 'B', false, '', { seed(scope, source) {
+    const side = { ...source, nativeSessionId: 'S', agentId: 'agent-S', title: 'Independent Side' };
+    localStorage.setItem(`agent-remote-opened:${scope}`, JSON.stringify([source, side]));
+    saveSessionComposition(scope, { path: [source, side], focus: sessionKey(side), anchor: sessionKey(source), addressKey: sessionKey(source) });
+    const drafts = new DraftStore(scope); drafts.set(side.agentId, 'Side draft before runtime restart'); drafts.flush();
+  } });
+  await settleApp(() => expect(succession.layoutView()?.sides[0]?.agentId).toBe('agent-S'));
+  const slot = succession.document.slots.find(value => value.intent.target.native.nativeSessionId === 'S')!;
+  const owners = structuredClone(slot.owners), askOwner = succession.ownerFor(slot.id);
+  f.rebind('S', 'restarted-side-binding');
+  await f.reload();
+  await settleApp(() => expect(succession.layoutView()?.sides[0]?.agentId).toBe('restarted-side-binding'));
+  const restored = succession.document.slots.find(value => value.id === slot.id)!;
+  expect(restored.owners).toEqual(owners); expect(succession.ownerFor(slot.id)).toBe(askOwner);
+  expect(restored.metadata?.agentId).toBe('restarted-side-binding');
+  expect(f.view.querySelector('.lab-side-conversation [data-testid="prompt-input"]')?.textContent).toBe('Side draft before runtime restart');
+  expect(f.frames.filter(frame => frame.type === 'subscribe').map(frame => frame.agentId)).toContain('restarted-side-binding');
+  expect(f.frames.filter(frame => frame.message && ['send_message', 'execute_command', 'image_upload_begin'].includes(frame.message.type))).toEqual([]);
+});
+
+it.each(['ordinary', 'Track'] as const)('leaves a focused unlinked Side through %s navigation and keeps its independent view', async navigation => {
+  const real = successionHooks.useSessionSuccession, realManager = managerComponents.ChatSessionManager, realAttention = attentionHooks.useSessionAttention;
+  let succession!: ReturnType<typeof real>, manager!: ComponentProps<typeof realManager>;
+  vi.spyOn(successionHooks, 'useSessionSuccession').mockImplementation((...args) => { succession = real(...args); return succession; });
+  vi.spyOn(managerComponents, 'ChatSessionManager').mockImplementation(props => { manager = props; return realManager(props); });
+  vi.spyOn(attentionHooks, 'useSessionAttention').mockImplementation((...args) => ({ ...realAttention(...args), trackVisible: true }));
+  let target!: OpenedSession, side!: OpenedSession, store!: ForkStore, recordId!: string;
+  const f = await failureFixture(false, 'B', false, '', { chain: [], userScoped: navigation === 'Track', seed(scope, source) {
+    target = { ...source, nativeSessionId: 'D', agentId: 'agent-D', title: 'New primary D' };
+    side = { ...source, nativeSessionId: 'S', agentId: 'agent-S', title: 'Side S' };
+    localStorage.setItem(`agent-remote-opened:${scope}`, JSON.stringify([source, target, side]));
+    saveTrackedSessions(scope, [target, side].map((session, index) => ({ ...session, hostId: 'host', starredAt: index + 1 })));
+    const drafts = new DraftStore(scope); drafts.set(side.agentId, 'Independent S draft'); drafts.flush();
+    store = new ForkStore(scope);
+    const record = store.prepare(referenceForkContext(source), { sourceNativeSessionId: source.nativeSessionId });
+    recordId = record.id;
+    store.bind(record.id, side); store.markConfigured(record.id); store.finishCreation(record.id);
+  } });
+  await settleApp(() => expect(succession.binding?.session.nativeSessionId).toBe('A'));
+  await act(async () => f.view.querySelector<HTMLButtonElement>('.lab-primary-conversation .lab-fork-entry > button')!.click());
+  await settleApp(() => expect(new URL(window.location.href).searchParams.get('session')).toBe('S'));
+  const slot = succession.document.slots.find(value => value.owners.text.key === side.agentId)!;
+  const owners = structuredClone(slot.owners), askOwner = succession.ownerFor(slot.id);
+  await act(async () => {
+    store.setLinked(recordId, false);
+    window.dispatchEvent(new StorageEvent('storage', { key: `agent-remote-forks:${f.scope}:navigation:${recordId}` }));
+  });
+  await settleApp(() => {
+    expect(f.view.querySelector('.lab-side-conversation:not([hidden]) .lab-side-close')).toBeNull();
+    expect(f.view.querySelector<HTMLElement>('.lab-primary-conversation')!.hidden).toBe(true);
+    expect(f.view.querySelector('.lab-side-conversation:not([hidden]) [data-testid="prompt-input"]')?.textContent).toBe('Independent S draft');
+  });
+  async function open(session: OpenedSession) {
+    if (navigation === 'ordinary') await act(async () => manager.onOpen(session));
+    else {
+      await act(async () => f.view.querySelector<HTMLButtonElement>('[aria-label="Tracked sessions"]')!.click());
+      await act(async () => [...f.view.querySelectorAll<HTMLButtonElement>('.lab-tracking-floating .lab-session-row')].find(row => row.textContent?.includes(session.title))!.click());
+    }
+    await settleApp(() => {
+      expect(succession.binding?.session.nativeSessionId).toBe(session.nativeSessionId);
+      expect(f.view.querySelector<HTMLElement>('.lab-primary-conversation')!.hidden).toBe(false);
+      expect(new URL(window.location.href).searchParams.get('session')).toBe(session.nativeSessionId);
+      expect(succession.document.primary).toBe(succession.binding!.session.viewId);
+    });
+  }
+  await open(target);
+  expect(f.view.querySelectorAll('.lab-side-conversation:not([hidden])')).toHaveLength(0);
+  await open(side);
+  expect(succession.binding?.session.viewId).toBe(slot.id);
+  expect(succession.desired?.slot.owners).toEqual(owners);
+  expect(succession.ownerFor(slot.id)).toBe(askOwner);
+  expect(f.view.querySelector('.lab-primary-conversation [data-testid="prompt-input"]')?.textContent).toBe('Independent S draft');
+  expect(store.get(recordId)?.linked).toBe(false);
+  expect(f.frames.filter(frame => frame.message && ['send_message', 'execute_command', 'image_upload_begin'].includes(frame.message.type))).toEqual([]);
+});
+
+it('retries a transient composition import failure through the synchronization button and restores shared owners', async () => {
+  const real = successionHooks.useSessionSuccession, realAsk = askHooks.useAskConversations;
+  let succession!: ReturnType<typeof real>, askDocument!: Parameters<typeof realAsk>[0], rejectImport = true;
+  vi.spyOn(successionHooks, 'useSessionSuccession').mockImplementation((...args) => { succession = real(...args); return succession; });
+  vi.spyOn(askHooks, 'useAskConversations').mockImplementation((...args) => { askDocument = args[0]; return realAsk(...args); });
+  const originalSet = Storage.prototype.setItem;
+  let importWrites = 0;
+  const f = await failureFixture(false, 'B', false, '', { chain: [], seed(scope, source) {
+    saveTrackedSessions(scope, [{ ...source, hostId: 'host', starredAt: 1 }]);
+    vi.spyOn(Storage.prototype, 'setItem').mockImplementation(function(this: Storage, key: string, value: string) {
+      if (key === `agent-remote:recovery:${scope}:composition-v2`) {
+        importWrites++;
+        if (rejectImport) throw new Error('Temporary import storage failure');
+      }
+      originalSet.call(this, key, value);
+    });
+  } });
+  await settleApp(() => expect(f.view.textContent).toContain('Saved session composition is unreadable or unsupported.'));
+  const failedWrites = importWrites, fallback = succession.document;
+  expect(f.requests.filter(request => request.url.endsWith('/attach'))).toHaveLength(0);
+  rejectImport = false;
+  await act(async () => [...f.view.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent === 'Retry synchronization')!.click());
+  await settleApp(() => expect(succession.binding?.session.nativeSessionId).toBe('A'));
+  expect(importWrites).toBeGreaterThan(failedWrites);
+  expect(succession.document).not.toBe(fallback);
+  expect(askDocument).toBe(succession.document);
+  expect(succession.error).toBeUndefined();
+  expect(succession.desired?.slot.owners.text.key).toBe('agent-A');
+  expect(succession.ownerFor(succession.binding!.session.viewId)).toBeDefined();
+  expect(new TrackedSessionViews(succession.document, () => {}).entry(sessionKey(succession.binding!.session))?.slotId).toBe(succession.binding!.session.viewId);
+  expect(readCompositionDocument(f.scope).status).toBe('ready');
+  expect(new DraftStore(f.scope).get('agent-A')).toBe('A local draft');
+  expect(f.view.querySelector('[data-testid="prompt-input"]')?.textContent).toBe('A local draft');
+  expect(f.frames.filter(frame => frame.message && ['send_message', 'execute_command', 'image_upload_begin'].includes(frame.message.type))).toEqual([]);
+  await f.reload();
+  await settleApp(() => expect(succession.binding?.session.nativeSessionId).toBe('A'));
+  expect(succession.desired?.slot.owners.text.key).toBe('agent-A');
+});
+
+it('keeps post-upgrade view preferences and owners when opening the session in a new tab', async () => {
+  vi.stubGlobal('ResizeObserver', class { observe() {} disconnect() {} unobserve() {} });
+  const real = successionHooks.useSessionSuccession, realAsk = askHooks.useAskConversations;
+  let succession!: ReturnType<typeof real>, ask!: ReturnType<typeof realAsk>;
+  vi.spyOn(successionHooks, 'useSessionSuccession').mockImplementation((...args) => { succession = real(...args); return succession; });
+  vi.spyOn(askHooks, 'useAskConversations').mockImplementation((...args) => { ask = realAsk(...args); return ask; });
+  const f = await failureFixture(false, 'B', false, '', { chain: [] });
+  await settleApp(() => expect(succession.binding?.session.nativeSessionId).toBe('A'));
+  await act(async () => succession.open({ hostId: 'host', providerId: 'recorded', nativeSessionId: 'D', title: 'Post-upgrade D' }));
+  await settleApp(() => expect(succession.binding?.session.nativeSessionId).toBe('D'));
+  const original = structuredClone(succession.desired!.slot), owner = succession.ownerFor(original.id);
+  await act(async () => ask.toggle(succession.binding!.session, owner));
+  const primary = () => f.view.querySelector('.lab-primary-conversation')!;
+  await act(async () => primary().querySelector<HTMLButtonElement>('[aria-label="Session view options"]')!.click());
+  await act(async () => primary().querySelector<HTMLInputElement>('input[name^="session-display-"][value="content"]')!.click());
+  await f.newTab('D');
+  await settleApp(() => expect(succession.binding?.session.nativeSessionId).toBe('D'));
+  expect(succession.desired?.slot.id).toBe(original.id);
+  expect(succession.desired?.slot.owners).toEqual(original.owners);
+  expect(succession.ownerFor(original.id)).toBe(owner);
+  expect(ask.isEnabled(succession.binding!.session, owner)).toBe(true);
+  await act(async () => primary().querySelector<HTMLButtonElement>('[aria-label="Session view options"]')!.click());
+  expect(primary().querySelector<HTMLInputElement>('input[name^="session-display-"][value="content"]')!.checked).toBe(true);
+  expect(f.frames.filter(frame => frame.message && ['send_message', 'execute_command', 'image_upload_begin'].includes(frame.message.type))).toEqual([]);
 });

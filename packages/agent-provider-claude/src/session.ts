@@ -15,6 +15,7 @@ import { discoverClaudeCommands } from './commands.js';
 import { ClaudeChildren } from './children.js';
 import { createClaudeCatalog, type ClaudeCatalog } from './catalog.js';
 import { createClaudeSessionTools } from './session-tools.js';
+import { ClaudeNativeEvidence, claudeEmptyHandle } from './native-evidence.js';
 
 export type ClaudeQuery = AsyncIterable<SDKMessage> & Pick<Query, 'initializationResult' | 'interrupt' | 'setPermissionMode' | 'close' | 'supportedCommands' | 'reloadSkills' | 'supportedModels' | 'setModel'> & Partial<Pick<Query, 'applyFlagSettings'>> & {
   /** The pinned SDK implements this control without declaring it on public Query. */
@@ -22,6 +23,10 @@ export type ClaudeQuery = AsyncIterable<SDKMessage> & Pick<Query, 'initializatio
 };
 export interface ClaudeSessionOptions {
   executable?: string;
+  /** Adapter-owned descriptor, only supplied after provider validation. */
+  emptyDescriptor?: boolean;
+  /** Native history is authoritative for the model after materialization. */
+  restoreNativeModel?: boolean;
   restrictedNative?: boolean;
   env?: NodeJS.ProcessEnv;
   requestTimeoutMs?: number;
@@ -41,6 +46,8 @@ export class ClaudeShutdownError extends Error {
 }
 
 export class ClaudeAgentSession implements AgentSession {
+  readonly nativeEvidence: ClaudeNativeEvidence;
+  private acceptance?: AgentMessageOptions['onAcceptance'];
   readonly capabilities: AgentCapabilities = { imageInput: IMAGE_INPUT_CAPABILITIES, history: true, sendMessage: true, steer: false, cancel: true, readResource: true,
     planning: true, commands: true, sessionSettings: true, interactions: { question: true, toolApproval: true, planApproval: true } };
   private readonly input = new Channel<SDKUserMessage>();
@@ -64,6 +71,8 @@ export class ClaudeAgentSession implements AgentSession {
   private models: ModelInfo[] = [];
   private appliedEffort: string | null | undefined;
   private settingsRevision = 0;
+  private nativeModelConfirmed: boolean;
+  private inputDispatched: boolean;
   private changingSetting = false;
   private preparingMessage = false;
   private observing = false;
@@ -77,6 +86,8 @@ export class ClaudeAgentSession implements AgentSession {
 
   private constructor(private readonly config: ClaudeSessionConfig, private readonly options: ClaudeSessionOptions,
     messages: SessionMessage[]) {
+    this.inputDispatched = messages.some(message => message.type === 'user');
+    this.nativeModelConfirmed = !options.restoreNativeModel;
     this.process = new ClaudeNativeProcess(options.onDiagnostic);
     this.timeout = options.requestTimeoutMs ?? 15_000;
     if (!Number.isFinite(this.timeout) || this.timeout <= 0) throw new Error('Claude request timeout must be positive.');
@@ -89,6 +100,15 @@ export class ClaudeAgentSession implements AgentSession {
     this.history = messages.flatMap((message) => history.project(message));
     this.children = new ClaudeChildren(config.sessionId, config.cwd,
       options.catalog ?? createClaudeCatalog(options.env ?? {}, this.timeout), () => this.runtimeUpdated());
+    this.nativeEvidence = new ClaudeNativeEvidence({ id: config.sessionId, cwd: config.cwd ?? process.cwd(), options,
+      open: () => !this.disposed && !this.failure, mutable: () => this.nativeModelConfirmed && !this.changingSetting && !this.preparingMessage,
+      counts: () => ({ pendingInteractions: this.interactions?.size ?? 0, activeChildren: this.children.descriptors().filter(child => child.status === 'running' || child.status === 'waiting').length, pendingInput: Boolean(this.turnId) }),
+      selections: () => ({ model: this.config.model ?? 'default', reasoningEffort: this.appliedEffort === undefined ? this.config.reasoningEffort ?? 'default' : this.appliedEffort ?? 'default',
+        ...(this.config.systemPrompt !== undefined ? { system: this.config.systemPrompt } : {}),
+        providerOptions: JSON.stringify({ permissionMode: this.permissionMode, planning: this.planning, ...(this.config.instructions ? { instructions: this.config.instructions } : {}) }) }),
+      messages: () => (options.catalog ?? createClaudeCatalog(options.env ?? {}, this.timeout)).messages(config.sessionId),
+      dispatch: (text, inputId) => { this.assertMessageReady({}); this.dispatchMessage(text, inputId); },
+    });
     this.interactions = new ClaudeInteractions((event) => {
       this.emit(event);
       this.status = this.interactions.size ? 'waiting' : this.turnId ? 'running' : 'idle';
@@ -119,17 +139,19 @@ export class ClaudeAgentSession implements AgentSession {
         ...(session.hostTools ? { mcpServers: { agent_host: session.hostTools } } : {}),
         ...(options.restrictedNative ? { sandbox: { enabled: true, failIfUnavailable: true, allowUnsandboxedCommands: false } } : {}),
         permissionMode: session.permissionMode, canUseTool: session.interactions.request,
+        hooks: { Stop: [{ hooks: [async input => { if (input.hook_event_name === 'Stop') session.nativeEvidence.noteStop(input); return {}; }] }] },
         stderr: options.onDiagnostic, spawnClaudeCodeProcess: session.process.spawn,
       } });
       session.pump = session.consume();
       const initialized = await deadline(session.native.initializationResult(), session.timeout, 'Claude initialization');
       session.models = initialized.models ?? [];
       if (session.native.applyFlagSettings && session.native.getSettings) {
-        try { await session.readNativeSettings(); }
+        try { await session.readNativeSettings(false, options.restoreNativeModel); }
         catch { session.appliedEffort = undefined; }
       }
       if (session.failure) throw session.failure;
       session.status = 'idle';
+      session.nativeEvidence.initialize();
       session.runtimeUpdated();
       return session;
     } catch (error) {
@@ -149,7 +171,7 @@ export class ClaudeAgentSession implements AgentSession {
   async sendMessage(text: string, options: AgentMessageOptions = {}): Promise<void> {
     this.assertMessageReady(options);
     if (!text.trim()) throw new AgentOperationRejectedError('operation_rejected', 'Claude message cannot be empty.');
-    this.dispatchMessage(text);
+    this.dispatchMessage(text, undefined, options);
   }
 
   async sendMessageContent(parts: readonly AgentInputPart[], options: AgentMessageOptions = {}): Promise<void> {
@@ -160,7 +182,7 @@ export class ClaudeAgentSession implements AgentSession {
     try {
       const content = await prepareAgentOperation(() => claudeMessageContent(snapshot));
       this.requireOpen();
-      this.dispatchMessage(content);
+      this.dispatchMessage(content, undefined, options);
     } finally { this.preparingMessage = false; if (!this.disposed && !this.failure) this.runtimeUpdated(); }
   }
 
@@ -170,12 +192,14 @@ export class ClaudeAgentSession implements AgentSession {
     if (this.turnId || this.changingSetting || this.preparingMessage) throw new AgentOperationRejectedError('operation_rejected', 'Claude already has an active turn or setting change.');
   }
 
-  private dispatchMessage(content: SDKUserMessage['message']['content']): void {
-    const turnId = randomUUID();
+  private dispatchMessage(content: SDKUserMessage['message']['content'], turnId = randomUUID(), options: AgentMessageOptions = {}): void {
     const message: SDKUserMessage = { type: 'user', uuid: turnId, session_id: this.config.sessionId,
       parent_tool_use_id: null, message: { role: 'user', content } };
     this.input.push(message);
     this.turnId = turnId;
+    this.inputDispatched = true;
+    this.acceptance = options.onAcceptance;
+    this.nativeEvidence.noteDispatch(turnId);
     this.usage.startTurn();
     this.status = 'running';
     this.cancelRequested = false;
@@ -239,9 +263,8 @@ export class ClaudeAgentSession implements AgentSession {
         if (this.disposed) throw new Error('Claude closed before effort confirmation.');
         this.settingsRevision++;
         await this.readNativeSettings();
-        if (value === 'default') delete this.config.reasoningEffort;
-        else if (this.appliedEffort !== null) this.config.reasoningEffort = this.appliedEffort;
-        else this.config.reasoningEffort = value;
+        if (value === 'default' || this.appliedEffort === null) delete this.config.reasoningEffort;
+        else this.config.reasoningEffort = this.appliedEffort;
         this.runtimeUpdated();
         if (value !== 'default' && value !== this.appliedEffort) throw new AgentOperationRejectedError('operation_rejected', `Claude applied ${this.appliedEffort ?? 'no effort parameter'} instead of requested effort ${value}.`);
       } else await this.updatePermissionMode(value as PermissionMode);
@@ -274,7 +297,7 @@ export class ClaudeAgentSession implements AgentSession {
     this.planning = mode === 'plan';
     if (!this.planning) this.resumePermissionMode = mode;
   }
-  private async readNativeSettings(refreshModel = false): Promise<void> {
+  private async readNativeSettings(refreshModel = false, restoreModel = false): Promise<void> {
     const revision = this.settingsRevision;
     try {
       const response = await deadline(this.native.getSettings!(), this.timeout, 'Claude applied effort readback');
@@ -284,8 +307,13 @@ export class ClaudeAgentSession implements AgentSession {
       if (effort !== null && (typeof effort !== 'string' || !['low', 'medium', 'high', 'xhigh', 'max'].includes(effort))) throw new Error('Claude did not report applied effort.');
       this.settingsRevision++;
       this.appliedEffort = effort;
+      if (this.config.reasoningEffort !== undefined) {
+        if (effort === null) delete this.config.reasoningEffort;
+        else this.config.reasoningEffort = effort;
+      }
       const model = applied?.model;
       const selected = this.config.model;
+      if (restoreModel && typeof model === 'string' && model.length > 0) { this.config.model = model; this.nativeModelConfirmed = true; }
       if (refreshModel && typeof model === 'string' && model.length > 0 && selected !== undefined && selected !== 'default') {
         const metadata = this.models.find(entry => entry.value === selected);
         if (model !== selected && model !== metadata?.resolvedModel) this.config.model = model;
@@ -355,12 +383,19 @@ export class ClaudeAgentSession implements AgentSession {
     if (this.disposed) throw new AgentOperationRejectedError('operation_rejected', 'Claude session is closed.');
     if (this.failure) throw new AgentOperationRejectedError('native_runtime_unavailable', this.failure.message);
   }
+  selectionConfig(): Partial<ClaudeSessionConfig> {
+    this.requireOpen();
+    return { ...(this.config.model !== undefined ? { model: this.config.model } : {}),
+      ...(this.config.reasoningEffort !== undefined ? { reasoningEffort: this.config.reasoningEffort } : {}),
+      ...(this.config.systemPrompt !== undefined ? { systemPrompt: this.config.systemPrompt } : {}),
+      planning: this.planning, permissionMode: this.resumePermissionMode };
+  }
   private info(): AgentRuntimeInfo {
     return { providerId: 'claude', sessionId: this.config.sessionId, status: this.status, cwd: this.config.cwd,
       model: this.config.model ?? null, planning: { active: this.planning }, settings: this.settings(), childSessions: this.children.descriptors(),
-      persistence: { providerId: 'claude', sessionId: this.config.sessionId, opaque: JSON.stringify({ ...persistedConfig(this.config), planning: this.planning, permissionMode: this.resumePermissionMode }) } };
+      persistence: this.options.emptyDescriptor && !this.inputDispatched ? claudeEmptyHandle({ ...this.config, planning: this.planning, permissionMode: this.resumePermissionMode }, this.options) : { providerId: 'claude', sessionId: this.config.sessionId, opaque: JSON.stringify({ ...persistedConfig(this.config), planning: this.planning, permissionMode: this.resumePermissionMode }) } };
   }
-  private runtimeUpdated(): void { this.emit({ type: 'runtime_updated', provider: 'claude', runtimeInfo: this.info(), activeTurnId: this.turnId ?? null }); }
+  private runtimeUpdated(): void { this.nativeEvidence.invalidate(); this.emit({ type: 'runtime_updated', provider: 'claude', runtimeInfo: this.info(), activeTurnId: this.turnId ?? null }); }
   private emit(event: AgentStreamEvent): void {
     this.output.push({ type: 'observation', sourceKey: `claude:${this.sourceId}:${++this.sequence}`, occurredAt: Date.now(), delivery: 'live',
       event: this.withTurn(event) });
@@ -388,6 +423,10 @@ export class ClaudeAgentSession implements AgentSession {
       for await (const message of this.native) {
         if (this.disposed) break;
         if (message.session_id && message.session_id !== this.config.sessionId) throw new Error('Claude returned a different native session identity.');
+        if (this.nativeEvidence.noteMessage(message)) {
+          const acceptance = this.acceptance; this.acceptance = undefined;
+          try { acceptance?.({ disposition: 'started' }); } catch { /* Observers cannot fail the native runtime. */ }
+        }
         this.children.consume(message, this.turnId);
         if ('parent_tool_use_id' in message && message.parent_tool_use_id) continue;
         if (message.type === 'result') {
@@ -401,6 +440,7 @@ export class ClaudeAgentSession implements AgentSession {
           event: this.withTurn(observation.event) });
         if (message.type === 'system' && message.subtype === 'init') {
           this.config.model = message.model;
+          this.nativeModelConfirmed = true;
           this.confirmPermissionMode(message.permissionMode);
           this.runtimeUpdated();
         }

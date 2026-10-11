@@ -82,14 +82,14 @@ export class CopilotChildSession implements AgentSession {
   async sendMessage(text: string): Promise<void> {
     if (this.closed || this.parent.isClosed) throw new AgentOperationRejectedError('operation_rejected', 'Copilot child view is closed.');
     this.activityGeneration++;
-    const result = await this.parent.call(this.parent.rpc.tasks.sendMessage({id: this.info.nativeSessionId, message: text}), 'Copilot child input');
+    const result = await this.parent.mutateNative(() => this.parent.rpc.tasks.sendMessage({id: this.info.nativeSessionId, message: text}), 'Copilot child input');
     if (!result.sent) throw new Error(result.error ?? 'Copilot child input was rejected.');
   }
   async steer(text: string) { await this.sendMessage(text); }
   async cancel() {
     if (this.closed || this.parent.isClosed) throw new AgentOperationRejectedError('operation_rejected', 'Copilot child view is closed.');
     const generation = this.activityGeneration;
-    const result = await this.parent.call(this.parent.rpc.tasks.cancel({id: this.info.nativeSessionId}), 'Copilot child cancellation');
+    const result = await this.parent.mutateNative(() => this.parent.rpc.tasks.cancel({id: this.info.nativeSessionId}), 'Copilot child cancellation');
     if (!result.cancelled) throw new Error('Copilot child cancellation was rejected.');
     if (generation !== this.activityGeneration) return;
     this.activityGeneration++;

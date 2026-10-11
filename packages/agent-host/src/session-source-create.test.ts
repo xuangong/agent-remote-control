@@ -11,6 +11,7 @@ import { jsonBytes, SUCCESSION_STORE_BYTES } from './succession-persistence.js';
 import * as directoryMutation from './directory-mutation.js';
 import * as fs from 'node:fs/promises';
 import { SessionReferenceStore } from './session-reference.js';
+import { SessionSuccessionContextStore } from './session-succession-context.js';
 
 vi.mock('node:fs/promises', async importOriginal => {
   const original = await importOriginal<typeof import('node:fs/promises')>();
@@ -33,11 +34,13 @@ class Native implements AgentSession {
   async sendMessage() {} async respondToInteraction() {}
   async dispose() { this.closed = true; this.stop?.(); }
 }
-async function fixture(certificate: boolean | undefined, nativeId = 'reader', cache?: { maxResultBytes?: number; maxBytes?: number; ttlMs?: number; now?: () => number }, policy = false, fileGrants = false) {
+async function fixture(certificate: boolean | undefined, nativeId = 'reader', cache?: { maxResultBytes?: number; maxBytes?: number; ttlMs?: number; now?: () => number }, policy = false, fileGrants = false, shutdownTimeoutMs?: number) {
   const root = await realpath(await mkdtemp(join(tmpdir(), 'source-create-')));
   closeables.push(() => rm(root, { recursive: true, force: true }));
   let creates = 0, certificates = 0, granted = true, loseResult = false, rejectNative = false;
   let beforeCreate = async () => {}, beforeOpen = async (_id: string) => {};
+  let closingDirectory!: () => void;
+  const directoryClosing = new Promise<void>(resolve => { closingDirectory = resolve; });
   const grants: Array<{ nativeSessionId: string; sourceNativeSessionId: string }> = [];
   let references = new SessionReferenceStore(join(root, 'references'), 'fixture');
   const sessions: Native[] = [];
@@ -61,16 +64,16 @@ async function fixture(certificate: boolean | undefined, nativeId = 'reader', ca
     },
     sourceReferences: async () => granted ? fileGrants ? references.list() : structuredClone(grants) : [], setSourceBindingReader: () => {},
     async open(id) { await beforeOpen(id); const session = new Native(id, root); sessions.push(session); return session; },
-    close: async () => { await Promise.all(sessions.map(session => session.dispose())); },
+    close: async () => { closingDirectory(); await Promise.all(sessions.map(session => session.dispose())); },
   };
-  const createHost = () => createAgentHostRuntime({ controllerId: 'controller', succession: { controllerId: 'controller', stateDirectory: root, enrollment: true },
+  const createHost = () => createAgentHostRuntime({ controllerId: 'controller', shutdownTimeoutMs, succession: { controllerId: 'controller', stateDirectory: root, enrollment: true },
     ...(cache ? { operationCache: cache } : {}), ...(policy ? { executionPolicy: { allowedWorkspaceRoots: [root], defaultWorkspace: root, lockPermissions: true } } : {}),
     registrations: [{ directory, adapter: { descriptor: { providerId: 'fixture', displayName: 'Fixture' }, createSession: async () => { throw new Error('unexpected'); }, resumeSession: async () => { throw new Error('unexpected'); } } }] });
   let host = createHost(); closeables.push(() => host.close());
   const request = (n = 1, agentId = 'proposal', scope = 'relay:scope', extra: object = {}) => ({ method: 'POST' as const, path: '/remote/create', sessionId: agentId, operationScope: scope,
     body: JSON.stringify({ providerId: 'fixture', operationId: operationId(n), sourceNativeSessionId: 'source', ...(policy ? { workspaceId: 'workspace' } : {}), ...extra }) });
   const state = async () => JSON.parse(await readFile(join(root, 'roles', 'state.json'), 'utf8'));
-  return { root, get host() { return host; }, request, state, grants, counts: () => ({ creates, certificates }), setCertificate: (value: boolean) => { certificate = value; },
+  return { root, get host() { return host; }, request, state, grants, directoryClosing, counts: () => ({ creates, certificates }), setCertificate: (value: boolean) => { certificate = value; },
     missingGrant: () => { granted = false; }, loseResult: () => { loseResult = true; }, rejectNative: () => { rejectNative = true; },
     beforeCreate: (hook: typeof beforeCreate) => { beforeCreate = hook; }, beforeOpen: (hook: typeof beforeOpen) => { beforeOpen = hook; },
     restart: async () => { await host.close(); references = new SessionReferenceStore(join(root, 'references'), 'fixture'); host = createHost(); },
@@ -115,6 +118,86 @@ test.each(['missing', 'conflicting', 'poisoned'] as const)('a durable source res
   await f.restart();
   expect((await f.host.enrollFromRelay(f.request(), context)).status).toBe(503);
   expect((await f.state()).associationResults).toHaveLength(1); expect(f.counts().creates).toBe(1);
+});
+
+test('Host close waits for a settled source mutation to publish its clean coverage', async () => {
+  const f = await fixture(true), original = await vi.importActual<typeof fs>('node:fs/promises');
+  const contextPath = join(f.root, 'contexts', 'context.json');
+  let entered!: () => void, release!: () => void;
+  const writing = new Promise<void>(resolve => { entered = resolve; }), gate = new Promise<void>(resolve => { release = resolve; });
+  vi.mocked(fs.open).mockImplementation(async (...args) => {
+    if (String(args[0]).startsWith(`${contextPath}.`) && args[1] === 'wx' && f.counts().creates === 1) { entered(); await gate; }
+    return original.open(...args);
+  });
+  let closing: Promise<void> | undefined, deadline: ReturnType<typeof setTimeout> | undefined;
+  try {
+    expect((await f.host.enrollFromRelay(f.request(), context)).status).toBe(200);
+    await writing;
+    expect(JSON.parse(await readFile(contextPath, 'utf8')).coverage).toHaveLength(1);
+    const agent = f.host.resolveSession('proposal')!, dispatch = vi.fn(async () => undefined);
+    closing = f.host.close();
+    await expect(f.host.executeOperation('closing')(agent, { operationId: operationId(2), kind: 'send_message', parameters: { text: 'late' }, maximumResultBytes: 1024 }, { dispatch })).rejects.toMatchObject({ code: 'controller_updating' });
+    expect(dispatch).not.toHaveBeenCalled();
+    const outcome = await Promise.race([
+      closing.then(() => 'closed'),
+      new Promise<string>(resolve => { deadline = setTimeout(() => resolve('waiting'), 100); }),
+    ]);
+    expect(outcome).toBe('waiting');
+    release(); await closing;
+    expect(JSON.parse(await readFile(contextPath, 'utf8')).coverage).toEqual([]);
+    const restored = new SessionSuccessionContextStore(join(f.root, 'contexts')); await restored.ready;
+    expect(restored.coverageAvailable(ref('source'))).toBe(true);
+  } finally {
+    if (deadline) clearTimeout(deadline);
+    release(); await closing;
+    await expect.poll(async () => JSON.parse(await readFile(contextPath, 'utf8')).coverage).toEqual([]);
+  }
+});
+
+test('Host close evaluates pending coverage before disposing the cache that retains another unresolved mutation', async () => {
+  const f = await fixture(true);
+  const clear = SessionSuccessionContextStore.prototype.clearMutation;
+  let entered!: () => void, release!: () => void;
+  const clearing = new Promise<void>(resolve => { entered = resolve; }), gate = new Promise<void>(resolve => { release = resolve; });
+  const spy = vi.spyOn(SessionSuccessionContextStore.prototype, 'clearMutation').mockImplementation(async function (this: SessionSuccessionContextStore, ...args) {
+    entered(); await gate; return clear.apply(this, args);
+  });
+  let closing: Promise<void> | undefined, deadline: ReturnType<typeof setTimeout> | undefined;
+  try {
+    expect((await f.host.enrollFromRelay(f.request(), context)).status).toBe(200); await clearing;
+    f.beforeCreate(async () => { throw new Error('Native create outcome unknown'); });
+    expect((await f.host.enrollFromRelay(f.request(2, 'second'), context)).status).toBe(503);
+    closing = f.host.close();
+    const phase = await Promise.race([
+      f.directoryClosing.then(() => 'disposing'),
+      new Promise<string>(resolve => { deadline = setTimeout(() => resolve('draining'), 100); }),
+    ]);
+    release(); await closing;
+    const restored = new SessionSuccessionContextStore(join(f.root, 'contexts')); await restored.ready;
+    expect(restored.coverageAvailable(ref('source'))).toBe(false);
+    expect(phase).toBe('draining');
+  } finally { if (deadline) clearTimeout(deadline); release(); await closing; spy.mockRestore(); }
+});
+
+test('a coverage callback resumed after the Host shutdown deadline cannot infer clean state from a disposed cache', async () => {
+  const f = await fixture(true, 'reader', undefined, false, false, 40);
+  const clear = SessionSuccessionContextStore.prototype.clearMutation;
+  let entered!: () => void, release!: () => void, finished!: () => void;
+  const clearing = new Promise<void>(resolve => { entered = resolve; }), gate = new Promise<void>(resolve => { release = resolve; });
+  const cleared = new Promise<void>(resolve => { finished = resolve; });
+  const spy = vi.spyOn(SessionSuccessionContextStore.prototype, 'clearMutation').mockImplementation(async function (this: SessionSuccessionContextStore, ...args) {
+    entered(); await gate;
+    try { return await clear.apply(this, args); } finally { finished(); }
+  });
+  try {
+    expect((await f.host.enrollFromRelay(f.request(), context)).status).toBe(200); await clearing;
+    f.beforeCreate(async () => { throw new Error('Native create outcome unknown'); });
+    expect((await f.host.enrollFromRelay(f.request(2, 'second'), context)).status).toBe(503);
+    await f.host.close(); await f.directoryClosing;
+    release(); await cleared;
+    const restored = new SessionSuccessionContextStore(join(f.root, 'contexts')); await restored.ready;
+    expect(restored.coverageAvailable(ref('source'))).toBe(false);
+  } finally { release(); await cleared; spy.mockRestore(); }
 });
 
 test('source-result directory uncertainty after the grant barrier recovers only its exact result on fresh reopen', async () => {
@@ -233,7 +316,7 @@ test.each([
 test('private role-file capacity refusal is authoritative before directory create and leaves no witness admission', async () => {
   const f = await fixture(true);
   await f.host.control({ method: 'GET', path: '/remote/providers' });
-  const saved: any = { version: 6, roles: [], associationAdmissions: [], associationResults: [] };
+  const saved: any = { version: 7, roles: [], associationAdmissions: [], associationResults: [] };
   const desired = SUCCESSION_STORE_BYTES - 1000;
   while (jsonBytes(saved) < desired - 17000) {
     const n = saved.associationResults.length;

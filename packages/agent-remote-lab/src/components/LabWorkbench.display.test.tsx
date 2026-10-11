@@ -173,12 +173,14 @@ it.each(['preview', 'simple'])('retains an unmounted absent Ask display without 
   const source = { agentId: 'source', providerId: 'codex', nativeSessionId: 'native', hostId: 'local', title: 'Source' };
   const key = sessionKey(source), transport = {} as import('@orchardworks/agent-remote-web').RemoteAgentTransport;
   let ask!: ReturnType<typeof useAskConversations>;
-  function OwnerHarness() { ask = useAskConversations(scope, transport); return null; }
-  const owner = { id: 'unmounted-owner', sourceSlot: 'A', stateScope: scope, legacySourceKey: key,
-    geometryScope: JSON.stringify([scope, key]), text: { scope: `${scope}:ask`, key }, display: binding };
+  const { createCompositionDocument, createCompositionSlot, createAskOwner } = await import('../session-composition.js');
+  const slot = createCompositionSlot('A', source, scope);
+  const document = createCompositionDocument(scope, [slot]);
+  function OwnerHarness() { ask = useAskConversations(document, transport); return null; }
+  const owner = { ...createAskOwner(slot, scope), image: undefined, display: binding };
+  document.asks.push(owner);
   const ownerContainer = await render(<OwnerHarness />);
   await act(async () => {
-    expect((await ask.adoptAssociationOwner(owner, source, () => true)).status).toBe('applied');
     expect((await ask.retainAssociationOwners([owner.id], () => true)).status).toBe('applied');
   });
   const storageKey = `agent-remote:recovery:${scope}:view:${binding.key}`;

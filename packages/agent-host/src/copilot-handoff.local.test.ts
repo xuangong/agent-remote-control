@@ -91,12 +91,21 @@ it.skipIf(process.platform === 'win32').each(['safe', 'interrupt'] as const)('ha
     write('CLI_RUNNING_TASK\r'); await waitFor(() => finish).catch(error => {throw new Error(String(error) + '\n' + output.slice(-7000) + errors);});
     expect((await locks(f, info.sessionId!)).length).toBeGreaterThan(0);
     if (mode === 'safe') {
-      finish!(); await waitFor(() => output.includes('CLI_TASK_FINISHED'));
+      finish!();
+      // Terminal redraws split text with cursor controls; native turn end confirms safe release.
+      await waitFor(async () => {
+        const events = await history(f, info.sessionId!);
+        const answer = events.findIndex(event => event.type === 'assistant.message' && event.data.content === 'CLI_TASK_FINISHED');
+        return answer >= 0 && events.slice(answer + 1).some(event => event.type === 'assistant.turn_end');
+      });
     } else {
       await new Promise(resolve => setTimeout(resolve, 200));
       write('\x03'); await waitFor(async () => (await history(f, info.sessionId!)).some(event => event.type === 'abort')).catch(error => {throw new Error(String(error) + '\n' + output.slice(-7000) + errors);});
     }
-    write('/exit\r'); await waitFor(() => exit !== undefined);
+    const beforeExit = output.length;
+    write('/exit');
+    await waitFor(() => output.slice(beforeExit).includes('Print the session after exiting'));
+    write('\r'); await waitFor(() => exit !== undefined).catch(error => {throw new Error(String(error) + '\n' + output.slice(-7000) + errors);});
     expect(exit, output.slice(-2000) + errors).toBe(0);
     expect(await locks(f, info.sessionId!)).toEqual([]);
     const resumed = await f.provider.resumeSession(info.persistence!); const restored = observe(resumed);

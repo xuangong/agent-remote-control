@@ -1,8 +1,10 @@
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, realpath, rm, symlink, writeFile } from 'node:fs/promises';
+import { createHash } from 'node:crypto';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createCopilotHostRegistration } from './copilot.js';
+import { SessionReferenceStore } from './session-reference.js';
 
 const temporary: string[] = [];
 afterEach(async () => { await Promise.all(temporary.splice(0).map((path) => rm(path, { recursive: true, force: true }))); });
@@ -56,4 +58,35 @@ describe('Copilot registration executable preflight', () => {
     await expect(createCopilotHostRegistration({ executable: await entry("console.log('GitHub Copilot CLI 1.0.39')") })).rejects.toThrow(/1\.0\.83 or newer/);
     await expect(createCopilotHostRegistration({ executable: await entry("console.log('v22.0.0')") })).rejects.toThrow(/GitHub Copilot CLI/);
   });
+});
+
+it('registers real Copilot source history and durable provider-scoped grants', async () => {
+  const profile = await mkdtemp(join(tmpdir(), 'copilot-reference-profile-')); temporary.push(profile);
+  const references = join(profile, 'test-references');
+  await new SessionReferenceStore(references, 'copilot').set({ sourceNativeSessionId: 'source', systemPrompt: 'role', handle: { providerId: 'copilot', sessionId: 'reader', opaque: '{}' } });
+  const registration = await createCopilotHostRegistration({ executable: await entry("console.log('GitHub Copilot CLI 1.0.83.');"), copilotHome: profile, referenceDirectory: references });
+  try {
+    expect(registration.adapter.readSessionHistory).toBeTypeOf('function');
+    expect(registration.directory.supportsSourceReferences).toBe(true);
+    expect(await registration.directory.sourceReferences!()).toEqual([{ nativeSessionId: 'reader', sourceNativeSessionId: 'source' }]);
+  } finally { await registration.directory.close(); }
+});
+
+it('shares the default source-grant scope for a canonical profile and its alias only', async () => {
+  const home = await mkdtemp(join(tmpdir(), 'copilot-reference-scope-')); temporary.push(home);
+  const profile = join(home, 'profile'), alias = join(home, 'alias'), other = join(home, 'other');
+  await mkdir(profile); await symlink(profile, alias, 'junction');
+  const scope = createHash('sha256').update(await realpath(profile)).digest('hex');
+  await new SessionReferenceStore(join(home, '.agent-remote-control', 'session-references', 'copilot', scope), 'copilot')
+    .set({ sourceNativeSessionId: 'source', systemPrompt: 'role', handle: { providerId: 'copilot', sessionId: 'reader', opaque: '{}' } });
+  const executable = await entry("console.log('GitHub Copilot CLI 1.0.83.');");
+  vi.stubEnv('HOME', home); vi.stubEnv('USERPROFILE', home);
+  try {
+    for (const copilotHome of [profile, alias, other]) {
+      const registration = await createCopilotHostRegistration({ executable, copilotHome });
+      try {
+        expect(await registration.directory.sourceReferences!()).toEqual(copilotHome === other ? [] : [{ nativeSessionId: 'reader', sourceNativeSessionId: 'source' }]);
+      } finally { await registration.directory.close(); }
+    }
+  } finally { vi.unstubAllEnvs(); }
 });

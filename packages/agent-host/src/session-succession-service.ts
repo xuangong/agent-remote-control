@@ -2,9 +2,9 @@ import { randomBytes, randomUUID } from 'node:crypto';
 import { link, mkdir, open, readFile, unlink } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { AgentHistoryPage, AgentHistoryQuery } from '@orchardworks/agent-provider-sdk';
-import { nativeSessionRefKey, serializeNormalizedHistory, type NativeSessionRef, type PreparedSuccession, type PrimaryRole, type ProjectedTimelineEntry, type SuccessionRequest, type TimelineCursor } from '@orchardworks/agent-remote-protocol';
-import { LocalSuccessionPreparation, type NativeSuccessionCreate, type RetainedSuccessionVerification, type SuccessionReadiness } from './local-succession-preparation.js';
-import { SessionSuccessionContextStore, type SuccessionContextDelivery, type SuccessionContextPreparation } from './session-succession-context.js';
+import { nativeSessionRefKey, serializeNormalizedHistory, type NativeSessionRef, type PreparedSuccession, type PrimaryRole, type ProjectedTimelineEntry, type SuccessionDescription, type SuccessionRequest, type TimelineCursor } from '@orchardworks/agent-remote-protocol';
+import { LocalSuccessionPreparation, SuccessionPreparationRejected, type NativeSuccessionCreate, type RetainedSuccessionVerification, type SuccessionReadiness } from './local-succession-preparation.js';
+import { isSuccessionDeliveryUnresolved, SessionSuccessionContextStore, type SuccessionContextDelivery, type SuccessionContextPreparation } from './session-succession-context.js';
 import { SessionSuccessionStore } from './session-succession-store.js';
 import { SessionSuccessionCoordinator } from './session-succession.js';
 import { SessionSourceBindings } from './session-source-binding.js';
@@ -36,12 +36,13 @@ export class SessionSuccessionService {
   readonly store: SessionSuccessionStore;
   readonly contexts: SessionSuccessionContextStore;
   readonly coordinator: SessionSuccessionCoordinator;
+  private readonly preparation: LocalSuccessionPreparation;
   private cursorKey?: Buffer;
   private readonly bindingReaders = new Map<string, SessionSourceBindings>();
   constructor(private readonly directory: string, private readonly controllerId: string, private readonly ports: SessionSuccessionPorts) {
     this.store = new SessionSuccessionStore(join(directory, 'roles'));
     this.contexts = new SessionSuccessionContextStore(join(directory, 'contexts'));
-    const preparation = new LocalSuccessionPreparation(controllerId, '', {
+    const preparation = this.preparation = new LocalSuccessionPreparation(controllerId, '', {
       inspect: source => ports.inspect(source), supports: (source, targetProvider) => ports.supports(source, targetProvider),
       supportsBoundedProjection: (source, targetProvider) => ports.supportsBoundedProjection?.(source, targetProvider) ?? Promise.resolve(false),
       create: (source, operationId, targetProvider) => ports.createIdle(source, operationId, targetProvider),
@@ -69,10 +70,32 @@ export class SessionSuccessionService {
   async createRole(role: PrimaryRole) { await this.ready; if (role.workspace.controllerId !== this.controllerId || role.current.controllerId !== this.controllerId) throw new Error('Role is outside this Controller.'); return this.store.createRole(role); }
   async prepare(request: SuccessionRequest) { await this.ready; return this.coordinator.prepare(request); }
   async commit(operationId: string, revision: number) { await this.ready; return this.coordinator.commit(operationId, revision); }
+  async describe(role: PrimaryRole, source: NativeSessionRef, candidates: SuccessionDescription['targets']): Promise<SuccessionDescription> {
+    await this.ready;
+    const targets: SuccessionDescription['targets'] = [];
+    for (const candidate of candidates) {
+      try {
+        await this.preparation.supports(role, candidate.providerId);
+        await this.preparation.supportsBoundedProjection(role, candidate.providerId);
+        targets.push(candidate);
+      } catch { /* An unverified provider pair cannot be offered for new preparation. */ }
+    }
+    const unavailable = (code: string, reason: string): SuccessionDescription => ({ role, targets, eligibility: { status: 'unavailable', code, reason } });
+    if (nativeSessionRefKey(role.current) !== nativeSessionRefKey(source)) return unavailable('session_superseded', 'Open the current primary session before handoff.');
+    if (!targets.length) return unavailable('succession_unsupported_provider', 'No available provider pair supports safe handoff.');
+    try {
+      this.coordinator.assertAdmission(source);
+      await this.preparation.check(role);
+      return { role, targets, eligibility: { status: 'ready' } };
+    } catch (error) {
+      if (error instanceof SuccessionPreparationRejected) return { role, targets, eligibility: { status: 'blocked', code: error.code, reason: error.message } };
+      return unavailable('succession_readiness_unavailable', error instanceof Error ? error.message : 'The current session state could not be verified.');
+    }
+  }
   async reconcileFirstInput(operationId: string): Promise<boolean> {
     await this.ready;
     const attachment = this.contexts.read(operationId);
-    const delivery = attachment.deliveries.find(item => ['accepted', 'unknown'].includes(item.state));
+    const delivery = attachment.deliveries.find(item => item.state !== 'dispatching' && isSuccessionDeliveryUnresolved(item));
     if (!delivery) return attachment.state === 'materialized';
     const evidence = await this.ports.reconcileDelivery(delivery);
     if (!evidence) return false;
@@ -84,7 +107,7 @@ export class SessionSuccessionService {
     const operationId = contextOperationId.slice(0, -':context'.length), operation = this.store.operation(operationId);
     if (nativeSessionRefKey(operation.from) !== nativeSessionRefKey(source)) throw new Error('Succession capture routing changed.');
     const pending = this.contexts.forTarget(source);
-    if (pending && ['accepted', 'unknown', 'dispatching'].includes(pending.state)) throw new Error('Reconcile unresolved source context before succession.');
+    if (pending?.deliveries.some(isSuccessionDeliveryUnresolved)) throw new Error('Reconcile unresolved source context before succession.');
     let capture: PreparedSuccession['capture'], history: { text: string; itemCount: number; shortenedToolCount?: number };
     if (pending?.state === 'pending') {
       const state = await this.ports.inspect(source);

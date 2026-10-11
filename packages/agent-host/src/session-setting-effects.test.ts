@@ -13,12 +13,12 @@ const key = nativeSessionRefKey(target);
 const operationId = (index: number) => `00000000-0000-4000-8000-${String(index).padStart(12, '0')}`;
 const gate = () => { let resolve!: () => void; const promise = new Promise<void>(r => { resolve = r; }); return { promise, resolve }; };
 
-async function fixture(options: OperationCacheOptions = {}, enabled = true) {
+async function fixture(options: OperationCacheOptions = {}, preEnabled = true) {
   const root = await mkdtemp(join(tmpdir(), 'arc-setting-effects-'));
   const contexts = new SessionSuccessionContextStore(root); await contexts.ready;
   let now = 1000;
   const cache = createOperationCache({ ttlMs: 100, now: () => now, ...options });
-  const disable = enabled ? cache.enableMutationTarget(key) : () => {};
+  const disable = preEnabled ? cache.enableMutationTarget(key) : () => {};
   const boundary = new SessionSuccessionBoundary(contexts, () => {}, () => undefined, cache);
   let stopped = false; let wake = gate(); let revision = 0;
   const observations: ProviderStreamItem[] = [];
@@ -66,7 +66,7 @@ async function fixture(options: OperationCacheOptions = {}, enabled = true) {
         event: { type: 'runtime_updated', provider: 'fixture', runtimeInfo: runtime() } });
       wake.resolve(); await vi.advanceTimersByTimeAsync(0);
     },
-    async close() { await manager.close(); disable(); boundary.close(); await cache.close(); await rm(root, { recursive: true, force: true }); },
+    async close() { await manager.close(); disable(); await boundary.close(); await cache.close(); await rm(root, { recursive: true, force: true }); },
   };
 }
 const flush = () => vi.advanceTimersByTimeAsync(0);
@@ -180,13 +180,24 @@ test('pin capacity rejects before visible acceptance and keeps the prior intent'
   } finally { await f.close(); vi.useRealTimers(); }
 }, 10000);
 
-test('invalid preaccept value releases reservations and ordinary targets retain existing TTL behavior', async () => {
+test('first Host admission pins its target while a generic target in the same cache retains normal TTL', async () => {
   const f = await fixture({}, false); vi.useFakeTimers();
   try {
     await expect(f.manager.setSessionSetting('model', 'invalid')).rejects.toThrow();
     expect(f.cache.hasUnsettledMutation(key)).toBe(false); expect(f.calls).toEqual([]);
-    await f.setting('second', 1); await flush(); f.age();
-    expect(f.cache.hasUnsettledMutation(key)).toBe(false);
+    await f.cache.execute({ operationId: operationId(99), scope: 'generic', kind: 'native', target: 'generic', parameters: {} }, {
+      mutationTargets: ['generic'], dispatch: async entry => { entry.startNativeEffect('generic').unresolved(); },
+    });
+    await f.setting('second', 1); await flush();
+    expect(f.cache.hasUnsettledMutation('generic')).toBe(true);
+    expect(f.cache.hasUnsettledMutation(key)).toBe(true);
+    f.age();
+    expect(f.cache.hasUnsettledMutation('generic')).toBe(false);
+    expect(f.cache.hasUnsettledMutation(key)).toBe(true);
+    expect(() => f.boundary.checkSource(target)).toThrow('Session has unsettled Host mutations.');
+    expect(await f.setting('second', 1)).toEqual({ accepted: true });
+    expect(f.calls).toEqual([{ value: 'second', entry: f.entries.get(operationId(1)) }]);
+    expect(f.entries.size).toBe(1);
     expect(f.manager.snapshot().payload.settingChanges).toMatchObject([{ status: 'pending' }]);
   } finally { await f.close(); vi.useRealTimers(); }
 }, 10000);
@@ -257,7 +268,7 @@ test('queued setting revalidates native capability before calling the provider',
   } finally { held.resolve(); await f.close(); vi.useRealTimers(); }
 }, 10000);
 
-test('ordinary deferred intent applies after its receipt expires without reaccepting or creating another entry', async () => {
+test('Host deferred intent survives receipt TTL under its original admission without reaccepting', async () => {
   const f = await fixture({}, false); vi.useFakeTimers();
   const acceptedRequests = new Set<string>();
   const unsubscribe = f.manager.subscribe(() => {
@@ -267,7 +278,10 @@ test('ordinary deferred intent applies after its receipt expires without reaccep
     f.apply(async (_id, selected) => { if (f.calls.length === 1) return { status: 'deferred' }; f.value(selected); });
     await f.setting('second', 1); await flush();
     const accepted = f.manager.snapshot().payload.settingChanges?.[0]?.requestId;
-    f.age(); expect(f.cache.hasUnsettledMutation(key)).toBe(false);
+    f.age(); expect(f.cache.hasUnsettledMutation(key)).toBe(true);
+    expect(() => f.boundary.checkSource(target)).toThrow('Session has unsettled Host mutations.');
+    expect(await f.setting('second', 1)).toEqual({ accepted: true });
+    expect(f.calls).toEqual([{ value: 'second', entry: f.entries.get(operationId(1)) }]);
     expect(f.manager.snapshot().payload.settingChanges).toMatchObject([{ requestId: accepted, status: 'pending' }]);
     await f.refresh();
     expect(f.calls).toEqual([
@@ -281,13 +295,17 @@ test('ordinary deferred intent applies after its receipt expires without reaccep
   } finally { unsubscribe(); await f.close(); vi.useRealTimers(); }
 }, 10000);
 
-test('ordinary queued intent applies after its receipt expires under its original operation context', async () => {
+test('Host queued intent retains its original operation context past receipt TTL', async () => {
   const f = await fixture({}, false); const held = gate(); vi.useFakeTimers();
   try {
     f.apply(async (_id, selected) => { if (selected === 'second') await held.promise; f.value(selected); });
     await f.setting('second', 1); await f.setting('third', 2);
     const accepted = f.manager.snapshot().payload.settingChanges?.[0]?.requestId;
-    f.age(); expect(f.cache.hasUnsettledMutation(key)).toBe(false);
+    f.age(); expect(f.cache.hasUnsettledMutation(key)).toBe(true);
+    expect(() => f.boundary.checkSource(target)).toThrow('Session has unsettled Host mutations.');
+    expect(await f.setting('second', 1)).toEqual({ accepted: true });
+    expect(await f.setting('third', 2)).toEqual({ accepted: true });
+    expect(f.calls).toEqual([{ value: 'second', entry: f.entries.get(operationId(1)) }]);
     expect(f.manager.snapshot().payload.settingChanges).toMatchObject([{ requestId: accepted, targetValue: 'third', status: 'pending' }]);
     held.resolve(); await flush();
     expect(f.calls).toEqual([

@@ -4,7 +4,7 @@ import { packageManager } from './lib/package-manager.mjs';
 
 const mode = process.argv[2] ?? 'unit';
 const successionEvidence = mode === 'claude-succession-evidence';
-const opencodeSuccessionEvidence = mode === 'opencode-succession-evidence';
+const opencodeSuccessionEvidence = mode === 'opencode-succession-evidence' || mode === 'opencode-succession-adapter';
 if (opencodeSuccessionEvidence) {
   if (process.platform !== 'darwin' || process.arch !== 'arm64') throw new Error('The OpenCode succession evidence experiment requires macOS arm64.');
   if (!isAbsolute(process.env.AGENT_OPENCODE_TEST_EXECUTABLE ?? '')) throw new Error('Set an absolute AGENT_OPENCODE_TEST_EXECUTABLE for the installed OpenCode 1.18.18.');
@@ -20,6 +20,7 @@ if (successionEvidence) {
 if (mode === 'claude' && !process.env.AGENT_CLAUDE_TEST_EXECUTABLE) throw new Error('Set AGENT_CLAUDE_TEST_EXECUTABLE to Claude Code 2.1.247 or newer for native Claude tests.');
 if (mode === 'codex-shared' && !process.env.AGENT_REMOTE_SHARED_CODEX_TEST_EXECUTABLE) throw new Error('Set AGENT_REMOTE_SHARED_CODEX_TEST_EXECUTABLE to the native Codex executable for shared-runtime tests.');
 const commands = {
+  'opencode-succession-adapter': ['exec', 'node', '--test', '--test-timeout=100000', '--test-concurrency=1', '--test-name-pattern=actual adapter', 'scripts/opencode-native-succession-evidence.test.mjs'],
   'opencode-succession-evidence': ['exec', 'node', '--test', '--test-timeout=100000', '--test-concurrency=1', 'scripts/opencode-native-succession-evidence.test.mjs'],
   'opencode-native': ['exec', 'node', '--test', '--test-timeout=150000', '--test-concurrency=1', 'scripts/opencode-native.test.mjs', 'scripts/opencode-native-boundaries.test.mjs', 'scripts/opencode-native-steer.test.mjs', 'scripts/opencode-native-callbacks.test.mjs'],
   opencode: ['--filter', '@orchardworks/agent-provider-opencode', 'exec', 'vitest', 'run', '--testTimeout=10000', '--hookTimeout=15000', '--maxWorkers=1'],
@@ -39,13 +40,15 @@ const commands = {
   'claude-succession-evidence': ['--filter', '@orchardworks/agent-provider-claude', 'exec', 'vitest', 'run', 'src/native-succession-evidence.local.test.ts', '--testTimeout=30000', '--hookTimeout=10000', '--maxWorkers=1'],
   copilot: ['--filter', '@orchardworks/agent-provider-copilot', 'run', 'test', '--hookTimeout=30000'],
   setup: ['exec', 'node', '--test', '--test-timeout=60000', 'scripts/dsh-debug.test.mjs', 'scripts/start.test.mjs', 'scripts/relay-local.test.mjs', 'scripts/controller/entrypoint.test.mjs', 'scripts/controller/create-host.test.mjs', 'scripts/controller/install.test.mjs'],
-  unit: ['-r', 'run', 'test', '--hookTimeout=30000'],
+  unit: ['-r', 'run', 'test'],
   e2e: ['--filter', '@orchardworks/agent-remote-lab', 'exec', 'playwright', 'test', '--timeout=30000', '--global-timeout=480000', ...process.argv.slice(3)],
   conformance: ['--filter', '@orchardworks/agent-remote-lab', 'run', 'test:conformance'],
 };
 if (!(mode in commands)) throw new Error(`Unknown test suite: ${mode}`);
 const child = spawn(...packageManager('pnpm', commands[mode]), { stdio: 'inherit', windowsHide: true, detached: process.platform !== 'win32',
-  env: { ...process.env, AGENT_CLAUDE_SUCCESSION_EVIDENCE: successionEvidence ? '1' : undefined, AGENT_OPENCODE_SUCCESSION_EVIDENCE: opencodeSuccessionEvidence ? '1' : undefined } });
+  env: { ...process.env, AGENT_CLAUDE_SUCCESSION_EVIDENCE: successionEvidence ? '1' : undefined,
+    AGENT_OPENCODE_SUCCESSION_EVIDENCE: mode === 'opencode-succession-evidence' ? '1' : undefined,
+    AGENT_OPENCODE_ACTUAL_SUCCESSION: mode === 'opencode-succession-adapter' ? '1' : undefined } });
 function stop(signal) {
   try {
     if (process.platform === 'win32') spawn('taskkill', ['/PID', String(child.pid), '/T', '/F'], { windowsHide: true, stdio: 'ignore' }).on('error', () => child.kill(signal));

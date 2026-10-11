@@ -1,0 +1,30 @@
+import { act } from 'react';
+import { afterEach, beforeEach, expect, it } from 'vitest';
+import { App } from './App.js';
+import { loadSuccessionIntent, saveSuccessionIntent } from './session-succession-intent.js';
+import { replicaState } from './test/fixtures.js';
+import { render, unmount } from './test/setup.js';
+afterEach(() => sessionStorage.clear());
+beforeEach(() => { Object.defineProperty(HTMLDialogElement.prototype, 'showModal', { configurable: true, value() { this.open = true; } }); });
+const button = (name: string) => [...document.querySelectorAll<HTMLButtonElement>('button')].find(item => item.textContent === name)!;
+it('lets an offline or retired primary hide and reopen its original Handoff without clearing or replacing it', async () => {
+  const scope = 'http://localhost/u/handoff-owner/';
+  const intent = { source: { hostId: 'original-host', agentId: 'original-agent', providerId: 'opencode', nativeSessionId: 'A', title: 'Original source' },
+    operation: { operationId: 'original-op', providerId: 'opencode', nativeSessionId: 'A', expectedRevision: 4, targetProviderId: 'opencode' }, cancelRequested: true };
+  saveSuccessionIntent(scope, intent);
+  const props = { baseUrl: scope, initialState: replicaState, initialSessionStatus: 'disconnected' as const, actions: {} };
+  const view = await render(<App {...props} />);
+  expect(document.querySelector('dialog[open]')).not.toBeNull();
+  await act(async () => button('Hide Handoff').click());
+  expect(document.querySelector('dialog')).toBeNull();
+  expect(button('Recover Handoff')).toBeDefined(); expect(loadSuccessionIntent(scope)).toEqual(intent);
+  await act(async () => button('Recover Handoff').click());
+  expect(document.querySelector('dialog')?.textContent).toContain('Original source');
+  expect(button('Prepare and hand off')).toBeUndefined();
+  expect(document.querySelector('dialog')?.textContent).toContain('Cancellation requested');
+  await unmount(view);
+  await render(<App {...props} />);
+  expect(document.querySelector('dialog[open]')).not.toBeNull();
+  await act(async () => button('Hide Handoff').click());
+  expect(button('Recover Handoff')).toBeDefined(); expect(loadSuccessionIntent(scope)).toEqual(intent);
+}, 5000);

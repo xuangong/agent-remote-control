@@ -1,6 +1,7 @@
 import { act, type ReactNode } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach } from 'vitest';
+import { clearConversationRecovery } from '../conversation-recovery.js';
 
 declare global {
   var IS_REACT_ACT_ENVIRONMENT: boolean | undefined;
@@ -19,9 +20,19 @@ afterEach(async () => {
   }
   if (typeof window !== 'undefined') {
     window.history.replaceState(null, '', '/');
-    for (const key of Object.keys(localStorage)) if (key.startsWith('agent-remote:recovery:')) localStorage.removeItem(key);
+    clearConversationRecovery();
   }
 });
+
+export function setPromptText(input: HTMLElement, text: string): void {
+  if (input instanceof HTMLTextAreaElement) Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!.call(input, text);
+  else {
+    Range.prototype.getClientRects = () => [] as unknown as DOMRectList;
+    Range.prototype.getBoundingClientRect = () => new DOMRect();
+    input.textContent = text;
+  }
+}
+export function promptText(input: HTMLElement): string { return input instanceof HTMLTextAreaElement ? input.value : input.textContent ?? ''; }
 
 export async function render(node: ReactNode): Promise<HTMLDivElement> {
   const container = document.createElement('div');

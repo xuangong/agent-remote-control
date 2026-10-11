@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto';
-import type { AgentSessionExtensions, AgentSessionTool } from '@orchardworks/agent-provider-sdk';
+import type { AgentInputAcceptance, AgentSessionExtensions, AgentSessionTool } from '@orchardworks/agent-provider-sdk';
 import { AgentOperationRejectedError, bindAgentSessionTools } from '@orchardworks/agent-provider-sdk';
 import { isTpmAction, isTpmCreate, sessionOperationAvailability, type TpmAction, type TpmCreate, type TpmIntent, type TpmWork, type TpmList, type NativeSessionRef, type SourceBinding, nativeSessionRefKey } from '@orchardworks/agent-remote-protocol';
 import { OperationCacheError, type AgentManagerEvent, type RemoteHostSessionLease, type SessionWireOperationExecutor } from '@orchardworks/agent-remote-relay';
@@ -468,6 +468,40 @@ export class TpmCoordinator {
         if (candidate.target === 'tpm') { record.reviewIntentId = intent.id; record.reviewVersion = record.changeVersion ?? 0; record.lastReviewAt = this.now(); record.work.nextCheckAt = this.now() + this.heartbeat(record.work); }
       });
       if (!claimed) return;
+      let settlement = Promise.resolve();
+      const settle = (outcome: { status: 'accepted'; acceptance?: AgentInputAcceptance } | { status: 'rejected' | 'unknown'; error: string }, callback = false) => {
+        const next = settlement.catch(() => undefined).then(async () => {
+          if (callback && this.closed) return;
+          const current = this.store.get(id).work.outbox?.find(value => value.id === candidate.id);
+          if (!current || current.status === 'prepared' || current.text !== candidate.text || current.createdAt !== candidate.createdAt
+            || current.target !== candidate.target || current.purpose !== candidate.purpose
+            || resolution && (!current.resolvedTarget || nativeSessionRefKey(current.resolvedTarget) !== nativeSessionRefKey(resolution.target) || current.roleRevision !== resolution.roleRevision)) return;
+          // A late return or transport failure cannot undo evidence for this invocation.
+          if (current.status === 'accepted' && ['started', 'handled'].includes(current.acceptance ?? '')) return;
+          const acceptance = outcome.status === 'accepted' ? outcome.acceptance?.disposition ?? current.acceptance : current.acceptance;
+          if (current.status === outcome.status && current.acceptance === acceptance
+            && current.error === (outcome.status === 'accepted' ? undefined : outcome.error)) return;
+          await this.store.update(id, undefined, record => {
+            const intent = record.work.outbox!.find(value => value.id === candidate.id)!;
+            intent.status = outcome.status;
+            if (outcome.status === 'accepted') {
+              if (acceptance) intent.acceptance = acceptance;
+              if (intent.error && record.work.health === intent.error) delete record.work.health;
+              delete intent.error;
+            } else {
+              intent.error = outcome.error; record.work.health = outcome.error;
+              if (outcome.status === 'rejected' && record.reviewIntentId === candidate.id) delete record.reviewIntentId;
+            }
+          });
+        });
+        settlement = next; return next;
+      };
+      const onAcceptance = (acceptance: AgentInputAcceptance) => {
+        if (this.closed || !['started', 'queued', 'handled'].includes(acceptance.disposition)) return;
+        void settle({ status: 'accepted', acceptance: { disposition: acceptance.disposition } }, true).catch(error => {
+          if (!this.closed) void this.recordFailure(id, error);
+        });
+      };
       try {
         const options = queue ? { delivery: 'next_turn' as const } : undefined;
         const result = await this.access.execute(target.agent, { operationId: executionOperationId(candidate.id), kind: 'send_message', parameters: { text: candidate.text, ...(options ? { options } : {}) }, maximumResultBytes: 4096 }, {
@@ -481,20 +515,14 @@ export class TpmCoordinator {
               }
             }
             if (!active(record.work) || !this.canSend(target, queue)) throw new AgentOperationRejectedError('tpm_dispatch_deferred', 'TPM work paused or native input became unavailable before dispatch.');
-          }, dispatch: () => target.agent.sendMessage(candidate.text, options),
+          }, dispatch: () => target.agent.sendMessage(candidate.text, { ...options, onAcceptance }),
         });
-        await this.store.update(id, undefined, record => {
-          const intent = record.work.outbox!.find(value => value.id === candidate.id)!; intent.status = 'accepted';
-          if (result && typeof result === 'object' && 'disposition' in result && ['started', 'queued', 'handled'].includes(String(result.disposition))) intent.acceptance = result.disposition as 'started' | 'queued' | 'handled';
-        });
+        const acceptance = result && typeof result === 'object' && 'disposition' in result && ['started', 'queued', 'handled'].includes(String(result.disposition))
+          ? { disposition: result.disposition as AgentInputAcceptance['disposition'] } : undefined;
+        await settle({ status: 'accepted', acceptance });
       } catch (error) {
         const rejected = error instanceof AgentOperationRejectedError || error instanceof OperationCacheError && error.code !== 'operation_outcome_unknown';
-        await this.store.update(id, undefined, record => {
-          const intent = record.work.outbox!.find(value => value.id === candidate.id)!;
-          intent.status = rejected ? 'rejected' : 'unknown'; intent.error = shortError(error);
-          if (rejected && record.reviewIntentId === candidate.id) delete record.reviewIntentId;
-          record.work.health = intent.error;
-        });
+        await settle({ status: rejected ? 'rejected' : 'unknown', error: shortError(error) });
       }
     } finally { if (candidate.target === 'tpm') this.reviewReservations.delete(id); }
   }

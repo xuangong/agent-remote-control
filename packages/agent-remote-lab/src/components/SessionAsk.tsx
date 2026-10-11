@@ -16,12 +16,13 @@ export function SessionAsk({ source, state, ask, visible, available, canRestore,
   synchronize(): Promise<void>; onOpen(clean?: boolean): void;
   replicaFor(id: string): AgentReplica; transport: RemoteAgentTransport;
   observations: Record<string, SessionObservation>; navigation: SessionViewNavigationFactory;
-  associationOwner?: string; imageRecipient?: ImageDraftRecipient;
+  associationOwner: string; imageRecipient?: ImageDraftRecipient;
 }) {
   const trigger = useRef<HTMLButtonElement>(null);
-  const key = associationOwner ?? sessionKey(source);
-  const owner = associationOwner ? ask.associationOwner(associationOwner) : undefined;
-  const geometryScope = owner?.geometryScope ?? JSON.stringify([storageScope, key]);
+  const key = associationOwner;
+  const owner = ask.associationOwner(associationOwner);
+  if (!owner) throw new Error('Ask owner unavailable.');
+  const geometryScope = owner.geometryScope;
   const entry = ask.entryFor(source, associationOwner);
   const attached = isAskAttached(entry);
   const participant = entry.record ? askParticipantKey(entry.record) : undefined;
@@ -29,7 +30,7 @@ export function SessionAsk({ source, state, ask, visible, available, canRestore,
   const expanded = ask.isOpen(source, associationOwner);
   useEffect(() => {
     if (!visible || !canRestore || !enabled || !expanded) return;
-    return associationOwner ? ask.restore(source, synchronize, associationOwner) : ask.restore(source, synchronize);
+    return ask.restore(source, synchronize, associationOwner);
   }, [storageScope, ask.store, transport, key, source.agentId, visible, canRestore, enabled, expanded, synchronize]);
   if (!visible || !enabled) return null;
   return <>
@@ -39,8 +40,8 @@ export function SessionAsk({ source, state, ask, visible, available, canRestore,
       transport={transport} replica={attached && entry.record?.target ? replicaFor(entry.record.target.agentId) : undefined}
       triggerRef={trigger} navigation={navigation} onSendInput={(id, send) => ask.sendInput(key, id, send, participant)}
       onDiscardInput={id => ask.discardInput(key, id)}
-      draftBinding={owner ? ask.draftBinding(owner.id) : { store: ask.drafts, key }} imageDraftBinding={owner?.image} displayBinding={owner?.display} imageRecipient={imageRecipient}
-      onClose={() => associationOwner ? ask.close(source, associationOwner) : ask.close(source)} onToggleEnabled={() => associationOwner ? ask.toggle(source, associationOwner) : ask.toggle(source)}
+      draftBinding={ask.draftBinding(owner.id)} imageDraftBinding={owner.image} displayBinding={owner.display} imageRecipient={imageRecipient}
+      onClose={() => ask.close(source, associationOwner)} onToggleEnabled={() => ask.toggle(source, associationOwner)}
       onClean={() => onOpen(true)} onRetry={() => onOpen()} /> : null}
   </>;
 }

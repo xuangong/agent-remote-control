@@ -183,7 +183,7 @@ test.each(['source', 'source-error', 'supports', 'candidate', 'verify'] as const
     expect((await coordinator.reconcileReady('op')).phase).toBe('cancelled');
     expect(f.effects.filter(effect => effect.startsWith('create:'))).toEqual(['create:A:op:create']);
     expect(store.read('role').role.current).toEqual(source);
-  } finally { resume(); await recovery; boundary.close(); await cache.close(); }
+  } finally { resume(); await recovery; await boundary.close(); await cache.close(); }
 }, 10000);
 
 test('a ready candidate that became busy cannot be committed or silently interrupted', async () => {
@@ -261,11 +261,11 @@ test('final synchronous Host check rejects facts changed after asynchronous veri
   try {
     expect((await f.coordinator.prepare(request)).phase).toBe('ready');
     const verify = f.preparation.verify.bind(f.preparation);
-    f.preparation.verify = async (...args) => { await verify(...args); changed = true; };
+    f.preparation.verify = async (...args) => { const lease = await verify(...args); changed = true; return lease; };
     await expect(f.coordinator.commit('op', 1)).rejects.toThrow('Host execution changed');
     expect(f.store.operation('op').phase).toBe('ready'); expect(f.store.read('role').role.current).toEqual(source);
     expect(() => boundary.admit([source], 'blocked')).toThrow();
     changed = false; f.preparation.verify = verify;
     expect((await f.coordinator.commit('op', 1)).phase).toBe('committed');
-  } finally { boundary.close(); await cache.close(); }
+  } finally { await boundary.close(); await cache.close(); }
 }, 10000);

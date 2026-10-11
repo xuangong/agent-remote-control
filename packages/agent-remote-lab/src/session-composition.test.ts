@@ -1,17 +1,17 @@
 // @vitest-environment jsdom
 import { afterEach, expect, it, vi } from 'vitest';
 import { clearConversationRecovery } from './conversation-recovery.js';
-import { readSessionComposition, saveSessionComposition, type SessionComposition } from './session-composition.js';
 import type { OpenedSession } from './directory-client.js';
 import { sessionKey } from './session-tree.js';
-import { clearCacheOnClose } from './conversation-storage.js';
+import { clearCacheOnClose, setClearCacheOnClose } from './conversation-storage.js';
+import * as compositionMetadata from './session-composition.js';
 
 const source: OpenedSession = { hostId: 'desk', providerId: 'codex', nativeSessionId: 'main', agentId: 'old-main-binding', title: 'Main' };
 const side: OpenedSession = { ...source, nativeSessionId: 'side', agentId: 'old-side-binding', title: 'Side' };
 const sourceKey = '["desk","codex","main"]';
 const sideKey = '["desk","codex","side"]';
 const storageKey = (scope: string) => `agent-remote:recovery:${scope}:composition`;
-const composition = (): SessionComposition => ({ path: [source, side], focus: sideKey, anchor: sideKey, addressKey: sideKey });
+const composition = () => ({ path: [source, side], focus: sideKey, anchor: sideKey, addressKey: sideKey });
 
 afterEach(() => {
   vi.restoreAllMocks();
@@ -21,130 +21,220 @@ afterEach(() => {
   sessionStorage.clear(); localStorage.clear();
 });
 
-it('restores the saved side address and preserves old bindings only as metadata', () => {
-  saveSessionComposition('alice', composition());
-  expect(readSessionComposition('alice', side)).toEqual({
-    path: [source, side], focus: sideKey, anchor: sideKey, addressKey: sideKey,
+it('imports view metadata once without moving its draft or image owners', () => {
+  sessionStorage.setItem(storageKey('alice'), JSON.stringify(composition()));
+  localStorage.setItem('agent-remote-opened:alice', JSON.stringify([source, side]));
+  sessionStorage.setItem(`agent-remote-ask:alice:open-windows`, JSON.stringify([sourceKey]));
+  const loaded = compositionMetadata.initializeCompositionDocument('alice');
+  expect(loaded.status).toBe('ready');
+  if (loaded.status !== 'ready') return;
+  const primary = loaded.document.slots.find(slot => slot.intent.target.native.nativeSessionId === 'main')!;
+  const child = loaded.document.slots.find(slot => slot.intent.target.native.nativeSessionId === 'side')!;
+  expect(loaded.document.version).toBe(2);
+  expect(loaded.document.primary).toBe(primary.id);
+  expect(loaded.document.address).toBe(child.id);
+  expect(loaded.document.edges).toEqual([{ source: primary.id, target: child.id, selected: true }]);
+  expect(primary.owners).toEqual({ text: { scope: 'alice', key: source.agentId },
+    image: { scope: 'alice', key: JSON.stringify(['alice', sourceKey]) }, display: { scope: 'alice', key: sourceKey } });
+  expect(loaded.document.asks.find(owner => owner.sourceSlot === primary.id)).toMatchObject({ open: true, text: { scope: 'alice:ask', key: sourceKey } });
+  expect(sessionStorage.getItem(storageKey('alice'))).toBe(JSON.stringify(composition()));
+});
+
+it('uses the new document alone after importing the original view state', () => {
+  sessionStorage.setItem(storageKey('alice'), JSON.stringify(composition()));
+  const first = compositionMetadata.initializeCompositionDocument('alice');
+  expect(first.status).toBe('ready');
+  sessionStorage.setItem(storageKey('alice'), '{');
+  localStorage.setItem('agent-remote-opened:alice', '{');
+  sessionStorage.setItem('agent-remote-ask:alice:open-windows', '{');
+  expect(compositionMetadata.initializeCompositionDocument('alice')).toEqual(first);
+});
+
+it('keeps imported metadata from replacing a view target while retaining its original draft owner', () => {
+  const view = createCompositionSlot('retained-owner', side, 'alice');
+  view.owners.text.key = source.agentId;
+  const previous = { ...createCompositionDocument('alice', [view]), version: 1 };
+  sessionStorage.setItem('agent-remote:recovery:alice:composition-v1', JSON.stringify(previous));
+  localStorage.setItem('agent-remote-opened:alice', JSON.stringify([source, side]));
+  const loaded = compositionMetadata.initializeCompositionDocument('alice');
+  expect(loaded.status).toBe('ready');
+  if (loaded.status !== 'ready') return;
+  expect(loaded.document.slots.map(slot => slot.intent.target.native.nativeSessionId).sort()).toEqual(['main', 'side']);
+  expect(loaded.document.slots.find(slot => slot.id === view.id)).toMatchObject({
+    intent: { target: { native: { nativeSessionId: side.nativeSessionId } } },
+    owners: { text: { key: source.agentId } },
   });
-  expect(localStorage.getItem(storageKey('alice'))).toBeNull();
 });
 
-it('does not replace another explicit link or another workspace with the saved composition', () => {
-  saveSessionComposition('alice', composition());
-  expect(readSessionComposition('alice', source)).toBeUndefined();
-  expect(readSessionComposition('alice', { ...side, nativeSessionId: 'other' })).toBeUndefined();
-  expect(readSessionComposition('bob', side)).toBeUndefined();
-  expect(readSessionComposition('alice', undefined)).toBeUndefined();
-  expect(readSessionComposition('alice', { hostId: 'desk', providerId: 'codex' })).toBeUndefined();
+it('preserves original view data and retries an import rejected by storage', () => {
+  const original = JSON.stringify(composition());
+  sessionStorage.setItem(storageKey('alice'), original);
+  const setItem = Storage.prototype.setItem;
+  const denied = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(function (this: Storage, key, value) {
+    if (key.endsWith(':composition-v2')) throw new Error('Storage full');
+    return setItem.call(this, key, value);
+  });
+  expect(compositionMetadata.initializeCompositionDocument('alice').status).toBe('failed');
+  expect(sessionStorage.getItem(storageKey('alice'))).toBe(original);
+  expect(sessionStorage.getItem('agent-remote:recovery:alice:composition-v2')).toBeNull();
+  denied.mockRestore();
+  expect(compositionMetadata.initializeCompositionDocument('alice').status).toBe('ready');
 });
 
-it('replaces the full path after the side is closed instead of reviving its old selection', () => {
-  saveSessionComposition('alice', composition());
-  saveSessionComposition('alice', { path: [source], focus: sourceKey, anchor: sourceKey, addressKey: sourceKey });
-  expect(readSessionComposition('alice', source)).toEqual({ path: [source], focus: sourceKey, anchor: sourceKey, addressKey: sourceKey });
-  expect(readSessionComposition('alice', side)).toBeUndefined();
+it('does not complete a view import until the new document reads back unchanged', () => {
+  sessionStorage.setItem(storageKey('alice'), JSON.stringify(composition()));
+  const setItem = Storage.prototype.setItem;
+  vi.spyOn(Storage.prototype, 'setItem').mockImplementation(function (this: Storage, key, value) {
+    if (key.endsWith(':composition-v2')) return;
+    return setItem.call(this, key, value);
+  });
+  expect(compositionMetadata.initializeCompositionDocument('alice').status).toBe('failed');
+  expect(sessionStorage.getItem(storageKey('alice'))).toBe(JSON.stringify(composition()));
 });
 
-it('keeps Host and Provider identity separate even when native IDs and old bindings match', () => {
-  const otherHost = { ...source, hostId: 'laptop' };
-  saveSessionComposition('alice', { path: [source, otherHost], addressKey: '["laptop","codex","main"]' });
-  expect(readSessionComposition('alice', otherHost)?.path).toEqual([source, otherHost]);
-  expect(readSessionComposition('alice', source)).toBeUndefined();
-  expect(readSessionComposition('alice', { ...otherHost, providerId: 'claude' })).toBeUndefined();
+it('retries the original import after a valid but incomplete write is read back', () => {
+  sessionStorage.setItem(storageKey('alice'), JSON.stringify(composition()));
+  const setItem = Storage.prototype.setItem;
+  const corrupt = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(function (this: Storage, key, value) {
+    return setItem.call(this, key, key.endsWith(':composition-v2') ? JSON.stringify(createCompositionDocument('alice')) : value);
+  });
+  expect(compositionMetadata.initializeCompositionDocument('alice').status).toBe('failed');
+  corrupt.mockRestore();
+  const next = compositionMetadata.initializeCompositionDocument('alice');
+  expect(next).toMatchObject({ status: 'ready', document: { slots: expect.arrayContaining([expect.objectContaining({ metadata: expect.objectContaining({ agentId: source.agentId }) })]) } });
+  expect(sessionStorage.getItem(storageKey('alice'))).toBe(JSON.stringify(composition()));
 });
 
-it('keeps sessions from different Providers distinct within a saved path', () => {
-  const otherProvider = { ...source, providerId: 'claude' };
-  saveSessionComposition('alice', { path: [source, otherProvider], addressKey: '["desk","claude","main"]' });
-  expect(readSessionComposition('alice', otherProvider)?.path).toEqual([source, otherProvider]);
+it.each(['{', 'null', '{"path":[]}', JSON.stringify({ path: [source], addressKey: sideKey })])('keeps malformed original layouts untouched: %s', raw => {
+  sessionStorage.setItem(storageKey('alice'), raw);
+  expect(compositionMetadata.initializeCompositionDocument('alice').status).toBe('failed');
+  expect(sessionStorage.getItem(storageKey('alice'))).toBe(raw);
+  expect(readCompositionDocument('alice').status).toBe('missing');
 });
 
-it('normalizes an omitted local Host only for identity matching', () => {
-  const local = { providerId: 'codex', nativeSessionId: 'main', agentId: 'old-local-binding', title: 'Local' };
-  saveSessionComposition('alice', { path: [local], addressKey: '["local","codex","main"]' });
-  expect(readSessionComposition('alice', { ...local, hostId: 'local' })?.path).toEqual([local]);
-});
-
-it('persists only session metadata and snapshots it before the queued write', () => {
-  const entry = { ...source, parentAgentId: 'old-parent-binding', parentNativeSessionId: 'parent', createdAt: '2026-10-08T00:00:00Z', secret: 'discard', timeline: ['discard'] };
-  const value = { path: [entry], addressKey: sourceKey, draft: 'discard' };
-  saveSessionComposition('alice', value);
-  entry.title = 'Changed after saving';
-  const restored = readSessionComposition('alice', source);
-  expect(restored).toEqual({ path: [{ ...source, parentAgentId: 'old-parent-binding', parentNativeSessionId: 'parent', createdAt: '2026-10-08T00:00:00Z' }], addressKey: sourceKey });
-  expect(sessionStorage.getItem(storageKey('alice'))).not.toContain('discard');
-});
-
-it('does not expose extra fields from an otherwise valid stored composition', () => {
-  sessionStorage.setItem(storageKey('alice'), JSON.stringify({ path: [{ ...source, secret: 'discard', timeline: ['discard'] }], addressKey: sourceKey, draft: 'discard' }));
-  expect(readSessionComposition('alice', source)).toEqual({ path: [source], addressKey: sourceKey });
-});
-
-it.each([
-  ['invalid JSON', '{'],
-  ['non-object', 'null'],
-  ['missing path', JSON.stringify({ addressKey: sourceKey })],
-  ['non-array path', JSON.stringify({ path: source, addressKey: sourceKey })],
-  ['empty path', JSON.stringify({ path: [], addressKey: sourceKey })],
-  ['null session', JSON.stringify({ path: [null], addressKey: sourceKey })],
-  ['invalid binding metadata', JSON.stringify({ path: [{ ...source, agentId: false }], addressKey: sourceKey })],
-  ['invalid title metadata', JSON.stringify({ path: [{ ...source, title: [] }], addressKey: sourceKey })],
-  ['empty Provider identity', JSON.stringify({ path: [{ ...source, providerId: '' }], addressKey: sourceKey })],
-  ['missing native identity', JSON.stringify({ path: [{ ...source, nativeSessionId: undefined }], addressKey: sourceKey })],
-  ['empty native identity', JSON.stringify({ path: [{ ...source, nativeSessionId: '' }], addressKey: sourceKey })],
-  ['invalid Host', JSON.stringify({ path: [{ ...source, hostId: 3 }], addressKey: sourceKey })],
-  ['invalid optional metadata', JSON.stringify({ path: [{ ...source, parentNativeSessionId: false }], addressKey: sourceKey })],
-  ['repeated native identity', JSON.stringify({ path: [source, { ...source, agentId: 'new-binding' }], addressKey: sourceKey })],
-  ['cyclic selected path', JSON.stringify({ path: [source, side, source], addressKey: sideKey })],
-  ['focus outside the path', JSON.stringify({ ...composition(), focus: 'another-session' })],
-  ['anchor outside the path', JSON.stringify({ ...composition(), anchor: 'another-session' })],
-  ['address outside the path', JSON.stringify({ path: [source], addressKey: sideKey })],
-])('ignores corrupt composition data: %s', (_name, saved) => {
-  sessionStorage.setItem(storageKey('alice'), saved);
-  expect(readSessionComposition('alice', source)).toBeUndefined();
-  expect(readSessionComposition('alice', side)).toBeUndefined();
-});
-
-it('accepts a bounded path and rejects an oversized saved path', () => {
-  const path = Array.from({ length: 100 }, (_, index) => ({ ...source, nativeSessionId: `session-${index}` }));
-  saveSessionComposition('alice', { path, addressKey: '["desk","codex","session-0"]' });
-  expect(readSessionComposition('alice', path[0])?.path).toHaveLength(100);
-  sessionStorage.setItem(storageKey('alice'), JSON.stringify({ path: [...path, side], addressKey: '["desk","codex","session-0"]' }));
-  expect(readSessionComposition('alice', path[0])).toBeUndefined();
-});
-
-it('clears stored and queued compositions only for the signed-out workspace', () => {
-  saveSessionComposition('alice', composition());
-  expect(readSessionComposition('alice', side)).toBeDefined();
-  saveSessionComposition('alice', { path: [source], addressKey: sourceKey });
-  saveSessionComposition('bob', composition());
-  sessionStorage.setItem('unrelated', 'keep');
+it('clears only the signed-out workspace composition', () => {
+  compositionMetadata.initializeCompositionDocument('alice'); compositionMetadata.initializeCompositionDocument('bob');
   clearConversationRecovery('alice');
-  window.dispatchEvent(new Event('pagehide'));
-  expect(readSessionComposition('alice', source)).toBeUndefined();
-  expect(readSessionComposition('alice', side)).toBeUndefined();
-  expect(readSessionComposition('bob', side)).toBeDefined();
-  expect(sessionStorage.getItem('unrelated')).toBe('keep');
+  expect(readCompositionDocument('alice').status).toBe('missing');
+  expect(readCompositionDocument('bob').status).toBe('ready');
 });
 
-it('leaves ordinary session navigation usable when browser storage is unavailable', () => {
-  vi.spyOn(Storage.prototype, 'getItem').mockImplementation(() => { throw new Error('Denied'); });
-  vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => { throw new Error('Full'); });
-  expect(() => saveSessionComposition('alice', composition())).not.toThrow();
-  expect(readSessionComposition('alice', side)).toBeUndefined();
-  expect(() => window.dispatchEvent(new Event('pagehide'))).not.toThrow();
+it('restores durable owners without reimporting legacy data or another tab layout', () => {
+  sessionStorage.setItem(storageKey('alice'), JSON.stringify(composition()));
+  const first = compositionMetadata.initializeCompositionDocument('alice');
+  if (first.status !== 'ready') throw new Error('Missing imported views');
+  sessionStorage.clear();
+  sessionStorage.setItem(storageKey('alice'), '{');
+  localStorage.setItem('agent-remote-opened:alice', '{');
+  sessionStorage.setItem('agent-remote-ask:alice:open-windows', '{');
+  const restored = compositionMetadata.initializeCompositionDocument('alice');
+  expect(restored).toMatchObject({ status: 'ready', document: { slots: first.document.slots, roles: [], edges: [], tracks: [], retained: [], collapsed: [] } });
+  if (restored.status !== 'ready') return;
+  for (const key of ['primary', 'address', 'focus', 'anchor', 'selectedTrack'] as const) expect(restored.document[key]).toBeUndefined();
+  expect(restored.document.asks.every(owner => !owner.open && owner.records === undefined)).toBe(true);
 });
 
+it.each(['throw', 'omit'] as const)('keeps owner import retryable after a durable metadata %s failure', failure => {
+  sessionStorage.setItem(storageKey('alice'), JSON.stringify(composition()));
+  const setItem = Storage.prototype.setItem;
+  const denied = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(function (this: Storage, key, value) {
+    if (key.includes(':composition-owner:')) { if (failure === 'throw') throw new Error('Owner storage denied'); return; }
+    return setItem.call(this, key, value);
+  });
+  expect(compositionMetadata.initializeCompositionDocument('alice').status).toBe('failed');
+  expect(localStorage.getItem('agent-remote:recovery:alice:composition-import-v2')).toBeNull();
+  expect(sessionStorage.getItem(storageKey('alice'))).toBe(JSON.stringify(composition()));
+  denied.mockRestore();
+  expect(compositionMetadata.initializeCompositionDocument('alice').status).toBe('ready');
+  expect(localStorage.getItem('agent-remote:recovery:alice:composition-import-v2')).toBe('2');
+});
+
+it('keeps the latest Ask preference when a stale tab saves and then reloads', async () => {
+  sessionStorage.setItem(storageKey('alice'), JSON.stringify(composition()));
+  localStorage.setItem(`agent-remote-ask:alice:enabled:${sourceKey}`, 'true');
+  const loaded = compositionMetadata.initializeCompositionDocument('alice');
+  if (loaded.status !== 'ready') throw new Error('Missing imported views');
+  const current = structuredClone(loaded.document), stale = structuredClone(loaded.document);
+  const owner = current.asks.find(owner => owner.sourceSlot === current.primary)!;
+  compositionMetadata.saveCompositionAskEnabled(current, owner.id, false, () => true);
+  expect((await saveDocument(stale)).status).toBe('saved');
+  const reloaded = compositionMetadata.initializeCompositionDocument('alice');
+  expect(reloaded).toMatchObject({ status: 'ready', document: { asks: expect.arrayContaining([expect.objectContaining({ id: owner.id, enabled: false })]) } });
+  sessionStorage.clear();
+  expect(compositionMetadata.initializeCompositionDocument('alice')).toMatchObject({ status: 'ready', document: { asks: expect.arrayContaining([expect.objectContaining({ id: owner.id, enabled: false })]) } });
+});
+
+it('retains independent and history owners across a new tab while authority restores role intent', async () => {
+  vi.stubGlobal('crypto', webcrypto);
+  const document = makeDocument();
+  document.slots.push(ownedSlot('independent-A', 'A'), createHistorySlot('history-A', { hostId: 'host', native: nativeRef('A') }, 'scope'));
+  document.asks = document.slots.map(slot => createAskOwner(slot, 'scope'));
+  const success = async () => ({ status: 'applied' as const, retention: 'session' as const });
+  const application = new SuccessionApplication(document, authority(), { track: success, ask: success, draftViews: success });
+  expect((await application.apply(replayCommit())).status).toBe('applied');
+  expect(compositionMetadata.initializeCompositionDocument('scope').status).toBe('ready');
+  sessionStorage.clear();
+  const restored = compositionMetadata.initializeCompositionDocument('scope');
+  if (restored.status !== 'ready') throw new Error('Missing durable owners');
+  expect(restored.document.roles).toEqual([]); expect(restored.document.retained).toEqual([]);
+  expect(restored.document.slots.map(slot => [slot.id, slot.origin.kind, slot.intent.target.native.nativeSessionId, slot.owners])).toEqual([
+    ['A', 'fixed', 'A', ownedSlot('A').owners], ['B', 'fixed', 'B', ownedSlot('B').owners],
+    ['independent-A', 'fixed', 'A', ownedSlot('independent-A', 'A').owners], ['history-A', 'history', 'A', document.slots[3]!.owners],
+  ]);
+  const recovered = new SuccessionApplication(restored.document, authority(), { track: success, ask: success, draftViews: success });
+  expect((await recovered.apply(replayCommit())).status).toBe('applied');
+  expect(restored.document.slots.find(slot => slot.id === 'A')).toMatchObject({ intent: { kind: 'role', target: { native: nativeRef('B') } }, owners: ownedSlot('A').owners });
+  expect(restored.document.slots.find(slot => slot.id === 'B')).toEqual(ownedSlot('B'));
+  expect(restored.document.slots.find(slot => slot.id === 'history-A')!.intent.kind).toBe('history');
+});
+
+it('clears durable owners on sign-out and keeps protected owners off disk', async () => {
+  for (const scope of ['alice', 'bob']) {
+    const slot = createCompositionSlot('view', source, scope);
+    expect((await saveDocument(createCompositionDocument(scope, [slot]))).status).toBe('saved');
+    expect(compositionMetadata.initializeCompositionDocument(scope).status).toBe('ready');
+  }
+  clearConversationRecovery('alice');
+  expect(Object.keys(localStorage).filter(key => key.startsWith('agent-remote:recovery:alice:'))).toEqual([]);
+  expect(compositionMetadata.restoreCompositionOwners('bob').slots).toHaveLength(1);
+  await setClearCacheOnClose(true);
+  const document = createCompositionDocument('protected', [createCompositionSlot('private', source, 'protected')]);
+  expect((await saveDocument(document)).status).toBe('saved');
+  expect(compositionMetadata.restoreCompositionOwners('protected').slots).toHaveLength(1);
+  expect(Object.keys(localStorage).filter(key => key.startsWith('agent-remote:recovery:'))).toEqual([]);
+  await setClearCacheOnClose(false);
+});
+
+it('rejects new owners beyond the durable catalogue bounds without making existing owners unreadable', async () => {
+  const full = createCompositionDocument('scope', Array.from({ length: 1024 }, (_, index) => ownedSlot(`durable-${index}`)));
+  expect((await saveDocument(full)).status).toBe('saved');
+  sessionStorage.clear();
+  const staleTab = createCompositionDocument('scope', [ownedSlot('later-view')]);
+  expect((await saveDocument(staleTab)).status).toBe('failed');
+  expect(compositionMetadata.restoreCompositionOwners('scope').slots).toHaveLength(1024);
+  clearConversationRecovery('scope');
+  const large = (id: string, size: number) => {
+    const slot = ownedSlot(id); slot.metadata = { title: 'x'.repeat(size) };
+    return createCompositionDocument('scope', [slot]);
+  };
+  expect((await saveDocument(large('first-large', 600000))).status).toBe('saved');
+  sessionStorage.clear();
+  expect((await saveDocument(large('second-large', 600000))).status).toBe('failed');
+  expect(compositionMetadata.restoreCompositionOwners('scope').slots.map(slot => slot.id)).toEqual(['first-large']);
+});
 
 import { webcrypto } from 'node:crypto';
 import type { SessionSuccessionReplay } from '@orchardworks/agent-remote-protocol';
 import { createCompositionDocument, readCompositionDocument, saveCompositionDocument, createRoleCheckpoint, compositionRoleKey,
-  SuccessionApplication, adoptLegacySlot, retainCompositionDraftViews, applyCompositionTrack, readTrackCompanion, type CompositionDocument, type CompositionSlot } from './session-composition.js';
+  SuccessionApplication, createCompositionSlot, createAskOwner, createHistorySlot, retainCompositionDraftViews, applyCompositionTrack, type CompositionDocument, type CompositionSlot } from './session-composition.js';
 import { flushRecoveryWrites } from './recovery-writes.js';
 import { DraftStore } from './draft-store.js';
 import { TrackedSessionViews } from './tracked-session-views.js';
 import { saveTrackedSessions, readTrackedSessions } from './tracking-state.js';
 import { configureImageDraftPersistence, writeImageDraft, readImageDraft } from '@orchardworks/agent-remote-web/browser';
+const importedSlot = (id: string, session: OpenedSession, scope: string, nativeKey: string) => createCompositionSlot(id, session, scope, {
+  text: { scope, key: session.agentId }, image: { scope, key: JSON.stringify([scope, nativeKey]) }, display: { scope, key: nativeKey },
+});
 const nativeRef = (nativeSessionId: string) => ({ controllerId: 'installation', providerId: 'codex', nativeSessionId });
 const replayCommit = (from = 'A', to = 'B', expectedRevision = 1): SessionSuccessionReplay => {
   const workspace = { controllerId: 'installation', canonicalCwd: '/workspace' };
@@ -153,9 +243,9 @@ const replayCommit = (from = 'A', to = 'B', expectedRevision = 1): SessionSucces
     projection: { version: 1, role: { id: 'role', revision: expectedRevision + 1, origin: nativeRef('A'), current: nativeRef(to), workspace }, receipt: { ...request, to: nativeRef(to), phase: 'committed', committedRevision: expectedRevision + 1, startedAt: 'now', updatedAt: 'now',
       prepared: { ...request, to: nativeRef(to), workspace, associationRevision: 1, participants: [], capture: { epoch: 'epoch', seq: 1, capturedAt: 'now' } } } } };
 };
-const ownedSlot = (id: string, native = id): CompositionSlot => ({ id, intent: { kind: 'fixed', target: { hostId: 'host', native: nativeRef(native) } },
+const ownedSlot = (id: string, native = id): CompositionSlot => ({ id, origin: { kind: 'fixed', target: { hostId: 'host', native: nativeRef(native) } }, intent: { kind: 'fixed', target: { hostId: 'host', native: nativeRef(native) } },
   owners: { text: { scope: 'scope', key: `text-${id}` }, image: { scope: 'scope', key: `image-${id}` }, display: { scope: 'scope', key: `display-${id}` } } });
-const makeDocument = (): CompositionDocument => createCompositionDocument('scope', [ownedSlot('A'), ownedSlot('B')]);
+const makeDocument = (): CompositionDocument => { const document = createCompositionDocument('scope', [ownedSlot('A'), ownedSlot('B')]); document.tracks = [{ entryId: 'A', slotId: 'A' }, { entryId: 'B', slotId: 'B' }]; return document; };
 const authority = () => ({ scope: 'scope', hostId: 'host', controllerId: 'installation', isCurrent: () => true });
 async function saveDocument(document: CompositionDocument) { const handle = saveCompositionDocument(document, () => true); flushRecoveryWrites(); return handle.completion; }
 
@@ -166,18 +256,19 @@ it('persists compact exact checkpoints without receipt bodies and hashes canonic
   expect((await createRoleCheckpoint('scope', reordered)).desired.projectionDigest).toEqual(checkpoint.desired.projectionDigest);
   const document = makeDocument(); document.roles.push(checkpoint);
   expect((await saveDocument(document)).status).toBe('saved');
-  const raw = sessionStorage.getItem('agent-remote:recovery:scope:composition-v1')!;
+  const raw = sessionStorage.getItem('agent-remote:recovery:scope:composition-v2')!;
   expect(raw).not.toContain('participants'); expect(raw).not.toContain('prepared'); expect(raw).not.toContain('authorityKey');
   expect(readCompositionDocument('scope')).toMatchObject({ status: 'ready', document: { roles: [{ desired: { from: nativeRef('A'), to: nativeRef('B') } }] } });
 });
 it('refuses unsupported metadata and independent count and UTF-8 byte overflow without replacing original state', async () => {
-  const key = 'agent-remote:recovery:scope:composition-v1';
+  const key = 'agent-remote:recovery:scope:composition-v2';
   sessionStorage.setItem(key, '{"version":9}');
   expect(readCompositionDocument('scope').status).toBe('unsupported');
   expect((await saveDocument(makeDocument())).status).toBe('failed'); expect(sessionStorage.getItem(key)).toBe('{"version":9}');
   sessionStorage.removeItem(key);
   const document = createCompositionDocument('scope', Array.from({ length: 1024 }, (_, index) => ownedSlot(`slot-${index}`)));
   expect((await saveDocument(document)).status).toBe('saved'); const original = sessionStorage.getItem(key);
+  expect(compositionMetadata.restoreCompositionOwners('scope').slots).toHaveLength(1024);
   document.slots.push(ownedSlot('overflow')); document.editRevision++;
   expect((await saveDocument(document)).status).toBe('failed'); expect(sessionStorage.getItem(key)).toBe(original);
   const wide = makeDocument(); wide.editRevision = document.editRevision + 1; wide.slots[0]!.owners.text.key = '界'.repeat(400000);
@@ -227,16 +318,16 @@ it('retains real legacy A and B text/image owners before deduplicating Track and
   vi.stubGlobal('crypto', webcrypto); configureImageDraftPersistence(() => false);
   const nativeA = { hostId: 'host', providerId: 'codex', nativeSessionId: 'A', agentId: 'runtime-A', title: 'A' };
   const nativeB = { ...nativeA, nativeSessionId: 'B', agentId: 'runtime-B', title: 'B' };
-  const slots = [adoptLegacySlot('A', nativeA, 'scope', sessionKey(nativeA)), adoptLegacySlot('B', nativeB, 'scope', sessionKey(nativeB))];
+  const slots = [importedSlot('A', nativeA, 'scope', sessionKey(nativeA)), importedSlot('B', nativeB, 'scope', sessionKey(nativeB))];
   const document = createCompositionDocument('scope', slots); document.edges = [{ source: 'A', target: 'B', selected: true }];
   const drafts = new DraftStore('scope'); drafts.set('runtime-A', 'A text'); drafts.set('runtime-B', 'B text');
   for (const slot of slots) await writeImageDraft({ version: 1, ...slot.owners.image, parts: [{ type: 'image', imageId: slot.id, label: `image ${slot.id}` }],
     images: { [slot.id]: { imageId: slot.id, blob: new Blob([`${slot.id} bytes`], { type: 'image/png' }), uploadId: slot.id, status: 'pending', progress: 0 } }, nextLabel: 2 });
-  saveTrackedSessions('scope', [{ ...nativeA, starredAt: 1 }, { ...nativeB, starredAt: 2 }]);
-  const views = new TrackedSessionViews(); views.remember({ primary: nativeA, selections: {} }, [nativeA, nativeB], [nativeA, nativeB]);
+  saveTrackedSessions('scope', [{ ...nativeA, entryId: 'A', starredAt: 1 }, { ...nativeB, entryId: 'B', starredAt: 2 }]);
+  document.tracks = [{ entryId: 'A', slotId: 'A', view: { primarySlot: 'A', selections: {} } }, { entryId: 'B', slotId: 'B' }];
   const ask = vi.fn(async () => ({ status: 'applied' as const, retention: 'session' as const }));
   const application = new SuccessionApplication(document, authority(), { draftViews: context => retainCompositionDraftViews(context, () => drafts),
-    track: context => applyCompositionTrack(context, views), ask });
+    track: context => applyCompositionTrack(context), ask });
   const denied = vi.spyOn(Storage.prototype, 'getItem').mockImplementation(function (this: Storage, key: string) {
     if (key.endsWith(':view:' + sessionKey(nativeB))) throw new Error('Unknown B display');
     return originalGet.call(this, key);
@@ -250,7 +341,7 @@ it('retains real legacy A and B text/image owners before deduplicating Track and
   expect((await readImageDraft(slots[0]!.owners.image.key))?.images.A?.blob?.size).toBe(7);
   expect((await readImageDraft(slots[1]!.owners.image.key))?.images.B?.blob?.size).toBe(7);
   expect(readTrackedSessions('scope')).toMatchObject([{ entryId: 'A', nativeSessionId: 'B', title: 'A' }]);
-  expect(readTrackCompanion('scope')).toMatchObject({ status: 'ready', document: { entries: [{ entryId: 'A', slotId: 'A' }] } });
+  expect(readCompositionDocument('scope')).toMatchObject({ status: 'ready', document: { tracks: expect.arrayContaining([{ entryId: 'A', slotId: 'A', view: { primarySlot: 'A', selections: {} } }]) } });
   expect(document.edges).toEqual([]);
 });
 const originalGet = Storage.prototype.getItem;
@@ -273,13 +364,12 @@ it('persists an incomplete marker when revalidating an applied revision fails, t
 it('keeps independent B Track and navigation reachable until Ask retention succeeds', async () => {
   vi.stubGlobal('crypto', webcrypto);
   const document = makeDocument(); document.edges = [{ source: 'A', target: 'B', selected: true }];
-  const a = { hostId: 'host', providerId: 'codex', nativeSessionId: 'A', title: 'Track A', starredAt: 1 };
-  const b = { ...a, nativeSessionId: 'B', title: 'Track B', starredAt: 2 };
+  const a = { hostId: 'host', providerId: 'codex', nativeSessionId: 'A', title: 'Track A', entryId: 'A', starredAt: 1 };
+  const b = { ...a, nativeSessionId: 'B', title: 'Track B', entryId: 'B', starredAt: 2 };
   saveTrackedSessions('scope', [a, b]);
-  const views = new TrackedSessionViews();
   let retained = false;
   const application = new SuccessionApplication(document, authority(), { draftViews: async () => ({ status: 'applied', retention: 'session' }),
-    track: context => applyCompositionTrack(context, views), ask: async () => retained ? { status: 'applied', retention: 'session' } : { status: 'failed', retention: 'page', code: 'B_ask_unreadable' } });
+    track: context => applyCompositionTrack(context), ask: async () => retained ? { status: 'applied', retention: 'session' } : { status: 'failed', retention: 'page', code: 'B_ask_unreadable' } });
   expect((await application.apply(replayCommit())).status).toBe('failed');
   expect(readTrackedSessions('scope').map(value => value.nativeSessionId)).toEqual(['A', 'B']);
   expect(document.edges).toEqual([{ source: 'A', target: 'B', selected: true }]);
@@ -290,52 +380,25 @@ it('keeps independent B Track and navigation reachable until Ask retention succe
   expect(document.edges).toEqual([]);
 });
 
-import { saveTrackCompanion, saveAskOwnerIndex, readAskOwnerIndex, createHistorySlot, type TrackCompanionDocument, type AskOwnerIndexDocument } from './session-composition.js';
-const askIndex = (count = 1): AskOwnerIndexDocument => ({ version: 1, scope: 'scope', editRevision: 0,
-  owners: Array.from({ length: count }, (_, i) => ({ id: `ask-${i}`, sourceSlot: `slot-${i}`, stateScope: 'scope', legacySourceKey: `legacy-${i}`, geometryScope: `geometry-${i}`, text: { scope: 'scope:ask', key: `draft-${i}` } })) });
-const trackCompanion = (count = 1): TrackCompanionDocument => ({ version: 1, scope: 'scope', editRevision: 0,
-  entries: Array.from({ length: count }, (_, i) => ({ entryId: `entry-${i}`, slotId: `slot-${i}` })), views: [] });
-async function completeWrite(handle: ReturnType<typeof saveCompositionDocument>) { flushRecoveryWrites(); return handle.completion; }
-
-it('independently enforces 1024 Ask owners, 128 roles and eight tracked entries without truncation', async () => {
-  vi.stubGlobal('crypto', webcrypto);
-  const ask = askIndex(1024), track = trackCompanion(8), document = makeDocument();
-  const role = await createRoleCheckpoint('scope', replayCommit());
-  document.roles = Array.from({ length: 128 }, (_, i) => ({ ...role, roleId: `role-${i}` }));
-  expect((await completeWrite(saveAskOwnerIndex(ask, () => true))).status).toBe('saved');
-  expect((await completeWrite(saveTrackCompanion(track, () => true))).status).toBe('saved');
+it('bounds all view metadata in the same document without truncating original state', async () => {
+  const document = createCompositionDocument('scope', Array.from({ length: 1024 }, (_, i) => ownedSlot(`slot-${i}`)));
+  document.asks = document.slots.map(slot => createAskOwner(slot, 'scope'));
   expect((await saveDocument(document)).status).toBe('saved');
-  const original = ['ask-owners-v1', 'track-views-v1', 'composition-v1'].map(name => sessionStorage.getItem(`agent-remote:recovery:scope:${name}`));
-  ask.owners.push({ ...ask.owners[0]!, id: 'overflow' }); ask.editRevision++;
-  track.entries.push({ entryId: 'overflow', slotId: 'overflow' }); track.editRevision++;
-  document.roles.push({ ...role, roleId: 'overflow' }); document.editRevision++;
-  expect((await completeWrite(saveAskOwnerIndex(ask, () => true))).status).toBe('failed');
-  expect((await completeWrite(saveTrackCompanion(track, () => true))).status).toBe('failed');
+  const raw = sessionStorage.getItem('agent-remote:recovery:scope:composition-v2');
+  document.asks.push({ ...document.asks[0]!, id: 'overflow' }); document.editRevision++;
   expect((await saveDocument(document)).status).toBe('failed');
-  expect(['ask-owners-v1', 'track-views-v1', 'composition-v1'].map(name => sessionStorage.getItem(`agent-remote:recovery:scope:${name}`))).toEqual(original);
-  expect([ask.owners.length, track.entries.length, document.roles.length]).toEqual([1025, 9, 129]);
+  expect(sessionStorage.getItem('agent-remote:recovery:scope:composition-v2')).toBe(raw);
 });
 
-it.each(['composition', 'track', 'ask'] as const)('enforces the exact UTF-8 byte boundary for %s metadata', async kind => {
-  const composition = makeDocument(), track = trackCompanion(), ask = askIndex();
-  const document = kind === 'composition' ? composition : kind === 'track' ? track : ask;
-  const set = (value: string) => { if (kind === 'composition') composition.slots[0]!.owners.text.key = value; else if (kind === 'track') track.entries[0]!.slotId = value; else ask.owners[0]!.text.key = value; };
-  const save = () => completeWrite(kind === 'composition' ? saveCompositionDocument(composition, () => true) : kind === 'track' ? saveTrackCompanion(track, () => true) : saveAskOwnerIndex(ask, () => true));
-  set('界'); const available = 1048576 - new TextEncoder().encode(JSON.stringify(document)).byteLength;
-  set('界' + 'x'.repeat(available));
-  expect((await save()).status).toBe('saved');
-  const key = `agent-remote:recovery:scope:${kind === 'composition' ? 'composition-v1' : kind === 'track' ? 'track-views-v1' : 'ask-owners-v1'}`;
-  const raw = sessionStorage.getItem(key)!; expect(new TextEncoder().encode(raw).byteLength).toBe(1048576);
-  document.editRevision++; set('界' + 'x'.repeat(available + 1));
-  expect((await save()).status).toBe('failed'); expect(sessionStorage.getItem(key)).toBe(raw);
-});
-
-it.each(['{', '{"version":9}', '{"version":1,"scope":"another"}'])('retains damaged or unsupported raw documents: %s', async raw => {
-  for (const name of ['composition-v1', 'track-views-v1', 'ask-owners-v1']) sessionStorage.setItem(`agent-remote:recovery:scope:${name}`, raw);
-  expect((await saveDocument(makeDocument())).status).toBe('failed');
-  expect((await completeWrite(saveTrackCompanion(trackCompanion(), () => true))).status).toBe('failed');
-  expect((await completeWrite(saveAskOwnerIndex(askIndex(), () => true))).status).toBe('failed');
-  for (const name of ['composition-v1', 'track-views-v1', 'ask-owners-v1']) expect(sessionStorage.getItem(`agent-remote:recovery:scope:${name}`)).toBe(raw);
+it('keeps invalid track and Ask references out of the authoritative document', async () => {
+  const document = makeDocument();
+  document.tracks[0]!.view = { primarySlot: 'missing', selections: {} };
+  expect((await saveDocument(document)).status).toBe('failed');
+  document.tracks[0]!.view = { primarySlot: 'A', selections: { A: 'missing' } };
+  expect((await saveDocument(document)).status).toBe('failed');
+  document.tracks[0]!.view = { primarySlot: 'A', selections: {} };
+  document.asks = [{ ...createAskOwner(document.slots[0]!, 'scope'), sourceSlot: 'missing' }];
+  expect((await saveDocument(document)).status).toBe('failed');
 });
 
 it.each([1, 2, 3, 4, 5])('retries current desired intent after checkpoint write %i fails', async fault => {
@@ -344,7 +407,7 @@ it.each([1, 2, 3, 4, 5])('retries current desired intent after checkpoint write 
   const application = new SuccessionApplication(makeDocument(), authority(), { draftViews: participant, ask: participant, track: participant });
   const original = Storage.prototype.setItem; let writes = 0;
   const denied = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(function (this: Storage, key, value) {
-    if (key.endsWith(':composition-v1') && ++writes === fault) throw new Error('Checkpoint unavailable');
+    if (key.endsWith(':composition-v2') && ++writes === fault) throw new Error('Checkpoint unavailable');
     original.call(this, key, value);
   });
   expect((await application.apply(replayCommit())).status).toBe('failed');
@@ -389,14 +452,14 @@ it('does not enroll explicit history or another provider with the same native ID
 
 it('retires held B callbacks after C and keeps original A owners when real Track catches up', async () => {
   vi.stubGlobal('crypto', webcrypto);
-  const document = makeDocument(); const views = new TrackedSessionViews();
-  saveTrackedSessions('scope', [{ hostId: 'host', providerId: 'codex', nativeSessionId: 'A', title: 'Original A', starredAt: 1 }]);
+  const document = makeDocument();
+  saveTrackedSessions('scope', [{ hostId: 'host', providerId: 'codex', nativeSessionId: 'A', title: 'Original A', entryId: 'A', starredAt: 1 }]);
   let finish!: () => void; const held = new Promise<void>(resolve => { finish = resolve; }); let entered = false;
   const ask = vi.fn(async () => ({ status: 'applied' as const, retention: 'session' as const }));
   const application = new SuccessionApplication(document, authority(), { draftViews: async context => {
     if (context.replay.to.nativeSessionId === 'B') { entered = true; await held; }
     return { status: 'applied', retention: 'session' };
-  }, ask, track: context => applyCompositionTrack(context, views) });
+  }, ask, track: context => applyCompositionTrack(context) });
   const b = application.apply(replayCommit()); await vi.waitFor(() => expect(entered).toBe(true));
   expect((await application.apply(replayCommit('B', 'C', 2))).status).toBe('applied');
   finish(); expect((await b).status).toBe('pending');
@@ -413,9 +476,9 @@ it.each(['edit', 'retire', 'clear'] as const)('does not persist late participant
     draftViews: async () => { entered = true; await held; return { status: 'applied', retention: 'session' }; } });
   const result = application.apply(replayCommit()); await vi.waitFor(() => expect(entered).toBe(true));
   if (reason === 'edit') document.editRevision++; else if (reason === 'retire') active = false; else clearConversationRecovery('scope');
-  const raw = sessionStorage.getItem('agent-remote:recovery:scope:composition-v1');
+  const raw = sessionStorage.getItem('agent-remote:recovery:scope:composition-v2');
   finish(); expect((await result).status).toBe('pending'); expect(next).not.toHaveBeenCalled();
-  expect(sessionStorage.getItem('agent-remote:recovery:scope:composition-v1')).toBe(raw);
+  expect(sessionStorage.getItem('agent-remote:recovery:scope:composition-v2')).toBe(raw);
 });
 
 it.each(['current-only', 'gap', 'offline', 'pinned-conflict'] as const)('keeps recovery incomplete for %s evidence', async mode => {
@@ -432,25 +495,20 @@ it.each(['current-only', 'gap', 'offline', 'pinned-conflict'] as const)('keeps r
   expect(document.slots[0]!.intent.kind).toBe('fixed'); expect(participant).not.toHaveBeenCalled();
 });
 
-it('persists unaffected Track views and independent duplicate views before removing their navigation entry', async () => {
+it('retains independent Track view IDs while a role binding changes twice', async () => {
   vi.stubGlobal('crypto', webcrypto);
   const document = makeDocument(); document.slots.push(ownedSlot('D'));
-  const entries = ['A', 'B', 'D'].map((nativeSessionId, index) => ({ hostId: 'host', providerId: 'codex', nativeSessionId, title: nativeSessionId, starredAt: index + 1 }));
-  saveTrackedSessions('scope', entries); const views = new TrackedSessionViews();
-  for (const entry of entries) { views.select(entry); views.remember({ primary: entry, selections: {}, focus: `focus-${entry.nativeSessionId}` }, entries, entries); }
-  views.select(entries[1]!);
+  document.tracks = ['A', 'B', 'D'].map(id => ({ entryId: id, slotId: id, view: { primarySlot: id, selections: {}, focus: id } }));
+  saveTrackedSessions('scope', ['A', 'B', 'D'].map((id, index) => ({ hostId: 'host', providerId: 'codex', nativeSessionId: id, entryId: id, title: id, starredAt: index + 1 })));
+  const views = new TrackedSessionViews(document, () => {});
   const ok = async () => ({ status: 'applied' as const, retention: 'session' as const });
-  const application = new SuccessionApplication(document, authority(), { draftViews: ok, ask: ok, track: context => applyCompositionTrack(context, views) });
+  const application = new SuccessionApplication(document, authority(), { draftViews: ok, ask: ok, track: applyCompositionTrack });
   expect((await application.apply(replayCommit())).status).toBe('applied');
-  const saved = readTrackCompanion('scope'); expect(saved.status).toBe('ready');
-  if (saved.status !== 'ready') throw new Error('Missing view retention');
-  expect(saved.document.views).toEqual(expect.arrayContaining([
-    expect.objectContaining({ primarySlot: 'A', focus: 'focus-A' }),
-    expect.objectContaining({ primarySlot: 'B', focus: 'focus-B' }),
-    expect.objectContaining({ primarySlot: 'D', focus: 'focus-D' }),
-  ]));
-  expect(saved.document.selected).toBe('A');
-  expect(readTrackedSessions('scope').map(entry => entry.nativeSessionId)).toEqual(['B', 'D']);
+  expect((await application.apply(replayCommit('B', 'C', 2))).status).toBe('applied');
+  expect(views.get('A')).toMatchObject({ primarySlot: 'A', primary: { nativeSessionId: 'C' } });
+  expect(views.get('B')).toMatchObject({ primarySlot: 'B', primary: { nativeSessionId: 'B' } });
+  expect(views.get('D')).toMatchObject({ primarySlot: 'D', primary: { nativeSessionId: 'D' } });
+  expect(readCompositionDocument('scope')).toMatchObject({ status: 'ready', document: { tracks: document.tracks } });
 });
 
 it('requires the complete authorized chain after reloading a compact pending C checkpoint', async () => {
@@ -491,7 +549,7 @@ it.each([
   const original = Storage.prototype.setItem; let edited = false;
   const write = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(function (this: Storage, key, value) {
     original.call(this, key, value);
-    if (!key.endsWith(':composition-v1') || edited) return;
+    if (!key.endsWith(':composition-v2') || edited) return;
     const saved = JSON.parse(value) as CompositionDocument, checkpoint = saved.roles[0]!;
     if (checkpoint.documents.track.status !== 'applied' || (checkpoint.documents.composition.status === 'applied') !== (phase === 'final')) return;
     edited = true;
@@ -527,7 +585,7 @@ it('does not roll back a newer C checkpoint when the B final completion retires'
   let newer: ReturnType<typeof application.apply> | undefined;
   vi.spyOn(Storage.prototype, 'setItem').mockImplementation(function (this: Storage, key, value) {
     original.call(this, key, value);
-    if (!key.endsWith(':composition-v1') || advanced) return;
+    if (!key.endsWith(':composition-v2') || advanced) return;
     const saved = JSON.parse(value) as CompositionDocument;
     if (saved.roles[0]!.appliedRevision !== 2) return;
     advanced = true;
@@ -538,4 +596,87 @@ it('does not roll back a newer C checkpoint when the B final completion retires'
   expect((await newer!)?.status).toBe('applied');
   expect(document.roles[0]).toMatchObject({ appliedRevision: 3, desired: { committedRevision: 3 } });
   expect(readCompositionDocument('scope')).toMatchObject({ status: 'ready', document: { roles: [{ appliedRevision: 3 }] } });
+});
+
+it('preserves an explicitly selected retained view during repeated and newer role recovery', async () => {
+  vi.stubGlobal('crypto', webcrypto);
+  const document = makeDocument(), chain = [replayCommit()];
+  const ok = async () => ({ status: 'applied' as const, retention: 'session' as const });
+  const application = new SuccessionApplication(document, authority(), { draftViews: ok, ask: ok, track: ok });
+  expect((await application.apply(chain[0]!)).status).toBe('applied');
+  Object.assign(document, { address: 'B', focus: 'B', anchor: 'B' }); document.editRevision++;
+  const transport = { fetchSessionSuccessionOperation: async (_role: string, operation: string) => chain.find(value => value.projection.receipt.operationId === operation),
+    fetchSessionSuccessionCurrent: async () => ({ version: 1 as const, role: chain.at(-1)!.projection.role, locator: chain.at(-1)!.to }),
+    fetchSessionSuccessions: async () => ({ version: 1 as const, successions: chain, nextCursor: null }) };
+  for (let index = 0; index < 3; index++) {
+    if (index === 2) chain.push(replayCommit('B', 'C', 2));
+    expect(await application.recover('role', transport, { selectedSlot: 'B', isCurrent: () => true })).toMatchObject({ status: 'applied' });
+    expect(readCompositionDocument('scope')).toMatchObject({ status: 'ready', document: { address: 'B', focus: 'B', anchor: 'B' } });
+  }
+  expect(document.slots.find(slot => slot.id === 'A')!.intent).toMatchObject({ kind: 'role', target: { native: { nativeSessionId: 'C' } } });
+  expect(document.slots.find(slot => slot.id === 'B')!.intent).toMatchObject({ kind: 'fixed', target: { native: { nativeSessionId: 'B' } } });
+});
+
+it('retires an in-flight recovery before it can publish over a new local selection', async () => {
+  vi.stubGlobal('crypto', webcrypto);
+  const document = makeDocument(), replay = replayCommit();
+  let selected = true, entered = false, finish!: () => void;
+  const gate = new Promise<void>(resolve => { finish = resolve; });
+  const ok = async () => ({ status: 'applied' as const, retention: 'session' as const });
+  const track = vi.fn(ok);
+  const application = new SuccessionApplication(document, authority(), { draftViews: ok, ask: async () => { entered = true; await gate; return ok(); }, track });
+  const pending = application.recover('role', { fetchSessionSuccessionOperation: async () => replay,
+    fetchSessionSuccessionCurrent: async () => ({ version: 1, role: replay.projection.role, locator: replay.to }),
+    fetchSessionSuccessions: async () => ({ version: 1, successions: [replay], nextCursor: null }),
+  }, { selectedSlot: 'B', isCurrent: () => selected });
+  await vi.waitFor(() => expect(entered).toBe(true));
+  selected = false; document.address = 'B'; finish();
+  expect(await pending).toMatchObject({ status: 'pending' });
+  expect(track).not.toHaveBeenCalled(); expect(document.address).toBe('B'); expect(document.roles[0]!.appliedRevision).toBeLessThan(2);
+});
+
+
+it('retries partial owner import for an Ask window outside the recent session catalog', () => {
+  const scope = 'partial-ask-import', key = `agent-remote:recovery:${scope}:composition-v2`;
+  const windowsKey = `agent-remote-ask:${scope}:open-windows`;
+  const windows = JSON.stringify([JSON.stringify(['host', 'recorded', 'outside-recent-catalog'])]);
+  sessionStorage.setItem(windowsKey, windows);
+  const original = Storage.prototype.setItem;
+  const fail = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(function(this: Storage, storedKey, value) {
+    if (storedKey === key) throw new Error('Session metadata write failed');
+    original.call(this, storedKey, value);
+  });
+  expect(compositionMetadata.initializeCompositionDocument(scope).status).toBe('failed');
+  const owners = compositionMetadata.restoreCompositionOwners(scope);
+  expect(owners.slots).toHaveLength(1);
+  expect(sessionStorage.getItem(key)).toBeNull();
+  fail.mockRestore();
+  const retry = compositionMetadata.initializeCompositionDocument(scope);
+  expect(retry).toMatchObject({ status: 'ready', document: { slots: [expect.objectContaining({ id: owners.slots[0]!.id, owners: owners.slots[0]!.owners })] } });
+  expect(compositionMetadata.initializeCompositionDocument(scope).status).toBe('ready');
+  expect(sessionStorage.getItem(windowsKey)).toBe(windows);
+});
+
+
+it('persists existing owners and current Ask preference after disabling clear-on-close', async () => {
+  const scope = 'policy-owner';
+  localStorage.setItem(`agent-remote-opened:${scope}`, JSON.stringify([source]));
+  const first = compositionMetadata.initializeCompositionDocument(scope);
+  if (first.status !== 'ready') throw new Error('Missing initial composition');
+  const document = first.document, owner = document.asks[0]!;
+  await setClearCacheOnClose(true);
+  compositionMetadata.saveCompositionAskEnabled(document, owner.id, true, () => true);
+  await setClearCacheOnClose(false);
+  document.editRevision++;
+  expect((await saveDocument(document)).status).toBe('saved');
+  const initialized = compositionMetadata.initializeCompositionDocument(scope);
+  if (initialized.status === 'failed') throw initialized.error;
+  expect(initialized.status).toBe('ready');
+  sessionStorage.clear();
+  vi.resetModules();
+  const cold = await import('./session-composition.js');
+  expect(cold.initializeCompositionDocument(scope)).toMatchObject({ status: 'ready', document: {
+    slots: expect.arrayContaining([expect.objectContaining({ id: document.slots[0]!.id, owners: document.slots[0]!.owners })]),
+    asks: expect.arrayContaining([expect.objectContaining({ id: owner.id, enabled: true })]),
+  } });
 });

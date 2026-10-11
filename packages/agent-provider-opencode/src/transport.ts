@@ -1,4 +1,5 @@
 import { createOpencodeClient, type GlobalEvent } from '@opencode-ai/sdk/v2/client';
+import { createHash } from 'node:crypto';
 import { setTimeout as delay } from 'node:timers/promises';
 
 export interface OpenCodeAgentProviderOptions {
@@ -20,6 +21,7 @@ export class OpenCodeRequestError extends Error {
 interface EventSubscriber { connected(): void; disconnected(attempt: number): void; receive(event: GlobalEvent): void; }
 export class OpenCodeTransport {
   readonly client;
+  readonly namespaceId: string;
   readonly timeout: number;
   readonly restricted: boolean;
   readonly local: boolean;
@@ -31,6 +33,7 @@ export class OpenCodeTransport {
   constructor(private readonly options: OpenCodeAgentProviderOptions) {
     const url = new URL(options.serverUrl ?? 'http://127.0.0.1:4096');
     if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password || url.search || url.hash) throw new Error('Invalid OpenCode server URL. Configure credentials separately.');
+    this.namespaceId = createHash('sha256').update(url.toString()).digest('hex');
     this.local = ['127.0.0.1', 'localhost', '[::1]'].includes(url.hostname);
     this.timeout = options.requestTimeoutMs ?? 15000;
     if (!Number.isFinite(this.timeout) || this.timeout < 1 || this.timeout > 120000) throw new Error('Invalid OpenCode request timeout.');

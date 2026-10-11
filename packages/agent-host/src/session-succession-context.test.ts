@@ -86,22 +86,22 @@ describe('durable succession first input', () => {
 
 const digest = (text: string) => createHash('sha256').update(text).digest('hex');
 function prepared(text = quotedSessionContextPrefix({ id: attachment.operationId, sourceSession: source.nativeSessionId, capturedAt: attachment.capturedAt, text: attachment.text }) + 'new'): AgentPreparedTextInput {
-  return { version: 1, providerId: target.providerId, nativeSessionId: 'B', nativeInputId: 'U', cwd: '/workspace', store: { authorityId: 'authority', storeId: 'store' },
+  return { version: 2, providerId: target.providerId, nativeSessionId: 'B', inputId: 'U', cwd: '/workspace', authority: { kind: 'trusted-service' as const, authorityId: 'authority', namespaceId: 'store' },
     parts: [{ type: 'text', text }], content: { encoding: 'utf-8', bytes: Buffer.byteLength(text), sha256: digest(text) }, selections: { model: 'model', delivery: 'immediate' } };
 }
-function positive(witness: AgentPreparedTextInput) {
+function positive(witness: AgentPreparedTextInput, nativeExecutionId?: string) {
   const { delivery: _delivery, ...selections } = witness.selections;
-  return serializeAgentInputMaterialization({ status: 'materialized', proof: { version: 1, providerId: witness.providerId, nativeSessionId: witness.nativeSessionId, nativeInputId: witness.nativeInputId,
-    cwd: witness.cwd, store: witness.store, witnessSha256: digest(serializeAgentPreparedTextInput(witness)), contentSha256: witness.content.sha256, nativeSelectionsSha256: digest(JSON.stringify(selections)) } });
+  return serializeAgentInputMaterialization({ status: 'materialized', ...(nativeExecutionId ? { execution: { disposition: 'started', nativeExecutionId } } : {}), proof: { version: 2, providerId: witness.providerId, nativeSessionId: witness.nativeSessionId, inputId: witness.inputId, nativeInputId: witness.inputId,
+    cwd: witness.cwd, authority: witness.authority, witnessSha256: digest(serializeAgentPreparedTextInput(witness)), contentSha256: witness.content.sha256, nativeSelectionsSha256: digest(JSON.stringify(selections)) } });
 }
 it('persists a nested witness with exact original context/input bindings, without preparation replay', async () => {
   const { path, store } = await setup(), witness = prepared();
   const first = await store.begin('succession', input(), witness);
-  expect(first.preparedInput).toMatchObject({ version: 1, contextOperationId: 'succession', witness });
+  expect(first.preparedInput).toMatchObject({ version: 2, contextOperationId: 'succession', witness });
   const disk = JSON.parse(await readFile(join(path, 'context.json'), 'utf8'));
   expect(disk.version).toBe(3); expect(disk.attachments[0].deliveries[0].preparedInput.witness.parts).toEqual(witness.parts);
   expect((await store.begin('succession', input())).preparedInput).toEqual(first.preparedInput);
-  await expect(store.begin('succession', input(), { ...witness, nativeInputId: 'other-U' })).rejects.toThrow(/identity|conflict/);
+  await expect(store.begin('succession', input(), { ...witness, inputId: 'other-U' })).rejects.toThrow(/identity|conflict/);
   const restored = new SessionSuccessionContextStore(path); await restored.ready;
   expect(restored.delivery('input')).toMatchObject({ state: 'unknown', preparedInput: first.preparedInput });
   expect(Number(restored.delivery('input')!.reservedBytes)).toBeGreaterThan(0);
@@ -119,15 +119,15 @@ it('requires exact positive proof for optional delivery and keeps actual accepta
   const evidence = { operationId: 'input', target, roleRevision: 2, outcome: 'materialized' as const, nativeEvidence: positive(witness) };
   for (const invalid of [
     { ...evidence, outcome: 'not-dispatched' as const }, { ...evidence, nativeEvidence: 'native-row' },
-    { ...evidence, nativeEvidence: positive({ ...witness, nativeInputId: 'other-U' }) },
+    { ...evidence, nativeEvidence: positive({ ...witness, inputId: 'other-U' }) },
     { ...evidence, nativeEvidence: positive({ ...witness, cwd: '/other' }) },
     ...['providerId', 'nativeSessionId'].map(key => ({ ...evidence, nativeEvidence: positive({ ...witness, [key]: 'other' }) })),
-    { ...evidence, nativeEvidence: positive({ ...witness, store: { ...witness.store, storeId: 'other' } }) },
+    { ...evidence, nativeEvidence: positive({ ...witness, authority: { ...witness.authority, namespaceId: 'other' } }) },
     { ...evidence, nativeEvidence: positive({ ...witness, selections: { model: 'other' } }) },
     ...['witnessSha256', 'contentSha256', 'nativeSelectionsSha256'].map(key => { const value = JSON.parse(evidence.nativeEvidence); value.proof[key] = '0'.repeat(64); return { ...evidence, nativeEvidence: serializeAgentInputMaterialization(value) }; }),
   ]) await expect(store.reconcile('succession', invalid)).rejects.toThrow();
   const result = await store.reconcile('succession', evidence);
-  expect(result).toMatchObject({ state: 'materialized', inputAcceptance: { disposition: 'queued' }, nativeEvidence: evidence.nativeEvidence, reservedBytes: '00000000' });
+  expect(result).toMatchObject({ state: 'materialized', inputAcceptance: { disposition: 'queued' }, nativeEvidence: evidence.nativeEvidence });
   expect(await store.reconcile('succession', evidence)).toEqual(result);
   await expect(store.reconcile('succession', { ...evidence, nativeEvidence: positive({ ...witness, selections: {} }) })).rejects.toThrow();
 });
@@ -149,4 +149,116 @@ it('optional definite rejection keeps context pending and releases only its sett
   const restored = new SessionSuccessionContextStore(path); await restored.ready;
   expect(await restored.begin('succession', input())).toEqual(result);
   await expect(restored.reconcile('succession', { operationId: 'input', roleRevision: 2, target, outcome: 'materialized', nativeEvidence: positive(prepared()) })).rejects.toThrow(/current state/);
+});
+
+it('retains materialized input until exact execution is persisted, including after restart', async () => {
+  const { path, store, dispatcher } = await setup(), witness = prepared();
+  await store.begin('succession', input(), witness); await store.settle('succession', 'input', 'unknown');
+  const evidence = { operationId: 'input', target, roleRevision: 2, outcome: 'materialized' as const, nativeEvidence: positive(witness) };
+  await store.reconcile('succession', evidence);
+  expect(Number(store.delivery('input')!.reservedBytes)).toBeGreaterThan(0);
+  await expect(dispatcher.dispatch(input('next'), admitted, async () => ({ outcome: 'accepted' }))).rejects.toThrow('unresolved');
+  const restored = new SessionSuccessionContextStore(path); await restored.ready;
+  expect(restored.delivery('input')!.inputAcceptance).toBeUndefined();
+  const settled = await restored.reconcile('succession', { ...evidence, nativeEvidence: positive(witness, 'R') });
+  expect(settled).toMatchObject({ state: 'materialized', inputAcceptance: { disposition: 'started' }, reservedBytes: '00000000' });
+  expect(settled.preparedInput).toEqual(store.delivery('input')!.preparedInput);
+  await expect(restored.reconcile('succession', evidence)).rejects.toThrow(/execution/);
+  await expect(restored.reconcile('succession', { ...evidence, nativeEvidence: positive(witness, 'other-R') })).rejects.toThrow(/execution/);
+  const cold = new SessionSuccessionContextStore(path); await cold.ready;
+  expect(cold.delivery('input')).toEqual(settled);
+});
+
+
+it('retains dirty mutation coverage across restart and a new operation cannot erase it', async () => {
+  const { path, store } = await setup();
+  await store.markMutation(source, 'ordinary');
+  expect(store.coverageAvailable(source)).toBe(true);
+  const restored = new SessionSuccessionContextStore(path); await restored.ready;
+  expect(restored.coverageAvailable(source)).toBe(false);
+  await restored.markMutation(source, 'later'); await restored.clearMutation(source, () => true);
+  expect(restored.coverageAvailable(source)).toBe(false);
+  expect(JSON.parse(await readFile(join(path, 'context.json'), 'utf8')).coverage).toEqual([{ target: source, operationId: 'ordinary' }]);
+});
+it('clears live dirty coverage only after checking the current cache inside serialized persistence', async () => {
+  const { path, store } = await setup();
+  await store.markMutation(source, 'one'); let clean = true;
+  const clear = store.clearMutation(source, () => clean); clean = false; await clear;
+  expect(JSON.parse(await readFile(join(path, 'context.json'), 'utf8')).coverage).toHaveLength(1);
+  await store.clearMutation(source, () => true);
+  expect(JSON.parse(await readFile(join(path, 'context.json'), 'utf8')).coverage).toEqual([]);
+});
+
+
+it('recovers cold prepared coverage only from the same persisted execution proof', async () => {
+  const { path, store } = await setup(), witness = prepared();
+  await store.markMutation(target, 'input'); await store.begin('succession', input(), witness); await store.markPreparedMutation(target, 'input');
+  await store.settle('succession', 'input', 'unknown');
+  const restored = new SessionSuccessionContextStore(path); await restored.ready;
+  const evidence = { operationId: 'input', target, roleRevision: 2, outcome: 'materialized' as const };
+  await restored.reconcile('succession', { ...evidence, nativeEvidence: positive(witness) });
+  await restored.clearMutation(target, () => true); expect(restored.coverageAvailable(target)).toBe(false);
+  await restored.reconcile('succession', { ...evidence, nativeEvidence: positive(witness, 'R') });
+  await restored.clearMutation(target, () => true); expect(restored.coverageAvailable(target)).toBe(true);
+});
+it('does not attribute concurrent ordinary effects to a prepared first-input marker', async () => {
+  const { path, store } = await setup(), witness = prepared();
+  await store.markMutation(target, 'input'); await store.begin('succession', input(), witness); await store.markPreparedMutation(target, 'input');
+  await store.markMutation(target, 'other'); await store.settle('succession', 'input', 'unknown');
+  const restored = new SessionSuccessionContextStore(path); await restored.ready;
+  await restored.reconcile('succession', { operationId: 'input', target, roleRevision: 2, outcome: 'materialized', nativeEvidence: positive(witness, 'R') });
+  await restored.clearMutation(target, () => true); expect(restored.coverageAvailable(target)).toBe(false);
+});
+
+
+it('retains updated empty handles but never initializes an input with an uncertain outcome', async () => {
+  const { store, path } = await setup();
+  const handle = { providerId: target.providerId, sessionId: target.nativeSessionId, opaque: '{"effort":"high"}' };
+  expect(store.canInitializeEmpty(target)).toBe(true);
+  await store.reserveResumeHandle(target);
+  await store.retainResumeHandle(target, handle);
+  const restored = new SessionSuccessionContextStore(path); await restored.ready;
+  expect(restored.forTarget(target)?.resumeHandle).toEqual(handle);
+  expect(restored.canInitializeEmpty(target)).toBe(true);
+  await restored.begin('succession', input(), prepared());
+  expect(restored.canInitializeEmpty(target)).toBe(false);
+  const cold = new SessionSuccessionContextStore(path); await cold.ready;
+  expect(cold.canInitializeEmpty(target)).toBe(false);
+  await cold.retainResumeHandle(target, handle);
+  expect(cold.canInitializeEmpty(target)).toBe(false);
+});
+it('accepts empty initialization after definite rejection, but not lost native mutation coverage', async () => {
+  const { store, path, dispatcher } = await setup();
+  await dispatcher.dispatch(input(), admitted, async () => ({ outcome: 'rejected' }));
+  expect(store.canInitializeEmpty(target)).toBe(true);
+  await store.markMutation(target, 'setting');
+  const restored = new SessionSuccessionContextStore(path); await restored.ready;
+  expect(restored.canInitializeEmpty(target)).toBe(false);
+});
+it('validates retained empty handle identity and reserves its full bounded encoding', async () => {
+  const { store } = await setup();
+  const handle = { providerId: target.providerId, sessionId: target.nativeSessionId, opaque: 'settings' };
+  await expect(store.retainResumeHandle(target, handle)).rejects.toThrow(/reserv/);
+  await store.reserveResumeHandle(target);
+  expect(Number(store.forTarget(target)?.resumeReservedBytes)).toBeGreaterThanOrEqual(16384);
+  await expect(store.retainResumeHandle(target, { ...handle, sessionId: 'other' })).rejects.toThrow(/identity/);
+  await expect(store.retainResumeHandle(target, { ...handle, opaque: 'x'.repeat(16385) })).rejects.toThrow();
+  await store.retainResumeHandle(target, handle);
+  expect(Number(store.forTarget(target)?.resumeReservedBytes)).toBeLessThan(16384);
+});
+
+it('keeps confirmed recovery configuration after materialization without reinitializing input', async () => {
+  const { store, path } = await setup(), witness = prepared();
+  await store.reserveResumeHandle(target);
+  await store.begin('succession', input(), witness);
+  await store.settle('succession', 'input', 'accepted');
+  await store.reconcile('succession', { operationId: 'input', target, roleRevision: 2, outcome: 'materialized', nativeEvidence: positive(witness, 'R') });
+  const handle = { providerId: target.providerId, sessionId: target.nativeSessionId, opaque: '{"effort":"medium","permission":"acceptEdits"}' };
+  await store.retainResumeHandle(target, handle);
+  const cold = new SessionSuccessionContextStore(path); await cold.ready;
+  expect(cold.forTarget(target)?.resumeHandle).toEqual(handle);
+  expect(cold.canInitializeEmpty(target)).toBe(false);
+  const substituted = JSON.parse(positive(witness, 'R'));
+  substituted.proof.nativeInputId = 'different-native-record';
+  await expect(cold.reconcile('succession', { operationId: 'input', target, roleRevision: 2, outcome: 'materialized', nativeEvidence: JSON.stringify(substituted) })).rejects.toThrow(/cannot be replaced/);
 });

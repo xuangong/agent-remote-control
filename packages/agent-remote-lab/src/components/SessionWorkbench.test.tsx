@@ -100,3 +100,14 @@ it('reopens a collapsed runtime notice group when the same search result is requ
   expect(toggle.getAttribute('aria-expanded')).toBe('true');
   expect(container.querySelector(target)?.textContent).toContain('Second runtime notice');
 });
+
+it('offers the supplied Handoff only on a synchronized writable Session View', async () => {
+  const handoffSession = vi.fn();
+  const ready = await render(<SessionWorkbench state={replicaState} sessionStatus="ready" actions={{ handoffSession }} />);
+  const handoff = [...ready.querySelectorAll('button')].find(button => button.textContent === 'Handoff');
+  expect(handoff).toBeDefined(); await act(async () => handoff!.click()); expect(handoffSession).toHaveBeenCalledOnce();
+  for (const props of [{ readOnly: true }, { draftOnly: true }, { sessionStatus: 'catching_up' as const }]) {
+    const blocked = await render(<SessionWorkbench state={replicaState} sessionStatus="ready" actions={{ handoffSession }} {...props} />);
+    expect([...blocked.querySelectorAll('button')].some(button => button.textContent === 'Handoff')).toBe(false);
+  }
+}, 5000);

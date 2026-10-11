@@ -9,7 +9,7 @@ import WebSocket, { WebSocketServer } from 'ws';
 import { createHostBroker, type RemoteHostBrokerState } from '../../agent-remote-hosted/src/broker.js';
 import { PROTOCOL_VERSION, type ServerMessage, type TpmWork } from '@orchardworks/agent-remote-protocol';
 import { createRemoteHostUplinkClient, createAgentRemoteHttpServer } from '@orchardworks/agent-remote-relay';
-import type { AgentSession, AgentSessionConfig, AgentCapabilities, AgentInputAcceptance, ProviderStreamItem } from '@orchardworks/agent-provider-sdk';
+import type { AgentSession, AgentSessionConfig, AgentCapabilities, AgentInputAcceptance, AgentMessageOptions, ProviderStreamItem } from '@orchardworks/agent-provider-sdk';
 import { serializeAgentPreparedTextInput, parseAgentPreparedTextInput, AGENT_NATIVE_EVIDENCE_REASONS, type AgentPreparedTextInput, type AgentSessionNativeEvidence, type AgentEmptyCreationResult } from '@orchardworks/agent-provider-sdk';
 import { directoryOperationId } from './directory-mutation.js';
 import { createAgentHostRuntime } from './host.js';
@@ -29,16 +29,18 @@ class Native implements AgentSession {
  async dispose(){this.disposals++;this.stop?.();}
 }
 class EvidenceNative extends Native {
+ override async runtimeInfo(){return {...await super.runtimeInfo(), persistence:{providerId:this.providerId,sessionId:this.id,opaque:'original complete handle'}};}
  epoch = 0; preparations = 0; inspections = 0; captures = 0; dispatches = 0; materialized = false; unresolved = false;
  dispatchFailure = false; afterInspect = () => {}; beforeCapture = () => {};
  nativeEvidence: AgentSessionNativeEvidence = {
-  availability: () => ({ status: 'configured', version: 1 }),
+  availability: () => ({ status: 'configured', version: 2 }),
+  inspectReadiness: async () => ({ cwd: this.cwd, idle: !this.unresolved, pendingInputs: this.unresolved ? 1 : 0, pendingInteractions: 0, activeChildren: 0 }),
   captureValidity: () => { this.beforeCapture(); this.captures++; if (this.unresolved) throw new Error('unresolved native input'); return { epoch: this.epoch } as never; },
   isCurrent: token => (token as unknown as {epoch:number}).epoch === this.epoch,
   prepareInput: async (parts, options) => {
    this.preparations++; const text=(parts[0] as {text:string}).text;
-   return parseAgentPreparedTextInput(serializeAgentPreparedTextInput({ version:1,providerId:this.providerId,nativeSessionId:this.id,nativeInputId:`U-${this.preparations}`,cwd:this.cwd,
-    store:{authorityId:'authority',storeId:'store'},parts:[{type:'text',text}],content:{encoding:'utf-8',bytes:Buffer.byteLength(text),sha256:createHash('sha256').update(text).digest('hex')},
+   return parseAgentPreparedTextInput(serializeAgentPreparedTextInput({ version: 2, providerId:this.providerId,nativeSessionId:this.id,inputId:`U-${this.preparations}`,cwd:this.cwd,
+    authority:{kind:'trusted-service' as const,authorityId:'authority',namespaceId:'store'},parts:[{type:'text',text}],content:{encoding:'utf-8',bytes:Buffer.byteLength(text),sha256:createHash('sha256').update(text).digest('hex')},
     selections:{model:'provider/model',agent:'agent',...(options?.delivery ? {delivery:'immediate' as const} : {})} }));
   },
   dispatchInput: async witness => { this.dispatches++;this.sent.push(witness.parts[0].text);this.unresolved=true;this.epoch++;if(this.dispatchFailure)throw new Error('response lost'); },
@@ -46,7 +48,7 @@ class EvidenceNative extends Native {
    this.inspections++;this.afterInspect();
    if(!this.materialized)return {status:'unknown',code:'native_evidence_readback_missing',reason:AGENT_NATIVE_EVIDENCE_REASONS.native_evidence_readback_missing};
    const {delivery:_delivery,...selections}=witness.selections;
-   return {status:'materialized',proof:{version:1,providerId:this.providerId,nativeSessionId:this.id,nativeInputId:witness.nativeInputId,cwd:this.cwd,store:witness.store,
+   return {status:'materialized',proof:{version: 2, providerId:this.providerId,nativeSessionId:this.id,inputId:witness.inputId,nativeInputId:witness.inputId,cwd:this.cwd,authority:witness.authority,
     witnessSha256:createHash('sha256').update(serializeAgentPreparedTextInput(witness)).digest('hex'),contentSha256:witness.content.sha256,nativeSelectionsSha256:createHash('sha256').update(JSON.stringify(selections)).digest('hex')}};
   },
  };
@@ -59,21 +61,21 @@ async function fixture(enableTpm=false,enrollment=false,setup?:(root:string)=>Pr
  const grants:Array<{nativeSessionId:string;sourceNativeSessionId:string}>=[];let beforeGrants=async()=>{};
  await setup?.(root);
  const sessions=new Map<string,Native>([['A',evidence?new EvidenceNative('A',root):new Native('A',root)]]);const tpmConfigurations:AgentSessionConfig[]=[];const snapshotConfigurations:AgentSessionConfig[]=[];let creates=0,sourceCreates=0,supported=true,bounded=true,coverage=true,busy='',loseTpmCreation=false,loseSourceCreation=false;let beforeSourceCreate=async()=>{};let beforeIdleCreate=async()=>{};
- const creationOptions: unknown[]=[],workspaceReads:string[]=[];let evidenceCreates=0,allowIdleRelease=false;let creationResult: AgentEmptyCreationResult | undefined; let beforeNativeInspect=async(_id:string)=>{};
- const providerEvidence = evidence ? { availability:()=>({status:'configured' as const,version:1 as const}),async createEmpty(config:Pick<AgentSessionConfig,'sessionId'|'cwd'>):Promise<AgentEmptyCreationResult>{evidenceCreates++;expect(config).toEqual({sessionId:directoryOperationId('handoff:create'),cwd:root});await beforeIdleCreate();sessions.set('B',new EvidenceNative('B',root));return creationResult ?? {status:'created',handle:{providerId:'fixture',sessionId:'B',opaque:'original complete handle'}};} } : undefined;
+ const creationOptions: unknown[]=[],resumeOptions: unknown[]=[],workspaceReads:string[]=[];let evidenceCreates=0,allowIdleRelease=false;let creationResult: AgentEmptyCreationResult | undefined; let beforeNativeInspect=async(_id:string)=>{};
+ const providerEvidence = evidence ? { availability:()=>({status:'configured' as const,version:2 as const}),async createEmpty(config:Pick<AgentSessionConfig,'sessionId'|'cwd'>):Promise<AgentEmptyCreationResult>{evidenceCreates++;expect(config).toEqual({sessionId:directoryOperationId('handoff:create'),cwd:root,selectionSourceSessionId:'A'});await beforeIdleCreate();sessions.set('B',new EvidenceNative('B',root));return creationResult ?? {status:'created',handle:{providerId:'fixture',sessionId:'B',opaque:'original complete handle'}};} } : undefined;
  const otherSession = new Native('other-A', root, 'other');
  const additional = snapshots ? [{adapter:{descriptor:{providerId:'other',displayName:'Other'},createSession:async()=>{throw new Error('unexpected');},resumeSession:async()=>{throw new Error('unexpected');},readSessionHistory:async()=>({entries:[]})},directory:{providerId:'other',list:()=>[],workspaces:()=>[],create:async()=>{throw new Error('unexpected');},open:async(id:string)=>{if(id!=='other-A')throw new Error('missing source');return otherSession;},sessionWorkspace:async(id:string)=>{if(id!=='other-A')throw new Error('missing source');return root;},sourceReferences:async()=>[],setSourceBindingReader:()=>{},close:()=>otherSession.dispose()}}] : [];
  const createHost=()=>createAgentHostRuntime({...(evidence?{idleGraceMs:20}:{}),...(policy?{executionPolicy:{defaultWorkspace:root,allowedWorkspaceRoots:[root],lockPermissions:false}}:{}),...(enableTpm?{tpm:{stateDirectory:join(root,'tpm'),tickMs:20}}:{}),succession:{controllerId:'controller',...(enrollment?{enrollment:true as const}:{}),stateDirectory:root,native:{
  supports:async()=>supported,supportsBoundedProjection:async()=>bounded,
  inspect:async source=>{await beforeNativeInspect(source.nativeSessionId);if(!coverage)throw new Error('Native queue and work coverage unavailable');return {cwd:root,idle:source.nativeSessionId!==busy,managed:true,pendingInputs:0,pendingInteractions:0,activeChildren:0};},
  createIdle:async()=>{creates++;await beforeIdleCreate();const id=String.fromCharCode(65+creates);sessions.set(id,new Native(id,root));return ref(id);},reconcileDelivery:async()=>undefined,
- }},registrations:[{adapter:{nativeEvidence:providerEvidence,descriptor:{providerId:'fixture',displayName:'Fixture',...(enableTpm?{sessionExtensions:{instructions:true,tools:true}}:{})},createSession:async()=>{throw new Error('unexpected');},resumeSession:async()=>{throw new Error('unexpected');},readSessionHistory:async()=>({entries:[]})},directory:{providerId:'fixture',canReleaseSession:()=>allowIdleRelease,supportsSourceReferences:true,supportsBoundedSourceCreate:async()=>true,list:()=>[],workspaces:()=>[],create:async config=>{if(config.sourceNativeSessionId){await beforeSourceCreate();const id=`source-${++sourceCreates}`;sessions.set(id,new Native(id,root));grants.push({nativeSessionId:id,sourceNativeSessionId:config.sourceNativeSessionId});if(loseSourceCreation)throw new Error('Unknown native creation');return id;}if(!enableTpm){if(!snapshots)throw new Error('unexpected');snapshotConfigurations.push(config);const id=`snapshot-${snapshotConfigurations.length}`;sessions.set(id,new Native(id,root));return id;}tpmConfigurations.push(config);const id=`tpm-${tpmConfigurations.length}`;sessions.set(id,new Native(id,root));if(loseTpmCreation)throw new Error('Native creation response was lost');return id;},open:async(id,options)=>{creationOptions.push(options?.nativeCreation);return sessions.get(id)!;},sessionWorkspace:async(id)=>{workspaceReads.push(id);return root;},sourceReferences:async()=>{await beforeGrants();return structuredClone(grants);},setSourceBindingReader:()=>{},close:async()=>{await Promise.all([...sessions.values()].map(session=>session.dispose()));}}}, ...additional]});
+ }},registrations:[{adapter:{nativeEvidence:providerEvidence,descriptor:{providerId:'fixture',displayName:'Fixture',...(enableTpm?{sessionExtensions:{instructions:true,tools:true}}:{})},createSession:async()=>{throw new Error('unexpected');},resumeSession:async()=>{throw new Error('unexpected');},readSessionHistory:async()=>({entries:[]})},directory:{providerId:'fixture',canReleaseSession:()=>allowIdleRelease,supportsSourceReferences:true,supportsBoundedSourceCreate:async()=>true,list:()=>[],workspaces:()=>[],create:async config=>{if(config.sourceNativeSessionId){await beforeSourceCreate();const id=`source-${++sourceCreates}`;sessions.set(id,new Native(id,root));grants.push({nativeSessionId:id,sourceNativeSessionId:config.sourceNativeSessionId});if(loseSourceCreation)throw new Error('Unknown native creation');return id;}if(!enableTpm){if(!snapshots)throw new Error('unexpected');snapshotConfigurations.push(config);const id=`snapshot-${snapshotConfigurations.length}`;sessions.set(id,new Native(id,root));return id;}tpmConfigurations.push(config);const id=`tpm-${tpmConfigurations.length}`;sessions.set(id,new Native(id,root));if(loseTpmCreation)throw new Error('Native creation response was lost');return id;},open:async(id,options)=>{creationOptions.push(options?.nativeCreation);resumeOptions.push(options?.resumeOptions);return sessions.get(id)!;},sessionWorkspace:async(id)=>{workspaceReads.push(id);return root;},sourceReferences:async()=>{await beforeGrants();return structuredClone(grants);},setSourceBindingReader:()=>{},close:async()=>{await Promise.all([...sessions.values()].map(session=>session.dispose()));}}}, ...additional]});
  let host=createHost();
  const createServer=()=>createAgentRemoteHttpServer(host.relay,{websocketAuthorizer:{authenticate:()=>({subject:'owner'}),authorize:()=>true}});
  let server=createServer();let address=await server.listen(0);
  const restart=async()=>{await server.close();await host.close();for(const [id,previous] of sessions){const next=evidence?new EvidenceNative(id,root):new Native(id,root);next.sent.push(...previous.sent);sessions.set(id,next);}host=createHost();server=createServer();address=await server.listen(0);};
  const control=async(action:string,body:unknown)=>{const result=await host.control({method:'POST',path:`/remote/succession/${action}`,sessionId:'owner',body:JSON.stringify(body)});return {status:result.status,payload:JSON.parse(result.body)};};
- return {root,sessions,creationOptions,workspaceReads,allowIdleRelease:()=>{allowIdleRelease=true;},evidenceCreates:()=>evidenceCreates,creationResult:(value:AgentEmptyCreationResult)=>{creationResult=value;},beforeNativeInspect:(hook:typeof beforeNativeInspect)=>{beforeNativeInspect=hook;},snapshotConfigurations,providerDescriptors:[{providerId:'fixture',displayName:'Fixture'},...(snapshots?[{providerId:'other',displayName:'Other'}]:[])],get host(){return host;},restart,loseSourceCreation:()=>{loseSourceCreation=true;},sourceCreates:()=>sourceCreates,beforeIdleCreate:(hook:()=>Promise<void>)=>{beforeIdleCreate=hook;},beforeSourceCreate:(hook:()=>Promise<void>)=>{beforeSourceCreate=hook;},loseTpmCreation:(value:boolean)=>{loseTpmCreation=value;},grants,beforeGrants:(hook:()=>Promise<void>)=>{beforeGrants=hook;},tpmConfigurations,control,attach:async(id:string)=>JSON.parse((await host.control({method:'POST',path:'/remote/attach',sessionId:id,body:JSON.stringify({providerId:'fixture',nativeSessionId:id})})).body),get url(){return address.url;},creates:()=>creates,unsupported:()=>{supported=false;},unbounded:()=>{bounded=false;},unavailableCoverage:()=>{coverage=false;},busy:(id:string)=>{busy=id;},close:async()=>{await server.close();await host.close();await rm(root,{recursive:true,force:true});}};
+ return {root,sessions,providerEvidence,creationOptions,resumeOptions,workspaceReads,allowIdleRelease:()=>{allowIdleRelease=true;},evidenceCreates:()=>evidenceCreates,creationResult:(value:AgentEmptyCreationResult)=>{creationResult=value;},beforeNativeInspect:(hook:typeof beforeNativeInspect)=>{beforeNativeInspect=hook;},snapshotConfigurations,providerDescriptors:[{providerId:'fixture',displayName:'Fixture'},...(snapshots?[{providerId:'other',displayName:'Other'}]:[])],get host(){return host;},restart,loseSourceCreation:()=>{loseSourceCreation=true;},sourceCreates:()=>sourceCreates,beforeIdleCreate:(hook:()=>Promise<void>)=>{beforeIdleCreate=hook;},beforeSourceCreate:(hook:()=>Promise<void>)=>{beforeSourceCreate=hook;},loseTpmCreation:(value:boolean)=>{loseTpmCreation=value;},grants,beforeGrants:(hook:()=>Promise<void>)=>{beforeGrants=hook;},tpmConfigurations,control,attach:async(id:string)=>JSON.parse((await host.control({method:'POST',path:'/remote/attach',sessionId:id,body:JSON.stringify({providerId:'fixture',nativeSessionId:id})})).body),get url(){return address.url;},creates:()=>creates,unsupported:()=>{supported=false;},unbounded:()=>{bounded=false;},unavailableCoverage:()=>{coverage=false;},busy:(id:string)=>{busy=id;},close:async()=>{await server.close();await host.close();await rm(root,{recursive:true,force:true});}};
 }
 const request={operationId:'handoff',roleId:'role',expectedRevision:1,from:ref('A')};
 test.each([false,true])('Host native evidence dispatch and independent readback preserve uncertainty, lost response %s',async lost=>{
@@ -88,7 +90,7 @@ test.each([false,true])('Host native evidence dispatch and independent readback 
   const sent=await sendOverWebSocket(f.url,attached.agentId,'continue',id);
   expect(sent.type).toBe(lost?'protocol_error':'command_acknowledged');expect(b.dispatches).toBe(1);expect(b.preparations).toBe(1);
   const contextPath=join(f.root,'contexts','context.json');const before=await readFile(contextPath,'utf8');
-  expect(JSON.parse(before).attachments[0].deliveries[0].preparedInput.witness.nativeInputId).toBe('U-1');
+  expect(JSON.parse(before).attachments[0].deliveries[0].preparedInput.witness.inputId).toBe('U-1');
   const captures=b.captures;
   expect((await f.control('reconcile',{operationId:'handoff'})).payload.materialized).toBe(false);
   expect(await readFile(contextPath,'utf8')).toBe(before);
@@ -451,6 +453,26 @@ test('authenticated broker enrollment derives a role, freezes associations and c
     expect(transport.saved().associations?.freezes[0]).toMatchObject({released:'committed',projection:{role:{current:ref('B')}}});
     const state=JSON.parse(await readFile(join(f.root,'roles','state.json'),'utf8'));
     expect(state).toMatchObject({version:7,roles:[{associationAuthority:transport.authority,enrollments:[{request:{operationId:input.operationId}}]}]});
+  } finally {await transport.close();await f.close();}
+});
+
+test('public description validates authority and source, exposes blocking facts and never creates a candidate', async () => {
+  const f=await fixture(false,true), transport=await enrollmentTransport(f);
+  const source={providerId:'fixture',nativeSessionId:'A'};
+  try {
+    expect((await transport.action('describe',source,'viewer')).status).toBe(403);
+    expect((await transport.action('describe',{...source,ready:true})).status).toBe(400);
+    expect((await transport.action('describe',{providerId:'fixture'})).status).toBe(400);
+    expect(await (await transport.action('describe',source)).json()).toMatchObject({role:{current:ref('A'),revision:1},targets:[{providerId:'fixture',displayName:'Fixture'}],eligibility:{status:'ready'}});
+    f.busy('A');
+    expect(await (await transport.action('describe',source)).json()).toMatchObject({targets:[{providerId:'fixture'}],eligibility:{status:'blocked',code:'succession_not_quiescent'}});
+    expect(f.creates()).toBe(0);expect(transport.saved().associations?.freezes ?? []).toEqual([]);
+    f.busy('');
+    const operation={...source,operationId:'described-handoff',expectedRevision:1};
+    expect((await transport.action('prepare',operation)).status).toBe(200);
+    expect((await transport.action('commit',{operationId:operation.operationId})).status).toBe(200);
+    expect(await (await transport.action('describe',source)).json()).toMatchObject({role:{current:ref('B'),revision:2},eligibility:{status:'unavailable',code:'session_superseded'}});
+    expect(f.creates()).toBe(1);
   } finally {await transport.close();await f.close();}
 });
 
@@ -1375,4 +1397,105 @@ test('authenticated committed output invariant errors preserve complete evidence
     expect(retained.roles[0].operations[0]).toEqual(record);expect(retained.roles[0].role).toEqual(role);
     expect(record.phase).toBe('committed');expect(f.creates()).toBe(1);
   }finally{await transport.close();await f.close();}
+},10000);
+
+
+async function acceptanceTpmWork(f: Awaited<ReturnType<typeof fixture>>) {
+  const created = await f.host.control({ method: 'POST', path: '/remote/tpm/create', body: JSON.stringify({
+    providerId: 'fixture', mainNativeSessionId: 'A', operationId: 'acceptance-tpm', requirement: 'Track one consultation',
+  }) });
+  expect(created.status).toBe(200); const work = JSON.parse(created.body) as TpmWork;
+  const current = async () => JSON.parse((await f.host.control({ method: 'GET', path: `/remote/tpm/work?id=${work.id}` })).body) as TpmWork;
+  await expect.poll(async () => (await current()).outbox?.[0]?.status).toBe('accepted');
+  const tools = f.tpmConfigurations[0]!.tools!;
+  const call = async (name: string, input: unknown) => JSON.parse(await tools.find(tool => tool.name === name)!.execute(input));
+  const todo = (await current()).todo!;
+  await call('update_todo_step', { revision: todo.revision, stepId: todo.steps[0]!.id, status: 'in_progress', note: 'Discussing the requirement' });
+  const input = { operationId: 'consult-once', todoStepId: todo.steps[0]!.id, purpose: 'consultation', text: 'Assess this work once' };
+  return { work, current, call, input };
+}
+
+test.each([false, true])('real Host TPM ordinary late acceptance releases the original handoff gate, lost response %s', async lost => {
+  const f = await fixture(true);
+  try {
+    const tpm = await acceptanceTpmWork(f), a = f.sessions.get('A')!; let notify: AgentMessageOptions['onAcceptance'];
+    a.sendMessage = async (text: string, options?: AgentMessageOptions) => {
+      a.sent.push(text); notify = options?.onAcceptance;
+      if (lost) throw new Error('Ordinary native response lost');
+    };
+    const receipt = await tpm.call('send_main_message', tpm.input);
+    await expect.poll(async () => (await tpm.current()).outbox!.find(item => item.id === receipt.id)?.status).toBe(lost ? 'unknown' : 'accepted');
+    expect((await f.control('prepare', { ...request, operationId: 'blocked' })).payload.phase).toBe('rejected');
+    expect(f.creates()).toBe(0);
+    notify!({ disposition: 'queued' });
+    await expect.poll(async () => (await tpm.current()).outbox!.find(item => item.id === receipt.id)?.acceptance).toBe('queued');
+    expect((await f.control('prepare', { ...request, operationId: 'still-queued' })).payload.phase).toBe('rejected');
+    expect(f.creates()).toBe(0);
+    notify!({ disposition: 'started' });
+    await expect.poll(async () => (await tpm.current()).outbox!.find(item => item.id === receipt.id)?.acceptance).toBe('started');
+    const persisted = JSON.parse(await readFile(join(f.root, 'tpm', `${tpm.work.id}.json`), 'utf8'));
+    expect(persisted.work.outbox.find((item: { id: string }) => item.id === receipt.id)).toMatchObject({ status: 'accepted', acceptance: 'started', resolvedTarget: ref('A'), roleRevision: 1 });
+    expect((await f.control('prepare', request)).payload.phase).toBe('ready');
+    expect(f.creates()).toBe(1); expect(a.sent).toHaveLength(1);
+    expect(await tpm.call('send_main_message', tpm.input)).toMatchObject({ id: receipt.id, acceptance: 'started' });
+    expect(a.sent).toHaveLength(1);
+  } finally { await f.close(); }
+}, 10000);
+
+test.each([false, true])('real Host TPM prepared late execution evidence releases the next handoff gate, lost response %s', async lost => {
+  const f = await fixture(true, false, undefined, false, true, true);
+  try {
+    const tpm = await acceptanceTpmWork(f);
+    expect((await f.control('prepare', request)).payload.phase).toBe('ready');
+    expect((await f.control('commit', { operationId: 'handoff', expectedRevision: 1 })).payload.phase).toBe('committed');
+    const b = f.sessions.get('B') as EvidenceNative; b.dispatchFailure = lost;
+    const receipt = await tpm.call('send_main_message', tpm.input);
+    await expect.poll(async () => (await tpm.current()).outbox!.find(item => item.id === receipt.id)?.status).toBe(lost ? 'unknown' : 'accepted');
+    expect(b.dispatches).toBe(1); expect(b.preparations).toBe(1); expect(b.sent[0]).toContain('Original requirement');
+    const next = { ...request, from: ref('B'), expectedRevision: 2 };
+    expect((await f.control('prepare', { ...next, operationId: 'unresolved-next' })).payload.phase).toBe('rejected');
+    b.materialized = true; b.unresolved = false; let started = false;
+    const inspect = b.nativeEvidence.inspectInput;
+    b.nativeEvidence.inspectInput = async witness => {
+      const result = await inspect(witness);
+      return started && result.status === 'materialized' ? { ...result, execution: { disposition: 'started', nativeExecutionId: 'exact-R' } } : result;
+    };
+    expect((await f.control('reconcile', { operationId: 'handoff' })).payload.materialized).toBe(true);
+    expect((await tpm.current()).outbox!.find(item => item.id === receipt.id)?.acceptance).toBeUndefined();
+    expect((await f.control('prepare', { ...next, operationId: 'materialized-without-execution' })).payload.phase).toBe('rejected');
+    expect(f.evidenceCreates()).toBe(1);
+    started = true;
+    expect((await f.control('reconcile', { operationId: 'handoff' })).payload.materialized).toBe(true);
+    await expect.poll(async () => (await tpm.current()).outbox!.find(item => item.id === receipt.id)?.acceptance).toBe('started');
+    const persisted = JSON.parse(await readFile(join(f.root, 'tpm', `${tpm.work.id}.json`), 'utf8'));
+    expect(persisted.work.outbox.find((item: { id: string }) => item.id === receipt.id)).toMatchObject({ status: 'accepted', acceptance: 'started', resolvedTarget: ref('B'), roleRevision: 2 });
+    let nextCreates = 0;
+    f.providerEvidence!.createEmpty = async config => {
+      expect(config).toMatchObject({ cwd: f.root, selectionSourceSessionId: 'B' }); nextCreates++;
+      f.sessions.set('C', new EvidenceNative('C', f.root));
+      return { status: 'created', handle: { providerId: 'fixture', sessionId: 'C', opaque: 'exact C handle' } };
+    };
+    expect((await f.control('prepare', { ...next, operationId: 'next' })).payload.phase).toBe('ready');
+    expect(nextCreates).toBe(1); expect(b.dispatches).toBe(1); expect(b.preparations).toBe(1);
+    expect(await tpm.call('send_main_message', tpm.input)).toMatchObject({ id: receipt.id, acceptance: 'started' });
+    expect(b.sent).toHaveLength(1); expect(f.sessions.get('C')!.sent).toEqual([]);
+  } finally { await f.close(); }
+}, 10000);
+
+
+test('Host grants empty initialization only before input and withdraws it on cold unknown restore', async () => {
+ const f=await fixture(false,false,undefined,false,true,true);
+ try {
+  expect((await f.control('prepare',request)).payload.phase).toBe('ready');
+  expect(f.resumeOptions).toContainEqual({initializeEmpty:true});
+  expect((await f.control('commit',{operationId:'handoff',expectedRevision:1})).payload.phase).toBe('committed');
+  await f.restart(); await f.attach('B');
+  expect(f.resumeOptions.at(-1)).toEqual({initializeEmpty:true});
+  const b=f.sessions.get('B') as EvidenceNative;b.dispatchFailure=true;
+  const attached=await f.attach('B');
+  expect((await sendOverWebSocket(f.url,attached.agentId,'uncertain','00000000-0000-4000-8000-000000000945')).type).toBe('protocol_error');
+  await f.restart(); await f.attach('B');
+  expect(f.resumeOptions.at(-1)).toEqual({initializeEmpty:false});
+  expect(f.evidenceCreates()).toBe(1);
+ } finally {await f.close();}
 },10000);

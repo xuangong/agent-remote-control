@@ -1,8 +1,28 @@
 import { expect, test } from 'vitest';
-import { isPrimaryRole, isPreparedSuccession, isSuccessionRequest } from './session-succession.js';
+import { isPrimaryRole, isPreparedSuccession, isSuccessionRequest, isSuccessionDescription, isSuccessionActionResult } from './session-succession.js';
 
 const source = { controllerId: 'host', providerId: 'codex', nativeSessionId: 'A' };
 const workspace = { controllerId: 'host', canonicalCwd: '/workspace' };
+const role = { id: 'role', revision: 1, origin: source, current: source, workspace };
+
+test('strict public handoff descriptions separate availability from current target identity', () => {
+  const description = { role, targets: [{ providerId: 'codex', displayName: 'Codex' }], eligibility: { status: 'ready' } };
+  expect(isSuccessionDescription(description)).toBe(true);
+  expect(isSuccessionDescription({ ...description, eligibility: { status: 'blocked', code: 'working', reason: 'Wait for the active turn.' } })).toBe(true);
+  expect(isSuccessionDescription({ ...description, eligibility: { status: 'unavailable', code: 'missing', reason: 'Native evidence is unavailable.' } })).toBe(true);
+  for (const value of [{ ...description, freeze: {} }, { ...description, role: { ...role, revision: 0 } },
+    { ...description, targets: [{ providerId: 'codex', displayName: 'Codex', ready: true }] },
+    { ...description, eligibility: { status: 'blocked' } }, { ...description, eligibility: { status: 'ready', reserved: true } }]) expect(isSuccessionDescription(value)).toBe(false);
+});
+
+test('strict public action results retain the original receipt and optional resolved locator', () => {
+  const record = { operationId: 'op', roleId: 'role', expectedRevision: 1, from: source, phase: 'preparing', startedAt: 'now', updatedAt: 'now' };
+  const result = { record, role };
+  expect(isSuccessionActionResult(result)).toBe(true);
+  expect(isSuccessionActionResult({ ...result, locator: { hostId: 'public-host', providerId: 'codex', nativeSessionId: 'B' } })).toBe(true);
+  expect(isSuccessionActionResult({ ...result, locator: { nativeSessionId: 'B' } })).toBe(false);
+  expect(isSuccessionActionResult({ ...result, freeze: {} })).toBe(false);
+});
 
 test('accepts complete role identities without treating placement as identity', () => {
   expect(isPrimaryRole({ id: 'role', revision: 1, origin: source, current: source, workspace })).toBe(true);

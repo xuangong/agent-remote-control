@@ -1,8 +1,39 @@
 # Same-host session succession
 
-Status: Implementation in progress. Durable roles and source binding primitives
-and scoped Host/Relay/TPM integrations are implemented. Recovery and native evidence
-remain incomplete; production storage and product integration are still pending.
+Status: the common/product implementation and prior OpenCode baseline are
+complete. Codex, Claude Code and Copilot evidence implementations are now frozen
+and reviewed; final provider-stage workspace gates are in progress. See the
+[current provider validation](../../handoffs/2026-10-11-succession-provider-validation.md)
+and the separately frozen [prior baseline](../../handoffs/2026-10-11-session-succession-validation.md).
+Provider pairs remain capability-gated. This specification does not imply deployment.
+
+## Coordinated upgrade and complexity limit
+
+The user can coordinate upgrades of every Controller and browser. This feature
+does not require mixed-version operation, rolling upgrades, old-writer support,
+or compatibility with intermediate formats produced only during development.
+This decision supersedes earlier compatibility requirements in this document
+and its implementation notes; it does not authorize deployment or data deletion.
+
+Use the existing stable role reference and view slot. One authoritative view
+document owns view bindings and layout; ordinary navigation and succession use
+the same explicit view IDs and the existing Session View attachment path.
+Track and Ask reference those owners instead of rediscovering them from native
+session IDs. Native connection reuse continues to use native session identity.
+Do not build a generic transaction, migration, workflow or second binding system.
+
+Import existing user state once at upgrade, preserving draft/attachment owner
+pointers, preferences and relationships. After successful import, only the new
+model is read and written. Keep recoverable original data until import succeeds;
+do not maintain live dual writes or permanent legacy fallbacks. Existing unknown
+operations remain unknown, with their original recipients and operation IDs.
+
+The active composition document owns tab-local layout and view binding. Durable
+view-origin records retain only stable storage-owner pointers and local preferences,
+so closing a tab cannot orphan persisted images or display settings. They are not
+a second layout model. Ordinary fixed views reuse their saved origin; history and
+independent retained views stay distinct. Roles still recover through authorized
+replay. Text drafts and Ask open state keep their existing session lifetime.
 
 ## Approved architecture review adjustments
 
@@ -78,9 +109,10 @@ native writers outside ARC.
 Product composition separates stable pane identity, ordinary/history target
 intent and actual native attachment. Immutable creation/delivery provenance must
 not be replaced by a navigation projection. Existing Ask/Side targets keep their
-own full native locator even when their main source changes provider. Recovery
-belongs to a bounded set of product documents, not to the shared Session View
-renderer or a new generic transaction/workflow system.
+own full native locator even when their main source changes provider. View
+metadata recovery belongs to the authoritative composition document, outside
+the shared Session View renderer. Separate content stores retain stable owner
+pointers and do not participate in every role replacement.
 
 ## Outcome and scope
 
@@ -110,7 +142,40 @@ The confirmed scope is product-level succession, with a Session View action and
 progress surface. It is not deployment, generic workflow scheduling, machine
 migration or takeover of an independently running CLI.
 
-## Current source and boundaries
+Codex, Claude Code, Copilot and OpenCode implement native evidence v2 on their
+existing transports. Same-provider and cross-provider admission requires the
+complete source/target capability and authoritative readiness, not provider names
+or discovery alone. The tested native versions and evidence limits are recorded
+in the provider validation report. OpenCode retains its reviewed 1.18.x
+configuration from 1.18.18, disabled background subagents, current native selections
+and connected observation; source references require its explicit callback plugin.
+
+The witness's adapter `inputId` is distinct from the native user-record
+`nativeInputId`; positively correlated execution adds `nativeExecutionId`.
+Authorities may be trusted services or owned runtimes, without claiming global
+ownership. Claude/Copilot empty descriptors require explicit Host permission to
+initialize their original identity. Missing history never grants that permission.
+Original creation evidence and the latest confirmed recovery configuration stay
+separate. Host retains bounded confirmed handles through existing readback and
+one observation, including after materialization; no second native observer or
+fake initial prompt is introduced.
+
+The OpenCode adapter identifies a trusted service namespace, validates exact
+empty-session selections and preserves the original native result. Exact U
+materialization and its non-summary assistant child R have separate meanings:
+R proves execution started, not task completion. The optional invocation callback
+is local execution plumbing and never enters public operations, fingerprints or
+persisted witnesses. Losing process-local ordinary evidence across restart does
+not become a successful outcome merely because the native session is now idle.
+
+Product Handoff retains one tab-local operation before preparation. Cancellation
+intention remains sticky across failed replies and reload, so a late ready result
+cannot trigger commit from that page. An authoritative committed result still
+recovers forward. An unresolved dialog may be hidden and reopened through Recover
+Handoff without losing its original identity; generic 409/404 is not proof that
+creation was never admitted. This adds no replacement-operation or replay path.
+
+## Pre-succession baseline
 
 - `packages/agent-remote-lab/src/session-forks.ts`: `/fork` copies a bounded,
   normalized history projection. It does not export full native context.
@@ -413,11 +478,12 @@ navigation entry. Do not discard a separate draft or an explicit historical pane
 Resolve collisions visibly when independent drafts cannot be merged losslessly.
 Only remove a duplicate after its state has been retained.
 
-Persist a last-applied role revision and a recoverable mapping for local state.
-Do not mark the whole projection complete until all required stores are applied.
-On storage denial, retain the in-memory correct target and show synchronization
-failure; never restore A as current from stale storage. A stale server snapshot
-cannot reverse a newer committed revision. Shared revisions synchronize identity;
+Persist the committed role revision and view metadata in the authoritative
+composition document. Normal replacement must not migrate draft contents or
+coordinate legacy composition, Track and Ask companion documents. On storage
+denial, retain the in-memory correct target and show synchronization failure;
+never restore A as current from stale storage. A stale server snapshot cannot
+reverse a newer committed revision. Shared revisions synchronize identity;
 each device preserves its own layout.
 
 Unsent primary drafts can follow the role. Inputs already being transmitted or
@@ -428,15 +494,21 @@ Old ordinary session links may follow a known authorized lineage; explicit histo
 links open A. Shared links do not automatically gain access to B. Unauthorized
 viewers receive the existing access boundary without successor identity leakage.
 
-## Compatibility, cost and release
+## Upgrade, cost and release
 
-Legacy fixed bindings remain readable and unchanged until an explicit succession.
-Keep old prompt-edit sibling behavior and native ownership takeover tests intact.
-Advertise a versioned complete succession capability, not a UI-only flag. Mixed
-versions reject unsupported coordination before creating B. Durable formats need
-version checks: an older writer must refuse incompatible role state rather than
-overwrite it. Retain backups and a documented forward recovery/rollback boundary
-before any separately authorized deployment.
+Ship one supported contract across Controller, Gateway and App in a coordinated
+upgrade. Advertise the complete provider capability and synchronize public
+schemas, fixtures and compatibility metadata. Outdated clients must refresh or
+upgrade before mutating the new state; do not implement mixed-version handoff.
+No old/new reader cross-product or intermediate-format support is a release gate.
+
+Retain ordinary fixed references, prompt-edit siblings and native ownership
+takeover as product semantics, not legacy compatibility. Version the new durable
+state explicitly and validate it in the new reader. Import actual existing user
+data once with failure recovery; do not silently reinterpret retained native
+evidence. Before a separately authorized upgrade, account for unfinished
+succession operations and preserve unknown outcomes. Keep a pre-upgrade backup;
+do not run an old writer against new state as a rollback strategy.
 
 Resolve roles through an in-memory Controller index invalidated by revision;
 avoid a disk read per token/tool chunk, eager reads of all predecessor histories,

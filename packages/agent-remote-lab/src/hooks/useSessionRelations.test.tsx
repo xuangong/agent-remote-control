@@ -4,6 +4,7 @@ import { render } from '../test/setup.js';
 import { ForkStore, referenceForkContext } from '../session-forks.js';
 import { SessionDirectoryClient } from '../directory-client.js';
 import { sessionKey } from '../session-tree.js';
+import { createCompositionDocument, createCompositionSlot, createAskOwner } from '../session-composition.js';
 import { useAskConversations } from './useAskConversations.js';
 import { useSessionRelations } from './useSessionRelations.js';
 import type { SessionRelation } from '@orchardworks/agent-remote-hosted/session-relations';
@@ -69,22 +70,22 @@ it('reports an unavailable directory before an explicit Ask open can accidentall
 
 
 it('lets the first Ask toggle hide an automatically discovered entry and the next toggle restore it', async () => {
+  const document = askDocument('http://localhost/u/alice/');
   let ask!: ReturnType<typeof useAskConversations>;
-  function Harness() { ask = useAskConversations('http://localhost/u/alice/', {} as never); return null; }
+  function Harness() { ask = useAskConversations(document, {} as never); return null; }
   await render(<Harness />);
   await act(async () => ask.store.setSharedRelations([relation('ask')]));
-  expect(ask.entryFor(source).record?.remote).toBe(true);
-  expect(ask.isEnabled(source)).toBe(true);
-  await act(async () => ask.toggle(source));
-  expect(ask.isEnabled(source)).toBe(false);
-  await act(async () => ask.toggle(source));
-  expect(ask.isEnabled(source)).toBe(true);
+  expect(ask.entryFor(source, 'source-ask').record?.remote).toBe(true);
+  expect(ask.isEnabled(source, 'source-ask')).toBe(true);
+  await act(async () => ask.toggle(source, 'source-ask'));
+  expect(ask.isEnabled(source, 'source-ask')).toBe(false);
+  await act(async () => ask.toggle(source, 'source-ask'));
+  expect(ask.isEnabled(source, 'source-ask')).toBe(true);
 });
 
 it('keeps a pending Ask relation recovery alive when focus moves to a sibling view', async () => {
   const baseUrl = 'http://localhost/';
-  sessionStorage.setItem(`agent-remote-ask:${baseUrl}:open-windows`, JSON.stringify([sessionKey(source)]));
-  localStorage.setItem(`agent-remote-ask:${baseUrl}:enabled:${sessionKey(source)}`, 'true');
+  const document = askDocument(baseUrl, true);
   let finish!: () => void;
   let relationSignal: AbortSignal | undefined;
   const ready = new Promise<void>(resolve => { finish = resolve; });
@@ -99,19 +100,26 @@ it('keeps a pending Ask relation recovery alive when focus moves to a sibling vi
   const directory = new SessionDirectoryClient(baseUrl, attach);
   const sides = new ForkStore('relation-focus');
   let ask!: ReturnType<typeof useAskConversations>, refresh!: () => Promise<void>, focus!: (key: string) => void;
+  const transport = {} as never;
   function Harness() {
     const [current, setCurrent] = useState('main'); focus = setCurrent;
-    ask = useAskConversations(baseUrl, {} as never, directory, 'host');
+    ask = useAskConversations(document, transport, directory, 'host');
     refresh = useSessionRelations(baseUrl, true, sides, ask.store, current);
     return null;
   }
   await render(<Harness />);
-  await act(async () => { ask.restore(source, refresh); });
+  await act(async () => { ask.restore(source, refresh, 'source-ask'); });
   await act(async () => { focus('side'); });
   expect(relationSignal?.aborted).toBe(false);
-  expect(ask.entryFor(source).error).toBeUndefined();
+  expect(ask.entryFor(source, 'source-ask').error).toBeUndefined();
   await act(async () => { finish(); });
-  expect(ask.entryFor(source)).toMatchObject({ attached: true, restoring: false });
+  expect(ask.entryFor(source, 'source-ask')).toMatchObject({ attached: true, restoring: false });
   expect(attach).toHaveBeenCalledTimes(1);
   expect(fetchRelations).toHaveBeenCalledTimes(1);
 });
+
+function askDocument(scope: string, open = false) {
+  const slot = createCompositionSlot('source-view', source, scope), document = createCompositionDocument(scope, [slot]);
+  document.asks.push({ ...createAskOwner(slot, scope), id: 'source-ask', open, ...(open ? { enabled: true } : {}) });
+  return document;
+}

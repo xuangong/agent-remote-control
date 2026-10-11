@@ -94,21 +94,25 @@ describe('session wire negotiation', () => {
   });
   it('acknowledges the exact planning command after provider completion', async () => {
     const { agent } = fakeAgent();
-    let finish!: () => void;
+    let started!: () => void, finish!: () => void;
+    const dispatchStarted = new Promise<void>((resolve) => { started = resolve; });
+    const providerCompletion = new Promise<void>((resolve) => { finish = resolve; });
     const selected: boolean[] = [];
-    agent.setPlanning = async (active) => { selected.push(active); await new Promise<void>((resolve) => { finish = resolve; }); };
+    agent.setPlanning = async (active) => { selected.push(active); started(); await providerCompletion; };
     const output: Array<Record<string, unknown>> = [];
     const wire = createSessionWire(agent, (json) => output.push(JSON.parse(json) as Record<string, unknown>));
-    await wire.receive(JSON.stringify({ protocolVersion: '1.7.0', type: 'negotiate' }));
-    output.length = 0;
-    const submitted = wire.receive(JSON.stringify({ protocolVersion: '1.7.0', type: 'set_planning', payload: { requestId: 'planning-1', operationId: OPERATION_ID, agentId: 'agent-1', active: true } }));
-    await Promise.resolve();
-    expect(selected).toEqual([true]);
-    expect(output).toEqual([]);
-    finish();
-    await submitted;
-    expect(output).toEqual([{ protocolVersion: '1.7.0', type: 'command_acknowledged', payload: { requestId: 'planning-1', agentId: 'agent-1', command: 'set_planning' } }]);
-    wire.close();
+    let submitted: Promise<void> | undefined;
+    try {
+      await wire.receive(JSON.stringify({ protocolVersion: '1.7.0', type: 'negotiate' }));
+      output.length = 0;
+      submitted = wire.receive(JSON.stringify({ protocolVersion: '1.7.0', type: 'set_planning', payload: { requestId: 'planning-1', operationId: OPERATION_ID, agentId: 'agent-1', active: true } }));
+      await Promise.race([dispatchStarted, submitted.then(() => { throw new Error('Planning command completed before provider dispatch.'); })]);
+      expect(selected).toEqual([true]);
+      expect(output).toEqual([]);
+      finish();
+      await submitted;
+      expect(output).toEqual([{ protocolVersion: '1.7.0', type: 'command_acknowledged', payload: { requestId: 'planning-1', agentId: 'agent-1', command: 'set_planning' } }]);
+    } finally { finish(); wire.close(); await submitted; }
   });
 
   it('rewraps a retained business result with each transport request identity', async () => {

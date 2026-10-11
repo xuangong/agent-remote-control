@@ -1,13 +1,21 @@
-import { mkdtemp, rm, readFile, writeFile, mkdir } from 'node:fs/promises';
+import { mkdtemp, rm, readFile, open } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, expect, test } from 'vitest';
+import { afterEach, expect, test, vi } from 'vitest';
 import { type RelationChangeReservation } from '@orchardworks/agent-remote-protocol';
 import { sourceParticipantId } from './source-participant.js';
 import { SessionSuccessionStore } from './session-succession-store.js';
 import { SessionSourceBindings } from './session-source-binding.js';
+vi.mock('node:fs/promises', async importOriginal => {
+  const original = await importOriginal<typeof import('node:fs/promises')>();
+  return { ...original, open: vi.fn(original.open) };
+});
 const dirs: string[] = [];
-afterEach(async () => { await Promise.all(dirs.splice(0).map(dir => rm(dir, { recursive: true, force: true }))); });
+afterEach(async () => {
+  const original = await vi.importActual<typeof import('node:fs/promises')>('node:fs/promises');
+  vi.mocked(open).mockReset(); vi.mocked(open).mockImplementation(original.open);
+  await Promise.all(dirs.splice(0).map(dir => rm(dir, { recursive: true, force: true })));
+});
 const ref = (nativeSessionId: string, providerId = 'p') => ({ controllerId: 'controller', providerId, nativeSessionId });
 const authority = { version: 1 as const, origin: 'https://relay.example', issuer: 'issuer', namespace: 'tenant', ownerSubject: 'owner' };
 async function fixture() {
@@ -91,12 +99,12 @@ test('unlink preserves a signed native A cursor and relink restores the full cur
 
 test('failed reservation publication leaves the overlay and read gate unchanged', async () => {
   const f = await fixture(), path = join(f.directory, 'state.json'), saved = await readFile(path, 'utf8');
-  await rm(path); await mkdir(path);
-  await expect(f.store.reserveRelationChange(f.reservation, f.store.generation)).rejects.toThrow();
+  vi.mocked(open).mockRejectedValueOnce(new Error('Cannot create temporary state file'));
+  await expect(f.store.reserveRelationChange(f.reservation, f.store.generation)).rejects.toMatchObject({ code: 'succession_publication_rejected' });
   expect(f.store.readerAssociationState(f.reader).pending).toBe(false);
   expect(f.store.relationChange('unlink')).toBeUndefined();
   expect(f.store.read('role').participants).toEqual([f.participant, f.tpm]);
-  await rm(path, { recursive: true }); await writeFile(path, saved);
+  expect(await readFile(path, 'utf8')).toBe(saved);
 });
 test('reservation while authorization awaits closes the native dispatch boundary', async () => {
   const f = await fixture(); let release!: () => void, entered!: () => void, dispatched = false;

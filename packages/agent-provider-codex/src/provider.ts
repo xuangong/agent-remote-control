@@ -24,6 +24,7 @@ import { readCodexSessionPage, type CodexSessionListOptions, type CodexSessionPa
 import type { CodexSharedRecoveryPlan, CodexSharedRecoverySettings } from './shared-recovery.js';
 import { windowsCodexSharedEndpoint } from './platform/windows/daemon.js';
 import { sessionLookupError } from './session-lookup-error.js';
+import { CodexProviderNativeEvidence, codexEvidenceAuthority, codexEvidenceJson } from './native-evidence.js';
 
 export interface CodexAppServerProviderOptions {
   executable?: string;
@@ -40,6 +41,9 @@ export interface CodexAppServerProviderOptions {
 }
 
 export class CodexAppServerProvider implements AgentProviderAdapter {
+  /** Native thread/start creates a nonempty UUID. An injected producer has no declared bound. */
+  get createdSessionIdMaxLength(): number | undefined { return this.options.spawn ? undefined : 36; }
+  readonly nativeEvidence: CodexProviderNativeEvidence;
   readonly descriptor: AgentProviderDescriptor = {
     sessionExtensions: { instructions: true, tools: true },
     providerId: 'codex',
@@ -50,6 +54,7 @@ export class CodexAppServerProvider implements AgentProviderAdapter {
   private readonly sessions = new Set<CodexAppServerSession>();
 
   constructor(private readonly options: CodexAppServerProviderOptions = {}) {
+    this.options = { ...options };
     this.takeover = new CodexSessionTakeover(options.env?.CODEX_HOME ?? process.env.CODEX_HOME ?? join(homedir(), '.codex'), undefined, options.onDiagnostic);
     if (options.connectionMode !== undefined && !['private', 'shared'].includes(options.connectionMode)) throw new Error('Codex connection mode must be private or shared.');
     if (options.socketPath !== undefined && (options.connectionMode !== 'shared' || !isAbsolute(options.socketPath))) {
@@ -60,6 +65,17 @@ export class CodexAppServerProvider implements AgentProviderAdapter {
     }
     if (options.connectionMode === 'shared' && options.spawn) throw new Error('Shared Codex cannot also spawn a private runtime.');
     if (process.platform === 'win32' && options.connectionMode === 'shared' && options.socketPath) throw new Error('Windows shared Codex selects its daemon through CODEX_HOME; remove the Unix socket override.');
+    this.nativeEvidence = new CodexProviderNativeEvidence({
+      authority: codexEvidenceAuthority(options.env?.CODEX_HOME ?? process.env.CODEX_HOME ?? join(homedir(), '.codex')),
+      allowed: () => !options.restrictedNative,
+      transport: cwd => this.createTransport(cwd),
+      diagnostic: error => options.onDiagnostic?.(JSON.stringify({ event: 'codex_empty_creation_failed',
+        message: error instanceof Error ? error.message : String(error) })),
+      sourceSettings: async id => {
+        for (const session of this.sessions) { const settings = await session.nativeEvidenceSourceSettings(id); if (settings) return settings; }
+        return undefined;
+      },
+    });
   }
 
   async inspectSessionOwner(nativeSessionId: string): Promise<{generation: string} | undefined> {
@@ -127,6 +143,11 @@ export class CodexAppServerProvider implements AgentProviderAdapter {
   }
 
   async resumeSession(handle: AgentPersistenceHandle, extensions: AgentSessionExtensions = {}): Promise<AgentSession> {
+    const metadata: unknown = JSON.parse(handle.opaque);
+    if (isRecord(metadata) && 'nativeEvidenceAuthority' in metadata && codexEvidenceJson(metadata.nativeEvidenceAuthority) !== codexEvidenceJson(
+      codexEvidenceAuthority(this.options.env?.CODEX_HOME ?? process.env.CODEX_HOME ?? join(homedir(), '.codex')))) {
+      throw new Error('Codex successor belongs to a different native profile.');
+    }
     const cwd = readPersistenceCwd(handle.opaque);
     const transport = await this.createTransport(cwd);
     try {

@@ -1,121 +1,86 @@
 import { expect, it } from 'vitest';
-import { TrackedSessionViews, type TrackedSessionView } from './tracked-session-views.js';
-import type { SessionEntry } from './session-tree.js';
-import { sessionKey } from './session-tree.js';
+import { TrackedSessionViews } from './tracked-session-views.js';
+import { createCompositionDocument, createCompositionSlot, parseComposition } from './session-composition-model.js';
 
-const parent: SessionEntry = { hostId: 'host-a', providerId: 'codex', nativeSessionId: 'parent', title: 'Project' };
-const child: SessionEntry = { ...parent, nativeSessionId: 'child', parentNativeSessionId: 'parent', title: 'Review' };
-const view = (primary: SessionEntry): TrackedSessionView => ({ primary, selections: {} });
+function fixture() {
+  const slots = ['parent', 'child', 'side', 'nested'].map(id => createCompositionSlot(id,
+    { hostId: 'host', providerId: 'codex', nativeSessionId: id, title: id }, 'scope'));
+  const document = createCompositionDocument('scope', slots);
+  document.tracks = [{ entryId: 'track-parent', slotId: 'parent' }, { entryId: 'track-child', slotId: 'child' }];
+  const views = new TrackedSessionViews(document, () => {});
+  return { document, views };
+}
 
-it('keeps separately tracked members of the same family independent', () => {
-  const views = new TrackedSessionViews();
-  const tracked = [parent, child];
-  views.select(parent);
-  views.remember(view(child), tracked, tracked);
-  views.select(child);
-  views.remember(view(parent), tracked, tracked);
-  expect(views.get(parent)?.primary.nativeSessionId).toBe('child');
-  expect(views.get(child)?.primary.nativeSessionId).toBe('parent');
+it('remembers the explicit track even when its visible primary is another member', () => {
+  const { views } = fixture();
+  views.select('track-parent'); views.remember({ primarySlot: 'child', selections: {}, focus: 'child' });
+  views.select('track-child'); views.remember({ primarySlot: 'parent', selections: {}, focus: 'parent' });
+  expect(views.get('track-parent')).toMatchObject({ primarySlot: 'child', focus: 'child' });
+  expect(views.get('track-child')).toMatchObject({ primarySlot: 'parent', focus: 'parent' });
 });
 
-it('does not overwrite the previous track when another Host opens the same native ID', () => {
-  const other = { ...parent, hostId: 'host-b' };
-  const views = new TrackedSessionViews();
-  const tracked = [parent, other];
-  views.select(parent);
-  views.remember(view(child), tracked, [parent, child, other]);
-  views.remember(view(other), tracked, [parent, child, other]);
-  expect(views.get(parent)?.primary.nativeSessionId).toBe('child');
-  expect(views.get(other)?.primary.hostId).toBe('host-b');
+it('does not invent a track owner from a native session or family', () => {
+  const { views, document } = fixture();
+  views.remember({ primarySlot: 'child', selections: {} });
+  expect(document.tracks.every(track => track.view === undefined)).toBe(true);
 });
 
-it('associates a directly opened descendant with its nearest tracked ancestor', () => {
-  const nested = { ...child, nativeSessionId: 'nested', parentNativeSessionId: 'child' };
-  const views = new TrackedSessionViews();
-  views.remember(view(nested), [parent], [parent, child, nested]);
-  expect(views.get(parent)?.primary.nativeSessionId).toBe('nested');
+it('drops a removed track layout without deleting the view or its data owners', () => {
+  const { views, document } = fixture();
+  const owners = structuredClone(document.slots[0]!.owners);
+  views.select('track-parent'); views.remember({ primarySlot: 'side', selections: {} });
+  views.retain(['track-child']); views.bind('track-parent', 'parent');
+  expect(views.get('track-parent')).toBeUndefined();
+  expect(document.slots[0]!.owners).toEqual(owners);
 });
 
-it('drops view memory when a session is untracked instead of reviving it when tracked again', () => {
-  const views = new TrackedSessionViews();
-  views.select(parent);
-  views.remember(view(child), [parent], [parent, child]);
-  views.retain([]);
-  views.retain([parent]);
-  expect(views.get(parent)).toBeUndefined();
+it('unlinks a side in every remembered layout while retaining its independent path', () => {
+  const { views } = fixture();
+  views.remember({ primarySlot: 'parent', selections: { parent: 'side', side: 'nested' }, focus: 'nested', anchor: 'nested' }, 'track-parent');
+  views.remember({ primarySlot: 'side', selections: { side: 'nested' }, focus: 'nested' }, 'track-child');
+  views.unlink('parent', 'side');
+  expect(views.get('track-parent')).toMatchObject({ selections: { parent: null, side: 'nested' }, focus: 'parent', anchor: 'parent' });
+  expect(views.get('track-child')).toMatchObject({ selections: { side: 'nested' }, focus: 'nested' });
 });
 
-it('removes an unlinked side from every saved track without breaking its own descendants', () => {
-  const side = { ...parent, nativeSessionId: 'side', title: 'Side' };
-  const nested = { ...parent, nativeSessionId: 'nested', title: 'Nested' };
-  const [a, b, c] = [parent, side, nested].map(sessionKey);
-  const views = new TrackedSessionViews();
-  const tracked = [parent, side];
-  views.select(parent);
-  views.remember({ primary: parent, selections: { [a!]: b!, [b!]: c! }, focus: c, anchor: c }, tracked, tracked);
-  views.select(side);
-  views.remember({ primary: side, selections: { [b!]: c! }, focus: c, anchor: c }, tracked, tracked);
-  views.unlink(parent, side);
-  expect(views.get(parent)).toEqual({ primary: parent, selections: { [a!]: null, [b!]: c! }, focus: a, anchor: a });
-  expect(views.get(side)).toEqual({ primary: side, selections: { [b!]: c! }, focus: c, anchor: c });
+it('restores Track memory from the same document as its view bindings', () => {
+  const { views, document } = fixture();
+  views.select('track-parent'); views.remember({ primarySlot: 'child', selections: {}, focus: 'child' });
+  const saved = parseComposition(JSON.parse(JSON.stringify(document)), 'scope');
+  const restored = new TrackedSessionViews(saved, () => {});
+  expect(restored.get('track-parent')).toEqual(views.get('track-parent'));
+  expect(saved.selectedTrack).toBe('track-parent');
 });
 
-it('keeps a different selected sibling when another side is unlinked', () => {
-  const side = { ...parent, nativeSessionId: 'side' };
-  const a = sessionKey(parent), b = sessionKey(side), other = 'other-side';
-  const views = new TrackedSessionViews();
-  const saved = { primary: parent, selections: { [a]: other, [b]: 'nested' }, focus: other, anchor: other };
-  views.remember(saved, [parent], [parent]);
-  views.unlink(parent, side);
-  expect(views.get(parent)).toEqual(saved);
+it('keeps two independent views of one native session through a role replacement', () => {
+  const { views, document } = fixture();
+  document.slots[0]!.intent = { kind: 'fixed', target: document.slots[1]!.intent.target };
+  views.remember({ primarySlot: 'parent', selections: {}, focus: 'parent' }, 'track-parent');
+  views.remember({ primarySlot: 'child', selections: {}, focus: 'child' }, 'track-child');
+  expect(views.get('track-parent')?.primary.nativeSessionId).toBe('child');
+  expect(views.get('track-child')?.primary.nativeSessionId).toBe('child');
+  document.slots[0]!.intent = { kind: 'fixed', target: { hostId: 'host', native: { providerId: 'codex', nativeSessionId: 'next' } } };
+  expect(views.get('track-parent')?.primary.nativeSessionId).toBe('next');
+  expect(views.get('track-child')?.primary.nativeSessionId).toBe('child');
 });
 
-it('retains stable track snapshots and rejects a restore over a newer same-tab selection', () => {
-  const views = new TrackedSessionViews();
-  views.select(parent); views.remember(view(child), [parent], [parent, child]);
-  const before = views.snapshot();
-  views.select(child);
-  expect(views.restore(before, before.editRevision)).toBe(false);
-  expect(views.snapshot().selected).toBe(sessionKey(child));
-  const fresh = new TrackedSessionViews();
-  expect(fresh.restore(before, 0)).toBe(true);
-  expect(fresh.get(parent)?.primary.nativeSessionId).toBe('child');
-  before.views[0]!.view.primary.title = 'External mutation';
-  expect(fresh.get(parent)?.primary.title).toBe('Review');
-});
-it('keeps stable view owners through remember and retain after a native replacement', () => {
-  const views = new TrackedSessionViews();
-  const a = { hostId: 'host', providerId: 'codex', nativeSessionId: 'A', agentId: 'runtime-A', title: 'A' };
-  const b = { ...a, nativeSessionId: 'B', agentId: 'runtime-B', title: 'B' };
-  views.remember({ primary: a, selections: {} }, [a], [a]); views.bindOwner(a, 'entry-A');
-  views.bindOwner(b, 'entry-A'); views.select(b, 'entry-A');
-  views.remember({ primary: b, selections: {}, focus: sessionKey(b) }, [b], [b]);
-  views.retain([b]);
-  expect(views.getByOwner('entry-A')).toMatchObject({ primary: b, focus: sessionKey(b) });
-  expect(views.get(b)).toEqual(views.getByOwner('entry-A'));
-  expect(views.snapshot().selected).toBe('entry-A');
+it('rejects unknown view references instead of falling back to a native match', () => {
+  const { views } = fixture();
+  expect(() => views.bind('invalid', 'missing')).toThrow('Tracked view is unavailable.');
+  expect(() => views.select('invalid')).toThrow('Tracked view is unavailable.');
+  expect(() => views.remember({ primarySlot: 'missing', selections: {} }, 'track-parent')).toThrow('unavailable view');
 });
 
-it('restores the parent owner when a remembered mobile child is the primary view', () => {
-  const parent = { hostId: 'host', providerId: 'codex', nativeSessionId: 'parent', title: 'Parent' };
-  const child = { ...parent, nativeSessionId: 'child', parentNativeSessionId: 'parent' };
-  const views = new TrackedSessionViews();
-  views.bindOwner(parent, 'stable-parent'); views.select(parent);
-  views.remember({ primary: child, selections: {}, focus: sessionKey(child) }, [parent], [parent, child]);
-  const restored = new TrackedSessionViews();
-  expect(restored.restore(views.snapshot(), 0)).toBe(true);
-  expect(restored.get(parent)?.primary).toEqual(child);
-  restored.retain([parent]);
-  expect(restored.getByOwner('stable-parent')?.focus).toBe(sessionKey(child));
-});
-
-it('removes a projected self-link while retaining the duplicate view and its independent descendants', () => {
-  const a = { ...parent, nativeSessionId: 'A' }, b = { ...parent, nativeSessionId: 'B' }, c = { ...parent, nativeSessionId: 'C' };
-  const views = new TrackedSessionViews(); views.select(a);
-  views.remember({ primary: a, selections: { [sessionKey(a)]: sessionKey(b), [sessionKey(b)]: sessionKey(c) }, focus: sessionKey(c) }, [a, b], [a, b, c]);
-  views.select(b); views.remember({ primary: b, selections: { [sessionKey(b)]: sessionKey(c) }, focus: sessionKey(c) }, [a, b], [a, b, c]);
-  views.projectOwner(a, b, 'stable-A');
-  expect(views.getByOwner('stable-A')?.selections[sessionKey(b)]).toBeNull();
-  expect(views.getByOwner('stable-A')?.focus).toBe(sessionKey(b));
-  expect(views.getByOwner(sessionKey(b))?.selections[sessionKey(b)]).toBe(sessionKey(c));
+it('retains the independent layout when the outer Track list deduplicates a successor', () => {
+  const { views, document } = fixture();
+  document.retained.push({ slot: 'child', against: 'parent' });
+  views.remember({ primarySlot: 'parent', selections: {}, focus: 'parent' }, 'track-parent');
+  views.select('track-child');
+  views.remember({ primarySlot: 'child', selections: { child: 'nested' }, focus: 'nested' });
+  views.retain(['track-parent']);
+  expect(document.selectedTrack).toBe('track-child');
+  expect(views.get('track-child')).toMatchObject({ primarySlot: 'child', selections: { child: 'nested' }, focus: 'nested' });
+  expect(views.getForSlot('child')).toEqual(views.get('track-child'));
+  views.remember({ primarySlot: 'child', selections: {}, focus: 'child' });
+  expect(views.getForSlot('parent')).toMatchObject({ primarySlot: 'parent', selections: {}, focus: 'parent' });
 });

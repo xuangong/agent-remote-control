@@ -329,7 +329,7 @@ test.each(['role-temporary', 'role-directory', 'context-temporary', 'context-dir
   const input = { operationId: 'input', roleId: 'role', roleRevision: 2, target: ref('B'), text: 'work' };
   const { quotedSessionContextPrefix } = await import('@orchardworks/agent-remote-protocol');
   const text = quotedSessionContextPrefix({ id: attachment.operationId, sourceSession: 'A', capturedAt: attachment.capturedAt, text: '[]' }) + input.text;
-  const witness = { version: 1 as const, providerId: 'fixture', nativeSessionId: 'B', nativeInputId: 'U', cwd: directory, store: { authorityId: 'authority', storeId: 'store' }, parts: [{ type: 'text' as const, text }] as const,
+  const witness = { version: 2 as const, providerId: 'fixture', nativeSessionId: 'B', inputId: 'U', cwd: directory, authority: { kind: 'trusted-service' as const, authorityId: 'authority', namespaceId: 'store' }, parts: [{ type: 'text' as const, text }] as const,
     content: { encoding: 'utf-8' as const, bytes: Buffer.byteLength(text), sha256: createHash('sha256').update(text).digest('hex') }, selections: {} };
   if (kind.startsWith('role')) {
     await role.createRole({ id: 'role', revision: 1, origin: ref('A'), current: ref('A'), workspace: { controllerId: 'host', canonicalCwd: directory } });
@@ -364,7 +364,7 @@ test.each(['temporary', 'directory'] as const)('prepared dispatcher never execut
   await store.attach({operationId:'op',roleId:'role',roleRevision:2,source:ref('A'),target:ref('B'),capturedAt:'2026-10-10T00:00:00Z',boundary:{epoch:'e',seq:1},text:'[]',itemCount:0});
   let preparations = 0, effects = 0;
   const prepare = async ({text}:{text:string}) => {
-    preparations++; return {version:1 as const,providerId:'fixture',nativeSessionId:'B',nativeInputId:'U',cwd:directory,store:{authorityId:'authority',storeId:'store'},parts:[{type:'text' as const,text}] as const,
+    preparations++; return {version: 2 as const, providerId:'fixture',nativeSessionId:'B',inputId:'U',cwd:directory,authority:{kind:'trusted-service' as const,authorityId:'authority',namespaceId:'store'},parts:[{type:'text' as const,text}] as const,
       content:{encoding:'utf-8' as const,bytes:Buffer.byteLength(text),sha256:createHash('sha256').update(text).digest('hex')},selections:{}};
   };
   const dispatch = async () => { effects++; return {outcome:'accepted' as const}; };
@@ -376,7 +376,7 @@ test.each(['temporary', 'directory'] as const)('prepared dispatcher never execut
   vi.mocked(fs.open).mockImplementation(original.open);
   const restored = new SessionSuccessionContextStore(directory);await restored.ready;
   if(phase==='directory') {
-    expect(await new SessionSuccessionInputDispatcher(restored).dispatch(input,async()=>{},dispatch,prepare)).toMatchObject({state:'unknown',preparedInput:{witness:{nativeInputId:'U'}}});
+    expect(await new SessionSuccessionInputDispatcher(restored).dispatch(input,async()=>{},dispatch,prepare)).toMatchObject({state:'unknown',preparedInput:{witness:{inputId:'U'}}});
     expect(preparations).toBe(1);expect(effects).toBe(0);
   } else expect(restored.read('op').deliveries).toEqual([]);
 });

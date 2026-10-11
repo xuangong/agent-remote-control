@@ -155,3 +155,26 @@ it('exposes validated TPM Host methods through the shared control client', async
     expect(requests.map(row => row.path)).toEqual(['/u/tenant/v1/remote/hosts/host/tpm', '/u/tenant/v1/remote/hosts/host/tpm/work?id=work', '/u/tenant/v1/remote/hosts/host/tpm/create', '/u/tenant/v1/remote/hosts/host/tpm/action']);
   } finally { server.closeAllConnections(); await new Promise<void>(resolve => server.close(() => resolve())); }
 }, 10000);
+
+it('keeps Handoff description and all action requests scoped to one Host and operation', async () => {
+  const requests: Array<{ path: string; body: unknown }> = [];
+  const server = createServer(async (request, response) => {
+    let body = ''; for await (const chunk of request) body += String(chunk);
+    requests.push({ path: request.url!, body: JSON.parse(body) });
+    const source = { controllerId: 'controller', providerId: 'opencode', nativeSessionId: 'A' };
+    const role = { id: 'role', revision: 8, origin: source, current: source, workspace: { controllerId: 'controller', canonicalCwd: '/workspace' } };
+    const value = request.url!.endsWith('/describe') ? { role, targets: [{ providerId: 'opencode', displayName: 'OpenCode' }], eligibility: { status: 'ready' } }
+      : { role, record: { operationId: 'same-op', roleId: 'role', expectedRevision: 8, from: source, targetProviderId: 'opencode', phase: 'ready', startedAt: 'now', updatedAt: 'now' } };
+    response.setHeader('content-type', 'application/json'); response.end(JSON.stringify(value));
+  });
+  await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
+  try {
+    const client = new SessionDirectoryClient(`http://127.0.0.1:${(server.address() as AddressInfo).port}/u/owner/`, fetch, 'my-host');
+    await client.describeSuccession('opencode', 'A');
+    await client.prepareSuccession({ operationId: 'same-op', providerId: 'opencode', nativeSessionId: 'A', expectedRevision: 8, targetProviderId: 'opencode' });
+    for (const action of ['commit', 'status', 'reconcile', 'cancel'] as const) await client.successionAction(action, 'same-op');
+    expect(requests.map(item => item.path)).toEqual(['describe', 'prepare', 'commit', 'status', 'reconcile', 'cancel'].map(action => `/u/owner/v1/remote/hosts/my-host/succession/${action}`));
+    expect(requests[0]!.body).toEqual({ providerId: 'opencode', nativeSessionId: 'A' });
+    expect(requests.slice(2).map(item => item.body)).toEqual(Array(4).fill({ operationId: 'same-op' }));
+  } finally { server.closeAllConnections(); await new Promise<void>(resolve => server.close(() => resolve())); }
+}, 5000);

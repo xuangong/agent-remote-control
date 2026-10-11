@@ -1,7 +1,7 @@
-import { OpenCodeSessionNativeEvidence, type OpenCodeNativeEvidenceVerifier } from './native-evidence.js';
+import { readOpenCodeInputResponse, OpenCodeSessionNativeEvidence, type OpenCodeNativeEvidenceVerifier } from './native-evidence.js';
 import { AgentOperationRejectedError, prepareAgentOperation } from '@orchardworks/agent-provider-sdk';
 import { randomBytes } from 'node:crypto';
-import { IMAGE_INPUT_CAPABILITIES, validateInteractionResponse, type AgentCapabilities, type AgentCommand, type AgentInputPart, type AgentInteractionRequest, type AgentInteractionResponse, type AgentMessageOptions, type AgentRuntimeInfo, type AgentSession, type AgentSessionNativeEvidence, type AgentSessionExtensions, type AgentStreamEvent, type ProviderObservation, type ProviderStreamItem } from '@orchardworks/agent-provider-sdk';
+import { IMAGE_INPUT_CAPABILITIES, validateInteractionResponse, type AgentInputAcceptance, type AgentCapabilities, type AgentCommand, type AgentInputPart, type AgentInteractionRequest, type AgentInteractionResponse, type AgentMessageOptions, type AgentRuntimeInfo, type AgentSession, type AgentSessionNativeEvidence, type AgentSessionExtensions, type AgentStreamEvent, type ProviderObservation, type ProviderStreamItem } from '@orchardworks/agent-provider-sdk';
 import type { Event, GlobalEvent, Message, Session } from '@opencode-ai/sdk/v2/client';
 import { canonicalDirectory, type OpenCodePersistence } from './provider.js';
 import { OpenCodeTransport } from './transport.js';
@@ -32,6 +32,8 @@ export class OpenCodeSession implements AgentSession {
   private nativeSession?: Session;
   private children: NonNullable<AgentRuntimeInfo['childSessions']> = [];
   private lastNativeUserId?: string;
+  private activeDescendants = 0;
+  private descendantsObserved = true;
   private streamConnected = false;
   private olderCursor?: string;
   private observed = false;
@@ -41,6 +43,7 @@ export class OpenCodeSession implements AgentSession {
   private activeTurnId: string | null = null;
   private active = false;
   private pendingInput?: string;
+  private readonly inputInvocations = new Map<string, { accepted?: AgentInputAcceptance; notify?: AgentMessageOptions['onAcceptance'] }>();
   private preparedInput = false;
   private pendingInputWhileRunning = false;
   private closed = false;
@@ -56,7 +59,7 @@ export class OpenCodeSession implements AgentSession {
   private readonly ready = new Promise<void>((resolve, reject) => { this.initialResolve = resolve; this.initialReject = reject; });
   private lastUsage = '';
   private lastTodos = '';
-  constructor(private readonly transport: OpenCodeTransport, readonly nativeId: string, private readonly config: OpenCodePersistence, private readonly extensions: AgentSessionExtensions, private readonly onClose: () => void, evidenceVerifier?: OpenCodeNativeEvidenceVerifier) {
+  constructor(private readonly transport: OpenCodeTransport, readonly nativeId: string, private readonly config: OpenCodePersistence, private readonly extensions: AgentSessionExtensions, private readonly onClose: () => void, private readonly evidenceVerifier?: OpenCodeNativeEvidenceVerifier, callbackCurrent?: () => boolean) {
     this.images = new OpenCodeImages(nativeId, { allowLocalFiles: transport.local });
     this.controls = new OpenCodeSettings(transport, nativeId, config.cwd, config);
     this.commands = new OpenCodeCommands(transport, nativeId, config.cwd);
@@ -64,13 +67,17 @@ export class OpenCodeSession implements AgentSession {
       cwd: config.cwd, nativeId, canonicalDirectory, messageId: () => this.messageId(), writable: () => this.writable(),
       currentSession: () => this.nativeSession,
       selections: () => ({ ...(config.model === undefined ? {} : { model: config.model }), ...(config.agent === undefined ? {} : { agent: config.agent }), ...(config.variant === undefined ? {} : { variant: config.variant }), ...(extensions.systemPrompt === undefined ? {} : { system: extensions.systemPrompt }) }),
-      canCapture: () => !this.closed && this.streamConnected && this.connection.state === 'connected' && !this.recovering && !this.recoveryDirty && !this.refreshTimer && !this.pendingInput && this.submitting.size === 0,
+      canInspect: () => this.descendantsObserved && !this.closed && this.streamConnected && this.connection.state === 'connected' && !this.recovering && !this.recoveryDirty && !this.refreshTimer && (!callbackCurrent || callbackCurrent()),
+      readiness: () => ({ cwd: config.cwd, idle: this.status === 'idle', pendingInputs: this.pendingInput ? 1 : 0, pendingInteractions: this.pending.size, activeChildren: this.activeDescendants }),
+      refreshReadiness: async () => { this.enqueue(() => this.refresh()); await this.queue; },
+      canCapture: () => this.descendantsObserved && (!callbackCurrent || callbackCurrent()) && !this.closed && this.streamConnected && this.connection.state === 'connected' && !this.recovering && !this.recoveryDirty && !this.refreshTimer && !this.pendingInput && this.submitting.size === 0,
       readable: () => !this.closed && this.streamConnected,
       reserveInput: id => { this.writable(); if (this.pendingInput) throw new AgentOperationRejectedError('native_evidence_admission', 'Native evidence input admission is unavailable.'); this.pendingInput = id; this.preparedInput = true; this.pendingInputWhileRunning = this.active; },
+      releaseInput: id => { if (this.preparedInput && this.pendingInput === id) { this.pendingInput = undefined; this.preparedInput = false; } },
       scheduleRefresh: () => this.scheduleRefresh(),
     });
     this.nativeEvidence = Object.freeze<AgentSessionNativeEvidence>({
-      availability: () => this.evidence.availability(), prepareInput: (parts, options) => this.evidence.prepareInput(parts, options),
+      availability: () => this.evidence.availability(), inspectReadiness: () => this.evidence.inspectReadiness(), prepareInput: (parts, options) => this.evidence.prepareInput(parts, options),
       dispatchInput: witness => this.evidence.dispatchInput(witness), inspectInput: witness => this.evidence.inspectInput(witness),
       captureValidity: () => this.evidence.captureValidity(), isCurrent: token => this.evidence.isCurrent(token),
     });
@@ -147,7 +154,7 @@ export class OpenCodeSession implements AgentSession {
     const sessionID = properties.sessionID ?? nested?.sessionID ?? (event.type.startsWith('session.') ? nested?.id : undefined);
     if (sessionID !== this.nativeId) {
       const info = properties.info as Session | undefined;
-      if (info?.parentID === this.nativeId || this.children.some(child => child.nativeSessionId === sessionID)) this.scheduleRefresh();
+      if (['session.created', 'session.updated', 'session.deleted'].includes(event.type) && info?.parentID === this.nativeId || this.children.some(child => child.nativeSessionId === sessionID)) this.scheduleRefresh();
       return;
     }
     if ('id' in event && typeof event.id === 'string') {
@@ -161,7 +168,7 @@ export class OpenCodeSession implements AgentSession {
     if (type === 'session.next.agent.switched' || type === 'session.next.model.switched') { this.scheduleRefresh(); return; }
     this.enqueue(() => this.applyEvent(event));
   }
-  private applyEvent(event: Event): void {
+  private async applyEvent(event: Event): Promise<void> {
     switch (event.type) {
       case 'message.updated': {
         const info = event.properties.info;
@@ -174,7 +181,10 @@ export class OpenCodeSession implements AgentSession {
           if ((this.pendingInputWhileRunning || this.active) && info.id === this.pendingInput) this.releaseOrdinaryInput();
         }
         this.publishTimeline(); this.publishUsage();
-        if (info.role === 'assistant' && info.error) this.failTurn(info.error, info.id);
+        if (info.role === 'assistant') {
+          await this.reconcileInputInvocations(info.parentID);
+          if (info.error) this.failTurn(info.error, info.id);
+        }
         break;
       }
       case 'message.part.updated': {
@@ -218,6 +228,7 @@ export class OpenCodeSession implements AgentSession {
     }
   }
   private async refresh(): Promise<void> {
+    await this.evidenceVerifier?.refresh(this.config.cwd).catch(() => undefined);
     const evidenceFence = this.evidence.readFence();
     const revision = this.controls.revision;
     const parameters = { sessionID: this.nativeId, directory: this.config.cwd };
@@ -231,6 +242,7 @@ export class OpenCodeSession implements AgentSession {
       this.transport.request(() => this.transport.client.session.children(parameters)),
     ]);
     if (this.closed) return;
+    this.evidenceVerifier?.observeSession(native); for (const child of children) this.evidenceVerifier?.observeSession(child);
     if (this.controls.updateNative(native, revision)) { this.evidence.noteSession(native, this.nativeSession); this.nativeSession = native; }
     this.capabilities.planning = this.controls.planningAvailable;
     this.children = children.map(child => {
@@ -242,6 +254,13 @@ export class OpenCodeSession implements AgentSession {
         observation: 'live',
       };
     });
+    const activeIds = [...Object.entries(statuses).filter(([, value]) => value.type !== 'idle').map(([id]) => id), ...permissions.map(item => item.sessionID), ...questions.map(item => item.sessionID)];
+    try {
+      this.activeDescendants = this.evidenceVerifier?.activeDescendants
+        ? await this.evidenceVerifier.activeDescendants(this.nativeId, this.config.cwd, activeIds)
+        : this.children.filter(child => child.status !== 'idle').length;
+      this.descendantsObserved = true;
+    } catch { this.descendantsObserved = false; }
     const messages = history.data;
     this.olderCursor = history.response.headers.get('x-next-cursor') || undefined;
     this.messages.clear(); for (const message of messages) this.messages.set(message.info.id, message);
@@ -263,6 +282,7 @@ export class OpenCodeSession implements AgentSession {
     }
     this.applyStatus(nativeStatus);
     if (!this.initialized) for (const message of messages) if (message.info.role === 'assistant' && message.info.time.completed) this.terminalMessages.add(message.info.id);
+    await this.reconcileInputInvocations();
     this.evidence.completeBaseline(evidenceFence, native);
   }
   private orderedMessages(): NativeMessage[] { return [...this.messages.values()].sort((a, b) => a.info.time.created - b.info.time.created || a.info.id.localeCompare(b.info.id)); }
@@ -350,20 +370,23 @@ export class OpenCodeSession implements AgentSession {
     if (this.transport.restricted) throw new AgentOperationRejectedError('operation_rejected', 'OpenCode native execution is locked by Host policy.');
     if (this.connection.state !== 'connected') throw new AgentOperationRejectedError('operation_rejected', 'OpenCode is reconnecting. Wait for native state recovery before sending input.');
   }
-  async sendMessage(text: string, options?: AgentMessageOptions): Promise<void> { await this.sendMessageContent([{ type: 'text', text }], options); }
-  async sendMessageContent(parts: readonly AgentInputPart[], options?: AgentMessageOptions): Promise<void> {
+  async sendMessage(text: string, options?: AgentMessageOptions): Promise<AgentInputAcceptance | void> { return this.sendMessageContent([{ type: 'text', text }], options); }
+  async sendMessageContent(parts: readonly AgentInputPart[], options?: AgentMessageOptions): Promise<AgentInputAcceptance | void> {
     return this.admitInput(parts, options);
   }
-  async steer(text: string): Promise<void> {
+  async steer(text: string, options?: AgentMessageOptions): Promise<AgentInputAcceptance | void> {
     this.writable();
     if (!this.active) throw new AgentOperationRejectedError('operation_rejected', 'OpenCode has no active turn to steer.');
-    return this.admitInput([{ type: 'text', text }], undefined, true);
+    return this.admitInput([{ type: 'text', text }], options, true);
   }
-  private async admitInput(parts: readonly AgentInputPart[], options?: AgentMessageOptions, requireActive = false): Promise<void> {
+  private async admitInput(parts: readonly AgentInputPart[], options?: AgentMessageOptions, requireActive = false): Promise<AgentInputAcceptance | void> {
     this.writable();
     if (this.pendingInput) throw new AgentOperationRejectedError('operation_rejected', 'Wait for the OpenCode turn and pending interactions before sending another message.');
     if (options?.delivery && options.delivery !== 'immediate') throw new AgentOperationRejectedError('operation_rejected', 'OpenCode does not support queued message delivery.');
+    if (this.inputInvocations.size >= 512) throw new AgentOperationRejectedError('input_evidence_capacity', 'Unsettled input evidence capacity is full.');
     const messageID = this.messageId();
+    const invocation: { accepted?: AgentInputAcceptance; notify?: AgentMessageOptions['onAcceptance'] } = { notify: options?.onAcceptance };
+    this.inputInvocations.set(messageID, invocation);
     this.pendingInput = messageID;
     this.preparedInput = false;
     this.pendingInputWhileRunning = this.active;
@@ -379,11 +402,27 @@ export class OpenCodeSession implements AgentSession {
       dispatched = true;
       await this.transport.request(() => this.transport.client.session.promptAsync({ sessionID: this.nativeId, directory: this.config.cwd, messageID, parts: nativeParts, ...(selected ? { model: selected } : {}), agent: this.config.agent, variant: this.config.variant, system: this.extensions.systemPrompt }));
       if (this.pendingInputWhileRunning && this.pendingInput === messageID) this.releaseOrdinaryInput();
+      await this.reconcileInputInvocations(messageID);
+      return invocation.accepted;
     } catch (error) {
       // A lost acknowledgement may have accepted the input. Only native evidence can release it.
-      if (!dispatched && this.pendingInput === messageID) this.releaseOrdinaryInput();
+      if (!dispatched) { this.inputInvocations.delete(messageID); if (this.pendingInput === messageID) this.releaseOrdinaryInput(); }
       throw error;
     } finally { finishEvidenceEffect(); if (dispatched) this.scheduleRefresh(); }
+  }
+
+  private async reconcileInputInvocations(inputID?: string): Promise<void> {
+    for (const [id, invocation] of this.inputInvocations) {
+      if (inputID !== undefined && id !== inputID) continue;
+      try {
+        const response = await readOpenCodeInputResponse(this.transport, this.nativeId, this.config.cwd, id, () => !this.closed && this.inputInvocations.get(id) === invocation);
+        if (!response) continue;
+        invocation.accepted = { disposition: 'started' };
+        this.inputInvocations.delete(id);
+        // Subscriber failures cannot invalidate native evidence or replay the invocation.
+        try { invocation.notify?.(invocation.accepted); } catch { /* The caller owns its callback. */ }
+      } catch { /* Unavailable readback leaves the original invocation unresolved. */ }
+    }
   }
 
   private releaseOrdinaryInput(): void { if (!this.preparedInput) this.pendingInput = undefined; }
@@ -480,6 +519,6 @@ export class OpenCodeSession implements AgentSession {
     this.closed = true; this.evidence.dispose(); this.abort.abort(); clearTimeout(this.refreshTimer);
     this.initialReject(new Error('OpenCode session closed.'));
     await this.stream; await this.queue;
-    this.status = 'closed'; this.output.close(); this.images.close(); this.pending.clear(); this.onClose();
+    this.status = 'closed'; this.output.close(); this.images.close(); this.pending.clear(); this.inputInvocations.clear(); this.onClose();
   }
 }

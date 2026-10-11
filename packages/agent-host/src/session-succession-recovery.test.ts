@@ -3,7 +3,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, expect, test } from 'vitest';
 import { SessionSuccessionService, type SessionSuccessionPorts } from './session-succession-service.js';
-import { AgentOperationRejectedError, AGENT_NATIVE_EVIDENCE_REASONS, type AgentEmptyCreationResult } from '@orchardworks/agent-provider-sdk';
+import { SessionSuccessionBoundary } from './session-succession-boundary.js';
+import { AgentOperationRejectedError, AGENT_NATIVE_EVIDENCE_REASONS, type AgentEmptyCreationResult, type AgentSession } from '@orchardworks/agent-provider-sdk';
 
 const roots: string[] = [];
 afterEach(async () => { await Promise.all(roots.splice(0).map(root => rm(root, { recursive: true, force: true }))); });
@@ -148,16 +149,71 @@ test.each([ref('x'.repeat(513)), { ...ref('B'), extra: 'unbounded' }])('invalid 
   expect((await f.service.prepare(request)).phase).toBe('cancelled');
 });
 
-test('late candidate read cannot bind context after cancellation', async () => {
-  const f = await fixture(), entered = deferred<void>(), released = deferred<void>(), inspect = f.ports.inspect;
-  f.ports.inspect = async source => { if (source.nativeSessionId === 'B') { entered.resolve(); await released.promise; } return inspect(source); };
+test('cancellation admitted before candidate binding prevents binding and native inspection', async () => {
+  const f = await fixture();
+  await f.service.store.begin(request, true);
+  await f.service.contexts.prepare({ operationId: 'handoff', roleId: 'role', roleRevision: 2, source: ref('A'), text: '[]', itemCount: 0, boundary: { epoch: 'e', seq: 1 }, capturedAt: '2026-10-10T00:00:00Z' });
+  await f.service.store.savePreparation('handoff', { epoch: 'e', seq: 1, capturedAt: '2026-10-10T00:00:00Z' });
+  await f.service.store.startCreation('handoff');
+  await f.service.store.saveCandidate('handoff', ref('B'));
+  const restored = new SessionSuccessionService(f.directory, 'host', f.ports); await restored.ready;
+  const inspect = f.ports.inspect; let candidateReads = 0;
+  f.ports.inspect = async source => { if (source.nativeSessionId === 'B') candidateReads++; return inspect(source); };
+  let cancelling: ReturnType<typeof restored.coordinator.cancel> | undefined;
+  restored.coordinator.setAdmission({
+    checkSource() {}, reserve() {}, assertCommit() {}, releaseReservation() {},
+    registerCandidate() { cancelling = restored.coordinator.cancel('handoff'); return { conflict: false }; },
+  });
+  expect((await restored.coordinator.reconcileReady('handoff')).phase).toBe('cancelled');
+  expect((await cancelling)?.phase).toBe('cancelled');
+  expect(restored.contexts.forTarget(ref('B'))).toBeUndefined();
+  expect(candidateReads).toBe(0); expect(f.creates()).toBe(0);
+  expect(restored.store.read('role').role.current).toEqual(ref('A'));
+  await expect(restored.commit('handoff', 1)).rejects.toThrow(/not ready/);
+});
+
+test.each(['binding', 'inspection'] as const)('cancellation during candidate %s retains recovery context without committing or dispatching', async stage => {
+  const f = await fixture(), entered = deferred<void>(), bound = deferred<void>(), read = deferred<void>(), inspect = f.ports.inspect;
+  const bind = f.service.contexts.bind.bind(f.service.contexts); let candidateReads = 0;
+  f.service.contexts.bind = async (...args) => {
+    if (stage === 'binding') { entered.resolve(); await bound.promise; }
+    return bind(...args);
+  };
+  f.ports.inspect = async source => {
+    if (source.nativeSessionId === 'B') {
+      candidateReads++;
+      expect(f.service.contexts.canInitializeEmpty(source)).toBe(true);
+      if (stage === 'inspection') entered.resolve();
+      await read.promise;
+    }
+    return inspect(source);
+  };
   const running = f.service.prepare(request);
   try {
     await entered.promise;
-    expect((await f.service.coordinator.cancel('handoff')).phase).toBe('cancelled');
-    released.resolve(); expect((await running).phase).toBe('cancelled');
-    expect(f.service.contexts.forTarget(ref('B'))).toBeUndefined();
-  } finally { released.resolve(); await running.catch(() => undefined); }
+    const cancelling = f.service.coordinator.cancel('handoff'); bound.resolve();
+    expect((await cancelling).phase).toBe('cancelled');
+    read.resolve(); expect((await running).phase).toBe('cancelled');
+    expect(f.service.contexts.forTarget(ref('B'))).toMatchObject({ state: 'pending', deliveries: [], target: ref('B') });
+    const restored = new SessionSuccessionService(f.directory, 'host', f.ports); await restored.ready;
+    const reads = candidateReads;
+    expect((await restored.prepare(request)).phase).toBe('cancelled');
+    expect((await restored.coordinator.reconcileReady('handoff')).phase).toBe('cancelled');
+    expect(restored.store.read('role').role.current).toEqual(ref('A'));
+    await expect(restored.commit('handoff', 1)).rejects.toThrow(/not ready/);
+    expect(candidateReads).toBe(reads); expect(f.creates()).toBe(1);
+    expect(restored.contexts.canInitializeEmpty(ref('B'))).toBe(true);
+    let dispatches = 0;
+    const boundary = new SessionSuccessionBoundary(restored.contexts, target => restored.coordinator.assertAdmission(target), target => {
+      const role = restored.store.all().find(state => state.role.current.nativeSessionId === target.nativeSessionId)?.role;
+      return role ? { roleId: role.id, roleRevision: role.revision } : undefined;
+    });
+    try {
+      const session = boundary.wrap(ref('B'), { async sendMessage() { dispatches++; } } as unknown as AgentSession);
+      await expect(boundary.run({ operationId: 'first', kind: 'send_message', parameters: { text: 'continue' }, maximumResultBytes: 1024 }, 'browser', () => session.sendMessage('continue'))).rejects.toMatchObject({ code: 'succession_not_committed' });
+      expect(dispatches).toBe(0); expect(restored.contexts.read('handoff').deliveries).toEqual([]);
+    } finally { await boundary.close(); }
+  } finally { bound.resolve(); read.resolve(); await running.catch(() => undefined); }
 });
 
 const capture = { epoch: 'e', seq: 1, capturedAt: '2026-10-10T00:00:00Z' };

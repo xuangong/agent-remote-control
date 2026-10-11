@@ -5,20 +5,21 @@ import { remoteSessionState, watchPageResume, type AgentReplica, type AgentRepli
 import type { ImageDraftRecipient } from '@orchardworks/agent-remote-web/browser';
 import type { ControllerLocation } from '@orchardworks/agent-remote-hosted/controller-location';
 import { SessionDirectoryClient, type OpenedSession } from '../directory-client.js';
+import { restoreSession } from '../session-restoration.js';
 import { sessionKey, type SessionEntry } from '../session-tree.js';
 import { recoveryGeneration } from '../conversation-recovery.js';
 import { flushRecoveryWrites } from '../recovery-writes.js';
-import { adoptLegacySlot, applyCompositionTrack, compositionRoleKey, createCompositionDocument, createHistorySlot, readCompositionDocument, readTrackCompanion, retainCompositionDraftViews, saveCompositionDocument, SuccessionApplication, type CompositionApplicationContext, type CompositionDocument, type CompositionLocator, type CompositionParticipantResult, type CompositionSlot } from '../session-composition.js';
+import { applyCompositionTrack, compositionOriginId, compositionRoleKey, createCompositionDocument, createHistorySlot, initializeCompositionDocument, compositionMetadataKey, compositionSelection, compositionSession, compositionSessionMetadata, createCompositionSlot, createAskOwner, retainCompositionDraftViews, saveCompositionDocument, SuccessionApplication, type CompositionApplicationContext, type CompositionDocument, type CompositionLocator, type CompositionParticipantResult, type CompositionSlot } from '../session-composition.js';
 import type { ConversationConnections } from '../conversation-connections.js';
 import type { DraftStore } from '../draft-store.js';
-import type { TrackedSessionView, TrackedSessionViews } from '../tracked-session-views.js';
+import type { TrackedSessionView } from '../tracked-session-views.js';
 import type { SessionTracking } from './useSessionTracking.js';
 import { isAskAttached, askParticipantKey, type useAskConversations } from './useAskConversations.js';
 import type { SessionStars } from './useSessionStars.js';
 
-type Selection = Pick<SessionEntry, 'hostId' | 'providerId' | 'nativeSessionId' | 'title'>;
+type Selection = Pick<SessionEntry, 'hostId' | 'providerId' | 'nativeSessionId' | 'title'> & Partial<Pick<OpenedSession, 'agentId' | 'parentAgentId' | 'parentNativeSessionId' | 'createdAt'>> & { viewId?: string };
 interface NativeBinding {
-  session: OpenedSession; client: RemoteSessionClient; replica: AgentReplica;
+  session: OpenedSession & { viewId: string }; client: RemoteSessionClient; replica: AgentReplica;
   isCurrent(): boolean; recipient?: ImageDraftRecipient; retireRecipient(): void; resumeRecipient(): void; stop(): void;
 }
 interface DesiredSelection {
@@ -27,17 +28,16 @@ interface DesiredSelection {
 }
 interface SuccessionOptions {
   scope: string; transport: RemoteAgentTransport; enabled: boolean; initial?: ControllerLocation;
-  connections: ConversationConnections; replicaFor(id: string): AgentReplica; views: TrackedSessionViews;
+  connections: ConversationConnections; replicaFor(id: string): AgentReplica;
+  directory(hostId: string): SessionDirectoryClient;
   textStore(scope: string): DraftStore; tracking(): SessionTracking; ask(): ReturnType<typeof useAskConversations>;
-  known(): readonly OpenedSession[];
-  legacyLayout?: { path: OpenedSession[]; focus?: string; anchor?: string; addressKey: string };
   layout(): { path: OpenedSession[]; selections: Record<string, string | null>; focus?: string; anchor?: string; address?: string; collapsed: string[] };
   retireNative(): void;
   bindNative(binding: NativeBinding): void;
-  confirmed(session: OpenedSession): void;
+  confirmed(session: OpenedSession & { viewId: string }): void;
+  failed(error: unknown, selection: Selection, retrying?: boolean): void;
 }
-const selectionFor = (slot: CompositionSlot): Omit<Selection, 'title'> => slot.intent.kind === 'legacy_fixed' ? slot.intent.target
-  : { hostId: slot.intent.target.hostId, providerId: slot.intent.target.native.providerId, nativeSessionId: slot.intent.target.native.nativeSessionId };
+const selectionFor = compositionSelection;
 const unavailable = (code: string): CompositionParticipantResult => ({ status: 'pending', retention: 'page', code });
 
 /** Product ownership and binding glue. Composition participants perform no native work. */
@@ -47,20 +47,26 @@ export function useSessionSuccession(options: SuccessionOptions) {
   const supported = !!options.transport.fetchSessionSuccessions && !!options.transport.fetchSessionSuccessionCurrent && !!options.transport.fetchSessionSuccessionOperation
     && options.transport.sessionSuccessionSupport !== 'disabled';
   const runtime = useMemo(() => {
-    const read = readCompositionDocument(options.scope);
+    const read = initializeCompositionDocument(options.scope);
     return {
       document: read.status === 'ready' ? read.document : createCompositionDocument(options.scope),
       readable: read.status === 'ready' || read.status === 'missing', unsupported: false, generation: recoveryGeneration(options.scope),
       mounted: true, authority: { active: options.enabled }, applications: new Map<string, SuccessionApplication>(),
-      discovered: !supported, discovering: false, viewsRestored: false, importLegacy: read.status === 'missing', layoutRevision: 0, active: supported && !!options.initial?.nativeSessionId,
+      discovered: false, discovering: false, layoutRevision: 0, active: !!options.initial?.nativeSessionId,
       initialStarted: false, sequence: 0, selection: undefined as Selection | undefined,
+      selectedSlot: undefined as string | undefined, navigationAttempt: false,
+      navigationLease: undefined as { key: string; release(): void } | undefined,
       intent: options.initial?.sessionIntent, keepOriginal: options.initial?.keepOriginal,
       desired: undefined as DesiredSelection | undefined, binding: undefined as NativeBinding | undefined,
+      takeover: undefined as { generation?: string; restored?: () => void } | undefined,
+      attached: undefined as OpenedSession | undefined,
       result: undefined as CompositionParticipantResult | undefined, error: undefined as string | undefined,
       replays: [] as SessionSuccessionReplay[], attempted: new Set<string>(), activeAttempt: undefined as string | undefined,
       favoritesHints: new Map<string, { revision: number; operationId: string; status: string }>(),
       metadata: undefined as AbortController | undefined, attachment: undefined as AbortController | undefined,
+      navigation: undefined as AbortController | undefined,
       askRecipients: new Map<string, { targetKey: string; participant: string; connection: unknown; recipient?: ImageDraftRecipient; retire(): void; update(): void; stop(): void }>(),
+      sides: new Map<string, OpenedSession & { viewId: string }>(), sideRequests: new Map<string, AbortController>(), sideAttempted: new Set<string>(),
       trackPublication: undefined as { revision: number; retainedCurrent(): boolean; context: CompositionApplicationContext } | undefined,
     };
   }, [options.scope, options.transport]);
@@ -69,75 +75,139 @@ export function useSessionSuccession(options: SuccessionOptions) {
     runtime.authority.active = false;
     runtime.authority = { active: options.enabled };
     runtime.applications.clear();
-    runtime.discovered = !supported;
+    runtime.discovered = false;
   }
   const live = () => currentRuntime.current === runtime && runtime.mounted && runtime.authority.active
     && latest.current.scope === options.scope && latest.current.transport === options.transport
     && latest.current.enabled && recoveryGeneration(options.scope) === runtime.generation;
   const publish = () => { if (currentRuntime.current === runtime && runtime.mounted) render(); };
-  function retireBinding() {
+  function retireBinding(next?: Selection) {
+    const key = next && sessionKey(next), previous = runtime.binding;
+    if (runtime.navigationLease?.key !== key) { runtime.navigationLease?.release(); runtime.navigationLease = undefined; }
+    if (key && previous?.isCurrent() && sessionKey(previous.session) === key && !runtime.navigationLease) {
+      const lease = latest.current.connections.acquire(previous.session.agentId, previous.replica, previous.session);
+      const held = { key, release() { clearTimeout(deadline); lease.release(); if (runtime.navigationLease === held) runtime.navigationLease = undefined; } };
+      const deadline = setTimeout(() => held.release(), 20000);
+      runtime.navigationLease = held;
+    }
     runtime.binding?.stop(); runtime.binding = undefined; runtime.attachment?.abort(); runtime.attachment = undefined; runtime.activeAttempt = undefined;
     latest.current.retireNative();
   }
   function slotFor(selection: Selection, history = false): CompositionSlot | undefined {
     return runtime.document.slots.find(slot => (slot.intent.kind === 'history') === history && sessionKey(selectionFor(slot)) === sessionKey(selection));
   }
-  function adoptKnown() {
-    const known = latest.current.known();
-    for (const source of known) {
-      if (slotFor(source) || runtime.document.slots.some(slot => slot.intent.kind !== 'history' && slot.owners.text.key === source.agentId)) continue;
-      const entry = latest.current.tracking().sessions.find(entry => sessionKey(entry) === sessionKey(source));
-      runtime.document.slots.push(adoptLegacySlot(entry?.entryId ?? sessionKey(source), source, options.scope, sessionKey(source)));
-      runtime.document.editRevision++;
-    }
+  function explicitSlot(selection: Selection, id: string): CompositionSlot | undefined {
+    return runtime.document.scope === options.scope ? runtime.document.slots.find(slot => slot.id === id
+      && sessionKey(selectionFor(slot)) === sessionKey(selection)) : undefined;
   }
-  function captureLayout(legacy = false) {
-    if (!live() || !runtime.readable || runtime.intent === 'history') return;
-    const saved = legacy ? latest.current.legacyLayout : undefined;
-    const current = saved ? { ...saved, selections: Object.fromEntries(saved.path.slice(0, -1).map((source, index) => [sessionKey(source), sessionKey(saved.path[index + 1]!)])),
-      address: saved.addressKey, collapsed: [] as string[] } : latest.current.layout();
+  function ensureView(selection: Selection, explicitId = selection.viewId): CompositionSlot {
+    if (explicitId) {
+      const existing = explicitSlot(selection, explicitId);
+      if (!existing) throw new Error('The selected session view no longer matches this session.');
+      return existing;
+    }
+    const lineage = runtime.replays.find(replay => [replay.from, replay.to].some(target => sessionKey(target) === sessionKey(selection)));
+    if (lineage) {
+      const key = compositionRoleKey({ scope: options.scope, hostId: lineage.to.hostId, controllerId: lineage.projection.role.current.controllerId, roleId: lineage.projection.role.id });
+      const role = runtime.document.slots.find(slot => slot.intent.kind === 'role' && slot.intent.roleKey === key);
+      if (role) return role;
+      const origin = { hostId: lineage.from.hostId, ...lineage.projection.role.origin, title: selection.title };
+      const original = slotFor(origin);
+      if (original) return original;
+      const slot = createCompositionSlot(compositionOriginId(origin), origin, options.scope);
+      runtime.document.slots.push(slot); runtime.document.asks.push(createAskOwner(slot, options.scope)); runtime.document.editRevision++;
+      return slot;
+    }
+    const existing = slotFor(selection);
+    if (existing) return existing;
+    const slot = createCompositionSlot(compositionOriginId(selection), selection, options.scope);
+    runtime.document.slots.push(slot); runtime.document.asks.push(createAskOwner(slot, options.scope)); runtime.document.editRevision++;
+    return slot;
+  }
+  function save() {
+    if (!live() || !runtime.readable) return;
+    const revision = runtime.document.editRevision;
+    const write = saveCompositionDocument(runtime.document, () => live() && runtime.document.editRevision === revision);
+    flushRecoveryWrites(compositionMetadataKey(options.scope));
+    publish();
+    void write.completion.then(result => { if (live() && result.status !== 'saved') { runtime.error = 'The current session layout could not be saved.'; publish(); } });
+    return write.completion;
+  }
+  function slotTitle(slot: CompositionSlot): string { return slot.metadata?.title ?? 'Session'; }
+  function captureLayout() {
+    if (!live() || !runtime.readable || runtime.intent === 'history' || runtime.result?.status !== 'applied') return;
+    if (sideSlots().some(slot => !runtime.sides.has(slot.id))) return;
+    const current = latest.current.layout();
     if (!current.path.length) return;
-    const slotByKey = new Map(current.path.map(source => [sessionKey(source), slotFor(source) ?? runtime.document.slots.find(slot => slot.owners.text.key === source.agentId)]));
-    if ([...slotByKey.values()].some(slot => !slot)) return;
-    const idFor = (key: string | undefined) => key ? slotByKey.get(key)?.id : undefined;
-    const ids = new Set([...slotByKey.values()].map(slot => slot!.id));
-    const edges = runtime.document.edges.filter(edge => !ids.has(edge.source));
-    for (const [source, target] of Object.entries(current.selections)) {
-      const from = idFor(source), to = target ? idFor(target) : undefined;
-      if (from && to && from !== to) edges.push({ source: from, target: to, selected: true });
-    }
-    const next = { edges, collapsed: current.collapsed.map(idFor).filter((id): id is string => !!id),
-      focus: idFor(current.focus), anchor: idFor(current.anchor), address: idFor(current.address) ?? idFor(sessionKey(current.path[0]!)) };
-    if (JSON.stringify(next) === JSON.stringify({ edges: runtime.document.edges, collapsed: runtime.document.collapsed, focus: runtime.document.focus, anchor: runtime.document.anchor, address: runtime.document.address })) return;
-    Object.assign(runtime.document, next); runtime.document.editRevision++;
-    if (!legacy) {
-      const revision = runtime.document.editRevision;
-      const write = saveCompositionDocument(runtime.document, () => live() && runtime.document.editRevision === revision);
-      flushRecoveryWrites(`agent-remote:recovery:${options.scope}:composition-v1`);
-      void write.completion.then(result => { if (live() && result.status !== 'saved') { runtime.error = 'The current session layout could not be saved.'; publish(); } });
-    }
+    const path = current.path as Array<OpenedSession & { viewId?: string }>;
+    if (path.some(source => !source.viewId || !runtime.document.slots.some(slot => slot.id === source.viewId))) return;
+    const ids = new Set(path.map(source => source.viewId!));
+    const next = { collapsed: current.collapsed.filter(id => ids.has(id)), primary: path[0]!.viewId,
+      focus: current.focus, anchor: current.anchor, address: current.address ?? path[0]!.viewId };
+    if (JSON.stringify(next) === JSON.stringify({ collapsed: runtime.document.collapsed, primary: runtime.document.primary,
+      focus: runtime.document.focus, anchor: runtime.document.anchor, address: runtime.document.address })) return;
+    Object.assign(runtime.document, next); runtime.document.editRevision++; save();
   }
-  function layoutView(): (TrackedSessionView & { primary: OpenedSession; sides: OpenedSession[] }) | undefined {
+  function layoutView(): (TrackedSessionView & { primary: OpenedSession & { viewId: string }; sides: Array<OpenedSession & { viewId: string }> }) | undefined {
     const desired = runtime.desired;
     if (!desired || runtime.intent === 'history') return;
-    const known = latest.current.known();
-    const resolve = (id: string | undefined): OpenedSession | undefined => {
-      const slot = runtime.document.slots.find(slot => slot.id === id);
-      if (!slot) return;
-      if (id === desired.slot.id && runtime.binding?.isCurrent()) return runtime.binding.session;
-      return known.find(source => sessionKey(source) === sessionKey(selectionFor(slot))) ?? known.find(source => source.agentId === slot.owners.text.key);
-    };
-    const primary = resolve(desired.slot.id);
+    const primary = runtime.binding?.isCurrent() ? runtime.binding.session : compositionSession(desired.slot);
     if (!primary) return;
-    const selections: Record<string, string | null> = {}, sides: OpenedSession[] = [];
-    for (const edge of runtime.document.edges) {
-      const source = resolve(edge.source), target = resolve(edge.target);
-      if (!source || !target || !edge.selected) continue;
-      selections[sessionKey(source)] = sessionKey(target);
-      if (target.agentId !== primary.agentId && !sides.some(side => sessionKey(side) === sessionKey(target))) sides.push(target);
+    const selections: Record<string, string | null> = {};
+    for (const edge of runtime.document.edges) if (edge.selected) selections[edge.source] = edge.target;
+    const sides = sideSlots().flatMap(slot => {
+      const session = runtime.sides.get(slot.id);
+      return session && sessionKey(session) === sessionKey(selectionFor(slot)) ? [session] : [];
+    });
+    return { primary, primarySlot: desired.slot.id, sides, selections, focus: runtime.document.focus, anchor: runtime.document.anchor };
+  }
+  function sideSlots(): CompositionSlot[] {
+    const visited = new Set<string>(), result: CompositionSlot[] = [];
+    let source = runtime.desired?.slot.id;
+    while (source && !visited.has(source)) {
+      visited.add(source);
+      const target = runtime.document.edges.find(edge => edge.source === source && edge.selected)?.target;
+      const slot = target ? runtime.document.slots.find(slot => slot.id === target) : undefined;
+      if (!slot || visited.has(slot.id)) break;
+      result.push(slot); source = slot.id;
     }
-    const focus = resolve(runtime.document.focus), anchor = resolve(runtime.document.anchor);
-    return { primary, sides, selections, ...(focus ? { focus: sessionKey(focus) } : {}), ...(anchor ? { anchor: sessionKey(anchor) } : {}) };
+    return result;
+  }
+  async function resolveNative(slot: CompositionSlot, title: string, signal: AbortSignal, takeOver?: string): Promise<OpenedSession & { viewId: string }> {
+    const identity = selectionFor(slot), cached = latest.current.connections.find(identity), agent = cached?.replica.getState().agent;
+    const externallyOwned = !!cached?.replica.getState().sessionControl?.nativeOwner;
+    const reusable = cached && !externallyOwned && agent?.id === cached.agentId && agent.providerId === identity.providerId
+      && agent.runtimeInfo.providerId === identity.providerId && agent.runtimeInfo.sessionId === identity.nativeSessionId;
+    const directory = latest.current.directory(identity.hostId ?? 'local');
+    const attached = runtime.attached && sessionKey(runtime.attached) === sessionKey(identity) ? runtime.attached : undefined;
+    const activity = latest.current.tracking().observations[sessionKey(identity)];
+    const observed = !externallyOwned && activity?.connection === 'ready' && !activity.error ? activity.agentId : undefined;
+    const response = attached && !takeOver ? { agentId: attached.agentId } : reusable && !takeOver ? { agentId: cached.agentId }
+      : observed && !takeOver ? { agentId: observed } : slot.metadata?.parentNativeSessionId
+      ? await directory.attachChild(identity.providerId, slot.metadata.parentNativeSessionId, identity.nativeSessionId, signal)
+      : await directory.attach(identity.providerId, identity.nativeSessionId, signal, takeOver);
+    signal.throwIfAborted();
+    if (response.nativeSessionId !== undefined && response.nativeSessionId !== identity.nativeSessionId) throw new Error('The Host returned a different native session.');
+    const currentSlot = runtime.document.slots.find(candidate => candidate.id === slot.id && sessionKey(selectionFor(candidate)) === sessionKey(identity));
+    return { ...slot.metadata, ...identity, agentId: response.agentId, title: currentSlot?.metadata?.title ?? title, viewId: slot.id };
+  }
+  function restoreSides() {
+    if (!live() || runtime.result?.status !== 'applied') return;
+    const required = sideSlots();
+    for (const [id, request] of runtime.sideRequests) if (!required.some(slot => slot.id === id)) { request.abort(); runtime.sideRequests.delete(id); }
+    for (const slot of required) {
+      const attempt = JSON.stringify([slot.id, slot.intent.target]);
+      if (runtime.sideAttempted.has(attempt) || runtime.sideRequests.has(slot.id) || runtime.sides.get(slot.id) && sessionKey(runtime.sides.get(slot.id)!) === sessionKey(selectionFor(slot))) continue;
+      runtime.sideAttempted.add(attempt);
+      const request = new AbortController(), target = JSON.stringify(slot.intent.target);
+      runtime.sideRequests.set(slot.id, request);
+      void resolveNative(slot, slotTitle(slot), AbortSignal.any([request.signal, AbortSignal.timeout(15000)])).then(session => {
+        if (!live() || request.signal.aborted || JSON.stringify(slot.intent.target) !== target) return;
+        runtime.sides.set(slot.id, session); slot.metadata = compositionSessionMetadata(session);
+        runtime.document.editRevision++; save();
+      }).catch(error => { if (live() && !request.signal.aborted) { runtime.error = error instanceof Error ? error.message : 'The side session could not be opened.'; publish(); } })
+        .finally(() => { if (runtime.sideRequests.get(slot.id) === request) runtime.sideRequests.delete(slot.id); });
+    }
   }
   function selectDesired(slot: CompositionSlot, target: CompositionLocator, revision: number, operationId?: string, roleKey?: string) {
     if (!live()) return;
@@ -146,10 +216,14 @@ export function useSessionSuccession(options: SuccessionOptions) {
     const identity = JSON.stringify([slot.id, target, revision, runtime.intent]);
     const oldIdentity = previous && JSON.stringify([previous.slot.id, previous.target, previous.revision, previous.sessionIntent]);
     if (identity === oldIdentity) { previous!.keepOriginal = runtime.keepOriginal; return; }
-    retireBinding();
+    retireBinding({ hostId: target.hostId, ...target.native, title: slotTitle(slot) });
     runtime.active = true; runtime.layoutRevision++;
+    if (runtime.navigationAttempt) { runtime.attempted.delete(JSON.stringify([slot.id, target, revision])); runtime.navigationAttempt = false; }
     if (!runtime.document.address) { runtime.document.address = slot.id; runtime.document.editRevision++; }
-    runtime.desired = { slot, target, revision, operationId, roleKey, title: runtime.selection?.title ?? latest.current.known().find(source => source.agentId === slot.owners.text.key)?.title ?? 'Session',
+    if (!runtime.document.primary) {
+      runtime.document.primary = slot.id; runtime.document.focus = slot.id; runtime.document.anchor = slot.id; runtime.document.editRevision++;
+    }
+    runtime.desired = { slot, target, revision, operationId, roleKey, title: runtime.selectedSlot ? slotTitle(slot) : runtime.selection?.title ?? slotTitle(slot),
       sessionIntent: runtime.intent, keepOriginal: runtime.keepOriginal };
     runtime.error = undefined; runtime.result = unavailable('reconciling');
     publish();
@@ -158,6 +232,8 @@ export function useSessionSuccession(options: SuccessionOptions) {
     if (!live() || runtime.intent === 'history' || !runtime.selection) return;
     const key = compositionRoleKey({ scope: options.scope, hostId: replay.to.hostId, controllerId: replay.projection.role.current.controllerId, roleId: replay.projection.role.id });
     const roleSlot = runtime.document.slots.find(slot => slot.intent.kind === 'role' && slot.intent.roleKey === key);
+    const originSlot = roleSlot ?? slotFor({ hostId: replay.from.hostId, ...replay.projection.role.origin, title: runtime.selection.title });
+    if (runtime.selectedSlot && runtime.selectedSlot !== originSlot?.id) return;
     const related = runtime.replays.filter(item => compositionRoleKey({ scope: options.scope, hostId: item.to.hostId,
       controllerId: item.projection.role.current.controllerId, roleId: item.projection.role.id }) === key);
     const selectionMatches = related.some(item => [item.from, item.to].some(target => sessionKey(target) === sessionKey(runtime.selection!)));
@@ -166,40 +242,15 @@ export function useSessionSuccession(options: SuccessionOptions) {
     const origin = replay.projection.role.origin;
     slot ??= slotFor({ hostId: replay.from.hostId, providerId: origin.providerId, nativeSessionId: origin.nativeSessionId, title: runtime.selection.title });
     if (!slot) {
-      const id = `primary:${crypto.randomUUID()}`, owner = `draft:${id}`;
-      slot = { id, intent: { kind: 'fixed', target: { hostId: replay.from.hostId, native: replay.projection.role.origin } },
-        owners: { text: { scope: options.scope, key: owner }, image: { scope: options.scope, key: JSON.stringify([options.scope, owner]) }, display: { scope: options.scope, key: owner } } };
-      runtime.document.slots.push(slot); runtime.document.editRevision++;
+      const source = { hostId: replay.from.hostId, ...replay.projection.role.origin, title: runtime.selection.title };
+      slot = createCompositionSlot(compositionOriginId(source), source, options.scope);
+      runtime.document.slots.push(slot); runtime.document.asks.push(createAskOwner(slot, options.scope)); runtime.document.editRevision++;
     }
     selectDesired(slot, { hostId: replay.to.hostId, native: replay.projection.role.current }, replay.projection.role.revision, replay.projection.receipt.operationId, key);
   }
   async function retainAsk(context: CompositionApplicationContext): Promise<CompositionParticipantResult> {
-    const ask = latest.current.ask();
-    const affected = [...context.slots, ...context.retained];
-    const records = ask.store.all();
-    for (let index = 0; index < affected.length; index++) {
-      const source = latest.current.known().find(source => source.agentId === affected[index]!.owners.text.key);
-      if (!source) continue;
-      for (const record of records.filter(record => sessionKey(record.source) === sessionKey(source))) {
-        const target = record.target;
-        if (!target || !records.some(nested => sessionKey(nested.source) === sessionKey(target))) continue;
-        const slot = slotFor(target);
-        if (slot && !affected.some(value => value.id === slot.id)) affected.push(slot);
-      }
-    }
-    for (const slot of affected) {
-      const existing = ask.ownerIndex().owners.find(owner => owner.sourceSlot === slot.id);
-      if (existing || slot.intent.kind === 'history') continue;
-      const source = latest.current.known().find(source => source.agentId === slot.owners.text.key);
-      if (!source) continue;
-      const key = sessionKey(source), entry = ask.entryFor(source), target = entry.record?.target;
-      const descriptor = { id: `ask:${slot.id}`, sourceSlot: slot.id, stateScope: options.scope, legacySourceKey: key,
-        geometryScope: JSON.stringify([options.scope, key]), text: { scope: `${options.scope}:ask`, key },
-        ...(target ? { image: { scope: options.scope, key: JSON.stringify([options.scope, sessionKey(target)]) }, display: { scope: options.scope, key: sessionKey(target) } } : {}) };
-      const adopted = await ask.adoptAssociationOwner(descriptor, source, context.isCurrent);
-      if (adopted.status !== 'applied') return adopted;
-    }
-    return ask.retainAssociationOwners(ask.ownerIndex().owners.filter(owner => affected.some(slot => slot.id === owner.sourceSlot)).map(owner => owner.id), context.isCurrent);
+    const ids = new Set([...context.slots, ...context.retained].map(slot => slot.id));
+    return latest.current.ask().retainAssociationOwners(runtime.document.asks.filter(owner => ids.has(owner.sourceSlot)).map(owner => owner.id), context.isCurrent);
   }
   function application(replay: SessionSuccessionReplay) {
     const hostId = replay.to.hostId, controllerId = replay.projection.role.current.controllerId;
@@ -211,7 +262,7 @@ export function useSessionSuccession(options: SuccessionOptions) {
         draftViews: context => retainCompositionDraftViews(context, scope => latest.current.textStore(scope)),
         ask: retainAsk,
         track: async context => {
-          const result = await applyCompositionTrack(context, latest.current.views);
+          const result = await applyCompositionTrack(context);
           if (result.status === 'applied' && result.retainedCurrent?.() && context.isCurrent()) {
             runtime.trackPublication = { revision: latest.current.tracking().editRevision(), retainedCurrent: result.retainedCurrent, context };
           }
@@ -222,50 +273,41 @@ export function useSessionSuccession(options: SuccessionOptions) {
     }
     return value;
   }
-  function restoreTrackViews(isCurrent: () => boolean): boolean {
-    const read = readTrackCompanion(options.scope);
-    if (read.status === 'missing') return true;
-    if (read.status !== 'ready') return false;
-    const views = latest.current.views, before = views.snapshot();
-    const known = latest.current.known();
-    const resolve = (id: string): SessionEntry | undefined => {
-      const slot = runtime.document.slots.find(slot => slot.id === id);
-      if (!slot) return undefined;
-      const identity = selectionFor(slot);
-      const actual = known.find(source => sessionKey(source) === sessionKey(identity));
-      return { ...identity, title: actual?.title ?? 'Session', ...(actual ? { agentId: actual.agentId } : {}) };
-    };
-    const restored = read.document.views.map(entry => {
-      const primary = resolve(entry.primarySlot);
-      return primary ? { entryId: entry.entryId, view: { primary, selections: { ...entry.selections }, focus: entry.focus, anchor: entry.anchor } } : undefined;
-    });
-    const bindings = read.document.entries.map(entry => { const primary = resolve(entry.slotId); return primary ? { nativeKey: sessionKey(primary), entryId: entry.entryId } : undefined; });
-    if (restored.some(entry => !entry) || bindings.some(entry => !entry)) return false;
-    return views.restore({ editRevision: before.editRevision, selected: read.document.selected,
-      views: restored.filter((entry): entry is NonNullable<typeof entry> => !!entry), bindings: bindings.filter((entry): entry is NonNullable<typeof entry> => !!entry) }, before.editRevision, isCurrent);
-  }
   async function attachDesired(explicit = false): Promise<void> {
     const desired = runtime.desired;
     if (!live() || !desired || runtime.result?.status !== 'applied') return;
     const attempt = JSON.stringify([desired.slot.id, desired.target, desired.revision]);
     if (!explicit && runtime.attempted.has(attempt)) return;
-    runtime.attempted.add(attempt); retireBinding(); runtime.activeAttempt = attempt;
+    runtime.attempted.add(attempt); retireBinding({ hostId: desired.target.hostId, ...desired.target.native, title: desired.title }); runtime.activeAttempt = attempt;
+    const navigationLease = runtime.navigationLease;
     const authority = runtime.authority;
     const controller = new AbortController(); runtime.attachment = controller;
     const current = () => live() && runtime.authority === authority && runtime.desired === desired && runtime.attachment === controller && !controller.signal.aborted;
     runtime.error = undefined; publish();
     try {
       const identity = { hostId: desired.target.hostId, providerId: desired.target.native.providerId, nativeSessionId: desired.target.native.nativeSessionId };
-      const cached = latest.current.connections.find(identity);
-      const cachedAgent = cached?.replica.getState().agent;
-      const reusable = cached && cachedAgent?.id === cached.agentId && cachedAgent.providerId === identity.providerId
-        && cachedAgent.runtimeInfo.providerId === identity.providerId && cachedAgent.runtimeInfo.sessionId === identity.nativeSessionId;
-      const response = reusable ? { agentId: cached.agentId } : await new SessionDirectoryClient(options.scope, undefined, identity.hostId)
-        .attach(identity.providerId, identity.nativeSessionId, AbortSignal.any([controller.signal, AbortSignal.timeout(15000)]));
+      const takeover = runtime.takeover;
+      const targetSlot = { ...desired.slot, intent: { kind: desired.sessionIntent ?? 'fixed', target: desired.target } } as CompositionSlot;
+      const resolve = (signal: AbortSignal) => resolveNative(targetSlot, desired.title, signal, takeover?.generation);
+      const session = desired.roleKey || desired.sessionIntent === 'history' || takeover
+        ? await resolve(AbortSignal.any([controller.signal, AbortSignal.timeout(15000)]))
+        : await new Promise<OpenedSession & { viewId: string }>((accept, reject) => {
+          let stop = () => {};
+          const finish = (settle: () => void) => { controller.signal.removeEventListener('abort', abort); stop(); settle(); };
+          const abort = () => finish(() => reject(controller.signal.reason));
+          controller.signal.addEventListener('abort', abort, { once: true });
+          stop = restoreSession({ active: current,
+            open: signal => resolve(AbortSignal.any([signal, controller.signal])),
+            restored: value => finish(() => accept(value)),
+            failed: (error, retrying) => {
+              if (!retrying) finish(() => reject(error));
+              else if (current()) latest.current.failed(error, { ...identity, title: desired.title }, true);
+            },
+          });
+        });
       if (!current()) return;
-      if (response.nativeSessionId !== undefined && response.nativeSessionId !== identity.nativeSessionId) throw new Error('The Host returned a different native session.');
-      const session: OpenedSession = { ...identity, agentId: response.agentId, title: desired.title };
       const lease = latest.current.connections.acquire(session.agentId, latest.current.replicaFor(session.agentId), session);
+      navigationLease?.release();
       let stopped = false, imageLifetime: { active: boolean } | undefined, imageEpoch: string | null | undefined;
       const exactIdentity = () => {
         const state = lease.replica.getState(), agent = state.agent;
@@ -300,9 +342,12 @@ export function useSessionSuccession(options: SuccessionOptions) {
         }
         if (synchronized() && !confirmed) {
           confirmed = true; clearTimeout(confirmationDeadline); runtime.error = undefined;
+          desired.slot.metadata = compositionSessionMetadata(session);
+          runtime.document.editRevision++; save();
           latest.current.bindNative(binding); latest.current.confirmed(session);
+          restoreSides();
           const ask = latest.current.ask();
-          for (const owner of ask.ownerIndex().owners.filter(owner => owner.sourceSlot === desired.slot.id)) {
+          for (const owner of runtime.document.asks.filter(owner => owner.sourceSlot === desired.slot.id)) {
             const revision = ask.ownerEditRevision(owner.id);
             ask.applySourceProjection(owner.id, session, revision, viewCurrent);
           }
@@ -313,12 +358,19 @@ export function useSessionSuccession(options: SuccessionOptions) {
       stops.push(lease.replica.subscribe(update));
       stops.push(lease.client.subscribeSessionState(update));
       update();
+      if (takeover && current()) {
+        takeover.restored?.();
+        await latest.current.connections.takeControlAfterNativeResume(session.agentId);
+        if (runtime.takeover === takeover) runtime.takeover = undefined;
+      }
     } catch (error) {
-      if (current()) { runtime.activeAttempt = undefined; runtime.error = error instanceof Error ? error.message : 'The session could not be opened.'; publish(); }
+      navigationLease?.release();
+      if (current()) { runtime.activeAttempt = undefined; runtime.error = error instanceof Error ? error.message : 'The session could not be opened.';
+        latest.current.failed(error, { hostId: desired.target.hostId, ...desired.target.native, title: desired.title }); publish(); }
     }
   }
   async function discover(): Promise<void> {
-    if (!live() || !supported || runtime.unsupported) return;
+    if (!live()) return;
     const sequence = ++runtime.sequence, authority = runtime.authority;
     runtime.metadata?.abort(); const controller = new AbortController(); runtime.metadata = controller;
     const current = () => live() && runtime.authority === authority && runtime.sequence === sequence && !controller.signal.aborted;
@@ -326,8 +378,9 @@ export function useSessionSuccession(options: SuccessionOptions) {
     runtime.discovering = true; runtime.discovered = false; publish();
     try {
       if (!runtime.readable) throw new Error('Saved session composition is unreadable or unsupported. Its original data has been preserved.');
+      if (runtime.result && 'code' in runtime.result && runtime.result.code === 'invalid_view') throw new Error('The selected session view no longer matches this session.');
       const all: SessionSuccessionReplay[] = [], cursors = new Set<string>(); let cursor: string | undefined;
-      do {
+      if (supported && !runtime.unsupported) do {
         const page = await options.transport.fetchSessionSuccessions!({ limit: 64, ...(cursor ? { cursor } : {}) }, request);
         if (!current()) return;
         all.push(...page.successions);
@@ -337,22 +390,19 @@ export function useSessionSuccession(options: SuccessionOptions) {
         if (cursor) cursors.add(cursor);
       } while (cursor);
       runtime.replays = all;
-      adoptKnown();
-      if (runtime.importLegacy) { captureLayout(true); runtime.importLegacy = false; }
-      if (runtime.intent === 'history') {
-        const selected = runtime.selection;
-        const match = selected && all.find(replay => [replay.from, replay.to].some(endpoint => sessionKey(endpoint) === sessionKey(selected)));
-        if (match && selected) {
-          const target = { hostId: selected.hostId ?? match.from.hostId, native: sessionKey(match.from) === sessionKey(selected) ? match.projection.receipt.from : match.projection.role.current };
-          let slot = slotFor(selected, true);
-          if (!slot) { slot = createHistorySlot(crypto.randomUUID(), target, options.scope); runtime.document.slots.push(slot); runtime.document.editRevision++; }
-          selectDesired(slot, target, 0);
-          if (runtime.document.address !== slot.id) { runtime.document.address = slot.id; runtime.document.editRevision++; }
-          const save = saveCompositionDocument(runtime.document, current); flushRecoveryWrites(`agent-remote:recovery:${options.scope}:composition-v1`);
-          const result = await save.completion;
-          if (!current()) return;
-          runtime.result = result.status === 'saved' ? { status: 'applied', retention: result.retention } : unavailable('history_write');
-        }
+      if (runtime.selection && runtime.intent !== 'history' && !runtime.selectedSlot) runtime.selectedSlot = ensureView(runtime.selection).id;
+      if (runtime.selectedSlot && !runtime.document.slots.some(slot => slot.id === runtime.selectedSlot)) throw new Error('The selected session view is no longer available.');
+      if (runtime.intent === 'history' && runtime.selection) {
+        let slot = slotFor(runtime.selection, true);
+        if (!slot) { slot = createHistorySlot(compositionOriginId(runtime.selection, true), { hostId: runtime.selection.hostId ?? 'local', native: { providerId: runtime.selection.providerId, nativeSessionId: runtime.selection.nativeSessionId } }, options.scope);
+          slot.metadata = compositionSessionMetadata(runtime.selection);
+          runtime.document.slots.push(slot); runtime.document.asks.push(createAskOwner(slot, options.scope)); runtime.document.editRevision++; }
+        runtime.selectedSlot = slot.id; selectDesired(slot, slot.intent.target, 0);
+        runtime.document.address = slot.id; runtime.document.primary = slot.id; runtime.document.editRevision++;
+        const write = saveCompositionDocument(runtime.document, current); flushRecoveryWrites(compositionMetadataKey(options.scope));
+        const result = await write.completion;
+        if (!current()) return;
+        runtime.result = result.status === 'saved' ? { status: 'applied', retention: result.retention } : unavailable('history_write');
       } else {
         const latestByRole = new Map<string, SessionSuccessionReplay>();
         for (const replay of all) {
@@ -360,10 +410,13 @@ export function useSessionSuccession(options: SuccessionOptions) {
           if ((latestByRole.get(key)?.projection.role.revision ?? 0) < replay.projection.role.revision) latestByRole.set(key, replay);
         }
         for (const replay of latestByRole.values()) admitReplay(replay);
-        if (!runtime.viewsRestored) {
-          if (!restoreTrackViews(current)) throw new Error('Saved Track views could not be recovered.');
-          runtime.viewsRestored = true;
+        const local = runtime.selectedSlot ? runtime.document.slots.find(slot => slot.id === runtime.selectedSlot) : undefined;
+        if (local?.intent.kind === 'role' && runtime.desired?.slot.id !== local.id) throw new Error('The selected session view could not be recovered from the current role.');
+        if (local && local.intent.kind !== 'role' && runtime.desired?.slot.id !== local.id) {
+          const target = local.intent.target;
+          selectDesired(local, target, 0);
         }
+        let localResult: CompositionParticipantResult | undefined;
         for (const replay of latestByRole.values()) {
           if (!current()) return;
           runtime.trackPublication = undefined;
@@ -378,7 +431,7 @@ export function useSessionSuccession(options: SuccessionOptions) {
               return value;
             },
             fetchSessionSuccessions: query => options.transport.fetchSessionSuccessions!(query, request),
-          });
+          }, { selectedSlot: runtime.selectedSlot, isCurrent: current });
           if (!current()) return;
           const publication = runtime.trackPublication as { revision: number; retainedCurrent(): boolean; context: CompositionApplicationContext } | undefined;
           let accepted = result;
@@ -393,6 +446,16 @@ export function useSessionSuccession(options: SuccessionOptions) {
           }
           const roleKey = compositionRoleKey({ scope: options.scope, hostId: replay.to.hostId, controllerId: replay.projection.role.current.controllerId, roleId: replay.projection.role.id });
           if (runtime.desired?.slot.intent.kind === 'role' && runtime.desired.slot.intent.roleKey === roleKey) runtime.result = accepted;
+          if (accepted.status !== 'applied') localResult = accepted;
+        }
+        if (local && local.intent.kind !== 'role' && runtime.desired?.slot.id === local.id) {
+          if (localResult) runtime.result = localResult;
+          else {
+            const save = saveCompositionDocument(runtime.document, current); flushRecoveryWrites(compositionMetadataKey(options.scope));
+            const result = await save.completion;
+            if (!current()) return;
+            runtime.result = result.status === 'saved' ? { status: 'applied', retention: result.retention } : unavailable('view_write');
+          }
         }
       }
       if (!current()) return;
@@ -406,29 +469,89 @@ export function useSessionSuccession(options: SuccessionOptions) {
     } catch (error) {
       if (current()) {
         if (!runtime.desired && !runtime.document.roles.length && error && typeof error === 'object' && 'code' in error && ['http_404', 'route_not_found'].includes(String(error.code))) {
-          runtime.unsupported = true; runtime.active = false; runtime.discovered = true; runtime.error = undefined;
-        } else { runtime.error = error instanceof Error ? error.message : 'Session succession could not be recovered.'; runtime.result = unavailable('replay_unavailable'); }
+          runtime.unsupported = true;
+          queueMicrotask(() => { if (current()) void discover(); });
+        } else {
+          runtime.error = error instanceof Error ? error.message : 'Session succession could not be recovered.';
+          if (runtime.result && 'code' in runtime.result && runtime.result.code === 'invalid_view') runtime.discovered = true;
+          else runtime.result = unavailable('replay_unavailable');
+        }
       }
-    } finally { if (current()) { runtime.discovering = false; publish(); } }
+    } finally { if (current()) { if (runtime.result?.status !== 'applied') runtime.navigationLease?.release(); runtime.discovering = false; publish(); } }
   }
-  async function open(selection: Selection, intent?: 'history', keepOriginal?: boolean): Promise<boolean> {
-    if (!live() || !supported || runtime.unsupported) return false;
+  async function open(selection: Selection, intent?: 'history', keepOriginal?: boolean, slotId?: string, takeOver?: string, onRestoring?: () => void, attached?: OpenedSession, restoreLayout = false): Promise<boolean> {
+    if (!live()) return false;
+    runtime.navigation?.abort(); runtime.navigation = undefined;
+    if (intent === 'history') {
+      const request = new AbortController(), sequence = runtime.sequence;
+      runtime.navigation = request;
+      const current = () => live() && !request.signal.aborted && runtime.sequence === sequence;
+      const candidate = slotFor(selection, true) ?? createHistorySlot(compositionOriginId(selection, true), {
+        hostId: selection.hostId ?? 'local', native: { providerId: selection.providerId, nativeSessionId: selection.nativeSessionId },
+      }, options.scope);
+      try {
+        attached = await resolveNative({ ...candidate, metadata: compositionSessionMetadata(selection) }, selection.title,
+          AbortSignal.any([request.signal, AbortSignal.timeout(15000)]));
+        if (!current()) return false;
+        selection = { ...selection, agentId: attached.agentId };
+      } catch (error) {
+        if (current()) latest.current.failed(error, selection);
+        return false;
+      } finally { if (runtime.navigation === request) runtime.navigation = undefined; }
+    }
+    runtime.attached = attached;
+    runtime.takeover = takeOver || onRestoring ? { generation: takeOver, restored: onRestoring } : undefined;
+    if (slotId && (intent === 'history' || !explicitSlot(selection, slotId))) {
+      runtime.sequence++; runtime.metadata?.abort(); retireBinding(); runtime.desired = undefined; runtime.selectedSlot = slotId;
+      runtime.selection = selection; runtime.intent = undefined; runtime.active = true; runtime.discovering = false;
+      runtime.result = unavailable('invalid_view'); runtime.error = 'The selected session view no longer matches this session.'; publish(); return true;
+    }
     const desired = runtime.desired;
-    const sameRole = intent !== 'history' && runtime.intent !== 'history' && desired?.roleKey && (
+    const sameRole = !slotId && intent !== 'history' && runtime.intent !== 'history' && desired?.roleKey && (
       sessionKey(selection) === sessionKey({ hostId: desired.target.hostId, ...desired.target.native })
       || runtime.replays.some(replay => compositionRoleKey({ scope: options.scope, hostId: replay.to.hostId,
         controllerId: replay.projection.role.current.controllerId, roleId: replay.projection.role.id }) === desired.roleKey
         && [replay.from, replay.to].some(target => sessionKey(target) === sessionKey(selection))));
-    runtime.selection = selection; runtime.intent = intent; runtime.keepOriginal = keepOriginal;
-    if (!sameRole) {
-      runtime.desired = undefined; runtime.result = undefined; runtime.error = undefined; retireBinding();
+    const sameView = slotId && desired?.slot.id === slotId;
+    const slot = intent === 'history' ? undefined : ensureView(selection, slotId);
+    const restorePrimary = restoreLayout && slot?.id === runtime.document.primary;
+    if (slot && attached) slot.metadata = compositionSessionMetadata(attached);
+    runtime.selection = selection; runtime.intent = intent; runtime.keepOriginal = keepOriginal; runtime.selectedSlot = slot?.id;
+    if (slot) { runtime.document.primary = slot.id; runtime.document.address = slot.id; runtime.document.editRevision++; }
+    if (!sameRole && !sameView) {
+      if (slot && !restorePrimary) { runtime.document.focus = slot.id; runtime.document.anchor = slot.id; }
+      runtime.navigationAttempt = true;
+      retireBinding(selection); runtime.desired = undefined; runtime.result = undefined; runtime.error = undefined;
     }
     runtime.active = true; publish();
     await discover();
     return runtime.active;
   }
   function leave() {
-    runtime.sequence++; runtime.metadata?.abort(); retireBinding(); runtime.desired = undefined; runtime.active = false; publish();
+    runtime.navigation?.abort(); runtime.navigation = undefined;
+    runtime.sequence++; runtime.metadata?.abort(); retireBinding(); runtime.desired = undefined; runtime.selectedSlot = undefined; runtime.active = false; publish();
+  }
+  function restoreSelection(requested: Selection) {
+    const address = runtime.document.slots.find(slot => slot.id === runtime.document.address);
+    const primary = runtime.intent !== 'history' && address && address.intent.kind !== 'history' && sessionKey(compositionSelection(address)) === sessionKey(requested)
+      ? runtime.document.slots.find(slot => slot.id === runtime.document.primary) : undefined;
+    runtime.selection = primary ? compositionSelection(primary) : requested;
+    runtime.selectedSlot = primary?.id;
+  }
+  function retry() {
+    if (!live()) return;
+    if (!runtime.readable) {
+      const read = initializeCompositionDocument(options.scope);
+      if (read.status === 'ready') {
+        runtime.document = read.document; runtime.readable = true;
+        runtime.applications.clear(); runtime.desired = undefined; runtime.result = undefined; runtime.error = undefined;
+        if (runtime.selection) restoreSelection(runtime.selection);
+        // Ask and Track must consume the verified document before recovery applies participants.
+        flushSync(publish);
+      }
+    }
+    runtime.attached = undefined; runtime.sideAttempted.clear();
+    if (runtime.result?.status === 'applied') void attachDesired(true); else void discover();
   }
   function canPrune(favorites: SessionStars, session: Selection): boolean {
     if (!live() || !runtime.discovered || runtime.discovering || !favorites.ready || favorites.scope !== options.scope) return false;
@@ -457,12 +580,10 @@ export function useSessionSuccession(options: SuccessionOptions) {
     }
     if (newer) void discover();
   }
-  function ownerFor(source: Selection) {
-    const ask = latest.current.ask();
-    const owner = ask.ownerIndex().owners.find(owner => owner.legacySourceKey === sessionKey(source));
-    if (owner) return owner.id;
-    const slot = slotFor(source) ?? (runtime.desired && sessionKey({ hostId: runtime.desired.target.hostId, ...runtime.desired.target.native }) === sessionKey(source) ? runtime.desired.slot : undefined);
-    return slot && ask.ownerIndex().owners.find(owner => owner.sourceSlot === slot.id)?.id;
+  function ownerFor(viewId: string): string {
+    const owner = runtime.document.asks.find(owner => owner.sourceSlot === viewId);
+    if (!owner) throw new Error('The session view has no Ask owner.');
+    return owner.id;
   }
   function reconcileAskRecipients() {
     const entries = latest.current.ask().entries;
@@ -510,14 +631,17 @@ export function useSessionSuccession(options: SuccessionOptions) {
       supplier.update();
     }
   }
-  useEffect(() => { reconcileAskRecipients(); });
+  useEffect(() => { reconcileAskRecipients(); restoreSides(); });
   useEffect(() => {
     runtime.mounted = true;
-    if (live() && supported) {
+    if (live()) {
       if (!runtime.initialStarted) {
         runtime.initialStarted = true;
         const target = options.initial;
-        if (target?.providerId && target.nativeSessionId) runtime.selection = { hostId: target.hostId, providerId: target.providerId, nativeSessionId: target.nativeSessionId, title: latest.current.known().find(source => sessionKey(source) === sessionKey(target as Selection))?.title ?? 'Session' };
+        if (target?.providerId && target.nativeSessionId) {
+          const requested = { hostId: target.hostId ?? 'local', providerId: target.providerId, nativeSessionId: target.nativeSessionId, title: 'Session', parentNativeSessionId: target.parentNativeSessionId };
+          restoreSelection(requested);
+        }
       }
       void discover();
     }
@@ -525,41 +649,72 @@ export function useSessionSuccession(options: SuccessionOptions) {
     const stop = options.transport.onSessionSuccession?.(() => {
       if (live() && supported) void discover();
     });
-    const resume = watchPageResume(() => { if (live() && supported) { runtime.binding?.resumeRecipient(); for (const supplier of runtime.askRecipients.values()) supplier.update(); void discover(); } }, () => {
+    const resume = watchPageResume(() => { if (live()) { runtime.binding?.resumeRecipient(); for (const supplier of runtime.askRecipients.values()) supplier.update(); void discover(); } }, () => {
       runtime.binding?.retireRecipient(); for (const supplier of runtime.askRecipients.values()) supplier.retire();
     });
     return () => {
-      runtime.mounted = false; runtime.sequence++; runtime.metadata?.abort(); runtime.attachment?.abort(); runtime.binding?.stop();
+      runtime.mounted = false; runtime.sequence++; runtime.navigation?.abort(); runtime.metadata?.abort(); runtime.attachment?.abort(); runtime.binding?.stop();
+      runtime.navigationLease?.release();
       if (runtime.activeAttempt) runtime.attempted.delete(runtime.activeAttempt);
       runtime.activeAttempt = undefined; runtime.binding = undefined; stop?.(); resume(); stopConnections();
       for (const supplier of runtime.askRecipients.values()) supplier.stop(); runtime.askRecipients.clear();
+      for (const request of runtime.sideRequests.values()) request.abort(); runtime.sideRequests.clear();
     };
   }, [runtime, options.enabled]);
   const bound = runtime.binding?.isCurrent() ? runtime.binding : undefined;
   const desired = runtime.desired, selection = runtime.selection;
   const selected: SessionEntry | undefined = desired ? { hostId: desired.target.hostId, providerId: desired.target.native.providerId, nativeSessionId: desired.target.native.nativeSessionId,
     title: desired.title, ...(bound ? { agentId: bound.session.agentId } : {}) } : undefined;
+  function localViews() {
+    const localIds = new Set(desired && runtime.intent !== 'history' ? [desired.slot.id] : []);
+    for (let size = -1; size !== localIds.size;) {
+      size = localIds.size;
+      for (const retained of runtime.document.retained) if (localIds.has(retained.slot) || localIds.has(retained.against)) { localIds.add(retained.slot); localIds.add(retained.against); }
+    }
+    return localIds.size > 1 ? runtime.document.slots.filter(slot => localIds.has(slot.id)).map(slot => ({ slotId: slot.id, session: { ...selectionFor(slot), title: slotTitle(slot) } })) : [];
+  }
   return {
-    active: supported && runtime.active && (options.enabled || !!desired), discovering: options.enabled && supported && (!runtime.discovered || runtime.discovering), document: runtime.document, desired, selected,
-    state: bound?.replica.getState(), sessionState: bound?.client.getSessionState() ?? remoteSessionState(undefined, 'idle'),
+    active: runtime.active && (options.enabled || !!desired), discovering: options.enabled && (!runtime.discovered || runtime.discovering), document: runtime.document, desired, selected,
+    state: bound?.replica.getState(), sessionState: bound?.client.getSessionState() ?? remoteSessionState(undefined, desired ? 'connecting' : 'idle'),
     layoutView, layoutRevision: runtime.layoutRevision, captureLayout, binding: bound, imageRecipient: bound?.recipient, error: runtime.error, result: runtime.result,
-    observerReady: !supported || live() && runtime.discovered && !runtime.discovering && (!runtime.active || !!bound),
-    isCurrent: () => !!runtime.binding?.isCurrent(), open, leave, refresh: discover, canPrune, observeFavorites,
-    retry: () => { if (!live()) return; if (runtime.result?.status === 'applied') void attachDesired(true); else void discover(); },
-    ownerFor,
-    recipientFor: (target: Selection, owner?: string) => {
-      const supplier = owner ? runtime.askRecipients.get(owner) : [...runtime.askRecipients.values()].find(value => value.targetKey === sessionKey(target));
+    observerReady: live() && runtime.discovered && !runtime.discovering && (!runtime.active || !!bound),
+    isCurrent: () => !!runtime.binding?.isCurrent(), open,
+    restore: (session: OpenedSession) => open(session, undefined, undefined, undefined, undefined, undefined, undefined, true),
+    openAttached: (session: OpenedSession, restoreLayout = false) => open(session, undefined, undefined, undefined, undefined, undefined, session, restoreLayout),
+    leave, refresh: discover, canPrune, observeFavorites,
+    retry,
+    ownerFor, localViews, ensureView, save,
+    navigationIntent: { sessionIntent: runtime.intent, keepOriginal: runtime.keepOriginal },
+    updateTitles: (sessions: readonly SessionEntry[]) => {
+      if (!live() || !runtime.readable) return;
+      const titles = new Map(sessions.map(session => [sessionKey(session), session.title]));
+      let changed = false;
+      for (const slot of runtime.document.slots) {
+        const title = titles.get(sessionKey(selectionFor(slot)));
+        if (title === undefined || slot.metadata?.title === title) continue;
+        slot.metadata = { ...slot.metadata, title }; changed = true;
+        if (runtime.desired?.slot === slot) runtime.desired.title = title;
+        if (runtime.binding?.session.viewId === slot.id) runtime.binding.session.title = title;
+        const side = runtime.sides.get(slot.id); if (side) side.title = title;
+      }
+      if (changed) { runtime.document.editRevision++; save(); }
+    },
+    rememberSide: (session: OpenedSession & { viewId: string }) => {
+      const slot = explicitSlot(session, session.viewId);
+      if (!slot) throw new Error('The side view no longer matches this session.');
+      runtime.sides.set(slot.id, session); slot.metadata = compositionSessionMetadata(session);
+      runtime.document.editRevision++; save();
+    },
+    recipientFor: (target: Selection, owner: string) => {
+      const supplier = runtime.askRecipients.get(owner);
       return supplier?.targetKey === sessionKey(target) ? supplier.recipient : undefined;
     },
     sourceCurrent: (source: OpenedSession) => {
-      if (!supported) return true;
-      const primarySource = desired ? desired.slot.owners.text.key === source.agentId
-        || bound?.session.agentId === source.agentId && sessionKey(bound.session) === sessionKey(source)
-        : selection && sessionKey(selection) === sessionKey(source);
-      if (primarySource) return live() && runtime.desired === desired && runtime.selection === selection && (desired
-        ? !!runtime.binding?.isCurrent() && runtime.binding.session.agentId === source.agentId && sessionKey(runtime.binding.session) === sessionKey(source)
-        : !runtime.active && runtime.discovered);
-      return !runtime.active || live();
+      const id = (source as { viewId?: string }).viewId, slot = runtime.document.slots.find(slot => slot.id === id);
+      if (!live() || !slot || sessionKey(selectionFor(slot)) !== sessionKey(source)) return false;
+      if (id === desired?.slot.id) return !!runtime.binding?.isCurrent() && runtime.binding.session.agentId === source.agentId;
+      const connection = latest.current.connections.find(source), agent = connection?.replica.getState().agent;
+      return agent?.id === source.agentId && agent.providerId === source.providerId && agent.runtimeInfo.sessionId === source.nativeSessionId;
     },
   };
 }

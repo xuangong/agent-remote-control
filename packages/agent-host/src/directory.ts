@@ -1,4 +1,5 @@
-import { AgentSessionInUseError } from '@orchardworks/agent-provider-sdk';
+import { successionResumeHandle } from './local-succession-preparation.js';
+import { AgentSessionInUseError, serializeAgentEmptyCreationResult } from '@orchardworks/agent-provider-sdk';
 import { NativeSessionOwnerError } from './native-session-owner.js';
 import { SessionReferenceStore, disposeAfterSourceGrantFailure, sourceSessionExtensions, type SourceBindingReader } from './session-reference.js';
 import { randomUUID } from 'node:crypto';
@@ -9,11 +10,11 @@ import { requireSessionExtensionIdentity, sessionExtensionIdentity } from './ses
 
 /** Keeps new native sessions alive before and after their relay projection is attached. */
 export function createCodexSessionDirectory(
-  provider: Pick<CodexAppServerProvider, 'listSessions' | 'createSession' | 'resumeSession' | 'openChildSession'> & Partial<Pick<CodexAppServerProvider, 'inspectSessionOwner' | 'releaseSessionOwner' | 'readSessionTitle' | 'renameSession' | 'readSessionHistory' | 'readSessionWorkspace' | 'canReleaseSession' | 'reconcileIdleSession' | 'forkSession' | 'forkForPromptEdit' | 'validatePromptEdit'>>,
+  provider: Pick<CodexAppServerProvider, 'listSessions' | 'createSession' | 'resumeSession' | 'openChildSession'> & Partial<Pick<CodexAppServerProvider, 'createdSessionIdMaxLength' | 'inspectSessionOwner' | 'releaseSessionOwner' | 'readSessionTitle' | 'renameSession' | 'readSessionHistory' | 'readSessionWorkspace' | 'canReleaseSession' | 'reconcileIdleSession' | 'forkSession' | 'forkForPromptEdit' | 'validatePromptEdit'>>,
   workspaces: readonly AgentHostWorkspace[],
   references?: SessionReferenceStore,
 ): AgentHostDirectory {
-  const opened = new Map<string, { session: AgentSession; handle: AgentPersistenceHandle; createdAt: string; extensionIdentity: string }>();
+  const opened = new Map<string, { session: AgentSession; handle: AgentPersistenceHandle; createdAt: string; extensionIdentity: string; nativeCreation?: string }>();
   const controllerTools = new Set<string>();
   let discovery: Promise<CodexSessionSummary[]> | undefined;
   let closed = false;
@@ -87,6 +88,11 @@ export function createCodexSessionDirectory(
     canReleaseSession: id => provider.canReleaseSession?.(id) === true,
     sessionReleased(id) { opened.delete(id); controllerTools.delete(id); },
     supportsSourceReferences: !!references && !!provider.readSessionHistory,
+    async supportsBoundedSourceCreate(input) {
+      const limit = provider.createdSessionIdMaxLength;
+      return !closed && !!input.sourceNativeSessionId?.trim() && !input.editNativeSessionId && !input.editTurnId && !input.editMessageId
+        && typeof limit === 'number' && Number.isInteger(limit) && limit > 0 && limit <= 512;
+    },
     ...(provider.readSessionWorkspace ? { sessionWorkspace: provider.readSessionWorkspace.bind(provider) } : {}),
     setSourceAccessCheck(check) { sourceAccessCheck = check; },
     setSourceBindingReader(reader) { sourceBindingReader = reader; },
@@ -133,8 +139,11 @@ export function createCodexSessionDirectory(
     },
     async open(nativeSessionId, options) {
       if (closed) throw new Error('Codex directory is closed.');
+      const handle = successionResumeHandle('codex', nativeSessionId, options?.nativeCreation, options?.resumeHandle);
+      const creationIdentity = options?.nativeCreation ? serializeAgentEmptyCreationResult(options.nativeCreation) : undefined;
       const existing = opened.get(nativeSessionId);
       const reusable = existing && (await existing.session.runtimeInfo()).status !== 'closed';
+      if (reusable && creationIdentity && existing.nativeCreation !== creationIdentity) throw new Error('Existing attachment does not match the original native creation evidence.');
       if (reusable && options?.extensions === undefined) return existing.session;
       const grant = await references?.get(nativeSessionId);
       if (grant && !provider.readSessionHistory) throw new Error('Source history tools are unavailable on this Host.');
@@ -147,7 +156,7 @@ export function createCodexSessionDirectory(
       }
       const identity = sessionExtensionIdentity(resumedExtensions);
       // Let native saved settings win after a Host restart; only restore Host instructions and tools.
-      const resume = () => provider.resumeSession(existing?.handle ?? { providerId: 'codex', sessionId: nativeSessionId, opaque: '{}' },
+      const resume = () => provider.resumeSession(handle ?? existing?.handle ?? { providerId: 'codex', sessionId: nativeSessionId, opaque: '{}' },
         resumedExtensions);
       let session: AgentSession;
       try { session = await resume(); }
@@ -166,7 +175,9 @@ export function createCodexSessionDirectory(
         try { session = await resume(); }
         catch { throw new NativeSessionOwnerError('native_handoff_unknown', 'The original Codex client was asked to stop, but shared recovery was not confirmed. Check the session before retrying.'); }
       }
-      await remember(session, identity);
+      const resumedId = await remember(session, identity);
+      if (resumedId !== nativeSessionId) { opened.delete(resumedId); await session.dispose(); throw new Error('Native creation attachment identity changed.'); }
+      if (creationIdentity) opened.get(nativeSessionId)!.nativeCreation = creationIdentity;
       if (extensions?.tools?.length || options?.extensions?.tools?.length) controllerTools.add(nativeSessionId);
       return session;
     },

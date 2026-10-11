@@ -16,6 +16,11 @@ export function openCodeModel(value?: string): { providerID: string; modelID: st
   return { providerID: value.slice(0, separator), modelID: value.slice(separator + 1) };
 }
 
+export function nativeSelections(session: Session | undefined): { model: string; agent: string; variant?: string } | undefined {
+  if (!session?.agent || !session.model?.providerID || !session.model.id) return;
+  return { agent: session.agent, model: `${session.model.providerID}/${session.model.id}`, ...(session.model.variant ? { variant: session.model.variant } : {}) };
+}
+
 /** Session-local native controls; never writes project or global configuration. */
 export class OpenCodeSettings {
   private providers?: ProviderListResponse;

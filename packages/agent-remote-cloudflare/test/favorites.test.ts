@@ -5,7 +5,7 @@ it('persists the account favorites tree through Durable Object restart and enfor
   const f = await fixture(); const alice = await f.login('alice'); const bob = await f.login('bob');
   const path = alice.basePath + 'v1/favorites';
   expect((await f.request(path)).status).toBe(401);
-  expect(await (await f.json(path, alice.cookie)).json()).toEqual({ revision: 0, folders: [], stars: [] });
+  expect(await (await f.json(path, alice.cookie)).json()).toEqual({ revision: 0, folders: [], stars: [], successionProgress: { version: 1, roles: [] } });
   const create = await f.json(path, alice.cookie, { type: 'create-folder', id: 'folder', parentId: null, title: 'Work', revision: 0 });
   expect(create.status).toBe(200);
   expect(await create.json()).toMatchObject({ revision: 1, folders: [{ id: 'folder', title: 'Work', parentId: null, order: 0 }] });
@@ -25,7 +25,7 @@ it('persists the account favorites tree through Durable Object restart and enfor
   await f.restart();
   const restored = await (await f.json(path, alice.cookie)).json() as any;
   expect(restored).toMatchObject({ revision: 2, folders: saved.folders, stars: [{ favoriteId: saved.stars[0].favoriteId, folderId: 'folder', order: 0 }] });
-  expect(await (await f.json(bob.basePath + 'v1/favorites', bob.cookie)).json()).toEqual({ revision: 0, folders: [], stars: [] });
+  expect(await (await f.json(bob.basePath + 'v1/favorites', bob.cookie)).json()).toEqual({ revision: 0, folders: [], stars: [], successionProgress: { version: 1, roles: [] } });
   const { title: _, ...identity } = session;
   expect((await f.json(alice.basePath + 'v1/stars', alice.cookie, identity, 'DELETE')).status).toBe(200);
   expect(await (await f.json(path, alice.cookie)).json()).toMatchObject({ revision: 3, stars: [] });

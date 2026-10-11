@@ -1,5 +1,6 @@
 import { createHostedRelay, validateGatewayOrigin, type RelayScheduler } from '@orchardworks/agent-remote-hosted';
 import { SqliteRelayStore } from './storage.js';
+import { encodeSqlSnapshot, quoteSqlRecord, SQL_CHUNK_BYTES, SQL_RECORD_FORMAT, SQL_SNAPSHOT_FORMAT } from './storage-codec.js';
 import { SqliteDiagnosticStore } from './diagnostic-storage.js';
 import { WorkerRelaySocket } from './socket.js';
 import { WorkerPreviewSocket } from './preview-socket.js';
@@ -44,7 +45,12 @@ export class RelayObject {
         await this.context.storage.setAlarm(Date.now() + 60_000);
       },
     };
-    this.core = createHostedRelay({ ...auth, previewOrigin: this.env.AGENT_REMOTE_PREVIEW_URL, previewDomain: this.env.AGENT_REMOTE_PREVIEW_DOMAIN, storage, diagnosticStorage: new SqliteDiagnosticStore(this.context.storage, auth),
+    this.core = createHostedRelay({ ...auth, previewOrigin: this.env.AGENT_REMOTE_PREVIEW_URL, previewDomain: this.env.AGENT_REMOTE_PREVIEW_DOMAIN, storage, successionEnrollment: true, diagnosticStorage: new SqliteDiagnosticStore(this.context.storage, auth),
+      successionEncodingCosts: {
+        measureSnapshot: state => ({ snapshotFormat: SQL_SNAPSHOT_FORMAT, recordFormat: SQL_RECORD_FORMAT,
+          chunkBytes: SQL_CHUNK_BYTES, costs: encodeSqlSnapshot(state, auth).costs }),
+        quoteRecord: quoteSqlRecord,
+      },
       diagnosticContext: { runtimeInstanceId: this.runtimeInstanceId, workerVersionId: this.env.CF_VERSION_METADATA?.id, startReason }, scheduler, clientAddress: request => request.headers.get('cf-connecting-ip') ?? 'unknown' });
   }
   async fetch(request: Request): Promise<Response> {

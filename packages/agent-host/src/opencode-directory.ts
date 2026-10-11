@@ -8,7 +8,7 @@ import { successionCreationHandle } from './local-succession-preparation.js';
 import { serializeAgentEmptyCreationResult } from '@orchardworks/agent-provider-sdk';
 
 type OpenCodeDirectoryProvider = Pick<OpenCodeAgentProvider, 'listSessions' | 'getSession' | 'createSession' | 'resumeSession' | 'renameSession' | 'close'>
-  & Partial<Pick<OpenCodeAgentProvider, 'forkForPromptEdit' | 'validatePromptEdit' | 'openChildSession' | 'readSessionHistory'>>;
+  & Partial<Pick<OpenCodeAgentProvider, 'createdSessionIdMaxLength' | 'forkForPromptEdit' | 'validatePromptEdit' | 'openChildSession' | 'readSessionHistory'>>;
 
 /** The native server owns all work; directory lifetime only controls local subscriptions. */
 export function createOpenCodeSessionDirectory(provider: OpenCodeDirectoryProvider, workspaces: readonly AgentHostWorkspace[], references?: SessionReferenceStore, callbacksAvailable = false): AgentHostDirectory {
@@ -49,6 +49,11 @@ export function createOpenCodeSessionDirectory(provider: OpenCodeDirectoryProvid
   return {
     providerId: 'opencode',
     supportsSourceReferences: callbacksAvailable && !!references && !!provider.readSessionHistory,
+    async supportsBoundedSourceCreate(input) {
+      const limit = provider.createdSessionIdMaxLength;
+      return !closed && !!input.sourceNativeSessionId?.trim() && !input.editNativeSessionId && !input.editTurnId && !input.editMessageId
+        && typeof limit === 'number' && Number.isInteger(limit) && limit > 0 && limit <= 512;
+    },
     requiresController: id => controllerTools.has(id),
     supportsPromptEditing: !!provider.forkForPromptEdit,
     setSourceAccessCheck(check) { sourceAccessCheck = check; },
@@ -135,9 +140,12 @@ export function createOpenCodeSessionDirectory(provider: OpenCodeDirectoryProvid
       const grant = await references?.get(id);
       if (grant && (!callbacksAvailable || !provider.readSessionHistory)) throw new Error('OpenCode source references require a connected native callback plugin.');
       if (grant) { await sourceAccessCheck?.(grant.sourceNativeSessionId); if (!await summary(grant.sourceNativeSessionId)) throw new Error('OpenCode source session was not found.'); }
-      const extensions = grant ? sourceExtensions(grant.sourceNativeSessionId, () => id) : undefined;
+      const sourceGrant = grant ? sourceExtensions(grant.sourceNativeSessionId, () => id) : undefined;
+      const tools = [...(sourceGrant?.tools ?? []), ...(options?.extensions?.tools ?? [])];
+      const systemPrompt = [grant?.systemPrompt, options?.extensions?.systemPrompt].filter(Boolean).join('\n\n');
+      const extensions = sourceGrant || options?.extensions ? { ...(tools.length ? { tools } : {}), ...(systemPrompt ? { systemPrompt } : {}) } : undefined;
       const session = await provider.resumeSession(creationHandle ?? { providerId: 'opencode', sessionId: id, opaque: JSON.stringify({ cwd: native.cwd }) },
-        extensions ? { tools: extensions.tools, systemPrompt: grant!.systemPrompt } : undefined);
+        extensions);
       const resumed = await remember(session);
       if (resumed !== id) { opened.delete(resumed); await session.dispose(); throw new Error('Native creation attachment identity changed.'); }
       if (creationIdentity) opened.get(id)!.nativeCreation = creationIdentity;

@@ -4,7 +4,7 @@ import type { RelationChangeReset, BrokerRelationChange } from './relation-chang
 import { isDeepStrictEqual } from 'node:util';
 import { retainedHostIdentities, retainedRecoveryInstallations, type HostRecoverySelection, type RevokedHost } from './host-recovery.js';
 import { validBrokerAssociations, migrateBrokerAssociations, type BrokerAssociationState } from './succession-associations.js';
-import { isNativeSessionRef, isPrimaryRole, isSuccessionRecord, nativeSessionRefKey, successionFreezeKey, successionAuthorityKey, type NativeSessionRef, type SuccessionAssociationFreeze, type BoundedSuccessionAssociationFreeze, type PrimaryRole, type SuccessionRecord } from '@orchardworks/agent-remote-protocol';
+import { isNativeSessionRef, isPrimaryRole, isSuccessionRecord, isSuccessionDescription, nativeSessionRefKey, successionFreezeKey, successionAuthorityKey, type NativeSessionRef, type SuccessionAssociationFreeze, type BoundedSuccessionAssociationFreeze, type PrimaryRole, type SuccessionRecord } from '@orchardworks/agent-remote-protocol';
 import { type SuccessionAssociationAuthority, isSuccessionAssociationAuthority } from '@orchardworks/agent-remote-protocol';
 import { isTpmAction, isTpmCreate, isTpmList, isTpmWork } from '@orchardworks/agent-remote-protocol';
 import { validSessionRelationUpdate, validSourceRelation, type SourceRelation, type SessionRelation } from './session-relations.js';
@@ -224,6 +224,15 @@ export function createHostBroker(options: HostBrokerOptions) {
   async function successionAction(host: Host, action: string, input: Record<string, unknown>) {
     const generation = host.generation; assertHostCurrent(host);
     if (!options.successionEnrollment || !host.successionEnrollmentVersion) throw new BrokerError(409, 'succession_enrollment_unavailable', 'Trusted succession enrollment was not negotiated.');
+    if (action === 'describe') {
+      if (Object.keys(input).some(name => !['providerId', 'nativeSessionId'].includes(name))) throw new BrokerError(400, 'invalid_succession_request', 'Only the source selection may be supplied.');
+      const providerId = required(input.providerId, 'providerId'), nativeSessionId = required(input.nativeSessionId, 'nativeSessionId');
+      const described = await associationRpc(host, { action, providerId, nativeSessionId });
+      const result = { role: described.role, targets: described.targets, eligibility: described.eligibility };
+      if (!isSuccessionDescription(result) || result.role.current.controllerId !== host.installationId) throw new BrokerError(502, 'invalid_host_response', 'Invalid handoff description.');
+      if (host.successionEnrollmentVersion !== 2 || !options.successionProjectionAllowance) result.eligibility = { status: 'unavailable', code: 'succession_preparation_unavailable', reason: 'New handoff requires the current Host and Relay capability.' };
+      return result;
+    }
     const allowed = action === 'prepare' ? ['operationId', 'providerId', 'nativeSessionId', 'expectedRevision', 'targetProviderId'] : ['operationId'];
     if (Object.keys(input).some(name => !allowed.includes(name))) throw new BrokerError(400, 'invalid_succession_request', 'Only source selection and operation identity may be supplied.');
     const operationId = required(input.operationId, 'operationId');
@@ -1200,7 +1209,7 @@ export function createHostBroker(options: HostBrokerOptions) {
       if (access?.status === 'rejected') throw new BrokerError(access.httpStatus, access.code, access.message);
     }
     const subject = principal(context);
-    const succession = /^\/v1\/remote\/hosts\/([^/]+)\/succession\/(prepare|commit|cancel|status|reconcile)$/.exec(url.pathname);
+    const succession = /^\/v1\/remote\/hosts\/([^/]+)\/succession\/(describe|prepare|commit|cancel|status|reconcile)$/.exec(url.pathname);
     if (succession) {
       requireOwner(subject); requireAccess(succession[1]!, subject);
       if (request.method !== 'POST') return json(405, { error: 'Method is not allowed.' });

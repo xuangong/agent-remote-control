@@ -102,7 +102,7 @@ it('checks a cold Claude workspace by ID without relying on the catalog', async 
   const directory = protectHostDirectory(source, (await createHostExecutionPolicy({AGENT_HOST_WORKSPACE: cwd}))!);
   try {
     expect((await (await directory.open('cold')).runtimeInfo()).cwd).toBe(cwd);
-    expect(lookup).toHaveBeenCalledWith('cold');
+    expect(lookup).toHaveBeenCalledWith('cold', undefined);
     expect(list).not.toHaveBeenCalled();
     lookup.mockResolvedValue(undefined);
     await expect(directory.open('missing')).rejects.toThrow(/workspace/i);

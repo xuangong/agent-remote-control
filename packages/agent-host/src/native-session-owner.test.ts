@@ -1,7 +1,7 @@
-import {mkdtemp, rm} from 'node:fs/promises';
+import {mkdtemp, readdir, rm} from 'node:fs/promises';
 import {join} from 'node:path';
 import {tmpdir} from 'node:os';
-import {afterEach, expect, it} from 'vitest';
+import {afterEach, expect, it, vi} from 'vitest';
 import {acquireNativeSession, inspectNativeOwner, type NativeSessionLease} from './native-session-owner.js';
 const roots: string[] = [], leases: NativeSessionLease[] = [];
 afterEach(async () => { await Promise.all(leases.splice(0).map(lease => lease.release())); await Promise.all(roots.splice(0).map(root => rm(root, {recursive:true, force:true}))); });
@@ -13,10 +13,13 @@ it('fences the former writer before closing, transferring only after release con
   let finish!: () => void; const stopped = new Promise<void>(resolve => {finish=resolve;});
   old.activate(async () => {events.push('interrupt'); await stopped; events.push('released'); return 'requested';});
   await expect(acquire({...f, kind:'controller'})).rejects.toMatchObject({code:'native_session_owned', owner:{kind:'native_cli', generation:old.generation}});
-  const opening = acquire({...f, kind:'controller', takeOver:old.generation});
-  await new Promise(resolve => setTimeout(resolve, 50));
-  expect(old.active).toBe(false); expect(events).toEqual(['interrupt']);
-  finish(); const next = await opening; next.activate(async () => 'requested');
+  const opening = acquire({...f, kind:'controller', takeOver:old.generation, requestTimeoutMs:2000});
+  const settled = opening.then(() => undefined, () => undefined);
+  try {
+    await expect.poll(() => events, {timeout:1500}).toEqual(['interrupt']);
+    expect(old.active).toBe(false);
+  } finally { finish(); await settled; }
+  const next = await opening; next.activate(async () => 'requested');
   expect(events).toEqual(['interrupt','released']); expect(next.active).toBe(true);
   await old.release(); expect((await inspectNativeOwner(f))?.generation).toBe(next.generation);
   await expect(acquire({...f, kind:'native_cli', takeOver:old.generation})).rejects.toMatchObject({code:'native_owner_changed'});
@@ -67,9 +70,31 @@ it('classifies a dead owner as unexpected and reclaims only the ARC reservation'
 },5000);
 
 it('does not strand a successor reservation when release completes after the request deadline',async()=>{
-  const f=await fixture();const old=await acquire({...f,kind:'native_cli'});
-  old.activate(async()=>{await new Promise(resolve=>setTimeout(resolve,80));return 'requested';});
-  await expect(acquire({...f,kind:'controller',takeOver:old.generation,requestTimeoutMs:25})).rejects.toMatchObject({code:'native_handoff_unknown'});
-  await new Promise(resolve=>setTimeout(resolve,100));
-  const next=await acquire({...f,kind:'controller'});next.activate(async()=> 'requested');expect(next.active).toBe(true);
+  const f=await fixture();const events:string[]=[];let released=false;
+  let entered!:()=>void, finish!:()=>void, cleaned!:()=>void;
+  const stopEntered=new Promise<void>(resolve=>{entered=resolve;});
+  const stopAllowed=new Promise<void>(resolve=>{finish=resolve;});
+  const transferCleaned=new Promise<void>(resolve=>{cleaned=resolve;});
+  const old=await acquire({...f,kind:'native_cli',onDiagnostic:event=>{
+    events.push(event.event);if(event.event==='native_handoff_failed')cleaned();
+  }});
+  old.activate(async()=>{entered();await stopAllowed;released=true;return 'requested';});
+  // Expire the request only after the real HTTP handler has begun native release.
+  const deadline=new AbortController();
+  const timeout=vi.spyOn(AbortSignal,'timeout').mockReturnValueOnce(deadline.signal);
+  const opening=acquire({...f,kind:'controller',takeOver:old.generation,requestTimeoutMs:25})
+    .then(lease=>({lease}),error=>({error}));
+  try {
+    await stopEntered;expect(timeout).toHaveBeenCalledWith(25);
+    deadline.abort(new DOMException('The request deadline expired.','TimeoutError'));
+    expect(await opening).toMatchObject({error:{code:'native_handoff_unknown'}});
+    expect(old.active).toBe(false);expect(released).toBe(false);
+    expect((await inspectNativeOwner(f))?.generation).toBe(old.generation);
+    expect((await readdir(f.root)).filter(name=>name.includes('.reservation-'))).toEqual([]);
+    finish();await transferCleaned;
+    expect(released).toBe(true);expect(await inspectNativeOwner(f)).toBeUndefined();
+    expect(events).toEqual(['native_handoff_started','native_handoff_failed']);
+    const next=await acquire({...f,kind:'controller'});next.activate(async()=> 'requested');expect(next.active).toBe(true);
+    await old.release();expect((await inspectNativeOwner(f))?.generation).toBe(next.generation);
+  } finally {deadline.abort();finish();await opening;timeout.mockRestore();}
 },5000);

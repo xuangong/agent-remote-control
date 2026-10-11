@@ -1,25 +1,24 @@
 import type { OpenedSession } from './directory-client.js';
-import { sessionKey } from './session-tree.js';
 
 export type SideSelections = Readonly<Record<string, string | null>>;
 
 /** Selected edges define a path; cached views retain sibling branches independently. */
-export function sidePath(root: OpenedSession | undefined, sessions: readonly OpenedSession[], selections: SideSelections): OpenedSession[] {
+export function sidePath(root: OpenedSession | undefined, sessions: readonly OpenedSession[], selections: SideSelections, key: (session: OpenedSession) => string): OpenedSession[] {
   if (!root) return [];
-  const available = new Map(sessions.map((session) => [sessionKey(session), session]));
+  const available = new Map(sessions.map((session) => [key(session), session]));
   const path = [root];
-  const visited = new Set([sessionKey(root)]);
+  const visited = new Set([key(root)]);
   for (;;) {
-    const selected = selections[sessionKey(path[path.length - 1]!)];
+    const selected = selections[key(path[path.length - 1]!)];
     const next = selected ? available.get(selected) : undefined;
-    if (!next || visited.has(sessionKey(next))) return path;
-    visited.add(sessionKey(next));
+    if (!next || visited.has(key(next))) return path;
+    visited.add(key(next));
     path.push(next);
   }
 }
 
-export function expandedSideRange(path: readonly OpenedSession[], focused: string | undefined, capacity: number): { start: number; end: number } {
-  const selected = focused ? path.findIndex((session) => sessionKey(session) === focused) : -1;
+export function expandedSideRange(path: readonly OpenedSession[], focused: string | undefined, capacity: number, key: (session: OpenedSession) => string): { start: number; end: number } {
+  const selected = focused ? path.findIndex((session) => key(session) === focused) : -1;
   const end = selected < 0 ? Math.max(0, path.length - 1) : selected;
   return { start: Math.max(0, end - Math.max(1, capacity) + 1), end };
 }

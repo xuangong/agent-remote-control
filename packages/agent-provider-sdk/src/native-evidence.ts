@@ -20,34 +20,49 @@ const creationBytes = Math.max(
   ...Object.entries(AGENT_NATIVE_EVIDENCE_REASONS).map(([code, reason]) =>
     16384 + JSON.stringify({ status: 'known_rejected', handle: null, code, reason }).length - 4),
 );
-/** Finite policy for optional evidence v1, not native runtime maxima. */
-export const AGENT_NATIVE_EVIDENCE_LIMITS = Object.freeze({ providerBytes: 64, identityBytes: 256, selectionBytes: 512, cwdBytes: 4096, textBytes: 2097152, systemBytes: 16384, witnessBytes: 3145728, materializationBytes: 32768, handleBytes: 16384, creationBytes, reasonBytes: 512, codeBytes: 64 });
+/** Finite policy for optional evidence v2, not native runtime maxima. */
+export const AGENT_NATIVE_EVIDENCE_LIMITS = Object.freeze({ providerBytes: 64, identityBytes: 256, selectionBytes: 512, cwdBytes: 4096, textBytes: 2097152, systemBytes: 16384, providerOptionsBytes: 16384, witnessBytes: 3145728, materializationBytes: 32768, handleBytes: 16384, creationBytes, reasonBytes: 512, codeBytes: 64 });
 export type AgentNativeEvidenceCode = keyof typeof AGENT_NATIVE_EVIDENCE_REASONS;
-export type AgentNativeEvidenceAvailability = { status: 'configured'; version: 1 } | { status: 'unavailable'; code: AgentNativeEvidenceCode; reason: string };
-export type AgentEmptySessionConfig = Pick<AgentSessionConfig, 'sessionId' | 'cwd'>;
+export type AgentNativeEvidenceAvailability = { status: 'configured'; version: 2 } | { status: 'unavailable'; code: AgentNativeEvidenceCode; reason: string };
+export type AgentEmptySessionConfig = Pick<AgentSessionConfig, 'sessionId' | 'cwd'> & {
+  /** Same-provider native selection source only; never forks history or creates a parent relation. */
+  selectionSourceSessionId?: string;
+};
+/** Created may be a prepared empty descriptor. It must retain the same native identity without input; resume never implies permission to initialize missing history. */
 export type AgentEmptyCreationResult = { status: 'created'; handle: AgentPersistenceHandle } | { status: 'known_rejected'; handle: AgentPersistenceHandle; code: AgentNativeEvidenceCode; reason: string } | { status: 'unknown'; code: AgentNativeEvidenceCode; reason: string };
 export interface AgentProviderNativeEvidence {
   availability(): AgentNativeEvidenceAvailability;
   createEmpty(config: AgentEmptySessionConfig): Promise<AgentEmptyCreationResult>;
 }
-export type AgentNativeStoreIdentity = Readonly<{ authorityId: string; storeId: string }>;
+export type AgentNativeAuthorityScope = Readonly<{ kind: 'trusted-service' | 'owned-runtime'; authorityId: string; namespaceId: string }>;
+/** inputId is adapter-owned correlation, which need not be a preallocated native record ID. */
 export type AgentPreparedTextInput = Readonly<{
-  version: 1; providerId: string; nativeSessionId: string; nativeInputId: string; cwd: string;
-  store: AgentNativeStoreIdentity;
+  version: 2; providerId: string; nativeSessionId: string; inputId: string; cwd: string;
+  authority: AgentNativeAuthorityScope;
   parts: readonly [Readonly<{ type: 'text'; text: string }>];
   content: Readonly<{ encoding: 'utf-8'; bytes: number; sha256: string }>;
-  selections: Readonly<{ model?: string; agent?: string; variant?: string; system?: string; delivery?: 'immediate' }>;
+  selections: Readonly<{ model?: string; agent?: string; variant?: string; system?: string; reasoningEffort?: string; providerOptions?: string; delivery?: 'immediate' }>;
 }>;
 export type AgentTextInputProof = Readonly<{
-  version: 1; providerId: string; nativeSessionId: string; nativeInputId: string; cwd: string; store: AgentNativeStoreIdentity;
+  version: 2; providerId: string; nativeSessionId: string; inputId: string; nativeInputId: string; cwd: string; authority: AgentNativeAuthorityScope;
   witnessSha256: string; contentSha256: string; nativeSelectionsSha256: string; nativePartIds?: readonly [string];
 }>;
-export type AgentInputMaterialization = { status: 'materialized'; proof: AgentTextInputProof } | { status: 'unknown'; code: AgentNativeEvidenceCode; reason: string };
+export type AgentNativeInputExecution = Readonly<{ disposition: 'started'; nativeExecutionId: string }>;
+export type AgentInputMaterialization = { status: 'materialized'; proof: AgentTextInputProof; execution?: AgentNativeInputExecution } | { status: 'unknown'; code: AgentNativeEvidenceCode; reason: string };
 declare const nativeValidityToken: unique symbol;
 /** Process-local object identity owned by one attachment; never readiness or persistence. */
 export interface AgentNativeValidityToken { readonly [nativeValidityToken]: true; }
+export interface AgentNativeReadiness {
+  cwd: string;
+  idle: boolean;
+  pendingInputs: number;
+  pendingInteractions: number;
+  activeChildren: number;
+}
 export interface AgentSessionNativeEvidence {
   availability(): AgentNativeEvidenceAvailability;
+  /** Current adapter-owned observations; throws when required native facts are unavailable. */
+  inspectReadiness(): Promise<AgentNativeReadiness>;
   prepareInput(parts: readonly AgentInputPart[], options?: AgentMessageOptions): Promise<AgentPreparedTextInput>;
   dispatchInput(witness: AgentPreparedTextInput): Promise<AgentInputAcceptance | void>;
   inspectInput(witness: AgentPreparedTextInput): Promise<AgentInputMaterialization>;
@@ -83,9 +98,9 @@ function object(value: unknown, required: string[], optional: string[] = []): as
   const keys = Object.keys(value); if (required.some(key => !keys.includes(key)) || keys.some(key => !required.includes(key) && !optional.includes(key))) reject();
 }
 function validateIdentity(value: Record<string, any>): void {
-  if (value.version !== 1) reject(); identity(value.providerId, limits.providerBytes); identity(value.nativeSessionId); identity(value.nativeInputId);
+  if (value.version !== 2) reject(); identity(value.providerId, limits.providerBytes); identity(value.nativeSessionId); identity(value.inputId);
   string(value.cwd, limits.cwdBytes); if (value.cwd.includes('\0')) reject();
-  object(value.store, ['authorityId', 'storeId']); identity(value.store.authorityId); identity(value.store.storeId);
+  object(value.authority, ['kind', 'authorityId', 'namespaceId']); if (!['trusted-service', 'owned-runtime'].includes(value.authority.kind)) reject(); identity(value.authority.authorityId); identity(value.authority.namespaceId);
 }
 /** Copies only inert JSON data before schema access, rejecting accessors without invoking them. */
 function copyJson(value: unknown, ancestors = new Set<object>(), depth = 0): any {
@@ -120,14 +135,15 @@ function parse<T>(encoded: string, max: number, validate: (value: any) => void):
   if (encode(value, max, validate) !== encoded) reject(); return freeze(value as T);
 }
 function validateWitness(value: any): void {
-  object(value, ['version', 'providerId', 'nativeSessionId', 'nativeInputId', 'cwd', 'store', 'parts', 'content', 'selections']); validateIdentity(value);
+  object(value, ['version', 'providerId', 'nativeSessionId', 'inputId', 'cwd', 'authority', 'parts', 'content', 'selections']); validateIdentity(value);
   if (!Array.isArray(value.parts) || value.parts.length !== 1) reject(); object(value.parts[0], ['type', 'text']); if (value.parts[0].type !== 'text') reject();
   string(value.parts[0].text, limits.textBytes, true);
   object(value.content, ['encoding', 'bytes', 'sha256']); if (value.content.encoding !== 'utf-8' || !Number.isSafeInteger(value.content.bytes) || value.content.bytes < 0 || value.content.bytes !== bytes(value.parts[0].text).length) reject();
   digest(value.content.sha256); if (value.content.sha256 !== sha256(bytes(value.parts[0].text))) reject();
-  object(value.selections, [], ['model', 'agent', 'variant', 'system', 'delivery']);
-  for (const key of ['model', 'agent', 'variant']) if (key in value.selections) { string(value.selections[key], limits.selectionBytes); if (/[\u0000-\u001f\u007f-\u009f]/u.test(value.selections[key])) reject(); }
+  object(value.selections, [], ['model', 'agent', 'variant', 'system', 'reasoningEffort', 'providerOptions', 'delivery']);
+  for (const key of ['model', 'agent', 'variant', 'reasoningEffort']) if (key in value.selections) { string(value.selections[key], limits.selectionBytes); if (/[\u0000-\u001f\u007f-\u009f]/u.test(value.selections[key])) reject(); }
   if ('system' in value.selections) string(value.selections.system, limits.systemBytes, true);
+  if ('providerOptions' in value.selections) string(value.selections.providerOptions, limits.providerOptionsBytes, true);
   if ('delivery' in value.selections && value.selections.delivery !== 'immediate') reject();
 }
 function validateReason(value: Record<string, any>): void {
@@ -149,8 +165,9 @@ function validateMaterialization(value: any): void {
     validateReason(value);
     return;
   }
-  object(value, ['status', 'proof']); if (value.status !== 'materialized') reject(); const proof = value.proof;
-  object(proof, ['version', 'providerId', 'nativeSessionId', 'nativeInputId', 'cwd', 'store', 'witnessSha256', 'contentSha256', 'nativeSelectionsSha256'], ['nativePartIds']); validateIdentity(proof);
+  object(value, ['status', 'proof'], ['execution']); if (value.status !== 'materialized') reject(); const proof = value.proof;
+  object(proof, ['version', 'providerId', 'nativeSessionId', 'inputId', 'nativeInputId', 'cwd', 'authority', 'witnessSha256', 'contentSha256', 'nativeSelectionsSha256'], ['nativePartIds']); validateIdentity(proof); identity(proof.nativeInputId);
+  if ('execution' in value) { object(value.execution, ['disposition', 'nativeExecutionId']); if (value.execution.disposition !== 'started') reject(); identity(value.execution.nativeExecutionId); }
   digest(proof.witnessSha256); digest(proof.contentSha256); digest(proof.nativeSelectionsSha256);
   if ('nativePartIds' in proof) { if (!Array.isArray(proof.nativePartIds) || proof.nativePartIds.length !== 1) reject(); identity(proof.nativePartIds[0]); }
 }

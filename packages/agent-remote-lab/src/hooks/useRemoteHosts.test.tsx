@@ -2,7 +2,7 @@ import { act } from 'react';
 import { expect, it, vi } from 'vitest';
 import { App } from '../App.js';
 import { SessionDirectoryClient } from '../directory-client.js';
-import { render } from '../test/setup.js';
+import { render, setPromptText } from '../test/setup.js';
 import { replicaState } from '../test/fixtures.js';
 
 it('restores mobile conversation actions when its Host reconnects while Context is unmounted', async () => {
@@ -18,17 +18,19 @@ it('restores mobile conversation actions when its Host reconnects while Context 
   try {
     const container = await render(<App baseUrl={baseUrl} directory={directory} hostService={{ hosts, pair: vi.fn() }} initialState={replicaState} initialSessionStatus="ready" actions={{ sendMessage }} />);
     expect(container.querySelector('#lab-context')).toBeNull();
-    const input = container.querySelector<HTMLTextAreaElement>('[data-testid="prompt-input"]')!;
-    expect(input.disabled).toBe(false);
+    const input = container.querySelector<HTMLElement>('[data-testid="prompt-input"]')!;
+    expect(input.getAttribute('contenteditable')).toBe('true');
+    expect(input.getAttribute('aria-disabled')).not.toBe('true');
     expect(container.querySelector<HTMLButtonElement>('[data-testid="prompt-submit"]')!.disabled).toBe(true);
     const beforeReconnect = hosts.mock.calls.length;
     online = true;
     await act(async () => { await vi.advanceTimersByTimeAsync(5_000); });
     expect(hosts).toHaveBeenCalledTimes(beforeReconnect + 1);
     expect(container.querySelector('#lab-context')).toBeNull();
-    expect(input.disabled).toBe(false);
+    expect(input.getAttribute('contenteditable')).toBe('true');
+    expect(input.getAttribute('aria-disabled')).not.toBe('true');
     await act(async () => {
-      Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!.call(input, 'After the Host reconnects');
+      setPromptText(input, 'After the Host reconnects');
       input.dispatchEvent(new Event('input', { bubbles: true }));
     });
     expect(container.querySelector<HTMLButtonElement>('[data-testid="prompt-submit"]')!.disabled).toBe(false);

@@ -35,7 +35,8 @@ it.each(['approval', 'sandbox'])('queues native %s changes during a running resp
   await once(server, 'listening');
   const address = server.address();
   if (!address || typeof address === 'string') throw new Error('Missing local address');
-  await writeFile(join(home, 'config.toml'), `model = "gpt-5.4"\nmodel_reasoning_effort = "high"\nmodel_provider = "mock"\napproval_policy = "never"\nsandbox_mode = "read-only"\n[model_providers.mock]\nname = "Local settings transport"\nbase_url = "http://127.0.0.1:${address.port}/v1"\nwire_api = "responses"\nrequest_max_retries = 0\nstream_max_retries = 0\n`);
+  // Settings fixtures must not start unrelated native plugin downloads.
+  await writeFile(join(home, 'config.toml'), `model = "gpt-5.4"\nmodel_reasoning_effort = "high"\nmodel_provider = "mock"\napproval_policy = "never"\nsandbox_mode = "read-only"\n[features]\nplugins = false\n[model_providers.mock]\nname = "Local settings transport"\nbase_url = "http://127.0.0.1:${address.port}/v1"\nwire_api = "responses"\nrequest_max_retries = 0\nstream_max_retries = 0\n`);
   const provider = new CodexAppServerProvider({
     executable: process.env.BORGEE_CODEX_TEST_EXECUTABLE ?? 'codex',
     env: { CODEX_HOME: home, OPENAI_API_KEY: 'local-settings-test' }, requestTimeoutMs: 10000,
@@ -112,6 +113,7 @@ model_provider = "mock"
 approval_policy = "never"
 sandbox_mode = "read-only"
 [features]
+plugins = false
 step_model_switching = ${enabled}
 [model_providers.mock]
 name = "Local step settings transport"

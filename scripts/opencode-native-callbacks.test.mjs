@@ -15,7 +15,7 @@ async function listen(server) { await new Promise(resolve => server.listen(0, '1
 async function until(check, milliseconds = 5000) { const end = Date.now() + milliseconds; while (Date.now() < end) { if (await check()) return; await delay(30); } throw new Error('Native callback condition timed out.'); }
 
 // Native plugin initialization installs its official plugin SDK even for a bundled local plugin.
-// Prepare that dependency in isolated storage before the 15-second behavior test starts.
+// Prepare that dependency in isolated storage before the bounded behavior test starts.
 const preparedRoot = executable ? await realpath(await mkdtemp(join(tmpdir(), 'arc-opencode-callbacks-'))) : undefined;
 if (preparedRoot) {
   const prefix = join(preparedRoot, 'xdg_config_home/opencode');
@@ -28,7 +28,7 @@ if (preparedRoot) {
   } catch (error) { await rm(preparedRoot, { recursive: true, force: true }); throw error; }
 }
 
-test('native plugin executes only bound callbacks and reconnects after Controller restart', { skip: !executable, timeout: 15000 }, async () => {
+test('native plugin executes only bound callbacks and reconnects after Controller restart', { skip: !executable, timeout: 30000 }, async () => {
   const root = preparedRoot;
   const env = { PATH: process.env.PATH, TMPDIR: process.env.TMPDIR, OPENCODE_DISABLE_AUTO_UPDATE: '1', OPENCODE_DISABLE_DEFAULT_PLUGINS: '1', OPENCODE_SERVER_PASSWORD: 'fixture-password', ARC_FIXTURE_KEY: 'fixture' };
   let native, provider; let diagnostics = ''; let calls = 0; let round = 0; let callbackName = 'read_source_session';
@@ -45,7 +45,7 @@ test('native plugin executes only bound callbacks and reconnects after Controlle
       response.end('data: [DONE]\n\n');
     } catch (error) { diagnostics += String(error); response.destroy(); }
   });
-  const watchdog = setTimeout(() => { native?.kill('SIGKILL'); model.closeAllConnections(); }, 14500); watchdog.unref();
+  const watchdog = setTimeout(() => { native?.kill('SIGKILL'); model.closeAllConnections(); }, 29500); watchdog.unref();
   try {
     for (const name of ['HOME', 'XDG_CONFIG_HOME', 'XDG_DATA_HOME', 'XDG_CACHE_HOME', 'XDG_STATE_HOME']) { env[name] = join(root, name.toLowerCase()); await mkdir(env[name], { recursive: true }); }
     const cwd = join(root, 'project'); await mkdir(cwd);
@@ -53,7 +53,8 @@ test('native plugin executes only bound callbacks and reconnects after Controlle
     env.OPENCODE_CONFIG = nativeConfigPath;
     const baseModel = await listen(model);
     const models = { fixture: { name: 'Fixture', limit: { context: 128000, output: 8192 } } };
-    await writeFile(join(cwd, 'opencode.json'), JSON.stringify({ model: 'arc/fixture', enabled_providers: ['arc'], permission: 'allow',
+    await writeFile(join(cwd, 'opencode.json'), JSON.stringify({ default_agent: 'build', model: 'arc/fixture', enabled_providers: ['arc'], permission: 'allow',
+      agent: { title: { disable: true }, summary: { disable: true }, compaction: { disable: true } },
       provider: { arc: { npm: '@ai-sdk/openai-compatible', options: { baseURL: `${baseModel}/v1`, apiKey: 'fixture' }, models } },
       providers: { arc: { env: ['ARC_FIXTURE_KEY'], api: { type: 'aisdk', package: '@ai-sdk/openai-compatible', url: `${baseModel}/v1` }, models } },
     }));
@@ -67,7 +68,13 @@ test('native plugin executes only bound callbacks and reconnects after Controlle
     await until(async () => { if (native.exitCode !== null) throw new Error(diagnostics); try { return (await fetch(base + '/global/health', { headers, signal: AbortSignal.timeout(200) })).ok; } catch { return false; } }, 7000);
     const tools = () => [{ name: callbackName, description: 'Read a fixed source.', inputSchema: { type: 'object', additionalProperties: false, properties: { limit: { type: 'integer', minimum: 1, maximum: 10 } } }, execute: async () => { calls++; return 'TRUSTED_FIXED_SOURCE'; } }];
     assert.equal(await provider.supportsHostCallbacks(cwd), true, diagnostics);
-    let session = await provider.createSession({ sessionId: 'local', cwd, model: 'arc/fixture', tools: tools(), systemPrompt: 'Read the fixed source using the Host callback.' });
+    let initial;
+    await until(async () => {
+      try { initial = await provider.nativeEvidence.createEmpty({ sessionId: 'local', cwd }); return true; }
+      catch (error) { if (error.message !== 'Native profile changed during observation.') throw error; return false; }
+    });
+    assert.equal(initial.status, 'created');
+    let session = await provider.resumeSession(initial.handle, { tools: tools(), systemPrompt: 'Read the fixed source using the Host callback.' });
     const handle = (await session.runtimeInfo()).persistence;
     await session.sendMessage('CALL_THE_HOST');
     const suffix = `?directory=${encodeURIComponent(cwd)}`;
@@ -81,15 +88,21 @@ test('native plugin executes only bound callbacks and reconnects after Controlle
     await until(async () => (await request('/session/status' + suffix))[handle.sessionId]?.type !== 'busy');
     // New callback names need only a Host binding; the independently running native plugin remains loaded.
     callbackName = 'read_another_source';
-    const second = await provider.createSession({ sessionId: 'second', cwd, model: 'arc/fixture', tools: tools() });
+    const created = await provider.nativeEvidence.createEmpty({ sessionId: 'second', cwd, selectionSourceSessionId: handle.sessionId });
+    assert.equal(created.status, 'created');
+    const second = await provider.resumeSession(created.handle, { tools: tools() });
     const secondId = (await second.runtimeInfo()).sessionId;
-    await second.sendMessage('CALL_THE_NEW_HOST_TOOL');
+    assert.deepEqual(await request(`/session/${secondId}/message${suffix}`), []);
+    assert.equal(calls, 2, 'Empty creation and callback binding cannot execute a task.');
+    const prepared = await second.nativeEvidence.prepareInput([{ type: 'text', text: 'CALL_THE_NEW_HOST_TOOL' }]);
+    await second.nativeEvidence.dispatchInput(prepared);
     await until(async () => (await request(`/session/${secondId}/message${suffix}`)).some(message => message.parts.some(part => part.type === 'text' && part.text === 'CALLBACK_COMPLETED')));
     assert.equal(calls, 3);
+    await until(async () => { const result = await second.nativeEvidence.inspectInput(prepared); return result.status === 'materialized' && result.execution?.disposition === 'started'; });
     const unbound = await request(`/session${suffix}`, 'POST', {});
     await request(`/session/${unbound.id}/message${suffix}`, 'POST', { model: { providerID: 'arc', modelID: 'fixture' }, parts: [{ type: 'text', text: 'CALLBACK_WITHOUT_GRANT' }] });
     assert.equal(calls, 3, 'An unbound native session must never execute a Host callback.');
-    console.log(JSON.stringify({ version: (await request('/global/health')).version, callbacks: calls, controllerRestored: true, unboundDenied: true }));
+    console.log(JSON.stringify({ version: (await request('/global/health')).version, callbacks: calls, controllerRestored: true, emptyCandidateBound: true, preparedInputSettled: true, unboundDenied: true }));
   } catch (error) { error.message += `\n${diagnostics}`; throw error; }
   finally {
     clearTimeout(watchdog); await provider?.close().catch(() => undefined);

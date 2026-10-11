@@ -13,7 +13,7 @@ export async function accountingWorker() {
     import { createRelayState } from '../agent-remote-hosted/src/state.ts';
     import { sourceCompletionBroker } from './test/source-completion-fixture.ts';
     import { retentionPeer } from './test/retention-consumption-fixture.ts';
-    import { SqliteRelayStore, TEST_ONLY_COMPLETE_SQL_CODEC } from './src/storage.ts';
+    import { SqliteRelayStore } from './src/storage.ts';
     import { encodeSqlSnapshot, quoteSqlRecord, SQL_CHUNK_BYTES } from './src/storage-codec.ts';
     const auth = ${JSON.stringify(accountingAuth)};
     export class AccountingFixture {
@@ -53,7 +53,7 @@ export async function accountingWorker() {
         this.open();
       }
       open() {
-        this.store = new SqliteRelayStore(this.storage, auth, TEST_ONLY_COMPLETE_SQL_CODEC);
+        this.store = new SqliteRelayStore(this.storage, auth);
         const commit = this.store.commit.bind(this.store);
         this.store.commit = async state => {
           this.observed.commitEntries++; this.phase = 'commit';
@@ -116,7 +116,7 @@ export async function accountingWorker() {
           chunks: this.ctx.storage.sql.exec('SELECT * FROM relay_snapshot_chunks ORDER BY kind, identity, ordinal').toArray().map(row => ({ ...row, byteLength: row.bytes.byteLength, bytes: createHash('sha256').update(new Uint8Array(row.bytes)).digest('hex') })) });
         if (path === '/restore') {
           const previous = this.phase; this.phase = 'restore';
-          try { return Response.json(new SqliteRelayStore(this.storage, auth, TEST_ONLY_COMPLETE_SQL_CODEC).initial); }
+          try { return Response.json(new SqliteRelayStore(this.storage, auth).initial); }
           finally { this.phase = previous; }
         }
         if (path === '/recover') { this.retention?.close(); this.retention = undefined; this.retentionMode = undefined; this.source?.broker.close(); this.source = undefined; this.mode = 'normal'; await this.relay.close(); this.open(); return new Response('ok'); }

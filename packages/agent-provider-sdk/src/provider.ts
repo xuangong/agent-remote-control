@@ -108,18 +108,28 @@ export interface AgentSessionConfig extends AgentSessionExtensions {
   planning?: boolean;
 }
 
+/** Explicit Host permission to initialize a prepared empty handle with its original identity.
+ * Omitted means native resume only. Missing history never grants this permission.
+ */
+export interface AgentSessionResumeOptions {
+  initializeEmpty?: boolean;
+}
+
 export interface AgentProviderAdapter {
   readonly nativeEvidence?: AgentProviderNativeEvidence;
   readonly descriptor: AgentProviderDescriptor;
 
   createSession(config: AgentSessionConfig): Promise<AgentSession>;
-  resumeSession(handle: AgentPersistenceHandle, extensions?: AgentSessionExtensions): Promise<AgentSession>;
+  resumeSession(handle: AgentPersistenceHandle, extensions?: AgentSessionExtensions, options?: AgentSessionResumeOptions): Promise<AgentSession>;
   readSessionHistory?(nativeSessionId: string, query: AgentHistoryQuery): Promise<AgentHistoryPage>;
 }
 
 export interface AgentMessageOptions {
   /** Immediate input joins active work; next_turn uses the native follow-up queue. */
   delivery?: 'immediate' | 'next_turn';
+  /** Process-local evidence for this invocation, possibly after its receipt was lost.
+   * Never serialized or used as operation identity. A queued disposition is not settlement. */
+  onAcceptance?: (acceptance: AgentInputAcceptance) => void;
 }
 
 /** Evidence about this input at acceptance time, never the current session execution state.
@@ -151,7 +161,7 @@ export interface AgentSession {
   sendMessage(text: string, options?: AgentMessageOptions): Promise<AgentInputAcceptance | void>;
   sendMessageContent?(parts: readonly AgentInputPart[], options?: AgentMessageOptions): Promise<AgentInputAcceptance | void>;
   respondToInteraction(requestId: string, response: AgentInteractionResponse): Promise<void>;
-  steer?(text: string): Promise<AgentInputAcceptance | void>;
+  steer?(text: string, options?: AgentMessageOptions): Promise<AgentInputAcceptance | void>;
   cancel?(): Promise<void>;
   setPlanning?(active: boolean): Promise<void>;
   /** Deferred has not been submitted and may be retried after native state changes.

@@ -1,4 +1,4 @@
-import type { SessionSuccessionContextStore, SuccessionContextRecord, SuccessionContextPreparation } from './session-succession-context.js';
+import { isSuccessionDeliveryUnresolved, type SessionSuccessionContextStore, type SuccessionContextRecord, type SuccessionContextPreparation } from './session-succession-context.js';
 import { realpath } from 'node:fs/promises';
 import { type NativeSessionRef, type PreparedSuccession, type PrimaryRole } from '@orchardworks/agent-remote-protocol';
 import { parseAgentEmptyCreationResult, serializeAgentEmptyCreationResult, type AgentEmptyCreationResult, type AgentPersistenceHandle } from '@orchardworks/agent-provider-sdk';
@@ -18,6 +18,16 @@ export function successionCreationHandle(providerId: string, nativeSessionId: st
     throw new SuccessionPreparationRejected('succession_creation_not_resumable', 'Native creation evidence does not authorize this attachment.');
   }
   return saved.handle;
+}
+
+/** Updated recovery configuration changes neither provider nor candidate identity. */
+export function successionResumeHandle(providerId: string, nativeSessionId: string, creation: AgentEmptyCreationResult | undefined, updated?: AgentPersistenceHandle): AgentPersistenceHandle | undefined {
+  if (!creation) {
+    if (updated) throw new Error('Updated recovery configuration requires original creation evidence.');
+    return undefined;
+  }
+  const original = successionCreationHandle(providerId, nativeSessionId, creation);
+  return updated ? successionCreationHandle(providerId, nativeSessionId, { status: 'created', handle: updated }) : original;
 }
 
 export interface SuccessionReadiness {
@@ -56,9 +66,9 @@ export class LocalSuccessionPreparation {
     if (session.controllerId !== this.controllerId
       || role.current.controllerId !== this.controllerId
       || role.workspace.controllerId !== this.controllerId) throw new SuccessionPreparationRejected('succession_local_only', 'Handoff requires the same Host.');
-    const context = this.pendingContext(session);
-    if (context && ['dispatching', 'accepted', 'unknown'].includes(context.state)) throw new SuccessionPreparationRejected('succession_context_unknown', 'Reconcile the first input before another succession.');
     const state = await inspect(session);
+    const context = this.pendingContext(session);
+    if (context?.deliveries.some(isSuccessionDeliveryUnresolved)) throw new SuccessionPreparationRejected('succession_context_unknown', 'Reconcile the first input before another succession.');
     if (state.idle !== true || state.managed !== true || state.pendingInputs !== 0 || state.inFlightInputs !== 0 || state.pendingInteractions !== 0 || state.activeChildren !== 0) {
       throw new SuccessionPreparationRejected('succession_not_quiescent', 'Finish pending input, approvals and child work before handoff. Native ownership must be confirmed.');
     }
@@ -89,7 +99,7 @@ export class LocalSuccessionPreparation {
   /** Consumers inherit these raw rows, never an already composed context prefix. */
   pendingContext(source: NativeSessionRef): SuccessionContextRecord | undefined {
     const context = this.contexts?.forTarget(source);
-    return context?.state === 'materialized' ? undefined : context;
+    return context?.state === 'materialized' && !context.deliveries.some(isSuccessionDeliveryUnresolved) ? undefined : context;
   }
   async verify(role: PrimaryRole, prepared: PreparedSuccession): Promise<SuccessionVerification> {
     await this.access.verifyAttachment(prepared);

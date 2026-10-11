@@ -59,3 +59,32 @@ it('keeps Escape and focus inside the active family menu without dismissing othe
   expect(document.activeElement).toBe(outer);
   expect(outerEscape.defaultPrevented).toBe(false);
 });
+
+it('selects related local views by slot while retaining native family navigation', async () => {
+  const current: SessionEntry = { providerId: 'recorded', nativeSessionId: 'B', title: 'Role B', status: 'idle' };
+  const child: SessionEntry = { ...current, nativeSessionId: 'child', parentNativeSessionId: 'B', title: 'Child' };
+  const localViews = [{ slotId: 'role', session: current }, { slotId: 'retained', session: { ...current, title: 'Independent B' } }];
+  const selected: string[] = [], native: string[] = [];
+  let select!: (slot: string) => void;
+  function Harness() {
+    const [activeSlot, setActive] = useState('role'); select = setActive;
+    return <ChatSessionManager current={current} entries={[current, child]} busy={false} onOpen={item => native.push(item.nativeSessionId)}
+      localViews={localViews} activeSlot={activeSlot} onOpenView={view => { selected.push(view.slotId); setActive(view.slotId); }} />;
+  }
+  const container = await render(<Harness />);
+  const heading = () => container.querySelector<HTMLButtonElement>('.lab-chat-sessions-heading')!;
+  const row = (title: string) => [...container.querySelectorAll<HTMLButtonElement>('.lab-chat-session-row')].find(button => button.textContent?.includes(title))!;
+  await act(async () => heading().click());
+  expect(row('Role B').disabled).toBe(true);
+  expect(row('Independent B').disabled).toBe(false);
+  expect([...container.querySelectorAll('.lab-session-branch')].every(branch => branch.querySelector('.lab-chat-session-row'))).toBe(true);
+  await act(async () => row('Independent B').click());
+  expect(selected).toEqual(['retained']); expect(native).toEqual([]);
+  expect(heading().getAttribute('aria-expanded')).toBe('false');
+  await act(async () => heading().click());
+  expect(row('Independent B').getAttribute('aria-current')).toBe('page');
+  expect(row('Role B').disabled).toBe(false);
+  await act(async () => row('Child').click()); expect(native).toEqual(['child']);
+  await act(async () => select('role'));
+  expect(heading().getAttribute('aria-expanded')).toBe('false');
+});

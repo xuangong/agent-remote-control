@@ -127,6 +127,6 @@ test('role-file v4 migrates exact legacy receipts without a ceiling and rejects 
   expect(JSON.stringify(restored.read('role').enrollments![0])).toBe(exact);
   expect(restored.progress('op')!.stage).toBe('not-started');
   expect(restored.operation('op').phase).toBe('unknown');
-  expect(JSON.parse(await readFile(path,'utf8')).version).toBe(6);
+  expect(JSON.parse(await readFile(path,'utf8')).version).toBe(7);
   expect(restored.read('role').enrollments![0]).not.toHaveProperty('maxProjectionBytes');
 },10000);

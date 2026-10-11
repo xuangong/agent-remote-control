@@ -1,30 +1,21 @@
 import { createHmac } from 'node:crypto';
 import { SQL_SNAPSHOT_FORMAT, decodeSqlSnapshot, encodeSqlSnapshot, type SqlManifest, type SqlChunk, type SqlEncodedRecord } from './storage-codec.js';
 import { emptyRelayState, validateRelayState, type GatewayAuthOptions, type HostedRelayState, type RelayStateStore } from '@orchardworks/agent-remote-hosted';
-import { hasHostRecoveryMetadata } from '@orchardworks/agent-remote-hosted/host-recovery';
 
 type RecordKind = 'sessionTitle' | 'sessionTitleRevision' | 'favoritesTree' | 'sessionMigration' | 'sessionStar' | 'preview' | 'securityEvent' | 'session' | 'tenant' | 'deviceKey' | 'host' | 'binding' | 'creation' | 'share' | 'reservation' | 'loginChallenge' | 'consumedProof';
 type StoredRecord = { kind: RecordKind; owner: string; key: string; version: number; value: string };
 const recordTable = (kind: RecordKind) => kind === 'sessionTitle' || kind === 'sessionTitleRevision' ? 'relay_session_titles' : kind === 'favoritesTree' ? 'relay_favorites_trees' : kind === 'sessionMigration' ? 'relay_session_migrations' : kind === 'sessionStar' ? 'relay_session_stars' : kind === 'preview' ? 'relay_previews' : kind === 'securityEvent' ? 'relay_security_events' : 'relay_records';
 const recordId = (record: Pick<StoredRecord, 'kind' | 'owner' | 'key'>) => JSON.stringify([record.kind, record.owner, record.key]);
 
-/** Explicit isolated-fixture injection; never derived from stored state or production configuration. */
-export const TEST_ONLY_COMPLETE_SQL_CODEC = Symbol('test-only-complete-sql-codec');
 const legacyTables = ['relay_records', 'relay_security_events', 'relay_previews', 'relay_session_stars',
   'relay_session_migrations', 'relay_favorites_trees', 'relay_session_titles'] as const;
-function assertDefaultSqlState(state: HostedRelayState) {
-  if (state.version !== 2 || state.tenants.some(tenant => tenant.broker.associations !== undefined || tenant.favoritesSuccession !== undefined || hasHostRecoveryMetadata(tenant.broker))) {
-    throw new Error('Unsupported Relay succession state for SQLite storage.');
-  }
-}
 /** Complete chunked snapshot publication shares the existing atomic transaction and durability gate. */
 export class SqliteRelayStore implements RelayStateStore {
   readonly initial: HostedRelayState;
   private records: Map<string, SqlEncodedRecord> = new Map();
   private format: number;
   private durabilityUnknown = false;
-  constructor(private readonly storage: DurableObjectStorage, private readonly auth: GatewayAuthOptions,
-    private readonly testOnlyAccess?: typeof TEST_ONLY_COMPLETE_SQL_CODEC) {
+  constructor(private readonly storage: DurableObjectStorage, private readonly auth: GatewayAuthOptions) {
     const fingerprint = createHmac('sha256', auth.secret).update(JSON.stringify(['agent-remote-cloudflare', 1, auth.origin, auth.issuer])).digest('hex');
     storage.transactionSync(() => {
       storage.sql.exec(`CREATE TABLE IF NOT EXISTS relay_metadata (
@@ -78,11 +69,9 @@ export class SqliteRelayStore implements RelayStateStore {
       this.initial = decodeSqlSnapshot(manifests, chunks, auth);
       this.records = encodeSqlSnapshot(this.initial, auth).records;
     }
-    if (testOnlyAccess !== TEST_ONLY_COMPLETE_SQL_CODEC) assertDefaultSqlState(this.initial);
   }
   async commit(state: HostedRelayState): Promise<void> {
     if (this.durabilityUnknown) throw new Error('Relay SQL durability is unknown.');
-    if (this.testOnlyAccess !== TEST_ONLY_COMPLETE_SQL_CODEC) assertDefaultSqlState(state);
     const next = encodeSqlSnapshot(state, this.auth);
     this.storage.transactionSync(() => {
       for (const [id, record] of this.records) {

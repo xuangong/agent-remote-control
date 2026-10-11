@@ -1,13 +1,13 @@
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, expect, test } from 'vitest';
+import { afterEach, expect, test, vi } from 'vitest';
 import { AgentOperationRejectedError, type AgentInputPart, type AgentSession } from '@orchardworks/agent-provider-sdk';
 import { SessionSuccessionContextStore } from './session-succession-context.js';
 import { SessionSuccessionBoundary } from './session-succession-boundary.js';
 import { createHash } from 'node:crypto';
 import { nativeSessionRefKey } from '@orchardworks/agent-remote-protocol';
-import type { MutationEntry } from '@orchardworks/agent-remote-relay';
+import { createOperationCache, type MutationEntry } from '@orchardworks/agent-remote-relay';
 import type { AgentInputAcceptance, AgentPreparedTextInput, AgentSessionNativeEvidence } from '@orchardworks/agent-provider-sdk';
 const roots: string[] = [];
 afterEach(async () => { await Promise.all(roots.splice(0).map(root => rm(root, {recursive:true,force:true}))); });
@@ -100,16 +100,16 @@ test('counts directory work until completion and rejects stale source metadata m
  expect(f.messages).toEqual([]);
 });
 
-test.each(['void', 'queued', 'started', 'handled', 'typed', 'unknown'] as const)('prepared first input keeps original entry accounting for %s', async outcome => {
-  const f = await fixture(); let prepares = 0, dispatches = 0; const effects: string[] = []; let saved: AgentPreparedTextInput | undefined;
+test.each([['void', false], ['queued', false], ['started', false], ['handled', false], ['typed', false], ['unknown', false], ['unknown', true]] as const)('prepared first input keeps original entry accounting for %s (closed %s)', async (outcome, closed) => {
+  const f = await fixture(); let prepares = 0, dispatches = 0; const effects: string[] = [], notifications: AgentInputAcceptance[] = []; let saved: AgentPreparedTextInput | undefined;
   const evidence = {
-    availability: () => ({ status: 'configured' as const, version: 1 as const }),
+    availability: () => ({ status: 'configured' as const, version: 2 as const }),
     async prepareInput(parts, options) {
       prepares++; expect(parts).toHaveLength(1); expect(parts[0]).toMatchObject({ type: 'text', text: expect.stringContaining('source work') });
       expect(options).toEqual({ delivery: 'immediate' });
       const text = (parts[0] as {text:string}).text;
-      return { version: 1, providerId: 'fixture', nativeSessionId: 'B', nativeInputId: `U-${prepares}`, cwd: f.root,
-        store: { authorityId: 'authority', storeId: 'store' }, parts: [{ type: 'text', text }],
+      return { version: 2, providerId: 'fixture', nativeSessionId: 'B', inputId: `U-${prepares}`, cwd: f.root,
+        authority: { kind: 'trusted-service' as const, authorityId: 'authority', namespaceId: 'store' }, parts: [{ type: 'text', text }],
         content: { encoding: 'utf-8', bytes: Buffer.byteLength(text), sha256: createHash('sha256').update(text).digest('hex') },
         selections: { model: 'provider/model', agent: 'agent', delivery: options?.delivery } } as AgentPreparedTextInput;
     },
@@ -127,17 +127,38 @@ test.each(['void', 'queued', 'started', 'handled', 'typed', 'unknown'] as const)
     startNativeEffect(target) { expect(target).toBe(nativeSessionRefKey(ref('B'))); return { settled() { effects.push('settled'); }, unresolved() { effects.push('unresolved'); } }; },
     retainAsyncWork() { throw new Error('unexpected retained work'); }, reserveNativeEffect() { throw new Error('unexpected reservation'); } };
   const start = entry.startNativeEffect; entry.startNativeEffect = target => { effects.push('start'); return start(target); };
-  const send = (text = 'first') => f.boundary.run(operation('first'), 'browser', () => session.sendMessage(text, { delivery: 'immediate' }), entry);
+  const send = (text = 'first') => f.boundary.run(operation('first'), 'browser', () => session.sendMessage(text, { delivery: 'immediate', onAcceptance: value => { notifications.push(value); } }), entry);
   if (outcome === 'typed' || outcome === 'unknown') await expect(send()).rejects.toThrow(); else await send();
-  expect(effects).toEqual(['start', ['typed', 'started', 'handled'].includes(outcome) ? 'settled' : 'unresolved']);
+  expect(effects).toEqual(['start', 'unresolved', ...(['typed', 'started', 'handled'].includes(outcome) ? ['settled'] : [])]);
   expect(dispatches).toBe(1); expect(prepares).toBe(1); expect(saved?.parts[0].text.endsWith('first')).toBe(true);
+  expect(notifications).toEqual(['started', 'handled'].includes(outcome) ? [{ disposition: outcome }] : []);
+  await f.boundary.run(operation('first'), 'browser', () => session.sendMessage('first', { delivery: 'immediate' }), entry).catch(() => undefined);
   await send().catch(() => undefined); expect(dispatches).toBe(1); expect(prepares).toBe(1);
   await expect(send('changed')).rejects.toThrow(/identity/); expect(prepares).toBe(1);
+  if (outcome === 'unknown') {
+    const { serializeAgentInputMaterialization, serializeAgentPreparedTextInput } = await import('@orchardworks/agent-provider-sdk');
+    if (closed) await f.boundary.close();
+    const witness = saved!, { delivery: _delivery, ...selections } = witness.selections;
+    const hash = (value: string) => createHash('sha256').update(value).digest('hex');
+    const proof = { version: 2 as const, providerId: witness.providerId, nativeSessionId: witness.nativeSessionId, inputId: witness.inputId, nativeInputId: witness.inputId,
+      cwd: witness.cwd, authority: witness.authority, witnessSha256: hash(serializeAgentPreparedTextInput(witness)), contentSha256: witness.content.sha256, nativeSelectionsSha256: hash(JSON.stringify(selections)) };
+    const delivery = f.contexts.read('handoff').deliveries[0]!;
+    const evidence = { operationId: delivery.operationId, target: ref('B'), roleRevision: 2, outcome: 'materialized' as const };
+    await f.contexts.reconcile('handoff', { ...evidence, nativeEvidence: serializeAgentInputMaterialization({ status: 'materialized', proof }) });
+    expect(effects).toEqual(['start', 'unresolved']); expect(notifications).toEqual([]);
+    await f.contexts.reconcile('handoff', { ...evidence, nativeEvidence: serializeAgentInputMaterialization({ status: 'materialized', proof, execution: { disposition: 'started', nativeExecutionId: 'R' } }) });
+    expect(effects).toEqual(['start', 'unresolved', ...(closed ? [] : ['settled'])]);
+    expect(f.contexts.delivery(delivery.operationId)?.inputAcceptance).toEqual({ disposition: 'started' });
+    expect(notifications).toEqual(closed ? [] : [{ disposition: 'started' }]);
+    await f.contexts.reconcile('handoff', { ...evidence, nativeEvidence: serializeAgentInputMaterialization({ status: 'materialized', proof, execution: { disposition: 'started', nativeExecutionId: 'R' } }) });
+    expect(notifications).toEqual(closed ? [] : [{ disposition: 'started' }]);
+    expect(dispatches).toBe(1); expect(prepares).toBe(1);
+  }
 });
 
 test('optional first input refuses rich and queued selections before preparation or dispatch', async () => {
   const f = await fixture(); let calls = 0;
-  const session = f.boundary.wrap(ref('B'), { nativeEvidence: { availability: () => ({ status: 'configured', version: 1 }),
+  const session = f.boundary.wrap(ref('B'), { nativeEvidence: { availability: () => ({ status: 'configured', version: 2 }),
     async prepareInput() { calls++; throw new Error('unexpected prepare'); } }, async sendMessage() { calls++; }, async sendMessageContent() { calls++; } } as unknown as AgentSession);
   await expect(f.boundary.run(operation('image'), 'browser', () => session.sendMessageContent!([{ type: 'image', bytes: new Uint8Array([1]), mediaType: 'image/png' }]))).rejects.toBeInstanceOf(AgentOperationRejectedError);
   await expect(f.boundary.run(operation('queue'), 'browser', () => session.sendMessage('later', { delivery: 'next_turn' }))).rejects.toBeInstanceOf(AgentOperationRejectedError);
@@ -159,4 +180,136 @@ test('direct nested dispatch requires the original admitted entry while prepare 
   expect(calls).toEqual(['prepare','inspect','effect','dispatch','unresolved']);
   await expect(f.boundary.run(operation('wrong'),'browser',()=>session.nativeEvidence!.dispatchInput({} as never),{...entry,targets:[nativeSessionRefKey(ref('wrong'))]})).rejects.toThrow(/target/i);
   expect(calls).toHaveLength(5);
+});
+
+
+test('pins the first ordinary ARC input and its late acceptance settles only the original effect', async () => {
+  const f = await fixture(); let now = 1000; const cache = createOperationCache({ ttlMs: 10, now: () => now });
+  const boundary = new SessionSuccessionBoundary(f.contexts, () => {}, () => undefined, cache);
+  const target = ref('ordinary'), key = nativeSessionRefKey(target); let notify: ((value: AgentInputAcceptance) => void) | undefined;
+  const session = boundary.wrap(target, { async sendMessage(_text, options) {
+    const restored = new SessionSuccessionContextStore(f.root); await restored.ready;
+    expect(restored.coverageAvailable(target)).toBe(false);
+    notify = options?.onAcceptance;
+  } } as AgentSession);
+  const op = operation('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa');
+  await cache.execute({ operationId: op.operationId, scope: 'browser', kind: op.kind, target: key, parameters: op.parameters }, {
+    mutationTargets: [key], admit: entry => boundary.admit([target], entry.key),
+    run: (entry, work) => boundary.run(op, 'browser', work, entry), dispatch: () => session.sendMessage('hello'),
+  });
+  now += 100; expect(cache.hasUnsettledMutation(key)).toBe(true); expect(() => boundary.checkSource(target)).toThrow(/unsettled/i);
+  notify!({ disposition: 'queued' }); expect(cache.hasUnsettledMutation(key)).toBe(true);
+  notify!({ disposition: 'started' }); expect(cache.hasUnsettledMutation(key)).toBe(false);
+  await boundary.reconcileCoverage(target);
+  const restored = new SessionSuccessionContextStore(f.root); await restored.ready; expect(restored.coverageAvailable(target)).toBe(true);
+  boundary.checkSource(target); await boundary.close(); await cache.close();
+});
+
+test('close retains a failed coverage publication and returns the same rejection on repeated close', async () => {
+  const f = await fixture(), cache = createOperationCache();
+  const boundary = new SessionSuccessionBoundary(f.contexts, () => {}, () => undefined, cache);
+  const target = ref('ordinary'), key = nativeSessionRefKey(target), op = operation('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa');
+  const failure = new Error('Coverage publication failed');
+  const clearing = vi.spyOn(f.contexts, 'clearMutation').mockRejectedValue(failure);
+  try {
+    await cache.execute({ operationId: op.operationId, scope: 'browser', kind: op.kind, target: key, parameters: op.parameters }, {
+      mutationTargets: [key], admit: entry => boundary.admit([target], entry.key),
+      run: (entry, work) => boundary.run(op, 'browser', work, entry), dispatch: async () => undefined,
+    });
+    expect(clearing).toHaveBeenCalledWith(target, expect.any(Function));
+    const closing = boundary.close(); expect(boundary.close()).toBe(closing);
+    await expect(closing).rejects.toBe(failure);
+    const restored = new SessionSuccessionContextStore(f.root); await restored.ready;
+    expect(restored.coverageAvailable(target)).toBe(false);
+  } finally { clearing.mockRestore(); await boundary.close().catch(() => undefined); await cache.close(); }
+});
+
+test('close drains direct coverage reconciliation and rejects new reconciliation after shutdown begins', async () => {
+  const f = await fixture(), target = ref('ordinary');
+  await f.contexts.markMutation(target, 'mutation');
+  const clear = f.contexts.clearMutation.bind(f.contexts);
+  let release!: () => void;
+  const gate = new Promise<void>(resolve => { release = resolve; });
+  const spy = vi.spyOn(f.contexts, 'clearMutation').mockImplementation(async (...args) => { await gate; return clear(...args); });
+  const reconciliation = f.boundary.reconcileCoverage(target), closing = f.boundary.close();
+  let deadline: ReturnType<typeof setTimeout> | undefined;
+  try {
+    const phase = await Promise.race([
+      closing.then(() => 'closed'),
+      new Promise<string>(resolve => { deadline = setTimeout(() => resolve('draining'), 100); }),
+    ]);
+    expect(phase).toBe('draining');
+    await expect(f.boundary.reconcileCoverage(target)).rejects.toThrow(/closing/i);
+    release(); await reconciliation; await closing;
+    const restored = new SessionSuccessionContextStore(f.root); await restored.ready;
+    expect(restored.coverageAvailable(target)).toBe(true);
+  } finally { if (deadline) clearTimeout(deadline); release(); await reconciliation; await closing; spy.mockRestore(); }
+});
+
+async function recoveryFixture() {
+ const f = await fixture(); let confirmed = 'high';
+ const boundary = new SessionSuccessionBoundary(f.contexts, () => {}, () => ({roleId:'role',roleRevision:2}), undefined, undefined, undefined, () => true);
+ const info = () => ({providerId:'fixture',sessionId:'B',status:'idle' as const,persistence:{providerId:'fixture',sessionId:'B',opaque:JSON.stringify({effort:confirmed})}});
+ const native = { async runtimeInfo() {return info();}, async setSessionSetting(_id:string,value:string) {confirmed=value;},
+   async *observe() { yield {type:'observation' as const,sourceKey:'late',occurredAt:1,delivery:'live' as const,event:{type:'runtime_updated' as const,provider:'fixture',runtimeInfo:{...info(),persistence:{providerId:'fixture',sessionId:'B',opaque:'stale'}}}}; }
+ } as unknown as AgentSession;
+ return {...f,boundary,native,session:boundary.wrap(ref('B'),native),setConfirmed:(value:string)=>{confirmed=value;}};
+}
+test('saves confirmed successor settings after first input and refreshes delayed runtime events from the current adapter', async () => {
+ const f = await recoveryFixture();
+ await f.contexts.begin('handoff',{operationId:'input',roleId:'role',roleRevision:2,target:ref('B'),text:'first'});
+ await f.contexts.settle('handoff','input','accepted');
+ await f.contexts.reconcile('handoff',{operationId:'input',target:ref('B'),roleRevision:2,outcome:'materialized',nativeEvidence:'native-U'});
+ await f.session.setSessionSetting!('reasoning_effort','medium');
+ expect(f.contexts.read('handoff').resumeHandle?.opaque).toBe('{"effort":"medium"}');
+ f.setConfirmed('low');
+ for await (const _ of f.session.observe()) { /* Consume the existing native observation. */ }
+ const cold = new SessionSuccessionContextStore(f.root); await cold.ready;
+ expect(cold.read('handoff').resumeHandle?.opaque).toBe('{"effort":"low"}');
+ expect(cold.canInitializeEmpty(ref('B'))).toBe(false);
+ await f.boundary.close();
+});
+test('reserves recovery configuration before native settings and preserves post-effect persistence failure as unknown', async () => {
+ const f = await recoveryFixture(), setter = vi.spyOn(f.native,'setSessionSetting');
+ const reserve = vi.spyOn(f.contexts,'reserveResumeHandle').mockRejectedValueOnce(new Error('capacity'));
+ await expect(f.session.setSessionSetting!('reasoning_effort','medium')).rejects.toBeInstanceOf(AgentOperationRejectedError);
+ expect(setter).not.toHaveBeenCalled(); reserve.mockRestore();
+ vi.spyOn(f.contexts,'retainResumeHandle').mockRejectedValueOnce(new Error('disk failure'));
+ let failure:unknown;
+ try {await f.session.setSessionSetting!('reasoning_effort','medium');} catch(error) {failure=error;}
+ expect(failure).toBeInstanceOf(Error); expect(failure).not.toBeInstanceOf(AgentOperationRejectedError);
+ expect(setter).toHaveBeenCalledTimes(1);
+});
+
+test('drains confirmed recovery reads before Host shutdown can release the native directory', async () => {
+ const f = await recoveryFixture(); let release!:()=>void, entered!:()=>void;
+ const blocked=new Promise<void>(resolve=>{release=resolve;}), started=new Promise<void>(resolve=>{entered=resolve;});
+ const original=f.native.runtimeInfo.bind(f.native);
+ vi.spyOn(f.native,'runtimeInfo').mockImplementationOnce(async()=>{entered();await blocked;return original();});
+ const reading=f.session.runtimeInfo();await started;
+ let closed=false;const closing=f.boundary.close().then(()=>{closed=true;});
+ await new Promise<void>(resolve=>setTimeout(resolve,10));expect(closed).toBe(false);
+ release();await reading;await closing;
+ const cold=new SessionSuccessionContextStore(f.root);await cold.ready;
+ expect(cold.read('handoff').resumeHandle?.opaque).toBe('{"effort":"high"}');
+});
+
+test('retains native readback even when a requested setting is refused', async () => {
+ const f=await recoveryFixture();
+ vi.spyOn(f.native,'setSessionSetting').mockImplementationOnce(async()=>{f.setConfirmed('low');throw new AgentOperationRejectedError('operation_rejected','Applied low instead');});
+ await expect(f.session.setSessionSetting!('reasoning_effort','max')).rejects.toBeInstanceOf(AgentOperationRejectedError);
+ expect(f.contexts.read('handoff').resumeHandle?.opaque).toBe('{"effort":"low"}');
+ await f.boundary.close();
+});
+test('drains an admitted setter and its final readback during shutdown', async () => {
+ const f=await recoveryFixture();let entered!:()=>void, release!:()=>void;
+ const blocked=new Promise<void>(resolve=>{release=resolve;}), started=new Promise<void>(resolve=>{entered=resolve;});
+ vi.spyOn(f.native,'setSessionSetting').mockImplementationOnce(async()=>{entered();await blocked;f.setConfirmed('medium');});
+ const setting=f.session.setSessionSetting!('reasoning_effort','medium');await started;
+ let closed=false;const closing=f.boundary.close().then(()=>{closed=true;});
+ await new Promise<void>(resolve=>setTimeout(resolve,10));expect(closed).toBe(false);
+ await expect(f.session.setSessionSetting!('reasoning_effort','low')).rejects.toThrow(/closing/);
+ release();await setting;await closing;
+ const cold=new SessionSuccessionContextStore(f.root);await cold.ready;
+ expect(cold.read('handoff').resumeHandle?.opaque).toBe('{"effort":"medium"}');
 });

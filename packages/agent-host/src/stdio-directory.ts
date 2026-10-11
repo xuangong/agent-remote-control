@@ -1,3 +1,5 @@
+import { successionResumeHandle } from './local-succession-preparation.js';
+import { serializeAgentEmptyCreationResult } from '@orchardworks/agent-provider-sdk';
 import {acquireNativeSession, inspectNativeOwner, NativeSessionOwnerError, type NativeSessionLease, type NativeOwnerDiagnostic, type NativeOwnerIdentity, type NativeHandoffGrant} from './native-session-owner.js';
 import { randomUUID } from 'node:crypto';
 import type {RemoteSessionSummary} from '@orchardworks/agent-remote-relay';
@@ -7,13 +9,16 @@ import { requireSessionExtensionIdentity, sessionExtensionIdentity } from './ses
 import { SessionReferenceStore, disposeAfterSourceGrantFailure, sourceSessionExtensions, type SourceBindingReader } from './session-reference.js';
 
 export type ManagedStdioProvider = Pick<AgentProviderAdapter, 'createSession' | 'resumeSession' | 'readSessionHistory'> & {
+    /** Pre-effect guarantee: ordinary createSession returns a same-provider ID with nonempty trim,
+     * at most this many UTF-16 units. Covers every selected create mode, not resume/fork or history. */
+    readonly createdSessionIdMaxLength?: number;
     listSessions(): Promise<RemoteSessionSummary[]>;
     readSessionTitle?(id: string): Promise<string | undefined>;
     renameSession?(id: string, title: string): Promise<string>;
     validateSessionTitle?(title: string): void;
     /** Some runtimes expose metadata writes only on a loaded native session. */
     sessionRenameRequiresOpen?: boolean;
-    sessionWorkspace?(id: string): Promise<string | undefined>;
+    sessionWorkspace?(id: string, handle?: AgentPersistenceHandle): Promise<string | undefined>;
     openChildSession?(parent: string, child: string): Promise<AgentSession>;
     dispose?(): Promise<void>;
     releaseSession?(id: string): Promise<void>;
@@ -30,7 +35,7 @@ export function createManagedStdioDirectory(
   ownership?: {root: string; onDiagnostic?: (event: NativeOwnerDiagnostic) => void},
   references?: SessionReferenceStore,
 ): AgentHostDirectory {
-  const opened = new Map<string, { session: AgentSession; handle: AgentPersistenceHandle; createdAt: string; extensionIdentity: string; sourceAvailable: boolean; owner?: NativeSessionLease }>();
+  const opened = new Map<string, { session: AgentSession; handle: AgentPersistenceHandle; createdAt: string; extensionIdentity: string; sourceAvailable: boolean; nativeCreation?: string; owner?: NativeSessionLease }>();
   const leases = new Map<string, NativeSessionLease>();
   const yielded = new Set<string>();
   const unconfirmedStarts = new Set<string>();
@@ -216,6 +221,11 @@ export function createManagedStdioDirectory(
   const directory: AgentHostDirectory = {
     providerId,
     supportsSourceReferences: !!references && !!provider.readSessionHistory,
+    async supportsBoundedSourceCreate(input) {
+      const limit = provider.createdSessionIdMaxLength;
+      return !closed && !!input.sourceNativeSessionId?.trim() && !input.editNativeSessionId && !input.editTurnId && !input.editMessageId
+        && typeof limit === 'number' && Number.isInteger(limit) && limit > 0 && limit <= 512;
+    },
     setSourceAccessCheck(check) { sourceAccessCheck = check; },
     setSourceBindingReader(reader) { sourceBindingReader = reader; },
     sourceReferences: () => references?.list() ?? Promise.resolve([]),
@@ -271,9 +281,14 @@ export function createManagedStdioDirectory(
     setSessionHandoffAdmission(handler) { onHandoffAdmission = handler; },
     async open(nativeSessionId, options) {
       if (closed) throw new Error(`${displayName} directory is closed.`);
+      const handle = successionResumeHandle(providerId, nativeSessionId, options?.nativeCreation, options?.resumeHandle);
+      if (options?.resumeOptions?.initializeEmpty && !handle) throw new Error('Empty initialization requires original creation evidence.');
+      const creationIdentity = options?.nativeCreation ? serializeAgentEmptyCreationResult(options.nativeCreation) : undefined;
+      const assertCreation = () => { if (creationIdentity && opened.get(nativeSessionId)?.nativeCreation !== creationIdentity) throw new Error('Existing attachment does not match the original native creation evidence.'); };
       const pending = loading.get(nativeSessionId);
       if (pending) {
         const session = await pending;
+        assertCreation();
         requireSessionExtensionIdentity(opened.get(nativeSessionId)?.extensionIdentity, options?.extensions === undefined ? undefined : await resumedExtensions(nativeSessionId, options.extensions, () => nativeSessionId));
         return session;
       }
@@ -282,6 +297,7 @@ export function createManagedStdioDirectory(
         await releaseFailedStart(nativeSessionId);
         const existing = opened.get(nativeSessionId);
         if (existing && !yielded.has(nativeSessionId) && (await existing.session.runtimeInfo()).status !== 'closed') {
+          assertCreation();
           requireSessionExtensionIdentity(existing.extensionIdentity, options?.extensions === undefined ? undefined : await resumedExtensions(nativeSessionId, options.extensions, () => nativeSessionId));
           return existing.session;
         }
@@ -297,7 +313,7 @@ export function createManagedStdioDirectory(
         const identity = sessionExtensionIdentity(extensions);
         let session: AgentSession;
         try {
-          session = await provider.resumeSession(existing?.handle ?? { providerId, sessionId: nativeSessionId, opaque: '{}' }, extensions);
+          session = await provider.resumeSession(handle ?? existing?.handle ?? { providerId, sessionId: nativeSessionId, opaque: '{}' }, extensions, options?.resumeOptions);
         } catch (error) {
           if (owner) {
             unconfirmedStarts.add(nativeSessionId);
@@ -306,6 +322,7 @@ export function createManagedStdioDirectory(
           throw error;
         }
         await remember(session, owner, identity, nativeSessionId);
+        if (creationIdentity) opened.get(nativeSessionId)!.nativeCreation = creationIdentity;
         if (extensions?.tools?.length) controllerTools.add(nativeSessionId);
         readerReady = true;
         readerSession = opened.get(nativeSessionId)!.session;

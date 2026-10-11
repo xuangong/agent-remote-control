@@ -21,10 +21,12 @@ function fixture(entries: AskEntry[]) {
   const ask = {
     entryFor: (session: typeof source) => values.get(sessionKey(session))!, isEnabled: () => true, isOpen: () => true,
     restore, drafts: new DraftStore('session-ask-focus'), store: new ForkStore('session-ask-focus', sessionStorage),
+    associationOwner: (id: string) => ({ id, sourceSlot: id, geometryScope: id, text: { scope: 'session-ask-focus', key: id }, input: { scope: 'session-ask-focus', key: id }, open: true }),
+    draftBinding: (id: string) => ({ store: ask.drafts, key: id }),
     close: vi.fn(), toggle: vi.fn(), sendInput: vi.fn(), discardInput: vi.fn(),
   } as unknown as AskProps['ask'];
   const props: Omit<AskProps, 'source'> = {
-    ask, visible: true, available: true, canRestore: false, storageScope: 'session-ask-focus',
+    associationOwner: sessionKey(source), ask, visible: true, available: true, canRestore: false, storageScope: 'session-ask-focus',
     synchronize: async () => {}, onOpen: vi.fn(), replicaFor: () => { throw new Error('A draft Ask has no native replica.'); },
     transport: {} as AskProps['transport'], observations: {}, navigation: () => ({} as ReturnType<AskProps['navigation']>),
   };
@@ -43,7 +45,7 @@ it('restores multiple expanded Ask windows without moving focus or cancelling th
     const [restored, setRestored] = useState(false);
     finish = () => { for (const entry of entries) { entry.restoring = false; entry.restoreOnly = false; } setRestored(true); };
     return <>{[source, sibling].map(value => <div key={sessionKey(value)} onFocusCapture={parentFocus}>
-      <SessionAsk {...props} source={value} canRestore={restored} />
+      <SessionAsk {...props} source={value} associationOwner={sessionKey(value)} canRestore={restored} />
     </div>)}</>;
   }
   const container = await render(<Harness />);
@@ -64,14 +66,14 @@ it('focuses an explicitly opened Ask and only minimizes the Ask containing the E
   function Harness() {
     const [, changed] = useState(0);
     return <><div data-source="main"><SessionAsk {...props} state={replicaState} source={source} onOpen={() => { open = true; changed(value => value + 1); }} /></div>
-      <div data-source="side"><SessionAsk {...props} source={sibling} /></div></>;
+      <div data-source="side"><SessionAsk {...props} source={sibling} associationOwner={sessionKey(sibling)} /></div></>;
   }
   const container = await render(<Harness />);
   await act(async () => { container.querySelector<HTMLButtonElement>('[data-source="main"] .lab-ask-trigger')!.click(); });
   const opened = container.querySelector('[data-source="main"] [role="dialog"]')!;
   expect(document.activeElement).toBe(opened);
   await act(async () => { opened.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })); });
-  expect(ask.close).toHaveBeenCalledExactlyOnceWith(source);
+  expect(ask.close).toHaveBeenCalledExactlyOnceWith(source, sessionKey(source));
 });
 
 it('retires the previous restoration when the owning workspace or transport changes', async () => {

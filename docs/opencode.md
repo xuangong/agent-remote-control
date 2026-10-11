@@ -79,6 +79,28 @@ The floating Live provider selector also includes OpenCode. It uses server-side 
 
 For a repeatable live Session View, two-client observation, recording and replay workflow, see [OpenCode ARDB development](opencode-debugging.md).
 
+## Session succession
+
+OpenCode provides the initial native implementation for same-Host, same-directory
+Session View **Handoff**. This capability is narrower than ordinary server support:
+it requires the reviewed 1.18.x contract from 1.18.18, background subagents disabled,
+current agent/model/variant selections, native observation and the explicitly
+connected [callback plugin](opencode-callbacks.md) for source references. Unsupported
+or incomplete facts produce an eligibility reason instead of creating a candidate.
+
+The Host accepts Handoff only while idle with no queued input, pending interaction,
+active child work or unsettled ARC mutation. Preparation creates exactly one empty
+successor with validated native selections; prepare/commit send no model input.
+The first real input receives normalized history once. Independent native clients
+remain outside ARC's mutation exclusion. This is a role transition, not native
+process takeover or workspace rollback.
+
+The adapter uses the configured trusted service namespace and fresh native facts.
+An exact user record proves materialization; only its exact non-summary assistant
+child proves execution started. Missing results retain the original candidate,
+input and operation and are never automatically replayed. See the complete
+[recovery and upgrade contract](current/agent-remote/session-succession-recovery.md).
+
 ## Validation
 
 The integration pins `@opencode-ai/sdk` 1.18.31 and is native-smoke tested against OpenCode 1.18.18. It uses established session/global-event endpoints and the mounted experimental global session list for discovery across projects. Generated durable Session v2 APIs are not assumed interchangeable with this execution path.
@@ -87,6 +109,7 @@ The integration pins `@opencode-ai/sdk` 1.18.31 and is native-smoke tested again
 pnpm --filter @orchardworks/agent-remote-debugger... build
 pnpm test:opencode
 AGENT_OPENCODE_TEST_EXECUTABLE=/absolute/path/to/opencode pnpm test:opencode:native
+AGENT_OPENCODE_TEST_EXECUTABLE=/absolute/path/to/opencode node scripts/run-tests.mjs opencode-succession-adapter
 ```
 
 The native suite isolates HOME/XDG data and starts both a real OpenCode server and a deterministic local model HTTP fixture. It verifies actual native execution/streaming, native title persistence, history pagination, cross-project discovery, resume, two shared ARDB clients and shared service lifetime without using personal model accounts. It is not evidence of a successful call to a commercial model service.

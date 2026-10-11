@@ -2,7 +2,7 @@ import { createAgentHostRuntime } from '../../agent-host/src/host.js';
 import { createCodexSessionDirectory } from '../../agent-host/src/directory.js';
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import { once } from 'node:events';
-import { mkdtemp, rm, writeFile, stat } from 'node:fs/promises';
+import { mkdtemp, realpath, rm, writeFile, stat } from 'node:fs/promises';
 import { createServer } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -63,6 +63,7 @@ model_provider = "fixture"
 approval_policy = "never"
 sandbox_mode = "read-only"
 [features]
+plugins = false
 default_mode_request_user_input = true
 [model_providers.fixture]
 name = "Local shared runtime fixture"
@@ -104,7 +105,7 @@ stream_max_retries = 0
   try {
     await waitForDaemon();
     const provider = () => new CodexAppServerProvider({ executable, env, connectionMode: 'shared', socketPath, requestTimeoutMs: 5000 });
-    return { home, env, get hasPendingResponse() { return !!pendingResponse; }, releaseResponse() { pendingResponse?.(); pendingResponse = undefined; }, get daemon() { return daemon; }, sessions, provider, restartDaemon, close };
+    return { home, env, get modelRequests() { return ordinal; }, get hasPendingResponse() { return !!pendingResponse; }, releaseResponse() { pendingResponse?.(); pendingResponse = undefined; }, get daemon() { return daemon; }, sessions, provider, restartDaemon, close };
   } catch (error) { await close(); throw error; }
 }
 
@@ -151,6 +152,60 @@ it.runIf(executable)('shares a live native thread, accepts messages from both cl
     expect(f.daemon.exitCode).toBeNull();
     await desktop.sendMessage('Desktop continues');
     await until(desktopStream, event => event.type === 'turn_completed');
+  } finally { await f.close(); }
+}, 30000);
+
+it.runIf(executable)('creates and materializes a successor through the shared daemon without stopping its runtime', async () => {
+  const f = await fixture();
+  try {
+    const provider = f.provider();
+    const creation = await provider.nativeEvidence.createEmpty({ sessionId: 'successor', cwd: f.home });
+    expect(creation.status).toBe('created');
+    if (creation.status !== 'created') return;
+    expect(f.daemon.exitCode).toBeNull();
+    const session = await provider.resumeSession(creation.handle); f.sessions.push(session);
+    const stream = session.observe()[Symbol.asyncIterator](); await stream.next();
+    const witness = await session.nativeEvidence!.prepareInput([{ type: 'text', text: 'First successor input' }]);
+    expect(await session.nativeEvidence!.dispatchInput(witness)).toEqual({ disposition: 'started' });
+    await until(stream, event => event.type === 'turn_completed');
+    const proof = await session.nativeEvidence!.inspectInput(witness);
+    expect(proof).toMatchObject({ status: 'materialized', execution: { disposition: 'started' } });
+    await session.dispose();
+    expect(f.daemon.exitCode).toBeNull();
+    const restored = await f.provider().resumeSession(creation.handle); f.sessions.push(restored);
+    expect(await restored.nativeEvidence!.inspectInput(witness)).toEqual(proof);
+  } finally { await f.close(); }
+}, 30000);
+
+it.runIf(executable)('recovers a zero-input successor after an isolated shared daemon restart', async () => {
+  const f = await fixture();
+  try {
+    const creation = await f.provider().nativeEvidence.createEmpty({ sessionId: 'successor', cwd: f.home });
+    expect(creation.status).toBe('created');
+    if (creation.status !== 'created') return;
+    expect(f.modelRequests).toBe(0);
+    expect(f.daemon.exitCode).toBeNull();
+    await stop(f.daemon);
+    await f.restartDaemon();
+    const session = await f.provider().resumeSession(creation.handle); f.sessions.push(session);
+    const info = await session.runtimeInfo();
+    expect(info.persistence?.sessionId).toBe(creation.handle.sessionId);
+    expect(info.cwd).toBe(await realpath(f.home));
+    const stream = session.observe()[Symbol.asyncIterator]();
+    const history: AgentStreamEvent[] = [];
+    while (true) {
+      const next = await stream.next();
+      if (next.done || next.value.type === 'history_boundary') break;
+      if (next.value.type === 'observation') history.push(next.value.event);
+    }
+    expect(history.filter(event => event.type === 'timeline')).toEqual([]);
+    expect(f.modelRequests).toBe(0);
+    const witness = await session.nativeEvidence!.prepareInput([{ type: 'text', text: 'First input after restart' }]);
+    expect(await session.nativeEvidence!.dispatchInput(witness)).toEqual({ disposition: 'started' });
+    await until(stream, event => event.type === 'turn_completed');
+    expect(f.modelRequests).toBe(1);
+    expect(await session.nativeEvidence!.inspectInput(witness)).toMatchObject({ status: 'materialized', execution: { disposition: 'started' } });
+    expect(f.daemon.exitCode).toBeNull();
   } finally { await f.close(); }
 }, 30000);
 

@@ -128,3 +128,27 @@ test('admission remains held during local receipt encoding and releases after it
     expect(active).toBe(false); expect(cache.hasUnsettledMutation('A')).toBe(false);
   } finally { await cache.close(); }
 }, 10000);
+
+
+test('async pre-dispatch lifecycle failure settles the original receipt without dispatch', async () => {
+  const cache = createOperationCache(); const op = descriptor(); let calls = 0;
+  try {
+    const work = { mutationTargets: ['A'], run: async () => { throw new OperationCacheError('coverage_write_failed', 'Could not publish coverage.'); }, dispatch: async () => { calls++; } };
+    await expect(cache.execute(op, work)).rejects.toMatchObject({ code: 'coverage_write_failed' });
+    expect(cache.hasUnsettledMutation('A')).toBe(false);
+    await expect(cache.execute(op, work)).rejects.toMatchObject({ code: 'coverage_write_failed' }); expect(calls).toBe(0);
+  } finally { await cache.close(); }
+}, 10000);
+test('settlement observers wait for native, async, reservation and in-flight work on the same target', async () => {
+  const cache = createOperationCache(); cache.enableMutationTarget('A'); const events: string[] = [];
+  const unsubscribe = cache.subscribeMutationSettlement(target => events.push(target));
+  let native!: NativeEffectHandle, release!: () => void, reservation!: ReturnType<MutationEntry['reserveNativeEffect']>;
+  try {
+    await cache.execute(descriptor(), { mutationTargets: ['A'], dispatch: async entry => {
+      native = entry.startNativeEffect('A'); native.unresolved(); release = entry.retainAsyncWork('A'); reservation = entry.reserveNativeEffect('A');
+    } });
+    native.settled(); release(); expect(events).toEqual([]); reservation.release(); expect(events).toEqual(['A']);
+    unsubscribe();
+    await cache.execute(descriptor(), { mutationTargets: ['A'], dispatch: async () => {} }); expect(events).toEqual(['A']);
+  } finally { await cache.close(); }
+}, 10000);

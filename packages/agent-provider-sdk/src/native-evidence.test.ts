@@ -5,7 +5,7 @@ import * as sdk from './index.js';
 const api = sdk as unknown as Record<string, any>;
 const hash = (text: string) => createHash('sha256').update(text).digest('hex');
 function witness(text = '你好\n"exact"') {
-  return { version: 1, providerId: 'opencode', nativeSessionId: 'ses_B', nativeInputId: 'msg_U', cwd: '/fixture', store: { authorityId: 'fixture', storeId: 'store' }, parts: [{ type: 'text', text }], content: { encoding: 'utf-8', bytes: Buffer.byteLength(text), sha256: hash(text) }, selections: { model: 'test/model', agent: 'build', system: '' } };
+  return { version: 2, providerId: 'opencode', nativeSessionId: 'ses_B', inputId: 'msg_U', cwd: '/fixture', authority: { kind: 'trusted-service', authorityId: 'fixture', namespaceId: 'namespace' }, parts: [{ type: 'text', text }], content: { encoding: 'utf-8', bytes: Buffer.byteLength(text), sha256: hash(text) }, selections: { model: 'test/model', agent: 'build', system: '' } };
 }
 function canonical(value: any): string { return JSON.stringify(value, function(_key, v) { return v && typeof v === 'object' && !Array.isArray(v) ? Object.fromEntries(Object.keys(v).sort().map(k => [k, v[k]])) : v; }); }
 
@@ -62,7 +62,7 @@ test.each(['', 'abc', '你好\n"exact"', '🌷🌱', ...([55, 56, 63, 64, 65, 10
 });
 test('rejects alternate JSON encodings, duplicate keys and digest lies', () => {
   const valid = canonical(witness());
-  for (const input of [' ' + valid, valid.replace('"version":1', '"version":1,"version":1'), valid.replace('"opencode"', '"openco\\u0064e"')]) expect(() => api.parseAgentPreparedTextInput(input)).toThrow(sdk.AgentOperationRejectedError);
+  for (const input of [' ' + valid, valid.replace('"version":2', '"version":2,"version":2'), valid.replace('"opencode"', '"openco\\u0064e"')]) expect(() => api.parseAgentPreparedTextInput(input)).toThrow(sdk.AgentOperationRejectedError);
   const wrong = witness(); wrong.content.sha256 = '0'.repeat(64);
   expect(() => api.serializeAgentPreparedTextInput(wrong)).toThrow(sdk.AgentOperationRejectedError);
 });
@@ -80,21 +80,26 @@ test('enforces both raw and final escaped witness ceilings without truncation', 
   expect(() => api.serializeAgentPreparedTextInput(witness('\u0000'.repeat(600000)))).toThrow(sdk.AgentOperationRejectedError);
   expect(() => api.parseAgentPreparedTextInput(' '.repeat(3145729))).toThrow(sdk.AgentOperationRejectedError);
 });
-test('materialization proofs contain identity and digests, never copied text or disposition', () => {
+test('materialization proofs preserve materialization separately from exact execution evidence', () => {
   const w = witness();
-  const result = { status: 'materialized', proof: { version: 1, providerId: w.providerId, nativeSessionId: w.nativeSessionId, nativeInputId: w.nativeInputId, cwd: w.cwd, store: w.store, witnessSha256: hash(canonical(w)), contentSha256: w.content.sha256, nativeSelectionsSha256: hash(canonical(w.selections)), nativePartIds: ['prt_P'] } };
+  const result = { status: 'materialized', proof: { version: 2, providerId: w.providerId, nativeSessionId: w.nativeSessionId, inputId: w.inputId, nativeInputId: 'native_U', cwd: w.cwd, authority: w.authority, witnessSha256: hash(canonical(w)), contentSha256: w.content.sha256, nativeSelectionsSha256: hash(canonical(w.selections)), nativePartIds: ['prt_P'] } };
   const encoded = api.serializeAgentInputMaterialization(result);
   expect(api.parseAgentInputMaterialization(encoded)).toEqual(result);
-  expect(() => api.serializeAgentInputMaterialization({ ...result, disposition: 'started' })).toThrow(sdk.AgentOperationRejectedError);
+  const started = { ...result, execution: { disposition: 'started', nativeExecutionId: 'msg_R' } };
+  expect(api.parseAgentInputMaterialization(api.serializeAgentInputMaterialization(started))).toEqual(started);
+  for (const execution of [{ disposition: 'handled', nativeExecutionId: 'msg_R' }, { disposition: 'started' }, { disposition: 'started', nativeExecutionId: '' }]) {
+    expect(() => api.serializeAgentInputMaterialization({ ...result, execution })).toThrow(sdk.AgentOperationRejectedError);
+  }
+  expect(() => api.serializeAgentInputMaterialization({ status: 'unknown', code: 'native_evidence_readback_missing', reason: sdk.AGENT_NATIVE_EVIDENCE_REASONS.native_evidence_readback_missing, execution: started.execution })).toThrow(sdk.AgentOperationRejectedError);
   for (const code of ['native_error', {}, ['native_evidence_readback_missing'], null]) expect(() => api.serializeAgentInputMaterialization({ status: 'unknown', code, reason: 'secret' })).toThrow(sdk.AgentOperationRejectedError);
 });
 
 test.each([
-  ['providerId', 'p'.repeat(65)], ['nativeSessionId', 's'.repeat(257)], ['nativeInputId', 'u'.repeat(257)], ['cwd', '/' + '路'.repeat(1366)],
+  ['providerId', 'p'.repeat(65)], ['nativeSessionId', 's'.repeat(257)], ['inputId', 'u'.repeat(257)], ['cwd', '/' + '路'.repeat(1366)],
 ])('enforces the finite %s field budget', (key, value) => {
   expect(() => api.serializeAgentPreparedTextInput({ ...witness(), [key]: value })).toThrow(sdk.AgentOperationRejectedError);
 });
-test.each(['model', 'agent', 'variant'])('validates the actual %s selection as bounded Unicode', key => {
+test.each(['model', 'agent', 'variant', 'reasoningEffort'])('validates the actual %s selection as bounded Unicode', key => {
   for (const value of ['a'.repeat(513), '', 'line\nbreak', null, undefined]) {
     const w = witness(); (w.selections as any)[key] = value;
     expect(() => api.serializeAgentPreparedTextInput(w)).toThrow(sdk.AgentOperationRejectedError);
@@ -105,7 +110,30 @@ test('accepts maximum text bytes when the canonical witness fits and preserves n
   expect(api.parseAgentPreparedTextInput(api.serializeAgentPreparedTextInput(w)).content.bytes).toBe(2097152);
 });
 test('rejects system overflow, nonfinite metadata, nonplain and hidden data', () => {
-  const bad: any[] = [{ ...witness(), selections: { system: 'x'.repeat(16385) } }, { ...witness(), content: { ...witness().content, bytes: Infinity } }, { ...witness(), store: new Date() }];
+  const bad: any[] = [{ ...witness(), selections: { system: 'x'.repeat(16385) } }, { ...witness(), content: { ...witness().content, bytes: Infinity } }, { ...witness(), authority: new Date() }];
   const hidden = witness(); Object.defineProperty(hidden, 'hidden', { value: 'x' }); bad.push(hidden);
   for (const value of bad) expect(() => api.serializeAgentPreparedTextInput(value)).toThrow(sdk.AgentOperationRejectedError);
+});
+
+
+test('private runtimes bind caller correlation separately from native record and execution identities', () => {
+  const input = { ...witness(), providerId: 'copilot', authority: { kind: 'owned-runtime', authorityId: 'owner', namespaceId: 'profile' },
+    selections: { reasoningEffort: 'high', providerOptions: '{"permissionMode":"default"}' } };
+  const saved = api.parseAgentPreparedTextInput(api.serializeAgentPreparedTextInput(input));
+  expect(saved).toEqual(input);
+  expect(saved).not.toHaveProperty('nativeInputId');
+  const result = { status: 'materialized', proof: { version: 2, providerId: saved.providerId, nativeSessionId: saved.nativeSessionId,
+    inputId: saved.inputId, nativeInputId: 'native_user_42', cwd: saved.cwd, authority: saved.authority,
+    witnessSha256: hash(canonical(saved)), contentSha256: saved.content.sha256, nativeSelectionsSha256: hash(canonical(saved.selections)) },
+    execution: { disposition: 'started', nativeExecutionId: 'native_turn_42' } };
+  expect(api.parseAgentInputMaterialization(api.serializeAgentInputMaterialization(result))).toEqual(result);
+  for (const nativeInputId of [undefined, '', 'u'.repeat(257)]) {
+    expect(() => api.serializeAgentInputMaterialization({ ...result, proof: { ...result.proof, nativeInputId } })).toThrow(sdk.AgentOperationRejectedError);
+  }
+  expect(() => api.serializeAgentPreparedTextInput({ ...input, authority: { ...input.authority, kind: 'guessed' } })).toThrow(sdk.AgentOperationRejectedError);
+});
+test('provider option snapshots are opaque bounded bytes, not public permission interpretation', () => {
+  const input = { ...witness(), selections: { providerOptions: 'x'.repeat(16384) } };
+  expect(api.parseAgentPreparedTextInput(api.serializeAgentPreparedTextInput(input)).selections).toEqual(input.selections);
+  expect(() => api.serializeAgentPreparedTextInput({ ...input, selections: { providerOptions: 'x'.repeat(16385) } })).toThrow(sdk.AgentOperationRejectedError);
 });

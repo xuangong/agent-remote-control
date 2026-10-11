@@ -1,6 +1,6 @@
 import type { AgentTimelineItem } from '@orchardworks/agent-remote-protocol';
 import { loadLocalResource, type MarkdownResourceContext } from './local-resource.js';
-import { type ImageDraft, writeImageDraft, cacheDraftImage, imageDraftScopeGeneration } from '../image-drafts.js';
+import { type ImageDraft, type ImageDraftBinding, writeImageDraft, cacheDraftImage, imageDraftScopeGeneration } from '../image-drafts.js';
 import { draftText } from './composer-document.js';
 export async function preparePromptDraft(item: Extract<AgentTimelineItem, { type: 'user_message' }>, context: MarkdownResourceContext): Promise<Omit<ImageDraft, 'key' | 'scope'>> {
   const draft: Omit<ImageDraft, 'key' | 'scope'> = { version: 1, parts: [], images: {}, nextLabel: 1 };
@@ -20,10 +20,12 @@ export async function preparePromptDraft(item: Extract<AgentTimelineItem, { type
   }
   return draft;
 }
-export async function savePromptDraft(scope: string, sessionKey: string, draft: Omit<ImageDraft, 'key' | 'scope'>): Promise<string> {
+export async function savePromptDraft(binding: ImageDraftBinding, draft: Omit<ImageDraft, 'key' | 'scope'>): Promise<string> {
+  const { scope, key } = binding;
   if (Object.keys(draft.images).length) {
     const generation = imageDraftScopeGeneration(scope);
-    await writeImageDraft({ ...draft, key: JSON.stringify([scope, sessionKey]), scope }, generation);
+    const result = await writeImageDraft({ ...draft, key, scope }, generation);
+    if (result.status !== 'saved') throw new Error('The edited prompt images could not be retained.');
     for (const image of Object.values(draft.images)) if (image.blob) cacheDraftImage(scope, image.imageId, image.blob, generation);
   }
   return draftText(draft.parts);

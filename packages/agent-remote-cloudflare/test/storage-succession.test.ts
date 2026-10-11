@@ -3,7 +3,7 @@ import { afterEach, expect, test } from 'vitest';
 import { createHash } from 'node:crypto';
 import { createRelayState } from '../../agent-remote-hosted/src/state.js';
 import { createHostBroker, emptyRelayState, type HostedRelayState } from '@orchardworks/agent-remote-hosted';
-import { SqliteRelayStore, TEST_ONLY_COMPLETE_SQL_CODEC } from '../src/storage.js';
+import { SqliteRelayStore } from '../src/storage.js';
 import { decodeSqlSnapshot, encodeSqlSnapshot, quoteSqlRecord, SQL_CHUNK_BYTES, type SqlChunk, type SqlManifest } from '../src/storage-codec.js';
 import { codecState } from './storage-codec-fixture.js';
 
@@ -42,7 +42,7 @@ test('rejects unsupported or incomplete quote tuples and unsafe lengths before a
 }, 10000);
 const databases: DatabaseSync[] = [];
 afterEach(() => { for (const db of databases.splice(0)) db.close(); }, 10000);
-function fixture(complete = false) {
+function fixture() {
   const db = new DatabaseSync(':memory:'); databases.push(db);
   let reverse = false;
   const storage = {
@@ -53,12 +53,12 @@ function fixture(complete = false) {
     transactionSync<T>(change: () => T) { db.exec('BEGIN'); try { const result = change(); db.exec('COMMIT'); return result; } catch (error) { db.exec('ROLLBACK'); throw error; } },
     async sync() {},
   } as unknown as DurableObjectStorage;
-  const store = new SqliteRelayStore(storage, auth, complete ? TEST_ONLY_COMPLETE_SQL_CODEC : undefined);
+  const store = new SqliteRelayStore(storage, auth);
   const snapshot = () => JSON.stringify(db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name").all()
     .map(row => [row.name, db.prepare(`SELECT * FROM ${row.name} ORDER BY rowid`).all()]));
   return { store, storage, snapshot, db, shuffle() { reverse = true; } };
 }
-const reopen = (storage: DurableObjectStorage) => new SqliteRelayStore(storage, auth, TEST_ONLY_COMPLETE_SQL_CODEC);
+const reopen = (storage: DurableObjectStorage) => new SqliteRelayStore(storage, auth);
 function physical(db: DatabaseSync) {
   return { manifests: db.prepare('SELECT * FROM relay_snapshot_manifests').all() as unknown as SqlManifest[],
     chunks: db.prepare('SELECT * FROM relay_snapshot_chunks').all() as unknown as SqlChunk[] };
@@ -72,14 +72,16 @@ function rewrite(db: DatabaseSync, kind: string, change: (record: any) => void) 
   db.prepare('DELETE FROM relay_snapshot_chunks WHERE kind = ? AND identity = ?').run(kind, row.identity);
   for (let ordinal = 0; ordinal < Math.ceil(bytes.length / SQL_CHUNK_BYTES); ordinal++) db.prepare('INSERT INTO relay_snapshot_chunks VALUES (?, ?, ?, ?)').run(kind, row.identity, ordinal, bytes.subarray(ordinal * SQL_CHUNK_BYTES, (ordinal + 1) * SQL_CHUNK_BYTES));
 }
-test('refuses unsupported succession formats before changing any SQLite rows and retains normal Relay2 writes', async () => {
+test('default store accepts supported Relay versions and rejects incomplete state before changing SQLite rows', async () => {
   const f = fixture(); const normal = emptyRelayState(auth);
   normal.favoritesTrees = [{ subject: 'owner', revision: 1, folders: [{ id: 'folder', parentId: null, title: 'Original', order: 0 }] }];
+  for (const version of [6, 7, 8] as const) {
+    const supported = { ...normal, version };
+    await f.store.commit(supported);
+    expect(new SqliteRelayStore(f.storage, auth).initial).toEqual(supported);
+  }
   await f.store.commit(normal); const before = f.snapshot();
   for (const change of [
-    (state: any) => { state.version = 6; },
-    (state: any) => { state.version = 7; },
-    (state: any) => { state.version = 8; },
     (state: any) => { state.tenants = [{ subject: 'owner', namespace: 'namespace', broker: { revokedHosts: [] } }]; },
     (state: any) => { state.tenants = [{ subject: 'owner', namespace: 'namespace', broker: { keys: [['key', { recovery: {} }]] } }]; },
     (state: any) => { state.tenants = [{ subject: 'owner', namespace: 'namespace', broker: { pairings: [{ recovery: {} }] } }]; },
@@ -87,18 +89,18 @@ test('refuses unsupported succession formats before changing any SQLite rows and
     (state: any) => { state.tenants = [{ subject: 'owner', namespace: 'namespace', favoritesSuccession: { version: 1, receipts: [] }, broker: {} }]; },
   ]) {
     const state = structuredClone(normal); state.favoritesTrees![0]!.folders[0]!.title = 'Must not persist'; change(state);
-    await expect(f.store.commit(state as HostedRelayState)).rejects.toThrow(/unsupported|succession/i);
+    await expect(f.store.commit(state as HostedRelayState)).rejects.toThrow(/unsupported|succession|invalid|state/i);
     expect(f.snapshot()).toBe(before);
   }
   expect(new SqliteRelayStore(f.storage, auth).initial.favoritesTrees).toEqual(normal.favoritesTrees);
 }, 10000);
 
 test('roundtrips the complete frozen inventory, actual versions and nested receipt bytes independently of SQL order', async () => {
-  const f = fixture(true); const state = codecState(auth);
+  const f = fixture(); const state = codecState(auth);
   await f.store.commit(state); f.shuffle();
   expect(reopen(f.storage).initial).toEqual(state);
   expect(JSON.stringify(reopen(f.storage).initial.tenants[0]!.broker.associations!.freezes)).toBe(JSON.stringify(state.tenants[0]!.broker.associations!.freezes));
-  expect(() => new SqliteRelayStore(f.storage, auth)).toThrow(/succession/);
+  expect(new SqliteRelayStore(f.storage, auth).initial).toEqual(state);
   const next = structuredClone(state); next.tenants.reverse(); next.securityEvents!.reverse();
   next.tenants[1]!.broker.pairings!.reverse(); next.tenants[1]!.broker.creations = [];
   await f.store.commit(next); expect(reopen(f.storage).initial).toEqual(next);
@@ -153,7 +155,7 @@ test('rejects configuration, legacy kinds, versions, identity conflicts and miss
 }, 10000);
 
 test('splits exact 256KiB and next-byte records, multibyte JSON, long logical keys and ordered headers with exact costs', async () => {
-  const f = fixture(true); const state: any = emptyRelayState(auth); state.padding = '';
+  const f = fixture(); const state: any = emptyRelayState(auth); state.padding = '';
   const overhead = encodeSqlSnapshot(state, auth).costs[0]!.byteLength;
   for (const length of [SQL_CHUNK_BYTES, SQL_CHUNK_BYTES + 1]) {
     state.padding = 'x'.repeat(length - overhead);
@@ -192,12 +194,12 @@ test.each([
   ['authority', (f: ReturnType<typeof fixture>) => rewrite(f.db, 'freeze', row => { row.payload.receipt.authority.ownerSubject = 'different'; })],
   ['receipt hash', (f: ReturnType<typeof fixture>) => rewrite(f.db, 'favoritesReceipt', row => { row.payload.receiptHash = '0'.repeat(64); })],
 ])('rejects %s before publishing a reconstructed snapshot', async (_name, corrupt) => {
-  const f = fixture(true); await f.store.commit(codecState(auth)); corrupt(f);
+  const f = fixture(); await f.store.commit(codecState(auth)); corrupt(f);
   const before = f.snapshot(); expect(() => reopen(f.storage)).toThrow(); expect(f.snapshot()).toBe(before);
 }, 10000);
 
 test('rejects duplicate manifests/chunks, orphan chunks and invalid strict UTF8 without SQL scan assumptions', async () => {
-  const f = fixture(true); await f.store.commit(codecState(auth)); const { manifests, chunks } = physical(f.db);
+  const f = fixture(); await f.store.commit(codecState(auth)); const { manifests, chunks } = physical(f.db);
   expect(() => decodeSqlSnapshot([...manifests, manifests[0]!], chunks, auth)).toThrow(/duplicate/);
   expect(() => decodeSqlSnapshot(manifests, [...chunks, chunks[0]!], auth)).toThrow(/duplicate/);
   expect(() => decodeSqlSnapshot(manifests, [...chunks, { ...chunks[0]!, identity: '0'.repeat(64) }], auth)).toThrow(/orphan/);
@@ -206,7 +208,7 @@ test('rejects duplicate manifests/chunks, orphan chunks and invalid strict UTF8 
 }, 10000);
 
 test('whole-snapshot preflight rejects duplicate logical tuples or invalid complete evidence without writing', async () => {
-  const f = fixture(true); const state = codecState(auth); await f.store.commit(state); const before = f.snapshot();
+  const f = fixture(); const state = codecState(auth); await f.store.commit(state); const before = f.snapshot();
   state.securityEvents!.push(state.securityEvents![0]!);
   await expect(f.store.commit(state)).rejects.toThrow(/duplicate/); expect(f.snapshot()).toBe(before);
   state.securityEvents!.pop(); state.tenants[0]!.favoritesSuccession!.receipts[0]!.receiptHash = '0'.repeat(64);
@@ -214,7 +216,7 @@ test('whole-snapshot preflight rejects duplicate logical tuples or invalid compl
 }, 10000);
 
 test('retains large actual freeze relations and repeated relation receipt bytes; rejects a missing lineage link', async () => {
-  const f = fixture(true); const state = codecState(auth); const associations = state.tenants[0]!.broker.associations!;
+  const f = fixture(); const state = codecState(auth); const associations = state.tenants[0]!.broker.associations!;
   const ref = (nativeSessionId: string) => ({ controllerId: 'installation', providerId: 'fixture', nativeSessionId });
   const relations = Array.from({ length: 700 }, (_, index) => ({ relationId: 'large-' + index, kind: 'side' as const,
     readerRef: ref('x'.repeat(400) + index), sourceRef: ref('A'), linked: true, revision: 0 }));
@@ -240,7 +242,7 @@ test.each([
   ['UPDATE', 'relay_snapshot_manifests', " WHEN NEW.kind = 'favoritesReceipt'"],
   ['INSERT', 'relay_snapshot_manifests', " WHEN NEW.kind = 'deviceKey'"],
 ])('rolls back every table after %s on %s%s', async (operation, table, condition) => {
-  const f = fixture(true); const state = codecState(auth); await f.store.commit(state); const before = f.snapshot();
+  const f = fixture(); const state = codecState(auth); await f.store.commit(state); const before = f.snapshot();
   f.db.exec(`CREATE TRIGGER fail_snapshot BEFORE ${operation} ON ${table}${condition} BEGIN SELECT RAISE(ABORT, 'late codec failure'); END`);
   const next: any = structuredClone(state); next.extraRelay.changed = true;
   next.tenants[0].broker.associations.freezes[0].extraEvidence = 'new';
@@ -252,7 +254,7 @@ test.each([
 }, 10000);
 
 test('awaits sync before Relay current/replies and cache, rejects unknown durability without asserting rollback', async () => {
-  const f = fixture(true); await f.store.commit(codecState(auth));
+  const f = fixture(); await f.store.commit(codecState(auth));
   let release!: () => void; let entered!: () => void; const started = new Promise<void>(resolve => { entered = resolve; });
   f.storage.sync = () => { entered(); return new Promise<void>(resolve => { release = resolve; }); };
   let publications = 0, failures = 0, replied = false;
@@ -299,7 +301,7 @@ test('preserves empty optional collections and complete ordinary metadata throug
 }, 10000);
 
 test('configured accounting fences SQL writes at ten, holds publication on sync and restores unknown complete evidence', async () => {
-  const f = fixture(true); const initial = codecState(auth);
+  const f = fixture(); const initial = codecState(auth);
   const unresolved: any = initial.tenants[0]!.broker.associations!.freezes.find(row => row.released === undefined)!;
   unresolved.receipt = { ...unresolved.receipt, version: 2, maxProjectionBytes: 65536 };
   await f.store.commit(initial);
@@ -317,7 +319,7 @@ test('configured accounting fences SQL writes at ten, holds publication on sync 
   expect(reopen(f.storage).initial.version).toBe(10);
   release(); await pending;
   expect(relay.read().version).toBe(10); expect(publications).toBe(1); expect(replies).toBe(1);
-  expect(() => new SqliteRelayStore(f.storage, auth)).toThrow(/succession/i);
+  expect(new SqliteRelayStore(f.storage, auth).initial).toEqual(relay.read());
   f.storage.sync = async () => { throw new Error('unknown accounting sync'); };
   await expect(relay.mutate(draft => { (draft.tenants[0]!.broker.associations as any).unknownEvidence = 'complete'; })).rejects.toThrow(/unknown accounting sync/);
   expect(failures).toBe(1); expect(publications).toBe(1);
@@ -329,7 +331,7 @@ test('configured accounting fences SQL writes at ten, holds publication on sync 
 }, 10000);
 
 test('configured accounting rolls back a late SQL fault before format and runtime publication', async () => {
-  const f = fixture(true); const initial = emptyRelayState(auth); initial.version = 9;
+  const f = fixture(); const initial = emptyRelayState(auth); initial.version = 9;
   await f.store.commit(initial); const before = f.snapshot();
   const encoding = { measureSnapshot(value: Readonly<HostedRelayState>) { return { snapshotFormat: 3, recordFormat: 1, chunkBytes: SQL_CHUNK_BYTES, costs: encodeSqlSnapshot(value as HostedRelayState, auth).costs }; }, quoteRecord: quoteSqlRecord };
   let failures = 0, publications = 0;
@@ -343,7 +345,7 @@ test('configured accounting rolls back a late SQL fault before format and runtim
 
 for (const failure of ['hold', 'rollback', 'unknown-sync'] as const) test(`atomic source completion preserves the Broker and SQL boundary on ${failure}`, async () => {
   const { sourceCompletionState, sourceCompletionBroker } = await import('./source-completion-fixture.js');
-  const f = fixture(true); const initial = sourceCompletionState(auth); await f.store.commit(initial);
+  const f = fixture(); const initial = sourceCompletionState(auth); await f.store.commit(initial);
   const encoding = { measureSnapshot(value: Readonly<HostedRelayState>) { return { snapshotFormat: 3, recordFormat: 1, chunkBytes: SQL_CHUNK_BYTES, costs: encodeSqlSnapshot(value as HostedRelayState, auth).costs }; }, quoteRecord: quoteSqlRecord };
   const relay = createRelayState(auth, { initial, commit: value => f.store.commit(value) }, () => {}, () => {}, encoding);
   let entered!: () => void, release!: () => void; const held = new Promise<void>(resolve => { entered = resolve; });
@@ -377,7 +379,7 @@ for (const failure of ['hold', 'rollback', 'unknown-sync'] as const) test(`atomi
 
 for (const failure of ['hold', 'rollback', 'unknown-sync'] as const) test(`exact relation completion keeps its last durable phase on ${failure}`, async () => {
   const { relationCompletionState, sourceCompletionBroker } = await import('./source-completion-fixture.js');
-  const f = fixture(true), initial = relationCompletionState(auth); await f.store.commit(initial);
+  const f = fixture(), initial = relationCompletionState(auth); await f.store.commit(initial);
   const encoding = { measureSnapshot(value: Readonly<HostedRelayState>) { return { snapshotFormat: 3, recordFormat: 1, chunkBytes: SQL_CHUNK_BYTES, costs: encodeSqlSnapshot(value as HostedRelayState, auth).costs }; }, quoteRecord: quoteSqlRecord };
   const relay = createRelayState(auth, { initial, commit: value => f.store.commit(value) }, () => {}, () => {}, encoding);
   let enter!: () => void, release!: () => void; const held = new Promise<void>(resolve => { enter = resolve; });
@@ -413,7 +415,7 @@ for (const consumer of ['terminal', 'favorites', 'invitation', 'registration', '
       const broker = initial.tenants[0]!.broker; broker.hosts = []; broker.keys = [];
       broker.revokedHosts![0]!.revocationId = '00000000-0000-4000-8000-000000000002';
     }
-    const f = fixture(true); await f.store.commit(initial);
+    const f = fixture(); await f.store.commit(initial);
     const encoding = { measureSnapshot: (state: Readonly<HostedRelayState>) => ({ snapshotFormat: 3, recordFormat: 1, chunkBytes: SQL_CHUNK_BYTES, costs: encodeSqlSnapshot(state as HostedRelayState, auth).costs }), quoteRecord: quoteSqlRecord };
     let publications = 0;
     const relay = createRelayState(auth, { initial, commit: value => f.store.commit(value) }, () => {}, () => { publications++; }, encoding);
@@ -490,7 +492,7 @@ test('full recovery registration construction fits the saved claim and ends only
   const { deriveSuccessionCapacity } = await import('../../agent-remote-hosted/src/succession-capacity.js');
   const initial = retentionState(auth, true), broker = initial.tenants[0]!.broker;
   broker.hosts = []; broker.keys = []; broker.revokedHosts![0]!.revocationId = '00000000-0000-4000-8000-000000000002';
-  const f = fixture(true); await f.store.commit(initial);
+  const f = fixture(); await f.store.commit(initial);
   const encoding = { measureSnapshot: (state: Readonly<HostedRelayState>) => ({ snapshotFormat: 3, recordFormat: 1, chunkBytes: SQL_CHUNK_BYTES, costs: encodeSqlSnapshot(state as HostedRelayState, auth).costs }), quoteRecord: quoteSqlRecord };
   const relay = createRelayState(auth, { initial, commit: value => f.store.commit(value) }, () => {}, () => {}, encoding), peer = retentionPeer(relay, auth);
   try {

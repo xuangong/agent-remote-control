@@ -85,7 +85,8 @@ export class SessionSuccessionEnrollment {
         const role = await this.service.store.ensureRole(source, await realpath(cwd));
         const state = this.service.store.read(role.id);
         if (state.associationAuthority && successionAuthorityKey(state.associationAuthority) !== successionAuthorityKey(context.authority)) throw new Error('Primary role belongs to another association authority.');
-        return json(200, { role, lineage: this.service.store.lineage(state), relationUpdates: 1, associationRevision: state.associationRevision, sourceParticipants: state.participants.filter(row => row.kind !== 'tpm').map(row => ({ relationId: row.relationId, kind: row.kind, readerRef: row.after })) });
+        const description = await this.service.describe(role, source, this.registrations().map(({ adapter }) => ({ providerId: adapter.descriptor.providerId, displayName: adapter.descriptor.displayName })));
+        return json(200, { ...description, lineage: this.service.store.lineage(state), relationUpdates: 1, associationRevision: state.associationRevision, sourceParticipants: state.participants.filter(row => row.kind !== 'tpm').map(row => ({ relationId: row.relationId, kind: row.kind, readerRef: row.after })) });
       }
       if (Object.keys(input).some(name => !['action', 'freeze'].includes(name)) || !isSuccessionAssociationFreeze(input.freeze)) throw new Error('A complete frozen association receipt is required.');
       const freeze: SuccessionAssociationFreeze = input.freeze;

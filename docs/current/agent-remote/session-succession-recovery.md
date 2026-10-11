@@ -28,8 +28,8 @@ succession state does not copy a workspace, process, credentials or native sessi
 
 | State | Checkpoint format | Supported upgrade behavior |
 | --- | --- | --- |
-| Controller role state | Version 6 | Versions 1 through 5 retain explicit migration rules; legacy receipts gain no invented projection budget, source-witness reservation or creation evidence |
-| Pending context | Version 2 | Reads version 1 attachments; new target-independent preparations share attachment capacity, and delivery-state recovery remains independent of role state |
+| Controller role state | Version 7 | Versions 1 through 6 retain explicit migration rules; legacy receipts gain no invented projection budget, source-witness reservation or optional native creation evidence |
+| Pending context | Version 3 | Reads valid versions 1 and 2; optional prepared-input records use attachment version 3. Preparations share attachment capacity, and delivery-state recovery remains independent of role state |
 | Relay outer state | Version 10 for configured succession accounting; version 9 with association-v5 writers; version 8 adds Host recovery metadata; version 7 adds Favorites succession progress | Restore10 requires complete encoding costs; successful accounting writes retain10. No-cost versions 2 through 9 preserve ordinary and exact saved recovery with explicit inner-format rules; no applied progress, budget or native result is fabricated |
 | Cloudflare SQL snapshot | Metadata format 3; record/envelope/manifest format 1 | Format 2 migrates atomically on the first complete commit; old readers reject 3. This physical format does not enable effectful succession |
 | Broker association state | Version 5 | Versions 1 through 4 retain explicit migrations and valid complete committed lineage; saved freeze-v1 identities remain unchanged |
@@ -44,6 +44,12 @@ association version 3 requires outer version 5; version 4 requires outer version
 version 5 requires outer version 9. Favorites progress requires outer version 7. New safety fields must not be
 hidden behind an older version number. An older writer must not overwrite a newer format. Do not edit a
 version number or delete recovery fields to make a previous binary accept them.
+
+Role7 retains the original optional native creation outcome; context3 retains a
+versioned nested prepared-input witness. Older layouts carrying these new fields
+are rejected as ambiguous. The actual role6/context2 readers reject files written
+by the new stores and cannot overwrite them. This format support alone does not
+connect an optional native producer or enable succession.
 
 ## Negotiated projection bound
 
@@ -300,6 +306,13 @@ and saves the exact creation identity and zero-task guarantee for that attempt.
 Legacy phases alone cannot supply those facts. Binding moves the saved context
 preparation into an attachment; it does not capture again or send native input.
 
+Optional native evidence preserves the complete original creation result in local
+progress, separately from the ordinary runtime persistence handle. Successful
+creation retains its verified-resume handle. Known rejection retains the actual
+candidate but does not authorize opening it. Unknown outcome identifies no
+candidate; only a typed definite pre-request rejection can use the separate
+`not_dispatched` terminal result. Exact repeats cannot replace these outcomes.
+
 Cancellation can settle a certified create while its call is still pending. The
 terminal decision must persist before releasing the source. A late result only
 adds bounded orphan evidence; it cannot bind context, commit, recreate, send input
@@ -315,6 +328,15 @@ the existing 1 MiB raw-input limit. Capacity rejection leaves context pending fo
 a smaller explicitly submitted input. Native proof is checked at its actual size;
 an oversized proof leaves the old accepted/unknown receipt unchanged. No retained
 history is deleted to make room, and no arbitrary future-input capacity is promised.
+
+For optional evidence, admission reserves the complete remaining original-result
+growth, including a late cancelled candidate. A prepared input stores its witness
+as a nested object and reserves the exact maximum proof allowed by that witness,
+including enclosing JSON escaping and settlement state. Accepted, unknown and
+restored deliveries retain that reserve; unrelated writes cannot consume it.
+Positive materialization must match the original context, input, native target,
+witness and selections. It does not prove execution completion, settle queued
+work or permit replay. Legacy evidence retains its previous meaning.
 
 ## Authenticated committed replay
 

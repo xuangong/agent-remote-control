@@ -1,8 +1,6 @@
 import { AgentOperationRejectedError, type AgentInputAcceptance, type AgentMessageOptions, type AgentPersistenceHandle, type AgentSessionConfig } from './provider.js';
 import type { AgentInputPart } from './image-input.js';
 
-/** Finite policy for optional evidence v1, not native runtime maxima. */
-export const AGENT_NATIVE_EVIDENCE_LIMITS = Object.freeze({ providerBytes: 64, identityBytes: 256, selectionBytes: 512, cwdBytes: 4096, textBytes: 2097152, systemBytes: 16384, witnessBytes: 3145728, materializationBytes: 32768, handleBytes: 16384, reasonBytes: 512, codeBytes: 64 });
 export const AGENT_NATIVE_EVIDENCE_REASONS = Object.freeze({
   native_evidence_unavailable: 'Native evidence authority is unavailable.',
   native_evidence_invalid: 'Native evidence is malformed.',
@@ -16,6 +14,14 @@ export const AGENT_NATIVE_EVIDENCE_REASONS = Object.freeze({
   native_evidence_readback_mismatch: 'The native input does not match the prepared evidence.',
   native_evidence_readback_failed: 'The exact native input could not be inspected.',
 });
+/** The finite closed wrappers add to the complete encoded handle, not its raw opaque length. */
+const creationBytes = Math.max(
+  16384 + JSON.stringify({ status: 'created', handle: null }).length - 4,
+  ...Object.entries(AGENT_NATIVE_EVIDENCE_REASONS).map(([code, reason]) =>
+    16384 + JSON.stringify({ status: 'known_rejected', handle: null, code, reason }).length - 4),
+);
+/** Finite policy for optional evidence v1, not native runtime maxima. */
+export const AGENT_NATIVE_EVIDENCE_LIMITS = Object.freeze({ providerBytes: 64, identityBytes: 256, selectionBytes: 512, cwdBytes: 4096, textBytes: 2097152, systemBytes: 16384, witnessBytes: 3145728, materializationBytes: 32768, handleBytes: 16384, creationBytes, reasonBytes: 512, codeBytes: 64 });
 export type AgentNativeEvidenceCode = keyof typeof AGENT_NATIVE_EVIDENCE_REASONS;
 export type AgentNativeEvidenceAvailability = { status: 'configured'; version: 1 } | { status: 'unavailable'; code: AgentNativeEvidenceCode; reason: string };
 export type AgentEmptySessionConfig = Pick<AgentSessionConfig, 'sessionId' | 'cwd'>;
@@ -124,11 +130,23 @@ function validateWitness(value: any): void {
   if ('system' in value.selections) string(value.selections.system, limits.systemBytes, true);
   if ('delivery' in value.selections && value.selections.delivery !== 'immediate') reject();
 }
+function validateReason(value: Record<string, any>): void {
+  string(value.code, limits.codeBytes); string(value.reason, limits.reasonBytes);
+  if (!Object.hasOwn(AGENT_NATIVE_EVIDENCE_REASONS, value.code) || value.reason !== AGENT_NATIVE_EVIDENCE_REASONS[value.code as AgentNativeEvidenceCode]) reject();
+}
+function validateCreation(value: any): void {
+  if (value?.status === 'unknown') { object(value, ['status', 'code', 'reason']); validateReason(value); return; }
+  if (value?.status === 'created') object(value, ['status', 'handle']);
+  else { object(value, ['status', 'handle', 'code', 'reason']); if (value.status !== 'known_rejected') reject(); validateReason(value); }
+  object(value.handle, ['providerId', 'sessionId', 'opaque']);
+  identity(value.handle.providerId, limits.providerBytes); identity(value.handle.sessionId);
+  string(value.handle.opaque, limits.handleBytes, true);
+  if (bytes(JSON.stringify(value.handle)).length > limits.handleBytes) reject('native_evidence_limit');
+}
 function validateMaterialization(value: any): void {
   if (value?.status === 'unknown') {
     object(value, ['status', 'code', 'reason']);
-    string(value.code, limits.codeBytes); string(value.reason, limits.reasonBytes);
-    if (!Object.hasOwn(AGENT_NATIVE_EVIDENCE_REASONS, value.code) || value.reason !== AGENT_NATIVE_EVIDENCE_REASONS[value.code as AgentNativeEvidenceCode]) reject();
+    validateReason(value);
     return;
   }
   object(value, ['status', 'proof']); if (value.status !== 'materialized') reject(); const proof = value.proof;
@@ -136,6 +154,8 @@ function validateMaterialization(value: any): void {
   digest(proof.witnessSha256); digest(proof.contentSha256); digest(proof.nativeSelectionsSha256);
   if ('nativePartIds' in proof) { if (!Array.isArray(proof.nativePartIds) || proof.nativePartIds.length !== 1) reject(); identity(proof.nativePartIds[0]); }
 }
+export function serializeAgentEmptyCreationResult(value: AgentEmptyCreationResult): string { return encode(value, limits.creationBytes, validateCreation); }
+export function parseAgentEmptyCreationResult(encoded: string): AgentEmptyCreationResult { return parse(encoded, limits.creationBytes, validateCreation); }
 export function serializeAgentPreparedTextInput(value: AgentPreparedTextInput): string { return encode(value, limits.witnessBytes, validateWitness); }
 export function parseAgentPreparedTextInput(encoded: string): AgentPreparedTextInput { return parse(encoded, limits.witnessBytes, validateWitness); }
 export function serializeAgentInputMaterialization(value: AgentInputMaterialization): string { return encode(value, limits.materializationBytes, validateMaterialization); }

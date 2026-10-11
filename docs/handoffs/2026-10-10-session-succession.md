@@ -3,6 +3,30 @@
 Date: 2026-10-10. Audience: the next implementation session or maintainer.
 Status: partially implemented; no usable end-to-end handoff yet.
 
+## Durable native evidence checkpoint (2026-10-11)
+
+D2A passed independent spec and quality review after one scoped correction.
+Root freshly passed 70 affected Host tests, both original malformed-code
+regressions and the Host source typecheck. Unchanged SDK and capacity paths retain
+their verified 46 and 13 tests and SDK source typecheck. Two actual prior-reader
+tests prove that role6/context2 readers reject new-writer files without changing
+them; current readers restore the saved evidence. Full patch and repair replay
+match the frozen source.
+
+The SDK provides canonical whole-result serialization with a bounded original
+handle. Host role7/context3 stores preserve original creation outcomes, nested
+input witnesses and exact positive proofs, including late cancelled candidates
+and the complete reserved durable growth. Known rejection, unknown and definite
+pre-request rejection remain distinct. A synchronous assertion now runs inside
+the final queued store mutation before its first state change.
+
+Next is D2B: connect verified original-handle attachment, first-input dispatch and
+readback through existing Host operation accounting; retain exact leased Session
+facades and validity tokens through the final commit assertion. Remaining Task
+5/6 and whole-branch acceptance follow. Production capability, SQL effects and
+real native suppliers remain disabled. No native certification, merge, push,
+deployment or installation is implied by this checkpoint.
+
 ## Optional native evidence checkpoint (2026-10-11)
 
 D1 passed independent spec and quality review after fixing its sole Important
@@ -19,12 +43,10 @@ validity admission; newly discovered relevant Session metadata retires old token
 Materialization does not prove execution, settle queued work or establish native
 readiness. No production authority supplier is installed.
 
-Next is D2A: retain original creation outcomes and nested input witnesses in the
-existing Host stores, reserve their complete durable growth, and add the final
-synchronous commit assertion. D2B then connects verified attachment, dispatch and
-readback to the existing Host effect route. Remaining Task 5/6 and whole-branch
-acceptance follow. Production capability, SQL effects and real native suppliers
-remain disabled; no merge, push, deployment or installation is included.
+The newer D2A checkpoint above completes the durable original-outcome,
+witness/proof and synchronous commit seams. D2B Host consumption, remaining Task
+5/6 and whole-branch acceptance remain open. Production capability, SQL effects
+and real native suppliers remain disabled.
 
 ## Product composition and recovery checkpoint (2026-10-11)
 
@@ -49,10 +71,10 @@ failure and Retry. Validated Favorites progress initiates authoritative HTTP
 recovery independently of the Favorites tree revision; hints never choose a
 native target or grant application/pruning authority.
 
-The newer D1 checkpoint above completes optional SDK/OpenCode native evidence.
-D2 durable consumption/admission, remaining Task 5/6 and whole-branch acceptance
-are still open. D1/D2 do not themselves establish production store authority,
-complete native readiness or queue settlement.
+The newer D1/D2A checkpoints above complete optional SDK/OpenCode evidence and
+its durable Host representation. D2B consumption/admission, remaining Task 5/6
+and whole-branch acceptance are still open. These checkpoints do not themselves
+establish production store authority, complete native readiness or queue settlement.
 
 ## Recoverable local composition checkpoint (2026-10-11)
 

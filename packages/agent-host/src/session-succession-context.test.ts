@@ -1,4 +1,7 @@
-import { mkdtemp, rm } from 'node:fs/promises';
+import { createHash } from 'node:crypto';
+import { serializeAgentPreparedTextInput, serializeAgentInputMaterialization, type AgentPreparedTextInput } from '@orchardworks/agent-provider-sdk';
+import { quotedSessionContextPrefix } from '@orchardworks/agent-remote-protocol';
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -79,4 +82,71 @@ describe('durable succession first input', () => {
     expect((await store.attach(reordered)).state).toBe('pending');
   });
 
+});
+
+const digest = (text: string) => createHash('sha256').update(text).digest('hex');
+function prepared(text = quotedSessionContextPrefix({ id: attachment.operationId, sourceSession: source.nativeSessionId, capturedAt: attachment.capturedAt, text: attachment.text }) + 'new'): AgentPreparedTextInput {
+  return { version: 1, providerId: target.providerId, nativeSessionId: 'B', nativeInputId: 'U', cwd: '/workspace', store: { authorityId: 'authority', storeId: 'store' },
+    parts: [{ type: 'text', text }], content: { encoding: 'utf-8', bytes: Buffer.byteLength(text), sha256: digest(text) }, selections: { model: 'model', delivery: 'immediate' } };
+}
+function positive(witness: AgentPreparedTextInput) {
+  const { delivery: _delivery, ...selections } = witness.selections;
+  return serializeAgentInputMaterialization({ status: 'materialized', proof: { version: 1, providerId: witness.providerId, nativeSessionId: witness.nativeSessionId, nativeInputId: witness.nativeInputId,
+    cwd: witness.cwd, store: witness.store, witnessSha256: digest(serializeAgentPreparedTextInput(witness)), contentSha256: witness.content.sha256, nativeSelectionsSha256: digest(JSON.stringify(selections)) } });
+}
+it('persists a nested witness with exact original context/input bindings, without preparation replay', async () => {
+  const { path, store } = await setup(), witness = prepared();
+  const first = await store.begin('succession', input(), witness);
+  expect(first.preparedInput).toMatchObject({ version: 1, contextOperationId: 'succession', witness });
+  const disk = JSON.parse(await readFile(join(path, 'context.json'), 'utf8'));
+  expect(disk.version).toBe(3); expect(disk.attachments[0].deliveries[0].preparedInput.witness.parts).toEqual(witness.parts);
+  expect((await store.begin('succession', input())).preparedInput).toEqual(first.preparedInput);
+  await expect(store.begin('succession', input(), { ...witness, nativeInputId: 'other-U' })).rejects.toThrow(/identity|conflict/);
+  const restored = new SessionSuccessionContextStore(path); await restored.ready;
+  expect(restored.delivery('input')).toMatchObject({ state: 'unknown', preparedInput: first.preparedInput });
+  expect(Number(restored.delivery('input')!.reservedBytes)).toBeGreaterThan(0);
+});
+it('rejects a witness for another native target or differently composed input before admission', async () => {
+  const { store } = await setup();
+  for (const witness of [prepared('new'), { ...prepared(), nativeSessionId: 'C' }, { ...prepared(), providerId: 'other' }]) {
+    await expect(store.begin('succession', input(), witness)).rejects.toThrow(/binding|match/);
+    expect(store.read('succession').deliveries).toEqual([]);
+  }
+});
+it('requires exact positive proof for optional delivery and keeps actual acceptance separate', async () => {
+  const { store } = await setup(), witness = prepared(); await store.begin('succession', input(), witness);
+  await store.settle('succession', 'input', 'accepted', { disposition: 'queued' });
+  const evidence = { operationId: 'input', target, roleRevision: 2, outcome: 'materialized' as const, nativeEvidence: positive(witness) };
+  for (const invalid of [
+    { ...evidence, outcome: 'not-dispatched' as const }, { ...evidence, nativeEvidence: 'native-row' },
+    { ...evidence, nativeEvidence: positive({ ...witness, nativeInputId: 'other-U' }) },
+    { ...evidence, nativeEvidence: positive({ ...witness, cwd: '/other' }) },
+    ...['providerId', 'nativeSessionId'].map(key => ({ ...evidence, nativeEvidence: positive({ ...witness, [key]: 'other' }) })),
+    { ...evidence, nativeEvidence: positive({ ...witness, store: { ...witness.store, storeId: 'other' } }) },
+    { ...evidence, nativeEvidence: positive({ ...witness, selections: { model: 'other' } }) },
+    ...['witnessSha256', 'contentSha256', 'nativeSelectionsSha256'].map(key => { const value = JSON.parse(evidence.nativeEvidence); value.proof[key] = '0'.repeat(64); return { ...evidence, nativeEvidence: serializeAgentInputMaterialization(value) }; }),
+  ]) await expect(store.reconcile('succession', invalid)).rejects.toThrow();
+  const result = await store.reconcile('succession', evidence);
+  expect(result).toMatchObject({ state: 'materialized', inputAcceptance: { disposition: 'queued' }, nativeEvidence: evidence.nativeEvidence, reservedBytes: '00000000' });
+  expect(await store.reconcile('succession', evidence)).toEqual(result);
+  await expect(store.reconcile('succession', { ...evidence, nativeEvidence: positive({ ...witness, selections: {} }) })).rejects.toThrow();
+});
+it('rejects persisted optional evidence with changed original input/context binding and legacy version mixtures', async () => {
+  const { path, store } = await setup(); await store.begin('succession', input(), prepared());
+  const file = join(path, 'context.json'), original = await readFile(file, 'utf8');
+  for (const mutation of [(state: any) => { state.attachments[0].deliveries[0].text = 'other'; },
+    (state: any) => { state.attachments[0].text = '[{"role":"user","text":"changed"}]'; },
+    (state: any) => { state.version = 2; }]) {
+    const state = JSON.parse(original); mutation(state); await writeFile(file, JSON.stringify(state));
+    await expect(new SessionSuccessionContextStore(path).ready).rejects.toThrow();
+  }
+});
+
+it('optional definite rejection keeps context pending and releases only its settled proof obligation', async () => {
+  const { path, store } = await setup(); await store.begin('succession', input(), prepared());
+  const result = await store.settle('succession', 'input', 'rejected');
+  expect(result.reservedBytes).toBe('00000000'); expect(store.read('succession').state).toBe('pending');
+  const restored = new SessionSuccessionContextStore(path); await restored.ready;
+  expect(await restored.begin('succession', input())).toEqual(result);
+  await expect(restored.reconcile('succession', { operationId: 'input', roleRevision: 2, target, outcome: 'materialized', nativeEvidence: positive(prepared()) })).rejects.toThrow(/current state/);
 });

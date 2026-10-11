@@ -291,3 +291,69 @@ test('context directory-sync uncertainty poisons reads and settlement until rest
   const restored = new SessionSuccessionContextStore(directory); await restored.ready;
   expect(restored.delivery('input')!.state).toBe('unknown');
 });
+
+test('commit checks retained native currentness inside the actual store mutation after a held writer', async () => {
+  const directory = await root(), store = new SessionSuccessionStore(directory); await store.ready;
+  await store.createRole({ id: 'role', revision: 1, origin: ref('A'), current: ref('A'), workspace: { controllerId: 'host', canonicalCwd: directory } });
+  await store.begin(request); await store.advance('op', 'preparing', { phase: 'quiescing' }); await store.advance('op', 'quiescing', { phase: 'transferring', to: ref('B') });
+  await store.advance('op', 'transferring', { phase: 'ready', prepared: { ...request, to: ref('B'), workspace: { controllerId: 'host', canonicalCwd: directory }, associationRevision: 0, participants: [], capture: { epoch: 'e', seq: 1, capturedAt: '2026-10-10T00:00:00Z' } } });
+  const original = await vi.importActual<typeof fs>('node:fs/promises');
+  let enter!: () => void, release!: () => void, current = true, checks = 0;
+  const entered = new Promise<void>(resolve => { enter = resolve; }), gate = new Promise<void>(resolve => { release = resolve; });
+  vi.mocked(fs.open).mockImplementation(async (...args) => {
+    const file = await original.open(...args);
+    if (args[0] === directory && args[1] === 'r') vi.spyOn(file, 'sync').mockImplementation(async () => { enter(); await gate; });
+    return file;
+  });
+  const writing = store.ensureRole(ref('unrelated'), '/workspace');
+  let committing: Promise<unknown> = Promise.resolve();
+  try {
+    await enteredWithinDeadline(entered);
+    committing = store.commit('op', undefined, () => { checks++; if (!current) throw new Error('retained attachment changed'); });
+    const observed = committing.then(() => undefined, error => error);
+    expect(checks).toBe(0); current = false; release(); await writing;
+    expect(await observed).toMatchObject({ message: 'retained attachment changed' }); expect(checks).toBe(1);
+    expect(store.read('role').role.current).toEqual(ref('A')); expect(store.operation('op').phase).toBe('ready');
+    expect(JSON.parse(await fs.readFile(join(directory, 'state.json'), 'utf8')).roles[0].operations[0].phase).toBe('ready');
+    vi.mocked(fs.open).mockImplementation(original.open);
+    current = true; await store.commit('op', store.generation, () => { checks++; expect(current).toBe(true); expect(store.operation('op').phase).toBe('ready'); });
+    expect(checks).toBe(2); expect(store.read('role').role.current).toEqual(ref('B'));
+  } finally { release(); await Promise.allSettled([writing, committing]); }
+});
+
+test.each(['role-temporary', 'role-directory', 'context-temporary', 'context-directory'] as const)('%s evidence publication failure never authorizes continuation and preserves exact restart evidence', async kind => {
+  const directory = await root(), original = await vi.importActual<typeof fs>('node:fs/promises');
+  const role = new SessionSuccessionStore(directory), context = new SessionSuccessionContextStore(directory); await Promise.all([role.ready, context.ready]);
+  const creation = { status: 'created' as const, handle: { providerId: 'fixture', sessionId: 'B', opaque: 'original\nopaque' } };
+  const attachment = { operationId: 'op', roleId: 'role', roleRevision: 2, source: ref('A'), target: ref('B'), capturedAt: '2026-10-10T00:00:00Z', boundary: { epoch: 'e', seq: 1 }, text: '[]', itemCount: 0 };
+  const input = { operationId: 'input', roleId: 'role', roleRevision: 2, target: ref('B'), text: 'work' };
+  const { quotedSessionContextPrefix } = await import('@orchardworks/agent-remote-protocol');
+  const text = quotedSessionContextPrefix({ id: attachment.operationId, sourceSession: 'A', capturedAt: attachment.capturedAt, text: '[]' }) + input.text;
+  const witness = { version: 1 as const, providerId: 'fixture', nativeSessionId: 'B', nativeInputId: 'U', cwd: directory, store: { authorityId: 'authority', storeId: 'store' }, parts: [{ type: 'text' as const, text }] as const,
+    content: { encoding: 'utf-8' as const, bytes: Buffer.byteLength(text), sha256: createHash('sha256').update(text).digest('hex') }, selections: {} };
+  if (kind.startsWith('role')) {
+    await role.createRole({ id: 'role', revision: 1, origin: ref('A'), current: ref('A'), workspace: { controllerId: 'host', canonicalCwd: directory } });
+    await role.begin(request, true); await role.savePreparation('op', { ...attachment.boundary, capturedAt: attachment.capturedAt }, true); await role.startCreation('op');
+  } else await context.attach(attachment);
+  const file = join(directory, kind.startsWith('role') ? 'state.json' : 'context.json'), before = await fs.readFile(file, 'utf8');
+  const temporary = kind.endsWith('temporary'); let continued = false;
+  if (temporary) vi.mocked(fs.open).mockRejectedValueOnce(new Error('temporary write unavailable'));
+  else vi.mocked(fs.open).mockImplementation(async (...args) => {
+    const file = await original.open(...args); if (args[0] === directory && args[1] === 'r') vi.spyOn(file, 'sync').mockRejectedValue(new Error('directory publication unknown')); return file;
+  });
+  const writing = kind.startsWith('role') ? role.saveCreationResult('op', creation) : context.begin('op', input, witness);
+  await expect(writing.then(() => { continued = true; })).rejects.toMatchObject({ code: temporary ? 'succession_publication_rejected' : 'succession_publication_unknown' });
+  expect(continued).toBe(false); if (temporary) expect(await fs.readFile(file, 'utf8')).toBe(before);
+  vi.mocked(fs.open).mockImplementation(original.open);
+  if (kind.startsWith('role')) {
+    const restored = new SessionSuccessionStore(directory); await restored.ready;
+    expect(restored.progress('op')!.nativeCreation!.outcome).toEqual(temporary ? undefined : creation);
+    expect(restored.operation('op').phase).toBe('unknown');
+    if (temporary) { expect(Number(restored.progress('op')!.reservedBytes)).toBeGreaterThan(16384); await restored.saveCreationResult('op', creation); }
+    expect(restored.operation('op').to).toEqual(ref('B'));
+  } else {
+    const restored = new SessionSuccessionContextStore(directory); await restored.ready;
+    if (temporary) expect(restored.read('op').deliveries).toEqual([]);
+    else { expect(restored.delivery('input')).toMatchObject({ state: 'unknown', preparedInput: { witness } }); expect(Number(restored.delivery('input')!.reservedBytes)).toBeGreaterThan(0); }
+  }
+});

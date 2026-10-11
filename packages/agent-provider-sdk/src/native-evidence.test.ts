@@ -9,6 +9,47 @@ function witness(text = '你好\n"exact"') {
 }
 function canonical(value: any): string { return JSON.stringify(value, function(_key, v) { return v && typeof v === 'object' && !Array.isArray(v) ? Object.fromEntries(Object.keys(v).sort().map(k => [k, v[k]])) : v; }); }
 
+test.each(['created', 'known_rejected', 'unknown'])('empty creation codec preserves the closed %s result and uninterpreted handle', status => {
+  const result = { status, ...(status === 'unknown' ? {} : { handle: { providerId: 'provider', sessionId: 'native-B', opaque: 'not JSON: "原样"\n' } }), ...(status === 'created' ? {} : { code: 'native_evidence_stale', reason: 'Native evidence authority or observation changed.' }) };
+  const encoded = api.serializeAgentEmptyCreationResult(result);
+  expect(encoded).toBe(canonical(result));
+  const parsed = api.parseAgentEmptyCreationResult(encoded);
+  expect(parsed).toEqual(result); expect(Object.isFrozen(parsed)).toBe(true);
+  if (status !== 'unknown') expect(Object.isFrozen(parsed.handle)).toBe(true);
+});
+test('empty creation codec measures the complete escaped handle at and beyond its bound', () => {
+  const handle = { providerId: 'provider', sessionId: 'B', opaque: '' };
+  const room = 16384 - Buffer.byteLength(JSON.stringify(handle));
+  handle.opaque = '\n'.repeat(Math.floor(room / 2)) + 'x'.repeat(room % 2);
+  expect(Buffer.byteLength(JSON.stringify(handle))).toBe(16384);
+  const result = { status: 'known_rejected', handle, code: 'native_evidence_readback_mismatch', reason: 'The native input does not match the prepared evidence.' };
+  expect(api.parseAgentEmptyCreationResult(api.serializeAgentEmptyCreationResult(result))).toEqual(result);
+  expect(() => api.serializeAgentEmptyCreationResult({ ...result, handle: { ...handle, opaque: handle.opaque + 'x' } })).toThrow(sdk.AgentOperationRejectedError);
+});
+test('empty creation codec rejects ambiguous outcomes, malformed public handles and unsafe reasons', () => {
+  const handle = { providerId: 'provider', sessionId: 'B', opaque: '' };
+  expect(api.parseAgentEmptyCreationResult(api.serializeAgentEmptyCreationResult({ status: 'created', handle }))).toEqual({ status: 'created', handle });
+  const bad = [
+    { status: 'created' }, { status: 'created', handle, code: 'native_evidence_stale' },
+    { status: 'unknown', handle, code: 'native_evidence_stale', reason: 'Native evidence authority or observation changed.' },
+    { status: 'known_rejected', handle, code: 'native_evidence_stale', reason: 'private native secret' },
+    { status: 'created', handle: { ...handle, providerId: 'p'.repeat(65) } },
+    { status: 'created', handle: { ...handle, sessionId: 'b'.repeat(257) } },
+    { status: 'created', handle: { ...handle, opaque: '\ud800' } },
+    { status: 'created', handle: { ...handle, cwd: '/provider-private' } },
+  ];
+  for (const value of bad) expect(() => api.serializeAgentEmptyCreationResult(value)).toThrow(sdk.AgentOperationRejectedError);
+  const encoded = canonical({ status: 'created', handle });
+  for (const value of [' ' + encoded, encoded.replace('"created"', '"created","status":"created"')]) expect(() => api.parseAgentEmptyCreationResult(value)).toThrow(sdk.AgentOperationRejectedError);
+});
+test('empty creation codec rejects non-inert handle data without evaluating it', () => {
+  let accessed = false;
+  const handle = { providerId: 'provider', sessionId: 'B' };
+  Object.defineProperty(handle, 'opaque', { enumerable: true, get() { accessed = true; return 'secret'; } });
+  expect(() => api.serializeAgentEmptyCreationResult({ status: 'created', handle })).toThrow(sdk.AgentOperationRejectedError);
+  expect(accessed).toBe(false);
+});
+
 test('exports optional bounded evidence codecs without changing legacy acceptance', () => {
   expect(api.AGENT_NATIVE_EVIDENCE_LIMITS).toMatchObject({ textBytes: 2097152, witnessBytes: 3145728, materializationBytes: 32768, handleBytes: 16384 });
   expect(api.AgentNativeEvidenceOutcomeUnknownError).toBeTypeOf('function');

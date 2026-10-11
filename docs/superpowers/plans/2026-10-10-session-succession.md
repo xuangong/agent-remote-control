@@ -412,9 +412,16 @@ no production capability is enabled by these scripted fixtures.
   and the source typecheck; unchanged SDK retains its verified 40 tests/typecheck.
   Inspection accounts for in-flight reads and relevant Session metadata changes.
   Owned HTTP/SSE fixtures and disabled private authority do not certify production.
-- [ ] Complete native readiness evidence and D2 Host consumption. D2A adds durable
-  original creation outcomes, nested witness/proof admission and the in-mutation
-  assertion; D2B wires verified attachment and the original effect/readback route.
+- [x] Preserve original native creation outcomes, nested witness/proof admission
+  and the synchronous in-mutation assertion (D2A). Independent spec/quality review
+  passed after a primitive-string validation fix. Root passed 70 affected Host
+  tests, both original regressions and Host source typecheck; unchanged SDK46,
+  capacity13 and SDK typecheck remain valid. Two actual prior-reader tests verify
+  role6/context2 rejection of new-writer files without mutation. This durable
+  representation does not activate the optional producer or certify readiness.
+- [ ] Complete native readiness evidence and D2B Host consumption: verified
+  original-handle attachment, original operation effect/readback routing, and
+  exact leased facade/token retention through the final commit assertion.
 - [ ] Treat unspecified acceptance as unknown disposition in TPM; settle native
   queued inputs from authoritative evidence, not later idle or text matching.
 - [ ] Preserve operation/candidate/input evidence across lost responses and restart.

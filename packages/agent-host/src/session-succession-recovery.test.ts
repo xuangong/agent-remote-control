@@ -158,3 +158,94 @@ test('late candidate read cannot bind context after cancellation', async () => {
     expect(f.service.contexts.forTarget(ref('B'))).toBeUndefined();
   } finally { released.resolve(); await running.catch(() => undefined); }
 });
+
+const capture = { epoch: 'e', seq: 1, capturedAt: '2026-10-10T00:00:00Z' };
+const creation = { status: 'created' as const, handle: { providerId: 'fixture', sessionId: 'B', opaque: 'original\nopaque' } };
+async function evidencePreparation() {
+  const f = await fixture(); await f.service.store.begin(request, true);
+  await f.service.store.savePreparation('handoff', capture, true);
+  await f.service.store.startCreation('handoff'); return f;
+}
+test('stores the original creation result with B atomically, rejects replacements, and restores only readback evidence', async () => {
+  const f = await evidencePreparation(), store = f.service.store;
+  await store.saveCreationResult('handoff', creation);
+  const saved = JSON.parse(await readFile(join(f.directory, 'roles', 'state.json'), 'utf8'));
+  expect(saved.version).toBe(7); expect(saved.roles[0].operations[0].to).toEqual(ref('B'));
+  expect(saved.roles[0].localPreparations[0].nativeCreation).toMatchObject({ version: 1, binding: expect.stringMatching(/^[a-f0-9]{64}$/), outcome: creation });
+  expect(await store.saveCreationResult('handoff', creation)).toMatchObject({ to: ref('B') });
+  await expect(store.saveCreationResult('handoff', { ...creation, handle: { ...creation.handle, opaque: 'runtime handle' } })).rejects.toThrow(/conflict/);
+  await expect(store.saveCandidate('handoff', ref('C'))).rejects.toThrow();
+  const restored = new SessionSuccessionService(f.directory, 'host', f.ports); await restored.ready;
+  expect(restored.store.progress('handoff')!.nativeCreation!.outcome).toEqual(creation);
+  expect(restored.store.operation('handoff').phase).toBe('unknown'); expect(f.creates()).toBe(0);
+});
+test.each([false, true])('retains known-rejected B without reviving it (cancelled=%s)', async cancelled => {
+  const f = await evidencePreparation(), store = f.service.store;
+  if (cancelled) await store.settlePreparation('handoff', 'cancelled');
+  const outcome = { ...creation, status: 'known_rejected' as const, code: 'native_evidence_invalid' as const, reason: 'Native evidence is malformed.' };
+  await store.saveCreationResult('handoff', outcome);
+  expect(store.operation('handoff').phase).toBe(cancelled ? 'cancelled' : 'rejected');
+  expect(cancelled ? store.progress('handoff')!.orphanCandidate : store.operation('handoff').to).toEqual(ref('B'));
+  expect(store.progress('handoff')!.nativeCreation!.outcome).toEqual(outcome);
+  await expect(store.revalidateCandidate('handoff')).rejects.toThrow();
+  await expect(store.advance('handoff', cancelled ? 'cancelled' : 'rejected', { phase: 'transferring' })).rejects.toThrow();
+});
+test('cancelled late successful creation retains its original outcome after restart', async () => {
+  const f = await evidencePreparation(); await f.service.store.settlePreparation('handoff', 'cancelled');
+  const restored = new SessionSuccessionService(f.directory, 'host', f.ports); await restored.ready;
+  await restored.store.saveCreationResult('handoff', creation);
+  expect(restored.store.operation('handoff')).toMatchObject({ phase: 'cancelled' });
+  expect(restored.store.operation('handoff').to).toBeUndefined();
+  expect(restored.store.progress('handoff')).toMatchObject({ orphanCandidate: ref('B'), nativeCreation: { version: 1, outcome: creation } });
+});
+test('only explicit typed pre-request evidence permits creation-start rejection; unknown remains uncertain', async () => {
+  const f = await evidencePreparation();
+  await expect(f.service.store.settlePreparation('handoff', 'rejected')).rejects.toThrow(/Unknown/);
+  await f.service.store.rejectCreationBeforeDispatch('handoff', 'native_evidence_admission');
+  expect(f.service.store.progress('handoff')!.nativeCreation!.outcome).toEqual({ status: 'not_dispatched', code: 'native_evidence_admission' });
+  expect(f.service.store.operation('handoff').phase).toBe('rejected');
+  await expect(f.service.store.saveCreationResult('handoff', creation)).rejects.toThrow(/conflict/);
+  const g = await evidencePreparation();
+  await g.service.store.saveCreationResult('handoff', { status: 'unknown', code: 'native_evidence_outcome_unknown', reason: 'The native operation outcome is unknown.' });
+  expect(g.service.store.operation('handoff').phase).toBe('unknown'); expect(g.service.store.operation('handoff').to).toBeUndefined();
+});
+test('creation evidence cannot be attached to legacy admission or a different provider', async () => {
+  const f = await fixture(); await f.service.store.begin(request, true); await f.service.store.savePreparation('handoff', capture); await f.service.store.startCreation('handoff');
+  await expect(f.service.store.saveCreationResult('handoff', creation)).rejects.toThrow(/evidence/);
+  const g = await evidencePreparation();
+  await expect(g.service.store.saveCreationResult('handoff', { ...creation, handle: { ...creation.handle, providerId: 'other' } })).rejects.toThrow(/identity/);
+  expect(g.service.store.operation('handoff').to).toBeUndefined();
+});
+
+test('creation restore rejects altered capture binding and evidence hidden in an old storage version', async () => {
+  const f = await evidencePreparation(); await f.service.store.saveCreationResult('handoff', creation);
+  const path = join(f.directory, 'roles', 'state.json'), original = await readFile(path, 'utf8');
+  for (const mutate of [(state: any) => { state.roles[0].localPreparations[0].capture.seq++; }, (state: any) => { state.version = 6; }]) {
+    const state = JSON.parse(original); mutate(state); await writeFile(path, JSON.stringify(state));
+    await expect(new SessionSuccessionService(f.directory, 'host', f.ports).ready).rejects.toThrow();
+  }
+});
+
+
+test('cancelled creation rejects a non-string local code without changing its durable outcome', async () => {
+  const f = await evidencePreparation(), store = f.service.store; await store.settlePreparation('handoff', 'cancelled');
+  const path = join(f.directory, 'roles', 'state.json'), before = await readFile(path);
+  await expect(store.rejectCreationBeforeDispatch('handoff', ['native_evidence_admission'] as never)).rejects.toThrow();
+  expect(await readFile(path)).toEqual(before); expect(store.progress('handoff')!.nativeCreation!.outcome).toBeUndefined();
+  const accepted = await store.rejectCreationBeforeDispatch('handoff', 'native_evidence_admission');
+  expect(accepted.phase).toBe('cancelled');
+  expect(store.progress('handoff')!.nativeCreation!.outcome).toEqual({ status: 'not_dispatched', code: 'native_evidence_admission' });
+  const retained = await readFile(path);
+  expect(await store.rejectCreationBeforeDispatch('handoff', 'native_evidence_admission')).toEqual(accepted);
+  expect(await readFile(path)).toEqual(retained);
+});
+
+test('restore rejects a non-string local code in cancelled evidence without rewriting the file', async () => {
+  const f = await evidencePreparation(), store = f.service.store; await store.settlePreparation('handoff', 'cancelled');
+  await store.rejectCreationBeforeDispatch('handoff', 'native_evidence_admission');
+  const path = join(f.directory, 'roles', 'state.json'), disk = JSON.parse(await readFile(path, 'utf8'));
+  disk.roles[0].localPreparations[0].nativeCreation.outcome.code = ['native_evidence_admission'];
+  await writeFile(path, JSON.stringify(disk)); const before = await readFile(path);
+  await expect(new SessionSuccessionService(f.directory, 'host', f.ports).ready).rejects.toThrow();
+  expect(await readFile(path)).toEqual(before);
+});

@@ -104,3 +104,86 @@ test('concurrent preparations cannot spend each other target-binding reservation
   await f.store.bind(preparation.operationId, { controllerId: '\ud800'.repeat(512), providerId: '\ud800'.repeat(512), nativeSessionId: '\ud800'.repeat(512) });
   expect(f.store.read(preparation.operationId).text).toBe(preparation.text);
 });
+
+const encodedBytes = (value: unknown) => Buffer.byteLength(JSON.stringify(value), 'utf8');
+function fillContextState(state: any, desired: number) {
+  while (encodedBytes(state) < desired - 1024 * 1024) {
+    const id = `bounded-${state.attachments.length}`;
+    state.attachments.push({ ...attachment(id, JSON.stringify([{ role: 'user', text: 'x'.repeat(1024 * 1024 - 100) }])), version: 2, state: 'pending', deliveries: [] });
+  }
+  const id = `bounded-${state.attachments.length}`, last = { ...attachment(id, '[{"role":"user","text":""}]'), version: 2, state: 'pending', deliveries: [] };
+  state.attachments.push(last); last.text = JSON.stringify([{ role: 'user', text: 'x'.repeat(desired - encodedBytes(state)) }]);
+  expect(encodedBytes(state)).toBe(desired);
+}
+test.each(['accepted', 'unknown', 'restart'] as const)('optional %s keeps a complete positive-proof reserve at the eight-MiB boundary', async transition => {
+  const { createHash } = await import('node:crypto');
+  const { serializeAgentPreparedTextInput, serializeAgentInputMaterialization } = await import('@orchardworks/agent-provider-sdk');
+  const { quotedSessionContextPrefix } = await import('@orchardworks/agent-remote-protocol');
+  const hash = (value: string) => createHash('sha256').update(value).digest('hex');
+  const directory = await root(), store = new SessionSuccessionContextStore(directory); await store.ready;
+  const context = attachment('input'); await store.attach(context);
+  const input = { operationId: 'delivery', roleId: 'input', roleRevision: 2, target: context.target, text: transition === 'unknown' ? '\u0000'.repeat(300000) : '\n"\\中'.repeat(200) };
+  const text = quotedSessionContextPrefix({ id: context.operationId, sourceSession: context.source.nativeSessionId, capturedAt: context.capturedAt, text: context.text }) + input.text;
+  const witness = { version: 1 as const, providerId: 'fixture', nativeSessionId: context.target.nativeSessionId, nativeInputId: 'U', cwd: '\u0001'.repeat(4096), store: { authorityId: 'authority', storeId: 'store' },
+    parts: [{ type: 'text' as const, text }] as const, content: { encoding: 'utf-8' as const, bytes: Buffer.byteLength(text), sha256: hash(text) }, selections: {} };
+  await store.begin('input', input, witness);
+  if (transition !== 'restart') await store.settle('input', 'delivery', transition, transition === 'accepted' ? { disposition: 'started' } : undefined);
+  const path = join(directory, 'context.json');
+  let current = store;
+  if (transition === 'restart') { current = new SessionSuccessionContextStore(directory); await current.ready; }
+  const state = JSON.parse(await readFile(path, 'utf8')), delivery = state.attachments[0].deliveries[0];
+  const nativeEvidence = serializeAgentInputMaterialization({ status: 'materialized', proof: { version: 1, providerId: witness.providerId, nativeSessionId: witness.nativeSessionId, nativeInputId: witness.nativeInputId, cwd: witness.cwd, store: witness.store,
+    witnessSha256: hash(serializeAgentPreparedTextInput(witness)), contentSha256: witness.content.sha256, nativeSelectionsSha256: hash('{}'), nativePartIds: ['p'.repeat(256)] } });
+  const future = structuredClone(state); future.attachments[0].state = 'materialized'; Object.assign(future.attachments[0].deliveries[0], { state: 'materialized', nativeEvidence, reservedBytes: '00000000' });
+  const growth = encodedBytes(future) - encodedBytes(state);
+  expect(Number(delivery.reservedBytes)).toBe(growth); expect(growth).toBeGreaterThan(28000);
+  fillContextState(state, SUCCESSION_STORE_BYTES - growth); await writeFile(path, JSON.stringify(state));
+  const full = new SessionSuccessionContextStore(directory); await full.ready;
+  await expect(full.attach(attachment('unrelated'))).rejects.toThrow(/capacity/);
+  expect(full.delivery('delivery')!.preparedInput!.witness).toEqual(witness);
+  await full.reconcile('input', { operationId: 'delivery', target: context.target, roleRevision: 2, outcome: 'materialized', nativeEvidence });
+  expect(Buffer.byteLength(await readFile(path, 'utf8'))).toBe(SUCCESSION_STORE_BYTES);
+  const final = new SessionSuccessionContextStore(directory); await final.ready;
+  expect(final.delivery('delivery')).toMatchObject({ state: 'materialized', nativeEvidence, reservedBytes: '00000000' });
+  if (transition === 'accepted') expect(final.delivery('delivery')!.inputAcceptance).toEqual({ disposition: 'started' });
+  else expect(final.delivery('delivery')!.inputAcceptance).toBeUndefined();
+});
+
+test('optional admission rejects one byte beyond its full reachable representation without losing the pending context', async () => {
+  const { createHash } = await import('node:crypto'); const { quotedSessionContextPrefix } = await import('@orchardworks/agent-remote-protocol');
+  const directory = await root(), store = new SessionSuccessionContextStore(directory); await store.ready;
+  const context = attachment('input'); await store.attach(context);
+  const path = join(directory, 'context.json'), before = JSON.parse(await readFile(path, 'utf8'));
+  const input = { operationId: 'delivery', roleId: 'input', roleRevision: 2, target: context.target, text: 'work' };
+  const text = quotedSessionContextPrefix({ id: context.operationId, sourceSession: context.source.nativeSessionId, capturedAt: context.capturedAt, text: context.text }) + input.text;
+  const witness = { version: 1 as const, providerId: 'fixture', nativeSessionId: context.target.nativeSessionId, nativeInputId: 'U', cwd: '/workspace', store: { authorityId: 'authority', storeId: 'store' }, parts: [{ type: 'text' as const, text }] as const,
+    content: { encoding: 'utf-8' as const, bytes: Buffer.byteLength(text), sha256: createHash('sha256').update(text).digest('hex') }, selections: {} };
+  await store.begin('input', input, witness);
+  const admitted = JSON.parse(await readFile(path, 'utf8'));
+  const completeGrowth = encodedBytes(admitted) - encodedBytes(before) + Number(admitted.attachments[0].deliveries[0].reservedBytes);
+  fillContextState(before, SUCCESSION_STORE_BYTES - completeGrowth + 1); await writeFile(path, JSON.stringify(before));
+  const over = new SessionSuccessionContextStore(directory); await over.ready;
+  await expect(over.begin('input', input, witness)).rejects.toThrow(/capacity/);
+  expect(over.read('input')).toMatchObject({ state: 'pending', deliveries: [] });
+  expect(JSON.parse(await readFile(path, 'utf8'))).toEqual(before);
+});
+
+test.each(['created', 'known_rejected'] as const)('cancelled creation retains capacity for a maximum %s envelope after restart and unrelated writes', async status => {
+  const directory = await root(), store = new SessionSuccessionStore(directory); await store.ready;
+  await store.createRole({ id: 'role', revision: 1, origin: ref('A'), current: ref('A'), workspace: { controllerId: 'host', canonicalCwd: directory } });
+  await store.begin(request, true); await store.savePreparation('op', capture, true); await store.startCreation('op'); await store.settlePreparation('op', 'cancelled');
+  const path = join(directory, 'state.json'), state = JSON.parse(await readFile(path, 'utf8')), progress = state.roles[0].localPreparations[0];
+  const handle = { providerId: 'fixture', sessionId: 'B'.repeat(256), opaque: '' };
+  handle.opaque = '\n'.repeat(Math.floor((16384 - encodedBytes(handle)) / 2));
+  if (encodedBytes(handle) < 16384) handle.opaque += 'x'; expect(encodedBytes(handle)).toBe(16384);
+  const outcome = status === 'created' ? { status, handle } : { status, handle, code: 'native_evidence_identity_unusable' as const, reason: 'The native session identity cannot be retained safely.' };
+  const future = structuredClone(state); future.roles[0].localPreparations[0].nativeCreation.outcome = outcome;
+  future.roles[0].localPreparations[0].orphanCandidate = ref(handle.sessionId);
+  const actualGrowth = encodedBytes(future) - encodedBytes(state); expect(Number(progress.reservedBytes)).toBeGreaterThanOrEqual(actualGrowth);
+  fillRoleState(state, SUCCESSION_STORE_BYTES - Number(progress.reservedBytes)); await writeFile(path, JSON.stringify(state));
+  const restored = new SessionSuccessionStore(directory); await restored.ready;
+  await expect(restored.ensureRole(ref('unrelated'), '/workspace')).rejects.toThrow(/capacity/);
+  await restored.saveCreationResult('op', outcome);
+  expect(restored.progress('op')).toMatchObject({ orphanCandidate: ref(handle.sessionId), nativeCreation: { outcome } });
+  expect(Buffer.byteLength(await readFile(path, 'utf8'))).toBeLessThanOrEqual(SUCCESSION_STORE_BYTES);
+});

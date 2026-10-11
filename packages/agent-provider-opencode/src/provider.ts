@@ -1,8 +1,9 @@
+import { OpenCodeProviderNativeEvidence, type OpenCodeNativeEvidenceVerifier } from './native-evidence.js';
 import { OpenCodeCallbackBridge, CALLBACK_TOOL_IDS } from './callback-bridge.js';
 import { readReferenceHistory } from './reference-history.js';
 import { realpath } from 'node:fs/promises';
 import { resolve } from 'node:path';
-import type { AgentHistoryPage, AgentHistoryQuery, AgentPersistenceHandle, AgentProviderAdapter, AgentSessionConfig, AgentSessionExtensions } from '@orchardworks/agent-provider-sdk';
+import type { AgentProviderNativeEvidence, AgentHistoryPage, AgentHistoryQuery, AgentPersistenceHandle, AgentProviderAdapter, AgentSessionConfig, AgentSessionExtensions } from '@orchardworks/agent-provider-sdk';
 import type { Session } from '@opencode-ai/sdk/v2/client';
 import { OpenCodeTransport, OpenCodeRequestError, type OpenCodeAgentProviderOptions } from './transport.js';
 import { OpenCodeSession } from './session.js';
@@ -15,14 +16,18 @@ function summary(session: Session): OpenCodeSessionSummary {
   return { id: session.id, title: session.title, cwd: session.directory, updatedAt: new Date(session.time.updated).toISOString(), createdAt: new Date(session.time.created).toISOString(), ...(session.parentID ? { parentId: session.parentID } : {}) };
 }
 export class OpenCodeAgentProvider implements AgentProviderAdapter {
+  readonly nativeEvidence: AgentProviderNativeEvidence;
+  private readonly providerEvidence: OpenCodeProviderNativeEvidence;
   readonly descriptor = { providerId: 'opencode', displayName: 'OpenCode' };
   private readonly transport: OpenCodeTransport;
   private readonly sessions = new Set<OpenCodeSession>();
   private closed = false;
   private readonly callbackBridge?: OpenCodeCallbackBridge;
-  constructor(options: OpenCodeAgentProviderOptions = {}) {
+  constructor(options: OpenCodeAgentProviderOptions = {}, private readonly evidenceVerifier?: OpenCodeNativeEvidenceVerifier) {
     if (options.restrictedNative) throw new Error('OpenCode shared server permissions cannot be restricted by the Host. Explicitly trust the native server permissions to connect.');
     this.transport = new OpenCodeTransport(options);
+    this.providerEvidence = new OpenCodeProviderNativeEvidence(this.transport, evidenceVerifier, canonicalDirectory, () => !this.closed);
+    this.nativeEvidence = Object.freeze<AgentProviderNativeEvidence>({ availability: () => this.providerEvidence.availability(), createEmpty: config => this.providerEvidence.createEmpty(config) });
     if (options.callbackConfigPath) this.callbackBridge = new OpenCodeCallbackBridge(options.callbackConfigPath, new URL(options.serverUrl ?? 'http://127.0.0.1:4096').toString().replace(/\/$/, ''));
   }
   async checkAvailability(timeoutMs = 5000): Promise<void> {
@@ -54,6 +59,12 @@ export class OpenCodeAgentProvider implements AgentProviderAdapter {
     if (handle.providerId !== 'opencode' || !handle.sessionId) throw new Error('Invalid OpenCode persistence handle.');
     let persisted: OpenCodePersistence;
     try { persisted = JSON.parse(handle.opaque); } catch { throw new Error('Invalid OpenCode persistence handle.'); }
+    const empty = await this.providerEvidence.resume(handle, persisted);
+    if (empty) {
+      empty.validate();
+      const opened = await this.open(empty.native, { cwd: empty.cwd }, extensions);
+      try { empty.validate(); return opened; } catch (error) { await opened.dispose(); throw error; }
+    }
     if (!persisted || typeof persisted.cwd !== 'string' || (persisted.model !== undefined && typeof persisted.model !== 'string') || (persisted.agent !== undefined && typeof persisted.agent !== 'string') || (persisted.variant !== undefined && typeof persisted.variant !== 'string')) throw new Error('Invalid OpenCode persistence handle.');
     const cwd = await canonicalDirectory(persisted.cwd);
     const session = await this.transport.request(() => this.transport.client.session.get({ sessionID: handle.sessionId, directory: cwd }));
@@ -89,7 +100,7 @@ export class OpenCodeAgentProvider implements AgentProviderAdapter {
         'Host tools are exposed through arc_host_discover and arc_host_invoke. First discover the callbacks authorized for this session. To use read_source_session or another Host callback, call arc_host_invoke with its exact name and an arguments object matching its schema. The native session identity and authorized source are fixed by the Host and cannot be selected in arguments.',
       ].filter(Boolean).join('\n\n') };
     }
-    const session = new OpenCodeSession(this.transport, native.id, config, extensions, () => { release?.(); this.sessions.delete(session); });
+    const session = new OpenCodeSession(this.transport, native.id, config, extensions, () => { release?.(); this.sessions.delete(session); }, this.evidenceVerifier);
     this.sessions.add(session);
     try { await session.start(); return session; } catch (error) { await session.dispose(); throw error; }
   }

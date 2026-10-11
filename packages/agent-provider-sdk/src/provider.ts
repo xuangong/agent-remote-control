@@ -1,3 +1,4 @@
+import type { AgentProviderNativeEvidence, AgentSessionNativeEvidence } from './native-evidence.js';
 import type { AgentInputPart, ImageInputCapabilities } from './image-input.js';
 import type { AgentInteractionResponse } from './control.js';
 import type { AgentRuntimeInfo, ProviderStreamItem } from './observation.js';
@@ -108,6 +109,7 @@ export interface AgentSessionConfig extends AgentSessionExtensions {
 }
 
 export interface AgentProviderAdapter {
+  readonly nativeEvidence?: AgentProviderNativeEvidence;
   readonly descriptor: AgentProviderDescriptor;
 
   createSession(config: AgentSessionConfig): Promise<AgentSession>;
@@ -129,6 +131,7 @@ export interface AgentInputAcceptance {
 }
 
 export interface AgentSession {
+  readonly nativeEvidence?: AgentSessionNativeEvidence;
   readonly capabilities: AgentCapabilities;
 
   /** One ordered stream for this native session attachment. Publish runtime_updated whenever

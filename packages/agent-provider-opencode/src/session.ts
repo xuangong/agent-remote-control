@@ -1,8 +1,9 @@
+import { OpenCodeSessionNativeEvidence, type OpenCodeNativeEvidenceVerifier } from './native-evidence.js';
 import { AgentOperationRejectedError, prepareAgentOperation } from '@orchardworks/agent-provider-sdk';
 import { randomBytes } from 'node:crypto';
-import { IMAGE_INPUT_CAPABILITIES, validateInteractionResponse, type AgentCapabilities, type AgentCommand, type AgentInputPart, type AgentInteractionRequest, type AgentInteractionResponse, type AgentMessageOptions, type AgentRuntimeInfo, type AgentSession, type AgentSessionExtensions, type AgentStreamEvent, type ProviderObservation, type ProviderStreamItem } from '@orchardworks/agent-provider-sdk';
+import { IMAGE_INPUT_CAPABILITIES, validateInteractionResponse, type AgentCapabilities, type AgentCommand, type AgentInputPart, type AgentInteractionRequest, type AgentInteractionResponse, type AgentMessageOptions, type AgentRuntimeInfo, type AgentSession, type AgentSessionNativeEvidence, type AgentSessionExtensions, type AgentStreamEvent, type ProviderObservation, type ProviderStreamItem } from '@orchardworks/agent-provider-sdk';
 import type { Event, GlobalEvent, Message, Session } from '@opencode-ai/sdk/v2/client';
-import type { OpenCodePersistence } from './provider.js';
+import { canonicalDirectory, type OpenCodePersistence } from './provider.js';
 import { OpenCodeTransport } from './transport.js';
 import { ObservationChannel } from './channel.js';
 import { OpenCodeImages } from './images.js';
@@ -14,6 +15,8 @@ import { permissionRequest, questionRequest, questionResponse } from './interact
 
 export class OpenCodeSession implements AgentSession {
   readonly capabilities: AgentCapabilities;
+  readonly nativeEvidence: AgentSessionNativeEvidence;
+  private readonly evidence: OpenCodeSessionNativeEvidence;
   private readonly output = new ObservationChannel();
   private readonly images: OpenCodeImages;
   private readonly abort = new AbortController();
@@ -38,6 +41,7 @@ export class OpenCodeSession implements AgentSession {
   private activeTurnId: string | null = null;
   private active = false;
   private pendingInput?: string;
+  private preparedInput = false;
   private pendingInputWhileRunning = false;
   private closed = false;
   private initialized = false;
@@ -52,16 +56,31 @@ export class OpenCodeSession implements AgentSession {
   private readonly ready = new Promise<void>((resolve, reject) => { this.initialResolve = resolve; this.initialReject = reject; });
   private lastUsage = '';
   private lastTodos = '';
-  constructor(private readonly transport: OpenCodeTransport, readonly nativeId: string, private readonly config: OpenCodePersistence, private readonly extensions: AgentSessionExtensions, private readonly onClose: () => void) {
+  constructor(private readonly transport: OpenCodeTransport, readonly nativeId: string, private readonly config: OpenCodePersistence, private readonly extensions: AgentSessionExtensions, private readonly onClose: () => void, evidenceVerifier?: OpenCodeNativeEvidenceVerifier) {
     this.images = new OpenCodeImages(nativeId, { allowLocalFiles: transport.local });
     this.controls = new OpenCodeSettings(transport, nativeId, config.cwd, config);
     this.commands = new OpenCodeCommands(transport, nativeId, config.cwd);
+    this.evidence = new OpenCodeSessionNativeEvidence(transport, evidenceVerifier, {
+      cwd: config.cwd, nativeId, canonicalDirectory, messageId: () => this.messageId(), writable: () => this.writable(),
+      currentSession: () => this.nativeSession,
+      selections: () => ({ ...(config.model === undefined ? {} : { model: config.model }), ...(config.agent === undefined ? {} : { agent: config.agent }), ...(config.variant === undefined ? {} : { variant: config.variant }), ...(extensions.systemPrompt === undefined ? {} : { system: extensions.systemPrompt }) }),
+      canCapture: () => !this.closed && this.streamConnected && this.connection.state === 'connected' && !this.recovering && !this.recoveryDirty && !this.refreshTimer && !this.pendingInput && this.submitting.size === 0,
+      readable: () => !this.closed && this.streamConnected,
+      reserveInput: id => { this.writable(); if (this.pendingInput) throw new AgentOperationRejectedError('native_evidence_admission', 'Native evidence input admission is unavailable.'); this.pendingInput = id; this.preparedInput = true; this.pendingInputWhileRunning = this.active; },
+      scheduleRefresh: () => this.scheduleRefresh(),
+    });
+    this.nativeEvidence = Object.freeze<AgentSessionNativeEvidence>({
+      availability: () => this.evidence.availability(), prepareInput: (parts, options) => this.evidence.prepareInput(parts, options),
+      dispatchInput: witness => this.evidence.dispatchInput(witness), inspectInput: witness => this.evidence.inspectInput(witness),
+      captureValidity: () => this.evidence.captureValidity(), isCurrent: token => this.evidence.isCurrent(token),
+    });
     this.capabilities = { history: true, sendMessage: !transport.restricted, steer: !transport.restricted, cancel: !transport.restricted, readResource: true, imageInput: IMAGE_INPUT_CAPABILITIES, sessionSettings: !transport.restricted, commands: !transport.restricted, planning: !transport.restricted, interactions: { question: true, planApproval: false, toolApproval: true } };
   }
   async start(): Promise<void> {
     const deadline = setTimeout(() => this.initialReject(new Error('OpenCode session observation did not become ready.')), this.transport.timeout);
     this.emit({ type: 'thread_started', provider: 'opencode', sessionId: this.nativeId }, 'thread');
     this.stream = this.transport.events(this.abort.signal, () => this.connected(), attempt => {
+      this.evidence.invalidate();
       this.streamConnected = false;
       this.connection = { state: 'reconnecting', attempt, reason: 'OpenCode event connection interrupted.' };
       this.emitRuntime();
@@ -70,14 +89,17 @@ export class OpenCodeSession implements AgentSession {
   }
   observe(): AsyncIterable<ProviderStreamItem> { if (this.observed) throw new Error('OpenCode observation already attached.'); this.observed = true; return this.output; }
   private enqueue(operation: () => Promise<void> | void): void {
+    this.evidence.beginWork();
     this.queue = this.queue.then(async () => { if (!this.closed) await operation(); }).catch(() => {
       if (this.closed) return;
+      this.evidence.invalidate();
       this.connection = { state: 'restoring', reason: 'OpenCode state reconciliation is retrying.' };
       this.emitRuntime(); this.scheduleRefresh();
-    });
+    }).finally(() => this.evidence.endWork());
   }
   private connected(): void {
     if (this.closed) return;
+    this.evidence.invalidate();
     this.streamConnected = true;
     this.recovering = true;
     this.connection = { state: 'restoring' }; this.emitRuntime();
@@ -117,6 +139,7 @@ export class OpenCodeSession implements AgentSession {
     this.refreshTimer.unref();
   }
   private receive(global: GlobalEvent): void {
+    this.evidence.receive(global, this.nativeSession, this.children.map(child => child.nativeSessionId));
     if (this.closed || !global.payload || !('properties' in global.payload)) return;
     const event = global.payload;
     const properties = event.properties as Record<string, unknown>;
@@ -148,7 +171,7 @@ export class OpenCodeSession implements AgentSession {
         if (info.role === 'user') {
           const latest = this.orderedMessages().filter(message => message.info.role === 'user').at(-1)?.info;
           if (latest?.id === info.id) { this.hydrateSelection(info); this.emitRuntime(); }
-          if ((this.pendingInputWhileRunning || this.active) && info.id === this.pendingInput) this.pendingInput = undefined;
+          if ((this.pendingInputWhileRunning || this.active) && info.id === this.pendingInput) this.releaseOrdinaryInput();
         }
         this.publishTimeline(); this.publishUsage();
         if (info.role === 'assistant' && info.error) this.failTurn(info.error, info.id);
@@ -195,6 +218,7 @@ export class OpenCodeSession implements AgentSession {
     }
   }
   private async refresh(): Promise<void> {
+    const evidenceFence = this.evidence.readFence();
     const revision = this.controls.revision;
     const parameters = { sessionID: this.nativeId, directory: this.config.cwd };
     const [history, statuses, permissions, questions, todos, native, children] = await Promise.all([
@@ -207,7 +231,7 @@ export class OpenCodeSession implements AgentSession {
       this.transport.request(() => this.transport.client.session.children(parameters)),
     ]);
     if (this.closed) return;
-    if (this.controls.updateNative(native, revision)) this.nativeSession = native;
+    if (this.controls.updateNative(native, revision)) { this.evidence.noteSession(native, this.nativeSession); this.nativeSession = native; }
     this.capabilities.planning = this.controls.planningAvailable;
     this.children = children.map(child => {
       const source = history.data.flatMap(message => message.info.role === 'assistant' ? message.parts.flatMap(part => part.type === 'tool' && part.tool === 'task' && part.state.status !== 'pending' && part.state.metadata?.sessionId === child.id && part.state.metadata?.parentSessionId === this.nativeId ? [{ parentTurnId: message.info.role === 'assistant' ? message.info.parentID : undefined, part }] : []) : []).at(0);
@@ -221,7 +245,7 @@ export class OpenCodeSession implements AgentSession {
     const messages = history.data;
     this.olderCursor = history.response.headers.get('x-next-cursor') || undefined;
     this.messages.clear(); for (const message of messages) this.messages.set(message.info.id, message);
-    if ((this.pendingInputWhileRunning || this.active) && this.pendingInput && this.messages.has(this.pendingInput)) this.pendingInput = undefined;
+    if ((this.pendingInputWhileRunning || this.active) && this.pendingInput && this.messages.has(this.pendingInput)) this.releaseOrdinaryInput();
     const requests = [...permissions.filter(p => p.sessionID === this.nativeId).map(p => permissionRequest(p, this.transport.restricted)), ...questions.filter(q => q.sessionID === this.nativeId).map(questionRequest)];
     for (const [id] of this.pending) if (!requests.some(request => request.requestId === id)) {
       this.pending.delete(id); this.emit({ type: 'interaction_invalidated', provider: 'opencode', requestId: id, reason: 'Native request is no longer pending.' }, `interaction:${id}:invalidated`);
@@ -232,13 +256,14 @@ export class OpenCodeSession implements AgentSession {
     const latestAssistant = messages.filter(message => message.info.role === 'assistant').at(-1)?.info;
     if (latestUser?.info.role === 'user') this.hydrateSelection(latestUser.info);
     const nativeStatus = statuses[this.nativeId]?.type ?? 'idle';
-    if (nativeStatus === 'idle' && latestAssistant?.role === 'assistant' && latestAssistant.parentID === this.pendingInput && (latestAssistant.error || (latestAssistant.time.completed && latestAssistant.finish && !['tool-calls', 'unknown'].includes(latestAssistant.finish)))) this.pendingInput = undefined;
+    if (nativeStatus === 'idle' && latestAssistant?.role === 'assistant' && latestAssistant.parentID === this.pendingInput && (latestAssistant.error || (latestAssistant.time.completed && latestAssistant.finish && !['tool-calls', 'unknown'].includes(latestAssistant.finish)))) this.releaseOrdinaryInput();
     if (this.initialized && this.active && latestAssistant?.role === 'assistant' && latestAssistant.error
       && nativeStatus === 'idle' && (!latestUser || latestAssistant.parentID === latestUser.info.id)) {
       this.failTurn(latestAssistant.error, latestAssistant.id);
     }
     this.applyStatus(nativeStatus);
     if (!this.initialized) for (const message of messages) if (message.info.role === 'assistant' && message.info.time.completed) this.terminalMessages.add(message.info.id);
+    this.evidence.completeBaseline(evidenceFence, native);
   }
   private orderedMessages(): NativeMessage[] { return [...this.messages.values()].sort((a, b) => a.info.time.created - b.info.time.created || a.info.id.localeCompare(b.info.id)); }
   private publishTimeline(pagedSnapshot = false): void {
@@ -267,7 +292,7 @@ export class OpenCodeSession implements AgentSession {
       const latest = this.orderedMessages().at(-1)?.info;
       this.activeTurnId = latestUser?.id ?? (latest?.role === 'assistant' ? latest.parentID : null);
       this.active = true; this.emit({ type: 'turn_started', provider: 'opencode', turnId: this.activeTurnId ?? undefined }); }
-    if (running && this.pendingInput && this.messages.has(this.pendingInput)) this.pendingInput = undefined;
+    if (running && this.pendingInput && this.messages.has(this.pendingInput)) this.releaseOrdinaryInput();
     if (!running && this.active) {
       this.active = false;
       if (!this.activeTurnId || !this.terminalTurns.has(this.activeTurnId)) this.emit({ type: 'turn_completed', provider: 'opencode', turnId: this.activeTurnId ?? undefined, usage: this.currentUsage() });
@@ -278,7 +303,7 @@ export class OpenCodeSession implements AgentSession {
   }
   private failTurn(error: { name: string }, messageId?: string): void {
     const failed = messageId ? this.messages.get(messageId)?.info : undefined;
-    if (failed?.role === 'assistant' && failed.parentID === this.pendingInput) this.pendingInput = undefined;
+    if (failed?.role === 'assistant' && failed.parentID === this.pendingInput) this.releaseOrdinaryInput();
     if (messageId && this.terminalMessages.has(messageId)) return;
     if (messageId) this.terminalMessages.add(messageId);
     const latest = this.orderedMessages().at(-1)?.info;
@@ -312,8 +337,11 @@ export class OpenCodeSession implements AgentSession {
   async runtimeInfo(options?: { refreshSettings?: boolean }): Promise<AgentRuntimeInfo> {
     if (options?.refreshSettings && !this.closed) {
       const revision = this.controls.revision;
-      const native = await this.transport.request(() => this.transport.client.session.get({ sessionID: this.nativeId, directory: this.config.cwd }));
-      if (!this.closed && this.controls.updateNative(native, revision)) this.nativeSession = native;
+      this.evidence.beginWork();
+      try {
+        const native = await this.transport.request(() => this.transport.client.session.get({ sessionID: this.nativeId, directory: this.config.cwd }));
+        if (!this.closed && this.controls.updateNative(native, revision)) { this.evidence.noteSession(native, this.nativeSession); this.nativeSession = native; }
+      } catch (error) { this.evidence.readFailed(); throw error; } finally { this.evidence.endWork(); }
     }
     return this.info();
   }
@@ -337,7 +365,9 @@ export class OpenCodeSession implements AgentSession {
     if (options?.delivery && options.delivery !== 'immediate') throw new AgentOperationRejectedError('operation_rejected', 'OpenCode does not support queued message delivery.');
     const messageID = this.messageId();
     this.pendingInput = messageID;
+    this.preparedInput = false;
     this.pendingInputWhileRunning = this.active;
+    const finishEvidenceEffect = this.evidence.beginEffect();
     let dispatched = false;
     try {
       const nativeParts = await prepareAgentOperation(() => this.images.input(parts));
@@ -348,13 +378,15 @@ export class OpenCodeSession implements AgentSession {
       this.pendingInputWhileRunning = this.active;
       dispatched = true;
       await this.transport.request(() => this.transport.client.session.promptAsync({ sessionID: this.nativeId, directory: this.config.cwd, messageID, parts: nativeParts, ...(selected ? { model: selected } : {}), agent: this.config.agent, variant: this.config.variant, system: this.extensions.systemPrompt }));
-      if (this.pendingInputWhileRunning && this.pendingInput === messageID) this.pendingInput = undefined;
+      if (this.pendingInputWhileRunning && this.pendingInput === messageID) this.releaseOrdinaryInput();
     } catch (error) {
       // A lost acknowledgement may have accepted the input. Only native evidence can release it.
-      if (!dispatched && this.pendingInput === messageID) this.pendingInput = undefined;
+      if (!dispatched && this.pendingInput === messageID) this.releaseOrdinaryInput();
       throw error;
-    } finally { if (dispatched) this.scheduleRefresh(); }
+    } finally { finishEvidenceEffect(); if (dispatched) this.scheduleRefresh(); }
   }
+
+  private releaseOrdinaryInput(): void { if (!this.preparedInput) this.pendingInput = undefined; }
 
   private messageId(): string { return `msg_${(BigInt(Date.now()) * 4096n).toString(16).padStart(12, '0')}${randomBytes(10).toString('hex')}`; }
   private model(): { providerID: string; modelID: string } | undefined {
@@ -366,9 +398,12 @@ export class OpenCodeSession implements AgentSession {
   async cancel(): Promise<void> {
     this.writable();
     const canceledInput = this.pendingInput;
-    await this.transport.request(() => this.transport.client.session.abort({ sessionID: this.nativeId, directory: this.config.cwd }));
-    if (this.pendingInput === canceledInput) this.pendingInput = undefined;
-    this.scheduleRefresh();
+    const finish = this.evidence.beginEffect();
+    try {
+      await this.transport.request(() => this.transport.client.session.abort({ sessionID: this.nativeId, directory: this.config.cwd }));
+      if (this.pendingInput === canceledInput) this.releaseOrdinaryInput();
+      this.scheduleRefresh();
+    } finally { finish(); }
   }
   async respondToInteraction(requestId: string, response: AgentInteractionResponse): Promise<void> {
     this.writable();
@@ -377,6 +412,7 @@ export class OpenCodeSession implements AgentSession {
     if (this.submitting.has(requestId)) throw new AgentOperationRejectedError('operation_rejected', 'OpenCode interaction response is already pending.');
     validateInteractionResponse(request, response);
     this.submitting.add(requestId);
+    const finish = this.evidence.beginEffect();
     try {
       const parameters = { requestID: requestId, directory: this.config.cwd };
       if (request.kind === 'question' && response.kind === 'question') {
@@ -389,7 +425,7 @@ export class OpenCodeSession implements AgentSession {
         await this.transport.request(() => this.transport.client.permission.reply({ ...parameters, reply: response.decision === 'allow' ? response.scope === 'session' ? 'always' : 'once' : 'reject' }));
       } else throw new AgentOperationRejectedError('operation_rejected', 'Unsupported OpenCode interaction response.');
       this.resolveInteraction(requestId, response);
-    } finally { this.submitting.delete(requestId); }
+    } finally { this.submitting.delete(requestId); finish(); }
   }
   private hydrateSelection(info: Extract<Message, { role: 'user' }>): void {
     if (this.lastNativeUserId === info.id) return;
@@ -399,8 +435,8 @@ export class OpenCodeSession implements AgentSession {
   }
   async setSessionSetting(id: string, value: string): Promise<void> {
     this.writable();
-    await this.controls.set(id, value);
-    this.emitRuntime(); this.scheduleRefresh();
+    const finish = this.evidence.beginEffect();
+    try { await this.controls.set(id, value); this.emitRuntime(); this.scheduleRefresh(); } finally { finish(); }
   }
   async setPlanning(active: boolean): Promise<void> { await this.setSessionSetting('agent', active ? 'plan' : 'build'); }
   async listCommands(): Promise<AgentCommand[]> {
@@ -412,7 +448,9 @@ export class OpenCodeSession implements AgentSession {
     if (this.active || this.pending.size || this.pendingInput) throw new AgentOperationRejectedError('operation_rejected', 'Wait for the OpenCode turn and pending interactions before executing a command.');
     const messageID = this.messageId();
     this.pendingInput = messageID;
+    this.preparedInput = false;
     this.pendingInputWhileRunning = this.active;
+    const finishEvidenceEffect = this.evidence.beginEffect();
     let dispatched = false;
     try {
       await this.commands.execute(id, args, this.config, messageID, () => this.controls.compactionModel(), () => {
@@ -420,23 +458,26 @@ export class OpenCodeSession implements AgentSession {
         if (this.active || this.pending.size || this.pendingInput !== messageID) throw new AgentOperationRejectedError('operation_rejected', 'Wait for the OpenCode turn and pending interactions before executing a command.');
         dispatched = true;
       });
-      if (this.pendingInput === messageID) this.pendingInput = undefined;
+      if (this.pendingInput === messageID) this.releaseOrdinaryInput();
     } catch (error) {
-      if (!dispatched && this.pendingInput === messageID) this.pendingInput = undefined;
+      if (!dispatched && this.pendingInput === messageID) this.releaseOrdinaryInput();
       throw error;
-    } finally { if (dispatched) this.scheduleRefresh(); }
+    } finally { finishEvidenceEffect(); if (dispatched) this.scheduleRefresh(); }
     return {};
   }
   async readTimelineHistory(cursor: string): Promise<{ observations: ProviderObservation[]; nextCursor?: string }> {
     if (!cursor || cursor.length > 8192) throw new Error('Invalid OpenCode history cursor.');
-    const page = await this.transport.requestWithResponse(() => this.transport.client.session.messages({ sessionID: this.nativeId, directory: this.config.cwd, limit: 200, before: cursor }));
-    const nextCursor = page.response.headers.get('x-next-cursor');
-    return { observations: orderedSnapshot(normalize(page.data, this.images), [...this.supplemental.values()].filter(item => item.after !== undefined)), ...(nextCursor && nextCursor !== cursor ? { nextCursor } : {}) };
+    const finish = this.evidence.beginObservedRead();
+    try {
+      const page = await this.transport.requestWithResponse(() => this.transport.client.session.messages({ sessionID: this.nativeId, directory: this.config.cwd, limit: 200, before: cursor }));
+      const nextCursor = page.response.headers.get('x-next-cursor');
+      return { observations: orderedSnapshot(normalize(page.data, this.images), [...this.supplemental.values()].filter(item => item.after !== undefined)), ...(nextCursor && nextCursor !== cursor ? { nextCursor } : {}) };
+    } finally { finish(); }
   }
   async readResource(locator: string) { return this.commands.ownsResource(locator) ? this.commands.readResource(locator) : this.images.read(locator); }
   async dispose(): Promise<void> {
     if (this.closed) return;
-    this.closed = true; this.abort.abort(); clearTimeout(this.refreshTimer);
+    this.closed = true; this.evidence.dispose(); this.abort.abort(); clearTimeout(this.refreshTimer);
     this.initialReject(new Error('OpenCode session closed.'));
     await this.stream; await this.queue;
     this.status = 'closed'; this.output.close(); this.images.close(); this.pending.clear(); this.onClose();

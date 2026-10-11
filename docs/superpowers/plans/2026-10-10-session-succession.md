@@ -405,8 +405,16 @@ no production capability is enabled by these scripted fixtures.
   through one Host admission boundary. Existing unsettled writes reject admission;
   allow read-only inspection, handoff recovery/cancel and security revocation.
   Verify multiple clients/TPM cannot bypass it and unrelated sessions remain usable.
-- [ ] Define minimal optional provider-neutral input witness/reconciliation and
-  readiness evidence contracts. Keep Host role identities out of the SDK.
+- [x] Define optional provider-neutral empty-creation, input witness/reconciliation
+  and attachment-local validity contracts without Host role identities. D1's
+  OpenCode implementation passed independent spec/quality review after one scoped
+  repair. Root freshly passed 97 OpenCode tests, both original validity regressions
+  and the source typecheck; unchanged SDK retains its verified 40 tests/typecheck.
+  Inspection accounts for in-flight reads and relevant Session metadata changes.
+  Owned HTTP/SSE fixtures and disabled private authority do not certify production.
+- [ ] Complete native readiness evidence and D2 Host consumption. D2A adds durable
+  original creation outcomes, nested witness/proof admission and the in-mutation
+  assertion; D2B wires verified attachment and the original effect/readback route.
 - [ ] Treat unspecified acceptance as unknown disposition in TPM; settle native
   queued inputs from authoritative evidence, not later idle or text matching.
 - [ ] Preserve operation/candidate/input evidence across lost responses and restart.

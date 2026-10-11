@@ -8,3 +8,4 @@ export * from './session-settings.js';
 export * from './commands.js';
 export * from './image-input.js';
 export * from './session-tools.js';
+export * from './native-evidence.js';

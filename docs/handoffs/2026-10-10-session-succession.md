@@ -3,6 +3,29 @@
 Date: 2026-10-10. Audience: the next implementation session or maintainer.
 Status: partially implemented; no usable end-to-end handoff yet.
 
+## Optional native evidence checkpoint (2026-10-11)
+
+D1 passed independent spec and quality review after fixing its sole Important
+finding. Root verified the complete 17-path patch and repair replay, then freshly
+passed 97 OpenCode tests, both original inspection-validity reproductions and
+the OpenCode source typecheck. The unchanged SDK retains its earlier verified
+40 tests and source typecheck. Original failed evidence remains preserved.
+
+The optional SDK contract separates empty creation, exact prepared text input,
+input materialization and attachment-local observation validity. OpenCode retains
+known native identities, resumes original verified handles, and checks exact
+input evidence through owned HTTP/SSE fixtures. In-flight inspection blocks
+validity admission; newly discovered relevant Session metadata retires old tokens.
+Materialization does not prove execution, settle queued work or establish native
+readiness. No production authority supplier is installed.
+
+Next is D2A: retain original creation outcomes and nested input witnesses in the
+existing Host stores, reserve their complete durable growth, and add the final
+synchronous commit assertion. D2B then connects verified attachment, dispatch and
+readback to the existing Host effect route. Remaining Task 5/6 and whole-branch
+acceptance follow. Production capability, SQL effects and real native suppliers
+remain disabled; no merge, push, deployment or installation is included.
+
 ## Product composition and recovery checkpoint (2026-10-11)
 
 Task 10C2 passed independent spec and quality review after one scoped correction
@@ -26,11 +49,10 @@ failure and Retry. Validated Favorites progress initiates authoritative HTTP
 recovery independently of the Favorites tree revision; hints never choose a
 native target or grant application/pruning authority.
 
-The next slices are D1 optional SDK/OpenCode native evidence and D2 durable
-consumption/admission, followed by remaining Task 5/6 and whole-branch acceptance.
-D1/D2 do not themselves establish production store authority, complete native
-readiness or queue settlement. Production capability, SQL effects and real native
-suppliers remain disabled. No merge, push, deployment or installation is included.
+The newer D1 checkpoint above completes optional SDK/OpenCode native evidence.
+D2 durable consumption/admission, remaining Task 5/6 and whole-branch acceptance
+are still open. D1/D2 do not themselves establish production store authority,
+complete native readiness or queue settlement.
 
 ## Recoverable local composition checkpoint (2026-10-11)
 

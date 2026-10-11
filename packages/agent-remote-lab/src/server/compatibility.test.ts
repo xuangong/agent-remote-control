@@ -36,7 +36,7 @@ describe('Agent Remote compatibility manifest', () => {
         { providerId: 'codex' },
         { providerId: 'claude', native: { name: 'claude-code', version: '2.1.247', revision: null },
           sdk: { name: '@anthropic-ai/claude-agent-sdk', version: '0.3.247' } },
-        { providerId: 'opencode', native: {name: 'opencode', version: '1.18.18', revision: null}, sdk: {name: '@opencode-ai/sdk', version: '1.18.31'} },
+        { providerId: 'opencode', native: {name: 'opencode', version: '2.0.25', revision: null}, sdk: {name: '@opencode/client', version: '2.0.25'} },
         { providerId: 'copilot', native: {name: 'github-copilot-cli', version: '1.0.83', revision: null}, sdk: {name: '@github/copilot-sdk', version: '1.0.11'} },
       ],
     });
@@ -181,7 +181,7 @@ describe('Agent Remote compatibility manifest', () => {
     opencode.sdk!.version = '0.0.0';
     process.env[manifestEnvironment] = writeManifest(manifest);
     expect(() => loadCompatibilityManifest()).toThrow('OpenCode');
-    opencode.sdk!.version = '1.18.31'; opencode.degradations = [];
+    opencode.sdk!.version = '2.0.25'; opencode.degradations = [];
     process.env[manifestEnvironment] = writeManifest(manifest);
     expect(() => loadCompatibilityManifest()).toThrow('OpenCode degradation');
   });
@@ -285,7 +285,7 @@ function validManifest(overrides: {
       ...(!overrides.omitClaudeSdk ? { sdk: { name: overrides.claudeSdkName ?? '@anthropic-ai/claude-agent-sdk', version: overrides.claudeSdkVersion ?? '0.3.247' } } : {}),
       degradations: claudeDegradations,
     },
-    {providerId: 'opencode', native: {name: 'opencode', version: '1.18.18', revision: null}, sdk: {name: '@opencode-ai/sdk', version: '1.18.31'}, degradations: opencodeCapabilities.map(capability => ({capability, status: 'degraded', reason: 'Bounded shared native provider.'}))},
+    {providerId: 'opencode', native: {name: 'opencode', version: '2.0.25', revision: null}, sdk: {name: '@opencode/client', version: '2.0.25'}, degradations: opencodeCapabilities.map(capability => ({capability, status: 'degraded', reason: 'Bounded shared native provider.'}))},
     {providerId: 'copilot', native: {name: 'github-copilot-cli', version: '1.0.83', revision: null}, sdk: {name: '@github/copilot-sdk', version: '1.0.11'}, degradations: copilotCapabilities.map(capability => ({capability, status: 'degraded', reason: 'Accepted bounded native integration scope.'}))},
   ];
   return {

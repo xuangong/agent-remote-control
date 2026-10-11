@@ -23,6 +23,7 @@ export function reconcileTimeline(previous: ProviderObservation[], next: Provide
     const delivery = initialized ? 'live' : 'history';
     if (!old) { changes.push({ ...item, delivery }); continue; }
     if (old.event.type !== 'timeline' || item.event.type !== 'timeline') return replace();
+    if (old.event.turnId !== item.event.turnId) return replace();
     const before = old.event.item; const after = item.event.item;
     if ((before.type === 'assistant_message' && after.type === 'assistant_message') || (before.type === 'reasoning' && after.type === 'reasoning')) {
       if (!after.text.startsWith(before.text)) return replace();

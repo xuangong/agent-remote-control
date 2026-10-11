@@ -613,17 +613,18 @@ Shared native permissions are trusted by default, as for Codex shared. Set
 if that policy requires restricted execution, registration fails because an
 external server cannot enforce an additional Controller sandbox.
 
-The adapter is validated with OpenCode 1.18.18 and pins SDK 1.18.31. Immediate
-input, steer and native prompt editing preserve the legacy native history. A
-separate next-turn queue is not advertised. Settings select the native model/agent
-for the next prompt.
+The adapter requires OpenCode 2.x, starting at 2.0.25, and pins the official
+`@opencode/client` 2.0.25 SDK. It uses authenticated `/api` HTTP/SSE interfaces
+for sessions, history, input admission, settings and pending interactions. The
+obsolete 1.x API is not supported. Native model/agent changes are confirmed by
+readback; input acknowledgement means queued until execution evidence arrives.
 
 Host callback tools and Ask source references still require an explicit native
 plugin setup. Automatic server management does not install or enable the plugin.
 With the installed Controller, create a new private directory:
 
 ```sh
-agent-remote-controller opencode callbacks setup "$HOME/.agent-remote-control/opencode-callbacks"
+AGENT_HOST_OPENCODE_URL=http://127.0.0.1:14096 agent-remote-controller opencode callbacks setup "$HOME/.agent-remote-control/opencode-callbacks"
 ```
 
 For an externally supervised server, start it with the generated configuration
@@ -632,7 +633,7 @@ the default managed server and its persisted credentials unchanged:
 
 ```sh
 OPENCODE_CONFIG="$HOME/.agent-remote-control/opencode-callbacks/opencode-arc.json" \
-  OPENCODE_SERVER_PASSWORD='choose-a-local-password' \
+  OPENCODE_PASSWORD='choose-a-local-password' \
   opencode serve --hostname 127.0.0.1 --port 14096
 ```
 
@@ -643,8 +644,7 @@ with `AGENT_HOST_OPENCODE_URL=http://127.0.0.1:14096` and the matching
 installed package; no source checkout is needed. This command never edits global
 OpenCode configuration or restarts a running server. Existing target directories
 are rejected without overwriting their files. Loading the plugin into an existing
-native server requires an operator-controlled restart, and OpenCode may install
-its own plugin SDK on first load.
+native server requires an operator-controlled restart, and the generated plugin directory is loaded by the native OpenCode plugin system.
 
 Ask is advertised after the Controller verifies the native plugin. The plugin
 supplies the trusted calling session ID; model arguments cannot select another

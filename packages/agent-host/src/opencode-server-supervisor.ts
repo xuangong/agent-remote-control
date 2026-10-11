@@ -5,9 +5,10 @@ import { createServer, type IncomingMessage, type ServerResponse } from 'node:ht
 import { join } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import { atomicWriteFile } from '@orchardworks/agent-platform';
-import { MIN_OPENCODE_VERSION, supportsOpenCodeVersion } from '@orchardworks/agent-provider-opencode';
 import { sanitizeNativeEnvironment } from './execution-policy.js';
-import { nativeInvocation, resolveNativeExecutable } from './platform/executables/index.js';
+import { nativeInvocation } from './platform/executables/index.js';
+import { resolveOpenCodeExecutable } from './opencode-executable.js';
+import { probeOpenCodeServer } from './opencode-server-state.js';
 import { spawnWindowsJob } from './platform/processes/windows-job.js';
 
 const STARTUP_TIMEOUT_MS = 15_000;
@@ -61,7 +62,7 @@ export async function serveOpenCodeServerSupervisor(directory: string, environme
     endpoint = new URL(config.url);
     if (endpoint.protocol !== 'http:' || !['127.0.0.1', 'localhost', '[::1]'].includes(endpoint.hostname)
       || !endpoint.port || endpoint.username || endpoint.password || endpoint.pathname !== '/' || endpoint.search || endpoint.hash
-      || typeof config.username !== 'string' || !config.username || typeof config.password !== 'string' || !config.password) throw new Error();
+      || config.username !== 'opencode' || typeof config.password !== 'string' || !config.password) throw new Error();
   } catch { throw new Error('The managed OpenCode server configuration is invalid.'); }
   const expectedRevision = environment.AGENT_HOST_OPENCODE_START_REVISION ?? 'initial';
   const generation = randomUUID();
@@ -75,13 +76,14 @@ export async function serveOpenCodeServerSupervisor(directory: string, environme
   let stopPromise: Promise<void> | undefined;
   let ready = false;
   let version = '';
+  let nativePid = 0;
   let managementPort = 0;
   let announced = false;
   let wrongEndpoint = false;
   let nativeLine = '';
   const identity = () => ({ pid: process.pid, generation, url: config.url, managementPort });
   const status = () => ready && !stopping && !exited
-    ? { running: true, ...identity(), nativePid: child!.pid!, version }
+    ? { running: true, ...identity(), nativePid, version }
     : { running: false, phase: stopping ? 'stopping' : 'starting', ...identity() };
   const signalNative = (signal: NodeJS.Signals) => {
     if (!child?.pid) return;
@@ -148,8 +150,8 @@ export async function serveOpenCodeServerSupervisor(directory: string, environme
     managementPort = (management.address() as { port: number }).port;
     await atomicWriteFile(marker, JSON.stringify({ ...identity(), token }) + '\n');
     await assertStartupAllowed();
-    const env = { ...sanitizeNativeEnvironment(environment), OPENCODE_SERVER_USERNAME: config.username, OPENCODE_SERVER_PASSWORD: config.password };
-    const executable = resolveNativeExecutable(environment.AGENT_HOST_OPENCODE ?? 'opencode', 'opencode-ai/bin/opencode', env);
+    const env = { ...sanitizeNativeEnvironment(environment), OPENCODE_PASSWORD: config.password };
+    const executable = resolveOpenCodeExecutable({ ...env, AGENT_HOST_OPENCODE: environment.AGENT_HOST_OPENCODE });
     const invocation = nativeInvocation(executable, ['serve', '--hostname', endpoint.hostname.replace(/^\[|\]$/g, ''), '--port', endpoint.port]);
     // The job owns native descendants and watches this supervisor, not the Controller.
     child = process.platform === 'win32' ? spawnWindowsJob(...invocation, { cwd: process.cwd(), env })
@@ -165,7 +167,7 @@ export async function serveOpenCodeServerSupervisor(directory: string, environme
       while ((end = nativeLine.indexOf('\n')) !== -1) {
         const line = nativeLine.slice(0, end).replace(/\x1b\[[0-9;]*m/g, '').trim();
         nativeLine = nativeLine.slice(end + 1);
-        const match = /^opencode server listening on (http:\/\/\S+)$/.exec(line);
+        const match = /^server listening on (http:\/\/\S+)$/.exec(line);
         if (!match) continue;
         try { if (new URL(match[1]!).toString() === endpoint.toString()) announced = true; else wrongEndpoint = true; }
         catch { wrongEndpoint = true; }
@@ -180,16 +182,13 @@ export async function serveOpenCodeServerSupervisor(directory: string, environme
       if (exited) throw new Error('OpenCode exited before its managed server became ready.');
       if (wrongEndpoint) throw new Error('OpenCode did not bind the requested local endpoint.');
       if (announced) {
-        let health: { healthy?: unknown; version?: unknown } | undefined;
-        try {
-          const response = await fetch(new URL('/global/health', endpoint), { headers: { authorization: `Basic ${Buffer.from(`${config.username}:${config.password}`).toString('base64')}` },
-            signal: AbortSignal.timeout(Math.min(1000, Math.max(1, deadline - Date.now()))), redirect: 'error' });
-          if (response.ok) health = await response.json() as typeof health;
-          else await response.body?.cancel();
-        } catch {}
-        if (health?.healthy === true) {
-          if (!supportsOpenCodeVersion(health.version)) throw new Error(`OpenCode server must be version ${MIN_OPENCODE_VERSION} or newer.`);
-          version = health.version;
+        const info = await probeOpenCodeServer(config.url, { AGENT_HOST_OPENCODE_USERNAME: config.username, AGENT_HOST_OPENCODE_PASSWORD: config.password });
+        if (info.running) {
+          // Windows launches through an owned Job Object wrapper; the API reports its native child.
+          if (info.nativePid <= 0 || process.platform !== 'win32' && info.nativePid !== child.pid)
+            throw new Error('OpenCode server identity does not match the owned native process.');
+          version = info.version;
+          nativePid = info.nativePid;
           break;
         }
       }

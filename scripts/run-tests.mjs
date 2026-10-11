@@ -8,8 +8,7 @@ const opencodeSuccessionEvidence = mode === 'opencode-succession-evidence' || mo
 if (mode === 'opencode-server-native' && !isAbsolute(process.env.AGENT_OPENCODE_TEST_EXECUTABLE ?? ''))
   throw new Error('Set an absolute AGENT_OPENCODE_TEST_EXECUTABLE for the isolated OpenCode managed-server smoke.');
 if (opencodeSuccessionEvidence) {
-  if (process.platform !== 'darwin' || process.arch !== 'arm64') throw new Error('The OpenCode succession evidence experiment requires macOS arm64.');
-  if (!isAbsolute(process.env.AGENT_OPENCODE_TEST_EXECUTABLE ?? '')) throw new Error('Set an absolute AGENT_OPENCODE_TEST_EXECUTABLE for the installed OpenCode 1.18.18.');
+  if (!isAbsolute(process.env.AGENT_OPENCODE_TEST_EXECUTABLE ?? '')) throw new Error('Set an absolute AGENT_OPENCODE_TEST_EXECUTABLE for OpenCode 2.0.25 or newer.');
   if (process.env.AGENT_OPENCODE_SUCCESSION_EVIDENCE_OUTPUT !== undefined && !isAbsolute(process.env.AGENT_OPENCODE_SUCCESSION_EVIDENCE_OUTPUT)) throw new Error('Set AGENT_OPENCODE_SUCCESSION_EVIDENCE_OUTPUT to a new absolute JSON output path, or omit it.');
 }
 if (successionEvidence) {
@@ -24,8 +23,8 @@ if (mode === 'codex-shared' && !process.env.AGENT_REMOTE_SHARED_CODEX_TEST_EXECU
 const commands = {
   'opencode-server-native': ['exec', 'node', '--test', '--test-timeout=60000', '--test-concurrency=1', 'scripts/opencode-managed-server-native.test.mjs'],
   'opencode-server': ['--filter', '@orchardworks/agent-remote-controller', 'exec', 'vitest', 'run', 'src/opencode-server.test.ts', 'src/opencode-server-supervisor.test.ts', 'src/provider-discovery.test.ts', 'src/registrations.test.ts', 'src/opencode-command.test.ts', 'src/opencode-executable.test.ts', 'src/connection-config.test.ts', 'src/host.test.ts', 'src/cli-bootstrap.test.ts', '--testTimeout=15000', '--hookTimeout=15000', '--maxWorkers=1'],
-  'opencode-succession-adapter': ['exec', 'node', '--test', '--test-timeout=100000', '--test-concurrency=1', '--test-name-pattern=actual adapter', 'scripts/opencode-native-succession-evidence.test.mjs'],
-  'opencode-succession-evidence': ['exec', 'node', '--test', '--test-timeout=100000', '--test-concurrency=1', 'scripts/opencode-native-succession-evidence.test.mjs'],
+  'opencode-succession-adapter': ['exec', 'node', '--test', '--test-timeout=115000', '--test-concurrency=1', '--test-name-pattern=actual adapter', 'scripts/opencode-native-succession-evidence.test.mjs'],
+  'opencode-succession-evidence': ['exec', 'node', '--test', '--test-timeout=115000', '--test-concurrency=1', 'scripts/opencode-native-succession-evidence.test.mjs'],
   'opencode-native': ['exec', 'node', '--test', '--test-timeout=150000', '--test-concurrency=1', 'scripts/opencode-native.test.mjs', 'scripts/opencode-native-boundaries.test.mjs', 'scripts/opencode-native-steer.test.mjs', 'scripts/opencode-native-callbacks.test.mjs'],
   opencode: ['--filter', '@orchardworks/agent-provider-opencode', 'exec', 'vitest', 'run', '--testTimeout=10000', '--hookTimeout=15000', '--maxWorkers=1'],
   'image-input': ['--filter', '@orchardworks/agent-remote-relay', 'exec', 'vitest', 'run', 'src/resources/input-image-store.test.ts', 'src/transport/image-input.test.ts', '--testTimeout=10000', '--hookTimeout=15000', '--maxWorkers=1'],

@@ -58,7 +58,7 @@ export function SessionWorkbench({ todo, displayPreferences, onDisplayPreference
   }, [visible, displayScope, state?.timeline.epoch, state?.timeline.entries, revealEntry, preferences.mode, preferences.lettersVisible]);
   const session = suppliedSessionState ?? remoteSessionState(state, connectionStatus);
   const sessionStatus = session.connection;
-  const controlReadOnly = !draftOnly && (!!nativeTakeover || session.readOnly);
+  const controlReadOnly = !!nativeTakeover || (!draftOnly && session.readOnly);
   const readOnly = recordingReadOnly || controlReadOnly;
   const { actions: suppliedFeedbackActions, reauthenticate } = useActionFeedback(suppliedActions, state?.agent?.id, isAuthenticationError);
   const actions: LabWorkbenchActions = draftOnly ? {} : readOnly || mutationBlocked ? { searchTimeline: suppliedFeedbackActions.searchTimeline, loadSearchMatch: suppliedFeedbackActions.loadSearchMatch, loadOlder: suppliedFeedbackActions.loadOlder, requestResource: suppliedFeedbackActions.requestResource, resolveResource: suppliedFeedbackActions.resolveResource, deleteMessage: suppliedFeedbackActions.deleteMessage } : session.synchronized ? { ...suppliedFeedbackActions,
@@ -175,7 +175,7 @@ export function SessionWorkbench({ todo, displayPreferences, onDisplayPreference
             readOnly={readOnly}
             readOnlyCollapsed={composerHidden}
             readOnlyLabel={controlReadOnly && !recordingReadOnly ? 'Read only' : undefined}
-            readOnlyNotice={!draftOnly && (nativeTakeover ?? (!recordingReadOnly && controlReadOnly && state?.sessionControl ? <SessionControlNotice handoff={handoff ?? session.handoff} control={state.sessionControl} connected={sessionStatus === 'ready'} onTakeControl={suppliedActions.takeControl} /> : undefined))}
+            readOnlyNotice={nativeTakeover ?? (!draftOnly && !recordingReadOnly && controlReadOnly && state?.sessionControl ? <SessionControlNotice handoff={handoff ?? session.handoff} control={state.sessionControl} connected={sessionStatus === 'ready'} onTakeControl={suppliedActions.takeControl} /> : undefined)}
             consoleCommands={!readOnly && !mutationBlocked && sessionStatus === 'ready' ? consoleCommands : []}
             onExecuteConsoleCommand={!readOnly && !mutationBlocked && sessionStatus === 'ready' ? onExecuteConsoleCommand : undefined}
             sessionControls={state?.agent && !draftOnly ? <PlanningControl sessionState={session} key={state.agent.id} state={state} sessionStatus={sessionStatus} onSetPlanning={actions.setPlanning} /> : null}

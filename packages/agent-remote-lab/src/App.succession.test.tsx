@@ -50,7 +50,7 @@ function committed(from = 'A', to = 'B', revision = 2, roleId = 'primary', provi
       receipt: { ...request, to: native(to, providerId), phase: 'committed', committedRevision: revision, startedAt: 'now', updatedAt: 'now',
         prepared: { ...request, to: native(to, providerId), workspace, associationRevision: 1, participants: [], capture: { epoch: 'epoch', seq: 1, capturedAt: 'now' } } } } };
 }
-async function failureFixture(advanceDuringRecovery = false, nativeIdentity?: string | null, strict = false, flags = '', setup?: { chain?: SessionSuccessionReplay[]; replayFailure?: string; selected?: string; providerId?: string; userScoped?: boolean; favorites?: FavoritesSnapshot; holdRelationsInitially?: boolean; holdReplayInitially?: boolean; preserveNativeState?: boolean; children?: AgentChildSession[]; timeline?: ProjectedTimelineEntry[]; nativeStatus?: 'idle' | 'running'; successionDescription?: SuccessionDescription; successionStatus?(): SuccessionActionResult; seed?(scope: string, source: OpenedSession): void | Promise<void> }) {
+async function failureFixture(advanceDuringRecovery = false, nativeIdentity?: string | null, strict = false, flags = '', setup?: { chain?: SessionSuccessionReplay[]; replayFailure?: string; selected?: string; providerId?: string; userScoped?: boolean; favorites?: FavoritesSnapshot; holdRelationsInitially?: boolean; holdReplayInitially?: boolean; preserveNativeState?: boolean; children?: AgentChildSession[]; timeline?: ProjectedTimelineEntry[]; nativeStatus?: 'idle' | 'running'; successionDescription?: SuccessionDescription; successionStatus?(): SuccessionActionResult; attachmentFailure?(body: Record<string, unknown>): { status: number; payload: unknown } | undefined; seed?(scope: string, source: OpenedSession): void | Promise<void> }) {
   configureImageDraftPersistence(() => false);
   const requests: Array<{ url: string; body?: Record<string, unknown> }> = [];
   const providerId = setup?.providerId ?? 'recorded';
@@ -67,6 +67,7 @@ async function failureFixture(advanceDuringRecovery = false, nativeIdentity?: st
   if (setup?.holdRelationsInitially) relationsGate = new Promise(resolve => { releaseRelations = resolve; });
   const attachmentGates = new Map<string, Promise<void>>();
   let currentGate: Promise<void> | undefined;
+  let controlGate: Promise<void> | undefined;
   let replayGate: Promise<void> | undefined;
   let releaseReplay: (() => void) | undefined;
   if (setup?.holdReplayInitially) replayGate = new Promise(resolve => { releaseReplay = resolve; });
@@ -96,7 +97,9 @@ async function failureFixture(advanceDuringRecovery = false, nativeIdentity?: st
     else if (url.pathname.endsWith('/favorites') && favorites) value = favorites;
     else if (url.pathname.endsWith('/attach')) {
       await attachmentGates.get(String(body!.nativeSessionId));
-      if (nativeIdentity !== undefined) value = { agentId: nativeBindings.get(String(body!.nativeSessionId)) ?? `agent-${body!.nativeSessionId}`, nativeSessionId: body!.nativeSessionId };
+      const failure = setup?.attachmentFailure?.(body!);
+      if (failure) { response.statusCode = failure.status; value = failure.payload; }
+      else if (nativeIdentity !== undefined) value = { agentId: nativeBindings.get(String(body!.nativeSessionId)) ?? `agent-${body!.nativeSessionId}`, nativeSessionId: body!.nativeSessionId };
       else { response.statusCode = 503; value = { code: 'host_offline', error: 'Fixture successor unavailable.' }; }
     }
     else if (url.pathname.endsWith('/providers')) value = { protocolVersion: PROTOCOL_VERSION, type: 'provider_list', payload: { providers: [] } };
@@ -126,7 +129,7 @@ async function failureFixture(advanceDuringRecovery = false, nativeIdentity?: st
     const callbacks = new Map<string, (identity: string | null, connection?: 'connected' | 'restoring') => void>();
     const retire = (id: string) => { const callback = callbacks.get(id); if (callback) activeUpdates.get(subscriptions.get(id)!)?.delete(callback); callbacks.delete(id); subscriptions.delete(id); };
     socket.on('close', () => { for (const id of callbacks.keys()) retire(id); });
-    socket.on('message', data => {
+    socket.on('message', async data => {
       const frame = JSON.parse(String(data)); frames.push(frame);
       if (frame.type === 'unsubscribe') { retire(frame.subscriptionId); return; }
       if (frame.type === 'subscribe') subscriptions.set(frame.subscriptionId, frame.agentId);
@@ -142,7 +145,10 @@ async function failureFixture(advanceDuringRecovery = false, nativeIdentity?: st
         update(agentId === 'agent-B' ? nativeIdentity ?? null : nativeFor(agentId));
         emit({ protocolVersion: PROTOCOL_VERSION, type: 'session_control', payload: { agentId: frame.agentId, revision: 'control', access: 'control', available: false, token: 'token' } });
       }
-      if (frame.message?.type === 'session_control_request') emit({ protocolVersion: PROTOCOL_VERSION, type: 'session_control', payload: { agentId, requestId: frame.message.payload.requestId, revision: 'control', access: 'control', available: false, token: 'token' } });
+      if (frame.message?.type === 'session_control_request') {
+        if (frame.message.payload.action === 'take_over') await controlGate;
+        emit({ protocolVersion: PROTOCOL_VERSION, type: 'session_control', payload: { agentId, requestId: frame.message.payload.requestId, revision: 'control', access: 'control', available: false, token: 'token' } });
+      }
       if (['send_message', 'interaction_response'].includes(frame.message?.type)) emit({ protocolVersion: PROTOCOL_VERSION, type: 'command_acknowledged', payload: {
         agentId, requestId: frame.message.payload.submissionId ?? frame.message.payload.requestId, command: frame.message.type,
       } });
@@ -190,6 +196,7 @@ async function failureFixture(advanceDuringRecovery = false, nativeIdentity?: st
     holdRelations() { relationsGate ??= new Promise(resolve => { releaseRelations = resolve; }); return () => { releaseRelations?.(); relationsGate = undefined; }; },
     holdAttach(nativeSessionId: string) { let release!: () => void; attachmentGates.set(nativeSessionId, new Promise(resolve => { release = resolve; })); return () => { attachmentGates.delete(nativeSessionId); release(); }; },
     holdCurrent() { let release!: () => void; currentGate = new Promise(resolve => { release = resolve; }); return () => { currentGate = undefined; release(); }; },
+    holdControl() { let release!: () => void; controlGate = new Promise(resolve => { release = resolve; }); return () => { controlGate = undefined; release(); }; },
     pauseReplay() { replayGate ??= new Promise(resolve => { releaseReplay = resolve; }); return () => { releaseReplay?.(); replayGate = undefined; }; },
     notify(replay: SessionSuccessionReplay) { for (const socket of sockets.clients) socket.send(JSON.stringify({ protocolVersion: PROTOCOL_VERSION, type: 'session_succession_committed', succession: replay })); },
   };
@@ -221,6 +228,64 @@ async function editVisiblePrompt(view: HTMLElement, text: string) {
     editor.dispatchEvent(new Event('input', { bubbles: true }));
   });
 }
+
+it.each(['A', 'B'])('keeps native takeover visible from failed initial binding %s until explicit takeover is confirmed', async nativeSessionId => {
+  const generation = 'native-owner-generation';
+  const f = await failureFixture(false, nativeSessionId, false, '', { chain: nativeSessionId === 'A' ? [] : [committed()], attachmentFailure(body) {
+    if (!body.takeOver) return { status: 409, payload: { code: 'native_session_owned',
+      error: 'This session is controlled by another native client.', nativeOwner: { kind: 'native_cli', generation } } };
+  } });
+  const takeover = () => f.view.querySelector<HTMLButtonElement>('[aria-label="Interrupt and take control"]');
+  await settleApp(() => expect(takeover()).not.toBeNull());
+  expect(takeover()!.closest('[hidden]')).toBeNull();
+  expect(f.view.textContent).toContain('Taking over interrupts its running work.');
+  expect(f.view.textContent).not.toContain('This session is controlled by another native client.');
+  expect(f.view.querySelector('[data-testid="prompt-submit"]')).toBeNull();
+  expect(f.requests.filter(request => request.url.endsWith('/attach')).map(request => request.body?.takeOver)).toEqual([undefined]);
+  const release = f.holdAttach(nativeSessionId), releaseControl = f.holdControl();
+  try {
+    await act(async () => takeover()!.click());
+    await settleApp(() => expect(f.requests.filter(request => request.url.endsWith('/attach'))).toHaveLength(2));
+    expect(f.view.querySelector('.lab-session-control')?.getAttribute('aria-busy')).toBe('true');
+    expect(f.view.querySelector<HTMLButtonElement>('[aria-label="Taking control…"]')?.disabled).toBe(true);
+    expect(f.requests.filter(request => request.url.endsWith('/attach'))[1]!.body).toMatchObject({ nativeSessionId, takeOver: generation });
+    expect(f.frames.some(frame => frame.message?.type === 'send_message')).toBe(false);
+    await act(async () => release());
+    await settleApp(() => expect(f.frames.some(frame => frame.message?.type === 'session_control_request' && frame.message.payload?.action === 'take_over')).toBe(true));
+    expect(f.view.querySelector<HTMLButtonElement>('[aria-label="Restoring session…"]')?.disabled).toBe(true);
+    expect(f.view.querySelector('[data-testid="prompt-submit"]')).toBeNull();
+    await act(async () => releaseControl());
+    await settleApp(() => {
+      expect(f.view.querySelector('.lab-session-control')).toBeNull();
+      expect(f.view.querySelector('[data-testid="prompt-submit"]')).not.toBeNull();
+    });
+  } finally { release(); releaseControl(); }
+});
+
+it('retains an uncertain initial takeover and checks status without repeating the interruption', async () => {
+  const generation = 'uncertain-native-owner';
+  let interrupted = false;
+  const f = await failureFixture(false, 'A', false, '', { chain: [], attachmentFailure(body) {
+    if (body.takeOver) {
+      interrupted = true;
+      return { status: 409, payload: { code: 'native_handoff_unknown', error: 'Native release could not be confirmed.' } };
+    }
+    if (!interrupted) return { status: 409, payload: { code: 'native_session_owned', error: 'Native CLI has control.', nativeOwner: { kind: 'native_cli', generation } } };
+  } });
+  await settleApp(() => expect(f.view.querySelector('[aria-label="Interrupt and take control"]')).not.toBeNull());
+  await act(async () => f.view.querySelector<HTMLButtonElement>('[aria-label="Interrupt and take control"]')!.click());
+  await settleApp(() => expect(f.view.querySelector('[aria-label="Check session status"]')).not.toBeNull());
+  expect(f.view.textContent).toContain('Native release could not be confirmed.');
+  expect(f.view.querySelector('.lab-session-control-error')?.textContent).toContain('Handoff is not confirmed.');
+  expect(f.view.querySelector('[data-testid="prompt-submit"]')).toBeNull();
+  await act(async () => f.view.querySelector<HTMLButtonElement>('[aria-label="Check session status"]')!.click());
+  await settleApp(() => {
+    expect(f.view.querySelector('.lab-session-control')).toBeNull();
+    expect(f.view.querySelector('[data-testid="prompt-submit"]')).not.toBeNull();
+  });
+  expect(f.requests.filter(request => request.url.endsWith('/attach')).map(request => request.body?.takeOver)).toEqual([undefined, generation, undefined]);
+  expect(f.frames.some(frame => frame.message?.type === 'send_message')).toBe(false);
+});
 
 it('shows exact cached content while replay and native attachment wait without granting control', async () => {
   const real = successionHooks.useSessionSuccession;

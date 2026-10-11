@@ -150,6 +150,7 @@ describe('LabWorkbench', () => {
 
     expect(container.textContent).toContain('Start with a Provider');
     expect((container.querySelector('.lab-composer-dock') as HTMLElement).hidden).toBe(true);
+    expect(container.querySelector('[data-testid="agent-activity"]')?.closest('[hidden]')).not.toBeNull();
   });
 
   it('names the Agent being attached instead of presenting a session-start empty state', async () => {

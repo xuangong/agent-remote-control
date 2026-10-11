@@ -37,12 +37,12 @@ async function fixture(overrides: NodeJS.ProcessEnv = {}) {
     import {createServer} from 'node:http';
     import {appendFileSync} from 'node:fs';
     const args = process.argv.slice(2);
-    if (args.includes('--version')) { process.stdout.write('1.18.18\\n'); process.exit(0); }
+    if (args.includes('--version')) { process.stdout.write((process.env.TEST_OPENCODE_CLI_VERSION ?? '2.0.25')+'\\n'); process.exit(0); }
     if (args[0] !== 'serve') process.exit(2);
     appendFileSync(process.env.TEST_OPENCODE_REPORT, JSON.stringify({pid:process.pid,args,
-      username:process.env.OPENCODE_SERVER_USERNAME,password:process.env.OPENCODE_SERVER_PASSWORD})+'\\n');
-    const username = process.env.OPENCODE_SERVER_USERNAME ?? 'opencode';
-    const password = process.env.OPENCODE_SERVER_PASSWORD;
+      username:'opencode',password:process.env.OPENCODE_PASSWORD})+'\\n');
+    const username = 'opencode';
+    const password = process.env.OPENCODE_PASSWORD;
     const authorization = 'Basic '+Buffer.from(username+':'+password).toString('base64');
     const hostname = args[args.indexOf('--hostname')+1];
     const port = Number(args[args.indexOf('--port')+1]);
@@ -53,12 +53,13 @@ async function fixture(overrides: NodeJS.ProcessEnv = {}) {
     const server = createServer((req,res)=>{
       if (password && req.headers.authorization !== authorization) { res.writeHead(401).end(); return; }
       if (req.url === '/crash') { res.end(); setTimeout(()=>process.exit(9),10); return; }
+      if (req.url !== '/api/info') { res.writeHead(404).end(); return; }
       res.setHeader('content-type','application/json');
-      res.end(JSON.stringify({healthy:true,version:'1.18.18'}));
+      res.end(JSON.stringify({version:'2.0.25',pid:process.pid,urls:[],paths:{tmp:'/tmp'}}));
     });
     server.on('error',()=>process.exit(12));
     setTimeout(()=>server.listen(port,hostname,()=>{
-      setTimeout(()=>process.stdout.write('opencode server listening on http://'+hostname+':'+server.address().port+'\\n'),
+      setTimeout(()=>process.stdout.write('server listening on http://'+hostname+':'+server.address().port+'\\n'),
         Number(process.env.TEST_OPENCODE_ANNOUNCE_DELAY ?? 0));
     }),Number(process.env.TEST_OPENCODE_DELAY ?? 0));
   `);
@@ -119,19 +120,37 @@ async function fixture(overrides: NodeJS.ProcessEnv = {}) {
 it('starts a local authenticated native server and reuses it with fresh Controller credentials', async () => {
   const f = await fixture();
   const first = await f.prepare();
-  expect(first).toMatchObject({ running: true, ownership: 'managed', url: f.url, version: '1.18.18', autoStart: true });
+  expect(first).toMatchObject({ running: true, ownership: 'managed', url: f.url, version: '2.0.25', autoStart: true });
   expect(first.pid).toBeGreaterThan(0);
   expect(first.nativePid).toBeGreaterThan(0);
   expect(first.pid).not.toBe(first.nativePid);
   expect(f.env.AGENT_HOST_OPENCODE_PASSWORD).toBeTruthy();
-  expect((await fetch(`${f.url}/global/health`, { signal: AbortSignal.timeout(2_000) })).status).toBe(401);
-  const health = await fetch(`${f.url}/global/health`, { headers: f.headers(), signal: AbortSignal.timeout(2_000) });
-  expect(await health.json()).toEqual({ healthy: true, version: '1.18.18' });
+  expect((await fetch(`${f.url}/api/info`, { signal: AbortSignal.timeout(2_000) })).status).toBe(401);
+  const health = await fetch(`${f.url}/api/info`, { headers: f.headers(), signal: AbortSignal.timeout(2_000) });
+  expect(await health.json()).toEqual({ version: '2.0.25', pid: first.nativePid, urls: [], paths: { tmp: '/tmp' } });
   const fresh = { ...f.initialEnv };
   expect(await f.prepare(fresh)).toMatchObject({ nativePid: first.nativePid, pid: first.pid });
   expect(fresh.AGENT_HOST_OPENCODE_PASSWORD).toBe(f.env.AGENT_HOST_OPENCODE_PASSWORD);
   expect((await f.prepare()).nativePid).toBe(first.nativePid);
   expect(await f.nativeRuns()).toHaveLength(1);
+}, 15_000);
+
+it.each(['2.0.25', 'v2.0.25', 'opencode v2.0.25'])('starts a compatible native server after CLI output %j', async version => {
+  const f = await fixture({ TEST_OPENCODE_CLI_VERSION: version });
+  expect(await f.prepare()).toMatchObject({ running: true, ownership: 'managed', version: '2.0.25' });
+  expect(await f.nativeRuns()).toHaveLength(1);
+}, 15_000);
+
+it.each([
+  ['opencode v1.19.0', 'opencode_api_unsupported'],
+  ['3.0.0', 'opencode_api_unsupported'],
+  ['2.0.24', 'opencode_version_unsupported'],
+  ['another-agent v2.0.25', 'opencode_version_unsupported'],
+])('rejects incompatible CLI output %j before executing serve', async (version, code) => {
+  const f = await fixture({ TEST_OPENCODE_CLI_VERSION: version });
+  await expect(f.prepare()).rejects.toMatchObject({ code, message: expect.stringContaining('OpenCode 2.x (2.0.25 or newer)') });
+  expect(await f.nativeRuns()).toHaveLength(0);
+  expect(await f.command('status')).toMatchObject({ running: false, ownership: 'none' });
 }, 15_000);
 
 it('deduplicates simultaneous startup into one native observation endpoint', async () => {
@@ -150,7 +169,7 @@ it('keeps the native session server alive after its starting Controller process 
   expect(started).toMatchObject({ running: true, ownership: 'managed' });
   const resumed = await f.prepare();
   expect(resumed).toMatchObject({ pid: started.pid, nativePid: started.nativePid, running: true });
-  expect((await fetch(`${f.url}/global/health`, { headers: f.headers(), signal: AbortSignal.timeout(2_000) })).status).toBe(200);
+  expect((await fetch(`${f.url}/api/info`, { headers: f.headers(), signal: AbortSignal.timeout(2_000) })).status).toBe(200);
   expect(await f.nativeRuns()).toHaveLength(1);
 }, 15_000);
 
@@ -175,7 +194,7 @@ it('waits for an existing managed startup before classifying its healthy endpoin
   await expect.poll(async () => (await f.nativeRuns()).length, { timeout: 4_000 }).toBe(1);
   await loadOpenCodeServerCredentials(f.directory, f.env);
   await expect.poll(async () => {
-    try { return (await fetch(`${f.url}/global/health`, { headers: f.headers(), signal: AbortSignal.timeout(500) })).status; }
+    try { return (await fetch(`${f.url}/api/info`, { headers: f.headers(), signal: AbortSignal.timeout(500) })).status; }
     catch { return 0; }
   }, { timeout: 2_000 }).toBe(200);
   const results = await Promise.all([starting, f.prepareInSeparateProcess()]);
@@ -195,7 +214,7 @@ it('loads managed authentication for a separate CLI without starting or replacin
   await loadOpenCodeServerCredentials(f.directory, fresh);
   expect(fresh.AGENT_HOST_OPENCODE_USERNAME).toBe(f.env.AGENT_HOST_OPENCODE_USERNAME);
   expect(fresh.AGENT_HOST_OPENCODE_PASSWORD).toBe(f.env.AGENT_HOST_OPENCODE_PASSWORD);
-  expect((await fetch(`${f.url}/global/health`, { headers: f.headers(fresh), signal: AbortSignal.timeout(2_000) })).status).toBe(200);
+  expect((await fetch(`${f.url}/api/info`, { headers: f.headers(fresh), signal: AbortSignal.timeout(2_000) })).status).toBe(200);
   expect((await f.command('status')).nativePid).toBe(started.nativePid);
   await f.command('stop');
   await loadOpenCodeServerCredentials(f.directory, { ...f.initialEnv });
@@ -206,15 +225,15 @@ it('loads managed authentication for a separate CLI without starting or replacin
 it('reuses an existing external server and never stops its process', async () => {
   const server = createServer((_request, response) => {
     response.setHeader('content-type', 'application/json');
-    response.end(JSON.stringify({ healthy: true, version: '1.18.18' }));
+    response.end(JSON.stringify({ version: '2.0.25', pid: process.pid, urls: [], paths: { tmp: '/tmp' } }));
   });
   const url = await listen(server);
   cleanup.push(() => close(server));
   const f = await fixture({ AGENT_HOST_OPENCODE_URL: url });
-  expect(await f.prepare()).toMatchObject({ running: true, ownership: 'external', url, version: '1.18.18' });
+  expect(await f.prepare()).toMatchObject({ running: true, ownership: 'external', url, version: '2.0.25' });
   await expect(f.command('stop')).rejects.toMatchObject({ code: 'opencode_external_server' });
   await expect(f.command('restart')).rejects.toMatchObject({ code: 'opencode_external_server' });
-  expect((await fetch(`${url}/global/health`, { signal: AbortSignal.timeout(2_000) })).status).toBe(200);
+  expect((await fetch(`${url}/api/info`, { signal: AbortSignal.timeout(2_000) })).status).toBe(200);
   expect(await f.command('status')).toMatchObject({ running: true, ownership: 'external' });
   expect(await f.nativeRuns()).toHaveLength(0);
 }, 15_000);
@@ -257,28 +276,29 @@ it.each([401, 404])('does not spawn or claim an occupied endpoint returning HTTP
   cleanup.push(() => close(server));
   const f = await fixture({ AGENT_HOST_OPENCODE_URL: url });
   await expect(f.prepare()).rejects.toThrow();
-  expect((await fetch(`${url}/global/health`, { signal: AbortSignal.timeout(2_000) })).status).toBe(status);
+  expect((await fetch(`${url}/api/info`, { signal: AbortSignal.timeout(2_000) })).status).toBe(status);
   expect(await f.nativeRuns()).toHaveLength(0);
 }, 15_000);
 
 it('can recover external authentication after an initial unauthorized detection', async () => {
-  const expected = `Basic ${Buffer.from('existing-user:existing-password').toString('base64')}`;
+  const expected = `Basic ${Buffer.from('opencode:existing-password').toString('base64')}`;
   const server = createServer((request, response) => {
     if (request.headers.authorization !== expected) { response.writeHead(401).end(); return; }
     response.setHeader('content-type', 'application/json');
-    response.end(JSON.stringify({ healthy: true, version: '1.18.18' }));
+    response.end(JSON.stringify({ version: '2.0.25', pid: process.pid, urls: [], paths: { tmp: '/tmp' } }));
   });
   const url = await listen(server);
   cleanup.push(() => close(server));
   const f = await fixture({ AGENT_HOST_OPENCODE_URL: url });
   await expect(f.prepare()).rejects.toMatchObject({ code: 'opencode_auth_required' });
-  const repaired = { ...f.initialEnv, AGENT_HOST_OPENCODE_USERNAME: 'existing-user', AGENT_HOST_OPENCODE_PASSWORD: 'existing-password' };
+  const repaired = { ...f.initialEnv, AGENT_HOST_OPENCODE_USERNAME: 'opencode', AGENT_HOST_OPENCODE_PASSWORD: 'existing-password' };
   expect(await f.prepare(repaired)).toMatchObject({ running: true, ownership: 'external' });
   expect(await f.nativeRuns()).toHaveLength(0);
 }, 15_000);
 
 it.each([
   ['an empty username', { AGENT_HOST_OPENCODE_USERNAME: '' }],
+  ['a custom username', { AGENT_HOST_OPENCODE_USERNAME: 'custom-user' }],
   ['a colon in the username', { AGENT_HOST_OPENCODE_USERNAME: 'invalid:user' }],
   ['an empty password', { AGENT_HOST_OPENCODE_PASSWORD: '' }],
   ['a newline in the password', { AGENT_HOST_OPENCODE_PASSWORD: 'invalid\npassword' }],
@@ -287,9 +307,9 @@ it.each([
   await expect(f.prepare()).rejects.toMatchObject({ code: 'opencode_state_invalid' });
   expect((await readdir(f.directory, { recursive: true })).filter(path => path.endsWith('config.json'))).toEqual([]);
   expect(await f.nativeRuns()).toHaveLength(0);
-  Object.assign(f.env, { AGENT_HOST_OPENCODE_USERNAME: 'corrected-user', AGENT_HOST_OPENCODE_PASSWORD: 'corrected-password' });
+  Object.assign(f.env, { AGENT_HOST_OPENCODE_USERNAME: 'opencode', AGENT_HOST_OPENCODE_PASSWORD: 'corrected-password' });
   expect(await f.prepare()).toMatchObject({ running: true, ownership: 'managed' });
-  expect((await fetch(`${f.url}/global/health`, { headers: f.headers(), signal: AbortSignal.timeout(2_000) })).status).toBe(200);
+  expect((await fetch(`${f.url}/api/info`, { headers: f.headers(), signal: AbortSignal.timeout(2_000) })).status).toBe(200);
   expect(await f.nativeRuns()).toHaveLength(1);
 }, 15_000);
 
@@ -306,7 +326,7 @@ it('cancels an in-flight native startup when stop is requested and does not resu
   }, { timeout: 4_000 }).toBe(false);
   await expect(f.prepare({ ...f.initialEnv })).rejects.toMatchObject({ code: 'opencode_start_disabled' });
   expect(await f.command('status')).toMatchObject({ running: false, autoStart: false });
-  await expect(fetch(`${f.url}/global/health`, { signal: AbortSignal.timeout(500) })).rejects.toThrow();
+  await expect(fetch(`${f.url}/api/info`, { signal: AbortSignal.timeout(500) })).rejects.toThrow();
   expect(await f.nativeRuns()).toHaveLength(1);
 }, 15_000);
 

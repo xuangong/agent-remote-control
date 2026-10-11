@@ -1,25 +1,29 @@
 # Session succession state and recovery
 
 Status: current implementation and recovery contract. The product action, Host
-coordinator and production Relay storage are connected. Codex, Claude Code,
-Copilot and OpenCode implement the evidence contract; each requested provider pair
-must pass current Host capability and readiness checks. Final provider-stage
-workspace gates passed; see the [validation report](../../handoffs/2026-10-11-succession-provider-validation.md).
+coordinator and production Relay storage are connected. Codex, Claude Code and
+Copilot implement the evidence contract; each requested provider pair must pass
+current Host capability and readiness checks. The current OpenCode 2.x adapter
+reports Handoff unavailable because default native history cannot establish all
+required execution selections. The [prior validation report](../../handoffs/2026-10-11-succession-provider-validation.md)
+records the earlier pinned provider versions, not support for the new 2.x contract.
 This does not imply deployment. Update the format table when schemas change.
 
 ## Supported configuration and product entry
 
 Succession stays on the same Host and canonical working directory. Codex,
-Claude Code, Copilot and OpenCode provide native evidence v2; ordinary provider
+Claude Code and Copilot provide native evidence v2; ordinary provider
 discovery alone does not establish Handoff eligibility. Both ends must provide
 the required evidence, source access and bounded projections. Cross-provider
 handoff transfers normalized context, not native credentials or runtime state.
 
-OpenCode retains its reviewed 1.18.x configuration from 1.18.18, with background
-subagents disabled and a connected observation stream. Its source references
-also require the explicit [Host callback plugin](../../opencode-callbacks.md).
-The current [provider validation](../../handoffs/2026-10-11-succession-provider-validation.md)
-records pinned native versions, provider-specific evidence and recovery limits.
+OpenCode 2.0.25 or newer within 2.x remains available for ordinary shared sessions,
+native prompt-edit forks and source references with the explicit
+[Host callback plugin](../../opencode-callbacks.md). It rejects Handoff preparation
+before effects. Public message sequence can prove an ordinary input began execution,
+but it cannot prove its complete historical system-instruction selection, and the
+experimental native event log is not persisted by default. See
+[OpenCode native boundaries](../../opencode-native-boundaries.md) for the exact gap.
 
 Enter `/handoff` in the primary Session View composer, or `/handoff <provider>`
 to request a target provider. The compact chooser defaults to the current provider
@@ -474,21 +478,24 @@ the substantive model stream incomplete. Following another SIGKILL, exact public
 GET B/U returned the original user identity and ordered text parts; bounded
 history contained U once, and reconciliation produced no new model requests.
 
-Both cuts passed independent review and a fresh Root run. The opt-in
-`test:opencode:succession-evidence` entry uses an explicit reviewed executable,
-isolated profile, restricted loopback sandbox and a 120-second outer deadline;
-an optional evidence output must be a new absolute path. Ordinary collection
-skips it. These results do not certify queue/work coverage, callback-enabled
-production configuration, multipart input, native completion, Host integration
-or power-loss durability. The experiment alone does not enable capability.
+Both cuts passed independent review and a fresh Root run. At that 1.18.x baseline,
+the opt-in `test:opencode:succession-evidence` entry used an explicit reviewed
+executable, isolated profile, restricted loopback sandbox and a 120-second outer
+deadline; an optional evidence output had to be a new absolute path. Ordinary
+collection skipped it. These historical results do not certify queue/work
+coverage, callback-enabled production configuration, multipart input, native
+completion, Host integration or power-loss durability. They do not establish
+OpenCode 2.x Handoff support. The current entry instead verifies ordinary input
+recovery and rejection of unsupported Handoff before native effects; see
+[OpenCode native boundaries](../../opencode-native-boundaries.md).
 
-The prior baseline's actual-adapter test separately uses the installed OpenCode binary and
-the built production adapter, without an injected native verifier. It covers
+The prior baseline's actual-adapter test separately used the installed OpenCode binary and
+the built production adapter, without an injected native verifier. It covered
 ordinary A input, empty B with exact selections, prepared first B input, ordinary
 B input, empty C and exact C resume through a new provider instance. Empty
-creation/attachment makes no model request. A callback-enabled native test also
-creates an empty B, restores its Host tools and sends one prepared input through
-the real plugin. Both use isolated profiles and a loopback model fixture, not a
+creation/attachment made no model request. A callback-enabled native test also
+created an empty B, restored its Host tools and sent one prepared input through
+the real plugin. Both used isolated profiles and a loopback model fixture, not a
 commercial model. Host/Gateway/browser and Cloudflare production-entry transport
 tests are separate evidence, not one combined native full-stack run.
 

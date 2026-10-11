@@ -120,7 +120,7 @@
         "packages/codex-daemon-client/src",
         "packages/codex-daemon-client/tsconfig.json"
       ],
-      "digest": "sha256:ed198055cb973af31d11c15918639d2e4ca20677c714654b976e0cb265af19e5"
+      "digest": "sha256:a5b5fd121850719ca0363239ffe0adb4c9fcc8a864cc22dee3e93b9a304ee0e8"
     }
   },
   "providers": [
@@ -291,18 +291,18 @@
       "providerId": "opencode",
       "native": {
         "name": "opencode",
-        "version": "1.18.18",
+        "version": "2.0.25",
         "revision": null
       },
       "sdk": {
-        "name": "@opencode-ai/sdk",
-        "version": "1.18.31"
+        "name": "@opencode/client",
+        "version": "2.0.25"
       },
       "degradations": [
         {
           "capability": "controls.queue-steer",
           "status": "degraded",
-          "reason": "Legacy prompt_async supports steer and immediate input during active work; the next native step consumes it with preserved history. A separate next_turn queue is unavailable. Durable history remains independent and is never substituted."
+          "reason": "Native v2 inbox accepts immediate input with steer delivery for the next native step. Admission is reported as queued; started evidence requires native execution records. The adapter does not expose a separate next_turn queue."
         },
         {
           "capability": "controls.source-references",
@@ -322,12 +322,12 @@
         {
           "capability": "events.usage",
           "status": "degraded",
-          "reason": "Uses native session token/cost aggregates when present, with session token scope. Otherwise tokens describe the latest populated model step with call scope; partial history does not establish lifetime totals."
+          "reason": "Uses native v2 cumulative session token and cost snapshots. These are consumption totals, not current context occupancy; missing native counters are not synthesized from a partial history."
         },
         {
           "capability": "interactions.native-producers",
           "status": "degraded",
-          "reason": "Native permission and question requests are normalized, including plan-exit questions. No native form, permission-grant, external-action or standalone plan-approval producer is fabricated."
+          "reason": "Native permissions, typed forms, custom-choice questions and standalone external actions are normalized. Persistent approval is project scoped. Conditional, hidden, pattern-constrained or unrepresentable mixed forms remain visibly waiting for a native client; no fields or receipts are fabricated."
         }
       ]
     }

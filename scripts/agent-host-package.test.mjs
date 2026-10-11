@@ -31,7 +31,7 @@ test('packs the public Controller name with the unchanged command and npm regist
   assert.deepEqual(manifest.os, ['darwin', 'linux', 'win32']);
   assert.deepEqual(manifest.bin, { 'agent-remote-controller': 'dist/launcher.js' });
   assert.ok(Object.values(manifest.dependencies).every(version => !version.startsWith('workspace:')));
-  assert.equal(manifest.dependencies['@opencode-ai/sdk'], '1.18.31');
+  assert.equal(manifest.dependencies['@opencode/client'], '2.0.25');
   const plugin = await exec('tar', ['-xOf', artifact, 'package/dist/bridge-plugin.mjs'], { timeout: 10000, maxBuffer: 2 * 1024 * 1024 });
   assert.ok(plugin.stdout.length > 1000);
 });
@@ -100,12 +100,12 @@ test('installs the tarball independently and manages a paired daemon from a path
   assert.equal(manifest.name, '@orchardworks/agent-remote-controller');
   assert.deepEqual(Object.keys(manifest.bin), ['agent-remote-controller']);
   assert.ok(Object.values(manifest.dependencies).every(version => !version.startsWith('workspace:')));
-  assert.equal(manifest.dependencies['@opencode-ai/sdk'], '1.18.31');
+  assert.equal(manifest.dependencies['@opencode/client'], '2.0.25');
   assert.ok(Object.keys(manifest.dependencies).every(name => !name.startsWith('@orchardworks/')));
   const callbackSetup = JSON.parse((await run(['opencode', 'callbacks', 'setup', join(directory, 'private callbacks')])).stdout);
   const nativeCallbackConfig = JSON.parse(await readFile(callbackSetup.nativeConfigPath, 'utf8'));
-  assert.equal(nativeCallbackConfig.plugin[0][1].configPath, callbackSetup.configPath);
-  assert.ok((await readFile(new URL(nativeCallbackConfig.plugin[0][0]), 'utf8')).length > 1000);
+  assert.equal(nativeCallbackConfig.plugins[0].options.configPath, callbackSetup.configPath);
+  assert.ok((await readFile(new URL('server.js', nativeCallbackConfig.plugins[0].package.replace(/\/?$/, '/')), 'utf8')).length > 1000);
   await assert.rejects(run(['opencode', 'callbacks', 'setup', join(directory, 'private callbacks')]));
   await assert.rejects(run(['start']), /AGENT_HOST_SERVER and AGENT_HOST_REMOTE_KEY are required/);
   await assert.rejects(run(['start'], { AGENT_HOST_REMOTE_KEY: 'key-without-relay' }), /Set AGENT_HOST_SERVER and AGENT_HOST_REMOTE_KEY together/);
@@ -115,9 +115,9 @@ test('installs the tarball independently and manages a paired daemon from a path
     env[`AGENT_HOST_${provider.toUpperCase()}`] = executable;
   }
   const nativeServer = createServer((request, response) => {
-    if (request.url !== '/global/health') { response.writeHead(404); response.end(); return; }
+    if (request.url !== '/api/info') { response.writeHead(404); response.end(); return; }
     response.writeHead(200, { 'content-type': 'application/json' });
-    response.end(JSON.stringify({ healthy: true, version: '1.18.31' }));
+    response.end(JSON.stringify({ version: '2.0.25', pid: process.pid, urls: [], paths: { tmp: directory } }));
   });
   await new Promise(resolve => nativeServer.listen(0, '127.0.0.1', resolve));
   t.after(async () => { nativeServer.closeAllConnections(); await new Promise(resolve => nativeServer.close(resolve)); });

@@ -4,6 +4,38 @@ import { createReplicaState } from '../replica/reducer.js';
 import type { AgentReplicaState } from '../replica/types.js';
 import { render, rerender } from '../test/setup.js';
 import { AgentComposer } from './AgentComposer.js';
+import { remoteSessionState } from '../client/session-state.js';
+
+it.each([
+  ['connecting', 'Opening session'],
+  ['catching_up', 'Synchronizing'],
+  ['disconnected', 'Reconnecting'],
+] as const)('keeps %s visible while a local draft has no native binding', async (connection, expected) => {
+  const state: AgentReplicaState = { ...createReplicaState(), agent: {
+    id: 'cached', providerId: 'test', createdAt: '2026-09-20T00:00:00Z', updatedAt: '2026-09-20T00:00:00Z', status: 'running',
+    activeTurn: { turnId: 'old-turn', startedAt: '2026-09-20T00:00:00Z' },
+    capabilities: { history: true, sendMessage: true, steer: true, cancel: true, readResource: false },
+    pendingInteractions: [], runtimeInfo: { providerId: 'test', status: 'running' },
+  } };
+  const send = vi.fn(), cancel = vi.fn();
+  for (const cached of [state, undefined]) {
+    const container = await render(<AgentComposer state={cached} sessionState={remoteSessionState(undefined, connection)} draftOnly draft="Local draft" onSendMessage={send} onCancel={cancel} />);
+    expect(container.querySelector('[data-testid="agent-activity-label"]')?.textContent).toBe(expected);
+    expect(container.querySelector('[data-testid="turn-elapsed"]')).toBeNull();
+    expect(container.querySelector<HTMLTextAreaElement>('[data-testid="prompt-input"]')).toMatchObject({ value: 'Local draft', disabled: false });
+    const submit = container.querySelector<HTMLButtonElement>('[data-testid="prompt-submit"]')!;
+    expect(submit.disabled).toBe(true);
+    await act(async () => submit.click());
+    expect(send).not.toHaveBeenCalled(); expect(cancel).not.toHaveBeenCalled();
+  }
+});
+
+it.each([false, true])('does not present Ready for an unbound draft while access checking is %s', async controlChecking => {
+  const session = { ...remoteSessionState(undefined, 'ready'), controlChecking };
+  const container = await render(<AgentComposer draftOnly sessionState={session} disabledLabel="Ready" draft="Local draft" />);
+  expect(container.querySelector('[data-testid="agent-activity-label"]')?.textContent).toBe('Opening session');
+  expect(container.querySelector<HTMLButtonElement>('[data-testid="prompt-submit"]')!.disabled).toBe(true);
+});
 
 it('allows cached-session drafts while synchronizing but waits for readiness to send or execute commands', async () => {
   const state: AgentReplicaState = { ...createReplicaState(), timeline: { ...createReplicaState().timeline, initialized: true }, agent: {
@@ -26,8 +58,8 @@ it('allows cached-session drafts while synchronizing but waits for readiness to 
   const enter = () => act(async () => input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true })));
   expect(input.disabled).toBe(false);
   expect(input.placeholder).toBe('Message…');
-  expect(container.querySelector('[data-testid="agent-activity"]')?.getAttribute('data-active')).toBe('false');
-  expect(container.querySelector('[data-testid="agent-activity-label"]')?.textContent).toBe('Waiting for session');
+  expect(container.querySelector('[data-testid="agent-activity"]')?.getAttribute('data-active')).toBe('true');
+  expect(container.querySelector('[data-testid="agent-activity-label"]')?.textContent).toBe('Opening session');
   await type('Draft during synchronization');
   expect(draft).toHaveBeenLastCalledWith('Draft during synchronization');
   expect(container.querySelector<HTMLButtonElement>('[data-testid="prompt-submit"]')!.disabled).toBe(false);

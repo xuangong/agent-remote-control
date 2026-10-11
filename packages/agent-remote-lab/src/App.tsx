@@ -330,7 +330,7 @@ function AppContent({
     },
     failed: (error, selection, retrying = false) => {
       setSessionNotice(sessionConnectionFailure(error, retrying));
-      if (error instanceof DirectoryError && error.nativeOwner) setNativeTakeover({ item: selection, owner: error.nativeOwner });
+      if (error instanceof DirectoryError && error.nativeOwner) setNativeTakeover({ item: selection, owner: error.nativeOwner, message: error.message });
     },
   });
   const compositionProtected = succession.active && succession.discovering;
@@ -356,7 +356,7 @@ function AppContent({
   const [attachingAgentId, setAttachingAgentId] = useState<string>();
   const [transitioning, setTransitioning] = useState(false);
   const [, refreshOpeningHandoff] = useState(0);
-  const [nativeTakeover, setNativeTakeover] = useState<{item: Pick<SessionSummary, 'providerId' | 'nativeSessionId' | 'title'> & {hostId?: string}; owner: NativeSessionOwner}>();
+  const [nativeTakeover, setNativeTakeover] = useState<{item: Pick<SessionSummary, 'providerId' | 'nativeSessionId' | 'title'> & {hostId?: string}; owner: NativeSessionOwner; message: string}>();
   const openingHandoff = nativeTakeover ? sessionHandoffScope(transport).forTarget(sessionKey({ ...nativeTakeover.item, hostId: nativeTakeover.item.hostId ?? selectedHost.id })) : undefined;
   useEffect(() => openingHandoff?.subscribe(() => refreshOpeningHandoff(version => version + 1)), [openingHandoff]);
   const [sessionNotice, setSessionNotice] = useState<SessionConnectionMessage>();
@@ -637,7 +637,8 @@ function AppContent({
     }
     pendingViewRestore.current = primarySlot && restoreView ? { scope: baseUrl, transport, slotId: primarySlot, read: restoreView } : undefined;
     setDetachedSideRoot(undefined);
-    setNativeTakeover(undefined); setActiveView('workbench'); setFailure(undefined); setSessionNotice(undefined);
+    if (!takeOver && !onRestoring) setNativeTakeover(undefined);
+    setActiveView('workbench'); setFailure(undefined); setSessionNotice(undefined);
     closeContext();
     if (compactLayoutRef.current) setInspectorOpen(false);
     try {
@@ -645,7 +646,7 @@ function AppContent({
       return result;
     } catch (error) {
       setSessionNotice(sessionConnectionFailure(error, false));
-      if (error instanceof DirectoryError && error.nativeOwner) setNativeTakeover({ item: selection, owner: error.nativeOwner });
+      if (error instanceof DirectoryError && error.nativeOwner) setNativeTakeover({ item: selection, owner: error.nativeOwner, message: error.message });
       if (takeOver || onRestoring) throw error;
       return false;
     }
@@ -1762,7 +1763,7 @@ function AppContent({
         hidden={activeView !== 'workbench'}
       >
         {sessionNotice && !nativeTakeover && !(compactLayout && contextOpen) ? <SessionConnectionNotice notice={sessionNotice} /> : null}
-        {succession.error ? <p role="alert">{succession.error}<button type="button" onClick={succession.retry}>{succession.result?.status === 'applied' ? 'Retry session' : 'Retry synchronization'}</button></p> : null}
+        {succession.error && succession.error !== nativeTakeover?.message ? <p role="alert">{succession.error}{!nativeTakeover ? <button type="button" onClick={succession.retry}>{succession.result?.status === 'applied' ? 'Retry session' : 'Retry synchronization'}</button> : null}</p> : null}
         {promptMigrations.notice}
         {uncertainMutation ? <p className="lab-control-note" role="alert">The previous action may have completed before the connection was interrupted. Its result is unknown. It will not be replayed automatically.</p> : null}
         <ConversationSplit compact={compactLayout} start={stackRange.start} end={stackRange.end}>
@@ -1798,6 +1799,7 @@ function AppContent({
                 const opened = await openSession(nativeTakeover.item, progress.checkOnly ? undefined : nativeTakeover.owner.generation, progress.onRestoring);
                 if (!opened) throw new Error('Session navigation changed before native restoration was confirmed.');
               }, options);
+              setNativeTakeover(current => current === nativeTakeover ? undefined : current);
             }} /> : undefined}
           composerContext={boundFork ? <ForkReference fork={boundFork} onOpen={revealSession} onUnlink={unlinkSide} onRecover={record => refreshRelations.reconcile(record)} /> : undefined}
           composerNotice={<ForkEntries forks={forkStore.linked().filter((fork) => fork.target && (sideNavigationSource(fork).agentId === activeAgentId || (activeOpened && sessionKey(sideNavigationSource(fork)) === sessionKey(activeOpened))))} selectedChild={stackRoot ? selectedChildKey(viewKey(stackRoot)) : undefined} onOpen={(fork) => void openFork(fork)} onUnlink={unlinkSide} onRecover={record => refreshRelations.reconcile(record)} />}

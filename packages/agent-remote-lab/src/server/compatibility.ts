@@ -149,9 +149,9 @@ function parseProviderCompatibility(value: unknown): ProviderCompatibility {
     || value.sdk.version !== '1.0.11')) {
     throw new Error('Agent Remote compatibility manifest must pin Copilot CLI 1.0.83 and @github/copilot-sdk 1.0.11.');
   }
-  if (value.providerId === 'opencode' && (value.native.name !== 'opencode' || value.native.version !== '1.18.18'
-    || value.native.revision !== null || !isRecord(value.sdk) || value.sdk.name !== '@opencode-ai/sdk' || value.sdk.version !== '1.18.31')) {
-    throw new Error('Agent Remote compatibility manifest must pin OpenCode 1.18.18 and @opencode-ai/sdk 1.18.31.');
+  if (value.providerId === 'opencode' && (value.native.name !== 'opencode' || value.native.version !== '2.0.25'
+    || value.native.revision !== null || !isRecord(value.sdk) || value.sdk.name !== '@opencode/client' || value.sdk.version !== '2.0.25')) {
+    throw new Error('Agent Remote compatibility manifest must pin OpenCode 2.0.25 and @opencode/client 2.0.25.');
   }
   let sdk: ProviderCompatibility['sdk'];
   if (value.sdk !== undefined) {

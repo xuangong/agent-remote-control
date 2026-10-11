@@ -67,7 +67,7 @@ it('holds a message through a real channel reconnect and never replays an unconf
     const [connection, setConnection] = useState<RemoteSessionStatus>('idle');
     useEffect(() => client.subscribeStatus(setConnection), []);
     const state = useSyncExternalStore(callback => replica.subscribe(callback), () => replica.getState());
-    return <AgentComposer state={state} disabled={connection !== 'ready'} recovering={connection !== 'idle' && connection !== 'ready'}
+    return <AgentComposer state={state} sessionState={client.getSessionState()} disabled={connection !== 'ready'} recovering={connection !== 'idle' && connection !== 'ready'}
       onSendMessage={async text => { await client.sendMessage(text); }} />;
   }
   const container = await render(<Harness />);
@@ -80,10 +80,13 @@ it('holds a message through a real channel reconnect and never replays an unconf
   try {
     await act(async () => client.start());
     await until(() => expect(status, JSON.stringify(replica.getState().diagnostics)).toBe('ready'));
+    expect(container.querySelector('[data-testid="agent-activity-label"]')?.textContent).toBe('Ready');
     blockRecovery = true;
     await act(async () => currentSocket!.terminate());
     await until(() => expect(releaseRecovery).toBeDefined());
     expect(status).toBe('catching_up');
+    expect(container.querySelector('[data-testid="agent-activity-label"]')?.textContent).toBe('Synchronizing');
+    expect(container.querySelector('[data-testid="agent-activity"]')?.getAttribute('data-active')).toBe('true');
     await act(async () => {
       const input = container.querySelector('textarea')!;
       Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!.call(input, 'Across the reconnect');
@@ -101,6 +104,7 @@ it('holds a message through a real channel reconnect and never replays an unconf
     await act(async () => releaseRecovery!());
     await until(() => expect(replica.getState().outgoingMessages?.[0]?.status).toBe('unconfirmed'));
     await until(() => expect(status, JSON.stringify(replica.getState().diagnostics)).toBe('ready'));
+    expect(container.querySelector('[data-testid="agent-activity-label"]')?.textContent).toBe('Ready');
     expect(sent).toHaveLength(1);
     expect(sent[0]!.payload.text).toBe('Across the reconnect');
     expect(container.querySelector('[data-testid="pending-send"]')?.getAttribute('data-state')).toBe('error');

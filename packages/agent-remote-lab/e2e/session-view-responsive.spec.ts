@@ -1,6 +1,81 @@
 import { expect, test, type Locator } from '@playwright/test';
 import { activateComposerAction, revealComposerAction } from './composer-actions';
 
+test('connection status remains visible during recovery and hides when ready in a narrow Session View', async ({ page }, testInfo) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto('/e2e/fixtures/session-view-responsive.html?idle&toolbar');
+  const view = page.locator('[data-placement="primary"]');
+  const status = view.getByTestId('agent-activity-label');
+  for (const width of [360, 320]) {
+    await page.getByRole('spinbutton', { name: 'View width' }).fill(String(width));
+    for (const [connection, label] of [['connecting', 'Opening session'], ['catching_up', 'Synchronizing'], ['disconnected', 'Reconnecting'], ['ready', 'Ready']] as const) {
+      await page.getByRole('combobox', { name: 'Session connection' }).selectOption(connection);
+      await expect(status).toHaveText(label);
+      if (connection === 'ready') await expect(status).toBeHidden();
+      else {
+        await expect(status).toBeVisible();
+        const frame = (await view.boundingBox())!, indicator = (await status.boundingBox())!;
+        expect(indicator.x).toBeGreaterThanOrEqual(frame.x);
+        expect(indicator.x + indicator.width).toBeLessThanOrEqual(frame.x + frame.width);
+      }
+      await expect(view.getByTestId('cancel-submit')).toBeHidden();
+      if (connection === 'connecting' || connection === 'ready') await view.screenshot({ path: testInfo.outputPath(`${width}-${connection}.png`) });
+    }
+  }
+});
+
+test('cached and empty draft views show recovery without reviving old activity or native controls', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  for (const query of ['draftOnly&toolbar', 'draftOnly&toolbar&noSnapshot']) {
+    await page.goto(`/e2e/fixtures/session-view-responsive.html?${query}`);
+    await page.getByRole('spinbutton', { name: 'View width' }).fill('360');
+    const view = page.locator('[data-placement="primary"]');
+    for (const [connection, label] of [['connecting', 'Opening session'], ['catching_up', 'Synchronizing'], ['disconnected', 'Reconnecting'], ['ready', 'Opening session']] as const) {
+      await page.getByRole('combobox', { name: 'Session connection' }).selectOption(connection);
+      await expect(view.getByTestId('agent-activity-label')).toHaveText(label);
+      await expect(view.getByTestId('agent-activity-label')).toBeVisible();
+      await expect(view.getByTestId('turn-elapsed')).toHaveCount(0);
+      await expect(view.getByTestId('cancel-submit')).toBeHidden();
+      await expect(view.getByTestId('prompt-submit')).toBeDisabled();
+      await expect(view.getByTestId('prompt-input')).toBeEditable();
+    }
+  }
+});
+
+test('native takeover stays reachable before a snapshot in narrow Session Views', async ({ page }, testInfo) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  const view = page.locator('[data-placement="primary"]');
+  for (const width of [390, 320]) {
+    await page.goto('/e2e/fixtures/session-view-responsive.html?draftOnly&toolbar&noSnapshot&nativeOwner');
+    await page.getByRole('spinbutton', { name: 'View width' }).fill(String(width));
+    const button = view.getByRole('button', { name: 'Interrupt and take control', exact: true });
+    await expect(button).toBeVisible();
+    await expect(button).toBeEnabled();
+    const description = view.getByText('Taking over interrupts its running work.', { exact: true });
+    await expect(description).toBeVisible();
+    await expect(view.getByTestId('prompt-submit')).toHaveCount(0);
+    await expect(view.getByTestId('prompt-input')).toHaveValue('A draft kept while the view resizes');
+    await expect(view.getByTestId('prompt-input')).not.toBeEditable();
+    const frame = (await view.boundingBox())!;
+    for (const element of [button, description]) {
+      const bounds = (await element.boundingBox())!;
+      expect(bounds.x).toBeGreaterThanOrEqual(frame.x);
+      expect(bounds.x + bounds.width).toBeLessThanOrEqual(frame.x + frame.width);
+    }
+    await view.screenshot({ path: testInfo.outputPath(`${width}-native-takeover.png`) });
+    await button.click();
+    await expect(view.getByRole('button', { name: 'Taking control…', exact: true })).toBeDisabled();
+    await page.getByRole('button', { name: 'Fail fixture takeover', exact: true }).click();
+    await expect(view.getByRole('alert')).toHaveText('Fixture native session remains owned.');
+    await expect(button).toBeEnabled();
+    await expect(button).toHaveText('Retry');
+    await view.screenshot({ path: testInfo.outputPath(`${width}-native-takeover-error.png`) });
+    await page.getByRole('combobox', { name: 'Session connection' }).selectOption('disconnected');
+    await expect(button).toBeDisabled();
+    await page.getByRole('combobox', { name: 'Session connection' }).selectOption('ready');
+  }
+});
+
 async function composerGeometry(view: Locator) {
   return view.evaluate(element => {
     const frame = element.querySelector('.lab-session-view')!.getBoundingClientRect();

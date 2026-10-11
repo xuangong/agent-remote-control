@@ -423,7 +423,7 @@ export function useSessionSuccession(options: SuccessionOptions) {
       if (takeover && current()) {
         takeover.restored?.();
         await latest.current.connections.takeControlAfterNativeResume(session.agentId);
-        if (runtime.takeover === takeover) runtime.takeover = undefined;
+        if (runtime.takeover === takeover) { runtime.takeover = undefined; publish(); }
       }
     } catch (error) {
       navigationLease?.release();
@@ -431,7 +431,7 @@ export function useSessionSuccession(options: SuccessionOptions) {
         latest.current.failed(error, { hostId: desired.target.hostId, ...desired.target.native, title: desired.title }); publish(); }
     }
   }
-  async function discover(): Promise<void> {
+  async function discover(attachExplicit = false): Promise<void> {
     if (!live()) return;
     const sequence = ++runtime.sequence, authority = runtime.authority;
     runtime.metadata?.abort(); const controller = new AbortController(); runtime.metadata = controller;
@@ -553,7 +553,7 @@ export function useSessionSuccession(options: SuccessionOptions) {
       }
       if (runtime.desired && runtime.result?.status === 'applied') {
         runtime.layoutRevision++;
-        void attachDesired();
+        void attachDesired(attachExplicit);
       }
     } catch (error) {
       if (current()) {
@@ -597,7 +597,8 @@ export function useSessionSuccession(options: SuccessionOptions) {
       } finally { if (runtime.navigation === request) runtime.navigation = undefined; }
     }
     runtime.attached = attached;
-    runtime.takeover = takeOver || onRestoring ? { generation: takeOver, restored: onRestoring } : undefined;
+    const takeover = takeOver || onRestoring ? { generation: takeOver, restored: onRestoring } : undefined;
+    runtime.takeover = takeover;
     if (slotId && (intent === 'history' || !explicitSlot(selection, slotId))) {
       runtime.sequence++; runtime.metadata?.abort(); retireBinding(); runtime.desired = undefined; runtime.selectedSlot = slotId;
       runtime.selection = selection; runtime.intent = undefined; runtime.active = true; runtime.discovering = false;
@@ -621,7 +622,10 @@ export function useSessionSuccession(options: SuccessionOptions) {
       retireBinding(selection); runtime.desired = undefined; runtime.result = undefined; runtime.error = undefined;
     }
     runtime.active = true; publish();
-    await discover();
+    await discover(!!takeover);
+    if (takeover) await confirmRestoredBinding(target => sessionKey(target) === sessionKey(selection), {
+      mustRemain: true, settled: () => runtime.takeover !== takeover,
+    });
     return runtime.active;
   }
   async function refreshCommitted(operationId: string): Promise<void> {
@@ -655,7 +659,8 @@ export function useSessionSuccession(options: SuccessionOptions) {
     await confirmRestoredBinding(target => runtime.desired?.roleKey === roleKey || sessionKey(target) === sessionKey(source)
       || sessionKey(target) === sessionKey({ hostId: source.hostId, ...result.role.current }));
   }
-  function confirmRestoredBinding(related: (target: Pick<SessionEntry, 'hostId' | 'providerId' | 'nativeSessionId'>) => boolean): Promise<void> {
+  function confirmRestoredBinding(related: (target: Pick<SessionEntry, 'hostId' | 'providerId' | 'nativeSessionId'>) => boolean,
+    options: { mustRemain?: boolean; settled?(): boolean } = {}): Promise<void> {
     return new Promise<void>((resolve, reject) => {
       const finish = (error?: Error) => {
         clearTimeout(deadline); runtime.refreshObservers.delete(check);
@@ -665,11 +670,11 @@ export function useSessionSuccession(options: SuccessionOptions) {
         if (!live()) { finish(new Error('Workspace access changed while refreshing this Handoff.')); return; }
         const desired = runtime.desired;
         const target = desired && { hostId: desired.target.hostId, ...desired.target.native };
-        if (!target || !related(target)) { finish(); return; }
+        if (!target || !related(target)) { finish(options.mustRemain ? new Error('Session navigation changed before native restoration was confirmed.') : undefined); return; }
         if (runtime.discovering) return;
         if (runtime.error) { finish(new Error(runtime.error)); return; }
         if (runtime.result?.status !== 'applied') { finish(new Error('The conversation layout still needs synchronization.')); return; }
-        if (runtime.binding?.isCurrent() && runtime.binding.isSynchronized() && sessionKey(runtime.binding.session) === sessionKey(target)) finish();
+        if (runtime.binding?.isCurrent() && runtime.binding.isSynchronized() && sessionKey(runtime.binding.session) === sessionKey(target) && (options.settled?.() ?? true)) finish();
       };
       const deadline = setTimeout(() => finish(new Error('The current native session has not been confirmed. Retry the session connection.')), 16000);
       runtime.refreshObservers.add(check); check();

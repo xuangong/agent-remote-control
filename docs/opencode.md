@@ -1,6 +1,6 @@
 # OpenCode shared provider
 
-OpenCode uses the official JavaScript SDK over HTTP and SSE. Its native server owns sessions and running tasks; Controller and ARDB are clients. Controller can manage the local server's lifecycle without changing this shared-session model. The normal product Session View, Favorites, Track and native session rename are reused.
+OpenCode 2.x uses the official `@opencode/client` Promise SDK over HTTP and SSE. The minimum supported native version is 2.0.25; 1.x servers use a different API and are rejected with an explicit upgrade reason. Its native server owns sessions and running tasks; Controller and ARDB are clients. Controller can manage the local server's lifecycle without changing this shared-session model. The normal product Session View, Favorites, Track and native session rename are reused.
 
 ## Use the managed local server
 
@@ -54,15 +54,15 @@ export AGENT_HOST_OPENCODE_AUTO_START=1
 
 `AGENT_HOST_OPENCODE_AUTO_START=0` disables automatic startup; an already running healthy server can still be discovered. This setting is separate from website provider disable and the persistent `server stop` preference. Automatic management never binds a public network address.
 
-Controller only registers a healthy, supported server (1.18.18 or newer). A port conflict, authentication failure, unsupported version or failed startup produces a diagnostic reason. The requested endpoint is fixed: Controller never accepts OpenCode's fallback to another port, because that would change the native session namespace. It only terminates a failed startup that it owns, never an unrelated listener. Controller's existing workspace admission policy still applies to each native session's actual directory, including direct-ID opens.
+Controller only registers a healthy, supported server (2.x, 2.0.25 or newer). A port conflict, authentication failure, unsupported version or failed startup produces a diagnostic reason. The requested endpoint is fixed: Controller never accepts OpenCode's fallback to another port, because that would change the native session namespace. It only terminates a failed startup that it owns, never an unrelated listener. Controller's existing workspace admission policy still applies to each native session's actual directory, including direct-ID opens.
 
 To keep full external lifecycle ownership even after a server exit, set `AGENT_HOST_OPENCODE_AUTO_START=0` in Controller's local configuration. Start and supervise OpenCode yourself and set the matching Controller URL and credentials:
 
 ```sh
-OPENCODE_SERVER_PASSWORD='choose-a-local-password' opencode serve --hostname 127.0.0.1 --port 4096
+OPENCODE_PASSWORD='choose-a-local-password' opencode serve --hostname 127.0.0.1 --port 4096
 ```
 
-In PowerShell, set `$env:OPENCODE_SERVER_PASSWORD = 'choose-a-local-password'` before running the same `opencode serve` command. Keep the service running under your chosen supervisor.
+In PowerShell, set `$env:OPENCODE_PASSWORD = 'choose-a-local-password'` before running the same `opencode serve` command. Keep the service running under your chosen supervisor.
 
 OpenCode is a shared runtime. As with Codex shared, its native execution policy is trusted by default. `AGENT_HOST_OPENCODE_TRUST_SHARED=0` requests the Host's restricted policy instead. An external server cannot enforce that additional sandbox, so a restricted registration is rejected explicitly; the Controller does not claim restrictions it cannot enforce. Explicit full-control Host configuration can also authorize native execution.
 
@@ -72,17 +72,17 @@ OpenCode is a shared runtime. As with Codex shared, its native execution policy 
 agent-remote-controller opencode resume <native-session-id>
 ```
 
-This wrapper reads the Controller's configured endpoint and credentials, including generated managed-server credentials, and runs native `opencode attach`. `resume --last` attaches with native `--continue`. Running the wrapper without arguments opens the attached TUI for the current directory.
+This wrapper reads the Controller's configured endpoint and credentials, including generated managed-server credentials, and runs native `opencode --server <endpoint> --session <id>`. `resume --last` attaches with native `--continue`. Running the wrapper without arguments opens the attached TUI for the current directory.
 
 Direct native usage also works when you provide the configured server credentials:
 
 ```sh
-OPENCODE_SERVER_PASSWORD='choose-a-local-password' opencode attach http://127.0.0.1:4096 --session <native-session-id>
+OPENCODE_PASSWORD='choose-a-local-password' opencode --server http://127.0.0.1:4096 --session <native-session-id>
 ```
 
 A separate `opencode`/`opencode serve` process is a different runtime. Attaching to the same server is necessary to share live execution. There is no Take control lease: browser and native clients can observe and operate the same session. Native arbitration applies to simultaneous operations.
 
-Closing a view, releasing an idle subscription, stopping ARDB or upgrading Controller does not abort native work. Explicit Cancel calls native abort. Stopping the OpenCode server itself is a separate administrative action.
+Closing a view, releasing an idle subscription, stopping ARDB or upgrading Controller does not abort native work. Explicit Cancel calls the native session interrupt endpoint. Stopping the OpenCode server itself is a separate administrative action.
 
 ## ARDB
 
@@ -98,48 +98,37 @@ Native callback plugin installation remains explicit. Automatic server managemen
 
 ## Capabilities and recovery
 
-- Native history, text/reasoning, shell exit status and duration, file diffs, output images, todos and compaction map to normalized events. Initial history is bounded; older pages use native cursors. Ordinary text deltas and tool lifecycle updates preserve the Relay epoch, including after todos and answered interactions.
+- Native history, text/reasoning, shell exit status and duration, file diffs, output images and compaction map to normalized events. Initial history is bounded; older pages use native cursors. Ordinary text deltas and tool lifecycle updates preserve the Relay epoch, including after answered interactions.
 - Native session token/cost aggregates are used when supplied. Otherwise tokens describe the latest useful model step; paginated history is not summed into an invented lifetime total. Context capacity comes from the native model catalog.
-- Permissions and questions are read from native pending lists and reconciled after reconnect, including requests answered by another client. Plan exit remains the native question/answer flow, not a fabricated plan-approval request.
+- Permissions and forms are read from native pending lists and reconciled after reconnect, including requests answered by another client. Typed forms, custom question choices and single external actions reuse public interactions. Native forms with conditional/hidden fields or other constraints the public contract cannot represent stay pending with an explicit notice; complete those in a native client. The adapter never removes constraints to make a form appear supported. Saved permission approval is a project-wide persistent policy, not a session-only grant.
 - Image input and output use bounded adapter resources. Native local output files are readable only for a loopback server and only through validated resource locators; remote URLs and arbitrary paths are not fetched.
 - Model, agent, model-specific variant and permission settings persist in the native session. External switch events refresh these settings. Variants keep their native meaning; they are not universally equivalent to Codex reasoning effort.
-- Native skills, custom commands and MCP prompt commands use the server catalog and refreshed documentation resources. Manual compact calls native summarization. Commands wait until the native turn and pending interactions finish. Immediate input and steer can join active native work without aborting it; a separate next-turn queue is not advertised.
+- Native commands and skills use separate catalogs. Skill documentation is refreshed from native content and skill invocation sends the native skill identity with the prompt. The v2 command catalog does not identify MCP origin or expose command templates, so the adapter does not invent that metadata. Manual compact uses the native compaction inbox and the session model selection. Commands wait until native turn and pending interactions finish. Immediate input and steer use the same v2 session inbox and can join native execution without aborting it.
 - Native titles use existing Host operation deduplication and cross-browser broadcasts. Unchanged titles are not written again.
 - Native prompt editing forks strictly before the selected user message and uses the existing favorite/Track replacement flow. It does not revert the original workspace. Active turns, pending interactions, child prompt edits and unresolved native reverts are rejected.
 - Parent runtime information includes direct native children, current observed status and native task provenance where available. Child navigation validates the native parent identity and canonical workspace before opening.
-- Transport recovery reconciles messages and pending state without replaying uncertain input. Legacy immediate/steer input retains the same native history, including during model and tool execution. Unknown admissions wait for matching native evidence and are never automatically replayed. Host callback tools and dynamic Ask/source reads require [explicit native plugin setup](opencode-callbacks.md); an unconfigured server remains usable for ordinary sessions. The newer durable runner has an independent history and cannot safely replace only the sending endpoint. Ordinary MCP callbacks do not carry trusted native session identity for Ask authorization. See [verified native boundaries](opencode-native-boundaries.md).
+- Transport recovery reconciles v2 messages, native execution state, inbox admissions and pending interactions without replaying uncertain input. Unknown admissions wait for matching native inbox/message evidence and are never automatically replayed. Host callback tools and dynamic Ask/source reads require [explicit native plugin setup](opencode-callbacks.md); an unconfigured server remains usable for ordinary sessions. Ordinary MCP callbacks do not carry trusted native session identity for Ask authorization. Native history and sending use the same v2 execution path.
 
 For a repeatable live Session View, two-client observation, recording and replay workflow, see [OpenCode ARDB development](opencode-debugging.md).
 
 ## Session succession
 
-OpenCode supports same-Host, same-directory handoff through `/handoff` in the
-primary Session View composer. Use `/handoff opencode` to request OpenCode as the
-target, then confirm **Hand off** in the provider chooser. Progress appears above
-the composer. This capability is narrower than ordinary server support:
-it requires the reviewed 1.18.x contract from 1.18.18, background subagents disabled,
-current agent/model/variant selections, native observation and the explicitly
-connected [callback plugin](opencode-callbacks.md) for source references. Unsupported
-or incomplete facts produce an eligibility reason instead of creating a candidate.
+Handoff is explicitly unavailable for the current OpenCode 2.x adapter. Ordinary
+discovery, shared sessions, native forks and callbacks remain supported. OpenCode's
+default public history can establish ordinary input execution but cannot prove
+the complete historical system-instruction selection required by ARC's prepared
+first-input contract. Its experimental event log is not persisted by default.
 
-The Host accepts Handoff only while idle with no queued input, pending interaction,
-active child work or unsettled ARC mutation. Preparation creates exactly one empty
-successor with validated native selections; prepare/commit send no model input.
-The first real input receives normalized history once and must use plain text
-with immediate delivery; attachments and queued delivery wait until that input
-is confirmed. Independent native clients remain outside ARC's mutation exclusion.
-This is a role transition, not native
-process takeover or workspace rollback.
-
-The adapter uses the configured trusted service namespace and fresh native facts.
-An exact user record proves materialization; only its exact non-summary assistant
-child proves execution started. Missing results retain the original candidate,
-input and operation and are never automatically replayed. See the complete
-[recovery and upgrade contract](current/agent-remote/session-succession-recovery.md).
+The adapter reports this capability gap before creating a Handoff candidate or
+dispatching a prepared input. Installing the callback plugin does not remove the
+gap. A reviewed additional native recording mechanism is required before enabling
+Handoff; the adapter never guesses a positive result from current settings or
+automatically resends uncertain input. See [native boundaries](opencode-native-boundaries.md)
+and the [recovery contract](current/agent-remote/session-succession-recovery.md).
 
 ## Validation
 
-The integration pins `@opencode-ai/sdk` 1.18.31 and is native-smoke tested against OpenCode 1.18.18. It uses established session/global-event endpoints and the mounted experimental global session list for discovery across projects. Generated durable Session v2 APIs are not assumed interchangeable with this execution path.
+The integration pins `@opencode/client` 2.0.25. Native identity is checked through `/api/info`; discovery uses `/api/session`, history uses the cursor-based message list, and live observation uses `/api/event`. Session model/agent changes use native switch operations and settings settle only after authoritative readback. The adapter does not retain a parallel 1.x execution path. The isolated native suite below targets the actual 2.0.25 executable; passing HTTP fixtures alone is not evidence that the native suite passed.
 
 ```sh
 pnpm --filter @orchardworks/agent-remote-debugger... build

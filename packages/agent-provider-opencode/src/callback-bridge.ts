@@ -56,10 +56,6 @@ export class OpenCodeCallbackBridge {
     } catch (error) { await this.shutdown(); throw error; }
   }
   isAvailable(directory: string): boolean { return Date.now() - (this.seen.get(directory) ?? 0) < 6000; }
-  captureBinding(nativeSessionId: string, directory: string): () => boolean {
-    const binding = this.sessions.get(nativeSessionId);
-    return () => !!binding && !this.closed && !binding.controller.signal.aborted && this.sessions.get(nativeSessionId) === binding && this.isAvailable(directory);
-  }
   async waitForPlugin(directory: string, timeoutMs = 4000): Promise<boolean> {
     const deadline = Date.now() + timeoutMs;
     while (!this.closed && Date.now() < deadline) { if (this.isAvailable(directory)) return true; await delay(50); }

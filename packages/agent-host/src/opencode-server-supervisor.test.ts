@@ -35,7 +35,7 @@ async function fixture(mode = 'ready') {
     const mode = process.env.TEST_NATIVE_MODE;
     const args = process.argv.slice(2);
     const descendant = mode === 'descendant' ? spawn(process.execPath,['-e',"process.on('SIGTERM',()=>{});setInterval(()=>{},1000)"],{stdio:'ignore'}) : undefined;
-    writeFileSync(process.env.TEST_NATIVE_REPORT, JSON.stringify({pid:process.pid,descendant:descendant?.pid,args,secret:process.env.AGENT_HOST_REMOTE_KEY,password:process.env.OPENCODE_SERVER_PASSWORD}));
+    writeFileSync(process.env.TEST_NATIVE_REPORT, JSON.stringify({pid:process.pid,descendant:descendant?.pid,args,secret:process.env.AGENT_HOST_REMOTE_KEY,password:process.env.OPENCODE_PASSWORD}));
     if (mode === 'exit') { process.stderr.write('private-native-password'); process.exit(7); }
     if (mode === 'no-listening') setInterval(()=>{},1000);
     else {
@@ -43,13 +43,14 @@ async function fixture(mode = 'ready') {
       const port = Number(args[args.indexOf('--port')+1]);
       const server = createServer((req,res)=>{
         if (req.headers.authorization !== 'Basic '+Buffer.from('opencode:private-native-password').toString('base64')) {res.writeHead(401).end();return;}
+        if (req.url !== '/api/info') {res.writeHead(404).end();return;}
         res.setHeader('content-type','application/json');
-        res.end(JSON.stringify({healthy:true,version:mode === 'old-version' ? '1.18.17' : '1.18.18'}));
+        res.end(JSON.stringify({version:mode === 'old-version' ? '2.0.24' : '2.0.25',pid:mode === 'wrong-pid' ? process.pid+1 : process.pid,urls:[],paths:mode === 'invalid-info' ? {} : {tmp:'/tmp'}}));
       });
       server.on('error',()=>process.exit(12));
       server.listen(mode === 'different-port' ? 0 : port,hostname,()=> {
         if (mode === 'noise') {process.stderr.write('private-native-password'.repeat(10000));process.stdout.write('x'.repeat(100000)+'\\n');}
-        process.stdout.write('opencode server listening on http://'+hostname+':'+server.address().port+'\\n');
+        process.stdout.write('server listening on http://'+hostname+':'+server.address().port+'\\n');
       });
       if (mode === 'ignore-term') process.on('SIGTERM',()=>{});
     }
@@ -90,24 +91,24 @@ it('owns a real authenticated native server and stops it only through its privat
   const f = await fixture();
   const outcome = f.start();
   const owner = await f.owner();
-  expect(owner).toMatchObject({ running: true, pid: process.pid, version: '1.18.18', url: f.url });
+  expect(owner).toMatchObject({ running: true, pid: process.pid, version: '2.0.25', url: f.url });
   expect(owner.nativePid).not.toBe(process.pid);
   expect(owner.generation).toBeTruthy();
   const report = JSON.parse(await readFile(join(f.directory, 'native.json'), 'utf8'));
   expect(report).toMatchObject({ password: 'private-native-password', args: ['serve', '--hostname', '127.0.0.1', '--port', new URL(f.url).port] });
   expect(report.secret).toBeUndefined();
-  const unauthenticated = await fetch(`${f.url}/global/health`, { signal: AbortSignal.timeout(2000) });
+  const unauthenticated = await fetch(`${f.url}/api/info`, { signal: AbortSignal.timeout(2000) });
   expect(unauthenticated.status).toBe(401);
   expect((await control(owner, 'stop', 'wrong-token')).status).toBe(403);
   const status = await (await control(owner)).json();
   expect(status).toEqual(Object.fromEntries(Object.entries(owner).filter(([key]) => key !== 'token')));
   expect(await (await control(owner, 'stop')).json()).toEqual({ running: false });
   expect(await outcome).toEqual({});
-  await expect(fetch(`${f.url}/global/health`, { signal: AbortSignal.timeout(500) })).rejects.toThrow();
+  await expect(fetch(`${f.url}/api/info`, { signal: AbortSignal.timeout(500) })).rejects.toThrow();
   expect(JSON.parse(await readFile(join(f.directory, 'owner.json'), 'utf8')).generation).toBe(owner.generation);
 }, 15000);
 
-it.each(['exit', 'different-port', 'old-version'])('does not publish a server that fails readiness: %s', async mode => {
+it.each(['exit', 'different-port', 'old-version', 'invalid-info', ...(process.platform === 'win32' ? [] : ['wrong-pid'])])('does not publish a server that fails readiness: %s', async mode => {
   const f = await fixture(mode);
   const result = await f.start();
   expect(result.error).toBeInstanceOf(Error);
@@ -185,7 +186,7 @@ it('waits for forced termination when the native process ignores graceful stop',
 
 it('does not treat a healthy unrelated endpoint as evidence that its own child started', async () => {
   const f = await fixture('no-listening');
-  const external = createHttpServer((_request, response) => response.end(JSON.stringify({ healthy: true, version: '1.18.18' })));
+  const external = createHttpServer((_request, response) => response.end(JSON.stringify({ version: '2.0.25', pid: process.pid, urls: [], paths: { tmp: '/tmp' } })));
   cleanup.push(() => new Promise<void>(resolve => external.close(() => resolve())));
   await new Promise<void>(resolve => external.listen(Number(new URL(f.url).port), '127.0.0.1', resolve));
   const outcome = f.start();
@@ -263,7 +264,7 @@ it.skipIf(process.platform === 'win32')('runs the Windows job launcher with the 
   const outcome = f.start();
   const owner = await Promise.race([f.owner(), outcome.then(result => { throw result.error ?? new Error('Supervisor exited before readiness.'); })]);
   const native = JSON.parse(await readFile(join(f.directory, 'native.json'), 'utf8'));
-  expect(native.pid).not.toBe(owner.nativePid);
+  expect(native.pid).toBe(owner.nativePid);
   const launch = JSON.parse(await readFile(launchReport, 'utf8'));
   expect(launch.args.slice(0, 3)).toEqual(['-NoProfile', '-NonInteractive', '-EncodedCommand']);
   expect(launch.script).toContain(`,${process.pid})`);

@@ -1,6 +1,6 @@
 # OpenCode debugger scenario
 
-`node scripts/opencode-debug-scenario.mjs` creates a real OpenCode 1.18.18 server, a real ARDB Live/Replay workspace, and an independent headless Remote client. The only simulated boundary is an OpenAI-compatible HTTP model endpoint. It returns deterministic text and tool requests; OpenCode performs the tools, permission prompts, questions, history persistence, and compaction itself.
+`node scripts/opencode-debug-scenario.mjs` creates a real OpenCode 2.0.25 server, a real ARDB Live/Replay workspace, and an independent headless Remote client. The only simulated boundary is an OpenAI-compatible HTTP model endpoint. It returns deterministic text and tool requests; OpenCode performs the tools, permission prompts, questions, history persistence, and compaction itself.
 
 The fixture uses a temporary Git project and isolated `HOME`/XDG directories. It does not need model credentials or an account. Native OpenCode connects only to the configured local model provider. Existing OpenCode servers and developer projects are not modified. All listeners use available loopback ports.
 
@@ -10,11 +10,11 @@ Build the current workspace, including the ARDB web assets, before running the s
 
 ```sh
 pnpm build
-opencode --version # Expected: 1.18.18
+opencode --version # Expected: opencode v2.0.25
 node scripts/opencode-debug-scenario.mjs --executable /opt/homebrew/bin/opencode
 ```
 
-The default executable is `AGENT_OPENCODE_TEST_EXECUTABLE`, falling back to `opencode` on `PATH`. The script checks the native version before creating the fixture. It imports the already built adapter and debugger; it does not build the workspace. It installs the pinned native plugin SDK into isolated temporary storage for OpenCode plugin initialization. Set `AGENT_OPENCODE_TEST_REGISTRY` to an accessible npm registry, or `AGENT_OPENCODE_TEST_PLUGIN_PREFIX` to a prepared isolated prefix containing that SDK; no global installation or personal npm configuration is changed.
+The default executable is `AGENT_OPENCODE_TEST_EXECUTABLE`, falling back to `opencode` on `PATH`. The script checks the native version before creating the fixture. It imports the already built adapter and debugger; it does not build the workspace. Callback setup writes the bundled OpenCode 2.x plugin into an isolated directory and points the fixture's native configuration to that directory. No plugin package installation or personal npm configuration is required.
 
 ## Inspect the actual Session View
 

@@ -142,13 +142,16 @@ The confirmed scope is product-level succession, with a Session View action and
 progress surface. It is not deployment, generic workflow scheduling, machine
 migration or takeover of an independently running CLI.
 
-Codex, Claude Code, Copilot and OpenCode implement native evidence v2 on their
-existing transports. Same-provider and cross-provider admission requires the
-complete source/target capability and authoritative readiness, not provider names
-or discovery alone. The tested native versions and evidence limits are recorded
-in the provider validation report. OpenCode retains its reviewed 1.18.x
-configuration from 1.18.18, disabled background subagents, current native selections
-and connected observation; source references require its explicit callback plugin.
+At the prior validation baseline, Codex, Claude Code, Copilot and OpenCode
+implemented native evidence v2 on their existing transports. Same-provider and
+cross-provider admission requires the complete source/target capability and
+authoritative readiness, not provider names or discovery alone. The tested native
+versions and evidence limits are recorded in the provider validation report.
+The OpenCode baseline used its reviewed 1.18.x configuration from 1.18.18,
+disabled background subagents, current native selections and connected
+observation; source references required its explicit callback plugin. This is
+historical evidence, not current 2.x capability: OpenCode 2.x Handoff is unavailable
+under the [current contract](../../current/agent-remote/session-succession-recovery.md#supported-configuration-and-product-entry).
 
 The witness's adapter `inputId` is distinct from the native user-record
 `nativeInputId`; positively correlated execution adds `nativeExecutionId`.
@@ -160,13 +163,14 @@ separate. Host retains bounded confirmed handles through existing readback and
 one observation, including after materialization; no second native observer or
 fake initial prompt is introduced.
 
-The OpenCode adapter identifies a trusted service namespace, validates exact
-empty-session selections and preserves the original native result. Exact U
-materialization and its non-summary assistant child R have separate meanings:
-R proves execution started, not task completion. The optional invocation callback
-is local execution plumbing and never enters public operations, fingerprints or
-persisted witnesses. Losing process-local ordinary evidence across restart does
-not become a successful outcome merely because the native session is now idle.
+In that prior OpenCode 1.18.x baseline, the adapter identified a trusted service
+namespace, validated exact empty-session selections and preserved the original
+native result. Exact U materialization and its non-summary assistant child R had
+separate meanings: R proved execution started, not task completion. The optional
+invocation callback was local execution plumbing and never entered public
+operations, fingerprints or persisted witnesses. Losing process-local ordinary
+evidence across restart does not become a successful outcome merely because the
+native session is now idle.
 
 Product Handoff retains one tab-local operation before preparation. Cancellation
 intention remains sticky across failed replies and reload, so a late ready result

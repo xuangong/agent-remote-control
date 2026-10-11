@@ -17,7 +17,7 @@
     "test": "vitest run --testTimeout=10000"
   },
   "dependencies": {
-    "@opencode-ai/sdk": "1.18.31",
+    "@opencode/client": "2.0.25",
     "@orchardworks/agent-provider-sdk": "workspace:*",
     "ajv": "8.20.0",
     "zod": "4.4.3"

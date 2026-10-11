@@ -6,7 +6,7 @@ import { resolveNativeExecutable } from './platform/executables/index.js';
 /** Login services may not inherit paths added by the native CLI installer. */
 export function resolveOpenCodeExecutable(env: NodeJS.ProcessEnv): string {
   if (env.AGENT_HOST_OPENCODE !== undefined || process.platform === 'win32')
-    return resolveNativeExecutable(env.AGENT_HOST_OPENCODE ?? 'opencode', 'opencode-ai/bin/opencode', env);
+    return resolveNativeExecutable(env.AGENT_HOST_OPENCODE ?? 'opencode', '@opencode/cli/bin/opencode.exe', env);
   const home = env.HOME ?? homedir();
   const directories = [...(env.PATH ?? '').split(delimiter).filter(Boolean),
     join(home, '.opencode', 'bin'), join(home, '.local', 'bin'), '/opt/homebrew/bin', '/usr/local/bin', '/usr/bin'];

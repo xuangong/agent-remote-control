@@ -44,11 +44,10 @@ test('real OpenCode CLI runs as an authenticated Controller-managed service inde
       AGENT_HOST_OPENCODE: executable,
       AGENT_HOST_OPENCODE_AUTO_START: '1',
       OPENCODE_DISABLE_AUTO_UPDATE: '1',
-      OPENCODE_DISABLE_DEFAULT_PLUGINS: '1',
-      OPENCODE_CONFIG_CONTENT: JSON.stringify({ autoupdate: false, plugin: [], enabled_providers: [] }),
+            OPENCODE_CONFIG_CONTENT: JSON.stringify({ update: 'disable', plugins: [], providers: {} }),
     });
     const { stdout: nativeVersion } = await execute(executable, ['--version'], { env, cwd, timeout: 5000 });
-    assert.equal(nativeVersion.trim(), '1.18.18', 'This evidence fixture targets OpenCode 1.18.18.');
+    assert.equal(nativeVersion.trim(), 'opencode v2.0.25', 'This evidence fixture targets OpenCode 2.0.25.');
     t.diagnostic(`Native OpenCode ${nativeVersion.trim()}; isolated HOME/XDG; health and lifecycle requests only.`);
     const port = await reservePort();
     const url = `http://127.0.0.1:${port}`;
@@ -78,20 +77,24 @@ test('real OpenCode CLI runs as an authenticated Controller-managed service inde
     const started = await cli(firstState, 'start');
     assert.equal(started.running, true);
     assert.equal(started.ownership, 'managed');
-    assert.equal(started.version, '1.18.18');
+    assert.equal(started.version, '2.0.25');
     assert.ok(Number.isInteger(started.pid) && Number.isInteger(started.nativePid));
     const directory = privateDirectory(firstState, url);
     const config = JSON.parse(await readFile(join(directory, 'config.json'), 'utf8'));
     const owner = JSON.parse(await readFile(join(directory, 'owner.json'), 'utf8'));
     assert.ok(/^[a-f\d]{64}$/.test(config.password), 'A fresh state directory generates a private random server credential.');
     assert.ok(!JSON.stringify(started).includes(config.password), 'CLI status must not expose credentials.');
-    const health = async password => fetch(`${url}/global/health`, {
+    const health = async password => fetch(`${url}/api/info`, {
       headers: password === undefined ? {} : { authorization: `Basic ${Buffer.from(`${config.username}:${password}`).toString('base64')}` },
       signal: AbortSignal.timeout(1500),
     });
     assert.equal((await health()).status, 401);
     assert.equal((await health('incorrect-password')).status, 401);
-    assert.deepEqual(await (await health(config.password)).json(), { healthy: true, version: '1.18.18' });
+    const info = await (await health(config.password)).json();
+    assert.equal(info.version, '2.0.25');
+    assert.equal(info.pid, started.nativePid);
+    assert.ok(Array.isArray(info.urls));
+    assert.equal(typeof info.paths.tmp, 'string');
     const unauthorizedControl = await fetch(`http://127.0.0.1:${owner.managementPort}/control`, {
       method: 'POST', body: JSON.stringify({ action: 'status', token: 'incorrect-token' }), signal: AbortSignal.timeout(1500),
     });

@@ -19,7 +19,7 @@ export async function runOpenCodeCommand(args: string[], stateDir: string, envir
   if (args[0] === 'callbacks') {
     if (args[1] !== 'setup' || args.length !== 3 || !args[2]) throw new Error('Use opencode callbacks setup <private-directory>.');
     const { setupOpenCodeCallbacks } = await import('@orchardworks/agent-provider-opencode');
-    const paths = await setupOpenCodeCallbacks(args[2]);
+    const paths = await setupOpenCodeCallbacks(args[2], configured.AGENT_HOST_OPENCODE_URL ?? 'http://127.0.0.1:4096');
     process.stdout.write(JSON.stringify({ ...paths, instruction: 'Start the independently managed native server with OPENCODE_CONFIG set to nativeConfigPath. Set AGENT_HOST_OPENCODE_CALLBACK_CONFIG to configPath for the Controller. Use the same loopback hostname and port for AGENT_HOST_OPENCODE_URL and opencode serve. Existing servers require an explicit operator restart to load the plugin.' }, null, 2) + '\n');
     return 0;
   }
@@ -34,9 +34,9 @@ export async function runOpenCodeCommand(args: string[], stateDir: string, envir
     const endpoint = configured.AGENT_HOST_OPENCODE_URL ?? 'http://127.0.0.1:4096';
     const url = new URL(endpoint);
     if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password || url.search || url.hash) throw new Error('OpenCode server URL must be an HTTP endpoint without credentials, query or fragment.');
-    nativeArgs = ['attach', endpoint, ...(!args.length ? ['--dir', process.cwd()] : target === '--last' ? ['--continue', ...args.slice(2)] : ['--session', target!, ...args.slice(2)])];
-    if (configured.AGENT_HOST_OPENCODE_USERNAME !== undefined) env.OPENCODE_SERVER_USERNAME = configured.AGENT_HOST_OPENCODE_USERNAME;
-    if (configured.AGENT_HOST_OPENCODE_PASSWORD !== undefined) env.OPENCODE_SERVER_PASSWORD = configured.AGENT_HOST_OPENCODE_PASSWORD;
+    nativeArgs = ['--server', endpoint, ...(!args.length ? [process.cwd()] : target === '--last' ? ['--continue', ...args.slice(2)] : ['--session', target!, ...args.slice(2)])];
+    if (configured.AGENT_HOST_OPENCODE_USERNAME !== undefined && configured.AGENT_HOST_OPENCODE_USERNAME !== 'opencode') throw new Error('OpenCode 2.x requires the native username opencode.');
+    if (configured.AGENT_HOST_OPENCODE_PASSWORD !== undefined) env.OPENCODE_PASSWORD = configured.AGENT_HOST_OPENCODE_PASSWORD;
   }
   return new Promise<number>((resolve, reject) => {
     const child = spawn(...nativeInvocation(executable, nativeArgs), { env, stdio: 'inherit' });

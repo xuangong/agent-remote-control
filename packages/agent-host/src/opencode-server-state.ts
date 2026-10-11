@@ -1,4 +1,4 @@
-import { MIN_OPENCODE_VERSION, supportsOpenCodeVersion } from '@orchardworks/agent-provider-opencode';
+import { openCodeVersionIssue } from '@orchardworks/agent-provider-opencode';
 import { atomicWriteFile } from '@orchardworks/agent-platform';
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { chmod, link, mkdir, readFile, readdir, rm, writeFile } from 'node:fs/promises';
@@ -37,9 +37,9 @@ export async function readOpenCodeServerConfig(directory: string): Promise<OpenC
   return value;
 }
 function validateOpenCodeServerConfig(value: OpenCodeServerConfig): void {
-  if (typeof value.url !== 'string' || typeof value.username !== 'string' || !value.username || value.username.includes(':')
+  if (typeof value.url !== 'string' || value.username !== 'opencode'
     || typeof value.password !== 'string' || !value.password || /[\r\n]/.test(value.username + value.password))
-    throw new OpenCodeServerError('opencode_state_invalid', 'The private OpenCode server credentials are invalid.');
+    throw new OpenCodeServerError('opencode_state_invalid', 'OpenCode requires the username opencode and a non-empty password without line breaks.');
 }
 export async function ensureOpenCodeServerConfig(directory: string, url: string, env: NodeJS.ProcessEnv): Promise<OpenCodeServerConfig> {
   let value = await readOpenCodeServerConfig(directory);
@@ -108,10 +108,10 @@ export async function requestOpenCodeServerOwner(owner: OpenCodeServerOwner, act
   }
 }
 
-export async function probeOpenCodeServer(url: string, env: NodeJS.ProcessEnv): Promise<{ running: true; version: string } | { running: false }> {
+export async function probeOpenCodeServer(url: string, env: NodeJS.ProcessEnv): Promise<{ running: true; version: string; nativePid: number } | { running: false }> {
   let response: Response;
   try {
-    response = await fetch(`${url}/global/health`, { headers: env.AGENT_HOST_OPENCODE_PASSWORD === undefined ? {} : {
+    response = await fetch(`${url}/api/info`, { headers: env.AGENT_HOST_OPENCODE_PASSWORD === undefined ? {} : {
       authorization: `Basic ${Buffer.from(`${env.AGENT_HOST_OPENCODE_USERNAME ?? 'opencode'}:${env.AGENT_HOST_OPENCODE_PASSWORD}`).toString('base64')}`,
     }, redirect: 'error', signal: AbortSignal.timeout(1500) });
   } catch (error) {
@@ -123,17 +123,18 @@ export async function probeOpenCodeServer(url: string, env: NodeJS.ProcessEnv): 
     await response.body?.cancel();
     throw new OpenCodeServerError('opencode_auth_required', 'OpenCode rejected authentication. Configure matching server credentials in the Controller.');
   }
-  let health: { healthy?: unknown; version?: unknown };
+  let info: { version?: unknown; pid?: unknown; urls?: unknown; paths?: { tmp?: unknown } } | null;
   try {
     const reader = response.body?.getReader(); let contents = '';
     if (!reader) throw new Error();
     try { while (true) { const { done, value } = await reader.read(); if (done) break; contents += Buffer.from(value).toString('utf8'); if (contents.length > 4096) throw new Error(); } }
     finally { await reader.cancel(); }
-    health = JSON.parse(contents);
-  } catch { throw new OpenCodeServerError('opencode_health_invalid', 'The configured port did not return a valid OpenCode health response.'); }
-  if (!response.ok || health.healthy !== true || typeof health.version !== 'string')
-    throw new OpenCodeServerError('opencode_health_invalid', 'The existing OpenCode service is not healthy. It will not be restarted automatically.');
-  if (!supportsOpenCodeVersion(health.version))
-    throw new OpenCodeServerError('opencode_version_unsupported', `OpenCode server must be version ${MIN_OPENCODE_VERSION} or newer.`);
-  return { running: true, version: health.version };
+    info = JSON.parse(contents);
+  } catch { throw new OpenCodeServerError('opencode_health_invalid', 'The configured port did not return valid OpenCode server information.'); }
+  if (!response.ok || !info || typeof info.version !== 'string' || !Number.isSafeInteger(info.pid) || (info.pid as number) < 0
+    || !Array.isArray(info.urls) || !info.urls.every(url => typeof url === 'string') || typeof info.paths?.tmp !== 'string')
+    throw new OpenCodeServerError('opencode_health_invalid', 'The existing service did not provide valid OpenCode server identity. It will not be restarted automatically.');
+  const issue = openCodeVersionIssue(info.version);
+  if (issue) throw new OpenCodeServerError(issue.code, issue.message);
+  return { running: true, version: info.version, nativePid: info.pid as number };
 }

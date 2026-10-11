@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
 import { spawn, execFile } from 'node:child_process';
-import { cp, mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 import { promisify } from 'node:util';
@@ -66,8 +66,8 @@ function modelAnswer(input, cwd) {
     { name: 'arc_host_invoke', args: { name: 'read_source_session', arguments: { query: 'ARC_SOURCE_UPDATED' } } },
   ] : prompt.includes('ARC_DEBUG_QUESTION') ? [question] : prompt.includes('ARC_DEBUG_SCENARIO') ? [
     { name: shell, args: { command: "printf 'ARC_SHELL_OK\\n'", description: 'Print deterministic smoke marker', workdir: cwd } },
-    { name: 'read', args: { filePath: join(cwd, 'fixture.ts') } },
-    { name: 'edit', args: { filePath: join(cwd, 'fixture.ts'), oldString: 'export const result = "before";', newString: 'export const result = "after";' } },
+    { name: 'read', args: { path: join(cwd, 'fixture.ts') } },
+    { name: 'edit', args: { path: join(cwd, 'fixture.ts'), oldString: 'export const result = "before";', newString: 'export const result = "after";' } },
     question,
   ] : [];
   const step = sequence[replies];
@@ -83,7 +83,7 @@ try {
   await mkdir(dirname(recordingPath), { recursive: true });
   const version = await execute(executable, ['--version'], { timeout: 10000 });
   evidence.nativeVersion = version.stdout.trim();
-  assert.equal(evidence.nativeVersion, '1.18.18', 'This deterministic native fixture is pinned to OpenCode 1.18.18.');
+  assert.equal(evidence.nativeVersion, 'opencode v2.0.25', 'This deterministic native fixture targets OpenCode 2.0.25.');
   root = await realpath(await mkdtemp(join(tmpdir(), 'arc-opencode-debug-')));
   const env = { ...process.env };
   for (const key of Object.keys(env)) if (/^(OPENCODE_|OPENAI_|ANTHROPIC_|CODEX_|COPILOT_|GITHUB_TOKEN|GH_TOKEN)/.test(key)) delete env[key];
@@ -91,18 +91,14 @@ try {
     env[name] = join(root, folder); await mkdir(env[name], { recursive: true });
   }
   const { setupOpenCodeCallbacks } = await import('../packages/agent-provider-opencode/dist/index.js');
-  const { configPath, nativeConfigPath } = await setupOpenCodeCallbacks(join(root, 'callbacks'));
+  const allocator = createServer(); const serverUrl = await listen(allocator); await new Promise(done => allocator.close(done));
+  const { configPath, nativeConfigPath } = await setupOpenCodeCallbacks(join(root, 'callbacks'), serverUrl);
   env.OPENCODE_CONFIG = nativeConfigPath;
-  if (process.env.AGENT_OPENCODE_TEST_PLUGIN_PREFIX) await cp(process.env.AGENT_OPENCODE_TEST_PLUGIN_PREFIX, join(env.XDG_CONFIG_HOME, 'opencode'), { recursive: true });
-  else await execute('npm', ['install', '--prefix', join(env.XDG_CONFIG_HOME, 'opencode'), '--ignore-scripts', '--no-audit', '--no-fund', `--registry=${process.env.AGENT_OPENCODE_TEST_REGISTRY ?? 'https://registry.npmjs.org'}`, '@opencode-ai/plugin@1.18.18'], {
-    timeout: 120000, env: { PATH: process.env.PATH, HOME: env.HOME, npm_config_cache: join(root, 'npm-cache') },
-  });
   const cwd = join(root, 'project'); await mkdir(cwd); evidence.cwd = cwd;
   await execute('git', ['init', '--quiet'], { cwd, env, timeout: 10000 });
   await writeFile(join(cwd, 'fixture.ts'), 'export const result = "before";\n');
   await execute('git', ['add', 'fixture.ts'], { cwd, env, timeout: 10000 });
   await execute('git', ['-c', 'user.name=ARC fixture', '-c', 'user.email=fixture@example.invalid', '-c', 'commit.gpgsign=false', 'commit', '--quiet', '-m', 'Isolated debugger fixture'], { cwd, env, timeout: 10000 });
-  await cp(join(env.XDG_CONFIG_HOME, 'opencode'), join(cwd, '.opencode'), { recursive: true });
   await mkdir(join(cwd, '.opencode/skills/arc-debug'), { recursive: true });
   await writeFile(join(cwd, '.opencode/skills/arc-debug/SKILL.md'), '---\nname: arc-debug\ndescription: Verify a deterministic isolated debugger session.\n---\n\nRead fixture.ts and report the current result value.\n');
   model = createServer(async (request, response) => {
@@ -139,11 +135,13 @@ try {
     } catch (error) { evidence.modelError = String(error); response.writeHead(500).end(JSON.stringify({ error: { message: String(error) } })); }
   });
   const modelUrl = await listen(model);
-  await writeFile(join(cwd, 'opencode.json'), JSON.stringify({ model: 'arc/fixture', enabled_providers: ['arc'], permission: { '*': 'ask', read: 'allow', question: 'allow', arc_host_discover: 'allow', arc_host_invoke: 'allow' }, provider: { arc: { npm: '@ai-sdk/openai-compatible', name: 'ARC isolated model', options: { baseURL: `${modelUrl}/v1`, apiKey: 'fixture-only' }, models: { fixture: { name: 'Deterministic fixture', limit: { context: 128000, output: 8192 }, variants: { concise: { reasoningEffort: 'low' }, thorough: { reasoningEffort: 'high' } } } } } } }));
-  env.OPENCODE_DISABLE_AUTO_UPDATE = '1'; env.OPENCODE_DISABLE_DEFAULT_PLUGINS = '1';
-  const password = randomUUID(); env.OPENCODE_SERVER_PASSWORD = password;
-  const allocator = createServer(); const serverUrl = await listen(allocator); await new Promise(done => allocator.close(done));
-  native = spawn(executable, ['serve', '--print-logs', '--hostname', '127.0.0.1', '--port', new URL(serverUrl).port], { cwd, env, stdio: ['ignore', 'pipe', 'pipe'] });
+  await writeFile(join(cwd, 'opencode.json'), JSON.stringify({ update: 'disable', default_agent: 'build', model: 'arc/fixture', permissions: [
+    { action: '*', resource: '*', effect: 'ask' },
+    ...['read', 'question', 'arc_host_discover', 'arc_host_invoke'].map(action => ({ action, resource: '*', effect: 'allow' })),
+  ], providers: { arc: { package: '@opencode/ai/providers/openai-compatible', name: 'ARC isolated model', env: ['ARC_FIXTURE_API_KEY'], settings: { baseURL: `${modelUrl}/v1`, apiKey: 'fixture-only', transport: 'http' }, models: { fixture: { name: 'Deterministic fixture', capabilities: { tools: true, input: ['text'], output: ['text'] }, limit: { context: 128000, output: 8192 }, variants: [{ id: 'concise', settings: { reasoningEffort: 'low' } }, { id: 'thorough', settings: { reasoningEffort: 'high' } }] } } } } }));
+  env.OPENCODE_DISABLE_AUTO_UPDATE = '1'; env.ARC_FIXTURE_API_KEY = 'fixture-only';
+  const password = randomUUID(); env.OPENCODE_PASSWORD = password;
+  native = spawn(executable, ['serve', '--hostname', '127.0.0.1', '--port', new URL(serverUrl).port], { cwd, env, stdio: ['ignore', 'pipe', 'pipe'] });
   native.stdout.on('data', bytes => { diagnostics = (diagnostics + bytes).slice(-1024 * 1024); });
   native.stderr.on('data', bytes => { diagnostics = (diagnostics + bytes).slice(-1024 * 1024); });
   let spawnError; native.on('error', error => { spawnError = error; });
@@ -151,7 +149,7 @@ try {
   await until(async () => {
     if (spawnError) throw spawnError;
     if (native.exitCode !== null) throw new Error(`Native server exited: ${diagnostics}`);
-    try { return (await fetch(`${serverUrl}/global/health`, { headers, signal: AbortSignal.timeout(1000) })).ok; } catch { return false; }
+    try { return (await fetch(`${serverUrl}/api/info`, { headers, signal: AbortSignal.timeout(1000) })).ok; } catch { return false; }
   }, 'native server health', 45000);
   const [{ OpenCodeAgentProvider }, { createReplayServer }, { createDebuggerRuntime }, { parseRecording }] = await Promise.all([
     import('../packages/agent-provider-opencode/dist/index.js'), import('../packages/agent-remote-debugger/dist/replay-server.js'),
@@ -159,17 +157,39 @@ try {
   ]);
   const { sourceSessionExtensions } = await import('../packages/agent-host/dist/session-reference.js');
   async function nativeRequest(path, body) {
-    const response = await fetch(`${serverUrl}${path}?directory=${encodeURIComponent(cwd)}`, { method: 'POST', headers: { ...headers, 'Content-Type': 'application/json' }, body: JSON.stringify(body), signal: AbortSignal.timeout(20000) });
+    const response = await fetch(`${serverUrl}${path}`, { method: 'POST', headers: { ...headers, 'Content-Type': 'application/json' }, body: JSON.stringify(body), signal: AbortSignal.timeout(20000) });
     const text = await response.text(); assert.ok(response.ok, `Native ${path}: ${response.status} ${text}`); return JSON.parse(text);
   }
-  const source = await nativeRequest('/session', {});
-  await nativeRequest(`/session/${source.id}/message`, { noReply: true, parts: [{ type: 'text', text: 'ARC_SOURCE_INITIAL' }] });
+  const source = (await nativeRequest('/api/session', { location: { directory: cwd }, agent: 'build', model: { providerID: 'arc', id: 'fixture' } })).data;
+  const sendSource = async text => {
+    await nativeRequest(`/api/session/${source.id}/prompt`, { text, delivery: 'queue' });
+    await until(async () => {
+      const response = await fetch(`${serverUrl}/api/session/${source.id}/message?limit=20&order=desc`, { headers, signal: AbortSignal.timeout(10000) });
+      assert.equal(response.status, 200);
+      const { data } = await response.json();
+      return data[0]?.type === 'idle' && data[0].outcome === 'succeeded' && data.some(message => message.type === 'user' && message.text === text);
+    }, 'source native completion');
+  };
+  await sendSource('ARC_SOURCE_INITIAL');
   evidence.sourceSessionId = source.id;
   workspace = await createReplayServer({ directory: dirname(recordingPath), loadProvider: async provider => {
     assert.equal(provider, 'opencode');
     const adapter = new OpenCodeAgentProvider({ serverUrl, password, callbackConfigPath: configPath, requestTimeoutMs: 20000 });
     const create = adapter.createSession.bind(adapter);
-    adapter.createSession = config => create({ ...config, ...sourceSessionExtensions(source.id, (id, query) => adapter.readSessionHistory(id, query)) });
+    adapter.createSession = async config => {
+      const created = await create({ ...config, ...sourceSessionExtensions(source.id, (id, query) => adapter.readSessionHistory(id, query)) });
+      for (const method of ['sendMessageContent', 'steer', 'executeCommand', 'setSessionSetting', 'respondToInteraction']) {
+        const operation = created[method].bind(created);
+        created[method] = async (...args) => {
+          try { return await operation(...args); }
+          catch (error) {
+            (evidence.nativeOperationErrors ??= []).push({ method, message: error instanceof Error ? error.message : String(error) });
+            throw error;
+          }
+        };
+      }
+      return created;
+    };
     return adapter;
   } });
   const session = await json(`${workspace.url}/__ardb/live/start`, { provider: 'opencode', cwd });
@@ -222,9 +242,9 @@ try {
   assert.ok(evidence.interactions.some(item => item.kind === 'tool_approval'), 'A real native permission must be answered.');
   assert.ok(evidence.interactions.some(item => item.kind === 'question'), 'A real native question must be answered.');
   assert.match(await readFile(join(cwd, 'fixture.ts'), 'utf8'), /result = "after"/);
-  const nativeHistory = await fetch(`${serverUrl}/session/${session.nativeSessionId}/message?directory=${encodeURIComponent(cwd)}`, { headers, signal: AbortSignal.timeout(10000) });
+  const nativeHistory = await fetch(`${serverUrl}/api/session/${session.nativeSessionId}/message`, { headers, signal: AbortSignal.timeout(10000) });
   assert.equal(nativeHistory.status, 200);
-  evidence.nativeTools = (await nativeHistory.json()).flatMap(message => message.parts.filter(part => part.type === 'tool').map(part => ({ tool: part.tool, state: part.state })));
+  evidence.nativeTools = (await nativeHistory.json()).data.filter(message => message.type === 'assistant').flatMap(message => message.content.filter(content => content.type === 'tool').map(content => ({ tool: content.name, state: content.state })));
   Object.assign(evidence.checks, { text: true, shell: true, fileDiff: true, permission: true, question: true });
   if (settings().some(setting => setting.id === 'permission:*')) {
     await runtime.client.setSessionSetting('permission:*', 'ask');
@@ -234,7 +254,7 @@ try {
   const commands = await runtime.client.listCommands(); evidence.commands = commands;
   evidence.checks.skillCatalog = commands.some(command => command.name === 'arc-debug' || command.id.includes('arc-debug'));
   assert.ok(evidence.checks.skillCatalog, 'Native fixture skill must appear in the command catalog.');
-  await nativeRequest(`/session/${source.id}/message`, { noReply: true, parts: [{ type: 'text', text: 'ARC_SOURCE_UPDATED: appended after the Ask session opened.' }] });
+  await sendSource('ARC_SOURCE_UPDATED: appended after the Ask session opened.');
   const sourceProgress = runtime.captureProgress();
   await runtime.client.sendMessage('ARC_DEBUG_SOURCE: discover and read the latest source update.');
   await until(() => JSON.stringify(runtime.replica.getState().timeline).includes('ARC_SOURCE_COMPLETE:'), 'dynamic source callback through ARDB');
@@ -247,6 +267,8 @@ try {
   releaseModel();
   await until(() => JSON.stringify(runtime.replica.getState().timeline).includes('ARC_STEER_COMPLETE:'), 'native steer through ARDB');
   await runtime.waitFor('idle', 20000, steerProgress);
+  await runtime.ready(15000);
+  await until(() => runtime.replica.getState().timeline.entries.some(entry => entry.item.type === 'user_message' && entry.item.text.includes('ARC_DEBUG_STEER')), 'native steer echo after timeline synchronization');
   const steerEchoes = runtime.replica.getState().timeline.entries.filter(entry => entry.item.type === 'user_message' && entry.item.text.includes('ARC_DEBUG_STEER'));
   assert.equal(steerEchoes.length, 1, 'The real replica must contain exactly one native steer echo.');
   evidence.checks.steer = true;

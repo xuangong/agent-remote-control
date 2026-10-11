@@ -19,6 +19,17 @@ async function fixture(timeout = 1000) {
     headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }, ...(body === undefined ? {} : { body: JSON.stringify(body) }), signal: AbortSignal.timeout(2000) });
   return { bridge, directory, path, config, request };
 }
+async function nativePlugin(directory: string, configPath: string, serverUrl = 'http://127.0.0.1:4096') {
+  const tools: Record<string, any> = {};
+  const dispose = await plugin.setup({ options: { configPath, serverUrl }, location: { directory },
+    tool: { async transform(register: (editor: any) => void) {
+      register({ add(value: any) { tools[value.name] = value; } });
+      return { async dispose() { for (const name of Object.keys(tools)) delete tools[name]; } };
+    } },
+  });
+  cleanup.push(dispose);
+  return tools;
+}
 const tool = (execute: (args: unknown) => Promise<string>) => ({ name: 'read_source_session', description: 'Read the fixed source', inputSchema: {
   type: 'object', additionalProperties: false, properties: { limit: { type: 'integer', minimum: 1, maximum: 10 } },
 }, execute });
@@ -26,16 +37,16 @@ const tool = (execute: (args: unknown) => Promise<string>) => ({ name: 'read_sou
 it('authenticates real HTTP callbacks, binds native context and validates the actual arguments', async () => {
   const f = await fixture(); const calls: unknown[] = [];
   f.bridge.bind('native-ask', [tool(async args => { calls.push(args); return 'fixed-source'; })]);
-  const native = await plugin({ directory: f.directory, serverUrl: new URL('http://127.0.0.1:4096') }, { configPath: f.path });
+  const native = await nativePlugin(f.directory, f.path);
   expect(f.bridge.isAvailable(f.directory)).toBe(true);
   expect((await stat(f.path)).mode & 0o777).toBe(0o600);
   expect((await f.request('/sessions/native-ask/discover', undefined, 'wrong')).status).toBe(401);
   expect((await f.request('/sessions/unbound/discover')).status).toBe(403);
-  expect(await native.tool.arc_host_invoke.execute({ name: 'read_source_session', arguments: { limit: 1 } }, { sessionID: 'native-ask' })).toBe('fixed-source');
+  expect(await native.arc_host_invoke.execute({ name: 'read_source_session', arguments: { limit: 1 } }, { sessionID: 'native-ask' })).toEqual({ content: 'fixed-source' });
   for (const arguments_ of [{ source: 'other' }, { sessionID: 'native-ask' }, { limit: 11 }, { limit: '1' }]) {
-    await expect(native.tool.arc_host_invoke.execute({ name: 'read_source_session', arguments: arguments_ }, { sessionID: 'native-ask' })).rejects.toThrow();
+    await expect(native.arc_host_invoke.execute({ name: 'read_source_session', arguments: arguments_ }, { sessionID: 'native-ask' })).rejects.toThrow();
   }
-  await expect(native.tool.arc_host_invoke.execute({ name: 'read_source_session', arguments: { sessionID: 'native-ask' } }, { sessionID: 'unbound' })).rejects.toThrow();
+  await expect(native.arc_host_invoke.execute({ name: 'read_source_session', arguments: { sessionID: 'native-ask' } }, { sessionID: 'unbound' })).rejects.toThrow();
   expect(calls).toEqual([{ limit: 1 }]);
 }, 10000);
 
@@ -61,21 +72,21 @@ it('caps request, output and execution time without exposing callback exceptions
 }, 10000);
 
 it('rereads private rendezvous after Controller restart and rejects a second active owner', async () => {
-  const f = await fixture(); const native = await plugin({ directory: f.directory, serverUrl: new URL('http://127.0.0.1:4096') }, { configPath: f.path });
+  const f = await fixture(); const native = await nativePlugin(f.directory, f.path);
   const conflicting = new OpenCodeCallbackBridge(f.path, 'http://127.0.0.1:4096');
   await expect(conflicting.start()).rejects.toThrow(/owner/);
   expect(JSON.parse(await readFile(f.path, 'utf8')).token).toBe(f.config.token);
   await f.bridge.close();
   const restarted = new OpenCodeCallbackBridge(f.path, 'http://127.0.0.1:4096'); cleanup.push(() => restarted.close()); await restarted.start();
   restarted.bind('resumed', [tool(async () => 'restored')]);
-  expect(await native.tool.arc_host_invoke.execute({ name: 'read_source_session', arguments: {} }, { sessionID: 'resumed' })).toBe('restored');
+  expect(await native.arc_host_invoke.execute({ name: 'read_source_session', arguments: {} }, { sessionID: 'resumed' })).toEqual({ content: 'restored' });
 }, 10000);
 
 it('does not report a plugin from another server or expose an unbound session manifest', async () => {
   const f = await fixture();
-  const wrong = await plugin({ directory: f.directory, serverUrl: new URL('http://127.0.0.1:4097') }, { configPath: f.path });
+  const wrong = await nativePlugin(f.directory, f.path, 'http://127.0.0.1:4097');
   expect(f.bridge.isAvailable(f.directory)).toBe(false);
-  await expect(wrong.tool.arc_host_discover.execute({}, { sessionID: 'any' })).rejects.toThrow(/does not match/);
+  await expect(wrong.arc_host_discover.execute({}, { sessionID: 'any' })).rejects.toThrow(/does not match/);
   expect((await f.request('/ready', { version: 1, directory: f.directory, serverUrl: 'http://127.0.0.1:4097' })).status).toBe(409);
 }, 10000);
 

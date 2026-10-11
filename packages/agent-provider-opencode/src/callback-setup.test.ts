@@ -9,8 +9,8 @@ it('installs an explicit plugin config and refuses to overwrite an existing setu
   try {
     const paths = await setupOpenCodeCallbacks(directory);
     const config = JSON.parse(await readFile(paths.nativeConfigPath, 'utf8'));
-    expect(config.plugin[0][1]).toEqual({ configPath: paths.configPath });
-    const asset = fileURLToPath(config.plugin[0][0]); expect((await readFile(asset, 'utf8')).length).toBeGreaterThan(1000);
+    expect(config.plugins[0].options).toEqual({ configPath: paths.configPath, serverUrl: 'http://127.0.0.1:4096' });
+    const asset = join(fileURLToPath(config.plugins[0].package), 'server.js'); expect((await readFile(asset, 'utf8')).length).toBeGreaterThan(1000);
     await writeFile(asset, 'USER-MODIFIED');
     await expect(setupOpenCodeCallbacks(directory)).rejects.toThrow();
     expect(await readFile(asset, 'utf8')).toBe('USER-MODIFIED');

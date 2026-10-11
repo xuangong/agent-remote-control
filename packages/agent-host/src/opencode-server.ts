@@ -1,4 +1,4 @@
-import { MIN_OPENCODE_VERSION, supportsOpenCodeVersion } from '@orchardworks/agent-provider-opencode';
+import { openCodeVersionIssue, parseOpenCodeCliVersion } from '@orchardworks/agent-provider-opencode';
 import { resolveOpenCodeExecutable } from './opencode-executable.js';
 import { execFile, spawn } from 'node:child_process';
 import { chmod, mkdir, open } from 'node:fs/promises';
@@ -82,8 +82,8 @@ async function startNativeServer(stateDir: string, env: NodeJS.ProcessEnv, optio
   try {
     executable = resolveOpenCodeExecutable({ ...nativeEnv, AGENT_HOST_OPENCODE: env.AGENT_HOST_OPENCODE });
     const { stdout } = await promisify(execFile)(...nativeInvocation(executable, ['--version']), { env: nativeEnv, timeout: 5000, maxBuffer: 16 * 1024, windowsHide: true });
-    if (!supportsOpenCodeVersion(stdout.trim()))
-      throw new OpenCodeServerError('opencode_version_unsupported', `OpenCode CLI must be version ${MIN_OPENCODE_VERSION} or newer.`);
+    const issue = openCodeVersionIssue(parseOpenCodeCliVersion(stdout));
+    if (issue) throw new OpenCodeServerError(issue.code, issue.message);
   } catch (error) {
     if (error instanceof OpenCodeServerError) throw error;
     throw new OpenCodeServerError('opencode_cli_unavailable', 'The Controller could not run OpenCode CLI. Install it on the Controller PATH or configure AGENT_HOST_OPENCODE.');

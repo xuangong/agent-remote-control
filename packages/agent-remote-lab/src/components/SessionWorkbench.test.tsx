@@ -4,6 +4,7 @@ import { render } from '../test/setup.js';
 import { replicaState } from '../test/fixtures.js';
 import { SessionWorkbench } from './SessionWorkbench.js';
 import { LabWorkbench } from './LabWorkbench.js';
+import { SessionControlNotice } from './SessionControlNotice.js';
 import type { AgentReplicaState } from '@orchardworks/agent-remote-web';
 
 it('keeps the original composer dock editable without native state in draft-only mode', async () => {
@@ -13,6 +14,31 @@ it('keeps the original composer dock editable without native state in draft-only
   expect(container.querySelector<HTMLTextAreaElement>('[data-testid="prompt-input"]')).toMatchObject({ value: 'Local owner', disabled: false });
   const submit = container.querySelector<HTMLButtonElement>('[data-testid="prompt-submit"]')!;
   expect(submit.disabled).toBe(true); await act(async () => submit.click()); expect(send).not.toHaveBeenCalled();
+});
+
+it('shows native ownership before the first snapshot while keeping the draft and mutations blocked', async () => {
+  const send = vi.fn(), takeControl = vi.fn(async () => {});
+  const container = await render(<LabWorkbench draftOnly sessionStatus="disconnected" messageDraft="Local owner" actions={{ sendMessage: send }}
+    nativeTakeover={<SessionControlNotice connected control={{ access: 'read_only', available: false,
+      nativeOwner: { kind: 'native_cli', generation: 'owner-1' } }} onTakeControl={takeControl} />} />);
+  const button = container.querySelector<HTMLButtonElement>('[aria-label="Interrupt and take control"]');
+  expect(button).not.toBeNull();
+  expect(button!.closest('[hidden]')).toBeNull();
+  expect(button!.disabled).toBe(false);
+  expect(container.textContent).toContain('Taking over interrupts its running work.');
+  expect(container.querySelector<HTMLTextAreaElement>('[data-testid="prompt-input"]')).toMatchObject({ value: 'Local owner', readOnly: true });
+  expect(container.querySelector('[data-testid="prompt-submit"]')).toBeNull();
+  expect(takeControl).not.toHaveBeenCalled();
+  await act(async () => button!.click());
+  expect(takeControl).toHaveBeenCalledOnce();
+  expect(send).not.toHaveBeenCalled();
+});
+
+it('does not infer native takeover from a disconnected draft without an owner', async () => {
+  const takeControl = vi.fn(async () => {});
+  const container = await render(<LabWorkbench draftOnly sessionStatus="disconnected" actions={{ takeControl }} />);
+  expect(container.querySelector('.lab-session-control')).toBeNull();
+  expect(takeControl).not.toHaveBeenCalled();
 });
 
 it('renders the same conversation and composer through product and standalone composition', async () => {

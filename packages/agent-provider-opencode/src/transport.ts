@@ -1,4 +1,4 @@
-import { createOpencodeClient, type GlobalEvent } from '@opencode-ai/sdk/v2/client';
+import { OpenCode, type OpenCodeClient, type V2Event } from '@opencode/client';
 import { createHash } from 'node:crypto';
 import { setTimeout as delay } from 'node:timers/promises';
 
@@ -13,14 +13,14 @@ export interface OpenCodeAgentProviderOptions {
   onDiagnostic?: (line: string) => void;
 }
 export class OpenCodeRequestError extends Error {
-  constructor(readonly status?: number) {
-    super(status ? `OpenCode request failed (HTTP ${status}).` : 'OpenCode request did not complete. Its outcome may be unknown; input was not replayed.');
+  constructor(readonly status?: number, readonly nativeCode?: string, message?: string) {
+    super(message ?? (status ? `OpenCode request failed (HTTP ${status}).` : 'OpenCode request did not complete. Its outcome may be unknown; input was not replayed.'));
     this.name = 'OpenCodeRequestError';
   }
 }
-interface EventSubscriber { connected(): void; disconnected(attempt: number): void; receive(event: GlobalEvent): void; }
+interface EventSubscriber { connected(): void; disconnected(attempt: number): void; receive(event: V2Event): void; }
 export class OpenCodeTransport {
-  readonly client;
+  readonly client: OpenCodeClient;
   readonly namespaceId: string;
   readonly timeout: number;
   readonly restricted: boolean;
@@ -38,32 +38,32 @@ export class OpenCodeTransport {
     this.timeout = options.requestTimeoutMs ?? 15000;
     if (!Number.isFinite(this.timeout) || this.timeout < 1 || this.timeout > 120000) throw new Error('Invalid OpenCode request timeout.');
     this.restricted = options.restrictedNative === true;
-    this.client = createOpencodeClient({
+    this.client = OpenCode.make({
       baseUrl: url.toString().replace(/\/$/, ''),
       headers: options.password === undefined ? undefined : { Authorization: `Basic ${Buffer.from(`${options.username ?? 'opencode'}:${options.password}`).toString('base64')}` },
-      fetch: async (input) => {
-        const request = input as Request;
-        const stream = new URL(request.url).pathname.endsWith('/global/event');
+      fetch: async (input, init) => {
+        const request = new Request(input, init);
+        const stream = new URL(request.url).pathname.endsWith('/api/event');
         const signal = AbortSignal.any([request.signal, this.lifetime.signal, ...(stream ? [] : [AbortSignal.timeout(this.timeout)])]);
         return fetch(new Request(request, { signal, redirect: 'error' }));
       },
     });
   }
-  async request<T>(operation: () => Promise<{ data?: T; error?: unknown; response: Response }>): Promise<T> {
-    return (await this.requestWithResponse(operation)).data;
-  }
-  async requestWithResponse<T>(operation: () => Promise<{ data?: T; error?: unknown; response: Response }>): Promise<{ data: T; response: Response }> {
-    try {
-      const result = await operation();
-      if (!result.response.ok || result.error !== undefined) throw new OpenCodeRequestError(result.response.status);
-      return { data: result.data as T, response: result.response };
-    } catch (error) {
+  async request<T>(operation: () => Promise<T>): Promise<T> {
+    try { return await operation(); }
+    catch (error) {
       if (error instanceof OpenCodeRequestError) throw error;
-      throw new OpenCodeRequestError();
+      const native = error as { _tag?: string; message?: string; cause?: { status?: number } };
+      const codes: Record<string, number> = { InvalidRequestError: 400, UnauthorizedError: 401, ForbiddenError: 403,
+        SessionNotFoundError: 404, MessageNotFoundError: 404, PermissionNotFoundError: 404, FormNotFoundError: 404,
+        SessionBusyError: 409, ConflictError: 409, FormAlreadySettledError: 409, FormInvalidAnswerError: 400 };
+      const code = typeof native?._tag === 'string' ? native._tag : undefined;
+      throw new OpenCodeRequestError(code ? codes[code] : native?.cause?.status, code,
+        code && typeof native.message === 'string' ? native.message : undefined);
     }
   }
   diagnostic(message: string): void { try { this.options.onDiagnostic?.(message); } catch { /* Diagnostics cannot interrupt native observation. */ } }
-  events(signal: AbortSignal, connected: () => void, disconnected: (attempt: number) => void, receive: (event: GlobalEvent) => void): Promise<void> {
+  events(signal: AbortSignal, connected: () => void, disconnected: (attempt: number) => void, receive: (event: V2Event) => void): Promise<void> {
     if (signal.aborted || this.lifetime.signal.aborted) return Promise.resolve();
     return new Promise<void>(resolve => {
       const subscriber = { connected, disconnected, receive };
@@ -103,8 +103,8 @@ export class OpenCodeTransport {
       let ready = false;
       try {
         arm(this.timeout);
-        const result = await this.client.global.event({ signal: combined, sseMaxRetryAttempts: 0 });
-        for await (const event of result.stream) {
+        const events = this.client.event.subscribe({ signal: combined, onActivity: () => arm(45000) });
+        for await (const event of events) {
           if (combined.aborted) break;
           arm(45000);
           if (!ready) { ready = true; attempt = 0; this.eventConnected = true; this.broadcast(subscriber => subscriber.connected()); }

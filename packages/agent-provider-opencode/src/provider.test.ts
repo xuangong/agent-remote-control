@@ -1,785 +1,580 @@
 import { createServer, type ServerResponse } from 'node:http';
-import { once } from 'node:events';
-import { mkdtemp, writeFile, rm } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
-import { createHash } from 'node:crypto';
-import { afterEach, expect, test, vi } from 'vitest';
-import { OpenCodeImages } from './images.js';
-import type { AgentSession, ProviderStreamItem } from '@orchardworks/agent-provider-sdk';
+import { afterEach, expect, it } from 'vitest';
+import type { SessionInfo, SessionMessageInfo, PermissionRequest, FormInfo } from '@opencode/client';
+import type { ProviderStreamItem, AgentSession } from '@orchardworks/agent-provider-sdk';
 import { OpenCodeAgentProvider } from './provider.js';
+import { OpenCodeImages } from './images.js';
+import { vi } from 'vitest';
 
-const cleanups: Array<() => Promise<void>> = [];
-afterEach(async () => { for (const cleanup of cleanups.splice(0).reverse()) await cleanup(); });
+const cleanup: Array<() => Promise<unknown>> = [];
+afterEach(async () => { for (const close of cleanup.splice(0).reverse()) await close(); });
+const tokens = { input: 10, output: 5, reasoning: 0, cache: { read: 3, write: 0 } };
+const native = (id: string): SessionInfo => ({ id, title: 'Native session', projectID: 'project', location: { directory: process.cwd() },
+  model: { providerID: 'test', id: 'model' }, agent: 'build', cost: 0, tokens, time: { created: 1, updated: 1 }, permissions: [] });
 async function fixture() {
-  const streams = new Set<ServerResponse>();
-  let connections = 0;
-  const requests: Array<{ method: string; path: string; body: any }> = [];
-  let messages: any[] = [];
-  let historyBarrier: { arrive(): void; wait: Promise<void> } | undefined;
-  let sessionBarrier: { arrive(): void; wait: Promise<void> } | undefined;
-  let failHistoryReads = 0;
-  let status: any = { type: 'idle' };
-  let permissions: any[] = [];
-  let questions: any[] = [];
-  let rejectPrompt = false;
-  let abortBarrier: { arrive(): void; wait: Promise<void> } | undefined;
-  let promptStatus = 204;
-  let health: unknown = { healthy: true, version: '1.18.31' };
-  let title = 'Native title';
-  let nativeSelection: any = {};
-  let children: any[] = [];
-  let connectedProviders = ['test'];
-  let globalSessions: any[] | undefined;
-  let globalListingStatus = 200;
-  const native = () => ({ id: 'ses_test', title, ...nativeSelection, directory: process.cwd(), time: { created: 1000, updated: 2000 } });
-  const server = createServer(async (req, res) => {
-    const url = new URL(req.url!, 'http://localhost');
-    if (url.pathname === '/global/event') {
-      connections++; res.writeHead(200, { 'Content-Type': 'text/event-stream' });
-      streams.add(res); res.on('close', () => streams.delete(res));
-      res.write(`data: ${JSON.stringify({ directory: process.cwd(), payload: { type: 'server.connected', properties: {} } })}\n\n`);
-      return;
+  const sessions = new Map<string, SessionInfo>([['ses_existing', native('ses_existing')]]);
+  const messages = new Map<string, SessionMessageInfo[]>([['ses_existing', [{ type: 'user', id: 'msg_old', text: 'Existing prompt', time: { created: 1 } },
+    { type: 'assistant', id: 'msg_reply', agent: 'build', model: { providerID: 'test', id: 'model' }, content: [{ type: 'text', text: 'Existing answer' }], time: { created: 2, completed: 3 } },
+    { type: 'idle', id: 'msg_idle', time: { created: 4 }, outcome: 'succeeded' }]]]);
+  const streams = new Set<ServerResponse>(), requests: Array<{ path: string; method: string; query: URLSearchParams; body: any }> = [];
+  const permissions = new Map<string, PermissionRequest[]>(), forms = new Map<string, FormInfo[]>();
+  const instructions = new Map<string, Array<{key: string; value: unknown}>>();
+  const state = { prompt: 'normal', historyFailures: 0, nativeFailures: 0, replyFailures: 0, version: '2.0.25', modelEnabled: true };
+  const intercept = new Map<string, () => Promise<void>>();
+  const block = (path: string) => {
+    let arrive!: () => void, release!: () => void;
+    const arrived = new Promise<void>(resolve => { arrive = resolve; }), gate = new Promise<void>(resolve => { release = resolve; });
+    intercept.set(path, async () => { arrive(); await gate; }); return { arrived, release };
+  };
+  let eventId = 0;
+  const active: Record<string, { type: 'running' }> = {};
+  const event = (type: string, data: unknown, id = `event_${++eventId}`) => { for (const stream of streams) stream.write(`data: ${JSON.stringify({ id, type, created: Date.now(), data })}\n\n`); };
+  const server = createServer(async (request, response) => {
+    const url = new URL(request.url!, 'http://test'); let raw = '';
+    for await (const chunk of request) raw += chunk;
+    const body = raw ? JSON.parse(raw) : undefined;
+    requests.push({ path: url.pathname, method: request.method!, query: url.searchParams, body });
+    if (url.pathname === '/api/event') {
+      response.writeHead(200, { 'content-type': 'text/event-stream' }); response.write('data: {"type":"server.connected","data":{}}\n\n');
+      streams.add(response); response.on('close', () => streams.delete(response)); return;
     }
-    let data = ''; for await (const chunk of req) data += chunk;
-    const body = data ? JSON.parse(data) : undefined;
-    requests.push({ method: req.method!, path: url.pathname, body });
-    const json = (value: any) => { res.writeHead(200, { 'Content-Type': 'application/json' }); res.end(JSON.stringify(value)); };
-    if (url.pathname === '/global/health') return json(health);
-    if (url.pathname === '/experimental/session') {
-      if (globalListingStatus !== 200) { res.writeHead(globalListingStatus); res.end(); return; }
-      const cursor = url.searchParams.get('cursor'); const limit = Number(url.searchParams.get('limit') ?? 100);
-      const eligible = (globalSessions ?? [native()]).filter(session => cursor === null || session.time.updated < Number(cursor));
-      const page = eligible.slice(0, limit);
-      if (eligible.length > limit) res.setHeader('X-Next-Cursor', String(page.at(-1).time.updated));
-      return json(page);
+    const json = (value: unknown, status = 200) => { response.writeHead(status, { 'content-type': 'application/json' }).end(JSON.stringify(value)); };
+    if (url.pathname === '/api/info') return json({ version: state.version, pid: 1, urls: [], paths: {} });
+    if (url.pathname === '/api/session/active') return json({ data: active });
+    if (url.pathname === '/api/form') return json({ location: { directory: process.cwd() }, data: [...forms.values()].flat() });
+    if (url.pathname === '/api/permission/request') return json({ location: { directory: process.cwd() }, data: [...permissions.values()].flat() });
+    if (url.pathname === '/api/model') return json({ location: { directory: process.cwd() }, data: [{ providerID: 'test', id: 'model', modelID: 'model', name: 'Model', enabled: state.modelEnabled, status: 'active', capabilities: {}, variants: [], limit: { context: 1000, output: 100 } }] });
+    if (url.pathname === '/api/agent') return json({ location: { directory: process.cwd() }, data: ['build', 'plan'].map(name => ({ id: name, name, mode: 'primary', hidden: false, permissions: [], request: {} })) });
+    if (url.pathname === '/api/session' && request.method === 'POST') {
+      const value = native('ses_created'); value.location = body.location; sessions.set(value.id, value); messages.set(value.id, []); return json({ data: value });
     }
-    if (url.pathname === '/session' && req.method === 'POST') return json(native());
-    if (url.pathname === '/session') return json([native()]);
-    if (url.pathname === '/session/status') return json({ ses_test: status });
-    if (url.pathname === '/session/ses_test/children') return json(children);
-    if (url.pathname === '/api/session/ses_test/model' || url.pathname === '/api/session/ses_test/agent') {
-      Object.assign(nativeSelection, body); emit('session.updated', { info: native() }); res.writeHead(204); res.end(); return;
+    if (url.pathname === '/api/session') {
+      const available = [...sessions.values()].filter(item => !url.searchParams.has('parentID') || item.parentID === url.searchParams.get('parentID'));
+      const offset = Number(url.searchParams.get('cursor') ?? 0), limit = Number(url.searchParams.get('limit') ?? 200);
+      return json({ data: available.slice(offset, offset + limit), cursor: { next: String(offset + limit) } });
     }
-    if (url.pathname === '/session/ses_test') {
-      if (req.method === 'PATCH') title = body.title;
-      const snapshot = structuredClone(native());
-      const barrier = sessionBarrier; sessionBarrier = undefined;
-      if (barrier) { barrier.arrive(); await barrier.wait; }
-      return json(snapshot);
+    const match = /^\/api\/(?:experimental\/)?session\/([^/]+)(.*)$/.exec(url.pathname);
+    if (match) {
+      const id = match[1]!, suffix = match[2], session = sessions.get(id);
+      if (!session) return json({ _tag: 'SessionNotFoundError', sessionID: id, message: 'Missing native session' }, 404);
+      if (!suffix) {
+        if (request.method === 'PATCH') { Object.assign(session, body); response.writeHead(204).end(); event('session.renamed', { sessionID: id, title: session.title }); return; }
+        if (state.nativeFailures-- > 0) return json({ _tag: 'UnknownError', message: 'retry native session' }, 503);
+        const snapshot = structuredClone(session);
+        const barrier = intercept.get(url.pathname); intercept.delete(url.pathname); if (barrier) await barrier();
+        return json({ data: snapshot });
+      }
+      if (suffix === '/message') {
+        if (state.historyFailures-- > 0) return json({ _tag: 'UnknownError', message: 'retry history' }, 503);
+        if (url.searchParams.has('cursor') && url.searchParams.has('order')) return json({ _tag: 'InvalidRequestError', message: 'Cannot combine cursor and order' }, 400);
+        const offset = Number(url.searchParams.get('cursor') ?? 0), limit = Number(url.searchParams.get('limit') ?? 200);
+        const data = structuredClone([...(messages.get(id) ?? [])].reverse().slice(offset, offset + limit));
+        const barrier = intercept.get(url.pathname); intercept.delete(url.pathname); if (barrier) await barrier();
+        return json({ data, cursor: data.length ? { previous: String(Math.max(offset-limit,0)), next: String(offset + limit) } : {} });
+      }
+      if (suffix === '/instructions/entries') return json({ data: instructions.get(id) ?? [] });
+      if (suffix.startsWith('/instructions/entries/')) {
+        const key = decodeURIComponent(suffix.split('/').at(-1)!);
+        instructions.set(id, [...(instructions.get(id) ?? []).filter(item => item.key !== key), {key, value:body.value}]); response.writeHead(204).end(); return;
+      }
+      if (suffix === '/model' || suffix === '/agent') { Object.assign(session, body); response.writeHead(204).end(); return; }
+      if (/^\/permission\/[^/]+\/reply$/.test(suffix)) { permissions.set(id, []); response.writeHead(204).end(); return; }
+      if (/^\/form\/[^/]+(?:\/reply)?$/.test(suffix)) {
+        forms.set(id, []);
+        if (state.replyFailures-- > 0) return json({ _tag: 'UnknownError', message: 'reply result unavailable' }, 503);
+        response.writeHead(204).end(); return;
+      }
+      if (suffix === '/permission') return json({ data: permissions.get(id) ?? [] });
+      if (suffix === '/form') return json({ data: forms.get(id) ?? [] });
+      if (suffix === '/inbox') return json({ data: [] });
+      if (suffix === '/prompt') {
+        if (state.prompt === 'drop') { request.socket.destroy(); return; }
+        const message: SessionMessageInfo = { type: 'user', id: body.id, text: body.text, time: { created: Date.now() } };
+        if (state.prompt === 'ack-only') return json({ data: { id: body.id, sessionID: id, type: 'user', payload: { text: body.text }, time: message.time, delivery: body.delivery } });
+        messages.set(id, [...(messages.get(id) ?? []), message]); active[id] = { type: 'running' };
+        if (state.prompt === 'accept-drop') { request.socket.destroy(); return; }
+        json({ data: { id: body.id, sessionID: id, type: 'user', payload: { text: body.text }, time: message.time, delivery: body.delivery } });
+        event('session.inbox.delivered', { sessionID: id, inboxID: body.id }); event('session.execution.started', { sessionID: id }); return;
+      }
+      if (suffix === '/interrupt') { delete active[id]; session.outcome = 'interrupted';
+        const barrier = intercept.get(url.pathname); intercept.delete(url.pathname); if (barrier) await barrier();
+        json({ interrupted: true }); event('session.execution.interrupted', { sessionID: id, reason: 'user' }); return; }
     }
-    if (url.pathname === '/session/ses_test/message') {
-      if (failHistoryReads-- > 0) { res.writeHead(500); res.end(); return; }
-      const before = url.searchParams.get('before');
-      const cursor = before ? JSON.parse(Buffer.from(before, 'base64url').toString()) : undefined;
-      const eligible = cursor ? messages.filter(message => message.info.time.created < cursor.time || (message.info.time.created === cursor.time && message.info.id < cursor.id)) : messages;
-      const limit = Number(url.searchParams.get('limit') ?? eligible.length);
-      const snapshot = structuredClone(eligible.slice(-limit));
-      if (eligible.length > limit && snapshot[0]) res.setHeader('X-Next-Cursor', Buffer.from(JSON.stringify({ id: snapshot[0].info.id, time: snapshot[0].info.time.created })).toString('base64url'));
-      const barrier = historyBarrier; historyBarrier = undefined;
-      if (barrier) { barrier.arrive(); await barrier.wait; }
-      return json(snapshot);
-    }
-    if (url.pathname === '/session/ses_test/todo') return json([]);
-    if (url.pathname === '/permission') return json(permissions);
-    if (url.pathname === '/question') return json(questions);
-    if (url.pathname === '/provider') return json({ all: [{ id: 'test', name: 'Test', models: { model: { id: 'model', name: 'Test model' } } }], connected: connectedProviders, default: { test: 'model' } });
-    if (url.pathname === '/agent') return json([{ name: 'build', mode: 'primary' }, { name: 'plan', mode: 'primary' }]);
-    if (url.pathname === '/command') return json([{ name: 'check', description: 'Check project' }]);
-    if (url.pathname.endsWith('/abort') && abortBarrier) {
-      const barrier = abortBarrier; abortBarrier = undefined; barrier.arrive(); await barrier.wait; return json(true);
-    }
-    if (url.pathname.endsWith('/prompt_async')) {
-      if (rejectPrompt) return req.socket.destroy();
-      if (promptStatus !== 204) { res.writeHead(promptStatus); res.end(); return; }
-      messages.push({ info: { id: body.messageID, role: 'user', sessionID: 'ses_test', model: body.model, agent: body.agent, time: { created: Date.now() } }, parts: body.parts.map((p: any, i: number) => ({ ...p, id: `prt_${i}`, messageID: body.messageID, sessionID: 'ses_test' })) });
-      res.writeHead(204); res.end();
-      emit('message.updated', { info: messages.at(-1).info }); return;
-    }
-    return json(true);
+    json({ _tag: 'UnknownError', message: `Unexpected ${request.method} ${url.pathname}` }, 500);
   });
   await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
-  const emit = (type: string, properties: any) => { for (const stream of streams) stream.write(`data: ${JSON.stringify({ directory: process.cwd(), payload: { type, properties } })}\n\n`); };
-  cleanups.push(async () => { for (const stream of streams) stream.destroy(); server.closeAllConnections(); server.close(); await once(server, 'close'); });
-  return { set health(value: unknown) { health = value; }, url: `http://127.0.0.1:${(server.address() as any).port}`, requests, emit, native, set nativeSelection(value: any) { nativeSelection = value; }, set children(value: any[]) { children = value; }, set globalSessions(value: any[]) { globalSessions = value; }, set globalListingStatus(value: number) { globalListingStatus = value; }, set connectedProviders(value: string[]) { connectedProviders = value; }, get connections() { return connections; }, get activeConnections() { return streams.size; }, set failHistoryReads(value: number) { failHistoryReads = value; }, blockNextHistory() {
-    let arrive!: () => void; let release!: () => void; const arrived = new Promise<void>(resolve => { arrive = resolve; });
-    historyBarrier = { arrive, wait: new Promise<void>(resolve => { release = resolve; }) }; return { arrived, release };
-  }, blockNextSessionRead() {
-    let arrive!: () => void; let release!: () => void; const arrived = new Promise<void>(resolve => { arrive = resolve; });
-    sessionBarrier = { arrive, wait: new Promise<void>(resolve => { release = resolve; }) }; return { arrived, release };
-  }, blockNextAbort() {
-    let arrive!: () => void; let release!: () => void; const arrived = new Promise<void>(resolve => { arrive = resolve; });
-    abortBarrier = { arrive, wait: new Promise<void>(resolve => { release = resolve; }) }; return { arrived, release };
-  }, get messages() { return messages; }, set messages(value) { messages = value; }, get status() { return status; }, set status(value) { status = value; }, set permissions(value) { permissions = value; }, set questions(value) { questions = value; }, set rejectPrompt(value) { rejectPrompt = value; }, set promptStatus(value: number) { promptStatus = value; }, disconnect() { for (const stream of streams) stream.destroy(); } };
+  cleanup.push(async () => { for (const stream of streams) stream.destroy(); server.closeAllConnections(); await new Promise<void>(resolve => server.close(() => resolve())); });
+  const provider = new OpenCodeAgentProvider({ serverUrl: `http://127.0.0.1:${(server.address() as { port: number }).port}`, requestTimeoutMs: 2000 });
+  cleanup.push(() => provider.close());
+  return { provider, messages, active, requests, streams, event, sessions, permissions, forms, state, block, instructions, disconnect() { for (const stream of streams) stream.destroy(); } };
+}
+
+it('opens ordinary sessions without handoff profile or unrelated ancestry requests', async () => {
+  const f = await fixture();
+  f.active.ses_unrelated = { type: 'running' };
+  const session = await open(f);
+  expect((await session.runtimeInfo()).connection?.state).toBe('connected');
+  expect(f.requests.filter(row => ['/api/info', '/api/config', '/api/plugin', '/api/session/ses_unrelated', '/api/session/ses_existing/inbox'].includes(row.path))).toEqual([]);
+  expect(f.requests.filter(row => row.path === '/api/model')).toHaveLength(1);
+  expect(f.requests.filter(row => row.path === '/api/agent')).toHaveLength(1);
+}, 10000);
+
+it('gates every unsupported handoff operation without native requests', async () => {
+  const f = await fixture(), session = await open(f);
+  const before = f.requests.length, evidence = session.nativeEvidence;
+  const unsupported = { code: 'native_evidence_unsupported' };
+  expect(f.provider.nativeEvidence.availability()).toMatchObject({ status: 'unavailable', ...unsupported });
+  expect(evidence.availability()).toMatchObject({ status: 'unavailable', ...unsupported });
+  await expect(f.provider.nativeEvidence.createEmpty({ sessionId: 'session_new', cwd: process.cwd() })).rejects.toMatchObject(unsupported);
+  await expect(evidence.inspectReadiness()).rejects.toMatchObject(unsupported);
+  await expect(evidence.prepareInput([{ type: 'text', text: 'Do not send' }])).rejects.toMatchObject(unsupported);
+  await expect(evidence.dispatchInput({} as any)).rejects.toMatchObject(unsupported);
+  expect(await evidence.inspectInput({} as any)).toMatchObject({ status: 'unknown', ...unsupported });
+  expect(() => evidence.captureValidity()).toThrow(expect.objectContaining(unsupported));
+  expect(evidence.isCurrent({} as any)).toBe(false);
+  expect(f.requests.slice(before)).toEqual([]);
+}, 10000);
+
+it.each(['opencode.empty', 'opencode.empty-recovery'])('rejects unsupported %s handles before native requests', async kind => {
+  const f = await fixture();
+  await expect(f.provider.resumeSession({ providerId: 'opencode', sessionId: 'ses_existing', opaque: JSON.stringify({ kind, cwd: process.cwd() }) })).rejects.toMatchObject({ code: 'native_evidence_unsupported' });
+  expect(f.requests).toEqual([]);
+}, 10000);
+
+it('opens v2 history and shares native observation across sessions', async () => {
+  const f = await fixture(); await f.provider.checkAvailability();
+  expect(await f.provider.listSessions()).toContainEqual(expect.objectContaining({ id: 'ses_existing', cwd: process.cwd() }));
+  const handle = { providerId: 'opencode', sessionId: 'ses_existing', opaque: JSON.stringify({ cwd: process.cwd() }) };
+  const first = await f.provider.resumeSession(handle), second = await f.provider.resumeSession(handle);
+  const output: ProviderStreamItem[] = []; const read = (async () => { for await (const item of first.observe()) output.push(item); })();
+  await expect.poll(() => output.some(item => item.type === 'history_boundary')).toBe(true);
+  expect(output).toContainEqual(expect.objectContaining({ type: 'observation', event: expect.objectContaining({ type: 'timeline', item: expect.objectContaining({ type: 'assistant_message', text: 'Existing answer' }) }) }));
+  expect((await first.runtimeInfo())).toMatchObject({ status: 'idle', model: 'test/model', connection: { state: 'connected' } });
+  expect(f.requests.filter(request => request.path === '/api/event')).toHaveLength(1);
+  await first.dispose(); await second.dispose(); await read;
+}, 10000);
+
+it('preserves native message sequence and turn identity when timestamps run backwards', async () => {
+  const f = await fixture();
+  f.messages.set('ses_existing', [
+    { type: 'user', id: 'msg_user', text: 'Original input', time: { created: 100 } },
+    { type: 'agent-switched', id: 'msg_control', agent: 'plan', time: { created: 200 } },
+    { type: 'assistant', id: 'msg_answer', agent: 'plan', model: { providerID: 'test', id: 'model' }, content: [{ type: 'text', text: 'Answer after agent switch' }], time: { created: 50, completed: 60 } },
+    { type: 'idle', id: 'msg_terminal', outcome: 'succeeded', time: { created: 40 } },
+  ]);
+  const session = await open(f), output = observe(session);
+  await settled(() => output.some(item => item.type === 'history_boundary'));
+  const content = output.flatMap(item => item.type === 'observation' && item.event.type === 'timeline' && ['user_message', 'assistant_message'].includes(item.event.item.type) ? [item.event] : []);
+  expect(content.map(event => event.item.type)).toEqual(['user_message', 'assistant_message']);
+  expect(content.map(event => event.turnId)).toEqual(['msg_user', 'msg_user']);
+  expect(await session.runtimeInfo()).toMatchObject({ status: 'idle' });
+}, 10000);
+
+it('creates, sends once, observes authoritative activity, and renames through the v2 API', async () => {
+  const f = await fixture(); const session = await f.provider.createSession({ cwd: process.cwd() });
+  const accepted: unknown[] = [];
+  await session.sendMessage('Native input', { onAcceptance: value => accepted.push(value) });
+  await expect.poll(async () => (await session.runtimeInfo()).status).toBe('running');
+  expect(accepted).toHaveLength(1);
+  expect(f.requests.filter(request => request.path.endsWith('/prompt'))).toHaveLength(1);
+  await session.cancel(); await expect.poll(async () => (await session.runtimeInfo()).status).toBe('idle');
+  await f.provider.renameSession(session.nativeId, 'Updated title');
+  expect(await f.provider.getSession(session.nativeId)).toMatchObject({ title: 'Updated title' });
+  await session.dispose();
+}, 10000);
+
+it('admits busy steer after exact native delivery without waiting for history refresh', async () => {
+  const f = await fixture(); const session = await f.provider.createSession({ cwd: process.cwd() });
+  f.state.prompt = 'ack-only';
+  const history = f.block(`/api/session/${session.nativeId}/message`);
+  try {
+    await session.sendMessage('First admitted input');
+    const first = f.requests.find(request => request.path.endsWith('/prompt'))!.body.id;
+    f.event('session.inbox.delivered', { sessionID: 'ses_other', inboxID: first });
+    f.event('session.inbox.delivered', { sessionID: session.nativeId, inboxID: 'msg_other' });
+    await expect(session.sendMessage('Must remain fenced')).rejects.toThrow(/pending interactions/);
+    f.active[session.nativeId] = { type: 'running' };
+    f.event('session.inbox.delivered', { sessionID: session.nativeId, inboxID: first });
+    f.event('session.execution.started', { sessionID: session.nativeId });
+    await expect.poll(async () => (await session.runtimeInfo()).status).toBe('running');
+    await history.arrived;
+    await expect(session.steer('Follow-up while history is still pending')).resolves.toEqual({ disposition: 'queued' });
+    expect(f.requests.filter(request => request.path.endsWith('/prompt')).map(request => request.body.text)).toEqual(['First admitted input', 'Follow-up while history is still pending']);
+  } finally { history.release(); }
+}, 10000);
+
+it('refreshes session settings when the native model catalog becomes available', async () => {
+  const f = await fixture(); f.state.modelEnabled = false;
+  const session = await open(f);
+  expect((await session.runtimeInfo()).settings?.find(item => item.id === 'model')?.options).toEqual([]);
+  f.state.modelEnabled = true;
+  f.event('model.updated', { providerID: 'test', id: 'model' });
+  await expect.poll(async () => (await session.runtimeInfo()).settings?.find(item => item.id === 'model')?.options).toContainEqual(expect.objectContaining({ value: 'test/model' }));
+  await session.dispose();
+}, 10000);
+
+async function open(f: Awaited<ReturnType<typeof fixture>>) {
+  return f.provider.resumeSession({ providerId: 'opencode', sessionId: 'ses_existing', opaque: JSON.stringify({ cwd: process.cwd() }) });
 }
 function observe(session: AgentSession) {
   const items: ProviderStreamItem[] = [];
-  const task = (async () => { for await (const item of session.observe()) items.push(item); })();
-  cleanups.push(async () => { await session.dispose(); await task; });
+  const task = (async () => { for await (const item of session.observe()) items.push(structuredClone(item)); })();
+  cleanup.push(async () => { await session.dispose(); await task; });
   return items;
 }
-async function waitFor(predicate: () => boolean) { await expect.poll(predicate, { timeout: 4000, interval: 10 }).toBe(true); }
-function timeline(items: ProviderStreamItem[]) {
-  let result: any[] = [];
+function text(items: ProviderStreamItem[]) {
+  const messages = new Map<string, string>();
   for (const item of items) {
-    if (item.type === 'timeline_replacement') result = item.observations.flatMap(o => o.event.type === 'timeline' ? [o.event.item] : []);
-    if (item.type === 'observation' && item.event.type === 'timeline') {
-      const next = structuredClone(item.event.item); const last = result.at(-1);
-      if (last?.type === next.type && (next.type === 'assistant_message' && last.messageId === next.messageId || next.type === 'reasoning')) last.text += next.text;
-      else result.push(next);
+    if (item.type === 'timeline_replacement') {
+      messages.clear(); for (const observation of item.observations) {
+        const event = observation.event;
+        if (event.type === 'timeline' && event.item.type === 'assistant_message') messages.set(event.item.messageId ?? observation.sourceKey, event.item.text);
+      }
+    } else if (item.type === 'observation' && item.event.type === 'timeline' && item.event.item.type === 'assistant_message') {
+      const key = item.event.item.messageId ?? item.sourceKey;
+      messages.set(key, (messages.get(key) ?? '') + item.event.item.text);
     }
   }
-  return result;
+  return [...messages.values()].join('\n');
 }
-const assistant = (text: string) => ({ info: { id: 'msg_assistant', sessionID: 'ses_test', role: 'assistant', parentID: 'msg_user', time: { created: 3000 }, tokens: { input: 2, output: 3, reasoning: 0, cache: { read: 1, write: 0 } }, cost: .01 }, parts: [{ type: 'text', id: 'prt_text', messageID: 'msg_assistant', sessionID: 'ses_test', text }] });
+const settled = async (predicate: () => unknown) => expect.poll(predicate, { timeout: 4000, interval: 15 }).toBeTruthy();
 
-test('shares native sessions, emits a history boundary and native input echo, and never aborts on dispose', async () => {
+it('skips duplicate renames, returns missing sessions, and verifies the native workspace', async () => {
   const f = await fixture();
-  const provider = new OpenCodeAgentProvider({ serverUrl: f.url }); cleanups.push(() => provider.close());
-  const session = await provider.createSession({ sessionId: 'local', cwd: process.cwd() });
-  const items = observe(session);
-  await waitFor(() => items.some(i => i.type === 'history_boundary'));
-  await session.sendMessage('Hello');
-  await waitFor(() => timeline(items).some(i => i.type === 'user_message' && i.text === 'Hello'));
-  await session.dispose();
-  expect(f.requests.filter(r => r.path.endsWith('/abort'))).toHaveLength(0);
-}, 10000);
-
-test('reconciles final text, duplicate notifications and missed events after reconnect without failing the turn', async () => {
-  const f = await fixture(); f.messages = [assistant('Hel')]; f.status = { type: 'busy' };
-  const provider = new OpenCodeAgentProvider({ serverUrl: f.url }); cleanups.push(() => provider.close());
-  const session = await provider.resumeSession({ providerId: 'opencode', sessionId: 'ses_test', opaque: JSON.stringify({ cwd: process.cwd() }) });
-  const items = observe(session); await waitFor(() => timeline(items).length === 1);
-  f.messages = [assistant('Hello')]; f.emit('message.part.updated', { part: f.messages[0].parts[0] });
-  f.emit('message.part.updated', { part: f.messages[0].parts[0] });
-  await waitFor(() => timeline(items)[0]?.text === 'Hello');
-  f.disconnect(); f.messages = [assistant('Hello recovered')];
-  await waitFor(() => timeline(items)[0]?.text === 'Hello recovered');
-  expect(timeline(items)).toHaveLength(1);
-  expect(items.some(i => i.type === 'observation' && i.event.type === 'turn_failed')).toBe(false);
-}, 10000);
-
-test('does not replay an uncertain prompt and rejects unsupported queued delivery', async () => {
-  const f = await fixture(); const provider = new OpenCodeAgentProvider({ serverUrl: f.url }); cleanups.push(() => provider.close());
-  const session = await provider.createSession({ sessionId: 'local', cwd: process.cwd() }); observe(session);
-  await expect(session.sendMessage('queued', { delivery: 'next_turn' })).rejects.toThrow();
-  f.rejectPrompt = true; await expect(session.sendMessage('uncertain')).rejects.toThrow();
-  expect(f.requests.filter(r => r.path.endsWith('/prompt_async'))).toHaveLength(1);
-}, 10000);
-
-test('lists and reads native sessions, verifies cwd, and skips same-title rename', async () => {
-  const f = await fixture(); const provider = new OpenCodeAgentProvider({ serverUrl: f.url }); cleanups.push(() => provider.close());
-  expect(await provider.listSessions()).toEqual([{ id: 'ses_test', title: 'Native title', cwd: process.cwd(), createdAt: new Date(1000).toISOString(), updatedAt: new Date(2000).toISOString() }]);
-  await provider.renameSession('ses_test', 'Native title');
-  expect(f.requests.filter(r => r.method === 'PATCH')).toHaveLength(0);
-  await provider.renameSession('ses_test', 'Changed'); expect((await provider.getSession('ses_test'))?.title).toBe('Changed');
-  await expect(provider.resumeSession({ providerId: 'opencode', sessionId: 'ses_test', opaque: JSON.stringify({ cwd: '/wrong' }) })).rejects.toThrow();
-}, 10000);
-
-test('streams keyed text deltas without fetching full history per token', async () => {
-  const f = await fixture(); f.messages = [assistant('Start')];
-  const provider = new OpenCodeAgentProvider({ serverUrl: f.url }); cleanups.push(() => provider.close());
-  const session = await provider.createSession({ sessionId: 'local', cwd: process.cwd() }); const items = observe(session);
-  await waitFor(() => timeline(items).length === 1);
-  const reads = () => f.requests.filter(r => r.path === '/session/ses_test/message').length;
-  const before = reads();
-  for (let i = 0; i < 20; i++) f.emit('message.part.delta', { sessionID: 'ses_test', messageID: 'msg_assistant', partID: 'prt_text', field: 'text', delta: '.' });
-  await waitFor(() => timeline(items)[0]?.text === 'Start' + '.'.repeat(20));
-  expect(reads()).toBe(before);
-  expect(items.filter(i => i.type === 'timeline_replacement')).toHaveLength(0);
-}, 10000);
-
-test('hydrates pending interactions and maps local answers and remote permission decisions', async () => {
-  const f = await fixture();
-  f.questions = [{ id: 'question_1', sessionID: 'ses_test', questions: [{ header: 'Choice', question: 'Which?', options: [{ label: 'One', description: 'First' }], custom: true }] }];
-  f.permissions = [{ id: 'permission_1', sessionID: 'ses_test', permission: 'bash', patterns: ['pwd'], metadata: {}, always: [], tool: { callID: 'call_1', messageID: 'msg_assistant' } }];
-  const provider = new OpenCodeAgentProvider({ serverUrl: f.url }); cleanups.push(() => provider.close());
-  const session = await provider.createSession({ sessionId: 'local', cwd: process.cwd() }); const items = observe(session);
-  await waitFor(() => items.filter(i => i.type === 'observation' && i.event.type === 'interaction_requested').length === 2);
-  expect((await session.runtimeInfo()).status).toBe('idle');
-  await expect(session.respondToInteraction('question_1', { kind: 'question', answers: [{ questionId: '0', selectedValues: ['Invalid'] }] })).rejects.toThrow();
-  await session.respondToInteraction('question_1', { kind: 'question', answers: [{ questionId: '0', selectedValues: [], customText: 'Custom' }] });
-  expect(f.requests.find(r => r.path === '/question/question_1/reply')?.body).toEqual({ answers: [['Custom']] });
-  f.emit('permission.replied', { sessionID: 'ses_test', requestID: 'permission_1', reply: 'once' });
-  await waitFor(() => items.some(i => i.type === 'observation' && i.event.type === 'interaction_resolved' && i.event.requestId === 'permission_1'));
-}, 10000);
-
-test('recovers requests resolved elsewhere as invalidated instead of inventing an answer', async () => {
-  const f = await fixture();
-  f.questions = [{ id: 'question_1', sessionID: 'ses_test', questions: [{ header: 'Choice', question: 'Which?', options: [{ label: 'One', description: 'First' }] }] }];
-  const provider = new OpenCodeAgentProvider({ serverUrl: f.url }); cleanups.push(() => provider.close());
-  const session = await provider.createSession({ sessionId: 'local', cwd: process.cwd() }); const items = observe(session);
-  f.disconnect(); f.questions = [];
-  await waitFor(() => items.some(i => i.type === 'observation' && i.event.type === 'interaction_invalidated' && i.event.requestId === 'question_1'));
-  await expect(session.respondToInteraction('question_1', { kind: 'question', answers: [], dismissed: true })).rejects.toThrow('no longer pending');
-}, 10000);
-
-test('maps reasoning, completed tool output, todos and usage and preserves todos through corrections', async () => {
-  const f = await fixture(); const message = assistant('Answer');
-  message.parts.unshift({ type: 'reasoning', id: 'prt_reason', messageID: 'msg_assistant', sessionID: 'ses_test', text: 'Thinking' } as any);
-  message.parts.push({ type: 'tool', id: 'prt_tool', messageID: 'msg_assistant', sessionID: 'ses_test', callID: 'call_1', tool: 'bash', state: { status: 'completed', input: { command: 'pwd' }, output: '/work', title: 'pwd', metadata: {}, time: { start: 1, end: 3 } } } as any);
-  f.messages = [message];
-  const provider = new OpenCodeAgentProvider({ serverUrl: f.url }); cleanups.push(() => provider.close());
-  const session = await provider.createSession({ sessionId: 'local', cwd: process.cwd() }); const items = observe(session);
-  await waitFor(() => timeline(items).length === 3);
-  expect(timeline(items)[0]).toMatchObject({ type: 'reasoning', text: 'Thinking' });
-  expect(timeline(items)[2]).toMatchObject({ type: 'tool_call', status: 'completed', result: { content: [{ type: 'text', text: '/work' }] } });
-  f.emit('todo.updated', { sessionID: 'ses_test', todos: [{ content: 'Work', status: 'in_progress', priority: 'high' }] });
-  await waitFor(() => timeline(items).some(i => i.type === 'todo'));
-  const corrected = { ...message.parts[1], text: 'Corrected' }; f.emit('message.part.updated', { part: corrected });
-  await waitFor(() => timeline(items).some(i => i.type === 'assistant_message' && i.text === 'Corrected'));
-  expect(timeline(items).some(i => i.type === 'todo')).toBe(true);
-  expect(items.some(i => i.type === 'observation' && i.event.type === 'usage_updated' && i.event.usage.outputTokens === 3)).toBe(true);
-}, 10000);
-
-test('cancels only explicitly and distinguishes canceled turns from failed turns', async () => {
-  const f = await fixture(); f.messages = [assistant('Partial')]; f.status = { type: 'busy' };
-  const provider = new OpenCodeAgentProvider({ serverUrl: f.url }); cleanups.push(() => provider.close());
-  const session = await provider.createSession({ sessionId: 'local', cwd: process.cwd() }); const items = observe(session);
-  await session.cancel();
-  expect(f.requests.filter(r => r.path.endsWith('/abort'))).toHaveLength(1);
-  const failed = assistant('Partial'); (failed.info as any).error = { name: 'MessageAbortedError', data: { message: 'Aborted' } };
-  f.messages = [failed]; f.status = { type: 'idle' };
-  f.emit('session.error', { sessionID: 'ses_test', error: (failed.info as any).error });
-  f.emit('message.updated', { info: failed.info }); f.emit('session.idle', { sessionID: 'ses_test' });
-  await waitFor(() => items.some(i => i.type === 'observation' && i.event.type === 'turn_canceled'));
-  await new Promise(resolve => setTimeout(resolve, 200));
-  expect(items.filter(i => i.type === 'observation' && i.event.type === 'turn_canceled')).toHaveLength(1);
-  expect(items.some(i => i.type === 'observation' && (i.event.type === 'turn_failed' || i.event.type === 'turn_completed'))).toBe(false);
-}, 10000);
-
-test('uses native catalog selections and commands and keeps credentials out of persistence', async () => {
-  const f = await fixture(); const provider = new OpenCodeAgentProvider({ serverUrl: f.url, username: 'local-user', password: 'secret-password' }); cleanups.push(() => provider.close());
-  const session = await provider.createSession({ sessionId: 'local', cwd: process.cwd() }); observe(session);
-  await session.setSessionSetting!('model', 'test/model'); await session.setPlanning!(true);
-  expect((await session.listCommands!())[0]).toMatchObject({ id: 'check', name: 'check' });
-  await session.executeCommand!('check', 'scope');
-  expect(f.requests.find(r => r.path.endsWith('/command') && r.method === 'POST')?.body).toMatchObject({ command: 'check', arguments: 'scope' });
-  await session.sendMessage('Plan');
-  expect(f.requests.find(r => r.path.endsWith('/prompt_async'))?.body).toMatchObject({ model: { providerID: 'test', modelID: 'model' }, agent: 'plan' });
-  const persisted = (await session.runtimeInfo()).persistence!;
-  expect(JSON.parse(persisted.opaque)).toEqual({ cwd: process.cwd(), model: 'test/model', agent: 'plan' });
-  expect(JSON.stringify(await session.runtimeInfo())).not.toContain('secret-password');
-  expect(() => new OpenCodeAgentProvider({ serverUrl: f.url, restrictedNative: true })).toThrow('permissions');
-}, 10000);
-
-test('reconciles deltas buffered during ordinary snapshots without replaying already captured text', async () => {
-  const f = await fixture(); f.messages = [assistant('A')];
-  const provider = new OpenCodeAgentProvider({ serverUrl: f.url }); cleanups.push(() => provider.close());
-  const session = await provider.createSession({ sessionId: 'local', cwd: process.cwd() }); const items = observe(session);
-  await waitFor(() => timeline(items)[0]?.text === 'A');
-  const barrier = f.blockNextHistory(); f.messages = [assistant('AB')];
-  f.emit('session.idle', { sessionID: 'ses_test' });
-  await barrier.arrived;
-  f.emit('message.part.delta', { sessionID: 'ses_test', messageID: 'msg_assistant', partID: 'prt_text', field: 'text', delta: 'B' });
-  await new Promise(resolve => setTimeout(resolve, 20)); barrier.release();
-  await new Promise(resolve => setTimeout(resolve, 250));
-  expect(timeline(items)[0]?.text).toBe('AB');
-}, 10000);
-
-test('retries failed recovery snapshots without poisoning future live event processing', async () => {
-  const f = await fixture(); f.messages = [assistant('Before')];
-  const provider = new OpenCodeAgentProvider({ serverUrl: f.url }); cleanups.push(() => provider.close());
-  const session = await provider.createSession({ sessionId: 'local', cwd: process.cwd() }); const items = observe(session);
-  f.failHistoryReads = 1; f.disconnect(); f.messages = [assistant('After')];
-  await waitFor(() => timeline(items)[0]?.text === 'After');
-  f.emit('message.part.delta', { sessionID: 'ses_test', messageID: 'msg_assistant', partID: 'prt_text', field: 'text', delta: '!' });
-  await waitFor(() => timeline(items)[0]?.text === 'After!');
-  expect((await session.runtimeInfo()).connection?.state).toBe('connected');
-  expect(items.some(i => i.type === 'observation' && i.event.type === 'turn_failed')).toBe(false);
-}, 10000);
-
-test('sends validated inline images and reads only their bounded native resource bytes', async () => {
-  const directory = await mkdtemp(join(tmpdir(), 'opencode-images-')); cleanups.push(() => rm(directory, { recursive: true, force: true }));
-  const bytes = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Wl6cVQAAAAASUVORK5CYII=', 'base64');
-  const path = join(directory, 'pixel.png'); await writeFile(path, bytes);
-  const f = await fixture(); const provider = new OpenCodeAgentProvider({ serverUrl: f.url }); cleanups.push(() => provider.close());
-  const session = await provider.createSession({ sessionId: 'local', cwd: process.cwd() }); const items = observe(session);
-  await expect(session.sendMessageContent!([{ type: 'image', path, mediaType: 'image/png', sha256: 'bad', label: 'Bad' }])).rejects.toThrow('validation');
-  await session.sendMessageContent!([{ type: 'image', path, mediaType: 'image/png', sha256: createHash('sha256').update(bytes).digest('hex'), label: 'Pixel' }]);
-  expect(f.requests.find(r => r.path.endsWith('/prompt_async'))?.body.parts[0]).toEqual({ type: 'file', mime: 'image/png', filename: 'Pixel', url: `data:image/png;base64,${bytes.toString('base64')}` });
-  await waitFor(() => timeline(items).some(i => i.type === 'user_message' && i.content?.[0]?.type === 'image'));
-  const locator = timeline(items).find(i => i.type === 'user_message').content[0].locator;
-  expect(await session.readResource!(locator)).toEqual({ status: 'available', bytes: Uint8Array.from(bytes), mediaType: 'image/png' });
-  expect((await session.readResource!(`file://${path}`)).status).toBe('unavailable');
-}, 10000);
-
-test('normalizes native user compaction markers without fabricating empty user messages', async () => {
-  const f = await fixture();
-  f.messages = [{ info: { id: 'msg_compaction', sessionID: 'ses_test', role: 'user', time: { created: 3000 } }, parts: [{ type: 'compaction', id: 'prt_compact', messageID: 'msg_compaction', sessionID: 'ses_test', auto: true }] }];
-  const provider = new OpenCodeAgentProvider({ serverUrl: f.url }); cleanups.push(() => provider.close());
-  const session = await provider.createSession({ sessionId: 'local', cwd: process.cwd() }); const items = observe(session);
-  await waitFor(() => items.some(i => i.type === 'history_boundary'));
-  expect(timeline(items)).toEqual([{ type: 'compaction', status: 'loading', trigger: 'auto' }]);
-}, 10000);
-
-test('preserves exactly one answered interaction in Relay before and after a timeline correction', async () => {
-  const { AgentManager } = await import('../../agent-remote-relay/src/agent-manager.js');
-  const f = await fixture(); f.messages = [assistant('Before')];
-  f.questions = [{ id: 'question_1', sessionID: 'ses_test', questions: [{ header: 'Choice', question: 'Which?', options: [{ label: 'One', description: 'First' }] }] }];
-  const provider = new OpenCodeAgentProvider({ serverUrl: f.url }); cleanups.push(() => provider.close());
-  const session = await provider.createSession({ sessionId: 'local', cwd: process.cwd() });
-  const manager = await AgentManager.attach({ agentId: 'test', provider: provider.descriptor, session, epoch: 'first' }); cleanups.push(() => manager.close()); await manager.ready;
-  const rows = () => manager.fetchTimeline({ requestId: 'test', agentId: 'test', epoch: manager.timelineCursor().epoch, direction: 'tail', limit: 20 }).payload.entries.map(entry => entry.item);
-  await session.respondToInteraction('question_1', { kind: 'question', answers: [{ questionId: '0', selectedValues: ['One'] }] });
-  await waitFor(() => manager.snapshot().payload.pendingInteractions.length === 0);
-  expect(rows().filter(item => item.type === 'interaction')).toHaveLength(1);
-  f.emit('message.part.updated', { part: assistant('Corrected').parts[0] });
-  await waitFor(() => rows().some(item => item.type === 'assistant_message' && item.text === 'Corrected'));
-  expect(rows().filter(item => item.type === 'interaction')).toHaveLength(1);
-}, 10000);
-
-test('restores native model and agent from the latest user message when the handle only carries cwd', async () => {
-  const f = await fixture();
-  f.messages = [{ info: { id: 'msg_user', sessionID: 'ses_test', role: 'user', time: { created: 1000 }, model: { providerID: 'test', modelID: 'model' }, agent: 'plan' }, parts: [{ type: 'text', id: 'prt_user', messageID: 'msg_user', sessionID: 'ses_test', text: 'Plan' }] }];
-  const provider = new OpenCodeAgentProvider({ serverUrl: f.url }); cleanups.push(() => provider.close());
-  const session = await provider.resumeSession({ providerId: 'opencode', sessionId: 'ses_test', opaque: JSON.stringify({ cwd: process.cwd() }) }); observe(session);
-  expect(await session.runtimeInfo()).toMatchObject({ model: 'test/model', mode: 'plan', planning: { active: true } });
-  await session.sendMessage('Continue');
-  expect(f.requests.find(r => r.path.endsWith('/prompt_async'))?.body).toMatchObject({ model: { providerID: 'test', modelID: 'model' }, agent: 'plan' });
-}, 10000);
-
-test('multiplexes one global SSE connection and keeps another observer live after detach', async () => {
-  const f = await fixture(); f.messages = [assistant('Shared')];
-  const provider = new OpenCodeAgentProvider({ serverUrl: f.url }); cleanups.push(() => provider.close());
-  const first = await provider.createSession({ sessionId: 'one', cwd: process.cwd() }); const one = observe(first);
-  const second = await provider.resumeSession({ providerId: 'opencode', sessionId: 'ses_test', opaque: JSON.stringify({ cwd: process.cwd() }) }); const two = observe(second);
-  await waitFor(() => timeline(one)[0]?.text === 'Shared' && timeline(two)[0]?.text === 'Shared');
-  expect(f.connections).toBe(1); expect(f.activeConnections).toBe(1);
-  await first.dispose();
-  f.emit('message.part.delta', { sessionID: 'ses_test', messageID: 'msg_assistant', partID: 'prt_text', field: 'text', delta: '!' });
-  await waitFor(() => timeline(two)[0]?.text === 'Shared!');
-  expect(timeline(one)[0]?.text).toBe('Shared');
-  expect(f.requests.filter(r => r.path.endsWith('/abort'))).toHaveLength(0);
-}, 10000);
-
-test('tracks persisted native selections without letting older prompt metadata overwrite them', async () => {
-  const f = await fixture(); const provider = new OpenCodeAgentProvider({ serverUrl: f.url }); cleanups.push(() => provider.close());
-  const session = await provider.createSession({ sessionId: 'local', cwd: process.cwd(), model: 'test/model', planning: true }); const items = observe(session);
-  await session.sendMessage('First'); await waitFor(() => timeline(items).some(item => item.type === 'user_message'));
-  const external = { id: 'msg_external', role: 'user', sessionID: 'ses_test', model: { providerID: 'test', modelID: 'model' }, agent: 'build', time: { created: Date.now() + 10 } };
-  f.nativeSelection = { model: { providerID: 'test', id: 'model' }, agent: 'build' };
-  f.emit('session.next.agent.switched', { sessionID: 'ses_test', agent: 'build', timestamp: new Date().toISOString(), messageID: 'switch_1' });
-  f.messages.push({ info: external, parts: [] }); f.emit('message.updated', { info: external });
-  await expect.poll(async () => (await session.runtimeInfo()).mode, { timeout: 4000 }).toBe('build');
-  await session.setSessionSetting!('agent', 'plan');
-  const later = { ...external, id: 'msg_later', time: { created: Date.now() + 20 } };
-  f.messages.push({ info: later, parts: [] }); f.emit('message.updated', { info: later });
-  await new Promise(resolve => setTimeout(resolve, 150));
-  expect((await session.runtimeInfo()).mode).toBe('plan');
-}, 10000);
-
-test('bounds initial history and loads an older native page without changing live runtime', async () => {
-  const f = await fixture();
-  f.messages = Array.from({ length: 205 }, (_, index) => ({ info: { id: `msg_${String(index).padStart(4, '0')}`, role: 'user', sessionID: 'ses_test', time: { created: index + 1 } }, parts: [{ type: 'text', id: `prt_${index}`, messageID: `msg_${String(index).padStart(4, '0')}`, sessionID: 'ses_test', text: `Message ${index}` }] }));
-  const provider = new OpenCodeAgentProvider({ serverUrl: f.url }); cleanups.push(() => provider.close());
-  const session = await provider.createSession({ sessionId: 'local', cwd: process.cwd() }); const items = observe(session);
-  await waitFor(() => items.some(i => i.type === 'history_boundary'));
-  expect(timeline(items)).toHaveLength(200);
-  const cursor = Buffer.from(JSON.stringify({ id: 'msg_0005', time: 6 })).toString('base64url');
-  const boundary = items.find(i => i.type === 'history_boundary'); expect(boundary).toMatchObject({ olderCursor: cursor });
-  const before = await session.runtimeInfo();
-  const page = await session.readTimelineHistory!(cursor);
-  expect(page.observations).toHaveLength(5); expect(page.nextCursor).toBeUndefined();
-  expect(await session.runtimeInfo()).toEqual(before);
-}, 10000);
-
-test('marks compaction completed from its native summary message', async () => {
-  const f = await fixture();
-  const summary = assistant('Compacted context'); summary.info.parentID = 'msg_compaction'; (summary.info as any).summary = true; (summary.info.time as any).completed = 4000;
-  f.messages = [{ info: { id: 'msg_compaction', sessionID: 'ses_test', role: 'user', time: { created: 2000 } }, parts: [{ type: 'compaction', id: 'prt_compact', messageID: 'msg_compaction', sessionID: 'ses_test', auto: false }] }, summary];
-  const provider = new OpenCodeAgentProvider({ serverUrl: f.url }); cleanups.push(() => provider.close());
-  const session = await provider.createSession({ sessionId: 'local', cwd: process.cwd() }); const items = observe(session);
-  await waitFor(() => items.some(i => i.type === 'history_boundary'));
-  expect(timeline(items)[0]).toEqual({ type: 'compaction', status: 'completed', trigger: 'manual' });
-}, 10000);
-
-test('sanitizes timed out request errors without retrying sends', async () => {
-  const f = await fixture(); const provider = new OpenCodeAgentProvider({ serverUrl: f.url, password: 'keep-local', requestTimeoutMs: 150 }); cleanups.push(() => provider.close());
-  const session = await provider.createSession({ sessionId: 'local', cwd: process.cwd() }); observe(session);
-  const barrier = f.blockNextHistory();
-  const history = provider.readSessionHistory('ses_test', {});
-  await barrier.arrived;
-  await expect(history).rejects.toThrow('OpenCode request did not complete');
-  barrier.release();
-  expect(f.requests.filter(r => r.path.endsWith('/prompt_async'))).toHaveLength(0);
-}, 10000);
-
-test('keeps native history readable when its previous model is no longer connected', async () => {
-  const f = await fixture(); f.connectedProviders = [];
-  f.messages = [{ info: { id: 'msg_user', sessionID: 'ses_test', role: 'user', time: { created: 1000 }, model: { providerID: 'old', modelID: 'removed' }, agent: 'plan' }, parts: [{ type: 'text', id: 'prt_user', messageID: 'msg_user', sessionID: 'ses_test', text: 'Earlier work' }] }];
-  const provider = new OpenCodeAgentProvider({ serverUrl: f.url }); cleanups.push(() => provider.close());
-  const session = await provider.resumeSession({ providerId: 'opencode', sessionId: 'ses_test', opaque: JSON.stringify({ cwd: process.cwd() }) }); const items = observe(session);
-  await waitFor(() => timeline(items).some(item => item.type === 'user_message' && item.text === 'Earlier work'));
-  expect((await session.runtimeInfo()).model).toBe('old/removed');
-}, 10000);
-
-test('reports latest native token usage without claiming a total cost for a truncated history window', async () => {
-  const f = await fixture();
-  f.messages = Array.from({ length: 201 }, (_, index) => { const message = assistant(`Answer ${index}`); message.info.id = `msg_${String(index).padStart(4, '0')}`; message.info.time.created = index + 1; return message; });
-  const provider = new OpenCodeAgentProvider({ serverUrl: f.url }); cleanups.push(() => provider.close());
-  const session = await provider.createSession({ sessionId: 'local', cwd: process.cwd() }); const items = observe(session);
-  await waitFor(() => items.some(i => i.type === 'history_boundary'));
-  const usage = items.flatMap(i => i.type === 'observation' && i.event.type === 'usage_updated' ? [i.event.usage] : []).at(-1);
-  expect(usage).toMatchObject({ tokenScope: 'call', inputTokens: 2, cachedInputTokens: 1, cacheCreationInputTokens: 0, outputTokens: 3, totalTokens: 6 });
-  expect(usage).not.toHaveProperty('totalCostUsd');
-}, 10000);
-
-test('reads native session totals on attach and replaces them after native updates and reconnects', async () => {
-  const f = await fixture();
-  const tokens = { input: 100, output: 20, reasoning: 5, cache: { read: 40, write: 10 } };
-  f.nativeSelection = { tokens };
-  f.messages = [assistant('Latest answer')];
-  const provider = new OpenCodeAgentProvider({ serverUrl: f.url }); cleanups.push(() => provider.close());
-  const session = await provider.resumeSession({ providerId: 'opencode', sessionId: 'ses_test', opaque: JSON.stringify({ cwd: process.cwd() }) });
-  const items = observe(session);
-  const snapshots = () => items.flatMap(item => item.type === 'observation' && item.event.type === 'usage_updated' ? [item.event.usage] : []);
-  await waitFor(() => items.some(item => item.type === 'history_boundary'));
-  expect(snapshots().at(-1)).toMatchObject({ tokenScope: 'session', inputTokens: 100, outputTokens: 25, cachedInputTokens: 40, cacheCreationInputTokens: 10, totalTokens: 175, contextScope: 'current', contextWindowUsedTokens: 6 });
-  f.emit('session.updated', { info: f.native() });
-  f.nativeSelection = { tokens: { ...tokens, input: 110 } };
-  f.emit('session.updated', { info: f.native() });
-  await waitFor(() => snapshots().at(-1)?.totalTokens === 185);
-  expect(snapshots()).toHaveLength(2);
-  f.nativeSelection = { tokens: { ...tokens, input: 120 } };
-  f.disconnect();
-  await waitFor(() => snapshots().at(-1)?.totalTokens === 195);
-  expect(snapshots().at(-1)).toMatchObject({ tokenScope: 'session', inputTokens: 120, contextScope: 'current', contextWindowUsedTokens: 6 });
-}, 10000);
-
-test('does not resurrect a canceled native turn while reconciling its retained error message', async () => {
-  const f = await fixture();
-  const user = { info: { id: 'msg_user', role: 'user', sessionID: 'ses_test', time: { created: 1000 } }, parts: [{ type: 'text', id: 'prt_user', messageID: 'msg_user', sessionID: 'ses_test', text: 'Work' }] };
-  const canceled = assistant('Partial'); (canceled.info as any).error = { name: 'MessageAbortedError', data: { message: 'Aborted' } }; (canceled.info.time as any).completed = 4000;
-  f.messages = [user, canceled];
-  const provider = new OpenCodeAgentProvider({ serverUrl: f.url }); cleanups.push(() => provider.close());
-  const session = await provider.createSession({ sessionId: 'local', cwd: process.cwd() }); const items = observe(session);
-  await waitFor(() => items.some(i => i.type === 'history_boundary'));
-  f.disconnect();
-  await waitFor(() => f.connections === 2);
-  await new Promise(resolve => setTimeout(resolve, 100));
-  const runtime = items.flatMap(i => i.type === 'observation' && i.event.type === 'runtime_updated' ? [i.event] : []).at(-1);
-  expect(runtime?.activeTurnId).toBeNull();
-  expect(runtime?.runtimeInfo.status).toBe('idle');
-}, 10000);
-
-test('lists every native page across projects instead of the server current project only', async () => {
-  const f = await fixture();
-  f.globalSessions = Array.from({ length: 250 }, (_, index) => ({ id: `ses_${index}`, title: `Session ${index}`, directory: index < 200 ? '/project-one' : '/project-two', time: { created: 1000, updated: 5000 - index } }));
-  const provider = new OpenCodeAgentProvider({ serverUrl: f.url }); cleanups.push(() => provider.close());
-  const sessions = await provider.listSessions();
-  expect(sessions).toHaveLength(250);
-  expect(sessions.at(-1)).toMatchObject({ id: 'ses_249', cwd: '/project-two' });
-  expect(f.requests.filter(request => request.path === '/experimental/session')).toHaveLength(2);
-  expect(f.requests.filter(request => request.path === '/session')).toHaveLength(0);
-}, 10000);
-
-test('reports an unavailable global listing endpoint without falling back to an incomplete project listing', async () => {
-  const f = await fixture(); f.globalListingStatus = 404;
-  const provider = new OpenCodeAgentProvider({ serverUrl: f.url }); cleanups.push(() => provider.close());
-  await expect(provider.listSessions()).rejects.toThrow('HTTP 404');
-  expect(f.requests.filter(request => request.path === '/session')).toHaveLength(0);
-}, 10000);
-
-test.each(['todo', 'receipt'])('keeps one Relay epoch when streaming after %s', async kind => {
-  const { AgentManager } = await import('../../agent-remote-relay/src/agent-manager.js');
-  const f = await fixture(); f.messages = [assistant('A')];
-  if (kind === 'receipt') f.questions = [{ id: 'question_1', sessionID: 'ses_test', questions: [{ header: 'Choice', question: 'Which?', options: [{ label: 'One', description: 'First' }] }] }];
-  const provider = new OpenCodeAgentProvider({ serverUrl: f.url }); cleanups.push(() => provider.close());
-  const session = await provider.createSession({ sessionId: 'local', cwd: process.cwd() });
-  const manager = await AgentManager.attach({ agentId: 'test', provider: provider.descriptor, session, epoch: 'initial' });
-  cleanups.push(() => manager.close()); await manager.ready;
-  const rows = () => manager.fetchTimeline({ requestId: 'test', agentId: 'test', epoch: manager.timelineCursor().epoch, direction: 'tail', limit: 20 }).payload.entries.map(entry => entry.item);
-  if (kind === 'todo') {
-    f.emit('todo.updated', { sessionID: 'ses_test', todos: [{ content: 'Work', status: 'in_progress', priority: 'high' }] });
-    await waitFor(() => rows().some(item => item.type === 'todo'));
-  } else {
-    await session.respondToInteraction('question_1', { kind: 'question', answers: [{ questionId: '0', selectedValues: ['One'] }] });
-    await waitFor(() => rows().some(item => item.type === 'interaction'));
-  }
-  const epoch = manager.timelineCursor().epoch;
-  for (let i = 1; i <= 3; i++) {
-    f.emit('message.part.delta', { sessionID: 'ses_test', messageID: 'msg_assistant', partID: 'prt_text', field: 'text', delta: 'B' });
-    await waitFor(() => rows().filter(item => item.type === 'assistant_message').map(item => item.text).join('') === 'A' + 'B'.repeat(i));
-    expect(manager.timelineCursor().epoch).toBe(epoch);
-  }
-}, 10000);
-
-test('projects native child states and refreshes them after child interaction events', async () => {
-  const f = await fixture();
-  const child = { id: 'child_1', title: 'Child task', parentID: 'ses_test', directory: process.cwd(), time: { created: 1000, updated: 2000 } };
-  f.children = [child];
-  const parent = assistant('Delegating');
-  parent.parts.push({ type: 'tool', id: 'task_part', messageID: 'msg_assistant', sessionID: 'ses_test', callID: 'task_call', tool: 'task', state: { status: 'running', input: { subagent_type: 'explore', description: 'Explore fixture' }, metadata: { parentSessionId: 'ses_test', sessionId: 'child_1' }, time: { start: 1 } } } as any);
-  f.messages = [parent];
-  f.questions = [{ id: 'child_question', sessionID: 'child_1', questions: [] }];
-  const provider = new OpenCodeAgentProvider({ serverUrl: f.url }); cleanups.push(() => provider.close());
-  const session = await provider.createSession({ sessionId: 'local', cwd: process.cwd() }); observe(session);
-  expect((await session.runtimeInfo()).childSessions).toEqual([{ nativeSessionId: 'child_1', title: 'Child task', createdAt: new Date(1000).toISOString(), status: 'waiting', observation: 'live', parentTurnId: 'msg_user', parentCallId: 'task_call', role: 'explore', description: 'Explore fixture' }]);
-  f.questions = []; f.emit('question.replied', { sessionID: 'child_1', requestID: 'child_question', answers: [] });
-  await expect.poll(async () => (await session.runtimeInfo()).childSessions?.[0]?.status, { timeout: 4000 }).toBe('idle');
-  f.children = []; f.emit('session.deleted', { info: child });
-  await expect.poll(async () => (await session.runtimeInfo()).childSessions?.length, { timeout: 4000 }).toBe(0);
-}, 10000);
-
-test('admits native immediate input during work without aborting or advertising a next-turn queue', async () => {
-  const f = await fixture(); f.status = { type: 'busy' }; f.messages = [assistant('Working')];
-  const provider = new OpenCodeAgentProvider({ serverUrl: f.url }); cleanups.push(() => provider.close());
-  const session = await provider.createSession({ sessionId: 'local', cwd: process.cwd() }); observe(session);
-  await session.sendMessage('Follow up');
-  expect(f.requests.filter(request => request.path.endsWith('/prompt_async'))).toHaveLength(1);
-  expect(f.requests.some(request => request.path.endsWith('/abort'))).toBe(false);
-  expect(session.capabilities.steer).toBe(true);
-  expect(session.capabilities.queueMessage).not.toBe(true);
-  await expect(session.sendMessage('Queued', { delivery: 'next_turn' })).rejects.toThrow('queued');
-}, 10000);
-
-test('reserves native input admission through the acknowledgement-to-busy notification gap', async () => {
-  const f = await fixture();
-  const provider = new OpenCodeAgentProvider({ serverUrl: f.url }); cleanups.push(() => provider.close());
-  const session = await provider.createSession({ sessionId: 'local', cwd: process.cwd() }); observe(session);
-  await session.sendMessage('First');
-  await expect(session.sendMessage('Second')).rejects.toThrow('Wait for');
-  expect(f.requests.filter(request => request.path.endsWith('/prompt_async'))).toHaveLength(1);
-  f.status = { type: 'busy' }; f.emit('session.status', { sessionID: 'ses_test', status: f.status });
-  await expect.poll(async () => (await session.runtimeInfo()).status, { timeout: 4000 }).toBe('running');
-  f.status = { type: 'idle' }; f.emit('session.status', { sessionID: 'ses_test', status: f.status });
-  await expect.poll(async () => (await session.runtimeInfo()).status, { timeout: 4000 }).toBe('idle');
-  await session.sendMessage('After confirmed work');
-  expect(f.requests.filter(request => request.path.endsWith('/prompt_async'))).toHaveLength(2);
-}, 10000);
-
-test('retains input admission after HTTP errors until native cancellation confirms release', async () => {
-  const f = await fixture();
-  const provider = new OpenCodeAgentProvider({ serverUrl: f.url }); cleanups.push(() => provider.close());
-  const session = await provider.createSession({ sessionId: 'local', cwd: process.cwd() }); observe(session);
-  f.promptStatus = 400;
-  await expect(session.sendMessage('Rejected')).rejects.toThrow('HTTP 400');
-  f.promptStatus = 204;
-  await expect(session.sendMessage('Unconfirmed HTTP rejection')).rejects.toThrow('Wait for');
-  await session.cancel();
-  f.rejectPrompt = true;
-  await expect(session.sendMessage('Unknown')).rejects.toThrow('unknown');
-  f.rejectPrompt = false;
-  await expect(session.sendMessage('Must not replay')).rejects.toThrow('Wait for');
-  await expect(session.executeCommand!('check', '')).rejects.toThrow('Wait for');
-  await session.cancel();
-  await session.sendMessage('After cancellation');
-  expect(f.requests.filter(request => request.path.endsWith('/prompt_async'))).toHaveLength(3);
-}, 10000);
-
-test('reconciles completed input when the busy notification was missed', async () => {
-  const f = await fixture();
-  const provider = new OpenCodeAgentProvider({ serverUrl: f.url }); cleanups.push(() => provider.close());
-  const session = await provider.createSession({ sessionId: 'local', cwd: process.cwd() }); observe(session);
-  await session.sendMessage('First');
-  const parentID = f.messages.at(-1).info.id;
-  f.messages.push({ ...assistant('Done'), info: { ...assistant('Done').info, parentID, finish: 'stop', time: { created: Date.now() + 1, completed: Date.now() + 2 } } });
-  const barrier = f.blockNextHistory();
-  f.emit('session.idle', { sessionID: 'ses_test' });
-  await barrier.arrived;
-  barrier.release();
-  await expect.poll(async () => { try { await session.sendMessage('After native completion'); return true; } catch { return false; } }, { timeout: 4000 }).toBe(true);
-  expect(f.requests.filter(request => request.path.endsWith('/prompt_async'))).toHaveLength(2);
-}, 10000);
-
-test('returns answered interactions on their older native page after a corrected tail', async () => {
-  const f = await fixture(); f.messages = [assistant('Old answer')];
-  f.questions = [{ id: 'old_question', sessionID: 'ses_test', questions: [{ header: 'Choice', question: 'Which?', options: [{ label: 'One', description: 'First' }] }] }];
-  const provider = new OpenCodeAgentProvider({ serverUrl: f.url }); cleanups.push(() => provider.close());
-  const session = await provider.createSession({ sessionId: 'local', cwd: process.cwd() }); const items = observe(session);
-  await session.respondToInteraction('old_question', { kind: 'question', answers: [{ questionId: '0', selectedValues: ['One'] }] });
-  f.questions = [];
-  for (let index = 0; index < 201; index++) {
-    const message = assistant(`Tail ${index}`); const id = `msg_tail_${index}`;
-    f.messages.push({ info: { ...message.info, id, time: { created: 4000 + index } }, parts: [{ ...message.parts[0], id: `prt_${index}`, messageID: id }] });
-  }
-  f.emit('session.idle', { sessionID: 'ses_test' });
-  await waitFor(() => timeline(items).some(item => item.text === 'Tail 200'));
-  f.emit('message.part.updated', { part: { ...f.messages.at(-1).parts[0], text: 'Corrected tail' } });
-  await waitFor(() => items.some(item => item.type === 'timeline_replacement'));
-  const replacement = items.findLast(item => item.type === 'timeline_replacement');
-  if (replacement?.type !== 'timeline_replacement') throw new Error('Expected corrected native tail');
-  expect(replacement.observations.some(item => item.event.type === 'timeline' && item.event.item.type === 'interaction')).toBe(false);
-  expect(replacement.olderCursor).toBeTruthy();
-  const page = await session.readTimelineHistory!(replacement.olderCursor!);
-  expect(page.observations.map(item => item.event.type === 'timeline' ? item.event.item.type : item.event.type)).toEqual(['assistant_message', 'interaction', 'assistant_message']);
-}, 10000);
-
-test('reserves command admission during catalog discovery and releases rejected commands', async () => {
-  const f = await fixture();
-  const provider = new OpenCodeAgentProvider({ serverUrl: f.url }); cleanups.push(() => provider.close());
-  const session = await provider.createSession({ sessionId: 'local', cwd: process.cwd() }); observe(session);
-  const command = session.executeCommand!('check', '');
-  await expect(session.sendMessage('Concurrent input')).rejects.toThrow('Wait for');
-  await command;
-  await expect(session.executeCommand!('unknown', '')).rejects.toThrow('Unknown OpenCode command');
-  await session.sendMessage('After command');
-  expect(f.requests.filter(request => request.path.endsWith('/prompt_async'))).toHaveLength(1);
-}, 10000);
-
-test('steer requires active native work and does not replay an uncertain admission', async () => {
-  const f = await fixture();
-  const provider = new OpenCodeAgentProvider({ serverUrl: f.url }); cleanups.push(() => provider.close());
-  const session = await provider.createSession({ sessionId: 'local', cwd: process.cwd() }); observe(session);
-  await expect(session.steer!('Idle')).rejects.toThrow('active');
-  f.status = { type: 'busy' }; f.emit('session.status', { sessionID: 'ses_test', status: f.status });
-  await expect.poll(async () => (await session.runtimeInfo()).status).toBe('running');
-  f.rejectPrompt = true;
-  await expect(session.steer!('Unknown')).rejects.toThrow('unknown');
-  f.rejectPrompt = false;
-  await expect(session.steer!('Do not resend')).rejects.toThrow('Wait for');
-  expect(f.requests.filter(request => request.path.endsWith('/prompt_async'))).toHaveLength(1);
-  const prompt = f.requests.find(request => request.path.endsWith('/prompt_async'))!.body;
-  const info = { id: prompt.messageID, role: 'user', sessionID: 'ses_test', time: { created: Date.now() } };
-  f.messages.push({ info, parts: [] }); f.emit('message.updated', { info });
-  await expect.poll(async () => { try { await session.steer!('After confirmed native admission'); return true; } catch { return false; } }, { timeout: 4000 }).toBe(true);
-  expect(f.requests.filter(request => request.path.endsWith('/prompt_async'))).toHaveLength(2);
-}, 10000);
-
-
-test('retains uncertain idle-origin input across unrelated busy and error events', async () => {
-  const f = await fixture();
-  const provider = new OpenCodeAgentProvider({ serverUrl: f.url }); cleanups.push(() => provider.close());
-  const session = await provider.createSession({ sessionId: 'local', cwd: process.cwd() }); const items = observe(session);
-  f.rejectPrompt = true;
-  await expect(session.sendMessage('Unknown')).rejects.toThrow('unknown');
-  f.rejectPrompt = false;
-  f.status = { type: 'busy' }; f.emit('session.status', { sessionID: 'ses_test', status: f.status });
-  await expect.poll(async () => (await session.runtimeInfo()).status).toBe('running');
-  await expect(session.sendMessage('Do not duplicate')).rejects.toThrow('Wait for');
-  f.emit('session.error', { sessionID: 'ses_test', error: { name: 'UnknownError', data: { message: 'Uncorrelated' } } });
-  await waitFor(() => items.some(item => item.type === 'observation' && item.event.type === 'turn_failed'));
-  await expect(session.sendMessage('Still unknown')).rejects.toThrow('Wait for');
-  expect(f.requests.filter(request => request.path.endsWith('/prompt_async'))).toHaveLength(1);
-}, 10000);
-
-test('does not identify or release an input still being prepared from unrelated busy', async () => {
-  const f = await fixture(); f.messages = [assistant('Existing work')];
-  const provider = new OpenCodeAgentProvider({ serverUrl: f.url }); cleanups.push(() => provider.close());
-  const session = await provider.createSession({ sessionId: 'local', cwd: process.cwd() }); const items = observe(session);
-  let release!: () => void; const gate = new Promise<void>(resolve => { release = resolve; });
-  const original = OpenCodeImages.prototype.input;
-  const spy = vi.spyOn(OpenCodeImages.prototype, 'input').mockImplementationOnce(async function(parts) { await gate; return original.call(this, parts); });
-  try {
-    const sending = session.sendMessage('After preparation');
-    void sending.catch(() => {});
-    f.status = { type: 'busy' }; f.emit('session.status', { sessionID: 'ses_test', status: f.status });
-    await expect.poll(async () => (await session.runtimeInfo()).status).toBe('running');
-    const started = items.findLast(item => item.type === 'observation' && item.event.type === 'turn_started');
-    expect(started).toMatchObject({ event: { turnId: 'msg_user' } });
-    expect(f.requests.filter(request => request.path.endsWith('/prompt_async'))).toHaveLength(0);
-    release(); await sending;
-    expect(f.requests.filter(request => request.path.endsWith('/prompt_async'))).toHaveLength(1);
-  } finally { release(); spy.mockRestore(); }
-}, 10000);
-
-test('does not release a newer uncertain steer when an older cancellation acknowledges', async () => {
-  const f = await fixture(); f.status = { type: 'busy' }; f.messages = [assistant('Working')];
-  const provider = new OpenCodeAgentProvider({ serverUrl: f.url }); cleanups.push(() => provider.close());
-  const session = await provider.createSession({ sessionId: 'local', cwd: process.cwd() }); observe(session);
-  const barrier = f.blockNextAbort(); const canceling = session.cancel(); await barrier.arrived;
-  try {
-    f.rejectPrompt = true;
-    await expect(session.steer!('New uncertain input')).rejects.toThrow('unknown');
-    f.rejectPrompt = false;
-    barrier.release(); await canceling;
-    await expect(session.steer!('Must not duplicate')).rejects.toThrow('Wait for');
-    expect(f.requests.filter(request => request.path.endsWith('/prompt_async'))).toHaveLength(1);
-  } finally { barrier.release(); await canceling; }
-}, 10000);
-
-
-test('availability probes only server health and rejects unsupported or unhealthy services', async () => {
-  const f = await fixture();
-  const provider = new OpenCodeAgentProvider({ serverUrl: f.url });
-  try {
-    await provider.checkAvailability();
-    for (const health of [{ healthy: true, version: '1.18.17' }, { healthy: false, version: '1.18.31' }, { healthy: true, version: 'dev' }]) {
-      f.health = health;
-      await expect(provider.checkAvailability()).rejects.toThrow('healthy and version');
-    }
-    expect(f.connections).toBe(0);
-    expect(f.requests.map(({ method, path }) => `${method} ${path}`)).toEqual(Array(4).fill('GET /global/health'));
-  } finally { await provider.close(); }
+  await f.provider.renameSession('ses_existing', 'Native session');
+  expect(f.requests.some(row => row.method === 'PATCH')).toBe(false);
+  expect(await f.provider.getSession('ses_missing')).toBeUndefined();
+  await expect(f.provider.resumeSession({ providerId: 'opencode', sessionId: 'ses_existing', opaque: JSON.stringify({ cwd: '/tmp' }) })).rejects.toThrow('workspace');
+  for (let index = 0; index < 401; index++) f.sessions.set(`ses_${index}`, native(`ses_${index}`));
+  expect(await f.provider.listSessions()).toHaveLength(402);
+  expect(f.requests.filter(row => row.path === '/api/session')).toHaveLength(3);
 });
 
-
-test('does not let historical failure override the current native idle state', async () => {
-  const f = await fixture(); const failed = assistant('Previous attempt');
-  Object.assign(failed.info, { error: { name: 'UnknownError', data: { message: 'Old failure' } } });
-  f.messages = [failed];
-  const provider = new OpenCodeAgentProvider({ serverUrl: f.url }); cleanups.push(() => provider.close());
-  const session = await provider.createSession({ sessionId: 'local', cwd: process.cwd() }); const items = observe(session);
-  await waitFor(() => items.some(item => item.type === 'history_boundary'));
-  expect((await session.runtimeInfo()).status).toBe('idle');
-  expect(items.some(item => item.type === 'observation' && item.event.type === 'turn_failed')).toBe(false);
-}, 10000);
-
-test('keeps native retry active after a failed turn until native settlement', async () => {
-  const f = await fixture(); f.status = { type: 'retry', attempt: 1, message: 'Retrying', next: Date.now() }; f.messages = [assistant('Working')];
-  const provider = new OpenCodeAgentProvider({ serverUrl: f.url }); cleanups.push(() => provider.close());
-  const session = await provider.createSession({ sessionId: 'local', cwd: process.cwd() }); const items = observe(session);
-  await waitFor(() => items.some(item => item.type === 'history_boundary'));
-  const failed = assistant('Failed attempt'); Object.assign(failed.info, { error: { name: 'UnknownError', data: { message: 'Retryable failure' } } }); f.messages = [failed];
-  f.emit('message.updated', { info: failed.info });
-  await waitFor(() => items.some(item => item.type === 'observation' && item.event.type === 'turn_failed'));
-  expect((await session.runtimeInfo()).status).toBe('running');
-  f.status = { type: 'idle' }; f.emit('session.status', { sessionID: 'ses_test', status: f.status });
-  await expect.poll(async () => (await session.runtimeInfo()).status, {timeout: 4000}).toBe('idle');
-  expect(items.filter(item => item.type === 'observation' && item.event.type === 'turn_failed')).toHaveLength(1);
-  expect(items.some(item => item.type === 'observation' && item.event.type === 'turn_completed')).toBe(false);
-}, 10000);
-
-test('changes a running session model and agent with native readback without aborting its turn', async () => {
-  const f = await fixture(); f.status = { type: 'busy' }; f.messages = [assistant('Still working')];
-  const provider = new OpenCodeAgentProvider({ serverUrl: f.url }); cleanups.push(() => provider.close());
-  const session = await provider.resumeSession({ providerId: 'opencode', sessionId: 'ses_test', opaque: JSON.stringify({ cwd: process.cwd() }) });
-  const items = observe(session);
-  await waitFor(() => timeline(items).some(item => item.text === 'Still working'));
-  await session.setSessionSetting!('model', 'test/model');
-  await session.setSessionSetting!('agent', 'plan');
-  expect((await session.runtimeInfo()).status).toBe('running');
-  expect((await session.runtimeInfo()).settings).toEqual(expect.arrayContaining([
-    expect.objectContaining({ id: 'model', value: 'test/model' }),
-    expect.objectContaining({ id: 'agent', value: 'plan' }),
-  ]));
-  expect(f.native()).toMatchObject({ model: { providerID: 'test', id: 'model' }, agent: 'plan' });
-  expect(f.requests.some(request => request.path.endsWith('/abort'))).toBe(false);
-  expect(items.some(item => item.type === 'observation' && ['turn_completed', 'turn_canceled', 'turn_failed'].includes(item.event.type))).toBe(false);
-}, 10000);
-
-test('refreshes native session selections on request without polling for ordinary runtime reads', async () => {
+it('bounds the live tail and reads opaque older pages without changing runtime state', async () => {
   const f = await fixture();
-  const provider = new OpenCodeAgentProvider({ serverUrl: f.url }); cleanups.push(() => provider.close());
-  const session = await provider.createSession({ sessionId: 'local', cwd: process.cwd() }); observe(session);
-  const reads = () => f.requests.filter(request => request.method === 'GET' && request.path === '/session/ses_test').length;
-  const before = reads();
-  await session.runtimeInfo();
-  expect(reads()).toBe(before);
-  f.nativeSelection = { model: { providerID: 'test', id: 'model', variant: 'deep' }, agent: 'plan', permission: [{ permission: '*', pattern: '*', action: 'deny' }] };
-  const current = await session.runtimeInfo({ refreshSettings: true });
-  expect(reads()).toBe(before + 1);
-  expect(current).toMatchObject({ model: 'test/model', mode: 'plan', planning: { active: true } });
-  expect(current.settings).toEqual(expect.arrayContaining([
-    expect.objectContaining({ id: 'variant', value: 'deep' }),
-    expect.objectContaining({ id: 'permission:*', value: 'deny' }),
-  ]));
+  f.messages.set('ses_existing', Array.from({length: 405}, (_, index) => ({id: `msg_${index}`, type: 'user', text: `Input ${index}`, time: {created: index}})));
+  const session = await open(f), output = observe(session);
+  await settled(() => output.some(item => item.type === 'history_boundary'));
+  const boundary = output.find(item => item.type === 'history_boundary');
+  expect(boundary).toMatchObject({olderCursor: '200'});
+  const before = await session.runtimeInfo();
+  const older = await session.readTimelineHistory('200');
+  expect(older.nextCursor).toBe('400'); expect(older.observations).toHaveLength(200);
+  expect((await session.readTimelineHistory('400')).observations).toHaveLength(5);
+  expect(await session.runtimeInfo()).toEqual(before);
+  expect(f.requests.filter(row => row.query.has('cursor')).every(row => !row.query.has('order'))).toBe(true);
+});
+
+it('streams keyed deltas without per-token history reads and ignores duplicate event IDs', async () => {
+  const f = await fixture(), session = await open(f), output = observe(session);
+  await settled(() => text(output).includes('Existing answer'));
+  const reads = f.requests.filter(row => row.path.endsWith('/message')).length;
+  f.event('session.text.delta', {sessionID: 'ses_existing', assistantMessageID: 'msg_reply', ordinal: 0, delta: '!'}, 'one');
+  f.event('session.text.delta', {sessionID: 'ses_existing', assistantMessageID: 'msg_reply', ordinal: 0, delta: '!'}, 'one');
+  await settled(() => text(output) === 'Existing answer!');
+  expect(f.requests.filter(row => row.path.endsWith('/message'))).toHaveLength(reads);
+});
+
+it('repairs missed native text on reconnect without reporting execution failure', async () => {
+  const f = await fixture(), session = await open(f), output = observe(session);
+  const reply = f.messages.get('ses_existing')![1]!;
+  if (reply.type === 'assistant') reply.content = [{type: 'text', text: 'Corrected after reconnect'}];
+  f.disconnect();
+  await settled(() => text(output).includes('Corrected after reconnect'));
+  expect(output.some(item => item.type === 'observation' && item.event.type === 'turn_failed')).toBe(false);
+  expect(await session.runtimeInfo()).toMatchObject({connection: {state: 'connected'}});
+});
+
+it('reconciles changes that arrive inside a history snapshot without duplicating text', async () => {
+  const f = await fixture(), session = await open(f), output = observe(session);
+  const barrier = f.block('/api/session/ses_existing/message');
+  f.event('session.renamed', {sessionID: 'ses_existing', title: 'Native session'}); await barrier.arrived;
+  const reply = f.messages.get('ses_existing')![1]!;
+  if (reply.type === 'assistant') reply.content = [{type: 'text', text: 'Existing answer!'}];
+  f.event('session.text.delta', {sessionID: 'ses_existing', assistantMessageID: 'msg_reply', ordinal: 0, delta: '!'});
+  barrier.release();
+  await settled(() => text(output) === 'Existing answer!');
+  await new Promise(resolve => setTimeout(resolve, 200));
+  expect(text(output)).toBe('Existing answer!');
+});
+
+it('retries a failed reconciliation and then continues processing live events', async () => {
+  const f = await fixture(), session = await open(f), output = observe(session);
+  f.state.historyFailures = 1; f.event('session.renamed', {sessionID: 'ses_existing'});
+  await settled(() => output.some(item => item.type === 'observation' && item.event.type === 'runtime_updated' && item.event.runtimeInfo.connection?.state === 'restoring'));
+  await settled(async () => (await session.runtimeInfo()).connection?.state === 'connected');
+  f.event('session.text.delta', {sessionID: 'ses_existing', assistantMessageID: 'msg_reply', ordinal: 0, delta: '!'});
+  await settled(() => text(output) === 'Existing answer!');
+});
+
+it('keeps uncertain input fenced across unrelated activity and never retries it', async () => {
+  const f = await fixture(), session = await open(f); f.state.prompt = 'drop';
+  await expect(session.sendMessage('uncertain')).rejects.toThrow();
+  f.active.ses_existing = {type:'running'}; f.event('session.execution.started', {sessionID: 'ses_existing'});
+  await settled(async () => (await session.runtimeInfo()).status === 'running');
+  await expect(session.sendMessage('must not dispatch')).rejects.toThrow();
+  f.event('session.execution.failed', {sessionID: 'ses_existing', error: {type:'provider', message:'Unrelated failure'}});
+  await expect(session.sendMessage('still fenced')).rejects.toThrow();
+  expect(f.requests.filter(row => row.path.endsWith('/prompt'))).toHaveLength(1);
+  await session.cancel(); f.state.prompt = 'normal';
+  await session.sendMessage('allowed after explicit cancellation');
+  expect(f.requests.filter(row => row.path.endsWith('/prompt'))).toHaveLength(2);
+});
+
+it('reports native inbox acceptance as queued and never aborts on disposal', async () => {
+  const f = await fixture(), session = await open(f), acceptances: unknown[] = [];
+  expect(await session.sendMessage('queued by native', {onAcceptance:value => acceptances.push(value)})).toEqual({disposition:'queued'});
+  expect(acceptances).toEqual([{disposition:'queued'}]);
+  await session.dispose();
+  expect(f.requests.some(row => row.path.endsWith('/interrupt'))).toBe(false);
+});
+
+it('settles a lost prompt acknowledgement from exact native history without replay', async () => {
+  const f = await fixture(), session = await open(f), accepted: unknown[] = [];
+  f.state.prompt = 'accept-drop';
+  await expect(session.sendMessage('Input with lost acknowledgement', { onAcceptance: value => accepted.push(value) })).rejects.toThrow();
+  const invocation = f.requests.find(row => row.path.endsWith('/prompt'))!.body;
+  f.messages.get('ses_existing')!.push({ type: 'assistant', id: 'msg_lost_ack_reply', agent: 'build', model: { providerID: 'test', id: 'model' }, content: [], time: { created: 0 } });
+  f.event('session.step.started', { sessionID: 'ses_existing', assistantMessageID: 'msg_lost_ack_reply', agent: 'build', model: { providerID: 'test', id: 'model' } });
+  await settled(() => accepted.length === 1);
+  expect(accepted).toEqual([{ disposition: 'started' }]);
+  expect(f.requests.filter(row => row.path.endsWith('/prompt'))).toHaveLength(1);
+  expect(f.messages.get('ses_existing')!.filter(message => message.id === invocation.id)).toHaveLength(1);
+  expect(f.requests.some(row => row.path.endsWith('/log'))).toBe(false);
 }, 10000);
 
+it('restores native forms, answers through v2, and invalidates externally settled requests', async () => {
+  const f = await fixture();
+  const form: FormInfo = {id:'form_one', sessionID:'ses_existing', title:'Choose', fields:[{key:'answer', type:'string', title:'Answer', required:true}]};
+  f.forms.set('ses_existing', [form]);
+  const session = await open(f), output = observe(session);
+  await settled(() => output.some(item => item.type === 'observation' && item.event.type === 'interaction_requested'));
+  expect((await session.runtimeInfo()).status).toBe('waiting');
+  await session.respondToInteraction('form_one', {kind:'form', action:'submit', values:{answer:'yes'}});
+  expect(f.requests.find(row => row.path.endsWith('/form/form_one/reply'))?.body).toEqual({answer:{answer:'yes'}});
+  const next = {...form, id:'form_two'}; f.forms.set('ses_existing', [next]); f.event('form.created', {form:next});
+  await settled(() => output.some(item => item.type === 'observation' && item.event.type === 'interaction_requested' && item.event.request.requestId === 'form_two'));
+  f.forms.set('ses_existing', []); f.event('form.cancelled', {sessionID:'ses_existing', id:'form_two'});
+  await settled(() => output.some(item => item.type === 'observation' && item.event.type === 'interaction_invalidated' && item.event.requestId === 'form_two'));
+  expect(output.some(item => item.type === 'observation' && item.event.type === 'interaction_resolved' && item.event.requestId === 'form_two')).toBe(false);
+});
 
-test('does not restore a stale session read after a newer native selection is confirmed', async () => {
-  const f = await fixture(); f.nativeSelection = { agent: 'build', model: { providerID: 'test', id: 'model' } };
-  const provider = new OpenCodeAgentProvider({ serverUrl: f.url }); cleanups.push(() => provider.close());
-  const session = await provider.createSession({ sessionId: 'local', cwd: process.cwd() }); observe(session);
-  const blocked = f.blockNextSessionRead();
-  const reading = session.runtimeInfo({ refreshSettings: true });
-  await blocked.arrived;
-  try {
-    await session.setSessionSetting!('agent', 'plan');
-    expect((await session.runtimeInfo()).mode).toBe('plan');
-    blocked.release(); await reading;
-    expect((await session.runtimeInfo()).mode).toBe('plan');
-    expect((await session.runtimeInfo()).settings).toContainEqual(expect.objectContaining({ id: 'agent', value: 'plan' }));
-  } finally { blocked.release(); await reading; }
+it.each([false, true])('refreshes native state after a form reply without a completion event (response lost: %s)', async responseLost => {
+  const f = await fixture();
+  f.forms.set('ses_existing', [{ id: 'form_reply', sessionID: 'ses_existing', title: 'Answer', fields: [{ key: 'answer', type: 'string', required: true }] }]);
+  const session = await open(f), output = observe(session);
+  expect((await session.runtimeInfo()).status).toBe('waiting');
+  f.state.replyFailures = responseLost ? 1 : 0;
+  const reply = session.respondToInteraction('form_reply', { kind: 'form', action: 'submit', values: { answer: 'yes' } });
+  if (responseLost) await expect(reply).rejects.toThrow();
+  else await reply;
+  await settled(async () => (await session.runtimeInfo()).status === 'idle');
+  if (responseLost) {
+    expect(output.some(item => item.type === 'observation' && item.event.type === 'interaction_resolved')).toBe(false);
+    expect(output.some(item => item.type === 'observation' && item.event.type === 'interaction_invalidated' && item.event.requestId === 'form_reply')).toBe(true);
+  }
+}, 10000);
+
+it('recovers current selections after a runtime settings read fails without another native event', async () => {
+  const f = await fixture(), session = await open(f);
+  f.sessions.get('ses_existing')!.agent = 'plan';
+  f.state.nativeFailures = 1;
+  await expect(session.runtimeInfo({ refreshSettings: true })).rejects.toThrow();
+  await settled(async () => (await session.runtimeInfo()).mode === 'plan');
+}, 10000);
+
+it('keeps unsupported native forms visibly waiting instead of silently losing required fields', async () => {
+  const f = await fixture();
+  f.forms.set('ses_existing', [{id:'conditional', sessionID:'ses_existing', title:'Native conditional form', fields:[{key:'answer', type:'string', pattern:'^[a-z]+$'}]}]);
+  const session = await open(f), output = observe(session);
+  await settled(() => output.some(item => item.type === 'observation' && item.event.type === 'timeline' && item.event.item.type === 'error' && item.event.item.message.includes('pattern')));
+  expect((await session.runtimeInfo()).status).toBe('waiting');
+  await expect(session.respondToInteraction('conditional', {kind:'form', action:'submit', values:{answer:'x'}})).rejects.toThrow('no longer pending');
+  expect(f.requests.some(row => row.path.endsWith('/conditional/reply'))).toBe(false);
+});
+
+it('maps project-persistent native approval explicitly and disallows session-only claims', async () => {
+  const f = await fixture();
+  f.permissions.set('ses_existing', [{id:'allow', sessionID:'ses_existing', action:'shell', resources:['pwd'], save:['pwd']}]);
+  const session = await open(f), output = observe(session);
+  await settled(() => output.some(item => item.type === 'observation' && item.event.type === 'interaction_requested'));
+  await expect(session.respondToInteraction('allow', {kind:'tool_approval', decision:'allow', scope:'session'})).rejects.toThrow();
+  await session.respondToInteraction('allow', {kind:'tool_approval', decision:'allow', scope:'policy', policyId:'opencode:save'});
+  expect(f.requests.find(row => row.path.endsWith('/permission/allow/reply'))?.body).toEqual({decision:'always'});
+});
+
+it('stores Host instructions once in the native session and confirms their readback', async () => {
+  const f = await fixture(), session = await f.provider.createSession({cwd:process.cwd(), systemPrompt:'Stay within this task.'});
+  const runtime = await session.runtimeInfo();
+  expect(f.instructions.get(session.nativeId)).toEqual([{key:'arc.host.system', value:'Stay within this task.'}]);
+  const other = await f.provider.resumeSession(runtime.persistence!, {systemPrompt:'Stay within this task.'});
+  expect(f.requests.filter(row => row.path.includes('/instructions/entries/') && row.method === 'PUT')).toHaveLength(1);
+  await other.dispose();
+});
+
+it('uses native execution truth instead of old errors and updates session token snapshots', async () => {
+  const f = await fixture(); const history = f.messages.get('ses_existing')!;
+  const reply = history[1]!; if (reply.type === 'assistant') reply.error = {type:'provider', message:'Historical error'};
+  const session = await open(f), output = observe(session);
+  expect((await session.runtimeInfo()).status).toBe('idle');
+  expect(output.some(item => item.type === 'observation' && item.event.type === 'turn_failed')).toBe(false);
+  f.sessions.get('ses_existing')!.tokens = {...tokens, output:99}; f.event('session.usage.updated', {sessionID:'ses_existing', tokens:{...tokens, output:99},cost:0});
+  await settled(() => output.some(item => item.type === 'observation' && item.event.type === 'usage_updated' && item.event.usage.outputTokens === 99));
+  f.active.ses_existing = {type:'running'}; f.event('session.execution.started', {sessionID:'ses_existing'});
+  await settled(async () => (await session.runtimeInfo()).status === 'running');
+  delete f.active.ses_existing; f.sessions.get('ses_existing')!.outcome = 'interrupted'; f.event('session.execution.interrupted', {sessionID:'ses_existing',reason:'user'});
+  await settled(() => output.some(item => item.type === 'observation' && item.event.type === 'turn_canceled'));
+  expect(output.some(item => item.type === 'observation' && item.event.type === 'turn_failed')).toBe(false);
+});
+
+it('fences stale native selections while a setting is confirmed during active work', async () => {
+  const f = await fixture(); f.active.ses_existing = {type:'running'};
+  const session = await open(f), gate = f.block('/api/session/ses_existing');
+  const stale = session.runtimeInfo({refreshSettings:true}); await gate.arrived;
+  await session.setPlanning(true); gate.release(); await stale;
+  expect(await session.runtimeInfo()).toMatchObject({status:'running', mode:'plan', planning:{active:true}});
+  expect(f.requests.some(row => row.path.endsWith('/interrupt'))).toBe(false);
+});
+
+it('discovers native children and preserves the shared parent identity', async () => {
+  const f = await fixture(), session = await open(f);
+  f.sessions.set('ses_child', {...native('ses_child'), parentID:'ses_existing'}); f.messages.set('ses_child', []);
+  f.event('session.created', {sessionID:'ses_child',parentID:'ses_existing'});
+  await settled(async () => (await session.runtimeInfo()).childSessions?.some(child => child.nativeSessionId === 'ses_child'));
+  const child = await f.provider.openChildSession('ses_existing','ses_child');
+  expect((await child.runtimeInfo()).sessionId).toBe('ses_child');
+  await expect(f.provider.openChildSession('ses_child','ses_existing')).rejects.toThrow('direct native child');
+  await child.dispose();
+});
+
+it('validates images before admission and leaves the session usable after local failure', async () => {
+  const f = await fixture(), session = await open(f);
+  const transform = vi.spyOn(OpenCodeImages.prototype,'input').mockRejectedValueOnce(new Error('Invalid image input'));
+  await expect(session.sendMessage('local transform failure')).rejects.toThrow('Invalid image input'); transform.mockRestore();
+  expect(f.requests.some(row => row.path.endsWith('/prompt'))).toBe(false);
+  await session.sendMessage('valid input');
+  expect(f.requests.filter(row => row.path.endsWith('/prompt'))).toHaveLength(1);
+});
+
+it('supports only the reviewed current native API major', async () => {
+  const f = await fixture(); f.state.version = '1.18.31';
+  await expect(f.provider.checkAvailability()).rejects.toThrow('requires OpenCode 2.x');
+  f.state.version = '2.1.0'; await expect(f.provider.checkAvailability()).resolves.toBeUndefined();
+  f.state.version = '3.0.0'; await expect(f.provider.checkAvailability()).rejects.toThrow('different server API');
+});
+
+it('rebinds a running turn from the new native prompt without reusing the prior idle turn', async () => {
+  const f = await fixture(), session = await open(f), output = observe(session);
+  await settled(() => output.some(item => item.type === 'history_boundary'));
+  f.messages.get('ses_existing')!.push({ type: 'user', id: 'msg_next', text: 'New turn', time: { created: 10 } });
+  f.active.ses_existing = { type: 'running' };
+  f.event('session.execution.started', { sessionID: 'ses_existing' });
+  await settled(() => output.some(item => item.type === 'observation' && item.event.type === 'runtime_updated' && item.event.activeTurnId === 'msg_next'));
+  expect(output.some(item => item.type === 'observation' && item.event.type === 'turn_started' && item.event.turnId === 'msg_old')).toBe(false);
+  delete f.active.ses_existing;
+  f.sessions.get('ses_existing')!.outcome = 'succeeded';
+  f.messages.get('ses_existing')!.push({ type: 'idle', id: 'idle_next', outcome: 'succeeded', time: { created: 11 } });
+  f.event('session.execution.succeeded', { sessionID: 'ses_existing' });
+  await settled(() => output.some(item => item.type === 'observation' && item.event.type === 'turn_completed' && item.event.turnId === 'msg_next'));
+  expect(output.filter(item => item.type === 'observation' && item.event.type === 'turn_completed')).toHaveLength(1);
+}, 10000);
+
+it('does not reuse an earlier turn failure when the latest failed turn has no assistant error', async () => {
+  const f = await fixture();
+  f.sessions.get('ses_existing')!.outcome = 'failed';
+  f.messages.set('ses_existing', [
+    { type: 'user', id: 'first', text: 'Earlier turn', time: { created: 1 } },
+    { type: 'assistant', id: 'first_error', agent: 'build', model: { providerID: 'test', id: 'model' }, content: [], error: { type: 'provider', message: 'Earlier credential failure' }, time: { created: 2, completed: 2 } },
+    { type: 'idle', id: 'first_idle', outcome: 'failed', time: { created: 3 } },
+    { type: 'user', id: 'latest', text: 'Latest turn', time: { created: 4 } },
+    { type: 'idle', id: 'latest_idle', outcome: 'failed', time: { created: 5 } },
+  ]);
+  const session = await open(f), info = await session.runtimeInfo();
+  expect(info.status).toBe('failed');
+  expect(JSON.stringify(info.failure ?? null)).not.toContain('Earlier credential failure');
+}, 10000);
+
+it('settles a native turn once when its terminal event arrives after recovery already read its idle record', async () => {
+  const f = await fixture();
+  f.messages.get('ses_existing')!.pop();
+  f.active.ses_existing = { type: 'running' };
+  const session = await open(f), output = observe(session);
+  await settled(() => output.some(item => item.type === 'observation' && item.event.type === 'runtime_updated' && item.event.activeTurnId === 'msg_old'));
+  f.messages.get('ses_existing')!.push({ type: 'idle', id: 'final_idle', time: { created: 10 }, outcome: 'succeeded' });
+  f.sessions.get('ses_existing')!.outcome = 'succeeded';
+  delete f.active.ses_existing;
+  f.event('session.renamed', { sessionID: 'ses_existing' });
+  await settled(() => output.some(item => item.type === 'observation' && item.event.type === 'turn_completed' && item.event.turnId === 'msg_old'));
+  f.event('session.execution.succeeded', { sessionID: 'ses_existing' });
+  await new Promise(resolve => setTimeout(resolve, 180));
+  expect(output.filter(item => item.type === 'observation' && item.event.type === 'turn_completed')).toHaveLength(1);
+}, 10000);
+
+it('waits for current terminal evidence when inactive and session outcome refer to different snapshots', async () => {
+  const f = await fixture();
+  f.sessions.get('ses_existing')!.outcome = 'failed';
+  f.messages.get('ses_existing')!.push({ type: 'user', id: 'current', text: 'Current turn', time: { created: 10 } });
+  f.active.ses_existing = { type: 'running' };
+  const session = await open(f), output = observe(session);
+  await settled(() => output.some(item => item.type === 'observation' && item.event.type === 'runtime_updated' && item.event.activeTurnId === 'current'));
+  delete f.active.ses_existing;
+  f.event('session.renamed', { sessionID: 'ses_existing' });
+  await settled(async () => (await session.runtimeInfo()).status !== 'running');
+  expect(output.some(item => item.type === 'observation' && ['turn_failed', 'turn_completed', 'turn_canceled'].includes(item.event.type))).toBe(false);
+  f.messages.get('ses_existing')!.push({ type: 'idle', id: 'current_idle', time: { created: 11 }, outcome: 'succeeded' });
+  f.sessions.get('ses_existing')!.outcome = 'succeeded';
+  f.event('session.execution.succeeded', { sessionID: 'ses_existing' });
+  await settled(() => output.some(item => item.type === 'observation' && item.event.type === 'turn_completed' && item.event.turnId === 'current'));
+  expect(output.filter(item => item.type === 'observation' && item.event.type === 'turn_completed')).toHaveLength(1);
+}, 10000);
+
+it('invalidates an externally answered custom form when its receipt cannot fit the public question shape', async () => {
+  const f = await fixture();
+  f.forms.set('ses_existing', [{ id: 'custom', sessionID: 'ses_existing', title: 'Choose custom values', fields: [{ key: 'values', type: 'multiselect', custom: true, options: [{ value: 'fixed', label: 'Fixed' }] }] }]);
+  const session = await open(f), output = observe(session);
+  await settled(() => output.some(item => item.type === 'observation' && item.event.type === 'interaction_requested' && item.event.request.requestId === 'custom'));
+  const offset = output.length;
+  f.forms.set('ses_existing', []);
+  f.event('form.replied', { sessionID: 'ses_existing', id: 'custom', answer: { values: ['first custom', 'second custom'] } });
+  await settled(() => output.some(item => item.type === 'observation' && item.event.type === 'interaction_invalidated' && item.event.requestId === 'custom'));
+  await settled(async () => (await session.runtimeInfo()).status === 'idle');
+  expect(output.slice(offset).some(item => item.type === 'observation' && item.event.type === 'runtime_updated' && item.event.runtimeInfo.connection?.state === 'restoring')).toBe(false);
+  expect(output.some(item => item.type === 'observation' && item.event.type === 'interaction_resolved' && item.event.requestId === 'custom')).toBe(false);
+}, 10000);
+
+it('reports a child waiting on native forms or approvals even when execution is inactive', async () => {
+  const f = await fixture();
+  f.sessions.set('ses_child', { ...native('ses_child'), parentID: 'ses_existing' });
+  f.messages.set('ses_child', []);
+  f.forms.set('ses_child', [{ id: 'child_form', sessionID: 'ses_child', title: 'Answer required', fields: [{ key: 'answer', type: 'string', required: true }] }]);
+  const session = await open(f);
+  expect((await session.runtimeInfo()).childSessions).toContainEqual(expect.objectContaining({ nativeSessionId: 'ses_child', status: 'waiting' }));
+  expect((await session.runtimeInfo()).status).toBe('idle');
+  f.forms.set('ses_child', []);
+  f.permissions.set('ses_child', [{ id: 'child_permission', sessionID: 'ses_child', action: 'shell', resources: ['pwd'] }]);
+  f.event('permission.asked', { sessionID: 'ses_child', id: 'child_permission', action: 'shell', resources: ['pwd'] });
+  await settled(() => f.requests.filter(row => row.path === '/api/permission/request').length >= 2);
+  expect((await session.runtimeInfo()).childSessions).toContainEqual(expect.objectContaining({ nativeSessionId: 'ses_child', status: 'waiting' }));
+  expect(f.requests.filter(row => row.path === '/api/form' || row.path === '/api/permission/request').every(row => row.query.get('location[directory]') === process.cwd())).toBe(true);
+}, 10000);
+
+it('clears an old failure reason when reconnect discovers a different failed turn without one', async () => {
+  const f = await fixture();
+  f.sessions.get('ses_existing')!.outcome = 'failed';
+  f.messages.set('ses_existing', [
+    { type: 'user', id: 'first_failed', text: 'Earlier turn', time: { created: 1 } },
+    { type: 'assistant', id: 'first_error', agent: 'build', model: { providerID: 'test', id: 'model' }, content: [], error: { type: 'provider', message: 'Earlier credential failure' }, time: { created: 2, completed: 2 } },
+    { type: 'idle', id: 'first_idle', outcome: 'failed', time: { created: 3 } },
+  ]);
+  const session = await open(f), output = observe(session);
+  expect((await session.runtimeInfo()).failure?.message).toBe('Earlier credential failure');
+  f.messages.get('ses_existing')!.push(
+    { type: 'user', id: 'latest_failed', text: 'Latest turn', time: { created: 4 } },
+    { type: 'idle', id: 'latest_idle', outcome: 'failed', time: { created: 5 } },
+  );
+  f.disconnect();
+  await settled(() => output.some(item => item.type === 'observation' && item.event.type === 'timeline' && item.event.item.type === 'user_message' && item.event.item.text === 'Latest turn'));
+  const info = await session.runtimeInfo();
+  expect(info.status).toBe('failed');
+  expect(JSON.stringify(info.failure ?? null)).not.toContain('Earlier credential failure');
 }, 10000);

@@ -27,7 +27,7 @@ async function until(check, timeout = 20000) {
 test('native OpenCode serves shared normalized sessions with isolated local model transport', { skip: !executable, timeout: 120000 }, async () => {
   const root = await realpath(await mkdtemp(join(tmpdir(), 'arc-opencode-smoke-')));
   const env = { ...process.env };
-  for (const key of Object.keys(env)) if (/^(OPENCODE_|OPENAI_|ANTHROPIC_|CODEX_|COPILOT_|GITHUB_TOKEN)/.test(key)) delete env[key];
+  for (const key of Object.keys(env)) if (/^(AGENT_HOST_|AGENT_REMOTE_|OPENCODE_|OPENAI_|ANTHROPIC_|CLAUDE_|CODEX_|COPILOT_|GITHUB_TOKEN|GATEWAY_|RELAY_)/.test(key)) delete env[key];
   for (const [name, directory] of Object.entries({ HOME: 'home', XDG_CONFIG_HOME: 'config', XDG_DATA_HOME: 'data', XDG_CACHE_HOME: 'cache', XDG_STATE_HOME: 'state' })) {
     env[name] = join(root, directory); await mkdir(env[name], { recursive: true });
   }
@@ -46,9 +46,9 @@ test('native OpenCode serves shared normalized sessions with isolated local mode
     await sleep(80); chunk({ content: 'reply' }); chunk({}, 'stop'); response.end('data: [DONE]\n\n');
   });
   const modelUrl = await listen(model);
-  await writeFile(join(cwd, 'opencode.json'), JSON.stringify({ model: 'arc/fixture', enabled_providers: ['arc'], provider: { arc: { npm: '@ai-sdk/openai-compatible', name: 'ARC local fixture', options: { baseURL: `${modelUrl}/v1`, apiKey: 'fixture-only' }, models: { fixture: { name: 'Fixture', limit: { context: 128000, output: 8192 } } } } } }));
-  env.OPENCODE_DISABLE_AUTO_UPDATE = '1'; env.OPENCODE_DISABLE_DEFAULT_PLUGINS = '1';
-  env.OPENCODE_SERVER_PASSWORD = 'isolated-smoke';
+  await writeFile(join(cwd, 'opencode.json'), JSON.stringify({ update: 'disable', model: { providerID: 'arc', model: 'fixture' }, providers: { arc: { package: '@opencode/ai/providers/openai-compatible', name: 'ARC local fixture', env: ['ARC_FIXTURE_API_KEY'], settings: { baseURL: `${modelUrl}/v1`, apiKey: 'fixture-only', transport: 'http' }, models: { fixture: { name: 'Fixture', capabilities: { tools: true, input: ['text'], output: ['text'] }, variants: [{ id: 'fast', settings: { temperature: 0.1 } }, { id: 'deep', settings: { temperature: 0.2 } }], limit: { context: 128000, output: 8192 } } } } } }));
+  env.OPENCODE_DISABLE_AUTO_UPDATE = '1';
+  env.OPENCODE_PASSWORD = 'isolated-smoke'; env.ARC_FIXTURE_API_KEY = 'fixture-only';
   const allocator = createServer(); const serverUrl = await listen(allocator);
   await new Promise(resolve => allocator.close(resolve));
   let native;
@@ -64,49 +64,59 @@ test('native OpenCode serves shared normalized sessions with isolated local mode
     await until(async () => {
       if (spawnError) throw spawnError;
       if (native.exitCode !== null) throw new Error(`OpenCode exited: ${diagnostics}`);
-      try { return (await fetch(`${serverUrl}/global/health`, { headers, signal: AbortSignal.timeout(1000) })).ok; } catch { return false; }
+      try { return (await fetch(`${serverUrl}/api/info`, { headers, signal: AbortSignal.timeout(1000) })).ok; } catch { return false; }
     }, 35000);
+    assert.equal((await fetch(`${serverUrl}/api/info`, { signal: AbortSignal.timeout(5000) })).status, 401, 'native v2 server must require authentication');
+    const identity = await (await fetch(`${serverUrl}/api/info`, { headers, signal: AbortSignal.timeout(5000) })).json();
+    assert.match(identity.version, /^2\./, 'native smoke requires OpenCode v2');
     const { OpenCodeAgentProvider } = await import('../packages/agent-provider-opencode/dist/index.js');
     provider = new OpenCodeAgentProvider({ serverUrl, password: 'isolated-smoke', requestTimeoutMs: 15000 });
     const session = await provider.createSession({ sessionId: 'arc-native-smoke', cwd, model: 'arc/fixture' }); sessions.push(session);
     const events = []; const watching = (async () => { for await (const item of session.observe()) events.push(item); })();
     await until(() => events.some(item => item.type === 'history_boundary'));
-    assert.equal(session.capabilities.sessionControl, 'shared');
+    assert.equal((await session.runtimeInfo()).model, 'arc/fixture');
+    await session.setSessionSetting('variant', 'deep');
+    assert.equal((await session.runtimeInfo()).settings.find(item => item.id === 'variant').value, 'deep');
+    const nativeSettings = await (await fetch(`${serverUrl}/api/session/${session.nativeId}`, { headers, signal: AbortSignal.timeout(5000) })).json();
+    assert.equal(nativeSettings.data.model.variant, 'deep', 'selection must be saved in the actual native session');
+    await session.setSessionSetting('permission:*', 'ask');
+    const permissionReadback = await (await fetch(`${serverUrl}/api/session/${session.nativeId}`, { headers, signal: AbortSignal.timeout(5000) })).json();
+    assert.deepEqual(permissionReadback.data.permissions.at(-1), { action: '*', resource: '*', effect: 'ask' });
     await session.sendMessage('Reply with the local fixture text.');
     await until(() => events.some(item => item.type === 'observation' && item.event.type === 'turn_completed'), 35000);
     assert.ok(requests > 0, 'the real native runtime must call the isolated model transport');
     assert.ok(JSON.stringify(events).includes('Native fixture'), JSON.stringify(events));
     assert.ok(!events.some(item => item.type === 'observation' && item.event.type === 'turn_failed'), JSON.stringify(events));
     const runtime = await session.runtimeInfo(); assert.ok(runtime.persistence);
-    const messagesUrl = `${serverUrl}/session/${runtime.sessionId}/message?directory=${encodeURIComponent(cwd)}&limit=1`;
+    const messagesUrl = `${serverUrl}/api/session/${runtime.sessionId}/message?limit=1&order=desc`;
     const latestPage = await fetch(messagesUrl, { headers, signal: AbortSignal.timeout(5000) });
     assert.equal(latestPage.status, 200);
     const latestMessages = await latestPage.json();
-    const nativeCursor = latestPage.headers.get('x-next-cursor');
+    const nativeCursor = latestMessages.cursor.next;
     assert.ok(nativeCursor, 'native history must return an opaque next-page cursor');
-    const olderPage = await fetch(`${messagesUrl}&before=${encodeURIComponent(nativeCursor)}`, { headers, signal: AbortSignal.timeout(5000) });
+    const olderPage = await fetch(`${serverUrl}/api/session/${runtime.sessionId}/message?limit=1&cursor=${encodeURIComponent(nativeCursor)}`, { headers, signal: AbortSignal.timeout(5000) });
     assert.equal(olderPage.status, 200, 'native history accepts its response cursor unchanged');
     const olderMessages = await olderPage.json();
-    assert.equal(olderMessages.length, 1);
-    assert.notEqual(olderMessages[0].info.id, latestMessages[0].info.id);
+    assert.equal(olderMessages.data.length, 1);
+    assert.notEqual(olderMessages.data[0].id, latestMessages.data[0].id);
     await session.sendMessage('Second prompt for native fork verification.');
     await until(() => events.filter(item => item.type === 'observation' && item.event.type === 'turn_completed').length === 2);
-    const historyUrl = `${serverUrl}/session/${runtime.sessionId}/message?directory=${encodeURIComponent(cwd)}`;
-    const sourceMessages = await (await fetch(historyUrl, { headers, signal: AbortSignal.timeout(5000) })).json();
-    const selectedPrompt = sourceMessages.filter(message => message.info.role === 'user').at(-1).info;
+    const historyUrl = `${serverUrl}/api/session/${runtime.sessionId}/message?limit=200&order=asc`;
+    const sourceMessages = (await (await fetch(historyUrl, { headers, signal: AbortSignal.timeout(5000) })).json()).data;
+    const selectedPrompt = sourceMessages.filter(message => message.type === 'user').at(-1);
     await writeFile(join(cwd, 'preserve.txt'), 'Keep current workspace contents.');
     const fork = await provider.forkForPromptEdit({ nativeSessionId: runtime.sessionId, messageId: selectedPrompt.id, turnId: selectedPrompt.id }); sessions.push(fork);
     const forkId = (await fork.runtimeInfo()).sessionId;
-    const forkMessages = await (await fetch(`${serverUrl}/session/${forkId}/message?directory=${encodeURIComponent(cwd)}`, { headers, signal: AbortSignal.timeout(5000) })).json();
-    assert.equal(forkMessages.length, sourceMessages.findIndex(message => message.info.id === selectedPrompt.id));
+    const forkMessages = (await (await fetch(`${serverUrl}/api/session/${forkId}/message?limit=200&order=asc`, { headers, signal: AbortSignal.timeout(5000) })).json()).data;
+    assert.equal(forkMessages.length, sourceMessages.findIndex(message => message.id === selectedPrompt.id));
     assert.ok(JSON.stringify(forkMessages).includes('Reply with the local fixture text.'));
     assert.ok(!JSON.stringify(forkMessages).includes('Second prompt for native fork verification.'));
-    assert.equal((await (await fetch(historyUrl, { headers, signal: AbortSignal.timeout(5000) })).json()).length, sourceMessages.length);
+    assert.equal((await (await fetch(historyUrl, { headers, signal: AbortSignal.timeout(5000) })).json()).data.length, sourceMessages.length);
     assert.equal(await readFile(join(cwd, 'preserve.txt'), 'utf8'), 'Keep current workspace contents.');
     await fork.dispose();
-    const childResponse = await fetch(`${serverUrl}/session?directory=${encodeURIComponent(cwd)}`, { method: 'POST', headers: { ...headers, 'Content-Type': 'application/json' }, body: JSON.stringify({ parentID: runtime.sessionId, title: 'Native child fixture' }), signal: AbortSignal.timeout(5000) });
+    const childResponse = await fetch(`${serverUrl}/api/session`, { method: 'POST', headers: { ...headers, 'Content-Type': 'application/json' }, body: JSON.stringify({ location: { directory: cwd }, parentID: runtime.sessionId, title: 'Native child fixture' }), signal: AbortSignal.timeout(5000) });
     assert.equal(childResponse.status, 200);
-    const nativeChild = await childResponse.json();
+    const nativeChild = (await childResponse.json()).data;
     await until(async () => (await session.runtimeInfo()).childSessions?.some(child => child.nativeSessionId === nativeChild.id));
     const child = await provider.openChildSession(runtime.sessionId, nativeChild.id); sessions.push(child);
     assert.equal((await child.runtimeInfo()).sessionId, nativeChild.id);
@@ -125,14 +135,14 @@ test('native OpenCode serves shared normalized sessions with isolated local mode
     assert.ok(listed.some(item => item.id === otherRuntime.sessionId && item.cwd === secondDirectory), 'global listing must include another project');
     await otherSession.dispose();
     await session.dispose(); await watching;
-    assert.equal((await fetch(`${serverUrl}/global/health`, { headers })).status, 200);
+    assert.equal((await fetch(`${serverUrl}/api/info`, { headers, signal: AbortSignal.timeout(5000) })).status, 200);
     const resumed = await provider.resumeSession(runtime.persistence); sessions.push(resumed);
     const history = []; const resumedWatch = (async () => { for await (const item of resumed.observe()) history.push(item); })();
     await until(() => history.some(item => item.type === 'history_boundary'));
     assert.ok(JSON.stringify(history).includes('Native fixture'));
     await resumed.dispose(); await resumedWatch;
     await provider.close();
-    assert.equal((await fetch(`${serverUrl}/global/health`, { headers })).status, 200, 'closing adapter must preserve the independently owned server');
+    assert.equal((await fetch(`${serverUrl}/api/info`, { headers, signal: AbortSignal.timeout(5000) })).status, 200, 'closing adapter must preserve the independently owned server');
     const { createDebuggerServer } = await import('../packages/agent-remote-debugger/dist/server.js');
     const { createDebuggerRuntime } = await import('../packages/agent-remote-debugger/dist/runtime.js');
     const debuggerServer = await createDebuggerServer({ adapter: new OpenCodeAgentProvider({ serverUrl, password: 'isolated-smoke' }), config: { cwd, model: 'arc/fixture' } });
@@ -144,14 +154,16 @@ test('native OpenCode serves shared normalized sessions with isolated local mode
       }
       await clients[0].client.sendMessage('From the first browser.');
       await until(() => JSON.stringify(clients[1].replica.getState().timeline).includes('Native fixture reply'));
-      await until(async () => (await (await fetch(`${serverUrl}/session/status?directory=${encodeURIComponent(cwd)}`, { headers })).json())[debuggerServer.session.nativeSessionId]?.type !== 'busy');
+      await until(async () => !(await (await fetch(`${serverUrl}/api/session/active`, { headers, signal: AbortSignal.timeout(5000) })).json()).data[debuggerServer.session.nativeSessionId]);
       await until(() => clients.every(client => client.replica.getState().agent?.runtimeInfo.status === 'idle'));
       await clients[1].client.sendMessage('From the second browser.');
       await until(() => JSON.stringify(clients[0].replica.getState().timeline).includes('From the second browser.'));
       await until(() => (JSON.stringify(clients[0].replica.getState().timeline).match(/Native fixture reply/g) ?? []).length >= 2);
     } finally { for (const client of clients) client.close(); await debuggerServer.close(); }
-    assert.equal((await fetch(`${serverUrl}/global/health`, { headers })).status, 200);
-    console.log(JSON.stringify({ ardbSharedClients: 2, native: 'OpenCode', model: 'isolated HTTP fixture', requests, observations: events.length, nativeSessionId: runtime.sessionId, rename: true, resume: true, nativePromptFork: true, nativeChildNavigation: true, nativeHistoryPagination: true, crossProjectListing: true, sharedServerSurvivedDispose: true }));
+    assert.equal((await fetch(`${serverUrl}/api/info`, { headers, signal: AbortSignal.timeout(5000) })).status, 200);
+    console.log(JSON.stringify({ ardbSharedClients: 2, native: `OpenCode ${identity.version}`, nativeSettingsReadback: true, model: 'isolated HTTP fixture', requests, observations: events.length, nativeSessionId: runtime.sessionId, rename: true, resume: true, nativePromptFork: true, nativeChildNavigation: true, nativeHistoryPagination: true, crossProjectListing: true, sharedServerSurvivedDispose: true }));
+  } catch (error) {
+    throw new Error(`${error instanceof Error ? error.message : String(error)}\nNative diagnostics:\n${diagnostics}`, { cause: error });
   } finally {
     for (const session of sessions) await session.dispose().catch(() => {});
     await provider?.close().catch(() => {});

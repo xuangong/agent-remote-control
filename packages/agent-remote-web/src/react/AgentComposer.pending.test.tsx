@@ -308,7 +308,7 @@ it('queues input when control is checking even if the transport reports ready', 
 it('uses public synchronization and operation admission without legacy disabled props', async () => {
   const { remoteSessionState } = await import('../client/session-state.js');
   const view = await setup({ disabled: false, recovering: false, sessionState: remoteSessionState(state, 'connecting') });
-  expect(view.container.querySelector('[data-testid="agent-activity-label"]')!.textContent).toBe('Waiting for session');
+  expect(view.container.querySelector('[data-testid="agent-activity-label"]')!.textContent).toBe('Opening session');
   await view.type('Wait for synchronization');
   await view.click();
   expect(view.send).not.toHaveBeenCalled();

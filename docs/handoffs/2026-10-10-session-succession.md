@@ -63,10 +63,13 @@ the shared Session View consumes ordinary state and actions.
 
 ## Native scope
 
-Codex, Claude Code, Copilot and OpenCode implement native evidence v2. Admission
-requires the complete source/target contract on the same Host/canonical cwd.
-Provider names alone do not enable a pair. OpenCode retains its reviewed 1.18.x
-configuration and callback-plugin requirement for source references.
+At this prior validation baseline, Codex, Claude Code, Copilot and OpenCode
+implemented native evidence v2. Admission required the complete source/target
+contract on the same Host/canonical cwd; provider names alone did not enable a
+pair. The OpenCode result applied to its reviewed 1.18.x configuration and
+callback-plugin requirement for source references. It does not establish current
+2.x Handoff support: OpenCode 2.x reports that capability as unavailable. See the
+[current supported configuration](../current/agent-remote/session-succession-recovery.md#supported-configuration-and-product-entry).
 
 `inputId` is adapter correlation; `nativeInputId` identifies the proven native
 user record; `nativeExecutionId` positively establishes execution start. These

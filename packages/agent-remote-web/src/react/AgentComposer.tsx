@@ -120,6 +120,7 @@ export function AgentComposer({ sessionState: suppliedSessionState, readOnly: fo
   const operationBusy = Boolean(pending || currentDraft.settingPending || currentDraft.interruptPending);
   const busy = operationBusy;
   const session = suppliedSessionState ?? remoteSessionState(state, disabled ? 'connecting' : 'ready');
+  const activitySession = draftOnly ? remoteSessionState(undefined, session.connection === 'ready' ? 'connecting' : session.connection) : session;
   const capabilities = state?.agent?.capabilities;
   const runtimeConnection = session.runtime;
   const runtimeUnavailable = runtimeConnectionMessage(runtimeConnection?.state);
@@ -504,11 +505,11 @@ export function AgentComposer({ sessionState: suppliedSessionState, readOnly: fo
         onView={(view) => { currentDraft.view = view; refresh((value) => value + 1); }}
         onPendingChange={(value) => { currentDraft.settingPending = value; if (mounted.current) refresh((count) => count + 1); }}
         onSelect={onSetSessionSetting && !mutationBlocked ? async (id, value) => { if (latest.current.draftOnly || latest.current.mutationBlocked || latest.current.agentId !== agentId) return; await onSetSessionSetting(id, value); } : undefined} renderError={renderSessionSettingError}>{sessionControls}</AgentSessionSettings> : <div className="agent-composer-secondary-controls">{toolbarActions.map(action => <button key={action.id} type="button" aria-label={action.label} disabled={action.disabled} onClick={action.run}>{action.content}</button>)}</div>}
-      {state?.agent && !draftOnly ? <AgentActivityStatus sessionState={session} visible={activityVisible} state={state} disabled={disabled} disabledLabel={disabledLabel}
+      <AgentActivityStatus sessionState={activitySession} visible={activityVisible} state={state} disabled={disabled || draftOnly} disabledLabel={!draftOnly && state?.agent ? disabledLabel : undefined}
         commandPending={pending === 'command'}
         interruptDisabled={!canInterrupt || currentDraft.interruptPending === true || (pending !== undefined && pending !== 'command') || !onCancel}
         interruptLabel={currentDraft.interruptPending ? 'Interrupting…' : interruptRequested ? 'Interrupt requested' : 'Interrupt'}
-        onInterrupt={() => void run('cancel')} /> : null}
+        onInterrupt={() => void run('cancel')} />
       <button type="button" data-testid="prompt-submit" aria-label={pending === 'send' ? 'Sending…' : 'Send message'} title={hasImages && pendingFirstInputContext ? firstInputImageNotice : `${nativeBusy ? 'Send input to the active native turn' : 'Start a new native turn'} · Hold for a new line`} disabled={!canSubmit || readOnly || busy || hasImages && pendingFirstInputContext || (selectedSkill ? nativeBusy || !onExecuteCommand : !hasContent || (!imageSendReady && !canWait) || (!isCommand && (capabilities?.sendMessage !== true || (!onSendMessage && !onSendMessageContent))))} {...sendButtonPress}><span aria-hidden="true">{pending === 'send' ? '…' : '↑'}</span></button>
     </div> : null}
     {waiting.items[0]?.phase === 'error' ? <p className="agent-composer-note" role="alert">

@@ -124,7 +124,7 @@ export function MinimizeMainSession() {
   </button>;
 }
 
-export function SessionDockRail({ children, mainTitle = 'Main session', minimumBaseWidth = minimumWidth }: { children: ReactNode; mainTitle?: string; minimumBaseWidth?: number }) {
+export function SessionDockRail({ children, minimizedHeader, mainTitle = 'Main session', minimumBaseWidth = minimumWidth }: { children: ReactNode; minimizedHeader?: ReactNode; mainTitle?: string; minimumBaseWidth?: number }) {
   const dock = useContext(Context);
   const rail = useRef<HTMLDivElement>(null);
   const [width, setWidth] = useState(0);
@@ -155,6 +155,7 @@ export function SessionDockRail({ children, mainTitle = 'Main session', minimumB
   return <div ref={rail} className="lab-session-dock-rail" data-docked={active.length > 0 || undefined}>
     <div className="lab-session-dock-base" data-minimized={minimized || undefined} style={active.length ? { flexBasis: minimized ? 44 : baseWidth } : undefined}>
       <div ref={content} id={contentId} className="lab-session-dock-main-content" hidden={minimized}>{children}</div>
+      {minimized ? minimizedHeader : null}
       {minimized ? <button ref={restore} type="button" className="lab-session-main-restore" aria-label={`Restore main session: ${mainTitle}`} title={`Restore main session: ${mainTitle}`} aria-expanded={false} aria-controls={contentId}
         onClick={() => { restoreFocus.current = true; dock?.minimizeMain(false); }}>
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" aria-hidden="true"><path d="m9 6 6 6-6 6" /></svg>

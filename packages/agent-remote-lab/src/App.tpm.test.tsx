@@ -40,7 +40,7 @@ it.each(['fixed', 'legacy', 'role', 'stale-role', 'missing-provider'] as const)(
   const list = vi.fn(async () => ({ supported: true, works: [work] }));
   const current = vi.fn(async () => ({ version: 1 as const, role: { id: 'primary', revision: mode === 'stale-role' ? 3 : 2, origin: { ...ref, nativeSessionId: 'A' }, current: { ...ref, nativeSessionId: mode === 'stale-role' ? 'C' : 'B' }, workspace: { controllerId: 'installation', canonicalCwd: '/fixture' } }, locator: { hostId: 'host', providerId: ref.providerId, nativeSessionId: mode === 'stale-role' ? 'C' : 'B' } }));
   const attach = vi.spyOn(SessionDirectoryClient.prototype, 'attach').mockRejectedValue(new Error('Fixture main is offline'));
-  vi.spyOn(SessionDirectoryClient.prototype, 'list').mockResolvedValue({ items: [], revision: '1', hasMore: false });
+  vi.spyOn(SessionDirectoryClient.prototype, 'list').mockImplementation(async providerId => ({ items: [{ providerId, nativeSessionId: 'B', title: 'Main project', createdAt: '', updatedAt: '', state: 'idle' }], revision: '1', hasMore: false }));
   vi.spyOn(SessionDirectoryClient.prototype, 'workspaces').mockResolvedValue({ workspaces: [] });
   const transport = { onDiagnostic: () => () => {}, onProtocolMessage: () => () => {}, fetchSessionSuccessionCurrent: current } as unknown as LabTransport;
   const hostService = { hosts: async () => ({ hosts: [{ id: 'host', name: 'Fixture', online: true, providers: [{ providerId: 'tpm-provider', displayName: 'TPM' }, ...(mode === 'missing-provider' ? [] : [{ providerId: ref.providerId, displayName: 'Main' }])] }] }),
@@ -51,7 +51,12 @@ it.each(['fixed', 'legacy', 'role', 'stale-role', 'missing-provider'] as const)(
   await act(async () => view.querySelector<HTMLButtonElement>('[aria-label="TPM works"]')!.click());
   await vi.waitFor(() => expect(view.querySelector('[data-tpm-work]')).not.toBeNull());
   await act(async () => view.querySelector<HTMLButtonElement>('[data-tpm-work]')!.click());
-  await act(async () => view.querySelector<HTMLButtonElement>('[aria-label="Open main session"]')!.click());
+  await act(async () => view.querySelector<HTMLButtonElement>('[aria-label="Close TPM works"]')!.click());
+  const mainLink = view.querySelector<HTMLButtonElement>('[aria-label^="Open main session:"]')!;
+  expect(mainLink.textContent).toContain('Main project');
+  expect(mainLink.title).toContain(mode === 'legacy' ? work.providerId : ref.providerId);
+  expect(attach).not.toHaveBeenCalled();
+  await act(async () => mainLink.click());
   if (mode === 'stale-role' || mode === 'missing-provider') {
     expect(attach).not.toHaveBeenCalled();
     expect(view.textContent).toContain(mode === 'stale-role' ? 'TPM has been refreshed' : 'provider is unavailable');

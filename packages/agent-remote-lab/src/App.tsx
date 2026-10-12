@@ -884,7 +884,7 @@ function AppContent({
     return { hostId: item.hostId, providerId: item.providerId, nativeSessionId: attached.nativeSessionId ?? item.nativeSessionId, title: item.title, agentId: attached.agentId };
   }, [baseUrl]);
   const tpm = useTpmWork(tpmService, tpmHosts, accessReady && !!directory, attachTpm, tpmView.visible);
-  const tpmMainSessions = useTpmMainSessions(baseUrl, accessReady, tpmView.visible && tpmListOpen, tpm.works, [...favorites.stars, ...sessionEntries], transport);
+  const tpmMainSessions = useTpmMainSessions(baseUrl, accessReady, tpmView.visible && (tpmListOpen || tpm.expanded), tpm.works, [...favorites.stars, ...sessionEntries], transport);
   const tpmMainState = useRef({ scope: baseUrl, transport, hosts: remoteHosts, providers, works: tpm.works });
   tpmMainState.current = { scope: baseUrl, transport, hosts: remoteHosts, providers, works: tpm.works };
   const tpmMainRequest = useRef(0);
@@ -1595,7 +1595,7 @@ function AppContent({
     <div className="lab-tpm-workspaces">{tpm.opened.map((key, index) => {
       const item = tpm.works.find(item => item.key === key);
       if (!item) return null;
-      return <TpmWorkspace key={key} item={item} session={tpm.sessions[key]} replica={tpm.sessions[key] ? replicaFor(tpm.sessions[key]!.agentId) : undefined}
+      return <TpmWorkspace key={key} item={item} mainTitle={tpmMainSessions.get(sessionKey(tpmMainTarget(item)))?.title} session={tpm.sessions[key]} replica={tpm.sessions[key] ? replicaFor(tpm.sessions[key]!.agentId) : undefined}
         visible={tpmView.visible && tpm.windows.includes(key) && (!compactLayout || tpm.selected === key) && !supportingRailOpen}
         layer={tpm.windows.indexOf(key) + 1} initialOffset={(index % 6) * 28} onFocus={() => tpm.focus(key)} storageScope={baseUrl} triggerRef={tpmTriggerRef}
         transport={transport} draftBinding={{ store: messageDrafts, key: `tpm:${key}` }} navigation={viewNavigation}

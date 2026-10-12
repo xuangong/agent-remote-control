@@ -10,6 +10,7 @@ import { useAskPosition } from '../hooks/useAskPosition.js';
 import { useConversationSession } from '../hooks/useConversationSession.js';
 import type { SessionViewNavigationFactory } from '../session-view-navigation.js';
 import { sessionKey } from '../session-tree.js';
+import { tpmMainTarget } from '../tpm-main-sessions.js';
 import { LabWorkbench } from './LabWorkbench.js';
 import { SessionViewPlacement } from './SessionDock.js';
 import { AskResize } from './AskResize.js';
@@ -22,9 +23,9 @@ export function TpmWorkspace(props: Omit<Parameters<typeof TpmWorkspaceContent>[
 }
 
 /** The shell controls presentation; the ordinary conversation owns input and recovery. */
-function TpmWorkspaceContent({ item, session, replica, visible, storageScope, triggerRef, transport, draftBinding, busy, attaching, error, navigation,
+function TpmWorkspaceContent({ item, mainTitle, session, replica, visible, storageScope, triggerRef, transport, draftBinding, busy, attaching, error, navigation,
   docked, dockControls, layer, initialOffset, onFocus, onClose, onShowList, onOpenMain, onRename, onAction, onResolve, onRetry, onConfirmTodo }: {
-  item: TpmItem; session?: OpenedSession; replica?: AgentReplica; visible: boolean; storageScope: string; triggerRef: RefObject<HTMLButtonElement>;
+  item: TpmItem; mainTitle?: string; session?: OpenedSession; replica?: AgentReplica; visible: boolean; storageScope: string; triggerRef: RefObject<HTMLButtonElement>;
   transport: RemoteAgentTransport; draftBinding: DraftBinding; busy?: boolean; attaching?: boolean; error?: string; navigation?: SessionViewNavigationFactory;
   docked: boolean; dockControls: ReactNode;
   layer?: number; initialOffset?: number; onFocus?(): void;
@@ -87,6 +88,8 @@ function TpmWorkspaceContent({ item, session, replica, visible, storageScope, tr
     void operation().catch(error => setActionError(error instanceof Error ? error.message : 'TPM operation failed.'));
   }
   const work = item.work;
+  const main = tpmMainTarget(item);
+  const mainLabel = mainTitle?.trim() || main.nativeSessionId;
   const unavailable = !item.online || busy;
   const creationUnresolved = work.creationStatus === 'unknown' || work.creationStatus === 'abandoned';
   const archiveLabel = work.archived ? 'Restore TPM session' : work.phase === 'completed' ? 'Archive TPM session' : 'Stop and archive TPM session';
@@ -110,7 +113,7 @@ function TpmWorkspaceContent({ item, session, replica, visible, storageScope, tr
         {work.archived ? <span>{work.phase === 'completed' ? 'Archived' : 'Stopped · Archived'}</span> : work.paused && work.phase !== 'completed' ? <span>Background follow-up paused</span> : null}
         {!work.archived && !work.paused && work.phase !== 'completed' ? work.waiting === 'user' ? <span className="lab-tpm-needs-user">Waiting for your decision</span> : work.waiting === 'main_session' ? <span>Waiting for main-session progress</span> : null : null}
         {work.health ? <span className="lab-tpm-health">{work.health}</span> : null}{!item.online ? <span className="lab-tpm-health">Host offline</span> : null}
-        <button className="lab-tpm-main-link" type="button" aria-label="Open main session" onClick={onOpenMain}>Main session ↗</button>
+        <button className="lab-tpm-main-link" type="button" aria-label={`Open main session: ${mainLabel}`} title={`${mainLabel} · ${main.providerId} · ${main.nativeSessionId}`} onClick={onOpenMain}><span>Main:</span><span className="lab-tpm-main-title">{mainLabel}</span><span aria-hidden="true">↗</span></button>
       </div>
       <nav className="lab-tpm-toolbar" aria-label="Work view">
         <button type="button" aria-pressed={!documentVisible} onClick={() => setDocumentVisible(false)}>Conversation</button>

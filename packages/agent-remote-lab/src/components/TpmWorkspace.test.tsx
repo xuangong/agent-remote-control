@@ -37,7 +37,7 @@ it('preserves a draft when hidden, minimizes without pausing, and resolves uncer
   expect(container.querySelector('[aria-label="Pause background follow-up"]')).toBeNull();
   await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="Plan & acceptance"]')!.click());
   expect(container.querySelector('article')?.textContent).toContain('Find matching items.');
-  await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="Open main session"]')!.click());
+  await act(async () => container.querySelector<HTMLButtonElement>('[aria-label^="Open main session:"]')!.click());
   expect(mainOpened).toBe(true);
   expect(resolutions).toEqual([]);
   await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="Mark uncertain as accepted"]')!.click());

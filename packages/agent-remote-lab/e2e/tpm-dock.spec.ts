@@ -14,6 +14,7 @@ test('TPM groups remain usable while multiple workspaces are open', async ({ pag
   await list.locator('[data-tpm-work]').filter({ hasText: 'Connection recovery' }).click();
   const second = page.getByRole('dialog', { name: 'TPM: Connection recovery' });
   await expect(second).toBeVisible();
+  await expect(second.getByRole('button', { name: 'Open main session: Agent Remote Control', exact: true })).toBeVisible();
   await expect(page.locator('.lab-tpm-window:visible')).toHaveCount(isMobile ? 1 : 2);
   await list.getByRole('button', { name: 'Close TPM works' }).click();
   await second.getByTestId('prompt-input').fill('Preserve this delivery draft');

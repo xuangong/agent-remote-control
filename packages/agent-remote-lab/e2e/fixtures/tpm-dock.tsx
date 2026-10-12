@@ -11,6 +11,7 @@ import { TpmWorkspace } from '../../src/components/TpmWorkspace';
 import { useTpmWork, type TpmService } from '../../src/hooks/useTpmWork';
 import { DraftStore } from '../../src/draft-store';
 import { replicaState } from '../../src/test/fixtures';
+import { tpmMainTarget } from '../../src/tpm-main-sessions';
 import { sessionKey } from '../../src/session-tree';
 import '../../src/session-view-styles';
 import '../../src/ask.css';
@@ -66,7 +67,7 @@ function Fixture() {
     <TpmMenu tpm={tpm} main={main} mainSessions={labels} visible triggerRef={trigger} inert={false} open={listOpen} onOpenChange={setListOpen} />
     <div className="lab-tpm-workspaces">{tpm.opened.map((key, index) => {
       const item = tpm.works.find(item => item.key === key)!;
-      return <TpmWorkspace key={key} item={item} session={tpm.sessions[key]} transport={transport} storageScope="fixture" triggerRef={trigger}
+      return <TpmWorkspace key={key} item={item} mainTitle={labels.get(sessionKey(tpmMainTarget(item)))?.title} session={tpm.sessions[key]} transport={transport} storageScope="fixture" triggerRef={trigger}
         visible={tpm.windows.includes(key) && (!compact || tpm.selected === key)} layer={tpm.windows.indexOf(key) + 1} initialOffset={index * 28}
         onFocus={() => tpm.focus(key)} draftBinding={{ store: drafts, key }} onClose={() => tpm.close(key)} onShowList={() => setListOpen(true)}
         onOpenMain={() => {}} onAction={action => tpm.action(key, action)} onResolve={async () => {}} onRetry={() => { void tpm.open(key); }} />;

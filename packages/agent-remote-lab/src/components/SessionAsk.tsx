@@ -25,12 +25,14 @@ export function SessionAsk({ source, state, ask, visible, surfaceVisible = visib
   if (!owner) throw new Error('Ask owner unavailable.');
   const geometryScope = owner.geometryScope;
   const docked = useSessionDocked(`ask:${geometryScope}`);
-  const shown = visible || docked && surfaceVisible;
+  const independent = useRef(false);
   const entry = ask.entryFor(source, associationOwner);
   const attached = isAskAttached(entry);
   const participant = entry.record ? askParticipantKey(entry.record) : undefined;
   const enabled = ask.isEnabled(source, associationOwner);
   const expanded = ask.isOpen(source, associationOwner);
+  independent.current = docked || independent.current && expanded;
+  const shown = visible || independent.current && surfaceVisible;
   useEffect(() => {
     if (!shown || !canRestore || !enabled || !expanded) return;
     return ask.restore(source, synchronize, associationOwner);

@@ -152,3 +152,29 @@ test('TPM delegation is explicit and quiet reviews use the ordinary session view
   await checks.click();
   await page.screenshot({ path: testInfo.outputPath('tpm-delegation.png') });
 });
+
+test('reload restores multiple TPM docks with their widths, order and drafts', async ({ page, isMobile }) => {
+  test.skip(isMobile, 'Dock uses a wide workspace.');
+  await page.setViewportSize({ width: 1600, height: 1000 });
+  await page.goto('/e2e/fixtures/tpm-dock.html');
+  for (const title of ['Search delivery', 'Connection recovery']) {
+    await page.getByRole('button', { name: 'TPM works', exact: true }).click();
+    const list = page.getByRole('region', { name: 'TPM works', exact: true });
+    await list.locator('[data-tpm-work]').filter({ hasText: title }).click();
+    await list.getByRole('button', { name: 'Close TPM works' }).click();
+    const view = page.getByRole('dialog', { name: `TPM: ${title}` });
+    await view.getByTestId('prompt-input').fill(`Draft for ${title}`);
+    await view.getByRole('button', { name: `Dock ${title}`, exact: true }).click();
+  }
+  const first = page.getByRole('region', { name: 'Docked Search delivery', exact: true });
+  const second = page.getByRole('region', { name: 'Docked Connection recovery', exact: true });
+  await second.getByRole('button', { name: 'Move Connection recovery' }).focus();
+  await second.getByRole('button', { name: 'Move Connection recovery' }).press('ArrowLeft');
+  await first.getByRole('separator').focus(); await first.getByRole('separator').press('ArrowRight');
+  await page.reload();
+  await expect(first).toBeVisible(); await expect(second).toBeVisible();
+  await expect(first).toHaveCSS('order', '2'); await expect(second).toHaveCSS('order', '1');
+  await expect(first.getByRole('separator')).toHaveAttribute('aria-valuenow', '450');
+  await expect(first.getByTestId('prompt-input')).toHaveText('Draft for Search delivery');
+  await expect(second.getByTestId('prompt-input')).toHaveText('Draft for Connection recovery');
+});

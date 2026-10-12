@@ -64,3 +64,33 @@ it('keeps its portal host connected through Strict Mode effect replay', async ()
   await act(async () => view.querySelector<HTMLButtonElement>('[aria-label="Float Strict"]')!.click());
   expect(input.isConnected).toBe(true);
 });
+
+it('restores workspace dock order and widths after reload, including late mounted views', async () => {
+  let reload!: () => void, reveal!: () => void;
+  function Workspace() {
+    const [late, setLate] = useState(false); reveal = () => setLate(true);
+    return <SessionDockProvider enabled storageScope="dock-reload"><SessionDockRail>Main</SessionDockRail>
+      {(late ? ['one', 'two'] : ['one']).map(id => <SessionViewPlacement key={id} id={id} title={id} visible>{({ controls }) => controls}</SessionViewPlacement>)}
+    </SessionDockProvider>;
+  }
+  function Harness() { const [revision, setRevision] = useState(0); reload = () => setRevision(v => v + 1); return <Workspace key={revision} />; }
+  const view = await render(<Harness />);
+  await act(async () => reveal());
+  for (const id of ['one', 'two']) await act(async () => view.querySelector<HTMLButtonElement>(`[aria-label="Dock ${id}"]`)!.click());
+  await act(async () => view.querySelector('[aria-label="Move two"]')!.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowLeft', bubbles: true })));
+  await act(async () => view.querySelector('[aria-label="one width"]')!.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true })));
+  await act(async () => reload());
+  expect(view.querySelector<HTMLElement>('[data-dock-id="one"]')?.style.width).toBe('450px');
+  await act(async () => reveal());
+  expect(Number(view.querySelector<HTMLElement>('[data-dock-id="two"]')?.style.order)).toBeLessThan(Number(view.querySelector<HTMLElement>('[data-dock-id="one"]')?.style.order));
+});
+
+it('ignores corrupt saved placement while keeping docking available', async () => {
+  sessionStorage.setItem('agent-remote:recovery:corrupt:workspace-dock', '{broken');
+  const view = await render(<SessionDockProvider enabled storageScope="corrupt"><SessionDockRail>Main</SessionDockRail>
+    <SessionViewPlacement id="one" title="one" visible>{({ controls }) => controls}</SessionViewPlacement>
+  </SessionDockProvider>);
+  expect(view.querySelector('[data-dock-id]')).toBeNull();
+  await act(async () => view.querySelector<HTMLButtonElement>('[aria-label="Dock one"]')!.click());
+  expect(view.querySelector('[data-dock-id="one"]')).not.toBeNull();
+});

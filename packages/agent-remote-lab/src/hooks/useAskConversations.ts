@@ -26,7 +26,7 @@ export function askParticipantKey(record: SessionFork): string {
 export function isAskAttached(entry?: AskEntry): boolean {
   return !!entry?.attached && !!entry.record?.target && entry.attachedParticipant === askParticipantKey(entry.record);
 }
-interface AskOpenOptions { synchronize?: () => Promise<void>; restoring?: AbortController; associationOwner: string }
+interface AskOpenOptions { existingOnly?: boolean; synchronize?: () => Promise<void>; restoring?: AbortController; associationOwner: string }
 
 export function useAskConversations(document: CompositionDocument, transport: RemoteAgentTransport, directory?: SessionDirectoryClient, selectedHostId = 'local', onCreated?: () => void) {
   const baseUrl = document.scope;
@@ -264,7 +264,7 @@ export function useAskConversations(document: CompositionDocument, transport: Re
     });
     return () => preparation.abort();
   }
-  async function open(sourceState: AgentReplicaState | undefined, source: OpenedSession, args: string, clean: boolean, { synchronize, restoring, associationOwner }: AskOpenOptions) {
+  async function open(sourceState: AgentReplicaState | undefined, source: OpenedSession, args: string, clean: boolean, { synchronize, restoring, associationOwner, existingOnly }: AskOpenOptions) {
     if (!restoring && !setEnabled(source, true, associationOwner)) throw new Error('Ask could not save this preference. Restore browser storage and retry.');
     const key = keyFor(source, associationOwner);
     const epoch = association.epochs.get(key);
@@ -274,13 +274,13 @@ export function useAskConversations(document: CompositionDocument, transport: Re
       if (associationOwner && preparations.current.get(key)?.signal.aborted) {
         await preparationSettlements.current.get(key);
         if (association.epochs.get(key) !== epoch || !owners.current.active || !expanded(key)) return {};
-        return open(sourceState, source, args, clean, { synchronize, restoring, associationOwner });
+        return open(sourceState, source, args, clean, { synchronize, restoring, associationOwner, existingOnly });
       }
       if (preparations.current.get(key)?.signal.aborted && !args.trim() && !clean) {
         if (restoring) {
           await preparationSettlements.current.get(key);
           if (restoring.signal.aborted || !isEnabled(source, associationOwner) || !expanded(key)) return {};
-          return open(sourceState, source, '', false, { synchronize, restoring, associationOwner });
+          return open(sourceState, source, '', false, { synchronize, restoring, associationOwner, existingOnly });
         }
         resumeRequested.current.add(key);
         return {};
@@ -333,7 +333,7 @@ export function useAskConversations(document: CompositionDocument, transport: Re
       }
       const replacing = clean || !!(entry.pending && entry.record && entry.pending.id !== entry.record.id);
       let record = entry.pending ?? (!clean ? entry.record : undefined);
-      if (restoring && !record?.target || entry.restoreOnly && !clean && !record) throw new Error('The saved Ask session is not available yet. Retry to reconnect.');
+      if ((restoring || existingOnly) && !record?.target || entry.restoreOnly && !clean && !record) throw new Error('The saved Ask session is not available yet. Retry to reconnect.');
       if (!record) {
         const agent = sourceState?.agent;
         if (!agent?.runtimeInfo.sessionId) throw new Error('Open the source session before starting Ask.');
@@ -410,7 +410,7 @@ export function useAskConversations(document: CompositionDocument, transport: Re
       if (current) update(key, { busy: false });
       finishPreparation();
       if (current && resumeRequested.current.delete(key) && isEnabled(source, associationOwner) && expanded(key)) {
-        void open(sourceState, source, '', false, { synchronize, associationOwner }).catch(() => {});
+        void open(sourceState, source, '', false, { synchronize, associationOwner, existingOnly }).catch(() => {});
       }
     }
   }

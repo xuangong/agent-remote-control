@@ -1,45 +1,71 @@
 import { createContext, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import './session-dock.css';
+import { conversationSessionStorage } from '../conversation-storage.js';
 
 const defaultWidth = 440, minimumWidth = 320, maximumWidth = 1600;
 interface DockItem { id: string; title: string; host: HTMLElement; visible: boolean; width: number }
+interface DockLayout { panes: Array<{ id: string; width: number }>; baseWidth?: number }
 interface DockContext {
-  enabled: boolean; items: DockItem[];
-  add(item: Omit<DockItem, 'width'>): void;
-  remove(id: string, host: HTMLElement): void;
-  update(id: string, title: string, visible: boolean): void;
+  enabled: boolean; items: DockItem[]; layout: DockLayout;
+  register(item: Omit<DockItem, 'width'>): void;
+  unregister(id: string, host: HTMLElement): void;
+  add(id: string): void;
+  remove(id: string): void;
   move(id: string, offset: number): void;
   reorder(id: string, before: string): void;
   resize(id: string, width: number): void;
+  resizeBase(width: number): void;
 }
 const Context = createContext<DockContext | undefined>(undefined);
+const clampWidth = (width: number) => Math.max(minimumWidth, Math.min(maximumWidth, width));
+function readLayout(key?: string): DockLayout {
+  try {
+    const saved = key && JSON.parse(conversationSessionStorage.getItem(key) ?? 'null');
+    if (!saved || !Array.isArray(saved.panes)) return { panes: [] };
+    const seen = new Set<string>();
+    const panes = saved.panes.filter((pane: { id?: unknown; width?: unknown }) => {
+      if (!pane || typeof pane.id !== 'string' || !pane.id || seen.has(pane.id) || typeof pane.width !== 'number' || !Number.isFinite(pane.width)) return false;
+      seen.add(pane.id); return true;
+    }).slice(-20).map((pane: { id: string; width: number }) => ({ id: pane.id, width: clampWidth(pane.width) }));
+    return { panes, ...(typeof saved.baseWidth === 'number' && Number.isFinite(saved.baseWidth) ? { baseWidth: clampWidth(saved.baseWidth) } : {}) };
+  } catch { return { panes: [] }; }
+}
 
-export function SessionDockProvider({ enabled, children }: { enabled: boolean; children: ReactNode }) {
-  const [items, setItems] = useState<DockItem[]>([]);
-  const add = useCallback((item: Omit<DockItem, 'width'>) => setItems(current => current.some(value => value.id === item.id) ? current : [...current, { ...item, width: defaultWidth }]), []);
-  const remove = useCallback((id: string, host: HTMLElement) => setItems(current => current.some(item => item.id === id && item.host === host) ? current.filter(item => item.id !== id || item.host !== host) : current), []);
-  const update = useCallback((id: string, title: string, visible: boolean) => setItems(current => {
-    const previous = current.find(item => item.id === id);
-    return !previous || previous.title === title && previous.visible === visible ? current : current.map(item => item.id === id ? { ...item, title, visible } : item);
+/** Placement preferences outlive DOM registrations and main-session navigation. */
+export function SessionDockProvider({ enabled, storageScope, children }: { enabled: boolean; storageScope?: string; children: ReactNode }) {
+  const key = storageScope ? `agent-remote:recovery:${storageScope}:workspace-dock` : undefined;
+  const [layout, setLayout] = useState<DockLayout>(() => readLayout(key));
+  const [registered, setRegistered] = useState<Array<Omit<DockItem, 'width'>>>([]);
+  const register = useCallback((item: Omit<DockItem, 'width'>) => setRegistered(current => {
+    const previous = current.find(value => value.id === item.id);
+    return previous?.host === item.host && previous.title === item.title && previous.visible === item.visible ? current
+      : [...current.filter(value => value.id !== item.id), item];
   }), []);
-  const move = useCallback((id: string, offset: number) => setItems(current => {
-    const index = current.findIndex(item => item.id === id), next = Math.max(0, Math.min(current.length - 1, index + offset));
+  const unregister = useCallback((id: string, host: HTMLElement) => setRegistered(current => current.some(item => item.id === id && item.host === host)
+    ? current.filter(item => item.id !== id || item.host !== host) : current), []);
+  const add = useCallback((id: string) => setLayout(current => current.panes.some(item => item.id === id) ? current : { ...current, panes: [...current.panes, { id, width: defaultWidth }] }), []);
+  const remove = useCallback((id: string) => setLayout(current => ({ ...current, panes: current.panes.filter(item => item.id !== id) })), []);
+  const move = useCallback((id: string, offset: number) => setLayout(current => {
+    const index = current.panes.findIndex(item => item.id === id), next = Math.max(0, Math.min(current.panes.length - 1, index + offset));
     if (index < 0 || index === next) return current;
-    const result = [...current]; result.splice(next, 0, result.splice(index, 1)[0]!); return result;
+    const panes = [...current.panes]; panes.splice(next, 0, panes.splice(index, 1)[0]!); return { ...current, panes };
   }), []);
-  const reorder = useCallback((id: string, before: string) => setItems(current => {
-    const source = current.findIndex(item => item.id === id), target = current.findIndex(item => item.id === before);
+  const reorder = useCallback((id: string, before: string) => setLayout(current => {
+    const source = current.panes.findIndex(item => item.id === id), target = current.panes.findIndex(item => item.id === before);
     if (source < 0 || target < 0 || source === target) return current;
-    const result = [...current]; result.splice(target, 0, result.splice(source, 1)[0]!); return result;
+    const panes = [...current.panes]; panes.splice(target, 0, panes.splice(source, 1)[0]!); return { ...current, panes };
   }), []);
-  const resize = useCallback((id: string, width: number) => setItems(current => current.map(item => item.id === id ? { ...item, width: Math.max(minimumWidth, Math.min(maximumWidth, width)) } : item)), []);
-  const value = useMemo(() => ({ enabled, items, add, remove, update, move, reorder, resize }), [enabled, items, add, remove, update, move, reorder, resize]);
+  const resize = useCallback((id: string, width: number) => setLayout(current => ({ ...current, panes: current.panes.map(item => item.id === id ? { ...item, width: clampWidth(width) } : item) })), []);
+  const resizeBase = useCallback((width: number) => setLayout(current => ({ ...current, baseWidth: clampWidth(width) })), []);
+  useEffect(() => { if (key) try { conversationSessionStorage.setItem(key, JSON.stringify(layout)); } catch { /* Layout remains usable without storage. */ } }, [key, layout]);
+  const items = useMemo(() => layout.panes.flatMap(pane => { const item = registered.find(item => item.id === pane.id); return item ? [{ ...item, width: pane.width }] : []; }), [layout, registered]);
+  const value = useMemo(() => ({ enabled, items, layout, register, unregister, add, remove, move, reorder, resize, resizeBase }), [enabled, items, layout, register, unregister, add, remove, move, reorder, resize, resizeBase]);
   return <Context.Provider value={value}>{children}</Context.Provider>;
 }
 
 /** The portal target is stable: moving its DOM host does not remount the Session View. */
-function moveHost(host: HTMLElement, parent: HTMLElement) {
+export function moveSessionHost(host: HTMLElement, parent: HTMLElement) {
   if (host.parentElement === parent) return;
   const focus = document.activeElement instanceof HTMLElement && host.contains(document.activeElement) ? document.activeElement : undefined;
   const selection = document.getSelection();
@@ -58,19 +84,19 @@ export function SessionViewPlacement({ id, title, visible, children }: {
   const [host] = useState(() => { const element = document.createElement('div'); element.className = 'lab-session-placement'; return element; });
   const home = useRef<HTMLDivElement>(null);
   const [mounted, setMounted] = useState(false);
-  const item = dock?.items.find(item => item.id === id);
+  const item = dock?.layout.panes.find(item => item.id === id);
   const docked = !!dock?.enabled && !!item && visible;
-  const remove = dock?.remove, update = dock?.update;
+  const unregister = dock?.unregister, register = dock?.register;
   useLayoutEffect(() => {
-    if (!docked && home.current) moveHost(host, home.current);
+    if (!docked && home.current) moveSessionHost(host, home.current);
     setMounted(true);
   }, [host, docked]);
-  useLayoutEffect(() => { update?.(id, title, visible); }, [update, id, title, visible]);
-  useEffect(() => () => { remove?.(id, host); host.remove(); }, [remove, id, host]);
+  useLayoutEffect(() => { register?.({ id, title, host, visible }); }, [register, id, title, host, visible]);
+  useLayoutEffect(() => () => { unregister?.(id, host); host.remove(); }, [unregister, id, host]);
   const controls = dock?.enabled ? <>
     {docked ? <DockMove id={id} title={title} /> : null}
     <button type="button" className="lab-session-dock-toggle" aria-label={`${docked ? 'Float' : 'Dock'} ${title}`} title={docked ? 'Return to floating window' : 'Dock to the right of the conversations'}
-      onClick={() => docked ? dock.remove(id, host) : dock.add({ id, title, host, visible })}>
+      onClick={() => docked ? dock.remove(id) : dock.add(id)}>
       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" aria-hidden="true"><rect x={docked ? '5' : '3'} y={docked ? '5' : '4'} width="16" height="16" rx="2" />{docked ? <path d="M3 16V3h13" /> : <path d="M13 4v16" />}</svg>
     </button>
   </> : null;
@@ -81,7 +107,7 @@ export function SessionDockRail({ children, minimumBaseWidth = minimumWidth }: {
   const dock = useContext(Context);
   const rail = useRef<HTMLDivElement>(null);
   const [width, setWidth] = useState(0);
-  const [preferredBaseWidth, setBaseWidth] = useState<number>();
+  const preferredBaseWidth = dock?.layout.baseWidth;
   const active = dock?.enabled ? dock.items.filter(item => item.visible) : [];
   useLayoutEffect(() => {
     const element = rail.current;
@@ -95,7 +121,7 @@ export function SessionDockRail({ children, minimumBaseWidth = minimumWidth }: {
   const baseWidth = Math.max(minimumBaseWidth, preferredBaseWidth ?? width - defaultWidth);
   return <div ref={rail} className="lab-session-dock-rail" data-docked={active.length > 0 || undefined}>
     <div className="lab-session-dock-base" style={active.length ? { flexBasis: baseWidth } : undefined}>{children}
-      {active.length ? <DockResize title="Main conversation area" width={baseWidth} minimum={minimumBaseWidth} onResize={setBaseWidth} /> : null}
+      {active.length ? <DockResize title="Main conversation area" width={baseWidth} minimum={minimumBaseWidth} onResize={width => dock?.resizeBase(width)} /> : null}
     </div>
     {[...active].sort((a, b) => a.id.localeCompare(b.id)).map(item => <DockPane key={item.id} item={item} order={active.indexOf(item) + 1} />)}
   </div>;
@@ -106,7 +132,7 @@ function DockPane({ item, order }: { item: DockItem; order: number }) {
   const dock = useContext(Context)!;
   useLayoutEffect(() => {
     const element = target.current!;
-    moveHost(item.host, element);
+    moveSessionHost(item.host, element);
     const frame = requestAnimationFrame(() => element.scrollIntoView?.({ block: 'nearest', inline: 'nearest' }));
     return () => cancelAnimationFrame(frame);
   }, [item.host]);
@@ -175,5 +201,5 @@ function DockMove({ id, title }: { id: string; title: string }) {
 
 export function useSessionDocked(id: string): boolean {
   const dock = useContext(Context);
-  return !!dock?.enabled && dock.items.some(item => item.id === id);
+  return !!dock?.enabled && dock.layout.panes.some(item => item.id === id);
 }

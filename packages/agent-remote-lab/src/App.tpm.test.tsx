@@ -56,7 +56,11 @@ it.each(['fixed', 'legacy', 'role', 'stale-role', 'missing-provider'] as const)(
   expect(mainLink.textContent).toContain('Main project');
   expect(mainLink.title).toContain(mode === 'legacy' ? work.providerId : ref.providerId);
   expect(attach).not.toHaveBeenCalled();
+  await act(async () => view.querySelector<HTMLButtonElement>('[aria-label="Dock Independent TPM work"]')!.click());
+  const dock = view.querySelector('[data-dock-id]');
   await act(async () => mainLink.click());
+  expect(view.querySelector('[data-dock-id]')).toBe(dock);
+  expect(dock?.isConnected).toBe(true);
   if (mode === 'stale-role' || mode === 'missing-provider') {
     expect(attach).not.toHaveBeenCalled();
     expect(view.textContent).toContain(mode === 'stale-role' ? 'TPM has been refreshed' : 'provider is unavailable');

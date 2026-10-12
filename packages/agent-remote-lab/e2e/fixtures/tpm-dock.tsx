@@ -59,14 +59,15 @@ function Fixture() {
       records.current = records.current.map(work => work.id === id ? { ...work, revision: work.revision + 1, ...(input.action === 'set_delegated' ? { delegated: input.delegated } : { archived: input.action === 'archive', paused: input.action === 'archive' }) } : work);
       return records.current.find(work => work.id === id)!;
     } }), []);
-  const tpm = useTpmWork(service, [{ id: 'host', name: 'Mac mini', online: true }], true, async target => ({ ...target, agentId: target.nativeSessionId }));
+  const tpm = useTpmWork(service, [{ id: 'host', name: 'Mac mini', online: true }], true, async target => ({ ...target, agentId: target.nativeSessionId }), true, 'tpm-dock-fixture');
   const trigger = useRef<HTMLButtonElement>(null), askTrigger = useRef<HTMLButtonElement>(null);
   const [listOpen, setListOpen] = useState(false), [askOpen, setAskOpen] = useState(false);
-  return <SessionDockProvider enabled={!compact}><main className="lab-shell" style={{ display: 'flex', padding: 12, flexDirection: 'column', gap: 8 }}>
+  return <SessionDockProvider enabled={!compact} storageScope="tpm-dock-fixture"><main className="lab-shell" style={{ display: 'flex', padding: 12, flexDirection: 'column', gap: 8 }}>
     <nav style={{ display: 'flex', gap: 8 }}><strong>TPM and Dock</strong><button ref={askTrigger} onClick={() => setAskOpen(true)}>Open Ask</button></nav>
     <TpmMenu tpm={tpm} main={main} mainSessions={labels} visible triggerRef={trigger} inert={false} open={listOpen} onOpenChange={setListOpen} />
     <div className="lab-tpm-workspaces">{tpm.opened.map((key, index) => {
-      const item = tpm.works.find(item => item.key === key)!;
+      const item = tpm.works.find(item => item.key === key);
+      if (!item) return null;
       return <TpmWorkspace key={key} item={item} mainTitle={labels.get(sessionKey(tpmMainTarget(item)))?.title} session={tpm.sessions[key]} transport={transport} storageScope="fixture" triggerRef={trigger}
         visible={tpm.windows.includes(key) && (!compact || tpm.selected === key)} layer={tpm.windows.indexOf(key) + 1} initialOffset={index * 28}
         onFocus={() => tpm.focus(key)} draftBinding={{ store: drafts, key }} onClose={() => tpm.close(key)} onShowList={() => setListOpen(true)}

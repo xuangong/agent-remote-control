@@ -118,3 +118,49 @@ it('restores the same browser history after remounting a visited conversation', 
   await f.click('Forward');
   expect(f.container.querySelector('output')!.textContent).toBe('child');
 });
+
+it('retains the latest layout for each browser visit and supplies it on back and forward', async () => {
+  let select!: (session: SessionEntry) => void, focus!: (id: string) => void;
+  const restored: string[] = [];
+  function Fixture() {
+    const [session, setSession] = useState(parent); select = setSession;
+    const [focused, setFocused] = useState('parent'); focus = setFocused;
+    useConversationHistory(session, known, async (target, _intent, _keep, layout) => {
+      restored.push(layout?.focus ?? 'missing'); setSession(target); setFocused(layout?.focus ?? 'missing'); return true;
+    }, undefined, undefined, { scope: 'history-layout', layout: { primarySlot: session.nativeSessionId, selections: {}, focus: focused } });
+    return null;
+  }
+  await render(<Fixture />);
+  await act(async () => focus('expanded-child'));
+  await act(async () => select(child));
+  await act(async () => focus('expanded-grandchild'));
+  await act(async () => window.history.back()); await settle();
+  expect(restored).toEqual(['expanded-child']);
+  await act(async () => window.history.forward()); await settle();
+  expect(restored).toEqual(['expanded-child', 'expanded-grandchild']);
+});
+
+it('bounds detailed layouts to the ten most recently changed visits', async () => {
+  let select!: (session: SessionEntry) => void;
+  function Fixture() {
+    const [session, setSession] = useState(parent); select = setSession;
+    useConversationHistory(session, known, async () => true, undefined, undefined,
+      { scope: 'bounded', layout: { primarySlot: session.nativeSessionId, selections: {} } });
+    return null;
+  }
+  await render(<Fixture />);
+  for (let i = 0; i < 15; i++) await act(async () => select({ ...parent, nativeSessionId: `visit-${i}` }));
+  const visits = JSON.parse(sessionStorage.getItem('agent-remote-conversation-history')!);
+  expect(visits.filter((visit: { layout?: unknown }) => visit.layout)).toHaveLength(10);
+  expect(visits.slice(-10).every((visit: { layout?: unknown }) => !!visit.layout)).toBe(true);
+});
+
+it('does not restore a visit from another workspace or a malformed layout', async () => {
+  sessionStorage.setItem('agent-remote-conversation-history', JSON.stringify([{ id: 'foreign', root: 'main', session: parent, scope: 'other', layout: { primarySlot: 'parent', selections: {} } }]));
+  window.history.replaceState({ agentRemoteVisit: 'foreign' }, '', '/');
+  let back = true;
+  function Fixture() { back = useConversationHistory(parent, known, async () => true, undefined, undefined, { scope: 'own' }).canBack; return null; }
+  await render(<Fixture />);
+  expect(back).toBe(false);
+  expect(JSON.parse(sessionStorage.getItem('agent-remote-conversation-history')!)[0].scope).toBe('own');
+});

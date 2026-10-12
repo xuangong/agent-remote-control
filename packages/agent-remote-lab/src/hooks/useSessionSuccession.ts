@@ -1,3 +1,4 @@
+import { applyConversationLayout, type ConversationLayout } from '../conversation-layout.js';
 import { flushSync } from 'react-dom';
 import { useEffect, useMemo, useReducer, useRef } from 'react';
 import { isSessionSuccessionCurrent, isSessionSuccessionReplay, nativeSessionRefKey, type SessionSuccessionCurrent, type SessionSuccessionReplay } from '@orchardworks/agent-remote-protocol';
@@ -31,6 +32,7 @@ interface DesiredSelection {
 interface SuccessionOptions {
   scope: string; transport: RemoteAgentTransport; enabled: boolean; initial?: ControllerLocation;
   initialDisplayState?: AgentReplicaState;
+  initialLayout?: ConversationLayout;
   connections: ConversationConnections; replicaFor(id: string): AgentReplica;
   cachedReplicaFor?(selection: Selection): AgentReplica | undefined;
   directory(hostId: string): SessionDirectoryClient;
@@ -793,6 +795,7 @@ export function useSessionSuccession(options: SuccessionOptions) {
         const target = options.initial;
         if (target?.providerId && target.nativeSessionId) {
           const requested = { hostId: target.hostId ?? 'local', providerId: target.providerId, nativeSessionId: target.nativeSessionId, title: 'Session', parentNativeSessionId: target.parentNativeSessionId };
+          if (runtime.readable && runtime.intent !== 'history' && options.initialLayout) applyConversationLayout(runtime.document, options.initialLayout);
           restoreSelection(requested);
         }
       }

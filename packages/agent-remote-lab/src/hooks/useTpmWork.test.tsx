@@ -354,3 +354,19 @@ it('keeps multiple TPM windows open, focuses without reattaching, and minimizes 
   expect(state.windows).toEqual([]);
   expect(state.expanded).toBe(false);
 });
+
+it('restores all open TPM windows after a reload without changing their focus order', async () => {
+  const records = [work('first'), work('second')];
+  const service: TpmService = { tpmList: async () => ({ supported: true, works: records }), tpmWork: async (_host, id) => records.find(item => item.id === id)!, tpmCreate: vi.fn(), tpmAction: vi.fn() };
+  const attach = vi.fn(async (session: SessionEntry) => ({ ...session, agentId: session.nativeSessionId }));
+  let state!: ReturnType<typeof useTpmWork>, reload!: () => void;
+  function Workspace() { state = useTpmWork(service, [{ id: 'one', name: 'One', online: true }], true, attach, true, 'reload'); return null; }
+  function Harness() { const [revision, setRevision] = useState(0); reload = () => setRevision(v => v + 1); return <Workspace key={revision} />; }
+  await render(<Harness />);
+  await act(async () => { await state.open('["one","first"]'); await state.open('["one","second"]'); });
+  expect(state.windows).toHaveLength(2);
+  await act(async () => reload());
+  expect(state.windows).toEqual(['["one","first"]', '["one","second"]']);
+  expect(state.sessions['["one","first"]']).toBeDefined();
+  expect(state.sessions['["one","second"]']).toBeDefined();
+});

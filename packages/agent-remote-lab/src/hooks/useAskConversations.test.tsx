@@ -1029,3 +1029,13 @@ it('routes discovered Ask relations to explicit role and fixed owners of the sam
   expect(document.asks.map(owner => owner.records)).toEqual(references);
   expect(document.asks.every(owner => !owner.open)).toBe(true);
 });
+
+it('an independent saved Ask retry never creates a missing target from a source snapshot', async () => {
+  const fixture = await setup();
+  const other = { ...source, nativeSessionId: 'other-source' };
+  const before = fixture.requests.length;
+  await act(async () => {
+    await expect(fixture.current().open(state, other, '', false, { associationOwner: ownerId(other), existingOnly: true })).rejects.toThrow('saved Ask session is not available');
+  });
+  expect(fixture.requests).toHaveLength(before);
+});

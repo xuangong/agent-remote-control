@@ -1,3 +1,4 @@
+import { conversationSessionStorage } from '../conversation-storage.js';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { TpmCreate, TpmList, TpmWork } from '@orchardworks/agent-remote-protocol';
 import type { SessionTodoDecision } from '@orchardworks/agent-remote-protocol';
@@ -32,7 +33,9 @@ function accessDenied(error: unknown): boolean {
 
 /** Catalog observation stays active independently of floating-view visibility. */
 export function useTpmWork(service: TpmService | undefined, hosts: readonly TpmHost[], enabled: boolean,
-  attach: (session: SessionEntry) => Promise<OpenedSession>, presentationVisible = true) {
+  attach: (session: SessionEntry) => Promise<OpenedSession>, presentationVisible = true, storageScope?: string) {
+  const storageKey = storageScope ? `agent-remote:recovery:${storageScope}:tpm-windows` : undefined;
+  const [restored] = useState(() => readWindows(storageKey));
   const hostIdentity = JSON.stringify(hosts);
   const stableHosts = useMemo<TpmHost[]>(() => JSON.parse(hostIdentity), [hostIdentity]);
   const [catalogs, setCatalogs] = useState<Record<string, Catalog>>({});
@@ -43,8 +46,8 @@ export function useTpmWork(service: TpmService | undefined, hosts: readonly TpmH
   const [detailsLoading, setDetailsLoading] = useState<Record<string, boolean>>({});
   const [attachmentErrors, setAttachmentErrors] = useState<Record<string, string | undefined>>({});
   const [attaching, setAttaching] = useState<Record<string, boolean>>({});
-  const [opened, setOpened] = useState<string[]>([]);
-  const [windowOrder, setWindowOrder] = useState<string[]>([]);
+  const [opened, setOpened] = useState<string[]>(restored);
+  const [windowOrder, setWindowOrder] = useState<string[]>(restored);
   const [busy, setBusy] = useState<string>();
   const [error, setError] = useState<string>();
   const [unread, setUnread] = useState<Record<string, boolean>>({});
@@ -200,12 +203,12 @@ export function useTpmWork(service: TpmService | undefined, hosts: readonly TpmH
   const focus = useCallback((key: string) => {
     setWindowOrder(current => !current.includes(key) || current.at(-1) === key ? current : [...current.filter(item => item !== key), key]);
   }, []);
-  const open = useCallback(async (key: string) => {
+  const open = useCallback(async (key: string, restoring = false) => {
     const item = find(key);
     if (!item) return;
     const requestedService = latest.current.service;
-    setWindowOrder(current => current.at(-1) === key ? current : [...current.filter(item => item !== key), key]); setOpened(current => current.includes(key) ? current : [...current, key]);
-    setUnread(current => ({ ...current, [key]: false }));
+    if (!restoring) { setWindowOrder(current => current.at(-1) === key ? current : [...current.filter(item => item !== key), key]); setOpened(current => current.includes(key) ? current : [...current, key]); }
+    setUnread(current => current[key] ? { ...current, [key]: false } : current);
     await loadDetail(key);
     if (!authorized(item.hostId, requestedService)) return;
     const currentItem = find(key), currentWork = currentItem?.work;
@@ -235,10 +238,16 @@ export function useTpmWork(service: TpmService | undefined, hosts: readonly TpmH
   useEffect(() => {
     if (presentationVisible && expanded && selected) setUnread(current => current[selected] ? { ...current, [selected]: false } : current);
   }, [presentationVisible, expanded, selected]);
-  const selectedWork = works.find(item => item.key === selected);
   useEffect(() => {
-    if (presentationVisible && expanded && selected && selectedWork?.online && selectedWork.work.tpmNativeSessionId && !sessions[selected] && !attachmentErrors[selected] && !detailErrors[selected]) void open(selected);
-  }, [presentationVisible, expanded, selected, selectedWork?.online, selectedWork?.work.tpmNativeSessionId, sessions, attachmentErrors, detailErrors, open]);
+    if (!presentationVisible) return;
+    for (const key of windows) {
+      const item = works.find(item => item.key === key);
+      if (item?.online && item.work.tpmNativeSessionId && !sessions[key] && !attachmentErrors[key] && !detailErrors[key]) void open(key, true);
+    }
+  }, [presentationVisible, JSON.stringify(windows), works, sessions, attachmentErrors, detailErrors, open]);
+  useEffect(() => {
+    if (storageKey && sameScope) try { conversationSessionStorage.setItem(storageKey, JSON.stringify(windowOrder.slice(-20))); } catch { /* Windows remain available without storage. */ }
+  }, [storageKey, windowOrder, sameScope]);
 
   const update = useCallback((hostId: string, work: TpmWork) => {
     const current = latest.current.catalogs[hostId] ?? { supported: true, works: [] };
@@ -298,4 +307,15 @@ export function useTpmWork(service: TpmService | undefined, hosts: readonly TpmH
   const close = useCallback((key?: string) => setWindowOrder(current => key ? current.filter(item => item !== key) : []), []);
   return { works, catalogs: visibleCatalogs, loading, sessions: sameScope ? sessions : {}, attaching, attachmentErrors, detailsLoading, detailErrors, selected, windows, focus, opened: sameScope ? opened : [], expanded, busy, error,
     available: !!service && enabled, canCreate, create, action, rename, resolve, confirmTodo, open, close, refresh };
+}
+
+function readWindows(key?: string): string[] {
+  try {
+    const values: unknown = key ? JSON.parse(conversationSessionStorage.getItem(key) ?? '[]') : [];
+    if (!Array.isArray(values)) return [];
+    return [...new Set(values.filter((value): value is string => {
+      if (typeof value !== 'string') return false;
+      try { const pair = JSON.parse(value); return Array.isArray(pair) && pair.length === 2 && pair.every(item => typeof item === 'string' && item.length > 0); } catch { return false; }
+    }))].slice(-20);
+  } catch { return []; }
 }

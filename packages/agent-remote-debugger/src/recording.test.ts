@@ -135,3 +135,38 @@ it.each(['session', 'runtime'] as const)('preserves %s cumulative usage through 
   player.seek(0);
   expect(player.state.agent?.lastUsage).toEqual(usage);
 });
+
+it('records and replays trusted background annotations without deleting native text', () => {
+  const replica = new AgentReplica();
+  const background = { id: 'review', kind: 'review' as const, status: 'silent' as const };
+  replica.applySnapshot({ ...snapshot, payload: { ...snapshot.payload, attention: { cursor: { epoch: 'epoch', seq: 0 }, background } } });
+  const history = page('Original native acknowledgement'); history.payload.entries[0]!.item.background = background;
+  replica.applyHistory(history);
+  const records: DebuggerRecord[] = [];
+  const stop = observeReplica('demo', replica, { subscribeStatus(listener: (s: RemoteSessionStatus) => void) { listener('ready'); return () => {}; } }, record => records.push(record));
+  const player = new RecordingPlayer(parseRecording(jsonl(records)));
+  expect(player.state.timeline.entries[0]?.item).toMatchObject({ text: 'Original native acknowledgement', background });
+  expect(player.state.agent?.attention).toEqual({ cursor: { epoch: 'epoch', seq: 0 }, background });
+  stop();
+});
+
+it('replays a lifecycle-only background outcome after the active turn has moved on', () => {
+  const replica = new AgentReplica(); replica.applySnapshot(snapshot);
+  const background = { id: 'review', kind: 'review' as const, status: 'silent' as const };
+  const history = page('Quiet native text'); history.payload.entries[0]!.item.background = background;
+  replica.applyHistory(history);
+  const records: DebuggerRecord[] = []; let time = 0;
+  const stop = observeReplica('demo', replica, { subscribeStatus(listener: (s: RemoteSessionStatus) => void) { listener('ready'); return () => {}; } },
+    record => records.push({ ...record, timestamp: new Date(Date.UTC(2026, 9, 12) + time).toISOString() }));
+  time = 1000;
+  replica.applyStream({ protocolVersion: PROTOCOL_VERSION, type: 'agent_stream', payload: { agentId: 'demo', timestamp: '2026-10-12T00:00:01Z',
+    event: { type: 'background_activity_updated', providerId: 'fixture', background: { ...background, status: 'failed' } } } });
+  replica.applySnapshot(snapshot);
+  stop();
+  const player = new RecordingPlayer(parseRecording(jsonl(records)));
+  expect(player.state.timeline.entries[0]?.item.background?.status).toBe('silent');
+  player.seek(player.recording.duration);
+  expect(player.state.timeline.entries[0]?.item).toMatchObject({ text: 'Quiet native text', background: { status: 'failed' } });
+  player.seek(0);
+  expect(player.state.timeline.entries[0]?.item.background?.status).toBe('silent');
+});

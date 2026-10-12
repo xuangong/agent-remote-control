@@ -964,3 +964,8 @@ body:has(.agent-image-preview[open]) { overflow: hidden; }
 .agent-session-todo [role="alert"] { color: var(--agent-danger); }
 .agent-session-todo :focus-visible { outline: 2px solid var(--agent-signal); outline-offset: 2px; }
 @media (pointer: coarse) { .agent-session-todo > summary, .agent-session-todo-actions button { min-height: 44px; } }
+
+.agent-background-group { margin-block: 2px; min-width: 0; }
+.agent-background-summary { display: inline-flex; align-items: center; gap: 6px; padding: 3px 6px; border: 0; background: transparent; color: var(--agent-muted); font-size: 11px; cursor: pointer; }
+.agent-background-summary:hover { color: var(--agent-ink); }
+.agent-background-count { font-variant-numeric: tabular-nums; opacity: .75; }

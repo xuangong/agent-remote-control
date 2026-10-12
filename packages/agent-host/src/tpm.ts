@@ -6,6 +6,7 @@ import { OperationCacheError, type AgentManagerEvent, type RemoteHostSessionLeas
 import { sessionHeartbeatInterval, sessionHeartbeatInstructions, sessionHeartbeatTools } from './session-heartbeat.js';
 import { TpmStore, isTpmIntentSettled, type TpmRecord } from './tpm-store.js';
 import { initialTpmTodo, tpmInstructions, tpmReviewPrompt, tpmPlaceholderTitle } from './tpm-role.js';
+import { backgroundInputHash, withBackgroundReviews } from './session-background.js';
 import { changeSessionTodo, confirmSessionTodo, invalidateSessionTodoApproval, currentSessionTodo, sessionTodoComplete, sessionTodoInstructions, sessionTodoTools } from './session-todo.js';
 
 export interface TpmOptions {
@@ -46,6 +47,8 @@ function executionOperationId(intentId: string): string {
   return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
 }
 const active = (work: TpmWork) => !work.archived && !work.paused && work.phase !== 'completed';
+// Missing delegation preserves the behavior of work created before this control existed.
+const automatic = (work: TpmWork) => active(work) && work.delegated !== false;
 const unknown = (record: TpmRecord) => record.creation === 'unknown' || record.work.outbox?.some(intent => intent.status === 'unknown');
 const shortError = (error: unknown) => (error instanceof Error ? error.message : 'TPM operation failed.').slice(0, 2048);
 
@@ -110,6 +113,21 @@ export class TpmCoordinator {
     const record = this.store.all().find(value => value.work.providerId === providerId && value.work.tpmNativeSessionId === nativeSessionId);
     return record ? this.boundExtensions(record.work.id) : undefined;
   }
+  async annotateSession(providerId: string, nativeSessionId: string, session: import('@orchardworks/agent-provider-sdk').AgentSession) {
+    try { await this.ready; } catch { return session; }
+    const record = this.store.all().find(value => value.work.providerId === providerId && value.work.tpmNativeSessionId === nativeSessionId);
+    if (!record) return session;
+    return withBackgroundReviews(session, {
+      records: () => this.store.backgroundReviews(record.work.id),
+      bind: async (id, turnId) => { await this.store.update(record.work.id, undefined, current => {
+        const review = current.backgroundReviews?.find(review => review.id === id);
+        if (review && review.turnId === undefined) review.turnId = turnId;
+      }); },
+      fail: async id => { await this.store.update(record.work.id, undefined, current => {
+        const review = current.backgroundReviews?.find(review => review.id === id); if (review) review.failed = true;
+      }); },
+    });
+  }
   async create(input: TpmCreate, scope: string): Promise<TpmWork> {
     if (!isTpmCreate(input)) throw new Error('Invalid TPM creation request.');
     return this.manage(async () => {
@@ -125,7 +143,7 @@ export class TpmCoordinator {
         await this.store.insert({ version: 1, createKey: key, createFingerprint: hash, creation: 'prepared', requirement: input.requirement ?? '', titleSetByUser: !!input.title,
           dirty: true, lastReviewAt: 0, actions: {}, work: { id, revision: 1, title: input.title ?? tpmPlaceholderTitle(this.store.all().map(record => record.work.title)), providerId: input.providerId,
             mainNativeSessionId: mainResolution?.target.nativeSessionId ?? input.mainNativeSessionId,
-            ...(mainBinding ? { mainBinding, mainSessionRef: mainResolution!.target } : {}), phase: 'clarifying', waiting: input.requirement ? 'none' : 'user', paused: false,
+            ...(mainBinding ? { mainBinding, mainSessionRef: mainResolution!.target } : {}), phase: 'clarifying', waiting: input.requirement ? 'none' : 'user', paused: false, delegated: input.delegated ?? false,
             summary: input.requirement?.slice(0, 2048) ?? '', nextAction: 'Clarify requirements and agree on a delivery plan.', document: '', acceptance: '', evidence: [],
             createdAt: timestamp, updatedAt: timestamp, nextCheckAt: this.now(), outbox: [] } });
         await this.store.update(id, undefined, record => { record.creation = 'dispatching'; });
@@ -179,7 +197,18 @@ export class TpmCoordinator {
         await this.access.recover!(previous.work.providerId, nativeId!, this.boundExtensions(input.id));
       }
       const updated = await this.store.update(input.id, input.action === 'confirm_todo' ? undefined : input.revision, record => {
-        if (input.action === 'rename') {
+        if (input.action === 'set_delegated') {
+          if (input.delegated && (!active(record.work) || unknown(record))) throw new Error('Resolve paused, completed, archived or uncertain work before enabling delegation.');
+          record.work.delegated = input.delegated;
+          if (input.delegated) {
+            record.dirty = true; record.changeVersion = (record.changeVersion ?? 0) + 1; record.work.nextCheckAt = this.now();
+          } else {
+            for (const intent of record.work.outbox ?? []) if (intent.target === 'tpm' && intent.purpose === 'review' && intent.status === 'prepared') {
+              intent.status = 'canceled'; delete intent.error;
+              record.backgroundReviews = record.backgroundReviews?.filter(review => review.id !== intent.id);
+            }
+          }
+        } else if (input.action === 'rename') {
           record.work.title = input.title.trim(); record.titleSetByUser = true;
         } else if (input.action === 'archive' || input.action === 'unarchive') {
           record.work.archived = input.action === 'archive';
@@ -195,6 +224,7 @@ export class TpmCoordinator {
           if (input.confirmation.decision === 'approve') record.approvedSpecification = fingerprint([record.work.document, record.work.acceptance]);
           record.dirty = true; record.changeVersion = (record.changeVersion ?? 0) + 1;
           record.work.waiting = 'none'; record.work.nextCheckAt = this.now();
+          if (!automatic(record.work)) this.enqueueRecord(record, 'tpm', 'decision', 'The user answered the current todo confirmation. Read read_work and read_todo_list, then continue the conversation from that decision. This does not enable background delegation.', randomUUID());
         } else if (input.action === 'pause') record.work.paused = true;
         else if (input.action === 'resolve') {
           if (input.intentId === 'creation' && record.creation === 'unknown') {
@@ -261,6 +291,7 @@ export class TpmCoordinator {
       const index = (start + offset) % records.length;
       const record = records[index]!;
       if (!active(record.work)) { this.detach(record.work.id); continue; }
+      if (!automatic(record.work) && !record.reviewIntentId && !record.work.outbox?.some(intent => intent.status === 'prepared')) { this.detach(record.work.id); continue; }
       if ((this.retries.get(record.work.id) ?? 0) > this.now() || !record.work.tpmNativeSessionId || unknown(record) || this.workers.has(record.work.id)) continue;
       // Retain every active binding, then spend worker slots only on pending or due work.
       if (this.attachments.has(record.work.id) && !record.work.outbox?.some(intent => intent.status === 'prepared') && record.work.nextCheckAt > this.now()) continue;
@@ -293,7 +324,7 @@ export class TpmCoordinator {
   }
   private visibleWork(work: TpmWork): TpmWork {
     const health = this.failures.get(work.id) ?? this.schedulerFailure;
-    return health ? { ...work, health } : work;
+    return { ...work, delegated: work.delegated ?? true, ...(health ? { health } : {}) };
   }
   private async recordFailure(id: string, error: unknown): Promise<void> {
     const message = shortError(error);
@@ -364,7 +395,7 @@ export class TpmCoordinator {
           coalesce = setTimeout(() => {
             coalesce = undefined;
             void this.store.update(id, undefined, item => {
-              if (!active(item.work)) return;
+              if (!automatic(item.work)) return;
               item.dirty = true; item.changeVersion = (item.changeVersion ?? 0) + 1;
               item.work.nextCheckAt = Math.min(item.work.nextCheckAt, this.now() + (this.options.coalesceMs ?? 2000));
             }).catch(() => undefined);
@@ -392,9 +423,10 @@ export class TpmCoordinator {
           if (event.type !== 'agent_stream' || event.delivery === 'history' || !['turn_completed', 'turn_failed', 'turn_canceled'].includes(event.event.type)) return;
           void this.store.update(id, undefined, item => {
             if (!active(item.work) || !item.reviewIntentId) return;
+            const review = item.backgroundReviews?.find(review => review.id === item.reviewIntentId); if (review) review.failed = true;
             delete item.reviewIntentId;
             item.work.nextCheckAt = this.now() + this.heartbeat(item.work);
-            item.work.health = 'The last review ended without updating work state. A heartbeat will check again.';
+            item.work.health = automatic(item.work) ? 'The last review ended without updating work state. A heartbeat will check again.' : 'The last review ended without updating work state. Background delegation is off.';
           }).catch(() => undefined);
         });
         const attachment: Attachment = { mainResolution, main, tpm, release() { clearTimeout(coalesce); unsubscribeMain(); unsubscribeTpm(); main.release(); tpm!.release(); } };
@@ -417,6 +449,16 @@ export class TpmCoordinator {
     for (const intent of outstanding) await this.dispatch(id, intent, attachment);
     record = this.store.get(id);
     if (unknown(record) || !active(record.work)) return;
+    if (!automatic(record.work)) {
+      if (record.reviewIntentId && record.work.nextCheckAt <= this.now() && this.canSend(attachment.tpm, false)) {
+        await this.store.update(id, undefined, item => {
+          const review = item.backgroundReviews?.find(review => review.id === item.reviewIntentId); if (review) review.failed = true;
+          delete item.reviewIntentId; item.work.health = 'The last review has no recorded assessment. Background delegation is off.';
+        });
+        this.detach(id);
+      }
+      return;
+    }
     if (record.reviewIntentId) {
       // A receipt is not proof that the model completed its review. An overdue idle
       // runtime permits a new reflection, never replay of the accepted input.
@@ -431,7 +473,8 @@ export class TpmCoordinator {
     if (!this.canSend(attachment.tpm, false)) return;
     if (!this.reserveReview(id)) return;
     try {
-      const intent = await this.enqueue(id, 'tpm', 'review', tpmReviewPrompt(id, record.dirty ? 'The bound main session changed or a review was requested' : 'Heartbeat check'));
+      const reviewId = randomUUID();
+      const intent = await this.enqueue(id, 'tpm', 'review', tpmReviewPrompt(id, record.dirty ? 'Main session updated' : 'Heartbeat', reviewId), reviewId);
       await this.dispatch(id, intent, attachment);
     } finally { this.reviewReservations.delete(id); }
   }
@@ -450,6 +493,7 @@ export class TpmCoordinator {
   }
   private async dispatch(id: string, candidate: TpmIntent, attachment: Attachment): Promise<void> {
     const before = this.store.get(id); if (!active(before.work) || unknown(before)) return;
+    if (candidate.target === 'tpm' && candidate.purpose === 'review' && !automatic(before.work)) return;
     this.admit(before.work.providerId);
     if (candidate.target === 'main') attachment = await this.attach(id);
     const target = candidate.target === 'main' ? attachment.main : attachment.tpm;
@@ -464,7 +508,7 @@ export class TpmCoordinator {
       let claimed = false;
       await this.store.update(id, undefined, record => {
         const intent = record.work.outbox?.find(value => value.id === candidate.id);
-        if (!intent || intent.status !== 'prepared' || !active(record.work) || unknown(record)) return;
+        if (!intent || intent.status !== 'prepared' || !active(record.work) || unknown(record) || candidate.target === 'tpm' && candidate.purpose === 'review' && !automatic(record.work)) return;
         if (resolution) {
           if (intent.resolvedTarget && (nativeSessionRefKey(intent.resolvedTarget) !== nativeSessionRefKey(resolution.target) || intent.roleRevision !== resolution.roleRevision)) {
             intent.status = 'rejected'; intent.error = 'The admitted main recipient changed. Submit a new operation after reviewing its outcome.'; return;
@@ -521,7 +565,7 @@ export class TpmCoordinator {
                 catch (error) { throw new AgentOperationRejectedError('tpm_main_changed', shortError(error)); }
               }
             }
-            if (!active(record.work) || !this.canSend(target, queue)) throw new AgentOperationRejectedError('tpm_dispatch_deferred', 'TPM work paused or native input became unavailable before dispatch.');
+            if (!active(record.work) || candidate.target === 'tpm' && candidate.purpose === 'review' && !automatic(record.work) || !this.canSend(target, queue)) throw new AgentOperationRejectedError('tpm_dispatch_deferred', 'TPM follow-up stopped or native input became unavailable before dispatch.');
           }, dispatch: () => target.agent.sendMessage(candidate.text, { ...options, onAcceptance }),
         });
         const acceptance = result && typeof result === 'object' && 'disposition' in result && ['started', 'queued', 'handled'].includes(String(result.disposition))
@@ -548,6 +592,7 @@ export class TpmCoordinator {
     if (existing) { if (existing.target !== target || existing.text !== text || existing.purpose !== purpose) throw new Error('Message operation identity was reused with different input.'); return existing; }
     while (outbox.length >= 200) { const index = outbox.findIndex(intent => isTpmIntentSettled(intent) && intent.id !== record.reviewIntentId); if (index < 0) throw new Error('Too many pending messages. Resolve them before adding more.'); outbox.splice(index, 1); }
     const result: TpmIntent = { ...todo, id: operationId, target, purpose, text, status: 'prepared', createdAt: new Date(this.now()).toISOString() }; outbox.push(result);
+    if (target === 'tpm' && purpose === 'review') (record.backgroundReviews ??= []).push({ id: operationId, inputHash: backgroundInputHash(text) });
     return result;
   }
   private assertTodoDispatch(record: TpmRecord, stepId: string | undefined, planRevision: number | undefined, purpose: string): void {
@@ -562,6 +607,13 @@ export class TpmCoordinator {
   }
   private async assess(id: string, input: Record<string, any>): Promise<TpmWork> {
     const result = await this.store.update(id, input.revision, record => {
+      const previous = { phase: record.work.phase, waiting: record.work.waiting, summary: record.work.summary, nextAction: record.work.nextAction };
+      if (input.reviewId !== undefined) {
+        const review = record.backgroundReviews?.find(review => review.id === input.reviewId);
+        if (!review || record.reviewIntentId !== review.id || review.result) throw new Error('This background review is no longer awaiting a result.');
+        if (typeof input.notify !== 'boolean') throw new Error('A background result requires an explicit notification decision.');
+        review.result = { notify: input.notify, summary: input.summary };
+      }
       if (record.work.archived) throw new Error('This work is archived. Restore and resume it before changing its assessment.');
       if (record.work.phase === 'completed' && input.phase !== 'completed') throw new Error('Reopen completed work explicitly before changing its delivery phase.');
       if (input.acceptance !== undefined && input.acceptance !== record.work.acceptance && record.work.todo) record.work.todo = invalidateSessionTodoApproval(record.work.todo);
@@ -569,6 +621,11 @@ export class TpmCoordinator {
       if (record.work.phase === 'completed' && (!record.work.acceptance.trim() || !record.work.evidence.length)) throw new Error('Completion requires acceptance criteria and work-specific evidence.');
       if (record.work.phase === 'completed' && (!record.work.todo || !sessionTodoComplete(record.work.todo))) throw new Error('Complete every todo step before completing the work.');
       if (record.work.todo && currentSessionTodo(record.work.todo)?.kind === 'confirmation') record.work.waiting = 'user';
+      const review = record.backgroundReviews?.find(review => review.id === input.reviewId);
+      if (review?.result && !review.result.notify) {
+        if (record.work.phase !== previous.phase || record.work.waiting !== previous.waiting) review.result.notify = true;
+        else { record.work.summary = previous.summary; record.work.nextAction = previous.nextAction; }
+      }
       record.dirty = (record.changeVersion ?? 0) > (record.reviewVersion ?? 0); delete record.reviewIntentId; delete record.work.health;
       if (active(record.work)) record.work.nextCheckAt = this.now() + (record.dirty ? this.options.coalesceMs ?? 2000 : this.heartbeat(record.work));
     });
@@ -606,8 +663,9 @@ export class TpmCoordinator {
         const historical = input.documentRevision !== undefined && input.documentRevision !== record.work.documentRevision
           ? record.documentHistory?.find(version => version.revision === input.documentRevision) : undefined;
         if (input.documentRevision !== undefined && input.documentRevision !== record.work.documentRevision && !historical) throw new Error('The requested work document revision is unavailable.');
-        return { ...record.work, outbox: record.work.outbox?.map(intent => ['accepted', 'rejected'].includes(intent.status) ? { ...intent, text: '[Settled message text omitted.]' } : intent),
+        return { ...record.work, delegated: record.work.delegated ?? true, outbox: record.work.outbox?.map(intent => ['accepted', 'rejected', 'canceled'].includes(intent.status) ? { ...intent, text: '[Settled message text omitted.]' } : intent),
           ...(historical ? { document: historical.document, acceptance: historical.acceptance, evidence: historical.evidence ?? [] } : {}), requirement: record.requirement, creation: record.creation, titleSetByUser: !!record.titleSetByUser,
+          activeReviewId: record.backgroundReviews?.some(review => review.id === record.reviewIntentId) ? record.reviewIntentId : undefined,
           documentRevision: input.documentRevision ?? record.work.documentRevision, documentVersions: (record.documentHistory ?? []).map(version => ({ revision: version.revision })) };
       }),
       tool('read_main_session', 'Read authoritative main-session state and bounded paginated history. Use the returned cursor to continue; a search filters only the returned page.', {
@@ -654,10 +712,12 @@ export class TpmCoordinator {
         this.scheduleTick(); return intent;
       }),
       tool('update_work', 'Record your delivery assessment and acknowledge this review. Set title when the conversation establishes the objective. User-set titles are preserved. Completion requires explicit acceptance criteria and evidence. Does not change user pause.', {
+        reviewId: { type: 'string', minLength: 1, maxLength: 128 }, notify: { type: 'boolean' },
         revision: integer, phase: { type: 'string', enum: ['clarifying', 'ready', 'implementing', 'validating', 'completed'] }, waiting: { type: 'string', enum: ['none', 'user', 'main_session'] },
         title: { type: 'string', minLength: 1, maxLength: 256, pattern: '\\S' }, summary: short, nextAction: short, acceptance: text, evidence: { type: 'array', items: short, maxItems: 100 },
       }, ['revision', 'phase', 'waiting', 'summary', 'nextAction'], input => this.assess(id, input)),
       tool('complete_work', 'Finish this delivery and stop automatic follow-up. Requires all todo tasks, explicit user confirmations, acceptance criteria, and work-specific evidence. Does not archive the conversation.', {
+        reviewId: { type: 'string', minLength: 1, maxLength: 128 }, notify: { type: 'boolean' },
         revision: integer, summary: short, acceptance: text, evidence: { type: 'array', items: short, minItems: 1, maxItems: 100 },
       }, ['revision', 'summary', 'evidence'], input => this.assess(id, { ...input, phase: 'completed', waiting: 'none', nextAction: '' })),
       tool('write_work_document', 'Replace this work PRD/spec Markdown and acceptance criteria with a revision check. Does not write project files.', {
@@ -676,7 +736,7 @@ export class TpmCoordinator {
           return { now: this.now(), lastReviewAt: record.lastReviewAt, intervalMs: this.heartbeat(record.work), minimumIntervalMs: this.options.minimumReviewMs ?? 30000 };
         },
         schedule: async (at, reason) => (await this.store.update(id, undefined, record => {
-          this.admit(record.work.providerId); if (!active(record.work)) throw new Error('Work is paused or completed.');
+          this.admit(record.work.providerId); if (!automatic(record.work)) throw new Error('Background scheduling requires delegated, active work.');
           record.work.nextCheckAt = at; record.work.nextAction = reason;
         })).work,
       }),

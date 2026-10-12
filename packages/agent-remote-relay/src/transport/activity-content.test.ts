@@ -17,7 +17,7 @@ const row = (sourceKey: string, text: string, delivery: 'history' | 'live' = 'li
   event: { type: 'timeline', provider: 'fake', item: { type: 'assistant_message', messageId: sourceKey, text } },
 });
 
-async function fixture() {
+async function fixture(history: ProviderObservation[] = []) {
   const pending: Array<ProviderStreamItem | undefined> = [];
   let waiting: ((value: ProviderStreamItem | undefined) => void) | undefined;
   const push = (value: ProviderStreamItem | undefined) => {
@@ -30,6 +30,7 @@ async function fixture() {
     runtimeInfo: async () => ({ providerId: 'fake', sessionId: 'native', status: 'idle' }),
     async *observe() {
       yield row('initial', 'Already read', 'history');
+      yield* history;
       yield { type: 'history_boundary', olderCursor: 'older' };
       while (true) {
         const value = pending.length ? pending.shift() : await new Promise<ProviderStreamItem | undefined>(resolve => { waiting = resolve; });
@@ -123,5 +124,75 @@ it('delivers the replacement baseline before immediately queued live content on 
   expect(cursors).toEqual([
     { epoch: 'original', seq: 1 }, { epoch: cursors[1].epoch, seq: 2 }, { epoch: cursors[1].epoch, seq: 3 },
   ]);
+  c.socket.close(); await once(c.socket, 'close');
+});
+
+it('keeps quiet review cursors stable across real socket reconnects and exposes visible results', async () => {
+  const f = await fixture(); const c = await f.connect();
+  const review = (key: string, status: 'pending' | 'silent' | 'visible') => {
+    const value = row(key, key);
+    if (value.event.type === 'timeline') { value.event.turnId = 'review-turn'; value.event.item.background = { id: 'review', kind: 'review', status }; }
+    return value;
+  };
+  f.push(review('Automatic input', 'pending'));
+  f.push(review('Quiet acknowledgement', 'silent'));
+  await expect.poll(() => c.activity().at(-1)?.background?.status, { timeout: 1500 }).toBe('silent');
+  expect(c.activity().at(-1).cursor).toEqual({ epoch: 'original', seq: 1 });
+  c.socket.close(); await once(c.socket, 'close');
+  const restored = await f.connect();
+  expect(restored.activity()[0]).toMatchObject({ cursor: { epoch: 'original', seq: 1 }, background: { status: 'silent' } });
+  f.push(review('A useful finding', 'visible'));
+  await expect.poll(() => restored.activity().at(-1)?.cursor.seq, { timeout: 1500 }).toBe(4);
+  expect(restored.activity().at(-1).background.status).toBe('visible');
+  expect(JSON.stringify(restored.messages)).not.toContain('A useful finding');
+  restored.socket.close(); await once(restored.socket, 'close');
+});
+
+it('retains live lifecycle-only review failures after ordinary work resumes', async () => {
+  const f = await fixture(); const c = await f.connect();
+  const quiet = row('quiet-review', 'Quiet response');
+  if (quiet.event.type === 'timeline') {
+    quiet.event.turnId = 'review-turn';
+    quiet.event.item.background = { id: 'review', kind: 'review', status: 'silent' };
+  }
+  f.push(quiet);
+  f.push({ type: 'observation', sourceKey: 'review-failed', occurredAt: 2, delivery: 'live',
+    event: { type: 'background_activity_updated', provider: 'fake', turnId: 'review-turn', background: { id: 'review', kind: 'review', status: 'failed' } } });
+  await expect.poll(() => c.activity().at(-1)?.background?.status, { timeout: 1500 }).toBe('failed');
+  f.push(row('ordinary', 'An ordinary reply'));
+  await expect.poll(() => c.activity().at(-1)?.cursor.seq, { timeout: 1500 }).toBe(3);
+  const history = await f.manager.loadTimeline({ requestId: 'restored', agentId: 'tracked', direction: 'tail', limit: 10 });
+  expect(history.payload.entries.find(entry => entry.item.type === 'assistant_message' && entry.item.text === 'Quiet response')?.item.background?.status).toBe('failed');
+  c.socket.close(); await once(c.socket, 'close');
+});
+
+it('publishes a quiet or visible metadata-only assessment without needing another native message', async () => {
+  const f = await fixture(); const c = await f.connect();
+  const review = row('assessment', 'Reviewing');
+  if (review.event.type === 'timeline') review.event.item.background = { id: 'review', kind: 'review', status: 'pending' };
+  f.push(review);
+  const result = (status: 'silent' | 'visible'): ProviderObservation => ({ type: 'observation', sourceKey: status, delivery: 'live', occurredAt: 2,
+    event: { type: 'background_activity_updated', provider: 'fake', background: { id: 'review', kind: 'review', status, summary: 'Private assessment' } } });
+  f.push(result('silent'));
+  await expect.poll(() => c.activity().at(-1)?.background?.status, { timeout: 1500 }).toBe('silent');
+  expect(c.activity().at(-1)?.cursor.seq).toBe(1);
+  f.push(result('visible'));
+  await expect.poll(() => c.activity().at(-1)?.background?.status, { timeout: 1500 }).toBe('visible');
+  expect(c.activity().at(-1)?.cursor.seq).toBe(2);
+  expect(JSON.stringify(c.messages)).not.toContain('Private assessment');
+  c.socket.close(); await once(c.socket, 'close');
+});
+
+it('restores historical outcomes without making an old review the current attention', async () => {
+  const quiet = row('quiet-history', 'Historical quiet reply', 'history');
+  if (quiet.event.type === 'timeline') quiet.event.item.background = { id: 'old-review', kind: 'review', status: 'silent' };
+  const f = await fixture([quiet, { type: 'observation', sourceKey: 'old-failure', occurredAt: 2, delivery: 'history',
+    event: { type: 'background_activity_updated', provider: 'fake', background: { id: 'old-review', kind: 'review', status: 'failed' } } }]);
+  const c = await f.connect();
+  expect(c.activity()[0]?.background).toBeUndefined();
+  f.push(row('ordinary', 'Ordinary reply'));
+  await expect.poll(() => c.activity().at(-1)?.cursor.seq, { timeout: 1500 }).toBe(3);
+  const history = await f.manager.loadTimeline({ requestId: 'restored', agentId: 'tracked', direction: 'tail', limit: 10 });
+  expect(history.payload.entries.find(entry => entry.item.background?.id === 'old-review')?.item.background?.status).toBe('failed');
   c.socket.close(); await once(c.socket, 'close');
 });

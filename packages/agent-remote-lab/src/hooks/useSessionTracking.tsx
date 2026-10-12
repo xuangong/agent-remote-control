@@ -196,7 +196,7 @@ export function useSessionTracking(baseUrl: string, transport: RemoteAgentTransp
     captureVisibleCursor(key);
     setObservations(previous => {
       const next = acknowledgeVisible(key, nextObservation(previous[key], value, readCursors.get(key))), old = previous[key];
-      return old && old.connection === next.connection && old.activity === next.activity && old.error === next.error && old.changed === next.changed && old.attention === next.attention && old.agentId === next.agentId && old.cursor?.epoch === next.cursor?.epoch && old.cursor?.seq === next.cursor?.seq ? previous : { ...previous, [key]: next };
+      return old && old.connection === next.connection && old.activity === next.activity && old.background?.id === next.background?.id && old.background?.status === next.background?.status && old.error === next.error && old.changed === next.changed && old.attention === next.attention && old.agentId === next.agentId && old.cursor?.epoch === next.cursor?.epoch && old.cursor?.seq === next.cursor?.seq ? previous : { ...previous, [key]: next };
     });
   }, [setObservations, acknowledgeVisible, captureVisibleCursor, readCursors]);
   const acknowledge = useCallback((key: string) => setObservations(previous => {

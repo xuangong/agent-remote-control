@@ -45,3 +45,5 @@ export * from './relation-change.js';
 export * from './session-succession-replay.js';
 
 export * from './creation-source.js';
+
+export { BackgroundActivity, mergeBackgroundActivity } from './background-activity.js';

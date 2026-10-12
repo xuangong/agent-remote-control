@@ -575,3 +575,38 @@ function deferred<T>(): { promise: Promise<T>; resolve(value?: T): void; reject(
   void promise.catch(() => undefined);
   return { promise, resolve: (value) => resolve(value as T), reject };
 }
+
+it('groups trusted quiet checks, preserves human and failed output, and reveals source records', async () => {
+  const bg = (status: 'pending' | 'silent' | 'failed') => ({ id: 'review', kind: 'review' as const, status });
+  const input = entry(1, { type: 'user_message', text: 'Private automatic input', background: bg('pending') });
+  const answer = entry(2, { type: 'assistant_message', text: 'Quiet acknowledgement', background: bg('silent') });
+  const human = entry(3, { type: 'user_message', text: '[TPM review] A real question' });
+  const container = await render(<AgentTimeline state={state([input, answer, human])} />);
+  expect(container.textContent).not.toContain('Private automatic input');
+  expect(container.textContent).not.toContain('Quiet acknowledgement');
+  expect(container.textContent).toContain('A real question');
+  const button = container.querySelector('.agent-background-summary') as HTMLButtonElement;
+  expect(button.textContent).toContain('1');
+  expect(container.querySelector('[data-entry-key]')).not.toBeNull();
+  await act(async () => button.click());
+  expect(container.textContent).toContain('Private automatic input');
+  expect(container.textContent).toContain('Background check');
+  await act(async () => button.click());
+  await rerender(container, <AgentTimeline state={state([input, { ...answer, item: { ...answer.item, background: bg('failed') } },
+    entry(4, { type: 'assistant_message', text: 'Later stale result', background: bg('silent') })])} />);
+  expect(container.textContent).toContain('Quiet acknowledgement');
+  expect(container.textContent).toContain('Later stale result');
+});
+
+it('reveals a quiet original search target in content mode without hiding unresolved assistant replies', async () => {
+  const bg = { id: 'review', kind: 'review' as const, status: 'silent' as const };
+  const input = entry(1, { type: 'user_message', text: 'Automatic source', background: bg });
+  const reply = entry(2, { type: 'assistant_message', text: 'Quiet result', background: bg });
+  const pending = entry(3, { type: 'assistant_message', text: 'Unsettled response', background: { ...bg, id: 'other', status: 'pending' } });
+  const { timelineEntryKey } = await import('../replica/timeline-entry-key.js');
+  const key = timelineEntryKey('epoch-one', reply);
+  const container = await render(<TimelineDisplay.Provider value="content"><AgentTimeline state={state([input, reply, pending])} searchEntryKey={key} searchRequestId={1} /></TimelineDisplay.Provider>);
+  expect(container.textContent).toContain('Quiet result');
+  expect(container.textContent).toContain('Unsettled response');
+  expect(container.querySelector('[data-inspected]')?.getAttribute('data-entry-key')).toBe(key);
+});

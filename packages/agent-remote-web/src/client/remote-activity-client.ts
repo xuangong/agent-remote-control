@@ -5,6 +5,7 @@ import type { RemoteAgentTransport, RemoteConnection, RemoteServerMessage } from
 export interface RemoteActivityState {
   connection: 'connecting' | 'ready' | 'disconnected';
   activity?: AgentStatus;
+  background?: import('@orchardworks/agent-remote-protocol').BackgroundActivity;
   cursor?: TimelineCursor;
   error?: string;
 }
@@ -77,7 +78,7 @@ export class RemoteActivityClient {
     if (message.type === 'agent_activity' && message.payload.agentId === this.agentId) {
       this.awaitingActivity = false;
       this.clearDeadline(); this.attempts = 0;
-      this.changed({ connection: 'ready', activity: message.payload.status, ...(message.payload.cursor ? { cursor: message.payload.cursor } : {}) });
+      this.changed({ connection: 'ready', activity: message.payload.status, ...(message.payload.background ? { background: message.payload.background } : {}), ...(message.payload.cursor ? { cursor: message.payload.cursor } : {}) });
     } else if (message.type === 'protocol_error') {
       const unsupported = message.payload.code === 'invalid_shape' || message.payload.code === 'incompatible_protocol_version';
       this.failed(generation, unsupported ? 'This Host does not support activity-only tracking. Update the Controller to track sessions.' : message.payload.message, !unsupported && message.payload.recoverable);

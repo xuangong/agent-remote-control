@@ -11,7 +11,7 @@ const revision = Type.Integer({ minimum: 1 });
 const utf8 = new (globalThis as unknown as { TextEncoder: new () => { encode(value: string): Uint8Array } }).TextEncoder();
 export const TpmIntent = Type.Object({
   id, target: Type.Union([Type.Literal('main'), Type.Literal('tpm')]),
-  status: Type.Union((['prepared', 'dispatching', 'accepted', 'rejected', 'unknown'] as const).map(value => Type.Literal(value))),
+  status: Type.Union((['prepared', 'dispatching', 'accepted', 'rejected', 'canceled', 'unknown'] as const).map(value => Type.Literal(value))),
   acceptance: Type.Optional(Type.Union([Type.Literal('started'), Type.Literal('queued'), Type.Literal('handled')])),
   purpose: short, text, createdAt: id, error: Type.Optional(short),
   todoStepId: Type.Optional(id), todoPlanRevision: Type.Optional(revision),
@@ -25,6 +25,7 @@ export const TpmWork = Type.Object({
   id, revision, title: Type.String({ minLength: 1, maxLength: 256 }), providerId: id,
   mainNativeSessionId: id, tpmNativeSessionId: Type.Optional(id),
   mainBinding: Type.Optional(SourceBinding), mainSessionRef: Type.Optional(NativeSessionRef),
+  delegated: Type.Optional(Type.Boolean()),
   phase: Type.Union((['clarifying', 'ready', 'implementing', 'validating', 'completed'] as const).map(value => Type.Literal(value))),
   waiting: Type.Union((['none', 'user', 'main_session'] as const).map(value => Type.Literal(value))),
   archived: Type.Optional(Type.Boolean()), paused: Type.Boolean(), summary: short, nextAction: short, document: text, acceptance: text,
@@ -35,9 +36,10 @@ export const TpmWork = Type.Object({
 export type TpmWork = Static<typeof TpmWork>;
 export const TpmList = Type.Object({ supported: Type.Boolean(), works: Type.Array(TpmWork), supportedProviders: Type.Optional(Type.Array(id)), nextCursor: Type.Optional(id) }, object);
 export type TpmList = Static<typeof TpmList>;
-export const TpmCreate = Type.Object({ providerId: id, mainNativeSessionId: id, title: Type.Optional(Type.String({ minLength: 1, maxLength: 256 })), requirement: Type.Optional(Type.String({ minLength: 1, maxLength: 16000 })), operationId: id }, object);
+export const TpmCreate = Type.Object({ providerId: id, mainNativeSessionId: id, title: Type.Optional(Type.String({ minLength: 1, maxLength: 256 })), requirement: Type.Optional(Type.String({ minLength: 1, maxLength: 16000 })), delegated: Type.Optional(Type.Boolean()), operationId: id }, object);
 export type TpmCreate = Static<typeof TpmCreate>;
 export const TpmAction = Type.Union([
+  Type.Object({ id, revision, operationId: id, action: Type.Literal('set_delegated'), delegated: Type.Boolean() }, object),
   Type.Object({ id, revision, operationId: id, action: Type.Literal('rename'), title: Type.String({ minLength: 1, maxLength: 256, pattern: '\\S' }) }, object),
   Type.Object({ id, revision, operationId: id, action: Type.Literal('confirm_todo'), confirmation: SessionTodoDecision }, object),
   Type.Object({ id, revision, operationId: id, action: Type.Union((['pause', 'resume', 'reopen', 'check', 'archive', 'unarchive'] as const).map(value => Type.Literal(value))) }, object),

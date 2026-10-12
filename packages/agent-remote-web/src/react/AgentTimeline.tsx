@@ -14,6 +14,7 @@ import type { RendererRegistry } from './renderer-registry.js';
 import { ConversationEntry } from './ConversationEntry.js';
 import { createTimelineRenderModel, type TimelineRenderEntry } from './timeline-render-model.js';
 import { groupRuntimeNotices, RuntimeNoticeGroup, useRuntimeNoticeDisclosure, type RuntimeNoticePresentation } from './RuntimeNoticeGroup.js';
+import { BackgroundActivityGroup, groupBackgroundActivity, type BackgroundRow } from './BackgroundActivityGroup.js';
 import type { PreviewController } from './PreviewActions.js';
 import { usePreviewController } from './PreviewContext.js';
 import { OutgoingMessageItem } from './OutgoingMessageItem.js';
@@ -100,7 +101,7 @@ export function AgentTimeline({
       const incompleteBoundary = state.timeline.hasOlder && turns.size === 0;
       turns.add(turn);
       // The first loaded turn may start on an older page. Keep its edit action hidden until known.
-      if (!incompleteBoundary && entry.item.type === 'user_message' && entry.item.messageId) prompts.add(entry);
+      if (!incompleteBoundary && entry.item.type === 'user_message' && !entry.item.background && entry.item.messageId) prompts.add(entry);
     }
     return prompts;
   }, [state.timeline.entries, state.timeline.hasOlder]);
@@ -113,7 +114,16 @@ export function AgentTimeline({
     });
   }, [contentOnly, lettersVisible, state.timeline.entries, state.timeline.epoch, searchEntryKey]);
   const renderModel = useMemo(() => createTimelineRenderModel(state.timeline.epoch, entries), [state.timeline.epoch, entries]);
-  const rows = useMemo(() => groupRuntimeNotices(renderModel, state.timeline.entries), [renderModel, state.timeline.entries]);
+  const rows = useMemo(() => {
+    const result: Array<ReturnType<typeof groupRuntimeNotices>[number] | Extract<BackgroundRow, { type: 'background' }>> = [];
+    let ordinary: TimelineRenderEntry[] = [];
+    const flush = () => { result.push(...groupRuntimeNotices(ordinary, state.timeline.entries)); ordinary = []; };
+    for (const row of groupBackgroundActivity(renderModel, createTimelineRenderModel(state.timeline.epoch, state.timeline.entries))) {
+      if (row.type === 'entry') ordinary.push(row.value);
+      else { flush(); result.push(row); }
+    }
+    flush(); return result;
+  }, [renderModel, state.timeline.entries, state.timeline.epoch]);
   const notices = useRuntimeNoticeDisclosure(scopeKey, searchEntryKey, inspectedEntryKey, searchRequestId, inspectedRequestId);
   const renderEntry = ({ entry, key, messageGroup }: TimelineRenderEntry, notice?: RuntimeNoticePresentation) =>
     <ConversationEntry key={key} entry={entry} entryKey={key}
@@ -158,7 +168,8 @@ export function AgentTimeline({
     <div className="agent-timeline-entries" aria-live="polite">
       {renderModel.length === 0 && outgoing.length === 0
         ? <p className="agent-timeline-empty">{contentOnly ? 'No conversation content in the loaded history.' : 'No timeline activity.'}</p>
-        : rows.map(row => row.type === 'entry' ? renderEntry(row.value) : <RuntimeNoticeGroup key={row.key}
+        : rows.map(row => row.type === 'entry' ? renderEntry(row.value) : row.type === 'background' ? <BackgroundActivityGroup key={row.key}
+            entries={row.entries} count={row.count} expanded={notices.isExpanded(row.entries)} toggle={() => notices.toggle(row.entries)} renderEntry={renderEntry} /> : <RuntimeNoticeGroup key={row.key}
             entries={row.entries} expanded={notices.isExpanded(row.entries)} toggle={() => notices.toggle(row.entries)}
             renderEntry={renderEntry} />)}
       {outgoing.map(message => <OutgoingMessageItem key={message.id} message={message} resourceContext={onResourceResolve && onResourceRequest ? { scopeKey: JSON.stringify([state.agent?.id, state.timeline.epoch]), bindings: [], resources: state.resources, resolveResource: onResourceResolve, requestResource: onResourceRequest } : undefined} onRetry={onRetryMessage} onDelete={onDeleteMessage} />)}

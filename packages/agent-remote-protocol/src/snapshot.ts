@@ -1,3 +1,5 @@
+import { BackgroundActivity } from './background-activity.js';
+import { TimelineCursor } from './cursor.js';
 import { ImageInputCapabilities } from './image-input.js';
 import { type Static, Type } from '@sinclair/typebox';
 
@@ -96,6 +98,8 @@ export const AgentRuntimeInfo = Strict({
 export type AgentRuntimeInfo = Static<typeof AgentRuntimeInfo>;
 
 export const AgentSnapshotPayload = Strict({
+  // Application-owned attention excludes acknowledged quiet background work.
+  attention: Type.Optional(Strict({ cursor: TimelineCursor, background: Type.Optional(BackgroundActivity) })),
   settingChanges: Type.Optional(Type.Array(AgentSessionSettingChange)),
   id: NonEmptyString,
   providerId: NonEmptyString,

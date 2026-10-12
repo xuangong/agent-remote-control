@@ -24,7 +24,7 @@ export type AgentToolCallTimelineItem = AgentToolCallBase & (
   | { status: 'canceled'; error: null }
 );
 
-export type AgentTimelineItem =
+export type AgentTimelineItem = (
   | { type: 'user_message'; text: string; content?: import('./image-input.js').AgentUserMessagePart[]; messageId?: string; clientMessageId?: string }
   | { type: 'assistant_message'; text: string; messageId?: string }
   | { type: 'agent_communication'; messageId: string; sender: string; recipient: string; text: string }
@@ -33,7 +33,8 @@ export type AgentTimelineItem =
   | { type: 'todo'; items: AgentTaskItem[] }
   | { type: 'interaction'; request: AgentInteractionRequest; response: AgentInteractionResponse }
   | { type: 'error'; message: string }
-  | { type: 'compaction'; status: 'loading' | 'completed'; trigger?: 'auto' | 'manual'; preTokens?: number };
+  | { type: 'compaction'; status: 'loading' | 'completed'; trigger?: 'auto' | 'manual'; preTokens?: number }
+) & { background?: import('./background-activity.js').BackgroundActivity };
 
 export interface AgentUsage {
   /**
@@ -100,6 +101,7 @@ export interface AgentRuntimeInfo {
 }
 
 export type AgentStreamEvent =
+  | { type: 'background_activity_updated'; provider: string; background: import('./background-activity.js').BackgroundActivity; turnId?: string }
   | { type: 'thread_started'; sessionId: string; provider: string }
   | { type: 'turn_started'; provider: string; turnId?: string }
   | { type: 'turn_completed'; provider: string; usage?: AgentUsage; turnId?: string }

@@ -1,3 +1,4 @@
+import { BackgroundActivity } from './background-activity.js';
 import { SessionControlRequest, SessionControlMessage } from './session-control.js';
 import { MessagePart, ImageUploadBeginRequest, ImageUploadChunkRequest, ImageUploadFinishRequest, ImageUploadResult } from './image-input.js';
 import { type Static, Type } from '@sinclair/typebox';
@@ -192,7 +193,7 @@ export type AgentUpdateMessage = Static<typeof AgentUpdateMessage>;
 export const AgentActivityMessage = Strict({
   protocolVersion: ProtocolVersionSchema,
   type: Type.Literal('agent_activity'),
-  payload: Strict({ agentId: NonEmptyString, status: AgentStatus, cursor: Type.Optional(TimelineCursor) }),
+  payload: Strict({ agentId: NonEmptyString, status: AgentStatus, cursor: Type.Optional(TimelineCursor), background: Type.Optional(BackgroundActivity) }),
 });
 export type AgentActivityMessage = Static<typeof AgentActivityMessage>;
 

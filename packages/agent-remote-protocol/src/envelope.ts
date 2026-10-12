@@ -1,6 +1,7 @@
 import { type Static, Type } from '@sinclair/typebox';
 
 import { SafeNonNegativeInteger } from './cursor.js';
+import { BackgroundActivity } from './background-activity.js';
 import { ResourceBinding } from './resources.js';
 import { AgentRuntimeInfo } from './snapshot.js';
 import { AgentTimelineItem, AgentUsage } from './timeline.js';
@@ -25,6 +26,7 @@ export const PublicAgentTimelineEvent = Strict({
 export type PublicAgentTimelineEvent = Static<typeof PublicAgentTimelineEvent>;
 
 export const PublicAgentNonTimelineEvent = Type.Union([
+  Strict({ type: Type.Literal('background_activity_updated'), ...ProviderEvent, ...TurnId, background: BackgroundActivity }),
   Strict({ type: Type.Literal('thread_started'), ...ProviderEvent, sessionId: NonEmptyString }),
   Strict({ type: Type.Literal('turn_started'), ...ProviderEvent, ...TurnId }),
   Strict({ type: Type.Literal('turn_completed'), ...ProviderEvent, ...TurnId, usage: Type.Optional(AgentUsage) }),

@@ -116,6 +116,8 @@ export function createSessionWire(
   let lastActivityCursor: TimelineCursor | undefined;
   let activityStatus: AgentStatus | undefined;
   let activityCursor: TimelineCursor | undefined;
+  let activityBackground: import('@orchardworks/agent-remote-protocol').BackgroundActivity | undefined;
+  let lastBackground: string | undefined;
   let activityTimer: ReturnType<typeof setTimeout> | undefined;
   let rebuildingTimeline = false;
   let negotiated = false;
@@ -158,11 +160,14 @@ export function createSessionWire(
           clearTimeout(activityTimer); activityTimer = undefined;
         } else if (event.type === 'timeline_rebuilt') {
           rebuildingTimeline = false;
-          activityCursor = event.cursor;
+          activityCursor = requireBoundAgent().snapshot().payload.attention?.cursor ?? event.cursor;
           // Establish the replacement baseline before subsequent live content can advance it.
+          const background = requireBoundAgent().snapshot().payload.attention?.background;
+          activityBackground = background ? { id: background.id, kind: background.kind, status: background.status } : undefined;
           publishActivity();
         } else if (event.type === 'agent_stream' && event.row && !rebuildingTimeline) {
-          advanceActivityCursor({ epoch: event.row.epoch, seq: event.row.seq });
+          const attention = requireBoundAgent().snapshot().payload.attention;
+          advanceActivityCursor(attention?.cursor ?? { epoch: event.row.epoch, seq: event.row.seq });
           scheduleActivity();
         }
         return;
@@ -477,8 +482,10 @@ export function createSessionWire(
     activityStatus = agent.status === 'closed' || agent.status === 'failed' ? agent.status
       : agent.pendingInteractions.length || agent.status === 'waiting' ? 'waiting'
       : agent.activeTurn || agent.status === 'running' ? 'running' : agent.status;
-    if (!rebuildingTimeline && cursor) advanceActivityCursor(cursor);
-    if (lastActivity !== activityStatus) publishActivity();
+    const background = agent.attention?.background;
+    activityBackground = background ? { id: background.id, kind: background.kind, status: background.status } : undefined;
+    if (!rebuildingTimeline && (agent.attention?.cursor ?? cursor)) advanceActivityCursor((agent.attention?.cursor ?? cursor)!);
+    if (lastActivity !== activityStatus || lastBackground !== JSON.stringify(activityBackground)) publishActivity();
     else if (!rebuildingTimeline) scheduleActivity();
   }
 
@@ -503,11 +510,12 @@ export function createSessionWire(
   function publishActivity(): void {
     clearTimeout(activityTimer); activityTimer = undefined;
     const cursor = rebuildingTimeline ? lastActivityCursor : activityCursor;
-    if (activityStatus === undefined || (lastActivity === activityStatus && sameCursor(lastActivityCursor, cursor))) return;
+    if (activityStatus === undefined || (lastActivity === activityStatus && sameCursor(lastActivityCursor, cursor) && lastBackground === JSON.stringify(activityBackground))) return;
+    lastBackground = JSON.stringify(activityBackground);
     lastActivity = activityStatus;
     lastActivityCursor = cursor;
     sendMessage({ protocolVersion: PROTOCOL_VERSION, type: 'agent_activity', payload: {
-      agentId: requireBoundAgent().agentId, status: activityStatus, ...(cursor ? { cursor } : {}),
+      agentId: requireBoundAgent().agentId, status: activityStatus, ...(cursor ? { cursor } : {}), ...(activityBackground ? { background: activityBackground } : {}),
     } });
   }
 

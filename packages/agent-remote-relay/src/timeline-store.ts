@@ -1,4 +1,5 @@
 import type { AgentTimelineItem } from '@orchardworks/agent-provider-sdk';
+import { mergeBackgroundActivity, type BackgroundActivity } from '@orchardworks/agent-remote-protocol';
 import type { ResourceBinding, TimelineCursor } from '@orchardworks/agent-remote-protocol';
 
 export interface CanonicalTimelineRow {
@@ -30,6 +31,8 @@ export class TimelineStore {
   private readonly timelineRows: CanonicalTimelineRow[] = [];
   private readonly rowsBySourceRevision = new Map<string, Map<number | null, CanonicalTimelineRow>>();
 
+  private readonly backgroundOutcomes = new Map<string, BackgroundActivity>();
+
   constructor(readonly epoch: string) {
     if (epoch.length === 0) throw new Error('Timeline epoch must be non-empty.');
   }
@@ -51,6 +54,7 @@ export class TimelineStore {
       timestamp: new Date(input.occurredAt).toISOString(),
       resources: structuredClone(input.resources ?? []),
     };
+    this.applyBackground(row);
     this.timelineRows.push(row);
     if (sourceRevisions) sourceRevisions.set(revision, row);
     else this.rowsBySourceRevision.set(input.sourceKey, new Map([[revision, row]]));
@@ -67,10 +71,24 @@ export class TimelineStore {
     if (!Number.isSafeInteger(seq)) throw new Error('Timeline history position exhausted');
     const row: CanonicalTimelineRow = { ...structuredClone(input), epoch: this.epoch, seq,
       timestamp: new Date(input.occurredAt).toISOString(), resources: structuredClone(input.resources ?? []) };
+    this.applyBackground(row);
     this.timelineRows.unshift(row);
     if (revisions) revisions.set(revision, row);
     else this.rowsBySourceRevision.set(input.sourceKey, new Map([[revision, row]]));
     return { status: 'appended', row: structuredClone(row) };
+  }
+
+  updateBackground(background: BackgroundActivity): void {
+    const merged = mergeBackgroundActivity(this.backgroundOutcomes.get(background.id), background);
+    this.backgroundOutcomes.set(background.id, structuredClone(merged));
+    if (this.backgroundOutcomes.size > 2048) this.backgroundOutcomes.delete(this.backgroundOutcomes.keys().next().value!);
+    for (const row of this.timelineRows) if (row.item.background?.id === background.id) this.applyBackground(row);
+  }
+
+  private applyBackground(row: CanonicalTimelineRow): void {
+    const background = row.item.background;
+    const outcome = background && this.backgroundOutcomes.get(background.id);
+    if (background && outcome) row.item.background = structuredClone(mergeBackgroundActivity(background, outcome));
   }
 
   rows(): readonly CanonicalTimelineRow[] {

@@ -45,7 +45,7 @@ it('preserves a draft when hidden, minimizes without pausing, and resolves uncer
   expect(container.querySelector('[aria-label="More work actions"]')).toBeNull();
   expect(container.querySelector('[aria-label="Pause background follow-up"]')).toBeNull();
   expect(container.querySelector('[aria-label="Review progress now"]')).toBeNull();
-  expect(container.querySelector('[aria-label="Resume background follow-up"]')).toBeNull();
+  expect(container.querySelector('[aria-label="Resume work"]')).toBeNull();
   await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="Minimize TPM"]')!.click());
   expect(actions).toEqual([]);
   expect(document.activeElement).toBe(container.querySelector('button'));
@@ -137,7 +137,7 @@ it('presents an unwritten plan honestly and leaves follow-up scheduling to the T
   expect(container.querySelector('article')!.textContent).toContain('has not written a plan yet');
   const labels = [...container.querySelectorAll('button')].map(button => button.getAttribute('aria-label') ?? button.textContent);
   expect(labels.some(label => /^pause|check|review progress/i.test(label ?? ''))).toBe(false);
-  expect(container.querySelector('[aria-label="Resume background follow-up"]')).not.toBeNull();
+  expect(container.querySelector('[aria-label="Resume work"]')).not.toBeNull();
   expect(container.querySelector('[aria-label="Reopen work"]')).toBeNull();
   expect(container.querySelector('.lab-tpm-work-status')?.textContent).not.toContain('Waiting for main-session progress');
 });
@@ -225,9 +225,9 @@ it('lets the user stop unfinished work with unknown delivery and explicitly resu
   expect(container.querySelector('[aria-label="Mark uncertain as accepted"]')).not.toBeNull();
   await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="Restore TPM session"]')!.click());
   expect(actions).toEqual(['archive', 'archive', 'unarchive']);
-  const resume = container.querySelector<HTMLButtonElement>('[aria-label="Resume background follow-up"]');
+  const resume = container.querySelector<HTMLButtonElement>('[aria-label="Resume work"]');
   expect(resume).not.toBeNull();
   await act(async () => resume!.click());
   expect(actions.at(-1)).toBe('resume');
-  expect(container.querySelector('[aria-label="Resume background follow-up"]')).toBeNull();
+  expect(container.querySelector('[aria-label="Resume work"]')).toBeNull();
 });

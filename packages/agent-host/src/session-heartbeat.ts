@@ -8,7 +8,7 @@ export interface SessionHeartbeatAccess {
   read(): Promise<{ now: number; lastReviewAt: number; intervalMs: number; minimumIntervalMs: number }>;
   schedule(at: number, reason: string): Promise<unknown>;
 }
-export const sessionHeartbeatInstructions = 'Background reviews continue independently of the page. schedule_check can bring a check forward within the Host cadence. Check the current situation and act or record justified waiting. Waiting for the user is legitimate. A heartbeat is not consent and does not require sending another message.';
+export const sessionHeartbeatInstructions = 'When background delegation is enabled, reviews continue independently of the page. Manual work has no automatic checks. schedule_check can bring a check forward within the Host cadence. Check the current situation and act or record justified waiting. Waiting for the user is legitimate. A heartbeat is not consent and does not require sending another message.';
 
 /** Scheduling is optional and independent of role, todo storage and native runtime ownership. */
 export function sessionHeartbeatTools(access: SessionHeartbeatAccess): AgentSessionTool[] {

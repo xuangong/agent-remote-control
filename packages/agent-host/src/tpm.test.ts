@@ -61,7 +61,7 @@ async function fixture(queueMessage = false, tickMs = 1_000_000) {
   };
   const options = { stateDirectory: directory, now: () => now, tickMs, heartbeatMs: 1000, waitingHeartbeatMs: 5000, minimumReviewMs: 30, coalesceMs: 5 };
   let coordinator = new TpmCoordinator(options, access); fixtures.push({ coordinator, directory }); await coordinator.ready;
-  const input = { providerId: 'codex', mainNativeSessionId: 'main', title: 'Deliver isolated work', requirement: 'Agree on scope and deliver evidence.', operationId: 'create-one' };
+  const input = { providerId: 'codex', mainNativeSessionId: 'main', title: 'Deliver isolated work', requirement: 'Agree on scope and deliver evidence.', operationId: 'create-one', delegated: true };
   const create = async (operationId = input.operationId) => {
     const work = await coordinator.create({ ...input, operationId }, 'browser-scope');
     await expect.poll(async () => (await coordinator.get(work.id)).outbox?.[0]?.status).toBe('accepted');
@@ -108,6 +108,44 @@ async function fixture(queueMessage = false, tickMs = 1_000_000) {
 }
 async function waitMessages(manager: SessionManager, count: number) { await expect.poll(() => manager.messages.length).toBe(count); }
 
+it('starts manual work without recurring reviews and preserves normal work tools across restart', async () => {
+  const f = await fixture();
+  const work = await f.coordinator.create({ ...f.input, delegated: undefined }, 'manual');
+  await expect.poll(async () => (await f.coordinator.get(work.id)).outbox?.[0]?.status).toBe('accepted');
+  expect((await f.coordinator.get(work.id)).delegated).toBe(false);
+  const tpm = f.sessions.get(work.tpmNativeSessionId!)!;
+  await f.acknowledge(work);
+  f.advance(60_000); await f.coordinator.tick();
+  f.sessions.get('main')!.stream({ type: 'turn_completed', provider: 'codex' });
+  await new Promise(resolve => setTimeout(resolve, 15));
+  await f.coordinator.tick();
+  expect(tpm.messages).toHaveLength(1);
+  const todo = (await f.coordinator.get(work.id)).todo!;
+  await f.call(work, 'update_todo_step', { revision: todo.revision, stepId: todo.steps[0]!.id, status: 'in_progress', note: 'User-led discussion' });
+  await f.call(work, 'send_main_message', { operationId: 'manual-question', purpose: 'consultation', text: 'Explain feasibility.' });
+  await expect.poll(() => f.sessions.get('main')!.messages.length).toBe(1);
+  await f.restart(); f.advance(60_000); await f.coordinator.tick();
+  expect((await f.coordinator.get(work.id)).delegated).toBe(false);
+  expect(tpm.messages).toHaveLength(1);
+});
+
+it('stops future delegated reviews without interrupting an accepted review or its assessment', async () => {
+  const f = await fixture(); const work = await f.create();
+  await f.acknowledge(work); f.advance(2000); await f.coordinator.tick();
+  const tpm = f.sessions.get(work.tpmNativeSessionId!)!;
+  expect(tpm.messages).toHaveLength(2);
+  const current = await f.coordinator.get(work.id);
+  await f.coordinator.action({ id: work.id, revision: current.revision, operationId: 'stop-delegation', action: 'set_delegated', delegated: false }, 'user');
+  expect(tpm.cancel).not.toHaveBeenCalled();
+  await f.acknowledge(work, { summary: 'Current review finished normally' });
+  f.advance(60_000); await f.coordinator.tick();
+  expect(tpm.messages).toHaveLength(2);
+  const manual = await f.coordinator.get(work.id);
+  expect(manual.summary).toBe('Current review finished normally');
+  await f.coordinator.action({ id: work.id, revision: manual.revision, operationId: 'delegate-again', action: 'set_delegated', delegated: true }, 'user');
+  await expect.poll(() => tpm.messages.length).toBe(3);
+});
+
 it('binds main dispatch to the current todo and requires explicit user approval before implementation', async () => {
   const f = await fixture(); const work = await f.create();
   const tools = (await f.coordinator.extensions(work.providerId, work.tpmNativeSessionId!))!.tools!;
@@ -147,7 +185,7 @@ it('starts and retains background review leases without browser or Relay connect
   expect(f.sessions.get('main')!.leases).toBe(1); expect(tpm.leases).toBe(1);
   expect(f.sessions.get('main')!.listeners.size).toBe(1); expect(tpm.listeners.size).toBe(1);
   await f.acknowledge(work); f.advance(1000); await f.coordinator.tick(); await waitMessages(tpm, 2);
-  expect(tpm.messages[1]?.text).toContain('Heartbeat check');
+  expect(tpm.messages[1]?.text).toContain('Heartbeat.');
 }, 10000);
 
 it('deduplicates concurrent creation and retries across restart and rejects identity reuse', async () => {
@@ -242,7 +280,7 @@ it('coalesces committed main content while ignoring history and usage-only updat
   main.stream({ type: 'turn_completed', provider: 'codex', turnId: 'answer' });
   await expect.poll(async () => (await f.coordinator.get(work.id)).nextCheckAt).toBeLessThanOrEqual(f.now + 5);
   f.advance(5); await expect.poll(async () => { await f.coordinator.tick(); return tpm.messages.length; }).toBe(2);
-  expect(tpm.messages[1]?.text).toContain('bound main session changed');
+  expect(tpm.messages[1]?.text).toContain('Main session updated.');
 }, 10000);
 
 it('validates scoped tool arguments and revision conflicts without exposing replacement targets or persistence', async () => {
@@ -264,7 +302,7 @@ it('retains main changes arriving during an active review for a subsequent bound
   const acknowledged = await f.acknowledge(work); expect(acknowledged.nextCheckAt).toBe(f.now + 5);
   f.advance(5); await f.coordinator.tick(); expect(tpm.messages).toHaveLength(1);
   f.advance(25); await expect.poll(async () => { await f.coordinator.tick(); return tpm.messages.length; }).toBe(2);
-  expect(tpm.messages[1]?.text).toContain('bound main session changed');
+  expect(tpm.messages[1]?.text).toContain('Main session updated.');
 }, 10000);
 
 it('limits automatic reviews to two and serves another work when a slot settles', async () => {
@@ -801,3 +839,46 @@ it.each(['unknown', 'void'] as const)('does not manufacture acceptance after coo
   expect((await f.coordinator.get(work.id)).revision).toBe(before.revision);
   expect(f.coordinator.hasUnsettledMain(route.origin)).toBe(true); expect(main.messages).toHaveLength(1);
 }, 10000);
+
+it('settles a quiet review once without rewriting unchanged visible work, but surfaces changed phase', async () => {
+  const f = await fixture(); const work = await f.create(); await f.acknowledge(work);
+  f.advance(2000); await f.coordinator.tick();
+  let current = await f.coordinator.get(work.id);
+  const reviewId = f.coordinator.store.get(work.id).reviewIntentId!;
+  const assessment = { revision: current.revision, reviewId, notify: false, phase: current.phase, waiting: current.waiting, summary: 'A paraphrase', nextAction: 'Another paraphrase' };
+  await f.call(work, 'update_work', assessment);
+  expect((await f.coordinator.get(work.id)).summary).toBe(current.summary);
+  expect(f.coordinator.store.get(work.id).backgroundReviews?.at(-1)?.result?.notify).toBe(false);
+  await expect(f.call(work, 'update_work', { ...assessment, revision: (await f.coordinator.get(work.id)).revision })).rejects.toThrow(/no longer awaiting/);
+  f.sessions.get(work.tpmNativeSessionId!)!.setStatus('idle'); f.advance(2000); await f.coordinator.tick();
+  current = await f.coordinator.get(work.id);
+  await f.call(work, 'update_work', { ...assessment, revision: current.revision, reviewId: f.coordinator.store.get(work.id).reviewIntentId!, waiting: 'user' });
+  expect(f.coordinator.store.get(work.id).backgroundReviews?.at(-1)?.result?.notify).toBe(true);
+});
+
+it('preserves legacy automatic work and cancels only undispatched reviews when delegation stops', async () => {
+  const f = await fixture(); const work = await f.create(); await f.acknowledge(work);
+  await f.coordinator.store.update(work.id, undefined, record => {
+    delete record.work.delegated;
+    record.work.outbox!.push({ id: 'not-sent', target: 'tpm', purpose: 'review', text: 'automatic', status: 'prepared', createdAt: work.createdAt });
+  });
+  await f.restart();
+  const current = await f.coordinator.get(work.id); expect(current.delegated).toBe(true);
+  await f.coordinator.action({ id: work.id, revision: current.revision, operationId: 'stop', action: 'set_delegated', delegated: false }, 'owner');
+  expect((await f.coordinator.get(work.id)).outbox?.find(intent => intent.id === 'not-sent')?.status).toBe('canceled');
+  expect(f.sessions.get(work.tpmNativeSessionId!)!.cancel).not.toHaveBeenCalled();
+});
+
+it('releases a stopped review that ends without assessment without scheduling another one', async () => {
+  const f = await fixture(); const work = await f.create(); await f.acknowledge(work);
+  f.advance(2000); await f.coordinator.tick();
+  let current = await f.coordinator.get(work.id);
+  const reviewId = f.coordinator.store.get(work.id).reviewIntentId;
+  await f.coordinator.action({ id: work.id, revision: current.revision, operationId: 'stop', action: 'set_delegated', delegated: false }, 'user');
+  const tpm = f.sessions.get(work.tpmNativeSessionId!)!;
+  tpm.setStatus('idle'); f.advance(60000); await f.coordinator.tick();
+  expect(f.coordinator.store.get(work.id).reviewIntentId).toBeUndefined();
+  expect(f.coordinator.store.get(work.id).backgroundReviews?.find(review => review.id === reviewId)?.failed).toBe(true);
+  expect(tpm.messages).toHaveLength(2);
+  expect(tpm.cancel).not.toHaveBeenCalled();
+});

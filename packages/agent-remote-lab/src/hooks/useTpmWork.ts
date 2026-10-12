@@ -5,7 +5,7 @@ import type { TpmActionInput } from '@orchardworks/agent-remote-web/headless';
 import type { OpenedSession } from '../directory-client.js';
 import type { SessionEntry } from '../session-tree.js';
 
-export type TpmAction = 'pause' | 'resume' | 'reopen' | 'check' | 'archive' | 'unarchive';
+export type TpmAction = 'pause' | 'resume' | 'reopen' | 'check' | 'archive' | 'unarchive' | 'delegate' | 'undelegate';
 export interface TpmService {
   tpmList(hostId: string): Promise<TpmList>;
   tpmWork(hostId: string, id: string): Promise<TpmWork>;
@@ -17,7 +17,7 @@ export interface TpmItem { key: string; hostId: string; hostName: string; online
 interface Catalog extends TpmList { error?: string }
 export function tpmKey(hostId: string, id: string): string { return JSON.stringify([hostId, id]); }
 function meaningful(work: TpmWork): string {
-  return JSON.stringify([work.title, work.phase, work.waiting, work.paused, work.archived, work.summary, work.nextAction,
+  return JSON.stringify([work.title, work.phase, work.waiting, work.paused, work.archived, work.delegated, work.summary, work.nextAction,
     work.todoRevision ?? work.todo?.revision, work.documentRevision ?? [work.document, work.acceptance, work.evidence], work.health, work.creationStatus,
     work.outbox?.filter(intent => intent.status === 'unknown' || intent.status === 'rejected').map(intent => [intent.id, intent.target, intent.status, intent.error])]);
 }
@@ -276,7 +276,7 @@ export function useTpmWork(service: TpmService | undefined, hosts: readonly TpmH
     } catch (error) { if (latest.current.service === service) setError(message(error)); throw error; }
     finally { mutation.current = false; setBusy(undefined); }
   }, [canCreate, service, update, open, authorized]);
-  const mutate = useCallback(async (key: string, input: { action: TpmAction } | { action: 'rename'; title: string } | { action: 'confirm_todo'; confirmation: SessionTodoDecision } | { action: 'resolve'; intentId: string; resolution: 'accepted' | 'rejected'; nativeSessionId?: string }) => {
+  const mutate = useCallback(async (key: string, input: { action: Exclude<TpmAction, 'delegate' | 'undelegate'> } | { action: 'set_delegated'; delegated: boolean } | { action: 'rename'; title: string } | { action: 'confirm_todo'; confirmation: SessionTodoDecision } | { action: 'resolve'; intentId: string; resolution: 'accepted' | 'rejected'; nativeSessionId?: string }) => {
     const item = find(key);
     if (!service || !enabled || !item?.online) throw new Error('The TPM Controller is unavailable.');
     if (mutation.current) throw new Error('Wait for the current TPM operation.');
@@ -292,7 +292,7 @@ export function useTpmWork(service: TpmService | undefined, hosts: readonly TpmH
     } finally { mutation.current = false; setBusy(undefined); }
   }, [service, enabled, find, update, refresh, authorized]);
   const rename = useCallback((key: string, title: string) => mutate(key, { action: 'rename', title: title.trim() }), [mutate]);
-  const action = useCallback((key: string, action: TpmAction) => mutate(key, { action }), [mutate]);
+  const action = useCallback((key: string, action: TpmAction) => mutate(key, action === 'delegate' || action === 'undelegate' ? { action: 'set_delegated', delegated: action === 'delegate' } : { action }), [mutate]);
   const resolve = useCallback((key: string, intentId: string, resolution: 'accepted' | 'rejected', nativeSessionId?: string) => mutate(key, { action: 'resolve', intentId, resolution, ...(nativeSessionId ? { nativeSessionId } : {}) }), [mutate]);
   const confirmTodo = useCallback((key: string, confirmation: SessionTodoDecision) => mutate(key, { action: 'confirm_todo', confirmation }), [mutate]);
   const close = useCallback((key?: string) => setWindowOrder(current => key ? current.filter(item => item !== key) : []), []);

@@ -110,7 +110,7 @@ function TpmWorkspaceContent({ item, mainTitle, session, replica, visible, stora
       </form> : null}
       <div className="lab-tpm-work-status">
         <span className="lab-tpm-phase" data-tpm-phase={work.phase}>{tpmPhaseLabel[work.phase]}</span>
-        {work.archived ? <span>{work.phase === 'completed' ? 'Archived' : 'Stopped · Archived'}</span> : work.paused && work.phase !== 'completed' ? <span>Background follow-up paused</span> : null}
+        {work.archived ? <span>{work.phase === 'completed' ? 'Archived' : 'Stopped · Archived'}</span> : work.paused && work.phase !== 'completed' ? <span>Work paused</span> : null}
         {!work.archived && !work.paused && work.phase !== 'completed' ? work.waiting === 'user' ? <span className="lab-tpm-needs-user">Waiting for your decision</span> : work.waiting === 'main_session' ? <span>Waiting for main-session progress</span> : null : null}
         {work.health ? <span className="lab-tpm-health">{work.health}</span> : null}{!item.online ? <span className="lab-tpm-health">Host offline</span> : null}
         <button className="lab-tpm-main-link" type="button" aria-label={`Open main session: ${mainLabel}`} title={`${mainLabel} · ${main.providerId} · ${main.nativeSessionId}`} onClick={onOpenMain}><span>Main:</span><span className="lab-tpm-main-title">{mainLabel}</span><span aria-hidden="true">↗</span></button>
@@ -118,8 +118,11 @@ function TpmWorkspaceContent({ item, mainTitle, session, replica, visible, stora
       <nav className="lab-tpm-toolbar" aria-label="Work view">
         <button type="button" aria-pressed={!documentVisible} onClick={() => setDocumentVisible(false)}>Conversation</button>
         <button type="button" aria-label="Plan & acceptance" aria-pressed={documentVisible} onClick={() => setDocumentVisible(true)}>Plan & acceptance</button>
+        {work.delegated !== undefined && !work.archived && work.phase !== 'completed' && !work.paused ? <button type="button" className="lab-tpm-delegation" aria-label="Background delegation" aria-pressed={work.delegated !== false}
+          title={work.delegated !== false ? 'Stop automatic follow-up. The current turn can finish.' : 'Let TPM follow up automatically, even while this page is closed.'}
+          disabled={unavailable || creationUnresolved} onClick={() => run(() => onAction(work.delegated !== false ? 'undelegate' : 'delegate'))}>{work.delegated !== false ? 'Delegated' : 'Delegate'}</button> : null}
         {work.phase === 'completed' ? <button className="lab-tpm-reopen" type="button" aria-label="Reopen work" disabled={unavailable || creationUnresolved} onClick={() => run(() => onAction('reopen'))}>Reopen work</button> : null}
-        {!work.archived && work.paused && work.phase !== 'completed' ? <button className="lab-tpm-reopen" type="button" aria-label="Resume background follow-up" disabled={unavailable || creationUnresolved} onClick={() => run(() => onAction('resume'))}>Resume follow-up</button> : null}
+        {!work.archived && work.paused && work.phase !== 'completed' ? <button className="lab-tpm-reopen" type="button" aria-label="Resume work" disabled={unavailable || creationUnresolved} onClick={() => run(() => onAction('resume'))}>Resume work</button> : null}
 
       </nav>
       {work.summary || work.nextAction ? <details className="lab-tpm-progress"><summary title={work.summary || work.nextAction}>{work.summary || work.nextAction}</summary>{work.summary && work.nextAction ? <small>Next: {work.nextAction}</small> : null}</details> : null}

@@ -43,10 +43,12 @@ export class SessionAttentionNotifications {
     const key = sessionKey(session), previous = this.observations.get(key);
     if (this.disposed || next.connection !== 'ready' || !next.activity) return;
     this.observations.set(key, next);
-    if (!previous?.activity || next.activity === previous.activity) return;
+    const visibleResult = next.background?.status === 'visible' && (next.background.id !== previous?.background?.id || previous?.background?.status !== 'visible');
+    if (!previous?.activity || next.activity === previous.activity && !visibleResult) return;
+    if (next.activity === 'idle' && next.background?.status === 'silent') return;
     if (previous.cursor?.epoch !== next.cursor?.epoch) return;
     const reminder: Reminder | undefined = next.activity === 'waiting' ? 'waiting'
-      : previous.activity === 'running' && next.activity === 'idle' ? 'idle' : undefined;
+      : (previous.activity === 'running' || visibleResult) && next.activity === 'idle' ? 'idle' : undefined;
     if (!reminder || !this.enabled() || typeof Notification === 'undefined' || Notification.permission !== 'granted') return;
     // A cursor gives all observers the same identity without inventing a native turn ID.
     const identity = JSON.stringify([this.scope, key, reminder, next.cursor]);

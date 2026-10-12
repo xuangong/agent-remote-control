@@ -1,5 +1,7 @@
+import { mergeBackgroundActivity } from '@orchardworks/agent-remote-protocol';
 import { reduceSessionState, withSessionInteractions } from '@orchardworks/agent-remote-protocol';
 import type {
+  BackgroundActivity,
   AgentInteractionRequest,
   AgentSnapshot,
   AgentStreamMessage,
@@ -50,6 +52,7 @@ export function applyAgentSnapshot(
   snapshot: AgentSnapshot | AgentUpdateMessage,
   options: SnapshotApplicationOptions = {},
 ): AgentReplicaState {
+  if (snapshot.payload.attention?.background) state = applyBackgroundOutcome(state, snapshot.payload.attention.background);
   const baseline = options.interactionBaseline ?? state.interactionRevision;
   const snapshotRequests = new Map(
     snapshot.payload.pendingInteractions.map((request) => [request.requestId, clone(request)]),
@@ -242,8 +245,9 @@ export function applyHistoryPage(state: AgentReplicaState, page: HistoryPage, op
     ...authorityState,
     timeline: {
       epoch: payload.epoch,
+      backgroundActivities: authorityState.timeline.backgroundActivities,
       initialized: true,
-      entries,
+      entries: applyBackgroundEntries(entries, authorityState.timeline.backgroundActivities),
       nextSeq,
       hasOlder: payload.direction === 'before' ? payload.hasOlder : payload.hasOlder || authorityState.timeline.hasOlder,
       pendingLive: authorityState.timeline.pendingLive
@@ -292,8 +296,33 @@ export function reduceTimelineEvent(state: AgentReplicaState, message: AgentStre
 function applyNonTimelineEvent(state: AgentReplicaState, message: AgentStreamMessage): AgentReplicaState {
   const event = message.payload.event;
   if (event.type === 'timeline') return state;
+  if (event.type === 'background_activity_updated') return applyBackgroundOutcome(state, event.background);
   if (!state.agent) return state;
   return { ...state, agent: reduceSessionState(state.agent, event, message.payload.timestamp) };
+}
+
+
+/** Preserve explicit outcomes across later ordinary turns and delayed history pages. */
+function applyBackgroundOutcome(state: AgentReplicaState, background: BackgroundActivity): AgentReplicaState {
+  const previous = state.timeline.backgroundActivities?.[background.id];
+  const merged = mergeBackgroundActivity(previous, background);
+  if (previous?.status === merged.status && previous?.summary === merged.summary) return state;
+  const outcomes = { ...state.timeline.backgroundActivities, [background.id]: merged };
+  const ids = Object.keys(outcomes);
+  if (ids.length > 2048) delete outcomes[ids[0]!];
+  return { ...state, timeline: { ...state.timeline, backgroundActivities: outcomes,
+    entries: applyBackgroundEntries(state.timeline.entries, outcomes) } };
+}
+
+function applyBackgroundEntries(entries: readonly ProjectedTimelineEntry[], outcomes: AgentReplicaState['timeline']['backgroundActivities']): readonly ProjectedTimelineEntry[] {
+  if (!outcomes) return entries;
+  return entries.map(entry => {
+    const background = entry.item.background;
+    const outcome = background && outcomes[background.id];
+    if (!background || !outcome) return entry;
+    const merged = mergeBackgroundActivity(background, outcome);
+    return merged === background ? entry : { ...entry, item: { ...entry.item, background: clone(merged) } };
+  });
 }
 
 function bufferLive(state: AgentReplicaState, message: TimelineStreamMessage): AgentReplicaState {
@@ -333,7 +362,7 @@ function drainPending(state: AgentReplicaState): TimelineReduction {
 
 function appendLive(state: AgentReplicaState, message: TimelineStreamMessage): AgentReplicaState {
   const payload = message.payload;
-  const projected = liveEntry(message);
+  const projected = applyBackgroundEntries([liveEntry(message)], state.timeline.backgroundActivities)[0]!;
   return {
     ...state,
     timeline: {
@@ -373,7 +402,7 @@ function coalesceEntry(
       && sameContext(previous, incoming)
       && previous.item.messageId === incomingItem.messageId
     ) {
-      const updated = { ...previous, item: { ...previous.item, text: previous.item.text + incomingItem.text }, collapsed: [...previous.collapsed] };
+      const updated = { ...previous, item: { ...previous.item, text: previous.item.text + incomingItem.text, ...(incomingItem.background ? { background: mergeBackgroundActivity(previous.item.background, incomingItem.background) } : {}) }, collapsed: [...previous.collapsed] };
       extendEntry(updated, incoming, 'assistant_merge');
       next[next.length - 1] = updated;
       return next;
@@ -381,7 +410,7 @@ function coalesceEntry(
   } else if (incomingItem.type === 'reasoning') {
     const previous = next.at(-1);
     if (previous?.item.type === 'reasoning' && sameContext(previous, incoming)) {
-      const updated = { ...previous, item: { ...previous.item, text: previous.item.text + incomingItem.text }, collapsed: [...previous.collapsed] };
+      const updated = { ...previous, item: { ...previous.item, text: previous.item.text + incomingItem.text, ...(incomingItem.background ? { background: mergeBackgroundActivity(previous.item.background, incomingItem.background) } : {}) }, collapsed: [...previous.collapsed] };
       extendEntry(updated, incoming, 'reasoning_merge');
       next[next.length - 1] = updated;
       return next;
@@ -393,7 +422,7 @@ function coalesceEntry(
       && entry.item.callId === incomingItem.callId
     ));
     if (existing) {
-      const updated = { ...existing, item: incomingItem, collapsed: [...existing.collapsed] };
+      const updated = { ...existing, item: { ...incomingItem, ...(incomingItem.background ? { background: mergeBackgroundActivity(existing.item.background, incomingItem.background) } : {}) }, collapsed: [...existing.collapsed] };
       extendEntry(updated, incoming, 'tool_lifecycle');
       next[next.indexOf(existing)] = updated;
       return sortEntries(next);
@@ -418,7 +447,7 @@ function coalesceEntry(
       }
     }
     if (existing) {
-      const updated = { ...existing, item: incomingItem, collapsed: [...existing.collapsed] };
+      const updated = { ...existing, item: { ...incomingItem, ...(incomingItem.background ? { background: mergeBackgroundActivity(existing.item.background, incomingItem.background) } : {}) }, collapsed: [...existing.collapsed] };
       extendEntry(updated, incoming);
       next[next.indexOf(existing)] = updated;
       return sortEntries(next);
@@ -440,7 +469,7 @@ function extendEntry(
 }
 
 function sameContext(left: ProjectedTimelineEntry, right: ProjectedTimelineEntry): boolean {
-  return left.providerId === right.providerId && left.turnId === right.turnId;
+  return left.providerId === right.providerId && left.turnId === right.turnId && left.item.background?.id === right.item.background?.id;
 }
 
 function mergeAuthoritative(

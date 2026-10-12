@@ -517,3 +517,29 @@ it('maintains waiting state through native restore and returns to the latest aut
   expect(state.agent?.status).toBe('running');
   expect(state.agent?.pendingInteractions).toEqual([]);
 });
+
+it('retains settled background results while coalescing live deltas and replaying history', () => {
+  let live = applyAgentSnapshot(createReplicaState(), snapshot());
+  live = applyHistoryPage(live, { ...page('tail', []), payload: { ...page('tail', []).payload, window: { minSeq: 0, maxSeq: 0, nextSeq: 1 } } }).state;
+  const background = { id: 'review', kind: 'review' as const, status: 'silent' as const };
+  for (const message of [stream(1, { type: 'assistant_message', text: 'Quiet ', background }),
+    stream(2, { type: 'assistant_message', text: 'late delta', background: { ...background, status: 'pending' } }),
+    stream(3, { type: 'assistant_message', text: 'Human reply' })]) live = reduceTimelineEvent(live, JSON.parse(JSON.stringify(message))).state;
+  expect(live.timeline.entries).toHaveLength(2);
+  expect(live.timeline.entries[0]?.item).toMatchObject({ text: 'Quiet late delta', background: { status: 'silent' } });
+  const restored = applyHistoryPage(applyAgentSnapshot(createReplicaState(), snapshot()), page('tail', live.timeline.entries)).state;
+  expect(restored.timeline.entries).toEqual(live.timeline.entries);
+});
+
+it('retains lifecycle-only failure through later snapshots, pagination, and delayed quiet rows', () => {
+  let state = applyHistoryPage(applyAgentSnapshot(createReplicaState(), snapshot()), page('tail', [])).state;
+  const background = { id: 'review', kind: 'review' as const, status: 'silent' as const };
+  state = applyHistoryPage(state, page('tail', [entry(1, 1, { type: 'assistant_message', text: 'Quiet reply', background })])).state;
+  state = reduceTimelineEvent(state, { protocolVersion: '1.7.0', type: 'agent_stream', payload: { agentId: 'agent-one', timestamp: '2026-10-12T00:00:00Z',
+    event: { type: 'background_activity_updated', providerId: 'fixture', background: { ...background, status: 'failed' } } } }).state;
+  state = applyAgentSnapshot(state, snapshot());
+  expect(state.timeline.entries[0]?.item.background?.status).toBe('failed');
+  const stale = page('tail', [entry(1, 1, { type: 'assistant_message', text: 'Quiet reply', background })]);
+  state = applyHistoryPage(state, stale).state;
+  expect(state.timeline.entries[0]?.item.background?.status).toBe('failed');
+});

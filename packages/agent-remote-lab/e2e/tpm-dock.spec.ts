@@ -122,3 +122,33 @@ test('Dock follows viewport width even on touch devices and restores after narro
   await expect(composer).toContainText('Keep this draft across layout changes');
   await expect(page.locator('html')).toHaveAttribute('data-fixture-connections', connections!);
 });
+
+test('TPM delegation is explicit and quiet reviews use the ordinary session view', async ({ page }, testInfo) => {
+  await page.goto('/e2e/fixtures/tpm-dock.html');
+  await page.getByRole('button', { name: 'TPM works', exact: true }).click();
+  const list = page.getByRole('region', { name: 'TPM works', exact: true });
+  await list.locator('[data-tpm-work]').filter({ hasText: 'Search delivery' }).click();
+  await list.getByRole('button', { name: 'Close TPM works' }).click();
+  const view = page.getByRole('dialog', { name: 'TPM: Search delivery' });
+  const delegation = view.getByRole('button', { name: 'Background delegation' });
+  await expect(delegation).toHaveAttribute('aria-pressed', 'false');
+  await view.getByTestId('prompt-input').fill('Continue discussing the scope');
+  await delegation.click(); await expect(delegation).toHaveAttribute('aria-pressed', 'true');
+  await expect(view.getByTestId('prompt-input')).toContainText('Continue discussing the scope');
+  await view.getByRole('button', { name: 'Minimize TPM', exact: true }).click();
+  await page.getByRole('button', { name: 'TPM works', exact: true }).click();
+  await list.locator('[data-tpm-work]').filter({ hasText: 'Search delivery' }).click();
+  await list.getByRole('button', { name: 'Close TPM works' }).click();
+  await expect(delegation).toHaveAttribute('aria-pressed', 'true');
+  await delegation.click(); await expect(delegation).toHaveAttribute('aria-pressed', 'false');
+  await view.getByTestId('timeline').focus();
+  await view.getByTestId('timeline').press('Home');
+  const checks = view.getByRole('button', { name: /Background checks/ });
+  await expect(checks).toBeInViewport();
+  await expect(checks).toHaveAttribute('aria-expanded', 'false');
+  await expect(view.getByText('Review 1:', { exact: false })).toHaveCount(0);
+  await checks.click(); await expect(checks).toHaveAttribute('aria-expanded', 'true');
+  await expect(view.getByText('Review 1:', { exact: false })).toHaveCount(1);
+  await checks.click();
+  await page.screenshot({ path: testInfo.outputPath('tpm-delegation.png') });
+});

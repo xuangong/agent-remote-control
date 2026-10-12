@@ -1,6 +1,6 @@
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { AgentOperationRejectedError } from '@orchardworks/agent-provider-sdk';
-import { reduceSessionState, sessionOperationAvailability, updateUsageSnapshot, type SessionOperationKind } from '@orchardworks/agent-remote-protocol';
+import { mergeBackgroundActivity, reduceSessionState, sessionOperationAvailability, updateUsageSnapshot, type SessionOperationKind } from '@orchardworks/agent-remote-protocol';
 import { InputImageStore, type ImageUploadDeclaration, type ImageUploadChunk } from './resources/input-image-store.js';
 import type { MessagePart, ImageUploadReceipt } from '@orchardworks/agent-remote-protocol';
 import { createHash, randomUUID } from 'node:crypto';
@@ -105,6 +105,8 @@ export class AgentManager {
   private readonly settingChanges: SessionSettingChanges;
   private readonly listeners = new Set<AgentManagerListener>();
   private timeline: TimelineStore;
+  private attentionCursor: TimelineCursor;
+  private attentionTurnId?: string;
   private readonly state: AgentSnapshot;
   private readonly bufferedLive: ProviderObservation[] = [];
   private olderHistoryCursor: string | undefined;
@@ -139,6 +141,7 @@ export class AgentManager {
     private readonly settingIntent?: OperationLifecycle['settingIntent'],
   ) {
     this.timeline = new TimelineStore(epoch);
+    this.attentionCursor = { epoch, seq: 0 };
     this.localResourceReader = runtimeInfo.cwd
       ? createLocalFileResourceReader({ roots: [runtimeInfo.cwd] }).catch(() => undefined)
       : Promise.resolve(undefined);
@@ -324,6 +327,8 @@ export class AgentManager {
   private resetTimeline(epoch: string): boolean {
     if (epoch === this.timeline.epoch) return false;
     this.timeline = new TimelineStore(epoch);
+    this.attentionCursor = { epoch, seq: 0 };
+    delete this.state.payload.attention; this.attentionTurnId = undefined;
     this.seenProviderRecords.clear();
     this.olderHistoryCursor = undefined;
     this.historyLoading = undefined;
@@ -685,6 +690,12 @@ export class AgentManager {
   private async applyObservation(observation: ProviderObservation, historical = false): Promise<void> {
     if (this.isDuplicate(observation)) return;
     let event = observation.event;
+    if (observation.delivery === 'history' && event.type === 'background_activity_updated') {
+      this.timeline.updateBackground(event.background);
+      this.remember(observation);
+      this.emitStream(event, new Date(observation.occurredAt).toISOString(), undefined, 'history');
+      return;
+    }
     // Persisted lifecycle records describe the past, not callable interactions or current execution.
     if (observation.delivery === 'history' && event.type !== 'timeline') {
       if ((event.type === 'usage_updated' || event.type === 'turn_completed') && event.usage) {
@@ -778,7 +789,11 @@ export class AgentManager {
           });
         }).catch(() => undefined);
       });
-      if (!historical) this.emitStream(event, row.timestamp, row, observation.delivery);
+      if (!historical) {
+        if (observation.delivery === 'live') this.observeAttention(event, { epoch: row.epoch, seq: row.seq });
+        else this.attentionCursor = { epoch: row.epoch, seq: row.seq };
+        this.emitStream(event, row.timestamp, row, observation.delivery);
+      }
       return;
     }
     const timestamp = new Date(observation.occurredAt).toISOString();
@@ -834,7 +849,43 @@ export class AgentManager {
     this.applyStateEvent({ type: 'runtime_updated', provider: this.provider.providerId, runtimeInfo }, this.clock().toISOString(), false);
   }
 
+  private observeAttention(event: Extract<AgentStreamEvent, { type: 'timeline' }>, cursor: TimelineCursor): void {
+    const item = event.item;
+    this.attentionTurnId = item.background ? event.turnId : undefined;
+    const previous = this.state.payload.attention;
+    let background = item.background;
+    if (background) background = mergeBackgroundActivity(previous?.background, background);
+    const actionable = item.type === 'interaction' || item.type === 'error' || item.type === 'agent_communication'
+      || item.type === 'tool_call' && (item.status === 'failed' || item.status === 'canceled');
+    if (background && actionable) background = { ...background, status: 'failed' };
+    if (!background || background.status === 'visible' || background.status === 'failed') this.attentionCursor = cursor;
+    if (previous || background) {
+      this.state.payload.attention = { cursor: this.attentionCursor, ...(background ? { background } : {}) };
+      if (JSON.stringify(previous?.background) !== JSON.stringify(background)) {
+        this.emit({ type: 'agent_state', agentId: this.agentId, snapshot: this.snapshot(), cursor: this.timeline.cursor });
+      }
+    }
+  }
+
   private applyStateEvent(event: Exclude<AgentStreamEvent, { type: 'timeline' }>, timestamp: string, nativeObservation = true): void {
+    if (event.type === 'background_activity_updated') {
+      this.timeline.updateBackground(event.background);
+      const background = mergeBackgroundActivity(this.state.payload.attention?.background, event.background);
+      if (background.status === 'visible' || background.status === 'failed') this.attentionCursor = this.timeline.cursor;
+      this.state.payload.attention = { cursor: this.attentionCursor, background };
+      this.attentionTurnId = event.turnId;
+    }
+    const attention = this.state.payload.attention;
+    if (attention?.background && event.type === 'turn_started' && event.turnId !== this.attentionTurnId) {
+      delete attention.background; this.attentionTurnId = undefined;
+    }
+    if (attention?.background && 'turnId' in event && event.turnId === this.attentionTurnId && (event.type === 'turn_failed' || event.type === 'turn_canceled'
+      || event.type === 'turn_completed' && attention.background.status === 'pending')) {
+      attention.background = { ...attention.background, status: 'failed' };
+      this.timeline.updateBackground(attention.background);
+      attention.cursor = this.timeline.cursor;
+      this.attentionCursor = attention.cursor;
+    }
     this.nativeStateRevision += 1;
     if (event.type === 'interaction_resolved' || event.type === 'interaction_invalidated') this.claimedInteractionIds.delete(event.requestId);
     this.applyingState = true;

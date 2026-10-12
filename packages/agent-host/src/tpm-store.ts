@@ -3,6 +3,7 @@ import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { isTpmWork, nativeSessionRefKey, type TpmWork, type TpmIntent } from '@orchardworks/agent-remote-protocol';
 import { initialTpmTodo } from './tpm-role.js';
+import type { BackgroundReviewRecord } from './session-background.js';
 
 export interface TpmRecord {
   version: 1;
@@ -19,11 +20,12 @@ export interface TpmRecord {
   lastReviewAt: number;
   reviewIntentId?: string;
   reviewObservedRunning?: boolean;
+  backgroundReviews?: BackgroundReviewRecord[];
   approvedSpecification?: string;
   actions: Record<string, { fingerprint: string; revision: number }>;
 }
 
-export const isTpmIntentSettled = (intent: TpmIntent): boolean => intent.status === 'rejected' || intent.status === 'accepted' && (intent.acceptance === 'started' || intent.acceptance === 'handled');
+export const isTpmIntentSettled = (intent: TpmIntent): boolean => intent.status === 'canceled' || intent.status === 'rejected' || intent.status === 'accepted' && (intent.acceptance === 'started' || intent.acceptance === 'handled');
 
 const OUTBOX_MAX_BYTES = 512 * 1024;
 function boundOutbox(record: TpmRecord): void {
@@ -42,6 +44,8 @@ export class TpmStore {
   private records = new Map<string, TpmRecord>();
   private tail: Promise<unknown> = Promise.resolve();
   constructor(private readonly directory: string) { this.ready = this.restore(); }
+  /** Internal immutable index; updates replace the stored record, never mutate readers. */
+  backgroundReviews(id: string): readonly BackgroundReviewRecord[] { return this.records.get(id)?.backgroundReviews ?? []; }
   all(): TpmRecord[] { return structuredClone([...this.records.values()]); }
   get(id: string): TpmRecord {
     const record = this.records.get(id);
@@ -92,6 +96,11 @@ export class TpmStore {
       if (record.version !== 1 || !isTpmWork(record.work) || `${record.work.id}.json` !== name
         || typeof record.createKey !== 'string' || typeof record.requirement !== 'string' || !record.actions
         || !['prepared', 'dispatching', 'accepted', 'unknown', 'abandoned'].includes(record.creation)) throw new Error(`Invalid TPM record: ${name}`);
+      if (record.backgroundReviews && (!Array.isArray(record.backgroundReviews) || record.backgroundReviews.some(review => !review
+        || typeof review.id !== 'string' || !review.id || review.id.length > 128 || typeof review.inputHash !== 'string' || !/^[a-f0-9]{64}$/.test(review.inputHash)
+        || review.turnId !== undefined && typeof review.turnId !== 'string'
+        || review.failed !== undefined && typeof review.failed !== 'boolean'
+        || review.result !== undefined && (typeof review.result.notify !== 'boolean' || typeof review.result.summary !== 'string' || review.result.summary.length > 2048)))) throw new Error(`Invalid TPM review provenance: ${name}`);
       let uncertain = false; let migrated = record.work.documentRevision === undefined;
       if (!record.work.todo && record.work.phase !== 'completed') { record.work.todo = initialTpmTodo(); migrated = true; }
       record.work.documentRevision ??= record.work.revision;
@@ -115,6 +124,8 @@ export class TpmStore {
     record.work.creationStatus = record.creation;
     record.work.documentRevision ??= record.work.revision;
     boundOutbox(record);
+    // Retain a bounded annotation ledger; older native content remains readable without grouping.
+    if ((record.backgroundReviews?.length ?? 0) > 2048) record.backgroundReviews = record.backgroundReviews!.slice(-2048);
     if (!/^[a-zA-Z0-9_-]{1,128}$/.test(record.work.id) || !isTpmWork(record.work)) throw new Error('Invalid TPM work record.');
     const target = join(this.directory, `${record.work.id}.json`);
     const temporary = `${target}.${randomUUID()}.tmp`;

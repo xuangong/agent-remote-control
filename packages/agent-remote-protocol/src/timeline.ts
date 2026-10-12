@@ -5,12 +5,14 @@ import { type Static, Type } from '@sinclair/typebox';
 import { SafeNonNegativeInteger, SafeTimelinePosition } from './cursor.js';
 import { AgentInteractionRequest, AgentInteractionResponse, AgentToolDetail } from './interactions.js';
 import { ResourceBinding } from './resources.js';
+import { BackgroundActivity } from './background-activity.js';
 
 const NonEmptyString = Type.String({ minLength: 1 });
 const Strict = <T extends Parameters<typeof Type.Object>[0]>(properties: T) => Type.Object(
   properties,
   { additionalProperties: false },
 );
+const Item = <T extends Parameters<typeof Type.Object>[0]>(properties: T) => Strict({ ...properties, background: Type.Optional(BackgroundActivity) });
 
 export const AgentTaskItem = Strict({
   text: Type.String(),
@@ -32,33 +34,33 @@ const ToolCallBase = {
 };
 
 export const AgentToolCallTimelineItem = Type.Union([
-  Strict({ ...ToolCallBase, status: Type.Literal('running'), error: Type.Null() }),
-  Strict({ ...ToolCallBase, status: Type.Literal('completed'), error: Type.Null() }),
-  Strict({ ...ToolCallBase, status: Type.Literal('failed'), error: NonEmptyString }),
-  Strict({ ...ToolCallBase, status: Type.Literal('canceled'), error: Type.Null() }),
+  Item({ ...ToolCallBase, status: Type.Literal('running'), error: Type.Null() }),
+  Item({ ...ToolCallBase, status: Type.Literal('completed'), error: Type.Null() }),
+  Item({ ...ToolCallBase, status: Type.Literal('failed'), error: NonEmptyString }),
+  Item({ ...ToolCallBase, status: Type.Literal('canceled'), error: Type.Null() }),
 ]);
 export type AgentToolCallTimelineItem = Static<typeof AgentToolCallTimelineItem>;
 
 export const AgentTimelineItem = Type.Union([
-  Strict({
+  Item({
     type: Type.Literal('user_message'),
     content: Type.Optional(Type.Array(UserMessagePart)),
     text: Type.String(),
     messageId: Type.Optional(NonEmptyString),
     clientMessageId: Type.Optional(NonEmptyString),
   }),
-  Strict({
+  Item({
     type: Type.Literal('assistant_message'),
     text: Type.String(),
     messageId: Type.Optional(NonEmptyString),
   }),
-  Strict({ type: Type.Literal('agent_communication'), messageId: NonEmptyString, sender: NonEmptyString, recipient: NonEmptyString, text: Type.String() }),
-  Strict({ type: Type.Literal('reasoning'), text: Type.String() }),
+  Item({ type: Type.Literal('agent_communication'), messageId: NonEmptyString, sender: NonEmptyString, recipient: NonEmptyString, text: Type.String() }),
+  Item({ type: Type.Literal('reasoning'), text: Type.String() }),
   AgentToolCallTimelineItem,
-  Strict({ type: Type.Literal('todo'), items: Type.Array(AgentTaskItem) }),
-  Strict({ type: Type.Literal('interaction'), request: AgentInteractionRequest, response: AgentInteractionResponse }),
-  Strict({ type: Type.Literal('error'), message: Type.String() }),
-  Strict({
+  Item({ type: Type.Literal('todo'), items: Type.Array(AgentTaskItem) }),
+  Item({ type: Type.Literal('interaction'), request: AgentInteractionRequest, response: AgentInteractionResponse }),
+  Item({ type: Type.Literal('error'), message: Type.String() }),
+  Item({
     type: Type.Literal('compaction'),
     status: Type.Union([Type.Literal('loading'), Type.Literal('completed')]),
     trigger: Type.Optional(Type.Union([Type.Literal('auto'), Type.Literal('manual')])),

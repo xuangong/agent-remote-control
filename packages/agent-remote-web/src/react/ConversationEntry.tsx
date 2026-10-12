@@ -35,7 +35,7 @@ export const ConversationEntry = memo(function ConversationEntry({ entry, entryK
   const attachments = useMemo(() => messageResources(entry.item, entry.resources, contentOnly),
     [entry.item, entry.resources, contentOnly]);
   return <TimelineSearchReveal.Provider value={!!searchSelected}><TimelineEntry entryKey={entryKey}
-    onEdit={onEditPrompt && entry.item.type === 'user_message' && entry.item.messageId && entry.turnId ? () => onEditPrompt(entry) : undefined}
+    onEdit={onEditPrompt && !entry.item.background && entry.item.type === 'user_message' && entry.item.messageId && entry.turnId ? () => onEditPrompt(entry) : undefined}
     timestamp={entry.timestamp} sent={entry.item.type === 'user_message'} sequence={entry.seqStart}
     inspected={inspected || !!searchSelected} inspect={!contentOnly && onInspectEntry ? () => onInspectEntry(entryKey) : undefined}>
     {entry.item.type === 'error' && noticeExpanded !== undefined && noticeDetailsId !== undefined

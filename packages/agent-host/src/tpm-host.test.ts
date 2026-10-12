@@ -1,4 +1,4 @@
-import { mkdtemp, rm, realpath, writeFile } from 'node:fs/promises';
+import { mkdtemp, rm, realpath, readFile, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { once } from 'node:events';
@@ -14,6 +14,7 @@ class NativeSession implements AgentSession {
   observed = 0;
   closed = false;
   private status: AgentRuntimeInfo['status'] = 'idle';
+  private turnId = 'initial';
   private sequence = 0;
   private queued: ProviderStreamItem[] = [{ type: 'history_boundary' }];
   private wake?: () => void;
@@ -29,14 +30,16 @@ class NativeSession implements AgentSession {
     persistence: { providerId: 'codex', sessionId: this.id, opaque: '{}' } }; }
   private emit(event: AgentStreamEvent) { this.queued.push({ type: 'observation', sourceKey: `${this.id}:${++this.sequence}`, occurredAt: Date.now(), delivery: 'live', event }); this.wake?.(); }
   async sendMessage(text: string) {
-    this.sent.push(text); this.status = 'running';
-    this.emit({ type: 'turn_started', provider: 'codex', turnId: 'review' });
-    this.emit({ type: 'runtime_updated', provider: 'codex', runtimeInfo: await this.runtimeInfo(), activeTurnId: 'review' });
+    this.sent.push(text); this.status = 'running'; this.turnId = `review-${this.sent.length}`;
+    this.emit({ type: 'timeline', provider: 'codex', turnId: this.turnId, item: { type: 'user_message', text } });
+    this.emit({ type: 'turn_started', provider: 'codex', turnId: this.turnId });
+    this.emit({ type: 'runtime_updated', provider: 'codex', runtimeInfo: await this.runtimeInfo(), activeTurnId: this.turnId });
     if (this.receiptGate) await this.receiptGate;
     return { disposition: 'started' as const };
   }
+  reply(text: string) { this.emit({ type: 'timeline', provider: 'codex', turnId: this.turnId, item: { type: 'assistant_message', text } }); }
   async finish() {
-    this.status = 'idle'; this.emit({ type: 'turn_completed', provider: 'codex', turnId: 'review' });
+    this.status = 'idle'; this.emit({ type: 'turn_completed', provider: 'codex', turnId: this.turnId });
     this.emit({ type: 'runtime_updated', provider: 'codex', runtimeInfo: await this.runtimeInfo(), activeTurnId: null });
   }
   async respondToInteraction() {}
@@ -86,7 +89,7 @@ it.each([false, true])('creates a scoped TPM over the real Host uplink and keeps
     uplink: { url: broker.url, remoteKey: 'isolated-process-key' } });
   try {
     await host.ready;
-    const created = await broker.rpc('POST', '/remote/tpm/create', { providerId: 'codex', mainNativeSessionId: 'main', operationId: 'create-operation' });
+    const created = await broker.rpc('POST', '/remote/tpm/create', { providerId: 'codex', mainNativeSessionId: 'main', delegated: true, operationId: 'create-operation' });
     expect(created.status, JSON.stringify(created.body)).toBe(200); expect(created.body.tpmNativeSessionId).toBe('tpm-1');
     expect(created.body).toMatchObject({ title: expect.stringMatching(/^[A-Z][a-z]+ [A-Z][a-z]+$/), waiting: 'user' });
     await expect.poll(() => sessions.get('tpm-1')!.sent.length, { timeout: 3000 }).toBe(1);
@@ -118,7 +121,21 @@ it.each([false, true])('creates a scoped TPM over the real Host uplink and keeps
     await native.finish();
     await broker.close(); await expect.poll(() => host.state).toBe('disconnected');
     now += 1000; await expect.poll(() => native.sent.length).toBe(2);
-    expect(native.sent[1]).toContain('Heartbeat check'); expect(sessions.get('main')!.closed).toBe(false);
+    await expect.poll(async () => {
+      const work = JSON.parse(await read.execute({}));
+      const record = JSON.parse(await readFile(join(root, 'state', `${workId}.json`), 'utf8'));
+      return { accepted: work.outbox?.find((intent: { id: string }) => intent.id === work.activeReviewId)?.status,
+        turnId: record.backgroundReviews?.find((review: { id: string }) => review.id === work.activeReviewId)?.turnId };
+    }, { timeout: 3000 }).toEqual({ accepted: 'accepted', turnId: 'review-2' });
+    const reviewing = JSON.parse(await read.execute({}));
+    await update.execute({ revision: reviewing.revision, reviewId: reviewing.activeReviewId, notify: false,
+      phase: reviewing.phase, waiting: reviewing.waiting, summary: reviewing.summary, nextAction: reviewing.nextAction });
+    native.reply('No change'); await native.finish();
+    await expect.poll(async () => {
+      const record = JSON.parse(await readFile(join(root, 'state', `${workId}.json`), 'utf8'));
+      return record.backgroundReviews?.at(-1);
+    }).toMatchObject({ turnId: 'review-2', result: { notify: false } });
+    expect(native.sent[1]).toContain('Heartbeat.'); expect(sessions.get('main')!.closed).toBe(false);
     expect(sessions.get('main')!.observed).toBe(1); expect(native.observed).toBe(1);
   } finally { releaseReceipt(); await host.close(); await broker.close(); await rm(root, { recursive: true, force: true }); }
 }, 10000);

@@ -267,3 +267,15 @@ describe('compaction lifecycle projection', () => {
     ]);
   });
 });
+
+it('preserves background outcomes through text projection and separates unannotated input', () => {
+  const store = new TimelineStore('epoch');
+  const append = (text: string, status?: 'pending' | 'silent' | 'failed') => store.append({ providerId: 'fixture', sourceKey: text, occurredAt: 1,
+    turnId: 'turn', item: { type: 'assistant_message', text, ...(status ? { background: { id: 'review', kind: 'review', status } } : {}) } });
+  append('Checking ', 'pending'); append('unchanged', 'silent'); append('User answer');
+  const entries = projectTimelineRows(store.rows());
+  expect(entries).toHaveLength(2);
+  expect(entries[0]?.item).toMatchObject({ text: 'Checking unchanged', background: { status: 'silent' } });
+  append('Failed ', 'failed'); append('late silent', 'silent');
+  expect(projectTimelineRows(store.rows()).at(-1)?.item.background?.status).toBe('failed');
+});

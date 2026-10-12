@@ -23,7 +23,7 @@ const labels = new Map([main, other].map(item => [sessionKey(item), { ...item, w
 const initialWorks: TpmWork[] = [
   ['one', 'Search delivery', 'main', false], ['two', 'Connection recovery', 'main', false], ['three', 'Image viewer', 'other', false], ['archived', 'Old delivery', 'main', true],
 ].map(([id, title, mainNativeSessionId, archived], index) => ({ id: String(id), title: String(title), mainNativeSessionId: String(mainNativeSessionId), archived: !!archived,
-  tpmNativeSessionId: `native-${id}`, providerId: 'codex', revision: 1, phase: 'clarifying', waiting: 'none', paused: false,
+  tpmNativeSessionId: `native-${id}`, providerId: 'codex', revision: 1, phase: 'clarifying', waiting: 'none', paused: false, delegated: false,
   summary: 'Discuss the requirements and delivery plan.', nextAction: '', document: '# Delivery plan\n\nClarify scope, implement, and verify.', acceptance: '', evidence: [],
   createdAt: '2026-10-12', updatedAt: `2026-10-12T00:00:0${9 - index}Z`, nextCheckAt: 0 }));
 const drafts = new DraftStore('tpm-dock-fixture');
@@ -31,7 +31,7 @@ const snapshot = (id: string): AgentSnapshot => ({ protocolVersion: '1.7.0', typ
 const timeline = (id: string): HistoryPage => ({ protocolVersion: '1.7.0', type: 'timeline_page', payload: {
   agentId: id, requestId: 'history', direction: 'tail', epoch: 'epoch', reset: false, staleCursor: false, gap: false,
   window: { minSeq: 1, maxSeq: 20, nextSeq: 21 }, startCursor: { epoch: 'epoch', seq: 1 }, endCursor: { epoch: 'epoch', seq: 20 },
-  entries: Array.from({ length: 20 }, (_, index) => ({ providerId: 'recorded', seqStart: index + 1, seqEnd: index + 1, timestamp: '2026-10-12T00:00:00Z', sourceSeqRanges: [], collapsed: [], resources: [], item: { type: 'assistant_message' as const, text: `Review ${index + 1}: We can keep this session focused on one delivery while checking the main session for progress.\n\nThe acceptance criteria and next steps stay visible in this conversation.` } })),
+  entries: Array.from({ length: 20 }, (_, index) => ({ providerId: 'recorded', seqStart: index + 1, seqEnd: index + 1, timestamp: '2026-10-12T00:00:00Z', sourceSeqRanges: [], collapsed: [], resources: [], item: { ...(index < 4 ? { background: { id: 'fixture-review', kind: 'review' as const, status: 'silent' as const } } : {}), type: 'assistant_message' as const, text: `Review ${index + 1}: We can keep this session focused on one delivery while checking the main session for progress.\n\nThe acceptance criteria and next steps stay visible in this conversation.` } })),
   hasOlder: false, hasNewer: false, error: null } });
 let connections = 0;
 const transport: RemoteAgentTransport = {
@@ -56,7 +56,7 @@ function Fixture() {
   const service = useMemo<TpmService>(() => ({ tpmList: async () => ({ supported: true, supportedProviders: ['codex'], works: records.current }),
     tpmWork: async (_host, id) => records.current.find(work => work.id === id)!, tpmCreate: async () => records.current[0]!,
     tpmAction: async (_host, id, input) => {
-      records.current = records.current.map(work => work.id === id ? { ...work, revision: work.revision + 1, archived: input.action === 'archive', paused: input.action === 'archive' } : work);
+      records.current = records.current.map(work => work.id === id ? { ...work, revision: work.revision + 1, ...(input.action === 'set_delegated' ? { delegated: input.delegated } : { archived: input.action === 'archive', paused: input.action === 'archive' }) } : work);
       return records.current.find(work => work.id === id)!;
     } }), []);
   const tpm = useTpmWork(service, [{ id: 'host', name: 'Mac mini', online: true }], true, async target => ({ ...target, agentId: target.nativeSessionId }));

@@ -39,7 +39,7 @@ function MessageBubble({ item, messageGroup = 'single', resourceContext }: Messa
     data-message-group={messageGroup}
   >
     <header className="agent-item-header">
-      <TimelineTitle className="agent-item-kicker">{user ? 'You' : 'Assistant'}</TimelineTitle>
+      <TimelineTitle className="agent-item-kicker">{user ? item.background ? 'Background check' : 'You' : 'Assistant'}</TimelineTitle>
     </header>
     {item.type === 'user_message' && item.content?.some(part => part.type === 'image')
       ? <div className="agent-message-ordered-content">{item.content.map((part, index) => part.type === 'text'

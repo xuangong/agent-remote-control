@@ -71,3 +71,17 @@ it('notifies pending attention once, then completion after work resumes, without
   expect(instances).toHaveLength(2);
   notifier.dispose();
 });
+
+it('does not notify quiet reviews but delivers a later visible assessment and pending input', async () => {
+  const { notifier, instances } = setup();
+  const background = { id: 'review', kind: 'review' as const, status: 'silent' as const };
+  await notifier.observe(session, { ...value('running', 1), background });
+  await notifier.observe(session, { ...value('idle', 1), background });
+  expect(instances).toHaveLength(0);
+  await notifier.observe(session, { ...value('idle', 3), background: { ...background, status: 'visible' } });
+  expect(instances).toHaveLength(1);
+  await notifier.observe(session, { ...value('running', 4), background });
+  await notifier.observe(session, { ...value('waiting', 4), background });
+  expect(instances).toHaveLength(2);
+  notifier.dispose();
+});

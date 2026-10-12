@@ -9,3 +9,5 @@ export * from './commands.js';
 export * from './image-input.js';
 export * from './session-tools.js';
 export * from './native-evidence.js';
+
+export type { BackgroundActivity } from './background-activity.js';

@@ -6,7 +6,7 @@ import type {
   TimelineDirection,
   TimelineSeqRange,
 } from '@orchardworks/agent-remote-protocol';
-import { PROTOCOL_VERSION } from '@orchardworks/agent-remote-protocol';
+import { PROTOCOL_VERSION, mergeBackgroundActivity } from '@orchardworks/agent-remote-protocol';
 
 import { TimelineStore, type CanonicalTimelineRow } from './timeline-store.js';
 
@@ -33,9 +33,11 @@ export function projectTimelineRows(rows: readonly CanonicalTimelineRow[]): Proj
     }
 
     const entry = entries[match] as ProjectedTimelineEntry;
+    const previousBackground = entry.item.background;
     entry.seqEnd = row.seq;
     entry.sourceSeqRanges = includeSequence(entry.sourceSeqRanges, row.seq);
     includeResources(entry.resources, row.resources);
+    if (row.item.background) entry.item.background = structuredClone(mergeBackgroundActivity(entry.item.background, row.item.background));
     if (row.item.type === 'assistant_message' && entry.item.type === 'assistant_message') {
       entry.item.text += row.item.text;
       includeCollapse(entry.collapsed, 'assistant_merge');
@@ -44,11 +46,13 @@ export function projectTimelineRows(rows: readonly CanonicalTimelineRow[]): Proj
       includeCollapse(entry.collapsed, 'reasoning_merge');
     } else if (row.item.type === 'tool_call') {
       entry.item = structuredClone(row.item);
+      if (row.item.background) entry.item.background = mergeBackgroundActivity(previousBackground, row.item.background);
       includeCollapse(entry.collapsed, 'tool_lifecycle');
     } else if (row.item.type === 'compaction' && entry.item.type === 'compaction') {
       entry.item = { ...entry.item, ...row.item };
     } else if (row.item.type === 'todo') {
       entry.item = structuredClone(row.item);
+      if (row.item.background) entry.item.background = mergeBackgroundActivity(previousBackground, row.item.background);
     }
   }
   return entries;
@@ -198,7 +202,7 @@ function findProjection(entries: readonly ProjectedTimelineEntry[], row: Canonic
 }
 
 function sameContext(entry: ProjectedTimelineEntry, row: CanonicalTimelineRow): boolean {
-  return entry.providerId === row.providerId && entry.turnId === row.turnId;
+  return entry.providerId === row.providerId && entry.turnId === row.turnId && entry.item.background?.id === row.item.background?.id;
 }
 
 function includeSequence(ranges: readonly TimelineSeqRange[], sequence: number): TimelineSeqRange[] {

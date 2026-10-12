@@ -670,7 +670,8 @@ export function createAgentHostRuntime(options: AgentHostRuntimeOptions): AgentH
           }) : open())
           : source.openChild ? await source.openChild(parentNativeSessionId, nativeSessionId)
           : (() => { throw new HostRequestError(400, 'child_attachment_unavailable', 'This provider does not support native child attachment.'); })();
-        const session = successionBoundary ? successionBoundary.wrap(nativeRef(binding), nativeSession) : nativeSession;
+        const annotated = tpm ? await tpm.annotateSession(providerId, nativeSessionId, nativeSession) : nativeSession;
+        const session = successionBoundary ? successionBoundary.wrap(nativeRef(binding), annotated) : annotated;
         if (closed) {
           await session.dispose().catch(() => undefined);
           throw new HostRequestError(503, 'host_closed', 'Agent Host is closed.');

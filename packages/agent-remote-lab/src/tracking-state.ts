@@ -2,7 +2,7 @@ import { clearCacheOnClose, conversationLocalStorage } from './conversation-stor
 import type { AgentStatus, TimelineCursor } from '@orchardworks/agent-remote-protocol';
 import type { RemoteSessionStatus } from '@orchardworks/agent-remote-web';
 import { validSessionStar, starKey, type SessionStar } from '@orchardworks/agent-remote-hosted/session-star-schema';
-export interface SessionObservation { connection: RemoteSessionStatus; activity?: AgentStatus; cursor?: TimelineCursor; changed?: boolean; attention?: 'pending' | 'idle'; error?: string; agentId?: string }
+export interface SessionObservation { connection: RemoteSessionStatus; activity?: AgentStatus; background?: import('@orchardworks/agent-remote-protocol').BackgroundActivity; cursor?: TimelineCursor; changed?: boolean; attention?: 'pending' | 'idle'; error?: string; agentId?: string }
 export const MAX_TRACKED_SESSIONS = 8;
 export function nextObservation(previous: SessionObservation | undefined, next: SessionObservation, readCursor?: TimelineCursor): SessionObservation {
   const activity = next.connection === 'ready' ? next.activity : undefined;
@@ -16,12 +16,15 @@ export function nextObservation(previous: SessionObservation | undefined, next: 
   // The visible replica can receive content before its coalesced activity notification.
   const alreadyRead = !!cursor && readCursor?.epoch === cursor.epoch && readCursor.seq >= cursor.seq;
   let attention = previous?.attention;
-  if (runtimeChanged) {
+  const visibleResult = next.background?.status === 'visible' && (next.background.id !== previous?.background?.id || previous?.background?.status !== 'visible');
+  if (visibleResult && activity === 'idle') attention = 'idle';
+  else if (runtimeChanged) {
     attention = activity === 'waiting' ? 'pending' : previous.activity === 'running' && activity === 'idle' ? 'idle' : undefined;
   } else if (next.connection === 'ready' && activity !== undefined) {
     // Retain an unread reminder across reconnect only while that state still applies.
     if ((attention === 'pending' && activity !== 'waiting') || (attention === 'idle' && activity !== 'idle')) attention = undefined;
   }
+  if (next.background?.status === 'silent' && activity === 'idle') attention = undefined;
   return { ...next, activity, cursor, attention, changed: !replaced && !alreadyRead && (previous?.changed === true || progressed) };
 }
 export interface LocalTrackedSession extends SessionStar {

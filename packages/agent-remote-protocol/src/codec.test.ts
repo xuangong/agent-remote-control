@@ -714,3 +714,11 @@ it.each(['pending', 'failed', 'timed_out'] as const)('round trips shared %s sett
   expect(decodeAgentSnapshot(JSON.stringify({ ...message, protocolVersion: '1.6.0' })).status).toBe('rejected');
   expect(decodeAgentSnapshot(JSON.stringify({ ...message, payload: { ...message.payload, settingChanges: [{ ...change, category: 'invented' }] } })).status).toBe('rejected');
 });
+
+it('roundtrips explicit background outcomes independently of native timeline rows', () => {
+  const message: AgentStreamMessage = { protocolVersion: '1.7.0', type: 'agent_stream', payload: {
+    agentId: 'agent', timestamp: '2026-10-12T00:00:00Z', event: { type: 'background_activity_updated', providerId: 'provider',
+      background: { id: 'review', kind: 'review', status: 'failed' } },
+  } };
+  expect(decodeAgentStreamMessage(JSON.stringify(message))).toEqual({ status: 'ok', value: message });
+});

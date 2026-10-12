@@ -25,6 +25,7 @@ export type TimelineStreamMessage = Extract<AgentStreamMessage, {
 }>;
 
 export interface TimelineReplicaState {
+  readonly backgroundActivities?: Readonly<Record<string, import('@orchardworks/agent-remote-protocol').BackgroundActivity>>;
   readonly epoch: string | null;
   readonly initialized: boolean;
   readonly entries: readonly ProjectedTimelineEntry[];

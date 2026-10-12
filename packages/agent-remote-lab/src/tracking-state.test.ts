@@ -129,3 +129,14 @@ it('rejects stale same-tab Track work and refuses to overwrite damaged Track dat
   expect(patchTrackedSessions(scope, [], trackingEditRevision(scope), () => true).status).toBe('failed');
   expect(localStorage.getItem(`agent-remote-tracking:${scope}`)).toBe('{damaged');
 });
+
+it('suppresses quiet review completion while preserving input requests and visible findings', () => {
+  const cursor = { epoch: 'one', seq: 1 };
+  const background = { id: 'review', kind: 'review' as const, status: 'silent' as const };
+  const running = nextObservation(undefined, { connection: 'ready', activity: 'running', cursor, background });
+  const quiet = nextObservation(running, { connection: 'ready', activity: 'idle', cursor, background });
+  expect(quiet).toMatchObject({ changed: false }); expect(quiet.attention).toBeUndefined();
+  expect(nextObservation(running, { connection: 'ready', activity: 'waiting', cursor, background }).attention).toBe('pending');
+  const visible = nextObservation(quiet, { connection: 'ready', activity: 'idle', cursor: { ...cursor, seq: 3 }, background: { ...background, status: 'visible' } });
+  expect(visible).toMatchObject({ changed: true, attention: 'idle' });
+});

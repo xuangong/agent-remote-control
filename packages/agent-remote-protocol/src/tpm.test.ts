@@ -48,3 +48,11 @@ test('round trips role-bound work with a cross-provider current main and a pinne
   expect(isTpmWork({ ...work, outbox: [{ ...work.outbox[0], resolvedTarget: { ...origin, controllerId: '' } }] })).toBe(false);
   expect(isTpmWork({ ...work, outbox: [{ ...work.outbox[0], roleRevision: 0 }] })).toBe(false);
 });
+
+test('accepts only explicit boolean delegation changes and represents canceled undispatched work', () => {
+  const action = { id: 'work', revision: 1, operationId: 'delegate', action: 'set_delegated' };
+  expect(isTpmAction({ ...action, delegated: true })).toBe(true);
+  expect(isTpmAction({ ...action, delegated: false })).toBe(true);
+  expect(isTpmAction(action)).toBe(false);
+  expect(isTpmAction({ ...action, delegated: 'true' })).toBe(false);
+});

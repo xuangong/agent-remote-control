@@ -30,6 +30,7 @@
 .lab-tpm-toolbar button { min-height: 36px; padding: 6px 8px; font-size: 12px; background: transparent; border-color: transparent; }
 .lab-tpm-toolbar button[aria-pressed="true"] { background: var(--obs-surface-selected); color: var(--obs-action); }
 .lab-tpm-reopen { margin-left: auto; }
+.lab-tpm-delegation { margin-left: auto; }
 .lab-tpm-work-status .lab-tpm-main-link { display: inline-flex; align-items: center; gap: 4px; min-width: 0; max-width: 100%; min-height: 28px; margin-left: auto; padding: 4px 0; border: 0; background: transparent; color: var(--obs-text-secondary); font-size: 11px; }
 .lab-tpm-progress { padding: 8px 16px; border-bottom: 1px solid var(--obs-border); font-size: 12px; max-height: 100px; overflow: auto; }
 .lab-tpm-progress p { margin: 0 0 4px; }

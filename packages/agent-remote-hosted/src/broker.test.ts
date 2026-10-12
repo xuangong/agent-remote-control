@@ -830,3 +830,41 @@ it('forwards explicit native takeover and public ownership errors through a prev
   expect(response?.status).toBe(409);expect(await response!.json()).toMatchObject({code:'native_session_owned',nativeOwner:owner});
   expect(calls).toEqual([expect.objectContaining({takeOver:owner.generation})]);
 },10000);
+
+it('preserves a saved public binding when the Host has already opened the same native session under a new runtime identity', async () => {
+  const { broker, native } = await restoredFixture();
+  native.onMessage(data => {
+    const message = JSON.parse(data);
+    if (message.type !== 'rpc_request') return;
+    native.send(JSON.stringify({ uplinkVersion: 2, type: 'rpc_response', requestId: message.requestId, status: 200,
+      body: JSON.stringify({ agentId: 'background-runtime', nativeSessionId: 'native-session' }) }));
+  });
+  const response = await broker.handleRequest(new Request('https://relay.example/v1/remote/hosts/host/attach', {
+    method: 'POST', body: JSON.stringify({ providerId: 'codex', nativeSessionId: 'native-session' }),
+  }));
+  expect(await response!.json()).toEqual({ agentId: 'agent', nativeSessionId: 'native-session' });
+  expect(response!.status).toBe(200);
+  expect(broker.snapshot().bindings).toEqual(restoredState.bindings);
+});
+
+it.each(['native', 'public-identity', 'runtime-identity', 'connection-identity'] as const)('rejects a conflicting %s while reconciling a Host runtime binding', async conflict => {
+  const state = structuredClone(restoredState);
+  state.bindings.push({ hostId: 'host', providerId: 'codex', nativeSessionId: 'other-native', agentId: 'other-agent' });
+  const { broker, native } = await restoredFixture({ initialState: state });
+  let calls = 0;
+  native.onMessage(data => {
+    const message = JSON.parse(data);
+    if (message.type !== 'rpc_request') return;
+    const input = JSON.parse(message.body); calls++;
+    const agentId = conflict === 'public-identity' ? 'other-agent' : conflict === 'connection-identity' && calls > 1 ? 'changed-runtime' : 'background-runtime';
+    native.send(JSON.stringify({ uplinkVersion: 2, type: 'rpc_response', requestId: message.requestId, status: 200,
+      body: JSON.stringify({ agentId, nativeSessionId: conflict === 'native' ? 'wrong-native' : input.nativeSessionId }) }));
+  });
+  const attach = (id: string) => broker.handleRequest(new Request('https://relay.example/v1/remote/hosts/host/attach', {
+    method: 'POST', body: JSON.stringify({ providerId: 'codex', nativeSessionId: id }),
+  }));
+  if (conflict === 'runtime-identity' || conflict === 'connection-identity') expect((await attach('native-session'))!.status).toBe(200);
+  const response = await attach(conflict === 'runtime-identity' ? 'other-native' : 'native-session');
+  expect(response!.status).toBe(409);
+  expect(broker.snapshot().bindings).toEqual(state.bindings);
+});

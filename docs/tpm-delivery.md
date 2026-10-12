@@ -56,6 +56,8 @@ Role instructions are appended to native instructions. Existing provider permiss
 
 ## Recovery and diagnostics
 
+The Relay's public session binding is durable; a Host's observation address is process-local. TPM restoration can open a native session before a browser reconnects. When the same Host, provider and native session return a different observation address after reconnect, the Relay retains the public binding and maps that address for the current Host connection. Snapshot/history reads and stream addresses use this mapping; native IDs, content, operation IDs and cursors remain unchanged. The mapping is not persisted and is re-established on recovery. A different native session, a reused address belonging to another binding, or a changed address within one Host connection is still rejected. Browsers share the Host's existing observation rather than creating another native session.
+
 Intent is written before native dispatch. Receipts distinguish acceptance from completion, retaining native `started`, `queued`, or `handled` when supplied. A crash after dispatch and before receipt persistence becomes an unknown outcome. It is not retried automatically, even using the previous operation ID: the common operation cache remains process-local.
 
 Unknown creation can be explicitly abandoned or bound to a verified, distinct recovered native session. A session already serving as a main or another TPM cannot be rebound. Native CLI takeover pauses affected automation; the Controller never silently takes it back.

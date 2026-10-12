@@ -1,3 +1,4 @@
+import { sessionIdentityMessage } from './session-identity.js';
 import { isCreationSource, type CreationSource } from '@orchardworks/agent-remote-protocol';
 import { relationChangeKey, isRelationChangeReceipt, type RelationChangeReservation, type RelationChangeReceipt } from '@orchardworks/agent-remote-protocol';
 import type { RelationChangeReset, BrokerRelationChange } from './relation-changes.js';
@@ -41,7 +42,7 @@ type Host = {
   ready?: boolean; credentialRotation?: boolean; gatewayKeyRequested?: boolean; issueCredential?(): Promise<void>;
   id: string; installationId: string; name: string; providers: ProviderDescriptor[]; legacyDsh: boolean; generation: number; socket?: RelaySocket;
   pending: Map<string, { resolve(value: RpcResponse): void; reject(error: Error): void; timer: unknown; method: 'GET' | 'POST'; path: string; diagnostic: boolean; startedAt: number }>;
-  streams: Map<string, { socket: RelaySocket; subject?: string; authorized?(): boolean; ready: boolean; buffered: string[]; timer?: unknown }>;
+  streams: Map<string, { publicAgentId: string; runtimeAgentId: string; socket: RelaySocket; subject?: string; authorized?(): boolean; ready: boolean; buffered: string[]; timer?: unknown }>;
 };
 type Binding = { hostId: string; providerId: string; nativeSessionId: string; agentId: string; generation: number;
   creatorSubject?: string; parentNativeSessionId?: string; sourceRelation?: SourceRelation; recovery?: Promise<void> };
@@ -100,6 +101,7 @@ export function createHostBroker(options: HostBrokerOptions) {
   let pairings = structuredClone(options.initialState?.pairings ?? []);
   let revokedHosts = structuredClone(options.initialState?.revokedHosts);
   const bindings = new Map<string, Binding>();
+  const runtimeBindings = new Map<string, { generation: number; agentId: string }>();
   const activeStreamCount = (subject: string) => [...hosts.values()].reduce((sum, host) => sum + [...host.streams.values()].filter(stream => stream.subject === subject).length, 0);
   const pendingBindingSlots = new Map<string, { admissionId?: string; nativeKey?: string; creationKey?: string }>();
   const nativeBindings = new Map<string, Binding>();
@@ -761,7 +763,10 @@ export function createHostBroker(options: HostBrokerOptions) {
         const stream = host.streams.get(message.streamId);
         if (stream?.socket.readyState === RELAY_SOCKET_OPEN && stream.authorized?.() !== false) {
           if (stream.socket.bufferedAmount !== undefined && stream.socket.bufferedAmount > BROKER_MAX_FRAME_BYTES) stream.socket.close(1013, 'Slow browser connection');
-          else stream.socket.send(message.message);
+          else {
+            try { stream.socket.send(sessionIdentityMessage(message.message, stream.runtimeAgentId, stream.publicAgentId, 'server')); }
+            catch { stream.socket.close(1008, 'Invalid Remote Host session identity'); }
+          }
         }
       } else if (message.type === 'stream_close') {
         const stream = host.streams.get(message.streamId); host.streams.delete(message.streamId); if(stream)diagnostic(host,{event:'stream_closed',streamId:message.streamId,closeCode:message.code}); stream?.socket.close(message.code, message.reason);
@@ -815,6 +820,34 @@ export function createHostBroker(options: HostBrokerOptions) {
       try {await operation;} finally {issuing=undefined;}
     }
   }
+  function runtimeAgentId(host: Host, binding: Binding): string {
+    const runtime = runtimeBindings.get(binding.agentId);
+    return runtime?.generation === host.generation ? runtime.agentId : binding.agentId;
+  }
+  function assertRuntimeIdentity(host: Host, binding: Pick<Binding, 'agentId' | 'providerId' | 'nativeSessionId'>, agentId: string): void {
+    const occupied = bindings.get(agentId);
+    if (occupied && !sameBinding(occupied, host.id, binding.providerId, binding.nativeSessionId)) {
+      throw new BrokerError(409, 'session_binding_conflict', 'The Remote Host session identity belongs to another binding.');
+    }
+    for (const [publicId, runtime] of runtimeBindings) {
+      const other = bindings.get(publicId);
+      if (other?.hostId === host.id && runtime.generation === host.generation && runtime.agentId === agentId
+        && !sameBinding(other, host.id, binding.providerId, binding.nativeSessionId)) {
+        throw new BrokerError(409, 'session_binding_conflict', 'The Remote Host runtime identity belongs to another session.');
+      }
+    }
+    const previous = runtimeBindings.get(binding.agentId);
+    if (previous?.generation === host.generation && previous.agentId !== agentId) {
+      throw new BrokerError(409, 'session_binding_conflict', 'The Remote Host changed session identity within one connection.');
+    }
+  }
+  async function sessionRead(host: Host, binding: Binding, path: string): Promise<RpcResponse> {
+    const agentId = runtimeAgentId(host, binding);
+    const result = await rpc(host, 'GET', path.replace(/^\/v1\/sessions\/[^/]+\//, `/v1/sessions/${encodeURIComponent(agentId)}/`), agentId);
+    if (result.status >= 300) return result;
+    try { return { ...result, body: sessionIdentityMessage(result.body, agentId, binding.agentId, 'server') }; }
+    catch { throw new BrokerError(502, 'invalid_host_response', 'The Remote Host returned an invalid session response.'); }
+  }
   async function recoverBinding(host: Host, binding: Binding): Promise<void> {
     assertHostCurrent(host);
     if (bindings.get(binding.agentId) !== binding) throw new BrokerError(404, 'session_unavailable', 'The session binding was revoked.');
@@ -840,14 +873,23 @@ export function createHostBroker(options: HostBrokerOptions) {
           throw new BrokerError(result.status, failure.code, failure.error, false, result.requestId, failure.nativeOwner);
         }
         if (host.generation !== generation) throw new BrokerError(503, 'host_reconnected', 'The Remote Host changed while the session was reattaching.');
+        let agentId = binding.agentId;
         if (!host.legacyDsh) {
           let returned: Record<string, unknown>;
           try { returned = JSON.parse(result.body); } catch { throw new BrokerError(502, 'invalid_host_response', 'The Remote Host returned invalid session identity.'); }
-          if (returned.agentId !== binding.agentId || returned.nativeSessionId !== binding.nativeSessionId) {
+          if (returned.nativeSessionId !== binding.nativeSessionId) {
             throw new BrokerError(409, 'session_binding_conflict', 'The Remote Host returned a different binding during recovery.');
           }
+          agentId = requiredHostIdentity(returned.agentId, 'agentId');
         }
-        binding.generation = generation;
+        await commit(() => {
+          assertHostCurrent(host, generation);
+          if (bindings.get(binding.agentId) !== binding) throw new BrokerError(404, 'session_unavailable', 'The session binding was revoked.');
+          assertRuntimeIdentity(host, binding, agentId);
+          runtimeBindings.set(binding.agentId, { generation, agentId });
+          binding.generation = generation;
+          return { value: undefined, unchanged: true, publish() {} };
+        });
       })();
       void binding.recovery.finally(() => { binding.recovery = undefined; }).catch(() => undefined);
     }
@@ -993,7 +1035,7 @@ export function createHostBroker(options: HostBrokerOptions) {
           throw new BrokerError(409, 'native_identity_conflict', 'The Remote Host returned a different native session identity.');
         }
         const actualNativeSessionId = host.legacyDsh ? nativeSessionId : requiredHostIdentity(returned.nativeSessionId, 'nativeSessionId');
-        const agentId = host.legacyDsh ? proposedAgentId : requiredHostIdentity(returned.agentId, 'agentId');
+        const returnedAgentId = host.legacyDsh ? proposedAgentId : requiredHostIdentity(returned.agentId, 'agentId');
         if (recoveredReaderId && actualNativeSessionId !== recoveredReaderId) throw new BrokerError(409, 'native_identity_conflict', 'The recovered session attachment returned a different native identity.');
         if (attaching && actualNativeSessionId !== nativeSessionId) throw new BrokerError(409, 'native_identity_conflict', 'The Remote Host returned a different native session identity.');
         if (body.conversationKind && actualNativeSessionId === body.sourceNativeSessionId) throw new BrokerError(409, 'native_identity_conflict', 'The new conversation cannot be its own source.');
@@ -1001,10 +1043,10 @@ export function createHostBroker(options: HostBrokerOptions) {
         return commit(draft => {
           if (source) assertAssociationCreationOpen(source);
           if (hosts.get(host.id) !== host || host.generation !== generation) throw new BrokerError(503, 'host_reconnected', 'The Remote Host changed while the session operation was completing.');
-          const byAgent = bindings.get(agentId); const byNative = nativeBindings.get(nativeKey);
-          if ((byAgent && !sameBinding(byAgent, host.id, providerId, actualNativeSessionId)) || (byNative && byNative.agentId !== agentId)) {
-            throw new BrokerError(409, 'session_binding_conflict', 'The Remote Host session identity conflicts with an existing binding.');
-          }
+          const byNative = nativeBindings.get(nativeKey);
+          const agentId = byNative?.agentId ?? returnedAgentId;
+          const byAgent = bindings.get(agentId);
+          assertRuntimeIdentity(host, { agentId, providerId, nativeSessionId: actualNativeSessionId }, returnedAgentId);
           if (!byAgent && !byNative && bindings.size >= 4096) throw new BrokerError(429, 'capacity_exceeded', 'The local session binding registry is full.');
           const binding = byAgent ?? byNative ?? { hostId: host.id, providerId, nativeSessionId: actualNativeSessionId, agentId,
             generation: host.generation, ...(creatorSubject ? { creatorSubject } : {}), ...(parentNativeSessionId ? { parentNativeSessionId } : {}),
@@ -1043,13 +1085,16 @@ export function createHostBroker(options: HostBrokerOptions) {
           const unchanged = isDeepStrictEqual(draft, snapshot());
           if (unchanged) {
             binding.generation = generation;
+            runtimeBindings.set(agentId, { generation, agentId: returnedAgentId });
             attached.set(nativeKey, Promise.resolve(binding));
           }
           return { value: binding, ...(unchanged ? { unchanged: true as const } : {}), publish() {
+            assertHostCurrent(host, generation);
             if (draft.associations) associations = draft.associations;
             if (creation) completedCreations.set(key, creation);
             if (nextSharing) sharing = nextSharing;
             binding.generation = host.generation;
+            runtimeBindings.set(agentId, { generation, agentId: returnedAgentId });
             bindings.set(agentId, binding); nativeBindings.set(nativeKey, binding); pendingBindingSlots.delete(slot);
             attached.set(nativeKey, Promise.resolve(binding));
           } };
@@ -1145,7 +1190,7 @@ export function createHostBroker(options: HostBrokerOptions) {
         const parent = nativeBindings.get(JSON.stringify([host.id, providerId, parentId]));
         if (parent && sessionAllowed(parent, subject)) {
           await recoverBinding(host, parent);
-          const result = await rpc(host, 'GET', `/v1/sessions/${encodeURIComponent(parent.agentId)}/snapshot`, parent.agentId);
+          const result = await sessionRead(host, parent, `/v1/sessions/${encodeURIComponent(parent.agentId)}/snapshot`);
           const data = JSON.parse(result.body);
           const children: unknown = data?.payload?.runtimeInfo?.childSessions;
           if (result.status === 200 && Array.isArray(children) && children.some(child => child?.nativeSessionId === nativeSessionId)) {
@@ -1524,7 +1569,7 @@ export function createHostBroker(options: HostBrokerOptions) {
           sharing = new HostSharing(draft.sharing, () => {});
           for (const [key, credential] of keys) if (credential.installationId === host.installationId) keys.delete(key);
           for (const [id, binding] of bindings) if (binding.hostId === host.id) {
-            bindings.delete(id); const key = JSON.stringify([host.id, binding.providerId, binding.nativeSessionId]);
+            bindings.delete(id); runtimeBindings.delete(id); const key = JSON.stringify([host.id, binding.providerId, binding.nativeSessionId]);
             nativeBindings.delete(key); attached.delete(key);
           }
           for (const [key, value] of completedCreations) if (!bindings.has(value.agentId)) { completedCreations.delete(key); creations.delete(key); }
@@ -1591,7 +1636,7 @@ export function createHostBroker(options: HostBrokerOptions) {
     if (binding && request.method === 'GET') {
       if (!sessionAllowed(binding, subject)) throw new SharingError(403, 'session_forbidden', 'Session access is unavailable.');
       const host = requireHost(binding.hostId); await recoverBinding(host, binding);
-      const result = await rpc(host, 'GET', url.pathname + url.search, binding.agentId);
+      const result = await sessionRead(host, binding, url.pathname + url.search);
       if (!sessionAllowed(binding, subject)) throw new SharingError(403, 'session_forbidden', 'Session access is unavailable.');
       return rawJson(result);
     }
@@ -1625,7 +1670,7 @@ export function createHostBroker(options: HostBrokerOptions) {
       const expiry = () => sessionAllowed(binding, principal(context)) ? context.connectionExpiresAt?.() : 0;
       expire(client, expiry);
       if (client.readyState !== RELAY_SOCKET_OPEN) return;
-      const streamId = randomUUID(); const stream: Host['streams'] extends Map<string, infer Value> ? Value : never = { socket: client, subject: principal(context), authorized: () => { const end = expiry(); return end === undefined || end > now(); }, ready: false, buffered: [] };
+      const streamId = randomUUID(); const stream: Host['streams'] extends Map<string, infer Value> ? Value : never = { publicAgentId: binding.agentId, runtimeAgentId: runtimeAgentId(host, binding), socket: client, subject: principal(context), authorized: () => { const end = expiry(); return end === undefined || end > now(); }, ready: false, buffered: [] };
       host.streams.set(streamId, stream);
       diagnostic(host,{event:'stream_opening',streamId,agentId:binding.agentId});
       const opening = setTimeout(() => { diagnostic(host,{event:'stream_open_timeout',streamId}); client.close(1013, 'Remote stream opening timed out'); }, options.rpcTimeoutMs ?? 30_000);
@@ -1657,12 +1702,15 @@ export function createHostBroker(options: HostBrokerOptions) {
         }
         const expiresAt = expiry();
         if (expiresAt !== undefined && expiresAt <= now()) return client.close(1008, 'Credential expired');
+        let outgoing: string;
+        try { outgoing = sessionIdentityMessage(raw.toString(), stream.publicAgentId, stream.runtimeAgentId, 'client'); }
+        catch { return client.close(1008, 'Invalid session target'); }
         if (!stream.ready) {
           if (stream.buffered.length >= 32 || stream.buffered.reduce((sum, value) => sum + Buffer.byteLength(value), 0) + Buffer.byteLength(raw.toString()) > 1024 * 1024) return client.close(1013, 'Remote stream is not ready');
-          stream.buffered.push(raw.toString()); return;
+          stream.buffered.push(outgoing); return;
         }
         clearTimeout(opening);
-        try { send(host, { uplinkVersion: 2, type: 'stream_message', streamId, message: raw.toString() }); } catch { client.close(1012, 'Remote Host disconnected'); }
+        try { send(host, { uplinkVersion: 2, type: 'stream_message', streamId, message: outgoing }); } catch { client.close(1012, 'Remote Host disconnected'); }
       });
       client.onClose(() => {
         clearTimeout(opening);
@@ -1670,7 +1718,7 @@ export function createHostBroker(options: HostBrokerOptions) {
         diagnostic(host,{event:'stream_closed',streamId});
         try { send(host, { uplinkVersion: 2, type: 'stream_close', streamId, code: 1000, reason: 'Browser disconnected' }); } catch { /* The host may already be offline. */ }
       });
-      try { send(host, { uplinkVersion: 2, type: 'stream_open', streamId, sessionId: binding.agentId }); }
+      try { send(host, { uplinkVersion: 2, type: 'stream_open', streamId, sessionId: stream.runtimeAgentId }); }
       catch { client.close(1012, 'Remote Host disconnected'); }
     } };
   }
@@ -1887,7 +1935,7 @@ export function createHostBroker(options: HostBrokerOptions) {
       for (const host of hosts.values()) if (host.socket) disconnected(host, host.socket, 'relay_closed', 1001);
       for (const client of clients) client.close(1001, 'Broker closed');
       clients.clear();
-      keys.clear(); hosts.clear(); bindings.clear(); nativeBindings.clear(); attached.clear(); creations.clear();
+      keys.clear(); hosts.clear(); bindings.clear(); runtimeBindings.clear(); nativeBindings.clear(); attached.clear(); creations.clear();
     },
   };
 }

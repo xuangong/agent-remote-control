@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState, type RefObject } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState, type RefObject, type ReactNode } from 'react';
 import type { SessionTodoDecision } from '@orchardworks/agent-remote-protocol';
 import type { SessionTodoPanelProps } from '@orchardworks/agent-remote-web/react';
 import type { AgentReplica, RemoteAgentTransport } from '@orchardworks/agent-remote-web';
@@ -11,14 +11,23 @@ import { useConversationSession } from '../hooks/useConversationSession.js';
 import type { SessionViewNavigationFactory } from '../session-view-navigation.js';
 import { sessionKey } from '../session-tree.js';
 import { LabWorkbench } from './LabWorkbench.js';
+import { SessionViewPlacement } from './SessionDock.js';
 import { AskResize } from './AskResize.js';
 import { tpmPhaseLabel } from './TpmMenu.js';
 
-/** The floating shell controls presentation; the ordinary conversation owns input and recovery. */
-export function TpmWorkspace({ item, session, replica, visible, storageScope, triggerRef, transport, draftBinding, busy, attaching, error, navigation,
-  onClose, onShowList, onOpenMain, onRename, onAction, onResolve, onRetry, onConfirmTodo }: {
+export function TpmWorkspace(props: Omit<Parameters<typeof TpmWorkspaceContent>[0], 'docked' | 'dockControls'>) {
+  return <SessionViewPlacement id={`tpm:${props.item.key}`} title={props.item.work.title} visible={props.visible}>
+    {({ docked, controls }) => <TpmWorkspaceContent {...props} docked={docked} dockControls={controls} />}
+  </SessionViewPlacement>;
+}
+
+/** The shell controls presentation; the ordinary conversation owns input and recovery. */
+function TpmWorkspaceContent({ item, session, replica, visible, storageScope, triggerRef, transport, draftBinding, busy, attaching, error, navigation,
+  docked, dockControls, layer, initialOffset, onFocus, onClose, onShowList, onOpenMain, onRename, onAction, onResolve, onRetry, onConfirmTodo }: {
   item: TpmItem; session?: OpenedSession; replica?: AgentReplica; visible: boolean; storageScope: string; triggerRef: RefObject<HTMLButtonElement>;
   transport: RemoteAgentTransport; draftBinding: DraftBinding; busy?: boolean; attaching?: boolean; error?: string; navigation?: SessionViewNavigationFactory;
+  docked: boolean; dockControls: ReactNode;
+  layer?: number; initialOffset?: number; onFocus?(): void;
   onRename?(title: string): Promise<unknown>;
   onClose(): void; onShowList(): void; onOpenMain(): void; onAction(action: TpmAction): Promise<unknown>;
   onConfirmTodo?(decision: SessionTodoDecision): Promise<unknown>;
@@ -51,7 +60,7 @@ export function TpmWorkspace({ item, session, replica, visible, storageScope, tr
   }
   const [actionError, setActionError] = useState<string>();
   const [verifiedSessionId, setVerifiedSessionId] = useState('');
-  useAskPosition(panel, triggerRef, JSON.stringify([storageScope, 'tpm', item.key]));
+  useAskPosition(panel, triggerRef, JSON.stringify([storageScope, 'tpm', item.key]), { initialOffset, docked, belowAnchor: true });
   useLayoutEffect(() => {
     const element = panel.current;
     if (!visible || !element) return;
@@ -81,10 +90,10 @@ export function TpmWorkspace({ item, session, replica, visible, storageScope, tr
   const unavailable = !item.online || busy;
   const creationUnresolved = work.creationStatus === 'unknown' || work.creationStatus === 'abandoned';
   const archiveLabel = work.archived ? 'Restore TPM session' : work.phase === 'completed' ? 'Archive TPM session' : 'Stop and archive TPM session';
-  return <div className="lab-ask-viewport lab-tpm-viewport" hidden={!visible}>
-    <section ref={panel} className="lab-ask-window lab-tpm-window" role="dialog" aria-label={`TPM: ${work.title}`} aria-modal="false" tabIndex={-1}>
+  return <div className="lab-ask-viewport lab-tpm-viewport" style={{ zIndex: layer }} hidden={!visible}>
+    <section ref={panel} className="lab-ask-window lab-tpm-window" role="dialog" aria-label={`TPM: ${work.title}`} aria-modal="false" tabIndex={-1} onPointerDownCapture={onFocus} onFocusCapture={onFocus}>
       <header className="lab-ask-heading lab-tpm-heading"><div><span className="lab-tpm-eyebrow">TPM · {item.hostName}</span>{onRename ? <button ref={titleButton} type="button" className="lab-tpm-title-button" aria-label="Rename TPM session" title={work.title} disabled={!!unavailable || savingTitle} onClick={() => { setTitleDraft(work.title); setTitleError(undefined); setEditingTitle(true); }}><strong>{work.title}</strong><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" aria-hidden="true"><path d="m16 3 5 5-12 12-6 1 1-6ZM14 5l5 5" /></svg></button> : <strong title={work.title}>{work.title}</strong>}</div>
-        <div className="lab-ask-controls"><button type="button" disabled={!!unavailable} aria-label={archiveLabel} title={archiveLabel} onClick={() => run(async () => {
+        <div className="lab-ask-controls">{dockControls}<button type="button" disabled={!!unavailable} aria-label={archiveLabel} title={archiveLabel} onClick={() => run(async () => {
           await onAction(work.archived ? 'unarchive' : 'archive');
           if (!work.archived) onShowList();
         })}><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M4 8v12h16V8M3 3h18v5H3z" /><path d={work.archived ? 'M12 17v-6m-3 3 3-3 3 3' : 'M9 12h6'} /></svg></button><button type="button" aria-label="Back to TPM works" title="Back to works" onClick={onShowList}>Works</button><button type="button" aria-label="Minimize TPM" title="Minimize TPM" onClick={onClose}>×</button></div>

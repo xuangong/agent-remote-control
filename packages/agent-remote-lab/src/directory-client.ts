@@ -58,10 +58,10 @@ export class SessionDirectoryClient {
   rename(providerId: string, nativeSessionId: string, title: string, operationId: string): Promise<{ title: string }> {
     return this.request('session/rename', { providerId, nativeSessionId, title, operationId }, AbortSignal.timeout(35000));
   }
-  list(providerId: string, cursor?: string): Promise<SessionCatalogPage> {
+  list(providerId: string, cursor?: string, signal?: AbortSignal): Promise<SessionCatalogPage> {
     const query = new URLSearchParams({ providerId, limit: '30' });
     if (cursor) query.set('cursor', cursor);
-    return this.request(`catalog?${query}`);
+    return this.request(`catalog?${query}`, undefined, signal);
   }
   revision(providerId: string): Promise<{ revision: string }> { return this.request(`catalog/revision?${new URLSearchParams({ providerId })}`); }
   workspaces(providerId: string): Promise<{ workspaces: SessionWorkspace[] }> { return this.request(`workspaces?${new URLSearchParams({ providerId })}`); }

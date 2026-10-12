@@ -1,8 +1,9 @@
 import { act, useState } from 'react';
-import { afterEach, expect, it } from 'vitest';
+import { afterEach, expect, it, vi } from 'vitest';
 import type { TpmWork } from '@orchardworks/agent-remote-protocol';
 import { render } from '../test/setup.js';
 import { useTpmWork, type TpmService } from './useTpmWork.js';
+import type { SessionEntry } from '../session-tree.js';
 import type { TpmHost } from './useTpmWork.js';
 
 afterEach(() => { sessionStorage.clear(); });
@@ -324,4 +325,32 @@ it('removes cached access when opening full work details is rejected by the Host
   expect(state.works).toEqual([]);
   expect(state.sessions).toEqual({});
   expect(attachments).toBe(0);
+});
+
+it('keeps multiple TPM windows open, focuses without reattaching, and minimizes each independently', async () => {
+  const records = [work(), { ...work(), id: 'second', tpmNativeSessionId: 'tpm-second' }];
+  const attach = vi.fn(async (value: SessionEntry) => ({ ...value, agentId: value.nativeSessionId }));
+  const service: TpmService = { tpmList: async () => ({ supported: true, works: records }),
+    tpmWork: async (_host, id) => records.find(item => item.id === id)!, tpmCreate: async () => records[0]!, tpmAction: async () => records[0]! };
+  let state!: ReturnType<typeof useTpmWork>;
+  function Harness() { state = useTpmWork(service, [{ id: 'one', name: 'One', online: true }], true, attach); return null; }
+  await render(<Harness />);
+  const [first, second] = state.works.map(item => item.key);
+  await act(async () => state.open(first!));
+  await act(async () => state.open(second!));
+  expect(state.windows).toEqual([first, second]);
+  expect(state.selected).toBe(second);
+  await act(async () => state.focus(first!));
+  expect(state.windows).toEqual([second, first]);
+  expect(state.selected).toBe(first);
+  expect(attach).toHaveBeenCalledTimes(2);
+  await act(async () => state.close(first));
+  expect(state.windows).toEqual([second]);
+  expect(state.selected).toBe(second);
+  expect(state.sessions[first!]).toBeDefined();
+  await act(async () => state.open(first!));
+  expect(attach).toHaveBeenCalledTimes(2);
+  await act(async () => state.close());
+  expect(state.windows).toEqual([]);
+  expect(state.expanded).toBe(false);
 });

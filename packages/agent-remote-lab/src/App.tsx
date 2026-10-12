@@ -34,6 +34,8 @@ import type { TimelineCursor } from '@orchardworks/agent-remote-protocol';
 import { TrackViewScope, useSessionAttention } from './hooks/useSessionAttention.js';
 import { TpmViewScope, useTpmVisibility } from './hooks/useTpmVisibility.js';
 import { useTpmWork, type TpmService } from './hooks/useTpmWork.js';
+import { useTpmMainSessions } from './hooks/useTpmMainSessions.js';
+import { tpmMainTarget } from './tpm-main-sessions.js';
 import { TpmMenu } from './components/TpmMenu.js';
 import { TpmWorkspace } from './components/TpmWorkspace.js';
 import { useSessionSuccession } from './hooks/useSessionSuccession.js';
@@ -99,6 +101,7 @@ import { useAskConversations } from './hooks/useAskConversations.js';
 import { ForkEntries, ForkReference } from './components/ForkReference.js';
 import { sideNavigationSource, sideNavigationTarget, sideLinkVisible, referenceForkContext, captureForkContext, forkDisplayState, ForkStore, type SessionFork } from './session-forks.js';
 import { CollapsedConversations } from './components/CollapsedConversations.js';
+import { SessionDockProvider, SessionDockRail } from './components/SessionDock.js';
 import { ConversationPane, ConversationSplit } from './components/ConversationSplit.js';
 import { expandedSideRange, sidePath, type SideSelections } from './side-tree.js';
 import { configureFork, forkActions, forkCommands, sendForkInput } from './fork-actions.js';
@@ -869,6 +872,7 @@ function AppContent({
   }, [sessionEntries]);
   const currentSession = sessionEntries.find((item) => item.agentId === activeAgentId) ?? succession.selected;
   const tpmView = useTpmVisibility();
+  const [tpmListOpen, setTpmListOpen] = useState(false);
   const tpmTriggerRef = useRef<HTMLButtonElement>(null);
   const candidateTpmService = hostClient as Partial<TpmService>;
   const tpmService = candidateTpmService.tpmList && candidateTpmService.tpmWork && candidateTpmService.tpmCreate && candidateTpmService.tpmAction ? candidateTpmService as TpmService : undefined;
@@ -880,13 +884,14 @@ function AppContent({
     return { hostId: item.hostId, providerId: item.providerId, nativeSessionId: attached.nativeSessionId ?? item.nativeSessionId, title: item.title, agentId: attached.agentId };
   }, [baseUrl]);
   const tpm = useTpmWork(tpmService, tpmHosts, accessReady && !!directory, attachTpm, tpmView.visible);
+  const tpmMainSessions = useTpmMainSessions(baseUrl, accessReady, tpmView.visible && tpmListOpen, tpm.works, [...favorites.stars, ...sessionEntries], transport);
   const tpmMainState = useRef({ scope: baseUrl, transport, hosts: remoteHosts, providers, works: tpm.works });
   tpmMainState.current = { scope: baseUrl, transport, hosts: remoteHosts, providers, works: tpm.works };
   const tpmMainRequest = useRef(0);
   async function openTpmMain(item: (typeof tpm.works)[number]): Promise<void> {
     const request = ++tpmMainRequest.current;
     const binding = item.work.mainBinding, ref = item.work.mainSessionRef;
-    const target = { hostId: item.hostId, providerId: ref?.providerId ?? item.work.providerId, nativeSessionId: ref?.nativeSessionId ?? item.work.mainNativeSessionId };
+    const target = tpmMainTarget(item);
     const current = () => accessReadyRef.current && tpmMainRequest.current === request && mountedTransport.current === transport
       && tpmMainState.current.scope === baseUrl && tpmMainState.current.transport === transport;
     try {
@@ -1577,27 +1582,28 @@ function AppContent({
       && agent.providerId === source.providerId && agent.runtimeInfo.providerId === source.providerId && agent.runtimeInfo.sessionId === source.nativeSessionId
       && !!sourceState?.timeline.initialized && !!sourceState.timeline.epoch && !!native?.synchronized && native.runtime?.state === 'connected' && !native.controlChecking && !native.recovering;
     return <SessionAsk key={associationOwner} associationOwner={associationOwner} imageRecipient={target ? succession.recipientFor(target, associationOwner) : undefined} source={source} state={sourceState} ask={ask} storageScope={baseUrl}
-      visible={activeView === 'workbench' && !supportingRailOpen && expandedKeys.has(viewKey(source))}
+      visible={activeView === 'workbench' && !supportingRailOpen && expandedKeys.has(viewKey(source))} surfaceVisible={activeView === 'workbench' && !supportingRailOpen}
       available={available} canRestore={available && (!compositionProtected || independentRestore)} synchronize={refreshRelations}
       onOpen={clean => openAsk(source, sourceState, clean)} replicaFor={replicaFor} transport={transport}
       observations={tracking.observations} navigation={viewNavigation} />;
   }
-  return <TpmViewScope.Provider value={tpmView.execute}><TrackViewScope.Provider value={userScoped ? attention.executeTrack : undefined}><ConversationConnectionScope.Provider value={connections}><VscodeTunnelScope service={vscodeTunnelClient} host={previewHost} polling={compactLayout ? contextOpen : desktopContextVisible}><PreviewScope client={previewClient} host={previewHost} polling={compactLayout ? contextOpen : desktopContextVisible}><RecoveryScope.Provider value={readingPositions}><main ref={shellRef} style={sidebar.style} className={`lab-shell${headerHidden ? ' lab-header-hidden' : ''}${!compactLayout && !desktopContextVisible ? ' lab-context-hidden' : ''}${state?.agent ? ' lab-has-agent' : ''}${supportingRailOpen ? ' lab-supporting-open' : ''}${inspectorOpen ? ' lab-inspector-open' : ''}`}>
+  return <SessionDockProvider key={baseUrl} enabled={!compactLayout && activeView === 'workbench'}><TpmViewScope.Provider value={tpmView.execute}><TrackViewScope.Provider value={userScoped ? attention.executeTrack : undefined}><ConversationConnectionScope.Provider value={connections}><VscodeTunnelScope service={vscodeTunnelClient} host={previewHost} polling={compactLayout ? contextOpen : desktopContextVisible}><PreviewScope client={previewClient} host={previewHost} polling={compactLayout ? contextOpen : desktopContextVisible}><RecoveryScope.Provider value={readingPositions}><main ref={shellRef} style={sidebar.style} className={`lab-shell${headerHidden ? ' lab-header-hidden' : ''}${!compactLayout && !desktopContextVisible ? ' lab-context-hidden' : ''}${state?.agent ? ' lab-has-agent' : ''}${supportingRailOpen ? ' lab-supporting-open' : ''}${inspectorOpen ? ' lab-inspector-open' : ''}`}>
     {scanOpen ? <SessionTransferDialog onOpen={openScannedSession} onClose={() => setScanOpen(false)} /> : null}
     {activated ? tracking.observers : null}
     {userScoped && attention.trackVisible ? <SessionTrackingMenu catchUp={catchUp} tracking={tracking} busy={transitioning} inert={supportingRailOpen} onOpen={item => void openTrackedSession(item)} /> : null}
-    <TpmMenu tpm={tpm} main={visibleStackRoot ?? currentSession} visible={tpmView.visible} triggerRef={tpmTriggerRef} inert={supportingRailOpen} />
-    {tpm.opened.map(key => {
+    <TpmMenu tpm={tpm} open={tpmListOpen} onOpenChange={setTpmListOpen} mainSessions={tpmMainSessions} main={visibleStackRoot ?? currentSession} visible={tpmView.visible} triggerRef={tpmTriggerRef} inert={supportingRailOpen} />
+    <div className="lab-tpm-workspaces">{tpm.opened.map((key, index) => {
       const item = tpm.works.find(item => item.key === key);
       if (!item) return null;
       return <TpmWorkspace key={key} item={item} session={tpm.sessions[key]} replica={tpm.sessions[key] ? replicaFor(tpm.sessions[key]!.agentId) : undefined}
-        visible={tpmView.visible && tpm.expanded && tpm.selected === key && !supportingRailOpen} storageScope={baseUrl} triggerRef={tpmTriggerRef}
+        visible={tpmView.visible && tpm.windows.includes(key) && (!compactLayout || tpm.selected === key) && !supportingRailOpen}
+        layer={tpm.windows.indexOf(key) + 1} initialOffset={(index % 6) * 28} onFocus={() => tpm.focus(key)} storageScope={baseUrl} triggerRef={tpmTriggerRef}
         transport={transport} draftBinding={{ store: messageDrafts, key: `tpm:${key}` }} navigation={viewNavigation}
         busy={!!tpm.busy} attaching={tpm.attaching[key] || tpm.detailsLoading[key]} error={tpm.detailErrors[key] ?? tpm.attachmentErrors[key]}
-        onClose={tpm.close} onShowList={() => { tpm.close(); tpmTriggerRef.current?.click(); }}
+        onClose={() => tpm.close(key)} onShowList={() => setTpmListOpen(true)}
         onOpenMain={() => void openTpmMain(item)}
         onRename={title => tpm.rename(key, title)} onAction={action => tpm.action(key, action)} onConfirmTodo={decision => tpm.confirmTodo(key, decision)} onResolve={(id, resolution, nativeSessionId) => tpm.resolve(key, id, resolution, nativeSessionId)} onRetry={() => void tpm.open(key)} />;
-    })}
+    })}</div>
     {compactLayout ? <nav className="lab-mobile-navigation" aria-label="Session navigation" {...backgroundInert}>
       <button ref={sessionsTriggerRef} type="button" aria-label="Open sessions" aria-haspopup="dialog" aria-expanded={contextOpen} aria-controls="lab-context" onClick={() => { openContext(true); }}>Sessions</button>
       <div ref={setMobileViewTarget} className="lab-global-view-slot" />
@@ -1766,7 +1772,7 @@ function AppContent({
         {succession.error && succession.error !== nativeTakeover?.message ? <p role="alert">{succession.error}{!nativeTakeover ? <button type="button" onClick={succession.retry}>{succession.result?.status === 'applied' ? 'Retry session' : 'Retry synchronization'}</button> : null}</p> : null}
         {promptMigrations.notice}
         {uncertainMutation ? <p className="lab-control-note" role="alert">The previous action may have completed before the connection was interrupted. Its result is unknown. It will not be replayed automatically.</p> : null}
-        <ConversationSplit compact={compactLayout} start={stackRange.start} end={stackRange.end}>
+        <SessionDockRail minimumBaseWidth={stackRange.end > stackRange.start ? 640 : 320}><ConversationSplit compact={compactLayout} start={stackRange.start} end={stackRange.end}>
         <CollapsedConversations entries={sessionEntries} sessions={stackPath.slice(0, stackRange.start)} offset={0} onExpand={revealSession} />
         <ConversationPane className="lab-primary-conversation lab-session-composition" tabIndex={-1} hidden={!primaryExpanded} onFocusCapture={() => { if (stackRoot) focusSession(stackRoot); }} onClickCapture={() => { if (stackRoot) focusSession(stackRoot); }}>
         <CommunicationNavigationContext.Provider value={primaryCommunication}><LabWorkbench {...primaryNavigation}
@@ -1839,7 +1845,7 @@ function AppContent({
           displayBinding={succession.document.slots.find(slot => slot.id === viewKey(session))!.owners.display}
           onFocus={() => focusSession(session)} onClose={() => closeSide(session)} onOpenSource={revealSession} onOpenFork={(fork) => void openFork(fork)} onFork={createFork} />)}
         <CollapsedConversations entries={sessionEntries} sessions={stackPath.slice(stackRange.end + 1)} offset={stackRange.end + 1} onExpand={revealSession} />
-        </ConversationSplit>
+        </ConversationSplit></SessionDockRail>
       </section>
       <section
         id="lab-trace"
@@ -1878,7 +1884,7 @@ function AppContent({
       </div>
       <ReplicaInspector state={state} sessionStatus={status} providerName={providerName} />
     </SupportingRail>
-  </main></RecoveryScope.Provider></PreviewScope></VscodeTunnelScope></ConversationConnectionScope.Provider></TrackViewScope.Provider></TpmViewScope.Provider>;
+  </main></RecoveryScope.Provider></PreviewScope></VscodeTunnelScope></ConversationConnectionScope.Provider></TrackViewScope.Provider></TpmViewScope.Provider></SessionDockProvider>;
 }
 
 function PreviewScope({ client, host, polling, children }: { readonly client: HttpPreviewClient; readonly host?: RemoteHost; readonly polling: boolean; readonly children: ReactNode }) {

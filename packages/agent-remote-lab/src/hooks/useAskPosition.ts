@@ -65,12 +65,13 @@ function rememberPosition(scope: string, position?: Position, size?: WindowSize)
 }
 
 /** Ask stays within its source view, retaining that view's floating geometry when space allows. */
-export function useAskPosition(panel: RefObject<HTMLElement>, anchor: RefObject<HTMLElement>, storageScope: string) {
+export function useAskPosition(panel: RefObject<HTMLElement>, anchor: RefObject<HTMLElement>, storageScope: string, { initialOffset = 0, docked = false, belowAnchor = false }: { initialOffset?: number; docked?: boolean; belowAnchor?: boolean } = {}) {
   useLayoutEffect(() => {
     const element = panel.current;
     const trigger = anchor.current;
     const viewport = element?.parentElement;
     if (!element || !trigger || !viewport) return;
+    if (docked) { viewport.dataset.presentation = 'docked'; return; }
     const savedGeometry = positionEntry(storageScope);
     const geometryCurrent = () => savedGeometry.generation === recoveryGeneration(askGeometryRecoveryScope(storageScope));
     let floating = false;
@@ -124,8 +125,8 @@ export function useAskPosition(panel: RefObject<HTMLElement>, anchor: RefObject<
       const size = sizeWindow(preferredSize ?? { width: 440, height: 560 });
       const button = trigger.getBoundingClientRect();
       positionWindow(manual ?? {
-        x: button.left + button.width / 2 - bounds.left < bounds.width / 2 ? margin : bounds.width - size.width - margin,
-        y: button.top - bounds.top,
+        x: button.left + button.width / 2 - bounds.left < bounds.width / 2 ? margin + initialOffset : bounds.width - size.width - margin - initialOffset,
+        y: (belowAnchor ? button.bottom + 8 : button.top) - bounds.top + initialOffset,
       });
     };
     const persist = () => {
@@ -211,5 +212,5 @@ export function useAskPosition(panel: RefObject<HTMLElement>, anchor: RefObject<
       element.removeEventListener('keydown', keydown);
       clearGesture();
     };
-  }, [panel, anchor, storageScope]);
+  }, [panel, anchor, storageScope, initialOffset, docked, belowAnchor]);
 }

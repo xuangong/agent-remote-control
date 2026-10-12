@@ -10,12 +10,20 @@ import { sessionKey } from '../session-tree.js';
 import { useAskPosition } from '../hooks/useAskPosition.js';
 import { askCommand } from '../fork-actions.js';
 import { LabWorkbench } from './LabWorkbench.js';
+import { SessionViewPlacement } from './SessionDock.js';
 import { AskResize } from './AskResize.js';
 import type { ImageDraftBinding, ImageDraftRecipient } from '@orchardworks/agent-remote-web/browser';
 import type { DisplayPreferenceBinding } from '../hooks/useSessionDisplayPreferences.js';
 interface AskStorageBindings { imageDraftBinding?: ImageDraftBinding; imageRecipient?: ImageDraftRecipient; displayBinding?: DisplayPreferenceBinding }
 
-export function AskConversation({ entry, replica, transport, draftBinding, onClose, onToggleEnabled, onClean, onRetry, onSendInput, onDiscardInput, triggerRef, storageScope, navigation, ...storageBindings }: AskStorageBindings & {
+export function AskConversation(props: Omit<Parameters<typeof AskConversationContent>[0], 'docked' | 'dockControls'>) {
+  return <SessionViewPlacement id={`ask:${props.storageScope}`} title="Ask" visible>
+    {({ docked, controls }) => <AskConversationContent {...props} docked={docked} dockControls={controls} />}
+  </SessionViewPlacement>;
+}
+
+function AskConversationContent({ docked, dockControls, entry, replica, transport, draftBinding, onClose, onToggleEnabled, onClean, onRetry, onSendInput, onDiscardInput, triggerRef, storageScope, navigation, ...storageBindings }: AskStorageBindings & {
+  docked: boolean; dockControls: ReactNode;
   navigation?: SessionViewNavigationFactory;
   storageScope: string; triggerRef: RefObject<HTMLButtonElement>; entry: AskEntry; replica?: AgentReplica; transport: RemoteAgentTransport;
   draftBinding: DraftBinding; onClose(): void; onToggleEnabled(): void; onClean(): void; onRetry(): void; onSendInput(id: string, send: AskInputSender): void; onDiscardInput(id: string): void;
@@ -23,7 +31,7 @@ export function AskConversation({ entry, replica, transport, draftBinding, onClo
   const panel = useRef<HTMLElement>(null);
   const returnFocus = useRef<HTMLElement | null>(null);
   const busy = !!entry.busy || !!entry.restoring;
-  useAskPosition(panel, triggerRef, storageScope);
+  useAskPosition(panel, triggerRef, storageScope, { docked });
   useEffect(() => {
     const dismiss = (event: KeyboardEvent) => {
       if (event.key !== 'Escape' || event.defaultPrevented || !(event.target instanceof Node) || !panel.current?.contains(event.target)) return;
@@ -47,7 +55,7 @@ export function AskConversation({ entry, replica, transport, draftBinding, onClo
       });
     };
   }, [triggerRef]);
-  const tools = <div className="lab-ask-controls">
+  const tools = <div className="lab-ask-controls">{dockControls}
     <button type="button" aria-label="Clean Ask" title="Start a fresh Ask conversation" disabled={busy || !!entry.inputs?.length} onClick={onClean}>Clean</button>
     <button type="button" aria-label="Minimize Ask" title="Minimize Ask" onClick={onClose}>×</button>
   </div>;

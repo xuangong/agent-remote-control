@@ -1161,7 +1161,7 @@ html[data-input-modality="pointer"] :focus { outline: none !important; }
 
 
 .lab-workbench-with-notice:not([hidden]) { display: flex; flex-direction: column; }
-.lab-workbench-with-notice > .lab-conversation-split { flex: 1; height: auto; }
+.lab-workbench-with-notice > .lab-session-dock-rail { flex: 1; height: auto; }
 .lab-session-notice { flex: 0 0 auto; margin: 8px 12px; overflow-wrap: anywhere; }
 .lab-session-notice p { margin: 0; }
 .lab-session-notice details { margin-top: 4px; }

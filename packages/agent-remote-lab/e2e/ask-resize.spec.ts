@@ -67,15 +67,15 @@ test('desktop Ask resizing keeps its position, draft and session through minimiz
   expect(resized.y).toBeCloseTo(before.y, 0);
   expect((await floating.boundingBox())!.x).toBeCloseTo(anchor.x, 0);
   expect((await floating.boundingBox())!.y).toBeCloseTo(anchor.y, 0);
-  await expect(ask.getByTestId('prompt-input')).toHaveValue('Keep this question while resizing');
+  await expect(ask.getByTestId('prompt-input')).toHaveText('Keep this question while resizing');
   expect(creations()).toBe(1);
   await ask.getByRole('button', { name: 'Minimize Ask' }).click();
   await trigger.click();
-  await expect(ask.getByTestId('prompt-input')).toHaveValue('Keep this question while resizing');
+  await expect(ask.getByTestId('prompt-input')).toHaveText('Keep this question while resizing');
   await expect.poll(() => ask.boundingBox()).toEqual(resized);
   await page.reload();
   await expect(ask).toBeVisible();
-  await expect(ask.getByTestId('prompt-input')).toHaveValue('Keep this question while resizing');
+  await expect(ask.getByTestId('prompt-input')).toHaveText('Keep this question while resizing');
   await expect.poll(() => ask.boundingBox()).toEqual(resized);
   expect(creations()).toBe(1);
   await moveAsk(page, ask, resized.x - 80, resized.y + 50);
@@ -152,7 +152,7 @@ test('a resized desktop Ask returns to mobile layout and follows the visual keyb
     window.visualViewport!.dispatchEvent(new Event('resize'));
   });
   await expect.poll(async () => { const box = (await ask.boundingBox())!; const owner = (await primary.boundingBox())!; return Math.abs(box.y + box.height - owner.y - owner.height); }).toBeLessThan(1);
-  await expect(ask.getByTestId('prompt-input')).toHaveValue('Keep the responsive draft');
+  await expect(ask.getByTestId('prompt-input')).toHaveText('Keep the responsive draft');
   await expect(ask.getByTestId('prompt-submit')).toBeInViewport();
   await page.evaluate(() => {
     delete (window.visualViewport as unknown as Record<string, unknown>).height;
@@ -163,5 +163,5 @@ test('a resized desktop Ask returns to mobile layout and follows the visual keyb
   await expect(ask.getByRole('button', { name: 'Resize Ask', exact: true })).toBeVisible();
   await expect.poll(async () => (await ask.boundingBox())!.width).toBeCloseTo(preferred.width, 0);
   await expect.poll(async () => (await ask.boundingBox())!.height).toBeCloseTo(preferred.height, 0);
-  await expect(ask.getByTestId('prompt-input')).toHaveValue('Keep the responsive draft');
+  await expect(ask.getByTestId('prompt-input')).toHaveText('Keep the responsive draft');
 });

@@ -140,7 +140,7 @@ test('selecting an opened side in discovery focuses its existing window', async 
   await selected.click();
   await expect(side).toHaveCount(1);
   await expect(side.getByTestId('prompt-input')).toBeVisible();
-  await expect(side.getByTestId('prompt-input')).toHaveValue('Keep the side draft');
+  await expect(side.getByTestId('prompt-input')).toHaveText('Keep the side draft');
   expect(attachmentRequests).toEqual([]);
 });
 

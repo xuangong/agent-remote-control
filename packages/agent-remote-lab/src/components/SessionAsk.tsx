@@ -5,14 +5,15 @@ import { isAskAttached, askParticipantKey, type useAskConversations } from '../h
 import type { SessionObservation } from '../tracking-state.js';
 import type { SessionViewNavigationFactory } from '../session-view-navigation.js';
 import { sessionKey } from '../session-tree.js';
+import { useSessionDocked } from './SessionDock.js';
 import { AskButton } from './AskButton.js';
 import { AskConversation } from './AskConversation.js';
 import type { ImageDraftRecipient } from '@orchardworks/agent-remote-web/browser';
 
 /** Each source view owns its Ask surface; the shared ledger owns native identities. */
-export function SessionAsk({ source, state, ask, visible, available, canRestore, storageScope, synchronize, onOpen, replicaFor, transport, observations, navigation, associationOwner, imageRecipient }: {
+export function SessionAsk({ source, state, ask, visible, surfaceVisible = visible, available, canRestore, storageScope, synchronize, onOpen, replicaFor, transport, observations, navigation, associationOwner, imageRecipient }: {
   source: OpenedSession; state?: AgentReplicaState; ask: ReturnType<typeof useAskConversations>;
-  visible: boolean; available: boolean; canRestore: boolean; storageScope: string;
+  surfaceVisible?: boolean; visible: boolean; available: boolean; canRestore: boolean; storageScope: string;
   synchronize(): Promise<void>; onOpen(clean?: boolean): void;
   replicaFor(id: string): AgentReplica; transport: RemoteAgentTransport;
   observations: Record<string, SessionObservation>; navigation: SessionViewNavigationFactory;
@@ -23,16 +24,18 @@ export function SessionAsk({ source, state, ask, visible, available, canRestore,
   const owner = ask.associationOwner(associationOwner);
   if (!owner) throw new Error('Ask owner unavailable.');
   const geometryScope = owner.geometryScope;
+  const docked = useSessionDocked(`ask:${geometryScope}`);
+  const shown = visible || docked && surfaceVisible;
   const entry = ask.entryFor(source, associationOwner);
   const attached = isAskAttached(entry);
   const participant = entry.record ? askParticipantKey(entry.record) : undefined;
   const enabled = ask.isEnabled(source, associationOwner);
   const expanded = ask.isOpen(source, associationOwner);
   useEffect(() => {
-    if (!visible || !canRestore || !enabled || !expanded) return;
+    if (!shown || !canRestore || !enabled || !expanded) return;
     return ask.restore(source, synchronize, associationOwner);
-  }, [storageScope, ask.store, transport, key, source.agentId, visible, canRestore, enabled, expanded, synchronize]);
-  if (!visible || !enabled) return null;
+  }, [storageScope, ask.store, transport, key, source.agentId, shown, canRestore, enabled, expanded, synchronize]);
+  if (!shown || !enabled) return null;
   return <>
     <AskButton triggerRef={trigger} storageScope={geometryScope} hidden={expanded} disabled={!available || (!state?.agent && !entry.record?.target)}
       observation={entry.record?.target ? observations[sessionKey(entry.record.target)] : undefined} onOpen={() => onOpen()} />

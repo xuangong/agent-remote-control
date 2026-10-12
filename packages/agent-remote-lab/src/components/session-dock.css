@@ -1,0 +1,18 @@
+.lab-session-placement-home, .lab-session-placement { display: contents; }
+.lab-session-dock-rail { display: flex; flex: 1; min-width: 0; min-height: 0; height: 100%; width: 100%; }
+.lab-session-dock-rail[data-docked] { overflow-x: auto; overflow-y: hidden; overscroll-behavior-x: contain; scrollbar-width: thin; }
+.lab-session-dock-base { flex: 1 1 0; min-width: 0; min-height: 0; height: 100%; position: relative; }
+.lab-session-dock-rail[data-docked] > .lab-session-dock-base { flex-grow: 0; flex-shrink: 0; }
+.lab-session-dock-pane { position: relative; flex: none; min-width: 320px; height: 100%; border-left: 1px solid var(--obs-border); background: var(--obs-surface); }
+.lab-session-dock-pane[data-dragging] { box-shadow: inset 0 0 0 2px var(--obs-action); }
+.lab-session-dock-content { position: absolute; inset: 0 4px 0 0; min-width: 0; min-height: 0; }
+.lab-session-dock-content .lab-ask-viewport { position: absolute; inset: 0; width: 100%; height: 100%; z-index: auto !important; }
+.lab-session-dock-content .lab-ask-window { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; border-radius: 0; box-shadow: none; animation: none; }
+.lab-session-dock-content .lab-ask-resize-footer { display: none; }
+.lab-ask-controls .lab-session-dock-toggle, .lab-ask-controls .lab-session-dock-move { display: inline-flex; align-items: center; justify-content: center; padding: 6px; min-width: 30px; flex: none; }
+.lab-session-dock-move { touch-action: none; cursor: grab; }
+.lab-session-dock-move:active { cursor: grabbing; }
+.lab-session-dock-resize { position: absolute; inset: 0 0 0 auto; width: 6px; z-index: 50; cursor: col-resize; touch-action: none; outline: none; }
+.lab-session-dock-resize::before { content: ''; position: absolute; inset: 0 2px; background: var(--obs-border); }
+.lab-session-dock-resize:is(:hover, :focus-visible)::before { background: var(--obs-action); }
+.lab-session-dock-resize:focus-visible { outline: 2px solid var(--obs-action); outline-offset: -2px; }

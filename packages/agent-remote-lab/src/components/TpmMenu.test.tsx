@@ -1,4 +1,4 @@
-import { act, useRef } from 'react';
+import { act, useRef, useState } from 'react';
 import { beforeEach, afterEach, expect, it, vi } from 'vitest';
 import type { TpmWork } from '@orchardworks/agent-remote-protocol';
 import { render } from '../test/setup.js';
@@ -11,13 +11,14 @@ const main = { hostId: 'host', providerId: 'codex', nativeSessionId: 'main', tit
 const work: TpmWork = { id: 'work', revision: 1, title: 'Search delivery', providerId: 'codex', mainNativeSessionId: 'main', tpmNativeSessionId: 'tpm', phase: 'validating', waiting: 'user', paused: false, summary: 'Review acceptance', nextAction: 'Choose scope', document: '# Search', acceptance: '- [ ] Query items', evidence: [], createdAt: '2026-10-09T00:00:00Z', updatedAt: '2026-10-09T00:00:00Z', nextCheckAt: 100 };
 function harness(catalog: { supported: boolean; works: TpmWork[]; supportedProviders?: string[] }) {
   const creates: unknown[] = [];
-  const service: TpmService = { tpmWork: async () => work, tpmList: async () => catalog,
+  const service: TpmService = { tpmWork: async (_host, id) => catalog.works.find(item => item.id === id) ?? work, tpmList: async () => catalog,
     tpmCreate: async (host, input) => { creates.push({ host, ...input }); return work; }, tpmAction: async () => work };
   let state!: ReturnType<typeof useTpmWork>;
   function Harness() {
     const trigger = useRef<HTMLButtonElement>(null);
+    const [open, setOpen] = useState(false);
     state = useTpmWork(service, [{ id: 'host', name: 'Host', online: true }], true, async value => ({ ...value, agentId: 'tpm-agent' }));
-    return <TpmMenu tpm={state} main={main} visible triggerRef={trigger} inert={false} />;
+    return <TpmMenu tpm={state} main={main} visible open={open} onOpenChange={setOpen} triggerRef={trigger} inert={false} />;
   }
   return { Harness, creates, state: () => state };
 }
@@ -61,8 +62,44 @@ it.each(['completed', 'validating'] as const)('keeps archived %s sessions access
   expect(archive.open).toBe(false);
   expect(archive.textContent).toContain('Archived (1)');
   expect(archive.querySelector('.lab-tpm-needs-user')).toBeNull();
-  expect(container.querySelector('.lab-tpm-panel > .lab-tpm-list')!.children.length).toBe(0);
+  expect(container.querySelectorAll('.lab-tpm-panel > .lab-tpm-group').length).toBe(0);
   await act(async () => archive.querySelector('summary')!.click());
   await act(async () => archive.querySelector<HTMLButtonElement>('[data-tpm-work]')!.click());
   expect(h.state().expanded).toBe(true);
+});
+
+it('keeps navigation open while selecting and interacting with TPM workspaces', async () => {
+  const h = harness({ supported: true, works: [work, { ...work, id: 'other', title: 'Other work', tpmNativeSessionId: 'other-tpm' }] });
+  const container = await render(<h.Harness />);
+  const trigger = container.querySelector<HTMLButtonElement>('[aria-label="TPM works"]')!;
+  await act(async () => trigger.click());
+  await act(async () => [...container.querySelectorAll<HTMLButtonElement>('[data-tpm-work]')].find(row => row.textContent?.includes('Search delivery'))!.click());
+  expect(trigger.getAttribute('aria-expanded')).toBe('true');
+  expect(container.querySelector('[data-tpm-work][aria-current="true"]')?.textContent).toContain('Search delivery');
+  const workspace = document.createElement('section');
+  workspace.className = 'lab-tpm-viewport';
+  const input = workspace.appendChild(document.createElement('textarea'));
+  document.body.append(workspace);
+  try {
+    await act(async () => input.dispatchEvent(new Event('pointerdown', { bubbles: true })));
+    expect(trigger.getAttribute('aria-expanded')).toBe('true');
+    await act(async () => [...container.querySelectorAll<HTMLButtonElement>('[data-tpm-work]')].find(row => row.textContent?.includes('Other work'))!.click());
+    expect(h.state().sessions[h.state().selected!]!.nativeSessionId).toBe('other-tpm');
+    expect(container.querySelector('[data-tpm-work][aria-current="true"]')?.textContent).toContain('Other work');
+    await act(async () => document.body.dispatchEvent(new Event('pointerdown', { bubbles: true })));
+    expect(trigger.getAttribute('aria-expanded')).toBe('false');
+  } finally { workspace.remove(); }
+});
+it('groups active and archived work under their main sessions', async () => {
+  const h = harness({ supported: true, works: [work, { ...work, id: 'second', title: 'Second work' },
+    { ...work, id: 'different', mainNativeSessionId: 'other-main', title: 'Other project' },
+    { ...work, id: 'archived', archived: true, title: 'Archived work' }] });
+  const container = await render(<h.Harness />);
+  await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="TPM works"]')!.click());
+  const groups = container.querySelectorAll('.lab-tpm-panel > .lab-tpm-group');
+  expect(groups.length).toBe(2);
+  const mainGroup = [...groups].find(group => group.querySelector('h3')!.textContent === 'Main session')!;
+  expect(mainGroup.querySelectorAll('[data-tpm-work]').length).toBe(2);
+  expect([...groups].some(group => group.querySelector('h3')!.textContent === 'other-main')).toBe(true);
+  expect(container.querySelector('.lab-tpm-archived h3')!.textContent).toBe('Main session');
 });

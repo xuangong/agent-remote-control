@@ -43,9 +43,8 @@ export function useTpmWork(service: TpmService | undefined, hosts: readonly TpmH
   const [detailsLoading, setDetailsLoading] = useState<Record<string, boolean>>({});
   const [attachmentErrors, setAttachmentErrors] = useState<Record<string, string | undefined>>({});
   const [attaching, setAttaching] = useState<Record<string, boolean>>({});
-  const [selected, setSelected] = useState<string>();
   const [opened, setOpened] = useState<string[]>([]);
-  const [expanded, setExpanded] = useState(false);
+  const [windowOrder, setWindowOrder] = useState<string[]>([]);
   const [busy, setBusy] = useState<string>();
   const [error, setError] = useState<string>();
   const [unread, setUnread] = useState<Record<string, boolean>>({});
@@ -54,6 +53,12 @@ export function useTpmWork(service: TpmService | undefined, hosts: readonly TpmH
   const sameScope = serviceScope.current === service;
   const permittedHosts = stableHosts.filter(host => host.access !== 'shared');
   const visibleCatalogs = sameScope ? Object.fromEntries(Object.entries(catalogs).filter(([id]) => permittedHosts.some(host => host.id === id))) : {};
+  const windows = sameScope ? windowOrder.filter(key => {
+    const [hostId, id] = JSON.parse(key) as [string, string];
+    return visibleCatalogs[hostId]?.works.some(work => work.id === id);
+  }) : [];
+  const selected = windows.at(-1);
+  const expanded = windows.length > 0;
   const latest = useRef({ catalogs: visibleCatalogs, sessions, details, hosts: stableHosts, attach, selected, expanded, enabled, presentationVisible, service });
   latest.current = { catalogs: visibleCatalogs, sessions, details, hosts: stableHosts, attach, selected, expanded, enabled, presentationVisible, service };
   const generation = useRef(0);
@@ -66,7 +71,7 @@ export function useTpmWork(service: TpmService | undefined, hosts: readonly TpmH
     serviceScope.current = service;
     generation.current++;
     observed.current.clear(); attachmentPromises.current.clear(); detailPromises.current.clear(); creationIntents.current.clear();
-    setCatalogs({}); setSessions({}); setAttachmentErrors({}); setAttaching({}); setSelected(undefined); setOpened([]); setExpanded(false); setUnread({}); setError(undefined);
+    setCatalogs({}); setSessions({}); setAttachmentErrors({}); setAttaching({}); setOpened([]); setWindowOrder([]); setUnread({}); setError(undefined);
     setDetails({}); setDetailErrors({}); setDetailsLoading({}); setLoading(false);
   }, [service]);
   useEffect(() => {
@@ -192,11 +197,14 @@ export function useTpmWork(service: TpmService | undefined, hosts: readonly TpmH
     detailPromises.current.set(key, promise);
     return promise;
   }, [find, authorized]);
+  const focus = useCallback((key: string) => {
+    setWindowOrder(current => !current.includes(key) || current.at(-1) === key ? current : [...current.filter(item => item !== key), key]);
+  }, []);
   const open = useCallback(async (key: string) => {
     const item = find(key);
     if (!item) return;
     const requestedService = latest.current.service;
-    setSelected(key); setExpanded(true); setOpened(current => current.includes(key) ? current : [...current, key]);
+    setWindowOrder(current => current.at(-1) === key ? current : [...current.filter(item => item !== key), key]); setOpened(current => current.includes(key) ? current : [...current, key]);
     setUnread(current => ({ ...current, [key]: false }));
     await loadDetail(key);
     if (!authorized(item.hostId, requestedService)) return;
@@ -287,7 +295,7 @@ export function useTpmWork(service: TpmService | undefined, hosts: readonly TpmH
   const action = useCallback((key: string, action: TpmAction) => mutate(key, { action }), [mutate]);
   const resolve = useCallback((key: string, intentId: string, resolution: 'accepted' | 'rejected', nativeSessionId?: string) => mutate(key, { action: 'resolve', intentId, resolution, ...(nativeSessionId ? { nativeSessionId } : {}) }), [mutate]);
   const confirmTodo = useCallback((key: string, confirmation: SessionTodoDecision) => mutate(key, { action: 'confirm_todo', confirmation }), [mutate]);
-  const close = useCallback(() => setExpanded(false), []);
-  return { works, catalogs: visibleCatalogs, loading, sessions: sameScope ? sessions : {}, attaching, attachmentErrors, detailsLoading, detailErrors, selected, opened: sameScope ? opened : [], expanded, busy, error,
+  const close = useCallback((key?: string) => setWindowOrder(current => key ? current.filter(item => item !== key) : []), []);
+  return { works, catalogs: visibleCatalogs, loading, sessions: sameScope ? sessions : {}, attaching, attachmentErrors, detailsLoading, detailErrors, selected, windows, focus, opened: sameScope ? opened : [], expanded, busy, error,
     available: !!service && enabled, canCreate, create, action, rename, resolve, confirmTodo, open, close, refresh };
 }

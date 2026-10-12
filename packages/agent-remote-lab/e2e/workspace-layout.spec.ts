@@ -1,5 +1,13 @@
-import { expect, test } from '@playwright/test';
+import { expect, test, type Locator } from '@playwright/test';
 import { showNewSession } from './session-navigation';
+
+async function navigateConversation(primary: Locator, direction: 'Back' | 'Forward'): Promise<void> {
+  const button = primary.getByRole('button', { name: direction === 'Back' ? 'Back to previous conversation' : 'Forward to next conversation', exact: true });
+  const expand = primary.getByRole('button', { name: 'Expand session actions', exact: true });
+  if (await expand.isVisible()) await expand.click();
+  if (!await button.isVisible()) await primary.getByRole('button', { name: 'More session actions', exact: true }).click();
+  await button.click();
+}
 
 test('main navigation, reload and browser history retain an independent docked Ask', async ({ page, isMobile }) => {
   test.skip(isMobile, 'Dock uses a wide workspace.');
@@ -35,6 +43,9 @@ test('main navigation, reload and browser history retain an independent docked A
   expect(second).not.toBe(first);
   await expect(dock).toBeVisible();
   await expect(ask.getByTestId('prompt-input')).toHaveAttribute('data-instance', 'retained');
+  await primary.getByRole('button', { name: 'Minimize main session area' }).click();
+  await expect(primary).toBeHidden();
+  await expect(dock).toBeVisible();
   const count = creations.length;
   let offline = true;
   await page.route('**/v1/remote/attach', async route => {
@@ -49,10 +60,13 @@ test('main navigation, reload and browser history retain an independent docked A
   await expect(dock.getByRole('separator')).toHaveAttribute('aria-valuenow', '450');
   await expect(ask.getByTestId('prompt-input')).toHaveText('Retain the dock draft');
   await expect(ask.locator('.agent-message-assistant').last()).toContainText('Remember the independent workspace');
-  await page.goBack();
+  await expect(primary).toBeHidden();
+  await page.getByRole('button', { name: /^Restore main session:/ }).click();
+  await expect(primary).toBeVisible();
+  await navigateConversation(primary, 'Back');
   await expect(page.locator('.lab-side-conversation:visible .agent-message-assistant').last()).toContainText('Keep the paired child');
   await expect(dock).toBeVisible();
-  await page.goForward();
+  await navigateConversation(primary, 'Forward');
   await expect(page).toHaveURL(url => url.searchParams.get('session') === second);
   await expect(dock).toBeVisible();
   await ask.getByRole('button', { name: 'Float Ask', exact: true }).click();
@@ -77,7 +91,7 @@ test('browser navigation restores the selected main and Side composition after r
   await page.getByTestId('session-create').click();
   const next = (await (await created).json() as { nativeSessionId: string }).nativeSessionId;
   await expect(page).toHaveURL(url => url.searchParams.get('session') === next);
-  await page.goBack();
+  await navigateConversation(primary, 'Back');
   await expect(side).toContainText('Restore this selected child');
   await expect(page).toHaveURL(url => url.searchParams.get('session') === selected);
   await page.reload();

@@ -637,3 +637,22 @@ it('keeps the View Ask toggle scoped to the selected session and restores its pr
   await act(async () => restored.container.querySelector<HTMLButtonElement>('[aria-label="View options"]')!.click());
   expect(restored.container.querySelector<HTMLInputElement>('[data-view-control="ask"]')!.checked).toBe(true);
 });
+
+
+it('keeps the focused child and browser history when using the primary navigation controls', async () => {
+  const f = await setup(false, { desktop: true, live: true });
+  const primary = f.container.querySelector<HTMLElement>('.lab-primary-conversation')!;
+  await act(async () => primary.querySelector<HTMLButtonElement>('[data-child-session-id]')!.click());
+  await waitForSession(f.container, 'parent');
+  expect(new URLSearchParams(location.search).get('session')).toBe('native-child');
+  const menu = primary.querySelector<HTMLButtonElement>('[aria-label="More session actions"]')!;
+  await act(async () => { menu.focus(); menu.click(); });
+  expect(new URLSearchParams(location.search).get('session')).toBe('native-child');
+  const back = primary.querySelector<HTMLButtonElement>('[aria-label="Back to previous conversation"]')!;
+  await act(async () => { back.focus(); back.click(); await new Promise(resolve => setTimeout(resolve, 30)); });
+  expect(new URLSearchParams(location.search).get('session')).toBe('native-parent');
+  const forward = primary.querySelector<HTMLButtonElement>('[aria-label="Forward to next conversation"]')!;
+  expect(forward.disabled).toBe(false);
+  await act(async () => { forward.focus(); forward.click(); await new Promise(resolve => setTimeout(resolve, 30)); });
+  expect(new URLSearchParams(location.search).get('session')).toBe('native-child');
+});

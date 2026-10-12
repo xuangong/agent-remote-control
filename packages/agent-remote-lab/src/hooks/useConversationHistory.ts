@@ -122,7 +122,7 @@ export function useConversationHistory(current: SessionEntry | undefined, known:
   }, []);
 
   const index = position.current;
-  const canVisit = (target: number) => !traveling.current && !restoring.current && visits.current[target] !== undefined && root !== undefined && sessionRootKey(visits.current[target]!.session, known) === root;
+  const canVisit = (target: number) => !traveling.current && !restoring.current && visits.current[target] !== undefined;
   return {
     canBack: canVisit(index - 1), canForward: canVisit(index + 1),
     back: () => { if (canVisit(position.current - 1)) window.history.back(); },

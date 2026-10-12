@@ -1,7 +1,7 @@
 import { act, StrictMode, useEffect, useState } from 'react';
 import { beforeEach, afterEach, expect, it, vi } from 'vitest';
 import { render } from '../test/setup.js';
-import { SessionDockProvider, SessionDockRail, SessionViewPlacement } from './SessionDock.js';
+import { SessionDockProvider, SessionDockRail, SessionViewPlacement, MinimizeMainSession } from './SessionDock.js';
 
 beforeEach(() => vi.stubGlobal('ResizeObserver', class { observe() {} disconnect() {} }));
 afterEach(() => vi.unstubAllGlobals());
@@ -69,7 +69,7 @@ it('restores workspace dock order and widths after reload, including late mounte
   let reload!: () => void, reveal!: () => void;
   function Workspace() {
     const [late, setLate] = useState(false); reveal = () => setLate(true);
-    return <SessionDockProvider enabled storageScope="dock-reload"><SessionDockRail>Main</SessionDockRail>
+    return <SessionDockProvider enabled storageScope="dock-reload"><SessionDockRail mainTitle="Project"><MinimizeMainSession />Main</SessionDockRail>
       {(late ? ['one', 'two'] : ['one']).map(id => <SessionViewPlacement key={id} id={id} title={id} visible>{({ controls }) => controls}</SessionViewPlacement>)}
     </SessionDockProvider>;
   }
@@ -79,7 +79,9 @@ it('restores workspace dock order and widths after reload, including late mounte
   for (const id of ['one', 'two']) await act(async () => view.querySelector<HTMLButtonElement>(`[aria-label="Dock ${id}"]`)!.click());
   await act(async () => view.querySelector('[aria-label="Move two"]')!.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowLeft', bubbles: true })));
   await act(async () => view.querySelector('[aria-label="one width"]')!.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true })));
+  await act(async () => view.querySelector<HTMLButtonElement>('[aria-label="Minimize main session area"]')!.click());
   await act(async () => reload());
+  expect(view.querySelector<HTMLElement>('.lab-session-dock-main-content')?.hidden).toBe(true);
   expect(view.querySelector<HTMLElement>('[data-dock-id="one"]')?.style.width).toBe('450px');
   await act(async () => reveal());
   expect(Number(view.querySelector<HTMLElement>('[data-dock-id="two"]')?.style.order)).toBeLessThan(Number(view.querySelector<HTMLElement>('[data-dock-id="one"]')?.style.order));
@@ -93,4 +95,54 @@ it('ignores corrupt saved placement while keeping docking available', async () =
   expect(view.querySelector('[data-dock-id]')).toBeNull();
   await act(async () => view.querySelector<HTMLButtonElement>('[aria-label="Dock one"]')!.click());
   expect(view.querySelector('[data-dock-id="one"]')).not.toBeNull();
+});
+
+
+it('minimizes the main composition without remounting it, restores on narrow screens and when the last dock closes', async () => {
+  let enable!: (value: boolean) => void, show!: (value: boolean) => void, mount!: (value: boolean) => void;
+  let mounts = 0;
+  function Main() { useEffect(() => { mounts++; }, []); return <><MinimizeMainSession /><textarea defaultValue="Main draft" /><div>Child session</div></>; }
+  function Harness() {
+    const [enabled, setEnabled] = useState(true); enable = setEnabled;
+    const [visible, setVisible] = useState(true); show = setVisible;
+    const [mounted, setMounted] = useState(true); mount = setMounted;
+    return <SessionDockProvider enabled={enabled}><SessionDockRail mainTitle="Project"><Main /></SessionDockRail>
+      {mounted ? <SessionViewPlacement id="one" title="one" visible={visible}>{({ controls }) => <section hidden={!visible}>{controls}</section>}</SessionViewPlacement> : null}
+    </SessionDockProvider>;
+  }
+  const view = await render(<Harness />);
+  const button = () => view.querySelector<HTMLButtonElement>('[aria-label="Minimize main session area"]');
+  expect(button()).toBeNull();
+  await act(async () => view.querySelector<HTMLButtonElement>('[aria-label="Dock one"]')!.click());
+  expect(button()).not.toBeNull();
+  const input = view.querySelector('textarea')!;
+  const content = () => view.querySelector<HTMLElement>('.lab-session-dock-main-content')!;
+  await act(async () => button()!.click());
+  expect(content().hidden).toBe(true);
+  expect(view.querySelector('[aria-label="Restore main session: Project"]')).not.toBeNull();
+  expect(view.querySelector('textarea')).toBe(input);
+  expect(mounts).toBe(1);
+  await act(async () => enable(false));
+  expect(content().hidden).toBe(false);
+  await act(async () => enable(true));
+  expect(content().hidden).toBe(true);
+  await act(async () => view.querySelector<HTMLButtonElement>('[aria-label="Restore main session: Project"]')!.click());
+  expect(content().hidden).toBe(false);
+  expect(input.value).toBe('Main draft');
+  await act(async () => button()!.click());
+  await act(async () => show(false));
+  expect(content().hidden).toBe(false);
+  await act(async () => show(true));
+  expect(content().hidden).toBe(false);
+  await act(async () => button()!.click());
+  await act(async () => view.querySelector<HTMLButtonElement>('[aria-label="Float one"]')!.click());
+  expect(content().hidden).toBe(false);
+  await act(async () => view.querySelector<HTMLButtonElement>('[aria-label="Dock one"]')!.click());
+  expect(content().hidden).toBe(false);
+  await act(async () => button()!.click());
+  await act(async () => mount(false));
+  expect(content().hidden).toBe(false);
+  await act(async () => mount(true));
+  expect(content().hidden).toBe(false);
+  expect(mounts).toBe(1);
 });

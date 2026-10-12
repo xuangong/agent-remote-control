@@ -78,6 +78,26 @@ test('desktop Dock preserves sessions, resizes and reorders only the appended vi
   await expect(page.locator('.lab-session-dock-base .lab-primary-conversation')).toHaveCount(1);
   await expect(page.locator('.lab-session-dock-base .lab-side-conversation')).toHaveCount(1);
   await expect(page.locator('.lab-session-dock-base [aria-label^="Move "]')).toHaveCount(0);
+  await page.locator('.lab-session-dock-rail').evaluate(element => { element.scrollLeft = 0; });
+  const main = page.locator('.lab-primary-conversation');
+  const child = page.locator('.lab-side-conversation');
+  await main.getByTestId('prompt-input').fill('Keep the main draft');
+  await main.getByTestId('prompt-input').evaluate(element => element.setAttribute('data-instance', 'original-main'));
+  const originalWidth = (await page.locator('.lab-session-dock-base').boundingBox())!.width;
+  const minimize = page.getByRole('button', { name: 'Minimize main session area' });
+  await minimize.focus(); await minimize.press('Enter');
+  await expect(main).toBeHidden(); await expect(child).toBeHidden();
+  const restore = page.getByRole('button', { name: 'Restore main session: Agent Remote Control' });
+  await expect(restore).toBeFocused();
+  expect((await page.locator('.lab-session-dock-base').boundingBox())!.width).toBe(44);
+  await expect(first).toBeVisible(); await expect(second).toBeVisible();
+  await page.screenshot({ path: testInfo.outputPath('main-minimized.png') });
+  await restore.click();
+  await expect(main).toBeVisible(); await expect(child).toBeVisible();
+  await expect(main.getByTestId('prompt-input')).toHaveAttribute('data-instance', 'original-main');
+  await expect(main.getByTestId('prompt-input')).toHaveText('Keep the main draft');
+  expect((await page.locator('.lab-session-dock-base').boundingBox())!.width).toBe(originalWidth);
+  await expect(page.getByRole('button', { name: 'Minimize main session area' })).toBeFocused();
   await page.screenshot({ path: testInfo.outputPath('dock-reordered.png') });
   await first.getByRole('button', { name: 'Float Search delivery', exact: true }).click();
   const floating = page.getByRole('dialog', { name: 'TPM: Search delivery' });
@@ -110,7 +130,9 @@ test('Dock follows viewport width even on touch devices and restores after narro
   await view.getByRole('button', { name: 'Dock Search delivery', exact: true }).click();
   await expect(page.locator('.lab-session-dock-pane')).toHaveCount(1);
   const connections = await page.locator('html').getAttribute('data-fixture-connections');
+  await page.getByRole('button', { name: 'Minimize main session area' }).click();
   await page.setViewportSize({ width: 820, height: 1180 });
+  await expect(page.locator('.lab-primary-conversation')).toBeVisible();
   await expect(page.getByRole('button', { name: /^(Dock|Float) Search delivery$/ })).toHaveCount(0);
   await expect(page.locator('.lab-session-dock-pane')).toHaveCount(0);
   await expect(view).toBeVisible();
@@ -120,6 +142,9 @@ test('Dock follows viewport width even on touch devices and restores after narro
   await expect(page.getByRole('region', { name: 'Docked Search delivery', exact: true })).toBeVisible();
   await expect(composer).toHaveAttribute('data-instance', 'before-resize');
   await expect(composer).toContainText('Keep this draft across layout changes');
+  await expect(page.locator('.lab-primary-conversation')).toBeHidden();
+  await view.getByRole('button', { name: 'Float Search delivery', exact: true }).click();
+  await expect(page.locator('.lab-primary-conversation')).toBeVisible();
   await expect(page.locator('html')).toHaveAttribute('data-fixture-connections', connections!);
 });
 

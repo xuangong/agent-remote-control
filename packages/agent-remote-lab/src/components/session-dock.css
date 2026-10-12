@@ -16,3 +16,14 @@
 .lab-session-dock-resize::before { content: ''; position: absolute; inset: 0 2px; background: var(--obs-border); }
 .lab-session-dock-resize:is(:hover, :focus-visible)::before { background: var(--obs-action); }
 .lab-session-dock-resize:focus-visible { outline: 2px solid var(--obs-action); outline-offset: -2px; }
+
+.lab-session-dock-main-content { height: 100%; min-width: 0; min-height: 0; }
+.lab-session-dock-main-content[hidden] { display: none; }
+.lab-session-dock-base[data-minimized] { position: sticky; left: 0; z-index: 51; background: var(--obs-surface); border-right: 1px solid var(--obs-border); }
+.lab-session-main-minimize { display: inline-flex; align-items: center; justify-content: center; flex: none; padding: 6px; }
+.lab-session-main-restore { display: flex; flex-direction: column; align-items: center; gap: 16px; width: 100%; height: 100%; padding: 14px 8px; border: 0; border-radius: 0; background: transparent; color: var(--obs-text-secondary); cursor: pointer; overflow: hidden; }
+.lab-session-main-restore:hover { background: var(--obs-surface-selected); color: var(--obs-text); }
+.lab-session-main-restore:focus-visible { outline: 2px solid var(--obs-action); outline-offset: -3px; }
+.lab-session-main-restore svg { flex: none; }
+.lab-session-main-label { font-size: 11px; font-weight: 600; }
+.lab-session-main-title { writing-mode: vertical-rl; font-size: 12px; max-height: calc(100% - 90px); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

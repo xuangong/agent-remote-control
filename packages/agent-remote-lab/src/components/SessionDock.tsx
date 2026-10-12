@@ -1,11 +1,11 @@
-import { createContext, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react';
+import { createContext, useCallback, useContext, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import './session-dock.css';
 import { conversationSessionStorage } from '../conversation-storage.js';
 
 const defaultWidth = 440, minimumWidth = 320, maximumWidth = 1600;
 interface DockItem { id: string; title: string; host: HTMLElement; visible: boolean; width: number }
-interface DockLayout { panes: Array<{ id: string; width: number }>; baseWidth?: number }
+interface DockLayout { panes: Array<{ id: string; width: number }>; baseWidth?: number; mainMinimized?: boolean }
 interface DockContext {
   enabled: boolean; items: DockItem[]; layout: DockLayout;
   register(item: Omit<DockItem, 'width'>): void;
@@ -16,6 +16,7 @@ interface DockContext {
   reorder(id: string, before: string): void;
   resize(id: string, width: number): void;
   resizeBase(width: number): void;
+  minimizeMain(minimized: boolean): void;
 }
 const Context = createContext<DockContext | undefined>(undefined);
 const clampWidth = (width: number) => Math.max(minimumWidth, Math.min(maximumWidth, width));
@@ -28,7 +29,7 @@ function readLayout(key?: string): DockLayout {
       if (!pane || typeof pane.id !== 'string' || !pane.id || seen.has(pane.id) || typeof pane.width !== 'number' || !Number.isFinite(pane.width)) return false;
       seen.add(pane.id); return true;
     }).slice(-20).map((pane: { id: string; width: number }) => ({ id: pane.id, width: clampWidth(pane.width) }));
-    return { panes, ...(typeof saved.baseWidth === 'number' && Number.isFinite(saved.baseWidth) ? { baseWidth: clampWidth(saved.baseWidth) } : {}) };
+    return { panes, mainMinimized: saved.mainMinimized === true, ...(typeof saved.baseWidth === 'number' && Number.isFinite(saved.baseWidth) ? { baseWidth: clampWidth(saved.baseWidth) } : {}) };
   } catch { return { panes: [] }; }
 }
 
@@ -37,6 +38,7 @@ export function SessionDockProvider({ enabled, storageScope, children }: { enabl
   const key = storageScope ? `agent-remote:recovery:${storageScope}:workspace-dock` : undefined;
   const [layout, setLayout] = useState<DockLayout>(() => readLayout(key));
   const [registered, setRegistered] = useState<Array<Omit<DockItem, 'width'>>>([]);
+  const hadVisibleDock = useRef(false);
   const register = useCallback((item: Omit<DockItem, 'width'>) => setRegistered(current => {
     const previous = current.find(value => value.id === item.id);
     return previous?.host === item.host && previous.title === item.title && previous.visible === item.visible ? current
@@ -45,7 +47,10 @@ export function SessionDockProvider({ enabled, storageScope, children }: { enabl
   const unregister = useCallback((id: string, host: HTMLElement) => setRegistered(current => current.some(item => item.id === id && item.host === host)
     ? current.filter(item => item.id !== id || item.host !== host) : current), []);
   const add = useCallback((id: string) => setLayout(current => current.panes.some(item => item.id === id) ? current : { ...current, panes: [...current.panes, { id, width: defaultWidth }] }), []);
-  const remove = useCallback((id: string) => setLayout(current => ({ ...current, panes: current.panes.filter(item => item.id !== id) })), []);
+  const remove = useCallback((id: string) => setLayout(current => {
+    const panes = current.panes.filter(item => item.id !== id);
+    return { ...current, panes, mainMinimized: panes.length > 0 && current.mainMinimized };
+  }), []);
   const move = useCallback((id: string, offset: number) => setLayout(current => {
     const index = current.panes.findIndex(item => item.id === id), next = Math.max(0, Math.min(current.panes.length - 1, index + offset));
     if (index < 0 || index === next) return current;
@@ -58,9 +63,16 @@ export function SessionDockProvider({ enabled, storageScope, children }: { enabl
   }), []);
   const resize = useCallback((id: string, width: number) => setLayout(current => ({ ...current, panes: current.panes.map(item => item.id === id ? { ...item, width: clampWidth(width) } : item) })), []);
   const resizeBase = useCallback((width: number) => setLayout(current => ({ ...current, baseWidth: clampWidth(width) })), []);
+  const minimizeMain = useCallback((mainMinimized: boolean) => setLayout(current => ({ ...current, mainMinimized })), []);
   useEffect(() => { if (key) try { conversationSessionStorage.setItem(key, JSON.stringify(layout)); } catch { /* Layout remains usable without storage. */ } }, [key, layout]);
   const items = useMemo(() => layout.panes.flatMap(pane => { const item = registered.find(item => item.id === pane.id); return item ? [{ ...item, width: pane.width }] : []; }), [layout, registered]);
-  const value = useMemo(() => ({ enabled, items, layout, register, unregister, add, remove, move, reorder, resize, resizeBase }), [enabled, items, layout, register, unregister, add, remove, move, reorder, resize, resizeBase]);
+  useEffect(() => {
+    const visible = enabled && items.some(item => item.visible);
+    // Empty registrations during reload or narrow presentation do not mean a dock was closed.
+    if (enabled && layout.mainMinimized && !visible && (hadVisibleDock.current || items.length === layout.panes.length)) minimizeMain(false);
+    hadVisibleDock.current = visible;
+  }, [enabled, items, layout.mainMinimized, layout.panes.length, minimizeMain]);
+  const value = useMemo(() => ({ enabled, items, layout, register, unregister, add, remove, move, reorder, resize, resizeBase, minimizeMain }), [enabled, items, layout, register, unregister, add, remove, move, reorder, resize, resizeBase, minimizeMain]);
   return <Context.Provider value={value}>{children}</Context.Provider>;
 }
 
@@ -103,12 +115,33 @@ export function SessionViewPlacement({ id, title, visible, children }: {
   return <><div ref={home} className="lab-session-placement-home" />{mounted ? createPortal(children({ docked, controls }), host) : null}</>;
 }
 
-export function SessionDockRail({ children, minimumBaseWidth = minimumWidth }: { children: ReactNode; minimumBaseWidth?: number }) {
+export function MinimizeMainSession() {
+  const dock = useContext(Context);
+  if (!dock?.enabled || !dock.items.some(item => item.visible)) return null;
+  return <button type="button" className="lab-session-main-minimize" aria-label="Minimize main session area" title="Minimize main session and subagents"
+    onClick={event => { event.stopPropagation(); dock.minimizeMain(true); }}>
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2" /><path d="M8 4v16m8-12-4 4 4 4" /></svg>
+  </button>;
+}
+
+export function SessionDockRail({ children, mainTitle = 'Main session', minimumBaseWidth = minimumWidth }: { children: ReactNode; mainTitle?: string; minimumBaseWidth?: number }) {
   const dock = useContext(Context);
   const rail = useRef<HTMLDivElement>(null);
   const [width, setWidth] = useState(0);
+  const content = useRef<HTMLDivElement>(null);
+  const restore = useRef<HTMLButtonElement>(null);
+  const restoreFocus = useRef(false);
+  const contentId = useId();
   const preferredBaseWidth = dock?.layout.baseWidth;
   const active = dock?.enabled ? dock.items.filter(item => item.visible) : [];
+  const minimized = active.length > 0 && dock?.layout.mainMinimized === true;
+  useLayoutEffect(() => {
+    if (minimized && content.current?.contains(document.activeElement)) restore.current?.focus({ preventScroll: true });
+    if (!minimized && restoreFocus.current) {
+      content.current?.querySelector<HTMLButtonElement>('.lab-session-main-minimize')?.focus({ preventScroll: true });
+      restoreFocus.current = false;
+    }
+  }, [minimized]);
   useLayoutEffect(() => {
     const element = rail.current;
     if (!element) return;
@@ -120,8 +153,14 @@ export function SessionDockRail({ children, minimumBaseWidth = minimumWidth }: {
   }, []);
   const baseWidth = Math.max(minimumBaseWidth, preferredBaseWidth ?? width - defaultWidth);
   return <div ref={rail} className="lab-session-dock-rail" data-docked={active.length > 0 || undefined}>
-    <div className="lab-session-dock-base" style={active.length ? { flexBasis: baseWidth } : undefined}>{children}
-      {active.length ? <DockResize title="Main conversation area" width={baseWidth} minimum={minimumBaseWidth} onResize={width => dock?.resizeBase(width)} /> : null}
+    <div className="lab-session-dock-base" data-minimized={minimized || undefined} style={active.length ? { flexBasis: minimized ? 44 : baseWidth } : undefined}>
+      <div ref={content} id={contentId} className="lab-session-dock-main-content" hidden={minimized}>{children}</div>
+      {minimized ? <button ref={restore} type="button" className="lab-session-main-restore" aria-label={`Restore main session: ${mainTitle}`} title={`Restore main session: ${mainTitle}`} aria-expanded={false} aria-controls={contentId}
+        onClick={() => { restoreFocus.current = true; dock?.minimizeMain(false); }}>
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" aria-hidden="true"><path d="m9 6 6 6-6 6" /></svg>
+        <span className="lab-session-main-label">Main</span><span className="lab-session-main-title">{mainTitle}</span>
+      </button> : null}
+      {active.length && !minimized ? <DockResize title="Main conversation area" width={baseWidth} minimum={minimumBaseWidth} onResize={width => dock?.resizeBase(width)} /> : null}
     </div>
     {[...active].sort((a, b) => a.id.localeCompare(b.id)).map(item => <DockPane key={item.id} item={item} order={active.indexOf(item) + 1} />)}
   </div>;

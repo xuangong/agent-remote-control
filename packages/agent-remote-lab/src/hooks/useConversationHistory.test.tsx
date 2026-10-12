@@ -58,7 +58,7 @@ it('visits ordinary and explicit history for the same native session independent
   expect(opened[1]).toEqual(['parent', 'history', true]);
 });
 
-it('drops the forward branch after a new visit and bounds controls to the current native family', async () => {
+it('drops the forward branch after a new visit and navigates across native families', async () => {
   const f = await setup();
   await f.click('Child');
   await f.click('Sibling');
@@ -67,7 +67,12 @@ it('drops the forward branch after a new visit and bounds controls to the curren
   await f.click('Parent');
   expect([...f.container.querySelectorAll('button')].find(button => button.textContent === 'Forward')!.disabled).toBe(true);
   await f.click('Other root');
-  expect([...f.container.querySelectorAll('button')].find(button => button.textContent === 'Back')!.disabled).toBe(true);
+  expect([...f.container.querySelectorAll('button')].find(button => button.textContent === 'Back')!.disabled).toBe(false);
+  await f.click('Reload');
+  await f.click('Back');
+  expect(f.container.querySelector('output')!.textContent).toBe('parent');
+  await f.click('Forward');
+  expect(f.container.querySelector('output')!.textContent).toBe('other');
 });
 
 it('restores the browser position after failed attachment so the next traversal remains usable', async () => {

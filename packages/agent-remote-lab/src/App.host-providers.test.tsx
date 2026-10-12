@@ -1,12 +1,15 @@
 import { act } from 'react';
 import { afterEach, expect, it, vi } from 'vitest';
 import type { HostProvider } from './components/HostPairing.js';
-import { App } from './App.js';
+import { App, type LabTransport } from './App.js';
+import { PROTOCOL_VERSION } from '@orchardworks/agent-remote-protocol';
+import { SessionDirectoryClient } from './directory-client.js';
+import { replicaState } from './test/fixtures.js';
 import { render } from './test/setup.js';
 
 afterEach(() => { vi.unstubAllGlobals(); window.localStorage.clear(); });
 
-async function setup(localProviders: 'ready' | 'empty' | 'error' = 'ready', discovered = false) {
+async function setup(localProviders: 'ready' | 'empty' | 'error' = 'ready', discovered = false, liveSessions = false) {
   let online = true;
   let deskProviders: HostProvider[] = [{ providerId: 'dsh', displayName: 'DeepSeek Harness' }, { providerId: 'codex', displayName: 'Codex CLI' }];
   const requests: Array<{ path: string; body: Record<string, unknown> }> = [];
@@ -30,15 +33,42 @@ async function setup(localProviders: 'ready' | 'empty' | 'error' = 'ready', disc
       { id: 'laptop', name: 'Laptop DSH', providerId: 'dsh', online: true },
     ] });
     if (url.pathname.endsWith('/workspaces')) return Response.json({ workspaces: [{ id: url.pathname.includes('/desk/') ? 'desk-workspace' : 'other-workspace', name: 'Project', path: '/project' }] });
-    if (url.pathname.endsWith('/catalog')) return Response.json({ items: discovered ? [{ providerId: 'codex', nativeSessionId: 'native-codex', title: 'Existing Codex', createdAt: '2026-01-01T00:00:00Z', updatedAt: '2026-01-01T00:00:00Z', state: 'idle' }] : [], hasMore: false, revision: '1' });
-    if (url.pathname.endsWith('/attach')) return Response.json({ agentId: 'remote-codex-agent', nativeSessionId: 'native-codex' });
+    if (url.pathname.endsWith('/catalog')) return Response.json({ items: discovered ? [{ providerId: 'codex', nativeSessionId: liveSessions ? url.pathname.includes('/studio/') ? 'native-studio' : 'native-desk' : 'native-codex', title: 'Existing Codex', createdAt: '2026-01-01T00:00:00Z', updatedAt: '2026-01-01T00:00:00Z', state: 'idle' }] : [], hasMore: false, revision: '1' });
+    if (url.pathname.endsWith('/attach')) {
+      const nativeSessionId = liveSessions ? JSON.parse(String(init?.body)).nativeSessionId as string : 'native-codex';
+      return Response.json({ agentId: liveSessions ? nativeSessionId.replace('native-', '') : 'remote-codex-agent', nativeSessionId });
+    }
     if (url.pathname.endsWith('/create')) {
       requests.push({ path: url.pathname, body: JSON.parse(String(init?.body)) });
       return Response.json({ code: 'invalid_request', error: 'Choose a workspace' }, { status: 400 });
     }
     throw new Error(`Unexpected request: ${url}`);
   });
-  const container = await render(<App baseUrl="http://localhost/" />);
+  const snapshot = (agentId: string) => ({ ...replicaState.agent!, id: agentId, providerId: 'codex',
+    persistence: { providerId: 'codex', sessionId: `native-${agentId}`, opaque: `native-${agentId}` },
+    runtimeInfo: { providerId: 'codex', sessionId: `native-${agentId}`, status: 'idle' as const } });
+  const transport: LabTransport | undefined = liveSessions ? {
+    listProviders: async () => [], createAgent: async () => { throw new Error('Not used'); }, resumeAgent: async () => { throw new Error('Not used'); },
+    fetchSnapshot: async agentId => ({ protocolVersion: PROTOCOL_VERSION, type: 'agent_snapshot', payload: snapshot(agentId) }),
+    fetchTimeline: async agentId => ({ protocolVersion: PROTOCOL_VERSION, type: 'timeline_page', payload: {
+      requestId: 'page', agentId, epoch: 'epoch', direction: 'tail', reset: false, staleCursor: false, gap: false,
+      window: { minSeq: 1, maxSeq: 0, nextSeq: 1 }, startCursor: null, endCursor: null, entries: [], hasOlder: false, hasNewer: false, error: null,
+    } }),
+    onDiagnostic: () => () => {}, onProtocolMessage: () => () => {},
+    connect: (agentId, listener) => {
+      queueMicrotask(() => {
+        listener.onOpen();
+        listener.onMessage({ protocolVersion: PROTOCOL_VERSION, type: 'negotiated', sessionControl: true });
+        listener.onMessage({ protocolVersion: PROTOCOL_VERSION, type: 'session_control', payload: { agentId, revision: 'control', access: 'control', available: false, token: 'token' } });
+        listener.onMessage({ protocolVersion: PROTOCOL_VERSION, type: 'agent_snapshot', payload: snapshot(agentId) });
+      });
+      return { close() {}, send(message) {
+        if (message.type === 'session_control_request') queueMicrotask(() => listener.onMessage({ protocolVersion: PROTOCOL_VERSION, type: 'session_control', payload: { agentId, requestId: message.payload.requestId, revision: 'control', access: 'control', available: false, token: 'token' } }));
+        if (message.type === 'timeline_subscription') queueMicrotask(() => listener.onMessage({ protocolVersion: PROTOCOL_VERSION, type: 'timeline_subscribed', payload: { requestId: message.payload.requestId, agentIds: [agentId] } }));
+      } };
+    },
+  } : undefined;
+  const container = await render(<App baseUrl="http://localhost/" transport={transport} directory={liveSessions ? new SessionDirectoryClient('http://localhost/') : undefined} />);
   const provider = () => container.querySelector<HTMLSelectElement>('#provider-select')!;
   const create = () => container.querySelector<HTMLButtonElement>('[data-testid="session-create"]')!;
   const browse = () => container.querySelector<HTMLSelectElement>('[aria-label="Browse provider"]')!;
@@ -203,4 +233,28 @@ it('reconciles discovered Providers without switching Hosts or retaining a disab
   await f.refresh();
   expect(f.browse().value).toBe('["desk","codex"]');
   expect(f.create().disabled).toBe(false);
+});
+
+it('lets conversation history leave an offline Host for a visited session on another Host', async () => {
+  const f = await setup('ready', true, true);
+  const openExisting = async (host: string) => {
+    await f.selectHost(host);
+    await f.selectProvider('codex');
+    await act(async () => [...f.container.querySelectorAll<HTMLButtonElement>('.lab-session-row')].find(button => button.textContent?.includes('Existing Codex'))!.click());
+    await vi.waitFor(async () => {
+      await act(async () => { await new Promise(resolve => setTimeout(resolve, 20)); });
+      expect(new URLSearchParams(location.search).get('host')).toBe(host);
+    });
+  };
+  await openExisting('studio');
+  await openExisting('desk');
+  expect(new URLSearchParams(location.search).get('host')).toBe('desk');
+  f.disconnect();
+  await f.refresh();
+  expect(f.container.querySelector('[data-testid="connection-summary"]')?.textContent).toContain('Host offline');
+  const back = f.container.querySelector<HTMLButtonElement>('[aria-label="Back to previous conversation"]')!;
+  expect(back.disabled).toBe(false);
+  await act(async () => { back.click(); await new Promise(resolve => setTimeout(resolve, 30)); });
+  expect(new URLSearchParams(location.search).get('host')).toBe('studio');
+  expect(f.container.querySelector('[data-testid="connection-summary"]')?.textContent).toContain('Studio Host');
 });

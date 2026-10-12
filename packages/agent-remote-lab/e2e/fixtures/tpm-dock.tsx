@@ -2,7 +2,7 @@ import { StrictMode, useEffect, useMemo, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import type { TpmWork, AgentSnapshot, HistoryPage } from '@orchardworks/agent-remote-protocol';
 import type { RemoteAgentTransport } from '@orchardworks/agent-remote-web';
-import { SessionDockProvider, SessionDockRail } from '../../src/components/SessionDock';
+import { MinimizeMainSession, SessionDockProvider, SessionDockRail } from '../../src/components/SessionDock';
 import { ConversationPane, ConversationSplit } from '../../src/components/ConversationSplit';
 import { SessionWorkbench } from '../../src/components/SessionWorkbench';
 import { AskConversation } from '../../src/components/AskConversation';
@@ -73,8 +73,8 @@ function Fixture() {
         onFocus={() => tpm.focus(key)} draftBinding={{ store: drafts, key }} onClose={() => tpm.close(key)} onShowList={() => setListOpen(true)}
         onOpenMain={() => {}} onAction={action => tpm.action(key, action)} onResolve={async () => {}} onRetry={() => { void tpm.open(key); }} />;
     })}</div>
-    <SessionDockRail minimumBaseWidth={compact ? 320 : 640}><ConversationSplit compact={compact} start={0} end={compact ? 0 : 1}>
-      <ConversationPane className="lab-primary-conversation lab-session-composition"><SessionWorkbench state={replicaState} sessionStatus="ready" conversationPath={<strong>Main agent</strong>} actions={{ sendMessage: async () => {} }} />
+    <SessionDockRail mainTitle={main.title} minimumBaseWidth={compact ? 320 : 640}><ConversationSplit compact={compact} start={0} end={compact ? 0 : 1}>
+      <ConversationPane className="lab-primary-conversation lab-session-composition"><SessionWorkbench state={replicaState} sessionStatus="ready" conversationPath={<strong>Main agent</strong>} sessionManager={<MinimizeMainSession />} actions={{ sendMessage: async () => {} }} />
         {askOpen ? <AskConversation entry={{ source: { ...main, agentId: 'main' } }} storageScope="fixture-ask" triggerRef={askTrigger} transport={transport} draftBinding={{ store: drafts, key: 'ask' }}
           onClose={() => setAskOpen(false)} onToggleEnabled={() => {}} onClean={() => {}} onRetry={() => {}} onSendInput={() => {}} onDiscardInput={() => {}} /> : null}
       </ConversationPane>

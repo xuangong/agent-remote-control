@@ -146,3 +146,25 @@ it('minimizes the main composition without remounting it, restores on narrow scr
   expect(content().hidden).toBe(false);
   expect(mounts).toBe(1);
 });
+
+it('moves an expanded session family as one dock without changing another dock or remounting it', async () => {
+  let expand!: () => void;
+  function Family() {
+    const [width, setWidth] = useState(0); expand = () => setWidth(440);
+    return <SessionViewPlacement id="family" title="Parent" visible dockRequest="open" additionalWidth={width}>
+      {({ controls }) => <section>{controls}<input defaultValue="Parent draft" />{width ? <textarea defaultValue="Child draft" /> : null}</section>}
+    </SessionViewPlacement>;
+  }
+  const view = await render(<SessionDockProvider enabled><SessionDockRail>Main</SessionDockRail><Family />
+    <SessionViewPlacement id="other" title="Other" visible dockRequest="open">{({ controls }) => <section>{controls}<input defaultValue="Other draft" /></section>}</SessionViewPlacement>
+  </SessionDockProvider>);
+  const parent = view.querySelector('[data-dock-id="family"] input');
+  await act(async () => expand());
+  const family = view.querySelector<HTMLElement>('[data-dock-id="family"]')!;
+  expect(family.style.width).toBe('880px');
+  const child = family.querySelector('textarea');
+  await act(async () => family.querySelector('[aria-label="Move Parent"]')!.dispatchEvent(new KeyboardEvent('keydown', {key:'ArrowRight',bubbles:true})));
+  expect(family.style.order).toBe('2');expect(family.querySelector('input')).toBe(parent);expect(family.querySelector('textarea')).toBe(child);
+  await act(async () => family.querySelector<HTMLButtonElement>('[aria-label="Float Parent"]')!.click());
+  expect(view.querySelectorAll('[data-dock-id]')).toHaveLength(1);expect(child?.isConnected).toBe(true);
+});

@@ -1,35 +1,26 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { RemoteTeamClient, type RemoteAgentTransport } from '@orchardworks/agent-remote-web/headless';
-import type { Team, TeamAction, TeamMember, TeamSource } from '@orchardworks/agent-remote-protocol';
+import { useEffect, useId, useMemo, useRef, useState, type ReactNode } from 'react';
+import { RemoteTeamClient } from '@orchardworks/agent-remote-web/headless';
+import type { Team, TeamAction, TeamSource } from '@orchardworks/agent-remote-protocol';
 import { workspaceFetch } from '../workspace-access.js';
 import { useTrackingPosition } from '../hooks/useTrackingPosition.js';
-import { conversationSessionStorage } from '../conversation-storage.js';
-import type { DraftBinding } from '../draft-store.js';
-import type { SessionViewNavigationFactory } from '../session-view-navigation.js';
-import { TeamSessionFamily } from './TeamSessionFamily.js';
-import { sessionKey } from '../session-tree.js';
 import './team.css';
 
 interface Host { teamManagement?: true; id: string; name: string; online: boolean; providers?: Array<{providerId:string;displayName:string}> }
 interface Props {
-  baseUrl: string; enabled: boolean; visible?: boolean; compact: boolean; hosts: Host[]; source?: TeamSource;
-  transport: RemoteAgentTransport; draftStore: DraftBinding['store']; navigation?: SessionViewNavigationFactory;
-  mount: HTMLElement | null; onModeChange(active: boolean): void; viewTarget?(node: HTMLDivElement | null): void;
+  baseUrl: string; enabled: boolean; visible?: boolean; hosts: Host[]; source?: TeamSource;
+  onOpen(team: Team): Promise<boolean>; onOpenSession(target: TeamSource): Promise<boolean>;
 }
 const errorMessage = (error: unknown) => error instanceof Error ? error.message : 'Team operation failed.';
-function saved(scope: string) { try { return conversationSessionStorage.getItem(`agent-remote:team:${scope}`) ?? ''; } catch { return ''; } }
-
-export function TeamWorkspace(props: Props) {
-  const { baseUrl, enabled, visible = true, hosts, source, mount, onModeChange } = props;
+export function TeamMenu(props: Props) {
+  const { baseUrl, enabled, visible = true, hosts, source } = props;
   const client = useMemo(() => new RemoteTeamClient(baseUrl, workspaceFetch), [baseUrl]);
-  const [teams, setTeams] = useState<Team[]>([]), [selected, setSelected] = useState(() => saved(baseUrl));
+  const [teams, setTeams] = useState<Team[]>([]), [selected, setSelected] = useState('');
   const [open, setOpen] = useState(false), [loading, setLoading] = useState(false), [busy, setBusy] = useState(false), [error, setError] = useState(''), [loadError, setLoadError] = useState('');
   const [pendingCreate, setPendingCreate] = useState<{operationId:string;source:TeamSource}>();
 
   const { root, style, handlers } = useTrackingPosition('agent-remote:team-position');
   const trigger = useRef<HTMLButtonElement>(null);
-  const team = teams.find(item => item.id === selected);
   const currentClient = useRef(client); currentClient.current = client;
   const generation = useRef(0), mutating = useRef(false);
   const refresh = async () => {
@@ -39,7 +30,7 @@ export function TeamWorkspace(props: Props) {
     if (currentClient.current === client && ticket === generation.current) { setTeams(value); setLoadError(''); }
   };
   useEffect(() => {
-    setTeams([]); setSelected(saved(baseUrl)); setError(''); setLoadError(''); setPendingCreate(undefined); ++generation.current;
+    setTeams([]); setSelected(''); setError(''); setLoadError(''); setPendingCreate(undefined); ++generation.current;
     if (!enabled) return;
     let stopped = false, inFlight = false;
     const load = async () => { if (stopped || inFlight || document.visibilityState === 'hidden') return; inFlight = true;
@@ -50,14 +41,10 @@ export function TeamWorkspace(props: Props) {
     document.addEventListener('visibilitychange', load);
     return () => { stopped = true; ++generation.current; clearInterval(timer); document.removeEventListener('visibilitychange', load); };
   }, [client, enabled, baseUrl]);
-  useEffect(() => {
-    const active = !!team && enabled && visible; onModeChange(active);
-    try { if (selected) conversationSessionStorage.setItem(`agent-remote:team:${baseUrl}`, selected); else conversationSessionStorage.removeItem(`agent-remote:team:${baseUrl}`); } catch { /* Keep navigation available without storage. */ }
-  }, [team?.id, enabled, visible, selected, baseUrl, onModeChange]);
   useEffect(() => { if (!visible) setOpen(false); }, [visible]);
   useEffect(() => {
     if (!open) return;
-    const dismiss = (event: PointerEvent) => { if (event.target instanceof Node && !root.current?.contains(event.target)) setOpen(false); };
+    const dismiss = (event: PointerEvent) => { if (event.target instanceof Node && !root.current?.contains(event.target) && !(event.target instanceof Element && event.target.closest('[data-team-dialog]'))) setOpen(false); };
     document.addEventListener('pointerdown', dismiss); return () => document.removeEventListener('pointerdown', dismiss);
   }, [open, root]);
   async function run(action: () => Promise<void>) {
@@ -74,7 +61,11 @@ export function TeamWorkspace(props: Props) {
     if (!source) return;
     const input = pendingCreate ?? { operationId: crypto.randomUUID(), source }; setPendingCreate(input);
     const created = await client.create(input); if (currentClient.current !== client) return;
-    setTeams(current => [...current.filter(value => value.id !== created.id), created]); setPendingCreate(undefined); setSelected(created.id); setOpen(false);
+    setTeams(current => [...current.filter(value => value.id !== created.id), created]); setPendingCreate(undefined); await openTeam(created);
+  }
+  async function openTeam(team: Team) {
+    if (!await props.onOpen(team)) throw new Error('The Team layout could not be opened. Retry after the main session is ready.');
+    setSelected(team.id); setOpen(false);
   }
   function groups(archived: boolean) {
     const items = teams.filter(team => (team.status === 'archived') === archived);
@@ -82,7 +73,8 @@ export function TeamWorkspace(props: Props) {
     return keys.map(key => { const group = items.filter(team => JSON.stringify([team.source.hostId, team.source.providerId, team.source.nativeSessionId]) === key), main = group[0]!.source;
       return <section key={key} className="lab-tpm-group"><header className="lab-tpm-group-heading"><h3>{main.title}</h3><small>{hosts.find(host => host.id === main.hostId)?.name ?? main.hostId}</small></header>
         <ul className="lab-tpm-list">{group.map(item => <TeamListItem key={item.id} team={item} selected={selected === item.id} busy={busy}
-          onOpen={() => { setSelected(item.id); setOpen(false); }} onRename={title => run(() => change({action:'rename',teamId:item.id,title}))} />)}</ul></section>;
+          onOpen={() => void run(() => openTeam(item))} onRename={title => run(() => change({action:'rename',teamId:item.id,title}))}
+          management={<TeamManagement team={item} hosts={hosts} busy={busy} failure={error} onChange={input => run(() => change(input))} onOpenSession={target => void run(async () => { if (!await props.onOpenSession(target)) throw new Error('The session could not be opened.'); setOpen(false); })} />} />)}</ul></section>;
     });
   }
   if (!enabled) return null;
@@ -100,12 +92,11 @@ export function TeamWorkspace(props: Props) {
         {error || loadError ? <p role="alert">{error || loadError}</p> : null}
       </section> : null}
     </div>
-    {team && mount ? createPortal(<TeamWorkspaceBody key={team.id} {...props} team={team} busy={busy} error={error || loadError} onExit={() => setSelected('')} onChange={input => run(() => change(input))} />, mount) : null}
   </>;
 }
 
-function TeamListItem({ team, selected, busy, onOpen, onRename }: {
-  team: Team; selected: boolean; busy: boolean; onOpen(): void; onRename(title: string): Promise<boolean>;
+function TeamListItem({ team, selected, busy, onOpen, onRename, management }: {
+  team: Team; selected: boolean; busy: boolean; onOpen(): void; onRename(title: string): Promise<boolean>; management: ReactNode;
 }) {
   const [editing, setEditing] = useState(false), [title, setTitle] = useState('');
   const renameButton = useRef<HTMLButtonElement>(null);
@@ -128,58 +119,62 @@ function TeamListItem({ team, selected, busy, onOpen, onRename }: {
       <label>Team name<input autoFocus disabled={busy} value={title} maxLength={256} required onChange={event => setTitle(event.target.value)} /></label>
       <div><button type="button" disabled={busy} onClick={close}>Cancel</button><button disabled={busy || !title.trim()}>Save</button></div>
     </form> : null}
+    {management}
   </li>;
 }
 
-function TeamWorkspaceBody(props: Props & { team: Team; busy: boolean; error: string; onExit():void; onChange(input:TeamAction):Promise<boolean> }) {
-  const { team, compact, hosts, busy, onChange } = props;
-  const [current, setCurrent] = useState(team.members[0]!.id), [adding, setAdding] = useState(false);
-  const [widths, setWidths] = useState<Record<string, number>>(() => { try { const value = JSON.parse(conversationSessionStorage.getItem(`agent-remote:team-widths:${props.baseUrl}:${team.id}`) ?? '{}'); return value && typeof value === 'object' && !Array.isArray(value) ? value : {}; } catch { return {}; } });
-  const widthsRef = useRef(widths); widthsRef.current = widths;
-  function resize(id: string, width: number) { setWidths(current => ({ ...current, [id]: Math.max(320, Math.min(1400, width)) })); }
-  function saveWidths() { try { conversationSessionStorage.setItem(`agent-remote:team-widths:${props.baseUrl}:${team.id}`, JSON.stringify(widthsRef.current)); } catch {} }
-  const panes: Array<{ id:string; label:string; target:TeamSource; member?:TeamMember }> = [
-    { id:'source', label:`Main · ${team.source.title}`, target:team.source },
-    ...team.members.filter(member => member.creation !== 'abandoned').map(member => ({ id:member.id, label:member.role === 'leader' ? 'Leader' : member.name,
-      target:{hostId:member.hostId,providerId:member.providerId,nativeSessionId:member.nativeSessionId ?? '',title:member.name}, member })),
-  ];
-  const activePane = panes.some(pane => pane.id === current) ? current : panes.find(pane => pane.member?.role === 'leader')?.id ?? 'source';
-  return <section hidden={props.visible === false} className="lab-team-workspace" aria-label={`Team: ${team.title}`} data-compact={compact || undefined}>
-    <header className="lab-team-heading"><div ref={props.viewTarget} className="lab-global-view-slot" /><strong className="lab-team-title" title={team.title}>{team.title}</strong>
+function TeamManagement({ team, hosts, busy, failure, onChange, onOpenSession }: {
+  team: Team; hosts: Host[]; busy: boolean; failure?: string; onChange(input: TeamAction): Promise<boolean>; onOpenSession(target: TeamSource): void;
+}) {
+  const [adding, setAdding] = useState(false);
+  return <details className="lab-team-management"><summary>Manage team</summary>
+    <div className="lab-team-actions">
       <button disabled={busy || team.status !== 'active'} onClick={() => setAdding(!adding)}>Add member</button>
       <button disabled={busy || team.status === 'archiving'} onClick={() => void onChange({teamId:team.id,action:team.status === 'archived' ? 'restore' : 'archive'})}>{team.status === 'archived' ? 'Restore' : team.status === 'archiving' ? 'Archiving…' : 'Archive'}</button>
-      <button onClick={props.onExit} aria-label="Exit Team mode">Exit team</button>
-    </header>
-
-    {adding ? <AddTeamMember teamId={team.id} hosts={hosts.filter(host => host.teamManagement)} busy={busy} onChange={onChange} onClose={() => setAdding(false)} /> : null}
+      <button disabled={busy} onClick={() => onOpenSession(team.source)}>Open main session</button>
+    </div>
+    {adding ? <AddTeamMember failure={failure} teamId={team.id} hosts={hosts.filter(host => host.teamManagement)} busy={busy} onChange={onChange} onClose={() => setAdding(false)} /> : null}
+    <ul className="lab-team-members">{team.members.filter(member => member.creation !== 'abandoned').map(member => <li key={member.id}>
+      <button disabled={busy || member.creation !== 'ready' || !member.nativeSessionId} onClick={() => onOpenSession({hostId:member.hostId,providerId:member.providerId,nativeSessionId:member.nativeSessionId!,title:member.name})}>{member.name}</button>
+      <small>{member.role} · {hosts.find(host => host.id === member.hostId)?.name ?? member.hostId} · {member.activity}</small>
+      {member.responsibility || member.cwd || member.summary ? <details><summary>Details</summary>{member.responsibility}{member.cwd ? <p>{member.cwd}</p> : null}{member.summary ? <p>{member.summary}</p> : null}</details> : null}
+      {member.creation !== 'ready' ? <div><p>{member.error ?? 'Session creation is pending.'}</p><button disabled={busy} onClick={() => void onChange({teamId:team.id,action:'retry_creation',memberId:member.id})}>Check creation</button><button disabled={busy} onClick={() => void onChange({teamId:team.id,action:'abandon_creation',memberId:member.id})}>Abandon slot</button></div> : null}
+    </li>)}</ul>
     {team.status === 'archiving' ? <p className="lab-control-note" role="status">New dispatches stopped. Waiting for members to settle. Open their sessions to resolve approvals or stop ongoing work.</p> : null}
-    {props.error ? <p role="alert">{props.error}</p> : null}
     {team.messages.some(message => ['unknown', 'dispatching', 'rejected'].includes(message.status) || message.acceptance === 'queued') ? <details className="lab-team-recovery"><summary>Delivery status</summary>{team.messages.filter(message => ['unknown','dispatching','rejected'].includes(message.status) || message.acceptance === 'queued').map(message => <div key={message.id}><p>{message.status}: {message.text.slice(0,160)}</p><small>{message.error ?? 'Awaiting a native receipt. Do not repeat this message.'}</small>{message.status !== 'rejected' ? <><p>Inspect the receiving session before resolving.</p><button disabled={busy} onClick={() => void onChange({teamId:team.id,action:'resolve_message',messageId:message.id,outcome:'accepted'})}>Confirm received</button><button disabled={busy} onClick={() => void onChange({teamId:team.id,action:'resolve_message',messageId:message.id,outcome:'rejected'})}>Confirm not executed</button></> : null}</div>)}</details> : null}
-    {compact ? <label className="lab-team-select">Session<select value={activePane} onChange={event => setCurrent(event.target.value)}>{panes.map(pane => <option key={pane.id} value={pane.id}>{pane.label}</option>)}</select></label> : null}
-    <div className="lab-team-rail">{panes.map(pane => {
-      const host = hosts.find(host => host.id === pane.target.hostId);
-      return <TeamSessionFamily key={`${pane.id}:${sessionKey(pane.target)}`} id={pane.id} storageScope={`${props.baseUrl}:${team.id}`} baseUrl={props.baseUrl}
-        target={pane.target} label={pane.label} hostLabel={host?.name ?? pane.target.hostId} offline={host?.online === false}
-        compact={compact} active={!compact || activePane === pane.id} readOnly={pane.id !== 'source' && team.status === 'archived'}
-        transport={props.transport} draftStore={props.draftStore} navigation={props.navigation} widths={widths} resize={resize} saveWidths={saveWidths}
-        ready={!pane.member || pane.member.creation === 'ready'}
-        header={pane.member?.responsibility ? <details className="lab-team-responsibility"><summary>Responsibility</summary>{pane.member.responsibility}{pane.member.cwd ? <p>{pane.member.cwd}</p> : null}{pane.member.summary ? <p>{pane.member.summary}</p> : null}</details> : null}
-        unavailable={pane.member ? <div className="lab-control-note"><p>{pane.member.error ?? 'Session creation is pending.'}</p><button disabled={busy} onClick={() => void onChange({teamId:team.id,action:'retry_creation',memberId:pane.id})}>Check creation</button><button disabled={busy} onClick={() => void onChange({teamId:team.id,action:'abandon_creation',memberId:pane.id})}>Abandon slot</button></div> : null} />;
-    })}</div>
-  </section>;
+  </details>;
 }
 
-function AddTeamMember({ teamId, hosts, busy, onChange, onClose }: {teamId:string;hosts:Host[];busy:boolean;onChange(input:TeamAction):Promise<boolean>;onClose():void}) {
+function AddTeamMember({ teamId, hosts, busy, failure, onChange, onClose }: {teamId:string;hosts:Host[];busy:boolean;failure?:string;onChange(input:TeamAction):Promise<boolean>;onClose():void}) {
   const [hostId,setHostId] = useState(hosts.find(host => host.online)?.id ?? ''), [providerId,setProviderId] = useState(''), [name,setName] = useState(''), [cwd,setCwd] = useState(''), [responsibility,setResponsibility] = useState('');
-  const operation = useRef(crypto.randomUUID());
+  const operation = useRef<{ signature: string; id: string }>();
+  const dialog = useRef<HTMLDialogElement>(null), label = useId();
+  const [error, setError] = useState('');
+  useEffect(() => {
+    const focus = document.activeElement as HTMLElement | null;
+    dialog.current?.showModal();
+    return () => { if (focus?.isConnected) focus.focus({ preventScroll: true }); };
+  }, []);
   const host = hosts.find(host => host.id === hostId), providers = host?.providers ?? [];
   const provider = providers.some(value => value.providerId === providerId) ? providerId : providers[0]?.providerId ?? '';
-  return <form className="lab-team-form" onSubmit={event => {event.preventDefault(); void onChange({action:'add_member',teamId,operationId:operation.current,hostId,providerId:provider,name:name.trim() || host?.name || 'Member',cwd:cwd.trim(),responsibility}).then(ok => {if(ok)onClose();});}}>
-    <label>Host<select disabled={busy} value={hostId} onChange={event => {setHostId(event.target.value); operation.current=crypto.randomUUID();}}>{hosts.map(host => <option key={host.id} value={host.id} disabled={!host.online}>{host.name}{!host.online ? ' · Offline' : ''}</option>)}</select></label>
-    <label>Provider<select disabled={busy} value={provider} onChange={event => {setProviderId(event.target.value); operation.current=crypto.randomUUID();}}>{providers.map(provider => <option key={provider.providerId} value={provider.providerId}>{provider.displayName}</option>)}</select></label>
+  return createPortal(<dialog ref={dialog} className="lab-favorite-dialog" data-team-dialog aria-labelledby={label}
+    onKeyDown={event => event.stopPropagation()} onPointerDown={event => event.stopPropagation()} onClick={event => event.stopPropagation()}
+    onCancel={event => { event.preventDefault(); if (!busy) onClose(); }}>
+    <header><h2 id={label}>Add member</h2><button type="button" aria-label="Close member editor" disabled={busy} onClick={onClose}>×</button></header>
+    <form onSubmit={event => {
+      event.preventDefault(); if (busy) return;
+      const fields = {hostId,providerId:provider,name:name.trim() || host?.name || 'Member',cwd:cwd.trim(),responsibility};
+      const signature = JSON.stringify(fields);
+      if (operation.current?.signature !== signature) operation.current = { signature, id: crypto.randomUUID() };
+      setError('');
+      void onChange({action:'add_member',teamId,operationId:operation.current.id,...fields}).then(ok => { if (ok) onClose(); else setError('The member could not be added. Retry to check the same request.'); });
+    }}>
+    <label>Host<select disabled={busy} value={hostId} onChange={event => {setHostId(event.target.value);}}>{hosts.map(host => <option key={host.id} value={host.id} disabled={!host.online}>{host.name}{!host.online ? ' · Offline' : ''}</option>)}</select></label>
+    <label>Provider<select disabled={busy} value={provider} onChange={event => {setProviderId(event.target.value);}}>{providers.map(provider => <option key={provider.providerId} value={provider.providerId}>{provider.displayName}</option>)}</select></label>
     <label>Name<input disabled={busy} maxLength={256} value={name} placeholder="Optional" onChange={event => setName(event.target.value)} /></label>
     <label>Working directory<input disabled={busy} maxLength={2048} value={cwd} placeholder="Host default directory" onChange={event => setCwd(event.target.value)} /></label>
     <label>Responsibility<textarea disabled={busy} maxLength={2048} value={responsibility} placeholder="Can be discussed with the Leader after joining" onChange={event => setResponsibility(event.target.value)} /></label>
-    <div><button type="button" onClick={onClose}>Cancel</button><button disabled={busy || !host?.online || !provider}>Add member</button></div>
-  </form>;
+    {failure || error ? <p role="alert">{failure || error}</p> : null}
+    <footer><button type="button" disabled={busy} onClick={onClose}>Cancel</button><button className="lab-favorite-primary" disabled={busy || !host?.online || !provider}>Add member</button></footer>
+  </form></dialog>, document.body);
 }

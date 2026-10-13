@@ -4,7 +4,7 @@ import './session-dock.css';
 import { conversationSessionStorage } from '../conversation-storage.js';
 
 const defaultWidth = 440, minimumWidth = 320, maximumWidth = 1600;
-interface DockItem { id: string; title: string; host: HTMLElement; visible: boolean; width: number }
+interface DockItem { id: string; title: string; host: HTMLElement; visible: boolean; width: number; additionalWidth?: number }
 interface DockLayout { panes: Array<{ id: string; width: number }>; baseWidth?: number; mainMinimized?: boolean }
 interface DockContext {
   enabled: boolean; items: DockItem[]; layout: DockLayout;
@@ -41,7 +41,7 @@ export function SessionDockProvider({ enabled, storageScope, children }: { enabl
   const hadVisibleDock = useRef(false);
   const register = useCallback((item: Omit<DockItem, 'width'>) => setRegistered(current => {
     const previous = current.find(value => value.id === item.id);
-    return previous?.host === item.host && previous.title === item.title && previous.visible === item.visible ? current
+    return previous?.host === item.host && previous.title === item.title && previous.visible === item.visible && previous.additionalWidth === item.additionalWidth ? current
       : [...current.filter(value => value.id !== item.id), item];
   }), []);
   const unregister = useCallback((id: string, host: HTMLElement) => setRegistered(current => current.some(item => item.id === id && item.host === host)
@@ -89,8 +89,8 @@ export function moveSessionHost(host: HTMLElement, parent: HTMLElement) {
   if (range && selection) { selection.removeAllRanges(); selection.addRange(range); }
 }
 
-export function SessionViewPlacement({ id, title, visible, children }: {
-  id: string; title: string; visible: boolean; children(placement: { docked: boolean; controls: ReactNode }): ReactNode;
+export function SessionViewPlacement({ id, title, visible, additionalWidth, dockRequest, children }: {
+  id: string; title: string; visible: boolean; additionalWidth?: number; dockRequest?: string; children(placement: { docked: boolean; controls: ReactNode }): ReactNode;
 }) {
   const dock = useContext(Context);
   const [host] = useState(() => { const element = document.createElement('div'); element.className = 'lab-session-placement'; return element; });
@@ -98,12 +98,13 @@ export function SessionViewPlacement({ id, title, visible, children }: {
   const [mounted, setMounted] = useState(false);
   const item = dock?.layout.panes.find(item => item.id === id);
   const docked = !!dock?.enabled && !!item && visible;
-  const unregister = dock?.unregister, register = dock?.register;
+  const unregister = dock?.unregister, register = dock?.register, add = dock?.add;
+  useLayoutEffect(() => { if (dockRequest) add?.(id); }, [add, id, dockRequest]);
   useLayoutEffect(() => {
     if (!docked && home.current) moveSessionHost(host, home.current);
     setMounted(true);
   }, [host, docked]);
-  useLayoutEffect(() => { register?.({ id, title, host, visible }); }, [register, id, title, host, visible]);
+  useLayoutEffect(() => { register?.({ id, title, host, visible, additionalWidth }); }, [register, id, title, host, visible, additionalWidth]);
   useLayoutEffect(() => () => { unregister?.(id, host); host.remove(); }, [unregister, id, host]);
   const controls = dock?.enabled ? <>
     {docked ? <DockMove id={id} title={title} /> : null}
@@ -176,13 +177,13 @@ function DockPane({ item, order }: { item: DockItem; order: number }) {
     const frame = requestAnimationFrame(() => element.scrollIntoView?.({ block: 'nearest', inline: 'nearest' }));
     return () => cancelAnimationFrame(frame);
   }, [item.host]);
-  return <section className="lab-session-dock-pane" data-dock-id={item.id} aria-label={`Docked ${item.title}`} style={{ width: item.width, order }}>
+  return <section className="lab-session-dock-pane" data-dock-id={item.id} aria-label={`Docked ${item.title}`} style={{ width: item.width + (item.additionalWidth ?? 0), order }}>
     <div ref={target} className="lab-session-dock-content" />
     <DockResize title={item.title} width={item.width} onResize={width => dock.resize(item.id, width)} />
   </section>;
 }
 
-function DockResize({ title, width, minimum = minimumWidth, onResize }: { title: string; width: number; minimum?: number; onResize(width: number): void }) {
+export function DockResize({ title, width, minimum = minimumWidth, onResize }: { title: string; width: number; minimum?: number; onResize(width: number): void }) {
   const drag = useRef<{ x: number; width: number }>();
   const resize = (value: number) => onResize(Math.max(minimum, Math.min(maximumWidth, value)));
   const stop = (event: ReactPointerEvent<HTMLElement>) => {

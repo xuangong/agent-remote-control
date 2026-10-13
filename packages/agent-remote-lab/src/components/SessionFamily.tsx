@@ -1,7 +1,11 @@
-import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { useContext, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 import type { RemoteAgentTransport } from '@orchardworks/agent-remote-web/headless';
 import { CommunicationNavigationContext, type AgentChildSessionView } from '@orchardworks/agent-remote-web/react';
-import type { TeamSource } from '@orchardworks/agent-remote-protocol';
+import type { SessionWindowTarget } from '../hooks/useSessionWindows.js';
+import { WorkspaceReady } from '../workspace-access.js';
+import { ConversationConnectionScope } from '../conversation-connections.js';
+import { DockResize } from './SessionDock.js';
+import './session-family.css';
 import { SessionDirectoryClient, type OpenedSession } from '../directory-client.js';
 import { useConversationSession } from '../hooks/useConversationSession.js';
 import { conversationSessionStorage } from '../conversation-storage.js';
@@ -10,16 +14,15 @@ import { sessionViewNavigation, type SessionViewNavigationActions, type SessionV
 import { sessionKey, type SessionEntry } from '../session-tree.js';
 import { LabWorkbench } from './LabWorkbench.js';
 
-interface FamilyTarget extends TeamSource { parentNativeSessionId?: string }
+type FamilyTarget = SessionWindowTarget;
 interface Layout { children: FamilyTarget[]; focus: number }
 interface Props {
-  id: string; storageScope: string; baseUrl: string; target: TeamSource; label: string; hostLabel: string;
-  compact: boolean; active: boolean; readOnly: boolean; offline: boolean; ready: boolean;
-  header?: ReactNode; unavailable?: ReactNode;
+  storageScope: string; baseUrl: string; target: SessionWindowTarget; hostLabel: string;
+  compact: boolean; active: boolean; offline: boolean; controls?: ReactNode;
   transport: RemoteAgentTransport; draftStore: DraftBinding['store']; navigation?: SessionViewNavigationFactory;
-  widths: Record<string, number>; resize(id: string, width: number): void; saveWidths(): void;
+  onAdditionalWidthChange?(width: number): void;
 }
-function restore(key: string, root: TeamSource): Layout {
+function restore(key: string, root: SessionWindowTarget): Layout {
   try {
     const value = JSON.parse(conversationSessionStorage.getItem(key) ?? 'null');
     if (!Array.isArray(value?.children)) return { children: [], focus: 0 };
@@ -35,11 +38,22 @@ function restore(key: string, root: TeamSource): Layout {
   } catch { return { children: [], focus: 0 }; }
 }
 
-/** Each Team participant owns its visible descendant chain, independently of other participants. */
-export function TeamSessionFamily(props: Props) {
-  const { target, compact, active, label } = props;
-  const storageKey = `agent-remote:team-family:${props.storageScope}:${props.id}:${sessionKey(target)}`;
+/** Each session window owns its visible descendant chain, independently of other participants. */
+export function SessionFamily(props: Props) {
+  const { target, compact, active } = props;
+  const storageKey = `agent-remote:recovery:${props.storageScope}:session-family:${sessionKey(target)}`;
   const [layout, setLayout] = useState(() => restore(storageKey, target));
+  const [widths, setWidths] = useState<Record<string, number>>(() => {
+    try { return JSON.parse(conversationSessionStorage.getItem(`${storageKey}:widths`) ?? '{}') ?? {}; } catch { return {}; }
+  });
+  const childWidth = (item: FamilyTarget) => {
+    const width = widths[sessionKey(item)];
+    return typeof width === 'number' && Number.isFinite(width) ? Math.max(320, Math.min(1600, width)) : 440;
+  };
+  const additionalWidth = layout.children.reduce((total, item) => total + childWidth(item), 0);
+  // Commit the outer dock width before revealing a newly inserted descendant.
+  useLayoutEffect(() => { props.onAdditionalWidthChange?.(compact ? 0 : additionalWidth); }, [props.onAdditionalWidthChange, compact, additionalWidth]);
+  useEffect(() => { try { conversationSessionStorage.setItem(`${storageKey}:widths`, JSON.stringify(widths)); } catch {} }, [storageKey, widths]);
   const [visited, setVisited] = useState(active || !compact);
   const [reveal, setReveal] = useState<{ index: number }>();
   const container = useRef<HTMLDivElement>(null);
@@ -52,7 +66,10 @@ export function TeamSessionFamily(props: Props) {
   useEffect(() => {
     if (compact || !active || !reveal) return;
     const pane = container.current?.children[reveal.index];
-    if (pane instanceof HTMLElement) pane.scrollIntoView({ block: 'nearest', inline: 'nearest', behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' });
+    let frame = requestAnimationFrame(() => { frame = requestAnimationFrame(() => {
+      if (pane instanceof HTMLElement) pane.scrollIntoView({ block: 'nearest', inline: 'nearest', behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' });
+    }); });
+    return () => cancelAnimationFrame(frame);
   }, [reveal, compact, active]);
   function focusPane(index: number) { setLayout(current => current.focus === index ? current : { ...current, focus: index }); }
   function show(index: number) { setLayout(current => ({ ...current, focus: index })); setReveal({ index }); }
@@ -84,25 +101,15 @@ export function TeamSessionFamily(props: Props) {
     const children = [...path.slice(1, index + 1), ...descendants];
     setLayout({ children, focus: children.length }); setReveal({ index: children.length });
   }
-  return <div className="lab-team-family" ref={container} hidden={!active} aria-label={`${label} session family`}>
+  return <div className="lab-session-family" ref={container} hidden={!active} aria-label={`${target.title} session family`}>
     {path.map((item, index) => {
-      const title = index === 0 ? label : item.title;
-      const widthKey = index === 0 ? props.id : `${props.id}:${sessionKey(item)}`;
-      const preferredWidth = props.widths[widthKey];
-      const width = typeof preferredWidth === 'number' && Number.isFinite(preferredWidth) ? Math.max(320, Math.min(1400, preferredWidth)) : 480;
-      return <section key={sessionKey(item)} className="lab-team-pane" aria-label={title} hidden={compact && focus !== index} style={compact ? undefined : { width }}
+      const controls = index === 0 ? props.controls : <button type="button" aria-label={compact ? `Back to ${path[index - 1]!.title}` : 'Close subagent'} title={compact ? 'Back to parent session' : 'Close subagent view'} onClick={() => compact ? show(index - 1) : close(index)}>{compact ? '←' : '×'}</button>;
+      return <section key={sessionKey(item)} className="lab-session-family-pane" aria-label={item.title} hidden={compact && focus !== index}
+        style={compact || index === 0 ? undefined : { width: childWidth(item), flex: 'none' }}
         onPointerDownCapture={() => focusPane(index)} onFocusCapture={() => focusPane(index)}>
-        <header className="lab-team-pane-heading"><strong>{title}</strong><small>{props.hostLabel}{props.offline ? ' · Offline' : ''}</small>
-          {index > 0 ? <button type="button" className="lab-team-child-close" aria-label={compact ? `Back to ${index === 1 ? label : path[index - 1]!.title}` : 'Close subagent'} title={compact ? 'Back to parent session' : 'Close subagent view'} onClick={() => compact ? show(index - 1) : close(index)}>{compact ? '←' : '×'}</button> : null}
-        </header>
-        {index === 0 ? props.header : null}
-        {!props.ready ? (index === 0 ? props.unavailable : null) : (visited || active || !compact) ? <FamilySession {...props} target={item} entries={path}
+        {(visited || active || !compact) ? <FamilySession {...props} controls={controls} target={item} entries={path}
           onNavigate={(destination, childrenFor) => open(index, destination, childrenFor)} /> : null}
-        {!compact ? <div className="lab-session-dock-resize" role="separator" aria-label={`Resize ${title}`} aria-orientation="vertical" aria-valuenow={width} aria-valuemin={320} aria-valuemax={1400} tabIndex={0}
-          onPointerDown={event => { event.currentTarget.setPointerCapture(event.pointerId); event.currentTarget.dataset.origin = `${event.clientX}:${width}`; }}
-          onPointerMove={event => { if (!event.currentTarget.hasPointerCapture(event.pointerId)) return; const [start, size] = event.currentTarget.dataset.origin!.split(':').map(Number); props.resize(widthKey, size! + event.clientX - start!); }}
-          onPointerUp={event => { event.currentTarget.releasePointerCapture(event.pointerId); props.saveWidths(); }}
-          onKeyDown={event => { if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') { event.preventDefault(); props.resize(widthKey, width + (event.key === 'ArrowLeft' ? -32 : 32)); } }} onBlur={props.saveWidths} /> : null}
+        {!compact && index > 0 ? <DockResize title={item.title} width={childWidth(item)} onResize={width => setWidths(current => ({ ...current, [sessionKey(item)]: width }))} /> : null}
       </section>;
     })}
   </div>;
@@ -114,9 +121,15 @@ interface SessionProps extends Props {
 }
 function FamilySession(props: SessionProps) {
   const { target, baseUrl } = props;
+  const connections = useContext(ConversationConnectionScope);
+  const enabled = useContext(WorkspaceReady);
   const [session, setSession] = useState<OpenedSession>(), [error, setError] = useState(''), [attempt, setAttempt] = useState(0);
   useEffect(() => {
-    let stopped = false; const abort = new AbortController(); setError(''); setSession(undefined);
+    if (!enabled) return;
+    let stopped = false; const abort = new AbortController(); setError('');
+    const cached = connections?.find(target);
+    if (cached) { setSession({ ...target, agentId: cached.agentId }); return () => { stopped = true; abort.abort(); }; }
+    setSession(undefined);
     const client = new SessionDirectoryClient(baseUrl, undefined, target.hostId);
     const attachment = target.parentNativeSessionId
       ? client.attachChild(target.providerId, target.parentNativeSessionId, target.nativeSessionId, abort.signal)
@@ -127,11 +140,11 @@ function FamilySession(props: SessionProps) {
       setSession({ ...target, agentId: value.agentId });
     }).catch(error => { if (!stopped) setError(error instanceof Error ? error.message : 'The session could not be opened.'); });
     return () => { stopped = true; abort.abort(); };
-  }, [baseUrl, target.hostId, target.providerId, target.nativeSessionId, target.parentNativeSessionId, attempt]);
-  if (!session) return <div className="lab-team-opening">{error ? <p role="alert">{error}<button onClick={() => setAttempt(value => value + 1)}>Retry</button></p> : <p role="status">Opening session…</p>}</div>;
+  }, [baseUrl, target.hostId, target.providerId, target.nativeSessionId, target.parentNativeSessionId, attempt, connections, enabled]);
+  if (!session) return <div className="lab-session-opening"><header><strong>{target.title}</strong>{props.controls}</header>{error ? <p role="alert">{error}<button onClick={() => setAttempt(value => value + 1)}>Retry</button></p> : <p role="status">Opening session…</p>}</div>;
   return <FamilyChat {...props} session={session} />;
 }
-function FamilyChat({ session, transport, navigation, draftStore, readOnly, offline, entries, onNavigate }: SessionProps & { session: OpenedSession }) {
+function FamilyChat({ session, transport, navigation, draftStore, controls, offline, entries, onNavigate }: SessionProps & { session: OpenedSession }) {
   const { state, sessionState, status, actions, questions, setQuestions } = useConversationSession(session, transport);
   const open = (destination: SessionEntry | AgentChildSessionView) => {
     if (offline) throw new Error('The Host is offline. Reconnect it before opening a subagent.');
@@ -148,11 +161,11 @@ function FamilyChat({ session, transport, navigation, draftStore, readOnly, offl
     return [...children.values()];
   };
   const key = JSON.stringify([session.hostId, session.providerId, session.nativeSessionId]);
-  return <CommunicationNavigationContext.Provider value={inherited?.communication}><LabWorkbench readOnly={readOnly} headingMode="toolbar" defaultDisplayMode="content"
+  return <CommunicationNavigationContext.Provider value={inherited?.communication}><LabWorkbench headingMode="inline" sessionManager={controls} defaultDisplayMode="content"
     childrenFor={childrenFor} onOpenChildSession={navigationActions.openChildSession}
     resolveSessionLink={id => inherited?.resolveSessionLink(id) ?? local.resolveSessionLink(id)} revealEntry={inherited?.revealEntry}
     state={state} sessionState={sessionState} sessionStatus={status} attachingAgentId={session.agentId} actions={actions}
-    draftSessionKey={key} draftBinding={{ store: draftStore, key: `team:${key}` }} questionDrafts={questions}
+    draftSessionKey={key} draftBinding={{ store: draftStore, key: `session:${key}` }} questionDrafts={questions}
     onQuestionDraftChange={(id, value) => setQuestions(current => ({ ...current, [id]: value }))}
     conversationPath={<strong className="agent-session-title">{session.title}</strong>} /></CommunicationNavigationContext.Provider>;
 }

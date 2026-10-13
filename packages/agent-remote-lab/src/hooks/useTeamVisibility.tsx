@@ -9,7 +9,7 @@ function preference(): boolean {
   catch { return true; }
 }
 
-/** Hiding Team presentation never changes membership or Controller work lifetime. */
+/** The Team preference controls its management entry, never session placement or work lifetime. */
 export function useTeamVisibility() {
   const [visible, setChoice] = useState(preference);
   useEffect(() => {

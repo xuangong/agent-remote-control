@@ -11,59 +11,57 @@ test.beforeEach(async({page})=>{
  await page.route('**/v1/remote/teams',route=>route.fulfill({json:{teams:[team]}}));
  await page.route('**/v1/remote/hosts/*/attach',route=>route.fulfill({json:{agentId:route.request().postDataJSON().nativeSessionId}}));
 });
-test('Team entry keeps standard chat controls, desktop pane resizing and mobile Leader-first navigation',async({page,isMobile},info)=>{
+test('Team opens a normal dock layout with responsive presentation and refresh recovery',async({page,isMobile},info)=>{
  const errors:string[]=[];page.on('pageerror',error=>errors.push(error.message));
  const attaches:string[]=[];page.on('request',request=>{if(request.url().endsWith('/attach'))attaches.push(request.postDataJSON().nativeSessionId);});
  await page.goto('/e2e/fixtures/team.html');await page.getByRole('button',{name:'Teams',exact:true}).click();
  await page.getByRole('button',{name:/Diagnose across Hosts/}).click();
- const panes=page.locator('.lab-team-pane:visible');await expect(panes).toHaveCount(isMobile?1:3);
+ await expect(page.locator('.lab-session-family-pane:visible')).toHaveCount(isMobile?1:3);
  await expect(page.locator('[data-testid="prompt-input"]:visible').first()).toBeVisible();
- if(isMobile){expect(attaches).toEqual(['leader']);await expect(page.locator('.lab-team-select select')).toHaveValue('leader');
-  await page.locator('[data-testid="prompt-input"]:visible').fill('Retain my Leader draft');await page.locator('.lab-team-select select').selectOption('member');await expect(page.locator('[data-testid="prompt-input"]:visible')).toBeVisible();
-  await page.locator('.lab-team-select select').selectOption('leader');await expect(page.locator('[data-testid="prompt-input"]:visible')).toContainText('Retain my Leader draft');
-  expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);
- }else{expect(attaches).toEqual(['source','leader','member']);const pane=page.getByRole('region',{name:'Leader',exact:true}),before=(await pane.boundingBox())!;
-  const handle=page.getByRole('separator',{name:'Resize Leader',exact:true});await handle.focus();await page.keyboard.press('ArrowRight');await expect.poll(async()=>(await pane.boundingBox())!.width).toBeGreaterThan(before.width);
-  expect(await page.locator('.lab-team-rail').evaluate(node=>node.scrollWidth>node.clientWidth)).toBe(true);
+ if(isMobile){expect(attaches).toEqual(['leader']);expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);}
+ else{
+  expect(attaches.sort()).toEqual(['source','leader','member'].sort());
+  const pane=page.getByRole('region',{name:'Docked Leader',exact:true}),before=(await pane.boundingBox())!;
+  const handle=pane.getByRole('separator',{name:'Leader width',exact:true});await handle.focus();await page.keyboard.press('ArrowRight');
+  await expect.poll(async()=>(await pane.boundingBox())!.width).toBeGreaterThan(before.width);
+  expect(await page.locator('.lab-session-dock-rail').evaluate(node=>node.scrollWidth>node.clientWidth)).toBe(true);
  }
  await page.screenshot({path:info.outputPath('team.png')});
- await page.reload();await expect(page.locator('.lab-team-workspace')).toBeVisible();
- if(isMobile)await expect(page.locator('.lab-team-select select')).toHaveValue('leader');
- await page.getByRole('button',{name:'Exit Team mode'}).click();await expect(page.getByText('Ordinary workspace')).toBeVisible();expect(errors).toEqual([]);
+ await page.reload();await expect(page.locator('.lab-session-family-pane:visible')).toHaveCount(isMobile?1:3);
+ expect(errors).toEqual([]);
 });
 
-test('Team mode mounts in the product shell and restores the ordinary session draft on exit',async({page,isMobile})=>{
+test('Team applies an ordinary layout and its menu visibility does not hide sessions',async({page,isMobile})=>{
  const {showNewSession}=await import('./session-navigation');
  await page.goto('/');await showNewSession(page);await page.getByTestId('session-create').click();
  const primary=page.locator('.lab-primary-conversation > .lab-session-view');
  await expect(primary.getByTestId('prompt-input')).toBeEnabled();
- await primary.getByTestId('prompt-input').fill('Keep the ordinary workspace draft');
- const url=new URL(page.url()),provider=url.searchParams.get('provider')!,nativeSessionId=url.searchParams.get('session')!;
- const leader=await page.evaluate(async providerId=>{
-  const response=await fetch('/v1/remote/create',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({providerId,operationId:crypto.randomUUID()})});
-  if(!response.ok)throw new Error(await response.text());return await response.json() as {nativeSessionId:string};
+ await expect(page).toHaveURL(/[?&]provider=[^&]+/);
+ const url=new URL(page.url()),provider=url.searchParams.get('provider')!;
+ const [source,leader]=await page.evaluate(async providerId=>{
+  const create=async()=>{const response=await fetch('/v1/remote/create',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({providerId,operationId:crypto.randomUUID()})});
+   if(!response.ok)throw new Error(await response.text());return await response.json() as {nativeSessionId:string};};
+  return [await create(),await create()];
  },provider);
- const actual={...team,source:{hostId:'local',providerId:provider,nativeSessionId,title:'Retained main'},members:[{...team.members[0],hostId:'local',providerId:provider,nativeSessionId:leader.nativeSessionId}]};
+ const actual={...team,source:{hostId:'local',providerId:provider,nativeSessionId:source.nativeSessionId,title:'Team main'},members:[{...team.members[0],hostId:'local',providerId:provider,nativeSessionId:leader.nativeSessionId}]};
  await page.route('**/v1/remote/teams',route=>route.fulfill({json:{teams:[actual]}}));
  await page.getByRole('button',{name:'Teams',exact:true}).click();await page.getByRole('button',{name:/Diagnose across Hosts/}).click();
- await expect(primary).toBeHidden();await expect(page.locator('.lab-team-workspace')).toBeVisible();
- await expect(page.locator('.lab-team-pane:visible')).toHaveCount(isMobile?1:2);
- await expect(page.locator('.lab-team-workspace').getByTestId('prompt-input').first()).toBeEnabled();
- const leaderInput = page.getByRole('region', { name: 'Leader', exact: true }).getByTestId('prompt-input');
- await leaderInput.fill('Keep the Leader draft while hidden');
- await openView(page);
- await page.getByRole('checkbox', { name: 'Team view', exact: true }).uncheck();
- await expect(primary).toBeVisible(); await expect(page.locator('.lab-team-workspace')).toBeHidden();
- await expect(primary.getByTestId('prompt-input')).toContainText('Keep the ordinary workspace draft');
- await openView(page);
- await page.getByRole('checkbox', { name: 'Team view', exact: true }).check();
- await expect(leaderInput).toBeVisible(); await expect(leaderInput).toContainText('Keep the Leader draft while hidden');
- await leaderInput.fill('/team off'); await leaderInput.press('Enter'); await expect(primary).toBeVisible();
- await openView(page);
- await page.getByRole('checkbox', { name: 'Team view', exact: true }).check();
- await expect(page.locator('.lab-team-workspace')).toBeVisible();
- await page.getByRole('button',{name:'Exit Team mode'}).click();await expect(primary).toBeVisible();
- await expect(primary.getByTestId('prompt-input')).toContainText('Keep the ordinary workspace draft');
+ await expect(primary).toBeVisible();
+ await expect.poll(()=>new URL(page.url()).searchParams.get('session')).toBe(isMobile?leader.nativeSessionId:source.nativeSessionId);
+ const leaderInput=isMobile?primary.getByTestId('prompt-input'):page.getByRole('region',{name:'Docked Leader',exact:true}).getByTestId('prompt-input');
+ await expect(leaderInput).toBeEnabled();await leaderInput.fill('Keep Leader draft');
+ await openView(page);await page.getByRole('checkbox',{name:'Team view',exact:true}).uncheck();
+ await expect(page.getByRole('button',{name:'Teams',exact:true})).toBeHidden();
+ await expect(leaderInput).toBeVisible();await expect(leaderInput).toContainText('Keep Leader draft');
+ if(!isMobile){
+  await expect(page.getByRole('button',{name:'Exit Team mode'})).toHaveCount(0);
+  await leaderInput.click();await page.getByRole('button',{name:'Float Leader',exact:true}).click();
+  await expect(page.getByRole('region',{name:'Docked Leader',exact:true})).toHaveCount(0);
+  await expect(page.getByRole('region',{name:'Leader',exact:true}).getByTestId('prompt-input')).toContainText('Keep Leader draft');
+  await page.getByRole('button',{name:'Dock Leader',exact:true}).click();
+  await expect(leaderInput).toBeVisible();
+ }
+ await page.reload();await expect(leaderInput).toBeVisible();
 });
 
 test('Team command and View switch share a retained presentation preference', async ({ page }) => {
@@ -104,17 +102,17 @@ test('Team names are edited in the floating list without opening or creating a T
  await panel.getByRole('textbox', { name: 'Team name' }).fill('Canceled title');
  await panel.getByRole('button', { name: 'Cancel', exact: true }).click();
  expect(actions).toEqual([]);
- await expect(page.locator('.lab-team-workspace')).toHaveCount(0);
+ await expect(page.locator('.lab-session-dock-pane')).toHaveCount(0);
  await panel.locator('.lab-session-row').click();
- await expect(page.locator('.lab-team-title')).toHaveText('New team');
- await expect(page.locator('.lab-team-heading').getByRole('button', { name: 'New team', exact: true })).toHaveCount(0);
+ await expect(page.locator('.lab-session-family-pane:visible')).not.toHaveCount(0);
+
  await entry.click();
  await panel.getByRole('button', { name: 'Rename Team', exact: true }).click();
  const input = panel.getByRole('textbox', { name: 'Team name' });
  await input.fill('  Windows investigation  ');
  await panel.getByRole('button', { name: 'Save', exact: true }).click();
  await expect(input).toHaveCount(0);
- await expect(page.locator('.lab-team-title')).toHaveText('Windows investigation');
+
  await expect(panel.locator('.lab-session-row')).toContainText('Windows investigation');
  expect(actions).toEqual([{ action: 'rename', teamId: 'team', title: 'Windows investigation' }]);
  await expect(panel.getByRole('button', { name: 'New team', exact: true })).toHaveCount(1);
@@ -124,7 +122,7 @@ test('Team names are edited in the floating list without opening or creating a T
  await panel.getByRole('button', { name: 'Save', exact: true }).click();
  await expect(panel.getByRole('alert')).toHaveText('Rename unavailable');
  await expect(input).toHaveValue('Keep this draft');
- await expect(page.locator('.lab-team-title')).toHaveText('Windows investigation');
+
  await input.press('Escape');
  await expect(input).toHaveCount(0);
  await expect(panel).toBeVisible();
@@ -141,7 +139,7 @@ test('Team subagents belong to their parent pane and keep other families intact'
  await page.goto('/e2e/fixtures/team.html?children');
  await page.getByRole('button', { name: 'Teams', exact: true }).click();
  await page.locator('.lab-session-row').filter({ hasText: team.title }).click();
- const pane = (name: string) => page.locator('.lab-team-pane').filter({ has: page.locator('.lab-team-pane-heading > strong', { hasText: new RegExp(`^${name}$`) }) });
+ const pane = (name: string) => page.getByRole('region', {name,exact:true});
  const openChild = async (parent: string, child: string) => {
   const list = pane(parent).getByRole('group', { name: 'Session subagents', exact: true });
   await expect(list).toBeVisible();
@@ -150,37 +148,37 @@ test('Team subagents belong to their parent pane and keep other families intact'
   await expect(pane(child).getByTestId('prompt-input')).toBeVisible();
   if (!isMobile) await expect.poll(async () => {
    const box = (await pane(child).boundingBox())!;
-   return box.x >= -1 && box.x + box.width <= page.viewportSize()!.width + 1;
-  }).toBe(true);
+   return Math.max(-box.x, box.x + box.width - page.viewportSize()!.width);
+  }).toBeLessThanOrEqual(1);
  };
  await pane('Leader').getByTestId('prompt-input').fill('Keep Leader draft');
  await openChild('Leader', 'leader-child');
  if (isMobile) {
-  await expect(page.locator('.lab-team-pane:visible')).toHaveCount(1);
+  await expect(page.locator('.lab-session-family-pane:visible')).toHaveCount(1);
   await pane('leader-child').getByRole('button', { name: 'Back to Leader', exact: true }).click();
   await expect(pane('Leader').getByTestId('prompt-input')).toContainText('Keep Leader draft');
   await openChild('Leader', 'leader-child');
  } else {
-  await expect(page.locator('.lab-team-pane-heading > strong')).toHaveText(['Main · Project', 'Leader', 'leader-child', 'Windows validation']);
+  expect(await page.locator('.lab-session-family-pane').evaluateAll(nodes => nodes.map(node => node.getAttribute('aria-label')))).toEqual(['Project', 'Leader', 'leader-child', 'Windows validation']);
   await pane('Leader').getByTestId('prompt-input').click();
   await expect(pane('leader-child')).toBeVisible();
  }
  await openChild('leader-child', 'leader-grandchild');
- if (isMobile) await page.locator('.lab-team-select select').selectOption('member');
+ if (isMobile) { await page.getByRole('button',{name:'Teams',exact:true}).click(); await page.locator('.lab-team-management > summary').click(); await page.locator('.lab-team-members').getByRole('button',{name:'Windows validation',exact:true}).click(); }
  await openChild('Windows validation', 'member-child');
  await page.screenshot({ path: info.outputPath('team-families.png') });
  if (isMobile) {
-  await page.locator('.lab-team-select select').selectOption('leader');
+  await page.getByRole('button',{name:'Teams',exact:true}).click(); await page.locator('.lab-team-management > summary').click(); await page.locator('.lab-team-members').getByRole('button',{name:'Leader',exact:true}).click();
   await expect(pane('leader-grandchild')).toBeVisible();
  } else {
-  await expect(page.locator('.lab-team-pane-heading > strong')).toHaveText(['Main · Project', 'Leader', 'leader-child', 'leader-grandchild', 'Windows validation', 'member-child']);
+  expect(await page.locator('.lab-session-family-pane').evaluateAll(nodes => nodes.map(node => node.getAttribute('aria-label')))).toEqual(['Project', 'Leader', 'leader-child', 'leader-grandchild', 'Windows validation', 'member-child']);
   await pane('leader-child').getByRole('button', { name: 'Close subagent', exact: true }).click();
   await expect(pane('leader-child')).toHaveCount(0);
   await expect(pane('leader-grandchild')).toHaveCount(0);
   await expect(pane('member-child')).toBeVisible();
   await expect(pane('Leader').getByTestId('prompt-input')).toContainText('Keep Leader draft');
  }
- expect(requests.map(value => [value.parentNativeSessionId, value.nativeSessionId])).toEqual([
+ expect(requests.slice(0, 3).map(value => [value.parentNativeSessionId, value.nativeSessionId])).toEqual([
   ['leader', 'leader-child'], ['leader-child', 'leader-grandchild'], ['member', 'member-child'],
  ]);
  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
@@ -189,7 +187,8 @@ test('Team subagents belong to their parent pane and keep other families intact'
  if (!isMobile) await expect(pane('leader-child')).toHaveCount(0);
 });
 
-test('Team child navigation uses the live session channel without navigating the hidden main workspace', async ({ page, isMobile }) => {
+test('Dock child navigation uses the live channel without replacing the main session', async ({ page, isMobile }) => {
+ test.skip(isMobile, 'Mobile uses the ordinary primary session navigation covered by the layout test.');
  const { showNewSession } = await import('./session-navigation');
  let leader: { agentId: string; nativeSessionId: string } | undefined;
  let child: { agentId: string; nativeSessionId: string } | undefined;
@@ -243,7 +242,111 @@ test('Team child navigation uses the live session channel without navigating the
  expect(requests).toEqual(Array(requests.length).fill({ providerId: provider, parentNativeSessionId: leader!.nativeSessionId, nativeSessionId: child!.nativeSessionId }));
  await childPane.getByRole('button', { name: isMobile ? 'Back to Leader' : 'Close subagent', exact: true }).click();
  await expect(parent.getByTestId('prompt-input')).toContainText('Keep Team draft');
- await page.getByRole('button', { name: 'Exit Team mode' }).click();
+ await page.getByRole('button', { name: 'Close Leader',exact:true }).click();
  await expect(primary.getByTestId('prompt-input')).toContainText('Keep primary draft');
  await expect(page).toHaveURL(address);
+});
+
+test('Team management adds members in a modal and preserves drafts after rejection', async ({ page }) => {
+ const actions: any[] = [];
+ let fail = true;
+ await page.route('**/v1/remote/teams/action', route => {
+  const input = route.request().postDataJSON(); actions.push(input);
+  return fail ? route.fulfill({status:503,json:{error:'Host temporarily unavailable'}}) : route.fulfill({json:team});
+ });
+ await page.goto('/e2e/fixtures/team.html');
+ await page.getByRole('button',{name:'Teams',exact:true}).click();
+ const panel=page.getByRole('region',{name:'Teams',exact:true});
+ await panel.locator('.lab-team-management > summary').click();
+ await panel.getByRole('button',{name:'Add member',exact:true}).click();
+ const dialog=page.getByRole('dialog',{name:'Add member',exact:true});
+ await expect(dialog).toBeVisible();await dialog.getByRole('combobox',{name:'Host',exact:true}).selectOption('win');
+ await dialog.getByRole('textbox',{name:'Name',exact:true}).fill('Linux investigator');
+ await dialog.getByRole('textbox',{name:'Working directory',exact:true}).fill('/work/project');
+ await dialog.getByRole('button',{name:'Add member',exact:true}).click();
+ await expect(dialog.getByRole('alert')).toBeVisible();
+ await expect(dialog.getByRole('textbox',{name:'Name',exact:true})).toHaveValue('Linux investigator');
+ fail=false;await dialog.getByRole('button',{name:'Add member',exact:true}).click();
+ await expect(dialog).toHaveCount(0);expect(actions).toHaveLength(2);expect(actions[0]).toEqual(actions[1]);
+ await expect(panel).toBeVisible();await expect(page.locator('.lab-session-dock-pane')).toHaveCount(0);
+ await panel.getByRole('button',{name:'Archive',exact:true}).click();
+ expect(actions.at(-1)).toEqual({teamId:'team',action:'archive'});
+});
+
+test('Applying another Team keeps existing docks and repeated opens do not duplicate sessions', async ({ page, isMobile }) => {
+ test.skip(isMobile, 'Independent docks require a wide workspace.');
+ const other={...team,id:'other-team',title:'Other Team',source:{...team.source,nativeSessionId:'other-source',title:'Other project'},members:[{...team.members[0],id:'other-leader',nativeSessionId:'other-leader',name:'Other leader'}]};
+ await page.route('**/v1/remote/teams',route=>route.fulfill({json:{teams:[team,other]}}));
+ await page.goto('/e2e/fixtures/team.html?children');
+ const open=async(title:string)=>{await page.getByRole('button',{name:'Teams',exact:true}).click();await page.locator('.lab-session-row').filter({hasText:title}).click();};
+ await open(team.title);
+ const leader=page.getByRole('region',{name:'Leader',exact:true});
+ await leader.getByTestId('prompt-input').fill('Keep across Team opens');
+ await leader.locator('.agent-child-sessions > summary').click();await leader.locator('[data-child-session-id="leader-child"]').click();
+ await expect(page.getByRole('region',{name:'leader-child',exact:true})).toBeVisible();
+ await open(other.title);
+ await expect(page.getByRole('region',{name:'Other project',exact:true})).toBeVisible();
+ await expect(page.locator('.lab-session-dock-pane')).toHaveCount(3);
+ await expect(leader.getByTestId('prompt-input')).toContainText('Keep across Team opens');
+ await expect(page.getByRole('region',{name:'leader-child',exact:true})).toBeVisible();
+ await leader.getByRole('button',{name:'Move Leader',exact:true}).focus();await page.keyboard.press('ArrowRight');
+ await expect(page.getByRole('region',{name:'Docked Leader',exact:true})).toHaveCSS('order','2');
+ await expect(page.getByRole('region',{name:'Docked Leader',exact:true}).getByRole('region',{name:'leader-child',exact:true})).toBeVisible();
+ await open(team.title);await expect(page.locator('.lab-session-dock-pane')).toHaveCount(3);
+ await page.reload();await expect(page.locator('.lab-session-dock-pane')).toHaveCount(3);
+ await expect(page.getByRole('region',{name:'Docked Leader',exact:true})).toHaveCSS('order','2');
+ // Closing a member is independent; Gather restores it without changing the main.
+ await page.getByRole('button',{name:'Close Windows validation',exact:true}).click();
+ await expect(page.locator('.lab-session-dock-pane')).toHaveCount(2);
+ await expect(leader).toBeVisible();
+ await leader.getByRole('button',{name:'Gather team members',exact:true}).click();
+ const member=page.getByRole('region',{name:'Windows validation',exact:true});
+ await member.locator('.agent-child-sessions > summary').click();
+ await member.locator('[data-child-session-id="member-child"]').click();
+ await expect(page.getByRole('region',{name:'member-child',exact:true})).toBeVisible();
+ // The close group survives reload and floating a member out of the rail.
+ await page.reload();
+ await page.getByRole('button',{name:'Float Windows validation',exact:true}).click();
+ await page.getByRole('button',{name:'Close Leader',exact:true}).click();
+ await expect(leader).toHaveCount(0);
+ await expect(member).toHaveCount(0);
+ await expect(page.getByRole('region',{name:'leader-child',exact:true})).toHaveCount(0);
+ await expect(page.getByRole('region',{name:'member-child',exact:true})).toHaveCount(0);
+ await expect(page.getByRole('region',{name:'Project',exact:true})).toBeVisible();
+ await expect(page.getByRole('region',{name:'Other leader',exact:true})).toBeVisible();
+ await expect(page.locator('.lab-session-dock-pane')).toHaveCount(1);
+ await page.reload();
+ await expect(page.locator('.lab-session-dock-pane')).toHaveCount(1);
+ await expect(leader).toHaveCount(0);
+ await expect(member).toHaveCount(0);
+});
+
+test('Gather uses the current roster and preserves existing floating members and the main session', async ({ page, isMobile }) => {
+ test.skip(isMobile, 'Gathering dock windows requires a wide workspace.');
+ let roster=structuredClone(team),fail=false;
+ await page.route('**/v1/remote/teams',route=>fail?route.fulfill({status:503,json:{error:'Team catalog is temporarily unavailable.'}}):route.fulfill({json:{teams:[roster]}}));
+ await page.goto('/e2e/fixtures/team.html');
+ await page.getByRole('button',{name:'Teams',exact:true}).click();
+ await page.locator('.lab-session-row').filter({hasText:team.title}).click();
+ const leader=page.getByRole('region',{name:'Leader',exact:true}), member=page.getByRole('region',{name:'Windows validation',exact:true});
+ await member.getByTestId('prompt-input').fill('Keep member draft');
+ await member.getByRole('button',{name:'Float Windows validation',exact:true}).click();
+ await page.reload();
+ await expect(member.getByRole('button',{name:'Dock Windows validation',exact:true})).toBeVisible();
+ roster={...roster,members:[...roster.members,{...roster.members[1]!,id:'linux',nativeSessionId:'linux-member',name:'Linux validation'}]};
+ fail=true;
+ await leader.getByRole('button',{name:'Gather team members',exact:true}).click();
+ await expect(leader.getByRole('alert')).toContainText('Team catalog is temporarily unavailable.');
+ await expect(page.getByRole('region',{name:'Linux validation',exact:true})).toHaveCount(0);
+ fail=false;
+ await leader.getByRole('button',{name:'Gather team members',exact:true}).click();
+ await expect(page.getByRole('region',{name:'Linux validation',exact:true})).toBeVisible();
+ await expect(member.getByRole('button',{name:'Dock Windows validation',exact:true})).toBeVisible();
+ await expect(member.getByTestId('prompt-input')).toContainText('Keep member draft');
+ await expect(page.getByRole('region',{name:'Project',exact:true})).toBeVisible();
+ await leader.getByRole('button',{name:'Gather team members',exact:true}).click();
+ await expect(page.locator('.lab-session-dock-pane')).toHaveCount(2);
+ await leader.getByRole('button',{name:'Close Leader',exact:true}).click();
+ await expect(member).toHaveCount(0);
+ await expect(page.getByRole('region',{name:'Linux validation',exact:true})).toHaveCount(0);
 });

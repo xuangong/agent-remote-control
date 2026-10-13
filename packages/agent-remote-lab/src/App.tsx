@@ -1,5 +1,10 @@
 import { TeamViewScope, useTeamVisibility } from './hooks/useTeamVisibility.js';
-import { TeamWorkspace } from './components/TeamWorkspace.js';
+import { teamLayoutTargets } from './team-layout.js';
+import { TeamMenu } from './components/TeamMenu.js';
+import { TeamGatherButton } from './components/TeamGatherButton.js';
+import type { Team } from '@orchardworks/agent-remote-protocol';
+import { useSessionWindows, sessionWindowId } from './hooks/useSessionWindows.js';
+import { SessionWindow } from './components/SessionWindow.js';
 import { SessionAskHome, SessionAskSurface, SessionAskSurfaceProvider } from './components/SessionAskSurface.js';
 import { resolveConversationLayout } from './conversation-layout.js';
 import { communicationResolver, communicationDirection, loadSessionCommunication, waitForCommunicationSession, type CommunicationSnapshot } from './session-communication.js';
@@ -631,12 +636,12 @@ function AppContent({
       undefined, undefined, view?.primarySlot ?? slotId)) trackedViews.select(entry?.entryId);
   }
 
-  async function openSession(item: Pick<SessionSummary, 'providerId' | 'nativeSessionId' | 'title'> & { hostId?: string; parentAgentId?: string; parentNativeSessionId?: string }, takeOver?: string, onRestoring?: () => void, letterNavigation = false, restoreView?: () => TrackedSessionView | undefined, sessionIntent?: 'history', keepOriginal?: boolean, primarySlot?: string): Promise<boolean> {
+  async function openSession(item: Pick<SessionSummary, 'providerId' | 'nativeSessionId' | 'title'> & { hostId?: string; parentAgentId?: string; parentNativeSessionId?: string }, takeOver?: string, onRestoring?: () => void, letterNavigation = false, restoreView?: () => TrackedSessionView | undefined, sessionIntent?: 'history', keepOriginal?: boolean, primarySlot?: string, placement?: 'primary'): Promise<boolean> {
     if (!letterNavigation) letterRequest.current?.abort();
     if (!directory || transitionRef.current) return false;
     rememberTrackedView();
     const selection = { ...item, hostId: item.hostId ?? selectedHost.id };
-    if (!primarySlot && sessionIntent !== 'history' && keepOriginal === undefined && !restoreView && !takeOver && !onRestoring) {
+    if (placement !== 'primary' && !primarySlot && sessionIntent !== 'history' && keepOriginal === undefined && !restoreView && !takeOver && !onRestoring) {
       const visible = stackPath.find(entry => sessionKey(entry) === sessionKey(selection));
       if (visible && !replicaFor(visible.agentId).getState().sessionControl?.nativeOwner) {
         setSideFocus(viewKey(visible));
@@ -877,9 +882,13 @@ function AppContent({
     });
   }, [sessionEntries]);
   const currentSession = sessionEntries.find((item) => item.agentId === activeAgentId) ?? succession.selected;
-  const [teamMode, setTeamMode] = useState(false);
-  const [teamMount, setTeamMount] = useState<HTMLDivElement | null>(null);
-  const [teamViewTarget, setTeamViewTarget] = useState<HTMLDivElement | null>(null);
+  const sessionWindows = useSessionWindows(baseUrl);
+  async function openTeamLayout(team: Team): Promise<boolean> {
+    const layout = teamLayoutTargets(team, compactLayout);
+    if (!await openSession(layout.main, undefined, undefined, false, undefined, undefined, undefined, undefined, 'primary')) return false;
+    sessionWindows.open(layout.dock, layout.groupRoot, team.id);
+    return true;
+  }
   const tpmView = useTpmVisibility();
   const teamView = useTeamVisibility();
   const [tpmListOpen, setTpmListOpen] = useState(false);
@@ -1622,12 +1631,12 @@ function AppContent({
       onOpen={clean => openAsk(source, sourceState, clean)} replicaFor={replicaFor} transport={transport}
       observations={tracking.observations} navigation={viewNavigation} />;
   }
-  return <SessionAskSurfaceProvider><SessionDockProvider key={baseUrl} storageScope={baseUrl} enabled={!compactLayout && activeView === 'workbench'}><TeamViewScope.Provider value={teamView.execute}><TpmViewScope.Provider value={tpmView.execute}><TrackViewScope.Provider value={userScoped ? attention.executeTrack : undefined}><ConversationConnectionScope.Provider value={connections}><VscodeTunnelScope service={vscodeTunnelClient} host={previewHost} polling={compactLayout ? contextOpen : desktopContextVisible}><PreviewScope client={previewClient} host={previewHost} polling={compactLayout ? contextOpen : desktopContextVisible}><RecoveryScope.Provider value={readingPositions}><main ref={shellRef} style={sidebar.style} className={`lab-shell${teamMode ? ' lab-team-mode' : ''}${headerHidden ? ' lab-header-hidden' : ''}${!compactLayout && !desktopContextVisible ? ' lab-context-hidden' : ''}${state?.agent ? ' lab-has-agent' : ''}${supportingRailOpen ? ' lab-supporting-open' : ''}${inspectorOpen ? ' lab-inspector-open' : ''}`}>
+  return <SessionAskSurfaceProvider><SessionDockProvider key={baseUrl} storageScope={baseUrl} enabled={!compactLayout && activeView === 'workbench'}><TeamViewScope.Provider value={teamView.execute}><TpmViewScope.Provider value={tpmView.execute}><TrackViewScope.Provider value={userScoped ? attention.executeTrack : undefined}><ConversationConnectionScope.Provider value={connections}><VscodeTunnelScope service={vscodeTunnelClient} host={previewHost} polling={compactLayout ? contextOpen : desktopContextVisible}><PreviewScope client={previewClient} host={previewHost} polling={compactLayout ? contextOpen : desktopContextVisible}><RecoveryScope.Provider value={readingPositions}><main ref={shellRef} style={sidebar.style} className={`lab-shell${headerHidden ? ' lab-header-hidden' : ''}${!compactLayout && !desktopContextVisible ? ' lab-context-hidden' : ''}${state?.agent ? ' lab-has-agent' : ''}${supportingRailOpen ? ' lab-supporting-open' : ''}${inspectorOpen ? ' lab-inspector-open' : ''}`}>
     {scanOpen ? <SessionTransferDialog onOpen={openScannedSession} onClose={() => setScanOpen(false)} /> : null}
     {activated ? tracking.observers : null}
     {userScoped && attention.trackVisible ? <SessionTrackingMenu catchUp={catchUp} tracking={tracking} busy={transitioning} inert={supportingRailOpen} onOpen={item => void openTrackedSession(item)} /> : null}
-    <TeamWorkspace visible={teamView.visible} baseUrl={baseUrl} enabled={accessReady && !!directory} compact={compactLayout} hosts={remoteHosts} source={(visibleStackRoot ?? currentSession) ? {hostId:(visibleStackRoot ?? currentSession)!.hostId ?? 'local', providerId:(visibleStackRoot ?? currentSession)!.providerId,nativeSessionId:(visibleStackRoot ?? currentSession)!.nativeSessionId,title:(visibleStackRoot ?? currentSession)!.title} : undefined}
-      transport={transport} draftStore={messageDrafts} navigation={viewNavigation} mount={teamMount} onModeChange={setTeamMode} viewTarget={setTeamViewTarget} />
+    <TeamMenu visible={teamView.visible} baseUrl={baseUrl} enabled={accessReady && !!directory} hosts={remoteHosts} source={(visibleStackRoot ?? currentSession) ? {hostId:(visibleStackRoot ?? currentSession)!.hostId ?? 'local', providerId:(visibleStackRoot ?? currentSession)!.providerId,nativeSessionId:(visibleStackRoot ?? currentSession)!.nativeSessionId,title:(visibleStackRoot ?? currentSession)!.title} : undefined}
+      onOpen={openTeamLayout} onOpenSession={openSession} />
     <TpmMenu tpm={tpm} open={tpmListOpen} onOpenChange={setTpmListOpen} mainSessions={tpmMainSessions} main={visibleStackRoot ?? currentSession} visible={tpmView.visible} triggerRef={tpmTriggerRef} inert={supportingRailOpen} />
     <div className="lab-tpm-workspaces">{tpm.opened.map((key, index) => {
       const item = tpm.works.find(item => item.key === key);
@@ -1656,7 +1665,7 @@ function AppContent({
         checked={addressSession ? ask.isEnabled(addressSession, succession.ownerFor(viewKey(addressSession))) : false} disabled={!addressSession}
         onChange={() => { if (addressSession) ask.toggle(addressSession, succession.ownerFor(viewKey(addressSession))); }} /></label>
       {userScoped ? attention.controls : null}{tpmView.controls}{teamView.controls}
-    </>} target={!headerHidden ? headerViewTarget : compactLayout ? mobileViewTarget : desktopContextVisible ? sidebarViewTarget : activeView === 'trace' ? traceViewTarget : (teamMode ? teamViewTarget : minimizedViewTarget) ?? sessionViewTarget}
+    </>} target={!headerHidden ? headerViewTarget : compactLayout ? mobileViewTarget : desktopContextVisible ? sidebarViewTarget : activeView === 'trace' ? traceViewTarget : minimizedViewTarget ?? sessionViewTarget}
       triggerRef={viewTriggerRef} headerVisible={!headerHidden} sidebarVisible={contextVisible}
       inspectorVisible={inspectorOpen} compact={compactLayout} inert={supportingRailOpen}
       onSetAllVisible={setAllPanelsVisible} onToggleHeader={() => setHeaderHidden((value) => !value)} onToggleSidebar={toggleContext}
@@ -1811,8 +1820,13 @@ function AppContent({
         tabIndex={-1}
         hidden={activeView !== 'workbench'}
       >
-        <div ref={setTeamMount} className="lab-team-mount" />
-        <div className="lab-ordinary-workspace" hidden={teamMode}>
+        <div className="lab-session-windows">{sessionWindows.entries.map(entry => <SessionWindow key={sessionWindowId(entry.target)} entry={entry} baseUrl={baseUrl}
+          visible={!compactLayout && activeView === 'workbench' && !supportingRailOpen} compact={compactLayout}
+          hostLabel={remoteHosts.find(host => host.id === entry.target.hostId)?.name ?? entry.target.hostId}
+          offline={remoteHosts.find(host => host.id === entry.target.hostId)?.online === false}
+          actions={entry.groupId ? <TeamGatherButton baseUrl={baseUrl} entry={entry} onGather={targets => sessionWindows.gather(entry, targets)} /> : undefined}
+          transport={transport} draftStore={messageDrafts} navigation={viewNavigation} onClose={() => sessionWindows.close(entry.target)} />)}</div>
+        <div className="lab-ordinary-workspace">
         {sessionNotice && !nativeTakeover && !(compactLayout && contextOpen) ? <SessionConnectionNotice notice={sessionNotice} /> : null}
         {succession.error && succession.error !== nativeTakeover?.message ? <p role="alert">{succession.error}{!nativeTakeover ? <button type="button" onClick={succession.retry}>{succession.result?.status === 'applied' ? 'Retry session' : 'Retry synchronization'}</button> : null}</p> : null}
         {promptMigrations.notice}

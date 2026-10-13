@@ -1,3 +1,4 @@
+import { TeamViewScope, useTeamVisibility } from './hooks/useTeamVisibility.js';
 import { TeamWorkspace } from './components/TeamWorkspace.js';
 import { SessionAskHome, SessionAskSurface, SessionAskSurfaceProvider } from './components/SessionAskSurface.js';
 import { resolveConversationLayout } from './conversation-layout.js';
@@ -880,6 +881,7 @@ function AppContent({
   const [teamMount, setTeamMount] = useState<HTMLDivElement | null>(null);
   const [teamViewTarget, setTeamViewTarget] = useState<HTMLDivElement | null>(null);
   const tpmView = useTpmVisibility();
+  const teamView = useTeamVisibility();
   const [tpmListOpen, setTpmListOpen] = useState(false);
   const tpmTriggerRef = useRef<HTMLButtonElement>(null);
   const candidateTpmService = hostClient as Partial<TpmService>;
@@ -1620,11 +1622,11 @@ function AppContent({
       onOpen={clean => openAsk(source, sourceState, clean)} replicaFor={replicaFor} transport={transport}
       observations={tracking.observations} navigation={viewNavigation} />;
   }
-  return <SessionAskSurfaceProvider><SessionDockProvider key={baseUrl} storageScope={baseUrl} enabled={!compactLayout && activeView === 'workbench'}><TpmViewScope.Provider value={tpmView.execute}><TrackViewScope.Provider value={userScoped ? attention.executeTrack : undefined}><ConversationConnectionScope.Provider value={connections}><VscodeTunnelScope service={vscodeTunnelClient} host={previewHost} polling={compactLayout ? contextOpen : desktopContextVisible}><PreviewScope client={previewClient} host={previewHost} polling={compactLayout ? contextOpen : desktopContextVisible}><RecoveryScope.Provider value={readingPositions}><main ref={shellRef} style={sidebar.style} className={`lab-shell${teamMode ? ' lab-team-mode' : ''}${headerHidden ? ' lab-header-hidden' : ''}${!compactLayout && !desktopContextVisible ? ' lab-context-hidden' : ''}${state?.agent ? ' lab-has-agent' : ''}${supportingRailOpen ? ' lab-supporting-open' : ''}${inspectorOpen ? ' lab-inspector-open' : ''}`}>
+  return <SessionAskSurfaceProvider><SessionDockProvider key={baseUrl} storageScope={baseUrl} enabled={!compactLayout && activeView === 'workbench'}><TeamViewScope.Provider value={teamView.execute}><TpmViewScope.Provider value={tpmView.execute}><TrackViewScope.Provider value={userScoped ? attention.executeTrack : undefined}><ConversationConnectionScope.Provider value={connections}><VscodeTunnelScope service={vscodeTunnelClient} host={previewHost} polling={compactLayout ? contextOpen : desktopContextVisible}><PreviewScope client={previewClient} host={previewHost} polling={compactLayout ? contextOpen : desktopContextVisible}><RecoveryScope.Provider value={readingPositions}><main ref={shellRef} style={sidebar.style} className={`lab-shell${teamMode ? ' lab-team-mode' : ''}${headerHidden ? ' lab-header-hidden' : ''}${!compactLayout && !desktopContextVisible ? ' lab-context-hidden' : ''}${state?.agent ? ' lab-has-agent' : ''}${supportingRailOpen ? ' lab-supporting-open' : ''}${inspectorOpen ? ' lab-inspector-open' : ''}`}>
     {scanOpen ? <SessionTransferDialog onOpen={openScannedSession} onClose={() => setScanOpen(false)} /> : null}
     {activated ? tracking.observers : null}
     {userScoped && attention.trackVisible ? <SessionTrackingMenu catchUp={catchUp} tracking={tracking} busy={transitioning} inert={supportingRailOpen} onOpen={item => void openTrackedSession(item)} /> : null}
-    <TeamWorkspace baseUrl={baseUrl} enabled={accessReady && !!directory} compact={compactLayout} hosts={remoteHosts} source={(visibleStackRoot ?? currentSession) ? {hostId:(visibleStackRoot ?? currentSession)!.hostId ?? 'local', providerId:(visibleStackRoot ?? currentSession)!.providerId,nativeSessionId:(visibleStackRoot ?? currentSession)!.nativeSessionId,title:(visibleStackRoot ?? currentSession)!.title} : undefined}
+    <TeamWorkspace visible={teamView.visible} baseUrl={baseUrl} enabled={accessReady && !!directory} compact={compactLayout} hosts={remoteHosts} source={(visibleStackRoot ?? currentSession) ? {hostId:(visibleStackRoot ?? currentSession)!.hostId ?? 'local', providerId:(visibleStackRoot ?? currentSession)!.providerId,nativeSessionId:(visibleStackRoot ?? currentSession)!.nativeSessionId,title:(visibleStackRoot ?? currentSession)!.title} : undefined}
       transport={transport} draftStore={messageDrafts} navigation={viewNavigation} mount={teamMount} onModeChange={setTeamMode} viewTarget={setTeamViewTarget} />
     <TpmMenu tpm={tpm} open={tpmListOpen} onOpenChange={setTpmListOpen} mainSessions={tpmMainSessions} main={visibleStackRoot ?? currentSession} visible={tpmView.visible} triggerRef={tpmTriggerRef} inert={supportingRailOpen} />
     <div className="lab-tpm-workspaces">{tpm.opened.map((key, index) => {
@@ -1653,7 +1655,7 @@ function AppContent({
       <label title="Enable Ask for the selected session"><span>Ask view</span><input data-view-control="ask" type="checkbox"
         checked={addressSession ? ask.isEnabled(addressSession, succession.ownerFor(viewKey(addressSession))) : false} disabled={!addressSession}
         onChange={() => { if (addressSession) ask.toggle(addressSession, succession.ownerFor(viewKey(addressSession))); }} /></label>
-      {userScoped ? attention.controls : null}{tpmView.controls}
+      {userScoped ? attention.controls : null}{tpmView.controls}{teamView.controls}
     </>} target={!headerHidden ? headerViewTarget : compactLayout ? mobileViewTarget : desktopContextVisible ? sidebarViewTarget : activeView === 'trace' ? traceViewTarget : (teamMode ? teamViewTarget : minimizedViewTarget) ?? sessionViewTarget}
       triggerRef={viewTriggerRef} headerVisible={!headerHidden} sidebarVisible={contextVisible}
       inspectorVisible={inspectorOpen} compact={compactLayout} inert={supportingRailOpen}
@@ -1928,7 +1930,7 @@ function AppContent({
       </div>
       <ReplicaInspector state={state} sessionStatus={status} providerName={providerName} />
     </SupportingRail>
-  </main></RecoveryScope.Provider></PreviewScope></VscodeTunnelScope></ConversationConnectionScope.Provider></TrackViewScope.Provider></TpmViewScope.Provider></SessionDockProvider></SessionAskSurfaceProvider>;
+  </main></RecoveryScope.Provider></PreviewScope></VscodeTunnelScope></ConversationConnectionScope.Provider></TrackViewScope.Provider></TpmViewScope.Provider></TeamViewScope.Provider></SessionDockProvider></SessionAskSurfaceProvider>;
 }
 
 function PreviewScope({ client, host, polling, children }: { readonly client: HttpPreviewClient; readonly host?: RemoteHost; readonly polling: boolean; readonly children: ReactNode }) {

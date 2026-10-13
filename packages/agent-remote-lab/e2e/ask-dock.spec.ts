@@ -65,7 +65,7 @@ test('Ask drags freely, animates to an edge at the released height, and stays cl
   expect(moved.x + moved.width).toBeLessThan(view.x + view.width);
   await expect(ask).toHaveCount(0);
   await release();
-  const animations = await owner.locator(':scope > .lab-ask-floating').evaluate(element => element.getAnimations().map(animation => animation.effect?.getTiming().duration));
+  const animations = await owner.locator('.lab-ask-floating').evaluate(element => element.getAnimations().map(animation => animation.effect?.getTiming().duration));
   expect(animations.some(duration => typeof duration === 'number' && duration >= 150)).toBe(true);
   await expectEdge(trigger, owner, 'left');
   expect((await trigger.boundingBox())!.y).toBeCloseTo(moved.y, 0);
@@ -93,7 +93,7 @@ test('keyboard docking honors reduced motion and restores each source independen
   await expect(trigger).toBeFocused();
   await expectEdge(trigger, owner, 'left');
   expect((await trigger.boundingBox())!.y - (await owner.boundingBox())!.y).toBeCloseTo(initialTop + 40, 0);
-  expect(await owner.locator(':scope > .lab-ask-floating').evaluate(element => parseFloat(getComputedStyle(element).transitionDuration))).toBeLessThanOrEqual(.00001);
+  expect(await owner.locator('.lab-ask-floating').evaluate(element => parseFloat(getComputedStyle(element).transitionDuration))).toBeLessThanOrEqual(.00001);
   const primary = owner.locator(':scope > .lab-session-view');
   await primary.getByTestId('prompt-input').fill('/side Keep a separate Ask dock');
   await primary.getByTestId('prompt-input').press('Enter');

@@ -1,4 +1,9 @@
+.lab-team-workspace[hidden] { display: none; }
+.lab-team-floating[data-hidden="true"] { visibility: hidden; pointer-events: none; }
 .lab-tracking-floating.lab-team-floating { top: 220px; right: 12px; z-index: 95; }
+@media (max-width: 599px), (max-height: 439px) {
+  .lab-tracking-floating.lab-team-floating { left: 12px; right: auto; }
+}
 .lab-team-mount { display: contents; }
 .lab-ordinary-workspace { display: contents; }
 .lab-ordinary-workspace[hidden] { display: none; }

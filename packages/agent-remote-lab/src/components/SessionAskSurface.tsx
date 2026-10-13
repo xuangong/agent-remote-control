@@ -21,7 +21,7 @@ export function SessionAskHome({ id }: { id: string }) {
 }
 export function SessionAskSurface({ id, active = true, children }: { id: string; active?: boolean; children: ReactNode }) {
   const { homes } = useContext(Context)!;
-  const [host] = useState(() => { const element = document.createElement('div'); element.style.display = 'contents'; return element; });
+  const [host] = useState(() => { const element = document.createElement('div'); element.className = 'lab-session-ask-surface'; return element; });
   const fallback = useRef<HTMLDivElement>(null);
   const home = active ? homes.get(id) : undefined;
   useLayoutEffect(() => { moveSessionHost(host, home ?? fallback.current!); return () => host.remove(); }, [host, home]);

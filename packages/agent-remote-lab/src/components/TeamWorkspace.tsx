@@ -15,7 +15,7 @@ import './team.css';
 
 interface Host { teamManagement?: true; id: string; name: string; online: boolean; providers?: Array<{providerId:string;displayName:string}> }
 interface Props {
-  baseUrl: string; enabled: boolean; compact: boolean; hosts: Host[]; source?: TeamSource;
+  baseUrl: string; enabled: boolean; visible?: boolean; compact: boolean; hosts: Host[]; source?: TeamSource;
   transport: RemoteAgentTransport; draftStore: DraftBinding['store']; navigation?: SessionViewNavigationFactory;
   mount: HTMLElement | null; onModeChange(active: boolean): void; viewTarget?(node: HTMLDivElement | null): void;
 }
@@ -23,7 +23,7 @@ const errorMessage = (error: unknown) => error instanceof Error ? error.message 
 function saved(scope: string) { try { return conversationSessionStorage.getItem(`agent-remote:team:${scope}`) ?? ''; } catch { return ''; } }
 
 export function TeamWorkspace(props: Props) {
-  const { baseUrl, enabled, hosts, source, mount, onModeChange } = props;
+  const { baseUrl, enabled, visible = true, hosts, source, mount, onModeChange } = props;
   const client = useMemo(() => new RemoteTeamClient(baseUrl, workspaceFetch), [baseUrl]);
   const [teams, setTeams] = useState<Team[]>([]), [selected, setSelected] = useState(() => saved(baseUrl));
   const [open, setOpen] = useState(false), [loading, setLoading] = useState(false), [busy, setBusy] = useState(false), [error, setError] = useState(''), [loadError, setLoadError] = useState('');
@@ -53,9 +53,10 @@ export function TeamWorkspace(props: Props) {
     return () => { stopped = true; ++generation.current; clearInterval(timer); document.removeEventListener('visibilitychange', load); };
   }, [client, enabled, baseUrl]);
   useEffect(() => {
-    const active = !!team && enabled; onModeChange(active);
+    const active = !!team && enabled && visible; onModeChange(active);
     try { if (selected) conversationSessionStorage.setItem(`agent-remote:team:${baseUrl}`, selected); else conversationSessionStorage.removeItem(`agent-remote:team:${baseUrl}`); } catch { /* Keep navigation available without storage. */ }
-  }, [team?.id, enabled, selected, baseUrl, onModeChange]);
+  }, [team?.id, enabled, visible, selected, baseUrl, onModeChange]);
+  useEffect(() => { if (!visible) setOpen(false); }, [visible]);
   useEffect(() => {
     if (!open) return;
     const dismiss = (event: PointerEvent) => { if (event.target instanceof Node && !root.current?.contains(event.target)) setOpen(false); };
@@ -89,7 +90,7 @@ export function TeamWorkspace(props: Props) {
   }
   if (!enabled) return null;
   return <>
-    <div ref={root} style={style} {...handlers} className="lab-tracking-floating lab-team-floating" onKeyDown={event => { handlers.onKeyDown?.(event); if (event.key === 'Escape') { setOpen(false); trigger.current?.focus(); } }}>
+    <div ref={root} data-hidden={!visible || undefined} aria-hidden={!visible || undefined} style={style} {...handlers} className="lab-tracking-floating lab-team-floating" onKeyDown={event => { handlers.onKeyDown?.(event); if (event.key === 'Escape') { setOpen(false); trigger.current?.focus(); } }}>
       <button ref={trigger} className="lab-session-popover-trigger" aria-expanded={open} aria-label="Teams" onClick={() => { setOpen(!open); void refresh().catch(error => setError(errorMessage(error))); }}><span>Team</span><span>{teams.filter(item => item.status !== 'archived').length}</span></button>
       {open ? <section className="lab-session-popover-panel lab-tpm-panel" aria-label="Teams">
         <div className="lab-directory-heading"><h2>Teams</h2><button onClick={() => setOpen(false)} aria-label="Close Teams">×</button></div>
@@ -119,7 +120,7 @@ function TeamWorkspaceBody(props: Props & { team: Team; busy: boolean; error: st
       target:{hostId:member.hostId,providerId:member.providerId,nativeSessionId:member.nativeSessionId ?? '',title:member.name}, member })),
   ];
   const activePane = panes.some(pane => pane.id === current) ? current : panes.find(pane => pane.member?.role === 'leader')?.id ?? 'source';
-  return <section className="lab-team-workspace" aria-label={`Team: ${team.title}`} data-compact={compact || undefined}>
+  return <section hidden={props.visible === false} className="lab-team-workspace" aria-label={`Team: ${team.title}`} data-compact={compact || undefined}>
     <header className="lab-team-heading"><div ref={props.viewTarget} className="lab-global-view-slot" /><button onClick={() => setRenaming(!renaming)} title="Rename Team"><strong>{team.title}</strong></button>
       <button disabled={busy || team.status !== 'active'} onClick={() => setAdding(!adding)}>Add member</button>
       <button disabled={busy || team.status === 'archiving'} onClick={() => void onChange({teamId:team.id,action:team.status === 'archived' ? 'restore' : 'archive'})}>{team.status === 'archived' ? 'Restore' : team.status === 'archiving' ? 'Archiving…' : 'Archive'}</button>

@@ -1,3 +1,4 @@
+import { TeamViewCommand, TeamViewScope } from '../hooks/useTeamVisibility.js';
 import { TrackViewCommand, TrackViewScope } from '../hooks/useSessionAttention.js';
 import { TpmViewCommand, TpmViewScope } from '../hooks/useTpmVisibility.js';
 import { useContext, type ComponentProps } from 'react';
@@ -15,14 +16,16 @@ export type { SessionViewActions as LabWorkbenchActions } from '@orchardworks/ag
 export function LabWorkbench({ draftBinding, displayBinding, defaultDisplayMode, ...props }: ComponentProps<typeof SessionWorkbench> & { draftBinding?: DraftBinding; displayBinding?: DisplayPreferenceBinding }) {
   const trackCommand = useContext(TrackViewScope);
   const tpmCommand = useContext(TpmViewScope);
+  const teamCommand = useContext(TeamViewScope);
   const positions = useContext(RecoveryScope);
   const draft = useBoundDraft(draftBinding);
   const [displayPreferences, onDisplayPreferencesChange] = useSessionDisplayPreferences(displayBinding?.scope ?? positions?.scope,
     displayBinding?.key ?? props.draftSessionKey ?? props.state?.agent?.runtimeInfo.sessionId ?? props.attachingAgentId, defaultDisplayMode);
   return <SessionWorkbench {...props}
-    consoleCommands={trackCommand || tpmCommand ? [...(trackCommand ? [TrackViewCommand] : []), ...(tpmCommand ? [TpmViewCommand] : []), ...(props.consoleCommands ?? [])] : props.consoleCommands}
-    onExecuteConsoleCommand={trackCommand || tpmCommand ? (id, args) => id === TrackViewCommand.id && trackCommand ? trackCommand(args)
+    consoleCommands={trackCommand || tpmCommand || teamCommand ? [...(trackCommand ? [TrackViewCommand] : []), ...(tpmCommand ? [TpmViewCommand] : []), ...(teamCommand ? [TeamViewCommand] : []), ...(props.consoleCommands ?? [])] : props.consoleCommands}
+    onExecuteConsoleCommand={trackCommand || tpmCommand || teamCommand ? (id, args) => id === TrackViewCommand.id && trackCommand ? trackCommand(args)
       : id === TpmViewCommand.id && tpmCommand ? tpmCommand(args)
+      : id === TeamViewCommand.id && teamCommand ? teamCommand(args)
       : props.onExecuteConsoleCommand ? props.onExecuteConsoleCommand(id, args) : Promise.reject(new Error('Unknown console command.')) : props.onExecuteConsoleCommand}
     displayPreferences={displayPreferences} onDisplayPreferencesChange={onDisplayPreferencesChange}
     readingPositions={positions} draftScope={positions?.scope}

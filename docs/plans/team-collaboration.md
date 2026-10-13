@@ -61,3 +61,7 @@ Relay and Controller must both support Team. Capability negotiation uses the `te
 - Chromium and WebKit, desktop and mobile: Team entry, resizing, narrow navigation, draft retention and refresh pass. Existing workspace tests verify main/Side navigation and independent docks; desktop-only dock tests are intentionally skipped on mobile.
 - Controller and Lab type checks, dependency/web builds, and compatibility update/check pass. No installed Controller or production service was replaced.
 - These tests validate SDK integration and real transport behavior, not real Codex/Claude Code/Copilot/OpenCode task execution on remote machines. A live-provider smoke test remains a release verification step.
+
+## Team presentation preference
+
+Use `/team` or **View → Team view** to toggle the Team entry and workspace. Explicit `/team on`, `/team off`, `/team enable`, and `/team disable` are supported. The preference is saved locally and defaults to visible. Hiding the view restores the ordinary workspace without ending Team work, archiving it, or discarding the selected Team, pane state, or drafts. Showing it again restores the selected Team.

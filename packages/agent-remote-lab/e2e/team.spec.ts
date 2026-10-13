@@ -1,4 +1,8 @@
-import { expect, test } from '@playwright/test';
+import { expect, test, type Page } from '@playwright/test';
+async function openView(page: Page) {
+ const trigger = page.getByRole('button', { name: 'View options', exact: true });
+ if (await trigger.getAttribute('aria-expanded') !== 'true') await trigger.click();
+}
 const team={id:'team',operationId:'create',revision:1,title:'Diagnose across Hosts',status:'active',source:{hostId:'mac',providerId:'codex',nativeSessionId:'source',title:'Project'},createdAt:1,updatedAt:1,messages:[],members:[
  {id:'leader',name:'Leader',role:'leader',hostId:'mac',providerId:'codex',nativeSessionId:'leader',creation:'ready',activity:'idle',responsibility:'Discuss and implement',summary:'',updatedAt:1},
  {id:'member',name:'Windows validation',role:'member',hostId:'win',providerId:'codex',nativeSessionId:'member',creation:'ready',activity:'idle',responsibility:'Check service logs',summary:'',updatedAt:1},
@@ -45,6 +49,37 @@ test('Team mode mounts in the product shell and restores the ordinary session dr
  await expect(primary).toBeHidden();await expect(page.locator('.lab-team-workspace')).toBeVisible();
  await expect(page.locator('.lab-team-pane:visible')).toHaveCount(isMobile?1:2);
  await expect(page.locator('.lab-team-workspace').getByTestId('prompt-input').first()).toBeEnabled();
+ const leaderInput = page.getByRole('region', { name: 'Leader', exact: true }).getByTestId('prompt-input');
+ await leaderInput.fill('Keep the Leader draft while hidden');
+ await openView(page);
+ await page.getByRole('checkbox', { name: 'Team view', exact: true }).uncheck();
+ await expect(primary).toBeVisible(); await expect(page.locator('.lab-team-workspace')).toBeHidden();
+ await expect(primary.getByTestId('prompt-input')).toContainText('Keep the ordinary workspace draft');
+ await openView(page);
+ await page.getByRole('checkbox', { name: 'Team view', exact: true }).check();
+ await expect(leaderInput).toBeVisible(); await expect(leaderInput).toContainText('Keep the Leader draft while hidden');
+ await leaderInput.fill('/team off'); await leaderInput.press('Enter'); await expect(primary).toBeVisible();
+ await openView(page);
+ await page.getByRole('checkbox', { name: 'Team view', exact: true }).check();
+ await expect(page.locator('.lab-team-workspace')).toBeVisible();
  await page.getByRole('button',{name:'Exit Team mode'}).click();await expect(primary).toBeVisible();
  await expect(primary.getByTestId('prompt-input')).toContainText('Keep the ordinary workspace draft');
+});
+
+test('Team command and View switch share a retained presentation preference', async ({ page }) => {
+ const { showNewSession } = await import('./session-navigation');
+ await page.goto('/'); await showNewSession(page); await page.getByTestId('session-create').click();
+ const primary = page.locator('.lab-primary-conversation > .lab-session-view');
+ const input = primary.getByTestId('prompt-input');
+ await expect(input).toBeEnabled();
+ const entry = page.getByRole('button', { name: 'Teams', exact: true });
+ await expect(entry).toBeVisible();
+ await input.fill('/team off'); await input.press('Enter'); await expect(entry).toBeHidden();
+ await openView(page);
+ const toggle = page.getByRole('checkbox', { name: 'Team view', exact: true });
+ await expect(toggle).not.toBeChecked(); await toggle.check(); await expect(entry).toBeVisible();
+ await input.click(); await input.fill('/team'); await input.press('Enter'); await expect(entry).toBeHidden();
+ await page.reload(); await expect(input).toBeEnabled(); await expect(entry).toBeHidden();
+ await input.fill('/team on'); await input.press('Enter'); await expect(entry).toBeVisible();
+ await openView(page); await expect(toggle).toBeChecked();
 });

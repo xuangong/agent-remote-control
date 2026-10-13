@@ -50,7 +50,7 @@ function committed(from = 'A', to = 'B', revision = 2, roleId = 'primary', provi
       receipt: { ...request, to: native(to, providerId), phase: 'committed', committedRevision: revision, startedAt: 'now', updatedAt: 'now',
         prepared: { ...request, to: native(to, providerId), workspace, associationRevision: 1, participants: [], capture: { epoch: 'epoch', seq: 1, capturedAt: 'now' } } } } };
 }
-async function failureFixture(advanceDuringRecovery = false, nativeIdentity?: string | null, strict = false, flags = '', setup?: { chain?: SessionSuccessionReplay[]; replayFailure?: string; selected?: string; providerId?: string; userScoped?: boolean; favorites?: FavoritesSnapshot; holdRelationsInitially?: boolean; holdReplayInitially?: boolean; preserveNativeState?: boolean; children?: AgentChildSession[]; timeline?: ProjectedTimelineEntry[]; nativeStatus?: 'idle' | 'running'; successionDescription?: SuccessionDescription; successionStatus?(): SuccessionActionResult; attachmentFailure?(body: Record<string, unknown>): { status: number; payload: unknown } | undefined; seed?(scope: string, source: OpenedSession): void | Promise<void> }) {
+async function failureFixture(advanceDuringRecovery = false, nativeIdentity?: string | null, strict = false, flags = '', setup?: { chain?: SessionSuccessionReplay[]; replayFailure?: string; selected?: string; providerId?: string; userScoped?: boolean; favorites?: FavoritesSnapshot; holdRelationsInitially?: boolean; holdReplayInitially?: boolean; holdTimelineInitially?: boolean; holdSnapshotInitially?: boolean; holdAccessInitially?: boolean; nativeConnection?: 'connected' | 'restoring'; preserveNativeState?: boolean; children?: AgentChildSession[]; timeline?: ProjectedTimelineEntry[]; nativeStatus?: 'idle' | 'running'; successionDescription?: SuccessionDescription; successionStatus?(): SuccessionActionResult; attachmentFailure?(body: Record<string, unknown>): { status: number; payload: unknown } | undefined; seed?(scope: string, source: OpenedSession): void | Promise<void> }) {
   configureImageDraftPersistence(() => false);
   const requests: Array<{ url: string; body?: Record<string, unknown> }> = [];
   const providerId = setup?.providerId ?? 'recorded';
@@ -65,6 +65,11 @@ async function failureFixture(advanceDuringRecovery = false, nativeIdentity?: st
   let createGate: Promise<void> | undefined, releaseCreate: (() => void) | undefined;
   let relationsGate: Promise<void> | undefined, releaseRelations: (() => void) | undefined;
   if (setup?.holdRelationsInitially) relationsGate = new Promise(resolve => { releaseRelations = resolve; });
+  let releaseTimeline: (() => void) | undefined;
+  const timelineGate = setup?.holdTimelineInitially ? new Promise<void>(resolve => { releaseTimeline = resolve; }) : undefined;
+  let releaseSnapshot: (() => void) | undefined, releaseAccess: (() => void) | undefined;
+  const snapshotGate = setup?.holdSnapshotInitially ? new Promise<void>(resolve => { releaseSnapshot = resolve; }) : undefined;
+  const accessGate = setup?.holdAccessInitially ? new Promise<void>(resolve => { releaseAccess = resolve; }) : undefined;
   const attachmentGates = new Map<string, Promise<void>>();
   let currentGate: Promise<void> | undefined;
   let controlGate: Promise<void> | undefined;
@@ -142,7 +147,9 @@ async function failureFixture(advanceDuringRecovery = false, nativeIdentity?: st
         } });
         const active = activeUpdates.get(agentId) ?? new Set(); activeUpdates.set(agentId, active); active.add(update); callbacks.set(frame.subscriptionId, update);
         updates.push(update); updatesByAgent.set(agentId, (identity, connection) => { for (const callback of activeUpdates.get(agentId) ?? []) callback(identity, connection); });
-        update(agentId === 'agent-B' ? nativeIdentity ?? null : nativeFor(agentId));
+        if (snapshotGate) await snapshotGate;
+        update(agentId === 'agent-B' ? nativeIdentity ?? null : nativeFor(agentId), setup?.nativeConnection);
+        if (accessGate) await accessGate;
         emit({ protocolVersion: PROTOCOL_VERSION, type: 'session_control', payload: { agentId: frame.agentId, revision: 'control', access: 'control', available: false, token: 'token' } });
       }
       if (frame.message?.type === 'session_control_request') {
@@ -157,6 +164,7 @@ async function failureFixture(advanceDuringRecovery = false, nativeIdentity?: st
         state: { status: 'available', mediaType: 'image/png', byteLength: 68, sha256: 'fixture-image', imageDimensions: { width: 1, height: 1 }, contentBase64: 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+j4AAAAABJRU5ErkJggg==' },
       } });
       if (frame.message?.type === 'timeline_subscription') emit({ protocolVersion: PROTOCOL_VERSION, type: 'timeline_subscribed', payload: { requestId: frame.message.payload.requestId, agentIds: [agentId] } });
+      if (frame.message?.type === 'timeline_request' && timelineGate) await timelineGate;
       if (frame.message?.type === 'timeline_request') emit({ protocolVersion: PROTOCOL_VERSION, type: 'timeline_page', payload: {
         requestId: frame.message.payload.requestId, agentId, direction: frame.message.payload.direction, epoch: `epoch-${agentId}`, reset: false, staleCursor: false, gap: false, error: null,
         window: { minSeq: 0, maxSeq: setup?.timeline?.length ?? 0, nextSeq: (setup?.timeline?.length ?? 0) + 1 }, startCursor: null, endCursor: null, hasOlder: setup?.preserveNativeState === true && agentId === 'agent-A' && frame.message.payload.direction !== 'before', hasNewer: false,
@@ -188,6 +196,9 @@ async function failureFixture(advanceDuringRecovery = false, nativeIdentity?: st
     async reload(selected?: string) { await unmount(view); if (selected) window.history.replaceState(null, '', `/?host=host&provider=${providerId}&session=${selected}`); view = await render(<Access />); },
     async newTab(selected: string) { await unmount(view); sessionStorage.clear(); window.history.replaceState(null, '', `/?host=host&provider=${providerId}&session=${selected}`); view = await render(<Access />); },
     setAccessReady(ready: boolean) { setAccessReady(ready); },
+    releaseTimeline() { releaseTimeline?.(); },
+    releaseSnapshot() { releaseSnapshot?.(); },
+    releaseAccess() { releaseAccess?.(); },
     setNativeIdentity(identity: string | null) { nativeIdentity = identity; },
     rebind(nativeSessionId: string, agentId: string) { nativeBindings.set(nativeSessionId, agentId); },
     setFavorites(snapshot: FavoritesSnapshot) { favorites = snapshot; },
@@ -1875,7 +1886,7 @@ it('keeps post-upgrade view preferences and owners when opening the session in a
   expect(f.frames.filter(frame => frame.message && ['send_message', 'execute_command', 'image_upload_begin'].includes(frame.message.type))).toEqual([]);
 });
 
-it('keeps a synchronized native binding alive past its confirmation deadline while replay is pending', async () => {
+it('keeps a synchronized native binding alive while composition replay is pending', async () => {
   const real = successionHooks.useSessionSuccession;
   let succession!: ReturnType<typeof real>, options!: Parameters<typeof real>[0];
   vi.spyOn(successionHooks, 'useSessionSuccession').mockImplementation((...args) => { options = args[0]; succession = real(...args); return succession; });
@@ -1883,9 +1894,8 @@ it('keeps a synchronized native binding alive past its confirmation deadline whi
   const releaseAttach = f.holdAttach('B');
   let releaseCurrent = () => {};
   const nativeSetTimeout = globalThis.setTimeout;
-  let shortenedDeadlines = 0;
   const deadlineSpy = vi.spyOn(globalThis, 'setTimeout').mockImplementation((callback, delay, ...args) => {
-    if (delay === 15000) { shortenedDeadlines++; return nativeSetTimeout(callback, 200, ...args); }
+    if (delay === 15000) return nativeSetTimeout(callback, 200, ...args);
     return nativeSetTimeout(callback, delay, ...args);
   });
   try {
@@ -1906,7 +1916,6 @@ it('keeps a synchronized native binding alive past its confirmation deadline whi
       expect(nativeConnection()?.client.getSessionState().recovering).toBe(false);
     });
     const synchronizedConnection = nativeConnection()!;
-    expect(shortenedDeadlines).toBe(1);
     deadlineSpy.mockRestore();
     expect(outcome).toBe('pending');
     expect(succession.binding).toBeUndefined();
@@ -1924,3 +1933,91 @@ it('keeps a synchronized native binding alive past its confirmation deadline whi
     expect(f.requests.filter(request => request.url.endsWith('/attach') && request.body?.nativeSessionId === 'B')).toHaveLength(1);
   } finally { deadlineSpy.mockRestore(); releaseAttach(); releaseCurrent(); }
 }, 10000);
+
+
+it.each(['history', 'control', 'runtime'] as const)('keeps a matching session alive while %s is still recovering', async phase => {
+  const real = successionHooks.useSessionSuccession;
+  let succession!: ReturnType<typeof real>, options!: Parameters<typeof real>[0];
+  vi.spyOn(successionHooks, 'useSessionSuccession').mockImplementation((...args) => { options = args[0]; succession = real(...args); return succession; });
+  const nativeSetTimeout = globalThis.setTimeout;
+  vi.spyOn(globalThis, 'setTimeout').mockImplementation((callback, delay, ...args) =>
+    nativeSetTimeout(callback, delay === 15000 ? 200 : delay, ...args));
+  const f = await failureFixture(false, 'B', false, '', {
+    holdTimelineInitially: phase === 'history', holdAccessInitially: phase === 'control',
+    nativeConnection: phase === 'runtime' ? 'restoring' : 'connected',
+  });
+  const connection = () => options.connections.find({ hostId: 'host', providerId: 'recorded', nativeSessionId: 'B' });
+  await settleApp(() => expect(connection()?.replica.getState().agent?.runtimeInfo.sessionId).toBe('B'));
+  const initial = connection()!;
+  await act(async () => { await new Promise(resolve => nativeSetTimeout(resolve, 300)); });
+  expect(succession.error).toBeUndefined();
+  expect(succession.binding).toBeUndefined();
+  expect(succession.sessionState.synchronized).toBe(false);
+  expect(succession.sessionState.operations.send_message.allowed).toBe(false);
+  expect(succession.imageRecipient).toBeUndefined();
+  expect(succession.sessionState.connection).toBe(initial.client.getSessionState().connection);
+  if (phase === 'control') expect(succession.sessionState.controlChecking).toBe(true);
+  if (phase === 'runtime') expect(succession.sessionState.runtime?.state).toBe('restoring');
+  if (phase === 'history') expect(succession.sessionState.connection).toBe('catching_up');
+  await editVisiblePrompt(f.view, 'Keep this draft while recovering');
+  expect(f.frames.filter(frame => frame.message && ['send_message', 'interaction_response', 'image_upload_begin'].includes(frame.message.type))).toEqual([]);
+  await act(async () => { f.releaseTimeline(); f.releaseAccess(); f.updatesByAgent.get('agent-B')?.('B'); });
+  await settleApp(() => expect(succession.binding?.session.nativeSessionId).toBe('B'));
+  expect(succession.error).toBeUndefined();
+  expect(succession.binding?.client).toBe(initial.client);
+  expect(f.view.querySelector('[data-testid="prompt-input"]')?.textContent).toBe('Keep this draft while recovering');
+  expect(f.requests.filter(request => request.url.endsWith('/attach'))).toHaveLength(1);
+});
+
+it('reconnects automatically when the initial snapshot does not arrive before the public deadline', async () => {
+  const real = successionHooks.useSessionSuccession;
+  let succession!: ReturnType<typeof real>;
+  vi.spyOn(successionHooks, 'useSessionSuccession').mockImplementation((...args) => { succession = real(...args); return succession; });
+  const nativeSetTimeout = globalThis.setTimeout;
+  vi.spyOn(globalThis, 'setTimeout').mockImplementation((callback, delay, ...args) =>
+    nativeSetTimeout(callback, delay === 15000 ? 150 : delay === 20000 ? 500 : delay, ...args));
+  const f = await failureFixture(false, 'B', false, '', { holdSnapshotInitially: true });
+  await settleApp(() => expect(f.frames.some(frame => frame.type === 'subscribe' && frame.agentId === 'agent-B')).toBe(true));
+  await settleApp(() => expect(succession.sessionState.connection).toBe('disconnected'));
+  expect(succession.error).toBeUndefined();
+  expect(succession.binding).toBeUndefined();
+  expect(succession.sessionState.operations.send_message.allowed).toBe(false);
+  await act(async () => f.releaseSnapshot());
+  await settleApp(() => expect(succession.binding?.session.nativeSessionId).toBe('B'));
+  expect(succession.error).toBeUndefined();
+  expect(f.frames.filter(frame => frame.type === 'subscribe' && frame.agentId === 'agent-B').length).toBeGreaterThanOrEqual(2);
+  expect(f.requests.filter(request => request.url.endsWith('/attach'))).toHaveLength(1);
+});
+
+it('clears an identity error as soon as a matching snapshot arrives while history is still pending', async () => {
+  const real = successionHooks.useSessionSuccession;
+  let succession!: ReturnType<typeof real>;
+  vi.spyOn(successionHooks, 'useSessionSuccession').mockImplementation((...args) => { succession = real(...args); return succession; });
+  const f = await failureFixture(false, 'wrong-native', false, '', { holdTimelineInitially: true });
+  await settleApp(() => expect(succession.error).toBe('The native session identity could not be confirmed.'));
+  expect(succession.binding).toBeUndefined();
+  expect(succession.sessionState.operations.send_message.allowed).toBe(false);
+  await act(async () => f.updatesByAgent.get('agent-B')?.('B'));
+  await settleApp(() => expect(succession.error).toBeUndefined());
+  expect(succession.binding).toBeUndefined();
+  expect(succession.sessionState.operations.send_message.allowed).toBe(false);
+  await act(async () => f.releaseTimeline());
+  await settleApp(() => expect(succession.binding?.session.nativeSessionId).toBe('B'));
+  expect(f.requests.filter(request => request.url.endsWith('/attach'))).toHaveLength(1);
+});
+
+it('retires a slow attachment when navigating away and ignores its late identity updates', async () => {
+  const real = successionHooks.useSessionSuccession;
+  let succession!: ReturnType<typeof real>;
+  vi.spyOn(successionHooks, 'useSessionSuccession').mockImplementation((...args) => { succession = real(...args); return succession; });
+  const f = await failureFixture(false, 'B', false, '', { holdTimelineInitially: true });
+  await settleApp(() => expect(f.updatesByAgent.has('agent-B')).toBe(true));
+  expect(succession.binding).toBeUndefined();
+  await act(async () => succession.open({ hostId: 'host', providerId: 'recorded', nativeSessionId: 'D', title: 'Other session' }));
+  await settleApp(() => expect(f.updatesByAgent.has('agent-D')).toBe(true));
+  await act(async () => { f.updatesByAgent.get('agent-B')?.('wrong-native'); f.releaseTimeline(); });
+  await settleApp(() => expect(succession.binding?.session.nativeSessionId).toBe('D'));
+  expect(succession.error).toBeUndefined();
+  expect(succession.selected?.nativeSessionId).toBe('D');
+  expect(f.frames.filter(frame => frame.message && ['send_message', 'interaction_response', 'image_upload_begin'].includes(frame.message.type))).toEqual([]);
+});

@@ -23,6 +23,7 @@ import { readWorkspaceSnapshot, saveWorkspaceSnapshot, workspaceDisplayState } f
 type Selection = Pick<SessionEntry, 'hostId' | 'providerId' | 'nativeSessionId' | 'title'> & Partial<Pick<OpenedSession, 'agentId' | 'parentAgentId' | 'parentNativeSessionId' | 'createdAt'>> & { viewId?: string };
 interface NativeBinding {
   session: OpenedSession & { viewId: string }; client: RemoteSessionClient; replica: AgentReplica;
+  getSessionState(): RemoteSessionState;
   isCurrent(): boolean; isSynchronized(): boolean; recipient?: ImageDraftRecipient; retireRecipient(): void; resumeRecipient(): void; stop(): void;
 }
 interface DesiredSelection {
@@ -44,6 +45,7 @@ interface SuccessionOptions {
   failed(error: unknown, selection: Selection, retrying?: boolean): void;
 }
 const selectionFor = compositionSelection;
+const identityConfirmationError = 'The native session identity could not be confirmed.';
 const unavailable = (code: string): CompositionParticipantResult => ({ status: 'pending', retention: 'page', code });
 
 export interface SessionSuccessionHistoryNavigation {
@@ -383,17 +385,26 @@ export function useSessionSuccession(options: SuccessionOptions) {
       const viewCurrent = () => confirmed && exactIdentity();
       const imageCurrent = () => synchronized() && lease.client.getSessionState().operations.send_message.allowed && !lease.client.getSessionState().readOnly;
       const stops: Array<() => void> = [];
-      const confirmationDeadline = setTimeout(() => {
-        if (!current() || confirmed) return;
-        runtime.error = 'The native session identity could not be confirmed.'; binding.stop(); publish();
-      }, 15000);
+      // The public client owns synchronization deadlines and reconnects. A slow
+      // history or control response is not evidence of a native identity mismatch.
       const binding: NativeBinding = { session, client: lease.client, replica: lease.replica, isCurrent: viewCurrent, isSynchronized: synchronized,
+        getSessionState() {
+          const native = lease.client.getSessionState();
+          const pending = remoteSessionState(undefined, native.connection);
+          if (!exactIdentity()) return pending;
+          // Expose authoritative progress before composition admission, without
+          // granting operations until replay and the initial synchronization settle.
+          return viewCurrent() ? native : { ...native, synchronized: false, operations: pending.operations };
+        },
         resumeRecipient() { update(); },
         retireRecipient() { if (imageLifetime) imageLifetime.active = false; imageLifetime = undefined; binding.recipient = undefined; },
-        stop() { if (stopped) return; stopped = true; clearTimeout(confirmationDeadline); if (imageLifetime) imageLifetime.active = false; for (const stop of stops) stop(); lease.release(); } };
+        stop() { if (stopped) return; stopped = true; if (imageLifetime) imageLifetime.active = false; for (const stop of stops) stop(); lease.release(); } };
       const update = () => {
         if (stopped || !current()) { if (imageLifetime) imageLifetime.active = false; return; }
         const state = lease.replica.getState(), epoch = state.timeline.epoch;
+        if (exactIdentity()) {
+          if (runtime.error === identityConfirmationError) runtime.error = undefined;
+        } else if (state.agent) runtime.error = identityConfirmationError;
         if (imageLifetime && (!imageCurrent() || imageEpoch !== epoch)) { imageLifetime.active = false; imageLifetime = undefined; binding.recipient = undefined; }
         if (!imageLifetime && imageCurrent()) {
           const lifetime = { active: true }; imageLifetime = lifetime; imageEpoch = epoch;
@@ -401,11 +412,10 @@ export function useSessionSuccession(options: SuccessionOptions) {
             isCurrent: () => lifetime.active && imageLifetime === lifetime && imageCurrent() && lease.replica.getState().timeline.epoch === epoch };
         }
         const nativeReady = synchronized();
-        if (nativeReady) clearTimeout(confirmationDeadline);
         // Replay owns the composition until its participants settle. An earlier native
         // attachment must not invalidate that read by publishing its binding metadata.
         if (nativeReady && !confirmed && !runtime.discovering && runtime.result?.status === 'applied') {
-          confirmed = true; clearTimeout(confirmationDeadline); runtime.error = undefined;
+          confirmed = true; runtime.error = undefined;
           desired.slot.metadata = compositionSessionMetadata(session);
           runtime.document.editRevision++; save();
           latest.current.bindNative(binding); latest.current.confirmed(session);
@@ -415,7 +425,7 @@ export function useSessionSuccession(options: SuccessionOptions) {
             const revision = ask.ownerEditRevision(owner.id);
             ask.applySourceProjection(owner.id, session, revision, viewCurrent);
           }
-        } else if (state.agent && !exactIdentity()) runtime.error = 'The native session identity could not be confirmed.';
+        }
         publish();
       };
       runtime.binding = binding;
@@ -872,7 +882,7 @@ export function useSessionSuccession(options: SuccessionOptions) {
   }
   return {
     active: runtime.active && (options.enabled || !!desired), discovering: options.enabled && (!runtime.discovered || runtime.discovering), document: runtime.document, desired, selected, displaySlot,
-    state: visibleState, sessionState: bound?.client.getSessionState() ?? remoteSessionState(undefined, runtime.active ? 'connecting' : 'idle'),
+    state: visibleState, sessionState: runtime.binding?.getSessionState() ?? remoteSessionState(undefined, runtime.active ? 'connecting' : 'idle'),
     layoutView, layoutRevision: runtime.layoutRevision, captureLayout, binding: bound, imageRecipient: bound?.recipient, error: runtime.error, result: runtime.result,
     observerReady: live() && runtime.discovered && !runtime.discovering && (!runtime.active || !!bound),
     isCurrent: () => !!runtime.binding?.isCurrent(), open,

@@ -1,3 +1,4 @@
+import { projectResourceInputText } from '@orchardworks/agent-provider-sdk';
 import {claudeFileChanges} from './tool-result.js';
 import { boundToolResult, type AgentUserMessagePart, type ProviderResourceReference, type AgentToolResultJson, type AgentStreamEvent, type AgentTimelineItem, type AgentToolDetail, type ProviderObservation } from '@orchardworks/agent-provider-sdk';
 import { ClaudeImageRegistry } from './images.js';
@@ -54,7 +55,7 @@ export class ClaudeEventProjector {
       let imageIndex = 0;
       for (const [index, block] of content.entries()) {
         if (!record(block)) continue;
-        if (block.type === 'text' && typeof block.text === 'string') parts.push({ type: 'text', text: block.text });
+        if (block.type === 'text' && typeof block.text === 'string') parts.push(...projectResourceInputText(block.text));
         else if (block.type === 'image') {
           const image = this.images.projectUser(key, index, block, `image #${++imageIndex}`);
           parts.push(image.part);
@@ -63,7 +64,7 @@ export class ClaudeEventProjector {
       }
       const text = parts.map(part => part.type === 'text' ? part.text : `[${part.label}]`).join(imageIndex ? '' : '\n');
       if (text && !value.isSynthetic) events.push({ ...this.item(key, { type: 'user_message', text, messageId: value.uuid,
-        ...(imageIndex ? { content: parts } : {}) }), ...(imageIndex ? { resourceReferences } : {}) });
+        ...(parts.some(part=>part.type!=='text') ? { content: parts } : {}) }), ...(imageIndex ? { resourceReferences } : {}) });
       const toolResults = content.filter((block: unknown) => record(block) && block.type === 'tool_result');
       const structured = toolResults.length === 1 ? toolResultJson(imageMetadata(value.tool_use_result, toolResults[0].content)) : undefined;
       for (const block of toolResults) {

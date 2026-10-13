@@ -9,6 +9,7 @@ import { AgentCommandDetails } from './AgentCommandDetails.js';
 import { useAgentCommands } from './useAgentCommands.js';
 import { AgentActivityStatus } from './AgentActivityStatus.js';
 import { ComposerEditor, type ComposerEditorHandle } from './ComposerEditor.js';
+import { useResourceDraft, type UploadResource } from './useResourceDraft.js';
 import { ImageUploadStatus } from './ImageUploadStatus.js';
 import { useImageDraft, type UploadImage } from './useImageDraft.js';
 import { draftHasContent, snapshotContent } from './composer-document.js';
@@ -56,6 +57,7 @@ export interface AgentComposerProps {
   imageDraftBinding?: ImageDraftBinding;
   imageRecipient?: ImageDraftRecipient;
   onUploadImage?: UploadImage;
+  onUploadResource?: UploadResource;
   onSendMessageContent?(content: readonly MessagePart[], options?: AgentMessageOptions & { imageDigests?: Readonly<Record<string, string>> }): Promise<void>;
   draft?: string;
   onDraftChange?(text: string): void;
@@ -87,7 +89,7 @@ interface Draft {
   feedback?: { kind: 'success' | 'error'; message: string; delivery?: boolean };
 }
 
-export function AgentComposer({ sessionState: suppliedSessionState, readOnly: forcedReadOnly = false, draftOnly = false, mutationBlocked = false, readOnlyLabel, readOnlyNotice, readOnlyCollapsed = false, state, sessionControls, renderSessionSettingError, sessionKey, disabled = false, disabledLabel, recovering = false, pendingFirstInputContext: firstInputContext, draft: controlledDraft, onDraftChange, onPendingInputChange, onSendMessage, onCancel, onSetSessionSetting, onListCommands, onExecuteCommand, onInspectCommand, onRequestResource, onResolveResource, attachments, consoleCommands = [], onExecuteConsoleCommand, visible = true, activityVisible = visible, draftScope, imageDraftBinding, imageRecipient, onUploadImage, onSendMessageContent }: AgentComposerProps) {
+export function AgentComposer({ sessionState: suppliedSessionState, readOnly: forcedReadOnly = false, draftOnly = false, mutationBlocked = false, readOnlyLabel, readOnlyNotice, readOnlyCollapsed = false, state, sessionControls, renderSessionSettingError, sessionKey, disabled = false, disabledLabel, recovering = false, pendingFirstInputContext: firstInputContext, draft: controlledDraft, onDraftChange, onPendingInputChange, onSendMessage, onCancel, onSetSessionSetting, onListCommands, onExecuteCommand, onInspectCommand, onRequestResource, onResolveResource, attachments, consoleCommands = [], onExecuteConsoleCommand, visible = true, activityVisible = visible, draftScope, imageDraftBinding, imageRecipient, onUploadImage, onUploadResource, onSendMessageContent }: AgentComposerProps) {
   const pendingFirstInputContext = firstInputContext !== undefined;
   const controlId = `composer-${useId().replace(/:/gu, '')}`;
   const drafts = useRef(new Map<string, Draft>());
@@ -100,6 +102,7 @@ export function AgentComposer({ sessionState: suppliedSessionState, readOnly: fo
   const editorRef = useRef<ComposerEditorHandle>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const filePickerAgent = useRef<string>();
+  const resourceInputRef = useRef<HTMLInputElement>(null);
   const composing = useRef(false);
   const mounted = useRef(true);
   const focusRequested = useRef<string>();
@@ -129,16 +132,20 @@ export function AgentComposer({ sessionState: suppliedSessionState, readOnly: fo
   const readOnly = forcedReadOnly || !draftOnly && (session.readOnly || capabilities?.sendMessage === false);
   const terminal = state?.agent?.status === 'failed' || state?.agent?.status === 'closed';
   const canWait = !draftOnly && !mutationBlocked && (session.recovering || recovering || disabled || controlChecking || runtimeConnection?.state === 'reconnecting' || runtimeConnection?.state === 'restoring') && Boolean(state?.agent) && !readOnly && !terminal && runtimeConnection?.state !== 'unavailable';
-  const richEnabled = Boolean(imageDraftBinding || capabilities?.imageInput);
+  const richEnabled = Boolean(imageDraftBinding || capabilities?.imageInput || capabilities?.resourceInput);
   const imageDraft = useImageDraft({ scope: draftScope, sessionKey: agentId, binding: imageDraftBinding, recipient: imageRecipient, text, enabled: richEnabled, active: visible && ready && !readOnly && !pendingFirstInputContext && Boolean(capabilities?.imageInput), upload: onUploadImage,
     onTextChange: value => { currentDraft.text = value; onDraftChange?.(value); refresh(count => count + 1); } });
   const hasImages = richEnabled && imageDraft.hasImages;
+  const resourceDraft = useResourceDraft({ scope: imageDraftBinding?.scope ?? draftScope, sessionKey: imageDraftBinding?.key ?? agentId, parts: imageDraft.parts, documentHydrated: imageDraft.hydrated,
+    active: visible && ready && !readOnly && !pendingFirstInputContext && Boolean(capabilities?.resourceInput) && (!imageDraftBinding || Boolean(imageRecipient?.isCurrent())), limits: capabilities?.resourceInput, upload: onUploadResource, recipient: imageRecipient });
+  const hasResources = imageDraft.parts.some(part => part.type === 'resource');
+  const hasAttachments = hasImages || hasResources;
   const hasContent = richEnabled ? draftHasContent(imageDraft.parts) : Boolean(text.trim());
   const ownershipReadOnly = forcedReadOnly && Boolean(readOnlyNotice);
   const hideDraft = ownershipReadOnly && (readOnlyCollapsed || (!hasContent && !attachments && !currentDraft.selectedSkill));
-  const imageSendReady = !hasImages || !pendingFirstInputContext && imageDraft.ready;
+  const imageSendReady = (!hasImages || !pendingFirstInputContext && imageDraft.ready) && (!hasResources || resourceDraft.ready);
   const firstInputImageNotice = 'The first message must contain only text. Images can be sent after the previous history is included.';
-  const isCommand = !hasImages && text.trimStart().startsWith('/');
+  const isCommand = !hasAttachments && text.trimStart().startsWith('/');
   const nativeCommandsEnabled = !draftOnly && !mutationBlocked && !readOnly && capabilities?.commands === true;
   const readOnlyHint = 'This session is read-only. Direct input is disabled.';
   const wantsCommands = !draftOnly && !currentDraft.commandsDismissed && Boolean((!readOnly && isCommand) || currentDraft.commandsOpen);
@@ -152,7 +159,7 @@ export function AgentComposer({ sessionState: suppliedSessionState, readOnly: fo
   const nativeBusy = session.busy;
   const canQueue = !draftOnly && nativeBusy && capabilities?.queueMessage === true;
   const selectedSkill = currentDraft.selectedSkill;
-  const canSubmit = (ready && (isCommand || selectedSkill ? session.operations.execute_command.allowed || consoleCommands.length > 0 : session.operations.send_message.allowed)) || (canWait && !isCommand && !selectedSkill);
+  const canSubmit = (!hasResources || ready && waiting.items.length === 0) && ((ready && (isCommand || selectedSkill ? session.operations.execute_command.allowed || consoleCommands.length > 0 : session.operations.send_message.allowed)) || (canWait && !isCommand && !selectedSkill));
   if (activeTurnId === undefined) currentDraft.interruptedTurnId = undefined;
   const interruptRequested = (activeTurnId !== undefined && currentDraft.interruptedTurnId === activeTurnId)
     || (pending === 'command' && currentDraft.commandInterrupted === true);
@@ -346,7 +353,7 @@ export function AgentComposer({ sessionState: suppliedSessionState, readOnly: fo
     if (readOnly) return;
     if (hasImages && blockFirstInputImages()) return;
     if (kind === 'queue' && latest.current.pendingFirstInputContext) return;
-    if (hasImages && currentDraft.selectedSkill) { currentDraft.feedback = { kind: 'error', message: 'Remove the selected skill before sending images.' }; refresh(value => value + 1); return; }
+    if (hasAttachments && currentDraft.selectedSkill) { currentDraft.feedback = { kind: 'error', message: 'Remove the selected skill before sending attachments.' }; refresh(value => value + 1); return; }
     if (currentDraft.selectedSkill && !showCommands) {
       if (kind !== 'send' || nativeBusy || !ready || busy) return;
       await executeCommand(currentDraft.selectedSkill, currentDraft.text);
@@ -365,13 +372,14 @@ export function AgentComposer({ sessionState: suppliedSessionState, readOnly: fo
       }
       return;
     }
+    if (hasResources && waiting.items.length > 0) return;
     const action = onSendMessage;
-    if (kind === 'send' && (!ready || waiting.items.length > 0) && (ready || canWait) && !operationBusy && hasContent && capabilities?.sendMessage && (hasImages ? onSendMessageContent : action)) { deferMessage(); return; }
-    if ((hasImages ? !onSendMessageContent : !action) || currentDraft.pending || currentDraft.settingPending || !ready || !hasContent || !imageSendReady) return;
+    if (!hasResources && kind === 'send' && (!ready || waiting.items.length > 0) && (ready || canWait) && !operationBusy && hasContent && capabilities?.sendMessage && (hasImages ? onSendMessageContent : action)) { deferMessage(); return; }
+    if ((hasAttachments ? !onSendMessageContent : !action) || currentDraft.pending || currentDraft.settingPending || !ready || !hasContent || !imageSendReady) return;
     if (!(kind === 'queue' ? session.operations.queue_message.allowed : session.operations.send_message.allowed) || (kind === 'queue' && (!canQueue || waiting.items.length > 0))) return;
     const submitted = currentDraft.text;
     const submittedParts = imageDraft.parts;
-    const content = hasImages ? imageDraft.snapshot() : undefined;
+    const content = hasAttachments ? resourceDraft.snapshot(imageDraft.snapshot()) : undefined;
     const imageDigests = content ? imageDraft.digests() : undefined;
     const ownsImageEdit = imageDraft.captureEdit();
     currentDraft.pending = kind;
@@ -382,6 +390,7 @@ export function AgentComposer({ sessionState: suppliedSessionState, readOnly: fo
       else if (kind === 'queue') await action!(submitted.trim(), { delivery: 'next_turn' });
       else await action!(submitted.trim());
       if (currentDraft.text === submitted && (!richEnabled || ownsImageEdit() && imageDraft.parts === submittedParts)) {
+        if (hasResources) resourceDraft.clear();
         if (richEnabled) imageDraft.setText(''); else { currentDraft.text = ''; if (currentAgent.current === agentId) onDraftChange?.(''); }
       }
       currentDraft.feedback = { kind: 'success', message: kind === 'send' ? 'Message sent.' : 'Message queued by Provider.', delivery: true };
@@ -390,6 +399,7 @@ export function AgentComposer({ sessionState: suppliedSessionState, readOnly: fo
       if (content && ownsImageEdit() && error && typeof error === 'object' && 'code' in error && error.code === 'invalid_image_input') {
         imageDraft.rejectAttachments(content, 'The Host could not use this image. Retry the upload, replace it, or remove it.');
       }
+      if (content && ownsImageEdit() && error && typeof error === 'object' && 'code' in error && error.code === 'invalid_resource_input') resourceDraft.reject(content, 'The Host could not use this resource. Retry the upload or remove it.');
       currentDraft.feedback = { kind: 'error', message: error instanceof Error ? error.message : 'Agent command failed.' };
     } finally {
       currentDraft.pending = undefined;
@@ -427,10 +437,14 @@ export function AgentComposer({ sessionState: suppliedSessionState, readOnly: fo
   }
 
   const toolbarActions: ComposerAction[] = [];
-  if (richEnabled) toolbarActions.push({ id: 'images', label: 'Add images', content: 'Image', priority: 20,
+  if (richEnabled && (imageDraftBinding || capabilities?.imageInput)) toolbarActions.push({ id: 'images', label: 'Add images', content: 'Image', priority: 20,
     title: pendingFirstInputContext ? firstInputImageNotice : undefined,
     disabled: (!state?.agent && !draftOnly) || readOnly || busy || pendingFirstInputContext,
     run: () => { filePickerAgent.current = agentId; editorRef.current?.captureSelection(); fileInputRef.current?.click(); } });
+  if (capabilities?.resourceInput) toolbarActions.push({ id: 'resources', label: 'Add resources', content: 'Resource', priority: 19,
+    title: pendingFirstInputContext ? 'Resources can be sent after the previous history is included.' : undefined,
+    disabled: !ready || readOnly || busy || pendingFirstInputContext || !onUploadResource || !resourceDraft.hydrated,
+    run: () => { filePickerAgent.current = agentId; editorRef.current?.captureSelection(); resourceInputRef.current?.click(); } });
   toolbarActions.push({ id: 'commands', label: 'Open chat commands', content: '/',
     disabled: !ready || busy || (readOnly && consoleCommands.length === 0),
     run: () => { currentDraft.commandsOpen = !currentDraft.commandsOpen; currentDraft.commandsDismissed = false; refresh(value => value + 1); focusInput(); } });
@@ -441,6 +455,11 @@ export function AgentComposer({ sessionState: suppliedSessionState, readOnly: fo
 
   return <section className="agent-composer" aria-label="Live provider controls" aria-busy={busy} data-control-readonly={ownershipReadOnly || undefined}>
     {richEnabled ? <input ref={fileInputRef} type="file" hidden multiple accept="image/png,image/jpeg,image/webp" onChange={event => { const files = Array.from(event.currentTarget.files ?? []); event.currentTarget.value = ''; if (filePickerAgent.current === agentId) editorRef.current?.insertParts(addImageFiles(files)); }} /> : null}
+    {capabilities?.resourceInput ? <input ref={resourceInputRef} type="file" hidden multiple aria-label="Choose resources" onChange={event => {
+      const files = Array.from(event.currentTarget.files ?? []); event.currentTarget.value = '';
+      if (filePickerAgent.current !== agentId) return;
+      try { editorRef.current?.insertParts(resourceDraft.add(files)); } catch (error) { currentDraft.feedback = { kind: 'error', message: error instanceof Error ? error.message : 'Resource selection failed.' }; refresh(value => value + 1); }
+    }} /> : null}
     <PendingSendQueue items={waiting.items} onCancel={waiting.cancel} onRetry={waiting.retry} />
     <div className="agent-composer-input">
     {forcedReadOnly ? readOnlyNotice : null}
@@ -521,6 +540,15 @@ export function AgentComposer({ sessionState: suppliedSessionState, readOnly: fo
     </div> : null}
     {richEnabled && imageDraft.error ? <p className="agent-composer-note" role="alert">{imageDraft.error}</p> : null}
     {hasImages && pendingFirstInputContext && feedback?.message !== firstInputImageNotice ? <p className="agent-composer-note" role="status">{firstInputImageNotice}</p> : null}
+    {hasResources ? <div className="agent-resource-draft-list" aria-label="Resource uploads">{resourceDraft.items.map(({ id, label, record }) => <div className="agent-resource-draft" key={id}>
+      <span><strong>[{label}]</strong> {record?.name ?? 'File unavailable'} {record ? <small>{record.file.size.toLocaleString()} bytes · {record.status === 'uploading' ? `Uploading ${Math.round(record.progress * 100)}%` : record.status === 'ready' ? 'Ready' : record.status}</small> : null}</span>
+      {record?.error ? <span role="alert">{record.error}</span> : null}
+      {record?.status === 'failed' ? <button type="button" disabled={!ready || busy} onClick={() => resourceDraft.retry(id)}>Retry {label}</button> : null}
+      <button type="button" disabled={busy || readOnly} aria-label={`Remove ${label}`} onClick={() => imageDraft.setParts(imageDraft.parts.filter(part => part.type !== 'resource' || part.resourceId !== id))}>Remove</button>
+    </div>)}</div> : null}
+    {hasResources && (draftScope || imageDraftBinding?.scope) && !resourceDraft.storageError ? <p role="status" className="agent-composer-note">{imageDraft.storageSaved && !resourceDraft.storageBusy ? 'Resource draft saved on this device.' : 'Saving resource draft…'}</p> : null}
+    {hasResources && resourceDraft.storageError ? <p role="status" className="agent-composer-note">{resourceDraft.storageError}</p> : null}
+    {hasResources && !ready ? <p role="status" className="agent-composer-note">Resources remain in your draft. Reconnect before sending.</p> : null}
     {hasImages ? <ImageUploadStatus parts={imageDraft.parts} images={imageDraft.images} connected={ready} onOpen={imageId => editorRef.current?.openImage(imageId)} /> : null}
     {!ownershipReadOnly && runtimeUnavailable ? <p className="agent-composer-note" role="status">{runtimeUnavailable}</p>
       : !ownershipReadOnly && !state?.agent ? <p className="agent-composer-note">Open or attach to an Agent first.</p> : null}

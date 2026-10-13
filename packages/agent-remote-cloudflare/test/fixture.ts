@@ -167,8 +167,8 @@ export async function fixture(options: { actualEntry?: true; completeCodec?: tru
   async function upgrade(path: string, headers: Record<string, string>, requestOrigin = origin) {
     return (await upgradeResponse(path, headers, requestOrigin)).socket;
   }
-  async function host(key: string, promptEditing = false, controller?: Record<string, unknown>, sessionRename = false, daemonControl = false, providerId = 'codex', installationId = 'workers-host', tpmManagement = false, teamManagement = false) {
-    const socket = await upgrade(teamManagement ? '/ws/remote-host?team=1' : '/ws/remote-host', { authorization: `Bearer ${key}` });
+  async function host(key: string, promptEditing = false, controller?: Record<string, unknown>, sessionRename = false, daemonControl = false, providerId = 'codex', installationId = 'workers-host', tpmManagement = false, teamManagement = false, teamResources = false) {
+    const socket = await upgrade(teamManagement ? `/ws/remote-host?team=1${teamResources ? '&teamResources=1' : ''}` : '/ws/remote-host', { authorization: `Bearer ${key}` });
     const registered = event(socket, 'message'); send(socket, { type: 'register', ...(controller ? { controller } : {}), ...(tpmManagement ? { tpmManagement: true } : {}), credentialRotation: true, installationId, name: 'Workers Host', providers: [{ providerId, displayName: providerId, ...(promptEditing ? { promptEditing: true } : {}), ...(sessionRename ? { sessionRename: true } : {}), ...(daemonControl ? { daemonControl: true } : {}) }] });
     let message = await registered;
     if (message.type === 'credential_issued') {
@@ -180,7 +180,7 @@ export async function fixture(options: { actualEntry?: true; completeCodec?: tru
       const frame = JSON.parse(String(event.data));
       if (frame.type === 'heartbeat') send(socket, { type: 'heartbeat_ack', nonce: frame.nonce });
     });
-    return { socket, hostId: message.hostId as string, tunnelToken: message.tunnelToken as string, key };
+    return { socket, hostId: message.hostId as string, tunnelToken: message.tunnelToken as string, key, teamResources: message.teamResources === true };
   }
   function control(body: Record<string, unknown>) {
     const serialized = JSON.stringify(body); const iat = Math.floor(Date.now() / 1000);

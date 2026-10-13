@@ -18,12 +18,12 @@ async function fixture(enabled = true, advertise = true) {
   await new Promise<void>(resolve => server.once('listening', resolve));
   const sockets: WebSocket[] = [], urls: string[] = [], requests: any[] = [], responses: any[] = [];
   server.on('connection', (socket, request) => { sockets.push(socket); urls.push(request.url!); socket.on('message', data => requests.push(JSON.parse(String(data))));
-    socket.send(JSON.stringify({ protocolVersion: '1.7.0', type: 'ready', ...(advertise ? { successions: 1 } : {}) })); });
+    socket.send(JSON.stringify({ protocolVersion: '1.8.0', type: 'ready', ...(advertise ? { successions: 1 } : {}) })); });
   const address = server.address() as { port: number };
   const transport = new HttpWebSocketTransport(`http://127.0.0.1:${address.port}/`, { sessionChannels: true, sessionSuccessions: enabled, WebSocket });
   cleanups.push(() => new Promise<void>(resolve => { transport.dispose(); for (const socket of server.clients) socket.terminate(); server.close(() => resolve()); }));
   const connect = () => {
-    const connection = transport.connect('session', { onOpen() { connection.send({ protocolVersion: '1.7.0', type: 'negotiate' }); }, onMessage(message) { responses.push(message); }, onDisconnect() {} });
+    const connection = transport.connect('session', { onOpen() { connection.send({ protocolVersion: '1.8.0', type: 'negotiate' }); }, onMessage(message) { responses.push(message); }, onDisconnect() {} });
     return connection;
   };
   connect();
@@ -33,13 +33,13 @@ async function fixture(enabled = true, advertise = true) {
 test('opts in explicitly, delivers exact duplicates once and replays immutable evidence to late subscribers', async () => {
   const f = await fixture(); expect(f.urls[0]).toContain('&successions=1'); expect(f.transport.sessionSuccessionSupport).toBe('supported');
   const received = vi.fn(); f.transport.onSessionSuccession(received); const succession = replay();
-  for (let i = 0; i < 2; i++) f.sockets[0]!.send(JSON.stringify({ protocolVersion: '1.7.0', type: 'session_succession_committed', succession }));
+  for (let i = 0; i < 2; i++) f.sockets[0]!.send(JSON.stringify({ protocolVersion: '1.8.0', type: 'session_succession_committed', succession }));
   await vi.waitFor(() => expect(received).toHaveBeenCalledOnce());
   received.mock.calls[0]![0].to.nativeSessionId = 'mutated';
   const late = vi.fn(); f.transport.onSessionSuccession(late); expect(late).toHaveBeenCalledWith(succession);
   const diagnostic = vi.fn(); f.transport.onDiagnostic(diagnostic);
   const changed = replay(); changed.projection.receipt.updatedAt = 'changed';
-  f.sockets[0]!.send(JSON.stringify({ protocolVersion: '1.7.0', type: 'session_succession_committed', succession: changed }));
+  f.sockets[0]!.send(JSON.stringify({ protocolVersion: '1.8.0', type: 'session_succession_committed', succession: changed }));
   await vi.waitFor(() => expect(diagnostic).toHaveBeenCalledWith(expect.objectContaining({ code: 'succession_replay_conflict' })));
   expect(received).toHaveBeenCalledOnce();
 }, 10000);
@@ -47,7 +47,7 @@ test('keeps default off and treats an old ready as unsupported while ordinary ch
   const disabled = await fixture(false, false); expect(disabled.urls[0]).not.toContain('successions'); expect(disabled.transport.sessionSuccessionSupport).toBe('disabled');
   const old = await fixture(true, false); expect(old.transport.sessionSuccessionSupport).toBe('unsupported'); expect(old.requests[0].type).toBe('subscribe');
   const receive = vi.fn(); old.transport.onSessionSuccession(receive); const diagnostics = vi.fn(); old.transport.onDiagnostic(diagnostics);
-  old.sockets[0]!.send(JSON.stringify({ protocolVersion: '1.7.0', type: 'session_succession_committed', succession: replay() }));
+  old.sockets[0]!.send(JSON.stringify({ protocolVersion: '1.8.0', type: 'session_succession_committed', succession: replay() }));
   await vi.waitFor(() => expect(diagnostics).toHaveBeenCalled()); expect(receive).not.toHaveBeenCalled();
 }, 10000);
 test('validates explicit HTTP replay and current lookup without creating a native binding', async () => {
@@ -70,22 +70,22 @@ test('rejects succession before ready and semantically malformed locators withou
     const socket = { readyState: 1, onopen: null as any, onmessage: null as any, onclose: null as any, onerror: null as any, send() {}, close() {} };
     const transport = new HttpWebSocketTransport('https://relay.example/', { sessionChannels: true, sessionSuccessions: true, webSocketFactory: () => socket }); cleanups.push(() => transport.dispose());
     const received = vi.fn(); transport.onSessionSuccession(received); const diagnostics = vi.fn(); transport.onDiagnostic(diagnostics);
-    transport.connect('session', { onOpen() {}, onMessage() {}, onDisconnect() {} }).send({ protocolVersion: '1.7.0', type: 'negotiate' });
-    if (!beforeReady) socket.onmessage({ data: JSON.stringify({ protocolVersion: '1.7.0', type: 'ready', successions: 1 }) });
+    transport.connect('session', { onOpen() {}, onMessage() {}, onDisconnect() {} }).send({ protocolVersion: '1.8.0', type: 'negotiate' });
+    if (!beforeReady) socket.onmessage({ data: JSON.stringify({ protocolVersion: '1.8.0', type: 'ready', successions: 1 }) });
     const succession = replay(); if (!beforeReady) succession.to.nativeSessionId = 'forged';
-    socket.onmessage({ data: JSON.stringify({ protocolVersion: '1.7.0', type: 'session_succession_committed', succession }) });
+    socket.onmessage({ data: JSON.stringify({ protocolVersion: '1.8.0', type: 'session_succession_committed', succession }) });
     expect(received).not.toHaveBeenCalled(); expect(diagnostics).toHaveBeenCalledWith(expect.objectContaining({ code: 'invalid_wire_body' }));
   }
 }, 10000);
 
 test('retires succession replay and listeners on actual transport disposal, preserving active reconnect replay', async () => {
   const f = await fixture(); const received = vi.fn(); f.transport.onSessionSuccession(received); const succession = replay();
-  f.sockets[0]!.send(JSON.stringify({ protocolVersion: '1.7.0', type: 'session_succession_committed', succession }));
+  f.sockets[0]!.send(JSON.stringify({ protocolVersion: '1.8.0', type: 'session_succession_committed', succession }));
   await vi.waitFor(() => expect(received).toHaveBeenCalledOnce());
   f.sockets[0]!.terminate(); await vi.waitFor(() => expect(f.sockets[0]!.readyState).toBe(WebSocket.CLOSED));
   f.connect(); await vi.waitFor(() => expect(f.requests).toHaveLength(2));
-  f.sockets[1]!.send(JSON.stringify({ protocolVersion: '1.7.0', type: 'session_succession_committed', succession }));
-  f.sockets[1]!.send(JSON.stringify({ protocolVersion: '1.7.0', type: 'message', subscriptionId: f.requests[1].subscriptionId, message: { protocolVersion: '1.7.0', type: 'protocol_error', payload: { code: 'fixture', message: 'After replay', recoverable: false } } }));
+  f.sockets[1]!.send(JSON.stringify({ protocolVersion: '1.8.0', type: 'session_succession_committed', succession }));
+  f.sockets[1]!.send(JSON.stringify({ protocolVersion: '1.8.0', type: 'message', subscriptionId: f.requests[1].subscriptionId, message: { protocolVersion: '1.8.0', type: 'protocol_error', payload: { code: 'fixture', message: 'After replay', recoverable: false } } }));
   await vi.waitFor(() => expect(f.responses).toHaveLength(1));
   const activeLate = vi.fn(); f.transport.onSessionSuccession(activeLate); expect(activeLate).toHaveBeenCalledWith(succession);
   f.transport.dispose(); expect(f.transport.sessionSuccessionSupport).toBe('disabled');
@@ -102,12 +102,12 @@ test('cannot repopulate retired succession scope from late HTTP or captured chan
     webSocketFactory: () => { const socket = { readyState: 1, onopen: null as any, onmessage: null as any, onclose: null as any, onerror: null as any, send() {}, close() {} }; sockets.push(socket); return socket; } });
   cleanups.push(() => transport.dispose());
   const received = vi.fn(); transport.onSessionSuccession(received);
-  transport.connect('session', { onOpen() {}, onMessage() {}, onDisconnect() {} }).send({ protocolVersion: '1.7.0', type: 'negotiate' });
+  transport.connect('session', { onOpen() {}, onMessage() {}, onDisconnect() {} }).send({ protocolVersion: '1.8.0', type: 'negotiate' });
   const deliver = sockets[0].onmessage;
   const pending = transport.fetchSessionSuccessions(); transport.dispose();
   finish(new Response(JSON.stringify({ version: 1, successions: [replay()], nextCursor: null }))); await pending;
-  deliver({ data: JSON.stringify({ protocolVersion: '1.7.0', type: 'ready', successions: 1 }) });
-  deliver({ data: JSON.stringify({ protocolVersion: '1.7.0', type: 'session_succession_committed', succession: replay() }) });
+  deliver({ data: JSON.stringify({ protocolVersion: '1.8.0', type: 'ready', successions: 1 }) });
+  deliver({ data: JSON.stringify({ protocolVersion: '1.8.0', type: 'session_succession_committed', succession: replay() }) });
   const late = vi.fn(); transport.onSessionSuccession(late); expect(received).not.toHaveBeenCalled(); expect(late).not.toHaveBeenCalled();
   expect(transport.sessionSuccessionSupport).toBe('disabled'); expect((transport as any).successionListeners.size).toBe(0);
 }, 10000);

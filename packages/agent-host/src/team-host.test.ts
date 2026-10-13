@@ -1,4 +1,4 @@
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, rm, writeFile, readFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createServer } from 'node:http';
@@ -7,6 +7,8 @@ import { expect, it } from 'vitest';
 import type { AgentSession, AgentRuntimeInfo, AgentCapabilities, AgentSessionExtensions, AgentMessageOptions, ProviderStreamItem } from '@orchardworks/agent-provider-sdk';
 import { createRemoteHostBroker } from '../../agent-remote-lab/src/server/remote-host-broker.js';
 import { createAgentHost, type AgentHostDirectory } from './host.js';
+import { PortableTeamResourceStore } from '../../agent-remote-hosted/src/team-resources.js';
+import { createHash } from 'node:crypto';
 
 class NativeSession implements AgentSession {
   capabilities: AgentCapabilities = {history:true,sendMessage:true,queueMessage:false,steer:false,cancel:false,readResource:false,interactions:{question:false,toolApproval:false,planApproval:false}};
@@ -23,7 +25,8 @@ class NativeSession implements AgentSession {
 }
 it('registers two real Host uplinks, injects scoped tools, delivers both ways without a browser and archives after native idle',async()=>{
   const root=await mkdtemp(join(tmpdir(),'arc-team-'));
-  const server=createServer(), broker=createRemoteHostBroker({origin:'http://127.0.0.1:6175',ownerSubject:'owner',principalSubject:()=> 'owner'});
+  const resourceRows=new Map<string,Uint8Array>();const teamResources=new PortableTeamResourceStore({storage:{async get(key){return resourceRows.get(key);},async put(key,value){resourceRows.set(key,value);},async delete(key){resourceRows.delete(key);},async list(prefix){return [...resourceRows.keys()].filter(key=>key.startsWith(prefix));}}});
+  const server=createServer(), broker=createRemoteHostBroker({teamResources,origin:'http://127.0.0.1:6175',ownerSubject:'owner',principalSubject:()=> 'owner'});
   broker.install(server);server.listen(0,'127.0.0.1');await once(server,'listening');const base=`http://127.0.0.1:${(server.address() as {port:number}).port}`;
   const request=async(path:string,body?:unknown)=>{const response=await fetch(base+path,{signal:AbortSignal.timeout(5000),...(body===undefined?{}:{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)})});const value=await response.json();if(!response.ok)throw new Error(`${response.status}: ${JSON.stringify(value)}`);return value;};
   const hosts:Array<ReturnType<typeof createAgentHost>>=[];
@@ -52,15 +55,24 @@ it('registers two real Host uplinks, injects scoped tools, delivers both ways wi
     const call=async(target:typeof mac,nativeId:string,name:string,args:unknown)=>JSON.parse(await target.extensions.get(nativeId)!.tools!.find(tool=>tool.name===name)!.execute(args));
     expect(win.extensions.get(member.nativeSessionId)?.tools?.some(tool=>tool.name==='describe_team_member')).toBe(false);
     win.sessions.get(member.nativeSessionId)!.voidReceipt=true;
-    const task={to:member.id,operationId:'diagnose-1',text:'Read service logs and report the failing component.'};
+    const fixtureBytes=process.env.TEAM_RESOURCE_FIXTURE_PATH ? await readFile(process.env.TEAM_RESOURCE_FIXTURE_PATH) : Buffer.alloc(4*1024*1024+32768,93),fixturePath=join(root,'fixture.zip');await writeFile(fixturePath,fixtureBytes);
+    const resource=await call(mac,leader.nativeSessionId,'upload_team_resource',{path:fixturePath,operationId:'fixture-upload'});
+    expect(resource.sha256).toBe(createHash('sha256').update(fixtureBytes).digest('hex'));
+    await expect(call(win,member.nativeSessionId,'download_team_resource',{resourceId:resource.resourceId})).rejects.toThrow('access');
+    const task={to:member.id,operationId:'diagnose-1',text:'Read service logs and report the failing component.',resources:[resource.resourceId]};
     await call(mac,leader.nativeSessionId,'send_team_message',task);
     await expect.poll(()=>win.sessions.get(member.nativeSessionId)?.sent.length,{timeout:5000}).toBe(1);
     await call(mac,leader.nativeSessionId,'send_team_message',task);
     expect(win.sessions.get(member.nativeSessionId)?.sent).toHaveLength(1);
+    expect(win.sessions.get(member.nativeSessionId)?.sent[0]).toContain('[resource #1]');
+    const local=await call(win,member.nativeSessionId,'download_team_resource',{resourceId:resource.resourceId});expect(await readFile(local.localPath)).toEqual(fixtureBytes);
+    const reportPath=join(root,'report.json');await writeFile(reportPath,JSON.stringify({sha256:resource.sha256,verified:true}));
+    const reportResource=await call(win,member.nativeSessionId,'upload_team_resource',{path:reportPath,operationId:'report-upload'});
     expect(mac.sessions.get('source')?.sent).toHaveLength(0);
     await expect.poll(async()=> (await request('/v1/remote/teams')).teams[0].messages.find((message:any)=>message.text===task.text)?.status,{timeout:5000}).toBe('accepted');
-    await call(win,member.nativeSessionId,'send_team_message',{to:leader.id,operationId:'result-1',text:'Evidence: the service is disabled.'});
+    await call(win,member.nativeSessionId,'send_team_message',{to:leader.id,operationId:'result-1',text:'Evidence: the service is disabled.',resources:[reportResource.resourceId]});
     await expect.poll(()=>mac.sessions.get(leader.nativeSessionId)?.sent.length,{timeout:5000}).toBe(2);
+    const returned=await call(mac,leader.nativeSessionId,'download_team_resource',{resourceId:reportResource.resourceId});expect(JSON.parse(await readFile(returned.localPath,'utf8'))).toEqual({sha256:resource.sha256,verified:true});
     await win.sessions.get(member.nativeSessionId)!.finish();
     win.sessions.get(member.nativeSessionId)!.failReceipt=true;
     await call(mac,leader.nativeSessionId,'send_team_message',{...task,operationId:'uncertain-task'});

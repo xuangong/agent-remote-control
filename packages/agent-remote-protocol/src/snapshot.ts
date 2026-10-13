@@ -1,3 +1,4 @@
+import { ResourceInputCapabilities } from './resource-input.js';
 import { BackgroundActivity } from './background-activity.js';
 import { TimelineCursor } from './cursor.js';
 import { ImageInputCapabilities } from './image-input.js';
@@ -23,6 +24,7 @@ export type AgentStatus = Static<typeof AgentStatus>;
 export const AgentCapabilities = Strict({
   // Legacy snapshots and recordings may contain either value; live Relay snapshots advertise shared access.
   sessionControl: Type.Optional(Type.Union([Type.Literal('shared'), Type.Literal('exclusive')])),
+  resourceInput: Type.Optional(ResourceInputCapabilities),
   imageInput: Type.Optional(ImageInputCapabilities),
   history: Type.Boolean(),
   sendMessage: Type.Boolean(),

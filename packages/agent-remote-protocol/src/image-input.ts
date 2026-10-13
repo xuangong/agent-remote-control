@@ -8,11 +8,13 @@ export const ImageMediaType = Type.Union([Type.Literal('image/png'), Type.Litera
 export type ImageMediaType = Static<typeof ImageMediaType>;
 export const MessagePart = Type.Union([
   Strict({ type: Type.Literal('text'), text: Type.String() }),
+  Strict({ type: Type.Literal('resource'), resourceId: Id, label: Type.String({ minLength: 1, maxLength: 256 }) }),
   Strict({ type: Type.Literal('image'), attachmentId: Id, label: Type.String({ minLength: 1, maxLength: 256 }) }),
 ]);
 export type MessagePart = Static<typeof MessagePart>;
 export const UserMessagePart = Type.Union([
   Strict({ type: Type.Literal('text'), text: Type.String() }),
+  Strict({ type: Type.Literal('resource'), locator: Type.String({ minLength: 1 }), label: Type.String(), name: Type.String(), mediaType: Type.String(), byteLength: Type.Integer({minimum:0}), sha256: Digest }),
   Strict({ type: Type.Literal('image'), locator: Type.String({ minLength: 1 }), label: Type.String(), sha256: Type.Optional(Digest) }),
 ]);
 export type UserMessagePart = Static<typeof UserMessagePart>;

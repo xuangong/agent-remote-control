@@ -212,3 +212,18 @@ it.each([true, false])('negotiates Team transport without breaking older Relay r
   if(supported){expect(await client.teamRequest({action:'poll'})).toEqual([]);expect(requests).toBe(1);}
   else {await expect(client.teamRequest({action:'poll'})).rejects.toThrow('unavailable');expect(requests).toBe(0);}
 });
+
+it('keeps an older Team Relay connected and rejects unnegotiated resource calls locally', async () => {
+  const server=new WebSocketServer({host:'127.0.0.1',port:0});await new Promise<void>(resolve=>server.once('listening',resolve));
+  closeables.push(()=>new Promise<void>(resolve=>{for(const socket of server.clients)socket.terminate();server.close(()=>resolve());}));
+  let requests=0;
+  server.on('connection',socket=>socket.on('message',data=>{const message=JSON.parse(data.toString());
+    if(message.type==='register')socket.send(JSON.stringify({uplinkVersion:2,type:'registered',hostId:'host',teamManagement:true,heartbeat:{intervalMs:30000,timeoutMs:10000}}));
+    if(message.type==='team_request'){requests++;socket.send(JSON.stringify({uplinkVersion:2,type:'team_response',requestId:message.requestId,status:200,body:'[]'}));}
+  }));
+  const relay=createAgentRemoteRelay({providers:[]});closeables.push(()=>relay.close());
+  const client=createRemoteHostUplinkClient({relay,installationId:'host',name:'Host',remoteKey:'key',providers:[],teamManagement:true,url:`ws://127.0.0.1:${(server.address() as {port:number}).port}/ws/remote-host`,resolveSession:()=>undefined,control:()=>({status:404,body:'{}'})});closeables.push(()=>client.close());
+  await client.ready;
+  await expect(client.teamRequest({action:'resource_metadata',teamId:'team',memberId:'member',resourceId:'resource'})).rejects.toThrow('resources are unavailable');
+  expect(requests).toBe(0);expect(await client.teamRequest({action:'poll'})).toEqual([]);expect(requests).toBe(1);
+});

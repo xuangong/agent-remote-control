@@ -1,3 +1,6 @@
+import { InputResourceStore, type ResourceUploadDeclaration, type ResourceUploadChunk } from './resources/input-resource-store.js';
+import type { ResourceUploadReceipt, ResourceMetadata } from '@orchardworks/agent-remote-protocol';
+import type { AgentInputPart } from '@orchardworks/agent-provider-sdk';
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { AgentOperationRejectedError } from '@orchardworks/agent-provider-sdk';
 import { mergeBackgroundActivity, reduceSessionState, sessionOperationAvailability, updateUsageSnapshot, type SessionOperationKind } from '@orchardworks/agent-remote-protocol';
@@ -46,6 +49,7 @@ export interface AgentManagerAttachOptions {
   epoch: string;
   clock?: () => Date;
   resourceStore?: ResourceStore;
+  inputResourceStore?: InputResourceStore;
   inputImageStore?: InputImageStore;
   settingIntent?: OperationLifecycle['settingIntent'];
 }
@@ -57,6 +61,7 @@ export interface AgentManagerCreateOptions {
   epoch: string;
   clock?: () => Date;
   resourceStore?: ResourceStore;
+  inputResourceStore?: InputResourceStore;
   inputImageStore?: InputImageStore;
   settingIntent?: OperationLifecycle['settingIntent'];
 }
@@ -68,6 +73,7 @@ export interface AgentManagerResumeOptions {
   epoch: string;
   clock?: () => Date;
   resourceStore?: ResourceStore;
+  inputResourceStore?: InputResourceStore;
   inputImageStore?: InputImageStore;
   settingIntent?: OperationLifecycle['settingIntent'];
 }
@@ -84,7 +90,7 @@ export class InteractionResponseError extends Error {
 }
 
 export class UnsupportedAgentCapabilityError extends AgentOperationRejectedError {
-  constructor(readonly capability: 'image_input' | 'send_message' | 'queue_message' | 'steer' | 'cancel' | 'set_planning' | 'set_session_setting' | 'list_commands' | 'execute_command') {
+  constructor(readonly capability: 'resource_input' | 'image_input' | 'send_message' | 'queue_message' | 'steer' | 'cancel' | 'set_planning' | 'set_session_setting' | 'list_commands' | 'execute_command') {
     super('unsupported_command', `Provider does not support ${capability}.`);
     this.name = 'UnsupportedAgentCapabilityError';
   }
@@ -139,6 +145,7 @@ export class AgentManager {
     private readonly resourceIngestor: ResourceIngestor,
     private readonly inputImageStore?: InputImageStore,
     private readonly settingIntent?: OperationLifecycle['settingIntent'],
+    private readonly inputResourceStore?: InputResourceStore,
   ) {
     this.timeline = new TimelineStore(epoch);
     this.attentionCursor = { epoch, seq: 0 };
@@ -205,6 +212,7 @@ export class AgentManager {
       new ResourceIngestor({ store: options.resourceStore ?? new InMemoryResourceStore() }),
       options.inputImageStore,
       options.settingIntent,
+      options.inputResourceStore,
     );
   }
 
@@ -236,6 +244,7 @@ export class AgentManager {
         epoch: options.epoch,
         ...(options.clock === undefined ? {} : { clock: options.clock }),
         ...(options.resourceStore === undefined ? {} : { resourceStore: options.resourceStore }),
+        ...(options.inputResourceStore === undefined ? {} : { inputResourceStore: options.inputResourceStore }),
         ...(options.inputImageStore === undefined ? {} : { inputImageStore: options.inputImageStore }),
         ...(options.settingIntent === undefined ? {} : { settingIntent: options.settingIntent }),
       });
@@ -386,6 +395,7 @@ export class AgentManager {
     const capabilities = structuredClone(this.session.capabilities);
     capabilities.sessionControl = 'shared';
     if (!this.inputImageStore || !this.session.sendMessageContent || !capabilities.sendMessage) delete capabilities.imageInput;
+    if (!this.inputResourceStore || !this.session.sendMessageContent || !capabilities.sendMessage) delete capabilities.resourceInput;
     return capabilities;
   }
 
@@ -409,21 +419,38 @@ export class AgentManager {
   finishImageUpload(uploadId: string, scope?: string): Promise<ImageUploadReceipt> {
     return this.requireImageStore().finish(this.imageScope(scope), uploadId);
   }
+  private requireResourceStore(): InputResourceStore {
+    if (!this.session.capabilities.sendMessage || !this.session.capabilities.resourceInput || !this.session.sendMessageContent || !this.inputResourceStore) throw new UnsupportedAgentCapabilityError('resource_input');
+    return this.inputResourceStore;
+  }
+  beginResourceUpload(input: ResourceUploadDeclaration, scope?: string): Promise<ResourceUploadReceipt> { return this.requireResourceStore().begin(this.imageScope(scope), input); }
+  chunkResourceUpload(input: ResourceUploadChunk, scope?: string): Promise<ResourceUploadReceipt> { return this.requireResourceStore().chunk(this.imageScope(scope), input); }
+  finishResourceUpload(uploadId: string, scope?: string): Promise<ResourceUploadReceipt> { return this.requireResourceStore().finish(this.imageScope(scope), uploadId); }
+  downloadResource(resourceId: string, offset: number, scope?: string): Promise<ResourceMetadata & {offset:number;contentBase64:string}> {
+    if (!this.inputResourceStore) throw new UnsupportedAgentCapabilityError('resource_input');
+    return this.inputResourceStore.readChunk(this.imageScope(scope), resourceId, offset);
+  }
+  private async resolveMessageContent(parts: readonly MessagePart[], scope?: string): Promise<AgentInputPart[]> {
+    const images = parts.filter(part => part.type === 'image');
+    const resources = parts.filter(part => part.type === 'resource');
+    const resolvedImages = images.length ? await this.requireImageStore().resolveAndPin(this.imageScope(scope), images) : [];
+    const resolvedResources = resources.length ? await this.requireResourceStore().resolveAndPin(this.imageScope(scope), resources) : [];
+    let image = 0, resource = 0;
+    return parts.map(part => part.type === 'image' ? resolvedImages[image++]! : part.type === 'resource' ? resolvedResources[resource++]! : {...part});
+  }
   async validateMessageContent(parts: readonly MessagePart[], options?: AgentMessageOptions, scope?: string): Promise<void> {
-    if (!parts.some(part => part.type === 'image')) return;
-    const store = this.requireImageStore();
+    if (!parts.some(part => part.type !== 'text')) return;
     if (options?.delivery === 'next_turn' && this.session.capabilities.queueMessage !== true) throw new UnsupportedAgentCapabilityError('queue_message');
-    await store.resolveAndPin(this.imageScope(scope), parts);
+    await this.resolveMessageContent(parts, scope);
   }
   async sendMessageContent(parts: readonly MessagePart[], options?: AgentMessageOptions, scope?: string): Promise<AgentInputAcceptance | void> {
-    if (!parts.some(part => part.type === 'image')) return this.sendMessage(parts.map(part => part.type === 'text' ? part.text : '').join(''), options);
+    if (!parts.some(part => part.type !== 'text')) return this.sendMessage(parts.map(part => part.type === 'text' ? part.text : '').join(''), options);
     return this.prepareOperation(async dispatch => {
       if (this.pendingCommandExecutions > 0) throw new AgentBusyError('The Agent is busy executing a native command.');
       return this.serializeCommand(async () => {
         this.validateOperation(options?.delivery === 'next_turn' ? 'queue_message' : 'send_message');
-        const store = this.requireImageStore();
         if (options?.delivery === 'next_turn' && this.session.capabilities.queueMessage !== true) throw new UnsupportedAgentCapabilityError('queue_message');
-        const resolved = await store.resolveAndPin(this.imageScope(scope), parts);
+        const resolved = await this.resolveMessageContent(parts, scope);
         this.validateOperation(options?.delivery === 'next_turn' ? 'queue_message' : 'send_message');
         return dispatch(() => this.session.sendMessageContent!(resolved, options));
       });

@@ -1,3 +1,5 @@
+import { InputResourceError, type ResourceUploadDeclaration, type ResourceUploadChunk } from './resources/input-resource-store.js';
+import type { ResourceUploadReceipt, ResourceMetadata } from '@orchardworks/agent-remote-protocol';
 import { AgentOperationRejectedError } from '@orchardworks/agent-provider-sdk';
 import { OperationCacheError } from './operation-cache.js';
 import { isSessionMutation } from '@orchardworks/agent-remote-protocol';
@@ -48,6 +50,10 @@ export interface SessionWireAgent {
   sendMessage(text: string, options?: AgentMessageOptions): Promise<AgentInputAcceptance | void>;
   sendMessageContent?(parts: readonly MessagePart[], options?: AgentMessageOptions, scope?: string): Promise<AgentInputAcceptance | void>;
   validateMessageContent?(parts: readonly MessagePart[], options?: AgentMessageOptions, scope?: string): Promise<void>;
+  beginResourceUpload?(input: ResourceUploadDeclaration, scope?: string): Promise<ResourceUploadReceipt>;
+  chunkResourceUpload?(input: ResourceUploadChunk, scope?: string): Promise<ResourceUploadReceipt>;
+  finishResourceUpload?(uploadId: string, scope?: string): Promise<ResourceUploadReceipt>;
+  downloadResource?(resourceId: string, offset: number, scope?: string): Promise<ResourceMetadata & {offset:number;contentBase64:string}>;
   beginImageUpload?(input: ImageUploadDeclaration, scope?: string): Promise<ImageUploadReceipt>;
   chunkImageUpload?(input: ImageUploadChunk, scope?: string): Promise<ImageUploadReceipt>;
   finishImageUpload?(uploadId: string, scope?: string): Promise<ImageUploadReceipt>;
@@ -75,7 +81,7 @@ export type SessionWireFailure =
 export interface SessionWireOptions {
   sessionControls?: SessionControlRegistry;
   imageScope?: () => string;
-  authorize?: (action: 'read_resource' | 'resolve_resource' | 'image_upload' | 'send_message') => boolean | Promise<boolean>;
+  authorize?: (action: 'read_resource' | 'resolve_resource' | 'image_upload' | 'resource_upload' | 'send_message') => boolean | Promise<boolean>;
   executeOperation?: SessionWireOperationExecutor;
   maxBufferedManagerEvents?: number;
   onFailure?: (failure: SessionWireFailure) => void;
@@ -299,6 +305,32 @@ export function createSessionWire(
             message.payload.requestId,
           ));
           return;
+        case 'resource_upload_begin':
+        case 'resource_upload_chunk':
+        case 'resource_upload_finish': {
+          if (options.authorize && !await options.authorize('resource_upload')) {
+            sendMessage(protocolError('forbidden', 'Resource uploads are not permitted for this session.', true, requestId));
+            return;
+          }
+          const snapshot = boundAgent.snapshot();
+          if (!snapshot.payload.capabilities.sendMessage || !snapshot.payload.capabilities.resourceInput) throw new UnsupportedSessionCommandError('resource_upload');
+          const scope = options.imageScope?.();
+          assertControl();
+          let receipt: ResourceUploadReceipt;
+          if (message.type === 'resource_upload_begin' && boundAgent.beginResourceUpload) receipt = await boundAgent.beginResourceUpload(message.payload, scope);
+          else if (message.type === 'resource_upload_chunk' && boundAgent.chunkResourceUpload) receipt = await boundAgent.chunkResourceUpload(message.payload, scope);
+          else if (message.type === 'resource_upload_finish' && boundAgent.finishResourceUpload) receipt = await boundAgent.finishResourceUpload(message.payload.uploadId, scope);
+          else throw new UnsupportedSessionCommandError('resource_upload');
+          sendMessage({ protocolVersion: PROTOCOL_VERSION, type: 'resource_upload_result', payload: { requestId: message.payload.requestId, agentId: boundAgent.agentId, ...receipt } });
+          return;
+        }
+        case 'resource_download_request': {
+          if (options.authorize && !await options.authorize('read_resource')) { sendMessage(protocolError('forbidden', 'Resource download is not permitted.', true, requestId)); return; }
+          if (!boundAgent.downloadResource) throw new UnsupportedSessionCommandError('resource_download');
+          const chunk = await boundAgent.downloadResource(message.payload.resourceId, message.payload.offset, options.imageScope?.());
+          sendMessage({protocolVersion:PROTOCOL_VERSION,type:'resource_download_result',payload:{requestId:message.payload.requestId,agentId:boundAgent.agentId,...chunk}});
+          return;
+        }
         case 'image_upload_begin':
         case 'image_upload_chunk':
         case 'image_upload_finish': {
@@ -321,7 +353,7 @@ export function createSessionWire(
         case 'send_message': {
           const payload = message.payload;
           if ('content' in payload && options.authorize && !await options.authorize('send_message')) {
-            sendMessage(protocolError('forbidden', 'Image messages are not permitted for this session.', true, requestId));
+            sendMessage(protocolError('forbidden', 'Messages with attachments are not permitted for this session.', true, requestId));
             return;
           }
           if ('content' in payload && !boundAgent.sendMessageContent) throw new UnsupportedSessionCommandError('send_message_content');
@@ -334,6 +366,7 @@ export function createSessionWire(
             if ('content' in payload) {
               try { await boundAgent.validateMessageContent?.(payload.content, delivery, imageScope); }
               catch (error) {
+                if (error instanceof InputResourceError) throw Object.assign(new Error(error.message), { code: 'invalid_resource_input' });
                 if (error instanceof InputImageError) throw Object.assign(new Error(error.message), { code: 'invalid_image_input' });
                 throw error;
               }
@@ -472,8 +505,8 @@ export function createSessionWire(
         sendMessage(protocolError(error.code, error.message, ['operation_capacity_exceeded', 'unsupported_command', 'agent_busy'].includes(error.code), requestId));
         return;
       }
-      const imageOperation = message.type.startsWith('image_upload_') || (message.type === 'send_message' && 'content' in message.payload);
-      sendMessage(protocolError('command_failed', imageOperation && error instanceof InputImageError ? error.message : 'Agent command failed.', true, requestId));
+      const imageOperation = message.type.startsWith('resource_') || message.type.startsWith('image_upload_') || (message.type === 'send_message' && 'content' in message.payload);
+      sendMessage(protocolError('command_failed', imageOperation && (error instanceof InputImageError || error instanceof InputResourceError) ? error.message : 'Agent command failed.', true, requestId));
     }
   }
 
@@ -765,7 +798,7 @@ function isOperationExecutionError(error: unknown): error is Error & { code: str
     && 'code' in error
     && typeof error.code === 'string'
     && ['invalid_operation_id', 'invalid_operation_intent', 'operation_cache_closed', 'operation_capacity_exceeded',
-      'session_read_only', 'operation_conflict', 'operation_outcome_unknown', 'operation_rejected', 'operation_result_too_large', 'invalid_image_input'].includes(error.code);
+      'session_read_only', 'operation_conflict', 'operation_outcome_unknown', 'operation_rejected', 'operation_result_too_large', 'invalid_image_input', 'invalid_resource_input'].includes(error.code);
 }
 
 class UnsupportedSessionCommandError extends Error {

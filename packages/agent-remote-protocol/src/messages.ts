@@ -1,3 +1,4 @@
+import { ResourceUploadBeginRequest, ResourceUploadChunkRequest, ResourceUploadFinishRequest, ResourceUploadResult, ResourceDownloadRequest, ResourceDownloadResult } from './resource-input.js';
 import { BackgroundActivity } from './background-activity.js';
 import { SessionControlRequest, SessionControlMessage } from './session-control.js';
 import { MessagePart, ImageUploadBeginRequest, ImageUploadChunkRequest, ImageUploadFinishRequest, ImageUploadResult } from './image-input.js';
@@ -223,6 +224,7 @@ export type IncompatibleProtocolVersionErrorMessage = Static<typeof Incompatible
 
 export const ClientMessage = Type.Union([
   SessionControlRequest,
+  ResourceUploadBeginRequest, ResourceUploadChunkRequest, ResourceUploadFinishRequest, ResourceDownloadRequest,
   ImageUploadBeginRequest, ImageUploadChunkRequest, ImageUploadFinishRequest,
   ListCommandsRequest,
   ExecuteCommandRequest,
@@ -244,6 +246,7 @@ export type ClientMessage = Static<typeof ClientMessage>;
 
 export const ServerMessage = Type.Union([
   SessionControlMessage,
+  ResourceUploadResult, ResourceDownloadResult,
   ImageUploadResult,
   CommandListResponse,
   CommandResultResponse,

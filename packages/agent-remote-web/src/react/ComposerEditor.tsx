@@ -12,6 +12,10 @@ import { ImagePreview } from './ImagePreview.js';
 const schema = new Schema({ nodes: {
   doc: { content: 'inline*', whitespace: 'pre' },
   text: { group: 'inline' },
+  resource: { inline: true, group: 'inline', atom: true, selectable: true, draggable: false,
+    attrs: { resourceId: {}, label: {} },
+    toDOM: node => ['span', { 'data-resource-id': node.attrs.resourceId, class: 'agent-image-tag', contenteditable: 'false', 'aria-label': node.attrs.label }, `[${node.attrs.label}]`],
+  },
   image: { inline: true, group: 'inline', atom: true, selectable: true, draggable: false,
     attrs: { imageId: {}, label: {} },
     toDOM: node => ['span', { 'data-image-id': node.attrs.imageId, class: 'agent-image-tag', contenteditable: 'false', role: 'img', 'aria-label': node.attrs.label }, `[${node.attrs.label}]`],
@@ -19,11 +23,11 @@ const schema = new Schema({ nodes: {
 } });
 const CLIPBOARD = 'application/x-agent-remote-image-draft+json';
 function toDocument(parts: readonly DraftPart[]): ProseMirrorNode {
-  return schema.node('doc', null, parts.flatMap(part => part.type === 'text' ? part.text ? [schema.text(part.text)] : [] : [schema.node('image', part)]));
+  return schema.node('doc', null, parts.flatMap(part => part.type === 'text' ? part.text ? [schema.text(part.text)] : [] : [schema.node(part.type, part)]));
 }
 function fromDocument(doc: ProseMirrorNode): DraftPart[] {
   const parts: DraftPart[] = [];
-  doc.forEach(node => { if (node.isText) parts.push({ type: 'text', text: node.text! }); else if (node.type.name === 'image') parts.push({ type: 'image', imageId: String(node.attrs.imageId), label: String(node.attrs.label) }); });
+  doc.forEach(node => { if (node.isText) parts.push({ type: 'text', text: node.text! }); else if (node.type.name === 'resource') parts.push({ type: 'resource', resourceId: String(node.attrs.resourceId), label: String(node.attrs.label) }); else if (node.type.name === 'image') parts.push({ type: 'image', imageId: String(node.attrs.imageId), label: String(node.attrs.label) }); });
   return normalizeDraftParts(parts);
 }
 export interface ComposerEditorHandle { focus(): void; openImage(imageId: string): void; insertText(text: string): void; captureSelection(): void; insertParts(parts: readonly DraftPart[]): void }

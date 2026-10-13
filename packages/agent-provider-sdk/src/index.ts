@@ -11,3 +11,5 @@ export * from './session-tools.js';
 export * from './native-evidence.js';
 
 export type { BackgroundActivity } from './background-activity.js';
+
+export * from './resource-input.js';

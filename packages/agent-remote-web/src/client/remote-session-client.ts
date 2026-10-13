@@ -7,6 +7,8 @@ import { isSessionMutation, type SessionControlClientKind, type SessionControlMe
 import {
   PROTOCOL_VERSION,
   type ImageUploadResult,
+  type ResourceUploadResult,
+  type ResourceDownloadResult,
   type MessagePart,
   type AgentInteractionResponse,
   type AgentMessageOptions,
@@ -25,6 +27,7 @@ import {
   type TimelineDirection,
 } from '@orchardworks/agent-remote-protocol';
 
+import { uploadResource, downloadResource, checkResourceAborted, type ResourceTransferOptions, type ResourceUploadRequest } from './resource-upload.js';
 import { uploadImage, checkUploadAborted, type ImageUploadOptions, type ImageUploadRequest } from './image-upload.js';
 import { watchMessageEchoes } from './message-echo-sync.js';
 import type { AgentReplica } from '../replica/store.js';
@@ -60,7 +63,7 @@ export interface RemoteSessionClientOptions {
   readonly operationId?: () => string;
 }
 
-type RemoteOperationResult = HistoryPage | SessionControlMessage | ImageUploadResult | CommandAcknowledgementMessage | InteractionResolvedMessage | ResourceResponse | ResourceResolveResponse | CommandListResponse | CommandResultResponse;
+type RemoteOperationResult = HistoryPage | SessionControlMessage | ImageUploadResult | ResourceUploadResult | ResourceDownloadResult | CommandAcknowledgementMessage | InteractionResolvedMessage | ResourceResponse | ResourceResolveResponse | CommandListResponse | CommandResultResponse;
 
 interface PendingOperation {
   readonly matches: (message: RemoteServerMessage) => message is RemoteOperationResult;
@@ -381,6 +384,44 @@ export class RemoteSessionClient {
     return result;
   }
 
+  uploadResource(file: Blob, name: string, uploadId: string, options: ResourceTransferOptions = {}) {
+    const generation = this.generation;
+    const active = () => {
+      checkResourceAborted(options.signal);
+      if (generation !== this.generation || this.currentStatus !== 'ready') throw new Error('Resource upload paused. Wait for the session to reconnect, then retry.');
+    };
+    const request = async (input: ResourceUploadRequest) => {
+      active(); const requestId = this.createRequestId(); const { type, ...payload } = input;
+      const operation = this.sendOperation<ResourceUploadResult>({ protocolVersion: PROTOCOL_VERSION, type,
+        payload: { ...payload, requestId, agentId: this.agentId, uploadId } } as Extract<ClientMessage, { type: ResourceUploadRequest['type'] }>,
+        'resource_upload_result', (response): response is ResourceUploadResult => response.type === 'resource_upload_result' && response.payload.agentId === this.agentId && response.payload.uploadId === uploadId);
+      const abort = () => this.rejectPendingOperation(requestId, 'resource_upload_result', new RemoteOperationError('upload_paused', 'Resource upload paused.', true, requestId));
+      options.signal?.addEventListener('abort', abort, { once: true });
+      if (options.signal?.aborted) abort();
+      try { const result = await operation; active(); return result.payload; }
+      finally { options.signal?.removeEventListener('abort', abort); }
+    };
+    const result = this.uploadQueue.catch(() => undefined).then(() => { active(); return uploadResource(file, name, uploadId, request, options); });
+    this.uploadQueue = result; return result;
+  }
+
+  downloadResource(resourceId: string, options: ResourceTransferOptions = {}) {
+    const generation = this.generation;
+    return downloadResource(resourceId, async offset => {
+      checkResourceAborted(options.signal);
+      if (generation !== this.generation || this.currentStatus !== 'ready') throw new Error('Wait for the session to reconnect, then retry the download.');
+      const requestId = this.createRequestId();
+      const operation = this.sendOperation<ResourceDownloadResult>({ protocolVersion: PROTOCOL_VERSION, type: 'resource_download_request',
+        payload: { requestId, agentId: this.agentId, resourceId, offset } }, 'resource_download_result',
+        (response): response is ResourceDownloadResult => response.type === 'resource_download_result' && response.payload.agentId === this.agentId && response.payload.resourceId === resourceId);
+      const abort = () => this.rejectPendingOperation(requestId, 'resource_download_result', new RemoteOperationError('download_paused', 'Resource download paused.', true, requestId));
+      options.signal?.addEventListener('abort', abort, { once: true });
+      if (options.signal?.aborted) abort();
+      try { const result = await operation; return result.payload; }
+      finally { options.signal?.removeEventListener('abort', abort); }
+    }, options);
+  }
+
   retryMessage(id: string): Promise<CommandAcknowledgementMessage> {
     const state = this.replica.getState();
     const message = state.outgoingMessages?.find(item => item.id === id && item.agentId === this.agentId);
@@ -587,6 +628,8 @@ export class RemoteSessionClient {
         return;
       case 'command_acknowledged':
       case 'command_list':
+      case 'resource_upload_result':
+      case 'resource_download_result':
       case 'image_upload_result':
       case 'command_result':
         this.resolvePendingOperation(message.payload.requestId, message);

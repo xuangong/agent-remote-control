@@ -1,11 +1,12 @@
 import type { AgentProviderNativeEvidence, AgentSessionNativeEvidence } from './native-evidence.js';
-import type { AgentInputPart, ImageInputCapabilities } from './image-input.js';
+import type { AgentInputPart, ImageInputCapabilities, ResourceInputCapabilities } from './image-input.js';
 import type { AgentInteractionResponse } from './control.js';
 import type { AgentRuntimeInfo, ProviderStreamItem } from './observation.js';
 
 export interface AgentCapabilities {
   /** @deprecated Compatibility-only metadata. Remote clients share the host-owned session; adapters do not choose page authorization. */
   sessionControl?: 'shared' | 'exclusive';
+  resourceInput?: ResourceInputCapabilities;
   imageInput?: ImageInputCapabilities;
   history: boolean;
   sendMessage: boolean;

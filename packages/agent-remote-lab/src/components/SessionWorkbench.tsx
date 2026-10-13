@@ -186,6 +186,7 @@ export function SessionWorkbench({ todo, displayPreferences, onDisplayPreference
             visible={visible}
             activityVisible={visible && !composerHidden}
             onSendMessageContent={readOnly || mutationBlocked ? undefined : suppliedFeedbackActions.sendMessageContent}
+            onUploadResource={visible ? actions.uploadResource : undefined}
             onUploadImage={visible ? actions.uploadImage : undefined}
             draft={messageDraft}
             onDraftChange={onMessageDraftChange}
@@ -327,6 +328,7 @@ const WorkbenchTimeline = memo(function WorkbenchTimeline({ nativeTakeover, read
               interactionsReadOnly={readOnly}
               interactionsWaitingForConnection={!readOnly && (sessionStatus !== 'ready' || runtimeMutationDisabled)}
               interactionDisabled={sessionStatus !== 'ready' || runtimeMutationDisabled}
+              onDownloadResource={actions.downloadResource}
               onResourceRequest={actions.requestResource}
               onResourceResolve={actions.resolveResource}
               questionDrafts={questionDrafts}

@@ -34,7 +34,7 @@ import { randomUUID } from 'node:crypto';
 import type { AgentProviderAdapter, AgentSession, AgentSessionConfig, AgentSessionExtensions, AgentEmptyCreationResult, AgentNativeValidityToken, AgentPersistenceHandle, AgentSessionResumeOptions } from '@orchardworks/agent-provider-sdk';
 import { AgentOperationRejectedError, AgentSessionInUseError, AgentRuntimeError, serializeAgentEmptyCreationResult, serializeAgentInputMaterialization } from '@orchardworks/agent-provider-sdk';
 import { PROTOCOL_VERSION, type HostEnvironment } from '@orchardworks/agent-remote-protocol';
-import { InputImageStore, type InputImageStoreOptions, createAgentRemoteRelay, createRemoteHostUplinkClient, type AgentRemoteHttpResult, type AgentRemoteRelay,
+import { InputImageStore, type InputImageStoreOptions, InputResourceStore, type InputResourceStoreOptions, createAgentRemoteRelay, createRemoteHostUplinkClient, type AgentRemoteHttpResult, type AgentRemoteRelay,
   RemoteHostCatalog, RemoteHostCatalogError, UnsupportedAgentCapabilityError, type RemoteHostControlRequest, type RemoteHostUplinkClient, type RemoteHostUplinkDiagnostic, type RemoteSessionSummary,
   type RemoteHostSessionLease, type SessionWireAgent, type SessionWireOperationExecutor } from '@orchardworks/agent-remote-relay';
 
@@ -109,6 +109,7 @@ export interface AgentHostRuntimeOptions {
     coordinator: SessionSuccessionCoordinator;
   });
   inputImages?: InputImageStoreOptions;
+  inputResources?: InputResourceStoreOptions;
 }
 export interface AgentHostRequestDiagnostic {
   event: 'host_request_started' | 'host_request_completed';
@@ -159,7 +160,9 @@ export interface AgentHost {
 export function createAgentHost(options: AgentHostOptions): AgentHost {
   if (options.succession?.enrollment && options.succession.controllerId !== options.installationId) throw new Error('Succession Controller identity must match the installed Controller.');
   const stateDirectory = options.preview?.stateDirectory ?? options.vscodeTunnel?.stateDirectory;
-  const runtime = createAgentHostRuntime({ ...options, ...(options.team ? { team: { ...options.team, request: (call: TeamHostCall) => connection.client.teamRequest(call) } } : {}), controllerId: options.installationId, ...(options.inputImages ? {} : stateDirectory ? { inputImages: { directory: join(stateDirectory, 'input-images') } } : {}) });
+  const runtime = createAgentHostRuntime({ ...options, ...(options.team ? { team: { ...options.team, request: (call: TeamHostCall) => connection.client.teamRequest(call) } } : {}), controllerId: options.installationId,
+    ...(options.inputImages ? {} : stateDirectory ? { inputImages: { directory: join(stateDirectory, 'input-images') } } : {}),
+    ...(options.inputResources ? {} : stateDirectory ? { inputResources: { directory: join(stateDirectory, 'input-resources') } } : {}) });
   options.providerDiscovery?.onRegistration(runtime.addRegistration);
   runtime.setRelayConnected(false);
   const updater = options.controller ? createControllerUpdater({ ...options.controller, beginRestart: runtime.beginControllerRestart, cancelRestart: runtime.cancelControllerRestart }) : undefined;
@@ -381,7 +384,8 @@ export function createAgentHostRuntime(options: AgentHostRuntimeOptions): AgentH
     },
     retain: agent => idle.retain(bindingFor(agent).agentId),
     uncertain: agent => { uncertainAgents.add(bindingFor(agent).agentId); },
-  }, ...(options.inputImages ? { inputImageStore: new InputImageStore(options.inputImages) } : {}) });
+  }, ...(options.inputImages ? { inputImageStore: new InputImageStore(options.inputImages) } : {}),
+    ...(options.inputResources ? { inputResourceStore: new InputResourceStore(options.inputResources) } : {}) });
   const catalogs = new Map(options.registrations.map(({ directory }) => [directory.providerId, new RemoteHostCatalog({ roots: directory.list })]));
   const bindings = new SessionBindings();
   const pending = new Set<Promise<unknown>>();

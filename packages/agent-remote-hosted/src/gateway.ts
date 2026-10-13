@@ -46,6 +46,7 @@ export interface HostedRelayOptions extends GatewayAuthOptions {
   previewDomain?: string;
   storage?: RelayStateStore;
   diagnosticStorage?: RelayDiagnosticStore;
+  teamResources?: (namespace: string) => import('./team-resources.js').TeamResourceStore;
   diagnosticContext?: RelayDiagnosticContext;
   scheduler?: RelayScheduler;
   maxTenants?: number;
@@ -260,6 +261,7 @@ export function createHostedRelay(options: HostedRelayOptions) {
       } : undefined;
       const broker = createHostBroker({ origin: auth.origin, publicUrl: auth.origin, keyLifetimeMs: options.keyLifetimeMs,
         ownerSubject: grant.subject, durable, initialState, diagnostics,
+        teamResources: options.teamResources?.(grant.namespace),
         ...(options.successionEnrollment ? { successionEnrollment: { version: 1, origin: auth.origin, issuer: auth.issuer, namespace: grant.namespace, ownerSubject: grant.subject } as const, successionProjectionAllowance: allowance } : {}),
         userStreamCount: subject => [...tenants.values()].reduce((sum, owned) => sum + owned.broker.activeStreamCount(subject), 0),
         onStateChange: async broker => { await state.mutate(draft => {
@@ -711,7 +713,7 @@ export function createHostedRelay(options: HostedRelayOptions) {
       if (action) await security.record(grant.subject, action, result.ok ? 'allowed' : 'denied', /^\/v1\/remote\/hosts\/([^/]+)/.exec(path)?.[1]);
     }
     return result ?? (path === '/v1/providers' && request.method === 'GET'
-      ? json(200, { protocolVersion: '1.7.0', type: 'provider_list', payload: { providers: [] } })
+      ? json(200, { protocolVersion: '1.8.0', type: 'provider_list', payload: { providers: [] } })
       : json(404, unavailableRoute(path)));
   }
   async function prepare(request: Request): Promise<{ accept(socket: RelaySocket): void } | Response | undefined> {

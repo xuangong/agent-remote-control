@@ -42,10 +42,10 @@ describe('Agent Remote WebSocket session failures', () => {
     let reconnected: WebSocket | undefined;
     try {
       for (const [socket, inbox] of [[first, firstInbox], [second, secondInbox]] as const) {
-        socket.send(JSON.stringify({ protocolVersion: '1.7.0', type: 'negotiate' }));
+        socket.send(JSON.stringify({ protocolVersion: '1.8.0', type: 'negotiate' }));
         await inbox.next('agent_snapshot');
       }
-      const command = { protocolVersion: '1.7.0', type: 'set_session_setting', payload: { requestId: 'choose', operationId: '11111111-1111-4111-8111-111111111111', agentId: 'agent-1', settingId: 'model', value: 'second' } };
+      const command = { protocolVersion: '1.8.0', type: 'set_session_setting', payload: { requestId: 'choose', operationId: '11111111-1111-4111-8111-111111111111', agentId: 'agent-1', settingId: 'model', value: 'second' } };
       first.send(JSON.stringify(command));
       expect((await firstInbox.next('command_acknowledged')).payload).toMatchObject({ requestId: 'choose' });
       const pending = await secondInbox.next('agent_update');
@@ -56,7 +56,7 @@ describe('Agent Remote WebSocket session failures', () => {
       expect(submissions).toBe(1);
       second.close();
       reconnected = await openControlledSocket(manager); const inbox = socketInbox(reconnected);
-      reconnected.send(JSON.stringify({ protocolVersion: '1.7.0', type: 'negotiate' }));
+      reconnected.send(JSON.stringify({ protocolVersion: '1.8.0', type: 'negotiate' }));
       const restored = await inbox.next('agent_snapshot');
       expect(restored.payload).toMatchObject({ settingChanges: [{ status: 'pending', targetValue: 'second' }] });
       resolve();
@@ -82,10 +82,10 @@ describe('Agent Remote WebSocket session failures', () => {
     const socket = await openControlledSocket(manager, (action) => { actions.push(action); return true; });
     const inbox = socketInbox(socket);
     try {
-      socket.send(JSON.stringify({ protocolVersion: '1.7.0', type: 'negotiate' }));
+      socket.send(JSON.stringify({ protocolVersion: '1.8.0', type: 'negotiate' }));
       await inbox.next('agent_snapshot');
       socket.send(JSON.stringify({
-        protocolVersion: '1.7.0', type: 'resource_resolve_request',
+        protocolVersion: '1.8.0', type: 'resource_resolve_request',
         payload: {
           requestId: 'resolve-one', agentId: 'agent-1', locator: './images/result.png',
           sourceLocator: join(workspace, 'docs', 'report.md'),
@@ -94,7 +94,7 @@ describe('Agent Remote WebSocket session failures', () => {
       const resolved = await inbox.next('resource_resolve_response');
       const binding = (resolved.payload as { binding: { resourceId: string } }).binding;
       socket.send(JSON.stringify({
-        protocolVersion: '1.7.0', type: 'resource_request',
+        protocolVersion: '1.8.0', type: 'resource_request',
         payload: { requestId: 'read-one', agentId: 'agent-1', resourceId: binding.resourceId },
       }));
       const read = await inbox.next('resource_response');
@@ -119,7 +119,7 @@ describe('Agent Remote WebSocket session failures', () => {
     const socket = await openControlledSocket(controlled.agent);
     const closed = socketClose(socket);
 
-    socket.send(JSON.stringify({ protocolVersion: '1.7.0', type: 'negotiate' }));
+    socket.send(JSON.stringify({ protocolVersion: '1.8.0', type: 'negotiate' }));
 
     await expect(closed).resolves.toEqual({ code: 1011, reason: 'Agent Remote event delivery failed' });
     expect(controlled.unsubscribeCount()).toBe(1);
@@ -134,7 +134,7 @@ describe('Agent Remote WebSocket session failures', () => {
     const socket = await openControlledSocket(controlled.agent);
     const closed = socketClose(socket);
 
-    socket.send(JSON.stringify({ protocolVersion: '1.7.0', type: 'negotiate' }));
+    socket.send(JSON.stringify({ protocolVersion: '1.8.0', type: 'negotiate' }));
 
     await expect(closed).resolves.toEqual({ code: 1013, reason: 'Agent event buffer overflowed' });
     expect(controlled.unsubscribeCount()).toBe(1);
@@ -171,7 +171,7 @@ function controlledAgent(onSnapshot: (emit: (event: AgentManagerEvent) => void) 
 
 function validSnapshot() {
   return {
-    protocolVersion: '1.7.0' as const,
+    protocolVersion: '1.8.0' as const,
     type: 'agent_snapshot' as const,
     payload: {
       id: 'agent-1', providerId: 'fake', createdAt: '2026-09-03T00:00:00.000Z',
@@ -287,9 +287,9 @@ it('streams only distinct activity over a real socket and keeps normal content s
   const inbox = socketInbox(tracking), full = socketInbox(content);
   const received: Array<{ type: string; payload?: unknown }> = [];
   tracking.on('message', data => received.push(JSON.parse(data.toString())));
-  tracking.send(JSON.stringify({ protocolVersion: '1.7.0', type: 'negotiate', observation: 'activity' }));
+  tracking.send(JSON.stringify({ protocolVersion: '1.8.0', type: 'negotiate', observation: 'activity' }));
   expect((await inbox.next('agent_activity')).payload).toEqual({ agentId: 'agent-1', status: 'idle' });
-  content.send(JSON.stringify({ protocolVersion: '1.7.0', type: 'negotiate' }));
+  content.send(JSON.stringify({ protocolVersion: '1.8.0', type: 'negotiate' }));
   await full.next('agent_snapshot');
   for (let index = 0; index < 10; index++) for (const emit of listeners) {
     emit({ type: 'agent_state', agentId: 'agent-1', snapshot: current });
@@ -298,7 +298,7 @@ it('streams only distinct activity over a real socket and keeps normal content s
   const waiting = { ...current, payload: { ...current.payload, status: 'waiting' as const } };
   for (const emit of listeners) emit({ type: 'agent_state', agentId: 'agent-1', snapshot: waiting });
   expect((await inbox.next('agent_activity')).payload).toEqual({ agentId: 'agent-1', status: 'waiting' });
-  tracking.send(JSON.stringify({ protocolVersion: '1.7.0', type: 'timeline_subscription', payload: { requestId: 'no-content', agentIds: ['agent-1'] } }));
+  tracking.send(JSON.stringify({ protocolVersion: '1.8.0', type: 'timeline_subscription', payload: { requestId: 'no-content', agentIds: ['agent-1'] } }));
   expect((await inbox.next('protocol_error')).payload).toMatchObject({ code: 'activity_only' });
   expect(received.map(item => item.type)).toEqual(['negotiated', 'agent_activity', 'agent_activity', 'protocol_error']);
   expect(JSON.stringify(received)).not.toContain('private output');
@@ -329,7 +329,7 @@ it('preserves native execution authority across turn results and socket reattach
   const socket = await openControlledSocket(manager);
   const inbox = socketInbox(socket);
   try {
-    socket.send(JSON.stringify({ protocolVersion: '1.7.0', type: 'negotiate' }));
+    socket.send(JSON.stringify({ protocolVersion: '1.8.0', type: 'negotiate' }));
     await inbox.next('agent_snapshot');
     push({ type: 'runtime_updated', provider: 'fake', runtimeInfo: { providerId: 'fake', sessionId: 'session-1', status: 'running' }, activeTurnId: 'new' });
     expect((await inbox.next('agent_update')).payload).toMatchObject({ status: 'running', activeTurn: { turnId: 'new' } });
@@ -341,7 +341,7 @@ it('preserves native execution authority across turn results and socket reattach
     const reconnected = await openControlledSocket(manager);
     const restored = socketInbox(reconnected);
     try {
-      reconnected.send(JSON.stringify({ protocolVersion: '1.7.0', type: 'negotiate' }));
+      reconnected.send(JSON.stringify({ protocolVersion: '1.8.0', type: 'negotiate' }));
       expect((await restored.next('agent_snapshot')).payload).toMatchObject({ status: 'running', activeTurn: null, runtimeInfo: { status: 'running' } });
       push({ type: 'runtime_updated', provider: 'fake', runtimeInfo: { providerId: 'fake', sessionId: 'session-1', status: 'idle' }, activeTurnId: null });
       expect((await restored.next('agent_update')).payload).toMatchObject({ status: 'idle', activeTurn: null });
@@ -381,7 +381,7 @@ it.each(['session', 'runtime'] as const)('restores %s totals and native resets a
   const socket = await openControlledSocket(manager);
   const inbox = socketInbox(socket);
   try {
-    socket.send(JSON.stringify({ protocolVersion: '1.7.0', type: 'negotiate' }));
+    socket.send(JSON.stringify({ protocolVersion: '1.8.0', type: 'negotiate' }));
     const first = await inbox.next('agent_snapshot');
     expect(decodeServerMessage(JSON.stringify(first))).toMatchObject({ status: 'ok' });
     expect(first.payload).toMatchObject({ lastUsage: { ...tokens, ...context } });
@@ -399,7 +399,7 @@ it.each(['session', 'runtime'] as const)('restores %s totals and native resets a
     const restored = socketInbox(reconnected);
     await new Promise<void>((resolve, reject) => { reconnected.once('open', resolve); reconnected.once('error', reject); });
     try {
-      reconnected.send(JSON.stringify({ protocolVersion: '1.7.0', type: 'negotiate' }));
+      reconnected.send(JSON.stringify({ protocolVersion: '1.8.0', type: 'negotiate' }));
       expect((await restored.next('agent_snapshot')).payload).toMatchObject({ lastUsage: {
         tokenScope, inputTokens: 2, outputTokens: 1, totalTokens: 3, ...context,
       } });

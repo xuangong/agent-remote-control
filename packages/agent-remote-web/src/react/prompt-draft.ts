@@ -7,6 +7,7 @@ export async function preparePromptDraft(item: Extract<AgentTimelineItem, { type
   let bytes = 0;
   for (const part of item.content ?? [{ type: 'text', text: item.text }]) {
     if (part.type === 'text') { draft.parts.push({ ...part }); continue; }
+    if (part.type === 'resource') throw new Error('Download the resource and attach it again when editing this prompt.');
     const { detail } = await loadLocalResource(context, part.locator);
     if (!detail || detail.status !== 'available' || !('contentBase64' in detail) || !detail.mediaType || !['image/png', 'image/jpeg', 'image/webp'].includes(detail.mediaType)) throw new Error('An image from this prompt is unavailable. Open the original prompt in Codex to edit it.');
     const blob = new Blob([Uint8Array.from(atob(detail.contentBase64), value => value.charCodeAt(0))], { type: detail.mediaType });

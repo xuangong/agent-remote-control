@@ -3,12 +3,12 @@ import { LiveRecording, serveCapture } from './live-recording.js';
 import { randomUUID } from 'node:crypto';
 import { access, mkdtemp, rm } from 'node:fs/promises';
 import type { IncomingMessage, ServerResponse } from 'node:http';
-import { tmpdir } from 'node:os';
+import { homedir, tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { AgentPersistenceHandle, AgentProviderAdapter, AgentSessionConfig } from '@orchardworks/agent-provider-sdk';
 import { PROTOCOL_VERSION } from '@orchardworks/agent-remote-protocol';
-import { createAgentRemoteHttpServer, createAgentRemoteRelay, InputImageStore } from '@orchardworks/agent-remote-relay';
+import { createAgentRemoteHttpServer, createAgentRemoteRelay, InputImageStore, InputResourceStore } from '@orchardworks/agent-remote-relay';
 
 import { localRequestAllowed, serveAssets } from './local-web.js';
 import { ownAdapter } from './owned-adapter.js';
@@ -23,6 +23,7 @@ export interface DebuggerServerOptions {
   origin?: string;
   signal?: AbortSignal;
   assetsDirectory?: string;
+  resourceDirectory?: string;
   onBrowserEvent?(record: Record<string, unknown>): void;
 }
 
@@ -36,7 +37,7 @@ export async function createDebuggerServer(options: DebuggerServerOptions) {
     await access(join(assets, 'index.html'));
     directory = await mkdtemp(join(tmpdir(), 'ardb-images-'));
   } catch (error) { await owned.close(); throw error; }
-  const relay = createAgentRemoteRelay({ providers: [owned.adapter], inputImageStore: new InputImageStore({ directory }) });
+  const relay = createAgentRemoteRelay({ providers: [owned.adapter], inputResourceStore: new InputResourceStore({directory:options.resourceDirectory ?? join(homedir(), '.agent-remote-control', 'ardb-input-resources')}), inputImageStore: new InputImageStore({ directory }) });
   const agentId = randomUUID();
   let url = '';
   const capture = new LiveRecording(agentId, () => url);

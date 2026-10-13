@@ -1,3 +1,4 @@
+import { RESOURCE_INPUT_CAPABILITIES } from '@orchardworks/agent-provider-sdk';
 import { AgentOperationRejectedError, prepareAgentOperation, bindAgentSessionTools } from '@orchardworks/agent-provider-sdk';
 import { preparePromptEdit, type CodexPromptEditTarget } from './prompt-edit.js';
 import { prepareNativeFork } from './session-fork.js';
@@ -53,7 +54,7 @@ import type { CodexSharedRecoveryPlan } from './shared-recovery.js';
 const PROVIDER_ID = 'codex';
 
 export const CODEX_CAPABILITIES: AgentCapabilities = {
-  imageInput: IMAGE_INPUT_CAPABILITIES,
+  resourceInput: RESOURCE_INPUT_CAPABILITIES, imageInput: IMAGE_INPUT_CAPABILITIES,
   history: true,
   sendMessage: true,
   steer: true,
@@ -378,8 +379,8 @@ export class CodexAppServerSession implements AgentSession {
   }
 
   private refreshInputCapabilities(): void {
-    if (this.acceptsDirectInput) this.capabilities.imageInput = IMAGE_INPUT_CAPABILITIES;
-    else delete this.capabilities.imageInput;
+    if (this.acceptsDirectInput) { this.capabilities.imageInput = IMAGE_INPUT_CAPABILITIES; this.capabilities.resourceInput = RESOURCE_INPUT_CAPABILITIES; }
+    else { delete this.capabilities.imageInput; delete this.capabilities.resourceInput; }
     for (const key of ['sendMessage', 'steer', 'cancel', 'sessionSettings', 'commands'] as const) this.capabilities[key] = this.acceptsDirectInput;
     this.capabilities.planning = this.acceptsDirectInput && this.planningModes !== undefined && (this.ownsRuntime || !!this.config.model);
     this.capabilities.interactions.planApproval = this.acceptsDirectInput && this.planningModes !== undefined && (this.ownsRuntime || !!this.config.model);

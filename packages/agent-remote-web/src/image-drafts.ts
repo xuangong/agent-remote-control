@@ -1,3 +1,4 @@
+import { clearResourceDraftScope } from './resource-drafts.js';
 import type { ImageUploadReceipt } from '@orchardworks/agent-remote-protocol';
 import type { DraftPart } from './react/composer-document.js';
 
@@ -266,7 +267,8 @@ export async function readImageDraft(key: string): Promise<ImageDraft | undefine
   if (draft.key !== key || typeof draft.scope !== 'string' || !Number.isSafeInteger(draft.nextLabel) || draft.nextLabel < 1
     || !draft.images || typeof draft.images !== 'object' || Array.isArray(draft.images)
     || !draft.parts.every(part => part && ((part.type === 'text' && typeof part.text === 'string')
-      || (part.type === 'image' && typeof part.imageId === 'string' && typeof part.label === 'string')))
+      || (part.type === 'image' && typeof part.imageId === 'string' && typeof part.label === 'string')
+      || (part.type === 'resource' && typeof part.resourceId === 'string' && typeof part.label === 'string')))
     || !Object.values(draft.images).every(image => image && typeof image.imageId === 'string' && typeof image.uploadId === 'string')) {
     throw new Error('Saved image draft is damaged.');
   }
@@ -325,6 +327,7 @@ export async function writeImageDraft(draft: ImageDraft, generation = imageDraft
 }
 /** Clear only the explicitly signed-out account/relay scope. */
 export async function clearImageDraftScope(scope: string): Promise<void> {
+  await clearResourceDraftScope(scope);
   scopeGenerations.set(scope, imageDraftScopeGeneration(scope) + 1);
   for (const [key, draft] of memoryDrafts) if (draft.scope === scope) { memoryDrafts.delete(key); privateDraftKeys.delete(key); }
   for (const [id, image] of localImages) if (image.scope === scope) localImages.delete(id);

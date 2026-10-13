@@ -27,8 +27,8 @@ const initialWorks: TpmWork[] = [
   summary: 'Discuss the requirements and delivery plan.', nextAction: '', document: '# Delivery plan\n\nClarify scope, implement, and verify.', acceptance: '', evidence: [],
   createdAt: '2026-10-12', updatedAt: `2026-10-12T00:00:0${9 - index}Z`, nextCheckAt: 0 }));
 const drafts = new DraftStore('tpm-dock-fixture');
-const snapshot = (id: string): AgentSnapshot => ({ protocolVersion: '1.7.0', type: 'agent_snapshot', payload: { ...replicaState.agent!, id } });
-const timeline = (id: string): HistoryPage => ({ protocolVersion: '1.7.0', type: 'timeline_page', payload: {
+const snapshot = (id: string): AgentSnapshot => ({ protocolVersion: '1.8.0', type: 'agent_snapshot', payload: { ...replicaState.agent!, id } });
+const timeline = (id: string): HistoryPage => ({ protocolVersion: '1.8.0', type: 'timeline_page', payload: {
   agentId: id, requestId: 'history', direction: 'tail', epoch: 'epoch', reset: false, staleCursor: false, gap: false,
   window: { minSeq: 1, maxSeq: 20, nextSeq: 21 }, startCursor: { epoch: 'epoch', seq: 1 }, endCursor: { epoch: 'epoch', seq: 20 },
   entries: Array.from({ length: 20 }, (_, index) => ({ providerId: 'recorded', seqStart: index + 1, seqEnd: index + 1, timestamp: '2026-10-12T00:00:00Z', sourceSeqRanges: [], collapsed: [], resources: [], item: { ...(index < 4 ? { background: { id: 'fixture-review', kind: 'review' as const, status: 'silent' as const } } : {}), type: 'assistant_message' as const, text: `Review ${index + 1}: We can keep this session focused on one delivery while checking the main session for progress.\n\nThe acceptance criteria and next steps stay visible in this conversation.` } })),
@@ -41,11 +41,11 @@ const transport: RemoteAgentTransport = {
     queueMicrotask(() => { listener.onOpen(); listener.onMessage(snapshot(id)); });
     return { close: () => {}, send: message => {
       if (message.type === 'negotiate') {
-        listener.onMessage({ protocolVersion: '1.7.0', type: 'negotiated', sessionControl: true });
-        listener.onMessage({ protocolVersion: '1.7.0', type: 'session_control', payload: { agentId: id, revision: 'control', access: 'control', available: false, token: 'token' } });
+        listener.onMessage({ protocolVersion: '1.8.0', type: 'negotiated', sessionControl: true });
+        listener.onMessage({ protocolVersion: '1.8.0', type: 'session_control', payload: { agentId: id, revision: 'control', access: 'control', available: false, token: 'token' } });
       }
-      if (message.type === 'session_control_request') listener.onMessage({ protocolVersion: '1.7.0', type: 'session_control', payload: { agentId: id, requestId: message.payload.requestId, revision: 'control', access: 'control', available: false, token: 'token' } });
-      if (message.type === 'timeline_subscription') listener.onMessage({ protocolVersion: '1.7.0', type: 'timeline_subscribed', payload: { requestId: message.payload.requestId, agentIds: [id] } });
+      if (message.type === 'session_control_request') listener.onMessage({ protocolVersion: '1.8.0', type: 'session_control', payload: { agentId: id, requestId: message.payload.requestId, revision: 'control', access: 'control', available: false, token: 'token' } });
+      if (message.type === 'timeline_subscription') listener.onMessage({ protocolVersion: '1.8.0', type: 'timeline_subscribed', payload: { requestId: message.payload.requestId, agentIds: [id] } });
     } };
   },
 };

@@ -1,3 +1,4 @@
+import { TeamResourceFiles } from './team-resource-files.js';
 import { createHash, randomUUID } from 'node:crypto';
 import { mkdir, readFile, open, rename } from 'node:fs/promises';
 import { join } from 'node:path';
@@ -29,10 +30,12 @@ export class TeamRuntime {
   private persistence: Promise<unknown> = Promise.resolve();
   private creations = new Map<string, Promise<TeamMember>>();
   private leases = new Map<string, RemoteHostSessionLease>();
+  private readonly resourceFiles: TeamResourceFiles;
   private ticking = false;
   private closed = false;
   private readonly timer: ReturnType<typeof setInterval>;
   constructor(private readonly directory: string, private readonly access: TeamRuntimeAccess, private readonly request: (call: TeamHostCall) => Promise<unknown>, tickMs = 3000) {
+    this.resourceFiles = new TeamResourceFiles(directory, request);
     this.ready = this.restore();
     void this.ready.catch(() => undefined);
     this.timer = setInterval(() => { void this.tick().catch(() => {}); }, tickMs); this.timer.unref?.();
@@ -100,7 +103,9 @@ export class TeamRuntime {
     });
     const tools = [
       tool('read_team', 'Read registered members, responsibilities, progress and message receipts. Accepted input is not completed work.', {}, [], () => call({ action: 'read' })),
-      tool('send_team_message', 'Send a task, question or evidence. Reuse operationId for the same request. Delivery is asynchronous; inspect read_team for its receipt. Members may send only to their Leader.', { to: id, operationId: id, text }, ['to', 'operationId', 'text'], args => this.request({ action: 'send', teamId, memberId: member.id, to: args.to!, operationId: args.operationId!, text: args.text! })),
+      tool('send_team_message', 'Send a task, question or evidence. Reuse operationId for the same request. Delivery is asynchronous; inspect read_team for its receipt. Members may send only to their Leader. Attach up to 8 uploaded or received resource IDs using resources; file bytes are not embedded in text.', { to: id, operationId: id, text, resources: {type:'array',items:id,minItems:1,maxItems:8,uniqueItems:true} }, ['to', 'operationId', 'text'], args => this.request({ action: 'send', teamId, memberId: member.id, to: args.to!, operationId: args.operationId!, text: args.text!, ...(args.resources ? {resources:args.resources as unknown as string[]} : {}) })),
+      tool('upload_team_resource', 'Upload a regular file from an absolute path on this Host, up to 50 MiB. Reuse operationId to resume. Returns a verified resourceId for send_team_message resources; does not send or execute the file.', {path:{type:'string',minLength:1,maxLength:4096},operationId:id}, ['path','operationId'], args => this.resourceFiles.upload(teamId,member.id,args.path!,args.operationId!)),
+      tool('download_team_resource', 'Download a resource you uploaded or received to this Host and verify size and SHA256. Returns a localPath. Optional outputDirectory must be absolute. Existing different files are never overwritten; downloaded files are never executed.', {resourceId:id,outputDirectory:{type:'string',minLength:1,maxLength:4096}}, ['resourceId'], args => this.resourceFiles.download(teamId,member.id,args.resourceId!,args.outputDirectory)),
       tool('report_team_progress', 'Record current progress, blocking questions or completion evidence. Also message the Leader when it needs to act.', { summary: { type: 'string', maxLength: 2048 } }, ['summary'], args => this.request({ action: 'report', teamId, memberId: member.id, summary: args.summary! })),
     ];
     if (member.role === 'leader') {
@@ -157,7 +162,8 @@ export class TeamRuntime {
     await this.request({ action: 'claim', teamId: team.id, memberId: record.seat.member.id, messageId: message.id });
     const receipt: LocalSeat['receipts'][string] = { text: message.text, status: 'dispatching' }; record.receipts[message.id] = receipt; await this.save();
     const sender = team.members.find(member => member.id === message.from);
-    const text = `[Team ${team.id}; message ${message.id}; from ${sender?.name ?? message.from}]\n${message.text}`;
+    const attachments = message.resources?.map((resource,index) => `[resource #${index+1}] ${JSON.stringify(resource)} (Use download_team_resource with resourceId to obtain a verified local file.)`).join('\n');
+    const text = `[Team ${team.id}; message ${message.id}; from ${sender?.name ?? message.from}]\n${message.text}${attachments ? `\n\nAttached resources:\n${attachments}` : ''}`;
     try {
       const onAcceptance = (acceptance: AgentInputAcceptance) => {
         if (!['started','queued','handled'].includes(acceptance.disposition) || this.closed) return;

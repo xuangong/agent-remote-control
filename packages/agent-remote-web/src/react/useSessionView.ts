@@ -45,6 +45,8 @@ export function useSessionView({ agentId, transport, source, cachedReplica, pend
   const actions: SessionViewActions = active && enabled && status === 'ready' && !pending ? {
     ...messageActions,
     takeControl: options => active.takeControl(options),
+    uploadResource: (file, name, uploadId, options) => active.uploadResource(file, name, uploadId, options),
+    downloadResource: resourceId => active.downloadResource(resourceId),
     uploadImage: (file, uploadId, options) => active.uploadImage(file, uploadId, options),
     retryMessage: sessionState.operations.send_message.allowed ? async id => { await active.retryMessage(id); } : undefined,
     searchTimeline: (query, options) => active.searchTimeline(query, options),

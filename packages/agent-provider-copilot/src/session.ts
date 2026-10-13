@@ -1,3 +1,4 @@
+import { RESOURCE_INPUT_CAPABILITIES, resourceInputText, projectResourceInputText } from '@orchardworks/agent-provider-sdk';
 import { AgentOperationRejectedError, prepareAgentOperation, bindAgentSessionTools } from '@orchardworks/agent-provider-sdk';
 import { randomUUID } from 'node:crypto';
 import { open } from 'node:fs/promises';
@@ -18,7 +19,7 @@ export class CopilotAgentSession implements AgentSession {
   readonly nativeEvidence: AgentSessionNativeEvidence;
   private readonly evidence: CopilotSessionNativeEvidence;
   private descriptor?: CopilotEmptyDescriptor;
-  readonly capabilities: AgentCapabilities = { imageInput: structuredClone(IMAGE_INPUT_CAPABILITIES), history: true, sendMessage: true, queueMessage: true, steer: true, cancel: true, readResource: true, commands: false, sessionSettings: false, interactions: {question: true, toolApproval: true, planApproval: false, form: true, externalAction: true} };
+  readonly capabilities: AgentCapabilities = { resourceInput: RESOURCE_INPUT_CAPABILITIES, imageInput: structuredClone(IMAGE_INPUT_CAPABILITIES), history: true, sendMessage: true, queueMessage: true, steer: true, cancel: true, readResource: true, commands: false, sessionSettings: false, interactions: {question: true, toolApproval: true, planApproval: false, form: true, externalAction: true} };
   readonly stream = new Channel<ProviderStreamItem>();
   private readonly projector: Projector;
   private readonly images: CopilotImages;
@@ -155,6 +156,10 @@ export class CopilotAgentSession implements AgentSession {
         if (owner && 'turnId' in projected.event) delete projected.event.turnId;
         const images = event.type === 'user.message' && event.data.attachments?.length ? this.images.project(event.id, event.data.content, event.data.attachments) : undefined;
         if (images && projected.event.type === 'timeline' && projected.event.item.type === 'user_message') projected.event.item.content = images.content;
+        if (event.type === 'user.message' && projected.event.type === 'timeline' && projected.event.item.type === 'user_message') {
+          const parts = (images?.content ?? [{type:'text' as const,text:event.data.content}]).flatMap(part => part.type === 'text' ? projectResourceInputText(part.text) : [part]);
+          if(parts.some(part=>part.type==='resource')) { projected.event.item.content=parts; projected.event.item.text=parts.map(part=>part.type==='text'?part.text:`[${part.label}]`).join(''); }
+        }
         this.stream.push({type: 'observation', sourceKey: `copilot:${this.config.sessionId}:${projected.key}`, nativeRevision: ++this.revision, occurredAt: Date.parse(event.timestamp), delivery, event: projected.event, ...(images ? {resourceReferences: images.resourceReferences} : {})});
       }
       if (delivery === 'live') {
@@ -236,7 +241,7 @@ export class CopilotAgentSession implements AgentSession {
   async sendMessage(text: string, options?: AgentMessageOptions): Promise<void> { this.assertOpen();const finish=this.beginNativeEffect();try {await this.mutateNative(() => this.native.send({prompt: text, mode: options?.delivery === 'next_turn' ? 'enqueue' : 'immediate'}), 'Copilot input');} finally {finish();} }
   async sendMessageContent(parts: readonly AgentInputPart[], options?: AgentMessageOptions): Promise<void> {
     this.assertOpen();
-    if (!parts.some(p => p.type === 'image')) return this.sendMessage(parts.flatMap(p => p.type === 'text' ? [p.text] : []).join('\n'), options);
+    if (!parts.some(p => p.type === 'image')) return this.sendMessage(parts.flatMap(p => p.type === 'text' ? [p.text] : p.type === 'resource' ? [resourceInputText(p)] : []).join('\n'), options);
     if (!this.capabilities.imageInput) throw new AgentOperationRejectedError('operation_rejected', 'The selected Copilot model does not advertise image input.');
     const input = await prepareAgentOperation(() => this.images.input(parts, this.capabilities.imageInput!));
     this.assertOpen();

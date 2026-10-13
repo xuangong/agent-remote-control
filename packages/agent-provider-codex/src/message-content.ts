@@ -1,3 +1,4 @@
+import { resourceInputText } from '@orchardworks/agent-provider-sdk';
 import type { AgentInputPart } from '@orchardworks/agent-provider-sdk';
 import { isRecord } from './native.js';
 
@@ -5,10 +6,11 @@ export type CodexInput = { type: 'text'; text: string; text_elements: Array<{
   byteRange: { start: number; end: number }; placeholder: string;
 }> } | { type: 'localImage'; path: string };
 export function codexMessageInput(parts: readonly AgentInputPart[]): CodexInput[] {
-  if (!parts.some(part => part.type === 'image' || part.text.trim())) throw new Error('Codex message must not be empty.');
+  if (!parts.some(part => part.type !== 'text' || part.text.trim())) throw new Error('Codex message must not be empty.');
   let imageIndex = 0;
   return parts.flatMap<CodexInput>(part => {
     if (part.type === 'text') return [{ type: 'text', text: part.text, text_elements: [] }];
+    if (part.type === 'resource') return [{type:'text',text:resourceInputText(part),text_elements:[]}];
     const text = `[${part.label ?? `image #${imageIndex + 1}`}]`;
     imageIndex++;
     return [

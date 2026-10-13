@@ -1,3 +1,4 @@
+import type { InputResourceStore } from './resources/input-resource-store.js';
 import { createOperationCache, type OperationCache } from './operation-cache.js';
 import { createOperationExecutor, type OperationLifecycle } from './operation-settlement.js';
 import type { SessionWireAgent, SessionWireOperationExecutor } from './session-wire.js';
@@ -36,6 +37,7 @@ export interface AgentRemoteRelayOptions {
   providers: readonly AgentProviderAdapter[];
   epoch?: () => string;
   resourceStore?: ResourceStore;
+  inputResourceStore?: InputResourceStore;
   inputImageStore?: InputImageStore;
 }
 
@@ -79,6 +81,7 @@ class AgentRemoteRelayImplementation implements AgentRemoteRelay {
     private readonly inputImageStore?: InputImageStore,
     private readonly operationCache: OperationCache = createOperationCache(),
     private readonly operationLifecycle?: OperationLifecycle,
+    private readonly inputResourceStore?: InputResourceStore,
   ) {
     this.providers = new ProviderRegistry(providers);
   }
@@ -130,6 +133,7 @@ class AgentRemoteRelayImplementation implements AgentRemoteRelay {
         epoch: this.createEpoch(),
         resourceStore: this.resourceStore,
         settingIntent: this.operationLifecycle?.settingIntent,
+        ...(this.inputResourceStore ? { inputResourceStore: this.inputResourceStore } : {}),
         ...(this.inputImageStore ? { inputImageStore: this.inputImageStore } : {}),
       });
       await manager.ready;
@@ -216,6 +220,7 @@ class AgentRemoteRelayImplementation implements AgentRemoteRelay {
         epoch: this.createEpoch(),
         resourceStore: this.resourceStore,
         settingIntent: this.operationLifecycle?.settingIntent,
+        ...(this.inputResourceStore ? { inputResourceStore: this.inputResourceStore } : {}),
         ...(this.inputImageStore ? { inputImageStore: this.inputImageStore } : {}),
       });
       await manager.ready;
@@ -278,6 +283,7 @@ export function createAgentRemoteRelay(options: AgentRemoteRelayOptions): AgentR
     options.inputImageStore,
     options.operationCache,
     options.operationLifecycle,
+    options.inputResourceStore,
   );
 }
 

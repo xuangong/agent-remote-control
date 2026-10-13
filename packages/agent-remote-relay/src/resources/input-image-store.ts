@@ -131,6 +131,7 @@ export class InputImageStore {
       for (const item of new Set(resolved)) { item.pinned = true; await this.touch(item); }
       return parts.map(part => {
         if (part.type === 'text') return { ...part };
+        if (part.type !== 'image') throw new InputImageError('Expected text or image input.');
         const item = this.requireAttachment(scope, part.attachmentId);
         return { type: 'image', path: this.path(item.key, 'image'), mediaType: item.mediaType, sha256: item.sha256, label: part.label };
       });

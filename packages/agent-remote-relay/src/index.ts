@@ -28,3 +28,5 @@ export * from './operation-settlement.js';
 export type { SessionSettingIntentLifecycle } from './session-setting-changes.js';
 
 export * from './session-bindings.js';
+
+export * from './resources/input-resource-store.js';

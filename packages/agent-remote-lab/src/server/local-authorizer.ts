@@ -15,7 +15,7 @@ export function createLocalLabAuthorizer(labOrigin: string): AgentRemoteWebSocke
       return { subject: localSubject };
     },
     authorize({ principal, action }) {
-      return principal.subject === localSubject && ['attach', 'read_resource', 'resolve_resource', 'image_upload', 'send_message'].includes(action);
+      return principal.subject === localSubject && ['attach', 'read_resource', 'resolve_resource', 'image_upload', 'resource_upload', 'send_message'].includes(action);
     },
   };
 }

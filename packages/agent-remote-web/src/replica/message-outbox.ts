@@ -53,7 +53,7 @@ export class MessageOutbox {
   private matches(message: OutgoingMessage, entry: ProjectedTimelineEntry): boolean {
     if (entry.item.type !== 'user_message') return false;
     if (message.submittedTextSha256 !== undefined) {
-      return !message.content?.some(part => part.type === 'image') && !entry.item.content?.some(part => part.type === 'image')
+      return !message.content?.some(part => part.type !== 'text') && !entry.item.content?.some(part => part.type !== 'text')
         && this.digests.get(entry.item)?.value === message.submittedTextSha256;
     }
     const key = outgoingKey(message);
@@ -63,11 +63,11 @@ export class MessageOutbox {
   private prepareDigests(state: AgentReplicaState): boolean {
     const candidates = state.outgoingMessages?.filter(message => message.submittedTextSha256 !== undefined
       && message.agentId === state.agent?.id && message.epoch === state.timeline.epoch && message.status !== 'failed'
-      && !message.content?.some(part => part.type === 'image')) ?? [];
+      && !message.content?.some(part => part.type !== 'text')) ?? [];
     if (!candidates.length) return true;
     let ready = true;
     for (const { item, seqStart } of state.timeline.entries) {
-      if (item.type !== 'user_message' || item.content?.some(part => part.type === 'image')
+      if (item.type !== 'user_message' || item.content?.some(part => part.type !== 'text')
         || !candidates.some(message => seqStart > message.afterSeq && !message.consumedEchoSeqs?.includes(seqStart))) continue;
       let digest = this.digests.get(item);
       if (!digest || digest.text !== item.text) {
@@ -87,17 +87,17 @@ export class MessageOutbox {
 function normalize(text: string): string { return text.replace(/\r\n/g, '\n').trim(); }
 
 function outgoingKey(message: OutgoingMessage): string | undefined {
-  if (!message.content?.some(part => part.type === 'image')) return `text:${normalize(message.text)}`;
-  return orderedKey(message.content.map(part => part.type === 'text' ? part : { type: 'image', sha256: message.imageDigests?.[part.attachmentId] }));
+  if (!message.content?.some(part => part.type !== 'text')) return `text:${normalize(message.text)}`;
+  return orderedKey(message.content.map(part => part.type === 'text' ? part : part.type === 'resource' ? { type: 'resource', locator: `input-resource:${part.resourceId}` } : { type: 'image', sha256: message.imageDigests?.[part.attachmentId] }));
 }
 function echoKey(text: string, content?: readonly UserMessagePart[]): string | undefined {
-  if (!content?.some(part => part.type === 'image')) return `text:${normalize(text)}`;
+  if (!content?.some(part => part.type !== 'text')) return `text:${normalize(text)}`;
   return orderedKey(content);
 }
-function orderedKey(parts: readonly ({ type: 'text'; text: string } | { type: 'image'; sha256?: string })[]): string | undefined {
+function orderedKey(parts: readonly ({ type: 'text'; text: string } | { type: 'image'; sha256?: string } | { type: 'resource'; locator: string })[]): string | undefined {
   const key: Array<[string, string]> = [];
   for (const part of parts) {
-    if (part.type === 'image') {
+    if (part.type === 'resource') { key.push(['resource', part.locator]); } else if (part.type === 'image') {
       if (!part.sha256) return undefined;
       key.push(['image', part.sha256]);
     } else {

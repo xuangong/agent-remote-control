@@ -969,3 +969,8 @@ body:has(.agent-image-preview[open]) { overflow: hidden; }
 .agent-background-summary { display: inline-flex; align-items: center; gap: 6px; padding: 3px 6px; border: 0; background: transparent; color: var(--agent-muted); font-size: 11px; cursor: pointer; }
 .agent-background-summary:hover { color: var(--agent-ink); }
 .agent-background-count { font-variant-numeric: tabular-nums; opacity: .75; }
+
+.agent-resource-draft-list { display: grid; gap: 0.4rem; margin-top: 0.5rem; }
+.agent-resource-draft { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem; padding: 0.4rem 0.6rem; border: 1px solid var(--agent-border, #ddd); border-radius: 0.4rem; overflow-wrap: anywhere; }
+.agent-resource-draft > span:first-child { flex: 1; min-width: 0; }
+.agent-resource-draft small { display: block; opacity: 0.7; }

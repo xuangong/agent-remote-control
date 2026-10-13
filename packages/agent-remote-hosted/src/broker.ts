@@ -1,4 +1,5 @@
-import { TeamBroker } from './teams.js';
+import { TeamBroker, teamMessageBudgetBytes } from './teams.js';
+import type { TeamResourceStore } from './team-resources.js';
 import { isTeam, isTeamCreate, isTeamAction, type Team } from '@orchardworks/agent-remote-protocol';
 import { sessionIdentityMessage } from './session-identity.js';
 import { isCreationSource, type CreationSource } from '@orchardworks/agent-remote-protocol';
@@ -65,6 +66,7 @@ export interface RemoteHostBrokerState {
   creations: Array<[string, { fingerprint: string; agentId: string }]>;
 }
 export interface HostBrokerOptions {
+  teamResources?: TeamResourceStore;
   /** Internal opt-in; only a Gateway-authenticated tenant can supply this authority. */
   successionEnrollment?: SuccessionAssociationAuthority;
   /** Pure synchronous selection from the complete post-increment Broker draft; no native effects. */
@@ -189,11 +191,12 @@ export function createHostBroker(options: HostBrokerOptions) {
     return operation;
   }
   const teams = new TeamBroker({
+    resources: options.teamResources,
     now, read: () => teamState,
     change: update => commit(draft => {
       const next = structuredClone(teamState), value = structuredClone(update(next));
       if (isDeepStrictEqual(next, teamState)) return { value, unchanged: true, publish() {} };
-      if (!next.every(team => isTeam(team) && Buffer.byteLength(JSON.stringify(team.messages)) <= 128 * 1024) || Buffer.byteLength(JSON.stringify(next)) > 2 * 1024 * 1024) throw new Error('Team storage capacity reached.');
+      if (!next.every(team => isTeam(team) && teamMessageBudgetBytes(team) <= 128 * 1024) || Buffer.byteLength(JSON.stringify(next)) > 2 * 1024 * 1024) throw new Error('Team storage capacity reached.');
       draft.teams = next; return { value, publish() { teamState = next; } };
     }),
     assertHost(hostId, providerId) { const host = requireHost(hostId); if (!host.teamManagement) throw new Error('Update the Controller to use Teams.'); if (!host.providers.some(provider => provider.providerId === providerId)) throw new Error('Provider is unavailable on this Host.'); },
@@ -615,7 +618,7 @@ export function createHostBroker(options: HostBrokerOptions) {
     }
     host.streams.clear();
   }
-  function register(socket: RelaySocket, credential: DeviceCredential, context: BrokerRequestContext, credentialHash: string, enrollmentRequested?: 1 | 2, teamRequested = false) {
+  function register(socket: RelaySocket, credential: DeviceCredential, context: BrokerRequestContext, credentialHash: string, enrollmentRequested?: 1 | 2, teamRequested = false, resourcesRequested = false) {
     let host: Host | undefined;
     let pendingCredential: {hash: string; value: DeviceCredential} | undefined;
     let issuing: Promise<void> | undefined;
@@ -653,7 +656,7 @@ export function createHostBroker(options: HostBrokerOptions) {
     function registered() {
       if (retired || !host || host.socket !== socket) return;
       host.tunnelToken ??= randomBytes(32).toString('base64url');
-      send(host, { uplinkVersion: 2, type: 'registered', ...(host.teamManagement ? {teamManagement: true} : {}), hostId: host.id, ...(host.successionEnrollmentVersion && options.successionEnrollment ? { successionEnrollment: options.successionEnrollment, ...(host.successionEnrollmentVersion === 2 ? { successionEnrollmentVersion: 2 as const } : {}) } : {}), pairingPurpose: host.pairingPurpose ?? (host.gatewayKeyRequested ? 'gateway-setup' : 'host-only'), heartbeat, tunnelToken: host.tunnelToken });
+      send(host, { uplinkVersion: 2, type: 'registered', ...(host.teamManagement && resourcesRequested && options.teamResources ? {teamResources:true} : {}), ...(host.teamManagement ? {teamManagement: true} : {}), hostId: host.id, ...(host.successionEnrollmentVersion && options.successionEnrollment ? { successionEnrollment: options.successionEnrollment, ...(host.successionEnrollmentVersion === 2 ? { successionEnrollmentVersion: 2 as const } : {}) } : {}), pairingPurpose: host.pairingPurpose ?? (host.gatewayKeyRequested ? 'gateway-setup' : 'host-only'), heartbeat, tunnelToken: host.tunnelToken });
       if (retired || host.socket !== socket) return;
       host.ready = true;
       if (!heartbeatStarted) {
@@ -1706,7 +1709,7 @@ export function createHostBroker(options: HostBrokerOptions) {
       return { accept(client: RelaySocket) {
         if (unavailable || keys.get(hash!) !== key || key.claimedAt !== undefined || key.expires <= now()) { client.close(1008, 'Device credential revoked'); return; }
         track(client);
-        register(client, key, context, hash!, url.searchParams.get('successionEnrollment') === '2' ? 2 : url.searchParams.get('successionEnrollment') === '1' ? 1 : undefined, url.searchParams.get('team') === '1');
+        register(client, key, context, hash!, url.searchParams.get('successionEnrollment') === '2' ? 2 : url.searchParams.get('successionEnrollment') === '1' ? 1 : undefined, url.searchParams.get('team') === '1', url.searchParams.get('teamResources') === '1');
       } };
     }
     const match = /^\/v1\/sessions\/([^/]+)\/events$/.exec(url.pathname);
@@ -1730,16 +1733,19 @@ export function createHostBroker(options: HostBrokerOptions) {
       const opening = setTimeout(() => { diagnostic(host,{event:'stream_open_timeout',streamId}); client.close(1013, 'Remote stream opening timed out'); }, options.rpcTimeoutMs ?? 30_000);
       stream.timer = opening;
       client.onError(() => undefined);
-      let messageWindow = now(); let messageCount = 0; let imageChunkCount = 0; let imageChunkBytes = 0;
+      let messageWindow = now(); let messageCount = 0; let imageChunkCount = 0; let imageChunkBytes = 0; let resourceCount = 0; let resourceBytes = 0;
       client.onMessage((raw, binary) => {
         if (binary) return client.close(1003, 'Text protocol required');
-        if (now()-messageWindow >= 60_000) { messageWindow=now(); messageCount=0; imageChunkCount=0; imageChunkBytes=0; }
+        if (now()-messageWindow >= 60_000) { messageWindow=now(); messageCount=0; imageChunkCount=0; imageChunkBytes=0; resourceCount=0; resourceBytes=0; }
         let publicMessage: { type?: string; payload?: { locator?: unknown } };
         try { publicMessage = JSON.parse(raw.toString()); } catch { return client.close(1008, 'Invalid session message'); }
         if (publicMessage?.type === 'image_upload_chunk') {
           const bytes = Buffer.byteLength(raw.toString());
           imageChunkBytes += bytes;
           if (bytes > 48 * 1024 || ++imageChunkCount > 2048 || imageChunkBytes > 48 * 1024 * 1024) return client.close(1008, 'Image upload rate exceeded');
+        } else if (publicMessage?.type === 'resource_upload_chunk' || publicMessage?.type === 'resource_download_request') {
+          const bytes = Buffer.byteLength(raw.toString()); resourceBytes += bytes;
+          if (bytes > 48 * 1024 || ++resourceCount > 8192 || resourceBytes > 192 * 1024 * 1024) return client.close(1008, 'Resource transfer rate exceeded');
         } else if (++messageCount > 120) return client.close(1008, 'Control message rate exceeded');
         if (context.authorizeMessage?.(raw.toString()) === false) {
           const decoded = decodeClientMessage(raw.toString());

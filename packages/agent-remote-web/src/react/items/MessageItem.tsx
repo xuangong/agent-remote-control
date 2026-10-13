@@ -1,3 +1,4 @@
+import { ResourceDownload } from '../ResourceDownload.js';
 import { Fragment, useContext, useState } from 'react';
 import { FilePreviewContext } from '../FilePreviewContext.js';
 import { ImagePreview } from '../ImagePreview.js';
@@ -41,9 +42,10 @@ function MessageBubble({ item, messageGroup = 'single', resourceContext }: Messa
     <header className="agent-item-header">
       <TimelineTitle className="agent-item-kicker">{user ? item.background ? 'Background check' : 'You' : 'Assistant'}</TimelineTitle>
     </header>
-    {item.type === 'user_message' && item.content?.some(part => part.type === 'image')
+    {item.type === 'user_message' && item.content?.some(part => part.type !== 'text')
       ? <div className="agent-message-ordered-content">{item.content.map((part, index) => part.type === 'text'
         ? <Fragment key={index}><span className="agent-message-part-space">{part.text.match(/^\s*/)?.[0]}</span>{part.text.trim() ? <MarkdownContent markdown={part.text} className="agent-message-text-part" resourceContext={resourceContext} /> : null}<span className="agent-message-part-space">{part.text.trim() ? part.text.match(/\s*$/)?.[0] : null}</span></Fragment>
+        : part.type === 'resource' ? <ResourceDownload key={index} resourceId={part.locator.replace(/^input-resource:/, '')} label={part.label} name={part.name} byteLength={part.byteLength} sha256={part.sha256} />
         : <MessageImageTag key={index} label={part.label} locator={part.locator} context={resourceContext} />)}</div>
       : <MarkdownContent markdown={item.text} resourceContext={resourceContext} />}
   </article>;

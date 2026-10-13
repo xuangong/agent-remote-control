@@ -1,0 +1,51 @@
+import { expect, test } from '@playwright/test';
+import { createHash } from 'node:crypto';
+import { readFile } from 'node:fs/promises';
+import { resolve } from 'node:path';
+function fixtureArchive(): Buffer {
+  const payload = Buffer.alloc(192 * 1024); for (let index = 0; index < payload.length; index++) payload[index] = index % 251;
+  let crc = 0xffffffff;
+  for (const byte of payload) { crc ^= byte; for (let bit = 0; bit < 8; bit++) crc = (crc >>> 1) ^ (crc & 1 ? 0xedb88320 : 0); }
+  crc = (crc ^ 0xffffffff) >>> 0;
+  const name = Buffer.from('fixture.bin'); const local = Buffer.alloc(30); local.writeUInt32LE(0x04034b50); local.writeUInt16LE(20, 4);
+  local.writeUInt32LE(crc, 14); local.writeUInt32LE(payload.length, 18); local.writeUInt32LE(payload.length, 22); local.writeUInt16LE(name.length, 26);
+  const central = Buffer.alloc(46); central.writeUInt32LE(0x02014b50); central.writeUInt16LE(20, 4); central.writeUInt16LE(20, 6);
+  central.writeUInt32LE(crc, 16); central.writeUInt32LE(payload.length, 20); central.writeUInt32LE(payload.length, 24); central.writeUInt16LE(name.length, 28);
+  const end = Buffer.alloc(22); end.writeUInt32LE(0x06054b50); end.writeUInt16LE(1, 8); end.writeUInt16LE(1, 10);
+  end.writeUInt32LE(central.length + name.length, 12); end.writeUInt32LE(local.length + name.length + payload.length, 16);
+  return Buffer.concat([local, name, payload, central, name, end]);
+}
+const bytes = fixtureArchive();
+const sha256 = createHash('sha256').update(bytes).digest('hex');
+test('transfers a resource through the composer, native file and replay download with retry and draft reload', async ({ page }, info) => {
+  await page.goto(`/e2e/fixtures/resource-input.html?agent=${info.project.name}`);
+  await expect(page.getByTestId('connection')).toHaveText('ready');
+  await page.getByRole('button', { name: 'Toggle upload rejection' }).click();
+  const editor = page.getByTestId('prompt-input'); await editor.fill('Before '); await editor.press('End');
+  const resourceAction = page.getByRole('button', { name: 'Add resources', exact: true });
+  if (!await resourceAction.isVisible()) await page.getByRole('button', { name: /More/ }).click();
+  await resourceAction.click();
+  await page.getByLabel('Choose resources').setInputFiles({ name: 'fixture.zip', mimeType: 'application/zip', buffer: bytes });
+  await expect(page.getByRole('button', { name: 'Retry resource #1', exact: true })).toBeVisible();
+  await expect(page.getByTestId('prompt-submit')).toBeDisabled();
+  await page.getByRole('button', { name: 'Toggle upload rejection' }).click();
+  await page.getByRole('button', { name: 'Retry resource #1', exact: true }).click();
+  await expect(page.locator('.agent-resource-draft')).toContainText('Ready');
+  await editor.press('End'); await editor.pressSequentially(' after');
+  await expect(editor).toHaveText('Before [resource #1] after');
+  await expect(page.getByText('Resource draft saved on this device.', { exact: true })).toBeVisible();
+  await page.reload();
+  await expect(page.getByTestId('connection')).toHaveText('ready');
+  await expect(editor).toHaveText('Before [resource #1] after');
+  await expect(page.locator('.agent-resource-draft')).toContainText('Ready');
+  await page.getByTestId('prompt-submit').click();
+  const attachment = page.getByRole('button', { name: 'Download resource #1: fixture.zip', exact: true });
+  await expect(attachment).toBeVisible();
+  const evidencePath = resolve(process.env.RESOURCE_BROWSER_EVIDENCE ?? '../../.artifacts/resource-browser', `${info.project.name}.json`);
+  const native = JSON.parse(await readFile(evidencePath, 'utf8')); expect(native.types).toEqual(['text', 'resource', 'text']); expect(native.resources[0]).toMatchObject({ byteLength: bytes.length, sha256 });
+  await page.reload(); await expect(attachment).toBeVisible();
+  const downloaded = page.waitForEvent('download'); await attachment.click();
+  const file = await downloaded; expect(file.suggestedFilename()).toBe('fixture.zip');
+  const downloadedBytes = await readFile((await file.path())!); expect(createHash('sha256').update(downloadedBytes).digest('hex')).toBe(sha256);
+  await page.screenshot({ path: info.outputPath('resource-history.png') });
+});

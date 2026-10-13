@@ -1581,6 +1581,8 @@ function AppContent({
     loadOlder: submittedClient ? () => commandClient().loadOlder() : undefined,
     sendMessage: async (text, options) => { await commandClient().sendMessage(text, options); },
     sendMessageContent: async (content, options) => { await commandClient().sendMessageContent(content, options); },
+    uploadResource: (file, name, uploadId, options) => commandClient().uploadResource(file, name, uploadId, options),
+    downloadResource: resourceId => commandClient().downloadResource(resourceId),
     uploadImage: (file, uploadId, options) => commandClient().uploadImage(file, uploadId, options),
     retryMessage: async (id) => { await commandClient().retryMessage(id); },
     deleteMessage: (id) => commandClient().deleteMessage(id),

@@ -9,7 +9,7 @@ const projection = { version: 1, role: { id: 'role', revision: 2, origin: ref('A
     prepared: { ...request, to: ref('B'), workspace, associationRevision: 1, participants: [], capture: { epoch: 'e', seq: 1, capturedAt: 'now' } } } };
 const succession = { version: 1, projection, from: { hostId: 'mapped-host', providerId: 'fixture', nativeSessionId: 'A' },
   to: { hostId: 'mapped-host', providerId: 'fixture', nativeSessionId: 'B' } };
-const frame = { protocolVersion: '1.7.0', type: 'session_succession_committed', succession };
+const frame = { protocolVersion: '1.8.0', type: 'session_succession_committed', succession };
 
 test('decodes a cold committed successor locator independently of prompt-edit migration', () => {
   const decoded = decodeSessionChannelServerMessage(JSON.stringify(frame));
@@ -24,7 +24,7 @@ test('rejects forged projection semantics, mismatched locators and extra fields'
   ]) expect(decodeSessionChannelServerMessage(JSON.stringify({ ...frame, succession: bad })).status).toBe('rejected');
 });
 test('accepts old readiness and explicit succession readiness without relaxing strictness', () => {
-  expect(decodeSessionChannelServerMessage('{"protocolVersion":"1.7.0","type":"ready"}').status).toBe('ok');
-  expect(decodeSessionChannelServerMessage('{"protocolVersion":"1.7.0","type":"ready","successions":1}').status).toBe('ok');
-  expect(decodeSessionChannelServerMessage('{"protocolVersion":"1.7.0","type":"ready","successions":2}').status).toBe('rejected');
+  expect(decodeSessionChannelServerMessage('{"protocolVersion":"1.8.0","type":"ready"}').status).toBe('ok');
+  expect(decodeSessionChannelServerMessage('{"protocolVersion":"1.8.0","type":"ready","successions":1}').status).toBe('ok');
+  expect(decodeSessionChannelServerMessage('{"protocolVersion":"1.8.0","type":"ready","successions":2}').status).toBe('rejected');
 });

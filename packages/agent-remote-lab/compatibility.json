@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "protocolVersion": "1.7.0",
+  "protocolVersion": "1.8.0",
   "borgee": {
     "release": "unreleased",
     "sourceState": "working_tree",
@@ -86,6 +86,7 @@
         "packages/agent-remote-lab/playwright.config.ts",
         "packages/agent-remote-lab/playwright.images.config.ts",
         "packages/agent-remote-lab/playwright.markdown.config.ts",
+        "packages/agent-remote-lab/playwright.resources.config.ts",
         "packages/agent-remote-lab/public",
         "packages/agent-remote-lab/scripts",
         "packages/agent-remote-lab/src",
@@ -120,7 +121,7 @@
         "packages/codex-daemon-client/src",
         "packages/codex-daemon-client/tsconfig.json"
       ],
-      "digest": "sha256:435b6a57339e9f687955d0a7472b223f0fe42bf1ae59d5e260aac96529fb7734"
+      "digest": "sha256:a18ccebe65cd038901ae0a3f8390bc86bf86f4c70aec72dd2f6bd457dfe256d5"
     }
   },
   "providers": [

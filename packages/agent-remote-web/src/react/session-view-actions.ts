@@ -19,6 +19,8 @@ export interface SessionViewActions {
   deleteMessage?(id: string): void;
   sendMessage?(text: string, options?: AgentMessageOptions): Promise<void>;
   sendMessageContent?(content: readonly MessagePart[], options?: AgentMessageOptions & { imageDigests?: Readonly<Record<string, string>> }): Promise<void>;
+  uploadResource?: import('./useResourceDraft.js').UploadResource;
+  downloadResource?(resourceId: string): Promise<{ blob: Blob; name: string; sha256: string }>;
   uploadImage?(file: Blob, uploadId: string, options?: { signal?: AbortSignal; onProgress?(loaded: number, total: number): void }): Promise<NonNullable<ImageUploadReceipt['attachment']>>;
   steer?(text: string): Promise<void>;
   cancel?(): Promise<void>;

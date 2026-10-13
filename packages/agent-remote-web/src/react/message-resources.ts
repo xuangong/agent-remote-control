@@ -15,9 +15,9 @@ export function messageResources(item: AgentTimelineItem, bindings: readonly Res
     return { bindings: [], labels };
   }
   const markdown: string[] = [];
-  if (item.type === 'user_message' && item.content?.some(part => part.type === 'image')) {
+  if (item.type === 'user_message' && item.content?.some(part => part.type !== 'text')) {
     for (const part of item.content) {
-      if (part.type === 'image') labels.set(part.locator, part.label);
+      if (part.type !== 'text') labels.set(part.locator, part.label);
       else markdown.push(part.text);
     }
   } else markdown.push(item.text);

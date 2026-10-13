@@ -34,9 +34,9 @@ export const SessionControlRequest = Strict({
 });
 export type SessionControlRequest = Static<typeof SessionControlRequest>;
 
-export type SessionMutation = Extract<ClientMessage, { type: 'send_message' | 'steer' | 'cancel' | 'set_planning' | 'set_session_setting' | 'execute_command' | 'interaction_response' | 'image_upload_begin' | 'image_upload_chunk' | 'image_upload_finish' }>;
+export type SessionMutation = Extract<ClientMessage, { type: 'send_message' | 'steer' | 'cancel' | 'set_planning' | 'set_session_setting' | 'execute_command' | 'interaction_response' | 'image_upload_begin' | 'image_upload_chunk' | 'resource_upload_begin' | 'resource_upload_chunk' | 'resource_upload_finish' | 'image_upload_finish' }>;
 
 export function isSessionMutation(message: { type: string }): message is SessionMutation {
   return ['send_message', 'steer', 'cancel', 'set_planning', 'set_session_setting', 'execute_command',
-    'interaction_response', 'image_upload_begin', 'image_upload_chunk', 'image_upload_finish'].includes(message.type);
+    'resource_upload_begin', 'resource_upload_chunk', 'resource_upload_finish', 'interaction_response', 'image_upload_begin', 'image_upload_chunk', 'image_upload_finish'].includes(message.type);
 }

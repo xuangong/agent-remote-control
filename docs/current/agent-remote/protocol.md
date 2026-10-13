@@ -116,7 +116,7 @@ The relay gives each intent 30 seconds. Native rejection ends Pending immediatel
 
 Snapshots and updates share these outcomes across pages and reconnects. The renderer displays pending targets in amber, then restores normal text for the actual or last confirmed value. Terminal outcomes remain in the relevant panel; an unread dot clears when that panel is opened. Read markers are local presentation state. No timeout toast or automatic retry is generated. Settings default choices describe native selection semantics, not an inferred effective model or effort.
 
-All strict-schema public participants must upgrade together to `1.7.0`. Independent uplink envelope versions stay unchanged (`packages/agent-remote-protocol/src/session-settings.ts`, `packages/agent-remote-relay/src/session-setting-changes.ts`).
+All strict-schema public participants must upgrade together to `1.8.0`. Independent uplink envelope versions stay unchanged (`packages/agent-remote-protocol/src/session-settings.ts`, `packages/agent-remote-relay/src/session-setting-changes.ts`).
 
 ## Provider commands
 
@@ -375,7 +375,7 @@ The shared Session View renders attribution and Markdown in Content and All
 activity modes. Search keeps User / Assistant messages as its default; All
 activity also searches communication text and attribution. Recording, replay,
 source-key deduplication, and reconnect use the ordinary timeline contract.
-All strict-schema Remote participants must upgrade together to protocol 1.7.0;
+All strict-schema Remote participants must upgrade together to protocol 1.8.0;
 this does not change the independent Host uplink envelope version.
 
 ## Current session usage
@@ -436,3 +436,13 @@ Deploy Relay and browser assets first and refresh open clients before updating
 Controllers to emit scoped usage, including the `runtime` scope. Older Controllers can remain connected; their
 unscoped token and context measurements appear as unavailable. The independent
 Host uplink version is unchanged.
+
+## Generic resource input
+
+Public Remote protocol 1.8.0 adds generic resource messages and strict resource capability fields. All public participants must upgrade together; independent uplink envelope versions remain unchanged. Older public clients are rejected during negotiation rather than receiving unsupported snapshot fields.
+
+`resourceInput` is an optional capability independent of image input. `resource_upload_begin`, `resource_upload_chunk`, and `resource_upload_finish` use the full-session stream with the existing control lease and a separate `resource_upload` authorization action. A completed receipt contains a stable `resourceId`, display name, media type, byte length and SHA256. Zero-byte files are supported. Defaults are 50 MiB per file, eight resource references per message and 100 MiB of distinct resource bytes per message. Upload chunks contain at most 32 KiB and resume from the persisted offset; repeated identical chunks and finish requests are idempotent.
+
+An ordered `MessagePart` with `type: resource` carries only `resourceId` and `label`. The receiving Host resolves the resource in the authenticated principal/provider/native-session scope and verifies the stored bytes before native dispatch. A native timeline `UserMessagePart` uses the `input-resource:<resourceId>` locator plus display metadata. Display labels such as `[resource #1]` are not storage identities or authorization grants.
+
+`resource_download_request` and `resource_download_result` transfer at most 32 KiB with the declared total length and SHA256. Reads require session read authorization, not a current control token, so an authorized read-only session can download historical attachments. The receiver verifies the complete length and digest. Generic files do not use the existing whole-image `resource_response` payload. Resource metadata recovered from native text is descriptive: it never grants access to a supplied path, and downloads must resolve the ID against the scoped store.

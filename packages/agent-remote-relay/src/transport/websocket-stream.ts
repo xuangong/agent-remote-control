@@ -17,7 +17,7 @@ export interface AgentRemotePrincipal {
   [claim: string]: unknown;
 }
 
-export type AgentRemoteAuthorizationAction = 'attach' | 'read_resource' | 'resolve_resource' | 'image_upload' | 'send_message';
+export type AgentRemoteAuthorizationAction = 'attach' | 'read_resource' | 'resolve_resource' | 'image_upload' | 'resource_upload' | 'send_message';
 
 export interface AgentRemoteAuthorizationContext {
   principal: AgentRemotePrincipal;

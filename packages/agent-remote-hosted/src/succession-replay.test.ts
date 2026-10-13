@@ -188,8 +188,8 @@ test('authorizes historical recovery only in the owning namespace and retains fa
 test('negotiates succession frames only for opted in channels and replays after reconnect', async () => {
   const f = await fixture(); const legacy = await f.channel(false); const modern = await f.channel();
   await until(() => modern.frames.filter(frame => frame.type === 'session_succession_committed').length === 2);
-  expect(legacy.frames).toEqual([{ protocolVersion: '1.7.0', type: 'ready' }]);
-  expect(modern.frames[0]).toEqual({ protocolVersion: '1.7.0', type: 'ready', successions: 1 });
+  expect(legacy.frames).toEqual([{ protocolVersion: '1.8.0', type: 'ready' }]);
+  expect(modern.frames[0]).toEqual({ protocolVersion: '1.8.0', type: 'ready', successions: 1 });
   for (const frame of modern.frames) expect(decodeSessionChannelServerMessage(JSON.stringify(frame)).status).toBe('ok');
   modern.socket.close(); await once(modern.socket, 'close', { signal: AbortSignal.timeout(3000) });
   const reconnected = await f.channel(); await until(() => reconnected.frames.length === 3);

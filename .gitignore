@@ -5,6 +5,7 @@ dist/
 .env.*
 !.env.example
 .runtime/
+.artifacts/
 docs/_drafts/
 playwright-report/
 test-results/

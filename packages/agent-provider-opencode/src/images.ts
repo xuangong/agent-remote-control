@@ -23,8 +23,8 @@ export class OpenCodeImages {
   private totalBytes = 0;
   private active = true;
   constructor(private readonly sessionId: string, private readonly options: { allowLocalFiles?: boolean } = {}) {}
-  project(messageId: string, parts: readonly NativeAttachment[]): { content: AgentUserMessagePart[]; references: ProviderResourceReference[] } {
-    const content: AgentUserMessagePart[] = [];
+  project(messageId: string, parts: readonly NativeAttachment[]): { content: Exclude<AgentUserMessagePart, { type: 'resource' }>[]; references: ProviderResourceReference[] } {
+    const content: Exclude<AgentUserMessagePart, { type: 'resource' }>[] = [];
     const references: ProviderResourceReference[] = [];
     if (!this.active) return { content, references };
     for (const part of parts) {
@@ -93,6 +93,7 @@ export class OpenCodeImages {
     let total = 0; let count = 0;
     for (const part of parts) {
       if (part.type === 'text') { total += Buffer.byteLength(part.text); text.push(part.text); continue; }
+      if (part.type !== 'image') throw new Error('OpenCode does not support generic resource input.');
       if (++count > IMAGE_INPUT_CAPABILITIES.maxImages || !IMAGE_INPUT_CAPABILITIES.mediaTypes.includes(part.mediaType)) throw new Error('Unsupported OpenCode image input.');
       const file = await open(part.path, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
       let bytes: Buffer;

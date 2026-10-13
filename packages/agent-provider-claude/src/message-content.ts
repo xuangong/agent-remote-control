@@ -1,3 +1,4 @@
+import { resourceInputText } from '@orchardworks/agent-provider-sdk';
 import { open } from 'node:fs/promises';
 import { constants } from 'node:fs';
 import { createHash } from 'node:crypto';
@@ -9,6 +10,7 @@ export async function claudeMessageContent(parts: readonly AgentInputPart[]): Pr
   const blocks: Exclude<SDKUserMessage['message']['content'], string> = [];
   for (const part of parts) {
     if (part.type === 'text') { blocks.push({ type: 'text', text: part.text }); continue; }
+    if (part.type === 'resource') { blocks.push({type:'text',text:resourceInputText(part)}); continue; }
     const file = await open(part.path, constants.O_RDONLY | constants.O_NONBLOCK);
     try {
       const stat = await file.stat();

@@ -1,3 +1,4 @@
+import { RESOURCE_INPUT_CAPABILITIES } from '@orchardworks/agent-provider-sdk';
 import { AgentOperationRejectedError, prepareAgentOperation } from '@orchardworks/agent-provider-sdk';
 import {ClaudeNativeProcess} from './native-process.js';
 import { claudeMessageContent } from './message-content.js';
@@ -48,7 +49,7 @@ export class ClaudeShutdownError extends Error {
 export class ClaudeAgentSession implements AgentSession {
   readonly nativeEvidence: ClaudeNativeEvidence;
   private acceptance?: AgentMessageOptions['onAcceptance'];
-  readonly capabilities: AgentCapabilities = { imageInput: IMAGE_INPUT_CAPABILITIES, history: true, sendMessage: true, steer: false, cancel: true, readResource: true,
+  readonly capabilities: AgentCapabilities = { resourceInput: RESOURCE_INPUT_CAPABILITIES, imageInput: IMAGE_INPUT_CAPABILITIES, history: true, sendMessage: true, steer: false, cancel: true, readResource: true,
     planning: true, commands: true, sessionSettings: true, interactions: { question: true, toolApproval: true, planApproval: true } };
   private readonly input = new Channel<SDKUserMessage>();
   private readonly output = new Channel<ProviderStreamItem>();
@@ -176,7 +177,7 @@ export class ClaudeAgentSession implements AgentSession {
 
   async sendMessageContent(parts: readonly AgentInputPart[], options: AgentMessageOptions = {}): Promise<void> {
     this.assertMessageReady(options);
-    if (!parts.some(part => part.type === 'image' || part.text.trim())) throw new AgentOperationRejectedError('operation_rejected', 'Claude message cannot be empty.');
+    if (!parts.some(part => part.type !== 'text' || part.text.trim())) throw new AgentOperationRejectedError('operation_rejected', 'Claude message cannot be empty.');
     const snapshot = parts.map(part => ({ ...part }));
     this.preparingMessage = true;
     try {

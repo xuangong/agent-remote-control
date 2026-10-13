@@ -1,7 +1,7 @@
 import { expect, it } from 'vitest';
 import { isControllerRelease, compareControllerVersions, releaseCoversHost, controllerUpdateTarget, controllerUpgradeBridgeVersion } from './controller-release.js';
 it('binds a stable release to its asset, revision and supported platforms', () => {
-  const release = { protocolVersion: '1.7.0', version: '0.2.0', revision: 'a'.repeat(40), sha256: 'b'.repeat(64), asset: 'orchardworks-agent-remote-controller-0.2.0.tgz', nodeMajor: 22, platforms: ['darwin-arm64', 'linux-x64'] };
+  const release = { protocolVersion: '1.8.0', version: '0.2.0', revision: 'a'.repeat(40), sha256: 'b'.repeat(64), asset: 'orchardworks-agent-remote-controller-0.2.0.tgz', nodeMajor: 22, platforms: ['darwin-arm64', 'linux-x64'] };
   expect(isControllerRelease(release)).toBe(true);
   expect(releaseCoversHost({ ...release, protocolVersion: '99.0.0' }, { platform: 'darwin', arch: 'arm64', nodeMajor: 22 })).toBe(true);
   expect(isControllerRelease({ ...release, asset: '../../other.tgz' })).toBe(false);
@@ -13,7 +13,7 @@ it('binds a stable release to its asset, revision and supported platforms', () =
   expect(releaseCoversHost(release, { platform: 'linux', arch: 'x64', nodeMajor: 20 })).toBe(false);
 });
 
-const target = { protocolVersion: '1.7.0', version: '0.2.40', revision: 'a'.repeat(40), sha256: 'b'.repeat(64), asset: 'orchardworks-agent-remote-controller-0.2.40.tgz', nodeMajor: 22, platforms: ['darwin-arm64'] };
+const target = { protocolVersion: '1.8.0', version: '0.2.40', revision: 'a'.repeat(40), sha256: 'b'.repeat(64), asset: 'orchardworks-agent-remote-controller-0.2.40.tgz', nodeMajor: 22, platforms: ['darwin-arm64'] };
 const bridge = { ...target, protocolVersion: '1.5.0', version: '0.2.32', asset: 'orchardworks-agent-remote-controller-0.2.32.tgz' };
 const host = { version: '0.2.30', platform: 'darwin', arch: 'arm64', nodeMajor: 22 };
 it('routes legacy updaters through the published protocol 1.5 bridge', () => {
@@ -45,7 +45,7 @@ it('supports a staged bridge release without reopening the final release', () =>
 });
 
 const protocolSixBridge = { ...target, protocolVersion: '1.6.0', version: '0.2.33', asset: 'orchardworks-agent-remote-controller-0.2.33.tgz' };
-it('keeps the protocol 1.6 updater on a verified intermediate release before protocol 1.7', () => {
+it('keeps the protocol 1.6 updater on a verified intermediate release before the current session protocol', () => {
   const legacy = { ...host, version: '0.2.31' };
   expect(controllerUpgradeBridgeVersion(target, legacy)).toBe('0.2.33');
   expect(controllerUpdateTarget(target, legacy)).toBeNull();

@@ -1,3 +1,4 @@
+import {resourceInputText} from '@orchardworks/agent-provider-sdk';
 import {createHash} from 'node:crypto';
 import {constants} from 'node:fs';
 import {open} from 'node:fs/promises';
@@ -53,7 +54,7 @@ export class CopilotImages {
  }
  async input(parts: readonly AgentInputPart[], limits: ImageInputCapabilities = IMAGE_INPUT_CAPABILITIES) {
   const attachments: {type: 'blob'; data: string; mimeType: string; displayName: string}[] = [];
-  const prompt = parts.flatMap(p => p.type === 'text' ? [p.text] : []).join('\n');
+  const prompt = parts.flatMap(p => p.type === 'text' ? [p.text] : p.type === 'resource' ? [resourceInputText(p)] : []).join('\n');
   let total = Buffer.byteLength(prompt);
   for (const part of parts) {
    if (part.type !== 'image') continue;

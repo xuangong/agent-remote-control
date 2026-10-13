@@ -1,3 +1,4 @@
+import { ResourceDownloadContext, type DownloadResource } from './ResourceDownload.js';
 import type { ResourceResponseState } from '@orchardworks/agent-remote-protocol';
 import { useContext, useMemo, useRef, useState } from 'react';
 import type {
@@ -25,6 +26,7 @@ import { useTimelineAction } from './useTimelineAction.js';
 export type AgentTimelineState = AgentReplicaState;
 
 export interface AgentTimelineProps {
+  readonly onDownloadResource?: DownloadResource;
   readonly searchEntryKey?: string;
   readonly searchRequestId?: number;
   readonly onEditPrompt?: (entry: import('@orchardworks/agent-remote-protocol').ProjectedTimelineEntry) => Promise<void>;
@@ -72,6 +74,7 @@ export function AgentTimeline({
   interactionDisabled = false,
   interactionsWaitingForConnection = false,
   interactionsReadOnly = false,
+  onDownloadResource,
   onResourceRequest,
   onResourceResolve,
   questionDrafts,
@@ -147,7 +150,7 @@ export function AgentTimeline({
   }
   children.sort((a, b) => (Date.parse(a.createdAt ?? '') - Date.parse(b.createdAt ?? ''))
     || discovered.current.order.get(a.nativeSessionId)! - discovered.current.order.get(b.nativeSessionId)!);
-  return <section className="agent-remote-surface" aria-label="Agent timeline">
+  return <ResourceDownloadContext.Provider value={onDownloadResource}><section className="agent-remote-surface" aria-label="Agent timeline">
     {showHeader ? <header className="agent-surface-header">
       <div>
         <span className="agent-item-kicker">REMOTE SESSION</span>
@@ -191,7 +194,7 @@ export function AgentTimeline({
           onQuestionDraftChange={onQuestionDraftChange ? (draft) => onQuestionDraftChange(request.requestId, draft) : undefined}
         /></fieldset>)}
     </aside> : null}
-  </section>;
+  </section></ResourceDownloadContext.Provider>;
 }
 
 function HistoryControls({ onLoadOlder, loading = false, error }: { readonly onLoadOlder?: () => void | Promise<void>; loading?: boolean; error?: string }) {

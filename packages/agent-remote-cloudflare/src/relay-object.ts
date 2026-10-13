@@ -1,4 +1,6 @@
-import { createHostedRelay, validateGatewayOrigin, type RelayScheduler } from '@orchardworks/agent-remote-hosted';
+import { createHostedRelay, PortableTeamResourceStore, validateGatewayOrigin, type RelayScheduler } from '@orchardworks/agent-remote-hosted';
+import { SqliteTeamResourceStorage } from './team-resource-storage.js';
+import { createHmac } from 'node:crypto';
 import { SqliteRelayStore } from './storage.js';
 import { encodeSqlSnapshot, quoteSqlRecord, SQL_CHUNK_BYTES, SQL_RECORD_FORMAT, SQL_SNAPSHOT_FORMAT } from './storage-codec.js';
 import { SqliteDiagnosticStore } from './diagnostic-storage.js';
@@ -46,6 +48,7 @@ export class RelayObject {
       },
     };
     this.core = createHostedRelay({ ...auth, previewOrigin: this.env.AGENT_REMOTE_PREVIEW_URL, previewDomain: this.env.AGENT_REMOTE_PREVIEW_DOMAIN, storage, successionEnrollment: true, diagnosticStorage: new SqliteDiagnosticStore(this.context.storage, auth),
+      teamResources: namespace => new PortableTeamResourceStore({ storage: new SqliteTeamResourceStorage(this.context.storage, createHmac('sha256', auth.secret).update(JSON.stringify([auth.origin, auth.issuer, namespace])).digest('hex')) }),
       successionEncodingCosts: {
         measureSnapshot: state => ({ snapshotFormat: SQL_SNAPSHOT_FORMAT, recordFormat: SQL_RECORD_FORMAT,
           chunkBytes: SQL_CHUNK_BYTES, costs: encodeSqlSnapshot(state, auth).costs }),

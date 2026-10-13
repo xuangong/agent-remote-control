@@ -1,7 +1,7 @@
 import { expect, it } from 'vitest';
 import { sessionIdentityMessage } from './session-identity.js';
 
-const client = (type: string, payload: unknown) => JSON.stringify({ protocolVersion: '1.7.0', type, payload });
+const client = (type: string, payload: unknown) => JSON.stringify({ protocolVersion: '1.8.0', type, payload });
 it('leaves protocol negotiation and version rejection to the endpoints', () => {
   const negotiate = JSON.stringify({ protocolVersion: 'future-version', type: 'negotiate' });
   expect(sessionIdentityMessage(negotiate, 'public', 'runtime', 'client')).toBe(negotiate);

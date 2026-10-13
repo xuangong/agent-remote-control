@@ -33,7 +33,7 @@ const capabilities = {
 
 function snapshot(): AgentSnapshot {
   return {
-    protocolVersion: '1.7.0',
+    protocolVersion: '1.8.0',
     type: 'agent_snapshot',
     payload: {
       id: 'agent-one', providerId: 'provider-neutral',
@@ -64,7 +64,7 @@ function page(
   const start = entries[0]?.seqStart ?? 0;
   const end = entries.at(-1)?.seqEnd ?? 0;
   return {
-    protocolVersion: '1.7.0', type: 'timeline_page',
+    protocolVersion: '1.8.0', type: 'timeline_page',
     payload: {
       requestId: 'timeline-page', agentId: 'agent-one', direction, epoch: 'epoch-one',
       reset: false, staleCursor: false, gap: false,
@@ -84,7 +84,7 @@ function live(
   resources: ResourceBinding[] = [],
 ): AgentStreamMessage {
   return {
-    protocolVersion: '1.7.0', type: 'agent_stream',
+    protocolVersion: '1.8.0', type: 'agent_stream',
     payload: {
       agentId: 'agent-one', epoch, seq,
       timestamp: `2026-09-02T00:00:0${seq}.000Z`,
@@ -104,7 +104,7 @@ describe('RemoteSessionClient', () => {
     client.subscribeStatus(value => statuses.push(value));
     client.start(); transport.open();
     expect(statuses.at(-1)).toBe('connecting');
-    transport.emit({ protocolVersion: '1.7.0', type: 'negotiated' });
+    transport.emit({ protocolVersion: '1.8.0', type: 'negotiated' });
     expect(statuses.at(-1)).toBe('catching_up');
     client.stop();
   });
@@ -115,10 +115,10 @@ describe('RemoteSessionClient', () => {
     const text = '  Keep this\nexact text  ';
     try {
       const pending = delivery === undefined ? client.sendMessage(text) : client.sendMessage(text, { delivery });
-      expect(transport.sent.at(-1)).toEqual({ protocolVersion: '1.7.0', type: 'send_message', payload: {
+      expect(transport.sent.at(-1)).toEqual({ protocolVersion: '1.8.0', type: 'send_message', payload: {
         requestId: 'message-delivery', operationId: expect.any(String), agentId: 'agent-one', text, ...(delivery === undefined ? {} : { delivery }),
       } });
-      const response = { protocolVersion: '1.7.0', type: 'command_acknowledged', payload: { requestId: 'message-delivery', agentId: 'agent-one', command: 'send_message' } } as const;
+      const response = { protocolVersion: '1.8.0', type: 'command_acknowledged', payload: { requestId: 'message-delivery', agentId: 'agent-one', command: 'send_message' } } as const;
       transport.emit(response);
       await expect(pending).resolves.toEqual(response);
     } finally { client.stop(); }
@@ -134,7 +134,7 @@ describe('RemoteSessionClient', () => {
       void pending.then(() => { settled = true; }, () => { settled = true; });
       await vi.advanceTimersByTimeAsync(60_000);
       expect(settled).toBe(false);
-      transport.emit({ protocolVersion: '1.7.0', type: 'command_result', payload: { requestId: 'long-command', agentId: 'agent-one', result: { text: 'Native finished' } } });
+      transport.emit({ protocolVersion: '1.8.0', type: 'command_result', payload: { requestId: 'long-command', agentId: 'agent-one', result: { text: 'Native finished' } } });
       await expect(pending).resolves.toEqual({ text: 'Native finished' });
     } finally { client.stop(); vi.useRealTimers(); }
   });
@@ -149,7 +149,7 @@ describe('RemoteSessionClient', () => {
     client.start();
     transport.open();
     const retry = client.executeCommand('native:ask', '');
-    transport.emit({ protocolVersion: '1.7.0', type: 'command_result', payload: { requestId: 'native-execution', agentId: 'agent-one', result: { text: 'New execution' } } });
+    transport.emit({ protocolVersion: '1.8.0', type: 'command_result', payload: { requestId: 'native-execution', agentId: 'agent-one', result: { text: 'New execution' } } });
     await expect(retry).resolves.toEqual({ text: 'New execution' });
     client.stop();
   });
@@ -164,12 +164,12 @@ describe('RemoteSessionClient', () => {
     expect(request.type).toBe('list_commands');
     if (request.type !== 'list_commands') throw new Error('Expected list');
     const commands = [{ id: 'native:go', name: 'go', description: 'Native', kind: 'command' as const }];
-    transport.emit({ protocolVersion: '1.7.0', type: 'command_list', payload: { ...request.payload, commands } });
+    transport.emit({ protocolVersion: '1.8.0', type: 'command_list', payload: { ...request.payload, commands } });
     await expect(listed).resolves.toEqual(commands);
     const executed = client.executeCommand('native:go', 'args');
     const run = transport.sent.at(-1)!;
     if (run.type !== 'execute_command') throw new Error('Expected execute');
-    transport.emit({ protocolVersion: '1.7.0', type: 'command_result', payload: { requestId: run.payload.requestId, agentId: 'agent-one', result: { text: 'Done' } } });
+    transport.emit({ protocolVersion: '1.8.0', type: 'command_result', payload: { requestId: run.payload.requestId, agentId: 'agent-one', result: { text: 'Done' } } });
     await expect(executed).resolves.toEqual({ text: 'Done' });
     client.stop();
   });
@@ -181,8 +181,8 @@ describe('RemoteSessionClient', () => {
     client.start();
     transport.open();
     const pending = client.setPlanning(true);
-    expect(transport.sent.at(-1)).toEqual({ protocolVersion: '1.7.0', type: 'set_planning', payload: { requestId: 'planning-one', operationId: expect.any(String), agentId: 'agent-one', active: true } });
-    const acknowledgement = { protocolVersion: '1.7.0', type: 'command_acknowledged', payload: { requestId: 'planning-one', agentId: 'agent-one', command: 'set_planning' } } as const;
+    expect(transport.sent.at(-1)).toEqual({ protocolVersion: '1.8.0', type: 'set_planning', payload: { requestId: 'planning-one', operationId: expect.any(String), agentId: 'agent-one', active: true } });
+    const acknowledgement = { protocolVersion: '1.8.0', type: 'command_acknowledged', payload: { requestId: 'planning-one', agentId: 'agent-one', command: 'set_planning' } } as const;
     transport.emit(acknowledgement);
     await expect(pending).resolves.toEqual(acknowledgement);
     expect(replica.getState().agent?.runtimeInfo.planning).toEqual({ active: false });
@@ -229,13 +229,13 @@ describe('RemoteSessionClient', () => {
     client.start();
     transport.open();
     expect(transport.sent.map(({ type }) => type)).toEqual(['negotiate']);
-    transport.emit({ protocolVersion: '1.7.0', type: 'negotiated' });
+    transport.emit({ protocolVersion: '1.8.0', type: 'negotiated' });
     transport.emit(snapshot());
     expect(transport.sent.map(({ type }) => type)).toEqual(['negotiate', 'timeline_subscription']);
     expect(transport.timelineRequests).toEqual([]);
 
     transport.emit({
-      protocolVersion: '1.7.0', type: 'timeline_subscribed',
+      protocolVersion: '1.8.0', type: 'timeline_subscribed',
       payload: { requestId: transport.sent[1]?.payload.requestId as string, agentIds: ['agent-one'] },
     });
     expect(transport.timelineRequests).toMatchObject([{ direction: 'tail', cursor: undefined }]);
@@ -263,10 +263,10 @@ describe('RemoteSessionClient', () => {
 
     client.start();
     transport.open();
-    transport.emit({ protocolVersion: '1.7.0', type: 'negotiated' });
+    transport.emit({ protocolVersion: '1.8.0', type: 'negotiated' });
     transport.emit(snapshot());
     transport.emit({
-      protocolVersion: '1.7.0', type: 'timeline_subscribed',
+      protocolVersion: '1.8.0', type: 'timeline_subscribed',
       payload: { requestId: transport.sent.at(-1)?.payload.requestId as string, agentIds: ['agent-one'] },
     });
     transport.emit(live(2, 'B'));
@@ -278,10 +278,10 @@ describe('RemoteSessionClient', () => {
     expect(transport.connections).toBe(2);
     expect(transport.closedConnections).toBe(1);
     transport.open();
-    transport.emit({ protocolVersion: '1.7.0', type: 'negotiated' });
+    transport.emit({ protocolVersion: '1.8.0', type: 'negotiated' });
     transport.emit(snapshot());
     transport.emit({
-      protocolVersion: '1.7.0', type: 'timeline_subscribed',
+      protocolVersion: '1.8.0', type: 'timeline_subscribed',
       payload: { requestId: transport.sent.at(-1)?.payload.requestId as string, agentIds: ['agent-one'] },
     });
     expect(transport.timelineRequests).toHaveLength(2);
@@ -303,10 +303,10 @@ describe('RemoteSessionClient', () => {
     });
     client.start();
     transport.open();
-    transport.emit({ protocolVersion: '1.7.0', type: 'negotiated' });
+    transport.emit({ protocolVersion: '1.8.0', type: 'negotiated' });
     transport.emit(snapshot());
     transport.emit({
-      protocolVersion: '1.7.0', type: 'timeline_subscribed',
+      protocolVersion: '1.8.0', type: 'timeline_subscribed',
       payload: { requestId: transport.sent.at(-1)?.payload.requestId as string, agentIds: ['agent-one'] },
     });
     const pending = client.sendMessage('Reject this when recovery restarts.');
@@ -333,10 +333,10 @@ describe('RemoteSessionClient', () => {
     });
     client.start();
     transport.open();
-    transport.emit({ protocolVersion: '1.7.0', type: 'negotiated' });
+    transport.emit({ protocolVersion: '1.8.0', type: 'negotiated' });
     transport.emit(snapshot());
     transport.emit({
-      protocolVersion: '1.7.0', type: 'timeline_subscribed',
+      protocolVersion: '1.8.0', type: 'timeline_subscribed',
       payload: { requestId: transport.sent.at(-1)?.payload.requestId as string, agentIds: ['agent-one'] },
     });
 
@@ -354,10 +354,10 @@ describe('RemoteSessionClient', () => {
     const client = new RemoteSessionClient('agent-one', transport, replica);
     client.start();
     transport.open();
-    transport.emit({ protocolVersion: '1.7.0', type: 'negotiated' });
+    transport.emit({ protocolVersion: '1.8.0', type: 'negotiated' });
     transport.emit(snapshot());
     transport.emit({
-      protocolVersion: '1.7.0', type: 'timeline_subscribed',
+      protocolVersion: '1.8.0', type: 'timeline_subscribed',
       payload: { requestId: transport.sent[1]?.payload.requestId as string, agentIds: ['agent-one'] },
     });
     transport.resolveTimeline(page('tail', [entry(1, 2, 'AB')], {
@@ -387,10 +387,10 @@ describe('RemoteSessionClient', () => {
     });
     client.start();
     transport.open();
-    transport.emit({ protocolVersion: '1.7.0', type: 'negotiated' });
+    transport.emit({ protocolVersion: '1.8.0', type: 'negotiated' });
     transport.emit(snapshot());
     transport.emit({
-      protocolVersion: '1.7.0', type: 'timeline_subscribed',
+      protocolVersion: '1.8.0', type: 'timeline_subscribed',
       payload: { requestId: transport.sent[1]?.payload.requestId as string, agentIds: ['agent-one'] },
     });
     transport.resolveTimeline(page('tail', [entry(1, 2, 'AB')], {
@@ -402,12 +402,12 @@ describe('RemoteSessionClient', () => {
     await transport.settle();
     expect(transport.connections).toBe(2);
     transport.open();
-    transport.emit({ protocolVersion: '1.7.0', type: 'negotiated' });
+    transport.emit({ protocolVersion: '1.8.0', type: 'negotiated' });
     transport.emit(snapshot());
     expect(replica.getState().timeline.entries[0]?.item).toMatchObject({ text: 'AB' });
     const subscribe = transport.sent.at(-1);
     transport.emit({
-      protocolVersion: '1.7.0', type: 'timeline_subscribed',
+      protocolVersion: '1.8.0', type: 'timeline_subscribed',
       payload: { requestId: subscribe?.payload.requestId as string, agentIds: ['agent-one'] },
     });
 
@@ -427,10 +427,10 @@ describe('RemoteSessionClient', () => {
     client.subscribeStatus((status) => statuses.push(status));
     client.start();
     transport.open();
-    transport.emit({ protocolVersion: '1.7.0', type: 'negotiated' });
+    transport.emit({ protocolVersion: '1.8.0', type: 'negotiated' });
     transport.emit(snapshot());
     transport.emit({
-      protocolVersion: '1.7.0', type: 'timeline_subscribed',
+      protocolVersion: '1.8.0', type: 'timeline_subscribed',
       payload: { requestId: transport.sent.at(-1)?.payload.requestId as string, agentIds: ['agent-one'] },
     });
     transport.resolveTimeline(page('tail', [entry(1, 1, 'A')]));
@@ -439,10 +439,10 @@ describe('RemoteSessionClient', () => {
     transport.disconnect();
     await transport.settle();
     transport.open();
-    transport.emit({ protocolVersion: '1.7.0', type: 'negotiated' });
+    transport.emit({ protocolVersion: '1.8.0', type: 'negotiated' });
     transport.emit(snapshot());
     transport.emit({
-      protocolVersion: '1.7.0', type: 'timeline_subscribed',
+      protocolVersion: '1.8.0', type: 'timeline_subscribed',
       payload: { requestId: transport.sent.at(-1)?.payload.requestId as string, agentIds: ['agent-one'] },
     });
     expect(transport.timelineRequests.at(-1)).toEqual({
@@ -486,10 +486,10 @@ describe('RemoteSessionClient', () => {
     });
     client.start();
     transport.open();
-    transport.emit({ protocolVersion: '1.7.0', type: 'negotiated' });
+    transport.emit({ protocolVersion: '1.8.0', type: 'negotiated' });
     transport.emit(snapshot());
     transport.emit({
-      protocolVersion: '1.7.0', type: 'timeline_subscribed',
+      protocolVersion: '1.8.0', type: 'timeline_subscribed',
       payload: { requestId: transport.sent.at(-1)?.payload.requestId as string, agentIds: ['agent-one'] },
     });
     transport.resolveTimeline(page('tail', [entry(1, 1, 'A')]));
@@ -519,10 +519,10 @@ describe('RemoteSessionClient', () => {
     });
     client.start();
     transport.open();
-    transport.emit({ protocolVersion: '1.7.0', type: 'negotiated' });
+    transport.emit({ protocolVersion: '1.8.0', type: 'negotiated' });
     transport.emit(snapshot());
     transport.emit({
-      protocolVersion: '1.7.0', type: 'timeline_subscribed',
+      protocolVersion: '1.8.0', type: 'timeline_subscribed',
       payload: { requestId: transport.sent.at(-1)?.payload.requestId as string, agentIds: ['agent-one'] },
     });
     transport.resolveTimeline(page('tail', [entry(1, 1, 'A')]));
@@ -556,10 +556,10 @@ describe('RemoteSessionClient', () => {
     client.subscribeStatus((status) => statuses.push(status));
     client.start();
     transport.open();
-    transport.emit({ protocolVersion: '1.7.0', type: 'negotiated' });
+    transport.emit({ protocolVersion: '1.8.0', type: 'negotiated' });
     transport.emit(snapshot());
     transport.emit({
-      protocolVersion: '1.7.0', type: 'timeline_subscribed',
+      protocolVersion: '1.8.0', type: 'timeline_subscribed',
       payload: { requestId: transport.sent.at(-1)?.payload.requestId as string, agentIds: ['agent-one'] },
     });
     transport.resolveTimeline(page('tail', [entry(1, 1, 'A')]));
@@ -568,10 +568,10 @@ describe('RemoteSessionClient', () => {
     transport.disconnect();
     await transport.settle();
     transport.open();
-    transport.emit({ protocolVersion: '1.7.0', type: 'negotiated' });
+    transport.emit({ protocolVersion: '1.8.0', type: 'negotiated' });
     transport.emit(snapshot());
     transport.emit({
-      protocolVersion: '1.7.0', type: 'timeline_subscribed',
+      protocolVersion: '1.8.0', type: 'timeline_subscribed',
       payload: { requestId: transport.sent.at(-1)?.payload.requestId as string, agentIds: ['agent-one'] },
     });
     transport.resolveTimeline(page('after', [entry(2, 2, 'B')], {
@@ -602,10 +602,10 @@ describe('RemoteSessionClient', () => {
     });
     client.start();
     transport.open();
-    transport.emit({ protocolVersion: '1.7.0', type: 'negotiated' });
+    transport.emit({ protocolVersion: '1.8.0', type: 'negotiated' });
     transport.emit(snapshot());
     transport.emit({
-      protocolVersion: '1.7.0', type: 'timeline_subscribed',
+      protocolVersion: '1.8.0', type: 'timeline_subscribed',
       payload: { requestId: transport.sent[1]?.payload.requestId as string, agentIds: ['agent-one'] },
     });
     transport.resolveTimeline(page('tail', [entry(1, 1, 'A')]));
@@ -614,10 +614,10 @@ describe('RemoteSessionClient', () => {
     transport.disconnect();
     await transport.settle();
     transport.open();
-    transport.emit({ protocolVersion: '1.7.0', type: 'negotiated' });
+    transport.emit({ protocolVersion: '1.8.0', type: 'negotiated' });
     transport.emit(snapshot());
     transport.emit({
-      protocolVersion: '1.7.0', type: 'timeline_subscribed',
+      protocolVersion: '1.8.0', type: 'timeline_subscribed',
       payload: { requestId: transport.sent.at(-1)?.payload.requestId as string, agentIds: ['agent-one'] },
     });
     transport.resolveTimeline(page('after', [entry(2, 2, 'B')], {
@@ -628,7 +628,7 @@ describe('RemoteSessionClient', () => {
     expect(transport.timelineRequests.at(-1)?.cursor).toEqual({ epoch: 'epoch-one', seq: 2 });
 
     transport.emit({
-      protocolVersion: '1.7.0', type: 'timeline_replacement',
+      protocolVersion: '1.8.0', type: 'timeline_replacement',
       payload: { agentId: 'agent-one', epoch: 'epoch-two' },
     });
 
@@ -653,10 +653,10 @@ describe('RemoteSessionClient', () => {
     const client = new RemoteSessionClient('agent-one', transport, replica);
     client.start();
     transport.open();
-    transport.emit({ protocolVersion: '1.7.0', type: 'negotiated' });
+    transport.emit({ protocolVersion: '1.8.0', type: 'negotiated' });
     transport.emit(snapshot());
     transport.emit({
-      protocolVersion: '1.7.0', type: 'timeline_subscribed',
+      protocolVersion: '1.8.0', type: 'timeline_subscribed',
       payload: { requestId: transport.sent[1]?.payload.requestId as string, agentIds: ['agent-one'] },
     });
     transport.resolveTimeline(page('tail', []));
@@ -667,14 +667,14 @@ describe('RemoteSessionClient', () => {
     const sentBeforePush = transport.sent.length;
     transport.emit(live(1, 'Generated output', 'epoch-one', [provisional]));
     transport.emit({
-      protocolVersion: '1.7.0', type: 'timeline_resource_binding_replaced',
+      protocolVersion: '1.8.0', type: 'timeline_resource_binding_replaced',
       payload: {
         agentId: 'agent-one', epoch: 'epoch-one', seq: 1,
         previous: provisional, replacement,
       },
     });
     transport.emit({
-      protocolVersion: '1.7.0', type: 'resource_update',
+      protocolVersion: '1.8.0', type: 'resource_update',
       payload: {
         agentId: 'agent-one', resourceId: replacement.resourceId,
         state: { status: 'available', mediaType: 'image/png', byteLength: 42, sha256: 'canonical-digest' },
@@ -701,12 +701,12 @@ describe('RemoteSessionClient', () => {
 
     client.requestResource('resource-one');
     expect(transport.sent.at(-1)).toEqual({
-      protocolVersion: '1.7.0', type: 'resource_request',
+      protocolVersion: '1.8.0', type: 'resource_request',
       payload: { requestId: 'resource-read', agentId: 'agent-one', resourceId: 'resource-one' },
     });
 
     transport.emit({
-      protocolVersion: '1.7.0', type: 'resource_response',
+      protocolVersion: '1.8.0', type: 'resource_response',
       payload: {
         requestId: 'resource-read', agentId: 'agent-one', resourceId: 'resource-one',
         state: {
@@ -727,14 +727,14 @@ describe('RemoteSessionClient', () => {
     client.start(); transport.open();
     const pending = client.resolveResource('./images/result.png', '/workspace/docs/report.md');
     expect(transport.sent.at(-1)).toEqual({
-      protocolVersion: '1.7.0', type: 'resource_resolve_request',
+      protocolVersion: '1.8.0', type: 'resource_resolve_request',
       payload: {
         requestId: 'resource-resolve', agentId: 'agent-one', locator: './images/result.png',
         sourceLocator: '/workspace/docs/report.md',
       },
     });
     const response = {
-      protocolVersion: '1.7.0' as const, type: 'resource_resolve_response' as const,
+      protocolVersion: '1.8.0' as const, type: 'resource_resolve_response' as const,
       payload: {
         requestId: 'resource-resolve', agentId: 'agent-one',
         binding: { locator: './images/result.png', resourceId: 'resource-one', status: 'available' as const },
@@ -745,7 +745,7 @@ describe('RemoteSessionClient', () => {
     await expect(pending).resolves.toEqual(response.payload.binding);
     expect(replica.getState().resources['resource-one']).toMatchObject({ imageDimensions: { width: 800, height: 600 } });
     expect(replica.getState().resources['resource-one']).not.toHaveProperty('contentBase64');
-    replica.applyResource({ protocolVersion: '1.7.0', type: 'resource_response', payload: {
+    replica.applyResource({ protocolVersion: '1.8.0', type: 'resource_response', payload: {
       requestId: 'bytes', agentId: 'agent-one', resourceId: 'resource-one',
       state: { ...response.payload.state, contentBase64: 'AAAA' },
     } });
@@ -757,7 +757,7 @@ describe('RemoteSessionClient', () => {
     const transport = new FakeTransport();
     const client = connectedClient(transport, { requestId: () => 'send-one' });
     const acknowledgement = {
-      protocolVersion: '1.7.0' as const,
+      protocolVersion: '1.8.0' as const,
       type: 'command_acknowledged' as const,
       payload: { requestId: 'send-one', agentId: 'agent-one', command: 'send_message' as const },
     };
@@ -782,7 +782,7 @@ describe('RemoteSessionClient', () => {
     const pending = client.steer('Use the new target.');
 
     transport.emit({
-      protocolVersion: '1.7.0',
+      protocolVersion: '1.8.0',
       type: 'protocol_error',
       payload: {
         requestId: 'steer-one', code: 'unsupported_command',
@@ -803,7 +803,7 @@ describe('RemoteSessionClient', () => {
     client.start();
     transport.open();
     transport.emit({
-      protocolVersion: '1.7.0', type: 'interaction_requested',
+      protocolVersion: '1.8.0', type: 'interaction_requested',
       payload: {
         agentId: 'agent-one',
         request: { kind: 'plan_approval', requestId: 'interaction-one', plan: 'Check the evidence.', allowedActions: ['approve'] },
@@ -811,7 +811,7 @@ describe('RemoteSessionClient', () => {
     });
     const pending = client.respondToInteraction('interaction-one', { kind: 'plan_approval', action: 'approve' });
     const resolution = {
-      protocolVersion: '1.7.0' as const,
+      protocolVersion: '1.8.0' as const,
       type: 'interaction_resolved' as const,
       payload: {
         agentId: 'agent-one', requestId: 'interaction-one',
@@ -823,7 +823,7 @@ describe('RemoteSessionClient', () => {
     expect(replica.getState().pendingInteractions).toEqual([]);
     const submission = transport.sent.at(-1);
     if (submission?.type !== 'interaction_response') throw new Error('Expected interaction response');
-    const acknowledgement = { protocolVersion: '1.7.0' as const, type: 'command_acknowledged' as const,
+    const acknowledgement = { protocolVersion: '1.8.0' as const, type: 'command_acknowledged' as const,
       payload: { agentId: 'agent-one', requestId: submission.payload.submissionId, command: 'interaction_response' as const } };
     transport.emit(acknowledgement);
     await expect(pending).resolves.toEqual(acknowledgement);
@@ -836,7 +836,7 @@ describe('RemoteSessionClient', () => {
     client.start();
     transport.open();
     transport.emit({
-      protocolVersion: '1.7.0', type: 'interaction_requested',
+      protocolVersion: '1.8.0', type: 'interaction_requested',
       payload: {
         agentId: 'agent-one',
         request: { kind: 'plan_approval', requestId: 'interaction-one', plan: 'Check the evidence.', allowedActions: ['approve'] },
@@ -846,7 +846,7 @@ describe('RemoteSessionClient', () => {
     const pending = client.respondToInteraction('interaction-one', { kind: 'plan_approval', action: 'approve' });
 
     transport.emit({
-      protocolVersion: '1.7.0', type: 'interaction_invalidated',
+      protocolVersion: '1.8.0', type: 'interaction_invalidated',
       payload: {
         agentId: 'agent-one', requestId: 'interaction-one',
         reason: 'connection_replaced', turnId: 'turn-one',
@@ -857,7 +857,7 @@ describe('RemoteSessionClient', () => {
     expect(replica.getState().timeline).toBe(timeline);
     const submission = transport.sent.at(-1);
     if (submission?.type !== 'interaction_response') throw new Error('Expected interaction response');
-    const acknowledgement = { protocolVersion: '1.7.0' as const, type: 'command_acknowledged' as const,
+    const acknowledgement = { protocolVersion: '1.8.0' as const, type: 'command_acknowledged' as const,
       payload: { agentId: 'agent-one', requestId: submission.payload.submissionId, command: 'interaction_response' as const } };
     transport.emit(acknowledgement);
     await expect(pending).resolves.toEqual(acknowledgement);
@@ -870,20 +870,20 @@ describe('RemoteSessionClient', () => {
     let settled = false;
     void command.then(() => { settled = true; }, () => { settled = true; });
     transport.emit({
-      protocolVersion: '1.7.0', type: 'interaction_requested',
+      protocolVersion: '1.8.0', type: 'interaction_requested',
       payload: { agentId: 'agent-one', request: {
         kind: 'plan_approval', requestId: 'native-approval', plan: 'Check.', allowedActions: ['approve'],
       } },
     });
 
     transport.emit({
-      protocolVersion: '1.7.0', type: 'interaction_invalidated',
+      protocolVersion: '1.8.0', type: 'interaction_invalidated',
       payload: { agentId: 'agent-one', requestId: 'native-approval', reason: 'connection_replaced' },
     });
     await transport.settle();
     expect(settled).toBe(false);
 
-    const acknowledgement = { protocolVersion: '1.7.0' as const, type: 'command_acknowledged' as const,
+    const acknowledgement = { protocolVersion: '1.8.0' as const, type: 'command_acknowledged' as const,
       payload: { requestId: 'native-approval', agentId: 'agent-one', command: 'send_message' as const } };
     transport.emit(acknowledgement);
     await expect(command).resolves.toEqual(acknowledgement);
@@ -894,7 +894,7 @@ describe('RemoteSessionClient', () => {
     const client = connectedClient(transport);
     const result = client.respondToInteraction('already-resolved', { kind: 'plan_approval', action: 'approve' });
     transport.emit({
-      protocolVersion: '1.7.0', type: 'interaction_resolved',
+      protocolVersion: '1.8.0', type: 'interaction_resolved',
       payload: { agentId: 'agent-one', requestId: 'already-resolved', response: { kind: 'plan_approval', action: 'approve' } },
     });
     await expect(result).rejects.toMatchObject({ code: 'stale_interaction', requestId: 'already-resolved' });
@@ -908,7 +908,7 @@ describe('RemoteSessionClient', () => {
     transport.open();
     const pending = client.requestResource('resource-one');
     const response = {
-      protocolVersion: '1.7.0' as const,
+      protocolVersion: '1.8.0' as const,
       type: 'resource_response' as const,
       payload: {
         requestId: 'resource-one', agentId: 'agent-one', resourceId: 'resource-one',
@@ -967,7 +967,7 @@ describe('RemoteSessionClient', () => {
     const client = connectedClient(transport, { requestId: () => 'shared-id' });
     const command = client.sendMessage('Continue.');
     transport.emit({
-      protocolVersion: '1.7.0', type: 'interaction_requested',
+      protocolVersion: '1.8.0', type: 'interaction_requested',
       payload: { agentId: 'agent-one', request: { kind: 'plan_approval', requestId: 'shared-id', plan: 'Check.', allowedActions: ['approve'] } },
     });
     const interaction = client.respondToInteraction('shared-id', { kind: 'plan_approval', action: 'approve' });
@@ -975,19 +975,19 @@ describe('RemoteSessionClient', () => {
     void command.then(() => { commandSettled = true; }, () => undefined);
 
     transport.emit({
-      protocolVersion: '1.7.0', type: 'interaction_resolved',
+      protocolVersion: '1.8.0', type: 'interaction_resolved',
       payload: {
         agentId: 'agent-one', requestId: 'shared-id',
         response: { kind: 'plan_approval', action: 'approve' },
       },
     });
-    transport.emit({ protocolVersion: '1.7.0', type: 'command_acknowledged',
+    transport.emit({ protocolVersion: '1.8.0', type: 'command_acknowledged',
       payload: { agentId: 'agent-one', requestId: 'shared-id', command: 'interaction_response' } });
     await interaction;
     expect(commandSettled).toBe(false);
 
     transport.emit({
-      protocolVersion: '1.7.0', type: 'protocol_error',
+      protocolVersion: '1.8.0', type: 'protocol_error',
       payload: { requestId: 'shared-id', code: 'command_failed', message: 'Command failed.', recoverable: true },
     });
     await expect(command).rejects.toMatchObject<Partial<RemoteOperationError>>({
@@ -1000,14 +1000,14 @@ describe('RemoteSessionClient', () => {
     const client = connectedClient(transport, { requestId: () => 'shared-id' });
     const command = client.sendMessage('Continue.');
     transport.emit({
-      protocolVersion: '1.7.0', type: 'interaction_requested',
+      protocolVersion: '1.8.0', type: 'interaction_requested',
       payload: { agentId: 'agent-one', request: { kind: 'plan_approval', requestId: 'shared-id', plan: 'Check.', allowedActions: ['approve'] } },
     });
     const interaction = client.respondToInteraction('shared-id', { kind: 'plan_approval', action: 'approve' });
     const resource = client.requestResource('resource-one');
 
     transport.emit({
-      protocolVersion: '1.7.0', type: 'protocol_error',
+      protocolVersion: '1.8.0', type: 'protocol_error',
       payload: { requestId: 'shared-id', code: 'command_failed', message: 'Command failed.', recoverable: true },
     });
 
@@ -1128,9 +1128,9 @@ it('loads older pages once without interrupting live readiness and retries histo
   const statuses: string[] = [];
   client.subscribeStatus((status) => statuses.push(status));
   client.start(); transport.open();
-  transport.emit({ protocolVersion: '1.7.0', type: 'negotiated' });
+  transport.emit({ protocolVersion: '1.8.0', type: 'negotiated' });
   transport.emit(snapshot());
-  transport.emit({ protocolVersion: '1.7.0', type: 'timeline_subscribed', payload: { requestId: transport.sent[1]?.payload.requestId as string, agentIds: ['agent-one'] } });
+  transport.emit({ protocolVersion: '1.8.0', type: 'timeline_subscribed', payload: { requestId: transport.sent[1]?.payload.requestId as string, agentIds: ['agent-one'] } });
   transport.resolveTimeline(page('tail', [entry(10, 10, 'Current')], { hasOlder: true }));
   await transport.settle();
   statuses.length = 0;
@@ -1174,7 +1174,7 @@ async function outgoingFixture(options: ConstructorParameters<typeof RemoteSessi
   client.start(); transport.open();
   completeSubscription(transport);
   await Promise.resolve();
-  const acknowledge = (requestId: string) => transport.emit({ protocolVersion: '1.7.0', type: 'command_acknowledged',
+  const acknowledge = (requestId: string) => transport.emit({ protocolVersion: '1.8.0', type: 'command_acknowledged',
     payload: { requestId, agentId: 'agent-one', command: 'send_message' } });
   const echo = (seq: number, text: string) => {
     const message = live(seq, text);
@@ -1189,7 +1189,7 @@ it.each(['started', 'queued', 'handled'] as const)('settles %s input using accep
   try {
     const before = f.replica.getState().agent;
     const send = f.client.sendMessage('/local');
-    f.transport.emit({ protocolVersion: '1.7.0', type: 'command_acknowledged', payload: {
+    f.transport.emit({ protocolVersion: '1.8.0', type: 'command_acknowledged', payload: {
       requestId: 'send-one', agentId: 'agent-one', command: 'send_message', inputAcceptance: { disposition },
     } });
     expect(await send).toMatchObject({ payload: { inputAcceptance: { disposition } } });
@@ -1208,7 +1208,7 @@ it.each([false, true])('confirms exact Host-prepared text with its full native e
   try {
     const send = f.client.sendMessage('Continue\r\n');
     if (echoFirst) f.echo(1, fullText);
-    f.transport.emit({ protocolVersion: '1.7.0', type: 'command_acknowledged', payload: {
+    f.transport.emit({ protocolVersion: '1.8.0', type: 'command_acknowledged', payload: {
       requestId: 'prepared-send', agentId: 'agent-one', command: 'send_message',
       submittedTextSha256: createHash('sha256').update(fullText).digest('hex'),
     } } as ServerMessage);
@@ -1237,7 +1237,7 @@ it('persists prepared-text evidence and does not reuse an echo consumed before i
     f.echo(1, fullText);
     f.acknowledge(sends[1]!.payload.requestId);
     await second;
-    f.transport.emit({ protocolVersion: '1.7.0', type: 'command_acknowledged', payload: {
+    f.transport.emit({ protocolVersion: '1.8.0', type: 'command_acknowledged', payload: {
       requestId: sends[0]!.payload.requestId, agentId: 'agent-one', command: 'send_message',
       submittedTextSha256: createHash('sha256').update(fullText).digest('hex'),
     } } as ServerMessage);
@@ -1277,7 +1277,7 @@ it('keeps prepared input uncertain after an epoch change and clears its evidence
   try {
     const send = f.client.sendMessage('Continue');
     f.replica.applyHistory(page('tail', [userHistoryEntry(1, fullText)], { epoch: 'replacement' }));
-    f.transport.emit({ protocolVersion: '1.7.0', type: 'command_acknowledged', payload: {
+    f.transport.emit({ protocolVersion: '1.8.0', type: 'command_acknowledged', payload: {
       requestId: 'prepared-epoch', agentId: 'agent-one', command: 'send_message',
       submittedTextSha256: createHash('sha256').update(fullText).digest('hex'),
     } } as ServerMessage);
@@ -1315,7 +1315,7 @@ it('ignores an old acknowledgement after the same outgoing row starts a new oper
     f.replica.applyHistory(page('tail', [], { epoch: 'replacement' }));
     const second = f.client.retryMessage(id);
     const secondRequest = f.transport.sent.filter(message => message.type === 'send_message')[1]!;
-    f.transport.emit({ protocolVersion: '1.7.0', type: 'command_acknowledged', payload: {
+    f.transport.emit({ protocolVersion: '1.8.0', type: 'command_acknowledged', payload: {
       requestId: firstRequest.payload.requestId, agentId: 'agent-one', command: 'send_message',
       submittedTextSha256: createHash('sha256').update('Old history\n\nContinue').digest('hex'),
     } } as ServerMessage);
@@ -1540,7 +1540,7 @@ it('reconciles a late echo after a generic command failure', async () => {
   const f = await outgoingFixture({ requestId: () => 'send-one' });
   try {
     const send = f.client.sendMessage('Possibly accepted');
-    f.transport.emit({ protocolVersion: '1.7.0', type: 'protocol_error', payload: {
+    f.transport.emit({ protocolVersion: '1.8.0', type: 'protocol_error', payload: {
       requestId: 'send-one', code: 'command_failed', message: 'Provider request timed out.', recoverable: true,
     } });
     await expect(send).rejects.toThrow('Provider request timed out.');
@@ -1556,7 +1556,7 @@ it('keeps definite rejections until explicitly deleted without adding them to hi
   const f = await outgoingFixture({ requestId: () => 'send-one' });
   try {
     const send = f.client.sendMessage('Rejected input');
-    f.transport.emit({ protocolVersion: '1.7.0', type: 'protocol_error', payload: {
+    f.transport.emit({ protocolVersion: '1.8.0', type: 'protocol_error', payload: {
       requestId: 'send-one', code: 'unsupported_operation', message: 'This session is read-only.', recoverable: false,
     } });
     await expect(send).rejects.toThrow('This session is read-only.');
@@ -1647,7 +1647,7 @@ function completeSubscription(transport: FakeTransport): void {
   transport.emit(snapshot());
   const request = transport.sent.at(-1)!;
   if (request.type !== 'timeline_subscription') throw new Error('Expected subscription');
-  transport.emit({ protocolVersion: '1.7.0', type: 'timeline_subscribed', payload: { requestId: request.payload.requestId, agentIds: ['agent-one'] } });
+  transport.emit({ protocolVersion: '1.8.0', type: 'timeline_subscribed', payload: { requestId: request.payload.requestId, agentIds: ['agent-one'] } });
   transport.resolveTimeline(page('tail', []));
 }
 
@@ -1673,7 +1673,7 @@ it.each(['command_failed', 'operation_outcome_unknown'])('allows an explicit new
   try {
     const original = f.client.sendMessage('Try again manually');
     const first = f.transport.sent.at(-1) as Extract<ClientMessage, { type: 'send_message' }>;
-    f.transport.emit({ protocolVersion: '1.7.0', type: 'protocol_error', payload: { requestId: first.payload.requestId, code, message: 'The result cannot be recovered.', recoverable: true } });
+    f.transport.emit({ protocolVersion: '1.8.0', type: 'protocol_error', payload: { requestId: first.payload.requestId, code, message: 'The result cannot be recovered.', recoverable: true } });
     await expect(original).rejects.toMatchObject({ code });
     const retry = f.client.retryMessage(f.replica.getState().outgoingMessages![0]!.id);
     const second = f.transport.sent.at(-1) as typeof first;
@@ -1714,7 +1714,7 @@ it('retains exact ordered content through failure and retry without mutating its
     const first = f.client.sendMessageContent(content, { imageDigests: { 'image-a': 'a'.repeat(64) } });
     const sent = f.transport.sent.at(-1) as Extract<ClientMessage, { type: 'send_message' }>;
     content[0]!.text = 'Changed';
-    f.transport.emit({ protocolVersion: '1.7.0', type: 'protocol_error', payload: { requestId: sent.payload.requestId, code: 'invalid_image_input', message: 'Native rejected', recoverable: true } });
+    f.transport.emit({ protocolVersion: '1.8.0', type: 'protocol_error', payload: { requestId: sent.payload.requestId, code: 'invalid_image_input', message: 'Native rejected', recoverable: true } });
     await expect(first).rejects.toThrow('Native rejected');
     const outgoing = f.replica.getState().outgoingMessages![0]!;
     expect(outgoing.status).toBe('failed');
@@ -1766,11 +1766,11 @@ it('correlates upload receipts and cancels eight in-flight chunks without reconn
     await vi.waitFor(() => expect(f.transport.sent.at(-1)?.type).toBe('image_upload_begin'));
     const begin = f.transport.sent.at(-1) as Extract<ClientMessage, { type: 'image_upload_begin' }>;
     expect(begin.payload.sha256).toBe(createHash('sha256').update(bytes).digest('hex'));
-    f.transport.emit({ protocolVersion: '1.7.0', type: 'image_upload_result', payload: { requestId: begin.payload.requestId, agentId: 'agent-one', uploadId: 'upload', offset: 0 } });
+    f.transport.emit({ protocolVersion: '1.8.0', type: 'image_upload_result', payload: { requestId: begin.payload.requestId, agentId: 'agent-one', uploadId: 'upload', offset: 0 } });
     await vi.waitFor(() => expect(f.transport.sent.filter(message => message.type === 'image_upload_chunk')).toHaveLength(8));
     const chunks = f.transport.sent.filter(message => message.type === 'image_upload_chunk');
     abort.abort(); await rejected;
-    for (const chunk of chunks) f.transport.emit({ protocolVersion: '1.7.0', type: 'image_upload_result', payload: { requestId: chunk.payload.requestId, agentId: 'agent-one', uploadId: 'upload', offset: chunk.payload.offset + 32768 } });
+    for (const chunk of chunks) f.transport.emit({ protocolVersion: '1.8.0', type: 'image_upload_result', payload: { requestId: chunk.payload.requestId, agentId: 'agent-one', uploadId: 'upload', offset: chunk.payload.offset + 32768 } });
     await Promise.resolve();
     expect(f.transport.sent.some(message => message.type === 'image_upload_finish')).toBe(false);
     expect(f.transport.connections).toBe(1);
@@ -1788,7 +1788,7 @@ it.each(['begin', 'chunks'] as const)('does not continue an upload on a new conn
     await vi.waitFor(() => expect(f.transport.sent.at(-1)?.type).toBe('image_upload_begin'));
     if (stage === 'chunks') {
       const begin = f.transport.sent.at(-1) as Extract<ClientMessage, { type: 'image_upload_begin' }>;
-      f.transport.emit({ protocolVersion: '1.7.0', type: 'image_upload_result', payload: { requestId: begin.payload.requestId, agentId: 'agent-one', uploadId: 'upload', offset: 0 } });
+      f.transport.emit({ protocolVersion: '1.8.0', type: 'image_upload_result', payload: { requestId: begin.payload.requestId, agentId: 'agent-one', uploadId: 'upload', offset: 0 } });
       await vi.waitFor(() => expect(f.transport.sent.filter(message => message.type === 'image_upload_chunk')).toHaveLength(8));
     }
     f.transport.disconnect(); await rejected;
@@ -1822,17 +1822,17 @@ it('waits for initial control settlement after history, and attaches proof only 
   client.subscribeStatus(status => statuses.push(status));
   try {
     client.start(); transport.open();
-    transport.emit({ protocolVersion: '1.7.0', type: 'negotiated', sessionControl: true });
+    transport.emit({ protocolVersion: '1.8.0', type: 'negotiated', sessionControl: true });
     transport.emit(snapshot());
     const subscription = transport.sent.find(message => message.type === 'timeline_subscription')!;
     if (subscription.type !== 'timeline_subscription') throw new Error('Missing subscription');
-    transport.emit({ protocolVersion: '1.7.0', type: 'timeline_subscribed', payload: subscription.payload });
-    transport.emit({ protocolVersion: '1.7.0', type: 'session_control', payload: { agentId: 'agent-one', revision: 'one', access: 'read_only', available: true } });
+    transport.emit({ protocolVersion: '1.8.0', type: 'timeline_subscribed', payload: subscription.payload });
+    transport.emit({ protocolVersion: '1.8.0', type: 'session_control', payload: { agentId: 'agent-one', revision: 'one', access: 'read_only', available: true } });
     const acquire = transport.sent.find(message => message.type === 'session_control_request')!;
     if (acquire.type !== 'session_control_request') throw new Error('Missing acquisition');
     transport.resolveTimeline(page('tail', [])); await transport.settle();
     expect(statuses.at(-1)).toBe('catching_up');
-    transport.emit({ protocolVersion: '1.7.0', type: 'session_control', payload: { agentId: 'agent-one', revision: 'two', access: 'control', available: false, token: 'private-control-proof', requestId: acquire.payload.requestId } });
+    transport.emit({ protocolVersion: '1.8.0', type: 'session_control', payload: { agentId: 'agent-one', revision: 'two', access: 'control', available: false, token: 'private-control-proof', requestId: acquire.payload.requestId } });
     await transport.settle();
     expect(statuses.at(-1)).toBe('ready');
     expect(JSON.stringify(replica.getState())).not.toContain('private-control-proof');
@@ -1840,7 +1840,7 @@ it('waits for initial control settlement after history, and attaches proof only 
     const outgoing = transport.sent.at(-1)!;
     expect(outgoing).toMatchObject({ type: 'cancel', controlToken: 'private-control-proof' });
     if (outgoing.type !== 'cancel') throw new Error('Missing cancel');
-    transport.emit({ protocolVersion: '1.7.0', type: 'command_acknowledged', payload: { agentId: 'agent-one', requestId: outgoing.payload.requestId, command: 'cancel' } });
+    transport.emit({ protocolVersion: '1.8.0', type: 'command_acknowledged', payload: { agentId: 'agent-one', requestId: outgoing.payload.requestId, command: 'cancel' } });
     await pending;
   } finally { client.stop(); }
 });
@@ -1852,8 +1852,8 @@ it('does not claim control for observers or silently write through an old Contro
     const client = new RemoteSessionClient('agent-one', transport, replica, { observeOnly: true, requireSessionControl: true });
     try {
       client.start(); transport.open();
-      transport.emit({ protocolVersion: '1.7.0', type: 'negotiated', ...(supported ? { sessionControl: true } : {}) });
-      if (supported) transport.emit({ protocolVersion: '1.7.0', type: 'session_control', payload: { agentId: 'agent-one', revision: 'one', access: 'read_only', available: true } });
+      transport.emit({ protocolVersion: '1.8.0', type: 'negotiated', ...(supported ? { sessionControl: true } : {}) });
+      if (supported) transport.emit({ protocolVersion: '1.8.0', type: 'session_control', payload: { agentId: 'agent-one', revision: 'one', access: 'read_only', available: true } });
       expect(transport.sent.some(message => message.type === 'session_control_request')).toBe(false);
       await expect(client.sendMessage('not sent')).rejects.toMatchObject({ code: 'session_read_only' });
       expect(transport.sent.some(message => message.type === 'send_message')).toBe(false);
@@ -1868,18 +1868,18 @@ it.each(['control', 'read_only'] as const)('publishes confirmed %s access only a
   const client = new RemoteSessionClient('agent-one', transport, replica, { requireSessionControl: true });
   try {
     client.start(); transport.open();
-    transport.emit({ protocolVersion: '1.7.0', type: 'negotiated', sessionControl: true });
+    transport.emit({ protocolVersion: '1.8.0', type: 'negotiated', sessionControl: true });
     const initial = { agentId: 'agent-one', access: 'read_only' as const, available: true, revision: 'initial' };
-    transport.emit({ protocolVersion: '1.7.0', type: 'session_control', payload: initial });
+    transport.emit({ protocolVersion: '1.8.0', type: 'session_control', payload: initial });
     expect(replica.getState().sessionControl?.access).toBe('checking');
     const request = transport.sent.find(message => message.type === 'session_control_request');
     if (request?.type !== 'session_control_request') throw new Error('Missing control request');
     await expect(client.sendMessage('must not dispatch')).rejects.toMatchObject({ code: 'session_read_only' });
     expect(transport.sent.some(message => message.type === 'send_message')).toBe(false);
     const confirmed = { ...initial, access, available: false, ...(access === 'control' ? { token: 'private-proof' } : { ownerKind: 'web' as const }) };
-    transport.emit({ protocolVersion: '1.7.0', type: 'session_control', payload: confirmed });
+    transport.emit({ protocolVersion: '1.8.0', type: 'session_control', payload: confirmed });
     expect(replica.getState().sessionControl?.access).toBe('checking');
-    transport.emit({ protocolVersion: '1.7.0', type: 'session_control', payload: { ...confirmed, requestId: request.payload.requestId } });
+    transport.emit({ protocolVersion: '1.8.0', type: 'session_control', payload: { ...confirmed, requestId: request.payload.requestId } });
     await transport.settle();
     expect(replica.getState().sessionControl?.access).toBe(access);
     expect(JSON.stringify(replica.getState().sessionControl)).not.toContain('private-proof');
@@ -1895,8 +1895,8 @@ it('reconnects an unconfirmed control handshake instead of presenting a takeover
   replica.subscribe(() => { const access = replica.getState().sessionControl?.access; if (access) states.push(access); });
   try {
     client.start(); transport.open();
-    transport.emit({ protocolVersion: '1.7.0', type: 'negotiated', sessionControl: true });
-    transport.emit({ protocolVersion: '1.7.0', type: 'session_control', payload: { agentId: 'agent-one', access: 'read_only', available: true, revision: 'initial' } });
+    transport.emit({ protocolVersion: '1.8.0', type: 'negotiated', sessionControl: true });
+    transport.emit({ protocolVersion: '1.8.0', type: 'session_control', payload: { agentId: 'agent-one', access: 'read_only', available: true, revision: 'initial' } });
     await vi.advanceTimersByTimeAsync(31);
     expect(transport.connections).toBe(2);
     expect(states).not.toContain('read_only');
@@ -1912,7 +1912,7 @@ it('pipelines socket history with subscription and waits for both confirmations'
   const statuses: string[] = []; client.subscribeStatus(value => statuses.push(value));
   try {
     client.start(); transport.open();
-    transport.emit({protocolVersion: '1.7.0', type: 'negotiated'});
+    transport.emit({protocolVersion: '1.8.0', type: 'negotiated'});
     transport.emit(snapshot());
     const subscription = transport.sent.find(message => message.type === 'timeline_subscription')!;
     const request = transport.sent.find(message => message.type === 'timeline_request');
@@ -1921,7 +1921,7 @@ it('pipelines socket history with subscription and waits for both confirmations'
     transport.emit(page('tail', [entry(1, 1, 'Recovered')], {requestId: request.payload.requestId}));
     await transport.settle();
     expect(statuses.at(-1)).toBe('catching_up');
-    transport.emit({protocolVersion: '1.7.0', type: 'timeline_subscribed', payload: {requestId: subscription.payload.requestId, agentIds: ['agent-one']}});
+    transport.emit({protocolVersion: '1.8.0', type: 'timeline_subscribed', payload: {requestId: subscription.payload.requestId, agentIds: ['agent-one']}});
     await transport.settle();
     expect(statuses.at(-1)).toBe('ready');
     expect(transport.timelineRequests).toHaveLength(0);
@@ -1935,9 +1935,9 @@ it('requests control before socket history so slow history cannot block ownershi
   const statuses: string[] = []; client.subscribeStatus(value => statuses.push(value));
   try {
     client.start(); transport.open();
-    transport.emit({protocolVersion: '1.7.0', type: 'negotiated', sessionControl: true});
+    transport.emit({protocolVersion: '1.8.0', type: 'negotiated', sessionControl: true});
     transport.emit(snapshot());
-    transport.emit({protocolVersion: '1.7.0', type: 'session_control', payload: {agentId: 'agent-one', access: 'read_only', available: true, revision: '1'}});
+    transport.emit({protocolVersion: '1.8.0', type: 'session_control', payload: {agentId: 'agent-one', access: 'read_only', available: true, revision: '1'}});
     const types = transport.sent.map(message => message.type);
     expect(types).toContain('timeline_request');
     expect(types.indexOf('session_control_request')).toBeLessThan(types.indexOf('timeline_request'));
@@ -1946,11 +1946,11 @@ it('requests control before socket history so slow history cannot block ownershi
     transport.emit(page('tail', [], {requestId: request.payload.requestId}));
     const subscription = transport.sent.find(message => message.type === 'timeline_subscription')!;
     if (subscription.type !== 'timeline_subscription') throw new Error('Missing subscription');
-    transport.emit({protocolVersion: '1.7.0', type: 'timeline_subscribed', payload: {requestId: subscription.payload.requestId, agentIds: ['agent-one']}});
+    transport.emit({protocolVersion: '1.8.0', type: 'timeline_subscribed', payload: {requestId: subscription.payload.requestId, agentIds: ['agent-one']}});
     await transport.settle(); expect(statuses.at(-1)).toBe('catching_up');
     const control = transport.sent.find(message => message.type === 'session_control_request')!;
     if (control.type !== 'session_control_request') throw new Error('Missing control');
-    transport.emit({protocolVersion: '1.7.0', type: 'session_control', payload: {agentId: 'agent-one', requestId: control.payload.requestId, access: 'read_only', available: false, revision: '1'}});
+    transport.emit({protocolVersion: '1.8.0', type: 'session_control', payload: {agentId: 'agent-one', requestId: control.payload.requestId, access: 'read_only', available: false, revision: '1'}});
     await transport.settle(); expect(statuses.at(-1)).toBe('ready');
   } finally { client.stop(); }
 });
@@ -1962,11 +1962,11 @@ it('follows socket recovery pages from the retained cursor without losing interl
   let status = ''; client.subscribeStatus(value => {status = value;});
   const requests = () => transport.sent.filter(message => message.type === 'timeline_request');
   try {
-    client.start(); transport.open(); transport.emit({protocolVersion: '1.7.0', type: 'negotiated'}); transport.emit(snapshot());
+    client.start(); transport.open(); transport.emit({protocolVersion: '1.8.0', type: 'negotiated'}); transport.emit(snapshot());
     const first = requests()[0]!; expect(first.payload).toMatchObject({direction: 'after', cursor: {epoch: 'epoch-one', seq: 1}});
     const subscription = transport.sent.find(message => message.type === 'timeline_subscription')!;
     if (subscription.type !== 'timeline_subscription') throw new Error('Missing subscription');
-    transport.emit({protocolVersion: '1.7.0', type: 'timeline_subscribed', payload: {requestId: subscription.payload.requestId, agentIds: ['agent-one']}});
+    transport.emit({protocolVersion: '1.8.0', type: 'timeline_subscribed', payload: {requestId: subscription.payload.requestId, agentIds: ['agent-one']}});
     transport.emit(page('after', [entry(2, 2, 'Second')], {requestId: first.payload.requestId, hasNewer: true}));
     await transport.settle();
     expect(status).toBe('catching_up');
@@ -1985,12 +1985,12 @@ it('ignores retired socket history when a timeline replacement starts a fresh re
   const client = new RemoteSessionClient('agent-one', transport, replica, {timelineRecovery: 'websocket'});
   let status = ''; client.subscribeStatus(value => {status = value;});
   try {
-    client.start(); transport.open(); transport.emit({protocolVersion: '1.7.0', type: 'negotiated'}); transport.emit(snapshot());
+    client.start(); transport.open(); transport.emit({protocolVersion: '1.8.0', type: 'negotiated'}); transport.emit(snapshot());
     const old = transport.sent.find(message => message.type === 'timeline_request')!;
     const subscription = transport.sent.find(message => message.type === 'timeline_subscription')!;
     if (old.type !== 'timeline_request' || subscription.type !== 'timeline_subscription') throw new Error('Missing recovery');
-    transport.emit({protocolVersion: '1.7.0', type: 'timeline_subscribed', payload: {requestId: subscription.payload.requestId, agentIds: ['agent-one']}});
-    transport.emit({protocolVersion: '1.7.0', type: 'timeline_replacement', payload: {agentId: 'agent-one', epoch: 'new-epoch'}});
+    transport.emit({protocolVersion: '1.8.0', type: 'timeline_subscribed', payload: {requestId: subscription.payload.requestId, agentIds: ['agent-one']}});
+    transport.emit({protocolVersion: '1.8.0', type: 'timeline_replacement', payload: {agentId: 'agent-one', epoch: 'new-epoch'}});
     const current = transport.sent.filter(message => message.type === 'timeline_request').at(-1)!;
     expect(current.payload.requestId).not.toBe(old.payload.requestId);
     transport.emit(page('tail', [entry(1, 1, 'Obsolete')], {requestId: old.payload.requestId}));
@@ -2007,11 +2007,11 @@ it.each(['history', 'subscription'] as const)('reconnects when socket recovery l
   const client = new RemoteSessionClient('agent-one', transport, replica, {timelineRecovery: 'websocket', connectionTimeoutMs: 100, reconnectInitialDelayMs: 10});
   let status = ''; client.subscribeStatus(value => {status = value;});
   try {
-    client.start(); transport.open(); transport.emit({protocolVersion: '1.7.0', type: 'negotiated'}); transport.emit(snapshot());
+    client.start(); transport.open(); transport.emit({protocolVersion: '1.8.0', type: 'negotiated'}); transport.emit(snapshot());
     const request = transport.sent.find(message => message.type === 'timeline_request')!;
     const subscription = transport.sent.find(message => message.type === 'timeline_subscription')!;
     if (request.type !== 'timeline_request' || subscription.type !== 'timeline_subscription') throw new Error('Missing recovery');
-    if (missing === 'history') transport.emit({protocolVersion: '1.7.0', type: 'timeline_subscribed', payload: {requestId: subscription.payload.requestId, agentIds: ['agent-one']}});
+    if (missing === 'history') transport.emit({protocolVersion: '1.8.0', type: 'timeline_subscribed', payload: {requestId: subscription.payload.requestId, agentIds: ['agent-one']}});
     else transport.emit(page('tail', [], {requestId: request.payload.requestId}));
     await vi.advanceTimersByTimeAsync(100);
     expect(status).toBe('disconnected');
@@ -2031,13 +2031,13 @@ it('exposes synchronized observation separately from native recovery and write a
   const unsubscribe = client.subscribeSessionState(state => states.push(state.runtime?.state ?? 'unknown'));
   try {
     client.start(); transport.open();
-    transport.emit({ protocolVersion: '1.7.0', type: 'negotiated' });
+    transport.emit({ protocolVersion: '1.8.0', type: 'negotiated' });
     const restoring = snapshot();
     restoring.payload.runtimeInfo.connection = { state: 'restoring' };
     transport.emit(restoring);
     const subscription = transport.sent.at(-1)!;
     if (subscription.type !== 'timeline_subscription') throw new Error('Expected subscription');
-    transport.emit({ protocolVersion: '1.7.0', type: 'timeline_subscribed', payload: { requestId: subscription.payload.requestId, agentIds: ['agent-one'] } });
+    transport.emit({ protocolVersion: '1.8.0', type: 'timeline_subscribed', payload: { requestId: subscription.payload.requestId, agentIds: ['agent-one'] } });
     transport.resolveTimeline(page('tail', []));
     await transport.settle();
     expect(client.getSessionState()).toMatchObject({ synchronized: true, runtime: { state: 'restoring' }, operations: { send_message: { allowed: false, code: 'native_runtime_restoring' } } });
@@ -2058,16 +2058,16 @@ it('owns native handoff synchronization and only acquires control after the nati
   const nativeOwner = { kind: 'native_cli' as const, generation: 'native-one' };
   try {
     client.start(); transport.open();
-    transport.emit({ protocolVersion: '1.7.0', type: 'negotiated', sessionControl: true });
+    transport.emit({ protocolVersion: '1.8.0', type: 'negotiated', sessionControl: true });
     transport.emit(snapshot());
     const subscription = transport.sent.find(message => message.type === 'timeline_subscription')!;
     if (subscription.type !== 'timeline_subscription') throw new Error('Missing subscription');
-    transport.emit({ protocolVersion: '1.7.0', type: 'timeline_subscribed', payload: subscription.payload });
+    transport.emit({ protocolVersion: '1.8.0', type: 'timeline_subscribed', payload: subscription.payload });
     transport.resolveTimeline(page('tail', []));
-    transport.emit({ protocolVersion: '1.7.0', type: 'session_control', payload: { agentId: 'agent-one', revision: 'native', access: 'read_only', available: false, nativeOwner } });
+    transport.emit({ protocolVersion: '1.8.0', type: 'session_control', payload: { agentId: 'agent-one', revision: 'native', access: 'read_only', available: false, nativeOwner } });
     const acquire = transport.sent.find(message => message.type === 'session_control_request');
     if (acquire?.type !== 'session_control_request') throw new Error('Missing acquisition');
-    transport.emit({ protocolVersion: '1.7.0', type: 'session_control', payload: { agentId: 'agent-one', requestId: acquire.payload.requestId, revision: 'native', access: 'read_only', available: false, nativeOwner } });
+    transport.emit({ protocolVersion: '1.8.0', type: 'session_control', payload: { agentId: 'agent-one', requestId: acquire.payload.requestId, revision: 'native', access: 'read_only', available: false, nativeOwner } });
     await transport.settle();
     const onRestoring = vi.fn();
     const taking = client.takeControl({ onRestoring });
@@ -2076,24 +2076,24 @@ it('owns native handoff synchronization and only acquires control after the nati
     expect(resumeNative).toHaveBeenCalledWith(nativeOwner, { checkOnly: false, signal: expect.any(AbortSignal) });
     expect(onRestoring).toHaveBeenCalledTimes(1);
     expect(transport.sent.some(message => message.type === 'session_control_request' && message.payload.action === 'take_over')).toBe(false);
-    transport.emit({ protocolVersion: '1.7.0', type: 'session_control', payload: { agentId: 'agent-one', revision: 'restored', access: 'read_only', available: true } });
+    transport.emit({ protocolVersion: '1.8.0', type: 'session_control', payload: { agentId: 'agent-one', revision: 'restored', access: 'read_only', available: true } });
     await vi.waitFor(() => expect(transport.connections).toBe(2));
     transport.open();
-    transport.emit({ protocolVersion: '1.7.0', type: 'negotiated', sessionControl: true });
+    transport.emit({ protocolVersion: '1.8.0', type: 'negotiated', sessionControl: true });
     transport.emit(snapshot());
     const resubscribe = transport.sent.filter(message => message.type === 'timeline_subscription').at(-1)!;
     if (resubscribe.type !== 'timeline_subscription') throw new Error('Missing subscription');
-    transport.emit({ protocolVersion: '1.7.0', type: 'timeline_subscribed', payload: resubscribe.payload });
-    transport.emit({ protocolVersion: '1.7.0', type: 'session_control', payload: { agentId: 'agent-one', revision: 'restored', access: 'read_only', available: true } });
+    transport.emit({ protocolVersion: '1.8.0', type: 'timeline_subscribed', payload: resubscribe.payload });
+    transport.emit({ protocolVersion: '1.8.0', type: 'session_control', payload: { agentId: 'agent-one', revision: 'restored', access: 'read_only', available: true } });
     const reacquire = transport.sent.filter(message => message.type === 'session_control_request').at(-1)!;
     if (reacquire.type !== 'session_control_request') throw new Error('Missing reacquisition');
-    transport.emit({ protocolVersion: '1.7.0', type: 'session_control', payload: { agentId: 'agent-one', requestId: reacquire.payload.requestId, revision: 'restored', access: 'read_only', available: true } });
+    transport.emit({ protocolVersion: '1.8.0', type: 'session_control', payload: { agentId: 'agent-one', requestId: reacquire.payload.requestId, revision: 'restored', access: 'read_only', available: true } });
     transport.resolveTimeline(page('after', []));
     await transport.settle();
     const request = transport.sent.find(message => message.type === 'session_control_request' && message.payload.action === 'take_over');
     expect(request).toBeDefined();
     if (request?.type !== 'session_control_request') throw new Error('Missing takeover');
-    transport.emit({ protocolVersion: '1.7.0', type: 'session_control', payload: { agentId: 'agent-one', requestId: request.payload.requestId, revision: 'ours', access: 'control', available: false, token: 'private' } });
+    transport.emit({ protocolVersion: '1.8.0', type: 'session_control', payload: { agentId: 'agent-one', requestId: request.payload.requestId, revision: 'ours', access: 'control', available: false, token: 'private' } });
     await taking;
     expect(client.getSessionState().operations.send_message.allowed).toBe(true);
   } finally { client.stop(); }
@@ -2104,8 +2104,8 @@ it('reports unsupported native control without pretending browser takeover can r
   const client = new RemoteSessionClient('agent-one', transport, new AgentReplica());
   try {
     client.start(); transport.open();
-    transport.emit({ protocolVersion: '1.7.0', type: 'negotiated', sessionControl: true });
-    transport.emit({ protocolVersion: '1.7.0', type: 'session_control', payload: { agentId: 'agent-one', revision: 'native', access: 'read_only', available: false, nativeOwner: { kind: 'native_cli', generation: 'native-one' } } });
+    transport.emit({ protocolVersion: '1.8.0', type: 'negotiated', sessionControl: true });
+    transport.emit({ protocolVersion: '1.8.0', type: 'session_control', payload: { agentId: 'agent-one', revision: 'native', access: 'read_only', available: false, nativeOwner: { kind: 'native_cli', generation: 'native-one' } } });
     await expect(client.takeControl()).rejects.toMatchObject({ code: 'native_control_unavailable' });
     expect(transport.sent.some(message => message.type === 'session_control_request' && message.payload.action === 'take_over')).toBe(false);
   } finally { client.stop(); }
@@ -2133,8 +2133,8 @@ it('retains uncertain handoff by owner generation for headless retries and new s
   } });
   try {
     client.start(); transport.open();
-    transport.emit({ protocolVersion: '1.7.0', type: 'negotiated', sessionControl: true });
-    const owner = (generation: string) => transport.emit({ protocolVersion: '1.7.0', type: 'session_control', payload: { agentId: 'agent-one', revision: generation, access: 'read_only', available: false, nativeOwner: { kind: 'native_cli', generation } } });
+    transport.emit({ protocolVersion: '1.8.0', type: 'negotiated', sessionControl: true });
+    const owner = (generation: string) => transport.emit({ protocolVersion: '1.8.0', type: 'session_control', payload: { agentId: 'agent-one', revision: generation, access: 'read_only', available: false, nativeOwner: { kind: 'native_cli', generation } } });
     owner('first');
     await expect(client.takeControl()).rejects.toMatchObject({ code: 'host_timeout' });
     const states: unknown[] = [];
@@ -2163,8 +2163,8 @@ it('retains uncertain handoffs when clients are destroyed and recreated in the s
     } });
     try {
       client.start(); transport.open();
-      transport.emit({ protocolVersion: '1.7.0', type: 'negotiated', sessionControl: true });
-      transport.emit({ protocolVersion: '1.7.0', type: 'session_control', payload: { agentId: 'agent-one', revision: 'owner', access: 'read_only', available: false, nativeOwner: { kind: 'native_cli', generation: 'same-owner' } } });
+      transport.emit({ protocolVersion: '1.8.0', type: 'negotiated', sessionControl: true });
+      transport.emit({ protocolVersion: '1.8.0', type: 'session_control', payload: { agentId: 'agent-one', revision: 'owner', access: 'read_only', available: false, nativeOwner: { kind: 'native_cli', generation: 'same-owner' } } });
       await expect(client.takeControl()).rejects.toMatchObject({ code: 'host_timeout' });
     } finally { client.stop(); }
   }
@@ -2186,8 +2186,8 @@ it('reuses an explicit native-target scope across transport and public binding r
     } });
     try {
       client.start(); transport.open();
-      transport.emit({ protocolVersion: '1.7.0', type: 'negotiated', sessionControl: true });
-      transport.emit({ protocolVersion: '1.7.0', type: 'session_control', payload: { agentId, revision: 'owner', access: 'read_only', available: false, nativeOwner: { kind: 'native_cli', generation: 'same-owner' } } });
+      transport.emit({ protocolVersion: '1.8.0', type: 'negotiated', sessionControl: true });
+      transport.emit({ protocolVersion: '1.8.0', type: 'session_control', payload: { agentId, revision: 'owner', access: 'read_only', available: false, nativeOwner: { kind: 'native_cli', generation: 'same-owner' } } });
       await expect(client.takeControl()).rejects.toThrow('Reply lost');
     } finally { client.stop(); }
   }

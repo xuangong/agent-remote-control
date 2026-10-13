@@ -1,12 +1,17 @@
 import { expect, it } from 'vitest';
 import type { Team, TeamSeat } from '@orchardworks/agent-remote-protocol';
 import { TeamBroker } from './teams.js';
-function fixture(create?: (seat:TeamSeat)=>Promise<TeamSeat['member']>) {
+import { PortableTeamResourceStore, type TeamResourceStorage } from './team-resources.js';
+import { createHash } from 'node:crypto';
+function fixture(create?: (seat:TeamSeat)=>Promise<TeamSeat['member']>, lifetime?: {now:()=>number;ttl:number}) {
+  const rows=new Map<string,Uint8Array>();const storage:TeamResourceStorage={async get(key){return rows.get(key);},async put(key,value){rows.set(key,value);},async delete(key){rows.delete(key);},async list(prefix){return [...rows.keys()].filter(key=>key.startsWith(prefix));}};
+  const resources=new PortableTeamResourceStore({storage,...(lifetime?{now:lifetime.now,draftTtlMs:lifetime.ttl}:{})});
   let state:Team[]=[], now=100;
   const calls:TeamSeat[]=[];
-  const broker=new TeamBroker({read:()=>state,now:()=>++now,assertHost:()=>{},change:async update=>{const draft=structuredClone(state);const result=structuredClone(update(draft));state=draft;return result;},
-    createSeat:async(_,seat)=>{calls.push(seat);return create ? create(seat) : {...seat.member,nativeSessionId:`native-${seat.member.id}`,creation:'ready',activity:'idle'};}});
-  return {broker,calls};
+  const ports:ConstructorParameters<typeof TeamBroker>[0]={resources,resourceDraftTtlMs:lifetime?.ttl,read:()=>state,now:lifetime?.now??(()=>++now),assertHost:()=>{},change:async update=>{const draft=structuredClone(state);const result=structuredClone(update(draft));state=draft;return result;},
+    createSeat:async(_,seat)=>{calls.push(seat);return create ? create(seat) : {...seat.member,nativeSessionId:`native-${seat.member.id}`,creation:'ready',activity:'idle'};}};
+  const broker=new TeamBroker(ports);
+  return {broker,calls,restart:()=>new TeamBroker({...ports,resources:new PortableTeamResourceStore({storage,...(lifetime?{now:lifetime.now,draftTtlMs:lifetime.ttl}:{})})})};
 }
 const source={hostId:'mac',providerId:'codex',nativeSessionId:'main',title:'Project'};
 async function group(f=fixture()) {
@@ -82,4 +87,45 @@ it('rechecks the sending Host lifetime at the serialized mutation boundary',asyn
   const {broker,team,leader,worker}=await group(); let checks=0;
   await expect(broker.hostCall('mac',{action:'send',teamId:team.id,memberId:leader.id,to:worker.id,operationId:'revoked',text:'Inspect'},()=>{if(++checks>1)throw new Error('Host retired');})).rejects.toThrow('retired');
   expect(broker.list()[0]!.messages.some(message=>message.text==='Inspect')).toBe(false);
+});
+
+it('persists sender ownership and recipient grants without adding file bytes to Team messages',async()=>{
+  const {broker,team,leader,worker,restart}=await group();
+  const bytes=Buffer.alloc(180000,42),sha256=createHash('sha256').update(bytes).digest('hex'),scope={teamId:team.id,memberId:leader.id,operationId:'zip'};
+  await broker.hostCall('mac',{...scope,action:'resource_begin',name:'diagnostic.zip',mediaType:'application/zip',byteLength:bytes.length,sha256});
+  for(let offset=0;offset<bytes.length;offset+=32768)await broker.hostCall('mac',{...scope,action:'resource_chunk',offset,contentBase64:bytes.subarray(offset,offset+32768).toString('base64')});
+  const finished=await broker.hostCall('mac',{...scope,action:'resource_finish'}) as {resource:{resourceId:string}};
+  const resourceId=finished.resource.resourceId;
+  const read={teamId:team.id,memberId:worker.id,resourceId,action:'resource_metadata' as const};
+  await expect(broker.hostCall('win',read)).rejects.toThrow('access');
+  const sent=await broker.hostCall('mac',{...scope,action:'send',to:worker.id,text:'Check [resource #1].',resources:[resourceId]});
+  expect(await broker.hostCall('mac',{...scope,action:'send',to:worker.id,text:'Check [resource #1].',resources:[resourceId]})).toEqual(sent);
+  expect(await broker.hostCall('win',read)).toMatchObject({resourceId,sha256,byteLength:bytes.length});
+  const restored=restart();expect(await restored.hostCall('win',read)).toMatchObject({resourceId,sha256});
+  await expect(restored.hostCall('intruder',read)).rejects.toThrow('registered');
+  const other=await restored.create({operationId:'other-team',source});
+  await expect(restored.hostCall('mac',{action:'resource_metadata',teamId:other.id,memberId:other.members[0]!.id,resourceId})).rejects.toThrow('access');
+  expect(JSON.stringify(broker.list())).not.toContain(bytes.toString('base64'));
+  expect(Buffer.byteLength(JSON.stringify(broker.list()))).toBeLessThan(10000);
+  await expect(broker.hostCall('mac',{...scope,action:'send',to:worker.id,text:'Check [resource #1].',resources:['other']})).rejects.toThrow();
+  const returned=await broker.hostCall('win',{teamId:team.id,memberId:worker.id,action:'send',to:leader.id,operationId:'return',text:'Verified',resources:[resourceId]});
+  expect(returned).toMatchObject({resources:[{resourceId}]});
+});
+
+it('expires completed unsent resources while retaining sent files and reclaiming draft manifest slots',async()=>{
+  let now=0;const {broker,team,leader,worker}=await group(fixture(undefined,{now:()=>now,ttl:10}));
+  const bytes=Buffer.from('fixture'),sha256=createHash('sha256').update(bytes).digest('hex');
+  const upload=async(operationId:string)=>{
+    const scope={teamId:team.id,memberId:leader.id,operationId};
+    await broker.hostCall('mac',{...scope,action:'resource_begin',name:'fixture.zip',mediaType:'application/zip',byteLength:bytes.length,sha256});
+    await broker.hostCall('mac',{...scope,action:'resource_chunk',offset:0,contentBase64:bytes.toString('base64')});
+    return (await broker.hostCall('mac',{...scope,action:'resource_finish'}) as {resource:{resourceId:string}}).resource;
+  };
+  const kept=await upload('kept'),draft=await upload('draft');
+  await broker.hostCall('mac',{teamId:team.id,memberId:leader.id,action:'send',to:worker.id,operationId:'send',text:'Inspect',resources:[kept.resourceId]});
+  now=11;
+  await expect(broker.hostCall('mac',{action:'resource_metadata',teamId:team.id,memberId:leader.id,resourceId:draft.resourceId})).rejects.toThrow('access');
+  expect(await broker.hostCall('win',{action:'resource_metadata',teamId:team.id,memberId:worker.id,resourceId:kept.resourceId})).toMatchObject({sha256});
+  const replacement=await upload('replacement');
+  expect(broker.list()[0]!.resourceUploads?.map(item=>item.resource.resourceId)).toEqual([kept.resourceId,replacement.resourceId]);
 });

@@ -53,8 +53,8 @@ it('preserves a draft when hidden, minimizes without pausing, and resolves uncer
 it('keeps the ordinary Session View connected and its full chatbox draft across hiding and minimizing', async () => {
   const closes: string[] = [];
   let connected = 0;
-  const snapshot: AgentSnapshot = { protocolVersion: '1.7.0', type: 'agent_snapshot', payload: { ...replicaState.agent!, id: 'tpm-agent' } };
-  const page: HistoryPage = { protocolVersion: '1.7.0', type: 'timeline_page', payload: {
+  const snapshot: AgentSnapshot = { protocolVersion: '1.8.0', type: 'agent_snapshot', payload: { ...replicaState.agent!, id: 'tpm-agent' } };
+  const page: HistoryPage = { protocolVersion: '1.8.0', type: 'timeline_page', payload: {
     agentId: 'tpm-agent', requestId: 'history', direction: 'tail', epoch: 'epoch', reset: false, staleCursor: false, gap: false,
     window: { minSeq: 1, maxSeq: 1, nextSeq: 2 }, startCursor: { epoch: 'epoch', seq: 1 }, endCursor: { epoch: 'epoch', seq: 1 },
     entries: [{ providerId: 'recorded', seqStart: 1, seqEnd: 1, timestamp: '2026-10-09T00:00:00Z', sourceSeqRanges: [], collapsed: [], resources: [], item: { type: 'assistant_message', text: 'Review the delivery evidence.' } }],
@@ -67,11 +67,11 @@ it('keeps the ordinary Session View connected and its full chatbox draft across 
       queueMicrotask(() => { listener.onOpen(); listener.onMessage(snapshot); });
       return { close: () => { closes.push(id); }, send: message => {
         if (message.type === 'negotiate') {
-          listener.onMessage({ protocolVersion: '1.7.0', type: 'negotiated', sessionControl: true });
-          listener.onMessage({ protocolVersion: '1.7.0', type: 'session_control', payload: { agentId: id, revision: 'control', access: 'control', available: false, token: 'control-token' } });
+          listener.onMessage({ protocolVersion: '1.8.0', type: 'negotiated', sessionControl: true });
+          listener.onMessage({ protocolVersion: '1.8.0', type: 'session_control', payload: { agentId: id, revision: 'control', access: 'control', available: false, token: 'control-token' } });
         }
-        if (message.type === 'session_control_request') listener.onMessage({ protocolVersion: '1.7.0', type: 'session_control', payload: { agentId: id, requestId: message.payload.requestId, revision: 'control', access: 'control', available: false, token: 'control-token' } });
-        if (message.type === 'timeline_subscription') listener.onMessage({ protocolVersion: '1.7.0', type: 'timeline_subscribed', payload: { requestId: message.payload.requestId, agentIds: [id] } });
+        if (message.type === 'session_control_request') listener.onMessage({ protocolVersion: '1.8.0', type: 'session_control', payload: { agentId: id, requestId: message.payload.requestId, revision: 'control', access: 'control', available: false, token: 'control-token' } });
+        if (message.type === 'timeline_subscription') listener.onMessage({ protocolVersion: '1.8.0', type: 'timeline_subscribed', payload: { requestId: message.payload.requestId, agentIds: [id] } });
       } };
     },
   };

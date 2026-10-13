@@ -222,7 +222,7 @@ it.each(['attach', 'snapshot', 'relay-restart'] as const)('restores a TPM-owned 
     // The background owner restores the runtime before either browser requests its saved binding.
     await expect.poll(() => sessions.get('main')?.observed).toBe(1);
     const main = sessions.get('main')!;
-    const snapshotPath = `/v1/sessions/${publicId}/snapshot?protocolVersion=1.7.0`;
+    const snapshotPath = `/v1/sessions/${publicId}/snapshot?protocolVersion=1.8.0`;
     const first = firstRead === 'attach' ? await request(attachPath, { providerId: 'codex', nativeSessionId: 'main' }) : await request(snapshotPath);
     expect(first.status, JSON.stringify(first.body)).toBe(200);
     expect((await request(attachPath, { providerId: 'codex', nativeSessionId: 'main' })).body).toEqual(attached.body);
@@ -235,30 +235,30 @@ it.each(['attach', 'snapshot', 'relay-restart'] as const)('restores a TPM-owned 
       const client = new WebSocket(origin.replace('http:', 'ws:') + `/v1/sessions/${publicId}/events`, { origin }); browsers.push(client);
       client.on('message', data => messages.push(JSON.parse(data.toString())));
       await once(client, 'open');
-      client.send(JSON.stringify({ protocolVersion: '1.7.0', type: 'negotiate' }));
+      client.send(JSON.stringify({ protocolVersion: '1.8.0', type: 'negotiate' }));
       await expect.poll(() => messages.some(message => message.type === 'negotiated')).toBe(true);
       await expect.poll(() => messages.find(message => message.type === 'session_control')?.payload.agentId).toBe(publicId);
       const control = messages.find(message => message.type === 'session_control')!.payload;
-      client.send(JSON.stringify({ protocolVersion: '1.7.0', type: 'session_control_request', payload: { requestId: `control-${i}`, agentId: publicId, revision: control.revision, action: 'acquire' } }));
+      client.send(JSON.stringify({ protocolVersion: '1.8.0', type: 'session_control_request', payload: { requestId: `control-${i}`, agentId: publicId, revision: control.revision, action: 'acquire' } }));
       await expect.poll(() => messages.findLast(message => message.type === 'session_control')?.payload.access).toBe('control');
-      client.send(JSON.stringify({ protocolVersion: '1.7.0', type: 'timeline_subscription', payload: { requestId: `subscribe-${i}`, agentIds: [publicId] } }));
+      client.send(JSON.stringify({ protocolVersion: '1.8.0', type: 'timeline_subscription', payload: { requestId: `subscribe-${i}`, agentIds: [publicId] } }));
       await expect.poll(() => messages.find(message => message.type === 'timeline_subscribed')?.payload.agentIds).toEqual([publicId]);
     }
-    browsers[0]!.send(JSON.stringify({ protocolVersion: '1.7.0', type: 'send_message', controlToken: received[0]!.findLast(message => message.type === 'session_control')!.payload.token, payload: {
+    browsers[0]!.send(JSON.stringify({ protocolVersion: '1.8.0', type: 'send_message', controlToken: received[0]!.findLast(message => message.type === 'session_control')!.payload.token, payload: {
       requestId: 'send', operationId: '00000000-0000-4000-8000-000000000001', agentId: publicId, text: publicId,
     } }));
     await expect.poll(() => ({ sent: main.sent, errors: received[0]!.filter(message => message.type === 'protocol_error') })).toEqual({ sent: [publicId], errors: [] });
     await expect.poll(() => received[0]!.find(message => message.type === 'command_acknowledged')?.payload.agentId).toBe(publicId);
     for (const messages of received) await expect.poll(() => messages.some(message => message.type === 'agent_stream' && message.payload.agentId === publicId
       && message.payload.event.item?.text === publicId)).toBe(true);
-    const timeline = await request(`/v1/sessions/${publicId}/timeline?protocolVersion=1.7.0&requestId=history&direction=tail&limit=20`);
+    const timeline = await request(`/v1/sessions/${publicId}/timeline?protocolVersion=1.8.0&requestId=history&direction=tail&limit=20`);
     expect(timeline.status, JSON.stringify(timeline.body)).toBe(200);
     expect(timeline.body.payload.agentId).toBe(publicId);
     const activity: any[] = [];
     const watcher = new WebSocket(origin.replace('http:', 'ws:') + `/v1/sessions/${publicId}/events`, { origin }); browsers.push(watcher);
     watcher.on('message', data => activity.push(JSON.parse(data.toString())));
     await once(watcher, 'open');
-    watcher.send(JSON.stringify({ protocolVersion: '1.7.0', type: 'negotiate', observation: 'activity' }));
+    watcher.send(JSON.stringify({ protocolVersion: '1.8.0', type: 'negotiate', observation: 'activity' }));
     await expect.poll(() => activity.find(message => message.type === 'agent_activity')?.payload.agentId).toBe(publicId);
     expect(main.observed).toBe(1);
   } finally {

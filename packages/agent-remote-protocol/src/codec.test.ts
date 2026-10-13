@@ -37,7 +37,7 @@ import {
   encodeResumeAgentRequest,
 } from './index.js';
 
-const version = '1.7.0';
+const version = '1.8.0';
 
 describe('usage snapshot wire contract', () => {
   const message = (usage: unknown) => ({ protocolVersion: version, type: 'agent_stream', payload: {
@@ -676,16 +676,16 @@ describe('resource and session messages', () => {
 });
 
 it('round-trips strict activity observation without accepting content fields', () => {
-  expect(decodeClientMessage(JSON.stringify({ protocolVersion: '1.7.0', type: 'negotiate', observation: 'activity' })).status).toBe('ok');
-  const activity = { protocolVersion: '1.7.0', type: 'agent_activity', payload: { agentId: 'agent', status: 'waiting' } };
+  expect(decodeClientMessage(JSON.stringify({ protocolVersion: '1.8.0', type: 'negotiate', observation: 'activity' })).status).toBe('ok');
+  const activity = { protocolVersion: '1.8.0', type: 'agent_activity', payload: { agentId: 'agent', status: 'waiting' } };
   expect(decodeServerMessage(JSON.stringify(activity))).toMatchObject({ status: 'ok', value: activity });
   expect(decodeServerMessage(JSON.stringify({ ...activity, payload: { ...activity.payload, text: 'private' } })).status).toBe('rejected');
 });
 
 
 it('round-trips an activity content cursor and rejects invalid cursor values', () => {
-  expect(decodeClientMessage(JSON.stringify({ protocolVersion: '1.7.0', type: 'negotiate', observation: 'activity' })).status).toBe('ok');
-  const message = { protocolVersion: '1.7.0', type: 'agent_activity', payload: {
+  expect(decodeClientMessage(JSON.stringify({ protocolVersion: '1.8.0', type: 'negotiate', observation: 'activity' })).status).toBe('ok');
+  const message = { protocolVersion: '1.8.0', type: 'agent_activity', payload: {
     agentId: 'agent', status: 'waiting', cursor: { epoch: 'epoch', seq: 42 },
   } };
   expect(decodeServerMessage(JSON.stringify(message))).toMatchObject({ status: 'ok', value: message });
@@ -716,7 +716,7 @@ it.each(['pending', 'failed', 'timed_out'] as const)('round trips shared %s sett
 });
 
 it('roundtrips explicit background outcomes independently of native timeline rows', () => {
-  const message: AgentStreamMessage = { protocolVersion: '1.7.0', type: 'agent_stream', payload: {
+  const message: AgentStreamMessage = { protocolVersion: '1.8.0', type: 'agent_stream', payload: {
     agentId: 'agent', timestamp: '2026-10-12T00:00:00Z', event: { type: 'background_activity_updated', providerId: 'provider',
       background: { id: 'review', kind: 'review', status: 'failed' } },
   } };

@@ -86,7 +86,7 @@ export function useImageDraft({ scope: suppliedScope, sessionKey, text, enabled,
   useEffect(() => {
     if (!enabled || current.inputText === text) return;
     current.inputText = text;
-    if (current.draft.parts.some(part => part.type === 'image') || draftText(current.draft.parts) === text) return;
+    if (current.draft.parts.some(part => part.type !== 'text') || draftText(current.draft.parts) === text) return;
     current.draft.parts = text ? [{ type: 'text', text }] : [];
     current.revision++;
     changed();
@@ -225,16 +225,18 @@ export function useImageDraft({ scope: suppliedScope, sessionKey, text, enabled,
   const images = current.draft.images;
   const hasImages = current.draft.parts.some(part => part.type === 'image');
   return {
+    hydrated: current.hydrated && !current.restoring && !current.readFailed,
     parts: current.draft.parts, images, error: current.error,
     storageError: current.readFailed ? 'Saved draft could not be restored.' : hasImages ? current.storageError : undefined,
-    storageBusy: Boolean(current.restoring || current.saving), retryStorage,
-    ready: current.draft.parts.every(part => part.type === 'text' || eligible(images[part.imageId])),
+    storageBusy: Boolean(current.restoring || current.saving || current.timer || current.dirty), retryStorage,
+    storageSaved: Boolean(scope && current.hydrated && !current.readFailed && !current.storageError && current.savedRevision === current.revision),
+    ready: current.draft.parts.every(part => part.type !== 'image' || eligible(images[part.imageId])),
     hasImages,
     captureEdit() { const revision = current.revision; return () => mounted.current && documentCurrent() && currentKey.current === entryKey && current.revision === revision; },
     digests() { return Object.fromEntries(Object.values(images).flatMap(image => eligible(image) && image.attachment ? [[image.attachment.attachmentId, image.attachment.sha256]] : [])); },
     setParts(parts: readonly DraftPart[]) {
       const imageIds = (parts: readonly DraftPart[]) => parts.flatMap(part => part.type === 'image' ? [part.imageId] : []).join(',');
-      const immediate = imageIds(parts) !== imageIds(current.draft.parts) || parts.length === 0;
+      const immediate = imageIds(parts) !== imageIds(current.draft.parts) || parts.length === 0 || parts.some(part => part.type === 'resource');
       current.draft.parts = normalizeDraftParts(parts); changed(true, immediate);
     },
     setText(value: string) { current.draft.parts = value ? [{ type: 'text', text: value }] : []; changed(true, !value || hasImages); },
@@ -265,6 +267,7 @@ export function useImageDraft({ scope: suppliedScope, sessionKey, text, enabled,
       current.error = undefined;
       for (const part of parts) {
         if (part.type === 'text') { result.push(part); continue; }
+        if (part.type === 'resource') { current.error = 'Use the Resource picker to attach a file to this draft.'; notify(); continue; }
         if (current.draft.parts.filter(value => value.type === 'image').length + result.filter(value => value.type === 'image').length >= 8) { current.error = 'A message can contain at most 8 images.'; notify(); break; }
         const blob = images[part.imageId]?.blob ?? lookupDraftImage(scope ?? '', part.imageId);
         const extraBytes = referencedIds.has(part.imageId) ? 0 : blob?.size ?? 0;

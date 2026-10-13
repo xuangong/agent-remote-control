@@ -204,3 +204,9 @@ Native `send` modes supply immediate/queued delivery. Native interaction IDs gro
 Codex `subAgentActivity` records expose a normalized optional tool-detail `sessionReference` containing `agentThreadId` as the native session ID and `agentPath` as the display title, falling back to the ID. Live and historical projection share this mapping. Navigation authorization remains with the Host directory's existing native-family attachment checks.
 
 Codex `collabAgentToolCall` waits normalize all unique `receiverThreadIds` into tool-detail `sessionReferences`, including while the call is running. An empty receiver list denotes a wait for updates from any sub-agent, as used by native `wait_agent`; it does not denote waiting for all children to finish. Missing target metadata is labeled unavailable. Completion describes the wait as finished without claiming any particular child completed. Live and historical projection share this interpretation.
+
+## Generic file references
+
+The SDK represents a generic file as a typed resource input with an opaque ID, Host-managed local path, name, media type, length and SHA256. Codex, Claude and Copilot advertise resource input when their session can accept input. Their native adapters encode a bounded local-file reference in a text block rather than treating arbitrary bytes as an image. Receiving the reference does not execute the file or bypass native tool permissions. Resource-only Copilot input does not require a vision-capable model.
+
+Live and replay projectors recover these references as structured resource timeline parts; merged native text preserves surrounding ordinary text. Native text can contain user-authored markers, so recovered display metadata is not proof of a stored file. Actual downloads resolve the opaque ID through the Host's authenticated scope and verify complete bytes. OpenCode and DSH do not advertise generic resource input; their existing image/text capabilities remain unchanged.

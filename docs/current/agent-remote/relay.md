@@ -141,3 +141,11 @@ Command descriptors can expose a short description and an optional Provider-owne
 
 
 Runtime updates retain native child relationship summaries and refresh the session capability snapshot before publishing `agent_update`. Child observations use separate AgentManagers and the ordinary session wire, so their Timeline and pending interaction identities remain isolated. A parent summary is not a copy of its children's pending requests.
+
+## Durable incoming resources
+
+`InputResourceStore` owns generated local paths, persisted upload offsets, complete-file SHA256 verification, quota admission and pinning. It is injected separately from the existing image and generated-resource stores. Filenames are display metadata and never select storage paths. The store defaults to a 1 GiB byte quota, a 10,000-entry bound and a 24-hour inactivity lifetime for unpinned drafts. Referenced resources are pinned before native dispatch, including uncertain outcomes, and survive restart; quota exhaustion rejects new uploads rather than evicting history. The store has one writer per directory.
+
+`AgentManager` advertises resource input only when both its provider and the injected store support it. Mixed text, image and resource messages preserve order and existing queue/admission semantics. Uploads and downloads derive their durable scope from the authenticated principal, provider and native session identity. Native text markers are not filesystem authority; a download uses the scoped resource ID and ignores any marker path.
+
+Host composition supplies its state-directory resource store. The direct Lab and debugger servers also inject durable stores, with `resourceDirectory` overrides and defaults `~/.agent-remote-control/lab-input-resources` and `~/.agent-remote-control/ardb-input-resources`. Closing a debugger does not remove referenced generic resources. The direct Lab broker has a separate `teamResourceDirectory`, defaulting to `~/.agent-remote-control/lab-team-resources`; Team ACL and message-delivery ownership remain broker responsibilities rather than store policy.

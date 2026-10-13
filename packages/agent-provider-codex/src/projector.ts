@@ -1,3 +1,4 @@
+import { projectResourceInputText } from '@orchardworks/agent-provider-sdk';
 import { randomUUID } from 'node:crypto';
 
 import { codexToolResult } from './tool-result.js';
@@ -520,7 +521,7 @@ export class CodexEventProjector {
     for (const [index, entry] of item.content.entries()) {
       if (!isRecord(entry)) continue;
       if (entry.type === 'text' && typeof entry.text === 'string') {
-        if (codexImagePlaceholderLabel(entry, item.content[index + 1]) === undefined) content.push({ type: 'text', text: entry.text });
+        if (codexImagePlaceholderLabel(entry, item.content[index + 1]) === undefined) content.push(...projectResourceInputText(entry.text));
       }
       else if (entry.type === 'image' || entry.type === 'localImage') {
         const label = codexImagePlaceholderLabel(item.content[index - 1], entry);
@@ -533,7 +534,7 @@ export class CodexEventProjector {
     const text = content.map(part => part.type === 'text' ? part.text : `[${part.label}]`).join('');
     if (!text) return null;
     return { ...this.observation(key, { type: 'timeline', provider: PROVIDER_ID, turnId,
-      item: { type: 'user_message', text, messageId: id, ...(imageIndex ? { content } : {}),
+      item: { type: 'user_message', text, messageId: id, ...(content.some(part=>part.type!=='text') ? { content } : {}),
         ...(readString(item.clientId) ? { clientMessageId: readString(item.clientId) } : {}) } }, occurredAt),
       ...(imageIndex ? { resourceReferences } : {}) };
   }

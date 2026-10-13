@@ -16,11 +16,15 @@ import { replicaState } from '../../src/test/fixtures';
 import '../../src/session-view-styles';
 import '../../src/tpm.css';
 const drafts = new DraftStore('team-fixture');
+const settingsEnabled = new URLSearchParams(location.search).has('settings');
+const permissions = new Map<string, string>();
 const children: Record<string, string[]> = {
  source: ['source-child'], leader: ['leader-child', 'leader-other'], member: ['member-child'], 'leader-child': ['leader-grandchild'],
 };
 const snapshot = (id: string): AgentSnapshot => ({ protocolVersion: '1.8.0', type: 'agent_snapshot', payload: {
- ...replicaState.agent!, id, runtimeInfo: { ...replicaState.agent!.runtimeInfo, sessionId: id,
+ ...replicaState.agent!, id, capabilities: { ...replicaState.agent!.capabilities, sessionSettings: settingsEnabled }, runtimeInfo: { ...replicaState.agent!.runtimeInfo, sessionId: id,
+ ...(settingsEnabled ? { settings: [{ id: 'approval', category: 'permissions' as const, label: 'Approval policy', value: permissions.get(id) ?? 'ask', mutable: true, scope: 'session' as const,
+ options: [{ value: 'ask', label: 'Ask' }, { value: 'allow', label: 'Allow' }] }] } : {}),
  childSessions: new URLSearchParams(location.search).has('children') ? (children[id] ?? []).map(nativeSessionId => ({
  nativeSessionId, title: nativeSessionId, createdAt: '2026-10-13T00:00:00Z', status: 'idle', observation: 'live',
  })) : [], },
@@ -43,6 +47,12 @@ const transport: RemoteAgentTransport = {
       }
       if (message.type === 'session_control_request') listener.onMessage({ protocolVersion: '1.8.0', type: 'session_control', payload: { agentId: id, requestId: message.payload.requestId, revision: 'control', access: 'control', available: false, token: 'token' } });
       if (message.type === 'timeline_subscription') listener.onMessage({ protocolVersion: '1.8.0', type: 'timeline_subscribed', payload: { requestId: message.payload.requestId, agentIds: [id] } });
+      if (message.type === 'set_session_setting') {
+        document.documentElement.dataset.fixtureSettingTarget = message.payload.agentId;
+        permissions.set(id, message.payload.value);
+        listener.onMessage({ protocolVersion: '1.8.0', type: 'command_acknowledged', payload: { agentId: id, requestId: message.payload.requestId, command: 'set_session_setting' } });
+        listener.onMessage(snapshot(id));
+      }
     } };
   },
 };
@@ -55,7 +65,7 @@ function Fixture() {
  const open=async(target:SessionWindowTarget)=>{setMain(target);sessionStorage.setItem('fixture:main',JSON.stringify(target));return true;};
  useEffect(()=>{const resize=()=>setCompact(window.innerWidth<=1180);window.addEventListener('resize',resize);return()=>window.removeEventListener('resize',resize);},[]);
  return <SessionDockProvider enabled={!compact} storageScope={location.origin}><main className="lab-shell" style={{display:'flex',flexDirection:'column',height:'100dvh'}}>
- <TeamMenu baseUrl={window.location.origin} enabled hosts={hosts}
+ <TeamMenu baseUrl={window.location.origin} enabled hosts={hosts} compact={compact} currentSession={main}
  source={{hostId:'mac',providerId:'codex',nativeSessionId:'source',title:'Project'}} onOpenSession={open}
  onOpen={async team=>{const layout=teamLayoutTargets(team,compact);await open(layout.main);windows.open(layout.dock, layout.groupRoot, team.id);return true;}} />
  <SessionDockRail>{main?<SessionFamily key={sessionWindowId(main)} storageScope={location.origin} baseUrl={location.origin} target={main} hostLabel="Mac" compact={compact} active offline={false} transport={transport} draftStore={drafts} navigation={navigation}/>:<p>Ordinary workspace</p>}</SessionDockRail>

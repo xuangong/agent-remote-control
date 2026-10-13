@@ -11,6 +11,39 @@ test.beforeEach(async({page})=>{
  await page.route('**/v1/remote/teams',route=>route.fulfill({json:{teams:[team]}}));
  await page.route('**/v1/remote/hosts/*/attach',route=>route.fulfill({json:{agentId:route.request().postDataJSON().nativeSessionId}}));
 });
+test('compact Team navigation opens a member with its own editable permissions and returns to the Leader', async ({ page, isMobile }, info) => {
+ test.skip(!isMobile, 'Compact Team navigation replaces the single visible session.');
+ const { activateComposerAction } = await import('./composer-actions');
+ const errors: string[] = []; page.on('pageerror', error => errors.push(error.message));
+ await page.goto('/e2e/fixtures/team.html?settings');
+ const trigger = page.getByRole('button', { name: 'Teams', exact: true });
+ await trigger.click(); await page.getByRole('button', { name: /Diagnose across Hosts/ }).click();
+ await expect(page.getByRole('region', { name: 'Leader', exact: true }).getByTestId('prompt-input')).toBeEnabled();
+ await trigger.click();
+ const navigation = page.getByRole('navigation', { name: 'Diagnose across Hosts sessions', exact: true });
+ await expect(navigation.getByRole('button', { name: /^Leader/ })).toHaveAttribute('aria-current', 'page');
+ await page.screenshot({ path: info.outputPath('team-member-switcher.png') });
+ await navigation.getByRole('button', { name: /^Windows validation/ }).click();
+ const member = page.getByRole('region', { name: 'Windows validation', exact: true });
+ await expect(member.getByTestId('prompt-input')).toBeEnabled();
+ await expect(page.locator('.lab-session-family-pane:visible')).toHaveCount(1);
+ await activateComposerAction(member, 'Permissions');
+ const policy = member.getByRole('combobox', { name: 'Approval policy', exact: true });
+ await expect(policy).toBeEnabled(); await policy.selectOption('allow');
+ await expect(page.locator('html')).toHaveAttribute('data-fixture-setting-target', 'member');
+ await expect(policy).toHaveValue('allow');
+ await page.keyboard.press('Escape');
+ await page.reload(); await expect(member.getByTestId('prompt-input')).toBeEnabled();
+ await trigger.click();
+ await expect(navigation.getByRole('button', { name: /^Windows validation/ })).toHaveAttribute('aria-current', 'page');
+ await navigation.getByRole('button', { name: /^Leader/ }).click();
+ const leader = page.getByRole('region', { name: 'Leader', exact: true });
+ await expect(leader.getByTestId('prompt-input')).toBeEnabled();
+ await activateComposerAction(leader, 'Permissions');
+ await expect(leader.getByRole('combobox', { name: 'Approval policy', exact: true })).toHaveValue('ask');
+ expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+ expect(errors).toEqual([]);
+});
 test('Team opens a normal dock layout with responsive presentation and refresh recovery',async({page,isMobile},info)=>{
  const errors:string[]=[];page.on('pageerror',error=>errors.push(error.message));
  const attaches:string[]=[];page.on('request',request=>{if(request.url().endsWith('/attach'))attaches.push(request.postDataJSON().nativeSessionId);});
@@ -38,18 +71,31 @@ test('Team applies an ordinary layout and its menu visibility does not hide sess
  await expect(primary.getByTestId('prompt-input')).toBeEnabled();
  await expect(page).toHaveURL(/[?&]provider=[^&]+/);
  const url=new URL(page.url()),provider=url.searchParams.get('provider')!;
- const [source,leader]=await page.evaluate(async providerId=>{
+ const [source,leader,member]=await page.evaluate(async providerId=>{
   const create=async()=>{const response=await fetch('/v1/remote/create',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({providerId,operationId:crypto.randomUUID()})});
    if(!response.ok)throw new Error(await response.text());return await response.json() as {nativeSessionId:string};};
-  return [await create(),await create()];
+  return [await create(),await create(),await create()];
  },provider);
- const actual={...team,source:{hostId:'local',providerId:provider,nativeSessionId:source.nativeSessionId,title:'Team main'},members:[{...team.members[0],hostId:'local',providerId:provider,nativeSessionId:leader.nativeSessionId}]};
+ const actual={...team,source:{hostId:'local',providerId:provider,nativeSessionId:source.nativeSessionId,title:'Team main'},members:[
+  {...team.members[0],hostId:'local',providerId:provider,nativeSessionId:leader.nativeSessionId},
+  {...team.members[1],hostId:'local',providerId:provider,nativeSessionId:member.nativeSessionId},
+ ]};
  await page.route('**/v1/remote/teams',route=>route.fulfill({json:{teams:[actual]}}));
  await page.getByRole('button',{name:'Teams',exact:true}).click();await page.getByRole('button',{name:/Diagnose across Hosts/}).click();
  await expect(primary).toBeVisible();
  await expect.poll(()=>new URL(page.url()).searchParams.get('session')).toBe(isMobile?leader.nativeSessionId:source.nativeSessionId);
  const leaderInput=isMobile?primary.getByTestId('prompt-input'):page.getByRole('region',{name:'Docked Leader',exact:true}).getByTestId('prompt-input');
  await expect(leaderInput).toBeEnabled();await leaderInput.fill('Keep Leader draft');
+ if(isMobile){
+  const entry=page.getByRole('button',{name:'Teams',exact:true}), navigation=page.getByRole('navigation',{name:'Diagnose across Hosts sessions',exact:true});
+  await entry.click();await navigation.getByRole('button',{name:/^Windows validation/}).click();
+  await expect.poll(()=>new URL(page.url()).searchParams.get('session')).toBe(member.nativeSessionId);
+  await expect(primary.getByTestId('prompt-input')).toBeEnabled();
+  await entry.click();await expect(navigation.getByRole('button',{name:/^Windows validation/})).toHaveAttribute('aria-current','page');
+  await navigation.getByRole('button',{name:/^Leader/}).click();
+  await expect.poll(()=>new URL(page.url()).searchParams.get('session')).toBe(leader.nativeSessionId);
+  await expect(leaderInput).toContainText('Keep Leader draft');
+ }
  await openView(page);await page.getByRole('checkbox',{name:'Team view',exact:true}).uncheck();
  await expect(page.getByRole('button',{name:'Teams',exact:true})).toBeHidden();
  await expect(leaderInput).toBeVisible();await expect(leaderInput).toContainText('Keep Leader draft');

@@ -1639,7 +1639,8 @@ function AppContent({
     {activated ? tracking.observers : null}
     {userScoped && attention.trackVisible ? <SessionTrackingMenu catchUp={catchUp} tracking={tracking} busy={transitioning} inert={supportingRailOpen} onOpen={item => void openTrackedSession(item)} /> : null}
     <TeamMenu visible={teamView.visible} baseUrl={baseUrl} enabled={accessReady && !!directory} hosts={remoteHosts} source={(visibleStackRoot ?? currentSession) ? {hostId:(visibleStackRoot ?? currentSession)!.hostId ?? 'local', providerId:(visibleStackRoot ?? currentSession)!.providerId,nativeSessionId:(visibleStackRoot ?? currentSession)!.nativeSessionId,title:(visibleStackRoot ?? currentSession)!.title} : undefined}
-      onOpen={openTeamLayout} onOpenSession={openSession} />
+      compact={compactLayout} currentSession={addressSession}
+      onOpen={openTeamLayout} onOpenSession={target => openSession(target, undefined, undefined, false, undefined, undefined, undefined, undefined, compactLayout ? 'primary' : undefined)} />
     <TpmMenu tpm={tpm} open={tpmListOpen} onOpenChange={setTpmListOpen} mainSessions={tpmMainSessions} main={visibleStackRoot ?? currentSession} visible={tpmView.visible} triggerRef={tpmTriggerRef} inert={supportingRailOpen} />
     <div className="lab-tpm-workspaces">{tpm.opened.map((key, index) => {
       const item = tpm.works.find(item => item.key === key);

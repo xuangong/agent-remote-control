@@ -216,6 +216,10 @@ Switching through the floating tracked-session list restores each track's last p
 
 The conversation Sessions menu highlights running subagent rows and reports the working subagent count for the current native family even while collapsed. Parent activity and unrelated families do not affect this count. Indicators follow status changes and disappear when no subagents are running.
 
+## Team session navigation
+
+Teams remain ordinary session layout presets. Wide layouts open the main session and dock the Leader and members. Compact layouts initially open the Leader; the floating Team list exposes each member directly, including its role, Host and current-session marker. Selecting a member replaces the primary conversation through normal session navigation, with the same model, permission and status controls. The current marker matches Host, Provider and native session identity, including after refresh. Unfinished member slots cannot be opened, and failed navigation keeps the list available for retry. Team management remains in its existing disclosure.
+
 ## Ordered image input
 
 Image-capable Codex and Claude sessions use a minimal inline editor: text, newlines,

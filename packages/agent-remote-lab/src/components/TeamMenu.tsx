@@ -9,9 +9,12 @@ import './team.css';
 interface Host { teamManagement?: true; id: string; name: string; online: boolean; providers?: Array<{providerId:string;displayName:string}> }
 interface Props {
   baseUrl: string; enabled: boolean; visible?: boolean; hosts: Host[]; source?: TeamSource;
+  compact?: boolean; currentSession?: Pick<TeamSource, 'providerId' | 'nativeSessionId'> & { hostId?: string };
   onOpen(team: Team): Promise<boolean>; onOpenSession(target: TeamSource): Promise<boolean>;
 }
 const errorMessage = (error: unknown) => error instanceof Error ? error.message : 'Team operation failed.';
+const isCurrentMember = (member: Team['members'][number], current: Props['currentSession']) => !!current
+  && member.hostId === (current.hostId ?? 'local') && member.providerId === current.providerId && member.nativeSessionId === current.nativeSessionId;
 export function TeamMenu(props: Props) {
   const { baseUrl, enabled, visible = true, hosts, source } = props;
   const client = useMemo(() => new RemoteTeamClient(baseUrl, workspaceFetch), [baseUrl]);
@@ -67,14 +70,19 @@ export function TeamMenu(props: Props) {
     if (!await props.onOpen(team)) throw new Error('The Team layout could not be opened. Retry after the main session is ready.');
     setSelected(team.id); setOpen(false);
   }
+  async function openSession(target: TeamSource) {
+    if (!await props.onOpenSession(target)) throw new Error('The session could not be opened.');
+    setOpen(false);
+  }
   function groups(archived: boolean) {
     const items = teams.filter(team => (team.status === 'archived') === archived);
     const keys = [...new Set(items.map(team => JSON.stringify([team.source.hostId, team.source.providerId, team.source.nativeSessionId])))];
     return keys.map(key => { const group = items.filter(team => JSON.stringify([team.source.hostId, team.source.providerId, team.source.nativeSessionId]) === key), main = group[0]!.source;
       return <section key={key} className="lab-tpm-group"><header className="lab-tpm-group-heading"><h3>{main.title}</h3><small>{hosts.find(host => host.id === main.hostId)?.name ?? main.hostId}</small></header>
-        <ul className="lab-tpm-list">{group.map(item => <TeamListItem key={item.id} team={item} selected={selected === item.id} busy={busy}
+        <ul className="lab-tpm-list">{group.map(item => <TeamListItem key={item.id} team={item} selected={props.compact ? item.members.some(member => isCurrentMember(member, props.currentSession)) : selected === item.id} busy={busy}
           onOpen={() => void run(() => openTeam(item))} onRename={title => run(() => change({action:'rename',teamId:item.id,title}))}
-          management={<TeamManagement team={item} hosts={hosts} busy={busy} failure={error} onChange={input => run(() => change(input))} onOpenSession={target => void run(async () => { if (!await props.onOpenSession(target)) throw new Error('The session could not be opened.'); setOpen(false); })} />} />)}</ul></section>;
+          navigation={props.compact ? <TeamSessionNavigation team={item} hosts={hosts} busy={busy} currentSession={props.currentSession} onOpen={target => void run(() => openSession(target))} /> : undefined}
+          management={<TeamManagement team={item} hosts={hosts} busy={busy} failure={error} onChange={input => run(() => change(input))} onOpenSession={target => void run(() => openSession(target))} />} />)}</ul></section>;
     });
   }
   if (!enabled) return null;
@@ -95,8 +103,21 @@ export function TeamMenu(props: Props) {
   </>;
 }
 
-function TeamListItem({ team, selected, busy, onOpen, onRename, management }: {
-  team: Team; selected: boolean; busy: boolean; onOpen(): void; onRename(title: string): Promise<boolean>; management: ReactNode;
+function TeamSessionNavigation({ team, hosts, busy, currentSession, onOpen }: {
+  team: Team; hosts: Host[]; busy: boolean; currentSession: Props['currentSession']; onOpen(target: TeamSource): void;
+}) {
+  return <nav className="lab-team-session-navigation" aria-label={`${team.title} sessions`}>
+    {team.members.filter(member => member.creation !== 'abandoned').map(member => <button key={member.id} type="button"
+      disabled={busy || member.creation !== 'ready' || !member.nativeSessionId}
+      aria-current={isCurrentMember(member, currentSession) ? 'page' : undefined}
+      onClick={() => onOpen({ hostId: member.hostId, providerId: member.providerId, nativeSessionId: member.nativeSessionId!, title: member.name })}>
+      <span>{member.name}</span><small>{member.role === 'leader' ? 'Leader' : 'Member'} · {hosts.find(host => host.id === member.hostId)?.name ?? member.hostId}{member.creation !== 'ready' ? ' · Not ready' : ''}</small>
+    </button>)}
+  </nav>;
+}
+
+function TeamListItem({ team, selected, busy, onOpen, onRename, navigation, management }: {
+  team: Team; selected: boolean; busy: boolean; onOpen(): void; onRename(title: string): Promise<boolean>; navigation?: ReactNode; management: ReactNode;
 }) {
   const [editing, setEditing] = useState(false), [title, setTitle] = useState('');
   const renameButton = useRef<HTMLButtonElement>(null);
@@ -119,6 +140,7 @@ function TeamListItem({ team, selected, busy, onOpen, onRename, management }: {
       <label>Team name<input autoFocus disabled={busy} value={title} maxLength={256} required onChange={event => setTitle(event.target.value)} /></label>
       <div><button type="button" disabled={busy} onClick={close}>Cancel</button><button disabled={busy || !title.trim()}>Save</button></div>
     </form> : null}
+    {navigation}
     {management}
   </li>;
 }

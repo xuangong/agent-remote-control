@@ -96,6 +96,7 @@ export class RemoteSessionClient {
   private resolveSubscriptionReady?: () => void;
   private readonly connectionTimeoutMs: number;
   private connectionDeadline?: ReturnType<typeof setTimeout>;
+  private pageHidden = false;
   private connectionOpen = false;
   private readonly operationTimeoutMs: number;
   private readonly reconnectInitialDelayMs: number;
@@ -146,11 +147,21 @@ export class RemoteSessionClient {
 
   start(): void {
     this.unwatchResume?.();
-    this.unwatchResume = watchPageResume(() => queueMicrotask(() => {
-      if (!this.cancelReconnect) return;
-      this.reconnectAttempt = 0;
-      this.connect();
-    }));
+    this.pageHidden = typeof document !== 'undefined' && document.visibilityState === 'hidden';
+    this.unwatchResume = watchPageResume(() => {
+      this.pageHidden = false;
+      queueMicrotask(() => {
+        if (this.pageHidden) return;
+        if (this.cancelReconnect) {
+          this.reconnectAttempt = 0;
+          this.connect();
+        } else if (this.currentStatus === 'connecting' || this.currentStatus === 'catching_up') this.armConnectionDeadline(this.generation);
+      });
+    }, () => {
+      this.pageHidden = true;
+      clearTimeout(this.connectionDeadline);
+      this.connectionDeadline = undefined;
+    });
     this.reconnectAttempt = 0;
     this.connect();
   }
@@ -278,7 +289,9 @@ export class RemoteSessionClient {
       requestId: this.createRequestId(), agentId: this.agentId, action, revision: this.control!.revision, retainOnDisconnect: this.retainControlOnDisconnect, clientKind: this.clientKind,
       ...(action === 'acquire' && (controlProofs.get(this.transport)?.get(this.agentId) ?? this.resumeControlToken)
         ? { resumeToken: controlProofs.get(this.transport)?.get(this.agentId) ?? this.resumeControlToken } : {}),
-    } }, 'session_control', (message): message is SessionControlMessage => message.type === 'session_control' && message.payload.agentId === this.agentId);
+    } }, 'session_control', (message): message is SessionControlMessage => message.type === 'session_control' && message.payload.agentId === this.agentId,
+    // Automatic acquisition is part of synchronization and shares its foreground deadline.
+    action === 'acquire' ? null : this.operationTimeoutMs);
   }
 
   searchTimeline(query: string, options: TimelineSearchOptions = {}) {
@@ -782,7 +795,7 @@ export class RemoteSessionClient {
     const pending = this.sendOperation({ protocolVersion: PROTOCOL_VERSION, type: 'timeline_request', payload: {
       requestId, agentId: this.agentId, direction, limit: this.historyPageSize, ...(cursor ? {cursor} : {}),
     } }, 'timeline_page', (message): message is HistoryPage => message.type === 'timeline_page'
-      && message.payload.agentId === this.agentId && message.payload.direction === direction, this.connectionTimeoutMs);
+      && message.payload.agentId === this.agentId && message.payload.direction === direction, null);
     const abort = () => this.rejectPendingOperation(requestId, 'timeline_page', new RemoteOperationError(
       'recovery_retired', 'This timeline recovery has been superseded.', true, requestId,
     ));
@@ -804,6 +817,8 @@ export class RemoteSessionClient {
 
   private armConnectionDeadline(generation: number): void {
     clearTimeout(this.connectionDeadline);
+    this.connectionDeadline = undefined;
+    if (this.pageHidden) return;
     this.connectionDeadline = setTimeout(() => {
       if (generation !== this.generation) return;
       this.replica.reportDiagnostic('connection_timeout', 'Session synchronization timed out. Reconnecting.', true);

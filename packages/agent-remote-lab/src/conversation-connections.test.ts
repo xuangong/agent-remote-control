@@ -47,6 +47,7 @@ it('keeps a tracked subscription current over real HTTP/WebSocket without reconn
     f.connections.retainTracked([]);
     expect(status).toBe('ready');
     again.release();
+    await Promise.resolve();
     expect(status).toBe('idle');
     expect(f.connections.agentIds).toEqual([]);
   } finally { await f.close(); }
@@ -134,6 +135,7 @@ it.each([false, true])('retains an unconfirmed native interruption after collect
     await expect(first.client.takeControl()).rejects.toMatchObject({ code: 'ECONNRESET' });
     await expect(first.client.takeControl()).rejects.toMatchObject({ code: 'ECONNRESET' });
     first.release();
+    await Promise.resolve();
     expect(connections.agentIds).toEqual([]);
     const next = connections.acquire('agent', new AgentReplica(), f.session);
     expect(next.client).not.toBe(first.client);
@@ -144,3 +146,25 @@ it.each([false, true])('retains an unconfirmed native interruption after collect
     next.release();
   } finally { connections.clear(); await f.close(); }
 }, 8000);
+
+it.each([false, true])('reuses an untracked session across a same-turn view transfer (channel=%s)', async sessionChannels => {
+  const f = await fixture(sessionChannels);
+  const wire: string[] = [];
+  f.transport.onProtocolMessage(event => { if (event.direction === 'outbound') wire.push(event.message.type); });
+  try {
+    const first = f.connections.acquire('agent', new AgentReplica(), f.session);
+    await vi.waitFor(() => expect(first.client.getSessionState().connection).toBe('ready'));
+    const initialWire = [...wire];
+    first.release();
+    const next = f.connections.acquire('agent', new AgentReplica(), f.session);
+    expect(next.client).toBe(first.client);
+    expect(next.replica).toBe(first.replica);
+    await new Promise(resolve => setTimeout(resolve, 30));
+    expect(next.client.getSessionState().connection).toBe('ready');
+    expect(wire).toEqual(initialWire);
+    expect(f.sockets).toHaveLength(1);
+    next.release();
+    await vi.waitFor(() => expect(f.connections.agentIds).toEqual([]));
+    expect(next.client.getSessionState().connection).toBe('idle');
+  } finally { await f.close(); }
+});

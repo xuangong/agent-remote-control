@@ -140,7 +140,7 @@ describe('session channel transport', () => {
     expect(harness.frames.filter(({ frame }) => frame.type === 'message')).toHaveLength(1);
   }, 10_000);
 
-  it('falls back before ready only once without duplicate opens or negotiation', async () => {
+  it('falls back before ready without duplicate opens and retries multiplexing on the next session', async () => {
     const harness = await server(false);
     const a = connect(harness.transport, 'agent one');
     await vi.waitFor(() => expect(harness.sockets).toHaveLength(1));
@@ -152,8 +152,11 @@ describe('session channel transport', () => {
     expect(a.disconnect).not.toHaveBeenCalled();
     a.connection.close();
     connect(harness.transport, 'b');
+    await vi.waitFor(() => expect(harness.urls).toHaveLength(3));
+    expect(harness.urls[2]).toContain('/base/v1/session-channel?');
+    harness.sockets[2]!.send(JSON.stringify({ protocolVersion: version, type: 'ready' }));
     await vi.waitFor(() => expect(harness.frames).toHaveLength(2));
-    expect(harness.urls[2]).toBe('/base/v1/sessions/b/events');
+    expect(harness.frames[1]!.frame).toMatchObject({ type: 'subscribe', agentId: 'b' });
   }, 10_000);
 
   it('falls back for an unanswered ready handshake without disabling multiplexing for later sessions', async () => {
@@ -657,3 +660,81 @@ it.each(['acknowledge', 'resume_then_acknowledge', 'slow_resume_then_acknowledge
   expect(harness.sockets).toHaveLength(1);
   expect(harness.frames.filter(({ frame }) => frame.message?.type === 'send_message')).toHaveLength(1);
 }, 10_000);
+
+it.each((['snapshot', 'control', 'history'] as const).flatMap(phase => (['recover', 'timeout'] as const).map(outcome => ({ phase, outcome }))))('keeps the same session wire while suspended waiting for $phase ($outcome)', async ({ phase, outcome }) => {
+  const browserWindow = new EventTarget();
+  const document = Object.assign(new EventTarget(), { visibilityState: 'visible' });
+  vi.stubGlobal('window', browserWindow); vi.stubGlobal('document', document);
+  cleanups.push(() => vi.unstubAllGlobals());
+  const harness = await server();
+  const replica = new AgentReplica();
+  const client = new RemoteSessionClient('a', harness.transport, replica, { connectionTimeoutMs: 300, operationTimeoutMs: 200, reconnectInitialDelayMs: 10 });
+  cleanups.push(() => client.stop());
+  client.start();
+  await vi.waitFor(() => expect(harness.frames.some(({ frame }) => frame.type === 'subscribe')).toBe(true));
+  const { socket, frame: subscription } = harness.frames[0]!;
+  const emit = (message: RemoteServerMessage) => socket.send(JSON.stringify({ protocolVersion: version, type: 'message', subscriptionId: subscription.subscriptionId, message }));
+  const snapshot = () => emit({ protocolVersion: version, type: 'agent_snapshot', payload: {
+    id: 'a', providerId: 'test', createdAt: 'now', updatedAt: 'now', status: 'idle', activeTurn: null, pendingInteractions: [],
+    runtimeInfo: { providerId: 'test', sessionId: 'native', status: 'idle' },
+    capabilities: { history: true, sendMessage: true, steer: false, cancel: false, readResource: false,
+      interactions: { question: false, planApproval: false, toolApproval: false } },
+  } });
+  socket.on('message', data => {
+    const frame = JSON.parse(String(data));
+    if (frame.type === 'ping') socket.send(JSON.stringify({ protocolVersion: version, type: 'pong' }));
+    if (frame.message?.type === 'timeline_subscription') emit({ protocolVersion: version, type: 'timeline_subscribed', payload: { requestId: frame.message.payload.requestId, agentIds: ['a'] } });
+  });
+  emit({ protocolVersion: version, type: 'negotiated', ...(phase === 'control' ? { sessionControl: true as const } : {}) });
+  if (phase !== 'snapshot') snapshot();
+  if (phase === 'control') emit({ protocolVersion: version, type: 'session_control', payload: { agentId: 'a', revision: 'r1', access: 'read_only', available: true } });
+  if (phase !== 'snapshot') await vi.waitFor(() => expect(harness.frames.some(({ frame }) => frame.message?.type === 'timeline_request')).toBe(true));
+  document.visibilityState = 'hidden'; document.dispatchEvent(new Event('visibilitychange'));
+  await new Promise(resolve => setTimeout(resolve, 450));
+  expect(harness.sockets).toHaveLength(1);
+  expect(client.getSessionState().connection).toBe('catching_up');
+  document.visibilityState = 'visible'; document.dispatchEvent(new Event('visibilitychange'));
+  if (outcome === 'timeout') {
+    const statuses: string[] = [];
+    client.subscribeStatus(status => statuses.push(status));
+    await new Promise(resolve => setTimeout(resolve, 100));
+    expect(statuses).not.toContain('disconnected');
+    await vi.waitFor(() => expect(statuses).toContain('disconnected'));
+    await vi.waitFor(() => expect(harness.frames.filter(({ frame }) => frame.type === 'subscribe')).toHaveLength(2));
+    expect(harness.frames.some(({ frame }) => frame.message?.type === 'send_message')).toBe(false);
+    return;
+  }
+  if (phase === 'snapshot') snapshot();
+  if (phase === 'control') {
+    const request = harness.frames.find(({ frame }) => frame.message?.type === 'session_control_request')!.frame.message.payload;
+    emit({ protocolVersion: version, type: 'session_control', payload: { agentId: 'a', requestId: request.requestId, revision: 'r2', access: 'control', available: false, token: 'proof' } });
+  }
+  await vi.waitFor(() => expect(harness.frames.some(({ frame }) => frame.message?.type === 'timeline_request')).toBe(true));
+  const request = harness.frames.find(({ frame }) => frame.message?.type === 'timeline_request')!.frame.message.payload;
+  emit({ protocolVersion: version, type: 'timeline_page', payload: { requestId: request.requestId, agentId: 'a', direction: 'tail', epoch: 'epoch',
+    reset: false, staleCursor: false, gap: false, error: null, window: { minSeq: 0, maxSeq: 0, nextSeq: 1 },
+    startCursor: null, endCursor: null, hasOlder: false, hasNewer: false, entries: [] } });
+  await vi.waitFor(() => expect(client.getSessionState().connection).toBe('ready'));
+  expect(harness.sockets).toHaveLength(1);
+  expect(harness.frames.filter(({ frame }) => frame.type === 'subscribe')).toHaveLength(1);
+  expect(harness.frames.filter(({ frame }) => frame.message?.type === 'timeline_request')).toHaveLength(1);
+});
+
+it('retries multiplexing for later sessions after an initial transient channel failure', async () => {
+  const harness = await server(false);
+  const first = connect(harness.transport, 'a');
+  await vi.waitFor(() => expect(harness.sockets).toHaveLength(1));
+  harness.sockets[0]!.terminate();
+  await vi.waitFor(() => expect(harness.urls).toHaveLength(2));
+  expect(harness.urls[1]).toContain('/sessions/a/events');
+  const second = connect(harness.transport, 'b');
+  const third = connect(harness.transport, 'c');
+  await vi.waitFor(() => expect(harness.urls).toHaveLength(3));
+  expect(harness.urls[2]).toContain('/session-channel?');
+  harness.sockets[2]!.send(JSON.stringify({ protocolVersion: version, type: 'ready' }));
+  await vi.waitFor(() => expect(harness.frames.filter(({ frame }) => frame.type === 'subscribe')).toHaveLength(2));
+  expect(first.opened).toHaveBeenCalledTimes(1);
+  expect(second.disconnect).not.toHaveBeenCalled();
+  expect(third.disconnect).not.toHaveBeenCalled();
+  expect(harness.sockets).toHaveLength(3);
+});

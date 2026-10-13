@@ -129,7 +129,6 @@ export class SessionChannelPool {
         try { channel = this.openChannel(mode); }
         catch {
           if (this.supportedModes.has(mode)) { this.disconnect(subscription); return; }
-          this.legacyModes.add(mode);
           this.openDirect(subscription);
           return;
         }
@@ -213,11 +212,12 @@ export class SessionChannelPool {
         }
       }
     };
-    socket.onclose = () => this.failChannel(channel);
+    // Transport failure is not proof that this Relay lacks multiplexing support.
+    socket.onclose = () => this.failChannel(channel, 'temporary');
     socket.onerror = () => {
       if (!channel.active) return;
       this.dependencies.diagnostic({ source: 'websocket', code: 'connection_failed', message: 'Relay WebSocket connection failed.', recoverable: true });
-      this.failChannel(channel);
+      this.failChannel(channel, 'temporary');
     };
     return channel;
   }

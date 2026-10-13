@@ -61,7 +61,9 @@ export class ConversationConnections {
       if (released) return;
       released = true;
       acquired.viewers -= 1;
-      this.collect(acquired);
+      // A layout transfer can release and reacquire the same session in one turn.
+      // Let the next view retain its client before collecting unused subscriptions.
+      queueMicrotask(() => this.collect(acquired));
     } };
   }
 

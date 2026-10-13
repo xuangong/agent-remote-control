@@ -1890,14 +1890,16 @@ it('reconnects an unconfirmed control handshake instead of presenting a takeover
   vi.useFakeTimers();
   const transport = new FakeTransport();
   const replica = new AgentReplica();
-  const client = new RemoteSessionClient('agent-one', transport, replica, { requireSessionControl: true, operationTimeoutMs: 20, reconnectInitialDelayMs: 10 });
+  const client = new RemoteSessionClient('agent-one', transport, replica, { requireSessionControl: true, connectionTimeoutMs: 20, operationTimeoutMs: 5, reconnectInitialDelayMs: 10 });
   const states: string[] = [];
   replica.subscribe(() => { const access = replica.getState().sessionControl?.access; if (access) states.push(access); });
   try {
     client.start(); transport.open();
     transport.emit({ protocolVersion: '1.8.0', type: 'negotiated', sessionControl: true });
     transport.emit({ protocolVersion: '1.8.0', type: 'session_control', payload: { agentId: 'agent-one', access: 'read_only', available: true, revision: 'initial' } });
-    await vi.advanceTimersByTimeAsync(31);
+    await vi.advanceTimersByTimeAsync(6);
+    expect(transport.connections).toBe(1);
+    await vi.advanceTimersByTimeAsync(25);
     expect(transport.connections).toBe(2);
     expect(states).not.toContain('read_only');
     expect(replica.getState().sessionControl?.access).toBe('checking');

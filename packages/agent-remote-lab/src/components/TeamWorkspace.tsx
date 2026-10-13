@@ -83,9 +83,8 @@ export function TeamWorkspace(props: Props) {
     const keys = [...new Set(items.map(team => JSON.stringify([team.source.hostId, team.source.providerId, team.source.nativeSessionId])))];
     return keys.map(key => { const group = items.filter(team => JSON.stringify([team.source.hostId, team.source.providerId, team.source.nativeSessionId]) === key), main = group[0]!.source;
       return <section key={key} className="lab-tpm-group"><header className="lab-tpm-group-heading"><h3>{main.title}</h3><small>{hosts.find(host => host.id === main.hostId)?.name ?? main.hostId}</small></header>
-        <ul className="lab-tpm-list">{group.map(item => <li key={item.id}><button type="button" className="lab-session-row" aria-current={selected === item.id ? true : undefined} onClick={() => { setSelected(item.id); setOpen(false); }}>
-          <span className="lab-tracked-description"><strong>{item.title}</strong><small>{item.members.length} {item.members.length === 1 ? 'worker' : 'workers'}{item.status !== 'active' ? ` · ${item.status}` : ''}</small></span>
-        </button></li>)}</ul></section>;
+        <ul className="lab-tpm-list">{group.map(item => <TeamListItem key={item.id} team={item} selected={selected === item.id} busy={busy}
+          onOpen={() => { setSelected(item.id); setOpen(false); }} onRename={title => run(() => change({action:'rename',teamId:item.id,title}))} />)}</ul></section>;
     });
   }
   if (!enabled) return null;
@@ -98,7 +97,7 @@ export function TeamWorkspace(props: Props) {
         {groups(false)}
         {!teams.some(item => item.status !== 'archived') ? <p className="lab-control-note">Start with a Leader. Discuss the work, then add members.</p> : null}
         {teams.some(item => item.status === 'archived') ? <details><summary>Archived</summary>{groups(true)}</details> : null}
-        <button type="button" disabled={busy || !source || !hosts.some(host => host.id === source.hostId && host.teamManagement && host.online)} onClick={() => void run(create)}>{busy ? 'Creating…' : pendingCreate ? 'Check previous creation' : 'New team'}</button>
+        <button type="button" disabled={busy || !source || !hosts.some(host => host.id === source.hostId && host.teamManagement && host.online)} onClick={() => void run(create)}>{pendingCreate ? 'Check previous creation' : 'New team'}</button>
         {!source || source.hostId === 'local' ? <p className="lab-control-note">Open a session on a connected Host to create a Team.</p> : null}
         {error || loadError ? <p role="alert">{error || loadError}</p> : null}
       </section> : null}
@@ -107,9 +106,36 @@ export function TeamWorkspace(props: Props) {
   </>;
 }
 
+function TeamListItem({ team, selected, busy, onOpen, onRename }: {
+  team: Team; selected: boolean; busy: boolean; onOpen(): void; onRename(title: string): Promise<boolean>;
+}) {
+  const [editing, setEditing] = useState(false), [title, setTitle] = useState('');
+  const renameButton = useRef<HTMLButtonElement>(null);
+  function close() { setEditing(false); renameButton.current?.focus(); }
+  return <li>
+    <div className="lab-team-list-row">
+      <button type="button" className="lab-session-row" aria-current={selected || undefined} onClick={onOpen}>
+        <span className="lab-tracked-description"><strong>{team.title}</strong><small>{team.members.length} {team.members.length === 1 ? 'worker' : 'workers'}{team.status !== 'active' ? ` · ${team.status}` : ''}</small></span>
+      </button>
+      <button ref={renameButton} type="button" className="lab-team-rename" disabled={busy} aria-label="Rename Team" title={`Rename ${team.title}`} onClick={() => { setTitle(team.title); setEditing(true); }}>Rename</button>
+    </div>
+    {editing ? <form className="lab-team-form lab-team-rename-form" onKeyDown={event => {
+      if (event.key === 'Escape') { event.stopPropagation(); if (!busy) close(); }
+    }} onSubmit={event => {
+      event.preventDefault();
+      if (!title.trim() || busy) return;
+      if (title.trim() === team.title) { close(); return; }
+      void onRename(title.trim()).then(ok => { if (ok) close(); });
+    }}>
+      <label>Team name<input autoFocus disabled={busy} value={title} maxLength={256} required onChange={event => setTitle(event.target.value)} /></label>
+      <div><button type="button" disabled={busy} onClick={close}>Cancel</button><button disabled={busy || !title.trim()}>Save</button></div>
+    </form> : null}
+  </li>;
+}
+
 function TeamWorkspaceBody(props: Props & { team: Team; busy: boolean; error: string; onExit():void; onChange(input:TeamAction):Promise<boolean> }) {
   const { team, compact, hosts, busy, onChange } = props;
-  const [current, setCurrent] = useState(team.members[0]!.id), [adding, setAdding] = useState(false), [renaming, setRenaming] = useState(false), [name, setName] = useState(team.title);
+  const [current, setCurrent] = useState(team.members[0]!.id), [adding, setAdding] = useState(false);
   const [widths, setWidths] = useState<Record<string, number>>(() => { try { const value = JSON.parse(conversationSessionStorage.getItem(`agent-remote:team-widths:${props.baseUrl}:${team.id}`) ?? '{}'); return value && typeof value === 'object' && !Array.isArray(value) ? value : {}; } catch { return {}; } });
   const widthsRef = useRef(widths); widthsRef.current = widths;
   function resize(id: string, width: number) { setWidths(current => ({ ...current, [id]: Math.max(320, Math.min(1400, width)) })); }
@@ -121,12 +147,12 @@ function TeamWorkspaceBody(props: Props & { team: Team; busy: boolean; error: st
   ];
   const activePane = panes.some(pane => pane.id === current) ? current : panes.find(pane => pane.member?.role === 'leader')?.id ?? 'source';
   return <section hidden={props.visible === false} className="lab-team-workspace" aria-label={`Team: ${team.title}`} data-compact={compact || undefined}>
-    <header className="lab-team-heading"><div ref={props.viewTarget} className="lab-global-view-slot" /><button onClick={() => setRenaming(!renaming)} title="Rename Team"><strong>{team.title}</strong></button>
+    <header className="lab-team-heading"><div ref={props.viewTarget} className="lab-global-view-slot" /><strong className="lab-team-title" title={team.title}>{team.title}</strong>
       <button disabled={busy || team.status !== 'active'} onClick={() => setAdding(!adding)}>Add member</button>
       <button disabled={busy || team.status === 'archiving'} onClick={() => void onChange({teamId:team.id,action:team.status === 'archived' ? 'restore' : 'archive'})}>{team.status === 'archived' ? 'Restore' : team.status === 'archiving' ? 'Archiving…' : 'Archive'}</button>
       <button onClick={props.onExit} aria-label="Exit Team mode">Exit team</button>
     </header>
-    {renaming ? <form className="lab-team-form" onSubmit={event => {event.preventDefault(); void onChange({teamId:team.id,action:'rename',title:name.trim()}).then(ok => {if(ok)setRenaming(false);});}}><label>Team name<input value={name} maxLength={256} required onChange={event => setName(event.target.value)} /></label><button disabled={busy || !name.trim()}>Save</button></form> : null}
+
     {adding ? <AddTeamMember teamId={team.id} hosts={hosts.filter(host => host.teamManagement)} busy={busy} onChange={onChange} onClose={() => setAdding(false)} /> : null}
     {team.status === 'archiving' ? <p className="lab-control-note" role="status">New dispatches stopped. Waiting for members to settle. Open their sessions to resolve approvals or stop ongoing work.</p> : null}
     {props.error ? <p role="alert">{props.error}</p> : null}

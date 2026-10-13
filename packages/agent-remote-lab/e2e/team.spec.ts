@@ -83,3 +83,50 @@ test('Team command and View switch share a retained presentation preference', as
  await input.fill('/team on'); await input.press('Enter'); await expect(entry).toBeVisible();
  await openView(page); await expect(toggle).toBeChecked();
 });
+
+
+test('Team names are edited in the floating list without opening or creating a Team', async ({ page }) => {
+ let current = { ...team, title: 'New team' };
+ const actions: unknown[] = [];
+ let fail = false;
+ await page.route('**/v1/remote/teams', route => route.fulfill({ json: { teams: [current] } }));
+ await page.route('**/v1/remote/teams/action', async route => {
+  const input = route.request().postDataJSON(); actions.push(input);
+  if (fail) { await route.fulfill({ status: 503, json: { error: 'Rename unavailable' } }); return; }
+  current = { ...current, title: input.title };
+  await route.fulfill({ json: current });
+ });
+ await page.goto('/e2e/fixtures/team.html');
+ const entry = page.getByRole('button', { name: 'Teams', exact: true });
+ await entry.click();
+ const panel = page.getByRole('region', { name: 'Teams', exact: true });
+ await panel.getByRole('button', { name: 'Rename Team', exact: true }).click();
+ await panel.getByRole('textbox', { name: 'Team name' }).fill('Canceled title');
+ await panel.getByRole('button', { name: 'Cancel', exact: true }).click();
+ expect(actions).toEqual([]);
+ await expect(page.locator('.lab-team-workspace')).toHaveCount(0);
+ await panel.locator('.lab-session-row').click();
+ await expect(page.locator('.lab-team-title')).toHaveText('New team');
+ await expect(page.locator('.lab-team-heading').getByRole('button', { name: 'New team', exact: true })).toHaveCount(0);
+ await entry.click();
+ await panel.getByRole('button', { name: 'Rename Team', exact: true }).click();
+ const input = panel.getByRole('textbox', { name: 'Team name' });
+ await input.fill('  Windows investigation  ');
+ await panel.getByRole('button', { name: 'Save', exact: true }).click();
+ await expect(input).toHaveCount(0);
+ await expect(page.locator('.lab-team-title')).toHaveText('Windows investigation');
+ await expect(panel.locator('.lab-session-row')).toContainText('Windows investigation');
+ expect(actions).toEqual([{ action: 'rename', teamId: 'team', title: 'Windows investigation' }]);
+ await expect(panel.getByRole('button', { name: 'New team', exact: true })).toHaveCount(1);
+ fail = true;
+ await panel.getByRole('button', { name: 'Rename Team', exact: true }).click();
+ await input.fill('Keep this draft');
+ await panel.getByRole('button', { name: 'Save', exact: true }).click();
+ await expect(panel.getByRole('alert')).toHaveText('Rename unavailable');
+ await expect(input).toHaveValue('Keep this draft');
+ await expect(page.locator('.lab-team-title')).toHaveText('Windows investigation');
+ await input.press('Escape');
+ await expect(input).toHaveCount(0);
+ await expect(panel).toBeVisible();
+ expect(await panel.evaluate(node => node.scrollWidth <= node.clientWidth)).toBe(true);
+});

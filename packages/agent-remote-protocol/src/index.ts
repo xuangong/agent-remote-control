@@ -47,3 +47,5 @@ export * from './session-succession-replay.js';
 export * from './creation-source.js';
 
 export { BackgroundActivity, mergeBackgroundActivity } from './background-activity.js';
+
+export * from './team.js';

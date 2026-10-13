@@ -4,13 +4,14 @@ import { chmod, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, expect, it, vi } from 'vitest';
+import * as platform from '@orchardworks/agent-platform';
 import { serveOpenCodeServerSupervisor } from './opencode-server-supervisor.js';
 
 interface Owner { running: true; pid: number; nativePid: number; version: string; url: string; generation: string; managementPort: number; token: string }
 const cleanup: Array<() => Promise<unknown>> = [];
 afterEach(async () => {
   try { for (const close of cleanup.splice(0).reverse()) await close(); }
-  finally { vi.unstubAllGlobals(); vi.unstubAllEnvs(); }
+  finally { vi.restoreAllMocks(); vi.unstubAllGlobals(); vi.unstubAllEnvs(); }
 }, 15000);
 async function availablePort() {
   const server = createServer();
@@ -173,6 +174,24 @@ it('drains noisy native output without losing the readiness announcement', async
   expect(await outcome).toEqual({});
 }, 15000);
 
+it.each(['stop', 'native exit'])('settles %s after publishing readiness while the owner write is still returning', async action => {
+  const f = await fixture();
+  const write = platform.atomicWriteFile;
+  vi.spyOn(platform, 'atomicWriteFile').mockImplementation(async (...args) => {
+    await write(...args);
+    if (args[0] !== join(f.directory, 'owner.json')) return;
+    const owner = JSON.parse(await readFile(args[0], 'utf8')) as Owner;
+    if (action === 'stop') expect((await control(owner, 'stop')).status).toBe(200);
+    else {
+      process.kill(owner.nativePid, 'SIGTERM');
+      await expect.poll(async () => (await (await control(owner)).json()).running, { timeout: 4000 }).toBe(false);
+    }
+  });
+  const outcome = await f.start();
+  if (action === 'stop') expect(outcome).toEqual({});
+  else expect(outcome.error?.message).toMatch(/exited unexpectedly/);
+}, 15000);
+
 it('waits for forced termination when the native process ignores graceful stop', async () => {
   const f = await fixture('ignore-term');
   const outcome = f.start();
@@ -308,6 +327,7 @@ it.skipIf(process.platform === 'win32').each(['stop', 'native exit'])('reclaims 
   if (action === 'stop') expect(await (await control(owner, 'stop')).json()).toEqual({ running: false });
   else process.kill(native.pid, 'SIGTERM');
   await outcome;
-  expect(() => process.kill(native.descendant, 0)).toThrow();
-  expect(() => process.kill(-native.pid, 0)).toThrow();
+  await expect.poll(() => [native.descendant, -native.pid].filter(pid => {
+    try { process.kill(pid, 0); return true; } catch { return false; }
+  }), { timeout: 1000 }).toEqual([]);
 }, 15000);

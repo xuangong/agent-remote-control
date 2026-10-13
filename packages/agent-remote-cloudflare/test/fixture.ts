@@ -167,8 +167,8 @@ export async function fixture(options: { actualEntry?: true; completeCodec?: tru
   async function upgrade(path: string, headers: Record<string, string>, requestOrigin = origin) {
     return (await upgradeResponse(path, headers, requestOrigin)).socket;
   }
-  async function host(key: string, promptEditing = false, controller?: Record<string, unknown>, sessionRename = false, daemonControl = false, providerId = 'codex', installationId = 'workers-host', tpmManagement = false) {
-    const socket = await upgrade('/ws/remote-host', { authorization: `Bearer ${key}` });
+  async function host(key: string, promptEditing = false, controller?: Record<string, unknown>, sessionRename = false, daemonControl = false, providerId = 'codex', installationId = 'workers-host', tpmManagement = false, teamManagement = false) {
+    const socket = await upgrade(teamManagement ? '/ws/remote-host?team=1' : '/ws/remote-host', { authorization: `Bearer ${key}` });
     const registered = event(socket, 'message'); send(socket, { type: 'register', ...(controller ? { controller } : {}), ...(tpmManagement ? { tpmManagement: true } : {}), credentialRotation: true, installationId, name: 'Workers Host', providers: [{ providerId, displayName: providerId, ...(promptEditing ? { promptEditing: true } : {}), ...(sessionRename ? { sessionRename: true } : {}), ...(daemonControl ? { daemonControl: true } : {}) }] });
     let message = await registered;
     if (message.type === 'credential_issued') {

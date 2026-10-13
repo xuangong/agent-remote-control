@@ -1,3 +1,5 @@
+import { randomUUID } from 'node:crypto';
+import type { TeamHostCall } from '@orchardworks/agent-remote-protocol';
 import { WebSocket } from 'ws';
 
 import {
@@ -44,6 +46,7 @@ export interface RemoteHostUplinkClientOptions {
   readonly environment?: HostEnvironment;
   readonly controller?: ControllerIdentity;
   readonly tpmManagement?: true;
+  readonly teamManagement?: true;
   readonly providers?: readonly { providerId: string; displayName: string; promptEditing?: true; sessionRename?: true; daemonControl?: true }[];
   readonly providerChanges?: { current(): NonNullable<RemoteHostUplinkClientOptions['providers']>; subscribe(listener: () => void): () => void };
   readonly remoteKey: string;
@@ -67,6 +70,7 @@ export interface RemoteHostUplinkClientOptions {
 }
 
 export interface RemoteHostUplinkClient {
+  teamRequest(call: TeamHostCall): Promise<unknown>;
   readonly ready: Promise<{ hostId: string; pairingPurpose?: PairingPurpose }>;
   close(): Promise<void>;
 }
@@ -84,6 +88,9 @@ export function createRemoteHostUplinkClient(options: RemoteHostUplinkClientOpti
   let rejectReady!: (error: Error) => void;
   const ready = new Promise<{ hostId: string; pairingPurpose?: PairingPurpose }>((resolve, reject) => { resolveReady = resolve; rejectReady = reject; });
   void ready.catch(() => undefined);
+  const teamPending = new Map<string, { resolve(value: unknown): void; reject(error: Error): void; timer: ReturnType<typeof setTimeout> }>();
+  let sendTeam: ((json: string) => void) | undefined;
+  const rejectTeam = () => { sendTeam = undefined; for (const pending of teamPending.values()) { clearTimeout(pending.timer); pending.reject(new Error('Team transport disconnected; query the original operation before retrying.')); } teamPending.clear(); };
   let remoteKey = options.remoteKey;
   let credentialWrite: Promise<void> | undefined;
   let closed = false;
@@ -116,6 +123,7 @@ export function createRemoteHostUplinkClient(options: RemoteHostUplinkClientOpti
     options.onStateChange?.('connecting');
     const endpoint = new URL(options.url);
     if (options.successionEnrollment) endpoint.searchParams.set('successionEnrollment', '2');
+    if (options.teamManagement) endpoint.searchParams.set('team', '1');
     const socket = new WebSocket(endpoint, {
       headers: { authorization: `Bearer ${remoteKey}` },
       maxPayload: UPLINK_MAX_FRAME_BYTES,
@@ -163,6 +171,7 @@ export function createRemoteHostUplinkClient(options: RemoteHostUplinkClientOpti
     });
     function retire(cause: DisconnectCause): void {
       if (retired) return;
+      rejectTeam();
       retired = true;
       unsubscribeProviders?.(); unsubscribeProviders = undefined; unsubscribePreviews?.();
       if (registered) options.previews?.disconnected();
@@ -239,6 +248,7 @@ export function createRemoteHostUplinkClient(options: RemoteHostUplinkClientOpti
       }
       if (registered && decoded.value.type === 'registered') {
         if ((decoded.value.successionEnrollment && JSON.stringify([successionAuthorityKey(decoded.value.successionEnrollment), decoded.value.successionEnrollmentVersion])) !== registeredEnrollmentIdentity || decoded.value.hostId !== registeredHostId
+          || !!decoded.value.teamManagement !== !!sendTeam
           || decoded.value.heartbeat?.intervalMs !== cloudHeartbeat?.intervalMs
           || decoded.value.heartbeat?.timeoutMs !== cloudHeartbeat?.timeoutMs) retire({ reason: 'protocol_error' });
         return;
@@ -248,6 +258,7 @@ export function createRemoteHostUplinkClient(options: RemoteHostUplinkClientOpti
         if (decoded.value.type !== 'registered') { retire({ reason: 'protocol_error' }); return; }
         clearTimeout(registrationDeadline);
         registered = true;
+        sendTeam = decoded.value.teamManagement ? json => { writer.send(json); } : undefined;
         registeredHostId = decoded.value.hostId;
         registeredEnrollmentIdentity = decoded.value.successionEnrollment && JSON.stringify([successionAuthorityKey(decoded.value.successionEnrollment), decoded.value.successionEnrollmentVersion]);
         operationScope = JSON.stringify([new URL(options.url).origin, registeredHostId, options.installationId]);
@@ -276,6 +287,14 @@ export function createRemoteHostUplinkClient(options: RemoteHostUplinkClientOpti
         }
         return;
       }
+      if (decoded.value.type === 'team_response') {
+        const pending = teamPending.get(decoded.value.requestId);
+        if (pending) { teamPending.delete(decoded.value.requestId); clearTimeout(pending.timer);
+          try { const value = JSON.parse(decoded.value.body); if (decoded.value.status >= 400) pending.reject(new Error(value.error ?? 'Team request failed.')); else pending.resolve(value); }
+          catch { pending.reject(new Error('Invalid Team response.')); }
+        }
+        return;
+      }
       if (decoded.value.type === 'heartbeat') {
         if (!cloudHeartbeat) { retire({ reason: 'protocol_error' }); return; }
         lastHeartbeatAt = performance.now();
@@ -290,6 +309,15 @@ export function createRemoteHostUplinkClient(options: RemoteHostUplinkClientOpti
   connect();
   return {
     ready,
+    teamRequest(call) {
+      if (!sendTeam || closed || teamPending.size >= 32) return Promise.reject(new Error('Team transport is unavailable.'));
+      const requestId = randomUUID();
+      return new Promise((resolve, reject) => {
+        const timer = setTimeout(() => { teamPending.delete(requestId); reject(new Error('Team request timed out; query its operation before retrying.')); }, 15000);
+        teamPending.set(requestId, {resolve, reject, timer});
+        sendTeam!(JSON.stringify({ uplinkVersion: 2, type: 'team_request', requestId, call }));
+      });
+    },
     close(): Promise<void> {
       if (closePromise) return closePromise;
       closed = true;

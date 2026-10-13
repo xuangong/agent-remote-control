@@ -1,3 +1,4 @@
+import { TeamHostCall } from './team.js';
 import { Type, type Static } from '@sinclair/typebox';
 import { Value } from '@sinclair/typebox/value';
 
@@ -38,10 +39,12 @@ const closeCode = Type.Union([
 
 const requestPath = Type.String({
   maxLength: 8192,
-  pattern: '^/(remote/(catalog(?:/(?:revision|session))?|workspaces|workspace-folders(?:/create)?(?=\\?|$)|models|succession/enrollment(?=$)|diagnostics/relay(?=$)|controller-update(?=$)|codex-daemon(?=$)|tpm(?:/(?:work|create|action))?(?=\\?|$)|provider-settings(?=$)|session/rename(?=$)|child/attach|attach|create|stop|vscode-tunnel(?:/(?:start|stop))?(?=$)|previews(?:/unregister)?)|v1/(providers|sessions))(?:[/?][^#]*)?$',
+  pattern: '^/(remote/(catalog(?:/(?:revision|session))?|workspaces|workspace-folders(?:/create)?(?=\\?|$)|models|succession/enrollment(?=$)|diagnostics/relay(?=$)|controller-update(?=$)|codex-daemon(?=$)|team/create-seat(?=$)|tpm(?:/(?:work|create|action))?(?=\\?|$)|provider-settings(?=$)|session/rename(?=$)|child/attach|attach|create|stop|vscode-tunnel(?:/(?:start|stop))?(?=$)|previews(?:/unregister)?)|v1/(providers|sessions))(?:[/?][^#]*)?$',
 });
 
 export const RemoteHostUplinkMessage = Type.Union([
+  Type.Object({ ...rpc, type: Type.Literal('team_request'), call: TeamHostCall }, object),
+  Type.Object({ ...rpc, type: Type.Literal('team_response'), status: Type.Integer({minimum:200, maximum:599}), body: Type.String() }, object),
   Type.Union([
     Type.Object({ uplinkVersion: version, type: Type.Literal('register'), installationId: identity, name: identity, environment: Type.Optional(HostEnvironment), controller: Type.Optional(ControllerIdentity), providerManagement: Type.Optional(Type.Literal(true)), tpmManagement: Type.Optional(Type.Literal(true)), credentialRotation: Type.Optional(Type.Literal(true)),
       providerId: Type.Literal('dsh') }, object),
@@ -50,7 +53,7 @@ export const RemoteHostUplinkMessage = Type.Union([
   ]),
   Type.Object({ uplinkVersion: version, type: Type.Literal('credential_issued'), credential: Type.String({ minLength: 1, maxLength: 512, pattern: '^[!-~]+$' }) }, object),
   Type.Object({ uplinkVersion: version, type: Type.Literal('credential_saved') }, object),
-  Type.Object({ uplinkVersion: version, type: Type.Literal('registered'), hostId: identity, successionEnrollment: Type.Optional(SuccessionAssociationAuthority), successionEnrollmentVersion: Type.Optional(Type.Literal(2)), pairingPurpose: Type.Optional(PairingPurpose), heartbeat: RemoteHostHeartbeat, tunnelToken: Type.Optional(identity) }, object),
+  Type.Object({ uplinkVersion: version, type: Type.Literal('registered'), teamManagement: Type.Optional(Type.Literal(true)), hostId: identity, successionEnrollment: Type.Optional(SuccessionAssociationAuthority), successionEnrollmentVersion: Type.Optional(Type.Literal(2)), pairingPurpose: Type.Optional(PairingPurpose), heartbeat: RemoteHostHeartbeat, tunnelToken: Type.Optional(identity) }, object),
   Type.Object({ uplinkVersion: version, type: Type.Literal('provider_snapshot'), providers: Type.Array(provider, { maxItems: 64 }) }, object),
   Type.Object({ uplinkVersion: version, type: Type.Literal('preview_snapshot'), snapshot: PreviewRegistrationSnapshot }, object),
   Type.Object({ uplinkVersion: version, type: Type.Literal('heartbeat'), nonce: heartbeatNonce }, object),
@@ -68,7 +71,7 @@ export const RemoteHostUplinkMessage = Type.Union([
 
 export type RemoteHostUplinkMessage = Static<typeof RemoteHostUplinkMessage>;
 export type RemoteHostUplinkBrokerMessage = Extract<RemoteHostUplinkMessage,
-  { type: 'credential_issued' | 'registered' | 'heartbeat' | 'rpc_request' | 'rpc_cancel' | 'stream_open' | 'stream_message' | 'stream_close' }>;
+  { type: 'team_response' | 'credential_issued' | 'registered' | 'heartbeat' | 'rpc_request' | 'rpc_cancel' | 'stream_open' | 'stream_message' | 'stream_close' }>;
 
 export function decodeRemoteHostUplinkMessage(json: string): WireDecodeResult<RemoteHostUplinkMessage> {
   let value: unknown;

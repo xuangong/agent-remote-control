@@ -1,3 +1,5 @@
+import { TeamBroker } from './teams.js';
+import { isTeam, isTeamCreate, isTeamAction, type Team } from '@orchardworks/agent-remote-protocol';
 import { sessionIdentityMessage } from './session-identity.js';
 import { isCreationSource, type CreationSource } from '@orchardworks/agent-remote-protocol';
 import { relationChangeKey, isRelationChangeReceipt, type RelationChangeReservation, type RelationChangeReceipt } from '@orchardworks/agent-remote-protocol';
@@ -34,6 +36,7 @@ type Host = {
   successionEnrollmentVersion?: 1 | 2;
   providerManagement?: true;
   tpmManagement?: true;
+  teamManagement?: true;
   connectionId?: string; stopDiagnostics?(): void;
   pairingPurpose?: PairingPurpose;
   environment?: HostEnvironment;
@@ -50,13 +53,14 @@ class BrokerError extends Error {
   constructor(readonly status: number, readonly code: string, message: string, readonly creationRejected = false, readonly requestId?: string, readonly nativeOwner?: NativeSessionOwner) { super(message); }
 }
 export interface RemoteHostBrokerState {
+  teams?: Team[];
   revokedHosts?: RevokedHost[];
   associations?: BrokerAssociationState;
   pairings?: SavedPairingKey[];
   previews?: HostPreviewState[];
   sharing?: HostSharingState;
   keys: Array<[string, DeviceCredential]>;
-  hosts: Array<Pick<Host, 'id' | 'installationId' | 'name' | 'providers' | 'legacyDsh' | 'credentialRotation' | 'gatewayKeyRequested' | 'environment' | 'pairingPurpose' | 'controller' | 'providerManagement' | 'tpmManagement'>>;
+  hosts: Array<Pick<Host, 'id' | 'installationId' | 'name' | 'providers' | 'legacyDsh' | 'credentialRotation' | 'gatewayKeyRequested' | 'environment' | 'pairingPurpose' | 'controller' | 'providerManagement' | 'tpmManagement' | 'teamManagement'>>;
   bindings: Array<Omit<Binding, 'generation' | 'recovery'>>;
   creations: Array<[string, { fingerprint: string; agentId: string }]>;
 }
@@ -123,9 +127,11 @@ export function createHostBroker(options: HostBrokerOptions) {
     if (binding) { completedCreations.set(key, value); creations.set(key, { fingerprint: value.fingerprint, result: Promise.resolve(binding) }); }
   }
   let associations = migrateBrokerAssociations(options.initialState?.associations ?? { version: 5, revision: 0, admissions: [], freezes: [], relationChanges: [], relationResets: [] });
+  let teamState = structuredClone(options.initialState?.teams ?? []);
+  if (!teamState.every(isTeam)) throw new Error('Invalid saved Teams.');
   function snapshot(): RemoteHostBrokerState {
-    return { ...(revokedHosts ? { revokedHosts: structuredClone(revokedHosts) } : {}), ...(options.successionEnrollment || options.initialState?.associations ? { associations: structuredClone(associations) } : {}), pairings: structuredClone(pairings), previews: previews.snapshot(), ...(options.ownerSubject ? { sharing: sharing.snapshot() } : {}), keys: [...keys].map(([key, value]) => [key, structuredClone(value)]),
-      hosts: [...hosts.values()].map(({ id, installationId, name, providers, legacyDsh, credentialRotation, gatewayKeyRequested, environment, pairingPurpose, controller, providerManagement, tpmManagement }) => ({ ...(tpmManagement ? { tpmManagement } : {}), ...(providerManagement ? { providerManagement } : {}), ...(controller ? { controller } : {}), ...(pairingPurpose ? { pairingPurpose } : {}), ...(environment ? { environment } : {}), id, installationId, name, providers, legacyDsh, ...(credentialRotation ? {credentialRotation} : {}), ...(gatewayKeyRequested ? { gatewayKeyRequested } : {}) })),
+    return { teams: structuredClone(teamState), ...(revokedHosts ? { revokedHosts: structuredClone(revokedHosts) } : {}), ...(options.successionEnrollment || options.initialState?.associations ? { associations: structuredClone(associations) } : {}), pairings: structuredClone(pairings), previews: previews.snapshot(), ...(options.ownerSubject ? { sharing: sharing.snapshot() } : {}), keys: [...keys].map(([key, value]) => [key, structuredClone(value)]),
+      hosts: [...hosts.values()].map(({ id, installationId, name, providers, legacyDsh, credentialRotation, gatewayKeyRequested, environment, pairingPurpose, controller, providerManagement, tpmManagement, teamManagement }) => ({ ...(teamManagement ? { teamManagement } : {}), ...(tpmManagement ? { tpmManagement } : {}), ...(providerManagement ? { providerManagement } : {}), ...(controller ? { controller } : {}), ...(pairingPurpose ? { pairingPurpose } : {}), ...(environment ? { environment } : {}), id, installationId, name, providers, legacyDsh, ...(credentialRotation ? {credentialRotation} : {}), ...(gatewayKeyRequested ? { gatewayKeyRequested } : {}) })),
       bindings: [...bindings.values()].map(({ generation: _generation, recovery: _recovery, ...binding }) => binding),
       creations: [...completedCreations] };
   }
@@ -182,6 +188,20 @@ export function createHostBroker(options: HostBrokerOptions) {
     commits = operation.catch(() => undefined);
     return operation;
   }
+  const teams = new TeamBroker({
+    now, read: () => teamState,
+    change: update => commit(draft => {
+      const next = structuredClone(teamState), value = structuredClone(update(next));
+      if (isDeepStrictEqual(next, teamState)) return { value, unchanged: true, publish() {} };
+      if (!next.every(team => isTeam(team) && Buffer.byteLength(JSON.stringify(team.messages)) <= 128 * 1024) || Buffer.byteLength(JSON.stringify(next)) > 2 * 1024 * 1024) throw new Error('Team storage capacity reached.');
+      draft.teams = next; return { value, publish() { teamState = next; } };
+    }),
+    assertHost(hostId, providerId) { const host = requireHost(hostId); if (!host.teamManagement) throw new Error('Update the Controller to use Teams.'); if (!host.providers.some(provider => provider.providerId === providerId)) throw new Error('Provider is unavailable on this Host.'); },
+    async createSeat(hostId, seat) {
+      const result = await rpc(requireHost(hostId), 'POST', '/remote/team/create-seat', undefined, JSON.stringify(seat));
+      const value = JSON.parse(result.body); if (result.status !== 200) throw new Error(value.error ?? 'Team session creation failed.'); return value;
+    },
+  });
   function assertAssociationCapacity(state: BrokerAssociationState) {
     if (!validBrokerAssociations(state) || state.revision > Number.MAX_SAFE_INTEGER - remainingAssociationRevisions(state)) throw new BrokerError(409, 'association_capacity', 'Association storage or revision headroom is exhausted.');
     retainedIdentities(state);
@@ -502,7 +522,8 @@ export function createHostBroker(options: HostBrokerOptions) {
     if (!hostAllowed(hostId, subject)) throw new SharingError(403, 'host_forbidden', 'Host access is unavailable.');
   }
   function visibleHosts(subject?: string) {
-    return [...hosts.values()].filter(host => hostAllowed(host.id, subject)).map(({ id, name, providers, legacyDsh, socket, ready, credentialRotation, environment, controller, providerManagement, tpmManagement }) => ({
+    return [...hosts.values()].filter(host => hostAllowed(host.id, subject)).map(({ id, name, providers, legacyDsh, socket, ready, credentialRotation, environment, controller, providerManagement, tpmManagement, teamManagement }) => ({
+      ...(teamManagement ? { teamManagement } : {}),
       ...(tpmManagement ? { tpmManagement } : {}),
       ...(providerManagement ? { providerManagement } : {}),
       ...(controller ? { controller } : {}),
@@ -594,7 +615,7 @@ export function createHostBroker(options: HostBrokerOptions) {
     }
     host.streams.clear();
   }
-  function register(socket: RelaySocket, credential: DeviceCredential, context: BrokerRequestContext, credentialHash: string, enrollmentRequested?: 1 | 2) {
+  function register(socket: RelaySocket, credential: DeviceCredential, context: BrokerRequestContext, credentialHash: string, enrollmentRequested?: 1 | 2, teamRequested = false) {
     let host: Host | undefined;
     let pendingCredential: {hash: string; value: DeviceCredential} | undefined;
     let issuing: Promise<void> | undefined;
@@ -632,7 +653,7 @@ export function createHostBroker(options: HostBrokerOptions) {
     function registered() {
       if (retired || !host || host.socket !== socket) return;
       host.tunnelToken ??= randomBytes(32).toString('base64url');
-      send(host, { uplinkVersion: 2, type: 'registered', hostId: host.id, ...(host.successionEnrollmentVersion && options.successionEnrollment ? { successionEnrollment: options.successionEnrollment, ...(host.successionEnrollmentVersion === 2 ? { successionEnrollmentVersion: 2 as const } : {}) } : {}), pairingPurpose: host.pairingPurpose ?? (host.gatewayKeyRequested ? 'gateway-setup' : 'host-only'), heartbeat, tunnelToken: host.tunnelToken });
+      send(host, { uplinkVersion: 2, type: 'registered', ...(host.teamManagement ? {teamManagement: true} : {}), hostId: host.id, ...(host.successionEnrollmentVersion && options.successionEnrollment ? { successionEnrollment: options.successionEnrollment, ...(host.successionEnrollmentVersion === 2 ? { successionEnrollmentVersion: 2 as const } : {}) } : {}), pairingPurpose: host.pairingPurpose ?? (host.gatewayKeyRequested ? 'gateway-setup' : 'host-only'), heartbeat, tunnelToken: host.tunnelToken });
       if (retired || host.socket !== socket) return;
       host.ready = true;
       if (!heartbeatStarted) {
@@ -703,7 +724,7 @@ export function createHostBroker(options: HostBrokerOptions) {
             ? existing.pairingPurpose ?? (existing.gatewayKeyRequested ? 'gateway-setup' : 'host-only')
             : credential.purpose ?? 'host-only';
           const providers = 'providers' in message ? [...message.providers] : [{ providerId: 'dsh', displayName: 'DeepSeek DSH' }];
-          const next = { id: existing?.id ?? recovery?.hostId ?? randomUUID(), installationId: message.installationId, name: message.name, environment: message.environment, controller: message.controller, providerManagement: message.providerManagement, tpmManagement: message.tpmManagement, pairingPurpose: purpose,
+          const next = { id: existing?.id ?? recovery?.hostId ?? randomUUID(), installationId: message.installationId, name: message.name, environment: message.environment, controller: message.controller, providerManagement: message.providerManagement, tpmManagement: message.tpmManagement, teamManagement: teamRequested ? true as const : undefined, pairingPurpose: purpose,
             ...(existing?.gatewayKeyRequested ? { gatewayKeyRequested: true } : {}),
             providers, legacyDsh: 'providerId' in message, ...(message.credentialRotation ? {credentialRotation:true} : {credentialRotation:undefined}) };
           draft.hosts = draft.hosts.filter(value => value.id !== next.id); draft.hosts.push(next);
@@ -753,6 +774,14 @@ export function createHostBroker(options: HostBrokerOptions) {
         registered();
       } else if (message.type === 'heartbeat_ack') {
         if (pendingNonce === message.nonce) { clearTimeout(heartbeatDeadline); pendingNonce = undefined; lastHeartbeatAck=now(); }
+      } else if (message.type === 'team_request') {
+        const current = host, generation = host.generation;
+        void (async () => {
+          let status = 200, body: string;
+          try { assertHostCurrent(current, generation); body = JSON.stringify(await teams.hostCall(current.id, message.call, () => assertHostCurrent(current, generation))); }
+          catch (error) { status = 409; body = JSON.stringify({ error: error instanceof Error ? error.message : 'Team request failed.' }); }
+          if (current.socket === socket && current.generation === generation) send(current, { uplinkVersion: 2, type: 'team_response', requestId: message.requestId, status, body });
+        })().catch(() => closeConnection(1011, 'Team response delivery failed'));
       } else if (message.type === 'rpc_response') {
         const pending = host.pending.get(message.requestId);
         if (pending) { clearTimeout(pending.timer); host.pending.delete(message.requestId); if (!pending.diagnostic && message.status>=400) diagnostic(host, {event:'rpc_failed',requestId:message.requestId,operation:diagnosticOperation(pending.path),status:message.status,durationMs:Math.max(0,now()-pending.startedAt)}); pending.resolve(message); }
@@ -1341,6 +1370,31 @@ export function createHostBroker(options: HostBrokerOptions) {
       requireOwner(principal(context)); requireAccess(providerSettings[1]!, principal(context));
       return new Response(result.body, { status: result.status, headers: { 'content-type': 'application/json', 'cache-control': 'no-store' } });
     }
+    if (url.pathname === '/v1/remote/teams' || url.pathname === '/v1/remote/teams/create' || url.pathname === '/v1/remote/teams/action') {
+      requireOwner(subject);
+      if (url.pathname === '/v1/remote/teams' && request.method === 'GET') return json(200, { teams: teams.list().filter(team => hostAllowed(team.source.hostId, subject)) });
+      if (request.method !== 'POST') return json(405, { error: 'Method is not allowed.' });
+      const input = await readBody(request); requireOwner(principal(context));
+      try {
+        if (url.pathname.endsWith('/create') && isTeamCreate(input)) {
+          requireAccess(input.source.hostId, principal(context));
+          const result = await teams.create(input);
+          requireOwner(principal(context)); requireAccess(input.source.hostId, principal(context));
+          return json(200, result);
+        }
+        if (url.pathname.endsWith('/action') && isTeamAction(input)) {
+          const team = teams.list().find(team => team.id === input.teamId);
+          if (!team) return json(404, { error: 'Team not found.' });
+          requireAccess(team.source.hostId, principal(context));
+          if (input.action === 'add_member') requireAccess(input.hostId, principal(context));
+          const result = await teams.action(input);
+          requireOwner(principal(context)); requireAccess(team.source.hostId, principal(context));
+          if (input.action === 'add_member') requireAccess(input.hostId, principal(context));
+          return json(200, result);
+        }
+        return json(400, { error: 'Invalid Team request.' });
+      } catch (error) { return json(409, { error: error instanceof Error ? error.message : 'Team request failed.' }); }
+    }
     const tpm = /^\/v1\/remote\/hosts\/([^/]+)\/tpm(?:\/(create|action|work))?$/.exec(url.pathname);
     if (tpm) {
       requireOwner(subject); requireAccess(tpm[1]!, subject);
@@ -1652,7 +1706,7 @@ export function createHostBroker(options: HostBrokerOptions) {
       return { accept(client: RelaySocket) {
         if (unavailable || keys.get(hash!) !== key || key.claimedAt !== undefined || key.expires <= now()) { client.close(1008, 'Device credential revoked'); return; }
         track(client);
-        register(client, key, context, hash!, url.searchParams.get('successionEnrollment') === '2' ? 2 : url.searchParams.get('successionEnrollment') === '1' ? 1 : undefined);
+        register(client, key, context, hash!, url.searchParams.get('successionEnrollment') === '2' ? 2 : url.searchParams.get('successionEnrollment') === '1' ? 1 : undefined, url.searchParams.get('team') === '1');
       } };
     }
     const match = /^\/v1\/sessions\/([^/]+)\/events$/.exec(url.pathname);
@@ -1724,7 +1778,7 @@ export function createHostBroker(options: HostBrokerOptions) {
   }
   const handlesRequest = (url: URL) => {
     const session = /^\/v1\/sessions\/([^/]+)\//.exec(url.pathname);
-    return url.pathname === '/v1/remote/controller-release' || /^\/v1\/remote\/(hosts|pairings)(\/|$)/.test(url.pathname) || !!(session && bindings.has(session[1]!));
+    return url.pathname === '/v1/remote/controller-release' || /^\/v1\/remote\/(hosts|pairings|teams)(\/|$)/.test(url.pathname) || !!(session && bindings.has(session[1]!));
   };
   const handlesUpgrade = (url: URL) => {
     const session = /^\/v1\/sessions\/([^/]+)\//.exec(url.pathname);

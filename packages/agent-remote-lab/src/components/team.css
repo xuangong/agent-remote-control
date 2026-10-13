@@ -1,0 +1,26 @@
+.lab-tracking-floating.lab-team-floating { top: 220px; right: 12px; z-index: 95; }
+.lab-team-mount { display: contents; }
+.lab-ordinary-workspace { display: contents; }
+.lab-ordinary-workspace[hidden] { display: none; }
+.lab-team-workspace { display: flex; flex-direction: column; width: 100%; height: 100%; min-width: 0; min-height: 0; background: var(--obs-canvas); }
+.lab-team-heading { display: flex; align-items: center; gap: 6px; padding: 6px 10px; border-bottom: 1px solid var(--obs-border); flex: none; }
+.lab-team-heading > button:first-of-type { margin-right: auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.lab-team-rail { display: flex; flex: 1; min-height: 0; min-width: 0; overflow-x: auto; overflow-y: hidden; overscroll-behavior-x: contain; }
+.lab-team-pane { display: flex; flex-direction: column; position: relative; flex: none; min-width: 320px; height: 100%; min-height: 0; border-right: 1px solid var(--obs-border); padding-right: 6px; }
+.lab-team-pane[hidden] { display: none; }
+.lab-team-pane-heading { display: flex; align-items: baseline; gap: 8px; padding: 8px 12px 4px; flex: none; min-width: 0; }
+.lab-team-pane-heading strong { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.lab-team-pane-heading small { color: var(--obs-text-secondary); margin-left: auto; white-space: nowrap; }
+.lab-team-responsibility { font-size: 12px; padding: 4px 12px; max-height: 140px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; }
+.lab-team-responsibility summary { cursor: pointer; color: var(--obs-text-secondary); }
+.lab-team-form { display: flex; flex-wrap: wrap; gap: 10px; padding: 12px; max-height: 45vh; overflow: auto; border-bottom: 1px solid var(--obs-border); }
+.lab-team-form label { display: flex; flex: 1 1 180px; flex-direction: column; gap: 4px; min-width: 0; }
+.lab-team-form input, .lab-team-form textarea, .lab-team-form select { min-width: 0; width: 100%; }
+.lab-team-recovery { flex: none; max-height: 180px; overflow: auto; padding: 6px 12px; font-size: 12px; }
+.lab-team-select { display: flex; align-items: center; gap: 8px; padding: 4px 10px; font-size: 12px; }
+.lab-team-select select { flex: 1; min-width: 0; }
+.lab-team-opening { padding: 16px; color: var(--obs-text-secondary); }
+.lab-team-workspace[data-compact] .lab-team-rail { overflow: hidden; }
+.lab-team-workspace[data-compact] .lab-team-pane { flex: 1; min-width: 0; width: 100%; padding-right: 0; border: 0; }
+.lab-team-workspace[data-compact] .lab-team-heading { gap: 3px; padding: 4px; font-size: 12px; }
+.lab-team-workspace[data-compact] .lab-team-heading button { padding: 5px; }

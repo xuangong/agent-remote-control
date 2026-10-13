@@ -1,3 +1,5 @@
+import { TeamRuntime } from './team.js';
+import { isTeamSeat, type TeamHostCall } from '@orchardworks/agent-remote-protocol';
 import { directoryNativeEffect, directoryOperationId, type DirectoryMutationEvidence } from './directory-mutation.js';
 import { admitNativeOwnerTransfer } from './native-owner-admission.js';
 import { isCreationSource } from '@orchardworks/agent-remote-protocol';
@@ -12,7 +14,7 @@ import { jsonBytes } from './succession-persistence.js';
 import type { SessionSuccessionContextStore } from './session-succession-context.js';
 import type { SessionSuccessionCoordinator } from './session-succession.js';
 import { nativeSessionRefKey, isNativeSessionRef, isSuccessionRequest, type NativeSessionRef, type TrustedSuccessionContext } from '@orchardworks/agent-remote-protocol';
-import { TpmCoordinator, type TpmOptions } from './tpm.js';
+import { TpmCoordinator, type TpmOptions, type TpmSessionAccess } from './tpm.js';
 import { isTpmCreate, isTpmAction } from '@orchardworks/agent-remote-protocol';
 import { SessionBindings, SessionBindingError } from '@orchardworks/agent-remote-relay';
 import type { HostProviderDiscovery } from './provider-discovery.js';
@@ -93,6 +95,7 @@ export interface AgentHostRuntimeOptions {
   executionPolicy?: HostExecutionPolicy;
   operationCache?: OperationCacheOptions;
   tpm?: TpmOptions;
+  team?: { stateDirectory: string; request?: (call: TeamHostCall) => Promise<unknown>; tickMs?: number };
   /** Internal wiring until provider readiness and product projection are certified together. */
   succession?: { controllerId: string; enrollment?: true } & ({
     stateDirectory: string;
@@ -156,7 +159,7 @@ export interface AgentHost {
 export function createAgentHost(options: AgentHostOptions): AgentHost {
   if (options.succession?.enrollment && options.succession.controllerId !== options.installationId) throw new Error('Succession Controller identity must match the installed Controller.');
   const stateDirectory = options.preview?.stateDirectory ?? options.vscodeTunnel?.stateDirectory;
-  const runtime = createAgentHostRuntime({ ...options, controllerId: options.installationId, ...(options.inputImages ? {} : stateDirectory ? { inputImages: { directory: join(stateDirectory, 'input-images') } } : {}) });
+  const runtime = createAgentHostRuntime({ ...options, ...(options.team ? { team: { ...options.team, request: (call: TeamHostCall) => connection.client.teamRequest(call) } } : {}), controllerId: options.installationId, ...(options.inputImages ? {} : stateDirectory ? { inputImages: { directory: join(stateDirectory, 'input-images') } } : {}) });
   options.providerDiscovery?.onRegistration(runtime.addRegistration);
   runtime.setRelayConnected(false);
   const updater = options.controller ? createControllerUpdater({ ...options.controller, beginRestart: runtime.beginControllerRestart, cancelRestart: runtime.cancelControllerRestart }) : undefined;
@@ -174,6 +177,7 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
     runtime.setRelayConnected(false);
     const current = ++generation;
     return { superseded: false, client: createRemoteHostUplinkClient({ relay: runtime.relay, installationId: options.installationId, name: options.name, environment: options.environment, controller: options.controller?.identity,
+      ...(options.team ? { teamManagement: true } : {}),
       ...(options.tpm ? { tpmManagement: true } : {}),
       ...(options.succession?.enrollment ? { successionEnrollment: { control: runtime.enrollFromRelay } } : {}),
       providers: describeProviders(), ...(options.providerDiscovery ? { providerChanges: { current: describeProviders, subscribe: options.providerDiscovery.subscribe } } : {}), url: config.url, remoteKey: config.remoteKey,
@@ -659,7 +663,7 @@ export function createAgentHostRuntime(options: AgentHostRuntimeOptions): AgentH
             if (!parent) throw new Error('Native parent session is unavailable.');
           }
         }
-        const extensions = await tpm?.extensions(providerId, nativeSessionId);
+        const extensions = await team?.extensions(providerId, nativeSessionId) ?? await tpm?.extensions(providerId, nativeSessionId);
         const open = () => source.open(nativeSessionId, { ...(takeOver ? { takeOver } : {}), ...(extensions ? { extensions } : {}), ...(nativeCreation ? { nativeCreation, resumeHandle: succession?.contexts.forTarget(nativeRef({ providerId, nativeSessionId }))?.resumeHandle, resumeOptions: { initializeEmpty: succession?.contexts.canInitializeEmpty(nativeRef({ providerId, nativeSessionId })) === true } } : {}) });
         const nativeSession = parentNativeSessionId === undefined ? await (takeOver
           ? directoryNativeEffect(successionBoundary?.currentEntry(), successionBoundary?.currentEntry()?.targets ?? [], async () => {
@@ -832,6 +836,12 @@ export function createAgentHostRuntime(options: AgentHostRuntimeOptions): AgentH
           if (error instanceof HostExecutionPolicyError) throw error;
           return json(409, { code: error instanceof SuccessionPreparationRejected ? error.code : 'succession_request_failed', error: error instanceof Error ? error.message : 'Session succession failed.' });
         }
+      }
+      if (url.pathname === '/remote/team/create-seat') {
+        if (!team) return json(404, {error: 'Update the Controller to use Teams.'});
+        if (request.method !== 'POST' || !isTeamSeat(payload)) return json(400, {error: 'Invalid Team session request.'});
+        try { return json(200, await team.create(payload)); }
+        catch (error) { return json(409, {error: error instanceof Error ? error.message : 'Team session creation failed.'}); }
       }
       if (url.pathname.startsWith('/remote/tpm')) {
         if (!tpm) return json(404, { code: 'tpm_unavailable', error: 'TPM is unavailable on this Controller.' });
@@ -1037,7 +1047,7 @@ export function createAgentHostRuntime(options: AgentHostRuntimeOptions): AgentH
     bindHandoff(registration.directory);
     bindSourceReader(registration.directory);
   }
-  const tpm = options.tpm ? new TpmCoordinator(options.tpm, {
+  const automationAccess: TpmSessionAccess = {
     ...(successionService ? { mainRouting: successionTpmRouting(successionService, successionConfig!.controllerId, acquireNative) } : {}),
     available: () => !closed && !draining,
     supportedProviders: () => [...registrations.values()].filter(({ adapter }) => options.providerEnabled?.(adapter.descriptor.providerId) !== false
@@ -1062,7 +1072,9 @@ export function createAgentHostRuntime(options: AgentHostRuntimeOptions): AgentH
     },
     create: (providerId, cwd, extensions) => directoryNativeEffect(successionBoundary?.currentEntry(), successionBoundary?.currentEntry()?.targets ?? [], evidence => registration(providerId).directory.create({ ...(cwd ? { cwd } : {}), ...extensions }, evidence)),
     execute: executeOperation('host:tpm'),
-  }) : undefined;
+  };
+  const tpm = options.tpm ? new TpmCoordinator(options.tpm, automationAccess) : undefined;
+  const team = options.team?.request ? new TeamRuntime(options.team.stateDirectory, {...automationAccess, execute: executeOperation('host:team')}, options.team.request, options.team.tickMs) : undefined;
   const enrollment = successionService ? new SessionSuccessionEnrollment(successionService, successionConfig!.controllerId, () => [...registrations.values()], () => tpm?.store.all() ?? [], source => authorizeSuccessionRead(source, source), directoryOperation) : undefined;
   const enrollFromRelay = async (request: RemoteHostControlRequest, context: TrustedSuccessionContext) => {
     if (!options.succession?.enrollment || !enrollment || closed || draining) return json(403, { code: 'succession_enrollment_unavailable', error: 'Trusted succession enrollment is unavailable.' });
@@ -1086,6 +1098,7 @@ export function createAgentHostRuntime(options: AgentHostRuntimeOptions): AgentH
     close(): Promise<void> { return closePromise ??= (async () => {
       closed = true; draining = true;
       await bounded(successionReady, shutdownTimeoutMs).catch(() => undefined);
+      await bounded(team?.close() ?? Promise.resolve(), shutdownTimeoutMs).catch(() => undefined);
       await bounded(tpm?.close() ?? Promise.resolve(), shutdownTimeoutMs).catch(() => undefined);
       try {
         await bounded(successionBoundary?.close() ?? Promise.resolve(), shutdownTimeoutMs);

@@ -196,3 +196,19 @@ it('keeps an older Relay connection while refusing unnegotiated succession contr
   expect(b.states).toEqual(['connecting', 'registered']);
   expect(b.connections[0]!.readyState).toBe(1);
 }, 10000);
+
+it.each([true, false])('negotiates Team transport without breaking older Relay registrations (supported=%s)', async supported => {
+  const server = new WebSocketServer({host:'127.0.0.1',port:0}); await new Promise<void>(resolve=>server.once('listening',resolve));
+  closeables.push(()=>new Promise<void>(resolve=>{for(const socket of server.clients)socket.terminate();server.close(()=>resolve());}));
+  let registration:unknown, requests=0, endpoint='';
+  server.on('connection',(socket,request)=>{endpoint=request.url!;socket.on('message',data=>{
+    const message=JSON.parse(data.toString());
+    if(message.type==='register'){registration=message;socket.send(JSON.stringify({uplinkVersion:2,type:'registered',hostId:'host',heartbeat:{intervalMs:30000,timeoutMs:10000},...(supported?{teamManagement:true}:{})}));}
+    if(message.type==='team_request'){requests++;socket.send(JSON.stringify({uplinkVersion:2,type:'team_response',requestId:message.requestId,status:200,body:'[]'}));}
+  });});
+  const relay=createAgentRemoteRelay({providers:[]});closeables.push(()=>relay.close());
+  const client=createRemoteHostUplinkClient({relay,installationId:'host',name:'Host',remoteKey:'key',providers:[],teamManagement:true,url:`ws://127.0.0.1:${(server.address() as {port:number}).port}/ws/remote-host`,resolveSession:()=>undefined,control:()=>({status:404,body:'{}'})});
+  closeables.push(()=>client.close());await client.ready;expect(endpoint).toContain('team=1');expect(registration).not.toHaveProperty('teamManagement');
+  if(supported){expect(await client.teamRequest({action:'poll'})).toEqual([]);expect(requests).toBe(1);}
+  else {await expect(client.teamRequest({action:'poll'})).rejects.toThrow('unavailable');expect(requests).toBe(0);}
+});

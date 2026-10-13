@@ -163,7 +163,7 @@ async function serveConfigured(daemon: boolean, diagnosticLog: DiagnosticLog | u
   }
   const registrations = providerDiscovery.registrations;
   const identity = await controllerIdentity(import.meta.url);
-  const host = createAgentHost({ succession: { controllerId: installationId, stateDirectory: join(stateDir, 'succession'), enrollment: true }, tpm: { stateDirectory: join(stateDir, 'tpm-v1') }, ...(identity ? { controller: { identity, stateDir, restart: requestLauncherRestart } } : {}), registrations, providerDiscovery, providerEnabled: providerDiscovery.enabled, environment: hostEnvironment, installationId, name: environment.AGENT_HOST_NAME?.trim() || hostname(),
+  const host = createAgentHost({ succession: { controllerId: installationId, stateDirectory: join(stateDir, 'succession'), enrollment: true }, tpm: { stateDirectory: join(stateDir, 'tpm-v1') }, team: { stateDirectory: join(stateDir, 'teams-v1') }, ...(identity ? { controller: { identity, stateDir, restart: requestLauncherRestart } } : {}), registrations, providerDiscovery, providerEnabled: providerDiscovery.enabled, environment: hostEnvironment, installationId, name: environment.AGENT_HOST_NAME?.trim() || hostname(),
     ...(supportsCodexDaemonControl(environment)
       ? { codexDaemon: { stateDir, restart: operationId => restartCodexDaemon({ stateDir, environment, operationId }) } } : {}),
     vscodeTunnel: { stateDirectory: stateDir, executable: environment.AGENT_HOST_VSCODE?.trim() || undefined,

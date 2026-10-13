@@ -10,6 +10,7 @@ export interface RemoteHost {
   id: string; name: string; online: boolean; managed?: boolean; providers?: HostProvider[]; providerId?: string;
   controller?: ControllerIdentity;
   providerManagement?: true;
+  teamManagement?: true;
   credentialRotation?: boolean; environment?: HostEnvironment;
   access?: 'owner' | 'shared'; sessionQuota?: { limit: number; used: number };
 }

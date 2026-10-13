@@ -1,3 +1,4 @@
+import { TeamWorkspace } from './components/TeamWorkspace.js';
 import { SessionAskHome, SessionAskSurface, SessionAskSurfaceProvider } from './components/SessionAskSurface.js';
 import { resolveConversationLayout } from './conversation-layout.js';
 import { communicationResolver, communicationDirection, loadSessionCommunication, waitForCommunicationSession, type CommunicationSnapshot } from './session-communication.js';
@@ -875,6 +876,9 @@ function AppContent({
     });
   }, [sessionEntries]);
   const currentSession = sessionEntries.find((item) => item.agentId === activeAgentId) ?? succession.selected;
+  const [teamMode, setTeamMode] = useState(false);
+  const [teamMount, setTeamMount] = useState<HTMLDivElement | null>(null);
+  const [teamViewTarget, setTeamViewTarget] = useState<HTMLDivElement | null>(null);
   const tpmView = useTpmVisibility();
   const [tpmListOpen, setTpmListOpen] = useState(false);
   const tpmTriggerRef = useRef<HTMLButtonElement>(null);
@@ -1616,10 +1620,12 @@ function AppContent({
       onOpen={clean => openAsk(source, sourceState, clean)} replicaFor={replicaFor} transport={transport}
       observations={tracking.observations} navigation={viewNavigation} />;
   }
-  return <SessionAskSurfaceProvider><SessionDockProvider key={baseUrl} storageScope={baseUrl} enabled={!compactLayout && activeView === 'workbench'}><TpmViewScope.Provider value={tpmView.execute}><TrackViewScope.Provider value={userScoped ? attention.executeTrack : undefined}><ConversationConnectionScope.Provider value={connections}><VscodeTunnelScope service={vscodeTunnelClient} host={previewHost} polling={compactLayout ? contextOpen : desktopContextVisible}><PreviewScope client={previewClient} host={previewHost} polling={compactLayout ? contextOpen : desktopContextVisible}><RecoveryScope.Provider value={readingPositions}><main ref={shellRef} style={sidebar.style} className={`lab-shell${headerHidden ? ' lab-header-hidden' : ''}${!compactLayout && !desktopContextVisible ? ' lab-context-hidden' : ''}${state?.agent ? ' lab-has-agent' : ''}${supportingRailOpen ? ' lab-supporting-open' : ''}${inspectorOpen ? ' lab-inspector-open' : ''}`}>
+  return <SessionAskSurfaceProvider><SessionDockProvider key={baseUrl} storageScope={baseUrl} enabled={!compactLayout && activeView === 'workbench'}><TpmViewScope.Provider value={tpmView.execute}><TrackViewScope.Provider value={userScoped ? attention.executeTrack : undefined}><ConversationConnectionScope.Provider value={connections}><VscodeTunnelScope service={vscodeTunnelClient} host={previewHost} polling={compactLayout ? contextOpen : desktopContextVisible}><PreviewScope client={previewClient} host={previewHost} polling={compactLayout ? contextOpen : desktopContextVisible}><RecoveryScope.Provider value={readingPositions}><main ref={shellRef} style={sidebar.style} className={`lab-shell${teamMode ? ' lab-team-mode' : ''}${headerHidden ? ' lab-header-hidden' : ''}${!compactLayout && !desktopContextVisible ? ' lab-context-hidden' : ''}${state?.agent ? ' lab-has-agent' : ''}${supportingRailOpen ? ' lab-supporting-open' : ''}${inspectorOpen ? ' lab-inspector-open' : ''}`}>
     {scanOpen ? <SessionTransferDialog onOpen={openScannedSession} onClose={() => setScanOpen(false)} /> : null}
     {activated ? tracking.observers : null}
     {userScoped && attention.trackVisible ? <SessionTrackingMenu catchUp={catchUp} tracking={tracking} busy={transitioning} inert={supportingRailOpen} onOpen={item => void openTrackedSession(item)} /> : null}
+    <TeamWorkspace baseUrl={baseUrl} enabled={accessReady && !!directory} compact={compactLayout} hosts={remoteHosts} source={(visibleStackRoot ?? currentSession) ? {hostId:(visibleStackRoot ?? currentSession)!.hostId ?? 'local', providerId:(visibleStackRoot ?? currentSession)!.providerId,nativeSessionId:(visibleStackRoot ?? currentSession)!.nativeSessionId,title:(visibleStackRoot ?? currentSession)!.title} : undefined}
+      transport={transport} draftStore={messageDrafts} navigation={viewNavigation} mount={teamMount} onModeChange={setTeamMode} viewTarget={setTeamViewTarget} />
     <TpmMenu tpm={tpm} open={tpmListOpen} onOpenChange={setTpmListOpen} mainSessions={tpmMainSessions} main={visibleStackRoot ?? currentSession} visible={tpmView.visible} triggerRef={tpmTriggerRef} inert={supportingRailOpen} />
     <div className="lab-tpm-workspaces">{tpm.opened.map((key, index) => {
       const item = tpm.works.find(item => item.key === key);
@@ -1648,7 +1654,7 @@ function AppContent({
         checked={addressSession ? ask.isEnabled(addressSession, succession.ownerFor(viewKey(addressSession))) : false} disabled={!addressSession}
         onChange={() => { if (addressSession) ask.toggle(addressSession, succession.ownerFor(viewKey(addressSession))); }} /></label>
       {userScoped ? attention.controls : null}{tpmView.controls}
-    </>} target={!headerHidden ? headerViewTarget : compactLayout ? mobileViewTarget : desktopContextVisible ? sidebarViewTarget : activeView === 'trace' ? traceViewTarget : minimizedViewTarget ?? sessionViewTarget}
+    </>} target={!headerHidden ? headerViewTarget : compactLayout ? mobileViewTarget : desktopContextVisible ? sidebarViewTarget : activeView === 'trace' ? traceViewTarget : (teamMode ? teamViewTarget : minimizedViewTarget) ?? sessionViewTarget}
       triggerRef={viewTriggerRef} headerVisible={!headerHidden} sidebarVisible={contextVisible}
       inspectorVisible={inspectorOpen} compact={compactLayout} inert={supportingRailOpen}
       onSetAllVisible={setAllPanelsVisible} onToggleHeader={() => setHeaderHidden((value) => !value)} onToggleSidebar={toggleContext}
@@ -1803,6 +1809,8 @@ function AppContent({
         tabIndex={-1}
         hidden={activeView !== 'workbench'}
       >
+        <div ref={setTeamMount} className="lab-team-mount" />
+        <div className="lab-ordinary-workspace" hidden={teamMode}>
         {sessionNotice && !nativeTakeover && !(compactLayout && contextOpen) ? <SessionConnectionNotice notice={sessionNotice} /> : null}
         {succession.error && succession.error !== nativeTakeover?.message ? <p role="alert">{succession.error}{!nativeTakeover ? <button type="button" onClick={succession.retry}>{succession.result?.status === 'applied' ? 'Retry session' : 'Retry synchronization'}</button> : null}</p> : null}
         {promptMigrations.notice}
@@ -1881,6 +1889,7 @@ function AppContent({
           onFocus={() => focusSession(session)} onClose={() => closeSide(session)} onOpenSource={revealSession} onOpenFork={(fork) => void openFork(fork)} onFork={createFork} />)}
         <CollapsedConversations entries={sessionEntries} sessions={stackPath.slice(stackRange.end + 1)} offset={stackRange.end + 1} onExpand={revealSession} />
         </ConversationSplit></SessionDockRail>
+      </div>
       </section>
       <section
         id="lab-trace"

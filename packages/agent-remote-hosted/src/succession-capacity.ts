@@ -29,7 +29,7 @@ function recoveryHostBound(hostId: string, installationId: string): number {
   const provider = { providerId: widest(512), displayName: widest(512), promptEditing: true, sessionRename: true, daemonControl: true };
   // HostEnvironment.detectedAt accepts non-safe finite integers. JSON numbers need up to 24 bytes.
   return sum(bytes({ id: hostId, installationId, name: widest(512), environment, controller, providers: Array(64).fill(provider),
-    legacyDsh: false, pairingPurpose: 'host-only', credentialRotation: true, providerManagement: true, tpmManagement: true }) - 4, 24);
+    legacyDsh: false, pairingPurpose: 'host-only', credentialRotation: true, providerManagement: true, tpmManagement: true, teamManagement: true }) - 4, 24);
 }
 const identity = (kind: string, owner: string, key: string) => JSON.stringify([kind, owner, key]);
 const charge = (cost: Pick<SuccessionRecordCost, 'byteLength' | 'manifestBytes'>) => sum(cost.byteLength, cost.manifestBytes);

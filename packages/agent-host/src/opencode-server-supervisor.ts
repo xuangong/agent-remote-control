@@ -199,8 +199,9 @@ export async function serveOpenCodeServerSupervisor(directory: string, environme
     if (exited) throw new Error('OpenCode exited before its managed server became ready.');
     ready = true;
     await atomicWriteFile(join(directory, 'owner.json'), JSON.stringify({ ...status(), token }) + '\n');
-    await assertStartupAllowed();
-    if (exited) throw new Error('OpenCode exited before its managed server became ready.');
+    // Published readiness admits normal stop requests, including during the owner write.
+    const publishedRevision = await preferenceRevision(directory);
+    if (!stopping && publishedRevision !== expectedRevision) throw new Error('Managed OpenCode startup was superseded or disabled.');
     const result = await nativeExit;
     if (!stopping && (result.spawnError || result.code !== 0)) throw new Error('The managed OpenCode server exited unexpectedly.');
   } finally {

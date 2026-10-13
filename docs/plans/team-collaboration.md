@@ -22,6 +22,10 @@ Archive first closes dispatch admission and cancels messages not yet claimed. In
 
 A draggable Team button opens a list grouped by source session, including a collapsed archive section. New Team requires no prewritten requirements. Opening a Team closes the list and enters an inline Team workspace: source, Leader, members. Wide layouts scroll horizontally with adjustable pane widths; narrow layouts open the Leader directly with no horizontal multi-session layout; users can explicitly switch to a member. All panes reuse ordinary Session View behavior. Exit restores the regular workspace without stopping work. Team selection and bounded layout preferences survive refresh. Team controls remain available while a Team is open.
 
+Each source, Leader, or member pane owns its subagent views as one contiguous family. Opening a subagent inserts an ordinary Session View immediately to the right of its parent, before the next Team participant. Nested subagents extend the same family; selecting a different child replaces that parent's displayed descendant branch. Closing a subagent view closes only that visible branch and never stops native work. Clicking a pane changes focus without collapsing its neighbors. Each pane remains independently resizable.
+
+On narrow screens, a family displays its focused session with a back-to-parent control. Switching Team participants retains each family's focus, expanded path, and drafts. Expanded paths are stored per Team, participant, Host, Provider, and root session; refresh restores up to 24 descendants per family. Child attachment uses the existing parent-scoped directory API, with opening, failure, and retry displayed inside the child pane. The containing layout supplies navigation actions to the shared Session View; it does not navigate the hidden ordinary workspace or change Team membership.
+
 ## Implementation and acceptance
 
 1. Public Team schemas and bounded state; protocol validation tests.

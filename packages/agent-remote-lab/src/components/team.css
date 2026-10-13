@@ -36,3 +36,9 @@
 .lab-team-rename { flex: none; min-height: 36px; margin-right: 6px; font-size: 12px; }
 .lab-team-rename-form { padding: 4px 8px 10px; border-bottom: 0; }
 .lab-team-rename-form > div { display: flex; align-items: flex-end; gap: 6px; }
+
+.lab-team-family { display: flex; flex: none; min-width: 0; min-height: 0; height: 100%; border-right: 2px solid var(--obs-border); }
+.lab-team-family[hidden] { display: none; }
+.lab-team-family > .lab-team-pane:last-child { border-right: 0; }
+.lab-team-child-close { flex: none; min-width: 28px; min-height: 28px; padding: 2px; }
+.lab-team-workspace[data-compact] .lab-team-family { flex: 1; width: 100%; border: 0; }

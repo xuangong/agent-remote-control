@@ -7,7 +7,7 @@ import { CommunicationNavigationContext, type CommunicationNavigation } from '@o
 import type { ProjectedTimelineEntry } from '@orchardworks/agent-remote-protocol';
 import type { SessionEntry } from './session-tree.js';
 import { useSessionRelations } from './hooks/useSessionRelations.js';
-import { sessionViewNavigation, type SessionViewNavigation } from './session-view-navigation.js';
+import { sessionViewNavigation, type SessionViewNavigation, type SessionViewNavigationActions } from './session-view-navigation.js';
 import { remoteSessionState, type RemoteSessionState, sessionHandoffScope, SessionHandoffRejectedError, type SessionHandoffState } from '@orchardworks/agent-remote-web';
 import {SessionControlNotice, type TakeControlOptions} from './components/SessionControlNotice.js';
 import type {NativeSessionOwner} from '@orchardworks/agent-remote-protocol';
@@ -1253,12 +1253,12 @@ function AppContent({
     setActiveView(view);
   }
 
-  function viewNavigation(rawSource: OpenedSession, sourceState?: AgentReplicaState) {
-    const source = viewSession(rawSource);
+  function viewNavigation(rawSource: OpenedSession, sourceState?: AgentReplicaState, actions?: SessionViewNavigationActions) {
+    const source = actions ? rawSource : viewSession(rawSource);
     const available = directory && accessReady && sourceCurrent(source) && !transitioning && remoteHosts.find(host => host.id === source.hostId)?.online !== false;
     return sessionViewNavigation({ source, state: sourceState, entries: sessionEntries,
-      openSession: available ? (session, intent) => openSession(session, undefined, undefined, false, undefined, intent) : undefined,
-      openChildSession: available ? child => openChildSession(child, source, sourceState) : undefined,
+      openSession: actions?.openSession ?? (available ? (session, intent) => openSession(session, undefined, undefined, false, undefined, intent) : undefined),
+      openChildSession: actions?.openChildSession ?? (available ? child => openChildSession(child, source, sourceState) : undefined),
       communication: available ? letterNavigation(source, sourceState) : undefined,
       revealEntry: letterReveals[source.agentId],
     });

@@ -8,7 +8,15 @@ import { replicaState } from '../../src/test/fixtures';
 import '../../src/session-view-styles';
 import '../../src/tpm.css';
 const drafts = new DraftStore('team-fixture');
-const snapshot = (id: string): AgentSnapshot => ({ protocolVersion: '1.7.0', type: 'agent_snapshot', payload: { ...replicaState.agent!, id } });
+const children: Record<string, string[]> = {
+ source: ['source-child'], leader: ['leader-child', 'leader-other'], member: ['member-child'], 'leader-child': ['leader-grandchild'],
+};
+const snapshot = (id: string): AgentSnapshot => ({ protocolVersion: '1.7.0', type: 'agent_snapshot', payload: {
+ ...replicaState.agent!, id, runtimeInfo: { ...replicaState.agent!.runtimeInfo, sessionId: id,
+ childSessions: new URLSearchParams(location.search).has('children') ? (children[id] ?? []).map(nativeSessionId => ({
+ nativeSessionId, title: nativeSessionId, createdAt: '2026-10-13T00:00:00Z', status: 'idle', observation: 'live',
+ })) : [], },
+} });
 const timeline = (id: string): HistoryPage => ({ protocolVersion: '1.7.0', type: 'timeline_page', payload: {
   agentId: id, requestId: 'history', direction: 'tail', epoch: 'epoch', reset: false, staleCursor: false, gap: false,
   window: { minSeq: 1, maxSeq: 20, nextSeq: 21 }, startCursor: { epoch: 'epoch', seq: 1 }, endCursor: { epoch: 'epoch', seq: 20 },

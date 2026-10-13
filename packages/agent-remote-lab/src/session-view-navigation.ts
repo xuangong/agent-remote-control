@@ -13,7 +13,12 @@ export interface SessionViewNavigation {
   revealEntry?: TraceEntryRequest;
 }
 
-export type SessionViewNavigationFactory = (source: OpenedSession, state?: AgentReplicaState) => SessionViewNavigation;
+/** A containing layout owns where navigation is presented. */
+export interface SessionViewNavigationActions {
+  openSession(target: SessionEntry, sessionIntent?: 'history'): Promise<boolean>;
+  openChildSession(child: AgentChildSessionView): Promise<void>;
+}
+export type SessionViewNavigationFactory = (source: OpenedSession, state?: AgentReplicaState, actions?: SessionViewNavigationActions) => SessionViewNavigation;
 
 /** Native relationships belong to the displayed session, regardless of its container. */
 export function sessionViewNavigation({ source, state, entries, openSession, openChildSession, communication, revealEntry }: {

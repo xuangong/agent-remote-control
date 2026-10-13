@@ -1,16 +1,14 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { RemoteTeamClient, type RemoteAgentTransport } from '@orchardworks/agent-remote-web/headless';
-import { CommunicationNavigationContext } from '@orchardworks/agent-remote-web/react';
 import type { Team, TeamAction, TeamMember, TeamSource } from '@orchardworks/agent-remote-protocol';
 import { workspaceFetch } from '../workspace-access.js';
-import { SessionDirectoryClient, type OpenedSession } from '../directory-client.js';
-import { useConversationSession } from '../hooks/useConversationSession.js';
 import { useTrackingPosition } from '../hooks/useTrackingPosition.js';
 import { conversationSessionStorage } from '../conversation-storage.js';
 import type { DraftBinding } from '../draft-store.js';
 import type { SessionViewNavigationFactory } from '../session-view-navigation.js';
-import { LabWorkbench } from './LabWorkbench.js';
+import { TeamSessionFamily } from './TeamSessionFamily.js';
+import { sessionKey } from '../session-tree.js';
 import './team.css';
 
 interface Host { teamManagement?: true; id: string; name: string; online: boolean; providers?: Array<{providerId:string;displayName:string}> }
@@ -159,18 +157,14 @@ function TeamWorkspaceBody(props: Props & { team: Team; busy: boolean; error: st
     {team.messages.some(message => ['unknown', 'dispatching', 'rejected'].includes(message.status) || message.acceptance === 'queued') ? <details className="lab-team-recovery"><summary>Delivery status</summary>{team.messages.filter(message => ['unknown','dispatching','rejected'].includes(message.status) || message.acceptance === 'queued').map(message => <div key={message.id}><p>{message.status}: {message.text.slice(0,160)}</p><small>{message.error ?? 'Awaiting a native receipt. Do not repeat this message.'}</small>{message.status !== 'rejected' ? <><p>Inspect the receiving session before resolving.</p><button disabled={busy} onClick={() => void onChange({teamId:team.id,action:'resolve_message',messageId:message.id,outcome:'accepted'})}>Confirm received</button><button disabled={busy} onClick={() => void onChange({teamId:team.id,action:'resolve_message',messageId:message.id,outcome:'rejected'})}>Confirm not executed</button></> : null}</div>)}</details> : null}
     {compact ? <label className="lab-team-select">Session<select value={activePane} onChange={event => setCurrent(event.target.value)}>{panes.map(pane => <option key={pane.id} value={pane.id}>{pane.label}</option>)}</select></label> : null}
     <div className="lab-team-rail">{panes.map(pane => {
-      const host = hosts.find(host => host.id === pane.target.hostId), width = typeof widths[pane.id] === 'number' ? Math.max(320, Math.min(1400,widths[pane.id]!)) : 480;
-      return <section className="lab-team-pane" key={pane.id} aria-label={pane.label} hidden={compact && activePane !== pane.id} style={compact ? undefined : {width}}>
-        <header className="lab-team-pane-heading"><strong>{pane.label}</strong><small>{host?.name ?? pane.target.hostId}{host?.online === false ? ' · Offline' : ''}</small></header>
-        {pane.member?.responsibility ? <details className="lab-team-responsibility"><summary>Responsibility</summary>{pane.member.responsibility}{pane.member.cwd ? <p>{pane.member.cwd}</p> : null}{pane.member.summary ? <p>{pane.member.summary}</p> : null}</details> : null}
-        {pane.member && pane.member.creation !== 'ready' ? <div className="lab-control-note"><p>{pane.member.error ?? 'Session creation is pending.'}</p><button disabled={busy} onClick={() => void onChange({teamId:team.id,action:'retry_creation',memberId:pane.id})}>Check creation</button><button disabled={busy} onClick={() => void onChange({teamId:team.id,action:'abandon_creation',memberId:pane.id})}>Abandon slot</button></div>
-          : (!compact || activePane === pane.id) ? <TeamSession {...props} target={pane.target} readOnly={pane.id !== 'source' && team.status === 'archived'} /> : null}
-        {!compact ? <div className="lab-session-dock-resize" role="separator" aria-label={`Resize ${pane.label}`} aria-orientation="vertical" aria-valuenow={width} aria-valuemin={320} aria-valuemax={1400} tabIndex={0}
-          onPointerDown={event => { event.currentTarget.setPointerCapture(event.pointerId); event.currentTarget.dataset.origin = `${event.clientX}:${width}`; }}
-          onPointerMove={event => { if (!event.currentTarget.hasPointerCapture(event.pointerId)) return; const [start, size] = event.currentTarget.dataset.origin!.split(':').map(Number); resize(pane.id, size! + event.clientX-start!); }}
-          onPointerUp={event => {event.currentTarget.releasePointerCapture(event.pointerId); saveWidths();}}
-          onKeyDown={event => {if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') { event.preventDefault(); resize(pane.id,width+(event.key === 'ArrowLeft' ? -32 : 32)); }}} onBlur={saveWidths} /> : null}
-      </section>;
+      const host = hosts.find(host => host.id === pane.target.hostId);
+      return <TeamSessionFamily key={`${pane.id}:${sessionKey(pane.target)}`} id={pane.id} storageScope={`${props.baseUrl}:${team.id}`} baseUrl={props.baseUrl}
+        target={pane.target} label={pane.label} hostLabel={host?.name ?? pane.target.hostId} offline={host?.online === false}
+        compact={compact} active={!compact || activePane === pane.id} readOnly={pane.id !== 'source' && team.status === 'archived'}
+        transport={props.transport} draftStore={props.draftStore} navigation={props.navigation} widths={widths} resize={resize} saveWidths={saveWidths}
+        ready={!pane.member || pane.member.creation === 'ready'}
+        header={pane.member?.responsibility ? <details className="lab-team-responsibility"><summary>Responsibility</summary>{pane.member.responsibility}{pane.member.cwd ? <p>{pane.member.cwd}</p> : null}{pane.member.summary ? <p>{pane.member.summary}</p> : null}</details> : null}
+        unavailable={pane.member ? <div className="lab-control-note"><p>{pane.member.error ?? 'Session creation is pending.'}</p><button disabled={busy} onClick={() => void onChange({teamId:team.id,action:'retry_creation',memberId:pane.id})}>Check creation</button><button disabled={busy} onClick={() => void onChange({teamId:team.id,action:'abandon_creation',memberId:pane.id})}>Abandon slot</button></div> : null} />;
     })}</div>
   </section>;
 }
@@ -188,26 +182,4 @@ function AddTeamMember({ teamId, hosts, busy, onChange, onClose }: {teamId:strin
     <label>Responsibility<textarea disabled={busy} maxLength={2048} value={responsibility} placeholder="Can be discussed with the Leader after joining" onChange={event => setResponsibility(event.target.value)} /></label>
     <div><button type="button" onClick={onClose}>Cancel</button><button disabled={busy || !host?.online || !provider}>Add member</button></div>
   </form>;
-}
-function TeamSession(props: Props & { target:TeamSource;readOnly:boolean }) {
-  const {target,baseUrl} = props;
-  const [session,setSession] = useState<OpenedSession>(), [error,setError] = useState(''), [attempt,setAttempt] = useState(0);
-  useEffect(() => {
-    let stopped=false; const abort=new AbortController(); setError(''); setSession(undefined);
-    const client=new SessionDirectoryClient(baseUrl,undefined,target.hostId);
-    void client.attach(target.providerId,target.nativeSessionId,abort.signal).then(value => { if(!stopped)setSession({...target,agentId:value.agentId}); }).catch(error => {if(!stopped)setError(errorMessage(error));});
-    return () => {stopped=true;abort.abort();};
-  },[baseUrl,target.hostId,target.providerId,target.nativeSessionId,attempt]);
-  if(!session)return <div className="lab-team-opening">{error ? <p role="alert">{error}<button onClick={()=>setAttempt(value=>value+1)}>Retry</button></p> : <p role="status">Opening session…</p>}</div>;
-  return <TeamChat {...props} session={session} />;
-}
-function TeamChat({ session, transport, navigation, draftStore, readOnly }: Props & {session:OpenedSession;readOnly:boolean}) {
-  const {state,sessionState,status,actions,questions,setQuestions}=useConversationSession(session,transport);
-  const {communication,...viewNavigation}=navigation?.(session,state) ?? {};
-  const key=JSON.stringify([session.hostId,session.providerId,session.nativeSessionId]);
-  return <CommunicationNavigationContext.Provider value={communication}><LabWorkbench {...viewNavigation} readOnly={readOnly} headingMode="toolbar" defaultDisplayMode="content"
-    state={state} sessionState={sessionState} sessionStatus={status} attachingAgentId={session.agentId} actions={actions}
-    draftSessionKey={key} draftBinding={{store:draftStore,key:`team:${key}`}} questionDrafts={questions}
-    onQuestionDraftChange={(id,value)=>setQuestions(current=>({...current,[id]:value}))}
-    conversationPath={<strong className="agent-session-title">{session.title}</strong>} /></CommunicationNavigationContext.Provider>;
 }

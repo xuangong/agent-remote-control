@@ -1237,6 +1237,7 @@ function AppContent({
 
   const navigationIntent = succession.navigationIntent;
   const navigationSession = succession.active ? (succession.binding ? addressSession : succession.desired?.roleKey ? succession.selected : undefined) : addressSession;
+  const shareSession = navigationSession ?? (succession.active ? succession.selected : undefined);
   const conversationHistory = useConversationHistory(succession.discovering || navigationIntent.sessionIntent === 'history' && !succession.binding || compositionProtected && !succession.selected ? undefined : navigationSession, sessionEntries, (session, intent, keepOriginal, layout) => {
     const view = intent === 'history' ? undefined : resolveConversationLayout(succession.document, layout);
     return openSession(view?.primary ?? session, undefined, undefined, false,
@@ -1874,7 +1875,7 @@ function AppContent({
             localViews={succession.localViews()} activeSlot={succession.desired?.slot.id} onOpenView={view => void openLocalView(view.slotId)} /> : null}<nav className="lab-conversation-history" aria-label="Conversation history">
             <button type="button" aria-label="Back to previous conversation" title="Back" disabled={transitioning || !conversationHistory.canBack} onClick={conversationHistory.back}>←</button>
             <button type="button" aria-label="Forward to next conversation" title="Forward" disabled={transitioning || !conversationHistory.canForward} onClick={conversationHistory.forward}>→</button>
-          </nav>{navigationSession ? <SessionLink session={navigationSession} sessionIntent={navigationIntent.sessionIntent} keepOriginal={navigationIntent.keepOriginal} /> : null}</SessionHeadingActions></>}
+          </nav>{shareSession ? <SessionLink session={shareSession} sessionIntent={navigationIntent.sessionIntent} keepOriginal={navigationIntent.keepOriginal} /> : null}</SessionHeadingActions></>}
           conversationPath={ancestors.length > 0 ? <nav className="lab-conversation-path" aria-label="Conversation path">
             {ancestors.map((ancestor) => <span key={ancestor.agentId}>
               <button type="button" className="agent-session-title" data-session-status={sessionEntries.find(entry => entry.agentId === ancestor.agentId)?.status} disabled={transitioning} onClick={() => { void openSession(ancestor); }}>{ancestor.title}</button>

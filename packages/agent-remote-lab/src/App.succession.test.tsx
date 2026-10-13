@@ -229,6 +229,46 @@ async function editVisiblePrompt(view: HTMLElement, text: string) {
   });
 }
 
+it.each(['recovering', 'attach-failed', 'identity-mismatch'] as const)('keeps sharing the selected session while %s', async phase => {
+  const modal = Object.getOwnPropertyDescriptor(HTMLDialogElement.prototype, 'showModal');
+  Object.defineProperty(HTMLDialogElement.prototype, 'showModal', { configurable: true, value(this: HTMLDialogElement) { this.setAttribute('open', ''); } });
+  cleanups.push(() => { if (modal) Object.defineProperty(HTMLDialogElement.prototype, 'showModal', modal); else Reflect.deleteProperty(HTMLDialogElement.prototype, 'showModal'); });
+  const f = await failureFixture(false, 'wrong-native', false, '', {
+    chain: [], selected: 'B', providerId: 'codex', holdReplayInitially: phase === 'recovering',
+    attachmentFailure: phase === 'attach-failed' ? () => ({ status: 403, payload: { error: 'Session cannot be opened.' } }) : undefined,
+  });
+  if (phase !== 'recovering') await settleApp(() => expect(f.view.textContent).toContain(
+    phase === 'attach-failed' ? 'Session cannot be opened.' : 'The native session identity could not be confirmed.',
+  ));
+  const share = f.view.querySelector<HTMLButtonElement>('[aria-label="Share session link"]');
+  expect(share).not.toBeNull();
+  expect(share!.disabled).toBe(false);
+  await act(async () => share!.click());
+  const dialog = document.querySelector<HTMLDialogElement>('dialog[aria-label="Share session"]')!;
+  expect(dialog).not.toBeNull();
+  const url = new URL(dialog.querySelector<HTMLInputElement>('#session-transfer-url')!.value);
+  expect(url.searchParams.get('host')).toBe('host');
+  expect(url.searchParams.get('provider')).toBe('codex');
+  expect(url.searchParams.get('session')).toBe('B');
+  expect(url.searchParams.has('agent')).toBe(false);
+  expect(dialog.textContent).toContain('Resume locally');
+});
+
+it('retains a local resume command for a session that cannot be opened', async () => {
+  const id = '01a0be55-d755-7d72-8463-5a04a193e20e';
+  const modal = Object.getOwnPropertyDescriptor(HTMLDialogElement.prototype, 'showModal');
+  Object.defineProperty(HTMLDialogElement.prototype, 'showModal', { configurable: true, value() {} });
+  cleanups.push(() => { if (modal) Object.defineProperty(HTMLDialogElement.prototype, 'showModal', modal); else Reflect.deleteProperty(HTMLDialogElement.prototype, 'showModal'); });
+  const f = await failureFixture(false, undefined, false, '', {
+    chain: [], selected: id, providerId: 'codex',
+    attachmentFailure: () => ({ status: 403, payload: { error: 'Session cannot be opened.' } }),
+  });
+  await settleApp(() => expect(f.view.textContent).toContain('Session cannot be opened.'));
+  await act(async () => f.view.querySelector<HTMLButtonElement>('[aria-label="Share session link"]')!.click());
+  const command = document.querySelector<HTMLInputElement>('.lab-native-session-command input');
+  expect(command?.value).toBe(`agent-remote-controller codex resume ${id}`);
+});
+
 it.each(['A', 'B'])('keeps native takeover visible from failed initial binding %s until explicit takeover is confirmed', async nativeSessionId => {
   const generation = 'native-owner-generation';
   const f = await failureFixture(false, nativeSessionId, false, '', { chain: nativeSessionId === 'A' ? [] : [committed()], attachmentFailure(body) {

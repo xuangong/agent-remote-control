@@ -1,4 +1,6 @@
 import { createHash, createHmac, randomUUID } from 'node:crypto';
+import { createServer } from 'node:http';
+import type { AddressInfo } from 'node:net';
 import { afterEach, expect, it } from 'vitest';
 import { createHostedRelay } from './gateway.js';
 import { emptyRelayState, migrateLegacyNodeState, type HostedRelayState, type RelayStateStore } from './state.js';
@@ -16,6 +18,40 @@ const scheduler: RelayScheduler = { schedule() {}, cancel() {} };
 function setup(storage?: RelayStateStore, customScheduler = scheduler) {
   const relay = createHostedRelay({ ...auth, storage, scheduler: customScheduler }); closers.push(() => relay.close()); return relay;
 }
+
+it('keeps Gateway session-capacity failures as JSON after a signed ticket exchange', async () => {
+  const sessionExpiresAt = Date.now() + 3_600_000;
+  const server = createServer(async (request, response) => {
+    let body = ''; for await (const chunk of request) body += chunk;
+    if (request.url !== '/api/agent-remote/renew' || request.method !== 'POST' || body !== JSON.stringify({ continuation: 'capacity-continuation' })) { response.writeHead(400); response.end(); return; }
+    response.setHeader('content-type', 'application/json');
+    response.end(JSON.stringify({ active: true, subject: 'alice', expiresAt: sessionExpiresAt, validUntil: Date.now() + 120_000 }));
+  });
+  await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
+  closers.push(async () => { server.closeAllConnections(); await new Promise<void>(resolve => server.close(() => resolve())); });
+  const options = { ...auth, issuer: `http://127.0.0.1:${(server.address() as AddressInfo).port}` };
+  const initial = emptyRelayState(options);
+  initial.sessions = Array.from({ length: 1024 }, (_, index) => ({
+    hash: createHash('sha256').update(`gateway-capacity-${index}`).digest('hex'), sessionExpiresAt,
+    grant: { subject: 'alice', namespace: createHash('sha256').update(JSON.stringify([options.issuer, 'alice'])).digest('hex'),
+      ticket: 'previous-ticket', nonce: 'n'.repeat(43), continuation: 'capacity-continuation', expiresAt: Date.now() + 120_000, sessionExpiresAt },
+  }));
+  const relay = createHostedRelay({ ...options, scheduler, storage: { initial, async commit() {} } });
+  closers.push(() => relay.close());
+  const login = (await relay.fetch(new Request(auth.origin + '/auth/login?host=studio')))!;
+  const nonce = new URL(login.headers.get('location')!).searchParams.get('challenge');
+  const iat = Math.floor(Date.now() / 1000);
+  const input = [{ alg: 'HS256', typ: 'arc-relay+jwt' }, { iss: options.issuer, aud: auth.origin, sub: 'alice',
+    iat, exp: iat + 900, jti: 'capacity-exchange', nonce, continuation: 'capacity-continuation', sessionExpiresAt }]
+    .map(value => Buffer.from(JSON.stringify(value)).toString('base64url')).join('.');
+  const ticket = input + '.' + createHmac('sha256', auth.secret).update(input).digest('base64url');
+  const result = (await relay.fetch(new Request(auth.origin + '/auth/session', { method: 'POST',
+    headers: { origin: auth.origin, 'content-type': 'application/json', cookie: login.headers.getSetCookie()[0]!.split(';')[0]! }, body: JSON.stringify({ ticket }) })))!;
+  expect(result.status).toBe(429);
+  expect(result.headers.get('content-type')).toBe('application/json');
+  expect(await result.json()).toEqual({ error: 'Sign-in access could not be renewed.' });
+  expect(result.headers.getSetCookie()).toEqual([]);
+}, 10000);
 
 it.each([undefined, auth.origin])('routes same-origin previews without intercepting control requests (preview origin: %s)', async previewOrigin => {
   const relay = createHostedRelay({ ...auth, previewOrigin, scheduler });

@@ -11,7 +11,14 @@ import { emptyRelayState, type HostedRelayState } from './state.js';
 const origin = 'https://relay.example';
 const secret = 'local-google-relay-secret-01234567890123456789';
 const closers: Array<() => Promise<void>> = [];
-afterEach(async () => { vi.restoreAllMocks(); for (const close of closers.splice(0).reverse()) await close(); });
+afterEach(async () => { for (const close of closers.splice(0).reverse()) await close(); vi.useRealTimers(); vi.restoreAllMocks(); });
+function relaySocket(socket: WebSocket): RelaySocket {
+  return { get readyState() { return socket.readyState; }, get bufferedAmount() { return socket.bufferedAmount; },
+    send: data => socket.send(data), close: (code, reason) => socket.close(code, reason),
+    onMessage(listener) { const receive = (data: Buffer, binary: boolean) => { void listener(data.toString(), binary); }; socket.on('message', receive); return () => { socket.off('message', receive); }; },
+    onClose(listener) { const close = (code: number) => listener({ code }); socket.on('close', close); return () => { socket.off('close', close); }; },
+    onError(listener) { socket.on('error', listener); return () => { socket.off('error', listener); }; } };
+}
 async function fixture(durable = true) {
   const keys = await generateKeyPair('RS256');
   const wrongKeys = await generateKeyPair('RS256');
@@ -196,19 +203,53 @@ it('rejects a delayed real Host WebSocket acceptance after its prepared account 
   const server = new WebSocketServer({ port: 0, host: '127.0.0.1' });
   await new Promise<void>(resolve => server.once('listening', resolve));
   closers.push(async () => { for (const client of server.clients) client.terminate(); await new Promise<void>(resolve => server.close(() => resolve())); });
-  server.on('connection', socket => {
-    const transport: RelaySocket = { get readyState() { return socket.readyState; }, get bufferedAmount() { return socket.bufferedAmount; },
-      send: data => socket.send(data), close: (code, reason) => socket.close(code, reason),
-      onMessage(listener) { const receive = (data: Buffer, binary: boolean) => { void listener(data.toString(), binary); }; socket.on('message', receive); return () => { socket.off('message', receive); }; },
-      onClose(listener) { const close = (code: number) => listener({ code }); socket.on('close', close); return () => { socket.off('close', close); }; },
-      onError(listener) { socket.on('error', listener); return () => { socket.off('error', listener); }; } };
-    prepared.accept(transport);
-  });
+  server.on('connection', socket => prepared.accept(relaySocket(socket)));
   clock += 180_000;
   const socket = new WebSocket(`ws://127.0.0.1:${(server.address() as AddressInfo).port}`);
   closers.push(async () => { socket.terminate(); });
   let closeCode: number | undefined; socket.on('close', code => { closeCode = code; });
   await expect.poll(() => closeCode, { timeout: 1500 }).toBe(1013);
+}, 10000);
+
+it('closes an established Google Host socket at its account lease deadline when local renewal is not scheduled', async () => {
+  let clock = Date.now(); vi.spyOn(Date, 'now').mockImplementation(() => clock);
+  const f = await fixture(false); const { cookie } = await f.signIn();
+  const status = await (await f.relay.fetch(f.request('/auth/status', cookie)))!.json();
+  const pairing = await (await f.relay.fetch(f.request(status.basePath + 'v1/remote/pairings', cookie, { purpose: 'host-only' })))!.json();
+  const server = createServer(); const sockets = new WebSocketServer({ noServer: true });
+  server.on('upgrade', async (request, socket, head) => {
+    const prepared = await f.relay.prepareUpgrade(new Request(origin + request.url, { headers: { authorization: request.headers.authorization! } }));
+    if (!prepared || prepared instanceof Response) { socket.destroy(); return; }
+    sockets.handleUpgrade(request, socket, head, client => prepared.accept(relaySocket(client)));
+  });
+  await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
+  closers.push(async () => { for (const client of sockets.clients) client.terminate(); await new Promise<void>(resolve => sockets.close(() => resolve())); await new Promise<void>(resolve => server.close(() => resolve())); });
+  vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+  const socket = new WebSocket(`ws://127.0.0.1:${(server.address() as AddressInfo).port}/ws/remote-host`, { headers: { authorization: `Bearer ${pairing.key}` } });
+  closers.push(async () => { socket.terminate(); });
+  const registered = new Promise<void>(resolve => socket.on('message', data => {
+    const message = JSON.parse(data.toString());
+    if (message.type === 'credential_issued') socket.send(JSON.stringify({ uplinkVersion: 2, type: 'credential_saved' }));
+    if (message.type === 'heartbeat') socket.send(JSON.stringify({ uplinkVersion: 2, type: 'heartbeat_ack', nonce: message.nonce }));
+    if (message.type === 'rpc_request') socket.send(JSON.stringify({ uplinkVersion: 2, type: 'rpc_response', requestId: message.requestId, status: 404, body: '{}' }));
+    if (message.type === 'registered') resolve();
+  }));
+  const closed = new Promise<{ code: number; reason: string; at: number }>(resolve => socket.once('close', (code, reason) => resolve({ code, reason: reason.toString(), at: Date.now() })));
+  await new Promise<void>((resolve, reject) => { socket.once('open', resolve); socket.once('error', reject); });
+  socket.send(JSON.stringify({ uplinkVersion: 2, type: 'register', installationId: 'google-lease-fixture', name: 'Google lease fixture', providers: [], credentialRotation: true }));
+  await registered;
+  expect(socket.readyState).toBe(WebSocket.OPEN);
+  expect(status.expiresAt).toBeGreaterThan(Date.now());
+  // The fixture's no-op Relay scheduler withholds local account renewal. Broker
+  // expiry timers and the real transport remain active, including heartbeat ACKs.
+  while (Date.now() < status.expiresAt - 1) {
+    const elapsed = Math.min(15_000, status.expiresAt - 1 - clock); clock += elapsed;
+    await vi.advanceTimersByTimeAsync(elapsed);
+    await new Promise<void>(resolve => { socket.once('pong', () => resolve()); socket.ping(); });
+  }
+  expect(socket.readyState).toBe(WebSocket.OPEN);
+  clock += 1; await vi.advanceTimersByTimeAsync(1);
+  expect(await closed).toEqual({ code: 1013, reason: 'Credential expired', at: status.expiresAt });
 }, 10000);
 
 
@@ -227,3 +268,26 @@ it('renders a private readable callback failure and preserves only the validated
   const invalid = await f.relay.fetch(f.request('/auth/callback?error_description=%3Cscript%3Eevil%3C/script%3E'));
   expect(await invalid!.text()).not.toContain('evil');
 });
+
+it('renders a safe retry with the saved target when a signed Google callback reaches session capacity', async () => {
+  const f = await fixture(); await f.signIn();
+  const snapshot = f.saved();
+  snapshot.sessions = Array.from({ length: 1024 }, (_, index) => ({ ...structuredClone(snapshot.sessions[0]!),
+    hash: createHash('sha256').update(`capacity-session-${index}`).digest('hex'), id: `capacity-session-${index}` }));
+  await f.relay.close(); const restarted = f.start(snapshot);
+  const login = await f.begin(restarted, undefined, '/auth/login?host=studio&provider=codex&session=one');
+  const response = await f.finish(login, restarted);
+  expect(response.status).toBe(429);
+  expect(response.headers.get('content-type')).toBe('text/html; charset=utf-8');
+  expect(response.headers.get('cache-control')).toBe('no-store');
+  expect(response.headers.get('referrer-policy')).toBe('no-referrer');
+  expect(response.headers.get('content-security-policy')).toContain("default-src 'none'");
+  expect(response.headers.getSetCookie()).toEqual([]);
+  const html = await response.text();
+  expect(html).toContain('account capacity');
+  expect(html).toContain('href="/auth/login?host=studio&amp;provider=codex&amp;session=one">Sign in again');
+  expect(html).toContain('href="/">Back to Agent Remote');
+  for (const value of [login.callback.searchParams.get('code')!, login.callback.searchParams.get('state')!, '/auth/session', '<script']) expect(html).not.toContain(value);
+  expect(f.saved().sessions).toHaveLength(1024);
+  expect(f.saved().loginChallenges).toEqual([]);
+}, 10000);

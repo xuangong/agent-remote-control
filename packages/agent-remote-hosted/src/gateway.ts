@@ -344,7 +344,8 @@ export function createHostedRelay(options: HostedRelayOptions) {
   }
   async function completeSignIn(grant: HostedGrant, request: Request, pending: { returnPath?: string; hostId?: string; google?: { browserId?: string } }, redirect: boolean, owned: Tenant): Promise<Response> {
     const exchange = await sessions.exchange(grant, request, pending.google?.browserId);
-    if (exchange.status !== 'active') return json(exchange.status === 'unavailable' ? 503 : exchange.status === 'capacity' ? 429 : 401, { error: 'Sign-in access could not be renewed.' });
+    if (exchange.status !== 'active') return redirect ? authenticationFailure(auth.origin, exchange.status, pending.returnPath)
+      : json(exchange.status === 'unavailable' ? 503 : exchange.status === 'capacity' ? 429 : 401, { error: 'Sign-in access could not be renewed.' });
     if (authentication.persistent(grant)) {
       owned.authorityUntil = exchange.grant.expiresAt; owned.authorityDenied = false;
       owned.authorityRefreshAt = Date.now() + Math.max(1, Math.floor(Math.min(60_000, (owned.authorityUntil - Date.now()) / 2)));

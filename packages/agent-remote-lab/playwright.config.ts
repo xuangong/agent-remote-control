@@ -29,6 +29,7 @@ export default defineConfig({
   projects: [
     { name: 'chromium-desktop', use: { ...devices['Desktop Chrome'] } },
     { name: 'chromium-mobile', use: { ...devices['Pixel 7'] } },
+    { name: 'webkit-conversation', testMatch: ['simple-conversation.spec.ts', 'tracked-team.spec.ts'], use: { ...devices['Desktop Safari'] } },
     { name: 'webkit-mobile-sidebar', testMatch: ['mobile-sidebar.spec.ts', 'provider-layout.spec.ts'], use: { ...devices['iPhone 13'], browserName: 'webkit' } },
     { name: 'webkit-mobile-viewport', testMatch: ['mobile-viewport.spec.ts', 'layout-diagnostics.spec.ts', 'standalone-layout.spec.ts'], use: { ...devices['iPhone 13'], browserName: 'webkit' } },
     { name: 'webkit-ask-desktop', testMatch: ['session-view-binding.spec.ts', 'team.spec.ts', 'workspace-layout.spec.ts', 'tpm-dock.spec.ts', 'session-title-rename.spec.ts', 'ask-dock.spec.ts', 'ask-composer.spec.ts', 'ask-resize.spec.ts', 'ask-timeline-layout.spec.ts', 'session-view-responsive.spec.ts', 'composer-overflow.spec.ts', 'ask-persistence.spec.ts', 'session-composition-persistence.spec.ts', 'session-view-ownership.spec.ts'], use: { ...devices['Desktop Safari'] } },

@@ -1,4 +1,10 @@
-import { expect, test } from '@playwright/test';
+import { expect, test, type Page } from '@playwright/test';
+
+async function openDisplayOptions(page: Page) {
+  const expand = page.getByRole('button', { name: 'Expand session actions', exact: true });
+  if (await expand.isVisible()) await expand.click();
+  await page.getByRole('button', { name: 'Session view options', exact: true }).click();
+}
 
 for (const width of [320, 390, 844, 1440]) {
   test(`shows previews and remembers simple mode at ${width}px`, async ({ page }, testInfo) => {
@@ -27,13 +33,13 @@ for (const width of [320, 390, 844, 1440]) {
     await page.getByTestId('timeline').dispatchEvent('wheel', { deltaY: -100 });
     await page.locator('.agent-reasoning').scrollIntoViewIfNeeded();
     await page.screenshot({ path: testInfo.outputPath(`previews-${width}.png`) });
-    await page.getByRole('button', { name: 'Session view options', exact: true }).click();
+    await openDisplayOptions(page);
     await page.getByRole('radio', { name: 'Simple conversation', exact: true }).check();
     await expect(page.locator('.agent-tool-preview')).toHaveCount(0);
     // App replaces the fixture URL with the session URL; revisit the fixture to remount it.
     await page.goto('/e2e/fixtures/view-overflow.html?view=previews');
     await expect(page.locator('.agent-tool-preview')).toHaveCount(0);
-    await page.getByRole('button', { name: 'Session view options', exact: true }).click();
+    await openDisplayOptions(page);
     await page.getByRole('radio', { name: 'Preview', exact: true }).check();
     await page.getByRole('button', { name: 'Session view options', exact: true }).click();
     await expect(page.locator('.agent-tool-preview')).toHaveCount(2);

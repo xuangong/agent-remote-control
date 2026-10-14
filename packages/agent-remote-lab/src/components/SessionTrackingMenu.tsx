@@ -1,10 +1,11 @@
 import { useId, useState } from 'react';
+import type { Team } from '@orchardworks/agent-remote-protocol';
 import { useTrackedSessionDrag } from '../hooks/useTrackedSessionDrag.js';
 import { SessionCatchUpRing } from './SessionCatchUpRing.js';
 import type { SessionCatchUp } from '../hooks/useSessionCatchUp.js';
 import type { SessionTracking } from '../hooks/useSessionTracking.js';
 import type { SessionStar } from '../session-stars-client.js';
-import { sessionKey } from '../session-tree.js';
+import { sessionKey, type SessionEntry } from '../session-tree.js';
 import { observationLabel } from '../tracking-state.js';
 import { SessionPopover } from './SessionPopover.js';
 import { useTrackingPosition } from '../hooks/useTrackingPosition.js';
@@ -18,9 +19,13 @@ const activityGroups = [
   { status: 'unknown', label: 'Status unavailable', activities: ['unknown'] },
 ];
 
-export function SessionTrackingMenu({ tracking, catchUp, busy, inert, onOpen }: { catchUp?: SessionCatchUp; tracking: SessionTracking; busy: boolean; inert: boolean; onOpen(session: SessionStar): void }) {
+export function SessionTrackingMenu({ tracking, catchUp, teams = [], knownSessions = [], busy, inert, onOpen }: { catchUp?: SessionCatchUp; tracking: SessionTracking; teams?: readonly Team[]; knownSessions?: readonly SessionEntry[]; busy: boolean; inert: boolean; onOpen(session: SessionStar): void }) {
   const { root, style, handlers } = useTrackingPosition();
   const sessions = tracking.backgroundSessions;
+  const titles = new Map([...tracking.sessions, ...knownSessions].map(session => [sessionKey(session), session.title]));
+  const teamSources = new Map(teams.flatMap(team => team.members
+    .filter(member => member.creation !== 'abandoned' && member.nativeSessionId)
+    .map(member => [sessionKey({ ...member, nativeSessionId: member.nativeSessionId! }), titles.get(sessionKey(team.source)) ?? team.source.title] as const)));
   const hintId = useId();
   const [announcement, setAnnouncement] = useState('');
   const reorder = (key: string, target: string, placement: 'before' | 'after') => {
@@ -46,10 +51,10 @@ export function SessionTrackingMenu({ tracking, catchUp, busy, inert, onOpen }: 
         <span id={hintId} className="agent-visually-hidden">Open a session with Enter. Drag a row to reorder; on touch screens use its grip. Alt plus Up or Down also changes its position.</span>
         {!sessions.length ? <p className="lab-control-note">{tracking.sessions.length ? 'The current session shows its status in the conversation.' : 'Choose Track in Favorites to watch a session here.'}</p> : null}
         <ul ref={ordering.list} className="lab-favorite-list lab-tracked-list">{sessions.map((session, index) => {
-          const key = sessionKey(session), value = tracking.observations[key];
+          const key = sessionKey(session), value = tracking.observations[key], mainTitle = teamSources.get(key);
           return <li key={key} data-tracked-key={key} data-moving={ordering.drag?.key === key}
             data-drop={ordering.drag?.target?.key === key ? ordering.drag.target.placement : undefined}><div className="lab-tracked-row">
-            <button type="button" className="lab-session-row" disabled={busy} title={session.title} aria-describedby={hintId} aria-keyshortcuts="Alt+ArrowUp Alt+ArrowDown"
+            <button type="button" className="lab-session-row" disabled={busy} title={mainTitle ? `${session.title} ｜ ${mainTitle}` : session.title} aria-describedby={hintId} aria-keyshortcuts="Alt+ArrowUp Alt+ArrowDown"
               onPointerDown={event => { if (sessions.length > 1) ordering.start(event, key); }}
               onClick={event => { if (event.detail > 0 && ordering.consumeClick()) return; close(); onOpen(session); }}
               onKeyDown={event => {
@@ -58,7 +63,7 @@ export function SessionTrackingMenu({ tracking, catchUp, busy, inert, onOpen }: 
                 const target = sessions[index + (event.key === 'ArrowUp' ? -1 : 1)];
                 if (target) reorder(key, sessionKey(target), event.key === 'ArrowUp' ? 'before' : 'after');
               }}>
-              <span className="lab-tracked-description"><strong className="agent-session-title" data-session-status={value?.activity ?? 'unknown'}>{session.title}</strong><small className="agent-session-title" data-session-status={value?.activity}>{observationLabel(value)} · {session.providerId}</small></span>
+              <span className="lab-tracked-description"><strong className="agent-session-title" data-session-status={value?.activity ?? 'unknown'}>{session.title}</strong>{mainTitle ? <small className="lab-tracked-main" title={`Main session: ${mainTitle}`}>Main: {mainTitle}</small> : null}<small className="agent-session-title" data-session-status={value?.activity}>{observationLabel(value)} · {session.providerId}</small></span>
               {value?.changed ? <span className="lab-tracked-change" data-attention={value.attention} aria-label={`New content in ${session.title}`}><span aria-hidden="true" />New</span> : null}
               {sessions.length > 1 ? <span className="lab-tracked-grip" aria-hidden="true" title="Drag to reorder"><svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><circle cx="5" cy="3" r="1.2" /><circle cx="11" cy="3" r="1.2" /><circle cx="5" cy="8" r="1.2" /><circle cx="11" cy="8" r="1.2" /><circle cx="5" cy="13" r="1.2" /><circle cx="11" cy="13" r="1.2" /></svg></span> : null}
             </button>

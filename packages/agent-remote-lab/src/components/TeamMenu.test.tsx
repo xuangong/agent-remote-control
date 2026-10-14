@@ -11,12 +11,37 @@ vi.mock('../directory-client.js',()=>({SessionDirectoryClient:class{async attach
 vi.mock('../hooks/useConversationSession.js',()=>({useConversationSession:()=>({state:undefined,sessionState:undefined,status:'connected',actions:{},questions:{},setQuestions:()=>{}})}));
 vi.mock('./LabWorkbench.js',()=>({LabWorkbench:(props:any)=><div data-testid="standard-session-view">{props.conversationPath}<textarea aria-label="Message" /></div>}));
 import { TeamMenu } from './TeamMenu.js';
+import { SessionTrackingMenu } from './SessionTrackingMenu.js';
+import type { SessionTracking } from '../hooks/useSessionTracking.js';
 const team:Team={id:'team',operationId:'create',revision:1,title:'Cross-platform diagnosis',status:'active',source:{hostId:'mac',providerId:'fixture',nativeSessionId:'source',title:'Main project'},members:[
   {id:'leader',hostId:'mac',providerId:'fixture',nativeSessionId:'leader-session',role:'leader',name:'Leader',responsibility:'Coordinate',creation:'ready',activity:'idle',summary:'',updatedAt:1},
   {id:'worker',hostId:'win',providerId:'fixture',nativeSessionId:'worker-session',role:'member',name:'Windows',responsibility:'Verify',creation:'ready',activity:'idle',summary:'',updatedAt:1},
 ],messages:[],createdAt:1,updatedAt:1};
 function App(){return <TeamMenu baseUrl="https://team.test" enabled hosts={[]} onOpen={async team=>{fixture.attached.push(team.id);return true;}} onOpenSession={async target=>{fixture.attached.push(target.nativeSessionId);return true;}}/>;}
 afterEach(()=>{localStorage.clear();sessionStorage.clear();fixture.attached=[];fixture.teams=[];fixture.actions=[];fixture.failure='';fixture.listFailure='';});
+it('shares the loaded Team roster with Track even when the Team menu is hidden', async () => {
+  fixture.teams = [structuredClone(team)];
+  const sessions = [
+    ...team.members.map(member => ({ ...member, nativeSessionId: member.nativeSessionId!, title: member.name, starredAt: 1 })),
+    { ...team.source, starredAt: 1 },
+    { ...team.source, hostId: 'other', nativeSessionId: 'leader-session', title: 'Unrelated', starredAt: 1 },
+  ];
+  const tracking = { sessions, backgroundSessions: sessions, observations: {} } as unknown as SessionTracking;
+  const open = vi.fn();
+  function SharedMenu() {
+    const [teams, setTeams] = useState<Team[]>([]);
+    const [receive] = useState(() => (_scope: string, teams: Team[]) => setTeams(teams));
+    return <><TeamMenu baseUrl="https://team.test" enabled visible={false} hosts={[]} onTeamsChange={receive} onOpen={async () => true} onOpenSession={async () => true} />
+      <SessionTrackingMenu tracking={tracking} teams={teams} busy={false} inert={false} onOpen={open} /></>;
+  }
+  const view = await render(<SharedMenu />);
+  await act(async () => view.querySelector<HTMLButtonElement>('[aria-label="Tracked sessions"]')!.click());
+  const rows = [...view.querySelectorAll<HTMLButtonElement>('.lab-tracked-row button')];
+  expect(rows.map(row => row.querySelector('.lab-tracked-main')?.textContent)).toEqual(['Main: Main project', 'Main: Main project', undefined, undefined]);
+  await act(async () => rows[0]!.click());
+  expect(open).toHaveBeenCalledWith(sessions[0]);
+  expect(fixture.attached).toEqual([]);
+});
 const button = (root: HTMLElement, text: string) => [...root.querySelectorAll<HTMLButtonElement>('button')].find(button => (button.getAttribute('aria-label') ?? button.textContent)?.includes(text))!;
 it('groups Teams and requests a layout without mounting another workspace',async()=>{
   fixture.teams=[structuredClone(team)];const view=await render(<App/>);

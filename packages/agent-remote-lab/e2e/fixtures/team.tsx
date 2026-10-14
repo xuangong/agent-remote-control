@@ -1,8 +1,10 @@
-import { useEffect, useReducer, useState } from 'react';
+import { useCallback, useEffect, useReducer, useState } from 'react';
 import { createRoot } from 'react-dom/client';
-import type { AgentSnapshot, HistoryPage } from '@orchardworks/agent-remote-protocol';
+import type { AgentSnapshot, HistoryPage, Team } from '@orchardworks/agent-remote-protocol';
 import type { RemoteAgentTransport } from '@orchardworks/agent-remote-web';
 import { TeamMenu } from '../../src/components/TeamMenu';
+import { SessionTrackingMenu } from '../../src/components/SessionTrackingMenu';
+import type { SessionTracking } from '../../src/hooks/useSessionTracking';
 import { TeamGatherButton } from '../../src/components/TeamGatherButton';
 import { SessionDockProvider, SessionDockRail } from '../../src/components/SessionDock';
 import { SessionWindow } from '../../src/components/SessionWindow';
@@ -59,6 +61,10 @@ const transport: RemoteAgentTransport = {
   },
 };
 function Fixture() {
+ const [teams, setTeams] = useState<Team[]>([]);
+ const receiveTeams = useCallback((_scope: string, teams: Team[]) => setTeams(teams), []);
+ const tracked = teams.flatMap(team => [...team.members.filter(member => member.nativeSessionId).map(member => ({ ...member, nativeSessionId: member.nativeSessionId!, title: member.name, starredAt: 1 })), { ...team.source, starredAt: 1 }]);
+ const tracking = { sessions: tracked, backgroundSessions: tracked, observations: {} } as unknown as SessionTracking;
  const [compact,setCompact]=useState(window.innerWidth<=1180);
  const [main,setMain]=useState<SessionWindowTarget | undefined>(()=>JSON.parse(sessionStorage.getItem('fixture:main')??'null')??undefined);
  const [document] = useState(() => {
@@ -79,7 +85,8 @@ function Fixture() {
  const open=async(target:SessionWindowTarget)=>{setMain(target);sessionStorage.setItem('fixture:main',JSON.stringify(target));return true;};
  useEffect(()=>{const resize=()=>setCompact(window.innerWidth<=1180);window.addEventListener('resize',resize);return()=>window.removeEventListener('resize',resize);},[]);
  return <SessionDockProvider enabled={!compact} storageScope={location.origin}><main className="lab-shell" style={{display:'flex',flexDirection:'column',height:'100dvh'}}>
- <TeamMenu baseUrl={window.location.origin} enabled hosts={hosts} compact={compact} currentSession={main}
+ {new URLSearchParams(location.search).has('tracking') ? <SessionTrackingMenu tracking={tracking} teams={teams} busy={false} inert={false} onOpen={target => void open(target)} /> : null}
+ <TeamMenu baseUrl={window.location.origin} enabled hosts={hosts} compact={compact} currentSession={main} onTeamsChange={receiveTeams}
  source={{hostId:'mac',providerId:'codex',nativeSessionId:'source',title:'Project'}} onOpenSession={open}
  onOpen={async team=>{const layout=teamLayoutTargets(team,compact);await open(layout.main);windows.open(layout.dock, layout.groupRoot, team.id);return true;}} />
  <SessionDockRail>{main?<SessionFamily key={sessionKey(main)} storageScope={location.origin} baseUrl={location.origin} target={main} hostLabel="Mac" compact={compact} active offline={false} transport={transport} draftStore={drafts} navigation={navigation}/>:<p>Ordinary workspace</p>}</SessionDockRail>

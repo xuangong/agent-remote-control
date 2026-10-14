@@ -105,6 +105,18 @@ const previewItems: AgentTimelineItem[] = [
 const previewState: AgentReplicaState = { ...replicaState, timeline: { ...replicaState.timeline, hasOlder: false, entries: previewItems.map((item, index) => ({
   providerId: 'recorded', seqStart: index + 1, seqEnd: index + 1, timestamp: '2026-09-15T00:00:00Z', sourceSeqRanges: [], collapsed: [], resources: [], item,
 })) } };
+const summaryText = 'Inspect the session and preserve the existing workspace before applying the requested change. '.repeat(20);
+const summaryItems: AgentTimelineItem[] = [
+  { type: 'user_message', text: summaryText }, { type: 'assistant_message', text: summaryText },
+  ...details.map((detail, index): AgentTimelineItem => ({
+    type: 'tool_call', callId: `summary-${index}`, name: detail.type, status: 'completed', error: null,
+    detail: detail.type === 'shell' ? { type: 'shell', command: `cat <<'TASK'\n${summaryText}\nEND OF TASK\nTASK` }
+      : detail.type === 'other' ? { type: 'other', description: summaryText } : detail,
+  })),
+];
+const summaryState: AgentReplicaState = { ...replicaState, timeline: { ...replicaState.timeline, hasOlder: false,
+  entries: summaryItems.map((item, index) => ({ ...previewState.timeline.entries[0]!, seqStart: index + 1, seqEnd: index + 1, item })),
+} };
 const planningItems: AgentTimelineItem[] = [
   { type: 'tool_call', callId: 'plan-update', name: 'functions.update_plan', status: 'completed', error: null,
     detail: { type: 'other', description: 'Update implementation plan' }, result: { content: [{ type: 'text', text: 'Plan updated' }] } },
@@ -125,6 +137,7 @@ createRoot(document.getElementById('root')!).render(
       : view === 'trace' ? <TraceView state={state} />
       : view === 'inspector' ? <ReplicaInspector state={state} sessionStatus="ready" providerName={long} />
       : view === 'command' ? <AgentCommandDetails command={{ id: long, name: long, description: long, kind: 'skill', documentation: { resourceId: 'documentation', locator: 'SKILL.md', status: 'available' } }} resources={state.resources} onClose={() => {}} />
+      : view === 'summaries' ? <AgentTimeline state={summaryState} />
       : <AgentTimeline state={state} onInteractionResponse={async () => {}} />}
   </main></TimelineDisplay.Provider>,
 );

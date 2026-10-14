@@ -170,6 +170,7 @@
 .agent-tool-chevron { color: var(--agent-muted); }
 .agent-tool-summary { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--agent-muted); font-size: .92em; }
 .agent-tool-references, .agent-tool-description { white-space: normal; overflow-wrap: anywhere; }
+.agent-tool-description { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; }
 .agent-tool .agent-tool-linked { display: grid; grid-template-columns: minmax(0, auto) minmax(0, 1fr) auto; align-items: center; gap: 8px; cursor: default; }
 .agent-tool-name-toggle { display: flex; align-items: center; gap: 8px; min-width: 0; padding: 0; border: 0; background: transparent; color: inherit; font: inherit; cursor: pointer; }
 .agent-session-reference { color: var(--agent-signal); text-decoration: underline; text-underline-offset: 3px; }
@@ -181,7 +182,7 @@
   .agent-tool-toggle > .agent-state-label { grid-column: 3; grid-row: 1; white-space: nowrap; }
   .agent-tool-toggle > .agent-tool-summary { grid-column: 1 / -1; grid-row: 2; white-space: normal; overflow-wrap: anywhere; }
   .agent-tool-toggle strong { max-width: 100%; white-space: normal; overflow-wrap: anywhere; }
-  .agent-tool-description { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; }
+  .agent-tool-toggle:not(.agent-tool-linked) > .agent-tool-summary { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; }
   .agent-tool .agent-tool-linked { grid-template-columns: minmax(0, 1fr) auto; align-items: start; row-gap: 4px; }
   .agent-tool-linked > .agent-state-label { grid-column: 2; }
   .agent-tool-name-toggle { grid-column: 1; grid-row: 1; align-items: baseline; }

@@ -12,6 +12,7 @@ interface Props {
   baseUrl: string; enabled: boolean; visible?: boolean; hosts: Host[]; source?: TeamSource;
   compact?: boolean; currentSession?: Pick<TeamSource, 'providerId' | 'nativeSessionId'> & { hostId?: string };
   onOpen(team: Team): Promise<boolean>; onOpenSession(target: TeamSource): Promise<boolean>;
+  onTeamsChange?(baseUrl: string, teams: Team[]): void;
 }
 const errorMessage = (error: unknown) => error instanceof Error ? error.message : 'Team operation failed.';
 const isCurrentMember = (member: Team['members'][number], current: Props['currentSession']) => !!current
@@ -58,6 +59,9 @@ export function TeamMenu(props: Props) {
       .map(member => ({ hostId: member.hostId, providerId: member.providerId, nativeSessionId: member.nativeSessionId! }))));
   }, [connections, client, rosterClient, enabled, teams]);
   useEffect(() => () => connections?.retainSessions('team-leaders', []), [connections, client]);
+  useEffect(() => {
+    if (rosterClient === client) props.onTeamsChange?.(baseUrl, teams);
+  }, [baseUrl, client, rosterClient, teams, props.onTeamsChange]);
   useEffect(() => { if (!visible) setOpen(false); }, [visible]);
   useEffect(() => {
     if (!open) return;

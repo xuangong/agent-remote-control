@@ -44,6 +44,14 @@ Tool, reasoning and runtime-notice titles retain single-click disclosure. Pointe
 
 At 1180 CSS pixels and below, inline timestamps and desktop title controls are hidden. The existing sender-direction swipe reveals the same local timestamp independently of the desktop visibility preference. Browser coverage in `e2e/timeline-time.spec.ts` verifies disclosure independence, synchronized conversations, streaming updates, local date boundaries, the responsive boundary and mobile gestures.
 
+## Team context in Track
+
+Track shows a small `Main: <session title>` subtitle for Team leaders and members,
+using the existing Team roster even when its menu is hidden. Matching includes
+Host, Provider and native session identity. Known session titles take precedence
+over the stored Team source title; long subtitles stay on one line with ellipsis.
+Opening the row still opens the tracked leader or member.
+
 ## Conversation previews
 
 Each Session View heading has a mode menu with mutually exclusive **Preview**, **Simple conversation** and **Content only** choices, plus an independent **Show letters** checkbox. Main, Side, Ask and ARDB use the same controls, with preferences scoped to their session or recording identity. Content only renders user messages and assistant text/Markdown, including inline Markdown images, links and associated message resources, and groups adjacent visible messages. It also retains plan/task-management tool calls, task boards with their live completion states, errors, and completed interactions including answered questions and approval decisions. Communication letters follow Show letters in every mode. Retained tools and answered questions use bounded previews with expandable details. Reasoning, other tools, runtime notices, compaction, unrelated resource cards, preview registration controls, renderer extensions, inline subagent lists and Trace shortcuts are hidden. The complete replica remains available to Trace and the other conversation modes. Pending interaction controls and outgoing message delivery feedback remain available. A loaded history page with no matching items shows an empty content state and retains older-history navigation. Explicitly choosing Show in Conversation for a hidden execution event in Trace switches only the destination view to Simple mode so the target can be revealed.
@@ -52,6 +60,12 @@ The default conversation shows bounded previews before full disclosure. Selectin
 **Simple conversation** in that view's heading restores the title-oriented display
 for untouched items without changing other views. Individual expand/collapse choices
 survive content updates and changes to the default mode while the item is mounted.
+Tool descriptions are limited to three lines. In views up to 620px wide, command,
+path, search and URL summaries also wrap to at most three lines; wider views keep
+their single-line summaries. The existing disclosure opens the complete details.
+User and assistant messages are not truncated, and session-reference links remain
+available. These header limits apply in every conversation mode and use the view's
+width, including a narrow desktop dock.
 
 | Element | Default preview | Full disclosure |
 | --- | --- | --- |

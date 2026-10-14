@@ -65,6 +65,12 @@ test('Team opens a normal dock layout with responsive presentation and refresh r
 });
 
 test('Team applies an ordinary layout and its menu visibility does not hide sessions',async({page,isMobile})=>{
+ const subscriptions:string[]=[];
+ page.on('websocket',socket=>socket.on('framesent',event=>{
+  const frame=JSON.parse(String(event.payload));
+  const message=frame.type==='message'?frame.message:frame;
+  if(message.type==='timeline_subscription')subscriptions.push(...message.payload.agentIds);
+ }));
  const {showNewSession}=await import('./session-navigation');
  await page.goto('/');await showNewSession(page);await page.getByTestId('session-create').click();
  const primary=page.locator('.lab-primary-conversation > .lab-session-view');
@@ -87,6 +93,9 @@ test('Team applies an ordinary layout and its menu visibility does not hide sess
  const leaderInput=isMobile?primary.getByTestId('prompt-input'):page.getByRole('region',{name:'Docked Leader',exact:true}).getByTestId('prompt-input');
  await expect(leaderInput).toBeEnabled();await leaderInput.fill('Keep Leader draft');
  if(isMobile){
+  const leaderAgent=new URL(page.url()).searchParams.get('agent')!;
+  const initialSubscriptions=subscriptions.filter(id=>id===leaderAgent).length;
+  expect(initialSubscriptions).toBeGreaterThan(0);
   const entry=page.getByRole('button',{name:'Teams',exact:true}), navigation=page.getByRole('navigation',{name:'Diagnose across Hosts sessions',exact:true});
   await entry.click();await navigation.getByRole('button',{name:/^Windows validation/}).click();
   await expect.poll(()=>new URL(page.url()).searchParams.get('session')).toBe(member.nativeSessionId);
@@ -95,6 +104,7 @@ test('Team applies an ordinary layout and its menu visibility does not hide sess
   await navigation.getByRole('button',{name:/^Leader/}).click();
   await expect.poll(()=>new URL(page.url()).searchParams.get('session')).toBe(leader.nativeSessionId);
   await expect(leaderInput).toContainText('Keep Leader draft');
+  expect(subscriptions.filter(id=>id===leaderAgent)).toHaveLength(initialSubscriptions);
  }
  await openView(page);await page.getByRole('checkbox',{name:'Team view',exact:true}).uncheck();
  await expect(page.getByRole('button',{name:'Teams',exact:true})).toBeHidden();

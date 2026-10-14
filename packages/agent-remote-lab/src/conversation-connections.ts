@@ -13,11 +13,11 @@ interface Connection {
   stopRecovery(): void;
 }
 
-/** Keeps already opened tracked conversations live independently of their mounted views. */
+/** Keeps already opened conversations live while a view or retention owner needs them. */
 export class ConversationConnections {
   private readonly connections = new Map<string, Connection>();
   private readonly listeners = new Set<() => void>();
-  private tracked = new Set<string>();
+  private readonly retained = new Map<string, Set<string>>();
 
   constructor(private readonly transport: RemoteAgentTransport, private readonly recoveryScope?: string, private readonly controlExtension?: (agentId: string, session?: Identity) => SessionControlExtension | undefined) {}
 
@@ -33,8 +33,9 @@ export class ConversationConnections {
     return [...this.connections.values()].find(connection => connection.key === key);
   }
 
-  retainTracked(sessions: readonly Identity[]): void {
-    this.tracked = new Set(sessions.map(sessionKey));
+  retainSessions(owner: string, sessions: readonly Identity[]): void {
+    if (sessions.length) this.retained.set(owner, new Set(sessions.map(sessionKey)));
+    else this.retained.delete(owner);
     for (const connection of this.connections.values()) this.collect(connection);
   }
 
@@ -77,7 +78,7 @@ export class ConversationConnections {
 
   private collect(connection: Connection): void {
     if (this.connections.get(connection.agentId) !== connection || connection.viewers > 0) return;
-    if (connection.key && this.tracked.has(connection.key)) return;
+    if (connection.key && [...this.retained.values()].some(sessions => sessions.has(connection.key!))) return;
     this.close(connection);
   }
 

@@ -102,7 +102,7 @@ it('reuses a tracked subscription after its side window unmounts and releases it
   const f = fixture();
   const connections = new ConversationConnections(f.transport);
   const session = { agentId: 'side', providerId: 'recorded', nativeSessionId: 'side', title: 'Side' };
-  connections.retainTracked([session]);
+  connections.retainSessions('tracked', [session]);
   const store = new ForkStore('side-retained');
   let show!: (value: boolean) => void;
   function Harness() {
@@ -121,7 +121,7 @@ it('reuses a tracked subscription after its side window unmounts and releases it
     expect(f.fetchTimeline).toHaveBeenCalledOnce();
     expect(container.textContent).toContain('Conversation side');
     expect(container.querySelector('[data-testid="agent-activity-label"]')?.textContent).toBe('Working');
-    await act(async () => connections.retainTracked([]));
+    await act(async () => connections.retainSessions('tracked', []));
     expect(f.closes).toEqual([]);
     await act(async () => show(false));
     expect(f.closes).toEqual(['side']);

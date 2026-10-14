@@ -1,10 +1,12 @@
 import { act } from 'react';
-import { render } from '../test/setup.js';
+import { render, unmount } from '../test/setup.js';
 import { afterEach, expect, it, vi } from 'vitest';
 import { useState } from 'react';
 import type { Team, TeamSource } from '@orchardworks/agent-remote-protocol';
-const fixture=vi.hoisted(()=>({teams:[] as any[],attached:[] as string[],actions:[] as any[],failure:''}));
-vi.mock('@orchardworks/agent-remote-web/headless',()=>({RemoteTeamClient:class{async list(){return structuredClone(fixture.teams);}async action(input:unknown){fixture.actions.push(input);if(fixture.failure)throw new Error(fixture.failure);return fixture.teams[0];}}}));
+import { AgentReplica, type RemoteAgentTransport } from '@orchardworks/agent-remote-web';
+import { ConversationConnections, ConversationConnectionScope } from '../conversation-connections.js';
+const fixture=vi.hoisted(()=>({teams:[] as any[],attached:[] as string[],actions:[] as any[],failure:'',listFailure:''}));
+vi.mock('@orchardworks/agent-remote-web/headless',async importOriginal=>({...await importOriginal<typeof import('@orchardworks/agent-remote-web/headless')>(),RemoteTeamClient:class{async list(){if(fixture.listFailure)throw new Error(fixture.listFailure);return structuredClone(fixture.teams);}async action(input:unknown){fixture.actions.push(input);if(fixture.failure)throw new Error(fixture.failure);return fixture.teams[0];}}}));
 vi.mock('../directory-client.js',()=>({SessionDirectoryClient:class{async attach(_:string,id:string){fixture.attached.push(id);return {agentId:id};}}}));
 vi.mock('../hooks/useConversationSession.js',()=>({useConversationSession:()=>({state:undefined,sessionState:undefined,status:'connected',actions:{},questions:{},setQuestions:()=>{}})}));
 vi.mock('./LabWorkbench.js',()=>({LabWorkbench:(props:any)=><div data-testid="standard-session-view">{props.conversationPath}<textarea aria-label="Message" /></div>}));
@@ -14,7 +16,7 @@ const team:Team={id:'team',operationId:'create',revision:1,title:'Cross-platform
   {id:'worker',hostId:'win',providerId:'fixture',nativeSessionId:'worker-session',role:'member',name:'Windows',responsibility:'Verify',creation:'ready',activity:'idle',summary:'',updatedAt:1},
 ],messages:[],createdAt:1,updatedAt:1};
 function App(){return <TeamMenu baseUrl="https://team.test" enabled hosts={[]} onOpen={async team=>{fixture.attached.push(team.id);return true;}} onOpenSession={async target=>{fixture.attached.push(target.nativeSessionId);return true;}}/>;}
-afterEach(()=>{localStorage.clear();sessionStorage.clear();fixture.attached=[];fixture.teams=[];fixture.actions=[];fixture.failure='';});
+afterEach(()=>{localStorage.clear();sessionStorage.clear();fixture.attached=[];fixture.teams=[];fixture.actions=[];fixture.failure='';fixture.listFailure='';});
 const button = (root: HTMLElement, text: string) => [...root.querySelectorAll<HTMLButtonElement>('button')].find(button => (button.getAttribute('aria-label') ?? button.textContent)?.includes(text))!;
 it('groups Teams and requests a layout without mounting another workspace',async()=>{
   fixture.teams=[structuredClone(team)];const view=await render(<App/>);
@@ -96,4 +98,68 @@ it('keeps wide Team navigation as a dock layout preset', async () => {
   expect(view.querySelector('nav[aria-label="Cross-platform diagnosis sessions"]')).toBeNull();
   await act(async () => button(view, 'Cross-platform diagnosis').click());
   expect(fixture.attached).toEqual(['team']);
+});
+
+function connectionPool() {
+  const closes: string[] = [];
+  const connect = vi.fn<RemoteAgentTransport['connect']>(id => ({ close: () => { closes.push(id); }, send: () => {} }));
+  const transport: RemoteAgentTransport = { connect, fetchSnapshot: async () => { throw new Error('Unexpected snapshot'); }, fetchTimeline: async () => { throw new Error('Unexpected history'); }, onDiagnostic: () => () => {}, onProtocolMessage: () => () => {} };
+  return { connections: new ConversationConnections(transport), connect, closes };
+}
+
+it('retains opened leaders across menu hiding, access restoration and catalog failures, then releases archived leaders', async () => {
+  const f = connectionPool();
+  fixture.teams = [structuredClone(team)];
+  let setEnabled!: (value: boolean) => void, setVisible!: (value: boolean) => void;
+  function Harness() {
+    const [enabled, enable] = useState(true), [visible, show] = useState(true); setEnabled = enable; setVisible = show;
+    return <ConversationConnectionScope.Provider value={f.connections}><TeamMenu baseUrl="https://team.test" enabled={enabled} visible={visible} hosts={[]} onOpen={async () => true} onOpenSession={async () => true} /></ConversationConnectionScope.Provider>;
+  }
+  try {
+    const view = await render(<Harness />);
+    expect(f.connect).not.toHaveBeenCalled();
+    const leader = f.connections.acquire('leader', new AgentReplica(), { ...team.members[0]!, nativeSessionId: 'leader-session' });
+    const member = f.connections.acquire('member', new AgentReplica(), { ...team.members[1]!, nativeSessionId: 'worker-session' });
+    await act(async () => { leader.release(); member.release(); });
+    expect(f.closes).toEqual(['member']);
+    await act(async () => { setVisible(false); setEnabled(false); });
+    expect(f.closes).toEqual(['member']);
+    fixture.listFailure = 'Catalog temporarily unavailable';
+    await act(async () => setEnabled(true));
+    expect(f.closes).toEqual(['member']);
+    await act(async () => setVisible(true));
+    await act(async () => button(view, 'Teams').click());
+    expect(view.textContent).toContain(fixture.listFailure);
+    expect(f.closes).toEqual(['member']);
+    fixture.listFailure = '';
+    await act(async () => button(view, 'Teams').click());
+    await act(async () => button(view, 'Teams').click());
+    fixture.teams = [{ ...structuredClone(team), status: 'archived' }];
+    await act(async () => button(view, 'Archive').click());
+    expect(f.closes).toEqual(['member', 'leader']);
+    expect(f.connections.agentIds).toEqual([]);
+  } finally { f.connections.clear(); }
+});
+
+it('reconciles removed Teams and releases only the Team retention reason on unmount', async () => {
+  const f = connectionPool();
+  fixture.teams = [structuredClone(team)];
+  try {
+    const view = await render(<ConversationConnectionScope.Provider value={f.connections}><App /></ConversationConnectionScope.Provider>);
+    const leader = f.connections.acquire('leader', new AgentReplica(), { ...team.members[0]!, nativeSessionId: 'leader-session' });
+    await act(async () => leader.release());
+    expect(f.closes).toEqual([]);
+    fixture.teams = [];
+    await act(async () => button(view, 'Teams').click());
+    expect(f.closes).toEqual(['leader']);
+    fixture.teams = [structuredClone(team)];
+    await act(async () => button(view, 'Teams').click());
+    const again = f.connections.acquire('leader', new AgentReplica(), { ...team.members[0]!, nativeSessionId: 'leader-session' });
+    f.connections.retainSessions('tracked', [{ ...team.members[0]!, nativeSessionId: 'leader-session' }]);
+    await act(async () => again.release());
+    await unmount(view);
+    expect(f.closes).toEqual(['leader']);
+    f.connections.retainSessions('tracked', []);
+    expect(f.closes).toEqual(['leader', 'leader']);
+  } finally { f.connections.clear(); }
 });

@@ -22,7 +22,7 @@ export function useSessionTracking(baseUrl: string, transport: RemoteAgentTransp
   const [selection, setSelection] = useState(() => ({ scope: baseUrl, sessions: readTrackedSessions(baseUrl) }));
   const sessions = useMemo(() => selection.scope === baseUrl ? selection.sessions : [], [selection, baseUrl]);
   // Authorization gates network access; only tracking changes release retained conversations.
-  useEffect(() => { if (enabled) connections?.retainTracked(sessions); }, [connections, sessions, enabled]);
+  useEffect(() => { if (enabled) connections?.retainSessions('tracked', sessions); }, [connections, sessions, enabled]);
   const [observationState, setObservationState] = useState<{ scope: string; transport: RemoteAgentTransport; values: Record<string, SessionObservation> }>(() => ({ scope: baseUrl, transport, values: {} }));
   const observations = observationState.scope === baseUrl && observationState.transport === transport ? observationState.values : {};
   const latestObservations = useRef(observations); latestObservations.current = observations;

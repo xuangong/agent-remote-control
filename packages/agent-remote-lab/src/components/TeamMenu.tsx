@@ -1,9 +1,10 @@
 import { createPortal } from 'react-dom';
-import { useEffect, useId, useMemo, useRef, useState, type ReactNode } from 'react';
+import { useContext, useEffect, useId, useMemo, useRef, useState, type ReactNode } from 'react';
 import { RemoteTeamClient } from '@orchardworks/agent-remote-web/headless';
 import type { Team, TeamAction, TeamSource } from '@orchardworks/agent-remote-protocol';
 import { workspaceFetch } from '../workspace-access.js';
 import { useTrackingPosition } from '../hooks/useTrackingPosition.js';
+import { ConversationConnectionScope } from '../conversation-connections.js';
 import './team.css';
 
 interface Host { teamManagement?: true; id: string; name: string; online: boolean; providers?: Array<{providerId:string;displayName:string}> }
@@ -18,6 +19,8 @@ const isCurrentMember = (member: Team['members'][number], current: Props['curren
 export function TeamMenu(props: Props) {
   const { baseUrl, enabled, visible = true, hosts, source } = props;
   const client = useMemo(() => new RemoteTeamClient(baseUrl, workspaceFetch), [baseUrl]);
+  const connections = useContext(ConversationConnectionScope);
+  const [rosterClient, setRosterClient] = useState<RemoteTeamClient>();
   const [teams, setTeams] = useState<Team[]>([]), [selected, setSelected] = useState('');
   const [open, setOpen] = useState(false), [loading, setLoading] = useState(false), [busy, setBusy] = useState(false), [error, setError] = useState(''), [loadError, setLoadError] = useState('');
   const [pendingCreate, setPendingCreate] = useState<{operationId:string;source:TeamSource}>();
@@ -30,11 +33,14 @@ export function TeamMenu(props: Props) {
     if (mutating.current) return;
     const ticket = ++generation.current;
     const value = await client.list();
-    if (currentClient.current === client && ticket === generation.current) { setTeams(value); setLoadError(''); }
+    if (currentClient.current === client && ticket === generation.current) { setTeams(value); setRosterClient(client); setLoadError(''); }
   };
   useEffect(() => {
-    setTeams([]); setSelected(''); setError(''); setLoadError(''); setPendingCreate(undefined); ++generation.current;
-    if (!enabled) return;
+    setTeams([]); setRosterClient(undefined); setSelected(''); setError(''); setLoadError(''); setPendingCreate(undefined);
+  }, [client]);
+  useEffect(() => {
+    ++generation.current;
+    if (!enabled) { setLoading(false); return; }
     let stopped = false, inFlight = false;
     const load = async () => { if (stopped || inFlight || document.visibilityState === 'hidden') return; inFlight = true;
       try { await refresh(); }
@@ -44,6 +50,14 @@ export function TeamMenu(props: Props) {
     document.addEventListener('visibilitychange', load);
     return () => { stopped = true; ++generation.current; clearInterval(timer); document.removeEventListener('visibilitychange', load); };
   }, [client, enabled, baseUrl]);
+  useEffect(() => {
+    // Temporary access or catalog failures must not discard the last confirmed retention set.
+    if (!enabled || rosterClient !== client) return;
+    connections?.retainSessions('team-leaders', teams.filter(team => team.status !== 'archived').flatMap(team => team.members
+      .filter(member => member.role === 'leader' && member.creation === 'ready' && member.nativeSessionId)
+      .map(member => ({ hostId: member.hostId, providerId: member.providerId, nativeSessionId: member.nativeSessionId! }))));
+  }, [connections, client, rosterClient, enabled, teams]);
+  useEffect(() => () => connections?.retainSessions('team-leaders', []), [connections, client]);
   useEffect(() => { if (!visible) setOpen(false); }, [visible]);
   useEffect(() => {
     if (!open) return;
@@ -59,12 +73,13 @@ export function TeamMenu(props: Props) {
   async function change(input: TeamAction) {
     const updated = await client.action(input); if (currentClient.current !== client) return;
     setTeams(current => [...current.filter(value => value.id !== updated.id), updated]);
+    setRosterClient(client);
   }
   async function create() {
     if (!source) return;
     const input = pendingCreate ?? { operationId: crypto.randomUUID(), source }; setPendingCreate(input);
     const created = await client.create(input); if (currentClient.current !== client) return;
-    setTeams(current => [...current.filter(value => value.id !== created.id), created]); setPendingCreate(undefined); await openTeam(created);
+    setTeams(current => [...current.filter(value => value.id !== created.id), created]); setRosterClient(client); setPendingCreate(undefined); await openTeam(created);
   }
   async function openTeam(team: Team) {
     if (!await props.onOpen(team)) throw new Error('The Team layout could not be opened. Retry after the main session is ready.');

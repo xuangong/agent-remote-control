@@ -27,7 +27,7 @@ async function fixture(sessionChannels = false) {
 it('keeps a tracked subscription current over real HTTP/WebSocket without reconnecting on revisit', async () => {
   const f = await fixture();
   try {
-    f.connections.retainTracked([f.session]);
+    f.connections.retainSessions('tracked', [f.session]);
     expect(f.sockets).toHaveLength(0);
     const first = f.connections.acquire('agent', new AgentReplica(), f.session);
     let status: RemoteSessionStatus = 'idle';
@@ -44,7 +44,7 @@ it('keeps a tracked subscription current over real HTTP/WebSocket without reconn
     expect(status).toBe('ready');
     expect(f.sockets).toHaveLength(1);
     expect(f.history).toHaveBeenCalledTimes(count);
-    f.connections.retainTracked([]);
+    f.connections.retainSessions('tracked', []);
     expect(status).toBe('ready');
     again.release();
     await Promise.resolve();
@@ -53,10 +53,59 @@ it('keeps a tracked subscription current over real HTTP/WebSocket without reconn
   } finally { await f.close(); }
 });
 
+it.each([false, true])('retains an opened Team leader independently of tracking without preconnecting (channel=%s)', async sessionChannels => {
+  const f = await fixture(sessionChannels);
+  const wire: string[] = [];
+  f.transport.onProtocolMessage(event => { if (event.direction === 'outbound') wire.push(event.message.type); });
+  try {
+    f.connections.retainSessions('team-leaders', [f.session, { ...f.session, nativeSessionId: 'unopened-leader' }]);
+    expect(f.sockets).toHaveLength(0);
+    expect(f.connections.agentIds).toEqual([]);
+    const first = f.connections.acquire('agent', new AgentReplica(), f.session);
+    await vi.waitFor(() => expect(first.client.getSessionState().connection).toBe('ready'));
+    first.release();
+    await Promise.resolve();
+    f.connections.retainSessions('tracked', []);
+    expect(first.client.getSessionState().connection).toBe('ready');
+    const before = first.replica.getState().timeline.nextSeq;
+    f.server.recorded.advance(f.session.nativeSessionId);
+    await vi.waitFor(() => expect(first.replica.getState().timeline.nextSeq).toBeGreaterThan(before));
+    const requests = [...wire];
+    const again = f.connections.acquire('agent', new AgentReplica(), f.session);
+    expect(again.client).toBe(first.client);
+    expect(again.replica).toBe(first.replica);
+    expect(wire).toEqual(requests);
+    expect(f.sockets).toHaveLength(1);
+    again.release();
+    await Promise.resolve();
+    f.connections.retainSessions('tracked', [f.session]);
+    f.connections.retainSessions('team-leaders', []);
+    expect(first.client.getSessionState().connection).toBe('ready');
+    f.connections.retainSessions('tracked', []);
+    expect(first.client.getSessionState().connection).toBe('idle');
+    expect(f.connections.agentIds).toEqual([]);
+  } finally { await f.close(); }
+});
+
+it('removes a Team retention reason without closing a mounted view or retaining unrelated identities', async () => {
+  const f = await fixture();
+  try {
+    const lease = f.connections.acquire('agent', new AgentReplica(), f.session);
+    await vi.waitFor(() => expect(lease.client.getSessionState().connection).toBe('ready'));
+    f.connections.retainSessions('team-leaders', [f.session]);
+    f.connections.retainSessions('team-leaders', [{ ...f.session, hostId: 'another-host' }]);
+    expect(lease.client.getSessionState().connection).toBe('ready');
+    lease.release();
+    await Promise.resolve();
+    expect(lease.client.getSessionState().connection).toBe('idle');
+    expect(f.connections.agentIds).toEqual([]);
+  } finally { await f.close(); }
+});
+
 it('reuses the existing recovery after a real socket disconnect and releases untracked background sessions', async () => {
   const f = await fixture();
   try {
-    f.connections.retainTracked([f.session]);
+    f.connections.retainSessions('tracked', [f.session]);
     const first = f.connections.acquire('agent', new AgentReplica(), f.session);
     let status: RemoteSessionStatus = 'idle';
     first.client.subscribeStatus(value => { status = value; });
@@ -69,7 +118,7 @@ it('reuses the existing recovery after a real socket disconnect and releases unt
     await vi.waitFor(() => expect(status).toBe('ready'), { timeout: 4000 });
     expect(f.sockets).toHaveLength(2);
     again.release();
-    f.connections.retainTracked([]);
+    f.connections.retainSessions('tracked', []);
     expect(status).toBe('idle');
     expect(f.connections.find(f.session)).toBeUndefined();
   } finally { await f.close(); }
@@ -78,7 +127,7 @@ it('reuses the existing recovery after a real socket disconnect and releases unt
 it('isolates native identities and disposes retained subscriptions at scope teardown', async () => {
   const f = await fixture();
   try {
-    f.connections.retainTracked([f.session]);
+    f.connections.retainSessions('tracked', [f.session]);
     const lease = f.connections.acquire('agent', new AgentReplica(), f.session);
     let status: RemoteSessionStatus = 'idle';
     lease.client.subscribeStatus(value => { status = value; });

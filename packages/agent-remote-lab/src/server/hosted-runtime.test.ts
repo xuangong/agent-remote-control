@@ -9,6 +9,8 @@ import { join } from 'node:path';
 import { spawn } from 'node:child_process';
 import { WebSocket } from 'ws';
 import { afterEach, expect, it } from 'vitest';
+import { hostedRecordEncodingCosts, validateRelayState, type HostedRelayState } from '@orchardworks/agent-remote-hosted';
+import { deriveSuccessionCapacity } from '@orchardworks/agent-remote-hosted/succession-capacity';
 import { createGatewayRelay } from './gateway-relay.js';
 import { createGatewayStaticPages } from './gateway-static.js';
 
@@ -28,7 +30,7 @@ async function assets() {
   await writeFile(join(directory, 'assets/main.js'), 'window.controller = true;');
   return directory;
 }
-async function fixture(provider: 'google' | 'gateway') {
+async function fixture(provider: 'google' | 'gateway', requestTimeout = 5000) {
   const keys = generateKeyPairSync('rsa', { modulusLength: 2048 });
   const grants = new Map<string, { nonce: string; challenge: string; redirect: string }>();
   const identity = createServer(async (request, response) => {
@@ -67,7 +69,7 @@ async function fixture(provider: 'google' | 'gateway') {
   };
   const stop = async () => { const active = relay; relay = undefined; await active?.close(); };
   closers.push(stop); await start();
-  const request = (path: string, cookie = '', body?: object) => fetch(url + path, { redirect: 'manual', signal: AbortSignal.timeout(5000), headers: { origin: url, cookie, ...(body ? { 'content-type': 'application/json' } : {}) }, ...(body ? { method: 'POST', body: JSON.stringify(body) } : {}) });
+  const request = (path: string, cookie = '', body?: object) => fetch(url + path, { redirect: 'manual', signal: AbortSignal.timeout(requestTimeout), headers: { origin: url, cookie, ...(body ? { 'content-type': 'application/json' } : {}) }, ...(body ? { method: 'POST', body: JSON.stringify(body) } : {}) });
   async function begin() {
     const response = await request('/auth/login?host=chosen-host'); expect(response.status).toBe(303);
     const destination = new URL(response.headers.get('location')!);
@@ -87,7 +89,17 @@ async function fixture(provider: 'google' | 'gateway') {
     const socket = new WebSocket(url.replace('http:', 'ws:') + path, { headers, handshakeTimeout: 3000 });
     closers.push(async () => { socket.terminate(); }); await once(socket, 'open'); return socket;
   }
-  return { get url() { return url; }, issuer, directory, request, begin, finish, upgrade, restart: async () => { await stop(); await start(); } };
+  return { get url() { return url; }, issuer, directory, request, begin, finish, upgrade, restart: async () => { await stop(); await start(); },
+    async seedState(change: (state: HostedRelayState) => void) {
+      if (provider !== 'gateway') throw new Error('This persisted-state fixture uses Gateway signing scope.');
+      await stop();
+      const file = join(directory, 'state.json'), state = JSON.parse(JSON.parse(await readFile(file, 'utf8')).payload) as HostedRelayState;
+      change(state); validateRelayState(state, { origin: url, issuer, secret });
+      const payload = JSON.stringify(state), scope = JSON.stringify([url, issuer]);
+      await writeFile(file, JSON.stringify({ payload, signature: createHmac('sha256', secret).update('arc-state-v1\0' + scope + '\0' + payload).digest('hex') }));
+      await start();
+    },
+  };
 }
 const frame = (socket: WebSocket) => once(socket, 'message', { signal: AbortSignal.timeout(5000) }).then(([raw]) => JSON.parse(raw.toString()));
 const send = (socket: WebSocket, data: object) => socket.send(JSON.stringify({ uplinkVersion: 2, ...data }));
@@ -99,13 +111,13 @@ function rejectedUpgrade(url: string, headers: Record<string, string> = {}): Pro
     socket.once('unexpected-response', (_, response) => { response.resume(); socket.removeListener('error', reject); socket.on('error', () => undefined); socket.terminate(); resolve(response.statusCode!); });
   });
 }
-async function handoff(f: Awaited<ReturnType<typeof fixture>>, socket: WebSocket, hostId: string, basePath: string, cookie: string) {
+function handoffHost() {
   const ref = (nativeSessionId: string) => ({ controllerId: 'installation', providerId: 'fixture', nativeSessionId });
   const workspace = { controllerId: 'installation', canonicalCwd: '/workspace' };
   let revision = 1, record: any;
   const role = () => ({ id: 'role', revision, origin: ref('A'), current: ref(revision === 1 ? 'A' : 'B'), workspace });
   const freezes: any[] = []; const effects: string[] = [];
-  socket.on('message', raw => {
+  const attach = (socket: WebSocket) => socket.on('message', raw => {
     const request = JSON.parse(raw.toString());
     if (request.type === 'heartbeat') { send(socket, { type: 'heartbeat_ack', nonce: request.nonce }); return; }
     if (request.type !== 'rpc_request') return;
@@ -122,6 +134,10 @@ async function handoff(f: Awaited<ReturnType<typeof fixture>>, socket: WebSocket
     }
     send(socket, { type: 'rpc_response', requestId: request.requestId, status: 200, body: JSON.stringify(body) });
   });
+  return { attach, freezes, effects };
+}
+async function handoff(f: Awaited<ReturnType<typeof fixture>>, socket: WebSocket, hostId: string, basePath: string, cookie: string) {
+  const { attach, freezes, effects } = handoffHost(); attach(socket);
   const path = basePath + `v1/remote/hosts/${hostId}/succession/`;
   const prepared = await f.request(path + 'prepare', cookie, { operationId: 'handoff', providerId: 'fixture', nativeSessionId: 'A', expectedRevision: 1 });
   expect(prepared.status, await prepared.clone().text()).toBe(200);
@@ -174,6 +190,81 @@ it.each(['google', 'gateway'] as const)('Node %s keeps login, pairing credential
     expect(info.basePath).toBe('/u/' + createHash('sha256').update(JSON.stringify([f.issuer, 'owner'])).digest('hex') + '/');
   }
 }, 20000);
+
+const envelopeBytes = (state: HostedRelayState) => Buffer.byteLength(JSON.stringify({ payload: JSON.stringify(state), signature: '0'.repeat(64) }));
+function fillOrdinaryReceipts(state: HostedRelayState, targetBytes: number) {
+  const broker = state.tenants[0]!.broker;
+  broker.bindings.push({ agentId: 'ordinary-agent', hostId: broker.hosts[0]!.id, providerId: 'fixture', nativeSessionId: 'ordinary' });
+  broker.creations = Array.from({ length: 1024 }, (_, index) => ['ordinary-' + index, { fingerprint: '"'.repeat(16384), agentId: 'ordinary-agent' }]);
+  let excess = envelopeBytes(state) - targetBytes;
+  for (const [, receipt] of [...broker.creations].reverse()) {
+    const remove = Math.min(Math.ceil(excess / 4), receipt.fingerprint.length - 1);
+    receipt.fingerprint = receipt.fingerprint.slice(0, receipt.fingerprint.length - remove); excess -= remove * 4;
+    if (excess <= 0) { receipt.fingerprint += 'x'.repeat(-excess); break; }
+  }
+  expect(envelopeBytes(state)).toBe(targetBytes);
+}
+async function pairedRuntime() {
+  const f = await fixture('gateway', 20000), cookie = await f.finish(await f.begin());
+  const info = await (await f.request('/auth/status', cookie)).json();
+  const { key } = await (await f.request(info.basePath + 'v1/remote/pairings', cookie, { purpose: 'host-only' })).json();
+  const host = await f.upgrade('/ws/remote-host?successionEnrollment=2', { authorization: `Bearer ${key}` });
+  const issued = frame(host); send(host, { type: 'register', credentialRotation: true, installationId: 'installation', name: 'Host', providers: [{ providerId: 'fixture', displayName: 'Fixture' }] });
+  const credential = (await issued).credential;
+  const registered = frame(host); send(host, { type: 'credential_saved' }); const { hostId } = await registered;
+  const emulator = handoffHost(); emulator.attach(host);
+  const reconnect = async () => {
+    const socket = await f.upgrade('/ws/remote-host?successionEnrollment=2', { authorization: `Bearer ${credential}` });
+    const registered = once(socket, 'message', { signal: AbortSignal.timeout(20000) }).then(([raw]) => JSON.parse(raw.toString()));
+    send(socket, { type: 'register', credentialRotation: true, installationId: 'installation', name: 'Host', providers: [{ providerId: 'fixture', displayName: 'Fixture' }] });
+    expect(await registered).toMatchObject({ type: 'registered', hostId }); emulator.attach(socket); return socket;
+  };
+  return { f, cookie, basePath: info.basePath as string, hostId: hostId as string, host, emulator, reconnect };
+}
+
+it('refuses a near-ceiling handoff before the native effect while keeping the Relay readable', async () => {
+  const { f, cookie, basePath, hostId, host, emulator, reconnect } = await pairedRuntime();
+  const closed = once(host, 'close'); host.close(); await closed;
+  await f.seedState(state => fillOrdinaryReceipts(state, 64 * 1024 * 1024 - 1500));
+  await reconnect();
+  const prepared = await f.request(basePath + `v1/remote/hosts/${hostId}/succession/prepare`, cookie,
+    { operationId: 'near-ceiling', providerId: 'fixture', nativeSessionId: 'A', expectedRevision: 1 });
+  expect(prepared.status, await prepared.clone().text()).toBe(409);
+  expect(await prepared.json()).toMatchObject({ code: 'succession_projection_capacity_exceeded' });
+  expect(emulator.effects).toEqual([]);
+  expect((await f.request('/health')).status).toBe(200);
+  expect((await f.request(basePath + 'v1/remote/hosts', cookie)).status).toBe(200);
+  const saved = JSON.parse(JSON.parse(await readFile(join(f.directory, 'state.json'), 'utf8')).payload) as HostedRelayState;
+  expect(saved.tenants[0]!.broker.associations?.freezes ?? []).toEqual([]);
+  await f.restart(); expect((await f.request('/auth/status', cookie)).status).toBe(200);
+}, 60000);
+
+it('protects an admitted near-ceiling reserve from ordinary writes and completes durable replay', async () => {
+  const { f, cookie, basePath, hostId, host, emulator, reconnect } = await pairedRuntime();
+  const path = basePath + `v1/remote/hosts/${hostId}/succession/`;
+  expect((await f.request(path + 'prepare', cookie, { operationId: 'reserved', providerId: 'fixture', nativeSessionId: 'A', expectedRevision: 1 })).status).toBe(200);
+  const closed = once(host, 'close'); host.close(); await closed;
+  await f.seedState(state => {
+    state.favoritesTrees = [{ subject: 'owner', revision: 1, folders: [{ id: 'ordinary', title: 'Folder', parentId: null, order: 0 }] }];
+    const reserve = deriveSuccessionCapacity(state, hostedRecordEncodingCosts({ origin: f.url, issuer: f.issuer, secret })).remainingSnapshotBytes;
+    expect(reserve).toBeGreaterThan(2 * 1024 * 1024);
+    fillOrdinaryReceipts(state, 64 * 1024 * 1024 - reserve - 180);
+  });
+  const reconnected = await reconnect();
+  const refused = await f.request(basePath + 'v1/favorites', cookie, { type: 'rename-folder', revision: 1, id: 'ordinary', title: '"'.repeat(128) });
+  expect(refused.status, await refused.clone().text()).toBe(409);
+  expect(await refused.json()).toMatchObject({ code: 'succession_projection_capacity_exceeded' });
+  const favorites = await (await f.request(basePath + 'v1/favorites', cookie)).json();
+  expect(favorites.folders[0].title).toBe('Folder');
+  const committed = await f.request(path + 'commit', cookie, { operationId: 'reserved' });
+  expect(committed.status, await committed.clone().text()).toBe(200);
+  expect(emulator.effects.filter(action => action !== 'status')).toEqual(['prepare', 'commit', 'release']);
+  const replay = await (await f.request(basePath + 'v1/session-successions', cookie)).json();
+  expect(replay.successions).toMatchObject([{ to: { nativeSessionId: 'B' } }]);
+  const reclosed = once(reconnected, 'close'); reconnected.close(); await reclosed; await f.restart();
+  expect(await (await f.request(basePath + 'v1/session-successions', cookie)).json()).toEqual(replay);
+  expect((await f.request('/health')).status).toBe(200);
+}, 60000);
 
 it.each(['google', 'gateway'] as const)('Node entrypoint resolves %s authentication from environment', async provider => {
   const directory = await assets(), readyFile = join(directory, 'ready.json');

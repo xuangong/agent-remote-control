@@ -45,6 +45,7 @@ export type HostedChunk = { kind: HostedRecordKind; identity: string; ordinal: n
 export interface HostedEncodedRecord { manifest: HostedManifest; chunks: HostedChunk[] }
 export interface HostedRecordCost {
   kind: HostedRecordKind; owner: string; key: string; identity: string; byteLength: number; chunkCount: number; manifestBytes: number;
+  payloadStringBytes: number;
 }
 export interface HostedSnapshot { records: Map<string, HostedEncodedRecord>; costs: HostedRecordCost[] }
 const object = (value: unknown): value is JsonObject => !!value && typeof value === 'object' && !Array.isArray(value);
@@ -91,7 +92,8 @@ export function encodeHostedSnapshot(input: HostedRelayState, auth: HostedAuthOp
     const chunks: HostedChunk[] = [];
     for (let ordinal = 0; ordinal < chunkCount; ordinal++) chunks.push({ kind, identity, ordinal, bytes: bytes.slice(ordinal * HOSTED_CHUNK_BYTES, (ordinal + 1) * HOSTED_CHUNK_BYTES) });
     records.set(physicalKey(kind, identity), { manifest, chunks });
-    costs.push({ kind, owner, key, identity, byteLength: bytes.byteLength, chunkCount, manifestBytes: jsonBytes(manifest).byteLength });
+    costs.push({ kind, owner, key, identity, byteLength: bytes.byteLength, chunkCount, manifestBytes: jsonBytes(manifest).byteLength,
+      payloadStringBytes: jsonBytes(JSON.stringify(payload)).byteLength - 2 });
     return tuple;
   }
   function references<T, K extends HostedRecordKind>(values: T[], kind: K, owner: string, key: (value: T) => string, payload?: (value: T) => unknown): Identity<K>[];

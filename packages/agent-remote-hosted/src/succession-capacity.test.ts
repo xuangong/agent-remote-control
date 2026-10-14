@@ -2,7 +2,7 @@ import { codecState } from '../../agent-remote-cloudflare/test/storage-codec-fix
 import { projectSuccessionFavorites } from './favorites-succession.js';
 import { createHash } from 'node:crypto';
 import { expect, test } from 'vitest';
-import { createRelayState, emptyRelayState, type HostedRelayState } from './state.js';
+import { createRelayState, emptyRelayState, validateRelayState, type HostedRelayState } from './state.js';
 import { deriveSuccessionCapacity, isSuccessionCapacityError, type SuccessionEncodingCosts } from './succession-capacity.js';
 import { validBrokerAssociations } from './succession-associations.js';
 import { encodeSqlSnapshot, quoteSqlRecord, SQL_SNAPSHOT_FORMAT, SQL_RECORD_FORMAT, SQL_CHUNK_BYTES } from '../../agent-remote-cloudflare/src/storage-codec.js';
@@ -108,6 +108,62 @@ function fullInventory() {
   return state;
 }
 const total = (state: HostedRelayState) => encodeSqlSnapshot(state, auth).costs.reduce((value, cost) => value + cost.byteLength + cost.manifestBytes, 0);
+
+test('checks complete snapshot reserves before ordinary writes without poisoning the queue', async () => {
+  const saved = initial(); let writes = 0, failures = 0;
+  const envelope = (value: HostedRelayState) => Buffer.byteLength(JSON.stringify({ payload: JSON.stringify(value), signature: '0'.repeat(64) }));
+  const limit = envelope(saved) + deriveSuccessionCapacity(saved, costs).remainingSnapshotBytes + 100;
+  const encoding = { ...costs, acceptsSnapshot: (value: HostedRelayState, reserve: number) => envelope(value) + reserve <= limit };
+  const relay = createRelayState(auth, { initial: saved, async commit() { writes++; } }, () => { failures++; }, () => {}, encoding);
+  let refusal: unknown;
+  try { await relay.mutate(draft => { draft.tenants[0]!.broker.hosts[0]!.name = '"'.repeat(100); }); } catch (error) { refusal = error; }
+  expect(isSuccessionCapacityError(refusal)).toBe(true);
+  expect(writes).toBe(0); expect(failures).toBe(0);
+  expect(relay.read().tenants[0]!.broker.hosts[0]!.name).toBe('Host');
+  await relay.mutate(() => {}); expect(writes).toBe(1);
+  expect(() => createRelayState(auth, { initial: saved, async commit() {} }, () => {}, () => {}, { ...encoding, acceptsSnapshot: () => false })).toThrow(/snapshot.*capacity/i);
+});
+
+test('reserves escaped snapshot growth through intermediate relation transitions', () => {
+  const state = fullInventory();
+  const envelope = (value: HostedRelayState) => Buffer.byteLength(JSON.stringify({ payload: JSON.stringify(value), signature: '0'.repeat(64) }));
+  const budget = envelope(state) + deriveSuccessionCapacity(state, costs).remainingSnapshotBytes;
+  const row = state.tenants[0]!.broker.associations!.relationChanges.find(value => value.phase === 'reserved')!;
+  for (const phase of ['metadata_committed', 'overlay_applied', 'committed'] as const) {
+    row.phase = phase;
+    row.hostReceipt = { reservation: row.reservation, phase: phase === 'metadata_committed' ? 'reserved' : 'released', associationRevision: row.reservation.associationRevision + (phase === 'metadata_committed' ? 0 : Number(row.reservation.previousMember !== row.reservation.linked)) };
+    state.tenants[0]!.broker.associations!.revision++;
+    validateRelayState(state, auth);
+    expect(envelope(state) + deriveSuccessionCapacity(state, costs).remainingSnapshotBytes).toBeLessThanOrEqual(budget);
+  }
+});
+
+test('consumes projection reserves even when an equal-length Favorite replacement escapes more bytes', () => {
+  const state = initial(), tenant = state.tenants[0]!, row = tenant.broker.associations!.freezes[0]!;
+  const from = row.receipt.request.from, to = { ...from, nativeSessionId: 'target' };
+  const workspace = { controllerId: 'controller', canonicalCwd: '/workspace' };
+  const star = { subject: 'owner', hostId: 'host', providerId: 'fixture', nativeSessionId: 'source', title: 'x'.repeat(512), starredAt: 1, favoriteId: 'favorite', folderId: null, order: 0 };
+  state.sessionStars = [star]; state.favoritesTrees = [{ subject: 'owner', revision: 1, folders: [] }];
+  state.sessionTitles = [{ hostId: 'host', providerId: 'fixture', nativeSessionId: 'target', title: '"'.repeat(256), revision: 1 }]; state.sessionTitleRevision = 1;
+  const serialized = (value: unknown) => Buffer.byteLength(JSON.stringify(value));
+  const envelope = (value: unknown) => serialized(JSON.stringify(value));
+  const replacement = { ...star, nativeSessionId: 'target', title: '"'.repeat(256) };
+  expect(serialized(replacement)).toBe(serialized(star));
+  expect(envelope(replacement)).toBeGreaterThan(envelope(star));
+  validateRelayState(state, auth);
+  const budget = envelope(state) + deriveSuccessionCapacity(state, costs).remainingSnapshotBytes;
+  row.released = 'committed';
+  row.projection = { version: 1, role: { id: 'role', revision: 2, origin: from, current: to, workspace }, receipt: {
+    ...row.receipt.request, to, phase: 'committed', committedRevision: 2, startedAt: 'now', updatedAt: 'now',
+    prepared: { ...row.receipt.request, to, workspace, associationRevision: 0, participants: [], capture: { epoch: 'e', seq: 1, capturedAt: 'now' } },
+  } };
+  tenant.broker.associations!.revision++;
+  validateRelayState(state, auth);
+  expect(envelope(state) + deriveSuccessionCapacity(state, costs).remainingSnapshotBytes).toBeLessThanOrEqual(budget);
+  projectSuccessionFavorites(state, 'owner'); validateRelayState(state, auth);
+  expect(state.sessionStars![0]).toMatchObject({ nativeSessionId: 'target', title: '"'.repeat(256) });
+  expect(envelope(state) + deriveSuccessionCapacity(state, costs).remainingSnapshotBytes).toBeLessThanOrEqual(budget);
+});
 
 test('fits the exact shared aggregate and refuses the next byte with complete retained extras', () => {
   const state = initial(); state.tenants.push(...initial(65536, 'other').tenants);

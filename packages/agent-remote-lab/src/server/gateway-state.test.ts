@@ -47,6 +47,20 @@ it('rejects oversized encoded snapshots before replacing previously acknowledged
   try { expect(restored.initial).toEqual({ value: 'acknowledged' }); } finally { restored.close(); }
 }, 15000);
 
+it('quotes the complete signed envelope and protects remaining space including JSON escaping', async () => {
+  const file = path(); const state = openGatewayState(file, 'secret', 'origin');
+  try {
+    const value = { value: '"\\\n\ud800'.repeat(100) };
+    const bytes = Buffer.byteLength(JSON.stringify({ payload: JSON.stringify(value), signature: '0'.repeat(64) }));
+    const remaining = 64 * 1024 * 1024 - bytes;
+    expect(state.acceptsSnapshot(value, remaining)).toBe(true);
+    expect(state.acceptsSnapshot(value, remaining + 1)).toBe(false);
+    expect(state.acceptsSnapshot(value, -1)).toBe(false);
+    await state.commit(value);
+    expect(statSync(file).size).toBe(bytes);
+  } finally { state.close(); }
+});
+
 function writer(file: string) {
   const module = new URL('./gateway-state.ts', import.meta.url).href;
   const source = `import { openGatewayState } from ${JSON.stringify(module)};

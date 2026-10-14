@@ -33,6 +33,11 @@ export function openGatewayState<T>(file: string, secret: string, scope: string)
     }
     let closed = false;
     return { initial,
+      acceptsSnapshot(value: T, remainingSnapshotBytes: number) {
+        if (!Number.isSafeInteger(remainingSnapshotBytes) || remainingSnapshotBytes < 0) return false;
+        const bytes = Buffer.byteLength(JSON.stringify({ payload: JSON.stringify(value), signature: '0'.repeat(64) }));
+        return bytes <= MAX_STATE_BYTES - remainingSnapshotBytes;
+      },
       save(value: T) {
         if (closed) throw new Error('Relay state is closed.');
         const content = encode(value); const temporary = file + '.' + randomUUID() + '.tmp';

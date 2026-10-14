@@ -8,12 +8,16 @@ import type { BrokerAssociationState } from './succession-associations.js';
 export interface SuccessionRecordCost {
   kind: string; owner: string; key: string; identity: string;
   byteLength: number; chunkCount: number; manifestBytes: number;
+  /** Exact payload contribution after encoding the snapshot JSON inside a JSON string. */
+  payloadStringBytes: number;
 }
 export interface SuccessionEncodingCosts {
   measureSnapshot(state: Readonly<HostedRelayState>): {
     snapshotFormat: number; recordFormat: number; chunkBytes: number; costs: readonly SuccessionRecordCost[];
   };
   quoteRecord(input: { kind: string; owner: string; key: string; payloadJsonBytesUpperBound: number }): Pick<SuccessionRecordCost, 'byteLength' | 'chunkCount' | 'manifestBytes'>;
+  /** Optional runtime representation ceiling, checked before every effect admission and storage write. */
+  acceptsSnapshot?(state: Readonly<HostedRelayState>, remainingSnapshotBytes: number): boolean;
 }
 export const SUCCESSION_FEATURE_BYTES = 8_388_608;
 const MAX = Number.MAX_SAFE_INTEGER;
@@ -63,6 +67,8 @@ export interface SuccessionTenantCapacity {
 }
 export interface SuccessionCapacity {
   retainedBytes: number; remainingBytes: number; featureCharge: number;
+  /** Additional encoded JSON-string bytes reserved for remaining durable transitions. */
+  remainingSnapshotBytes: number;
   tenants: SuccessionTenantCapacity[]; violations: string[];
 }
 
@@ -111,6 +117,7 @@ export function deriveSuccessionCapacity(state: Readonly<HostedRelayState>, enco
     for (const cost of costs) {
       if (typeof cost.kind !== 'string' || typeof cost.owner !== 'string' || typeof cost.key !== 'string' || typeof cost.identity !== 'string'
         || !Number.isSafeInteger(cost.byteLength) || cost.byteLength < 1 || !Number.isSafeInteger(cost.manifestBytes) || cost.manifestBytes < 1
+        || !Number.isSafeInteger(cost.payloadStringBytes) || cost.payloadStringBytes < 0
         || cost.chunkCount !== Math.ceil(cost.byteLength / actual.chunkBytes)) throw new Error('Invalid succession record costs.');
       const id = identity(cost.kind, cost.owner, cost.key);
       if (result.has(id)) throw new Error('Duplicate succession record costs.');
@@ -133,14 +140,26 @@ export function deriveSuccessionCapacity(state: Readonly<HostedRelayState>, enco
   };
   const headers = new Map<string, { kind: string; owner: string; key: string; delta: number; absentPayload?: number }>();
   const replacements = new Map<string, number>();
-  let retainedBytes = 0, remainingBytes = 0;
+  const snapshotReplacements = new Map<string, number>();
+  let retainedBytes = 0, remainingBytes = 0, remainingSnapshotBytes = 0;
+  // Serialized JSON has no raw control characters or unpaired surrogates. Its
+  // outer string encoding expands each UTF-8 byte at most twice. Subtract only
+  // the exact current payload, so intermediate writes consume their reservation.
+  // Complete record framing also bounds tuple keys and collection separators.
+  const snapshotGrowth = (future: number, present?: SuccessionRecordCost) => Math.max(0, sum(future, future) - (present?.payloadStringBytes ?? 0));
   for (const [id, cost] of records) retainedBytes = sum(retainedBytes, Math.max(0, charge(cost) - (ordinaryRecords.has(id) ? charge(ordinaryRecords.get(id)!) : 0)));
   const replacement = (kind: string, owner: string, key: string, payload: number) => {
     const present = current(kind, owner, key);
     const id = identity(kind, owner, key);
-    replacements.set(id, Math.max(replacements.get(id) ?? 0, Math.max(0, charge(quote(kind, owner, key, payload)) - (present ? charge(present) : 0))));
+    const quoted = quote(kind, owner, key, payload);
+    replacements.set(id, Math.max(replacements.get(id) ?? 0, Math.max(0, charge(quoted) - (present ? charge(present) : 0))));
+    snapshotReplacements.set(id, Math.max(snapshotReplacements.get(id) ?? 0, snapshotGrowth(quoted.byteLength, present)));
   };
-  const insertion = (kind: string, owner: string, key: string, payload: number) => { remainingBytes = sum(remainingBytes, charge(quote(kind, owner, key, payload))); };
+  const insertion = (kind: string, owner: string, key: string, payload: number) => {
+    const quoted = quote(kind, owner, key, payload);
+    remainingBytes = sum(remainingBytes, charge(quoted));
+    remainingSnapshotBytes = sum(remainingSnapshotBytes, snapshotGrowth(quoted.byteLength));
+  };
   const headerGrowth = (kind: string, owner: string, key: string, delta: number, absentPayload?: number) => {
     const id = identity(kind, owner, key), saved = headers.get(id);
     headers.set(id, { kind, owner, key, delta: sum(saved?.delta ?? 0, delta), absentPayload: saved?.absentPayload ?? absentPayload });
@@ -244,8 +263,9 @@ export function deriveSuccessionCapacity(state: Readonly<HostedRelayState>, enco
             const candidate = { ...organized, providerId: widest(512), nativeSessionId: widest(512),
               title: widest(512), workspace: widest(4096), parentNativeSessionId: widest(4096) };
             const nextKey = JSON.stringify([candidate.subject, candidate.hostId, candidate.providerId, candidate.nativeSessionId]);
-            const largest = charge(quote('sessionStar', '', nextKey, bytes(candidate)));
+            const quoted = quote('sessionStar', '', nextKey, bytes(candidate)), largest = charge(quoted);
             remainingBytes = sum(remainingBytes, Math.max(0, largest - charge(requireCurrent('sessionStar', '', key))));
+            remainingSnapshotBytes = sum(remainingSnapshotBytes, snapshotGrowth(quoted.byteLength, requireCurrent('sessionStar', '', key)));
             // The existing reference can be shorter; charging a whole bounded reference is conservative.
             headerGrowth('relayHeader', '', 'relay', reference('sessionStar', '', nextKey));
           }
@@ -264,6 +284,8 @@ export function deriveSuccessionCapacity(state: Readonly<HostedRelayState>, enco
       const claimGrowth = Math.max(0, ...recoveryKeys.filter(([, key]) => key.recovery!.installationId === installationId).map(([hash, key]) =>
         key.claimedAt === undefined ? charge(quote('deviceKey', owner, hash, bytes({ ...key, claimedAt: MAX }))) - charge(requireCurrent('deviceKey', owner, hash)) : 0));
       remainingBytes = sum(remainingBytes, claimGrowth);
+      remainingSnapshotBytes = sum(remainingSnapshotBytes, Math.max(0, ...recoveryKeys.filter(([, key]) => key.recovery!.installationId === installationId).map(([hash, key]) =>
+        key.claimedAt === undefined ? snapshotGrowth(quote('deviceKey', owner, hash, bytes({ ...key, claimedAt: MAX })).byteLength, requireCurrent('deviceKey', owner, hash)) : 0)));
       if (!broker.hosts.some(host => host.id === recovery.hostId && host.installationId === installationId)) {
         slots.hostSlots++;
         insertion('host', owner, recovery.hostId, recoveryHostBound(recovery.hostId, installationId));
@@ -297,20 +319,28 @@ export function deriveSuccessionCapacity(state: Readonly<HostedRelayState>, enco
     if (!present) {
       if (growth.absentPayload === undefined) throw new Error('Missing header payload bound.');
       remainingBytes = sum(remainingBytes, charge(quote(growth.kind, growth.owner, growth.key, sum(growth.absentPayload, growth.delta))));
+      remainingSnapshotBytes = sum(remainingSnapshotBytes, snapshotGrowth(quote(growth.kind, growth.owner, growth.key, sum(growth.absentPayload, growth.delta)).byteLength));
     } else if (ordinaryCost) {
       const delta = sum(Math.max(0, present.byteLength - ordinaryCost.byteLength), growth.delta);
       const maximum = sum(delta, headerNumberGrowth(ordinaryCost.byteLength, delta, actual.chunkBytes));
       remainingBytes = sum(remainingBytes, Math.max(0, maximum - Math.max(0, charge(present) - charge(ordinaryCost))));
+      remainingSnapshotBytes = sum(remainingSnapshotBytes, growth.delta, growth.delta);
     } else {
       const payload = present.byteLength - quote(growth.kind, growth.owner, growth.key, 0).byteLength;
       if (payload < 0) throw new Error('Invalid complete header encoding cost.');
       replacement(growth.kind, growth.owner, growth.key, sum(payload, growth.delta));
+      // Header payloads contain codec references, not inline snapshot objects;
+      // only their known additive growth belongs to the inline representation.
+      snapshotReplacements.delete(id);
+      remainingSnapshotBytes = sum(remainingSnapshotBytes, growth.delta, growth.delta);
     }
   }
   remainingBytes = sum(remainingBytes, ...replacements.values());
+  remainingSnapshotBytes = sum(remainingSnapshotBytes, ...snapshotReplacements.values());
   const featureCharge = sum(retainedBytes, remainingBytes);
   if (featureCharge > SUCCESSION_FEATURE_BYTES) violations.push('Succession evidence encoding capacity is exhausted.');
-  return { retainedBytes, remainingBytes, featureCharge, tenants, violations };
+  if (encoding.acceptsSnapshot && !encoding.acceptsSnapshot(state, remainingSnapshotBytes)) violations.push('Complete Relay snapshot encoding capacity is exhausted.');
+  return { retainedBytes, remainingBytes, remainingSnapshotBytes, featureCharge, tenants, violations };
 }
 
 export function assertSuccessionCapacity(state: Readonly<HostedRelayState>, encoding: SuccessionEncodingCosts): SuccessionCapacity {

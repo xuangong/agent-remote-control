@@ -186,6 +186,8 @@ The Lab retains provider-reported child titles independently of the active conve
 
 The composer accepts an optional `sessionControls` slot for additional controls inside the Status panel. Session menus close on outside pointer interaction or Escape, which returns focus to the trigger. The slot stays mounted while hidden so pending provider changes survive menu navigation (`packages/agent-remote-web/src/react/AgentComposer.tsx`, `packages/agent-remote-web/src/react/AgentSessionSettings.tsx`).
 
+Before a native binding is ready, local drafts reuse the same adaptive action toolbar without exposing native settings or Status. Opening and recovery remain visible in the activity indicator; cached activity cannot expose an interrupt action while disconnected. An opening draft does not also show the instruction to open an Agent. The host layout can place connection status inline using the activity indicator's `data-connection-pending` attribute.
+
 The shared composer accepts caller-owned `consoleCommands`, `onExecuteConsoleCommand` and `attachments`. Console commands remain distinct from native capabilities and carry a Console label; their names and aliases take precedence in the local menu. Provider command discovery failures do not disable available console commands. Each mounted composer has distinct input, command-menu and accessibility IDs, allowing independent primary and side conversations without cross-target focus or labels.
 
 ## Communication letters

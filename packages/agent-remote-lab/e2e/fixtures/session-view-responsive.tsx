@@ -35,7 +35,7 @@ function Fixture() {
   const [height, setHeight] = useState(560);
   const [connection, setConnection] = useState<RemoteSessionStatus>('ready');
   const [takeoverRequest, setTakeoverRequest] = useState<{ reject(error: Error): void }>();
-  const draftOnly = query.has('draftOnly');
+  const [draftOnly, setDraftOnly] = useState(query.has('draftOnly'));
   const idle = query.has('idle');
   return <main className="lab-shell" style={{ display: 'block', position: 'static', height: 'auto', overflow: 'visible' }}>
     <nav aria-label="Fixture size">
@@ -44,6 +44,7 @@ function Fixture() {
       <label>Connection<select aria-label="Session connection" value={connection} onChange={event => setConnection(event.target.value as RemoteSessionStatus)}>
         {['connecting', 'catching_up', 'disconnected', 'ready'].map(value => <option key={value}>{value}</option>)}
       </select></label>
+      <label><input aria-label="Draft only" type="checkbox" checked={draftOnly} onChange={event => setDraftOnly(event.target.checked)} />Draft only</label>
       {query.has('nativeOwner') ? <button type="button" disabled={!takeoverRequest} onClick={() => {
         takeoverRequest?.reject(new Error('Fixture native session remains owned.')); setTakeoverRequest(undefined);
       }}>Fail fixture takeover</button> : null}
@@ -52,12 +53,12 @@ function Fixture() {
       {['primary', 'side', 'popup'].map((placement, index) => <section key={placement} data-placement={placement}
         className={placement === 'side' ? 'lab-side-conversation' : placement === 'popup' ? 'lab-ask-window' : 'lab-primary-conversation'}
         style={{ width, height, flex: 'none', minWidth: 0, padding: 0, border: 0, position: 'relative' }}>
-        <SessionWorkbench state={query.has('noSnapshot') ? undefined : { ...state, agent: { ...state.agent!, id: `fixture-${index}`, ...(idle ? { status: 'idle', activeTurn: null } : {}) } }} sessionStatus={connection}
+        <SessionWorkbench state={query.has('noSnapshot') && draftOnly ? undefined : { ...state, agent: { ...state.agent!, id: `fixture-${index}`, ...(idle ? { status: 'idle', activeTurn: null } : {}) } }} sessionStatus={connection}
           draftOnly={draftOnly} headingMode={query.has('toolbar') ? 'toolbar' : 'inline'}
           nativeTakeover={query.has('nativeOwner') ? <SessionControlNotice connected={connection === 'ready'}
             control={{ access: 'read_only', available: false, nativeOwner: { kind: 'native_cli', generation: 'fixture-owner' } }}
             onTakeControl={() => new Promise<void>((_resolve, reject) => setTakeoverRequest({ reject }))} /> : undefined}
-          conversationPath={<strong>Session fixture</strong>} sessionManager={<div><button type="button">Manage</button></div>} messageDraft="A draft kept while the view resizes"
+          conversationPath={<strong>Session fixture</strong>} sessionManager={<div><button type="button">Manage</button></div>} messageDraft={query.has('emptyDraft') ? '' : 'A draft kept while the view resizes'}
           actions={{ sendMessage: async () => {}, sendMessageContent: async () => {}, cancel: async () => {}, listCommands: async () => [{ id: 'review', name: 'review', description: 'Review a change while keeping the conversation visible.', kind: 'skill' }] }} />
       </section>)}
     </div>

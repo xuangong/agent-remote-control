@@ -417,7 +417,6 @@
 .agent-composer-actions { display: flex; align-items: center; gap: 8px; margin-top: 8px; }
 .agent-composer-note { margin: 0; color: var(--agent-muted); font-size: 12px; line-height: 1.45; }
 .agent-composer-actions > .agent-composer-note { flex: 1; }
-.agent-composer-secondary-controls { display: flex; gap: 6px; }
 .agent-composer button, .agent-planning-control button { min-height: 34px; border: 1px solid var(--agent-rule); border-radius: 6px; padding: 5px 10px; color: var(--agent-ink); background: var(--agent-panel-raised); font: inherit; font-size: 12px; cursor: pointer; }
 .agent-composer button:disabled, .agent-planning-control button:disabled { cursor: not-allowed; opacity: .45; }
 .agent-activity { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px 16px; min-height: 36px; margin-bottom: 8px; font-size: 12px; }

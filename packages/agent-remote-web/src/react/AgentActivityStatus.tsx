@@ -45,14 +45,14 @@ export function AgentActivityStatus({ state, sessionState, visible = true, disab
   const timed = active && !unavailable && Number.isFinite(startedAt);
   const now = useVisibleClock(timed && visible);
   const seconds = Math.max(0, Math.floor((now - startedAt) / 1_000));
-  return <div className="agent-activity" data-active={unavailable || terminal || working || waiting || commandPending || session.activity === 'starting'} aria-label="Agent activity" data-testid="agent-activity">
+  return <div className="agent-activity" data-connection-pending={unavailable || undefined} data-active={unavailable || terminal || working || waiting || commandPending || session.activity === 'starting'} aria-label="Agent activity" data-testid="agent-activity">
     <div className="agent-activity-summary">
       <span className={`agent-presence agent-state-${unavailable ? 'offline' : terminal ? session.activity : waiting ? 'waiting' : working ? 'running' : 'idle'}`} aria-hidden="true" />
-      <span data-testid="agent-activity-label" aria-live="polite">{label}</span>
+      <span className="agent-activity-label" data-testid="agent-activity-label" aria-live="polite">{label}</span>
       {timed ? <time className="agent-activity-elapsed" data-testid="turn-elapsed" aria-label="Turn elapsed time" aria-live="off" dateTime={`PT${seconds}S`}>{formatElapsed(seconds)}</time>
         : working && !unavailable ? <span className="agent-activity-elapsed">Start time unavailable</span> : null}
     </div>
-    <button type="button" data-testid="cancel-submit" disabled={interruptDisabled} hidden={!working && !waiting && !commandPending}
+    <button type="button" data-testid="cancel-submit" disabled={interruptDisabled} hidden={unavailable || !working && !waiting && !commandPending}
       title={agent?.capabilities.cancel ? 'Interrupt the current native operation' : 'Interrupt is unavailable for this Provider.'}
       onClick={onInterrupt}>{interruptLabel}</button>
   </div>;

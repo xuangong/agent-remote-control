@@ -17,7 +17,7 @@ import type { MessagePart } from '@orchardworks/agent-remote-protocol';
 import { useSendButtonPress } from './useSendButtonPress.js';
 import { usePendingSend } from './usePendingSend.js';
 import { PendingSendQueue } from './PendingSendQueue.js';
-import type { ComposerAction } from './AgentActionToolbar.js';
+import { AgentActionToolbar, type ComposerAction } from './AgentActionToolbar.js';
 
 export interface PendingFirstInputContext {
   state: 'restoring' | 'pending' | 'dispatching' | 'accepted' | 'unknown' | 'unavailable';
@@ -267,13 +267,25 @@ export function AgentComposer({ sessionState: suppliedSessionState, readOnly: fo
     if (readOnly) focusRequested.current = undefined;
     const input = inputRef.current;
     if (!input) { if (focusRequested.current === agentId && !pending && visible) { focusRequested.current = undefined; editorRef.current?.focus(); } return; }
-    input.style.height = 'auto';
-    input.style.height = `${Math.min(input.scrollHeight, 200)}px`;
+    const resize = () => {
+      input.style.height = 'auto';
+      input.style.height = `${Math.min(input.scrollHeight, 200)}px`;
+    };
+    resize();
     if (focusRequested.current === agentId && !pending) {
       focusRequested.current = undefined;
       if (!input.closest('[hidden]')) input.focus({ preventScroll: true });
     }
-  }, [agentId, text, pending, readOnly, hideDraft]);
+    let width = input.getBoundingClientRect().width;
+    const observer = typeof ResizeObserver === 'undefined' ? undefined : new ResizeObserver(() => {
+      const nextWidth = input.getBoundingClientRect().width;
+      if (nextWidth === width) return;
+      width = nextWidth;
+      resize();
+    });
+    observer?.observe(input);
+    return () => observer?.disconnect();
+  }, [agentId, text, pending, readOnly, hideDraft, richEnabled]);
 
   function chooseCommand(command: AgentCommand): void {
     if (latest.current.draftOnly || latest.current.mutationBlocked || latest.current.agentId !== agentId) return;
@@ -523,7 +535,10 @@ export function AgentComposer({ sessionState: suppliedSessionState, readOnly: fo
       {state?.agent && !draftOnly ? <AgentSessionSettings actions={toolbarActions} sessionState={session} key={agentId} state={state} disabled={disabled} readOnly={forcedReadOnly} view={currentDraft.view} busy={busy}
         onView={(view) => { currentDraft.view = view; refresh((value) => value + 1); }}
         onPendingChange={(value) => { currentDraft.settingPending = value; if (mounted.current) refresh((count) => count + 1); }}
-        onSelect={onSetSessionSetting && !mutationBlocked ? async (id, value) => { if (latest.current.draftOnly || latest.current.mutationBlocked || latest.current.agentId !== agentId) return; await onSetSessionSetting(id, value); } : undefined} renderError={renderSessionSettingError}>{sessionControls}</AgentSessionSettings> : <div className="agent-composer-secondary-controls">{toolbarActions.map(action => <button key={action.id} type="button" aria-label={action.label} disabled={action.disabled} onClick={action.run}>{action.content}</button>)}</div>}
+        onSelect={onSetSessionSetting && !mutationBlocked ? async (id, value) => { if (latest.current.draftOnly || latest.current.mutationBlocked || latest.current.agentId !== agentId) return; await onSetSessionSetting(id, value); } : undefined} renderError={renderSessionSettingError}>{sessionControls}</AgentSessionSettings> : <div className="agent-session-controls">
+          <AgentActionToolbar actions={toolbarActions} overflowOpen={currentDraft.view === 'actions'}
+            onOverflow={open => { currentDraft.view = open ? 'actions' : undefined; refresh(value => value + 1); }} />
+        </div>}
       <AgentActivityStatus sessionState={activitySession} visible={activityVisible} state={state} disabled={disabled || draftOnly} disabledLabel={!draftOnly && state?.agent ? disabledLabel : undefined}
         commandPending={pending === 'command'}
         interruptDisabled={!canInterrupt || currentDraft.interruptPending === true || (pending !== undefined && pending !== 'command') || !onCancel}
@@ -551,7 +566,7 @@ export function AgentComposer({ sessionState: suppliedSessionState, readOnly: fo
     {hasResources && !ready ? <p role="status" className="agent-composer-note">Resources remain in your draft. Reconnect before sending.</p> : null}
     {hasImages ? <ImageUploadStatus parts={imageDraft.parts} images={imageDraft.images} connected={ready} onOpen={imageId => editorRef.current?.openImage(imageId)} /> : null}
     {!ownershipReadOnly && runtimeUnavailable ? <p className="agent-composer-note" role="status">{runtimeUnavailable}</p>
-      : !ownershipReadOnly && !state?.agent ? <p className="agent-composer-note">Open or attach to an Agent first.</p> : null}
+      : !ownershipReadOnly && !draftOnly && !state?.agent ? <p className="agent-composer-note">Open or attach to an Agent first.</p> : null}
     {feedback && !(feedback.delivery && state?.outgoingMessages !== undefined) ? <p className="agent-composer-note" role={feedback.kind === 'error' ? 'alert' : 'status'}>{feedback.message}</p> : null}
     {!draftOnly && !onInspectCommand && currentDraft.inspectedSkill && state ? <AgentCommandDetails key={`${agentId}:${currentDraft.inspectedSkill.id}`}
       command={currentDraft.inspectedSkill} resources={state.resources} onRequestResource={onRequestResource}

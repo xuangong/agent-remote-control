@@ -1,6 +1,42 @@
 import { expect, test, type Locator } from '@playwright/test';
 import { activateComposerAction, revealComposerAction } from './composer-actions';
 
+test('composer height stays stable from opening through ready and reconnect with a retained draft', async ({ page, isMobile }, testInfo) => {
+  await page.setViewportSize({ width: isMobile ? 390 : 1440, height: 844 });
+  for (const width of isMobile ? [320, 360] : [320, 360, 900]) {
+    for (const query of ['emptyDraft', '', 'emptyDraft&noSnapshot', 'noSnapshot']) {
+      await page.goto(`/e2e/fixtures/session-view-responsive.html?idle&toolbar&draftOnly&${query}`);
+      await page.getByRole('spinbutton', { name: 'View width' }).fill(String(width));
+      const view = page.locator('[data-placement="primary"]');
+      const composer = view.locator('.agent-composer');
+      const status = view.getByTestId('agent-activity-label');
+      const input = view.getByTestId('prompt-input');
+      const draft = () => input.evaluate(element => element instanceof HTMLTextAreaElement ? element.value : element.textContent);
+      await expect(status).toHaveText('Opening session');
+      await expect(composer).not.toContainText('Open or attach to an Agent first.');
+      await expect(input).toHaveCSS('font-size', width <= 760 ? '16px' : '14px');
+      const expectedDraft = query.includes('emptyDraft') ? '' : 'A draft kept while the view resizes';
+      expect(await draft()).toBe(expectedDraft);
+      const suffix = `${width}-${query.replaceAll('&', '-') || 'draft'}`;
+      await view.screenshot({ path: testInfo.outputPath(`composer-opening-${suffix}.png`) });
+      const opening = (await composer.boundingBox())!;
+      const timeline = (await view.getByTestId('timeline').boundingBox())!;
+      await page.getByRole('checkbox', { name: 'Draft only', exact: true }).uncheck();
+      await expect(status).toBeHidden();
+      await view.screenshot({ path: testInfo.outputPath(`composer-ready-${suffix}.png`) });
+      expect(await draft()).toBe(expectedDraft);
+      expect(Math.abs((await composer.boundingBox())!.height - opening.height)).toBeLessThan(1);
+      expect(Math.abs((await view.getByTestId('timeline').boundingBox())!.height - timeline.height)).toBeLessThan(1);
+      for (const connection of ['disconnected', 'catching_up', 'ready']) {
+        await page.getByRole('combobox', { name: 'Session connection' }).selectOption(connection);
+        expect(Math.abs((await composer.boundingBox())!.height - opening.height)).toBeLessThan(1);
+        expect(await draft()).toBe(expectedDraft);
+        if (connection !== 'ready') await expect(status).toBeVisible();
+      }
+    }
+  }
+});
+
 test('connection status remains visible during recovery and hides when ready in a narrow Session View', async ({ page }, testInfo) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto('/e2e/fixtures/session-view-responsive.html?idle&toolbar');

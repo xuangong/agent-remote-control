@@ -5,8 +5,21 @@
 .lab-mobile-navigation .lab-global-view-slot .lab-view-options-trigger { width: 44px; padding: 0; }
 .lab-mobile-navigation .lab-global-view-slot .lab-view-options-trigger > span { display: none; }
 .lab-composer-input-shell { container: session-composer / inline-size; }
+/* Lift the dock's open menus above timeline tools. */
+.lab-composer-dock:has(.agent-session-panel:not([hidden]), .agent-command-menu) { z-index: 8; }
 
 .lab-composer-dock .agent-composer { --lab-session-panel-space: 160px; }
+/* Plain drafts and rich drafts share the same line box before capabilities arrive. */
+.lab-composer-dock .agent-composer :is(textarea, .agent-composer-editor) {
+  box-sizing: border-box; min-height: 38px; padding: 6px; line-height: 1.5;
+}
+.lab-composer-dock .agent-activity[data-connection-pending="true"] {
+  flex: 0 1 auto; min-width: 0; max-width: calc(100% - 96px);
+}
+.lab-composer-dock .agent-activity[data-connection-pending="true"] .agent-activity-summary { flex-wrap: nowrap; }
+.lab-composer-dock .agent-activity[data-connection-pending="true"] .agent-activity-label {
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
 .lab-composer-dock .agent-composer:not([data-control-readonly]) :is(textarea, .agent-composer-editor) {
   max-height: clamp(44px, 18cqh, 200px);
 }
@@ -50,13 +63,13 @@
 
 @container session-composer (max-width: 760px) {
   .lab-composer-dock .agent-composer :is(textarea, .agent-composer-editor) { font-size: 16px; }
-  .lab-composer-dock .agent-composer textarea { min-height: 44px; }
+  .lab-composer-dock .agent-composer :is(textarea, .agent-composer-editor) { min-height: 44px; }
   .lab-composer-dock .agent-composer-actions button { min-height: 44px; }
   .lab-composer-dock .agent-session-toolbar { --agent-toolbar-target: 44px; }
   .lab-composer-dock .agent-composer-actions > button[data-testid="prompt-submit"] { flex: 0 0 44px; min-width: 44px; margin-left: 0; }
-  .lab-composer-dock .agent-activity[data-active="true"] { order: -1; flex-basis: 100%; margin: 0; justify-content: space-between; }
+  .lab-composer-dock .agent-activity[data-active="true"]:not([data-connection-pending="true"]) { order: -1; flex-basis: 100%; margin: 0; justify-content: space-between; }
   .lab-composer-dock .agent-activity[data-active="true"] + button[data-testid="prompt-submit"] { margin-left: 0; }
-  .lab-composer-dock .agent-composer:has(.agent-activity[data-active="true"]) { --lab-session-panel-space: 208px; }
+  .lab-composer-dock .agent-composer:has(.agent-activity[data-active="true"]:not([data-connection-pending="true"])) { --lab-session-panel-space: 208px; }
 }
 
 /* Short views keep menus usable by letting them cover the composer. */

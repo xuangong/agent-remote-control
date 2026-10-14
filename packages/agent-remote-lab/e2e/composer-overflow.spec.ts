@@ -1,4 +1,5 @@
 import { expect, test } from '@playwright/test';
+import { activateComposerAction } from './composer-actions';
 
 test('narrow composed views keep actions on one row and expose overflow without losing the draft', async ({ page }, info) => {
   await page.setViewportSize({ width: 1440, height: 900 });
@@ -30,7 +31,7 @@ test('narrow composed views keep actions on one row and expose overflow without 
   await expect(more).toBeFocused();
   await more.click();
   const chooser = page.waitForEvent('filechooser');
-  await menu.getByRole('button', { name: 'Add images', exact: true }).click();
+  await activateComposerAction(view, 'Add images');
   await (await chooser).setFiles([]);
   await expect(menu).toBeHidden();
   expect(Math.abs((await view.getByTestId('timeline').boundingBox())!.height - before.height)).toBeLessThan(0.5);

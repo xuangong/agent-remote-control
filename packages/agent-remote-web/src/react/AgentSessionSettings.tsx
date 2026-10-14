@@ -31,7 +31,7 @@ export function AgentSessionSettings({ state, sessionState, children, actions = 
     target?.focus({ preventScroll: true });
   };
   useEffect(() => {
-    if (!view) return;
+    if (!view || view === 'actions') return;
     const controls = layer.current;
     const keyboardScope = controls?.closest<HTMLElement>('.agent-composer') ?? controls;
     trigger.current = controls?.querySelector<HTMLElement>('.agent-session-toolbar [aria-expanded="true"]') ?? undefined;

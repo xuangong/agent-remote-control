@@ -21,6 +21,8 @@ it.each([
   for (const cached of [state, undefined]) {
     const container = await render(<AgentComposer state={cached} sessionState={remoteSessionState(undefined, connection)} draftOnly draft="Local draft" onSendMessage={send} onCancel={cancel} />);
     expect(container.querySelector('[data-testid="agent-activity-label"]')?.textContent).toBe(expected);
+    expect(container.textContent).not.toContain('Open or attach to an Agent first.');
+    expect(container.querySelector<HTMLButtonElement>('[data-testid="cancel-submit"]')?.hidden).toBe(true);
     expect(container.querySelector('[data-testid="turn-elapsed"]')).toBeNull();
     expect(container.querySelector<HTMLTextAreaElement>('[data-testid="prompt-input"]')).toMatchObject({ value: 'Local draft', disabled: false });
     const submit = container.querySelector<HTMLButtonElement>('[data-testid="prompt-submit"]')!;

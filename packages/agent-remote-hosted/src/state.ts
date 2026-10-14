@@ -13,15 +13,16 @@ import { hasHostRecoveryMetadata, retainedHostIdentities, validHostRecovery, val
 import { validSessionStar, starKey, MAX_USER_STARS, type SavedSessionStar } from './session-stars.js';
 import type { SecurityEvent } from './security.js';
 import { validControllerPath } from './controller-location.js';
-import { createHash } from 'node:crypto';
-import type { GatewayAuthOptions, GatewayGrant } from './auth.js';
+import type { HostedGrant } from './auth.js';
+import { hostedAuthStateConfig, hostedAuthNamespace, validAllowedEmail, type HostedAuthOptions } from './hosted-auth.js';
 import type { RemoteHostBrokerState } from './broker.js';
 import type { HostPreviewState } from './host-previews.js';
 import { validPreviewNames } from './preview-names.js';
 import { assertSuccessionCapacity, isSuccessionCapacityError, requireSuccessionEncodingCosts, type SuccessionEncodingCosts } from './succession-capacity.js';
 import { decodeRemoteHostUplinkMessage, isControllerIdentity, isHostEnvironment, isPairingPurpose } from '@orchardworks/agent-remote-protocol';
 
-export interface SavedGatewaySession { hash: string; grant: GatewayGrant; sessionExpiresAt: number; id?: string; label?: string; createdAt?: number; lastSeenAt?: number; browserId?: string; activity?: number[] }
+export interface SavedHostedSession { hash: string; grant: HostedGrant; sessionExpiresAt: number; id?: string; label?: string; createdAt?: number; lastSeenAt?: number; browserId?: string; activity?: number[] }
+export type SavedGatewaySession = SavedHostedSession;
 export interface HostedRelayState {
   version: 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10;
   securityEvents?: SecurityEvent[];
@@ -30,25 +31,26 @@ export interface HostedRelayState {
   sessionMigrations?: SavedSessionMigration[];
   sessionTitles?: SessionTitleUpdate[];
   sessionTitleRevision?: number;
-  config: { origin: string; issuer: string };
-  sessions: SavedGatewaySession[];
+  config: { origin: string; issuer: string; provider?: 'google'; clientId?: string };
+  googleIdentities?: Array<{ subject: string; email: string }>;
+  sessions: SavedHostedSession[];
   tenants: Array<{ subject: string; namespace: string; broker: RemoteHostBrokerState; favoritesSuccession?: FavoritesSuccessionProgress }>;
-  loginChallenges: Array<[string, { expiresAt: number; hostId?: string; returnPath?: string }]>;
+  loginChallenges: Array<[string, LoginChallenge]>;
   consumedProofs: Array<[string, number]>;
 }
+export interface LoginChallenge { expiresAt: number; hostId?: string; returnPath?: string; google?: { nonce: string; verifier: string; browserHash: string; browserId?: string } }
 export interface RelayStateStore {
   initial?: unknown;
   /** Resolve only after the entire snapshot is durably and atomically committed. */
   commit(state: HostedRelayState): Promise<void>;
   close?(): void | Promise<void>;
 }
-export function emptyRelayState(auth: GatewayAuthOptions): HostedRelayState {
-  return { version: 2, config: { origin: auth.origin, issuer: auth.issuer }, sessions: [], tenants: [], loginChallenges: [], consumedProofs: [] };
+export function emptyRelayState(auth: HostedAuthOptions): HostedRelayState {
+  return { version: 2, config: hostedAuthStateConfig(auth), sessions: [], tenants: [], loginChallenges: [], consumedProofs: [] };
 }
 function record(value: unknown): value is Record<string, any> { return value !== null && typeof value === 'object' && !Array.isArray(value); }
 const string = (value: unknown, max = 512): value is string => typeof value === 'string' && value.length > 0 && value.length <= max;
 const time = (value: unknown): value is number => typeof value === 'number' && Number.isSafeInteger(value) && value >= 0;
-const namespace = (issuer: string, subject: string) => createHash('sha256').update(JSON.stringify([issuer, subject])).digest('hex');
 function unique<T>(values: T[], key: (value: T) => string) { return new Set(values.map(key)).size === values.length; }
 function validBroker(value: unknown): value is RemoteHostBrokerState {
   if (!record(value) || !Array.isArray(value.keys) || value.keys.length > 128 || !Array.isArray(value.hosts) || value.hosts.length > 128 ||
@@ -79,9 +81,9 @@ function validBroker(value: unknown): value is RemoteHostBrokerState {
   }
   return true;
 }
-export function validateRelayState(value: unknown, auth: GatewayAuthOptions): HostedRelayState {
+export function validateRelayState(value: unknown, auth: HostedAuthOptions): HostedRelayState {
   const invalid = () => { throw new Error('Invalid or unsupported Relay state.'); };
-  if (!record(value) || ![2, 3, 4, 5, 6, 7, 8, 9, 10].includes(value.version) || !record(value.config) || value.config.origin !== auth.origin || value.config.issuer !== auth.issuer) return invalid();
+  if (!record(value) || ![2, 3, 4, 5, 6, 7, 8, 9, 10].includes(value.version) || !record(value.config) || value.config.origin !== auth.origin || value.config.issuer !== hostedAuthStateConfig(auth).issuer || value.config.provider !== hostedAuthStateConfig(auth).provider || value.config.clientId !== hostedAuthStateConfig(auth).clientId) return invalid();
   if (value.version < 9 && Array.isArray(value.tenants) && value.tenants.some((tenant: any) => tenant?.broker?.associations?.version === 5)) return invalid();
   if (value.version < 8 && Array.isArray(value.tenants) && value.tenants.some((tenant: any) => record(tenant?.broker) && hasHostRecoveryMetadata(tenant.broker as RemoteHostBrokerState))) return invalid();
   if (value.version < 6 && Array.isArray(value.tenants) && value.tenants.some((tenant: any) => tenant?.broker?.associations?.version === 4)) return invalid();
@@ -89,11 +91,13 @@ export function validateRelayState(value: unknown, auth: GatewayAuthOptions): Ho
   if (value.version < 4 && Array.isArray(value.tenants) && value.tenants.some((tenant: any) => tenant?.broker?.associations?.version === 2)) return invalid();
   if (value.version === 2 && Array.isArray(value.tenants) && value.tenants.some((tenant: any) => tenant?.broker?.associations !== undefined)) return invalid();
   if (!Array.isArray(value.sessions) || value.sessions.length > 1024 || !Array.isArray(value.tenants) || !Array.isArray(value.loginChallenges) || value.loginChallenges.length > 4096 || !Array.isArray(value.consumedProofs) || value.consumedProofs.length > 10000) return invalid();
-  if (!value.sessions.every((session: unknown) => record(session) && /^[a-f0-9]{64}$/.test(session.hash) && time(session.sessionExpiresAt) && record(session.grant) && string(session.grant.subject) && session.grant.namespace === namespace(auth.issuer, session.grant.subject) && time(session.grant.expiresAt) && typeof session.grant.ticket === 'string' && string(session.grant.nonce) && string(session.grant.continuation, 6000) && time(session.grant.sessionExpiresAt) && (session.id === undefined || string(session.id, 128)) && (session.browserId === undefined || validBrowserId(session.browserId)) && (session.activity === undefined || (Array.isArray(session.activity) && session.activity.length <= 8 && session.activity.every(time))) && (session.label === undefined || string(session.label, 128)) && (session.createdAt === undefined || time(session.createdAt)) && (session.lastSeenAt === undefined || time(session.lastSeenAt)) && (session.grant.authenticatedAt === undefined || time(session.grant.authenticatedAt))) ||
-    !value.tenants.every((tenant: unknown) => record(tenant) && string(tenant.subject) && tenant.namespace === namespace(auth.issuer, tenant.subject) && validBroker(tenant.broker)) ||
-    !value.loginChallenges.every((item: unknown) => Array.isArray(item) && item.length === 2 && /^[A-Za-z0-9_-]{43}$/.test(item[0]) && record(item[1]) && time(item[1].expiresAt) && (item[1].returnPath === undefined || validControllerPath(item[1].returnPath)) && (item[1].hostId === undefined || /^[A-Za-z0-9_-]{1,256}$/.test(item[1].hostId))) ||
+  if (!value.sessions.every((session: unknown) => record(session) && /^[a-f0-9]{64}$/.test(session.hash) && time(session.sessionExpiresAt) && record(session.grant) && string(session.grant.subject) && session.grant.namespace === hostedAuthNamespace(auth, session.grant.subject) && time(session.grant.expiresAt) && (auth.provider === 'google' ? session.grant.provider === 'google' && session.grant.ticket === undefined && session.grant.nonce === undefined && session.grant.continuation === undefined && time(session.grant.authenticatedAt) && session.grant.authenticatedAt <= session.sessionExpiresAt : (session.grant.provider === undefined || session.grant.provider === 'gateway') && typeof session.grant.ticket === 'string' && string(session.grant.nonce) && string(session.grant.continuation, 6000)) && time(session.grant.sessionExpiresAt) && (session.id === undefined || string(session.id, 128)) && (session.browserId === undefined || validBrowserId(session.browserId)) && (session.activity === undefined || (Array.isArray(session.activity) && session.activity.length <= 8 && session.activity.every(time))) && (session.label === undefined || string(session.label, 128)) && (session.createdAt === undefined || time(session.createdAt)) && (session.lastSeenAt === undefined || time(session.lastSeenAt)) && (session.grant.authenticatedAt === undefined || time(session.grant.authenticatedAt))) ||
+    !value.tenants.every((tenant: unknown) => record(tenant) && string(tenant.subject) && tenant.namespace === hostedAuthNamespace(auth, tenant.subject) && validBroker(tenant.broker)) ||
+    !value.loginChallenges.every((item: unknown) => Array.isArray(item) && item.length === 2 && /^[A-Za-z0-9_-]{43}$/.test(item[0]) && record(item[1]) && time(item[1].expiresAt) && (auth.provider === 'google' ? record(item[1].google) && /^[A-Za-z0-9_-]{43}$/.test(item[1].google.nonce) && /^[A-Za-z0-9_-]{43}$/.test(item[1].google.verifier) && /^[a-f0-9]{64}$/.test(item[1].google.browserHash) && (item[1].google.browserId === undefined || validBrowserId(item[1].google.browserId)) : item[1].google === undefined) && (item[1].returnPath === undefined || validControllerPath(item[1].returnPath)) && (item[1].hostId === undefined || /^[A-Za-z0-9_-]{1,256}$/.test(item[1].hostId))) ||
     !value.consumedProofs.every((item: unknown) => Array.isArray(item) && item.length === 2 && string(item[0], 128) && item[0].length >= 16 && time(item[1])) ||
     !unique(value.sessions, item => item.hash) || !unique(value.tenants, item => item.namespace) || !unique(value.loginChallenges, item => item[0]) || !unique(value.consumedProofs, item => item[0])) return invalid();
+  if (value.googleIdentities !== undefined && (auth.provider !== 'google' || !Array.isArray(value.googleIdentities) || value.googleIdentities.length > 1024 || !value.googleIdentities.every((identity: unknown) => record(identity) && string(identity.subject) && validAllowedEmail(identity.email)) || !unique(value.googleIdentities, identity => identity.subject))) return invalid();
+  if (auth.provider === 'google' && value.sessions.some((session: SavedHostedSession) => !value.googleIdentities?.some((identity: { subject: string }) => identity.subject === session.grant.subject))) return invalid();
   if (value.securityEvents !== undefined && (!Array.isArray(value.securityEvents) || value.securityEvents.length > 4096 || !value.securityEvents.every((event: unknown) => record(event) && string(event.id) && string(event.subject) && time(event.at) && string(event.action, 128) && ['allowed', 'denied'].includes(event.outcome) && (event.hostId === undefined || string(event.hostId))))) return invalid();
   if (!validSuccessionAuthorities(value as HostedRelayState)) return invalid();
   if (Object.hasOwn(value, 'sessionSuccessions') && (value.version >= 6 || !validLegacySuccessionMirrors(value.sessionSuccessions, value as HostedRelayState))) throw new Error('Invalid legacy succession mirror state.');
@@ -121,15 +125,16 @@ export function validateRelayState(value: unknown, auth: GatewayAuthOptions): Ho
   }) || !unique(value.sessionTitles, starKey))) return invalid();
   if (!validFavoritesSuccession(value as HostedRelayState)) return invalid();
   if (!validFavoritesState(value as HostedRelayState)) return invalid();
-  if (value.sessions.some((session: SavedGatewaySession) => session.grant.profile !== undefined && (!record(session.grant.profile) || !string(session.grant.profile.name) || (session.grant.profile.email !== undefined && !string(session.grant.profile.email, 320))))) return invalid();
+  if (value.sessions.some((session: SavedHostedSession) => session.grant.profile !== undefined && (!record(session.grant.profile) || !string(session.grant.profile.name) || (session.grant.profile.email !== undefined && !string(session.grant.profile.email, 320))))) return invalid();
   const migrated = structuredClone(value);
   delete migrated.sessionSuccessions;
   return migrated as HostedRelayState;
 }
 /** Only the authenticated Node file adapter calls this explicit v1 migration. */
-export function migrateLegacyNodeState(value: unknown, auth: GatewayAuthOptions): HostedRelayState | undefined {
+export function migrateLegacyNodeState(value: unknown, auth: HostedAuthOptions): HostedRelayState | undefined {
   if (value === undefined) return undefined;
-  if (record(value) && value.version === 1) return validateRelayState({ ...value, version: 2, config: { origin: auth.origin, issuer: auth.issuer }, loginChallenges: [], consumedProofs: [] }, auth);
+  if (record(value) && value.version === 1 && auth.provider === 'google') throw new Error('Legacy Gateway state cannot be migrated into Google authentication.');
+  if (record(value) && value.version === 1) return validateRelayState({ ...value, version: 2, config: hostedAuthStateConfig(auth), loginChallenges: [], consumedProofs: [] }, auth);
   return validateRelayState(value, auth);
 }
 /** Shared normalization for real drafts and disposable complete quote views. */
@@ -142,7 +147,7 @@ export function stageRelayState(draft: HostedRelayState, minimumVersion: HostedR
   if (draft.version < 8 && draft.tenants.some(tenant => hasHostRecoveryMetadata(tenant.broker))) draft.version = 8;
   if (accounting) draft.version = 10;
 }
-export function createRelayState(auth: GatewayAuthOptions, storage: RelayStateStore | undefined, failed: () => void, published: () => void, successionEncodingCosts?: SuccessionEncodingCosts) {
+export function createRelayState(auth: HostedAuthOptions, storage: RelayStateStore | undefined, failed: () => void, published: () => void, successionEncodingCosts?: SuccessionEncodingCosts) {
   let current = storage?.initial === undefined ? emptyRelayState(auth) : validateRelayState(storage.initial, auth);
   // Authority leases must be confirmed again after every runtime restart.
   current.sessions = current.sessions.map(value => ({ ...value, grant: { ...value.grant, expiresAt: 0 } }));

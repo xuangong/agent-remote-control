@@ -16,7 +16,10 @@ import { createHash, randomBytes } from 'node:crypto';
 import { createHostBroker, type RemoteHostBrokerState, type HostBrokerOptions } from './broker.js';
 import { createGatewayControlVerifier } from './control.js';
 import { SharingError } from './host-sharing.js';
-import { createGatewaySessions } from './sessions.js';
+import { createHostedSessions } from './sessions.js';
+import { createAuthenticationProvider } from './auth-provider.js';
+import { createGoogleLogin } from './google-auth.js';
+import { resolveHostedAuth, hostedAuthMetadata, type HostedAuthOptions } from './hosted-auth.js';
 import { queryGatewayAuthority, type AuthorityDiagnostic } from './authority.js';
 import { provisionGatewayHostKey, revokeGatewayHostKey, validateBootstrapBody } from './host-bootstrap.js';
 import { createRelayState, stageRelayState, type HostedRelayState, type RelayStateStore } from './state.js';
@@ -33,9 +36,9 @@ import { previewTrafficBody, previewTrafficSocket } from './preview-traffic.js';
 import { adaptPreviewContent, PreviewContentError } from './preview-content.js';
 import type { TunnelSocket } from '@orchardworks/agent-remote-tunnel';
 import type { BrokerRequestContext, RelaySocket } from './transport.js';
-import { gatewayCookieName, readGatewayCookie, validateGatewayOrigin, verifyGatewayGrant, type GatewayAuthOptions, type GatewayGrant } from './auth.js';
+import { gatewayCookieName, readGatewayCookie, validateGatewayOrigin, verifyGatewayGrant, type HostedGrant } from './auth.js';
 
-export interface HostedRelayOptions extends GatewayAuthOptions {
+export type HostedRelayOptions = HostedAuthOptions & {
   /** Unpublished integration; native readiness remains independently required. */
   successionEnrollment?: true;
   /** Optional selector inside configured accounting; absent costs keep fresh preparation disabled. */
@@ -56,21 +59,23 @@ export interface HostedRelayOptions extends GatewayAuthOptions {
 type Tenant = { subject: string; namespace: string; authorityUntil: number; authorityRefreshAt: number; authorityDenied: boolean;
   checking?: Promise<'active' | 'denied' | 'unavailable'>; broker: ReturnType<typeof createHostBroker>; expiresAt: number };
 export function createHostedRelay(options: HostedRelayOptions) {
-  const auth = { origin: validateGatewayOrigin(options.origin), issuer: validateGatewayOrigin(options.issuer), secret: options.secret };
-  if (Buffer.byteLength(auth.secret) < 32) throw new Error('Gateway signing secret must contain at least 32 bytes.');
+  const auth = resolveHostedAuth(options);
   const tenants = new Map<string, Tenant>();
   const diagnostics = createDiagnosticJournal({storage:options.diagnosticStorage,context:options.diagnosticContext});
   const hostKeyOperations = new Map<string, Promise<unknown>>();
   const browserChannels = new Map<RelaySocket, { subject: string; expiresAt(): number; migrations?: Set<string>; titles?: Map<string, string>; successions?: Set<string> }>();
   const scheduler = options.scheduler ?? createTimerRelayScheduler();
   const durable = options.storage !== undefined;
+  const accountBacked = durable || auth.provider === 'google';
   const cookieFlags = `Path=/; HttpOnly; SameSite=Strict${auth.origin.startsWith('https:') ? '; Secure' : ''}`;
   const hash = (value: string) => createHash('sha256').update(value).digest('hex');
   let closing = false; let failed = false; let initialized = false; let refreshing: Promise<void> | undefined;
   let scheduling: Promise<unknown> = Promise.resolve();
   let renewalAt = Date.now() + 60_000;
   const state = createRelayState(auth, options.storage, failClosed, published, options.successionEncodingCosts);
-  const sessions = createGatewaySessions(auth, state, durable);
+  const authentication = createAuthenticationProvider(auth, state);
+  const sessions = createHostedSessions(auth, state, durable, authentication);
+  const googleLogin = auth.provider === 'google' ? createGoogleLogin(auth, state) : undefined;
   const starAccess = (subject: string, item: import('./session-stars.js').StarIdentity) => {
     const broker = [...tenants.values()].find(value => value.broker.canStarSession(item, subject))?.broker;
     const host = broker?.visibleHosts(subject).find(host => host.id === item.hostId);
@@ -99,7 +104,7 @@ export function createHostedRelay(options: HostedRelayOptions) {
       for (const succession of successions.entries(channel.subject)) {
         const key = JSON.stringify([succession.projection.role.id, succession.projection.role.revision, succession.projection.receipt.operationId]);
         if (channel.successions!.has(key)) continue;
-        if (socket.readyState !== 1 || channel.expiresAt() <= Date.now() || owned.authorityUntil <= Date.now() && durable) return;
+        if (socket.readyState !== 1 || channel.expiresAt() <= Date.now() || owned.authorityUntil <= Date.now() && accountBacked) return;
         const encoded = encodeSessionChannelServerMessage({ protocolVersion: PROTOCOL_VERSION, type: 'session_succession_committed', succession });
         if (encoded.status !== 'ok') { socket.close(1011, 'Succession replay unavailable'); return; }
         if ((socket.bufferedAmount ?? 0) + Buffer.byteLength(encoded.json) > 16 * 1024 * 1024) { socket.close(1013, 'Succession replay backlog'); return; }
@@ -168,7 +173,7 @@ export function createHostedRelay(options: HostedRelayOptions) {
   const domainOrigin = (broker: ReturnType<typeof createHostBroker>, hostId: string, id: string) => previewDomainOrigin(broker.previews.nameId(hostId, id), options.previewDomain!, auth.origin);
 
   const security = createSecurityPolicy(state);
-  const verifyControl = createGatewayControlVerifier(auth, state);
+  const verifyControl = auth.provider === 'gateway' ? createGatewayControlVerifier(auth, state) : undefined;
   function failClosed() {
     failed = true;
     for (const socket of browserChannels.keys()) socket.close(1013, 'Relay unavailable');
@@ -191,7 +196,7 @@ export function createHostedRelay(options: HostedRelayOptions) {
     const due = [...browserChannels.values()].map(channel => channel.expiresAt());
     due.push(renewalAt, ...state.read().loginChallenges.map(([, value]) => value.expiresAt), ...state.read().consumedProofs.map(([, expires]) => expires * 1000));
     for (const owned of tenants.values()) {
-      if (!durable) due.push(owned.expiresAt);
+      if (!accountBacked) due.push(owned.expiresAt);
       if (owned.authorityRefreshAt > 0) due.push(owned.authorityRefreshAt);
       if (owned.authorityUntil > Date.now()) due.push(owned.authorityUntil);
     }
@@ -204,14 +209,14 @@ export function createHostedRelay(options: HostedRelayOptions) {
     void scheduling.catch(() => undefined);
   }
   async function activeOwner(owned: Tenant, force = false): Promise<'active' | 'denied' | 'unavailable'> {
-    if (!durable) return 'active';
+    if (!accountBacked) return 'active';
     if (!force && owned.authorityUntil > Date.now()) return 'active';
     if (owned.checking) return owned.checking;
     owned.checking = (async () => {
       const hostIds = owned.broker.visibleHosts(owned.subject).map(host => host.id);
       for (const id of hostIds) diagnostics.record(id, { event: 'authority_refresh_started', leaseRemainingMs: Math.max(0, owned.authorityUntil - Date.now()) });
       let detail: AuthorityDiagnostic | undefined;
-      const result = await queryGatewayAuthority(auth, 'user-status', { subject: owned.subject }, value => { detail = value; });
+      const result = await authentication.userStatus(owned.subject, value => { detail = value; });
       if (closing || failed) return 'unavailable' as const;
       if (result.status === 'active' && result.subject === owned.subject) { owned.authorityUntil = result.validUntil; owned.authorityDenied = false; }
       else if (result.status === 'denied' || result.status === 'active') { owned.authorityUntil = 0; owned.authorityDenied = true; }
@@ -234,7 +239,7 @@ export function createHostedRelay(options: HostedRelayOptions) {
     })();
     try { return await owned.checking; } finally { owned.checking = undefined; }
   }
-  function tenant(grant: GatewayGrant, initialState?: RemoteHostBrokerState): Tenant | undefined {
+  function tenant(grant: Pick<HostedGrant, 'subject' | 'namespace' | 'expiresAt'>, initialState?: RemoteHostBrokerState): Tenant | undefined {
     let entry = tenants.get(grant.namespace);
     if (!entry) {
       if (tenants.size >= (options.maxTenants ?? 64)) return undefined;
@@ -260,7 +265,7 @@ export function createHostedRelay(options: HostedRelayOptions) {
         throw refusal;
       } : undefined;
       const broker = createHostBroker({ origin: auth.origin, publicUrl: auth.origin, keyLifetimeMs: options.keyLifetimeMs,
-        ownerSubject: grant.subject, durable, initialState, diagnostics,
+        ownerSubject: grant.subject, durable, accountBacked, initialState, diagnostics, gatewaySetup: auth.provider === 'gateway',
         teamResources: options.teamResources?.(grant.namespace),
         ...(options.successionEnrollment ? { successionEnrollment: { version: 1, origin: auth.origin, issuer: auth.issuer, namespace: grant.namespace, ownerSubject: grant.subject } as const, successionProjectionAllowance: allowance } : {}),
         userStreamCount: subject => [...tenants.values()].reduce((sum, owned) => sum + owned.broker.activeStreamCount(subject), 0),
@@ -276,18 +281,18 @@ export function createHostedRelay(options: HostedRelayOptions) {
     return entry;
   }
   for (const item of state.read().tenants) {
-    if (!tenant({ subject: item.subject, namespace: item.namespace, expiresAt: Number.MAX_SAFE_INTEGER, ticket: '', nonce: '' }, item.broker)) throw new Error('Stored Relay tenants exceed configured capacity.');
+    if (!tenant({ subject: item.subject, namespace: item.namespace, expiresAt: Number.MAX_SAFE_INTEGER }, item.broker)) throw new Error('Stored Relay tenants exceed configured capacity.');
   }
   initialized = true; queueSchedule();
-  function browserState(grant: GatewayGrant) { return { user: { id: grant.subject, ...(grant.profile ?? {}) }, basePath: `/u/${grant.namespace}/`, expiresAt: grant.expiresAt,
-    ...(grant.continuation ? { refreshAfterMs: Math.max(250, Math.min(60_000, (grant.expiresAt - Date.now()) / 2)) } : {}), loginUrl: `${auth.issuer}/agent-remote` }; }
-  async function authorize(request: Request, refresh = false): Promise<GatewayGrant | Response> {
+  function browserState(grant: HostedGrant) { return { user: { id: grant.subject, ...(grant.profile ?? {}) }, basePath: `/u/${grant.namespace}/`, expiresAt: grant.expiresAt,
+    ...(authentication.persistent(grant) ? { refreshAfterMs: Math.max(250, Math.min(60_000, (grant.expiresAt - Date.now()) / 2)) } : {}), loginUrl: auth.provider === 'google' ? '/auth/login' : `${auth.issuer}/agent-remote`, auth: hostedAuthMetadata(auth) }; }
+  async function authorize(request: Request, refresh = false): Promise<HostedGrant | Response> {
     const result = await sessions.authenticate(request, refresh);
-    if (!result.grant) return json(result.unavailable ? 503 : 401, { error: 'Sign in through the gateway.', loginUrl: `${auth.issuer}/agent-remote` });
+    if (!result.grant) return json(result.unavailable ? 503 : 401, { error: 'Sign in to continue.', loginUrl: '/auth/login', auth: hostedAuthMetadata(auth) });
     return result.grant;
   }
   const originAllowed = (request: Request) => request.headers.get('origin') === auth.origin;
-  function context(request: Request, grant: GatewayGrant): BrokerRequestContext {
+  function context(request: Request, grant: HostedGrant): BrokerRequestContext {
     return { principalSubject: () => grant.subject, authorizeMessage: raw => {
       try { const message = JSON.parse(raw); return message.type !== 'set_session_setting' || !['approval', 'sandbox', 'permissions'].includes(message.payload?.settingId) || security.recent(grant.authenticatedAt); } catch { return true; }
     }, authorize: () => !closing && !failed && sessions.expiresAt(request, grant) > Date.now(),
@@ -336,10 +341,26 @@ export function createHostedRelay(options: HostedRelayOptions) {
         : json(result.status === 'denied' ? 403 : 503, { error: 'Host bootstrap could not be completed.' });
     });
   }
+  async function completeSignIn(grant: HostedGrant, request: Request, pending: { returnPath?: string; hostId?: string; google?: { browserId?: string } }, redirect: boolean, owned: Tenant): Promise<Response> {
+    const exchange = await sessions.exchange(grant, request, pending.google?.browserId);
+    if (exchange.status !== 'active') return json(exchange.status === 'unavailable' ? 503 : exchange.status === 'capacity' ? 429 : 401, { error: 'Sign-in access could not be renewed.' });
+    if (authentication.persistent(grant)) {
+      owned.authorityUntil = exchange.grant.expiresAt; owned.authorityDenied = false;
+      owned.authorityRefreshAt = Date.now() + Math.max(1, Math.floor(Math.min(60_000, (owned.authorityUntil - Date.now()) / 2)));
+    }
+    await security.record(grant.subject, 'signed_in', 'allowed');
+    const response = redirect ? new Response(null, { status: 303, headers: { location: pending.returnPath ?? '/' } })
+      : json(200, { ...browserState(exchange.grant), ...(pending.returnPath ? { returnPath: pending.returnPath } : {}), ...(pending.hostId ? { hostId: pending.hostId } : {}) });
+    response.headers.append('set-cookie', `${gatewayCookieName(auth.origin, 'session')}=${exchange.token}; ${cookieFlags}; Max-Age=${Math.max(0, Math.floor((exchange.expiresAt - Date.now()) / 1000))}`);
+    if (exchange.browserCookie) response.headers.append('set-cookie', `${gatewayCookieName(auth.origin, 'browser')}=${exchange.browserCookie}; ${cookieFlags}; Max-Age=31536000`);
+    response.headers.append('set-cookie', `${gatewayCookieName(auth.origin, 'login')}=; ${cookieFlags}; Max-Age=0`);
+    return response;
+  }
   async function handle(request: Request): Promise<Response | undefined> {
     const url = new URL(request.url);
     if (isPreviewRequest(url)) return handlePreview(request);
     if (url.origin !== auth.origin) return json(403, { error: 'Origin is not allowed.' });
+    if (auth.provider === 'google' && ['/v1/remote/host/bootstrap', '/gateway/control', '/auth/session'].includes(url.pathname)) return json(404, { error: 'This authentication capability is unavailable.' });
     if (url.pathname === '/v1/remote/host/bootstrap') return bootstrapHost(request, url);
     if (url.pathname === '/_arc/preview-authorize' && subdomainAccess) {
       if (request.method !== 'POST' || !originAllowed(request)) return json(403, {});
@@ -375,7 +396,7 @@ export function createHostedRelay(options: HostedRelayOptions) {
     }
     if (url.pathname === '/health' && request.method === 'GET') return json(200, { status: 'ok', service: 'agent-remote-gateway-relay' });
     if (url.pathname === '/gateway/control') {
-      const control = await verifyControl(request);
+      const control = await verifyControl!(request);
       if (control.operation === 'hosts') return json(200, { hosts: [...tenants.values()].flatMap(value => value.broker.visibleHosts(control.subject)) });
       const target = [...tenants.values()].find(value => value.broker.hasHost(control.hostId!));
       if (!target) return json(404, { error: 'Host is unavailable.' });
@@ -391,6 +412,7 @@ export function createHostedRelay(options: HostedRelayOptions) {
       try { returnPath = controllerPath(readControllerLocation(url.searchParams)); }
       catch { return json(400, { error: 'Invalid session link.' }); }
       const hostId = url.searchParams.get('host') ?? undefined;
+      if (googleLogin) return googleLogin.begin(request, returnPath, hostId, reauthenticate === '1');
       const verifier = randomBytes(32).toString('base64url');
       const challenge = createHash('sha256').update(verifier).digest('base64url');
       const added = await state.mutate(draft => {
@@ -419,18 +441,13 @@ export function createHostedRelay(options: HostedRelayOptions) {
         draft.loginChallenges = draft.loginChallenges.filter(([key]) => key !== challenge); return entry[1];
       });
       if (!pending) return json(401, { error: 'Start sign-in from this browser before opening the gateway.' });
-      const exchange = await sessions.exchange(grant, request);
-      if (exchange.status !== 'active') return json(exchange.status === 'unavailable' ? 503 : exchange.status === 'capacity' ? 429 : 401, { error: 'Gateway access could not be renewed.' });
-      if (grant.continuation) {
-        owned.authorityUntil = exchange.grant.expiresAt; owned.authorityDenied = false;
-        owned.authorityRefreshAt = Date.now() + Math.max(1, Math.floor(Math.min(60_000, (owned.authorityUntil - Date.now()) / 2)));
-      }
-      await security.record(grant.subject, 'signed_in', 'allowed');
-      const response = json(200, { ...browserState(exchange.grant), ...(pending.returnPath ? { returnPath: pending.returnPath } : {}), ...(pending.hostId ? { hostId: pending.hostId } : {}) });
-      response.headers.append('set-cookie', `${gatewayCookieName(auth.origin, 'session')}=${exchange.token}; ${cookieFlags}; Max-Age=${Math.max(0, Math.floor((exchange.expiresAt - Date.now()) / 1000))}`);
-      if (exchange.browserCookie) response.headers.append('set-cookie', `${gatewayCookieName(auth.origin, 'browser')}=${exchange.browserCookie}; ${cookieFlags}; Max-Age=31536000`);
-      response.headers.append('set-cookie', `${gatewayCookieName(auth.origin, 'login')}=; ${cookieFlags}; Max-Age=0`);
-      return response;
+      return completeSignIn(grant, request, pending, false, owned);
+    }
+    if (googleLogin && url.pathname === '/auth/callback' && request.method === 'GET') {
+      const result = await googleLogin.callback(request);
+      if (result.status !== 'active') return json(result.status === 'unavailable' ? 503 : result.status === 'capacity' ? 429 : 401, { error: 'Google sign-in could not be verified. Start sign-in again.' });
+      const owned = tenant(result.grant); if (!owned) return json(429, { error: 'Relay tenant capacity reached.' });
+      return completeSignIn(result.grant, request, result.pending, true, owned);
     }
     if (url.pathname === '/auth/status' && request.method === 'GET') {
       const grant = await authorize(request); if (grant instanceof Response) return grant;
@@ -509,7 +526,7 @@ export function createHostedRelay(options: HostedRelayOptions) {
     if (request.method !== 'GET') {
       if (!security.allow('mutation:' + grant.subject, 60, 60_000)) return json(429, {error:'Too many control requests.'});
       const sensitive = path.startsWith('/v1/remote/pairings') || /\/rotate$/.test(path);
-      if (sensitive && durable && !security.recent(grant.authenticatedAt)) {
+      if (sensitive && accountBacked && !security.recent(grant.authenticatedAt)) {
         await security.record(grant.subject, 'recent_authentication_required', 'denied');
         return json(403, {code:'reauthentication_required',error:'Sign in again before managing device credentials.',loginUrl:'/auth/login?reauthenticate=1'});
       }
@@ -559,7 +576,7 @@ export function createHostedRelay(options: HostedRelayOptions) {
       if ((path !== '/v1/session-successions' || query.has('afterRevision')) && !roleId || roleId !== undefined && (!roleId || roleId.length > 512)) return json(400, { error: 'Invalid succession replay selection.' });
       const authority = await activeOwner(owned);
       if (authority !== 'active') return json(authority === 'denied' ? 403 : 503, { error: 'Succession access is unavailable.' });
-      if (closing || failed || sessions.expiresAt(request, grant) <= Date.now() || owned.subject !== grant.subject || durable && owned.authorityUntil <= Date.now()) return json(403, { error: 'Succession access is unavailable.' });
+      if (closing || failed || sessions.expiresAt(request, grant) <= Date.now() || owned.subject !== grant.subject || accountBacked && owned.authorityUntil <= Date.now()) return json(403, { error: 'Succession access is unavailable.' });
       try {
         if (path.endsWith('/operation')) {
           const operationId = query.get('operationId');
@@ -685,7 +702,7 @@ export function createHostedRelay(options: HostedRelayOptions) {
         } catch (error) { if (error instanceof StarError) return json(error.status, { code: error.code, error: error.message }); throw error; }
       });
     };
-    const result = durable && revokeHost && request.method === 'POST' ? await withHostKey(revokeHost[1]!, async () => {
+    const result = durable && auth.provider === 'gateway' && revokeHost && request.method === 'POST' ? await withHostKey(revokeHost[1]!, async () => {
       const identity = destination.broker.gatewayKeyHost(revokeHost[1]!, grant.subject);
       if (identity) {
         await validateBootstrapBody(relative.clone());
@@ -726,7 +743,7 @@ export function createHostedRelay(options: HostedRelayOptions) {
       if (!owned) return json(401, {});
       const access = await activeOwner(owned);
       if (access !== 'active') return json(access === 'denied' ? 401 : 503, {});
-      return owned.broker.prepareUpgrade(request, { connectionExpiresAt: () => failed || closing ? 0 : durable ? owned.authorityUntil : undefined,
+      return owned.broker.prepareUpgrade(request, { connectionExpiresAt: () => failed || closing ? 0 : accountBacked ? owned.authorityUntil : undefined,
         connectionExpiryCode: () => owned.authorityDenied ? 1008 : 1013 });
     }
     const { grant } = await sessions.authenticate(request); if (!grant) return json(401, {});
@@ -879,12 +896,12 @@ export function createHostedRelay(options: HostedRelayOptions) {
       enforceChannels();
       for (const [namespace, owned] of tenants) {
         owned.broker.enforceExpiry();
-        if (!durable && owned.expiresAt <= now) { tenants.delete(namespace); owned.broker.close(); }
+        if (!accountBacked && owned.expiresAt <= now) { tenants.delete(namespace); owned.broker.close(); }
       }
       await state.mutate(draft => {
         draft.loginChallenges = draft.loginChallenges.filter(([, value]) => value.expiresAt > now);
         draft.consumedProofs = draft.consumedProofs.filter(([, expires]) => expires * 1000 > now);
-        if (!durable) draft.tenants = draft.tenants.filter(value => tenants.has(value.namespace));
+        if (!accountBacked) draft.tenants = draft.tenants.filter(value => tenants.has(value.namespace));
       });
       const renewOwners = async (force = false) => {
         const due = [...tenants.values()].filter(owned => force || owned.authorityRefreshAt <= Date.now());

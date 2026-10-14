@@ -67,6 +67,8 @@ export interface RemoteHostBrokerState {
   creations: Array<[string, { fingerprint: string; agentId: string }]>;
 }
 export interface HostBrokerOptions {
+  /** Hosted authentication capability; never enables standalone Gateway access. */
+  gatewaySetup?: boolean;
   teamResources?: TeamResourceStore;
   /** Internal opt-in; only a Gateway-authenticated tenant can supply this authority. */
   successionEnrollment?: SuccessionAssociationAuthority;
@@ -83,6 +85,9 @@ export interface HostBrokerOptions {
   keyLifetimeMs?: number;
   publicUrl?: string;
   onPairing?(key: string, expiresAt: number): void;
+  /** Account security and credential management, independent of storage durability. */
+  accountBacked?: boolean;
+  /** Legacy account-mode option. Prefer accountBacked in hosted compositions. */
   durable?: boolean;
   initialState?: RemoteHostBrokerState;
   onStateChange?(state: RemoteHostBrokerState): void | Promise<void>;
@@ -90,8 +95,9 @@ export interface HostBrokerOptions {
   scheduler?: BrokerScheduler;
 }
 export function createHostBroker(options: HostBrokerOptions) {
+  const accountBacked = options.accountBacked ?? options.durable ?? false;
   const origin = new URL(options.origin).origin;
-  if (options.successionEnrollment && (!options.durable || !options.onStateChange || !isSuccessionAssociationAuthority(options.successionEnrollment) || options.successionEnrollment.origin !== origin || options.successionEnrollment.ownerSubject !== options.ownerSubject)) throw new Error('Succession enrollment requires a durable authenticated tenant authority.');
+  if (options.successionEnrollment && (!accountBacked || !options.onStateChange || !isSuccessionAssociationAuthority(options.successionEnrollment) || options.successionEnrollment.origin !== origin || options.successionEnrollment.ownerSubject !== options.ownerSubject)) throw new Error('Succession enrollment requires a durable authenticated tenant authority.');
   const now = options.now ?? Date.now;
   const scheduler = options.scheduler ?? defaultBrokerScheduler;
   const setTimeout = scheduler.setTimeout.bind(scheduler);
@@ -536,7 +542,7 @@ export function createHostBroker(options: HostBrokerOptions) {
       ...(controller ? { controller } : {}),
       ...(environment ? { environment } : {}),
       ...(credentialRotation ? {credentialRotation:true} : {}), id, name, online: ready === true && socket?.readyState === RELAY_SOCKET_OPEN, providers,
-      ...(options.durable && owner(subject) ? { managed: true } : {}),
+      ...(accountBacked && owner(subject) ? { managed: true } : {}),
       ...(options.ownerSubject ? { access: owner(subject) ? 'owner' as const : 'shared' as const } : {}),
       ...(!owner(subject) && subject ? { sessionQuota: sharing.quota(id, subject) } : {}),
       ...(legacyDsh ? { providerId: 'dsh' } : providers.length === 1 ? { providerId: providers[0]!.providerId } : {}),
@@ -711,8 +717,8 @@ export function createHostBroker(options: HostBrokerOptions) {
           if (keys.get(credentialHash) !== credential || credential.claimedAt !== undefined || credential.expires <= now() || (credential.installationId && credential.installationId !== message.installationId)) throw new BrokerError(401, 'device_revoked', 'Registration is not authorized');
           const savedCredential = draft.keys.find(([hash]) => hash === credentialHash)![1];
           savedCredential.installationId = message.installationId;
-          if (options.durable && invitation) savedCredential.claimedAt = now();
-          if (options.durable) {
+          if (accountBacked && invitation) savedCredential.claimedAt = now();
+          if (accountBacked) {
             if (!savedCredential.requiresRotation) savedCredential.expires = Number.MAX_SAFE_INTEGER;
             // Reconnection proves possession of this key, not which overlapping recovery key was saved.
             const retainOverlap = credential.kind === 'device' && retainedRecoveryInstallations(draft).has(message.installationId);
@@ -753,14 +759,14 @@ export function createHostBroker(options: HostBrokerOptions) {
             if (!retired && socket.readyState === RELAY_SOCKET_OPEN) {
               host.socket = socket;
               host.issueCredential = message.credentialRotation ? () => issueCredential(false, true) : undefined;
-              if (!options.durable || !message.credentialRotation || credential.kind === 'device') {
+              if (!accountBacked || !message.credentialRotation || credential.kind === 'device') {
                 registered();
               }
             }
           } };
         });
         try { await registration; } finally { registration = undefined; }
-        if (options.durable && message.credentialRotation && credential.kind !== 'device') await issueCredential(invitation);
+        if (accountBacked && message.credentialRotation && credential.kind !== 'device') await issueCredential(invitation);
         return;
       }
       if (host.socket !== socket) return;
@@ -1523,17 +1529,18 @@ export function createHostBroker(options: HostBrokerOptions) {
     if (url.pathname === '/v1/remote/hosts' && request.method === 'GET') return json(200, { hosts: visibleHosts(subject) });
     if (url.pathname === '/v1/remote/pairings') {
       requireOwner(subject);
-      if (request.method === 'GET') return json(200, { availablePurposes: options.durable ? ['host-only', 'gateway-setup'] : ['host-only'],
+      if (request.method === 'GET') return json(200, { availablePurposes: accountBacked && options.gatewaySetup !== false ? ['host-only', 'gateway-setup'] : ['host-only'],
         pairings: [...pairings].sort((a, b) => b.createdAt - a.createdAt).map(item => visiblePairing(item, now())) });
       if (request.method !== 'POST') return json(405, { error: 'Method is not allowed.' });
       const body = await readBody(request);
       const purpose = body.purpose ?? 'host-only';
       if (Object.keys(body).some(key => !['purpose', 'recoverHostId'].includes(key)) || !isPairingPurpose(purpose)) throw new BrokerError(400, 'invalid_request', 'Select a supported pairing purpose.');
       const recoverHostId = body.recoverHostId === undefined ? undefined : required(body.recoverHostId, 'recoverHostId');
-      if (recoverHostId && (recoverHostId.length > 512 || purpose !== 'host-only' || !options.durable || !options.ownerSubject || !options.successionEnrollment)) throw new BrokerError(400, 'host_recovery_unavailable', 'Recovery requires an authenticated owner and a retained succession identity.');
-      if (!options.durable && purpose !== 'host-only') throw new BrokerError(400, 'unsupported_purpose', 'Gateway setup requires an account-backed Relay.');
+      if (recoverHostId && (recoverHostId.length > 512 || purpose !== 'host-only' || !accountBacked || !options.ownerSubject || !options.successionEnrollment)) throw new BrokerError(400, 'host_recovery_unavailable', 'Recovery requires an authenticated owner and a retained succession identity.');
+      if (options.gatewaySetup === false && purpose !== 'host-only') throw new BrokerError(403, 'unsupported_purpose', 'Gateway setup is unavailable for this authentication provider.');
+      if (!accountBacked && purpose !== 'host-only') throw new BrokerError(400, 'unsupported_purpose', 'Gateway setup requires an account-backed Relay.');
       const key = `arc_${randomBytes(32).toString('base64url')}`;
-      const createdAt = now(); const expires = createdAt + (options.keyLifetimeMs ?? (options.durable ? 10 * 60 * 1000 : 24 * 60 * 60 * 1000));
+      const createdAt = now(); const expires = createdAt + (options.keyLifetimeMs ?? (accountBacked ? 10 * 60 * 1000 : 24 * 60 * 60 * 1000));
       const item: SavedPairingKey = { id: randomUUID(), purpose, createdAt, expiresAt: expires };
       await commit(draft => {
         let recovery: HostRecoverySelection | undefined;
@@ -1553,7 +1560,7 @@ export function createHostBroker(options: HostBrokerOptions) {
         draft.keys = draft.keys.filter(([, value]) => value.expires > now());
         if (draft.keys.length >= 128) throw new BrokerError(429, 'capacity_exceeded', 'Too many active temporary keys.');
         if ((draft.pairings?.length ?? 0) >= MAX_PAIRING_HISTORY) throw new BrokerError(429, 'pairing_history_full', 'Delete old pairing key records before creating another key.');
-        const credential: DeviceCredential = { expires, purpose, pairingId: item.id, ...(recovery ? { recovery, installationId: recovery.installationId } : {}), ...(options.durable ? { requiresRotation: true } : {}) };
+        const credential: DeviceCredential = { expires, purpose, pairingId: item.id, ...(recovery ? { recovery, installationId: recovery.installationId } : {}), ...(accountBacked ? { requiresRotation: true } : {}) };
         draft.keys.push([keyHash(key), credential]);
         (draft.pairings ??= []).push(item);
         return { value: undefined, publish() {
@@ -1566,7 +1573,7 @@ export function createHostBroker(options: HostBrokerOptions) {
       // No key or access removal is published, and no external grant effect occurs, before admission.
       }, true);
       return json(201, { ...visiblePairing(item, now()), key, serverUrl: options.publicUrl ?? context.serverUrl ?? new URL(request.url).origin,
-        ...(options.durable && options.publicUrl ? { command: `export AGENT_HOST_SERVER='${options.publicUrl.replaceAll("'", "'\\''")}'\nexport AGENT_HOST_REMOTE_KEY='${key}'\nagent-remote-controller start` } : {}) });
+        ...(accountBacked && options.publicUrl ? { command: `export AGENT_HOST_SERVER='${options.publicUrl.replaceAll("'", "'\\''")}'\nexport AGENT_HOST_REMOTE_KEY='${key}'\nagent-remote-controller start` } : {}) });
     }
     const pairingAction = /^\/v1\/remote\/pairings\/([^/]+)(\/revoke)?$/.exec(url.pathname);
     if (pairingAction) {
@@ -1597,7 +1604,7 @@ export function createHostBroker(options: HostBrokerOptions) {
       const host = requireHost(management[1]!);
       if (management[2] === 'rotate') {
         if (Object.keys(body).length) throw new BrokerError(400, 'invalid_request', 'No parameters are accepted.');
-        if (!options.durable || !host.issueCredential) throw new BrokerError(409, 'host_upgrade_required', 'Update and reconnect Agent Host before rotating its credential.');
+        if (!accountBacked || !host.issueCredential) throw new BrokerError(409, 'host_upgrade_required', 'Update and reconnect Agent Host before rotating its credential.');
         await host.issueCredential();
         return json(200, {ok:true,status:'pending'});
       }
@@ -1606,7 +1613,7 @@ export function createHostBroker(options: HostBrokerOptions) {
       return rawJson(result);
     }
     const revoking = /^\/v1\/remote\/hosts\/([^/]+)\/revoke$/.exec(url.pathname);
-    if (options.durable && revoking && request.method === 'POST') {
+    if (accountBacked && revoking && request.method === 'POST') {
       requireOwner(subject);
       await readBody(request);
       const host = hosts.get(revoking[1]!);
@@ -1795,7 +1802,7 @@ export function createHostBroker(options: HostBrokerOptions) {
     return url.pathname === '/ws/remote-host' || !!(session && bindings.has(session[1]!));
   };
   function authenticateDevice(value: string) {
-    if (unavailable || !options.durable) return undefined;
+    if (unavailable || !accountBacked) return undefined;
     const hash = keyHash(value); const credential = keys.get(hash);
     if (!credential || credential.kind !== 'device' || credential.requiresRotation || !credential.installationId || credential.expires <= now()) return undefined;
     const host = [...hosts.values()].find(host => host.installationId === credential.installationId);

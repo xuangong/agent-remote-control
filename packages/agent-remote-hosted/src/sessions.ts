@@ -1,11 +1,12 @@
-import { browserActivity, browserGroups, browserIdentity } from './browser-devices.js';
+import { browserActivity, browserGroups, browserIdentity, validBrowserId } from './browser-devices.js';
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
-import { authenticateGatewayRequest, gatewayCookieName, readGatewayCookie, type GatewayAuthOptions, type GatewayGrant } from './auth.js';
-import { queryGatewayAuthority } from './authority.js';
+import { gatewayCookieName, readGatewayCookie, type HostedGrant } from './auth.js';
+import { createAuthenticationProvider, type HostedAuthenticationProvider } from './auth-provider.js';
+import { resolveHostedAuth, type HostedAuthOptions } from './hosted-auth.js';
 import type { RelayState, SavedGatewaySession } from './state.js';
 export type { SavedGatewaySession } from './state.js';
 
-export function createGatewaySessions(auth: GatewayAuthOptions, state: RelayState, durable: boolean) {
+export function createHostedSessions(auth: HostedAuthOptions, state: RelayState, durable: boolean, provider: HostedAuthenticationProvider = createAuthenticationProvider(resolveHostedAuth(auth), state)) {
   const pending = new Map<string, Promise<'active' | 'denied' | 'unavailable'>>();
   let closed = false;
   const identity = browserIdentity(auth);
@@ -19,8 +20,8 @@ export function createGatewaySessions(auth: GatewayAuthOptions, state: RelayStat
     if (closed) return 'denied';
     const existing = pending.get(record.hash); if (existing) return existing;
     const operation = (async () => {
-      const result = record.sessionExpiresAt <= Date.now() || !record.grant.continuation
-        ? { status: 'denied' as const } : await queryGatewayAuthority(auth, 'renew', { continuation: record.grant.continuation });
+      const result = record.sessionExpiresAt <= Date.now()
+        ? { status: 'denied' as const } : await provider.renew(record.grant);
       if (closed) return 'denied' as const;
       if (result.status === 'unavailable') return result.status;
       return state.mutate(draft => {
@@ -30,7 +31,7 @@ export function createGatewaySessions(auth: GatewayAuthOptions, state: RelayStat
           draft.sessions = draft.sessions.filter(value => value.hash !== record.hash); return 'denied' as const;
         }
         current.sessionExpiresAt = Math.min(current.sessionExpiresAt, result.expiresAt!);
-        current.grant.authenticatedAt = result.authenticatedAt;
+        if (current.grant.provider !== 'google') current.grant.authenticatedAt = result.authenticatedAt;
         current.grant.profile = result.profile;
         current.grant.expiresAt = Math.min(current.sessionExpiresAt, result.validUntil);
         return 'active' as const;
@@ -40,17 +41,18 @@ export function createGatewaySessions(auth: GatewayAuthOptions, state: RelayStat
     try { return await operation; } finally { pending.delete(record.hash); }
   }
   return {
-    async exchange(grant: GatewayGrant, request?: Request): Promise<{ status: 'active'; token: string; grant: GatewayGrant; expiresAt: number; browserCookie?: string } | { status: 'denied' | 'unavailable' | 'capacity' }> {
-      if (!grant.continuation || !grant.sessionExpiresAt) return { status: 'active', token: grant.ticket, grant, expiresAt: grant.expiresAt };
-      const result = await queryGatewayAuthority(auth, 'renew', { continuation: grant.continuation });
+    async exchange(grant: HostedGrant, request?: Request, retainedBrowserId?: string): Promise<{ status: 'active'; token: string; grant: HostedGrant; expiresAt: number; browserCookie?: string } | { status: 'denied' | 'unavailable' | 'capacity' }> {
+      if (!provider.persistent(grant)) return grant.provider === 'google' ? { status: 'denied' } : { status: 'active', token: grant.ticket, grant, expiresAt: grant.expiresAt };
+      const result = await provider.renew(grant);
       if (closed) return { status: 'denied' };
       if (result.status !== 'active') return result;
       if (result.subject !== grant.subject) return { status: 'denied' };
       const prior = request ? recordFor(request) : undefined;
-      const browserId = identity.read(request) ?? (prior?.grant.subject === grant.subject ? prior.browserId : undefined) ?? identity.create();
+      const browserId = identity.read(request) ?? (validBrowserId(retainedBrowserId) ? retainedBrowserId : undefined) ?? (prior?.grant.subject === grant.subject ? prior.browserId : undefined) ?? identity.create();
       const token = randomBytes(32).toString('base64url');
-      const sessionExpiresAt = Math.min(grant.sessionExpiresAt, result.expiresAt!);
-      const current = { ...grant, profile: result.profile, authenticatedAt: result.authenticatedAt, expiresAt: Math.min(sessionExpiresAt, result.validUntil) };
+      const sessionExpiresAt = Math.min(grant.sessionExpiresAt ?? 0, result.expiresAt!);
+      const current: HostedGrant = { ...grant, profile: result.profile, expiresAt: Math.min(sessionExpiresAt, result.validUntil) };
+      if (current.provider !== 'google') current.authenticatedAt = result.authenticatedAt;
       return state.mutate(draft => {
         draft.sessions = draft.sessions.filter(record => record.sessionExpiresAt > Date.now());
         if (draft.sessions.length >= 1024) return { status: 'capacity' as const };
@@ -67,7 +69,7 @@ export function createGatewaySessions(auth: GatewayAuthOptions, state: RelayStat
         return { status: 'active' as const, token, grant: current, expiresAt: sessionExpiresAt, browserCookie: identity.cookie(browserId) };
       });
     },
-    async authenticate(request: Request, refresh = false): Promise<{ grant?: GatewayGrant; unavailable?: boolean }> {
+    async authenticate(request: Request, refresh = false): Promise<{ grant?: HostedGrant; unavailable?: boolean }> {
       const record = recordFor(request);
       if (record) {
         if (refresh || record.grant.expiresAt <= Date.now()) {
@@ -78,11 +80,11 @@ export function createGatewaySessions(auth: GatewayAuthOptions, state: RelayStat
         const current = recordFor(request);
         return current && current.grant.expiresAt > Date.now() ? { grant: current.grant } : {};
       }
-      const legacy = !durable ? authenticateGatewayRequest(request, auth) : undefined;
+      const legacy = !durable ? provider.legacy(request) : undefined;
       return legacy && !legacy.continuation ? { grant: legacy } : {};
     },
-    expiresAt(request: Request, grant: GatewayGrant) {
-      return grant.continuation ? recordFor(request)?.grant.expiresAt ?? 0 : grant.expiresAt;
+    expiresAt(request: Request, grant: HostedGrant) {
+      return provider.persistent(grant) ? recordFor(request)?.grant.expiresAt ?? 0 : grant.expiresAt;
     },
     list(subject: string, request: Request) {
       const current = recordFor(request);
@@ -130,3 +132,6 @@ function browserLabel(agent?: string | null): string {
   const browser = /Edg(?:e|A|iOS)?\//.test(agent ?? '') ? 'Edge' : /Chrome\/|CriOS\//.test(agent ?? '') ? 'Chrome' : /Firefox\/|FxiOS\//.test(agent ?? '') ? 'Firefox' : /Safari\//.test(agent ?? '') ? 'Safari' : 'Browser';
   return platform + ' · ' + browser;
 }
+
+/** Backward-compatible entrypoint; all providers use the same session manager. */
+export const createGatewaySessions = createHostedSessions;

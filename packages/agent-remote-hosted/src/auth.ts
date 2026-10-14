@@ -5,7 +5,10 @@ export function gatewayProfile(value: unknown): GatewayProfile | undefined {
   if (!value || typeof value !== 'object' || !('name' in value) || typeof value.name !== 'string' || !value.name.trim() || value.name.length > 512) return undefined;
   return { name: value.name, ...('email' in value && typeof value.email === 'string' && value.email.length <= 320 ? { email: value.email } : {}) };
 }
-export interface GatewayGrant { profile?: GatewayProfile; subject: string; namespace: string; expiresAt: number; ticket: string; nonce: string; continuation?: string; sessionExpiresAt?: number; authenticatedAt?: number }
+export interface HostedGrantIdentity { profile?: GatewayProfile; subject: string; namespace: string; expiresAt: number; authenticatedAt?: number }
+export interface GatewayGrant extends HostedGrantIdentity { provider?: 'gateway'; ticket: string; nonce: string; continuation?: string; sessionExpiresAt?: number }
+export interface GoogleGrant extends HostedGrantIdentity { provider: 'google'; sessionExpiresAt: number; authenticatedAt: number }
+export type HostedGrant = GatewayGrant | GoogleGrant;
 export interface GatewayAuthOptions { origin: string; issuer: string; secret: string }
 export function validateGatewayOrigin(value: string): string {
   const url = new URL(value);

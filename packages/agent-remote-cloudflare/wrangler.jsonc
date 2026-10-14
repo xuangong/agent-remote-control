@@ -43,7 +43,7 @@
     }
   ],
   "vars": {
-    "AGENT_REMOTE_AUTH_PROVIDER": "gateway",
+    "AGENT_REMOTE_AUTH_PROVIDER": "mainsite",
     "AGENT_REMOTE_RELAY_URL": "https://agents.xianliao.de5.net",
     "AGENT_REMOTE_ISSUER": "https://token.xianliao.de5.net",
     "AGENT_REMOTE_PREVIEW_DOMAIN": "agents.xianliao.de5.net"

@@ -4,13 +4,13 @@ import { WebSocketServer } from 'ws';
 import { createHmac } from 'node:crypto';
 import { join } from 'node:path';
 import { InputResourceStore } from '@orchardworks/agent-remote-relay';
-import { BROKER_MAX_FRAME_BYTES, createHostedRelay, isPreviewDomain, migrateLegacyNodeState, validateGatewayOrigin, type GatewayAuthOptions } from '@orchardworks/agent-remote-hosted';
+import { BROKER_MAX_FRAME_BYTES, createHostedRelay, hostedAuthStorageIdentity, hostedRecordEncodingCosts, isPreviewDomain, migrateLegacyNodeState, resolveHostedAuth, type HostedAuthOptions } from '@orchardworks/agent-remote-hosted';
 import { openGatewayState } from './gateway-state.js';
 import { openGatewayDiagnostics } from './gateway-diagnostics.js';
 import { InvalidHttpRequest, relaySocket, rejectUpgrade, webRequest, writeResponse } from './remote-host-broker.js';
 import { previewSocket } from './preview-socket.js';
 
-export interface GatewayRelayOptions extends GatewayAuthOptions {
+export type GatewayRelayOptions = HostedAuthOptions & {
   previewOrigin?: string;
   previewDomain?: string;
   maxTenants?: number;
@@ -19,8 +19,7 @@ export interface GatewayRelayOptions extends GatewayAuthOptions {
   servePage?(request: IncomingMessage, response: ServerResponse): Promise<boolean>;
 }
 export function createGatewayRelay(options: GatewayRelayOptions) {
-  const auth = { origin: validateGatewayOrigin(options.origin), issuer: validateGatewayOrigin(options.issuer), secret: options.secret };
-  if (Buffer.byteLength(auth.secret) < 32) throw new Error('Gateway signing secret must contain at least 32 bytes.');
+  const auth = resolveHostedAuth(options);
   const protocols = new WeakMap<IncomingMessage, string | undefined>();
   const websockets = new WebSocketServer({ noServer: true, maxPayload: BROKER_MAX_FRAME_BYTES,
     handleProtocols(offered, request) { return protocols.has(request) ? protocols.get(request) ?? false : offered.values().next().value ?? false; } });
@@ -77,9 +76,10 @@ export function createGatewayRelay(options: GatewayRelayOptions) {
       if (new URL(auth.origin).port === '0') { const origin = new URL(auth.origin); origin.port = String(address.port); auth.origin = origin.origin; }
       if (previewOrigin && new URL(previewOrigin).port === '0') { const preview = new URL(previewOrigin); preview.port = String(address.port); previewOrigin = preview.origin; }
       try {
-        if (options.stateFile) storage = openGatewayState(options.stateFile, auth.secret, JSON.stringify([auth.origin, auth.issuer]));
+        if (options.stateFile) storage = openGatewayState(options.stateFile, auth.secret, hostedAuthStorageIdentity(auth));
         const initial = storage ? migrateLegacyNodeState(storage.initial, auth) : undefined;
         runtime = createHostedRelay({ ...auth, previewOrigin, previewDomain: options.previewDomain, clientAddress: request => clientAddresses.get(request) ?? 'unknown', maxTenants: options.maxTenants, keyLifetimeMs: options.keyLifetimeMs,
+          ...(storage ? { successionEnrollment: true, successionEncodingCosts: hostedRecordEncodingCosts(auth) } : {}),
           ...(options.stateFile ? { diagnosticStorage: openGatewayDiagnostics(options.stateFile, auth) } : {}),
           ...(options.stateFile ? { teamResources: (namespace: string) => new InputResourceStore({ directory: join(options.stateFile + '.resources', createHmac('sha256', auth.secret).update(JSON.stringify([auth.origin, auth.issuer, namespace])).digest('hex')) }) } : {}),
           ...(storage ? { storage: { initial, commit: value => storage!.commit(value), close: () => storage!.close() } } : {}) });

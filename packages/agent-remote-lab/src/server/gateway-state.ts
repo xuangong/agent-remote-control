@@ -4,6 +4,8 @@ import { dirname } from 'node:path';
 import { open, rename, unlink } from 'node:fs/promises';
 import { spawnSync } from 'node:child_process';
 
+const MAX_STATE_BYTES = 64 * 1024 * 1024;
+
 /** One writer, atomic authenticated snapshots; no transcript or raw device keys. */
 export function openGatewayState<T>(file: string, secret: string, scope: string) {
   mkdirSync(dirname(file), { recursive: true, mode: 0o700 });
@@ -13,10 +15,16 @@ export function openGatewayState<T>(file: string, secret: string, scope: string)
   // The kernel releases its advisory lock even after SIGKILL or PID namespace reuse.
   const unlock = () => closeSync(lockFd);
   const sign = (payload: string) => createHmac('sha256', secret).update('arc-state-v1\0' + scope + '\0' + payload).digest('hex');
+  const encode = (value: T) => {
+    const payload = JSON.stringify(value);
+    const content = JSON.stringify({ payload, signature: sign(payload) });
+    if (Buffer.byteLength(content) > MAX_STATE_BYTES) throw new Error('Relay state is too large.');
+    return content;
+  };
   try {
     let initial: T | undefined;
     if (existsSync(file)) {
-      if (statSync(file).size > 64 * 1024 * 1024) throw new Error('Relay state is too large.');
+      if (statSync(file).size > MAX_STATE_BYTES) throw new Error('Relay state is too large.');
       const record: unknown = JSON.parse(readFileSync(file, 'utf8'));
       if (!record || typeof record !== 'object' || !('payload' in record) || !('signature' in record) || typeof record.payload !== 'string' || typeof record.signature !== 'string') throw new Error('Invalid Relay state.');
       const actual = Buffer.from(record.signature, 'hex'); const expected = Buffer.from(sign(record.payload), 'hex');
@@ -27,18 +35,18 @@ export function openGatewayState<T>(file: string, secret: string, scope: string)
     return { initial,
       save(value: T) {
         if (closed) throw new Error('Relay state is closed.');
-        const payload = JSON.stringify(value); const temporary = file + '.' + randomUUID() + '.tmp';
+        const content = encode(value); const temporary = file + '.' + randomUUID() + '.tmp';
         const output = openSync(temporary, 'wx', 0o600);
-        try { writeFileSync(output, JSON.stringify({ payload, signature: sign(payload) })); fsyncSync(output); } finally { closeSync(output); }
+        try { writeFileSync(output, content); fsyncSync(output); } finally { closeSync(output); }
         try { renameSync(temporary, file); const directory = openSync(dirname(file), 'r'); try { fsyncSync(directory); } finally { closeSync(directory); } }
         finally { if (existsSync(temporary)) unlinkSync(temporary); }
       },
       async commit(value: T) {
         if (closed) throw new Error('Relay state is closed.');
-        const payload = JSON.stringify(value); const temporary = file + '.' + randomUUID() + '.tmp';
+        const content = encode(value); const temporary = file + '.' + randomUUID() + '.tmp';
         const output = await open(temporary, 'wx', 0o600);
         try {
-          try { await output.writeFile(JSON.stringify({ payload, signature: sign(payload) })); await output.sync(); }
+          try { await output.writeFile(content); await output.sync(); }
           finally { await output.close(); }
           await rename(temporary, file);
           const directory = await open(dirname(file), 'r');

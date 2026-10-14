@@ -186,7 +186,7 @@ it('requires recent Google authentication even when no persistence adapter is pr
   expect(result.status).toBe(403); expect(await result.json()).toMatchObject({ code: 'reauthentication_required' });
 }, 10000);
 
-it('expires a real Host WebSocket at the account lease deadline without a persistence adapter', async () => {
+it('rejects a delayed real Host WebSocket acceptance after its prepared account lease expires', async () => {
   let clock = Date.now(); vi.spyOn(Date, 'now').mockImplementation(() => clock);
   const f = await fixture(false); const { cookie } = await f.signIn();
   const status = await (await f.relay.fetch(f.request('/auth/status', cookie)))!.json();

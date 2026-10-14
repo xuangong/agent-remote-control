@@ -34,6 +34,19 @@ it('ignores stale PID and recovery metadata while retaining one lock inode for l
   expect(statSync(file + '.lock').ino).toBe(inode);
 }, 10000);
 
+it('rejects oversized encoded snapshots before replacing previously acknowledged recoverable state', async () => {
+  const file = path(); const state = openGatewayState(file, 'secret', 'origin');
+  try {
+    await state.commit({ value: 'acknowledged' });
+    // JSON payload plus the authenticated outer JSON escape this value twice.
+    const oversized = { value: '"'.repeat(16 * 1024 * 1024) };
+    await expect(state.commit(oversized)).rejects.toThrow('too large');
+    expect(() => state.save(oversized)).toThrow('too large');
+  } finally { state.close(); }
+  const restored = openGatewayState(file, 'secret', 'origin');
+  try { expect(restored.initial).toEqual({ value: 'acknowledged' }); } finally { restored.close(); }
+}, 15000);
+
 function writer(file: string) {
   const module = new URL('./gateway-state.ts', import.meta.url).href;
   const source = `import { openGatewayState } from ${JSON.stringify(module)};

@@ -1,17 +1,15 @@
-import { createHostedRelay, PortableTeamResourceStore, validateGatewayOrigin, type RelayScheduler } from '@orchardworks/agent-remote-hosted';
+import { createHostedRelay, hostedAuthFromEnv, hostedRecordEncodingCosts, PortableTeamResourceStore, type HostedAuthEnvironment, type RelayScheduler } from '@orchardworks/agent-remote-hosted';
 import { SqliteTeamResourceStorage } from './team-resource-storage.js';
 import { createHmac } from 'node:crypto';
 import { SqliteRelayStore } from './storage.js';
-import { encodeSqlSnapshot, quoteSqlRecord, SQL_CHUNK_BYTES, SQL_RECORD_FORMAT, SQL_SNAPSHOT_FORMAT } from './storage-codec.js';
 import { SqliteDiagnosticStore } from './diagnostic-storage.js';
 import { WorkerRelaySocket } from './socket.js';
 import { WorkerPreviewSocket } from './preview-socket.js';
 
-export interface RelayEnvironment {
+export interface RelayEnvironment extends HostedAuthEnvironment {
   AGENT_REMOTE_PREVIEW_URL?: string;
   AGENT_REMOTE_PREVIEW_DOMAIN?: string;
   AGENT_REMOTE_RELAY_URL: string;
-  AGENT_REMOTE_ISSUER: string;
   AGENT_REMOTE_SIGNING_SECRET: string;
   RELAY: DurableObjectNamespace;
   ASSETS: Fetcher;
@@ -31,8 +29,7 @@ export class RelayObject {
     });
   }
   private initialize(startReason: 'runtime_start' | 'core_recovery') {
-    const auth = { origin: validateGatewayOrigin(this.env.AGENT_REMOTE_RELAY_URL), issuer: validateGatewayOrigin(this.env.AGENT_REMOTE_ISSUER), secret: this.env.AGENT_REMOTE_SIGNING_SECRET };
-    if (typeof auth.secret !== 'string' || new TextEncoder().encode(auth.secret).byteLength < 32) throw new Error('Relay configuration is invalid.');
+    const auth = hostedAuthFromEnv(this.env);
     const storage = new SqliteRelayStore(this.context.storage, auth);
     const scheduler: RelayScheduler = {
       schedule: async deadline => {
@@ -49,11 +46,7 @@ export class RelayObject {
     };
     this.core = createHostedRelay({ ...auth, previewOrigin: this.env.AGENT_REMOTE_PREVIEW_URL, previewDomain: this.env.AGENT_REMOTE_PREVIEW_DOMAIN, storage, successionEnrollment: true, diagnosticStorage: new SqliteDiagnosticStore(this.context.storage, auth),
       teamResources: namespace => new PortableTeamResourceStore({ storage: new SqliteTeamResourceStorage(this.context.storage, createHmac('sha256', auth.secret).update(JSON.stringify([auth.origin, auth.issuer, namespace])).digest('hex')) }),
-      successionEncodingCosts: {
-        measureSnapshot: state => ({ snapshotFormat: SQL_SNAPSHOT_FORMAT, recordFormat: SQL_RECORD_FORMAT,
-          chunkBytes: SQL_CHUNK_BYTES, costs: encodeSqlSnapshot(state, auth).costs }),
-        quoteRecord: quoteSqlRecord,
-      },
+      successionEncodingCosts: hostedRecordEncodingCosts(auth),
       diagnosticContext: { runtimeInstanceId: this.runtimeInstanceId, workerVersionId: this.env.CF_VERSION_METADATA?.id, startReason }, scheduler, clientAddress: request => request.headers.get('cf-connecting-ip') ?? 'unknown' });
   }
   async fetch(request: Request): Promise<Response> {

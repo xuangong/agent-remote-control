@@ -1,4 +1,4 @@
-import { createHash, createHmac, randomUUID } from 'node:crypto';
+import { createHash, createHmac, generateKeyPairSync, randomUUID, sign as rsaSign } from 'node:crypto';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
@@ -25,7 +25,7 @@ export function event(socket: WebSocket, type: 'message' | 'close'): Promise<any
 }
 export const send = (socket: WebSocket, data: object) => socket.send(JSON.stringify({ uplinkVersion: 2, ...data }));
 
-export async function fixture(options: { actualEntry?: true; completeCodec?: true; previewOrigin?: string; previewDomain?: string; controllerRelease?: Record<string, unknown>; controllerBridge?: Record<string, unknown>; controllerBridges?: Record<string, unknown>[]; workerVersionId?: string } = {}) {
+export async function fixture(options: { actualEntry?: true; completeCodec?: true; authProvider?: 'google'; previewOrigin?: string; previewDomain?: string; controllerRelease?: Record<string, unknown>; controllerBridge?: Record<string, unknown>; controllerBridges?: Record<string, unknown>[]; workerVersionId?: string } = {}) {
   const directory = await mkdtemp(join(tmpdir(), 'arc-workers-'));
   closers.push(() => rm(directory, { recursive: true, force: true }));
     const result = await build({ stdin: { contents: options.actualEntry ? `export { default, RelayObject } from './src/worker.ts';` : `
@@ -97,14 +97,31 @@ export async function fixture(options: { actualEntry?: true; completeCodec?: tru
   const sockets: WebSocket[] = [];
   let mf: Miniflare;
   let envSecret = secret;
+  let googleClientId = 'workers-client';
+  let googleEmails = 'owner@example.com';
+  const googleKeys = options.authProvider === 'google' ? generateKeyPairSync('rsa', { modulusLength: 2048 }) : undefined;
+  const googleCodes = new Map<string, { nonce: string; challenge: string; redirect: string }>();
   async function start() {
     mf = new Miniflare({ modules: true, script, compatibilityDate: '2026-06-01', compatibilityFlags: ['nodejs_compat'],
       durableObjects: { RELAY: { className: options.actualEntry ? 'RelayObject' : 'TestRelayObject', useSQLite: true } }, durableObjectsPersist: join(directory, 'state'),
-      bindings: { ...(options.workerVersionId ? { CF_VERSION_METADATA: { id: options.workerVersionId } } : {}), AGENT_REMOTE_RELAY_URL: origin, ...(options.previewDomain ? { AGENT_REMOTE_PREVIEW_DOMAIN: options.previewDomain } : {}), ...(options.previewOrigin ? { AGENT_REMOTE_PREVIEW_URL: options.previewOrigin } : {}), AGENT_REMOTE_ISSUER: issuer, AGENT_REMOTE_SIGNING_SECRET: envSecret },
+      bindings: { ...(options.workerVersionId ? { CF_VERSION_METADATA: { id: options.workerVersionId } } : {}), AGENT_REMOTE_RELAY_URL: origin, ...(options.previewDomain ? { AGENT_REMOTE_PREVIEW_DOMAIN: options.previewDomain } : {}), ...(options.previewOrigin ? { AGENT_REMOTE_PREVIEW_URL: options.previewOrigin } : {}), ...(options.authProvider === 'google' ? {
+        AGENT_REMOTE_AUTH_PROVIDER: 'google', AGENT_REMOTE_GOOGLE_CLIENT_ID: googleClientId, AGENT_REMOTE_GOOGLE_CLIENT_SECRET: 'workers-client-secret', AGENT_REMOTE_GOOGLE_ALLOWED_EMAILS: googleEmails,
+      } : { AGENT_REMOTE_ISSUER: issuer }), AGENT_REMOTE_SIGNING_SECRET: envSecret },
       serviceBindings: { ASSETS: async request => new Response(new URL(request.url).pathname === '/index.html'
         ? '<!doctype html><html><head><title>Controller</title></head><body><script src="/assets/main.js"></script></body></html>' : 'asset',
       { headers: { 'content-type': new URL(request.url).pathname === '/index.html' ? 'text/html' : 'text/javascript' } }) },
       outboundService: async request => {
+        if (googleKeys) {
+          const url = new URL(request.url);
+          if (url.href === 'https://www.googleapis.com/oauth2/v3/certs') return Response.json({ keys: [{ ...googleKeys.publicKey.export({ format: 'jwk' }), kid: 'workers-fixture', alg: 'RS256', use: 'sig' }] });
+          if (url.href !== 'https://oauth2.googleapis.com/token') return new Response('Unexpected Google endpoint', { status: 400 });
+          const input = new URLSearchParams(await request.text()); const code = input.get('code')!, grant = googleCodes.get(code); googleCodes.delete(code);
+          if (!grant || input.get('client_id') !== googleClientId || input.get('client_secret') !== 'workers-client-secret' || input.get('grant_type') !== 'authorization_code' || input.get('redirect_uri') !== grant.redirect || createHash('sha256').update(input.get('code_verifier') ?? '').digest('base64url') !== grant.challenge) return new Response('Invalid code exchange', { status: 400 });
+          const now = Math.floor(Date.now() / 1000);
+          const payload = [{ alg: 'RS256', kid: 'workers-fixture' }, { iss: 'https://accounts.google.com', aud: googleClientId, sub: 'owner', email: 'owner@example.com', email_verified: true, nonce: grant.nonce, iat: now, exp: now + 600 }]
+            .map(value => Buffer.from(JSON.stringify(value)).toString('base64url')).join('.');
+          return Response.json({ id_token: payload + '.' + rsaSign('RSA-SHA256', Buffer.from(payload), googleKeys.privateKey).toString('base64url'), access_token: 'never-store-google-access-token' });
+        }
         if (options.controllerRelease && ['api.github.com', 'github.com'].includes(new URL(request.url).hostname)) {
           const path = new URL(request.url).pathname;
           const candidates = [options.controllerRelease, ...(options.controllerBridge ? [options.controllerBridge] : []), ...(options.controllerBridges ?? [])];
@@ -145,6 +162,22 @@ export async function fixture(options: { actualEntry?: true; completeCodec?: tru
   const previewRequest = (path: string, init: RequestInit = {}) => requestAt(options.previewOrigin ?? previewOrigin, path, init);
   const json = (path: string, cookie: string, body?: object, method = body ? 'POST' : 'GET') => request(path, {
     method, headers: { origin, cookie, 'content-type': 'application/json' }, ...(body ? { body: JSON.stringify(body) } : {}) });
+  async function beginGoogleLogin() {
+    const response = await request('/auth/login?host=chosen-host'); expect(response.status).toBe(303);
+    const destination = new URL(response.headers.get('location')!);
+    expect(destination.origin).toBe('https://accounts.google.com');
+    expect(destination.searchParams.get('client_id')).toBe(googleClientId);
+    expect(destination.searchParams.get('code_challenge_method')).toBe('S256');
+    const code = randomUUID(); googleCodes.set(code, { nonce: destination.searchParams.get('nonce')!, challenge: destination.searchParams.get('code_challenge')!, redirect: destination.searchParams.get('redirect_uri')! });
+    const callback = new URL(destination.searchParams.get('redirect_uri')!); callback.searchParams.set('state', destination.searchParams.get('state')!); callback.searchParams.set('code', code);
+    return { callback: callback.pathname + callback.search, cookie: response.headers.getSetCookie().map(value => value.split(';')[0]).join('; ') };
+  }
+  async function finishGoogleLogin(pending: Awaited<ReturnType<typeof beginGoogleLogin>>) {
+    const callback = await request(pending.callback, { headers: { cookie: pending.cookie } }); expect(callback.status).toBe(303);
+    const cookie = callback.headers.getSetCookie().filter(value => !value.includes('arc_login=')).map(value => value.split(';')[0]).join('; ');
+    const status = await json('/auth/status', cookie); expect(status.status).toBe(200);
+    return { cookie, ...await status.json() as { basePath: string; user: { id: string }; auth: object } };
+  }
   async function beginLogin(subject: string) {
     const begin = await request('/auth/login'); expect(begin.status).toBe(303);
     const loginCookie = begin.headers.get('set-cookie')!.split(';')[0]!;
@@ -187,7 +220,8 @@ export async function fixture(options: { actualEntry?: true; completeCodec?: tru
     const token = sign('arc-gateway-service+jwt', { iss: issuer, aud: origin, op: 'control', bodyHash: createHash('sha256').update(serialized).digest('base64url'), iat, exp: iat + 60, jti: randomUUID() });
     return () => request('/gateway/control', { method: 'POST', headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' }, body: serialized });
   }
-  return { requestAt, request, previewRequest, json, beginLogin, login, upgrade, upgradeResponse, host, control, directory,
+  return { requestAt, request, previewRequest, json, beginLogin, login, beginGoogleLogin, finishGoogleLogin, upgrade, upgradeResponse, host, control, directory,
+    setGoogleConfig(clientId: string, allowedEmails = googleEmails) { googleClientId = clientId; googleEmails = allowedEmails; },
     setAuthority(status: number, duration = 120_000) { authorityStatus = status; leaseMs = duration; },
     failOwnerChecks(count: number) { ownerFailures = count; },
     delayRenewals(ms: number) { renewalDelayMs = ms; peakRenewals = 0; authorityOperations.length = 0; },

@@ -3,19 +3,15 @@ import { resolve, join } from 'node:path';
 import { homedir } from 'node:os';
 import { createGatewayRelay } from './gateway-relay.js';
 import { createGatewayStaticPages } from './gateway-static.js';
+import { hostedAuthFromEnv } from '@orchardworks/agent-remote-hosted';
 
-function required(name: string): string {
-  const value = process.env[name];
-  if (!value) throw new Error(`${name} is required.`);
-  return value;
-}
+const auth = hostedAuthFromEnv(process.env);
 const server = createGatewayRelay({
+  ...auth,
   stateFile: join(process.env.AGENT_REMOTE_STATE_DIR ?? join(homedir(), '.agent-remote-control', 'gateway-relay'), 'state.json'),
-  origin: required('AGENT_REMOTE_RELAY_URL'), issuer: required('AGENT_REMOTE_ISSUER'),
   previewOrigin: process.env.AGENT_REMOTE_PREVIEW_URL,
   previewDomain: process.env.AGENT_REMOTE_PREVIEW_DOMAIN,
-  secret: required('AGENT_REMOTE_SIGNING_SECRET'),
-  servePage: await createGatewayStaticPages(process.env.AGENT_REMOTE_WEB_DIST ?? fileURLToPath(new URL('../../dist', import.meta.url)), { origin: required('AGENT_REMOTE_RELAY_URL'), previewDomain: process.env.AGENT_REMOTE_PREVIEW_DOMAIN }),
+  servePage: await createGatewayStaticPages(process.env.AGENT_REMOTE_WEB_DIST ?? fileURLToPath(new URL('../../dist', import.meta.url)), { origin: auth.origin, previewDomain: process.env.AGENT_REMOTE_PREVIEW_DOMAIN }),
 });
 const port = Number(process.env.AGENT_REMOTE_PORT ?? 5910);
 if (!Number.isInteger(port) || port < 0 || port > 65535) throw new Error('AGENT_REMOTE_PORT must be a valid port.');

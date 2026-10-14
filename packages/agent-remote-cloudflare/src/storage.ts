@@ -1,6 +1,6 @@
 import { createHmac } from 'node:crypto';
 import { SQL_SNAPSHOT_FORMAT, decodeSqlSnapshot, encodeSqlSnapshot, type SqlManifest, type SqlChunk, type SqlEncodedRecord } from './storage-codec.js';
-import { emptyRelayState, validateRelayState, type GatewayAuthOptions, type HostedRelayState, type RelayStateStore } from '@orchardworks/agent-remote-hosted';
+import { emptyRelayState, hostedAuthStateConfig, hostedAuthStorageIdentity, resolveHostedAuth, validateRelayState, type HostedAuthOptions, type HostedRelayState, type RelayStateStore } from '@orchardworks/agent-remote-hosted';
 
 type RecordKind = 'sessionTitle' | 'sessionTitleRevision' | 'favoritesTree' | 'sessionMigration' | 'sessionStar' | 'preview' | 'securityEvent' | 'session' | 'tenant' | 'deviceKey' | 'host' | 'binding' | 'creation' | 'share' | 'reservation' | 'loginChallenge' | 'consumedProof';
 type StoredRecord = { kind: RecordKind; owner: string; key: string; version: number; value: string };
@@ -15,8 +15,11 @@ export class SqliteRelayStore implements RelayStateStore {
   private records: Map<string, SqlEncodedRecord> = new Map();
   private format: number;
   private durabilityUnknown = false;
-  constructor(private readonly storage: DurableObjectStorage, private readonly auth: GatewayAuthOptions) {
-    const fingerprint = createHmac('sha256', auth.secret).update(JSON.stringify(['agent-remote-cloudflare', 1, auth.origin, auth.issuer])).digest('hex');
+  constructor(private readonly storage: DurableObjectStorage, private readonly auth: HostedAuthOptions) {
+    auth = this.auth = resolveHostedAuth(auth);
+    const config = hostedAuthStateConfig(auth);
+    // Flatten the shared identity to retain the original Gateway fingerprint bytes.
+    const fingerprint = createHmac('sha256', auth.secret).update(JSON.stringify(['agent-remote-cloudflare', 1, ...JSON.parse(hostedAuthStorageIdentity(auth))])).digest('hex');
     storage.transactionSync(() => {
       storage.sql.exec(`CREATE TABLE IF NOT EXISTS relay_metadata (
         id INTEGER PRIMARY KEY CHECK (id = 1), version INTEGER NOT NULL, origin TEXT NOT NULL, issuer TEXT NOT NULL, fingerprint TEXT NOT NULL
@@ -44,12 +47,12 @@ export class SqliteRelayStore implements RelayStateStore {
       )`);
       const metadata = storage.sql.exec('SELECT * FROM relay_metadata WHERE id = 1').toArray()[0];
       if (metadata) {
-        if (![2, SQL_SNAPSHOT_FORMAT].includes(metadata.version as number) || metadata.origin !== auth.origin || metadata.issuer !== auth.issuer || metadata.fingerprint !== fingerprint) {
+        if (![2, SQL_SNAPSHOT_FORMAT].includes(metadata.version as number) || metadata.origin !== config.origin || metadata.issuer !== config.issuer || metadata.fingerprint !== fingerprint) {
           throw new Error('Relay configuration does not match persisted state.');
         }
       } else {
         if (storage.sql.exec('SELECT identity FROM relay_snapshot_manifests LIMIT 1').toArray().length || storage.sql.exec('SELECT identity FROM relay_snapshot_chunks LIMIT 1').toArray().length || storage.sql.exec('SELECT key FROM relay_session_titles LIMIT 1').toArray().length || storage.sql.exec('SELECT key FROM relay_favorites_trees LIMIT 1').toArray().length || storage.sql.exec('SELECT key FROM relay_session_migrations LIMIT 1').toArray().length || storage.sql.exec('SELECT key FROM relay_session_stars LIMIT 1').toArray().length || storage.sql.exec('SELECT key FROM relay_records LIMIT 1').toArray().length || storage.sql.exec('SELECT key FROM relay_security_events LIMIT 1').toArray().length || storage.sql.exec('SELECT key FROM relay_previews LIMIT 1').toArray().length) throw new Error('Relay metadata is missing.');
-        storage.sql.exec('INSERT INTO relay_metadata (id, version, origin, issuer, fingerprint) VALUES (1, 2, ?, ?, ?)', auth.origin, auth.issuer, fingerprint);
+        storage.sql.exec('INSERT INTO relay_metadata (id, version, origin, issuer, fingerprint) VALUES (1, 2, ?, ?, ?)', config.origin, config.issuer, fingerprint);
       }
     });
     const metadata = storage.sql.exec('SELECT version FROM relay_metadata WHERE id = 1').toArray()[0]!;
@@ -129,7 +132,7 @@ function encodeLegacyRecords(state: HostedRelayState) {
   }
   return records;
 }
-function decode(rows: StoredRecord[], auth: GatewayAuthOptions): HostedRelayState {
+function decode(rows: StoredRecord[], auth: HostedAuthOptions): HostedRelayState {
   const kinds: RecordKind[] = ['sessionTitle', 'sessionTitleRevision', 'favoritesTree', 'sessionMigration', 'sessionStar', 'preview', 'securityEvent', 'session', 'tenant', 'deviceKey', 'host', 'binding', 'creation', 'share', 'reservation', 'loginChallenge', 'consumedProof'];
   if (rows.some(row => !kinds.includes(row.kind) || row.version !== 1 || typeof row.owner !== 'string' || typeof row.key !== 'string' || typeof row.value !== 'string')) throw new Error('Unsupported legacy Relay record kind or version.');
   const state = emptyRelayState(auth);

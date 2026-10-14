@@ -5,6 +5,8 @@ import { event, fixture, origin, send } from './fixture.js';
 it('serves hosted assets and health, authenticates browser login, and transports Host RPC and Controller frames', async () => {
   const f = await fixture({ previewOrigin: origin });
   expect((await f.request('/health')).status).toBe(200);
+  const physical = await (await f.inspect('codec/physical')).json() as any;
+  expect(physical.metadata[0].fingerprint).toBe('de85da62db08e8c027e57a9b123ae2ac14e3494c93a6b4068a96db9045bd5d74');
   const index = await f.request('/');
   expect(await index.text()).toContain('<meta name="agent-remote-auth" content="gateway">');
   expect(index.headers.get('content-security-policy')).toContain("frame-ancestors 'none'");

@@ -11,7 +11,7 @@ export interface HostedAuthenticationProvider {
   userStatus(subject: string, observe?: (diagnostic: AuthorityDiagnostic) => void): Promise<AuthorityResult>;
 }
 export function createAuthenticationProvider(auth: ResolvedHostedAuth, state: RelayState): HostedAuthenticationProvider {
-  if (auth.provider === 'gateway') return {
+  if (auth.provider === 'mainsite') return {
     persistent: grant => grant.provider !== 'google' && !!grant.continuation,
     legacy: request => authenticateGatewayRequest(request, auth),
     renew: grant => grant.provider !== 'google' && grant.continuation ? queryGatewayAuthority(auth, 'renew', { continuation: grant.continuation }) : Promise.resolve({ status: 'denied' }),

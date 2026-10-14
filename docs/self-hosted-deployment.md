@@ -2,8 +2,13 @@
 
 Run your own hosted website and Relay, then connect an Agent Host on your workstation.
 The diagnostic Lab remains an account-free local workbench. Hosted deployments add
-site login without requiring Borgee, a sibling checkout, or production credentials.
+site login using your own configuration and credentials.
 No provider CLI runs on the Relay.
+
+Start with the [README deployment walkthrough](../README.md#private-deployment)
+for authentication, Docker or Workers, [Caddy with Let's Encrypt](../README.md#caddy-and-lets-encrypt),
+and [Controller installation](../README.md#install-controller). This guide adds
+runtime and backup details to that operator-facing flow.
 
 ## Choose runtime and sign-in independently
 
@@ -11,13 +16,15 @@ No provider CLI runs on the Relay.
 | --- | --- | --- | --- |
 | Node / Docker | Google | Your Relay, Google OAuth application | Host only |
 | Cloudflare Workers | Google | Your Worker / Durable Object, Google OAuth application | Host only |
-| Node / Docker | Gateway | Your Relay, your compatible Copilot API Gateway | Host only; optional Gateway token + CLI setup |
-| Cloudflare Workers | Gateway | Your Worker / Durable Object, your compatible Copilot API Gateway | Host only; optional Gateway token + CLI setup |
+| Node / Docker | Main site | Your Relay, your main site implementing the authentication contract | Host only; optional model key + CLI setup |
+| Cloudflare Workers | Main site | Your Worker / Durable Object, your main site implementing the authentication contract | Host only; optional model key + CLI setup |
 
-Google login does not require any Gateway. Host only retains the Host's existing
-provider configuration. Google login grants site access; it does not supply model
-API credentials. Gateway setup is offered only when the server supports it and
-must be selected explicitly.
+Direct Google login does not require a main site. Host only retains the Host's
+existing provider configuration. Google login grants site access; it does not
+supply model API credentials. Main-site login uses the configuration value
+`mainsite`; model-key setup is optional and currently labeled **Gateway token + CLI
+setup** in the UI. That mode advertises setup/control capabilities without probing
+the main site's endpoints, so use **Host only** unless those APIs are implemented.
 
 ## Origins, HTTPS and secrets
 
@@ -30,13 +37,13 @@ listens on loopback.
 
 Generate `AGENT_REMOTE_SIGNING_SECRET` once with `openssl rand -hex 32`. Keep it
 private and stable across restarts, upgrades and restores. It must contain at
-least 32 bytes. Google mode uses a local Relay secret; Gateway mode shares the
-same secret between your Gateway and Relay. Do not use a model API key here.
+least 32 bytes. Google mode uses a local Relay secret; main-site login shares the
+same secret between your main site and Relay. Do not use a model API key here.
 Secrets are runtime environment variables or Wrangler secrets, never build args,
 source files, client assets or Docker image layers.
 
-Keep the origin, auth provider, Google client ID (Google mode), Gateway issuer
-(Gateway mode), and signing secret consistent with persisted state. Changes to
+Keep the origin, auth provider, Google client ID (Google mode), main-site issuer
+(main-site login), and signing secret consistent with persisted state. Changes to
 identity configuration can invalidate credentials or fail storage admission;
 they are a migration/re-enrollment operation, not an ordinary upgrade. Removing
 an email from the allowlist denies subsequent authorization and renewal for that
@@ -101,7 +108,7 @@ Its own ignore file excludes installed dependencies, build output, Git/worktrees
 local environment files, keys and runtime state. The final image runs as a non-root
 user and contains only the bundled server and public assets, including installers.
 The existing root `Dockerfile` still supports the prebuilt-artifact release/test
-workflow; the existing root Compose topology is a separate Gateway integration lab.
+workflow; the existing root Compose topology is a separate main-site integration lab.
 
 The new Compose service exposes `127.0.0.1:5910` by default. Change
 `AGENT_REMOTE_HTTP_PORT` in `.env` to an unused host port. Put your TLS reverse
@@ -110,6 +117,13 @@ original public `Host` and browser `Origin`. Do not substitute the loopback Host
 Node deliberately validates it against the configured public origin. The container
 healthcheck connects locally with the configured public Host, so it needs no
 public DNS or TLS route to test process health.
+
+Use the [README Caddy configuration](../README.md#caddy-and-lets-encrypt) for
+Let's Encrypt issuance and renewal, host-installed versus container upstreams,
+and the matching Relay origin and Google callback. Preserve Caddy's certificate
+data separately from Relay state. TLS certificate renewal does not rotate
+`AGENT_REMOTE_SIGNING_SECRET`; changing that application secret can invalidate
+persisted state.
 
 Verify the public site and `/health` through HTTPS after configuring DNS/proxy.
 Sign-in, browser secure context, Host WSS registration and reconnection need an
@@ -146,26 +160,43 @@ Wrangler prompts for your own Cloudflare authentication and secret values. The
 Google secret command is needed only in Google mode. Keep secrets out of `vars`.
 The template binds public assets and a SQLite-backed `RelayObject` under `RELAY`,
 with a stable `primary` object. Keep that binding, class, Worker identity and
-migration history stable during upgrades. The Worker has no Gateway D1/KV/R2
+migration history stable during upgrades. The Worker has no main-site D1/KV/R2
 bindings. Do not remove/recreate the namespace to fix configuration errors.
 
-## Gateway setup
+## Main-site setup
 
-Choose `AGENT_REMOTE_AUTH_PROVIDER=gateway` (also the compatibility default when
-unset). Set `AGENT_REMOTE_ISSUER` to your own compatible Gateway HTTPS origin and
+Choose `AGENT_REMOTE_AUTH_PROVIDER=mainsite`. The default when unset is also
+`mainsite`; the previous `gateway` value remains a compatibility alias. New
+deployments should explicitly select `google` or `mainsite`. Renaming an existing
+configuration from `gateway` to `mainsite` preserves its identity and stored state.
+Set `AGENT_REMOTE_ISSUER` to your main site's HTTPS origin and
 configure the same Relay URL, issuer and signing secret on both services. In the
 Workers template, replace Google vars with `AGENT_REMOTE_AUTH_PROVIDER` and
-`AGENT_REMOTE_ISSUER`. The Gateway must implement the Agent Remote signed login,
-authority renewal and control integration; an arbitrary OpenAI-compatible model
-endpoint is not an identity Gateway. Follow [Gateway integration](current/agent-remote/gateway-relay.md)
-and the Gateway project's own `vnext/docs/agent-remote-relay.md`.
+`AGENT_REMOTE_ISSUER`. The main site must implement the Agent Remote signed login
+and authority APIs. A model API alone does not provide this identity integration;
+a model API is not required for authentication-only integration. Follow the
+[main-site API and data contract](../README.md#main-site-api-and-data-requirements)
+and [integration guide](current/agent-remote/gateway-relay.md).
 
-The Relay serves `/auth/login`, and your Gateway handles `/agent-remote` before
+The Relay serves `/auth/login`, and your main site handles `/agent-remote` before
 returning the browser to this Relay. No production business domain is required.
 If both are Workers in the same zone, use appropriate Custom Domains for their
 server-to-server calls; do not assume a wildcard route is interchangeable.
 
+Sign in to the main site before launching Agent Remote. If that site uses Google,
+use the same Google/Gmail account you use on the main site; its login supplies the
+identity for Agent Remote, without a separate Google login on the Relay. Other
+main-site login methods are supported by the same contract. Identity follows the
+main site's stable issuer and subject, not an email match. Direct Google login
+has a separate namespace: an identical Gmail address does not merge accounts,
+Host ownership or permissions across these two modes.
+
 ## Pair one Controller with this site
+
+The root [install.sh](../install.sh) and [install.ps1](../install.ps1) are the
+macOS/Linux and Windows installers. The Relay build publishes them at the site
+paths below. For commands that run directly from a checkout, see
+[Install Controller](../README.md#install-controller).
 
 Open your deployment, select **Sign in**, then **Settings → Pair Agent Host**.
 The account label and installer target refer to this site. Choose **Host only**

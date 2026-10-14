@@ -25,7 +25,7 @@ export function event(socket: WebSocket, type: 'message' | 'close'): Promise<any
 }
 export const send = (socket: WebSocket, data: object) => socket.send(JSON.stringify({ uplinkVersion: 2, ...data }));
 
-export async function fixture(options: { actualEntry?: true; completeCodec?: true; authProvider?: 'google'; previewOrigin?: string; previewDomain?: string; controllerRelease?: Record<string, unknown>; controllerBridge?: Record<string, unknown>; controllerBridges?: Record<string, unknown>[]; workerVersionId?: string } = {}) {
+export async function fixture(options: { actualEntry?: true; completeCodec?: true; authProvider?: 'google' | 'mainsite' | 'gateway'; previewOrigin?: string; previewDomain?: string; controllerRelease?: Record<string, unknown>; controllerBridge?: Record<string, unknown>; controllerBridges?: Record<string, unknown>[]; workerVersionId?: string } = {}) {
   const directory = await mkdtemp(join(tmpdir(), 'arc-workers-'));
   closers.push(() => rm(directory, { recursive: true, force: true }));
     const result = await build({ stdin: { contents: options.actualEntry ? `export { default, RelayObject } from './src/worker.ts';` : `
@@ -106,7 +106,7 @@ export async function fixture(options: { actualEntry?: true; completeCodec?: tru
       durableObjects: { RELAY: { className: options.actualEntry ? 'RelayObject' : 'TestRelayObject', useSQLite: true } }, durableObjectsPersist: join(directory, 'state'),
       bindings: { ...(options.workerVersionId ? { CF_VERSION_METADATA: { id: options.workerVersionId } } : {}), AGENT_REMOTE_RELAY_URL: origin, ...(options.previewDomain ? { AGENT_REMOTE_PREVIEW_DOMAIN: options.previewDomain } : {}), ...(options.previewOrigin ? { AGENT_REMOTE_PREVIEW_URL: options.previewOrigin } : {}), ...(options.authProvider === 'google' ? {
         AGENT_REMOTE_AUTH_PROVIDER: 'google', AGENT_REMOTE_GOOGLE_CLIENT_ID: googleClientId, AGENT_REMOTE_GOOGLE_CLIENT_SECRET: 'workers-client-secret', AGENT_REMOTE_GOOGLE_ALLOWED_EMAILS: googleEmails,
-      } : { AGENT_REMOTE_ISSUER: issuer }), AGENT_REMOTE_SIGNING_SECRET: envSecret },
+      } : { ...(options.authProvider ? { AGENT_REMOTE_AUTH_PROVIDER: options.authProvider } : {}), AGENT_REMOTE_ISSUER: issuer }), AGENT_REMOTE_SIGNING_SECRET: envSecret },
       serviceBindings: { ASSETS: async request => new Response(new URL(request.url).pathname === '/index.html'
         ? '<!doctype html><html><head><title>Controller</title></head><body><script src="/assets/main.js"></script></body></html>' : 'asset',
       { headers: { 'content-type': new URL(request.url).pathname === '/index.html' ? 'text/html' : 'text/javascript' } }) },
@@ -230,6 +230,6 @@ export async function fixture(options: { actualEntry?: true; completeCodec?: tru
     setAuthenticatedAt(value: number) { authenticatedAt = value; },
     get authorityCalls() { return authorityCalls; },
     async inspect(path: string, init?: RequestInit) { const namespace = await mf.getDurableObjectNamespace('RELAY'); return namespace.getByName('primary').fetch(origin + '/_fixture/' + path, { ...init, signal: AbortSignal.timeout(10000) } as any); },
-    async restart(replacementSecret = secret) { await mf.dispose(); envSecret = replacementSecret; await start(); },
+    async restart(replacementSecret = secret, authProvider = options.authProvider) { await mf.dispose(); envSecret = replacementSecret; options.authProvider = authProvider; await start(); },
   };
 }

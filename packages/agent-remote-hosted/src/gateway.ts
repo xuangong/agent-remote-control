@@ -174,7 +174,7 @@ export function createHostedRelay(options: HostedRelayOptions) {
   const domainOrigin = (broker: ReturnType<typeof createHostBroker>, hostId: string, id: string) => previewDomainOrigin(broker.previews.nameId(hostId, id), options.previewDomain!, auth.origin);
 
   const security = createSecurityPolicy(state);
-  const verifyControl = auth.provider === 'gateway' ? createGatewayControlVerifier(auth, state) : undefined;
+  const verifyControl = auth.provider === 'mainsite' ? createGatewayControlVerifier(auth, state) : undefined;
   function failClosed() {
     failed = true;
     for (const socket of browserChannels.keys()) socket.close(1013, 'Relay unavailable');
@@ -266,7 +266,7 @@ export function createHostedRelay(options: HostedRelayOptions) {
         throw refusal;
       } : undefined;
       const broker = createHostBroker({ origin: auth.origin, publicUrl: auth.origin, keyLifetimeMs: options.keyLifetimeMs,
-        ownerSubject: grant.subject, durable, accountBacked, initialState, diagnostics, gatewaySetup: auth.provider === 'gateway',
+        ownerSubject: grant.subject, durable, accountBacked, initialState, diagnostics, gatewaySetup: auth.provider === 'mainsite',
         teamResources: options.teamResources?.(grant.namespace),
         ...(options.successionEnrollment ? { successionEnrollment: { version: 1, origin: auth.origin, issuer: auth.issuer, namespace: grant.namespace, ownerSubject: grant.subject } as const, successionProjectionAllowance: allowance } : {}),
         userStreamCount: subject => [...tenants.values()].reduce((sum, owned) => sum + owned.broker.activeStreamCount(subject), 0),
@@ -704,7 +704,7 @@ export function createHostedRelay(options: HostedRelayOptions) {
         } catch (error) { if (error instanceof StarError) return json(error.status, { code: error.code, error: error.message }); throw error; }
       });
     };
-    const result = durable && auth.provider === 'gateway' && revokeHost && request.method === 'POST' ? await withHostKey(revokeHost[1]!, async () => {
+    const result = durable && auth.provider === 'mainsite' && revokeHost && request.method === 'POST' ? await withHostKey(revokeHost[1]!, async () => {
       const identity = destination.broker.gatewayKeyHost(revokeHost[1]!, grant.subject);
       if (identity) {
         await validateBootstrapBody(relative.clone());

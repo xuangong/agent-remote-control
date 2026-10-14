@@ -30,7 +30,7 @@ async function assets() {
   await writeFile(join(directory, 'assets/main.js'), 'window.controller = true;');
   return directory;
 }
-async function fixture(provider: 'google' | 'gateway', requestTimeout = 5000) {
+async function fixture(provider: 'google' | 'mainsite' | 'gateway', requestTimeout = 5000) {
   const keys = generateKeyPairSync('rsa', { modulusLength: 2048 });
   const grants = new Map<string, { nonce: string; challenge: string; redirect: string }>();
   const identity = createServer(async (request, response) => {
@@ -63,7 +63,7 @@ async function fixture(provider: 'google' | 'gateway', requestTimeout = 5000) {
   const directory = await assets();
   let url = 'http://127.0.0.1:0'; let relay: ReturnType<typeof createGatewayRelay> | undefined;
   const start = async () => {
-    relay = createGatewayRelay({ ...(provider === 'google' ? { provider, google: { clientId: 'runtime-client', clientSecret: 'runtime-client-secret', allowedEmails: ['owner@example.com'], endpoints: { authorization: issuer + '/authorize', token: issuer + '/token', jwks: issuer + '/jwks' } } } : { issuer }),
+    relay = createGatewayRelay({ ...(provider === 'google' ? { provider, google: { clientId: 'runtime-client', clientSecret: 'runtime-client-secret', allowedEmails: ['owner@example.com'], endpoints: { authorization: issuer + '/authorize', token: issuer + '/token', jwks: issuer + '/jwks' } } } : { provider, issuer }),
       origin: url, secret, stateFile: join(directory, 'state.json'), servePage: await createGatewayStaticPages(directory, { origin: url }) });
     url = (await relay.listen(Number(new URL(url).port))).url;
   };
@@ -89,9 +89,9 @@ async function fixture(provider: 'google' | 'gateway', requestTimeout = 5000) {
     const socket = new WebSocket(url.replace('http:', 'ws:') + path, { headers, handshakeTimeout: 3000 });
     closers.push(async () => { socket.terminate(); }); await once(socket, 'open'); return socket;
   }
-  return { get url() { return url; }, issuer, directory, request, begin, finish, upgrade, restart: async () => { await stop(); await start(); },
+  return { get url() { return url; }, issuer, directory, request, begin, finish, upgrade, restart: async (nextProvider = provider) => { await stop(); provider = nextProvider; await start(); },
     async seedState(change: (state: HostedRelayState) => void) {
-      if (provider !== 'gateway') throw new Error('This persisted-state fixture uses Gateway signing scope.');
+      if (provider === 'google') throw new Error('This persisted-state fixture uses Gateway signing scope.');
       await stop();
       const file = join(directory, 'state.json'), state = JSON.parse(JSON.parse(await readFile(file, 'utf8')).payload) as HostedRelayState;
       change(state); validateRelayState(state, { origin: url, issuer, secret });
@@ -151,26 +151,26 @@ async function handoff(f: Awaited<ReturnType<typeof fixture>>, socket: WebSocket
   return replay;
 }
 
-it.each(['google', 'gateway'] as const)('Node %s keeps login, pairing credentials and browser admission through restart', async provider => {
+it.each(['google', 'mainsite', 'gateway'] as const)('Node %s keeps login, pairing credentials and browser admission through restart', async provider => {
   const f = await fixture(provider);
   expect((await f.request('/health')).status).toBe(200);
   const index = await f.request('/'); expect(await index.text()).toContain('agent-remote-auth');
   expect((await f.request('/assets/main.js')).status).toBe(200);
-  const pending = await f.begin(); await f.restart(); const cookie = await f.finish(pending);
+  const pending = await f.begin(); await f.restart(provider === 'gateway' ? 'mainsite' : provider); const cookie = await f.finish(pending);
   const info = await (await f.request('/auth/status', cookie)).json();
-  expect(info).toMatchObject({ user: { id: 'owner' }, auth: { provider } });
+  expect(info).toMatchObject({ user: { id: 'owner' }, auth: { provider: provider === 'google' ? 'google' : 'mainsite' } });
   expect(await rejectedUpgrade(f.url + '/ws/remote-host')).toBe(401);
   expect(await rejectedUpgrade(f.url + info.basePath + 'v1/session-channel?observation=session', { cookie, origin: 'https://other.example' })).toBe(403);
   const pairing = await f.request(info.basePath + 'v1/remote/pairings', cookie, { purpose: 'host-only' });
   expect(pairing.status).toBe(201); const { key } = await pairing.json();
-  await f.restart();
+  await f.restart(provider);
   const host = await f.upgrade('/ws/remote-host?successionEnrollment=2', { authorization: `Bearer ${key}` });
   const issued = frame(host); send(host, { type: 'register', credentialRotation: true, installationId: 'installation', name: 'Host', providers: [{ providerId: 'fixture', displayName: 'Fixture' }] });
   const credential = await issued; expect(credential.type).toBe('credential_issued');
   const registered = frame(host); send(host, { type: 'credential_saved' }); const registration = await registered;
   expect(registration).toMatchObject({ type: 'registered', successionEnrollmentVersion: 2, successionEnrollment: { ownerSubject: 'owner' } });
   const replay = await handoff(f, host, registration.hostId, info.basePath, cookie);
-  const closed = once(host, 'close'); host.close(); await closed; await f.restart();
+  const closed = once(host, 'close'); host.close(); await closed; await f.restart(provider === 'gateway' ? 'mainsite' : provider);
   expect((await f.request('/auth/status', cookie)).status).toBe(200);
   expect(await (await f.request(info.basePath + 'v1/remote/hosts', cookie)).json()).toMatchObject({ hosts: [{ id: registration.hostId, online: false }] });
   expect(await (await f.request(info.basePath + 'v1/session-successions', cookie)).json()).toEqual(replay);
@@ -266,10 +266,10 @@ it('protects an admitted near-ceiling reserve from ordinary writes and completes
   expect((await f.request('/health')).status).toBe(200);
 }, 60000);
 
-it.each(['google', 'gateway'] as const)('Node entrypoint resolves %s authentication from environment', async provider => {
+it.each(['google', 'mainsite', 'gateway'] as const)('Node entrypoint resolves %s authentication from environment', async provider => {
   const directory = await assets(), readyFile = join(directory, 'ready.json');
   const env = { ...process.env, AGENT_REMOTE_AUTH_PROVIDER: provider, AGENT_REMOTE_RELAY_URL: 'http://127.0.0.1:0', AGENT_REMOTE_SIGNING_SECRET: secret,
-    AGENT_REMOTE_ISSUER: provider === 'gateway' ? 'https://gateway.example' : undefined, AGENT_REMOTE_GOOGLE_CLIENT_ID: 'runtime-client', AGENT_REMOTE_GOOGLE_CLIENT_SECRET: 'runtime-client-secret', AGENT_REMOTE_GOOGLE_ALLOWED_EMAILS: 'owner@example.com',
+    AGENT_REMOTE_ISSUER: provider === 'google' ? undefined : 'https://gateway.example', AGENT_REMOTE_GOOGLE_CLIENT_ID: 'runtime-client', AGENT_REMOTE_GOOGLE_CLIENT_SECRET: 'runtime-client-secret', AGENT_REMOTE_GOOGLE_ALLOWED_EMAILS: 'owner@example.com',
     AGENT_REMOTE_PORT: '0', AGENT_REMOTE_STATE_DIR: join(directory, 'state'), AGENT_REMOTE_WEB_DIST: directory, AGENT_REMOTE_READY_FILE: readyFile };
   const child = spawn(process.execPath, ['--import', 'tsx/esm', new URL('./gateway.ts', import.meta.url).pathname], { env, stdio: ['ignore', 'pipe', 'pipe'] });
   let output = ''; child.stderr.on('data', data => { output += data; });
@@ -282,7 +282,7 @@ it.each(['google', 'gateway'] as const)('Node entrypoint resolves %s authenticat
     if (!url) await new Promise(resolve => setTimeout(resolve, 25));
   }
   const status = await fetch(url + '/auth/status', { signal: AbortSignal.timeout(3000) });
-  expect(await status.json()).toMatchObject({ auth: { provider } });
+  expect(await status.json()).toMatchObject({ auth: { provider: provider === 'google' ? 'google' : 'mainsite' } });
   const login = await fetch(url + '/auth/login', { redirect: 'manual', signal: AbortSignal.timeout(3000) });
   expect(login.status).toBe(303); expect(new URL(login.headers.get('location')!).hostname).toBe(provider === 'google' ? 'accounts.google.com' : 'gateway.example');
 }, 15000);

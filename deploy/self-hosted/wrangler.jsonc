@@ -15,8 +15,8 @@
     "AGENT_REMOTE_AUTH_PROVIDER": "google",
     "AGENT_REMOTE_GOOGLE_CLIENT_ID": "your-client-id.apps.googleusercontent.com",
     "AGENT_REMOTE_GOOGLE_ALLOWED_EMAILS": "owner@example.com"
-    // Gateway mode: set AGENT_REMOTE_AUTH_PROVIDER to gateway and add
-    // AGENT_REMOTE_ISSUER with your own compatible Gateway origin.
+    // Main-site login: set AGENT_REMOTE_AUTH_PROVIDER to mainsite and add
+    // AGENT_REMOTE_ISSUER with your main site's origin. See README for required APIs.
     // Signing and Google client secrets belong in Wrangler secrets, never vars.
   }
 }

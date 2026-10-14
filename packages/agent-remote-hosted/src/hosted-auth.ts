@@ -10,9 +10,9 @@ export interface GoogleAuthConfiguration {
   /** Trusted operator configuration; never taken from a browser request or token. */
   endpoints?: { authorization: string; token: string; jwks: string };
 }
-export type HostedAuthOptions = (GatewayAuthOptions & { provider?: 'gateway' }) |
+export type HostedAuthOptions = (GatewayAuthOptions & { provider?: 'mainsite' | 'gateway' }) |
   { provider: 'google'; origin: string; secret: string; google: GoogleAuthConfiguration };
-export type ResolvedHostedAuth = (GatewayAuthOptions & { provider: 'gateway' }) |
+export type ResolvedHostedAuth = (GatewayAuthOptions & { provider: 'mainsite' }) |
   (GatewayAuthOptions & { provider: 'google'; google: GoogleAuthConfiguration & { sessionLifetimeMs: number; endpoints: NonNullable<GoogleAuthConfiguration['endpoints']> } });
 export interface HostedAuthEnvironment {
   AGENT_REMOTE_AUTH_PROVIDER?: string;
@@ -33,7 +33,7 @@ export function validAllowedEmail(email: unknown): email is string {
 export function resolveHostedAuth(options: HostedAuthOptions): ResolvedHostedAuth {
   const origin = validateGatewayOrigin(options.origin);
   if (typeof options.secret !== 'string' || Buffer.byteLength(options.secret) < 32) throw new Error('Relay signing secret must contain at least 32 bytes.');
-  if (options.provider === undefined || options.provider === 'gateway') return { provider: 'gateway', origin, issuer: validateGatewayOrigin(options.issuer), secret: options.secret };
+  if (options.provider === undefined || options.provider === 'mainsite' || options.provider === 'gateway') return { provider: 'mainsite', origin, issuer: validateGatewayOrigin(options.issuer), secret: options.secret };
   if (options.provider !== 'google') throw new Error('Unsupported authentication provider.');
   const input = options.google;
   if (!input || !input.clientId?.trim() || input.clientId.length > 512 || !input.clientSecret?.trim() || input.clientSecret.length > 4096) throw new Error('Google client ID and client secret are required.');
@@ -50,10 +50,11 @@ export function resolveHostedAuth(options: HostedAuthOptions): ResolvedHostedAut
 }
 export function hostedAuthFromEnv(env: HostedAuthEnvironment): ResolvedHostedAuth {
   const required = (name: keyof HostedAuthEnvironment) => { const value = env[name]; if (!value?.trim()) throw new Error(`${name} is required.`); return value; };
-  const provider = env.AGENT_REMOTE_AUTH_PROVIDER ?? 'gateway';
-  if (provider !== 'gateway' && provider !== 'google') throw new Error('AGENT_REMOTE_AUTH_PROVIDER must be gateway or google.');
+  const configuredProvider = env.AGENT_REMOTE_AUTH_PROVIDER ?? 'mainsite';
+  const provider = configuredProvider === 'gateway' ? 'mainsite' : configuredProvider;
+  if (provider !== 'mainsite' && provider !== 'google') throw new Error('AGENT_REMOTE_AUTH_PROVIDER must be google or mainsite.');
   const common = { origin: required('AGENT_REMOTE_RELAY_URL'), secret: required('AGENT_REMOTE_SIGNING_SECRET') };
-  return resolveHostedAuth(provider === 'gateway' ? { ...common, provider, issuer: required('AGENT_REMOTE_ISSUER') } : { ...common, provider, google: {
+  return resolveHostedAuth(provider === 'mainsite' ? { ...common, provider, issuer: required('AGENT_REMOTE_ISSUER') } : { ...common, provider, google: {
     clientId: required('AGENT_REMOTE_GOOGLE_CLIENT_ID'), clientSecret: required('AGENT_REMOTE_GOOGLE_CLIENT_SECRET'), allowedEmails: (env.AGENT_REMOTE_GOOGLE_ALLOWED_EMAILS ?? '').split(',') } });
 }
 export function hostedAuthStateConfig(auth: HostedAuthOptions) {
@@ -67,5 +68,5 @@ export function hostedAuthNamespace(auth: HostedAuthOptions, subject: string): s
   return createHash('sha256').update(JSON.stringify(auth.provider === 'google' ? ['google', googleIssuer, auth.google.clientId, subject] : [auth.issuer, subject])).digest('hex');
 }
 export function hostedAuthMetadata(auth: HostedAuthOptions) {
-  return { provider: auth.provider ?? 'gateway', capabilities: { hostOnlyPairing: true, gatewaySetup: auth.provider !== 'google', gatewayControl: auth.provider !== 'google' } };
+  return { provider: auth.provider === 'google' ? 'google' : 'mainsite', capabilities: { hostOnlyPairing: true, gatewaySetup: auth.provider !== 'google', gatewayControl: auth.provider !== 'google' } };
 }

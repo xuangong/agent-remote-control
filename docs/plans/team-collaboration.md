@@ -73,3 +73,7 @@ Relay and Controller must both support Team. Capability negotiation uses the `te
 ## Team presentation preference
 
 Use `/team` or **View → Team view** to toggle the Team management entry. Explicit `/team on`, `/team off`, `/team enable`, and `/team disable` are supported. The preference is saved locally and defaults to visible. Existing main/dock sessions remain visible and usable regardless of the management entry's visibility.
+
+## Delivery queue settlement
+
+`Team.messages` is the unresolved delivery queue, not the communication archive. Accepted input leaves it once it is no longer reported as queued; explicit rejection and cancellation also leave it. Unknown effects remain for reconciliation. Settlement atomically removes the body and stores a bounded Relay-only fingerprint/outcome receipt. Restoring existing state compacts legacy settled messages. Attachment recipient grants are independent of queue lifetime. See [Team resources](../guides/team-resources.md#limits-and-retention) for retry-window and capacity semantics. Public Team schemas and existing Controller polling remain compatible.

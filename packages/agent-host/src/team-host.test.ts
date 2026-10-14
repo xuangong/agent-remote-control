@@ -69,7 +69,8 @@ it('registers two real Host uplinks, injects scoped tools, delivers both ways wi
     const reportPath=join(root,'report.json');await writeFile(reportPath,JSON.stringify({sha256:resource.sha256,verified:true}));
     const reportResource=await call(win,member.nativeSessionId,'upload_team_resource',{path:reportPath,operationId:'report-upload'});
     expect(mac.sessions.get('source')?.sent).toHaveLength(0);
-    await expect.poll(async()=> (await request('/v1/remote/teams')).teams[0].messages.find((message:any)=>message.text===task.text)?.status,{timeout:5000}).toBe('accepted');
+    await expect.poll(async()=> (await request('/v1/remote/teams')).teams[0].messages.some((message:any)=>message.text===task.text),{timeout:5000}).toBe(false);
+    expect((await call(mac,leader.nativeSessionId,'read_team',{})).receipts).toEqual(expect.arrayContaining([expect.objectContaining({to:member.id,status:'accepted'})]));
     await call(win,member.nativeSessionId,'send_team_message',{to:leader.id,operationId:'result-1',text:'Evidence: the service is disabled.',resources:[reportResource.resourceId]});
     await expect.poll(()=>mac.sessions.get(leader.nativeSessionId)?.sent.length,{timeout:5000}).toBe(2);
     const returned=await call(mac,leader.nativeSessionId,'download_team_resource',{resourceId:reportResource.resourceId});expect(JSON.parse(await readFile(returned.localPath,'utf8'))).toEqual({sha256:resource.sha256,verified:true});

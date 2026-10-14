@@ -1,20 +1,21 @@
+import { assertTeamQueueCapacity, compactTeamDeliveries, publicTeam, replayTeamDelivery, validSavedTeam, type SavedTeam } from './team-delivery.js';
+export { teamMessageBudgetBytes } from './team-delivery.js';
 import type { TeamResourceStore } from './team-resources.js';
 import { createHash, randomUUID } from 'node:crypto';
-import { isTeam, isTeamMember, type Team, type TeamAction, type TeamCreate, type TeamHostCall, type TeamMember, type TeamSeat, type TeamResource } from '@orchardworks/agent-remote-protocol';
+import { isTeamMember, type Team, type TeamAction, type TeamCreate, type TeamHostCall, type TeamMember, type TeamSeat, type TeamResource } from '@orchardworks/agent-remote-protocol';
 
 export interface TeamBrokerPorts {
   resources?: TeamResourceStore;
   resourceDraftTtlMs?: number;
-  read(): Team[];
-  change<T>(update: (teams: Team[]) => T): Promise<T>;
+  read(): SavedTeam[];
+  change<T>(update: (teams: SavedTeam[]) => T): Promise<T>;
   createSeat(hostId: string, seat: TeamSeat): Promise<TeamMember>;
   assertHost(hostId: string, providerId: string): void;
   now(): number;
 }
 const fail = (message: string): never => { throw new Error(message); };
-const find = (teams: Team[], id: string) => teams.find(team => team.id === id) ?? fail('Team not found.');
+const find = (teams: SavedTeam[], id: string) => teams.find(team => team.id === id) ?? fail('Team not found.');
 const member = (team: Team, id: string) => team.members.find(item => item.id === id) ?? fail('Team member not found.');
-export const teamMessageBudgetBytes = (team: Team) => Buffer.byteLength(JSON.stringify(team.messages.map(({resources: _resources, ...message}) => message)));
 const active = (team: Team) => { if (team.status !== 'active') fail('Team is not active.'); };
 function touch(team: Team, now: number) { team.revision++; team.updatedAt = now; }
 function settleArchive(team: Team, now: number) {
@@ -26,10 +27,20 @@ function settleArchive(team: Team, now: number) {
 export class TeamBroker {
   private creating = new Map<string, Promise<Team>>();
   constructor(private readonly ports: TeamBrokerPorts) {}
-  list(): Team[] { return structuredClone(this.ports.read()); }
+  private change<T>(update: (teams: SavedTeam[]) => T): Promise<T> {
+    return this.ports.change(teams => {
+      for (const team of teams) compactTeamDeliveries(team, this.ports.now());
+      const result = update(teams);
+      for (const team of teams) compactTeamDeliveries(team, this.ports.now());
+      return result;
+    });
+  }
+  list(): Team[] { return this.ports.read().map(saved => {
+    const team = structuredClone(saved); compactTeamDeliveries(team, this.ports.now()); return publicTeam(team);
+  }); }
   async create(input: TeamCreate): Promise<Team> {
     this.ports.assertHost(input.source.hostId, input.source.providerId);
-    const team = await this.ports.change(teams => {
+    const team = await this.change(teams => {
       const existing = teams.find(item => item.operationId === input.operationId);
       if (existing) { if (JSON.stringify(existing.source) !== JSON.stringify(input.source)) fail('Creation identity has different input.'); return existing; }
       if (teams.length >= 32) fail('Team capacity reached.');
@@ -44,7 +55,7 @@ export class TeamBroker {
   }
   async action(input: TeamAction): Promise<Team> {
     if (input.action === 'add_member') this.ports.assertHost(input.hostId, input.providerId);
-    const result = await this.ports.change(teams => {
+    const result = await this.change(teams => {
       const team = find(teams, input.teamId), now = this.ports.now();
       if (input.action === 'archive') {
         if (team.status === 'active') { team.status = 'archiving'; for (const message of team.messages) if (message.status === 'queued') message.status = 'canceled'; touch(team, now); }
@@ -65,21 +76,29 @@ export class TeamBroker {
       } else if (input.action === 'retry_creation') { active(team); if (member(team, input.memberId).creation === 'abandoned') fail('Member was abandoned.'); }
       settleArchive(team, now); return team;
     });
-    return input.action === 'add_member' ? this.provision(result.id, input.operationId) : input.action === 'retry_creation' ? this.provision(result.id, input.memberId) : result;
+    return input.action === 'add_member' ? this.provision(result.id, input.operationId) : input.action === 'retry_creation' ? this.provision(result.id, input.memberId) : publicTeam(result);
   }
   async hostCall(hostId: string, call: TeamHostCall, assertCurrent: () => void = () => {}): Promise<unknown> {
     assertCurrent();
     if (call.action === 'poll') return this.list().filter(team => team.status !== 'archived' && team.members.some(item => item.hostId === hostId && item.creation === 'ready'));
     if (call.action.startsWith('resource_')) return this.resourceCall(hostId, call, assertCurrent);
     if (call.action === 'send' && call.resources?.length) await this.prepareResources(hostId,call,assertCurrent);
-    return this.ports.change(teams => {
+    return this.change(teams => {
       assertCurrent();
       const team = find(teams, call.teamId), self = member(team, call.memberId), now = this.ports.now();
       if (self.hostId !== hostId || self.creation !== 'ready') fail('This Host is not the registered Team member.');
-      if (call.action === 'read') return team;
+      if (call.action === 'read') return { ...publicTeam(team), receipts: team.deliveryReceipts?.map(({ fingerprint: _hash, settledAt: _time, ...receipt }) => receipt) ?? [] };
       if (call.action === 'presence') { if (self.activity === call.activity && team.status !== 'archiving') return team.status; self.activity = call.activity; self.updatedAt = now; settleArchive(team, now); return team.status; }
       if (call.action === 'settle' || call.action === 'claim') {
-        const message = team.messages.find(item => item.id === call.messageId && item.to === self.id) ?? fail('Message is not addressed to this member.');
+        const message = team.messages.find(item => item.id === call.messageId && item.to === self.id);
+        if (!message) {
+          const receipt = team.deliveryReceipts?.find(item => item.id === call.messageId && item.to === self.id);
+          if (!receipt) fail('Message is not addressed to this member.');
+          if (call.action === 'claim') return fail('Message is already settled.');
+          if (receipt!.status !== call.outcome) fail('Message is already settled.');
+          const { fingerprint: _hash, settledAt: _time, ...result } = receipt!;
+          return result;
+        }
         if (call.action === 'claim') { active(team); if (message.status !== 'queued') fail('Message is already claimed.'); message.status = 'dispatching'; self.activity = 'busy'; }
         else { if (message.status !== 'dispatching' && message.status !== 'unknown' && message.status !== call.outcome) fail('Message is already settled.'); message.status = call.outcome; if (message.acceptance !== 'started' && message.acceptance !== 'handled') message.acceptance = call.acceptance; message.error = call.error; }
         return message;
@@ -89,40 +108,43 @@ export class TeamBroker {
         const target = member(team, call.to);
         if (target.id === self.id || self.role !== 'leader' && target.role !== 'leader') fail('Members can communicate only with their Leader.');
         if (target.creation !== 'ready') fail('Target member is not registered.');
+        const id = createHash('sha256').update(JSON.stringify([self.id, call.operationId])).digest('hex');
+        const replay = replayTeamDelivery(team, id, call);
+        if (replay) return replay;
         const resources = call.resources?.map(resourceId => this.resourceAccess(team, self.id, resourceId));
         if (resources && (new Set(resources.map(resource => resource.resourceId)).size !== resources.length || resources.reduce((total, resource) => total + resource.byteLength, 0) > 100 * 1024 * 1024)) fail('Resource attachment limit exceeded.');
-        const id = createHash('sha256').update(JSON.stringify([self.id, call.operationId])).digest('hex');
         const existing = team.messages.find(message => message.id === id);
         if (existing) { if (existing.to !== call.to || existing.text !== call.text || JSON.stringify(existing.resources) !== JSON.stringify(resources)) fail('Message identity has different input.'); return existing; }
-        if (team.messages.length >= 200 || teamMessageBudgetBytes(team) + Buffer.byteLength(call.text) > 128 * 1024) fail('Team communication capacity reached.');
-        const message = { id, from: self.id, to: call.to, text: call.text, ...(resources ? {resources} : {}), status: 'queued' as const, createdAt: now }; team.messages.push(message); touch(team, now); return message;
+        const message = { id, from: self.id, to: call.to, text: call.text, ...(resources ? {resources} : {}), status: 'queued' as const, createdAt: now }; assertTeamQueueCapacity(team, message); team.messages.push(message); touch(team, now); return message;
       }
       if (call.action === 'describe_member') { if (self.role !== 'leader') fail('Only the Leader defines member responsibilities.'); member(team, call.target).responsibility = call.responsibility; }
       if (call.action === 'report') { self.summary = call.summary; self.updatedAt = now; }
-      touch(team, now); return team;
+      touch(team, now); return publicTeam(team);
     });
   }
-  private resourceAccess(team: Team, memberId: string, resourceId: string): TeamResource {
+  private resourceAccess(team: SavedTeam, memberId: string, resourceId: string): TeamResource {
     const upload = team.resourceUploads?.find(item => item.resource.resourceId === resourceId);
-    const referenced=team.messages.some(message=>message.resources?.some(resource=>resource.resourceId===resourceId));
-    if (!upload || !referenced && upload.expiresAt <= this.ports.now() || upload.ownerMemberId !== memberId && !team.messages.some(message => message.to === memberId && message.resources?.some(resource => resource.resourceId === resourceId))) fail('Resource access is not granted to this member.');
+    const grant = team.resourceGrants?.find(grant => grant.resourceId === resourceId);
+    const referenced=!!grant || team.messages.some(message=>message.resources?.some(resource=>resource.resourceId===resourceId));
+    if (!upload || !referenced && upload.expiresAt <= this.ports.now() || upload.ownerMemberId !== memberId && !grant?.memberIds.includes(memberId) && !team.messages.some(message => message.to === memberId && message.resources?.some(resource => resource.resourceId === resourceId))) fail('Resource access is not granted to this member.');
     return upload!.resource;
   }
-  private pruneResourceUploads(team:Team) {
+  private pruneResourceUploads(team:SavedTeam) {
     if(!team.resourceUploads)return;
-    const referenced=new Set(team.messages.flatMap(message=>message.resources?.map(resource=>resource.resourceId)??[]));
+    const referenced=new Set([...(team.resourceGrants ?? []).map(grant => grant.resourceId), ...team.messages.flatMap(message=>message.resources?.map(resource=>resource.resourceId)??[])]);
     team.resourceUploads=team.resourceUploads.filter(upload=>upload.expiresAt>this.ports.now()||referenced.has(upload.resource.resourceId));
   }
   private async prepareResources(hostId:string,call:Extract<TeamHostCall,{action:'send'}>,assertCurrent:()=>void) {
     const check=()=>{
-      assertCurrent();const team=find(this.ports.read(),call.teamId),self=member(team,call.memberId),target=member(team,call.to);active(team);
+      assertCurrent();const team=structuredClone(find(this.ports.read(),call.teamId));compactTeamDeliveries(team,this.ports.now());const self=member(team,call.memberId),target=member(team,call.to);active(team);
       if(self.hostId!==hostId||self.creation!=='ready')fail('This Host is not the registered Team member.');
       if(target.id===self.id||self.role!=='leader'&&target.role!=='leader')fail('Members can communicate only with their Leader.');
       if(target.creation!=='ready')fail('Target member is not registered.');
       const id=createHash('sha256').update(JSON.stringify([self.id,call.operationId])).digest('hex');
+      const replay=replayTeamDelivery(team,id,call);if(replay)return {team,existing:replay};
       const existing=team.messages.find(message=>message.id===id);
       if(existing){if(existing.to!==call.to||existing.text!==call.text||JSON.stringify(existing.resources?.map(resource=>resource.resourceId))!==JSON.stringify(call.resources))fail('Message identity has different input.');return {team,existing};}
-      if(team.messages.length>=200||teamMessageBudgetBytes(team)+Buffer.byteLength(call.text)>128*1024)fail('Team communication capacity reached.');
+      assertTeamQueueCapacity(team,{id,from:self.id,to:call.to,text:call.text,status:'queued',createdAt:this.ports.now()});
       return {team};
     };
     const initial=check();if(initial.existing)return;
@@ -155,12 +177,12 @@ export class TeamBroker {
     const uploadId = createHash('sha256').update(JSON.stringify([self.id,call.operationId])).digest('hex');
     if (call.action === 'resource_begin') {
       const result = await store.begin(scope,{uploadId,name:call.name,mediaType:call.mediaType,byteLength:call.byteLength,sha256:call.sha256});authorize();
-      await this.ports.change(teams=>{assertCurrent();const current=find(teams,team.id);this.pruneResourceUploads(current);const existing=current.resourceUploads?.find(item=>item.resource.resourceId===result.resource?.resourceId);if(existing)existing.expiresAt=this.ports.now()+(this.ports.resourceDraftTtlMs??86400000);});return result;
+      await this.change(teams=>{assertCurrent();const current=find(teams,team.id);this.pruneResourceUploads(current);const existing=current.resourceUploads?.find(item=>item.resource.resourceId===result.resource?.resourceId);if(existing)existing.expiresAt=this.ports.now()+(this.ports.resourceDraftTtlMs??86400000);});return result;
     }
     if (call.action === 'resource_chunk') {const result=await store.chunk(scope,{uploadId,offset:call.offset,contentBase64:call.contentBase64});authorize();return result;}
     const result = await store.finish(scope,uploadId);
     if (!result.resource) fail('Resource upload is incomplete.');
-    return this.ports.change(teams => {
+    return this.change(teams => {
       assertCurrent();const current=find(teams,team.id),owner=member(current,self.id);active(current);
       if(owner.hostId!==hostId||owner.creation!=='ready')fail('This Host is not the registered Team member.');
       this.pruneResourceUploads(current);
@@ -184,20 +206,20 @@ export class TeamBroker {
       result = await this.ports.createSeat(item.hostId, { teamId, source: team.source, member: item });
       if (!isTeamMember(result) || result.id !== item.id || result.hostId !== item.hostId || result.providerId !== item.providerId || result.role !== item.role || result.creation !== 'ready' || !result.nativeSessionId) fail('Invalid Host member registration.');
     } catch (error) { result = { ...item, creation: 'unknown', error: error instanceof Error ? error.message.slice(0, 2048) : 'Member creation is uncertain.' }; }
-    return this.ports.change(teams => {
+    return this.change(teams => {
       const current = find(teams, teamId), slot = member(current, memberId);
       if (result.creation === 'ready' && teams.some(other => other.members.some(candidate => candidate !== slot && candidate.creation === 'ready' && candidate.hostId === result.hostId && candidate.providerId === result.providerId && candidate.nativeSessionId === result.nativeSessionId))) fail('Native session is already bound to a Team member.');
       const registering = slot.creation !== 'ready' && slot.creation !== 'abandoned' && result.creation === 'ready';
       if (slot.creation !== 'abandoned') Object.assign(slot, result);
       if (registering && result.role === 'member' && current.status === 'active') {
         const leader = current.members[0]!;
-        if (current.messages.length >= 200) fail('Team communication capacity reached before registration.');
-        current.messages.push({ id: createHash('sha256').update(JSON.stringify(['registration', result.id])).digest('hex'), from: result.id, to: leader.id,
-          text: `Team member registered: ${result.name}. Host: ${result.hostId}. Provider: ${result.providerId}. Working directory: ${result.cwd || 'Host default'}. Responsibility: ${result.responsibility || 'Not defined yet; discuss with the user before assigning work.'}`, status: 'queued', createdAt: this.ports.now() });
+        const registration = { id: createHash('sha256').update(JSON.stringify(['registration', result.id])).digest('hex'), from: result.id, to: leader.id,
+          text: `Team member registered: ${result.name}. Host: ${result.hostId}. Provider: ${result.providerId}. Working directory: ${result.cwd || 'Host default'}. Responsibility: ${result.responsibility || 'Not defined yet; discuss with the user before assigning work.'}`, status: 'queued' as const, createdAt: this.ports.now() };
+        assertTeamQueueCapacity(current,registration);current.messages.push(registration);
       }
       // An archive may have started while native creation was in progress. Never reactivate it.
       if (current.status === 'active') touch(current, this.ports.now());
-      if (!isTeam(current)) fail('Invalid Team state.'); return current;
+      if (!validSavedTeam(current)) fail('Invalid Team state.'); return publicTeam(current);
     });
   }
 }

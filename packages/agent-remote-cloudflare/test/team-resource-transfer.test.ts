@@ -33,7 +33,7 @@ it('transfers authorized Team resources through the production Worker and preser
     });
     return h;
   }
-  const leaderHost = await host('resource-leader');
+  let leaderHost = await host('resource-leader');
   let workerHost = await host('resource-worker');
   const path = alice.basePath + 'v1/remote/teams';
   const created = await f.json(path + '/create', alice.cookie, { operationId: 'resources', source: { hostId: leaderHost.hostId, providerId: 'codex', nativeSessionId: 'main', title: 'Resources' } });
@@ -54,9 +54,19 @@ it('transfers authorized Team resources through the production Worker and preser
   expect(finished.status).toBe(200);
   const resourceId = finished.body.resource.resourceId;
   expect((await call(workerHost.socket, { ...recipient, action: 'resource_metadata', resourceId })).status).toBeGreaterThanOrEqual(400);
-  expect((await call(leaderHost.socket, { ...owner, action: 'send', operationId: 'send-file', to: 'worker', text: 'Inspect this archive.', resources: [resourceId] })).status).toBe(200);
+  const message = { ...owner, action: 'send', operationId: 'send-file', to: 'worker', text: 'Inspect this archive.', resources: [resourceId] };
+  const sent = await call(leaderHost.socket, message);
+  expect(sent.status).toBe(200);
+  const target = { ...recipient, messageId: sent.body.id };
+  expect((await call(workerHost.socket, { ...target, action: 'claim' })).status).toBe(200);
+  expect((await call(workerHost.socket, { ...target, action: 'settle', outcome: 'accepted', acceptance: 'started' })).status).toBe(200);
   await f.restart();
   workerHost = await host('resource-worker', workerHost.key);
+  leaderHost = await host('resource-leader', leaderHost.key);
+  const replay = await call(leaderHost.socket, message);
+  expect(replay.status).toBe(200);
+  expect(replay.body).toMatchObject({id: sent.body.id, status: 'accepted'});
+  expect((await call(workerHost.socket, { ...target, action: 'settle', outcome: 'accepted', acceptance: 'started' })).status).toBe(200);
   const chunks: Buffer[] = [];
   for (let offset = 0; offset < bytes.length; offset += 32768) {
     const received = await call(workerHost.socket, { ...recipient, action: 'resource_read', resourceId, offset });
@@ -66,6 +76,8 @@ it('transfers authorized Team resources through the production Worker and preser
   }
   expect(Buffer.concat(chunks)).toEqual(bytes);
   const restored = await (await f.json(path, alice.cookie)).json() as any;
-  expect(restored.teams[0].messages).toEqual(expect.arrayContaining([expect.objectContaining({ text: 'Inspect this archive.', resources: [expect.objectContaining({ resourceId, sha256, byteLength: bytes.length })] })]));
+  expect(restored.teams[0].messages.some((item: {id: string}) => item.id === sent.body.id)).toBe(false);
+  expect(restored.teams[0]).not.toHaveProperty('deliveryReceipts');
+  expect(restored.teams[0]).not.toHaveProperty('resourceGrants');
   expect(JSON.stringify(restored).length).toBeLessThan(128 * 1024);
 }, 30000);

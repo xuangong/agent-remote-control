@@ -1,6 +1,7 @@
 import { TeamBroker, teamMessageBudgetBytes } from './teams.js';
+import { compactTeamDeliveries, trimTeamDeliveryReceipts, validSavedTeam, type SavedTeam } from './team-delivery.js';
 import type { TeamResourceStore } from './team-resources.js';
-import { isTeam, isTeamCreate, isTeamAction, type Team } from '@orchardworks/agent-remote-protocol';
+import { isTeamCreate, isTeamAction } from '@orchardworks/agent-remote-protocol';
 import { sessionIdentityMessage } from './session-identity.js';
 import { isCreationSource, type CreationSource } from '@orchardworks/agent-remote-protocol';
 import { relationChangeKey, isRelationChangeReceipt, type RelationChangeReservation, type RelationChangeReceipt } from '@orchardworks/agent-remote-protocol';
@@ -54,7 +55,7 @@ class BrokerError extends Error {
   constructor(readonly status: number, readonly code: string, message: string, readonly creationRejected = false, readonly requestId?: string, readonly nativeOwner?: NativeSessionOwner) { super(message); }
 }
 export interface RemoteHostBrokerState {
-  teams?: Team[];
+  teams?: SavedTeam[];
   revokedHosts?: RevokedHost[];
   associations?: BrokerAssociationState;
   pairings?: SavedPairingKey[];
@@ -130,7 +131,9 @@ export function createHostBroker(options: HostBrokerOptions) {
   }
   let associations = migrateBrokerAssociations(options.initialState?.associations ?? { version: 5, revision: 0, admissions: [], freezes: [], relationChanges: [], relationResets: [] });
   let teamState = structuredClone(options.initialState?.teams ?? []);
-  if (!teamState.every(isTeam)) throw new Error('Invalid saved Teams.');
+  if (!teamState.every(validSavedTeam)) throw new Error('Invalid saved Teams.');
+  for (const team of teamState) compactTeamDeliveries(team, now());
+  trimTeamDeliveryReceipts(teamState, 2 * 1024 * 1024);
   function snapshot(): RemoteHostBrokerState {
     return { teams: structuredClone(teamState), ...(revokedHosts ? { revokedHosts: structuredClone(revokedHosts) } : {}), ...(options.successionEnrollment || options.initialState?.associations ? { associations: structuredClone(associations) } : {}), pairings: structuredClone(pairings), previews: previews.snapshot(), ...(options.ownerSubject ? { sharing: sharing.snapshot() } : {}), keys: [...keys].map(([key, value]) => [key, structuredClone(value)]),
       hosts: [...hosts.values()].map(({ id, installationId, name, providers, legacyDsh, credentialRotation, gatewayKeyRequested, environment, pairingPurpose, controller, providerManagement, tpmManagement, teamManagement }) => ({ ...(teamManagement ? { teamManagement } : {}), ...(tpmManagement ? { tpmManagement } : {}), ...(providerManagement ? { providerManagement } : {}), ...(controller ? { controller } : {}), ...(pairingPurpose ? { pairingPurpose } : {}), ...(environment ? { environment } : {}), id, installationId, name, providers, legacyDsh, ...(credentialRotation ? {credentialRotation} : {}), ...(gatewayKeyRequested ? { gatewayKeyRequested } : {}) })),
@@ -195,8 +198,9 @@ export function createHostBroker(options: HostBrokerOptions) {
     now, read: () => teamState,
     change: update => commit(draft => {
       const next = structuredClone(teamState), value = structuredClone(update(next));
+      trimTeamDeliveryReceipts(next, 2 * 1024 * 1024);
       if (isDeepStrictEqual(next, teamState)) return { value, unchanged: true, publish() {} };
-      if (!next.every(team => isTeam(team) && teamMessageBudgetBytes(team) <= 128 * 1024) || Buffer.byteLength(JSON.stringify(next)) > 2 * 1024 * 1024) throw new Error('Team storage capacity reached.');
+      if (!next.every(team => validSavedTeam(team) && teamMessageBudgetBytes(team) <= 128 * 1024) || Buffer.byteLength(JSON.stringify(next)) > 2 * 1024 * 1024) throw new Error('Team storage capacity reached.');
       draft.teams = next; return { value, publish() { teamState = next; } };
     }),
     assertHost(hostId, providerId) { const host = requireHost(hostId); if (!host.teamManagement) throw new Error('Update the Controller to use Teams.'); if (!host.providers.some(provider => provider.providerId === providerId)) throw new Error('Provider is unavailable on this Host.'); },

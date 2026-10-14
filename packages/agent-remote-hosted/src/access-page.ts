@@ -3,7 +3,7 @@ export const signInReturnKey = 'agent-remote-sign-in-return';
 export const accessBrandMark = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="4"/><path d="M3 9h18M9 9v12"/></svg>';
 export const accessCopy = {
   checking: { title: 'Opening your session', description: 'Checking whether you are already signed in.', status: 'Checking access…' },
-  signin: { title: 'Sign in to continue', description: 'Continue through your gateway. We will bring you straight back to this session.', status: '' },
+  signin: { title: 'Sign in to continue', description: 'Sign in with an account approved for this site. We will bring you straight back to this session.', status: '' },
   restoring: { title: 'Reconnecting securely', description: 'Your conversation will return as soon as access is restored.', status: 'Restoring access…' },
   verifying: { title: 'Completing sign-in', description: 'Confirming your access before opening your conversation.', status: 'Verifying access…' },
   opening: { title: 'You are signed in', description: 'Taking you back to your conversation.', status: 'Opening session…' },

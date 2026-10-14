@@ -18,7 +18,7 @@ for (const signal of ['visibility', 'pageshow'] as const) {
     });
     try {
       await page.goto(f.url);
-      await page.getByRole('link', { name: 'Sign in through gateway' }).click();
+      await page.getByRole('link', { name: 'Sign in' }).click();
       await page.getByLabel('Connected Host').selectOption(f.hostId);
       await showNewSession(page);
       await page.getByTestId('session-create').click();
@@ -63,7 +63,7 @@ test('cached startup keeps the editor while business traffic waits for access', 
   let release!: () => void;
   try {
     await page.goto(f.url);
-    await page.getByRole('link', { name: 'Sign in through gateway' }).click();
+    await page.getByRole('link', { name: 'Sign in' }).click();
     await page.getByRole('link', { name: 'Sign in as alice' }).click();
     await page.getByLabel('Connected Host').selectOption(f.hostId);
     await showNewSession(page);
@@ -110,7 +110,7 @@ test('returning browsers automatically complete Gateway authorization without an
   const f = await sessionLinkFixture({ automaticSignIn: true });
   try {
     await page.goto(f.url);
-    await page.getByRole('link', { name: 'Sign in through gateway' }).click();
+    await page.getByRole('link', { name: 'Sign in' }).click();
     await expect(page.getByLabel('Connected Host')).toBeVisible();
     await page.evaluate(() => sessionStorage.removeItem('agent-remote:automatic-sign-in'));
     await page.context().clearCookies();
@@ -129,7 +129,7 @@ test('confirmed device protection clears disk copies across tabs without interru
   let release!: () => void;
   try {
     await page.goto(f.url);
-    await page.getByRole('link', { name: 'Sign in through gateway' }).click();
+    await page.getByRole('link', { name: 'Sign in' }).click();
     await page.getByLabel('Connected Host').selectOption(f.hostId);
     await showNewSession(page);
     await page.getByTestId('session-create').click();

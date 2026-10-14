@@ -210,3 +210,20 @@ it('rejects a delayed real Host WebSocket acceptance after its prepared account 
   let closeCode: number | undefined; socket.on('close', code => { closeCode = code; });
   await expect.poll(() => closeCode, { timeout: 1500 }).toBe(1013);
 }, 10000);
+
+
+it('renders a private readable callback failure and preserves only the validated return target', async () => {
+  const f = await fixture(); f.wrongSignature();
+  const login = await f.begin(f.relay, undefined, '/auth/login?host=studio&provider=codex&session=one');
+  const response = await f.finish(login);
+  expect(response.status).toBe(401);
+  expect(response.headers.get('content-type')).toContain('text/html');
+  expect(response.headers.get('cache-control')).toBe('no-store');
+  const html = await response.text();
+  expect(html).toContain('Sign in again');
+  expect(html).toContain('/auth/login?host=studio&amp;provider=codex&amp;session=one');
+  expect(html).not.toContain(login.callback.searchParams.get('code'));
+  expect(html).not.toContain('/auth/session');
+  const invalid = await f.relay.fetch(f.request('/auth/callback?error_description=%3Cscript%3Eevil%3C/script%3E'));
+  expect(await invalid!.text()).not.toContain('evil');
+});

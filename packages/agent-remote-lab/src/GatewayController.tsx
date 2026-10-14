@@ -181,7 +181,7 @@ export function GatewayController({ children, navigate = navigateToLogin }: {
     requestAnimationFrame(() => securityTrigger.current?.focus());
   }
   const accountAction = <>
-    {access?.user ? <span className="gateway-account-identity" aria-label="Gateway account" title={[access.user.name, access.user.email, `Gateway user: ${access.user.id}`].filter(Boolean).join(' · ')}><span aria-hidden="true">◉</span> {access.user.name || access.user.email || access.user.id}</span> : null}
+    {access?.user ? <span className="gateway-account-identity" aria-label="Account" title={[access.user.name, access.user.email, `User: ${access.user.id}`].filter(Boolean).join(' · ')}><span aria-hidden="true">◉</span> {access.user.name || access.user.email || access.user.id}</span> : null}
     <button type="button" disabled={!ready} onClick={event => { securityTrigger.current = event.currentTarget; setSecurityOpen(true); }}>Security</button>
     <button type="button" onClick={() => void logout()}>Sign out</button>
   </>;

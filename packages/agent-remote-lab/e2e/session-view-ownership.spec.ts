@@ -298,7 +298,7 @@ test('account actions belong to the Header and View follows the visible owning t
   await draft.fill('Preserve this draft while moving the shell controls');
   const header = page.locator('.lab-app-bar');
   const globalView = page.getByRole('button', { name: 'View options', exact: true });
-  const identity = page.getByLabel('Gateway account', { exact: true });
+  const identity = page.getByLabel('Account', { exact: true });
   const security = page.getByRole('button', { name: 'Security', exact: true });
   const signOut = page.getByRole('button', { name: 'Sign out', exact: true });
   await expect(header).toBeHidden();
@@ -307,7 +307,7 @@ test('account actions belong to the Header and View follows the visible owning t
   await expect(signOut).toBeHidden();
   await setChromePanel(page, 'Header', true);
   await expect(header).toBeVisible();
-  await expect(header.getByLabel('Gateway account', { exact: true })).toHaveText('◉ Alice Example');
+  await expect(header.getByLabel('Account', { exact: true })).toHaveText('◉ Alice Example');
   await expect(header.getByRole('button', { name: 'Security', exact: true })).toBeVisible();
   await expect(header.getByRole('button', { name: 'Sign out', exact: true })).toBeVisible();
   await expectBeforeTitle(globalView, header.locator('.lab-brand h1'));

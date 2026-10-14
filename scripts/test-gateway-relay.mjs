@@ -65,7 +65,7 @@ try {
   const context = await browser.newContext(); const page = await context.newPage();
   page.setDefaultTimeout(10_000); page.setDefaultNavigationTimeout(15_000);
   await page.goto(relayUrl);
-  await page.getByRole('link', { name: 'Sign in through gateway' }).waitFor();
+  await page.getByRole('link', { name: 'Sign in' }).waitFor();
   await context.addCookies([{ name: 'session_token', value: 'ses_agent_remote_alice', url: gatewayUrl }]);
   await page.goto(gatewayUrl + '/agent-remote');
   await page.waitForURL(relayUrl + '/');
@@ -228,7 +228,7 @@ try {
   const revoked = await page.evaluate(async base => (await fetch(base + 'v1/remote/hosts')).json(), state.basePath);
   assert.deepEqual(revoked, { hosts: [] });
   await page.getByRole('button', { name: 'Sign out', exact: true }).click();
-  await page.getByRole('link', { name: 'Sign in through gateway' }).waitFor();
+  await page.getByRole('link', { name: 'Sign in' }).waitFor();
   await bob.close(); await context.close();
   console.log('PASS: real gateway SQLite auth -> callback -> HttpOnly cookie -> controller -> Host catalog; two browser users isolated; forwarded login grant rejected; renewal, process restart with stable device/binding, device rotation without disconnect, explicit partial stop outcomes, mobile security management and other-browser revocation, device revoke and logout verified; shared Host Gateway APIs, selected-Host login, per-user catalog, cumulative quota, retry identity, quota and unresolved-reservation persistence, revoke/regrant verified. No CLI agents started.');
   console.log(`Runtime: ${runtime.runtime}${runtime.docker ? " (Docker)" : ""}; Evidence: ${temporary}`);

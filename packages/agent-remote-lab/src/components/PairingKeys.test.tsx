@@ -130,3 +130,36 @@ it('waits for the current history request before allowing creation', async () =>
   await act(async () => resolveHistory({ pairings: [], availablePurposes: ['host-only'] }));
   expect(button(view, 'Generate pairing key').disabled).toBe(false);
 });
+
+
+it('targets installer commands at the pairing server and uses repository assets in the diagnostic Lab', async () => {
+  const view = await open({ serverUrl: 'https://configured.example', hosts: async () => ({ hosts: [] }), pair: async () => invitation });
+  expect(view.querySelector('[aria-label="Linux / macOS install command"]')?.textContent).toContain("--server 'https://configured.example'");
+  expect(view.textContent).toContain('https://raw.githubusercontent.com/xuangong/agent-remote-control/main/install.sh');
+  await act(async () => button(view, 'Generate pairing key').click());
+  expect(view.querySelector('[aria-label="Linux / macOS install command"]')?.textContent).toContain("--server 'https://relay.example'");
+  expect(view.querySelector('[aria-label="Windows (PowerShell) install command"]')?.textContent).toContain("-Server 'https://relay.example'");
+  expect(view.textContent).not.toContain('xianliao.de5.net');
+});
+
+it('serves hosted installer commands from the pairing origin and copies the displayed command', async () => {
+  const meta = document.createElement('meta'); meta.name = 'agent-remote-auth'; meta.content = 'gateway'; document.head.append(meta);
+  try {
+    const copy = vi.fn(async () => undefined); Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText: copy } });
+    const view = await open({ serverUrl: 'https://private.example:8443', hosts: async () => ({ hosts: [] }), pair: async () => invitation });
+    const command = view.querySelector('[aria-label="Linux / macOS install command"]')!.textContent;
+    expect(command).toBe("curl -fsSL 'https://private.example:8443/install.sh' | sh -s -- --server 'https://private.example:8443'");
+    await act(async () => view.querySelector<HTMLButtonElement>('[aria-label="Copy Linux / macOS install command"]')!.click());
+    expect(copy).toHaveBeenCalledWith(command);
+    expect(view.textContent).toContain('Copied');
+  } finally { meta.remove(); }
+});
+
+
+it('waits for a real pairing URL when a diagnostic service has no server metadata', async () => {
+  const view = await open({ hosts: async () => ({ hosts: [] }), pair: async () => invitation });
+  expect(view.textContent).toContain('Generate a pairing key to see installation commands for its server.');
+  expect(view.querySelector('[aria-label="Linux / macOS install command"]')).toBeNull();
+  await act(async () => button(view, 'Generate pairing key').click());
+  expect(view.querySelector('[aria-label="Linux / macOS install command"]')?.textContent).toContain("--server 'https://relay.example'");
+});

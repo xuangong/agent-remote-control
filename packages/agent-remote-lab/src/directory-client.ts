@@ -82,6 +82,7 @@ export class SessionDirectoryClient {
 }
 
 export class RemoteHostClient implements HostPairingService {
+  get serverUrl(): string { return new URL(this.baseUrl).origin; }
   invitation?: PairingInvitation;
   constructor(private readonly baseUrl: string) {}
   private async request<T>(path: string, method = 'GET', requestBody?: unknown, timeoutMs?: number): Promise<T> {

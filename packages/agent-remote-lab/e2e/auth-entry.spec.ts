@@ -19,7 +19,7 @@ test('session sign-in has consistent checking, login, callback and retry pages',
     releaseCheck();
     await expect(page.getByRole('heading', { name: 'Sign in to continue' })).toBeVisible();
     await expect(page.getByRole('heading', { name: 'Sign in to continue' })).toBeFocused();
-    const signIn = page.getByRole('link', { name: 'Sign in through gateway' });
+    const signIn = page.getByRole('link', { name: 'Sign in' });
     await expect(signIn).toHaveAttribute('href', '/auth/login' + target.slice(1));
     await expect(page.locator('[aria-current="step"]')).toContainText('Sign in');
     expect((await signIn.boundingBox())!.height).toBeGreaterThanOrEqual(48);
@@ -61,7 +61,7 @@ test('connection failure offers a real access retry without losing the session l
     await page.unroute('**/auth/status');
     await page.getByRole('button', { name: 'Try again', exact: true }).click();
     await expect(page.getByRole('heading', { name: 'Sign in to continue' })).toBeVisible();
-    await expect(page.getByRole('link', { name: 'Sign in through gateway' })).toHaveAttribute('href', '/auth/login' + target.slice(1));
+    await expect(page.getByRole('link', { name: 'Sign in' })).toHaveAttribute('href', '/auth/login' + target.slice(1));
   } finally { await f.close(); }
 });
 

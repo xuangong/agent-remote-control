@@ -30,7 +30,7 @@ test('a clean mobile browser finds desktop Side and Ask from their source withou
     const writes: string[] = [];
     phone.on('request', request => { if (request.method() === 'POST' && /\/create$|\/operations$/.test(new URL(request.url()).pathname)) writes.push(request.url()); });
     await phone.goto(sourceUrl);
-    await phone.getByRole('link', { name: 'Sign in through gateway' }).click();
+    await phone.getByRole('link', { name: 'Sign in' }).click();
     await phone.getByRole('link', { name: 'Sign in as alice' }).click();
     const phonePrimary = phone.locator('.lab-primary-conversation');
     const entries = phonePrimary.getByRole('navigation', { name: 'Forked sessions' }).getByRole('button');

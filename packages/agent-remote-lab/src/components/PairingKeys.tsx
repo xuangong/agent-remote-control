@@ -86,7 +86,7 @@ export function PairingKeys({ service }: { service: HostPairingService }) {
   }
 
   return <div className="lab-pairing-details">
-    <ControllerInstallGuide />
+    <ControllerInstallGuide serverUrl={invitation?.serverUrl ?? service.serverUrl} />
     <details><summary>Already installed or using DSH?</summary>
     <p className="lab-control-note">Generate a pairing key, then run <code>agent-remote-controller start</code> for a managed CLI Host or configure the DSH Host plugin. Use <code>agent-remote-controller pair</code> only to replace the uplink of an already-running Host daemon. Give a Host on another machine a reachable broker address instead of the loopback URL shown by a local browser.</p>
     </details>

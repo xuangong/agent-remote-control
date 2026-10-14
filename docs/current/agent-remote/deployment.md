@@ -1,5 +1,9 @@
 # Agents deployment
 
+For a private deployment, start with [Self-hosted deployment](../../self-hosted-deployment.md)
+and its independent templates. This runbook also records the existing production
+and local Gateway integration topology.
+
 Agents has two independent runtime targets: Cloudflare Workers for the public
 service and Node/Docker for an SSH server. Local Docker can run either the Node
 entry or the actual Workers/workerd entry. Both use the same hosted Relay core

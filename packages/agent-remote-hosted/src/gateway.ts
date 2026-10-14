@@ -10,6 +10,7 @@ import { acceptSessionChannel } from '@orchardworks/agent-remote-protocol';
 import { createSessionStars, StarError } from './session-stars.js';
 import { unavailableRoute } from './session-errors.js';
 import { createSecurityPolicy } from './security.js';
+import { authenticationFailure } from './auth-error.js';
 import { authenticationCallback } from './auth-callback.js';
 import { controllerPath, readControllerLocation } from './controller-location.js';
 import { createHash, randomBytes } from 'node:crypto';
@@ -445,8 +446,8 @@ export function createHostedRelay(options: HostedRelayOptions) {
     }
     if (googleLogin && url.pathname === '/auth/callback' && request.method === 'GET') {
       const result = await googleLogin.callback(request);
-      if (result.status !== 'active') return json(result.status === 'unavailable' ? 503 : result.status === 'capacity' ? 429 : 401, { error: 'Google sign-in could not be verified. Start sign-in again.' });
-      const owned = tenant(result.grant); if (!owned) return json(429, { error: 'Relay tenant capacity reached.' });
+      if (result.status !== 'active') return authenticationFailure(auth.origin, result.status, result.returnPath);
+      const owned = tenant(result.grant); if (!owned) return authenticationFailure(auth.origin, 'capacity', result.pending.returnPath);
       return completeSignIn(result.grant, request, result.pending, true, owned);
     }
     if (url.pathname === '/auth/status' && request.method === 'GET') {

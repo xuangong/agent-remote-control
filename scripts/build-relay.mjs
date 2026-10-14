@@ -1,6 +1,6 @@
 import { createRequire } from 'node:module';
 import { spawn } from 'node:child_process';
-import { cp, mkdir, rm } from 'node:fs/promises';
+import { copyFile, cp, mkdir, rm } from 'node:fs/promises';
 import { resolve, join } from 'node:path';
 const root = resolve(import.meta.dirname, '..');
 const build = spawn('pnpm', ['--filter', '@orchardworks/agent-remote-lab...', 'run', 'build'], { cwd: root, stdio: 'inherit' });
@@ -16,5 +16,7 @@ await bundle({ entryPoints: [join(root, 'packages/agent-remote-lab/src/server/ga
   banner: { js: 'import { createRequire as relayCreateRequire } from "node:module"; const require = relayCreateRequire(import.meta.url);' },
 });
 await rm(join(output, 'web'), { recursive: true, force: true });
-await cp(join(root, 'packages/agent-remote-lab/dist'), join(output, 'web'), { recursive: true });
+const web = join(root, 'packages/agent-remote-lab/dist');
+for (const installer of ['install.sh', 'install.ps1']) await copyFile(join(root, installer), join(web, installer));
+await cp(web, join(output, 'web'), { recursive: true });
 console.log('Built standalone Relay and Controller artifacts in dist/relay.');

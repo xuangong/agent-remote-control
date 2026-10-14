@@ -1,0 +1,17 @@
+# Run from the repository root; the env file is runtime-only and excluded from images.
+services:
+  relay:
+    build:
+      context: ../..
+      dockerfile: Dockerfile.self-hosted
+      target: node
+    image: agent-remote-self-hosted:local
+    env_file: .env
+    ports:
+      - "127.0.0.1:${AGENT_REMOTE_HTTP_PORT:-5910}:5910"
+    volumes:
+      - relay-state:/data
+    restart: unless-stopped
+
+volumes:
+  relay-state:

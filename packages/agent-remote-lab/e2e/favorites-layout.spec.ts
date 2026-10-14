@@ -46,7 +46,7 @@ test('aligns the desktop account and keeps long favorite titles on one line with
     await options.getByText('Header', { exact: true }).click();
     await options.press('Escape');
     const header = page.locator('.lab-app-bar');
-    const identity = header.getByLabel('Gateway account', { exact: true });
+    const identity = header.getByLabel('Account', { exact: true });
     const security = header.getByRole('button', { name: 'Security', exact: true });
     await expect(identity).toBeVisible();
     const a = (await identity.boundingBox())!, b = (await security.boundingBox())!;

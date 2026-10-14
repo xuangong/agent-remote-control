@@ -20,6 +20,7 @@ export interface PairingRecord { id: string; purpose: PairingPurpose; createdAt:
 export interface PairingHistory { pairings: PairingRecord[]; availablePurposes?: PairingPurpose[] }
 export interface HostStopResult { agentId: string; status: 'cancelled' | 'unsupported' | 'failed'; message?: string }
 export interface HostPairingService {
+  readonly serverUrl?: string;
   providerSettings?(hostId: string, input?: HostProviderChange): Promise<HostProviderSettings>;
   codexDaemon?(hostId: string, input?: CodexDaemonRestart): Promise<CodexDaemonStatus>;
   controllerRelease?(options?: { refresh?: boolean }): Promise<ControllerReleaseDiscovery>;

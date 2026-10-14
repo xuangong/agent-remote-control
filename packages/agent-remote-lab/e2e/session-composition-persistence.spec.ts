@@ -354,7 +354,7 @@ for (const action of ['focus', 'Ask'] as const) {
     let release: (() => void) | undefined;
     try {
       await page.goto(fixture.url);
-      await page.getByRole('link', { name: 'Sign in through gateway' }).click();
+      await page.getByRole('link', { name: 'Sign in' }).click();
       await page.getByLabel('Connected Host').selectOption(fixture.hostId);
       await showNewSession(page);
       const created = page.waitForResponse(response => new URL(response.url()).pathname.endsWith('/create'));

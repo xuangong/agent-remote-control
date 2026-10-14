@@ -38,7 +38,7 @@ export function createGoogleLogin(auth: GoogleAuth, state: RelayState) {
       return new Response(null, { status: 303, headers: { location: destination.href,
         'set-cookie': `${gatewayCookieName(auth.origin, 'login')}=${browser}; Path=/; HttpOnly; SameSite=Lax${auth.origin.startsWith('https:') ? '; Secure' : ''}; Max-Age=300` } });
     },
-    async callback(request: Request): Promise<{ status: 'active'; grant: GoogleGrant; pending: LoginChallenge } | { status: 'denied' | 'unavailable' | 'capacity' }> {
+    async callback(request: Request): Promise<{ status: 'active'; grant: GoogleGrant; pending: LoginChallenge } | { status: 'denied' | 'unavailable' | 'capacity'; returnPath?: string }> {
       const url = new URL(request.url), id = url.searchParams.get('state'), code = url.searchParams.get('code');
       const browser = readGatewayCookie(request, gatewayCookieName(auth.origin, 'login'));
       if (!validOpaque(id) || !validOpaque(browser) || url.searchParams.getAll('state').length !== 1 || url.searchParams.getAll('code').length > 1) return { status: 'denied' };
@@ -48,28 +48,29 @@ export function createGoogleLogin(auth: GoogleAuth, state: RelayState) {
         if (!entry) return undefined;
         draft.loginChallenges = draft.loginChallenges.filter(([key]) => key !== id); return entry[1];
       });
-      if (!pending?.google || !code || code.length > 4096 || url.searchParams.has('error')) return { status: 'denied' };
+      const failure = (status: 'denied' | 'unavailable' | 'capacity') => ({ status, ...(pending ? { returnPath: pending.returnPath } : {}) });
+      if (!pending?.google || !code || code.length > 4096 || url.searchParams.has('error')) return failure('denied');
       let token: string;
       try {
         const response = await fetch(auth.google.endpoints.token, { method: 'POST', redirect: 'manual', signal: AbortSignal.timeout(5000), headers: { 'content-type': 'application/x-www-form-urlencoded' },
           body: new URLSearchParams({ client_id: auth.google.clientId, client_secret: auth.google.clientSecret, grant_type: 'authorization_code', redirect_uri: auth.origin + '/auth/callback', code, code_verifier: pending.google.verifier }) });
-        if (!response.ok) { await response.body?.cancel(); return { status: response.status === 400 || response.status === 401 ? 'denied' : 'unavailable' }; }
+        if (!response.ok) { await response.body?.cancel(); return failure(response.status === 400 || response.status === 401 ? 'denied' : 'unavailable'); }
         const value: unknown = JSON.parse(new TextDecoder().decode(await readRequestBytes(response, 32_768)));
-        if (!value || typeof value !== 'object' || !('id_token' in value) || typeof value.id_token !== 'string' || value.id_token.length > 16_384) return { status: 'denied' };
+        if (!value || typeof value !== 'object' || !('id_token' in value) || typeof value.id_token !== 'string' || value.id_token.length > 16_384) return failure('denied');
         token = value.id_token;
-      } catch { return { status: 'unavailable' }; }
+      } catch { return failure('unavailable'); }
       let identity: { subject: string; email: string; name: string };
       try {
         const { payload } = await jwtVerify(token, keys, { issuer: ['https://accounts.google.com', 'accounts.google.com'], audience: auth.google.clientId, algorithms: ['RS256'], requiredClaims: ['sub', 'iat', 'exp', 'nonce', 'email', 'email_verified'], maxTokenAge: 600, clockTolerance: 0 });
         if (typeof payload.sub !== 'string' || !payload.sub || payload.sub.length > 255 || payload.nonce !== pending.google.nonce || payload.email_verified !== true || typeof payload.email !== 'string' ||
-          payload.azp !== undefined && payload.azp !== auth.google.clientId || Array.isArray(payload.aud) && payload.aud.length > 1 && payload.azp !== auth.google.clientId) return { status: 'denied' };
+          payload.azp !== undefined && payload.azp !== auth.google.clientId || Array.isArray(payload.aud) && payload.aud.length > 1 && payload.azp !== auth.google.clientId) return failure('denied');
         const email = normalizeAllowedEmail(payload.email);
-        if (!allowed.has(email)) return { status: 'denied' };
+        if (!allowed.has(email)) return failure('denied');
         const name = typeof payload.name === 'string' && payload.name.trim() && payload.name.length <= 512 ? payload.name : email;
         identity = { subject: payload.sub, email, name };
       } catch (error) {
         const code = error && typeof error === 'object' && 'code' in error ? error.code : undefined;
-        return { status: code === 'ERR_JWKS_TIMEOUT' || !code ? 'unavailable' : 'denied' };
+        return failure(code === 'ERR_JWKS_TIMEOUT' || !code ? 'unavailable' : 'denied');
       }
       const admitted = await state.mutate(draft => {
         const identities = draft.googleIdentities ??= [];
@@ -78,7 +79,7 @@ export function createGoogleLogin(auth: GoogleAuth, state: RelayState) {
         else { if (identities.length >= 1024) return false; identities.push({ subject: identity.subject, email: identity.email }); }
         return true;
       });
-      if (!admitted) return { status: 'capacity' };
+      if (!admitted) return failure('capacity');
       const now = Date.now(), sessionExpiresAt = now + auth.google.sessionLifetimeMs;
       return { status: 'active', pending, grant: { provider: 'google', subject: identity.subject, namespace: hostedAuthNamespace(auth, identity.subject), profile: { name: identity.name, email: identity.email },
         // This is a new locally verified sign-in, not proof of a new Google password challenge.

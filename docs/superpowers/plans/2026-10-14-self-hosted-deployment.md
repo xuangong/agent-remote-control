@@ -1,0 +1,21 @@
+# Self-hosted deployment implementation plan
+
+**Goal:** Implement the approved runtime/authentication matrix using shared product behavior.
+**Spec:** docs/superpowers/specs/2026-10-14-self-hosted-deployment.md
+**Baseline:** 6aa332ff503afa3feacdcde2b2e97e9ba0e3423f
+
+## Global constraints
+
+Work only in /Volumes/Projects/agent-remote-control/.worktrees/self-hosted-deployment. Preserve all other worktrees and services. English code/docs, Chinese user communication. No push, deployment, publishing or live Controller changes. Use Node at /Users/zhangxian/.nvm/versions/node/v22.23.2/bin. Install with the Tencent npm registry. Tests require both per-test and outer deadlines. Test observable behavior; authentication, pairing and transport changes need real HTTP/WebSocket validation. Do not delegate further. Commit only your task files, never all worktree changes indiscriminately.
+
+### Task 1: Shared authentication and Google provider
+
+Own packages/agent-remote-hosted authentication, session and state code; expose a clean configuration API consumed by both runtimes. Existing GatewayAuthOptions callers must keep working, and Gateway persisted identity/namespace semantics must not change. Implement configurable Google OIDC code flow and explicit allowlisted verified emails, Google subject identity, bounded local sessions and authority, with state, nonce, PKCE, browser binding and replay prevention. Use a proven JWT verification library compatible with Node and Workers. Gateway-only bootstrap/control endpoints must not become available under Google mode. Shared session/device/logout/recent-auth rules must be one implementation. Add failing behavior tests first, implement, then run meaningful auth/session/security regressions under deadlines. Include local signed JWT/JWKS and HTTP provider fixture tests. Expose environment config with AGENT_REMOTE_AUTH_PROVIDER=gateway|google (absent means gateway), AGENT_REMOTE_GOOGLE_CLIENT_ID, AGENT_REMOTE_GOOGLE_CLIENT_SECRET, AGENT_REMOTE_GOOGLE_ALLOWED_EMAILS (comma-separated) and existing origin/signing-secret settings. Google must not require a Gateway issuer. Do not edit runtime entrypoints or UI in this task. Update package/lock dependencies only as needed. Report config API, browser status capability shape and migration behavior explicitly.
+
+### Task 2: Runtime adapters and product storage parity
+
+Consume Task 1 configuration API in Node and Workers. Keep production Gateway configuration compatible. Expose authentication config consistently via both runtime environments, with secrets kept server-side. Inspect Node hosted composition against Workers; align missing product capabilities, especially handoff storage admission, without duplicating business logic or pretending Node is SQL. If a shared encoding contract needs extraction, keep actual storage cost guarantees and existing Workers regression evidence. Add runtime tests exercising Google and Gateway hosted routes, restart, pairing and WebSocket admission. Ensure static routing and callbacks work with full product assets. Own runtime files under packages/agent-remote-lab/src/server and packages/agent-remote-cloudflare, and minimal shared storage contracts if necessary. Existing diagnostic workbench behavior stays unchanged.
+
+### Task 3: Product setup, deployment artifacts and final integration
+
+Use auth capabilities from Task 1 in hosted product UI: generic account/login copy; Host-only pairing under Google, optional Gateway setup only when supported; installation/server hints use current configured site. Provide standalone self-host Compose/env templates and an independent Workers config template, with complete deployment documentation covering all four combinations, Google setup, Gateway setup, HTTPS/persistence/backup/upgrades and single-site Controller pairing. Preserve production and local integration configs. Validate UI behaviors, deployment configuration, Node/Workers bundles, relevant tests and typechecks. Run pnpm compatibility:update then pnpm compatibility:check after reviewed code changes. Clearly record unavailable real Google/Docker validation; do not claim unrun tests. Final review must consider cross-runtime secrets, authorization and persistence as well as scope. No publishing or deployment.

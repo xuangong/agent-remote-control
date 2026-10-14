@@ -184,3 +184,8 @@ it('keeps Handoff description and all action requests scoped to one Host and ope
     expect(requests).toHaveLength(7);
   } finally { server.closeAllConnections(); await new Promise<void>(resolve => server.close(() => resolve())); }
 }, 5000);
+
+
+it('exposes only the Relay origin as the install target for a tenant-scoped client', () => {
+  expect(new RemoteHostClient('https://private.example:8443/u/tenant/').serverUrl).toBe('https://private.example:8443');
+});

@@ -245,11 +245,11 @@ it('renews frozen access as soon as the page is shown without waiting for old ti
   expect(fetcher.mock.calls).toHaveLength(2);
   expect(view.querySelector('input')).toBe(input);
 });
-it('shows the Gateway account identity without exposing authentication material', async () => {
+it('shows the Account identity without exposing authentication material', async () => {
   vi.stubGlobal('fetch', async () => Response.json({ basePath: '/u/' + 'a'.repeat(64) + '/', expiresAt: Date.now()+60000, user: { id: 'alice', name: 'Alice Example', email: 'alice@example.com' } }));
   const view = await render(<GatewayController>{(_baseUrl, accountAction) => <><p>Conversation</p>{accountAction}</>}</GatewayController>);
   expect(view.textContent).toContain('Alice Example');
-  expect(view.querySelector('[aria-label="Gateway account"]')?.getAttribute('title')).toContain('alice@example.com');
+  expect(view.querySelector('[aria-label="Account"]')?.getAttribute('title')).toContain('alice@example.com');
 });
 
 

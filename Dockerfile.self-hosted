@@ -1,0 +1,24 @@
+# Build the complete hosted Node application from a source checkout.
+FROM node:22-bookworm-slim AS build
+ARG NPM_REGISTRY=https://mirrors.cloud.tencent.com/npm/
+RUN npm install --global --registry="${NPM_REGISTRY}" pnpm@10.34.5
+WORKDIR /source
+COPY . .
+# Prepare only the build-stage lock copy; normal Controller installs are unchanged.
+RUN node scripts/prepare-relay-docker-lock.mjs pnpm-lock.yaml /tmp/relay-lock.yaml \
+    && mv /tmp/relay-lock.yaml pnpm-lock.yaml \
+    && pnpm config set registry "${NPM_REGISTRY}" \
+    && pnpm install --frozen-lockfile
+RUN pnpm build:relay
+
+FROM node:22-bookworm-slim AS node
+WORKDIR /app
+ENV NODE_ENV=production AGENT_REMOTE_BIND=0.0.0.0 AGENT_REMOTE_PORT=5910
+ENV AGENT_REMOTE_STATE_DIR=/data AGENT_REMOTE_WEB_DIST=/app/web
+COPY --from=build --chown=node:node /source/dist/relay/gateway.mjs ./gateway.mjs
+COPY --from=build --chown=node:node /source/dist/relay/web ./web
+RUN test -x /usr/bin/flock && mkdir -p /data && chown node:node /data
+USER node
+EXPOSE 5910
+HEALTHCHECK --interval=10s --timeout=5s --start-period=10s CMD node -e "require('node:http').get({hostname:'127.0.0.1',port:process.env.AGENT_REMOTE_PORT,path:'/health',timeout:4000,headers:{host:new URL(process.env.AGENT_REMOTE_RELAY_URL).host}},r=>process.exit(r.statusCode===200?0:1)).on('error',()=>process.exit(1)).on('timeout',()=>process.exit(1))"
+CMD ["node", "gateway.mjs"]

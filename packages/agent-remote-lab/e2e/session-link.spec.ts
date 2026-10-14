@@ -4,7 +4,7 @@ import { sessionLinkFixture } from './session-link-fixture';
 import { showNewSession } from './session-navigation';
 
 async function signIn(page: Page, subject = 'alice') {
-  await page.getByRole('link', { name: 'Sign in through gateway' }).click();
+  await page.getByRole('link', { name: 'Sign in' }).click();
   await page.getByRole('link', { name: `Sign in as ${subject}` }).click();
 }
 

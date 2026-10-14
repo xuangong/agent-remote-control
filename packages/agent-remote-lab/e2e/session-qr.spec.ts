@@ -8,7 +8,7 @@ test('shares a decodable QR without fetching more scripts from an older open pag
   const fixture = await sessionLinkFixture();
   try {
     await page.goto(fixture.url);
-    await page.getByRole('link', { name: 'Sign in through gateway' }).click();
+    await page.getByRole('link', { name: 'Sign in' }).click();
     await page.getByRole('link', { name: 'Sign in as alice' }).click();
     await page.getByLabel('Connected Host').selectOption(fixture.hostId);
     await showNewSession(page);

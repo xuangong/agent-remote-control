@@ -31,7 +31,7 @@ test('security supports narrow screens, keyboard return, draft preservation and 
   expect(mutations).toEqual([]);
   await security.getByRole('button', { name: 'Confirm sign out' }).click();
   await expect(page.getByLabel('Message draft')).toHaveCount(0);
-  await expect(page.getByRole('link', { name: 'Sign in through gateway' })).toBeVisible();
+  await expect(page.getByRole('link', { name: 'Sign in' })).toBeVisible();
   expect(mutations).toEqual(['/auth/sessions/revoke-all']);
 });
 

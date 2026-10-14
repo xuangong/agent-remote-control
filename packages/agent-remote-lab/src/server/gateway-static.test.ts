@@ -16,6 +16,7 @@ it('serves public install assets through the Docker static handler without expos
   const source = fileURLToPath(new URL('../..', import.meta.url));
   await cp(join(source, 'public'), root, { recursive: true });
   await copyFile(join(source, 'index.html'), join(root, 'index.html'));
+  for (const file of ['install.sh', 'install.ps1']) await copyFile(join(source, '../..', file), join(root, file));
   const serve = await createGatewayStaticPages(root);
   const server = createServer((request, response) => {
     void serve(request, response).then((handled) => { if (!handled) { response.writeHead(404); response.end(); } });
@@ -26,6 +27,12 @@ it('serves public install assets through the Docker static handler without expos
   if (!address || typeof address === 'string') throw new Error('Missing address');
   const base = `http://127.0.0.1:${address.port}`;
   expect((await fetch(base + '/src/App.tsx')).status).toBe(404);
+  for (const file of ['install.sh', 'install.ps1']) {
+    const asset = await fetch(base + '/' + file);
+    expect(asset.headers.get('content-type')).toBe('text/plain; charset=utf-8');
+    expect(await asset.text()).toContain(file === 'install.sh' ? '--server URL' : '-Server URL');
+  }
+  expect((await fetch(base + '/other.sh')).status).toBe(404);
   const manifest = await fetch(base + '/app/manifest.webmanifest');
   expect(manifest.headers.get('content-type')).toBe('application/manifest+json');
   const value = await manifest.json();

@@ -1,0 +1,22 @@
+{
+  "$schema": "../../packages/agent-remote-cloudflare/node_modules/wrangler/config-schema.json",
+  "name": "my-agent-remote",
+  "main": "../../dist/cloudflare/worker.js",
+  "compatibility_date": "2026-06-01",
+  "compatibility_flags": ["nodejs_compat"],
+  "workers_dev": true,
+  "preview_urls": false,
+  "assets": { "directory": "../../dist/relay/web", "binding": "ASSETS", "run_worker_first": true },
+  "version_metadata": { "binding": "CF_VERSION_METADATA" },
+  "durable_objects": { "bindings": [{ "name": "RELAY", "class_name": "RelayObject" }] },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["RelayObject"] }],
+  "vars": {
+    "AGENT_REMOTE_RELAY_URL": "https://my-agent-remote.YOUR-SUBDOMAIN.workers.dev",
+    "AGENT_REMOTE_AUTH_PROVIDER": "google",
+    "AGENT_REMOTE_GOOGLE_CLIENT_ID": "your-client-id.apps.googleusercontent.com",
+    "AGENT_REMOTE_GOOGLE_ALLOWED_EMAILS": "owner@example.com"
+    // Gateway mode: set AGENT_REMOTE_AUTH_PROVIDER to gateway and add
+    // AGENT_REMOTE_ISSUER with your own compatible Gateway origin.
+    // Signing and Google client secrets belong in Wrangler secrets, never vars.
+  }
+}

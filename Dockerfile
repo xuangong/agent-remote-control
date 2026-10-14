@@ -8,7 +8,7 @@ COPY --chown=node:node dist/relay/web ./web
 RUN test -x /usr/bin/flock && mkdir -p /data && chown node:node /data
 USER node
 EXPOSE 5910
-HEALTHCHECK --interval=10s --timeout=5s --start-period=10s CMD node -e "fetch('http://127.0.0.1:'+process.env.AGENT_REMOTE_PORT+'/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
+HEALTHCHECK --interval=10s --timeout=5s --start-period=10s CMD node -e "require('node:http').get({hostname:'127.0.0.1',port:process.env.AGENT_REMOTE_PORT,path:'/health',timeout:4000,headers:{host:new URL(process.env.AGENT_REMOTE_RELAY_URL).host}},r=>process.exit(r.statusCode===200?0:1)).on('error',()=>process.exit(1)).on('timeout',()=>process.exit(1))"
 CMD ["node", "gateway.mjs"]
 
 # Local Workers parity image. Production Workers deploy through Wrangler.

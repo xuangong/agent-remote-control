@@ -30,3 +30,11 @@
 
 .lab-minimized-view-slot .lab-view-options-trigger { width: 43px; min-height: 40px; padding: 0; justify-content: center; }
 .lab-minimized-view-slot .lab-view-options-trigger > span { display: none; }
+
+.lab-session-dock-add { flex: 0 0 32px; align-self: flex-start; margin: 8px 4px; padding: 4px; border: 0; background: transparent; color: var(--obs-text-secondary); font-size: 22px; }
+.lab-bindable-session-window[data-active] { outline: 2px solid var(--obs-action); outline-offset: -2px; }
+.lab-empty-session-heading { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 12px; border-bottom: 1px solid var(--obs-border); }
+.lab-empty-session-heading > div { display: flex; align-items: center; gap: 4px; }
+.lab-empty-session-body { display: flex; flex: 1; flex-direction: column; align-items: center; justify-content: center; gap: 8px; padding: 24px; color: var(--obs-text-secondary); text-align: center; }
+.lab-session-open-target { display: flex; gap: 5px; padding: 8px 16px; min-width: 0; color: var(--obs-text-secondary); font-size: 12px; border-bottom: 1px solid var(--obs-border); }
+.lab-session-open-target strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--obs-text); font-weight: 500; }

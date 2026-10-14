@@ -4,6 +4,7 @@ import { recoveryGeneration } from './conversation-recovery.js';
 import { flushRecoveryWrites, queueRecoveryWrite, type RecoveryWriteHandle } from './recovery-writes.js';
 import type { OpenedSession } from './directory-client.js';
 import { sessionKey, type SessionEntry } from './session-tree.js';
+import { parseCompositionWindows, type CompositionWindow } from './composition-views.js';
 
 export const COMPOSITION_CAPACITY = { slots: 1024, askOwners: 1024, roles: 128, bytes: 1048576, tracks: 8 } as const;
 export interface StoreOwner { scope: string; key: string }
@@ -32,6 +33,7 @@ export interface CompositionDocument {
   collapsed: string[]; primary?: string; address?: string; focus?: string; anchor?: string;
   retained: Array<{ slot: string; against: string }>;
   tracks: CompositionTrack[]; selectedTrack?: string; asks: AskAssociationOwner[];
+  windows?: CompositionWindow[]; activeWindow?: string;
 }
 export interface CompositionTrack {
   entryId: string; slotId: string;
@@ -122,7 +124,10 @@ export function parseComposition(value: unknown, scope: string): CompositionDocu
     return { entryId: value.entryId, slotId: value.slotId, ...(value.view ? { view: parseTrackedView(value.view, ids) } : {}) };
   });
   unique(tracks.map(value => value.entryId));
+  const windows = item.windows === undefined ? undefined : parseCompositionWindows(item.windows, ids);
+  const activeWindow = windows?.find(view => view.id === item.activeWindow && !view.managed)?.id;
   return { version: 2, scope, editRevision: item.editRevision, slots, roles, edges, collapsed: [...item.collapsed], retained, asks, tracks,
+    ...(windows ? { windows } : {}), ...(activeWindow ? { activeWindow } : {}),
     ...optionalKeys(item as unknown as Record<string, unknown>, ids, ['primary', 'address', 'focus', 'anchor']),
     ...optionalKeys(item as unknown as Record<string, unknown>, new Set(tracks.map(value => value.entryId)), ['selectedTrack']) };
 }

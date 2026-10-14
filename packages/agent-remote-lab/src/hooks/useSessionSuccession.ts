@@ -10,7 +10,7 @@ import { restoreSession } from '../session-restoration.js';
 import { sessionKey, type SessionEntry } from '../session-tree.js';
 import { recoveryGeneration } from '../conversation-recovery.js';
 import { flushRecoveryWrites } from '../recovery-writes.js';
-import { applyCompositionTrack, compositionOriginId, compositionRoleKey, createCompositionDocument, createHistorySlot, initializeCompositionDocument, compositionMetadataKey, compositionSelection, compositionSession, compositionSessionMetadata, createCompositionSlot, createAskOwner, retainCompositionDraftViews, saveCompositionDocument, SuccessionApplication, type CompositionApplicationContext, type CompositionDocument, type CompositionLocator, type CompositionParticipantResult, type CompositionSlot } from '../session-composition.js';
+import { bindCompositionView, applyCompositionTrack, compositionOriginId, compositionRoleKey, createCompositionDocument, createHistorySlot, initializeCompositionDocument, compositionMetadataKey, compositionSelection, compositionSession, compositionSessionMetadata, createCompositionSlot, createAskOwner, retainCompositionDraftViews, saveCompositionDocument, SuccessionApplication, type CompositionApplicationContext, type CompositionDocument, type CompositionLocator, type CompositionParticipantResult, type CompositionSlot } from '../session-composition.js';
 import type { ConversationConnections } from '../conversation-connections.js';
 import type { DraftStore } from '../draft-store.js';
 import type { TrackedSessionView } from '../tracked-session-views.js';
@@ -177,13 +177,15 @@ export function useSessionSuccession(options: SuccessionOptions) {
     runtime.document.slots.push(slot); runtime.document.asks.push(createAskOwner(slot, options.scope)); runtime.document.editRevision++;
     return slot;
   }
-  function save() {
-    if (!live() || !runtime.readable) return;
+  function save(presentation = false) {
+    const current = () => live() || presentation && currentRuntime.current === runtime && runtime.mounted
+      && recoveryGeneration(options.scope) === runtime.generation;
+    if (!current() || !runtime.readable) return;
     const revision = runtime.document.editRevision;
-    const write = saveCompositionDocument(runtime.document, () => live() && runtime.document.editRevision === revision);
+    const write = saveCompositionDocument(runtime.document, () => current() && runtime.document.editRevision === revision);
     flushRecoveryWrites(compositionMetadataKey(options.scope));
     publish();
-    void write.completion.then(result => { if (live() && result.status !== 'saved') { runtime.error = 'The current session layout could not be saved.'; publish(); } });
+    void write.completion.then(result => { if (current() && result.status !== 'saved' && result.status !== 'cancelled') { runtime.error = 'The current session layout could not be saved.'; publish(); } });
     return write.completion;
   }
   function slotTitle(slot: CompositionSlot): string { return slot.metadata?.title ?? 'Session'; }
@@ -627,7 +629,7 @@ export function useSessionSuccession(options: SuccessionOptions) {
     const restorePrimary = restoreLayout && slot?.id === runtime.document.primary;
     if (slot && attached) slot.metadata = compositionSessionMetadata(attached);
     runtime.selection = selection; runtime.intent = intent; runtime.keepOriginal = keepOriginal; runtime.selectedSlot = slot?.id;
-    if (slot) { runtime.document.primary = slot.id; runtime.document.address = slot.id; runtime.document.editRevision++; }
+    if (slot) bindCompositionView(runtime.document, 'main', slot.id);
     if (!sameRole && !sameView) {
       if (slot && !restorePrimary) { runtime.document.focus = slot.id; runtime.document.anchor = slot.id; }
       runtime.navigationAttempt = true;

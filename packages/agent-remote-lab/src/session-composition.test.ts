@@ -680,3 +680,19 @@ it('persists existing owners and current Ask preference after disabling clear-on
     asks: expect.arrayContaining([expect.objectContaining({ id: owner.id, enabled: true })]),
   } });
 });
+
+it('projects and persists a dock binding through the shared succession application', async () => {
+  vi.stubGlobal('crypto', webcrypto);
+  const document = makeDocument();
+  const view = compositionMetadata.createCompositionView(document);
+  compositionMetadata.bindCompositionView(document, view.id, 'A');
+  const empty = compositionMetadata.createCompositionView(document);
+  const success = async () => ({ status: 'applied' as const, retention: 'session' as const });
+  const application = new SuccessionApplication(document, authority(), { track: success, ask: success, draftViews: success });
+  expect((await application.apply(replayCommit())).status).toBe('applied');
+  const restored = compositionMetadata.initializeCompositionDocument('scope');
+  if (restored.status !== 'ready') throw new Error('Missing saved composition');
+  expect(restored.document.windows).toEqual([{ id: view.id, slotId: 'A' }, { id: empty.id }]);
+  expect(compositionMetadata.compositionSelection(restored.document.slots.find(slot => slot.id === view.slotId)!))
+    .toMatchObject({ nativeSessionId: 'B' });
+});

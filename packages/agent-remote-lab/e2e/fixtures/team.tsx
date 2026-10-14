@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useReducer, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import type { AgentSnapshot, HistoryPage } from '@orchardworks/agent-remote-protocol';
 import type { RemoteAgentTransport } from '@orchardworks/agent-remote-web';
@@ -7,7 +7,9 @@ import { TeamGatherButton } from '../../src/components/TeamGatherButton';
 import { SessionDockProvider, SessionDockRail } from '../../src/components/SessionDock';
 import { SessionWindow } from '../../src/components/SessionWindow';
 import { SessionFamily } from '../../src/components/SessionFamily';
-import { useSessionWindows, sessionWindowId, type SessionWindowTarget } from '../../src/hooks/useSessionWindows';
+import { useSessionWindows, type SessionWindowTarget } from '../../src/hooks/useSessionWindows';
+import { createCompositionDocument, createCompositionSlot, compositionSelection, parseComposition } from '../../src/session-composition';
+import { sessionKey } from '../../src/session-tree';
 import { teamLayoutTargets } from '../../src/team-layout';
 import { sessionViewNavigation } from '../../src/session-view-navigation';
 import '../../src/ask.css';
@@ -59,7 +61,19 @@ const transport: RemoteAgentTransport = {
 function Fixture() {
  const [compact,setCompact]=useState(window.innerWidth<=1180);
  const [main,setMain]=useState<SessionWindowTarget | undefined>(()=>JSON.parse(sessionStorage.getItem('fixture:main')??'null')??undefined);
- const windows=useSessionWindows(location.origin);
+ const [document] = useState(() => {
+   const saved = sessionStorage.getItem('fixture:composition');
+   return saved ? parseComposition(JSON.parse(saved), location.origin) : createCompositionDocument(location.origin);
+ });
+ const [, render] = useReducer(n => n + 1, 0);
+ const windows = useSessionWindows(location.origin, { document,
+   save() { sessionStorage.setItem('fixture:composition', JSON.stringify(document)); render(); },
+   ensureView(target) {
+     let slot = document.slots.find(slot => sessionKey(compositionSelection(slot)) === sessionKey(target));
+     if (!slot) { slot = createCompositionSlot(crypto.randomUUID(), target, location.origin); document.slots.push(slot); }
+     return slot;
+   },
+ });
  const hosts=[{id:'mac',name:'Mac',online:true,teamManagement:true as const,providers:[{providerId:'codex',displayName:'Codex'}]},{id:'win',name:'Windows',online:true,teamManagement:true as const,providers:[{providerId:'codex',displayName:'Codex'}]}];
  const navigation: import('../../src/session-view-navigation').SessionViewNavigationFactory=(source,state,actions)=>sessionViewNavigation({source,state,entries:[],...actions});
  const open=async(target:SessionWindowTarget)=>{setMain(target);sessionStorage.setItem('fixture:main',JSON.stringify(target));return true;};
@@ -68,8 +82,8 @@ function Fixture() {
  <TeamMenu baseUrl={window.location.origin} enabled hosts={hosts} compact={compact} currentSession={main}
  source={{hostId:'mac',providerId:'codex',nativeSessionId:'source',title:'Project'}} onOpenSession={open}
  onOpen={async team=>{const layout=teamLayoutTargets(team,compact);await open(layout.main);windows.open(layout.dock, layout.groupRoot, team.id);return true;}} />
- <SessionDockRail>{main?<SessionFamily key={sessionWindowId(main)} storageScope={location.origin} baseUrl={location.origin} target={main} hostLabel="Mac" compact={compact} active offline={false} transport={transport} draftStore={drafts} navigation={navigation}/>:<p>Ordinary workspace</p>}</SessionDockRail>
- {windows.entries.map(entry=><SessionWindow key={sessionWindowId(entry.target)} entry={entry} baseUrl={location.origin} visible={!compact} compact={compact} hostLabel={entry.target.hostId} offline={false} transport={transport} draftStore={drafts} navigation={navigation} onClose={()=>windows.close(entry.target)} actions={entry.groupId?<TeamGatherButton baseUrl={location.origin} entry={entry} onGather={targets=>windows.gather(entry,targets)}/>:undefined}/>)}
+ <SessionDockRail>{main?<SessionFamily key={sessionKey(main)} storageScope={location.origin} baseUrl={location.origin} target={main} hostLabel="Mac" compact={compact} active offline={false} transport={transport} draftStore={drafts} navigation={navigation}/>:<p>Ordinary workspace</p>}</SessionDockRail>
+ {windows.entries.map(entry=><SessionWindow key={entry.id} entry={entry} baseUrl={location.origin} visible={!compact} compact={compact} hostLabel={entry.target?.hostId ?? ''} offline={false} transport={transport} draftStore={drafts} navigation={navigation} closeWith={windows.entries.filter(child=>child.closeWith===entry.id).map(child=>child.id)} onFocus={()=>windows.focus(entry.id)} onClose={()=>windows.close(entry.id)} actions={entry.groupId?<TeamGatherButton baseUrl={location.origin} entry={entry} onGather={targets=>windows.gather(entry,targets)}/>:undefined}/>)}
  </main></SessionDockProvider>;
 }
 createRoot(document.getElementById('root')!).render(<Fixture/>);

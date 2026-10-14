@@ -32,18 +32,19 @@ for (const target of ['main', 'side', 'ask'] as const) {
       window.dispatchEvent(new PageTransitionEvent('pagehide', { persisted: true }));
       window.dispatchEvent(new PageTransitionEvent('pageshow', { persisted: true }));
     });
-    await expect(pane.locator('button[aria-label="Open chat commands"]')).toBeDisabled();
+    await expect(pane.getByText('Timeline synchronization is reconnecting.', { exact: true })).toBeVisible();
+    await expect(input).toBeEditable();
     await expect(pane.getByTestId('prompt-submit')).toBeEnabled();
     await pane.getByTestId('prompt-submit').click();
     await expect(pane.getByTestId('pending-send')).toHaveAttribute('data-state', 'waiting');
     await expect(pane.getByTestId('pending-send')).toContainText(text);
     expect(sent.filter(message => message.includes(text))).toHaveLength(0);
-    await expect(input).toHaveValue('');
+    await expect.poll(() => input.evaluate(node => node instanceof HTMLTextAreaElement ? node.value : node.textContent)).toBe('');
     await page.context().setOffline(false);
     await page.evaluate(() => window.dispatchEvent(new PageTransitionEvent('pageshow', { persisted: true })));
     await expect(pane.getByTestId('pending-send')).toHaveCount(0);
     await expect(pane.locator('.agent-message-assistant').last()).toContainText(text);
-    await expect(input).toHaveValue('');
+    await expect.poll(() => input.evaluate(node => node instanceof HTMLTextAreaElement ? node.value : node.textContent)).toBe('');
     expect(sent.filter(message => message.includes(text))).toHaveLength(1);
     await page.evaluate(() => {
       window.dispatchEvent(new PageTransitionEvent('pagehide', { persisted: true }));

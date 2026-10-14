@@ -1,5 +1,5 @@
 import { useContext, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
-import type { RemoteAgentTransport } from '@orchardworks/agent-remote-web/headless';
+import type { AgentReplicaState, RemoteAgentTransport } from '@orchardworks/agent-remote-web/headless';
 import { CommunicationNavigationContext, type AgentChildSessionView } from '@orchardworks/agent-remote-web/react';
 import type { SessionWindowTarget } from '../hooks/useSessionWindows.js';
 import { WorkspaceReady } from '../workspace-access.js';
@@ -7,19 +7,24 @@ import { ConversationConnectionScope } from '../conversation-connections.js';
 import { DockResize } from './SessionDock.js';
 import './session-family.css';
 import { SessionDirectoryClient, type OpenedSession } from '../directory-client.js';
+import { useWorkspaceDisplayCache } from '../hooks/useWorkspaceDisplayCache.js';
+import { readWorkspaceSnapshot } from '../workspace-cache.js';
 import { useConversationSession } from '../hooks/useConversationSession.js';
 import { conversationSessionStorage } from '../conversation-storage.js';
+import type { ImageDraftBinding } from '@orchardworks/agent-remote-web/browser';
 import type { DraftBinding } from '../draft-store.js';
 import { sessionViewNavigation, type SessionViewNavigationActions, type SessionViewNavigationFactory } from '../session-view-navigation.js';
 import { sessionKey, type SessionEntry } from '../session-tree.js';
 import { LabWorkbench } from './LabWorkbench.js';
+import type { DisplayPreferenceBinding } from '../hooks/useSessionDisplayPreferences.js';
 
 type FamilyTarget = SessionWindowTarget;
 interface Layout { children: FamilyTarget[]; focus: number }
 interface Props {
   storageScope: string; baseUrl: string; target: SessionWindowTarget; hostLabel: string;
   compact: boolean; active: boolean; offline: boolean; controls?: ReactNode;
-  transport: RemoteAgentTransport; draftStore: DraftBinding['store']; navigation?: SessionViewNavigationFactory;
+  transport: RemoteAgentTransport; draftStore: DraftBinding['store']; draftBinding?: DraftBinding; imageDraftBinding?: ImageDraftBinding; navigation?: SessionViewNavigationFactory;
+  displayBinding?: DisplayPreferenceBinding;
   onAdditionalWidthChange?(width: number): void;
 }
 function restore(key: string, root: SessionWindowTarget): Layout {
@@ -41,7 +46,7 @@ function restore(key: string, root: SessionWindowTarget): Layout {
 /** Each session window owns its visible descendant chain, independently of other participants. */
 export function SessionFamily(props: Props) {
   const { target, compact, active } = props;
-  const storageKey = `agent-remote:recovery:${props.storageScope}:session-family:${sessionKey(target)}`;
+  const storageKey = `agent-remote:recovery:${props.storageScope}:session-family:${props.displayBinding && !props.displayBinding.key.startsWith('session:') ? `${props.displayBinding.key}:` : ''}${sessionKey(target)}`;
   const [layout, setLayout] = useState(() => restore(storageKey, target));
   const [widths, setWidths] = useState<Record<string, number>>(() => {
     try { return JSON.parse(conversationSessionStorage.getItem(`${storageKey}:widths`) ?? '{}') ?? {}; } catch { return {}; }
@@ -108,6 +113,7 @@ export function SessionFamily(props: Props) {
         style={compact || index === 0 ? undefined : { width: childWidth(item), flex: 'none' }}
         onPointerDownCapture={() => focusPane(index)} onFocusCapture={() => focusPane(index)}>
         {(visited || active || !compact) ? <FamilySession {...props} controls={controls} target={item} entries={path}
+          draftBinding={index === 0 ? props.draftBinding : undefined} imageDraftBinding={index === 0 ? props.imageDraftBinding : undefined}
           onNavigate={(destination, childrenFor) => open(index, destination, childrenFor)} /> : null}
         {!compact && index > 0 ? <DockResize title={item.title} width={childWidth(item)} onResize={width => setWidths(current => ({ ...current, [sessionKey(item)]: width }))} /> : null}
       </section>;
@@ -123,6 +129,7 @@ function FamilySession(props: SessionProps) {
   const { target, baseUrl } = props;
   const connections = useContext(ConversationConnectionScope);
   const enabled = useContext(WorkspaceReady);
+  const [preview] = useState(() => readWorkspaceSnapshot(baseUrl, target));
   const [session, setSession] = useState<OpenedSession>(), [error, setError] = useState(''), [attempt, setAttempt] = useState(0);
   useEffect(() => {
     if (!enabled) return;
@@ -141,11 +148,21 @@ function FamilySession(props: SessionProps) {
     }).catch(error => { if (!stopped) setError(error instanceof Error ? error.message : 'The session could not be opened.'); });
     return () => { stopped = true; abort.abort(); };
   }, [baseUrl, target.hostId, target.providerId, target.nativeSessionId, target.parentNativeSessionId, attempt, connections, enabled]);
+  if (!session && preview) {
+    const key = JSON.stringify([target.hostId, target.providerId, target.nativeSessionId]);
+    return <LabWorkbench state={preview} sessionStatus="connecting" actions={{}} draftOnly
+      conversationPath={<strong className="agent-session-title">{target.title}</strong>} sessionManager={props.controls}
+      headingContext={error ? <p role="alert">{error}<button onClick={() => setAttempt(value => value + 1)}>Retry</button></p> : undefined}
+      draftSessionKey={key} draftBinding={props.draftBinding ?? { store: props.draftStore, key: `session:${key}` }} imageDraftBinding={props.imageDraftBinding}
+      displayBinding={familyDisplayBinding(props)} defaultDisplayMode="content" />;
+  }
   if (!session) return <div className="lab-session-opening"><header><strong>{target.title}</strong>{props.controls}</header>{error ? <p role="alert">{error}<button onClick={() => setAttempt(value => value + 1)}>Retry</button></p> : <p role="status">Opening session…</p>}</div>;
-  return <FamilyChat {...props} session={session} />;
+  return <FamilyChat {...props} session={session} preview={preview} />;
 }
-function FamilyChat({ session, transport, navigation, draftStore, controls, offline, entries, onNavigate }: SessionProps & { session: OpenedSession }) {
+function FamilyChat({ session, transport, navigation, draftStore, draftBinding, imageDraftBinding, controls, offline, entries, onNavigate, displayBinding, baseUrl, target, preview }: SessionProps & { session: OpenedSession; preview?: AgentReplicaState }) {
   const { state, sessionState, status, actions, questions, setQuestions } = useConversationSession(session, transport);
+  const enabled = useContext(WorkspaceReady);
+  useWorkspaceDisplayCache(baseUrl, session, state, enabled && status === 'ready');
   const open = (destination: SessionEntry | AgentChildSessionView) => {
     if (offline) throw new Error('The Host is offline. Reconnect it before opening a subagent.');
     onNavigate(destination, childrenFor);
@@ -161,11 +178,16 @@ function FamilyChat({ session, transport, navigation, draftStore, controls, offl
     return [...children.values()];
   };
   const key = JSON.stringify([session.hostId, session.providerId, session.nativeSessionId]);
-  return <CommunicationNavigationContext.Provider value={inherited?.communication}><LabWorkbench headingMode="inline" sessionManager={controls} defaultDisplayMode="content"
+  return <CommunicationNavigationContext.Provider value={inherited?.communication}><LabWorkbench displayBinding={familyDisplayBinding({ displayBinding, target, entries })} headingMode="inline" sessionManager={controls} defaultDisplayMode="content"
     childrenFor={childrenFor} onOpenChildSession={navigationActions.openChildSession}
     resolveSessionLink={id => inherited?.resolveSessionLink(id) ?? local.resolveSessionLink(id)} revealEntry={inherited?.revealEntry}
-    state={state} sessionState={sessionState} sessionStatus={status} attachingAgentId={session.agentId} actions={actions}
-    draftSessionKey={key} draftBinding={{ store: draftStore, key: `session:${key}` }} questionDrafts={questions}
+    state={state?.timeline.initialized ? state : preview ?? state} sessionState={sessionState} sessionStatus={status} attachingAgentId={session.agentId} actions={actions}
+    draftSessionKey={key} draftBinding={draftBinding ?? { store: draftStore, key: `session:${key}` }} imageDraftBinding={imageDraftBinding} questionDrafts={questions}
     onQuestionDraftChange={(id, value) => setQuestions(current => ({ ...current, [id]: value }))}
     conversationPath={<strong className="agent-session-title">{session.title}</strong>} /></CommunicationNavigationContext.Provider>;
+}
+
+function familyDisplayBinding({ displayBinding, target, entries }: Pick<SessionProps, 'displayBinding' | 'target' | 'entries'>) {
+  return displayBinding && { ...displayBinding, key: target.nativeSessionId === entries[0]?.nativeSessionId
+    ? displayBinding.key : `${displayBinding.key}:${target.nativeSessionId}` };
 }

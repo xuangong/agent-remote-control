@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
 import { RemoteTeamClient } from '@orchardworks/agent-remote-web/headless';
 import { workspaceFetch } from '../workspace-access.js';
-import { sessionWindowId, type SessionWindowEntry, type SessionWindowTarget } from '../hooks/useSessionWindows.js';
+import { type SessionWindowEntry, type SessionWindowTarget } from '../hooks/useSessionWindows.js';
+import { sessionKey } from '../session-tree.js';
 import { teamLayoutTargets } from '../team-layout.js';
 
 /** Team membership supplies targets; ordinary windows own their placement and lifetime. */
@@ -20,7 +21,7 @@ export function TeamGatherButton({ baseUrl, entry, onGather }: {
       const team = teams.find(team => team.id === entry.groupId);
       if (!team) throw new Error('This Team is no longer available. Check the Team list.');
       const layout = teamLayoutTargets(team, false);
-      if (!layout.groupRoot || sessionWindowId(layout.groupRoot) !== sessionWindowId(entry.target)) throw new Error('The Team Leader has changed. Reopen the Team from its list.');
+      if (!layout.groupRoot || !entry.target || sessionKey(layout.groupRoot) !== sessionKey(entry.target)) throw new Error('The Team Leader has changed. Reopen the Team from its list.');
       onGather(layout.dock);
       const unavailable = team.members.filter(member => member.creation !== 'abandoned' && (member.creation !== 'ready' || !member.nativeSessionId)).length;
       if (unavailable) setNotice(`${unavailable} member session(s) are not ready. Check creation in the Team list.`);

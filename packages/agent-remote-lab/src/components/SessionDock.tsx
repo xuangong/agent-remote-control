@@ -125,7 +125,7 @@ export function MinimizeMainSession() {
   </button>;
 }
 
-export function SessionDockRail({ children, minimizedHeader, mainTitle = 'Main session', minimumBaseWidth = minimumWidth }: { children: ReactNode; minimizedHeader?: ReactNode; mainTitle?: string; minimumBaseWidth?: number }) {
+export function SessionDockRail({ children, minimizedHeader, mainTitle = 'Main session', minimumBaseWidth = minimumWidth, onCreateView }: { children: ReactNode; minimizedHeader?: ReactNode; mainTitle?: string; minimumBaseWidth?: number; onCreateView?(): void }) {
   const dock = useContext(Context);
   const rail = useRef<HTMLDivElement>(null);
   const [width, setWidth] = useState(0);
@@ -164,6 +164,7 @@ export function SessionDockRail({ children, minimizedHeader, mainTitle = 'Main s
       </button> : null}
       {active.length && !minimized ? <DockResize title="Main conversation area" width={baseWidth} minimum={minimumBaseWidth} onResize={width => dock?.resizeBase(width)} /> : null}
     </div>
+    {dock?.enabled && onCreateView ? <button type="button" className="lab-session-dock-add" style={{ order: active.length + 1 }} aria-label="New session view" title="New session view" onClick={onCreateView}>+</button> : null}
     {[...active].sort((a, b) => a.id.localeCompare(b.id)).map(item => <DockPane key={item.id} item={item} order={active.indexOf(item) + 1} />)}
   </div>;
 }
@@ -243,4 +244,10 @@ function DockMove({ id, title }: { id: string; title: string }) {
 export function useSessionDocked(id: string): boolean {
   const dock = useContext(Context);
   return !!dock?.enabled && dock.layout.panes.some(item => item.id === id);
+}
+
+/** Explicit window closure also retires its persisted placement. */
+export function useRemoveSessionDocks() {
+  const dock = useContext(Context);
+  return (ids: readonly string[]) => { for (const id of ids) dock?.remove(id); };
 }

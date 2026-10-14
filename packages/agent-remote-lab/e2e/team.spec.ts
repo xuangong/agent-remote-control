@@ -215,7 +215,7 @@ test('Team subagents belong to their parent pane and keep other families intact'
   await expect(pane('Leader').getByTestId('prompt-input')).toContainText('Keep Leader draft');
   await openChild('Leader', 'leader-child');
  } else {
-  expect(await page.locator('.lab-session-family-pane').evaluateAll(nodes => nodes.map(node => node.getAttribute('aria-label')))).toEqual(['Project', 'Leader', 'leader-child', 'Windows validation']);
+  expect(await page.locator('.lab-session-family-pane').evaluateAll(nodes => nodes.sort((a, b) => a.getBoundingClientRect().left - b.getBoundingClientRect().left).map(node => node.getAttribute('aria-label')))).toEqual(['Project', 'Leader', 'leader-child', 'Windows validation']);
   await pane('Leader').getByTestId('prompt-input').click();
   await expect(pane('leader-child')).toBeVisible();
  }
@@ -227,7 +227,7 @@ test('Team subagents belong to their parent pane and keep other families intact'
   await page.getByRole('button',{name:'Teams',exact:true}).click(); await page.locator('.lab-team-management > summary').click(); await page.locator('.lab-team-members').getByRole('button',{name:'Leader',exact:true}).click();
   await expect(pane('leader-grandchild')).toBeVisible();
  } else {
-  expect(await page.locator('.lab-session-family-pane').evaluateAll(nodes => nodes.map(node => node.getAttribute('aria-label')))).toEqual(['Project', 'Leader', 'leader-child', 'leader-grandchild', 'Windows validation', 'member-child']);
+  expect(await page.locator('.lab-session-family-pane').evaluateAll(nodes => nodes.sort((a, b) => a.getBoundingClientRect().left - b.getBoundingClientRect().left).map(node => node.getAttribute('aria-label')))).toEqual(['Project', 'Leader', 'leader-child', 'leader-grandchild', 'Windows validation', 'member-child']);
   await pane('leader-child').getByRole('button', { name: 'Close subagent', exact: true }).click();
   await expect(pane('leader-child')).toHaveCount(0);
   await expect(pane('leader-grandchild')).toHaveCount(0);

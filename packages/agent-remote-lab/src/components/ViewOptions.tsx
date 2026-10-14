@@ -14,9 +14,10 @@ interface ViewOptionsProps {
   onToggleHeader(): void;
   onToggleSidebar(): void;
   onToggleInspector(): void;
+  onCreateSessionView?(): void;
 }
 
-export function ViewOptions({ attentionControls, target, triggerRef, headerVisible, sidebarVisible, inspectorVisible, compact, inert, onSetAllVisible, onToggleHeader, onToggleSidebar, onToggleInspector }: ViewOptionsProps) {
+export function ViewOptions({ attentionControls, target, triggerRef, headerVisible, sidebarVisible, inspectorVisible, compact, inert, onSetAllVisible, onToggleHeader, onToggleSidebar, onToggleInspector, onCreateSessionView }: ViewOptionsProps) {
   const [open, setOpen] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
   const focusedControl = useRef<string>();
@@ -69,6 +70,7 @@ export function ViewOptions({ attentionControls, target, triggerRef, headerVisib
       <label><span>Header</span><input data-view-control="header" type="checkbox" checked={headerVisible} onChange={onToggleHeader} /></label>
       <label><span>Sidebar</span><input data-view-control="sidebar" type="checkbox" aria-controls="lab-context" checked={sidebarVisible} onChange={() => togglePanel(onToggleSidebar)} /></label>
       <label><span>Replica Inspector</span><input data-view-control="inspector" type="checkbox" aria-controls="lab-inspector" checked={inspectorVisible} onChange={() => togglePanel(onToggleInspector)} /></label>
+      {!compact && onCreateSessionView ? <button type="button" onClick={() => { setOpen(false); onCreateSessionView(); }}>New session view</button> : null}
       {attentionControls}
     </section> : null}
   </div>;

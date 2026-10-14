@@ -11,6 +11,52 @@ test.beforeEach(async({page})=>{
  await page.route('**/v1/remote/teams',route=>route.fulfill({json:{teams:[team]}}));
  await page.route('**/v1/remote/hosts/*/attach',route=>route.fulfill({json:{agentId:route.request().postDataJSON().nativeSessionId}}));
 });
+for (const navigation of ['team', 'create'] as const) {
+ test(`Track restores its own view after ${navigation} navigation`, async ({ page, isMobile }) => {
+  const tracked = { hostId: 'host', providerId: 'recorded', nativeSessionId: 'tracked', title: 'Tracked research', starredAt: 1 };
+  const actual = { ...team, source: { hostId: tracked.hostId, providerId: tracked.providerId, nativeSessionId: 'team-main', title: 'Team main' },
+   members: team.members.map(member => ({ ...member, hostId: 'host', providerId: 'recorded' })) };
+  await page.route('**/v1/remote/teams', route => route.fulfill({ json: { teams: [actual] } }));
+  await page.route('**/v1/favorites', route => route.fulfill({ json: { revision: 1, folders: [], stars: [
+   { ...tracked, favoriteId: 'favorite', folderId: null, order: 0, available: true, online: true },
+  ] } }));
+  await page.route('**/v1/remote/hosts/host/attach', route => {
+   const nativeSessionId = route.request().postDataJSON().nativeSessionId;
+   return route.fulfill({ json: { agentId: nativeSessionId, nativeSessionId } });
+  });
+  await page.route('**/v1/remote/**/create', route => route.fulfill({ json: { agentId: 'created', nativeSessionId: 'created' } }));
+  await page.addInitScript(tracked => {
+   localStorage.setItem('agent-remote:track-view', 'true');
+   localStorage.setItem(`agent-remote-tracking:${location.origin}/u/alice/`, JSON.stringify([tracked]));
+  }, tracked);
+  await page.goto('/e2e/fixtures/session-stars.html?switching=1');
+  const primary = page.locator('.lab-primary-conversation');
+  const openTracked = async () => {
+   await page.getByRole('button', { name: 'Tracked sessions', exact: true }).click();
+   await page.locator('.lab-tracking-floating .lab-session-row').filter({ hasText: tracked.title }).click();
+   await expect.poll(() => new URL(page.url()).searchParams.get('session')).toBe(tracked.nativeSessionId);
+   await expect(primary).toBeVisible();
+   await expect(primary.locator('.agent-message-assistant')).toContainText('Conversation for tracked');
+  };
+  await openTracked();
+  if (navigation === 'team') {
+   await page.getByRole('button', { name: 'Teams', exact: true }).click();
+   await page.getByRole('button', { name: /Diagnose across Hosts/ }).click();
+   await expect.poll(() => new URL(page.url()).searchParams.get('session')).toBe(isMobile ? 'leader' : 'team-main');
+   if (isMobile) {
+    await page.getByRole('button', { name: 'Teams', exact: true }).click();
+    await page.getByRole('navigation', { name: 'Diagnose across Hosts sessions' }).getByRole('button', { name: /^Windows validation/ }).click();
+    await expect.poll(() => new URL(page.url()).searchParams.get('session')).toBe('member');
+   }
+  } else {
+   const { showNewSession } = await import('./session-navigation');
+   await showNewSession(page); await page.getByTestId('session-create').click();
+   await expect.poll(() => new URL(page.url()).searchParams.get('session')).toBe('created');
+  }
+  await openTracked();
+ });
+}
+
 test('compact Team navigation opens a member with its own editable permissions and returns to the Leader', async ({ page, isMobile }, info) => {
  test.skip(!isMobile, 'Compact Team navigation replaces the single visible session.');
  const { activateComposerAction } = await import('./composer-actions');

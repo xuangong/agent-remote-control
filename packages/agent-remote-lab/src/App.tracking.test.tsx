@@ -1,4 +1,5 @@
-import { act, useState } from 'react';
+import { act, useState, type ComponentProps } from 'react';
+import * as teamComponents from './components/TeamMenu.js';
 import { afterEach, expect, it, vi } from 'vitest';
 import type { RemoteTransportListener } from '@orchardworks/agent-remote-web';
 import { App, type LabTransport } from './App.js';
@@ -406,4 +407,27 @@ it('keeps desktop tracking alive while its panel is hidden and delivers pending 
   expect(f.activityClosed).not.toHaveBeenCalled();
   expect(f.contentConnections).toHaveLength(0);
   expect(readTrackedSessions(baseUrl)).toEqual([star]);
+});
+it.each([false, true])('returns to the requested tracked session after Team navigation (compact: %s)', async compact => {
+  const realTeamMenu = teamComponents.TeamMenu;
+  let team!: ComponentProps<typeof realTeamMenu>;
+  vi.spyOn(teamComponents, 'TeamMenu').mockImplementation(props => { team = props; return realTeamMenu(props); });
+  const leader = { ...star, nativeSessionId: 'leader', title: 'Leader' };
+  const f = await fixture(star, true, leader, undefined, { compact });
+  await f.open();
+  const input = f.container.querySelector<HTMLElement>('[data-testid="prompt-input"]')!;
+  await act(async () => {
+    setPromptText(input, 'Unsent tracked draft');
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+  });
+  expect(new URL(window.location.href).searchParams.get('session')).toBe(star.nativeSessionId);
+  await act(async () => { await team.onOpenSession(leader); });
+  expect(new URL(window.location.href).searchParams.get('session')).toBe(leader.nativeSessionId);
+  await f.open();
+  expect(new URL(window.location.href).searchParams.get('session')).toBe(star.nativeSessionId);
+  await f.open(leader.title);
+  expect(new URL(window.location.href).searchParams.get('session')).toBe(leader.nativeSessionId);
+  await f.open();
+  expect(new URL(window.location.href).searchParams.get('session')).toBe(star.nativeSessionId);
+  expect(promptText(f.container.querySelector<HTMLElement>('[data-testid="prompt-input"]')!)).toBe('Unsent tracked draft');
 });

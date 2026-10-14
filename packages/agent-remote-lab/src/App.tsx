@@ -651,6 +651,11 @@ function AppContent({
         setActiveView('workbench'); closeContext(); setInspectorOpen(false); return true;
       }
     }
+    // Returning to a native parent remains inside the tracked family. Other
+    // primary navigation must not save its layout over the Track we just left.
+    const returningToParent = sessionIntent !== 'history' && !primarySlot && !restoreView
+      && ancestors.some(ancestor => sessionKey(ancestor) === sessionKey(selection));
+    if (!returningToParent) trackedViews.select();
     pendingViewRestore.current = primarySlot && restoreView ? { scope: baseUrl, transport, slotId: primarySlot, read: restoreView } : undefined;
     setDetachedSideRoot(undefined);
     if (!takeOver && !onRestoring) setNativeTakeover(undefined);
@@ -748,6 +753,7 @@ function AppContent({
         setCreationLocked(true);
         const response = await directory.create(reservation.providerId, reservation.operationId, reservation.options);
         const session = { agentId: response.agentId, nativeSessionId: response.nativeSessionId ?? response.agentId, providerId: reservation.providerId, title: 'New session', hostId: selectedHost.id };
+        rememberTrackedView(); trackedViews.select();
         closeContext(); setActiveView('workbench');
         rememberSession(session); await succession.openAttached(session);
         creationReservation.current = undefined;
@@ -755,6 +761,7 @@ function AppContent({
         setDirectoryRevision((current) => current + 1);
       } else {
         const response = await transport.createAgent(agentId, providerId, { sessionId: agentId, ...(createPlanning ? { planning: true } : {}) });
+        rememberTrackedView(); trackedViews.select();
         attach(response.payload.agentId);
       }
       setProviderName(providerConnectionName(selectedHost.id, providerId));

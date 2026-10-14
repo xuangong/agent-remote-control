@@ -25,11 +25,14 @@ const observers = new Map<RemoteTransportListener, string>();
 const catchUpFixture = new URLSearchParams(location.search).has('catchup');
 const contentObservers = new Map<RemoteTransportListener, string>();
 const allowContent = new URLSearchParams(location.search).has('switching');
+if (allowContent) directory.attach = async (_providerId, nativeSessionId) => ({ agentId: nativeSessionId, nativeSessionId });
 const transport: RemoteAgentTransport & Pick<HttpWebSocketTransport, 'listProviders' | 'createAgent' | 'resumeAgent'> = {
   listProviders: async () => [{ providerId: 'recorded', displayName: 'Recorded' }],
   createAgent: async () => { throw new Error('Creation is not used'); },
   resumeAgent: async () => { throw new Error('Resume is not used'); },
-  fetchSnapshot: async () => ({ protocolVersion: '1.8.0', type: 'agent_snapshot', payload: replicaState.agent! }),
+  fetchSnapshot: async agentId => ({ protocolVersion: '1.8.0', type: 'agent_snapshot', payload: allowContent
+    ? { ...replicaState.agent!, id: agentId, runtimeInfo: { ...replicaState.agent!.runtimeInfo, sessionId: agentId } }
+    : replicaState.agent! }),
   fetchTimeline: async agentId => {
     if (!allowContent) throw new Error('Tracking must not request content');
     if (catchUpFixture) await new Promise<void>(resolve => window.addEventListener('fixture-history', () => resolve(), { once: true }));

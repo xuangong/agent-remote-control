@@ -13,7 +13,7 @@
 
 :root {
   color: oklch(0.243 0.024 248.8);
-  background: oklch(0.975 0.006 255.5);
+  background: var(--obs-surface);
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
   font-size: 14px;
   -webkit-text-size-adjust: 100%;
@@ -21,6 +21,7 @@
   font-synthesis: none;
   text-rendering: optimizeLegibility;
   --obs-canvas: oklch(0.975 0.006 255.5);
+  /* Keep browser theme and manifest colors aligned with this surface (#fbfdff). */
   --obs-surface: oklch(0.993 0.003 247.9);
   --obs-surface-selected: oklch(0.959 0.018 245.4);
   --obs-text: oklch(0.243 0.024 248.8);
@@ -53,7 +54,7 @@ body {
   min-height: 100vh;
   min-height: 100dvh;
   color: var(--obs-text);
-  background: var(--obs-canvas);
+  background: var(--obs-surface);
 }
 
 button,

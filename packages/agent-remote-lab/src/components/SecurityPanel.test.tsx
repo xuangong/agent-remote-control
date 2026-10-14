@@ -8,6 +8,18 @@ const other = { ...current, id: 'other-id', label: 'Mobile Safari', current: fal
 const list = { sessions: [current, other], authenticatedAt: now, recentAuthentication: true };
 afterEach(() => vi.unstubAllGlobals());
 const button = (view: HTMLElement, label: string) => [...view.querySelectorAll('button')].find(value => value.textContent === label)!;
+it('uses provider-neutral copy while loading and reviewing a recent sign-in', async () => {
+  let complete!: (response: Response) => void;
+  vi.stubGlobal('fetch', (url: string) => url === '/auth/sessions'
+    ? new Promise<Response>(resolve => { complete = resolve; }) : Promise.resolve(Response.json({ events: [] })));
+  const view = await render(<SecurityPanel onClose={() => undefined} onSignedOut={() => undefined} />);
+  expect(view.textContent).toContain('Checking whether a recent sign-in is required…');
+  await act(async () => complete(Response.json(list)));
+  expect(view.textContent).toContain('Your recent sign-in allows pairing and credential rotation.');
+  expect(view.textContent).toContain('Last sign-in:');
+  expect(view.textContent).not.toMatch(/gateway/i);
+});
+
 it('revokes another browser, refreshes activity and leaves this browser signed in', async () => {
   const signedOut = vi.fn(); const calls: string[] = []; let removed = false;
   vi.stubGlobal('fetch', async (url: string, init?: RequestInit) => {

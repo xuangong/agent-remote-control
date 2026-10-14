@@ -79,8 +79,8 @@ export function SecurityPanel({ onClose, onSignedOut }: { onClose(): void; onSig
         </div> : null}
       </section>
       <section aria-labelledby="sensitive-actions-title"><h2 id="sensitive-actions-title">Sensitive actions</h2>
-        {sessions?.recentAuthentication ? <p>Your recent gateway sign-in allows pairing and credential rotation.</p> : sessions ? <ReauthenticationNotice /> : <p>Checking whether a recent gateway sign-in is required…</p>}
-        {sessions?.authenticatedAt != null ? <p>Last gateway sign-in: {time(sessions.authenticatedAt)}</p> : null}
+        {sessions?.recentAuthentication ? <p>Your recent sign-in allows pairing and credential rotation.</p> : sessions ? <ReauthenticationNotice /> : <p>Checking whether a recent sign-in is required…</p>}
+        {sessions?.authenticatedAt != null ? <p>Last sign-in: {time(sessions.authenticatedAt)}</p> : null}
       </section>
       <section aria-labelledby="security-activity-title"><h2 id="security-activity-title">Recent security activity</h2>
         <p>Access and device events for your account. Conversation content and credentials are excluded.</p>

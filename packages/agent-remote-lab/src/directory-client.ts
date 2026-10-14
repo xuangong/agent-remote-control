@@ -89,7 +89,7 @@ export class RemoteHostClient implements HostPairingService {
     const response = await workspaceFetch(new URL(`v1/remote/${path}`, this.baseUrl.endsWith('/') ? this.baseUrl : `${this.baseUrl}/`), { method, ...(timeoutMs ? { signal: AbortSignal.timeout(timeoutMs) } : {}),
       ...(method === 'POST' ? { headers: { 'content-type': 'application/json' }, body: JSON.stringify(requestBody ?? {}) } : {}) });
     const body = await response.json();
-    if (!response.ok) throw new DirectoryError(body.code === 'reauthentication_required' ? 'A recent gateway sign-in is required.' : body.error ?? 'Remote Host service is unavailable.', body.code, response.status, typeof body.requestId === 'string' ? body.requestId : undefined);
+    if (!response.ok) throw new DirectoryError(body.code === 'reauthentication_required' ? 'A recent sign-in is required.' : body.error ?? 'Remote Host service is unavailable.', body.code, response.status, typeof body.requestId === 'string' ? body.requestId : undefined);
     return body as T;
   }
   tpmList(hostId: string): Promise<TpmList> { return this.tpm(client => client.tpmList(hostId, { signal: AbortSignal.timeout(15000) })); }

@@ -70,7 +70,7 @@ it('sends owner stop and rotation requests without credentials and retains fresh
   await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
   try {
     const client = new RemoteHostClient(`http://127.0.0.1:${(server.address() as AddressInfo).port}/u/tenant/`);
-    await expect(client.rotate('host/one')).rejects.toMatchObject({ code: 'reauthentication_required' });
+    await expect(client.rotate('host/one')).rejects.toMatchObject({ code: 'reauthentication_required', status: 403, message: 'A recent sign-in is required.' });
     expect(await client.stop('host/one')).toEqual({ results: [{ agentId: 'one', status: 'unsupported' }] });
     expect(paths).toEqual(['/u/tenant/v1/remote/hosts/host%2Fone/rotate', '/u/tenant/v1/remote/hosts/host%2Fone/stop']);
   } finally { server.closeAllConnections(); await new Promise<void>(resolve => server.close(() => resolve())); }

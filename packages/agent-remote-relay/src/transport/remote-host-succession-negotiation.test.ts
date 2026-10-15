@@ -5,13 +5,13 @@ import { createAgentRemoteRelay } from '../relay.js';
 import { createRemoteHostUplinkClient } from './remote-host-uplink-client.js';
 const cleanup: Array<() => Promise<void>> = [];
 afterEach(async () => { for (const close of cleanup.splice(0).reverse()) await close(); }, 5000);
-async function connection(acknowledged: boolean) {
+async function connection(acknowledged: boolean | 3) {
   const server = new WebSocketServer({host:'127.0.0.1',port:0});
   await once(server,'listening',{signal:AbortSignal.timeout(3000)});
   cleanup.push(async()=>{for(const socket of server.clients)socket.terminate();await new Promise<void>(resolve=>server.close(()=>resolve()));});
   const origin=`http://127.0.0.1:${(server.address() as {port:number}).port}`;
   const authority={version:1 as const,origin,issuer:'https://issuer.example',namespace:'tenant',ownerSubject:'owner'};
-  const registered={uplinkVersion:2,type:'registered',hostId:'host',heartbeat:{intervalMs:30000,timeoutMs:10000},successionEnrollment:authority,...(acknowledged?{successionEnrollmentVersion:2}:{})};
+  const registered={uplinkVersion:2,type:'registered',hostId:'host',heartbeat:{intervalMs:30000,timeoutMs:10000},successionEnrollment:authority,...(acknowledged?{successionEnrollmentVersion:acknowledged === 3 ? 3 : 2}:{})};
   const responses: Array<{requestId:string;status:number;body:string}>=[];
   let query='',socket!:import('ws').WebSocket;
   server.on('connection',(next,request)=>{socket=next;query=new URL(request.url!,origin).searchParams.get('successionEnrollment')!;socket.on('message',data=>{
@@ -33,7 +33,7 @@ async function connection(acknowledged: boolean) {
 }
 
 test.each([true,false])('duplicate registration retains acknowledged v2 trust only: %s',async acknowledged=>{
-  const f=await connection(acknowledged);expect(f.query).toBe('2');
+  const f=await connection(acknowledged);expect(f.query).toBe('3');
   expect((await f.rpc('ordinary','/remote/controller-update')).status).toBe(200);
   const enrolled=await f.rpc('enrolled','/remote/succession/enrollment');
   expect(enrolled.status).toBe(acknowledged?200:403);
@@ -47,3 +47,10 @@ test('a duplicate registration that changes negotiated feature version retires t
   f.socket.send(JSON.stringify({...f.registered,successionEnrollmentVersion:undefined}));
   await closed;expect(f.contexts).toEqual([]);
 },10000);
+
+test('acknowledged v3 reaches only the trusted enrollment callback over WebSocket', async () => {
+  const f = await connection(3);
+  expect(f.query).toBe('3');
+  expect((await f.rpc('enrolled-v3', '/remote/succession/enrollment')).status).toBe(200);
+  expect(f.contexts[0]).toMatchObject({ successionEnrollmentVersion: 3, installationId: 'installation' });
+}, 10000);

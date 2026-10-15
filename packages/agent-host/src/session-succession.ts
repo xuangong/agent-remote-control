@@ -27,10 +27,10 @@ export class SessionSuccessionCoordinator {
     return this.prepareRequest(request, JSON.stringify(['local', requestKey(request)]), () => this.store.begin(request, true));
   }
   async prepareEnrolled(freeze: SuccessionAssociationFreeze, participants: SuccessionParticipant[], generation: number): Promise<SuccessionRecord> {
-    if (freeze.request.preparation) throw new Error('Native prefix enrollment requires v3 integration.');
+    if (freeze.request.preparation && freeze.version !== 3) throw new Error('Native prefix enrollment requires v3.');
     if (!this.store.read(freeze.request.roleId).enrollments?.some(saved => saved.request.operationId === freeze.request.operationId)) {
-      if (freeze.version !== 2) throw new Error('New succession preparation requires a bounded v2 freeze.');
-      await this.preparation.supportsBoundedProjection(this.store.read(freeze.request.roleId).role, freeze.request.targetProviderId);
+      if (freeze.version === 1) throw new Error('New succession preparation requires a bounded freeze.');
+      await this.preparation.supportsBoundedProjection(this.store.read(freeze.request.roleId).role, freeze.request.targetProviderId, freeze.request.preparation);
     }
     return this.prepareRequest(freeze.request, JSON.stringify(['enrolled', successionFreezeKey(freeze)]), () => this.store.beginEnrolled(freeze, participants, generation, true));
   }
@@ -67,9 +67,17 @@ export class SessionSuccessionCoordinator {
     return this.run(request.operationId);
   }
   private releaseTerminal(record: SuccessionRecord): SuccessionRecord {
-    if (['committed', 'cancelled', 'rejected'].includes(record.phase)) this.admission?.releaseReservation(record.operationId, record.phase === 'committed');
+    if (['committed', 'cancelled', 'rejected'].includes(record.phase) && !this.awaitingEnrollmentRelease(record)) this.admission?.releaseReservation(record.operationId, record.phase === 'committed');
     return record;
   }
+
+  private awaitingEnrollmentRelease(record: SuccessionRecord): boolean {
+    if (record.phase !== 'committed' || !record.preparation) return false;
+    const state = this.store.read(record.roleId);
+    const freeze = state.enrollments?.find(item => item.request.operationId === record.operationId);
+    return !!freeze && !state.releasedEnrollments?.includes(freeze.token);
+  }
+  releaseCommitted(operationId: string): void { this.releaseTerminal(this.store.operation(operationId)); }
 
   /** Serialize local durable boundaries, never an unresolved native call or read. */
   private serialized<T>(operationId: string, run: () => Promise<T>): Promise<T> {
@@ -267,6 +275,7 @@ export class SessionSuccessionCoordinator {
           blocks.set(from, 'reserved');
           if (record.to) blocks.set(nativeSessionRefKey(record.to), 'reserved');
         }
+        if (this.awaitingEnrollmentRelease(record) && record.to) blocks.set(nativeSessionRefKey(record.to), 'reserved');
         if (record.phase === 'committed' && from !== current && blocks.get(from) !== 'reserved') blocks.set(from, 'superseded');
       }
     }

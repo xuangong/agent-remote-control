@@ -5,7 +5,7 @@ import { admitNativeOwnerTransfer } from './native-owner-admission.js';
 import { isCreationSource } from '@orchardworks/agent-remote-protocol';
 import { SessionSuccessionEnrollment } from './session-succession-enrollment.js';
 import { successionTpmRouting } from './session-succession-tpm.js';
-import { SessionSuccessionService, type SessionSuccessionPorts } from './session-succession-service.js';
+import { SessionSuccessionService, type SessionSuccessionPorts, type SessionExecutionRouting } from './session-succession-service.js';
 import { captureSuccessionTimeline } from './session-succession-capture.js';
 import { SuccessionPreparationRejected, successionCreationHandle, nativePrefixResumeHandle, type NativePromptEditTarget, type RetainedSuccessionVerification } from './local-succession-preparation.js';
 import { SessionSuccessionBoundary } from './session-succession-boundary.js';
@@ -123,6 +123,7 @@ export interface AgentHostRequestDiagnostic {
   code?: string;
 }
 export interface AgentHostRuntime {
+  readonly executionRouting?: SessionExecutionRouting;
   readonly relay: AgentRemoteRelay;
   addRegistration(registration: AgentHostProviderRegistration): void;
   control(request: RemoteHostControlRequest): Promise<AgentRemoteHttpResult>;
@@ -792,7 +793,7 @@ export function createAgentHostRuntime(options: AgentHostRuntimeOptions): AgentH
     };
     const selected = registration(providerId), directory = selected.directory;
     const scope = operationScope(request);
-    const qualified = context?.successionEnrollmentVersion === 2 && !!settings.sourceNativeSessionId && !!enrollment;
+    const qualified = (context?.successionEnrollmentVersion ?? 0) >= 2 && !!settings.sourceNativeSessionId && !!enrollment;
     const sourceReader = settings.sourceNativeSessionId ? nativeRef({ providerId, nativeSessionId: settings.sourceNativeSessionId }) : undefined;
     // An exact durable source result is forward recovery, including after cache expiry/restart.
     const savedCreation = sourceReader && enrollment ? await enrollment.sourceResult(scope, operationId, sourceReader, settings, directory) : undefined;
@@ -1149,7 +1150,7 @@ export function createAgentHostRuntime(options: AgentHostRuntimeOptions): AgentH
     }
     return enrollment.control(request, context);
   };
-  return { relay, addRegistration, control: request => control(request), enrollFromRelay, executeOperation, acquireSession, setRelayConnected: idle.setConnected,
+  return { relay, executionRouting: successionService?.executionRouting, addRegistration, control: request => control(request), enrollFromRelay, executeOperation, acquireSession, setRelayConnected: idle.setConnected,
     beginControllerRestart() {
       if (closed || draining) return false;
       // An owner-confirmed update closes admission immediately. Shutdown and the

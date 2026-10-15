@@ -271,7 +271,7 @@ export class SessionSuccessionStore {
         if (successionFreezeKey(previous) !== successionFreezeKey(receipt)) throw new Error('Association receipt conflict.');
         return this.findOperation(state, receipt.request.operationId);
       }
-      if (receipt.version !== 2) throw new Error('New succession preparation requires a bounded v2 freeze.');
+      if (receipt.version === 1) throw new Error('New succession preparation requires a bounded freeze.');
       if (item.relationChanges?.some(change => change.phase !== 'released')) throw new Error('Primary role associations are reserved.');
       if (item.operations.some(operation => operation.operationId === receipt.request.operationId)) throw new Error('Operation has no matching association receipt.');
       if (item.enrollments?.some(receipt => !item.releasedEnrollments?.includes(receipt.token))) throw new Error('Previous association reservation has not been released.');
@@ -306,7 +306,7 @@ export class SessionSuccessionStore {
       if (item.associationAuthority && successionAuthorityKey(item.associationAuthority) !== successionAuthorityKey(receipt.authority)) throw new Error('Primary role belongs to another association authority.');
       if (item.enrollments?.some(value => !item.releasedEnrollments?.includes(value.token))) throw new Error('Previous association reservation has not been released.');
       if (JSON.stringify(this.lineage(item).map(nativeSessionRefKey)) !== JSON.stringify(receipt.lineage.map(nativeSessionRefKey))) throw new Error('Primary role lineage changed.');
-      const record = this.beginRecord(state, receipt.request, false, receipt.version === 1 ? 'historical' : 'current');
+      const record = this.beginRecord(state, receipt.request, false, receipt.version === 1 || receipt.request.preparation ? 'historical' : 'current');
       record.phase = 'cancelled';
       item.associationAuthority = receipt.authority;
       (item.enrollments ??= []).push(receipt);
@@ -493,13 +493,13 @@ export class SessionSuccessionStore {
   }
   private assertProjectionAllowance(item: SuccessionRoleState, record: SuccessionRecord, progress: LocalSuccessionProgress): void {
     const freeze = item.enrollments?.find(value => value.request.operationId === record.operationId);
-    if (freeze?.version === 2 && this.committedProjectionBound(item, record, progress) > freeze.maxProjectionBytes) throw new SuccessionProjectionCapacityError();
+    if (freeze && freeze.version !== 1 && this.committedProjectionBound(item, record, progress) > freeze.maxProjectionBytes) throw new SuccessionProjectionCapacityError();
   }
   /** Check after durable commit; a producer defect must retain the complete native decision. */
   assertCommittedProjection(operationId: string): void {
     const record = this.operation(operationId), item = this.read(record.roleId);
     const freeze = item.enrollments?.find(value => value.request.operationId === operationId);
-    if (record.phase === 'committed' && freeze?.version === 2 && jsonBytes({ version: 1, role: { ...item.role, current: record.to!, workspace: record.prepared!.workspace, revision: record.committedRevision! }, receipt: record }) > freeze.maxProjectionBytes) throw new SuccessionProjectionInvariantError();
+    if (record.phase === 'committed' && freeze && freeze.version !== 1 && jsonBytes({ version: 1, role: { ...item.role, current: record.to!, workspace: record.prepared!.workspace, revision: record.committedRevision! }, receipt: record }) > freeze.maxProjectionBytes) throw new SuccessionProjectionInvariantError();
   }
 
   /** Compute finite representation growth from the actual role, request and participants. */
@@ -687,12 +687,12 @@ export class SessionSuccessionStore {
         this.validateRecord(op);
         const enrollment = item.enrollments?.find(receipt => receipt.request.operationId === op.operationId);
         const progress = item.localPreparations?.find(value => value.operationId === op.operationId);
-        if (op.preparation && !progress?.stage) throw new Error('Native prefix operation requires durable local progress.');
-        const historicalCancellation = op.phase === 'cancelled' && !op.to && !op.prepared && enrollment?.version === 1
+        const historicalCancellation = op.phase === 'cancelled' && !op.to && !op.prepared && (enrollment?.version === 1 || enrollment?.version === 3 && !!op.preparation)
           && progress && Object.keys(progress).every(name => ['operationId', 'reservedBytes'].includes(name))
           && op.expectedRevision <= revision && history[op.expectedRevision - 1]
           && nativeSessionRefKey(op.from) === nativeSessionRefKey(history[op.expectedRevision - 1]!)
           && JSON.stringify(enrollment.lineage.map(nativeSessionRefKey)) === JSON.stringify(history.map(nativeSessionRefKey));
+        if (op.preparation && !progress?.stage && !historicalCancellation) throw new Error('Native prefix operation requires durable local progress.');
         if (op.roleId !== item.role.id || operations.has(op.operationId) || !historicalCancellation
           && (op.expectedRevision !== revision || nativeSessionRefKey(op.from) !== nativeSessionRefKey(current))) throw new Error('Invalid succession history.');
         operations.add(op.operationId);

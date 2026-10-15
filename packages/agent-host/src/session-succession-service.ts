@@ -2,7 +2,7 @@ import { randomBytes, randomUUID } from 'node:crypto';
 import { link, mkdir, open, readFile, unlink } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { AgentHistoryPage, AgentHistoryQuery, AgentPersistenceHandle } from '@orchardworks/agent-provider-sdk';
-import { nativeSessionRefKey, serializeNormalizedHistory, type NativeSessionRef, type PreparedSuccession, type PrimaryRole, type ProjectedTimelineEntry, type SuccessionDescription, type SuccessionRequest, type TimelineCursor, type NativePrefixSelection } from '@orchardworks/agent-remote-protocol';
+import { nativeSessionRefKey, resolveNativePrefix, type NativePrefixResolution, type SuccessionAssociationFreeze, serializeNormalizedHistory, type NativeSessionRef, type PreparedSuccession, type PrimaryRole, type ProjectedTimelineEntry, type SuccessionDescription, type SuccessionRequest, type TimelineCursor, type NativePrefixSelection } from '@orchardworks/agent-remote-protocol';
 import { LocalSuccessionPreparation, SuccessionPreparationRejected, type NativePrefixCandidate, type NativeSuccessionCreate, type RetainedSuccessionVerification, type SuccessionReadiness } from './local-succession-preparation.js';
 import { isSuccessionDeliveryUnresolved, SessionSuccessionContextStore, type SuccessionContextDelivery, type SuccessionContextPreparation } from './session-succession-context.js';
 import { SessionSuccessionStore } from './session-succession-store.js';
@@ -33,12 +33,28 @@ export interface SessionSuccessionPorts {
   reconcileDelivery(delivery: SuccessionContextDelivery): Promise<{ outcome: 'materialized' | 'not-dispatched'; nativeEvidence: string } | undefined>;
 }
 
+export interface SessionExecutionRouting {
+  resolve(anchor: NativeSessionRef): NativePrefixResolution;
+  assertCurrent(anchor: NativeSessionRef, actual: NativeSessionRef): void;
+}
+
 /** Stable Controller state plus explicit runtime ports; no implicit native idle or delivery inference. */
 export class SessionSuccessionService {
   readonly ready: Promise<void>;
   readonly store: SessionSuccessionStore;
   readonly contexts: SessionSuccessionContextStore;
   readonly coordinator: SessionSuccessionCoordinator;
+  readonly executionRouting: SessionExecutionRouting = {
+    resolve: anchor => {
+      if (!this.cursorKey || anchor.controllerId !== this.controllerId) throw new Error('Execution routing is unavailable for this Host.');
+      return resolveNativePrefix(anchor, this.store.all().flatMap(state => state.operations.filter(record => record.phase === 'committed')));
+    },
+    assertCurrent: (anchor, actual) => {
+      const { target } = this.executionRouting.resolve(anchor);
+      if (target.controllerId !== this.controllerId || nativeSessionRefKey(target) !== nativeSessionRefKey(actual)) throw new Error('Execution recipient is no longer current.');
+      this.coordinator.assertAdmission(actual);
+    },
+  };
   private readonly preparation: LocalSuccessionPreparation;
   private cursorKey?: Buffer;
   private readonly bindingReaders = new Map<string, SessionSourceBindings>();
@@ -80,6 +96,11 @@ export class SessionSuccessionService {
   async createRole(role: PrimaryRole) { await this.ready; if (role.workspace.controllerId !== this.controllerId || role.current.controllerId !== this.controllerId) throw new Error('Role is outside this Controller.'); return this.store.createRole(role); }
   async prepare(request: SuccessionRequest) { await this.ready; return this.coordinator.prepare(request); }
   async commit(operationId: string, revision: number) { await this.ready; return this.coordinator.commit(operationId, revision); }
+  async releaseEnrollment(freeze: SuccessionAssociationFreeze): Promise<void> {
+    await this.ready;
+    await this.store.releaseEnrollment(freeze);
+    this.coordinator.releaseCommitted(freeze.request.operationId);
+  }
   async describe(role: PrimaryRole, source: NativeSessionRef, candidates: SuccessionDescription['targets'], preparation?: NativePrefixSelection): Promise<SuccessionDescription> {
     await this.ready;
     const targets: SuccessionDescription['targets'] = [];

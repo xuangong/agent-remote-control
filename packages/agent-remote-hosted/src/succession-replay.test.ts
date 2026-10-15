@@ -7,6 +7,7 @@ import { join } from 'node:path';
 import { createRequire } from 'node:module';
 import { afterEach, expect, test } from 'vitest';
 import { createHostedRelay } from './gateway.js';
+import { migrateBrokerAssociations } from './succession-associations.js';
 import { createHostBroker, type HostBrokerOptions } from './broker.js';
 import { assertSuccessionCapacity, deriveSuccessionCapacity } from './succession-capacity.js';
 import { projectSuccessionFavorites } from './favorites-succession.js';
@@ -170,7 +171,7 @@ test('authorizes historical recovery only in the owning namespace and retains fa
   const f = await fixture(undefined, true);
   expect((await f.request('v1/remote/hosts/mapped-host/revoke', 'owner', {})).status).toBe(200);
   const revoked = await f.saved();
-  expect(revoked.version).toBe(9);
+  expect(revoked.version).toBe(11);
   expect(revoked.tenants[0]!.broker.associations!.freezes).toHaveLength(2);
   expect(revoked.tenants[0]!.broker.hosts).toEqual([]);
   expect(revoked.tenants[0]!.favoritesSuccession!.receipts.every(receipt => receipt.status === 'pending')).toBe(true);
@@ -180,7 +181,7 @@ test('authorizes historical recovery only in the owning namespace and retains fa
   expect(foreign.status).toBe(403);
   const pairing = await f.request('v1/remote/pairings', 'owner', { recoverHostId: 'mapped-host' });
   expect(pairing.status).toBe(201); expect((await pairing.json()).recovery.hostId).toBe('mapped-host');
-  const saved = await f.saved(); expect(saved.version).toBe(9); expect(validateRelayState(saved, f.auth)).toEqual(saved);
+  const saved = await f.saved(); expect(saved.version).toBe(11); expect(validateRelayState(saved, f.auth)).toEqual(saved);
   await f.restart();
   expect((await f.request('v1/remote/pairings')).status).toBe(200);
   expect((await f.saved()).tenants[0]!.broker.associations).toEqual(revoked.tenants[0]!.broker.associations);
@@ -233,7 +234,7 @@ async function controller(f: Awaited<ReturnType<typeof fixture>>, failAtCommit =
   const operations = new Map<string, any>(saved.filter(row => row.projection).map(row => [row.receipt.request.operationId, structuredClone(row.projection!.receipt)]));
   let revision = saved.filter(row => row.projection).length + 1;
   const sockets: any[] = [];
-  let decline = false;
+  let decline = false, loseRelease = false;
   let describeHold: { entered(): void; waiting: Promise<void> } | undefined;
   async function connect() {
     const socket = new WebSocket(f.origin.replace('http', 'ws') + `/ws/remote-host?successionEnrollment=${enrollmentVersion}`, { headers: { authorization: 'Bearer ' + f.credential } }); sockets.push(socket);
@@ -249,7 +250,7 @@ async function controller(f: Awaited<ReturnType<typeof fixture>>, failAtCommit =
           result = { role: { id: 'role', revision, origin: ref('A'), current: sequenceRef(revision - 1), workspace }, lineage: Array.from({ length: revision }, (_, index) => sequenceRef(index)) };
         } else {
           const freeze = input.freeze; effects.receivedFreezes.push(structuredClone(freeze)); const request = freeze.request; let record = operations.get(request.operationId);
-          if (input.action === 'prepare' && !record && freeze.version !== 2) {
+          if (input.action === 'prepare' && !record && freeze.version === 1) {
             socket.send(JSON.stringify({ uplinkVersion: 2, type: 'rpc_response', requestId: message.requestId, status: 409, body: JSON.stringify({ code: 'succession_preparation_unavailable', error: 'A new preparation requires a bounded freeze.' }) })); return;
           }
           if (input.action === 'prepare' && !record && decline) {
@@ -267,7 +268,7 @@ async function controller(f: Awaited<ReturnType<typeof fixture>>, failAtCommit =
             effects.cancel++; record = { ...(record ?? { ...request, startedAt: 'now', updatedAt: 'now' }), phase: 'cancelled' }; operations.set(request.operationId, record);
           }
           if (input.action === 'commit' && record.phase !== 'committed') { effects.commit++; effects.input++; record.phase = 'committed'; record.committedRevision = ++revision; if (failAtCommit) f.fail(); }
-          if (input.action === 'release') effects.release++;
+          if (input.action === 'release') { effects.release++; if (loseRelease) { loseRelease = false; socket.send(JSON.stringify({ uplinkVersion: 2, type: 'rpc_response', requestId: message.requestId, status: 503, body: JSON.stringify({ error: 'Release response lost' }) })); return; } }
           result = { record: structuredClone(record), role: { id: 'role', revision, origin: ref('A'), current: sequenceRef(revision - 1), workspace }, freeze };
           if (malformed && record.phase === 'committed') result.record.prepared.from = ref('forged');
         }
@@ -281,7 +282,7 @@ async function controller(f: Awaited<ReturnType<typeof fixture>>, failAtCommit =
     expect((await registered).successionEnrollment.ownerSubject).toBe('owner');
   }
   await connect();
-  return { effects, connect, decline: () => { decline = true; }, holdDescribe: () => {
+  return { effects, connect, loseRelease: () => { loseRelease = true; }, decline: () => { decline = true; }, holdDescribe: () => {
     let entered!: () => void, release!: () => void;
     const start = new Promise<void>(resolve => { entered = resolve; }), waiting = new Promise<void>(resolve => { release = resolve; });
     describeHold = { entered, waiting }; closers.push(async () => { release(); }); return { entered: start, release };
@@ -357,7 +358,7 @@ test('atomically projects legacy A through C and preserves the stable slot witho
   const f = await fixture(state => { state.sessionStars = [favorite()]; state.favoritesTrees = [{ subject: 'owner', revision: 4, folders: [] }]; });
   const result = await f.request('v1/favorites'); expect(result.status).toBe(200);
   expect(await result.json()).toMatchObject({ revision: 5, stars: [{ nativeSessionId: 'C', favoriteId: 'favorite-A', starredAt: 100, folderId: null, order: 0 }] });
-  expect(await f.saved()).toMatchObject({ version: 9, tenants: [{ favoritesSuccession: { version: 1, receipts: [{ status: 'applied' }, { status: 'applied' }] } }] });
+  expect(await f.saved()).toMatchObject({ version: 11, tenants: [{ favoritesSuccession: { version: 1, receipts: [{ status: 'applied' }, { status: 'applied' }] } }] });
   await f.request('v1/favorites'); await f.restart(); await f.request('v1/favorites');
   expect((await f.saved()).favoritesTrees![0]!.revision).toBe(5);
   expect((await (await f.request('v1/session-successions/operation?roleId=role&operationId=op-2')).json()).to.nativeSessionId).toBe('B');
@@ -543,7 +544,7 @@ test('concurrent stale browser edits conflict after pending legacy projection an
   expect((await f.saved()).favoritesTrees![0]!.revision).toBe(2);
 }, 10000);
 
-test.each([1,2])('feature %s recovers an exact saved v1 ready candidate without preparing another native candidate', async enrollmentVersion => {
+test.each([1,2,3])('feature %s recovers an exact saved v1 ready candidate without preparing another native candidate', async enrollmentVersion => {
   let candidate: any;
   const f = await fixture(state => {
     const row=state.tenants[0]!.broker.associations!.freezes[0]!;candidate=structuredClone(row.projection!.receipt);
@@ -1285,7 +1286,7 @@ test('full feature budget revoke retains complete history and quota without ordi
   expect((await f.request('v1/remote/hosts/mapped-host/revoke', 'owner', {})).status).toBe(200);
   const saved = await f.saved(), broker = saved.tenants[0]!.broker;
   expect(broker.hosts).toEqual([]); expect(broker.keys).toEqual([]); expect(broker.bindings).toEqual([]); expect(broker.creations).toEqual([]);
-  expect(broker.associations).toEqual(before.tenants[0]!.broker.associations);
+  expect(broker.associations).toEqual(migrateBrokerAssociations(before.tenants[0]!.broker.associations));
   expect(saved.tenants[0]!.favoritesSuccession).toEqual(before.tenants[0]!.favoritesSuccession);
   expect(broker.sharing!.reservations).toEqual(before.tenants[0]!.broker.sharing!.reservations); expect(broker.sharing!.grants[0]!.revoked).toBe(true);
   expect(broker.pairings![0]!.revokedAt).toBeTypeOf('number'); expect(broker.revokedHosts).toHaveLength(1);
@@ -1338,4 +1339,79 @@ for (const phase of ['rejected', 'cancelled'] as const) test(`durable ${phase} d
   expect(settled.freezes[0]!.projection).toBeUndefined(); expect((await f.saved()).tenants[0]!.favoritesSuccession).toBeUndefined();
   expect((await f.request('v1/remote/hosts/mapped-host/succession/status', 'owner', { operationId: 'op-2' })).status).toBe(200);
   expect((await f.saved()).tenants[0]!.broker.associations).toEqual(settled); expect(native.effects.commit).toBe(0);
+}, 10000);
+
+
+const prefixSelection = { kind: 'native_prefix', turnId: 'turn', messageId: 'message' };
+test('v3 prefix retains exact projection through lost release response, status retry and reopen', async () => {
+  const f = await fixture(state => { state.tenants[0]!.broker.associations!.freezes = []; }, false, true);
+  const native = await controller(f, false, false, 3);
+  const request = { operationId: 'prefix', providerId: 'fixture', nativeSessionId: 'A', expectedRevision: 1, preparation: prefixSelection };
+  expect((await f.request('v1/remote/hosts/mapped-host/succession/prepare', 'owner', request)).status).toBe(200);
+  const frozen = (await f.saved()).tenants[0]!.broker.associations!.freezes[0]!.receipt;
+  expect(frozen).toMatchObject({ version: 3, request: { preparation: prefixSelection } });
+  expect((await f.request('v1/remote/hosts/mapped-host/succession/prepare', 'owner', { ...request, targetProviderId: 'other' })).status).toBe(400);
+  expect((await f.request('v1/remote/hosts/mapped-host/succession/prepare', 'owner', { ...request, preparation: { ...prefixSelection, messageId: 'changed' } })).status).toBe(409);
+  native.loseRelease();
+  expect((await f.request('v1/remote/hosts/mapped-host/succession/commit', 'owner', { operationId: 'prefix' })).status).toBe(503);
+  const projection = (await f.saved()).tenants[0]!.broker.associations!.freezes[0]!.projection;
+  expect(projection).toBeDefined();
+  expect((await f.request('v1/remote/hosts/mapped-host/succession/status', 'owner', { operationId: 'prefix' })).status).toBe(200);
+  expect(native.effects.release).toBe(2);
+  await f.restart(); await native.connect();
+  expect((await f.request('v1/remote/hosts/mapped-host/succession/commit', 'owner', { operationId: 'prefix' })).status).toBe(200);
+  expect((await f.saved()).tenants[0]!.broker.associations!.freezes[0]!.projection).toEqual(projection);
+  expect(native.effects.prepare).toBe(1); expect(native.effects.commit).toBe(1);
+}, 10000);
+test.each([1, 2])('feature %s never receives native prefix selection', async version => {
+  const f = await fixture(state => { state.tenants[0]!.broker.associations!.freezes = []; }, false, true);
+  const native = await controller(f, false, false, version);
+  const request = { operationId: 'prefix', providerId: 'fixture', nativeSessionId: 'A', expectedRevision: 1, preparation: prefixSelection };
+  expect((await f.request('v1/remote/hosts/mapped-host/succession/prepare', 'owner', request)).status).toBe(409);
+  expect((await f.request('v1/remote/hosts/mapped-host/succession/describe', 'owner', { providerId: 'fixture', nativeSessionId: 'A', preparation: prefixSelection })).status).toBe(409);
+  expect(native.effects.rpc).toEqual([]);
+}, 10000);
+test('v3 original prefix cancel is an immutable tombstone across retries and restart', async () => {
+  const f = await fixture(state => { state.tenants[0]!.broker.associations!.freezes = []; }, false, true, true);
+  const native = await controller(f, false, false, 3);
+  const request = { operationId: 'cancel-prefix', providerId: 'fixture', nativeSessionId: 'A', expectedRevision: 1, preparation: prefixSelection };
+  native.loseRelease();
+  expect((await f.request('v1/remote/hosts/mapped-host/succession/cancel', 'owner', request)).status).toBe(503);
+  const saved = (await f.saved()).tenants[0]!.broker.associations!.freezes[0]!;
+  expect(saved).toMatchObject({ cancelOnly: true, released: 'cancelled', receipt: { version: 3, maxProjectionBytes: 1, request: { preparation: prefixSelection } } });
+  await f.restart(); await native.connect();
+  expect((await f.request('v1/remote/hosts/mapped-host/succession/cancel', 'owner', request)).status).toBe(200);
+  expect((await f.request('v1/remote/hosts/mapped-host/succession/prepare', 'owner', request)).status).toBe(409);
+  expect((await f.request('v1/remote/hosts/mapped-host/succession/commit', 'owner', { operationId: request.operationId })).status).toBe(409);
+  const edit = await f.request('v1/remote/hosts/mapped-host/create', 'owner', { operationId: request.operationId, providerId: 'fixture', editNativeSessionId: 'A', editTurnId: 'turn', editMessageId: 'message' });
+  expect(edit.status).toBe(409); expect(await edit.json()).toMatchObject({ code: 'succession_identity_conflict' });
+  expect((await f.saved()).tenants[0]!.broker.associations!.freezes[0]).toEqual(saved);
+  expect(native.effects.prepare).toBe(0); expect(native.effects.commit).toBe(0);
+}, 10000);
+
+
+test('native prefix cannot reinterpret an operation retained by legacy creation', async () => {
+  const f = await fixture(state => {
+    const broker = state.tenants[0]!.broker;
+    broker.associations!.freezes = [];
+    broker.bindings = [{ hostId: 'mapped-host', providerId: 'fixture', nativeSessionId: 'legacy-result', agentId: 'legacy-agent' }];
+    broker.creations = [[JSON.stringify(['mapped-host', 'fixture', 'legacy-operation']), { fingerprint: 'legacy-fingerprint', agentId: 'legacy-agent' }]];
+  }, false, true);
+  const native = await controller(f, false, false, 3);
+  const response = await f.request('v1/remote/hosts/mapped-host/succession/prepare', 'owner', { operationId: 'legacy-operation', providerId: 'fixture', nativeSessionId: 'A', expectedRevision: 1, preparation: prefixSelection });
+  expect(response.status).toBe(409); expect(await response.json()).toMatchObject({ code: 'succession_identity_conflict' });
+  expect(native.effects.rpc).toEqual([]);
+  expect((await f.saved()).tenants[0]!.broker.associations!.freezes).toEqual([]);
+}, 10000);
+
+
+test('native prefix rejects an ID retained only in legacy migration history', async () => {
+  const f = await fixture(state => {
+    state.tenants[0]!.broker.associations!.freezes = [];
+    state.sessionMigrations = [{ subject: 'owner', id: 'legacy-history', from: { hostId: 'mapped-host', providerId: 'fixture', nativeSessionId: 'old', agentId: 'old-agent' }, to: { hostId: 'mapped-host', providerId: 'fixture', nativeSessionId: 'old-branch', agentId: 'branch-agent' }, createdAt: 1 }];
+  }, false, true);
+  const native = await controller(f, false, false, 3);
+  const response = await f.request('v1/remote/hosts/mapped-host/succession/prepare', 'owner', { operationId: 'legacy-history', providerId: 'fixture', nativeSessionId: 'A', expectedRevision: 1, preparation: prefixSelection });
+  expect(response.status).toBe(409); expect(await response.json()).toMatchObject({ code: 'succession_identity_conflict' });
+  expect(native.effects.prepare).toBe(0);
 }, 10000);

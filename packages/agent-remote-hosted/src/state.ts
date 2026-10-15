@@ -24,7 +24,8 @@ import { decodeRemoteHostUplinkMessage, isControllerIdentity, isHostEnvironment,
 export interface SavedHostedSession { hash: string; grant: HostedGrant; sessionExpiresAt: number; id?: string; label?: string; createdAt?: number; lastSeenAt?: number; browserId?: string; activity?: number[] }
 export type SavedGatewaySession = SavedHostedSession;
 export interface HostedRelayState {
-  version: 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10;
+  version: 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11;
+  successionAccounting?: true;
   securityEvents?: SecurityEvent[];
   sessionStars?: SavedSessionStar[];
   favoritesTrees?: SavedFavoritesTree[];
@@ -83,7 +84,10 @@ function validBroker(value: unknown): value is RemoteHostBrokerState {
 }
 export function validateRelayState(value: unknown, auth: HostedAuthOptions): HostedRelayState {
   const invalid = () => { throw new Error('Invalid or unsupported Relay state.'); };
-  if (!record(value) || ![2, 3, 4, 5, 6, 7, 8, 9, 10].includes(value.version) || !record(value.config) || value.config.origin !== auth.origin || value.config.issuer !== hostedAuthStateConfig(auth).issuer || value.config.provider !== hostedAuthStateConfig(auth).provider || value.config.clientId !== hostedAuthStateConfig(auth).clientId) return invalid();
+  if (!record(value) || ![2, 3, 4, 5, 6, 7, 8, 9, 10, 11].includes(value.version) || !record(value.config) || value.config.origin !== auth.origin || value.config.issuer !== hostedAuthStateConfig(auth).issuer || value.config.provider !== hostedAuthStateConfig(auth).provider || value.config.clientId !== hostedAuthStateConfig(auth).clientId) return invalid();
+  if (Object.hasOwn(value, 'successionAccounting') && (value.version !== 11 || value.successionAccounting !== true)) return invalid();
+  if (Array.isArray(value.tenants) && value.tenants.some((tenant: any) => tenant?.broker?.associations?.freezes?.some((row: any) => row?.receipt?.version === 3)) && value.successionAccounting !== true) return invalid();
+  if (value.version < 11 && Array.isArray(value.tenants) && value.tenants.some((tenant: any) => tenant?.broker?.associations?.version === 6)) return invalid();
   if (value.version < 9 && Array.isArray(value.tenants) && value.tenants.some((tenant: any) => tenant?.broker?.associations?.version === 5)) return invalid();
   if (value.version < 8 && Array.isArray(value.tenants) && value.tenants.some((tenant: any) => record(tenant?.broker) && hasHostRecoveryMetadata(tenant.broker as RemoteHostBrokerState))) return invalid();
   if (value.version < 6 && Array.isArray(value.tenants) && value.tenants.some((tenant: any) => tenant?.broker?.associations?.version === 4)) return invalid();
@@ -139,19 +143,21 @@ export function migrateLegacyNodeState(value: unknown, auth: HostedAuthOptions):
 }
 /** Shared normalization for real drafts and disposable complete quote views. */
 export function stageRelayState(draft: HostedRelayState, minimumVersion: HostedRelayState['version'], accounting: boolean): void {
+  const retainAccounting = accounting || draft.successionAccounting === true || draft.version === 10 || minimumVersion === 10;
   draft.version = Math.max(draft.version, minimumVersion) as HostedRelayState['version'];
   if (draft.tenants.some(tenant => tenant.broker.associations)) {
     for (const tenant of draft.tenants) if (tenant.broker.associations) tenant.broker.associations = migrateBrokerAssociations(tenant.broker.associations);
-    if (draft.version < 9) draft.version = 9;
+    if (draft.version < 11) draft.version = 11;
   }
   if (draft.version < 8 && draft.tenants.some(tenant => hasHostRecoveryMetadata(tenant.broker))) draft.version = 8;
-  if (accounting) draft.version = 10;
+  if (!retainAccounting && draft.tenants.some(tenant => tenant.broker.associations?.freezes.some(row => row.receipt.version === 3))) throw new Error('Native prefix state requires succession accounting.');
+  if (retainAccounting) { draft.version = 11; draft.successionAccounting = true; }
 }
 export function createRelayState(auth: HostedAuthOptions, storage: RelayStateStore | undefined, failed: () => void, published: () => void, successionEncodingCosts?: SuccessionEncodingCosts) {
   let current = storage?.initial === undefined ? emptyRelayState(auth) : validateRelayState(storage.initial, auth);
   // Authority leases must be confirmed again after every runtime restart.
   current.sessions = current.sessions.map(value => ({ ...value, grant: { ...value.grant, expiresAt: 0 } }));
-  if (successionEncodingCosts !== undefined || current.version === 10) {
+  if (successionEncodingCosts !== undefined || current.version === 10 || current.successionAccounting === true) {
     requireSuccessionEncodingCosts(successionEncodingCosts);
     const candidate = structuredClone(current); stageRelayState(candidate, current.version, true);
     try { assertSuccessionCapacity(candidate, successionEncodingCosts); }
@@ -166,7 +172,8 @@ export function createRelayState(auth: HostedAuthOptions, storage: RelayStateSto
       const operation = queue.then(async () => {
         assertAvailable();
         const draft = structuredClone(current); const result = change(draft);
-        stageRelayState(draft, current.version, successionEncodingCosts !== undefined);
+        stageRelayState(draft, current.version, successionEncodingCosts !== undefined || current.successionAccounting === true);
+        if (draft.successionAccounting) requireSuccessionEncodingCosts(successionEncodingCosts);
         if (successionEncodingCosts) assertSuccessionCapacity(draft, successionEncodingCosts);
         try { await storage?.commit(draft); }
         catch (error) { unavailable = true; failed(); throw error; }

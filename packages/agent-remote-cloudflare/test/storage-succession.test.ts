@@ -300,7 +300,7 @@ test('preserves empty optional collections and complete ordinary metadata throug
   expect(new SqliteRelayStore(f.storage, auth).initial).toEqual(state);
 }, 10000);
 
-test('configured accounting fences SQL writes at ten, holds publication on sync and restores unknown complete evidence', async () => {
+test('configured accounting fences SQL writes at eleven, holds publication on sync and restores unknown complete evidence', async () => {
   const f = fixture(); const initial = codecState(auth);
   const unresolved: any = initial.tenants[0]!.broker.associations!.freezes.find(row => row.released === undefined)!;
   unresolved.receipt = { ...unresolved.receipt, version: 2, maxProjectionBytes: 65536 };
@@ -316,16 +316,16 @@ test('configured accounting fences SQL writes at ten, holds publication on sync 
   const pending = relay.mutate(draft => { draft.securityEvents!.push({ id: 'accounting', subject: 'owner', action: 'fixture', outcome: 'allowed', at: 1 }); }).then(() => { replies++; });
   await entered;
   expect(relay.read()).toEqual(before); expect(publications).toBe(0); expect(replies).toBe(0);
-  expect(reopen(f.storage).initial.version).toBe(10);
+  expect(reopen(f.storage).initial.version).toBe(11);
   release(); await pending;
-  expect(relay.read().version).toBe(10); expect(publications).toBe(1); expect(replies).toBe(1);
+  expect(relay.read().version).toBe(11); expect(publications).toBe(1); expect(replies).toBe(1);
   expect(new SqliteRelayStore(f.storage, auth).initial).toEqual(relay.read());
   f.storage.sync = async () => { throw new Error('unknown accounting sync'); };
   await expect(relay.mutate(draft => { (draft.tenants[0]!.broker.associations as any).unknownEvidence = 'complete'; })).rejects.toThrow(/unknown accounting sync/);
   expect(failures).toBe(1); expect(publications).toBe(1);
   expect(relay.read().tenants[0]!.broker.associations).not.toHaveProperty('unknownEvidence');
   const restored = reopen(f.storage).initial;
-  expect(restored.version).toBe(10); expect(restored.tenants[0]!.broker.associations).toHaveProperty('unknownEvidence', 'complete');
+  expect(restored.version).toBe(11); expect(restored.tenants[0]!.broker.associations).toHaveProperty('unknownEvidence', 'complete');
   expect(() => createRelayState(auth, { initial: restored, async commit() {} }, () => {}, () => {})).toThrow(/cost/i);
   expect(() => createRelayState(auth, { initial: restored, async commit() {} }, () => {}, () => {}, encoding)).not.toThrow();
 }, 10000);

@@ -16,8 +16,8 @@ async function until(check: () => boolean) {
 }
 
 /** Deterministic Host evidence over the production Worker uplink, with no seeded Relay state. */
-async function connectHost(f: Awaited<ReturnType<typeof fixture>>, key: string) {
-  const socket = await f.upgrade('/ws/remote-host?successionEnrollment=2', { authorization: `Bearer ${key}` });
+async function connectHost(f: Awaited<ReturnType<typeof fixture>>, key: string, prefix = false) {
+  const socket = await f.upgrade(`/ws/remote-host?successionEnrollment=${prefix ? 3 : 2}`,  { authorization: `Bearer ${key}` });
   const registered = event(socket, 'message');
   send(socket, { type: 'register', credentialRotation: true, installationId: 'installation', name: 'Host',
     providers: [{ providerId: 'fixture', displayName: 'Fixture' }] });
@@ -26,7 +26,7 @@ async function connectHost(f: Awaited<ReturnType<typeof fixture>>, key: string) 
   const saved = event(socket, 'message');
   send(socket, { type: 'credential_saved' });
   registration = await saved;
-  expect(registration).toMatchObject({ type: 'registered', successionEnrollment: { ownerSubject: 'owner' }, successionEnrollmentVersion: 2 });
+  expect(registration).toMatchObject({ type: 'registered', successionEnrollment: { ownerSubject: 'owner' }, successionEnrollmentVersion: prefix ? 3 : 2 });
 
   const effects = { prepare: 0, commit: 0, release: 0, attach: 0, rpc: [] as string[], freezes: [] as any[] };
   const operations = new Map<string, any>();
@@ -80,14 +80,14 @@ function observe(socket: WebSocket) {
   return frames;
 }
 
-test('actual RelayObject admits public succession and cold-replays the exact committed projections and Favorites', async () => {
+test.each([false, true])('actual RelayObject admits public succession and cold-replays exact projections and Favorites, prefix %s', async prefix => {
   const f = await fixture({ actualEntry: true });
   const owner = await f.login('owner');
   const viewer = await f.login('viewer');
   const pairingResponse = await f.json(owner.basePath + 'v1/remote/pairings', owner.cookie, {});
   expect(pairingResponse.status).toBe(201);
   const pairing = await pairingResponse.json() as { key: string };
-  const host = await connectHost(f, pairing.key);
+  const host = await connectHost(f, pairing.key, prefix);
   const hostPath = owner.basePath + `v1/remote/hosts/${host.hostId}`;
   const favoritesPath = owner.basePath + 'v1/favorites';
   expect((await f.json(favoritesPath, owner.cookie, { type: 'create-folder', id: 'folder', parentId: null, title: 'Work', revision: 0 })).status).toBe(200);
@@ -101,7 +101,7 @@ test('actual RelayObject admits public succession and cold-replays the exact com
 
   for (const nextRevision of [2, 3]) {
     const prepared = await f.json(hostPath + '/succession/prepare', owner.cookie, { operationId: 'op-' + nextRevision,
-      providerId: 'fixture', nativeSessionId: sequence[nextRevision - 2], expectedRevision: nextRevision - 1 });
+      providerId: 'fixture', nativeSessionId: sequence[nextRevision - 2], expectedRevision: nextRevision - 1, ...(prefix ? { preparation: { kind: 'native_prefix', turnId: 'turn', messageId: 'message' } } : {}) });
     expect(prepared.status, await prepared.clone().text()).toBe(200);
     const committed = await f.json(hostPath + '/succession/commit', owner.cookie, { operationId: 'op-' + nextRevision });
     expect(committed.status, await committed.clone().text()).toBe(200);
@@ -110,7 +110,7 @@ test('actual RelayObject admits public succession and cold-replays the exact com
   expect(host.effects).toMatchObject({ prepare: 2, commit: 2, release: 2, attach: 1 });
   expect(host.effects.rpc.every(path => path === '/remote/succession/enrollment' || path === '/remote/attach')).toBe(true);
   for (const freeze of host.effects.freezes) {
-    expect(freeze).toMatchObject({ version: 2, authority: host.authority, controllerId: 'installation' });
+    expect(freeze).toMatchObject({ version: prefix ? 3 : 2, authority: host.authority, controllerId: 'installation' });
     expect(freeze.maxProjectionBytes).toBeGreaterThan(0);
     expect(Number.isSafeInteger(freeze.maxProjectionBytes)).toBe(true);
   }

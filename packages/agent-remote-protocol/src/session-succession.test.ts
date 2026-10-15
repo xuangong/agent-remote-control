@@ -69,3 +69,29 @@ test('native prefix selection is bounded, same-provider, and semantically bound 
   expect(isSuccessionRecord({ ...receipt, targetProviderId: 'other' })).toBe(false);
   expect(isCommittedSuccessionProjection({ ...projection, receipt: { ...receipt, prepared: { ...prepared, preparation: { ...request.preparation, messageId: 'other' } } } })).toBe(false);
 });
+
+
+function committedEdge(from: string, to: string, revision: number, prefix = true) {
+  const request = { operationId: `op-${revision}`, roleId: 'role', expectedRevision: revision, from: { ...source, nativeSessionId: from },
+    ...(prefix ? { preparation: { kind: 'native_prefix' as const, turnId: 'turn', messageId: 'message' } } : {}) };
+  return { ...request, to: { ...source, nativeSessionId: to }, phase: 'committed' as const, committedRevision: revision + 1, startedAt: 'now', updatedAt: 'now',
+    prepared: { ...request, to: { ...source, nativeSessionId: to }, workspace, associationRevision: 0, participants: [], capture: { epoch: 'epoch', seq: 4, capturedAt: 'now' } } };
+}
+test('native prefix routing follows only complete exact committed chains and returns inclusive ancestry', async () => {
+  const api = await import('./session-succession.js');
+  expect(api.resolveNativePrefix).toBeTypeOf('function');
+  const a = committedEdge('A', 'B', 1), b = committedEdge('B', 'C', 2);
+  expect(api.resolveNativePrefix(source, [b, a])).toEqual({ anchor: source, target: b.to, operationIds: ['op-1', 'op-2'] });
+  expect(api.resolveNativePrefix(b.to, [a, b])).toEqual({ anchor: b.to, target: b.to, operationIds: [] });
+  expect(api.nativePrefixAncestors(b.to, [b, a])).toEqual([source, a.to, b.to]);
+  expect(api.resolveNativePrefix(source, [])).toEqual({ anchor: source, target: source, operationIds: [] });
+  for (const records of [[b], [a, a], [a, committedEdge('B', 'A', 2)], [a, committedEdge('A', 'C', 2)],
+    [a, { ...committedEdge('B', 'C', 2), phase: 'ready' }], [a, { ...b, preparation: undefined }],
+    [a, { ...b, from: { ...b.from, controllerId: 'foreign' } }], [a, { ...committedEdge('X', 'B', 1), operationId: 'other', roleId: 'other' }]]) {
+    expect(() => api.resolveNativePrefix(source, records as never)).toThrow();
+  }
+  const owned = committedEdge('X', 'B', 1); owned.roleId = 'other'; owned.operationId = 'other'; owned.prepared.roleId = 'other'; owned.prepared.operationId = 'other';
+  expect(() => api.resolveNativePrefix(source, [a, owned])).toThrow();
+  expect(() => api.resolveNativePrefix(source, [a, committedEdge('B', 'C', 2, false)])).toThrow(/unavailable/i);
+  expect(() => api.nativePrefixAncestors(b.to, [a, committedEdge('B', 'C', 2, false)])).toThrow(/unavailable/i);
+});

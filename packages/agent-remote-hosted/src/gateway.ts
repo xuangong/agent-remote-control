@@ -684,6 +684,10 @@ export function createHostedRelay(options: HostedRelayOptions) {
           return response;
         });
       }
+      if (request.method === 'POST' && /\/succession\/(prepare|cancel)$/.test(path)) {
+        const selection = await readJson(relative.clone());
+        if (selection?.preparation !== undefined && state.read().sessionMigrations?.some(item => item.subject === grant.subject && item.id === selection.operationId)) return json(409, { code: 'succession_identity_conflict', error: 'Operation identity belongs to legacy prompt editing.' });
+      }
       const editRoute = /^\/v1\/remote\/hosts\/([^/]+)\/create$/.exec(path);
       const input = editRoute && request.method === 'POST' ? await readJson(relative.clone()) : undefined;
       if (!input?.editNativeSessionId) return destination.broker.handleRequest(relative, context(request, grant));

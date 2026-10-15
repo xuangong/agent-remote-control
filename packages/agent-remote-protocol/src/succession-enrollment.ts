@@ -20,19 +20,22 @@ export type LegacySuccessionAssociationFreeze = Static<typeof LegacySuccessionAs
 export const BoundedSuccessionAssociationFreeze = Type.Object({ version: Type.Literal(2), ...freeze,
   maxProjectionBytes: Type.Integer({ minimum: 1, maximum: Number.MAX_SAFE_INTEGER }) }, object);
 export type BoundedSuccessionAssociationFreeze = Static<typeof BoundedSuccessionAssociationFreeze>;
-export const SuccessionAssociationFreeze = Type.Union([LegacySuccessionAssociationFreeze, BoundedSuccessionAssociationFreeze]);
+export const NativePrefixSuccessionAssociationFreeze = Type.Object({ version: Type.Literal(3), ...freeze,
+  maxProjectionBytes: Type.Integer({ minimum: 1, maximum: Number.MAX_SAFE_INTEGER }) }, object);
+export type NativePrefixSuccessionAssociationFreeze = Static<typeof NativePrefixSuccessionAssociationFreeze>;
+export const SuccessionAssociationFreeze = Type.Union([LegacySuccessionAssociationFreeze, BoundedSuccessionAssociationFreeze, NativePrefixSuccessionAssociationFreeze]);
 export type SuccessionAssociationFreeze = Static<typeof SuccessionAssociationFreeze>;
 export const isSuccessionAssociationAuthority = (value: unknown): value is SuccessionAssociationAuthority => Value.Check(SuccessionAssociationAuthority, value);
 export const isSuccessionAssociationFreeze = (value: unknown): value is SuccessionAssociationFreeze => {
   if (!Value.Check(SuccessionAssociationFreeze, value)) return false;
   const item = value as SuccessionAssociationFreeze;
   const refs = [item.request.from, ...item.lineage, ...item.relations.flatMap(relation => [relation.readerRef, relation.sourceRef])];
-  return isSuccessionRequest(item.request) && !item.request.preparation && refs.every(ref => ref.controllerId === item.controllerId)
+  return isSuccessionRequest(item.request) && (!item.request.preparation || item.version === 3) && refs.every(ref => ref.controllerId === item.controllerId)
     && item.lineage.some(ref => nativeSessionRefKey(ref) === nativeSessionRefKey(item.request.from))
     && new Set(item.lineage.map(nativeSessionRefKey)).size === item.lineage.length
     && new Set(item.relations.map(relation => nativeSessionRefKey(relation.readerRef))).size === item.relations.length;
 };
-export interface TrustedSuccessionContext { authority: SuccessionAssociationAuthority; installationId: string; successionEnrollmentVersion: 1 | 2 }
+export interface TrustedSuccessionContext { authority: SuccessionAssociationAuthority; installationId: string; successionEnrollmentVersion: 1 | 2 | 3 }
 export const successionAuthorityKey = (authority: SuccessionAssociationAuthority): string => JSON.stringify([
   authority.version, authority.origin, authority.issuer, authority.namespace, authority.ownerSubject,
 ]);
@@ -44,8 +47,8 @@ export const successionFreezeKey = (freeze: SuccessionAssociationFreeze): string
     freeze.lineage.map(nativeSessionRefKey), freeze.relations.map(relation => [relation.relationId, relation.kind,
       nativeSessionRefKey(relation.readerRef), nativeSessionRefKey(relation.sourceRef), relation.linked, relation.revision]),
   ];
-  // Preserve the historical v1 array exactly; only v2 adds allowance identity.
-  if (freeze.version === 2) identity.push(freeze.maxProjectionBytes);
+  // Preserve historical v1/v2 keys; bounded versions include allowance identity.
+  if (freeze.version !== 1) identity.push(freeze.maxProjectionBytes);
   if (freeze.request.preparation) identity.push(nativePrefixSelectionKey(freeze.request.preparation));
   return JSON.stringify(identity);
 };

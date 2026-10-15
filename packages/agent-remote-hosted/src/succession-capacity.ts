@@ -195,9 +195,9 @@ export function deriveSuccessionCapacity(state: Readonly<HostedRelayState>, enco
           if (row.released === undefined) replacement('freeze', owner, row.receipt.token, bytes({ ...row, released: 'cancelled' }));
           continue;
         }
-        if (row.receipt.version === 2 && row.projection && bytes(row.projection) > row.receipt.maxProjectionBytes) throw new Error('Succession projection bound invariant failed.');
+        if (row.receipt.version !== 1 && row.projection && bytes(row.projection) > row.receipt.maxProjectionBytes) throw new Error('Succession projection bound invariant failed.');
         if (row.released === undefined) {
-          if (row.receipt.version !== 2) throw new Error('Unresolved legacy succession has no finite projection bound.');
+          if (row.receipt.version === 1) throw new Error('Unresolved legacy succession has no finite projection bound.');
           replacement('freeze', owner, row.receipt.token, Math.max(
             sum(bytes({ ...row, released: 'committed', projection: null }) - 4, row.receipt.maxProjectionBytes),
             bytes({ ...row, released: 'cancelled' }), bytes({ ...row, released: 'rejected' })));

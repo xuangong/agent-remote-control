@@ -123,7 +123,7 @@ export function createRemoteHostUplinkClient(options: RemoteHostUplinkClientOpti
     diagnose({ event: 'connecting', connectionId, registered: false });
     options.onStateChange?.('connecting');
     const endpoint = new URL(options.url);
-    if (options.successionEnrollment) endpoint.searchParams.set('successionEnrollment', '2');
+    if (options.successionEnrollment) endpoint.searchParams.set('successionEnrollment', '3');
     if (options.teamManagement) { endpoint.searchParams.set('team', '1'); endpoint.searchParams.set('teamResources', '1'); }
     const socket = new WebSocket(endpoint, {
       headers: { authorization: `Bearer ${remoteKey}` },
@@ -264,10 +264,10 @@ export function createRemoteHostUplinkClient(options: RemoteHostUplinkClientOpti
         registeredHostId = decoded.value.hostId;
         registeredEnrollmentIdentity = decoded.value.successionEnrollment && JSON.stringify([successionAuthorityKey(decoded.value.successionEnrollment), decoded.value.successionEnrollmentVersion]);
         operationScope = JSON.stringify([new URL(options.url).origin, registeredHostId, options.installationId]);
-        if (options.successionEnrollment && decoded.value.successionEnrollment && decoded.value.successionEnrollmentVersion === 2) {
+        if (options.successionEnrollment && decoded.value.successionEnrollment && (decoded.value.successionEnrollmentVersion === 2 || decoded.value.successionEnrollmentVersion === 3)) {
           const relayOrigin = new URL(options.url); relayOrigin.protocol = relayOrigin.protocol === 'wss:' ? 'https:' : 'http:';
           if (decoded.value.successionEnrollment.origin !== relayOrigin.origin) { retire({ reason: 'protocol_error' }); return; }
-          successionContext = { authority: decoded.value.successionEnrollment, installationId: options.installationId, successionEnrollmentVersion: 2 };
+          successionContext = { authority: decoded.value.successionEnrollment, installationId: options.installationId, successionEnrollmentVersion: decoded.value.successionEnrollmentVersion };
         }
         cloudHeartbeat = decoded.value.heartbeat;
         resetCloudDeadline();

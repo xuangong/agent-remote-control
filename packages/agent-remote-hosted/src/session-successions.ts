@@ -1,5 +1,5 @@
 import { isDeepStrictEqual } from 'node:util';
-import { isCommittedSuccessionProjection, nativeSessionRefKey, type CommittedSuccessionProjection, type NativeSessionRef, type SessionSuccessionReplay, type SessionSuccessionReplayPage, type SuccessionSessionLocator } from '@orchardworks/agent-remote-protocol';
+import { isCommittedSuccessionProjection, nativePrefixSelectionKey, nativeSessionRefKey, type CommittedSuccessionProjection, type NativeSessionRef, type SessionSuccessionReplay, type SessionSuccessionReplayPage, type SuccessionSessionLocator } from '@orchardworks/agent-remote-protocol';
 import type { BrokerAssociationState } from './succession-associations.js';
 import type { HostedRelayState } from './state.js';
 import { StarError } from './session-stars.js';
@@ -21,6 +21,7 @@ export function validCommittedSuccessionLineage(rows: BrokerAssociationState['fr
     const request = freeze.request;
     if (role.origin.controllerId !== freeze.controllerId || role.current.controllerId !== freeze.controllerId
       || request.operationId !== receipt.operationId || request.roleId !== receipt.roleId || request.expectedRevision !== receipt.expectedRevision
+      || nativePrefixSelectionKey(request.preparation) !== nativePrefixSelectionKey(receipt.preparation)
       || !sameRef(request.from, receipt.from) || (request.targetProviderId ?? request.from.providerId) !== (receipt.targetProviderId ?? receipt.from.providerId)
       || new Set(receipt.prepared!.participants.map(item => item.relationId)).size !== receipt.prepared!.participants.length
       || receipt.prepared!.participants.some(item => item.before.controllerId !== freeze.controllerId || item.after.controllerId !== freeze.controllerId)) return false;

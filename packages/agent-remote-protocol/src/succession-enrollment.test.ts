@@ -40,3 +40,17 @@ test('feature v2 acknowledgment keeps authority v1 and requires authority in the
   expect(decodeRemoteHostUplinkMessage(JSON.stringify({ ...registered, successionEnrollmentVersion: 1 })).status).toBe('rejected');
   expect(decodeRemoteHostUplinkMessage(JSON.stringify({ ...registered, successionEnrollment: undefined })).status).toBe('rejected');
 });
+
+
+test('v3 acknowledges exact bounded native prefix selection while old freezes reject it', () => {
+  const preparation = { kind: 'native_prefix' as const, turnId: 'turn', messageId: 'message' };
+  const freeze = { ...legacy, version: 3 as const, request: { ...legacy.request, preparation }, maxProjectionBytes: 42000 };
+  expect(isSuccessionAssociationFreeze(freeze)).toBe(true);
+  for (const version of [1, 2]) expect(isSuccessionAssociationFreeze({ ...freeze, version })).toBe(false);
+  expect(isSuccessionAssociationFreeze({ ...freeze, request: { ...freeze.request, targetProviderId: 'other' } })).toBe(false);
+  expect(isSuccessionAssociationFreeze({ ...freeze, request: { ...freeze.request, preparation: { ...preparation, extra: true } } })).toBe(false);
+  expect(successionFreezeKey(freeze)).not.toBe(successionFreezeKey({ ...freeze, request: { ...freeze.request, preparation: { ...preparation, messageId: 'changed' } } }));
+  expect(successionFreezeKey(freeze)).not.toBe(successionFreezeKey({ ...freeze, maxProjectionBytes: 42001 }));
+  const registered = { uplinkVersion: 2, type: 'registered', hostId: 'host', heartbeat: { intervalMs: 30000, timeoutMs: 10000 }, successionEnrollment: authority, successionEnrollmentVersion: 3 };
+  expect(decodeRemoteHostUplinkMessage(JSON.stringify(registered)).status).toBe('ok');
+});

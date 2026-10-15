@@ -34,7 +34,7 @@ test('migrates only exact legacy mirrors to the single Broker authority', async 
   let persisted: unknown;
   const state = createRelayState(auth, { initial: legacy, commit: async value => { persisted = structuredClone(value); } }, () => {}, () => {});
   await state.mutate(() => {});
-  expect(persisted).toMatchObject({ version: 9, tenants: [{ broker: { associations: { version: 5 } } }] });
+  expect(persisted).toMatchObject({ version: 11, tenants: [{ broker: { associations: { version: 6 } } }] });
   expect(persisted).not.toHaveProperty('sessionSuccessions');
   expect(legacy.sessionSuccessions).toHaveLength(2);
   expect(() => validateRelayState({ ...legacy, sessionSuccessions: [{ ...legacy.sessionSuccessions[0]!, receipt: { ...row().projection.receipt, updatedAt: 'changed' } }] }, auth)).toThrow();
@@ -53,5 +53,5 @@ test('rejects changed freeze request, reordered lineage and reused executors', (
     (value: ReturnType<typeof saved>) => { value.tenants[0]!.broker.associations!.freezes[1]!.receipt.lineage.reverse(); },
     (value: ReturnType<typeof saved>) => { const item = value.tenants[0]!.broker.associations!.freezes[1]!; item.projection!.role.current = ref('A'); item.projection!.receipt.to = ref('A'); item.projection!.receipt.prepared!.to = ref('A'); },
   ]) { const initial = saved(); mutate(initial); expect(() => validateRelayState(initial, auth)).toThrow(); }
-  expect(migrateBrokerAssociations(saved().tenants[0]!.broker.associations).version).toBe(5);
+  expect(migrateBrokerAssociations(saved().tenants[0]!.broker.associations).version).toBe(6);
 });

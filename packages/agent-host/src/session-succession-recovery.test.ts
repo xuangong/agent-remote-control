@@ -470,3 +470,26 @@ test('native prefix rejects v2 enrollment before any native fork', async () => {
   await expect(f.service.coordinator.prepareEnrolled({ version: 2, maxProjectionBytes: 100000, token: 'freeze', authority: { version: 1, origin: 'https://relay.example', issuer: 'issuer', namespace: 'namespace', ownerSubject: 'owner' }, controllerId: 'host', request: prefixRequest, associationRevision: 0, lineage: [ref('A')], relations: [] }, [], f.service.store.generation)).rejects.toThrow(/v3/);
   expect(f.forks()).toBe(0); expect(f.service.store.read('role').operations).toEqual([]);
 });
+
+
+test('enrolled native prefix stays fenced through Host commit and restart until durable release', async () => {
+  const f = await prefixFixture();
+  const freeze = { version: 3 as const, maxProjectionBytes: 100000, token: 'freeze', authority: { version: 1 as const, origin: 'https://relay.example', issuer: 'issuer', namespace: 'namespace', ownerSubject: 'owner' }, controllerId: 'host', request: prefixRequest, associationRevision: 0, lineage: [ref('A')], relations: [] };
+  const released: string[] = [];
+  f.service.coordinator.setAdmission({ checkSource() {}, reserve() {}, registerCandidate: () => ({ conflict: false }), assertCommit() {}, releaseReservation: id => { released.push(id); } });
+  expect((await f.service.coordinator.prepareEnrolled(freeze, [], f.service.store.generation)).phase).toBe('ready');
+  const committed = await f.service.commit('handoff', 1);
+  expect(released).toEqual([]);
+  expect(() => f.service.coordinator.assertAdmission(ref('B'))).toThrow(/reserved/);
+  expect(f.service.executionRouting.resolve(ref('A')).target).toEqual(ref('B'));
+  expect(() => f.service.executionRouting.assertCurrent(ref('A'), ref('B'))).toThrow(/reserved/);
+  const restored = new SessionSuccessionService(f.directory, 'host', f.ports); await restored.ready;
+  expect(() => restored.executionRouting.assertCurrent(ref('A'), ref('B'))).toThrow(/reserved/);
+  expect(await restored.commit('handoff', 1)).toEqual(committed);
+  await restored.releaseEnrollment(freeze); await restored.releaseEnrollment(freeze);
+  expect(() => restored.executionRouting.assertCurrent(ref('A'), ref('B'))).not.toThrow();
+  expect(() => restored.executionRouting.assertCurrent(ref('A'), ref('A'))).toThrow();
+  expect(() => restored.coordinator.assertAdmission(ref('A'))).toThrow(/superseded/);
+  expect(restored.store.nativePrefixHandle('handoff')).toEqual(creation.handle);
+  expect(f.forks()).toBe(1);
+});

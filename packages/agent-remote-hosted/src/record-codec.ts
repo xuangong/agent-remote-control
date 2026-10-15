@@ -18,7 +18,7 @@ type Broker = Tenant['broker'];
 type Associations = NonNullable<Broker['associations']>;
 type Favorites = NonNullable<Tenant['favoritesSuccession']>;
 type HostedAssociationHeader = Omit<Associations, 'version' | 'admissions' | 'freezes' | 'relationChanges' | 'relationResets'> & {
-  version: 1 | 2 | 3 | 4 | 5; admissions: Identity<'admission'>[]; freezes: Identity<'freeze'>[];
+  version: 1 | 2 | 3 | 4 | 5 | 6; admissions: Identity<'admission'>[]; freezes: Identity<'freeze'>[];
   relationChanges?: Identity<'relationChange'>[]; relationResets?: Identity<'relationReset'>[];
 };
 type HostedFavoritesHeader = Omit<Favorites, 'receipts'> & { receipts: Identity<'favoritesReceipt'>[] };

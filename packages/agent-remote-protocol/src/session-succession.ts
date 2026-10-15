@@ -17,6 +17,7 @@ export const SourceBinding = Type.Union([
 export type SourceBinding = Static<typeof SourceBinding>;
 export const NativePrefixSelection = Type.Object({ kind: Type.Literal('native_prefix'), turnId: id, messageId: id }, object);
 export type NativePrefixSelection = Static<typeof NativePrefixSelection>;
+export const isNativePrefixSelection = (value: unknown): value is NativePrefixSelection => Value.Check(NativePrefixSelection, value);
 export const nativePrefixSelectionKey = (selection: NativePrefixSelection | undefined): string | undefined => selection && JSON.stringify([selection.kind, selection.turnId, selection.messageId]);
 const request = { preparation: Type.Optional(NativePrefixSelection), operationId: id, roleId: id, expectedRevision: revision, from: NativeSessionRef, targetProviderId: Type.Optional(id) };
 export const SuccessionRequest = Type.Object(request, object);
@@ -96,3 +97,64 @@ export const isCommittedSuccessionProjection = (value: unknown): value is Commit
     && role.workspace.controllerId === role.current.controllerId && receipt.from.controllerId === role.current.controllerId
     && receipt.prepared.workspace.controllerId === role.workspace.controllerId && receipt.prepared.workspace.canonicalCwd === role.workspace.canonicalCwd;
 };
+
+
+export interface NativePrefixResolution {
+  anchor: NativeSessionRef;
+  target: NativeSessionRef;
+  operationIds: readonly string[];
+}
+/** Validate complete committed role histories before deriving execution authority. */
+function nativePrefixEdges(committed: readonly SuccessionRecord[]) {
+  const groups = new Map<string, SuccessionRecord[]>(), owners = new Map<string, string>(), operations = new Set<string>();
+  const forward = new Map<string, SuccessionRecord>(), reverse = new Map<string, SuccessionRecord>();
+  const unavailable = () => { throw new Error('Native prefix execution routing is unavailable: invalid committed lineage.'); };
+  for (const receipt of committed) {
+    if (!isSuccessionRecord(receipt) || receipt.phase !== 'committed' || operations.has(receipt.operationId)) unavailable();
+    operations.add(receipt.operationId);
+    const rows = groups.get(receipt.roleId) ?? []; rows.push(receipt); groups.set(receipt.roleId, rows);
+  }
+  for (const [roleId, rows] of groups) {
+    rows.sort((a, b) => a.expectedRevision - b.expectedRevision);
+    const origin = rows[0]!.from, workspace = rows[0]!.prepared?.workspace;
+    if (!workspace || rows.length > 512) unavailable();
+    const visited = new Set<string>([nativeSessionRefKey(origin)]);
+    let current = origin;
+    for (let index = 0; index < rows.length; index++) {
+      const receipt = rows[index]!;
+      if (!receipt.to || !isCommittedSuccessionProjection({ version: 1, role: { id: roleId, origin, current: receipt.to, workspace, revision: index + 2 }, receipt })
+        || receipt.expectedRevision !== index + 1 || nativeSessionRefKey(receipt.from) !== nativeSessionRefKey(current)
+        || visited.has(nativeSessionRefKey(receipt.to))) unavailable();
+      const target = receipt.to!;
+      for (const ref of [receipt.from, target]) {
+        const key = nativeSessionRefKey(ref), owner = owners.get(key);
+        if (owner !== undefined && owner !== roleId) unavailable();
+        owners.set(key, roleId);
+      }
+      forward.set(nativeSessionRefKey(receipt.from), receipt); reverse.set(nativeSessionRefKey(target), receipt);
+      visited.add(nativeSessionRefKey(target)); current = target;
+    }
+  }
+  return { forward, reverse };
+}
+export function resolveNativePrefix(anchor: NativeSessionRef, committed: readonly SuccessionRecord[]): NativePrefixResolution {
+  if (!isNativeSessionRef(anchor)) throw new Error('Native prefix execution routing is unavailable: invalid anchor.');
+  const { forward } = nativePrefixEdges(committed), operationIds: string[] = [];
+  let target = anchor;
+  for (let edge = forward.get(nativeSessionRefKey(target)); edge; edge = forward.get(nativeSessionRefKey(target))) {
+    if (!edge.preparation) throw new Error('Native prefix execution routing is unavailable across generic succession.');
+    operationIds.push(edge.operationId); target = edge.to!;
+  }
+  return { anchor: { ...anchor }, target: { ...target }, operationIds };
+}
+/** Inclusive ancestry, ordered from the oldest verified anchor to the target. */
+export function nativePrefixAncestors(target: NativeSessionRef, committed: readonly SuccessionRecord[]): readonly NativeSessionRef[] {
+  if (!isNativeSessionRef(target)) throw new Error('Native prefix execution routing is unavailable: invalid target.');
+  const { reverse } = nativePrefixEdges(committed), ancestors = [target];
+  let current = target;
+  for (let edge = reverse.get(nativeSessionRefKey(current)); edge; edge = reverse.get(nativeSessionRefKey(current))) {
+    if (!edge.preparation) throw new Error('Native prefix execution routing is unavailable across generic succession.');
+    current = edge.from; ancestors.unshift(current);
+  }
+  return ancestors.map(ref => ({ ...ref }));
+}

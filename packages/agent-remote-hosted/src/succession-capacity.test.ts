@@ -4,7 +4,7 @@ import { createHash } from 'node:crypto';
 import { expect, test } from 'vitest';
 import { createRelayState, emptyRelayState, validateRelayState, type HostedRelayState } from './state.js';
 import { deriveSuccessionCapacity, isSuccessionCapacityError, type SuccessionEncodingCosts } from './succession-capacity.js';
-import { validBrokerAssociations } from './succession-associations.js';
+import { validBrokerAssociations, migrateBrokerAssociations } from './succession-associations.js';
 import { encodeSqlSnapshot, quoteSqlRecord, SQL_SNAPSHOT_FORMAT, SQL_RECORD_FORMAT, SQL_CHUNK_BYTES } from '../../agent-remote-cloudflare/src/storage-codec.js';
 
 const auth = { origin: 'https://relay.example', issuer: 'https://issuer.example', secret: 's'.repeat(32) };
@@ -22,18 +22,18 @@ function initial(ceiling = 65536, subject = 'owner'): HostedRelayState {
   return state;
 }
 
-test('preflights without storage writes, fences every configured write at ten and refuses missing costs', async () => {
+test('preflights without storage writes, fences every configured write at eleven and refuses missing costs', async () => {
   const writes: HostedRelayState[] = [];
   const state = createRelayState(auth, { initial: initial(), async commit(value) { writes.push(structuredClone(value)); } }, () => {}, () => {}, costs);
   expect(writes).toEqual([]); expect(state.read().version).toBe(9);
   await state.mutate(draft => { draft.securityEvents = []; });
-  expect(writes[0]!.version).toBe(10);
-  await state.mutate(draft => { draft.version = 2; });
-  expect(writes[1]!.version).toBe(10);
+  expect(writes[0]!.version).toBe(11);
+  await state.mutate(draft => { draft.version = 2; delete draft.successionAccounting; });
+  expect(writes[1]!.version).toBe(11);
   expect(() => createRelayState(auth, { initial: writes[1], async commit() {} }, () => {}, () => {})).toThrow(/cost|accounting/i);
   expect(() => createRelayState(auth, { initial: writes[1], async commit() {} }, () => {}, () => {}, { measureSnapshot: costs.measureSnapshot } as any)).toThrow(/cost|accounting/i);
   const ordinary = createRelayState(auth, { async commit(value) { writes.push(value); } }, () => {}, () => {}, costs);
-  await ordinary.mutate(() => {}); expect(writes.at(-1)!.version).toBe(10);
+  await ordinary.mutate(() => {}); expect(writes.at(-1)!.version).toBe(11);
 }, 10000);
 
 test('accounts across tenants while preserving large unrelated complete ordinary data', () => {
@@ -86,7 +86,7 @@ test('reserves only durable cancellation for an explicit v1 cancellation fence',
   const { maxProjectionBytes: _allowance, ...receipt } = row.receipt as Extract<typeof row.receipt, { version: 2 }>;
   row.receipt = { ...receipt, version: 1 }; Object.assign(row, { cancelOnly: true });
   const associations = state.tenants[0]!.broker.associations!;
-  expect(validBrokerAssociations(associations)).toBe(true);
+  expect(validBrokerAssociations(migrateBrokerAssociations(associations))).toBe(true);
   expect(validBrokerAssociations({ ...associations, freezes: [{ ...row, cancelOnly: false }] })).toBe(false);
   expect(validBrokerAssociations({ ...associations, freezes: [{ ...row, released: 'committed' }] })).toBe(false);
   expect(validBrokerAssociations({ ...associations, freezes: [{ ...row, receipt: { ...row.receipt, version: 2, maxProjectionBytes: 65536 } }] })).toBe(false);
@@ -395,3 +395,20 @@ for (const blocker of ['authority', 'mapping', 'tree', 'revision'] as const) tes
   const applied = structuredClone(saved); await restored.mutate(draft => { projectSuccessionFavorites(draft, 'owner', true); }); expect(saved).toEqual(applied);
   await relay.close(); await restored.close();
 }, 10000);
+
+
+test('v3 prefix projection costs retain exact request bytes and accounting provenance', async () => {
+  const legacy = initial(); legacy.version = 10;
+  let saved: HostedRelayState | undefined;
+  const state = createRelayState(auth, { initial: legacy, commit: async value => { saved = value; } }, () => {}, () => {}, costs);
+  await state.mutate(() => {});
+  await state.mutate(draft => {
+    const freeze = draft.tenants[0]!.broker.associations!.freezes[0]!.receipt;
+    Object.assign(freeze, { version: 3 });
+    freeze.request.preparation = { kind: 'native_prefix', turnId: 'turn', messageId: 'message' };
+  });
+  expect(saved).toMatchObject({ version: 11, successionAccounting: true });
+  const capacity = deriveSuccessionCapacity(saved!, costs);
+  expect(capacity.featureCharge).toBeGreaterThan(65536);
+  expect(() => createRelayState(auth, { initial: saved, commit: async () => {} }, () => {}, () => {})).toThrow(/accounting/);
+});

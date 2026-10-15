@@ -2,7 +2,7 @@ import { validCommittedSuccessionLineage } from './session-successions.js';
 import { validRelationChangeReset, validBrokerRelationChange, type RelationChangeReset, type BrokerRelationChange } from './relation-changes.js';
 import { isCommittedSuccessionProjection, isNativeSessionRef, isSuccessionAssociationFreeze, type CommittedSuccessionProjection, type NativeSessionRef, type SuccessionAssociationFreeze } from '@orchardworks/agent-remote-protocol';
 export interface BrokerAssociationState {
-  version: 5;
+  version: 6;
   relationResets: RelationChangeReset[];
   relationChanges: BrokerRelationChange[];
   revision: number;
@@ -11,7 +11,7 @@ export interface BrokerAssociationState {
 }
 export function validBrokerAssociations(value: unknown): value is BrokerAssociationState {
   const state = value as BrokerAssociationState;
-  return !!state && state.version === 5 && Number.isSafeInteger(state.revision) && state.revision >= 0
+  return !!state && state.version === 6 && Number.isSafeInteger(state.revision) && state.revision >= 0
     && Array.isArray(state.relationResets) && state.relationResets.length <= 1024 && state.relationResets.every(validRelationChangeReset)
     && new Set(state.relationResets.map(item => item.intent.operationId)).size === state.relationResets.length
     && Array.isArray(state.relationChanges) && state.relationChanges.length <= 1024 && state.relationChanges.every(validBrokerRelationChange)
@@ -23,7 +23,7 @@ export function validBrokerAssociations(value: unknown): value is BrokerAssociat
     && new Set(state.admissions.map(item => item.id)).size === state.admissions.length
     && Array.isArray(state.freezes) && state.freezes.length <= 1024
     && state.freezes.every(item => typeof item.hostId === 'string' && item.hostId.length > 0 && isSuccessionAssociationFreeze(item.receipt)
-      && (item.cancelOnly === undefined || item.cancelOnly === true && item.receipt.version === 1 && (item.released === undefined || item.released === 'cancelled') && item.projection === undefined)
+      && (item.cancelOnly === undefined || item.cancelOnly === true && (item.receipt.version === 1 || item.receipt.version === 3 && !!item.receipt.request.preparation && item.receipt.maxProjectionBytes === 1) && (item.released === undefined || item.released === 'cancelled') && item.projection === undefined)
       && (item.released === undefined || ['committed', 'rejected', 'cancelled'].includes(item.released))
       && (item.released === 'committed' ? isCommittedSuccessionProjection(item.projection) && item.projection!.receipt.operationId === item.receipt.request.operationId : item.projection === undefined))
     && new Set(state.freezes.map(item => item.receipt.token)).size === state.freezes.length
@@ -44,6 +44,10 @@ export function migrateBrokerAssociations(value: unknown): BrokerAssociationStat
   if (candidate?.version === 4) {
     if ((candidate as unknown as BrokerAssociationState).freezes?.some(row => row.receipt.version !== 1)) throw new Error('Legacy association storage cannot certify a bounded freeze.');
     candidate = { ...candidate, version: 5 };
+  }
+  if (candidate?.version === 5) {
+    if ((candidate as unknown as BrokerAssociationState).freezes?.some(row => row.receipt.version === 3 || row.receipt.request.preparation)) throw new Error('Legacy association storage cannot certify native prefix.');
+    candidate = { ...candidate, version: 6 };
   }
   if (!validBrokerAssociations(candidate)) throw new Error('Invalid durable association state.');
   return candidate;

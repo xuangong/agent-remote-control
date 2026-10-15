@@ -3,7 +3,7 @@ import { sourceParticipantId } from './source-participant.js';
 import { realpath } from 'node:fs/promises';
 import { createHash, randomUUID } from 'node:crypto';
 import { AgentOperationRejectedError } from '@orchardworks/agent-provider-sdk';
-import { successionAuthorityKey, successionFreezeKey, isSuccessionAssociationFreeze, isNativeSessionRef, nativeSessionRefKey, type NativeSessionRef, type TrustedSuccessionContext, type SuccessionParticipant, type SuccessionAssociationFreeze } from '@orchardworks/agent-remote-protocol';
+import { successionAuthorityKey, successionFreezeKey, isNativePrefixSelection, isSuccessionAssociationFreeze, isNativeSessionRef, nativeSessionRefKey, type NativeSessionRef, type TrustedSuccessionContext, type SuccessionParticipant, type SuccessionAssociationFreeze } from '@orchardworks/agent-remote-protocol';
 import type { AgentRemoteHttpResult, RemoteHostControlRequest } from '@orchardworks/agent-remote-relay';
 import type { AgentHostDirectory, AgentHostProviderRegistration } from './host.js';
 import { SuccessionCapacityError } from './succession-persistence.js';
@@ -76,7 +76,8 @@ export class SessionSuccessionEnrollment {
         return json(200, {source:result.source,reader:result.reader,operationId:result.operationId});
       }
       if (input.action === 'describe') {
-        if (Object.keys(input).some(name => !['action', 'providerId', 'nativeSessionId'].includes(name)) || typeof input.providerId !== 'string' || typeof input.nativeSessionId !== 'string') throw new Error('Invalid source selection.');
+        if (Object.keys(input).some(name => !['action', 'providerId', 'nativeSessionId', 'preparation'].includes(name)) || typeof input.providerId !== 'string' || typeof input.nativeSessionId !== 'string') throw new Error('Invalid source selection.');
+        if (input.preparation !== undefined && (!isNativePrefixSelection(input.preparation) || context.successionEnrollmentVersion !== 3)) throw new Error('Native prefix description requires acknowledged v3 and exact selection.');
         const source = { controllerId: this.controllerId, providerId: input.providerId, nativeSessionId: input.nativeSessionId };
         await this.authorize(source);
         const registration = this.registrations().find(item => item.directory.providerId === source.providerId);
@@ -85,14 +86,14 @@ export class SessionSuccessionEnrollment {
         const role = await this.service.store.ensureRole(source, await realpath(cwd));
         const state = this.service.store.read(role.id);
         if (state.associationAuthority && successionAuthorityKey(state.associationAuthority) !== successionAuthorityKey(context.authority)) throw new Error('Primary role belongs to another association authority.');
-        const description = await this.service.describe(role, source, this.registrations().map(({ adapter }) => ({ providerId: adapter.descriptor.providerId, displayName: adapter.descriptor.displayName })));
+        const description = await this.service.describe(role, source, this.registrations().map(({ adapter }) => ({ providerId: adapter.descriptor.providerId, displayName: adapter.descriptor.displayName })), input.preparation);
         return json(200, { ...description, lineage: this.service.store.lineage(state), relationUpdates: 1, associationRevision: state.associationRevision, sourceParticipants: state.participants.filter(row => row.kind !== 'tpm').map(row => ({ relationId: row.relationId, kind: row.kind, readerRef: row.after })) });
       }
       if (Object.keys(input).some(name => !['action', 'freeze', 'includeContext'].includes(name)) || !isSuccessionAssociationFreeze(input.freeze)
         || input.includeContext !== undefined && (input.action !== 'status' || input.includeContext !== true)) throw new Error('A complete frozen association receipt is required.');
       const freeze: SuccessionAssociationFreeze = input.freeze;
       if (freeze.controllerId !== this.controllerId || successionAuthorityKey(freeze.authority) !== successionAuthorityKey(context.authority)) throw new Error('Frozen association authority does not match this connection.');
-      if (freeze.version === 2 && context.successionEnrollmentVersion !== 2) return json(409, { code: 'succession_enrollment_unavailable', error: 'Bounded succession requires acknowledged v2.' });
+      if (freeze.version > context.successionEnrollmentVersion) return json(409, { code: 'succession_enrollment_unavailable', error: 'Succession freeze version was not acknowledged.' });
       await this.authorize(freeze.request.from);
       const state = this.service.store.read(freeze.request.roleId);
       const saved = state.enrollments?.find(receipt => receipt.request.operationId === freeze.request.operationId);
@@ -101,7 +102,7 @@ export class SessionSuccessionEnrollment {
         let record;
         if (saved) record = this.service.coordinator.status(freeze.request.operationId);
         else {
-          if (context.successionEnrollmentVersion !== 2 || freeze.version !== 2) return json(409, { code: 'succession_preparation_unavailable', error: 'New preparation requires acknowledged v2 and a bounded freeze.' });
+          if (context.successionEnrollmentVersion < 2 || freeze.version === 1) return json(409, { code: 'succession_preparation_unavailable', error: 'New preparation requires acknowledged bounded enrollment.' });
           const generation = this.service.store.generation;
           const grants = [];
           for (const { directory } of this.registrations()) {
@@ -126,11 +127,11 @@ export class SessionSuccessionEnrollment {
           record = await this.service.coordinator.prepareEnrolled(freeze, participants, generation);
         }
         this.service.store.assertCommittedProjection(freeze.request.operationId);
-        return json(200, { record, role: this.service.store.read(state.role.id).role, freeze });
+        return json(200, { record, role: record.phase === 'committed' ? { ...state.role, revision: record.committedRevision!, current: record.to!, workspace: record.prepared!.workspace } : this.service.store.read(state.role.id).role, freeze });
       }
       if (!saved && input.action === 'cancel') {
         const record = await this.service.store.cancelUnenrolled(freeze);
-        return json(200, { record, role: this.service.store.read(state.role.id).role, freeze });
+        return json(200, { record, role: record.phase === 'committed' ? { ...state.role, revision: record.committedRevision!, current: record.to!, workspace: record.prepared!.workspace } : this.service.store.read(state.role.id).role, freeze });
       }
       if (!saved) throw new Error('Frozen association receipt is not enrolled.');
       let record = this.service.coordinator.status(freeze.request.operationId);
@@ -138,7 +139,7 @@ export class SessionSuccessionEnrollment {
       if (input.action === 'commit') record = await this.service.commit(record.operationId, freeze.request.expectedRevision);
       else if (input.action === 'cancel') record = await this.service.coordinator.cancel(record.operationId);
       else if (input.action === 'reconcile') record = await this.service.coordinator.reconcileReady(record.operationId);
-      else if (input.action === 'release') await this.service.store.releaseEnrollment(freeze);
+      else if (input.action === 'release') await this.service.releaseEnrollment(freeze);
       else if (input.action !== 'status') throw new Error('Invalid enrollment action.');
       this.service.store.assertCommittedProjection(record.operationId);
       let contextStatus: import('@orchardworks/agent-remote-protocol').SuccessionContextStatus | undefined;
@@ -151,7 +152,7 @@ export class SessionSuccessionEnrollment {
           contextStatus = { operationId: current.operationId, target: current.target, state: current.state };
         }
       }
-      return json(200, { record, role: this.service.store.read(state.role.id).role, freeze, ...(contextStatus ? { context: contextStatus } : {}) });
+      return json(200, { record, role: record.phase === 'committed' ? { ...state.role, revision: record.committedRevision!, current: record.to!, workspace: record.prepared!.workspace } : this.service.store.read(state.role.id).role, freeze, ...(contextStatus ? { context: contextStatus } : {}) });
     } catch (error) { return json(409, { code: error instanceof SuccessionProjectionCapacityError || error instanceof SuccessionProjectionInvariantError ? error.code : 'succession_enrollment_failed', error: error instanceof Error ? error.message : 'Succession enrollment failed.' }); }
   }
 

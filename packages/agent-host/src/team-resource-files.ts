@@ -21,25 +21,27 @@ async function digestFile(path:string):Promise<{sha256:string;byteLength:number}
 /** Explicit local file transfer tools. Downloading never executes the received file. */
 export class TeamResourceFiles {
   constructor(private readonly directory:string,private readonly request:(call:TeamHostCall)=>Promise<unknown>){}
-  async upload(teamId:string,memberId:string,path:string,operationId:string):Promise<TeamResource>{
+  async upload(teamId:string,memberId:string,path:string,operationId:string,assertCurrent:()=>void=()=>{}):Promise<TeamResource>{
+    const request=(call:TeamHostCall)=>{assertCurrent();return this.request(call);};
     if(!isAbsolute(path))throw new Error('Upload requires an absolute path on this Host.');
     const {sha256,byteLength}=await digestFile(path),scope={teamId,memberId,operationId};
-    let receipt=uploadReceipt(await this.request({...scope,action:'resource_begin',name:basename(path),mediaType:'application/octet-stream',byteLength,sha256}),byteLength);
-    if(receipt.resource){const result=uploadReceipt(await this.request({...scope,action:'resource_finish'}),byteLength).resource;if(!result||result.sha256!==sha256||result.byteLength!==byteLength)throw new Error('Resource upload integrity verification failed.');return result;}
+    let receipt=uploadReceipt(await request({...scope,action:'resource_begin',name:basename(path),mediaType:'application/octet-stream',byteLength,sha256}),byteLength);
+    if(receipt.resource){const result=uploadReceipt(await request({...scope,action:'resource_finish'}),byteLength).resource;if(!result||result.sha256!==sha256||result.byteLength!==byteLength)throw new Error('Resource upload integrity verification failed.');return result;}
     const file=await open(path,constants.O_RDONLY | constants.O_NONBLOCK);try{
       const stat=await file.stat();if(!stat.isFile())throw new Error('Resource must be a regular file.');if(stat.size!==byteLength)throw new Error('Resource changed before upload.');
       const buffer=Buffer.alloc(CHUNK_BYTES);
       while(receipt.offset<byteLength){const offset=receipt.offset,expected=Math.min(buffer.length,byteLength-offset),{bytesRead}=await file.read(buffer,0,expected,offset);if(bytesRead!==expected)throw new Error('Resource changed during upload.');
-        receipt=uploadReceipt(await this.request({...scope,action:'resource_chunk',offset,contentBase64:buffer.subarray(0,bytesRead).toString('base64')}),byteLength);
+        receipt=uploadReceipt(await request({...scope,action:'resource_chunk',offset,contentBase64:buffer.subarray(0,bytesRead).toString('base64')}),byteLength);
         if(receipt.offset<=offset)throw new Error('Resource upload made no progress.');
       }
     }finally{await file.close();}
-    const result=uploadReceipt(await this.request({...scope,action:'resource_finish'}),byteLength).resource;
+    const result=uploadReceipt(await request({...scope,action:'resource_finish'}),byteLength).resource;
     if(!result||result.sha256!==sha256||result.byteLength!==byteLength)throw new Error('Resource upload integrity verification failed.');return result;
   }
-  async download(teamId:string,memberId:string,resourceId:string,outputDirectory?:string):Promise<TeamResource & {localPath:string;verified:true}>{
+  async download(teamId:string,memberId:string,resourceId:string,outputDirectory?:string,assertCurrent:()=>void=()=>{}):Promise<TeamResource & {localPath:string;verified:true}>{
+    const request=(call:TeamHostCall)=>{assertCurrent();return this.request(call);};
     if(outputDirectory!==undefined&&!isAbsolute(outputDirectory))throw new Error('Download directory must be an absolute path on this Host.');
-    const scope={teamId,memberId,resourceId},metadata=resource(await this.request({...scope,action:'resource_metadata'}));
+    const scope={teamId,memberId,resourceId},metadata=resource(await request({...scope,action:'resource_metadata'}));
     if(metadata.resourceId!==resourceId)throw new Error('Resource identity mismatch.');
     const key=createHash('sha256').update(JSON.stringify([teamId,memberId,resourceId])).digest('hex');
     const directory=outputDirectory??join(this.directory,'downloads',key);
@@ -50,10 +52,10 @@ export class TeamResourceFiles {
       try{if(!(await lstat(target)).isFile())throw new Error('The existing destination is not a regular file.');const actual=await digestFile(target);if(actual.sha256!==metadata.sha256||actual.byteLength!==metadata.byteLength)throw new Error('The existing destination contains different bytes.');return true;}
       catch(error){if((error as NodeJS.ErrnoException).code==='ENOENT')return false;throw error;}
     };
-    if(await existing())return {...metadata,localPath:target,verified:true};
+    if(await existing()){assertCurrent();return {...metadata,localPath:target,verified:true};}
     const temp=join(directory,`.resource-${randomUUID()}.part`),file=await open(temp,'wx',0o600),digest=createHash('sha256');let offset=0;
     try{
-      while(offset<metadata.byteLength){const value=await this.request({...scope,action:'resource_read',offset});
+      while(offset<metadata.byteLength){const value=await request({...scope,action:'resource_read',offset});
         if(!value||typeof value!=='object'||!('contentBase64' in value)||typeof value.contentBase64!=='string'||!('offset' in value)||value.offset!==offset)throw new Error('Invalid resource download chunk.');
         const chunkMetadata=resource(Object.fromEntries(['resourceId','name','mediaType','byteLength','sha256'].map(key=>[key,(value as Record<string,unknown>)[key]])));
         if((['resourceId','name','mediaType','byteLength','sha256'] as const).some(key=>chunkMetadata[key]!==metadata[key]))throw new Error('Resource metadata changed during download.');
@@ -63,6 +65,7 @@ export class TeamResourceFiles {
       }
       if(offset!==metadata.byteLength||digest.digest('hex')!==metadata.sha256)throw new Error('Resource download integrity verification failed.');
       await file.sync();await file.close();
+      assertCurrent();
       try{await link(temp,target);}catch(error){if((error as NodeJS.ErrnoException).code!=='EEXIST'||!await existing())throw error;}
       return {...metadata,localPath:target,verified:true};
     }finally{await file.close().catch(()=>undefined);await unlink(temp).catch(()=>undefined);}

@@ -3,7 +3,7 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import ts from 'typescript';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { mkdtemp, readFile, rm, writeFile, symlink } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, writeFile, symlink, readdir } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { expect,it } from 'vitest';
@@ -49,3 +49,42 @@ it.skipIf(process.platform==='win32')('rejects a FIFO without waiting for a writ
     expect(result.stdout).toContain('regular file');
   }finally{await rm(root,{recursive:true,force:true});}
 },5000);
+
+it.each(['upload', 'download'] as const)('stops a %s when its attachment retires between resource RPCs', async direction => {
+  const root = await mkdtemp(join(tmpdir(), 'team-resource-retired-'));
+  const bytes = Buffer.alloc(70000, 42), path = join(root, 'input.bin');
+  const metadata = { resourceId: 'resource', name: 'input.bin', mediaType: 'application/octet-stream', byteLength: bytes.length, sha256: createHash('sha256').update(bytes).digest('hex') };
+  let current = true; const calls: string[] = [];
+  const files = new TeamResourceFiles(root, async call => {
+    calls.push(call.action);
+    if (call.action === 'resource_begin') return { offset: 0 };
+    if (call.action === 'resource_metadata') return metadata;
+    current = false;
+    if (call.action === 'resource_chunk') return { offset: Math.min(bytes.length, call.offset + 32768) };
+    if (call.action === 'resource_finish') return { offset: bytes.length, resource: metadata };
+    if (call.action === 'resource_read') return { ...metadata, offset: call.offset, contentBase64: bytes.subarray(call.offset, call.offset + 32768).toString('base64') };
+    throw new Error('Unexpected resource call');
+  });
+  const guard = () => { if (!current) throw new Error('Attachment retired'); };
+  try {
+    await writeFile(path, bytes);
+    await expect(direction === 'upload' ? files.upload('team', 'member', path, 'operation', guard)
+      : files.download('team', 'member', 'resource', undefined, guard)).rejects.toThrow('Attachment retired');
+    expect(calls).toEqual(direction === 'upload' ? ['resource_begin', 'resource_chunk'] : ['resource_metadata', 'resource_read']);
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+
+it('does not publish the final local download if the attachment retires during the last RPC', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'team-resource-final-')), bytes = Buffer.from('last chunk');
+  const metadata = { resourceId: 'resource', name: 'input.bin', mediaType: 'application/octet-stream', byteLength: bytes.length, sha256: createHash('sha256').update(bytes).digest('hex') };
+  let current = true;
+  const files = new TeamResourceFiles(root, async call => {
+    if (call.action === 'resource_metadata') return metadata;
+    current = false; return { ...metadata, offset: 0, contentBase64: bytes.toString('base64') };
+  });
+  try {
+    await expect(files.download('team', 'member', 'resource', root, () => { if (!current) throw new Error('Retired'); })).rejects.toThrow('Retired');
+    expect(await readdir(root)).toEqual([]);
+  } finally { await rm(root, { recursive: true, force: true }); }
+});

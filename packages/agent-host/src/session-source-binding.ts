@@ -84,23 +84,23 @@ export class SessionSourceBindings {
   }
 
   /** Trusted Host consumers already hold a durable role binding; public source tools use enrolled readers. */
-  readRole(binding: SourceBinding, input: SourceHistoryQuery): Promise<SourceHistoryPage> {
+  readRole(binding: SourceBinding, input: SourceHistoryQuery, assertCurrent: () => void = () => {}): Promise<SourceHistoryPage> {
     const unavailable = async (): Promise<AgentHistoryPage> => { throw new Error('Role history requires a routed native reader.'); };
     if (binding.kind === 'fixed') return this.readSource(binding.source, binding.source, input, unavailable, {
       source: this.ref(binding.source), lineage: new Set([nativeSessionRefKey(binding.source)]),
-    });
+    }, binding.source, assertCurrent);
     const state = this.store.read(binding.roleId);
     if (!sameRef(binding.origin, state.role.origin)) throw new Error('Primary role origin changed.');
     const lineage = new Set([nativeSessionRefKey(state.role.origin), ...state.operations.filter(operation => operation.phase === 'committed').map(operation => nativeSessionRefKey(operation.to!))]);
     return this.readSource(binding.origin, binding.origin, input, unavailable, {
       source: state.role.current, roleId: state.role.id, roleRevision: state.role.revision, lineage,
-    });
+    }, binding.origin, assertCurrent);
   }
 
   private async readSource(reader: string | NativeSessionRef, originalSource: string | NativeSessionRef, input: SourceHistoryQuery,
-    read: (nativeSessionId: string, query: AgentHistoryQuery) => Promise<AgentHistoryPage>, role?: RoleSource, canonicalReader: string | NativeSessionRef = reader): Promise<SourceHistoryPage> {
+    read: (nativeSessionId: string, query: AgentHistoryQuery) => Promise<AgentHistoryPage>, role?: RoleSource, canonicalReader: string | NativeSessionRef = reader, assertCurrent: () => void = () => {}): Promise<SourceHistoryPage> {
     const canonicalRef = this.ref(canonicalReader);
-    const assertReader = () => { if (!role) this.options.executionRouting?.assertCurrent(canonicalRef, this.ref(reader)); };
+    const assertReader = () => { assertCurrent(); if (!role) this.options.executionRouting?.assertCurrent(canonicalRef, this.ref(reader)); };
     assertReader();
     const readerRef = this.ref(reader), originalRef = this.ref(originalSource);
     if (!role) this.assertReaderOpen(readerRef);

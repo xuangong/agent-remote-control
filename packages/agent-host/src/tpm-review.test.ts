@@ -2,10 +2,11 @@ import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, expect, it } from 'vitest';
-import type { AgentSessionExtensions } from '@orchardworks/agent-provider-sdk';
+import type { AgentSession, AgentSessionExtensions, ProviderStreamItem } from '@orchardworks/agent-provider-sdk';
 import type { SessionWireAgent, AgentManagerEvent } from '@orchardworks/agent-remote-relay';
 import { TpmCoordinator, type TpmSessionAccess } from './tpm.js';
 import type { TpmRecord } from './tpm-store.js';
+import { backgroundInputHash } from './session-background.js';
 const cleanups: Array<() => Promise<void>> = [];
 afterEach(async () => { for (const close of cleanups.splice(0)) await close(); });
 function record(id: string, lastReviewAt: number, nextCheckAt: number, pending = false): TpmRecord {
@@ -23,6 +24,7 @@ async function fixture() {
   const statuses = new Map<string, 'idle' | 'running'>();
   const recovery: Array<{ nativeSessionId: string; extensions: AgentSessionExtensions }> = [];
   const access: TpmSessionAccess = {
+    controllerId: 'controller',
     supportedProviders: () => ['codex'], available: () => available,
     async acquire(_providerId, nativeSessionId) {
       const group = listeners.get(nativeSessionId) ?? new Set(); listeners.set(nativeSessionId, group);
@@ -227,3 +229,22 @@ it('isolates corrupt TPM recovery from ordinary session extensions and shutdown'
   await expect(coordinator.list()).rejects.toThrow();
   await expect(coordinator.close()).resolves.toBeUndefined();
 }, 10000);
+
+
+it('annotates each TPM attachment only with reviews dispatched to its exact native recipient', async () => {
+  const f = await fixture(), item = record('prefix', 0, 900000);
+  const ref = (nativeSessionId: string) => ({ controllerId: 'controller', providerId: 'codex', nativeSessionId });
+  item.work.paused = true; item.work.tpmNativeSessionId = 'A';
+  item.work.outbox = ['A', 'B'].map(id => ({ id: `review-${id}`, target: 'tpm' as const, purpose: 'review', text: id, status: 'accepted' as const, acceptance: 'started' as const, resolvedTarget: ref(id), createdAt: '2026' }));
+  item.backgroundReviews = ['A', 'B'].map(id => ({ id: `review-${id}`, inputHash: backgroundInputHash(id), turnId: `turn-${id}` }));
+  await f.coordinator.store.insert(item);
+  f.access.sessionRouting = { resolve: anchor => ({ anchor, target: ref(anchor.nativeSessionId === 'A' ? 'B' : anchor.nativeSessionId), operationIds: ['prefix'] }), assertCurrent() {} };
+  for (const actual of ['A', 'B']) {
+    const native = { async *observe(): AsyncIterable<ProviderStreamItem> {
+      for (const id of ['A', 'B']) yield { type: 'observation', sourceKey: id, delivery: 'history', occurredAt: 1, event: { type: 'timeline', provider: 'codex', turnId: `turn-${id}`, item: { type: 'assistant_message', text: id } } };
+    } } as AgentSession;
+    const annotated = await f.coordinator.annotateSession('codex', actual, native), rows = [];
+    for await (const row of annotated.observe()) if (row.type === 'observation' && row.event.type === 'timeline') rows.push(row.event.item);
+    expect(rows.map(row => 'background' in row ? row.background?.id : undefined)).toEqual(actual === 'A' ? ['review-A', undefined] : [undefined, 'review-B']);
+  }
+});

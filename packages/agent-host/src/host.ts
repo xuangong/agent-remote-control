@@ -316,7 +316,7 @@ export function createAgentHostRuntime(options: AgentHostRuntimeOptions): AgentH
       },
       async supportsNativePrefix(source, selection) {
         await authorizeSuccessionRead(source, source);
-        await nativePrefixExtensions(source);
+        await nativePrefixExtensions(source, () => source.nativeSessionId);
         const directory = registration(source.providerId).directory;
         if (!boundedSourceIdentity(source.controllerId) || !boundedSourceIdentity(source.providerId) || !directory.createNativePrefix || !directory.verifyNativePrefix) return false;
         const lease = await acquireNative(source);
@@ -332,9 +332,11 @@ export function createAgentHostRuntime(options: AgentHostRuntimeOptions): AgentH
         const selection = request.preparation;
         if (!selection) throw new Error('Native prefix selection is missing.');
         await authorizeSuccessionRead(request.from, request.from);
-        const extensions = await nativePrefixExtensions(request.from), directory = registration(request.from.providerId).directory;
+        let actual: string | undefined;
+        const extensions = await nativePrefixExtensions(request.from, () => actual), directory = registration(request.from.providerId).directory;
         if (!directory.createNativePrefix) throw new Error('Native prefix creation is unavailable.');
         const handle = await directory.createNativePrefix({ nativeSessionId: request.from.nativeSessionId, turnId: selection.turnId, messageId: selection.messageId }, extensions);
+        actual = handle.sessionId;
         return { target: { controllerId: request.from.controllerId, providerId: handle.providerId, nativeSessionId: handle.sessionId }, handle };
       },
       async verifyNativePrefix(prepared, handle) {
@@ -437,7 +439,7 @@ export function createAgentHostRuntime(options: AgentHostRuntimeOptions): AgentH
     if (!own && allowMissing) return;
     const state = own && liveAgent(own.agentId)?.handoffAdmissionState();
     if (!state || !state.connected || !state.synchronized || state.closed || state.status !== 'idle' || state.activeTurn
-      || state.pendingInteractions || state.commandWork || state.settingWork || tpm?.hasUnsettledMain(target)) {
+      || state.pendingInteractions || state.commandWork || state.settingWork || (tpm?.hasUnsettledRecipient(target) || team?.hasUnsettledRecipient(target))) {
       throw new SuccessionPreparationRejected('succession_not_quiescent', 'Session has active, unknown or unsynchronized Host work.');
     }
     const cursor = own && liveAgent(own.agentId)?.timelineCursor();
@@ -533,18 +535,18 @@ export function createAgentHostRuntime(options: AgentHostRuntimeOptions): AgentH
     }
     return result;
   }
-  /** Role-owned callbacks need an actual-recipient authority before they can follow a native prefix. */
-  async function nativePrefixExtensions(source: NativeSessionRef): Promise<AgentSessionExtensions> {
+  /** Rebuild each native attachment from stable role anchors and its own actual recipient. */
+  async function nativePrefixExtensions(source: NativeSessionRef, actual: () => string | undefined): Promise<AgentSessionExtensions> {
     const directory = registration(source.providerId).directory;
     const ancestry = nativePrefixAncestors(source, successionService!.store.all().flatMap(state => state.operations.filter(row => row.phase === 'committed')));
     const grants = (await directory.sourceReferences?.() ?? []).filter(grant => ancestry.some(ref => ref.nativeSessionId === grant.nativeSessionId));
     if (grants.length > 1) throw new Error('Source reference ancestry is ambiguous.');
     const sourceTools = grants.length === 1 && !!directory.setSourceReferenceAncestors && !!directory.setSourceBindingReader;
-    if ((directory.requiresController?.(source.nativeSessionId) && !sourceTools)
-      || await team?.extensions(source.providerId, source.nativeSessionId) || await tpm?.extensions(source.providerId, source.nativeSessionId)) {
-      throw new SuccessionPreparationRejected('succession_prefix_extensions_unavailable', 'Native prefix role extensions require stable recipient routing.');
-    }
-    return {};
+    const teamTools = await team?.extensions(source.providerId, source.nativeSessionId, actual);
+    const tpmTools = await tpm?.extensions(source.providerId, source.nativeSessionId, actual);
+    if (teamTools && tpmTools) throw new SuccessionPreparationRejected('succession_prefix_extensions_unavailable', 'Native recipient has conflicting role extensions.');
+    if (directory.requiresController?.(source.nativeSessionId) && !sourceTools && !teamTools && !tpmTools) throw new SuccessionPreparationRejected('succession_prefix_extensions_unavailable', 'Native prefix extensions cannot be reconstructed.');
+    return teamTools ?? tpmTools ?? {};
   }
   async function authorizeSuccessionRead(reader: NativeSessionRef, source: NativeSessionRef): Promise<void> {
     for (const target of [reader, source]) {
@@ -567,7 +569,7 @@ export function createAgentHostRuntime(options: AgentHostRuntimeOptions): AgentH
     const binding = bindings.getByNative(source.providerId, source.nativeSessionId);
     const managedPrefix = !!binding && liveAgent(binding.agentId) === lease.agent && !!successionBoundary && succession!.contexts.coverageAvailable(source);
     const state = preparation ? { ...await session!.promptEditEvidence!.inspectReadiness(), managed: managedPrefix } : nativeSuccession ? await nativeSuccession.inspect(source) : { ...await session!.nativeEvidence!.inspectReadiness(), managed: succession!.contexts.coverageAvailable(source) };
-    if (operationCache.hasUnsettledMutation(nativeSessionRefKey(source)) || tpm?.hasUnsettledMain(source)) {
+    if (operationCache.hasUnsettledMutation(nativeSessionRefKey(source)) || (tpm?.hasUnsettledRecipient(source) || team?.hasUnsettledRecipient(source))) {
       throw new SuccessionPreparationRejected('succession_delivery_unresolved', 'Reconcile unsettled operations before succession.');
     }
     assertHandoffState(source);
@@ -749,7 +751,7 @@ export function createAgentHostRuntime(options: AgentHostRuntimeOptions): AgentH
             if (!parent) throw new Error('Native parent session is unavailable.');
           }
         }
-        const extensions = nativePrefix ? await nativePrefixExtensions(nativePrefix.source) : await team?.extensions(providerId, nativeSessionId) ?? await tpm?.extensions(providerId, nativeSessionId);
+        const extensions = nativePrefix ? await nativePrefixExtensions(nativePrefix.source, () => nativeSessionId) : await team?.extensions(providerId, nativeSessionId) ?? await tpm?.extensions(providerId, nativeSessionId);
         const open = () => source.open(nativeSessionId, { ...(takeOver ? { takeOver } : {}), ...(extensions ? { extensions } : {}), ...(nativePrefix ? { nativePrefix: nativePrefix.handle } : {}), ...(nativeCreation ? { nativeCreation, resumeHandle: succession?.contexts.forTarget(nativeRef({ providerId, nativeSessionId }))?.resumeHandle, resumeOptions: { initializeEmpty: succession?.contexts.canInitializeEmpty(nativeRef({ providerId, nativeSessionId })) === true } } : {}) });
         const nativeSession = parentNativeSessionId === undefined ? await (takeOver
           ? directoryNativeEffect(successionBoundary?.currentEntry(), successionBoundary?.currentEntry()?.targets ?? [], async () => {
@@ -1135,6 +1137,11 @@ export function createAgentHostRuntime(options: AgentHostRuntimeOptions): AgentH
     bindSourceReferenceAncestry(registration.directory);
   }
   const automationAccess: TpmSessionAccess = {
+    controllerId: successionConfig?.controllerId ?? options.controllerId ?? 'local',
+    sessionRouting: successionService?.executionRouting ?? {
+      resolve: anchor => ({ anchor, target: anchor, operationIds: [] }),
+      assertCurrent: (anchor, actual) => { if (closed || draining || nativeSessionRefKey(anchor) !== nativeSessionRefKey(actual)) throw new Error('Execution recipient is unavailable.'); },
+    },
     ...(successionService ? { mainRouting: successionTpmRouting(successionService, successionConfig!.controllerId, acquireNative) } : {}),
     available: () => !closed && !draining,
     supportedProviders: () => [...registrations.values()].filter(({ adapter }) => options.providerEnabled?.(adapter.descriptor.providerId) !== false
@@ -1161,7 +1168,7 @@ export function createAgentHostRuntime(options: AgentHostRuntimeOptions): AgentH
     execute: executeOperation('host:tpm'),
   };
   const tpm = options.tpm ? new TpmCoordinator(options.tpm, automationAccess) : undefined;
-  const team = options.team?.request ? new TeamRuntime(options.team.stateDirectory, {...automationAccess, execute: executeOperation('host:team')}, options.team.request, options.team.tickMs) : undefined;
+  const team = options.team?.request ? new TeamRuntime(options.team.stateDirectory, {...automationAccess, sessionRouting: automationAccess.sessionRouting!, execute: executeOperation('host:team')}, options.team.request, options.team.tickMs) : undefined;
   const enrollment = successionService ? new SessionSuccessionEnrollment(successionService, successionConfig!.controllerId, () => [...registrations.values()], () => tpm?.store.all() ?? [], source => authorizeSuccessionRead(source, source), directoryOperation) : undefined;
   const enrollFromRelay = async (request: RemoteHostControlRequest, context: TrustedSuccessionContext) => {
     if (!options.succession?.enrollment || !enrollment || closed || draining) return json(403, { code: 'succession_enrollment_unavailable', error: 'Trusted succession enrollment is unavailable.' });

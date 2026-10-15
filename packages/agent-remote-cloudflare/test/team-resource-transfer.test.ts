@@ -58,15 +58,18 @@ it('transfers authorized Team resources through the production Worker and preser
   const sent = await call(leaderHost.socket, message);
   expect(sent.status).toBe(200);
   const target = { ...recipient, messageId: sent.body.id };
-  expect((await call(workerHost.socket, { ...target, action: 'claim' })).status).toBe(200);
-  expect((await call(workerHost.socket, { ...target, action: 'settle', outcome: 'accepted', acceptance: 'started' })).status).toBe(200);
+  const claimed = await call(workerHost.socket, { ...target, action: 'claim', expectedNativeSessionId: 'native-worker' });
+  expect(claimed).toMatchObject({status:200,body:{resolvedTarget:{controllerId:'resource-worker',providerId:'codex',nativeSessionId:'native-worker'}}});
+  const resolvedTarget = claimed.body.resolvedTarget;
+  expect((await call(workerHost.socket, { ...target, action:'settle', outcome:'accepted', resolvedTarget:{...resolvedTarget,nativeSessionId:'wrong'} })).status).toBe(409);
+  expect((await call(workerHost.socket, { ...target, action: 'settle', outcome: 'accepted', acceptance: 'started', resolvedTarget })).status).toBe(200);
   await f.restart();
   workerHost = await host('resource-worker', workerHost.key);
   leaderHost = await host('resource-leader', leaderHost.key);
   const replay = await call(leaderHost.socket, message);
   expect(replay.status).toBe(200);
-  expect(replay.body).toMatchObject({id: sent.body.id, status: 'accepted'});
-  expect((await call(workerHost.socket, { ...target, action: 'settle', outcome: 'accepted', acceptance: 'started' })).status).toBe(200);
+  expect(replay.body).toMatchObject({id: sent.body.id, status: 'accepted', resolvedTarget});
+  expect((await call(workerHost.socket, { ...target, action: 'settle', outcome: 'accepted', acceptance: 'started', resolvedTarget })).status).toBe(200);
   const chunks: Buffer[] = [];
   for (let offset = 0; offset < bytes.length; offset += 32768) {
     const received = await call(workerHost.socket, { ...recipient, action: 'resource_read', resourceId, offset });

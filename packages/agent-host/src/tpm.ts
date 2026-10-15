@@ -1,3 +1,4 @@
+import type { SessionExecutionRouting } from './session-succession-service.js';
 import { createHash, randomUUID } from 'node:crypto';
 import type { AgentInputAcceptance, AgentSessionExtensions, AgentSessionTool } from '@orchardworks/agent-provider-sdk';
 import { AgentOperationRejectedError, bindAgentSessionTools } from '@orchardworks/agent-provider-sdk';
@@ -24,9 +25,11 @@ export interface TpmMainRouting {
   resolve(binding: SourceBinding): TpmMainResolution;
   acquire(target: NativeSessionRef): Promise<RemoteHostSessionLease>;
   assertCurrent(binding: SourceBinding, target: NativeSessionRef, roleRevision?: number): void;
-  read?(binding: SourceBinding, input: Record<string, unknown>): Promise<unknown>;
+  read?(binding: SourceBinding, input: Record<string, unknown>, assertReader?: () => void): Promise<unknown>;
 }
 export interface TpmSessionAccess {
+  controllerId: string;
+  sessionRouting?: SessionExecutionRouting;
   mainRouting?: TpmMainRouting;
   supportedProviders(): string[];
   available(): boolean;
@@ -35,7 +38,7 @@ export interface TpmSessionAccess {
   recover?(providerId: string, nativeSessionId: string, extensions: AgentSessionExtensions): Promise<void>;
   execute: SessionWireOperationExecutor;
 }
-interface Attachment { mainResolution?: TpmMainResolution; main: RemoteHostSessionLease; tpm: RemoteHostSessionLease; release(): void }
+interface Attachment { tpmTarget: NativeSessionRef; mainResolution?: TpmMainResolution; main: RemoteHostSessionLease; tpm: RemoteHostSessionLease; release(): void }
 const fingerprint = (value: unknown) => createHash('sha256').update(JSON.stringify(value)).digest('hex');
 function executionOperationId(intentId: string): string {
   if (/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(intentId)) return intentId;
@@ -99,26 +102,54 @@ export class TpmCoordinator {
   }
   async get(id: string): Promise<TpmWork> { await this.ready; await this.reconcileMainBindingSafely(id); return this.visibleWork(this.store.get(id).work); }
   /** Call after ready. Queue acceptance remains unsettled without native execution evidence. */
-  hasUnsettledMain(target: NativeSessionRef): boolean {
+  hasUnsettledRecipient(target: NativeSessionRef): boolean {
     return this.store.all().some(record => (record.work.outbox ?? []).some(intent => {
-      if (intent.target !== 'main' || intent.status === 'prepared' || isTpmIntentSettled(intent)) return false;
-      const recipient = intent.resolvedTarget ?? (record.work.mainBinding && this.access.mainRouting
-        ? this.access.mainRouting.resolve(record.work.mainBinding).target : record.work.mainSessionRef);
-      return recipient ? nativeSessionRefKey(recipient) === nativeSessionRefKey(target)
-        : record.work.providerId === target.providerId && record.work.mainNativeSessionId === target.nativeSessionId;
+      if (intent.status === 'prepared' || isTpmIntentSettled(intent)) return false;
+      if (intent.resolvedTarget) return nativeSessionRefKey(intent.resolvedTarget) === nativeSessionRefKey(target);
+      const known = intent.target === 'tpm' ? this.tpmAnchor(record.work) : record.work.mainSessionRef
+        ?? (record.work.mainBinding?.kind === 'fixed' ? record.work.mainBinding.source : record.work.mainBinding?.origin)
+        ?? { controllerId: this.access.controllerId, providerId: record.work.providerId, nativeSessionId: record.work.mainNativeSessionId };
+      if (known.controllerId !== target.controllerId || known.providerId !== target.providerId) return false;
+      if (nativeSessionRefKey(known) === nativeSessionRefKey(target)) return true;
+      try {
+        if (this.access.sessionRouting && nativeSessionRefKey(this.access.sessionRouting.resolve(known).target) === nativeSessionRefKey(this.access.sessionRouting.resolve(target).target)) return true;
+        return intent.target === 'main' && !!record.work.mainBinding && !!this.access.mainRouting && nativeSessionRefKey(this.access.mainRouting.resolve(record.work.mainBinding).target) === nativeSessionRefKey(target);
+      } catch { return true; }
     }));
   }
-  async extensions(providerId: string, nativeSessionId: string): Promise<AgentSessionExtensions | undefined> {
+  private tpmAnchor(work: TpmWork): NativeSessionRef {
+    if (!work.tpmNativeSessionId) throw new Error('TPM recipient is not attached.');
+    return { controllerId: this.access.controllerId, providerId: work.providerId, nativeSessionId: work.tpmNativeSessionId };
+  }
+  private tpmTarget(work: TpmWork): NativeSessionRef {
+    const anchor = this.tpmAnchor(work); return this.access.sessionRouting?.resolve(anchor).target ?? anchor;
+  }
+  private assertTpmCurrent(work: TpmWork, actual: NativeSessionRef): void {
+    this.admit(work.providerId);
+    if (this.access.sessionRouting) this.access.sessionRouting.assertCurrent(this.tpmAnchor(work), actual);
+    else if (nativeSessionRefKey(this.tpmAnchor(work)) !== nativeSessionRefKey(actual)) throw new Error('TPM recipient is no longer current.');
+  }
+  private roleRecord(providerId: string, nativeSessionId: string): TpmRecord | undefined {
+    const requested = { controllerId: this.access.controllerId, providerId, nativeSessionId };
+    const current = this.access.sessionRouting?.resolve(requested).target ?? requested;
+    const records = this.store.all().filter(value => {
+      if (value.work.providerId !== providerId || !value.work.tpmNativeSessionId) return false;
+      try { return nativeSessionRefKey(this.tpmTarget(value.work)) === nativeSessionRefKey(current); } catch { return false; }
+    });
+    if (records.length > 1) throw new Error('TPM recipient has ambiguous role anchors.');
+    return records[0];
+  }
+  async extensions(providerId: string, nativeSessionId: string, actual: () => string | undefined = () => nativeSessionId): Promise<AgentSessionExtensions | undefined> {
     try { await this.ready; } catch { return undefined; }
-    const record = this.store.all().find(value => value.work.providerId === providerId && value.work.tpmNativeSessionId === nativeSessionId);
-    return record ? this.boundExtensions(record.work.id) : undefined;
+    const record = this.roleRecord(providerId, nativeSessionId);
+    return record ? this.boundExtensions(record.work.id, actual) : undefined;
   }
   async annotateSession(providerId: string, nativeSessionId: string, session: import('@orchardworks/agent-provider-sdk').AgentSession) {
     try { await this.ready; } catch { return session; }
-    const record = this.store.all().find(value => value.work.providerId === providerId && value.work.tpmNativeSessionId === nativeSessionId);
+    const record = this.roleRecord(providerId, nativeSessionId);
     if (!record) return session;
     return withBackgroundReviews(session, {
-      records: () => this.store.backgroundReviews(record.work.id),
+      records: () => this.store.backgroundReviews(record.work.id).filter(review => this.store.get(record.work.id).work.outbox?.some(intent => intent.id === review.id && (intent.resolvedTarget ? nativeSessionRefKey(intent.resolvedTarget) === nativeSessionRefKey({controllerId:this.access.controllerId,providerId,nativeSessionId}) : nativeSessionId === record.work.tpmNativeSessionId))),
       bind: async (id, turnId) => { await this.store.update(record.work.id, undefined, current => {
         const review = current.backgroundReviews?.find(review => review.id === id);
         if (review && review.turnId === undefined) review.turnId = turnId;
@@ -134,7 +165,7 @@ export class TpmCoordinator {
       this.admit(input.providerId);
       const key = JSON.stringify([scope, input.operationId]); const hash = fingerprint(input);
       const previous = this.store.all().find(record => record.createKey === key);
-      if (previous) { if (previous.createFingerprint !== hash) throw new Error('The operation identity was reused with different input.'); return previous.work; }
+      if (previous) { if (previous.createFingerprint !== hash) throw new Error('The operation identity was reused with different input.'); return this.visibleWork(previous.work); }
       const mainBinding = await this.access.mainRouting?.bind(input.providerId, input.mainNativeSessionId);
       const mainResolution = mainBinding ? this.access.mainRouting!.resolve(mainBinding) : undefined;
       const main = mainResolution ? await this.access.mainRouting!.acquire(mainResolution.target) : await this.access.acquire(input.providerId, input.mainNativeSessionId);
@@ -149,7 +180,9 @@ export class TpmCoordinator {
         await this.store.update(id, undefined, record => { record.creation = 'dispatching'; });
         try {
           this.admit(input.providerId);
-          const nativeId = await this.access.create(input.providerId, main.agent.snapshot().payload.runtimeInfo.cwd, this.boundExtensions(id));
+          let actual: string | undefined;
+          const nativeId = await this.access.create(input.providerId, main.agent.snapshot().payload.runtimeInfo.cwd, this.boundExtensions(id, () => actual));
+          actual = nativeId;
           const introduction = input.requirement
             ? `User requirement:\n${input.requirement}\n\nBegin by understanding the user's need and discussing the plan.`
             : 'No requirement has been provided yet. Briefly ask the user what they want to accomplish, then wait for their reply. Do not infer a task from the main session or contact it before the user explains their need.';
@@ -160,7 +193,7 @@ export class TpmCoordinator {
         } catch (error) {
           await this.store.update(id, undefined, record => { if (record.creation !== 'accepted') record.creation = 'unknown'; record.work.health = shortError(error); });
         }
-        this.scheduleTick(); return this.store.get(id).work;
+        this.scheduleTick(); return this.visibleWork(this.store.get(id).work);
       } finally { main.release(); }
     });
   }
@@ -190,11 +223,11 @@ export class TpmCoordinator {
     return this.manage(async () => {
       const previous = this.store.get(input.id); const key = fingerprint([scope, input.operationId]); const hash = fingerprint(input);
       const settled = previous.actions[key];
-      if (settled) { if (settled.fingerprint !== hash) throw new AgentOperationRejectedError('tpm_action_conflict', 'The operation identity was reused with different input.'); return previous.work; }
+      if (settled) { if (settled.fingerprint !== hash) throw new AgentOperationRejectedError('tpm_action_conflict', 'The operation identity was reused with different input.'); return this.visibleWork(previous.work); }
       if (input.action === 'resolve' && input.intentId === 'creation' && input.resolution === 'accepted') {
         const nativeId = input.nativeSessionId;
         this.validateCreationRecovery(input, scope);
-        await this.access.recover!(previous.work.providerId, nativeId!, this.boundExtensions(input.id));
+        await this.access.recover!(previous.work.providerId, nativeId!, this.boundExtensions(input.id, () => nativeId));
       }
       const updated = await this.store.update(input.id, input.action === 'confirm_todo' ? undefined : input.revision, record => {
         if (input.action === 'set_delegated') {
@@ -269,7 +302,7 @@ export class TpmCoordinator {
         const keys = Object.keys(record.actions); for (const old of keys.slice(0, Math.max(0, keys.length - 200))) delete record.actions[old];
       });
       if (!active(updated.work)) this.detach(input.id);
-      this.scheduleTick(); return updated.work;
+      this.scheduleTick(); return this.visibleWork(updated.work);
     });
   }
   async handoff(providerId: string, nativeSessionId: string): Promise<void> {
@@ -293,6 +326,11 @@ export class TpmCoordinator {
       if (!active(record.work)) { this.detach(record.work.id); continue; }
       if (!automatic(record.work) && !record.reviewIntentId && !record.work.outbox?.some(intent => intent.status === 'prepared')) { this.detach(record.work.id); continue; }
       if ((this.retries.get(record.work.id) ?? 0) > this.now() || !record.work.tpmNativeSessionId || unknown(record) || this.workers.has(record.work.id)) continue;
+      const held = this.attachments.get(record.work.id);
+      if (held) {
+        try { if (nativeSessionRefKey(held.tpmTarget) !== nativeSessionRefKey(this.tpmTarget(record.work))) this.detach(record.work.id); }
+        catch (error) { await this.recordFailure(record.work.id, error); continue; }
+      }
       // Retain every active binding, then spend worker slots only on pending or due work.
       if (this.attachments.has(record.work.id) && !record.work.outbox?.some(intent => intent.status === 'prepared') && record.work.nextCheckAt > this.now()) continue;
       if ([...this.workers.keys()].filter(id => active(this.store.get(id).work)).length >= 2) break;
@@ -324,7 +362,9 @@ export class TpmCoordinator {
   }
   private visibleWork(work: TpmWork): TpmWork {
     const health = this.failures.get(work.id) ?? this.schedulerFailure;
-    return { ...work, delegated: work.delegated ?? true, ...(health ? { health } : {}) };
+    let current: string | undefined;
+    try { current = work.tpmNativeSessionId ? this.tpmTarget(work).nativeSessionId : undefined; } catch { /* An unavailable route must not expose a retired executable locator. */ }
+    return { ...work, tpmNativeSessionId: current, delegated: work.delegated ?? true, ...(health ? { health } : {}) };
   }
   private async recordFailure(id: string, error: unknown): Promise<void> {
     const message = shortError(error);
@@ -380,14 +420,18 @@ export class TpmCoordinator {
   }
   private async attach(id: string): Promise<Attachment> {
     const mainResolution = await this.reconcileMainBinding(id);
-    const existing = this.attachments.get(id); if (existing) return existing;
+    const tpmTarget = this.tpmTarget(this.store.get(id).work);
+    let existing = this.attachments.get(id);
+    if (existing && nativeSessionRefKey(existing.tpmTarget) !== nativeSessionRefKey(tpmTarget)) { this.detach(id); existing = undefined; }
+    if (existing) return existing;
     const pending = this.attaching.get(id); if (pending) return pending;
     const operation = (async () => {
       const record = this.store.get(id); this.admit(record.work.providerId);
       const main = mainResolution ? await this.access.mainRouting!.acquire(mainResolution.target) : await this.access.acquire(record.work.providerId, record.work.mainNativeSessionId);
       let tpm: RemoteHostSessionLease | undefined;
       try {
-        tpm = await this.access.acquire(record.work.providerId, record.work.tpmNativeSessionId!);
+        tpm = await this.access.acquire(tpmTarget.providerId, tpmTarget.nativeSessionId);
+        this.assertTpmCurrent(this.store.get(id).work, tpmTarget);
         let contentChanged = false; let coalesce: ReturnType<typeof setTimeout> | undefined;
         let mainStatus = main.agent.snapshot().payload.status;
         const markDirty = () => {
@@ -429,7 +473,7 @@ export class TpmCoordinator {
             item.work.health = automatic(item.work) ? 'The last review ended without updating work state. A heartbeat will check again.' : 'The last review ended without updating work state. Background delegation is off.';
           }).catch(() => undefined);
         });
-        const attachment: Attachment = { mainResolution, main, tpm, release() { clearTimeout(coalesce); unsubscribeMain(); unsubscribeTpm(); main.release(); tpm!.release(); } };
+        const attachment: Attachment = { tpmTarget, mainResolution, main, tpm, release() { clearTimeout(coalesce); unsubscribeMain(); unsubscribeTpm(); main.release(); tpm!.release(); } };
         if (this.closed || !active(this.store.get(id).work)) { attachment.release(); throw new Error('TPM work is paused or closed.'); }
         if (mainResolution) {
           try { this.access.mainRouting!.assertCurrent(record.work.mainBinding!, mainResolution.target, mainResolution.roleRevision); }
@@ -495,30 +539,14 @@ export class TpmCoordinator {
     const before = this.store.get(id); if (!active(before.work) || unknown(before)) return;
     if (candidate.target === 'tpm' && candidate.purpose === 'review' && !automatic(before.work)) return;
     this.admit(before.work.providerId);
-    if (candidate.target === 'main') attachment = await this.attach(id);
+    attachment = await this.attach(id);
     const target = candidate.target === 'main' ? attachment.main : attachment.tpm;
-    const resolution: TpmMainResolution | undefined = candidate.target === 'main' ? attachment.mainResolution
-      : before.work.mainSessionRef && before.work.tpmNativeSessionId ? { target: {
-        controllerId: before.work.mainSessionRef.controllerId, providerId: before.work.providerId, nativeSessionId: before.work.tpmNativeSessionId,
-      } } : undefined;
+    const resolution: TpmMainResolution = candidate.target === 'main' ? attachment.mainResolution ?? { target: { controllerId: this.access.controllerId, providerId: before.work.providerId, nativeSessionId: before.work.mainNativeSessionId } } : { target: attachment.tpmTarget };
     const queue = candidate.target === 'main' && target.agent.snapshot().payload.capabilities.queueMessage === true;
     if (!this.canSend(target, queue)) return;
     if (candidate.target === 'tpm' && (before.reviewIntentId && before.reviewIntentId !== candidate.id || !this.reserveReview(id))) return;
     try {
       let claimed = false;
-      await this.store.update(id, undefined, record => {
-        const intent = record.work.outbox?.find(value => value.id === candidate.id);
-        if (!intent || intent.status !== 'prepared' || !active(record.work) || unknown(record) || candidate.target === 'tpm' && candidate.purpose === 'review' && !automatic(record.work)) return;
-        if (resolution) {
-          if (intent.resolvedTarget && (nativeSessionRefKey(intent.resolvedTarget) !== nativeSessionRefKey(resolution.target) || intent.roleRevision !== resolution.roleRevision)) {
-            intent.status = 'rejected'; intent.error = 'The admitted main recipient changed. Submit a new operation after reviewing its outcome.'; return;
-          }
-          intent.resolvedTarget = resolution.target; intent.roleRevision = resolution.roleRevision;
-        }
-        intent.status = 'dispatching'; claimed = true;
-        if (candidate.target === 'tpm') { record.reviewIntentId = intent.id; record.reviewVersion = record.changeVersion ?? 0; record.lastReviewAt = this.now(); record.work.nextCheckAt = this.now() + this.heartbeat(record.work); }
-      });
-      if (!claimed) return;
       let settlement = Promise.resolve();
       const settle = (outcome: { status: 'accepted'; acceptance?: AgentInputAcceptance } | { status: 'rejected' | 'unknown'; error: string }, callback = false) => {
         const next = settlement.catch(() => undefined).then(async () => {
@@ -553,34 +581,65 @@ export class TpmCoordinator {
           if (!this.closed) void this.recordFailure(id, error);
         });
       };
+      const check = () => {
+        const record = this.store.get(id); this.admit(record.work.providerId);
+        if (candidate.target === 'main') {
+          this.assertTodoDispatch(record, candidate.todoStepId, candidate.todoPlanRevision, candidate.purpose.split(':')[0]!);
+          if (record.work.mainBinding && this.access.mainRouting) {
+            try { this.access.mainRouting!.assertCurrent(record.work.mainBinding!, resolution.target, resolution.roleRevision); }
+            catch (error) { throw new AgentOperationRejectedError('tpm_main_changed', shortError(error)); }
+          }
+        }
+        if (candidate.target === 'tpm') this.assertTpmCurrent(record.work, resolution.target);
+        if (!active(record.work) || candidate.target === 'tpm' && candidate.purpose === 'review' && !automatic(record.work) || !this.canSend(target, queue)) throw new AgentOperationRejectedError('tpm_dispatch_deferred', 'TPM follow-up stopped or native input became unavailable before dispatch.');
+      };
       try {
         const options = queue ? { delivery: 'next_turn' as const } : undefined;
         const result = await this.access.execute(target.agent, { operationId: executionOperationId(candidate.id), kind: 'send_message', parameters: { text: candidate.text, ...(options ? { options } : {}) }, maximumResultBytes: 4096 }, {
-          beforeDispatch: () => {
-            const record = this.store.get(id); this.admit(record.work.providerId);
-            if (candidate.target === 'main') {
-              this.assertTodoDispatch(record, candidate.todoStepId, candidate.todoPlanRevision, candidate.purpose.split(':')[0]!);
+          beforeDispatch: check,
+          dispatch: async () => {
+            check();
+            await this.store.update(id, undefined, record => {
+              check();
+              const intent = record.work.outbox?.find(value => value.id === candidate.id);
+              if (!intent || intent.status !== 'prepared' || !active(record.work) || unknown(record) || candidate.target === 'tpm' && candidate.purpose === 'review' && !automatic(record.work)) return;
               if (resolution) {
-                try { this.access.mainRouting!.assertCurrent(record.work.mainBinding!, resolution.target, resolution.roleRevision); }
-                catch (error) { throw new AgentOperationRejectedError('tpm_main_changed', shortError(error)); }
+                if (intent.resolvedTarget && (nativeSessionRefKey(intent.resolvedTarget) !== nativeSessionRefKey(resolution.target) || intent.roleRevision !== resolution.roleRevision)) {
+                  intent.status = 'rejected'; intent.error = 'The admitted main recipient changed. Submit a new operation after reviewing its outcome.'; return;
+                }
+                intent.resolvedTarget = resolution.target; intent.roleRevision = resolution.roleRevision;
               }
-            }
-            if (!active(record.work) || candidate.target === 'tpm' && candidate.purpose === 'review' && !automatic(record.work) || !this.canSend(target, queue)) throw new AgentOperationRejectedError('tpm_dispatch_deferred', 'TPM follow-up stopped or native input became unavailable before dispatch.');
-          }, dispatch: () => target.agent.sendMessage(candidate.text, { ...options, onAcceptance }),
+              intent.status = 'dispatching'; claimed = true;
+              if (candidate.target === 'tpm') { record.reviewIntentId = intent.id; record.reviewVersion = record.changeVersion ?? 0; record.lastReviewAt = this.now(); record.work.nextCheckAt = this.now() + this.heartbeat(record.work); }
+            });
+            if (!claimed) throw new AgentOperationRejectedError('tpm_dispatch_deferred', 'TPM intent is no longer prepared.');
+            check(); return target.agent.sendMessage(candidate.text, { ...options, onAcceptance });
+          },
         });
         const acceptance = result && typeof result === 'object' && 'disposition' in result && ['started', 'queued', 'handled'].includes(String(result.disposition))
           ? { disposition: result.disposition as AgentInputAcceptance['disposition'] } : undefined;
         await settle({ status: 'accepted', acceptance });
       } catch (error) {
+        if (!claimed) {
+          if (error instanceof AgentOperationRejectedError && ['tpm_paused', 'todo_step_unavailable', 'todo_approval_required'].includes(error.code)) {
+            await this.store.update(id, undefined, record => {
+              const intent = record.work.outbox?.find(value => value.id === candidate.id);
+              if (intent?.status === 'prepared' && intent.text === candidate.text && intent.createdAt === candidate.createdAt) {
+                intent.status = 'rejected'; intent.error = shortError(error);
+              }
+            });
+          }
+          return;
+        }
         const rejected = error instanceof AgentOperationRejectedError || error instanceof OperationCacheError && error.code !== 'operation_outcome_unknown';
         await settle({ status: rejected ? 'rejected' : 'unknown', error: shortError(error) });
       }
     } finally { if (candidate.target === 'tpm') this.reviewReservations.delete(id); }
   }
-  private async enqueue(id: string, target: 'main' | 'tpm', purpose: string, text: string, operationId: string = randomUUID(), todo?: Pick<TpmIntent, 'todoStepId' | 'todoPlanRevision'>): Promise<TpmIntent> {
+  private async enqueue(id: string, target: 'main' | 'tpm', purpose: string, text: string, operationId: string = randomUUID(), todo?: Pick<TpmIntent, 'todoStepId' | 'todoPlanRevision'>, assertCurrent: () => void = () => {}): Promise<TpmIntent> {
     let result: TpmIntent | undefined;
     await this.store.update(id, undefined, record => {
-      result = this.enqueueRecord(record, target, purpose, text, operationId, todo);
+      assertCurrent(); result = this.enqueueRecord(record, target, purpose, text, operationId, todo);
     });
     return result!;
   }
@@ -605,8 +664,9 @@ export class TpmCoordinator {
       throw new AgentOperationRejectedError('todo_approval_required', 'Implementation requires explicit user approval of the current plan and specification.');
     }
   }
-  private async assess(id: string, input: Record<string, any>): Promise<TpmWork> {
+  private async assess(id: string, input: Record<string, any>, assertCurrent: () => void = () => {}): Promise<TpmWork> {
     const result = await this.store.update(id, input.revision, record => {
+      assertCurrent();
       const previous = { phase: record.work.phase, waiting: record.work.waiting, summary: record.work.summary, nextAction: record.work.nextAction };
       if (input.reviewId !== undefined) {
         const review = record.backgroundReviews?.find(review => review.id === input.reviewId);
@@ -630,25 +690,26 @@ export class TpmCoordinator {
       if (active(record.work)) record.work.nextCheckAt = this.now() + (record.dirty ? this.options.coalesceMs ?? 2000 : this.heartbeat(record.work));
     });
     if (!active(result.work)) this.detach(id);
-    return result.work;
+    return this.visibleWork(result.work);
   }
-  private boundExtensions(id: string): AgentSessionExtensions {
+  private boundExtensions(id: string, actual: () => string | undefined = () => this.store.get(id).work.tpmNativeSessionId): AgentSessionExtensions {
+    const assertCurrent = () => { const work = this.store.get(id).work, nativeSessionId = actual(); if (!nativeSessionId) throw new Error('TPM recipient is not attached.'); this.assertTpmCurrent(work, { controllerId: this.access.controllerId, providerId: work.providerId, nativeSessionId }); };
     const integer = { type: 'integer', minimum: 1 };
     const text = { type: 'string', maxLength: 65536 };
     const short = { type: 'string', maxLength: 2048 };
     const tool = (name: string, description: string, properties: Record<string, unknown>, required: string[], execute: (input: Record<string, any>) => Promise<unknown>): AgentSessionTool => ({
       name, description, inputSchema: { type: 'object', properties, required, additionalProperties: false },
       execute: async args => {
-        await this.ready; const record = this.store.get(id); this.admit(record.work.providerId);
+        await this.ready; const record = this.store.get(id); assertCurrent();
         return JSON.stringify(await execute(args as Record<string, any>));
       },
     });
     return { instructions: `${tpmInstructions(id)}\n\n${sessionTodoInstructions}\n\n${sessionHeartbeatInstructions}`, tools: bindAgentSessionTools([
       ...sessionTodoTools({
-        read: async () => { await this.ready; const record = this.store.get(id); this.admit(record.work.providerId); if (!record.work.todo) throw new Error('Reopen this completed work to start a new list.'); return record.work.todo; },
+        read: async () => { await this.ready; const record = this.store.get(id); assertCurrent(); if (!record.work.todo) throw new Error('Reopen this completed work to start a new list.'); return record.work.todo; },
         change: async input => {
           const result = await this.store.update(id, undefined, record => {
-            this.admit(record.work.providerId);
+            assertCurrent();
             if (!active(record.work) || !record.work.todo) throw new Error('This work is paused or completed.');
             if (record.work.outbox?.some(intent => intent.target === 'main' && ['prepared', 'dispatching', 'unknown'].includes(intent.status)) && ['complete', 'revise_remaining'].includes(input.action)) throw new Error('Settle pending main-session communication before advancing the todo.');
             record.work.todo = changeSessionTodo(record.work.todo, input);
@@ -659,11 +720,11 @@ export class TpmCoordinator {
         },
       }),
       tool('read_work', 'Read this work and document versions. An optional documentRevision reads an older artifact without changing the current work revision.', { documentRevision: integer }, [], async input => {
-        await this.reconcileMainBinding(id); const record = this.store.get(id);
+        await this.reconcileMainBinding(id); assertCurrent(); const record = this.store.get(id);
         const historical = input.documentRevision !== undefined && input.documentRevision !== record.work.documentRevision
           ? record.documentHistory?.find(version => version.revision === input.documentRevision) : undefined;
         if (input.documentRevision !== undefined && input.documentRevision !== record.work.documentRevision && !historical) throw new Error('The requested work document revision is unavailable.');
-        return { ...record.work, delegated: record.work.delegated ?? true, outbox: record.work.outbox?.map(intent => ['accepted', 'rejected', 'canceled'].includes(intent.status) ? { ...intent, text: '[Settled message text omitted.]' } : intent),
+        return { ...this.visibleWork(record.work), delegated: record.work.delegated ?? true, outbox: record.work.outbox?.map(intent => ['accepted', 'rejected', 'canceled'].includes(intent.status) ? { ...intent, text: '[Settled message text omitted.]' } : intent),
           ...(historical ? { document: historical.document, acceptance: historical.acceptance, evidence: historical.evidence ?? [] } : {}), requirement: record.requirement, creation: record.creation, titleSetByUser: !!record.titleSetByUser,
           activeReviewId: record.backgroundReviews?.some(review => review.id === record.reviewIntentId) ? record.reviewIntentId : undefined,
           documentRevision: input.documentRevision ?? record.work.documentRevision, documentVersions: (record.documentHistory ?? []).map(version => ({ revision: version.revision })) };
@@ -675,15 +736,18 @@ export class TpmCoordinator {
         sourceRef: { type: 'object', properties: { controllerId: { type: 'string', minLength: 1, maxLength: 512 }, providerId: { type: 'string', minLength: 1, maxLength: 512 }, nativeSessionId: { type: 'string', minLength: 1, maxLength: 512 } }, required: ['controllerId', 'providerId', 'nativeSessionId'], additionalProperties: false },
         limit: { type: 'integer', minimum: 1, maximum: 100 }, query: { type: 'string', maxLength: 500 },
       }, [], async input => {
-        const resolution = await this.reconcileMainBinding(id); const record = this.store.get(id);
-        if (record.work.mainBinding && this.access.mainRouting?.read) return this.access.mainRouting.read(record.work.mainBinding, input);
+        const resolution = await this.reconcileMainBinding(id); assertCurrent(); const record = this.store.get(id);
+        if (record.work.mainBinding && this.access.mainRouting?.read) { assertCurrent(); const result = await this.access.mainRouting.read(record.work.mainBinding, input, assertCurrent); assertCurrent(); return result; }
         if ((resolution?.roleRevision ?? 1) > 1 || typeof input.cursor === 'string' || input.sourceContext || input.sourceRef) {
           throw new Error('Contextual main-session reading is unavailable. Reconnect to a Controller with source history support.');
         }
+        assertCurrent();
         const lease = resolution ? await this.access.mainRouting!.acquire(resolution.target) : await this.access.acquire(record.work.providerId, record.work.mainNativeSessionId);
         try {
+          assertCurrent();
           const request = { requestId: randomUUID(), agentId: lease.agent.agentId, direction: input.direction ?? 'tail', limit: input.limit ?? 40, ...(input.cursor ? { cursor: input.cursor } : {}) };
           const page = await (lease.agent.loadTimeline?.(request) ?? lease.agent.fetchTimeline(request));
+          assertCurrent();
           const query = input.query?.toLocaleLowerCase();
           const entries = page.payload.entries.filter(entry => !query || JSON.stringify(entry.item).toLocaleLowerCase().includes(query));
           // Explicitly truncate bodies while preserving native cursors, never silently claim a complete history.
@@ -708,38 +772,39 @@ export class TpmCoordinator {
         if (existing) { if (existing.purpose !== purpose) throw new Error('Message identity was reused with different content.'); return existing; }
         this.assertTodoDispatch(record, input.todoStepId, record.work.todo?.planRevision, input.purpose);
         const message = `[TPM ${id}; todo ${input.todoStepId}; spec revision ${record.work.documentRevision}; ${input.purpose}]\n${input.text}\n\nReply with evidence relevant to this work. Do not infer that unrelated main-session work belongs to it.`;
-        const intent = await this.enqueue(id, 'main', purpose, message, messageId, { todoStepId: input.todoStepId, todoPlanRevision: record.work.todo!.planRevision });
+        const intent = await this.enqueue(id, 'main', purpose, message, messageId, { todoStepId: input.todoStepId, todoPlanRevision: record.work.todo!.planRevision }, assertCurrent);
         this.scheduleTick(); return intent;
       }),
       tool('update_work', 'Record your delivery assessment and acknowledge this review. Set title when the conversation establishes the objective. User-set titles are preserved. Completion requires explicit acceptance criteria and evidence. Does not change user pause.', {
         reviewId: { type: 'string', minLength: 1, maxLength: 128 }, notify: { type: 'boolean' },
         revision: integer, phase: { type: 'string', enum: ['clarifying', 'ready', 'implementing', 'validating', 'completed'] }, waiting: { type: 'string', enum: ['none', 'user', 'main_session'] },
         title: { type: 'string', minLength: 1, maxLength: 256, pattern: '\\S' }, summary: short, nextAction: short, acceptance: text, evidence: { type: 'array', items: short, maxItems: 100 },
-      }, ['revision', 'phase', 'waiting', 'summary', 'nextAction'], input => this.assess(id, input)),
+      }, ['revision', 'phase', 'waiting', 'summary', 'nextAction'], input => this.assess(id, input, assertCurrent)),
       tool('complete_work', 'Finish this delivery and stop automatic follow-up. Requires all todo tasks, explicit user confirmations, acceptance criteria, and work-specific evidence. Does not archive the conversation.', {
         reviewId: { type: 'string', minLength: 1, maxLength: 128 }, notify: { type: 'boolean' },
         revision: integer, summary: short, acceptance: text, evidence: { type: 'array', items: short, minItems: 1, maxItems: 100 },
-      }, ['revision', 'summary', 'evidence'], input => this.assess(id, { ...input, phase: 'completed', waiting: 'none', nextAction: '' })),
+      }, ['revision', 'summary', 'evidence'], input => this.assess(id, { ...input, phase: 'completed', waiting: 'none', nextAction: '' }, assertCurrent)),
       tool('write_work_document', 'Replace this work PRD/spec Markdown and acceptance criteria with a revision check. Does not write project files.', {
         revision: integer, document: text, acceptance: text,
-      }, ['revision', 'document', 'acceptance'], async input => (await this.store.update(id, input.revision, record => {
+      }, ['revision', 'document', 'acceptance'], async input => this.visibleWork((await this.store.update(id, input.revision, record => {
+        assertCurrent();
         if (record.work.archived) throw new Error('This work is archived. Restore and resume it before changing its document.');
         if (record.work.document !== input.document || record.work.acceptance !== input.acceptance) {
           if (record.work.todo) record.work.todo = invalidateSessionTodoApproval(record.work.todo);
           if (record.work.todo && currentSessionTodo(record.work.todo)?.kind === 'confirmation') record.work.waiting = 'user';
         }
         record.work.document = input.document; record.work.acceptance = input.acceptance;
-      })).work),
+      })).work)),
       ...sessionHeartbeatTools({
         read: async () => {
-          await this.ready; const record = this.store.get(id); this.admit(record.work.providerId);
+          await this.ready; const record = this.store.get(id); assertCurrent();
           return { now: this.now(), lastReviewAt: record.lastReviewAt, intervalMs: this.heartbeat(record.work), minimumIntervalMs: this.options.minimumReviewMs ?? 30000 };
         },
-        schedule: async (at, reason) => (await this.store.update(id, undefined, record => {
-          this.admit(record.work.providerId); if (!automatic(record.work)) throw new Error('Background scheduling requires delegated, active work.');
+        schedule: async (at, reason) => this.visibleWork((await this.store.update(id, undefined, record => {
+          assertCurrent(); if (!automatic(record.work)) throw new Error('Background scheduling requires delegated, active work.');
           record.work.nextCheckAt = at; record.work.nextAction = reason;
-        })).work,
+        })).work),
       }),
-    ]) };
+    ], assertCurrent) };
   }
 }

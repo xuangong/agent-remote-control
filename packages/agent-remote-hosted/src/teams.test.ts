@@ -11,10 +11,10 @@ function fixture(create?: (seat:TeamSeat)=>Promise<TeamSeat['member']>, lifetime
   const resources=new PortableTeamResourceStore({storage,...(lifetime?{now:lifetime.now,draftTtlMs:lifetime.ttl}:{})});
   let state:Team[]=[], now=100;
   const calls:TeamSeat[]=[];
-  const ports:ConstructorParameters<typeof TeamBroker>[0]={resources,resourceDraftTtlMs:lifetime?.ttl,read:()=>state,now:lifetime?.now??(()=>++now),assertHost:()=>{},change:async update=>{const draft=structuredClone(state);const result=structuredClone(update(draft));state=draft;return result;},
+  const ports:ConstructorParameters<typeof TeamBroker>[0]={resolveSession:(hostId,providerId,nativeSessionId)=>({controllerId:hostId,providerId,nativeSessionId}),resources,resourceDraftTtlMs:lifetime?.ttl,read:()=>state,now:lifetime?.now??(()=>++now),assertHost:()=>{},change:async update=>{const draft=structuredClone(state);const result=structuredClone(update(draft));state=draft;return result;},
     createSeat:async(_,seat)=>{calls.push(seat);return create ? create(seat) : {...seat.member,nativeSessionId:`native-${seat.member.id}`,creation:'ready',activity:'idle'};}};
   const broker=new TeamBroker(ports);
-  return {broker,calls,snapshot:()=>structuredClone(state),seed:(saved:Team[])=>{state=structuredClone(saved);},restart:()=>new TeamBroker({...ports,resources:new PortableTeamResourceStore({storage,...(lifetime?{now:lifetime.now,draftTtlMs:lifetime.ttl}:{})})})};
+  return {broker,calls,ports,snapshot:()=>structuredClone(state),seed:(saved:Team[])=>{state=structuredClone(saved);},restart:()=>new TeamBroker({...ports,resources:new PortableTeamResourceStore({storage,...(lifetime?{now:lifetime.now,draftTtlMs:lifetime.ttl}:{})})})};
 }
 const source={hostId:'mac',providerId:'codex',nativeSessionId:'main',title:'Project'};
 async function group(f=fixture()) {
@@ -177,7 +177,7 @@ it('deduplicates settled sends and late receipts across a broker restart without
 it('reclaims legacy settled history before admitting new messages while preserving uncertain input',async()=>{
   const {broker,team,leader,worker,seed,restart}=await group();
   const legacy=structuredClone(team);
-  legacy.messages=Array.from({length:199},(_,i)=>({id:`old-${i}`,from:leader.id,to:worker.id,text:'old completed input',status:i%2?'rejected' as const:'accepted' as const,createdAt:1}));
+  legacy.messages=Array.from({length:199},(_,i)=>({id:`old-${i}`,from:leader.id,to:worker.id,text:'old completed input',status:i%2?'rejected' as const:'accepted' as const,...(i%2?{}:{acceptance:'started' as const}),createdAt:1}));
   legacy.messages.push({id:'uncertain',from:leader.id,to:worker.id,text:'Keep this input',status:'unknown',createdAt:2});
   seed([legacy]);
   const restored=restart();
@@ -235,4 +235,67 @@ it('evicts retry receipts under shared storage pressure without discarding queue
     expect(stored.reduce((count,team)=>count+team.messages.length,0)).toBe(128);
     expect(stored.reduce((count,team)=>count+(team.deliveryReceipts?.length??0),0)).toBeLessThan(32);
   } finally { await broker.close(); }
+});
+
+
+it('projects every Team response through the current recipient and pins claim evidence across compaction', async () => {
+  const f = await group(); const anchor = f.worker.nativeSessionId!;
+  const recipient = { controllerId: 'controller-win', providerId: f.worker.providerId, nativeSessionId: 'B' };
+  f.ports.resolveSession = (hostId, providerId, nativeSessionId) => ({ controllerId: `controller-${hostId}`, providerId, nativeSessionId: nativeSessionId === anchor ? recipient.nativeSessionId : nativeSessionId });
+  const sent = await f.broker.hostCall('mac', { action: 'send', teamId: f.team.id, memberId: f.leader.id, to: f.worker.id, operationId: 'prefix', text: 'Inspect once' }) as any;
+  const claim = { teamId: f.team.id, memberId: f.worker.id, messageId: sent.id };
+  for (const result of [f.broker.list()[0], await f.broker.hostCall('win', { action: 'read', teamId: f.team.id, memberId: f.worker.id }), await f.broker.action({ action: 'rename', teamId: f.team.id, title: 'Renamed' }), await f.broker.action({ action: 'retry_creation', teamId: f.team.id, memberId: f.worker.id })] as Team[]) expect(result.members[1]!.nativeSessionId).toBe('B');
+  expect(f.snapshot()[0]!.members[1]!.nativeSessionId).toBe(anchor);
+  await expect(f.broker.hostCall('win', { action: 'claim', ...claim })).rejects.toThrow(/recipient|moved/);
+  await expect(f.broker.hostCall('win', { action: 'claim', ...claim, expectedNativeSessionId: anchor })).rejects.toThrow(/recipient/);
+  const claimed = await f.broker.hostCall('win', { action: 'claim', ...claim, expectedNativeSessionId: 'B' });
+  expect(claimed).toMatchObject({ status: 'dispatching', resolvedTarget: recipient });
+  expect(f.broker.hasUnsettledRecipient(recipient)).toBe(true);
+  await expect(f.broker.hostCall('win', { action: 'settle', ...claim, outcome: 'accepted', resolvedTarget: { ...recipient, nativeSessionId: 'other' } })).rejects.toThrow(/recipient/);
+  await f.broker.hostCall('win', { action: 'settle', ...claim, outcome: 'accepted', acceptance: 'queued', resolvedTarget: recipient });
+  expect(f.broker.hasUnsettledRecipient(recipient)).toBe(true);
+  await f.broker.hostCall('win', { action: 'settle', ...claim, outcome: 'accepted', acceptance: 'started', resolvedTarget: recipient });
+  expect(f.broker.hasUnsettledRecipient(recipient)).toBe(false);
+  recipient.nativeSessionId = 'C';
+  const restarted = f.restart();
+  expect(validSavedTeam(f.snapshot()[0])).toBe(true);
+  expect(await restarted.hostCall('mac', { action: 'send', teamId: f.team.id, memberId: f.leader.id, to: f.worker.id, operationId: 'prefix', text: 'Inspect once' })).toMatchObject({ status: 'accepted', resolvedTarget: { ...recipient, nativeSessionId: 'B' } });
+  f.ports.resolveSession = () => { throw new Error('Generic succession unavailable'); };
+  expect(f.broker.list()[0]!.members[1]!.nativeSessionId).toBeUndefined();
+  expect(isTeam(f.broker.list()[0])).toBe(true);
+  expect(validSavedTeam(f.broker.list()[0])).toBe(false);
+  const queued = await f.broker.hostCall('mac', {action:'send',teamId:f.team.id,memberId:f.leader.id,to:f.worker.id,operationId:'unavailable',text:'Wait'}) as any;
+  await expect(f.broker.hostCall('win', {action:'claim',teamId:f.team.id,memberId:f.worker.id,messageId:queued.id,expectedNativeSessionId:'C'})).rejects.toThrow('unavailable');
+  expect(f.snapshot()[0]!.messages.find(message => message.id === queued.id)!.status).toBe('queued');
+});
+
+
+it('reserves bounded recipient evidence before admitting a queue that can later be claimed', async () => {
+  const f = await group();
+  const nativeSessionId = '\u0000'.repeat(512);
+  f.ports.resolveSession = (_host, providerId) => ({ controllerId: '\u0000'.repeat(512), providerId, nativeSessionId });
+  const ids: string[] = [];
+  for (let index = 0; index < 30; index++) {
+    try { const result = await f.broker.hostCall('mac', {action:'send',teamId:f.team.id,memberId:f.leader.id,to:f.worker.id,operationId:`bounded-${index}`,text:'x'.repeat(16000)}) as any; ids.push(result.id); }
+    catch { break; }
+  }
+  expect(ids.length).toBeGreaterThan(0);
+  for (const messageId of ids) {
+    await f.broker.hostCall('win', {action:'claim',teamId:f.team.id,memberId:f.worker.id,messageId,expectedNativeSessionId:nativeSessionId});
+    expect(Buffer.byteLength(JSON.stringify(f.snapshot()[0]!.messages))).toBeLessThanOrEqual(128 * 1024);
+  }
+});
+
+
+it('limits legacy unresolved recipient blockers to the owning Controller when its anchor route is unavailable', async () => {
+  const f = await group();
+  const state = f.snapshot();
+  state[0]!.messages.push({ id: 'legacy', from: f.leader.id, to: f.worker.id, text: 'Unknown effect', status: 'unknown', createdAt: 1 });
+  f.seed(state);
+  f.ports.resolveSession = (hostId, providerId, nativeSessionId) => {
+    if (nativeSessionId === f.worker.nativeSessionId) throw new Error('Unavailable legacy route');
+    return { controllerId: hostId, providerId, nativeSessionId };
+  };
+  expect(f.broker.hasUnsettledRecipient({ controllerId: 'other', providerId: 'claude', nativeSessionId: 'other-session' })).toBe(false);
+  expect(f.broker.hasUnsettledRecipient({ controllerId: 'win', providerId: 'claude', nativeSessionId: 'current-session' })).toBe(true);
 });

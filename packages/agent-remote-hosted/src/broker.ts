@@ -200,6 +200,12 @@ export function createHostBroker(options: HostBrokerOptions) {
     return operation;
   }
   const teams = new TeamBroker({
+    resolveSession(hostId, providerId, nativeSessionId) {
+      const host = hosts.get(hostId);
+      if (!host) throw new Error('Team recipient Host is unavailable.');
+      return resolveNativePrefix(associationSource(host, providerId, nativeSessionId), prefixRecords(host)).target;
+    },
+    assertRecipient: target => assertAssociationOpen(target),
     resources: options.teamResources,
     now, read: () => teamState,
     change: update => commit(draft => {
@@ -323,6 +329,7 @@ export function createHostBroker(options: HostBrokerOptions) {
             return { value: result, publish() { associations = state; } };
           }
           if (state.admissions.some(admission => described.lineage.some((ref: NativeSessionRef) => nativeSessionRefKey(ref) === nativeSessionRefKey(admission.source)))) throw new BrokerError(409, 'association_outcome_unknown', 'Settle source creation before succession.');
+          if (teams.hasUnsettledRecipient(source)) throw new BrokerError(409, 'team_delivery_unsettled', 'Settle Team delivery before succession.');
           const proposal: Omit<BoundedSuccessionAssociationFreeze | NativePrefixSuccessionAssociationFreeze, 'maxProjectionBytes'> = { version: preparation ? 3 : 2, token: randomUUID(), authority: options.successionEnrollment!, controllerId: host.installationId,
             request: { operationId, roleId: described.role.id, expectedRevision: input.expectedRevision as number, from: source, ...(targetProviderId ? { targetProviderId } : {}), ...(preparation ? { preparation } : {}) },
             associationRevision: state.revision, lineage: described.lineage,
@@ -363,6 +370,7 @@ export function createHostBroker(options: HostBrokerOptions) {
       const result = { record: structuredClone(frozen.projection.receipt), role: structuredClone(frozen.projection.role), locator: { hostId: host.id, providerId: frozen.projection.role.current.providerId, nativeSessionId: frozen.projection.role.current.nativeSessionId } };
       return withContextStatus(result);
     }
+    if (action === 'commit' && teams.hasUnsettledRecipient(frozen.receipt.request.from)) throw new BrokerError(409, 'team_delivery_unsettled', 'Settle Team delivery before succession.');
     const result = await associationRpc(host, { action, freeze: frozen.receipt });
     if (!isSuccessionRecord(result.record) || !isPrimaryRole(result.role) || !result.freeze || successionFreezeKey(result.freeze) !== successionFreezeKey(frozen.receipt)
       || result.record.operationId !== operationId || result.record.roleId !== frozen.receipt.request.roleId) throw new BrokerError(502, 'invalid_host_response', 'The saved succession receipt could not be verified.');

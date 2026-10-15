@@ -33,13 +33,16 @@ export function successionTpmRouting(service: SessionSuccessionService, controll
       if (!same(current.target, target) || current.roleRevision !== revision) throw new Error('TPM main-session admission changed before dispatch.');
       service.coordinator.assertAdmission(target);
     },
-    async read(binding, input) {
+    async read(binding, input, assertReader = () => {}) {
+      assertReader();
       await service.ready;
       if (input.cursor && typeof input.cursor === 'object') {
         const target = input.sourceRef as NativeSessionRef | undefined;
         if (!target || !lineage(binding).some(source => same(source, target))) throw new Error('Legacy timeline cursors require an authorized explicit sourceRef. Read current history again to obtain a signed cursor.');
+        assertReader();
         const lease = await acquire(target);
         try {
+          assertReader();
           const direction = input.direction ?? 'after';
           if (direction !== 'tail' && direction !== 'before' && direction !== 'after') throw new Error('Invalid history direction.');
           const cursor = input.cursor as {epoch?: unknown;seq?:unknown};
@@ -49,6 +52,7 @@ export function successionTpmRouting(service: SessionSuccessionService, controll
           const request: Parameters<RemoteHostSessionLease['agent']['fetchTimeline']>[0] = { requestId:'tpm-succession-history', agentId:lease.agent.agentId, direction, limit:limit as number,
             cursor: {epoch:cursor.epoch,seq:cursor.seq as number} };
           const page = await (lease.agent.loadTimeline?.(request) ?? lease.agent.fetchTimeline(request));
+          assertReader();
           if (input.query !== undefined && typeof input.query !== 'string') throw new Error('Invalid history query.');
           const query = (input.query as string | undefined)?.toLocaleLowerCase();
           let remaining = 48000 - 2; let truncated = false;
@@ -78,10 +82,14 @@ export function successionTpmRouting(service: SessionSuccessionService, controll
       if (input.limit !== undefined) query.limit = input.cursor ? input.limit as number : Math.min(input.limit as number, 7);
       else if (!input.cursor) query.limit = 7;
       const origin = binding.kind === 'fixed' ? binding.source : binding.origin;
-      const history = await service.bindings(origin.providerId).readRole(binding, query);
+      assertReader();
+      const history = await service.bindings(origin.providerId).readRole(binding, query, assertReader);
+      assertReader();
       if (!history.sourceRef) throw new Error('Main history is missing its actual source identity.');
+      assertReader();
       const lease = await acquire(history.sourceRef);
       try {
+        assertReader();
         const { persistence: _persistence, runtimeInfo, ...snapshot } = lease.agent.snapshot().payload;
         const { persistence: _runtimePersistence, ...runtime } = runtimeInfo;
         return { ...history, state: { ...snapshot, runtimeInfo: runtime } };

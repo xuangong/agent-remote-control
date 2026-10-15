@@ -13,7 +13,10 @@ export interface SavedTeam extends Team {
 const receiptLifetimeMs = 24 * 60 * 60 * 1000;
 const receiptCount = 200;
 const receiptBytes = 32 * 1024;
-export const teamMessageBudgetBytes = (team: Team) => Buffer.byteLength(JSON.stringify(team.messages.map(({ resources: _resources, ...message }) => message)));
+// Every native reference string can occupy six JSON bytes per code unit.
+const recipientGrowthBytes = Buffer.byteLength(JSON.stringify({ resolvedTarget: { controllerId: '\u0000'.repeat(512), providerId: '\u0000'.repeat(512), nativeSessionId: '\u0000'.repeat(512) } })) - 1;
+export const teamMessageBudgetBytes = (team: Team, reserveRecipients = false) => Buffer.byteLength(JSON.stringify(team.messages.map(({ resources: _resources, ...message }) => message)))
+  + (reserveRecipients ? team.messages.filter(message => message.status === 'queued' && !message.resolvedTarget).length * recipientGrowthBytes : 0);
 
 export function publicTeam(team: SavedTeam): Team {
   const { deliveryReceipts: _receipts, resourceGrants: _grants, ...value } = team;
@@ -21,7 +24,7 @@ export function publicTeam(team: SavedTeam): Team {
 }
 
 export function pendingTeamMessage(message: TeamMessage): boolean {
-  return ['queued', 'dispatching', 'unknown'].includes(message.status) || message.status === 'accepted' && message.acceptance === 'queued';
+  return ['queued', 'dispatching', 'unknown'].includes(message.status) || message.status === 'accepted' && !['started', 'handled'].includes(message.acceptance ?? '');
 }
 
 export function deliveryFingerprint(input: { to: string; text: string; resources?: string[] }): string {
@@ -68,12 +71,12 @@ export function trimTeamDeliveryReceipts(teams: SavedTeam[], maximumStateBytes: 
 export function validSavedTeam(value: unknown): value is SavedTeam {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
   const team = value as SavedTeam, visible = publicTeam(team);
-  if (!isTeam(visible)) return false;
+  if (!isTeam(visible) || !visible.members.every(member => member.creation !== 'ready' || !!member.nativeSessionId)) return false;
   const receipts = team.deliveryReceipts;
   if (receipts !== undefined) {
     if (!Array.isArray(receipts) || receipts.length > receiptCount || Buffer.byteLength(JSON.stringify(receipts)) > receiptBytes) return false;
     if (!receipts.every(receipt => receipt && typeof receipt === 'object'
-      && Object.keys(receipt).every(key => ['id', 'from', 'to', 'status', 'acceptance', 'createdAt', 'error', 'fingerprint', 'settledAt'].includes(key))
+      && Object.keys(receipt).every(key => ['id', 'from', 'to', 'status', 'acceptance', 'createdAt', 'error', 'fingerprint', 'settledAt', 'resolvedTarget'].includes(key))
       && typeof receipt.fingerprint === 'string' && /^[a-f0-9]{64}$/.test(receipt.fingerprint)
       && Number.isSafeInteger(receipt.settledAt) && receipt.settledAt >= 0)) return false;
     const messages = receipts.map(({ fingerprint: _hash, settledAt: _time, ...receipt }) => ({ ...receipt, text: 'receipt' }));
@@ -102,7 +105,7 @@ export function replayTeamDelivery(team: SavedTeam, id: string, input: { to: str
 }
 
 export function assertTeamQueueCapacity(team: Team, message: TeamMessage): void {
-  if (team.messages.length >= 200 || teamMessageBudgetBytes({ ...team, messages: [...team.messages, message] }) > 128 * 1024) {
+  if (team.messages.length >= 200 || teamMessageBudgetBytes({ ...team, messages: [...team.messages, message] }, true) > 128 * 1024) {
     throw new Error('Team communication capacity reached. Wait for pending deliveries to settle.');
   }
 }

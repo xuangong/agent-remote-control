@@ -47,6 +47,7 @@ async function fixture(queueMessage = false, tickMs = 1_000_000) {
   let now = 1_000_000; let available = true; let supported = ['codex']; let createFailure: Error | undefined;
   const creates: AgentSessionExtensions[] = [];
   const access: TpmSessionAccess = {
+    controllerId: 'controller',
     available: () => available, supportedProviders: () => supported,
     async acquire(_providerId, id) {
       const session = sessions.get(id); if (!session) throw new Error('Native session unavailable.');
@@ -177,6 +178,7 @@ it('rejects queued communication before native dispatch when its plan changed', 
   main.setStatus('idle'); await f.coordinator.tick();
   await expect.poll(async () => (await f.coordinator.get(work.id)).outbox?.find(item => item.id === intent.id)?.status).toBe('rejected');
   expect(main.messages).toEqual([]);
+  expect((await f.coordinator.get(work.id)).outbox?.find(value => value.id === intent.id)?.resolvedTarget).toBeUndefined();
 }, 10000);
 
 it('starts and retains background review leases without browser or Relay connections', async () => {
@@ -363,6 +365,7 @@ it('rechecks pause immediately before native dispatch and settles a deferred req
   await f.coordinator.action({ id: work.id, revision: current.revision, operationId: 'pause-race-action', action: 'pause' }, 'scope'); release();
   await expect.poll(async () => (await f.coordinator.get(work.id)).outbox?.find(value => value.id === intent.id)?.status).toBe('rejected');
   expect(main.messages).toEqual([]); expect((await f.coordinator.get(work.id)).paused).toBe(true);
+  expect((await f.coordinator.get(work.id)).outbox?.find(value => value.id === intent.id)?.resolvedTarget).toBeUndefined();
 }, 10000);
 
 it('ignores a known outgoing message echo instead of treating it as independent work evidence', async () => {
@@ -471,7 +474,8 @@ it.each([false, true])('archive settles only known pre-dispatch rejection and pr
     await expect.poll(() => entered).toBe(true);
     const current = await f.coordinator.get(work.id);
     const archived = await f.coordinator.action({ id: work.id, revision: current.revision, operationId: 'stop-race', action: 'archive' }, 'owner');
-    expect(archived.outbox?.find(value => value.id === intent.id)?.status).toBe('dispatching');
+    expect(archived.outbox?.find(value => value.id === intent.id)?.status).toBe(dispatched ? 'dispatching' : 'rejected');
+    expect(archived.outbox?.find(value => value.id === intent.id)?.resolvedTarget).toEqual(dispatched ? { controllerId: 'controller', providerId: 'codex', nativeSessionId: 'main' } : undefined);
   } finally { release(); }
   await expect.poll(async () => (await f.coordinator.get(work.id)).outbox?.find(value => value.id === intent.id)?.status).toBe(dispatched ? 'unknown' : 'rejected');
   expect(main.messages).toHaveLength(dispatched ? 1 : 0);
@@ -585,9 +589,14 @@ it('rejects a claimed intent when succession commits before final native dispatc
   const original = f.access.execute;
   f.access.execute = async (agent, operation, execution) => {
     if (agent.agentId === 'main') {
-      const persisted = (await f.coordinator.get(work.id)).outbox!.find(item => item.target === 'main' && item.status === 'dispatching')!;
-      expect(persisted).toMatchObject({ status: 'dispatching', resolvedTarget: route.origin, roleRevision: 1 });
-      route.commit('successor');
+      const originalUpdate = f.coordinator.store.update.bind(f.coordinator.store);
+      f.coordinator.store.update = async (...args) => {
+        const value = await originalUpdate(...args);
+        if (!value.work.outbox?.some(item => item.target === 'main' && item.status === 'dispatching')) return value;
+        const persisted = (await f.coordinator.get(work.id)).outbox!.find(item => item.target === 'main' && item.status === 'dispatching')!;
+        expect(persisted).toMatchObject({ status: 'dispatching', resolvedTarget: route.origin, roleRevision: 1 });
+        route.commit('successor'); f.coordinator.store.update = originalUpdate; return value;
+      };
     }
     return original(agent, operation, execution);
   };
@@ -605,6 +614,7 @@ it('enrolls existing fixed and legacy paused works when their main acquires a ro
   const work = await f.create();
   const intent = await f.call(work, 'send_main_message', { operationId: 'before-role', purpose: 'consultation', text: 'Old receipt' });
   await waitMessages(f.sessions.get('main')!, 1);
+  await expect.poll(async () => (await f.coordinator.get(work.id)).outbox!.find(item => item.id === intent.id)?.status).toBe('accepted');
   await f.coordinator.action({ id: work.id, revision: (await f.coordinator.get(work.id)).revision, operationId: 'pause', action: 'pause' }, 'owner');
   f.access.mainRouting!.bind = bind; route.commit('successor'); await f.coordinator.tick();
   const current = await f.coordinator.get(work.id);
@@ -617,24 +627,24 @@ it('reports uncertain and queued main recipients to readiness using their pinned
   const f = await fixture(true); const route = successionRouting(f); const work = await f.create();
   const intent = await f.call(work, 'send_main_message', { operationId: 'queued-readiness', purpose: 'consultation', text: 'Assess once' });
   await waitMessages(f.sessions.get('main')!, 1);
-  expect(f.coordinator.hasUnsettledMain(route.origin)).toBe(true);
+  expect(f.coordinator.hasUnsettledRecipient(route.origin)).toBe(true);
   route.commit('successor'); await f.coordinator.tick();
-  expect(f.coordinator.hasUnsettledMain(route.target)).toBe(false);
+  expect(f.coordinator.hasUnsettledRecipient(route.target)).toBe(false);
   for (const acceptance of [undefined, 'queued', 'started', 'handled'] as const) {
     await f.coordinator.store.update(work.id, undefined, record => { const item = record.work.outbox!.find(item => item.id === intent.id)!; item.status = 'accepted'; item.acceptance = acceptance; });
-    expect(f.coordinator.hasUnsettledMain(route.origin)).toBe(acceptance === undefined || acceptance === 'queued');
-    expect(f.coordinator.hasUnsettledMain(route.target)).toBe(false);
+    expect(f.coordinator.hasUnsettledRecipient(route.origin)).toBe(acceptance === undefined || acceptance === 'queued');
+    expect(f.coordinator.hasUnsettledRecipient(route.target)).toBe(false);
     const summary = (await f.coordinator.list()).works.find(item => item.id === work.id)!;
     expect(summary.outbox?.some(item => item.id === intent.id)).toBe(acceptance === undefined || acceptance === 'queued');
   }
   for (const status of ['prepared', 'dispatching', 'unknown'] as const) {
     await f.coordinator.store.update(work.id, undefined, record => { record.work.outbox!.find(item => item.id === intent.id)!.status = status; });
-    expect(f.coordinator.hasUnsettledMain(route.origin)).toBe(status !== 'prepared');
+    expect(f.coordinator.hasUnsettledRecipient(route.origin)).toBe(status !== 'prepared');
     const summary = (await f.coordinator.list()).works.find(item => item.id === work.id)!;
     expect(summary.outbox?.some(item => item.id === intent.id)).toBe(true);
   }
   await f.coordinator.store.update(work.id, undefined, record => { record.work.outbox!.find(item => item.id === intent.id)!.status = 'rejected'; });
-  expect(f.coordinator.hasUnsettledMain(route.origin)).toBe(false);
+  expect(f.coordinator.hasUnsettledRecipient(route.origin)).toBe(false);
   expect((await f.coordinator.list()).works.find(item => item.id === work.id)!.outbox?.some(item => item.id === intent.id)).toBe(false);
 }, 10000);
 
@@ -663,7 +673,7 @@ it('pins legacy unknown receipts before enrolling a work whose main already succ
   const restored = (await f.coordinator.get(work.id)).outbox!.find(item => item.id === intent.id)!;
   expect(restored.resolvedTarget).toEqual(route.origin);
   expect(restored.roleRevision).toBeUndefined();
-  expect(f.coordinator.hasUnsettledMain(route.origin)).toBe(true); expect(f.coordinator.hasUnsettledMain(route.target)).toBe(false);
+  expect(f.coordinator.hasUnsettledRecipient(route.origin)).toBe(true); expect(f.coordinator.hasUnsettledRecipient(route.target)).toBe(false);
   expect(f.sessions.get('successor')!.messages).toEqual([]);
 }, 10000);
 
@@ -685,7 +695,7 @@ it('retains queued evidence when enqueue reaches the intent count limit', async 
   });
   await f.call(work, 'send_main_message', { operationId: 'new-at-limit', purpose: 'consultation', text: 'Another request' });
   expect((await f.coordinator.get(work.id)).outbox!.some(item => item.id === intent.id)).toBe(true);
-  expect(f.coordinator.hasUnsettledMain(route.origin)).toBe(true);
+  expect(f.coordinator.hasUnsettledRecipient(route.origin)).toBe(true);
 }, 10000);
 
 it.each(['bind', 'resolve'] as const)('isolates a failed role %s and retries it while another work continues background scheduling', async failure => {
@@ -788,12 +798,12 @@ it.each(['void', 'unknown', 'queued'] as const)('settles the original main inten
   await f.coordinator.tick();
   const current = (await f.coordinator.get(work.id)).outbox!.find(item => item.id === receipt.id)!;
   expect(current.status).toBe(outcome === 'unknown' ? 'unknown' : 'accepted');
-  expect(f.coordinator.hasUnsettledMain(route.origin)).toBe(true);
+  expect(f.coordinator.hasUnsettledRecipient(route.origin)).toBe(true);
   expect(notify).toBeTypeOf('function');
   notify!({ disposition: 'queued' }); await f.coordinator.store.flush();
-  expect(f.coordinator.hasUnsettledMain(route.origin)).toBe(true);
+  expect(f.coordinator.hasUnsettledRecipient(route.origin)).toBe(true);
   notify!({ disposition: 'started' });
-  await expect.poll(() => f.coordinator.hasUnsettledMain(route.origin)).toBe(false);
+  await expect.poll(() => f.coordinator.hasUnsettledRecipient(route.origin)).toBe(false);
   const confirmed = await f.coordinator.get(work.id);
   expect(confirmed.outbox!.find(item => item.id === receipt.id)).toMatchObject({ status: 'accepted', acceptance: 'started', resolvedTarget: route.origin, roleRevision: 1 });
   expect(confirmed.outbox!.find(item => item.id === receipt.id)!.error).toBeUndefined();
@@ -802,7 +812,7 @@ it.each(['void', 'unknown', 'queued'] as const)('settles the original main inten
   expect(f.coordinator.store.get(work.id).work.revision).toBe(confirmed.revision);
   await f.coordinator.close();
   await f.restart(); await f.coordinator.tick();
-  expect(f.coordinator.hasUnsettledMain(route.origin)).toBe(false);
+  expect(f.coordinator.hasUnsettledRecipient(route.origin)).toBe(false);
   expect(main.messages).toHaveLength(1);
 }, 10000);
 
@@ -820,7 +830,7 @@ it.each(['void', 'queued', 'unknown', 'rejected'] as const)('preserves acceptanc
   const intent = (await f.coordinator.get(work.id)).outbox!.find(item => item.id === receipt.id)!;
   expect(intent).toMatchObject({ status: 'accepted', acceptance: 'handled', resolvedTarget: route.origin, roleRevision: 1 });
   expect(intent.error).toBeUndefined();
-  expect(f.coordinator.hasUnsettledMain(route.origin)).toBe(false); expect(main.messages).toHaveLength(1);
+  expect(f.coordinator.hasUnsettledRecipient(route.origin)).toBe(false); expect(main.messages).toHaveLength(1);
 }, 10000);
 
 it.each(['unknown', 'void'] as const)('does not manufacture acceptance after coordinator replacement with %s outcome', async outcome => {
@@ -837,7 +847,7 @@ it.each(['unknown', 'void'] as const)('does not manufacture acceptance after coo
   notify!({ disposition: 'started' }); await f.coordinator.tick();
   expect((await f.coordinator.get(work.id)).outbox!.find(item => item.id === receipt.id)).toMatchObject({ status: outcome === 'unknown' ? 'unknown' : 'accepted', resolvedTarget: route.origin });
   expect((await f.coordinator.get(work.id)).revision).toBe(before.revision);
-  expect(f.coordinator.hasUnsettledMain(route.origin)).toBe(true); expect(main.messages).toHaveLength(1);
+  expect(f.coordinator.hasUnsettledRecipient(route.origin)).toBe(true); expect(main.messages).toHaveLength(1);
 }, 10000);
 
 it('settles a quiet review once without rewriting unchanged visible work, but surfaces changed phase', async () => {
@@ -881,4 +891,113 @@ it('releases a stopped review that ends without assessment without scheduling an
   expect(f.coordinator.store.get(work.id).backgroundReviews?.find(review => review.id === reviewId)?.failed).toBe(true);
   expect(tpm.messages).toHaveLength(2);
   expect(tpm.cancel).not.toHaveBeenCalled();
+});
+
+it('keeps TPM role tools, work and future review recipients across a released native prefix', async () => {
+  const f = await fixture(); const work = await f.create();
+  const ref = (nativeSessionId: string) => ({ controllerId: 'controller', providerId: 'codex', nativeSessionId });
+  let current = work.tpmNativeSessionId!, frozen = false;
+  f.access.controllerId = 'controller';
+  f.access.sessionRouting = {
+    resolve: anchor => ({ anchor, target: ref(anchor.nativeSessionId === work.tpmNativeSessionId ? current : anchor.nativeSessionId), operationIds: [] }),
+    assertCurrent: (anchor, actual) => { if (f.access.sessionRouting!.resolve(anchor).target.nativeSessionId !== actual.nativeSessionId || frozen) throw new Error('Recipient not current or released'); },
+  };
+  const old = (await f.coordinator.extensions('codex', work.tpmNativeSessionId!))!.tools!.find(tool => tool.name === 'read_work')!;
+  const candidate = (await f.coordinator.extensions('codex', work.tpmNativeSessionId!, () => 'B'))!.tools!.find(tool => tool.name === 'read_work')!;
+  await expect(candidate.execute({})).rejects.toThrow(/current|released/);
+  await f.acknowledge(work); f.sessions.set('B', new SessionManager('B'));
+  current = 'B'; frozen = true;
+  await expect(old.execute({})).rejects.toThrow(/current|released/);
+  await expect(candidate.execute({})).rejects.toThrow(/current|released/);
+  expect((await f.coordinator.get(work.id)).tpmNativeSessionId).toBe('B');
+  frozen = false;
+  expect(JSON.parse(await candidate.execute({}))).toMatchObject({ id: work.id, tpmNativeSessionId: 'B' });
+  const projected = { ...work, tpmNativeSessionId: 'B' };
+  const document = await f.call(projected, 'write_work_document', { revision: (await f.coordinator.get(work.id)).revision, document: work.document, acceptance: work.acceptance });
+  expect(document.tpmNativeSessionId).toBe('B');
+  expect((await f.call(projected, 'schedule_check', { seconds: 30, reason: 'Check later' })).tpmNativeSessionId).toBe('B');
+  await f.coordinator.tick();
+  expect(f.sessions.get(work.tpmNativeSessionId!)!.leases).toBe(0);
+  expect(f.sessions.get('B')!.leases).toBe(1);
+  expect(f.sessions.get('B')!.messages).toHaveLength(0);
+  f.advance(3000); await f.coordinator.tick();
+  await expect.poll(async () => (await f.coordinator.get(work.id)).outbox?.find(intent => intent.target === 'tpm' && intent.purpose === 'review')?.status).toBe('accepted');
+  expect(f.sessions.get('B')!.messages).toHaveLength(1);
+  expect(f.sessions.get(work.tpmNativeSessionId!)!.leases).toBe(0);
+  expect(f.coordinator.store.get(work.id).work.tpmNativeSessionId).toBe(work.tpmNativeSessionId);
+  expect((await f.coordinator.get(work.id)).outbox!.at(-1)).toMatchObject({ resolvedTarget: ref('B') });
+  await f.restart();
+  expect((await f.coordinator.extensions('codex', 'B'))!.tools!.map(tool => tool.name)).toContain('update_work');
+  expect(f.coordinator.store.get(work.id).work.todo).toEqual(work.todo);
+  expect(f.sessions.get('B')!.messages).toHaveLength(1);
+}, 10000);
+
+it('leaves a TPM intent prepared when execution admission fails before dispatch', async () => {
+  const f = await fixture(); const work = await f.create();
+  f.access.execute = async () => { throw new AgentOperationRejectedError('reserved', 'Recipient reserved'); };
+  const intent = await f.call(work, 'send_main_message', { operationId: 'frozen-before-claim', purpose: 'consultation', text: 'Wait for release' });
+  await f.coordinator.tick();
+  expect((await f.coordinator.get(work.id)).outbox!.find(item => item.id === intent.id)).toMatchObject({ status: 'prepared' });
+  expect((await f.coordinator.get(work.id)).outbox!.find(item => item.id === intent.id)!.resolvedTarget).toBeUndefined();
+  expect(f.sessions.get('main')!.messages).toEqual([]);
+});
+
+
+it('native send visibility can precede durable TPM settlement and cannot authorize a stale work revision', async () => {
+  const f = await fixture(); const work = await f.create();
+  let release!: () => void; const waiting = new Promise<void>(done => { release = done; });
+  const execute = f.access.execute;
+  f.access.execute = async (agent, operation, dispatch) => {
+    const result = await execute(agent, operation, dispatch);
+    if (agent.agentId === 'main') await waiting;
+    return result;
+  };
+  try {
+    const intent = await f.call(work, 'send_main_message', { operationId: 'settlement-window', purpose: 'consultation', text: 'One input' });
+    await waitMessages(f.sessions.get('main')!, 1);
+    const visible = await f.coordinator.get(work.id);
+    expect(visible.outbox!.find(item => item.id === intent.id)!.status).toBe('dispatching');
+    release();
+    await expect.poll(async () => (await f.coordinator.get(work.id)).outbox!.find(item => item.id === intent.id)!.status).toBe('accepted');
+    await expect(f.coordinator.action({ id: work.id, revision: visible.revision, operationId: 'stale-pause', action: 'pause' }, 'owner')).rejects.toThrow('TPM work changed');
+    const settled = await f.coordinator.get(work.id);
+    expect(settled.revision).toBeGreaterThan(visible.revision);
+    expect((await f.coordinator.action({ id: work.id, revision: settled.revision, operationId: 'fresh-pause', action: 'pause' }, 'owner')).paused).toBe(true);
+  } finally { release(); }
+});
+
+
+it.each(['unknown', 'queued', 'void'] as const)('retains the own TPM recipient across restart after %s delivery', async outcome => {
+  const f = await fixture(); const work = await f.create(); await f.acknowledge(work);
+  const anchor = work.tpmNativeSessionId!, ref = (nativeSessionId: string) => ({ controllerId: 'controller', providerId: 'codex', nativeSessionId });
+  let current = anchor;
+  f.access.sessionRouting = {
+    resolve: source => ({ anchor: source, target: ref(source.nativeSessionId === anchor ? current : source.nativeSessionId), operationIds: [] }),
+    assertCurrent: (source, actual) => { if (f.access.sessionRouting!.resolve(source).target.nativeSessionId !== actual.nativeSessionId) throw new Error('Retired recipient'); },
+  };
+  const native = f.sessions.get(anchor)!;
+  native.sendMessage = (async (text: string, options?: AgentMessageOptions) => {
+    native.messages.push({ text, options });
+    if (outcome === 'unknown') throw new Error('Receipt lost');
+    return outcome === 'queued' ? { disposition: 'queued' } : undefined;
+  }) as typeof native.sendMessage;
+  f.advance(3000); await f.coordinator.tick();
+  const intent = f.coordinator.store.get(work.id).work.outbox!.at(-1)!;
+  expect(intent).toMatchObject({ target: 'tpm', status: outcome === 'unknown' ? 'unknown' : 'accepted', resolvedTarget: ref(anchor) });
+  expect(f.coordinator.hasUnsettledRecipient(ref(anchor))).toBe(true);
+  current = 'B'; f.sessions.set('B', new SessionManager('B')); await f.restart(); await f.coordinator.tick();
+  expect(f.coordinator.store.get(work.id).work.outbox!.find(item => item.id === intent.id)).toEqual(intent);
+  expect(f.coordinator.hasUnsettledRecipient(ref(anchor))).toBe(true); expect(f.coordinator.hasUnsettledRecipient(ref('B'))).toBe(false);
+  expect(native.messages).toHaveLength(2); expect(f.sessions.get('B')!.messages).toEqual([]);
+  if (outcome === 'unknown') {
+    await f.coordinator.close();
+    const { readFile, writeFile } = await import('node:fs/promises');
+    const path = join(f.directory, `${work.id}.json`), saved = JSON.parse(await readFile(path, 'utf8'));
+    delete saved.work.outbox.find((item: { id: string }) => item.id === intent.id).resolvedTarget;
+    await writeFile(path, JSON.stringify(saved)); await f.restart(); await f.coordinator.tick();
+    expect(f.coordinator.hasUnsettledRecipient(ref(anchor))).toBe(true); expect(f.coordinator.hasUnsettledRecipient(ref('B'))).toBe(true);
+    expect(f.coordinator.hasUnsettledRecipient(ref('unrelated'))).toBe(false);
+    expect(f.coordinator.store.get(work.id).work.outbox!.find(item => item.id === intent.id)!.resolvedTarget).toBeUndefined();
+    expect(f.sessions.get('B')!.messages).toEqual([]);
+  }
 });

@@ -282,7 +282,15 @@ async function controller(f: Awaited<ReturnType<typeof fixture>>, failAtCommit =
     expect((await registered).successionEnrollment.ownerSubject).toBe('owner');
   }
   await connect();
-  return { effects, connect, loseRelease: () => { loseRelease = true; }, decline: () => { decline = true; }, holdDescribe: () => {
+  return { effects, connect,
+    teamCall: (call: Record<string, unknown>): Promise<{status:number; body:any}> => {
+      const socket = sockets.at(-1), requestId = 'team-' + Math.random();
+      return new Promise((resolve, reject) => {
+        const timer = setTimeout(() => { socket.off('message', receive); reject(new Error('Team response deadline')); }, 3000);
+        const receive = (data: {toString():string}) => { const frame = JSON.parse(data.toString()); if (frame.type !== 'team_response' || frame.requestId !== requestId) return; clearTimeout(timer); socket.off('message', receive); resolve({status:frame.status, body:JSON.parse(frame.body)}); };
+        socket.on('message', receive); socket.send(JSON.stringify({uplinkVersion:2,type:'team_request',requestId,call}));
+      });
+    }, loseRelease: () => { loseRelease = true; }, decline: () => { decline = true; }, holdDescribe: () => {
     let entered!: () => void, release!: () => void;
     const start = new Promise<void>(resolve => { entered = resolve; }), waiting = new Promise<void>(resolve => { release = resolve; });
     describeHold = { entered, waiting }; closers.push(async () => { release(); }); return { entered: start, release };
@@ -1414,4 +1422,49 @@ test('native prefix rejects an ID retained only in legacy migration history', as
   const response = await f.request('v1/remote/hosts/mapped-host/succession/prepare', 'owner', { operationId: 'legacy-history', providerId: 'fixture', nativeSessionId: 'A', expectedRevision: 1, preparation: prefixSelection });
   expect(response.status).toBe(409); expect(await response.json()).toMatchObject({ code: 'succession_identity_conflict' });
   expect(native.effects.prepare).toBe(0);
+}, 10000);
+
+
+function seedPrefixTeam(state: HostedRelayState) {
+  const broker = state.tenants[0]!.broker;
+  broker.associations!.freezes = [];
+  broker.teams = [{ id: 'team', operationId: 'create-team', revision: 1, title: 'Team', status: 'active', source: { hostId: 'mapped-host', providerId: 'fixture', nativeSessionId: 'source', title: 'Source' }, createdAt: 1, updatedAt: 1,
+    members: [{ id: 'leader', hostId: 'mapped-host', providerId: 'fixture', nativeSessionId: 'leader', role: 'leader', name: 'Leader', responsibility: '', creation: 'ready', activity: 'idle', summary: '', updatedAt: 1 },
+      { id: 'worker', hostId: 'mapped-host', providerId: 'fixture', nativeSessionId: 'A', role: 'member', name: 'Worker', responsibility: 'Verify', creation: 'ready', activity: 'idle', summary: '', updatedAt: 1 }],
+    messages: [{ id: 'message', from: 'leader', to: 'worker', text: 'Once', status: 'queued', createdAt: 1 }] }];
+}
+const prefixTeamRequest = { operationId: 'prefix-team', providerId: 'fixture', nativeSessionId: 'A', expectedRevision: 1, preparation: { kind: 'native_prefix', turnId: 'turn', messageId: 'message' } };
+const prefixTeamClaim = { action: 'claim', teamId: 'team', memberId: 'worker', messageId: 'message', expectedNativeSessionId: 'A' };
+test.each(['claim-first', 'freeze-first'] as const)('serializes Team %s at the durable claim versus freeze boundary over HTTP and WebSocket', async order => {
+  const f = await fixture(seedPrefixTeam, false, true, true), host = await controller(f, false, false, 3);
+  const held = f.hold(state => order === 'claim-first' ? state.tenants[0]!.broker.teams![0]!.messages[0]!.status === 'dispatching' : state.tenants[0]!.broker.associations!.freezes.length === 1);
+  const prepare = () => f.request('v1/remote/hosts/mapped-host/succession/prepare', 'owner', prefixTeamRequest);
+  if (order === 'claim-first') {
+    const claim = host.teamCall(prefixTeamClaim); await held.entered;
+    const preparing = prepare(); held.release();
+    expect(await claim).toMatchObject({status:200,body:{status:'dispatching',resolvedTarget:ref('A')}});
+    expect((await preparing).status).toBe(409); expect(host.effects.prepare).toBe(0);
+    expect((await f.saved()).tenants[0]!.broker.associations!.freezes).toEqual([]);
+  } else {
+    const preparing = prepare(); await held.entered;
+    const claim = host.teamCall(prefixTeamClaim); held.release();
+    expect((await preparing).status).toBe(200); expect((await claim).status).toBe(409);
+    expect((await f.saved()).tenants[0]!.broker.teams![0]!.messages[0]).toMatchObject({status:'queued'});
+    expect((await f.request('v1/remote/hosts/mapped-host/succession/commit', 'owner', {operationId:prefixTeamRequest.operationId})).status).toBe(200);
+    expect((await host.teamCall({...prefixTeamClaim,expectedNativeSessionId:undefined})).status).toBe(409);
+    expect(await host.teamCall({...prefixTeamClaim,expectedNativeSessionId:'B'})).toMatchObject({status:200,body:{status:'dispatching',resolvedTarget:ref('B')}});
+    expect((await f.saved()).tenants[0]!.broker.teams![0]!.members[1]!.nativeSessionId).toBe('A');
+    await f.restart(); await host.connect();
+    const poll = await host.teamCall({action:'poll'});
+    expect(poll.body[0].members[1].nativeSessionId).toBe('B');
+    expect(poll.body[0].messages[0]).toMatchObject({status:'dispatching',resolvedTarget:ref('B')});
+    expect((await host.teamCall({...prefixTeamClaim,expectedNativeSessionId:'B'})).status).toBe(409);
+  }
+}, 10000);
+test.each(['unknown', 'accepted', 'queued'] as const)('blocks Team %s receipts at their actual recipient before Relay freezing', async state => {
+  const f = await fixture(seedPrefixTeam, false, true, true), host = await controller(f, false, false, 3);
+  expect((await host.teamCall(prefixTeamClaim)).status).toBe(200);
+  expect((await host.teamCall({ action:'settle',teamId:'team',memberId:'worker',messageId:'message',resolvedTarget:ref('A'),outcome:state==='unknown'?'unknown':'accepted',...(state==='queued'?{acceptance:'queued'}:{}) })).status).toBe(200);
+  expect((await f.request('v1/remote/hosts/mapped-host/succession/prepare','owner',prefixTeamRequest)).status).toBe(409);
+  expect(host.effects.prepare).toBe(0); expect((await f.saved()).tenants[0]!.broker.associations!.freezes).toEqual([]);
 }, 10000);

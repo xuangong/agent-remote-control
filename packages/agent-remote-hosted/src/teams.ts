@@ -2,9 +2,11 @@ import { assertTeamQueueCapacity, compactTeamDeliveries, publicTeam, replayTeamD
 export { teamMessageBudgetBytes } from './team-delivery.js';
 import type { TeamResourceStore } from './team-resources.js';
 import { createHash, randomUUID } from 'node:crypto';
-import { isTeamMember, type Team, type TeamAction, type TeamCreate, type TeamHostCall, type TeamMember, type TeamSeat, type TeamResource } from '@orchardworks/agent-remote-protocol';
+import { nativeSessionRefKey, type NativeSessionRef, isTeamMember, type Team, type TeamAction, type TeamCreate, type TeamHostCall, type TeamMember, type TeamSeat, type TeamResource } from '@orchardworks/agent-remote-protocol';
 
 export interface TeamBrokerPorts {
+  resolveSession(hostId: string, providerId: string, anchorNativeId: string): NativeSessionRef;
+  assertRecipient?(target: NativeSessionRef): void;
   resources?: TeamResourceStore;
   resourceDraftTtlMs?: number;
   read(): SavedTeam[];
@@ -20,7 +22,7 @@ const active = (team: Team) => { if (team.status !== 'active') fail('Team is not
 function touch(team: Team, now: number) { team.revision++; team.updatedAt = now; }
 function settleArchive(team: Team, now: number) {
   if (team.status === 'archiving' && team.members.every(item => item.creation === 'abandoned' || item.creation === 'ready' && item.activity === 'idle' && item.updatedAt >= team.updatedAt)
-    && !team.messages.some(message => (['dispatching', 'unknown'].includes(message.status) || message.status === 'accepted' && message.acceptance === 'queued'))) { team.status = 'archived'; touch(team, now); }
+    && !team.messages.some(message => (['dispatching', 'unknown'].includes(message.status) || message.status === 'accepted' && !['started', 'handled'].includes(message.acceptance ?? '')))) { team.status = 'archived'; touch(team, now); }
 }
 
 /** Membership authority and durable mailboxes; provider execution stays on Controllers. */
@@ -35,8 +37,36 @@ export class TeamBroker {
       return result;
     });
   }
+  private project(saved: SavedTeam): Team {
+    const team = structuredClone(publicTeam(saved));
+    for (const member of team.members) if (member.nativeSessionId) {
+      try { member.nativeSessionId = this.resolve(member).nativeSessionId; }
+      catch { delete member.nativeSessionId; }
+    }
+    return team;
+  }
+  private resolve(member: TeamMember): NativeSessionRef {
+    if (!member.nativeSessionId) fail('Team recipient is unavailable.');
+    const target = this.ports.resolveSession(member.hostId, member.providerId, member.nativeSessionId!);
+    if (target.providerId !== member.providerId) fail('Team recipient provider changed.');
+    return target;
+  }
+  hasUnsettledRecipient(target: NativeSessionRef): boolean {
+    return this.ports.read().some(team => [...team.messages, ...(team.deliveryReceipts ?? [])].some(message => {
+      if (!['dispatching', 'unknown'].includes(message.status) && !(message.status === 'accepted' && !['started', 'handled'].includes(message.acceptance ?? ''))) return false;
+      if (message.resolvedTarget) return nativeSessionRefKey(message.resolvedTarget) === nativeSessionRefKey(target);
+      const seat = member(team, message.to);
+      if (seat.providerId !== target.providerId) return false;
+      try {
+        const actual = this.ports.resolveSession(seat.hostId, target.providerId, target.nativeSessionId);
+        if (actual.controllerId !== target.controllerId) return false;
+        const anchor = this.ports.resolveSession(seat.hostId, seat.providerId, seat.nativeSessionId!);
+        return nativeSessionRefKey(anchor) === nativeSessionRefKey(actual);
+      } catch { return true; }
+    }));
+  }
   list(): Team[] { return this.ports.read().map(saved => {
-    const team = structuredClone(saved); compactTeamDeliveries(team, this.ports.now()); return publicTeam(team);
+    const team = structuredClone(saved); compactTeamDeliveries(team, this.ports.now()); return this.project(team);
   }); }
   async create(input: TeamCreate): Promise<Team> {
     this.ports.assertHost(input.source.hostId, input.source.providerId);
@@ -76,7 +106,7 @@ export class TeamBroker {
       } else if (input.action === 'retry_creation') { active(team); if (member(team, input.memberId).creation === 'abandoned') fail('Member was abandoned.'); }
       settleArchive(team, now); return team;
     });
-    return input.action === 'add_member' ? this.provision(result.id, input.operationId) : input.action === 'retry_creation' ? this.provision(result.id, input.memberId) : publicTeam(result);
+    return input.action === 'add_member' ? this.provision(result.id, input.operationId) : input.action === 'retry_creation' ? this.provision(result.id, input.memberId) : this.project(result);
   }
   async hostCall(hostId: string, call: TeamHostCall, assertCurrent: () => void = () => {}): Promise<unknown> {
     assertCurrent();
@@ -87,7 +117,7 @@ export class TeamBroker {
       assertCurrent();
       const team = find(teams, call.teamId), self = member(team, call.memberId), now = this.ports.now();
       if (self.hostId !== hostId || self.creation !== 'ready') fail('This Host is not the registered Team member.');
-      if (call.action === 'read') return { ...publicTeam(team), receipts: team.deliveryReceipts?.map(({ fingerprint: _hash, settledAt: _time, ...receipt }) => receipt) ?? [] };
+      if (call.action === 'read') return { ...this.project(team), receipts: team.deliveryReceipts?.map(({ fingerprint: _hash, settledAt: _time, ...receipt }) => receipt) ?? [] };
       if (call.action === 'presence') { if (self.activity === call.activity && team.status !== 'archiving') return team.status; self.activity = call.activity; self.updatedAt = now; settleArchive(team, now); return team.status; }
       if (call.action === 'settle' || call.action === 'claim') {
         const message = team.messages.find(item => item.id === call.messageId && item.to === self.id);
@@ -95,12 +125,19 @@ export class TeamBroker {
           const receipt = team.deliveryReceipts?.find(item => item.id === call.messageId && item.to === self.id);
           if (!receipt) fail('Message is not addressed to this member.');
           if (call.action === 'claim') return fail('Message is already settled.');
+          if (call.resolvedTarget && (!receipt!.resolvedTarget || nativeSessionRefKey(call.resolvedTarget) !== nativeSessionRefKey(receipt!.resolvedTarget))) fail('Team receipt recipient changed.');
           if (receipt!.status !== call.outcome) fail('Message is already settled.');
           const { fingerprint: _hash, settledAt: _time, ...result } = receipt!;
           return result;
         }
-        if (call.action === 'claim') { active(team); if (message.status !== 'queued') fail('Message is already claimed.'); message.status = 'dispatching'; self.activity = 'busy'; }
-        else { if (message.status !== 'dispatching' && message.status !== 'unknown' && message.status !== call.outcome) fail('Message is already settled.'); message.status = call.outcome; if (message.acceptance !== 'started' && message.acceptance !== 'handled') message.acceptance = call.acceptance; message.error = call.error; }
+        if (call.action === 'claim') {
+          active(team); if (message.status !== 'queued') fail('Message is already claimed.');
+          const target = this.resolve(self);
+          if (call.expectedNativeSessionId === undefined ? target.nativeSessionId !== self.nativeSessionId : call.expectedNativeSessionId !== target.nativeSessionId) fail('Team recipient moved or does not match the claim.');
+          this.ports.assertRecipient?.(target);
+          message.resolvedTarget = structuredClone(target); message.status = 'dispatching'; self.activity = 'busy';
+        }
+        else { if (call.resolvedTarget && (!message.resolvedTarget || nativeSessionRefKey(call.resolvedTarget) !== nativeSessionRefKey(message.resolvedTarget))) fail('Team receipt recipient changed.'); if (message.status !== 'dispatching' && message.status !== 'unknown' && message.status !== call.outcome) fail('Message is already settled.'); message.status = call.outcome; if (message.acceptance !== 'started' && message.acceptance !== 'handled') message.acceptance = call.acceptance; message.error = call.error; }
         return message;
       }
       active(team);
@@ -119,7 +156,7 @@ export class TeamBroker {
       }
       if (call.action === 'describe_member') { if (self.role !== 'leader') fail('Only the Leader defines member responsibilities.'); member(team, call.target).responsibility = call.responsibility; }
       if (call.action === 'report') { self.summary = call.summary; self.updatedAt = now; }
-      touch(team, now); return publicTeam(team);
+      touch(team, now); return this.project(team);
     });
   }
   private resourceAccess(team: SavedTeam, memberId: string, resourceId: string): TeamResource {
@@ -219,7 +256,7 @@ export class TeamBroker {
       }
       // An archive may have started while native creation was in progress. Never reactivate it.
       if (current.status === 'active') touch(current, this.ports.now());
-      if (!validSavedTeam(current)) fail('Invalid Team state.'); return publicTeam(current);
+      if (!validSavedTeam(current)) fail('Invalid Team state.'); return this.project(current);
     });
   }
 }

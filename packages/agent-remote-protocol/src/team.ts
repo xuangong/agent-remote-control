@@ -1,4 +1,5 @@
 import { Type, type Static } from '@sinclair/typebox';
+import { NativeSessionRef } from './session-succession.js';
 import { Value } from '@sinclair/typebox/value';
 const object = { additionalProperties: false } as const;
 const id = Type.String({ minLength: 1, maxLength: 256 });
@@ -9,7 +10,7 @@ export const TeamSource = Type.Object({ hostId: id, providerId: id, nativeSessio
 export type TeamSource = Static<typeof TeamSource>;
 export const TeamMember = Type.Object({
   id, hostId: id, providerId: id, role: enumOf('leader', 'member'), name: Type.String({ minLength: 1, maxLength: 256 }),
-  responsibility: short, cwd: Type.Optional(short), nativeSessionId: Type.Optional(id),
+  responsibility: short, cwd: Type.Optional(short), nativeSessionId: Type.Optional(NativeSessionRef.properties.nativeSessionId),
   creation: enumOf('reserved', 'ready', 'unknown', 'abandoned'), activity: enumOf('unknown', 'idle', 'busy'),
   summary: short, updatedAt: Type.Number(), error: Type.Optional(short),
 }, object);
@@ -20,7 +21,7 @@ export const TeamResourceUpload = Type.Object({ ownerMemberId: id, expiresAt: Ty
 export type TeamResourceUpload = Static<typeof TeamResourceUpload>;
 export const TeamMessage = Type.Object({ id, from: id, to: id, text, resources: Type.Optional(Type.Array(TeamResource, { minItems: 1, maxItems: 8 })),
   status: enumOf('queued', 'dispatching', 'accepted', 'rejected', 'unknown', 'canceled'),
-  acceptance: Type.Optional(enumOf('started', 'queued', 'handled')), createdAt: Type.Number(), error: Type.Optional(short),
+  resolvedTarget: Type.Optional(NativeSessionRef), acceptance: Type.Optional(enumOf('started', 'queued', 'handled')), createdAt: Type.Number(), error: Type.Optional(short),
 }, object);
 export type TeamMessage = Static<typeof TeamMessage>;
 export const Team = Type.Object({ id, operationId: id, revision: Type.Integer({ minimum: 1 }), source: TeamSource,
@@ -55,8 +56,8 @@ export const TeamHostCall = Type.Union([
   Type.Object({ action: Type.Literal('describe_member'), teamId: id, memberId: id, target: id, responsibility: short }, object),
   Type.Object({ action: Type.Literal('report'), teamId: id, memberId: id, summary: short }, object),
   Type.Object({ action: Type.Literal('presence'), teamId: id, memberId: id, activity: enumOf('idle', 'busy', 'unknown') }, object),
-  Type.Object({ action: Type.Literal('claim'), teamId: id, memberId: id, messageId: id }, object),
-  Type.Object({ action: Type.Literal('settle'), teamId: id, memberId: id, messageId: id, outcome: enumOf('accepted', 'rejected', 'unknown'), acceptance: Type.Optional(enumOf('started', 'queued', 'handled')), error: Type.Optional(short) }, object),
+  Type.Object({ action: Type.Literal('claim'), teamId: id, memberId: id, messageId: id, expectedNativeSessionId: Type.Optional(NativeSessionRef.properties.nativeSessionId) }, object),
+  Type.Object({ action: Type.Literal('settle'), teamId: id, memberId: id, messageId: id, resolvedTarget: Type.Optional(NativeSessionRef), outcome: enumOf('accepted', 'rejected', 'unknown'), acceptance: Type.Optional(enumOf('started', 'queued', 'handled')), error: Type.Optional(short) }, object),
 ]);
 export type TeamHostCall = Static<typeof TeamHostCall>;
 export const TeamSeat = Type.Object({ teamId: id, source: TeamSource, member: TeamMember }, object);
@@ -64,7 +65,6 @@ export type TeamSeat = Static<typeof TeamSeat>;
 export const isTeam = (value: unknown): value is Team => Value.Check(Team, value)
   && value.members[0]?.role === 'leader' && value.members.slice(1).every(member => member.role === 'member')
   && value.members[0].hostId === value.source.hostId
-  && value.members.every(member => member.creation !== 'ready' || !!member.nativeSessionId)
   && new Set(value.members.map(member => member.id)).size === value.members.length
   && new Set(value.messages.map(message => message.id)).size === value.messages.length
   && new Set(value.resourceUploads?.map(upload => upload.resource.resourceId) ?? []).size === (value.resourceUploads?.length ?? 0)
@@ -72,6 +72,7 @@ export const isTeam = (value: unknown): value is Team => Value.Check(Team, value
   && value.messages.every(message => !message.resources || message.resources.reduce((total, resource) => total + resource.byteLength, 0) <= 100 * 1024 * 1024
     && new Set(message.resources.map(resource => resource.resourceId)).size === message.resources.length
     && message.resources.every(resource => value.resourceUploads?.some(upload => (['resourceId', 'name', 'mediaType', 'byteLength', 'sha256'] as const).every(key => upload.resource[key] === resource[key]))))
+  && value.messages.every(message => !message.resolvedTarget || value.members.some(member => member.id === message.to && member.providerId === message.resolvedTarget!.providerId))
   && value.messages.every(message => value.members.some(member => member.id === message.from) && value.members.some(member => member.id === message.to));
 export const isTeamCreate = (value: unknown): value is TeamCreate => Value.Check(TeamCreate, value);
 export const isTeamAction = (value: unknown): value is TeamAction => Value.Check(TeamAction, value);

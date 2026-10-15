@@ -13,7 +13,7 @@ const ref=(nativeSessionId:string,providerId='first'):NativeSessionRef=>({contro
 async function fixture() {
   const root=await realpath(await mkdtemp(join(tmpdir(),'succession-tpm-routing-'))); roots.push(root);
   const acquired: NativeSessionRef[]=[];
-  let released=0, denied=false;
+  let released=0, denied=false; let onAuthorize = () => {};
   const queries: AgentHistoryQuery[]=[];
   const legacyEntries: Array<{seq:number;item:{type:'user_message';text:string}}> = [];
   const legacyRequests: unknown[]=[];
@@ -24,7 +24,7 @@ async function fixture() {
     inspect:async()=>({cwd:root,idle:true,managed:true,pendingInputs:0,inFlightInputs:0,pendingInteractions:0,activeChildren:0,boundary:{epoch:'e',seq:1}}),
     createIdle:async(_source,_operation,providerId)=>ref('B',providerId),
     captureTimeline:async()=>({entries:[entry],boundary:{epoch:'e',seq:1},capturedAt:'2026-10-10T00:00:00Z'}),
-    authorizeRead:async()=>{if(denied)throw new Error('Access revoked');},
+    authorizeRead:async()=>{onAuthorize();if(denied)throw new Error('Access revoked');},
     readHistory:async (source,query)=>{queries.push(query);return {entries:[{id:'message',turnId:'turn',role:'user',text:source.nativeSessionId,textOffset:0,totalChars:1}],...(!query.cursor ? {nextCursor:'native-next'} : {})};},
     reconcileDelivery:async()=>undefined,
   });
@@ -38,7 +38,7 @@ async function fixture() {
     const request={operationId:'handoff',roleId:'role',expectedRevision:1,from:ref('A'),targetProviderId:'second'};
     expect((await service.prepare(request)).phase).toBe('ready');await service.commit('handoff',1);
   };
-  return {service,routing,commit,acquired,queries,legacyEntries,legacyRequests,released:()=>released,deny:()=>{denied=true;}};
+  return {service,routing,commit,acquired,queries,legacyEntries,legacyRequests,onAuthorize:(callback:()=>void)=>{onAuthorize=callback;},released:()=>released,deny:()=>{denied=true;}};
 }
 test('TPM reads pending context across providers and old history cursors retain their actual source',async()=>{
   const f=await fixture(),binding=await f.routing.bind('first','A');
@@ -88,4 +88,12 @@ test('signed TPM continuation inherits omitted query fields and rejects explicit
   await expect(f.routing.read!(binding,{cursor:first.nextCursor,query:'different'})).rejects.toThrow(/query cannot change/);
   const bounded=await f.routing.read!(binding,{}) as {nextCursor:string};
   await expect(f.routing.read!(binding,{cursor:bounded.nextCursor,limit:100})).rejects.toThrow(/query cannot change/);
+});
+
+
+test('a retired TPM reader cannot start a native role-history read after asynchronous authorization', async () => {
+  const f = await fixture(), binding = await f.routing.bind('first', 'A');
+  let current = true; f.onAuthorize(() => { current = false; });
+  await expect(f.routing.read!(binding, {}, () => { if (!current) throw new Error('TPM attachment retired'); })).rejects.toThrow('retired');
+  expect(f.queries).toEqual([]); expect(f.acquired).toEqual([]);
 });

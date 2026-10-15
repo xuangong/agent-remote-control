@@ -264,7 +264,13 @@ Protocol (14), hosted service (10), client (19), Controller CLI (6), and
 Cloudflare SQLite (3) focused tests passed. Final dependency/Lab builds,
 affected typechecks, the compatibility-dependent Lab regression (67), and
 whitespace checks passed. Final compatibility digest:
-`sha256:2875822c5db507dda490f807ac56a23796273e2fd9754de1b62545d6ba7697b8`.
+`sha256:79e68c2b65472cccbae4286d9c9b769135d4bf7b7ac0f613716b23f8aa97da90`.
+
+Release verification also corrected an image-draft test's React scheduling:
+each readiness poll flushes pending updates before inspecting the button,
+instead of waiting for the DOM inside the outer `act`. The original one-second
+poll deadline and all image/ACK/rejection assertions remain unchanged. All 1691
+Lab tests passed afterward; production behavior was unchanged by this correction.
 
 Cached layouts remain visible before hosted inspection. Only confirmed stores
 start deletion recovery; explicit missing links remain errors. Replacement

@@ -237,7 +237,10 @@ it.each(['ack', 'reject'] as const)('persists image bytes and clears the image d
     Object.defineProperty(event, 'clipboardData', { value: { files: [new NativeBlob(['image'], { type: 'image/png' })], getData: () => '' } });
     editor(f.view).dispatchEvent(event);
   });
-  await act(async () => { await vi.waitFor(() => expect(f.view.querySelector<HTMLButtonElement>('[data-testid="prompt-submit"]')!.disabled).toBe(false)); });
+  await vi.waitFor(async () => {
+    await act(async () => {});
+    expect(f.view.querySelector<HTMLButtonElement>('[data-testid="prompt-submit"]')!.disabled).toBe(false);
+  });
   const image = f.view.querySelector('[data-image-id]')!.getAttribute('data-image-id')!;
   let persisted = await inspectImageDraft(f.imageDraftBinding);
   await act(async () => { await persisted.flush(persisted.snapshot().revision, () => true); });

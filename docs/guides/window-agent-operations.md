@@ -16,6 +16,21 @@ ordinary shared Window, with no naming or save step required. Each committed
 change persists; refresh and shared links reuse its identity. **New Window**
 creates another Window, and **Delete Window** explicitly removes a layout.
 
+## Deployment and upgrades
+
+The website and Relay implement the shared Window service. Existing Controllers
+can keep serving sessions without an upgrade because the native session protocol
+is unchanged. Using the new `agent-remote-controller window` commands requires a
+CLI build that includes them; those commands contact the service directly and do
+not require restarting the running Host daemon.
+
+The new Relay reads existing state that has no Windows. Once it stores a Window,
+the state contains `workspaceWindow` records that earlier Relay versions cannot
+read. Deleting a Window retains its settlement records and does not restore
+backward compatibility. Any rollback build must retain the new record reader;
+do not directly roll back to a pre-Window Worker or clear durable state. Preserve
+the existing storage namespace, origins, and signing secret during deployment.
+
 ## Obtain a scoped grant
 
 In the hosted website, open the Window and select the session that will manage

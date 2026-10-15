@@ -32,3 +32,19 @@ it('validates exact recipient evidence additively and permits an unavailable pub
   const team = { id:'team',operationId:'create',revision:1,source:{hostId:'host',providerId:'codex',nativeSessionId:'source',title:'Source'},title:'Team',status:'active',members:[{id:'leader',hostId:'host',providerId:'codex',role:'leader',name:'Leader',responsibility:'',creation:'ready',activity:'unknown',summary:'',updatedAt:1}],messages:[],createdAt:1,updatedAt:1 };
   expect(isTeam(team)).toBe(true);
 });
+
+
+it('validates bounded unresolved compact evidence without inventing a message body', () => {
+  const member = { hostId: 'host', providerId: 'codex', responsibility: '', creation: 'ready', activity: 'idle', summary: '', updatedAt: 1 };
+  const receipt = { id: 'legacy', from: 'leader', to: 'worker', status: 'accepted', createdAt: 1 };
+  const team = { id: 'team', operationId: 'create', revision: 1, source: { hostId: 'host', providerId: 'codex', nativeSessionId: 'source', title: 'Source' }, title: 'Team', status: 'active',
+    members: [{ ...member, id: 'leader', role: 'leader', name: 'Leader' }, { ...member, id: 'worker', role: 'member', name: 'Worker' }], messages: [], unresolvedReceipts: [receipt], createdAt: 1, updatedAt: 1 };
+  expect(isTeam(team)).toBe(true);
+  expect(isTeam({ ...team, unresolvedReceipts: [{ ...receipt, resolvedTarget: { controllerId: 'host', providerId: 'codex', nativeSessionId: 'A' } }] })).toBe(true);
+  for (const extra of [{ text: 'Invented body' }, { fingerprint: 'a'.repeat(64) }, { acceptance: 'handled' }, { status: 'queued' }, { to: 'missing' }, { resolvedTarget: { controllerId: 'host', providerId: 'other', nativeSessionId: 'A' } }]) {
+    expect(isTeam({ ...team, unresolvedReceipts: [{ ...receipt, ...extra }] })).toBe(false);
+  }
+  expect(isTeam({ ...team, unresolvedReceipts: [receipt, receipt] })).toBe(false);
+  expect(isTeam({ ...team, messages: [{ ...receipt, text: 'Duplicate' }] })).toBe(false);
+  expect(isTeam({ ...team, unresolvedReceipts: Array.from({ length: 201 }, (_, index) => ({ ...receipt, id: String(index) })) })).toBe(false);
+});

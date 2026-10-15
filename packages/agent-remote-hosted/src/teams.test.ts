@@ -2,7 +2,7 @@ import { expect, it } from 'vitest';
 import type { Team, TeamSeat } from '@orchardworks/agent-remote-protocol';
 import { TeamBroker } from './teams.js';
 import { createHostBroker } from './broker.js';
-import { validSavedTeam } from './team-delivery.js';
+import { validSavedTeam, deliveryFingerprint, trimTeamDeliveryReceipts, type SavedTeam } from './team-delivery.js';
 import { isTeam } from '@orchardworks/agent-remote-protocol';
 import { PortableTeamResourceStore, type TeamResourceStorage } from './team-resources.js';
 import { createHash } from 'node:crypto';
@@ -298,4 +298,54 @@ it('limits legacy unresolved recipient blockers to the owning Controller when it
   };
   expect(f.broker.hasUnsettledRecipient({ controllerId: 'other', providerId: 'claude', nativeSessionId: 'other-session' })).toBe(false);
   expect(f.broker.hasUnsettledRecipient({ controllerId: 'win', providerId: 'claude', nativeSessionId: 'current-session' })).toBe(true);
+});
+
+
+it.each(['accepted', 'rejected'] as const)('explicitly resolves accepted input without disposition as %s after restart', async outcome => {
+  const f = await group();
+  const input = { action: 'send' as const, teamId: f.team.id, memberId: f.leader.id, to: f.worker.id, operationId: 'no-disposition', text: 'Inspect once' };
+  const sent = await f.broker.hostCall('mac', input) as { id: string };
+  const target = { teamId: f.team.id, memberId: f.worker.id, messageId: sent.id };
+  const claimed = await f.broker.hostCall('win', { action: 'claim', ...target }) as { resolvedTarget: import('@orchardworks/agent-remote-protocol').NativeSessionRef };
+  await f.broker.hostCall('win', { action: 'settle', ...target, outcome: 'accepted' });
+  const restored = f.restart();
+  expect(restored.hasUnsettledRecipient(claimed.resolvedTarget)).toBe(true);
+  expect(await restored.hostCall('mac', input)).toMatchObject({ id: sent.id, status: 'accepted', resolvedTarget: claimed.resolvedTarget });
+  await restored.action({ action: 'archive', teamId: f.team.id });
+  await restored.hostCall('mac', { action: 'presence', teamId: f.team.id, memberId: f.leader.id, activity: 'idle' });
+  await restored.hostCall('win', { action: 'presence', teamId: f.team.id, memberId: f.worker.id, activity: 'idle' });
+  expect(restored.list()[0]!.status).toBe('archiving');
+  await restored.action({ action: 'resolve_message', teamId: f.team.id, messageId: sent.id, outcome });
+  expect(restored.hasUnsettledRecipient(claimed.resolvedTarget)).toBe(false);
+  expect(restored.list()[0]!.status).toBe('archived');
+  const receipt = (f.snapshot()[0] as SavedTeam).deliveryReceipts!.find(item => item.id === sent.id)!;
+  expect(receipt).toMatchObject({ status: outcome, resolvedTarget: claimed.resolvedTarget });
+  expect(receipt.acceptance).toBe(outcome === 'accepted' ? 'handled' : undefined);
+  expect(f.restart().hasUnsettledRecipient(claimed.resolvedTarget)).toBe(false);
+});
+
+it('retains legacy compact uncertainty through expiry, count and shared storage pressure', async () => {
+  let now = 1;
+  const f = await group(fixture(undefined, { now: () => now, ttl: 10 }));
+  const team = f.snapshot()[0]! as SavedTeam;
+  team.messages = [];
+  const receipt = { id: 'legacy', from: f.leader.id, to: f.worker.id, status: 'accepted' as const, createdAt: 1, settledAt: 1, fingerprint: deliveryFingerprint({ to: f.worker.id, text: 'Original private body' }) };
+  team.deliveryReceipts = [receipt];
+  expect(validSavedTeam(team)).toBe(true);
+  expect(validSavedTeam({ ...team, unresolvedReceipts: [{ id: receipt.id, from: receipt.from, to: receipt.to, status: receipt.status, createdAt: receipt.createdAt }] })).toBe(false);
+  f.seed([team]); now = 25 * 60 * 60 * 1000;
+  const restored = f.restart();
+  for (let index = 0; index < 205; index++) {
+    const sent = await restored.hostCall('mac', { action: 'send', teamId: team.id, memberId: f.leader.id, to: f.worker.id, operationId: `settled-${index}`, text: 'Unrelated input' }) as { id: string };
+    const target = { teamId: team.id, memberId: f.worker.id, messageId: sent.id };
+    await restored.hostCall('win', { action: 'claim', ...target });
+    await restored.hostCall('win', { action: 'settle', ...target, outcome: 'rejected' });
+  }
+  const saved = f.snapshot() as SavedTeam[];
+  expect(saved[0]!.deliveryReceipts!.find(item => item.id === receipt.id)).toEqual(receipt);
+  expect(saved[0]!.deliveryReceipts!.length).toBeLessThan(200);
+  trimTeamDeliveryReceipts(saved, 1);
+  expect(saved[0]!.deliveryReceipts).toEqual([receipt]);
+  expect(validSavedTeam(saved[0])).toBe(true);
+  expect(JSON.stringify(saved)).not.toContain('Original private body');
 });

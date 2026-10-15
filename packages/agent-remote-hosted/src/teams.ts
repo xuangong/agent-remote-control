@@ -1,4 +1,4 @@
-import { assertTeamQueueCapacity, compactTeamDeliveries, publicTeam, replayTeamDelivery, validSavedTeam, type SavedTeam } from './team-delivery.js';
+import { assertTeamQueueCapacity, compactTeamDeliveries, unresolvedTeamDelivery, publicTeam, replayTeamDelivery, validSavedTeam, type SavedTeam } from './team-delivery.js';
 export { teamMessageBudgetBytes } from './team-delivery.js';
 import type { TeamResourceStore } from './team-resources.js';
 import { createHash, randomUUID } from 'node:crypto';
@@ -20,9 +20,9 @@ const find = (teams: SavedTeam[], id: string) => teams.find(team => team.id === 
 const member = (team: Team, id: string) => team.members.find(item => item.id === id) ?? fail('Team member not found.');
 const active = (team: Team) => { if (team.status !== 'active') fail('Team is not active.'); };
 function touch(team: Team, now: number) { team.revision++; team.updatedAt = now; }
-function settleArchive(team: Team, now: number) {
+function settleArchive(team: SavedTeam, now: number) {
   if (team.status === 'archiving' && team.members.every(item => item.creation === 'abandoned' || item.creation === 'ready' && item.activity === 'idle' && item.updatedAt >= team.updatedAt)
-    && !team.messages.some(message => (['dispatching', 'unknown'].includes(message.status) || message.status === 'accepted' && !['started', 'handled'].includes(message.acceptance ?? '')))) { team.status = 'archived'; touch(team, now); }
+    && ![...team.messages, ...(team.deliveryReceipts ?? [])].some(unresolvedTeamDelivery)) { team.status = 'archived'; touch(team, now); }
 }
 
 /** Membership authority and durable mailboxes; provider execution stays on Controllers. */
@@ -39,6 +39,12 @@ export class TeamBroker {
   }
   private project(saved: SavedTeam): Team {
     const team = structuredClone(publicTeam(saved));
+    const unresolved = (saved.deliveryReceipts ?? []).flatMap(receipt => {
+      if (receipt.status !== 'accepted' || receipt.acceptance !== undefined) return [];
+      const { fingerprint: _hash, settledAt: _time, acceptance: _disposition, ...evidence } = receipt;
+      return [{ ...evidence, status: receipt.status }];
+    });
+    if (unresolved.length) team.unresolvedReceipts = structuredClone(unresolved);
     for (const member of team.members) if (member.nativeSessionId) {
       try { member.nativeSessionId = this.resolve(member).nativeSessionId; }
       catch { delete member.nativeSessionId; }
@@ -53,7 +59,7 @@ export class TeamBroker {
   }
   hasUnsettledRecipient(target: NativeSessionRef): boolean {
     return this.ports.read().some(team => [...team.messages, ...(team.deliveryReceipts ?? [])].some(message => {
-      if (!['dispatching', 'unknown'].includes(message.status) && !(message.status === 'accepted' && !['started', 'handled'].includes(message.acceptance ?? ''))) return false;
+      if (!unresolvedTeamDelivery(message)) return false;
       if (message.resolvedTarget) return nativeSessionRefKey(message.resolvedTarget) === nativeSessionRefKey(target);
       const seat = member(team, message.to);
       if (seat.providerId !== target.providerId) return false;
@@ -100,9 +106,11 @@ export class TeamBroker {
       } else if (input.action === 'abandon_creation') {
         const item = member(team, input.memberId); if (item.creation === 'ready') fail('A registered member cannot be abandoned.'); item.creation = 'abandoned'; item.activity = 'idle'; item.updatedAt = now;
       } else if (input.action === 'resolve_message') {
-        const message = team.messages.find(item => item.id === input.messageId) ?? fail('Message not found.');
-        if (!['unknown', 'dispatching'].includes(message.status) && message.acceptance !== 'queued') fail('Message does not require resolution.');
+        const receipt = team.deliveryReceipts?.find(item => item.id === input.messageId);
+        const message = team.messages.find(item => item.id === input.messageId) ?? receipt ?? fail('Message not found.');
+        if (!unresolvedTeamDelivery(message)) fail('Message does not require resolution.');
         message.status = input.outcome; message.acceptance = input.outcome === 'accepted' ? 'handled' : undefined; message.error = 'Resolved explicitly by the user.';
+        if (receipt) receipt.settledAt = now;
       } else if (input.action === 'retry_creation') { active(team); if (member(team, input.memberId).creation === 'abandoned') fail('Member was abandoned.'); }
       settleArchive(team, now); return team;
     });

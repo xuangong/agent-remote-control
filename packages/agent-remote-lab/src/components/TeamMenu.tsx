@@ -168,6 +168,8 @@ function TeamManagement({ team, hosts, busy, failure, onChange, onOpenSession }:
   team: Team; hosts: Host[]; busy: boolean; failure?: string; onChange(input: TeamAction): Promise<boolean>; onOpenSession(target: TeamSource): void;
 }) {
   const [adding, setAdding] = useState(false);
+  const recovery = [...team.messages.filter(message => ['unknown', 'dispatching', 'rejected'].includes(message.status)
+    || message.status === 'accepted' && !['started', 'handled'].includes(message.acceptance ?? '')), ...(team.unresolvedReceipts ?? [])];
   return <details className="lab-team-management"><summary>Manage team</summary>
     <div className="lab-team-actions">
       <button disabled={busy || team.status !== 'active'} onClick={() => setAdding(!adding)}>Add member</button>
@@ -182,7 +184,7 @@ function TeamManagement({ team, hosts, busy, failure, onChange, onOpenSession }:
       {member.creation !== 'ready' ? <div><p>{member.error ?? 'Session creation is pending.'}</p><button disabled={busy} onClick={() => void onChange({teamId:team.id,action:'retry_creation',memberId:member.id})}>Check creation</button><button disabled={busy} onClick={() => void onChange({teamId:team.id,action:'abandon_creation',memberId:member.id})}>Abandon slot</button></div> : null}
     </li>)}</ul>
     {team.status === 'archiving' ? <p className="lab-control-note" role="status">New dispatches stopped. Waiting for members to settle. Open their sessions to resolve approvals or stop ongoing work.</p> : null}
-    {team.messages.some(message => ['unknown', 'dispatching', 'rejected'].includes(message.status) || message.acceptance === 'queued') ? <details className="lab-team-recovery"><summary>Delivery status</summary>{team.messages.filter(message => ['unknown','dispatching','rejected'].includes(message.status) || message.acceptance === 'queued').map(message => <div key={message.id}><p>{message.status}: {message.text.slice(0,160)}</p><small>{message.error ?? 'Awaiting a native receipt. Do not repeat this message.'}</small>{message.status !== 'rejected' ? <><p>Inspect the receiving session before resolving.</p><button disabled={busy} onClick={() => void onChange({teamId:team.id,action:'resolve_message',messageId:message.id,outcome:'accepted'})}>Confirm received</button><button disabled={busy} onClick={() => void onChange({teamId:team.id,action:'resolve_message',messageId:message.id,outcome:'rejected'})}>Confirm not executed</button></> : null}</div>)}</details> : null}
+    {recovery.length > 0 ? <details className="lab-team-recovery"><summary>Delivery status</summary>{recovery.map(message => <div key={message.id}>{!('text' in message) ? <><p>Delivery {message.id} to {team.members.find(member => member.id === message.to)?.name ?? message.to}</p>{message.resolvedTarget ? <small>Recorded recipient: {message.resolvedTarget.nativeSessionId}</small> : null}</> : null}<p>{message.status}: {'text' in message ? message.text.slice(0,160) : 'Original message body is unavailable.'}</p><small>{message.error ?? 'Awaiting a native receipt. Do not repeat this message.'}</small>{message.status !== 'rejected' ? <><p>Inspect the receiving session before resolving.</p><button disabled={busy} onClick={() => void onChange({teamId:team.id,action:'resolve_message',messageId:message.id,outcome:'accepted'})}>Confirm received</button><button disabled={busy} onClick={() => void onChange({teamId:team.id,action:'resolve_message',messageId:message.id,outcome:'rejected'})}>Confirm not executed</button></> : null}</div>)}</details> : null}
   </details>;
 }
 

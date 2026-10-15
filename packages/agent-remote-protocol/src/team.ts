@@ -24,9 +24,14 @@ export const TeamMessage = Type.Object({ id, from: id, to: id, text, resources: 
   resolvedTarget: Type.Optional(NativeSessionRef), acceptance: Type.Optional(enumOf('started', 'queued', 'handled')), createdAt: Type.Number(), error: Type.Optional(short),
 }, object);
 export type TeamMessage = Static<typeof TeamMessage>;
+export const TEAM_DELIVERY_RECEIPT_LIMIT = 200;
+/** Recoverable legacy delivery evidence whose original body has already been compacted. */
+export const TeamUnresolvedReceipt = Type.Object({ ...Type.Omit(TeamMessage, ['text', 'resources', 'status', 'acceptance']).properties, status: Type.Literal('accepted') }, object);
+export type TeamUnresolvedReceipt = Static<typeof TeamUnresolvedReceipt>;
 export const Team = Type.Object({ id, operationId: id, revision: Type.Integer({ minimum: 1 }), source: TeamSource,
   title: Type.String({ minLength: 1, maxLength: 256 }), status: enumOf('active', 'archiving', 'archived'),
   members: Type.Array(TeamMember, { minItems: 1, maxItems: 12 }), messages: Type.Array(TeamMessage, { maxItems: 200 }),
+  unresolvedReceipts: Type.Optional(Type.Array(TeamUnresolvedReceipt, { maxItems: TEAM_DELIVERY_RECEIPT_LIMIT })),
   resourceUploads: Type.Optional(Type.Array(TeamResourceUpload, { maxItems: 1024 })),
   createdAt: Type.Number(), updatedAt: Type.Number(),
 }, object);
@@ -66,7 +71,8 @@ export const isTeam = (value: unknown): value is Team => Value.Check(Team, value
   && value.members[0]?.role === 'leader' && value.members.slice(1).every(member => member.role === 'member')
   && value.members[0].hostId === value.source.hostId
   && new Set(value.members.map(member => member.id)).size === value.members.length
-  && new Set(value.messages.map(message => message.id)).size === value.messages.length
+  && new Set([...value.messages, ...(value.unresolvedReceipts ?? [])].map(message => message.id)).size === value.messages.length + (value.unresolvedReceipts?.length ?? 0)
+  && (value.unresolvedReceipts ?? []).every(receipt => value.members.some(member => member.id === receipt.from) && value.members.some(member => member.id === receipt.to && (!receipt.resolvedTarget || member.providerId === receipt.resolvedTarget.providerId)))
   && new Set(value.resourceUploads?.map(upload => upload.resource.resourceId) ?? []).size === (value.resourceUploads?.length ?? 0)
   && (value.resourceUploads ?? []).every(upload => value.members.some(member => member.id === upload.ownerMemberId))
   && value.messages.every(message => !message.resources || message.resources.reduce((total, resource) => total + resource.byteLength, 0) <= 100 * 1024 * 1024

@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { deliveryFingerprint, validSavedTeam } from './team-delivery.js';
 import { once } from 'node:events';
 import { createServer } from 'node:http';
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
@@ -1467,4 +1468,67 @@ test.each(['unknown', 'accepted', 'queued'] as const)('blocks Team %s receipts a
   expect((await host.teamCall({ action:'settle',teamId:'team',memberId:'worker',messageId:'message',resolvedTarget:ref('A'),outcome:state==='unknown'?'unknown':'accepted',...(state==='queued'?{acceptance:'queued'}:{}) })).status).toBe(200);
   expect((await f.request('v1/remote/hosts/mapped-host/succession/prepare','owner',prefixTeamRequest)).status).toBe(409);
   expect(host.effects.prepare).toBe(0); expect((await f.saved()).tenants[0]!.broker.associations!.freezes).toEqual([]);
+}, 10000);
+
+
+test.each(['inline', 'compact-legacy', 'compact-target'] as const)('recovers %s accepted receipts only after explicit settlement over persisted HTTP and WebSocket', async representation => {
+  for (const outcome of ['accepted', 'rejected'] as const) {
+    const f = await fixture(seedPrefixTeam, false, true, true);
+    const input = { action: 'send', teamId: 'team', memberId: 'leader', to: 'worker', operationId: 'uncertain', text: 'Original private body' };
+    const id = createHash('sha256').update(JSON.stringify(['leader', input.operationId])).digest('hex');
+    const fingerprint = deliveryFingerprint(input);
+    await f.replaceSaved(state => {
+      const team = state.tenants[0]!.broker.teams![0]!;
+      const message = { id, from: 'leader', to: 'worker', status: 'accepted' as const, createdAt: 1, ...(representation === 'compact-legacy' ? {} : { resolvedTarget: ref('A') }) };
+      team.messages = representation === 'inline' ? [{ ...message, text: input.text }] : [];
+      if (representation !== 'inline') team.deliveryReceipts = [{ ...message, fingerprint, settledAt: 1 }];
+    });
+    await f.restart();
+    const host = await controller(f, false, false, 3);
+    expect((await f.request('v1/remote/teams/action', 'owner', { action: 'rename', teamId: 'team', title: 'Retained' })).status).toBe(200);
+    const saved = (await f.saved()).tenants[0]!.broker.teams![0]!;
+    expect(validSavedTeam(saved)).toBe(true);
+    if (representation !== 'inline') {
+      const catalog = (await (await f.request('v1/remote/teams')).json()).teams[0];
+      expect(catalog.unresolvedReceipts).toHaveLength(1);
+      expect(catalog.unresolvedReceipts[0]).toMatchObject({ id, from: 'leader', to: 'worker', status: 'accepted' });
+      expect(catalog.unresolvedReceipts[0]).not.toHaveProperty('text');
+      expect(catalog.unresolvedReceipts[0]).not.toHaveProperty('fingerprint');
+      expect(catalog.unresolvedReceipts[0]).not.toHaveProperty('acceptance');
+      if (representation === 'compact-legacy') expect(catalog.unresolvedReceipts[0]).not.toHaveProperty('resolvedTarget');
+      else expect(catalog.unresolvedReceipts[0].resolvedTarget).toEqual(ref('A'));
+      expect(JSON.stringify(saved)).not.toContain(input.text);
+      expect(saved.deliveryReceipts![0]).toMatchObject({ id, fingerprint, settledAt: 1 });
+      expect(saved.deliveryReceipts![0]).not.toHaveProperty('acceptance');
+      if (representation === 'compact-legacy') expect(saved.deliveryReceipts![0]).not.toHaveProperty('resolvedTarget');
+    }
+    expect((await f.request('v1/remote/hosts/mapped-host/succession/prepare', 'owner', prefixTeamRequest)).status).toBe(409);
+    expect(host.effects.prepare).toBe(0);
+    expect(await host.teamCall(input)).toMatchObject({ status: 200, body: { id, status: 'accepted' } });
+    expect((await host.teamCall({ ...prefixTeamClaim, messageId: id })).status).toBe(409);
+    expect((await f.request('v1/remote/teams/action', 'owner', { action: 'archive', teamId: 'team' })).status).toBe(200);
+    for (const memberId of ['leader', 'worker']) expect((await host.teamCall({ action: 'presence', teamId: 'team', memberId, activity: 'idle' })).status).toBe(200);
+    expect((await (await f.request('v1/remote/teams')).json()).teams[0].status).toBe('archiving');
+    const resolved = await f.request('v1/remote/teams/action', 'owner', { action: 'resolve_message', teamId: 'team', messageId: id, outcome });
+    expect(resolved.status).toBe(200);
+    const resolvedTeam = await resolved.json();
+    expect(resolvedTeam.status).toBe('archived');
+    expect(resolvedTeam).not.toHaveProperty('unresolvedReceipts');
+    const receipt = (await f.saved()).tenants[0]!.broker.teams![0]!.deliveryReceipts!.find(item => item.id === id)!;
+    expect(receipt).toMatchObject({ id, status: outcome, fingerprint });
+    expect(receipt.acceptance).toBe(outcome === 'accepted' ? 'handled' : undefined);
+    if (representation === 'compact-legacy') expect(receipt).not.toHaveProperty('resolvedTarget');
+    else expect(receipt.resolvedTarget).toEqual(ref('A'));
+    await f.restart(); await host.connect();
+    expect((await f.request('v1/remote/teams/action', 'owner', { action: 'restore', teamId: 'team' })).status).toBe(200);
+    expect(await host.teamCall(input)).toMatchObject({ status: 200, body: { id, status: outcome } });
+    expect((await host.teamCall({ ...input, text: 'Different input' })).status).toBe(409);
+    const poll = await host.teamCall({ action: 'poll' });
+    expect(poll.body[0].messages).toEqual([]);
+    expect((await host.teamCall({ ...prefixTeamClaim, messageId: id })).status).toBe(409);
+    expect(host.effects.input).toBe(0);
+    expect(host.effects.rpc.every(path => path === '/remote/succession/enrollment')).toBe(true);
+    expect((await f.request('v1/remote/hosts/mapped-host/succession/prepare', 'owner', prefixTeamRequest)).status).toBe(200);
+    expect(host.effects.prepare).toBe(1);
+  }
 }, 10000);

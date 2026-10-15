@@ -188,3 +188,26 @@ it('reconciles removed Teams and releases only the Team retention reason on unmo
     expect(f.closes).toEqual(['leader', 'leader']);
   } finally { f.connections.clear(); }
 });
+
+
+it.each(['Confirm received', 'Confirm not executed'])('offers %s for accepted input without native disposition', async label => {
+  fixture.teams = [{ ...structuredClone(team), messages: [{ id: 'uncertain', from: 'leader', to: 'worker', text: 'Inspect once', status: 'accepted', createdAt: 1 }] }];
+  const view = await render(<App />);
+  await act(async () => button(view, 'Teams').click());
+  expect(view.querySelector('.lab-team-recovery')?.textContent).toContain('Inspect once');
+  await act(async () => button(view, label).click());
+  expect(fixture.actions).toEqual([{ teamId: 'team', action: 'resolve_message', messageId: 'uncertain', outcome: label === 'Confirm received' ? 'accepted' : 'rejected' }]);
+  expect(fixture.attached).toEqual([]);
+});
+
+
+it.each(['Confirm received', 'Confirm not executed'])('discovers compact uncertainty and offers %s without the original body', async label => {
+  fixture.teams = [{ ...structuredClone(team), unresolvedReceipts: [{ id: 'legacy', from: 'leader', to: 'worker', status: 'accepted', createdAt: 1 }] }];
+  const view = await render(<App />);
+  await act(async () => button(view, 'Teams').click());
+  expect(view.querySelector('.lab-team-recovery')?.textContent).toContain('Original message body is unavailable.');
+  expect(view.querySelector('.lab-team-recovery')?.textContent).toContain('Delivery legacy to Windows');
+  await act(async () => button(view, label).click());
+  expect(fixture.actions).toEqual([{ teamId: 'team', action: 'resolve_message', messageId: 'legacy', outcome: label === 'Confirm received' ? 'accepted' : 'rejected' }]);
+  expect(fixture.attached).toEqual([]);
+});

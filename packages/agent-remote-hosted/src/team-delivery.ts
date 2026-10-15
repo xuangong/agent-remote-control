@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { isTeam, type Team, type TeamMessage } from '@orchardworks/agent-remote-protocol';
+import { TEAM_DELIVERY_RECEIPT_LIMIT, isTeam, type Team, type TeamMessage } from '@orchardworks/agent-remote-protocol';
 
 type DeliveryReceipt = Omit<TeamMessage, 'text' | 'resources'> & { fingerprint: string; settledAt: number };
 type ResourceGrant = { resourceId: string; memberIds: string[] };
@@ -11,7 +11,7 @@ export interface SavedTeam extends Team {
 }
 
 const receiptLifetimeMs = 24 * 60 * 60 * 1000;
-const receiptCount = 200;
+const receiptCount = TEAM_DELIVERY_RECEIPT_LIMIT;
 const receiptBytes = 32 * 1024;
 // Every native reference string can occupy six JSON bytes per code unit.
 const recipientGrowthBytes = Buffer.byteLength(JSON.stringify({ resolvedTarget: { controllerId: '\u0000'.repeat(512), providerId: '\u0000'.repeat(512), nativeSessionId: '\u0000'.repeat(512) } })) - 1;
@@ -23,8 +23,12 @@ export function publicTeam(team: SavedTeam): Team {
   return value;
 }
 
+export function unresolvedTeamDelivery(message: Pick<TeamMessage, 'status' | 'acceptance'>): boolean {
+  return ['dispatching', 'unknown'].includes(message.status) || message.status === 'accepted' && !['started', 'handled'].includes(message.acceptance ?? '');
+}
+
 export function pendingTeamMessage(message: TeamMessage): boolean {
-  return ['queued', 'dispatching', 'unknown'].includes(message.status) || message.status === 'accepted' && !['started', 'handled'].includes(message.acceptance ?? '');
+  return message.status === 'queued' || unresolvedTeamDelivery(message);
 }
 
 export function deliveryFingerprint(input: { to: string; text: string; resources?: string[] }): string {
@@ -40,7 +44,7 @@ export function compactTeamDeliveries(team: SavedTeam, now: number): void {
     if (!grant.memberIds.includes(message.to)) grant.memberIds.push(message.to);
   }
   if (grants.size) team.resourceGrants = [...grants.values()];
-  const receipts = new Map((team.deliveryReceipts ?? []).filter(receipt => receipt.settledAt + receiptLifetimeMs > now).map(receipt => [receipt.id, receipt]));
+  const receipts = new Map((team.deliveryReceipts ?? []).filter(receipt => unresolvedTeamDelivery(receipt) || receipt.settledAt + receiptLifetimeMs > now).map(receipt => [receipt.id, receipt]));
   const pending: TeamMessage[] = [];
   for (const message of team.messages) {
     if (pendingTeamMessage(message)) { pending.push(message); continue; }
@@ -49,16 +53,20 @@ export function compactTeamDeliveries(team: SavedTeam, now: number): void {
   }
   team.messages = pending;
   const retained = [...receipts.values()];
-  while (retained.length > receiptCount || Buffer.byteLength(JSON.stringify(retained)) > receiptBytes) retained.shift();
+  while (retained.length > receiptCount || Buffer.byteLength(JSON.stringify(retained)) > receiptBytes) {
+    const expendable = retained.findIndex(receipt => !unresolvedTeamDelivery(receipt));
+    if (expendable < 0) break;
+    retained.splice(expendable, 1);
+  }
   if (retained.length) team.deliveryReceipts = retained;
   else delete team.deliveryReceipts;
 }
 
-/** Optional retry evidence must never prevent queue admission or settlement. */
+/** Settled retry evidence is expendable; legacy unresolved effects remain authoritative. */
 export function trimTeamDeliveryReceipts(teams: SavedTeam[], maximumStateBytes: number): void {
   let excess = Buffer.byteLength(JSON.stringify(teams)) - maximumStateBytes;
   if (excess <= 0) return;
-  const oldest = teams.flatMap(team => (team.deliveryReceipts ?? []).map(receipt => ({ team, receipt })))
+  const oldest = teams.flatMap(team => (team.deliveryReceipts ?? []).filter(receipt => !unresolvedTeamDelivery(receipt)).map(receipt => ({ team, receipt })))
     .sort((a, b) => a.receipt.settledAt - b.receipt.settledAt);
   for (const { team, receipt } of oldest) {
     team.deliveryReceipts = team.deliveryReceipts!.filter(item => item !== receipt);
@@ -71,7 +79,7 @@ export function trimTeamDeliveryReceipts(teams: SavedTeam[], maximumStateBytes: 
 export function validSavedTeam(value: unknown): value is SavedTeam {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
   const team = value as SavedTeam, visible = publicTeam(team);
-  if (!isTeam(visible) || !visible.members.every(member => member.creation !== 'ready' || !!member.nativeSessionId)) return false;
+  if (team.unresolvedReceipts !== undefined || !isTeam(visible) || !visible.members.every(member => member.creation !== 'ready' || !!member.nativeSessionId)) return false;
   const receipts = team.deliveryReceipts;
   if (receipts !== undefined) {
     if (!Array.isArray(receipts) || receipts.length > receiptCount || Buffer.byteLength(JSON.stringify(receipts)) > receiptBytes) return false;
@@ -79,8 +87,9 @@ export function validSavedTeam(value: unknown): value is SavedTeam {
       && Object.keys(receipt).every(key => ['id', 'from', 'to', 'status', 'acceptance', 'createdAt', 'error', 'fingerprint', 'settledAt', 'resolvedTarget'].includes(key))
       && typeof receipt.fingerprint === 'string' && /^[a-f0-9]{64}$/.test(receipt.fingerprint)
       && Number.isSafeInteger(receipt.settledAt) && receipt.settledAt >= 0)) return false;
+    // Older versions compacted accepted input without a native disposition. Keep that evidence unresolved.
     const messages = receipts.map(({ fingerprint: _hash, settledAt: _time, ...receipt }) => ({ ...receipt, text: 'receipt' }));
-    if (!isTeam({ ...visible, messages }) || messages.some(pendingTeamMessage)
+    if (!isTeam({ ...visible, messages }) || messages.some(message => pendingTeamMessage(message) && !(message.status === 'accepted' && message.acceptance === undefined))
       || messages.some(receipt => team.messages.some(message => message.id === receipt.id))) return false;
   }
   const grants = team.resourceGrants;

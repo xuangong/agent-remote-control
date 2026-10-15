@@ -16,6 +16,12 @@ ordinary shared Window, with no naming or save step required. Each committed
 change persists; refresh and shared links reuse its identity. **New Window**
 creates another Window, and **Delete Window** explicitly removes a layout.
 
+Open the floating **Window** button to choose a workspace and select one of its
+session views. The entry remembers its dragged position. **View → Window view**
+only changes its visibility. Less frequent actions are under **Window options**;
+renaming uses an explicit **Save** or **Cancel**, not focus changes. On narrow
+screens the panel stays inside the viewport and its content scrolls.
+
 ## Deployment and upgrades
 
 The website and Relay implement the shared Window service. Existing Controllers
@@ -34,7 +40,7 @@ the existing storage namespace, origins, and signing secret during deployment.
 ## Obtain a scoped grant
 
 In the hosted website, open the Window and select the session that will manage
-it. Choose **Assign current session as manager**, then **Save private manager
+it. Open **Window options → Agent control → Use current session**, then **Save private manager
 grant**. Assignment does not automatically deliver a credential into an already
 running native session. Explicitly make the downloaded file available to the
 intended Agent through your local workflow.

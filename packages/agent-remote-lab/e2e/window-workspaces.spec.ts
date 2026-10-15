@@ -1,10 +1,21 @@
-import { expect, test } from '@playwright/test';
+import { expect, test, type Page } from '@playwright/test';
 import { runWindowCommand } from '../../agent-host/src/window-command.js';
 import type { WorkspaceWindow } from '@orchardworks/agent-remote-protocol';
 import { sessionLinkFixture } from './session-link-fixture';
 import { showNewSession } from './session-navigation';
 import { compositionMetadataKey, createAskOwner, createCompositionDocument, createCompositionSlot, type CompositionDocument } from '../src/session-composition.js';
 import { bindWindowCompositionSlot } from '../src/window-composition.js';
+
+async function openWindows(page: Page) {
+  const trigger = page.getByRole('button', { name: 'Windows', exact: true });
+  if (await trigger.getAttribute('aria-expanded') !== 'true') await trigger.click();
+  return page.locator('.lab-window-panel');
+}
+
+async function openWindowOptions(panel: ReturnType<Page['locator']>) {
+  const options = panel.locator('.lab-window-options');
+  if (!await options.evaluate(element => element.hasAttribute('open'))) await options.locator('summary').first().click();
+}
 
 test('two pages share Window UI edits and external commands across narrow presentation', async ({ page, context }) => {
   const fixture = await sessionLinkFixture({ automaticSignIn: true });
@@ -18,17 +29,15 @@ test('two pages share Window UI edits and external commands across narrow presen
     await page.getByLabel('Connected Host').selectOption(fixture.hostId);
     await showNewSession(page); await page.getByTestId('session-create').click();
     await expect(page.locator('.lab-primary-conversation').getByTestId('prompt-input')).toBeEnabled();
-    await page.getByRole('button', { name: 'View options', exact: true }).click();
-    const menu = page.locator('.lab-window-workspaces');
-    await menu.locator('summary').click();
-    await expect(menu.getByLabel('Open Window')).not.toHaveValue('');
-    const windowId = await menu.getByLabel('Open Window').inputValue();
+    const menu = await openWindows(page);
+    await expect(menu.locator('[data-window-id][aria-current="true"]')).toBeVisible();
+    const windowId = (await menu.locator('[data-window-id][aria-current="true"]').getAttribute('data-window-id'))!;
     const address = new URL(page.url()); address.searchParams.set('window', windowId);
     second = await context.newPage(); second.on('pageerror', error => errors.push(error.message));
     await second.setViewportSize({ width: 1680, height: 1000 });
     await second.goto(address.href);
-    await second.getByRole('button', { name: 'View options', exact: true }).click();
-    await expect(second.getByLabel('Open Window', { exact: true })).toHaveValue(windowId);
+    await openWindows(second);
+    await expect(second.locator(`[data-window-id="${windowId}"]`)).toHaveAttribute('aria-current', 'true');
     const access = await (await context.request.get(fixture.url + '/auth/status')).json();
     const endpoint = `${fixture.url}${access.basePath}v1/windows/${encodeURIComponent(windowId)}`;
     const inspect = async (): Promise<WorkspaceWindow> => {
@@ -47,8 +56,7 @@ test('two pages share Window UI edits and external commands across narrow presen
     await expect(second.locator('.lab-primary-conversation').getByTestId('prompt-input')).toBeEnabled();
     expect(new URL(second.url()).searchParams.get('window')).toBe(windowId);
     await expect(second.locator('.lab-primary-conversation').getByTestId('prompt-input')).toHaveText('Second page retained draft');
-    await second.getByRole('button', { name: 'View options', exact: true }).click();
-    await second.locator('.lab-window-workspaces summary').click();
+    await openWindows(second);
     await expect(primary.getByTestId('prompt-input')).toHaveText('Draft kept when renaming this Window');
     expect(creations).toEqual([]);
     const manager = (await inspect()).views.find(view => view.placement === 'primary')!.binding!;
@@ -64,13 +72,14 @@ test('two pages share Window UI edits and external commands across narrow presen
       return result;
     };
     // Browser actions commit through the same service observed by the other page.
-    await page.getByRole('button', { name: 'View options', exact: true }).click();
-    await menu.locator('summary').click();
+    await openWindows(page);
+    await openWindowOptions(menu);
+    await menu.getByRole('button', { name: 'Rename Window', exact: true }).click();
     await menu.getByLabel('Window title').fill('Shared browser workspace');
-    await menu.getByLabel('Window title').blur();
-    await expect(second.locator('.lab-window-workspaces summary')).toHaveText('Window: Shared browser workspace');
-    await page.getByRole('region', { name: 'View options', exact: true }).press('Escape');
-    await second.getByRole('region', { name: 'View options', exact: true }).press('Escape');
+    await menu.getByRole('button', { name: 'Save', exact: true }).click();
+    await expect(second.locator('[data-window-id][aria-current="true"]')).toContainText('Shared browser workspace');
+    await menu.getByRole('button', { name: 'Close Windows', exact: true }).click();
+    await second.getByRole('button', { name: 'Close Windows', exact: true }).click();
     await page.locator('.lab-session-dock-add').click();
     await expect(second.locator('[data-view-id]')).toHaveCount(1);
     const viewId = (await inspect()).views.find(view => view.id !== 'main' && !view.attachedTo)!.id;
@@ -126,8 +135,8 @@ test('two pages share Window UI edits and external commands across narrow presen
     await expect(page.locator('[data-view-id]')).toHaveCount(0);
     await expect.poll(async () => (await inspect()).views.some(view => view.id === viewId)).toBe(false);
     const nativeCreatesBeforeDelete = creations.filter(url => new URL(url).pathname.endsWith('/create')).length;
-    await page.getByRole('button', { name: 'View options', exact: true }).click();
-    await menu.locator('summary').click();
+    await openWindows(page);
+    await openWindowOptions(menu);
     await menu.getByRole('button', { name: 'Delete Window', exact: true }).click();
     for (const target of [page, second]) {
       await expect.poll(() => new URL(target.url()).searchParams.get('window')).not.toBe(windowId);
@@ -164,11 +173,13 @@ test('a fresh page restores an opening Ask, shares close and reopen, and survive
     await expect(primary.getByTestId('prompt-input')).toBeEnabled();
     const askCreation = new Promise<void>(resolve => { releaseAsk = resolve; });
     await page.route('**/create', async route => { await askCreation; await route.continue(); });
+    const initialAskRequest = page.waitForRequest(request => request.method() === 'POST' && new URL(request.url()).pathname.endsWith('/create'));
     await primary.getByTestId('prompt-input').fill('/ask Shared Ask question');
     await primary.getByTestId('prompt-input').press('Enter');
     const ask = page.getByRole('dialog', { name: 'Ask', exact: true });
     await expect(ask).toBeVisible();
     await expect(ask.getByRole('status').filter({ hasText: 'Opening Ask' })).toBeVisible();
+    await initialAskRequest;
     const windowId = new URL(page.url()).searchParams.get('window');
     expect(windowId).toBeTruthy();
     const creations: string[] = [];
@@ -219,4 +230,88 @@ test('a fresh page restores an opening Ask, shares close and reopen, and survive
     expect(creations).toEqual([]);
     expect(errors).toEqual([]);
   } finally { releaseAsk?.(); await second?.close(); await page.close(); await fixture.close(); }
+});
+
+for (const width of [320, 390]) test(`floating Window management remains usable at ${width}px`, async ({ page }) => {
+  const fixture = await sessionLinkFixture({ automaticSignIn: true });
+  const errors: string[] = [];
+  page.on('pageerror', error => errors.push(error.message));
+  try {
+    await page.setViewportSize({ width, height: 667 });
+    await page.goto(fixture.url);
+    await page.getByRole('link', { name: 'Sign in', exact: true }).click();
+    await page.getByLabel('Connected Host').selectOption(fixture.hostId);
+    await showNewSession(page); await page.getByTestId('session-create').click();
+    await expect(page.locator('.lab-primary-conversation').getByTestId('prompt-input')).toBeEnabled();
+    const trigger = page.getByRole('button', { name: 'Windows', exact: true });
+    const panel = await openWindows(page);
+    if (width === 390) await page.screenshot({ path: `/tmp/window-menu-${test.info().project.name}-390.png` });
+    const currentWindow = panel.locator('[data-window-id][aria-current="true"]');
+    const first = (await currentWindow.getAttribute('data-window-id'))!;
+    const title = 'A long Window title keeps the current workspace readable on a narrow phone screen';
+    await openWindowOptions(panel);
+    await panel.getByRole('button', { name: 'Rename Window', exact: true }).click();
+    await panel.getByLabel('Window title', { exact: true }).fill(title);
+    const bounds = async () => panel.evaluate(element => {
+      const box = element.getBoundingClientRect();
+      const controls = Array.from(element.querySelectorAll('[data-window-id], [data-window-view-id], input')).map(control => {
+        const rect = control.getBoundingClientRect();
+        return { label: control.hasAttribute('data-window-id') || control.hasAttribute('data-window-view-id') ? 'list item' : control.getAttribute('aria-label'), left: rect.left, right: rect.right, width: rect.width };
+      });
+      return { left: box.left, right: box.right, top: box.top, bottom: box.bottom, controls, pageWidth: document.documentElement.scrollWidth };
+    });
+    let measured = await bounds();
+    expect(measured.left).toBeGreaterThanOrEqual(0); expect(measured.right).toBeLessThanOrEqual(width);
+    expect(measured.top).toBeGreaterThanOrEqual(0); expect(measured.bottom).toBeLessThanOrEqual(667);
+    for (const control of measured.controls) {
+      expect(control.left).toBeGreaterThanOrEqual(measured.left);
+      expect(control.right).toBeLessThanOrEqual(measured.right);
+      if (control.label === 'list item') expect(control.width).toBeGreaterThanOrEqual((measured.right - measured.left) * .85);
+    }
+    await panel.getByRole('button', { name: 'Save', exact: true }).click();
+    await expect(currentWindow).toContainText(title);
+    measured = await bounds();
+    expect(measured.pageWidth).toBe(width);
+    for (const control of measured.controls) expect(control.right).toBeLessThanOrEqual(measured.right);
+    await panel.getByRole('button', { name: 'New Window', exact: true }).click();
+    await expect(currentWindow).not.toHaveAttribute('data-window-id', first);
+    const second = (await currentWindow.getAttribute('data-window-id'))!;
+    await panel.locator(`[data-window-id="${first}"]`).click();
+    await expect(currentWindow).toHaveAttribute('data-window-id', first);
+    await expect(currentWindow).toContainText(title);
+    expect(new URL(page.url()).searchParams.get('window')).toBe(first);
+    await panel.locator('[data-window-view-id="main"]').click();
+    await openWindowOptions(panel);
+    const agentControl = panel.getByText('Agent control', { exact: true });
+    await agentControl.click();
+    const revoke = panel.getByRole('button', { name: 'Revoke manager', exact: true });
+    await revoke.scrollIntoViewIfNeeded();
+    await expect(revoke).toBeInViewport();
+    if (width === 390) await page.screenshot({ path: `/tmp/window-menu-${test.info().project.name}-390-options.png` });
+    measured = await bounds();
+    expect(measured.bottom).toBeLessThanOrEqual(667);
+    expect(measured.pageWidth).toBe(width);
+    await panel.locator(`[data-window-id="${second}"]`).click();
+    await expect(currentWindow).toHaveAttribute('data-window-id', second);
+    await panel.getByRole('button', { name: 'Close Windows', exact: true }).click();
+    // Dragging uses the same viewport clamping as the existing Team control.
+    const before = await trigger.boundingBox(); expect(before).not.toBeNull();
+    await page.mouse.move(before!.x + before!.width / 2, before!.y + before!.height / 2);
+    await page.mouse.down(); await page.mouse.move(1, 1, { steps: 8 }); await page.mouse.up();
+    await expect(panel).toBeHidden();
+    let dragged = await trigger.boundingBox();
+    expect(dragged!.x).toBeGreaterThanOrEqual(11); expect(dragged!.y).toBeGreaterThanOrEqual(11);
+    await page.mouse.move(dragged!.x + dragged!.width / 2, dragged!.y + dragged!.height / 2);
+    await page.mouse.down(); await page.mouse.move(width - 1, 666, { steps: 8 }); await page.mouse.up();
+    dragged = await trigger.boundingBox();
+    expect(dragged!.x + dragged!.width).toBeLessThanOrEqual(width - 11);
+    expect(dragged!.y + dragged!.height).toBeLessThanOrEqual(656);
+    await page.getByRole('button', { name: 'View options', exact: true }).click();
+    const visibility = page.getByRole('checkbox', { name: 'Window view', exact: true });
+    await visibility.uncheck(); await expect(trigger).toBeHidden();
+    await visibility.check(); await expect(trigger).toBeVisible();
+    await page.getByRole('region', { name: 'View options', exact: true }).press('Escape');
+    await openWindows(page);
+    expect(errors).toEqual([]);
+  } finally { await page.close(); await fixture.close(); }
 });

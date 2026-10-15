@@ -6,6 +6,8 @@ import { windowSessionBinding } from './window-workspace.js';
 import { useWindowWorkspace } from './hooks/useWindowWorkspace.js';
 import { WindowLayoutContext } from './window-workspace-context.js';
 import { WindowWorkspaces } from './components/WindowWorkspaces.js';
+import { WindowMenu } from './components/WindowMenu.js';
+import { useWindowVisibility } from './hooks/useWindowVisibility.js';
 import { teamViewTarget } from './team-view-binding.js';
 import { SessionViewOperationsContext } from './session-view-operations.js';
 import { labSessionSuccessionDirectory, type SessionSuccessionDirectory } from './session-succession-directory.js';
@@ -994,6 +996,7 @@ function AppContent({
   }
   const tpmView = useTpmVisibility();
   const teamView = useTeamVisibility();
+  const windowView = useWindowVisibility();
   const updateTeamRoster = useCallback((baseUrl: string, teams: Team[]) => setTeamRoster({ baseUrl, teams }), []);
   const [tpmListOpen, setTpmListOpen] = useState(false);
   const tpmTriggerRef = useRef<HTMLButtonElement>(null);
@@ -1714,6 +1717,8 @@ function AppContent({
   }, directory: source => labSessionSuccessionDirectory(new SessionDirectoryClient(baseUrl, undefined, source.hostId)), refreshSettled: succession.refreshSettled }}><SessionAskSurfaceProvider><WindowSessionBridgeContext.Provider value={windowWorkspace.sessionBridge}><WindowLayoutContext.Provider value={windowWorkspace.authority}><SessionDockProvider key={baseUrl} storageScope={baseUrl} enabled={!compactLayout && activeView === 'workbench'}><TeamViewScope.Provider value={teamView.execute}><TpmViewScope.Provider value={tpmView.execute}><TrackViewScope.Provider value={userScoped ? attention.executeTrack : undefined}><ConversationConnectionScope.Provider value={connections}><VscodeTunnelScope service={vscodeTunnelClient} host={previewHost} polling={compactLayout ? contextOpen : desktopContextVisible}><PreviewScope client={previewClient} host={previewHost} polling={compactLayout ? contextOpen : desktopContextVisible}><RecoveryScope.Provider value={readingPositions}><main ref={shellRef} onPointerDownCapture={focusManagedWindow} onFocusCapture={focusManagedWindow} style={sidebar.style} className={`lab-shell${headerHidden ? ' lab-header-hidden' : ''}${!compactLayout && !desktopContextVisible ? ' lab-context-hidden' : ''}${state?.agent ? ' lab-has-agent' : ''}${supportingRailOpen ? ' lab-supporting-open' : ''}${inspectorOpen ? ' lab-inspector-open' : ''}`}>
     {scanOpen ? <SessionTransferDialog onOpen={openScannedSession} onClose={() => setScanOpen(false)} /> : null}
     {activated ? tracking.observers : null}
+    <WindowMenu workspace={windowWorkspace} current={sharedWindow ? windowSession.selected : currentSession ? windowSessionBinding(currentSession) : undefined}
+      visible={windowView.visible} inert={supportingRailOpen} />
     {userScoped && attention.trackVisible ? <SessionTrackingMenu catchUp={catchUp} tracking={tracking} teams={teamRoster?.baseUrl === baseUrl ? teamRoster.teams : []} knownSessions={[...favorites.stars, ...sessionEntries]} busy={transitioning} inert={supportingRailOpen} onOpen={item => void openTrackedSession(item)} /> : null}
     <TeamMenu visible={teamView.visible} baseUrl={baseUrl} enabled={accessReady && !!directory} hosts={remoteHosts} source={(visibleStackRoot ?? currentSession) ? {hostId:(visibleStackRoot ?? currentSession)!.hostId ?? 'local', providerId:(visibleStackRoot ?? currentSession)!.providerId,nativeSessionId:(visibleStackRoot ?? currentSession)!.nativeSessionId,title:(visibleStackRoot ?? currentSession)!.title} : undefined}
       compact={compactLayout} currentSession={addressSession} onTeamsChange={updateTeamRoster}
@@ -1748,7 +1753,7 @@ function AppContent({
       <label title="Enable Ask for the selected session"><span>Ask view</span><input data-view-control="ask" type="checkbox"
         checked={addressSession ? ask.isEnabled(addressSession, succession.ownerFor(viewKey(addressSession))) : false} disabled={!addressSession}
         onChange={() => { if (addressSession) ask.toggle(addressSession, succession.ownerFor(viewKey(addressSession))); }} /></label>
-      <WindowWorkspaces workspace={windowWorkspace} current={sharedWindow ? windowSession.selected : currentSession ? windowSessionBinding(currentSession) : undefined} />{userScoped ? attention.controls : null}{tpmView.controls}{teamView.controls}
+      {windowView.controls}{userScoped ? attention.controls : null}{tpmView.controls}{teamView.controls}
     </>} target={!headerHidden ? headerViewTarget : compactLayout ? mobileViewTarget : desktopContextVisible ? sidebarViewTarget : activeView === 'trace' ? traceViewTarget : minimizedViewTarget ?? sessionViewTarget}
       triggerRef={viewTriggerRef} headerVisible={!headerHidden} sidebarVisible={contextVisible}
       inspectorVisible={inspectorOpen} compact={compactLayout} inert={supportingRailOpen}

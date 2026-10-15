@@ -476,7 +476,10 @@ widths, and per-view display preferences. Narrow screens show the selected view;
 they do not replace the saved wide-screen layout. Closing a view does not stop its
 native session or archive a Team or TPM task.
 
-Use **View → Window** to choose, create, rename, share, or delete a Window. Assign
+Use the floating **Window** button to switch Windows and select their session
+views. Drag the button to reposition it; **View → Window view** shows or hides
+the entry without changing the layout. **Window options** contains rename,
+copy link, Agent control, and delete actions. Assign
 one managing Agent session and download its private grant file to enable
 `agent-remote-controller window ...`. These commands use the same committed
 operations as the page; Host pairing credentials are not Window credentials.

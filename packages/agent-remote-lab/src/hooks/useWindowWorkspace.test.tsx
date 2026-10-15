@@ -250,7 +250,7 @@ it('keeps the catalog current after renaming the same Window without changing it
   expect(read().window).toMatchObject({ id: before.id, title: 'Renamed workspace', views: before.views });
   expect(read().windows.find(window => window.id === before.id)?.title).toBe('Renamed workspace');
   expect(document.windowBindings).toEqual(bindings); expect(document.asks).toEqual(owners);
-  expect(globalThis.document.querySelector(`option[value="${before.id}"]`)?.textContent).toBe('Renamed workspace');
+  expect(globalThis.document.querySelector(`[data-window-id="${before.id}"] strong`)?.textContent).toBe('Renamed workspace');
 }, 10000);
 
 it('replaces an explicitly deleted current Window with one new empty Window', async () => {

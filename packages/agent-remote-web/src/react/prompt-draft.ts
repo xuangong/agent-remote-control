@@ -9,10 +9,10 @@ export async function preparePromptDraft(item: Extract<AgentTimelineItem, { type
     if (part.type === 'text') { draft.parts.push({ ...part }); continue; }
     if (part.type === 'resource') throw new Error('Download the resource and attach it again when editing this prompt.');
     const { detail } = await loadLocalResource(context, part.locator);
-    if (!detail || detail.status !== 'available' || !('contentBase64' in detail) || !detail.mediaType || !['image/png', 'image/jpeg', 'image/webp'].includes(detail.mediaType)) throw new Error('An image from this prompt is unavailable. Open the original prompt in Codex to edit it.');
+    if (!detail || detail.status !== 'available' || !('contentBase64' in detail) || !detail.mediaType || !['image/png', 'image/jpeg', 'image/webp'].includes(detail.mediaType)) throw new Error('An image from this prompt is unavailable. Open the original prompt in the native editor to edit it.');
     const blob = new Blob([Uint8Array.from(atob(detail.contentBase64), value => value.charCodeAt(0))], { type: detail.mediaType });
     bytes += blob.size;
-    if (Object.keys(draft.images).length >= 8 || blob.size > 10 * 1024 * 1024 || bytes > 20 * 1024 * 1024) throw new Error('This prompt exceeds the web composer image limits. Edit it in Codex.');
+    if (Object.keys(draft.images).length >= 8 || blob.size > 10 * 1024 * 1024 || bytes > 20 * 1024 * 1024) throw new Error('This prompt exceeds the web composer image limits. Edit it in the native editor.');
     const imageId = crypto.randomUUID();
     draft.parts.push({ type: 'image', imageId, label: part.label });
     draft.images[imageId] = { imageId, blob, uploadId: crypto.randomUUID(), status: 'pending', progress: 0 };

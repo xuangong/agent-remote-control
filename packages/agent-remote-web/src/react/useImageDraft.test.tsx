@@ -559,3 +559,20 @@ it('fences same-key A and B held receipts before sending C through a real WebSoc
     vi.unstubAllGlobals();
   }
 });
+
+it('conditionally restores a prompt into the active owner and rejects an intervening edit even when text returns', async () => {
+  const binding = { scope: 'prefix-restore', key: 'prefix-restore-owner' };
+  const recipient = { identity: 'current', lifetime: {}, isCurrent: () => true };
+  await render(<Harness binding={binding} recipient={recipient} active={false} text="draft" />);
+  const handle = await inspectImageDraft(binding), revision = handle.snapshot().revision;
+  const selected = { version: 1 as const, parts: [{ type: 'text' as const, text: 'Selected prompt' }], images: {}, nextLabel: 1 };
+  expect(handle.replace).toBeTypeOf('function');
+  await act(async () => { draft.setText('Changed'); draft.setText('draft'); });
+  await act(async () => { expect((await handle.replace!(revision, selected, () => true)).status).toBe('cancelled'); });
+  expect(draft.parts).toEqual([{ type: 'text', text: 'draft' }]);
+  await act(async () => { expect((await handle.replace!(handle.snapshot().revision, selected, () => true)).status).toBe('ready'); });
+  expect(draft.parts).toEqual([{ type: 'text', text: 'Selected prompt' }]);
+  expect(handle.snapshot().savedRevision).toBe(handle.snapshot().revision);
+  await act(async () => { expect((await handle.replace!(handle.snapshot().revision, { ...selected, parts: [] }, () => false)).status).toBe('cancelled'); });
+  expect(draft.parts).toEqual([{ type: 'text', text: 'Selected prompt' }]);
+});

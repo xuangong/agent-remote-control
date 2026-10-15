@@ -161,10 +161,10 @@ function TpmWorkspaceContent({ item, mainTitle, session, replica, visible, stora
 function TpmChat({ session, replica, transport, draftBinding, navigation, title, todo }: {
   session: OpenedSession; replica?: AgentReplica; transport: RemoteAgentTransport; draftBinding: DraftBinding; navigation?: SessionViewNavigationFactory; title: string; todo?: SessionTodoPanelProps;
 }) {
-  const { state, sessionState, status, actions, questions, setQuestions, imageRecipient } = useConversationSession(session, transport, replica);
+  const { state, sessionState, status, actions, questions, setQuestions, imageRecipient, operationBinding } = useConversationSession(session, transport, replica, false, { nativePrefixOnly: true });
   const { communication, ...viewNavigation } = navigation?.(session, state) ?? {};
   return <CommunicationNavigationContext.Provider value={communication}><LabWorkbench todo={todo} defaultDisplayMode="content" headingMode="toolbar" {...viewNavigation}
-    state={state} sessionState={sessionState} sessionStatus={status} attachingAgentId={session.agentId} actions={actions}
+    state={state} sessionState={sessionState} sessionStatus={status} attachingAgentId={operationBinding.source.agentId} actions={actions} operationBinding={operationBinding}
     draftSessionKey={sessionKey(session)} draftBinding={draftBinding} imageRecipient={imageRecipient} questionDrafts={questions}
     onQuestionDraftChange={(id, value) => setQuestions(current => ({ ...current, [id]: value }))}
     conversationPath={<strong className="agent-session-title" data-session-status={state?.agent?.status}>{title}</strong>} />

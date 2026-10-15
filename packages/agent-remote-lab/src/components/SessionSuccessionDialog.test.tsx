@@ -433,3 +433,33 @@ it('does not auto-commit preparation if the source changed before the response a
   await details();
   expect(document.querySelector('[role="alert"]')?.textContent).toContain('Source changed');
 }, 5000);
+
+it('automatically prepares only the exact selected prefix after durable prompt preparation', async () => {
+  const directory = new SessionDirectoryClient('http://localhost', undefined, 'host');
+  const prefix = { kind: 'native_prefix' as const, turnId: 'turn-2', messageId: 'message-2' };
+  const describe = vi.spyOn(directory, 'describeSuccession').mockResolvedValue(description);
+  const order: string[] = [];
+  const prepare = vi.spyOn(directory, 'prepareSuccession').mockImplementation(async input => { order.push('prepare'); return response(input.operationId, 'ready'); });
+  const action = vi.spyOn(directory, 'successionAction').mockImplementation(async (_kind, id) => { order.push('commit'); return response(id, 'committed'); });
+  await render(<SessionSuccessionDialog source={source} directory={directory} preparation={prefix} autoPrepare
+    onPreparing={async () => { order.push('draft'); }} assertAccess={() => {}} assertSource={() => {}}
+    onIntent={() => { order.push('intent'); }} onSettled={async () => { order.push('follow'); }} onClose={() => {}} />);
+  await flush();
+  expect(describe).toHaveBeenCalledWith('opencode', 'A', prefix);
+  expect(prepare.mock.calls[0]?.[0]).toMatchObject({ preparation: prefix, providerId: 'opencode', nativeSessionId: 'A', expectedRevision: 4 });
+  expect(order).toEqual(['draft', 'intent', 'prepare', 'commit', 'follow']);
+  expect(action).toHaveBeenCalledOnce();
+}, 5000);
+
+it('performs no native preparation when retaining selected prompt bytes fails', async () => {
+  const directory = new SessionDirectoryClient('http://localhost', undefined, 'host');
+  vi.spyOn(directory, 'describeSuccession').mockResolvedValue(description);
+  const prepare = vi.spyOn(directory, 'prepareSuccession');
+  await render(<SessionSuccessionDialog source={source} directory={directory} autoPrepare
+    preparation={{ kind: 'native_prefix', turnId: 'turn', messageId: 'message' }}
+    onPreparing={async () => { throw new Error('Prompt bytes could not be retained.'); }}
+    assertAccess={() => {}} assertSource={() => {}} onIntent={() => {}} onSettled={async () => {}} onClose={() => {}} />);
+  await flush();
+  expect(document.body.textContent).toContain('Prompt bytes could not be retained.');
+  expect(prepare).not.toHaveBeenCalled();
+}, 5000);

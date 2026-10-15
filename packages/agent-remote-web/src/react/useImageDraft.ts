@@ -136,7 +136,17 @@ export function useImageDraft({ scope: suppliedScope, sessionKey, text, enabled,
     while (current.saving && valid()) await current.saving;
     return valid() ? storageSnapshot() : { ...storageSnapshot(), status: 'cancelled' };
   }
-  useEffect(() => enabled ? registerImageDraftWriter({ scope: scope ?? '', key }, { snapshot: storageSnapshot, flush: flushStorage }) : undefined, [entryKey, enabled]);
+  async function replaceStorage(expectedRevision: number, draft: Omit<ImageDraft, 'key' | 'scope'>, isCurrent: () => boolean): Promise<ImageDraftStorageSnapshot> {
+    if (!mounted.current || currentKey.current !== entryKey || !isCurrent() || current.revision !== expectedRevision || storageSnapshot().status !== 'ready') {
+      return { ...storageSnapshot(), status: 'cancelled' };
+    }
+    current.draft = { ...draft, key, scope: scope ?? '', parts: draft.parts.map(part => ({ ...part })),
+      images: Object.fromEntries(Object.entries(draft.images).map(([id, image]) => [id, { ...image, status: 'pending', progress: 0, attachment: undefined }])) };
+    current.inputText = draftText(current.draft.parts);
+    changed(true, true);
+    return flushStorage(current.revision, isCurrent);
+  }
+  useEffect(() => enabled ? registerImageDraftWriter({ scope: scope ?? '', key }, { snapshot: storageSnapshot, flush: flushStorage, replace: replaceStorage }) : undefined, [entryKey, enabled]);
   function retryStorage(): void {
     if (current.restoring || current.saving) return;
     if (current.readFailed || !current.hydrated) restore();

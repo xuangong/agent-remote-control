@@ -128,3 +128,18 @@ it('preserves pasted newlines and blank lines when subsequent native typing upda
   });
   expect(parts).toEqual([{ type: 'text', text: text + ' More' }]);
 });
+
+it('synchronizes a retained draft without reporting another user edit', async () => {
+  const change = vi.fn();
+  const view = (text: string) => <ComposerEditor id="retained" parts={[{ type: 'text', text }]} images={{}} disabled={false} onChange={change} onFiles={() => []} onImport={value => [...value]} onRetry={() => {}} onKeyDown={() => {}} />;
+  const container = await render(view('before'));
+  await rerender(container, view('restored prompt'));
+  expect(container.querySelector('[role="textbox"]')?.textContent).toBe('restored prompt');
+  expect(change).not.toHaveBeenCalled();
+  const input = container.querySelector('[role="textbox"]')!;
+  await act(async () => input.dispatchEvent(new KeyboardEvent('keydown', { key: 'a', ctrlKey: true, bubbles: true, cancelable: true })));
+  const paste = new Event('paste', { bubbles: true, cancelable: true });
+  Object.defineProperty(paste, 'clipboardData', { value: { files: [], getData: (type: string) => type === 'text/plain' ? 'new draft' : '' } });
+  await act(async () => input.dispatchEvent(paste));
+  expect(change).toHaveBeenCalledWith([{ type: 'text', text: 'new draft' }]);
+});

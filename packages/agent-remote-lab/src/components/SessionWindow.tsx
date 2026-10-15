@@ -41,7 +41,8 @@ function WindowBody({ entry, baseUrl, visible, compact, hostLabel, offline, tran
       <section ref={panel} className="lab-ask-window lab-bindable-session-window" aria-label={`Session: ${title}`}
         data-view-id={entry.id} data-active={selected || undefined} tabIndex={-1}
         onPointerDownCapture={onFocus} onFocusCapture={onFocus}>
-        {entry.target ? <SessionFamily key={sessionKey(entry.target)} storageScope={baseUrl} baseUrl={baseUrl} target={entry.target} hostLabel={hostLabel} offline={offline}
+        {entry.target ? <SessionFamily storageScope={baseUrl} baseUrl={baseUrl} target={entry.target} hostLabel={hostLabel} offline={offline}
+          viewId={entry.slotId} nativePrefixOnly={entry.managed}
           displayBinding={{ scope: baseUrl, key: entry.id }} active={visible} compact={compact} onAdditionalWidthChange={onAdditionalWidthChange}
           transport={transport} draftStore={draftStore} draftBinding={draftBinding} imageDraftBinding={imageDraftBinding} navigation={navigation} controls={windowControls} /> : <>
           <header className="lab-empty-session-heading"><strong>Select session</strong><div>{windowControls}</div></header>

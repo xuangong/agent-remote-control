@@ -86,7 +86,7 @@ export const ComposerEditor = forwardRef<ComposerEditorHandle, Props>(function C
         editor.updateState(editor.state.apply(transaction));
         const selection = editor.state.selection;
         setSelected(selection instanceof NodeSelection && selection.node.type.name === 'image' ? String(selection.node.attrs.imageId) : undefined);
-        if (transaction.docChanged) latest.current.onChange(fromDocument(editor.state.doc));
+        if (transaction.docChanged && !transaction.getMeta('retainedDraft')) latest.current.onChange(fromDocument(editor.state.doc));
       },
       handleClickOn(_view, _position, node, nodePosition, _event, direct) {
         if (!direct || node.type.name !== 'image') return false;
@@ -160,7 +160,7 @@ export const ComposerEditor = forwardRef<ComposerEditorHandle, Props>(function C
     if (!editor) return;
     editor.setProps({ editable: () => !props.disabled });
     const doc = toDocument(props.parts);
-    if (!doc.eq(editor.state.doc)) editor.dispatch(editor.state.tr.replaceWith(0, editor.state.doc.content.size, doc.content).setMeta('addToHistory', false));
+    if (!doc.eq(editor.state.doc)) editor.dispatch(editor.state.tr.replaceWith(0, editor.state.doc.content.size, doc.content).setMeta('addToHistory', false).setMeta('retainedDraft', true));
     for (const element of Array.from(editor.dom.querySelectorAll<HTMLElement>('[data-image-id]'))) {
       const image = props.images[element.dataset.imageId!];
       element.dataset.state = image?.status ?? 'unavailable';

@@ -64,7 +64,7 @@ function AskConversationContent({ docked, dockControls, entry, replica, transpor
       {input.text}<button type="button" aria-label="Discard saved question" onClick={() => onDiscardInput(input.id)}>Discard</button>
     </div>)}</div> : null}
     {entry.error ? <div className="lab-ask-error" role="alert">{entry.error}<button type="button" disabled={busy} onClick={onRetry}>Retry</button></div> : null}
-    {isAskAttached(entry) ? <AskChat key={askParticipantKey(entry.record!)} record={entry.record!} inputs={entry.error ? undefined : entry.inputs} onSendInput={onSendInput} replica={replica} transport={transport}
+    {isAskAttached(entry) ? <AskChat key={askParticipantKey(entry.record!)} record={entry.record!} executionTarget={entry.executionTarget} inputs={entry.error ? undefined : entry.inputs} onSendInput={onSendInput} replica={replica} transport={transport}
       navigation={navigation} onToggleEnabled={onToggleEnabled} busy={busy} draftBinding={draftBinding} tools={tools} {...storageBindings} /> : <>
       <header className="lab-ask-heading"><strong>Ask</strong>{tools}</header>
       {busy || !entry.error ? <div className="lab-ask-opening" role="status">{busy ? 'Opening Ask…' : 'Ask about this conversation.'}</div> : null}
@@ -74,13 +74,13 @@ function AskConversationContent({ docked, dockControls, entry, replica, transpor
   </section></div>;
 }
 
-function AskChat({ record, inputs, onSendInput, replica, transport, draftBinding, tools, busy, onToggleEnabled, navigation, ...storageBindings }: AskStorageBindings & {
+function AskChat({ record, executionTarget, inputs, onSendInput, replica, transport, draftBinding, tools, busy, onToggleEnabled, navigation, ...storageBindings }: AskStorageBindings & {
   navigation?: SessionViewNavigationFactory;
-  onToggleEnabled(): void; record: SessionFork; inputs?: AskInput[]; onSendInput(id: string, send: AskInputSender): void; replica?: AgentReplica; transport: RemoteAgentTransport;
+  onToggleEnabled(): void; record: SessionFork; executionTarget?: import('../directory-client.js').OpenedSession; inputs?: AskInput[]; onSendInput(id: string, send: AskInputSender): void; replica?: AgentReplica; transport: RemoteAgentTransport;
   draftBinding: DraftBinding; tools: ReactNode; busy?: boolean;
 }) {
-  const session = record.target!;
-  const { state, sessionState, status, actions, questions, setQuestions, sendQueuedInput, imageRecipient } = useConversationSession(session, transport, replica, busy);
+  const session = executionTarget ?? record.target!;
+  const { state, sessionState, status, actions, questions, setQuestions, sendQueuedInput, imageRecipient, operationBinding } = useConversationSession(session, transport, replica, busy, { nativePrefixOnly: true });
   const { communication, ...viewNavigation } = navigation?.(session, state) ?? {};
   useEffect(() => {
     if (sendQueuedInput && !busy && inputs?.[0]) onSendInput(inputs[0].id, sendQueuedInput);
@@ -93,7 +93,7 @@ function AskChat({ record, inputs, onSendInput, replica, transport, draftBinding
       } else onToggleEnabled();
       return {};
     }}
-    sessionStatus={status} attachingAgentId={session.agentId} actions={actions}
+    sessionStatus={status} attachingAgentId={operationBinding.source.agentId} actions={actions} operationBinding={operationBinding}
     draftSessionKey={sessionKey(session)} draftBinding={draftBinding} {...storageBindings} imageRecipient={storageBindings.imageRecipient ?? imageRecipient}
     questionDrafts={questions} onQuestionDraftChange={(id, value) => setQuestions(current => ({ ...current, [id]: value }))}
     conversationPath={<strong className="agent-session-title" data-session-status={state?.agent?.status}>Ask</strong>}

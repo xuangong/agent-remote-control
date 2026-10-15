@@ -17,10 +17,12 @@ import { sessionViewNavigation, type SessionViewNavigationActions, type SessionV
 import { sessionKey, type SessionEntry } from '../session-tree.js';
 import { LabWorkbench } from './LabWorkbench.js';
 import type { DisplayPreferenceBinding } from '../hooks/useSessionDisplayPreferences.js';
+import { SessionViewOperationsContext } from '../session-view-operations.js';
 
 type FamilyTarget = SessionWindowTarget;
 interface Layout { children: FamilyTarget[]; focus: number }
 interface Props {
+  viewId?: string; nativePrefixOnly?: boolean;
   storageScope: string; baseUrl: string; target: SessionWindowTarget; hostLabel: string;
   compact: boolean; active: boolean; offline: boolean; controls?: ReactNode;
   transport: RemoteAgentTransport; draftStore: DraftBinding['store']; draftBinding?: DraftBinding; imageDraftBinding?: ImageDraftBinding; navigation?: SessionViewNavigationFactory;
@@ -109,10 +111,11 @@ export function SessionFamily(props: Props) {
   return <div className="lab-session-family" ref={container} hidden={!active} aria-label={`${target.title} session family`}>
     {path.map((item, index) => {
       const controls = index === 0 ? props.controls : <button type="button" aria-label={compact ? `Back to ${path[index - 1]!.title}` : 'Close subagent'} title={compact ? 'Back to parent session' : 'Close subagent view'} onClick={() => compact ? show(index - 1) : close(index)}>{compact ? '←' : '×'}</button>;
-      return <section key={sessionKey(item)} className="lab-session-family-pane" aria-label={item.title} hidden={compact && focus !== index}
+      return <section key={index === 0 ? "root" : sessionKey(item)} className="lab-session-family-pane" aria-label={item.title} hidden={compact && focus !== index}
         style={compact || index === 0 ? undefined : { width: childWidth(item), flex: 'none' }}
         onPointerDownCapture={() => focusPane(index)} onFocusCapture={() => focusPane(index)}>
         {(visited || active || !compact) ? <FamilySession {...props} controls={controls} target={item} entries={path}
+          viewId={index === 0 ? props.viewId : undefined}
           draftBinding={index === 0 ? props.draftBinding : undefined} imageDraftBinding={index === 0 ? props.imageDraftBinding : undefined}
           onNavigate={(destination, childrenFor) => open(index, destination, childrenFor)} /> : null}
         {!compact && index > 0 ? <DockResize title={item.title} width={childWidth(item)} onResize={width => setWidths(current => ({ ...current, [sessionKey(item)]: width }))} /> : null}
@@ -127,6 +130,12 @@ interface SessionProps extends Props {
 }
 function FamilySession(props: SessionProps) {
   const { target, baseUrl } = props;
+  const operations = useContext(SessionViewOperationsContext);
+  let currentTarget = target, historyRoleId: string | undefined, resolutionError: string | undefined;
+  try {
+    const resolved = operations?.resolveTarget(target, { viewId: props.viewId, nativePrefixOnly: props.nativePrefixOnly });
+    if (resolved) { currentTarget = { ...target, ...resolved.target, hostId: resolved.target.hostId ?? 'local' }; historyRoleId = resolved.historyRoleId; }
+  } catch (error) { resolutionError = error instanceof Error ? error.message : 'The current session locator is unavailable.'; }
   const connections = useContext(ConversationConnectionScope);
   const enabled = useContext(WorkspaceReady);
   const [preview] = useState(() => readWorkspaceSnapshot(baseUrl, target));
@@ -134,20 +143,21 @@ function FamilySession(props: SessionProps) {
   useEffect(() => {
     if (!enabled) return;
     let stopped = false; const abort = new AbortController(); setError('');
-    const cached = connections?.find(target);
-    if (cached) { setSession({ ...target, agentId: cached.agentId }); return () => { stopped = true; abort.abort(); }; }
-    setSession(undefined);
-    const client = new SessionDirectoryClient(baseUrl, undefined, target.hostId);
-    const attachment = target.parentNativeSessionId
-      ? client.attachChild(target.providerId, target.parentNativeSessionId, target.nativeSessionId, abort.signal)
-      : client.attach(target.providerId, target.nativeSessionId, abort.signal);
+    if (resolutionError) { setError(resolutionError); return; }
+    const cached = connections?.find(currentTarget);
+    if (cached && !historyRoleId) { setSession({ ...currentTarget, agentId: cached.agentId }); return () => { stopped = true; abort.abort(); }; }
+    const client = new SessionDirectoryClient(baseUrl, undefined, currentTarget.hostId);
+    const attachment = currentTarget.parentNativeSessionId
+      ? client.attachChild(currentTarget.providerId, currentTarget.parentNativeSessionId, currentTarget.nativeSessionId, abort.signal)
+      : historyRoleId ? client.attachHistorical(currentTarget.providerId, currentTarget.nativeSessionId, historyRoleId, abort.signal)
+      : client.attach(currentTarget.providerId, currentTarget.nativeSessionId, abort.signal);
     void attachment.then(value => {
       if (stopped) return;
-      if (value.nativeSessionId && value.nativeSessionId !== target.nativeSessionId) throw new Error('The Host returned a different session. Reopen this subagent from its parent.');
-      setSession({ ...target, agentId: value.agentId });
+      if (value.nativeSessionId && value.nativeSessionId !== currentTarget.nativeSessionId) throw new Error('The Host returned a different session. Reopen this subagent from its parent.');
+      setSession({ ...currentTarget, agentId: value.agentId });
     }).catch(error => { if (!stopped) setError(error instanceof Error ? error.message : 'The session could not be opened.'); });
     return () => { stopped = true; abort.abort(); };
-  }, [baseUrl, target.hostId, target.providerId, target.nativeSessionId, target.parentNativeSessionId, attempt, connections, enabled]);
+  }, [baseUrl, currentTarget.hostId, currentTarget.providerId, currentTarget.nativeSessionId, currentTarget.parentNativeSessionId, historyRoleId, resolutionError, attempt, connections, enabled]);
   if (!session && preview) {
     const key = JSON.stringify([target.hostId, target.providerId, target.nativeSessionId]);
     return <LabWorkbench state={preview} sessionStatus="connecting" actions={{}} draftOnly
@@ -157,10 +167,10 @@ function FamilySession(props: SessionProps) {
       displayBinding={familyDisplayBinding(props)} defaultDisplayMode="content" />;
   }
   if (!session) return <div className="lab-session-opening"><header><strong>{target.title}</strong>{props.controls}</header>{error ? <p role="alert">{error}<button onClick={() => setAttempt(value => value + 1)}>Retry</button></p> : <p role="status">Opening session…</p>}</div>;
-  return <FamilyChat {...props} session={session} preview={preview} />;
+  return <FamilyChat {...props} session={session} preview={preview} availabilityError={resolutionError ?? error} />;
 }
-function FamilyChat({ session, transport, navigation, draftStore, draftBinding, imageDraftBinding, controls, offline, entries, onNavigate, displayBinding, baseUrl, target, preview }: SessionProps & { session: OpenedSession; preview?: AgentReplicaState }) {
-  const { state, sessionState, status, actions, questions, setQuestions, imageRecipient } = useConversationSession(session, transport);
+function FamilyChat({ session, transport, navigation, draftStore, draftBinding, imageDraftBinding, controls, offline, entries, onNavigate, displayBinding, baseUrl, target, preview, viewId, nativePrefixOnly, availabilityError }: SessionProps & { session: OpenedSession; preview?: AgentReplicaState; availabilityError?: string }) {
+  const { state, sessionState, status, actions, questions, setQuestions, imageRecipient, operationBinding } = useConversationSession(session, transport, undefined, false, { viewId, nativePrefixOnly, externalAttachment: true });
   const enabled = useContext(WorkspaceReady);
   useWorkspaceDisplayCache(baseUrl, session, state, enabled && status === 'ready');
   const open = (destination: SessionEntry | AgentChildSessionView) => {
@@ -181,7 +191,8 @@ function FamilyChat({ session, transport, navigation, draftStore, draftBinding, 
   return <CommunicationNavigationContext.Provider value={inherited?.communication}><LabWorkbench displayBinding={familyDisplayBinding({ displayBinding, target, entries })} headingMode="inline" sessionManager={controls} defaultDisplayMode="content"
     childrenFor={childrenFor} onOpenChildSession={navigationActions.openChildSession}
     resolveSessionLink={id => inherited?.resolveSessionLink(id) ?? local.resolveSessionLink(id)} revealEntry={inherited?.revealEntry}
-    state={state?.timeline.initialized ? state : preview ?? state} sessionState={sessionState} sessionStatus={status} attachingAgentId={session.agentId} actions={actions}
+    composerNotice={availabilityError ? <p role="alert">{availabilityError}</p> : undefined}
+    state={state?.timeline.initialized ? state : preview ?? state} sessionState={sessionState} sessionStatus={status} attachingAgentId={operationBinding.source.agentId} actions={actions} operationBinding={operationBinding}
     draftSessionKey={key} draftBinding={draftBinding ?? { store: draftStore, key: `session:${key}` }} imageDraftBinding={imageDraftBinding} imageRecipient={imageRecipient} questionDrafts={questions}
     onQuestionDraftChange={(id, value) => setQuestions(current => ({ ...current, [id]: value }))}
     conversationPath={<strong className="agent-session-title">{session.title}</strong>} /></CommunicationNavigationContext.Provider>;

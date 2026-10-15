@@ -1,7 +1,7 @@
 import { applyConversationLayout, type ConversationLayout } from '../conversation-layout.js';
 import { flushSync } from 'react-dom';
 import { useEffect, useMemo, useReducer, useRef } from 'react';
-import { isSessionSuccessionCurrent, isSessionSuccessionReplay, nativeSessionRefKey, type SessionSuccessionCurrent, type SessionSuccessionReplay } from '@orchardworks/agent-remote-protocol';
+import { isSessionSuccessionCurrent, isSessionSuccessionReplay, nativeSessionRefKey, resolveNativePrefix, type SessionSuccessionCurrent, type SessionSuccessionReplay } from '@orchardworks/agent-remote-protocol';
 import { remoteSessionState, watchPageResume, type AgentReplica, type AgentReplicaState, type RemoteAgentTransport, type RemoteSessionClient, type RemoteSessionState } from '@orchardworks/agent-remote-web';
 import type { ImageDraftRecipient } from '@orchardworks/agent-remote-web/browser';
 import type { ControllerLocation } from '@orchardworks/agent-remote-hosted/controller-location';
@@ -35,6 +35,8 @@ interface SuccessionOptions {
   initialDisplayState?: AgentReplicaState;
   initialLayout?: ConversationLayout;
   connections: ConversationConnections; replicaFor(id: string): AgentReplica;
+  validateTarget?(selection: SessionEntry, viewId: string, document: CompositionDocument): void;
+  targetRevision?: string;
   cachedReplicaFor?(selection: Selection): AgentReplica | undefined;
   directory(hostId: string): SessionDirectoryClient;
   textStore(scope: string): DraftStore; tracking(): SessionTracking; ask(): ReturnType<typeof useAskConversations>;
@@ -102,7 +104,7 @@ export function useSessionSuccession(options: SuccessionOptions) {
       attached: undefined as OpenedSession | undefined,
       result: undefined as CompositionParticipantResult | undefined, error: undefined as string | undefined,
       discoveryError: undefined as string | undefined,
-      replays: [] as SessionSuccessionReplay[], attempted: new Set<string>(), activeAttempt: undefined as string | undefined,
+      replays: [] as SessionSuccessionReplay[], attempted: new Set<string>(), activeAttempt: undefined as string | undefined, targetUnavailable: false,
       historyEvidence: new Map<string, { replays: SessionSuccessionReplay[]; current: SessionSuccessionCurrent }>(),
       historyTitles: new Map<string, string>(),
       refreshObservers: new Set<() => void>(),
@@ -238,7 +240,13 @@ export function useSessionSuccession(options: SuccessionOptions) {
     return result;
   }
   async function resolveNative(slot: CompositionSlot, title: string, signal: AbortSignal, takeOver?: string): Promise<OpenedSession & { viewId: string }> {
-    const identity = selectionFor(slot), cached = latest.current.connections.find(identity), agent = cached?.replica.getState().agent;
+    const identity = selectionFor(slot);
+    runtime.targetUnavailable = false;
+    if (slot.intent.kind !== 'history') {
+      try { latest.current.validateTarget?.(identity, slot.id, runtime.document); }
+      catch (error) { runtime.targetUnavailable = true; throw error; }
+    }
+    const cached = latest.current.connections.find(identity), agent = cached?.replica.getState().agent;
     const externallyOwned = !!cached?.replica.getState().sessionControl?.nativeOwner;
     const reusable = cached && !externallyOwned && agent?.id === cached.agentId && agent.providerId === identity.providerId
       && agent.runtimeInfo.providerId === identity.providerId && agent.runtimeInfo.sessionId === identity.nativeSessionId;
@@ -375,7 +383,9 @@ export function useSessionSuccession(options: SuccessionOptions) {
       let stopped = false, imageLifetime: { active: boolean } | undefined, imageEpoch: string | null | undefined;
       const exactIdentity = () => {
         const state = lease.replica.getState(), agent = state.agent;
-        return current() && !stopped && agent?.id === session.agentId && agent.providerId === identity.providerId
+        let available = true;
+        try { if (desired.sessionIntent !== 'history') latest.current.validateTarget?.(session, desired.slot.id, runtime.document); } catch { available = false; }
+        return available && current() && !stopped && agent?.id === session.agentId && agent.providerId === identity.providerId
           && agent.runtimeInfo.providerId === identity.providerId && agent.runtimeInfo.sessionId === identity.nativeSessionId;
       };
       let confirmed = false;
@@ -752,9 +762,47 @@ export function useSessionSuccession(options: SuccessionOptions) {
     if (!owner) throw new Error('The session view has no Ask owner.');
     return owner.id;
   }
+  function resolveTarget(selection: Selection, requested: { nativePrefixOnly?: boolean; viewId?: string } = {}) {
+    if (!live() || !runtime.discovered || runtime.discovering) throw new Error('The current session locator is still synchronizing.');
+    if (selection.parentNativeSessionId) return { target: selection };
+    const slot = requested.viewId ? runtime.document.slots.find(slot => slot.id === requested.viewId) : undefined;
+    const matches = [...runtime.historyEvidence.values()].filter(evidence => evidence.replays.some(replay =>
+      [replay.from, replay.to].some(target => sessionKey(target) === sessionKey(selection))));
+    if (!matches.length) {
+      if (runtime.replays.some(replay => [replay.from, replay.to].some(target => sessionKey(target) === sessionKey(selection)))) {
+        throw new Error('The current session locator could not be verified. The original history is preserved.');
+      }
+      return { target: selection };
+    }
+    if (matches.length !== 1) throw new Error('The session has conflicting current role identities.');
+    const evidence = matches[0]!;
+    if (slot?.intent.kind === 'history') return { target: selection, historyRoleId: evidence.current.role.id };
+    if (requested.nativePrefixOnly) {
+      const anchor = evidence.replays.flatMap(replay => [replay.projection.receipt.from, replay.projection.receipt.to!])
+        .find(ref => ref.providerId === selection.providerId && ref.nativeSessionId === selection.nativeSessionId)!;
+      const resolved = resolveNativePrefix(anchor, evidence.replays.map(replay => replay.projection.receipt));
+      if (nativeSessionRefKey(resolved.target) !== nativeSessionRefKey(evidence.current.role.current)) throw new Error('Native prefix execution routing is unavailable.');
+    }
+    return { target: { ...selection, ...evidence.current.locator } };
+  }
+  useEffect(() => {
+    if (!live()) return;
+    if (runtime.binding) {
+      if (!runtime.binding.isCurrent()) {
+        runtime.binding.retireRecipient();
+        try { latest.current.validateTarget?.(runtime.binding.session, runtime.binding.session.viewId, runtime.document); }
+        catch (error) { runtime.error = error instanceof Error ? error.message : 'The current execution locator is unavailable.'; publish(); }
+      }
+      else runtime.binding.resumeRecipient();
+    } else if (runtime.discovered && !runtime.discovering && runtime.desired && !runtime.activeAttempt && runtime.targetUnavailable) void attachDesired(true);
+  }, [options.targetRevision]);
   function reconcileAskRecipients() {
     const entries = latest.current.ask().entries;
-    const targets = new Map([...entries].flatMap(([owner, entry]) => isAskAttached(entry) && entry.record?.target ? [[owner, { entry, target: entry.record.target }] as const] : []));
+    const targets = new Map([...entries].flatMap(([owner, entry]) => {
+      if (!isAskAttached(entry) || !entry.record?.target) return [];
+      try { return [[owner, { entry, anchor: entry.record.target, target: resolveTarget(entry.record.target, { nativePrefixOnly: true }).target }] as const]; }
+      catch { return []; }
+    }));
     for (const [owner, supplier] of runtime.askRecipients) {
       const next = targets.get(owner);
       if (!next || !live() || supplier.participant !== askParticipantKey(next.entry.record!)
@@ -764,13 +812,14 @@ export function useSessionSuccession(options: SuccessionOptions) {
     for (const [owner, value] of targets) {
       if (runtime.askRecipients.has(owner)) continue;
       const connection = latest.current.connections.find(value.target);
-      if (!connection || connection.agentId !== value.target.agentId) continue;
-      const authority = runtime.authority, target = value.target, participant = value.entry.record!, key = sessionKey(target);
+      if (!connection) continue;
+      const authority = runtime.authority, target = { ...value.target, agentId: connection.agentId }, anchor = value.anchor, participant = value.entry.record!, key = sessionKey(anchor);
       let stopped = false, lifetime: { active: boolean } | undefined, epoch: string | null | undefined;
       const eligible = () => {
         const entry = latest.current.ask().entries.get(owner), state = connection.replica.getState(), native = connection.client.getSessionState(), agent = state.agent;
         return live() && runtime.authority === authority && !stopped && isAskAttached(entry) && entry?.record?.id === participant.id
-          && entry.record.target?.agentId === target.agentId && sessionKey(entry.record.target) === key
+          && entry.record.target?.agentId === anchor.agentId && sessionKey(entry.record.target) === key
+          && (() => { try { return sessionKey(resolveTarget(anchor, { nativePrefixOnly: true }).target) === sessionKey(target); } catch { return false; } })()
           && latest.current.connections.find(target) === connection && agent?.id === target.agentId && agent.providerId === target.providerId
           && agent.runtimeInfo.providerId === target.providerId && agent.runtimeInfo.sessionId === target.nativeSessionId
           && state.timeline.initialized && !!state.timeline.epoch && native.synchronized && native.runtime?.state === 'connected'
@@ -892,7 +941,7 @@ export function useSessionSuccession(options: SuccessionOptions) {
     openAttached: (session: OpenedSession, restoreLayout = false) => open(session, undefined, undefined, undefined, undefined, undefined, session, restoreLayout),
     leave, refresh: discover, refreshCommitted, refreshSettled, canPrune, observeFavorites,
     retry,
-    ownerFor, localViews, ensureView, save,
+    ownerFor, localViews, ensureView, save, resolveTarget,
     navigationIntent: { sessionIntent: runtime.intent, keepOriginal: runtime.keepOriginal }, historyNavigation,
     observeHistoryTitles: (sessions: readonly SessionEntry[]) => { if (live() && runtime.readable && rememberHistoryTitles(sessions)) publish(); },
     updateTitles: (sessions: readonly SessionEntry[]) => {

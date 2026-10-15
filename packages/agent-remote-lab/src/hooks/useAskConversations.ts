@@ -5,7 +5,7 @@ import { SessionDirectoryClient, type CreateSessionOptions, type OpenedSession }
 import { ForkStore, currentForkSource, referenceForkContext, type SessionFork } from '../session-forks.js';
 import { configureFork } from '../fork-actions.js';
 import { DraftStore } from '../draft-store.js';
-import { sessionKey } from '../session-tree.js';
+import { sessionKey, type SessionEntry } from '../session-tree.js';
 import { compositionMetadataKey, compositionRoleKey, compositionSelection, saveCompositionAskEnabled, saveCompositionDocument, type CompositionDocument } from '../session-composition-model.js';
 import { flushRecoveryWrites } from '../recovery-writes.js';
 import { recoveryGeneration } from '../conversation-recovery.js';
@@ -18,7 +18,7 @@ import type { CompositionParticipantResult } from '../session-composition-applic
 export type AskInputSender = (text: string, operationId: string) => Promise<unknown>;
 interface AskInputOwner { recordId: string; target?: string; creation?: string }
 export interface AskInput { id: string; text: string; owner?: AskInputOwner }
-export interface AskEntry { attached?: boolean; attachedParticipant?: string; restoring?: boolean; restoreOnly?: boolean; inputs?: AskInput[]; source: OpenedSession; record?: SessionFork; pending?: SessionFork; busy?: boolean; error?: string }
+export interface AskEntry { executionTarget?: OpenedSession; attached?: boolean; attachedParticipant?: string; restoring?: boolean; restoreOnly?: boolean; inputs?: AskInput[]; source: OpenedSession; record?: SessionFork; pending?: SessionFork; busy?: boolean; error?: string }
 /** Scoped ledger/relation identity and concrete native recipient, independent of navigation. */
 export function askParticipantKey(record: SessionFork): string {
   return JSON.stringify([record.id, record.target ? sessionKey(record.target) : null]);
@@ -28,7 +28,7 @@ export function isAskAttached(entry?: AskEntry): boolean {
 }
 interface AskOpenOptions { existingOnly?: boolean; synchronize?: () => Promise<void>; restoring?: AbortController; associationOwner: string }
 
-export function useAskConversations(document: CompositionDocument, transport: RemoteAgentTransport, directory?: SessionDirectoryClient, selectedHostId = 'local', onCreated?: () => void) {
+export function useAskConversations(document: CompositionDocument, transport: RemoteAgentTransport, directory?: SessionDirectoryClient, selectedHostId = 'local', onCreated?: () => void, resolveExecution?: (source: OpenedSession) => SessionEntry) {
   const baseUrl = document.scope;
   const preparations = useRef(new Map<string, AbortController>());
   const preparationSettlements = useRef(new Map<string, Promise<void>>());
@@ -352,18 +352,20 @@ export function useAskConversations(document: CompositionDocument, transport: Re
       record = record.remote ? record : checkedAskOperation(store, record);
       if (restoringCurrent) update(key, { attached: false, attachedParticipant: undefined });
       const savedTarget = record.target;
-      const locator = savedTarget ?? record.source;
+      const locator = savedTarget ? resolveExecution?.(savedTarget) ?? savedTarget : record.source;
+      const following = savedTarget && sessionKey(locator) !== sessionKey(savedTarget);
+      if (following && !record.configured && !record.remote) throw new Error('The original Ask configuration is incomplete. Recover it before following its current session.');
       if (!locator.providerId || !locator.nativeSessionId) throw new Error('The saved Ask native locator is unavailable. Retry after restoring its identity.');
       const hostId = locator.hostId ?? 'local';
       const target = hostId === selectedHostId ? directory : new SessionDirectoryClient(baseUrl, undefined, hostId);
       const operation = record;
       queueQuestion(operation);
-      const result = savedTarget ? await target.attach(savedTarget.providerId, savedTarget.nativeSessionId, preparation.signal)
+      const result = savedTarget ? await target.attach(locator.providerId, locator.nativeSessionId, preparation.signal)
         : await target.create(operation.source.providerId, operation.id, operation.options);
       if (savedTarget) {
         requireCurrent();
         if (!operation.remote) checkedAskOperation(store, operation);
-        if (result.nativeSessionId !== undefined && result.nativeSessionId !== savedTarget.nativeSessionId) {
+        if (result.nativeSessionId !== undefined && result.nativeSessionId !== locator.nativeSessionId) {
           throw new Error('The attached Ask native identity does not match its saved target. Retry the original Ask.');
         }
       } else {
@@ -371,14 +373,14 @@ export function useAskConversations(document: CompositionDocument, transport: Re
         if (!owner.active) return settleRetired();
         checkedAskCreation(store, operation);
       }
-      const bound = savedTarget ? { ...savedTarget, agentId: result.agentId }
+      const bound = savedTarget ? { ...savedTarget, ...locator, agentId: result.agentId }
         : { agentId: result.agentId, nativeSessionId: result.nativeSessionId ?? result.agentId,
           providerId: operation.source.providerId, hostId: operation.source.hostId ?? 'local', title: 'Ask', createdAt: operation.capturedAt };
       if (!bound.agentId || !bound.nativeSessionId) throw new Error('The Ask attachment identity could not be confirmed. Retry the original Ask.');
-      store.bind(operation.id, bound);
+      if (!following) store.bind(operation.id, bound);
       // Retention above is independent of permission to configure or mutate the current window.
       if (!ownsEntry()) return settleRetired();
-      record = operation.remote ? store.get(operation.id) : checkedAskOperation(store, { ...operation, target: bound });
+      record = operation.remote ? store.get(operation.id) : checkedAskOperation(store, { ...operation, target: following ? savedTarget : bound });
       participant = record;
       update(key, { pending: record });
       confirmInputOwners(key, record);
@@ -389,7 +391,7 @@ export function useAskConversations(document: CompositionDocument, transport: Re
       store.finishCreation(record.id);
       record = store.get(record.id);
       if (askParticipantKey(record) !== askParticipantKey(participant)) throw new Error('The Ask participant changed. Retry the current Ask.');
-      update(key, { record, pending: undefined, attached: true, attachedParticipant: askParticipantKey(record), restoreOnly: false });
+      update(key, { record, pending: undefined, attached: true, attachedParticipant: askParticipantKey(record), executionTarget: bound, restoreOnly: false });
       participant = record;
       if (replacing && textBinding.store.get(textBinding.key) === draftAtStart) setDraft(key, '');
       onCreated?.();

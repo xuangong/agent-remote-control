@@ -11,7 +11,7 @@ interface Host { teamManagement?: true; id: string; name: string; online: boolea
 interface Props {
   baseUrl: string; enabled: boolean; visible?: boolean; hosts: Host[]; source?: TeamSource;
   compact?: boolean; currentSession?: Pick<TeamSource, 'providerId' | 'nativeSessionId'> & { hostId?: string };
-  onOpen(team: Team): Promise<boolean>; onOpenSession(target: TeamSource): Promise<boolean>;
+  onOpen(team: Team): Promise<boolean>; onOpenSession(target: TeamSource & { teamId?: string; teamMemberId?: string }): Promise<boolean>;
   onTeamsChange?(baseUrl: string, teams: Team[]): void;
 }
 const errorMessage = (error: unknown) => error instanceof Error ? error.message : 'Team operation failed.';
@@ -123,14 +123,14 @@ export function TeamMenu(props: Props) {
 }
 
 function TeamSessionNavigation({ team, hosts, busy, currentSession, onOpen }: {
-  team: Team; hosts: Host[]; busy: boolean; currentSession: Props['currentSession']; onOpen(target: TeamSource): void;
+  team: Team; hosts: Host[]; busy: boolean; currentSession: Props['currentSession']; onOpen(target: TeamSource & { teamId?: string; teamMemberId?: string }): void;
 }) {
   return <nav className="lab-team-session-navigation" aria-label={`${team.title} sessions`}>
     {team.members.filter(member => member.creation !== 'abandoned').map(member => <button key={member.id} type="button"
       disabled={busy || member.creation !== 'ready' || !member.nativeSessionId}
       aria-current={isCurrentMember(member, currentSession) ? 'page' : undefined}
-      onClick={() => onOpen({ hostId: member.hostId, providerId: member.providerId, nativeSessionId: member.nativeSessionId!, title: member.name })}>
-      <span>{member.name}</span><small>{member.role === 'leader' ? 'Leader' : 'Member'} · {hosts.find(host => host.id === member.hostId)?.name ?? member.hostId}{member.creation !== 'ready' ? ' · Not ready' : ''}</small>
+      onClick={() => onOpen({ teamId: team.id, teamMemberId: member.id, hostId: member.hostId, providerId: member.providerId, nativeSessionId: member.nativeSessionId!, title: member.name })}>
+      <span>{member.name}</span><small>{member.role === 'leader' ? 'Leader' : 'Member'} · {hosts.find(host => host.id === member.hostId)?.name ?? member.hostId}{member.creation !== 'ready' ? ' · Not ready' : !member.nativeSessionId ? ' · Execution unavailable' : ''}</small>
     </button>)}
   </nav>;
 }
@@ -165,7 +165,7 @@ function TeamListItem({ team, selected, busy, onOpen, onRename, navigation, mana
 }
 
 function TeamManagement({ team, hosts, busy, failure, onChange, onOpenSession }: {
-  team: Team; hosts: Host[]; busy: boolean; failure?: string; onChange(input: TeamAction): Promise<boolean>; onOpenSession(target: TeamSource): void;
+  team: Team; hosts: Host[]; busy: boolean; failure?: string; onChange(input: TeamAction): Promise<boolean>; onOpenSession(target: TeamSource & { teamId?: string; teamMemberId?: string }): void;
 }) {
   const [adding, setAdding] = useState(false);
   const recovery = [...team.messages.filter(message => ['unknown', 'dispatching', 'rejected'].includes(message.status)
@@ -178,9 +178,10 @@ function TeamManagement({ team, hosts, busy, failure, onChange, onOpenSession }:
     </div>
     {adding ? <AddTeamMember failure={failure} teamId={team.id} hosts={hosts.filter(host => host.teamManagement)} busy={busy} onChange={onChange} onClose={() => setAdding(false)} /> : null}
     <ul className="lab-team-members">{team.members.filter(member => member.creation !== 'abandoned').map(member => <li key={member.id}>
-      <button disabled={busy || member.creation !== 'ready' || !member.nativeSessionId} onClick={() => onOpenSession({hostId:member.hostId,providerId:member.providerId,nativeSessionId:member.nativeSessionId!,title:member.name})}>{member.name}</button>
+      <button disabled={busy || member.creation !== 'ready' || !member.nativeSessionId} onClick={() => onOpenSession({teamId:team.id,teamMemberId:member.id,hostId:member.hostId,providerId:member.providerId,nativeSessionId:member.nativeSessionId!,title:member.name})}>{member.name}</button>
       <small>{member.role} · {hosts.find(host => host.id === member.hostId)?.name ?? member.hostId} · {member.activity}</small>
       {member.responsibility || member.cwd || member.summary ? <details><summary>Details</summary>{member.responsibility}{member.cwd ? <p>{member.cwd}</p> : null}{member.summary ? <p>{member.summary}</p> : null}</details> : null}
+      {member.creation === 'ready' && !member.nativeSessionId ? <p>The current execution locator is unavailable. History and drafts are preserved.</p> : null}
       {member.creation !== 'ready' ? <div><p>{member.error ?? 'Session creation is pending.'}</p><button disabled={busy} onClick={() => void onChange({teamId:team.id,action:'retry_creation',memberId:member.id})}>Check creation</button><button disabled={busy} onClick={() => void onChange({teamId:team.id,action:'abandon_creation',memberId:member.id})}>Abandon slot</button></div> : null}
     </li>)}</ul>
     {team.status === 'archiving' ? <p className="lab-control-note" role="status">New dispatches stopped. Waiting for members to settle. Open their sessions to resolve approvals or stop ongoing work.</p> : null}

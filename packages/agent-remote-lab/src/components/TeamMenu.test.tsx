@@ -84,13 +84,13 @@ it('switches compact Team sessions in both directions through ordinary session n
   expect(button(navigation(), 'Leader').getAttribute('aria-current')).toBe('page');
   expect(navigation().textContent).toContain('Office Windows');
   await act(async () => button(navigation(), 'Windows').click());
-  expect(opened).toHaveBeenLastCalledWith({ hostId: 'win', providerId: 'fixture', nativeSessionId: 'worker-session', title: 'Windows' });
+  expect(opened).toHaveBeenLastCalledWith({ teamId: 'team', teamMemberId: 'worker', hostId: 'win', providerId: 'fixture', nativeSessionId: 'worker-session', title: 'Windows' });
   expect(view.querySelector('section[aria-label="Teams"]')).toBeNull();
   await act(async () => button(view, 'Teams').click());
   expect(button(navigation(), 'Windows').getAttribute('aria-current')).toBe('page');
   expect(button(navigation(), 'Leader').hasAttribute('aria-current')).toBe(false);
   await act(async () => button(navigation(), 'Leader').click());
-  expect(opened).toHaveBeenLastCalledWith({ hostId: 'mac', providerId: 'fixture', nativeSessionId: 'leader-session', title: 'Leader' });
+  expect(opened).toHaveBeenLastCalledWith({ teamId: 'team', teamMemberId: 'leader', hostId: 'mac', providerId: 'fixture', nativeSessionId: 'leader-session', title: 'Leader' });
 });
 
 it('keeps compact member navigation available after failure and disables unfinished slots', async () => {

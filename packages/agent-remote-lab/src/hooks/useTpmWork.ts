@@ -66,6 +66,7 @@ export function useTpmWork(service: TpmService | undefined, hosts: readonly TpmH
   latest.current = { catalogs: visibleCatalogs, sessions, details, hosts: stableHosts, attach, selected, expanded, enabled, presentationVisible, service };
   const generation = useRef(0);
   const attachmentPromises = useRef(new Map<string, Promise<void>>());
+  const attachmentTargets = useRef(new Map<string, string>());
   const detailPromises = useRef(new Map<string, Promise<void>>());
   const creationIntents = useRef(new Map<string, string>());
   const mutation = useRef(false);
@@ -213,7 +214,12 @@ export function useTpmWork(service: TpmService | undefined, hosts: readonly TpmH
     if (!authorized(item.hostId, requestedService)) return;
     const currentItem = find(key), currentWork = currentItem?.work;
     if (currentWork?.detailsOmitted && (latest.current.details[key]?.revision ?? 0) < currentWork.revision) return;
-    if (latest.current.sessions[key] || !currentWork?.tpmNativeSessionId || !currentItem?.online || !latest.current.enabled) return;
+    if (!currentWork?.tpmNativeSessionId || !currentItem?.online || !latest.current.enabled) return;
+    const target = JSON.stringify([currentWork.providerId, currentWork.tpmNativeSessionId]);
+    const held = latest.current.sessions[key];
+    if (held?.providerId === currentWork.providerId && held.nativeSessionId === currentWork.tpmNativeSessionId) return;
+    if (attachmentTargets.current.get(key) !== target) attachmentPromises.current.delete(key);
+    attachmentTargets.current.set(key, target);
     const existing = attachmentPromises.current.get(key);
     if (existing) return existing;
     setAttaching(current => ({ ...current, [key]: true })); setAttachmentErrors(current => ({ ...current, [key]: undefined }));
@@ -221,7 +227,10 @@ export function useTpmWork(service: TpmService | undefined, hosts: readonly TpmH
       try {
         if (!authorized(item.hostId, requestedService)) return;
         const session = await latest.current.attach({ hostId: item.hostId, providerId: currentWork.providerId, nativeSessionId: currentWork.tpmNativeSessionId!, title: currentWork.title });
-        if (authorized(item.hostId, requestedService) && attachmentPromises.current.get(key) === promise) setSessions(current => ({ ...current, [key]: session }));
+        const observed = find(key)?.work;
+        if (session.providerId !== currentWork.providerId || session.nativeSessionId !== currentWork.tpmNativeSessionId) throw new Error('The Controller returned a different TPM session.');
+        if (authorized(item.hostId, requestedService) && attachmentPromises.current.get(key) === promise
+          && observed?.providerId === currentWork.providerId && observed.tpmNativeSessionId === currentWork.tpmNativeSessionId) setSessions(current => ({ ...current, [key]: session }));
       } catch (error) { if (authorized(item.hostId, requestedService) && attachmentPromises.current.get(key) === promise) setAttachmentErrors(current => ({ ...current, [key]: message(error) })); }
       finally {
         if (attachmentPromises.current.get(key) === promise) {
@@ -242,7 +251,9 @@ export function useTpmWork(service: TpmService | undefined, hosts: readonly TpmH
     if (!presentationVisible) return;
     for (const key of windows) {
       const item = works.find(item => item.key === key);
-      if (item?.online && item.work.tpmNativeSessionId && !sessions[key] && !attachmentErrors[key] && !detailErrors[key]) void open(key, true);
+      const held = sessions[key], target = item && JSON.stringify([item.work.providerId, item.work.tpmNativeSessionId]);
+      const changed = item && (held?.providerId !== item.work.providerId || held.nativeSessionId !== item.work.tpmNativeSessionId);
+      if (item?.online && item.work.tpmNativeSessionId && changed && (!attachmentErrors[key] || attachmentTargets.current.get(key) !== target) && !detailErrors[key]) void open(key, true);
     }
   }, [presentationVisible, JSON.stringify(windows), works, sessions, attachmentErrors, detailErrors, open]);
   useEffect(() => {
@@ -305,7 +316,11 @@ export function useTpmWork(service: TpmService | undefined, hosts: readonly TpmH
   const resolve = useCallback((key: string, intentId: string, resolution: 'accepted' | 'rejected', nativeSessionId?: string) => mutate(key, { action: 'resolve', intentId, resolution, ...(nativeSessionId ? { nativeSessionId } : {}) }), [mutate]);
   const confirmTodo = useCallback((key: string, confirmation: SessionTodoDecision) => mutate(key, { action: 'confirm_todo', confirmation }), [mutate]);
   const close = useCallback((key?: string) => setWindowOrder(current => key ? current.filter(item => item !== key) : []), []);
-  return { works, catalogs: visibleCatalogs, loading, sessions: sameScope ? sessions : {}, attaching, attachmentErrors, detailsLoading, detailErrors, selected, windows, focus, opened: sameScope ? opened : [], expanded, busy, error,
+  const currentSessions = Object.fromEntries(Object.entries(sessions).filter(([key, session]) => {
+    const item = works.find(item => item.key === key);
+    return enabled && sameScope && item?.work.providerId === session.providerId && item.work.tpmNativeSessionId === session.nativeSessionId;
+  }));
+  return { works, catalogs: visibleCatalogs, loading, sessions: currentSessions, attaching, attachmentErrors, detailsLoading, detailErrors, selected, windows, focus, opened: sameScope ? opened : [], expanded, busy, error,
     available: !!service && enabled, canCreate, create, action, rename, resolve, confirmTodo, open, close, refresh };
 }
 

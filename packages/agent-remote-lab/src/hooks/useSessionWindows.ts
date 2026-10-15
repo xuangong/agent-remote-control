@@ -4,7 +4,7 @@ import { sessionKey } from '../session-tree.js';
 import { bindCompositionView, compositionSelection, createCompositionView, SESSION_VIEW_LIMIT,
   type CompositionDocument, type CompositionSlot, type CompositionWindow } from '../session-composition.js';
 
-export interface SessionWindowTarget { hostId: string; providerId: string; nativeSessionId: string; title: string; parentNativeSessionId?: string }
+export interface SessionWindowTarget { teamId?: string; teamMemberId?: string; hostId: string; providerId: string; nativeSessionId: string; title: string; parentNativeSessionId?: string }
 export interface SessionWindowEntry extends CompositionWindow { target?: SessionWindowTarget; dockRequest?: string }
 interface CompositionAccess {
   document: CompositionDocument;
@@ -97,6 +97,7 @@ export function useSessionWindows(scope: string, access: CompositionAccess) {
         bindCompositionView(document, view.id, slot.id);
         view.managed = !!groupRoot;
       }
+      if (target.teamMemberId) view.teamMemberId = target.teamMemberId;
       if (groupRoot && sessionKey(target) === sessionKey(groupRoot)) { rootId = view.id; view.groupId = groupId; }
       else if (rootId) view.closeWith = rootId;
       ids.push(view.id);
@@ -118,6 +119,7 @@ export function useSessionWindows(scope: string, access: CompositionAccess) {
         view = createCompositionView(document); bindCompositionView(document, view.id, slot.id);
         view.managed = true; added.push(view.id);
       }
+      if (target.teamMemberId) view.teamMemberId = target.teamMemberId;
       if (view.id !== root.id) view.closeWith = root.id;
     }
     document.editRevision++; save(); if (added.length) requestDock(added);

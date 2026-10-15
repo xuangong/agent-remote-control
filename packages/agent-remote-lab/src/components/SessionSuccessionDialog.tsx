@@ -2,6 +2,9 @@ import { useEffect, useId, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import type { OpenedSession, SessionDirectoryClient, SuccessionActionResult, SuccessionDescription, SuccessionPrepareInput } from '../directory-client.js';
 import './session-succession.css';
+import type { NativePrefixSelection } from '@orchardworks/agent-remote-protocol';
+
+export type SessionSuccessionDirectory = Pick<SessionDirectoryClient, 'describeSuccession' | 'prepareSuccession' | 'successionAction'>;
 
 type Action = 'prepare' | 'commit' | 'cancel' | 'status' | 'reconcile';
 const statusDelays = [1000, 2000, 4000, 8000, 15000];
@@ -16,8 +19,9 @@ function preferredTarget(description: SuccessionDescription, initialProvider?: s
 }
 
 /** Retains one operation until both its outcome and the current conversation are confirmed. */
-export function SessionSuccessionDialog({ source, directory, assertAccess, assertSource, resume, resumeCancellation, initialProvider, blockedReason, visible = true, onIntent, onSettled, onClose, onOpen, onGatedChange }: {
-  source: OpenedSession; directory: SessionDirectoryClient; assertAccess(): void; assertSource(): void;
+export function SessionSuccessionDialog({ source, directory, assertAccess, assertSource, resume, resumeCancellation, initialProvider, blockedReason, visible = true, onIntent, onSettled, onClose, onOpen, onGatedChange, preparation, autoPrepare = false, onPreparing }: {
+  source: OpenedSession; directory: SessionSuccessionDirectory; assertAccess(): void; assertSource(): void;
+  preparation?: NativePrefixSelection; autoPrepare?: boolean; onPreparing?(operation: SuccessionPrepareInput): Promise<void>;
   resume?: SuccessionPrepareInput; resumeCancellation?: boolean; initialProvider?: string; blockedReason?: string; visible?: boolean;
   onIntent(operation: SuccessionPrepareInput, cancelRequested: boolean): void;
   onSettled(result: SuccessionActionResult): Promise<void>; onClose(retain?: boolean): void; onOpen?(): void; onGatedChange?(gated: boolean): void;
@@ -37,12 +41,13 @@ export function SessionSuccessionDialog({ source, directory, assertAccess, asser
   const settled = useRef<SuccessionActionResult>(), cancelRequested = useRef(resumeCancellation === true);
   const mounted = useRef(false), projecting = useRef(false), projected = useRef(false);
   const statusAttempts = useRef(0), recoverImmediately = useRef(!!resume), accessBlocked = useRef(false);
-  const callbacks = useRef({ assertAccess, assertSource, onIntent, onSettled, onClose, onGatedChange });
-  callbacks.current = { assertAccess, assertSource, onIntent, onSettled, onClose, onGatedChange };
+  const callbacks = useRef({ assertAccess, assertSource, onIntent, onSettled, onClose, onGatedChange, onPreparing });
+  callbacks.current = { assertAccess, assertSource, onIntent, onSettled, onClose, onGatedChange, onPreparing };
+  const automaticPreparation = useRef(false);
   const terminal = isTerminal(result);
   const gated = !!intent && (!terminal || projection !== 'done');
   const statusExhausted = !!intent && !terminal && !busy && statusAttempts.current > statusDelays.length;
-  const showChooser = visible && !intent;
+  const showChooser = visible && !intent && !autoPrepare;
   const expanded = visible && detailsOpen;
 
   useEffect(() => {
@@ -63,7 +68,7 @@ export function SessionSuccessionDialog({ source, directory, assertAccess, asser
       try {
         callbacks.current.assertAccess();
         callbacks.current.assertSource();
-        const value = await directory.describeSuccession(source.providerId, source.nativeSessionId);
+        const value = await directory.describeSuccession(source.providerId, source.nativeSessionId, preparation);
         if (!active || !mounted.current) return;
         callbacks.current.assertSource();
         setDescription(value);
@@ -73,7 +78,7 @@ export function SessionSuccessionDialog({ source, directory, assertAccess, asser
       }
     })();
     return () => { active = false; };
-  }, [directory, source.providerId, source.nativeSessionId, initialProvider]);
+  }, [directory, source.providerId, source.nativeSessionId, initialProvider, preparation]);
   useEffect(() => {
     const awaken = () => {
       setPageVisible(document.visibilityState !== 'hidden');
@@ -154,8 +159,16 @@ export function SessionSuccessionDialog({ source, directory, assertAccess, asser
         callbacks.current.assertSource();
         if (operation.current) throw new Error('A Handoff is already retained. Check the original operation.');
         if (!description || description.eligibility.status !== 'ready' || !description.targets.some(item => item.providerId === target)) throw new Error('An eligible target has not been confirmed.');
+        if (preparation && (description.role.current.providerId !== source.providerId || description.role.current.nativeSessionId !== source.nativeSessionId)) {
+          throw new Error('The selected prompt belongs to a retired native session. Reopen its current view before editing.');
+        }
         const pending = { operationId: crypto.randomUUID(), providerId: description.role.current.providerId,
-          nativeSessionId: description.role.current.nativeSessionId, expectedRevision: description.role.revision, targetProviderId: target };
+          nativeSessionId: description.role.current.nativeSessionId, expectedRevision: description.role.revision, targetProviderId: target,
+          ...(preparation ? { preparation } : {}) };
+        await callbacks.current.onPreparing?.(pending);
+        if (!mounted.current) return;
+        callbacks.current.assertAccess();
+        callbacks.current.assertSource();
         callbacks.current.onIntent(pending, false);
         operation.current = pending;
         setIntent(pending);
@@ -187,6 +200,11 @@ export function SessionSuccessionDialog({ source, directory, assertAccess, asser
   }
   const runCurrent = useRef(run);
   runCurrent.current = run;
+  useEffect(() => {
+    if (!autoPrepare || !description || operation.current || automaticPreparation.current) return;
+    automaticPreparation.current = true;
+    if (description.eligibility.status === 'ready') void runCurrent.current('prepare');
+  }, [autoPrepare, description]);
   useEffect(() => {
     if (!intent || terminal || busy || !pageVisible || statusAttempts.current > statusDelays.length) return;
     const observe = () => {
@@ -239,7 +257,11 @@ export function SessionSuccessionDialog({ source, directory, assertAccess, asser
       <footer><button type="button" onClick={close}>Cancel</button><button type="submit" className="lab-favorite-primary" disabled={busy || !!blockedReason || description?.eligibility.status !== 'ready' || !target}>Hand off</button></footer>
     </form>
   </dialog>, document.body);
-  if (!intent) return null;
+  if (!intent) return autoPrepare ? <section className="lab-handoff-notice" aria-label="Edit prompt">
+    <p role={error ? 'alert' : 'status'}>{error ?? (description?.eligibility.status !== 'ready' ? description?.eligibility.reason : undefined) ?? 'Preparing selected prompt…'}</p>
+    {error && !busy ? <button type="button" onClick={() => void run('prepare')}>Retry preparation</button> : null}
+    <button type="button" onClick={close}>Close</button>
+  </section> : null;
   return <section className="lab-handoff-notice" aria-label="Handoff">
     <div className="lab-handoff-summary">
       <div className="lab-handoff-message"><p role="status" aria-live="polite" title={progress}>{progress}</p></div>

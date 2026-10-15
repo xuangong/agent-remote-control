@@ -33,6 +33,7 @@ export interface ImageDraftStorageSnapshot {
 export interface ImageDraftStorageHandle {
   snapshot(): ImageDraftStorageSnapshot;
   flush(expectedRevision: number, isCurrent: () => boolean): Promise<ImageDraftStorageSnapshot>;
+  replace?(expectedRevision: number, draft: Omit<ImageDraft, 'key' | 'scope'>, isCurrent: () => boolean): Promise<ImageDraftStorageSnapshot>;
 }
 const draftWriters = new Map<string, Set<ImageDraftStorageHandle>>();
 const bindingIdentity = (binding: ImageDraftBinding) => JSON.stringify([binding.scope, binding.key]);
@@ -47,6 +48,7 @@ export function registerImageDraftWriter(binding: ImageDraftBinding, handle: Ima
   const remove = () => { writers.delete(registered); releasedWriters.delete(registered); if (!writers.size && draftWriters.get(key) === writers) draftWriters.delete(key); };
   const registered: ImageDraftStorageHandle = {
     snapshot: () => handle.snapshot(),
+    ...(handle.replace ? { replace: handle.replace.bind(handle) } : {}),
     async flush(revision, isCurrent) {
       const result = await handle.flush(revision, isCurrent);
       if (releasedWriters.has(registered) && (result.status === 'cancelled' && handle.snapshot().status === 'cancelled' || result.status === 'ready' && result.savedRevision === result.revision)) remove();

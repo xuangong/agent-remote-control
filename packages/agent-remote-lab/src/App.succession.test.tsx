@@ -1,9 +1,10 @@
+import 'fake-indexeddb/auto';
 import { createServer, type Server } from 'node:http';
 import { createHash, webcrypto } from 'node:crypto';
 import { act, StrictMode, useContext, useState, type ComponentProps } from 'react';
 import { WebSocket, WebSocketServer } from 'ws';
 import { afterEach, expect, it, vi } from 'vitest';
-import { PROTOCOL_VERSION, type AgentChildSession, type ProjectedTimelineEntry, type SessionSuccessionReplay } from '@orchardworks/agent-remote-protocol';
+import { PROTOCOL_VERSION, type AgentChildSession, type ProjectedTimelineEntry, type SessionSuccessionReplay, type Team } from '@orchardworks/agent-remote-protocol';
 import { configureImageDraftPersistence, inspectImageDraft, readImageDraft, writeImageDraft } from '@orchardworks/agent-remote-web/browser';
 import { HttpWebSocketTransport } from '@orchardworks/agent-remote-web';
 import { CommunicationNavigationContext, type CommunicationNavigation } from '@orchardworks/agent-remote-web/react';
@@ -11,7 +12,7 @@ import { App, type LabTransport } from './App.js';
 import { SessionDirectoryClient, type OpenedSession, type SuccessionActionResult, type SuccessionDescription } from './directory-client.js';
 import { DraftStore } from './draft-store.js';
 import { replicaState } from './test/fixtures.js';
-import { readCompositionDocument, initializeCompositionDocument, saveCompositionDocument } from './session-composition.js';
+import { readCompositionDocument, initializeCompositionDocument, saveCompositionDocument, createCompositionDocument, createCompositionSlot, createAskOwner } from './session-composition.js';
 import { TrackedSessionViews } from './tracked-session-views.js';
 import { flushRecoveryWrites } from './recovery-writes.js';
 import { render, unmount } from './test/setup.js';
@@ -24,7 +25,6 @@ import { readTrackedSessions, saveTrackedSessions } from './tracking-state.js';
 import * as workbenchComponents from './components/LabWorkbench.js';
 import * as forkActions from './fork-actions.js';
 import { clearConversationRecovery } from './conversation-recovery.js';
-import * as promptEditIntents from './prompt-edit-intent.js';
 import * as sessionCommunication from './session-communication.js';
 import * as remoteReact from '@orchardworks/agent-remote-web/react';
 import * as historyHooks from './hooks/useConversationHistory.js';
@@ -50,8 +50,8 @@ function committed(from = 'A', to = 'B', revision = 2, roleId = 'primary', provi
       receipt: { ...request, to: native(to, providerId), phase: 'committed', committedRevision: revision, startedAt: 'now', updatedAt: 'now',
         prepared: { ...request, to: native(to, providerId), workspace, associationRevision: 1, participants: [], capture: { epoch: 'epoch', seq: 1, capturedAt: 'now' } } } } };
 }
-async function failureFixture(advanceDuringRecovery = false, nativeIdentity?: string | null, strict = false, flags = '', setup?: { chain?: SessionSuccessionReplay[]; replayFailure?: string; selected?: string; providerId?: string; userScoped?: boolean; favorites?: FavoritesSnapshot; holdRelationsInitially?: boolean; holdReplayInitially?: boolean; holdTimelineInitially?: boolean; holdSnapshotInitially?: boolean; holdAccessInitially?: boolean; nativeConnection?: 'connected' | 'restoring'; preserveNativeState?: boolean; children?: AgentChildSession[]; timeline?: ProjectedTimelineEntry[]; nativeStatus?: 'idle' | 'running'; successionDescription?: SuccessionDescription; successionStatus?(): SuccessionActionResult; attachmentFailure?(body: Record<string, unknown>): { status: number; payload: unknown } | undefined; seed?(scope: string, source: OpenedSession): void | Promise<void> }) {
-  configureImageDraftPersistence(() => false);
+async function failureFixture(advanceDuringRecovery = false, nativeIdentity?: string | null, strict = false, flags = '', setup?: { persistPrompt?: boolean; successionCommit?(): SuccessionActionResult; successionPrepare?(body: Record<string, unknown>): Promise<SuccessionActionResult>; teams?(): Team[]; chain?: SessionSuccessionReplay[]; replayFailure?: string; selected?: string; providerId?: string; userScoped?: boolean; favorites?: FavoritesSnapshot; holdRelationsInitially?: boolean; holdReplayInitially?: boolean; holdTimelineInitially?: boolean; holdSnapshotInitially?: boolean; holdAccessInitially?: boolean; nativeConnection?: 'connected' | 'restoring'; preserveNativeState?: boolean; children?: AgentChildSession[]; timeline?: ProjectedTimelineEntry[]; nativeStatus?: 'idle' | 'running'; successionDescription?: SuccessionDescription; successionStatus?(): SuccessionActionResult; attachmentFailure?(body: Record<string, unknown>): { status: number; payload: unknown } | undefined; seed?(scope: string, source: OpenedSession): void | Promise<void> }) {
+  configureImageDraftPersistence(() => setup?.persistPrompt === true);
   const requests: Array<{ url: string; body?: Record<string, unknown> }> = [];
   const providerId = setup?.providerId ?? 'recorded';
   const nativeBindings = new Map<string, string>();
@@ -95,7 +95,10 @@ async function failureFixture(advanceDuringRecovery = false, nativeIdentity?: st
       if (Number(url.searchParams.get('limit')) > 64) { response.statusCode = 400; value = { error: 'Replay page limit exceeded.' }; }
       else value = { version: 1, successions: url.searchParams.has('roleId') ? chain.filter(item => item.projection.role.id === url.searchParams.get('roleId')) : chain, nextCursor: null };
     }
+    else if (url.pathname.endsWith('/teams')) value = { teams: setup?.teams?.() ?? [] };
     else if (url.pathname.endsWith('/succession/describe') && setup?.successionDescription) value = setup.successionDescription;
+    else if (url.pathname.endsWith('/succession/commit') && setup?.successionCommit) value = setup.successionCommit();
+    else if (url.pathname.endsWith('/succession/prepare') && setup?.successionPrepare) value = await setup.successionPrepare(body!);
     else if (url.pathname.endsWith('/succession/status') && setup?.successionStatus) value = setup.successionStatus();
     else if (url.pathname.endsWith('/create')) { if (createGate) await createGate; value = { agentId: 'agent-S', nativeSessionId: 'S' }; }
     else if (url.pathname.endsWith('/session-relations')) { if (relationsGate) await relationsGate; value = { relations: [] }; }
@@ -112,7 +115,7 @@ async function failureFixture(advanceDuringRecovery = false, nativeIdentity?: st
       const agentId = decodeURIComponent(url.pathname.split('/').at(-2)!);
       value = { protocolVersion: PROTOCOL_VERSION, type: 'timeline_page', payload: {
         requestId: url.searchParams.get('requestId') ?? 'history-page', agentId, direction: url.searchParams.get('direction'), epoch: `epoch-${agentId}`, reset: false, staleCursor: false, gap: false, error: null,
-        window: { minSeq: 0, maxSeq: 0, nextSeq: 1 }, startCursor: null, endCursor: null, hasOlder: false, hasNewer: false, entries: [],
+        window: { minSeq: 0, maxSeq: setup?.timeline?.length ?? 0, nextSeq: (setup?.timeline?.length ?? 0) + 1 }, startCursor: null, endCursor: null, hasOlder: false, hasNewer: false, entries: setup?.timeline ?? [],
       } };
     }
     else if (url.pathname.endsWith('/snapshot')) {
@@ -1308,7 +1311,7 @@ it.each(['A', 'B'])('retains a completed old-source creation before rejecting ne
   expect(new URL(window.location.href).searchParams.get('session')).toBe(current);
 });
 
-it.each(['A', 'B'].flatMap(initial => ['edit', 'child', 'child-mobile', 'communication', 'ask'].map(operation => ({ initial, operation }))))
+it.each(['A', 'B'].flatMap(initial => ['child', 'child-mobile', 'communication', 'ask'].map(operation => ({ initial, operation }))))
 ('fences held $operation work from source $initial after its successor is confirmed', async ({ initial, operation }) => {
   vi.stubGlobal('matchMedia', vi.fn((query: string) => ({ matches: query.includes(operation === 'child-mobile' ? 'max-width: 1180px' : 'min-width: 1181px'), media: query, addEventListener() {}, removeEventListener() {}, addListener() {}, removeListener() {} })));
   vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} });
@@ -1317,18 +1320,15 @@ it.each(['A', 'B'].flatMap(initial => ['edit', 'child', 'child-mobile', 'communi
   vi.spyOn(workbenchComponents, 'LabWorkbench').mockImplementation(props => { const navigation = useContext(CommunicationNavigationContext); if (props.state?.agent?.id !== 'agent-S') { primary = props; communication = navigation; } return realWorkbench(props); });
   vi.spyOn(successionHooks, 'useSessionSuccession').mockImplementation((...args) => { succession = realSuccession(...args); return succession; });
   const configure = vi.spyOn(forkActions, 'configureFork').mockRejectedValue(new Error('Unexpected stale operation configuration'));
-  const beginReservation = promptEditIntents.beginPromptEditReservation;
-  let reservation: promptEditIntents.PromptEditReservation | undefined;
-  vi.spyOn(promptEditIntents, 'beginPromptEditReservation').mockImplementation((...args) => reservation = beginReservation(...args));
-  const providerId = operation === 'edit' ? 'codex' : 'recorded';
+  const providerId = 'recorded';
   const child: AgentChildSession = { nativeSessionId: 'S', title: '/root/side', createdAt: 'now', status: 'idle', observation: 'live' };
   const letter: ProjectedTimelineEntry = { providerId, seqStart: 1, seqEnd: 1, timestamp: '2026-10-10T00:00:00Z', resources: [], collapsed: [], sourceSeqRanges: [{ startSeq: 1, endSeq: 1 }],
     item: { type: 'agent_communication', messageId: 'letter', sender: '/root', recipient: '/root/side', text: 'Read the source message.' } };
-  const f = await failureFixture(false, 'B', false, '', { providerId, userScoped: operation === 'edit',
+  const f = await failureFixture(false, 'B', false, '', { providerId,
     chain: initial === 'A' ? [] : [committed('A', 'B', 2, 'primary', providerId)], children: operation === 'child-mobile' ? [] : [child], timeline: operation === 'communication' ? [letter] : [] });
   await vi.waitFor(async () => { await act(async () => { await new Promise(resolve => setTimeout(resolve, 20)); }); expect(primary.state?.agent?.id).toBe(`agent-${initial}`); });
   const oldPrimary = primary, oldCommunication = communication;
-  const create = operation === 'edit' || operation === 'ask';
+  const create = operation === 'ask';
   let loaded = false, releaseLoad!: () => void;
   const loadGate = new Promise<void>(resolve => { releaseLoad = resolve; });
   if (operation === 'communication') {
@@ -1339,8 +1339,7 @@ it.each(['A', 'B'].flatMap(initial => ['edit', 'child', 'child-mobile', 'communi
   cleanups.push(release);
   let pending!: Promise<unknown>;
   await act(async () => {
-    const request = operation === 'edit' ? oldPrimary.actions.editPrompt!({ ...letter, turnId: 'original-turn', item: { type: 'user_message', messageId: 'original-message', text: 'Original prompt' } })
-      : operation.startsWith('child') ? oldPrimary.onOpenChildSession!(child)
+    const request = operation.startsWith('child') ? oldPrimary.onOpenChildSession!(child)
       : operation === 'communication' ? oldCommunication!.open(letter)
       : oldPrimary.onExecuteConsoleCommand!('console:ask', 'Question for the original source');
     pending = Promise.resolve(request).catch(error => error);
@@ -1348,8 +1347,7 @@ it.each(['A', 'B'].flatMap(initial => ['edit', 'child', 'child-mobile', 'communi
   await vi.waitFor(() => expect(f.requests.some(item => create ? item.url.endsWith('/create') : item.url.endsWith('/child/attach'))).toBe(true));
   if (operation === 'communication') await vi.waitFor(() => expect(loaded).toBe(true));
   const destination = f.requests.find(item => create ? item.url.endsWith('/create') : item.url.endsWith('/child/attach'))!;
-  expect(destination.body).toMatchObject(create ? operation === 'edit' ? { providerId, editNativeSessionId: initial }
-    : { providerId, sourceNativeSessionId: initial } : { providerId, parentNativeSessionId: initial, nativeSessionId: 'S' });
+  expect(destination.body).toMatchObject(create ? { providerId, sourceNativeSessionId: initial } : { providerId, parentNativeSessionId: initial, nativeSessionId: 'S' });
   const current = initial === 'A' ? 'B' : 'C';
   const next = committed(initial, current, initial === 'A' ? 2 : 3, 'primary', providerId); f.chain.push(next);
   await act(async () => f.notify(next));
@@ -1357,12 +1355,7 @@ it.each(['A', 'B'].flatMap(initial => ['edit', 'child', 'child-mobile', 'communi
   const layoutBeforeRelease = JSON.stringify(succession.layoutView());
   let result: unknown;
   await act(async () => { release(); result = await pending; });
-  if (operation === 'edit' || operation === 'communication') { expect(result).toBeInstanceOf(Error); expect((result as Error).message).toContain('source session changed'); }
-  if (operation === 'edit') {
-    expect(reservation?.target).toMatchObject({ agentId: 'agent-S', providerId, nativeSessionId: 'S' });
-    expect(reservation?.restored).not.toBe(true);
-    expect(new DraftStore(f.scope).get('agent-S')).toBe('');
-  }
+  if (operation === 'communication') { expect(result).toBeInstanceOf(Error); expect((result as Error).message).toContain('source session changed'); }
   if (operation === 'ask') {
     const record = new ForkStore(`ask:${f.scope}`, sessionStorage).allLocal().find(record => record.source.nativeSessionId === initial)!;
     expect(record.target).toMatchObject({ agentId: 'agent-S', providerId, nativeSessionId: 'S' });
@@ -1380,35 +1373,25 @@ it.each(['A', 'B'].flatMap(initial => ['edit', 'child', 'child-mobile', 'communi
 });
 
 
-it.each(['edit resources', 'Ask relations'])('rejects a retired source after awaiting %s before creating any native target', async stage => {
+it('rejects a retired source after awaiting Ask relations before creating any native target', async () => {
   vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} });
   const realWorkbench = workbenchComponents.LabWorkbench, realSuccession = successionHooks.useSessionSuccession;
   let primary!: ComponentProps<typeof realWorkbench>, succession!: ReturnType<typeof realSuccession>;
   vi.spyOn(workbenchComponents, 'LabWorkbench').mockImplementation(props => { primary = props; return realWorkbench(props); });
   vi.spyOn(successionHooks, 'useSessionSuccession').mockImplementation((...args) => { succession = realSuccession(...args); return succession; });
-  const f = await failureFixture(false, 'B', false, '', { providerId: 'codex', userScoped: true, holdRelationsInitially: stage === 'Ask relations' });
+  const f = await failureFixture(false, 'B', false, '', { providerId: 'codex', userScoped: true, holdRelationsInitially: true });
   await vi.waitFor(async () => { await act(async () => { await new Promise(resolve => setTimeout(resolve, 20)); }); expect(primary.state?.agent?.id).toBe('agent-B'); });
   const oldPrimary = primary;
-  let prepared = false, releasePrepare!: () => void;
-  const gate = new Promise<void>(resolve => { releasePrepare = resolve; });
-  const prepare = remoteReact.preparePromptDraft;
-  if (stage === 'edit resources') vi.spyOn(remoteReact, 'preparePromptDraft').mockImplementation(async (...args) => { const result = await prepare(...args); prepared = true; await gate; return result; });
-  const release = stage === 'edit resources' ? releasePrepare : f.holdRelations(); cleanups.push(release);
-  const resourceId = `prompt-${f.scope}`;
-  const prompt: ProjectedTimelineEntry = { providerId: 'codex', seqStart: 1, seqEnd: 1, timestamp: 'now', turnId: 'turn', collapsed: [], sourceSeqRanges: [{ startSeq: 1, endSeq: 1 }],
-    resources: [{ locator: resourceId, resourceId, status: 'available' }],
-    item: { type: 'user_message', messageId: 'message', text: 'Original image prompt', content: [{ type: 'text', text: 'Original image prompt' }, { type: 'image', locator: resourceId, label: 'image #1' }] } };
+  const release = f.holdRelations(); cleanups.push(release);
   let pending!: Promise<unknown>;
-  await act(async () => { pending = (stage === 'edit resources' ? oldPrimary.actions.editPrompt!(prompt)
-    : oldPrimary.onExecuteConsoleCommand!('console:ask', 'Preserve the submitting source')).catch(error => error); });
-  if (stage === 'edit resources') await vi.waitFor(() => expect(prepared).toBe(true));
-  else await vi.waitFor(() => expect(f.requests.some(item => item.url.endsWith('/session-relations'))).toBe(true));
+  await act(async () => { pending = oldPrimary.onExecuteConsoleCommand!('console:ask', 'Preserve the submitting source').catch(error => error); });
+  await vi.waitFor(() => expect(f.requests.some(item => item.url.endsWith('/session-relations'))).toBe(true));
   const next = committed('B', 'C', 3, 'primary', 'codex'); f.chain.push(next);
   await act(async () => f.notify(next));
   await vi.waitFor(async () => { await act(async () => { await new Promise(resolve => setTimeout(resolve, 20)); }); expect(succession.binding?.session.nativeSessionId).toBe('C'); });
   await act(async () => { release(); await pending; });
   expect(f.requests.filter(item => item.url.endsWith('/create'))).toEqual([]);
-  expect(f.frames.filter(frame => frame.message?.type === 'resource_request').map(frame => frame.message?.payload?.agentId)).toEqual(stage === 'edit resources' ? ['agent-B'] : []);
+  expect(f.frames.filter(frame => frame.message?.type === 'resource_request').map(frame => frame.message?.payload?.agentId)).toEqual([]);
   expect(f.frames.some(frame => ['send_message', 'execute_command', 'session_setting_request'].includes(frame.message?.type ?? ''))).toBe(false);
   expect(new URL(window.location.href).searchParams.get('session')).toBe('C');
 });
@@ -2021,3 +2004,191 @@ it('retires a slow attachment when navigating away and ignores its late identity
   expect(succession.selected?.nativeSessionId).toBe('D');
   expect(f.frames.filter(frame => frame.message && ['send_message', 'interaction_response', 'image_upload_begin'].includes(frame.message.type))).toEqual([]);
 });
+
+it('follows an Ask native prefix with an execution recipient while preserving the association anchor', async () => {
+  vi.stubGlobal('ResizeObserver', class { observe() {} disconnect() {} });
+  const realAsk = askHooks.useAskConversations, realSuccession = successionHooks.useSessionSuccession;
+  let ask!: ReturnType<typeof realAsk>, succession!: ReturnType<typeof realSuccession>;
+  vi.spyOn(askHooks, 'useAskConversations').mockImplementation((...args) => { ask = realAsk(...args); return ask; });
+  vi.spyOn(successionHooks, 'useSessionSuccession').mockImplementation((...args) => { succession = realSuccession(...args); return succession; });
+  const prefix = committed('X', 'Y', 2, 'ask');
+  const preparation = { kind: 'native_prefix' as const, turnId: 'turn', messageId: 'message' };
+  prefix.projection.receipt.preparation = preparation; prefix.projection.receipt.prepared!.preparation = preparation;
+  let anchor!: OpenedSession, original!: OpenedSession;
+  const f = await failureFixture(false, 'B', false, '', { chain: [committed(), prefix], seed(scope, source) {
+    original = source; anchor = { ...source, nativeSessionId: 'X', agentId: 'agent-X', title: 'Ask X' };
+    const store = new ForkStore(`ask:${scope}`, sessionStorage);
+    const record = store.prepare(referenceForkContext(source), { sourceNativeSessionId: source.nativeSessionId });
+    store.bind(record.id, anchor); store.markConfigured(record.id); store.finishCreation(record.id);
+  } });
+  await settleApp(() => expect(succession.binding?.session.nativeSessionId).toBe('B'));
+  const owner = succession.ownerFor(succession.desired!.slot.id);
+  await act(async () => { await ask.open(undefined, succession.binding!.session, '', false, { associationOwner: owner }); });
+  await settleApp(() => expect(succession.recipientFor(anchor, owner)?.isCurrent()).toBe(true));
+  expect(succession.recipientFor(anchor, owner)?.identity).toContain('agent-Y');
+  expect(ask.entryFor(original, owner).record?.target).toEqual(anchor);
+  expect(ask.entryFor(original, owner).record?.source).toEqual(original);
+  expect(f.requests.filter(request => request.url.endsWith('/attach')).some(request => request.body?.nativeSessionId === 'X')).toBe(false);
+  expect(succession.binding?.session.nativeSessionId).toBe('B');
+  expect(f.frames.some(frame => frame.message?.type === 'send_message')).toBe(false);
+}, 10000);
+
+it('fences a warm Team main view immediately when its public execution locator disappears', async () => {
+  const real = successionHooks.useSessionSuccession;
+  let succession!: ReturnType<typeof real>;
+  vi.spyOn(successionHooks, 'useSessionSuccession').mockImplementation((...args) => { succession = real(...args); return succession; });
+  const interval = globalThis.setInterval;
+  vi.spyOn(globalThis, 'setInterval').mockImplementation(((callback: TimerHandler, delay?: number, ...args: unknown[]) => interval(callback, delay === 4000 ? 50 : delay, ...args)) as typeof setInterval);
+  let team: Team = { id: 'team', operationId: 'create', revision: 1, title: 'Team', status: 'active', source: { hostId: 'host', providerId: 'recorded', nativeSessionId: 'main', title: 'Main' },
+    members: [{ id: 'leader', hostId: 'host', providerId: 'recorded', nativeSessionId: 'A', role: 'leader', name: 'Leader', responsibility: '', creation: 'ready', activity: 'idle', summary: '', updatedAt: 1 }], messages: [], createdAt: 1, updatedAt: 1 };
+  const f = await failureFixture(false, 'A', false, '', { chain: [], teams: () => [team] });
+  await settleApp(() => expect(succession.binding?.isCurrent()).toBe(true));
+  await act(async () => {
+    succession.desired!.slot.metadata = { ...succession.desired!.slot.metadata!, teamId: 'team', teamMemberId: 'leader' };
+    succession.save();
+  });
+  const recipient = succession.imageRecipient!;
+  expect(recipient.isCurrent()).toBe(true);
+  team = { ...team, revision: 2, members: [{ ...team.members[0]!, nativeSessionId: undefined }] };
+  await settleApp(() => expect(recipient.isCurrent()).toBe(false));
+  expect(succession.isCurrent()).toBe(false);
+  expect(f.view.textContent).toContain('no current execution locator');
+  expect(f.view.querySelector('.lab-primary-conversation [data-prompt-edit-action]')).toBeNull();
+  expect(f.frames.some(frame => frame.message?.type === 'send_message')).toBe(false);
+  team = { ...team, revision: 3, members: [{ ...team.members[0]!, nativeSessionId: 'A' }] };
+  await settleApp(() => expect(succession.imageRecipient?.isCurrent()).toBe(true));
+  expect(recipient.isCurrent()).toBe(false);
+  expect(succession.imageRecipient).not.toBe(recipient);
+}, 10000);
+
+it.each(['A', 'B'].flatMap(initial => ['native preparation', 'selected resources'].map(stage => ({ initial, stage }))))
+('fences shared prompt editing from $initial after awaiting $stage over HTTP and WebSocket', async ({ initial, stage }) => {
+  vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} });
+  Range.prototype.getClientRects = () => [] as unknown as DOMRectList;
+  Range.prototype.getBoundingClientRect = () => new DOMRect();
+  const real = successionHooks.useSessionSuccession;
+  let succession!: ReturnType<typeof real>;
+  vi.spyOn(successionHooks, 'useSessionSuccession').mockImplementation((...args) => { succession = real(...args); return succession; });
+  let entered = false, release!: () => void;
+  const gate = new Promise<void>(resolve => { release = resolve; }); cleanups.push(release);
+  const prompt: ProjectedTimelineEntry = { providerId: 'recorded', seqStart: 1, seqEnd: 1, timestamp: '2026-10-15T00:00:00Z', turnId: 'selected-turn', collapsed: [], sourceSeqRanges: [{ startSeq: 1, endSeq: 1 }],
+    resources: stage === 'selected resources' ? [{ locator: '/selected.png', resourceId: 'selected-image', status: 'available' }] : [],
+    item: { type: 'user_message', messageId: 'selected-message', text: 'Original selected prompt', ...(stage === 'selected resources' ? { content: [{ type: 'text', text: 'Original selected prompt' }, { type: 'image', locator: '/selected.png', label: 'image #1' }] } : {}) } };
+  const description: SuccessionDescription = { role: { id: 'primary', revision: initial === 'A' ? 1 : 2, origin: native('A'), current: native(initial), workspace: { controllerId: 'installation', canonicalCwd: '/fixture' } },
+    targets: [{ providerId: 'recorded', displayName: 'Recorded' }], eligibility: { status: 'ready' } };
+  if (stage === 'selected resources') {
+    const prepare = remoteReact.preparePromptDraft;
+    vi.spyOn(remoteReact, 'preparePromptDraft').mockImplementation(async (...args) => { const value = await prepare(...args); entered = true; await gate; return value; });
+  }
+  const f = await failureFixture(false, 'B', false, '', { chain: initial === 'A' ? [] : [committed()], timeline: [prompt], persistPrompt: true,
+    successionDescription: description, async successionPrepare(body) {
+      entered = true; await gate;
+      return { role: description.role, record: { operationId: String(body.operationId), roleId: 'primary', expectedRevision: description.role.revision,
+        from: native(initial), to: native('S'), targetProviderId: 'recorded', preparation: body.preparation as any, phase: 'ready', startedAt: 'now', updatedAt: 'now' } };
+    } });
+  await settleApp(() => expect(succession.binding?.session.nativeSessionId).toBe(initial));
+  await settleApp(() => expect(f.view.querySelector('.lab-primary-conversation [data-prompt-edit-action]')).not.toBeNull());
+  await act(async () => f.view.querySelector<HTMLButtonElement>('.lab-primary-conversation [data-prompt-edit-action]')!.click());
+  await settleApp(() => expect(entered, f.view.textContent ?? '').toBe(true));
+  const next = committed(initial, initial === 'A' ? 'B' : 'C', initial === 'A' ? 2 : 3); f.chain.push(next);
+  await act(async () => f.notify(next));
+  await settleApp(() => expect(succession.binding?.session.nativeSessionId).toBe(next.to!.nativeSessionId));
+  await act(async () => release());
+  if (stage === 'native preparation') {
+    await settleApp(() => expect(f.view.textContent).toContain('Details'));
+    await act(async () => [...f.view.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent === 'Details')!.click());
+  }
+  await settleApp(() => expect(f.view.textContent).toMatch(/no longer ready|connection changed/));
+  const prepared = f.requests.filter(request => request.url.endsWith('/succession/prepare'));
+  expect(prepared).toHaveLength(stage === 'native preparation' ? 1 : 0);
+  if (prepared[0]) {
+    expect(prepared[0].body).toMatchObject({ nativeSessionId: initial, preparation: { kind: 'native_prefix', turnId: 'selected-turn', messageId: 'selected-message' } });
+    const retained = Object.keys(sessionStorage).filter(key => key.includes(':prefix-edit:')).map(key => JSON.parse(sessionStorage.getItem(key)!));
+    expect(retained).toEqual([expect.objectContaining({ operation: expect.objectContaining({ operationId: prepared[0].body!.operationId, nativeSessionId: initial }) })]);
+  }
+  expect(f.requests.filter(request => request.url.endsWith('/succession/commit') || request.url.endsWith('/create'))).toEqual([]);
+  expect(f.frames.filter(frame => frame.message?.type === 'resource_request').map(frame => frame.message?.payload?.agentId)).toEqual(stage === 'selected resources' ? [`agent-${initial}`] : []);
+  expect(f.frames.some(frame => ['send_message', 'execute_command', 'session_setting_request'].includes(frame.message?.type ?? ''))).toBe(false);
+  expect(new URL(window.location.href).searchParams.get('session')).toBe(next.to!.nativeSessionId);
+});
+
+it.each(['legacy exact', 'legacy missing', 'explicit successor'] as const)('restores a cold managed Team window only from public roster evidence: %s', async mode => {
+  vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} });
+  const team: Team = { id: 'team', operationId: 'create', revision: 1, title: 'Team', status: 'active', source: { hostId: 'host', providerId: 'recorded', nativeSessionId: 'A', title: 'Main' },
+    members: [{ id: 'leader', hostId: 'host', providerId: 'recorded', nativeSessionId: mode === 'legacy missing' ? undefined : mode === 'explicit successor' ? 'Y' : 'X', role: 'leader', name: 'Leader', responsibility: '', creation: 'ready', activity: 'idle', summary: '', updatedAt: 1 }], messages: [], createdAt: 1, updatedAt: 1 };
+  const prefix = committed('X', 'Y', 2, 'team-role');
+  const preparation = { kind: 'native_prefix' as const, turnId: 'turn', messageId: 'message' };
+  prefix.projection.receipt.preparation = preparation; prefix.projection.receipt.prepared!.preparation = preparation;
+  const f = await failureFixture(false, 'A', false, '', { chain: mode === 'explicit successor' ? [prefix] : [], teams: () => [team], seed(scope, source) {
+    const main = createCompositionSlot('main-slot', source, scope);
+    const target = { ...source, nativeSessionId: 'X', agentId: 'agent-X', title: 'Saved Leader', ...(mode === 'explicit successor' ? { teamId: 'team', teamMemberId: 'leader' } : {}) };
+    const member = createCompositionSlot('member-slot', target, scope);
+    const document = createCompositionDocument(scope, [main, member]);
+    document.asks = document.slots.map(slot => createAskOwner(slot, scope));
+    document.windows = [{ id: 'member-window', slotId: member.id, managed: true, groupId: 'team' }];
+    saveCompositionDocument(document, () => true); flushRecoveryWrites();
+    const drafts = new DraftStore(scope); drafts.set(`session:${sessionKey(target)}`, 'Retained member draft'); drafts.flush();
+  } });
+  await settleApp(() => expect(f.view.querySelector('[data-view-id="member-window"]'), f.view.textContent ?? '').not.toBeNull());
+  const panel = () => f.view.querySelector('[data-view-id="member-window"]')!;
+  if (mode === 'legacy missing') {
+    await settleApp(() => expect(panel().textContent).toContain('saved Team member identity is unavailable'));
+    expect(f.requests.filter(request => request.url.endsWith('/attach')).some(request => request.body?.nativeSessionId === 'X')).toBe(false);
+  } else {
+    const expected = mode === 'explicit successor' ? 'Y' : 'X';
+    await settleApp(() => expect(f.requests.filter(request => request.url.endsWith('/attach')).some(request => request.body?.nativeSessionId === expected)).toBe(true));
+    await settleApp(() => expect(panel().querySelector('[data-testid="prompt-input"]')?.textContent).toBe('Retained member draft'));
+    if (mode === 'explicit successor') expect(f.requests.filter(request => request.url.endsWith('/attach')).some(request => request.body?.nativeSessionId === 'X')).toBe(false);
+  }
+  expect(new URL(window.location.href).searchParams.get('session')).toBe('A');
+  expect(f.frames.some(frame => frame.message?.type === 'send_message')).toBe(false);
+}, 10000);
+
+it('edits a real App managed Team window into its retained origin owner and admits input only to the successor', async () => {
+  vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} });
+  Range.prototype.getClientRects = () => [] as unknown as DOMRectList;
+  Range.prototype.getBoundingClientRect = () => new DOMRect();
+  let team: Team = { id: 'team', operationId: 'create', revision: 1, title: 'Team', status: 'active', source: { hostId: 'host', providerId: 'recorded', nativeSessionId: 'A', title: 'Main' },
+    members: [{ id: 'leader', hostId: 'host', providerId: 'recorded', nativeSessionId: 'X', role: 'leader', name: 'Leader', responsibility: '', creation: 'ready', activity: 'idle', summary: '', updatedAt: 1 }], messages: [], createdAt: 1, updatedAt: 1 };
+  const chain: SessionSuccessionReplay[] = [], prefix = committed('X', 'Y', 2, 'team-role');
+  const preparation = { kind: 'native_prefix' as const, turnId: 'selected-turn', messageId: 'selected-message' };
+  prefix.projection.receipt.preparation = preparation; prefix.projection.receipt.prepared!.preparation = preparation;
+  const description: SuccessionDescription = { role: { ...prefix.projection.role, revision: 1, current: native('X') }, targets: [{ providerId: 'recorded', displayName: 'Recorded' }], eligibility: { status: 'ready' } };
+  const prompt: ProjectedTimelineEntry = { providerId: 'recorded', seqStart: 1, seqEnd: 1, timestamp: '2026-10-15T00:00:00Z', turnId: preparation.turnId, collapsed: [], resources: [], sourceSeqRanges: [{ startSeq: 1, endSeq: 1 }], item: { type: 'user_message', messageId: preparation.messageId, text: 'Selected member prompt' } };
+  const textKey = `session:${JSON.stringify(['host', 'recorded', 'X'])}`;
+  const f = await failureFixture(false, 'A', false, '', { chain, teams: () => [team], timeline: [prompt], persistPrompt: true, successionDescription: description,
+    async successionPrepare(body) {
+      prefix.projection.receipt.operationId = String(body.operationId); prefix.projection.receipt.prepared!.operationId = String(body.operationId);
+      return { role: description.role, record: { ...prefix.projection.receipt, phase: 'ready', committedRevision: undefined } };
+    }, successionCommit() {
+      chain.push(prefix); team = { ...team, revision: 2, members: [{ ...team.members[0]!, nativeSessionId: 'Y' }] };
+      return { role: prefix.projection.role, record: prefix.projection.receipt, locator: prefix.to };
+    }, seed(scope, source) {
+      const main = createCompositionSlot('main-slot', source, scope);
+      const target = { ...source, nativeSessionId: 'X', agentId: 'agent-X', title: 'Leader', teamId: 'team', teamMemberId: 'leader' };
+      const member = createCompositionSlot('member-slot', target, scope), document = createCompositionDocument(scope, [main, member]);
+      document.asks = document.slots.map(slot => createAskOwner(slot, scope));
+      document.windows = [{ id: 'member-window', slotId: member.id, managed: true, groupId: 'team', teamMemberId: 'leader' }];
+      saveCompositionDocument(document, () => true); flushRecoveryWrites();
+      const drafts = new DraftStore(scope); drafts.set(textKey, 'Existing member draft'); drafts.flush();
+    } });
+  const panel = () => f.view.querySelector('[data-view-id="member-window"]')!;
+  await settleApp(() => expect(panel()?.querySelector('[data-testid="prompt-input"]')?.textContent).toBe('Existing member draft'));
+  await settleApp(() => expect(panel().querySelector('[data-prompt-edit-action]')).not.toBeNull());
+  await act(async () => panel().querySelector<HTMLButtonElement>('[data-prompt-edit-action]')!.click());
+  await settleApp(() => expect(f.requests.filter(request => request.url.endsWith('/succession/commit'))).toHaveLength(1));
+  await act(async () => f.notify(prefix));
+  await vi.waitFor(async () => { await act(async () => { await new Promise(resolve => setTimeout(resolve, 30)); }); expect(panel().querySelector('.lab-handoff-notice')?.textContent ?? '').toBe(''); }, { timeout: 6000 });
+  expect(panel().querySelector('[data-testid="prompt-input"]')?.textContent).toBe('Selected member prompt');
+  expect(new DraftStore(f.scope).get(textKey)).toBe('Selected member prompt');
+  expect(new DraftStore(f.scope).get(`session:${JSON.stringify(['host', 'recorded', 'Y'])}`)).toBe('');
+  expect(f.frames.filter(frame => frame.message?.type === 'send_message')).toEqual([]);
+  expect(f.requests.filter(request => request.url.endsWith('/succession/prepare'))).toHaveLength(1);
+  expect(new URL(window.location.href).searchParams.get('session')).toBe('A');
+  const button = panel().querySelector<HTMLButtonElement>('[data-testid="prompt-submit"]')!;
+  await act(async () => { button.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })); button.click(); });
+  await settleApp(() => expect(f.frames.filter(frame => frame.message?.type === 'send_message').map(frame => frame.message?.payload?.agentId)).toEqual(['agent-Y']));
+  await settleApp(() => expect(panel().querySelector('[data-testid="prompt-input"]')?.textContent).toBe(''));
+  expect(new DraftStore(f.scope).get(textKey)).toBe('');
+  expect(new URL(window.location.href).searchParams.get('session')).toBe('A');
+}, 10000);

@@ -370,3 +370,45 @@ it('restores all open TPM windows after a reload without changing their focus or
   expect(state.sessions['["one","first"]']).toBeDefined();
   expect(state.sessions['["one","second"]']).toBeDefined();
 });
+
+it('replaces a held TPM connection from the authoritative locator without changing the logical window', async () => {
+  let record = work();
+  const service: TpmService = { tpmWork: async () => record, tpmList: async () => ({ supported: true, works: [record] }), tpmCreate: async () => record, tpmAction: async () => record };
+  const attach = vi.fn(async (value: SessionEntry) => ({ ...value, agentId: value.nativeSessionId }));
+  let state!: ReturnType<typeof useTpmWork>;
+  function Harness() { state = useTpmWork(service, [{ id: 'one', name: 'One', online: true }], true, attach); return null; }
+  await render(<Harness />);
+  const key = state.works[0]!.key;
+  await act(async () => state.open(key));
+  expect(state.sessions[key]?.nativeSessionId).toBe('tpm');
+  record = { ...record, revision: 2, tpmNativeSessionId: 'successor' };
+  await act(async () => state.refresh());
+  expect(state.sessions[key]?.nativeSessionId).toBe('successor');
+  expect(state.windows).toEqual([key]);
+  expect(attach.mock.calls.map(([value]) => value.nativeSessionId)).toEqual(['tpm', 'successor']);
+  record = { ...record, revision: 3, tpmNativeSessionId: undefined };
+  await act(async () => state.refresh());
+  expect(state.sessions[key]).toBeUndefined();
+  expect(state.windows).toEqual([key]);
+  expect(attach).toHaveBeenCalledTimes(2);
+});
+
+it('ignores a delayed old native attachment after the same TPM work follows its current locator', async () => {
+  let record = work(), release!: () => void;
+  const gate = new Promise<void>(resolve => { release = resolve; });
+  const service: TpmService = { tpmWork: async () => record, tpmList: async () => ({ supported: true, works: [record] }), tpmCreate: async () => record, tpmAction: async () => record };
+  const attach = vi.fn(async (value: SessionEntry) => { if (value.nativeSessionId === 'tpm') await gate; return { ...value, agentId: value.nativeSessionId }; });
+  let state!: ReturnType<typeof useTpmWork>;
+  function Harness() { state = useTpmWork(service, [{ id: 'one', name: 'One', online: true }], true, attach); return null; }
+  await render(<Harness />);
+  const key = state.works[0]!.key;
+  let pending!: Promise<void>;
+  await act(async () => { pending = state.open(key); });
+  record = { ...record, revision: 2, tpmNativeSessionId: 'successor' };
+  await act(async () => state.refresh());
+  expect(state.sessions[key]?.nativeSessionId).toBe('successor');
+  await act(async () => { release(); await pending; });
+  expect(state.sessions[key]?.nativeSessionId).toBe('successor');
+  expect(state.windows).toEqual([key]);
+  expect(attach.mock.calls.map(([value]) => value.nativeSessionId)).toEqual(['tpm', 'successor']);
+});

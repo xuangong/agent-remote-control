@@ -1,3 +1,5 @@
+import { teamViewTarget } from './team-view-binding.js';
+import { SessionViewOperationsContext } from './session-view-operations.js';
 import { TeamViewScope, useTeamVisibility } from './hooks/useTeamVisibility.js';
 import { teamLayoutTargets } from './team-layout.js';
 import { TeamMenu } from './components/TeamMenu.js';
@@ -25,8 +27,7 @@ import { WorkspaceReady, workspaceFetch, workspaceSocket, readWorkspaceAccess } 
 import { useWorkspaceDisplayCache } from './hooks/useWorkspaceDisplayCache.js';
 import { readWorkspaceSnapshot } from './workspace-cache.js';
 import { ControllerUpdates } from './components/ControllerUpdates.js';
-import { beginPromptEditReservation, readPromptEditReservation, retainPromptEditReservation, finishPromptEditReservation, type PromptEditReservation } from './prompt-edit-intent.js';
-import { preparePromptDraft, savePromptDraft } from '@orchardworks/agent-remote-web/react';
+import { readPromptEditReservation, finishPromptEditReservation, type PromptEditReservation } from './prompt-edit-intent.js';
 import { useSessionMigrations } from './hooks/useSessionMigrations.js';
 import { ReplicaCache } from './replica-cache.js';
 import { DraftStore } from './draft-store.js';
@@ -316,7 +317,15 @@ function AppContent({
   const [storedState, setState] = useState<AgentReplicaState | undefined>(initialState ?? cachedState);
   const [storedSessionState, setSessionState] = useState<RemoteSessionState>(() => remoteSessionState(initialState ?? cachedState, cachedState ? 'connecting' : initialSessionStatus));
   const draftStores = useMemo(() => new Map([[baseUrl, messageDrafts]]), [baseUrl, messageDrafts]);
+  const [teamRoster, setTeamRoster] = useState<{ baseUrl: string; teams: Team[] }>();
+  const teamRosterRef = useRef(teamRoster); teamRosterRef.current = teamRoster;
   const succession = useSessionSuccession({
+    targetRevision: JSON.stringify(teamRoster),
+    validateTarget(selection, viewId, document) {
+      const roster = teamRosterRef.current;
+      const target = teamViewTarget(document, roster?.baseUrl === baseUrl ? roster.teams : undefined, selection, viewId);
+      if (target && sessionKey(target) !== sessionKey(selection)) throw new Error('The Team execution locator is still synchronizing. Its history and draft are preserved.');
+    },
     scope: baseUrl, transport, enabled: activated && accessReady,
     initial: initialState ? undefined : requested.target, initialDisplayState: cachedState, initialLayout,
     connections, replicaFor, directory: hostId => hostId === selectedHost.id && directory ? directory : new SessionDirectoryClient(baseUrl, undefined, hostId),
@@ -404,7 +413,7 @@ function AppContent({
     setSessionOptions({});
     setCreatePlanning(false);
   }, [currentHost, selectedHost.providerId, providerId, creationLocked, transitioning]);
-  const ask = useAskConversations(succession.document, transport, directory, selectedHost.id, retryHosts);
+  const ask = useAskConversations(succession.document, transport, directory, selectedHost.id, retryHosts, source => succession.resolveTarget(source, { nativePrefixOnly: true }).target);
   const projectedLayout = succession.layoutView();
   const sideSessions = projectedLayout ? [...storedSideSessions.filter(session => !projectedLayout.sides.some(side => viewKey(side) === viewKey(session))), ...projectedLayout.sides] : storedSideSessions;
   const sideSelections = useMemo<SideSelections>(() => Object.fromEntries(succession.document.edges.filter(edge => edge.selected).map(edge => [edge.source, edge.target])), [succession.document, succession.document.editRevision]);
@@ -905,7 +914,12 @@ function AppContent({
     catch (error) { setSessionNotice(sessionConnectionFailure(error, false)); }
   }
   function windowDraftBinding(entry: (typeof sessionWindows.entries)[number]) {
-    const slot = !entry.managed && succession.document.slots.find(slot => slot.id === entry.slotId);
+    const slot = succession.document.slots.find(slot => slot.id === entry.slotId);
+    if (slot && entry.managed) {
+      const origin = slot.origin.target;
+      const key = sessionKey({ hostId: origin.hostId, ...origin.native });
+      return { draftBinding: { store: messageDrafts, key: `session:${key}` }, imageDraftBinding: { scope: baseUrl, key: JSON.stringify([baseUrl, key]) } };
+    }
     return slot ? { draftBinding: draftOwnerBinding(slot.owners.text), imageDraftBinding: slot.owners.image } : {};
   }
   async function openDirectorySession(item: Parameters<typeof openSession>[0]): Promise<boolean> {
@@ -925,7 +939,6 @@ function AppContent({
   }
   const tpmView = useTpmVisibility();
   const teamView = useTeamVisibility();
-  const [teamRoster, setTeamRoster] = useState<{ baseUrl: string; teams: Team[] }>();
   const updateTeamRoster = useCallback((baseUrl: string, teams: Team[]) => setTeamRoster({ baseUrl, teams }), []);
   const [tpmListOpen, setTpmListOpen] = useState(false);
   const tpmTriggerRef = useRef<HTMLButtonElement>(null);
@@ -1160,12 +1173,10 @@ function AppContent({
     return () => { remove?.(); clearTimeout(timer); };
   }, [transport, applySessionTitle]);
   useWorkspaceDisplayCache(baseUrl, addressSession, state, accessReady && status === 'ready' && !!state?.timeline.epoch);
-  const promptEditBusy = useRef(false);
-  const [promptEditPending, setPromptEditPending] = useState(false);
   const promptEditReservation = useMemo<{ current: PromptEditReservation | undefined }>(() => ({ current: readPromptEditReservation(baseUrl) }), [baseUrl]);
   const promptMigrations = useSessionMigrations({ baseUrl, enabled: userScoped && accessReady, transport, current: activeOpened, loaded: openWindows,
-    blocked: () => promptEditBusy.current || transitionRef.current || activeView !== 'workbench' || supportingRailOpen,
-    needsPromptRestore: migration => !promptEditBusy.current && promptEditReservation.current?.operationId === migration.id && !promptEditReservation.current.restored,
+    blocked: () => transitionRef.current || activeView !== 'workbench' || supportingRailOpen,
+    needsPromptRestore: migration => promptEditReservation.current?.operationId === migration.id && !promptEditReservation.current.restored,
     stay: migration => {
       if (promptEditReservation.current?.operationId !== migration.id) return;
       finishPromptEditReservation(baseUrl, migration.id);
@@ -1205,51 +1216,6 @@ function AppContent({
     });
     return () => { canceled = true; };
   }, [favorites.scope, favorites.ready, favorites.stars, favorites.successionProgress, tracking.sessions, tracking.reconcileFavorites, succession.observerReady]);
-  async function editPrompt(entry: import('@orchardworks/agent-remote-protocol').ProjectedTimelineEntry): Promise<void> {
-    const source = activeOpened; const item = entry.item; const sourceClient = clientRef.current;
-    if (!source || !sourceClient || !directory || source.providerId !== 'codex' || item.type !== 'user_message' || !item.messageId || !entry.turnId) throw new Error('This prompt cannot be edited.');
-    assertSourceCurrent(source);
-    if (promptEditBusy.current) throw new Error('A prompt edit is already being prepared.');
-    promptEditBusy.current = true; setPromptEditPending(true);
-    const assertActiveAccount = () => { assertSourceCurrent(source); if (mountedTransport.current !== transport) throw new Error('The account connection changed. Reopen the source conversation before editing.'); };
-    try {
-      const draft = await preparePromptDraft(item, { scopeKey: JSON.stringify([source.agentId, state?.timeline.epoch]), bindings: entry.resources, resources: state?.resources ?? {},
-        resolveResource: sourceClient.resolveResource.bind(sourceClient), requestResource: async binding => (await sourceClient.requestResource(binding.resourceId)).payload.state });
-      assertActiveAccount();
-      const key = JSON.stringify([sessionKey(source), entry.turnId, item.messageId]);
-      let reservation = promptEditReservation.current?.key === key && !promptEditReservation.current.restored ? promptEditReservation.current : undefined;
-      if (!reservation) {
-        reservation = beginPromptEditReservation(baseUrl, key);
-        promptEditReservation.current = reservation;
-      }
-      retainPromptEditReservation(baseUrl, reservation);
-      if (!reservation.target) {
-        const targetDirectory = new SessionDirectoryClient(baseUrl, undefined, source.hostId);
-        const result = await targetDirectory.create(source.providerId, reservation.operationId, { editNativeSessionId: source.nativeSessionId, editTurnId: entry.turnId, editMessageId: item.messageId });
-        if (!result.nativeSessionId || result.nativeSessionId === source.nativeSessionId) throw new Error('The native prompt-edit branch could not be confirmed.');
-        reservation.target = { hostId: source.hostId, providerId: source.providerId, title: source.title,
-          agentId: result.agentId, nativeSessionId: result.nativeSessionId };
-        assertActiveAccount();
-      }
-      if (!reservation.restored) {
-        const target = viewSession(reservation.target);
-        if ((await succession.save())?.status !== 'saved') throw new Error('The edited session view could not be retained.');
-        assertActiveAccount();
-        const slot = succession.document.slots.find(slot => slot.id === target.viewId)!;
-        const text = await savePromptDraft(slot.owners.image, draft);
-        assertActiveAccount();
-        const binding = draftBindingFor(target);
-        binding.store.set(binding.key, text);
-        const retained = await binding.store.flushCurrent(binding.key, binding.store.snapshot(binding.key).revision,
-          () => mountedTransport.current === transport && sourceCurrent(source));
-        if (retained.status !== 'saved') throw new Error('The edited prompt could not be retained.');
-        assertActiveAccount(); reservation.restored = true;
-        finishPromptEditReservation(baseUrl, reservation.operationId);
-      }
-      rememberSession(reservation.target); setDirectoryRevision(value => value + 1);
-      promptMigrations.requestFollow(reservation.operationId);
-    } finally { promptEditBusy.current = false; setPromptEditPending(false); }
-  }
 
   const navigationIntent = succession.navigationIntent;
   const navigationSession = succession.active ? (succession.binding ? addressSession : succession.desired?.roleKey ? succession.selected : undefined) : addressSession;
@@ -1594,7 +1560,6 @@ function AppContent({
 
   const clientActions: AppActions = actions ?? {
     takeControl: options => commandClient().takeControl(options),
-    ...(userScoped && activeOpened && activeOpened.providerId === 'codex' && !activeOpened.parentNativeSessionId && !boundFork && !promptEditPending ? { editPrompt } : {}),
     searchTimeline: submittedClient ? (query, options) => commandClient().searchTimeline(query, options) : undefined,
     loadSearchMatch: submittedClient ? (match, options) => commandClient().loadSearchMatch(match, options) : undefined,
     loadOlder: submittedClient ? () => commandClient().loadOlder() : undefined,
@@ -1652,7 +1617,13 @@ function AppContent({
       onOpen={clean => openAsk(source, sourceState, clean)} replicaFor={replicaFor} transport={transport}
       observations={tracking.observations} navigation={viewNavigation} />;
   }
-  return <SessionAskSurfaceProvider><SessionDockProvider key={baseUrl} storageScope={baseUrl} enabled={!compactLayout && activeView === 'workbench'}><TeamViewScope.Provider value={teamView.execute}><TpmViewScope.Provider value={tpmView.execute}><TrackViewScope.Provider value={userScoped ? attention.executeTrack : undefined}><ConversationConnectionScope.Provider value={connections}><VscodeTunnelScope service={vscodeTunnelClient} host={previewHost} polling={compactLayout ? contextOpen : desktopContextVisible}><PreviewScope client={previewClient} host={previewHost} polling={compactLayout ? contextOpen : desktopContextVisible}><RecoveryScope.Provider value={readingPositions}><main ref={shellRef} onPointerDownCapture={focusManagedWindow} onFocusCapture={focusManagedWindow} style={sidebar.style} className={`lab-shell${headerHidden ? ' lab-header-hidden' : ''}${!compactLayout && !desktopContextVisible ? ' lab-context-hidden' : ''}${state?.agent ? ' lab-has-agent' : ''}${supportingRailOpen ? ' lab-supporting-open' : ''}${inspectorOpen ? ' lab-inspector-open' : ''}`}>
+  return <SessionViewOperationsContext.Provider value={{ storageScope: baseUrl, transport, enabled: accessReady && activated, resolveTarget: (source, requested) => {
+    const roster = teamRosterRef.current;
+    const member = teamViewTarget(succession.document, roster?.baseUrl === baseUrl ? roster.teams : undefined, source, requested?.viewId);
+    const result = succession.resolveTarget(source, { ...requested, ...(member ? { nativePrefixOnly: true } : {}) });
+    if (member && sessionKey(member) !== sessionKey(result.target)) throw new Error('The Team execution locator is still synchronizing.');
+    return { ...result, target: { ...result.target, ...(member ? { teamId: member.teamId, teamMemberId: member.teamMemberId } : {}) } };
+  }, directory: source => new SessionDirectoryClient(baseUrl, undefined, source.hostId), refreshSettled: succession.refreshSettled }}><SessionAskSurfaceProvider><SessionDockProvider key={baseUrl} storageScope={baseUrl} enabled={!compactLayout && activeView === 'workbench'}><TeamViewScope.Provider value={teamView.execute}><TpmViewScope.Provider value={tpmView.execute}><TrackViewScope.Provider value={userScoped ? attention.executeTrack : undefined}><ConversationConnectionScope.Provider value={connections}><VscodeTunnelScope service={vscodeTunnelClient} host={previewHost} polling={compactLayout ? contextOpen : desktopContextVisible}><PreviewScope client={previewClient} host={previewHost} polling={compactLayout ? contextOpen : desktopContextVisible}><RecoveryScope.Provider value={readingPositions}><main ref={shellRef} onPointerDownCapture={focusManagedWindow} onFocusCapture={focusManagedWindow} style={sidebar.style} className={`lab-shell${headerHidden ? ' lab-header-hidden' : ''}${!compactLayout && !desktopContextVisible ? ' lab-context-hidden' : ''}${state?.agent ? ' lab-has-agent' : ''}${supportingRailOpen ? ' lab-supporting-open' : ''}${inspectorOpen ? ' lab-inspector-open' : ''}`}>
     {scanOpen ? <SessionTransferDialog onOpen={openScannedSession} onClose={() => setScanOpen(false)} /> : null}
     {activated ? tracking.observers : null}
     {userScoped && attention.trackVisible ? <SessionTrackingMenu catchUp={catchUp} tracking={tracking} teams={teamRoster?.baseUrl === baseUrl ? teamRoster.teams : []} knownSessions={[...favorites.stars, ...sessionEntries]} busy={transitioning} inert={supportingRailOpen} onOpen={item => void openTrackedSession(item)} /> : null}
@@ -1861,6 +1832,7 @@ function AppContent({
         <CollapsedConversations entries={sessionEntries} sessions={stackPath.slice(0, stackRange.start)} offset={0} onExpand={revealSession} />
         <ConversationPane className="lab-primary-conversation lab-session-composition" data-active={!sessionWindows.activeId || undefined} tabIndex={-1} hidden={!primaryExpanded} onFocusCapture={event => focusPrimaryContent(event.target)} onClickCapture={event => focusPrimaryContent(event.target)}>
         <CommunicationNavigationContext.Provider value={primaryCommunication}><LabWorkbench {...primaryNavigation}
+          operationBinding={succession.binding ? { source: succession.binding.session, historical: navigationIntent.sessionIntent === 'history', scope: { agentId: succession.binding.session.agentId, client: succession.binding.client, replica: succession.binding.replica, transport, recipient: succession.imageRecipient, isCurrent: succession.binding.isCurrent } } : undefined}
           headingMode={compactLayout ? 'toolbar' : 'inline'}
           headingStart={primaryExpanded ? <div ref={setSessionViewTarget} className="lab-global-view-slot" /> : undefined}
           sessionState={!accessReady || hostOffline ? remoteSessionState(state, !accessReady ? 'connecting' : 'disconnected') : sessionState}
@@ -1970,7 +1942,7 @@ function AppContent({
       </div>
       <ReplicaInspector state={state} sessionStatus={status} providerName={providerName} />
     </SupportingRail>
-  </main></RecoveryScope.Provider></PreviewScope></VscodeTunnelScope></ConversationConnectionScope.Provider></TrackViewScope.Provider></TpmViewScope.Provider></TeamViewScope.Provider></SessionDockProvider></SessionAskSurfaceProvider>;
+  </main></RecoveryScope.Provider></PreviewScope></VscodeTunnelScope></ConversationConnectionScope.Provider></TrackViewScope.Provider></TpmViewScope.Provider></TeamViewScope.Provider></SessionDockProvider></SessionAskSurfaceProvider></SessionViewOperationsContext.Provider>;
 }
 
 function PreviewScope({ client, host, polling, children }: { readonly client: HttpPreviewClient; readonly host?: RemoteHost; readonly polling: boolean; readonly children: ReactNode }) {

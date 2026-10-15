@@ -133,3 +133,31 @@ it('exposes the complete public session state and gates actions by its operation
   expect(view.actions.cancel).toBeDefined();
   await unmount(container);
 });
+
+it('binds view operations to its acquired client and retires captured authority before a replacement render', async () => {
+  const replica = new AgentReplica();
+  const client = { subscribeSessionState(listener: (state: RemoteSessionState) => void) {
+    listener(remoteSessionState(replica.getState(), 'ready')); return () => {};
+  } } as unknown as RemoteSessionClient;
+  const source: SessionConnectionSource = { acquire: () => ({ client, replica, release() {} }) };
+  let view!: ReturnType<typeof useSessionView>;
+  function View({ enabled = true, agentId = 'supporting' }: { enabled?: boolean; agentId?: string }) {
+    view = useSessionView({ agentId, transport: {} as RemoteAgentTransport, source, enabled }); return null;
+  }
+  const container = await render(<View />);
+  const operation = view.operationScope!;
+  expect(operation?.client).toBe(client);
+  expect(operation?.replica).toBe(replica);
+  expect(operation?.agentId).toBe('supporting');
+  expect(operation?.isCurrent()).toBe(true);
+  await rerender(container, <View enabled={false} />);
+  expect(operation.isCurrent()).toBe(false);
+  expect(view.operationScope).toBeUndefined();
+  await rerender(container, <View />);
+  expect(operation.isCurrent()).toBe(false);
+  const restored = view.operationScope!;
+  expect(restored.isCurrent()).toBe(true);
+  await rerender(container, <View agentId="replacement" />);
+  expect(restored.isCurrent()).toBe(false);
+  await unmount(container);
+});

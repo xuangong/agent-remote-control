@@ -1,3 +1,6 @@
+import { usePromptEditOperation } from '../../agent-remote-lab/src/hooks/usePromptEditOperation.js';
+import { useBoundDraft, type DraftBinding } from '../../agent-remote-lab/src/draft-store.js';
+import type { SessionOperationBinding } from '../../agent-remote-lab/src/session-view-operations.js';
 import { createContext, useContext, useRef, useState, type ComponentProps, type ReactNode } from 'react';
 import { ToastProvider } from '../../agent-remote-lab/src/components/Toast.js';
 import { SessionWorkbench } from '../../agent-remote-lab/src/components/SessionWorkbench.js';
@@ -5,10 +8,14 @@ import { useSessionDisplayPreferences } from '../../agent-remote-lab/src/hooks/u
 
 export const DebugControlsState = createContext<{ expanded: boolean; setExpanded(value: boolean | ((value: boolean) => boolean)): void } | undefined>(undefined);
 
-export function DebugWorkbench({ displaySessionKey, ...props }: ComponentProps<typeof SessionWorkbench> & { displaySessionKey: string }) {
+export function DebugWorkbench({ displaySessionKey, operationBinding, draftBinding, ...props }: ComponentProps<typeof SessionWorkbench> & { displaySessionKey: string; operationBinding?: SessionOperationBinding; draftBinding?: DraftBinding }) {
+  const draft = useBoundDraft(draftBinding);
+  const operation = usePromptEditOperation(operationBinding, draftBinding, props.imageDraftBinding, displaySessionKey, props.imageRecipient);
   const [displayPreferences, onDisplayPreferencesChange] = useSessionDisplayPreferences(`${location.origin}:ardb`,
     displaySessionKey, props.defaultDisplayMode);
-  return <SessionWorkbench {...props} displayPreferences={displayPreferences} onDisplayPreferencesChange={onDisplayPreferencesChange} />;
+  return <SessionWorkbench {...props} actions={{ ...props.actions, ...(operation.editPrompt ? { editPrompt: operation.editPrompt } : {}) }}
+    messageDraft={draftBinding ? draft.text : props.messageDraft} onMessageDraftChange={draftBinding ? draft.set : props.onMessageDraftChange}
+    composerNotice={<>{props.composerNotice}{operation.notice}</>} displayPreferences={displayPreferences} onDisplayPreferencesChange={onDisplayPreferencesChange} />;
 }
 
 /** Debug controls overlay the shared view without changing its available space. */

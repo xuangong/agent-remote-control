@@ -11,6 +11,11 @@ import type { ImageDraftRecipient } from '../image-drafts.js';
 export interface SessionConnectionLease { client: RemoteSessionClient; replica: AgentReplica; release(): void }
 /** The owner controls retention and persistence; a mounted view owns only its lease. */
 export interface SessionConnectionSource { acquire(agentId: string, replica: AgentReplica): SessionConnectionLease }
+/** Exact acquired view authority. Embedders supply operation policy and persistence. */
+export interface SessionViewOperationScope {
+  agentId: string; client: RemoteSessionClient; replica: AgentReplica; transport: RemoteAgentTransport;
+  recipient?: ImageDraftRecipient; isCurrent(): boolean;
+}
 
 export function useSessionView({ agentId, transport, source, cachedReplica, pending = false, enabled = true }: {
   agentId: string; transport: RemoteAgentTransport; source?: SessionConnectionSource; cachedReplica?: AgentReplica; pending?: boolean; enabled?: boolean;
@@ -26,12 +31,16 @@ export function useSessionView({ agentId, transport, source, cachedReplica, pend
   const status = sessionState.connection;
   const [questions, setQuestions] = useState<Record<string, QuestionDraft>>({});
   const client = useRef<RemoteSessionClient>();
+  const acquired = useRef<SessionConnectionLease>();
+  const access = useRef({ enabled, pending });
+  if (access.current.enabled !== enabled || access.current.pending !== pending) access.current = { enabled, pending };
   const recipient = useRef<ImageDraftRecipient>();
   const selection = useRef({ agentId, connections, cachedReplica });
   selection.current = { agentId, connections, cachedReplica };
   useEffect(() => {
     const lease = connections.acquire(agentId, cachedReplica ?? new AgentReplica());
     const { replica, client: connection } = lease;
+    acquired.current = lease;
     let mounted = true;
     client.current = connection;
     setState(replica.getState().agent ? replica.getState() : undefined); setSessionState(remoteSessionState(replica.getState(), 'connecting')); setQuestions({});
@@ -50,6 +59,7 @@ export function useSessionView({ agentId, transport, source, cachedReplica, pend
     return () => {
       mounted = false; unsubscribe(); unsubscribeStatus(); lease.release();
       if (client.current === connection) { client.current = undefined; recipient.current = undefined; }
+      if (acquired.current === lease) acquired.current = undefined;
     };
   }, [agentId, connections, cachedReplica]);
   const active = client.current;
@@ -78,5 +88,10 @@ export function useSessionView({ agentId, transport, source, cachedReplica, pend
   const sendQueuedInput = active && enabled && sessionState.operations.send_message.allowed && !pending
     ? (text: string, operationId: string) => active.sendMessage(text, { operationId }) : undefined;
   const imageRecipient = recipient.current?.isCurrent() ? recipient.current : undefined;
-  return { state, sessionState, handoff: sessionState.handoff, status, questions, setQuestions, actions, sendQueuedInput, imageRecipient };
+  const authority = access.current, lease = acquired.current;
+  const operationScope: SessionViewOperationScope | undefined = enabled && !pending && status === 'ready' && active && lease && imageRecipient
+    ? { agentId, client: active, replica: lease.replica, transport, recipient: imageRecipient,
+      isCurrent: () => access.current === authority && authority.enabled && !authority.pending && acquired.current === lease && imageRecipient.isCurrent() }
+    : undefined;
+  return { state, sessionState, handoff: sessionState.handoff, status, questions, setQuestions, actions, sendQueuedInput, imageRecipient, operationScope };
 }

@@ -15,7 +15,7 @@ export type CompositionIntent =
   | { kind: 'role'; roleKey: string; revision: number; target: { hostId: string; native: NativeSessionRef } };
 export interface CompositionSlot {
   id: string; origin: { kind: 'fixed' | 'history'; target: CompositionLocator }; intent: CompositionIntent;
-  metadata?: Pick<OpenedSession, 'title' | 'parentAgentId' | 'parentNativeSessionId' | 'createdAt'> & { agentId?: string };
+  metadata?: Pick<OpenedSession, 'title' | 'parentAgentId' | 'parentNativeSessionId' | 'createdAt'> & { agentId?: string; teamId?: string; teamMemberId?: string };
   owners: { text: StoreOwner; image: StoreOwner; display: StoreOwner };
 }
 export type CompositionParticipant = 'composition' | 'track' | 'ask' | 'draftViews';
@@ -68,11 +68,11 @@ function slot(value: unknown): CompositionSlot {
   requireValue(record(value) && text(value.id) && record(value.owners)); const item = value as CompositionSlot;
   const metadata = item.metadata;
   if (metadata) requireValue(record(metadata) && (metadata.agentId === undefined || text(metadata.agentId)) && typeof metadata.title === 'string'
-    && ['parentAgentId', 'parentNativeSessionId', 'createdAt'].every(key => metadata[key as keyof typeof metadata] === undefined || typeof metadata[key as keyof typeof metadata] === 'string'));
+    && ['parentAgentId', 'parentNativeSessionId', 'createdAt', 'teamId', 'teamMemberId'].every(key => metadata[key as keyof typeof metadata] === undefined || typeof metadata[key as keyof typeof metadata] === 'string'));
   const origin = intent(item.origin), current = intent(item.intent);
   requireValue(origin.kind !== 'role' && (origin.kind === 'history') === (current.kind === 'history'));
   return { id: item.id, origin: origin as CompositionSlot['origin'], intent: current, owners: { text: owner(item.owners.text), image: owner(item.owners.image), display: owner(item.owners.display) },
-    ...(metadata ? { metadata: { ...(metadata.agentId ? { agentId: metadata.agentId } : {}), title: metadata.title, ...Object.fromEntries(['parentAgentId', 'parentNativeSessionId', 'createdAt'].filter(key => metadata[key as keyof typeof metadata] !== undefined).map(key => [key, metadata[key as keyof typeof metadata]])) } } : {}) };
+    ...(metadata ? { metadata: { ...(metadata.agentId ? { agentId: metadata.agentId } : {}), title: metadata.title, ...Object.fromEntries(['parentAgentId', 'parentNativeSessionId', 'createdAt', 'teamId', 'teamMemberId'].filter(key => metadata[key as keyof typeof metadata] !== undefined).map(key => [key, metadata[key as keyof typeof metadata]])) } } : {}) };
 }
 function progress(value: unknown, revision: number): CompositionProgress {
   requireValue(record(value)); const item = value as CompositionProgress;
@@ -209,7 +209,7 @@ export function compositionSession(slot: CompositionSlot): (OpenedSession & { vi
   return { ...compositionSelection(slot), ...slot.metadata, agentId: slot.metadata.agentId, viewId: slot.id };
 }
 export function compositionSessionMetadata(session: SessionEntry): NonNullable<CompositionSlot['metadata']> {
-  return { title: session.title, ...(session.agentId ? { agentId: session.agentId } : {}),
+  return { title: session.title, ...(session.teamId ? { teamId: session.teamId } : {}), ...(session.teamMemberId ? { teamMemberId: session.teamMemberId } : {}), ...(session.agentId ? { agentId: session.agentId } : {}),
     ...(session.parentAgentId ? { parentAgentId: session.parentAgentId } : {}),
     ...(session.parentNativeSessionId ? { parentNativeSessionId: session.parentNativeSessionId } : {}),
     ...(session.createdAt ? { createdAt: session.createdAt } : {}) };

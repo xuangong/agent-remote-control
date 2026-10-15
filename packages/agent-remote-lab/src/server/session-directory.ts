@@ -45,7 +45,7 @@ export function createSessionDirectory(providers: readonly AgentProviderAdapter[
   const local = new LocalSessionSuccession(stateDirectory, `lab-${createHash('sha256').update(stateDirectory).digest('hex')}`, successionProviders);
 
   const entries = new Map(providers.map((provider) => {
-    const source = sources.find((item) => item.providerId === provider.descriptor.providerId) ?? localSource(local.providers.find(item => item.descriptor.providerId === provider.descriptor.providerId)!);
+    const source = sources.find((item) => item.providerId === provider.descriptor.providerId) ?? localSource(local.providers.find(item => item.descriptor.providerId === provider.descriptor.providerId)!, local);
     return [source.providerId, { source, catalog: new RemoteHostCatalog({ roots: () => source.list() }) }] as const;
   }));
   const adapters = providers.map((provider): AgentProviderAdapter => ({
@@ -195,8 +195,11 @@ export function createSessionDirectory(providers: readonly AgentProviderAdapter[
             const hasOriginal = body.providerId !== undefined || body.nativeSessionId !== undefined;
             if (action === 'describe' || action === 'prepare' && hasOriginal || action === 'cancel' && !saved && hasOriginal) {
               const providerId = required(body.providerId, 'providerId'), nativeSessionId = required(body.nativeSessionId, 'nativeSessionId');
-              const attached = await attach(relay, providerId, nativeSessionId);
-              role = await local.ensureRole(local.agentRef(attached.agentId));
+              if (action === 'prepare' && saved) role = local.service.store.read(saved.roleId).role;
+              else {
+                const attached = await attach(relay, providerId, nativeSessionId);
+                role = await local.ensureRole(local.agentRef(attached.agentId));
+              }
               if (action !== 'describe') input = { operationId: body.operationId, roleId: role.id, expectedRevision: body.expectedRevision, from: local.ref(providerId, nativeSessionId),
                 ...(body.targetProviderId === undefined ? {} : { targetProviderId: body.targetProviderId }), ...(body.preparation === undefined ? {} : { preparation: body.preparation }) };
             } else {
@@ -262,7 +265,7 @@ export function createSessionDirectory(providers: readonly AgentProviderAdapter[
   };
 }
 
-function localSource(provider: AgentProviderAdapter): SessionDirectorySource {
+function localSource(provider: AgentProviderAdapter, local: LocalSessionSuccession): SessionDirectorySource {
   const providerId = provider.descriptor.providerId;
   const sessions = new Map<string, { config: AgentSessionConfig; createdAt: string }>();
   if (providerId === 'recorded') sessions.set('recorded-welcome', { config: { sessionId: 'recorded-welcome' }, createdAt: new Date().toISOString() });
@@ -278,7 +281,15 @@ function localSource(provider: AgentProviderAdapter): SessionDirectorySource {
       if (input.workspaceId !== undefined) throw new DirectoryError(400, 'invalid_request', 'This Provider uses a workspace path.');
       const sessionId = randomUUID();
       const { sourceNativeSessionId, ...config } = input;
-      if (sourceNativeSessionId && !sessions.has(sourceNativeSessionId)) throw new DirectoryError(404, 'session_unavailable', 'The source session is unavailable.');
+      if (sourceNativeSessionId && !sessions.has(sourceNativeSessionId)) {
+        await local.service.ready;
+        const source = local.ref(providerId, sourceNativeSessionId), key = nativeSessionRefKey(source);
+        const inLineage = local.service.store.all().some(state => nativeSessionRefKey(state.role.origin) === key
+          || state.operations.some(record => record.phase === 'committed' && record.to && nativeSessionRefKey(record.to) === key));
+        if (!inLineage) throw new DirectoryError(404, 'session_unavailable', 'The source session is unavailable.');
+        // Restore the exact fixed source; directory attach would follow its current successor.
+        await local.attach(source);
+      }
       sessions.set(sessionId, { config: { ...config, ...(sourceNativeSessionId ? { sourceNativeSessionId } : {}), sessionId } as AgentSessionConfig, createdAt: new Date().toISOString() });
       return sessionId;
     },

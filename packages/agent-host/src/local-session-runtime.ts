@@ -290,7 +290,10 @@ export class LocalSessionSuccession {
     let record: SuccessionRecord;
     if (action === 'prepare') {
       if (!isSuccessionRequest(body)) throw failure(400, 'Invalid succession request.');
-      if (body.roleId !== role.id || !same(body.from, role.current)) throw failure(403, 'Succession source is outside the current local role.');
+      this.adapter(body.from);
+      const saved = this.service.store.all().flatMap(state => state.operations).find(record => record.operationId === body.operationId);
+      if (body.roleId !== role.id || saved && saved.roleId !== role.id || !saved && !same(body.from, role.current)) throw failure(403, 'Succession source is outside the current local role.');
+      // The existing store validates a saved request's complete fingerprint before replaying it.
       record = await this.service.prepare(body);
     } else {
       if (typeof body.operationId !== 'string' || !Number.isSafeInteger(body.expectedRevision)) throw failure(400, 'Invalid succession operation identity.');

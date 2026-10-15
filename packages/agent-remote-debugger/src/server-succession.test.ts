@@ -105,6 +105,16 @@ test('serves immutable committed replay and actual current through the public tr
   await prepare(server, 'two');
   expect(await (await post(server, 'commit', { operationId: 'two', expectedRevision: 2 })).json()).toMatchObject({ record: { phase: 'committed' } });
   const roleId = first.role.id;
+  const originalRequest = { operationId: 'one', roleId, expectedRevision: 1, from: first.record.from, preparation: first.record.preparation };
+  const assertReplay = async () => {
+    expect(await (await post(server, 'prepare', originalRequest)).json()).toMatchObject({ record: first.record });
+    expect((await post(server, 'prepare', { ...originalRequest, preparation: { ...originalRequest.preparation, messageId: 'changed' } })).status).toBe(409);
+    expect((await post(server, 'prepare', { ...originalRequest, roleId: 'foreign-role' })).status).toBe(403);
+    expect((await post(server, 'prepare', { ...originalRequest, from: { ...originalRequest.from, controllerId: 'foreign' } })).status).toBe(403);
+    expect((await post(server, 'prepare', { ...originalRequest, operationId: 'new-from-retired' })).status).toBe(403);
+    expect((await f.adapter.state()).forks).toBe(2);
+  };
+  await assertReplay();
   const page = await transport.fetchSessionSuccessions({ roleId, limit: 1 });
   expect(page.successions[0]).toMatchObject({ projection: { role: { revision: 2, current: { nativeSessionId: 'candidate-1' } } }, to: { hostId: 'local' } });
   expect(await transport.fetchSessionSuccessionOperation(roleId, 'one')).toEqual(page.successions[0]);
@@ -120,6 +130,7 @@ test('serves immutable committed replay and actual current through the public tr
   const foreign = { ...first.role, id: 'foreign-role', revision: 1, origin: { ...first.role.origin, nativeSessionId: 'foreign' }, current: { ...first.role.origin, nativeSessionId: 'foreign' } };
   await state.service.createRole(foreign); await state.close();
   server = await f.start();
+  await assertReplay();
   const restarted = new HttpWebSocketTransport(server.url, { sessionSuccessions: true });
   expect((await restarted.fetchSessionSuccessions()).successions).toHaveLength(2);
   for (const suffix of ['?roleId=foreign-role', '/current?roleId=foreign-role', '/operation?roleId=foreign-role&operationId=one', '/operation?roleId=' + roleId + '&operationId=missing']) {

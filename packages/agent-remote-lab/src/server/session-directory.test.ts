@@ -92,6 +92,14 @@ it('runs local prefix prepare and commit with stable source anchors over HTTP an
   const { url } = await server.http.listen(0);
   const post = (path: string, body: unknown) => fetch(`${url}/v1/remote/${path}`, { method: 'POST', headers: { origin, 'content-type': 'application/json' }, body: JSON.stringify(body), signal: AbortSignal.timeout(5000) });
   const providerId = 'prefix-fixture';
+  const { SessionDirectoryClient } = await import('../directory-client.js');
+  const client = (baseUrl: string) => new SessionDirectoryClient(baseUrl, (input, init) => fetch(input, { ...init, headers: { ...init?.headers, origin } }));
+  const assertNewReference = async (baseUrl: string, operationId: string) => {
+    const created = await client(baseUrl).create(providerId, operationId, { cwd: root, sourceNativeSessionId: 'candidate-1' });
+    const history = JSON.parse(await adapter.readSource(created.nativeSessionId, {}));
+    expect(history.sourceSessionId).toBe('candidate-1');
+    expect(JSON.stringify(history)).toContain('original history'); expect(JSON.stringify(history)).not.toContain('discarded tail');
+  };
   const source = await (await post('create', { providerId, operationId: 'source', cwd: root })).json();
   const reader = await (await post('create', { providerId, operationId: 'reader', cwd: root, sourceNativeSessionId: source.nativeSessionId })).json();
   let old: Awaited<ReturnType<typeof createDebuggerRuntime>> | undefined;
@@ -103,18 +111,24 @@ it('runs local prefix prepare and commit with stable source anchors over HTTP an
     const prepared = await post('succession/prepare', { operationId: 'edit', roleId: role.id, expectedRevision: 1, from: role.current, preparation: { kind: 'native_prefix', turnId: 'turn', messageId: 'message-1' } });
     expect(await prepared.json()).toMatchObject({ record: { phase: 'ready' } });
     await expect(adapter.readSource('candidate-1', {})).rejects.toThrow();
+    await expect(client(url).create(providerId, 'pending-source', { cwd: root, sourceNativeSessionId: 'candidate-1' })).rejects.toMatchObject({ status: 404 });
     const committed = await post('succession/commit', { operationId: 'edit', expectedRevision: 1, roleId: role.id });
     expect(await committed.json()).toMatchObject({ record: { phase: 'committed' }, locator: { nativeSessionId: 'candidate-1' } });
+    await assertNewReference(url, 'new-reference-before-restart');
+    await expect(client(url).create(providerId, 'foreign-source', { cwd: root, sourceNativeSessionId: 'foreign' })).rejects.toMatchObject({ status: 404 });
     await expect(old.client.sendMessage('obsolete')).rejects.toThrow();
     expect(JSON.parse(await adapter.readSource('candidate-1', { sourceContext: before.sourceContext }))).toMatchObject({ sourceSessionId: source.nativeSessionId });
     await expect(adapter.readSource(reader.nativeSessionId, {})).rejects.toThrow();
     const attached = await post('attach', { providerId, nativeSessionId: reader.nativeSessionId }); expect(await attached.json()).toMatchObject({ nativeSessionId: 'candidate-1' });
     old.close(); await server.close(); servers.splice(servers.indexOf(server), 1);
     const restarted = createProtocolValidationServer(options); servers.push(restarted); const next = await restarted.http.listen(0);
+    // A cold source-reference create must restore B without a preceding directory attach.
+    await assertNewReference(next.url, 'new-reference-after-restart');
     const restored = await fetch(`${next.url}/v1/remote/attach`, { method: 'POST', headers: { origin, 'content-type': 'application/json' }, body: JSON.stringify({ providerId, nativeSessionId: reader.nativeSessionId }), signal: AbortSignal.timeout(5000) });
     expect(await restored.json()).toMatchObject({ nativeSessionId: 'candidate-1' });
     expect(JSON.parse(await adapter.readSource('candidate-1', { sourceContext: before.sourceContext }))).toMatchObject({ sourceSessionId: source.nativeSessionId });
-    expect((await adapter.state()).forks).toBe(1);
+    expect((await adapter.state()).forks).toBe(1); expect((await adapter.state()).creates).toBe(4);
+    expect((await adapter.state()).sessions['candidate-1'].texts).toEqual(['original history']);
     await restarted.close(); servers.splice(servers.indexOf(restarted), 1);
   } finally { old?.close(); if (servers.includes(server)) { await server.close(); servers.splice(servers.indexOf(server), 1); } await rm(root, { recursive: true, force: true }); }
 }, 20000);

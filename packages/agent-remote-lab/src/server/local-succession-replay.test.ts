@@ -32,6 +32,7 @@ test('the existing clients replay A to B to C and reopen exact ancestors after r
   const original = await live.directory.create(providerId, 'create', { cwd: f.root });
   const description = await live.directory.describeSuccession(providerId, original.nativeSessionId!, preparation);
   const roleId = description.role.id;
+  const originalRequest = { operationId: 'one', providerId, nativeSessionId: original.nativeSessionId!, expectedRevision: 1, preparation };
   for (const [operationId, nativeSessionId, expectedRevision] of [['one', original.nativeSessionId!, 1], ['two', 'candidate-1', 2]] as const) {
     const ready = await live.directory.prepareSuccession({ operationId, providerId, nativeSessionId, expectedRevision, preparation });
     expect(ready.record.phase).toBe('ready');
@@ -41,6 +42,15 @@ test('the existing clients replay A to B to C and reopen exact ancestors after r
     expect(result.role.current.controllerId).not.toBe('local');
     expect(await live.directory.attach(providerId, original.nativeSessionId!)).toMatchObject({ nativeSessionId: result.locator!.nativeSessionId });
   }
+  const originalCommitted = (await live.directory.successionAction('status', 'one')).record;
+  const assertReplay = async () => {
+    expect((await live.directory.prepareSuccession(originalRequest)).record).toEqual(originalCommitted);
+    await expect(live.directory.prepareSuccession({ ...originalRequest, preparation: { ...preparation, messageId: 'changed' } })).rejects.toMatchObject({ status: 409 });
+    await expect(live.directory.prepareSuccession({ ...originalRequest, nativeSessionId: 'foreign' })).rejects.toMatchObject({ status: 409 });
+    await expect(live.directory.prepareSuccession({ ...originalRequest, operationId: 'new-from-retired' })).rejects.toMatchObject({ status: 403 });
+    expect((await f.adapter.state()).forks).toBe(2);
+  };
+  await assertReplay();
   const page = await live.transport.fetchSessionSuccessions({ roleId, limit: 1 });
   expect(page.successions.map(row => [row.projection.role.revision, row.to.nativeSessionId])).toEqual([[2, 'candidate-1']]);
   expect(page.nextCursor).toBeTypeOf('string');
@@ -54,6 +64,7 @@ test('the existing clients replay A to B to C and reopen exact ancestors after r
   }
   expect((await live.fetcher(`${live.url}/v1/session-successions`, { method: 'POST' })).status).toBe(405);
   await live.server.close(); live = await f.start();
+  await assertReplay();
   expect(await live.transport.fetchSessionSuccessionOperation(roleId, 'one')).toEqual(page.successions[0]);
   const historical = await live.directory.attachHistorical(providerId, original.nativeSessionId!, roleId);
   expect(historical.nativeSessionId).toBe(original.nativeSessionId);

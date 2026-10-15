@@ -93,6 +93,9 @@ test('installed direct runtime commits, reads original history, restores B and n
   const replay = new HttpWebSocketTransport(server.url, { sessionSuccessions: true });
   const page = await replay.fetchSessionSuccessions({ limit: 1 }); assert.equal(page.successions.length, 1);
   const roleId = page.successions[0].projection.role.id;
+  const receipt = page.successions[0].projection.receipt;
+  const originalRequest = { operationId: receipt.operationId, roleId, expectedRevision: receipt.expectedRevision, from: receipt.from, preparation: receipt.preparation };
+  assert.deepEqual((await (await post(server, 'prepare', originalRequest)).json()).record, receipt);
   assert.equal(page.successions[0].to.hostId, 'local'); assert.equal(page.successions[0].projection.role.revision, 2);
   assert.deepEqual(await replay.fetchSessionSuccessionOperation(roleId, 'edit'), page.successions[0]);
   assert.equal((await replay.fetchSessionSuccessionCurrent(roleId)).locator.nativeSessionId, 'candidate-1');
@@ -104,6 +107,8 @@ test('installed direct runtime commits, reads original history, restores B and n
   server = await createDebuggerServer(options); assert.deepEqual(server.session, committed); assert.equal((await adapter.state()).forks, 1); assert.equal((await adapter.state()).creates, 1);
   const restoredReplay = new HttpWebSocketTransport(server.url, { sessionSuccessions: true });
   assert.deepEqual(await restoredReplay.fetchSessionSuccessionOperation(roleId, 'edit'), page.successions[0]);
+  assert.deepEqual((await (await post(server, 'prepare', originalRequest)).json()).record, receipt);
+  assert.equal((await adapter.state()).forks, 1);
   const history = await (await fetch(server.url + '/__ardb/history?nativeSessionId=A')).json();
   old = await createDebuggerRuntime(history.agentId, { relayUrl: server.url, origin: server.url }); await old.ready(3000); await assert.rejects(old.client.sendMessage('historical'));
   await adapter.unknown(); assert.equal((await (await prepare(server, 'unknown')).json()).record.phase, 'unknown'); old.close(); await server.close();

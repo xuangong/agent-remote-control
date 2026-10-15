@@ -5,7 +5,8 @@ export class RemoteTeamClient {
   constructor(private readonly baseUrl: string, private readonly fetcher: typeof fetch = globalThis.fetch.bind(globalThis)) {}
   private async request(path: string, body?: unknown): Promise<unknown> {
     const response = await this.fetcher(new URL(`v1/remote/teams${path}`, this.baseUrl.endsWith('/') ? this.baseUrl : `${this.baseUrl}/`), {
-      signal: AbortSignal.timeout(45000), ...(body === undefined ? {} : { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) }),
+      signal: AbortSignal.timeout(45000), headers: { 'x-arc-team-recipients': '1', ...(body === undefined ? {} : { 'content-type': 'application/json' }) },
+      ...(body === undefined ? {} : { method: 'POST', body: JSON.stringify(body) }),
     });
     const value = await response.json(); if (!response.ok) throw new Error(value.error ?? 'Team service is unavailable.'); return value;
   }

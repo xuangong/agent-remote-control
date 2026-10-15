@@ -171,3 +171,11 @@ Evidence recorded for this release:
 Compatibility cleanup was deliberately deferred. The reusable result is the staged
 sequence and preserved management path, not a guarantee that future protocol,
 authentication or launcher changes will be compatible without another audit.
+
+### Team recipient negotiation
+
+The recipient-aware Team contract is negotiated independently of succession enrollment and the compatibility fingerprint. Controllers offer `team=1&teamRecipients=1` on their uplink URL; Relays acknowledge `teamRecipients: 1` in `registered` only for that offer. The acknowledgement is connection-local and is cleared on disconnect. Without it, a current Controller refuses claims and recipient-bearing settlements locally with an upgrade requirement; registration, heartbeat, management RPCs and legacy-safe polling remain available.
+
+Current browser clients send `x-arc-team-recipients: 1` on every Team HTTP request. Unacknowledged Controllers and cached browser clients receive legacy-safe responses with original seat anchors and no new recipient fields. Teams with a moved recipient or compacted unresolved evidence require an upgraded Controller or a browser reload instead of projecting an unsafe legacy view. Existing unresolved deliveries continue to block role replacement. A Relay also requires the affected Controller's live recipient acknowledgement before preparing or committing a Team role replacement.
+
+Recipient projection never rewrites storage: inline messages and compacted receipts retain their exact `resolvedTarget`, and legacy receipts without one remain unresolved. A legacy claim is valid only for its unchanged original seat; a legacy settlement cannot settle a receipt for a different recipient. Upgrading or reconnecting never replays a delivery or retargets unresolved evidence. Persisted Team state is forward-readable, but rollback to software predating recipient evidence requires retaining the newer state and upgrading again; deleting evidence to make a downgrade parse is unsafe.

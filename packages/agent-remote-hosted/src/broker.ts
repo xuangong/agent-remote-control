@@ -39,6 +39,7 @@ type Host = {
   providerManagement?: true;
   tpmManagement?: true;
   teamManagement?: true;
+  teamRecipients?: 1;
   connectionId?: string; stopDiagnostics?(): void;
   pairingPurpose?: PairingPurpose;
   environment?: HostEnvironment;
@@ -206,6 +207,7 @@ export function createHostBroker(options: HostBrokerOptions) {
       return resolveNativePrefix(associationSource(host, providerId, nativeSessionId), prefixRecords(host)).target;
     },
     assertRecipient: target => assertAssociationOpen(target),
+    assertRecipientSupport(hostId) { if (requireHost(hostId).teamRecipients !== 1) throw new BrokerError(409, 'team_recipients_upgrade_required', 'Update the Controller before replacing a Team recipient.'); },
     resources: options.teamResources,
     now, read: () => teamState,
     change: update => commit(draft => {
@@ -329,6 +331,7 @@ export function createHostBroker(options: HostBrokerOptions) {
             return { value: result, publish() { associations = state; } };
           }
           if (state.admissions.some(admission => described.lineage.some((ref: NativeSessionRef) => nativeSessionRefKey(ref) === nativeSessionRefKey(admission.source)))) throw new BrokerError(409, 'association_outcome_unknown', 'Settle source creation before succession.');
+          teams.assertReplacementSupported(source, host.id);
           if (teams.hasUnsettledRecipient(source)) throw new BrokerError(409, 'team_delivery_unsettled', 'Settle Team delivery before succession.');
           const proposal: Omit<BoundedSuccessionAssociationFreeze | NativePrefixSuccessionAssociationFreeze, 'maxProjectionBytes'> = { version: preparation ? 3 : 2, token: randomUUID(), authority: options.successionEnrollment!, controllerId: host.installationId,
             request: { operationId, roleId: described.role.id, expectedRevision: input.expectedRevision as number, from: source, ...(targetProviderId ? { targetProviderId } : {}), ...(preparation ? { preparation } : {}) },
@@ -370,6 +373,7 @@ export function createHostBroker(options: HostBrokerOptions) {
       const result = { record: structuredClone(frozen.projection.receipt), role: structuredClone(frozen.projection.role), locator: { hostId: host.id, providerId: frozen.projection.role.current.providerId, nativeSessionId: frozen.projection.role.current.nativeSessionId } };
       return withContextStatus(result);
     }
+    if (action === 'commit') teams.assertReplacementSupported(frozen.receipt.request.from, host.id);
     if (action === 'commit' && teams.hasUnsettledRecipient(frozen.receipt.request.from)) throw new BrokerError(409, 'team_delivery_unsettled', 'Settle Team delivery before succession.');
     const result = await associationRpc(host, { action, freeze: frozen.receipt });
     if (!isSuccessionRecord(result.record) || !isPrimaryRole(result.role) || !result.freeze || successionFreezeKey(result.freeze) !== successionFreezeKey(frozen.receipt)
@@ -675,7 +679,7 @@ export function createHostBroker(options: HostBrokerOptions) {
     }
     host.streams.clear();
   }
-  function register(socket: RelaySocket, credential: DeviceCredential, context: BrokerRequestContext, credentialHash: string, enrollmentRequested?: 1 | 2 | 3, teamRequested = false, resourcesRequested = false) {
+  function register(socket: RelaySocket, credential: DeviceCredential, context: BrokerRequestContext, credentialHash: string, enrollmentRequested?: 1 | 2 | 3, teamRequested = false, resourcesRequested = false, recipientsRequested = false) {
     let host: Host | undefined;
     let pendingCredential: {hash: string; value: DeviceCredential} | undefined;
     let issuing: Promise<void> | undefined;
@@ -713,7 +717,7 @@ export function createHostBroker(options: HostBrokerOptions) {
     function registered() {
       if (retired || !host || host.socket !== socket) return;
       host.tunnelToken ??= randomBytes(32).toString('base64url');
-      send(host, { uplinkVersion: 2, type: 'registered', ...(host.teamManagement && resourcesRequested && options.teamResources ? {teamResources:true} : {}), ...(host.teamManagement ? {teamManagement: true} : {}), hostId: host.id, ...(host.successionEnrollmentVersion && options.successionEnrollment ? { successionEnrollment: options.successionEnrollment, ...(host.successionEnrollmentVersion !== 1 ? { successionEnrollmentVersion: host.successionEnrollmentVersion } : {}) } : {}), pairingPurpose: host.pairingPurpose ?? (host.gatewayKeyRequested ? 'gateway-setup' : 'host-only'), heartbeat, tunnelToken: host.tunnelToken });
+      send(host, { uplinkVersion: 2, type: 'registered', ...(host.teamRecipients === 1 ? { teamRecipients: 1 } : {}), ...(host.teamManagement && resourcesRequested && options.teamResources ? {teamResources:true} : {}), ...(host.teamManagement ? {teamManagement: true} : {}), hostId: host.id, ...(host.successionEnrollmentVersion && options.successionEnrollment ? { successionEnrollment: options.successionEnrollment, ...(host.successionEnrollmentVersion !== 1 ? { successionEnrollmentVersion: host.successionEnrollmentVersion } : {}) } : {}), pairingPurpose: host.pairingPurpose ?? (host.gatewayKeyRequested ? 'gateway-setup' : 'host-only'), heartbeat, tunnelToken: host.tunnelToken });
       if (retired || host.socket !== socket) return;
       host.ready = true;
       if (!heartbeatStarted) {
@@ -784,7 +788,7 @@ export function createHostBroker(options: HostBrokerOptions) {
             ? existing.pairingPurpose ?? (existing.gatewayKeyRequested ? 'gateway-setup' : 'host-only')
             : credential.purpose ?? 'host-only';
           const providers = 'providers' in message ? [...message.providers] : [{ providerId: 'dsh', displayName: 'DeepSeek DSH' }];
-          const next = { id: existing?.id ?? recovery?.hostId ?? randomUUID(), installationId: message.installationId, name: message.name, environment: message.environment, controller: message.controller, providerManagement: message.providerManagement, tpmManagement: message.tpmManagement, teamManagement: teamRequested ? true as const : undefined, pairingPurpose: purpose,
+          const next = { id: existing?.id ?? recovery?.hostId ?? randomUUID(), installationId: message.installationId, name: message.name, environment: message.environment, controller: message.controller, providerManagement: message.providerManagement, tpmManagement: message.tpmManagement, teamManagement: teamRequested ? true as const : undefined, teamRecipients: teamRequested && recipientsRequested ? 1 as const : undefined, pairingPurpose: purpose,
             ...(existing?.gatewayKeyRequested ? { gatewayKeyRequested: true } : {}),
             providers, legacyDsh: 'providerId' in message, ...(message.credentialRotation ? {credentialRotation:true} : {credentialRotation:undefined}) };
           draft.hosts = draft.hosts.filter(value => value.id !== next.id); draft.hosts.push(next);
@@ -838,7 +842,7 @@ export function createHostBroker(options: HostBrokerOptions) {
         const current = host, generation = host.generation;
         void (async () => {
           let status = 200, body: string;
-          try { assertHostCurrent(current, generation); body = JSON.stringify(await teams.hostCall(current.id, message.call, () => assertHostCurrent(current, generation))); }
+          try { assertHostCurrent(current, generation); body = JSON.stringify(await teams.hostCall(current.id, message.call, () => assertHostCurrent(current, generation), current.teamRecipients === 1)); }
           catch (error) { status = 409; body = JSON.stringify({ error: error instanceof Error ? error.message : 'Team request failed.' }); }
           if (current.socket === socket && current.generation === generation) send(current, { uplinkVersion: 2, type: 'team_response', requestId: message.requestId, status, body });
         })().catch(() => closeConnection(1011, 'Team response delivery failed'));
@@ -1434,7 +1438,11 @@ export function createHostBroker(options: HostBrokerOptions) {
     }
     if (url.pathname === '/v1/remote/teams' || url.pathname === '/v1/remote/teams/create' || url.pathname === '/v1/remote/teams/action') {
       requireOwner(subject);
-      if (url.pathname === '/v1/remote/teams' && request.method === 'GET') return json(200, { teams: teams.list().filter(team => hostAllowed(team.source.hostId, subject)) });
+      const recipientAware = request.headers.get('x-arc-team-recipients') === '1';
+      if (url.pathname === '/v1/remote/teams' && request.method === 'GET') {
+        try { return json(200, { teams: teams.list().filter(team => hostAllowed(team.source.hostId, subject)).map(team => teams.forClient(team, recipientAware)) }); }
+        catch (error) { return json(409, { error: error instanceof Error ? error.message : 'Team request failed.' }); }
+      }
       if (request.method !== 'POST') return json(405, { error: 'Method is not allowed.' });
       const input = await readBody(request); requireOwner(principal(context));
       try {
@@ -1442,7 +1450,7 @@ export function createHostBroker(options: HostBrokerOptions) {
           requireAccess(input.source.hostId, principal(context));
           const result = await teams.create(input);
           requireOwner(principal(context)); requireAccess(input.source.hostId, principal(context));
-          return json(200, result);
+          return json(200, teams.forClient(result, recipientAware));
         }
         if (url.pathname.endsWith('/action') && isTeamAction(input)) {
           const team = teams.list().find(team => team.id === input.teamId);
@@ -1452,7 +1460,7 @@ export function createHostBroker(options: HostBrokerOptions) {
           const result = await teams.action(input);
           requireOwner(principal(context)); requireAccess(team.source.hostId, principal(context));
           if (input.action === 'add_member') requireAccess(input.hostId, principal(context));
-          return json(200, result);
+          return json(200, teams.forClient(result, recipientAware));
         }
         return json(400, { error: 'Invalid Team request.' });
       } catch (error) { return json(409, { error: error instanceof Error ? error.message : 'Team request failed.' }); }
@@ -1769,7 +1777,7 @@ export function createHostBroker(options: HostBrokerOptions) {
       return { accept(client: RelaySocket) {
         if (unavailable || keys.get(hash!) !== key || key.claimedAt !== undefined || key.expires <= now()) { client.close(1008, 'Device credential revoked'); return; }
         track(client);
-        register(client, key, context, hash!, url.searchParams.get('successionEnrollment') === '3' ? 3 : url.searchParams.get('successionEnrollment') === '2' ? 2 : url.searchParams.get('successionEnrollment') === '1' ? 1 : undefined, url.searchParams.get('team') === '1', url.searchParams.get('teamResources') === '1');
+        register(client, key, context, hash!, url.searchParams.get('successionEnrollment') === '3' ? 3 : url.searchParams.get('successionEnrollment') === '2' ? 2 : url.searchParams.get('successionEnrollment') === '1' ? 1 : undefined, url.searchParams.get('team') === '1', url.searchParams.get('teamResources') === '1', url.searchParams.get('teamRecipients') === '1');
       } };
     }
     const match = /^\/v1\/sessions\/([^/]+)\/events$/.exec(url.pathname);

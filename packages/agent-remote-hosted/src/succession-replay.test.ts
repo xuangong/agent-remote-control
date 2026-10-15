@@ -119,7 +119,7 @@ async function fixture(configure?: (state: HostedRelayState) => void, recentAuth
     websockets.handleUpgrade(incoming, socket, head, (ws: any) => result.accept(adapt(ws)));
   })(); });
   const cookie = async (subject = 'owner') => (await import('./auth.js')).gatewayCookieName(origin, 'session') + '=' + subject;
-  const request = async (route: string, subject = 'owner', body?: unknown, method = 'POST') => fetch(`${origin}/u/${namespace(subject)}/${route}`, { ...(body === undefined ? {} : { method, body: JSON.stringify(body) }), headers: { cookie: await cookie(subject), origin, 'content-type': 'application/json' } });
+  const request = async (route: string, subject = 'owner', body?: unknown, method = 'POST') => fetch(`${origin}/u/${namespace(subject)}/${route}`, { ...(body === undefined ? {} : { method, body: JSON.stringify(body) }), headers: { cookie: await cookie(subject), origin, 'content-type': 'application/json', 'x-arc-team-recipients': '1' } });
   const channel = async (optIn = true) => {
     const socket = new WebSocket(`${origin.replace('http', 'ws')}/u/${namespace('owner')}/v1/session-channel?observation=session${optIn ? '&successions=1' : ''}`, { headers: { origin, cookie: await cookie() } });
     const frames: any[] = []; socket.on('message', (data: { toString(): string }) => frames.push(JSON.parse(data.toString())));
@@ -229,7 +229,7 @@ test('requires renewed owner authority after restart and rejects contradictory C
   expect(() => validateRelayState(contradictory, f.auth)).toThrow(/state/);
 }, 10000);
 
-async function controller(f: Awaited<ReturnType<typeof fixture>>, failAtCommit = false, malformed = false, enrollmentVersion = 2) {
+async function controller(f: Awaited<ReturnType<typeof fixture>>, failAtCommit = false, malformed = false, enrollmentVersion = 2, teamRecipients = true) {
   const effects = { prepare: 0, cancel: 0, commit: 0, input: 0, release: 0, rpc: [] as string[], receivedFreezes: [] as unknown[] };
   const saved = (await f.saved()).tenants[0]!.broker.associations!.freezes;
   const operations = new Map<string, any>(saved.filter(row => row.projection).map(row => [row.receipt.request.operationId, structuredClone(row.projection!.receipt)]));
@@ -237,8 +237,8 @@ async function controller(f: Awaited<ReturnType<typeof fixture>>, failAtCommit =
   const sockets: any[] = [];
   let decline = false, loseRelease = false;
   let describeHold: { entered(): void; waiting: Promise<void> } | undefined;
-  async function connect() {
-    const socket = new WebSocket(f.origin.replace('http', 'ws') + `/ws/remote-host?successionEnrollment=${enrollmentVersion}`, { headers: { authorization: 'Bearer ' + f.credential } }); sockets.push(socket);
+  async function connect(recipientAware = teamRecipients) {
+    const socket = new WebSocket(f.origin.replace('http', 'ws') + `/ws/remote-host?successionEnrollment=${enrollmentVersion}&team=1${recipientAware ? '&teamRecipients=1' : ''}`, { headers: { authorization: 'Bearer ' + f.credential } }); sockets.push(socket);
     socket.on('message', async (data: { toString(): string }) => {
       const message = JSON.parse(data.toString());
       if (message.type === 'heartbeat') { socket.send(JSON.stringify({ uplinkVersion: 2, type: 'heartbeat_ack', nonce: message.nonce })); return; }
@@ -1531,4 +1531,17 @@ test.each(['inline', 'compact-legacy', 'compact-target'] as const)('recovers %s 
     expect((await f.request('v1/remote/hosts/mapped-host/succession/prepare', 'owner', prefixTeamRequest)).status).toBe(200);
     expect(host.effects.prepare).toBe(1);
   }
+}, 10000);
+
+
+test('Team role replacement requires a live recipient acknowledgement at both prepare and commit', async () => {
+  const f = await fixture(seedPrefixTeam, false, true, true), host = await controller(f, false, false, 3, false);
+  const prepare = () => f.request('v1/remote/hosts/mapped-host/succession/prepare', 'owner', prefixTeamRequest);
+  const legacy = await prepare(); expect(legacy.status).toBe(409); expect(await legacy.json()).toMatchObject({ code: 'team_recipients_upgrade_required' });
+  expect(host.effects.prepare).toBe(0); expect((await f.saved()).tenants[0]!.broker.associations!.freezes).toEqual([]);
+  await host.connect(true); expect((await prepare()).status).toBe(200); expect(host.effects.prepare).toBe(1);
+  await host.connect(false);
+  const committed = await f.request('v1/remote/hosts/mapped-host/succession/commit', 'owner', { operationId: prefixTeamRequest.operationId });
+  expect(committed.status).toBe(409); expect(await committed.json()).toMatchObject({ code: 'team_recipients_upgrade_required' });
+  expect(host.effects.commit).toBe(0); expect((await f.saved()).tenants[0]!.broker.associations!.freezes[0]!.projection).toBeUndefined();
 }, 10000);

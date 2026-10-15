@@ -7,6 +7,7 @@ import { nativeSessionRefKey, type NativeSessionRef, isTeamMember, type Team, ty
 export interface TeamBrokerPorts {
   resolveSession(hostId: string, providerId: string, anchorNativeId: string): NativeSessionRef;
   assertRecipient?(target: NativeSessionRef): void;
+  assertRecipientSupport?(hostId: string): void;
   resources?: TeamResourceStore;
   resourceDraftTtlMs?: number;
   read(): SavedTeam[];
@@ -15,6 +16,8 @@ export interface TeamBrokerPorts {
   assertHost(hostId: string, providerId: string): void;
   now(): number;
 }
+const upgradeRequired = 'Update the Controller for exact Team recipients. Reload the browser after updating the Relay to inspect this Team safely.';
+const withoutRecipient = <T extends { id: string; resolvedTarget?: NativeSessionRef }>(value: T): Omit<T, 'resolvedTarget'> => { const { resolvedTarget: _target, ...legacy } = value; return legacy; };
 const fail = (message: string): never => { throw new Error(message); };
 const find = (teams: SavedTeam[], id: string) => teams.find(team => team.id === id) ?? fail('Team not found.');
 const member = (team: Team, id: string) => team.members.find(item => item.id === id) ?? fail('Team member not found.');
@@ -37,7 +40,7 @@ export class TeamBroker {
       return result;
     });
   }
-  private project(saved: SavedTeam): Team {
+  private project(saved: SavedTeam, recipientAware = true): Team {
     const team = structuredClone(publicTeam(saved));
     const unresolved = (saved.deliveryReceipts ?? []).flatMap(receipt => {
       if (receipt.status !== 'accepted' || receipt.acceptance !== undefined) return [];
@@ -45,6 +48,16 @@ export class TeamBroker {
       return [{ ...evidence, status: receipt.status }];
     });
     if (unresolved.length) team.unresolvedReceipts = structuredClone(unresolved);
+    if (!recipientAware) {
+      if (unresolved.length || team.members.some(member => {
+        if (!member.nativeSessionId) return member.creation === 'ready';
+        if (member.nativeSessionId.length > 256) return true;
+        try { return this.resolve(member).nativeSessionId !== member.nativeSessionId; }
+        catch { return false; } // Offline seats retain their persisted anchor for read-only display.
+      })) fail(upgradeRequired);
+      team.messages = team.messages.map(withoutRecipient);
+      return team;
+    }
     for (const member of team.members) if (member.nativeSessionId) {
       try { member.nativeSessionId = this.resolve(member).nativeSessionId; }
       catch { delete member.nativeSessionId; }
@@ -71,8 +84,14 @@ export class TeamBroker {
       } catch { return true; }
     }));
   }
-  list(): Team[] { return this.ports.read().map(saved => {
-    const team = structuredClone(saved); compactTeamDeliveries(team, this.ports.now()); return this.project(team);
+  forClient(team: Team, recipientAware: boolean): Team { return this.project(find(this.ports.read(), team.id), recipientAware); }
+  assertReplacementSupported(target: NativeSessionRef, hostId: string): void {
+    for (const team of this.ports.read()) for (const seat of team.members) {
+      if (seat.hostId === hostId && seat.providerId === target.providerId && seat.creation === 'ready' && nativeSessionRefKey(this.resolve(seat)) === nativeSessionRefKey(target)) this.ports.assertRecipientSupport?.(seat.hostId);
+    }
+  }
+  list(recipientAware = true): Team[] { return this.ports.read().map(saved => {
+    const team = structuredClone(saved); compactTeamDeliveries(team, this.ports.now()); return this.project(team, recipientAware);
   }); }
   async create(input: TeamCreate): Promise<Team> {
     this.ports.assertHost(input.source.hostId, input.source.providerId);
@@ -116,16 +135,19 @@ export class TeamBroker {
     });
     return input.action === 'add_member' ? this.provision(result.id, input.operationId) : input.action === 'retry_creation' ? this.provision(result.id, input.memberId) : this.project(result);
   }
-  async hostCall(hostId: string, call: TeamHostCall, assertCurrent: () => void = () => {}): Promise<unknown> {
+  async hostCall(hostId: string, call: TeamHostCall, assertCurrent: () => void = () => {}, recipientAware = true): Promise<unknown> {
     assertCurrent();
-    if (call.action === 'poll') return this.list().filter(team => team.status !== 'archived' && team.members.some(item => item.hostId === hostId && item.creation === 'ready'));
+    if (!recipientAware && (call.action === 'claim' && call.expectedNativeSessionId !== undefined || call.action === 'settle' && call.resolvedTarget)) fail(upgradeRequired);
+    if (call.action === 'poll') return this.ports.read().filter(team => team.status !== 'archived' && team.members.some(item => item.hostId === hostId && item.creation === 'ready')).map(team => this.project(team, recipientAware));
+    const projectDelivery = <T extends { id: string; resolvedTarget?: NativeSessionRef }>(value: T) => recipientAware ? value : withoutRecipient(value);
     if (call.action.startsWith('resource_')) return this.resourceCall(hostId, call, assertCurrent);
     if (call.action === 'send' && call.resources?.length) await this.prepareResources(hostId,call,assertCurrent);
     return this.change(teams => {
       assertCurrent();
       const team = find(teams, call.teamId), self = member(team, call.memberId), now = this.ports.now();
       if (self.hostId !== hostId || self.creation !== 'ready') fail('This Host is not the registered Team member.');
-      if (call.action === 'read') return { ...this.project(team), receipts: team.deliveryReceipts?.map(({ fingerprint: _hash, settledAt: _time, ...receipt }) => receipt) ?? [] };
+      if (!recipientAware && this.resolve(self).nativeSessionId !== self.nativeSessionId) fail(upgradeRequired);
+      if (call.action === 'read') return { ...this.project(team, recipientAware), receipts: team.deliveryReceipts?.map(({ fingerprint: _hash, settledAt: _time, ...receipt }) => projectDelivery(receipt)) ?? [] };
       if (call.action === 'presence') { if (self.activity === call.activity && team.status !== 'archiving') return team.status; self.activity = call.activity; self.updatedAt = now; settleArchive(team, now); return team.status; }
       if (call.action === 'settle' || call.action === 'claim') {
         const message = team.messages.find(item => item.id === call.messageId && item.to === self.id);
@@ -133,10 +155,11 @@ export class TeamBroker {
           const receipt = team.deliveryReceipts?.find(item => item.id === call.messageId && item.to === self.id);
           if (!receipt) fail('Message is not addressed to this member.');
           if (call.action === 'claim') return fail('Message is already settled.');
+          if (!recipientAware && receipt!.resolvedTarget && nativeSessionRefKey(receipt!.resolvedTarget) !== nativeSessionRefKey(this.resolve(self))) fail(upgradeRequired);
           if (call.resolvedTarget && (!receipt!.resolvedTarget || nativeSessionRefKey(call.resolvedTarget) !== nativeSessionRefKey(receipt!.resolvedTarget))) fail('Team receipt recipient changed.');
           if (receipt!.status !== call.outcome) fail('Message is already settled.');
           const { fingerprint: _hash, settledAt: _time, ...result } = receipt!;
-          return result;
+          return projectDelivery(result);
         }
         if (call.action === 'claim') {
           active(team); if (message.status !== 'queued') fail('Message is already claimed.');
@@ -145,8 +168,8 @@ export class TeamBroker {
           this.ports.assertRecipient?.(target);
           message.resolvedTarget = structuredClone(target); message.status = 'dispatching'; self.activity = 'busy';
         }
-        else { if (call.resolvedTarget && (!message.resolvedTarget || nativeSessionRefKey(call.resolvedTarget) !== nativeSessionRefKey(message.resolvedTarget))) fail('Team receipt recipient changed.'); if (message.status !== 'dispatching' && message.status !== 'unknown' && message.status !== call.outcome) fail('Message is already settled.'); message.status = call.outcome; if (message.acceptance !== 'started' && message.acceptance !== 'handled') message.acceptance = call.acceptance; message.error = call.error; }
-        return message;
+        else { if (!recipientAware && message.resolvedTarget && nativeSessionRefKey(message.resolvedTarget) !== nativeSessionRefKey(this.resolve(self))) fail(upgradeRequired); if (call.resolvedTarget && (!message.resolvedTarget || nativeSessionRefKey(call.resolvedTarget) !== nativeSessionRefKey(message.resolvedTarget))) fail('Team receipt recipient changed.'); if (message.status !== 'dispatching' && message.status !== 'unknown' && message.status !== call.outcome) fail('Message is already settled.'); message.status = call.outcome; if (message.acceptance !== 'started' && message.acceptance !== 'handled') message.acceptance = call.acceptance; message.error = call.error; }
+        return projectDelivery(message);
       }
       active(team);
       if (call.action === 'send') {
@@ -155,16 +178,16 @@ export class TeamBroker {
         if (target.creation !== 'ready') fail('Target member is not registered.');
         const id = createHash('sha256').update(JSON.stringify([self.id, call.operationId])).digest('hex');
         const replay = replayTeamDelivery(team, id, call);
-        if (replay) return replay;
+        if (replay) return projectDelivery(replay);
         const resources = call.resources?.map(resourceId => this.resourceAccess(team, self.id, resourceId));
         if (resources && (new Set(resources.map(resource => resource.resourceId)).size !== resources.length || resources.reduce((total, resource) => total + resource.byteLength, 0) > 100 * 1024 * 1024)) fail('Resource attachment limit exceeded.');
         const existing = team.messages.find(message => message.id === id);
-        if (existing) { if (existing.to !== call.to || existing.text !== call.text || JSON.stringify(existing.resources) !== JSON.stringify(resources)) fail('Message identity has different input.'); return existing; }
-        const message = { id, from: self.id, to: call.to, text: call.text, ...(resources ? {resources} : {}), status: 'queued' as const, createdAt: now }; assertTeamQueueCapacity(team, message); team.messages.push(message); touch(team, now); return message;
+        if (existing) { if (existing.to !== call.to || existing.text !== call.text || JSON.stringify(existing.resources) !== JSON.stringify(resources)) fail('Message identity has different input.'); return projectDelivery(existing); }
+        const message = { id, from: self.id, to: call.to, text: call.text, ...(resources ? {resources} : {}), status: 'queued' as const, createdAt: now }; assertTeamQueueCapacity(team, message); team.messages.push(message); touch(team, now); return projectDelivery(message);
       }
       if (call.action === 'describe_member') { if (self.role !== 'leader') fail('Only the Leader defines member responsibilities.'); member(team, call.target).responsibility = call.responsibility; }
       if (call.action === 'report') { self.summary = call.summary; self.updatedAt = now; }
-      touch(team, now); return this.project(team);
+      touch(team, now); return this.project(team, recipientAware);
     });
   }
   private resourceAccess(team: SavedTeam, memberId: string, resourceId: string): TeamResource {

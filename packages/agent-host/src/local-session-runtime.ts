@@ -16,7 +16,7 @@ import { publishSuccessionState } from './succession-persistence.js';
 export interface LocalSuccessionProvider extends AgentProviderAdapter {
   readonly createdSessionIdMaxLength?: number;
   validatePromptEdit?(target: NativePromptEditTarget): Promise<void>;
-  forkForPromptEdit?(target: NativePromptEditTarget, extensions?: AgentSessionExtensions): Promise<AgentSession>;
+  forkForPromptEdit?(target: NativePromptEditTarget, extensions?: AgentSessionExtensions, candidateKnown?: (handle: AgentPersistenceHandle) => Promise<void>): Promise<AgentSession>;
   verifyPromptEditBranch?(target: NativePromptEditTarget, handle: AgentPersistenceHandle): Promise<void>;
 }
 interface Attachment { ref: NativeSessionRef; handle?: AgentPersistenceHandle; cwd?: string; session: AgentSession; wrapped: AgentSession }
@@ -51,12 +51,17 @@ export class LocalSessionSuccession {
         await this.extensions(source, () => source.nativeSessionId);
         await adapter.validatePromptEdit({ nativeSessionId: source.nativeSessionId, ...selection }); return true;
       },
-      createNativePrefix: async request => {
+      createNativePrefix: async (request, candidateKnown) => {
         const adapter = this.adapter(request.from), selection = request.preparation!;
         let actual: string | undefined;
+        let checkpoint: AgentPersistenceHandle | undefined;
         const extensions = await this.extensions(request.from, () => actual);
-        const session = await adapter.forkForPromptEdit!({ nativeSessionId: request.from.nativeSessionId, turnId: selection.turnId, messageId: selection.messageId }, extensions);
-        const saved = await this.retain(session, request.from.providerId); actual = saved.ref.nativeSessionId;
+        const session = await adapter.forkForPromptEdit!({ nativeSessionId: request.from.nativeSessionId, turnId: selection.turnId, messageId: selection.messageId }, extensions, async handle => {
+          checkpoint = nativePrefixResumeHandle(request.from.providerId, handle.sessionId, handle);
+          actual = checkpoint.sessionId;
+          await candidateKnown({ target: this.ref(request.from.providerId, actual), handle: checkpoint });
+        });
+        const saved = await this.retain(session, request.from.providerId, checkpoint); actual = saved.ref.nativeSessionId;
         if (!saved.handle) throw new Error('Native prefix has no exact persistence handle.');
         return { target: saved.ref, handle: nativePrefixResumeHandle(saved.ref.providerId, actual, saved.handle) };
       },
@@ -160,7 +165,7 @@ export class LocalSessionSuccession {
     const attachment = this.native.get(nativeSessionRefKey(ref)) ?? await this.saved(ref); this.adapter(ref);
     if (!attachment.cwd || await realpath(attachment.cwd) !== attachment.cwd) throw new Error('Local session workspace is unavailable.');
   }
-  private async retain(session: AgentSession, providerId: string): Promise<Attachment> {
+  private async retain(session: AgentSession, providerId: string, checkpoint?: AgentPersistenceHandle): Promise<Attachment> {
     let disposed: Promise<void> | undefined;
     const dispose = () => disposed ??= Promise.resolve().then(() => session.dispose()).finally(() => { if (this.native.get(key) === attachment) this.native.delete(key); });
     let attachment: Attachment, key = '';
@@ -169,7 +174,10 @@ export class LocalSessionSuccession {
       if (this.closed || info.providerId !== providerId || !info.sessionId) throw new Error('Local native attachment identity changed.');
       const ref = this.ref(providerId, info.sessionId); key = nativeSessionRefKey(ref);
       if (this.native.has(key)) throw new Error('Local native identity is already attached.');
-      const handle = info.persistence && nativePrefixResumeHandle(providerId, info.sessionId, info.persistence);
+      const runtimeHandle = info.persistence && nativePrefixResumeHandle(providerId, info.sessionId, info.persistence);
+      if (checkpoint && !runtimeHandle) throw new Error('Native prefix attachment has no persistence handle.');
+      // Runtime settings may change after bootstrap; recovery keeps the original exact checkpoint.
+      const handle = checkpoint ? nativePrefixResumeHandle(providerId, info.sessionId, checkpoint) : runtimeHandle;
       const cwd = info.cwd ? await realpath(info.cwd).catch(() => undefined) : undefined;
       const owned = new Proxy(session, { get(target, name) { if (name === 'dispose') return dispose; const value = Reflect.get(target, name, target); return typeof value === 'function' ? value.bind(target) : value; } });
       attachment = { ref, handle, cwd, session: owned, wrapped: this.boundary.wrap(ref, owned) };
@@ -236,7 +244,7 @@ export class LocalSessionSuccession {
       return existing.wrapped;
     }
     const extensions = await this.extensions(prefix?.record.from ?? ref, () => ref.nativeSessionId);
-    return (await this.retain(await adapter.resumeSession(handle, extensions), ref.providerId)).wrapped;
+    return (await this.retain(await adapter.resumeSession(handle, extensions), ref.providerId, prefix?.handle)).wrapped;
   }
   private async attachment(ref: NativeSessionRef, reopen?: () => Promise<AgentSession>): Promise<Attachment> {
     this.adapter(ref);

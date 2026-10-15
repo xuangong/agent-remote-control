@@ -163,6 +163,10 @@ it('offers explicit upload retry after the Host rejects an expired attachment', 
   expect(upload.mock.calls[1]?.[1]).not.toBe(upload.mock.calls[0]?.[1]);
   expect(send).toHaveBeenCalledTimes(1);
   await act(async () => document.querySelector<HTMLButtonElement>('[aria-label="Close image preview"]')!.click());
-  await act(async () => container.querySelector<HTMLButtonElement>('[data-testid="prompt-submit"]')!.click());
+  await act(async () => {
+    const submit = container.querySelector<HTMLButtonElement>('[data-testid="prompt-submit"]')!;
+    submit.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+    submit.click();
+  });
   expect(send.mock.calls[1]?.[0]).toEqual([{ type: 'image', attachmentId: 'replacement', label: 'image #1' }]);
 });

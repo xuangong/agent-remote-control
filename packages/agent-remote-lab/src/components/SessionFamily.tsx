@@ -49,10 +49,16 @@ function restore(key: string, root: SessionWindowTarget): Layout {
 export function SessionFamily(props: Props) {
   const { target, compact, active } = props;
   const storageKey = `agent-remote:recovery:${props.storageScope}:session-family:${props.displayBinding && !props.displayBinding.key.startsWith('session:') ? `${props.displayBinding.key}:` : ''}${sessionKey(target)}`;
+  const [layoutKey, setLayoutKey] = useState(storageKey);
   const [layout, setLayout] = useState(() => restore(storageKey, target));
   const [widths, setWidths] = useState<Record<string, number>>(() => {
     try { return JSON.parse(conversationSessionStorage.getItem(`${storageKey}:widths`) ?? '{}') ?? {}; } catch { return {}; }
   });
+  if (layoutKey !== storageKey) {
+    setLayoutKey(storageKey);
+    setLayout(restore(storageKey, target));
+    try { setWidths(JSON.parse(conversationSessionStorage.getItem(`${storageKey}:widths`) ?? '{}') ?? {}); } catch { setWidths({}); }
+  }
   const childWidth = (item: FamilyTarget) => {
     const width = widths[sessionKey(item)];
     return typeof width === 'number' && Number.isFinite(width) ? Math.max(320, Math.min(1600, width)) : 440;
@@ -167,10 +173,11 @@ function FamilySession(props: SessionProps) {
       displayBinding={familyDisplayBinding(props)} defaultDisplayMode="content" />;
   }
   if (!session) return <div className="lab-session-opening"><header><strong>{target.title}</strong>{props.controls}</header>{error ? <p role="alert">{error}<button onClick={() => setAttempt(value => value + 1)}>Retry</button></p> : <p role="status">Opening session…</p>}</div>;
-  return <FamilyChat {...props} session={session} preview={preview} availabilityError={resolutionError ?? error} />;
+  const pending = !!resolutionError || sessionKey(session) !== sessionKey(currentTarget);
+  return <FamilyChat {...props} session={session} pending={pending} preview={preview} availabilityError={resolutionError ?? error} />;
 }
-function FamilyChat({ session, transport, navigation, draftStore, draftBinding, imageDraftBinding, controls, offline, entries, onNavigate, displayBinding, baseUrl, target, preview, viewId, nativePrefixOnly, availabilityError }: SessionProps & { session: OpenedSession; preview?: AgentReplicaState; availabilityError?: string }) {
-  const { state, sessionState, status, actions, questions, setQuestions, imageRecipient, operationBinding } = useConversationSession(session, transport, undefined, false, { viewId, nativePrefixOnly, externalAttachment: true });
+function FamilyChat({ session, pending, transport, navigation, draftStore, draftBinding, imageDraftBinding, controls, offline, entries, onNavigate, displayBinding, baseUrl, target, preview, viewId, nativePrefixOnly, availabilityError }: SessionProps & { session: OpenedSession; pending: boolean; preview?: AgentReplicaState; availabilityError?: string }) {
+  const { state, sessionState, status, actions, questions, setQuestions, imageRecipient, operationBinding } = useConversationSession(session, transport, undefined, pending, { viewId, nativePrefixOnly, externalAttachment: true });
   const enabled = useContext(WorkspaceReady);
   useWorkspaceDisplayCache(baseUrl, session, state, enabled && status === 'ready');
   const open = (destination: SessionEntry | AgentChildSessionView) => {

@@ -182,6 +182,7 @@ export function SessionSuccessionDialog({ source, directory, assertAccess, asser
           await accept(await directory.successionAction('commit', pending.operationId));
         }
       } else if (operation.current) {
+        if (action === 'commit' && operation.current.preparation?.kind === 'native_prefix') callbacks.current.assertSource();
         const value = action === 'cancel'
           ? await directory.successionAction(action, operation.current.operationId, { original: operation.current })
           : await directory.successionAction(action, operation.current.operationId);

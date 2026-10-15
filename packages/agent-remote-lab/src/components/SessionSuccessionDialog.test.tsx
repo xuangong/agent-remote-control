@@ -463,3 +463,29 @@ it('performs no native preparation when retaining selected prompt bytes fails', 
   expect(document.body.textContent).toContain('Prompt bytes could not be retained.');
   expect(prepare).not.toHaveBeenCalled();
 }, 5000);
+
+
+it('checks the original prefix authority for manual commit while retaining read and cancel recovery', async () => {
+  const directory = new SessionDirectoryClient('http://localhost', undefined, 'host');
+  vi.spyOn(directory, 'describeSuccession').mockResolvedValue(description);
+  let release!: (value: SuccessionActionResult) => void, current = true;
+  const prepare = vi.spyOn(directory, 'prepareSuccession').mockImplementation(() => new Promise(resolve => { release = resolve; }));
+  const action = vi.spyOn(directory, 'successionAction').mockImplementation(async (kind, id) => response(id, kind === 'cancel' ? 'cancelled' : 'ready'));
+  const guard = vi.fn(() => { if (!current) throw new Error('Original recipient retired.'); });
+  await render(<SessionSuccessionDialog source={source} directory={directory} autoPrepare
+    preparation={{ kind: 'native_prefix', turnId: 'turn', messageId: 'message' }} assertAccess={() => {}} assertSource={guard}
+    onIntent={() => {}} onSettled={async () => {}} onClose={() => {}} />);
+  await vi.waitFor(() => expect(prepare).toHaveBeenCalledOnce());
+  const original = prepare.mock.calls[0]![0];
+  current = false;
+  await act(async () => release(response(original.operationId, 'ready')));
+  expect(action.mock.calls.filter(([kind]) => kind === 'commit')).toHaveLength(0);
+  await details(); guard.mockClear();
+  await act(async () => button('Commit Handoff').click());
+  expect(guard).toHaveBeenCalledOnce();
+  expect(action.mock.calls.filter(([kind]) => kind === 'commit')).toHaveLength(0);
+  await act(async () => button('Check status').click());
+  await act(async () => button('Reconcile').click());
+  await act(async () => button('Cancel Handoff').click());
+  expect(action.mock.calls).toEqual([['status', original.operationId], ['reconcile', original.operationId], ['cancel', original.operationId, { original }]]);
+});

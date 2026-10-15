@@ -243,6 +243,12 @@ export function useImageDraft({ scope: suppliedScope, sessionKey, text, enabled,
     ready: current.draft.parts.every(part => part.type !== 'image' || eligible(images[part.imageId])),
     hasImages,
     captureEdit() { const revision = current.revision; return () => mounted.current && documentCurrent() && currentKey.current === entryKey && current.revision === revision; },
+    async retain(isCurrent: () => boolean): Promise<boolean> {
+      const snapshot = await flushStorage(current.revision, () => mounted.current && documentCurrent() && currentKey.current === entryKey && isCurrent());
+      if (snapshot.status === 'cancelled') return false;
+      if (snapshot.status !== 'ready' || snapshot.savedRevision !== snapshot.revision) throw new Error('Draft could not be saved. Keep this page open and retry.');
+      return true;
+    },
     digests() { return Object.fromEntries(Object.values(images).flatMap(image => eligible(image) && image.attachment ? [[image.attachment.attachmentId, image.attachment.sha256]] : [])); },
     setParts(parts: readonly DraftPart[]) {
       const imageIds = (parts: readonly DraftPart[]) => parts.flatMap(part => part.type === 'image' ? [part.imageId] : []).join(',');

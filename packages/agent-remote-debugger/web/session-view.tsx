@@ -14,6 +14,7 @@ export function DebugWorkbench({ displaySessionKey, operationBinding, draftBindi
   const [displayPreferences, onDisplayPreferencesChange] = useSessionDisplayPreferences(`${location.origin}:ardb`,
     displaySessionKey, props.defaultDisplayMode);
   return <SessionWorkbench {...props} actions={{ ...props.actions, ...(operation.editPrompt ? { editPrompt: operation.editPrompt } : {}) }}
+    readOnly={props.readOnly || operation.recoveringDraft}
     messageDraft={draftBinding ? draft.text : props.messageDraft} onMessageDraftChange={draftBinding ? draft.set : props.onMessageDraftChange}
     composerNotice={<>{props.composerNotice}{operation.notice}</>} displayPreferences={displayPreferences} onDisplayPreferencesChange={onDisplayPreferencesChange} />;
 }

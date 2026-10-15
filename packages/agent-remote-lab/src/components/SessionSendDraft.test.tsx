@@ -93,12 +93,15 @@ async function type(view: ParentNode, text: string) {
     }
   });
 }
-async function submit(view: ParentNode) {
+async function submit({ view, sent }: { view: ParentNode; sent: unknown[] }, dispatch = true) {
+  const count = sent.length;
   await act(async () => {
     const button = view.querySelector<HTMLButtonElement>('[data-testid="prompt-submit"]')!;
     button.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
     button.click();
   });
+  if (dispatch) await act(async () => { await vi.waitFor(() => expect(sent).toHaveLength(count + 1)); });
+  else expect(sent).toHaveLength(count);
 }
 
 type ViewKind = 'side' | 'window' | 'team-leader' | 'team-member' | 'compact-leader' | 'compact-member' | 'child' | 'ask' | 'tpm';
@@ -153,7 +156,7 @@ it.each(['side', 'window', 'team-leader', 'team-member', 'compact-leader', 'comp
   await type(f.view, 'Confirmed input');
   expect(promptText(editor(f.view))).toBe('Confirmed input');
   expect(f.view.querySelector<HTMLButtonElement>('[data-testid="prompt-submit"]')!.disabled).toBe(false);
-  await submit(f.view);
+  await submit(f);
   expect(f.sent).toHaveLength(1);
   expect(promptText(editor(f.view))).toBe('Confirmed input');
   await act(async () => f.acknowledge());
@@ -164,7 +167,7 @@ it.each(['side', 'window', 'team-leader', 'team-member', 'compact-leader', 'comp
 
 it.each(['side', 'window'] as const)('retains the %s draft after rejection and echo without ACK', async kind => {
   const f = await setup(kind);
-  await type(f.view, 'Unconfirmed input'); await submit(f.view);
+  await type(f.view, 'Unconfirmed input'); await submit(f);
   await act(async () => f.echo());
   expect(f.view.querySelector('.agent-message-user')?.textContent).toContain('Unconfirmed input');
   expect(promptText(editor(f.view))).toBe('Unconfirmed input');
@@ -177,7 +180,7 @@ it.each(['side', 'window'] as const)('retains the %s draft after rejection and e
 
 it.each(['side', 'window'] as const)('preserves a newer %s edit after an old matching ACK', async kind => {
   const f = await setup(kind);
-  await type(f.view, 'First input'); await submit(f.view);
+  await type(f.view, 'First input'); await submit(f);
   await act(async () => f.drafts.set(f.draftKey, 'First input and newer draft'));
   const newer = promptText(editor(f.view));
   expect(newer).toBe('First input and newer draft');
@@ -189,7 +192,7 @@ it.each(['side', 'window'] as const)('preserves a newer %s edit after an old mat
 
 it('retains a changed revision even when its text returns to the submitted value', async () => {
   const f = await setup('side');
-  await type(f.view, 'Same text'); await submit(f.view);
+  await type(f.view, 'Same text'); await submit(f);
   await act(async () => f.drafts.set(f.draftKey, 'Changed revision'));
   await act(async () => f.drafts.set(f.draftKey, 'Same text'));
   await act(async () => f.acknowledge());
@@ -198,7 +201,7 @@ it('retains a changed revision even when its text returns to the submitted value
 
 it('ignores an ACK for another request and preserves the draft across a session switch', async () => {
   const f = await setup('side');
-  await type(f.view, 'Old session input'); await submit(f.view);
+  await type(f.view, 'Old session input'); await submit(f);
   const original = f.sent[0]!;
   await act(async () => f.acknowledge({ ...original, payload: { ...original.payload, requestId: 'another-request' } }));
   expect(promptText(editor(f.view))).toBe('Old session input');
@@ -211,7 +214,17 @@ it('ignores an ACK for another request and preserves the draft across a session 
 
 it('keeps an explicitly retired Ask recipient authoritative over its connected fallback', async () => {
   const f = await setup('ask', { recipient: { identity: 'succession-recipient', lifetime: {}, isCurrent: () => false } });
-  await type(f.view, 'Retired owner input'); await submit(f.view);
+  await type(f.view, 'Retired owner input'); await submit(f, false);
+  expect(f.view.querySelector('[aria-label="Live provider controls"]')?.getAttribute('aria-busy')).toBe('false');
+  expect(f.sent).toHaveLength(0);
+  expect(promptText(editor(f.view))).toBe('Retired owner input');
+});
+
+it('preserves the Ask draft when its explicit recipient retires after dispatch and before ACK', async () => {
+  let current = true;
+  const f = await setup('ask', { recipient: { identity: 'succession-recipient', lifetime: {}, isCurrent: () => current } });
+  await type(f.view, 'Retired owner input'); await submit(f);
+  current = false;
   await act(async () => f.acknowledge());
   expect(promptText(editor(f.view))).toBe('Retired owner input');
 });
@@ -229,7 +242,7 @@ it.each(['ack', 'reject'] as const)('persists image bytes and clears the image d
   let persisted = await inspectImageDraft(f.imageDraftBinding);
   await act(async () => { await persisted.flush(persisted.snapshot().revision, () => true); });
   expect((await readImageDraft(f.imageDraftBinding.key))?.images[image]?.blob?.size).toBe(5);
-  await submit(f.view);
+  await submit(f);
   const payload = f.sent[0]!.payload;
   expect('content' in payload ? payload.content : undefined).toEqual([{ type: 'text', text: 'Image input' }, { type: 'image', attachmentId: 'image-side', label: 'image #1' }]);
   await act(async () => outcome === 'ack' ? f.acknowledge() : f.reject());

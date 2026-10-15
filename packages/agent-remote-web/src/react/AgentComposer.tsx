@@ -167,8 +167,10 @@ export function AgentComposer({ sessionState: suppliedSessionState, readOnly: fo
     && state?.agent?.status !== 'failed' && state?.agent?.status !== 'closed' && !interruptRequested;
 
   const dispatchReady = ready && !readOnly && !terminal && !operationBusy && session.operations.send_message.allowed;
-  const latest = useRef({ agentId, draftOnly, mutationBlocked, dispatchReady, pendingFirstInputContext, onSendMessage, onSendMessageContent, onUploadImage, imageRecipient });
-  latest.current = { agentId, draftOnly, mutationBlocked, dispatchReady, pendingFirstInputContext, onSendMessage, onSendMessageContent, onUploadImage, imageRecipient };
+  const sendAllowed = ready && !readOnly && !terminal && session.operations.send_message.allowed;
+  const queueAllowed = ready && !readOnly && !terminal && session.operations.queue_message.allowed;
+  const latest = useRef({ agentId, draftOnly, mutationBlocked, dispatchReady, sendAllowed, queueAllowed, pendingFirstInputContext, onSendMessage, onSendMessageContent, onUploadImage, imageRecipient });
+  latest.current = { agentId, draftOnly, mutationBlocked, dispatchReady, sendAllowed, queueAllowed, pendingFirstInputContext, onSendMessage, onSendMessageContent, onUploadImage, imageRecipient };
   const richPreparations = useRef(new Map<AbortController, ImageDraftRecipient>());
   for (const [abort, owner] of richPreparations.current) {
     if (draftOnly || mutationBlocked || pendingFirstInputContext || imageRecipient?.identity !== owner.identity || imageRecipient?.lifetime !== owner.lifetime || !owner.isCurrent()) abort.abort();
@@ -398,6 +400,13 @@ export function AgentComposer({ sessionState: suppliedSessionState, readOnly: fo
     currentDraft.feedback = undefined;
     refresh((value) => value + 1);
     try {
+      if (richEnabled) {
+        const ownsSubmission = () => mounted.current && latest.current.agentId === agentId && !latest.current.draftOnly && !latest.current.mutationBlocked
+          && (kind === 'queue' ? latest.current.queueAllowed : latest.current.sendAllowed)
+          && (!(hasAttachments || kind === 'queue') || !latest.current.pendingFirstInputContext)
+          && currentDraft.text === submitted && ownsImageEdit() && imageDraft.parts === submittedParts;
+        if (!await imageDraft.retain(ownsSubmission) || !ownsSubmission()) return;
+      }
       if (content) await onSendMessageContent!(content, { ...(kind === 'queue' ? { delivery: 'next_turn' as const } : {}), imageDigests });
       else if (kind === 'queue') await action!(submitted.trim(), { delivery: 'next_turn' });
       else await action!(submitted.trim());
@@ -465,7 +474,7 @@ export function AgentComposer({ sessionState: suppliedSessionState, readOnly: fo
     disabled: pendingFirstInputContext || !session.operations.queue_message.allowed || waiting.items.length > 0 || !ready || !capabilities?.sendMessage || !hasContent || !imageSendReady || isCommand || Boolean(selectedSkill) || busy || (!onSendMessage && !onSendMessageContent),
     run: () => void run('queue') });
 
-  return <section className="agent-composer" aria-label="Live provider controls" aria-busy={busy} data-control-readonly={ownershipReadOnly || undefined}>
+  return <section className="agent-composer" aria-label="Live provider controls" aria-busy={busy || richEnabled && !imageDraft.hydrated} data-control-readonly={ownershipReadOnly || undefined}>
     {richEnabled ? <input ref={fileInputRef} type="file" hidden multiple accept="image/png,image/jpeg,image/webp" onChange={event => { const files = Array.from(event.currentTarget.files ?? []); event.currentTarget.value = ''; if (filePickerAgent.current === agentId) editorRef.current?.insertParts(addImageFiles(files)); }} /> : null}
     {capabilities?.resourceInput ? <input ref={resourceInputRef} type="file" hidden multiple aria-label="Choose resources" onChange={event => {
       const files = Array.from(event.currentTarget.files ?? []); event.currentTarget.value = '';

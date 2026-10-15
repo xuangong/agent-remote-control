@@ -55,7 +55,10 @@ test('ARDB Live edits its native prefix and retains drafts until the matching ad
     adapter.settleInput(false);
     await expect.poll(() => admissions.join('\n')).toContain('fixture_rejected');
     await expect(editor).toHaveText('rejected draft');
-    await page.reload(); await expect(editor).toHaveText('rejected draft');
+    await page.reload();
+    await expect(editor).toHaveAttribute('contenteditable', 'true');
+    await expect(page.getByRole('region', { name: 'Live provider controls' })).toHaveAttribute('aria-busy', 'false');
+    await expect(editor).toHaveText('rejected draft');
     expect(failures).toEqual([]);
     await page.screenshot({ path: info.outputPath('ardb-prefix-desktop.png'), fullPage: true });
     await page.setViewportSize({ width: 390, height: 844 });

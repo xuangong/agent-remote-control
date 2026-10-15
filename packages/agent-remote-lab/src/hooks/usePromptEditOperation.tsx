@@ -1,4 +1,4 @@
-import { useContext, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { ProjectedTimelineEntry } from '@orchardworks/agent-remote-protocol';
 import { preparePromptDraft } from '@orchardworks/agent-remote-web/react';
 import { inspectImageDraft, readImageDraft, type ImageDraftBinding, type ImageDraftStorageHandle, type ImageDraftRecipient } from '@orchardworks/agent-remote-web/browser';
@@ -29,12 +29,35 @@ export function usePromptEditOperation(binding: SessionOperationBinding | undefi
   const [finished, setFinished] = useState<string>();
   const intent = (pending?.identity === identity ? pending.intent : undefined) ?? (restored.intent?.operation.operationId === finished ? undefined : restored.intent);
   const preparing = useRef<PrefixEditIntent>();
-  const baselineHandle = useRef<{ identity: string; text: DraftBinding; image: ImageDraftStorageHandle; textRevision: number; imageRevision: number }>();
+  const baselineHandle = useRef<{ identity: string; operationId: string; text: DraftBinding; image: ImageDraftStorageHandle; textRevision: number; imageRevision: number }>();
   const appliedHandle = useRef<{ operationId: string; text: DraftBinding; image: ImageDraftStorageHandle; textRevision: number; imageRevision: number }>();
+  // These revisions belong to this mount; persisted revision numbers cannot identify a new editor.
+  const resumedOwner = useMemo(() => restored.intent && text && image ? {
+    operationId: restored.intent.operation.operationId, text, image, textRevision: text.store.snapshot(text.key).revision,
+  } : undefined, [identity]);
+  const recovery = useRef<Promise<void>>();
+  const [recoveredOwner, setRecoveredOwner] = useState<string>();
+  const recoveringDraft = !!intent && intent.operation.operationId === resumedOwner?.operationId && recoveredOwner !== identity;
+  const resumedSource = useRef<{ operationId: string; binding: SessionOperationBinding; recipient?: ImageDraftRecipient }>();
+  if (intent && !selection && resumedSource.current?.operationId !== intent.operation.operationId && binding?.scope?.isCurrent()
+    && binding.source.agentId === intent.source.agentId && binding.source.nativeSessionId === intent.source.nativeSessionId) {
+    resumedSource.current = { operationId: intent.operation.operationId, binding, recipient: explicitRecipient };
+  }
   const mounted = useRef(false);
   const latest = useRef({ identity, environment, binding, text, image, explicitRecipient });
   latest.current = { identity, environment, binding, text, image, explicitRecipient };
   useLayoutEffect(() => { mounted.current = true; preparing.current = undefined; return () => { mounted.current = false; }; }, [identity]);
+  useEffect(() => {
+    if (!resumedOwner) return;
+    let active = true;
+    recovery.current = (async () => {
+      const handle = await inspectImageDraft(resumedOwner.image);
+      if (!active || !handle.replace) return;
+      baselineHandle.current = { identity, operationId: resumedOwner.operationId, text: resumedOwner.text, image: handle,
+        textRevision: resumedOwner.textRevision, imageRevision: handle.snapshot().revision };
+    })().finally(() => { if (active) setRecoveredOwner(identity); });
+    return () => { active = false; };
+  }, [identity]);
   const source = intent?.source ?? selection?.binding.source;
   const directory = useMemo(() => source && environment?.directory(source), [environment?.storageScope, environment?.transport, source?.hostId, source?.providerId, source?.nativeSessionId]);
   const preparation = useMemo(() => intent?.operation.preparation ?? (selection?.entry.item.type === 'user_message' && selection.entry.item.messageId && selection.entry.turnId
@@ -45,14 +68,17 @@ export function usePromptEditOperation(binding: SessionOperationBinding | undefi
   }
   function assertSource() {
     assertAccess();
-    const selected = selection?.binding ?? binding, current = selected?.scope;
+    const resumed = resumedSource.current?.operationId === intent?.operation.operationId ? resumedSource.current : undefined;
+    const selected = selection?.binding ?? resumed?.binding, current = selected?.scope;
     const state = current?.replica.getState(), agent = state?.agent;
     if (!source || !current?.isCurrent() || current.transport !== environment?.transport || agent?.id !== source.agentId
       || agent.providerId !== source.providerId || agent.runtimeInfo.sessionId !== source.nativeSessionId || selected?.historical
       || selection && (latest.current.text?.store !== selection.text.store || latest.current.text?.key !== selection.text.key
         || JSON.stringify(latest.current.image) !== JSON.stringify(selection.image) || latest.current.explicitRecipient !== selection.recipient)
+      || !selection && (!resumedOwner || latest.current.text?.store !== resumedOwner.text.store || latest.current.text?.key !== intent?.owner.textKey
+        || JSON.stringify(latest.current.image) !== JSON.stringify(intent?.owner.image) || latest.current.explicitRecipient !== resumed?.recipient)
       || source.parentNativeSessionId || !current.client.getSessionState().synchronized || current.client.getSessionState().readOnly
-      || (selection?.recipient ?? explicitRecipient) && !(selection?.recipient ?? explicitRecipient)!.isCurrent()) throw new Error('The original prompt view is no longer ready for editing.');
+      || (selection?.recipient ?? resumed?.recipient) && !(selection?.recipient ?? resumed?.recipient)!.isCurrent()) throw new Error('The original prompt view is no longer ready for editing.');
   }
   const editPrompt = environment && binding?.scope && text && image && key && !binding.historical && !binding.source.parentNativeSessionId
     ? async (entry: ProjectedTimelineEntry) => {
@@ -77,7 +103,7 @@ export function usePromptEditOperation(binding: SessionOperationBinding | undefi
       assertSource();
       if (imageSnapshot.status !== 'ready') throw new Error('The current image draft is not ready.');
       const textSnapshot = text.store.snapshot(text.key);
-      baselineHandle.current = { identity, text, image: handle, textRevision: textSnapshot.revision, imageRevision: imageSnapshot.revision };
+      baselineHandle.current = { identity, operationId: operation.operationId, text, image: handle, textRevision: textSnapshot.revision, imageRevision: imageSnapshot.revision };
       const current = selection.binding.scope!, state = current.replica.getState();
       const draft = await preparePromptDraft(selection.entry.item, { scopeKey: JSON.stringify([current.agentId, state.timeline.epoch]),
         bindings: selection.entry.resources, resources: state.resources,
@@ -102,6 +128,8 @@ export function usePromptEditOperation(binding: SessionOperationBinding | undefi
       assertAccess();
       let saved = readPrefixEdit(scope, key);
       if (!saved || saved.operation.operationId !== result.record.operationId) throw new Error('The original prompt edit identity changed.');
+      await recovery.current;
+      assertAccess();
       await environment.refreshSettled(result, source);
       assertAccess();
       if (result.record.phase !== 'committed' || saved.restored) return;
@@ -126,16 +154,18 @@ export function usePromptEditOperation(binding: SessionOperationBinding | undefi
       const imageHandle = await inspectImageDraft(imageOwner);
       assertAccess();
       const snapshot = await imageHandle.flush(imageHandle.snapshot().revision, targetCurrent);
-      const textSnapshot = owner.store.snapshot(owner.key), original = baselineHandle.current?.identity === identity ? baselineHandle.current : undefined;
+      const textSnapshot = owner.store.snapshot(owner.key), original = baselineHandle.current?.identity === identity
+        && baselineHandle.current.operationId === saved.operation.operationId ? baselineHandle.current : undefined;
       const unchanged = () => targetCurrent()
         && owner.store.snapshot(owner.key).revision === textSnapshot.revision && imageHandle.snapshot().revision === snapshot.revision;
       const applied = appliedHandle.current?.operationId === saved.operation.operationId ? appliedHandle.current : undefined;
       const alreadyApplied = !!saved.restoration && textSnapshot.text === saved.restoration.text
         && JSON.stringify(snapshot.draft?.parts ?? []) === saved.restoration.imageParts;
-      const ownRevisions = !applied || applied.text.store === owner.store && applied.text.key === owner.key && applied.image === imageHandle
-        && applied.textRevision === textSnapshot.revision && applied.imageRevision === snapshot.revision;
+      const previous = applied ?? original;
+      const ownRevisions = !!previous && previous.text.store === owner.store && previous.text.key === owner.key && previous.image === imageHandle
+        && previous.textRevision === textSnapshot.revision && previous.imageRevision === snapshot.revision;
       if (snapshot.status !== 'ready' || !ownRevisions || !alreadyApplied && (textSnapshot.text !== saved.baseline.text || JSON.stringify(snapshot.draft?.parts ?? []) !== saved.baseline.imageParts
-        || original && (original.text.store.snapshot(original.text.key).revision !== original.textRevision || original.image.snapshot().revision !== original.imageRevision))) {
+        || !original || original.text.store.snapshot(original.text.key).revision !== original.textRevision || original.image.snapshot().revision !== original.imageRevision)) {
         throw new Error('A newer draft is preserved. The original prompt edit remains available for recovery.');
       }
       const draft = await readImageDraft(saved.prompt.key);
@@ -172,5 +202,5 @@ export function usePromptEditOperation(binding: SessionOperationBinding | undefi
       if (intent) { finishPrefixEdit(scope, key, intent.operation.operationId); setFinished(intent.operation.operationId); }
       preparing.current = undefined; setPending(undefined); setSelection(undefined);
     }} /> : restored.error ? <p role="alert">{restored.error}</p> : undefined;
-  return { editPrompt, notice };
+  return { editPrompt, notice, recoveringDraft };
 }

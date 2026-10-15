@@ -28,6 +28,7 @@ export function LabWorkbench({ draftBinding, displayBinding, defaultDisplayMode,
   const [displayPreferences, onDisplayPreferencesChange] = useSessionDisplayPreferences(displayBinding?.scope ?? positions?.scope,
     displayBinding?.key ?? props.draftSessionKey ?? props.state?.agent?.runtimeInfo.sessionId ?? props.attachingAgentId, defaultDisplayMode);
   return <SessionWorkbench {...props}
+    readOnly={props.readOnly || promptEdit.recoveringDraft}
     actions={{ ...props.actions, ...(promptEdit.editPrompt ? { editPrompt: promptEdit.editPrompt } : {}) }}
     imageDraftBinding={imageBinding}
     consoleCommands={trackCommand || tpmCommand || teamCommand ? [...(trackCommand ? [TrackViewCommand] : []), ...(tpmCommand ? [TpmViewCommand] : []), ...(teamCommand ? [TeamViewCommand] : []), ...(props.consoleCommands ?? [])] : props.consoleCommands}

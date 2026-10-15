@@ -10,8 +10,9 @@ import { DraftStore } from '../draft-store.js';
 import { readDrafts } from '../conversation-recovery.js';
 import { ForkStore } from '../session-forks.js';
 import { replicaState } from '../test/fixtures.js';
-import { promptText, render, unmount } from '../test/setup.js';
+import { promptText, render, setPromptText, unmount } from '../test/setup.js';
 import { SideConversation } from './SideConversation.js';
+import { DebugWorkbench } from '../../../agent-remote-debugger/web/session-view.js';
 import { SessionWindow } from './SessionWindow.js';
 import { SessionFamily } from './SessionFamily.js';
 import { AskConversation } from './AskConversation.js';
@@ -23,9 +24,23 @@ import { SessionDirectoryClient, type OpenedSession, type SuccessionActionResult
 import { SessionViewOperationsContext } from '../session-view-operations.js';
 import { LabWorkbench } from './LabWorkbench.js';
 import { useConversationSession } from '../hooks/useConversationSession.js';
+import { readPrefixEdit } from '../prompt-edit-succession.js';
+import { conversationSessionStorage } from '../conversation-storage.js';
+import { sessionKey } from '../session-tree.js';
+import type { SessionOperationBinding } from '../session-view-operations.js';
 import { sessionViewNavigation } from '../session-view-navigation.js';
 
+const observed = vi.hoisted(() => ({ bindings: new Map<string, SessionOperationBinding>() }));
+vi.mock('./LabWorkbench.js', async importOriginal => {
+  const actual = await importOriginal<typeof import('./LabWorkbench.js')>();
+  return { ...actual, LabWorkbench: (props: Parameters<typeof actual.LabWorkbench>[0]) => {
+    if (props.operationBinding) observed.bindings.set(props.operationBinding.source.nativeSessionId, props.operationBinding);
+    return <actual.LabWorkbench {...props} />;
+  } };
+});
+
 beforeEach(() => {
+  observed.bindings.clear();
   vi.stubGlobal('ResizeObserver', class { observe() {} disconnect() {} });
   Range.prototype.getClientRects = () => [] as unknown as DOMRectList;
   Range.prototype.getBoundingClientRect = () => new DOMRect();
@@ -89,15 +104,21 @@ function fixture(images = false, unavailableImage = false) {
 }
 
 const promptEditor = (view: ParentNode) => view.querySelector<HTMLElement>('[data-testid="prompt-input"]')!;
-type Placement = 'main' | 'side' | 'window' | 'team-leader' | 'team-member' | 'compact-leader' | 'compact-member' | 'child' | 'ask' | 'tpm';
-async function setupEdit(kind: Placement, options: { outcome?: 'ready' | 'unknown' | 'rejected' | 'cancelled'; holdCommit?: boolean; holdPrepare?: boolean; commitBoundaryChanged?: boolean; explicitRecipient?: boolean; unavailable?: boolean; historical?: boolean; images?: boolean; unavailableImage?: boolean } = {}) {
+type Placement = 'debugger' | 'main' | 'side' | 'window' | 'team-leader' | 'team-member' | 'compact-leader' | 'compact-member' | 'child' | 'ask' | 'tpm';
+async function setupEdit(kind: Placement, options: { outcome?: 'ready' | 'unknown' | 'rejected' | 'cancelled'; holdCommit?: boolean; holdPrepare?: boolean; windowChild?: boolean; commitBoundaryChanged?: boolean; explicitRecipient?: boolean; unavailable?: boolean; historical?: boolean; images?: boolean; unavailableImage?: boolean } = {}) {
   const f = fixture(options.images, options.unavailableImage);
   let recipientCurrent = true;
   const explicitRecipient: ImageDraftRecipient = { identity: 'explicit-A', lifetime: {}, isCurrent: () => recipientCurrent };
   const scope = `http://fixture/${crypto.randomUUID()}/`;
+  const replacementDrafts = new DraftStore(scope);
   const drafts = new DraftStore(scope), draftBinding = { store: drafts, key: 'selected-owner' };
   const imageDraftBinding = { scope, key: `${scope}selected-images` };
   const session: OpenedSession & { hostId: string } = { hostId: 'local', agentId: 'A', providerId: 'recorded', nativeSessionId: 'A', title: 'Supporting A' };
+  if (options.windowChild) conversationSessionStorage.setItem(`agent-remote:recovery:${scope}:session-family:window:${sessionKey(session)}`,
+    JSON.stringify({ children: [{ ...session, nativeSessionId: 'A-child', title: 'A child', parentNativeSessionId: 'A' }], focus: 0 }));
+  let replaceTarget!: () => void, changeOwner!: () => void;
+  let failReplacement!: () => void;
+  const replacementGate = new Promise<void>((_, reject) => { failReplacement = () => reject(new Error('D attachment failed.')); });
   const connections = new ConversationConnections(f.transport);
   const lease = connections.acquire('A', new AgentReplica(), session);
   const unrelated = connections.acquire('unrelated-main', new AgentReplica(), { ...session, nativeSessionId: 'unrelated-main' });
@@ -122,6 +143,7 @@ async function setupEdit(kind: Placement, options: { outcome?: 'ready' | 'unknow
       if (options.commitBoundaryChanged) return new Response(JSON.stringify({ code: 'succession_boundary_changed', error: 'succession_boundary_changed: The Host timeline epoch changed.' }), { status: 409 });
     }
     if (path.endsWith('/prepare')) await prepareGate;
+    if (path.endsWith('/attach') && body.nativeSessionId === 'D') await replacementGate;
     const data = path.endsWith('/describe') ? { role: { ...role, current: ref(native), revision: native === 'A' ? 1 : 2 }, targets: [{ providerId: 'recorded', displayName: 'Recorded' }], eligibility: options.unavailable ? { status: 'unavailable', code: 'unsupported', reason: 'This provider does not support native prefix editing.' } : { status: 'ready' } }
       : path.endsWith('/prepare') ? (operation = body, result(outcome))
       : path.endsWith('/commit') ? result('committed') : path.endsWith('/status') ? result(outcome)
@@ -131,12 +153,15 @@ async function setupEdit(kind: Placement, options: { outcome?: 'ready' | 'unknow
   };
   vi.stubGlobal('fetch', fetcher);
   function Main() {
+    const [changedOwner, updateOwner] = useState(false); changeOwner = () => updateOwner(true);
     const view = useConversationSession(session, f.transport);
-    return <LabWorkbench state={view.state} sessionState={view.sessionState} sessionStatus={view.status} actions={view.actions} operationBinding={view.operationBinding}
-      draftBinding={draftBinding} imageDraftBinding={imageDraftBinding} imageRecipient={options.explicitRecipient ? explicitRecipient : view.imageRecipient} draftSessionKey="main-draft" />;
+    const Workbench = kind === 'debugger' ? DebugWorkbench : LabWorkbench;
+    return <Workbench displaySessionKey="selected-owner" state={view.state} sessionState={view.sessionState} sessionStatus={view.status} actions={view.actions} operationBinding={view.operationBinding}
+      draftBinding={changedOwner ? { store: replacementDrafts, key: 'selected-owner' } : draftBinding} imageDraftBinding={imageDraftBinding} imageRecipient={options.explicitRecipient ? explicitRecipient : view.imageRecipient} draftSessionKey="main-draft" />;
   }
   function Harness() {
     const [current, update] = useState(native); setCurrent = update;
+    const [windowTarget, setWindowTarget] = useState(session); replaceTarget = () => setWindowTarget({ ...session, nativeSessionId: 'D', agentId: 'D', title: 'Unrelated D' });
     const [enabled, updateEnabled] = useState(true); setEnabled = updateEnabled;
     const trigger = useRef<HTMLButtonElement>(null);
     const family = { storageScope: scope, baseUrl: scope, target: kind === 'child' ? { ...session, parentNativeSessionId: 'parent' } : session,
@@ -145,22 +170,22 @@ async function setupEdit(kind: Placement, options: { outcome?: 'ready' | 'unknow
       capturedAt: 'now', delivery: 'sent', configured: true, options: {}, settings: [] };
     const item: TpmItem = { key: 'work', hostId: 'local', hostName: 'Local', online: true, unread: false, work: { id: 'work', revision: 1, title: 'Work', providerId: 'recorded', mainNativeSessionId: 'unrelated-main', tpmNativeSessionId: 'A', phase: 'implementing', waiting: 'none', paused: false, summary: '', nextAction: '', document: '', acceptance: '', evidence: [], createdAt: 'now', updatedAt: 'now', nextCheckAt: 0, outbox: [] } };
     return <SessionViewOperationsContext.Provider value={{ storageScope: scope, transport: f.transport, enabled,
-      resolveTarget: source => ({ target: 'parentNativeSessionId' in source && source.parentNativeSessionId ? source : { ...source, nativeSessionId: current }, ...(options.historical ? { historyRoleId: 'history-role' } : {}) }),
+      resolveTarget: source => ({ target: 'parentNativeSessionId' in source && source.parentNativeSessionId || source.nativeSessionId === 'D' ? source : { ...source, nativeSessionId: current }, ...(options.historical ? { historyRoleId: 'history-role' } : {}) }),
       directory: () => new SessionDirectoryClient(scope, fetcher), refreshSettled: async result => { if (result.record.phase === 'committed') { native = result.record.to!.nativeSessionId; update(native); } } }}><ConversationConnectionScope.Provider value={connections}>
-      {kind === 'main' ? <Main /> : kind === 'side' ? <SideConversation session={session} transport={f.transport} store={new ForkStore(scope)} draftBinding={draftBinding} imageDraftBinding={imageDraftBinding}
+      {kind === 'main' || kind === 'debugger' ? <Main /> : kind === 'side' ? <SideConversation session={session} transport={f.transport} store={new ForkStore(scope)} draftBinding={draftBinding} imageDraftBinding={imageDraftBinding}
         onClose={() => {}} onOpenSource={() => {}} onOpenFork={() => {}} onFork={async () => ({})} />
       : kind === 'ask' ? <AskConversation entry={{ source: record.source, record, attached: true, attachedParticipant: askParticipantKey(record) }} transport={f.transport}
         draftBinding={draftBinding} imageDraftBinding={imageDraftBinding} triggerRef={trigger} storageScope={scope} onClose={() => {}} onToggleEnabled={() => {}} onClean={() => {}} onRetry={() => {}} onSendInput={() => {}} onDiscardInput={() => {}} />
       : kind === 'tpm' ? <TpmWorkspace session={session} item={item} visible storageScope={scope} triggerRef={trigger} transport={f.transport} draftBinding={draftBinding}
         onClose={() => {}} onShowList={() => {}} onOpenMain={() => {}} onAction={async () => {}} onResolve={async () => {}} onRetry={() => {}} />
       : kind.startsWith('compact-') || kind === 'child' ? <SessionFamily {...family} />
-      : <SessionWindow entry={{ id: 'window', slotId: 'slot', managed: kind.startsWith('team-'), target: session }} baseUrl={scope} visible compact={false} hostLabel="Local" offline={false}
+      : <SessionWindow entry={{ id: 'window', slotId: 'slot', managed: kind.startsWith('team-'), target: windowTarget }} baseUrl={scope} visible compact={false} hostLabel="Local" offline={false}
         transport={f.transport} draftStore={drafts} draftBinding={draftBinding} imageDraftBinding={imageDraftBinding} navigation={(source, state) => sessionViewNavigation({ source, state, entries: [] })} onFocus={() => {}} onClose={() => {}} />}
     </ConversationConnectionScope.Provider></SessionViewOperationsContext.Provider>;
   }
   const view = await render(<Harness />); lease.release(); unrelated.release();
   await act(async () => { await new Promise(resolve => setTimeout(resolve, 0)); });
-  return { ...f, view, requests, drafts, draftBinding, imageDraftBinding, connections, retireRecipient() { recipientCurrent = false; }, setCurrent, setEnabled, releaseCommit, releasePrepare, setOutcome(value: typeof outcome) { outcome = value; }, async reload() { await unmount(view); return render(<Harness />); } };
+  return { ...f, view, requests, drafts, draftBinding, imageDraftBinding, connections, replaceTarget, changeOwner: () => changeOwner(), failReplacement, retireRecipient() { recipientCurrent = false; }, setCurrent: (value: string) => setCurrent(value), setEnabled, releaseCommit, releasePrepare, setOutcome(value: typeof outcome) { outcome = value; }, async reload() { await unmount(view); return render(<Harness />); } };
 }
 
 it.each(['main', 'side', 'window', 'team-leader', 'team-member', 'compact-leader', 'compact-member', 'ask', 'tpm'] as const)('edits the clicked %s prefix through its own client, follows B and restores without input', async kind => {
@@ -364,13 +389,14 @@ it('keeps the original candidate and recovery controls when a restarted Host rej
   expect(f.sent).toHaveLength(0);
 });
 
-it('refuses automatic commit when the explicitly supplied recipient retires during preparation', async () => {
+it('refuses automatic and manual commit when the explicitly supplied recipient retires during preparation', async () => {
   const f = await setupEdit('main', { holdPrepare: true, explicitRecipient: true });
   await clickPrompt(f.view);
   await vi.waitFor(() => expect(f.requests.filter(item => item.path.endsWith('/prepare'))).toHaveLength(1));
   await act(async () => { f.retireRecipient(); f.releasePrepare(); });
   await clickButton(f.view, 'Details');
   expect(f.view.textContent).toContain('no longer ready');
+  await clickButton(f.view, 'Commit Handoff');
   expect(f.requests.filter(item => item.path.endsWith('/commit'))).toHaveLength(0);
   expect(f.sent).toHaveLength(0);
 });
@@ -401,4 +427,88 @@ it.each(['transport', 'storage scope'] as const)('reattaches a followed view whe
   await act(async () => change());
   await vi.waitFor(() => expect(attached).toHaveLength(2));
   await vi.waitFor(() => expect(view.textContent).toBe('B'));
+});
+
+
+it.each([{ kind: 'side', boundary: 'text' }, { kind: 'side', boundary: 'image' }, { kind: 'debugger', boundary: 'text' }, { kind: 'debugger', boundary: 'image' }] as const)('preserves a resumed $kind owner after $boundary ABA during held recovery commit', async ({ kind, boundary }) => {
+  vi.stubGlobal('Blob', NativeBlob);
+  const f = await setupEdit(kind, { outcome: 'unknown', holdCommit: true, images: boundary === 'image' });
+  await clickPrompt(f.view);
+  await vi.waitFor(() => expect(f.requests.filter(item => item.path.endsWith('/prepare'))).toHaveLength(1));
+  const original = f.requests.find(item => item.path.endsWith('/prepare'))!.body;
+  f.setOutcome('ready');
+  const view = await f.reload();
+  await clickButton(view, 'Details');
+  await vi.waitFor(() => expect(view.textContent).toContain('Commit Handoff'));
+  await clickButton(view, 'Commit Handoff');
+  await vi.waitFor(() => expect(f.requests.filter(item => item.path.endsWith('/commit'))).toHaveLength(1));
+  const image = await inspectImageDraft(f.imageDraftBinding), before = image.snapshot().revision;
+  if (boundary === 'text') {
+    await act(async () => { f.drafts.set('selected-owner', 'newer'); f.drafts.set('selected-owner', ''); });
+  } else {
+    const textRevision = f.drafts.snapshot('selected-owner').revision;
+    await act(async () => {
+      const event = new Event('paste', { bubbles: true, cancelable: true });
+      Object.defineProperty(event, 'clipboardData', { value: { files: [new NativeBlob(['image'], { type: 'image/png' })], getData: () => '' } });
+      promptEditor(view).dispatchEvent(event);
+    });
+    await act(async () => { await vi.waitFor(() => expect(promptEditor(view).querySelector('[data-image-id]')).not.toBeNull()); });
+    await act(async () => { setPromptText(promptEditor(view), ''); promptEditor(view).dispatchEvent(new Event('input', { bubbles: true })); });
+    expect(image.snapshot().revision).toBeGreaterThan(before);
+    expect(f.drafts.snapshot('selected-owner').revision).toBe(textRevision);
+  }
+  await act(async () => f.releaseCommit());
+  await vi.waitFor(() => expect(view.textContent).toContain('A newer draft is preserved'));
+  expect(f.drafts.get('selected-owner')).toBe('');
+  expect(image.snapshot().draft?.parts ?? []).toEqual([]);
+  expect(readPrefixEdit(f.imageDraftBinding.scope, 'selected-owner')?.operation).toEqual(original);
+  await clickButton(view, 'Retry refresh');
+  expect(f.drafts.get('selected-owner')).toBe('');
+  expect(f.requests.filter(item => item.path.endsWith('/prepare'))).toHaveLength(1);
+  expect(f.sent).toHaveLength(0);
+});
+
+it.each(['source', 'owner'] as const)('fences manual ready recovery after the %s changes', async boundary => {
+  const f = await setupEdit('main', { outcome: 'unknown' });
+  await clickPrompt(f.view);
+  await vi.waitFor(() => expect(f.requests.filter(item => item.path.endsWith('/prepare'))).toHaveLength(1));
+  f.setOutcome('ready');
+  const view = await f.reload();
+  await clickButton(view, 'Details');
+  await vi.waitFor(() => expect(view.textContent).toContain('Commit Handoff'));
+  await act(async () => { if (boundary === 'source') f.setCurrent('B'); else f.changeOwner(); });
+  await clickButton(view, 'Commit Handoff');
+  expect(f.requests.filter(item => item.path.endsWith('/commit'))).toHaveLength(0);
+  await clickButton(view, 'Check status');
+  await clickButton(view, 'Reconcile');
+  await clickButton(view, 'Cancel Handoff');
+  expect(f.requests.filter(item => item.path.endsWith('/prepare'))).toHaveLength(1);
+  expect(f.requests.some(item => item.path.endsWith('/cancel'))).toBe(true);
+});
+
+it('retires an explicitly replaced ordinary window while D attachment is held and after it fails', async () => {
+  const f = await setupEdit('window', { windowChild: true });
+  await vi.waitFor(() => expect(observed.bindings.get('A')?.scope?.isCurrent()).toBe(true));
+  await vi.waitFor(() => expect(f.view.querySelectorAll('.lab-session-family-pane')).toHaveLength(2));
+  const original = observed.bindings.get('A')!.scope!;
+  await act(async () => f.drafts.set('selected-owner', 'A draft'));
+  const submit = () => f.view.querySelector<HTMLButtonElement>('[data-testid="prompt-submit"]')!;
+  expect(submit().disabled).toBe(false);
+  await act(async () => f.replaceTarget());
+  await vi.waitFor(() => expect(f.requests.some(item => item.path.endsWith('/attach') && item.body.nativeSessionId === 'D')).toBe(true));
+  expect(original.isCurrent()).toBe(false);
+  expect(f.view.querySelectorAll('[data-prompt-edit-action]')).toHaveLength(0);
+  expect(submit().disabled).toBe(true);
+  await act(async () => submit().click());
+  expect(f.view.querySelectorAll('.lab-session-family-pane')).toHaveLength(1);
+  const layoutKey = `agent-remote:recovery:${f.imageDraftBinding.scope}:session-family:window:${sessionKey({ hostId: 'local', providerId: 'recorded', nativeSessionId: 'D' })}`;
+  expect(JSON.parse(conversationSessionStorage.getItem(layoutKey)!).children).toEqual([]);
+  await act(async () => f.failReplacement());
+  await vi.waitFor(() => expect(f.view.textContent).toContain('D attachment failed'));
+  expect(original.isCurrent()).toBe(false);
+  expect(f.view.querySelectorAll('[data-prompt-edit-action]')).toHaveLength(0);
+  expect(f.view.querySelectorAll('.lab-session-family-pane')).toHaveLength(1);
+  expect(submit().disabled).toBe(true);
+  await act(async () => submit().click());
+  expect(f.sent).toHaveLength(0);
 });

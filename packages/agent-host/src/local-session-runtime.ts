@@ -1,6 +1,8 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { mkdir, readFile, realpath } from 'node:fs/promises';
 import { join } from 'node:path';
+import { isDeepStrictEqual } from 'node:util';
+import { LocalSuccessionReplay, localSuccessionLocator } from './local-succession-replay.js';
 import type { AgentPersistenceHandle, AgentProviderAdapter, AgentSession, AgentSessionConfig, AgentSessionExtensions } from '@orchardworks/agent-provider-sdk';
 import { isNativePrefixSelection, isSuccessionRequest, nativePrefixAncestors, nativeSessionRefKey, PROTOCOL_VERSION, type NativeSessionRef, type PrimaryRole, type SuccessionRecord, type TimelineCursor } from '@orchardworks/agent-remote-protocol';
 import { createOperationCache, type AgentRemoteRelay, type OperationLifecycle, type SessionWireAgent } from '@orchardworks/agent-remote-relay';
@@ -27,6 +29,7 @@ const failure = (status: number, message: string) => Object.assign(new Error(mes
 export class LocalSessionSuccession {
   readonly service: SessionSuccessionService;
   readonly boundary: SessionSuccessionBoundary;
+  readonly replay: LocalSuccessionReplay;
   readonly operationCache = createOperationCache();
   readonly operationLifecycle: OperationLifecycle;
   readonly providers: readonly AgentProviderAdapter[];
@@ -85,6 +88,7 @@ export class LocalSessionSuccession {
       },
       reconcileDelivery: async () => undefined,
     });
+    this.replay = new LocalSuccessionReplay(this.service.store, controllerId);
     this.boundary = new SessionSuccessionBoundary(this.service.contexts, ref => this.assertAdmission(ref), ref => {
       const role = this.service.store.all().find(state => same(state.role.current, ref))?.role;
       return role && { roleId: role.id, roleRevision: role.revision };
@@ -234,21 +238,31 @@ export class LocalSessionSuccession {
     const extensions = await this.extensions(prefix?.record.from ?? ref, () => ref.nativeSessionId);
     return (await this.retain(await adapter.resumeSession(handle, extensions), ref.providerId)).wrapped;
   }
-  private async attachment(ref: NativeSessionRef): Promise<Attachment> {
+  private async attachment(ref: NativeSessionRef, reopen?: () => Promise<AgentSession>): Promise<Attachment> {
     this.adapter(ref);
     const existing = this.native.get(nativeSessionRefKey(ref)); if (existing) return existing;
     const prefix = this.prefix(ref), handle = prefix ? prefix.handle : (await this.saved(ref)).handle;
     if (!handle) throw new Error('Original native prefix handle is unavailable.');
+    if (reopen) {
+      const session = await reopen();
+      try {
+        const info = await session.runtimeInfo();
+        const expected = await this.saved(ref);
+        if (info.providerId !== ref.providerId || info.sessionId !== ref.nativeSessionId || !isDeepStrictEqual(info.persistence, handle)
+          || !info.cwd || await realpath(info.cwd) !== expected.cwd) throw new Error('Historical directory attachment changed its exact native identity.');
+      } catch (error) { await session.dispose(); throw error; }
+      return this.retain(session, ref.providerId);
+    }
     await this.resume(handle); return this.native.get(nativeSessionRefKey(ref))!;
   }
-  async attach(ref: NativeSessionRef): Promise<string> {
+  async attach(ref: NativeSessionRef, reopen?: () => Promise<AgentSession>): Promise<string> {
     await this.service.ready; this.adapter(ref);
     const key = nativeSessionRefKey(ref), current = this.agents.get(key);
     if (current) { try { this.relay!.requireAgent(current); return current; } catch { this.agents.delete(key); } }
     let opening = this.openings.get(key);
     if (!opening) {
       opening = (async () => {
-        const attachment = await this.attachment(ref); if (!attachment.handle) throw new Error('Local session cannot be resumed.');
+        const attachment = await this.attachment(ref, reopen); if (!attachment.handle) throw new Error('Local session cannot be resumed.');
         const agentId = `local-${hash(key)}`;
         await this.relay!.resumeAgent({ protocolVersion: PROTOCOL_VERSION, type: 'resume_agent', payload: { requestId: randomUUID(), agentId, persistence: attachment.handle } });
         this.agents.set(key, agentId); return agentId;
@@ -271,7 +285,7 @@ export class LocalSessionSuccession {
     await this.service.ready;
     if (action === 'describe') {
       if (body.preparation !== undefined && !isNativePrefixSelection(body.preparation)) throw failure(400, 'Invalid native prefix selection.');
-      return this.service.describe(role, role.current, this.adapters.map(adapter => adapter.descriptor), body.preparation);
+      return this.service.describe(role, role.current, this.adapters.map(({ descriptor }) => ({ providerId: descriptor.providerId, displayName: descriptor.displayName })), body.preparation);
     }
     let record: SuccessionRecord;
     if (action === 'prepare') {
@@ -289,7 +303,7 @@ export class LocalSessionSuccession {
       else throw failure(404, 'Unknown local succession action.');
     }
     const current = this.service.store.read(role.id).role;
-    return { record, role: current, locator: { hostId: this.controllerId, providerId: current.current.providerId, nativeSessionId: current.current.nativeSessionId } };
+    return { record, role: current, locator: localSuccessionLocator(current.current) };
   }
   async close(): Promise<void> {
     if (this.closed) return;

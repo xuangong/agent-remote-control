@@ -1,4 +1,6 @@
 import { browseWorkspaceFolders, createWorkspaceFolder, WorkspaceFolderError } from '@orchardworks/agent-remote-controller';
+import { isDeepStrictEqual } from 'node:util';
+import { isSuccessionRequest, nativeSessionRefKey } from '@orchardworks/agent-remote-protocol';
 import { createHash, randomUUID } from 'node:crypto';
 import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
@@ -144,7 +146,7 @@ export function createSessionDirectory(providers: readonly AgentProviderAdapter[
       server.removeAllListeners('request');
       server.on('request', (request, response) => {
         const url = new URL(request.url ?? '/', 'http://localhost');
-        if (!url.pathname.startsWith('/v1/remote/')) {
+        if (!url.pathname.startsWith('/v1/remote/') && url.pathname !== '/v1/session-successions' && !url.pathname.startsWith('/v1/session-successions/')) {
           for (const handler of handlers) handler.call(server, request, response);
           return;
         }
@@ -157,6 +159,11 @@ export function createSessionDirectory(providers: readonly AgentProviderAdapter[
         const address = request.socket.remoteAddress;
         if (!['127.0.0.1', '::1', '::ffff:127.0.0.1'].includes(address ?? '') || (request.headers.origin && request.headers.origin !== origin)) {
           throw new DirectoryError(403, 'forbidden', 'The directory is available only to the local application.');
+        }
+        if (url.pathname === '/v1/session-successions' || url.pathname.startsWith('/v1/session-successions/')) {
+          if (request.method !== 'GET') throw new DirectoryError(405, 'method_not_allowed', 'Method is not allowed.');
+          await local.service.ready;
+          return send(response, 200, local.replay.read(url.pathname, url.searchParams));
         }
         if (request.method === 'GET') {
           const providerId = required(url.searchParams.get('providerId'), 'providerId');
@@ -183,21 +190,47 @@ export function createSessionDirectory(providers: readonly AgentProviderAdapter[
             await local.service.ready;
             const action = url.pathname.slice('/v1/remote/succession/'.length);
             let role;
-            if (action === 'describe') {
+            let input = body;
+            const saved = typeof body.operationId === 'string' ? local.service.store.all().flatMap(state => state.operations).find(record => record.operationId === body.operationId) : undefined;
+            const hasOriginal = body.providerId !== undefined || body.nativeSessionId !== undefined;
+            if (action === 'describe' || action === 'prepare' && hasOriginal || action === 'cancel' && !saved && hasOriginal) {
               const providerId = required(body.providerId, 'providerId'), nativeSessionId = required(body.nativeSessionId, 'nativeSessionId');
               const attached = await attach(relay, providerId, nativeSessionId);
               role = await local.ensureRole(local.agentRef(attached.agentId));
+              if (action !== 'describe') input = { operationId: body.operationId, roleId: role.id, expectedRevision: body.expectedRevision, from: local.ref(providerId, nativeSessionId),
+                ...(body.targetProviderId === undefined ? {} : { targetProviderId: body.targetProviderId }), ...(body.preparation === undefined ? {} : { preparation: body.preparation }) };
             } else {
-              const roleId = required(body.roleId ?? (typeof body.operationId === 'string' ? local.service.store.operation(body.operationId).roleId : undefined), 'roleId');
+              const roleId = required(body.roleId ?? saved?.roleId, 'roleId');
               role = local.service.store.read(roleId).role;
             }
-            const result = await local.action(action, body, role);
+            if (action !== 'describe' && action !== 'prepare') {
+              if (saved) {
+                if (body.expectedRevision !== undefined && body.expectedRevision !== saved.expectedRevision) throw new DirectoryError(409, 'request_conflict', 'The original revision changed.');
+                if (hasOriginal && (body.providerId !== saved.from.providerId || body.nativeSessionId !== saved.from.nativeSessionId
+                  || body.expectedRevision !== saved.expectedRevision || (body.targetProviderId ?? saved.from.providerId) !== (saved.targetProviderId ?? saved.from.providerId)
+                  || !isDeepStrictEqual(body.preparation, saved.preparation))) throw new DirectoryError(409, 'request_conflict', 'The original succession identity changed.');
+              } else if (action === 'cancel') {
+                if (!isSuccessionRequest(input) || input.roleId !== role.id || nativeSessionRefKey(input.from) !== nativeSessionRefKey(role.current)) throw new DirectoryError(400, 'invalid_request', 'Cancellation requires its exact original request.');
+                await local.service.store.begin(input, true);
+              } else throw new DirectoryError(403, 'succession_unavailable', 'Succession access is unavailable.');
+              input = { ...input, operationId: body.operationId, expectedRevision: saved?.expectedRevision ?? input.expectedRevision };
+            }
+            const result = await local.action(action, input, role);
             return send(response, 200, result);
           }
           const providerId = required(body.providerId, 'providerId');
           const { source } = requireEntry(providerId);
           if (url.pathname === '/v1/remote/workspace-folders/create') return send(response, 201, await createWorkspaceFolder(body.parentPath, body.name));
           if (url.pathname === '/v1/remote/child/attach') return send(response, 200, await attach(relay, providerId, required(body.nativeSessionId, 'nativeSessionId'), required(body.parentNativeSessionId, 'parentNativeSessionId')));
+          if (url.pathname === '/v1/remote/history/attach') {
+            await local.service.ready;
+            const ref = local.replay.historical(required(body.roleId, 'roleId'), local.ref(providerId, required(body.nativeSessionId, 'nativeSessionId')));
+            const custom = sources.find(source => source.providerId === providerId);
+            const state = local.service.store.read(required(body.roleId, 'roleId'));
+            const isOrigin = nativeSessionRefKey(state.role.origin) === nativeSessionRefKey(ref);
+            if (custom && !isOrigin) await assertNoExternalGrant(custom, ref.nativeSessionId);
+            return send(response, 200, { agentId: await local.attach(ref, custom && isOrigin ? () => custom.open(ref.nativeSessionId) : undefined), nativeSessionId: ref.nativeSessionId });
+          }
           if (url.pathname === '/v1/remote/attach') return send(response, 200, await attach(relay, providerId, required(body.nativeSessionId, 'nativeSessionId')));
           if (url.pathname === '/v1/remote/create') {
             if (body.creationSource !== undefined) throw new DirectoryError(400, 'unsupported_configuration', 'Snapshot source admission is unavailable in the legacy local directory. Use a paired Host.');

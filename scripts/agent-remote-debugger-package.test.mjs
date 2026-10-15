@@ -45,6 +45,8 @@ test('installed public ARDB contains its local service and recovers exact prefix
     assert.ok(!local.includes(repository));
     const graph = JSON.parse(await readFile(join(installed, 'dist/local-session-succession.meta.json'), 'utf8'));
     assert.ok(graph.inputs.includes('local-session-runtime.js'));
+    assert.ok(graph.inputs.includes('local-succession-replay.js'));
+    assert.ok(graph.declarations.includes('local-succession-replay.d.ts'));
     assert.ok(graph.imports.every(name => name.startsWith('node:') || ['@orchardworks/agent-provider-sdk', '@orchardworks/agent-remote-protocol', '@orchardworks/agent-remote-relay'].includes(name)));
     for (const name of graph.declarations) {
       const declaration = await readFile(join(installed, 'dist/internal/local-succession', name), 'utf8');
@@ -71,6 +73,7 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { createDebuggerServer } from '@orchardworks/agent-remote-debugger/dist/server.js';
 import { createDebuggerRuntime } from '@orchardworks/agent-remote-debugger/dist/runtime.js';
+import { HttpWebSocketTransport } from '@orchardworks/agent-remote-web/headless';
 import { createPrefixAdapter } from './prefix-adapter.mjs';
 const post = (server, action, body) => fetch(server.url + '/__ardb/succession/' + action, { method: 'POST', headers: { origin: server.url, 'content-type': 'application/json' }, body: JSON.stringify(body), signal: AbortSignal.timeout(5000) });
 async function prepare(server, id) {
@@ -87,11 +90,20 @@ test('installed direct runtime commits, reads original history, restores B and n
   assert.equal((await (await prepare(server, 'edit')).json()).record.phase, 'ready');
   assert.equal((await post(server, 'commit', { operationId: 'edit', expectedRevision: 1 })).status, 200);
   const committed = await (await fetch(server.url + '/__ardb/session')).json(); assert.equal(committed.nativeSessionId, 'candidate-1');
+  const replay = new HttpWebSocketTransport(server.url, { sessionSuccessions: true });
+  const page = await replay.fetchSessionSuccessions({ limit: 1 }); assert.equal(page.successions.length, 1);
+  const roleId = page.successions[0].projection.role.id;
+  assert.equal(page.successions[0].to.hostId, 'local'); assert.equal(page.successions[0].projection.role.revision, 2);
+  assert.deepEqual(await replay.fetchSessionSuccessionOperation(roleId, 'edit'), page.successions[0]);
+  assert.equal((await replay.fetchSessionSuccessionCurrent(roleId)).locator.nativeSessionId, 'candidate-1');
+  assert.equal((await fetch(server.url + '/v1/session-successions?limit=65')).status, 400);
   await assert.rejects(old.client.sendMessage('obsolete'));
   assert.match(JSON.stringify(old.replica.getState().timeline), /discarded tail/);
   current = await createDebuggerRuntime(committed.agentId, { relayUrl: server.url, origin: server.url }); await current.ready(3000); await current.client.sendMessage('replacement');
   old.close(); current.close(); await server.close();
   server = await createDebuggerServer(options); assert.deepEqual(server.session, committed); assert.equal((await adapter.state()).forks, 1); assert.equal((await adapter.state()).creates, 1);
+  const restoredReplay = new HttpWebSocketTransport(server.url, { sessionSuccessions: true });
+  assert.deepEqual(await restoredReplay.fetchSessionSuccessionOperation(roleId, 'edit'), page.successions[0]);
   const history = await (await fetch(server.url + '/__ardb/history?nativeSessionId=A')).json();
   old = await createDebuggerRuntime(history.agentId, { relayUrl: server.url, origin: server.url }); await old.ready(3000); await assert.rejects(old.client.sendMessage('historical'));
   await adapter.unknown(); assert.equal((await (await prepare(server, 'unknown')).json()).record.phase, 'unknown'); old.close(); await server.close();

@@ -8,7 +8,7 @@ const root = fileURLToPath(new URL('..', import.meta.url));
 const hostEntry = fileURLToPath(import.meta.resolve('@orchardworks/agent-remote-controller/local-session-succession'));
 const hostDist = dirname(hostEntry);
 const manifest = JSON.parse(await readFile(join(root, 'package.json'), 'utf8'));
-const allowedInputs = new Set(['local-session-succession', 'local-session-runtime', 'session-succession-service', 'session-succession', 'session-succession-store',
+const allowedInputs = new Set(['local-session-succession', 'local-session-runtime', 'local-succession-replay', 'session-succession-service', 'session-succession', 'session-succession-store',
   'session-succession-context', 'local-succession-preparation', 'session-succession-boundary', 'session-source-binding', 'source-participant', 'succession-persistence', 'session-reference'].map(name => `${name}.js`));
 const publicPackages = new Set(['@orchardworks/agent-provider-sdk', '@orchardworks/agent-remote-protocol', '@orchardworks/agent-remote-relay']);
 const isExternal = name => name.startsWith('node:') || builtinModules.includes(name) || publicPackages.has(name) && Object.hasOwn(manifest.dependencies, name);
@@ -23,7 +23,7 @@ for (const output of Object.values(result.metafile.outputs)) for (const imported
 const copied = new Set();
 async function copyDeclaration(name) {
   if (copied.has(name)) return;
-  if (basename(name) !== name || !name.endsWith('.d.ts')) throw new Error(`Declaration escaped the local closure: ${name}`);
+  if (basename(name) !== name || !name.endsWith('.d.ts') || !allowedInputs.has(name.replace(/\.d\.ts$/, '.js'))) throw new Error(`Declaration escaped the local closure: ${name}`);
   copied.add(name);
   const content = (await readFile(join(hostDist, name), 'utf8')).replace(/^\/\/# sourceMappingURL=.*$/gm, '');
   for (const match of content.matchAll(/(?:from\s*|import\s*\(\s*)['"]([^'"]+)['"]/g)) {

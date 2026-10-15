@@ -93,3 +93,37 @@ test('restores the exact uncommitted candidate without refreshing its source cap
   expect(await reconciled.json()).toMatchObject({ record: { phase: 'rejected', failureCode: 'succession_boundary_changed', to: { nativeSessionId: 'candidate-1' } } });
   expect(restarted.session.nativeSessionId).toBe('A'); expect((await f.adapter.state()).forks).toBe(1);
 }, 15000);
+
+test('serves immutable committed replay and actual current through the public transport with owned-role access', async () => {
+  const { HttpWebSocketTransport } = await import('@orchardworks/agent-remote-web/headless');
+  const { LocalSessionSuccession } = await import('./local-session-succession.js');
+  const f = await fixture(); let server = await f.start();
+  const transport = new HttpWebSocketTransport(server.url, { sessionSuccessions: true });
+  expect((await transport.fetchSessionSuccessions()).successions).toEqual([]);
+  await prepare(server, 'one');
+  const first = await (await post(server, 'commit', { operationId: 'one', expectedRevision: 1 })).json();
+  await prepare(server, 'two');
+  expect(await (await post(server, 'commit', { operationId: 'two', expectedRevision: 2 })).json()).toMatchObject({ record: { phase: 'committed' } });
+  const roleId = first.role.id;
+  const page = await transport.fetchSessionSuccessions({ roleId, limit: 1 });
+  expect(page.successions[0]).toMatchObject({ projection: { role: { revision: 2, current: { nativeSessionId: 'candidate-1' } } }, to: { hostId: 'local' } });
+  expect(await transport.fetchSessionSuccessionOperation(roleId, 'one')).toEqual(page.successions[0]);
+  expect(await transport.fetchSessionSuccessionCurrent(roleId)).toMatchObject({ role: { revision: 3 }, locator: { nativeSessionId: 'candidate-2' } });
+  expect((await transport.fetchSessionSuccessions({ roleId, limit: 1, cursor: page.nextCursor! })).successions[0]?.projection.role.revision).toBe(3);
+  for (const suffix of ['?limit=65', '?cursor=invalid', '?roleId=x&roleId=y', '/current', '/operation?roleId=' + roleId]) {
+    expect((await fetch(server.url + '/v1/session-successions' + suffix)).status).toBe(400);
+  }
+  expect((await fetch(server.url + '/v1/session-successions', { headers: { origin: 'https://foreign.example' } })).status).toBe(403);
+  expect((await fetch(server.url + '/__ardb/history?nativeSessionId=candidate-2')).status).toBe(403);
+  const directory = server.successionStateDirectory; await server.close();
+  const state = new LocalSessionSuccession(directory, first.role.current.controllerId, [f.adapter]); await state.service.ready;
+  const foreign = { ...first.role, id: 'foreign-role', revision: 1, origin: { ...first.role.origin, nativeSessionId: 'foreign' }, current: { ...first.role.origin, nativeSessionId: 'foreign' } };
+  await state.service.createRole(foreign); await state.close();
+  server = await f.start();
+  const restarted = new HttpWebSocketTransport(server.url, { sessionSuccessions: true });
+  expect((await restarted.fetchSessionSuccessions()).successions).toHaveLength(2);
+  for (const suffix of ['?roleId=foreign-role', '/current?roleId=foreign-role', '/operation?roleId=foreign-role&operationId=one', '/operation?roleId=' + roleId + '&operationId=missing']) {
+    expect((await fetch(server.url + '/v1/session-successions' + suffix)).status).toBe(403);
+  }
+  expect(await restarted.fetchSessionSuccessionOperation(roleId, 'one')).toEqual(page.successions[0]);
+}, 20000);

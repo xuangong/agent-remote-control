@@ -129,6 +129,7 @@ it.each(['external', 'unknown', 'error', 'unmarked', 'absent', 'changed'] as con
   let described = false;
   let handle: AgentPersistenceHandle | undefined;
   let opens = 0;
+  let corruptHistory = false;
   const externalTools = grantState === 'external' ? { tools: [{ name: 'read_source_session', description: 'External source grant', inputSchema: { type: 'object' }, execute: async () => 'external source' }] } : {};
   const source = { providerId, supportsSourceReferences: true,
     ...(grantState === 'unmarked' ? {} : { sourceGrantState: async () => { if (grantState === 'error') throw new Error('Grant state unavailable.'); return grantState === 'changed' ? described ? 'external' as const : 'absent' as const : grantState; } }),
@@ -136,7 +137,12 @@ it.each(['external', 'unknown', 'error', 'unmarked', 'absent', 'changed'] as con
     create: async () => 'external-reader', open: async () => {
       opens++;
       const session = handle ? await adapter.resumeSession(handle, externalTools) : await adapter.createSession({ sessionId: 'external-reader', cwd: root, ...externalTools });
-      handle = (await session.runtimeInfo()).persistence; return session;
+      handle = (await session.runtimeInfo()).persistence;
+      if (corruptHistory) return new Proxy(session, { get(target, name) {
+        if (name === 'runtimeInfo') return async () => ({ ...await target.runtimeInfo(), persistence: { ...handle!, opaque: 'wrong-exact-handle' } });
+        const value = Reflect.get(target, name, target); return typeof value === 'function' ? value.bind(target) : value;
+      } });
+      return session;
     } };
   const options = { providers: [adapter], directories: [source], labOrigin: origin, successionStateDirectory: join(root, 'state') };
   let server = createProtocolValidationServer(options);
@@ -160,6 +166,18 @@ it.each(['external', 'unknown', 'error', 'unmarked', 'absent', 'changed'] as con
       const response = await fetch(`${restored.url}/v1/remote/attach`, { method: 'POST', headers: { origin, 'content-type': 'application/json' }, body: JSON.stringify({ providerId, nativeSessionId: 'external-reader' }), signal: AbortSignal.timeout(5000) });
       expect(await response.json()).toMatchObject({ nativeSessionId: 'candidate-1' });
       expect(opens).toBe(1); expect((await adapter.state()).forks).toBe(1);
+      const { SessionDirectoryClient } = await import('../directory-client.js');
+      const client = new SessionDirectoryClient(restored.url, (input, init) => fetch(input, { ...init, headers: { ...init?.headers, origin } }));
+      corruptHistory = true;
+      await expect(client.attachHistorical(providerId, 'external-reader', role.id)).rejects.toMatchObject({ status: 409 });
+      corruptHistory = false;
+      const historical = await client.attachHistorical(providerId, 'external-reader', role.id);
+      expect(historical.nativeSessionId).toBe('external-reader'); expect(opens).toBe(3);
+      const { createDebuggerRuntime } = await import('../../../agent-remote-debugger/src/runtime.js');
+      const old = await createDebuggerRuntime(historical.agentId, { relayUrl: restored.url, origin });
+      try { await old.ready(3000); await expect(old.client.sendMessage('historical custom input')).rejects.toThrow(); }
+      finally { old.close(); }
+      expect((await adapter.state()).creates).toBe(1);
     }
     if (grantState === 'external') {
       expect(await adapter.readSource('external-reader', {})).toBe('external source');

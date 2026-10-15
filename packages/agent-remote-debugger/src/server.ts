@@ -7,7 +7,7 @@ import { homedir, tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { AgentPersistenceHandle, AgentSessionConfig } from '@orchardworks/agent-provider-sdk';
-import { PROTOCOL_VERSION } from '@orchardworks/agent-remote-protocol';
+import { PROTOCOL_VERSION, nativeSessionRefKey } from '@orchardworks/agent-remote-protocol';
 import { createAgentRemoteHttpServer, createAgentRemoteRelay, InputImageStore, InputResourceStore } from '@orchardworks/agent-remote-relay';
 
 import { localRequestAllowed, serveAssets } from './local-web.js';
@@ -78,12 +78,19 @@ export async function createDebuggerServer(options: DebuggerServerOptions) {
     if (path === '/__ardb/session' && request.method === 'GET') {
       response.writeHead(session ? 200 : 503, { 'Content-Type': 'application/json' }).end(JSON.stringify(session ?? { error: 'starting' })); return;
     }
+    if (path === '/v1/session-successions' || path.startsWith('/v1/session-successions/')) {
+      if (request.method !== 'GET') { response.writeHead(405).end(); return; }
+      if (!ownedOrigin) throw Object.assign(new Error('Owned session is starting.'), { status: 503 });
+      await local.service.ready;
+      const result = local.replay.read(path, new URL(request.url ?? '/', url).searchParams, ownedOrigin);
+      response.writeHead(200, { 'Content-Type': 'application/json' }).end(JSON.stringify(result)); return;
+    }
     if (path === '/__ardb/history' && request.method === 'GET') {
       if (!ownedOrigin) throw new Error('Owned session is starting.');
-      const role = await local.ensureRole(ownedOrigin), state = local.service.store.read(role.id);
+      const role = local.service.store.all().find(state => nativeSessionRefKey(state.role.origin) === nativeSessionRefKey(ownedOrigin!))?.role;
+      if (!role) throw Object.assign(new Error('Owned history is unavailable.'), { status: 403 });
       const requested = new URL(request.url ?? '/', url).searchParams.get('nativeSessionId');
-      const source = [role.origin, ...state.operations.filter(row => row.phase === 'committed').map(row => row.to!)].find(ref => ref.nativeSessionId === requested);
-      if (!source) throw Object.assign(new Error('History is outside the owned lineage.'), { status: 403 });
+      const source = local.replay.historical(role.id, local.ref(role.origin.providerId, requested ?? ''), ownedOrigin);
       const historicalId = await local.attach(source); historicalAgents.add(historicalId);
       response.writeHead(200, { 'Content-Type': 'application/json' }).end(JSON.stringify({ agentId: historicalId, providerId: source.providerId, nativeSessionId: source.nativeSessionId })); return;
     }

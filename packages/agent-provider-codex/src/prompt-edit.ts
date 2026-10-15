@@ -2,7 +2,6 @@ import { realpath } from 'node:fs/promises';
 import type { AgentPersistenceHandle } from '@orchardworks/agent-provider-sdk';
 import { codexEvidenceJson } from './native-evidence.js';
 import { CodexAppServerRpcError, type CodexAppServerTransport } from './app-server-transport.js';
-import { readCodexHistoryPage } from '@orchardworks/codex-daemon-client';
 import { isRecord, readString } from './native.js';
 import { codexImagePlaceholderLabel } from './message-content.js';
 
@@ -72,9 +71,10 @@ async function completeTurns(transport: Pick<CodexAppServerTransport, 'request'>
     try { page = await transport.request('thread/turns/list', { threadId, limit: 10, sortDirection: 'desc', itemsView: 'full', ...(cursor ? { cursor } : {}) }); }
     catch (error) {
       if (index !== 0 || !(error instanceof CodexAppServerRpcError) || error.code !== -32601) throw error;
-      const legacy = await readCodexHistoryPage(transport, threadId);
+      const legacy = await transport.request('thread/read', { threadId, includeTurns: true });
+      if (!isRecord(legacy) || !isRecord(legacy.thread) || legacy.thread.id !== threadId) throw new Error('Codex complete legacy prefix readback is unavailable.');
       const turns = legacy.thread.turns;
-      if (legacy.historyCursor || !Array.isArray(turns) || turns.length > 5000 || turns.some(turn => !isRecord(turn) || !readString(turn.id) || !Array.isArray(turn.items))
+      if (!Array.isArray(turns) || turns.length > 5000 || turns.some(turn => !isRecord(turn) || !readString(turn.id) || !Array.isArray(turn.items))
         || new Set(turns.map(turn => turn.id)).size !== turns.length) throw new Error('Codex complete legacy prefix readback is unavailable.');
       return turns;
     }

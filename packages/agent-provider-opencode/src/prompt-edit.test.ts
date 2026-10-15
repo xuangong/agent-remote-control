@@ -35,6 +35,8 @@ async function fixture(callbacks = false) {
   const permissions: Array<{ id: string; sessionID: string }> = [];
   const forms: Array<{ id: string; sessionID: string }> = [];
   const inbox: Array<{ id: string; sessionID: string }> = [];
+  let nullableChildCursor = false;
+  let childPageGate: { parentID: string; entered(): void; release: Promise<void> } | undefined;
   const streams = new Set<ServerResponse>();
   const server = createServer(async (request, response) => {
     const url = new URL(request.url!, 'http://localhost');
@@ -61,7 +63,12 @@ async function fixture(callbacks = false) {
     if (url.pathname === '/api/permission/request') return json({ location: { directory: cwd }, data: permissions });
     if (url.pathname === '/api/model') return json({ location: { directory: cwd }, data: [{ providerID: 'test', id: 'model', modelID: 'model', name: 'Model', enabled: true, status: 'active', capabilities: {}, variants: [], limit: { context: 1000, output: 100 } }] });
     if (url.pathname === '/api/agent') return json({ location: { directory: cwd }, data: ['build', 'plan'].map(name => ({ id: name, name, mode: 'primary', hidden: false, permissions: [], request: {} })) });
-    if (url.pathname === '/api/session') return json({ data: [...sessions.values()].filter(value => !url.searchParams.has('parentID') || value.parentID === url.searchParams.get('parentID')), cursor: {} });
+    if (url.pathname === '/api/session') {
+      if (childPageGate?.parentID === url.searchParams.get('parentID')) {
+        const gate = childPageGate; childPageGate = undefined; gate.entered(); await gate.release;
+      }
+      return json({ data: [...sessions.values()].filter(value => !url.searchParams.has('parentID') || value.parentID === url.searchParams.get('parentID')), cursor: nullableChildCursor ? { next: null } : {} });
+    }
     const match = /^\/api\/(?:experimental\/)?session\/([^/]+)(?:\/(.*))?$/.exec(url.pathname);
     if (!match) return json({ message: `Unexpected ${url.pathname}` }, 404);
     const id = match[1]!; const operation = match[2];
@@ -96,6 +103,13 @@ async function fixture(callbacks = false) {
   const provider = new OpenCodeAgentProvider({ serverUrl, requestTimeoutMs: 1000, ...(callbacks ? { callbackConfigPath } : {}) });
   cleanups.push(() => provider.close());
   return { provider, source, histories, writes, reads, sessions, instructions, nativeTools, active, permissions, forms, inbox,
+    set nullableChildCursor(value: boolean) { nullableChildCursor = value; },
+    deferChildPage(parentID: string) {
+      let entered!: () => void, release!: () => void;
+      const reached = new Promise<void>(resolve => { entered = resolve; });
+      childPageGate = { parentID, entered, release: new Promise<void>(resolve => { release = resolve; }) };
+      return { reached, release };
+    },
     event(type: string, data: unknown) { for (const stream of streams) stream.write(`data: ${JSON.stringify({ id: Math.random().toString(), type, created: Date.now(), data })}\n\n`); },
     disconnect() { for (const stream of streams) stream.destroy(); }, set busy(value: boolean) { busy = value; } };
 }
@@ -271,6 +285,34 @@ test('invalidates prompt-edit tokens on disconnect before recovery readback', as
   await new Promise(resolve => setTimeout(resolve, 10));
   expect(evidence.isCurrent(token)).toBe(false);
   await expect(evidence.inspectReadiness()).rejects.toThrow();
+}, 10000);
+
+test('rejects the first readiness snapshot when an undiscovered grandchild starts during discovery', async () => {
+  const f = await fixture();
+  f.sessions.get('child')!.parentID = 'fork';
+  f.sessions.set('grandchild', { ...f.sessions.get('child')!, id: 'grandchild', parentID: 'child' });
+  f.histories.set('grandchild', []);
+  const branch = await f.provider.forkForPromptEdit(target), evidence = branch.promptEditEvidence!;
+  const gate = f.deferChildPage('child');
+  const readiness = evidence.inspectReadiness();
+  const rejection = expect(readiness).rejects.toThrow(/changed|readback/i);
+  try {
+    await gate.reached;
+    f.active.grandchild = { type: 'running' };
+    f.event('session.execution.started', { sessionID: 'grandchild', executionID: 'grandchild-execution' });
+    await new Promise(resolve => setTimeout(resolve, 10));
+  } finally { gate.release(); }
+  await rejection;
+  expect(() => evidence.captureValidity()).toThrow();
+  expect(await evidence.inspectReadiness()).toMatchObject({ activeChildren: 1 });
+  expect(() => evidence.captureValidity()).toThrow();
+}, 10000);
+
+test('accepts a nullable terminal child cursor for preflight and independent readiness', async () => {
+  const f = await fixture(); f.nullableChildCursor = true;
+  const branch = await f.provider.forkForPromptEdit(target), evidence = branch.promptEditEvidence!;
+  expect(await evidence.inspectReadiness()).toMatchObject({ idle: true, activeChildren: 0 });
+  const token = evidence.captureValidity(); expect(evidence.isCurrent(token)).toBe(true);
 }, 10000);
 
 test('rejects foreign attachment tokens and invalidates active-child changes without timeline input', async () => {

@@ -42,8 +42,8 @@ export async function readPromptEditReadiness(transport: OpenCodeTransport, nati
         if (active[child.id] || waiting.has(child.id)) activeChildren++;
       }
       const next = page.cursor.next;
-      if (next !== undefined && (typeof next !== 'string' || !next)) reject('OpenCode child cursor is invalid.');
-      cursor = page.data.length === 200 ? next : undefined;
+      if (next != null && (typeof next !== 'string' || !next)) reject('OpenCode child cursor is invalid.');
+      cursor = page.data.length === 200 ? next ?? undefined : undefined;
       if (cursor && cursors.has(cursor)) reject('OpenCode child pagination did not advance.');
       if (cursor) cursors.add(cursor);
     } while (cursor);
@@ -63,10 +63,12 @@ export class OpenCodePromptEditEvidence implements AgentPromptEditEvidence {
   readonly version = 1 as const;
   private generation = 0;
   private baseline = -1;
+  private inspections = 0;
   private children = new Set<string>();
   private readonly tokens = new WeakMap<object, number>();
   constructor(private readonly ports: Ports) {}
-  observes(sessionId: unknown, parentId?: unknown): boolean { return sessionId === this.ports.nativeId || parentId === this.ports.nativeId
+  observes(sessionId: unknown, parentId?: unknown): boolean { return this.inspections > 0 && typeof sessionId === 'string'
+    || sessionId === this.ports.nativeId || parentId === this.ports.nativeId
     || typeof sessionId === 'string' && this.children.has(sessionId) || typeof parentId === 'string' && this.children.has(parentId); }
   invalidate(): void { this.generation++; this.baseline = -1; }
   private localReady(): boolean {
@@ -77,7 +79,11 @@ export class OpenCodePromptEditEvidence implements AgentPromptEditEvidence {
     this.baseline = -1;
     if (!this.ports.readable()) reject('OpenCode prompt-edit attachment is closed or recovering.');
     const generation = this.generation;
-    const native = await readPromptEditReadiness(this.ports.transport, this.ports.nativeId, this.ports.cwd, ids => { this.children = ids; });
+    let native: AgentNativeReadiness;
+    // An event may belong to a descendant whose identity has not been enumerated yet.
+    this.inspections++;
+    try { native = await readPromptEditReadiness(this.ports.transport, this.ports.nativeId, this.ports.cwd, ids => { this.children = ids; }); }
+    finally { this.inspections--; }
     if (!this.ports.readable() || generation !== this.generation) reject('OpenCode prompt-edit readiness changed during native readback.');
     const local = this.ports.local();
     const result = { ...native, idle: native.idle && local.idle, pendingInputs: native.pendingInputs + local.pendingInputs,

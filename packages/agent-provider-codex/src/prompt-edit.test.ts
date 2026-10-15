@@ -267,3 +267,20 @@ it('rejects an incomplete paginated snapshot returned while probing legacy readb
   await expect(new CodexAppServerProvider({ spawn: () => app.child }).verifyPromptEditBranch(target, { providerId: 'codex', sessionId: 'branch', opaque: JSON.stringify({ cwd }) })).rejects.toThrow(/complete|unavailable/i);
   expect(app.requests.every(r => ['initialize', 'thread/read', 'thread/turns/list'].includes(r.method))).toBe(true);
 });
+
+it('rejects fallback pagination without an explicit completion cursor', async () => {
+  const { CodexAppServerProvider } = await import('./provider.js');
+  const cwd = realpathSync(process.cwd());
+  let candidateReads = 0;
+  const app = createScriptedAppServer({
+    'thread/read': params => ({ thread: { id: (params as any).threadId, cwd } }),
+    'thread/turns/list': params => {
+      if ((params as any).threadId === 'source') return { data: [{ id: 'turn-2', status: 'completed', items: [prompt] }], nextCursor: null };
+      if (++candidateReads === 1) throw Object.assign(new Error('Method not found'), { code: -32601 });
+      return { data: [] };
+    },
+  });
+  await expect(new CodexAppServerProvider({ spawn: () => app.child }).verifyPromptEditBranch(target, { providerId: 'codex', sessionId: 'branch', opaque: JSON.stringify({ cwd }) })).rejects.toThrow(/complete|unavailable/i);
+  expect(candidateReads).toBe(1);
+  expect(app.requests).toContainEqual(expect.objectContaining({ method: 'thread/read', params: { threadId: 'branch', includeTurns: true } }));
+});

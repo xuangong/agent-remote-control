@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useReducer, useState } from 'react';
 import { createRoot } from 'react-dom/client';
-import type { AgentSnapshot, HistoryPage, Team } from '@orchardworks/agent-remote-protocol';
-import type { RemoteAgentTransport } from '@orchardworks/agent-remote-web';
+import type { AgentSnapshot, ClientMessage, HistoryPage, Team } from '@orchardworks/agent-remote-protocol';
+import type { RemoteAgentTransport, RemoteTransportListener } from '@orchardworks/agent-remote-web';
 import { TeamMenu } from '../../src/components/TeamMenu';
 import { SessionTrackingMenu } from '../../src/components/SessionTrackingMenu';
 import type { SessionTracking } from '../../src/hooks/useSessionTracking';
@@ -39,9 +39,28 @@ const timeline = (id: string): HistoryPage => ({ protocolVersion: '1.8.0', type:
   entries: Array.from({ length: 20 }, (_, index) => ({ providerId: 'recorded', seqStart: index + 1, seqEnd: index + 1, timestamp: '2026-10-12T00:00:00Z', sourceSeqRanges: [], collapsed: [], resources: [], item: { ...(index < 4 ? { background: { id: 'fixture-review', kind: 'review' as const, status: 'silent' as const } } : {}), type: 'assistant_message' as const, text: `Review ${index + 1}: We can keep this session focused on one delivery while checking the main session for progress.\n\nThe acceptance criteria and next steps stay visible in this conversation.` } })),
   hasOlder: false, hasNewer: false, error: null } });
 let connections = 0;
+const pendingInputs = new Map<string, Extract<ClientMessage, { type: 'send_message' }>>();
+const inputListeners = new Map<string, RemoteTransportListener>();
+const nextSeq = new Map<string, number>();
+function settleInput(id: string, outcome: 'ack' | 'echo' | 'reject') {
+ const input = pendingInputs.get(id), listener = inputListeners.get(id);
+ if (!input || !listener) throw new Error(`No pending input for ${id}.`);
+ if (outcome === 'echo') {
+  const seq = nextSeq.get(id) ?? 21; nextSeq.set(id, seq + 1);
+  listener.onMessage({ protocolVersion: '1.8.0', type: 'agent_stream', payload: { agentId: id, epoch: 'epoch', seq, timestamp: new Date().toISOString(),
+   event: { type: 'timeline', providerId: 'recorded', item: { type: 'user_message', text: 'text' in input.payload ? input.payload.text : 'Image input' }, resources: [] } } });
+ } else if (outcome === 'ack') {
+  listener.onMessage({ protocolVersion: '1.8.0', type: 'command_acknowledged', payload: { agentId: id, requestId: input.payload.requestId, command: 'send_message' } });
+ } else listener.onMessage({ protocolVersion: '1.8.0', type: 'protocol_error', payload: { requestId: input.payload.requestId, code: 'agent_busy', message: 'Fixture rejected input.', recoverable: true } });
+}
+window.addEventListener('fixture:settle-input', event => {
+ const { id, outcome } = (event as CustomEvent<{ id: string; outcome: 'ack' | 'echo' | 'reject' }>).detail;
+ settleInput(id, outcome);
+});
 const transport: RemoteAgentTransport = {
   fetchSnapshot: async id => snapshot(id), fetchTimeline: async id => timeline(id), onDiagnostic: () => () => {}, onProtocolMessage: () => () => {},
   connect: (id, listener) => {
+    inputListeners.set(id, listener);
     document.documentElement.dataset.fixtureConnections = String(++connections);
     queueMicrotask(() => { listener.onOpen(); listener.onMessage(snapshot(id)); });
     return { close: () => {}, send: message => {
@@ -51,6 +70,10 @@ const transport: RemoteAgentTransport = {
       }
       if (message.type === 'session_control_request') listener.onMessage({ protocolVersion: '1.8.0', type: 'session_control', payload: { agentId: id, requestId: message.payload.requestId, revision: 'control', access: 'control', available: false, token: 'token' } });
       if (message.type === 'timeline_subscription') listener.onMessage({ protocolVersion: '1.8.0', type: 'timeline_subscribed', payload: { requestId: message.payload.requestId, agentIds: [id] } });
+      if (message.type === 'send_message') {
+        pendingInputs.set(id, message); document.documentElement.dataset.fixtureInputTarget = id;
+        if (new URLSearchParams(location.search).get('send') !== 'manual') { settleInput(id, 'ack'); settleInput(id, 'echo'); }
+      }
       if (message.type === 'set_session_setting') {
         document.documentElement.dataset.fixtureSettingTarget = message.payload.agentId;
         permissions.set(id, message.payload.value);

@@ -32,7 +32,7 @@ export function SideConversation({ session, replica: cachedReplica, transport, s
   onFocus?(): void; onClose(): void; onOpenSource(session: OpenedSession): void; onOpenFork(fork: SessionFork): void;
   onFork(state: AgentReplicaState, session: OpenedSession, id: string, args: string): Promise<AgentCommandResult>; visible?: boolean;
 }) {
-  const { state, sessionState, handoff, status, questions, setQuestions, actions } = useConversationSession(session, transport, cachedReplica, initialInput?.pending);
+  const { state, sessionState, handoff, status, questions, setQuestions, actions, imageRecipient } = useConversationSession(session, transport, cachedReplica, initialInput?.pending);
   const { communication, ...viewNavigation } = navigation?.(session, state) ?? {};
   const panel = useRef<HTMLElement>(null);
   useEffect(() => {
@@ -46,7 +46,7 @@ export function SideConversation({ session, replica: cachedReplica, transport, s
   const title = standalone ? session.title : record?.firstInput?.trim().slice(0, 72) || session.title;
   return <ConversationPane as="aside" position={position} className="lab-side-conversation lab-session-composition" aria-label="Side conversation" tabIndex={-1} ref={panel} onFocusCapture={onFocus} onClickCapture={onFocus} hidden={!expanded}>
     <CommunicationNavigationContext.Provider value={communication}><LabWorkbench {...viewNavigation} sessionState={sessionState} handoff={handoff} draftSessionKey={sessionKey(session)} state={forkDisplayState(state, record)} sessionStatus={status} attachingAgentId={session.agentId}
-      visible={visible && expanded} actions={forkActions(actions, store, record, transport)} draftBinding={draftBinding} imageDraftBinding={imageDraftBinding} displayBinding={displayBinding} messageDraft={draft} onMessageDraftChange={onDraftChange}
+      visible={visible && expanded} actions={forkActions(actions, store, record, transport)} draftBinding={draftBinding} imageDraftBinding={imageDraftBinding} imageRecipient={imageRecipient} displayBinding={displayBinding} messageDraft={draft} onMessageDraftChange={onDraftChange}
       questionDrafts={questions} onQuestionDraftChange={(id, value) => setQuestions((current) => ({ ...current, [id]: value }))}
       headingStart={headingStart}
       headingMode={headingMode}

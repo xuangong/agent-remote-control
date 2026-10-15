@@ -160,7 +160,7 @@ function FamilySession(props: SessionProps) {
   return <FamilyChat {...props} session={session} preview={preview} />;
 }
 function FamilyChat({ session, transport, navigation, draftStore, draftBinding, imageDraftBinding, controls, offline, entries, onNavigate, displayBinding, baseUrl, target, preview }: SessionProps & { session: OpenedSession; preview?: AgentReplicaState }) {
-  const { state, sessionState, status, actions, questions, setQuestions } = useConversationSession(session, transport);
+  const { state, sessionState, status, actions, questions, setQuestions, imageRecipient } = useConversationSession(session, transport);
   const enabled = useContext(WorkspaceReady);
   useWorkspaceDisplayCache(baseUrl, session, state, enabled && status === 'ready');
   const open = (destination: SessionEntry | AgentChildSessionView) => {
@@ -182,7 +182,7 @@ function FamilyChat({ session, transport, navigation, draftStore, draftBinding, 
     childrenFor={childrenFor} onOpenChildSession={navigationActions.openChildSession}
     resolveSessionLink={id => inherited?.resolveSessionLink(id) ?? local.resolveSessionLink(id)} revealEntry={inherited?.revealEntry}
     state={state?.timeline.initialized ? state : preview ?? state} sessionState={sessionState} sessionStatus={status} attachingAgentId={session.agentId} actions={actions}
-    draftSessionKey={key} draftBinding={draftBinding ?? { store: draftStore, key: `session:${key}` }} imageDraftBinding={imageDraftBinding} questionDrafts={questions}
+    draftSessionKey={key} draftBinding={draftBinding ?? { store: draftStore, key: `session:${key}` }} imageDraftBinding={imageDraftBinding} imageRecipient={imageRecipient} questionDrafts={questions}
     onQuestionDraftChange={(id, value) => setQuestions(current => ({ ...current, [id]: value }))}
     conversationPath={<strong className="agent-session-title">{session.title}</strong>} /></CommunicationNavigationContext.Provider>;
 }

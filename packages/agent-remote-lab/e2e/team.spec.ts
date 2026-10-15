@@ -11,6 +11,34 @@ test.beforeEach(async({page})=>{
  await page.route('**/v1/remote/teams',route=>route.fulfill({json:{teams:[team]}}));
  await page.route('**/v1/remote/hosts/*/attach',route=>route.fulfill({json:{agentId:route.request().postDataJSON().nativeSessionId}}));
 });
+
+test('Team sessions retain an echoed draft until their matching send ACK', async ({ page, isMobile }) => {
+ await page.goto('/e2e/fixtures/team.html?send=manual');
+ const teams = page.getByRole('button', { name: 'Teams', exact: true });
+ await teams.click(); await page.getByRole('button', { name: /Diagnose across Hosts/ }).click();
+ const targets: Array<[string, string]> = isMobile ? [['Leader', 'leader'], ['Windows validation', 'member']] : [['Project', 'source'], ['Leader', 'leader'], ['Windows validation', 'member']];
+ for (const [title, id] of targets) {
+  if (isMobile && id === 'member') {
+   await teams.click();
+   await page.getByRole('navigation', { name: 'Diagnose across Hosts sessions', exact: true }).getByRole('button', { name: /^Windows validation/ }).click();
+  }
+  const pane = page.getByRole('region', { name: title, exact: true });
+  const input = pane.getByTestId('prompt-input');
+  await expect(input).toBeEnabled();
+  const text = `Confirmed Team input for ${id}`;
+  await input.fill(text); await pane.getByTestId('prompt-submit').click();
+  await expect(page.locator('html')).toHaveAttribute('data-fixture-input-target', id);
+  await page.evaluate(id => window.dispatchEvent(new CustomEvent('fixture:settle-input', { detail: { id, outcome: 'echo' } })), id);
+  await expect(pane.locator('.agent-message-user')).toContainText(text);
+  await expect(input).toHaveValue(text);
+  await expect(pane.getByTestId('prompt-submit')).toBeDisabled();
+  await page.evaluate(id => window.dispatchEvent(new CustomEvent('fixture:settle-input', { detail: { id, outcome: 'ack' } })), id);
+  await expect(input).toHaveValue('');
+  await expect.poll(() => page.evaluate(text => Object.values(JSON.parse(sessionStorage.getItem('agent-remote:recovery:team-fixture:drafts') ?? '{}')).includes(text), text)).toBe(false);
+ }
+ await page.reload();
+ await expect(page.getByRole('region', { name: isMobile ? 'Windows validation' : 'Leader', exact: true }).getByTestId('prompt-input')).toHaveValue('');
+});
 for (const navigation of ['team', 'create'] as const) {
  test(`Track restores its own view after ${navigation} navigation`, async ({ page, isMobile }) => {
   const tracked = { hostId: 'host', providerId: 'recorded', nativeSessionId: 'tracked', title: 'Tracked research', starredAt: 1 };

@@ -80,7 +80,7 @@ function AskChat({ record, inputs, onSendInput, replica, transport, draftBinding
   draftBinding: DraftBinding; tools: ReactNode; busy?: boolean;
 }) {
   const session = record.target!;
-  const { state, sessionState, status, actions, questions, setQuestions, sendQueuedInput } = useConversationSession(session, transport, replica, busy);
+  const { state, sessionState, status, actions, questions, setQuestions, sendQueuedInput, imageRecipient } = useConversationSession(session, transport, replica, busy);
   const { communication, ...viewNavigation } = navigation?.(session, state) ?? {};
   useEffect(() => {
     if (sendQueuedInput && !busy && inputs?.[0]) onSendInput(inputs[0].id, sendQueuedInput);
@@ -94,7 +94,7 @@ function AskChat({ record, inputs, onSendInput, replica, transport, draftBinding
       return {};
     }}
     sessionStatus={status} attachingAgentId={session.agentId} actions={actions}
-    draftSessionKey={sessionKey(session)} draftBinding={draftBinding} {...storageBindings}
+    draftSessionKey={sessionKey(session)} draftBinding={draftBinding} {...storageBindings} imageRecipient={storageBindings.imageRecipient ?? imageRecipient}
     questionDrafts={questions} onQuestionDraftChange={(id, value) => setQuestions(current => ({ ...current, [id]: value }))}
     conversationPath={<strong className="agent-session-title" data-session-status={state?.agent?.status}>Ask</strong>}
     sessionManager={tools} /></CommunicationNavigationContext.Provider>;

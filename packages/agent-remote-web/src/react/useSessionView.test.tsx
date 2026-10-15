@@ -8,6 +8,45 @@ import type { RemoteAgentTransport } from '../client/transport.js';
 import { render, rerender, unmount } from '../test/setup.js';
 import { useSessionView, type SessionConnectionSource } from './useSessionView.js';
 
+it('retires exact draft recipients on reconnect, lease replacement, session switch and unmount', async () => {
+  const replica = new AgentReplica();
+  const observers: Array<(status: RemoteSessionStatus) => void> = [];
+  function connection(): SessionConnectionSource {
+    return { acquire() {
+      const client = { subscribeSessionState(listener: (state: RemoteSessionState) => void) {
+        observers.push(status => listener(remoteSessionState(replica.getState(), status)));
+        observers.at(-1)!('ready');
+        return () => {};
+      } } as unknown as RemoteSessionClient;
+      return { client, replica, release() {} };
+    } };
+  }
+  const first = connection(), second = connection(), transport = {} as RemoteAgentTransport;
+  let result!: ReturnType<typeof useSessionView>;
+  function View({ agentId = 'a', source = first }: { agentId?: string; source?: SessionConnectionSource }) {
+    result = useSessionView({ agentId, source, transport });
+    return null;
+  }
+  const view = await render(<View />);
+  const original = result.imageRecipient!;
+  expect(original?.isCurrent()).toBe(true);
+  await act(async () => { observers[0]!('disconnected'); observers[0]!('ready'); });
+  const reconnected = result.imageRecipient!;
+  expect(original.isCurrent()).toBe(false);
+  expect(reconnected.isCurrent()).toBe(true);
+  expect(reconnected.lifetime).not.toBe(original.lifetime);
+  await rerender(view, <View source={second} />);
+  const replaced = result.imageRecipient!;
+  expect(reconnected.isCurrent()).toBe(false);
+  expect(replaced.isCurrent()).toBe(true);
+  await rerender(view, <View source={second} agentId="b" />);
+  const switched = result.imageRecipient!;
+  expect(replaced.isCurrent()).toBe(false);
+  expect(switched.isCurrent()).toBe(true);
+  await unmount(view);
+  expect(switched.isCurrent()).toBe(false);
+});
+
 it('leases neutral session connections and preserves deferred send actions across reconnects', async () => {
   let publishStatus: (status: RemoteSessionStatus) => void = () => {};
   const sendMessage = vi.fn(async () => {}), release = vi.fn();

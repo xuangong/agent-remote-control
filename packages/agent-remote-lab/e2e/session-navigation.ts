@@ -13,5 +13,5 @@ export async function showNewSession(page: Page): Promise<void> {
   const create = page.getByTestId('session-create');
   if (await create.isVisible()) return;
   await showSessions(page);
-  await page.getByRole('button', { name: 'New session', exact: true }).click();
+  await page.locator('#lab-context').getByRole('button', { name: 'New session', exact: true }).click();
 }

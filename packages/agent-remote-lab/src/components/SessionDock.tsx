@@ -1,6 +1,7 @@
 import { createContext, useCallback, useContext, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import './session-dock.css';
+import { useWindowLayout } from '../window-workspace-context.js';
 import { conversationSessionStorage } from '../conversation-storage.js';
 
 const defaultWidth = 440, minimumWidth = 320, maximumWidth = 1600;
@@ -36,8 +37,12 @@ function readLayout(key?: string): DockLayout {
 /** Placement preferences outlive DOM registrations and main-session navigation. */
 export function SessionDockProvider({ enabled, storageScope, children }: { enabled: boolean; storageScope?: string; children: ReactNode }) {
   const key = storageScope ? `agent-remote:recovery:${storageScope}:workspace-dock` : undefined;
-  const [layout, setLayout] = useState<DockLayout>(() => readLayout(key));
+  const shared = useWindowLayout();
+  const [localLayout, setLayout] = useState<DockLayout>(() => readLayout(key));
   const [registered, setRegistered] = useState<Array<Omit<DockItem, 'width'>>>([]);
+  const resolve = (id: string) => shared?.resolveViewId?.(id) ?? id;
+  const localId = (id: string) => registered.find(item => resolve(item.id) === id)?.id ?? id;
+  const layout: DockLayout = shared ? { panes: shared.window.views.filter(view => view.placement === 'dock').map(view => ({ id: localId(view.id), width: view.width })), baseWidth: shared.window.views.find(view => view.id === shared.window.primaryViewId)?.width, mainMinimized: shared.window.mainMinimized } : localLayout;
   const hadVisibleDock = useRef(false);
   const register = useCallback((item: Omit<DockItem, 'width'>) => setRegistered(current => {
     const previous = current.find(value => value.id === item.id);
@@ -64,15 +69,33 @@ export function SessionDockProvider({ enabled, storageScope, children }: { enabl
   const resize = useCallback((id: string, width: number) => setLayout(current => ({ ...current, panes: current.panes.map(item => item.id === id ? { ...item, width: clampWidth(width) } : item) })), []);
   const resizeBase = useCallback((width: number) => setLayout(current => ({ ...current, baseWidth: clampWidth(width) })), []);
   const minimizeMain = useCallback((mainMinimized: boolean) => setLayout(current => ({ ...current, mainMinimized })), []);
-  useEffect(() => { if (key) try { conversationSessionStorage.setItem(key, JSON.stringify(layout)); } catch { /* Layout remains usable without storage. */ } }, [key, layout]);
+  useEffect(() => { if (!shared && key) try { conversationSessionStorage.setItem(key, JSON.stringify(layout)); } catch { /* Layout remains usable without storage. */ } }, [key, layout, shared]);
   const items = useMemo(() => layout.panes.flatMap(pane => { const item = registered.find(item => item.id === pane.id); return item ? [{ ...item, width: pane.width }] : []; }), [layout, registered]);
   useEffect(() => {
     const visible = enabled && items.some(item => item.visible);
     // Empty registrations during reload or narrow presentation do not mean a dock was closed.
-    if (enabled && layout.mainMinimized && !visible && (hadVisibleDock.current || items.length === layout.panes.length)) minimizeMain(false);
+    if (!shared && enabled && layout.mainMinimized && !visible && (hadVisibleDock.current || items.length === layout.panes.length)) minimizeMain(false);
     hadVisibleDock.current = visible;
   }, [enabled, items, layout.mainMinimized, layout.panes.length, minimizeMain]);
-  const value = useMemo(() => ({ enabled, items, layout, register, unregister, add, remove, move, reorder, resize, resizeBase, minimizeMain }), [enabled, items, layout, register, unregister, add, remove, move, reorder, resize, resizeBase, minimizeMain]);
+  const value: DockContext = shared ? { enabled, items, layout, register, unregister,
+    add: id => shared.operate({ type: 'view.place', viewId: resolve(id), placement: 'dock' }),
+    remove: id => shared.operate({ type: 'view.place', viewId: resolve(id), placement: 'float' }),
+    resize: (id, width) => shared.operate({ type: 'view.resize', viewId: resolve(id), width: clampWidth(width) }),
+    resizeBase: width => shared.operate({ type: 'view.resize', viewId: shared.window.primaryViewId, width: clampWidth(width) }),
+    minimizeMain: minimized => shared.operate({ type: 'main.minimize', minimized }),
+    move: (id, offset) => {
+      const index = layout.panes.findIndex(item => item.id === id), next = Math.max(0, Math.min(layout.panes.length - 1, index + offset));
+      if (index < 0 || index === next) return;
+      const panes = [...layout.panes]; panes.splice(next, 0, panes.splice(index, 1)[0]!);
+      shared.operate({ type: 'view.move', viewId: resolve(id), afterId: next === 0 ? shared.window.primaryViewId : resolve(panes[next - 1]!.id) });
+    },
+    reorder: (id, before) => {
+      const source = layout.panes.findIndex(item => item.id === id), target = layout.panes.findIndex(item => item.id === before);
+      if (source < 0 || target < 0 || source === target) return;
+      const panes = [...layout.panes]; panes.splice(target, 0, panes.splice(source, 1)[0]!);
+      shared.operate({ type: 'view.move', viewId: resolve(id), afterId: target === 0 ? shared.window.primaryViewId : resolve(panes[target - 1]!.id) });
+    },
+  } : { enabled, items, layout, register, unregister, add, remove, move, reorder, resize, resizeBase, minimizeMain };
   return <Context.Provider value={value}>{children}</Context.Provider>;
 }
 
@@ -98,8 +121,9 @@ export function SessionViewPlacement({ id, title, visible, additionalWidth, dock
   const [mounted, setMounted] = useState(false);
   const item = dock?.layout.panes.find(item => item.id === id);
   const docked = !!dock?.enabled && !!item && visible;
-  const unregister = dock?.unregister, register = dock?.register, add = dock?.add;
-  useLayoutEffect(() => { if (dockRequest) add?.(id); }, [add, id, dockRequest]);
+  const unregister = dock?.unregister, register = dock?.register;
+  const addRef = useRef(dock?.add); addRef.current = dock?.add;
+  useLayoutEffect(() => { if (dockRequest) addRef.current?.(id); }, [id, dockRequest]);
   useLayoutEffect(() => {
     if (!docked && home.current) moveSessionHost(host, home.current);
     setMounted(true);
@@ -185,19 +209,22 @@ function DockPane({ item, order }: { item: DockItem; order: number }) {
 }
 
 export function DockResize({ title, width, minimum = minimumWidth, onResize }: { title: string; width: number; minimum?: number; onResize(width: number): void }) {
-  const drag = useRef<{ x: number; width: number }>();
+  const shared = useWindowLayout();
+  const drag = useRef<{ x: number; width: number; preferred?: number; parent?: HTMLElement; property?: 'width' | 'flexBasis'; original?: string }>();
   const resize = (value: number) => onResize(Math.max(minimum, Math.min(maximumWidth, value)));
   const stop = (event: ReactPointerEvent<HTMLElement>) => {
-    drag.current = undefined;
+    const gesture = drag.current; drag.current = undefined;
+    if (gesture?.parent && gesture.property) gesture.parent.style[gesture.property] = gesture.original ?? '';
+    if (gesture?.preferred !== undefined) resize(gesture.preferred);
     if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
   };
   return <div className="lab-session-dock-resize" role="separator" tabIndex={0} aria-label={`${title} width`} aria-orientation="vertical"
     aria-valuemin={minimum} aria-valuemax={maximumWidth} aria-valuenow={Math.round(width)} aria-valuetext={`${Math.round(width)} pixels`}
     title="Drag to resize. Arrow keys adjust width. Double-click to reset."
     onDoubleClick={() => resize(defaultWidth)}
-    onPointerDown={event => { if (event.button !== 0) return; event.preventDefault(); event.stopPropagation(); event.currentTarget.focus({ preventScroll: true }); drag.current = { x: event.clientX, width }; event.currentTarget.setPointerCapture(event.pointerId); }}
-    onPointerMove={event => { if (drag.current) resize(drag.current.width + event.clientX - drag.current.x); }}
-    onPointerUp={stop} onPointerCancel={stop} onLostPointerCapture={() => { drag.current = undefined; }}
+    onPointerDown={event => { if (event.button !== 0) return; event.preventDefault(); event.stopPropagation(); event.currentTarget.focus({ preventScroll: true }); const parent = event.currentTarget.parentElement!; const property = parent.classList.contains('lab-session-dock-base') ? 'flexBasis' : 'width'; drag.current = { x: event.clientX, width, parent, property, original: parent.style[property] }; event.currentTarget.setPointerCapture(event.pointerId); }}
+    onPointerMove={event => { const gesture = drag.current; if (!gesture) return; const next = Math.max(minimum, Math.min(maximumWidth, gesture.width + event.clientX - gesture.x)); if (!shared) resize(next); else { gesture.preferred = next; if (gesture.parent && gesture.property) gesture.parent.style[gesture.property] = `${next}px`; } }}
+    onPointerUp={stop} onPointerCancel={stop} onLostPointerCapture={stop}
     onKeyDown={event => {
       const step = event.shiftKey ? 40 : 10;
       const next = event.key === 'ArrowRight' ? width + step : event.key === 'ArrowLeft' ? width - step : event.key === 'Home' ? minimum : event.key === 'Enter' ? defaultWidth : undefined;

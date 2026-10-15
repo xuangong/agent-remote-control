@@ -1,20 +1,18 @@
 import { useBoundDraft, type DraftBinding } from '../draft-store.js';
-import { useEffect, useLayoutEffect, useRef, type RefObject, type ReactNode } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, type RefObject, type ReactNode } from 'react';
 import type { AgentReplica, RemoteAgentTransport } from '@orchardworks/agent-remote-web';
-import { CommunicationNavigationContext } from '@orchardworks/agent-remote-web/react';
 import type { SessionViewNavigationFactory } from '../session-view-navigation.js';
 import { isAskAttached, askParticipantKey, type AskEntry, type AskInput, type AskInputSender } from '../hooks/useAskConversations.js';
 import { useConversationSession } from '../hooks/useConversationSession.js';
 import type { SessionFork } from '../session-forks.js';
-import { sessionKey } from '../session-tree.js';
 import { useAskPosition } from '../hooks/useAskPosition.js';
 import { askCommand } from '../fork-actions.js';
-import { LabWorkbench } from './LabWorkbench.js';
+import { SessionFamily } from './SessionFamily.js';
 import { SessionViewPlacement } from './SessionDock.js';
 import { AskResize } from './AskResize.js';
 import type { ImageDraftBinding, ImageDraftRecipient } from '@orchardworks/agent-remote-web/browser';
 import type { DisplayPreferenceBinding } from '../hooks/useSessionDisplayPreferences.js';
-interface AskStorageBindings { imageDraftBinding?: ImageDraftBinding; imageRecipient?: ImageDraftRecipient; displayBinding?: DisplayPreferenceBinding }
+interface AskStorageBindings { baseUrl?: string; viewId?: string; compact?: boolean; imageDraftBinding?: ImageDraftBinding; imageRecipient?: ImageDraftRecipient; displayBinding?: DisplayPreferenceBinding }
 
 export function AskConversation(props: Omit<Parameters<typeof AskConversationContent>[0], 'docked' | 'dockControls'>) {
   return <SessionViewPlacement id={`ask:${props.storageScope}`} title="Ask" visible>
@@ -65,7 +63,7 @@ function AskConversationContent({ docked, dockControls, entry, replica, transpor
     </div>)}</div> : null}
     {entry.error ? <div className="lab-ask-error" role="alert">{entry.error}<button type="button" disabled={busy} onClick={onRetry}>Retry</button></div> : null}
     {isAskAttached(entry) ? <AskChat key={askParticipantKey(entry.record!)} record={entry.record!} executionTarget={entry.executionTarget} inputs={entry.error ? undefined : entry.inputs} onSendInput={onSendInput} replica={replica} transport={transport}
-      navigation={navigation} onToggleEnabled={onToggleEnabled} busy={busy} draftBinding={draftBinding} tools={tools} {...storageBindings} /> : <>
+      storageScope={storageScope} navigation={navigation} onToggleEnabled={onToggleEnabled} busy={busy} draftBinding={draftBinding} tools={tools} {...storageBindings} /> : <>
       <header className="lab-ask-heading"><strong>Ask</strong>{tools}</header>
       {busy || !entry.error ? <div className="lab-ask-opening" role="status">{busy ? 'Opening Ask…' : 'Ask about this conversation.'}</div> : null}
       <AskDraft binding={draftBinding} />
@@ -74,30 +72,28 @@ function AskConversationContent({ docked, dockControls, entry, replica, transpor
   </section></div>;
 }
 
-function AskChat({ record, executionTarget, inputs, onSendInput, replica, transport, draftBinding, tools, busy, onToggleEnabled, navigation, ...storageBindings }: AskStorageBindings & {
-  navigation?: SessionViewNavigationFactory;
+function AskChat({ storageScope, record, executionTarget, inputs, onSendInput, replica, transport, draftBinding, tools, busy, onToggleEnabled, navigation, ...storageBindings }: AskStorageBindings & {
+  storageScope: string; navigation?: SessionViewNavigationFactory;
   onToggleEnabled(): void; record: SessionFork; executionTarget?: import('../directory-client.js').OpenedSession; inputs?: AskInput[]; onSendInput(id: string, send: AskInputSender): void; replica?: AgentReplica; transport: RemoteAgentTransport;
   draftBinding: DraftBinding; tools: ReactNode; busy?: boolean;
 }) {
   const session = executionTarget ?? record.target!;
-  const { state, sessionState, status, actions, questions, setQuestions, sendQueuedInput, imageRecipient, operationBinding } = useConversationSession(session, transport, replica, busy, { nativePrefixOnly: true });
-  const { communication, ...viewNavigation } = navigation?.(session, state) ?? {};
-  useEffect(() => {
-    if (sendQueuedInput && !busy && inputs?.[0]) onSendInput(inputs[0].id, sendQueuedInput);
-  }, [sendQueuedInput, inputs, onSendInput, busy]);
-  return <CommunicationNavigationContext.Provider value={communication}><LabWorkbench defaultDisplayMode="content" {...viewNavigation} sessionState={sessionState} state={state}
+  const sendMessage = useRef<ReturnType<typeof useConversationSession>['actions']['sendMessage']>(undefined);
+  const onSessionReady = useCallback((conversation: ReturnType<typeof useConversationSession> | undefined) => {
+    sendMessage.current = conversation?.actions.sendMessage;
+    if (conversation?.sendQueuedInput && !busy && inputs?.[0]) onSendInput(inputs[0].id, conversation.sendQueuedInput);
+  }, [inputs, onSendInput, busy]);
+  return <SessionFamily storageScope={storageScope} baseUrl={storageBindings.baseUrl ?? storageScope}
+    replica={replica} onSessionReady={onSessionReady} attachedSession={session} target={{ hostId: session.hostId ?? 'local', providerId: session.providerId, nativeSessionId: session.nativeSessionId, title: 'Ask' }} hostLabel={session.hostId ?? 'local'}
+    compact={storageBindings.compact ?? false} active offline={false} nativePrefixOnly transport={transport}
+    draftStore={draftBinding.store} draftBinding={draftBinding} navigation={navigation} controls={tools} {...storageBindings}
     consoleCommands={[askCommand]} onExecuteConsoleCommand={async (_id, args) => {
       if (args.trim()) {
-        if (!actions.sendMessage) throw new Error('Wait for Ask to finish synchronizing.');
-        await actions.sendMessage(args.trim());
+        if (!sendMessage.current) throw new Error('Wait for Ask to finish synchronizing.');
+        await sendMessage.current(args.trim());
       } else onToggleEnabled();
       return {};
-    }}
-    sessionStatus={status} attachingAgentId={operationBinding.source.agentId} actions={actions} operationBinding={operationBinding}
-    draftSessionKey={sessionKey(session)} draftBinding={draftBinding} {...storageBindings} imageRecipient={storageBindings.imageRecipient ?? imageRecipient}
-    questionDrafts={questions} onQuestionDraftChange={(id, value) => setQuestions(current => ({ ...current, [id]: value }))}
-    conversationPath={<strong className="agent-session-title" data-session-status={state?.agent?.status}>Ask</strong>}
-    sessionManager={tools} /></CommunicationNavigationContext.Provider>;
+    }} />;
 }
 
 function AskDraft({ binding }: { binding: DraftBinding }) {

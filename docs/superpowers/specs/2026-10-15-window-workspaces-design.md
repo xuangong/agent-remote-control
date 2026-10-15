@@ -1,13 +1,22 @@
 # Shared Window Workspaces
 
-Status: design synthesis; implementation has not started.
-Source baseline: `main@50f5072447f708276006f4904d022bfa097ae8a0`.
+Status: first stage implemented and locally verified in the isolated window-workspaces branch; not committed or deployed.
+Source baseline: `main@2e957ae`.
 
 ## Product decisions
 
-A Window is the product workspace. It has an independent identity, one primary
-Session View, and a collection of additional Session Views with their layout.
+A Window is the product workspace and owns its layout identity independently of
+any session. This first delivery preserves one primary Session View area and its
+additional Session Views. Rebinding that primary View does not replace the Window.
 There is no additional Workspace layer above Window.
+
+Delivery is deliberately split into two stages. The first establishes the shared
+Window abstraction while retaining the current primary-area behavior used by Track,
+Ask, and navigation. The second will let one Window contain multiple primary session
+groups, each retaining its own attached Subagent, Ask, and other relationships. This
+is not a flat collection of unrelated peer Views. Multiple primary groups are outside
+this delivery; the single-primary constraint is the current product layout contract,
+not the identity or fundamental meaning of a Window.
 
 Multiple pages opening the same Window share its state. User and Agent operations
 address the Window, not an individual browser client. Selected view, bindings,
@@ -93,6 +102,19 @@ A Window document describes:
 Management assignment and operation receipts are protected service metadata. A
 layout export must not carry credentials or grant management to its importer.
 
+The product automatically creates an ordinary Window when no Window is selected,
+including when opening a Session directly. No explicit workspace setup or naming
+step is required. Every Window uses the same durable service, committed revisions,
+sharing, and scoped Agent management. Changes persist through ordinary operations;
+there is no separate save action or temporary/saved lifecycle.
+
+Refresh reuses the current Window identity. After confirmed deletion of the
+selected Window, the page creates an empty replacement without copying the
+deleted layout or stopping native sessions. A late deletion or creation reply
+must not replace a newer explicit selection. An unresolved operation remains
+unresolved; an explicit link to an unavailable Window reports that error rather
+than silently opening a different Window.
+
 Bindings reuse existing session references and succession semantics. They do not
 substitute a display title, array position, or temporary Relay Agent ID for the
 native/session-role reference. The same native session may be displayed by more
@@ -101,10 +123,13 @@ than one view. View identity survives renaming, reordering, and rebinding.
 An empty additional view remains supported. Binding `empty -> A` and `A -> B`
 remains supported; adding `A -> empty` is not required by this work.
 
-The primary view is structural, not simply whichever view is selected. Switching
-the main session changes its main/subagent area and leaves independent dock views
-intact. Succession updates the relevant session reference without replacing Window
-or view identities.
+In this first delivery the primary view is structural, not simply whichever view
+is selected. Switching the main session changes its main/subagent area and leaves
+independent dock views intact. Succession updates the relevant session reference
+without replacing Window or view identities. The current schema explicitly enforces
+one primary area so clients cannot create layouts that the current renderer cannot
+represent. A later version can expand primary groups without treating the primary
+native session ID as a Window ID or flattening attachment relationships.
 
 Do not copy Timeline content, native execution state, pending approvals, drafts,
 resource bodies, or credentials into the layout document. Persisted layout is
@@ -116,8 +141,11 @@ sessions; it does not rewind their execution or replay prior messages.
 Ask, Side, TPM, and Team remain business features that create or reference normal
 Session Views. Their presentation uses the same Window operations.
 
-- A Side/subagent stays attached immediately to its source view. Each source and
+- A Side/subagent stays attached immediately to its source view. The visible attachment is a selected descendant chain, with at most one directly attached child per source; opening a different child replaces that branch. Each source and
   its attached views form a layout group; moving a dock group preserves it.
+- Unlinking a Side removes its attachment relationship while keeping the same View
+  as an independent dock. Its local session slot and drafts remain owned by that
+  View. Unlinking is not a close or a native-session operation.
 - Ask and TPM views can float or dock without changing their native identity.
 - A Team opens the existing primary/leader/member layout preset. Member management,
   archive, and execution remain in Team. Gather reopens missing member views.
@@ -128,6 +156,59 @@ Session Views. Their presentation uses the same Window operations.
 - Track and feature catalogs are not duplicated inside the Window document.
 
 ## State and responsibility boundaries
+
+### Composition of abstractions
+
+Each layer builds on the public capabilities of the layer below it. File placement
+alone is not an abstraction boundary. The current product calls its addressable
+presentation unit a `View`; `WindowView` is that pane carrier, while Session View
+is the reusable session renderer it hosts. These are different responsibilities,
+not two competing identities for the same pane.
+
+| Layer | Consumes | Owns and exposes |
+| --- | --- | --- |
+| Remote session | Provider-neutral session protocol | Authoritative observed session state, capabilities, and operations |
+| Session View | Session state/actions and injected presentation/navigation callbacks | Conversation rendering and session interaction, independent of Window layout |
+| View carrier | A session binding and the Session View presentation contract | Stable presentation identity, display preferences, and placement settings |
+| Window | Addressable views and explicit structural relationships | Validated layout operations, selection, ordering, and shared revisions |
+| Product features and page shell | Window operations and session capabilities | Ask/TPM/Team presets, catalogs, navigation, management assignment, and URL choice |
+
+The public layout reducer must not infer binding or closing behavior from an
+Ask, TPM, or Team label. Features express their requirements with generic binding
+policy and explicit relationships; application adapters interpret bounded feature
+metadata. Native slots and draft owners belong to the application session bridge,
+not to the layout authority. This bridge translates committed layout references
+into existing session capabilities without becoming another writable layout store.
+Adoption maps a View to an eligible existing local session slot; it does not rename
+that slot or reconstruct its drafts, Ask ownership, recovery attempts, or active
+connection. Additional views receive independent local ownership when needed.
+The mapping is persisted locally and is committed only after Window creation has
+settled. A View can retain distinct owners for its previous bindings so that A to B
+to A restores A's draft. Two different Views cannot claim the same local slot.
+
+An Ask association records its source session reference separately from the View
+that contains that source. Rebinding the primary View from A to an unrelated B
+does not relabel an open Ask of A as an Ask of B. A fresh page retains a local
+reference for A without opening it or changing the primary binding. Verified
+native-role succession can preserve the association; shared metadata alone cannot
+establish native-role authority. Another page seeing an Ask before native creation
+settles waits for its published binding instead of creating a second session.
+
+Navigation to a named local View selects its exact presentation identity. Session
+catalog, Favorites, and Track navigation continue to replace the primary binding
+while preserving independent docks; a matching native session in a dock does not
+silently change that navigation into a View selection.
+
+Session View can be embedded without this product's Window, sidebar, catalogs, or
+authentication UI. Its existing state/action and callback interfaces remain the
+boundary; this work does not introduce a second renderer for shared layouts.
+The Window store is instance-scoped. Choosing a Window from a URL is a responsibility
+of the current product shell, not a property of every Window instance.
+
+Other pane content types and pages hosting multiple Windows are examples for
+checking these boundaries, not features in this delivery. Do not add a content
+registry, a new pane hierarchy, or a multitasking UI speculatively. A later content
+adapter must keep its behavior separate from the existing layout operations.
 
 ```text
 Browser controls --------------------------+
@@ -159,13 +240,12 @@ a fresh snapshot or supported catch-up. They are not an Agent-facing watch produ
 
 ## Command surface
 
-The following vocabulary is proposed; it is not available in the current CLI.
+The following vocabulary guides the Window CLI; the operating guide documents the available commands and grant limitations.
 Prefer explicit state-setting operations over toggles for safe scripted retries.
 
 ```text
 agent-remote-controller window
   list
-  create --main <session-reference>
   inspect <window-id>
   rename <window-id> <title>
   delete <window-id>
@@ -185,10 +265,11 @@ agent-remote-controller window
 ```
 
 Structured `--json` output includes stable identifiers, the resulting revision,
-and explicit errors. Inspection returns the workspace structure and separately
-annotated session facts where available. Missing or stale runtime observations
-must remain distinguishable from authoritative current facts. Layout inspection
-must work even when one referenced Host/session is unavailable.
+and explicit errors. Inspection returns the workspace structure independently of
+Host/session availability. Runtime observations remain available through the
+existing session APIs; a layout snapshot does not establish native readiness.
+This release creates Windows in the website. The CLI can create views within its
+assigned Window, but its grant cannot create other Windows.
 
 Session text, settings, interactions, and lifecycle commands reuse their current
 public APIs and client implementations. A view-to-session resolver lets Agent
@@ -220,7 +301,7 @@ authorize unrelated Hosts, or turn layout commands into session-execution contro
 Each mutation has an operation ID and a base revision where it depends on an
 observed layout. Commit only a validated next document; malformed imports and failed
 layout batches leave the previous document intact. A successful result identifies
-the committed revision and affected view IDs. Full-layout application is one layout
+the operation and committed revision. Full-layout application is one layout
 transaction, not a transaction over native Agent execution.
 
 Use the same persistence boundary for a document change and its operation result.
@@ -269,7 +350,7 @@ This work needs coordinated website and Controller delivery for the new command
 surface. Update protocol fixtures, schemas, documentation, replay/compatibility
 metadata affected by the contract, run `pnpm compatibility:update`, and verify
 `pnpm compatibility:check`. Publishing, deployment, and installed Controller updates
-are separate delivery actions, not part of this design-only change.
+are separate delivery actions, not part of this implementation task.
 
 ## Acceptance
 

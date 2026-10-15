@@ -1,0 +1,124 @@
+import { act, useReducer } from 'react';
+import { expect, it, vi } from 'vitest';
+import { applyWindowOperation, createWindowView, type WorkspaceWindow } from '@orchardworks/agent-remote-protocol';
+import { windowSessionBinding } from '../window-workspace.js';
+import { createCompositionDocument } from '../session-composition.js';
+import { bindWindowCompositionSlot, ensureWindowCompositionSlot } from '../window-composition.js';
+import { render } from '../test/setup.js';
+import { useWindowSessionBridge } from './useWindowSessionBridge.js';
+
+type Options = Parameters<typeof useWindowSessionBridge>[0];
+const session = { agentId: 'agent', hostId: 'host', providerId: 'recorded', nativeSessionId: 'native', title: 'Session' };
+const emptyWindow = (id = 'window'): WorkspaceWindow => ({ schemaVersion: 1, id, revision: 0, title: 'Window', primaryViewId: 'main', selectedViewId: 'main', mainMinimized: false, views: [createWindowView('main', undefined, 'primary')] });
+async function harness(configure?: (options: Options) => void) {
+  const document = createCompositionDocument('bridge');
+  const native = vi.fn(async (..._args: Parameters<Options['succession']['open']>) => true), attached = vi.fn(async () => true), clear = vi.fn(), project = vi.fn();
+  const options: Options = { enabled: false, window: emptyWindow(), onError: vi.fn(), operate: vi.fn(async operation => { options.window = applyWindowOperation(options.window!, operation); update(); }),
+    succession: { document, desired: undefined, selected: undefined, discovering: false, navigationIntent: { sessionIntent: undefined, keepOriginal: undefined }, open: native, openAttached: attached,
+      ensureWindowView: (windowId, viewId, binding) => ensureWindowCompositionSlot(document, windowId, viewId, binding),
+      bindWindowView: (windowId, viewId, binding, slotId) => bindWindowCompositionSlot(document, windowId, viewId, binding, slotId), projectWindow: project, leave: vi.fn(), clearPresentation: clear },
+  };
+  configure?.(options);
+  let bridge!: ReturnType<typeof useWindowSessionBridge>, update!: () => void;
+  function Harness() { const [, refresh] = useReducer(n => n + 1, 0); update = refresh; bridge = useWindowSessionBridge(options); return null; }
+  await render(<Harness />);
+  return { options, native, attached, clear, project, read: () => bridge, update: async () => { await act(async () => update()); } };
+}
+it('commits the public primary binding before opening an attached native Session View', async () => {
+  const test = await harness();
+  let finish!: () => void;
+  const committed = test.options.operate;
+  test.options.operate = vi.fn(operation => new Promise<void>(resolve => { finish = () => { void committed(operation).then(resolve); }; }));
+  let result!: Promise<boolean>;
+  await act(async () => { result = test.read().openAttached(session); });
+  expect(test.native).not.toHaveBeenCalled();
+  await act(async () => { finish(); await result; });
+  expect(test.options.window!.views[0]?.binding).toMatchObject({ nativeSessionId: 'native' });
+  expect(test.native).toHaveBeenCalledWith(session, undefined, undefined, expect.stringContaining('window:window:main:'), undefined, undefined, session, false);
+  expect(test.attached).not.toHaveBeenCalled();
+});
+it('does not open native content when the shared commit is rejected', async () => {
+  const test = await harness(options => { options.operate = vi.fn(async () => { throw new Error('Rejected'); }); });
+  await expect(test.read().openAttached(session)).rejects.toThrow('Rejected');
+  expect(test.native).not.toHaveBeenCalled(); expect(test.project).not.toHaveBeenCalled();
+});
+it('uses the latest Window for callbacks retained before a Window switch', async () => {
+  const test = await harness(); const open = test.read().openAttached;
+  test.options.window = emptyWindow('other'); await test.update();
+  await act(async () => { await open(session); });
+  expect(test.native.mock.calls[0]?.[3]).toContain('window:other:main:');
+});
+it('does not navigate a new Window when an older binding commit completes', async () => {
+  const test = await harness(); let finish!: () => void;
+  test.options.operate = vi.fn(() => new Promise<void>(resolve => { finish = resolve; }));
+  const result = test.read().openAttached(session);
+  test.options.window = emptyWindow('other'); await test.update();
+  await act(async () => { finish(); await result; });
+  expect(test.native).not.toHaveBeenCalled();
+});
+it('clears only presentation for an empty primary and exposes its empty state', async () => {
+  const test = await harness(options => { options.enabled = true; });
+  expect(test.read().empty).toBe(true); expect(test.clear).toHaveBeenCalledTimes(1); expect(test.native).not.toHaveBeenCalled();
+  await test.update(); expect(test.clear).toHaveBeenCalledTimes(1);
+});
+it('preserves concrete history across shared layout changes but projects a newly selected Window', async () => {
+  const test = await harness(options => { options.enabled = true; options.succession.navigationIntent = { sessionIntent: 'history', keepOriginal: true }; options.window!.views[0]!.binding = session; });
+  expect(test.native).not.toHaveBeenCalled(); expect(test.project).not.toHaveBeenCalled();
+  test.options.window = { ...test.options.window!, revision: 1 }; await test.update();
+  expect(test.native).not.toHaveBeenCalled();
+  test.options.window = { ...test.options.window!, id: 'other' }; await test.update();
+  expect(test.native).toHaveBeenCalledTimes(1);
+});
+it('keeps standalone native opening on its existing path', async () => {
+  const test = await harness(options => { options.window = undefined; });
+  await act(async () => { await test.read().openAttached(session, true); });
+  expect(test.attached).toHaveBeenCalledWith(session, true); expect(test.options.operate).not.toHaveBeenCalled();
+});
+
+it('projects the latest committed primary after an older native open finishes', async () => {
+  const test = await harness();
+  let finish!: (opened: boolean) => void;
+  test.native.mockImplementationOnce(() => new Promise<boolean>(resolve => { finish = resolve; }));
+  let result!: Promise<boolean>;
+  await act(async () => { result = test.read().openAttached(session); });
+  const next = { ...session, nativeSessionId: 'other-native' };
+  test.options.window = applyWindowOperation(test.options.window!, { type: 'view.bind', viewId: 'main', binding: windowSessionBinding(next) });
+  test.options.enabled = true;
+  await test.update();
+  expect(test.native).toHaveBeenCalledTimes(1);
+  await act(async () => { finish(true); expect(await result).toBe(false); });
+  expect(test.native).toHaveBeenCalledTimes(2);
+  expect(test.native.mock.calls[1]?.[0]).toMatchObject({ nativeSessionId: 'other-native' });
+  expect(test.options.window!.views[0]!.binding?.nativeSessionId).toBe('other-native');
+});
+
+it('exposes the selected dock binding for manager assignment and leaves empty selections unassigned', async () => {
+  const test = await harness(options => {
+    options.window!.views[0]!.binding = windowSessionBinding(session);
+    options.window!.views.push(createWindowView('dock', { ...windowSessionBinding(session), nativeSessionId: 'dock-native' }));
+    options.window!.selectedViewId = 'dock';
+  });
+  expect(test.read().selected?.nativeSessionId).toBe('dock-native');
+  test.options.window!.views.push(createWindowView('empty'));
+  test.options.window!.selectedViewId = 'empty'; await test.update();
+  expect(test.read().selected).toBeUndefined();
+});
+it('projects the same Window again after replacing its native runtime document', async () => {
+  const test = await harness(options => { options.enabled = true; options.window!.views[0]!.binding = windowSessionBinding(session); });
+  expect(test.native).toHaveBeenCalledTimes(1);
+  test.options.succession.document = createCompositionDocument('bridge');
+  test.options.succession.discovering = true;
+  await test.update();
+  expect(test.native).toHaveBeenCalledTimes(1);
+  test.options.succession.discovering = false;
+  await test.update();
+  expect(test.native).toHaveBeenCalledTimes(2);
+});
+
+it('rejects stale opening callbacks while the Window recovery surface is unavailable', async () => {
+  const test = await harness(); const open = test.read().openAttached;
+  test.options.unavailable = true; test.options.window = undefined; await test.update();
+  await expect(open(session)).rejects.toThrow('available Window');
+  expect(test.read().empty).toBe(true);
+  expect(test.attached).not.toHaveBeenCalled(); expect(test.native).not.toHaveBeenCalled();
+}, 10000);

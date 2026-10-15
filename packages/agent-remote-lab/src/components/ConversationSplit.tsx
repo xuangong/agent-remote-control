@@ -18,7 +18,7 @@ export const ConversationPane = forwardRef<HTMLElement, HTMLAttributes<HTMLEleme
     'data-split-side': side, style: { ...style, order: position * 2 } });
 });
 
-export function ConversationSplit({ compact, start, end, children }: { compact: boolean; start: number; end: number; children: ReactNode }) {
+export function ConversationSplit({ compact, start, end, children, preferredRatio: controlledRatio, onRatioChange }: { compact: boolean; start: number; end: number; children: ReactNode; preferredRatio?: number; onRatioChange?(ratio: number): void }) {
   const id = useId();
   const container = useRef<HTMLDivElement>(null);
   const [preferredRatio, setPreferredRatio] = useState(savedRatio);
@@ -27,7 +27,8 @@ export function ConversationSplit({ compact, start, end, children }: { compact: 
   const drag = useRef<{ x: number; width: number }>();
   const resizable = !compact && end > start;
   const minimumRatio = availableWidth > 0 ? Math.min(.5, minimumWidth / availableWidth) : .5;
-  const ratio = Math.max(minimumRatio, Math.min(1 - minimumRatio, preferredRatio));
+  const ratio = Math.max(minimumRatio, Math.min(1 - minimumRatio, dragging ? preferredRatio : controlledRatio ?? preferredRatio));
+  const ratioRef = useRef(ratio); ratioRef.current = ratio;
   const context = useMemo(() => ({ id, start, end }), [id, start, end]);
   useLayoutEffect(() => {
     const element = container.current;
@@ -47,13 +48,16 @@ export function ConversationSplit({ compact, start, end, children }: { compact: 
     return () => observer.disconnect();
   }, [resizable, start, end]);
   useEffect(() => {
-    if (!dragging) {
+    if (!dragging && controlledRatio === undefined) {
       try { localStorage.setItem(storageKey, String(preferredRatio)); } catch { /* The layout remains adjustable without storage. */ }
     }
-  }, [preferredRatio, dragging]);
+  }, [preferredRatio, dragging, controlledRatio]);
   useEffect(() => { if (!resizable) { drag.current = undefined; setDragging(false); } }, [resizable]);
-  const resize = (next: number) => setPreferredRatio(Math.max(minimumRatio, Math.min(1 - minimumRatio, next)));
-  const stopDragging = () => { drag.current = undefined; setDragging(false); };
+  const resize = (next: number, commit = false) => {
+    const value = Math.max(minimumRatio, Math.min(1 - minimumRatio, next));
+    ratioRef.current = value; setPreferredRatio(value); if (commit) onRatioChange?.(value);
+  };
+  const stopDragging = () => { if (drag.current) onRatioChange?.(ratioRef.current); drag.current = undefined; setDragging(false); };
   return <SplitContext.Provider value={context}><div ref={container} className={`lab-conversation-split${end > 0 ? ' lab-has-side' : ''}`}
     data-resizable={resizable || undefined} style={{ '--lab-conversation-ratio': ratio } as CSSProperties}>
     {children}
@@ -61,11 +65,11 @@ export function ConversationSplit({ compact, start, end, children }: { compact: 
       aria-controls={`${id}-pane-${start}`} aria-valuemin={Math.round(minimumRatio * 100)} aria-valuemax={Math.round((1 - minimumRatio) * 100)}
       aria-valuenow={Math.round(ratio * 100)} aria-valuetext={`${Math.round(ratio * 100)}% left, ${Math.round((1 - ratio) * 100)}% right`}
       title="Drag to resize. Double-click to reset. Arrow keys adjust width." style={{ order: start * 2 + 1 }} data-resizing={dragging || undefined}
-      onDoubleClick={() => resize(.5)}
+      onDoubleClick={() => resize(.5, true)}
       onPointerDown={event => {
         if (event.button !== 0 || availableWidth <= 0) return;
         event.preventDefault(); event.currentTarget.focus({ preventScroll: true });
-        drag.current = { x: event.clientX, width: ratio * availableWidth };
+        setPreferredRatio(ratio); drag.current = { x: event.clientX, width: ratio * availableWidth };
         event.currentTarget.setPointerCapture(event.pointerId); setDragging(true);
       }}
       onPointerMove={event => { if (drag.current && availableWidth > 0) resize((drag.current.width + event.clientX - drag.current.x) / availableWidth); }}
@@ -76,7 +80,7 @@ export function ConversationSplit({ compact, start, end, children }: { compact: 
         const step = (event.shiftKey ? 40 : 10) / availableWidth;
         const next = event.key === 'ArrowLeft' ? ratio - step : event.key === 'ArrowRight' ? ratio + step
           : event.key === 'Home' ? minimumRatio : event.key === 'End' ? 1 - minimumRatio : event.key === 'Enter' ? .5 : undefined;
-        if (next !== undefined) { event.preventDefault(); resize(next); }
+        if (next !== undefined) { event.preventDefault(); resize(next, true); }
       }} /> : null}
   </div></SplitContext.Provider>;
 }

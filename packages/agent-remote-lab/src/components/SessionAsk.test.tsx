@@ -19,6 +19,7 @@ function fixture(entries: AskEntry[]) {
   const values = new Map(entries.map(entry => [sessionKey(entry.source), entry]));
   const restore = vi.fn<AskProps['ask']['restore']>(() => undefined);
   const ask = {
+    sharedView: () => undefined,
     entryFor: (session: typeof source) => values.get(sessionKey(session))!, isEnabled: () => true, isOpen: () => true,
     restore, drafts: new DraftStore('session-ask-focus'), store: new ForkStore('session-ask-focus', sessionStorage),
     associationOwner: (id: string) => ({ id, sourceSlot: id, geometryScope: id, text: { scope: 'session-ask-focus', key: id }, input: { scope: 'session-ask-focus', key: id }, open: true }),
@@ -193,4 +194,45 @@ it('shows each blocked saved question and routes explicit discard to that source
   await act(async () => { discard[1]!.click(); });
   expect(ask.discardInput).toHaveBeenCalledExactlyOnceWith(sessionKey(source), 'second-question');
   expect(ask.sendInput).not.toHaveBeenCalled();
+});
+
+it('follows a replacement Agent for the same concrete Ask session without keeping its old connection', async () => {
+  const entry: AskEntry = { source, attached: true };
+  const { ask, props } = fixture([entry]);
+  const record = ask.store.prepare(referenceForkContext(source), { sourceNativeSessionId: source.nativeSessionId });
+  ask.store.bind(record.id, { ...sibling, title: 'Ask' });
+  entry.record = ask.store.get(record.id); entry.attachedParticipant = askParticipantKey(entry.record);
+  const connected: string[] = [], closed: string[] = [];
+  const transport = { ...props.transport, connect: (agentId: string) => {
+    connected.push(agentId); return { close: () => { closed.push(agentId); }, send: () => {} };
+  }, onDiagnostic: () => () => {}, onProtocolMessage: () => () => {} };
+  let reconnect!: () => void;
+  function Harness() {
+    const [, update] = useState(0);
+    reconnect = () => { entry.executionTarget = { ...sibling, agentId: 'reconnected-agent' }; update(value => value + 1); };
+    return <SessionAsk {...props} source={source} replicaFor={() => new AgentReplica()} transport={transport} />;
+  }
+  await render(<Harness />);
+  expect(connected).toEqual(['side-agent']);
+  await act(async () => reconnect());
+  expect(connected).toEqual(['side-agent', 'reconnected-agent']);
+  expect(closed).toContain('side-agent');
+});
+
+it('retries an expanded shared Ask when its first native binding arrives from another page', async () => {
+  const entry: AskEntry = { source, restoring: true };
+  const { ask, props, restore } = fixture([entry]);
+  let sharedView = { id: 'shared-ask', feature: { kind: 'ask', id: 'feature-ask' }, placement: 'float' as const,
+    width: 440, collapsed: false, display: { mode: 'content' as const, lettersVisible: true } } as ReturnType<typeof ask.sharedView>;
+  ask.sharedView = () => sharedView;
+  let publish!: () => void;
+  function Harness() {
+    const [, update] = useState(0);
+    publish = () => { sharedView = { ...sharedView!, binding: { hostId: 'local', providerId: 'codex', nativeSessionId: 'ask-target', title: 'Ask' } }; update(value => value + 1); };
+    return <SessionAsk {...props} source={source} canRestore />;
+  }
+  await render(<Harness />);
+  expect(restore).toHaveBeenCalledTimes(1);
+  await act(async () => publish());
+  expect(restore).toHaveBeenCalledTimes(2);
 });

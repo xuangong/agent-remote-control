@@ -1,5 +1,6 @@
 /** Public navigation identity, never an authorization credential. */
 export interface ControllerLocation {
+  windowId?: string;
   hostId?: string;
   previewId?: string;
   previewPath?: string;
@@ -11,7 +12,7 @@ export interface ControllerLocation {
   sessionIntent?: 'history';
   keepOriginal?: boolean;
 }
-const fields = { host: 'hostId', agent: 'agentId', provider: 'providerId', session: 'nativeSessionId', parent: 'parentNativeSessionId', preview: 'previewId', path: 'previewPath', challenge: 'previewChallenge' } as const;
+const fields = { window: 'windowId', host: 'hostId', agent: 'agentId', provider: 'providerId', session: 'nativeSessionId', parent: 'parentNativeSessionId', preview: 'previewId', path: 'previewPath', challenge: 'previewChallenge' } as const;
 
 export function readControllerLocation(query: URLSearchParams): ControllerLocation {
   const result: ControllerLocation = {};
@@ -20,6 +21,7 @@ export function readControllerLocation(query: URLSearchParams): ControllerLocati
     if (!values.length) continue;
     const value = values[0]!;
     if (values.length !== 1 || !value || value.length > 4096 || /[\u0000-\u001f\u007f]/.test(value) ||
+      (key === 'window' && !/^[A-Za-z0-9_.:-]{1,128}$/.test(value)) ||
       ((key === 'host' || key === 'provider') && !/^[A-Za-z0-9_-]{1,256}$/.test(value)) ||
       (key === 'challenge' && !/^[A-Za-z0-9_-]{43}$/.test(value)) ||
       (key === 'preview' && !/^[A-Za-z0-9_-]{1,128}$/.test(value))) throw new Error('Invalid session link.');

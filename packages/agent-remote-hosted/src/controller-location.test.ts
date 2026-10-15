@@ -53,3 +53,12 @@ it('rejects incomplete and mixed preview identities', () => {
   expect(() => controllerPath({ hostId: 'host', previewId: 'preview' })).toThrow();
   expect(() => controllerPath({ hostId: 'host', previewId: 'preview', previewPath: '/', agentId: 'agent' })).toThrow();
 });
+
+it('preserves a shared Window identity through controller and login return paths', () => {
+  const location = readControllerLocation(new URLSearchParams('window=window-123'));
+  expect(location).toEqual({ windowId: 'window-123' });
+  expect(controllerPath(location)).toBe('/?window=window-123');
+  expect(validControllerPath('/?window=window-123')).toBe(true);
+  expect(() => readControllerLocation(new URLSearchParams('window=one&window=two'))).toThrow();
+  expect(() => readControllerLocation(new URLSearchParams('window=invalid%2Fid'))).toThrow();
+});

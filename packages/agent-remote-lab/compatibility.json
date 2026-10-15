@@ -88,6 +88,7 @@
         "packages/agent-remote-lab/playwright.markdown.config.ts",
         "packages/agent-remote-lab/playwright.prompt-edit.config.ts",
         "packages/agent-remote-lab/playwright.resources.config.ts",
+        "packages/agent-remote-lab/playwright.windows.config.ts",
         "packages/agent-remote-lab/public",
         "packages/agent-remote-lab/scripts",
         "packages/agent-remote-lab/src",
@@ -123,7 +124,7 @@
         "packages/codex-daemon-client/src",
         "packages/codex-daemon-client/tsconfig.json"
       ],
-      "digest": "sha256:0c22dcf8f1408c33414e31ddfaed4d2bee2ed55484cf808589870211e9423735"
+      "digest": "sha256:2875822c5db507dda490f807ac56a23796273e2fd9754de1b62545d6ba7697b8"
     }
   },
   "providers": [

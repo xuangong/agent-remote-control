@@ -14,6 +14,14 @@ import { replicaState } from './test/fixtures.js';
 import { SessionDirectoryClient } from './directory-client.js';
 
 describe('App', () => {
+  it('renders a supplied Session View snapshot without a Window controller', async () => {
+    const container = await render(<App initialState={letterState} initialSessionStatus="ready" actions={{}} />);
+    expect(container.querySelector('[data-testid="prompt-input"]')).not.toBeNull();
+    expect(container.querySelector('.lab-empty-session-view')).toBeNull();
+    expect(container.textContent).toContain('Review the transport.');
+    expect(new URL(location.href).searchParams.has('window')).toBe(false);
+  });
+
   const letterState = { ...replicaState, timeline: { ...replicaState.timeline, entries: [{
     providerId: 'recorded', seqStart: 1, seqEnd: 1, timestamp: '2026-09-18T00:00:00Z', sourceSeqRanges: [], collapsed: [], resources: [],
     item: { type: 'agent_communication' as const, messageId: 'task-letter', sender: '/root', recipient: '/root/review', text: 'Review the transport.' },

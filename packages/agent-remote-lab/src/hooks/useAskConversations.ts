@@ -1,3 +1,7 @@
+import { windowAskSourceAnchor, windowAskSourceMatches } from '../window-composition.js';
+import { parseWindowFeature } from '../window-feature-views.js';
+import type { WindowLayoutAuthority } from '../window-workspace-context.js';
+import { askFeatureView, openFeatureView, projectFeatureBinding } from '../window-feature-views.js';
 import { clearCacheOnClose, conversationSessionStorage } from '../conversation-storage.js';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { AgentReplicaState, RemoteAgentTransport } from '@orchardworks/agent-remote-web';
@@ -28,11 +32,16 @@ export function isAskAttached(entry?: AskEntry): boolean {
 }
 interface AskOpenOptions { existingOnly?: boolean; synchronize?: () => Promise<void>; restoring?: AbortController; associationOwner: string }
 
-export function useAskConversations(document: CompositionDocument, transport: RemoteAgentTransport, directory?: SessionDirectoryClient, selectedHostId = 'local', onCreated?: () => void, resolveExecution?: (source: OpenedSession) => SessionEntry) {
+export function useAskConversations(document: CompositionDocument, transport: RemoteAgentTransport, directory?: SessionDirectoryClient, selectedHostId = 'local', onCreated?: () => void, resolveExecution?: (source: OpenedSession) => SessionEntry, authority?: WindowLayoutAuthority) {
   const baseUrl = document.scope;
+  const shared = useRef(authority); shared.current = authority;
   const preparations = useRef(new Map<string, AbortController>());
   const preparationSettlements = useRef(new Map<string, Promise<void>>());
   const resumeRequested = useRef(new Set<string>());
+  const pendingCloseViews = useRef(new Map<string, string>());
+  const pendingOpenViews = useRef(new Set<string>());
+  const windowRecords = useRef(new Map<string, SessionFork>());
+  const bindingProjections = useRef(new Map<string, OpenedSession>());
   // A tab-local ledger keeps retries idempotent without populating the normal fork list.
   const storage = useMemo(() => {
     try { return conversationSessionStorage; } catch { return undefined; }
@@ -41,6 +50,14 @@ export function useAskConversations(document: CompositionDocument, transport: Re
   const association = useMemo(() => ({ edits: new Map<string, number>(), epochs: new Map<string, number>(), generation: recoveryGeneration(baseUrl), saved: true }), [document]);
   const associationOwner = (key: string) => document.asks.find(owner => owner.id === key);
   const ownerEditRevision = (key: string) => association.edits.get(key) ?? 0;
+  function sharedView(key: string) {
+    const authority = shared.current, owner = associationOwner(key);
+    if (!authority || !owner) return;
+    const source = authority.resolveViewId?.(owner.sourceSlot) ?? owner.sourceSlot;
+    const slot = document.slots.find(slot => slot.id === owner.sourceSlot);
+    return askFeatureView(authority.window, key, source, anchor => !!slot && windowAskSourceMatches(document, slot, anchor));
+  }
+
   const edited = (key: string) => association.edits.set(key, ownerEditRevision(key) + 1);
   const keyFor = (_source: OpenedSession, owner: string): string => {
     if (!owner || !associationOwner(owner)) throw new Error('The Ask association owner is unavailable.');
@@ -83,21 +100,55 @@ export function useAskConversations(document: CompositionDocument, transport: Re
   const entries = useMemo(() => new Map<string, AskEntry>(), [store]);
   const [revision, refresh] = useState(0);
   const windows = useMemo(() => {
-    const expanded = document.asks.filter(owner => owner.open).map(owner => owner.id);
+    const expanded = authority ? document.asks.filter(owner => { const view = sharedView(owner.id); return view && !view.collapsed; }).map(owner => owner.id) : document.asks.filter(owner => owner.open).map(owner => owner.id);
     return { restoring: new Set(expanded), revision: 0, controllers: new Map<string, AbortController>() };
   }, [document]);
   useEffect(() => () => { for (const controller of windows.controllers.values()) controller.abort(); }, [windows]);
-  const expanded = (key: string) => associationOwner(key)?.open === true;
+  const expanded = (key: string) => shared.current ? pendingOpenViews.current.has(key) || !!sharedView(key) && !sharedView(key)!.collapsed : associationOwner(key)?.open === true;
+  const sharedOpenKeys = authority ? document.asks.filter(owner => { const view = sharedView(owner.id); return view && !view.collapsed; }).map(owner => owner.id) : [];
+  const previousSharedOpen = useRef(new Set(sharedOpenKeys));
+  useEffect(() => {
+    if (!authority) return;
+    const current = new Set(sharedOpenKeys);
+    for (const key of current) {
+      const view = sharedView(key);
+      if (view && view.id !== pendingCloseViews.current.get(key)) {
+        pendingOpenViews.current.delete(key);
+        pendingCloseViews.current.delete(key);
+      }
+    }
+    for (const key of current) if (!previousSharedOpen.current.has(key)) windows.restoring.add(key);
+    for (const key of previousSharedOpen.current) if (!current.has(key) && !pendingOpenViews.current.has(key)) { bindingProjections.current.delete(key); preparations.current.get(key)?.abort(); windows.controllers.get(key)?.abort(); windows.restoring.delete(key); }
+    previousSharedOpen.current = current;
+  }, [authority?.window.id, JSON.stringify(authority?.window.views.filter(view => parseWindowFeature(view.feature)?.kind === 'ask').map(view => [view.id, view.collapsed])), windows]);
   function isOpen(source: OpenedSession, associationOwner: string) { return expanded(keyFor(source, associationOwner)); }
   function isEnabled(source: OpenedSession, associationOwnerId: string): boolean {
     const key = keyFor(source, associationOwnerId);
+    if (sharedView(key)) return true;
     return associationOwner(key)?.enabled ?? !!entryFor(source, key).record?.remote;
   }
   function setOpen(key: string, expanded: boolean) {
     const owner = associationOwner(key); if (!owner) throw new Error('Ask owner unavailable.');
     edited(key); windows.revision++;
     windows.controllers.get(key)?.abort(); windows.controllers.delete(key); windows.restoring.delete(key);
-    owner.open = expanded; document.editRevision++; persist(() => owners.current.active);
+    if (shared.current) {
+      const current = shared.current;
+      const view = sharedView(key);
+      if (expanded) {
+        const source = current.resolveViewId?.(owner.sourceSlot) ?? owner.sourceSlot;
+        if (!current.window.views.some(view => view.id === source)) throw new Error('The Ask source view is unavailable in this Window.');
+        pendingOpenViews.current.add(key);
+        const target = entries.get(key)?.record?.target;
+        const slot = document.slots.find(slot => slot.id === owner.sourceSlot);
+        openFeatureView(current, { kind: 'ask', id: view?.feature?.id ?? `ask-${crypto.randomUUID()}`, ...(slot ? { source: { ...windowAskSourceAnchor(document, slot), ...(entries.get(key)?.source.agentId ? { agentId: entries.get(key)!.source.agentId, title: entries.get(key)!.source.title } : {}) } } : {}) }, target ? { hostId: target.hostId ?? 'local', providerId: target.providerId, nativeSessionId: target.nativeSessionId, title: target.title } : undefined, source, pendingCloseViews.current.get(key));
+      } else {
+        pendingOpenViews.current.delete(key);
+        if (view) {
+          pendingCloseViews.current.set(key, view.id);
+          current.operate({ type: 'view.close', viewId: view.id });
+        }
+      }
+    } else { owner.open = expanded; document.editRevision++; persist(() => owners.current.active); }
     refresh(value => value + 1);
   }
   function setEnabled(source: OpenedSession, enabled: boolean, associationOwnerId: string) {
@@ -113,6 +164,7 @@ export function useAskConversations(document: CompositionDocument, transport: Re
   function close(source: OpenedSession, associationOwner: string) {
     const key = keyFor(source, associationOwner);
     setOpen(key, false);
+    if (shared.current) update(key, { attached: false, attachedParticipant: undefined });
     resumeRequested.current.delete(key);
     preparations.current.get(key)?.abort();
   }
@@ -165,6 +217,17 @@ export function useAskConversations(document: CompositionDocument, transport: Re
     }
     refresh(value => value + 1);
   }
+  useEffect(() => {
+    if (!authority) return;
+    for (const owner of document.asks) {
+      const target = bindingProjections.current.get(owner.id);
+      if (target && sharedView(owner.id)) {
+        const current = sharedView(owner.id)!;
+        if (current.binding && sessionKey(current.binding) === sessionKey(target)) { bindingProjections.current.delete(owner.id); continue; }
+        if (projectFeatureBinding(authority, 'ask', current.feature!.id, { hostId: target.hostId ?? 'local', providerId: target.providerId, nativeSessionId: target.nativeSessionId, title: target.title })) break;
+      }
+    }
+  }, [authority, revision, document, entries]);
   function setDraft(key: string, text: string) {
     edited(key);
     const binding = draftBinding(key); binding.store.set(binding.key, text);
@@ -220,13 +283,33 @@ export function useAskConversations(document: CompositionDocument, transport: Re
     }
     return entry;
   }
+  function projectedWindowRecord(key: string, source: OpenedSession): SessionFork | undefined {
+    const view = sharedView(key), binding = view?.binding;
+    if (!view || !binding || !shared.current) return;
+    const id = JSON.stringify(['window-ask', shared.current.window.id, view.id, sessionKey(binding)]);
+    let record = windowRecords.current.get(id);
+    if (!record) {
+      record = { ...referenceForkContext(source), id, remote: true, configured: true, delivery: 'sent',
+        target: { ...binding, agentId: '', title: binding.title ?? 'Ask' }, options: {}, settings: [] };
+      windowRecords.current.set(id, record);
+    }
+    return record;
+  }
+  function readRecord(record: SessionFork): SessionFork {
+    return windowRecords.current.get(record.id) ?? store.get(record.id);
+  }
   function withLatestRecord(key: string, entry: AskEntry): AskEntry {
     if (entry.pending) return entry;
-    const records = store.all().filter(record => record.target && !record.creationKey);
+    const records = [...store.all(), ...windowRecords.current.values()].filter(record => record.target && !record.creationKey);
     const retained = entry.record && records.find(record => askParticipantKey(record) === askParticipantKey(entry.record!));
     const candidates = records.filter(record => matchesSource(record, key));
-    const latest = isAskAttached(entry) && expanded(key)
-      ? retained ?? records.find(record => record.id === entry.record!.id) : candidates.at(-1) ?? retained;
+    const projected = bindingProjections.current.get(key) ?? (shared.current && sharedView(key)?.binding);
+    const projectedCandidates = projected ? candidates.filter(record => record.target && sessionKey(record.target) === sessionKey(projected)) : [];
+    const projectedRecord = projected && (isAskAttached(entry) && retained && projectedCandidates.some(record => record.id === retained.id) ? retained : projectedCandidates.at(-1))
+      || projectedWindowRecord(key, entry.source);
+    if (projected && !projectedRecord) return { ...entry, record: undefined, attached: false, attachedParticipant: undefined, error: 'The Ask record for this Window binding is unavailable. Refresh session relations and retry.' };
+    const latest = projectedRecord || (isAskAttached(entry) && expanded(key)
+      ? retained ?? records.find(record => record.id === entry.record!.id) : candidates.at(-1) ?? retained);
     if (latest) {
       const same = !!entry.record && askParticipantKey(entry.record) === askParticipantKey(latest);
       const record = same && isAskAttached(entry) ? { ...latest, target: { ...latest.target!, agentId: entry.record!.target!.agentId } } : latest;
@@ -235,10 +318,11 @@ export function useAskConversations(document: CompositionDocument, transport: Re
     return entry.record?.remote ? { ...entry, record: undefined, attached: false } : entry;
   }
   function restore(source: OpenedSession, synchronize: () => Promise<void>, associationOwner: string) {
+    if (shared.current && sharedView(associationOwner) && !sharedView(associationOwner)?.binding) return;
     const key = keyFor(source, associationOwner);
     const epoch = association.epochs.get(key);
     const previous = windows.controllers.get(key);
-    if (!isEnabled(source, associationOwner) || !windows.restoring.has(key) || previous && !previous.signal.aborted || !expanded(key) || !directory) return;
+    if (entries.get(key)?.busy && !preparations.current.get(key)?.signal.aborted || !isEnabled(source, associationOwner) || !(windows.restoring.has(key) || shared.current && !isAskAttached(entries.get(key))) || previous && !previous.signal.aborted || !expanded(key) || !directory) return;
     const owner = owners.current;
     const preparation = new AbortController();
     windows.controllers.set(key, preparation);
@@ -377,10 +461,11 @@ export function useAskConversations(document: CompositionDocument, transport: Re
         : { agentId: result.agentId, nativeSessionId: result.nativeSessionId ?? result.agentId,
           providerId: operation.source.providerId, hostId: operation.source.hostId ?? 'local', title: 'Ask', createdAt: operation.capturedAt };
       if (!bound.agentId || !bound.nativeSessionId) throw new Error('The Ask attachment identity could not be confirmed. Retry the original Ask.');
-      if (!following) store.bind(operation.id, bound);
+      if (windowRecords.current.has(operation.id)) windowRecords.current.set(operation.id, { ...operation, target: bound });
+      else if (!following) store.bind(operation.id, bound);
       // Retention above is independent of permission to configure or mutate the current window.
       if (!ownsEntry()) return settleRetired();
-      record = operation.remote ? store.get(operation.id) : checkedAskOperation(store, { ...operation, target: following ? savedTarget : bound });
+      record = operation.remote ? readRecord(operation) : checkedAskOperation(store, { ...operation, target: following ? savedTarget : bound });
       participant = record;
       update(key, { pending: record });
       confirmInputOwners(key, record);
@@ -388,9 +473,10 @@ export function useAskConversations(document: CompositionDocument, transport: Re
       await configureFork(transport, store, record, preparation.signal);
       requireCurrent();
       if (!record.remote) checkedAskOperation(store, record);
-      store.finishCreation(record.id);
-      record = store.get(record.id);
+      if (!windowRecords.current.has(record.id)) store.finishCreation(record.id);
+      record = readRecord(record);
       if (askParticipantKey(record) !== askParticipantKey(participant)) throw new Error('The Ask participant changed. Retry the current Ask.');
+      if (shared.current) bindingProjections.current.set(key, record.target!);
       update(key, { record, pending: undefined, attached: true, attachedParticipant: askParticipantKey(record), executionTarget: bound, restoreOnly: false });
       participant = record;
       if (replacing && textBinding.store.get(textBinding.key) === draftAtStart) setDraft(key, '');
@@ -493,7 +579,7 @@ export function useAskConversations(document: CompositionDocument, transport: Re
       return { status: 'applied', retention: retentions.includes('page') ? 'page' : retentions.includes('session') ? 'session' : 'local', retainedCurrent };
     } catch { return { status: 'failed', retention: 'page', code: 'ask_retention' }; }
   }
-  return { revision, isEnabled, isOpen, toggle, store, entries, entryFor, drafts, draftBinding, setDraft, sendInput, discardInput, restore, open, close,
+  return { revision, sharedView, isEnabled, isOpen, toggle, store, entries, entryFor, drafts, draftBinding, setDraft, sendInput, discardInput, restore, open, close,
     associationOwner, ownerEditRevision, applySourceProjection, retainAssociationOwners };
 }
 

@@ -1,3 +1,4 @@
+import { useWindowLayout } from '../window-workspace-context.js';
 import { useLayoutEffect, type RefObject } from 'react';
 import { clearCacheOnClose, conversationLocalStorage } from '../conversation-storage.js';
 import { recoveryGeneration } from '../conversation-recovery.js';
@@ -66,6 +67,13 @@ function rememberPosition(scope: string, position?: Position, size?: WindowSize)
 
 /** Ask stays within its source view, retaining that view's floating geometry when space allows. */
 export function useAskPosition(panel: RefObject<HTMLElement>, anchor: RefObject<HTMLElement>, storageScope: string, { initialOffset = 0, docked = false, belowAnchor = false }: { initialOffset?: number; docked?: boolean; belowAnchor?: boolean } = {}) {
+  const shared = useWindowLayout();
+  let viewId = shared?.resolveViewId?.(`ask:${storageScope}`);
+  if (shared && !viewId) {
+    try { const parts = JSON.parse(storageScope); if (Array.isArray(parts)) viewId = shared.resolveViewId?.(parts[1] === 'tpm' ? `tpm:${parts[2]}` : parts[1]); } catch { /* Ask identity can also be a plain scope. */ }
+  }
+  const sharedView = shared?.window.views.find(view => view.id === viewId);
+  const geometry = sharedView?.geometry;
   useLayoutEffect(() => {
     const element = panel.current;
     const trigger = anchor.current;
@@ -75,8 +83,8 @@ export function useAskPosition(panel: RefObject<HTMLElement>, anchor: RefObject<
     const savedGeometry = positionEntry(storageScope);
     const geometryCurrent = () => savedGeometry.generation === recoveryGeneration(askGeometryRecoveryScope(storageScope));
     let floating = false;
-    let manual: Position | undefined = savedGeometry.position;
-    let preferredSize: WindowSize | undefined = savedGeometry.size;
+    let manual: Position | undefined = shared ? geometry && { x: geometry.x, y: geometry.y } : savedGeometry.position;
+    let preferredSize: WindowSize | undefined = shared ? geometry && { width: geometry.width, height: geometry.height } : savedGeometry.size;
     let appliedSize: WindowSize | undefined;
     let drag: { id: number; start: Position; origin: Position; moved: boolean } | undefined;
     let resize: { id: number; start: Position; origin: Position; size: WindowSize; preferred: WindowSize; moved: boolean } | undefined;
@@ -130,6 +138,10 @@ export function useAskPosition(panel: RefObject<HTMLElement>, anchor: RefObject<
       });
     };
     const persist = () => {
+      if (shared) {
+        if (viewId && manual && preferredSize) shared.operate({ type: 'view.geometry', viewId, geometry: { ...manual, ...preferredSize } });
+        return;
+      }
       if (!geometryCurrent()) return;
       const entry = rememberPosition(storageScope, manual, preferredSize);
       flushAskPosition(storageScope, entry.revision, geometryCurrent);
@@ -174,7 +186,7 @@ export function useAskPosition(panel: RefObject<HTMLElement>, anchor: RefObject<
         element.dataset.dragging = 'true';
         manual = positionWindow({ x: drag.origin.x + dx, y: drag.origin.y + dy });
       }
-      if (geometryCurrent()) rememberPosition(storageScope, manual, preferredSize);
+      if (!shared && geometryCurrent()) rememberPosition(storageScope, manual, preferredSize);
     };
     const keydown = (event: KeyboardEvent) => {
       if (!floating || drag || resize || event.altKey || event.ctrlKey || event.metaKey
@@ -212,5 +224,5 @@ export function useAskPosition(panel: RefObject<HTMLElement>, anchor: RefObject<
       element.removeEventListener('keydown', keydown);
       clearGesture();
     };
-  }, [panel, anchor, storageScope, initialOffset, docked, belowAnchor]);
+  }, [panel, anchor, storageScope, initialOffset, docked, belowAnchor, !!shared, viewId, geometry?.x, geometry?.y, geometry?.width, geometry?.height]);
 }

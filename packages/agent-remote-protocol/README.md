@@ -31,6 +31,24 @@ Timeline entries bind visible locators to Borgee resource identities. Resource r
 - Aggregate `decodeClientMessage` / `encodeClientMessage` and `decodeServerMessage` / `encodeServerMessage` codecs.
 - `BORGEE_AGENT_REMOTE_PROTOCOL_VERSION` and `ProtocolVersionSchema` for the one accepted wire version.
 
+## Shared Window presentation
+
+`WorkspaceWindow`, `WindowView`, and their strict operation schemas describe a
+shared workspace separately from session execution. The document has its own
+`schemaVersion`, stable Window/View identities, and a committed revision. Native
+session bindings are references; transcripts, drafts, runtime state, and credentials
+are not layout data. `applyWindowOperation` validates and applies atomic layout
+changes without Provider or React dependencies.
+
+The current layout schema retains one primary session area and supports additional
+floating, docked, and attached views. This is a renderer contract, not a dependency
+of Window identity on a main session. Feature metadata is opaque to the reducer;
+generic binding policy and explicit attachment/close relationships determine layout
+behavior. The Window HTTP API is independent of the existing session wire and does
+not change recorded session replay. See the
+[Window operations guide](../../docs/guides/window-agent-operations.md) for command
+results, retention, authorization, and uncertain-outcome recovery.
+
 ## Persistent session channels
 
 `/v1/session-channel?observation=session|activity` multiplexes independent existing

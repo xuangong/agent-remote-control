@@ -11,14 +11,14 @@ const other = { ...parent, nativeSessionId: 'other', title: 'Other root' };
 const known = [parent, child, sibling, other];
 afterEach(() => { window.history.replaceState(null, '', '/'); });
 
-async function setup(open?: (session: SessionEntry) => Promise<boolean>) {
+async function setup(open?: (session: SessionEntry) => Promise<boolean>, windowId?: string) {
   function Fixture() {
     const [current, setCurrent] = useState(() => known.find(session => session.nativeSessionId === new URLSearchParams(location.search).get('session')) ?? parent);
     const navigation = useConversationHistory(current, known, async target => {
       if (open && !await open(target)) return false;
       setCurrent(target);
       return true;
-    });
+    }, undefined, undefined, windowId ? { scope: 'window-navigation', windowId } : undefined);
     return <><output>{current.nativeSessionId}</output>
       {known.map(target => <button key={target.nativeSessionId} onClick={() => setCurrent(target)}>{target.title}</button>)}
       <button disabled={!navigation.canBack} onClick={navigation.back}>Back</button>
@@ -168,4 +168,18 @@ it('does not restore a visit from another workspace or a malformed layout', asyn
   await render(<Fixture />);
   expect(back).toBe(false);
   expect(JSON.parse(sessionStorage.getItem('agent-remote-conversation-history')!)[0].scope).toBe('own');
+});
+
+it('retains Window identity through native navigation, reload and browser traversal', async () => {
+  const f = await setup(undefined, 'shared-window');
+  expect(new URL(location.href).searchParams.get('window')).toBe('shared-window');
+  await f.click('Child');
+  expect(new URL(location.href).searchParams.get('window')).toBe('shared-window');
+  await f.click('Reload');
+  await f.click('Back');
+  expect(f.container.querySelector('output')!.textContent).toBe('parent');
+  expect(new URL(location.href).searchParams.get('window')).toBe('shared-window');
+  await f.click('Forward');
+  expect(f.container.querySelector('output')!.textContent).toBe('child');
+  expect(new URL(location.href).searchParams.get('window')).toBe('shared-window');
 });

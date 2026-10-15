@@ -1,3 +1,5 @@
+import { createWindowWorkspaces } from './window-workspaces.js';
+import { handleWindowRequest } from './window-routes.js';
 import { projectSuccessionFavorites } from './favorites-succession.js';
 import { createSuccessionReplay } from './session-successions.js';
 import { createDiagnosticJournal } from './diagnostic-journal.js';
@@ -92,6 +94,7 @@ export function createHostedRelay(options: HostedRelayOptions) {
     return { hostId: host.id, providerId: source.providerId, nativeSessionId: source.nativeSessionId };
   };
   const favorites = createFavorites(state, starAccess, (snapshot, subject, hostId, source) => !!successionLocator(snapshot, subject, hostId, source));
+  const windows = createWindowWorkspaces(state, (subject, binding) => [...tenants.values()].some(value => value.broker.canStarSession(binding, subject)));
   const sessionTitles = createSessionTitles(state, (subject, item) => [...tenants.values()].some(value => value.broker.canStarSession(item, subject)));
   const successions = createSuccessionReplay(() => state.read(), (subject, hostId, source) => successionLocator(state.read(), subject, hostId, source));
   const migrations = createSessionMigrations(state, (subject, item) => [...tenants.values()].some(value => value.broker.canStarSession(item, subject)));
@@ -514,6 +517,14 @@ export function createHostedRelay(options: HostedRelayOptions) {
     }
     if (url.pathname === '/auth/callback' && request.method === 'GET') return authenticationCallback(auth.origin);
     if (request.method === 'GET' && !url.pathname.startsWith('/v1/') && !url.pathname.startsWith('/u/') && !url.pathname.startsWith('/auth/')) return undefined;
+    if (/^\/v1\/windows(?:\/|$)/.test(url.pathname)) {
+      if (request.headers.has('origin') && !originAllowed(request)) return json(403, { code: 'origin_forbidden' });
+      const token = /^Bearer ([A-Za-z0-9_-]{43})$/.exec(request.headers.get('authorization') ?? '')?.[1];
+      const principal = token && windows.resolveToken(token);
+      if (!principal) return json(401, { code: 'invalid_window_grant' });
+      if (request.method !== 'GET' && !security.allow('mutation:' + principal.subject, 60, 60_000)) return json(429, { code: 'rate_limited' });
+      return handleWindowRequest(windows, request, principal);
+    }
     const grant = await authorize(request); if (grant instanceof Response) return grant;
     if (request.headers.has('origin') && !originAllowed(request)) return json(403, { error: 'Origin is not allowed.' });
     if (request.method !== 'GET') {
@@ -534,6 +545,7 @@ export function createHostedRelay(options: HostedRelayOptions) {
       }
       if (path === '/v1/remote/pairings' && request.method === 'POST' && !security.allow('pair:' + grant.subject, 5, 60_000)) return json(429, {error:'Too many pairing invitations.'});
     }
+    if (/^\/v1\/windows(?:\/|$)/.test(path)) return handleWindowRequest(windows, relative, { subject: grant.subject, authorize: () => !closing && !failed && sessions.expiresAt(request, grant) > Date.now() });
     if (path === '/v1/session-relations/reset') {
       if (request.method !== 'POST') return json(405,{error:'Method is not allowed.'});
       const input = await readJson(request);
@@ -942,6 +954,7 @@ export function createHostedRelay(options: HostedRelayOptions) {
     async close() {
       if (closing) return;
       closing = true;
+      windows.close();
       for (const socket of browserChannels.keys()) socket.close(1001, 'Relay stopped');
       browserChannels.clear();
       previewAccess.close(); subdomainAccess?.close(); sessions.close(); await scheduling.catch(() => undefined); await scheduler.cancel();

@@ -59,3 +59,27 @@ test('authenticated Worker HTTP and WS reopen complete saved C evidence, Favorit
   expect(createHash('sha256').update(JSON.stringify(restored.tenants[0].broker.associations.freezes)).digest('hex')).toBe(createHash('sha256').update(JSON.stringify(state.tenants[0]!.broker.associations!.freezes)).digest('hex'));
   // There is no registered native Host in this fixture; every effect would require one.
 }, 30000);
+
+test('Window documents, hashed management grants, operation receipts and deletion survive Worker SQLite restart atomically', async () => {
+  const f = await fixture({ completeCodec: true }); const state = codecState({ origin, issuer, secret });
+  const now = Date.now();
+  state.workspaceWindows = [{ subject: 'owner', id: 'window', generation: 1,
+    window: { schemaVersion: 1, id: 'window', title: 'Shared', revision: 1, primaryViewId: 'primary', selectedViewId: 'primary', mainMinimized: false,
+      views: [{ id: 'primary', placement: 'primary', width: 480, collapsed: false, display: { mode: 'content', lettersVisible: true } }] },
+    manager: { generation: 1, hash: createHash('sha256').update('private-window-grant').digest('hex'), session: { hostId: 'mapped-host', providerId: 'fixture', nativeSessionId: 'A', title: 'Manager' } },
+    receipts: [{ fingerprint: 'a'.repeat(64), result: { operationId: 'rename', status: 'committed', revision: 1, committedAt: now, expiresAt: now + 86400000 } }] }];
+  expect((await f.inspect('codec/seed', { method: 'POST', body: JSON.stringify(state) })).status).toBe(200);
+  const physical = await (await f.inspect('codec/physical')).json() as any;
+  expect(physical.manifests.some((row: any) => row.kind === 'workspaceWindow')).toBe(true);
+  await f.restart();
+  expect((await (await f.inspect('codec/snapshot')).json() as any).workspaceWindows).toEqual(state.workspaceWindows);
+  const deleted = structuredClone(state); const row = deleted.workspaceWindows![0]!;
+  delete row.window; row.deleted = true; row.receipts.push({ fingerprint: 'b'.repeat(64), result: { operationId: 'delete', status: 'committed', revision: 2, committedAt: now, expiresAt: now + 86400000 } });
+  await f.inspect('fail-commit');
+  expect((await f.inspect('codec/seed', { method: 'POST', body: JSON.stringify(deleted) })).status).toBe(500);
+  await f.inspect('restore-commit'); await f.restart();
+  expect((await (await f.inspect('codec/snapshot')).json() as any).workspaceWindows).toEqual(state.workspaceWindows);
+  expect((await f.inspect('codec/seed', { method: 'POST', body: JSON.stringify(deleted) })).status).toBe(200);
+  await f.restart();
+  expect((await (await f.inspect('codec/snapshot')).json() as any).workspaceWindows).toEqual(deleted.workspaceWindows);
+}, 30000);

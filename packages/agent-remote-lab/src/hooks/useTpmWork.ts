@@ -1,3 +1,7 @@
+import { parseWindowFeature } from '../window-feature-views.js';
+import type { WindowLayoutAuthority } from '../window-workspace-context.js';
+import { featureView, openFeatureView, projectFeatureBinding } from '../window-feature-views.js';
+import { tpmMainTarget } from '../tpm-main-sessions.js';
 import { conversationSessionStorage } from '../conversation-storage.js';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { TpmCreate, TpmList, TpmWork } from '@orchardworks/agent-remote-protocol';
@@ -33,9 +37,10 @@ function accessDenied(error: unknown): boolean {
 
 /** Catalog observation stays active independently of floating-view visibility. */
 export function useTpmWork(service: TpmService | undefined, hosts: readonly TpmHost[], enabled: boolean,
-  attach: (session: SessionEntry) => Promise<OpenedSession>, presentationVisible = true, storageScope?: string) {
+  attach: (session: SessionEntry) => Promise<OpenedSession>, presentationVisible = true, storageScope?: string, authority?: WindowLayoutAuthority) {
   const storageKey = storageScope ? `agent-remote:recovery:${storageScope}:tpm-windows` : undefined;
-  const [restored] = useState(() => readWindows(storageKey));
+  const shared = useRef(authority); shared.current = authority;
+  const [restored] = useState(() => authority ? [] : readWindows(storageKey));
   const hostIdentity = JSON.stringify(hosts);
   const stableHosts = useMemo<TpmHost[]>(() => JSON.parse(hostIdentity), [hostIdentity]);
   const [catalogs, setCatalogs] = useState<Record<string, Catalog>>({});
@@ -56,11 +61,13 @@ export function useTpmWork(service: TpmService | undefined, hosts: readonly TpmH
   const sameScope = serviceScope.current === service;
   const permittedHosts = stableHosts.filter(host => host.access !== 'shared');
   const visibleCatalogs = sameScope ? Object.fromEntries(Object.entries(catalogs).filter(([id]) => permittedHosts.some(host => host.id === id))) : {};
-  const windows = sameScope ? windowOrder.filter(key => {
+  const sharedKeys = authority?.window.views.filter(view => parseWindowFeature(view.feature)?.kind === 'tpm' && !view.collapsed).map(view => view.feature!.id);
+  const windows = sameScope ? (sharedKeys ?? windowOrder).filter(key => {
     const [hostId, id] = JSON.parse(key) as [string, string];
     return visibleCatalogs[hostId]?.works.some(work => work.id === id);
   }) : [];
-  const selected = windows.at(-1);
+  const selectedFeature = authority?.window.views.find(view => view.id === authority.window.selectedViewId)?.feature;
+  const selected = selectedFeature?.kind === 'tpm' && windows.includes(selectedFeature.id) ? selectedFeature.id : windows.at(-1);
   const expanded = windows.length > 0;
   const latest = useRef({ catalogs: visibleCatalogs, sessions, details, hosts: stableHosts, attach, selected, expanded, enabled, presentationVisible, service });
   latest.current = { catalogs: visibleCatalogs, sessions, details, hosts: stableHosts, attach, selected, expanded, enabled, presentationVisible, service };
@@ -202,13 +209,19 @@ export function useTpmWork(service: TpmService | undefined, hosts: readonly TpmH
     return promise;
   }, [find, authorized]);
   const focus = useCallback((key: string) => {
+    const current = shared.current; if (current) { const view = featureView(current.window, 'tpm', key); if (view && (view.collapsed || current.window.selectedViewId !== view.id)) current.operate({ type: 'view.select', viewId: view.id }); return; }
     setWindowOrder(current => !current.includes(key) || current.at(-1) === key ? current : [...current.filter(item => item !== key), key]);
   }, []);
   const open = useCallback(async (key: string, restoring = false) => {
     const item = find(key);
     if (!item) return;
     const requestedService = latest.current.service;
-    if (!restoring) { setWindowOrder(current => current.at(-1) === key ? current : [...current.filter(item => item !== key), key]); setOpened(current => current.includes(key) ? current : [...current, key]); }
+    if (!restoring && shared.current) {
+      const current = shared.current, main = tpmMainTarget(item);
+      const source = current.window.views.find(view => view.binding && view.binding.hostId === main.hostId && view.binding.providerId === main.providerId && view.binding.nativeSessionId === main.nativeSessionId);
+      openFeatureView(current, { kind: 'tpm', id: key, hostId: item.hostId }, item.work.tpmNativeSessionId ? { hostId: item.hostId, providerId: item.work.providerId, nativeSessionId: item.work.tpmNativeSessionId, title: item.work.title } : undefined, source?.id);
+    }
+    if (!restoring && !shared.current) { setWindowOrder(current => current.at(-1) === key ? current : [...current.filter(item => item !== key), key]); setOpened(current => current.includes(key) ? current : [...current, key]); }
     setUnread(current => current[key] ? { ...current, [key]: false } : current);
     await loadDetail(key);
     if (!authorized(item.hostId, requestedService)) return;
@@ -242,8 +255,8 @@ export function useTpmWork(service: TpmService | undefined, hosts: readonly TpmH
     return promise;
   }, [find, authorized, loadDetail]);
   useEffect(() => {
-    for (const key of opened) if (!detailErrors[key] && works.find(item => item.key === key)?.work.detailsOmitted) void loadDetail(key);
-  }, [opened, works, detailErrors, loadDetail]);
+    for (const key of authority ? windows : opened) if (!detailErrors[key] && works.find(item => item.key === key)?.work.detailsOmitted) void loadDetail(key);
+  }, [opened, JSON.stringify(windows), works, detailErrors, loadDetail, !!authority]);
   useEffect(() => {
     if (presentationVisible && expanded && selected) setUnread(current => current[selected] ? { ...current, [selected]: false } : current);
   }, [presentationVisible, expanded, selected]);
@@ -257,7 +270,7 @@ export function useTpmWork(service: TpmService | undefined, hosts: readonly TpmH
     }
   }, [presentationVisible, JSON.stringify(windows), works, sessions, attachmentErrors, detailErrors, open]);
   useEffect(() => {
-    if (storageKey && sameScope) try { conversationSessionStorage.setItem(storageKey, JSON.stringify(windowOrder.slice(-20))); } catch { /* Windows remain available without storage. */ }
+    if (!authority && storageKey && sameScope) try { conversationSessionStorage.setItem(storageKey, JSON.stringify(windowOrder.slice(-20))); } catch { /* Windows remain available without storage. */ }
   }, [storageKey, windowOrder, sameScope]);
 
   const update = useCallback((hostId: string, work: TpmWork) => {
@@ -315,12 +328,27 @@ export function useTpmWork(service: TpmService | undefined, hosts: readonly TpmH
   const action = useCallback((key: string, action: TpmAction) => mutate(key, action === 'delegate' || action === 'undelegate' ? { action: 'set_delegated', delegated: action === 'delegate' } : { action }), [mutate]);
   const resolve = useCallback((key: string, intentId: string, resolution: 'accepted' | 'rejected', nativeSessionId?: string) => mutate(key, { action: 'resolve', intentId, resolution, ...(nativeSessionId ? { nativeSessionId } : {}) }), [mutate]);
   const confirmTodo = useCallback((key: string, confirmation: SessionTodoDecision) => mutate(key, { action: 'confirm_todo', confirmation }), [mutate]);
-  const close = useCallback((key?: string) => setWindowOrder(current => key ? current.filter(item => item !== key) : []), []);
+  const close = useCallback((key?: string) => {
+    const current = shared.current;
+    if (current) {
+      const views = current.window.views.filter(view => parseWindowFeature(view.feature)?.kind === 'tpm' && (!key || view.feature!.id === key));
+      if (views.length) current.operate({ type: 'batch', operations: views.map(view => ({ type: 'view.close', viewId: view.id })) });
+      return;
+    }
+    setWindowOrder(current => key ? current.filter(item => item !== key) : []);
+  }, []);
+  useEffect(() => {
+    if (!authority) return;
+    for (const key of windows) {
+      const item = works.find(item => item.key === key);
+      if (item?.work.tpmNativeSessionId && projectFeatureBinding(authority, 'tpm', key, { hostId: item.hostId, providerId: item.work.providerId, nativeSessionId: item.work.tpmNativeSessionId, title: item.work.title })) break;
+    }
+  }, [authority, works, JSON.stringify(windows)]);
   const currentSessions = Object.fromEntries(Object.entries(sessions).filter(([key, session]) => {
     const item = works.find(item => item.key === key);
     return enabled && sameScope && item?.work.providerId === session.providerId && item.work.tpmNativeSessionId === session.nativeSessionId;
   }));
-  return { works, catalogs: visibleCatalogs, loading, sessions: currentSessions, attaching, attachmentErrors, detailsLoading, detailErrors, selected, windows, focus, opened: sameScope ? opened : [], expanded, busy, error,
+  return { works, catalogs: visibleCatalogs, loading, sessions: currentSessions, attaching, attachmentErrors, detailsLoading, detailErrors, selected, windows, focus, opened: sameScope ? authority ? windows : opened : [], expanded, busy, error,
     available: !!service && enabled, canCreate, create, action, rename, resolve, confirmTodo, open, close, refresh };
 }
 

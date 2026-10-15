@@ -51,3 +51,6 @@ export { BackgroundActivity, mergeBackgroundActivity } from './background-activi
 export * from './team.js';
 
 export * from './resource-input.js';
+
+export * from './window-workspace.js';
+export * from './window-workspace-operations.js';

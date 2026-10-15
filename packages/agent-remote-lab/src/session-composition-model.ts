@@ -34,6 +34,7 @@ export interface CompositionDocument {
   retained: Array<{ slot: string; against: string }>;
   tracks: CompositionTrack[]; selectedTrack?: string; asks: AskAssociationOwner[];
   windows?: CompositionWindow[]; activeWindow?: string;
+  windowBindings?: Array<{ windowId: string; viewId: string; bindingKey: string; slotId: string }>;
 }
 export interface CompositionTrack {
   entryId: string; slotId: string;
@@ -125,8 +126,28 @@ export function parseComposition(value: unknown, scope: string): CompositionDocu
   });
   unique(tracks.map(value => value.entryId));
   const windows = item.windows === undefined ? undefined : parseCompositionWindows(item.windows, ids);
+  let windowBindings: CompositionDocument['windowBindings'];
+  if (item.windowBindings !== undefined) {
+    requireValue(Array.isArray(item.windowBindings) && item.windowBindings.length <= 4096);
+    const ownership = new Map<string, string>();
+    windowBindings = item.windowBindings.map(entry => {
+      requireValue(record(entry) && typeof entry.windowId === 'string' && /^[A-Za-z0-9_.:-]{1,128}$/.test(entry.windowId)
+        && typeof entry.viewId === 'string' && /^[A-Za-z0-9_.:-]{1,128}$/.test(entry.viewId)
+        && typeof entry.bindingKey === 'string' && entry.bindingKey.length <= 73760 && ids.has(entry.slotId));
+      let binding: unknown;
+      try { binding = JSON.parse(entry.bindingKey); } catch { requireValue(false); }
+      requireValue(Array.isArray(binding) && binding.length === 3 && binding.every(value => typeof value === 'string' && value.length > 0 && value.length <= 4096)
+        && JSON.stringify(binding) === entry.bindingKey);
+      const owner = JSON.stringify([entry.windowId, entry.viewId]);
+      requireValue(!ownership.has(entry.slotId) || ownership.get(entry.slotId) === owner);
+      ownership.set(entry.slotId, owner);
+      return { windowId: entry.windowId, viewId: entry.viewId, bindingKey: entry.bindingKey, slotId: entry.slotId };
+    });
+    unique(windowBindings.map(entry => JSON.stringify([entry.windowId, entry.viewId, entry.bindingKey])));
+  }
   const activeWindow = windows?.find(view => view.id === item.activeWindow && !view.managed)?.id;
   return { version: 2, scope, editRevision: item.editRevision, slots, roles, edges, collapsed: [...item.collapsed], retained, asks, tracks,
+    ...(windowBindings ? { windowBindings } : {}),
     ...(windows ? { windows } : {}), ...(activeWindow ? { activeWindow } : {}),
     ...optionalKeys(item as unknown as Record<string, unknown>, ids, ['primary', 'address', 'focus', 'anchor']),
     ...optionalKeys(item as unknown as Record<string, unknown>, new Set(tracks.map(value => value.entryId)), ['selectedTrack']) };

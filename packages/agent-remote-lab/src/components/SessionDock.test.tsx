@@ -1,3 +1,5 @@
+import { WindowLayoutContext } from '../window-workspace-context.js';
+import { applyWindowOperation, createWindowView, type WorkspaceWindow } from '@orchardworks/agent-remote-protocol';
 import { act, StrictMode, useEffect, useState } from 'react';
 import { beforeEach, afterEach, expect, it, vi } from 'vitest';
 import { render } from '../test/setup.js';
@@ -167,4 +169,28 @@ it('moves an expanded session family as one dock without changing another dock o
   expect(family.style.order).toBe('2');expect(family.querySelector('input')).toBe(parent);expect(family.querySelector('textarea')).toBe(child);
   await act(async () => family.querySelector<HTMLButtonElement>('[aria-label="Float Parent"]')!.click());
   expect(view.querySelectorAll('[data-dock-id]')).toHaveLength(1);expect(child?.isConnected).toBe(true);
+});
+
+it('uses the shared Window for dock placement, resize, order and main minimization', async () => {
+  let update!: (operation: Parameters<typeof applyWindowOperation>[1]) => void;
+  function Harness() {
+    const [window, setWindow] = useState<WorkspaceWindow>({ schemaVersion: 1, id: 'window', revision: 0, title: 'Window', primaryViewId: 'main', selectedViewId: 'main', mainMinimized: false,
+      views: [createWindowView('main', undefined, 'primary'), createWindowView('one', undefined, 'float'), createWindowView('two', undefined, 'float')] });
+    update = operation => setWindow(current => applyWindowOperation(current, operation));
+    return <WindowLayoutContext.Provider value={{ window, operate: update }}><SessionDockProvider enabled><SessionDockRail><MinimizeMainSession /><textarea defaultValue="Main draft" /></SessionDockRail>
+      {['one', 'two'].map(id => <SessionViewPlacement key={id} id={id} title={id} visible>{({ controls }) => <section>{controls}<textarea defaultValue={id} /></section>}</SessionViewPlacement>)}
+    </SessionDockProvider></WindowLayoutContext.Provider>;
+  }
+  const view = await render(<Harness />);
+  await act(async () => view.querySelector<HTMLButtonElement>('[aria-label="Dock one"]')!.click());
+  await act(async () => update({ type: 'view.place', viewId: 'two', placement: 'dock' }));
+  const input = view.querySelector('[data-dock-id="one"] textarea');
+  await act(async () => update({ type: 'view.resize', viewId: 'one', width: 610 }));
+  expect(view.querySelector<HTMLElement>('[data-dock-id="one"]')!.style.width).toBe('610px');
+  await act(async () => view.querySelector('[data-dock-id="two"] [aria-label="Move two"]')!.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowLeft', bubbles: true })));
+  expect(view.querySelector<HTMLElement>('[data-dock-id="two"]')!.style.order).toBe('1');
+  await act(async () => view.querySelector<HTMLButtonElement>('[aria-label="Minimize main session area"]')!.click());
+  expect(view.querySelector('.lab-session-dock-base')!.getAttribute('data-minimized')).toBe('true');
+  await act(async () => update({ type: 'main.minimize', minimized: false }));
+  expect(view.querySelector('[data-dock-id="one"] textarea')).toBe(input);
 });

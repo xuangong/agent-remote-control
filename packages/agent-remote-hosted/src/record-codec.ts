@@ -9,7 +9,7 @@ export const HOSTED_CHUNK_BYTES = 262144;
 export const HOSTED_RECORD_KINDS = ['relayHeader', 'tenant', 'brokerHeader', 'associationHeader', 'favoritesHeader',
   'session', 'loginChallenge', 'consumedProof', 'securityEvent', 'sessionStar', 'favoritesTree', 'sessionMigration',
   'sessionTitle', 'deviceKey', 'host', 'binding', 'creation', 'preview', 'pairing', 'share', 'reservation',
-  'revokedHost', 'admission', 'freeze', 'relationChange', 'relationReset', 'favoritesReceipt'] as const;
+  'workspaceWindow', 'revokedHost', 'admission', 'freeze', 'relationChange', 'relationReset', 'favoritesReceipt'] as const;
 export type HostedRecordKind = typeof HOSTED_RECORD_KINDS[number];
 type Identity<K extends HostedRecordKind = HostedRecordKind> = [K, string, string];
 type JsonObject = Record<string, unknown>;
@@ -33,7 +33,8 @@ type HostedBrokerHeader = Omit<Broker, 'keys' | 'hosts' | 'bindings' | 'creation
 type HostedTenantHeader = Omit<Tenant, 'broker' | 'favoritesSuccession'> & {
   broker: Identity<'brokerHeader'>; favoritesSuccession?: Identity<'favoritesHeader'>;
 };
-type HostedRelayHeader = Omit<HostedRelayState, 'tenants' | 'sessions' | 'loginChallenges' | 'consumedProofs' | 'securityEvents' | 'sessionStars' | 'favoritesTrees' | 'sessionMigrations' | 'sessionTitles'> & {
+type HostedRelayHeader = Omit<HostedRelayState, 'workspaceWindows' | 'tenants' | 'sessions' | 'loginChallenges' | 'consumedProofs' | 'securityEvents' | 'sessionStars' | 'favoritesTrees' | 'sessionMigrations' | 'sessionTitles'> & {
+  workspaceWindows?: Identity<'workspaceWindow'>[];
   tenants: Identity<'tenant'>[]; sessions: Identity<'session'>[]; loginChallenges: Identity<'loginChallenge'>[];
   consumedProofs: Identity<'consumedProof'>[]; securityEvents?: Identity<'securityEvent'>[]; sessionStars?: Identity<'sessionStar'>[];
   favoritesTrees?: Identity<'favoritesTree'>[]; sessionMigrations?: Identity<'sessionMigration'>[]; sessionTitles?: Identity<'sessionTitle'>[];
@@ -102,6 +103,7 @@ export function encodeHostedSnapshot(input: HostedRelayState, auth: HostedAuthOp
     return values?.map(value => add(kind, owner, key(value), payload(value)));
   }
   const relay: HostedRelayHeader = { ...state,
+    workspaceWindows: references(state.workspaceWindows, 'workspaceWindow', '', value => JSON.stringify([value.subject, value.id])),
     sessions: references(state.sessions, 'session', '', value => value.hash),
     loginChallenges: references(state.loginChallenges, 'loginChallenge', '', value => value[0], value => value[1]),
     consumedProofs: references(state.consumedProofs, 'consumedProof', '', value => value[0], value => value[1]),
@@ -226,6 +228,7 @@ export function decodeHostedSnapshot(manifests: HostedManifest[], chunks: Hosted
     });
   }
   const relay = header(['relayHeader', '', 'relay'], 'relayHeader', '', 'relay');
+  collection(relay, 'workspaceWindows', 'workspaceWindow', '');
   collection(relay, 'sessions', 'session', '', true);
   collection(relay, 'loginChallenges', 'loginChallenge', '', true, true);
   collection(relay, 'consumedProofs', 'consumedProof', '', true, true);

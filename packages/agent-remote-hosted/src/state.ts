@@ -1,3 +1,4 @@
+import { validWindowState, type SavedWorkspaceWindow } from './window-workspaces.js';
 import { validSavedTeam } from './team-delivery.js';
 import { validFavoritesSuccession, type FavoritesSuccessionProgress } from './favorites-succession.js';
 import { validBrokerAssociations, migrateBrokerAssociations } from './succession-associations.js';
@@ -26,6 +27,7 @@ export type SavedGatewaySession = SavedHostedSession;
 export interface HostedRelayState {
   version: 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11;
   successionAccounting?: true;
+  workspaceWindows?: SavedWorkspaceWindow[];
   securityEvents?: SecurityEvent[];
   sessionStars?: SavedSessionStar[];
   favoritesTrees?: SavedFavoritesTree[];
@@ -103,6 +105,7 @@ export function validateRelayState(value: unknown, auth: HostedAuthOptions): Hos
   if (value.googleIdentities !== undefined && (auth.provider !== 'google' || !Array.isArray(value.googleIdentities) || value.googleIdentities.length > 1024 || !value.googleIdentities.every((identity: unknown) => record(identity) && string(identity.subject) && validAllowedEmail(identity.email)) || !unique(value.googleIdentities, identity => identity.subject))) return invalid();
   if (auth.provider === 'google' && value.sessions.some((session: SavedHostedSession) => !value.googleIdentities?.some((identity: { subject: string }) => identity.subject === session.grant.subject))) return invalid();
   if (value.securityEvents !== undefined && (!Array.isArray(value.securityEvents) || value.securityEvents.length > 4096 || !value.securityEvents.every((event: unknown) => record(event) && string(event.id) && string(event.subject) && time(event.at) && string(event.action, 128) && ['allowed', 'denied'].includes(event.outcome) && (event.hostId === undefined || string(event.hostId))))) return invalid();
+  if (value.workspaceWindows !== undefined && !validWindowState(value.workspaceWindows)) return invalid();
   if (!validSuccessionAuthorities(value as HostedRelayState)) return invalid();
   if (Object.hasOwn(value, 'sessionSuccessions') && (value.version >= 6 || !validLegacySuccessionMirrors(value.sessionSuccessions, value as HostedRelayState))) throw new Error('Invalid legacy succession mirror state.');
   if (value.sessionMigrations !== undefined) {

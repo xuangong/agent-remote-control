@@ -1,3 +1,5 @@
+import { bindWindowCompositionSlot, ensureWindowCompositionSlot, projectWindowComposition } from '../window-composition.js';
+import type { WindowSessionBinding, WorkspaceWindow } from '@orchardworks/agent-remote-protocol';
 import { applyConversationLayout, type ConversationLayout } from '../conversation-layout.js';
 import { flushSync } from 'react-dom';
 import { useEffect, useMemo, useReducer, useRef } from 'react';
@@ -92,7 +94,7 @@ export function useSessionSuccession(options: SuccessionOptions) {
     return {
       document: read.status === 'ready' ? read.document : createCompositionDocument(options.scope),
       readable: read.status === 'ready' || read.status === 'missing', unsupported: false, generation: recoveryGeneration(options.scope),
-      mounted: true, authority: { active: options.enabled }, applications: new Map<string, SuccessionApplication>(),
+      sharedWindow: undefined as WorkspaceWindow | undefined, windowProjectionRevision: -1, mounted: true, authority: { active: options.enabled }, applications: new Map<string, SuccessionApplication>(),
       discovered: false, discovering: false, layoutRevision: 0, active: !!options.initial?.nativeSessionId,
       initialStarted: false, sequence: 0, selection: undefined as Selection | undefined,
       selectedSlot: undefined as string | undefined, navigationAttempt: false,
@@ -187,7 +189,11 @@ export function useSessionSuccession(options: SuccessionOptions) {
     const write = saveCompositionDocument(runtime.document, () => current() && runtime.document.editRevision === revision);
     flushRecoveryWrites(compositionMetadataKey(options.scope));
     publish();
-    void write.completion.then(result => { if (current() && result.status !== 'saved' && result.status !== 'cancelled') { runtime.error = 'The current session layout could not be saved.'; publish(); } });
+    void write.completion.then(result => {
+      if (current() && runtime.document.editRevision === revision && !runtime.error && result.status !== 'saved' && result.status !== 'cancelled') {
+        runtime.error = 'The current session layout could not be saved.'; publish();
+      }
+    });
     return write.completion;
   }
   function slotTitle(slot: CompositionSlot): string { return slot.metadata?.title ?? 'Session'; }
@@ -201,7 +207,7 @@ export function useSessionSuccession(options: SuccessionOptions) {
     return changed;
   }
   function captureLayout() {
-    if (!live() || !runtime.readable || runtime.intent === 'history' || runtime.result?.status !== 'applied') return;
+    if (runtime.sharedWindow || !live() || !runtime.readable || runtime.intent === 'history' || runtime.result?.status !== 'applied') return;
     if (sideSlots().some(slot => !runtime.sides.has(slot.id))) return;
     const current = latest.current.layout();
     if (!current.path.length) return;
@@ -303,14 +309,18 @@ export function useSessionSuccession(options: SuccessionOptions) {
   function admitReplay(replay: SessionSuccessionReplay) {
     if (!live() || runtime.intent === 'history' || !runtime.selection) return;
     const key = compositionRoleKey({ scope: options.scope, hostId: replay.to.hostId, controllerId: replay.projection.role.current.controllerId, roleId: replay.projection.role.id });
-    const roleSlot = runtime.document.slots.find(slot => slot.intent.kind === 'role' && slot.intent.roleKey === key);
-    const originSlot = roleSlot ?? slotFor({ hostId: replay.from.hostId, ...replay.projection.role.origin, title: runtime.selection.title });
+    const selected = runtime.document.slots.find(slot => slot.id === runtime.selectedSlot);
+    const originSelection = { hostId: replay.from.hostId, ...replay.projection.role.origin, title: runtime.selection.title };
+    const selectedRole = selected?.intent.kind === 'role' && selected.intent.roleKey === key ? selected : undefined;
+    const selectedOrigin = selected?.intent.kind === 'fixed' && sessionKey(selectionFor(selected)) === sessionKey(originSelection) ? selected : undefined;
+    const roleSlot = selectedRole ?? runtime.document.slots.find(slot => slot.intent.kind === 'role' && slot.intent.roleKey === key);
+    const originSlot = selectedRole ?? selectedOrigin ?? roleSlot ?? slotFor(originSelection);
     if (runtime.selectedSlot && runtime.selectedSlot !== originSlot?.id) return;
     const related = runtime.replays.filter(item => compositionRoleKey({ scope: options.scope, hostId: item.to.hostId,
       controllerId: item.projection.role.current.controllerId, roleId: item.projection.role.id }) === key);
     const selectionMatches = related.some(item => [item.from, item.to].some(target => sessionKey(target) === sessionKey(runtime.selection!)));
     if (!selectionMatches && (!roleSlot || runtime.desired?.slot.id !== roleSlot.id)) return;
-    let slot = runtime.desired?.slot.intent.kind === 'role' && runtime.desired.slot.intent.roleKey === key ? runtime.desired.slot : roleSlot;
+    let slot = selectedRole ?? selectedOrigin ?? (runtime.desired?.slot.intent.kind === 'role' && runtime.desired.slot.intent.roleKey === key ? runtime.desired.slot : roleSlot);
     const origin = replay.projection.role.origin;
     slot ??= slotFor({ hostId: replay.from.hostId, providerId: origin.providerId, nativeSessionId: origin.nativeSessionId, title: runtime.selection.title });
     if (!slot) {
@@ -708,6 +718,16 @@ export function useSessionSuccession(options: SuccessionOptions) {
     runtime.navigation?.abort(); runtime.navigation = undefined;
     runtime.sequence++; runtime.metadata?.abort(); retireBinding(); runtime.desired = undefined; runtime.selectedSlot = undefined; runtime.active = false; publish();
   }
+  function clearPresentation() {
+    runtime.navigation?.abort(); runtime.navigation = undefined;
+    runtime.sequence++; runtime.metadata?.abort(); retireBinding();
+    runtime.selection = undefined; runtime.desired = undefined; runtime.selectedSlot = undefined;
+    runtime.attached = undefined; runtime.intent = undefined; runtime.keepOriginal = undefined;
+    runtime.active = false; runtime.discovering = false; runtime.navigationAttempt = false;
+    runtime.result = undefined; runtime.error = undefined;
+    for (const request of runtime.sideRequests.values()) request.abort();
+    runtime.sideRequests.clear(); runtime.sides.clear(); publish();
+  }
   function restoreSelection(requested: Selection) {
     const address = runtime.document.slots.find(slot => slot.id === runtime.document.address);
     const primary = runtime.intent !== 'history' && address && address.intent.kind !== 'history' && sessionKey(compositionSelection(address)) === sessionKey(requested)
@@ -939,9 +959,25 @@ export function useSessionSuccession(options: SuccessionOptions) {
     isCurrent: () => !!runtime.binding?.isCurrent(), open,
     restore: (session: OpenedSession) => open(session, undefined, undefined, undefined, undefined, undefined, undefined, true),
     openAttached: (session: OpenedSession, restoreLayout = false) => open(session, undefined, undefined, undefined, undefined, undefined, session, restoreLayout),
-    leave, refresh: discover, refreshCommitted, refreshSettled, canPrune, observeFavorites,
+    leave, clearPresentation, refresh: discover, refreshCommitted, refreshSettled, canPrune, observeFavorites,
     retry,
     ownerFor, localViews, ensureView, save, resolveTarget,
+    bindWindowView: (windowId: string, viewId: string, binding: WindowSessionBinding, slotId: string) => {
+      const slot = bindWindowCompositionSlot(runtime.document, windowId, viewId, binding, slotId);
+      save(true);
+      return slot;
+    },
+    ensureWindowView: (windowId: string, viewId: string, binding: WindowSessionBinding) => ensureWindowCompositionSlot(runtime.document, windowId, viewId, binding),
+    projectWindow: (window: WorkspaceWindow | undefined) => {
+      runtime.sharedWindow = window;
+      if (!window) return;
+      const changed = projectWindowComposition(runtime.document, window);
+      if (changed) { runtime.layoutRevision++; restoreSides(); }
+      if (runtime.windowProjectionRevision !== runtime.document.editRevision) {
+        runtime.windowProjectionRevision = runtime.document.editRevision;
+        save(true);
+      }
+    },
     navigationIntent: { sessionIntent: runtime.intent, keepOriginal: runtime.keepOriginal }, historyNavigation,
     observeHistoryTitles: (sessions: readonly SessionEntry[]) => { if (live() && runtime.readable && rememberHistoryTitles(sessions)) publish(); },
     updateTitles: (sessions: readonly SessionEntry[]) => {

@@ -1,3 +1,4 @@
+import { useWindowLayout } from '../window-workspace-context.js';
 import { useState } from 'react';
 import type { TimelineDisplayMode } from '@orchardworks/agent-remote-web/react';
 import type { SessionDisplayPreferences } from '../components/SessionViewOptions.js';
@@ -79,6 +80,9 @@ export function flushSessionDisplayPreferences(binding: DisplayPreferenceBinding
 
 /** Concrete display ownership is independent of native attachment and text/image owners. */
 export function useSessionDisplayPreferences(scope: string | undefined, sessionKey: string | undefined, defaultMode?: TimelineDisplayMode) {
+  const shared = useWindowLayout();
+  const viewId = sessionKey && (shared?.resolveViewId?.(sessionKey) ?? sessionKey);
+  const view = shared?.window.views.find(item => item.id === viewId);
   const binding = scope && sessionKey ? { scope, key: sessionKey } : undefined;
   const key = JSON.stringify([scope, sessionKey]);
   const read = () => binding ? entryFor(binding, defaultMode, true).preferences : defaults(defaultMode);
@@ -86,6 +90,7 @@ export function useSessionDisplayPreferences(scope: string | undefined, sessionK
   let current = selection;
   if (selection.identity !== key) { current = { identity: key, preferences: read() }; setSelection(current); }
   function setPreferences(preferences: SessionDisplayPreferences): void {
+    if (shared) { if (view) shared.operate({ type: 'view.display', viewId: view.id, display: preferences }); return; }
     setSelection({ identity: key, preferences });
     if (binding) {
       const entry = entryFor(binding, defaultMode, true);
@@ -93,5 +98,5 @@ export function useSessionDisplayPreferences(scope: string | undefined, sessionK
       flushSessionDisplayPreferences(binding, entry.revision, () => true);
     }
   }
-  return [current.preferences, setPreferences] as const;
+  return [view?.display ?? current.preferences, setPreferences] as const;
 }

@@ -12,7 +12,7 @@ import { App, type LabTransport } from './App.js';
 import { SessionDirectoryClient, type OpenedSession, type SuccessionActionResult, type SuccessionDescription } from './directory-client.js';
 import { DraftStore } from './draft-store.js';
 import { replicaState } from './test/fixtures.js';
-import { readCompositionDocument, initializeCompositionDocument, saveCompositionDocument, createCompositionDocument, createCompositionSlot, createAskOwner } from './session-composition.js';
+import { readCompositionDocument, parseComposition, initializeCompositionDocument, saveCompositionDocument, createCompositionDocument, createCompositionSlot, createAskOwner } from './session-composition.js';
 import { TrackedSessionViews } from './tracked-session-views.js';
 import { flushRecoveryWrites } from './recovery-writes.js';
 import { render, unmount } from './test/setup.js';
@@ -197,7 +197,7 @@ async function failureFixture(advanceDuringRecovery = false, nativeIdentity?: st
   cleanups.push(() => unmount(view));
   return { scope, get view() { return view; }, requests, chain, frames, updates, updatesByAgent, sockets,
     async reload(selected?: string) { await unmount(view); if (selected) window.history.replaceState(null, '', `/?host=host&provider=${providerId}&session=${selected}`); view = await render(<Access />); },
-    async newTab(selected: string) { await unmount(view); sessionStorage.clear(); window.history.replaceState(null, '', `/?host=host&provider=${providerId}&session=${selected}`); view = await render(<Access />); },
+    async newTab(selected: string, windowId?: string) { await unmount(view); sessionStorage.clear(); window.history.replaceState(null, '', `/?host=host&provider=${providerId}&session=${selected}${windowId ? `&window=${encodeURIComponent(windowId)}` : ''}`); view = await render(<Access />); },
     setAccessReady(ready: boolean) { setAccessReady(ready); },
     releaseTimeline() { releaseTimeline?.(); },
     releaseSnapshot() { releaseSnapshot?.(); },
@@ -1695,10 +1695,11 @@ it.each([false, true])('restores the legacy Side primary without overriding expl
   if (!history) expect(succession.desired?.slot.owners.text.key).toBe('agent-A');
 });
 
-it.each(['B', 'D'])('restores the selected local owner only for a matching %s reload target and clears it on ordinary navigation', async selected => {
-  const real = successionHooks.useSessionSuccession;
-  let succession!: ReturnType<typeof real>;
+it.each(['B', 'D'])('restores the selected Window owner while a new %s Window keeps independent owners', async selected => {
+  const real = successionHooks.useSessionSuccession, realManager = managerComponents.ChatSessionManager;
+  let succession!: ReturnType<typeof real>, manager!: ComponentProps<typeof realManager>;
   vi.spyOn(successionHooks, 'useSessionSuccession').mockImplementation((...args) => { succession = real(...args); return succession; });
+  vi.spyOn(managerComponents, 'ChatSessionManager').mockImplementation(props => { manager = props; return realManager(props); });
   const f = await failureFixture(false, 'B', false, '', { seed(scope, source) {
     const independent = { ...source, nativeSessionId: 'B', agentId: 'agent-B', title: 'Independent B' };
     localStorage.setItem(`agent-remote-opened:${scope}`, JSON.stringify([source, independent]));
@@ -1707,20 +1708,29 @@ it.each(['B', 'D'])('restores the selected local owner only for a matching %s re
   } });
   await settleApp(() => expect(succession.binding?.session.nativeSessionId).toBe('B'));
   const slot = succession.document.slots.find(value => value.owners.text.key === 'agent-B')!;
-  await act(async () => succession.open({ hostId: 'host', providerId: 'recorded', nativeSessionId: 'B', title: 'Independent B' }, undefined, undefined, slot.id));
-  await settleApp(() => { expect(succession.desired?.slot.id).toBe(slot.id); expect(succession.isCurrent()).toBe(true); });
+  const primarySlot = succession.desired!.slot.id, owners = structuredClone(slot.owners), askOwner = succession.ownerFor(slot.id);
+  await act(async () => manager.onOpenView!({ slotId: slot.id, session: { hostId: 'host', providerId: 'recorded', nativeSessionId: 'B', title: 'Independent B' } }));
+  await settleApp(() => expect(succession.document.focus).toBe(slot.id));
+  const originalUrl = window.location.href, windowId = new URL(originalUrl).searchParams.get('window');
+  const sideDraft = () => f.view.querySelector('.lab-side-conversation [data-testid="prompt-input"]')?.textContent;
+  expect(sideDraft()).toBe('Independent B draft');
   expect(readCompositionDocument(f.scope)).toMatchObject({ status: 'ready', document: { address: slot.id } });
+  await f.reload();
+  await settleApp(() => { expect(succession.document.focus).toBe(slot.id); expect(sideDraft()).toBe('Independent B draft'); });
+  expect(succession.document.slots.find(value => value.id === slot.id)?.owners).toEqual(owners);
+  expect(succession.ownerFor(slot.id)).toBe(askOwner);
   await f.reload(selected);
-  if (selected === 'B') {
-    await settleApp(() => { expect(succession.desired?.slot.id).toBe(slot.id); expect(succession.isCurrent()).toBe(true); });
-    expect(f.view.querySelector('[data-testid="prompt-input"]')?.textContent).toBe('Independent B draft');
-    await act(async () => succession.open({ hostId: 'host', providerId: 'recorded', nativeSessionId: 'B', title: 'Ordinary B' }));
-    await settleApp(() => { expect(succession.desired?.slot.owners.text.key).toBe('agent-A'); expect(succession.isCurrent()).toBe(true); });
-    expect(f.view.querySelector('[data-testid="prompt-input"]')?.textContent).toBe('A local draft');
-  } else {
-    await settleApp(() => expect(f.requests.filter(item => item.url.endsWith('/attach')).at(-1)?.body?.nativeSessionId).toBe('D'));
-    expect(succession.active).toBe(true); expect(succession.desired?.slot.intent).toMatchObject({ kind: 'fixed', target: { native: { nativeSessionId: 'D' } } });
-  }
+  await settleApp(() => expect(succession.binding?.session.nativeSessionId).toBe(selected));
+  expect(new URL(window.location.href).searchParams.get('window')).not.toBe(windowId);
+  expect(succession.desired?.slot.id).not.toBe(slot.id); expect(succession.desired?.slot.id).not.toBe(primarySlot);
+  expect(succession.desired?.slot.owners.text).not.toEqual(owners.text);
+  window.history.replaceState(null, '', originalUrl);
+  await f.reload();
+  await settleApp(() => { expect(succession.document.focus).toBe(slot.id); expect(sideDraft()).toBe('Independent B draft'); });
+  expect(succession.ownerFor(slot.id)).toBe(askOwner);
+  await act(async () => manager.onOpen({ hostId: 'host', providerId: 'recorded', nativeSessionId: 'B', title: 'Ordinary B' }));
+  await settleApp(() => expect(succession.document.focus).toBe(primarySlot));
+  expect(f.view.querySelector('.lab-primary-conversation [data-testid="prompt-input"]')?.textContent).toBe('A local draft');
 });
 
 
@@ -1771,14 +1781,19 @@ it.each(['ordinary', 'Track'] as const)('leaves a focused unlinked Side through 
   await settleApp(() => expect(new URL(window.location.href).searchParams.get('session')).toBe('S'));
   const slot = succession.document.slots.find(value => value.owners.text.key === side.agentId)!;
   const owners = structuredClone(slot.owners), askOwner = succession.ownerFor(slot.id);
+  const sharedWindow = new URL(window.location.href).searchParams.has('window');
+  const independent = () => f.view.querySelector('[aria-label="Session: Side S"]');
   await act(async () => {
     store.setLinked(recordId, false);
     window.dispatchEvent(new StorageEvent('storage', { key: `agent-remote-forks:${f.scope}:navigation:${recordId}` }));
   });
   await settleApp(() => {
     expect(f.view.querySelector('.lab-side-conversation:not([hidden]) .lab-side-close')).toBeNull();
-    expect(f.view.querySelector<HTMLElement>('.lab-primary-conversation')!.hidden).toBe(true);
-    expect(f.view.querySelector('.lab-side-conversation:not([hidden]) [data-testid="prompt-input"]')?.textContent).toBe('Independent S draft');
+    if (sharedWindow) expect(independent()?.querySelector('[data-testid="prompt-input"]')?.textContent).toBe('Independent S draft');
+    else {
+      expect(f.view.querySelector<HTMLElement>('.lab-primary-conversation')!.hidden).toBe(true);
+      expect(f.view.querySelector('.lab-side-conversation:not([hidden]) [data-testid="prompt-input"]')?.textContent).toBe('Independent S draft');
+    }
   });
   async function open(session: OpenedSession) {
     if (navigation === 'ordinary') await act(async () => manager.onOpen(session));
@@ -1796,10 +1811,17 @@ it.each(['ordinary', 'Track'] as const)('leaves a focused unlinked Side through 
   await open(target);
   expect(f.view.querySelectorAll('.lab-side-conversation:not([hidden])')).toHaveLength(0);
   await open(side);
-  expect(succession.binding?.session.viewId).toBe(slot.id);
-  expect(succession.desired?.slot.owners).toEqual(owners);
+  if (sharedWindow) {
+    expect(succession.binding?.session.viewId).not.toBe(slot.id);
+    expect(succession.desired?.slot.owners).not.toEqual(owners);
+    expect(independent()?.querySelector('[data-testid="prompt-input"]')?.textContent).toBe('Independent S draft');
+    expect(succession.document.slots.find(value => value.id === slot.id)?.owners).toEqual(owners);
+  } else {
+    expect(succession.binding?.session.viewId).toBe(slot.id);
+    expect(succession.desired?.slot.owners).toEqual(owners);
+    expect(f.view.querySelector('.lab-primary-conversation [data-testid="prompt-input"]')?.textContent).toBe('Independent S draft');
+  }
   expect(succession.ownerFor(slot.id)).toBe(askOwner);
-  expect(f.view.querySelector('.lab-primary-conversation [data-testid="prompt-input"]')?.textContent).toBe('Independent S draft');
   expect(store.get(recordId)?.linked).toBe(false);
   expect(f.frames.filter(frame => frame.message && ['send_message', 'execute_command', 'image_upload_begin'].includes(frame.message.type))).toEqual([]);
 });
@@ -1843,22 +1865,24 @@ it('retries a transient composition import failure through the synchronization b
   expect(succession.desired?.slot.owners.text.key).toBe('agent-A');
 });
 
-it('keeps post-upgrade view preferences and owners when opening the session in a new tab', async () => {
+it('keeps post-upgrade view preferences and owners when opening the same Window in a new tab', async () => {
   vi.stubGlobal('ResizeObserver', class { observe() {} disconnect() {} unobserve() {} });
-  const real = successionHooks.useSessionSuccession, realAsk = askHooks.useAskConversations;
-  let succession!: ReturnType<typeof real>, ask!: ReturnType<typeof realAsk>;
+  const real = successionHooks.useSessionSuccession, realAsk = askHooks.useAskConversations, realManager = managerComponents.ChatSessionManager;
+  let succession!: ReturnType<typeof real>, ask!: ReturnType<typeof realAsk>, manager!: ComponentProps<typeof realManager>;
   vi.spyOn(successionHooks, 'useSessionSuccession').mockImplementation((...args) => { succession = real(...args); return succession; });
   vi.spyOn(askHooks, 'useAskConversations').mockImplementation((...args) => { ask = realAsk(...args); return ask; });
+  vi.spyOn(managerComponents, 'ChatSessionManager').mockImplementation(props => { manager = props; return realManager(props); });
   const f = await failureFixture(false, 'B', false, '', { chain: [] });
   await settleApp(() => expect(succession.binding?.session.nativeSessionId).toBe('A'));
-  await act(async () => succession.open({ hostId: 'host', providerId: 'recorded', nativeSessionId: 'D', title: 'Post-upgrade D' }));
+  await act(async () => manager.onOpen({ hostId: 'host', providerId: 'recorded', nativeSessionId: 'D', title: 'Post-upgrade D' }));
   await settleApp(() => expect(succession.binding?.session.nativeSessionId).toBe('D'));
+  const windowId = new URL(window.location.href).searchParams.get('window')!;
   const original = structuredClone(succession.desired!.slot), owner = succession.ownerFor(original.id);
   await act(async () => ask.toggle(succession.binding!.session, owner));
   const primary = () => f.view.querySelector('.lab-primary-conversation')!;
   await act(async () => primary().querySelector<HTMLButtonElement>('[aria-label="Session view options"]')!.click());
   await act(async () => primary().querySelector<HTMLInputElement>('input[name^="session-display-"][value="content"]')!.click());
-  await f.newTab('D');
+  await f.newTab('D', windowId);
   await settleApp(() => expect(succession.binding?.session.nativeSessionId).toBe('D'));
   expect(succession.desired?.slot.id).toBe(original.id);
   expect(succession.desired?.slot.owners).toEqual(original.owners);
@@ -2192,3 +2216,73 @@ it('edits a real App managed Team window into its retained origin owner and admi
   expect(new DraftStore(f.scope).get(textKey)).toBe('');
   expect(new URL(window.location.href).searchParams.get('session')).toBe('A');
 }, 10000);
+
+it('persists adopted Window mappings across reload without changing native owners or Ask references', async () => {
+  const real = successionHooks.useSessionSuccession;
+  let succession!: ReturnType<typeof real>;
+  vi.spyOn(successionHooks, 'useSessionSuccession').mockImplementation((...args) => { succession = real(...args); return succession; });
+  const f = await failureFixture(false, 'B');
+  await settleApp(() => expect(succession.binding?.session.nativeSessionId).toBe('B'));
+  const slotId = succession.desired!.slot.id;
+  const owners = structuredClone(succession.desired!.slot.owners);
+  const askOwnerId = succession.ownerFor(slotId);
+  const windowId = new URL(window.location.href).searchParams.get('window')!;
+  await settleApp(() => {
+    const read = readCompositionDocument(f.scope);
+    expect(read.status).toBe('ready');
+    if (read.status === 'ready') expect(read.document.windowBindings).toEqual(expect.arrayContaining([expect.objectContaining({ windowId, viewId: 'main', slotId })]));
+  });
+  await f.reload();
+  await settleApp(() => expect(succession.binding?.session.nativeSessionId).toBe('B'));
+  expect(succession.desired!.slot.id).toBe(slotId);
+  expect(succession.desired!.slot.owners).toEqual(owners);
+  expect(succession.ownerFor(slotId)).toBe(askOwnerId);
+  expect(f.view.querySelector('[data-testid="prompt-input"]')?.textContent).toBe('A local draft');
+}, 10000);
+
+it('restores an open Ask with its original source after rebinding main and opening a fresh page', async () => {
+  vi.stubGlobal('ResizeObserver', class { observe() {} disconnect() {} unobserve() {} });
+  const real = successionHooks.useSessionSuccession, realAsk = askHooks.useAskConversations, realManager = managerComponents.ChatSessionManager;
+  let succession!: ReturnType<typeof real>, ask!: ReturnType<typeof realAsk>, manager!: ComponentProps<typeof realManager>;
+  vi.spyOn(successionHooks, 'useSessionSuccession').mockImplementation((...args) => { succession = real(...args); return succession; });
+  vi.spyOn(askHooks, 'useAskConversations').mockImplementation((...args) => { ask = realAsk(...args); return ask; });
+  vi.spyOn(managerComponents, 'ChatSessionManager').mockImplementation(props => { manager = props; return realManager(props); });
+  const f = await failureFixture(false, 'B', false, '', { chain: [], seed(scope, source) {
+    const store = new ForkStore(`ask:${scope}`, sessionStorage);
+    const record = store.prepare(referenceForkContext(source), { sourceNativeSessionId: source.nativeSessionId });
+    store.bind(record.id, { ...source, nativeSessionId: 'T', agentId: 'agent-T', title: 'Ask for A' });
+    store.markConfigured(record.id); store.finishCreation(record.id);
+  } });
+  await settleApp(() => expect(succession.binding?.session.nativeSessionId).toBe('A'));
+  const sourceA = succession.binding!.session, ownerA = succession.ownerFor(sourceA.viewId);
+  await act(async () => ask.toggle(sourceA, ownerA));
+  await act(async () => f.view.querySelector<HTMLButtonElement>('[aria-label="Ask about this session"]')!.click());
+  await settleApp(() => expect(ask.isOpen(sourceA, ownerA)).toBe(true));
+  await settleApp(() => expect(f.view.querySelector('[role="dialog"][aria-label="Ask"] [data-testid="prompt-input"]')).not.toBeNull());
+  const windowId = new URL(window.location.href).searchParams.get('window')!;
+  await act(async () => manager.onOpen({ hostId: 'host', providerId: 'recorded', nativeSessionId: 'B', title: 'Main B' }));
+  await settleApp(() => expect(succession.binding?.session.nativeSessionId).toBe('B'));
+  const sourceB = succession.binding!.session, ownerB = succession.ownerFor(sourceB.viewId);
+  expect(ask.sharedView(ownerB)).toBeUndefined();
+  expect(ask.entryFor(sourceB, ownerB).record?.target?.nativeSessionId).not.toBe('T');
+  expect(ask.entryFor(sourceA, ownerA).record?.source.nativeSessionId).toBe('A');
+  expect(ask.entryFor(sourceA, ownerA).record?.target?.nativeSessionId).toBe('T');
+  await f.newTab('B', windowId);
+  await settleApp(() => expect(succession.binding?.session.nativeSessionId).toBe('B'));
+  await settleApp(() => expect(f.view.querySelectorAll('[role="dialog"][aria-label="Ask"]')).toHaveLength(1));
+  const restoredOwners = succession.document.asks.filter(owner => ask.sharedView(owner.id));
+  expect(restoredOwners).toHaveLength(1);
+  const restoredSlot = succession.document.slots.find(slot => slot.id === restoredOwners[0]!.sourceSlot)!;
+  expect(restoredSlot.intent.target.native.nativeSessionId).toBe('A');
+  const currentOwner = succession.ownerFor(succession.binding!.session.viewId);
+  expect(ask.sharedView(currentOwner)).toBeUndefined();
+  expect(ask.entryFor(succession.binding!.session, currentOwner).record?.target?.nativeSessionId).not.toBe('T');
+  expect(() => parseComposition(succession.document, f.scope)).not.toThrow();
+  await act(async () => ask.toggle(succession.binding!.session, currentOwner));
+  expect(f.view.querySelector('.lab-primary-conversation [aria-label="Ask about this session"]')).not.toBeNull();
+  await act(async () => f.view.querySelector<HTMLButtonElement>('.lab-primary-conversation [aria-label="Ask about this session"]')!.click());
+  await settleApp(() => expect(ask.entryFor(succession.binding!.session, currentOwner).record?.target?.nativeSessionId).toBe('S'));
+  expect(f.requests.filter(request => request.url.endsWith('/create')).map(request => request.body?.sourceNativeSessionId)).toEqual(['B']);
+  expect(f.view.querySelectorAll('[role="dialog"][aria-label="Ask"]')).toHaveLength(2);
+  expect(ask.entryFor(sourceA, restoredOwners[0]!.id).record?.target?.nativeSessionId).toBe('T');
+});

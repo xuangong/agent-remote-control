@@ -462,6 +462,27 @@ ordinary restart or update.
 | Host is online but a provider is missing | CLI installation/version, native login, Host provider settings and **Detect again**. |
 | Installation/update cannot download | Host access to GitHub Releases **and** npm; changing the npm mirror does not proxy GitHub downloads. |
 
+## Shared Window workspaces
+
+A Window is a workspace with its own identity. The product automatically creates
+one when no Window is selected, without requiring a name or a setup step.
+Changes persist as they commit, so refresh, sharing, and returning later use the
+same Window. Use **Delete Window** to remove its layout; the page then creates
+an empty Window without stopping any native sessions.
+
+This version retains one primary session area and additional views; replacing its primary session keeps
+the same Window. Open its shared link in multiple pages to share layout, selection, docking,
+widths, and per-view display preferences. Narrow screens show the selected view;
+they do not replace the saved wide-screen layout. Closing a view does not stop its
+native session or archive a Team or TPM task.
+
+Use **View → Window** to choose, create, rename, share, or delete a Window. Assign
+one managing Agent session and download its private grant file to enable
+`agent-remote-controller window ...`. These commands use the same committed
+operations as the page; Host pairing credentials are not Window credentials.
+See [Window Agent operations](docs/guides/window-agent-operations.md) for commands,
+permission scope, explicit results, and recovery after a lost response.
+
 ## Main-site API and data requirements
 
 Here, **main site** means the account/login authority at `AGENT_REMOTE_ISSUER`.

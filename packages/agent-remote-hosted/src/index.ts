@@ -19,3 +19,6 @@ export * from './team-resources.js';
 export * from './hosted-auth.js';
 export * from './auth-provider.js';
 export * from './record-codec.js';
+
+export * from './window-workspaces.js';
+export * from './window-routes.js';

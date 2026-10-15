@@ -146,7 +146,7 @@ function TpmWorkspaceContent({ item, mainTitle, session, replica, visible, stora
         {work.evidence.length ? <><h2>Evidence</h2><ul>{work.evidence.map((evidence, index) => <li key={index}><MarkdownContent markdown={evidence} /></li>)}</ul></> : null}
       </article>
       <div className="lab-tpm-conversation" hidden={documentVisible}>
-        {session ? <TpmChat session={session} replica={replica} transport={transport} draftBinding={draftBinding} navigation={navigation} title={work.title}
+        {session ? <TpmChat displayBinding={{ scope: storageScope, key: `tpm:${item.key}` }} session={session} replica={replica} transport={transport} draftBinding={draftBinding} navigation={navigation} title={work.title}
           todo={work.todo ? { list: work.todo, disabled: unavailable || work.paused || work.archived, onConfirm: onConfirmTodo,
             context: work.document || work.acceptance ? <details><summary>Specification & acceptance</summary><MarkdownContent markdown={`${work.document}\n\n${work.acceptance}`} /></details> : undefined } : undefined} /> : <>
           <div className="lab-ask-opening" role="status">{attaching ? 'Opening TPM conversation…' : work.creationStatus === 'abandoned' ? 'This work was abandoned.' : work.tpmNativeSessionId ? 'The TPM conversation is unavailable. Retry attachment when the Controller is online.' : 'The TPM session has not been created. Review its work health before continuing.'}</div>
@@ -158,12 +158,13 @@ function TpmWorkspaceContent({ item, mainTitle, session, replica, visible, stora
   </div>;
 }
 
-function TpmChat({ session, replica, transport, draftBinding, navigation, title, todo }: {
+function TpmChat({ session, replica, transport, draftBinding, navigation, title, todo, displayBinding }: {
+  displayBinding: { scope: string; key: string };
   session: OpenedSession; replica?: AgentReplica; transport: RemoteAgentTransport; draftBinding: DraftBinding; navigation?: SessionViewNavigationFactory; title: string; todo?: SessionTodoPanelProps;
 }) {
   const { state, sessionState, status, actions, questions, setQuestions, imageRecipient, operationBinding } = useConversationSession(session, transport, replica, false, { nativePrefixOnly: true });
   const { communication, ...viewNavigation } = navigation?.(session, state) ?? {};
-  return <CommunicationNavigationContext.Provider value={communication}><LabWorkbench todo={todo} defaultDisplayMode="content" headingMode="toolbar" {...viewNavigation}
+  return <CommunicationNavigationContext.Provider value={communication}><LabWorkbench displayBinding={displayBinding} todo={todo} defaultDisplayMode="content" headingMode="toolbar" {...viewNavigation}
     state={state} sessionState={sessionState} sessionStatus={status} attachingAgentId={operationBinding.source.agentId} actions={actions} operationBinding={operationBinding}
     draftSessionKey={sessionKey(session)} draftBinding={draftBinding} imageRecipient={imageRecipient} questionDrafts={questions}
     onQuestionDraftChange={(id, value) => setQuestions(current => ({ ...current, [id]: value }))}

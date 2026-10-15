@@ -1,0 +1,6 @@
+.lab-window-workspaces { position: relative; font-size: .8rem; max-width: 240px; }
+.lab-window-workspaces > summary { cursor: pointer; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.lab-window-workspaces[open] { display: flex; flex-wrap: wrap; gap: 6px; padding: 8px; border: 1px solid var(--border, #cbd5e1); border-radius: 8px; background: var(--surface, #fff); z-index: 65; }
+.lab-window-workspaces[open] > summary { flex-basis: 100%; }
+.lab-window-workspaces select, .lab-window-workspaces input { min-width: 0; max-width: 100%; }
+.lab-window-workspaces p { flex-basis: 100%; margin: 2px 0; overflow-wrap: anywhere; }

@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from 'react';
 import { controllerPath } from '@orchardworks/agent-remote-hosted/controller-location';
 import { sessionKey, sessionRootKey, type SessionEntry } from '../session-tree.js';
 
-interface Visit { id: string; session: SessionEntry; root: string; sessionIntent?: 'history'; keepOriginal?: boolean; scope?: string; layout?: ConversationLayout; layoutUpdated?: number }
+interface Visit { id: string; session: SessionEntry; root: string; sessionIntent?: 'history'; keepOriginal?: boolean; scope?: string; windowId?: string; layout?: ConversationLayout; layoutUpdated?: number }
 const storageKey = 'agent-remote-conversation-history';
 function restoreVisits(scope?: string): Visit[] {
   try {
@@ -13,7 +13,7 @@ function restoreVisits(scope?: string): Visit[] {
     for (const visit of visits) {
       if (typeof visit.id !== 'string' || typeof visit.root !== 'string' || typeof visit.session?.title !== 'string' || typeof visit.session?.nativeSessionId !== 'string' || typeof visit.session?.providerId !== 'string') return [];
       if (visit.sessionIntent !== undefined && visit.sessionIntent !== 'history' || visit.keepOriginal !== undefined && typeof visit.keepOriginal !== 'boolean') return [];
-      controllerPath({ ...visit.session, hostId: visit.session.hostId ?? 'local', sessionIntent: visit.sessionIntent, keepOriginal: visit.keepOriginal });
+      controllerPath({ ...visit.session, hostId: visit.session.hostId ?? 'local', sessionIntent: visit.sessionIntent, keepOriginal: visit.keepOriginal, windowId: visit.windowId });
     }
     return visits.filter(visit => visit.scope === scope).map(visit => ({ ...visit, layout: isConversationLayout(visit.layout) ? visit.layout : undefined }));
   } catch { return []; }
@@ -22,18 +22,19 @@ function restoreVisits(scope?: string): Visit[] {
 export function readCurrentConversationLayout(scope: string): ConversationLayout | undefined {
   const visit = restoreVisits(scope).find(visit => visit.id === window.history.state?.agentRemoteVisit);
   if (!visit) return;
-  const expected = controllerPath({ ...visit.session, hostId: visit.session.hostId ?? 'local', sessionIntent: visit.sessionIntent, keepOriginal: visit.keepOriginal });
+  const expected = controllerPath({ ...visit.session, hostId: visit.session.hostId ?? 'local', sessionIntent: visit.sessionIntent, keepOriginal: visit.keepOriginal, windowId: visit.windowId });
   return `${window.location.pathname}${window.location.search}` === expected ? visit.layout : undefined;
 }
 
 export function useConversationHistory(current: SessionEntry | undefined, known: readonly SessionEntry[], open: (session: SessionEntry, sessionIntent?: 'history', keepOriginal?: boolean, layout?: ConversationLayout) => Promise<boolean>, sessionIntent?: 'history', keepOriginal?: boolean,
-  presentation?: { scope: string; layout?: ConversationLayout }) {
+  presentation?: { scope: string; windowId?: string; layout?: ConversationLayout }) {
   const [restored] = useState(() => restoreVisits(presentation?.scope));
   const visits = useRef<Visit[]>(restored);
   const position = useRef(restored.findIndex(visit => visit.id === window.history.state?.agentRemoteVisit));
   const traveling = useRef(false);
   const queued = useRef<number>();
   const restoring = useRef(false);
+  const windowIdRef = useRef(presentation?.windowId); windowIdRef.current = presentation?.windowId;
   const openRef = useRef(open);
   openRef.current = open;
   const [, refresh] = useState(0);
@@ -54,9 +55,10 @@ export function useConversationHistory(current: SessionEntry | undefined, known:
     persist();
   }
   function write(visit: Visit, push: boolean): void {
+    visit.windowId ??= windowIdRef.current;
     persist();
     const state = { ...window.history.state, agentRemoteVisit: visit.id };
-    const path = controllerPath({ ...visit.session, hostId: visit.session.hostId ?? 'local', sessionIntent: visit.sessionIntent, keepOriginal: visit.keepOriginal });
+    const path = controllerPath({ ...visit.session, hostId: visit.session.hostId ?? 'local', sessionIntent: visit.sessionIntent, keepOriginal: visit.keepOriginal, windowId: visit.windowId });
     if (push) window.history.pushState(state, '', path);
     else window.history.replaceState(state, '', path);
   }
@@ -66,17 +68,18 @@ export function useConversationHistory(current: SessionEntry | undefined, known:
     const previous = visits.current[position.current];
     if (previous && sessionKey(previous.session) === identity && previous.sessionIntent === sessionIntent && !!previous.keepOriginal === !!keepOriginal) {
       previous.session = current;
+      previous.windowId = presentation?.windowId;
       previous.root = root;
       write(previous, false);
       return;
     }
-    const visit: Visit = { id: crypto.randomUUID(), session: current, root, sessionIntent, keepOriginal, scope: presentation?.scope };
+    const visit: Visit = { id: crypto.randomUUID(), session: current, root, sessionIntent, keepOriginal, scope: presentation?.scope, windowId: presentation?.windowId };
     visits.current = [...visits.current.slice(0, position.current + 1), visit];
     visits.current = visits.current.slice(-100);
     position.current = visits.current.length - 1;
     write(visit, previous !== undefined);
     refresh(value => value + 1);
-  }, [identity, root, sessionIntent, keepOriginal, current?.agentId, current?.title, current?.parentNativeSessionId]);
+  }, [identity, root, sessionIntent, keepOriginal, current?.agentId, current?.title, current?.parentNativeSessionId, presentation?.windowId]);
 
   useEffect(() => {
     if (traveling.current || !current) return;

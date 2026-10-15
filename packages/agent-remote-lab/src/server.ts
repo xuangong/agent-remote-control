@@ -14,12 +14,13 @@ export interface ProtocolValidationServerOptions {
   imageDirectory?: string;
   resourceDirectory?: string;
   teamResourceDirectory?: string;
+  successionStateDirectory?: string;
   directories?: readonly SessionDirectorySource[];
 }
 
 export function createProtocolValidationServer(options: ProtocolValidationServerOptions) {
-  const directory = createSessionDirectory(options.providers, options.directories);
-  const relay = createAgentRemoteRelay({ providers: directory.providers, inputResourceStore: new InputResourceStore({directory:options.resourceDirectory ?? join(homedir(), '.agent-remote-control', 'lab-input-resources')}), inputImageStore: new InputImageStore({ directory: options.imageDirectory ?? join(homedir(), '.agent-remote-control', 'lab-input-images') }) });
+  const directory = createSessionDirectory(options.providers, options.directories, { successionStateDirectory: options.successionStateDirectory });
+  const relay = createAgentRemoteRelay({ providers: directory.providers, operationCache: directory.operationCache, operationLifecycle: directory.operationLifecycle, inputResourceStore: new InputResourceStore({directory:options.resourceDirectory ?? join(homedir(), '.agent-remote-control', 'lab-input-resources')}), inputImageStore: new InputImageStore({ directory: options.imageDirectory ?? join(homedir(), '.agent-remote-control', 'lab-input-images') }) });
   const http = createAgentRemoteHttpServer(relay, {
     // The mutation policy admits both local CLI and exact-origin browser requests.
     operationScope: () => 'local-lab',

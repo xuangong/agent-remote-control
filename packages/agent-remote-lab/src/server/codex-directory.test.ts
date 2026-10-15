@@ -65,3 +65,18 @@ it('disposes newly created threads that have not been attached to a Relay', asyn
   expect(f.children.every((app) => app.child.killed)).toBe(true);
   await expect(f.directory.create({})).rejects.toThrow('closed');
 });
+
+it('classifies native source grants from the original durable store', async () => {
+  const { mkdtemp, rm } = await import('node:fs/promises');
+  const { join } = await import('node:path'); const { tmpdir } = await import('node:os');
+  const { SessionReferenceStore } = await import('@orchardworks/agent-remote-controller');
+  const root = await mkdtemp(join(tmpdir(), 'codex-directory-grants-'));
+  const f = fixture(), directory = createCodexDirectory(f.provider, root);
+  try {
+    expect(await directory.sourceGrantState!('ordinary')).toBe('absent');
+    await new SessionReferenceStore(join(root, '.references')).set({ sourceNativeSessionId: 'source', systemPrompt: 'source context', handle: { providerId: 'codex', sessionId: 'reader', opaque: '{}' } });
+    expect(await directory.sourceGrantState!('reader')).toBe('external');
+    expect(await directory.sourceGrantState!('ordinary')).toBe('absent');
+    expect(f.starts()).toBe(0);
+  } finally { await directory.close!(); await f.directory.close!(); await rm(root, { recursive: true, force: true }); }
+}, 10000);

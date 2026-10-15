@@ -59,6 +59,18 @@ The server accepts only its exact loopback Host/Origin. It owns one session, so 
 
 A trusted local Adapter module exports `createAdapter()` returning an `AgentProviderAdapter`, optionally with an async `dispose()` for provider-wide resources. It is loaded only from CLI configuration. Native normalization, capabilities, history boundaries, controls and stdio ownership stay in that Adapter; ARDB does not reinterpret native messages.
 
+### Local native prefix operations
+
+Live sessions expose same-origin JSON `POST /__ardb/succession/{describe,prepare,status,commit,cancel,reconcile}`. `describe` accepts the current public `agentId` and a native prefix selection; mutations use the returned role, revision and operation identity. These endpoints support native prefix preparation only, subject to the adapter's exact-handle and readback evidence. Replay has no mutation backend until a separate live session starts.
+
+Use `--succession-state-directory /path/to/state` to name one durable owned-session scope. The `server_ready` record prints the resolved directory. By default it is under `~/.agent-remote-control/ardb-successions/`, separate from temporary images; a supplied persistence handle or programmatic session seed gives a stable scope, otherwise a new scope is allocated. Reuse the printed directory to restore the committed current session from its exact saved handle. Keep different owned sessions in different directories.
+
+A successful commit updates the current descriptor and CLI observer, closes the original capture under its original recording identity, and leaves the new session's UI capture idle. Existing original-session subscribers remain readable but reject mutations. `GET /__ardb/history?nativeSessionId=...` explicitly opens history within the committed owned lineage; saved captures remain exportable during the process with `GET /__ardb/recording/export?id=RECORDING_ID`. Export recordings before shutdown; succession state does not persist capture files.
+
+Cold restart restores committed sessions without creating another prefix. An uncommitted candidate's exact handle can be recovered, but the new direct Relay has a new timeline epoch: reconciliation cannot replace the original source capture and safely rejects `succession_boundary_changed`. The source remains current, the original evidence remains retained, and retrying the same operation never creates another candidate. An unknown outcome without an exact handle also stays unresolved.
+
+The local backend bundles a narrow Host service at build time. The installed package needs no Controller package, account, Hosted service, repository source path or workspace symlink. Standalone Lab uses the same service through `/v1/remote/succession/{action}` and a configurable `successionStateDirectory` (default `~/.agent-remote-control/lab-successions/`). Its built-in local directory reconstructs fixed source-reader grants with the original grant identity and the current reader's execution authority, including after restart. Custom `SessionDirectorySource` implementations can report per-session `sourceGrantState`: `absent` permits the normal provider checks, while `external` or `unknown` makes prefix preparation unavailable without affecting ordinary attachment. A source-capable directory without this marker is treated as unknown; grants are never silently dropped or migrated.
+
 ## Record human and AI collaboration
 
 Start `ardb server --provider codex --open` (or another supported provider) and use

@@ -1,5 +1,8 @@
-import { sourceSessionExtensions, browseWorkspaceFolders, createWorkspaceFolder, WorkspaceFolderError } from '@orchardworks/agent-remote-controller';
-import { randomUUID } from 'node:crypto';
+import { browseWorkspaceFolders, createWorkspaceFolder, WorkspaceFolderError } from '@orchardworks/agent-remote-controller';
+import { createHash, randomUUID } from 'node:crypto';
+import { homedir } from 'node:os';
+import { join, resolve } from 'node:path';
+import { LocalSessionSuccession, type LocalSuccessionProvider } from '@orchardworks/agent-remote-controller/local-session-succession';
 import type { IncomingMessage, Server, ServerResponse } from 'node:http';
 import { RemoteHostCatalog, RemoteHostCatalogError, type RemoteSessionSummary } from '@orchardworks/dsh';
 import type { AgentProviderAdapter, AgentSession, AgentSessionConfig } from '@orchardworks/agent-provider-sdk';
@@ -9,6 +12,8 @@ import { createLocalLabMutationPolicy } from './local-authorizer.js';
 export interface SessionDirectorySource {
   providerId: string;
   supportsSourceReferences?: boolean;
+  /** External or unknown grants cannot be reconstructed by the direct local runtime. */
+  sourceGrantState?(nativeSessionId: string): 'absent' | 'external' | 'unknown' | Promise<'absent' | 'external' | 'unknown'>;
   list(): Promise<readonly RemoteSessionSummary[]> | readonly RemoteSessionSummary[];
   workspaces(): unknown;
   models?(): unknown;
@@ -18,14 +23,32 @@ export interface SessionDirectorySource {
   close?(): Promise<void>;
 }
 
-export function createSessionDirectory(providers: readonly AgentProviderAdapter[], sources: readonly SessionDirectorySource[] = []) {
+export function createSessionDirectory(providers: readonly AgentProviderAdapter[], sources: readonly SessionDirectorySource[] = [], options: { successionStateDirectory?: string } = {}) {
+  const stateDirectory = resolve(options.successionStateDirectory ?? join(homedir(), '.agent-remote-control', 'lab-successions'));
+  const successionProviders = providers.map((provider: LocalSuccessionProvider) => {
+    const source = sources.find(source => source.providerId === provider.descriptor.providerId);
+    if (!source) return provider;
+    return new Proxy(provider, { get(target, key) {
+      if (key === 'validatePromptEdit' && target.validatePromptEdit) return async (selection: Parameters<NonNullable<LocalSuccessionProvider['validatePromptEdit']>>[0]) => {
+        await assertNoExternalGrant(source, selection.nativeSessionId);
+        await target.validatePromptEdit!(selection);
+      };
+      if (key === 'forkForPromptEdit' && target.forkForPromptEdit) return async (...args: Parameters<NonNullable<LocalSuccessionProvider['forkForPromptEdit']>>) => {
+        await assertNoExternalGrant(source, args[0].nativeSessionId);
+        return target.forkForPromptEdit!(...args);
+      };
+      const value = Reflect.get(target, key, target); return typeof value === 'function' ? value.bind(target) : value;
+    } });
+  });
+  const local = new LocalSessionSuccession(stateDirectory, `lab-${createHash('sha256').update(stateDirectory).digest('hex')}`, successionProviders);
+
   const entries = new Map(providers.map((provider) => {
-    const source = sources.find((item) => item.providerId === provider.descriptor.providerId) ?? localSource(provider);
+    const source = sources.find((item) => item.providerId === provider.descriptor.providerId) ?? localSource(local.providers.find(item => item.descriptor.providerId === provider.descriptor.providerId)!);
     return [source.providerId, { source, catalog: new RemoteHostCatalog({ roots: () => source.list() }) }] as const;
   }));
   const adapters = providers.map((provider): AgentProviderAdapter => ({
     descriptor: provider.descriptor,
-    resumeSession: (handle) => provider.resumeSession(handle),
+    resumeSession: (handle) => local.providers.find(item => item.descriptor.providerId === provider.descriptor.providerId)!.resumeSession(handle),
     async createSession(config) {
       const { nativeSessionId, parentNativeSessionId } = config as AgentSessionConfig & { nativeSessionId?: string; parentNativeSessionId?: string };
       if (nativeSessionId && parentNativeSessionId) {
@@ -36,10 +59,10 @@ export function createSessionDirectory(providers: readonly AgentProviderAdapter[
         if (info.sessionId !== nativeSessionId || info.providerId !== source.providerId) {
           throw new DirectoryError(409, 'child_identity_mismatch', 'The Provider returned a different native child session.');
         }
-        return child;
+        return local.ownSession(child, source.providerId);
       }
-      return nativeSessionId === undefined ? provider.createSession(config)
-        : entries.get(provider.descriptor.providerId)!.source.open(nativeSessionId);
+      return nativeSessionId === undefined ? local.providers.find(item => item.descriptor.providerId === provider.descriptor.providerId)!.createSession(config)
+        : local.ownSession(await entries.get(provider.descriptor.providerId)!.source.open(nativeSessionId), provider.descriptor.providerId);
     },
   }));
   const attachments = new Map<string, Promise<{ agentId: string; nativeSessionId: string }>>();
@@ -50,6 +73,20 @@ export function createSessionDirectory(providers: readonly AgentProviderAdapter[
     return entry;
   };
   const attach = async (relay: AgentRemoteRelay, providerId: string, nativeSessionId: string, parentNativeSessionId?: string): Promise<{ agentId: string; nativeSessionId: string }> => {
+    await local.service.ready;
+    if (parentNativeSessionId === undefined) {
+      const state = local.service.store.all().find(state => state.role.origin.providerId === providerId && (state.role.origin.nativeSessionId === nativeSessionId || state.role.current.nativeSessionId === nativeSessionId || state.operations.some(row => row.to?.nativeSessionId === nativeSessionId)));
+      if (state) {
+        const external = sources.find(source => source.providerId === providerId);
+        // Original custom sessions keep their directory-owned extension reconstruction.
+        // A committed descendant always follows the durable role, never the retired origin.
+        if (!external || state.role.current.nativeSessionId !== state.role.origin.nativeSessionId) {
+          if (external) await assertNoExternalGrant(external, state.role.current.nativeSessionId);
+          return { agentId: await local.attach(state.role.current), nativeSessionId: state.role.current.nativeSessionId };
+        }
+        nativeSessionId = state.role.current.nativeSessionId;
+      }
+    }
     if (parentNativeSessionId !== undefined) {
       const entry = requireEntry(providerId);
       if (!entry.source.openChild) throw new DirectoryError(409, 'child_control_unavailable', 'This Provider cannot attach native child sessions.');
@@ -84,6 +121,7 @@ export function createSessionDirectory(providers: readonly AgentProviderAdapter[
           requestId: randomUUID(), operationId: randomUUID(), agentId, providerId,
           config: { sessionId: agentId, nativeSessionId, ...(parentNativeSessionId === undefined ? {} : { parentNativeSessionId }) } as AgentSessionConfig,
         } });
+        local.agentRef(agentId);
         return { agentId, nativeSessionId };
       })();
       attachments.set(key, pending);
@@ -93,11 +131,15 @@ export function createSessionDirectory(providers: readonly AgentProviderAdapter[
   };
   return {
     providers: adapters,
+    operationCache: local.operationCache,
+    operationLifecycle: local.operationLifecycle,
     async close() {
+      await local.close();
       for (const entry of entries.values()) entry.catalog.dispose();
       await Promise.all([...entries.values()].map((entry) => entry.source.close?.()));
     },
     install(server: Server, relay: AgentRemoteRelay, origin: string) {
+      local.bindRelay(relay);
       const handlers = server.listeners('request');
       server.removeAllListeners('request');
       server.on('request', (request, response) => {
@@ -108,7 +150,7 @@ export function createSessionDirectory(providers: readonly AgentProviderAdapter[
         }
         void handle(request, response, url).catch((error) => {
           if (error instanceof DirectoryError || error instanceof RemoteHostCatalogError || error instanceof WorkspaceFolderError) send(response, error.status, { code: error.code, error: error.message });
-          else send(response, 503, { code: 'operation_failed', error: error instanceof Error ? error.message : 'Session operation failed.' });
+          else send(response, (error as { status?: number }).status ?? 409, { code: 'operation_failed', error: error instanceof Error ? error.message : 'Session operation failed.' });
         });
       });
       async function handle(request: IncomingMessage, response: ServerResponse, url: URL) {
@@ -136,6 +178,22 @@ export function createSessionDirectory(providers: readonly AgentProviderAdapter[
           const access = createLocalLabMutationPolicy(origin).validate(request);
           if (access.status === 'rejected') throw new DirectoryError(access.httpStatus, access.code, access.message);
           const body = await readBody(request);
+          if (url.pathname.startsWith('/v1/remote/succession/')) {
+            if (request.headers.origin !== origin) throw new DirectoryError(403, 'forbidden', 'A same-origin request is required.');
+            await local.service.ready;
+            const action = url.pathname.slice('/v1/remote/succession/'.length);
+            let role;
+            if (action === 'describe') {
+              const providerId = required(body.providerId, 'providerId'), nativeSessionId = required(body.nativeSessionId, 'nativeSessionId');
+              const attached = await attach(relay, providerId, nativeSessionId);
+              role = await local.ensureRole(local.agentRef(attached.agentId));
+            } else {
+              const roleId = required(body.roleId ?? (typeof body.operationId === 'string' ? local.service.store.operation(body.operationId).roleId : undefined), 'roleId');
+              role = local.service.store.read(roleId).role;
+            }
+            const result = await local.action(action, body, role);
+            return send(response, 200, result);
+          }
           const providerId = required(body.providerId, 'providerId');
           const { source } = requireEntry(providerId);
           if (url.pathname === '/v1/remote/workspace-folders/create') return send(response, 201, await createWorkspaceFolder(body.parentPath, body.name));
@@ -177,7 +235,7 @@ function localSource(provider: AgentProviderAdapter): SessionDirectorySource {
   if (providerId === 'recorded') sessions.set('recorded-welcome', { config: { sessionId: 'recorded-welcome' }, createdAt: new Date().toISOString() });
   return {
     providerId,
-    supportsSourceReferences: !!provider.readSessionHistory,
+    supportsSourceReferences: !!provider.readSessionHistory && !!provider.descriptor.sessionExtensions?.tools,
     list: () => [...sessions].map(([nativeSessionId, { config, createdAt }]) => ({
       nativeSessionId, providerId, title: nativeSessionId === 'recorded-welcome' ? 'Recorded welcome session' : nativeSessionId,
       workspace: config.cwd, model: config.model, createdAt, updatedAt: createdAt, state: 'idle',
@@ -188,8 +246,7 @@ function localSource(provider: AgentProviderAdapter): SessionDirectorySource {
       const sessionId = randomUUID();
       const { sourceNativeSessionId, ...config } = input;
       if (sourceNativeSessionId && !sessions.has(sourceNativeSessionId)) throw new DirectoryError(404, 'session_unavailable', 'The source session is unavailable.');
-      const extensions = sourceNativeSessionId && provider.readSessionHistory ? sourceSessionExtensions(sourceNativeSessionId, provider.readSessionHistory.bind(provider)) : {};
-      sessions.set(sessionId, { config: { ...config, ...extensions, sessionId }, createdAt: new Date().toISOString() });
+      sessions.set(sessionId, { config: { ...config, ...(sourceNativeSessionId ? { sourceNativeSessionId } : {}), sessionId } as AgentSessionConfig, createdAt: new Date().toISOString() });
       return sessionId;
     },
     async open(sessionId) {
@@ -202,6 +259,10 @@ function localSource(provider: AgentProviderAdapter): SessionDirectorySource {
 
 class DirectoryError extends Error {
   constructor(readonly status: number, readonly code: string, message: string) { super(message); }
+}
+async function assertNoExternalGrant(source: SessionDirectorySource, nativeSessionId: string): Promise<void> {
+  const state = source.sourceGrantState ? await source.sourceGrantState(nativeSessionId) : source.supportsSourceReferences ? 'unknown' : 'absent';
+  if (state !== 'absent') throw new Error('The external directory source grant cannot be reconstructed by this local runtime.');
 }
 function required(value: unknown, field: string): string {
   if (typeof value !== 'string' || !value.trim() || value.length > 4096) throw new DirectoryError(400, 'invalid_request', `${field} must be a nonempty string.`);

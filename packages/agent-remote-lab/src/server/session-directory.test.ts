@@ -2,7 +2,7 @@
 import { afterEach, expect, it } from 'vitest';
 import { createProtocolValidationServer } from '../server.js';
 import { createSessionDirectory } from './session-directory.js';
-import type { AgentProviderAdapter } from '@orchardworks/agent-provider-sdk';
+import type { AgentPersistenceHandle, AgentProviderAdapter } from '@orchardworks/agent-provider-sdk';
 import { createRecordedLabProvider } from './recorded.js';
 
 const servers: ReturnType<typeof createProtocolValidationServer>[] = [];
@@ -78,3 +78,97 @@ it('preserves Provider prototype methods when adding directory attachment', asyn
   expect(resumed.capabilities.sendMessage).toBe(true);
   await resumed.dispose(); directory.close();
 });
+
+it('runs local prefix prepare and commit with stable source anchors over HTTP and WebSocket', async () => {
+  const { mkdtemp, rm } = await import('node:fs/promises');
+  const { tmpdir } = await import('node:os'); const { join } = await import('node:path');
+  // @ts-expect-error Test-only adapter fixture is also used by standalone package smoke.
+  const { createPrefixAdapter } = await import('../../../agent-remote-debugger/src/fixtures/prefix-adapter.mjs');
+  const { createDebuggerRuntime } = await import('../../../agent-remote-debugger/src/runtime.js');
+  const root = await mkdtemp(join(tmpdir(), 'lab-local-prefix-'));
+  const adapter = createPrefixAdapter(root), origin = 'http://127.0.0.1:5175';
+  const options = { providers: [adapter], labOrigin: origin, successionStateDirectory: join(root, 'state') };
+  const server = createProtocolValidationServer(options); servers.push(server);
+  const { url } = await server.http.listen(0);
+  const post = (path: string, body: unknown) => fetch(`${url}/v1/remote/${path}`, { method: 'POST', headers: { origin, 'content-type': 'application/json' }, body: JSON.stringify(body), signal: AbortSignal.timeout(5000) });
+  const providerId = 'prefix-fixture';
+  const source = await (await post('create', { providerId, operationId: 'source', cwd: root })).json();
+  const reader = await (await post('create', { providerId, operationId: 'reader', cwd: root, sourceNativeSessionId: source.nativeSessionId })).json();
+  let old: Awaited<ReturnType<typeof createDebuggerRuntime>> | undefined;
+  try {
+    const before = JSON.parse(await adapter.readSource(reader.nativeSessionId, {})); expect(before.sourceSessionId).toBe(source.nativeSessionId);
+    const description = await post('succession/describe', { providerId, nativeSessionId: reader.nativeSessionId, preparation: { kind: 'native_prefix', turnId: 'turn', messageId: 'message-1' } });
+    expect(description.status).toBe(200); const { role } = await description.json();
+    old = await createDebuggerRuntime(reader.agentId, { relayUrl: url, origin }); await old.ready(3000);
+    const prepared = await post('succession/prepare', { operationId: 'edit', roleId: role.id, expectedRevision: 1, from: role.current, preparation: { kind: 'native_prefix', turnId: 'turn', messageId: 'message-1' } });
+    expect(await prepared.json()).toMatchObject({ record: { phase: 'ready' } });
+    await expect(adapter.readSource('candidate-1', {})).rejects.toThrow();
+    const committed = await post('succession/commit', { operationId: 'edit', expectedRevision: 1, roleId: role.id });
+    expect(await committed.json()).toMatchObject({ record: { phase: 'committed' }, locator: { nativeSessionId: 'candidate-1' } });
+    await expect(old.client.sendMessage('obsolete')).rejects.toThrow();
+    expect(JSON.parse(await adapter.readSource('candidate-1', { sourceContext: before.sourceContext }))).toMatchObject({ sourceSessionId: source.nativeSessionId });
+    await expect(adapter.readSource(reader.nativeSessionId, {})).rejects.toThrow();
+    const attached = await post('attach', { providerId, nativeSessionId: reader.nativeSessionId }); expect(await attached.json()).toMatchObject({ nativeSessionId: 'candidate-1' });
+    old.close(); await server.close(); servers.splice(servers.indexOf(server), 1);
+    const restarted = createProtocolValidationServer(options); servers.push(restarted); const next = await restarted.http.listen(0);
+    const restored = await fetch(`${next.url}/v1/remote/attach`, { method: 'POST', headers: { origin, 'content-type': 'application/json' }, body: JSON.stringify({ providerId, nativeSessionId: reader.nativeSessionId }), signal: AbortSignal.timeout(5000) });
+    expect(await restored.json()).toMatchObject({ nativeSessionId: 'candidate-1' });
+    expect(JSON.parse(await adapter.readSource('candidate-1', { sourceContext: before.sourceContext }))).toMatchObject({ sourceSessionId: source.nativeSessionId });
+    expect((await adapter.state()).forks).toBe(1);
+    await restarted.close(); servers.splice(servers.indexOf(restarted), 1);
+  } finally { old?.close(); if (servers.includes(server)) { await server.close(); servers.splice(servers.indexOf(server), 1); } await rm(root, { recursive: true, force: true }); }
+}, 20000);
+
+it.each(['external', 'unknown', 'error', 'unmarked', 'absent', 'changed'] as const)('checks custom directory source grant state %s before native prefix effects', async (grantState) => {
+  const { mkdtemp, rm } = await import('node:fs/promises');
+  const { tmpdir } = await import('node:os'); const { join } = await import('node:path');
+  // @ts-expect-error Test-only adapter fixture is also used by standalone package smoke.
+  const { createPrefixAdapter } = await import('../../../agent-remote-debugger/src/fixtures/prefix-adapter.mjs');
+  const root = await mkdtemp(join(tmpdir(), 'lab-custom-prefix-'));
+  const adapter = createPrefixAdapter(root), origin = 'http://127.0.0.1:5175', providerId = adapter.descriptor.providerId;
+  let described = false;
+  let handle: AgentPersistenceHandle | undefined;
+  let opens = 0;
+  const externalTools = grantState === 'external' ? { tools: [{ name: 'read_source_session', description: 'External source grant', inputSchema: { type: 'object' }, execute: async () => 'external source' }] } : {};
+  const source = { providerId, supportsSourceReferences: true,
+    ...(grantState === 'unmarked' ? {} : { sourceGrantState: async () => { if (grantState === 'error') throw new Error('Grant state unavailable.'); return grantState === 'changed' ? described ? 'external' as const : 'absent' as const : grantState; } }),
+    list: () => [{ nativeSessionId: 'external-reader', providerId, title: 'External reader', state: 'idle' as const, createdAt: '2026-10-15T00:00:00.000Z', updatedAt: '2026-10-15T00:00:00.000Z' }], workspaces: () => [],
+    create: async () => 'external-reader', open: async () => {
+      opens++;
+      const session = handle ? await adapter.resumeSession(handle, externalTools) : await adapter.createSession({ sessionId: 'external-reader', cwd: root, ...externalTools });
+      handle = (await session.runtimeInfo()).persistence; return session;
+    } };
+  const options = { providers: [adapter], directories: [source], labOrigin: origin, successionStateDirectory: join(root, 'state') };
+  let server = createProtocolValidationServer(options);
+  try {
+    const { url } = await server.http.listen(0);
+    const post = (action: string, body: unknown) => fetch(`${url}/v1/remote/succession/${action}`, { method: 'POST', headers: { origin, 'content-type': 'application/json' }, body: JSON.stringify(body), signal: AbortSignal.timeout(5000) });
+    const response = await post('describe', { providerId, nativeSessionId: 'external-reader', preparation: { kind: 'native_prefix', turnId: 'turn', messageId: 'message-1' } });
+    expect(response.status).toBe(200);
+    const description = await response.json();
+    expect(description.eligibility.status).toBe(grantState === 'absent' || grantState === 'changed' ? 'ready' : 'unavailable');
+    described = true;
+    const { role } = description;
+    const prepared = await post('prepare', { operationId: 'external-edit', roleId: role.id, expectedRevision: 1, from: role.current, preparation: { kind: 'native_prefix', turnId: 'turn', messageId: 'message-1' } });
+    expect(prepared.status).toBe(200);
+    expect(await prepared.json()).toMatchObject({ record: { phase: grantState === 'absent' ? 'ready' : 'rejected' } });
+    expect((await adapter.state()).forks).toBe(grantState === 'absent' ? 1 : 0);
+    if (grantState === 'absent') {
+      expect(await (await post('commit', { operationId: 'external-edit', roleId: role.id, expectedRevision: 1 })).json()).toMatchObject({ record: { phase: 'committed' } });
+      await server.close(); server = createProtocolValidationServer(options);
+      const restored = await server.http.listen(0);
+      const response = await fetch(`${restored.url}/v1/remote/attach`, { method: 'POST', headers: { origin, 'content-type': 'application/json' }, body: JSON.stringify({ providerId, nativeSessionId: 'external-reader' }), signal: AbortSignal.timeout(5000) });
+      expect(await response.json()).toMatchObject({ nativeSessionId: 'candidate-1' });
+      expect(opens).toBe(1); expect((await adapter.state()).forks).toBe(1);
+    }
+    if (grantState === 'external') {
+      expect(await adapter.readSource('external-reader', {})).toBe('external source');
+      await server.close(); server = createProtocolValidationServer(options);
+      const restored = await server.http.listen(0);
+      const response = await fetch(`${restored.url}/v1/remote/attach`, { method: 'POST', headers: { origin, 'content-type': 'application/json' }, body: JSON.stringify({ providerId, nativeSessionId: 'external-reader' }), signal: AbortSignal.timeout(5000) });
+      expect(response.status).toBe(200);
+      expect(await adapter.readSource('external-reader', {})).toBe('external source');
+      expect(opens).toBe(2); expect((await adapter.state()).creates).toBe(1);
+    }
+  } finally { await server.close(); await rm(root, { recursive: true, force: true }); }
+}, 20000);

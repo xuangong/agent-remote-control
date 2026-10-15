@@ -319,6 +319,9 @@ importers:
       '@orchardworks/agent-provider-opencode':
         specifier: workspace:*
         version: link:../agent-provider-opencode
+      '@orchardworks/agent-remote-controller':
+        specifier: workspace:*
+        version: link:../agent-host
       '@orchardworks/agent-remote-lab':
         specifier: workspace:*
         version: link:../agent-remote-lab

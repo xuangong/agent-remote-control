@@ -1,5 +1,5 @@
 import { spawn, spawnSync, type ChildProcessWithoutNullStreams } from 'node:child_process';
-import { access, mkdtemp, readFile, rm, symlink } from 'node:fs/promises';
+import { access, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises';
 import { createServer } from 'node:http';
 import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
@@ -76,6 +76,8 @@ beforeAll(async () => {
     expect(build.error, `${packageDirectory}: ${build.stderr}`).toBeUndefined();
     expect(build.status, `${packageDirectory}: ${build.stderr}`).toBe(0);
   }
+  const local = spawnSync(process.execPath, ['scripts/build-local-succession.mjs'], { cwd: debuggerDirectory, encoding: 'utf8', timeout: childTimeoutMs });
+  expect(local.status, local.stderr).toBe(0);
   const adapters = spawnSync(process.execPath, ['scripts/build-adapters.mjs'], { cwd: debuggerDirectory, encoding: 'utf8', timeout: childTimeoutMs });
   expect(adapters.status, adapters.stderr).toBe(0);
   ({ createRecordedValidationServer } = await import('../../agent-remote-lab/src/server/recorded.js'));
@@ -649,7 +651,7 @@ function startJsonlBdb(arguments_: readonly string[], targetRelay = relayUrl): {
   stop(): Promise<void>;
 } {
   const { child, closed } = launchBdb([
-    ...arguments_, '--relay', targetRelay, '--origin', labOrigin,
+    ...arguments_, ...(arguments_[0] === 'server' ? [] : ['--relay', targetRelay, '--origin', labOrigin]),
   ]);
   child.stdin.end();
   const records: JsonRecord[] = [];
@@ -775,3 +777,27 @@ function stableReplicaProjection(value: unknown): unknown {
     diagnostics: state.diagnostics,
   };
 }
+
+it('restores an owned native prefix from the CLI state directory without forking twice', async () => {
+  const directory = await mkdtemp(join(temporaryDirectory, 'prefix-cli-'));
+  const fixture = new URL('./fixtures/prefix-adapter.mjs', import.meta.url).href;
+  const module = join(directory, 'adapter.mjs');
+  await writeFile(module, `import { createPrefixAdapter } from ${JSON.stringify(fixture)}; export const createAdapter = () => createPrefixAdapter(${JSON.stringify(directory)});\n`);
+  const args = ['server', '--adapter', module, '--cwd', directory, '--succession-state-directory', join(directory, 'state'), '--jsonl', '--timeout', '5000'];
+  let running = startJsonlBdb(args);
+  try {
+    const first = await running.waitFor(record => record.kind === 'server_ready');
+    const url = String(first.url);
+    const post = (action: string, body: unknown) => fetch(`${url}/__ardb/succession/${action}`, { method: 'POST', headers: { origin: url, 'content-type': 'application/json' }, body: JSON.stringify(body), signal: AbortSignal.timeout(5000) });
+    const { role } = await (await post('describe', { agentId: first.agentId, preparation: { kind: 'native_prefix', turnId: 'turn', messageId: 'message-1' } })).json();
+    expect(await (await post('prepare', { operationId: 'cli-edit', roleId: role.id, expectedRevision: 1, from: role.current, preparation: { kind: 'native_prefix', turnId: 'turn', messageId: 'message-1' } })).json()).toMatchObject({ record: { phase: 'ready' } });
+    expect((await post('commit', { operationId: 'cli-edit', expectedRevision: 1 })).status).toBe(200);
+    const selected = await (await fetch(`${url}/__ardb/session`)).json();
+    expect(await running.waitFor(record => record.kind === 'recording_end' && record.agentId === first.agentId)).toMatchObject({ agentId: first.agentId });
+    expect(await running.waitFor(record => record.kind === 'recording_start' && record.agentId === selected.agentId)).toMatchObject({ agentId: selected.agentId });
+    expect(first.successionStateDirectory).toBe(join(directory, 'state'));
+    await running.stop(); running = startJsonlBdb(args);
+    expect(await running.waitFor(record => record.kind === 'server_ready')).toMatchObject({ nativeSessionId: 'candidate-1' });
+    expect(JSON.parse(await readFile(join(directory, 'native.json'), 'utf8'))).toMatchObject({ creates: 1, forks: 1 });
+  } finally { await running.stop(); }
+}, 20000);

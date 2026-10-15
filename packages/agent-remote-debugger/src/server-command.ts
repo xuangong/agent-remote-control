@@ -11,7 +11,7 @@ import { openBrowser } from './local-web.js';
 import { observeReplica } from './records.js';
 
 export async function runServerCommand(invocation: ParsedInvocation, io: DebuggerIo, signal: AbortSignal): Promise<void> {
-  const allowed = new Set(['provider', 'adapter', 'cwd', 'model', 'reasoning-effort', 'executable', 'port', 'open', 'jsonl', 'format', 'persistence-file', 'timeout']);
+  const allowed = new Set(['provider', 'adapter', 'cwd', 'model', 'reasoning-effort', 'executable', 'port', 'open', 'jsonl', 'format', 'persistence-file', 'timeout', 'succession-state-directory']);
   for (const option of invocation.options.keys()) if (!allowed.has(option)) throw usage(`Option --${option} is not supported by server.`);
   if (invocation.positionals.length || invocation.format === 'json') throw usage('server accepts no positional arguments; use text or jsonl output.');
   const get = (name: string): string | undefined => { const value = invocation.options.get(name); return typeof value === 'string' ? value : undefined; };
@@ -43,6 +43,8 @@ export async function runServerCommand(invocation: ParsedInvocation, io: Debugge
   let server: Awaited<ReturnType<typeof createDebuggerServer>> | undefined;
   let observer: DebuggerRuntime | undefined;
   let unsubscribe: (() => void) | undefined;
+  let unsubscribeSession: (() => void) | undefined;
+  let recordingAgentId: string | undefined;
   const startup = new AbortController();
   const onTerm = () => { startup.abort(); stop(); };
   let stop = () => {};
@@ -55,14 +57,21 @@ export async function runServerCommand(invocation: ParsedInvocation, io: Debugge
   try {
     if (signal.aborted) return;
     transferred = true;
-    server = await createDebuggerServer({ adapter, signal: startup.signal, port, persistence, config: { cwd: resolve(get('cwd') ?? process.cwd()), model: get('model'), reasoningEffort: get('reasoning-effort') }, onBrowserEvent: emit });
+    server = await createDebuggerServer({ adapter, signal: startup.signal, port, persistence, successionStateDirectory: get('succession-state-directory'), config: { cwd: resolve(get('cwd') ?? process.cwd()), model: get('model'), reasoningEffort: get('reasoning-effort') }, onBrowserEvent: emit });
     const { url, agentId } = server;
-    emit({ kind: 'recording_start', schemaVersion: '1.1.0', timestamp: new Date().toISOString(), agentId });
-    observer = await createDebuggerRuntime(agentId, { observeOnly: true, relayUrl: url, origin: url, signal: startup.signal });
-    unsubscribe = observeReplica(agentId, observer.replica, observer.client, record => emit({ ...record, source: 'relay' }));
-    await observer.ready(startupTimeout);
+    const observe = async (selected: { agentId: string }) => {
+      unsubscribe?.(); observer?.close();
+      if (recordingAgentId) emit({ kind: 'recording_end', schemaVersion: '1.1.0', timestamp: new Date().toISOString(), agentId: recordingAgentId });
+      recordingAgentId = selected.agentId;
+      emit({ kind: 'recording_start', schemaVersion: '1.1.0', timestamp: new Date().toISOString(), agentId: recordingAgentId });
+      observer = await createDebuggerRuntime(recordingAgentId, { observeOnly: true, relayUrl: url, origin: url, signal: startup.signal });
+      unsubscribe = observeReplica(recordingAgentId, observer.replica, observer.client, record => emit({ ...record, source: 'relay' }));
+      await observer.ready(startupTimeout);
+    };
+    unsubscribeSession = server.onSessionChanged(observe);
+    await observe(server.session);
     clearTimeout(deadline);
-    emit({ kind: 'server_ready', url, agentId, providerId: adapter.descriptor.providerId, nativeSessionId: server.session.nativeSessionId,
+    emit({ kind: 'server_ready', url, agentId, providerId: adapter.descriptor.providerId, nativeSessionId: server.session.nativeSessionId, successionStateDirectory: server.successionStateDirectory,
       commands: { observe: `ardb observe ${agentId} --relay ${url} --origin ${url} --jsonl`, inspect: `ardb inspect ${agentId} --relay ${url} --origin ${url}`, send: `ardb send ${agentId} "hello" --relay ${url} --origin ${url}` } });
     if (invocation.options.has('open')) {
       try { await openBrowser(url); } catch { io.stderr(`Browser could not be opened; visit ${url} manually.\n`); }
@@ -74,10 +83,10 @@ export async function runServerCommand(invocation: ParsedInvocation, io: Debugge
   } finally {
     clearTimeout(deadline);
     signal.removeEventListener('abort', onTerm); process.removeListener('SIGTERM', onTerm);
-    unsubscribe?.(); observer?.close();
+    unsubscribeSession?.(); unsubscribe?.(); observer?.close();
     if (server) {
       await server.close();
-      emit({ kind: 'recording_end', schemaVersion: '1.1.0', timestamp: new Date().toISOString(), agentId: server.agentId });
+      if (recordingAgentId) emit({ kind: 'recording_end', schemaVersion: '1.1.0', timestamp: new Date().toISOString(), agentId: recordingAgentId });
     }
     else if (!transferred) await adapter.dispose?.();
   }

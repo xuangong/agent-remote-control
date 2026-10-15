@@ -3,7 +3,7 @@ import { createServer } from 'node:http';
 import { resolve } from 'node:path';
 import { WebSocketServer } from 'ws';
 import { expect, test, type BrowserContext, type Page } from '@playwright/test';
-import { createHostedRelay, emptyRelayState, gatewayCookieName, type HostedRelayState } from '@orchardworks/agent-remote-hosted';
+import { createHostedRelay, emptyRelayState, gatewayCookieName, validateRelayState, stageRelayState, type HostedRelayState } from '@orchardworks/agent-remote-hosted';
 import { createAgentRemoteRelay, createRemoteHostUplinkClient } from '@orchardworks/agent-remote-relay';
 import { PROTOCOL_VERSION, type CommittedSuccessionProjection, type SuccessionAssociationFreeze } from '@orchardworks/agent-remote-protocol';
 import { createRecordedLabProvider } from '../src/server/recorded.js';
@@ -37,12 +37,17 @@ async function fixture() {
       prepared: { ...request, to: native('B'), workspace, associationRevision: 0, participants: [], capture: { epoch: 'epoch-A', seq: 0, capturedAt: 'now' } } } };
   const receipt: SuccessionAssociationFreeze = { version: 1, token: 'browser-freeze', authority: { version: 1, origin, issuer, namespace, ownerSubject: 'owner' },
     controllerId: 'browser-installation', request, associationRevision: 0, lineage: [native('A')], relations: [] };
-  const initial = emptyRelayState(auth); initial.version = 9;
-  initial.sessions.push({ hash: hash('owner'), sessionExpiresAt: Date.now() + 600000,
+  const legacy = { ...emptyRelayState(auth), version: 9 };
+  legacy.sessions.push({ hash: hash('owner'), sessionExpiresAt: Date.now() + 600000,
     grant: { authenticatedAt: Date.now(), subject: 'owner', namespace, expiresAt: Date.now() + 60000, ticket: '', nonce: 'nonce', continuation: 'owner', sessionExpiresAt: Date.now() + 600000 } });
-  initial.tenants.push({ subject: 'owner', namespace, broker: { keys: [[hash(credential), { expires: Date.now() + 600000, installationId: 'browser-installation', kind: 'device' }]],
+  const raw = { ...legacy, tenants: [{ subject: 'owner', namespace, broker: { keys: [[hash(credential), { expires: Date.now() + 600000, installationId: 'browser-installation', kind: 'device' }]],
     hosts: [{ id: 'browser-host', installationId: 'browser-installation', name: 'Succession fixture', legacyDsh: false, providers: [{ providerId: 'recorded', displayName: 'Recorded fixture' }] }],
-    bindings: [], creations: [], associations: { version: 5, revision: 1, admissions: [], relationChanges: [], relationResets: [], freezes: [{ hostId: 'browser-host', receipt, released: 'committed', projection }] } } });
+    bindings: [], creations: [], associations: { version: 5, revision: 1, admissions: [], relationChanges: [], relationResets: [], freezes: [{ hostId: 'browser-host', receipt, released: 'committed', projection }] } } }] };
+  const initial = validateRelayState(raw, auth);
+  expect(initial.version).toBe(9);
+  stageRelayState(initial, initial.version, false);
+  expect(initial.version).toBe(11);
+  expect(initial.tenants[0]!.broker.associations?.version).toBe(6);
   let saved: HostedRelayState = initial;
   const gateway = createHostedRelay({ ...auth, storage: { initial, async commit(value) { saved = value; } }, scheduler: { schedule() {}, cancel() {} } });
   const serve = await createGatewayStaticPages(resolve('dist'), { origin });

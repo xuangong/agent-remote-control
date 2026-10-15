@@ -12,7 +12,7 @@ import { readLocalJson } from './live-recording.js';
 /** Replay and live share one local entry point; the native runtime is created only on request. */
 export async function createReplayServer(options: {
   recording?: SessionRecording; name?: string; port?: number; assetsDirectory?: string; directory?: string;
-  executable?: string; startupTimeout?: number;
+  executable?: string; startupTimeout?: number; successionStateDirectory?: string;
   loadProvider?(provider: string, executable?: string): Promise<DebuggerAdapter>;
   onLiveReady?(live: Awaited<ReturnType<typeof createDebuggerServer>>): Promise<void>;
   onBrowserEvent?(record: Record<string, unknown>): void;
@@ -56,7 +56,7 @@ export async function createReplayServer(options: {
             const timer = setTimeout(() => abort.abort(new Error('Provider startup timed out.')), options.startupTimeout ?? 30000);
             try {
               const adapter = await (options.loadProvider ?? ((id, binary) => loadAdapter(id, undefined, binary)))(provider, executable);
-              live = await createDebuggerServer({ adapter, origin: url, config: { cwd }, signal: abort.signal, assetsDirectory: assets, onBrowserEvent: options.onBrowserEvent });
+              live = await createDebuggerServer({ adapter, origin: url, successionStateDirectory: options.successionStateDirectory, config: { cwd }, signal: abort.signal, assetsDirectory: assets, onBrowserEvent: options.onBrowserEvent });
               try { await options.onLiveReady?.(live); }
               catch (error) { await live.close(); live = undefined; throw error; }
             } finally { clearTimeout(timer); }

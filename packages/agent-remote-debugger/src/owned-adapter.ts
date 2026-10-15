@@ -18,11 +18,13 @@ export function ownAdapter(adapter: DebuggerAdapter) {
     } });
   }
   return {
-    adapter: {
-      descriptor: adapter.descriptor,
-      createSession: config => retain(adapter.createSession(config)),
-      resumeSession: (handle, extensions) => retain(adapter.resumeSession(handle, extensions)),
-    } satisfies DebuggerAdapter,
+    adapter: new Proxy(adapter, { get(target, key) {
+      if (key === 'createSession') return (...args: Parameters<DebuggerAdapter['createSession']>) => retain(adapter.createSession(...args));
+      if (key === 'resumeSession') return (...args: Parameters<DebuggerAdapter['resumeSession']>) => retain(adapter.resumeSession(...args));
+      if (key === 'forkForPromptEdit' && adapter.forkForPromptEdit) return (...args: Parameters<NonNullable<DebuggerAdapter['forkForPromptEdit']>>) => retain(adapter.forkForPromptEdit!(...args));
+      const value = Reflect.get(target, key, target);
+      return typeof value === 'function' ? value.bind(target) : value;
+    } }),
     close: () => closing ??= (async () => {
       try {
         const results = await Promise.allSettled([...sessions].map(dispose => dispose()));

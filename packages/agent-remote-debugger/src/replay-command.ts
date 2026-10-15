@@ -11,7 +11,7 @@ import { createReplayServer } from './replay-server.js';
 export async function runReplayCommand(invocation: ParsedInvocation, io: DebuggerIo, signal: AbortSignal) {
   const fail = (message: string): never => { throw new DebuggerError(2, 'invalid_recording', message, false); };
   const workspace = invocation.path[0] === 'server';
-  for (const option of invocation.options.keys()) if (!['port', 'open', 'json', 'jsonl', 'format', ...(workspace ? ['cwd', 'executable', 'timeout'] : [])].includes(option)) fail(`Option --${option} is not supported by replay.`);
+  for (const option of invocation.options.keys()) if (!['port', 'open', 'json', 'jsonl', 'format', ...(workspace ? ['cwd', 'executable', 'timeout', 'succession-state-directory'] : [])].includes(option)) fail(`Option --${option} is not supported by replay.`);
   if (invocation.positionals.length !== (workspace ? 0 : 1)) fail('Usage: ardb replay session.jsonl [--open] [--port 0]');
   const port = String(invocation.options.get('port') ?? '0');
   if (!/^\d+$/.test(port) || Number(port) > 65535) fail('--port must be between 0 and 65535.');
@@ -26,21 +26,29 @@ export async function runReplayCommand(invocation: ParsedInvocation, io: Debugge
   process.once('SIGTERM', stop); signal.addEventListener('abort', stop, { once: true });
   let observer: DebuggerRuntime | undefined;
   let unsubscribe: (() => void) | undefined;
+  let unsubscribeSession: (() => void) | undefined;
   let liveAgentId: string | undefined;
   const emit = (record: Record<string, unknown>) => { if (invocation.format === 'jsonl') io.stdout(`${JSON.stringify(record)}\n`); };
   let server: Awaited<ReturnType<typeof createReplayServer>> | undefined;
   try {
     if (signal.aborted) return;
-    server = await createReplayServer({ recording, name: path ? basename(path) : undefined, directory, port: Number(port), executable, startupTimeout: timeout,
+    server = await createReplayServer({ recording, name: path ? basename(path) : undefined, directory, port: Number(port), executable, startupTimeout: timeout, successionStateDirectory: invocation.options.get('succession-state-directory') as string | undefined,
       onBrowserEvent: emit,
       async onLiveReady(live) {
         if (invocation.format !== 'jsonl') return;
-        observer = await createDebuggerRuntime(live.agentId, { observeOnly: true, relayUrl: live.url, origin: live.url, signal });
-        try { await observer.ready(timeout); } catch (error) { observer.close(); observer = undefined; throw error; }
-        liveAgentId = live.agentId;
-        emit({ kind: 'recording_start', schemaVersion: '1.1.0', timestamp: new Date().toISOString(), agentId: liveAgentId });
-        unsubscribe = observeReplica(live.agentId, observer.replica, observer.client, record => emit({ ...record, source: 'relay' }));
-        emit({ kind: 'server_ready', mode: 'live', url: live.url, ...live.session });
+        const observe = async (selected: { agentId: string }) => {
+          unsubscribe?.(); observer?.close();
+          if (liveAgentId) emit({ kind: 'recording_end', schemaVersion: '1.1.0', timestamp: new Date().toISOString(), agentId: liveAgentId });
+          liveAgentId = undefined;
+          observer = await createDebuggerRuntime(selected.agentId, { observeOnly: true, relayUrl: live.url, origin: live.url, signal });
+          try { await observer.ready(timeout); } catch (error) { observer.close(); observer = undefined; throw error; }
+          liveAgentId = selected.agentId;
+          emit({ kind: 'recording_start', schemaVersion: '1.1.0', timestamp: new Date().toISOString(), agentId: liveAgentId });
+          unsubscribe = observeReplica(liveAgentId, observer.replica, observer.client, record => emit({ ...record, source: 'relay' }));
+        };
+        unsubscribeSession = live.onSessionChanged(observe);
+        await observe(live.session);
+        emit({ kind: 'server_ready', mode: 'live', url: live.url, successionStateDirectory: live.successionStateDirectory, ...live.session });
       },
     });
     const ready = { kind: workspace || invocation.format === 'jsonl' ? 'server_ready' : 'replay_ready', mode: workspace ? 'workspace' : 'replay', url: server.url, file: path, durationMs: recording?.duration, warnings: recording?.warnings };
@@ -51,7 +59,7 @@ export async function runReplayCommand(invocation: ParsedInvocation, io: Debugge
     await stopped;
   } finally {
     process.removeListener('SIGTERM', stop); signal.removeEventListener('abort', stop);
-    unsubscribe?.(); observer?.close();
+    unsubscribeSession?.(); unsubscribe?.(); observer?.close();
     await server?.close();
     if (liveAgentId) emit({ kind: 'recording_end', schemaVersion: '1.1.0', timestamp: new Date().toISOString(), agentId: liveAgentId });
   }

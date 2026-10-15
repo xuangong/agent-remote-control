@@ -13,7 +13,7 @@ export type { CliEnvironment } from './commands.js';
 const valueOptions = new Set([
   'relay', 'origin', 'format', 'provider', 'provider-session-id', 'cwd', 'model', 'reasoning-effort', 'system-prompt',
   'cookie-file', 'main-session', 'title', 'revision', 'operation-id', 'intent-id', 'resolution', 'native-session',
-  'persistence-file', 'tail', 'file', 'wait', 'for', 'response-file', 'output', 'until', 'timeout', 'planning', 'adapter', 'executable', 'port',
+  'persistence-file', 'tail', 'file', 'wait', 'for', 'response-file', 'output', 'until', 'timeout', 'planning', 'adapter', 'executable', 'port', 'succession-state-directory',
 ]);
 const flagOptions = new Set(['json', 'jsonl', 'all', 'follow', 'help', 'open']);
 
@@ -143,7 +143,7 @@ function helpText(): string {
 Agent Remote Debugger: inspect and exercise the Session View protocol and state.
 
 Commands:
-  server [--open] [--cwd <path>] [--port <0-65535>]
+  server [--open] [--cwd <path>] [--port <0-65535>] [--succession-state-directory <path>]
   server --provider <codex|claude|copilot|opencode> [--cwd <path>] [--executable <path>] [--port <0-65535>] [--open] [--jsonl]
   server --adapter <module-path> [--persistence-file <path>] [--port <0-65535>] [--open] [--jsonl]
   replay <session.jsonl> [--open] [--port <0-65535>]

@@ -54,13 +54,25 @@ class EvidenceNative extends Native {
  };
  override async dispose(){this.epoch++;await super.dispose();}
 }
-async function fixture(enableTpm=false,enrollment=false,setup?:(root:string)=>Promise<void>, snapshots=false,evidence=false,policy=false){
+class PromptNative extends Native {
+ epoch = 0; baselined = false; captures = 0;
+ override async runtimeInfo(){return {...await super.runtimeInfo(), persistence:{providerId:this.providerId,sessionId:this.id,opaque:'original prefix handle'}};}
+ promptEditEvidence = {
+  version: 1 as const,
+  inspectReadiness: async () => { this.baselined = true; return {cwd:this.cwd,idle:true,pendingInputs:0,pendingInteractions:0,activeChildren:0}; },
+  captureValidity: () => { if (!this.baselined) throw new Error('readiness baseline required'); this.captures++; return {epoch:this.epoch} as never; },
+  isCurrent: (token: unknown) => (token as {epoch:number}).epoch === this.epoch,
+ };
+ override async dispose(){this.epoch++;await super.dispose();}
+}
+async function fixture(enableTpm=false,enrollment=false,setup?:(root:string)=>Promise<void>, snapshots=false,evidence=false,policy=false,prefix=false){
  const root=await realpath(await mkdtemp(join(tmpdir(),'arc-succession-runtime-')));
  const store=new SessionSuccessionStore(join(root,'roles'));await store.ready;
  if(!enrollment) await store.createRole({id:'role',revision:1,origin:ref('A'),current:ref('A'),workspace:{controllerId:'controller',canonicalCwd:root}});
  const grants:Array<{nativeSessionId:string;sourceNativeSessionId:string}>=[];let beforeGrants=async()=>{};
  await setup?.(root);
- const sessions=new Map<string,Native>([['A',evidence?new EvidenceNative('A',root):new Native('A',root)]]);const tpmConfigurations:AgentSessionConfig[]=[];const snapshotConfigurations:AgentSessionConfig[]=[];let creates=0,sourceCreates=0,supported=true,bounded=true,coverage=true,busy='',loseTpmCreation=false,loseSourceCreation=false;let beforeSourceCreate=async()=>{};let beforeIdleCreate=async()=>{};
+ const sessions=new Map<string,Native>([['A',prefix?new PromptNative('A',root):evidence?new EvidenceNative('A',root):new Native('A',root)]]);const tpmConfigurations:AgentSessionConfig[]=[];const snapshotConfigurations:AgentSessionConfig[]=[];let creates=0,sourceCreates=0,supported=true,bounded=true,coverage=true,busy='',loseTpmCreation=false,loseSourceCreation=false;let beforeSourceCreate=async()=>{};let beforeIdleCreate=async()=>{};
+ let prefixForks=0,prefixVerifications=0; let onPrefixVerify=async()=>{}; const prefixHandles:unknown[]=[];
  const creationOptions: unknown[]=[],resumeOptions: unknown[]=[],workspaceReads:string[]=[];let evidenceCreates=0,allowIdleRelease=false;let creationResult: AgentEmptyCreationResult | undefined; let beforeNativeInspect=async(_id:string)=>{};
  const providerEvidence = evidence ? { availability:()=>({status:'configured' as const,version:2 as const}),async createEmpty(config:Pick<AgentSessionConfig,'sessionId'|'cwd'>):Promise<AgentEmptyCreationResult>{evidenceCreates++;expect(config).toEqual({sessionId:directoryOperationId('handoff:create'),cwd:root,selectionSourceSessionId:'A'});await beforeIdleCreate();sessions.set('B',new EvidenceNative('B',root));return creationResult ?? {status:'created',handle:{providerId:'fixture',sessionId:'B',opaque:'original complete handle'}};} } : undefined;
  const otherSession = new Native('other-A', root, 'other');
@@ -69,13 +81,13 @@ async function fixture(enableTpm=false,enrollment=false,setup?:(root:string)=>Pr
  supports:async()=>supported,supportsBoundedProjection:async()=>bounded,
  inspect:async source=>{await beforeNativeInspect(source.nativeSessionId);if(!coverage)throw new Error('Native queue and work coverage unavailable');return {cwd:root,idle:source.nativeSessionId!==busy,managed:true,pendingInputs:0,pendingInteractions:0,activeChildren:0};},
  createIdle:async()=>{creates++;await beforeIdleCreate();const id=String.fromCharCode(65+creates);sessions.set(id,new Native(id,root));return ref(id);},reconcileDelivery:async()=>undefined,
- }},registrations:[{adapter:{nativeEvidence:providerEvidence,descriptor:{providerId:'fixture',displayName:'Fixture',...(enableTpm?{sessionExtensions:{instructions:true,tools:true}}:{})},createSession:async()=>{throw new Error('unexpected');},resumeSession:async()=>{throw new Error('unexpected');},readSessionHistory:async()=>({entries:[]})},directory:{providerId:'fixture',canReleaseSession:()=>allowIdleRelease,supportsSourceReferences:true,supportsBoundedSourceCreate:async()=>true,list:()=>[],workspaces:()=>[],create:async config=>{if(config.sourceNativeSessionId){await beforeSourceCreate();const id=`source-${++sourceCreates}`;sessions.set(id,new Native(id,root));grants.push({nativeSessionId:id,sourceNativeSessionId:config.sourceNativeSessionId});if(loseSourceCreation)throw new Error('Unknown native creation');return id;}if(!enableTpm){if(!snapshots)throw new Error('unexpected');snapshotConfigurations.push(config);const id=`snapshot-${snapshotConfigurations.length}`;sessions.set(id,new Native(id,root));return id;}tpmConfigurations.push(config);const id=`tpm-${tpmConfigurations.length}`;sessions.set(id,new Native(id,root));if(loseTpmCreation)throw new Error('Native creation response was lost');return id;},open:async(id,options)=>{creationOptions.push(options?.nativeCreation);resumeOptions.push(options?.resumeOptions);return sessions.get(id)!;},sessionWorkspace:async(id)=>{workspaceReads.push(id);return root;},sourceReferences:async()=>{await beforeGrants();return structuredClone(grants);},setSourceBindingReader:()=>{},close:async()=>{await Promise.all([...sessions.values()].map(session=>session.dispose()));}}}, ...additional]});
+ }},registrations:[{adapter:{nativeEvidence:providerEvidence,descriptor:{providerId:'fixture',displayName:'Fixture',...(enableTpm?{sessionExtensions:{instructions:true,tools:true}}:{})},createSession:async()=>{throw new Error('unexpected');},resumeSession:async()=>{throw new Error('unexpected');},readSessionHistory:async()=>({entries:[]})},directory:{providerId:'fixture',supportsNativePrefix:async()=>prefix,createNativePrefix:async(target,extensions)=>{prefixForks++;expect(target).toEqual({nativeSessionId:'A',turnId:'turn',messageId:'message'});expect(extensions).toEqual({});sessions.set('B',new PromptNative('B',root));return {providerId:'fixture',sessionId:'B',opaque:'original prefix handle'};},verifyNativePrefix:async(target,handle)=>{prefixVerifications++;expect(handle).toEqual({providerId:'fixture',sessionId:'B',opaque:'original prefix handle'});await onPrefixVerify();if(sessions.get('B')!.sent.length)throw new Error('candidate prefix changed');},canReleaseSession:()=>allowIdleRelease,supportsSourceReferences:true,supportsBoundedSourceCreate:async()=>true,list:()=>[],workspaces:()=>[],create:async config=>{if(config.sourceNativeSessionId){await beforeSourceCreate();const id=`source-${++sourceCreates}`;sessions.set(id,new Native(id,root));grants.push({nativeSessionId:id,sourceNativeSessionId:config.sourceNativeSessionId});if(loseSourceCreation)throw new Error('Unknown native creation');return id;}if(!enableTpm){if(!snapshots)throw new Error('unexpected');snapshotConfigurations.push(config);const id=`snapshot-${snapshotConfigurations.length}`;sessions.set(id,new Native(id,root));return id;}tpmConfigurations.push(config);const id=`tpm-${tpmConfigurations.length}`;sessions.set(id,new Native(id,root));if(loseTpmCreation)throw new Error('Native creation response was lost');return id;},open:async(id,options)=>{prefixHandles.push(options?.nativePrefix);creationOptions.push(options?.nativeCreation);resumeOptions.push(options?.resumeOptions);return sessions.get(id)!;},sessionWorkspace:async(id)=>{workspaceReads.push(id);return root;},sourceReferences:async()=>{await beforeGrants();return structuredClone(grants);},setSourceBindingReader:()=>{},close:async()=>{await Promise.all([...sessions.values()].map(session=>session.dispose()));}}}, ...additional]});
  let host=createHost();
  const createServer=()=>createAgentRemoteHttpServer(host.relay,{websocketAuthorizer:{authenticate:()=>({subject:'owner'}),authorize:()=>true}});
  let server=createServer();let address=await server.listen(0);
- const restart=async()=>{await server.close();await host.close();for(const [id,previous] of sessions){const next=evidence?new EvidenceNative(id,root):new Native(id,root);next.sent.push(...previous.sent);sessions.set(id,next);}host=createHost();server=createServer();address=await server.listen(0);};
+ const restart=async()=>{await server.close();await host.close();for(const [id,previous] of sessions){const next=prefix?new PromptNative(id,root):evidence?new EvidenceNative(id,root):new Native(id,root);next.sent.push(...previous.sent);sessions.set(id,next);}host=createHost();server=createServer();address=await server.listen(0);};
  const control=async(action:string,body:unknown)=>{const result=await host.control({method:'POST',path:`/remote/succession/${action}`,sessionId:'owner',body:JSON.stringify(body)});return {status:result.status,payload:JSON.parse(result.body)};};
- return {root,sessions,providerEvidence,creationOptions,resumeOptions,workspaceReads,allowIdleRelease:()=>{allowIdleRelease=true;},evidenceCreates:()=>evidenceCreates,creationResult:(value:AgentEmptyCreationResult)=>{creationResult=value;},beforeNativeInspect:(hook:typeof beforeNativeInspect)=>{beforeNativeInspect=hook;},snapshotConfigurations,providerDescriptors:[{providerId:'fixture',displayName:'Fixture'},...(snapshots?[{providerId:'other',displayName:'Other'}]:[])],get host(){return host;},restart,loseSourceCreation:()=>{loseSourceCreation=true;},sourceCreates:()=>sourceCreates,beforeIdleCreate:(hook:()=>Promise<void>)=>{beforeIdleCreate=hook;},beforeSourceCreate:(hook:()=>Promise<void>)=>{beforeSourceCreate=hook;},loseTpmCreation:(value:boolean)=>{loseTpmCreation=value;},grants,beforeGrants:(hook:()=>Promise<void>)=>{beforeGrants=hook;},tpmConfigurations,control,attach:async(id:string)=>JSON.parse((await host.control({method:'POST',path:'/remote/attach',sessionId:id,body:JSON.stringify({providerId:'fixture',nativeSessionId:id})})).body),get url(){return address.url;},creates:()=>creates,unsupported:()=>{supported=false;},unbounded:()=>{bounded=false;},unavailableCoverage:()=>{coverage=false;},busy:(id:string)=>{busy=id;},close:async()=>{await server.close();await host.close();await rm(root,{recursive:true,force:true});}};
+ return {root,sessions,providerEvidence,prefixHandles,prefixForks:()=>prefixForks,prefixVerifications:()=>prefixVerifications,onPrefixVerify:(hook:()=>Promise<void>)=>{onPrefixVerify=hook;},creationOptions,resumeOptions,workspaceReads,allowIdleRelease:()=>{allowIdleRelease=true;},evidenceCreates:()=>evidenceCreates,creationResult:(value:AgentEmptyCreationResult)=>{creationResult=value;},beforeNativeInspect:(hook:typeof beforeNativeInspect)=>{beforeNativeInspect=hook;},snapshotConfigurations,providerDescriptors:[{providerId:'fixture',displayName:'Fixture'},...(snapshots?[{providerId:'other',displayName:'Other'}]:[])],get host(){return host;},restart,loseSourceCreation:()=>{loseSourceCreation=true;},sourceCreates:()=>sourceCreates,beforeIdleCreate:(hook:()=>Promise<void>)=>{beforeIdleCreate=hook;},beforeSourceCreate:(hook:()=>Promise<void>)=>{beforeSourceCreate=hook;},loseTpmCreation:(value:boolean)=>{loseTpmCreation=value;},grants,beforeGrants:(hook:()=>Promise<void>)=>{beforeGrants=hook;},tpmConfigurations,control,attach:async(id:string)=>JSON.parse((await host.control({method:'POST',path:'/remote/attach',sessionId:id,body:JSON.stringify({providerId:'fixture',nativeSessionId:id})})).body),get url(){return address.url;},creates:()=>creates,unsupported:()=>{supported=false;},unbounded:()=>{bounded=false;},unavailableCoverage:()=>{coverage=false;},busy:(id:string)=>{busy=id;},close:async()=>{await server.close();await host.close();await rm(root,{recursive:true,force:true});}};
 }
 const request={operationId:'handoff',roleId:'role',expectedRevision:1,from:ref('A')};
 test.each([undefined, 'started'] as const)('prepared first WebSocket input acknowledges exact submitted text with native acceptance %s', async disposition => {
@@ -471,7 +483,7 @@ test('authenticated broker enrollment derives a role, freezes associations and c
     expect(committed).toMatchObject({record:{phase:'committed'},role:{current:ref('B'),revision:2},locator:{hostId:transport.hostId,providerId:'fixture',nativeSessionId:'B'}});
     expect(transport.saved().associations?.freezes[0]).toMatchObject({released:'committed',projection:{role:{current:ref('B')}}});
     const state=JSON.parse(await readFile(join(f.root,'roles','state.json'),'utf8'));
-    expect(state).toMatchObject({version:7,roles:[{associationAuthority:transport.authority,enrollments:[{request:{operationId:input.operationId}}]}]});
+    expect(state).toMatchObject({version:8,roles:[{associationAuthority:transport.authority,enrollments:[{request:{operationId:input.operationId}}]}]});
   } finally {await transport.close();await f.close();}
 });
 
@@ -1547,3 +1559,43 @@ test('Host grants empty initialization only before input and withdraws it on col
   expect(f.evidenceCreates()).toBe(1);
  } finally {await f.close();}
 },10000);
+
+const nativePrefixRequest = {...request,preparation:{kind:'native_prefix' as const,turnId:'turn',messageId:'message'}};
+test('native prefix Host uses settled prompt evidence and exact committed handle through restart and normal first WebSocket input',async()=>{
+ const f=await fixture(false,false,undefined,false,false,true,true);
+ try {
+  expect((await f.control('prepare',nativePrefixRequest)).payload.phase).toBe('ready');
+  expect(f.prefixForks()).toBe(1); expect(f.prefixVerifications()).toBe(1);
+  expect(f.prefixHandles).toContainEqual({providerId:'fixture',sessionId:'B',opaque:'original prefix handle'});
+  expect(f.creationOptions.every(value=>value===undefined)).toBe(true);expect(f.resumeOptions.every(value=>value===undefined)).toBe(true);
+  expect((f.sessions.get('B') as PromptNative).captures).toBeGreaterThan(0);
+  expect((await f.control('commit',{operationId:'handoff',expectedRevision:1})).payload.phase).toBe('committed');
+  await f.restart();
+  expect(f.prefixForks()).toBe(1); expect((await f.control('reconcile',{operationId:'handoff'})).payload.materialized).toBe(true);
+  const attached=await f.attach('B');
+  expect((await sendOverWebSocket(f.url,attached.agentId,'edited prompt','00000000-0000-4000-8000-000000008822')).type).toBe('command_acknowledged');
+  expect(f.sessions.get('B')!.sent).toEqual(['edited prompt']); expect(f.sessions.get('A')!.sent).toEqual([]);
+ }finally{await f.close();}
+});
+test.each(['A','B'])('native prefix Host retains %s evidence across native branch readback',async id=>{
+ const f=await fixture(false,false,undefined,false,false,false,true);
+ try{
+  f.onPrefixVerify(async()=>{(f.sessions.get(id) as PromptNative).epoch++;});
+  expect((await f.control('prepare',nativePrefixRequest)).payload.phase).toBe('rejected');
+  expect(f.prefixForks()).toBe(1);expect(f.prefixVerifications()).toBe(1);
+  expect((f.sessions.get(id) as PromptNative).captures).toBe(1);
+ }finally{await f.close();}
+});
+
+test('native prefix Host restart keeps the saved source observation and rejects a replaced timeline epoch',async()=>{
+ const f=await fixture(false,false,undefined,false,false,false,true);
+ try{
+  expect((await f.control('prepare',nativePrefixRequest)).payload.phase).toBe('ready');
+  const original=JSON.parse(await readFile(join(f.root,'roles','state.json'),'utf8')).roles[0].localPreparations[0].capture;
+  await f.restart();
+  expect((await f.control('reconcile',{operationId:'handoff'})).payload).toMatchObject({phase:'rejected',failureCode:'succession_boundary_changed',to:ref('B')});
+  const saved=JSON.parse(await readFile(join(f.root,'roles','state.json'),'utf8'));
+  expect(saved.roles[0].localPreparations[0].capture).toEqual(original);expect(saved.roles[0].role.current).toEqual(ref('A'));
+  expect(f.prefixForks()).toBe(1);expect(f.prefixHandles.filter(Boolean)).toHaveLength(2);
+ }finally{await f.close();}
+});

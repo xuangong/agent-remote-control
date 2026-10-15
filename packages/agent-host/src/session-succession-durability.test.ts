@@ -417,3 +417,28 @@ test.each(['stale', 'publication-unknown', 'success'] as const)('coordinator hol
     else expect(result).toMatchObject({phase:'committed'});
   }finally{releaseWriter();await Promise.allSettled([writing,committing]);}
 });
+
+test.each(['before-rename', 'after-rename'] as const)('native prefix %s publication failure never repeats creation and restores only saved handle evidence', async failurePoint => {
+  const directory = await fs.realpath(await root()), original = await vi.importActual<typeof fs>('node:fs/promises');
+  let forks = 0;
+  const handle = { providerId: 'fixture', sessionId: 'B', opaque: 'original\nprefix handle' };
+  const inspect = async () => ({ cwd: directory, idle: true, managed: true, pendingInputs: 0, inFlightInputs: 0, pendingInteractions: 0, activeChildren: 0, boundary: { epoch: 'e', seq: 1 } });
+  const ports: SessionSuccessionPorts = { ...unusedPorts, inspect, supportsNativePrefix: async () => true,
+    createNativePrefix: async () => {
+      forks++;
+      vi.mocked(fs.rename).mockImplementationOnce(async (...args) => { if (failurePoint === 'after-rename') await original.rename(...args); throw Object.assign(new Error('native result publication unknown'), { code: 'EIO' }); });
+      return { target: ref('B'), handle };
+    }, verifyNativePrefix: async (_prepared, saved) => { expect(saved).toEqual(handle); },
+    retainVerification: async () => ({ inspect, assertCurrent(){}, release(){} }) };
+  const service = new SessionSuccessionService(directory, 'host', ports); await service.ready;
+  await service.createRole({ id:'role',revision:1,origin:ref('A'),current:ref('A'),workspace:{controllerId:'host',canonicalCwd:directory} });
+  const input = { ...request, preparation: { kind: 'native_prefix' as const, turnId: 'turn', messageId: 'message' } };
+  await expect(service.prepare(input)).rejects.toMatchObject({ code: 'succession_publication_unknown' });
+  expect(() => service.store.operation('op')).toThrow(/unknown/);
+  const restored = new SessionSuccessionService(directory, 'host', ports); await restored.ready;
+  expect((await restored.prepare(input)).phase).toBe('unknown');
+  expect(restored.store.nativePrefixHandle('op')).toEqual(failurePoint === 'after-rename' ? handle : undefined);
+  if (failurePoint === 'after-rename') expect((await restored.coordinator.reconcileReady('op')).phase).toBe('ready');
+  else await expect(restored.coordinator.reconcileReady('op')).rejects.toThrow(/unknown/);
+  expect(restored.store.read('role').role.current).toEqual(ref('A')); expect(forks).toBe(1);
+});

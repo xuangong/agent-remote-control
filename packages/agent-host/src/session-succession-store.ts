@@ -1,15 +1,17 @@
-import { AGENT_NATIVE_EVIDENCE_LIMITS, AGENT_NATIVE_EVIDENCE_REASONS, parseAgentEmptyCreationResult, serializeAgentEmptyCreationResult, type AgentEmptyCreationResult, type AgentNativeEvidenceCode } from '@orchardworks/agent-provider-sdk';
+import { nativePrefixResumeHandle, type NativePrefixCandidate } from './local-succession-preparation.js';
+import { AGENT_NATIVE_EVIDENCE_LIMITS, AGENT_NATIVE_EVIDENCE_REASONS, parseAgentEmptyCreationResult, serializeAgentEmptyCreationResult, type AgentEmptyCreationResult, type AgentNativeEvidenceCode, type AgentPersistenceHandle } from '@orchardworks/agent-provider-sdk';
 import { sourceParticipantId } from './source-participant.js';
 import { isRelationChangeReservation, isRelationChangeReceipt, relationChangeKey, type RelationChangeReservation, type RelationChangeReceipt } from '@orchardworks/agent-remote-protocol';
 import { mkdir, readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { createHash } from 'node:crypto';
 import { assertSuccessionCapacity, isReservation, jsonBytes, largestSuccessionId, largestSuccessionRef, publishSuccessionState, reservationBytes, SuccessionCapacityError, SuccessionPublicationUnknown } from './succession-persistence.js';
-import { successionAuthorityKey, successionFreezeKey, isNativeSessionRef, isSuccessionAssociationAuthority, isSuccessionAssociationFreeze, type SuccessionAssociationAuthority, type SuccessionAssociationFreeze, type NativeSessionRef, isPrimaryRole, isPreparedSuccession, isSuccessionParticipant, isSuccessionRecord, isSuccessionRequest, nativeSessionRefKey,
+import { successionAuthorityKey, successionFreezeKey, isNativeSessionRef, isSuccessionAssociationAuthority, isSuccessionAssociationFreeze, type SuccessionAssociationAuthority, type SuccessionAssociationFreeze, type NativeSessionRef, isPrimaryRole, isPreparedSuccession, isSuccessionParticipant, isSuccessionRecord, isSuccessionRequest, nativeSessionRefKey, nativePrefixSelectionKey,
   type PrimaryRole, type SuccessionParticipant, type SuccessionPhase, type SuccessionRecord, type SuccessionRequest } from '@orchardworks/agent-remote-protocol';
 
 export type SuccessionCreationOutcome = AgentEmptyCreationResult | { status: 'not_dispatched'; code: AgentNativeEvidenceCode };
 export interface LocalSuccessionProgress {
+  nativePrefix?: { version: 1; handle?: AgentPersistenceHandle };
   nativeCreation?: { version: 1; binding: string; outcome?: SuccessionCreationOutcome };
   operationId: string;
   reservedBytes: string;
@@ -33,10 +35,10 @@ export interface SuccessionRoleState {
 export interface SourceAssociationResult { id: string; fingerprint: string; scope: string; operationId: string; source: NativeSessionRef; reader: NativeSessionRef }
 export interface SourceWitnessDescriptor { version: 1; scope: string; operationId: string }
 export interface AssociationRecovery { createKey: string; createFingerprint: string }
-interface StoreState { version: 7; associationResults: SourceAssociationResult[]; roles: SuccessionRoleState[]; associationAdmissions: Array<{ id: string; fingerprint: string; source: NativeSessionRef; sourceReader?: true; recovery?: AssociationRecovery; sourceWitness?: SourceWitnessDescriptor }> }
+interface StoreState { version: 8; associationResults: SourceAssociationResult[]; roles: SuccessionRoleState[]; associationAdmissions: Array<{ id: string; fingerprint: string; source: NativeSessionRef; sourceReader?: true; recovery?: AssociationRecovery; sourceWitness?: SourceWitnessDescriptor }> }
 type Advance = Pick<SuccessionRecord, 'phase'> & Partial<Pick<SuccessionRecord, 'to' | 'prepared' | 'failureCode'>>;
 const terminal = (phase: SuccessionPhase) => ['committed', 'rejected', 'cancelled'].includes(phase);
-const fingerprint = (request: SuccessionRequest) => JSON.stringify([request.operationId, request.roleId, request.expectedRevision, nativeSessionRefKey(request.from), request.targetProviderId ?? request.from.providerId]);
+const fingerprint = (request: SuccessionRequest) => JSON.stringify([request.operationId, request.roleId, request.expectedRevision, nativeSessionRefKey(request.from), request.targetProviderId ?? request.from.providerId, ...(request.preparation ? [nativePrefixSelectionKey(request.preparation)] : [])]);
 const maxBytes = 8 * 1024 * 1024;
 /** The cache retains the native-ID string, whose reviewed 512-unit JSON maximum is 3074 bytes. */
 export const SOURCE_WITNESS_RESULT_BYTES = jsonBytes(largestSuccessionId);
@@ -44,7 +46,7 @@ export const SOURCE_WITNESS_RESULT_BYTES = jsonBytes(largestSuccessionId);
 /** One owning Controller serializes role decisions; publication follows atomic file replacement. */
 export class SessionSuccessionStore {
   readonly ready: Promise<void>;
-  private state: StoreState = { version: 7, roles: [], associationAdmissions: [], associationResults: [] };
+  private state: StoreState = { version: 8, roles: [], associationAdmissions: [], associationResults: [] };
   private tail: Promise<unknown> = Promise.resolve();
   private loaded = false;
   private writeFailure?: SuccessionPublicationUnknown;
@@ -61,6 +63,10 @@ export class SessionSuccessionStore {
   progress(operationId: string): LocalSuccessionProgress | undefined {
     this.assertReadable();
     return structuredClone(this.state.roles.flatMap(item => item.localPreparations ?? []).find(item => item.operationId === operationId));
+  }
+
+  nativePrefixHandle(operationId: string): AgentPersistenceHandle | undefined {
+    return this.progress(operationId)?.nativePrefix?.handle;
   }
 
   read(roleId: string): SuccessionRoleState {
@@ -350,9 +356,10 @@ export class SessionSuccessionStore {
     const saved = structuredClone(capture);
     return this.mutate(state => {
       const record = this.findOperation(state, operationId), progress = this.localProgress(state, record);
+      if (record.preparation && nativeEvidence) throw new Error('Native prefix cannot use empty creation evidence.');
       if (record.phase !== 'preparing' || progress.stage !== 'not-started') throw new Error('Local preparation stage changed.');
       if (progress.capture && (JSON.stringify(progress.capture) !== JSON.stringify(saved) || !!progress.nativeCreation !== nativeEvidence)) throw new Error('Local preparation identity conflict.');
-      Object.assign(progress, { capture: saved, createOperationId: `${operationId}:create`, zeroInputAndTask: true, ...(nativeEvidence ? { nativeCreation: { version: 1, binding: this.creationBinding(record, saved) } } : {}) });
+      Object.assign(progress, { capture: saved, createOperationId: `${operationId}:create`, zeroInputAndTask: true, ...(record.preparation ? { nativePrefix: { version: 1 } } : {}), ...(nativeEvidence ? { nativeCreation: { version: 1, binding: this.creationBinding(record, saved) } } : {}) });
     });
   }
   startCreation(operationId: string): Promise<void> {
@@ -368,7 +375,7 @@ export class SessionSuccessionStore {
     return this.mutate(state => {
       if (!isNativeSessionRef(candidate)) throw new Error('Invalid native candidate identity.');
       const record = this.findOperation(state, operationId), progress = this.localProgress(state, record);
-      if (progress.nativeCreation) throw new Error('Native evidence requires the original creation result.');
+      if (progress.nativeCreation || progress.nativePrefix) throw new Error('Native evidence requires its original result.');
       if (progress.stage !== 'create-started' || !progress.zeroInputAndTask) throw new Error('Native candidate has no creation request.');
       if (record.phase === 'cancelled') {
         if (progress.orphanCandidate && nativeSessionRefKey(progress.orphanCandidate) !== nativeSessionRefKey(candidate)) throw new Error('Orphan candidate identity changed.');
@@ -378,6 +385,26 @@ export class SessionSuccessionStore {
       if (nativeSessionRefKey(candidate) === nativeSessionRefKey(record.from)) throw new Error('Native candidate is the source session.');
       progress.stage = 'candidate-known'; record.to = candidate; record.phase = 'transferring';
       delete record.resumePhase; record.updatedAt = new Date().toISOString(); return record;
+    });
+  }
+  async saveNativePrefixCandidate(operationId: string, value: NativePrefixCandidate): Promise<SuccessionRecord> {
+    const candidate = structuredClone(value.target);
+    const handle = nativePrefixResumeHandle(candidate.providerId, candidate.nativeSessionId, value.handle);
+    return this.mutate(state => {
+      const record = this.findOperation(state, operationId), progress = this.localProgress(state, record);
+      if (!record.preparation || !progress.nativePrefix || progress.nativeCreation || !progress.zeroInputAndTask) throw new Error('Native prefix creation was not admitted.');
+      if (!isNativeSessionRef(candidate) || candidate.controllerId !== record.from.controllerId || candidate.providerId !== record.from.providerId
+        || nativeSessionRefKey(candidate) === nativeSessionRefKey(record.from)) throw new Error('Native prefix candidate identity conflicts.');
+      if (progress.nativePrefix.handle) {
+        if (JSON.stringify(progress.nativePrefix.handle) !== JSON.stringify(handle)
+          || nativeSessionRefKey(record.to ?? progress.orphanCandidate!) !== nativeSessionRefKey(candidate)) throw new Error('Native prefix outcome conflict.');
+        return record;
+      }
+      if (progress.stage !== 'create-started' || terminal(record.phase) && record.phase !== 'cancelled') throw new Error('Native prefix creation stage changed.');
+      progress.nativePrefix.handle = handle;
+      if (record.phase === 'cancelled') progress.orphanCandidate = candidate;
+      else { progress.stage = 'candidate-known'; record.to = candidate; record.phase = 'transferring'; delete record.resumePhase; record.updatedAt = new Date().toISOString(); }
+      return record;
     });
   }
   async saveCreationResult(operationId: string, result: AgentEmptyCreationResult): Promise<SuccessionRecord> {
@@ -431,6 +458,7 @@ export class SessionSuccessionStore {
   revalidateCandidate(operationId: string): Promise<SuccessionRecord> {
     return this.mutate(state => {
       const record = this.findOperation(state, operationId), progress = this.localProgress(state, record);
+      if (record.preparation && !progress.nativePrefix?.handle) throw new Error('Original native prefix handle is unavailable.');
       if (progress.nativeCreation && progress.nativeCreation.outcome?.status !== 'created') throw new Error('Native creation evidence is not resumable.');
       if (record.phase !== 'unknown' || progress.stage !== 'candidate-known' || !record.to || !progress.capture) throw new Error('No saved candidate can be revalidated.');
       record.phase = 'transferring'; delete record.resumePhase; return record;
@@ -451,7 +479,7 @@ export class SessionSuccessionStore {
     const to = record.to ?? largestSuccessionRef;
     const capture = progress.capture ?? record.prepared?.capture ?? { epoch: largestSuccessionId, seq: Number.MAX_SAFE_INTEGER, capturedAt: largestSuccessionId };
     const request: SuccessionRequest = { operationId: record.operationId, roleId: record.roleId, expectedRevision: record.expectedRevision, from: record.from,
-      ...(record.targetProviderId ? { targetProviderId: record.targetProviderId } : {}) };
+      ...(record.targetProviderId ? { targetProviderId: record.targetProviderId } : {}), ...(record.preparation ? { preparation: record.preparation } : {}) };
     const prepared = record.prepared ?? { ...request, to, workspace: item.role.workspace, associationRevision: item.associationRevision, participants: item.participants, capture };
     return { to, capture, prepared };
   }
@@ -478,6 +506,8 @@ export class SessionSuccessionStore {
   private preparationGrowth(item: SuccessionRoleState, progress: LocalSuccessionProgress): number {
     const record = item.operations.find(value => value.operationId === progress.operationId)!;
     const current = jsonBytes({ record, progress });
+    const prefixGrowth = record.preparation && !progress.nativePrefix?.handle && (!terminal(record.phase) || record.phase === 'cancelled' && progress.stage === 'create-started')
+      ? AGENT_NATIVE_EVIDENCE_LIMITS.handleBytes + jsonBytes({ nativePrefix: { version: 1, handle: null } }) - 4 - (progress.nativePrefix ? jsonBytes({ nativePrefix: progress.nativePrefix }) : 0) : 0;
     const creationGrowth = progress.nativeCreation && !progress.nativeCreation.outcome && (!terminal(record.phase) || record.phase === 'cancelled' && progress.stage === 'create-started')
       ? this.creationOutcomeGrowth(progress) : 0;
     const release = item.enrollments?.find(value => value.request.operationId === record.operationId);
@@ -486,7 +516,7 @@ export class SessionSuccessionStore {
     if (terminal(record.phase)) {
       const orphan = record.phase === 'cancelled' && progress.stage === 'create-started' && !progress.orphanCandidate
         ? jsonBytes({ record, progress: { ...progress, orphanCandidate: largestSuccessionRef } }) - current : 0;
-      return Math.max(0, orphan) + releaseGrowth + creationGrowth;
+      return Math.max(0, orphan) + releaseGrowth + creationGrowth + prefixGrowth;
     }
     const { to, capture, prepared } = this.candidateValues(item, record, progress);
     const futureProgress = progress.stage ? { ...progress, stage: 'candidate-known', capture, createOperationId: `${record.operationId}:create`, zeroInputAndTask: true } : progress;
@@ -498,7 +528,7 @@ export class SessionSuccessionStore {
     const commitGrowth = jsonBytes({ record: committed, progress: futureProgress }) - current + roleGrowth;
     const cancelled = { ...record, phase: 'cancelled', updatedAt: '2000-01-01T00:00:00.000Z', failureCode: largestSuccessionId };
     const orphanProgress = progress.stage ? { ...progress, stage: 'create-started', capture, createOperationId: `${record.operationId}:create`, zeroInputAndTask: true, orphanCandidate: largestSuccessionRef } : progress;
-    return Math.max(0, readyGrowth, commitGrowth, jsonBytes({ record: cancelled, progress: orphanProgress }) - current) + releaseGrowth + creationGrowth;
+    return Math.max(0, readyGrowth, commitGrowth, jsonBytes({ record: cancelled, progress: orphanProgress }) - current) + releaseGrowth + creationGrowth + prefixGrowth;
   }
   private creationBinding(record: SuccessionRecord, capture: NonNullable<LocalSuccessionProgress['capture']>): string {
     return createHash('sha256').update(JSON.stringify([fingerprint(record), `${record.operationId}:create`, capture.epoch, capture.seq, capture.capturedAt])).digest('hex');
@@ -617,7 +647,7 @@ export class SessionSuccessionStore {
     }
   }
   private validate(state: StoreState): void {
-    if (!state || state.version !== 7 || !Array.isArray(state.roles) || state.roles.length > 1024) throw new Error('Unsupported succession storage format/version.');
+    if (!state || state.version !== 8 || !Array.isArray(state.roles) || state.roles.length > 1024) throw new Error('Unsupported succession storage format/version.');
     if (!Array.isArray(state.associationAdmissions) || state.associationAdmissions.length > 1024 || new Set(state.associationAdmissions.map(item => item.id)).size !== state.associationAdmissions.length
       || state.associationAdmissions.some(item => !item.id || !item.fingerprint || item.id.length > 512 || item.fingerprint.length > 512 || !isNativeSessionRef(item.source) || item.sourceReader !== undefined && item.sourceReader !== true || item.recovery !== undefined && (typeof item.recovery.createKey !== 'string' || !item.recovery.createKey || item.recovery.createKey.length > 16384 || !/^[a-f0-9]{64}$/.test(item.recovery.createFingerprint)))) throw new Error('Invalid source association admission.');
     for (const admission of state.associationAdmissions) if (admission.sourceWitness !== undefined) {
@@ -657,6 +687,7 @@ export class SessionSuccessionStore {
         this.validateRecord(op);
         const enrollment = item.enrollments?.find(receipt => receipt.request.operationId === op.operationId);
         const progress = item.localPreparations?.find(value => value.operationId === op.operationId);
+        if (op.preparation && !progress?.stage) throw new Error('Native prefix operation requires durable local progress.');
         const historicalCancellation = op.phase === 'cancelled' && !op.to && !op.prepared && enrollment?.version === 1
           && progress && Object.keys(progress).every(name => ['operationId', 'reservedBytes'].includes(name))
           && op.expectedRevision <= revision && history[op.expectedRevision - 1]
@@ -673,7 +704,7 @@ export class SessionSuccessionStore {
         if (!Array.isArray(item.localPreparations) || item.localPreparations.length > 512 || new Set(item.localPreparations.map(value => value.operationId)).size !== item.localPreparations.length) throw new Error('Invalid local succession progress.');
         for (const progress of item.localPreparations) {
           const record = item.operations.find(value => value.operationId === progress.operationId);
-          if (!record || Object.keys(progress).some(name => !['operationId', 'reservedBytes', 'stage', 'createOperationId', 'zeroInputAndTask', 'capture', 'orphanCandidate', 'nativeCreation'].includes(name))
+          if (!record || Object.keys(progress).some(name => !['operationId', 'reservedBytes', 'stage', 'createOperationId', 'zeroInputAndTask', 'capture', 'orphanCandidate', 'nativeCreation', 'nativePrefix'].includes(name))
             || !isReservation(progress.reservedBytes) || progress.reservedBytes !== reservationBytes(this.preparationGrowth(item, progress))) throw new Error('Invalid local succession reservation.');
           if (!progress.stage) {
             if (Object.keys(progress).some(name => !['operationId', 'reservedBytes'].includes(name))) throw new Error('Legacy progress cannot certify native creation.');
@@ -691,6 +722,17 @@ export class SessionSuccessionStore {
             || record.resumePhase && !['transferring', 'ready'].includes(record.resumePhase)
             || record.resumePhase === 'ready' && !record.prepared
             || record.prepared && JSON.stringify(record.prepared.capture) !== JSON.stringify(progress.capture))) throw new Error('Contradictory known candidate.');
+          if (record.preparation && progress.capture && !progress.nativePrefix || !record.preparation && progress.nativePrefix) throw new Error('Native prefix mode evidence is missing or misplaced.');
+          if (progress.nativePrefix !== undefined) {
+            const evidence = progress.nativePrefix;
+            if (!evidence || evidence.version !== 1 || Object.keys(evidence).some(key => !['version', 'handle'].includes(key)) || !progress.capture || progress.nativeCreation) throw new Error('Invalid native prefix evidence.');
+            if (evidence.handle !== undefined) {
+              const candidate = record.to ?? progress.orphanCandidate;
+              if (!candidate || progress.stage === 'not-started' || candidate.controllerId !== record.from.controllerId || candidate.providerId !== record.from.providerId
+                || nativeSessionRefKey(candidate) === nativeSessionRefKey(record.from)) throw new Error('Native prefix handle has no matching candidate.');
+              nativePrefixResumeHandle(candidate.providerId, candidate.nativeSessionId, evidence.handle);
+            } else if (progress.stage === 'candidate-known' || record.to || progress.orphanCandidate) throw new Error('Native prefix candidate requires its original handle.');
+          }
           if (progress.nativeCreation !== undefined) {
             const evidence = progress.nativeCreation, outcome = evidence?.outcome;
             if (!evidence || evidence.version !== 1 || Object.keys(evidence).some(key => !['version', 'binding', 'outcome'].includes(key)) || !progress.capture || evidence.binding !== this.creationBinding(record, progress.capture)) throw new Error('Invalid native creation evidence.');
@@ -726,14 +768,16 @@ export class SessionSuccessionStore {
     const legacyPreparation = [1, 2, 3].includes(parsed.version);
     const legacyProjection = legacyPreparation || parsed.version === 4;
     const legacyWitness = legacyProjection || parsed.version === 5;
-    const migrated = legacyWitness || parsed.version === 6;
-    if (migrated && parsed.roles?.some((item: SuccessionRoleState) => item.localPreparations?.some(progress => progress.nativeCreation !== undefined))) throw new Error('Legacy storage cannot certify native creation evidence.');
+    const legacyNativeCreation = legacyWitness || parsed.version === 6;
+    const migrated = legacyNativeCreation || parsed.version === 7;
+    if (migrated && parsed.roles?.some((item: SuccessionRoleState) => item.operations?.some(record => record.preparation !== undefined) || item.localPreparations?.some(progress => progress.nativePrefix !== undefined))) throw new Error('Legacy storage cannot certify native prefix evidence.');
+    if (legacyNativeCreation && parsed.roles?.some((item: SuccessionRoleState) => item.localPreparations?.some(progress => progress.nativeCreation !== undefined))) throw new Error('Legacy storage cannot certify native creation evidence.');
     if (legacyWitness && parsed.associationAdmissions?.some((item: StoreState['associationAdmissions'][number]) => item.sourceWitness !== undefined)) throw new Error('Legacy storage cannot certify a source witness.');
     if (legacyProjection && parsed.roles.some((item: SuccessionRoleState) => item.enrollments?.some(freeze => freeze.version !== 1))) throw new Error('Legacy storage cannot certify a bounded freeze.');
     if (legacyPreparation && parsed.roles.some((item: SuccessionRoleState) => item.localPreparations !== undefined)) throw new Error('Ambiguous legacy preparation evidence.');
     if (parsed.version === 1 && (parsed.associationAdmissions !== undefined || parsed.associationResults !== undefined || parsed.roles.some((item: SuccessionRoleState) => item.associationAuthority || item.enrollments || item.releasedEnrollments))) throw new Error('Ambiguous legacy association storage.');
     if ((parsed.version === 1 || parsed.version === 2) && parsed.roles.some((item: SuccessionRoleState) => item.relationChanges !== undefined)) throw new Error('Ambiguous legacy relation change storage.');
-    const state: StoreState = migrated ? { ...parsed, version: 7, associationAdmissions: parsed.version === 1 ? [] : parsed.associationAdmissions, associationResults: parsed.version === 1 ? [] : parsed.associationResults } : parsed; this.validate(state);
+    const state: StoreState = migrated ? { ...parsed, version: 8, associationAdmissions: parsed.version === 1 ? [] : parsed.associationAdmissions, associationResults: parsed.version === 1 ? [] : parsed.associationResults } : parsed; this.validate(state);
     let changed = migrated;
     for (const item of state.roles) for (const op of item.operations) if (!terminal(op.phase) && op.phase !== 'unknown') {
       op.resumePhase = op.phase as SuccessionRecord['resumePhase']; op.phase = 'unknown';

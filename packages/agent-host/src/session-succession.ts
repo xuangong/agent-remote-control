@@ -1,4 +1,4 @@
-import { isNativeSessionRef, nativeSessionRefKey, successionFreezeKey, type NativeSessionRef, type SuccessionRecord, type SuccessionRequest, type SuccessionAssociationFreeze, type SuccessionParticipant, type TimelineCursor } from '@orchardworks/agent-remote-protocol';
+import { isNativeSessionRef, nativeSessionRefKey, successionFreezeKey, type NativeSessionRef, type SuccessionRecord, type SuccessionRequest, type SuccessionAssociationFreeze, type SuccessionParticipant, type TimelineCursor, nativePrefixSelectionKey } from '@orchardworks/agent-remote-protocol';
 import { LocalSuccessionPreparation, SuccessionPreparationRejected } from './local-succession-preparation.js';
 import { SessionSuccessionStore } from './session-succession-store.js';
 import { SuccessionPublicationUnknown } from './succession-persistence.js';
@@ -27,6 +27,7 @@ export class SessionSuccessionCoordinator {
     return this.prepareRequest(request, JSON.stringify(['local', requestKey(request)]), () => this.store.begin(request, true));
   }
   async prepareEnrolled(freeze: SuccessionAssociationFreeze, participants: SuccessionParticipant[], generation: number): Promise<SuccessionRecord> {
+    if (freeze.request.preparation) throw new Error('Native prefix enrollment requires v3 integration.');
     if (!this.store.read(freeze.request.roleId).enrollments?.some(saved => saved.request.operationId === freeze.request.operationId)) {
       if (freeze.version !== 2) throw new Error('New succession preparation requires a bounded v2 freeze.');
       await this.preparation.supportsBoundedProjection(this.store.read(freeze.request.roleId).role, freeze.request.targetProviderId);
@@ -54,8 +55,8 @@ export class SessionSuccessionCoordinator {
     try {
       this.admission?.checkSource(request.from);
       // Native readiness covers work predating this process/cache before enabling evidence pins.
-      await this.preparation.check(role);
-      await this.preparation.supports(role, request.targetProviderId);
+      await this.preparation.check(role, role.current, undefined, request.preparation);
+      await this.preparation.supports(role, request.targetProviderId, request.preparation);
     } catch (error) {
       await begin();
       return this.failPreparation(request.operationId, error);
@@ -84,9 +85,10 @@ export class SessionSuccessionCoordinator {
   private async run(operationId: string): Promise<SuccessionRecord> {
     try {
       const record = this.store.operation(operationId), state = this.store.read(record.roleId);
-      await this.preparation.check(state.role);
-      await this.preparation.supports(state.role, record.targetProviderId);
+      await this.preparation.check(state.role, record.from, undefined, record.preparation);
+      await this.preparation.supports(state.role, record.targetProviderId, record.preparation);
       if (this.stopped(operationId)) return this.store.operation(operationId);
+      if (record.preparation) return await this.runNativePrefix(record);
       const nativeCreate = await this.preparation.selectNativeCreation(state.role, operationId, record.targetProviderId);
       const context = await this.preparation.capture(state.role, operationId);
       await this.serialized(operationId, async () => {
@@ -136,6 +138,30 @@ export class SessionSuccessionCoordinator {
       return await this.finishCandidate(operationId);
     } catch (error) { return this.failPreparation(operationId, error); }
   }
+  private async runNativePrefix(record: SuccessionRecord): Promise<SuccessionRecord> {
+    const operationId = record.operationId, role = this.store.read(record.roleId).role;
+    const observation = await this.preparation.check(role, record.from, undefined, record.preparation);
+    const capture = { ...observation.boundary, capturedAt: new Date().toISOString() };
+    await this.serialized(operationId, async () => { if (!this.stopped(operationId)) await this.store.savePreparation(operationId, capture); });
+    if (this.stopped(operationId)) return this.store.operation(operationId);
+    const source = await this.preparation.check(role, record.from, undefined, record.preparation);
+    if (source.boundary.epoch !== capture.epoch || source.boundary.seq !== capture.seq) throw new SuccessionPreparationRejected('succession_boundary_changed', 'Source history changed before native prefix creation.');
+    const started = await this.serialized(operationId, async () => {
+      if (this.stopped(operationId)) return undefined;
+      await this.store.startCreation(operationId);
+      return { result: Promise.resolve().then(() => this.preparation.createNativePrefix({ operationId, roleId: record.roleId, expectedRevision: record.expectedRevision,
+        from: record.from, ...(record.targetProviderId ? { targetProviderId: record.targetProviderId } : {}), preparation: record.preparation })) };
+    });
+    if (!started) return this.store.operation(operationId);
+    const candidate = await started.result;
+    let conflict = false, registrationError: unknown;
+    try { conflict = this.admission?.registerCandidate(operationId, candidate.target).conflict ?? false; } catch (error) { registrationError = error; }
+    await this.serialized(operationId, () => this.store.saveNativePrefixCandidate(operationId, candidate));
+    if (this.stopped(operationId)) return this.store.operation(operationId);
+    if (registrationError) throw registrationError;
+    if (conflict) throw new SuccessionPreparationRejected('succession_candidate_busy', 'Candidate has conflicting Host mutations.');
+    return this.finishCandidate(operationId);
+  }
   private async finishCandidate(operationId: string): Promise<SuccessionRecord> {
     const record = this.store.operation(operationId), progress = this.store.progress(operationId), state = this.store.read(record.roleId);
     if (!record.to || progress?.stage !== 'candidate-known' || !progress.capture) throw new Error('Saved candidate preparation is incomplete.');
@@ -143,13 +169,13 @@ export class SessionSuccessionCoordinator {
     if (record.to.providerId !== (record.targetProviderId ?? record.from.providerId)) throw new SuccessionPreparationRejected('succession_target_provider_mismatch', 'The candidate provider does not match the selected provider.');
     await this.serialized(operationId, async () => {
       if (this.stopped(operationId)) return;
-      await this.preparation.bind(operationId, record.to!);
+      if (!record.preparation) await this.preparation.bind(operationId, record.to!);
     });
     if (this.stopped(operationId)) return this.store.operation(operationId);
-    await this.preparation.check(state.role, record.to);
+    await this.preparation.check(state.role, record.to, undefined, record.preparation);
     if (this.stopped(operationId)) return this.store.operation(operationId);
     const prepared = { operationId, roleId: record.roleId, expectedRevision: record.expectedRevision, from: record.from,
-      ...(record.targetProviderId ? { targetProviderId: record.targetProviderId } : {}), to: record.to, workspace: state.role.workspace,
+      ...(record.targetProviderId ? { targetProviderId: record.targetProviderId } : {}), ...(record.preparation ? { preparation: record.preparation } : {}), to: record.to, workspace: state.role.workspace,
       associationRevision: state.associationRevision, participants: state.participants, capture: progress.capture };
     const verification = await this.preparation.verify(state.role, prepared);
     try {
@@ -193,7 +219,7 @@ export class SessionSuccessionCoordinator {
     if (record.phase !== 'transferring') return this.releaseTerminal(record);
     try {
       const role = this.store.read(record.roleId).role;
-      await this.preparation.check(role); await this.preparation.supports(role, record.targetProviderId);
+      await this.preparation.check(role, record.from, undefined, record.preparation); await this.preparation.supports(role, record.targetProviderId, record.preparation);
       const terminal = await this.serialized(operationId, async () => {
         const stopped = this.stopped(operationId); if (stopped) return this.releaseTerminal(stopped);
         const current = this.store.operation(operationId);
@@ -248,4 +274,4 @@ export class SessionSuccessionCoordinator {
   }
 }
 
-function requestKey(request: SuccessionRequest): string { return JSON.stringify([request.operationId, request.roleId, request.expectedRevision, nativeSessionRefKey(request.from), request.targetProviderId ?? null]); }
+function requestKey(request: SuccessionRequest): string { return JSON.stringify([request.operationId, request.roleId, request.expectedRevision, nativeSessionRefKey(request.from), request.targetProviderId ?? null, ...(request.preparation ? [nativePrefixSelectionKey(request.preparation)] : [])]); }

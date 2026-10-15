@@ -1,9 +1,9 @@
 import { randomBytes, randomUUID } from 'node:crypto';
 import { link, mkdir, open, readFile, unlink } from 'node:fs/promises';
 import { join } from 'node:path';
-import type { AgentHistoryPage, AgentHistoryQuery } from '@orchardworks/agent-provider-sdk';
-import { nativeSessionRefKey, serializeNormalizedHistory, type NativeSessionRef, type PreparedSuccession, type PrimaryRole, type ProjectedTimelineEntry, type SuccessionDescription, type SuccessionRequest, type TimelineCursor } from '@orchardworks/agent-remote-protocol';
-import { LocalSuccessionPreparation, SuccessionPreparationRejected, type NativeSuccessionCreate, type RetainedSuccessionVerification, type SuccessionReadiness } from './local-succession-preparation.js';
+import type { AgentHistoryPage, AgentHistoryQuery, AgentPersistenceHandle } from '@orchardworks/agent-provider-sdk';
+import { nativeSessionRefKey, serializeNormalizedHistory, type NativeSessionRef, type PreparedSuccession, type PrimaryRole, type ProjectedTimelineEntry, type SuccessionDescription, type SuccessionRequest, type TimelineCursor, type NativePrefixSelection } from '@orchardworks/agent-remote-protocol';
+import { LocalSuccessionPreparation, SuccessionPreparationRejected, type NativePrefixCandidate, type NativeSuccessionCreate, type RetainedSuccessionVerification, type SuccessionReadiness } from './local-succession-preparation.js';
 import { isSuccessionDeliveryUnresolved, SessionSuccessionContextStore, type SuccessionContextDelivery, type SuccessionContextPreparation } from './session-succession-context.js';
 import { SessionSuccessionStore } from './session-succession-store.js';
 import { SessionSuccessionCoordinator } from './session-succession.js';
@@ -18,7 +18,10 @@ export interface SessionSuccessionPorts {
    * The certificate must come from the supported adapter mode, not post-create validation.
    * Missing/false keeps new v2 preparation disabled; legacy recovery uses supports alone. */
   supportsBoundedProjection?(source: NativeSessionRef, targetProviderId: string): Promise<boolean>;
-  inspect(source: NativeSessionRef): Promise<SuccessionReadiness>;
+  supportsNativePrefix?(source: NativeSessionRef, selection: NativePrefixSelection): Promise<boolean>;
+  createNativePrefix?(request: SuccessionRequest): Promise<NativePrefixCandidate>;
+  verifyNativePrefix?(prepared: PreparedSuccession, handle: AgentPersistenceHandle): Promise<void>;
+  inspect(source: NativeSessionRef, preparation?: NativePrefixSelection): Promise<SuccessionReadiness>;
   createIdle(source: NativeSessionRef, operationId: string, targetProviderId: string): Promise<NativeSessionRef>;
   selectNativeCreation?(source: NativeSessionRef, operationId: string, targetProviderId: string): Promise<NativeSuccessionCreate | undefined>;
   retainVerification?(prepared: PreparedSuccession): Promise<RetainedSuccessionVerification>;
@@ -43,11 +46,18 @@ export class SessionSuccessionService {
     this.store = new SessionSuccessionStore(join(directory, 'roles'));
     this.contexts = new SessionSuccessionContextStore(join(directory, 'contexts'));
     const preparation = this.preparation = new LocalSuccessionPreparation(controllerId, '', {
-      inspect: source => ports.inspect(source), supports: (source, targetProvider) => ports.supports(source, targetProvider),
+      inspect: (source, preparation) => ports.inspect(source, preparation), supports: (source, targetProvider) => ports.supports(source, targetProvider),
       supportsBoundedProjection: (source, targetProvider) => ports.supportsBoundedProjection?.(source, targetProvider) ?? Promise.resolve(false),
       create: (source, operationId, targetProvider) => ports.createIdle(source, operationId, targetProvider),
       selectNativeCreation: (source, operationId, targetProvider) => ports.selectNativeCreation?.(source, operationId, targetProvider) ?? Promise.resolve(undefined),
       ...(ports.retainVerification ? { retainVerification: (prepared: PreparedSuccession) => ports.retainVerification!(prepared) } : {}),
+      supportsNativePrefix: (source, selection) => ports.supportsNativePrefix?.(source, selection) ?? Promise.resolve(false),
+      ...(ports.createNativePrefix ? { createNativePrefix: (request: SuccessionRequest) => ports.createNativePrefix!(request) } : {}),
+      ...(ports.verifyNativePrefix ? { verifyNativePrefix: (prepared: PreparedSuccession) => {
+        const handle = this.store.nativePrefixHandle(prepared.operationId);
+        if (!handle) throw new Error('Original native prefix handle is unavailable.');
+        return ports.verifyNativePrefix!(prepared, handle);
+      } } : {}),
       capture: (source, operationId) => this.capture(source, operationId),
       saveContext: context => this.contexts.prepare(context),
       bind: async (operationId, target) => { await this.contexts.bind(operationId, target); },
@@ -70,13 +80,13 @@ export class SessionSuccessionService {
   async createRole(role: PrimaryRole) { await this.ready; if (role.workspace.controllerId !== this.controllerId || role.current.controllerId !== this.controllerId) throw new Error('Role is outside this Controller.'); return this.store.createRole(role); }
   async prepare(request: SuccessionRequest) { await this.ready; return this.coordinator.prepare(request); }
   async commit(operationId: string, revision: number) { await this.ready; return this.coordinator.commit(operationId, revision); }
-  async describe(role: PrimaryRole, source: NativeSessionRef, candidates: SuccessionDescription['targets']): Promise<SuccessionDescription> {
+  async describe(role: PrimaryRole, source: NativeSessionRef, candidates: SuccessionDescription['targets'], preparation?: NativePrefixSelection): Promise<SuccessionDescription> {
     await this.ready;
     const targets: SuccessionDescription['targets'] = [];
     for (const candidate of candidates) {
       try {
-        await this.preparation.supports(role, candidate.providerId);
-        await this.preparation.supportsBoundedProjection(role, candidate.providerId);
+        await this.preparation.supports(role, candidate.providerId, preparation);
+        await this.preparation.supportsBoundedProjection(role, candidate.providerId, preparation);
         targets.push(candidate);
       } catch { /* An unverified provider pair cannot be offered for new preparation. */ }
     }
@@ -85,7 +95,7 @@ export class SessionSuccessionService {
     if (!targets.length) return unavailable('succession_unsupported_provider', 'No available provider pair supports safe handoff.');
     try {
       this.coordinator.assertAdmission(source);
-      await this.preparation.check(role);
+      await this.preparation.check(role, role.current, undefined, preparation);
       return { role, targets, eligibility: { status: 'ready' } };
     } catch (error) {
       if (error instanceof SuccessionPreparationRejected) return { role, targets, eligibility: { status: 'blocked', code: error.code, reason: error.message } };
@@ -94,6 +104,7 @@ export class SessionSuccessionService {
   }
   async reconcileFirstInput(operationId: string): Promise<boolean> {
     await this.ready;
+    if (this.store.operation(operationId).preparation) return true;
     const attachment = this.contexts.read(operationId);
     const delivery = attachment.deliveries.find(item => item.state !== 'dispatching' && isSuccessionDeliveryUnresolved(item));
     if (!delivery) return attachment.state === 'materialized';

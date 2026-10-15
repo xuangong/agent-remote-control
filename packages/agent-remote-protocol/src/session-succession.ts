@@ -15,7 +15,10 @@ export const SourceBinding = Type.Union([
   Type.Object({ kind: Type.Literal('primary_role'), roleId: id, origin: NativeSessionRef }, object),
 ]);
 export type SourceBinding = Static<typeof SourceBinding>;
-const request = { operationId: id, roleId: id, expectedRevision: revision, from: NativeSessionRef, targetProviderId: Type.Optional(id) };
+export const NativePrefixSelection = Type.Object({ kind: Type.Literal('native_prefix'), turnId: id, messageId: id }, object);
+export type NativePrefixSelection = Static<typeof NativePrefixSelection>;
+export const nativePrefixSelectionKey = (selection: NativePrefixSelection | undefined): string | undefined => selection && JSON.stringify([selection.kind, selection.turnId, selection.messageId]);
+const request = { preparation: Type.Optional(NativePrefixSelection), operationId: id, roleId: id, expectedRevision: revision, from: NativeSessionRef, targetProviderId: Type.Optional(id) };
 export const SuccessionRequest = Type.Object(request, object);
 export type SuccessionRequest = Static<typeof SuccessionRequest>;
 export const SuccessionParticipant = Type.Object({ relationId: id,
@@ -60,15 +63,18 @@ export const isSuccessionDescription = (value: unknown): value is SuccessionDesc
 export const isSuccessionActionResult = (value: unknown): value is SuccessionActionResult => {
   if (!Value.Check(SuccessionActionResult, value)) return false;
   const { record, context } = value as SuccessionActionResult;
-  return !context || record.phase === 'committed' && !!record.to && context.operationId === record.operationId && nativeSessionRefKey(context.target) === nativeSessionRefKey(record.to);
+  return isSuccessionRecord(record) && (!context || !record.preparation && record.phase === 'committed' && !!record.to && context.operationId === record.operationId && nativeSessionRefKey(context.target) === nativeSessionRefKey(record.to));
 };
 export const isNativeSessionRef = (value: unknown): value is NativeSessionRef => Value.Check(NativeSessionRef, value);
 export const isPrimaryRole = (value: unknown): value is PrimaryRole => Value.Check(PrimaryRole, value);
 export const isSourceBinding = (value: unknown): value is SourceBinding => Value.Check(SourceBinding, value);
-export const isSuccessionRequest = (value: unknown): value is SuccessionRequest => Value.Check(SuccessionRequest, value);
-export const isPreparedSuccession = (value: unknown): value is PreparedSuccession => Value.Check(PreparedSuccession, value);
+const validPreparation = (value: SuccessionRequest): boolean => !value.preparation || value.targetProviderId === undefined || value.targetProviderId === value.from.providerId;
+export const isSuccessionRequest = (value: unknown): value is SuccessionRequest => Value.Check(SuccessionRequest, value) && validPreparation(value as SuccessionRequest);
+export const isPreparedSuccession = (value: unknown): value is PreparedSuccession => Value.Check(PreparedSuccession, value) && validPreparation(value as PreparedSuccession) && (!(value as PreparedSuccession).preparation || (value as PreparedSuccession).to.providerId === (value as PreparedSuccession).from.providerId);
 export const isSuccessionParticipant = (value: unknown): value is SuccessionParticipant => Value.Check(SuccessionParticipant, value);
-export const isSuccessionRecord = (value: unknown): value is SuccessionRecord => Value.Check(SuccessionRecord, value);
+export const isSuccessionRecord = (value: unknown): value is SuccessionRecord => Value.Check(SuccessionRecord, value) && validPreparation(value as SuccessionRecord)
+  && (!(value as SuccessionRecord).prepared || isPreparedSuccession((value as SuccessionRecord).prepared) && nativePrefixSelectionKey((value as SuccessionRecord).preparation) === nativePrefixSelectionKey((value as SuccessionRecord).prepared!.preparation))
+  && (!(value as SuccessionRecord).preparation || !(value as SuccessionRecord).to || (value as SuccessionRecord).to!.providerId === (value as SuccessionRecord).from.providerId);
 export const nativeSessionRefKey = (ref: NativeSessionRef): string => JSON.stringify([ref.controllerId, ref.providerId, ref.nativeSessionId]);
 
 export const CommittedSuccessionProjection = Type.Object({ version: Type.Literal(1), role: PrimaryRole, receipt: SuccessionRecord }, object);
@@ -77,7 +83,7 @@ export type CommittedSuccessionProjection = Static<typeof CommittedSuccessionPro
 export const isCommittedSuccessionProjection = (value: unknown): value is CommittedSuccessionProjection => {
   if (!Value.Check(CommittedSuccessionProjection, value)) return false;
   const { role, receipt } = value as CommittedSuccessionProjection;
-  if (!receipt.to || !receipt.prepared) return false;
+  if (!isSuccessionRecord(receipt) || !receipt.to || !receipt.prepared) return false;
   return nativeSessionRefKey(receipt.from) !== nativeSessionRefKey(receipt.to)
     && receipt.prepared!.targetProviderId === receipt.targetProviderId
     && receipt.to!.providerId === (receipt.targetProviderId ?? receipt.from.providerId)

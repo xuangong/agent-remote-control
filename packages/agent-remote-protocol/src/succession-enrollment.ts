@@ -1,6 +1,6 @@
 import { Type, type Static } from '@sinclair/typebox';
 import { Value } from '@sinclair/typebox/value';
-import { NativeSessionRef, SuccessionRequest, nativeSessionRefKey } from './session-succession.js';
+import { NativeSessionRef, SuccessionRequest, nativeSessionRefKey, nativePrefixSelectionKey, isSuccessionRequest } from './session-succession.js';
 const object = { additionalProperties: false };
 const id = Type.String({ minLength: 1, maxLength: 512 });
 const counter = Type.Integer({ minimum: 0, maximum: Number.MAX_SAFE_INTEGER });
@@ -27,7 +27,7 @@ export const isSuccessionAssociationFreeze = (value: unknown): value is Successi
   if (!Value.Check(SuccessionAssociationFreeze, value)) return false;
   const item = value as SuccessionAssociationFreeze;
   const refs = [item.request.from, ...item.lineage, ...item.relations.flatMap(relation => [relation.readerRef, relation.sourceRef])];
-  return refs.every(ref => ref.controllerId === item.controllerId)
+  return isSuccessionRequest(item.request) && !item.request.preparation && refs.every(ref => ref.controllerId === item.controllerId)
     && item.lineage.some(ref => nativeSessionRefKey(ref) === nativeSessionRefKey(item.request.from))
     && new Set(item.lineage.map(nativeSessionRefKey)).size === item.lineage.length
     && new Set(item.relations.map(relation => nativeSessionRefKey(relation.readerRef))).size === item.relations.length;
@@ -46,5 +46,6 @@ export const successionFreezeKey = (freeze: SuccessionAssociationFreeze): string
   ];
   // Preserve the historical v1 array exactly; only v2 adds allowance identity.
   if (freeze.version === 2) identity.push(freeze.maxProjectionBytes);
+  if (freeze.request.preparation) identity.push(nativePrefixSelectionKey(freeze.request.preparation));
   return JSON.stringify(identity);
 };

@@ -142,7 +142,7 @@ export class SessionSuccessionEnrollment {
       else if (input.action !== 'status') throw new Error('Invalid enrollment action.');
       this.service.store.assertCommittedProjection(record.operationId);
       let contextStatus: import('@orchardworks/agent-remote-protocol').SuccessionContextStatus | undefined;
-      if (input.includeContext && record.phase === 'committed' && record.to) {
+      if (input.includeContext && !record.preparation && record.phase === 'committed' && record.to) {
         await this.authorize(record.to);
         const attachment = this.service.contexts.forTarget(record.to);
         if (attachment?.operationId === record.operationId) {

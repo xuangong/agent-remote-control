@@ -2,7 +2,7 @@ import { realpath, stat } from 'node:fs/promises';
 import { isAbsolute, relative, resolve, sep } from 'node:path';
 import type { AgentRuntimeInfo, AgentSession, AgentSessionNativeEvidence, AgentPersistenceHandle } from '@orchardworks/agent-provider-sdk';
 import type { AgentHostDirectory } from './host.js';
-import { successionCreationHandle } from './local-succession-preparation.js';
+import { successionCreationHandle, nativePrefixResumeHandle } from './local-succession-preparation.js';
 
 /** Trusted local admission policy. A cwd check is not a filesystem sandbox. */
 export interface HostExecutionPolicy {
@@ -126,6 +126,15 @@ export function protectHostDirectory(directory: AgentHostDirectory, policy: Host
       return allowedWorkspace(policy, cwd);
     } } : {}),
     ...(directory.renameSession ? { async renameSession(id: string, title: string) { await checkSource(id); return directory.renameSession!(id, title); } } : {}),
+    ...(directory.supportsNativePrefix ? { async supportsNativePrefix(target: Parameters<NonNullable<AgentHostDirectory['supportsNativePrefix']>>[0]) {
+      await checkSource(target.nativeSessionId); return directory.supportsNativePrefix!(target);
+    } } : {}),
+    ...(directory.createNativePrefix ? { async createNativePrefix(...args: Parameters<NonNullable<AgentHostDirectory['createNativePrefix']>>) {
+      await checkSource(args[0].nativeSessionId); return directory.createNativePrefix!(...args);
+    } } : {}),
+    ...(directory.verifyNativePrefix ? { async verifyNativePrefix(...args: Parameters<NonNullable<AgentHostDirectory['verifyNativePrefix']>>) {
+      await checkSource(args[0].nativeSessionId); await checkSource(args[1].sessionId, args[1]); return directory.verifyNativePrefix!(...args);
+    } } : {}),
     async validatePromptEdit(target) { await checkSource(target.nativeSessionId); await directory.validatePromptEdit?.(target); },
     reconcileIdleSession: directory.reconcileIdleSession?.bind(directory),
     canReleaseSession: directory.canReleaseSession?.bind(directory),
@@ -154,7 +163,7 @@ export function protectHostDirectory(directory: AgentHostDirectory, policy: Host
       return directory.create(await createInput(input), evidence);
     },
     async open(nativeSessionId, options) {
-      const handle = options?.nativeCreation ? successionCreationHandle(directory.providerId, nativeSessionId, options.nativeCreation) : undefined;
+      const handle = options?.nativePrefix ? nativePrefixResumeHandle(directory.providerId, nativeSessionId, options.nativePrefix) : options?.nativeCreation ? successionCreationHandle(directory.providerId, nativeSessionId, options.nativeCreation) : undefined;
       await checkSource(nativeSessionId, handle);
       return protect(await directory.open(nativeSessionId, options));
     },

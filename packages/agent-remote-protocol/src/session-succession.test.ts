@@ -55,3 +55,17 @@ test('rejects unknown fields and incomplete participant identities', () => {
   expect(isPreparedSuccession({ ...prepared, participants: [{ relationId: 'ask', kind: 'ask', before: source, after: { nativeSessionId: 'Q' } }] })).toBe(false);
   expect(isSuccessionRequest({ operationId: 'op', roleId: 'role', expectedRevision: 1, from: source, ready: true })).toBe(false);
 });
+
+test('native prefix selection is bounded, same-provider, and semantically bound to prepared receipts', async () => {
+  const { isSuccessionRecord, isCommittedSuccessionProjection } = await import('./session-succession.js');
+  const request = { operationId: 'op', roleId: 'role', expectedRevision: 1, from: source, preparation: { kind: 'native_prefix', turnId: 'turn', messageId: 'message' } };
+  expect(isSuccessionRequest(request)).toBe(true);
+  for (const value of [{ ...request, targetProviderId: 'other' }, { ...request, preparation: { ...request.preparation, messageId: '' } }, { ...request, preparation: { ...request.preparation, turnId: 'x'.repeat(513) } }]) expect(isSuccessionRequest(value)).toBe(false);
+  const to = { ...source, nativeSessionId: 'B' };
+  const prepared = { ...request, to, workspace, associationRevision: 0, participants: [], capture: { epoch: 'e', seq: 1, capturedAt: 'now' } };
+  const receipt = { ...request, to, phase: 'committed', committedRevision: 2, prepared, startedAt: 'now', updatedAt: 'now' };
+  const projection = { version: 1, role: { ...role, revision: 2, current: to }, receipt };
+  expect(isCommittedSuccessionProjection(projection)).toBe(true);
+  expect(isSuccessionRecord({ ...receipt, targetProviderId: 'other' })).toBe(false);
+  expect(isCommittedSuccessionProjection({ ...projection, receipt: { ...receipt, prepared: { ...prepared, preparation: { ...request.preparation, messageId: 'other' } } } })).toBe(false);
+});

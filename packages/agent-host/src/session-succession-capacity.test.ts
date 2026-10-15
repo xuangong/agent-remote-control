@@ -186,3 +186,22 @@ test.each(['created', 'known_rejected'] as const)('cancelled creation retains ca
   expect(restored.progress('op')).toMatchObject({ orphanCandidate: ref(handle.sessionId), nativeCreation: { outcome } });
   expect(Buffer.byteLength(await readFile(path, 'utf8'))).toBeLessThanOrEqual(SUCCESSION_STORE_BYTES);
 });
+
+test('native prefix reserves the complete handle envelope before any native effect', async () => {
+  const { SessionSuccessionService } = await import('./session-succession-service.js');
+  const { realpath } = await import('node:fs/promises');
+  const directory = await realpath(await root()), service = new SessionSuccessionService(directory, 'host', {} as never); await service.ready;
+  await service.createRole({ id: 'role', revision: 1, origin: ref('A'), current: ref('A'), workspace: { controllerId: 'host', canonicalCwd: directory } });
+  const path = join(directory, 'roles', 'state.json'), before = JSON.parse(await readFile(path, 'utf8'));
+  const prefix = { ...request, preparation: { kind: 'native_prefix' as const, turnId: 'turn', messageId: 'message' } };
+  await service.store.begin(prefix, true);
+  const admitted = JSON.parse(await readFile(path, 'utf8'));
+  const allowance = Number(admitted.roles[0].localPreparations[0].reservedBytes) + jsonBytes(admitted) - jsonBytes(before);
+  expect(allowance).toBeGreaterThan(16384);
+  fillRoleState(before, SUCCESSION_STORE_BYTES - allowance + 1); await writeFile(path, JSON.stringify(before));
+  let forks = 0;
+  const reopened = new SessionSuccessionService(directory, 'host', { inspect: async () => ({ cwd: directory, idle: true, managed: true, pendingInputs: 0, inFlightInputs: 0, pendingInteractions: 0, activeChildren: 0, boundary: { epoch: 'e', seq: 1 } }),
+    supportsNativePrefix: async () => true, createNativePrefix: async () => { forks++; return { target: ref('B'), handle: { providerId: 'fixture', sessionId: 'B', opaque: '{}' } }; }, verifyNativePrefix: async () => {}, retainVerification: async () => ({ inspect: async () => { throw new Error('unexpected'); }, assertCurrent(){}, release(){} }) } as never);
+  await reopened.ready;
+  await expect(reopened.prepare(prefix)).rejects.toThrow(/capacity/); expect(forks).toBe(0); expect(reopened.store.read('role').operations).toEqual([]);
+});

@@ -1,18 +1,19 @@
+import { sessionExtensionIdentity, requireSessionExtensionIdentity } from './session-extension-identity.js';
 import { SessionReferenceStore, disposeAfterSourceGrantFailure, sourceSessionExtensions, type SourceBindingReader } from './session-reference.js';
 import { randomUUID } from 'node:crypto';
 import type { OpenCodeAgentProvider, OpenCodeSessionSummary } from '@orchardworks/agent-provider-opencode';
 import type { AgentSession, AgentHistoryQuery, AgentPersistenceHandle } from '@orchardworks/agent-provider-sdk';
 import type { RemoteSessionSummary } from '@orchardworks/agent-remote-relay';
 import type { AgentHostDirectory, AgentHostWorkspace } from './host.js';
-import { successionCreationHandle } from './local-succession-preparation.js';
+import { nativePrefixResumeHandle, successionCreationHandle } from './local-succession-preparation.js';
 import { serializeAgentEmptyCreationResult } from '@orchardworks/agent-provider-sdk';
 
 type OpenCodeDirectoryProvider = Pick<OpenCodeAgentProvider, 'listSessions' | 'getSession' | 'createSession' | 'resumeSession' | 'renameSession' | 'close'>
-  & Partial<Pick<OpenCodeAgentProvider, 'createdSessionIdMaxLength' | 'forkForPromptEdit' | 'validatePromptEdit' | 'openChildSession' | 'readSessionHistory'>>;
+  & Partial<Pick<OpenCodeAgentProvider, 'createdSessionIdMaxLength' | 'forkForPromptEdit' | 'validatePromptEdit' | 'verifyPromptEditBranch' | 'openChildSession' | 'readSessionHistory'>>;
 
 /** The native server owns all work; directory lifetime only controls local subscriptions. */
 export function createOpenCodeSessionDirectory(provider: OpenCodeDirectoryProvider, workspaces: readonly AgentHostWorkspace[], references?: SessionReferenceStore, callbacksAvailable = false): AgentHostDirectory {
-  const opened = new Map<string, { session: AgentSession; handle: AgentPersistenceHandle; createdAt: string; verifiedParent?: string; nativeCreation?: string }>();
+  const opened = new Map<string, { session: AgentSession; handle: AgentPersistenceHandle; createdAt: string; verifiedParent?: string; nativeCreation?: string; nativePrefix?: string; prefixExtensions?: string }>();
   const controllerTools = new Set<string>();
   let closed = false;
   let closing: Promise<void> | undefined;
@@ -59,6 +60,33 @@ export function createOpenCodeSessionDirectory(provider: OpenCodeDirectoryProvid
     setSourceAccessCheck(check) { sourceAccessCheck = check; },
     setSourceBindingReader(reader) { sourceBindingReader = reader; },
     sourceReferences: () => references?.list() ?? Promise.resolve([]),
+    async supportsNativePrefix(target) {
+      const limit = provider.createdSessionIdMaxLength;
+      if (closed || !provider.forkForPromptEdit || !provider.verifyPromptEditBranch || !provider.validatePromptEdit
+        || !Number.isInteger(limit) || !limit || limit > 512 || limit < 1) return false;
+      await sourceAccessCheck?.(target.nativeSessionId);
+      if (await references?.get(target.nativeSessionId)) return false;
+      await provider.validatePromptEdit(target); return true;
+    },
+    async createNativePrefix(target, extensions, evidence) {
+      assertOpen();
+      if (!provider.forkForPromptEdit || !provider.verifyPromptEditBranch) throw new Error('Native prefix preparation is unavailable.');
+      await sourceAccessCheck?.(target.nativeSessionId);
+      if (await references?.get(target.nativeSessionId)) throw new Error('Editing previous prompts is unavailable in side or Ask conversations.');
+      const session = await provider.forkForPromptEdit(target, extensions);
+      evidence?.completed();
+      const id = await remember(session), entry = opened.get(id)!;
+      const handle = nativePrefixResumeHandle('opencode', id, entry.handle);
+      entry.nativePrefix = JSON.stringify(handle); entry.prefixExtensions = sessionExtensionIdentity(extensions);
+      if (extensions.tools?.length) controllerTools.add(id);
+      return handle;
+    },
+    async verifyNativePrefix(target, handle) {
+      assertOpen();
+      if (!provider.verifyPromptEditBranch) throw new Error('Native prefix verification is unavailable.');
+      await sourceAccessCheck?.(target.nativeSessionId);
+      await provider.verifyPromptEditBranch(target, nativePrefixResumeHandle('opencode', handle.sessionId, handle));
+    },
     async validatePromptEdit(target) {
       assertOpen();
       if (!provider.validatePromptEdit) throw new Error('OpenCode prompt editing is unavailable.');
@@ -128,11 +156,16 @@ export function createOpenCodeSessionDirectory(provider: OpenCodeDirectoryProvid
     },
     async open(id, options) {
       assertOpen();
+      if (options?.nativePrefix && (options.nativeCreation || options.resumeHandle || options.resumeOptions)) throw new Error('Native prefix cannot use empty creation recovery options.');
+      const prefixHandle = options?.nativePrefix && nativePrefixResumeHandle('opencode', id, options.nativePrefix);
+      const prefixIdentity = prefixHandle && JSON.stringify(prefixHandle);
       const creationHandle = options?.nativeCreation ? successionCreationHandle('opencode', id, options.nativeCreation) : undefined;
       const creationIdentity = options?.nativeCreation ? serializeAgentEmptyCreationResult(options.nativeCreation) : undefined;
       if (options?.takeOver) throw new Error('OpenCode uses shared session control; takeover is unavailable.');
       const existing = opened.get(id);
       if (existing && (await existing.session.runtimeInfo()).status !== 'closed') {
+        if (prefixIdentity && existing.nativePrefix !== prefixIdentity) throw new Error('Existing attachment does not match the original native prefix handle.');
+        if (prefixIdentity && options?.extensions) requireSessionExtensionIdentity(existing.prefixExtensions!, options.extensions);
         if (creationIdentity && existing.nativeCreation !== creationIdentity) throw new Error('Existing attachment does not match the original native creation evidence.');
         return existing.session;
       }
@@ -143,12 +176,13 @@ export function createOpenCodeSessionDirectory(provider: OpenCodeDirectoryProvid
       const sourceGrant = grant ? sourceExtensions(grant.sourceNativeSessionId, () => id) : undefined;
       const tools = [...(sourceGrant?.tools ?? []), ...(options?.extensions?.tools ?? [])];
       const systemPrompt = [grant?.systemPrompt, options?.extensions?.systemPrompt].filter(Boolean).join('\n\n');
-      const extensions = sourceGrant || options?.extensions ? { ...(tools.length ? { tools } : {}), ...(systemPrompt ? { systemPrompt } : {}) } : undefined;
-      const session = await provider.resumeSession(creationHandle ?? { providerId: 'opencode', sessionId: id, opaque: JSON.stringify({ cwd: native.cwd }) },
+      const extensions = sourceGrant || options?.extensions ? { ...(options?.extensions?.instructions ? { instructions: options.extensions.instructions } : {}), ...(tools.length ? { tools } : {}), ...(systemPrompt ? { systemPrompt } : {}) } : undefined;
+      const session = await provider.resumeSession(prefixHandle ?? creationHandle ?? { providerId: 'opencode', sessionId: id, opaque: JSON.stringify({ cwd: native.cwd }) },
         extensions);
       const resumed = await remember(session);
       if (resumed !== id) { opened.delete(resumed); await session.dispose(); throw new Error('Native creation attachment identity changed.'); }
       if (creationIdentity) opened.get(id)!.nativeCreation = creationIdentity;
+      if (prefixIdentity) { opened.get(id)!.nativePrefix = prefixIdentity; opened.get(id)!.prefixExtensions = sessionExtensionIdentity(extensions); }
       if (extensions?.tools?.length) controllerTools.add(id); return session;
     },
     async openChild(parentNativeSessionId, nativeSessionId) {

@@ -1,4 +1,4 @@
-import { successionResumeHandle } from './local-succession-preparation.js';
+import { successionResumeHandle, nativePrefixResumeHandle } from './local-succession-preparation.js';
 import { AgentSessionInUseError, serializeAgentEmptyCreationResult } from '@orchardworks/agent-provider-sdk';
 import { NativeSessionOwnerError } from './native-session-owner.js';
 import { SessionReferenceStore, disposeAfterSourceGrantFailure, sourceSessionExtensions, type SourceBindingReader } from './session-reference.js';
@@ -10,11 +10,11 @@ import { requireSessionExtensionIdentity, sessionExtensionIdentity } from './ses
 
 /** Keeps new native sessions alive before and after their relay projection is attached. */
 export function createCodexSessionDirectory(
-  provider: Pick<CodexAppServerProvider, 'listSessions' | 'createSession' | 'resumeSession' | 'openChildSession'> & Partial<Pick<CodexAppServerProvider, 'createdSessionIdMaxLength' | 'inspectSessionOwner' | 'releaseSessionOwner' | 'readSessionTitle' | 'renameSession' | 'readSessionHistory' | 'readSessionWorkspace' | 'canReleaseSession' | 'reconcileIdleSession' | 'forkSession' | 'forkForPromptEdit' | 'validatePromptEdit'>>,
+  provider: Pick<CodexAppServerProvider, 'listSessions' | 'createSession' | 'resumeSession' | 'openChildSession'> & Partial<Pick<CodexAppServerProvider, 'createdSessionIdMaxLength' | 'inspectSessionOwner' | 'releaseSessionOwner' | 'readSessionTitle' | 'renameSession' | 'readSessionHistory' | 'readSessionWorkspace' | 'canReleaseSession' | 'reconcileIdleSession' | 'forkSession' | 'forkForPromptEdit' | 'validatePromptEdit' | 'verifyPromptEditBranch'>>,
   workspaces: readonly AgentHostWorkspace[],
   references?: SessionReferenceStore,
 ): AgentHostDirectory {
-  const opened = new Map<string, { session: AgentSession; handle: AgentPersistenceHandle; createdAt: string; extensionIdentity: string; nativeCreation?: string }>();
+  const opened = new Map<string, { session: AgentSession; handle: AgentPersistenceHandle; createdAt: string; extensionIdentity: string; nativeCreation?: string; nativePrefix?: string }>();
   const controllerTools = new Set<string>();
   let discovery: Promise<CodexSessionSummary[]> | undefined;
   let closed = false;
@@ -79,6 +79,31 @@ export function createCodexSessionDirectory(
     ...(provider.renameSession ? { renameSession: provider.renameSession.bind(provider) } : {}),
     requiresController: id => controllerTools.has(id),
     supportsPromptEditing: !!provider.forkForPromptEdit,
+    async supportsNativePrefix(target) {
+      const limit = provider.createdSessionIdMaxLength;
+      if (closed || !provider.forkForPromptEdit || !provider.verifyPromptEditBranch || !provider.validatePromptEdit
+        || !Number.isInteger(limit) || !limit || limit > 512 || limit < 1) return false;
+      await sourceAccessCheck?.(target.nativeSessionId);
+      if (await references?.get(target.nativeSessionId)) return false;
+      await provider.validatePromptEdit(target); return true;
+    },
+    async createNativePrefix(target, extensions, evidence) {
+      if (closed || !provider.forkForPromptEdit || !provider.verifyPromptEditBranch) throw new Error('Native prefix preparation is unavailable.');
+      await sourceAccessCheck?.(target.nativeSessionId);
+      if (await references?.get(target.nativeSessionId)) throw new Error('Editing previous prompts is unavailable in side or Ask conversations.');
+      const session = await provider.forkForPromptEdit(target, extensions);
+      evidence?.completed();
+      const id = await remember(session, sessionExtensionIdentity(extensions)), entry = opened.get(id)!;
+      const handle = nativePrefixResumeHandle('codex', id, entry.handle);
+      entry.nativePrefix = JSON.stringify(handle);
+      if (extensions.tools?.length) controllerTools.add(id);
+      return handle;
+    },
+    async verifyNativePrefix(target, handle) {
+      if (closed || !provider.verifyPromptEditBranch) throw new Error('Native prefix verification is unavailable.');
+      await sourceAccessCheck?.(target.nativeSessionId);
+      await provider.verifyPromptEditBranch(target, nativePrefixResumeHandle('codex', handle.sessionId, handle));
+    },
     async validatePromptEdit(target) {
       await sourceAccessCheck?.(target.nativeSessionId);
       if (await references?.get(target.nativeSessionId)) throw new Error('Editing previous prompts is unavailable in side or Ask conversations.');
@@ -139,10 +164,14 @@ export function createCodexSessionDirectory(
     },
     async open(nativeSessionId, options) {
       if (closed) throw new Error('Codex directory is closed.');
-      const handle = successionResumeHandle('codex', nativeSessionId, options?.nativeCreation, options?.resumeHandle);
+      if (options?.nativePrefix && (options.nativeCreation || options.resumeHandle || options.resumeOptions)) throw new Error('Native prefix cannot use empty creation recovery options.');
+      const prefixHandle = options?.nativePrefix && nativePrefixResumeHandle('codex', nativeSessionId, options.nativePrefix);
+      const prefixIdentity = prefixHandle && JSON.stringify(prefixHandle);
+      const handle = prefixHandle ?? successionResumeHandle('codex', nativeSessionId, options?.nativeCreation, options?.resumeHandle);
       const creationIdentity = options?.nativeCreation ? serializeAgentEmptyCreationResult(options.nativeCreation) : undefined;
       const existing = opened.get(nativeSessionId);
       const reusable = existing && (await existing.session.runtimeInfo()).status !== 'closed';
+      if (reusable && prefixIdentity && existing.nativePrefix !== prefixIdentity) throw new Error('Existing attachment does not match the original native prefix handle.');
       if (reusable && creationIdentity && existing.nativeCreation !== creationIdentity) throw new Error('Existing attachment does not match the original native creation evidence.');
       if (reusable && options?.extensions === undefined) return existing.session;
       const grant = await references?.get(nativeSessionId);
@@ -178,6 +207,7 @@ export function createCodexSessionDirectory(
       const resumedId = await remember(session, identity);
       if (resumedId !== nativeSessionId) { opened.delete(resumedId); await session.dispose(); throw new Error('Native creation attachment identity changed.'); }
       if (creationIdentity) opened.get(nativeSessionId)!.nativeCreation = creationIdentity;
+      if (prefixIdentity) opened.get(nativeSessionId)!.nativePrefix = prefixIdentity;
       if (extensions?.tools?.length || options?.extensions?.tools?.length) controllerTools.add(nativeSessionId);
       return session;
     },

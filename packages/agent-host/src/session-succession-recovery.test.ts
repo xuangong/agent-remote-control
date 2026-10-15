@@ -264,7 +264,7 @@ test('stores the original creation result with B atomically, rejects replacement
   const f = await evidencePreparation(), store = f.service.store;
   await store.saveCreationResult('handoff', creation);
   const saved = JSON.parse(await readFile(join(f.directory, 'roles', 'state.json'), 'utf8'));
-  expect(saved.version).toBe(7); expect(saved.roles[0].operations[0].to).toEqual(ref('B'));
+  expect(saved.version).toBe(8); expect(saved.roles[0].operations[0].to).toEqual(ref('B'));
   expect(saved.roles[0].localPreparations[0].nativeCreation).toMatchObject({ version: 1, binding: expect.stringMatching(/^[a-f0-9]{64}$/), outcome: creation });
   expect(await store.saveCreationResult('handoff', creation)).toMatchObject({ to: ref('B') });
   await expect(store.saveCreationResult('handoff', { ...creation, handle: { ...creation.handle, opaque: 'runtime handle' } })).rejects.toThrow(/conflict/);
@@ -342,4 +342,131 @@ test('restore rejects a non-string local code in cancelled evidence without rewr
   await writeFile(path, JSON.stringify(disk)); const before = await readFile(path);
   await expect(new SessionSuccessionService(f.directory, 'host', f.ports).ready).rejects.toThrow();
   expect(await readFile(path)).toEqual(before);
+});
+
+const prefixRequest = { ...request, preparation: { kind: 'native_prefix' as const, turnId: 'turn', messageId: 'message' } };
+async function prefixFixture() {
+  const f = await fixture(); let forks = 0, verified = 0, held = false, invalid = false;
+  f.ports.supports = async () => false;
+  f.ports.supportsNativePrefix = async () => true;
+  f.ports.createNativePrefix = async input => {
+    expect(input).toEqual(prefixRequest); forks++;
+    expect(f.service.store.progress('handoff')).toMatchObject({ stage: 'create-started', nativePrefix: { version: 1 }, zeroInputAndTask: true });
+    return { target: ref('B'), handle: creation.handle };
+  };
+  f.ports.verifyNativePrefix = async (prepared, handle) => { verified++; expect(held).toBe(true); expect(prepared.preparation).toEqual(prefixRequest.preparation); expect(handle).toEqual(creation.handle); };
+  const inspect = f.ports.inspect;
+  f.ports.inspect = async (source, mode) => { expect(mode).toEqual(prefixRequest.preparation); return inspect(source); };
+  f.ports.retainVerification = async prepared => { expect(prepared.preparation).toEqual(prefixRequest.preparation); held = true; return {
+    inspect: source => inspect(source), assertCurrent() { if (invalid) throw new Error('retained evidence changed'); }, release() { held = false; },
+  }; };
+  const forbidden = async () => { throw new Error('normalized context operation invoked'); };
+  f.ports.captureTimeline = forbidden; f.ports.createIdle = forbidden; f.ports.selectNativeCreation = forbidden;
+  f.service = new SessionSuccessionService(f.directory, 'host', f.ports); await f.service.ready;
+  f.service.contexts.prepare = forbidden; f.service.contexts.bind = forbidden;
+  f.service.contexts.read = () => { throw new Error('context read invoked'); };
+  return { ...f, forks: () => forks, verified: () => verified, invalidate: () => { invalid = true; } };
+}
+test('native prefix forks once inside durable preparation and commits without normalized context', async () => {
+  const f = await prefixFixture();
+  const ready = await f.service.prepare(prefixRequest);
+  expect(ready).toMatchObject({ phase: 'ready', to: ref('B'), preparation: prefixRequest.preparation, prepared: { preparation: prefixRequest.preparation } });
+  expect(f.service.store.nativePrefixHandle('handoff')).toEqual(creation.handle);
+  expect(f.service.store.progress('handoff')?.nativeCreation).toBeUndefined();
+  expect(f.service.store.read('role').role.current).toEqual(ref('A'));
+  expect((await f.service.commit('handoff', 1)).phase).toBe('committed');
+  expect(await f.service.reconcileFirstInput('handoff')).toBe(true);
+  expect(f.service.contexts.forTarget(ref('B'))).toBeUndefined();
+  expect(f.forks()).toBe(1); expect(f.verified()).toBe(2);
+  expect(JSON.parse(await readFile(join(f.directory, 'roles', 'state.json'), 'utf8')).version).toBe(8);
+});
+test('native prefix rejects token invalidation during branch readback', async () => {
+  const f = await prefixFixture(), verify = f.ports.verifyNativePrefix!;
+  f.ports.verifyNativePrefix = async (...args) => { await verify(...args); f.invalidate(); };
+  expect((await f.service.prepare(prefixRequest)).phase).toBe('rejected');
+  expect(f.service.store.nativePrefixHandle('handoff')).toEqual(creation.handle);
+  expect(f.service.store.read('role').role.current).toEqual(ref('A'));
+});
+test('native prefix source activity after prepare blocks commit even when idle again', async () => {
+  const f = await prefixFixture(); expect((await f.service.prepare(prefixRequest)).phase).toBe('ready');
+  const capture = f.service.store.progress('handoff')!.capture;
+  const retain = f.ports.retainVerification!;
+  f.ports.retainVerification = async prepared => { const pin = await retain(prepared); const inspect = pin.inspect; return { ...pin, inspect: async source => ({ ...await inspect(source), boundary: { epoch: 'e', seq: source.nativeSessionId === 'A' ? 2 : 1 } }) }; };
+  await expect(f.service.commit('handoff', 1)).rejects.toThrow(/boundary/);
+  expect(f.service.store.progress('handoff')!.capture).toEqual(capture);
+  expect(f.service.store.read('role').role.current).toEqual(ref('A'));
+});
+test.each(['not-started', 'create-started', 'candidate-known'] as const)('native prefix restart at %s never repeats fork', async stage => {
+  const f = await prefixFixture(); await f.service.store.begin(prefixRequest, true);
+  if (stage !== 'not-started') { await f.service.store.savePreparation('handoff', capture); await f.service.store.startCreation('handoff'); }
+  if (stage === 'candidate-known') await f.service.store.saveNativePrefixCandidate('handoff', { target: ref('B'), handle: creation.handle });
+  const restored = new SessionSuccessionService(f.directory, 'host', f.ports); await restored.ready;
+  if (stage === 'create-started') await expect(restored.coordinator.reconcileReady('handoff')).rejects.toThrow(/unknown/);
+  else expect((await restored.coordinator.reconcileReady('handoff')).phase).toBe(stage === 'not-started' ? 'rejected' : 'ready');
+  expect(f.forks()).toBe(0);
+  expect(restored.store.nativePrefixHandle('handoff')).toEqual(stage === 'candidate-known' ? creation.handle : undefined);
+});
+test('native prefix cancelled late result preserves the original orphan handle after restart', async () => {
+  const f = await prefixFixture(), entered = deferred<void>(), result = deferred<{ target: ReturnType<typeof ref>; handle: typeof creation.handle }>();
+  f.ports.createNativePrefix = async () => { entered.resolve(); return result.promise; };
+  const running = f.service.prepare(prefixRequest);
+  try {
+    await Promise.race([entered.promise, running.then(() => { throw new Error('Preparation ended before native fork.'); })]); await f.service.coordinator.cancel('handoff'); result.resolve({ target: ref('B'), handle: creation.handle });
+    expect((await running).phase).toBe('cancelled');
+    const restored = new SessionSuccessionService(f.directory, 'host', f.ports); await restored.ready;
+    expect(restored.store.progress('handoff')).toMatchObject({ orphanCandidate: ref('B'), nativePrefix: { version: 1, handle: creation.handle } });
+    expect(restored.store.operation('handoff').to).toBeUndefined(); expect(f.verified()).toBe(0);
+  } finally { result.resolve({ target: ref('B'), handle: creation.handle }); await running.catch(() => undefined); }
+});
+test('native prefix operation selection cannot be changed or interpreted as generic succession', async () => {
+  const f = await prefixFixture(); await f.service.prepare(prefixRequest);
+  await expect(f.service.prepare({ ...prefixRequest, preparation: { ...prefixRequest.preparation, messageId: 'different' } })).rejects.toThrow(/identity conflict/);
+  await expect(f.service.prepare(request)).rejects.toThrow(/identity conflict/);
+  const g = await prefixFixture(); await expect(g.service.prepare({ ...prefixRequest, targetProviderId: 'other' })).rejects.toThrow(); expect(g.forks()).toBe(0);
+});
+test('native prefix restore rejects legacy version, missing or conflated handle evidence', async () => {
+  const f = await prefixFixture(); await f.service.prepare(prefixRequest);
+  const path = join(f.directory, 'roles', 'state.json'), original = await readFile(path, 'utf8');
+  for (const change of [(disk: any) => { disk.version = 7; }, (disk: any) => { delete disk.roles[0].localPreparations[0].nativePrefix; },
+    (disk: any) => { disk.roles[0].localPreparations[0].nativeCreation = { version: 1, binding: 'x', outcome: creation }; }]) {
+    const disk = JSON.parse(original); change(disk); await writeFile(path, JSON.stringify(disk));
+    await expect(new SessionSuccessionService(f.directory, 'host', f.ports).ready).rejects.toThrow();
+  }
+});
+test('native prefix handle envelope is bounded and cannot authorize a different candidate', async () => {
+  const f = await prefixFixture(); await f.service.store.begin(prefixRequest, true); await f.service.store.savePreparation('handoff', capture); await f.service.store.startCreation('handoff');
+  for (const handle of [{ ...creation.handle, sessionId: 'C' }, { ...creation.handle, opaque: 'x'.repeat(16384) }]) {
+    await expect(f.service.store.saveNativePrefixCandidate('handoff', { target: ref('B'), handle })).rejects.toThrow();
+  }
+  expect(f.service.store.operation('handoff').to).toBeUndefined();
+  expect(Number(f.service.store.progress('handoff')!.reservedBytes)).toBeGreaterThan(16384);
+});
+
+test('native prefix oversized native result stays unknown without reconstructing or repeating the fork', async () => {
+  const f = await prefixFixture(); let forks = 0;
+  f.ports.createNativePrefix = async () => { forks++; return { target: ref('B'), handle: { ...creation.handle, opaque: 'x'.repeat(16384) } }; };
+  expect((await f.service.prepare(prefixRequest)).phase).toBe('unknown');
+  expect(f.service.store.progress('handoff')).toMatchObject({ stage: 'create-started', nativePrefix: { version: 1 } });
+  expect(f.service.store.nativePrefixHandle('handoff')).toBeUndefined();
+  const restored = new SessionSuccessionService(f.directory, 'host', f.ports); await restored.ready;
+  expect((await restored.prepare(prefixRequest)).phase).toBe('unknown');
+  await expect(restored.coordinator.reconcileReady('handoff')).rejects.toThrow(/unknown/);
+  expect(forks).toBe(1); expect((await restored.coordinator.cancel('handoff')).phase).toBe('cancelled');
+  expect(() => restored.coordinator.assertAdmission(ref('A'))).not.toThrow();
+});
+test('native prefix mode-specific description exposes prompt readiness without generic support or side effects', async () => {
+  const f = await prefixFixture(), role = f.service.store.read('role').role;
+  expect(await f.service.describe(role, ref('A'), [{ providerId: 'fixture', displayName: 'Fixture' }, { providerId: 'other', displayName: 'Other' }], prefixRequest.preparation)).toMatchObject({ targets: [{ providerId: 'fixture' }], eligibility: { status: 'ready' } });
+  expect(f.forks()).toBe(0); expect(f.service.store.read('role').operations).toEqual([]);
+});
+test.each(['wrong branch', 'wrong workspace', 'additional candidate input'])('native prefix readback failure for %s retains candidate and source', async reason => {
+  const f = await prefixFixture(); f.ports.verifyNativePrefix = async () => { throw new Error(reason); };
+  expect(await f.service.prepare(prefixRequest)).toMatchObject({ phase: 'rejected', failureCode: 'succession_prefix_verification_failed' });
+  expect(f.service.store.nativePrefixHandle('handoff')).toEqual(creation.handle); expect(f.forks()).toBe(1);
+  expect(f.service.store.read('role').role.current).toEqual(ref('A'));
+});
+test('native prefix rejects v2 enrollment before any native fork', async () => {
+  const f = await prefixFixture();
+  await expect(f.service.coordinator.prepareEnrolled({ version: 2, maxProjectionBytes: 100000, token: 'freeze', authority: { version: 1, origin: 'https://relay.example', issuer: 'issuer', namespace: 'namespace', ownerSubject: 'owner' }, controllerId: 'host', request: prefixRequest, associationRevision: 0, lineage: [ref('A')], relations: [] }, [], f.service.store.generation)).rejects.toThrow(/v3/);
+  expect(f.forks()).toBe(0); expect(f.service.store.read('role').operations).toEqual([]);
 });

@@ -1930,7 +1930,8 @@ export function createHostBroker(options: HostBrokerOptions) {
       if (!validSourceRelation(rawInput) || typeof rawInput.hostId !== 'string' || typeof rawInput.providerId !== 'string' || typeof rawInput.nativeSessionId !== 'string') {
         throw new SharingError(400, 'invalid_relation', 'A complete session relation is required.');
       }
-      const input = canonicalRelationInput(subject, rawInput as typeof rawInput & { hostId: string; providerId: string; nativeSessionId: string }, true);
+      const requested = { ...rawInput } as typeof rawInput & { hostId: string; providerId: string; nativeSessionId: string };
+      const input = canonicalRelationInput(subject, requested, true);
       const binding = nativeBindings.get(JSON.stringify([input.hostId, input.providerId, input.nativeSessionId]));
       const source = nativeBindings.get(JSON.stringify([input.hostId, input.providerId, input.sourceNativeSessionId]));
       const allowed = () => binding && source && binding !== source && sessionAllowed(binding, subject) && sessionAllowed(source, subject);
@@ -1943,6 +1944,8 @@ export function createHostBroker(options: HostBrokerOptions) {
       if (!proven) throw new SharingError(403, 'unverified_relation', 'The source relationship could not be verified.');
       const relation: SourceRelation = { id: input.id, kind: input.kind, sourceNativeSessionId: input.sourceNativeSessionId, createdAt: input.createdAt };
       await commit(draft => {
+        const current = canonicalRelationInput(subject, requested, true);
+        if (nativeBindings.get(JSON.stringify([current.hostId, current.providerId, current.nativeSessionId])) !== binding) throw new SharingError(409, 'relation_conflict', 'The source reader binding changed.');
         if (!allowed() || bindings.get(binding!.agentId) !== binding) throw new SharingError(403, 'session_forbidden', 'Session access is unavailable.');
         assertAssociationMutable(associationSource(hosts.get(input.hostId as string)!, input.providerId as string, input.sourceNativeSessionId as string));
         if (options.successionEnrollment || draft.associations) { draft.associations = structuredClone(associations); draft.associations.revision++; }
@@ -1957,7 +1960,9 @@ export function createHostBroker(options: HostBrokerOptions) {
     },
     async updateSessionRelation(subject: string, rawInput: unknown): Promise<void | { operation: BrokerRelationChange }> {
       if (!validSessionRelationUpdate(rawInput)) throw new SharingError(400, 'invalid_relation', 'A complete session relation and current revision are required.');
-      const input = canonicalRelationInput(subject, rawInput);
+      const requested = { ...rawInput };
+      const input = canonicalRelationInput(subject, requested);
+      const expectedBinding = nativeBindings.get(JSON.stringify([input.hostId, input.providerId, input.nativeSessionId]));
       const host = hosts.get(input.hostId);
       if (host) {
         const nativeRelation = nativeBindings.get(JSON.stringify([host.id,input.providerId,input.nativeSessionId]))?.sourceRelation;
@@ -1970,6 +1975,8 @@ export function createHostBroker(options: HostBrokerOptions) {
       await commit(draft => {
         if (!host) throw new SharingError(404, 'host_not_found', 'Host is unavailable.');
         assertHostCurrent(host);
+        const current = canonicalRelationInput(subject, requested);
+        if (nativeBindings.get(JSON.stringify([current.hostId, current.providerId, current.nativeSessionId])) !== expectedBinding) throw new SharingError(409, 'relation_conflict', 'The source reader binding changed.');
         assertAssociationMutable(associationSource(host, input.providerId, input.sourceNativeSessionId));
         const binding = nativeBindings.get(JSON.stringify([input.hostId, input.providerId, input.nativeSessionId]));
         const source = nativeBindings.get(JSON.stringify([input.hostId, input.providerId, input.sourceNativeSessionId]));

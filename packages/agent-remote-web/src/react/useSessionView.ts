@@ -63,11 +63,18 @@ export function useSessionView({ agentId, transport, source, cachedReplica, pend
     };
   }, [agentId, connections, cachedReplica]);
   const active = client.current;
+  const authority = access.current, lease = acquired.current;
+  const viewCurrent = () => !!active && !!lease && client.current === active && acquired.current === lease
+    && access.current === authority && authority.enabled && !authority.pending
+    && selection.current.agentId === agentId && selection.current.connections === connections && selection.current.cachedReplica === cachedReplica;
+  function assertSendAuthority(): void {
+    if (!viewCurrent()) throw new Error('The original session view is no longer current.');
+  }
   const messageActions: SessionViewActions = {
     deleteMessage: id => active?.deleteMessage(id),
     ...(active && !pending ? {
-      sendMessage: async (text, options) => { await active.sendMessage(text, options); },
-      sendMessageContent: async (content, options) => { await active.sendMessageContent(content, options); },
+      sendMessage: async (text, options) => { assertSendAuthority(); await active.sendMessage(text, options); },
+      sendMessageContent: async (content, options) => { assertSendAuthority(); await active.sendMessageContent(content, options); },
     } satisfies SessionViewActions : {}),
   };
   const actions: SessionViewActions = active && enabled && status === 'ready' && !pending ? {
@@ -86,12 +93,11 @@ export function useSessionView({ agentId, transport, source, cachedReplica, pend
     resolveResource: (locator, sourceLocator) => active.resolveResource(locator, sourceLocator),
   } : messageActions;
   const sendQueuedInput = active && enabled && sessionState.operations.send_message.allowed && !pending
-    ? (text: string, operationId: string) => active.sendMessage(text, { operationId }) : undefined;
+    ? async (text: string, operationId: string) => { assertSendAuthority(); return active.sendMessage(text, { operationId }); } : undefined;
   const imageRecipient = recipient.current?.isCurrent() ? recipient.current : undefined;
-  const authority = access.current, lease = acquired.current;
   const operationScope: SessionViewOperationScope | undefined = enabled && !pending && status === 'ready' && active && lease && imageRecipient
     ? { agentId, client: active, replica: lease.replica, transport, recipient: imageRecipient,
-      isCurrent: () => access.current === authority && authority.enabled && !authority.pending && acquired.current === lease && imageRecipient.isCurrent() }
+      isCurrent: () => viewCurrent() && imageRecipient.isCurrent() }
     : undefined;
   return { state, sessionState, handoff: sessionState.handoff, status, questions, setQuestions, actions, sendQueuedInput, imageRecipient, operationScope };
 }

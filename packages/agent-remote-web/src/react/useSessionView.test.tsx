@@ -161,3 +161,40 @@ it('binds view operations to its acquired client and retires captured authority 
   expect(restored.isCurrent()).toBe(false);
   await unmount(container);
 });
+
+it.each(['send', 'queue', 'content', 'queued input'].flatMap(delivery => ['pending', 'pending then current', 'lease replacement'].map(boundary => ({ delivery, boundary }))))(
+  'rejects the captured $delivery callback after $boundary retires its view authority', async ({ delivery, boundary }) => {
+    const acknowledgement = { type: 'command_acknowledged', payload: { agentId: 'A', requestId: 'current-request', command: 'send_message' } };
+    const replica = new AgentReplica(), send = vi.fn(async () => acknowledgement), content = vi.fn(async () => {});
+    const initial = remoteSessionState(replica.getState(), 'ready');
+    const client = { sendMessage: send, sendMessageContent: content, subscribeSessionState(listener: (state: RemoteSessionState) => void) {
+      listener({ ...initial, operations: { ...initial.operations, send_message: { allowed: true }, queue_message: { allowed: true } } }); return () => {};
+    } } as unknown as RemoteSessionClient;
+    const first: SessionConnectionSource = { acquire: () => ({ client, replica, release() {} }) };
+    const second: SessionConnectionSource = { acquire: () => ({ client, replica, release() {} }) };
+    const transport = {} as RemoteAgentTransport;
+    let view!: ReturnType<typeof useSessionView>;
+    function View({ pending = false, source = first }: { pending?: boolean; source?: SessionConnectionSource }) {
+      view = useSessionView({ agentId: 'A', transport, source, pending }); return null;
+    }
+    const container = await render(<View />);
+    const original = view.operationScope!;
+    const message = view.actions.sendMessage!, rich = view.actions.sendMessageContent!, queued = view.sendQueuedInput!;
+    const dispatch = () => delivery === 'content' ? rich([{ type: 'text', text: 'Held A input' }])
+      : delivery === 'queued input' ? queued('Held A input', 'retained-operation')
+      : message('Held A input', delivery === 'queue' ? { delivery: 'next_turn' } : undefined);
+    if (boundary === 'lease replacement') await rerender(container, <View source={second} />);
+    else await rerender(container, <View pending />);
+    if (boundary === 'pending then current') await rerender(container, <View />);
+    expect(original.isCurrent()).toBe(false);
+    await expect(dispatch()).rejects.toThrow('The original session view is no longer current.');
+    expect(send).not.toHaveBeenCalled(); expect(content).not.toHaveBeenCalled();
+    await rerender(container, <View source={boundary === 'lease replacement' ? second : first} />);
+    await view.actions.sendMessage!('Current A input');
+    expect(send).toHaveBeenCalledExactlyOnceWith('Current A input', undefined);
+    if (delivery === 'queued input') {
+      expect(await view.sendQueuedInput!('Current queued input', 'current-operation')).toBe(acknowledgement);
+      expect(send).toHaveBeenLastCalledWith('Current queued input', { operationId: 'current-operation' });
+    }
+  }, 10000,
+);

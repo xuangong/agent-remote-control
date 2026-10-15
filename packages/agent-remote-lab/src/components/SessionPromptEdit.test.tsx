@@ -5,6 +5,7 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { AgentReplica, type RemoteAgentTransport, type RemoteTransportListener } from '@orchardworks/agent-remote-web';
 import type { AgentSnapshot, ClientMessage, HistoryPage } from '@orchardworks/agent-remote-protocol';
 import { inspectImageDraft, readImageDraft, type ImageDraftRecipient } from '@orchardworks/agent-remote-web/browser';
+import * as imageDraftStorage from '../../../agent-remote-web/dist/image-drafts.js';
 import { ConversationConnections, ConversationConnectionScope } from '../conversation-connections.js';
 import { DraftStore } from '../draft-store.js';
 import { readDrafts } from '../conversation-recovery.js';
@@ -47,14 +48,15 @@ beforeEach(() => {
 });
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 
-function fixture(images = false, unavailableImage = false) {
+function fixture(images = false, unavailableImage = false, queue = false) {
   const listeners = new Map<string, RemoteTransportListener>();
   const resourceRequests: string[] = [];
   const sent: Extract<ClientMessage, { type: 'send_message' }>[] = [];
   const snapshot = (id: string): AgentSnapshot => ({ protocolVersion: '1.8.0', type: 'agent_snapshot', payload: {
-    ...replicaState.agent!, id, capabilities: { ...replicaState.agent!.capabilities,
+    ...replicaState.agent!, id, ...(queue ? { status: 'running' as const, activeTurn: { turnId: 'running-turn', startedAt: 'now' } } : {}), capabilities: { ...replicaState.agent!.capabilities,
+      ...(queue ? { queueMessage: true } : {}),
       ...(images ? { imageInput: { mediaTypes: ['image/png'], maxImages: 8, maxImageBytes: 10485760, maxMessageBytes: 20971520 } } : {}) },
-    runtimeInfo: { ...replicaState.agent!.runtimeInfo, sessionId: id },
+    runtimeInfo: { ...replicaState.agent!.runtimeInfo, sessionId: id, ...(queue ? { status: 'running' as const } : {}) },
   } });
   const page = (id: string): HistoryPage => ({ protocolVersion: '1.8.0', type: 'timeline_page', payload: {
     agentId: id, requestId: 'history', direction: 'tail', epoch: `epoch-${id}`, reset: false, staleCursor: false, gap: false,
@@ -105,8 +107,8 @@ function fixture(images = false, unavailableImage = false) {
 
 const promptEditor = (view: ParentNode) => view.querySelector<HTMLElement>('[data-testid="prompt-input"]')!;
 type Placement = 'debugger' | 'main' | 'side' | 'window' | 'team-leader' | 'team-member' | 'compact-leader' | 'compact-member' | 'child' | 'ask' | 'tpm';
-async function setupEdit(kind: Placement, options: { outcome?: 'ready' | 'unknown' | 'rejected' | 'cancelled'; holdCommit?: boolean; holdPrepare?: boolean; windowChild?: boolean; commitBoundaryChanged?: boolean; explicitRecipient?: boolean; unavailable?: boolean; historical?: boolean; images?: boolean; unavailableImage?: boolean } = {}) {
-  const f = fixture(options.images, options.unavailableImage);
+async function setupEdit(kind: Placement, options: { outcome?: 'ready' | 'unknown' | 'rejected' | 'cancelled'; holdCommit?: boolean; holdPrepare?: boolean; windowChild?: boolean; commitBoundaryChanged?: boolean; explicitRecipient?: boolean; unavailable?: boolean; historical?: boolean; images?: boolean; unavailableImage?: boolean; queue?: boolean } = {}) {
+  const f = fixture(options.images, options.unavailableImage, options.queue);
   let recipientCurrent = true;
   const explicitRecipient: ImageDraftRecipient = { identity: 'explicit-A', lifetime: {}, isCurrent: () => recipientCurrent };
   const scope = `http://fixture/${crypto.randomUUID()}/`;
@@ -116,7 +118,7 @@ async function setupEdit(kind: Placement, options: { outcome?: 'ready' | 'unknow
   const session: OpenedSession & { hostId: string } = { hostId: 'local', agentId: 'A', providerId: 'recorded', nativeSessionId: 'A', title: 'Supporting A' };
   if (options.windowChild) conversationSessionStorage.setItem(`agent-remote:recovery:${scope}:session-family:window:${sessionKey(session)}`,
     JSON.stringify({ children: [{ ...session, nativeSessionId: 'A-child', title: 'A child', parentNativeSessionId: 'A' }], focus: 0 }));
-  let replaceTarget!: () => void, changeOwner!: () => void;
+  let replaceTarget!: () => void, returnTarget!: () => void, changeOwner!: () => void;
   let failReplacement!: () => void;
   const replacementGate = new Promise<void>((_, reject) => { failReplacement = () => reject(new Error('D attachment failed.')); });
   const connections = new ConversationConnections(f.transport);
@@ -162,6 +164,7 @@ async function setupEdit(kind: Placement, options: { outcome?: 'ready' | 'unknow
   function Harness() {
     const [current, update] = useState(native); setCurrent = update;
     const [windowTarget, setWindowTarget] = useState(session); replaceTarget = () => setWindowTarget({ ...session, nativeSessionId: 'D', agentId: 'D', title: 'Unrelated D' });
+    returnTarget = () => setWindowTarget(session);
     const [enabled, updateEnabled] = useState(true); setEnabled = updateEnabled;
     const trigger = useRef<HTMLButtonElement>(null);
     const family = { storageScope: scope, baseUrl: scope, target: kind === 'child' ? { ...session, parentNativeSessionId: 'parent' } : session,
@@ -185,7 +188,7 @@ async function setupEdit(kind: Placement, options: { outcome?: 'ready' | 'unknow
   }
   const view = await render(<Harness />); lease.release(); unrelated.release();
   await act(async () => { await new Promise(resolve => setTimeout(resolve, 0)); });
-  return { ...f, view, requests, drafts, draftBinding, imageDraftBinding, connections, replaceTarget, changeOwner: () => changeOwner(), failReplacement, retireRecipient() { recipientCurrent = false; }, setCurrent: (value: string) => setCurrent(value), setEnabled, releaseCommit, releasePrepare, setOutcome(value: typeof outcome) { outcome = value; }, async reload() { await unmount(view); return render(<Harness />); } };
+  return { ...f, view, requests, drafts, draftBinding, imageDraftBinding, connections, replaceTarget, returnTarget: () => returnTarget(), changeOwner: () => changeOwner(), failReplacement, retireRecipient() { recipientCurrent = false; }, setCurrent: (value: string) => setCurrent(value), setEnabled, releaseCommit, releasePrepare, setOutcome(value: typeof outcome) { outcome = value; }, async reload() { await unmount(view); return render(<Harness />); } };
 }
 
 it.each(['main', 'side', 'window', 'team-leader', 'team-member', 'compact-leader', 'compact-member', 'ask', 'tpm'] as const)('edits the clicked %s prefix through its own client, follows B and restores without input', async kind => {
@@ -512,3 +515,56 @@ it('retires an explicitly replaced ordinary window while D attachment is held an
   await act(async () => submit().click());
   expect(f.sent).toHaveLength(0);
 });
+
+it.each(['send', 'queue'].flatMap(delivery => ['pending D', 'failed D', 'return to A'].map(replacement => ({ delivery, replacement }))))(
+  'retires a held $delivery from the actual window through $replacement', async ({ delivery, replacement }) => {
+    const f = await setupEdit('window', { queue: delivery === 'queue' });
+    await vi.waitFor(() => expect(observed.bindings.get('A')?.scope?.isCurrent()).toBe(true));
+    const writer = await inspectImageDraft(f.imageDraftBinding);
+    await act(async () => { await writer.flush(writer.snapshot().revision, () => true); });
+    const original = observed.bindings.get('A')!.scope!;
+    const persist = imageDraftStorage.writeImageDraft;
+    let release!: () => Promise<unknown>, held = 0;
+    const write = vi.spyOn(imageDraftStorage, 'writeImageDraft').mockImplementation((draft, generation) => {
+      if (draft.key !== f.imageDraftBinding.key || held > 0) return persist(draft, generation);
+      held++;
+      return new Promise((resolve, reject) => { release = () => persist(draft, generation).then(resolve, reject); });
+    });
+    try {
+      await act(async () => {
+        const paste = new Event('paste', { bubbles: true, cancelable: true });
+        Object.defineProperty(paste, 'clipboardData', { value: { files: [], getData: (type: string) => type === 'text/plain' ? 'Held A draft' : '' } });
+        promptEditor(f.view).dispatchEvent(paste);
+      });
+      if (delivery === 'queue') {
+        expect(original.replica.getState().agent?.status).toBe('running');
+        await act(async () => f.view.querySelector<HTMLButtonElement>('[aria-label="More actions"]')?.click());
+      }
+      const submit = f.view.querySelector<HTMLButtonElement>(delivery === 'queue' ? '[data-testid="queue-submit"]' : '[data-testid="prompt-submit"]')!;
+      expect(submit.disabled).toBe(false);
+      await act(async () => { submit.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })); submit.click(); });
+      expect(held).toBe(1); expect(f.sent).toHaveLength(0);
+      await act(async () => f.replaceTarget());
+      await vi.waitFor(() => expect(f.requests.some(item => item.path.endsWith('/attach') && item.body.nativeSessionId === 'D')).toBe(true));
+      expect(original.isCurrent()).toBe(false);
+      expect(f.view.querySelector<HTMLButtonElement>('[data-testid="prompt-submit"]')!.disabled).toBe(true);
+      if (replacement === 'failed D') {
+        await act(async () => f.failReplacement());
+        await vi.waitFor(() => expect(f.view.textContent).toContain('D attachment failed'));
+      }
+      if (replacement === 'return to A') {
+        await act(async () => f.returnTarget());
+        await vi.waitFor(() => expect(observed.bindings.get('A')?.scope?.isCurrent()).toBe(true));
+      }
+      expect(original.isCurrent()).toBe(false);
+      await act(async () => { await release(); });
+      expect(f.sent).toHaveLength(0);
+      expect(f.view.querySelector('[aria-label="Live provider controls"]')?.getAttribute('aria-busy')).toBe('false');
+      expect(f.drafts.get('selected-owner')).toBe('Held A draft');
+      expect((await readImageDraft(f.imageDraftBinding.key))?.parts).toEqual([{ type: 'text', text: 'Held A draft' }]);
+    } finally {
+      if (f.sent.length) await act(async () => f.acknowledge());
+      write.mockRestore(); await act(async () => f.connections.clear());
+    }
+  }, 10000,
+);

@@ -102,6 +102,7 @@
         "packages/agent-remote-protocol/package.json",
         "packages/agent-remote-protocol/scripts",
         "packages/agent-remote-protocol/src",
+        "packages/agent-remote-protocol/test",
         "packages/agent-remote-protocol/tsconfig.json",
         "packages/agent-remote-relay/package.json",
         "packages/agent-remote-relay/src",
@@ -122,7 +123,7 @@
         "packages/codex-daemon-client/src",
         "packages/codex-daemon-client/tsconfig.json"
       ],
-      "digest": "sha256:c79d93de3f1347dd9170abf7b8ef5dd12dd898c2d32d298e1f4ec2dd34419f8d"
+      "digest": "sha256:daad92e6e7e8a8beb4027b8cabf16d10613bd79563aaa7b6649f5f64680ce970"
     }
   },
   "providers": [

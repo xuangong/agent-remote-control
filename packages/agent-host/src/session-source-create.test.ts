@@ -316,7 +316,7 @@ test.each([
 test('private role-file capacity refusal is authoritative before directory create and leaves no witness admission', async () => {
   const f = await fixture(true);
   await f.host.control({ method: 'GET', path: '/remote/providers' });
-  const saved: any = { version: 7, roles: [], associationAdmissions: [], associationResults: [] };
+  const saved: any = { version: 8, roles: [], associationAdmissions: [], associationResults: [] };
   const desired = SUCCESSION_STORE_BYTES - 1000;
   while (jsonBytes(saved) < desired - 17000) {
     const n = saved.associationResults.length;

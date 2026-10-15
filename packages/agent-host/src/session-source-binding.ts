@@ -2,6 +2,7 @@ import { createHmac, timingSafeEqual } from 'node:crypto';
 import type { AgentHistoryPage, AgentHistoryQuery } from '@orchardworks/agent-provider-sdk';
 import { nativeSessionRefKey, type NativeSessionRef, type SourceBinding } from '@orchardworks/agent-remote-protocol';
 import type { SessionSuccessionContextStore, SuccessionContextRecord } from './session-succession-context.js';
+import type { SessionExecutionRouting } from './session-succession-service.js';
 import type { SessionSuccessionStore } from './session-succession-store.js';
 import type { SourceHistoryPage, SourceHistoryQuery } from './session-reference.js';
 
@@ -35,6 +36,7 @@ export interface SourceBindingOptions {
   /** Required for stored attachment reads, which cannot rely on a native read callback. */
   authorizeRead?: (reader: NativeSessionRef, source: NativeSessionRef) => Promise<void>;
   contexts?: SessionSuccessionContextStore;
+  executionRouting?: SessionExecutionRouting;
 }
 
 /** Role lookups are cached by committed store generation; pagination pins an authenticated source. */
@@ -77,14 +79,16 @@ export class SessionSourceBindings {
   }
 
   read(reader: string | NativeSessionRef, originalSource: string | NativeSessionRef, input: SourceHistoryQuery,
-    read: (nativeSessionId: string, query: AgentHistoryQuery) => Promise<AgentHistoryPage>): Promise<SourceHistoryPage> {
-    return this.readSource(reader, originalSource, input, read);
+    read: (nativeSessionId: string, query: AgentHistoryQuery) => Promise<AgentHistoryPage>, canonicalReader: string | NativeSessionRef = reader): Promise<SourceHistoryPage> {
+    return this.readSource(reader, originalSource, input, read, undefined, canonicalReader);
   }
 
   /** Trusted Host consumers already hold a durable role binding; public source tools use enrolled readers. */
   readRole(binding: SourceBinding, input: SourceHistoryQuery): Promise<SourceHistoryPage> {
     const unavailable = async (): Promise<AgentHistoryPage> => { throw new Error('Role history requires a routed native reader.'); };
-    if (binding.kind === 'fixed') return this.readSource(binding.source, binding.source, input, unavailable);
+    if (binding.kind === 'fixed') return this.readSource(binding.source, binding.source, input, unavailable, {
+      source: this.ref(binding.source), lineage: new Set([nativeSessionRefKey(binding.source)]),
+    });
     const state = this.store.read(binding.roleId);
     if (!sameRef(binding.origin, state.role.origin)) throw new Error('Primary role origin changed.');
     const lineage = new Set([nativeSessionRefKey(state.role.origin), ...state.operations.filter(operation => operation.phase === 'committed').map(operation => nativeSessionRefKey(operation.to!))]);
@@ -94,12 +98,15 @@ export class SessionSourceBindings {
   }
 
   private async readSource(reader: string | NativeSessionRef, originalSource: string | NativeSessionRef, input: SourceHistoryQuery,
-    read: (nativeSessionId: string, query: AgentHistoryQuery) => Promise<AgentHistoryPage>, role?: RoleSource): Promise<SourceHistoryPage> {
+    read: (nativeSessionId: string, query: AgentHistoryQuery) => Promise<AgentHistoryPage>, role?: RoleSource, canonicalReader: string | NativeSessionRef = reader): Promise<SourceHistoryPage> {
+    const canonicalRef = this.ref(canonicalReader);
+    const assertReader = () => { if (!role) this.options.executionRouting?.assertCurrent(canonicalRef, this.ref(reader)); };
+    assertReader();
     const readerRef = this.ref(reader), originalRef = this.ref(originalSource);
     if (!role) this.assertReaderOpen(readerRef);
-    const readerKey = typeof reader === 'string' ? reader : nativeSessionRefKey(readerRef);
+    const readerKey = typeof canonicalReader === 'string' ? canonicalReader : nativeSessionRefKey(canonicalRef);
     const originalKey = typeof originalSource === 'string' ? originalSource : nativeSessionRefKey(originalRef);
-    const resolved = role ?? this.resolveSource(readerRef, originalRef);
+    const resolved = role ?? this.resolveSource(canonicalRef, originalRef);
     const context = input.sourceContext ? this.decode(input.sourceContext, readerKey, originalKey, 'context') : undefined;
     const page = input.cursor ? this.decode(input.cursor, readerKey, originalKey, 'page') : undefined;
     if (context && page && (nativeSessionRefKey(context.source) !== nativeSessionRefKey(page.source) || context.roleRevision !== page.roleRevision || context.representation !== page.representation || context.attachmentId !== page.attachmentId)) throw new Error('Source context and page cursor disagree.');
@@ -119,7 +126,8 @@ export class SessionSourceBindings {
     }
     if (input.textOffset !== undefined) query.textOffset = input.textOffset;
     await this.options.authorizeRead?.(readerRef, selected.source);
-    this.checkSelected(readerRef, originalRef, selected, role);
+    assertReader();
+    this.checkSelected(canonicalRef, originalRef, selected, role);
     const candidate = this.options.contexts?.forTarget(selected.source);
     const attachment = pinned?.representation === 'attachment'
       ? this.options.contexts?.read(pinned.attachmentId!)
@@ -139,9 +147,11 @@ export class SessionSourceBindings {
       if (selected.source.providerId !== this.providerId) throw new Error('Cross-provider source reads require a routed reader.');
       result = await read(selected.source.nativeSessionId, query);
     }
-    this.checkSelected(readerRef, originalRef, selected, role);
+    assertReader();
+    this.checkSelected(canonicalRef, originalRef, selected, role);
     await this.options.authorizeRead?.(readerRef, selected.source);
-    this.checkSelected(readerRef, originalRef, selected, role);
+    assertReader();
+    this.checkSelected(canonicalRef, originalRef, selected, role);
     const base: SourceCursor = { version: 1, reader: readerKey, originalSource: originalKey, kind: 'context', source: selected.source,
       representation: attachment ? 'attachment' : 'native', ...(attachment ? { attachmentId: attachment.operationId } : {}),
       ...(attachment ? { roleId: attachment.roleId, roleRevision: attachment.roleRevision } : selected.roleId ? { roleId: selected.roleId, roleRevision: selected.roleRevision } : {}) };

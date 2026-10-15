@@ -20,16 +20,20 @@ export function createCodexSessionDirectory(
   let closed = false;
   let sourceAccessCheck: ((nativeSessionId: string) => Promise<void>) | undefined;
   let sourceBindingReader: SourceBindingReader | undefined;
+  let sourceReferenceAncestors: ((id: string, preparationHandle?: AgentPersistenceHandle) => Promise<readonly string[]>) | undefined;
+  async function lookupSourceGrant(id: string, preparationHandle?: AgentPersistenceHandle) {
+    return references?.resolve(sourceReferenceAncestors ? await sourceReferenceAncestors(id, preparationHandle) : [id]);
+  }
   async function readSource(id: string, query: AgentHistoryQuery) {
     if (closed) throw new Error('Codex directory is closed.');
     await sourceAccessCheck?.(id);
     return provider.readSessionHistory!(id, query);
   }
-  function sourceExtensions(source: string, reader: () => string | undefined) {
+  function sourceExtensions(source: string, reader: () => string | undefined, canonicalReader?: string) {
     return sourceSessionExtensions(source, readSource, async query => {
       const id = reader(); if (!id) throw new Error('Source reader identity is not ready.');
       if (sourceBindingReader) {
-        return sourceBindingReader(id, source, query, readSource);
+        return sourceBindingReader(id, source, query, readSource, canonicalReader);
       }
       if (query.sourceContext) throw new Error('Source context is unavailable on this Host.');
       return { ...await readSource(source, query), sourceSessionId: source };
@@ -84,19 +88,24 @@ export function createCodexSessionDirectory(
       if (closed || !provider.forkForPromptEdit || !provider.verifyPromptEditBranch || !provider.validatePromptEdit
         || !Number.isInteger(limit) || !limit || limit > 512 || limit < 1) return false;
       await sourceAccessCheck?.(target.nativeSessionId);
-      if (await references?.get(target.nativeSessionId)) return false;
+      if (await lookupSourceGrant(target.nativeSessionId) && (!sourceReferenceAncestors || !sourceBindingReader)) return false;
       await provider.validatePromptEdit(target); return true;
     },
     async createNativePrefix(target, extensions, evidence) {
       if (closed || !provider.forkForPromptEdit || !provider.verifyPromptEditBranch) throw new Error('Native prefix preparation is unavailable.');
       await sourceAccessCheck?.(target.nativeSessionId);
-      if (await references?.get(target.nativeSessionId)) throw new Error('Editing previous prompts is unavailable in side or Ask conversations.');
-      const session = await provider.forkForPromptEdit(target, extensions);
+      const grant = await lookupSourceGrant(target.nativeSessionId);
+      if (grant && (!sourceReferenceAncestors || !sourceBindingReader)) throw new Error('Source prefix routing is unavailable on this Host.');
+      let readerId: string | undefined;
+      const source = grant ? sourceExtensions(grant.sourceNativeSessionId, () => readerId, grant.handle.sessionId) : undefined;
+      const boundExtensions = source ? { ...extensions, systemPrompt: [grant!.systemPrompt, extensions.systemPrompt].filter(Boolean).join('\n\n'), tools: [...(source.tools ?? []), ...(extensions.tools ?? [])] } : extensions;
+      const session = await provider.forkForPromptEdit(target, boundExtensions);
       evidence?.completed();
-      const id = await remember(session, sessionExtensionIdentity(extensions)), entry = opened.get(id)!;
+      const id = await remember(session, sessionExtensionIdentity(boundExtensions)), entry = opened.get(id)!;
       const handle = nativePrefixResumeHandle('codex', id, entry.handle);
+      readerId = id;
       entry.nativePrefix = JSON.stringify(handle);
-      if (extensions.tools?.length) controllerTools.add(id);
+      if (boundExtensions.tools?.length) controllerTools.add(id);
       return handle;
     },
     async verifyNativePrefix(target, handle) {
@@ -106,7 +115,7 @@ export function createCodexSessionDirectory(
     },
     async validatePromptEdit(target) {
       await sourceAccessCheck?.(target.nativeSessionId);
-      if (await references?.get(target.nativeSessionId)) throw new Error('Editing previous prompts is unavailable in side or Ask conversations.');
+      if (await lookupSourceGrant(target.nativeSessionId)) throw new Error('Editing previous prompts is unavailable in side or Ask conversations.');
       await provider.validatePromptEdit?.(target);
     },
     reconcileIdleSession: id => provider.reconcileIdleSession?.(id) ?? Promise.resolve(false),
@@ -121,11 +130,12 @@ export function createCodexSessionDirectory(
     ...(provider.readSessionWorkspace ? { sessionWorkspace: provider.readSessionWorkspace.bind(provider) } : {}),
     setSourceAccessCheck(check) { sourceAccessCheck = check; },
     setSourceBindingReader(reader) { sourceBindingReader = reader; },
+    setSourceReferenceAncestors(resolve) { sourceReferenceAncestors = resolve; },
     sourceReferences: () => references?.list() ?? Promise.resolve([]),
     ...(provider.forkSession ? { async forkSession(nativeSessionId: string) {
       if (closed) throw new Error('Codex directory is closed.');
       await sourceAccessCheck?.(nativeSessionId);
-      if (await references?.get(nativeSessionId)) throw new Error('Primary handoff is unavailable in side or Ask conversations.');
+      if (await lookupSourceGrant(nativeSessionId)) throw new Error('Primary handoff is unavailable in side or Ask conversations.');
       return remember(await provider.forkSession!(nativeSessionId));
     } } : {}),
     list() { if (closed) throw new Error('Codex directory is closed.'); return discovery ??= discover().finally(() => { discovery = undefined; }); },
@@ -135,7 +145,7 @@ export function createCodexSessionDirectory(
       if (input.editNativeSessionId) {
         if (!provider.forkForPromptEdit || !input.editTurnId || !input.editMessageId) throw new Error('Native prompt editing is unavailable.');
         await sourceAccessCheck?.(input.editNativeSessionId);
-        if (await references?.get(input.editNativeSessionId)) throw new Error('Editing previous prompts is unavailable in side or Ask conversations.');
+        if (await lookupSourceGrant(input.editNativeSessionId)) throw new Error('Editing previous prompts is unavailable in side or Ask conversations.');
         const native = await provider.forkForPromptEdit({ nativeSessionId: input.editNativeSessionId, turnId: input.editTurnId, messageId: input.editMessageId });
         evidence?.completed();
         return remember(native);
@@ -174,11 +184,11 @@ export function createCodexSessionDirectory(
       if (reusable && prefixIdentity && existing.nativePrefix !== prefixIdentity) throw new Error('Existing attachment does not match the original native prefix handle.');
       if (reusable && creationIdentity && existing.nativeCreation !== creationIdentity) throw new Error('Existing attachment does not match the original native creation evidence.');
       if (reusable && options?.extensions === undefined) return existing.session;
-      const grant = await references?.get(nativeSessionId);
+      const grant = await lookupSourceGrant(nativeSessionId, prefixHandle);
       if (grant && !provider.readSessionHistory) throw new Error('Source history tools are unavailable on this Host.');
-      const extensions = grant ? sourceExtensions(grant.sourceNativeSessionId, () => nativeSessionId) : undefined;
+      const extensions = grant ? sourceExtensions(grant.sourceNativeSessionId, () => nativeSessionId, grant.handle.sessionId) : undefined;
       const resumedExtensions = extensions || options?.extensions ? { ...(extensions ? { tools: extensions.tools, systemPrompt: grant!.systemPrompt } : {}),
-        ...options?.extensions, tools: [...(extensions?.tools ?? []), ...(options?.extensions?.tools ?? [])] } : undefined;
+        ...options?.extensions, ...(prefixHandle && grant ? { systemPrompt: [grant.systemPrompt, options?.extensions?.systemPrompt].filter(Boolean).join('\n\n') } : {}), tools: [...(extensions?.tools ?? []), ...(options?.extensions?.tools ?? [])] } : undefined;
       if (reusable) {
         requireSessionExtensionIdentity(existing.extensionIdentity, resumedExtensions);
         return existing.session;

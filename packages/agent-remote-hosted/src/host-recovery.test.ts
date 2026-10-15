@@ -94,10 +94,10 @@ test('reads legacy reset and re-pair history, preserving both identities through
   let saved: HostedRelayState | undefined;
   const state = createRelayState(auth, { initial: legacy, async commit(value) { saved = validateRelayState(value, auth); } }, () => {}, () => {});
   await state.mutate(draft => { draft.tenants[0]!.broker.revokedHosts = [{ hostId: 'unrelated-host', installationId: 'unrelated-installation', revocationId: randomUUID() }]; });
-  expect(saved!.version).toBe(9);
+  expect(saved!.version).toBe(11);
   const restarted = createRelayState(auth, { initial: saved, async commit(value) { saved = validateRelayState(value, auth); } }, () => {}, () => {});
   await restarted.mutate(() => {});
-  expect(saved!.tenants[0]!.broker).toMatchObject({ hosts: broker.hosts, keys: broker.keys, associations: { ...broker.associations, version: 5 } });
+  expect(saved!.tenants[0]!.broker).toMatchObject({ hosts: broker.hosts, keys: broker.keys, associations: { ...broker.associations, version: 6 } });
   expect(retainedHostIdentities(saved!.tenants[0]!.broker).has('old-host')).toBe(false);
   const contradictory = structuredClone(saved!);
   contradictory.tenants[0]!.broker.revokedHosts!.push({ hostId: 'old-host', installationId: 'installation', revocationId: randomUUID() });

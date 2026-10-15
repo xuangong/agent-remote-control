@@ -19,16 +19,20 @@ export function createOpenCodeSessionDirectory(provider: OpenCodeDirectoryProvid
   let closing: Promise<void> | undefined;
   let sourceAccessCheck: ((nativeSessionId: string) => Promise<void>) | undefined;
   let sourceBindingReader: SourceBindingReader | undefined;
+  let sourceReferenceAncestors: ((id: string, preparationHandle?: AgentPersistenceHandle) => Promise<readonly string[]>) | undefined;
+  async function lookupSourceGrant(id: string, preparationHandle?: AgentPersistenceHandle) {
+    return references?.resolve(sourceReferenceAncestors ? await sourceReferenceAncestors(id, preparationHandle) : [id]);
+  }
   function assertOpen() { if (closed) throw new Error('OpenCode directory is closed.'); }
   async function readSource(id: string, query: AgentHistoryQuery) {
     assertOpen(); await sourceAccessCheck?.(id);
     return provider.readSessionHistory!(id, query);
   }
-  function sourceExtensions(source: string, reader: () => string | undefined) {
+  function sourceExtensions(source: string, reader: () => string | undefined, canonicalReader?: string) {
     return sourceSessionExtensions(source, readSource, async query => {
       const id = reader(); if (!id) throw new Error('Source reader identity is not ready.');
       if (sourceBindingReader) {
-        return sourceBindingReader(id, source, query, readSource);
+        return sourceBindingReader(id, source, query, readSource, canonicalReader);
       }
       if (query.sourceContext) throw new Error('Source context is unavailable on this Host.');
       return { ...await readSource(source, query), sourceSessionId: source };
@@ -59,26 +63,33 @@ export function createOpenCodeSessionDirectory(provider: OpenCodeDirectoryProvid
     supportsPromptEditing: !!provider.forkForPromptEdit,
     setSourceAccessCheck(check) { sourceAccessCheck = check; },
     setSourceBindingReader(reader) { sourceBindingReader = reader; },
+    setSourceReferenceAncestors(resolve) { sourceReferenceAncestors = resolve; },
     sourceReferences: () => references?.list() ?? Promise.resolve([]),
     async supportsNativePrefix(target) {
       const limit = provider.createdSessionIdMaxLength;
       if (closed || !provider.forkForPromptEdit || !provider.verifyPromptEditBranch || !provider.validatePromptEdit
         || !Number.isInteger(limit) || !limit || limit > 512 || limit < 1) return false;
       await sourceAccessCheck?.(target.nativeSessionId);
-      if (await references?.get(target.nativeSessionId)) return false;
+      if (await lookupSourceGrant(target.nativeSessionId) && (!sourceReferenceAncestors || !sourceBindingReader || !callbacksAvailable)) return false;
       await provider.validatePromptEdit(target); return true;
     },
     async createNativePrefix(target, extensions, evidence) {
       assertOpen();
       if (!provider.forkForPromptEdit || !provider.verifyPromptEditBranch) throw new Error('Native prefix preparation is unavailable.');
       await sourceAccessCheck?.(target.nativeSessionId);
-      if (await references?.get(target.nativeSessionId)) throw new Error('Editing previous prompts is unavailable in side or Ask conversations.');
-      const session = await provider.forkForPromptEdit(target, extensions);
+      const grant = await lookupSourceGrant(target.nativeSessionId);
+      if (grant && (!sourceReferenceAncestors || !sourceBindingReader || !callbacksAvailable)) throw new Error('Source prefix routing is unavailable on this Host.');
+      let readerId: string | undefined;
+      const source = grant ? sourceExtensions(grant.sourceNativeSessionId, () => readerId, grant.handle.sessionId) : undefined;
+      const boundExtensions = source ? { ...extensions, systemPrompt: [grant!.systemPrompt, extensions.systemPrompt].filter(Boolean).join('\n\n'), tools: [...(source.tools ?? []), ...(extensions.tools ?? [])] } : extensions;
+      const session = await provider.forkForPromptEdit(target, boundExtensions);
       evidence?.completed();
       const id = await remember(session), entry = opened.get(id)!;
       const handle = nativePrefixResumeHandle('opencode', id, entry.handle);
-      entry.nativePrefix = JSON.stringify(handle); entry.prefixExtensions = sessionExtensionIdentity(extensions);
-      if (extensions.tools?.length) controllerTools.add(id);
+      readerId = id;
+      entry.nativePrefix = JSON.stringify(handle);
+      entry.prefixExtensions = sessionExtensionIdentity(boundExtensions);
+      if (boundExtensions.tools?.length) controllerTools.add(id);
       return handle;
     },
     async verifyNativePrefix(target, handle) {
@@ -91,7 +102,7 @@ export function createOpenCodeSessionDirectory(provider: OpenCodeDirectoryProvid
       assertOpen();
       if (!provider.validatePromptEdit) throw new Error('OpenCode prompt editing is unavailable.');
       await sourceAccessCheck?.(target.nativeSessionId);
-      if (await references?.get(target.nativeSessionId)) throw new Error('Editing previous prompts is unavailable in side or Ask conversations.');
+      if (await lookupSourceGrant(target.nativeSessionId)) throw new Error('Editing previous prompts is unavailable in side or Ask conversations.');
       await provider.validatePromptEdit(target);
     },
     workspaces: () => [...workspaces],
@@ -126,7 +137,7 @@ export function createOpenCodeSessionDirectory(provider: OpenCodeDirectoryProvid
       if (input.editNativeSessionId) {
         if (!provider.forkForPromptEdit || !input.editTurnId || !input.editMessageId) throw new Error('OpenCode prompt editing requires a complete native prompt identity.');
         await sourceAccessCheck?.(input.editNativeSessionId);
-        if (await references?.get(input.editNativeSessionId)) throw new Error('Editing previous prompts is unavailable in side or Ask conversations.');
+        if (await lookupSourceGrant(input.editNativeSessionId)) throw new Error('Editing previous prompts is unavailable in side or Ask conversations.');
         const native = await provider.forkForPromptEdit({ nativeSessionId: input.editNativeSessionId, turnId: input.editTurnId, messageId: input.editMessageId });
         evidence?.completed();
         return remember(native);
@@ -165,15 +176,20 @@ export function createOpenCodeSessionDirectory(provider: OpenCodeDirectoryProvid
       const existing = opened.get(id);
       if (existing && (await existing.session.runtimeInfo()).status !== 'closed') {
         if (prefixIdentity && existing.nativePrefix !== prefixIdentity) throw new Error('Existing attachment does not match the original native prefix handle.');
-        if (prefixIdentity && options?.extensions) requireSessionExtensionIdentity(existing.prefixExtensions!, options.extensions);
+        if (prefixIdentity && options?.extensions) {
+          const grant = await lookupSourceGrant(id, prefixHandle);
+          const source = grant ? sourceExtensions(grant.sourceNativeSessionId, () => id, grant.handle.sessionId) : undefined;
+          const requested = source ? { ...options.extensions, systemPrompt: [grant!.systemPrompt, options.extensions.systemPrompt].filter(Boolean).join('\n\n'), tools: [...(source.tools ?? []), ...(options.extensions.tools ?? [])] } : options.extensions;
+          requireSessionExtensionIdentity(existing.prefixExtensions!, requested);
+        }
         if (creationIdentity && existing.nativeCreation !== creationIdentity) throw new Error('Existing attachment does not match the original native creation evidence.');
         return existing.session;
       }
       const native = await summary(id); if (!native) throw new Error('OpenCode session was not found.');
-      const grant = await references?.get(id);
+      const grant = await lookupSourceGrant(id, prefixHandle);
       if (grant && (!callbacksAvailable || !provider.readSessionHistory)) throw new Error('OpenCode source references require a connected native callback plugin.');
       if (grant) { await sourceAccessCheck?.(grant.sourceNativeSessionId); if (!await summary(grant.sourceNativeSessionId)) throw new Error('OpenCode source session was not found.'); }
-      const sourceGrant = grant ? sourceExtensions(grant.sourceNativeSessionId, () => id) : undefined;
+      const sourceGrant = grant ? sourceExtensions(grant.sourceNativeSessionId, () => id, grant.handle.sessionId) : undefined;
       const tools = [...(sourceGrant?.tools ?? []), ...(options?.extensions?.tools ?? [])];
       const systemPrompt = [grant?.systemPrompt, options?.extensions?.systemPrompt].filter(Boolean).join('\n\n');
       const extensions = sourceGrant || options?.extensions ? { ...(options?.extensions?.instructions ? { instructions: options.extensions.instructions } : {}), ...(tools.length ? { tools } : {}), ...(systemPrompt ? { systemPrompt } : {}) } : undefined;

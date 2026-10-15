@@ -86,7 +86,7 @@ export class SessionSuccessionService {
     if (!this.cursorKey) throw new Error('Succession service is not ready.');
     let bindings = this.bindingReaders.get(providerId);
     if (!bindings) {
-      bindings = new SessionSourceBindings(this.store, this.controllerId, providerId, this.cursorKey, { contexts: this.contexts,
+      bindings = new SessionSourceBindings(this.store, this.controllerId, providerId, this.cursorKey, { contexts: this.contexts, executionRouting: this.executionRouting,
         authorizeRead: (reader, source) => this.ports.authorizeRead(reader, source),
         readRouted: (source, query) => this.ports.readHistory(source, query) });
       this.bindingReaders.set(providerId, bindings);

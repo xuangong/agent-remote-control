@@ -85,11 +85,12 @@ test('reserves only durable cancellation for an explicit v1 cancellation fence',
   const state = initial(), row = state.tenants[0]!.broker.associations!.freezes[0]!;
   const { maxProjectionBytes: _allowance, ...receipt } = row.receipt as Extract<typeof row.receipt, { version: 2 }>;
   row.receipt = { ...receipt, version: 1 }; Object.assign(row, { cancelOnly: true });
-  const associations = state.tenants[0]!.broker.associations!;
-  expect(validBrokerAssociations(migrateBrokerAssociations(associations))).toBe(true);
-  expect(validBrokerAssociations({ ...associations, freezes: [{ ...row, cancelOnly: false }] })).toBe(false);
-  expect(validBrokerAssociations({ ...associations, freezes: [{ ...row, released: 'committed' }] })).toBe(false);
-  expect(validBrokerAssociations({ ...associations, freezes: [{ ...row, receipt: { ...row.receipt, version: 2, maxProjectionBytes: 65536 } }] })).toBe(false);
+  const associations = migrateBrokerAssociations(state.tenants[0]!.broker.associations!);
+  const cancellation = associations.freezes[0]!;
+  expect(validBrokerAssociations(associations)).toBe(true);
+  expect(validBrokerAssociations({ ...associations, freezes: [{ ...cancellation, cancelOnly: false }] })).toBe(false);
+  expect(validBrokerAssociations({ ...associations, freezes: [{ ...cancellation, released: 'committed' }] })).toBe(false);
+  expect(validBrokerAssociations({ ...associations, freezes: [{ ...cancellation, receipt: { ...cancellation.receipt, version: 2, maxProjectionBytes: 65536 } }] })).toBe(false);
   const before = deriveSuccessionCapacity(state, costs);
   expect(before.tenants[0]).toMatchObject({ remainingAssociationRevisions: 1, progressSlots: 0 });
   const saved: HostedRelayState[] = [];

@@ -13,7 +13,7 @@ import { SOURCE_WITNESS_RESULT_BYTES, validSourceWitnessIdentity, type SessionSu
 import { jsonBytes } from './succession-persistence.js';
 import type { SessionSuccessionContextStore } from './session-succession-context.js';
 import type { SessionSuccessionCoordinator } from './session-succession.js';
-import { nativeSessionRefKey, isNativeSessionRef, isSuccessionRequest, type NativeSessionRef, type NativePrefixSelection, type TrustedSuccessionContext } from '@orchardworks/agent-remote-protocol';
+import { nativeSessionRefKey, nativePrefixAncestors, isNativeSessionRef, isSuccessionRequest, type NativeSessionRef, type NativePrefixSelection, type TrustedSuccessionContext } from '@orchardworks/agent-remote-protocol';
 import { TpmCoordinator, type TpmOptions, type TpmSessionAccess } from './tpm.js';
 import { isTpmCreate, isTpmAction } from '@orchardworks/agent-remote-protocol';
 import { SessionBindings, SessionBindingError } from '@orchardworks/agent-remote-relay';
@@ -64,6 +64,8 @@ export interface AgentHostDirectory {
   sessionWorkspace?(nativeSessionId: string, handle?: AgentPersistenceHandle): Promise<string | undefined>;
   setSourceAccessCheck?(check: (nativeSessionId: string) => Promise<void>): void;
   setSourceBindingReader?(reader: import('./session-reference.js').SourceBindingReader): void;
+  /** Host validates committed ancestry; exact saved prefix handles may reconstruct preparation attachments. */
+  setSourceReferenceAncestors?(resolve: (nativeSessionId: string, preparationHandle?: AgentPersistenceHandle) => Promise<readonly string[]>): void;
   sourceReferences?(): Promise<Array<{ nativeSessionId: string; sourceNativeSessionId: string }>>;
   /** Native history copy only; role succession and task ownership are separate. */
   forkSession?(nativeSessionId: string): Promise<string>;
@@ -483,12 +485,26 @@ export function createAgentHostRuntime(options: AgentHostRuntimeOptions): AgentH
   }); }
   function bindSourceReader(directory: AgentHostDirectory) {
     if (!successionService) return;
-    directory.setSourceBindingReader?.(async (reader, source, query, legacyRead) => {
+    directory.setSourceBindingReader?.(async (reader, source, query, legacyRead, canonicalReader) => {
       await successionReady;
-      return successionService.bindings(directory.providerId).read(reader, source, query, legacyRead);
+      return successionService.bindings(directory.providerId).read(reader, source, query, legacyRead, canonicalReader);
     });
   }
-  for (const {directory} of registrations.values()) { bindHandoff(directory); bindSourceReader(directory); }
+  for (const {directory} of registrations.values()) { bindHandoff(directory); bindSourceReader(directory); bindSourceReferenceAncestry(directory); }
+  function bindSourceReferenceAncestry(directory: AgentHostDirectory) {
+    if (!successionService) return;
+    directory.setSourceReferenceAncestors?.(async (id, preparationHandle) => {
+      await successionReady;
+      let target = nativeRef({ providerId: directory.providerId, nativeSessionId: id });
+      if (preparationHandle) {
+        const saved = originalNativePrefix(target);
+        if (!saved || JSON.stringify(saved.handle) !== JSON.stringify(preparationHandle)) throw new Error('Source attachment lacks exact saved native prefix evidence.');
+        target = saved.source;
+      }
+      const ancestry = nativePrefixAncestors(target, successionService.store.all().flatMap(state => state.operations.filter(row => row.phase === 'committed')));
+      return [...new Set([...ancestry.map(ref => ref.nativeSessionId), id])];
+    });
+  }
   function originalCreation(target: NativeSessionRef): AgentEmptyCreationResult | undefined {
     let result: AgentEmptyCreationResult | undefined;
     for (const state of succession?.store.all() ?? []) for (const operation of state.operations) {
@@ -512,14 +528,19 @@ export function createAgentHostRuntime(options: AgentHostRuntimeOptions): AgentH
       if (!candidate || nativeSessionRefKey(candidate) !== nativeSessionRefKey(target) || !operation.preparation) continue;
       if (!progress?.nativePrefix?.handle || progress.nativeCreation) throw new Error('Original native prefix evidence is unavailable.');
       const handle = nativePrefixResumeHandle(target.providerId, target.nativeSessionId, progress.nativePrefix.handle);
-      if (result && JSON.stringify(result.handle) !== JSON.stringify(handle)) throw new Error('Native prefix attachment identity conflicts.');
+      if (result && (JSON.stringify(result.handle) !== JSON.stringify(handle) || nativeSessionRefKey(result.source) !== nativeSessionRefKey(operation.from))) throw new Error('Native prefix attachment identity conflicts.');
       result = { handle, source: operation.from };
     }
     return result;
   }
   /** Role-owned callbacks need an actual-recipient authority before they can follow a native prefix. */
   async function nativePrefixExtensions(source: NativeSessionRef): Promise<AgentSessionExtensions> {
-    if (registration(source.providerId).directory.requiresController?.(source.nativeSessionId)
+    const directory = registration(source.providerId).directory;
+    const ancestry = nativePrefixAncestors(source, successionService!.store.all().flatMap(state => state.operations.filter(row => row.phase === 'committed')));
+    const grants = (await directory.sourceReferences?.() ?? []).filter(grant => ancestry.some(ref => ref.nativeSessionId === grant.nativeSessionId));
+    if (grants.length > 1) throw new Error('Source reference ancestry is ambiguous.');
+    const sourceTools = grants.length === 1 && !!directory.setSourceReferenceAncestors && !!directory.setSourceBindingReader;
+    if ((directory.requiresController?.(source.nativeSessionId) && !sourceTools)
       || await team?.extensions(source.providerId, source.nativeSessionId) || await tpm?.extensions(source.providerId, source.nativeSessionId)) {
       throw new SuccessionPreparationRejected('succession_prefix_extensions_unavailable', 'Native prefix role extensions require stable recipient routing.');
     }
@@ -1111,6 +1132,7 @@ export function createAgentHostRuntime(options: AgentHostRuntimeOptions): AgentH
     catalogs.set(id, new RemoteHostCatalog({ roots: registration.directory.list }));
     bindHandoff(registration.directory);
     bindSourceReader(registration.directory);
+    bindSourceReferenceAncestry(registration.directory);
   }
   const automationAccess: TpmSessionAccess = {
     ...(successionService ? { mainRouting: successionTpmRouting(successionService, successionConfig!.controllerId, acquireNative) } : {}),

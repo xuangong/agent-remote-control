@@ -83,7 +83,7 @@ it('enrolls and saves the device before configuring Codex, then registers provid
   expect(f.registrations.map(value => value.key)).toEqual(['Bearer invitation', 'Bearer ' + f.deviceKey]);
   expect(f.registrations[0]?.installationId).toBe(f.registrations[1]?.installationId);
   expect(f.registrations[0]?.successionEnrollment).toBeUndefined();
-  expect(f.registrations[1]?.successionEnrollment).toBe(2);
+  expect(f.registrations[1]?.successionEnrollment).toBe(3);
   const native = JSON.parse(await readFile(join(f.root, 'native.json'), 'utf8'));
   expect(native.home).toBe(join(f.root, 'gateway-codex')); expect(native.key).toBe(f.apiKey);
   expect(native.config).toContain('wire_api = "responses"');

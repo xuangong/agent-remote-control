@@ -16,7 +16,7 @@ export interface SourceHistoryPage extends AgentHistoryPage {
   sourceContext?: string;
 }
 export type SourceBindingReader = (readerNativeSessionId: string, originalSource: string, query: SourceHistoryQuery,
-  read: (nativeSessionId: string, query: AgentHistoryQuery) => Promise<AgentHistoryPage>) => Promise<SourceHistoryPage>;
+  read: (nativeSessionId: string, query: AgentHistoryQuery) => Promise<AgentHistoryPage>, canonicalReader?: string) => Promise<SourceHistoryPage>;
 
 interface SourceGrant { sourceNativeSessionId: string; systemPrompt: string; systemPromptProvided?: boolean; instructions?: string; handle: AgentPersistenceHandle }
 
@@ -50,6 +50,19 @@ export class SessionReferenceStore {
         result.push({ nativeSessionId: grant.handle.sessionId, sourceNativeSessionId: grant.sourceNativeSessionId });
       }
       return result;
+    });
+  }
+  /** Resolve exactly one existing grant; ancestry is supplied by validated Host routing. */
+  resolve(ancestors: readonly string[]): Promise<SourceGrant | undefined> {
+    return this.serialize(async () => {
+      let matched: SourceGrant | undefined;
+      for (const id of new Set(ancestors)) {
+        const grant = await this.read(id);
+        if (!grant) continue;
+        if (matched) throw new Error('Source reference ancestry is ambiguous.');
+        matched = grant;
+      }
+      return matched;
     });
   }
   get(id: string): Promise<SourceGrant | undefined> {

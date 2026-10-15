@@ -1,7 +1,7 @@
 import { OpenCodePromptEditEvidence } from './prompt-edit-evidence.js';
 import { openCodeSessionNativeEvidence } from './native-evidence.js';
 import { readOpenCodeInputResponse } from './input-response.js';
-import { AgentOperationRejectedError, prepareAgentOperation } from '@orchardworks/agent-provider-sdk';
+import { AgentOperationRejectedError, AgentRuntimeError, prepareAgentOperation } from '@orchardworks/agent-provider-sdk';
 import { randomBytes } from 'node:crypto';
 import { IMAGE_INPUT_CAPABILITIES, validateInteractionResponse, type AgentInputAcceptance, type AgentCapabilities, type AgentCommand, type AgentInputPart, type AgentInteractionRequest, type AgentInteractionResponse, type AgentMessageOptions, type AgentRuntimeInfo, type AgentSession, type AgentSessionNativeEvidence, type AgentStreamEvent, type ProviderObservation, type ProviderStreamItem } from '@orchardworks/agent-provider-sdk';
 import type { V2Event, SessionInfo as Session, FormInfo, SessionStructuredError } from '@opencode/client';
@@ -76,7 +76,7 @@ export class OpenCodeSession implements AgentSession {
     this.capabilities = { history: true, sendMessage: !transport.restricted, steer: !transport.restricted, cancel: !transport.restricted, readResource: true, imageInput: IMAGE_INPUT_CAPABILITIES, sessionSettings: !transport.restricted, commands: !transport.restricted, planning: !transport.restricted, interactions: { question: true, planApproval: false, toolApproval: true } };
   }
   async start(): Promise<void> {
-    const deadline = setTimeout(() => this.initialReject(new Error('OpenCode session observation did not become ready.')), this.transport.timeout);
+    const deadline = setTimeout(() => this.initialReject(new AgentRuntimeError('native_runtime_unavailable', 'OpenCode session observation did not become ready.')), this.transport.timeout);
     this.emit({ type: 'thread_started', provider: 'opencode', sessionId: this.nativeId }, 'thread');
     this.stream = this.transport.events(this.abort.signal, () => this.connected(), attempt => {
       this.promptEditEvidence.invalidate();

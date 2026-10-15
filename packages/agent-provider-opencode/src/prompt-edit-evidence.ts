@@ -1,7 +1,7 @@
 import { realpath } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { AgentOperationRejectedError, type AgentNativeReadiness, type AgentNativeValidityToken, type AgentPromptEditEvidence } from '@orchardworks/agent-provider-sdk';
-import type { OpenCodeTransport } from './transport.js';
+import { openCodeReadError, type OpenCodeTransport } from './transport.js';
 
 function reject(reason: string): never { throw new AgentOperationRejectedError('prompt_edit_evidence_unavailable', reason); }
 
@@ -83,6 +83,7 @@ export class OpenCodePromptEditEvidence implements AgentPromptEditEvidence {
     // An event may belong to a descendant whose identity has not been enumerated yet.
     this.inspections++;
     try { native = await readPromptEditReadiness(this.ports.transport, this.ports.nativeId, this.ports.cwd, ids => { this.children = ids; }); }
+    catch (error) { throw openCodeReadError(error); }
     finally { this.inspections--; }
     if (!this.ports.readable() || generation !== this.generation) reject('OpenCode prompt-edit readiness changed during native readback.');
     const local = this.ports.local();

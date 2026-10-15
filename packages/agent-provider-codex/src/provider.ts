@@ -166,7 +166,7 @@ export class CodexAppServerProvider implements AgentProviderAdapter {
     const transport = await this.createTransport();
     try { await initializeCodexTransport(transport); await preparePromptEdit(transport, target); }
     catch (error) {
-      const mapped = runtimeError(error, this.options.connectionMode === 'shared');
+      const mapped = promptEditReadError(error, this.options.connectionMode === 'shared');
       if (mapped instanceof AgentRuntimeError) throw mapped;
       if (error instanceof CodexAppServerRpcError) throw new Error('Codex could not verify this prompt. Check the Controller log and reload the source conversation.');
       throw error;
@@ -188,24 +188,26 @@ export class CodexAppServerProvider implements AgentProviderAdapter {
     }
   }
 
-  async forkForPromptEdit(target: CodexPromptEditTarget, extensions: AgentSessionExtensions = {}): Promise<AgentSession> {
+  /** Await durable candidate retention before materialization or branch history reads. */
+  async forkForPromptEdit(target: CodexPromptEditTarget, extensions: AgentSessionExtensions = {}, candidateKnown?: (handle: AgentPersistenceHandle) => Promise<void>): Promise<AgentSession> {
     const transport = await this.createTransport();
+    let candidateReturned = false;
     try {
       const session = await CodexAppServerSession.forkForPromptEdit(transport, target, this.options.env?.CODEX_HOME,
-        this.options.restrictedNative, this.sharedRecoveryPlan(), extensions);
+        this.options.restrictedNative, this.sharedRecoveryPlan(), extensions, async handle => { candidateReturned = true; await candidateKnown?.(handle); });
       this.sessions.add(session);
       session.onRuntimeClosed(() => this.sessions.delete(session));
       return session;
     } catch (error) {
       await transport.dispose();
-      throw runtimeError(error, this.options.connectionMode === 'shared');
+      throw candidateReturned ? promptEditReadError(error, this.options.connectionMode === 'shared') : runtimeError(error, this.options.connectionMode === 'shared');
     }
   }
 
   async verifyPromptEditBranch(target: CodexPromptEditTarget, handle: AgentPersistenceHandle): Promise<void> {
     const transport = await this.createTransport();
     try { await initializeCodexTransport(transport); await verifyPromptEditBranch(transport, target, handle); }
-    catch (error) { throw runtimeError(error, this.options.connectionMode === 'shared'); }
+    catch (error) { throw promptEditReadError(error, this.options.connectionMode === 'shared'); }
     finally { await transport.dispose(); }
   }
 
@@ -290,6 +292,14 @@ function readPersistenceCwd(opaque: string): string | undefined {
   } catch {
     return undefined;
   }
+}
+
+function promptEditReadError(error: unknown, shared: boolean): unknown {
+  const mapped = runtimeError(error, shared);
+  if (mapped === error && error instanceof CodexAppServerRpcError && error.code === -32603) {
+    return new AgentRuntimeError('native_runtime_unavailable', 'Codex native prefix read is temporarily unavailable. Retry reading the saved session after the runtime recovers.');
+  }
+  return mapped;
 }
 
 function runtimeError(error: unknown, shared: boolean): unknown {

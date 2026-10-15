@@ -118,7 +118,7 @@ it('rejects a missing pagination capability before creating a branch', async () 
   expect(app.requests.some(request => ['thread/start', 'thread/fork'].includes(request.method))).toBe(false);
 });
 
-function completeFixture(first = false) {
+function completeFixture(first = false, beforeCandidateRead?: () => void) {
   const cwd = realpathSync(process.cwd());
   const source = [
     { id: 'turn-1', status: 'completed', items: [{ id: 'user-1', type: 'userMessage', content: [{ type: 'text', text: 'Keep' }] }, { id: 'answer-1', type: 'agentMessage', text: 'Answer' }] },
@@ -129,8 +129,9 @@ function completeFixture(first = false) {
   const selection = first ? { nativeSessionId: 'source', turnId: 'turn-1', messageId: 'user-1' } : target;
   const app = createScriptedAppServer({
     initialize: () => ({}),
-    'thread/read': params => ({ thread: { id: (params as any).threadId, cwd, status: { type: 'idle' }, parentThreadId: null, canAcceptDirectInput: true, ...((params as any).includeTurns ? { turns: candidate } : {}) } }),
+    'thread/read': params => { if ((params as any).threadId === 'branch') beforeCandidateRead?.(); return { thread: { id: (params as any).threadId, cwd, status: { type: 'idle' }, parentThreadId: null, canAcceptDirectInput: true, ...((params as any).includeTurns ? { turns: candidate } : {}) } }; },
     'thread/turns/list': params => {
+      if ((params as any).threadId === 'branch') beforeCandidateRead?.();
       const values = (params as any).threadId === 'source' ? source : candidate;
       const offset = Number((params as any).cursor ?? 0), limit = (params as any).limit;
       return { data: [...values].reverse().slice(offset, offset + limit), nextCursor: offset + limit < values.length ? String(offset + limit) : null };
@@ -142,6 +143,24 @@ function completeFixture(first = false) {
   });
   return { cwd, source, candidate, selection, app };
 }
+it.each([true, false])('awaits the exact candidate checkpoint before failed bootstrap reads (first=%s)', async first => {
+  const { CodexAppServerProvider } = await import('./provider.js');
+  let saved: import('@orchardworks/agent-provider-sdk').AgentPersistenceHandle | undefined;
+  let savedBeforeRead = false;
+  const f = completeFixture(first, () => { savedBeforeRead = !!saved; throw Object.assign(new Error('Temporary read failure'), { code: -32603 }); });
+  const provider = new CodexAppServerProvider({ spawn: () => f.app.child });
+  await expect(provider.forkForPromptEdit(f.selection, {}, async handle => {
+    await new Promise(resolve => setTimeout(resolve, 5)); saved = structuredClone(handle);
+  })).rejects.toThrow(/temporarily unavailable/);
+  expect(savedBeforeRead).toBe(true);
+  expect(saved).toMatchObject({ providerId: 'codex', sessionId: 'branch' });
+  expect(JSON.parse(saved!.opaque)).toMatchObject({ cwd: f.cwd });
+  expect(f.app.requests.filter(request => ['thread/start', 'thread/fork'].includes(request.method))).toHaveLength(1);
+  expect(f.app.requests.some(request => request.method === 'turn/start')).toBe(false);
+  const recovered = completeFixture(first);
+  await new CodexAppServerProvider({ spawn: () => recovered.app.child }).verifyPromptEditBranch(f.selection, saved!);
+  expect(recovered.app.requests.every(request => ['initialize', 'thread/read', 'thread/turns/list'].includes(request.method))).toBe(true);
+}, 10000);
 it.each([true, false])('binds inherited Host callbacks and instructions on the first prompt-edit attachment (first=%s)', async first => {
   const { CodexAppServerProvider } = await import('./provider.js');
   const f = completeFixture(first), original = structuredClone(f.source);

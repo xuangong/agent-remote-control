@@ -73,7 +73,7 @@ export function createOpenCodeSessionDirectory(provider: OpenCodeDirectoryProvid
       if (await lookupSourceGrant(target.nativeSessionId) && (!sourceReferenceAncestors || !sourceBindingReader || !callbacksAvailable)) return false;
       await provider.validatePromptEdit(target); return true;
     },
-    async createNativePrefix(target, extensions, evidence) {
+    async createNativePrefix(target, extensions, evidence, candidateKnown) {
       assertOpen();
       if (!provider.forkForPromptEdit || !provider.verifyPromptEditBranch) throw new Error('Native prefix preparation is unavailable.');
       await sourceAccessCheck?.(target.nativeSessionId);
@@ -82,10 +82,15 @@ export function createOpenCodeSessionDirectory(provider: OpenCodeDirectoryProvid
       let readerId: string | undefined;
       const source = grant ? sourceExtensions(grant.sourceNativeSessionId, () => readerId, grant.handle.sessionId) : undefined;
       const boundExtensions = source ? { ...extensions, systemPrompt: [grant!.systemPrompt, extensions.systemPrompt].filter(Boolean).join('\n\n'), tools: [...(source.tools ?? []), ...(extensions.tools ?? [])] } : extensions;
-      const session = await provider.forkForPromptEdit(target, boundExtensions);
+      let checkpoint: AgentPersistenceHandle | undefined;
+      const session = await provider.forkForPromptEdit(target, boundExtensions, async handle => {
+        checkpoint = nativePrefixResumeHandle('opencode', handle.sessionId, handle);
+        await candidateKnown?.(checkpoint);
+        readerId = checkpoint.sessionId;
+      });
       evidence?.completed();
       const id = await remember(session), entry = opened.get(id)!;
-      const handle = nativePrefixResumeHandle('opencode', id, entry.handle);
+      const handle = nativePrefixResumeHandle('opencode', id, checkpoint ?? entry.handle);
       readerId = id;
       entry.nativePrefix = JSON.stringify(handle);
       entry.prefixExtensions = sessionExtensionIdentity(boundExtensions);

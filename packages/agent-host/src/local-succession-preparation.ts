@@ -1,7 +1,7 @@
 import { isSuccessionDeliveryUnresolved, type SessionSuccessionContextStore, type SuccessionContextRecord, type SuccessionContextPreparation } from './session-succession-context.js';
 import { realpath } from 'node:fs/promises';
 import { type NativeSessionRef, type PreparedSuccession, type PrimaryRole, type NativePrefixSelection, type SuccessionRequest, nativeSessionRefKey } from '@orchardworks/agent-remote-protocol';
-import { AGENT_NATIVE_EVIDENCE_LIMITS, parseAgentEmptyCreationResult, serializeAgentEmptyCreationResult, type AgentEmptyCreationResult, type AgentPersistenceHandle } from '@orchardworks/agent-provider-sdk';
+import { AgentRuntimeError, AGENT_NATIVE_EVIDENCE_LIMITS, parseAgentEmptyCreationResult, serializeAgentEmptyCreationResult, type AgentEmptyCreationResult, type AgentPersistenceHandle } from '@orchardworks/agent-provider-sdk';
 
 export interface SuccessionVerification {
   assertCurrent(): void;
@@ -32,6 +32,11 @@ export function successionResumeHandle(providerId: string, nativeSessionId: stri
 
 export interface NativePromptEditTarget { nativeSessionId: string; turnId: string; messageId: string }
 export interface NativePrefixCandidate { target: NativeSessionRef; handle: AgentPersistenceHandle }
+export type NativePrefixCandidateKnown = (candidate: NativePrefixCandidate) => Promise<void>;
+/** A complete candidate is retained while native reads or local observation are unavailable. */
+export function isNativePrefixReadUnavailable(error: unknown): boolean {
+  return error instanceof AgentRuntimeError && error.code !== 'native_session_unavailable';
+}
 /** Validate the complete bounded envelope without interpreting adapter-owned opaque contents. */
 export function nativePrefixResumeHandle(providerId: string, nativeSessionId: string, value: AgentPersistenceHandle): AgentPersistenceHandle {
   if (!value || typeof value !== 'object' || Array.isArray(value) || ![Object.prototype, null].includes(Object.getPrototypeOf(value))
@@ -61,7 +66,7 @@ export interface LocalSuccessionAccess {
   /** Explicit producer certificate: every candidate ref field and capture string fits 512 UTF-16 units; capture seq is a nonnegative safe integer. */
   supportsBoundedProjection?(source: NativeSessionRef, targetProviderId: string): Promise<boolean>;
   supportsNativePrefix?(source: NativeSessionRef, selection: NativePrefixSelection): Promise<boolean>;
-  createNativePrefix?(request: SuccessionRequest): Promise<NativePrefixCandidate>;
+  createNativePrefix?(request: SuccessionRequest, candidateKnown: NativePrefixCandidateKnown): Promise<NativePrefixCandidate>;
   verifyNativePrefix?(prepared: PreparedSuccession): Promise<void>;
   verifyAttachment(prepared: PreparedSuccession): Promise<void>;
   create(source: NativeSessionRef, operationId: string, targetProviderId: string): Promise<NativeSessionRef>;
@@ -109,9 +114,9 @@ export class LocalSuccessionPreparation {
     if (preparation) return this.supports(role, targetProviderId, preparation);
     if (await this.access.supportsBoundedProjection?.(role.current, targetProviderId) !== true) throw new SuccessionPreparationRejected('succession_bounded_producer_unavailable', 'The selected adapters have not certified bounded candidate and capture producers.');
   }
-  createNativePrefix(request: SuccessionRequest): Promise<NativePrefixCandidate> {
+  createNativePrefix(request: SuccessionRequest, candidateKnown: NativePrefixCandidateKnown): Promise<NativePrefixCandidate> {
     if (!request.preparation || !this.access.createNativePrefix) throw new Error('Native prefix creation is unavailable.');
-    return this.access.createNativePrefix(request);
+    return this.access.createNativePrefix(request, candidateKnown);
   }
   create(role: PrimaryRole, operationId: string, targetProviderId = role.current.providerId): Promise<NativeSessionRef> {
     return this.access.create(role.current, `${operationId}:create`, targetProviderId);
@@ -143,7 +148,10 @@ export class LocalSuccessionPreparation {
       if (prepared.preparation) {
         if (!this.access.verifyNativePrefix) throw new Error('Native prefix verification is unavailable.');
         try { await this.access.verifyNativePrefix(prepared); }
-        catch (error) { throw new SuccessionPreparationRejected('succession_prefix_verification_failed', error instanceof Error ? error.message : 'Native prefix readback could not be verified.'); }
+        catch (error) {
+          if (isNativePrefixReadUnavailable(error)) throw error;
+          throw new SuccessionPreparationRejected('succession_prefix_verification_failed', error instanceof Error ? error.message : 'Native prefix readback could not be verified.');
+        }
         retained!.assertCurrent();
       }
       return retained ?? { assertCurrent() {}, release() {} };

@@ -1,5 +1,5 @@
 import { isNativeSessionRef, nativeSessionRefKey, successionFreezeKey, type NativeSessionRef, type SuccessionRecord, type SuccessionRequest, type SuccessionAssociationFreeze, type SuccessionParticipant, type TimelineCursor, nativePrefixSelectionKey } from '@orchardworks/agent-remote-protocol';
-import { LocalSuccessionPreparation, SuccessionPreparationRejected } from './local-succession-preparation.js';
+import { LocalSuccessionPreparation, SuccessionPreparationRejected, isNativePrefixReadUnavailable, type NativePrefixCandidate } from './local-succession-preparation.js';
 import { SessionSuccessionStore } from './session-succession-store.js';
 import { SuccessionPublicationUnknown } from './succession-persistence.js';
 import { AgentOperationRejectedError, AGENT_NATIVE_EVIDENCE_REASONS, type AgentNativeEvidenceCode } from '@orchardworks/agent-provider-sdk';
@@ -154,20 +154,24 @@ export class SessionSuccessionCoordinator {
     if (this.stopped(operationId)) return this.store.operation(operationId);
     const source = await this.preparation.check(role, record.from, undefined, record.preparation);
     if (source.boundary.epoch !== capture.epoch || source.boundary.seq !== capture.seq) throw new SuccessionPreparationRejected('succession_boundary_changed', 'Source history changed before native prefix creation.');
+    const candidateKnown = async (candidate: NativePrefixCandidate) => {
+      let conflict = false, registrationError: unknown;
+      try { conflict = this.admission?.registerCandidate(operationId, candidate.target).conflict ?? false; } catch (error) { registrationError = error; }
+      await this.serialized(operationId, () => this.store.saveNativePrefixCandidate(operationId, candidate));
+      if (this.stopped(operationId)) return;
+      if (registrationError) throw registrationError;
+      if (conflict) throw new SuccessionPreparationRejected('succession_candidate_busy', 'Candidate has conflicting Host mutations.');
+    };
     const started = await this.serialized(operationId, async () => {
       if (this.stopped(operationId)) return undefined;
       await this.store.startCreation(operationId);
       return { result: Promise.resolve().then(() => this.preparation.createNativePrefix({ operationId, roleId: record.roleId, expectedRevision: record.expectedRevision,
-        from: record.from, ...(record.targetProviderId ? { targetProviderId: record.targetProviderId } : {}), preparation: record.preparation })) };
+        from: record.from, ...(record.targetProviderId ? { targetProviderId: record.targetProviderId } : {}), preparation: record.preparation }, candidateKnown)) };
     });
     if (!started) return this.store.operation(operationId);
     const candidate = await started.result;
-    let conflict = false, registrationError: unknown;
-    try { conflict = this.admission?.registerCandidate(operationId, candidate.target).conflict ?? false; } catch (error) { registrationError = error; }
-    await this.serialized(operationId, () => this.store.saveNativePrefixCandidate(operationId, candidate));
+    await candidateKnown(candidate);
     if (this.stopped(operationId)) return this.store.operation(operationId);
-    if (registrationError) throw registrationError;
-    if (conflict) throw new SuccessionPreparationRejected('succession_candidate_busy', 'Candidate has conflicting Host mutations.');
     return this.finishCandidate(operationId);
   }
   private async finishCandidate(operationId: string): Promise<SuccessionRecord> {
@@ -196,8 +200,9 @@ export class SessionSuccessionCoordinator {
     return this.serialized(operationId, async () => {
       const stopped = this.stopped(operationId); if (stopped) return this.releaseTerminal(stopped);
       const progress = this.store.progress(operationId);
-      const safe = progress?.stage === 'not-started' || progress?.stage === 'candidate-known';
-      return this.releaseTerminal(await this.store.settlePreparation(operationId, safe ? 'rejected' : 'unknown', error instanceof SuccessionPreparationRejected ? error.code : safe ? 'succession_preparation_failed' : 'succession_creation_unknown'));
+      const unavailable = !!this.store.operation(operationId).preparation && progress?.stage === 'candidate-known' && isNativePrefixReadUnavailable(error);
+      const safe = !unavailable && (progress?.stage === 'not-started' || progress?.stage === 'candidate-known');
+      return this.releaseTerminal(await this.store.settlePreparation(operationId, safe ? 'rejected' : 'unknown', error instanceof SuccessionPreparationRejected ? error.code : unavailable ? 'succession_prefix_read_unavailable' : safe ? 'succession_preparation_failed' : 'succession_creation_unknown'));
     });
   }
   async commit(operationId: string, expectedRevision: number): Promise<SuccessionRecord> {

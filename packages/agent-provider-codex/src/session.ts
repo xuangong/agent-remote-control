@@ -488,6 +488,7 @@ export class CodexAppServerSession implements AgentSession {
     restrictedNative = false,
     recoveryPlan?: CodexSharedRecoveryPlan,
     extensions: AgentSessionExtensions = {},
+    candidateKnown?: (handle: AgentPersistenceHandle) => Promise<void>,
   ): Promise<CodexAppServerSession> {
     const session = new CodexAppServerSession(transport, { systemPrompt: extensions.systemPrompt, instructions: extensions.instructions }, codexHome, undefined, restrictedNative, recoveryPlan);
     session.tools = bindAgentSessionTools(extensions.tools, () => session.assertOpen());
@@ -504,6 +505,7 @@ export class CodexAppServerSession implements AgentSession {
     });
     session.setThreadFromResponse(response, boundary.beforeTurnId ? 'thread/fork' : 'thread/start');
     if (session.threadId === target.nativeSessionId) throw new Error('Codex did not create an independent prompt-edit branch.');
+    await candidateKnown?.(session.currentRuntimeInfo().persistence!);
     if (!boundary.beforeTurnId) {
       // Loaded full-history reads materialize an empty identity without starting a user turn.
       try {

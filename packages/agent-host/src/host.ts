@@ -53,7 +53,7 @@ export interface AgentHostDirectory {
   readonly supportsPromptEditing?: boolean;
   validatePromptEdit?(target: { nativeSessionId: string; turnId: string; messageId: string }): Promise<void>;
   supportsNativePrefix?(target: NativePromptEditTarget): Promise<boolean>;
-  createNativePrefix?(target: NativePromptEditTarget, extensions: AgentSessionExtensions, evidence?: DirectoryMutationEvidence): Promise<AgentPersistenceHandle>;
+  createNativePrefix?(target: NativePromptEditTarget, extensions: AgentSessionExtensions, evidence?: DirectoryMutationEvidence, candidateKnown?: (handle: AgentPersistenceHandle) => Promise<void>): Promise<AgentPersistenceHandle>;
   verifyNativePrefix?(target: NativePromptEditTarget, handle: AgentPersistenceHandle): Promise<void>;
   /** Active work uses tools served by the Controller process. */
   requiresController?(nativeSessionId: string): boolean;
@@ -328,14 +328,17 @@ export function createAgentHostRuntime(options: AgentHostRuntimeOptions): AgentH
           return await directory.supportsNativePrefix?.({ nativeSessionId: source.nativeSessionId, turnId: selection.turnId, messageId: selection.messageId }) === true;
         } finally { lease.release(); }
       },
-      async createNativePrefix(request) {
+      async createNativePrefix(request, candidateKnown) {
         const selection = request.preparation;
         if (!selection) throw new Error('Native prefix selection is missing.');
         await authorizeSuccessionRead(request.from, request.from);
         let actual: string | undefined;
         const extensions = await nativePrefixExtensions(request.from, () => actual), directory = registration(request.from.providerId).directory;
         if (!directory.createNativePrefix) throw new Error('Native prefix creation is unavailable.');
-        const handle = await directory.createNativePrefix({ nativeSessionId: request.from.nativeSessionId, turnId: selection.turnId, messageId: selection.messageId }, extensions);
+        const handle = await directory.createNativePrefix({ nativeSessionId: request.from.nativeSessionId, turnId: selection.turnId, messageId: selection.messageId }, extensions, undefined, async handle => {
+          actual = handle.sessionId;
+          await candidateKnown({ target: { controllerId: request.from.controllerId, providerId: handle.providerId, nativeSessionId: handle.sessionId }, handle });
+        });
         actual = handle.sessionId;
         return { target: { controllerId: request.from.controllerId, providerId: handle.providerId, nativeSessionId: handle.sessionId }, handle };
       },

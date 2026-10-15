@@ -7,7 +7,7 @@ import { resolve } from 'node:path';
 import type { AgentProviderNativeEvidence, AgentHistoryPage, AgentHistoryQuery, AgentPersistenceHandle, AgentProviderAdapter, AgentSessionConfig, AgentSessionExtensions } from '@orchardworks/agent-provider-sdk';
 import { AgentOperationRejectedError } from '@orchardworks/agent-provider-sdk';
 import type { SessionInfo as Session } from '@opencode/client';
-import { OpenCodeTransport, OpenCodeRequestError, type OpenCodeAgentProviderOptions } from './transport.js';
+import { OpenCodeTransport, OpenCodeRequestError, openCodeReadError, type OpenCodeAgentProviderOptions } from './transport.js';
 import { OpenCodeSession } from './session.js';
 import { preparePromptEdit, verifyPromptEditBranch, type OpenCodePromptEditTarget } from './prompt-edit.js';
 export type { OpenCodeAgentProviderOptions } from './transport.js';
@@ -61,25 +61,32 @@ export class OpenCodeAgentProvider implements AgentProviderAdapter {
     if (persisted && typeof persisted === 'object' && 'kind' in persisted) throw new AgentOperationRejectedError('native_evidence_unsupported', 'OpenCode handoff persistence handles are unsupported. Reopen this session from the session list.');
     if (!persisted || typeof persisted.cwd !== 'string' || (persisted.model !== undefined && typeof persisted.model !== 'string') || (persisted.agent !== undefined && typeof persisted.agent !== 'string') || (persisted.variant !== undefined && typeof persisted.variant !== 'string')) throw new Error('Invalid OpenCode persistence handle.');
     const cwd = await canonicalDirectory(persisted.cwd);
-    const session = await this.transport.request(() => this.transport.client.session.get({ sessionID: handle.sessionId }));
+    const session = await this.transport.request(() => this.transport.client.session.get({ sessionID: handle.sessionId })).catch(error => { throw openCodeReadError(error); });
     if (await canonicalDirectory(session.location.directory) !== cwd) throw new Error('OpenCode native session directory does not match the requested workspace.');
-    return this.open(session, { cwd, model: persisted.model, agent: persisted.agent, variant: persisted.variant }, extensions);
+    return this.open(session, { cwd, model: persisted.model, agent: persisted.agent, variant: persisted.variant }, extensions).catch(error => { throw openCodeReadError(error); });
   }
   async validatePromptEdit(target: OpenCodePromptEditTarget): Promise<void> {
-    this.assertOpen(); await preparePromptEdit(this.transport, target);
+    this.assertOpen();
+    try { await preparePromptEdit(this.transport, target); } catch (error) { throw openCodeReadError(error); }
   }
-  async forkForPromptEdit(target: OpenCodePromptEditTarget, extensions: AgentSessionExtensions = {}): Promise<OpenCodeSession> {
+  /** Await durable candidate retention before fallible prefix reads or attachment setup. */
+  async forkForPromptEdit(target: OpenCodePromptEditTarget, extensions: AgentSessionExtensions = {}, candidateKnown?: (handle: AgentPersistenceHandle) => Promise<void>): Promise<OpenCodeSession> {
     this.assertOpen();
     const config = await preparePromptEdit(this.transport, target);
     if (extensions.tools?.length && !await this.supportsHostCallbacks(config.cwd)) throw new Error('OpenCode Host callbacks require an installed and connected ARC native plugin.');
     const native = await this.transport.request(() => this.transport.client.session.fork({ sessionID: target.nativeSessionId, before: target.messageId }));
     if (!native.id || native.id === target.nativeSessionId) throw new Error('OpenCode did not create an independent prompt-edit branch.');
     if (await canonicalDirectory(native.location.directory) !== config.cwd) throw new Error('OpenCode prompt-edit branch workspace does not match the source.');
-    await verifyPromptEditBranch(this.transport, target, { providerId: 'opencode', sessionId: native.id, opaque: JSON.stringify(config) });
-    return this.open(native, config, extensions);
+    const handle = { providerId: 'opencode', sessionId: native.id, opaque: JSON.stringify(config) };
+    await candidateKnown?.(handle);
+    try {
+      await verifyPromptEditBranch(this.transport, target, handle);
+      return await this.open(native, config, extensions);
+    } catch (error) { throw openCodeReadError(error); }
   }
   async verifyPromptEditBranch(target: OpenCodePromptEditTarget, handle: AgentPersistenceHandle): Promise<void> {
-    this.assertOpen(); await verifyPromptEditBranch(this.transport, target, handle);
+    this.assertOpen();
+    try { await verifyPromptEditBranch(this.transport, target, handle); } catch (error) { throw openCodeReadError(error); }
   }
   async openChildSession(parentNativeSessionId: string, childNativeSessionId: string): Promise<OpenCodeSession> {
     this.assertOpen();
@@ -132,7 +139,7 @@ export class OpenCodeAgentProvider implements AgentProviderAdapter {
   async getSession(id: string): Promise<OpenCodeSessionSummary | undefined> {
     this.assertOpen();
     try { return summary(await this.transport.request(() => this.transport.client.session.get({ sessionID: id }))); }
-    catch (error) { if (error instanceof OpenCodeRequestError && error.status === 404) return undefined; throw error; }
+    catch (error) { if (error instanceof OpenCodeRequestError && error.status === 404) return undefined; throw openCodeReadError(error); }
   }
   async renameSession(id: string, title: string): Promise<void> {
     if (!title.trim()) throw new Error('OpenCode session title must not be empty.');

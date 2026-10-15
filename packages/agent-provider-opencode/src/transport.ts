@@ -1,6 +1,7 @@
 import { OpenCode, type OpenCodeClient, type V2Event } from '@opencode/client';
 import { createHash } from 'node:crypto';
 import { setTimeout as delay } from 'node:timers/promises';
+import { AgentRuntimeError } from '@orchardworks/agent-provider-sdk';
 
 export interface OpenCodeAgentProviderOptions {
   serverUrl?: string;
@@ -17,6 +18,13 @@ export class OpenCodeRequestError extends Error {
     super(message ?? (status ? `OpenCode request failed (HTTP ${status}).` : 'OpenCode request did not complete. Its outcome may be unknown; input was not replayed.'));
     this.name = 'OpenCodeRequestError';
   }
+}
+/** Read/attachment failures do not imply that an earlier native mutation was rejected. */
+export function openCodeReadError(error: unknown): unknown {
+  if (error instanceof OpenCodeRequestError && (error.status === undefined || error.status === 408 || error.status === 429 || error.status >= 500)) {
+    return new AgentRuntimeError('native_runtime_unavailable', 'OpenCode native state is temporarily unavailable. Retry reading the saved session after the server recovers.');
+  }
+  return error;
 }
 interface EventSubscriber { connected(): void; disconnected(attempt: number): void; receive(event: V2Event): void; }
 export class OpenCodeTransport {

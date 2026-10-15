@@ -3,7 +3,7 @@ import { link, mkdir, open, readFile, unlink } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { AgentHistoryPage, AgentHistoryQuery, AgentPersistenceHandle } from '@orchardworks/agent-provider-sdk';
 import { nativeSessionRefKey, resolveNativePrefix, type NativePrefixResolution, type SuccessionAssociationFreeze, serializeNormalizedHistory, type NativeSessionRef, type PreparedSuccession, type PrimaryRole, type ProjectedTimelineEntry, type SuccessionDescription, type SuccessionRequest, type TimelineCursor, type NativePrefixSelection } from '@orchardworks/agent-remote-protocol';
-import { LocalSuccessionPreparation, SuccessionPreparationRejected, type NativePrefixCandidate, type NativeSuccessionCreate, type RetainedSuccessionVerification, type SuccessionReadiness } from './local-succession-preparation.js';
+import { LocalSuccessionPreparation, SuccessionPreparationRejected, type NativePrefixCandidate, type NativePrefixCandidateKnown, type NativeSuccessionCreate, type RetainedSuccessionVerification, type SuccessionReadiness } from './local-succession-preparation.js';
 import { isSuccessionDeliveryUnresolved, SessionSuccessionContextStore, type SuccessionContextDelivery, type SuccessionContextPreparation } from './session-succession-context.js';
 import { SessionSuccessionStore } from './session-succession-store.js';
 import { SessionSuccessionCoordinator } from './session-succession.js';
@@ -19,7 +19,7 @@ export interface SessionSuccessionPorts {
    * Missing/false keeps new v2 preparation disabled; legacy recovery uses supports alone. */
   supportsBoundedProjection?(source: NativeSessionRef, targetProviderId: string): Promise<boolean>;
   supportsNativePrefix?(source: NativeSessionRef, selection: NativePrefixSelection): Promise<boolean>;
-  createNativePrefix?(request: SuccessionRequest): Promise<NativePrefixCandidate>;
+  createNativePrefix?(request: SuccessionRequest, candidateKnown: NativePrefixCandidateKnown): Promise<NativePrefixCandidate>;
   verifyNativePrefix?(prepared: PreparedSuccession, handle: AgentPersistenceHandle): Promise<void>;
   inspect(source: NativeSessionRef, preparation?: NativePrefixSelection): Promise<SuccessionReadiness>;
   createIdle(source: NativeSessionRef, operationId: string, targetProviderId: string): Promise<NativeSessionRef>;
@@ -68,7 +68,7 @@ export class SessionSuccessionService {
       selectNativeCreation: (source, operationId, targetProvider) => ports.selectNativeCreation?.(source, operationId, targetProvider) ?? Promise.resolve(undefined),
       ...(ports.retainVerification ? { retainVerification: (prepared: PreparedSuccession) => ports.retainVerification!(prepared) } : {}),
       supportsNativePrefix: (source, selection) => ports.supportsNativePrefix?.(source, selection) ?? Promise.resolve(false),
-      ...(ports.createNativePrefix ? { createNativePrefix: (request: SuccessionRequest) => ports.createNativePrefix!(request) } : {}),
+      ...(ports.createNativePrefix ? { createNativePrefix: (request: SuccessionRequest, candidateKnown: NativePrefixCandidateKnown) => ports.createNativePrefix!(request, candidateKnown) } : {}),
       ...(ports.verifyNativePrefix ? { verifyNativePrefix: (prepared: PreparedSuccession) => {
         const handle = this.store.nativePrefixHandle(prepared.operationId);
         if (!handle) throw new Error('Original native prefix handle is unavailable.');

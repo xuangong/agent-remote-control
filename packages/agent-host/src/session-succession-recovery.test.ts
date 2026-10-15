@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { afterEach, expect, test } from 'vitest';
 import { SessionSuccessionService, type SessionSuccessionPorts } from './session-succession-service.js';
 import { SessionSuccessionBoundary } from './session-succession-boundary.js';
-import { AgentOperationRejectedError, AGENT_NATIVE_EVIDENCE_REASONS, type AgentEmptyCreationResult, type AgentSession } from '@orchardworks/agent-provider-sdk';
+import { AgentOperationRejectedError, AgentRuntimeError, AGENT_NATIVE_EVIDENCE_REASONS, type AgentEmptyCreationResult, type AgentSession } from '@orchardworks/agent-provider-sdk';
 
 const roots: string[] = [];
 afterEach(async () => { await Promise.all(roots.splice(0).map(root => rm(root, { recursive: true, force: true }))); });
@@ -380,6 +380,29 @@ test('native prefix forks once inside durable preparation and commits without no
   expect(f.forks()).toBe(1); expect(f.verified()).toBe(2);
   expect(JSON.parse(await readFile(join(f.directory, 'roles', 'state.json'), 'utf8')).version).toBe(8);
 });
+test.each([false, true])('native prefix checkpoint survives unavailable bootstrap and read-only verification (restart=%s)', async restart => {
+  const f = await prefixFixture(); let forks = 0;
+  f.ports.createNativePrefix = async (_request, candidateKnown) => {
+    forks++; await candidateKnown({ target: ref('B'), handle: creation.handle });
+    const disk = JSON.parse(await readFile(join(f.directory, 'roles', 'state.json'), 'utf8'));
+    expect(disk.roles[0].localPreparations[0]).toMatchObject({ stage: 'candidate-known', nativePrefix: { handle: creation.handle } });
+    for (const id of ['A', 'B']) expect(() => f.service.coordinator.assertAdmission(ref(id))).toThrow(/reserved/);
+    throw new AgentRuntimeError('native_runtime_unavailable', 'Temporary bootstrap failure');
+  };
+  expect(await f.service.prepare(prefixRequest)).toMatchObject({ phase: 'unknown', to: ref('B') });
+  const service = restart ? new SessionSuccessionService(f.directory, 'host', f.ports) : f.service;
+  await service.ready;
+  const verify = f.ports.verifyNativePrefix!;
+  f.ports.verifyNativePrefix = async () => { throw new AgentRuntimeError('native_history_timeout', 'Temporary history failure'); };
+  expect(await service.coordinator.reconcileReady('handoff')).toMatchObject({ phase: 'unknown', to: ref('B') });
+  for (const id of ['A', 'B']) expect(() => service.coordinator.assertAdmission(ref(id))).toThrow(/reserved/);
+  await expect(service.commit('handoff', 1)).rejects.toThrow(/not ready/);
+  f.ports.verifyNativePrefix = verify;
+  expect(await service.coordinator.reconcileReady('handoff')).toMatchObject({ phase: 'ready', to: ref('B') });
+  expect(service.store.nativePrefixHandle('handoff')).toEqual(creation.handle);
+  expect(service.store.progress('handoff')!.capture).toMatchObject({ epoch: 'e', seq: 1 });
+  expect(forks).toBe(1);
+}, 10000);
 test('native prefix rejects token invalidation during branch readback', async () => {
   const f = await prefixFixture(), verify = f.ports.verifyNativePrefix!;
   f.ports.verifyNativePrefix = async (...args) => { await verify(...args); f.invalidate(); };

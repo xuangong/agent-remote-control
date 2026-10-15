@@ -1041,6 +1041,7 @@ function AppContent({
   const stackRange = expandedSideRange(stackPath, compactLayout ? sideFocus : sideAnchor, compactLayout ? 1 : 2, viewKey);
   const expandedKeys = new Set(stackPath.slice(stackRange.start, stackRange.end + 1).map(viewKey));
   const focusedWindow = stackPath.find(session => viewKey(session) === sideFocus) ?? stackPath[stackRange.end];
+  const focusedPathIndex = focusedWindow ? stackPath.indexOf(focusedWindow) : 0;
   const primaryExpanded = detachedSideRoot ? !!stackRoot && expandedKeys.has(viewKey(stackRoot)) : stackRange.start === 0;
   const addressSession = stackPath.find((session) => viewKey(session) === sideFocus) ?? visibleStackRoot;
   const refreshRelations = useSessionRelations(baseUrl, userScoped && accessReady, forkStore, ask.store, addressSession ? sessionKey(addressSession) : undefined, userScoped);
@@ -1650,9 +1651,12 @@ function AppContent({
       {userScoped ? <FavoritesMenu onScan={directory ? () => setScanOpen(true) : undefined} status={addressSession?.agentId === state?.agent?.id ? state?.agent?.status : sessionEntries.find(entry => addressSession && sessionKey(entry) === sessionKey(addressSession))?.status} currentSession={addressSession} title={addressSession?.title || activeOpened?.title || 'Agent Remote'} favorites={favorites} tracking={tracking} activeKey={sidebarWindow ? sidebarWindow.target && sessionKey(sidebarWindow.target) : addressSession ? sessionKey(addressSession) : undefined} busy={transitioning && !sidebarWindow} onOpen={item => void openDirectorySession(item)} /> : stackPath.length > 1 ? <select className="agent-session-title" data-session-status={sessionEntries.find(entry => entry.agentId === focusedWindow?.agentId)?.status} aria-label="Side path" value={focusedWindow ? sessionKey(focusedWindow) : ''} onChange={(event) => { const session = stackPath.find((entry) => sessionKey(entry) === event.target.value); if (session) revealSession(session); }}>
         {stackPath.map((session, index) => <option className="agent-session-title" data-session-status={sessionEntries.find(entry => entry.agentId === session.agentId)?.status} key={sessionKey(session)} value={sessionKey(session)}>{index === 0 ? 'Root' : `Side ${index}`} · {session.title}</option>)}
       </select> : <span className="lab-mobile-session-title agent-session-title" data-session-status={sessionEntries.find(entry => entry.agentId === addressSession?.agentId)?.status}>{addressSession?.title || 'Agent Remote'}</span>}
-      {userScoped && stackPath.length > 1 ? <select className="lab-mobile-side-path" aria-label="Side path" value={focusedWindow ? sessionKey(focusedWindow) : ''} onChange={event => { const session = stackPath.find(entry => sessionKey(entry) === event.target.value); if (session) revealSession(session); }}>
-        {stackPath.map((session, index) => <option key={sessionKey(session)} value={sessionKey(session)}>{index === 0 ? 'Root' : `Side ${index}`} · {session.title}</option>)}
-      </select> : null}
+      {userScoped && stackPath.length > 1 ? <div className="lab-mobile-side-path">
+        <span aria-hidden="true">{focusedPathIndex === 0 ? 'Root' : `Side ${focusedPathIndex}`}</span><span className="lab-mobile-side-chevron" aria-hidden="true">▾</span>
+        <select aria-label="Side path" value={focusedWindow ? sessionKey(focusedWindow) : ''} onChange={event => { const session = stackPath.find(entry => sessionKey(entry) === event.target.value); if (session) revealSession(session); }}>
+          {stackPath.map((session, index) => <option key={sessionKey(session)} value={sessionKey(session)}>{index === 0 ? 'Root' : `Side ${index}`} · {session.title}</option>)}
+        </select>
+      </div> : null}
     </nav> : null}
     <ViewOptions onCreateSessionView={createSessionView} attentionControls={<>
       <label title="Enable Ask for the selected session"><span>Ask view</span><input data-view-control="ask" type="checkbox"

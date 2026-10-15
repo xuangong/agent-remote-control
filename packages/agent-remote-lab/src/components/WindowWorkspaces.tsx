@@ -59,12 +59,20 @@ export function WindowWorkspaces({ workspace, current, active = true }: {
     link.href = url; link.download = `window-${manager.grant.windowId}-grant.json`; link.click(); URL.revokeObjectURL(url);
   }
   return <div className="lab-window-workspaces">
-    <div className="lab-window-section-heading"><span>Workspaces</span><button type="button" disabled={busy} onClick={() => void run(workspace.create)}>New Window</button></div>
-    <nav className="lab-window-list" aria-label="Windows">{catalog.map(window => <button key={window.id} type="button" data-window-id={window.id}
+    <div className="lab-window-section-heading"><span>Windows</span><button type="button" disabled={busy} onClick={() => void run(workspace.create)}>New Window</button></div>
+    <nav className="lab-window-list" aria-label="Windows">{catalog.map(window => <div key={window.id} className="lab-window-row" data-window-row={window.id}>
+      <button type="button" className="lab-window-open" data-window-id={window.id}
       aria-current={window.id === workspace.window?.id || undefined} aria-busy={openingId === window.id || undefined} onClick={() => void openWindow(window.id)}>
       <span><strong>{window.title}</strong><small>{openingId === window.id ? 'Opening…' : `${window.views.length} ${window.views.length === 1 ? 'session view' : 'session views'}`}</small></span>
       {window.id === workspace.window?.id ? <span className="lab-window-selected" aria-label="Current Window">✓</span> : null}
-    </button>)}</nav>
+      </button>
+      <button type="button" className="lab-window-delete" aria-label={`Delete Window: ${window.title}`}
+        title={!workspace.hasActiveWindow ? 'Open or create a Window before deleting another one.' : window.id === workspace.window?.id ? 'Switch to another Window before deleting this one.' : 'Delete this layout. Agent sessions keep running.'}
+        disabled={busy || !workspace.hasActiveWindow || window.id === workspace.window?.id} onClick={() => void run(() => workspace.remove(window.id))}>
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M3 6h18M9 6V4h6v2M5 6l1 14h12l1-14M10 10v6m4-6v6" /></svg>
+      </button>
+    </div>)}</nav>
+    {catalog.length ? <p className="lab-window-note">{workspace.hasActiveWindow ? 'Switch to another Window before deleting the active one.' : 'Open or create a Window before deleting another one.'}</p> : null}
     {!catalog.length ? <p className="lab-window-note">Create a Window to organize session views.</p> : null}
     {workspace.window ? <>
       <div className="lab-window-section-heading"><span>Session views</span><button type="button" disabled={busy || workspace.unavailable} onClick={() => void run(async () => {
@@ -113,8 +121,6 @@ export function WindowWorkspaces({ workspace, current, active = true }: {
           {manager.error && manager.status !== 'error' ? <p role="alert">{manager.error}</p> : null}
           {manager.grant ? <div className="lab-window-grant"><button type="button" onClick={saveGrant}>Save private manager grant</button><p className="lab-window-note">Give this file to the assigned Agent. Keep it private.</p></div> : null}
         </details> : null}
-        <button type="button" className="lab-window-delete" disabled={busy} onClick={() => void run(workspace.remove)}>Delete Window</button>
-        <p className="lab-window-note">Deletes the layout. Agent sessions keep running.</p>
       </details>
     </> : null}
     {workspace.error || notice ? <p className="lab-window-note" role="status">{workspace.error ?? notice}</p> : null}

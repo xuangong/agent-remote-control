@@ -14,7 +14,12 @@ Subagent views remain grouped with their source view.
 The product automatically creates a Window when none is selected. It is an
 ordinary shared Window, with no naming or save step required. Each committed
 change persists; refresh and shared links reuse its identity. **New Window**
-creates another Window, and **Delete Window** explicitly removes a layout.
+creates another Window. Each list row has a delete action; the current page's
+active Window cannot be deleted. First switch to or create another Window, then
+delete the inactive one. Other pages can still have that Window open: they show
+**Window deleted** and wait for an explicit choice, without creating a replacement
+or stopping native sessions. Deletion is disabled until the current page has a
+confirmed active Window; an unavailable page must open or create one first.
 
 Open the floating **Window** button to choose a workspace and select one of its
 session views. The entry remembers its dragged position. **View → Window view**

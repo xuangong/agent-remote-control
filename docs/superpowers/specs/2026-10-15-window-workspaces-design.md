@@ -108,9 +108,14 @@ step is required. Every Window uses the same durable service, committed revision
 sharing, and scoped Agent management. Changes persist through ordinary operations;
 there is no separate save action or temporary/saved lifecycle.
 
-Refresh reuses the current Window identity. After confirmed deletion of the
-selected Window, the page creates an empty replacement without copying the
-deleted layout or stopping native sessions. A late deletion or creation reply
+Refresh reuses the current Window identity. The Window list can delete an inactive
+Window; deleting the current page's active Window requires switching to or creating
+another Window first. This is a page interaction rule, not a cross-page ownership
+lock. If another page or the CLI deletes the selected Window, the page transitions
+to a deleted-state notice and explicit Window selection. Deletion also requires
+a confirmed active Window on the current page: while unavailable, the page must
+open or create one before deleting anything else. Deletion never allocates
+a replacement, changes another selection, or stops native sessions. Late replies
 must not replace a newer explicit selection. An unresolved operation remains
 unresolved; an explicit link to an unavailable Window reports that error rather
 than silently opening a different Window.

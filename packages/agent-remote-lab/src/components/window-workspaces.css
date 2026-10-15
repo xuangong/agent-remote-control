@@ -9,8 +9,10 @@
 .lab-window-section-heading > span { color: var(--obs-text-secondary); font-size: 12px; }
 .lab-window-section-heading > button { min-height: 36px; flex: none; padding: 6px 8px; border-color: transparent; color: var(--obs-action); font-size: 12px; }
 .lab-window-list { display: grid; gap: 3px; min-width: 0; }
-.lab-window-list > button { display: flex; align-items: center; gap: 8px; width: 100%; min-width: 0; min-height: 48px; padding: 8px; text-align: left; border-color: transparent; }
-.lab-window-list > button > span:first-child { flex: 1; min-width: 0; }
+.lab-window-row { display: flex; align-items: center; gap: 4px; min-width: 0; }
+.lab-window-row > .lab-window-open { flex: 1; }
+.lab-window-list > button, .lab-window-open { display: flex; align-items: center; gap: 8px; width: 100%; min-width: 0; min-height: 48px; padding: 8px; text-align: left; border-color: transparent; }
+.lab-window-list > button > span:first-child, .lab-window-open > span:first-child { flex: 1; min-width: 0; }
 .lab-window-list strong { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; overflow-wrap: anywhere; line-height: 1.4; font-size: 13px; font-weight: 500; }
 .lab-window-list small { display: block; margin-top: 2px; color: var(--obs-text-secondary); font-size: 11px; }
 .lab-window-list [aria-current="true"] { background: var(--obs-surface-selected); }
@@ -25,7 +27,15 @@
 .lab-window-rename label { display: grid; gap: 6px; min-width: 0; color: var(--obs-text-secondary); }
 .lab-window-rename input { display: block; width: 100%; min-width: 0; max-width: 100%; min-height: 42px; padding: 8px; border: 1px solid var(--obs-control-border); border-radius: var(--obs-radius-sm); background: var(--obs-surface); color: var(--obs-text); font-size: 16px; }
 .lab-window-note { margin: 6px 0 10px; color: var(--obs-text-secondary); font-size: 12px; line-height: 1.5; overflow-wrap: anywhere; }
-.lab-window-delete { margin-top: 12px; min-height: 38px; color: var(--obs-danger); font-size: 12px; }
+.lab-window-delete { display: grid; place-items: center; flex: 0 0 40px; min-height: 44px; padding: 8px; border-color: transparent; color: var(--obs-danger); }
+.lab-window-delete:disabled { color: var(--obs-text-secondary); opacity: .35; }
+.lab-window-unavailable { display: flex; justify-content: center; align-items: flex-start; padding: max(24px, env(safe-area-inset-top)) 16px; }
+.lab-window-recovery { width: min(440px, 100%); min-width: 0; }
+.lab-window-recovery > [role="status"] { margin: 12px 0 24px; color: var(--obs-text-secondary); }
+.lab-window-recovery > [role="status"] strong { display: block; margin-bottom: 6px; color: var(--obs-text); font-size: 18px; }
+.lab-window-recovery[data-deleted="true"] { animation: lab-window-deleted-in 180ms ease-out both; }
+@keyframes lab-window-deleted-in { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }
+@media (prefers-reduced-motion: reduce) { .lab-window-recovery[data-deleted="true"] { animation: none; } }
 .lab-window-grant { margin-top: 10px; }
 .lab-window-grant > button { width: 100%; min-width: 0; font-size: 12px; }
 @media (pointer: coarse) {

@@ -478,8 +478,12 @@ native session or archive a Team or TPM task.
 
 Use the floating **Window** button to switch Windows and select their session
 views. Drag the button to reposition it; **View → Window view** shows or hides
-the entry without changing the layout. **Window options** contains rename,
-copy link, Agent control, and delete actions. Assign
+the entry without changing the layout. Delete an inactive Window directly from
+its list row; switch or create another Window before deleting the current one.
+Other pages showing a deleted Window ask you to choose another without creating
+a replacement. Deletion requires a valid active Window on the current page;
+open or create one first if the current Window is unavailable.
+**Window options** contains rename, copy link, and Agent control. Assign
 one managing Agent session and download its private grant file to enable
 `agent-remote-controller window ...`. These commands use the same committed
 operations as the page; Host pairing credentials are not Window credentials.

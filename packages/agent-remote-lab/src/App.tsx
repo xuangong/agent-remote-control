@@ -1305,7 +1305,7 @@ function AppContent({
   }, [favorites.scope, favorites.ready, favorites.stars, favorites.successionProgress, tracking.sessions, tracking.reconcileFavorites, succession.observerReady]);
 
   const navigationIntent = succession.navigationIntent;
-  const navigationSession = succession.active ? (succession.binding ? addressSession : succession.desired?.roleKey ? succession.selected : undefined) : addressSession;
+  const navigationSession = windowWorkspace.unavailable ? undefined : succession.active ? (succession.binding ? addressSession : succession.desired?.roleKey ? succession.selected : undefined) : addressSession;
   const shareSession = navigationSession ?? (succession.active ? succession.selected : undefined);
   const conversationHistory = useConversationHistory(succession.discovering || navigationIntent.sessionIntent === 'history' && !succession.binding || compositionProtected && !succession.selected ? undefined : navigationSession, sessionEntries, (session, intent, keepOriginal, layout) => {
     const view = intent === 'history' ? undefined : resolveConversationLayout(succession.document, layout);
@@ -1319,7 +1319,7 @@ function AppContent({
     if (!succession.discovering && (navigationIntent.sessionIntent !== 'history' || succession.binding) && (!compositionProtected || succession.selected) && navigationSession && !initialState) saveLastSession(baseUrl, { ...navigationSession, hostId: navigationSession.hostId ?? 'local', ...navigationIntent });
   }, [baseUrl, compositionProtected, navigationSession?.agentId, navigationSession?.hostId, navigationSession?.providerId, navigationSession?.nativeSessionId, navigationIntent, succession.discovering, initialState]);
   const activeCompositionLayout = JSON.stringify([sideSelections, sideFocus, sideAnchor, stackPath.map(viewKey)]);
-  useEffect(() => { if (!sharedWindow && succession.active && !succession.discovering) succession.captureLayout(); }, [activeCompositionLayout, succession.discovering, succession.layoutRevision]);
+  useEffect(() => { if (!windowWorkspace.unavailable && !sharedWindow && succession.active && !succession.discovering) succession.captureLayout(); }, [activeCompositionLayout, windowWorkspace.unavailable, succession.discovering, succession.layoutRevision]);
   const traceScope = JSON.stringify([state?.agent?.id, state?.timeline.epoch]);
   const traceRequest = traceNavigation?.scope === traceScope ? traceNavigation : undefined;
   useEffect(() => {
@@ -1705,8 +1705,10 @@ function AppContent({
       observations={tracking.observations} navigation={viewNavigation} />;
   }
   if (windowWorkspace.unavailable) return <main className="lab-shell lab-window-unavailable">
-    <p role="status">{windowWorkspace.error ?? 'Opening Window…'}</p>
-    <WindowWorkspaces workspace={windowWorkspace} />
+    <div className="lab-window-recovery" data-deleted={windowWorkspace.deleted || undefined}>
+      <p role="status">{windowWorkspace.deleted ? <><strong>Window deleted</strong>This page no longer has a valid Window. Choose another one or create a new one.</> : windowWorkspace.error ?? 'Opening Window…'}</p>
+      <WindowWorkspaces workspace={windowWorkspace} />
+    </div>
   </main>;
   return <SessionViewOperationsContext.Provider value={{ storageScope: baseUrl, transport, enabled: accessReady && activated, resolveTarget: (source, requested) => {
     const roster = teamRosterRef.current;
@@ -1823,7 +1825,7 @@ function AppContent({
     >
       <div className="lab-rail-heading">
         {!compactLayout ? <div ref={setSidebarViewTarget} className="lab-global-view-slot" /> : null}
-        <p className="lab-eyebrow" title={baseUrl}>Workspace</p>
+        <p className="lab-eyebrow" title={baseUrl}>Window</p>
       </div>
       {!compactLayout ? <nav className="lab-sidebar-tabs" aria-label="Sidebar sections">
         <button type="button" aria-pressed={sessionPanel === 'list'} onClick={() => setSessionPanel('list')}>Sessions</button>

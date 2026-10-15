@@ -19,6 +19,24 @@ async function mount(scope: string, hosted = false, initialComposition?: Composi
   await act(async () => root!.render(<Harness />));
   return () => current;
 }
+function windowFixture(id: string): WorkspaceWindow {
+  return { schemaVersion: 1, id, revision: 0, title: id, primaryViewId: 'main', selectedViewId: 'main', mainMinimized: false, views: [createWindowView('main', undefined, 'primary')] };
+}
+function hostedWindows(...windows: WorkspaceWindow[]) {
+  const documents = new Map(windows.map(window => [window.id, window]));
+  const list = vi.spyOn(WindowWorkspaceClient.prototype, 'list').mockImplementation(async () => [...documents.values()]);
+  const inspect = vi.spyOn(WindowWorkspaceClient.prototype, 'inspect').mockImplementation(async id => {
+    const window = documents.get(id); if (!window) throw new WindowRequestError('Window deleted', 404);
+    return { window };
+  });
+  const changes = vi.spyOn(WindowWorkspaceClient.prototype, 'changes').mockImplementation((_id, _revision, signal) => new Promise((_resolve, reject) => {
+    signal.addEventListener('abort', () => reject(signal.reason), { once: true });
+  }));
+  const create = vi.spyOn(WindowWorkspaceClient.prototype, 'create').mockImplementation(async window => { documents.set(window.id, window); return { window }; });
+  const remove = vi.spyOn(WindowWorkspaceClient.prototype, 'delete').mockImplementation(async window => { documents.delete(window.id); });
+  const recover = vi.spyOn(WindowWorkspaceClient.prototype, 'recoverDelete');
+  return { documents, list, inspect, changes, create, remove, recover };
+}
 it('keeps independent Window identities, opens local snapshots and restores browser history targets', async () => {
   const read = await mount('local-route'); const first = read().window!.id;
   await act(async () => read().create()); const second = read().window!.id;
@@ -73,23 +91,23 @@ it('rejects a local operation when authoritative storage cannot save its result'
 
 it('preserves a newer selection when deletion of the previous Window finishes', async () => {
   const first: WorkspaceWindow = { schemaVersion: 1, id: 'first', revision: 0, title: 'First', primaryViewId: 'main', selectedViewId: 'main', mainMinimized: false, views: [createWindowView('main', undefined, 'primary')] };
-  const second = { ...first, id: 'second', title: 'Second' };
-  history.replaceState(null, '', '/?window=first');
-  vi.spyOn(WindowWorkspaceClient.prototype, 'list').mockResolvedValue([first, second]);
-  vi.spyOn(WindowWorkspaceClient.prototype, 'inspect').mockImplementation(async id => ({ window: id === first.id ? first : second }));
+  const second = { ...first, id: 'second', title: 'Second' }, third = { ...first, id: 'third', title: 'Third' };
+  history.replaceState(null, '', '/?window=second');
+  vi.spyOn(WindowWorkspaceClient.prototype, 'list').mockResolvedValue([first, second, third]);
+  vi.spyOn(WindowWorkspaceClient.prototype, 'inspect').mockImplementation(async id => ({ window: id === first.id ? first : id === second.id ? second : third }));
   vi.spyOn(WindowWorkspaceClient.prototype, 'changes').mockImplementation((_id, _revision, signal) => new Promise((_resolve, reject) => {
     signal!.addEventListener('abort', () => reject(signal!.reason), { once: true });
   }));
   let complete!: () => void;
   vi.spyOn(WindowWorkspaceClient.prototype, 'delete').mockImplementation(() => new Promise<void>(resolve => { complete = resolve; }));
   const read = await mount('https://delete.example/', true);
-  const pending = read().remove();
-  await act(async () => { await read().open(second.id); });
+  const pending = read().remove(first.id);
+  await act(async () => { await read().open(third.id); });
   await act(async () => { complete(); await pending; });
-  expect(read().window?.id).toBe(second.id);
-  expect(new URL(location.href).searchParams.get('window')).toBe(second.id);
-  expect(sessionStorage.getItem('agent-remote:recovery:https://delete.example/:shared-window')).toBe(second.id);
-  expect(read().windows.map(window => window.id)).toEqual([second.id]);
+  expect(read().window?.id).toBe(third.id);
+  expect(new URL(location.href).searchParams.get('window')).toBe(third.id);
+  expect(sessionStorage.getItem('agent-remote:recovery:https://delete.example/:shared-window')).toBe(third.id);
+  expect(read().windows.map(window => window.id)).toEqual([second.id, third.id]);
 });
 
 it('retains one exact create request across lost replies, explicit retry and page recovery', async () => {
@@ -164,9 +182,10 @@ it('retains an uncertain creation when a replay is refused after its receipt exp
 
 it('retains the original delete identity until its receipt can be settled', async () => {
   const window: WorkspaceWindow = { schemaVersion: 1, id: 'pending-delete', revision: 2, title: 'Pending delete', primaryViewId: 'main', selectedViewId: 'main', mainMinimized: false, views: [createWindowView('main', undefined, 'primary')] };
-  history.replaceState(null, '', `/?window=${window.id}`);
-  vi.spyOn(WindowWorkspaceClient.prototype, 'list').mockResolvedValue([window]);
-  vi.spyOn(WindowWorkspaceClient.prototype, 'inspect').mockResolvedValue({ window });
+  const active = { ...window, id: 'active-window' };
+  history.replaceState(null, '', `/?window=${active.id}`);
+  vi.spyOn(WindowWorkspaceClient.prototype, 'list').mockResolvedValue([window, active]);
+  vi.spyOn(WindowWorkspaceClient.prototype, 'inspect').mockImplementation(async id => ({ window: id === window.id ? window : active }));
   vi.spyOn(WindowWorkspaceClient.prototype, 'changes').mockImplementation((_id, _revision, signal) => new Promise((_resolve, reject) => {
     signal.addEventListener('abort', () => reject(signal.reason), { once: true });
   }));
@@ -177,18 +196,20 @@ it('retains the original delete identity until its receipt can be settled', asyn
     throw new WindowMutationUnknownError(source.id, { ...identity, baseRevision: source.revision, operation: { type: 'delete' } }, new Error('Offline'));
   });
   const read = await mount('https://pending-delete.example/', true);
-  await act(async () => { await expect(read().remove()).rejects.toMatchObject({ name: 'WindowMutationUnknownError' }); });
+  await act(async () => { await expect(read().remove(window.id)).rejects.toMatchObject({ name: 'WindowMutationUnknownError' }); });
   remove.mockRejectedValueOnce(new WindowRequestError('Expired', 410, 'operation_expired'));
-  await act(async () => { await expect(read().remove()).rejects.toMatchObject({ name: 'WindowMutationUnknownError' }); });
+  await act(async () => { await expect(read().remove(window.id)).rejects.toMatchObject({ name: 'WindowMutationUnknownError' }); });
   expect(remove.mock.calls[1]).toEqual(remove.mock.calls[0]);
-  expect(read().window?.id).toBe(window.id);
+  expect(read().window?.id).toBe(active.id);
   recover.mockResolvedValueOnce(undefined);
   const create = vi.spyOn(WindowWorkspaceClient.prototype, 'create').mockImplementation(async window => ({ window }));
-  await act(async () => { await read().remove(); });
+  await act(async () => { await read().remove(window.id); });
   expect(remove).toHaveBeenCalledTimes(2);
   expect(recover.mock.calls[1]).toEqual(remove.mock.calls[0]);
-  expect(create).toHaveBeenCalledTimes(1);
-  expect(read().window?.id).not.toBe(window.id);
+  expect(create).not.toHaveBeenCalled();
+  expect(read().window?.id).toBe(active.id);
+  expect(read().windows.map(window => window.id)).toEqual([active.id]);
+  expect(new URL(location.href).searchParams.get('window')).toBe(active.id);
 });
 
 it('keeps the latest requested Window when an earlier open returns later', async () => {
@@ -253,76 +274,229 @@ it('keeps the catalog current after renaming the same Window without changing it
   expect(globalThis.document.querySelector(`[data-window-id="${before.id}"] strong`)?.textContent).toBe('Renamed workspace');
 }, 10000);
 
-it('replaces an explicitly deleted current Window with one new empty Window', async () => {
-  const read = await mount('default-delete'); const first = read().window!.id;
-  await act(async () => read().operate({ type: 'view.create', view: createWindowView('deleted-dock', { hostId: 'host', providerId: 'recorded', nativeSessionId: 'existing', title: 'Existing' }) }));
-  await act(async () => read().remove());
-  expect(read().window).toBeDefined();
-  expect(read().window!.id).not.toBe(first);
-  expect(read().window!.views).toEqual([createWindowView('main', undefined, 'primary')]);
-  expect(read().windows).toHaveLength(1);
-  expect(new URL(location.href).searchParams.get('window')).toBe(read().window!.id);
+it('rejects deleting the active local Window and preserves its layout', async () => {
+  const scope = 'default-delete', read = await mount(scope);
+  await act(async () => read().operate({ type: 'view.create', view: createWindowView('retained-dock') }));
+  const before = read().window!;
+  await act(async () => { await expect(read().remove(before.id)).rejects.toThrow(); });
+  expect(read().window).toEqual(before); expect(read().windows).toEqual([before]);
+  expect(read().unavailable).toBe(false);
+  expect(new URL(location.href).searchParams.get('window')).toBe(before.id);
+  expect(JSON.parse(localStorage.getItem(`agent-remote:recovery:${scope}:shared-window:${before.id}`)!)).toEqual(before);
 }, 10000);
 
 it('keeps a missing explicit Window link as an error without creating a replacement', async () => {
   history.replaceState(null, '', '/?window=missing-window');
   const read = await mount('missing-window-link');
   expect(read().window).toBeUndefined(); expect(read().error).toContain('unavailable');
+  expect(read().unavailable).toBe(true); expect(read().hasActiveWindow).toBe(false);
   expect(read().windows).toHaveLength(0);
   expect(new URL(location.href).searchParams.get('window')).toBe('missing-window');
 }, 10000);
 
-it('keeps a newer choice when empty replacement creation completes after deletion', async () => {
-  const first: WorkspaceWindow = { schemaVersion: 1, id: 'deleted-current', revision: 0, title: 'First', primaryViewId: 'main', selectedViewId: 'main', mainMinimized: false, views: [createWindowView('main', undefined, 'primary')] };
-  const second = { ...first, id: 'newer-choice', title: 'Second' };
-  history.replaceState(null, '', `/?window=${first.id}`);
-  vi.spyOn(WindowWorkspaceClient.prototype, 'list').mockResolvedValue([first, second]);
-  vi.spyOn(WindowWorkspaceClient.prototype, 'inspect').mockImplementation(async id => ({ window: id === first.id ? first : second }));
-  vi.spyOn(WindowWorkspaceClient.prototype, 'changes').mockImplementation((_id, _revision, signal) => new Promise((_resolve, reject) => {
+it('deletes a nonactive local Window without changing the current selection', async () => {
+  const scope = 'local-target-delete', read = await mount(scope); const target = read().window!;
+  await act(async () => read().create());
+  await act(async () => read().operate({ type: 'view.create', view: createWindowView('retained-dock') }));
+  const active = read().window!;
+  await act(async () => read().remove(target.id));
+  expect(read().window).toEqual(active); expect(read().windows).toEqual([active]);
+  expect(read().unavailable).toBe(false);
+  expect(new URL(location.href).searchParams.get('window')).toBe(active.id);
+  expect(sessionStorage.getItem(`agent-remote:recovery:${scope}:shared-window`)).toBe(active.id);
+  expect(localStorage.getItem(`agent-remote:recovery:${scope}:shared-window:${target.id}`)).toBeNull();
+}, 10000);
+
+it.each([false, true])('rejects active hosted deletion before dispatch with another Window=%s', async another => {
+  const active = windowFixture('active'), target = windowFixture('other');
+  const fixture = hostedWindows(active, ...(another ? [target] : []));
+  history.replaceState(null, '', `/?window=${active.id}`);
+  const read = await mount('https://active-delete.example/', true);
+  await act(async () => { await expect(read().remove(active.id)).rejects.toThrow(); });
+  await act(async () => { await expect(read().remove(undefined as unknown as string)).rejects.toThrow(); });
+  expect(fixture.remove).not.toHaveBeenCalled(); expect(fixture.recover).not.toHaveBeenCalled(); expect(fixture.create).not.toHaveBeenCalled();
+  expect(read().window).toEqual(active); expect(read().windows).toHaveLength(another ? 2 : 1);
+  expect(new URL(location.href).searchParams.get('window')).toBe(active.id);
+}, 10000);
+
+it.each(['loading', 'cached', 'missing', 'deleted'] as const)('requires a valid active Window before reading a delete target when the page is %s', async state => {
+  const active = windowFixture('active'), target = windowFixture('delete-target');
+  const scope = `https://${state}-active-delete.example/`;
+  const fixture = hostedWindows(...(state === 'missing' ? [target] : [active, target]));
+  history.replaceState(null, '', `/?window=${active.id}`);
+  if (state === 'cached') localStorage.setItem(`agent-remote:recovery:${scope}:shared-window:${active.id}`, JSON.stringify(active));
+  if (state === 'loading' || state === 'cached') fixture.inspect.mockImplementationOnce(() => new Promise(() => {}));
+  if (state === 'deleted') fixture.changes.mockImplementationOnce(async id => { fixture.documents.delete(id); throw new WindowRequestError('Window deleted', 404); });
+  const read = await mount(scope, true);
+  expect(read().window).toEqual(state === 'cached' ? active : undefined);
+  fixture.inspect.mockClear();
+  await act(async () => { await expect(read().remove(target.id)).rejects.toThrow(); });
+  expect(read().hasActiveWindow).toBe(false);
+  expect(fixture.inspect).not.toHaveBeenCalled(); expect(fixture.remove).not.toHaveBeenCalled(); expect(fixture.recover).not.toHaveBeenCalled();
+  expect(fixture.documents.get(target.id)).toEqual(target);
+  expect(new URL(location.href).searchParams.get('window')).toBe(active.id);
+}, 10000);
+
+it('rejects an undispatched delete if the active Window disappears while its target is inspected', async () => {
+  const active = windowFixture('active'), target = windowFixture('delete-target'), fixture = hostedWindows(active, target);
+  history.replaceState(null, '', `/?window=${active.id}`);
+  let deleteActive!: () => void, inspectTarget!: () => void;
+  fixture.changes.mockImplementationOnce((_id, _revision, signal) => new Promise((_resolve, reject) => {
+    deleteActive = () => { fixture.documents.delete(active.id); reject(new WindowRequestError('Window deleted', 404)); };
     signal.addEventListener('abort', () => reject(signal.reason), { once: true });
   }));
-  vi.spyOn(WindowWorkspaceClient.prototype, 'delete').mockResolvedValue(undefined);
+  const read = await mount('https://active-disappears.example/', true);
+  fixture.inspect.mockImplementationOnce(() => new Promise(resolve => { inspectTarget = () => resolve({ window: target }); }));
+  const deleting = read().remove(target.id);
+  await act(async () => deleteActive());
+  expect(read().window).toBeUndefined(); expect(read().unavailable).toBe(true);
+  await act(async () => { inspectTarget(); await expect(deleting).rejects.toThrow(); });
+  expect(fixture.remove).not.toHaveBeenCalled(); expect(fixture.recover).not.toHaveBeenCalled();
+  await act(async () => { await expect(read().open(target.id)).resolves.toBeUndefined(); });
+  expect(read().window).toEqual(target); expect(read().unavailable).toBe(false);
+}, 10000);
+
+it('does not select an old open snapshot after its Window deletion is confirmed', async () => {
+  const active = windowFixture('active'), target = windowFixture('delete-target'), fixture = hostedWindows(active, target);
+  history.replaceState(null, '', `/?window=${active.id}`);
+  const read = await mount('https://deleted-open-snapshot.example/', true);
+  let openTarget!: () => void;
+  fixture.inspect.mockImplementationOnce(() => new Promise(resolve => { openTarget = () => resolve({ window: target }); }));
+  const opening = read().open(target.id);
+  await act(async () => read().remove(target.id));
+  expect(fixture.remove).toHaveBeenCalledTimes(1); expect(read().windows).toEqual([active]);
+  await act(async () => { openTarget(); await Promise.allSettled([opening]); });
+  expect(read().window).toEqual(active); expect(read().windows).toEqual([active]); expect(read().unavailable).toBe(false);
+  expect(new URL(location.href).searchParams.get('window')).toBe(active.id);
+  expect(fixture.create).not.toHaveBeenCalled();
+}, 10000);
+
+it('does not select an old open snapshot while its Window deletion is already dispatched', async () => {
+  const active = windowFixture('active'), target = windowFixture('delete-target'), fixture = hostedWindows(active, target);
+  history.replaceState(null, '', `/?window=${active.id}`);
+  const read = await mount('https://dispatched-open-snapshot.example/', true);
+  let openTarget!: () => void, deleteTarget!: () => void;
+  fixture.inspect.mockImplementationOnce(() => new Promise(resolve => { openTarget = () => resolve({ window: target }); }));
+  fixture.remove.mockImplementation(window => new Promise(resolve => { deleteTarget = () => { fixture.documents.delete(window.id); resolve(); }; }));
+  const opening = read().open(target.id), deleting = read().remove(target.id);
+  await act(async () => { await vi.waitFor(() => expect(fixture.remove).toHaveBeenCalledTimes(1)); });
+  try {
+    await act(async () => { openTarget(); await Promise.allSettled([opening]); });
+    expect(read().window).toEqual(active); expect(read().unavailable).toBe(false);
+    expect(new URL(location.href).searchParams.get('window')).toBe(active.id);
+  } finally { await act(async () => { deleteTarget(); await deleting; }); }
+  expect(read().window).toEqual(active); expect(read().windows).toEqual([active]);
+  expect(fixture.create).not.toHaveBeenCalled();
+}, 10000);
+
+it('shares one pending hosted delete for duplicate requests without changing the active Window', async () => {
+  const active = windowFixture('active'), target = windowFixture('delete-target'), fixture = hostedWindows(active, target);
+  history.replaceState(null, '', `/?window=${active.id}`);
   let complete!: () => void;
-  const create = vi.spyOn(WindowWorkspaceClient.prototype, 'create').mockImplementation(window => new Promise(resolve => { complete = () => resolve({ window }); }));
-  const read = await mount('https://replacement-race.example/', true);
+  fixture.remove.mockImplementation(window => new Promise(resolve => { complete = () => { fixture.documents.delete(window.id); resolve(); }; }));
+  const read = await mount('https://duplicate-delete.example/', true);
+  let first!: Promise<void>, second!: Promise<void>;
+  await act(async () => { first = read().remove(target.id); second = read().remove(target.id); await vi.waitFor(() => expect(fixture.remove).toHaveBeenCalledTimes(1)); });
+  await act(async () => { complete(); await Promise.all([first, second]); });
+  expect(fixture.remove).toHaveBeenCalledTimes(1); expect(fixture.remove.mock.calls[0]?.[0]).toMatchObject({ id: target.id });
+  expect(read().window).toEqual(active); expect(read().windows.map(window => window.id)).toEqual([active.id]);
+  expect(fixture.create).not.toHaveBeenCalled(); expect(new URL(location.href).searchParams.get('window')).toBe(active.id);
+}, 10000);
+
+it('releases an undispatched delete when an earlier navigation makes the target active', async () => {
+  const active = windowFixture('active'), target = windowFixture('pending-target'), fixture = hostedWindows(active, target);
+  history.replaceState(null, '', `/?window=${active.id}`);
+  const read = await mount('https://undispatched-delete.example/', true);
+  let openTarget!: () => void, inspectTarget!: () => void;
+  fixture.inspect.mockImplementationOnce(() => new Promise(resolve => { openTarget = () => resolve({ window: target }); }))
+    .mockImplementationOnce(() => new Promise(resolve => { inspectTarget = () => resolve({ window: target }); }));
+  const opening = read().open(target.id), deleting = read().remove(target.id);
+  await act(async () => { openTarget(); await opening; });
+  expect(read().window).toEqual(target);
+  await act(async () => { inspectTarget(); await expect(deleting).rejects.toThrow(/active|switch/i); });
+  expect(fixture.remove).not.toHaveBeenCalled(); expect(fixture.recover).not.toHaveBeenCalled();
+  await act(async () => read().open(active.id));
+  await act(async () => { await expect(read().open(target.id)).resolves.toBeUndefined(); });
+  expect(read().window).toEqual(target);
+}, 10000);
+
+it('keeps the target and current selection when a nonactive deletion is rejected', async () => {
+  const active = windowFixture('active'), target = windowFixture('delete-target'), fixture = hostedWindows(active, target);
+  history.replaceState(null, '', `/?window=${active.id}`);
+  fixture.remove.mockRejectedValueOnce(new WindowRequestError('Delete refused', 403));
+  const read = await mount('https://refused-delete.example/', true);
+  await act(async () => { await expect(read().remove(target.id)).rejects.toThrow('Delete refused'); });
+  expect(read().window).toEqual(active); expect(read().windows).toEqual([active, target]);
+  expect(read().unavailable).toBe(false); expect(fixture.create).not.toHaveBeenCalled();
+}, 10000);
+
+it('does not apply a previous service deletion to a same-id Window after switching service', async () => {
+  const firstScope = 'https://first-scope.example/', secondScope = 'https://second-scope.example/';
+  const active = windowFixture('first-active'), target = windowFixture('shared-id'), replacement = { ...target, title: 'Second service Window' };
+  const fixture = hostedWindows(active, target);
+  history.replaceState(null, '', `/?window=${active.id}`);
+  let complete!: () => void;
+  fixture.remove.mockImplementation(() => new Promise(resolve => { complete = resolve; }));
+  const element = document.createElement('div'); document.body.append(element); root = createRoot(element);
+  const compositions = new Map([firstScope, secondScope].map(scope => [scope, createCompositionDocument(scope)]));
+  let current!: ReturnType<typeof useWindowWorkspace>;
+  function Harness({ scope }: { scope: string }) { current = useWindowWorkspace(scope, true, true, compositions.get(scope)!); return null; }
+  await act(async () => root!.render(<Harness scope={firstScope} />));
   let pending!: Promise<void>;
-  await act(async () => { pending = read().remove(); await vi.waitFor(() => expect(create).toHaveBeenCalledTimes(1)); });
-  await act(async () => read().open(second.id));
+  await act(async () => { pending = current.remove(target.id); await vi.waitFor(() => expect(fixture.remove).toHaveBeenCalledTimes(1)); });
+  fixture.documents.clear(); fixture.documents.set(replacement.id, replacement);
+  await act(async () => {
+    history.replaceState(null, '', `/?window=${replacement.id}`);
+    root!.render(<Harness scope={secondScope} />);
+  });
+  expect(current.window).toEqual(replacement);
   await act(async () => { complete(); await pending; });
-  expect(read().window?.id).toBe(second.id);
-  expect(new URL(location.href).searchParams.get('window')).toBe(second.id);
-  expect(sessionStorage.getItem('agent-remote:recovery:https://replacement-race.example/:shared-window')).toBe(second.id);
+  expect(current.window).toEqual(replacement); expect(current.windows).toEqual([replacement]); expect(current.unavailable).toBe(false);
+  expect(new URL(location.href).searchParams.get('window')).toBe(replacement.id);
+  expect(sessionStorage.getItem(`agent-remote:recovery:${secondScope}:shared-window`)).toBe(replacement.id);
 }, 10000);
 
-
-it('replaces a selected Window removed by another local page with an empty Window', async () => {
-  const scope = 'external-local-delete'; const read = await mount(scope); const id = read().window!.id;
-  await act(async () => read().operate({ type: 'view.create', view: createWindowView('old-dock') }));
-  await act(async () => { dispatchEvent(new StorageEvent('storage', { key: `agent-remote:recovery:${scope}:shared-window:${id}`, newValue: null })); });
-  expect(read().window?.id).not.toBe(id);
-  expect(read().window?.views).toEqual([createWindowView('main', undefined, 'primary')]);
+it.each([false, true])('invalidates an externally deleted active local Window with another Window=%s', async another => {
+  const scope = 'external-local-delete'; const read = await mount(scope); const original = read().window!;
+  let other: WorkspaceWindow | undefined;
+  if (another) { await act(async () => read().create()); other = read().window; await act(async () => read().open(original.id)); }
+  await act(async () => {
+    const key = `agent-remote:recovery:${scope}:shared-window:${original.id}`;
+    localStorage.removeItem(key); dispatchEvent(new StorageEvent('storage', { key, newValue: null }));
+  });
+  expect(read().window).toBeUndefined(); expect(read().unavailable).toBe(true); expect(read().deleted).toBe(true);
+  expect(read().authority).toBeUndefined(); expect(read().readWindow()).toBeUndefined();
+  expect(read().windows.map(window => window.id)).toEqual(other ? [other.id] : []);
+  expect(new URL(location.href).searchParams.get('window')).toBe(original.id);
+  if (other) await act(async () => read().open(other!.id));
+  else await act(async () => read().create());
+  expect(read().window).toBeDefined(); expect(read().unavailable).toBe(false); expect(read().deleted).toBe(false);
+  if (other) expect(read().window).toEqual(other);
 }, 10000);
 
-it('replaces a selected hosted Window after confirmed deletion without copying its layout', async () => {
-  const original: WorkspaceWindow = { schemaVersion: 1, id: 'externally-deleted', revision: 0, title: 'Deleted', primaryViewId: 'main', selectedViewId: 'main', mainMinimized: false, views: [createWindowView('main', { hostId: 'host', providerId: 'recorded', nativeSessionId: 'still-alive', title: 'Native survives' }, 'primary'), createWindowView('old-dock')] };
+it.each([false, true])('invalidates an externally deleted active hosted Window with another Window=%s', async another => {
+  const original = windowFixture('externally-deleted'), other = windowFixture('existing');
+  const fixture = hostedWindows(original, ...(another ? [other] : []));
+  fixture.changes.mockImplementationOnce(async id => { fixture.documents.delete(id); throw new WindowRequestError('Window deleted', 404); });
   history.replaceState(null, '', `/?window=${original.id}`);
-  vi.spyOn(WindowWorkspaceClient.prototype, 'list').mockResolvedValue([original]);
-  vi.spyOn(WindowWorkspaceClient.prototype, 'inspect').mockResolvedValue({ window: original });
-  vi.spyOn(WindowWorkspaceClient.prototype, 'changes').mockImplementation((_id, _revision, signal) => new Promise((_resolve, reject) => { signal.addEventListener('abort', () => reject(signal.reason), { once: true }); })).mockRejectedValueOnce(new WindowRequestError('Deleted', 404));
-  const create = vi.spyOn(WindowWorkspaceClient.prototype, 'create').mockImplementation(async window => ({ window }));
   const read = await mount('https://external-delete.example/', true);
-  await act(async () => { await vi.waitFor(() => expect(read().window?.id).not.toBe(original.id)); });
-  expect(create).toHaveBeenCalledTimes(1);
-  expect(read().window?.views).toEqual([createWindowView('main', undefined, 'primary')]);
-  expect(read().windows.map(window => window.id)).not.toContain(original.id);
+  await act(async () => { await vi.waitFor(() => expect(read().unavailable).toBe(true)); });
+  expect(read().window).toBeUndefined(); expect(read().deleted).toBe(true);
+  expect(fixture.create).not.toHaveBeenCalled(); expect(fixture.remove).not.toHaveBeenCalled();
+  expect(read().windows.map(window => window.id)).toEqual(another ? [other.id] : []);
+  expect(new URL(location.href).searchParams.get('window')).toBe(original.id);
+  if (another) await act(async () => read().open(other.id));
+  else await act(async () => read().create());
+  expect(read().window).toBeDefined(); expect(read().unavailable).toBe(false); expect(read().deleted).toBe(false);
+  if (another) expect(read().window).toEqual(other);
 }, 10000);
 
-it('replaces a deleted current Window after a different Window failed to open', async () => {
+it('invalidates a deleted current Window after a different Window failed to open', async () => {
   const scope = 'failed-open-deletion'; const read = await mount(scope); const id = read().window!.id;
   await act(async () => { await expect(read().open('missing')).rejects.toThrow('unavailable'); });
   await act(async () => { dispatchEvent(new StorageEvent('storage', { key: `agent-remote:recovery:${scope}:shared-window:${id}`, newValue: null })); });
-  expect(read().window?.id).not.toBe(id);
-  expect(read().window?.views).toEqual([createWindowView('main', undefined, 'primary')]);
+  expect(read().window).toBeUndefined(); expect(read().unavailable).toBe(true);
+  expect(new URL(location.href).searchParams.get('window')).toBe(id);
 }, 10000);
 
 it('does not replace a missing explicit hosted Window even when its cache exists', async () => {
@@ -341,57 +515,38 @@ it('does not replace a missing explicit hosted Window even when its cache exists
   expect(new URL(location.href).searchParams.get('window')).toBe(cached.id);
 }, 10000);
 
-it('blocks deleted Window edits during empty replacement creation and after creation fails', async () => {
-  const original: WorkspaceWindow = { schemaVersion: 1, id: 'replacement-pending', revision: 0, title: 'Old', primaryViewId: 'main', selectedViewId: 'main', mainMinimized: false, views: [createWindowView('main', undefined, 'primary')] };
+it('blocks externally deleted Window edits when explicit creation fails', async () => {
+  const original = windowFixture('deleted-before-create'), fixture = hostedWindows(original);
+  fixture.changes.mockImplementationOnce(async id => { fixture.documents.delete(id); throw new WindowRequestError('Window deleted', 404); });
   history.replaceState(null, '', `/?window=${original.id}`);
-  vi.spyOn(WindowWorkspaceClient.prototype, 'list').mockResolvedValue([original]);
-  vi.spyOn(WindowWorkspaceClient.prototype, 'inspect').mockResolvedValue({ window: original });
-  vi.spyOn(WindowWorkspaceClient.prototype, 'changes').mockImplementation((_id, _revision, signal) => new Promise((_resolve, reject) => { signal.addEventListener('abort', () => reject(signal.reason), { once: true }); }));
-  vi.spyOn(WindowWorkspaceClient.prototype, 'delete').mockResolvedValue(undefined);
-  let fail!: () => void;
-  vi.spyOn(WindowWorkspaceClient.prototype, 'create').mockImplementation(() => new Promise((_resolve, reject) => { fail = () => reject(new WindowRequestError('Replacement refused', 403)); }));
-  const read = await mount('https://pending-empty.example/', true);
-  let pending!: Promise<void>;
-  await act(async () => { pending = read().remove(); await vi.waitFor(() => expect(fail).toBeDefined()); });
-  expect(read().unavailable).toBe(true);
-  expect(read().authority).toBeUndefined();
+  const read = await mount('https://deleted-edit.example/', true);
+  expect(read().unavailable).toBe(true); expect(read().window).toBeUndefined();
+  expect(read().authority).toBeUndefined(); expect(fixture.create).not.toHaveBeenCalled();
   await expect(read().operate({ type: 'rename', title: 'Cannot edit deleted Window' })).rejects.toThrow();
-  await act(async () => { fail(); await expect(pending).rejects.toThrow('Replacement refused'); });
-  expect(read().unavailable).toBe(true);
-  expect(read().authority).toBeUndefined();
+  fixture.create.mockRejectedValueOnce(new WindowRequestError('Creation refused', 403));
+  await act(async () => { await expect(read().create()).rejects.toThrow('Creation refused'); });
+  expect(read().unavailable).toBe(true); expect(read().authority).toBeUndefined();
+  expect(read().window).toBeUndefined(); expect(new URL(location.href).searchParams.get('window')).toBe(original.id);
 }, 10000);
 
-it.each(['unknown', 'committed'] as const)('settles an earlier %s creation without replay or adopting its layout during deletion recovery', async outcome => {
+it.each(['unknown', 'committed'] as const)('leaves an unrelated %s creation untouched when the active Window is externally deleted', async outcome => {
   const scope = `https://${outcome}-prior-create.example/`;
   const original: WorkspaceWindow = { schemaVersion: 1, id: 'selected-A', revision: 0, title: 'A', primaryViewId: 'main', selectedViewId: 'main', mainMinimized: false, views: [createWindowView('main', undefined, 'primary')] };
   const prior = { ...original, id: 'unknown-C', views: [...original.views, createWindowView('unrelated-dock')] };
   const request = { window: prior, operationId: 'prior-create', issuedAt: Date.now() };
   sessionStorage.setItem(`agent-remote:recovery:${scope}:shared-window:pending-create`, JSON.stringify({ request, bindings: [] }));
   history.replaceState(null, '', `/?window=${original.id}`);
-  vi.spyOn(WindowWorkspaceClient.prototype, 'list').mockResolvedValue([original]);
-  vi.spyOn(WindowWorkspaceClient.prototype, 'inspect').mockResolvedValue({ window: original });
-  vi.spyOn(WindowWorkspaceClient.prototype, 'changes').mockImplementation((_id, _revision, signal) => new Promise((_resolve, reject) => { signal.addEventListener('abort', () => reject(signal.reason), { once: true }); }));
-  vi.spyOn(WindowWorkspaceClient.prototype, 'delete').mockResolvedValue(undefined);
+  const fixture = hostedWindows(original, ...(outcome === 'committed' ? [prior] : []));
+  fixture.changes.mockImplementationOnce(async id => { fixture.documents.delete(id); throw new WindowRequestError('Window deleted', 404); });
   const recover = vi.spyOn(WindowWorkspaceClient.prototype, 'recoverCreate');
-  if (outcome === 'unknown') recover.mockRejectedValue(new WindowMutationUnknownError(prior.id, request, new Error('Unavailable receipt')));
-  else recover.mockResolvedValue({ window: prior });
-  const create = vi.spyOn(WindowWorkspaceClient.prototype, 'create').mockImplementation(async window => ({ window }));
   const read = await mount(scope, true);
-  if (outcome === 'unknown') {
-    await act(async () => { await expect(read().remove()).rejects.toMatchObject({ name: 'WindowMutationUnknownError' }); });
-    expect(create).not.toHaveBeenCalled(); expect(read().unavailable).toBe(true);
-    expect(JSON.parse(sessionStorage.getItem(`agent-remote:recovery:${scope}:shared-window:pending-create`)!)).toMatchObject({ request });
-  } else {
-    await act(async () => read().remove());
-    expect(create).toHaveBeenCalledTimes(1);
-    expect(read().window?.id).not.toBe(prior.id);
-    expect(read().window?.views).toEqual([createWindowView('main', undefined, 'primary')]);
-    expect(read().windows.map(window => window.id)).toContain(prior.id);
-  }
-  expect(recover).toHaveBeenCalledWith(prior, request);
+  expect(read().unavailable).toBe(true); expect(read().window).toBeUndefined();
+  expect(fixture.create).not.toHaveBeenCalled(); expect(recover).not.toHaveBeenCalled();
+  expect(JSON.parse(sessionStorage.getItem(`agent-remote:recovery:${scope}:shared-window:pending-create`)!)).toMatchObject({ request });
+  expect(read().windows.map(window => window.id)).toEqual(outcome === 'committed' ? [prior.id] : []);
 }, 10000);
 
-it('keeps an already requested navigation valid while the current Window is replaced after deletion', async () => {
+it('keeps an already requested navigation valid when the current Window is externally deleted', async () => {
   const first: WorkspaceWindow = { schemaVersion: 1, id: 'deleted-before-navigation', revision: 0, title: 'First', primaryViewId: 'main', selectedViewId: 'main', mainMinimized: false, views: [createWindowView('main', undefined, 'primary')] };
   const second = { ...first, id: 'pending-destination', title: 'Second' };
   history.replaceState(null, '', `/?window=${first.id}`);
@@ -403,14 +558,15 @@ it('keeps an already requested navigation valid while the current Window is repl
     if (id === first.id) deleteFirst = () => reject(new WindowRequestError('Deleted', 404));
     signal.addEventListener('abort', () => reject(signal.reason), { once: true });
   }));
-  vi.spyOn(WindowWorkspaceClient.prototype, 'create').mockImplementation(async window => { committed.set(window.id, window); return { window }; });
+  const create = vi.spyOn(WindowWorkspaceClient.prototype, 'create');
   const read = await mount('https://pending-navigation.example/', true);
   const pending = read().open(second.id);
   await act(async () => deleteFirst());
-  await vi.waitFor(async () => { await act(async () => {}); expect(read().window?.id).not.toBe(first.id); });
+  expect(read().window).toBeUndefined(); expect(read().unavailable).toBe(true);
   await act(async () => { openSecond(); await pending; });
   expect(read().window?.id).toBe(second.id);
   expect(new URL(location.href).searchParams.get('window')).toBe(second.id);
+  expect(read().unavailable).toBe(false); expect(create).not.toHaveBeenCalled();
 }, 10000);
 
 it('renders cached Window before hosted inspection completes without starting synchronization', async () => {
@@ -429,22 +585,20 @@ it('renders cached Window before hosted inspection completes without starting sy
   expect(changes).toHaveBeenCalledTimes(1);
 }, 10000);
 
-it('does not select a late empty replacement after the page unmounts', async () => {
+it('does not change the route when a nonactive deletion finishes after unmount', async () => {
   const scope = 'https://unmounted-replacement.example/';
-  const original: WorkspaceWindow = { schemaVersion: 1, id: 'unmounted-original', revision: 0, title: 'Original', primaryViewId: 'main', selectedViewId: 'main', mainMinimized: false, views: [createWindowView('main', undefined, 'primary')] };
+  const original = windowFixture('unmounted-original'), target = windowFixture('unmounted-target');
   history.replaceState(null, '', `/?window=${original.id}`);
-  vi.spyOn(WindowWorkspaceClient.prototype, 'list').mockResolvedValue([original]);
-  vi.spyOn(WindowWorkspaceClient.prototype, 'inspect').mockResolvedValue({ window: original });
-  vi.spyOn(WindowWorkspaceClient.prototype, 'changes').mockImplementation((_id, _revision, signal) => new Promise((_resolve, reject) => { signal.addEventListener('abort', () => reject(signal.reason), { once: true }); }));
-  vi.spyOn(WindowWorkspaceClient.prototype, 'delete').mockResolvedValue(undefined);
+  const fixture = hostedWindows(original, target);
   let complete!: () => void;
-  vi.spyOn(WindowWorkspaceClient.prototype, 'create').mockImplementation(window => new Promise(resolve => { complete = () => resolve({ window }); }));
+  fixture.remove.mockImplementation(() => new Promise(resolve => { complete = resolve; }));
   const read = await mount(scope, true);
   let pending!: Promise<void>;
-  await act(async () => { pending = read().remove(); });
+  await act(async () => { pending = read().remove(target.id); });
   expect(complete).toBeDefined();
   await act(async () => root!.unmount()); root = undefined;
   await act(async () => { complete(); await pending; });
   expect(new URL(location.href).searchParams.get('window')).toBe(original.id);
   expect(sessionStorage.getItem(`agent-remote:recovery:${scope}:shared-window`)).toBe(original.id);
+  expect(fixture.create).not.toHaveBeenCalled();
 }, 10000);

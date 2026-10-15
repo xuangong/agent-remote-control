@@ -9,11 +9,15 @@ import { createCodexSessionDirectory } from './directory.js';
 import { createOpenCodeSessionDirectory } from './opencode-directory.js';
 import { SessionReferenceStore } from './session-reference.js';
 import { SessionSuccessionStore } from './session-succession-store.js';
+import { createHostExecutionPolicy } from './execution-policy.js';
 
 const cleanup: Array<() => Promise<void>> = [];
 afterEach(async () => { for (const close of cleanup.splice(0).reverse()) await close(); }, 5000);
-test.each(['codex', 'opencode'] as const)('%s Host binds exact saved candidate extensions, fences v3 release, and restores the original grant after restart', async providerId => {
+for (const providerId of ['codex', 'opencode'] as const) test.each(['side', 'ask'] as const)(`${providerId} default-policy Host preserves %s source tools, release fencing and restart`, async kind => {
   const root = await realpath(await mkdtemp(join(tmpdir(), 'arc-prefix-source-runtime-')));
+  const executionPolicy = await createHostExecutionPolicy({ AGENT_HOST_WORKSPACE: root });
+  expect(executionPolicy).toBeDefined();
+  let sourceWorkspace = root;
   const references = new SessionReferenceStore(join(root, 'grants'), providerId);
   await references.set({ sourceNativeSessionId: 'source', systemPrompt: 'saved source prompt', handle: { providerId, sessionId: 'A', opaque: '{}' } });
   const bound = new Map<string, AgentSessionExtensions>(); let forks = 0;
@@ -26,12 +30,12 @@ test.each(['codex', 'opencode'] as const)('%s Host binds exact saved candidate e
     async *observe(): AsyncIterable<ProviderStreamItem> { yield { type: 'history_boundary' }; await new Promise<void>(resolve => { this.stop = resolve; }); }
     async sendMessage() {} async respondToInteraction() {} async dispose() { this.stop?.(); }
   }
-  const provider = { createdSessionIdMaxLength: 36, validatePromptEdit: async () => {}, verifyPromptEditBranch: async () => {}, forkForPromptEdit: async (_target: unknown, extensions: AgentSessionExtensions = {}) => { forks++; const id = forks === 1 ? 'B' : 'source-prefix'; bound.set(id, extensions); return new Native(id); }, createSession: async () => new Native('unused'), openChildSession: async () => new Native('unused'), resumeSession: async (handle: { sessionId: string }, extensions: AgentSessionExtensions = {}) => { bound.set(handle.sessionId, extensions); return new Native(handle.sessionId); }, readSessionWorkspace: async () => root, readSessionHistory: async () => ({ entries: [{ id: 'entry', turnId: 'turn', role: 'assistant', text: 'source history' }] }), getSession: async (id: string) => ({ id, cwd: root, title: id }), renameSession: async () => {}, close: async () => {} };
+  const provider = { createdSessionIdMaxLength: 36, validatePromptEdit: async () => {}, verifyPromptEditBranch: async () => {}, forkForPromptEdit: async (_target: unknown, extensions: AgentSessionExtensions = {}) => { forks++; const id = forks === 1 ? 'B' : 'source-prefix'; bound.set(id, extensions); return new Native(id); }, createSession: async () => new Native('unused'), openChildSession: async () => new Native('unused'), resumeSession: async (handle: { sessionId: string }, extensions: AgentSessionExtensions = {}) => { bound.set(handle.sessionId, extensions); return new Native(handle.sessionId); }, readSessionWorkspace: async (id: string) => id === 'source' ? sourceWorkspace : root, readSessionHistory: async () => ({ entries: [{ id: 'entry', turnId: 'turn', role: 'assistant', text: 'source history' }] }), getSession: async (id: string) => ({ id, cwd: id === 'source' ? sourceWorkspace : root, title: id }), renameSession: async () => {}, close: async () => {} };
   let latestDirectory: AgentHostDirectory;
   const make = () => {
     const directory = providerId === 'codex' ? createCodexSessionDirectory({ ...provider, listSessions: async () => ({ sessions: [] }) }, [], references) : createOpenCodeSessionDirectory({ ...provider, listSessions: async () => [] }, [], references, true);
     latestDirectory = directory;
-    return createAgentHostRuntime({ succession: { controllerId: 'host', stateDirectory: root, enrollment: true }, registrations: [{ directory, adapter: { descriptor: { providerId, displayName: providerId }, createSession: provider.createSession, resumeSession: provider.resumeSession, readSessionHistory: provider.readSessionHistory } }] });
+    return createAgentHostRuntime({ executionPolicy, succession: { controllerId: 'host', stateDirectory: root, enrollment: true }, registrations: [{ directory, adapter: { descriptor: { providerId, displayName: providerId }, createSession: provider.createSession, resumeSession: provider.resumeSession, readSessionHistory: provider.readSessionHistory } }] });
   };
   let host = make();
   const http = createServer((request, response) => { void (async () => {
@@ -50,7 +54,7 @@ test.each(['codex', 'opencode'] as const)('%s Host binds exact saved candidate e
   const described = await post('/enroll', { action: 'describe', providerId, nativeSessionId: 'A', preparation: { kind: 'native_prefix', turnId: 'turn', messageId: 'message' } });
   expect(described.status).toBe(200);
   const from = { controllerId: 'host', providerId, nativeSessionId: 'A' };
-  const freeze = { version: 3 as const, token: 'freeze', authority, controllerId: 'host', maxProjectionBytes: 2 * 1024 * 1024, associationRevision: 0, lineage: [from], relations: [{ relationId: 'relation', kind: 'side' as const, readerRef: from, sourceRef: { ...from, nativeSessionId: 'source' }, linked: true, revision: 0 }], request: { roleId: described.data.role.id, operationId: 'prefix', expectedRevision: 1, from, preparation: { kind: 'native_prefix' as const, turnId: 'turn', messageId: 'message' } } };
+  const freeze = { version: 3 as const, token: 'freeze', authority, controllerId: 'host', maxProjectionBytes: 2 * 1024 * 1024, associationRevision: 0, lineage: [from], relations: [{ relationId: 'relation', kind, readerRef: from, sourceRef: { ...from, nativeSessionId: 'source' }, linked: true, revision: 0 }], request: { roleId: described.data.role.id, operationId: 'prefix', expectedRevision: 1, from, preparation: { kind: 'native_prefix' as const, turnId: 'turn', messageId: 'message' } } };
   const prepared = await post('/enroll', { action: 'prepare', freeze });
   expect(prepared, JSON.stringify(prepared)).toMatchObject({ status: 200, data: { record: { phase: 'ready' } } });
   await expect(bound.get('B')!.tools![0]!.execute({})).rejects.toThrow(/current|reserved|admission/);
@@ -71,6 +75,10 @@ test.each(['codex', 'opencode'] as const)('%s Host binds exact saved candidate e
   expect((await post('/remote/attach', { providerId, nativeSessionId: 'B' }, 'B')).status).toBe(200);
   expect(JSON.parse(await bound.get('B')!.tools![0]!.execute({}))).toMatchObject({ sourceSessionId: 'source' });
   await expect(stale.execute({})).rejects.toThrow(/current/);
+  sourceWorkspace = await realpath(tmpdir());
+  await expect(bound.get('B')!.tools![0]!.execute({})).rejects.toThrow(/workspace|allowed roots/i);
+  sourceWorkspace = root;
+  expect(JSON.parse(await bound.get('B')!.tools![0]!.execute({}))).toMatchObject({ sourceSessionId: 'source' });
   expect(forks).toBe(1); expect(await references.list()).toEqual([{ nativeSessionId: 'A', sourceNativeSessionId: 'source' }]);
   const store = new SessionSuccessionStore(join(root, 'roles')); await store.ready;
   expect(store.read(freeze.request.roleId).participants).toEqual([]);
@@ -80,7 +88,7 @@ test.each(['codex', 'opencode'] as const)('%s Host binds exact saved candidate e
   const source = { ...from, nativeSessionId: 'source' };
   const sourceFreeze = { ...freeze, token: 'source-freeze', lineage: [source], request: { ...freeze.request, roleId: sourceDescription.data.role.id, operationId: 'source-prefix', from: source } };
   const sourcePrepared = await post('/enroll', { action: 'prepare', freeze: sourceFreeze });
-  expect(sourcePrepared, JSON.stringify(sourcePrepared)).toMatchObject({ status: 200, data: { record: { phase: 'ready', prepared: { participants: [{ kind: 'side', before: from, after: from }] } } } });
+  expect(sourcePrepared, JSON.stringify(sourcePrepared)).toMatchObject({ status: 200, data: { record: { phase: 'ready', prepared: { participants: [{ kind, before: from, after: from }] } } } });
   expect(await references.list()).toEqual([{ nativeSessionId: 'A', sourceNativeSessionId: 'source' }]);
   expect((await post('/enroll', { action: 'cancel', freeze: sourceFreeze })).status).toBe(200);
   expect((await post('/enroll', { action: 'release', freeze: sourceFreeze })).status).toBe(200);

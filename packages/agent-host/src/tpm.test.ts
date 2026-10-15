@@ -336,6 +336,17 @@ it('pauses every affected work on native takeover and keeps bound session callba
   expect(await f.coordinator.extensions('copilot', work.tpmNativeSessionId!)).toBeUndefined();
 }, 10000);
 
+it('still pauses the main recipient when the TPM execution route is unavailable', async () => {
+  const f = await fixture(); const work = await f.create();
+  f.access.sessionRouting = { resolve() { throw new Error('No authorized current recipient'); }, assertCurrent() { throw new Error('Unavailable'); } };
+  await f.coordinator.handoff('codex', 'unrelated');
+  expect(f.coordinator.store.get(work.id).work.paused).toBe(false);
+  await f.coordinator.handoff('codex', 'main');
+  expect(f.coordinator.store.get(work.id).work.paused).toBe(true);
+  expect(f.sessions.get('main')!.leases).toBe(0);
+  expect(f.sessions.get(work.tpmNativeSessionId!)!.leases).toBe(0);
+}, 10000);
+
 it('resolves an explicitly rejected uncertain message without resending that message', async () => {
   const f = await fixture(); const work = await f.create(); const main = f.sessions.get('main')!; main.sendFailure = new Error('Receipt lost');
   const sent = await f.call(work, 'send_main_message', { operationId: 'uncertain-main', purpose: 'consultation', text: 'Investigate feasibility' });
@@ -893,7 +904,7 @@ it('releases a stopped review that ends without assessment without scheduling an
   expect(tpm.cancel).not.toHaveBeenCalled();
 });
 
-it('keeps TPM role tools, work and future review recipients across a released native prefix', async () => {
+it.each([false, true])('keeps TPM prefix recipients and pauses the current native takeover (restart before takeover: %s)', async restartBeforeTakeover => {
   const f = await fixture(); const work = await f.create();
   const ref = (nativeSessionId: string) => ({ controllerId: 'controller', providerId: 'codex', nativeSessionId });
   let current = work.tpmNativeSessionId!, frozen = false;
@@ -926,10 +937,42 @@ it('keeps TPM role tools, work and future review recipients across a released na
   expect(f.sessions.get(work.tpmNativeSessionId!)!.leases).toBe(0);
   expect(f.coordinator.store.get(work.id).work.tpmNativeSessionId).toBe(work.tpmNativeSessionId);
   expect((await f.coordinator.get(work.id)).outbox!.at(-1)).toMatchObject({ resolvedTarget: ref('B') });
-  await f.restart();
+  if (restartBeforeTakeover) await f.restart();
   expect((await f.coordinator.extensions('codex', 'B'))!.tools!.map(tool => tool.name)).toContain('update_work');
   expect(f.coordinator.store.get(work.id).work.todo).toEqual(work.todo);
   expect(f.sessions.get('B')!.messages).toHaveLength(1);
+  await f.coordinator.tick();
+  const receipts = structuredClone((await f.coordinator.get(work.id)).outbox!);
+  expect(receipts[0]).toMatchObject({ resolvedTarget: ref(work.tpmNativeSessionId!) });
+  expect(receipts.at(-1)).toMatchObject({ resolvedTarget: ref('B') });
+  const main = f.sessions.get('main')!, successor = f.sessions.get('B')!;
+  expect(main.leases).toBe(1); expect(successor.leases).toBe(1);
+  await f.coordinator.handoff('codex', 'B');
+  expect(await f.coordinator.get(work.id)).toMatchObject({ paused: true, tpmNativeSessionId: 'B', mainNativeSessionId: 'main' });
+  expect(f.coordinator.store.get(work.id).work.tpmNativeSessionId).toBe(work.tpmNativeSessionId);
+  expect(main.leases).toBe(0); expect(successor.leases).toBe(0);
+  expect(main.listeners.size).toBe(0); expect(successor.listeners.size).toBe(0);
+  for (const operationId of ['available-slot-one', 'available-slot-two']) {
+    const other = await f.create(operationId);
+    expect(f.sessions.get(other.tpmNativeSessionId!)!.messages).toHaveLength(1);
+  }
+  for (const other of f.coordinator.store.all().filter(record => record.work.id !== work.id)) {
+    await f.coordinator.action({ id: other.work.id, revision: other.work.revision, operationId: 'pause-other-' + other.work.id, action: 'pause' }, 'owner');
+  }
+  successor.setStatus('idle');
+  f.advance(60_000); await f.coordinator.tick();
+  await f.restart(); await f.coordinator.tick();
+  expect((await f.coordinator.get(work.id)).paused).toBe(true);
+  expect(successor.messages).toHaveLength(1);
+  expect(main.leases).toBe(0); expect(successor.leases).toBe(0);
+  expect((await f.coordinator.get(work.id)).outbox).toEqual(receipts);
+  const paused = await f.coordinator.get(work.id);
+  await f.coordinator.action({ id: work.id, revision: paused.revision, operationId: 'resume-successor', action: 'resume' }, 'owner');
+  await expect.poll(async () => { await f.coordinator.tick(); return successor.messages.length; }).toBe(2);
+  expect((await f.coordinator.get(work.id)).outbox!.slice(0, receipts.length)).toEqual(receipts);
+  await f.coordinator.handoff('codex', work.tpmNativeSessionId!);
+  expect((await f.coordinator.get(work.id)).paused).toBe(false);
+  expect(main.leases).toBe(1); expect(successor.leases).toBe(1);
 }, 10000);
 
 it('leaves a TPM intent prepared when execution admission fails before dispatch', async () => {

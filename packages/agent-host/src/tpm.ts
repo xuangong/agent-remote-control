@@ -307,8 +307,13 @@ export class TpmCoordinator {
   }
   async handoff(providerId: string, nativeSessionId: string): Promise<void> {
     await this.ready; await this.reconcileMainBindings();
-    for (const record of this.store.all()) if (record.work.providerId === providerId && record.work.tpmNativeSessionId === nativeSessionId
-      || (record.work.mainSessionRef?.providerId ?? record.work.providerId) === providerId && record.work.mainNativeSessionId === nativeSessionId) {
+    for (const record of this.store.all()) {
+      let tpmTarget: NativeSessionRef | undefined;
+      try { if (record.work.tpmNativeSessionId) tpmTarget = this.tpmTarget(record.work); }
+      catch { /* An unavailable route does not identify a current TPM recipient. */ }
+      const tpmMatches = tpmTarget?.providerId === providerId && tpmTarget.nativeSessionId === nativeSessionId;
+      const mainMatches = (record.work.mainSessionRef?.providerId ?? record.work.providerId) === providerId && record.work.mainNativeSessionId === nativeSessionId;
+      if (!tpmMatches && !mainMatches) continue;
       await this.store.update(record.work.id, undefined, item => { item.work.paused = true; item.work.health = 'Automation paused after native CLI takeover. Resume explicitly after returning control.'; });
       this.detach(record.work.id);
     }

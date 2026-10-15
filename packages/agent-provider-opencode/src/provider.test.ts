@@ -578,3 +578,23 @@ it('clears an old failure reason when reconnect discovers a different failed tur
   expect(info.status).toBe('failed');
   expect(JSON.stringify(info.failure ?? null)).not.toContain('Earlier credential failure');
 }, 10000);
+
+it('rejects prompt-edit validity during a locally admitted input even with an empty native inbox', async () => {
+  const f = await fixture(), session = await open(f), evidence = session.promptEditEvidence!;
+  await evidence.inspectReadiness(); const token = evidence.captureValidity();
+  f.state.prompt = 'ack-only';
+  await session.sendMessage('Reserved locally.');
+  expect(evidence.isCurrent(token)).toBe(false);
+  expect(await evidence.inspectReadiness()).toMatchObject({ pendingInputs: 1 });
+  expect(() => evidence.captureValidity()).toThrow();
+}, 10000);
+it('invalidates prompt-edit readiness as soon as an interaction response is submitting', async () => {
+  const f = await fixture(), session = await open(f), evidence = session.promptEditEvidence!;
+  await evidence.inspectReadiness(); const token = evidence.captureValidity();
+  f.event('permission.asked', { id: 'permission-local', sessionID: 'ses_existing', action: 'shell', resources: ['pwd'] });
+  await new Promise(resolve => setTimeout(resolve, 10));
+  expect(evidence.isCurrent(token)).toBe(false);
+  expect(await evidence.inspectReadiness()).toMatchObject({ pendingInteractions: 1 });
+  const response = session.respondToInteraction('permission-local', { kind: 'tool_approval', decision: 'allow', scope: 'once' });
+  expect(() => evidence.captureValidity()).toThrow(); await response;
+}, 10000);

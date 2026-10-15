@@ -59,6 +59,13 @@ export interface AgentNativeReadiness {
   pendingInteractions: number;
   activeChildren: number;
 }
+/** Read-only readiness for native-prefix prompt edits; no empty-creation semantics. */
+export interface AgentPromptEditEvidence {
+  readonly version: 1;
+  inspectReadiness(): Promise<AgentNativeReadiness>;
+  captureValidity(): AgentNativeValidityToken;
+  isCurrent(token: AgentNativeValidityToken): boolean;
+}
 export interface AgentSessionNativeEvidence {
   availability(): AgentNativeEvidenceAvailability;
   /** Current adapter-owned observations; throws when required native facts are unavailable. */

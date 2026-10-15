@@ -1,4 +1,8 @@
-import type { CodexAppServerTransport } from './app-server-transport.js';
+import { realpath } from 'node:fs/promises';
+import type { AgentPersistenceHandle } from '@orchardworks/agent-provider-sdk';
+import { codexEvidenceJson } from './native-evidence.js';
+import { CodexAppServerRpcError, type CodexAppServerTransport } from './app-server-transport.js';
+import { readCodexHistoryPage } from '@orchardworks/codex-daemon-client';
 import { isRecord, readString } from './native.js';
 import { codexImagePlaceholderLabel } from './message-content.js';
 
@@ -56,4 +60,56 @@ export async function preparePromptEdit(
     seen.add(next); cursor = next;
   }
   throw new Error('The selected prompt could not be verified within the history deadline. Use Esc in the Codex CLI.');
+}
+
+/** Independently read every native turn; a last-turn check cannot prove inherited content. */
+async function completeTurns(transport: Pick<CodexAppServerTransport, 'request'>, threadId: string): Promise<Record<string, unknown>[]> {
+  const pages: Record<string, unknown>[][] = [], cursors = new Set<string>(), ids = new Set<string>();
+  const deadline = Date.now() + 25_000;
+  let cursor: string | undefined;
+  for (let index = 0; index < 500 && Date.now() < deadline; index++) {
+    let page: unknown;
+    try { page = await transport.request('thread/turns/list', { threadId, limit: 10, sortDirection: 'desc', itemsView: 'full', ...(cursor ? { cursor } : {}) }); }
+    catch (error) {
+      if (index !== 0 || !(error instanceof CodexAppServerRpcError) || error.code !== -32601) throw error;
+      const legacy = await readCodexHistoryPage(transport, threadId);
+      const turns = legacy.thread.turns;
+      if (legacy.historyCursor || !Array.isArray(turns) || turns.length > 5000 || turns.some(turn => !isRecord(turn) || !readString(turn.id) || !Array.isArray(turn.items))
+        || new Set(turns.map(turn => turn.id)).size !== turns.length) throw new Error('Codex complete legacy prefix readback is unavailable.');
+      return turns;
+    }
+    if (!isRecord(page) || !Array.isArray(page.data) || page.data.length > 10 || !Object.hasOwn(page, 'nextCursor')) throw new Error('Codex prefix readback is incomplete.');
+    const turns: Record<string, unknown>[] = [];
+    for (const turn of page.data) {
+      if (!isRecord(turn) || !readString(turn.id) || ids.has(turn.id as string) || !Array.isArray(turn.items)) throw new Error('Codex prefix readback is ambiguous.');
+      ids.add(turn.id as string); turns.push(turn);
+    }
+    pages.push(turns.reverse());
+    const next = readString(page.nextCursor);
+    if (page.nextCursor != null && !next || next && (cursors.has(next) || !turns.length)) throw new Error('Codex prefix pagination did not advance.');
+    if (!next) return pages.reverse().flat();
+    cursors.add(next); cursor = next;
+  }
+  throw new Error('Codex prefix readback exceeded its bounded history budget.');
+}
+export async function verifyPromptEditBranch(
+  transport: Pick<CodexAppServerTransport, 'request'>, target: CodexPromptEditTarget, handle: AgentPersistenceHandle,
+): Promise<void> {
+  if (handle.providerId !== 'codex' || !handle.sessionId || handle.sessionId === target.nativeSessionId) throw new Error('Invalid Codex prompt-edit candidate identity.');
+  const stored: unknown = JSON.parse(handle.opaque);
+  if (!isRecord(stored) || !readString(stored.cwd)) throw new Error('Codex candidate workspace is unavailable.');
+  const boundary = await preparePromptEdit(transport, target);
+  if (!boundary.cwd) throw new Error('Codex source workspace is unavailable.');
+  const cwd = await realpath(boundary.cwd);
+  const candidate = await transport.request('thread/read', { threadId: handle.sessionId, includeTurns: false });
+  if (!isRecord(candidate) || !isRecord(candidate.thread) || candidate.thread.id !== handle.sessionId || candidate.thread.parentThreadId != null
+    || isRecord(candidate.thread.source) && 'subAgent' in candidate.thread.source || !readString(candidate.thread.cwd)
+    || await realpath(candidate.thread.cwd as string) !== cwd || await realpath(stored.cwd as string) !== cwd) throw new Error('Codex candidate identity or workspace does not match.');
+  const source = await completeTurns(transport, target.nativeSessionId);
+  const index = source.findIndex(turn => turn.id === target.turnId);
+  if (index < 0) throw new Error('Codex selected prompt disappeared during readback.');
+  const first = (source[index]!.items as unknown[]).find(item => isRecord(item) && item.type === 'userMessage');
+  if (!isRecord(first) || first.id !== target.messageId) throw new Error('Codex selected prompt identity changed during readback.');
+  const prefix = source.slice(0, index), actual = await completeTurns(transport, handle.sessionId);
+  if (codexEvidenceJson(actual) !== codexEvidenceJson(prefix)) throw new Error('Codex candidate does not contain the exact native prompt-edit prefix.');
 }

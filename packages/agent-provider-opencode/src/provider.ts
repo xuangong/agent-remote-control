@@ -9,7 +9,7 @@ import { AgentOperationRejectedError } from '@orchardworks/agent-provider-sdk';
 import type { SessionInfo as Session } from '@opencode/client';
 import { OpenCodeTransport, OpenCodeRequestError, type OpenCodeAgentProviderOptions } from './transport.js';
 import { OpenCodeSession } from './session.js';
-import { preparePromptEdit, type OpenCodePromptEditTarget } from './prompt-edit.js';
+import { preparePromptEdit, verifyPromptEditBranch, type OpenCodePromptEditTarget } from './prompt-edit.js';
 export type { OpenCodeAgentProviderOptions } from './transport.js';
 export interface OpenCodeSessionSummary { id: string; title: string; cwd: string; updatedAt: string; createdAt?: string; parentId?: string; }
 export interface OpenCodePersistence { cwd: string; model?: string; agent?: string; variant?: string; }
@@ -68,13 +68,18 @@ export class OpenCodeAgentProvider implements AgentProviderAdapter {
   async validatePromptEdit(target: OpenCodePromptEditTarget): Promise<void> {
     this.assertOpen(); await preparePromptEdit(this.transport, target);
   }
-  async forkForPromptEdit(target: OpenCodePromptEditTarget): Promise<OpenCodeSession> {
+  async forkForPromptEdit(target: OpenCodePromptEditTarget, extensions: AgentSessionExtensions = {}): Promise<OpenCodeSession> {
     this.assertOpen();
     const config = await preparePromptEdit(this.transport, target);
+    if (extensions.tools?.length && !await this.supportsHostCallbacks(config.cwd)) throw new Error('OpenCode Host callbacks require an installed and connected ARC native plugin.');
     const native = await this.transport.request(() => this.transport.client.session.fork({ sessionID: target.nativeSessionId, before: target.messageId }));
     if (!native.id || native.id === target.nativeSessionId) throw new Error('OpenCode did not create an independent prompt-edit branch.');
     if (await canonicalDirectory(native.location.directory) !== config.cwd) throw new Error('OpenCode prompt-edit branch workspace does not match the source.');
-    return this.open(native, config, {});
+    await verifyPromptEditBranch(this.transport, target, { providerId: 'opencode', sessionId: native.id, opaque: JSON.stringify(config) });
+    return this.open(native, config, extensions);
+  }
+  async verifyPromptEditBranch(target: OpenCodePromptEditTarget, handle: AgentPersistenceHandle): Promise<void> {
+    this.assertOpen(); await verifyPromptEditBranch(this.transport, target, handle);
   }
   async openChildSession(parentNativeSessionId: string, childNativeSessionId: string): Promise<OpenCodeSession> {
     this.assertOpen();
@@ -95,13 +100,13 @@ export class OpenCodeAgentProvider implements AgentProviderAdapter {
       ].filter(Boolean).join('\n\n') };
     }
     try {
-      if (extensions.systemPrompt !== undefined) {
-        const key = 'arc.host.system';
+      for (const [key, value] of [['arc.host.system', extensions.systemPrompt], ['arc.host.role', extensions.instructions]] as const) {
+        if (value === undefined) continue;
         const entries = await this.transport.request(() => this.transport.client.session.instructions.entry.list({ sessionID: native.id }));
-        if (entries.find(entry => entry.key === key)?.value !== extensions.systemPrompt) {
-          await this.transport.request(() => this.transport.client.session.instructions.entry.put({ sessionID: native.id, key, value: extensions.systemPrompt! }));
+        if (entries.find(entry => entry.key === key)?.value !== value) {
+          await this.transport.request(() => this.transport.client.session.instructions.entry.put({ sessionID: native.id, key, value }));
           const confirmed = await this.transport.request(() => this.transport.client.session.instructions.entry.list({ sessionID: native.id }));
-          if (confirmed.find(entry => entry.key === key)?.value !== extensions.systemPrompt) throw new Error('OpenCode did not confirm the Host session instructions.');
+          if (confirmed.find(entry => entry.key === key)?.value !== value) throw new Error('OpenCode did not confirm the Host session instructions.');
         }
       }
     } catch (error) { release?.(); throw error; }

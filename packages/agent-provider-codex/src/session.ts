@@ -101,6 +101,12 @@ interface RawNotification {
 export class CodexAppServerSession implements AgentSession {
   readonly capabilities: AgentCapabilities = { ...CODEX_CAPABILITIES, interactions: { ...CODEX_CAPABILITIES.interactions } };
   readonly nativeEvidence: CodexSessionNativeEvidence;
+  readonly promptEditEvidence = Object.freeze({
+    version: 1 as const,
+    inspectReadiness: () => this.nativeEvidence.inspectReadiness(),
+    captureValidity: () => this.nativeEvidence.captureValidity(),
+    isCurrent: (token: import('@orchardworks/agent-provider-sdk').AgentNativeValidityToken) => this.nativeEvidence.isCurrent(token),
+  });
   private nativeSettings: CodexEvidenceSettings | undefined;
   private readonly nativeSettingsObservers = new Set<(settings: CodexEvidenceSettings) => void>();
 
@@ -481,19 +487,35 @@ export class CodexAppServerSession implements AgentSession {
     codexHome?: string,
     restrictedNative = false,
     recoveryPlan?: CodexSharedRecoveryPlan,
+    extensions: AgentSessionExtensions = {},
   ): Promise<CodexAppServerSession> {
-    const session = new CodexAppServerSession(transport, {}, codexHome, undefined, restrictedNative, recoveryPlan);
+    const session = new CodexAppServerSession(transport, { systemPrompt: extensions.systemPrompt, instructions: extensions.instructions }, codexHome, undefined, restrictedNative, recoveryPlan);
+    session.tools = bindAgentSessionTools(extensions.tools, () => session.assertOpen());
     await session.initialize();
     const boundary = await preparePromptEdit(transport, target);
     const response = await transport.request(boundary.beforeTurnId ? 'thread/fork' : 'thread/start', {
       ...(boundary.beforeTurnId ? { threadId: target.nativeSessionId, beforeTurnId: boundary.beforeTurnId, excludeTurns: true } : {}),
       ...(boundary.cwd ? { cwd: boundary.cwd } : {}),
+      // Native forks inherit declarations from source metadata; only thread/start registers tools.
+      ...(!boundary.beforeTurnId && session.tools.length ? { dynamicTools: session.tools.map(({ name, description, inputSchema }) => ({ type: 'function', name, description, inputSchema })) } : {}),
+      ...(sessionInstructions(session.config) ? { developerInstructions: sessionInstructions(session.config) } : {}),
       config: { 'features.default_mode_request_user_input': true },
       ...(restrictedNative ? { sandbox: 'workspace-write', approvalPolicy: 'never' } : {}),
     });
     session.setThreadFromResponse(response, boundary.beforeTurnId ? 'thread/fork' : 'thread/start');
     if (session.threadId === target.nativeSessionId) throw new Error('Codex did not create an independent prompt-edit branch.');
-    if (!boundary.beforeTurnId) { session.finishBootstrap([], new Map()); return session; }
+    if (!boundary.beforeTurnId) {
+      // Loaded full-history reads materialize an empty identity without starting a user turn.
+      try {
+        const materialized = await transport.request('thread/read', { threadId: session.threadId, includeTurns: true });
+        if (!isRecord(materialized) || !isRecord(materialized.thread) || materialized.thread.id !== session.threadId
+          || !Array.isArray(materialized.thread.turns) || materialized.thread.turns.length) throw new Error('Codex did not confirm first-prompt materialization history.');
+      } catch (error) {
+        // Some stores materialize the identity while rejecting zero-turn listing. Verification still fails closed.
+        if (!(error instanceof CodexAppServerRpcError) || error.code !== -32601) throw error;
+      }
+      session.finishBootstrap([], new Map()); return session;
+    }
     const history = await readCodexHistoryPage(transport, session.threadId!, { metadata: response });
     // Unknown native versions may ignore optional fork fields. Verify the actual result before exposing it.
     const turns = history.thread.turns;

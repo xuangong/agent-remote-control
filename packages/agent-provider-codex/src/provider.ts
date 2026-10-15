@@ -1,5 +1,5 @@
 import { CodexSessionTakeover } from './session-takeover.js';
-import { preparePromptEdit, type CodexPromptEditTarget } from './prompt-edit.js';
+import { preparePromptEdit, verifyPromptEditBranch, type CodexPromptEditTarget } from './prompt-edit.js';
 import type { AgentSessionExtensions, AgentHistoryQuery, AgentHistoryPage } from '@orchardworks/agent-provider-sdk';
 import { readSessionHistoryPage } from './reference-history.js';
 import type { ChildProcessWithoutNullStreams } from 'node:child_process';
@@ -188,11 +188,11 @@ export class CodexAppServerProvider implements AgentProviderAdapter {
     }
   }
 
-  async forkForPromptEdit(target: CodexPromptEditTarget): Promise<AgentSession> {
+  async forkForPromptEdit(target: CodexPromptEditTarget, extensions: AgentSessionExtensions = {}): Promise<AgentSession> {
     const transport = await this.createTransport();
     try {
       const session = await CodexAppServerSession.forkForPromptEdit(transport, target, this.options.env?.CODEX_HOME,
-        this.options.restrictedNative, this.sharedRecoveryPlan());
+        this.options.restrictedNative, this.sharedRecoveryPlan(), extensions);
       this.sessions.add(session);
       session.onRuntimeClosed(() => this.sessions.delete(session));
       return session;
@@ -200,6 +200,13 @@ export class CodexAppServerProvider implements AgentProviderAdapter {
       await transport.dispose();
       throw runtimeError(error, this.options.connectionMode === 'shared');
     }
+  }
+
+  async verifyPromptEditBranch(target: CodexPromptEditTarget, handle: AgentPersistenceHandle): Promise<void> {
+    const transport = await this.createTransport();
+    try { await initializeCodexTransport(transport); await verifyPromptEditBranch(transport, target, handle); }
+    catch (error) { throw runtimeError(error, this.options.connectionMode === 'shared'); }
+    finally { await transport.dispose(); }
   }
 
   async readSessionWorkspace(nativeSessionId: string): Promise<string | undefined> {

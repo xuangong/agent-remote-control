@@ -286,7 +286,8 @@ it('keeps both pages authorized when another page opens while the foreground cha
   await act(async () => { input = app.primary.client.sendMessage('First page after foreground recovery'); });
   await input;
   await otherPage.sendMessage('Other page still usable');
-  expect(app.sendMessage.mock.calls).toEqual([['Other page while the first is away'], ['First page after foreground recovery'], ['Other page still usable']]);
+  expect(app.sendMessage.mock.calls).toEqual(['Other page while the first is away', 'First page after foreground recovery', 'Other page still usable']
+    .map(text => [text, { onAcceptance: expect.any(Function) }]));
   expect(replica.getState().sessionControl?.access).toBe('control');
   await app.completeRenewals();
 }, 15_000);
@@ -335,7 +336,7 @@ it('keeps the live composer and draft through a healthy foreground probe on an 1
   expect(app.renewals[0]!.writableEnded).toBe(false);
   await submitComposer(app.view);
   await app.waitFor(() => {
-    expect(app.sendMessage.mock.calls).toEqual([['Continue typing on the slow link']]);
+    expect(app.sendMessage.mock.calls).toEqual([['Continue typing on the slow link', { onAcceptance: expect.any(Function) }]]);
     expect(draft.value).toBe('');
   }, 4000);
   expect(app.commands('send_message')).toHaveLength(1);
@@ -376,7 +377,8 @@ it('keeps offline composer inputs editable and sends its pending queue once afte
     expect(pending()).toHaveLength(0);
   }, 8000);
   const queueDrainedMs = Math.round(performance.now() - onlineAt);
-  expect(app.sendMessage.mock.calls).toEqual([['First input while offline'], ['Second input while offline']]);
+  expect(app.sendMessage.mock.calls).toEqual(['First input while offline', 'Second input while offline']
+    .map(text => [text, { onAcceptance: expect.any(Function) }]));
   expect(app.commands('send_message')).toHaveLength(2);
   expect(app.primary.replica.getState().sessionControl?.access).toBe('control');
   expect(app.view.querySelector('[data-testid="prompt-input"]')).toBe(draft);

@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import type { ImageUploadReceipt, MessagePart } from '@orchardworks/agent-remote-protocol';
-import { readImageDraft, writeImageDraft, imageDraftScopeGeneration, cacheDraftImage, lookupDraftImage, retainDraftImages, restoreCachedDraftImage, type ImageDraft, type DraftImage, type ImageDraftBinding, type ImageDraftRecipient, type ImageDraftStorageSnapshot, type ImageDraftWriteResult, registerImageDraftWriter, flushReleasedImageDraftWriters, imageDraftRetention } from '../image-drafts.js';
+import { readImageDraft, writeImageDraft, imageDraftScopeGeneration, cacheDraftImage, lookupDraftImage, retainDraftImages, restoreCachedDraftImage, type ImageDraft, type DraftImage, type ImageDraftBinding, type ImageDraftRecipient, type ImageDraftStorageSnapshot, type ImageDraftWriteResult, type ImageDraftReplacement, registerImageDraftWriter, flushReleasedImageDraftWriters, imageDraftRetention } from '../image-drafts.js';
 import { draftText, normalizeDraftParts, snapshotContent, type DraftPart } from './composer-document.js';
 
 export type UploadImage = (file: Blob, uploadId: string, options?: { signal?: AbortSignal; onProgress?(loaded: number, total: number): void }) => Promise<NonNullable<ImageUploadReceipt['attachment']>>;
@@ -136,17 +136,25 @@ export function useImageDraft({ scope: suppliedScope, sessionKey, text, enabled,
     while (current.saving && valid()) await current.saving;
     return valid() ? storageSnapshot() : { ...storageSnapshot(), status: 'cancelled' };
   }
-  async function replaceStorage(expectedRevision: number, draft: Omit<ImageDraft, 'key' | 'scope'>, isCurrent: () => boolean): Promise<ImageDraftStorageSnapshot> {
-    if (!mounted.current || currentKey.current !== entryKey || !isCurrent() || current.revision !== expectedRevision || storageSnapshot().status !== 'ready') {
-      return { ...storageSnapshot(), status: 'cancelled' };
-    }
+  function applyStorage(expectedRevision: number, draft: Omit<ImageDraft, 'key' | 'scope'>, isCurrent: () => boolean): ImageDraftReplacement {
+    const snapshot = storageSnapshot();
+    const reason = !mounted.current || currentKey.current !== entryKey || !isCurrent() || snapshot.status === 'cancelled' ? 'retired'
+      : current.revision !== expectedRevision ? 'changed' : snapshot.status !== 'ready' ? 'unavailable' : undefined;
+    if (reason) return { application: { status: 'not-applied', reason }, completion: Promise.resolve({ ...snapshot, status: 'cancelled' }) };
     current.draft = { ...draft, key, scope: scope ?? '', parts: draft.parts.map(part => ({ ...part })),
       images: Object.fromEntries(Object.entries(draft.images).map(([id, image]) => [id, { ...image, status: 'pending', progress: 0, attachment: undefined }])) };
     current.inputText = draftText(current.draft.parts);
-    changed(true, true);
-    return flushStorage(current.revision, isCurrent);
+    const revision = ++current.revision;
+    // Publish the actual identity before text subscribers can make another edit.
+    const application = { status: 'applied' as const, revision };
+    callbacks.current.onTextChange(current.inputText);
+    persist(true); notify(); current.wake?.();
+    return { application, completion: flushStorage(revision, isCurrent) };
   }
-  useEffect(() => enabled ? registerImageDraftWriter({ scope: scope ?? '', key }, { snapshot: storageSnapshot, flush: flushStorage, replace: replaceStorage }) : undefined, [entryKey, enabled]);
+  function replaceStorage(expectedRevision: number, draft: Omit<ImageDraft, 'key' | 'scope'>, isCurrent: () => boolean): Promise<ImageDraftStorageSnapshot> {
+    return applyStorage(expectedRevision, draft, isCurrent).completion;
+  }
+  useEffect(() => enabled ? registerImageDraftWriter({ scope: scope ?? '', key }, { snapshot: storageSnapshot, flush: flushStorage, apply: applyStorage, replace: replaceStorage }) : undefined, [entryKey, enabled]);
   function retryStorage(): void {
     if (current.restoring || current.saving) return;
     if (current.readFailed || !current.hydrated) restore();

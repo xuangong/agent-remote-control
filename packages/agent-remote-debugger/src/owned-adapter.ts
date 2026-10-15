@@ -1,3 +1,4 @@
+import { resolveAgentNativePrefixCapability, type AgentNativePrefixCapability } from '@orchardworks/agent-provider-sdk';
 import type { AgentSession } from '@orchardworks/agent-provider-sdk';
 import type { DebuggerAdapter } from './server.js';
 
@@ -21,8 +22,18 @@ export function ownAdapter(adapter: DebuggerAdapter) {
     adapter: new Proxy(adapter, { get(target, key) {
       if (key === 'createSession') return (...args: Parameters<DebuggerAdapter['createSession']>) => retain(adapter.createSession(...args));
       if (key === 'resumeSession') return (...args: Parameters<DebuggerAdapter['resumeSession']>) => retain(adapter.resumeSession(...args));
-      if (key === 'forkForPromptEdit' && adapter.forkForPromptEdit) return (...args: Parameters<NonNullable<DebuggerAdapter['forkForPromptEdit']>>) => retain(adapter.forkForPromptEdit!(...args));
+      if (key === 'nativePrefix') {
+        const capability = resolveAgentNativePrefixCapability(target);
+        if (!capability) return undefined;
+        return {
+          get createdSessionIdMaxLength() { return capability.createdSessionIdMaxLength; },
+          validate: selection => capability.validate(selection),
+          create: (...args) => retain(capability.create(...args)),
+          verify: (selection, handle) => capability.verify(selection, handle),
+        } satisfies AgentNativePrefixCapability;
+      }
       const value = Reflect.get(target, key, target);
+      if (key === 'forkForPromptEdit' && typeof value === 'function') return (...args: unknown[]) => retain(value.apply(target, args));
       return typeof value === 'function' ? value.bind(target) : value;
     } }),
     close: () => closing ??= (async () => {

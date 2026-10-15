@@ -1,7 +1,7 @@
 import { realpath } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { isDeepStrictEqual } from 'node:util';
-import type { AgentPersistenceHandle } from '@orchardworks/agent-provider-sdk';
+import type { AgentNativePrefixTarget, AgentPersistenceHandle } from '@orchardworks/agent-provider-sdk';
 import { readPromptEditReadiness } from './prompt-edit-evidence.js';
 import { IMAGE_INPUT_CAPABILITIES } from '@orchardworks/agent-provider-sdk';
 import { OpenCodeImages } from './images.js';
@@ -9,7 +9,7 @@ import { nativeHistory } from './native-history.js';
 import { turnIds } from './v2-native.js';
 import type { OpenCodeTransport } from './transport.js';
 
-export interface OpenCodePromptEditTarget { nativeSessionId: string; turnId: string; messageId: string }
+export type OpenCodePromptEditTarget = AgentNativePrefixTarget;
 
 /** The native fork endpoint copies the prefix strictly before a message without reverting files. */
 async function readPromptEditSource(transport: OpenCodeTransport, target: OpenCodePromptEditTarget) {

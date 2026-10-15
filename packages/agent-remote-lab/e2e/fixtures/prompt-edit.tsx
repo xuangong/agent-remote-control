@@ -6,6 +6,7 @@ import { SessionDirectoryClient, type OpenedSession } from '../../src/directory-
 import { DraftStore } from '../../src/draft-store.js';
 import { ForkStore, type SessionFork } from '../../src/session-forks.js';
 import { SessionViewOperationsContext } from '../../src/session-view-operations.js';
+import { labSessionSuccessionDirectory } from '../../src/session-succession-directory.js';
 import { SideConversation } from '../../src/components/SideConversation.js';
 import { AskConversation } from '../../src/components/AskConversation.js';
 import { SessionFamily } from '../../src/components/SessionFamily.js';
@@ -32,7 +33,7 @@ function Fixture() {
   const record: SessionFork = { id: 'ask', mode: 'reference', source: main, target: source, capturedAt: 'now', delivery: 'sent', configured: true, options: {}, settings: [] };
   const item: TpmItem = { key: 'work', hostId: 'local', hostName: 'Local', online: true, unread: false, work: { id: 'work', revision: 1, title: 'TPM', providerId: source.providerId, mainNativeSessionId: main.nativeSessionId, tpmNativeSessionId: source.nativeSessionId, phase: 'implementing', waiting: 'none', paused: false, summary: '', nextAction: '', document: '', acceptance: '', evidence: [], createdAt: 'now', updatedAt: 'now', nextCheckAt: 0, outbox: [] } };
   return <SessionViewOperationsContext.Provider value={{ storageScope: scope, transport, enabled: true,
-    resolveTarget: target => ({ target: { ...target, nativeSessionId: current } }), directory: () => directory,
+    resolveTarget: target => ({ target: { ...target, nativeSessionId: current } }), directory: () => labSessionSuccessionDirectory(directory),
     refreshSettled: async result => {
       if (result.record.phase !== 'committed') return;
       const replay = await transport.fetchSessionSuccessionOperation(result.role.id, result.record.operationId);

@@ -55,7 +55,13 @@ test('installed public ARDB contains its local service and recovers exact prefix
     assert.match(command(join(prefix, 'node_modules/.bin/ardb'), ['--help'], prefix, 10000), /Usage: ardb/);
     await writeFile(join(prefix, 'consumer.ts'), `import { createDebuggerServer, type DebuggerServerOptions } from '@orchardworks/agent-remote-debugger/dist/server.js';
 import { LocalSessionSuccession, type LocalSuccessionProvider } from '@orchardworks/agent-remote-debugger/dist/local-session-succession.js';
-declare const adapter: LocalSuccessionProvider; const options: DebuggerServerOptions = { adapter, successionStateDirectory: './state' };
+import { resolveAgentNativePrefixCapability, type AgentNativePrefixCapability, type AgentProviderAdapter } from '@orchardworks/agent-provider-sdk';
+declare const ordinary: Pick<AgentProviderAdapter, 'descriptor' | 'createSession' | 'resumeSession'>;
+const unsupported: LocalSuccessionProvider = ordinary;
+declare const nativePrefix: AgentNativePrefixCapability;
+const adapter: LocalSuccessionProvider = { ...ordinary, nativePrefix };
+void unsupported; void resolveAgentNativePrefixCapability(adapter);
+const options: DebuggerServerOptions = { adapter, successionStateDirectory: './state' };
 void createDebuggerServer; void options; void LocalSessionSuccession;
 `);
     command(join(prefix, 'node_modules/.bin/tsc'), ['--noEmit', '--strict', '--module', 'Node16', '--moduleResolution', 'Node16', '--target', 'ES2022', '--skipLibCheck', 'false', 'consumer.ts'], prefix, 30000);

@@ -149,7 +149,8 @@ it.each([true, false])('awaits the exact candidate checkpoint before failed boot
   let savedBeforeRead = false;
   const f = completeFixture(first, () => { savedBeforeRead = !!saved; throw Object.assign(new Error('Temporary read failure'), { code: -32603 }); });
   const provider = new CodexAppServerProvider({ spawn: () => f.app.child });
-  await expect(provider.forkForPromptEdit(f.selection, {}, async handle => {
+  Object.defineProperty(provider, 'createdSessionIdMaxLength', { value: 36 });
+  await expect(provider.nativePrefix!.create(f.selection, {}, async handle => {
     await new Promise(resolve => setTimeout(resolve, 5)); saved = structuredClone(handle);
   })).rejects.toThrow(/temporarily unavailable/);
   expect(savedBeforeRead).toBe(true);
@@ -302,4 +303,45 @@ it('rejects fallback pagination without an explicit completion cursor', async ()
   await expect(new CodexAppServerProvider({ spawn: () => app.child }).verifyPromptEditBranch(target, { providerId: 'codex', sessionId: 'branch', opaque: JSON.stringify({ cwd }) })).rejects.toThrow(/complete|unavailable/i);
   expect(candidateReads).toBe(1);
   expect(app.requests).toContainEqual(expect.objectContaining({ method: 'thread/read', params: { threadId: 'branch', includeTurns: true } }));
+});
+
+
+it.each([true, false])('durable capability awaits a held checkpoint before any bootstrap read (first=%s)', async first => {
+  const { CodexAppServerProvider } = await import('./provider.js');
+  let reads = 0, offered: import('@orchardworks/agent-provider-sdk').AgentPersistenceHandle | undefined;
+  const f = completeFixture(first, () => { reads++; });
+  const provider = new CodexAppServerProvider({ spawn: () => f.app.child });
+  expect(provider.nativePrefix).toBeUndefined();
+  // Certify only this deterministic fixture producer, never arbitrary injected runtimes.
+  Object.defineProperty(provider, 'createdSessionIdMaxLength', { value: 36 });
+  let release!: () => void, reached!: () => void;
+  const gate = new Promise<void>(resolve => { release = resolve; }), entered = new Promise<void>(resolve => { reached = resolve; });
+  const pending = provider.nativePrefix!.create(f.selection, {}, async handle => { offered = handle; reached(); await gate; });
+  try {
+    await entered; await new Promise(resolve => setTimeout(resolve, 10));
+    expect(reads).toBe(0); expect(offered).toMatchObject({ providerId: 'codex', sessionId: 'branch' });
+    release(); const session = await pending;
+    expect((await session.runtimeInfo()).persistence).toEqual(offered); expect(reads).toBeGreaterThan(0);
+    await session.dispose();
+  } finally { release(); await (await pending).dispose(); }
+});
+it.each([true, false])('durable capability stops after checkpoint rejection (first=%s)', async first => {
+  const { CodexAppServerProvider } = await import('./provider.js');
+  let reads = 0, calls = 0;
+  const f = completeFixture(first, () => { reads++; });
+  const provider = new CodexAppServerProvider({ spawn: () => f.app.child });
+  Object.defineProperty(provider, 'createdSessionIdMaxLength', { value: 36 });
+  await expect(provider.nativePrefix!.create(f.selection, {}, async handle => {
+    calls++; expect(handle.sessionId).toBe('branch'); throw new Error('Checkpoint refused');
+  })).rejects.toThrow('Checkpoint refused');
+  expect(calls).toBe(1); expect(reads).toBe(0);
+  expect(f.app.requests.filter(request => ['thread/start', 'thread/fork'].includes(request.method))).toHaveLength(1);
+});
+
+it('rejects a missing durable checkpoint before native reads or creation', async () => {
+  const { CodexAppServerProvider } = await import('./provider.js');
+  const f = completeFixture(), provider = new CodexAppServerProvider({ spawn: () => f.app.child });
+  Object.defineProperty(provider, 'createdSessionIdMaxLength', { value: 36 });
+  await expect(provider.nativePrefix!.create(f.selection, {}, undefined as never)).rejects.toThrow(/checkpoint/);
+  expect(f.app.requests).toEqual([]);
 });

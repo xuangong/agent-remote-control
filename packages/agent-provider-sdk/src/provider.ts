@@ -116,7 +116,31 @@ export interface AgentSessionResumeOptions {
   initializeEmpty?: boolean;
 }
 
+/** A provider-native history boundary, independent of Host authority and roles. */
+export interface AgentNativePrefixTarget { nativeSessionId: string; turnId: string; messageId: string }
+
+/** Complete native prefix creation support. Attachment validity remains on AgentSession. */
+export interface AgentNativePrefixCapability {
+  readonly createdSessionIdMaxLength: number;
+  validate(target: AgentNativePrefixTarget): Promise<void>;
+  /** Await retention of the exact original handle before any candidate bootstrap or readback.
+   * A checkpoint failure may follow native creation; callers must retain unknown outcomes. */
+  create(target: AgentNativePrefixTarget, extensions: AgentSessionExtensions,
+    checkpoint: (handle: AgentPersistenceHandle) => Promise<void>): Promise<AgentSession>;
+  verify(target: AgentNativePrefixTarget, handle: AgentPersistenceHandle): Promise<void>;
+}
+
+/** JS adapters may omit or misdeclare optional support. Never synthesize a partial capability. */
+export function resolveAgentNativePrefixCapability(adapter: { readonly nativePrefix?: AgentNativePrefixCapability }): AgentNativePrefixCapability | undefined {
+  const capability = adapter.nativePrefix;
+  if (!capability || typeof capability !== 'object' || Array.isArray(capability)
+    || !Number.isSafeInteger(capability.createdSessionIdMaxLength) || capability.createdSessionIdMaxLength < 1
+    || typeof capability.validate !== 'function' || typeof capability.create !== 'function' || typeof capability.verify !== 'function') return undefined;
+  return capability;
+}
+
 export interface AgentProviderAdapter {
+  readonly nativePrefix?: AgentNativePrefixCapability;
   readonly nativeEvidence?: AgentProviderNativeEvidence;
   readonly descriptor: AgentProviderDescriptor;
 

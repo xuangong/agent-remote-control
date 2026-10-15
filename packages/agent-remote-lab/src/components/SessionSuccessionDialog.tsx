@@ -1,10 +1,9 @@
 import { useEffect, useId, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import type { OpenedSession, SessionDirectoryClient, SuccessionActionResult, SuccessionDescription, SuccessionPrepareInput } from '../directory-client.js';
+import type { OpenedSession, SuccessionActionResult, SuccessionDescription, SuccessionPrepareInput } from '../directory-client.js';
+import type { SessionSuccessionDirectory } from '../session-succession-directory.js';
 import './session-succession.css';
 import type { NativePrefixSelection } from '@orchardworks/agent-remote-protocol';
-
-export type SessionSuccessionDirectory = Pick<SessionDirectoryClient, 'describeSuccession' | 'prepareSuccession' | 'successionAction'>;
 
 type Action = 'prepare' | 'commit' | 'cancel' | 'status' | 'reconcile';
 const statusDelays = [1000, 2000, 4000, 8000, 15000];
@@ -24,7 +23,7 @@ export function SessionSuccessionDialog({ source, directory, assertAccess, asser
   preparation?: NativePrefixSelection; autoPrepare?: boolean; onPreparing?(operation: SuccessionPrepareInput): Promise<void>;
   resume?: SuccessionPrepareInput; resumeCancellation?: boolean; initialProvider?: string; blockedReason?: string; visible?: boolean;
   onIntent(operation: SuccessionPrepareInput, cancelRequested: boolean): void;
-  onSettled(result: SuccessionActionResult): Promise<void>; onClose(retain?: boolean): void; onOpen?(): void; onGatedChange?(gated: boolean): void;
+  onSettled(result: SuccessionActionResult): Promise<void>; onClose(retain?: boolean): void | Promise<void>; onOpen?(): void; onGatedChange?(gated: boolean): void;
 }) {
   const dialog = useRef<HTMLDialogElement>(null), label = useId(), detailsId = useId();
   const [description, setDescription] = useState<SuccessionDescription>();
@@ -40,6 +39,7 @@ export function SessionSuccessionDialog({ source, directory, assertAccess, asser
   const operation = useRef(resume), inFlight = useRef(false), cancelling = useRef(false);
   const settled = useRef<SuccessionActionResult>(), cancelRequested = useRef(resumeCancellation === true);
   const mounted = useRef(false), projecting = useRef(false), projected = useRef(false);
+  const closing = useRef(false), cleanupRequested = useRef(false);
   const statusAttempts = useRef(0), recoverImmediately = useRef(!!resume), accessBlocked = useRef(false);
   const callbacks = useRef({ assertAccess, assertSource, onIntent, onSettled, onClose, onGatedChange, onPreparing });
   callbacks.current = { assertAccess, assertSource, onIntent, onSettled, onClose, onGatedChange, onPreparing };
@@ -112,10 +112,11 @@ export function SessionSuccessionDialog({ source, directory, assertAccess, asser
       callbacks.current.assertAccess();
       await callbacks.current.onSettled(value);
       if (!mounted.current) return;
+      if (value.record.phase === 'committed' || cleanupRequested.current) await callbacks.current.onClose(false);
+      if (!mounted.current) return;
       projected.current = true;
       setProjection('done');
       callbacks.current.onGatedChange?.(false);
-      if (value.record.phase === 'committed') callbacks.current.onClose(false);
     } catch (failure) {
       if (mounted.current) {
         setProjection('failed');
@@ -133,7 +134,7 @@ export function SessionSuccessionDialog({ source, directory, assertAccess, asser
     if (isTerminal(value)) await refreshSettled();
   }
   async function run(action: Action, automatic = false) {
-    if (!mounted.current || projecting.current) return;
+    if (!mounted.current || projecting.current || closing.current) return;
     if (action === 'prepare' && blockedReason) { setError(blockedReason); return; }
     if (action === 'cancel') {
       if (cancelling.current || isTerminal(settled.current)) return;
@@ -179,13 +180,11 @@ export function SessionSuccessionDialog({ source, directory, assertAccess, asser
         if (prepared.record.phase === 'ready' && !cancelRequested.current && settled.current?.record.phase === 'ready') {
           callbacks.current.assertAccess();
           callbacks.current.assertSource();
-          await accept(await directory.successionAction('commit', pending.operationId));
+          await accept(await directory.actOnSuccession('commit', pending));
         }
       } else if (operation.current) {
         if (action === 'commit' && operation.current.preparation?.kind === 'native_prefix') callbacks.current.assertSource();
-        const value = action === 'cancel'
-          ? await directory.successionAction(action, operation.current.operationId, { original: operation.current })
-          : await directory.successionAction(action, operation.current.operationId);
+        const value = await directory.actOnSuccession(action, operation.current);
         await accept(value);
       }
     } catch (failure) {
@@ -219,9 +218,20 @@ export function SessionSuccessionDialog({ source, directory, assertAccess, asser
     return () => window.clearTimeout(timer);
   }, [intent, terminal, busy, pageVisible, wake]);
 
-  function close() {
-    setDetailsOpen(false);
-    callbacks.current.onClose(!!operation.current && (!isTerminal(settled.current) || !projected.current));
+  async function close() {
+    if (closing.current) return;
+    closing.current = true;
+    const retain = !!operation.current && (!isTerminal(settled.current) || !projected.current);
+    if (!retain) cleanupRequested.current = true;
+    try {
+      await callbacks.current.onClose(retain);
+      if (mounted.current) setDetailsOpen(false);
+    } catch (failure) {
+      if (mounted.current) {
+        if (isTerminal(settled.current)) { projected.current = false; setProjection('failed'); }
+        setError(failure instanceof Error ? failure.message : 'The operation snapshot could not be released. Retry cleanup.');
+      }
+    } finally { closing.current = false; }
   }
   function openDetails() { setDetailsOpen(true); onOpen?.(); }
   const targetId = intent?.targetProviderId ?? target;
@@ -260,7 +270,7 @@ export function SessionSuccessionDialog({ source, directory, assertAccess, asser
   </dialog>, document.body);
   if (!intent) return autoPrepare ? <section className="lab-handoff-notice" aria-label="Edit prompt">
     <p role={error ? 'alert' : 'status'}>{error ?? (description?.eligibility.status !== 'ready' ? description?.eligibility.reason : undefined) ?? 'Preparing selected prompt…'}</p>
-    {error && !busy ? <button type="button" onClick={() => void run('prepare')}>Retry preparation</button> : null}
+    {error && !busy ? <button type="button" onClick={cleanupRequested.current ? close : () => void run('prepare')}>{cleanupRequested.current ? 'Retry cleanup' : 'Retry preparation'}</button> : null}
     <button type="button" onClick={close}>Close</button>
   </section> : null;
   return <section className="lab-handoff-notice" aria-label="Handoff">

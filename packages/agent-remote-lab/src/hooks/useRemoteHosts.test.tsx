@@ -1,8 +1,10 @@
+import 'fake-indexeddb/auto';
 import { act } from 'react';
 import { expect, it, vi } from 'vitest';
-import { App } from '../App.js';
+import { PROTOCOL_VERSION } from '@orchardworks/agent-remote-protocol';
+import { App, type LabTransport } from '../App.js';
 import { SessionDirectoryClient } from '../directory-client.js';
-import { render, setPromptText } from '../test/setup.js';
+import { promptText, render, setPromptText } from '../test/setup.js';
 import { replicaState } from '../test/fixtures.js';
 
 it('restores mobile conversation actions when its Host reconnects while Context is unmounted', async () => {
@@ -13,10 +15,58 @@ it('restores mobile conversation actions when its Host reconnects while Context 
   window.localStorage.setItem(`agent-remote-opened:${baseUrl}`, JSON.stringify([{ agentId, nativeSessionId: 'native', providerId: 'dsh', title: 'Mobile conversation', hostId: 'host-1' }]));
   let online = false;
   const hosts = vi.fn(async () => ({ hosts: [{ id: 'local', name: 'Local runtime', online: true }, { id: 'host-1', name: 'My DSH', online }] }));
-  const directory = new SessionDirectoryClient(baseUrl);
+  const attachments: unknown[] = [];
+  const fetcher: typeof fetch = async (url, options) => {
+    const path = new URL(String(url)).pathname;
+    if (path === '/v1/remote/hosts/host-1/attach') {
+      attachments.push(JSON.parse(String(options?.body)));
+      return Response.json({ agentId, nativeSessionId: 'native' });
+    }
+    if (path.endsWith('/catalog')) return Response.json({ items: [], hasMore: false, revision: '1' });
+    if (path.endsWith('/workspaces')) return Response.json({ workspaces: [] });
+    return Response.json({ error: 'Not found' }, { status: 404 });
+  };
+  vi.stubGlobal('fetch', fetcher);
+  const directory = new SessionDirectoryClient(baseUrl, fetcher, 'host-1');
   const sendMessage = vi.fn().mockResolvedValue(undefined);
+  const controlRequests: string[] = [];
+  const snapshot = { ...replicaState.agent!, providerId: 'dsh', runtimeInfo: { ...replicaState.agent!.runtimeInfo, providerId: 'dsh', sessionId: 'native' } };
+  const transport: LabTransport = {
+    onDiagnostic: () => () => {}, onProtocolMessage: () => () => {},
+    listProviders: async () => [{ providerId: 'dsh', displayName: 'DSH' }],
+    createAgent: async () => { throw new Error('This test opens an existing session.'); },
+    resumeAgent: async () => { throw new Error('This test opens an existing session.'); },
+    fetchSnapshot: async () => ({ protocolVersion: PROTOCOL_VERSION, type: 'agent_snapshot', payload: snapshot }),
+    fetchTimeline: async () => ({ protocolVersion: PROTOCOL_VERSION, type: 'timeline_page', payload: {
+      requestId: 'history', agentId, epoch: 'epoch', direction: 'tail', reset: false, staleCursor: false, gap: false,
+      window: { minSeq: 1, maxSeq: 0, nextSeq: 1 }, startCursor: null, endCursor: null,
+      entries: [], hasOlder: false, hasNewer: false, error: null,
+    } }),
+    connect: (_agentId, listener) => {
+      queueMicrotask(() => listener.onOpen());
+      return { close() {}, send(message) {
+        if (message.type === 'negotiate') {
+          listener.onMessage({ protocolVersion: PROTOCOL_VERSION, type: 'negotiated', sessionControl: true });
+          listener.onMessage({ protocolVersion: PROTOCOL_VERSION, type: 'session_control', payload: {
+            agentId, revision: 'available', access: 'read_only', available: true,
+          } });
+          listener.onMessage({ protocolVersion: PROTOCOL_VERSION, type: 'agent_snapshot', payload: snapshot });
+        } else if (message.type === 'session_control_request') {
+          controlRequests.push(message.payload.action);
+          listener.onMessage({ protocolVersion: PROTOCOL_VERSION, type: 'session_control', payload: {
+            agentId, requestId: message.payload.requestId, revision: 'control', access: 'control', available: false, token: 'control-token',
+          } });
+        }
+        else if (message.type === 'timeline_subscription') listener.onMessage({ protocolVersion: PROTOCOL_VERSION,
+          type: 'timeline_subscribed', payload: { requestId: message.payload.requestId, agentIds: [agentId] } });
+      } };
+    },
+  };
+  window.history.replaceState(null, '', `/?agent=${agentId}`);
   try {
-    const container = await render(<App baseUrl={baseUrl} directory={directory} hostService={{ hosts, pair: vi.fn() }} initialState={replicaState} initialSessionStatus="ready" actions={{ sendMessage }} />);
+    const container = await render(<App baseUrl={baseUrl} directory={directory} transport={transport} hostService={{ hosts, pair: vi.fn() }} actions={{ sendMessage }} />);
+    expect(attachments).toEqual([{ providerId: 'dsh', nativeSessionId: 'native' }]);
+    expect(controlRequests).toEqual(['acquire']);
     expect(container.querySelector('#lab-context')).toBeNull();
     const input = container.querySelector<HTMLElement>('[data-testid="prompt-input"]')!;
     expect(input.getAttribute('contenteditable')).toBe('true');
@@ -33,9 +83,15 @@ it('restores mobile conversation actions when its Host reconnects while Context 
       setPromptText(input, 'After the Host reconnects');
       input.dispatchEvent(new Event('input', { bubbles: true }));
     });
-    expect(container.querySelector<HTMLButtonElement>('[data-testid="prompt-submit"]')!.disabled).toBe(false);
-    await act(async () => input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true })));
-    expect(sendMessage).toHaveBeenCalledWith('After the Host reconnects');
+    const submit = container.querySelector<HTMLButtonElement>('[data-testid="prompt-submit"]')!;
+    expect(submit.disabled, container.textContent ?? '').toBe(false);
+    await act(async () => {
+      submit.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+      submit.click();
+      await vi.waitFor(() => expect(sendMessage).toHaveBeenCalledWith('After the Host reconnects'));
+    });
+    expect(sendMessage).toHaveBeenCalledTimes(1);
+    expect(promptText(input)).toBe('');
   } finally {
     window.localStorage.removeItem(`agent-remote-opened:${baseUrl}`);
     vi.useRealTimers();

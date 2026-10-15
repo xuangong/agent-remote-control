@@ -4,7 +4,7 @@ import { OpenCodeCallbackBridge } from './callback-bridge.js';
 import { readReferenceHistory } from './reference-history.js';
 import { realpath } from 'node:fs/promises';
 import { resolve } from 'node:path';
-import type { AgentProviderNativeEvidence, AgentHistoryPage, AgentHistoryQuery, AgentPersistenceHandle, AgentProviderAdapter, AgentSessionConfig, AgentSessionExtensions } from '@orchardworks/agent-provider-sdk';
+import type { AgentNativePrefixCapability, AgentProviderNativeEvidence, AgentHistoryPage, AgentHistoryQuery, AgentPersistenceHandle, AgentProviderAdapter, AgentSessionConfig, AgentSessionExtensions } from '@orchardworks/agent-provider-sdk';
 import { AgentOperationRejectedError } from '@orchardworks/agent-provider-sdk';
 import type { SessionInfo as Session } from '@opencode/client';
 import { OpenCodeTransport, OpenCodeRequestError, openCodeReadError, type OpenCodeAgentProviderOptions } from './transport.js';
@@ -20,6 +20,15 @@ function summary(session: Session): OpenCodeSessionSummary {
 export class OpenCodeAgentProvider implements AgentProviderAdapter {
   /** Ordinary native creation generates ses_ plus 26 characters without a caller-supplied ID. */
   readonly createdSessionIdMaxLength: number = 30;
+  readonly nativePrefix: AgentNativePrefixCapability = {
+    createdSessionIdMaxLength: this.createdSessionIdMaxLength,
+    validate: target => this.validatePromptEdit(target),
+    create: (target, extensions, checkpoint) => {
+      if (typeof checkpoint !== 'function') return Promise.reject(new Error('Native prefix creation requires a checkpoint.'));
+      return this.createPromptEditPrefix(target, extensions, checkpoint);
+    },
+    verify: (target, handle) => this.verifyPromptEditBranch(target, handle),
+  };
   readonly nativeEvidence: AgentProviderNativeEvidence = openCodeProviderNativeEvidence;
   readonly descriptor = { providerId: 'opencode', displayName: 'OpenCode' };
   private readonly transport: OpenCodeTransport;
@@ -69,8 +78,11 @@ export class OpenCodeAgentProvider implements AgentProviderAdapter {
     this.assertOpen();
     try { await preparePromptEdit(this.transport, target); } catch (error) { throw openCodeReadError(error); }
   }
-  /** Await durable candidate retention before fallible prefix reads or attachment setup. */
-  async forkForPromptEdit(target: OpenCodePromptEditTarget, extensions: AgentSessionExtensions = {}, candidateKnown?: (handle: AgentPersistenceHandle) => Promise<void>): Promise<OpenCodeSession> {
+  /** Non-durable convenience fork. Host succession uses nativePrefix.create. */
+  async forkForPromptEdit(target: OpenCodePromptEditTarget, extensions: AgentSessionExtensions = {}): Promise<OpenCodeSession> {
+    return this.createPromptEditPrefix(target, extensions);
+  }
+  private async createPromptEditPrefix(target: OpenCodePromptEditTarget, extensions: AgentSessionExtensions = {}, candidateKnown?: (handle: AgentPersistenceHandle) => Promise<void>): Promise<OpenCodeSession> {
     this.assertOpen();
     const config = await preparePromptEdit(this.transport, target);
     if (extensions.tools?.length && !await this.supportsHostCallbacks(config.cwd)) throw new Error('OpenCode Host callbacks require an installed and connected ARC native plugin.');

@@ -2,6 +2,103 @@ import 'fake-indexeddb/auto';
 import { Blob as NativeBlob } from 'node:buffer';
 import { expect, it, vi } from 'vitest';
 import { cacheDraftImage, clearImageDraftScope, imageDraftScopeGeneration, lookupDraftImage, readImageDraft, writeImageDraft, type ImageDraft } from './image-drafts.js';
+import * as draftStorage from './image-drafts.js';
+
+async function storedDraft(key: string) {
+  const db = await new Promise<IDBDatabase>((resolve, reject) => {
+    const request = indexedDB.open('agent-remote-image-drafts', 2);
+    request.onsuccess = () => resolve(request.result); request.onerror = () => reject(request.error);
+  });
+  try {
+    return await new Promise<{ draft: ImageDraft | undefined; images: unknown[] }>((resolve, reject) => {
+      const tx = db.transaction(['drafts', 'images'], 'readonly');
+      const metadata = tx.objectStore('drafts').get(key), images = tx.objectStore('images').getAll();
+      tx.oncomplete = () => resolve({ draft: metadata.result, images: images.result.filter(image => JSON.parse(image.key)[0] === key) });
+      tx.onabort = () => reject(tx.error);
+    });
+  } finally { db.close(); }
+}
+
+it('releases only the exact draft and its bytes, preserving restored copies and other scopes', async () => {
+  const saved = draft('exact-release'), copied = { ...saved, key: 'restored-composer' }, other = draft('release-neighbor');
+  await writeImageDraft(saved); await writeImageDraft(copied); await writeImageDraft(other);
+  await draftStorage.releaseImageDraft({ scope: saved.scope, key: saved.key });
+  expect(await storedDraft(saved.key)).toEqual({ draft: undefined, images: [] });
+  expect(await readImageDraft(saved.key)).toBeUndefined();
+  expect((await storedDraft(copied.key)).images).toHaveLength(1);
+  expect((await storedDraft(other.key)).images).toHaveLength(1);
+  await expect(draftStorage.releaseImageDraft({ scope: 'wrong-scope', key: copied.key })).rejects.toThrow(/scope/);
+  expect((await storedDraft(copied.key)).images).toHaveLength(1);
+}, 5000);
+
+it('waits for an already-started write before releasing its exact key', async () => {
+  const saved = draft('release-in-flight');
+  let finish!: (bytes: ArrayBuffer) => void;
+  const convert = vi.spyOn(saved.images[saved.scope]!.blob!, 'arrayBuffer').mockImplementation(() => new Promise(resolve => { finish = resolve; }));
+  try {
+    const pending = writeImageDraft(saved);
+    await vi.waitFor(() => expect(finish).toBeDefined());
+    const released = draftStorage.releaseImageDraft({ scope: saved.scope, key: saved.key });
+    finish(new TextEncoder().encode('image bytes').buffer);
+    await pending; await released;
+    expect(await storedDraft(saved.key)).toEqual({ draft: undefined, images: [] });
+  } finally { convert.mockRestore(); }
+}, 5000);
+
+it('refuses to release an editor-owned key and preserves an aborted deletion for retry', async () => {
+  const saved = draft('release-retry'); await writeImageDraft(saved);
+  const unregister = draftStorage.registerImageDraftWriter(saved, {
+    snapshot: () => ({ status: 'ready', revision: 0, savedRevision: 0, retention: 'local', draft: saved }),
+    flush: async () => ({ status: 'ready', revision: 0, savedRevision: 0, retention: 'local', draft: saved }),
+  });
+  await expect(draftStorage.releaseImageDraft(saved)).rejects.toThrow(/editor/);
+  unregister(); await draftStorage.flushReleasedImageDraftWriters(saved);
+  const remove = IDBObjectStore.prototype.delete;
+  const fail = vi.spyOn(IDBObjectStore.prototype, 'delete').mockImplementation(function (this: IDBObjectStore, key) {
+    if (this.name === 'images') throw new Error('Delete unavailable');
+    return remove.call(this, key);
+  });
+  try { await expect(draftStorage.releaseImageDraft(saved)).rejects.toThrow(/Delete unavailable/); }
+  finally { fail.mockRestore(); }
+  expect((await storedDraft(saved.key)).images).toHaveLength(1);
+  expect((await readImageDraft(saved.key))?.parts).toEqual(saved.parts);
+  await draftStorage.releaseImageDraft(saved);
+  expect(await storedDraft(saved.key)).toEqual({ draft: undefined, images: [] });
+}, 5000);
+
+it('fences a queued release when scope cleanup retires the snapshot before a new draft is saved', async () => {
+  const saved = draft('release-scope-change');
+  let finish!: (bytes: ArrayBuffer) => void;
+  const convert = vi.spyOn(saved.images[saved.scope]!.blob!, 'arrayBuffer').mockImplementation(() => new Promise(resolve => { finish = resolve; }));
+  try {
+    const pending = writeImageDraft(saved);
+    const release = draftStorage.releaseImageDraft(saved);
+    const rejected = expect(release).rejects.toThrow(/scope changed/);
+    await clearImageDraftScope(saved.scope);
+    const replacement = writeImageDraft({ ...saved, parts: [{ type: 'text', text: 'new scope draft' }], images: {} });
+    finish(new ArrayBuffer(11));
+    await pending; await rejected; await replacement;
+    expect((await storedDraft(saved.key)).draft?.parts).toEqual([{ type: 'text', text: 'new scope draft' }]);
+  } finally { convert.mockRestore(); }
+}, 5000);
+
+it('aborts snapshot release when a new editor claims its key before deletion commits', async () => {
+  const saved = draft('release-new-editor'); await writeImageDraft(saved);
+  let unregister: (() => void) | undefined;
+  const remove = IDBObjectStore.prototype.delete;
+  const claim = vi.spyOn(IDBObjectStore.prototype, 'delete').mockImplementation(function (this: IDBObjectStore, key) {
+    const request = remove.call(this, key);
+    if (key === saved.key) unregister = draftStorage.registerImageDraftWriter(saved, {
+      snapshot: () => ({ status: 'ready', revision: 0, savedRevision: 0, retention: 'local', draft: saved }),
+      flush: async () => ({ status: 'ready', revision: 0, savedRevision: 0, retention: 'local', draft: saved }),
+    });
+    return request;
+  });
+  try { await expect(draftStorage.releaseImageDraft(saved)).rejects.toThrow(); }
+  finally { claim.mockRestore(); unregister?.(); await draftStorage.flushReleasedImageDraftWriters(saved); }
+  expect((await storedDraft(saved.key)).images).toHaveLength(1);
+  expect((await storedDraft(saved.key)).draft?.parts).toEqual(saved.parts);
+}, 5000);
 
 function draft(scope: string): ImageDraft {
   return { version: 1, key: JSON.stringify([scope, 'native-session']), scope, parts: [{ type: 'text', text: 'before ' }, { type: 'image', imageId: scope, label: 'image #4' }, { type: 'text', text: ' after' }],

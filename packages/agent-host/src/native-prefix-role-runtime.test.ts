@@ -7,7 +7,7 @@ import { WebSocket } from 'ws';
 import { createAgentRemoteHttpServer } from '@orchardworks/agent-remote-relay';
 import { PROTOCOL_VERSION, type ServerMessage } from '@orchardworks/agent-remote-protocol';
 import { expect, test } from 'vitest';
-import type { AgentSession, AgentSessionExtensions, AgentMessageOptions, ProviderStreamItem } from '@orchardworks/agent-provider-sdk';
+import type { AgentPersistenceHandle, AgentSession, AgentSessionExtensions, AgentMessageOptions, ProviderStreamItem } from '@orchardworks/agent-provider-sdk';
 import { createAgentHostRuntime, type AgentHostDirectory, type AgentHostRuntime } from './host.js';
 import { createCodexSessionDirectory } from './directory.js';
 import { createOpenCodeSessionDirectory } from './opencode-directory.js';
@@ -34,7 +34,7 @@ for (const providerId of ['codex', 'opencode'] as const) test.each(['leader', 'm
     async *observe(): AsyncIterable<ProviderStreamItem> { yield { type: 'history_boundary' }; await new Promise<void>(resolve => { this.stop = resolve; }); }
     async sendMessage(_text: string, options?: AgentMessageOptions) { deliveries.push(this.id); acceptance = options?.onAcceptance; return { disposition: this.id === 'A' ? 'queued' as const : 'started' as const }; } async respondToInteraction() {} async dispose() { this.stop?.(); }
   }
-  const provider = { createdSessionIdMaxLength: 36, validatePromptEdit: async () => {}, verifyPromptEditBranch: async () => {}, forkForPromptEdit: async (_target: unknown, extensions: AgentSessionExtensions = {}) => { forks++; bound.set('B', extensions); return new Native('B'); }, createSession: async () => new Native('unused'), openChildSession: async () => new Native('unused'), resumeSession: async (handle: { sessionId: string }, extensions: AgentSessionExtensions = {}) => { bound.set(handle.sessionId, extensions); return new Native(handle.sessionId); }, readSessionWorkspace: async () => root, readSessionHistory: async () => ({ entries: [] }), getSession: async (id: string) => ({ id, cwd: root, title: id }), renameSession: async () => {}, close: async () => {} };
+  const provider = { nativePrefix: { createdSessionIdMaxLength: 36, validate: async () => {}, verify: async () => {}, create: async (_target: unknown, extensions: AgentSessionExtensions, checkpoint: (handle: AgentPersistenceHandle) => Promise<void>) => { forks++; bound.set('B', extensions); await checkpoint({ providerId, sessionId: 'B', opaque: 'original' }); return new Native('B'); } }, createSession: async () => new Native('unused'), openChildSession: async () => new Native('unused'), resumeSession: async (handle: { sessionId: string }, extensions: AgentSessionExtensions = {}) => { bound.set(handle.sessionId, extensions); return new Native(handle.sessionId); }, readSessionWorkspace: async () => root, readSessionHistory: async () => ({ entries: [] }), getSession: async (id: string) => ({ id, cwd: root, title: id }), renameSession: async () => {}, close: async () => {} };
   const handoffs = new WeakMap<AgentHostRuntime, Parameters<NonNullable<AgentHostDirectory['setSessionHandoffHandler']>>[0]>();
   let now = 1_000_000;
   const make = () => {

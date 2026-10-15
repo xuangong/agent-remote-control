@@ -58,6 +58,7 @@ it.each(['leader', 'member'] as const)('keeps the %s seat and tools on a release
     await expect(candidate.execute({})).rejects.toThrow(/current|released/);
     await runtime.tick();
     current = 'B'; frozen = true;
+    await expect(runtime.extensions('codex', 'A')).resolves.toBeUndefined();
     await expect(stale.execute({})).rejects.toThrow(/current|released/);
     await expect(candidate.execute({})).rejects.toThrow(/current|released/);
     const message = { id: 'delivery', from: team.members[0]!.id, to: seat.id, text: 'Once', createdAt: 1, status: 'queued' as const };

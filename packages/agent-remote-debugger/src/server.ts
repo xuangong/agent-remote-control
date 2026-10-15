@@ -12,11 +12,11 @@ import { createAgentRemoteHttpServer, createAgentRemoteRelay, InputImageStore, I
 
 import { localRequestAllowed, serveAssets } from './local-web.js';
 import { ownAdapter } from './owned-adapter.js';
-import { LocalSessionSuccession, publishSuccessionState, type LocalSuccessionProvider } from './local-session-succession.js';
+import { LocalSessionSuccession, localSessionRoleId, publishSuccessionState, type LocalSuccessionProvider } from './local-session-succession.js';
 import type { NativeSessionRef } from '@orchardworks/agent-remote-protocol';
 
 export type DebuggerAdapter = LocalSuccessionProvider & { dispose?(): Promise<void> };
-export interface DebuggerSession { agentId: string; providerId: string; nativeSessionId: string; title: string }
+export interface DebuggerSession { agentId: string; providerId: string; nativeSessionId: string; title: string; draftOwnerId: string }
 export interface DebuggerServerOptions {
   adapter: DebuggerAdapter;
   config?: Partial<AgentSessionConfig>;
@@ -47,6 +47,7 @@ export async function createDebuggerServer(options: DebuggerServerOptions) {
   const relay = createAgentRemoteRelay({ providers: local.providers, operationCache: local.operationCache, operationLifecycle: local.operationLifecycle, inputResourceStore: new InputResourceStore({directory:options.resourceDirectory ?? join(homedir(), '.agent-remote-control', 'ardb-input-resources')}), inputImageStore: new InputImageStore({ directory }) });
   local.bindRelay(relay);
   let agentId: string = randomUUID();
+  let draftOwnerId = `session:${agentId}`;
   const historicalAgents = new Set<string>();
   let ownedOrigin: NativeSessionRef | undefined;
   let url = '';
@@ -146,7 +147,7 @@ export async function createDebuggerServer(options: DebuggerServerOptions) {
     const previousId = capture.status().id; if (previousId) recordings.set(previousId, capture);
     agentId = next;
     capture = new LiveRecording(agentId, () => url);
-    session = { agentId, providerId: ref.providerId, nativeSessionId: ref.nativeSessionId, title: 'ARDB Session View' };
+    session = { agentId, providerId: ref.providerId, nativeSessionId: ref.nativeSessionId, title: 'ARDB Session View', draftOwnerId };
     for (const listener of sessionListeners) {
       try { await listener(session); } catch { /* A diagnostic observer cannot undo a committed native selection. */ }
     }
@@ -181,6 +182,7 @@ export async function createDebuggerServer(options: DebuggerServerOptions) {
         || options.persistence && options.persistence.sessionId !== saved.origin.nativeSessionId) throw new Error('Succession state belongs to another owned session.');
       ownedOrigin = saved.origin;
       const role = await local.ensureRole(ownedOrigin);
+      draftOwnerId = role.id;
       if (options.config?.cwd && await realpath(options.config.cwd) !== role.workspace.canonicalCwd) throw new Error('Succession workspace changed.');
       await Promise.race([selectCurrent(role.current), aborted]);
     } else {
@@ -189,8 +191,11 @@ export async function createDebuggerServer(options: DebuggerServerOptions) {
         : relay.createAgent({ protocolVersion: PROTOCOL_VERSION, type: 'create_agent', payload: { requestId: randomUUID(), operationId: randomUUID(), agentId, providerId: options.adapter.descriptor.providerId, config: { cwd: process.cwd(), ...options.config, sessionId: options.config?.sessionId ?? randomUUID() } } });
       const result = await Promise.race([opening, aborted]);
       ownedOrigin = local.agentRef(agentId);
-      session = { agentId, providerId: result.payload.providerId, nativeSessionId: result.payload.sessionId, title: 'ARDB Session View' };
       const info = relay.requireAgent(agentId).snapshot().payload.runtimeInfo;
+      const existing = local.service.store.all().find(state => nativeSessionRefKey(state.role.origin) === nativeSessionRefKey(ownedOrigin!));
+      // Preserve role-owned recovery without requiring prompt-edit enrollment to succeed.
+      draftOwnerId = existing?.role.id ?? (info.persistence ? localSessionRoleId(ownedOrigin) : draftOwnerId);
+      session = { agentId, providerId: result.payload.providerId, nativeSessionId: result.payload.sessionId, title: 'ARDB Session View', draftOwnerId };
       if (info.persistence && info.cwd) await publishSuccessionState(stateDirectory, 'owned-session.json', { version: 1, origin: ownedOrigin });
     }
     // Once ready, the command owns shutdown; startup cancellation no longer applies.

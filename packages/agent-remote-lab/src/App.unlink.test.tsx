@@ -1,7 +1,11 @@
+import 'fake-indexeddb/auto';
+import { mkdtemp, realpath, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { act } from 'react';
 import { afterEach, expect, it, vi } from 'vitest';
 import WebSocket from 'ws';
-import type { AgentSessionSetting } from '@orchardworks/agent-provider-sdk';
+import type { AgentSessionSetting, AgentSessionTool } from '@orchardworks/agent-provider-sdk';
 import { HttpWebSocketTransport, type WebSocketLike } from '@orchardworks/agent-remote-web';
 import { PROTOCOL_VERSION } from '@orchardworks/agent-remote-protocol';
 import { sessionKey } from './session-tree.js';
@@ -25,17 +29,21 @@ async function waitFor(assertion: () => void): Promise<void> {
 }
 
 it('does not reopen a side unlinked during configuration, while still delivering its requested first message', async () => {
-  const { provider } = createRecordedLabProvider({ capabilities: { sessionControl: 'shared' } });
+  const workspace = await realpath(await mkdtemp(join(tmpdir(), 'lab-unlink-')));
+  const recorded = createRecordedLabProvider({ capabilities: { sessionControl: 'shared' } });
+  const provider = { ...recorded.provider, descriptor: { ...recorded.provider.descriptor, sessionExtensions: { instructions: false, tools: true } } };
+  const sessionTools = new Map<string, readonly AgentSessionTool[]>();
   const setting: AgentSessionSetting = { id: 'model', category: 'model', label: 'Model', value: 'recorded-model',
     options: [{ value: 'recorded-model', label: 'Recorded' }], mutable: true, scope: 'session' };
   const create = provider.createSession.bind(provider);
   provider.createSession = async config => {
-    const session = await create(config);
+    sessionTools.set(config.sessionId, config.tools ?? []);
+    const session = await create({ ...config, cwd: workspace });
     const runtimeInfo = session.runtimeInfo.bind(session);
     session.runtimeInfo = async () => ({ ...await runtimeInfo(), settings: [setting] });
     return session;
   };
-  const relay = createProtocolValidationServer({ providers: [provider], labOrigin: window.location.origin });
+  const relay = createProtocolValidationServer({ providers: [provider], labOrigin: window.location.origin, successionStateDirectory: join(workspace, 'state') });
   const { url } = await relay.http.listen();
   const directory = new SessionDirectoryClient(url);
   const transport = new HttpWebSocketTransport(url, {
@@ -46,27 +54,34 @@ it('does not reopen a side unlinked during configuration, while still delivering
   const configuration = new Promise<void>(resolve => { releaseConfiguration = resolve; });
   try {
     const source = await directory.attach('recorded', 'recorded-welcome');
-    const snapshot = await transport.fetchSnapshot(source.agentId);
     const fetchSnapshot = transport.fetchSnapshot.bind(transport);
     let configuring = false;
     vi.spyOn(transport, 'fetchSnapshot').mockImplementation(async (agentId, options) => {
       if (agentId !== source.agentId) { configuring = true; await configuration; }
       return fetchSnapshot(agentId, options);
     });
+    window.history.replaceState(null, '', `/?agent=${source.agentId}`);
     view = await render(<App baseUrl={url} directory={directory} transport={transport}
-      initialState={{ ...replicaState, agent: snapshot.payload }} initialSessionStatus="ready"
       actions={{ sendMessage: async () => { throw new Error('The slash command must not send to its source.'); } }} />);
+    await waitFor(() => expect(view!.querySelector<HTMLButtonElement>('.lab-primary-conversation [aria-label="Open chat commands"]')?.disabled).toBe(false));
     const sourceInput = view.querySelector<HTMLTextAreaElement>('.lab-primary-conversation [data-testid="prompt-input"]')!;
     await act(async () => {
       setPromptText(sourceInput, '/side Finish this requested task');
       sourceInput.dispatchEvent(new Event('input', { bubbles: true }));
     });
-    await act(async () => view!.querySelector<HTMLButtonElement>('.lab-primary-conversation [data-testid="prompt-submit"]')!.click());
+    await act(async () => {
+      const submit = view!.querySelector<HTMLButtonElement>('.lab-primary-conversation [data-testid="prompt-submit"]')!;
+      expect(submit.disabled).toBe(false);
+      submit.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+      submit.click();
+    });
     await waitFor(() => expect(configuring).toBe(true));
     const store = new ForkStore(url);
     const pending = store.all()[0]!;
     expect(pending.target).toBeDefined();
     expect(pending.configured).not.toBe(true);
+    const readSource = sessionTools.get(pending.target!.nativeSessionId)!.find(tool => tool.name === 'read_source_session')!;
+    expect(JSON.parse(await readSource.execute({ limit: 1 })).sourceSessionId).toBe('recorded-welcome');
     await act(async () => view!.querySelector<HTMLButtonElement>('.lab-fork-menu-trigger')!.click());
     await act(async () => document.querySelector<HTMLButtonElement>('[role="menuitem"].lab-fork-unlink')!.click());
     await waitFor(() => expect(store.get(pending.id).linked).toBe(false));
@@ -87,6 +102,7 @@ it('does not reopen a side unlinked during configuration, while still delivering
     if (view) await unmount(view);
     transport.dispose();
     await relay.close();
+    await rm(workspace, { recursive: true, force: true });
   }
 }, 10000);
 

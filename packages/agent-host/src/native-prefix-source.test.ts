@@ -2,8 +2,8 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, expect, test } from 'vitest';
-import { nativePrefixAncestors } from '@orchardworks/agent-remote-protocol';
-import type { AgentSession, AgentSessionExtensions } from '@orchardworks/agent-provider-sdk';
+import { nativePrefixSegmentAncestors } from '@orchardworks/agent-remote-protocol';
+import type { AgentPersistenceHandle, AgentSession, AgentSessionExtensions } from '@orchardworks/agent-provider-sdk';
 import { createCodexSessionDirectory } from './directory.js';
 import { createOpenCodeSessionDirectory } from './opencode-directory.js';
 import { SessionReferenceStore } from './session-reference.js';
@@ -37,10 +37,10 @@ test.each(['codex', 'opencode'] as const)('%s prefix readers reconstruct extensi
   await service.createRole({ id: 'reader-role', revision: 1, origin: ref('A', providerId), current: ref('A', providerId), workspace: { controllerId: 'host', canonicalCwd: '/work' } });
   const bound = new Map<string, AgentSessionExtensions>(); let next = 'B';
   const session = (id: string): AgentSession => ({ capabilities: { history: true, sendMessage: true, steer: false, cancel: false, readResource: false, interactions: { question: false, toolApproval: false, planApproval: false } }, async runtimeInfo() { return { providerId, sessionId: id, cwd: '/work', status: 'idle', persistence: { providerId, sessionId: id, opaque: '{}' } }; }, async *observe() { yield { type: 'history_boundary' }; }, async sendMessage() {}, async respondToInteraction() {}, async dispose() {} });
-  const provider = { createdSessionIdMaxLength: 36, validatePromptEdit: async () => {}, verifyPromptEditBranch: async () => {}, forkForPromptEdit: async (_target: unknown, extensions: AgentSessionExtensions = {}) => { bound.set(next, extensions); return session(next); }, createSession: async () => session('unused'), openChildSession: async () => session('unused'), resumeSession: async (handle: { sessionId: string }, extensions: AgentSessionExtensions = {}) => { bound.set(handle.sessionId, extensions); return session(handle.sessionId); }, readSessionHistory: async (id: string, query: { cursor?: string }) => read({ nativeSessionId: id }, query), getSession: async (id: string) => ({ id, cwd: '/work', title: id }), renameSession: async () => {}, close: async () => {} };
+  const provider = { nativePrefix: { createdSessionIdMaxLength: 36, validate: async () => {}, verify: async () => {}, create: async (_target: unknown, extensions: AgentSessionExtensions, checkpoint: (handle: AgentPersistenceHandle) => Promise<void>) => { bound.set(next, extensions); await checkpoint({ providerId, sessionId: next, opaque: '{}' }); return session(next); } }, createSession: async () => session('unused'), openChildSession: async () => session('unused'), resumeSession: async (handle: { sessionId: string }, extensions: AgentSessionExtensions = {}) => { bound.set(handle.sessionId, extensions); return session(handle.sessionId); }, readSessionHistory: async (id: string, query: { cursor?: string }) => read({ nativeSessionId: id }, query), getSession: async (id: string) => ({ id, cwd: '/work', title: id }), renameSession: async () => {}, close: async () => {} };
   const make = () => {
     const directory = providerId === 'codex' ? createCodexSessionDirectory({ ...provider, listSessions: async () => ({ sessions: [] }) }, [], grants) : createOpenCodeSessionDirectory({ ...provider, listSessions: async () => [] }, [], grants, true);
-    directory.setSourceReferenceAncestors?.(async id => nativePrefixAncestors(ref(id, providerId), service.store.all().flatMap(state => state.operations.filter(row => row.phase === 'committed'))).map(row => row.nativeSessionId));
+    directory.setSourceReferenceAncestors?.(async id => nativePrefixSegmentAncestors(ref(id, providerId), service.store.all().flatMap(state => state.operations.filter(row => row.phase === 'committed'))).map(row => row.nativeSessionId));
     directory.setSourceBindingReader!((actual, source, query, legacy, anchor) => service.bindings(providerId).read(actual, source, query, legacy, anchor));
     cleanup.push(async () => { await directory.close(); }); return directory;
   };
@@ -51,7 +51,7 @@ test.each(['codex', 'opencode'] as const)('%s prefix readers reconstruct extensi
   const target = (id: string) => ({ nativeSessionId: id, turnId: 'turn', messageId: 'message' });
   expect(await directory.supportsNativePrefix!(target('A'))).toBe(true);
   const extra = { systemPrompt: 'Additional prefix instructions' };
-  const handle = await directory.createNativePrefix!(target('A'), extra);
+  const handle = await directory.createNativePrefix!(target('A'), extra, undefined, async handle => { expect(handle).toEqual({ providerId, sessionId: 'B', opaque: '{}' }); });
   await expect(bound.get('B')!.tools![0]!.execute({})).rejects.toThrow(/current|reserved|admission/);
   await advance(service, 'A', 'B', providerId, 1, false);
   await expect(bound.get('B')!.tools![0]!.execute({})).rejects.toThrow(/current|reserved|admission/);
@@ -61,7 +61,7 @@ test.each(['codex', 'opencode'] as const)('%s prefix readers reconstruct extensi
   expect((await service.bindings(providerId).readRole({ kind: 'fixed', source: ref('A', providerId) }, {})).sourceRef).toEqual(ref('A', providerId));
   expect(JSON.parse(await bound.get('B')!.tools![0]!.execute({ cursor: old.nextCursor }))).toMatchObject({ sourceSessionId: 'source' });
   await expect(stale.execute({})).rejects.toThrow(/current/);
-  next = 'C'; const cHandle = await directory.createNativePrefix!(target('B'), {}); await advance(service, 'B', 'C', providerId, 2);
+  next = 'C'; const cHandle = await directory.createNativePrefix!(target('B'), {}, undefined, async handle => { expect(handle).toEqual({ providerId, sessionId: 'C', opaque: '{}' }); }); await advance(service, 'B', 'C', providerId, 2);
   expect(JSON.parse(await bound.get('C')!.tools![0]!.execute({}))).toMatchObject({ sourceSessionId: 'source' });
   await expect(bound.get('B')!.tools![0]!.execute({})).rejects.toThrow(/current/);
   service = new SessionSuccessionService(stateDirectory, 'host', ports); await service.ready;

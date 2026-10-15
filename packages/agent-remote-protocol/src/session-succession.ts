@@ -104,7 +104,7 @@ export interface NativePrefixResolution {
   target: NativeSessionRef;
   operationIds: readonly string[];
 }
-/** Validate complete committed role histories before deriving execution authority. */
+/** Validate complete committed role histories before routing or inheritance lookup. */
 function nativePrefixEdges(committed: readonly SuccessionRecord[]) {
   const groups = new Map<string, SuccessionRecord[]>(), owners = new Map<string, string>(), operations = new Set<string>();
   const forward = new Map<string, SuccessionRecord>(), reverse = new Map<string, SuccessionRecord>();
@@ -147,13 +147,13 @@ export function resolveNativePrefix(anchor: NativeSessionRef, committed: readonl
   }
   return { anchor: { ...anchor }, target: { ...target }, operationIds };
 }
-/** Inclusive ancestry, ordered from the oldest verified anchor to the target. */
-export function nativePrefixAncestors(target: NativeSessionRef, committed: readonly SuccessionRecord[]): readonly NativeSessionRef[] {
+/** Inclusive metadata ancestry within one contiguous native-prefix segment. Generic succession stops inheritance. */
+export function nativePrefixSegmentAncestors(target: NativeSessionRef, committed: readonly SuccessionRecord[]): readonly NativeSessionRef[] {
   if (!isNativeSessionRef(target)) throw new Error('Native prefix execution routing is unavailable: invalid target.');
   const { reverse } = nativePrefixEdges(committed), ancestors = [target];
   let current = target;
   for (let edge = reverse.get(nativeSessionRefKey(current)); edge; edge = reverse.get(nativeSessionRefKey(current))) {
-    if (!edge.preparation) throw new Error('Native prefix execution routing is unavailable across generic succession.');
+    if (!edge.preparation) break;
     current = edge.from; ancestors.unshift(current);
   }
   return ancestors.map(ref => ({ ...ref }));

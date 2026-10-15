@@ -79,10 +79,12 @@ export class TeamRuntime {
   }
   async extensions(provider: string, nativeSessionId: string, actual: () => string | undefined = () => nativeSessionId): Promise<AgentSessionExtensions | undefined> {
     await this.ready;
-    const requested = this.access.sessionRouting.resolve({ controllerId: this.access.controllerId, providerId: provider, nativeSessionId }).target;
+    // Before native creation the source is current; on restoration the actual attachment can already be current.
+    const recipients = new Set([nativeSessionId, actual()].filter((id): id is string => !!id)
+      .map(id => nativeSessionRefKey({ controllerId: this.access.controllerId, providerId: provider, nativeSessionId: id })));
     const records = this.records.filter(item => {
       if (item.creation !== 'ready' || item.seat.member.providerId !== provider) return false;
-      try { return nativeSessionRefKey(this.access.sessionRouting.resolve(this.anchor(item.seat)).target) === nativeSessionRefKey(requested); } catch { return false; }
+      try { return recipients.has(nativeSessionRefKey(this.access.sessionRouting.resolve(this.anchor(item.seat)).target)); } catch { return false; }
     });
     if (records.length > 1) throw new Error('Team recipient has ambiguous role anchors.');
     return records[0] ? this.tools(records[0].seat, actual) : undefined;

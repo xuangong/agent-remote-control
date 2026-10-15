@@ -23,8 +23,9 @@ it('transfers authorized Team resources through the production Worker and preser
   const alice = await f.login('alice');
   async function host(name: string, savedKey?: string) {
     const key = savedKey ?? ((await (await f.json(alice.basePath + 'v1/remote/pairings', alice.cookie, {})).json()) as { key: string }).key;
-    const h = await f.host(key, false, undefined, false, false, 'codex', name, false, true, true);
+    const h = await f.host(key, false, undefined, false, false, 'codex', name, false, true, true, true);
     expect(h.teamResources).toBe(true);
+    expect(h.teamRecipients).toBe(1);
     h.socket.addEventListener('message', event => {
       const frame = JSON.parse(String(event.data));
       if (frame.type !== 'rpc_request' || frame.path !== '/remote/team/create-seat') return;

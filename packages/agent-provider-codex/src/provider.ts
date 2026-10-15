@@ -1,6 +1,6 @@
 import { CodexSessionTakeover } from './session-takeover.js';
 import { preparePromptEdit, verifyPromptEditBranch, type CodexPromptEditTarget } from './prompt-edit.js';
-import type { AgentSessionExtensions, AgentHistoryQuery, AgentHistoryPage } from '@orchardworks/agent-provider-sdk';
+import type { AgentNativePrefixCapability, AgentSessionExtensions, AgentHistoryQuery, AgentHistoryPage } from '@orchardworks/agent-provider-sdk';
 import { readSessionHistoryPage } from './reference-history.js';
 import type { ChildProcessWithoutNullStreams } from 'node:child_process';
 import { homedir } from 'node:os';
@@ -43,6 +43,19 @@ export interface CodexAppServerProviderOptions {
 export class CodexAppServerProvider implements AgentProviderAdapter {
   /** Native thread/start creates a nonempty UUID. An injected producer has no declared bound. */
   get createdSessionIdMaxLength(): number | undefined { return this.options.spawn ? undefined : 36; }
+  get nativePrefix(): AgentNativePrefixCapability | undefined {
+    const bound = this.createdSessionIdMaxLength;
+    if (bound === undefined) return undefined;
+    return {
+      createdSessionIdMaxLength: bound,
+      validate: target => this.validatePromptEdit(target),
+      create: (target, extensions, checkpoint) => {
+        if (typeof checkpoint !== 'function') return Promise.reject(new Error('Native prefix creation requires a checkpoint.'));
+        return this.createPromptEditPrefix(target, extensions, checkpoint);
+      },
+      verify: (target, handle) => this.verifyPromptEditBranch(target, handle),
+    };
+  }
   readonly nativeEvidence: CodexProviderNativeEvidence;
   readonly descriptor: AgentProviderDescriptor = {
     sessionExtensions: { instructions: true, tools: true },
@@ -188,8 +201,12 @@ export class CodexAppServerProvider implements AgentProviderAdapter {
     }
   }
 
-  /** Await durable candidate retention before materialization or branch history reads. */
-  async forkForPromptEdit(target: CodexPromptEditTarget, extensions: AgentSessionExtensions = {}, candidateKnown?: (handle: AgentPersistenceHandle) => Promise<void>): Promise<AgentSession> {
+  /** Non-durable convenience fork. Host succession uses nativePrefix.create. */
+  async forkForPromptEdit(target: CodexPromptEditTarget, extensions: AgentSessionExtensions = {}): Promise<AgentSession> {
+    return this.createPromptEditPrefix(target, extensions);
+  }
+
+  private async createPromptEditPrefix(target: CodexPromptEditTarget, extensions: AgentSessionExtensions = {}, candidateKnown?: (handle: AgentPersistenceHandle) => Promise<void>): Promise<AgentSession> {
     const transport = await this.createTransport();
     let candidateReturned = false;
     try {

@@ -1,16 +1,16 @@
 import { successionResumeHandle, nativePrefixResumeHandle } from './local-succession-preparation.js';
-import { AgentSessionInUseError, serializeAgentEmptyCreationResult } from '@orchardworks/agent-provider-sdk';
+import { AgentSessionInUseError, serializeAgentEmptyCreationResult, resolveAgentNativePrefixCapability } from '@orchardworks/agent-provider-sdk';
 import { NativeSessionOwnerError } from './native-session-owner.js';
 import { SessionReferenceStore, disposeAfterSourceGrantFailure, sourceSessionExtensions, type SourceBindingReader } from './session-reference.js';
 import { randomUUID } from 'node:crypto';
 import type { CodexAppServerProvider, CodexSessionSummary } from '@orchardworks/agent-provider-codex';
-import type { AgentPersistenceHandle, AgentSession, AgentHistoryQuery } from '@orchardworks/agent-provider-sdk';
+import type { AgentProviderAdapter, AgentPersistenceHandle, AgentSession, AgentHistoryQuery } from '@orchardworks/agent-provider-sdk';
 import type { AgentHostDirectory, AgentHostWorkspace } from './host.js';
 import { requireSessionExtensionIdentity, sessionExtensionIdentity } from './session-extension-identity.js';
 
 /** Keeps new native sessions alive before and after their relay projection is attached. */
 export function createCodexSessionDirectory(
-  provider: Pick<CodexAppServerProvider, 'listSessions' | 'createSession' | 'resumeSession' | 'openChildSession'> & Partial<Pick<CodexAppServerProvider, 'createdSessionIdMaxLength' | 'inspectSessionOwner' | 'releaseSessionOwner' | 'readSessionTitle' | 'renameSession' | 'readSessionHistory' | 'readSessionWorkspace' | 'canReleaseSession' | 'reconcileIdleSession' | 'forkSession' | 'forkForPromptEdit' | 'validatePromptEdit' | 'verifyPromptEditBranch'>>,
+  provider: Pick<CodexAppServerProvider, 'listSessions' | 'createSession' | 'resumeSession' | 'openChildSession'> & Pick<AgentProviderAdapter, 'nativePrefix'> & Partial<Pick<CodexAppServerProvider, 'createdSessionIdMaxLength' | 'inspectSessionOwner' | 'releaseSessionOwner' | 'readSessionTitle' | 'renameSession' | 'readSessionHistory' | 'readSessionWorkspace' | 'canReleaseSession' | 'reconcileIdleSession' | 'forkSession' | 'forkForPromptEdit' | 'validatePromptEdit'>>,
   workspaces: readonly AgentHostWorkspace[],
   references?: SessionReferenceStore,
 ): AgentHostDirectory {
@@ -84,15 +84,16 @@ export function createCodexSessionDirectory(
     requiresController: id => controllerTools.has(id),
     supportsPromptEditing: !!provider.forkForPromptEdit,
     async supportsNativePrefix(target) {
-      const limit = provider.createdSessionIdMaxLength;
-      if (closed || !provider.forkForPromptEdit || !provider.verifyPromptEditBranch || !provider.validatePromptEdit
-        || !Number.isInteger(limit) || !limit || limit > 512 || limit < 1) return false;
+      const capability = resolveAgentNativePrefixCapability(provider);
+      if (closed || !capability || capability.createdSessionIdMaxLength > 512) return false;
       await sourceAccessCheck?.(target.nativeSessionId);
       if (await lookupSourceGrant(target.nativeSessionId) && (!sourceReferenceAncestors || !sourceBindingReader)) return false;
-      await provider.validatePromptEdit(target); return true;
+      await capability.validate(target); return true;
     },
     async createNativePrefix(target, extensions, evidence, candidateKnown) {
-      if (closed || !provider.forkForPromptEdit || !provider.verifyPromptEditBranch) throw new Error('Native prefix preparation is unavailable.');
+      const capability = resolveAgentNativePrefixCapability(provider);
+      if (closed || !capability || capability.createdSessionIdMaxLength > 512) throw new Error('Native prefix preparation is unavailable.');
+      if (typeof candidateKnown !== 'function') throw new Error('Native prefix creation requires a checkpoint.');
       await sourceAccessCheck?.(target.nativeSessionId);
       const grant = await lookupSourceGrant(target.nativeSessionId);
       if (grant && (!sourceReferenceAncestors || !sourceBindingReader)) throw new Error('Source prefix routing is unavailable on this Host.');
@@ -100,23 +101,25 @@ export function createCodexSessionDirectory(
       const source = grant ? sourceExtensions(grant.sourceNativeSessionId, () => readerId, grant.handle.sessionId) : undefined;
       const boundExtensions = source ? { ...extensions, systemPrompt: [grant!.systemPrompt, extensions.systemPrompt].filter(Boolean).join('\n\n'), tools: [...(source.tools ?? []), ...(extensions.tools ?? [])] } : extensions;
       let checkpoint: AgentPersistenceHandle | undefined;
-      const session = await provider.forkForPromptEdit(target, boundExtensions, async handle => {
+      const session = await capability.create(target, boundExtensions, async handle => {
         checkpoint = nativePrefixResumeHandle('codex', handle.sessionId, handle);
-        await candidateKnown?.(checkpoint);
+        await candidateKnown(checkpoint);
         readerId = checkpoint.sessionId;
       });
+      if (!checkpoint) { await session.dispose(); throw new Error('Native prefix creation did not checkpoint its handle.'); }
       evidence?.completed();
       const id = await remember(session, sessionExtensionIdentity(boundExtensions)), entry = opened.get(id)!;
-      const handle = nativePrefixResumeHandle('codex', id, checkpoint ?? entry.handle);
+      const handle = nativePrefixResumeHandle('codex', id, checkpoint);
       readerId = id;
       entry.nativePrefix = JSON.stringify(handle);
       if (boundExtensions.tools?.length) controllerTools.add(id);
       return handle;
     },
     async verifyNativePrefix(target, handle) {
-      if (closed || !provider.verifyPromptEditBranch) throw new Error('Native prefix verification is unavailable.');
+      const capability = resolveAgentNativePrefixCapability(provider);
+      if (closed || !capability || capability.createdSessionIdMaxLength > 512) throw new Error('Native prefix verification is unavailable.');
       await sourceAccessCheck?.(target.nativeSessionId);
-      await provider.verifyPromptEditBranch(target, nativePrefixResumeHandle('codex', handle.sessionId, handle));
+      await capability.verify(target, nativePrefixResumeHandle('codex', handle.sessionId, handle));
     },
     async validatePromptEdit(target) {
       await sourceAccessCheck?.(target.nativeSessionId);

@@ -35,7 +35,7 @@ async function copyDeclaration(name) {
 }
 await mkdir(join(root, 'dist/internal/local-succession'), { recursive: true });
 await copyDeclaration('local-session-succession.d.ts');
-await writeFile(join(root, 'dist/local-session-succession.d.ts'), "export { LocalSessionSuccession, publishSuccessionState, type LocalSuccessionProvider } from './internal/local-succession/local-session-succession.js';\n");
+await writeFile(join(root, 'dist/local-session-succession.d.ts'), "export { LocalSessionSuccession, localSessionRoleId, publishSuccessionState, type LocalSuccessionProvider } from './internal/local-succession/local-session-succession.js';\n");
 await writeFile(join(root, 'dist/local-session-succession.meta.json'), JSON.stringify({ inputs: Object.keys(result.metafile.inputs).map(input => basename(input)),
   imports: Object.values(result.metafile.outputs).flatMap(output => output.imports.map(item => item.path)), declarations: [...copied].sort() }, null, 2) + '\n');
 console.log(`Bundled local succession: ${Object.keys(result.metafile.inputs).length} modules, ${copied.size} local declarations.`);

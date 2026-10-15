@@ -9,12 +9,12 @@ import { createHash } from 'node:crypto';
 function fixture(create?: (seat:TeamSeat)=>Promise<TeamSeat['member']>, lifetime?: {now:()=>number;ttl:number}) {
   const rows=new Map<string,Uint8Array>();const storage:TeamResourceStorage={async get(key){return rows.get(key);},async put(key,value){rows.set(key,value);},async delete(key){rows.delete(key);},async list(prefix){return [...rows.keys()].filter(key=>key.startsWith(prefix));}};
   const resources=new PortableTeamResourceStore({storage,...(lifetime?{now:lifetime.now,draftTtlMs:lifetime.ttl}:{})});
-  let state:Team[]=[], now=100;
+  let state:SavedTeam[]=[], now=100;
   const calls:TeamSeat[]=[];
   const ports:ConstructorParameters<typeof TeamBroker>[0]={resolveSession:(hostId,providerId,nativeSessionId)=>({controllerId:hostId,providerId,nativeSessionId}),resources,resourceDraftTtlMs:lifetime?.ttl,read:()=>state,now:lifetime?.now??(()=>++now),assertHost:()=>{},change:async update=>{const draft=structuredClone(state);const result=structuredClone(update(draft));state=draft;return result;},
     createSeat:async(_,seat)=>{calls.push(seat);return create ? create(seat) : {...seat.member,nativeSessionId:`native-${seat.member.id}`,creation:'ready',activity:'idle'};}};
   const broker=new TeamBroker(ports);
-  return {broker,calls,ports,snapshot:()=>structuredClone(state),seed:(saved:Team[])=>{state=structuredClone(saved);},restart:()=>new TeamBroker({...ports,resources:new PortableTeamResourceStore({storage,...(lifetime?{now:lifetime.now,draftTtlMs:lifetime.ttl}:{})})})};
+  return {broker,calls,ports,snapshot:()=>structuredClone(state),seed:(saved:SavedTeam[])=>{state=structuredClone(saved);},restart:()=>new TeamBroker({...ports,resources:new PortableTeamResourceStore({storage,...(lifetime?{now:lifetime.now,draftTtlMs:lifetime.ttl}:{})})})};
 }
 const source={hostId:'mac',providerId:'codex',nativeSessionId:'main',title:'Project'};
 async function group(f=fixture()) {
@@ -175,8 +175,8 @@ it('deduplicates settled sends and late receipts across a broker restart without
 });
 
 it('reclaims legacy settled history before admitting new messages while preserving uncertain input',async()=>{
-  const {broker,team,leader,worker,seed,restart}=await group();
-  const legacy=structuredClone(team);
+  const {broker,team,leader,worker,seed,restart,snapshot}=await group();
+  const legacy=snapshot()[0]!;
   legacy.messages=Array.from({length:199},(_,i)=>({id:`old-${i}`,from:leader.id,to:worker.id,text:'old completed input',status:i%2?'rejected' as const:'accepted' as const,...(i%2?{}:{acceptance:'started' as const}),createdAt:1}));
   legacy.messages.push({id:'uncertain',from:leader.id,to:worker.id,text:'Keep this input',status:'unknown',createdAt:2});
   seed([legacy]);
@@ -189,9 +189,10 @@ it('reclaims legacy settled history before admitting new messages while preservi
 
 
 it('still bounds unresolved backlog and releases a slot after explicit failed settlement',async()=>{
-  const {team,leader,worker,seed,restart}=await group();
-  team.messages=Array.from({length:200},(_,i)=>({id:`pending-${i}`,from:leader.id,to:worker.id,text:'Inspect',status:i%2?'unknown' as const:'accepted' as const,...(i%2?{}:{acceptance:'queued' as const}),createdAt:1}));
-  seed([team]);
+  const {team,leader,worker,seed,restart,snapshot}=await group();
+  const stored=snapshot()[0]!;
+  stored.messages=Array.from({length:200},(_,i)=>({id:`pending-${i}`,from:leader.id,to:worker.id,text:'Inspect',status:i%2?'unknown' as const:'accepted' as const,...(i%2?{}:{acceptance:'queued' as const}),createdAt:1}));
+  seed([stored]);
   const broker=restart(),input={action:'send' as const,teamId:team.id,memberId:leader.id,to:worker.id,operationId:'new',text:'New work'};
   await expect(broker.hostCall('mac',input)).rejects.toThrow('capacity');
   expect(broker.list()[0]!.messages).toHaveLength(200);
@@ -202,7 +203,8 @@ it('still bounds unresolved backlog and releases a slot after explicit failed se
 
 
 it('compacts old settled bodies on broker restore before any client or Host request',async()=>{
-  const {team,leader,worker}=await group();
+  const {leader,worker,snapshot}=await group();
+  const team=snapshot()[0]!;
   team.messages=[{id:'old',from:leader.id,to:worker.id,text:'Legacy settled body',status:'rejected',createdAt:1},
     {id:'unknown',from:leader.id,to:worker.id,text:'Uncertain input',status:'unknown',createdAt:2}];
   const broker=createHostBroker({origin:'https://relay.example',initialState:{keys:[],hosts:[],bindings:[],creations:[],teams:[team]}});
@@ -318,7 +320,7 @@ it.each(['accepted', 'rejected'] as const)('explicitly resolves accepted input w
   await restored.action({ action: 'resolve_message', teamId: f.team.id, messageId: sent.id, outcome });
   expect(restored.hasUnsettledRecipient(claimed.resolvedTarget)).toBe(false);
   expect(restored.list()[0]!.status).toBe('archived');
-  const receipt = (f.snapshot()[0] as SavedTeam).deliveryReceipts!.find(item => item.id === sent.id)!;
+  const receipt = f.snapshot()[0]!.deliveryReceipts!.find(item => item.id === sent.id)!;
   expect(receipt).toMatchObject({ status: outcome, resolvedTarget: claimed.resolvedTarget });
   expect(receipt.acceptance).toBe(outcome === 'accepted' ? 'handled' : undefined);
   expect(f.restart().hasUnsettledRecipient(claimed.resolvedTarget)).toBe(false);
@@ -327,7 +329,7 @@ it.each(['accepted', 'rejected'] as const)('explicitly resolves accepted input w
 it('retains legacy compact uncertainty through expiry, count and shared storage pressure', async () => {
   let now = 1;
   const f = await group(fixture(undefined, { now: () => now, ttl: 10 }));
-  const team = f.snapshot()[0]! as SavedTeam;
+  const team = f.snapshot()[0]!;
   team.messages = [];
   const receipt = { id: 'legacy', from: f.leader.id, to: f.worker.id, status: 'accepted' as const, createdAt: 1, settledAt: 1, fingerprint: deliveryFingerprint({ to: f.worker.id, text: 'Original private body' }) };
   team.deliveryReceipts = [receipt];
@@ -341,7 +343,7 @@ it('retains legacy compact uncertainty through expiry, count and shared storage 
     await restored.hostCall('win', { action: 'claim', ...target });
     await restored.hostCall('win', { action: 'settle', ...target, outcome: 'rejected' });
   }
-  const saved = f.snapshot() as SavedTeam[];
+  const saved = f.snapshot();
   expect(saved[0]!.deliveryReceipts!.find(item => item.id === receipt.id)).toEqual(receipt);
   expect(saved[0]!.deliveryReceipts!.length).toBeLessThan(200);
   trimTeamDeliveryReceipts(saved, 1);
@@ -356,7 +358,7 @@ it('requires recipient-aware participants before replacing a Team role and retai
   const target = { controllerId: 'win', providerId: 'claude', nativeSessionId: f.worker.nativeSessionId! };
   expect(() => f.broker.assertReplacementSupported(target, 'win')).toThrow('Update the Controller');
   supported = true; expect(() => f.broker.assertReplacementSupported(target, 'win')).not.toThrow();
-  const saved = f.snapshot() as SavedTeam[];
+  const saved = f.snapshot();
   saved[0]!.deliveryReceipts = [{ id: 'legacy', from: f.leader.id, to: f.worker.id, status: 'accepted', createdAt: 1, settledAt: 1, fingerprint: deliveryFingerprint({ to: f.worker.id, text: 'Old input' }) }];
   f.seed(saved); const restarted = f.restart();
   expect(restarted.hasUnsettledRecipient(target)).toBe(true);

@@ -13,7 +13,7 @@ function deferred() {
   const promise = new Promise<void>(done => { resolve = done; });
   return { promise, resolve };
 }
-async function fixture(generic = false, operation = false, ambiguous = false, targetAccess?: 'unbound' | 'inaccessible' | 'authorized') {
+async function fixture(generic: boolean | 'before-prefix' = false, operation = false, ambiguous = false, targetAccess?: 'unbound' | 'inaccessible' | 'authorized') {
   let broker: ReturnType<typeof createHostBroker>;
   const publicationEntered = deferred(), publicationReleased = deferred(), mutationQueued = deferred();
   let prefixProjection: CommittedSuccessionProjection | undefined;
@@ -43,11 +43,13 @@ async function fixture(generic = false, operation = false, ambiguous = false, ta
   const origin = `http://127.0.0.1:${(http.address() as { port: number }).port}`;
   const authority = { version: 1 as const, origin, issuer: 'issuer', namespace: 'tenant', ownerSubject: 'owner' };
   const relation = { id: 'relation', kind: 'side' as const, sourceNativeSessionId: 'source', createdAt: '2026-10-10T00:00:00.000Z' };
-  const initial: RemoteHostBrokerState = { keys: [], hosts: [{ id: 'host', installationId: 'controller', name: 'Host', legacyDsh: false, providers: [{ providerId: 'codex', displayName: 'Codex' }] }], bindings: ['source', 'A', 'B', 'C'].map(id => ({ hostId: 'host', providerId: 'codex', nativeSessionId: id, agentId: id, ...(id === 'A' ? { sourceRelation: relation } : {}) })), creations: [['created', { agentId: 'A', fingerprint: JSON.stringify({ sourceNativeSessionId: 'source' }) }]], associations: { version: 6, revision: 2, admissions: [], relationChanges: [], relationResets: [], freezes: [] } };
+  const reader = generic === 'before-prefix' ? 'B' : 'A';
+  const initial: RemoteHostBrokerState = { keys: [], hosts: [{ id: 'host', installationId: 'controller', name: 'Host', legacyDsh: false, providers: [{ providerId: 'codex', displayName: 'Codex' }] }], bindings: ['source', 'A', 'B', 'C'].map(id => ({ hostId: 'host', providerId: 'codex', nativeSessionId: id, agentId: id, ...(id === reader ? { sourceRelation: relation } : {}) })), creations: [['created', { agentId: reader, fingerprint: JSON.stringify({ sourceNativeSessionId: 'source' }) }]], associations: { version: 6, revision: 2, admissions: [], relationChanges: [], relationResets: [], freezes: [] } };
   for (const [revision, from, to] of [[1, 'A', 'B'], [2, 'B', 'C']] as const) {
-    const request = { roleId: 'reader-role', operationId: `prefix-${revision}`, expectedRevision: revision, from: ref(from), ...(!generic ? { preparation: { kind: 'native_prefix' as const, turnId: 'turn', messageId: 'message' } } : {}) };
+    const prefix = !generic || generic === 'before-prefix' && revision === 2;
+    const request = { roleId: 'reader-role', operationId: `prefix-${revision}`, expectedRevision: revision, from: ref(from), ...(prefix ? { preparation: { kind: 'native_prefix' as const, turnId: 'turn', messageId: 'message' } } : {}) };
     const workspace = { controllerId: 'controller', canonicalCwd: '/work' };
-    initial.associations!.freezes.push({ hostId: 'host', released: 'committed', receipt: { version: generic ? 2 : 3, maxProjectionBytes: 10000, token: `token-${revision}`, authority, controllerId: 'controller', request, associationRevision: 0, lineage: revision === 1 ? [ref('A')] : [ref('A'), ref('B')], relations: [{ relationId: relation.id, kind: relation.kind, sourceRef: ref('source'), readerRef: ref('A'), linked: true, revision: 0 }] }, projection: { version: 1, role: { id: 'reader-role', revision: revision + 1, origin: ref('A'), current: ref(to), workspace }, receipt: { ...request, to: ref(to), phase: 'committed', committedRevision: revision + 1, startedAt: 'now', updatedAt: 'now', prepared: { ...request, to: ref(to), workspace, participants: [], associationRevision: 0, capture: { epoch: 'e', seq: 1, capturedAt: 'now' } } } } });
+    initial.associations!.freezes.push({ hostId: 'host', released: 'committed', receipt: { version: prefix ? 3 : 2, maxProjectionBytes: 10000, token: `token-${revision}`, authority, controllerId: 'controller', request, associationRevision: 0, lineage: revision === 1 ? [ref('A')] : [ref('A'), ref('B')], relations: [{ relationId: relation.id, kind: relation.kind, sourceRef: ref('source'), readerRef: ref('A'), linked: true, revision: 0 }] }, projection: { version: 1, role: { id: 'reader-role', revision: revision + 1, origin: ref('A'), current: ref(to), workspace }, receipt: { ...request, to: ref(to), phase: 'committed', committedRevision: revision + 1, startedAt: 'now', updatedAt: 'now', prepared: { ...request, to: ref(to), workspace, participants: [], associationRevision: 0, capture: { epoch: 'e', seq: 1, capturedAt: 'now' } } } } });
   }
   if (targetAccess) {
     initial.sharing = { grants: [{ hostId: 'host', subject: 'viewer', label: 'Viewer', sessionLimit: 10, revoked: false }], reservations: [] };
@@ -177,4 +179,16 @@ for (const path of ['/import', '/update']) test.each(['unbound', 'inaccessible',
     expect(saved.creations).toEqual(before.creations);
     expect(JSON.parse((await f.request('/', undefined, 'viewer')).body)).toEqual([]);
   }
+}, 10000);
+
+
+test('a source grant created after generic succession projects and mutates only within its own prefix segment', async () => {
+  const f = await fixture('before-prefix');
+  expect(JSON.parse((await f.request('/')).body)).toMatchObject([{ target: { nativeSessionId: 'C', agentId: 'C' } }]);
+  const input = { hostId: 'host', providerId: 'codex', nativeSessionId: 'C', sourceNativeSessionId: 'source', id: 'relation', linked: false, expectedRevision: 0 };
+  expect(await f.request('/update', input)).toMatchObject({ status: 200 });
+  expect(f.saved().bindings.find(row => row.nativeSessionId === 'B')!.sourceRelation).toMatchObject({ linked: false, revision: 1 });
+  expect(f.saved().bindings.find(row => row.nativeSessionId === 'A')!.sourceRelation).toBeUndefined();
+  expect((await f.request('/update', { ...input, nativeSessionId: 'A', expectedRevision: 1 })).status).toBeGreaterThanOrEqual(400);
+  expect(f.saved().bindings.filter(row => row.sourceRelation)).toHaveLength(1);
 }, 10000);

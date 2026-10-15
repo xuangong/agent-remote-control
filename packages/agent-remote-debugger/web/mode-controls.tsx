@@ -1,9 +1,9 @@
 import { useState } from 'react';
-import type { OpenedSession } from '../../agent-remote-lab/src/directory-client.js';
+import type { LiveSession } from './session-operations.js';
 
 export function ModeControls({ mode, onMode, onClear, session, directory, executable, onStarted }: {
-  mode: 'live' | 'replay'; onMode(mode: 'live' | 'replay'): void; onClear(): void; session?: OpenedSession;
-  directory: string; executable?: string; onStarted(session: OpenedSession): void;
+  mode: 'live' | 'replay'; onMode(mode: 'live' | 'replay'): void; onClear(): void; session?: LiveSession;
+  directory: string; executable?: string; onStarted(session: LiveSession): void;
 }) {
   const [provider, setProvider] = useState('codex');
   const [cwd, setCwd] = useState(directory);

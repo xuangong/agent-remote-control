@@ -4,8 +4,9 @@ import { TEAM_DELIVERY_RECEIPT_LIMIT, isTeam, type Team, type TeamMessage } from
 type DeliveryReceipt = Omit<TeamMessage, 'text' | 'resources'> & { fingerprint: string; settledAt: number };
 type ResourceGrant = { resourceId: string; memberIds: string[] };
 
-/** Relay-only evidence. Never included in the public Team catalog or Host poll. */
-export interface SavedTeam extends Team {
+/** Stored role anchors and Relay-only evidence, without client projection evidence. */
+export interface SavedTeam extends Omit<Team, 'unresolvedReceipts'> {
+  unresolvedReceipts?: never;
   deliveryReceipts?: DeliveryReceipt[];
   resourceGrants?: ResourceGrant[];
 }
@@ -18,7 +19,7 @@ const recipientGrowthBytes = Buffer.byteLength(JSON.stringify({ resolvedTarget: 
 export const teamMessageBudgetBytes = (team: Team, reserveRecipients = false) => Buffer.byteLength(JSON.stringify(team.messages.map(({ resources: _resources, ...message }) => message)))
   + (reserveRecipients ? team.messages.filter(message => message.status === 'queued' && !message.resolvedTarget).length * recipientGrowthBytes : 0);
 
-export function publicTeam(team: SavedTeam): Team {
+export function stripPrivateTeamEvidence(team: SavedTeam): Omit<Team, 'unresolvedReceipts'> {
   const { deliveryReceipts: _receipts, resourceGrants: _grants, ...value } = team;
   return value;
 }
@@ -78,7 +79,7 @@ export function trimTeamDeliveryReceipts(teams: SavedTeam[], maximumStateBytes: 
 
 export function validSavedTeam(value: unknown): value is SavedTeam {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
-  const team = value as SavedTeam, visible = publicTeam(team);
+  const team = value as SavedTeam, visible = stripPrivateTeamEvidence(team);
   if (team.unresolvedReceipts !== undefined || !isTeam(visible) || !visible.members.every(member => member.creation !== 'ready' || !!member.nativeSessionId)) return false;
   const receipts = team.deliveryReceipts;
   if (receipts !== undefined) {

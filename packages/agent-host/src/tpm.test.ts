@@ -918,6 +918,7 @@ it.each([false, true])('keeps TPM prefix recipients and pauses the current nativ
   await expect(candidate.execute({})).rejects.toThrow(/current|released/);
   await f.acknowledge(work); f.sessions.set('B', new SessionManager('B'));
   current = 'B'; frozen = true;
+  await expect(f.coordinator.extensions('codex', work.tpmNativeSessionId!)).resolves.toBeUndefined();
   await expect(old.execute({})).rejects.toThrow(/current|released/);
   await expect(candidate.execute({})).rejects.toThrow(/current|released/);
   expect((await f.coordinator.get(work.id)).tpmNativeSessionId).toBe('B');

@@ -340,3 +340,31 @@ test.each([false, true])('verifies older native input content across complete me
   if (corrupt) await expect(verification).rejects.toThrow(/prefix/i); else await verification;
   expect(f.writes).toHaveLength(before);
 }, 10000);
+
+
+test.each([false, true])('durable capability awaits the exact checkpoint before bootstrap (reject=%s)', async reject => {
+  const f = await fixture();
+  let release!: () => void, reached!: () => void, offered: import('@orchardworks/agent-provider-sdk').AgentPersistenceHandle | undefined, calls = 0;
+  const gate = new Promise<void>(resolve => { release = resolve; }), entered = new Promise<void>(resolve => { reached = resolve; });
+  const pending = f.provider.nativePrefix.create(target, {}, async handle => {
+    calls++; offered = handle; reached(); await gate; if (reject) throw new Error('Checkpoint refused');
+  });
+  const result = pending.then(session => ({ session }), error => ({ error }));
+  try {
+    await entered; await new Promise(resolve => setTimeout(resolve, 10));
+    expect(f.reads.some(path => path.includes('/session/fork'))).toBe(false);
+    expect(offered).toMatchObject({ providerId: 'opencode', sessionId: 'fork' }); expect(calls).toBe(1);
+    release(); const outcome = await result;
+    if ('error' in outcome) { expect(reject).toBe(true); expect(outcome.error.message).toBe('Checkpoint refused');
+      expect(f.reads.some(path => path.includes('/session/fork'))).toBe(false); }
+    else { expect(reject).toBe(false); expect((await outcome.session.runtimeInfo()).persistence).toMatchObject({ providerId: offered!.providerId, sessionId: offered!.sessionId });
+      expect(JSON.parse(offered!.opaque)).toEqual({ cwd: process.cwd() }); }
+    expect(f.writes.filter(write => write.path === 'POST /api/session/source/fork')).toHaveLength(1);
+  } finally { release(); }
+});
+
+test('rejects a missing durable checkpoint before native reads or creation', async () => {
+  const f = await fixture();
+  await expect(f.provider.nativePrefix.create(target, {}, undefined as never)).rejects.toThrow(/checkpoint/);
+  expect(f.reads).toEqual([]); expect(f.writes).toEqual([]);
+});

@@ -2,14 +2,14 @@ import { sessionExtensionIdentity, requireSessionExtensionIdentity } from './ses
 import { SessionReferenceStore, disposeAfterSourceGrantFailure, sourceSessionExtensions, type SourceBindingReader } from './session-reference.js';
 import { randomUUID } from 'node:crypto';
 import type { OpenCodeAgentProvider, OpenCodeSessionSummary } from '@orchardworks/agent-provider-opencode';
-import type { AgentSession, AgentHistoryQuery, AgentPersistenceHandle } from '@orchardworks/agent-provider-sdk';
+import type { AgentProviderAdapter, AgentSession, AgentHistoryQuery, AgentPersistenceHandle } from '@orchardworks/agent-provider-sdk';
 import type { RemoteSessionSummary } from '@orchardworks/agent-remote-relay';
 import type { AgentHostDirectory, AgentHostWorkspace } from './host.js';
 import { nativePrefixResumeHandle, successionCreationHandle } from './local-succession-preparation.js';
-import { serializeAgentEmptyCreationResult } from '@orchardworks/agent-provider-sdk';
+import { serializeAgentEmptyCreationResult, resolveAgentNativePrefixCapability } from '@orchardworks/agent-provider-sdk';
 
 type OpenCodeDirectoryProvider = Pick<OpenCodeAgentProvider, 'listSessions' | 'getSession' | 'createSession' | 'resumeSession' | 'renameSession' | 'close'>
-  & Partial<Pick<OpenCodeAgentProvider, 'createdSessionIdMaxLength' | 'forkForPromptEdit' | 'validatePromptEdit' | 'verifyPromptEditBranch' | 'openChildSession' | 'readSessionHistory'>>;
+  & Pick<AgentProviderAdapter, 'nativePrefix'> & Partial<Pick<OpenCodeAgentProvider, 'createdSessionIdMaxLength' | 'forkForPromptEdit' | 'validatePromptEdit' | 'openChildSession' | 'readSessionHistory'>>;
 
 /** The native server owns all work; directory lifetime only controls local subscriptions. */
 export function createOpenCodeSessionDirectory(provider: OpenCodeDirectoryProvider, workspaces: readonly AgentHostWorkspace[], references?: SessionReferenceStore, callbacksAvailable = false): AgentHostDirectory {
@@ -66,16 +66,17 @@ export function createOpenCodeSessionDirectory(provider: OpenCodeDirectoryProvid
     setSourceReferenceAncestors(resolve) { sourceReferenceAncestors = resolve; },
     sourceReferences: () => references?.list() ?? Promise.resolve([]),
     async supportsNativePrefix(target) {
-      const limit = provider.createdSessionIdMaxLength;
-      if (closed || !provider.forkForPromptEdit || !provider.verifyPromptEditBranch || !provider.validatePromptEdit
-        || !Number.isInteger(limit) || !limit || limit > 512 || limit < 1) return false;
+      const capability = resolveAgentNativePrefixCapability(provider);
+      if (closed || !capability || capability.createdSessionIdMaxLength > 512) return false;
       await sourceAccessCheck?.(target.nativeSessionId);
       if (await lookupSourceGrant(target.nativeSessionId) && (!sourceReferenceAncestors || !sourceBindingReader || !callbacksAvailable)) return false;
-      await provider.validatePromptEdit(target); return true;
+      await capability.validate(target); return true;
     },
     async createNativePrefix(target, extensions, evidence, candidateKnown) {
       assertOpen();
-      if (!provider.forkForPromptEdit || !provider.verifyPromptEditBranch) throw new Error('Native prefix preparation is unavailable.');
+      const capability = resolveAgentNativePrefixCapability(provider);
+      if (!capability || capability.createdSessionIdMaxLength > 512) throw new Error('Native prefix preparation is unavailable.');
+      if (typeof candidateKnown !== 'function') throw new Error('Native prefix creation requires a checkpoint.');
       await sourceAccessCheck?.(target.nativeSessionId);
       const grant = await lookupSourceGrant(target.nativeSessionId);
       if (grant && (!sourceReferenceAncestors || !sourceBindingReader || !callbacksAvailable)) throw new Error('Source prefix routing is unavailable on this Host.');
@@ -83,14 +84,15 @@ export function createOpenCodeSessionDirectory(provider: OpenCodeDirectoryProvid
       const source = grant ? sourceExtensions(grant.sourceNativeSessionId, () => readerId, grant.handle.sessionId) : undefined;
       const boundExtensions = source ? { ...extensions, systemPrompt: [grant!.systemPrompt, extensions.systemPrompt].filter(Boolean).join('\n\n'), tools: [...(source.tools ?? []), ...(extensions.tools ?? [])] } : extensions;
       let checkpoint: AgentPersistenceHandle | undefined;
-      const session = await provider.forkForPromptEdit(target, boundExtensions, async handle => {
+      const session = await capability.create(target, boundExtensions, async handle => {
         checkpoint = nativePrefixResumeHandle('opencode', handle.sessionId, handle);
-        await candidateKnown?.(checkpoint);
+        await candidateKnown(checkpoint);
         readerId = checkpoint.sessionId;
       });
+      if (!checkpoint) { await session.dispose(); throw new Error('Native prefix creation did not checkpoint its handle.'); }
       evidence?.completed();
       const id = await remember(session), entry = opened.get(id)!;
-      const handle = nativePrefixResumeHandle('opencode', id, checkpoint ?? entry.handle);
+      const handle = nativePrefixResumeHandle('opencode', id, checkpoint);
       readerId = id;
       entry.nativePrefix = JSON.stringify(handle);
       entry.prefixExtensions = sessionExtensionIdentity(boundExtensions);
@@ -99,9 +101,10 @@ export function createOpenCodeSessionDirectory(provider: OpenCodeDirectoryProvid
     },
     async verifyNativePrefix(target, handle) {
       assertOpen();
-      if (!provider.verifyPromptEditBranch) throw new Error('Native prefix verification is unavailable.');
+      const capability = resolveAgentNativePrefixCapability(provider);
+      if (!capability || capability.createdSessionIdMaxLength > 512) throw new Error('Native prefix verification is unavailable.');
       await sourceAccessCheck?.(target.nativeSessionId);
-      await provider.verifyPromptEditBranch(target, nativePrefixResumeHandle('opencode', handle.sessionId, handle));
+      await capability.verify(target, nativePrefixResumeHandle('opencode', handle.sessionId, handle));
     },
     async validatePromptEdit(target) {
       assertOpen();

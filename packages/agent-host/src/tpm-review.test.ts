@@ -248,3 +248,64 @@ it('annotates each TPM attachment only with reviews dispatched to its exact nati
     expect(rows.map(row => 'background' in row ? row.background?.id : undefined)).toEqual(actual === 'A' ? ['review-A', undefined] : [undefined, 'review-B']);
   }
 });
+
+it('retains intermediate TPM review history after another prefix transition without restoring retired write tools', async () => {
+  const f = await fixture(), item = record('multiple-prefixes', 0, 900000);
+  const ref = (nativeSessionId: string) => ({ controllerId: 'controller', providerId: 'codex', nativeSessionId });
+  item.work.paused = true; item.work.tpmNativeSessionId = 'A';
+  item.work.outbox = [
+    { id: 'review-legacy', target: 'tpm', purpose: 'review', text: 'legacy', status: 'accepted', acceptance: 'started', createdAt: '2026' },
+    ...['A', 'B'].map(id => ({ id: `review-${id}`, target: 'tpm' as const, purpose: 'review', text: id, status: 'accepted' as const, acceptance: 'started' as const, resolvedTarget: ref(id), createdAt: '2026' })),
+  ];
+  item.backgroundReviews = ['legacy', 'A', 'B'].map(id => ({ id: `review-${id}`, inputHash: backgroundInputHash(id), turnId: `turn-${id}` }));
+  await f.coordinator.store.insert(item);
+  f.access.sessionRouting = { resolve: anchor => ({ anchor, target: ref('C'), operationIds: ['A-to-B', 'B-to-C'] }), assertCurrent() {} };
+  for (const { actual, expected, writable } of [
+    { actual: 'B', expected: [undefined, undefined, 'review-B', undefined], writable: false },
+    { actual: 'A', expected: ['review-legacy', 'review-A', undefined, undefined], writable: false },
+    { actual: 'C', expected: [undefined, undefined, undefined, 'review-C'], writable: true },
+    { actual: 'unrelated', expected: [undefined, undefined, undefined, undefined], writable: false },
+  ]) {
+    const native = { async *observe(): AsyncIterable<ProviderStreamItem> {
+      for (const id of ['legacy', 'A', 'B', 'C']) yield { type: 'observation', sourceKey: id, delivery: 'history', occurredAt: 1, event: { type: 'timeline', provider: 'codex', turnId: `turn-${id}`, item: { type: 'assistant_message', text: id } } };
+    } } as AgentSession;
+    const annotated = await f.coordinator.annotateSession('codex', actual, native), rows = [];
+    if (actual === 'C') await f.coordinator.store.update(item.work.id, undefined, current => {
+      current.work.outbox!.push({ id: 'review-C', target: 'tpm', purpose: 'review', text: 'C', status: 'accepted', acceptance: 'started', resolvedTarget: ref('C'), createdAt: '2026' });
+      current.backgroundReviews!.push({ id: 'review-C', inputHash: backgroundInputHash('C'), turnId: 'turn-C' });
+    });
+    for await (const row of annotated.observe()) if (row.type === 'observation' && row.event.type === 'timeline') rows.push(row.event.item);
+    expect(rows.map(row => 'background' in row ? row.background?.id : undefined)).toEqual(expected);
+    const extensions = await f.coordinator.extensions('codex', actual);
+    if (writable) expect(extensions?.tools?.map(tool => tool.name)).toContain('update_work');
+    else expect(extensions).toBeUndefined();
+  }
+});
+
+it('rejects ambiguous historical TPM review recipients instead of choosing a work', async () => {
+  const f = await fixture();
+  const ref = (nativeSessionId: string) => ({ controllerId: 'controller', providerId: 'codex', nativeSessionId });
+  for (const id of ['one', 'two']) {
+    const item = record(id, 0, 900000); item.work.paused = true;
+    item.work.outbox = [{ id: `review-${id}`, target: 'tpm', purpose: 'review', text: id, status: 'accepted', acceptance: 'started', resolvedTarget: ref('historical'), createdAt: '2026' }];
+    item.backgroundReviews = [{ id: `review-${id}`, inputHash: backgroundInputHash(id), turnId: 'shared-turn' }];
+    await f.coordinator.store.insert(item);
+  }
+  const native = { async *observe(): AsyncIterable<ProviderStreamItem> {} } as AgentSession;
+  await expect(f.coordinator.annotateSession('codex', 'historical', native)).rejects.toThrow(/ambiguous/i);
+  await expect(f.coordinator.extensions('codex', 'historical')).resolves.toBeUndefined();
+});
+
+it.each(['main', 'other-controller', 'other-provider'])('does not infer a TPM review attachment from a %s receipt', async recipient => {
+  const f = await fixture(), item = record('recipient-scope', 0, 900000); item.work.paused = true;
+  item.work.outbox = [{ id: 'review', target: recipient === 'main' ? 'main' : 'tpm', purpose: 'review', text: 'review', status: 'accepted', acceptance: 'started',
+    resolvedTarget: { controllerId: recipient === 'other-controller' ? 'other' : 'controller', providerId: recipient === 'other-provider' ? 'copilot' : 'codex', nativeSessionId: 'historical' }, createdAt: '2026' }];
+  item.backgroundReviews = [{ id: 'review', inputHash: backgroundInputHash('review'), turnId: 'turn' }];
+  await f.coordinator.store.insert(item);
+  const native = { async *observe(): AsyncIterable<ProviderStreamItem> {
+    yield { type: 'observation', sourceKey: 'review', delivery: 'history', occurredAt: 1, event: { type: 'timeline', provider: 'codex', turnId: 'turn', item: { type: 'assistant_message', text: 'review' } } };
+  } } as AgentSession;
+  const annotated = await f.coordinator.annotateSession('codex', 'historical', native), rows = [];
+  for await (const row of annotated.observe()) if (row.type === 'observation' && row.event.type === 'timeline') rows.push(row.event.item);
+  expect(rows.map(row => 'background' in row ? row.background?.id : undefined)).toEqual([undefined]);
+});

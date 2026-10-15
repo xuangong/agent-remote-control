@@ -1,3 +1,4 @@
+import { resolveAgentNativePrefixCapability, type AgentNativePrefixCapability } from '@orchardworks/agent-provider-sdk';
 import { browseWorkspaceFolders, createWorkspaceFolder, WorkspaceFolderError } from '@orchardworks/agent-remote-controller';
 import { isDeepStrictEqual } from 'node:util';
 import { isSuccessionRequest, nativeSessionRefKey } from '@orchardworks/agent-remote-protocol';
@@ -31,14 +32,22 @@ export function createSessionDirectory(providers: readonly AgentProviderAdapter[
     const source = sources.find(source => source.providerId === provider.descriptor.providerId);
     if (!source) return provider;
     return new Proxy(provider, { get(target, key) {
-      if (key === 'validatePromptEdit' && target.validatePromptEdit) return async (selection: Parameters<NonNullable<LocalSuccessionProvider['validatePromptEdit']>>[0]) => {
-        await assertNoExternalGrant(source, selection.nativeSessionId);
-        await target.validatePromptEdit!(selection);
-      };
-      if (key === 'forkForPromptEdit' && target.forkForPromptEdit) return async (...args: Parameters<NonNullable<LocalSuccessionProvider['forkForPromptEdit']>>) => {
-        await assertNoExternalGrant(source, args[0].nativeSessionId);
-        return target.forkForPromptEdit!(...args);
-      };
+      if (key === 'nativePrefix') {
+        const capability = resolveAgentNativePrefixCapability(target);
+        if (!capability) return undefined;
+        return {
+          get createdSessionIdMaxLength() { return capability.createdSessionIdMaxLength; },
+          async validate(selection) {
+            await assertNoExternalGrant(source, selection.nativeSessionId);
+            await capability.validate(selection);
+          },
+          async create(...args) {
+            await assertNoExternalGrant(source, args[0].nativeSessionId);
+            return capability.create(...args);
+          },
+          verify: (selection, handle) => capability.verify(selection, handle),
+        } satisfies AgentNativePrefixCapability;
+      }
       const value = Reflect.get(target, key, target); return typeof value === 'function' ? value.bind(target) : value;
     } });
   });

@@ -151,15 +151,15 @@ it.each(['codex', 'opencode'] as const)('%s native prefix attaches extensions on
   const session = (): AgentSession => ({ capabilities: { history: true, sendMessage: true, steer: false, cancel: false, readResource: false, interactions: {question:false,toolApproval:false,planApproval:false} },
     async runtimeInfo() { expect(completed || !forks).toBe(true); return { providerId, sessionId: 'branch', cwd: '/work', status: 'idle', persistence: handle }; },
     async *observe(){yield {type:'history_boundary'};}, async sendMessage(){ await bound.tools?.[0]?.execute({revision:1}); },async respondToInteraction(){},async dispose(){} });
-  const provider = { createdSessionIdMaxLength: 36, async validatePromptEdit(){}, async forkForPromptEdit(_target: unknown, extensions: AgentSessionExtensions = {}) { forks++; bound = extensions; return session(); },
-    async verifyPromptEditBranch(_target: unknown, original: AgentPersistenceHandle){expect(original).toEqual(handle);verifies++;},
+  const provider = { nativePrefix: { createdSessionIdMaxLength: 36, async validate(){}, async create(_target: unknown, extensions: AgentSessionExtensions, checkpoint: (handle: AgentPersistenceHandle) => Promise<void>) { forks++; bound = extensions; await checkpoint(handle); return session(); },
+    async verify(_target: unknown, original: AgentPersistenceHandle){expect(original).toEqual(handle);verifies++;} },
     async createSession(){throw new Error('empty create invoked');}, async openChildSession(){throw new Error('child invoked');}, async resumeSession(original: AgentPersistenceHandle, extensions?: AgentSessionExtensions, options?: AgentSessionResumeOptions){resumed.push({original,options});bound=extensions??{};return session();},
     async getSession(){return {id:'branch',cwd:'/work'} as never;},async renameSession(){},async close(){} };
   const make = () => providerId === 'codex' ? createCodexSessionDirectory({...provider,listSessions:async()=>({sessions:[]})},[]) : createOpenCodeSessionDirectory({...provider,listSessions:async()=>[]},[],undefined,true);
   const directory = make(), target = { nativeSessionId:'source',turnId:'turn',messageId:'message' };
   try {
     expect(await directory.supportsNativePrefix!(target)).toBe(true);
-    expect(await directory.createNativePrefix!(target,ext,{completed(){completed=true;}})).toEqual(handle);
+    expect(await directory.createNativePrefix!(target,ext,{completed(){completed=true;}},async original => { expect(original).toEqual(handle); expect(completed).toBe(false); })).toEqual(handle);
     const opened = await directory.open('branch',{nativePrefix:handle,extensions:ext});
     await opened.sendMessage('invoke bound callback');expect(calls).toEqual(['original']);expect(forks).toBe(1);expect(resumed).toEqual([]);
     await directory.verifyNativePrefix!(target,handle);expect(verifies).toBe(1);

@@ -23,6 +23,7 @@ import type { SessionFork } from '../session-forks.js';
 import type { TpmItem } from '../hooks/useTpmWork.js';
 import { SessionDirectoryClient, type OpenedSession, type SuccessionActionResult } from '../directory-client.js';
 import { SessionViewOperationsContext } from '../session-view-operations.js';
+import { labSessionSuccessionDirectory } from '../session-succession-directory.js';
 import { LabWorkbench } from './LabWorkbench.js';
 import { useConversationSession } from '../hooks/useConversationSession.js';
 import { readPrefixEdit } from '../prompt-edit-succession.js';
@@ -30,6 +31,7 @@ import { conversationSessionStorage } from '../conversation-storage.js';
 import { sessionKey } from '../session-tree.js';
 import type { SessionOperationBinding } from '../session-view-operations.js';
 import { sessionViewNavigation } from '../session-view-navigation.js';
+import { persistedPrompt } from '../test/image-draft-storage.js';
 
 const observed = vi.hoisted(() => ({ bindings: new Map<string, SessionOperationBinding>() }));
 vi.mock('./LabWorkbench.js', async importOriginal => {
@@ -174,7 +176,7 @@ async function setupEdit(kind: Placement, options: { outcome?: 'ready' | 'unknow
     const item: TpmItem = { key: 'work', hostId: 'local', hostName: 'Local', online: true, unread: false, work: { id: 'work', revision: 1, title: 'Work', providerId: 'recorded', mainNativeSessionId: 'unrelated-main', tpmNativeSessionId: 'A', phase: 'implementing', waiting: 'none', paused: false, summary: '', nextAction: '', document: '', acceptance: '', evidence: [], createdAt: 'now', updatedAt: 'now', nextCheckAt: 0, outbox: [] } };
     return <SessionViewOperationsContext.Provider value={{ storageScope: scope, transport: f.transport, enabled,
       resolveTarget: source => ({ target: 'parentNativeSessionId' in source && source.parentNativeSessionId || source.nativeSessionId === 'D' ? source : { ...source, nativeSessionId: current }, ...(options.historical ? { historyRoleId: 'history-role' } : {}) }),
-      directory: () => new SessionDirectoryClient(scope, fetcher), refreshSettled: async result => { if (result.record.phase === 'committed') { native = result.record.to!.nativeSessionId; update(native); } } }}><ConversationConnectionScope.Provider value={connections}>
+      directory: () => labSessionSuccessionDirectory(new SessionDirectoryClient(scope, fetcher)), refreshSettled: async result => { if (result.record.phase === 'committed') { native = result.record.to!.nativeSessionId; update(native); } } }}><ConversationConnectionScope.Provider value={connections}>
       {kind === 'main' || kind === 'debugger' ? <Main /> : kind === 'side' ? <SideConversation session={session} transport={f.transport} store={new ForkStore(scope)} draftBinding={draftBinding} imageDraftBinding={imageDraftBinding}
         onClose={() => {}} onOpenSource={() => {}} onOpenFork={() => {}} onFork={async () => ({})} />
       : kind === 'ask' ? <AskConversation entry={{ source: record.source, record, attached: true, attachedParticipant: askParticipantKey(record) }} transport={f.transport}
@@ -219,6 +221,141 @@ const clickPrompt = async (view: ParentNode, index = 0) => {
 const clickButton = async (view: ParentNode, label: string) => {
   await act(async () => [...view.querySelectorAll('button')].find(button => button.textContent === label)!.click());
 };
+
+it.each([false, true])('compensates a selected snapshot when its view closes before the image write finishes (cleanup failure: %s)', async failCleanup => {
+  vi.stubGlobal('Blob', NativeBlob);
+  const f = await setupEdit('side', { images: true });
+  const convert = NativeBlob.prototype.arrayBuffer, persist = imageDraftStorage.writeImageDraft;
+  let release!: () => Promise<void>, pending: Promise<unknown> | undefined, key = '';
+  const held = vi.spyOn(NativeBlob.prototype, 'arrayBuffer').mockImplementation(function (this: NativeBlob) {
+    return new Promise((resolve, reject) => { release = () => convert.call(this).then(resolve, reject); });
+  });
+  const observe = vi.spyOn(imageDraftStorage, 'writeImageDraft').mockImplementation((draft, generation) => {
+    const result = persist(draft, generation);
+    if (draft.key.includes('prefix-edit-prompt')) { key = draft.key; pending = result; }
+    return result;
+  });
+  const remove = IDBObjectStore.prototype.delete;
+  const fail = vi.spyOn(IDBObjectStore.prototype, 'delete').mockImplementation(function (this: IDBObjectStore, requestedKey) {
+    if (failCleanup && requestedKey === key) throw new Error('Snapshot cleanup failed');
+    return remove.call(this, requestedKey);
+  });
+  try {
+    await clickPrompt(f.view);
+    await vi.waitFor(() => expect(release).toBeDefined());
+    await clickButton(f.view, 'Close');
+    await act(async () => { await release(); await pending; });
+    if (failCleanup) {
+      await vi.waitFor(() => expect(f.view.textContent).toContain('Retry cleanup'));
+      expect((await persistedPrompt(key)).images).toHaveLength(1);
+      fail.mockRestore();
+      await clickButton(f.view, 'Retry cleanup');
+    }
+    await vi.waitFor(async () => expect(await persistedPrompt(key)).toEqual({ draft: undefined, images: [] }));
+    expect(readPrefixEdit(f.imageDraftBinding.scope, 'selected-owner')).toBeUndefined();
+    expect(f.requests.filter(item => item.path.endsWith('/prepare'))).toHaveLength(0);
+  } finally { held.mockRestore(); observe.mockRestore(); fail.mockRestore(); }
+}, 10000);
+
+it.each([false, true])('releases the original unpublished snapshot before retrying preparation (cleanup still failing: %s)', async failFirstRetry => {
+  vi.stubGlobal('Blob', NativeBlob);
+  const f = await setupEdit('side', { images: true });
+  const persist = imageDraftStorage.writeImageDraft, snapshots: string[] = [];
+  vi.spyOn(imageDraftStorage, 'writeImageDraft').mockImplementation((draft, generation) => {
+    if (draft.key.includes('prefix-edit-prompt')) snapshots.push(draft.key);
+    return persist(draft, generation);
+  });
+  const setItem = Storage.prototype.setItem;
+  const deny = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(function (this: Storage, key, value) {
+    if (key.includes(f.imageDraftBinding.scope) && key.includes('prefix-edit:')) throw new Error('Identity storage unavailable');
+    return setItem.call(this, key, value);
+  });
+  const remove = IDBObjectStore.prototype.delete;
+  const fail = vi.spyOn(IDBObjectStore.prototype, 'delete').mockImplementation(function (this: IDBObjectStore, key) {
+    if (String(key).includes('prefix-edit-prompt')) throw new Error('Snapshot deletion unavailable');
+    return remove.call(this, key);
+  });
+  try {
+    await clickPrompt(f.view);
+    await vi.waitFor(() => expect(f.view.textContent).toContain('recovery identity could not be retained'));
+    expect(snapshots).toHaveLength(1);
+    expect(readPrefixEdit(f.imageDraftBinding.scope, 'selected-owner')).toBeUndefined();
+    expect((await persistedPrompt(snapshots[0]!)).images).toHaveLength(1);
+    deny.mockRestore();
+    if (failFirstRetry) {
+      await clickButton(f.view, 'Retry preparation');
+      await vi.waitFor(() => expect(f.view.textContent).toContain('Snapshot deletion unavailable'));
+      expect(snapshots).toHaveLength(1);
+      expect(f.requests.filter(item => item.path.endsWith('/prepare'))).toHaveLength(0);
+    }
+    fail.mockRestore();
+    await clickButton(f.view, 'Retry preparation');
+    await vi.waitFor(() => expect(f.view.querySelector('.lab-handoff-notice')).toBeNull());
+    expect(snapshots).toHaveLength(2);
+    expect(f.requests.filter(item => item.path.endsWith('/prepare'))).toHaveLength(1);
+    expect(f.requests.filter(item => item.path.endsWith('/commit'))).toHaveLength(1);
+    expect(await persistedPrompt(snapshots[0]!)).toEqual({ draft: undefined, images: [] });
+    expect(await persistedPrompt(snapshots[1]!)).toEqual({ draft: undefined, images: [] });
+    expect(readPrefixEdit(f.imageDraftBinding.scope, 'selected-owner')).toBeUndefined();
+  } finally { deny.mockRestore(); fail.mockRestore(); }
+}, 10000);
+
+it('releases a committed snapshot only after restoration and retries failed cleanup without another native operation', async () => {
+  vi.stubGlobal('Blob', NativeBlob);
+  const f = await setupEdit('side', { images: true, holdCommit: true });
+  await clickPrompt(f.view);
+  await vi.waitFor(() => expect(f.requests.some(item => item.path.endsWith('/commit'))).toBe(true));
+  const retained = readPrefixEdit(f.imageDraftBinding.scope, 'selected-owner')!;
+  const remove = IDBObjectStore.prototype.delete;
+  const fail = vi.spyOn(IDBObjectStore.prototype, 'delete').mockImplementation(function (this: IDBObjectStore, key) {
+    if (key === retained.prompt.key) throw new Error('Snapshot cleanup failed');
+    return remove.call(this, key);
+  });
+  try {
+    await act(async () => f.releaseCommit());
+    await vi.waitFor(() => expect(f.view.textContent).toContain('Retry refresh'));
+    expect(readPrefixEdit(f.imageDraftBinding.scope, 'selected-owner')?.restored).toBe(true);
+    expect((await persistedPrompt(retained.prompt.key)).images).toHaveLength(1);
+    expect((await persistedPrompt(f.imageDraftBinding.key)).images).toHaveLength(1);
+  } finally { fail.mockRestore(); }
+  await clickButton(f.view, 'Retry refresh');
+  await vi.waitFor(() => expect(f.view.querySelector('.lab-handoff-notice')).toBeNull());
+  expect(await persistedPrompt(retained.prompt.key)).toEqual({ draft: undefined, images: [] });
+  expect((await persistedPrompt(f.imageDraftBinding.key)).images).toHaveLength(1);
+  expect(f.requests.filter(item => item.path.endsWith('/prepare'))).toHaveLength(1);
+  expect(f.requests.filter(item => item.path.endsWith('/commit'))).toHaveLength(1);
+}, 10000);
+
+it.each(['cancelled', 'rejected'] as const)('releases the %s operation on Done while an unknown operation stays recoverable', async outcome => {
+  const f = await setupEdit('side', { outcome: 'unknown', images: true });
+  vi.stubGlobal('Blob', NativeBlob);
+  await clickPrompt(f.view);
+  await vi.waitFor(() => expect(f.requests.filter(item => item.path.endsWith('/prepare'))).toHaveLength(1));
+  const retained = readPrefixEdit(f.imageDraftBinding.scope, 'selected-owner')!;
+  await clickButton(f.view, 'Details');
+  await clickButton(f.view, 'Hide Handoff');
+  expect((await persistedPrompt(retained.prompt.key)).images).toHaveLength(1);
+  expect(readPrefixEdit(f.imageDraftBinding.scope, 'selected-owner')).toBeDefined();
+  f.setOutcome(outcome);
+  await clickButton(f.view, 'Details');
+  await clickButton(f.view, 'Check status');
+  await vi.waitFor(() => expect(f.view.textContent).toContain('Done'));
+  const remove = IDBObjectStore.prototype.delete;
+  const fail = vi.spyOn(IDBObjectStore.prototype, 'delete').mockImplementation(function (this: IDBObjectStore, key) {
+    if (key === retained.prompt.key) throw new Error('Snapshot cleanup failed');
+    return remove.call(this, key);
+  });
+  try {
+    await clickButton(f.view, 'Done');
+    await vi.waitFor(() => expect(f.view.textContent).toContain('Retry refresh'));
+    expect(readPrefixEdit(f.imageDraftBinding.scope, 'selected-owner')).toBeDefined();
+    expect((await persistedPrompt(retained.prompt.key)).images).toHaveLength(1);
+  } finally { fail.mockRestore(); }
+  await clickButton(f.view, 'Retry refresh');
+  await vi.waitFor(() => expect(f.view.querySelector('.lab-handoff-notice')).toBeNull());
+  expect(await persistedPrompt(retained.prompt.key)).toEqual({ draft: undefined, images: [] });
+  expect(f.requests.filter(item => item.path.endsWith('/prepare'))).toHaveLength(1);
+}, 10000);
 it('edits the first prompt and repeats B to C with separate exact operations', async () => {
   const f = await setupEdit('side');
   await clickPrompt(f.view);
@@ -342,6 +479,31 @@ it.each(['text storage', 'image storage'] as const)('recovers a committed partia
   expect(f.requests.filter(item => item.path.endsWith('/commit'))).toHaveLength(1);
   expect(f.sent).toHaveLength(0);
 });
+it('preserves a same-content newer text edit made synchronously during restoration after a failed save', async () => {
+  const f = await setupEdit('side');
+  const write = Storage.prototype.setItem;
+  let fail = true;
+  vi.spyOn(Storage.prototype, 'setItem').mockImplementation(function(this: Storage, key, value) {
+    if (fail && key.endsWith(':drafts') && value.includes('Selected A prompt 1')) throw new Error('Target text storage failed.');
+    return write.call(this, key, value);
+  });
+  const unsubscribe = f.drafts.subscribe('selected-owner', () => {
+    if (f.drafts.get('selected-owner') !== 'Selected A prompt 1') return;
+    unsubscribe();
+    f.drafts.set('selected-owner', 'newer');
+    f.drafts.set('selected-owner', 'Selected A prompt 1');
+  });
+  await clickPrompt(f.view);
+  await vi.waitFor(() => expect(f.view.textContent).toContain('Retry refresh'));
+  fail = false;
+  await clickButton(f.view, 'Retry refresh');
+  await vi.waitFor(() => expect(f.view.textContent).toContain('Retry refresh'));
+  await clickButton(f.view, 'Details');
+  expect(f.view.textContent).toContain('A newer draft is preserved');
+  expect(f.drafts.get('selected-owner')).toBe('Selected A prompt 1');
+  expect(f.requests.filter(item => item.path.endsWith('/prepare'))).toHaveLength(1);
+  expect(f.requests.filter(item => item.path.endsWith('/commit'))).toHaveLength(1);
+});
 it('preserves a newer same-content draft revision after partial restoration', async () => {
   const f = await setupEdit('side');
   const write = Storage.prototype.setItem;
@@ -420,7 +582,7 @@ it.each(['transport', 'storage scope'] as const)('reattaches a followed view whe
     const transport = changed && boundary === 'transport' ? second.transport : first.transport;
     const storageScope = changed && boundary === 'storage scope' ? 'http://second/' : 'http://first/';
     return <SessionViewOperationsContext.Provider value={{ storageScope, transport, enabled: true,
-      resolveTarget: source => ({ target: { ...source, nativeSessionId: 'B' } }), directory: () => new SessionDirectoryClient(storageScope), refreshSettled: async () => {} }}>
+      resolveTarget: source => ({ target: { ...source, nativeSessionId: 'B' } }), directory: () => labSessionSuccessionDirectory(new SessionDirectoryClient(storageScope)), refreshSettled: async () => {} }}>
       <View transport={transport} />
     </SessionViewOperationsContext.Provider>;
   }

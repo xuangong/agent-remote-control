@@ -92,9 +92,9 @@ it.each([
     expect(b.replica.getState().sessionControl?.access).toBe('control');
     for (const connection of [a, b, cli]) expect(connection.controlStates).not.toContain('read_only');
     expect(sendMessage.mock.calls).toEqual([
-      ['first page input'], ['second page input'], ['remote command input'],
-      ['first page after reconnect'], ['second page after the others close'],
-    ]);
+      'first page input', 'second page input', 'remote command input',
+      'first page after reconnect', 'second page after the others close',
+    ].map(text => [text, { onAcceptance: expect.any(Function) }]));
     expect(cancel).not.toHaveBeenCalled();
     expect(dispose).not.toHaveBeenCalled();
     expect(resumeSession).not.toHaveBeenCalled();

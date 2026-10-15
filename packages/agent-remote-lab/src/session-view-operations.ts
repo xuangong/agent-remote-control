@@ -2,7 +2,7 @@ import { createContext } from 'react';
 import type { RemoteAgentTransport } from '@orchardworks/agent-remote-web';
 import type { SessionViewOperationScope } from '@orchardworks/agent-remote-web/react';
 import type { SuccessionActionResult } from '@orchardworks/agent-remote-protocol';
-import type { SessionSuccessionDirectory } from './components/SessionSuccessionDialog.js';
+import type { SessionSuccessionDirectory } from './session-succession-directory.js';
 import type { OpenedSession } from './directory-client.js';
 import type { SessionEntry } from './session-tree.js';
 

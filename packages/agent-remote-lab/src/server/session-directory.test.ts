@@ -133,20 +133,37 @@ it('runs local prefix prepare and commit with stable source anchors over HTTP an
   } finally { old?.close(); if (servers.includes(server)) { await server.close(); servers.splice(servers.indexOf(server), 1); } await rm(root, { recursive: true, force: true }); }
 }, 20000);
 
-it.each(['external', 'unknown', 'error', 'unmarked', 'absent', 'changed'] as const)('checks custom directory source grant state %s before native prefix effects', async (grantState) => {
+it.each(['external', 'unknown', 'error', 'unmarked', 'absent', 'changed', 'changed-after-validation', 'unsupported', 'missing-create', 'noncallable-verify', 'invalid-bound'] as const)('checks custom directory source grant state %s before native prefix effects', async (grantState) => {
   const { mkdtemp, rm } = await import('node:fs/promises');
   const { tmpdir } = await import('node:os'); const { join } = await import('node:path');
   // @ts-expect-error Test-only adapter fixture is also used by standalone package smoke.
   const { createPrefixAdapter } = await import('../../../agent-remote-debugger/src/fixtures/prefix-adapter.mjs');
   const root = await mkdtemp(join(tmpdir(), 'lab-custom-prefix-'));
   const adapter = createPrefixAdapter(root), origin = 'http://127.0.0.1:5175', providerId = adapter.descriptor.providerId;
-  let described = false;
+  if (grantState === 'unsupported') delete adapter.nativePrefix;
+  if (grantState === 'missing-create') delete adapter.nativePrefix.create;
+  if (grantState === 'noncallable-verify') adapter.nativePrefix.verify = true;
+  if (grantState === 'invalid-bound') adapter.nativePrefix.createdSessionIdMaxLength = 0;
+  let described = false, externalAfterValidation = false;
+  if (adapter.nativePrefix) {
+    const capability = adapter.nativePrefix, validate = capability.validate, create = capability.create;
+    if (typeof validate === 'function') capability.validate = async function (target: unknown) {
+      expect(this).toBe(capability); await validate.call(this, target);
+      if (grantState === 'changed-after-validation' && described) externalAfterValidation = true;
+    };
+    if (typeof create === 'function') capability.create = function (...args: unknown[]) { expect(this).toBe(capability); return create.apply(this, args); };
+  }
   let handle: AgentPersistenceHandle | undefined;
   let opens = 0;
   let corruptHistory = false;
   const externalTools = grantState === 'external' ? { tools: [{ name: 'read_source_session', description: 'External source grant', inputSchema: { type: 'object' }, execute: async () => 'external source' }] } : {};
   const source = { providerId, supportsSourceReferences: true,
-    ...(grantState === 'unmarked' ? {} : { sourceGrantState: async () => { if (grantState === 'error') throw new Error('Grant state unavailable.'); return grantState === 'changed' ? described ? 'external' as const : 'absent' as const : grantState; } }),
+    ...(grantState === 'unmarked' ? {} : { sourceGrantState: async () => {
+      if (grantState === 'error') throw new Error('Grant state unavailable.');
+      if (grantState === 'changed') return described ? 'external' as const : 'absent' as const;
+      if (grantState === 'changed-after-validation') return externalAfterValidation ? 'external' as const : 'absent' as const;
+      return grantState === 'external' || grantState === 'unknown' ? grantState : 'absent' as const;
+    } }),
     list: () => [{ nativeSessionId: 'external-reader', providerId, title: 'External reader', state: 'idle' as const, createdAt: '2026-10-15T00:00:00.000Z', updatedAt: '2026-10-15T00:00:00.000Z' }], workspaces: () => [],
     create: async () => 'external-reader', open: async () => {
       opens++;
@@ -166,7 +183,7 @@ it.each(['external', 'unknown', 'error', 'unmarked', 'absent', 'changed'] as con
     const response = await post('describe', { providerId, nativeSessionId: 'external-reader', preparation: { kind: 'native_prefix', turnId: 'turn', messageId: 'message-1' } });
     expect(response.status).toBe(200);
     const description = await response.json();
-    expect(description.eligibility.status).toBe(grantState === 'absent' || grantState === 'changed' ? 'ready' : 'unavailable');
+    expect(description.eligibility.status).toBe(grantState === 'absent' || grantState === 'changed' || grantState === 'changed-after-validation' ? 'ready' : 'unavailable');
     described = true;
     const { role } = description;
     const prepared = await post('prepare', { operationId: 'external-edit', roleId: role.id, expectedRevision: 1, from: role.current, preparation: { kind: 'native_prefix', turnId: 'turn', messageId: 'message-1' } });

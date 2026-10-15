@@ -1,3 +1,4 @@
+import { IDBFactory, IDBKeyRange } from 'fake-indexeddb';
 import { act, useState } from 'react';
 import { describe, expect, it, vi } from 'vitest';
 import {
@@ -304,7 +305,7 @@ describe('App', () => {
   it('names the Provider catalog request while it is pending', async () => {
     const providers = deferred<readonly AgentProviderDescriptor[]>();
     const container = await render(<App transport={labTransport({ listProviders: () => providers.promise })} />);
-    expect(container.querySelector('[role="status"]')?.textContent).toContain('Loading providers');
+    expect(container.querySelector('.lab-provider-controls [role="status"]')?.textContent).toContain('Loading providers');
     expect((container.querySelector('[data-testid="session-create"]') as HTMLButtonElement).disabled).toBe(true);
   });
 
@@ -849,19 +850,35 @@ it('shows recovery waiting without a failure alert and clears it after a success
 
 
 it('notifies a failed send without clearing the draft or replaying it after dismissal', async () => {
+  vi.stubGlobal('indexedDB', new IDBFactory());
+  vi.stubGlobal('IDBKeyRange', IDBKeyRange);
+  window.history.replaceState(null, '', '/?agent=agent-1');
   const sendMessage = vi.fn(async () => { throw new Error('The message was not accepted.'); });
-  const container = await render(<App initialState={replicaState} initialSessionStatus="ready" actions={{ sendMessage }} />);
-  const input = container.querySelector<HTMLTextAreaElement>('[data-testid="prompt-input"]')!;
-  await act(async () => {
-    setPromptText(input, 'Keep this failed message');
-    input.dispatchEvent(new Event('input', { bubbles: true }));
-  });
-  await act(async () => container.querySelector<HTMLButtonElement>('[data-testid="prompt-submit"]')!.click());
-  expect(container.querySelector('.lab-toast')?.textContent).toContain('The message was not accepted.');
-  await act(async () => container.querySelector<HTMLButtonElement>('.lab-toast button')!.click());
-  expect(promptText(input)).toBe('Keep this failed message');
-  expect(sendMessage).toHaveBeenCalledTimes(1);
-  expect(container.querySelector('[role="alert"]')?.textContent).toContain('The message was not accepted.');
+  const container = await render(<App transport={labTransport({ connect: (agentId, listener) => readyConnection(agentId, listener) })} actions={{ sendMessage }} />);
+  try {
+    const input = container.querySelector<HTMLElement>('[data-testid="prompt-input"]')!;
+    await act(async () => {
+      setPromptText(input, 'Keep this failed message');
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    const submit = container.querySelector<HTMLButtonElement>('[data-testid="prompt-submit"]')!;
+    expect(submit.disabled).toBe(false);
+    await act(async () => {
+      submit.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+      submit.click();
+    });
+    await vi.waitFor(async () => {
+      await act(async () => { await new Promise(resolve => setTimeout(resolve, 10)); });
+      expect(container.querySelector('.lab-toast')?.textContent).toContain('The message was not accepted.');
+    });
+    await act(async () => container.querySelector<HTMLButtonElement>('.lab-toast button')!.click());
+    expect(promptText(input)).toBe('Keep this failed message');
+    expect(sendMessage).toHaveBeenCalledTimes(1);
+    expect(container.querySelector('[role="alert"]')?.textContent).toContain('The message was not accepted.');
+  } finally {
+    await unmount(container);
+    vi.unstubAllGlobals();
+  }
 });
 
 it('renders saved conversation content and a usable draft before business access is ready', async () => {

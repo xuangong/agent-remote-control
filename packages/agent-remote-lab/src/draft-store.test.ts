@@ -103,3 +103,18 @@ it('does not certify a text edit after a newer edit or scope retirement', async 
   expect((await store.flushCurrent('A', revision, () => true)).status).toBe('cancelled');
   expect((await store.flushCurrent('A', store.snapshot('A').revision, () => false)).status).toBe('cancelled');
 });
+
+
+it('returns its text application identity before a subscriber performs a same-content newer edit', () => {
+  const store = new DraftStore('application-receipt');
+  let appliedRevision: number | undefined;
+  const unsubscribe = store.subscribe('one', () => {
+    appliedRevision = store.snapshot('one').revision;
+    unsubscribe();
+    store.set('one', 'newer'); store.set('one', 'selected');
+  });
+  const applied = store.set('one', 'selected');
+  expect(applied).toEqual({ text: 'selected', revision: appliedRevision });
+  expect(store.snapshot('one').text).toBe('selected');
+  expect(store.snapshot('one').revision).not.toBe(applied?.revision);
+});

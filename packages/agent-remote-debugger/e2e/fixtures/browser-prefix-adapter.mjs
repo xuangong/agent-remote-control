@@ -41,7 +41,7 @@ export function createBrowserPrefixAdapter(directory) {
     };
     attached.set(id, session); return session;
   }
-  return {
+  const adapter = {
     descriptor: { providerId: 'prefix-fixture', displayName: 'Native prefix fixture', sessionExtensions: { instructions: true, tools: true } },
     createdSessionIdMaxLength: 100,
     async createSession(config) {
@@ -54,11 +54,8 @@ export function createBrowserPrefixAdapter(directory) {
       return open(value.sessionId, extensions);
     },
     async validatePromptEdit(target) { if (!(await state()).sessions[target.nativeSessionId] || target.turnId !== 'turn-1' || target.messageId !== 'message-1') throw new Error('Invalid selection'); },
-    async forkForPromptEdit(target, extensions) {
-      const current = await state(); current.forks++; await save(current);
-      if (current.unknown) throw new Error('Native fork outcome unknown');
-      const id = `candidate-${current.forks}`; current.sessions[id] = { texts: ['original history'], inputs: [] }; await save(current); return open(id, extensions);
-    },
+    // Non-durable convenience calls deliberately omit a checkpoint.
+    async forkForPromptEdit(target, extensions) { return createPrefix(target, extensions); },
     async verifyPromptEditBranch(target, value) {
       if (value.sessionId === target.nativeSessionId || JSON.stringify(value) !== JSON.stringify(handle(value.sessionId)) || (await state()).sessions[value.sessionId]?.texts.join() !== 'original history') throw new Error('Prefix readback mismatch');
     },
@@ -67,4 +64,21 @@ export function createBrowserPrefixAdapter(directory) {
     readSource: (id, args) => attached.get(id)?.readSource(args),
     async dispose() { await Promise.all([...attached.values()].map(session => session.dispose())); },
   };
+  async function createPrefix(target, extensions, checkpoint) {
+    const current = await state(); current.forks++; await save(current);
+    if (current.unknown) throw new Error('Native fork outcome unknown');
+    const id = `candidate-${current.forks}`; current.sessions[id] = { texts: ['original history'], inputs: [] }; await save(current);
+    await checkpoint?.(handle(id));
+    return open(id, extensions);
+  }
+  adapter.nativePrefix = {
+    createdSessionIdMaxLength: 100,
+    validate: target => adapter.validatePromptEdit(target),
+    create(target, extensions, checkpoint) {
+      if (typeof checkpoint !== 'function') return Promise.reject(new Error('Native prefix creation requires a checkpoint.'));
+      return createPrefix(target, extensions, checkpoint);
+    },
+    verify: (target, value) => adapter.verifyPromptEditBranch(target, value),
+  };
+  return adapter;
 }

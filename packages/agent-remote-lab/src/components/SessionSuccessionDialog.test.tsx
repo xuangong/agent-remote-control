@@ -1,8 +1,9 @@
 import { act, useState } from 'react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { render, unmount } from '../test/setup.js';
-import { SessionDirectoryClient, type SuccessionActionResult, type SuccessionDescription } from '../directory-client.js';
+import { SessionDirectoryClient, type SuccessionActionResult, type SuccessionDescription, type SuccessionPrepareInput } from '../directory-client.js';
 import { SessionSuccessionDialog } from './SessionSuccessionDialog.js';
+import { labSessionSuccessionDirectory } from '../session-succession-directory.js';
 const source = { hostId: 'host', agentId: 'agent', providerId: 'opencode', nativeSessionId: 'A', title: 'Original' };
 const ref = { controllerId: 'controller', providerId: 'opencode', nativeSessionId: 'A' };
 const description: SuccessionDescription = { role: { id: 'role', revision: 4, origin: ref, current: ref, workspace: { controllerId: 'controller', canonicalCwd: '/actual/workspace' } }, targets: [{ providerId: 'opencode', displayName: 'OpenCode' }], eligibility: { status: 'ready' } };
@@ -20,9 +21,35 @@ async function setup(options: { description?: SuccessionDescription; initialProv
   const prepare = vi.spyOn(directory, 'prepareSuccession');
   const action = vi.spyOn(directory, 'successionAction');
   const settled = vi.fn().mockResolvedValue(undefined), close = vi.fn(), intent = vi.fn(), gated = vi.fn();
-  const container = await render(<SessionSuccessionDialog source={source} directory={directory} initialProvider={options.initialProvider} blockedReason={options.blockedReason} assertAccess={() => {}} assertSource={() => {}} onIntent={intent} onSettled={settled} onClose={close} onGatedChange={gated} />);
+  const container = await render(<SessionSuccessionDialog source={source} directory={labSessionSuccessionDirectory(directory)} initialProvider={options.initialProvider} blockedReason={options.blockedReason} assertAccess={() => {}} assertSource={() => {}} onIntent={intent} onSettled={settled} onClose={close} onGatedChange={gated} />);
   await flush(); return { directory, describe, prepare, action, settled, close, intent, gated, container };
 }
+it.each(['commit', 'reconcile', 'cancel'] as const)('passes the retained request to automatic status and manual %s', async action => {
+  const retained: SuccessionPrepareInput = { operationId: 'explicit-retained', providerId: 'opencode', nativeSessionId: 'A', expectedRevision: 4,
+    preparation: { kind: 'native_prefix', turnId: 'turn', messageId: 'message' } };
+  const actOnSuccession = vi.fn(async (_action: string, original: Readonly<SuccessionPrepareInput>) => response(original.operationId, 'ready'));
+  const directory = { describeSuccession: vi.fn(), prepareSuccession: vi.fn(), actOnSuccession };
+  await render(<SessionSuccessionDialog source={source} directory={directory} resume={retained} assertAccess={() => {}} assertSource={() => {}}
+    onIntent={() => {}} onSettled={async () => {}} onClose={() => {}} />);
+  expect(actOnSuccession.mock.calls).toEqual([['status', retained]]);
+  await details();
+  await act(async () => button(action === 'commit' ? 'Commit Handoff' : action === 'cancel' ? 'Cancel Handoff' : 'Reconcile').click());
+  expect(actOnSuccession.mock.calls).toEqual([['status', retained], [action, retained]]);
+  expect(actOnSuccession.mock.calls.every(([, original]) => original === retained)).toBe(true);
+  expect(directory.describeSuccession).not.toHaveBeenCalled(); expect(directory.prepareSuccession).not.toHaveBeenCalled();
+}, 5000);
+
+it('passes the pending preparation request to automatic commitment', async () => {
+  const prepareSuccession = vi.fn(async (input: SuccessionPrepareInput) => response(input.operationId, 'ready'));
+  const actOnSuccession = vi.fn(async (_action: string, original: Readonly<SuccessionPrepareInput>) => response(original.operationId, 'committed'));
+  const directory = { describeSuccession: async () => description, prepareSuccession, actOnSuccession };
+  await render(<SessionSuccessionDialog source={source} directory={directory} assertAccess={() => {}} assertSource={() => {}}
+    onIntent={() => {}} onSettled={async () => {}} onClose={() => {}} />);
+  await act(async () => button('Hand off').click());
+  expect(actOnSuccession).toHaveBeenCalledWith('commit', prepareSuccession.mock.calls[0]![0]);
+  expect(actOnSuccession.mock.calls[0]?.[1]).toBe(prepareSuccession.mock.calls[0]![0]);
+}, 5000);
+
 it('uses authoritative revision and same operation for preparation and commitment', async () => {
   const state = await setup();
   state.prepare.mockImplementation(async input => response(input.operationId, 'ready'));
@@ -57,7 +84,7 @@ it('checks the current preparation block when a previously available chooser is 
   function Panel() {
     const [reason, setReason] = useState<string>();
     block = setReason;
-    return <SessionSuccessionDialog source={source} directory={directory} blockedReason={reason}
+    return <SessionSuccessionDialog source={source} directory={labSessionSuccessionDirectory(directory)} blockedReason={reason}
       assertAccess={access} assertSource={current} onIntent={intent} onSettled={async () => {}} onClose={() => {}} />;
   }
   await render(<Panel />); await flush();
@@ -72,7 +99,7 @@ it('checks the current preparation block when a previously available chooser is 
 it('continues status, reconciliation, and cancellation of a retained operation with pending input', async () => {
   const directory = new SessionDirectoryClient('http://localhost', undefined, 'host');
   const action = vi.spyOn(directory, 'successionAction').mockImplementation(async (kind, id) => response(id, kind === 'cancel' ? 'cancelled' : 'unknown'));
-  await render(<SessionSuccessionDialog source={source} directory={directory} blockedReason="Resolve pending input."
+  await render(<SessionSuccessionDialog source={source} directory={labSessionSuccessionDirectory(directory)} blockedReason="Resolve pending input."
     resume={{ operationId: 'retained-op', providerId: 'opencode', nativeSessionId: 'A', expectedRevision: 4 }}
     assertAccess={() => {}} assertSource={() => {}} onIntent={() => {}} onSettled={async () => {}} onClose={() => {}} />);
   await flush(); await details();
@@ -162,7 +189,7 @@ it('blocks a Host-described unavailable source before preparing', async () => {
   const directory = new SessionDirectoryClient('http://localhost', undefined, 'host');
   vi.spyOn(directory, 'describeSuccession').mockResolvedValue({ ...description, eligibility: { status: 'blocked', code: 'busy', reason: 'Source has pending work.' } });
   const prepare = vi.spyOn(directory, 'prepareSuccession');
-  await render(<SessionSuccessionDialog source={source} directory={directory} assertAccess={() => {}} assertSource={() => {}} onIntent={() => {}} onSettled={async () => {}} onClose={() => {}} />);
+  await render(<SessionSuccessionDialog source={source} directory={labSessionSuccessionDirectory(directory)} assertAccess={() => {}} assertSource={() => {}} onIntent={() => {}} onSettled={async () => {}} onClose={() => {}} />);
   await flush(); expect(button('Hand off').disabled).toBe(true); expect(prepare).not.toHaveBeenCalled();
 }, 5000);
 
@@ -171,7 +198,7 @@ it('resumes a saved uncertain operation without describing or preparing another 
   const describe = vi.spyOn(directory, 'describeSuccession'), prepare = vi.spyOn(directory, 'prepareSuccession');
   const action = vi.spyOn(directory, 'successionAction').mockResolvedValue(response('saved-op', 'committed'));
   const settled = vi.fn().mockResolvedValue(undefined);
-  await render(<SessionSuccessionDialog source={source} directory={directory} resume={{ operationId: 'saved-op', providerId: 'opencode', nativeSessionId: 'A', expectedRevision: 4, targetProviderId: 'opencode' }}
+  await render(<SessionSuccessionDialog source={source} directory={labSessionSuccessionDirectory(directory)} resume={{ operationId: 'saved-op', providerId: 'opencode', nativeSessionId: 'A', expectedRevision: 4, targetProviderId: 'opencode' }}
     assertAccess={() => {}} assertSource={() => { throw new Error('Original source is now historical'); }} onIntent={() => {}} onSettled={settled} onClose={() => {}} />);
   await flush();
   expect(action).toHaveBeenCalledWith('status', 'saved-op'); expect(describe).not.toHaveBeenCalled(); expect(prepare).not.toHaveBeenCalled(); expect(settled).toHaveBeenCalledOnce();
@@ -181,7 +208,7 @@ it('does not dispatch preparation when retaining the operation fails', async () 
   const directory = new SessionDirectoryClient('http://localhost', undefined, 'host');
   vi.spyOn(directory, 'describeSuccession').mockResolvedValue(description);
   const prepare = vi.spyOn(directory, 'prepareSuccession');
-  await render(<SessionSuccessionDialog source={source} directory={directory} assertAccess={() => {}} assertSource={() => {}} onIntent={() => { throw new Error('Storage unavailable'); }} onSettled={async () => {}} onClose={() => {}} />);
+  await render(<SessionSuccessionDialog source={source} directory={labSessionSuccessionDirectory(directory)} assertAccess={() => {}} assertSource={() => {}} onIntent={() => { throw new Error('Storage unavailable'); }} onSettled={async () => {}} onClose={() => {}} />);
   await flush(); await act(async () => button('Hand off').click());
   expect(prepare).not.toHaveBeenCalled(); expect(button('Hand off')).toBeDefined(); expect(document.querySelector('[role="alert"]')?.textContent).toContain('Storage unavailable');
 }, 5000);
@@ -205,7 +232,7 @@ it('preserves saved cancellation intent after reload while consuming an already 
   const directory = new SessionDirectoryClient('http://localhost', undefined, 'host');
   const action = vi.spyOn(directory, 'successionAction').mockResolvedValue(response('cancel-op', 'ready'));
   const settled = vi.fn().mockResolvedValue(undefined);
-  await render(<SessionSuccessionDialog source={source} directory={directory} resume={{ operationId: 'cancel-op', providerId: 'opencode', nativeSessionId: 'A', expectedRevision: 4, targetProviderId: 'opencode' }} resumeCancellation
+  await render(<SessionSuccessionDialog source={source} directory={labSessionSuccessionDirectory(directory)} resume={{ operationId: 'cancel-op', providerId: 'opencode', nativeSessionId: 'A', expectedRevision: 4, targetProviderId: 'opencode' }} resumeCancellation
     assertAccess={() => {}} assertSource={() => {}} onIntent={() => {}} onSettled={settled} onClose={() => {}} />);
   await flush(); await details();
   expect(button('Commit Handoff')).toBeUndefined(); expect(action.mock.calls).toEqual([['status', 'cancel-op']]);
@@ -234,7 +261,7 @@ it('bounds automatic status recovery of a saved unknown result without replaying
   const prepare = vi.spyOn(directory, 'prepareSuccession');
   const action = vi.spyOn(directory, 'successionAction').mockRejectedValue(new Error('HTTP 404'));
   const gated = vi.fn(), close = vi.fn();
-  await render(<SessionSuccessionDialog source={source} directory={directory} resume={{ operationId: 'unknown-op', providerId: 'opencode', nativeSessionId: 'A', expectedRevision: 4 }}
+  await render(<SessionSuccessionDialog source={source} directory={labSessionSuccessionDirectory(directory)} resume={{ operationId: 'unknown-op', providerId: 'opencode', nativeSessionId: 'A', expectedRevision: 4 }}
     assertAccess={() => {}} assertSource={() => {}} onIntent={() => {}} onSettled={async () => {}} onClose={close} onGatedChange={gated} />);
   expect(action).toHaveBeenCalledWith('status', 'unknown-op');
   expect(gated).toHaveBeenLastCalledWith(true);
@@ -344,7 +371,7 @@ it('pauses status polling when hidden or access is unavailable and resumes on fo
   Object.defineProperty(document, 'visibilityState', { configurable: true, value: 'hidden' });
   const directory = new SessionDirectoryClient('http://localhost', undefined, 'host');
   const action = vi.spyOn(directory, 'successionAction').mockResolvedValue(response('paused-op', 'unknown'));
-  await render(<SessionSuccessionDialog source={source} directory={directory} resume={{ operationId: 'paused-op', providerId: 'opencode', nativeSessionId: 'A', expectedRevision: 4 }}
+  await render(<SessionSuccessionDialog source={source} directory={labSessionSuccessionDirectory(directory)} resume={{ operationId: 'paused-op', providerId: 'opencode', nativeSessionId: 'A', expectedRevision: 4 }}
     assertAccess={() => { if (!access) throw new Error('Reconnect required'); }} assertSource={() => {}} onIntent={() => {}} onSettled={async () => {}} onClose={() => {}} />);
   await act(async () => vi.advanceTimersByTimeAsync(3000));
   expect(action).not.toHaveBeenCalled();
@@ -363,7 +390,7 @@ it('keeps the operation inline while details are hidden and reopens through onOp
   const opened = vi.fn();
   function Panel() {
     const [visible, setVisible] = useState(false);
-    return <SessionSuccessionDialog source={source} directory={directory} visible={visible} resume={{ operationId: 'visible-op', providerId: 'opencode', nativeSessionId: 'A', expectedRevision: 4 }}
+    return <SessionSuccessionDialog source={source} directory={labSessionSuccessionDirectory(directory)} visible={visible} resume={{ operationId: 'visible-op', providerId: 'opencode', nativeSessionId: 'A', expectedRevision: 4 }}
       assertAccess={() => {}} assertSource={() => {}} onIntent={() => {}} onSettled={async () => {}} onClose={() => setVisible(false)} onOpen={() => { opened(); setVisible(true); }} />;
   }
   const container = await render(<Panel />);
@@ -423,7 +450,7 @@ it('does not auto-commit preparation if the source changed before the response a
   const prepare = vi.spyOn(directory, 'prepareSuccession').mockImplementation(() => new Promise(resolve => { release = resolve; }));
   const action = vi.spyOn(directory, 'successionAction');
   let sourceChanged = false;
-  await render(<SessionSuccessionDialog source={source} directory={directory} assertAccess={() => {}} assertSource={() => { if (sourceChanged) throw new Error('Source changed'); }}
+  await render(<SessionSuccessionDialog source={source} directory={labSessionSuccessionDirectory(directory)} assertAccess={() => {}} assertSource={() => { if (sourceChanged) throw new Error('Source changed'); }}
     onIntent={() => {}} onSettled={async () => {}} onClose={() => {}} />);
   await flush();
   await act(async () => button('Hand off').click());
@@ -441,7 +468,7 @@ it('automatically prepares only the exact selected prefix after durable prompt p
   const order: string[] = [];
   const prepare = vi.spyOn(directory, 'prepareSuccession').mockImplementation(async input => { order.push('prepare'); return response(input.operationId, 'ready'); });
   const action = vi.spyOn(directory, 'successionAction').mockImplementation(async (_kind, id) => { order.push('commit'); return response(id, 'committed'); });
-  await render(<SessionSuccessionDialog source={source} directory={directory} preparation={prefix} autoPrepare
+  await render(<SessionSuccessionDialog source={source} directory={labSessionSuccessionDirectory(directory)} preparation={prefix} autoPrepare
     onPreparing={async () => { order.push('draft'); }} assertAccess={() => {}} assertSource={() => {}}
     onIntent={() => { order.push('intent'); }} onSettled={async () => { order.push('follow'); }} onClose={() => {}} />);
   await flush();
@@ -455,7 +482,7 @@ it('performs no native preparation when retaining selected prompt bytes fails', 
   const directory = new SessionDirectoryClient('http://localhost', undefined, 'host');
   vi.spyOn(directory, 'describeSuccession').mockResolvedValue(description);
   const prepare = vi.spyOn(directory, 'prepareSuccession');
-  await render(<SessionSuccessionDialog source={source} directory={directory} autoPrepare
+  await render(<SessionSuccessionDialog source={source} directory={labSessionSuccessionDirectory(directory)} autoPrepare
     preparation={{ kind: 'native_prefix', turnId: 'turn', messageId: 'message' }}
     onPreparing={async () => { throw new Error('Prompt bytes could not be retained.'); }}
     assertAccess={() => {}} assertSource={() => {}} onIntent={() => {}} onSettled={async () => {}} onClose={() => {}} />);
@@ -472,7 +499,7 @@ it('checks the original prefix authority for manual commit while retaining read 
   const prepare = vi.spyOn(directory, 'prepareSuccession').mockImplementation(() => new Promise(resolve => { release = resolve; }));
   const action = vi.spyOn(directory, 'successionAction').mockImplementation(async (kind, id) => response(id, kind === 'cancel' ? 'cancelled' : 'ready'));
   const guard = vi.fn(() => { if (!current) throw new Error('Original recipient retired.'); });
-  await render(<SessionSuccessionDialog source={source} directory={directory} autoPrepare
+  await render(<SessionSuccessionDialog source={source} directory={labSessionSuccessionDirectory(directory)} autoPrepare
     preparation={{ kind: 'native_prefix', turnId: 'turn', messageId: 'message' }} assertAccess={() => {}} assertSource={guard}
     onIntent={() => {}} onSettled={async () => {}} onClose={() => {}} />);
   await vi.waitFor(() => expect(prepare).toHaveBeenCalledOnce());

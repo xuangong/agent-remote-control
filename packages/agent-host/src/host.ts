@@ -13,7 +13,7 @@ import { SOURCE_WITNESS_RESULT_BYTES, validSourceWitnessIdentity, type SessionSu
 import { jsonBytes } from './succession-persistence.js';
 import type { SessionSuccessionContextStore } from './session-succession-context.js';
 import type { SessionSuccessionCoordinator } from './session-succession.js';
-import { nativeSessionRefKey, nativePrefixAncestors, isNativeSessionRef, isSuccessionRequest, type NativeSessionRef, type NativePrefixSelection, type TrustedSuccessionContext } from '@orchardworks/agent-remote-protocol';
+import { nativeSessionRefKey, nativePrefixSegmentAncestors, isNativeSessionRef, isSuccessionRequest, type NativeSessionRef, type NativePrefixSelection, type TrustedSuccessionContext } from '@orchardworks/agent-remote-protocol';
 import { TpmCoordinator, type TpmOptions, type TpmSessionAccess } from './tpm.js';
 import { isTpmCreate, isTpmAction } from '@orchardworks/agent-remote-protocol';
 import { SessionBindings, SessionBindingError } from '@orchardworks/agent-remote-relay';
@@ -53,7 +53,7 @@ export interface AgentHostDirectory {
   readonly supportsPromptEditing?: boolean;
   validatePromptEdit?(target: { nativeSessionId: string; turnId: string; messageId: string }): Promise<void>;
   supportsNativePrefix?(target: NativePromptEditTarget): Promise<boolean>;
-  createNativePrefix?(target: NativePromptEditTarget, extensions: AgentSessionExtensions, evidence?: DirectoryMutationEvidence, candidateKnown?: (handle: AgentPersistenceHandle) => Promise<void>): Promise<AgentPersistenceHandle>;
+  createNativePrefix?(target: NativePromptEditTarget, extensions: AgentSessionExtensions, evidence: DirectoryMutationEvidence | undefined, candidateKnown: (handle: AgentPersistenceHandle) => Promise<void>): Promise<AgentPersistenceHandle>;
   verifyNativePrefix?(target: NativePromptEditTarget, handle: AgentPersistenceHandle): Promise<void>;
   /** Active work uses tools served by the Controller process. */
   requiresController?(nativeSessionId: string): boolean;
@@ -506,7 +506,7 @@ export function createAgentHostRuntime(options: AgentHostRuntimeOptions): AgentH
         if (!saved || JSON.stringify(saved.handle) !== JSON.stringify(preparationHandle)) throw new Error('Source attachment lacks exact saved native prefix evidence.');
         target = saved.source;
       }
-      const ancestry = nativePrefixAncestors(target, successionService.store.all().flatMap(state => state.operations.filter(row => row.phase === 'committed')));
+      const ancestry = nativePrefixSegmentAncestors(target, successionService.store.all().flatMap(state => state.operations.filter(row => row.phase === 'committed')));
       return [...new Set([...ancestry.map(ref => ref.nativeSessionId), id])];
     });
   }
@@ -541,7 +541,7 @@ export function createAgentHostRuntime(options: AgentHostRuntimeOptions): AgentH
   /** Rebuild each native attachment from stable role anchors and its own actual recipient. */
   async function nativePrefixExtensions(source: NativeSessionRef, actual: () => string | undefined): Promise<AgentSessionExtensions> {
     const directory = registration(source.providerId).directory;
-    const ancestry = nativePrefixAncestors(source, successionService!.store.all().flatMap(state => state.operations.filter(row => row.phase === 'committed')));
+    const ancestry = nativePrefixSegmentAncestors(source, successionService!.store.all().flatMap(state => state.operations.filter(row => row.phase === 'committed')));
     const grants = (await directory.sourceReferences?.() ?? []).filter(grant => ancestry.some(ref => ref.nativeSessionId === grant.nativeSessionId));
     if (grants.length > 1) throw new Error('Source reference ancestry is ambiguous.');
     const sourceTools = grants.length === 1 && !!directory.setSourceReferenceAncestors && !!directory.setSourceBindingReader;

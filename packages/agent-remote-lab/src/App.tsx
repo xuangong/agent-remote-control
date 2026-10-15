@@ -1,5 +1,6 @@
 import { teamViewTarget } from './team-view-binding.js';
 import { SessionViewOperationsContext } from './session-view-operations.js';
+import { labSessionSuccessionDirectory, type SessionSuccessionDirectory } from './session-succession-directory.js';
 import { TeamViewScope, useTeamVisibility } from './hooks/useTeamVisibility.js';
 import { teamLayoutTargets } from './team-layout.js';
 import { TeamMenu } from './components/TeamMenu.js';
@@ -1502,9 +1503,9 @@ function AppContent({
     return submittedClient;
   }
 
-  const [successionDialog, setSuccessionDialog] = useState<{ scope: string; source: OpenedSession; directory: SessionDirectoryClient; resume?: SessionSuccessionIntent['operation']; cancelRequested?: boolean; visible?: boolean; initialProvider?: string } | undefined>(() => {
+  const [successionDialog, setSuccessionDialog] = useState<{ scope: string; source: OpenedSession; directory: SessionSuccessionDirectory; resume?: SessionSuccessionIntent['operation']; cancelRequested?: boolean; visible?: boolean; initialProvider?: string } | undefined>(() => {
     const saved = loadSuccessionIntent(baseUrl);
-    return saved ? { scope: baseUrl, source: saved.source, resume: saved.operation, cancelRequested: saved.cancelRequested, visible: true, directory: new SessionDirectoryClient(baseUrl, undefined, saved.source.hostId) } : undefined;
+    return saved ? { scope: baseUrl, source: saved.source, resume: saved.operation, cancelRequested: saved.cancelRequested, visible: true, directory: labSessionSuccessionDirectory(new SessionDirectoryClient(baseUrl, undefined, saved.source.hostId)) } : undefined;
   });
   const primaryInputKey = JSON.stringify([baseUrl, stackRoot && sessionKey(stackRoot)]);
   const [pendingPrimaryInput, setPendingPrimaryInput] = useState<{ key: string; count: number }>();
@@ -1526,7 +1527,7 @@ function AppContent({
       const initialProvider = handoffProvider(args);
       if (!canHandoffPrimary || !stackRoot) throw new Error('Handoff is available on the current main conversation with authorized Host access.');
       assertSourceCurrent(stackRoot);
-      setSuccessionDialog({ scope: baseUrl, source: stackRoot, visible: true, initialProvider, directory: new SessionDirectoryClient(baseUrl, undefined, stackRoot.hostId) });
+      setSuccessionDialog({ scope: baseUrl, source: stackRoot, visible: true, initialProvider, directory: labSessionSuccessionDirectory(new SessionDirectoryClient(baseUrl, undefined, stackRoot.hostId)) });
       return {};
     }
     if (!state || status !== 'ready' || hostOffline) throw new Error('Wait for this session to finish synchronizing.');
@@ -1623,7 +1624,7 @@ function AppContent({
     const result = succession.resolveTarget(source, { ...requested, ...(member ? { nativePrefixOnly: true } : {}) });
     if (member && sessionKey(member) !== sessionKey(result.target)) throw new Error('The Team execution locator is still synchronizing.');
     return { ...result, target: { ...result.target, ...(member ? { teamId: member.teamId, teamMemberId: member.teamMemberId } : {}) } };
-  }, directory: source => new SessionDirectoryClient(baseUrl, undefined, source.hostId), refreshSettled: succession.refreshSettled }}><SessionAskSurfaceProvider><SessionDockProvider key={baseUrl} storageScope={baseUrl} enabled={!compactLayout && activeView === 'workbench'}><TeamViewScope.Provider value={teamView.execute}><TpmViewScope.Provider value={tpmView.execute}><TrackViewScope.Provider value={userScoped ? attention.executeTrack : undefined}><ConversationConnectionScope.Provider value={connections}><VscodeTunnelScope service={vscodeTunnelClient} host={previewHost} polling={compactLayout ? contextOpen : desktopContextVisible}><PreviewScope client={previewClient} host={previewHost} polling={compactLayout ? contextOpen : desktopContextVisible}><RecoveryScope.Provider value={readingPositions}><main ref={shellRef} onPointerDownCapture={focusManagedWindow} onFocusCapture={focusManagedWindow} style={sidebar.style} className={`lab-shell${headerHidden ? ' lab-header-hidden' : ''}${!compactLayout && !desktopContextVisible ? ' lab-context-hidden' : ''}${state?.agent ? ' lab-has-agent' : ''}${supportingRailOpen ? ' lab-supporting-open' : ''}${inspectorOpen ? ' lab-inspector-open' : ''}`}>
+  }, directory: source => labSessionSuccessionDirectory(new SessionDirectoryClient(baseUrl, undefined, source.hostId)), refreshSettled: succession.refreshSettled }}><SessionAskSurfaceProvider><SessionDockProvider key={baseUrl} storageScope={baseUrl} enabled={!compactLayout && activeView === 'workbench'}><TeamViewScope.Provider value={teamView.execute}><TpmViewScope.Provider value={tpmView.execute}><TrackViewScope.Provider value={userScoped ? attention.executeTrack : undefined}><ConversationConnectionScope.Provider value={connections}><VscodeTunnelScope service={vscodeTunnelClient} host={previewHost} polling={compactLayout ? contextOpen : desktopContextVisible}><PreviewScope client={previewClient} host={previewHost} polling={compactLayout ? contextOpen : desktopContextVisible}><RecoveryScope.Provider value={readingPositions}><main ref={shellRef} onPointerDownCapture={focusManagedWindow} onFocusCapture={focusManagedWindow} style={sidebar.style} className={`lab-shell${headerHidden ? ' lab-header-hidden' : ''}${!compactLayout && !desktopContextVisible ? ' lab-context-hidden' : ''}${state?.agent ? ' lab-has-agent' : ''}${supportingRailOpen ? ' lab-supporting-open' : ''}${inspectorOpen ? ' lab-inspector-open' : ''}`}>
     {scanOpen ? <SessionTransferDialog onOpen={openScannedSession} onClose={() => setScanOpen(false)} /> : null}
     {activated ? tracking.observers : null}
     {userScoped && attention.trackVisible ? <SessionTrackingMenu catchUp={catchUp} tracking={tracking} teams={teamRoster?.baseUrl === baseUrl ? teamRoster.teams : []} knownSessions={[...favorites.stars, ...sessionEntries]} busy={transitioning} inert={supportingRailOpen} onOpen={item => void openTrackedSession(item)} /> : null}

@@ -3,5 +3,5 @@ export { watchPageResume } from './client/page-resume.js';
 export { watchPagePolling } from './client/page-polling.js';
 export { clearImageDraftScope, configureImageDraftPersistence, clearPersistedImageDrafts } from './image-drafts.js';
 export type { ImageDraftBinding, ImageDraftRecipient } from './image-drafts.js';
-export { inspectImageDraft, readImageDraft, writeImageDraft } from './image-drafts.js';
-export type { ImageDraft, ImageDraftStorageHandle, ImageDraftStorageSnapshot } from './image-drafts.js';
+export { inspectImageDraft, readImageDraft, writeImageDraft, releaseImageDraft } from './image-drafts.js';
+export type { ImageDraft, ImageDraftStorageHandle, ImageDraftStorageSnapshot, ImageDraftApplication, ImageDraftReplacement } from './image-drafts.js';

@@ -30,7 +30,7 @@ export function successionResumeHandle(providerId: string, nativeSessionId: stri
   return updated ? successionCreationHandle(providerId, nativeSessionId, { status: 'created', handle: updated }) : original;
 }
 
-export interface NativePromptEditTarget { nativeSessionId: string; turnId: string; messageId: string }
+export type NativePromptEditTarget = import('@orchardworks/agent-provider-sdk').AgentNativePrefixTarget;
 export interface NativePrefixCandidate { target: NativeSessionRef; handle: AgentPersistenceHandle }
 export type NativePrefixCandidateKnown = (candidate: NativePrefixCandidate) => Promise<void>;
 /** A complete candidate is retained while native reads or local observation are unavailable. */

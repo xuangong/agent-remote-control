@@ -83,7 +83,7 @@ test('native prefix routing follows only complete exact committed chains and ret
   const a = committedEdge('A', 'B', 1), b = committedEdge('B', 'C', 2);
   expect(api.resolveNativePrefix(source, [b, a])).toEqual({ anchor: source, target: b.to, operationIds: ['op-1', 'op-2'] });
   expect(api.resolveNativePrefix(b.to, [a, b])).toEqual({ anchor: b.to, target: b.to, operationIds: [] });
-  expect(api.nativePrefixAncestors(b.to, [b, a])).toEqual([source, a.to, b.to]);
+  expect(api.nativePrefixSegmentAncestors(b.to, [b, a])).toEqual([source, a.to, b.to]);
   expect(api.resolveNativePrefix(source, [])).toEqual({ anchor: source, target: source, operationIds: [] });
   for (const records of [[b], [a, a], [a, committedEdge('B', 'A', 2)], [a, committedEdge('A', 'C', 2)],
     [a, { ...committedEdge('B', 'C', 2), phase: 'ready' }], [a, { ...b, preparation: undefined }],
@@ -93,5 +93,17 @@ test('native prefix routing follows only complete exact committed chains and ret
   const owned = committedEdge('X', 'B', 1); owned.roleId = 'other'; owned.operationId = 'other'; owned.prepared.roleId = 'other'; owned.prepared.operationId = 'other';
   expect(() => api.resolveNativePrefix(source, [a, owned])).toThrow();
   expect(() => api.resolveNativePrefix(source, [a, committedEdge('B', 'C', 2, false)])).toThrow(/unavailable/i);
-  expect(() => api.nativePrefixAncestors(b.to, [a, committedEdge('B', 'C', 2, false)])).toThrow(/unavailable/i);
+  expect(api.nativePrefixSegmentAncestors(b.to, [a, committedEdge('B', 'C', 2, false)])).toEqual([b.to]);
 });
+
+
+test('prefix metadata ancestry stops at each generic boundary without granting execution across it', async () => {
+  const api = await import('./session-succession.js');
+  const edges = [committedEdge('A', 'B', 1), committedEdge('B', 'C', 2, false), committedEdge('C', 'D', 3)];
+  expect(api.nativePrefixSegmentAncestors(edges[1]!.to, edges)).toEqual([edges[1]!.to]);
+  expect(api.nativePrefixSegmentAncestors(edges[2]!.to, edges)).toEqual([edges[1]!.to, edges[2]!.to]);
+  expect(api.nativePrefixSegmentAncestors(source, edges)).toEqual([source]);
+  expect(() => api.resolveNativePrefix(source, edges)).toThrow(/generic succession/);
+  expect(api.resolveNativePrefix(edges[1]!.to, edges).target).toEqual(edges[2]!.to);
+  expect(() => api.nativePrefixSegmentAncestors(edges[2]!.to, [edges[1]!, edges[2]!])).toThrow(/invalid committed lineage/);
+}, 5000);

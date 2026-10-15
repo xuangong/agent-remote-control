@@ -15,30 +15,30 @@ async function fixture(mode: 'unavailable' | 'settings' | 'identity' | 'oversize
   cleanups.push(() => rm(root, { recursive: true, force: true }));
   const adapter = createPrefixAdapter(root), directory = join(root, 'state');
   cleanups.push(() => adapter.dispose());
-  const originalFork = adapter.forkForPromptEdit.bind(adapter), resume = adapter.resumeSession.bind(adapter);
+  const originalFork = adapter.nativePrefix.create.bind(adapter.nativePrefix), resume = adapter.resumeSession.bind(adapter);
   let offered: AgentPersistenceHandle | undefined, checkpoint: any;
   const resumed: AgentPersistenceHandle[] = [];
   adapter.resumeSession = async (handle: AgentPersistenceHandle, extensions?: AgentSessionExtensions) => { resumed.push(structuredClone(handle)); return resume(handle, extensions); };
-  adapter.forkForPromptEdit = async (target: unknown, extensions: AgentSessionExtensions, candidateKnown?: (handle: AgentPersistenceHandle) => Promise<void>) => {
-    const session: AgentSession = await originalFork(target, extensions);
-    offered = (await session.runtimeInfo()).persistence!;
-    try {
-      await candidateKnown?.(mode === 'oversized' ? { ...offered, opaque: 'x'.repeat(16384) } : offered);
+  adapter.nativePrefix.create = async (target: unknown, extensions: AgentSessionExtensions, candidateKnown: (handle: AgentPersistenceHandle) => Promise<void>) => {
+    const session: AgentSession = await originalFork(target, extensions, async (handle: AgentPersistenceHandle) => {
+      offered = handle;
+      await candidateKnown(mode === 'oversized' ? { ...offered, opaque: 'x'.repeat(16384) } : offered);
       checkpoint = JSON.parse(await readFile(join(directory, 'roles', 'state.json'), 'utf8'));
       if (mode === 'unavailable') throw new AgentRuntimeError('native_runtime_unavailable', 'Post-fork bootstrap read unavailable');
-      if (mode === 'settings' || mode === 'identity') return new Proxy(session, { get(target, property) {
-        if (property === 'runtimeInfo') return async () => {
-          const info = await target.runtimeInfo();
-          return mode === 'settings' ? { ...info, persistence: { ...info.persistence!, opaque: JSON.stringify({ cwd: root, changedSettings: true }) } }
-            : { ...info, sessionId: 'different', persistence: { ...info.persistence!, sessionId: 'different' } };
-        };
-        const value = Reflect.get(target, property, target); return typeof value === 'function' ? value.bind(target) : value;
-      } });
-      return session;
-    } catch (error) { await session.dispose(); throw error; }
+    });
+    if (mode === 'settings' || mode === 'identity') return new Proxy(session, { get(target, property) {
+      if (property === 'runtimeInfo') return async () => {
+        const info = await target.runtimeInfo();
+        return mode === 'settings' ? { ...info, persistence: { ...info.persistence!, opaque: JSON.stringify({ cwd: root, changedSettings: true }) } }
+          : { ...info, sessionId: 'different', persistence: { ...info.persistence!, sessionId: 'different' } };
+      };
+      const value = Reflect.get(target, property, target); return typeof value === 'function' ? value.bind(target) : value;
+    } });
+    return session;
   };
   const make = () => {
     const local = new LocalSessionSuccession(directory, 'local-test', [adapter]);
+    expect(local.providers[0]!.nativePrefix).toBeUndefined();
     const relay = createAgentRemoteRelay({ providers: local.providers, operationCache: local.operationCache, operationLifecycle: local.operationLifecycle });
     local.bindRelay(relay);
     const close = async () => { await relay.close(); await local.close(); };

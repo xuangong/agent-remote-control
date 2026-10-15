@@ -160,3 +160,25 @@ it('preserves Controller-dependent extension lifetime metadata through workspace
   expect(directory.requiresController?.('with-tools')).toBe(true);
   expect(directory.requiresController?.('plain')).toBe(false);
 });
+
+it('forwards the original durable checkpoint and keeps source and candidate workspace checks', async () => {
+  const f = await fixture(), handle = { providerId: 'recorded', sessionId: 'candidate', opaque: 'exact' };
+  const target = { nativeSessionId: 'session', turnId: 'turn', messageId: 'message' };
+  let release!: () => void, reached!: () => void, completed = false, calls = 0;
+  const gate = new Promise<void>(resolve => { release = resolve; }), entered = new Promise<void>(resolve => { reached = resolve; });
+  const checkpoint = async (original: typeof handle) => { expect(original).toBe(handle); reached(); await gate; };
+  f.source.sessionWorkspace = async () => f.info.cwd;
+  f.source.createNativePrefix = async (_target, _extensions, _evidence, callback) => {
+    expect(callback).toBe(checkpoint); calls++; await callback(handle); completed = true; return handle;
+  };
+  f.source.verifyNativePrefix = async () => { calls++; };
+  const directory = protectHostDirectory(f.source, f.policy!);
+  const pending = directory.createNativePrefix!(target, {}, undefined, checkpoint);
+  await entered; expect(completed).toBe(false); release(); expect(await pending).toBe(handle);
+  f.info.cwd = f.outside;
+  await expect(directory.createNativePrefix!(target, {}, undefined, checkpoint)).rejects.toThrow(/workspace/i);
+  await expect(directory.verifyNativePrefix!(target, handle)).rejects.toThrow(/workspace/i);
+  f.source.sessionWorkspace = async id => id === 'candidate' ? f.outside : f.allowed;
+  await expect(directory.verifyNativePrefix!(target, handle)).rejects.toThrow(/workspace/i);
+  expect(calls).toBe(1);
+});

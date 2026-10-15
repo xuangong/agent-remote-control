@@ -27,12 +27,14 @@ test('ARDB Live edits its native prefix and retains drafts until the matching ad
     const editor = page.getByTestId('prompt-input');
     await expect(editor).toBeVisible();
     await expect.poll(() => described).toBe(true);
-    await expect(editor).toBeDisabled();
+    await expect(editor).toHaveAttribute('contenteditable', 'true');
+    await editor.fill('draft before prompt editing is available');
     releaseDescription!();
     await expect(editor).toHaveAttribute('contenteditable', 'true');
     await page.unroute('**/__ardb/succession/describe');
     const row = page.locator('[data-prompt-editable]').filter({ hasText: 'selected prompt' });
     await expect(row.locator('[data-prompt-edit-action]:visible')).toHaveCount(1);
+    await expect(editor).toHaveText('draft before prompt editing is available');
     await row.hover(); await row.locator('[data-prompt-edit-action]:visible').click();
     await expect(editor).toHaveText('selected prompt');
     await expect(page.locator('.lab-handoff-notice')).toHaveCount(0);

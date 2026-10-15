@@ -6,8 +6,8 @@ import { render, rerender, unmount } from '../test/setup.js';
 import { useImageDraft, type UploadImage } from './useImageDraft.js';
 vi.mock('../image-drafts.js', async importOriginal => ({ ...await importOriginal<typeof import('../image-drafts.js')>(), readImageDraft: vi.fn(), writeImageDraft: vi.fn(async () => ({ status: 'saved', retention: 'local' })) }));
 let draft!: ReturnType<typeof useImageDraft>;
-function Harness({ session = 'a', active = true, scope, upload, text = '', enabled = true, binding, recipient, onRender }: { session?: string; active?: boolean; scope?: string; upload?: UploadImage; text?: string; enabled?: boolean; binding?: { scope: string; key: string }; recipient?: { identity: string; lifetime: object; isCurrent(): boolean }; onRender?(): void }) {
-  draft = useImageDraft({ sessionKey: session, scope, text, enabled, active, upload, binding, recipient, onTextChange: () => {} });
+function Harness({ session = 'a', active = true, scope, upload, text = '', enabled = true, binding, recipient, onRender, onTextChange = () => {} }: { session?: string; active?: boolean; scope?: string; upload?: UploadImage; text?: string; enabled?: boolean; binding?: { scope: string; key: string }; recipient?: { identity: string; lifetime: object; isCurrent(): boolean }; onRender?(): void; onTextChange?(text: string): void }) {
+  draft = useImageDraft({ sessionKey: session, scope, text, enabled, active, upload, binding, recipient, onTextChange });
   onRender?.();
   return <span>{draft.storageError}</span>;
 }
@@ -575,4 +575,54 @@ it('conditionally restores a prompt into the active owner and rejects an interve
   expect(handle.snapshot().savedRevision).toBe(handle.snapshot().revision);
   await act(async () => { expect((await handle.replace!(handle.snapshot().revision, { ...selected, parts: [] }, () => false)).status).toBe('cancelled'); });
   expect(draft.parts).toEqual([{ type: 'text', text: 'Selected prompt' }]);
+});
+
+
+it.each(['failed save', 'newer edit', 'recipient retirement'] as const)('keeps the actual local application receipt after %s', async boundary => {
+  const binding = { scope: `application-${boundary}`, key: `application-${boundary}` };
+  let active = true;
+  const recipient = { identity: 'application-owner', lifetime: {}, isCurrent: () => active };
+  await render(<Harness binding={binding} recipient={recipient} active={false} text="before" />);
+  const handle = await inspectImageDraft(binding);
+  let finish!: () => void;
+  vi.mocked(writeImageDraft).mockImplementationOnce(() => new Promise((resolve, reject) => {
+    finish = () => boundary === 'failed save' ? reject(new Error('Full')) : resolve({ status: 'saved', retention: 'local' });
+  }));
+  expect(handle.apply).toBeTypeOf('function');
+  let replacement!: ReturnType<NonNullable<typeof handle.apply>>;
+  await act(async () => { replacement = handle.apply!(handle.snapshot().revision,
+    { version: 1, parts: [{ type: 'text', text: 'selected' }], images: {}, nextLabel: 1 }, () => active); });
+  const appliedRevision = handle.snapshot().revision;
+  expect(replacement.application).toEqual({ status: 'applied', revision: appliedRevision });
+  expect(draft.parts).toEqual([{ type: 'text', text: 'selected' }]);
+  await act(async () => {
+    if (boundary === 'newer edit') { draft.setText('newer'); draft.setText('selected'); }
+    if (boundary === 'recipient retirement') active = false;
+    finish();
+    expect((await replacement.completion).status).toBe(boundary === 'failed save' ? 'failed' : 'cancelled');
+  });
+  expect(replacement.application).toEqual({ status: 'applied', revision: appliedRevision });
+  if (boundary === 'newer edit') expect(handle.snapshot().revision).not.toBe(appliedRevision);
+});
+
+
+it('captures the image application before a text subscriber synchronously edits the document again', async () => {
+  const binding = { scope: 'synchronous-image-receipt', key: 'synchronous-image-receipt' };
+  const recipient = { identity: 'owner', lifetime: {}, isCurrent: () => true };
+  let handle!: Awaited<ReturnType<typeof inspectImageDraft>>;
+  let appliedRevision: number | undefined;
+  await render(<Harness binding={binding} recipient={recipient} active={false} onTextChange={text => {
+    if (text !== 'selected' || appliedRevision !== undefined) return;
+    appliedRevision = handle.snapshot().revision;
+    draft.setText('newer'); draft.setText('selected');
+  }} />);
+  handle = await inspectImageDraft(binding);
+  await act(async () => {
+    const replacement = handle.apply!(handle.snapshot().revision,
+      { version: 1, parts: [{ type: 'text', text: 'selected' }], images: {}, nextLabel: 1 }, () => true);
+    expect(replacement.application).toEqual({ status: 'applied', revision: appliedRevision });
+    expect((await replacement.completion).status).toBe('cancelled');
+  });
+  expect(handle.snapshot().revision).not.toBe(appliedRevision);
+  expect(draft.parts).toEqual([{ type: 'text', text: 'selected' }]);
 });

@@ -1,11 +1,11 @@
 import { realpath } from 'node:fs/promises';
-import type { AgentPersistenceHandle } from '@orchardworks/agent-provider-sdk';
+import type { AgentNativePrefixTarget, AgentPersistenceHandle } from '@orchardworks/agent-provider-sdk';
 import { codexEvidenceJson } from './native-evidence.js';
 import { CodexAppServerRpcError, type CodexAppServerTransport } from './app-server-transport.js';
 import { isRecord, readString } from './native.js';
 import { codexImagePlaceholderLabel } from './message-content.js';
 
-export interface CodexPromptEditTarget { nativeSessionId: string; turnId: string; messageId: string }
+export type CodexPromptEditTarget = AgentNativePrefixTarget;
 
 /** Resolve an editable persisted boundary from native history, independently of CLI version. */
 export async function preparePromptEdit(

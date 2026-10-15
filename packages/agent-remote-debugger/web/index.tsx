@@ -1,4 +1,4 @@
-import { ardbSessionDirectory, describeLiveSession } from './session-operations.js';
+import { ardbSessionDirectory, describeLiveSession, type LiveSession } from './session-operations.js';
 import { DraftStore } from '../../agent-remote-lab/src/draft-store.js';
 import { SessionViewOperationsContext } from '../../agent-remote-lab/src/session-view-operations.js';
 import { LiveControls, useLiveRecording } from './live-controls.js';
@@ -8,7 +8,6 @@ import { createRoot } from 'react-dom/client';
 import { HttpWebSocketTransport } from '@orchardworks/agent-remote-web';
 import { DebugControlsState, DebugSessionView, DebugWorkbench } from './session-view.js';
 import { useSessionView } from '@orchardworks/agent-remote-web/react';
-import type { OpenedSession } from '../../agent-remote-lab/src/directory-client.js';
 import { trackFocusModality } from '../../agent-remote-lab/src/focus-modality.js';
 import { ReplayView } from './replay.js';
 import { RecordingPlayer, type SessionRecording } from '../src/recording.js';
@@ -24,15 +23,21 @@ function Playback({ modeControls, recording, player, onOpen, liveControls, recor
     <div className="ardb-empty-view">Open a server recording from the controls to replay it.</div>
   </DebugSessionView>;
 }
-function SessionView({ session, onSessionChanged, ...view }: ViewProps & { session: OpenedSession; onSessionChanged(session: OpenedSession): void }) {
-  const [roleId, setRoleId] = useState<string>(), [operationError, setOperationError] = useState<string>();
+function SessionView({ session, onSessionChanged, ...view }: ViewProps & { session: LiveSession; onSessionChanged(session: LiveSession): void }) {
+  const [description, setDescription] = useState<{ agentId: string; ready: boolean; error?: string }>();
+  const [descriptionAttempt, retryDescription] = useState(0);
+  const currentDescription = description?.agentId === session.agentId ? description : undefined;
   const storageScope = `${location.origin}:ardb`;
   const drafts = useMemo(() => new DraftStore(storageScope), [storageScope]);
   useEffect(() => {
     let current = true;
-    void describeLiveSession(session).then(value => { if (current) { setRoleId(value.role.id); setOperationError(undefined); } }).catch(error => { if (current) setOperationError(error instanceof Error ? error.message : 'The local operation is unavailable.'); });
+    setDescription({ agentId: session.agentId, ready: false });
+    void describeLiveSession(session).then(value => {
+      if (value.role.current.providerId !== session.providerId || value.role.current.nativeSessionId !== session.nativeSessionId) throw new Error('The local prompt source changed. Reload its current view.');
+      if (current) setDescription({ agentId: session.agentId, ready: true });
+    }).catch(error => { if (current) setDescription({ agentId: session.agentId, ready: false, error: error instanceof Error ? error.message : 'Prompt editing is unavailable.' }); });
     return () => { current = false; };
-  }, [session.agentId]);
+  }, [session.agentId, descriptionAttempt]);
   const capture = useLiveRecording();
   const trace = useMemo(() => createBrowserTrace(), []);
   const transport = useMemo(() => {
@@ -41,14 +46,14 @@ function SessionView({ session, onSessionChanged, ...view }: ViewProps & { sessi
     value.onDiagnostic(diagnostic => trace.record({ event: 'diagnostic', code: diagnostic.code }));
     return value;
   }, [trace]);
-  const { state, sessionState, handoff, status, questions, setQuestions, actions, imageRecipient, operationScope } = useSessionView({ agentId: session.agentId, transport, pending: !roleId || view.mode !== 'live' });
+  const { state, sessionState, handoff, status, questions, setQuestions, actions, imageRecipient, operationScope } = useSessionView({ agentId: session.agentId, transport, pending: view.mode !== 'live' });
   useEffect(() => { trace.record({ event: 'connection', status }); }, [status, trace]);
   useEffect(() => () => trace.close(), [trace]);
   const controls = <LiveControls capture={capture} agentId={session.agentId} onOpen={view.mode === 'live' ? view.onOpen : undefined} />;
   const recordingActive = capture.status?.phase === 'recording';
   if (view.mode === 'replay') return <Playback {...view} liveControls={controls} recordingActive={recordingActive} />;
   return <SessionViewOperationsContext.Provider value={{ storageScope, transport, enabled: view.mode === 'live',
-    resolveTarget: source => ({ target: source }), directory: source => ardbSessionDirectory(source, storageScope, roleId!),
+    resolveTarget: source => ({ target: source }), directory: source => ardbSessionDirectory(source),
     refreshSettled: async result => {
       if (result.record.phase !== 'committed') return;
       const response = await fetch('/__ardb/session', { signal: AbortSignal.timeout(10000) });
@@ -58,16 +63,16 @@ function SessionView({ session, onSessionChanged, ...view }: ViewProps & { sessi
       if (!selected || !result.record.to || selected.providerId !== result.record.to?.providerId || selected.nativeSessionId !== result.record.to.nativeSessionId) throw new Error('The local current session differs from the committed prompt target.');
       onSessionChanged(selected);
     },
-  }}><DebugSessionView modeControls={view.modeControls} liveControls={controls} recordingActive={recordingActive}><DebugWorkbench readOnly={!roleId} sessionState={sessionState} handoff={handoff} state={state} sessionStatus={status} attachingAgentId={session.agentId}
-    operationBinding={roleId ? { source: session, scope: operationScope } : undefined}
-    draftBinding={roleId ? { store: drafts, key: roleId } : undefined}
-    imageDraftBinding={roleId ? { scope: storageScope, key: JSON.stringify([storageScope, roleId]) } : undefined}
-    composerNotice={operationError ? <p role="status">{operationError}</p> : undefined}
-    actions={actions} imageRecipient={imageRecipient} questionDrafts={questions} draftSessionKey={session.agentId} displaySessionKey={roleId ?? JSON.stringify([session.providerId, session.nativeSessionId])}
+  }}><DebugSessionView modeControls={view.modeControls} liveControls={controls} recordingActive={recordingActive}><DebugWorkbench sessionState={sessionState} handoff={handoff} state={state} sessionStatus={status} attachingAgentId={session.agentId}
+    operationBinding={currentDescription?.ready ? { source: session, scope: operationScope } : undefined}
+    draftBinding={{ store: drafts, key: session.draftOwnerId }}
+    imageDraftBinding={{ scope: storageScope, key: JSON.stringify([storageScope, session.draftOwnerId]) }}
+    composerNotice={currentDescription?.error ? <div><p role="status">{currentDescription.error}</p><button type="button" onClick={() => retryDescription(value => value + 1)}>Retry prompt editing</button></div> : undefined}
+    actions={actions} imageRecipient={imageRecipient} questionDrafts={questions} draftSessionKey={session.agentId} displaySessionKey={session.draftOwnerId}
     onQuestionDraftChange={(id, draft) => setQuestions(current => ({ ...current, [id]: draft }))} /></DebugSessionView></SessionViewOperationsContext.Provider>;
 }
 function Workspace({ initialSession, initialRecording, directory = '', executable }: {
-  initialSession?: OpenedSession; initialRecording?: OpenedRecording; directory?: string; executable?: string;
+  initialSession?: LiveSession; initialRecording?: OpenedRecording; directory?: string; executable?: string;
 }) {
   const [expanded, setExpanded] = useState(false);
   const [session, setSession] = useState(initialSession);
@@ -91,7 +96,7 @@ async function open() {
   try {
     const response = await fetch('/__ardb/session', { signal: AbortSignal.timeout(10000) });
     if (!response.ok) throw new Error(`Session bootstrap failed (${response.status}).`);
-    const bootstrap = await response.json() as OpenedSession | { mode: 'replay' | 'workspace'; name?: string; directory: string; executable?: string; live?: OpenedSession };
+    const bootstrap = await response.json() as LiveSession | { mode: 'replay' | 'workspace'; name?: string; directory: string; executable?: string; live?: LiveSession };
     if ('mode' in bootstrap) {
       let recording: OpenedRecording | undefined;
       if (bootstrap.mode === 'replay') {

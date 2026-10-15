@@ -9,7 +9,7 @@ import type { RelationChangeReset, BrokerRelationChange } from './relation-chang
 import { isDeepStrictEqual } from 'node:util';
 import { retainedHostIdentities, retainedRecoveryInstallations, type HostRecoverySelection, type RevokedHost } from './host-recovery.js';
 import { validBrokerAssociations, migrateBrokerAssociations, type BrokerAssociationState } from './succession-associations.js';
-import { isNativeSessionRef, nativePrefixAncestors, resolveNativePrefix, isNativePrefixSelection, nativePrefixSelectionKey, isPrimaryRole, isSuccessionRecord, isSuccessionDescription, isSuccessionActionResult, nativeSessionRefKey, successionFreezeKey, successionAuthorityKey, type NativeSessionRef, type SuccessionAssociationFreeze, type BoundedSuccessionAssociationFreeze, type NativePrefixSuccessionAssociationFreeze, type PrimaryRole, type SuccessionRecord, type SuccessionActionResult } from '@orchardworks/agent-remote-protocol';
+import { isNativeSessionRef, nativePrefixSegmentAncestors, resolveNativePrefix, isNativePrefixSelection, nativePrefixSelectionKey, isPrimaryRole, isSuccessionRecord, isSuccessionDescription, isSuccessionActionResult, nativeSessionRefKey, successionFreezeKey, successionAuthorityKey, type NativeSessionRef, type SuccessionAssociationFreeze, type BoundedSuccessionAssociationFreeze, type NativePrefixSuccessionAssociationFreeze, type PrimaryRole, type SuccessionRecord, type SuccessionActionResult } from '@orchardworks/agent-remote-protocol';
 import { type SuccessionAssociationAuthority, isSuccessionAssociationAuthority } from '@orchardworks/agent-remote-protocol';
 import { isTpmAction, isTpmCreate, isTpmList, isTpmWork } from '@orchardworks/agent-remote-protocol';
 import { validSessionRelationUpdate, validSourceRelation, type SourceRelation, type SessionRelation } from './session-relations.js';
@@ -201,10 +201,10 @@ export function createHostBroker(options: HostBrokerOptions) {
     return operation;
   }
   const teams = new TeamBroker({
-    resolveSession(hostId, providerId, nativeSessionId) {
+    resolveSession(hostId, providerId, anchorNativeId) {
       const host = hosts.get(hostId);
       if (!host) throw new Error('Team recipient Host is unavailable.');
-      return resolveNativePrefix(associationSource(host, providerId, nativeSessionId), prefixRecords(host)).target;
+      return resolveNativePrefix(associationSource(host, providerId, anchorNativeId), prefixRecords(host)).target;
     },
     assertRecipient: target => assertAssociationOpen(target),
     assertRecipientSupport(hostId) { if (requireHost(hostId).teamRecipients !== 1) throw new BrokerError(409, 'team_recipients_upgrade_required', 'Update the Controller before replacing a Team recipient.'); },
@@ -402,7 +402,7 @@ export function createHostBroker(options: HostBrokerOptions) {
     const anchor = associationSource(host, binding.providerId, binding.nativeSessionId);
     const target = resolveNativePrefix(anchor, prefixRecords(host)).target;
     const actual = nativeBindings.get(JSON.stringify([host.id, target.providerId, target.nativeSessionId]));
-    if (binding.sourceRelation && nativePrefixAncestors(target, prefixRecords(host)).filter(ref => nativeBindings.get(JSON.stringify([host.id, ref.providerId, ref.nativeSessionId]))?.sourceRelation).length !== 1) throw new SharingError(409, 'relation_conflict', 'Source reader ancestry is ambiguous.');
+    if (binding.sourceRelation && nativePrefixSegmentAncestors(target, prefixRecords(host)).filter(ref => nativeBindings.get(JSON.stringify([host.id, ref.providerId, ref.nativeSessionId]))?.sourceRelation).length !== 1) throw new SharingError(409, 'relation_conflict', 'Source reader ancestry is ambiguous.');
     if (!sessionAllowed(binding, subject) || actual && !sessionAllowed(actual, subject) || !actual && !owner(subject)) {
       throw new SharingError(403, 'session_forbidden', 'Current relation reader access is unavailable.');
     }
@@ -414,7 +414,7 @@ export function createHostBroker(options: HostBrokerOptions) {
     if (!host) throw new SharingError(404, 'host_not_found', 'Host is unavailable.');
     const actual = nativeBindings.get(JSON.stringify([host.id, input.providerId, input.nativeSessionId]));
     if (actual ? !sessionAllowed(actual, subject) : !owner(subject)) throw new SharingError(403, 'session_forbidden', 'Session access is unavailable.');
-    const matches = nativePrefixAncestors(associationSource(host, input.providerId, input.nativeSessionId), prefixRecords(host))
+    const matches = nativePrefixSegmentAncestors(associationSource(host, input.providerId, input.nativeSessionId), prefixRecords(host))
       .map(ref => nativeBindings.get(JSON.stringify([host.id, ref.providerId, ref.nativeSessionId])))
       .filter((binding): binding is Binding => !!binding && (!!binding.sourceRelation || importing && [...completedCreations.values()].some(value => value.agentId === binding.agentId)));
     if (matches.length !== 1) throw new SharingError(409, 'relation_conflict', 'Source reader ancestry is missing or ambiguous.');
@@ -1440,7 +1440,7 @@ export function createHostBroker(options: HostBrokerOptions) {
       requireOwner(subject);
       const recipientAware = request.headers.get('x-arc-team-recipients') === '1';
       if (url.pathname === '/v1/remote/teams' && request.method === 'GET') {
-        try { return json(200, { teams: teams.list().filter(team => hostAllowed(team.source.hostId, subject)).map(team => teams.forClient(team, recipientAware)) }); }
+        try { return json(200, { teams: teamState.filter(team => hostAllowed(team.source.hostId, subject)).map(team => teams.readForClient(team.id, recipientAware)) }); }
         catch (error) { return json(409, { error: error instanceof Error ? error.message : 'Team request failed.' }); }
       }
       if (request.method !== 'POST') return json(405, { error: 'Method is not allowed.' });
@@ -1450,17 +1450,17 @@ export function createHostBroker(options: HostBrokerOptions) {
           requireAccess(input.source.hostId, principal(context));
           const result = await teams.create(input);
           requireOwner(principal(context)); requireAccess(input.source.hostId, principal(context));
-          return json(200, teams.forClient(result, recipientAware));
+          return json(200, teams.readForClient(result.id, recipientAware));
         }
         if (url.pathname.endsWith('/action') && isTeamAction(input)) {
-          const team = teams.list().find(team => team.id === input.teamId);
+          const team = teamState.find(team => team.id === input.teamId);
           if (!team) return json(404, { error: 'Team not found.' });
           requireAccess(team.source.hostId, principal(context));
           if (input.action === 'add_member') requireAccess(input.hostId, principal(context));
           const result = await teams.action(input);
           requireOwner(principal(context)); requireAccess(team.source.hostId, principal(context));
           if (input.action === 'add_member') requireAccess(input.hostId, principal(context));
-          return json(200, teams.forClient(result, recipientAware));
+          return json(200, teams.readForClient(result.id, recipientAware));
         }
         return json(400, { error: 'Invalid Team request.' });
       } catch (error) { return json(409, { error: error instanceof Error ? error.message : 'Team request failed.' }); }

@@ -129,27 +129,41 @@ export class TpmCoordinator {
     if (this.access.sessionRouting) this.access.sessionRouting.assertCurrent(this.tpmAnchor(work), actual);
     else if (nativeSessionRefKey(this.tpmAnchor(work)) !== nativeSessionRefKey(actual)) throw new Error('TPM recipient is no longer current.');
   }
-  private roleRecord(providerId: string, nativeSessionId: string): TpmRecord | undefined {
-    const requested = { controllerId: this.access.controllerId, providerId, nativeSessionId };
-    const current = this.access.sessionRouting?.resolve(requested).target ?? requested;
+  private roleRecord(providerId: string, nativeSessionId: string, actualNativeSessionId?: string): TpmRecord | undefined {
+    // Prefix preparation names the current source until the candidate's actual identity is known.
+    const recipients = new Set([nativeSessionId, actualNativeSessionId].filter((id): id is string => !!id)
+      .map(id => nativeSessionRefKey({ controllerId: this.access.controllerId, providerId, nativeSessionId: id })));
     const records = this.store.all().filter(value => {
       if (value.work.providerId !== providerId || !value.work.tpmNativeSessionId) return false;
-      try { return nativeSessionRefKey(this.tpmTarget(value.work)) === nativeSessionRefKey(current); } catch { return false; }
+      try { return recipients.has(nativeSessionRefKey(this.tpmTarget(value.work))); } catch { return false; }
     });
     if (records.length > 1) throw new Error('TPM recipient has ambiguous role anchors.');
     return records[0];
   }
+  private reviewRecord(recipient: NativeSessionRef): TpmRecord | undefined {
+    const key = nativeSessionRefKey(recipient);
+    const records = this.store.all().filter(({ work }) => {
+      if (work.providerId !== recipient.providerId || !work.tpmNativeSessionId) return false;
+      if (nativeSessionRefKey(this.tpmAnchor(work)) === key || work.outbox?.some(intent =>
+        intent.target === 'tpm' && intent.resolvedTarget && nativeSessionRefKey(intent.resolvedTarget) === key)) return true;
+      try { return nativeSessionRefKey(this.tpmTarget(work)) === key; } catch { return false; }
+    });
+    if (records.length > 1) throw new Error('TPM review recipient has ambiguous work anchors.');
+    return records[0];
+  }
   async extensions(providerId: string, nativeSessionId: string, actual: () => string | undefined = () => nativeSessionId): Promise<AgentSessionExtensions | undefined> {
     try { await this.ready; } catch { return undefined; }
-    const record = this.roleRecord(providerId, nativeSessionId);
+    const record = this.roleRecord(providerId, nativeSessionId, actual());
     return record ? this.boundExtensions(record.work.id, actual) : undefined;
   }
   async annotateSession(providerId: string, nativeSessionId: string, session: import('@orchardworks/agent-provider-sdk').AgentSession) {
     try { await this.ready; } catch { return session; }
-    const record = this.roleRecord(providerId, nativeSessionId);
+    const recipient = { controllerId: this.access.controllerId, providerId, nativeSessionId };
+    const record = this.reviewRecord(recipient);
     if (!record) return session;
     return withBackgroundReviews(session, {
-      records: () => this.store.backgroundReviews(record.work.id).filter(review => this.store.get(record.work.id).work.outbox?.some(intent => intent.id === review.id && (intent.resolvedTarget ? nativeSessionRefKey(intent.resolvedTarget) === nativeSessionRefKey({controllerId:this.access.controllerId,providerId,nativeSessionId}) : nativeSessionId === record.work.tpmNativeSessionId))),
+      records: () => this.store.backgroundReviews(record.work.id).filter(review => this.store.get(record.work.id).work.outbox?.some(intent =>
+        intent.target === 'tpm' && intent.id === review.id && (intent.resolvedTarget ? nativeSessionRefKey(intent.resolvedTarget) === nativeSessionRefKey(recipient) : nativeSessionId === record.work.tpmNativeSessionId))),
       bind: async (id, turnId) => { await this.store.update(record.work.id, undefined, current => {
         const review = current.backgroundReviews?.find(review => review.id === id);
         if (review && review.turnId === undefined) review.turnId = turnId;

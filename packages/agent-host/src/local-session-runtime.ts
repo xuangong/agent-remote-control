@@ -1,29 +1,28 @@
+import { resolveAgentNativePrefixCapability } from '@orchardworks/agent-provider-sdk';
 import { createHash, randomUUID } from 'node:crypto';
 import { mkdir, readFile, realpath } from 'node:fs/promises';
 import { join } from 'node:path';
 import { isDeepStrictEqual } from 'node:util';
 import { LocalSuccessionReplay, localSuccessionLocator } from './local-succession-replay.js';
 import type { AgentPersistenceHandle, AgentProviderAdapter, AgentSession, AgentSessionConfig, AgentSessionExtensions } from '@orchardworks/agent-provider-sdk';
-import { isNativePrefixSelection, isSuccessionRequest, nativePrefixAncestors, nativeSessionRefKey, PROTOCOL_VERSION, type NativeSessionRef, type PrimaryRole, type SuccessionRecord, type TimelineCursor } from '@orchardworks/agent-remote-protocol';
+import { isNativePrefixSelection, isSuccessionRequest, nativePrefixSegmentAncestors, nativeSessionRefKey, PROTOCOL_VERSION, type NativeSessionRef, type PrimaryRole, type SuccessionRecord, type TimelineCursor } from '@orchardworks/agent-remote-protocol';
 import { createOperationCache, type AgentRemoteRelay, type OperationLifecycle, type SessionWireAgent } from '@orchardworks/agent-remote-relay';
-import { nativePrefixResumeHandle, SuccessionPreparationRejected, type NativePromptEditTarget } from './local-succession-preparation.js';
+import { nativePrefixResumeHandle, SuccessionPreparationRejected } from './local-succession-preparation.js';
 import { SessionSuccessionService } from './session-succession-service.js';
 import { SessionSuccessionBoundary } from './session-succession-boundary.js';
 import { SessionReferenceStore, sourceSessionExtensions } from './session-reference.js';
 import { publishSuccessionState } from './succession-persistence.js';
 
-/** Structural ports implemented by native providers; opaque handle interpretation stays there. */
-export interface LocalSuccessionProvider extends AgentProviderAdapter {
-  readonly createdSessionIdMaxLength?: number;
-  validatePromptEdit?(target: NativePromptEditTarget): Promise<void>;
-  forkForPromptEdit?(target: NativePromptEditTarget, extensions?: AgentSessionExtensions, candidateKnown?: (handle: AgentPersistenceHandle) => Promise<void>): Promise<AgentSession>;
-  verifyPromptEditBranch?(target: NativePromptEditTarget, handle: AgentPersistenceHandle): Promise<void>;
-}
+/** Compatibility name for the provider-neutral SDK adapter contract. */
+export type LocalSuccessionProvider = AgentProviderAdapter;
 interface Attachment { ref: NativeSessionRef; handle?: AgentPersistenceHandle; cwd?: string; session: AgentSession; wrapped: AgentSession }
 interface SavedAttachment { version: 1; ref: NativeSessionRef; handle: AgentPersistenceHandle; cwd: string }
 const hash = (value: string) => createHash('sha256').update(value).digest('hex');
 const same = (a: NativeSessionRef, b: NativeSessionRef) => nativeSessionRefKey(a) === nativeSessionRefKey(b);
 const failure = (status: number, message: string) => Object.assign(new Error(message), { status });
+
+/** Stable local ownership does not require enrolling a session for succession. */
+export const localSessionRoleId = (source: NativeSessionRef): string => `local-${hash(nativeSessionRefKey(source))}`;
 
 /** Explicit direct-Relay wiring over the existing durable Host service and admission boundary. */
 export class LocalSessionSuccession {
@@ -44,28 +43,35 @@ export class LocalSessionSuccession {
       supports: async () => false,
       supportsNativePrefix: async (source, selection) => {
         const adapter = this.adapter(source), attachment = await this.attachment(source);
-        if (!adapter.forkForPromptEdit || !adapter.verifyPromptEditBranch || !adapter.validatePromptEdit
-          || !Number.isInteger(adapter.createdSessionIdMaxLength) || adapter.createdSessionIdMaxLength! < 1 || adapter.createdSessionIdMaxLength! > 512
+        const capability = resolveAgentNativePrefixCapability(adapter);
+        if (!capability || capability.createdSessionIdMaxLength > 512
           || attachment.session.promptEditEvidence?.version !== 1 || !attachment.handle) return false;
         nativePrefixResumeHandle(source.providerId, source.nativeSessionId, attachment.handle);
         await this.extensions(source, () => source.nativeSessionId);
-        await adapter.validatePromptEdit({ nativeSessionId: source.nativeSessionId, ...selection }); return true;
+        await capability.validate({ nativeSessionId: source.nativeSessionId, ...selection }); return true;
       },
       createNativePrefix: async (request, candidateKnown) => {
         const adapter = this.adapter(request.from), selection = request.preparation!;
+        const capability = resolveAgentNativePrefixCapability(adapter);
+        if (!capability || capability.createdSessionIdMaxLength > 512) throw new Error('Native prefix preparation is unavailable.');
         let actual: string | undefined;
         let checkpoint: AgentPersistenceHandle | undefined;
         const extensions = await this.extensions(request.from, () => actual);
-        const session = await adapter.forkForPromptEdit!({ nativeSessionId: request.from.nativeSessionId, turnId: selection.turnId, messageId: selection.messageId }, extensions, async handle => {
+        const session = await capability.create({ nativeSessionId: request.from.nativeSessionId, turnId: selection.turnId, messageId: selection.messageId }, extensions, async handle => {
           checkpoint = nativePrefixResumeHandle(request.from.providerId, handle.sessionId, handle);
           actual = checkpoint.sessionId;
           await candidateKnown({ target: this.ref(request.from.providerId, actual), handle: checkpoint });
         });
+        if (!checkpoint) { await session.dispose(); throw new Error('Native prefix creation did not checkpoint its handle.'); }
         const saved = await this.retain(session, request.from.providerId, checkpoint); actual = saved.ref.nativeSessionId;
         if (!saved.handle) throw new Error('Native prefix has no exact persistence handle.');
         return { target: saved.ref, handle: nativePrefixResumeHandle(saved.ref.providerId, actual, saved.handle) };
       },
-      verifyNativePrefix: async (prepared, handle) => this.adapter(prepared.from).verifyPromptEditBranch!({ nativeSessionId: prepared.from.nativeSessionId, turnId: prepared.preparation!.turnId, messageId: prepared.preparation!.messageId }, handle),
+      verifyNativePrefix: async (prepared, handle) => {
+        const capability = resolveAgentNativePrefixCapability(this.adapter(prepared.from));
+        if (!capability || capability.createdSessionIdMaxLength > 512) throw new Error('Native prefix verification is unavailable.');
+        await capability.verify({ nativeSessionId: prepared.from.nativeSessionId, turnId: prepared.preparation!.turnId, messageId: prepared.preparation!.messageId }, handle);
+      },
       inspect: async source => this.inspect(source),
       retainVerification: async prepared => {
         const entries: Array<{ ref: NativeSessionRef; attachment: Attachment; evidence: NonNullable<AgentSession['promptEditEvidence']>; token: ReturnType<NonNullable<AgentSession['promptEditEvidence']>['captureValidity']> }> = [];
@@ -110,6 +116,8 @@ export class LocalSessionSuccession {
       dispatch: async (agent, operation, scope, work) => this.boundary.inputResult(target(agent), operation, scope, await work()),
     };
     this.providers = adapters.map(adapter => new Proxy(adapter, { get: (target, key) => {
+      // Durable creation belongs to this runtime's admission and retention path.
+      if (key === 'nativePrefix') return undefined;
       if (key === 'createSession') return (config: AgentSessionConfig) => this.create(adapter, config);
       if (key === 'resumeSession') return (handle: AgentPersistenceHandle) => this.resume(handle);
       const value = Reflect.get(target, key, target); return typeof value === 'function' ? value.bind(target) : value;
@@ -196,7 +204,7 @@ export class LocalSessionSuccession {
   }
   private async extensions(source: NativeSessionRef, actual: () => string | undefined): Promise<AgentSessionExtensions> {
     await this.service.ready;
-    const ancestors = nativePrefixAncestors(source, this.service.store.all().flatMap(state => state.operations.filter(row => row.phase === 'committed')));
+    const ancestors = nativePrefixSegmentAncestors(source, this.service.store.all().flatMap(state => state.operations.filter(row => row.phase === 'committed')));
     const grant = await this.grants(source.providerId).resolve(ancestors.map(ref => ref.nativeSessionId));
     if (!grant) return {};
     const adapter = this.adapter(source);
@@ -285,7 +293,7 @@ export class LocalSessionSuccession {
     if (existing) return existing.role;
     const attachment = await this.attachment(source);
     if (!attachment.cwd || !attachment.handle) throw new Error('Durable local session identity is unavailable.');
-    const role: PrimaryRole = { id: `local-${hash(nativeSessionRefKey(source))}`, revision: 1, origin: source, current: source, workspace: { controllerId: this.controllerId, canonicalCwd: attachment.cwd } };
+    const role: PrimaryRole = { id: localSessionRoleId(source), revision: 1, origin: source, current: source, workspace: { controllerId: this.controllerId, canonicalCwd: attachment.cwd } };
     await this.service.createRole(role); return role;
   }
   /** Validate a request against an already authorized local role; never accept foreign locators. */

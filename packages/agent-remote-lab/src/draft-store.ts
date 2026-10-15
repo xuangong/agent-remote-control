@@ -2,6 +2,8 @@ import { useCallback, useSyncExternalStore } from 'react';
 import { readDraftsChecked, saveDrafts, recoveryGeneration, type CheckedDraftRead } from './conversation-recovery.js';
 import { flushRecoveryWrites, type RecoveryWriteHandle, type RecoveryWriteResult } from './recovery-writes.js';
 
+export interface DraftTextSnapshot { text: string; revision: number }
+
 export interface DraftPersistenceState { revision: number; savedRevision: number; result?: RecoveryWriteResult }
 
 /** Tab-local text recovery with subscriptions limited to the edited conversation. */
@@ -50,15 +52,18 @@ export class DraftStore {
     return current() ? result : { status: 'cancelled', ticket: write.ticket };
   }
   get(key: string): string { return this.drafts[key] ?? ''; }
-  set(key: string, text: string): void {
-    if (this.generation !== recoveryGeneration(this.scope) || this.get(key) === text) return;
+  set(key: string, text: string): DraftTextSnapshot | undefined {
+    if (this.generation !== recoveryGeneration(this.scope)) return;
+    if (this.get(key) === text) return this.snapshot(key);
     this.drafts[key] = text;
     this.revisions.set(key, ++this.revision);
+    const applied = this.snapshot(key);
     this.save();
     for (const listener of this.listeners.get(key) ?? []) listener();
     if (this.failed) this.notifyPersistence();
+    return applied;
   }
-  snapshot(key: string): { text: string; revision: number } { return { text: this.get(key), revision: this.revisions.get(key) ?? 0 }; }
+  snapshot(key: string): DraftTextSnapshot { return { text: this.get(key), revision: this.revisions.get(key) ?? 0 }; }
   persistence(): DraftPersistenceState { return { revision: this.revision, savedRevision: this.savedRevision, result: this.result }; }
   hasSaveError(key: string): boolean {
     return this.generation === recoveryGeneration(this.scope) && this.failed && (this.revisions.get(key) ?? 0) > this.savedRevision;

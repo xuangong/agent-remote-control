@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { validateRelayState, emptyRelayState, type HostedRelayState } from '../../agent-remote-hosted/src/state.js';
+import { validateRelayState, emptyRelayState, stageRelayState, type HostedRelayState } from '../../agent-remote-hosted/src/state.js';
 import { deriveSuccessionCapacity, SUCCESSION_FEATURE_BYTES } from '../../agent-remote-hosted/src/succession-capacity.js';
 import { encodeSqlSnapshot, decodeSqlSnapshot, quoteSqlRecord, SQL_CHUNK_BYTES } from '../src/storage-codec.js';
 import { accountingAuth as auth } from './accounting-worker-fixture.js';
@@ -17,7 +17,7 @@ const namespace = (subject: string) => createHash('sha256').update(JSON.stringif
 export const stateDigest = (state: unknown) => createHash('sha256').update(JSON.stringify(state)).digest('hex');
 
 function complete(state: HostedRelayState): HostedRelayState {
-  state.version = 10;
+  stageRelayState(state, state.version, true);
   const validated = validateRelayState(state, auth), encoded = encodeSqlSnapshot(validated, auth);
   const decoded = decodeSqlSnapshot([...encoded.records.values()].map(record => record.manifest), [...encoded.records.values()].flatMap(record => record.chunks), auth);
   if (JSON.stringify(decoded) !== JSON.stringify(validated)) throw new Error('Operating dataset lost complete ordered snapshot identity.');

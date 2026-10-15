@@ -1,3 +1,4 @@
+import { resolveAgentNativePrefixCapability } from './provider.js';
 import { describe, expect, it } from 'vitest';
 
 import type {
@@ -167,4 +168,37 @@ runAgentProviderContractTests('reusable provider contract runner', async () => {
     createConfig: { sessionId: 'session-1', cwd: '/workspace' },
     expected: { providerId: 'codex', historyCount: 1, liveCount: 1 },
   };
+});
+
+
+describe('optional native-prefix capability', () => {
+  const complete = () => ({ createdSessionIdMaxLength: 36, async validate() {}, async create() { return sessionFor([]); }, async verify() {} });
+  it('keeps ordinary adapters valid without native prefix support', async () => {
+    const adapter: AgentProviderAdapter = { descriptor: { providerId: 'ordinary', displayName: 'Ordinary' },
+      async createSession() { return sessionFor([]); }, async resumeSession() { return sessionFor([]); } };
+    expect(resolveAgentNativePrefixCapability(adapter)).toBeUndefined();
+    await expect((await adapter.createSession({ sessionId: 'ordinary' })).sendMessage('hello')).resolves.toBeUndefined();
+  });
+  it.each(['validate', 'create', 'verify', 'createdSessionIdMaxLength'])('rejects an incomplete or non-callable %s', key => {
+    const capability = complete() as Record<string, unknown>;
+    delete capability[key];
+    expect(resolveAgentNativePrefixCapability({ nativePrefix: capability } as never)).toBeUndefined();
+    capability[key] = key === 'createdSessionIdMaxLength' ? 0 : true;
+    expect(resolveAgentNativePrefixCapability({ nativePrefix: capability } as never)).toBeUndefined();
+  });
+  it.each([null, false, 1, [], { createdSessionIdMaxLength: NaN }, { ...complete(), createdSessionIdMaxLength: Infinity },
+    { ...complete(), createdSessionIdMaxLength: 1.5 }])('rejects malformed JS capabilities (%j)', nativePrefix => {
+    expect(resolveAgentNativePrefixCapability({ nativePrefix } as never)).toBeUndefined();
+  });
+  it('preserves the receiver and accepts inherited methods and bounds', async () => {
+    class Capability {
+      get createdSessionIdMaxLength() { return 36; }
+      async validate() { expect(this).toBe(capability); }
+      async create() { return sessionFor([]); }
+      async verify() { expect(this).toBe(capability); }
+    }
+    const capability = new Capability(), resolved = resolveAgentNativePrefixCapability({ nativePrefix: capability });
+    expect(resolved).toBe(capability);
+    await resolved!.validate({ nativeSessionId: 'source', turnId: 'turn', messageId: 'message' });
+  });
 });

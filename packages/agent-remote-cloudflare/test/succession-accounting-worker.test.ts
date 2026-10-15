@@ -4,23 +4,28 @@ import { sourceCompletionState, relationCompletionState } from './source-complet
 import { retentionState } from './retention-consumption-fixture.js';
 import { accountingWorker, accountingAuth as auth } from './accounting-worker-fixture.js';
 
-test('real Worker accounting holds sync, rolls back transaction faults and reopens complete outer10 after unknown sync', async () => {
+test('real Worker accounting migrates legacy state, holds sync, rolls back faults and reopens complete evidence after unknown sync', async () => {
   const f = await accountingWorker();
   try {
     const initial = codecState(auth);
     const unresolved: any = initial.tenants[0]!.broker.associations!.freezes.find(row => row.released === undefined)!;
     unresolved.receipt = { ...unresolved.receipt, version: 2, maxProjectionBytes: 65536 };
+    expect(initial.version).toBe(9); expect(initial.tenants[0]!.broker.associations!.version).toBe(5);
+    const migrated = structuredClone(initial);
+    migrated.version = 11; migrated.successionAccounting = true; migrated.tenants[0]!.broker.associations!.version = 6;
     expect((await f.request('/mutate', initial)).status).toBe(200);
-    const before = await f.json('/status'); expect(before.current.version).toBe(10);
+    const before = await f.json('/status'); expect(before.current).toEqual(migrated);
     await f.request('/mode?value=hold');
     let replied = false;
     const pending = f.request('/mutate', { securityEvents: [] }).then(response => { replied = true; return response; });
     const deadline = Date.now() + 3000; let held;
     do { held = await f.json('/status'); if (Date.now() > deadline) throw new Error('Worker hold deadline'); } while (!held.entered);
     expect(replied).toBe(false); expect(held.current).toEqual(before.current); expect(held.publications).toBe(before.publications);
-    expect((await f.json('/restore')).securityEvents).toEqual([]);
+    const committed = { ...migrated, securityEvents: [] };
+    expect(await f.json('/restore')).toEqual(committed);
     await f.request('/release'); expect((await pending).status).toBe(200);
     const released = await f.json('/status'); expect(released.publications).toBe(before.publications + 1);
+    expect(released.current).toEqual(committed);
     const physical = await f.json('/physical');
     expect(physical.metadata[0].version).toBe(3); expect(physical.manifests.every((row: any) => row.format === 1)).toBe(true);
     await f.request('/fault?on=1');
@@ -35,8 +40,8 @@ test('real Worker accounting holds sync, rolls back transaction faults and reope
     expect((await f.json('/restore')).extraRelay).toBe('unknown complete evidence');
     await f.restart();
     const reopened = await f.json('/status');
-    expect(reopened.current.version).toBe(10); expect(reopened.current.extraRelay).toBe('unknown complete evidence');
-    expect(reopened.current.tenants[0].broker.associations).toEqual(initial.tenants[0]!.broker.associations);
+    expect(reopened.current).toEqual({ ...committed, extraRelay: 'unknown complete evidence',
+      sessions: committed.sessions.map(session => ({ ...session, grant: { ...session.grant, expiresAt: 0 } })) });
   } finally { await f.close(); }
 }, 30000);
 

@@ -75,10 +75,10 @@ function savedTeam(): SavedTeam {
     messages: [{ id: 'message', from: 'leader', to: 'worker', text: 'Fixture', status: 'queued', createdAt: 1 }], createdAt: 1, updatedAt: 1 };
 }
 
-async function currentRelay(team = savedTeam(), successor = false) {
+async function currentRelay(team: SavedTeam | SavedTeam[] = savedTeam(), successor = false) {
   let broker: ReturnType<typeof createHostBroker>, saved: RemoteHostBrokerState = {
     keys: [[createHash('sha256').update('key').digest('hex'), { kind: 'device', installationId: 'controller', expires: Number.MAX_SAFE_INTEGER }]],
-    hosts: [{ id: 'host', installationId: 'controller', name: 'Host', legacyDsh: false, teamManagement: true, providers: [{ providerId: 'codex', displayName: 'Codex' }] }], bindings: [], creations: [], teams: [team],
+    hosts: [{ id: 'host', installationId: 'controller', name: 'Host', legacyDsh: false, teamManagement: true, providers: [{ providerId: 'codex', displayName: 'Codex' }] }], bindings: [], creations: [], teams: Array.isArray(team) ? team : [team],
   };
   const http = createServer((incoming, response) => { void (async () => {
     let body = ''; for await (const chunk of incoming) body += chunk;
@@ -152,6 +152,21 @@ test('legacy unresolved receipts survive old peers and browser projections and s
   f.restart(); expect(f.snapshot().teams![0]!.deliveryReceipts).toHaveLength(1);
   const resolved = await f.request('/action', { action: 'resolve_message', teamId: 'team', messageId: 'legacy-receipt', outcome: 'accepted' }, true);
   expect(resolved.status).toBe(200); expect((await resolved.json()).status).toBe('archived');
+}, 10000);
+
+test('legacy browser lists filter unavailable source Hosts before rejecting recipient-incompatible Teams', async () => {
+  const hidden = savedTeam();
+  hidden.id = 'hidden'; hidden.operationId = 'hidden-create'; hidden.source.hostId = 'unavailable';
+  hidden.members.forEach(member => { member.hostId = 'unavailable'; });
+  hidden.messages = [];
+  hidden.deliveryReceipts = [{ id: 'hidden-receipt', from: 'leader', to: 'worker', status: 'accepted', createdAt: 1, settledAt: 1, fingerprint: deliveryFingerprint({ to: 'worker', text: 'Compacted private input' }) }];
+  const f = await currentRelay([savedTeam(), hidden]);
+  const response = await f.request();
+  expect(response.status).toBe(200);
+  const body = await response.json();
+  expect(body.teams.map((team: { id: string }) => team.id)).toEqual(['team']);
+  expect(body.teams.every(isLegacyTeam)).toBe(true);
+  expect(f.snapshot().teams!.find(team => team.id === hidden.id)!.deliveryReceipts).toEqual(hidden.deliveryReceipts);
 }, 10000);
 
 

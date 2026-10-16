@@ -219,7 +219,7 @@ export function useTpmWork(service: TpmService | undefined, hosts: readonly TpmH
     if (!restoring && sourceView && !shared.current) return;
     if (!restoring && shared.current) {
       const current = shared.current, main = tpmMainTarget(item);
-      const sourceId = sourceView ? sourceView.windowId === current.window.id ? sourceView.viewId : undefined : current.window.selectedPrimaryViewId;
+      const sourceId = sourceView ? sourceView.windowId === current.window.id ? sourceView.viewId : undefined : current.window.selectedViewId;
       const source = current.window.views.find(view => view.id === sourceId && view.binding && view.binding.hostId === main.hostId && view.binding.providerId === main.providerId && view.binding.nativeSessionId === main.nativeSessionId);
       if (sourceView && !source) return;
       openFeatureView(current, { kind: 'tpm', id: key, hostId: item.hostId }, item.work.tpmNativeSessionId ? { hostId: item.hostId, providerId: item.work.providerId, nativeSessionId: item.work.tpmNativeSessionId, title: item.work.title } : undefined, source?.id);
@@ -291,7 +291,7 @@ export function useTpmWork(service: TpmService | undefined, hosts: readonly TpmH
     if (!main || !service || !enabled) return false;
     const hostId = main.hostId ?? 'local';
     const window = shared.current?.window;
-    const source = window?.views.find(view => view.id === window.selectedPrimaryViewId)?.binding;
+    const source = window?.views.find(view => view.id === window.selectedViewId)?.binding;
     if (window && (!source || source.hostId !== hostId || source.providerId !== main.providerId || source.nativeSessionId !== main.nativeSessionId)) return false;
     const host = latest.current.hosts.find(host => host.id === hostId);
     const catalog = latest.current.catalogs[hostId];
@@ -301,7 +301,7 @@ export function useTpmWork(service: TpmService | undefined, hosts: readonly TpmH
     if (!canCreate(main) || !service) throw new Error('TPM creation is unavailable for this session.');
     if (mutation.current) throw new Error('Wait for the current TPM operation.');
     const sourceWindow = shared.current?.window;
-    const sourceView = sourceWindow ? { windowId: sourceWindow.id, viewId: sourceWindow.selectedPrimaryViewId } : undefined;
+    const sourceView = sourceWindow ? { windowId: sourceWindow.id, viewId: sourceWindow.selectedViewId } : undefined;
     mutation.current = true; setBusy('create'); setError(undefined);
     try {
       const hostId = main.hostId ?? 'local';

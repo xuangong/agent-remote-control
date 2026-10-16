@@ -7,6 +7,8 @@ import { afterEach, expect, it, vi } from 'vitest';
 import { PROTOCOL_VERSION, applyWindowOperation, createWindowView, type WindowMutation, type WorkspaceWindow, type AgentChildSession, type ProjectedTimelineEntry, type SessionSuccessionReplay, type Team } from '@orchardworks/agent-remote-protocol';
 import { configureImageDraftPersistence, inspectImageDraft, readImageDraft, writeImageDraft } from '@orchardworks/agent-remote-web/browser';
 import { HttpWebSocketTransport } from '@orchardworks/agent-remote-web';
+import { createWindowFeature } from './window-feature-views.js';
+import { RemoteTeamClient } from '@orchardworks/agent-remote-web/headless';
 import { CommunicationNavigationContext, type CommunicationNavigation } from '@orchardworks/agent-remote-web/react';
 import { App, type LabTransport } from './App.js';
 import { SessionDirectoryClient, type OpenedSession, type SuccessionActionResult, type SuccessionDescription } from './directory-client.js';
@@ -53,7 +55,7 @@ function committed(from = 'A', to = 'B', revision = 2, roleId = 'primary', provi
       receipt: { ...request, to: native(to, providerId), phase: 'committed', committedRevision: revision, startedAt: 'now', updatedAt: 'now',
         prepared: { ...request, to: native(to, providerId), workspace, associationRevision: 1, participants: [], capture: { epoch: 'epoch', seq: 1, capturedAt: 'now' } } } } };
 }
-async function failureFixture(advanceDuringRecovery = false, nativeIdentity?: string | null, strict = false, flags = '', setup?: { beforeWindowMutation?(mutation: WindowMutation): Promise<void>; windowDocument?: WorkspaceWindow; persistPrompt?: boolean; successionCommit?(): SuccessionActionResult; successionPrepare?(body: Record<string, unknown>): Promise<SuccessionActionResult>; teams?(): Team[]; chain?: SessionSuccessionReplay[]; replayFailure?: string; selected?: string; providerId?: string; userScoped?: boolean; favorites?: FavoritesSnapshot; holdRelationsInitially?: boolean; holdReplayInitially?: boolean; holdTimelineInitially?: boolean; holdSnapshotInitially?: boolean; holdAccessInitially?: boolean; nativeConnection?: 'connected' | 'restoring'; preserveNativeState?: boolean; children?: AgentChildSession[]; timeline?: ProjectedTimelineEntry[]; nativeStatus?: 'idle' | 'running'; successionDescription?: SuccessionDescription; successionStatus?(): SuccessionActionResult; attachmentFailure?(body: Record<string, unknown>): { status: number; payload: unknown } | undefined; seed?(scope: string, source: OpenedSession): void | Promise<void> }) {
+async function failureFixture(advanceDuringRecovery = false, nativeIdentity?: string | null, strict = false, flags = '', setup?: { hostService?: ComponentProps<typeof App>['hostService']; beforeWindowMutation?(mutation: WindowMutation): Promise<void>; windowDocument?: WorkspaceWindow; persistPrompt?: boolean; successionCommit?(): SuccessionActionResult; successionPrepare?(body: Record<string, unknown>): Promise<SuccessionActionResult>; teams?(): Team[]; chain?: SessionSuccessionReplay[]; replayFailure?: string; selected?: string; providerId?: string; userScoped?: boolean; favorites?: FavoritesSnapshot; holdRelationsInitially?: boolean; holdReplayInitially?: boolean; holdTimelineInitially?: boolean; holdSnapshotInitially?: boolean; holdAccessInitially?: boolean; nativeConnection?: 'connected' | 'restoring'; preserveNativeState?: boolean; children?: AgentChildSession[]; timeline?: ProjectedTimelineEntry[]; nativeStatus?: 'idle' | 'running'; successionDescription?: SuccessionDescription; successionStatus?(): SuccessionActionResult; attachmentFailure?(body: Record<string, unknown>): { status: number; payload: unknown } | undefined; seed?(scope: string, source: OpenedSession): void | Promise<void> }) {
   configureImageDraftPersistence(() => setup?.persistPrompt === true);
   const requests: Array<{ url: string; body?: Record<string, unknown> }> = [];
   const hostedWindows = new Map<string, WorkspaceWindow>();
@@ -224,7 +226,7 @@ async function failureFixture(advanceDuringRecovery = false, nativeIdentity?: st
   await setup?.seed?.(scope, source);
   window.history.replaceState(null, '', `/?host=host&provider=${providerId}&session=${setup?.selected ?? 'A'}${flags}`);
   const app = <App baseUrl={scope} userScoped={setup?.userScoped} transport={transport} directory={new SessionDirectoryClient(scope, undefined, 'host')}
-    hostService={{ hosts: async () => ({ hosts: [{ id: 'host', name: 'Fixture Host', online: true, providers: [] }] }), pair: async () => { throw new Error('No pairing'); }, revoke: async () => {} }} />;
+    hostService={setup?.hostService ?? { hosts: async () => ({ hosts: [{ id: 'host', name: 'Fixture Host', online: true, providers: [] }] }), pair: async () => { throw new Error('No pairing'); }, revoke: async () => {} }} />;
   let setAccessReady!: (ready: boolean) => void;
   function Access() {
     const [ready, setReady] = useState(true); setAccessReady = setReady;
@@ -2357,7 +2359,7 @@ it('restores an open Ask with its original source after rebinding main and openi
   expect(ask.entryFor(sourceA, restoredOwners[0]!.id).record?.target?.nativeSessionId).toBe('T');
 });
 
-it('keeps both primary conversations mounted with separate drafts and creates an empty primary group', async () => {
+it('keeps both primary conversations mounted with separate drafts and creates an empty dock without a primary selector', async () => {
   vi.stubGlobal('ResizeObserver', class { observe() {} disconnect() {} unobserve() {} });
   const f = await failureFixture(false, 'A', false, '&window=multi-primary-test', { chain: [], async seed(scope, source) {
     const secondary = { ...source, nativeSessionId: 'X', agentId: 'agent-X', title: 'Secondary X' };
@@ -2370,8 +2372,10 @@ it('keeps both primary conversations mounted with separate drafts and creates an
       selectedPrimaryViewId: 'primary-A', selectedViewId: 'primary-A', views: [view('primary-A', source), view('primary-X', secondary)],
     }));
   } });
-  const group = (title: string) => f.view.querySelector<HTMLButtonElement>(`[aria-label="Select primary group: ${title}"]`);
-  await settleApp(() => expect(group('Secondary X')).not.toBeNull());
+  const group = (id: string) => f.view.querySelector<HTMLElement>(`[data-primary-group-id="${id}"]`);
+  await settleApp(() => expect(group('primary-X')).not.toBeNull());
+  expect(f.view.querySelector('[aria-label="Primary session groups"]')).toBeNull();
+  expect(f.view.querySelector('[aria-label="New primary group"]')).toBeNull();
   const a = f.view.querySelector('[data-primary-group-id="primary-A"]');
   await settleApp(() => expect(f.view.querySelectorAll('.lab-primary-group [data-testid="prompt-input"]')).toHaveLength(2));
   const conversations = [...f.view.querySelectorAll<HTMLElement>('.lab-primary-group')];
@@ -2379,10 +2383,25 @@ it('keeps both primary conversations mounted with separate drafts and creates an
   await editVisiblePrompt(conversations[1]!, 'X independent draft');
   expect(conversations[0]!.querySelector('[data-testid="prompt-input"]')?.textContent).toBe('A local draft');
   expect(conversations[1]!.querySelector('[data-testid="prompt-input"]')?.textContent).toBe('X independent draft');
-  await act(async () => group('Secondary X')!.click());
-  await settleApp(() => expect(group('Secondary X')!.getAttribute('aria-current')).toBe('true'));
+  expect(group('primary-X')!.closest('[hidden]')).toBeNull();
+  await act(async () => { group('primary-X')!.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true })); });
+  await settleApp(() => expect(group('primary-X')!.getAttribute('data-selected')).toBe('true'));
   if (a) expect(f.view.contains(a)).toBe(true);
   expect(conversations.every(pane => f.view.contains(pane))).toBe(true);
+  const add = f.view.querySelector<HTMLButtonElement>('.lab-session-dock-add');
+  expect(add).not.toBeNull(); expect(add!.closest('[hidden]')).toBeNull();
+  await act(async () => add!.click());
+  await settleApp(() => {
+    const saved = JSON.parse(localStorage.getItem(`agent-remote:recovery:${f.scope}:shared-window:multi-primary-test`)!);
+    expect(saved.views).toHaveLength(3);
+    expect(saved.views.filter((view: { placement: string }) => view.placement === 'primary')).toHaveLength(2);
+    expect(saved.views.find((view: { id: string }) => view.id === saved.selectedViewId)).toMatchObject({ placement: 'dock' });
+    expect(saved.views.find((view: { id: string }) => view.id === saved.selectedViewId)?.binding).toBeUndefined();
+    expect(saved.selectedPrimaryViewId).toBe('primary-X');
+  });
+  expect(conversations.every(pane => f.view.contains(pane))).toBe(true);
+  expect(conversations[0]!.querySelector('[data-testid="prompt-input"]')?.textContent).toBe('A local draft');
+  expect(conversations[1]!.querySelector('[data-testid="prompt-input"]')?.textContent).toBe('X independent draft');
   for (const pane of conversations) {
     await settleApp(() => expect(pane.querySelector<HTMLButtonElement>('[data-testid="prompt-submit"]')?.disabled).toBe(false));
     await act(async () => { const submit = pane.querySelector<HTMLButtonElement>('[data-testid="prompt-submit"]')!; submit.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })); submit.click(); });
@@ -2390,12 +2409,7 @@ it('keeps both primary conversations mounted with separate drafts and creates an
   await settleApp(() => expect(f.frames.filter(frame => frame.message?.type === 'send_message')).toHaveLength(2));
   expect(f.frames.filter(frame => frame.message?.type === 'send_message').map(frame => frame.message!.payload).map(payload => [payload?.agentId, payload?.text]))
     .toEqual([['agent-A', 'A local draft'], ['agent-X', 'X independent draft']]);
-  await act(async () => f.view.querySelector<HTMLButtonElement>('[aria-label="New primary group"]')!.click());
-  await settleApp(() => expect(f.view.querySelectorAll('.lab-primary-group-option')).toHaveLength(3));
-  expect(conversations.every(pane => f.view.contains(pane))).toBe(true);
-  const saved = JSON.parse(localStorage.getItem(`agent-remote:recovery:${f.scope}:shared-window:multi-primary-test`)!);
-  expect(saved.views.filter((view: { placement: string }) => view.placement === 'primary')).toHaveLength(3);
-  expect(saved.views.find((view: { id: string }) => view.id === saved.selectedPrimaryViewId)?.binding).toBeUndefined();
+
 });
 
 it.each(['directory', 'directory-open', 'Favorites', 'Track'] as const)('opens a %s session into the selected primary group and preserves the other group', async navigation => {
@@ -2420,10 +2434,20 @@ it.each(['directory', 'directory-open', 'Favorites', 'Track'] as const)('opens a
       saveTrackedSessions(scope, [{ ...target, starredAt: 1 }]);
     } };
   const f = await failureFixture(false, 'A', false, `&window=${document.id}`, setup);
-  const x = () => f.view.querySelector<HTMLButtonElement>('[aria-label="Select primary group: Secondary X"]');
+  const x = () => f.view.querySelector<HTMLElement>('[data-primary-group-id="primary-X"]');
   await settleApp(() => expect(x()).not.toBeNull());
-  await act(async () => x()!.click());
-  await settleApp(() => expect(x()?.getAttribute('aria-current')).toBe('true'));
+  if (navigation === 'Favorites') {
+    expect(x()!.hidden).toBe(true);
+    await act(async () => f.view.querySelector<HTMLButtonElement>('[aria-label="Windows"]')!.click());
+    const option = f.view.querySelector<HTMLButtonElement>('[data-window-view-id="primary-X"]')!;
+    expect(option.closest('[hidden]')).toBeNull();
+    await act(async () => option.click());
+    await act(async () => f.view.querySelector<HTMLButtonElement>('[aria-label="Close Windows"]')!.click());
+  } else {
+    expect(x()!.closest('[hidden]')).toBeNull();
+    await act(async () => { x()!.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true })); });
+  }
+  await settleApp(() => { expect(x()?.getAttribute('data-selected')).toBe('true'); expect(x()!.hidden).toBe(false); });
   const originalA = f.view.querySelector('[data-primary-group-id="primary-A"]');
   if (navigation === 'directory') await act(async () => directory.onSelect(target));
   else if (navigation === 'directory-open') await act(async () => directory.onOpen({ ...target, createdAt: 'now', updatedAt: 'now', state: 'idle' }));
@@ -2433,7 +2457,7 @@ it.each(['directory', 'directory-open', 'Favorites', 'Track'] as const)('opens a
     await act(async () => [...f.view.querySelectorAll<HTMLButtonElement>('.lab-tracking-floating .lab-session-row')].find(row => row.textContent?.includes(target.title))!.click());
   }
   await settleApp(() => {
-    expect(f.view.querySelector('[aria-label="Select primary group: Destination D"]')?.getAttribute('aria-current')).toBe('true');
+    expect(x()?.getAttribute('data-selected')).toBe('true');
     expect(f.view.querySelector('[data-primary-group-id="primary-X"]')?.textContent).toContain('Destination D');
   });
   expect(f.view.querySelector('[data-primary-group-id="primary-A"]')).toBe(originalA);
@@ -2455,7 +2479,7 @@ it('selects another primary group while a native attachment is pending without r
   const f = await failureFixture(false, 'A', false, `&window=${document.id}`, { chain: [], seed(scope) {
     localStorage.setItem(`agent-remote:recovery:${scope}:shared-window:${document.id}`, JSON.stringify(document));
   } });
-  const selectA = () => f.view.querySelector<HTMLButtonElement>('.lab-primary-group-option:first-child > button:first-child');
+  const selectA = () => f.view.querySelector<HTMLElement>('[data-primary-group-id="primary-A"]');
   await settleApp(() => { expect(selectA()).not.toBeNull(); expect(manager).toBeDefined(); });
   const release = f.holdAttach('D');
   try {
@@ -2463,11 +2487,12 @@ it('selects another primary group while a native attachment is pending without r
     await settleApp(() => expect(f.requests.some(request => request.url.endsWith('/attach') && request.body?.nativeSessionId === 'D')).toBe(true));
     expect(JSON.parse(localStorage.getItem(`agent-remote:recovery:${f.scope}:shared-window:${document.id}`)!).views
       .find((view: { id: string }) => view.id === 'primary-X')?.binding?.nativeSessionId).toBe('D');
-    await act(async () => selectA()!.click());
-    await settleApp(() => expect(selectA()?.getAttribute('aria-current')).toBe('true'));
+    expect(selectA()!.closest('[hidden]')).toBeNull();
+    await act(async () => { selectA()!.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true })); });
+    await settleApp(() => expect(selectA()?.getAttribute('data-selected')).toBe('true'));
   } finally { await act(async () => release()); }
   await settleApp(() => expect(f.frames.some(frame => frame.type === 'subscribe' && frame.agentId === 'agent-D')).toBe(true));
-  expect(selectA()?.getAttribute('aria-current')).toBe('true');
+  expect(selectA()?.getAttribute('data-selected')).toBe('true');
   await settleApp(() => {
     const saved = JSON.parse(localStorage.getItem(`agent-remote:recovery:${f.scope}:shared-window:${document.id}`)!);
     expect(saved.selectedPrimaryViewId).toBe('primary-A');
@@ -2655,4 +2680,162 @@ it('rejects a queued Track bind after its selected ordinary destination changes 
   expect(setup.windowDocument.views.find(view => view.id === 'ordinary-dock')?.binding?.nativeSessionId).toBe('Y');
   expect(setup.windowDocument.views.find(view => view.id === 'primary-A')?.binding?.nativeSessionId).toBe('A');
   expect(setup.windowDocument.selectedViewId).toBe('ordinary-dock');
+});
+
+it.each((['dock', 'attached', 'empty-dock'] as const).flatMap(destination => (['Team', 'TPM'] as const).map(feature => ({ destination, feature }))))
+('creates $feature from the selected $destination binding without falling back to primary', async ({ destination, feature }) => {
+  vi.stubGlobal('ResizeObserver', class { observe() {} disconnect() {} unobserve() {} });
+  localStorage.setItem('agent-remote:tpm-view', 'true');
+  const teamCreate = vi.spyOn(RemoteTeamClient.prototype, 'create').mockImplementation(async input => ({
+    id: 'created-selected-team', operationId: input.operationId, revision: 1, title: 'Selected source Team', status: 'active', source: input.source,
+    members: [
+      { id: 'leader', hostId: 'host', providerId: 'recorded', nativeSessionId: 'S', role: 'leader', name: 'Selected Leader', responsibility: '', creation: 'ready', activity: 'idle', summary: '', updatedAt: 1 },
+      { id: 'member', hostId: 'host', providerId: 'recorded', nativeSessionId: 'T', role: 'member', name: 'Selected Member', responsibility: '', creation: 'ready', activity: 'idle', summary: '', updatedAt: 1 },
+    ], messages: [], createdAt: 1, updatedAt: 1,
+  }));
+  const tpmCreate = vi.fn().mockRejectedValue(new Error('TPM creation observed'));
+  const hostService = {
+    hosts: async () => ({ hosts: [{ id: 'host', name: 'Fixture Host', online: true, teamManagement: true as const, providers: [] }] }),
+    pair: async () => { throw new Error('No pairing'); }, revoke: async () => {},
+    tpmList: async () => ({ supported: true, supportedProviders: ['recorded'], works: [] }),
+    tpmWork: async () => { throw new Error('No TPM detail expected'); }, tpmCreate,
+    tpmAction: async () => { throw new Error('No TPM action expected'); },
+  };
+  const binding = (id: string) => ({ hostId: 'host', providerId: 'recorded', nativeSessionId: id, title: `Source ${id}` });
+  const selected = createWindowView('feature-source', destination === 'empty-dock' ? undefined : binding('X'), destination === 'attached' ? 'attached' : 'dock');
+  if (destination === 'attached') selected.attachedTo = 'primary-A';
+  const document: WorkspaceWindow = { schemaVersion: 2, id: `feature-selected-${destination}-${feature}`, title: 'Selected feature source', revision: 0,
+    selectedPrimaryViewId: 'primary-A', selectedViewId: 'primary-A', views: [createWindowView('primary-A', binding('A'), 'primary'), selected] };
+  const setup = { chain: [] as SessionSuccessionReplay[], userScoped: true, windowDocument: document, hostService };
+  const f = await failureFixture(false, 'A', false, `&window=${document.id}`, setup);
+  await settleApp(() => expect(f.view.querySelector('[data-window-view-id="feature-source"]')).not.toBeNull());
+  await act(async () => f.view.querySelector<HTMLButtonElement>('[aria-label="Windows"]')!.click());
+  const destinationOption = f.view.querySelector<HTMLButtonElement>('[data-window-view-id="feature-source"]')!;
+  expect(destinationOption.closest('[hidden]')).toBeNull();
+  await act(async () => destinationOption.click());
+  await act(async () => f.view.querySelector<HTMLButtonElement>('[aria-label="Close Windows"]')!.click());
+  await settleApp(() => expect(setup.windowDocument.selectedViewId).toBe('feature-source'));
+  if (destination !== 'attached') {
+    await settleApp(() => expect(f.view.querySelector('[data-primary-group-id="primary-A"]')?.hasAttribute('data-selected')).toBe(false));
+  }
+  const trigger = feature === 'Team' ? '[aria-label="Teams"]' : '[aria-label="TPM works"]';
+  await act(async () => f.view.querySelector<HTMLButtonElement>(trigger)!.click());
+  const create = () => feature === 'Team'
+    ? [...f.view.querySelectorAll<HTMLButtonElement>('[aria-label="Teams"] button')].find(button => button.textContent === 'New team')
+    : f.view.querySelector<HTMLButtonElement>('[aria-label="Create TPM work"]');
+  if (destination === 'empty-dock') {
+    await settleApp(() => { expect(feature === 'Team' ? create()?.disabled === true : !create() || create()!.disabled).toBe(true); });
+    expect(teamCreate).not.toHaveBeenCalled(); expect(tpmCreate).not.toHaveBeenCalled();
+    expect(f.view.querySelector('.lab-tpm-panel [data-creation-source]')).toBeNull();
+    return;
+  }
+  await settleApp(() => { expect(create()).toBeTruthy(); expect(create()!.disabled).toBe(false); });
+  await act(async () => create()!.click());
+  if (feature === 'Team') {
+    await settleApp(() => expect(teamCreate).toHaveBeenCalledOnce());
+    expect(teamCreate.mock.calls[0]![0]).toMatchObject({ source: binding('X'), operationId: expect.any(String) });
+    expect(tpmCreate).not.toHaveBeenCalled();
+    await settleApp(() => {
+      const teamViews = setup.windowDocument.views.filter(view => view.feature?.kind === 'team' && view.feature.id === 'created-selected-team');
+      expect(teamViews.map(view => view.binding?.nativeSessionId).sort()).toEqual(['S', 'T']);
+      expect(teamViews.every(view => view.placement === 'dock' && view.bindingPolicy === 'managed')).toBe(true);
+    });
+    expect(setup.windowDocument.views.find(view => view.id === selected.id)?.binding?.nativeSessionId).toBe('X');
+  } else {
+    await settleApp(() => expect(tpmCreate).toHaveBeenCalledOnce());
+    expect(tpmCreate).toHaveBeenCalledWith('host', expect.objectContaining({ providerId: 'recorded', mainNativeSessionId: 'X', operationId: expect.any(String) }));
+    expect(teamCreate).not.toHaveBeenCalled();
+  }
+  expect(setup.windowDocument.views.find(view => view.id === 'primary-A')?.binding?.nativeSessionId).toBe('A');
+});
+
+
+it('selects a managed Team view directly for pointer and focus without first selecting primary', async () => {
+  vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} });
+  const binding = (id: string) => ({ hostId: 'host', providerId: 'recorded', nativeSessionId: id, title: id });
+  const team: Team = { id: 'focus-team', operationId: 'create', revision: 1, title: 'Team', status: 'active', source: binding('A'),
+    members: [{ id: 'leader', hostId: 'host', providerId: 'recorded', nativeSessionId: 'X', role: 'leader', name: 'Leader', responsibility: '', creation: 'ready', activity: 'idle', summary: '', updatedAt: 1 }],
+    messages: [], createdAt: 1, updatedAt: 1 };
+  const managed = { ...createWindowView('team-leader', binding('X'), 'dock'), bindingPolicy: 'managed' as const,
+    feature: createWindowFeature({ kind: 'team', id: team.id, role: 'leader', memberId: 'leader' }) };
+  const document: WorkspaceWindow = { schemaVersion: 2, id: 'team-direct-focus', title: 'Team focus', revision: 0,
+    selectedPrimaryViewId: 'primary-A', selectedViewId: 'primary-A', views: [createWindowView('primary-A', binding('A'), 'primary'), managed] };
+  const selections: string[] = [];
+  const setup = { chain: [] as SessionSuccessionReplay[], userScoped: true, windowDocument: document, teams: () => [team],
+    async beforeWindowMutation(mutation: WindowMutation) { if (mutation.operation.type === 'view.select') selections.push(mutation.operation.viewId); } };
+  const f = await failureFixture(false, 'A', false, `&window=${document.id}`, setup);
+  const input = () => f.view.querySelector<HTMLElement>('[data-view-id="team-leader"] [data-testid="prompt-input"]');
+  await settleApp(() => expect(input()).not.toBeNull());
+  for (const event of ['pointerdown', 'focusin']) {
+    await act(async () => f.view.querySelector<HTMLButtonElement>('[aria-label="Windows"]')!.click());
+    await act(async () => f.view.querySelector<HTMLButtonElement>('[data-window-view-id="primary-A"]')!.click());
+    await act(async () => f.view.querySelector<HTMLButtonElement>('[aria-label="Close Windows"]')!.click());
+    await settleApp(() => expect(setup.windowDocument.selectedViewId).toBe('primary-A'));
+    selections.length = 0;
+    await act(async () => input()!.dispatchEvent(event === 'pointerdown' ? new MouseEvent(event, { bubbles: true }) : new FocusEvent(event, { bubbles: true })));
+    await settleApp(() => { expect(selections).toContain('team-leader'); expect(setup.windowDocument.selectedViewId).toBe('team-leader'); });
+    expect(selections, event).not.toContain('primary-A');
+    expect(setup.windowDocument.selectedPrimaryViewId).toBe('primary-A');
+    selections.length = 0;
+    await act(async () => { input()!.dispatchEvent(event === 'pointerdown' ? new MouseEvent(event, { bubbles: true }) : new FocusEvent(event, { bubbles: true })); await new Promise(resolve => setTimeout(resolve, 30)); });
+    expect(selections, `repeated ${event}`).not.toContain('primary-A');
+    expect(setup.windowDocument.selectedViewId).toBe('team-leader');
+  }
+});
+
+it('keeps the selected shared attached child on repeated pointer and focus without selecting its dock root', async () => {
+  vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} });
+  const binding = (id: string) => ({ hostId: 'host', providerId: 'recorded', nativeSessionId: id, title: id });
+  const child = { ...createWindowView('attached-child', binding('Y'), 'attached'), attachedTo: 'dock-root' };
+  const document: WorkspaceWindow = { schemaVersion: 2, id: 'attached-direct-focus', title: 'Attached focus', revision: 0,
+    selectedPrimaryViewId: 'primary-A', selectedViewId: child.id,
+    views: [createWindowView('primary-A', binding('A'), 'primary'), createWindowView('dock-root', binding('X'), 'dock'), child] };
+  const selections: string[] = [];
+  const setup = { chain: [] as SessionSuccessionReplay[], userScoped: true, windowDocument: document,
+    async beforeWindowMutation(mutation: WindowMutation) { if (mutation.operation.type === 'view.select') selections.push(mutation.operation.viewId); } };
+  const f = await failureFixture(false, 'A', false, `&window=${document.id}`, setup);
+  const input = () => f.view.querySelector<HTMLElement>('[data-view-id="dock-root"] .lab-session-family-pane[aria-label="Y"] [data-testid="prompt-input"]');
+  await settleApp(() => { expect(input()).not.toBeNull(); expect(setup.windowDocument.selectedViewId).toBe(child.id); });
+  for (const event of ['pointerdown', 'focusin', 'pointerdown', 'focusin']) {
+    selections.length = 0;
+    await act(async () => { input()!.dispatchEvent(event === 'pointerdown' ? new MouseEvent(event, { bubbles: true }) : new FocusEvent(event, { bubbles: true })); await new Promise(resolve => setTimeout(resolve, 30)); });
+    expect(selections, event).not.toContain('dock-root');
+    expect(selections, event).not.toContain('primary-A');
+    expect(setup.windowDocument.selectedViewId).toBe(child.id);
+  }
+});
+
+it('opens an existing Team from a managed view by selecting its new ordinary source on mobile', async () => {
+  vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} });
+  vi.stubGlobal('matchMedia', vi.fn((query: string) => ({ matches: query.includes('max-width: 1180px'), media: query, addEventListener() {}, removeEventListener() {}, addListener() {}, removeListener() {} })));
+  const binding = (id: string) => ({ hostId: 'host', providerId: 'recorded', nativeSessionId: id, title: `Session ${id}` });
+  const originalTeam: Team = { id: 'original-team', operationId: 'original-create', revision: 1, title: 'Original Team', status: 'active', source: binding('A'),
+    members: [{ id: 'original-leader', hostId: 'host', providerId: 'recorded', nativeSessionId: 'X', role: 'leader', name: 'Original Leader', responsibility: '', creation: 'ready', activity: 'idle', summary: '', updatedAt: 1 }],
+    messages: [], createdAt: 1, updatedAt: 1 };
+  const unopenedTeam: Team = { ...originalTeam, id: 'unopened-team', operationId: 'unopened-create', title: 'Unopened Team', source: binding('S'),
+    members: [{ ...originalTeam.members[0]!, id: 'unopened-leader', nativeSessionId: 'T', name: 'Unopened Leader' }] };
+  const managed = { ...createWindowView('original-leader-view', binding('X'), 'dock'), bindingPolicy: 'managed' as const,
+    feature: createWindowFeature({ kind: 'team', id: originalTeam.id, role: 'leader', memberId: 'original-leader' }) };
+  const document: WorkspaceWindow = { schemaVersion: 2, id: 'team-managed-fallback', title: 'Team navigation', revision: 0,
+    selectedPrimaryViewId: 'primary-A', selectedViewId: managed.id, views: [createWindowView('primary-A', binding('A'), 'primary'), managed] };
+  const setup = { chain: [] as SessionSuccessionReplay[], userScoped: true, windowDocument: document, teams: () => [originalTeam, unopenedTeam] };
+  const f = await failureFixture(false, 'A', false, `&window=${document.id}`, setup);
+  await settleApp(() => {
+    expect(setup.windowDocument.selectedViewId).toBe(managed.id);
+    expect(f.view.querySelector(`[data-view-id="${managed.id}"]`)?.closest('[hidden]')).toBeNull();
+  });
+  await act(async () => f.view.querySelector<HTMLButtonElement>('[aria-label="Teams"]')!.click());
+  const openTeam = () => [...f.view.querySelectorAll<HTMLButtonElement>('.lab-team-floating .lab-session-row')]
+    .find(button => button.textContent?.includes('Unopened Team'));
+  await settleApp(() => expect(openTeam()).toBeDefined());
+  await act(async () => openTeam()!.click());
+  await settleApp(() => expect(setup.windowDocument.views.some(view => view.feature?.id === unopenedTeam.id)).toBe(true));
+  const source = setup.windowDocument.views.find(view => view.binding?.nativeSessionId === 'S');
+  expect(source).toBeDefined();
+  expect(source?.bindingPolicy).not.toBe('managed');
+  expect(source?.feature).toBeUndefined();
+  expect(setup.windowDocument.views.find(view => view.id === managed.id)).toEqual(managed);
+  expect(setup.windowDocument.views.find(view => view.id === 'primary-A')?.binding).toEqual(binding('A'));
+  expect(setup.windowDocument.selectedViewId).toBe(source!.id);
+  await settleApp(() => expect(f.view.querySelector(`[data-view-id="${source!.id}"]`)?.closest('[hidden]')).toBeNull());
 });

@@ -31,9 +31,11 @@ screens the panel stays inside the viewport and its content scrolls.
 
 ## Select a session view
 
-The group selector above the conversations adds, selects, or closes primary
-groups. **New primary group** starts with an empty view. **New session view**
-adds an independent empty dock; both can receive a session from the sidebar.
+Select a session view directly by clicking its conversation or controls.
+There is no separate primary-group selector. **New session view** adds an
+independent empty dock with the same selection and layout controls as a bound
+view. Select it and choose a session from the sidebar. A primary group can be
+closed from its own view when another primary group remains.
 
 Click a conversation to focus its view, then use Favorites, Discover sessions,
 Track, or New session. These actions bind that exact ordinary view, including an empty
@@ -41,14 +43,15 @@ one. A pending creation keeps its original destination when focus changes; a
 closed or rebound destination cannot silently receive the result elsewhere.
 Ask, Team, and TPM views have managed bindings and cannot be replaced this way.
 
-The selected primary group is marked separately from the focused view. Creation
-of Team or TPM work uses that primary group. Track restores its remembered family
+The selected view is the target for pane operations and its current session is
+the source for session operations, including creation of Team or TPM work.
+An empty view has no session source. Creation captures the source view and session;
+later selection changes do not change that relationship. Track restores its remembered family
 layout when the selected destination is a primary view; an independent or attached
 destination receives the clicked session without changing the primary group's
-Track memory. Ask and Side
-actions belong to their source view. Focusing an independent dock preserves the
-primary-group selection. On narrow screens, the visible conversation is the
-focused view; the same shared selection and layout are used on every page.
+Track memory. Ask and Side actions also belong to their source view. On narrow
+screens, the foreground conversation is the selected view, with no additional
+selection control. The same shared selection and layout are used on every page.
 
 ## Deployment and upgrades
 
@@ -128,7 +131,9 @@ and `content`; placement modes are `dock` and `float`. `view create` accepts
 `--session JSON` and `--mode primary|dock|float`. Create a primary to add a group,
 then use the existing select, move, collapse, bind, and close commands on its ID.
 Selecting a primary or attached child selects its group; selecting an independent
-dock or float preserves the current primary selection. Moving a primary moves
+dock or float preserves the primary group used for family layout and history.
+This grouping metadata does not override the selected view as the operation target.
+Moving a primary moves
 its attached chain together. Closing a primary closes dependent views but keeps
 independent docks; the last primary cannot be closed. Closing a view or deleting
 a Window does not stop or archive native work.

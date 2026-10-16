@@ -199,7 +199,7 @@ export function SessionDockRail({ children, minimizedHeader, mainTitle = 'Main s
   }, []);
   const baseWidth = Math.max(minimumBaseWidth, preferredBaseWidth ?? width - defaultWidth);
   return <div ref={rail} className="lab-session-dock-rail" data-docked={active.length > 0 || primaryGroups && primaryGroups.length > 1 && !compact || undefined} data-primary-groups={primaryGroups ? true : undefined} data-compact={compact || undefined}>
-    {primaryGroups ? primaryGroups.map(group => <PrimaryGroupPane key={group.id} group={group} compact={compact} onSelect={onSelectPrimaryGroup} onResize={onResizePrimaryGroup} onCollapse={onCollapsePrimaryGroup} />) : <div className="lab-session-dock-base" data-minimized={minimized || undefined} style={active.length ? { flexBasis: minimized ? 44 : baseWidth } : undefined}>
+    {primaryGroups ? primaryGroups.map((group, index) => <PrimaryGroupPane key={group.id} group={group} compact={compact} minimizedHeader={index === 0 ? minimizedHeader : undefined} onSelect={onSelectPrimaryGroup} onResize={onResizePrimaryGroup} onCollapse={onCollapsePrimaryGroup} />) : <div className="lab-session-dock-base" data-minimized={minimized || undefined} style={active.length ? { flexBasis: minimized ? 44 : baseWidth } : undefined}>
       <div ref={content} id={contentId} className="lab-session-dock-main-content" hidden={minimized}>{children}</div>
       {minimized ? minimizedHeader : null}
       {minimized ? <button ref={restore} type="button" className="lab-session-main-restore" aria-label={`Restore main session: ${mainTitle}`} title={`Restore main session: ${mainTitle}`} aria-expanded={false} aria-controls={contentId}
@@ -214,19 +214,24 @@ export function SessionDockRail({ children, minimizedHeader, mainTitle = 'Main s
   </div>;
 }
 
-function PrimaryGroupPane({ group, compact, onSelect, onResize, onCollapse }: {
-  group: PrimarySessionGroupPane; compact: boolean;
+function PrimaryGroupPane({ group, compact, minimizedHeader, onSelect, onResize, onCollapse }: {
+  group: PrimarySessionGroupPane; compact: boolean; minimizedHeader?: ReactNode;
   onSelect?: SessionDockRailProps['onSelectPrimaryGroup'];
   onResize?: SessionDockRailProps['onResizePrimaryGroup'];
   onCollapse?: SessionDockRailProps['onCollapsePrimaryGroup'];
 }) {
   const minimized = !compact && group.collapsed;
   const contentId = useId();
+  const select = (event: { target: EventTarget }) => {
+    if (event.target instanceof Element && event.target.closest('[data-pane-selection-ignore]')) return;
+    onSelect?.(group.id);
+  };
   return <section className="lab-primary-group" data-primary-group-id={group.id} data-selected={group.selected || undefined}
     data-minimized={minimized || undefined} hidden={compact && !group.selected} aria-label={`Primary group: ${group.title}`}
     style={compact ? undefined : { width: minimized ? 44 : group.width + (group.additionalWidth ?? 0) }}
-    onPointerDownCapture={() => onSelect?.(group.id)} onFocusCapture={() => onSelect?.(group.id)}>
+    onPointerDownCapture={select} onFocusCapture={select}>
     <div id={contentId} className="lab-primary-group-content" hidden={minimized}>{group.content}</div>
+    {minimized ? minimizedHeader : null}
     {minimized ? <button type="button" className="lab-session-main-restore" aria-label={`Restore primary group: ${group.title}`} aria-controls={contentId} aria-expanded={false}
       onClick={() => onCollapse?.(group.id, false)}><span className="lab-session-main-label">Group</span><span className="lab-session-main-title">{group.title}</span></button>
       : !compact && onCollapse ? <button type="button" className="lab-primary-group-minimize" aria-label={`Minimize primary group: ${group.title}`} aria-controls={contentId} aria-expanded={true}

@@ -45,17 +45,19 @@ test('two pages share Window UI edits and external commands across narrow presen
       expect(response.ok(), `${response.status()} ${await response.text()}`).toBe(true); return (await response.json()).window;
     };
     await expect.poll(async () => !!(await inspect()).views.find(view => view.placement === 'primary')?.binding).toBe(true);
-    const primary = page.locator('.lab-primary-group[data-selected="true"]');
+    const primaryId = (await inspect()).selectedPrimaryViewId;
+    const primary = page.locator(`[data-primary-group-id="${primaryId}"]`);
+    const otherPrimary = second.locator(`[data-primary-group-id="${primaryId}"]`);
     await primary.getByTestId('prompt-input').fill('Draft kept when renaming this Window');
     const creations: string[] = [];
     context.on('request', request => {
       if (request.method() === 'POST' && /\/(?:windows|create)$/.test(new URL(request.url()).pathname)) creations.push(request.url());
     });
-    await second.locator('.lab-primary-group[data-selected="true"]').getByTestId('prompt-input').fill('Second page retained draft');
+    await otherPrimary.getByTestId('prompt-input').fill('Second page retained draft');
     await second.reload();
-    await expect(second.locator('.lab-primary-group[data-selected="true"]').getByTestId('prompt-input')).toBeEnabled();
+    await expect(otherPrimary.getByTestId('prompt-input')).toBeEnabled();
     expect(new URL(second.url()).searchParams.get('window')).toBe(windowId);
-    await expect(second.locator('.lab-primary-group[data-selected="true"]').getByTestId('prompt-input')).toHaveText('Second page retained draft');
+    await expect(otherPrimary.getByTestId('prompt-input')).toHaveText('Second page retained draft');
     await openWindows(second);
     await expect(primary.getByTestId('prompt-input')).toHaveText('Draft kept when renaming this Window');
     expect(creations).toEqual([]);
@@ -101,8 +103,14 @@ test('two pages share Window UI edits and external commands across narrow presen
     await expect(pane.getByRole('separator')).toHaveAttribute('aria-valuenow', '620');
     await expect(otherPane.getByRole('separator')).toHaveAttribute('aria-valuenow', '620');
     await command(['view', 'collapse', windowId, (await inspect()).selectedPrimaryViewId, '--value', 'true']);
-    await expect(page.locator('.lab-primary-group[data-selected="true"]')).toHaveAttribute('data-minimized', 'true');
-    await expect(second.locator('.lab-primary-group[data-selected="true"]')).toHaveAttribute('data-minimized', 'true');
+    await expect(primary).toHaveAttribute('data-minimized', 'true');
+    await expect(otherPrimary).toHaveAttribute('data-minimized', 'true');
+    const minimizedOptions = page.getByRole('button', { name: 'View options', exact: true });
+    await expect(minimizedOptions).toBeVisible();
+    await minimizedOptions.click();
+    await expect(page.getByRole('region', { name: 'View options', exact: true })).toBeVisible();
+    await page.keyboard.press('Escape');
+    await page.screenshot({ path: `/tmp/window-primary-minimized-${test.info().project.name}.png` });
     await command(['view', 'collapse', windowId, (await inspect()).selectedPrimaryViewId, '--value', 'false']);
     await command(['view', 'select', windowId, viewId]);
     await second.setViewportSize({ width: 390, height: 844 });
@@ -121,7 +129,7 @@ test('two pages share Window UI edits and external commands across narrow presen
     await command(['view', 'select', windowId, child.id]);
     await second.setViewportSize({ width: 390, height: 844 });
     await expect(second.locator('.lab-side-conversation:visible').getByTestId('prompt-input')).toBeEnabled();
-    await expect(second.locator('.lab-primary-group[data-selected="true"] .lab-primary-conversation')).toBeHidden();
+    await expect(otherPrimary.locator('.lab-primary-conversation')).toBeHidden();
     expect((await inspect()).selectedViewId).toBe(child.id);
     await second.setViewportSize({ width: 1680, height: 1000 });
     await command(['view', 'bind', windowId, (await inspect()).selectedPrimaryViewId, '--session', JSON.stringify({ hostId: fixture.hostId, providerId: 'recorded', nativeSessionId: bound.nativeSessionId, title: 'Different main' })]);
@@ -129,7 +137,7 @@ test('two pages share Window UI edits and external commands across narrow presen
     await expect(page.locator('.lab-side-conversation:visible')).toHaveCount(0);
     await expect(second.locator('.lab-side-conversation:visible')).toHaveCount(0);
     await expect(primary.getByTestId('prompt-input')).toBeEnabled();
-    await expect(second.locator('.lab-primary-group[data-selected="true"]').getByTestId('prompt-input')).toBeEnabled();
+    await expect(otherPrimary.getByTestId('prompt-input')).toBeEnabled();
     await expect(pane).toBeVisible(); await expect(otherPane).toBeVisible();
     await otherPane.getByRole('button', { name: 'Close Shared dock session', exact: true }).click();
     await expect(page.locator('[data-view-id]')).toHaveCount(0);
@@ -398,7 +406,7 @@ test('active Windows cannot be deleted and deleting another Window never creates
   } finally { await second?.close(); await page.close(); await fixture.close(); }
 });
 
-test('multiple primary families preserve independent drafts and mobile pages select their owning group', async ({ page, context }) => {
+test('session panes preserve independent drafts and mobile Window navigation selects the foreground view', async ({ page, context }) => {
   const fixture = await sessionLinkFixture({ automaticSignIn: true });
   const errors: string[] = [];
   page.on('pageerror', error => errors.push(error.message));
@@ -436,13 +444,30 @@ test('multiple primary families preserve independent drafts and mobile pages sel
     const alphaRoot = group('alpha').locator('.lab-session-family-pane').first();
     const betaRoot = group('beta').locator('.lab-session-family-pane').first();
     const alphaChild = group('alpha').locator('.lab-session-family-pane').nth(1);
+    await expect(page.getByRole('navigation', { name: 'Primary session groups', exact: true })).toHaveCount(0);
+    await expect(page.getByRole('button', { name: 'New primary group', exact: true })).toHaveCount(0);
+
     await expect(group('alpha')).toBeVisible(); await expect(group('beta')).toBeVisible(); await expect(group('gamma')).toBeVisible();
     await expect(alphaRoot.getByTestId('prompt-input')).toBeEnabled();
     await expect(betaRoot.getByTestId('prompt-input')).toBeEnabled();
     await expect(alphaChild.getByTestId('prompt-input')).toBeEnabled();
     await alphaRoot.getByTestId('prompt-input').fill('Alpha independent draft');
     await betaRoot.getByTestId('prompt-input').fill('Beta independent draft');
+    await expect.poll(async () => { const value = await inspect(); return [value.selectedPrimaryViewId, value.selectedViewId]; }).toEqual(['beta', 'beta']);
+    // Global controls live in the first pane but must preserve the active conversation.
+    await group('alpha').getByRole('button', { name: 'View options', exact: true }).click();
+    const globalOptions = page.getByRole('region', { name: 'View options', exact: true });
+    await expect(globalOptions).toBeVisible();
+    await expect.poll(async () => (await inspect()).selectedViewId).toBe('beta');
+    const sidebarOption = globalOptions.getByRole('checkbox', { name: 'Sidebar', exact: true });
+    await sidebarOption.check();
+    await expect(page.locator('#lab-context')).toBeVisible();
+    await expect.poll(async () => (await inspect()).selectedViewId).toBe('beta');
+    await sidebarOption.uncheck();
+    await globalOptions.press('Escape');
+    await expect.poll(async () => (await inspect()).selectedViewId).toBe('beta');
     await alphaChild.getByTestId('prompt-input').fill('Child independent draft');
+    await expect.poll(async () => { const value = await inspect(); return [value.selectedPrimaryViewId, value.selectedViewId]; }).toEqual(['alpha', 'alpha-child']);
     await expect(alphaRoot.getByTestId('prompt-input')).toHaveText('Alpha independent draft');
     await expect(betaRoot.getByTestId('prompt-input')).toHaveText('Beta independent draft');
     await page.screenshot({ path: `/tmp/window-multi-${test.info().project.name}-desktop.png` });
@@ -457,30 +482,33 @@ test('multiple primary families preserve independent drafts and mobile pages sel
     await page.getByRole('button', { name: 'Restore primary group: Beta same native', exact: true }).click();
     await expect(betaRoot.getByTestId('prompt-input')).toHaveText('Beta independent draft');
     await page.setViewportSize({ width: 390, height: 844 });
-    await page.getByRole('button', { name: 'Select primary group: Beta same native', exact: true }).click();
+    const selectMobileView = async (viewId: string) => {
+      const windows = await openWindows(page);
+      await windows.locator(`[data-window-view-id="${viewId}"]`).click();
+      await windows.getByRole('button', { name: 'Close Windows', exact: true }).click();
+    };
+    await selectMobileView('beta');
     await expect(group('beta')).toBeVisible(); await expect(group('alpha')).toBeHidden();
     await expect.poll(async () => { const value = await inspect(); return [value.selectedPrimaryViewId, value.selectedViewId]; }).toEqual(['beta', 'beta']);
     await expect(betaRoot.getByTestId('prompt-input')).toHaveText('Beta independent draft');
-    await page.getByRole('button', { name: 'Select primary group: Alpha', exact: true }).click();
+    await selectMobileView('alpha');
     await expect(alphaRoot.getByTestId('prompt-input')).toBeVisible();
     await expect.poll(async () => { const value = await inspect(); return [value.selectedPrimaryViewId, value.selectedViewId]; }).toEqual(['alpha', 'alpha']);
     await expect(alphaRoot.getByTestId('prompt-input')).toHaveText('Alpha independent draft');
-    const beforeChild = await inspect();
-    const childSelection = await context.request.post(endpoint + '/operations', { headers: { origin: fixture.url }, data: {
-      operationId: crypto.randomUUID(), issuedAt: Date.now(), baseRevision: beforeChild.revision,
-      operation: { type: 'view.select', viewId: 'alpha-child' },
-    } });
-    expect(childSelection.ok(), await childSelection.text()).toBe(true);
-    expect((await childSelection.json()).result.status).toBe('committed');
+    await selectMobileView('alpha-child');
     await expect(alphaChild.getByTestId('prompt-input')).toBeVisible();
     await expect(alphaRoot).toBeHidden();
-    await expect(page.getByRole('button', { name: 'Select primary group: Alpha', exact: true })).toHaveAttribute('aria-current', 'true');
+    await expect(group('alpha')).toHaveAttribute('data-selected', 'true');
+    await expect(group('beta')).toBeHidden(); await expect(group('gamma')).toBeHidden();
+    await expect(page.getByRole('navigation', { name: 'Primary session groups', exact: true })).toHaveCount(0);
+    await expect(page.getByRole('button', { name: 'New primary group', exact: true })).toHaveCount(0);
     await expect.poll(async () => { const value = await inspect(); return [value.selectedPrimaryViewId, value.selectedViewId]; }).toEqual(['alpha', 'alpha-child']);
+    await expect(group('alpha')).toHaveCSS('outline-style', 'none');
     await page.screenshot({ path: `/tmp/window-multi-${test.info().project.name}-mobile-child.png` });
     await page.setViewportSize({ width: 1680, height: 1000 });
     await expect(alphaChild.getByTestId('prompt-input')).toHaveText('Child independent draft');
     await expect(betaRoot.getByTestId('prompt-input')).toHaveText('Beta independent draft');
-    await page.getByRole('button', { name: 'Close primary group: Gamma', exact: true }).click();
+    await group('gamma').getByRole('button', { name: 'Close primary group: Gamma', exact: true }).click();
     await expect(group('gamma')).toHaveCount(0);
     expect((await inspect()).views.filter(view => view.placement === 'primary')).toHaveLength(2);
     expect(errors).toEqual([]);

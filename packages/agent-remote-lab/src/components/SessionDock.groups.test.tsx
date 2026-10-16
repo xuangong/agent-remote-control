@@ -11,7 +11,7 @@ it('keeps every primary group mounted while selection, collapse and compact pres
   function Harness() {
     const [current, setCurrent] = useState('a'), [narrow, setNarrow] = useState(false), [minimized, setMinimized] = useState(false);
     select = setCurrent; compact = setNarrow; collapse = setMinimized;
-    return <SessionDockProvider enabled={!narrow}><SessionDockRail compact={narrow} primaryGroups={['a', 'b'].map(id => ({ id, title: id, width: 400, additionalWidth: id === 'a' ? 240 : 0, collapsed: id === 'a' && minimized, selected: id === current, content: <Chat id={id} /> }))}
+    return <SessionDockProvider enabled={!narrow}><SessionDockRail compact={narrow} minimizedHeader={<button type="button" aria-label="View options">View</button>} primaryGroups={['a', 'b'].map(id => ({ id, title: id, width: 400, additionalWidth: id === 'a' ? 240 : 0, collapsed: id === 'a' && minimized, selected: id === current, content: <Chat id={id} /> }))}
       onSelectPrimaryGroup={selected} onResizePrimaryGroup={resized} onCollapsePrimaryGroup={collapsed} /></SessionDockProvider>;
   }
   const view = await render(<Harness />);
@@ -29,6 +29,8 @@ it('keeps every primary group mounted while selection, collapse and compact pres
   await act(async () => collapse(true));
   expect(a().style.width).toBe('44px');
   expect(a().querySelector<HTMLElement>('.lab-primary-group-content')!.hidden).toBe(true);
+  expect(a().querySelector('[aria-label="View options"]')?.closest('[hidden]')).toBeNull();
+  expect(a().querySelector('[aria-label="View options"]')).not.toBeNull();
   await act(async () => view.querySelector<HTMLButtonElement>('[aria-label="Restore primary group: a"]')!.click());
   expect(collapsed).toHaveBeenCalledWith('a', false);
   await act(async () => { compact(true); select('b'); });
@@ -39,23 +41,6 @@ it('keeps every primary group mounted while selection, collapse and compact pres
   expect(a().querySelector<HTMLElement>('.lab-primary-group-content')!.hidden).toBe(false);
   expect(view.querySelector('[aria-label="a draft"]')).toBe(first);
   expect([...mounts.values()]).toEqual([1, 1]);
-});
-
-it('selects, creates and closes primary groups while protecting the final group', async () => {
-  const module = await import('./PrimarySessionGroups.js');
-  expect(typeof module.PrimarySessionGroups).toBe('function');
-  const selected = vi.fn(), created = vi.fn(), closed = vi.fn();
-  const Selector = module.PrimarySessionGroups;
-  const view = await render(<Selector groups={[{ id: 'one', title: 'One', selected: true }, { id: 'two', title: 'Two', selected: false }]} onSelect={selected} onCreate={created} onClose={closed} />);
-  expect(view.querySelector('[aria-label="Select primary group: Two"]')).not.toBeNull();
-  await act(async () => view.querySelector<HTMLButtonElement>('[aria-label="Select primary group: Two"]')!.click());
-  expect(selected).toHaveBeenCalledWith('two');
-  await act(async () => view.querySelector<HTMLButtonElement>('[aria-label="New primary group"]')!.click());
-  expect(created).toHaveBeenCalledOnce();
-  await act(async () => view.querySelector<HTMLButtonElement>('[aria-label="Close primary group: One"]')!.click());
-  expect(closed).toHaveBeenCalledWith('one');
-  const sole = await render(<Selector groups={[{ id: 'one', title: 'One', selected: true }]} onSelect={selected} onCreate={created} onClose={closed} />);
-  expect(sole.querySelector<HTMLButtonElement>('[aria-label="Close primary group: One"]')!.disabled).toBe(true);
 });
 
 it('retains attached widths during a primary group resize preview and commits only its own width', async () => {
@@ -75,4 +60,15 @@ it('retains attached widths during a primary group resize preview and commits on
   await act(async () => separator.dispatchEvent(new MouseEvent('pointerup', { bubbles: true, clientX: 120 })));
   expect(resized).toHaveBeenCalledWith('a', 420);
   expect(pane.style.width).toBe('640px');
+});
+
+it('does not change the selected view when using global controls inside a pane', async () => {
+  const selected = vi.fn();
+  const view = await render(<SessionDockProvider enabled><SessionDockRail
+    primaryGroups={[{ id: 'a', title: 'A', width: 400, collapsed: false, selected: false,
+      content: <div data-pane-selection-ignore><button type="button">View</button></div> }]}
+    onSelectPrimaryGroup={selected} /></SessionDockProvider>);
+  const button = view.querySelector<HTMLButtonElement>('button')!;
+  await act(async () => { button.dispatchEvent(new Event('pointerdown', { bubbles: true })); button.focus(); });
+  expect(selected).not.toHaveBeenCalled();
 });

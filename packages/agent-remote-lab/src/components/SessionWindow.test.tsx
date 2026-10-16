@@ -1,4 +1,5 @@
 import 'fake-indexeddb/auto';
+import { act } from 'react';
 import { afterEach, expect, it, vi } from 'vitest';
 import { AgentReplica, type RemoteAgentTransport } from '@orchardworks/agent-remote-web';
 import { createWindowView } from '@orchardworks/agent-remote-protocol';
@@ -29,6 +30,7 @@ it.each([{ shared: true }, { shared: false }, { shared: true, intent: 'history' 
   const dock = createWindowView('ordinary-dock', { ...session, ...(intent ? { sessionIntent: intent } : {}) });
   const slot = createCompositionSlot('dock-slot', session, 'dock-test');
   const bound = vi.fn();
+  const focus = vi.fn();
   const historical = vi.fn();
   const window = { schemaVersion: 2 as const, id: 'window', title: 'Window', revision: 0, selectedPrimaryViewId: primary.id, selectedViewId: dock.id, views: [primary, dock] };
   const view = await render(<WorkspaceReady.Provider value={true}>
@@ -37,7 +39,7 @@ it.each([{ shared: true }, { shared: false }, { shared: true, intent: 'history' 
         <SessionAskSurfaceProvider>
           <SessionAskSurface id={slot.id}><aside>Dock Ask content</aside></SessionAskSurface>
           <SessionWindow entry={{ id: dock.id, slotId: slot.id, target: session, managed: false }} baseUrl="http://fixture" visible compact={false} hostLabel="Host" offline={false}
-            transport={transport} draftStore={new DraftStore('dock-test')} navigation={() => ({ childrenFor: () => [], resolveSessionLink: () => undefined })} onFocus={() => {}} onClose={() => {}}
+            transport={transport} draftStore={new DraftStore('dock-test')} navigation={() => ({ childrenFor: () => [], resolveSessionLink: () => undefined })} onFocus={focus} onClose={() => {}}
             onSessionBound={bound} sessionPresentation={context => { historical(context.operationBinding.historical); return { composerNotice: <p>{context.viewId} presentation</p> }; }}
             renderSessionFooter={context => <SessionAskHome id={context.viewId!} />} />
         </SessionAskSurfaceProvider>
@@ -50,4 +52,10 @@ it.each([{ shared: true }, { shared: false }, { shared: true, intent: 'history' 
   expect(pane.textContent).toContain('Dock Ask content');
   expect(bound.mock.calls.every(call => call[1] === slot.id)).toBe(true);
   expect(historical).toHaveBeenLastCalledWith(intent === 'history');
+  focus.mockClear();
+  await act(async () => {
+    pane.dispatchEvent(new Event('pointerdown', { bubbles: true }));
+    pane.dispatchEvent(new FocusEvent('focusin', { bubbles: true }));
+  });
+  expect(focus).toHaveBeenCalledTimes(shared ? 0 : 2);
 });

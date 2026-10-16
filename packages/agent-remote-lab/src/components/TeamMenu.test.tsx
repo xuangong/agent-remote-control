@@ -214,16 +214,17 @@ it.each(['Confirm received', 'Confirm not executed'])('discovers compact uncerta
   expect(fixture.attached).toEqual([]);
 });
 
-it.each(['selected-another-group', 'rebound', 'closed', 'another-window'] as const)('keeps Team creation source fixed and handles a late result after %s', async change => {
+it.each((['primary', 'dock', 'attached', 'float'] as const).flatMap(placement =>
+  (['selected-another-view', 'rebound', 'closed', 'another-window'] as const).map(change => ({ placement, change }))))('keeps Team creation source in $placement fixed after $change', async ({ placement, change }) => {
   const binding = { ...team.source };
-  let window: WorkspaceWindow = { schemaVersion: 2, id: 'origin', revision: 0, title: 'Window', selectedPrimaryViewId: 'b', selectedViewId: 'b',
-    views: [createWindowView('a', binding, 'primary'), createWindowView('b', binding, 'primary')] };
+  let window: WorkspaceWindow = { schemaVersion: 2, id: 'origin', revision: 0, title: 'Window', selectedPrimaryViewId: placement === 'primary' ? 'b' : 'a', selectedViewId: 'b',
+    views: [createWindowView('a', binding, 'primary'), { ...createWindowView('b', binding, placement), ...(placement === 'attached' ? { attachedTo: 'a' } : {}) }] };
   let finish!: (value: Team) => void, refresh!: () => void;
   const requests: unknown[] = [], opened = vi.fn(async () => true), catalog = vi.fn();
   fixture.create = input => { requests.push(input); return new Promise(resolve => { finish = resolve; }); };
   function Harness() {
     const [, update] = useState(0); refresh = () => update(value => value + 1);
-    const selected = window.views.find(view => view.id === window.selectedPrimaryViewId)!;
+    const selected = window.views.find(view => view.id === window.selectedViewId)!;
     return <WindowLayoutContext.Provider value={{ window, operate() {} }}><TeamMenu baseUrl="https://team.test" enabled
       hosts={[{ id: 'mac', name: 'Mac', online: true, teamManagement: true }]} source={selected.binding}
       sourceViewId={`${window.id}/${selected.id}`} onOpen={opened} onOpenSession={async () => true} onTeamsChange={catalog} /></WindowLayoutContext.Provider>;
@@ -233,7 +234,7 @@ it.each(['selected-another-group', 'rebound', 'closed', 'another-window'] as con
   await act(async () => button(view, 'New team').click());
   await act(async () => {
     if (change === 'another-window') window = { ...window, id: 'destination' };
-    if (change === 'selected-another-group' || change === 'closed') window = { ...window, selectedPrimaryViewId: 'a', selectedViewId: 'a',
+    if (change === 'selected-another-view' || change === 'closed') window = { ...window, selectedPrimaryViewId: 'a', selectedViewId: 'a',
       views: change === 'closed' ? window.views.filter(value => value.id !== 'b') : window.views };
     if (change === 'rebound') window = { ...window, views: window.views.map(value => value.id === 'b' ? { ...value, binding: { ...binding, nativeSessionId: 'replacement' } } : value) };
     refresh();
@@ -241,7 +242,7 @@ it.each(['selected-another-group', 'rebound', 'closed', 'another-window'] as con
   await act(async () => { finish(structuredClone(team)); });
   await vi.waitFor(() => expect(catalog).toHaveBeenLastCalledWith('https://team.test', [team]));
   expect(requests).toEqual([{ operationId: expect.any(String), source: team.source }]);
-  if (change === 'selected-another-group') expect(opened).toHaveBeenCalledWith(team, 'origin/b');
+  if (change === 'selected-another-view') expect(opened).toHaveBeenCalledWith(team, 'origin/b');
   else expect(opened).not.toHaveBeenCalled();
 });
 

@@ -86,13 +86,13 @@ export function TeamMenu(props: Props) {
   async function create() {
     if (!source && !pendingCreate) return;
     const input = pendingCreate ?? { operationId: crypto.randomUUID(), source: structuredClone(source!), sourceViewId: props.sourceViewId,
-      ...(layout ? { origin: { windowId: layout.window.id, viewId: layout.window.selectedPrimaryViewId } } : {}) }; setPendingCreate(input);
+      ...(layout ? { origin: { windowId: layout.window.id, viewId: layout.window.selectedViewId } } : {}) }; setPendingCreate(input);
     const { sourceViewId, origin, ...request } = input;
     const created = await client.create(request); if (currentClient.current !== client) return;
     setTeams(current => [...current.filter(value => value.id !== created.id), created]); setRosterClient(client); setPendingCreate(undefined);
     if (origin) {
       const current = currentPresentation.current.layout?.window;
-      const binding = current?.id === origin.windowId ? current.views.find(view => view.id === origin.viewId && view.placement === 'primary')?.binding : undefined;
+      const binding = current?.id === origin.windowId ? current.views.find(view => view.id === origin.viewId)?.binding : undefined;
       if (!binding || binding.hostId !== input.source.hostId || binding.providerId !== input.source.providerId || binding.nativeSessionId !== input.source.nativeSessionId) return;
     }
     if (!await currentPresentation.current.onOpen(created, sourceViewId)) throw new Error('The Team layout could not be opened. Retry after the main session is ready.');

@@ -39,13 +39,17 @@ function WindowBody({ entry, baseUrl, visible, compact, hostLabel, offline, tran
   const title = entry.target?.title ?? 'Select session';
   const panel = useRef<HTMLElement>(null), anchor = useRef<HTMLSpanElement>(null);
   useAskPosition(panel, anchor, JSON.stringify([baseUrl, entry.id]), { docked });
+  const focusWindow = (event: { target: EventTarget }) => {
+    if (shared && event.target instanceof Element && event.target.closest('.lab-session-family-pane')) return;
+    onFocus();
+  };
   const windowControls = <>{actions}{controls}{onChangeSession && entry.target ? <button type="button" aria-label="Change session" title="Choose a session from the sidebar" onClick={onChangeSession}>↔</button> : null}<button type="button" aria-label={`Close ${title}`} title="Close session view" onClick={onClose}>×</button></>;
   return <>
     <span ref={anchor} />
     <div className="lab-ask-viewport" hidden={!visible}>
       <section ref={panel} className="lab-ask-window lab-bindable-session-window" aria-label={`Session: ${title}`}
         data-view-id={entry.id} data-active={selected || undefined} tabIndex={-1}
-        onPointerDownCapture={onFocus} onFocusCapture={onFocus}>
+        onPointerDownCapture={focusWindow} onFocusCapture={focusWindow}>
         {entry.target ? <SessionFamily storageScope={baseUrl} baseUrl={baseUrl} target={entry.target} hostLabel={hostLabel} offline={offline}
           viewId={shared ? entry.id : entry.slotId} sessionIntent={shared?.window.views.find(view => view.id === entry.id)?.binding?.sessionIntent}
           onSessionBound={onSessionBound} sessionPresentation={sessionPresentation} renderSessionFooter={renderSessionFooter} nativePrefixOnly={entry.managed}

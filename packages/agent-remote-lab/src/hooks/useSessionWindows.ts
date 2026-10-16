@@ -70,8 +70,9 @@ export function useSessionWindows(scope: string, access: CompositionAccess) {
   const activeId = entries.find(view => view.id === selectedId && !view.managed)?.id;
   function focus(id?: string) {
     if (latest.current.shared) {
-      const authority = latest.current.shared, viewId = id ?? authority.window.selectedPrimaryViewId;
-      if (authority.window.selectedViewId === viewId && !authority.window.views.find(view => view.id === viewId)?.collapsed) return;
+      const authority = latest.current.shared, window = authority.readWindow?.() ?? authority.window;
+      const viewId = id ?? window.selectedPrimaryViewId;
+      if (window.selectedViewId === viewId && !window.views.find(view => view.id === viewId)?.collapsed) return;
       authority.operate({ type: 'view.select', viewId }); return;
     }
     const { document, save } = latest.current;
@@ -113,10 +114,11 @@ export function useSessionWindows(scope: string, access: CompositionAccess) {
   function open(targets: SessionWindowTarget[], groupRoot?: SessionWindowTarget, groupId?: string) {
     if (latest.current.shared) {
       const authority = latest.current.shared;
+      const window = authority.readWindow?.() ?? authority.window;
       const operations: WindowOperation[] = [];
       let rootId: string | undefined;
       for (const target of uniqueTargets(groupRoot ? [groupRoot, ...targets] : targets)) {
-        const existing = authority.window.views.find(view => {
+        const existing = window.views.find(view => {
           if (!view.binding) return false;
           const feature = parseWindowFeature(view.feature);
           return groupRoot && target.teamMemberId

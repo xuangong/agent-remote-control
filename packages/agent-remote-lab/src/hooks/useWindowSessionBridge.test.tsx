@@ -2,7 +2,7 @@ import { act, useReducer } from 'react';
 import { expect, it, vi } from 'vitest';
 import { applyWindowOperation, createWindowView, type WorkspaceWindow } from '@orchardworks/agent-remote-protocol';
 import { windowSessionBinding } from '../window-workspace.js';
-import { createCompositionDocument } from '../session-composition.js';
+import { compositionRoleKey, createCompositionDocument } from '../session-composition.js';
 import { bindWindowCompositionSlot, ensureWindowCompositionSlot, projectWindowComposition } from '../window-composition.js';
 import { render } from '../test/setup.js';
 import { useWindowSessionBridge } from './useWindowSessionBridge.js';
@@ -13,7 +13,8 @@ const emptyWindow = (id = 'window'): WorkspaceWindow => ({ schemaVersion: 2, id,
 async function harness(configure?: (options: Options) => void) {
   const document = createCompositionDocument('bridge');
   const native = vi.fn(async (..._args: Parameters<Options['succession']['open']>) => true), attached = vi.fn(async () => true), clear = vi.fn(), project = vi.fn((window?: WorkspaceWindow) => { if (window) projectWindowComposition(document, window); });
-  const options: Options = { enabled: false, window: emptyWindow(), onError: vi.fn(), operate: vi.fn(async operation => { options.window = applyWindowOperation(options.window!, operation); update(); }),
+  const options: Options = { enabled: false, window: emptyWindow(), onError: vi.fn(), readWindow: () => options.window,
+    operate: vi.fn(operation => { options.window = applyWindowOperation(options.window!, operation); update(); return Promise.resolve(); }),
     succession: { document, desired: undefined, selected: undefined, discovering: false, navigationIntent: { sessionIntent: undefined, keepOriginal: undefined }, open: native, openAttached: attached,
       ensureWindowView: (windowId, viewId, binding) => ensureWindowCompositionSlot(document, windowId, viewId, binding),
       bindWindowView: (windowId, viewId, binding, slotId) => bindWindowCompositionSlot(document, windowId, viewId, binding, slotId), projectWindow: project, leave: vi.fn(), clearPresentation: clear },
@@ -24,26 +25,44 @@ async function harness(configure?: (options: Options) => void) {
   await render(<Harness />);
   return { options, native, attached, clear, project, read: () => bridge, update: async () => { await act(async () => update()); } };
 }
-it('commits the public primary binding before opening an attached native Session View', async () => {
+it('opens an attached native Session View from its local binding while saving remains pending', async () => {
   const test = await harness();
   let finish!: () => void;
-  const committed = test.options.operate;
-  test.options.operate = vi.fn(operation => new Promise<void>(resolve => { finish = () => { void committed(operation).then(resolve); }; }));
+  const saved = new Promise<void>(resolve => { finish = resolve; });
+  const edit = test.options.operate;
+  test.options.operate = vi.fn(operation => { void edit(operation); return saved; });
   let result!: Promise<boolean>;
   await act(async () => { result = test.read().openAttached(session); });
-  expect(test.native).not.toHaveBeenCalled();
-  await act(async () => { finish(); await result; });
   expect(test.options.window!.views[0]?.binding).toMatchObject({ nativeSessionId: 'native' });
   expect(test.native).toHaveBeenCalledWith(session, undefined, undefined, expect.stringContaining('window:window:main:'), undefined, undefined, session, false);
+  expect(await result).toBe(true);
   expect(test.attached).not.toHaveBeenCalled();
+  await act(async () => finish());
+});
+
+it('reports background save rejection without treating the native Session as rejected or ready', async () => {
+  const test = await harness();
+  let failSave!: (error: Error) => void, finishNative!: (opened: boolean) => void;
+  const saved = new Promise<void>((_resolve, reject) => { failSave = reject; });
+  const edit = test.options.operate;
+  test.options.operate = operation => { void edit(operation); return saved; };
+  test.native.mockImplementationOnce(() => new Promise<boolean>(resolve => { finishNative = resolve; }));
+  let result!: Promise<boolean>, settled = false;
+  await act(async () => { result = test.read().openAttached(session); void result.then(() => { settled = true; }); });
+  expect(test.native).toHaveBeenCalledOnce();
+  const error = new Error('Saving failed');
+  await act(async () => failSave(error));
+  expect(test.options.onError).toHaveBeenCalledWith(error);
+  expect(settled).toBe(false);
+  await act(async () => { finishNative(false); expect(await result).toBe(false); });
 });
 
 it.each([null, windowSessionBinding(session)])('refuses a guarded primary binding after its captured target changes: %j', async expectedBinding => {
   const test = await harness(options => { if (expectedBinding) options.window!.views[0]!.binding = expectedBinding; });
   const operate = test.options.operate;
-  test.options.operate = async operation => {
+  test.options.operate = operation => {
     test.options.window = applyWindowOperation(test.options.window!, { type: 'view.bind', viewId: 'main', binding: { ...windowSessionBinding(session), nativeSessionId: 'replacement' } });
-    await operate(operation);
+    return operate(operation);
   };
   await act(async () => {
     await expect(test.read().openPrimary(session, undefined, false, undefined, undefined, 'main', undefined, expectedBinding)).rejects.toThrow('The target session view changed');
@@ -69,12 +88,13 @@ it('projects another primary immediately while native discovery is pending', asy
 it('retains an opening target after another primary is selected without stealing focus', async () => {
   const test = await harness(options => { options.window!.views.push(createWindowView('other', { ...windowSessionBinding(session), nativeSessionId: 'other-native' }, 'primary')); });
   let finish!: () => void;
-  test.options.operate = vi.fn(operation => new Promise<void>(resolve => {
+  test.options.operate = vi.fn(operation => {
     const committed = applyWindowOperation(test.options.window!, operation);
-    finish = () => { test.options.window = { ...committed, revision: committed.revision + 1, selectedPrimaryViewId: 'other', selectedViewId: 'other' }; resolve(); };
-  }));
+    test.options.window = { ...committed, revision: committed.revision + 1, selectedPrimaryViewId: 'other', selectedViewId: 'other' };
+    return new Promise<void>(resolve => { finish = resolve; });
+  });
   const result = test.read().openAttached(session);
-  await act(async () => { finish(); expect(await result).toBe(true); });
+  await act(async () => { expect(await result).toBe(true); finish(); });
   expect(test.options.window!.views.find(view => view.id === 'main')?.binding?.nativeSessionId).toBe('native');
   expect(test.options.window!.selectedPrimaryViewId).toBe('other');
   expect(test.native).not.toHaveBeenCalled();
@@ -123,8 +143,8 @@ it('does not hold another primary in the previous group concrete history', async
   expect(test.read().concreteHistory).toBe(false);
   expect(test.native.mock.calls.at(-1)?.[3]).toContain('window:window:other:');
 }, 10000);
-it('does not open native content when the shared commit is rejected', async () => {
-  const test = await harness(options => { options.operate = vi.fn(async () => { throw new Error('Rejected'); }); });
+it('does not open native content when local Window validation rejects the binding', async () => {
+  const test = await harness(options => { options.operate = vi.fn(() => { throw new Error('Rejected'); }); });
   await expect(test.read().openAttached(session)).rejects.toThrow('Rejected');
   expect(test.native).not.toHaveBeenCalled(); expect(test.project).not.toHaveBeenCalled();
 });
@@ -237,3 +257,26 @@ it('does not project cached Window state or publish runtime layout changes while
   expect(test.options.operate).not.toHaveBeenCalled();
   expect(test.options.window).toEqual(original);
 });
+
+it('reports synchronous Window validation failures while projecting an applied succession', async () => {
+  const test = await harness(options => { options.window!.views[0]!.binding = windowSessionBinding(session); });
+  const document = test.options.succession.document;
+  const slot = ensureWindowCompositionSlot(document, 'window', 'main', windowSessionBinding(session));
+  const native = { controllerId: 'controller', providerId: session.providerId, nativeSessionId: session.nativeSessionId };
+  const target = { ...native, nativeSessionId: 'successor' };
+  const progress = { revision: 1, status: 'applied' as const, retention: 'page' as const };
+  const checkpoint = { scope: document.scope, hostId: session.hostId, controllerId: native.controllerId, roleId: 'role', appliedRevision: 1,
+    desired: { operationId: 'handoff', expectedRevision: 0, committedRevision: 1, from: native, to: target,
+      projectionDigest: { version: 1 as const, algorithm: 'sha256' as const, hex: 'a'.repeat(64) } },
+    documents: { composition: progress, track: progress, ask: progress, draftViews: progress } };
+  document.roles.push(checkpoint);
+  slot.intent = { kind: 'role', roleKey: compositionRoleKey(checkpoint), revision: 1, target: { hostId: session.hostId, native: target } };
+  document.primary = slot.id; document.editRevision++;
+  const error = new Error('The local Window is unavailable.');
+  test.options.operate = vi.fn(() => { throw error; });
+  test.options.enabled = true;
+  await test.update();
+  expect(test.options.operate).toHaveBeenCalledOnce();
+  expect(test.options.onError).toHaveBeenCalledWith(error);
+  expect(test.options.window!.views[0]!.binding?.nativeSessionId).toBe(session.nativeSessionId);
+}, 10000);

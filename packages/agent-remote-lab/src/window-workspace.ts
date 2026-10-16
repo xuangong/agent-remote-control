@@ -1,7 +1,6 @@
 import { bindWindowCompositionSlot, windowAskSourceAnchor } from './window-composition.js';
 import { createWindowFeature, parseWindowFeature } from './window-feature-views.js';
 import { applyWindowOperation, createWindowView, isWorkspaceWindow, type WindowOperation, type WindowSessionBinding, type WorkspaceWindow } from '@orchardworks/agent-remote-protocol';
-import type { WindowWorkspaceClient, WindowSnapshot } from '@orchardworks/agent-remote-web';
 import { conversationLocalStorage, conversationSessionStorage } from './conversation-storage.js';
 import { sessionKey } from './session-tree.js';
 import { compositionSelection, type CompositionDocument } from './session-composition.js';
@@ -162,61 +161,4 @@ export function importCompositionWindow(document: CompositionDocument): Workspac
 export function resolveWindowViewId(window: WorkspaceWindow, localId: string): string | undefined {
   return window.views.find(view => { const feature = parseWindowFeature(view.feature); return view.id === localId || feature && `${feature.kind}:${feature.id}` === localId; })?.id;
 }
-/** Serialized commands use the latest committed revision. A lost reply is settled by receipt lookup. */
-export class WindowWorkspaceStore {
-  private snapshot: WorkspaceWindow;
-  private listeners = new Set<() => void>();
-  private queue = Promise.resolve();
-  private uncertain = false;
-  constructor(initial: WorkspaceWindow, private readonly client?: WindowWorkspaceClient, private readonly cache?: (window: WorkspaceWindow) => void, private readonly localCommit?: (source: WorkspaceWindow, operation: WindowOperation) => Promise<WorkspaceWindow>) { this.snapshot = initial; }
-  getSnapshot = () => this.snapshot;
-  subscribe = (listener: () => void) => { this.listeners.add(listener); return () => { this.listeners.delete(listener); }; };
-  accept(window: WorkspaceWindow) {
-    if (!isWorkspaceWindow(window) || window.id !== this.snapshot.id || window.revision < this.snapshot.revision) return;
-    this.snapshot = window; this.cache?.(window); for (const listener of this.listeners) listener();
-  }
-  operate(operation: WindowOperation): Promise<void> {
-    const observedRevision = this.snapshot.revision;
-    const replacesLayout = operation.type === 'layout.apply' || operation.type === 'batch' && operation.operations.some(edit => edit.type === 'layout.apply');
-    const run = async () => {
-      if (this.uncertain) throw new Error('The prior Window operation is unresolved. Reopen this Window to inspect its current state.');
-      if (replacesLayout && this.snapshot.revision !== observedRevision) throw new Error('The Window changed before applying this layout. Refresh and retry.');
-      if (!this.client) { this.accept(this.localCommit ? await this.localCommit(this.snapshot, operation) : applyWindowOperation(this.snapshot, operation)); return; }
-      const mutation = { operationId: crypto.randomUUID(), issuedAt: Date.now(), baseRevision: this.snapshot.revision, operation };
-      let commit;
-      try { commit = await this.client.mutate(this.snapshot.id, mutation); }
-      catch (error) {
-        let result;
-        try { result = await this.client.operation(this.snapshot.id, mutation.operationId); }
-        catch {
-          // A known HTTP rejection can be refreshed safely; an unknown transport outcome blocks further edits.
-          if (error instanceof Error && 'status' in error && typeof error.status === 'number' && error.status >= 400 && error.status < 500) {
-            const current = await this.client.inspect(this.snapshot.id); this.accept(current.window); throw error;
-          }
-          this.uncertain = true; throw error;
-        }
-        const current = await this.client.inspect(this.snapshot.id); this.accept(current.window);
-        if (result.status !== 'committed') throw new Error(result.message ?? 'Window operation rejected.');
-        return;
-      }
-      this.accept(commit.window);
-      if (commit.result.status !== 'committed') throw new Error(commit.result.message ?? 'Window operation rejected.');
-    };
-    const result = this.queue.then(run); this.queue = result.catch(() => {}); return result;
-  }
-  async synchronize(signal: AbortSignal): Promise<void> {
-    if (!this.client) return;
-    let initialized = false, failures = 0;
-    while (!signal.aborted) {
-      try {
-        const next: WindowSnapshot | undefined = initialized ? await this.client.changes(this.snapshot.id, this.snapshot.revision, signal) : await this.client.inspect(this.snapshot.id, signal);
-        if (next) this.accept(next.window); initialized = true; failures = 0;
-      } catch (error) {
-        if (signal.aborted) return;
-        if (error instanceof Error && 'status' in error && [401, 403, 404].includes(Number(error.status))) throw error;
-        initialized = false;
-        await new Promise<void>(resolve => { const done = () => { clearTimeout(timer); signal.removeEventListener('abort', done); resolve(); }; const timer = setTimeout(done, Math.min(10000, 250 * 2 ** Math.min(failures++, 6))); signal.addEventListener('abort', done, { once: true }); });
-      }
-    }
-  }
-}
+export { WindowWorkspaceStore } from './window-workspace-store.js';

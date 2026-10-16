@@ -109,6 +109,46 @@ it('keeps a focused view while selecting an identical native ID on another Host 
   expect(document.slots).toHaveLength(2);
 });
 
+it('uses the latest local selection before React renders a newly created view', async () => {
+  const document = createCompositionDocument('local-selection');
+  let window: WorkspaceWindow = { schemaVersion: 2, id: 'local-selection', title: 'Window', revision: 0, selectedPrimaryViewId: 'main', selectedViewId: 'main', views: [createWindowView('main', undefined, 'primary')] };
+  let current!: ReturnType<typeof useSessionWindows>;
+  function Harness() {
+    const [, save] = useReducer(n => n + 1, 0);
+    current = useSessionWindows(document.scope, { document, save,
+      ensureView: selection => ensureWindowCompositionSlot(document, window.id, 'fallback', selection),
+      shared: { window, readWindow: () => window, operate(operation) { window = applyWindowOperation(window, operation); save(); } },
+    });
+    return <output>{current.activeId}</output>;
+  }
+  const element = await render(<Harness />);
+  let id = '';
+  await act(async () => { id = current.create(); current.focus(id); current.focus(id); });
+  expect(window.views).toHaveLength(2);
+  expect(window.selectedViewId).toBe(id);
+  expect(window.revision).toBe(1);
+  expect(element.querySelector('output')?.textContent).toBe(id);
+});
+
+it('opens the same local session once before the first render commits', async () => {
+  const document = createCompositionDocument('local-open');
+  let window: WorkspaceWindow = { schemaVersion: 2, id: 'local-open', title: 'Window', revision: 0, selectedPrimaryViewId: 'main', selectedViewId: 'main', views: [createWindowView('main', undefined, 'primary')] };
+  let current!: ReturnType<typeof useSessionWindows>;
+  function Harness() {
+    const [, save] = useReducer(n => n + 1, 0);
+    current = useSessionWindows(document.scope, { document, save,
+      ensureView: selection => ensureWindowCompositionSlot(document, window.id, 'fallback', selection),
+      shared: { window, readWindow: () => window, operate(operation) { window = applyWindowOperation(window, operation); save(); } },
+    });
+    return <output>{current.entries.length}</output>;
+  }
+  const element = await render(<Harness />);
+  await act(async () => { current.open([target('same')]); current.open([target('same')]); });
+  expect(window.views.filter(view => view.binding?.nativeSessionId === 'same')).toHaveLength(1);
+  expect(window.revision).toBe(1);
+  expect(element.querySelector('output')?.textContent).toBe('1');
+});
+
 it('retains shared Team member identity and validates its current roster locator after gather', async () => {
   const document = createCompositionDocument('shared-team');
   let window: WorkspaceWindow = { schemaVersion: 2, id: 'shared-team', title: 'Team', revision: 0, selectedPrimaryViewId: 'main', selectedViewId: 'main', views: [createWindowView('main', undefined, 'primary')] };

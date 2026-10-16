@@ -5,6 +5,7 @@ import {
   PROTOCOL_VERSION,
   type AgentProviderDescriptor,
   type AgentSessionResponse,
+  type WindowOperation,
 } from '@orchardworks/agent-remote-protocol';
 import type { RemoteTransportListener } from '@orchardworks/agent-remote-web';
 
@@ -797,6 +798,35 @@ function deferred<T>(): { promise: Promise<T>; resolve(value: T): void } {
   return { promise, resolve };
 }
 
+it('creates and selects an empty pane with one layout command and opens its session chooser', async () => {
+  const operations: WindowOperation[] = [];
+  let workspace!: ReturnType<typeof windowWorkspaceHooks.useWindowWorkspace>;
+  const useWorkspace = windowWorkspaceHooks.useWindowWorkspace;
+  vi.spyOn(windowWorkspaceHooks, 'useWindowWorkspace').mockImplementation((...args) => {
+    workspace = useWorkspace(...args);
+    const authority = workspace.authority;
+    return { ...workspace, authority: authority && { ...authority, operate(operation) { operations.push(operation); authority.operate(operation); } } };
+  });
+  const baseUrl = 'http://localhost/create-pane/';
+  const directory = new SessionDirectoryClient(baseUrl);
+  vi.spyOn(directory, 'list').mockResolvedValue({ items: [], hasMore: false, revision: '1' });
+  vi.spyOn(directory, 'workspaces').mockResolvedValue({ workspaces: [] });
+  try {
+    const container = await render(<App baseUrl={baseUrl} directory={directory} transport={labTransport()}
+      hostService={{ hosts: async () => ({ hosts: [] }), pair: async () => { throw new Error('Pairing is not used'); } }} />);
+    operations.length = 0;
+    await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="New session view"]')!.click());
+    const pane = workspace.readWindow()!.views.find(view => view.id === workspace.readWindow()!.selectedViewId)!;
+    expect(pane.placement).toBe('dock');
+    expect(pane.binding).toBeUndefined();
+    expect(container.querySelector('.lab-empty-session-view')).not.toBeNull();
+    expect(container.querySelector('[aria-label="Discover sessions"]')?.closest('[hidden]')).toBeNull();
+    expect(operations).toEqual([{ type: 'batch', operations: [
+      { type: 'view.create', view: pane }, { type: 'view.select', viewId: pane.id },
+    ] }]);
+  } finally { vi.restoreAllMocks(); localStorage.clear(); sessionStorage.clear(); }
+});
+
 it('keeps a confirmed title when an older session attachment finishes afterward', async () => {
   let workspace!: ReturnType<typeof windowWorkspaceHooks.useWindowWorkspace>;
   const useWorkspace = windowWorkspaceHooks.useWindowWorkspace;
@@ -827,6 +857,7 @@ it('keeps a confirmed title when an older session attachment finishes afterward'
     expect(row?.textContent).toContain(target.title);
     await act(async () => row!.click());
     expect(attach).toHaveBeenCalledOnce();
+    expect(container.querySelector('.lab-shell')?.classList.contains('lab-context-hidden')).toBe(true);
     await act(async () => receiveTitle({ hostId: 'local', providerId: target.providerId,
       nativeSessionId: target.nativeSessionId, title: 'Confirmed target title', revision: 1 }));
     await act(async () => { attachment.resolve({ agentId: 'target-agent', nativeSessionId: target.nativeSessionId }); await attachment.promise; });

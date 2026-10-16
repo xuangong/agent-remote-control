@@ -4,6 +4,7 @@ import { useWindowSessionBridge } from './hooks/useWindowSessionBridge.js';
 import { createWindowView, primaryWindowViews, windowPrimaryViewId, type WindowEdit } from '@orchardworks/agent-remote-protocol';
 import { windowSessionBinding } from './window-workspace.js';
 import { useWindowWorkspace } from './hooks/useWindowWorkspace.js';
+import { useWindowSessionRetention } from './hooks/useWindowSessionRetention.js';
 import { WindowLayoutContext, WindowPresentationContext } from './window-workspace-context.js';
 import { WindowWorkspaces } from './components/WindowWorkspaces.js';
 import { WindowMenu } from './components/WindowMenu.js';
@@ -379,8 +380,14 @@ function AppContent({
   useEffect(() => { if (nativeBootstrap && succession.binding) setBootstrapComplete(true); }, [nativeBootstrap, succession.binding]);
   // A supplied snapshot is a standalone rendering input; it does not require a Window controller.
   const workspaceController = useWindowWorkspace(baseUrl, userScoped, accessReady, succession.document, !initialState && bootstrapComplete);
-  const windowWorkspace = initialState ? { ...workspaceController, window: undefined, authority: undefined, sessionBridge: undefined, unavailable: false } : workspaceController;
-  const sharedWindow = windowWorkspace.window;
+  const sharedWindow = initialState ? undefined : workspaceController.window;
+  const windowRetention = useWindowSessionRetention(connections, sharedWindow);
+  useEffect(() => {
+    for (const id of workspaceController.deletedWindowIds) windowRetention.forgetWindow(id);
+  }, [workspaceController.deletedWindowIds, windowRetention]);
+  const windowWorkspace = { ...workspaceController,
+    ...(initialState ? { window: undefined, authority: undefined, sessionBridge: undefined, unavailable: false } : {}),
+  };
   const primaryGroups = sharedWindow ? primaryWindowViews(sharedWindow) : [];
   const [mountedViewSessions, setMountedViewSessions] = useState<Record<string, OpenedSession & { viewId: string }>>({});
   function receiveViewSession(bound: OpenedSession, slotId?: string, windowViewId?: string) {
@@ -393,7 +400,7 @@ function AppContent({
     succession.rememberSide(session);
     setMountedViewSessions(values => JSON.stringify(values[view.id]) === JSON.stringify(session) ? values : { ...values, [view.id]: session });
   }
-  const windowSession = useWindowSessionBridge({ window: sharedWindow, unavailable: windowWorkspace.unavailable, readWindow: windowWorkspace.readWindow, operate: windowWorkspace.operate, succession, enabled: accessReady && activated && !windowWorkspace.unavailable && (!sharedWindow || windowWorkspace.hasActiveWindow),
+  const windowSession = useWindowSessionBridge({ window: sharedWindow, unavailable: windowWorkspace.unavailable, readWindow: windowWorkspace.readWindow, operate: windowWorkspace.operate, succession, enabled: accessReady && activated && !windowWorkspace.unavailable,
     onError: error => setSessionNotice(sessionConnectionFailure(error, false)) });
   const sharedSlots = windowSession.slots, sharedFamily = windowSession.family;
   const sharedViewForSlot = windowSession.viewForSlot;
@@ -735,7 +742,7 @@ function AppContent({
     const entry = succession.document.tracks.find(entry => entry.slotId === slotId), view = trackedViews.getForSlot(slotId);
     const sharedView = sharedViewForSlot(slotId);
     if (sharedWindow && sharedView) {
-      await windowWorkspace.operate({ type: 'view.select', viewId: sharedView.id });
+      editWindow({ type: 'view.select', viewId: sharedView.id });
       trackedViews.select(entry?.entryId);
       return;
     }
@@ -1019,7 +1026,13 @@ function AppContent({
     if (!sharedWindow && event.target instanceof Element && event.target.closest('.lab-ask-window') && !event.target.closest('[data-view-id]')) sessionWindows.focus();
   }
   function chooseWindowSession(id: string) {
-    sessionWindows.focus(id); setActiveView('workbench'); setSessionPanel('list'); setDesktopContextVisible(true); setContextOpen(true);
+    sessionWindows.focus(id); showWindowSessionChooser();
+  }
+  function showWindowSessionChooser() {
+    setActiveView('workbench'); setSessionPanel('list'); setDesktopContextVisible(true); setContextOpen(true);
+  }
+  function editWindow(operation: Parameters<typeof windowWorkspace.operate>[0]) {
+    void windowWorkspace.operate(operation).catch(error => setSessionNotice(sessionConnectionFailure(error, false)));
   }
   function selectPrimaryGroup(id: string) {
     const current = windowWorkspace.readWindow();
@@ -1027,7 +1040,7 @@ function AppContent({
     windowWorkspace.authority?.operate({ type: 'view.select', viewId: id });
   }
   function createSessionView() {
-    try { chooseWindowSession(sessionWindows.create()); }
+    try { sessionWindows.create(); showWindowSessionChooser(); }
     catch (error) { setSessionNotice(sessionConnectionFailure(error, false)); }
   }
   function windowDraftBinding(entry: (typeof sessionWindows.entries)[number]) {
@@ -1043,8 +1056,8 @@ function AppContent({
     try {
       const destination = directoryDestination();
       if (!destination) return openSession(item);
-      const opened = await bindDirectorySession({ ...item, hostId: item.hostId ?? selectedHost.id }, destination);
-      setActiveView('workbench'); closeContext(); return opened;
+      const opened = bindDirectorySession({ ...item, hostId: item.hostId ?? selectedHost.id }, destination);
+      setActiveView('workbench'); closeContext(); return await opened;
     } catch (error) { setSessionNotice(sessionConnectionFailure(error, false)); return false; }
   }
   function directoryDestination() {
@@ -1068,7 +1081,7 @@ function AppContent({
         return opened;
       } finally { if (!opened && trackedView && pendingViewRestore.current === pending) pendingViewRestore.current = undefined; }
     }
-    await windowWorkspace.operate({ type: 'view.bind', viewId: view.id, binding: windowSessionBinding(session), expectedBinding });
+    editWindow({ type: 'view.bind', viewId: view.id, binding: windowSessionBinding(session), expectedBinding });
     return true;
   }
   async function openTeamLayout(team: Team, sourceViewAddress?: string): Promise<boolean> {
@@ -1078,7 +1091,7 @@ function AppContent({
     if (captured && current?.id !== captured[0]) return false;
     const existing = current?.views.find(view => { const feature = parseWindowFeature(view.feature); return feature?.kind === 'team' && feature.id === team.id && feature.role === 'leader'; });
     if (existing) {
-      await windowWorkspace.operate({ type: 'view.select', viewId: existing.id });
+      editWindow({ type: 'view.select', viewId: existing.id });
       const latest = windowWorkspace.readWindow();
       const leader = latest?.views.find(view => view.id === existing.id);
       const feature = parseWindowFeature(leader?.feature);
@@ -1093,7 +1106,7 @@ function AppContent({
       if (!sameSource) {
         if (destination.bindingPolicy === 'managed') {
           const source = createWindowView(crypto.randomUUID(), windowSessionBinding(layout.main));
-          await windowWorkspace.operate({ type: 'batch', operations: [{ type: 'view.create', view: source }, { type: 'view.select', viewId: source.id }] });
+          editWindow({ type: 'batch', operations: [{ type: 'view.create', view: source }, { type: 'view.select', viewId: source.id }] });
         } else if (!await bindDirectorySession(layout.main, { windowId: current.id, viewId: destination.id, binding: JSON.stringify(destination.binding ?? null) })) return false;
       }
       if (windowWorkspace.readWindow()?.id !== current.id) return false;
@@ -1414,8 +1427,8 @@ function AppContent({
     });
     if (!changed) return;
     const { schemaVersion: _, id: __, revision: ___, ...layout } = sharedWindow;
-    void windowWorkspace.operate({ type: 'layout.apply', layout: { ...layout, views } })
-      .catch(error => setSessionNotice(sessionConnectionFailure(error, false)));
+    try { editWindow({ type: 'layout.apply', layout: { ...layout, views } }); }
+    catch (error) { setSessionNotice(sessionConnectionFailure(error, false)); }
   }, [sharedWindow?.id, sharedWindow?.revision, confirmedTitles]);
   useEffect(() => {
     let timer: ReturnType<typeof setTimeout> | undefined;
@@ -1665,7 +1678,7 @@ function AppContent({
           operations.push({ type: 'view.create', view: child });
         }
         operations.push({ type: 'view.select', viewId: compactLayoutRef.current || endpoint === 'recipient' ? destinationId : origin.id });
-        await windowWorkspace.operate({ type: 'batch', operations });
+        editWindow({ type: 'batch', operations });
         setLetterReveals(values => ({ ...values, [revealSession.agentId]: { ...target, align: 'start', requestId: ++traceRequestCounter.current } }));
         return;
       }

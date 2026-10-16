@@ -1,6 +1,6 @@
 import './window-workspaces.css';
 import { useEffect, useRef, useState } from 'react';
-import { createWindowView, type WindowSessionBinding, type WindowView } from '@orchardworks/agent-remote-protocol';
+import { createWindowView, type WindowOperation, type WindowSessionBinding, type WindowView } from '@orchardworks/agent-remote-protocol';
 import type { useWindowWorkspace } from '../hooks/useWindowWorkspace.js';
 import { useWindowManager } from '../hooks/useWindowManager.js';
 
@@ -42,6 +42,16 @@ export function WindowWorkspaces({ workspace, current, active = true }: {
       return false;
     } finally { if (pending.current === scope) { pending.current = undefined; setRunning(undefined); } }
   }
+  function background(action: () => Promise<unknown>): boolean {
+    const scope = currentScope.current;
+    const failed = (error: unknown) => {
+      if (currentScope.current.client === scope.client && currentScope.current.id === scope.id) setNotice(error instanceof Error ? error.message : String(error));
+    };
+    setNotice(undefined);
+    try { void action().catch(failed); return true; }
+    catch (error) { failed(error); return false; }
+  }
+  function edit(operation: WindowOperation): boolean { return background(() => workspace.operate(operation)); }
   const catalog = [...new Map([...(workspace.windows ?? []), ...(workspace.window ? [workspace.window] : [])].map(window => [window.id, window])).values()];
   async function openWindow(id: string) {
     const client = workspace.client, generation = ++navigation.current;
@@ -73,16 +83,19 @@ export function WindowWorkspaces({ workspace, current, active = true }: {
       </button>
     </div>)}</nav>
     {catalog.length ? <p className="lab-window-note">{workspace.hasActiveWindow ? 'Switch to another Window before deleting the active one.' : 'Open or create a Window before deleting another one.'}</p> : null}
+    {workspace.saveState?.state === 'saving' ? <p className="lab-window-note" role="status">Saving…</p>
+      : workspace.saveState?.state === 'offline' || workspace.saveState?.state === 'error' ? <p className="lab-window-note" role="status">Changes are not saved. <button type="button" onClick={() => background(workspace.retrySave)}>Retry</button>
+        {workspace.saveState.state === 'error' && workspace.saveState.pending > 0 ? <button type="button" title="Discard unsaved local layout edits; changes already saved remain." onClick={() => background(workspace.discardLocalChanges)}>Use saved layout</button> : null}</p> : null}
     {!catalog.length ? <p className="lab-window-note">Create a Window to organize session views.</p> : null}
     {workspace.window ? <>
-      <div className="lab-window-section-heading"><span>Session views</span><button type="button" disabled={busy || workspace.unavailable} onClick={() => void run(async () => {
+      <div className="lab-window-section-heading"><span>Session views</span><button type="button" disabled={busy || workspace.unavailable} onClick={() => {
         const view = createWindowView(crypto.randomUUID());
-        await workspace.operate({ type: 'batch', operations: [{ type: 'view.create', view }, { type: 'view.select', viewId: view.id }] });
-      })}>New session view</button></div>
+        edit({ type: 'batch', operations: [{ type: 'view.create', view }, { type: 'view.select', viewId: view.id }] });
+      }}>New session view</button></div>
       <nav className="lab-window-list lab-window-views" aria-label="Session views">{workspace.window.views.map(view => <button key={view.id} type="button" data-window-view-id={view.id}
         data-attached={!!view.attachedTo || undefined} disabled={busy || workspace.unavailable}
         aria-current={view.id === workspace.window!.selectedViewId || undefined}
-        onClick={() => void run(() => workspace.operate({ type: 'view.select', viewId: view.id }))}>
+        onClick={() => edit({ type: 'view.select', viewId: view.id })}>
         <span><strong>{viewTitle(view)}</strong><small>{viewRole(view)}</small></span>
         {view.id === workspace.window!.selectedViewId ? <span className="lab-window-selected" aria-label="Selected view">✓</span> : null}
       </button>)}</nav>
@@ -102,7 +115,7 @@ export function WindowWorkspaces({ workspace, current, active = true }: {
           event.preventDefault(); if (busy || !title.trim()) return;
           const id = workspace.window!.id, client = workspace.client;
           if (title.trim() === workspace.window!.title) { closeRename(); return; }
-          void run(() => workspace.operate({ type: 'rename', title: title.trim() })).then(ok => { if (ok && currentScope.current.id === id && currentScope.current.client === client) closeRename(); });
+          if (edit({ type: 'rename', title: title.trim() }) && currentScope.current.id === id && currentScope.current.client === client) closeRename();
         }}>
           <label>Window title<input autoFocus required maxLength={256} value={title} disabled={busy} onChange={event => setTitle(event.target.value)} /></label>
           <div className="lab-window-actions"><button type="button" disabled={busy} onClick={closeRename}>Cancel</button><button type="submit" disabled={busy || !title.trim()}>Save</button></div>

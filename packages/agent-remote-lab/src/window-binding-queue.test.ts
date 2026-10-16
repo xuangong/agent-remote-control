@@ -38,20 +38,23 @@ it.each(['empty', 'bound'] as const)('rejects a delayed %s destination after an 
   try {
     await client.create(initial);
     const store = new WindowWorkspaceStore(initial, client);
+    const expectedBinding = store.getSnapshot().views[0]?.binding ?? null;
     const earlier = store.operate({ type: 'view.bind', viewId: 'main', binding: replacement });
     await pending;
-    const expectedBinding = store.getSnapshot().views[0]?.binding ?? null;
     const delayed = store.operate({ type: 'view.bind', viewId: 'main', binding: created, expectedBinding });
     const rejected = expect(delayed).rejects.toThrow('The target session view changed');
     release(); await earlier; await rejected;
-    expect(mutations).toHaveLength(2);
-    expect(mutations[1]?.baseRevision).toBe(1);
+    expect(mutations).toHaveLength(1);
     expect(store.getSnapshot()).toMatchObject({ revision: 1, views: [{ id: 'main', binding: replacement }] });
     expect((await client.inspect(initial.id)).window.views[0]?.binding).toEqual(replacement);
-    const receipt = await client.operation(initial.id, mutations[1]!.operationId);
+    // A stale command from another page is also rejected by the shared service.
+    const stale: WindowMutation = { operationId: crypto.randomUUID(), issuedAt: Date.now(), baseRevision: 1,
+      operation: { type: 'view.bind', viewId: 'main', binding: created, expectedBinding } };
+    await client.mutate(initial.id, stale);
+    const receipt = await client.operation(initial.id, stale.operationId);
     expect(receipt).toMatchObject({ status: 'rejected', code: 'invalid_operation', revision: 1,
       message: 'The target session view changed. Choose it again before opening a session.' });
-    const retry = await client.mutate(initial.id, mutations[1]!);
+    const retry = await client.mutate(initial.id, stale);
     expect(retry.result).toEqual(receipt);
     expect(retry.window.views[0]?.binding).toEqual(replacement);
   } finally {

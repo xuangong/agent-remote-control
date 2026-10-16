@@ -35,11 +35,23 @@ export function useWindowWorkspace(scope: string, hosted: boolean, enabled: bool
   const creation = useMemo(() => ({ pending: undefined as PendingCreation | null | undefined, running: undefined as Promise<CreatedWindow> | undefined }), [key, client]);
   const deletions = useMemo(() => new Map<string, { window?: WorkspaceWindow; identity: WindowOperationIdentity; dispatched: boolean; running?: Promise<void> }>(), [key, client]);
   const selection = useMemo(() => ({ generation: 0, active: true, deleted: new Set<string>() }), [key, client]);
+  const stores = useMemo(() => new Map<string, WindowWorkspaceStore>(), [key, client]);
+  const access = useRef(enabled && participating); access.current = enabled && participating;
   const currentSelection = useRef(selection); currentSelection.current = selection;
   const inScope = () => selection.active && currentSelection.current === selection;
   const [store, setStore] = useState<WindowWorkspaceStore>();
   const currentStore = useRef<WindowWorkspaceStore>();
-  useEffect(() => { selection.active = true; return () => { selection.active = false; selection.generation++; currentStore.current = undefined; }; }, [selection]);
+  useEffect(() => {
+    selection.active = true;
+    for (const saved of stores.values()) saved.setEnabled(access.current);
+    return () => {
+      selection.active = false; selection.generation++; currentStore.current = undefined;
+      for (const saved of stores.values()) saved.setEnabled(false);
+      // React may immediately replay effects; only a departed scope owns disposal.
+      queueMicrotask(() => { if (!selection.active) { for (const saved of stores.values()) saved.dispose(); stores.clear(); } });
+    };
+  }, [selection, stores]);
+  useEffect(() => { for (const saved of stores.values()) saved.setEnabled(enabled && participating); }, [stores, enabled, participating]);
   const confirmedStores = useMemo(() => new WeakSet<WindowWorkspaceStore>(), [key, client]);
   const [unavailable, setUnavailable] = useState(false);
   const currentlyUnavailable = useRef(unavailable); currentlyUnavailable.current = unavailable;
@@ -51,33 +63,73 @@ export function useWindowWorkspace(scope: string, hosted: boolean, enabled: bool
   const [route, setRoute] = useState(() => globalThis.location.href);
   const navigation = useMemo(() => ({ url: globalThis.location.href }), [route, key]);
   useEffect(() => { const navigate = () => setRoute(globalThis.location.href); globalThis.addEventListener('popstate', navigate); return () => globalThis.removeEventListener('popstate', navigate); }, []);
-  const cache = (window: WorkspaceWindow) => { if (selection.deleted.has(window.id)) return; try { conversationLocalStorage.setItem(`${key}:${window.id}`, JSON.stringify(window)); } catch { /* The service remains authoritative when cache storage is unavailable. */ } };
+  const cache = (window: WorkspaceWindow) => {
+    if (selection.deleted.has(window.id)) return;
+    try {
+      const previous = decodeWorkspaceWindow(JSON.parse(conversationLocalStorage.getItem(`${key}:${window.id}`) ?? 'null'));
+      if (!previous || previous.revision <= window.revision) conversationLocalStorage.setItem(`${key}:${window.id}`, JSON.stringify(window));
+    } catch { /* The service remains authoritative when cache storage is unavailable. */ }
+  };
   const persistLocal = (window: WorkspaceWindow) => conversationLocalStorage.setItem(`${key}:${window.id}`, JSON.stringify(window));
   const choose = (window: WorkspaceWindow, created = false, confirmed = true) => {
     if (!inScope() || selection.deleted.has(window.id) || deletions.get(window.id)?.dispatched) return;
     if (created && !client) persistLocal(window);
-    cache(window);
-    if (confirmed) {
-      commitImportedWindowComposition(composition, window);
-      try { conversationSessionStorage.setItem(key, window.id); } catch { /* The URL still identifies the chosen Window. */ }
-      try { conversationLocalStorage.setItem(`${key}:last-window`, window.id); } catch { /* The catalog can restore a Window without this preference. */ }
-      const url = new URL(globalThis.location.href);
-      if (url.searchParams.get('window') !== window.id) { url.searchParams.set('window', window.id); globalThis.history.replaceState(globalThis.history.state, '', url); }
-      navigation.url = url.href;
-    }
-    const next = makeStore(window); if (confirmed) confirmedStores.add(next);
-    selectStore(next); setUnavailable(false); setDeleted(false);
+    const next = makeStore(window);
+    if (confirmed) { next.accept(window); confirmedStores.add(next); }
+    if (client) cache(next.getCommittedSnapshot());
+    if (confirmed) commitImportedWindowComposition(composition, window);
+    try { conversationSessionStorage.setItem(key, window.id); } catch { /* The URL still identifies the chosen Window. */ }
+    try { conversationLocalStorage.setItem(`${key}:last-window`, window.id); } catch { /* The catalog can restore a Window without this preference. */ }
+    const url = new URL(globalThis.location.href);
+    if (url.searchParams.get('window') !== window.id) { url.searchParams.set('window', window.id); globalThis.history.replaceState(globalThis.history.state, '', url); }
+    navigation.url = url.href;
+    selectStore(next); currentlyUnavailable.current = false; setUnavailable(false); setDeleted(false);
   };
-  const makeStore = (window: WorkspaceWindow) => new WindowWorkspaceStore(window, client, client ? cache : undefined, client ? undefined : async (source, operation) => {
-    const commit = async () => {
-      const value = decodeWorkspaceWindow(JSON.parse(conversationLocalStorage.getItem(`${key}:${source.id}`) ?? 'null'));
-      if (!value) throw new Error('The local Window is unavailable.');
-      const replacesLayout = operation.type === 'layout.apply' || operation.type === 'batch' && operation.operations.some(edit => edit.type === 'layout.apply');
-      if (replacesLayout && value.revision !== source.revision) throw new Error('The Window changed before applying this layout. Refresh and retry.');
-      const next = applyWindowOperation(value, operation); persistLocal(next); return next;
-    };
-    return globalThis.navigator.locks ? globalThis.navigator.locks.request(`${key}:${source.id}`, commit) : commit();
-  });
+  const readCached = (id: string): WorkspaceWindow | undefined => {
+    const existing = stores.get(id); if (existing) return existing.getCommittedSnapshot();
+    try {
+      const journal = JSON.parse(conversationSessionStorage.getItem(`${key}:pending:${id}`) ?? 'null');
+      const committed = decodeWorkspaceWindow(journal?.committed);
+      if (committed?.id === id) return committed;
+    } catch { /* Fall back to the last confirmed layout. */ }
+    try { const value = decodeWorkspaceWindow(JSON.parse(conversationLocalStorage.getItem(`${key}:${id}`) ?? 'null')); return value?.id === id ? value : undefined; }
+    catch { return undefined; }
+  };
+  const makeStore = (window: WorkspaceWindow) => {
+    const existing = stores.get(window.id); if (existing) return existing;
+    let recovery: unknown;
+    try { recovery = JSON.parse(conversationSessionStorage.getItem(`${key}:pending:${window.id}`) ?? 'null'); } catch { /* Invalid journals do not replace a confirmed layout. */ }
+    const next = new WindowWorkspaceStore(window, client, client ? () => cache(next.getCommittedSnapshot()) : undefined, client ? undefined : async (source, operation) => {
+      const commit = async () => {
+        const value = decodeWorkspaceWindow(JSON.parse(conversationLocalStorage.getItem(`${key}:${source.id}`) ?? 'null'));
+        if (!value) throw new Error('The local Window is unavailable.');
+        const replacesLayout = operation.type === 'layout.apply' || operation.type === 'batch' && operation.operations.some(edit => edit.type === 'layout.apply');
+        if (replacesLayout && value.revision !== source.revision) throw new Error('The Window changed before applying this layout. Refresh and retry.');
+        const result = applyWindowOperation(value, operation); persistLocal(result); return result;
+      };
+      return globalThis.navigator.locks ? globalThis.navigator.locks.request(`${key}:${source.id}`, commit) : commit();
+    }, {
+      recovery, autoRetry: true, paused: !access.current,
+      persist: value => {
+        if (selection.deleted.has(window.id)) return;
+        if (value.edits.length) conversationSessionStorage.setItem(`${key}:pending:${window.id}`, JSON.stringify(value));
+        else conversationSessionStorage.removeItem(`${key}:pending:${window.id}`);
+      },
+    });
+    stores.set(window.id, next);
+    next.setEnabled(access.current);
+    return next;
+  };
+  useEffect(() => {
+    if (!participating) return;
+    const prefix = `${key}:pending:`;
+    try {
+      for (const entry of conversationSessionStorage.keys().filter(entry => entry.startsWith(prefix))) {
+        const id = entry.slice(prefix.length), cached = readCached(id);
+        if (cached && !selection.deleted.has(id)) makeStore(cached);
+      }
+    } catch { /* Live layout and network saving do not require recovery storage. */ }
+  }, [stores, participating]);
   const pendingCreation = (): PendingCreation | undefined => {
     if (creation.pending !== undefined) return creation.pending ?? undefined;
     const saved = conversationSessionStorage.getItem(`${key}:pending-create`);
@@ -126,11 +178,13 @@ export function useWindowWorkspace(scope: string, hosted: boolean, enabled: bool
     ? current.map(item => item.id === window.id ? window : item) : [...current, window]); };
   const forgetDeletedWindow = (id: string) => {
     selection.deleted.add(id);
+    stores.get(id)?.dispose(); stores.delete(id);
+    try { conversationSessionStorage.removeItem(`${key}:pending:${id}`); } catch { /* A deleted Window never replays its pending edits. */ }
     try { conversationLocalStorage.removeItem(`${key}:${id}`); } catch { /* A failed cache cleanup cannot undo a confirmed deletion. */ }
     if (!inScope()) return;
     setWindows(current => current.filter(item => item.id !== id));
     if (currentStore.current?.getSnapshot().id !== id) return;
-    selectStore(undefined); setUnavailable(true); setDeleted(true); setError(undefined);
+    selectStore(undefined); currentlyUnavailable.current = true; setUnavailable(true); setDeleted(true); setError(undefined);
   };
   useEffect(() => {
     const generation = ++selection.generation;
@@ -167,7 +221,7 @@ export function useWindowWorkspace(scope: string, hosted: boolean, enabled: bool
     };
     let cached: WorkspaceWindow | undefined;
     for (const id of requested ? [requested] : preferredIds()) {
-      try { const value = decodeWorkspaceWindow(JSON.parse(conversationLocalStorage.getItem(`${key}:${id}`) ?? 'null')); if (value?.id === id) { cached = value; break; } } catch { /* Ignore an invalid cache. */ }
+      const value = readCached(id); if (value) { cached = value; break; }
     }
     // A deep link is applied to the authoritative layout before it becomes the selected Window.
     if (client && cached && !target) choose(cached, false, false);
@@ -176,8 +230,8 @@ export function useWindowWorkspace(scope: string, hosted: boolean, enabled: bool
     const restore = async (window: WorkspaceWindow) => {
       if (!live()) return;
       const operation = target && sessionLinkOperation(window, target);
-      if (operation) { const next = makeStore(window); await next.operate(operation); if (!live()) return; window = next.getSnapshot(); }
       choose(window);
+      if (operation) { const pending = makeStore(window).operate(operation); void pending.catch(error => { if (live()) setError(String(error.message ?? error)); }); }
     };
     if (!client) {
       const local: WorkspaceWindow[] = [];
@@ -198,7 +252,16 @@ export function useWindowWorkspace(scope: string, hosted: boolean, enabled: bool
     if (!enabled || !client) return () => { current = false; };
     const restoreHosted = async () => {
       if (!live()) return;
-      const list = (await client.list()).filter(window => !selection.deleted.has(window.id)); if (!current || generation !== selection.generation) return; setWindows(list);
+      const list = (await client.list()).filter(window => !selection.deleted.has(window.id)); if (!current || generation !== selection.generation) return; setWindows(list.map(window => stores.get(window.id)?.getSnapshot() ?? window));
+      // A background journal may outlive a Window deleted on another page.
+      // Catalog omission alone is insufficient proof, and its inspection must not delay opening the selected Window.
+      const listed = new Set(list.map(window => window.id));
+      for (const [id, pending] of stores) {
+        if (listed.has(id) || id === currentStore.current?.getSnapshot().id || !pending.getSyncState().pending) continue;
+        void client.inspect(id).catch(error => {
+          if (live() && stores.get(id) === pending && error instanceof WindowRequestError && error.status === 404) forgetDeletedWindow(id);
+        });
+      }
       if (requested) { const next = await client.inspect(requested); if (live()) choose(next.window); return; }
       if (!pendingCreation()) {
         const ids = [...new Set([...preferredIds(), ...list.map(window => window.id)])].filter(id => list.some(window => window.id === id));
@@ -208,8 +271,7 @@ export function useWindowWorkspace(scope: string, hosted: boolean, enabled: bool
           catch (error) {
             if (!live()) return;
             if (!(error instanceof WindowRequestError) || error.status !== 404) throw error;
-            selection.deleted.add(id);
-            try { conversationLocalStorage.removeItem(`${key}:${id}`); } catch { /* Ignore stale cache cleanup failures. */ }
+            forgetDeletedWindow(id);
             continue;
           }
           await restore(next.window); return;
@@ -220,16 +282,22 @@ export function useWindowWorkspace(scope: string, hosted: boolean, enabled: bool
       if (live()) { commitImportedWindowComposition(composition, candidate, next.window); await restore(next.window); }
     };
     const restored = !requested && globalThis.navigator.locks ? globalThis.navigator.locks.request(`${key}:restore`, restoreHosted) : restoreHosted();
-    void restored.catch(error => { if (live()) { setError(String(error.message ?? error)); if (error?.status === 404) { selectStore(undefined); setUnavailable(true); } } });
+    void restored.catch(error => {
+      if (!live()) return;
+      if (error?.status === 404) { if (requested) forgetDeletedWindow(requested); selectStore(undefined); setUnavailable(true); }
+      setError(String(error.message ?? error));
+    });
     return () => { current = false; };
   }, [scope, client, enabled, route, participating]);
   const window = useSyncExternalStore(store?.subscribe ?? (() => () => {}), store?.getSnapshot ?? (() => undefined));
+  const saveState = useSyncExternalStore(store?.subscribe ?? (() => () => {}), store?.getSyncState ?? (() => undefined));
   useEffect(() => {
     if (!window) return;
     updateCatalog(window);
   }, [window]);
+  const confirmed = !!store && confirmedStores.has(store);
   useEffect(() => {
-    if (!store || !enabled || !client || !confirmedStores.has(store)) return;
+    if (!store || !enabled || !client || !participating || !confirmed) return;
     const abort = new AbortController();
     void store.synchronize(abort.signal).catch(error => {
       if (abort.signal.aborted) return;
@@ -238,7 +306,7 @@ export function useWindowWorkspace(scope: string, hosted: boolean, enabled: bool
       } else setError(String(error.message ?? error));
     });
     return () => abort.abort();
-  }, [store, enabled, client]);
+  }, [store, enabled, client, participating, confirmed]);
   useEffect(() => {
     if (client || !store) return;
     const receive = (event: StorageEvent) => {
@@ -249,12 +317,24 @@ export function useWindowWorkspace(scope: string, hosted: boolean, enabled: bool
     };
     globalThis.addEventListener('storage', receive); return () => globalThis.removeEventListener('storage', receive);
   }, [store, client, key]);
-  const operate = async (operation: Parameters<WindowWorkspaceStore['operate']>[0]): Promise<void> => { if (!store || unavailable || !confirmedStores.has(store)) throw new Error('Wait for this Window to synchronize before editing its layout.'); try { await store.operate(operation); } catch (error) { setError(String(error instanceof Error ? error.message : error)); throw error; } };
-  const dispatch = (operation: Parameters<WindowWorkspaceStore['operate']>[0]) => { void operate(operation).catch(() => {}); };
-  const hasActiveWindow = !!store && confirmedStores.has(store) && !unavailable;
-  return { window, windows, error, client, deleted, hasActiveWindow, unavailable: participating && enabled && unavailable, operate, readWindow,
+  const operate = (operation: Parameters<WindowWorkspaceStore['operate']>[0]): Promise<void> => {
+    const active = currentStore.current;
+    if (!active || currentlyUnavailable.current || !inScope()) throw new Error('Open an available Window before editing its layout.');
+    applyWindowOperation(active.getSnapshot(), operation);
+    return active.operate(operation).catch(error => {
+      if (inScope() && currentStore.current === active) setError(String(error instanceof Error ? error.message : error));
+      throw error;
+    });
+  };
+  const dispatch = (operation: Parameters<WindowWorkspaceStore['operate']>[0]) => {
+    try { void operate(operation).catch(() => {}); } catch (error) { setError(String(error instanceof Error ? error.message : error)); }
+  };
+  const hasActiveWindow = confirmed && !unavailable;
+  const deletedWindowIds = useMemo(() => [...selection.deleted] as readonly string[], [selection, selection.deleted.size]);
+  return { window, windows, error, client, deleted, deletedWindowIds, hasActiveWindow, saveState, retrySave: () => currentStore.current?.retry() ?? Promise.resolve(),
+    discardLocalChanges: () => currentStore.current?.discardPendingChanges() ?? Promise.resolve(), unavailable: participating && enabled && unavailable, operate, readWindow,
     authority: window && !unavailable ? {
-      window,
+      window, readWindow,
       operate: dispatch,
       resolveViewId: (id: string) => resolveCompositionWindowViewId(composition, window, id),
     } : undefined,
@@ -262,11 +342,17 @@ export function useWindowWorkspace(scope: string, hosted: boolean, enabled: bool
     async open(id: string) {
       if (deletions.has(id)) throw new Error('This Window has an unsettled deletion. Retry deleting it before opening it.');
       const generation = ++selection.generation;
+      const cached = readCached(id);
+      if (cached) { choose(cached, false, !client); setError(undefined); }
       let next: WorkspaceWindow;
       try {
         if (client) next = (await client.inspect(id)).window;
         else { const cached = decodeWorkspaceWindow(JSON.parse(conversationLocalStorage.getItem(`${key}:${id}`) ?? 'null')); if (!cached || cached.id !== id) throw new Error('This local Window is unavailable.'); next = cached; }
-      } catch (error) { if (generation === selection.generation) throw error; return; }
+      } catch (error) {
+        if (generation !== selection.generation) return;
+        if (error instanceof WindowRequestError && error.status === 404) forgetDeletedWindow(id);
+        throw error;
+      }
       if (generation !== selection.generation) return;
       setError(undefined); choose(next);
     },

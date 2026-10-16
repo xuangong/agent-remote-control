@@ -49,13 +49,17 @@ it('settles a lost mutation reply by its original receipt without reissuing the 
   expect(mutations).toBe(1); expect(store.getSnapshot().views).toHaveLength(2);
 });
 
-it('blocks subsequent edits when a mutation outcome cannot be settled', async () => {
+it('keeps later local edits available while an earlier mutation is unresolved', async () => {
   let mutations = 0;
   const client = { async mutate() { mutations++; throw new Error('Offline'); }, async operation() { throw new Error('Offline'); } };
   const store = new WindowWorkspaceStore(initial(), client as any);
-  await expect(store.operate({ type: 'rename', title: 'Uncertain' })).rejects.toThrow('Offline');
-  await expect(store.operate({ type: 'rename', title: 'Later' })).rejects.toThrow('unresolved');
+  void store.operate({ type: 'rename', title: 'Uncertain' });
+  await store.retry();
+  void store.operate({ type: 'rename', title: 'Later' });
+  expect(store.getSnapshot().title).toBe('Later');
+  expect(store.getSyncState()).toMatchObject({ state: 'offline', pending: 2 });
   expect(mutations).toBe(1);
+  store.dispose();
 });
 
 it('rejects a queued stale full layout instead of overwriting an earlier local edit', async () => {

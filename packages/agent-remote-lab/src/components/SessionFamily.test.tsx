@@ -9,6 +9,9 @@ import type { OpenedSession, SessionDirectoryClient as DirectoryClient } from '.
 import { DraftStore } from '../draft-store.js';
 import { WorkspaceReady } from '../workspace-access.js';
 import { SessionFamily, type FamilySessionPresentationContext } from './SessionFamily.js';
+import { SessionDockProvider, SessionDockRail } from './SessionDock.js';
+import { WindowLayoutContext } from '../window-workspace-context.js';
+import { applyWindowOperation, createWindowView, type WorkspaceWindow } from '@orchardworks/agent-remote-protocol';
 
 it('composes per-session presentation and footer from the native conversation and stable slot', async () => {
   const session = { hostId: 'local', providerId: 'recorded', nativeSessionId: 'native', agentId: 'agent', title: 'Native title' };
@@ -48,6 +51,49 @@ it.each(['primary', 'dock', 'float'] as const)('sizes a %s family within its pla
   const panes = view.querySelectorAll<HTMLElement>('.lab-session-family-pane');
   expect(panes[0]?.style.width).toBe(placement === 'float' ? '100%' : '260px');
   expect(panes[1]?.style.width).toBe('240px');
+});
+
+it.each(['pointer', 'keyboard'])('selects a child directly within its primary group using %s without a redundant parent transition', async gesture => {
+  const session = { hostId: 'local', providerId: 'recorded', nativeSessionId: 'native', agentId: 'agent', title: 'Root' };
+  const { agentId: _, ...binding } = session;
+  const root = createWindowView('root', binding, 'primary');
+  const child = { ...createWindowView('child', { ...binding, nativeSessionId: 'child', title: 'Child' }, 'attached'), attachedTo: root.id };
+  let window: WorkspaceWindow = { schemaVersion: 2, id: 'selection', title: 'Window', revision: 0, selectedPrimaryViewId: 'other', selectedViewId: 'other', views: [createWindowView('other', undefined, 'primary'), root, child] };
+  const selections: string[] = [];
+  const transport = { onDiagnostic: () => () => {}, onProtocolMessage: () => () => {}, connect: () => ({ close() {}, send() {} }) } as unknown as RemoteAgentTransport;
+  const drafts = new DraftStore(`family-selection-${gesture}`);
+  function Harness() {
+    const [, renderAgain] = useState(0);
+    const authority = { window, readWindow: () => window, operate(operation: Parameters<typeof applyWindowOperation>[1]) {
+      window = applyWindowOperation(window, operation);
+      selections.push(window.selectedViewId); renderAgain(value => value + 1);
+    } };
+    return <WorkspaceReady.Provider value={false}><WindowLayoutContext.Provider value={authority}><SessionDockProvider enabled>
+      <SessionDockRail onSelectPrimaryGroup={viewId => authority.operate({ type: 'view.select', viewId })} primaryGroups={[{
+        id: root.id, title: 'Root', width: root.width, selected: window.selectedPrimaryViewId === root.id, collapsed: false,
+        content: <SessionFamily attachedSession={session} target={session} viewId={root.id} storageScope="family-selection" baseUrl="http://fixture" hostLabel="Local"
+          compact={false} active offline transport={transport} draftStore={drafts}
+          renderSessionFooter={context => <><button data-session-action={context.session.nativeSessionId}>Session action</button>
+            <button data-pane-selection-ignore data-global-action={context.session.nativeSessionId}>Global action</button></>} />,
+      }]} />
+    </SessionDockProvider></WindowLayoutContext.Provider></WorkspaceReady.Provider>;
+  }
+  const view = await render(<Harness />);
+  const action = view.querySelector<HTMLButtonElement>('[data-session-action="child"]')!;
+  await act(async () => {
+    if (gesture === 'pointer') action.dispatchEvent(new MouseEvent('pointerdown', { button: 0, bubbles: true }));
+    action.focus();
+  });
+  expect(window.selectedViewId).toBe('child');
+  expect(window.selectedPrimaryViewId).toBe('root');
+  expect(selections).toEqual(['child']);
+  const global = view.querySelector<HTMLButtonElement>('[data-global-action="native"]')!;
+  await act(async () => { global.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true })); global.focus(); });
+  expect(window.selectedViewId).toBe('child');
+  expect(selections).toEqual(['child']);
+  await act(async () => view.querySelector('.lab-primary-group-content')!.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true })));
+  expect(window.selectedViewId).toBe('root');
+  expect(selections).toEqual(['child', 'root']);
 });
 
 

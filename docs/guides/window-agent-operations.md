@@ -24,10 +24,35 @@ link opens a new ordinary dock instead.
 
 Window layout snapshots are cached separately from session content. Reopening
 a Window can show its cached bindings, order, widths, placement, and display
-preferences before the service responds; session content remains cached by
-session identity and can be reused across Windows. The service confirms the
-current layout before layout edits are enabled. An explicit link to a deleted
-or missing Window stays unavailable instead of silently creating a replacement.
+preferences before the service responds. Layout edits apply immediately to the
+local Window, including while its initial inspection or a previous save is pending.
+Saving and synchronization run in the background. Incoming snapshots are combined
+with pending local edits; an older response cannot remove a newly opened view or
+reopen one the user just closed. The shared layout becomes visible to other pages
+when the service commits it. An explicit link to a deleted or missing Window stays
+unavailable instead of silently creating a replacement.
+
+The browser stores confirmed Window snapshots separately from its page-local
+journal of pending edits. Normal refresh restores those edits and retries their
+original operation identities, including edits to inactive Windows. The existing
+**Clear cache on close** policy also applies to this journal. Storage failure does
+not block live editing, but recovery then requires keeping the page open until
+saving succeeds. Offline saves retry with backoff. A definitive rejection removes
+the rejected edit; unrelated later edits remain. A lost receipt is not treated as
+rejection or retried with a new identity. When a receipt cannot be recovered,
+**Use saved layout** explicitly abandons pending local layout edits and adopts the
+service's current layout. It does not undo changes already committed or stop any
+native session. Full-layout replacement retains its revision/conflict checks.
+
+Session reuse includes the live Remote client, canonical Replica, and state
+subscriptions, as well as cached content. Within a page, Views of the same Session
+share that connection across Windows. The page retains up to 24 recently presented,
+already connected Sessions, without preconnecting unopened Sessions. Closing one
+View does not disconnect other consumers; an inactive retained Session continues
+receiving updates. Track and Team retention remain independent. A full page reload
+creates a new browser network connection and restores cached content while native
+session synchronization runs; layout restoration does not establish native readiness.
+
 An unresolved creation is settled using its original operation identity before
 the page considers another creation. Concurrent first opens in the same browser
 use a browser lock when available; this is not a cross-device creation guarantee.

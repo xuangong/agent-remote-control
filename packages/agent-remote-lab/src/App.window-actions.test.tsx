@@ -100,7 +100,7 @@ async function fixture(historyPlacement?: 'dock' | 'float', hiddenAskSource?: 'm
   return { read: () => workspace, menu: () => menu, first, second, container };
 }
 
-it('does not gather Team members into a new Window when selecting its existing leader finishes late', async () => {
+it('gathers Team members locally before saving and keeps them out of a subsequently selected Window', async () => {
   const test = await fixture();
   let release!: () => Promise<void>;
   let held = false;
@@ -110,17 +110,18 @@ it('does not gather Team members into a new Window when selecting its existing l
     return new Promise(resolve => { release = async () => { resolve(await commit()); }; });
   } } });
   let pending!: Promise<boolean>;
-  await act(async () => { pending = test.menu().onOpen(team, 'first/main'); });
+  await act(async () => { pending = test.menu().onOpen(team, 'first/main'); void pending.catch(() => {}); });
+  expect(test.read().window!.views.filter(view => parseWindowFeature(view.feature)?.kind === 'team')).toHaveLength(2);
+  expect(await pending).toBe(true);
   await vi.waitFor(() => expect(release).toBeTypeOf('function'));
   await act(async () => { await test.read().open('second'); });
   expect(test.read().window?.id).toBe('second');
   await act(async () => { await release(); await pending; });
   expect(test.read().window!.views.filter(view => parseWindowFeature(view.feature)?.kind === 'team')).toHaveLength(0);
   expect(test.read().window).toEqual(test.second);
-  expect(await pending).toBe(false);
   const storedFirst = JSON.parse(localStorage.getItem(`agent-remote:recovery:${scope}:shared-window:first`)!);
   expect(storedFirst.selectedViewId).toBe('leader-view');
-  expect(storedFirst.views).toHaveLength(2);
+  expect(storedFirst.views).toHaveLength(3);
 }, 10000);
 
 it('restores source families behind the visible selected Ask', async () => {

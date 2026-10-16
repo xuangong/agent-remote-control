@@ -3,6 +3,7 @@ import type { WindowOperation, WorkspaceWindow } from '@orchardworks/agent-remot
 /** Layout commands and opaque local identity adaptation; no session ownership capability. */
 export interface WindowLayoutAuthority {
   window: WorkspaceWindow;
+  readWindow?(): WorkspaceWindow | undefined;
   operate(operation: WindowOperation): void;
   resolveViewId?(localId: string): string | undefined;
 }

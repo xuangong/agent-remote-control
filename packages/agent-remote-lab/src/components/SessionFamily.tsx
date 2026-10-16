@@ -125,8 +125,13 @@ export function SessionFamily(props: Props) {
     return () => cancelAnimationFrame(frame);
   }, [reveal, compact, active]);
   function focusPane(index: number) {
-    if (shared && rootView) { const view = [rootView, ...attached][index]; if (view && shared.window.selectedViewId !== view.id) shared.operate({ type: 'view.select', viewId: view.id }); return; }
-    setLayout(current => current.focus === index ? current : { ...current, focus: index }); }
+    if (shared && rootView) {
+      const view = [rootView, ...attached][index], window = shared.readWindow?.() ?? shared.window;
+      if (view && window.selectedViewId !== view.id) shared.operate({ type: 'view.select', viewId: view.id });
+      return;
+    }
+    setLayout(current => current.focus === index ? current : { ...current, focus: index });
+  }
   function show(index: number) { if (shared && rootView) { focusPane(index); setReveal({ index }); return; } setLayout(current => ({ ...current, focus: index })); setReveal({ index }); }
   function close(index: number) {
     if (shared && rootView) { const view = attached[index - 1]; if (view) shared.operate({ type: 'view.close', viewId: view.id }); setReveal({ index: index - 1 }); return; }

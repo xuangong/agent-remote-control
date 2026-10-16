@@ -561,7 +561,7 @@ it('blocks externally deleted Window edits when explicit creation fails', async 
   const read = await mount('https://deleted-edit.example/', true);
   expect(read().unavailable).toBe(true); expect(read().window).toBeUndefined();
   expect(read().authority).toBeUndefined(); expect(fixture.create).not.toHaveBeenCalled();
-  await expect(read().operate({ type: 'rename', title: 'Cannot edit deleted Window' })).rejects.toThrow();
+  expect(() => read().operate({ type: 'rename', title: 'Cannot edit deleted Window' })).toThrow();
   fixture.create.mockRejectedValueOnce(new WindowRequestError('Creation refused', 403));
   await act(async () => { await expect(read().create()).rejects.toThrow('Creation refused'); });
   expect(read().unavailable).toBe(true); expect(read().authority).toBeUndefined();
@@ -745,30 +745,32 @@ it('settles a pending hosted creation receipt before restoring a nonempty catalo
   expect(sessionStorage.getItem(`${key}:pending-create`)).toBeNull();
 });
 
-it('renders the last local Window snapshot immediately while reopen list and inspection wait for confirmation', async () => {
+it('renders and edits the last cached layout while reopen inspection waits for confirmation', async () => {
   const scope = 'https://recent-cache-reopen.example/', key = `agent-remote:recovery:${scope}:shared-window`;
   const cached = windowFixture('recent-cached');
   localStorage.setItem(`${key}:last-window`, cached.id);
   localStorage.setItem(`${key}:${cached.id}`, JSON.stringify(cached));
   const fixture = hostedWindows(cached);
-  const mutate = vi.spyOn(WindowWorkspaceClient.prototype, 'mutate');
+  let save!: () => void;
+  vi.spyOn(WindowWorkspaceClient.prototype, 'mutate').mockImplementation((_id, mutation) => new Promise(resolve => {
+    save = () => { const window = applyWindowOperation(cached, mutation.operation); resolve({ window, result: { operationId: mutation.operationId,
+      status: 'committed', revision: window.revision, committedAt: Date.now(), expiresAt: Date.now() + 86400000 } }); };
+  }));
   let list!: () => void, inspect!: () => void;
   fixture.list.mockImplementationOnce(() => new Promise(resolve => { list = () => resolve([cached]); }));
   fixture.inspect.mockImplementationOnce(() => new Promise(resolve => { inspect = () => resolve({ window: cached }); }));
   const read = await mount(scope, true);
   expect(read().window).toEqual(cached);
   expect(read().hasActiveWindow).toBe(false);
-  expect(fixture.changes).not.toHaveBeenCalled();
-  await act(async () => { await expect(read().operate({ type: 'rename', title: 'Unconfirmed edit' })).rejects.toThrow('synchronize'); });
-  expect(mutate).not.toHaveBeenCalled();
+  let pending!: Promise<void>;
+  await act(async () => { pending = read().operate({ type: 'rename', title: 'Local edit' }); });
+  expect(read().window?.title).toBe('Local edit');
   await act(async () => list());
-  await vi.waitFor(() => expect(fixture.inspect).toHaveBeenCalledWith(cached.id));
-  expect(read().window).toEqual(cached);
   expect(read().hasActiveWindow).toBe(false);
-  await act(async () => { await expect(read().operate({ type: 'rename', title: 'Still unconfirmed' })).rejects.toThrow('synchronize'); });
-  expect(mutate).not.toHaveBeenCalled();
   await act(async () => inspect());
-  await vi.waitFor(async () => { await act(async () => {}); expect(read().hasActiveWindow).toBe(true); });
+  expect(read().hasActiveWindow).toBe(true);
+  expect(read().window?.title).toBe('Local edit');
+  await act(async () => { save(); await pending; });
   expect(fixture.create).not.toHaveBeenCalled();
 });
 

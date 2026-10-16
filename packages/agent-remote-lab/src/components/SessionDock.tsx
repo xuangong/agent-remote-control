@@ -223,7 +223,7 @@ function PrimaryGroupPane({ group, compact, minimizedHeader, onSelect, onResize,
   const minimized = !compact && group.collapsed;
   const contentId = useId();
   const select = (event: { target: EventTarget }) => {
-    if (event.target instanceof Element && event.target.closest('[data-pane-selection-ignore]')) return;
+    if (event.target instanceof Element && event.target.closest('[data-pane-selection-ignore],.lab-session-family-pane')) return;
     onSelect?.(group.id);
   };
   return <section className="lab-primary-group" data-primary-group-id={group.id} data-selected={group.selected || undefined}

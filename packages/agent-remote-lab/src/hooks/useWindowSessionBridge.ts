@@ -18,7 +18,7 @@ interface Options {
   onError(error: unknown): void;
 }
 
-/** Projects committed Window bindings into native Session Views without owning native execution. */
+/** Projects Window bindings into native Session Views without owning native execution. */
 export function useWindowSessionBridge(options: Options) {
   const latest = useRef(options); latest.current = options;
   const pending = useRef(new Map<string, number>());
@@ -75,11 +75,12 @@ export function useWindowSessionBridge(options: Options) {
     const key = operation && JSON.stringify([window.id, window.revision, operation]);
     if (!operation || key === successionAttempt.current) return;
     successionAttempt.current = key;
-    void options.operate(operation).catch(error => latest.current.onError(error));
+    try { void options.operate(operation).catch(error => latest.current.onError(error)); }
+    catch (error) { latest.current.onError(error); }
   }, [window?.id, window?.revision, succession.document.editRevision, succession.discovering, concreteHistory, enabled, settled]);
 
   const openPrimary = useCallback(async (session: SessionEntry, attached?: OpenedSession, restoreLayout = false, keepOriginal?: boolean, slotId?: string, targetViewId?: string, sessionIntent?: 'history', expectedBinding?: WindowSessionBinding | null): Promise<boolean> => {
-    const current = latest.current, targetWindow = current.window;
+    const current = latest.current, targetWindow = current.readWindow ? current.readWindow() : current.window;
     if (current.unavailable) throw new Error('Choose an available Window before opening a session.');
     if (!targetWindow) return sessionIntent ? current.succession.open(session, sessionIntent, keepOriginal, slotId) : attached ? current.succession.openAttached(attached, restoreLayout) : current.succession.open(session);
     const viewId = targetViewId ?? targetWindow.selectedPrimaryViewId, targetGroup = JSON.stringify([targetWindow.id, viewId]);
@@ -94,21 +95,25 @@ export function useWindowSessionBridge(options: Options) {
     }
     pending.current.set(targetGroup, (pending.current.get(targetGroup) ?? 0) + 1);
     try {
-      await current.operate(operation);
+      const saved = current.operate(operation);
+      void saved.catch(error => {
+        const active = latest.current.readWindow ? latest.current.readWindow() : latest.current.window;
+        if (active?.id === targetWindow.id) latest.current.onError(error);
+      });
       const next = latest.current;
-      const committed = next.readWindow ? next.readWindow() : next.window;
-      if (committed?.id !== targetWindow.id) return false;
-      const binding = committed.views.find(view => view.id === viewId)?.binding;
+      const projectedWindow = next.readWindow ? next.readWindow() : next.window;
+      if (projectedWindow?.id !== targetWindow.id) return false;
+      const binding = projectedWindow.views.find(view => view.id === viewId)?.binding;
       if (!binding || windowBindingKey(binding) !== windowBindingKey(requestedBinding)) return false;
-      const slot = next.succession.ensureWindowView(committed.id, viewId, binding);
+      const slot = next.succession.ensureWindowView(projectedWindow.id, viewId, binding);
       adopted.current.add(targetGroup);
-      if (committed.selectedPrimaryViewId !== viewId) return true;
+      if (projectedWindow.selectedPrimaryViewId !== viewId) return true;
       projectedGroup.current = targetGroup;
-      next.succession.projectWindow(committed);
+      next.succession.projectWindow(projectedWindow);
       const opened = await next.succession.open(session, sessionIntent, keepOriginal, slot.id, undefined, undefined, attached, restoreLayout);
       const active = latest.current.readWindow ? latest.current.readWindow() : latest.current.window;
       const activeBinding = active?.views.find(view => view.id === viewId)?.binding;
-      if (active?.id !== committed.id || !activeBinding || windowBindingKey(activeBinding) !== windowBindingKey(requestedBinding)) return false;
+      if (active?.id !== projectedWindow.id || !activeBinding || windowBindingKey(activeBinding) !== windowBindingKey(requestedBinding)) return false;
       if (active.selectedPrimaryViewId !== viewId) return true;
       if (opened) latest.current.succession.projectWindow(active);
       return opened;

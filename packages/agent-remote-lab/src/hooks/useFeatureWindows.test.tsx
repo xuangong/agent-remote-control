@@ -16,7 +16,7 @@ it('projects remote feature opening and closing through existing Ask owners and 
   let tpm!: ReturnType<typeof useTpmWork>, ask!: ReturnType<typeof useAskConversations>, operate!: (op: WindowOperation) => void;
   let current!: WorkspaceWindow;
   function Harness() {
-    const [window, setWindow] = useState<WorkspaceWindow>({ schemaVersion: 1, id: 'window', revision: 0, title: 'Window', primaryViewId: 'main', selectedViewId: 'main', mainMinimized: false, views: [createWindowView('main', { hostId: source.hostId, providerId: source.providerId, nativeSessionId: source.nativeSessionId, title: source.title }, 'primary')] });
+    const [window, setWindow] = useState<WorkspaceWindow>({ schemaVersion: 2, id: 'window', revision: 0, title: 'Window', selectedPrimaryViewId: 'main', selectedViewId: 'main', views: [createWindowView('main', { hostId: source.hostId, providerId: source.providerId, nativeSessionId: source.nativeSessionId, title: source.title }, 'primary')] });
     current = window; operate = operation => setWindow(value => applyWindowOperation(value, operation));
     const authority = { window, operate };
     tpm = useTpmWork(service, [{ id: 'host', name: 'Host', online: true }], true, async value => ({ ...value, agentId: 'agent' }), true, document.scope, authority);

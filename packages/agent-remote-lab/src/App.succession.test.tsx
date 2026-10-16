@@ -4,7 +4,7 @@ import { createHash, webcrypto } from 'node:crypto';
 import { act, StrictMode, useContext, useState, type ComponentProps } from 'react';
 import { WebSocket, WebSocketServer } from 'ws';
 import { afterEach, expect, it, vi } from 'vitest';
-import { PROTOCOL_VERSION, type AgentChildSession, type ProjectedTimelineEntry, type SessionSuccessionReplay, type Team } from '@orchardworks/agent-remote-protocol';
+import { PROTOCOL_VERSION, applyWindowOperation, createWindowView, type WindowMutation, type WorkspaceWindow, type AgentChildSession, type ProjectedTimelineEntry, type SessionSuccessionReplay, type Team } from '@orchardworks/agent-remote-protocol';
 import { configureImageDraftPersistence, inspectImageDraft, readImageDraft, writeImageDraft } from '@orchardworks/agent-remote-web/browser';
 import { HttpWebSocketTransport } from '@orchardworks/agent-remote-web';
 import { CommunicationNavigationContext, type CommunicationNavigation } from '@orchardworks/agent-remote-web/react';
@@ -34,6 +34,9 @@ import * as starsHooks from './hooks/useSessionStars.js';
 import * as attentionHooks from './hooks/useSessionAttention.js';
 import type { FavoritesSnapshot } from './session-stars-client.js';
 import * as managerComponents from './components/ChatSessionManager.js';
+import * as directoryComponents from './components/SessionDirectory.js';
+import * as favoritesComponents from './components/SessionFavorites.js';
+import * as windowWorkspaceHooks from './hooks/useWindowWorkspace.js';
 import { saveWorkspaceSnapshot } from './workspace-cache.js';
 
 function saveSessionComposition(scope: string, value: { path: OpenedSession[]; focus?: string; anchor?: string; addressKey: string }) {
@@ -50,9 +53,12 @@ function committed(from = 'A', to = 'B', revision = 2, roleId = 'primary', provi
       receipt: { ...request, to: native(to, providerId), phase: 'committed', committedRevision: revision, startedAt: 'now', updatedAt: 'now',
         prepared: { ...request, to: native(to, providerId), workspace, associationRevision: 1, participants: [], capture: { epoch: 'epoch', seq: 1, capturedAt: 'now' } } } } };
 }
-async function failureFixture(advanceDuringRecovery = false, nativeIdentity?: string | null, strict = false, flags = '', setup?: { persistPrompt?: boolean; successionCommit?(): SuccessionActionResult; successionPrepare?(body: Record<string, unknown>): Promise<SuccessionActionResult>; teams?(): Team[]; chain?: SessionSuccessionReplay[]; replayFailure?: string; selected?: string; providerId?: string; userScoped?: boolean; favorites?: FavoritesSnapshot; holdRelationsInitially?: boolean; holdReplayInitially?: boolean; holdTimelineInitially?: boolean; holdSnapshotInitially?: boolean; holdAccessInitially?: boolean; nativeConnection?: 'connected' | 'restoring'; preserveNativeState?: boolean; children?: AgentChildSession[]; timeline?: ProjectedTimelineEntry[]; nativeStatus?: 'idle' | 'running'; successionDescription?: SuccessionDescription; successionStatus?(): SuccessionActionResult; attachmentFailure?(body: Record<string, unknown>): { status: number; payload: unknown } | undefined; seed?(scope: string, source: OpenedSession): void | Promise<void> }) {
+async function failureFixture(advanceDuringRecovery = false, nativeIdentity?: string | null, strict = false, flags = '', setup?: { beforeWindowMutation?(mutation: WindowMutation): Promise<void>; windowDocument?: WorkspaceWindow; persistPrompt?: boolean; successionCommit?(): SuccessionActionResult; successionPrepare?(body: Record<string, unknown>): Promise<SuccessionActionResult>; teams?(): Team[]; chain?: SessionSuccessionReplay[]; replayFailure?: string; selected?: string; providerId?: string; userScoped?: boolean; favorites?: FavoritesSnapshot; holdRelationsInitially?: boolean; holdReplayInitially?: boolean; holdTimelineInitially?: boolean; holdSnapshotInitially?: boolean; holdAccessInitially?: boolean; nativeConnection?: 'connected' | 'restoring'; preserveNativeState?: boolean; children?: AgentChildSession[]; timeline?: ProjectedTimelineEntry[]; nativeStatus?: 'idle' | 'running'; successionDescription?: SuccessionDescription; successionStatus?(): SuccessionActionResult; attachmentFailure?(body: Record<string, unknown>): { status: number; payload: unknown } | undefined; seed?(scope: string, source: OpenedSession): void | Promise<void> }) {
   configureImageDraftPersistence(() => setup?.persistPrompt === true);
   const requests: Array<{ url: string; body?: Record<string, unknown> }> = [];
+  const hostedWindows = new Map<string, WorkspaceWindow>();
+  const windowReceipts = new Map<string, unknown>();
+  if (setup?.windowDocument) hostedWindows.set(setup.windowDocument.id, setup.windowDocument);
   const providerId = setup?.providerId ?? 'recorded';
   const nativeBindings = new Map<string, string>();
   const nativeFor = (agentId: string) => [...nativeBindings].find(([, binding]) => binding === agentId)?.[0] ?? agentId.slice('agent-'.length);
@@ -81,6 +87,37 @@ async function failureFixture(advanceDuringRecovery = false, nativeIdentity?: st
     let body: Record<string, unknown> | undefined;
     if (request.method === 'POST') { let data = ''; for await (const chunk of request) data += String(chunk); body = JSON.parse(data); }
     requests.push({ url: request.url!, body });
+    if ((setup?.userScoped || setup?.windowDocument) && url.pathname.startsWith('/v1/windows')) {
+      if (url.pathname.endsWith('/changes')) { await new Promise<void>(resolve => response.once('close', resolve)); return; }
+      const segments = url.pathname.split('/').filter(Boolean), id = segments[2];
+      let payload: unknown;
+      if (request.method === 'POST') {
+        let document: WorkspaceWindow;
+        if (!id) document = body!.window as WorkspaceWindow;
+        else {
+          await setup.beforeWindowMutation?.(body as unknown as WindowMutation);
+          try { document = applyWindowOperation(hostedWindows.get(id)!, (body as unknown as WindowMutation).operation); }
+          catch (error) {
+            const current = hostedWindows.get(id)!;
+            const result = { operationId: body!.operationId, status: 'rejected', revision: current.revision,
+              code: error && typeof error === 'object' && 'code' in error ? String(error.code) : 'invalid_operation',
+              message: error instanceof Error ? error.message : String(error), committedAt: Date.now(), expiresAt: Date.now() + 86400000 };
+            windowReceipts.set(String(body!.operationId), result);
+            response.setHeader('content-type', 'application/json'); response.end(JSON.stringify({ window: current, result })); return;
+          }
+        }
+        hostedWindows.set(document.id, document);
+        if (setup.windowDocument?.id === document.id) setup.windowDocument = document;
+        const result = { operationId: body!.operationId, status: 'committed', revision: document.revision,
+          committedAt: Date.now(), expiresAt: Date.now() + 86400000 };
+        windowReceipts.set(String(body!.operationId), result);
+        payload = { window: document, result };
+      } else if (segments[3] === 'operations') payload = { result: windowReceipts.get(segments[4]!) };
+      else if (!id) payload = { windows: [...hostedWindows.values()] };
+      else if (hostedWindows.has(id)) payload = { window: hostedWindows.get(id) };
+      else { response.statusCode = 404; payload = { code: 'window_not_found', error: 'Window is unavailable.' }; }
+      response.setHeader('content-type', 'application/json'); response.end(JSON.stringify(payload)); return;
+    }
     if (url.pathname.includes('/session-successions') && replayGate) await replayGate;
     if (url.pathname.includes('/session-successions') && replayFailure) { response.writeHead(404, { 'content-type': 'application/json' }); response.end(JSON.stringify({ code: replayFailure, error: 'Fixture succession route unavailable.' })); return; }
     let value: unknown;
@@ -222,7 +259,7 @@ async function settleApp(assertion: () => void) {
 
 function successionHistoryLink(view: HTMLElement, nativeSessionId: string): HTMLAnchorElement {
   const link = [...view.querySelectorAll<HTMLAnchorElement>('.lab-succession-history a')]
-    .find(link => new URL(link.href).searchParams.get('session') === nativeSessionId);
+    .find(link => !link.closest('[hidden]') && new URL(link.href).searchParams.get('session') === nativeSessionId);
   expect(link).toBeDefined(); return link!;
 }
 
@@ -234,8 +271,18 @@ function cachedConversation(nativeSessionId: string) {
     item: { type: 'assistant_message' as const, text: `Cached ${nativeSessionId} content` } }] } };
 }
 
+function visibleQuery<T extends Element = Element>(view: HTMLElement, selector: string): T | null {
+  return [...view.querySelectorAll<T>(selector)].find(element => !element.closest('[hidden]')) ?? null;
+}
+
+function visibleText(view: HTMLElement): string {
+  const copy = view.cloneNode(true) as HTMLElement;
+  for (const hidden of copy.querySelectorAll('[hidden]')) hidden.remove();
+  return copy.textContent ?? '';
+}
+
 async function editVisiblePrompt(view: HTMLElement, text: string) {
-  const editor = view.querySelector<HTMLElement>('[data-testid="prompt-input"]')!;
+  const editor = visibleQuery<HTMLElement>(view, '[data-testid="prompt-input"]')!;
   await act(async () => {
     if (editor instanceof HTMLTextAreaElement) Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!.call(editor, text);
     else editor.textContent = text;
@@ -350,14 +397,14 @@ it('shows exact cached content while replay and native attachment wait without g
   } });
   const releaseReplay = f.pauseReplay(), releaseAttach = f.holdAttach('B');
   try {
-    await settleApp(() => expect(f.view.textContent).toContain('Cached A content'));
+    await settleApp(() => expect(visibleText(f.view)).toContain('Cached A content'));
     expect(succession.binding).toBeUndefined(); expect(succession.isCurrent()).toBe(false);
     expect(succession.sessionState.connection).toBe('connecting');
     expect(succession.sessionState.operations.send_message.allowed).toBe(false);
     expect(f.requests.some(request => request.url.endsWith('/attach'))).toBe(false);
     await act(async () => releaseReplay());
-    await settleApp(() => { expect(succession.selected?.nativeSessionId).toBe('B'); expect(f.view.textContent).toContain('Cached B content'); });
-    expect(f.view.textContent).not.toContain('Cached A content');
+    await settleApp(() => { expect(succession.selected?.nativeSessionId).toBe('B'); expect(visibleText(f.view)).toContain('Cached B content'); });
+    expect(visibleText(f.view)).not.toContain('Cached A content');
     expect(succession.binding).toBeUndefined();
     expect(f.frames.some(frame => frame.message?.type === 'send_message')).toBe(false);
     await act(async () => releaseAttach());
@@ -370,62 +417,68 @@ it('retains edits made beside cached content before initial checks and native at
   const real = successionHooks.useSessionSuccession, realWorkbench = workbenchComponents.LabWorkbench;
   let succession!: ReturnType<typeof real>, primary!: ComponentProps<typeof realWorkbench>;
   vi.spyOn(successionHooks, 'useSessionSuccession').mockImplementation((...args) => { succession = real(...args); return succession; });
-  vi.spyOn(workbenchComponents, 'LabWorkbench').mockImplementation(props => { primary = props; return realWorkbench(props); });
+  vi.spyOn(workbenchComponents, 'LabWorkbench').mockImplementation(props => { if (props.state?.agent) primary = props; return realWorkbench(props); });
   const f = await failureFixture(false, 'B', false, '', { holdReplayInitially: true, seed(scope) {
     saveWorkspaceSnapshot(scope, { hostId: 'host', providerId: 'recorded', nativeSessionId: 'A' }, cachedConversation('A'));
   } });
   const releaseReplay = f.pauseReplay(), releaseAttach = f.holdAttach('B');
   try {
-    await settleApp(() => expect(f.view.textContent).toContain('Cached A content'));
+    await settleApp(() => expect(visibleText(f.view)).toContain('Cached A content'));
     const owner = primary.draftBinding;
     expect(owner).toBeDefined();
     expect(succession.binding).toBeUndefined();
     await editVisiblePrompt(f.view, 'Edited before checks completed');
     expect(owner!.store.get(owner!.key)).toBe('Edited before checks completed');
-    expect(f.view.querySelector('[data-testid="prompt-input"]')?.textContent).toBe('Edited before checks completed');
+    await settleApp(() => expect(visibleQuery(f.view, '[data-testid="prompt-input"]')?.textContent).toBe('Edited before checks completed'));
     await act(async () => releaseReplay());
     await settleApp(() => expect(succession.selected?.nativeSessionId).toBe('B'));
     expect(primary.draftBinding).toEqual(owner);
-    expect(f.view.querySelector('[data-testid="prompt-input"]')?.textContent).toBe('Edited before checks completed');
+    await settleApp(() => expect(visibleQuery(f.view, '[data-testid="prompt-input"]')?.textContent).toBe('Edited before checks completed'));
     await act(async () => releaseAttach());
     await settleApp(() => expect(succession.binding?.session.nativeSessionId).toBe('B'));
     expect(primary.draftBinding).toEqual(owner);
-    expect(f.view.querySelector('[data-testid="prompt-input"]')?.textContent).toBe('Edited before checks completed');
+    await settleApp(() => expect(visibleQuery(f.view, '[data-testid="prompt-input"]')?.textContent).toBe('Edited before checks completed'));
     expect(f.frames.filter(frame => frame.message?.type === 'send_message')).toEqual([]);
   } finally { releaseReplay(); releaseAttach(); }
 });
 
 it('retains the selected session draft while cached navigation waits for checks and binding', async () => {
   const real = successionHooks.useSessionSuccession, realWorkbench = workbenchComponents.LabWorkbench;
+  const realDirectory = directoryComponents.SessionDirectory;
+  let directory!: ComponentProps<typeof realDirectory>;
+  vi.spyOn(directoryComponents, 'SessionDirectory').mockImplementation(props => { directory = props; return realDirectory(props); });
   let succession!: ReturnType<typeof real>, primary!: ComponentProps<typeof realWorkbench>;
   vi.spyOn(successionHooks, 'useSessionSuccession').mockImplementation((...args) => { succession = real(...args); return succession; });
-  vi.spyOn(workbenchComponents, 'LabWorkbench').mockImplementation(props => { primary = props; return realWorkbench(props); });
+  vi.spyOn(workbenchComponents, 'LabWorkbench').mockImplementation(props => { if (props.state?.agent) primary = props; return realWorkbench(props); });
   const f = await failureFixture(false, 'B', false, '', { chain: [], seed(scope) {
     saveWorkspaceSnapshot(scope, { hostId: 'host', providerId: 'recorded', nativeSessionId: 'C' }, cachedConversation('C'));
   } });
   await settleApp(() => expect(succession.binding?.session.nativeSessionId).toBe('A'));
   const releaseReplay = f.pauseReplay(), releaseAttach = f.holdAttach('C');
   try {
-    await act(async () => { void succession.open({ hostId: 'host', providerId: 'recorded', nativeSessionId: 'C', title: 'C' }); });
-    expect(f.view.textContent).toContain('Cached C content');
+    await act(async () => { directory.onSelect({ hostId: 'host', providerId: 'recorded', nativeSessionId: 'C', agentId: 'agent-C', title: 'C' }); });
+    expect(visibleText(f.view)).toContain('Cached C content');
     const owner = primary.draftBinding;
     expect(owner).toBeDefined();
     await editVisiblePrompt(f.view, 'C edit before connection');
     expect(owner!.store.get(owner!.key)).toBe('C edit before connection');
-    expect(f.view.querySelector('[data-testid="prompt-input"]')?.textContent).toBe('C edit before connection');
+    expect(visibleQuery(f.view, '[data-testid="prompt-input"]')?.textContent).toBe('C edit before connection');
     await act(async () => releaseReplay());
     await settleApp(() => expect(succession.desired?.target.native.nativeSessionId).toBe('C'));
     expect(primary.draftBinding).toEqual(owner);
     await act(async () => releaseAttach());
     await settleApp(() => expect(succession.binding?.session.nativeSessionId).toBe('C'));
     expect(primary.draftBinding).toEqual(owner);
-    expect(f.view.querySelector('[data-testid="prompt-input"]')?.textContent).toBe('C edit before connection');
+    expect(visibleQuery(f.view, '[data-testid="prompt-input"]')?.textContent).toBe('C edit before connection');
     expect(f.frames.filter(frame => frame.message?.type === 'send_message')).toEqual([]);
   } finally { releaseReplay(); releaseAttach(); }
 });
 
 it('changes cached content immediately on session selection and clears it for uncached targets', async () => {
   const real = successionHooks.useSessionSuccession;
+  const realDirectory = directoryComponents.SessionDirectory;
+  let directory!: ComponentProps<typeof realDirectory>;
+  vi.spyOn(directoryComponents, 'SessionDirectory').mockImplementation(props => { directory = props; return realDirectory(props); });
   let succession!: ReturnType<typeof real>;
   vi.spyOn(successionHooks, 'useSessionSuccession').mockImplementation((...args) => { succession = real(...args); return succession; });
   const f = await failureFixture(false, 'B', false, '', { chain: [], timeline: cachedConversation('A').timeline.entries, seed(scope) {
@@ -433,17 +486,16 @@ it('changes cached content immediately on session selection and clears it for un
   } });
   await settleApp(() => expect(succession.binding?.session.nativeSessionId).toBe('A'));
   const release = f.pauseReplay();
-  let first!: Promise<boolean>, second!: Promise<boolean>;
   try {
-    await act(async () => { first = succession.open({ hostId: 'host', providerId: 'recorded', nativeSessionId: 'C', title: 'C' }); });
-    expect(f.view.textContent).toContain('Cached C content');
-    expect(f.view.textContent).not.toContain('Cached A content');
+    await act(async () => { directory.onSelect({ hostId: 'host', providerId: 'recorded', nativeSessionId: 'C', agentId: 'agent-C', title: 'C' }); });
+    expect(visibleText(f.view)).toContain('Cached C content');
+    expect(visibleText(f.view)).not.toContain('Cached A content');
     expect(succession.binding).toBeUndefined();
-    await act(async () => { second = succession.open({ hostId: 'host', providerId: 'recorded', nativeSessionId: 'D', title: 'D' }); });
+    await act(async () => { directory.onSelect({ hostId: 'host', providerId: 'recorded', nativeSessionId: 'D', agentId: 'agent-D', title: 'D' }); });
     expect(succession.selected?.nativeSessionId).toBe('D');
     expect(succession.state).toBeUndefined();
-    expect(f.view.textContent).not.toContain('Cached C content');
-    await act(async () => { release(); await Promise.all([first, second]); });
+    expect(visibleText(f.view)).not.toContain('Cached C content');
+    await act(async () => { release(); });
     await settleApp(() => expect(succession.binding?.session.nativeSessionId).toBe('D'));
   } finally { release(); }
 });
@@ -453,10 +505,10 @@ it('keeps already visible content during workspace access recovery with no usabl
   let succession!: ReturnType<typeof real>;
   vi.spyOn(successionHooks, 'useSessionSuccession').mockImplementation((...args) => { succession = real(...args); return succession; });
   const f = await failureFixture(false, 'B', false, '', { chain: [], timeline: cachedConversation('A').timeline.entries });
-  await settleApp(() => { expect(succession.binding?.session.nativeSessionId).toBe('A'); expect(f.view.textContent).toContain('Cached A content'); });
+  await settleApp(() => { expect(succession.binding?.session.nativeSessionId).toBe('A'); expect(visibleText(f.view)).toContain('Cached A content'); });
   await act(async () => f.setAccessReady(false));
   expect(succession.binding).toBeUndefined(); expect(succession.isCurrent()).toBe(false);
-  expect(f.view.textContent).toContain('Cached A content');
+  expect(visibleText(f.view)).toContain('Cached A content');
   expect(succession.sessionState.operations.send_message.allowed).toBe(false);
   const before = f.frames.filter(frame => frame.message?.type === 'send_message').length;
   await act(async () => f.setAccessReady(true));
@@ -479,7 +531,7 @@ it('opens predecessor A from current B, reloads its concrete history and returns
   expect(new URL(window.location.href).searchParams.get('intent')).toBe('history');
   expect(succession.desired!.slot.intent.kind).toBe('history');
   expect(succession.document.slots.find(slot => slot.id === currentSlot)?.owners).toEqual(owners);
-  expect(f.view.querySelector('[data-testid="prompt-input"]')?.textContent).toBe('');
+  expect(visibleQuery(f.view, '[data-testid="prompt-input"]')?.textContent).toBe('');
   await f.reload();
   await settleApp(() => expect(succession.binding?.session.nativeSessionId).toBe('A'));
   const returnLink = successionHistoryLink(f.view, 'B');
@@ -490,7 +542,7 @@ it('opens predecessor A from current B, reloads its concrete history and returns
   expect(new URL(window.location.href).searchParams.has('intent')).toBe(false);
   expect(succession.desired!.slot.id).toBe(currentSlot);
   expect(succession.desired!.slot.owners).toEqual(owners);
-  expect(f.view.querySelector('[data-testid="prompt-input"]')?.textContent).toBe('A local draft');
+  expect(visibleQuery(f.view, '[data-testid="prompt-input"]')?.textContent).toBe('A local draft');
   expect(f.requests.some(request => request.url.endsWith('/create'))).toBe(false);
   expect(f.frames.some(frame => ['send_message', 'execute_command', 'image_upload_begin'].includes(frame.message?.type ?? ''))).toBe(false);
 }, 10000);
@@ -502,7 +554,7 @@ it('shows A-B-C handoff history once in reverse order while ordinary A navigatio
   vi.spyOn(historyHooks, 'useConversationHistory').mockImplementation((...args) => { open = args[2]; return realHistory(...args); });
   const f = await failureFixture(false, 'B', false, '', { chain: [committed(), committed('B', 'C', 3)] });
   await settleApp(() => expect(succession.binding?.session.nativeSessionId).toBe('C'));
-  const nav = f.view.querySelector('.lab-succession-history')!;
+  const nav = visibleQuery(f.view, '.lab-succession-history')!;
   expect([...nav.querySelectorAll<HTMLAnchorElement>('a')].map(link => new URL(link.href).searchParams.get('session'))).toEqual(['B', 'A']);
   expect(nav.querySelector('details')?.open).toBe(false);
   expect(nav.querySelectorAll('a')).toHaveLength(2);
@@ -511,8 +563,8 @@ it('shows A-B-C handoff history once in reverse order while ordinary A navigatio
   expect(new URL(window.location.href).searchParams.get('intent')).toBe('history');
   await act(async () => successionHistoryLink(f.view, 'C').click());
   await settleApp(() => expect(succession.binding?.session.nativeSessionId).toBe('C'));
-  await act(async () => f.view.querySelector<HTMLElement>('.lab-succession-history summary')!.click());
-  expect(f.view.querySelector<HTMLDetailsElement>('.lab-succession-history details')?.open).toBe(true);
+  await act(async () => visibleQuery<HTMLElement>(f.view, '.lab-succession-history summary')!.click());
+  expect(visibleQuery<HTMLDetailsElement>(f.view, '.lab-succession-history details')?.open).toBe(true);
   await act(async () => successionHistoryLink(f.view, 'A').click());
   await settleApp(() => expect(succession.binding?.session.nativeSessionId).toBe('A'));
   await f.reload();
@@ -536,7 +588,7 @@ it('removes handoff navigation when fresh authorized replay is denied', async ()
   f.failReplay('succession_not_found');
   await act(async () => { await succession.refresh(); });
   expect(succession.historyNavigation).toBeUndefined();
-  expect(f.view.querySelector('.lab-succession-history')).toBeNull();
+  expect(visibleQuery(f.view, '.lab-succession-history')).toBeNull();
 }, 10000);
 
 it('waits for the selected native successor before reporting a committed refresh complete', async () => {
@@ -716,7 +768,7 @@ async function handoffCommandFixture(options: { nativeStatus?: 'idle' | 'running
   Object.defineProperty(HTMLDialogElement.prototype, 'showModal', { configurable: true, value() { this.open = true; } });
   const real = workbenchComponents.LabWorkbench;
   let primary!: ComponentProps<typeof real>;
-  vi.spyOn(workbenchComponents, 'LabWorkbench').mockImplementation(props => { primary = props; return real(props); });
+  vi.spyOn(workbenchComponents, 'LabWorkbench').mockImplementation(props => { if (props.state?.agent) primary = props; return real(props); });
   const ref = native('A', 'opencode');
   const description: SuccessionDescription = { role: { id: 'primary', revision: 1, origin: ref, current: ref,
     workspace: { controllerId: 'installation', canonicalCwd: '/fixture' } },
@@ -801,7 +853,7 @@ it('refreshes successor context after Composer delivery without waiting for a na
   const real = workbenchComponents.LabWorkbench;
   let primary!: ComponentProps<typeof real>, reads = 0;
   const pendingCounts: number[] = [];
-  vi.spyOn(workbenchComponents, 'LabWorkbench').mockImplementation(props => { primary = props; return real({ ...props,
+  vi.spyOn(workbenchComponents, 'LabWorkbench').mockImplementation(props => { if (props.state?.agent) primary = props; return real({ ...props,
     onPendingInputChange: count => { pendingCounts.push(count); props.onPendingInputChange?.(count); },
   }); });
   const replay = committed();
@@ -856,7 +908,7 @@ it('old desktop A notification still opens concrete A history after B and C conf
     attention = realAttention(scope, active, session => { opened.push(structuredClone(session)); open(session); }); return attention;
   });
   vi.spyOn(successionHooks, 'useSessionSuccession').mockImplementation((...args) => { succession = realSuccession(...args); return succession; });
-  vi.spyOn(workbenchComponents, 'LabWorkbench').mockImplementation(props => { primary = props; return realWorkbench(props); });
+  vi.spyOn(workbenchComponents, 'LabWorkbench').mockImplementation(props => { if (props.state?.agent) primary = props; return realWorkbench(props); });
   let source!: OpenedSession;
   const entry: ProjectedTimelineEntry = { providerId: 'recorded', seqStart: 1, seqEnd: 1, timestamp: 'now', turnId: 'A-turn', resources: [], collapsed: [], sourceSeqRanges: [{ startSeq: 1, endSeq: 1 }],
     item: { type: 'assistant_message', text: 'Original A completion' } };
@@ -878,7 +930,7 @@ it('old desktop A notification still opens concrete A history after B and C conf
   }
   const beforeClick = f.requests.length;
   await act(async () => original.onclick!());
-  await settleApp(() => { expect(primary.state?.agent?.id).toBe('agent-A'); expect(primary.state?.timeline.initialized).toBe(true); });
+  await settleApp(() => { expect(succession.binding?.session.nativeSessionId).toBe('A'); expect(primary.state?.agent?.id).toBe('agent-A'); expect(primary.state?.timeline.initialized).toBe(true); expect(new URL(window.location.href).searchParams.get('session')).toBe('A'); });
   expect(opened).toEqual([locator]);
   expect(source).toEqual(locator);
   expect(original.options.tag).toBe(`arc:${receipt}`);
@@ -890,7 +942,7 @@ it('old desktop A notification still opens concrete A history after B and C conf
   expect(succession.desired?.slot.intent).toMatchObject({ kind: 'history', target: { native: { providerId: 'recorded', nativeSessionId: 'A' } } });
   expect(succession.desired?.slot.owners.text.key).toMatch(/^view:/);
   expect(f.view.textContent).toContain('Original A completion');
-  expect(f.view.querySelector('[data-testid="prompt-input"]')?.textContent).toBe('');
+  expect(visibleQuery(f.view, '[data-testid="prompt-input"]')?.textContent).toBe('');
   expect(f.requests.slice(beforeClick).filter(item => item.url.endsWith('/attach')).map(item => item.body?.nativeSessionId)).toEqual(['A']);
   expect(f.frames.some(frame => ['send_message', 'execute_command', 'image_upload_begin'].includes(frame.message?.type ?? ''))).toBe(false);
 });
@@ -910,7 +962,7 @@ it.each([false, true])('first complete A-B-C discovery retains the origin owners
   await vi.waitFor(async () => { await act(async () => { await new Promise(resolve => setTimeout(resolve, 20)); }); expect(succession.desired?.slot.owners.text.key).toBe('agent-A'); });
   await settleApp(() => expect(succession.binding?.session.nativeSessionId).toBe('C'));
   expect(succession.result?.status).toBe('applied');
-  expect(f.view.querySelector('[data-testid="prompt-input"]')?.textContent).toContain('A local draft');
+  expect(visibleQuery(f.view, '[data-testid="prompt-input"]')?.textContent).toContain('A local draft');
   expect(succession.desired?.slot.owners).toEqual({ text: { scope: f.scope, key: 'agent-A' },
     image: { scope: f.scope, key: JSON.stringify([f.scope, sessionKey(source)]) }, display: { scope: f.scope, key: sessionKey(source) } });
   const image = (await readImageDraft(succession.desired!.slot.owners.image.key))?.images['origin-image'];
@@ -936,7 +988,7 @@ it.each(['confirmed', 'failed'] as const)('reopening current B preserves its %s 
     if (outcome === 'confirmed') expect(succession.binding?.session.nativeSessionId).toBe('B');
     else expect(succession.error).toBe('Fixture successor unavailable.');
   });
-  const editor = f.view.querySelector('[data-testid="prompt-input"]'), owners = structuredClone(succession.desired!.slot.owners), binding = succession.binding;
+  const editor = visibleQuery(f.view, '[data-testid="prompt-input"]'), owners = structuredClone(succession.desired!.slot.owners), binding = succession.binding;
   await act(async () => { expect(await open({ hostId: 'host', providerId: 'recorded', nativeSessionId: 'B', title: 'Current B' })).toBe(true); });
   if (outcome === 'confirmed') { expect(succession.binding).toBe(binding); expect(succession.isCurrent()).toBe(true); }
   else {
@@ -950,7 +1002,7 @@ it.each(['confirmed', 'failed'] as const)('reopening current B preserves its %s 
     else expect(succession.error).toBe('Fixture successor unavailable.');
   }
   expect(succession.desired!.slot.owners).toEqual(owners);
-  expect(f.view.querySelector('[data-testid="prompt-input"]')).toBe(editor);
+  expect(visibleQuery(f.view, '[data-testid="prompt-input"]')).toBe(editor);
   expect(editor?.textContent).toBe('A local draft');
   expect(f.requests.filter(item => item.url.endsWith('/attach')).map(item => item.body?.nativeSessionId)).toEqual(['B']);
   if (outcome === 'failed') {
@@ -966,12 +1018,12 @@ it('access suspension keeps hot B ownership and resumes only after authoritative
   const real = successionHooks.useSessionSuccession, realWorkbench = workbenchComponents.LabWorkbench;
   let succession!: ReturnType<typeof real>, primary!: ComponentProps<typeof realWorkbench>;
   vi.spyOn(successionHooks, 'useSessionSuccession').mockImplementation((...args) => { succession = real(...args); return succession; });
-  vi.spyOn(workbenchComponents, 'LabWorkbench').mockImplementation(props => { primary = props; return realWorkbench(props); });
+  vi.spyOn(workbenchComponents, 'LabWorkbench').mockImplementation(props => { if (props.state?.agent) primary = props; return realWorkbench(props); });
   const f = await failureFixture(false, 'B', false, '', { chain: [] });
   await settleApp(() => expect(primary.state?.agent?.id).toBe('agent-A'));
   const next = committed(); f.chain.push(next); await act(async () => f.notify(next));
   await settleApp(() => expect(succession.binding?.session.nativeSessionId).toBe('B'));
-  const editor = f.view.querySelector('[data-testid="prompt-input"]'), owners = structuredClone(succession.desired!.slot.owners);
+  const editor = visibleQuery(f.view, '[data-testid="prompt-input"]'), owners = structuredClone(succession.desired!.slot.owners);
   const oldRecipient = succession.imageRecipient!, oldPrimary = primary;
   const beforeRequests = f.requests.length, beforeFrames = f.frames.length;
   await act(async () => f.setAccessReady(false));
@@ -982,7 +1034,7 @@ it('access suspension keeps hot B ownership and resumes only after authoritative
   expect(primary.state?.agent?.id).not.toBe('agent-A');
   expect(primary.draftOnly).toBe(true); expect(succession.isCurrent()).toBe(false); expect(oldRecipient.isCurrent()).toBe(false);
   expect(succession.desired!.slot.owners).toEqual(owners);
-  expect(f.view.querySelector('[data-testid="prompt-input"]')).toBe(editor);
+  expect(visibleQuery(f.view, '[data-testid="prompt-input"]')).toBe(editor);
   await act(async () => { primary.draftBinding!.store.set(primary.draftBinding!.key, 'Edited while access paused'); });
   expect(editor?.textContent).toBe('Edited while access paused');
   await expect(oldPrimary.actions.sendMessage!('Must remain local')).rejects.toThrow();
@@ -998,7 +1050,7 @@ it('access suspension keeps hot B ownership and resumes only after authoritative
   await settleApp(() => expect(succession.binding?.session.nativeSessionId).toBe('B'));
   expect(succession.imageRecipient?.isCurrent()).toBe(true); expect(oldRecipient.isCurrent()).toBe(false);
   expect(succession.desired!.slot.owners).toEqual(owners);
-  expect(f.view.querySelector('[data-testid="prompt-input"]')).toBe(editor);
+  expect(visibleQuery(f.view, '[data-testid="prompt-input"]')).toBe(editor);
   expect(f.requests.slice(beforeRequests).filter(item => item.url.endsWith('/attach')).every(item => item.body?.nativeSessionId === 'B')).toBe(true);
   expect(new URL(window.location.href).searchParams.get('session')).toBe('B');
   expect(readLastSession(f.scope)?.nativeSessionId).toBe('B');
@@ -1016,7 +1068,7 @@ it('newer Favorites progress with the same tree revision recovers missed success
   const f = await failureFixture(false, 'B', false, '', { userScoped: true, favorites: snapshot(2) });
   await settleApp(() => { expect(succession.binding?.session.nativeSessionId).toBe('B'); expect(favorites.ready).toBe(true); });
   const queries = () => f.requests.filter(item => item.url.includes('/session-successions?')).length;
-  const before = queries(), editor = f.view.querySelector('[data-testid="prompt-input"]');
+  const before = queries(), editor = visibleQuery(f.view, '[data-testid="prompt-input"]');
   f.chain.push(committed('B', 'C', 3)); f.setFavorites(snapshot(3));
   const release = f.pauseReplay();
   try {
@@ -1027,7 +1079,7 @@ it('newer Favorites progress with the same tree revision recovers missed success
     expect(f.requests.filter(item => item.url.endsWith('/attach')).map(item => item.body?.nativeSessionId)).toEqual(['B']);
   } finally { release(); }
   await settleApp(() => expect(succession.binding?.session.nativeSessionId).toBe('C'));
-  expect(f.view.querySelector('[data-testid="prompt-input"]')).toBe(editor);
+  expect(visibleQuery(f.view, '[data-testid="prompt-input"]')).toBe(editor);
   expect(editor?.textContent).toBe('A local draft');
   const after = queries();
   for (const value of [snapshot(3), snapshot(2), snapshot(2, 'pending'), { revision: 7, folders: [], stars: snapshot(3).stars }]) {
@@ -1049,7 +1101,7 @@ it('discovers desired B over HTTP before any A attach, retains its owner on fail
   const f = await failureFixture();
   await vi.waitFor(async () => { await act(async () => { await new Promise(resolve => setTimeout(resolve, 20)); }); expect(f.view.textContent).toContain('Fixture successor unavailable.'); });
   expect(f.requests.filter(item => item.url.endsWith('/attach')).map(item => item.body?.nativeSessionId)).toEqual(['B']);
-  expect(f.view.querySelector('[data-testid="prompt-input"]')?.textContent).toBe('A local draft');
+  expect(visibleQuery(f.view, '[data-testid="prompt-input"]')?.textContent).toBe('A local draft');
   const saved = readCompositionDocument(f.scope);
   expect(saved.status).toBe('ready');
   if (saved.status === 'ready') expect(saved.document.slots[0]?.intent).toMatchObject({ kind: 'role', revision: 2, target: { native: native('B') } });
@@ -1058,7 +1110,7 @@ it('discovers desired B over HTTP before any A attach, retains its owner on fail
     expect(retry).toBeDefined(); retry!.click();
     await vi.waitFor(() => expect(f.requests.filter(item => item.url.endsWith('/attach'))).toHaveLength(2));
   });
-  expect(f.requests.filter(item => item.body).every(item => item.url.endsWith('/attach'))).toBe(true);
+  expect(f.requests.filter(item => item.body && !item.url.startsWith('/v1/windows') && !item.url.endsWith('/attach') && !item.url.endsWith('/succession/status')).map(item => item.url)).toEqual([]);
 });
 
 it('uses C when current advances during initial A enrollment after the discovery page reported B', async () => {
@@ -1077,18 +1129,23 @@ it('uses C when current advances during initial A enrollment after the discovery
 it.each([null, 'wrong-native'])('keeps the opaque draft editable and refuses native input for snapshot identity %s', async identity => {
   const f = await failureFixture(false, identity);
   await vi.waitFor(async () => { await act(async () => { await new Promise(resolve => setTimeout(resolve, 20)); }); expect(f.view.textContent).toContain('The native session identity could not be confirmed.'); });
-  expect(f.view.querySelector('[data-testid="prompt-input"]')?.textContent).toBe('A local draft');
+  expect(visibleQuery(f.view, '[data-testid="prompt-input"]')?.textContent).toBe('A local draft');
   expect(f.frames.some(frame => frame.message?.type === 'send_message')).toBe(false);
   expect(f.requests.filter(item => item.url.endsWith('/attach')).map(item => item.body?.nativeSessionId)).toEqual(['B']);
 });
 
 it('confirms only B through the real session channel in StrictMode and keeps its view during native recovery', async () => {
+  const real = successionHooks.useSessionSuccession;
+  let succession!: ReturnType<typeof real>;
+  vi.spyOn(successionHooks, 'useSessionSuccession').mockImplementation((...args) => { succession = real(...args); return succession; });
   const f = await failureFixture(false, 'B', true);
-  await vi.waitFor(async () => { await act(async () => { await new Promise(resolve => setTimeout(resolve, 20)); }); expect(f.view.querySelector('.lab-has-agent')).not.toBeNull(); });
-  expect(f.view.querySelector('[data-testid="prompt-input"]')?.textContent).toBe('A local draft');
+  await vi.waitFor(async () => { await act(async () => { await new Promise(resolve => setTimeout(resolve, 20)); }); expect(succession.binding?.session.nativeSessionId).toBe('B');
+    expect(visibleQuery(f.view, '.lab-primary-conversation [data-testid="prompt-input"]')).not.toBeNull(); });
+  const editor = visibleQuery(f.view, '.lab-primary-conversation [data-testid="prompt-input"]');
+  expect(editor?.textContent).toBe('A local draft');
   await act(async () => { for (const update of f.updates) update('B', 'restoring'); });
   await vi.waitFor(async () => { await act(async () => { await new Promise(resolve => setTimeout(resolve, 20)); }); expect(f.view.textContent).toContain('Native runtime is restoring this session.'); });
-  expect(f.view.querySelector('.lab-has-agent')).not.toBeNull();
+  expect(visibleQuery(f.view, '.lab-primary-conversation [data-testid="prompt-input"]')).toBe(editor);
   await act(async () => { for (const update of f.updates) update('B'); });
   expect(f.frames.filter(frame => frame.type === 'subscribe').every(frame => frame.agentId === 'agent-B')).toBe(true);
   expect(f.requests.filter(item => item.url.endsWith('/attach')).map(item => item.body?.nativeSessionId)).toEqual(['B']);
@@ -1099,7 +1156,7 @@ it.each([['&keepOriginal=1', 'B', 'A local draft'], ['&intent=history', 'A', '']
   const f = await failureFixture(false, undefined, false, flags);
   await vi.waitFor(async () => { await act(async () => { await new Promise(resolve => setTimeout(resolve, 20)); }); expect(f.view.textContent).toContain('Fixture successor unavailable.'); });
   expect(f.requests.filter(item => item.url.endsWith('/attach')).map(item => item.body?.nativeSessionId)).toEqual([expected]);
-  expect(f.view.querySelector('[data-testid="prompt-input"]')?.textContent).toBe(draft);
+  expect(visibleQuery(f.view, '[data-testid="prompt-input"]')?.textContent).toBe(draft);
   const read = readCompositionDocument(f.scope);
   if (read.status !== 'ready') throw new Error('Missing composition.');
   const slot = read.document.slots.find(slot => slot.intent.kind === (flags.includes('history') ? 'history' : 'role'))!;
@@ -1260,7 +1317,7 @@ it('restores a selected Side path and focus while the primary changes from A to 
   await vi.waitFor(() => expect(succession.binding).toBeDefined());
   await vi.waitFor(() => expect(f.view.querySelector('.lab-side-conversation')).not.toBeNull());
   const sideId = succession.document.slots.find(slot => slot.intent.target.native.nativeSessionId === 'S')!.id;
-  expect(succession.layoutView()).toMatchObject({ primary: { nativeSessionId: 'B' }, sides: [side], focus: sideId, anchor: sideId });
+  await settleApp(() => expect(succession.layoutView()).toMatchObject({ primary: { nativeSessionId: 'B' }, sides: [side], focus: sideId, anchor: sideId }));
   const saved = readCompositionDocument(f.scope);
   if (saved.status !== 'ready') throw new Error('Missing composition.');
   const sideSlot = saved.document.slots.find(slot => slot.owners.text.key === side.agentId)!;
@@ -1277,14 +1334,14 @@ it('retains an authorized desired B after its replay endpoint becomes unavailabl
   await vi.waitFor(async () => { await act(async () => { await new Promise(resolve => setTimeout(resolve, 20)); }); expect(f.view.textContent).toContain('Fixture succession route unavailable.'); });
   expect(f.requests.filter(item => item.url.endsWith('/attach')).map(item => item.body?.nativeSessionId)).toEqual(['B']);
   expect(new URL(window.location.href).searchParams.get('session')).toBe('B');
-  expect(f.view.querySelector('[data-testid="prompt-input"]')?.textContent).toBe('A local draft');
+  expect(visibleQuery(f.view, '[data-testid="prompt-input"]')?.textContent).toBe('A local draft');
 });
 
 
 it.each(['A', 'B'])('retains a completed old-source creation before rejecting new configuration, input and navigation after %s changes', async initial => {
   const realWorkbench = workbenchComponents.LabWorkbench, realSuccession = successionHooks.useSessionSuccession;
   let primary!: ComponentProps<typeof realWorkbench>, succession!: ReturnType<typeof realSuccession>;
-  vi.spyOn(workbenchComponents, 'LabWorkbench').mockImplementation(props => { primary = props; return realWorkbench(props); });
+  vi.spyOn(workbenchComponents, 'LabWorkbench').mockImplementation(props => { if (props.state?.agent) primary = props; return realWorkbench(props); });
   vi.spyOn(successionHooks, 'useSessionSuccession').mockImplementation((...args) => { succession = realSuccession(...args); return succession; });
   const configure = vi.spyOn(forkActions, 'configureFork').mockRejectedValue(new Error('Unexpected target configuration'));
   const f = await failureFixture(false, 'B', false, '', initial === 'A' ? { chain: [] } : undefined);
@@ -1317,7 +1374,7 @@ it.each(['A', 'B'].flatMap(initial => ['child', 'child-mobile', 'communication',
   vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} });
   const realWorkbench = workbenchComponents.LabWorkbench, realSuccession = successionHooks.useSessionSuccession;
   let primary!: ComponentProps<typeof realWorkbench>, succession!: ReturnType<typeof realSuccession>, communication: CommunicationNavigation | undefined;
-  vi.spyOn(workbenchComponents, 'LabWorkbench').mockImplementation(props => { const navigation = useContext(CommunicationNavigationContext); if (props.state?.agent?.id !== 'agent-S') { primary = props; communication = navigation; } return realWorkbench(props); });
+  vi.spyOn(workbenchComponents, 'LabWorkbench').mockImplementation(props => { const navigation = useContext(CommunicationNavigationContext); if (props.state?.agent && props.state.agent.id !== 'agent-S') { primary = props; communication = navigation; } return realWorkbench(props); });
   vi.spyOn(successionHooks, 'useSessionSuccession').mockImplementation((...args) => { succession = realSuccession(...args); return succession; });
   const configure = vi.spyOn(forkActions, 'configureFork').mockRejectedValue(new Error('Unexpected stale operation configuration'));
   const providerId = 'recorded';
@@ -1377,7 +1434,7 @@ it('rejects a retired source after awaiting Ask relations before creating any na
   vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} });
   const realWorkbench = workbenchComponents.LabWorkbench, realSuccession = successionHooks.useSessionSuccession;
   let primary!: ComponentProps<typeof realWorkbench>, succession!: ReturnType<typeof realSuccession>;
-  vi.spyOn(workbenchComponents, 'LabWorkbench').mockImplementation(props => { primary = props; return realWorkbench(props); });
+  vi.spyOn(workbenchComponents, 'LabWorkbench').mockImplementation(props => { if (props.state?.agent) primary = props; return realWorkbench(props); });
   vi.spyOn(successionHooks, 'useSessionSuccession').mockImplementation((...args) => { succession = realSuccession(...args); return succession; });
   const f = await failureFixture(false, 'B', false, '', { providerId: 'codex', userScoped: true, holdRelationsInitially: true });
   await vi.waitFor(async () => { await act(async () => { await new Promise(resolve => setTimeout(resolve, 20)); }); expect(primary.state?.agent?.id).toBe('agent-B'); });
@@ -1479,7 +1536,7 @@ it.each(['retention failure', 'draft edit'])('retains independent B stores and s
   expect(succession.document.tracks.map(({ entryId, view }) => ({ entryId, view }))).toEqual(trackedLayouts);
   expect(consumer.textStore(f.scope).get(independent.agentId)).toBe('Independent B draft');
   const text = boundary === 'draft edit' ? 'Edited while Ask retained' : 'A local draft';
-  expect(f.view.querySelector('[data-testid="prompt-input"]')?.textContent).toBe(text);
+  expect(visibleQuery(f.view, '[data-testid="prompt-input"]')?.textContent).toBe(text);
   expect(ask.entryFor(independent, independentOwner).record?.source.nativeSessionId).toBe('B');
   expect(ask.entryFor(independent, independentOwner).record?.target?.nativeSessionId).toBe('U');
   expect(succession.document.tracks.map(track => track.view?.primarySlot)).toEqual(expect.arrayContaining([succession.desired!.slot.id, independentSlot.id]));
@@ -1557,7 +1614,7 @@ it('retains desired B and the editable owner when the composition checkpoint can
   } });
   await vi.waitFor(async () => { await act(async () => { await new Promise(resolve => setTimeout(resolve, 20)); }); expect(f.view.textContent).toContain('Session composition needs synchronization'); });
   expect(f.requests.filter(item => item.url.endsWith('/attach'))).toEqual([]);
-  expect(f.view.querySelector('[data-testid="prompt-input"]')?.textContent).toBe('A local draft');
+  expect(visibleQuery(f.view, '[data-testid="prompt-input"]')?.textContent).toBe('A local draft');
   expect(new URL(window.location.href).searchParams.get('session')).toBe('B');
 });
 
@@ -1614,8 +1671,9 @@ it('opens retained B and the role through local view entries without sharing the
   await settleApp(() => expect(succession.binding?.session.nativeSessionId).toBe('B'));
   const originalSlot = succession.desired!.slot.id, originalClient = succession.binding!.client;
   const independent = succession.document.slots.find(slot => slot.owners.text.key === 'agent-B')!;
-  const primary = () => f.view.querySelector('.lab-primary-conversation')!;
+  const primary = () => visibleQuery(f.view, '.lab-primary-conversation')!;
   const clickView = async (title: string) => {
+    await settleApp(() => expect(primary()?.querySelector('.lab-chat-sessions-heading')).not.toBeNull());
     await act(async () => primary().querySelector<HTMLButtonElement>('.lab-chat-sessions-heading')!.click());
     const row = [...primary().querySelectorAll<HTMLButtonElement>('.lab-chat-session-row')].find(button => button.textContent?.includes(title));
     expect(row).toBeDefined(); expect(row!.disabled).toBe(false);
@@ -1754,7 +1812,7 @@ it('reattaches a restored Side to its new runtime binding while preserving the v
   expect(restored.owners).toEqual(owners); expect(succession.ownerFor(slot.id)).toBe(askOwner);
   expect(restored.metadata?.agentId).toBe('restarted-side-binding');
   expect(f.view.querySelector('.lab-side-conversation [data-testid="prompt-input"]')?.textContent).toBe('Side draft before runtime restart');
-  expect(f.frames.filter(frame => frame.type === 'subscribe').map(frame => frame.agentId)).toContain('restarted-side-binding');
+  await settleApp(() => expect(f.frames.filter(frame => frame.type === 'subscribe').map(frame => frame.agentId)).toContain('restarted-side-binding'));
   expect(f.frames.filter(frame => frame.message && ['send_message', 'execute_command', 'image_upload_begin'].includes(frame.message.type))).toEqual([]);
 });
 
@@ -1764,6 +1822,9 @@ it.each(['ordinary', 'Track'] as const)('leaves a focused unlinked Side through 
   vi.spyOn(successionHooks, 'useSessionSuccession').mockImplementation((...args) => { succession = real(...args); return succession; });
   vi.spyOn(managerComponents, 'ChatSessionManager').mockImplementation(props => { manager = props; return realManager(props); });
   vi.spyOn(attentionHooks, 'useSessionAttention').mockImplementation((...args) => ({ ...realAttention(...args), trackVisible: true }));
+  const realWindow = windowWorkspaceHooks.useWindowWorkspace;
+  let workspace!: ReturnType<typeof realWindow>;
+  vi.spyOn(windowWorkspaceHooks, 'useWindowWorkspace').mockImplementation((...args) => { workspace = realWindow(...args); return workspace; });
   let target!: OpenedSession, side!: OpenedSession, store!: ForkStore, recordId!: string;
   const f = await failureFixture(false, 'B', false, '', { chain: [], userScoped: navigation === 'Track', seed(scope, source) {
     target = { ...source, nativeSessionId: 'D', agentId: 'agent-D', title: 'New primary D' };
@@ -1799,7 +1860,9 @@ it.each(['ordinary', 'Track'] as const)('leaves a focused unlinked Side through 
     if (navigation === 'ordinary') await act(async () => manager.onOpen(session));
     else {
       await act(async () => f.view.querySelector<HTMLButtonElement>('[aria-label="Tracked sessions"]')!.click());
-      await act(async () => [...f.view.querySelectorAll<HTMLButtonElement>('.lab-tracking-floating .lab-session-row')].find(row => row.textContent?.includes(session.title))!.click());
+      const row = () => [...f.view.querySelectorAll<HTMLButtonElement>('.lab-tracking-floating .lab-session-row')].find(row => row.textContent?.includes(session.title));
+      await settleApp(() => expect(row()).toBeDefined());
+      await act(async () => row()!.click());
     }
     await settleApp(() => {
       expect(succession.binding?.session.nativeSessionId).toBe(session.nativeSessionId);
@@ -1808,8 +1871,15 @@ it.each(['ordinary', 'Track'] as const)('leaves a focused unlinked Side through 
       expect(succession.document.primary).toBe(succession.binding!.session.viewId);
     });
   }
+  if (sharedWindow && navigation === 'Track') {
+    await act(async () => { await workspace.operate({ type: 'view.select', viewId: workspace.window!.selectedPrimaryViewId }); });
+  }
   await open(target);
   expect(f.view.querySelectorAll('.lab-side-conversation:not([hidden])')).toHaveLength(0);
+  if (sharedWindow && navigation === 'Track') {
+    const dock = workspace.window!.views.find(view => view.placement === 'dock' && view.binding?.nativeSessionId === 'S')!;
+    await act(async () => { await workspace.operate({ type: 'view.collapse', viewId: dock.id, collapsed: true }); await workspace.operate({ type: 'view.select', viewId: workspace.window!.selectedPrimaryViewId }); });
+  }
   await open(side);
   if (sharedWindow) {
     expect(succession.binding?.session.viewId).not.toBe(slot.id);
@@ -1858,7 +1928,7 @@ it('retries a transient composition import failure through the synchronization b
   expect(new TrackedSessionViews(succession.document, () => {}).entry(sessionKey(succession.binding!.session))?.slotId).toBe(succession.binding!.session.viewId);
   expect(readCompositionDocument(f.scope).status).toBe('ready');
   expect(new DraftStore(f.scope).get('agent-A')).toBe('A local draft');
-  expect(f.view.querySelector('[data-testid="prompt-input"]')?.textContent).toBe('A local draft');
+  expect(visibleQuery(f.view, '[data-testid="prompt-input"]')?.textContent).toBe('A local draft');
   expect(f.frames.filter(frame => frame.message && ['send_message', 'execute_command', 'image_upload_begin'].includes(frame.message.type))).toEqual([]);
   await f.reload();
   await settleApp(() => expect(succession.binding?.session.nativeSessionId).toBe('A'));
@@ -1879,7 +1949,7 @@ it('keeps post-upgrade view preferences and owners when opening the same Window 
   const windowId = new URL(window.location.href).searchParams.get('window')!;
   const original = structuredClone(succession.desired!.slot), owner = succession.ownerFor(original.id);
   await act(async () => ask.toggle(succession.binding!.session, owner));
-  const primary = () => f.view.querySelector('.lab-primary-conversation')!;
+  const primary = () => visibleQuery(f.view, '.lab-primary-conversation')!;
   await act(async () => primary().querySelector<HTMLButtonElement>('[aria-label="Session view options"]')!.click());
   await act(async () => primary().querySelector<HTMLInputElement>('input[name^="session-display-"][value="content"]')!.click());
   await f.newTab('D', windowId);
@@ -1972,7 +2042,7 @@ it.each(['history', 'control', 'runtime'] as const)('keeps a matching session al
   await settleApp(() => expect(succession.binding?.session.nativeSessionId).toBe('B'));
   expect(succession.error).toBeUndefined();
   expect(succession.binding?.client).toBe(initial.client);
-  expect(f.view.querySelector('[data-testid="prompt-input"]')?.textContent).toBe('Keep this draft while recovering');
+  expect(visibleQuery(f.view, '[data-testid="prompt-input"]')?.textContent).toBe('Keep this draft while recovering');
   expect(f.requests.filter(request => request.url.endsWith('/attach'))).toHaveLength(1);
 });
 
@@ -2237,7 +2307,7 @@ it('persists adopted Window mappings across reload without changing native owner
   expect(succession.desired!.slot.id).toBe(slotId);
   expect(succession.desired!.slot.owners).toEqual(owners);
   expect(succession.ownerFor(slotId)).toBe(askOwnerId);
-  expect(f.view.querySelector('[data-testid="prompt-input"]')?.textContent).toBe('A local draft');
+  expect(visibleQuery(f.view, '[data-testid="prompt-input"]')?.textContent).toBe('A local draft');
 }, 10000);
 
 it('restores an open Ask with its original source after rebinding main and opening a fresh page', async () => {
@@ -2285,4 +2355,304 @@ it('restores an open Ask with its original source after rebinding main and openi
   expect(f.requests.filter(request => request.url.endsWith('/create')).map(request => request.body?.sourceNativeSessionId)).toEqual(['B']);
   expect(f.view.querySelectorAll('[role="dialog"][aria-label="Ask"]')).toHaveLength(2);
   expect(ask.entryFor(sourceA, restoredOwners[0]!.id).record?.target?.nativeSessionId).toBe('T');
+});
+
+it('keeps both primary conversations mounted with separate drafts and creates an empty primary group', async () => {
+  vi.stubGlobal('ResizeObserver', class { observe() {} disconnect() {} unobserve() {} });
+  const f = await failureFixture(false, 'A', false, '&window=multi-primary-test', { chain: [], async seed(scope, source) {
+    const secondary = { ...source, nativeSessionId: 'X', agentId: 'agent-X', title: 'Secondary X' };
+    localStorage.setItem(`agent-remote-opened:${scope}`, JSON.stringify([source, secondary]));
+    const view = (id: string, session: OpenedSession) => ({ id, placement: 'primary', width: 520, collapsed: false,
+      display: { mode: 'content', lettersVisible: true }, bindingPolicy: 'replaceable',
+      binding: { hostId: session.hostId, providerId: session.providerId, nativeSessionId: session.nativeSessionId, title: session.title } });
+    localStorage.setItem(`agent-remote:recovery:${scope}:shared-window:multi-primary-test`, JSON.stringify({
+      schemaVersion: 2, id: 'multi-primary-test', title: 'Parallel work', revision: 0,
+      selectedPrimaryViewId: 'primary-A', selectedViewId: 'primary-A', views: [view('primary-A', source), view('primary-X', secondary)],
+    }));
+  } });
+  const group = (title: string) => f.view.querySelector<HTMLButtonElement>(`[aria-label="Select primary group: ${title}"]`);
+  await settleApp(() => expect(group('Secondary X')).not.toBeNull());
+  const a = f.view.querySelector('[data-primary-group-id="primary-A"]');
+  await settleApp(() => expect(f.view.querySelectorAll('.lab-primary-group [data-testid="prompt-input"]')).toHaveLength(2));
+  const conversations = [...f.view.querySelectorAll<HTMLElement>('.lab-primary-group')];
+  expect(conversations.some(pane => pane.querySelector('[data-testid="prompt-input"]')?.textContent === 'A local draft')).toBe(true);
+  await editVisiblePrompt(conversations[1]!, 'X independent draft');
+  expect(conversations[0]!.querySelector('[data-testid="prompt-input"]')?.textContent).toBe('A local draft');
+  expect(conversations[1]!.querySelector('[data-testid="prompt-input"]')?.textContent).toBe('X independent draft');
+  await act(async () => group('Secondary X')!.click());
+  await settleApp(() => expect(group('Secondary X')!.getAttribute('aria-current')).toBe('true'));
+  if (a) expect(f.view.contains(a)).toBe(true);
+  expect(conversations.every(pane => f.view.contains(pane))).toBe(true);
+  for (const pane of conversations) {
+    await settleApp(() => expect(pane.querySelector<HTMLButtonElement>('[data-testid="prompt-submit"]')?.disabled).toBe(false));
+    await act(async () => { const submit = pane.querySelector<HTMLButtonElement>('[data-testid="prompt-submit"]')!; submit.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })); submit.click(); });
+  }
+  await settleApp(() => expect(f.frames.filter(frame => frame.message?.type === 'send_message')).toHaveLength(2));
+  expect(f.frames.filter(frame => frame.message?.type === 'send_message').map(frame => frame.message!.payload).map(payload => [payload?.agentId, payload?.text]))
+    .toEqual([['agent-A', 'A local draft'], ['agent-X', 'X independent draft']]);
+  await act(async () => f.view.querySelector<HTMLButtonElement>('[aria-label="New primary group"]')!.click());
+  await settleApp(() => expect(f.view.querySelectorAll('.lab-primary-group-option')).toHaveLength(3));
+  expect(conversations.every(pane => f.view.contains(pane))).toBe(true);
+  const saved = JSON.parse(localStorage.getItem(`agent-remote:recovery:${f.scope}:shared-window:multi-primary-test`)!);
+  expect(saved.views.filter((view: { placement: string }) => view.placement === 'primary')).toHaveLength(3);
+  expect(saved.views.find((view: { id: string }) => view.id === saved.selectedPrimaryViewId)?.binding).toBeUndefined();
+});
+
+it.each(['directory', 'directory-open', 'Favorites', 'Track'] as const)('opens a %s session into the selected primary group and preserves the other group', async navigation => {
+  if (navigation === 'Favorites') vi.stubGlobal('matchMedia', vi.fn((query: string) => ({ matches: query.includes('max-width: 1180px'), media: query, addEventListener() {}, removeEventListener() {}, addListener() {}, removeListener() {} })));
+  vi.stubGlobal('ResizeObserver', class { observe() {} disconnect() {} unobserve() {} });
+  const realDirectory = directoryComponents.SessionDirectory, realAttention = attentionHooks.useSessionAttention;
+  let directory!: ComponentProps<typeof realDirectory>;
+  vi.spyOn(directoryComponents, 'SessionDirectory').mockImplementation(props => { directory = props; return realDirectory(props); });
+  vi.spyOn(attentionHooks, 'useSessionAttention').mockImplementation((...args) => ({ ...realAttention(...args), trackVisible: true }));
+  const realFavorites = favoritesComponents.FavoritesMenu;
+  let favoritesMenu!: ComponentProps<typeof realFavorites>;
+  vi.spyOn(favoritesComponents, 'FavoritesMenu').mockImplementation(props => { favoritesMenu = props; return realFavorites(props); });
+  const binding = (id: string, title: string) => ({ hostId: 'host', providerId: 'recorded', nativeSessionId: id, title });
+  const document: WorkspaceWindow = { schemaVersion: 2, id: 'navigation-primary-test', title: 'Parallel navigation', revision: 0,
+    selectedPrimaryViewId: 'primary-A', selectedViewId: 'primary-A',
+    views: [createWindowView('primary-A', binding('A', 'Retained primary'), 'primary'), createWindowView('primary-X', binding('X', 'Secondary X'), 'primary')] };
+  const target = { ...binding('D', 'Destination D'), agentId: 'agent-D' };
+  const setup = { chain: [] as SessionSuccessionReplay[], userScoped: navigation === 'Track' || navigation === 'Favorites', windowDocument: document,
+    seed(scope: string, source: OpenedSession) {
+      localStorage.setItem(`agent-remote:recovery:${scope}:shared-window:${document.id}`, JSON.stringify(document));
+      localStorage.setItem(`agent-remote-opened:${scope}`, JSON.stringify([source, target]));
+      saveTrackedSessions(scope, [{ ...target, starredAt: 1 }]);
+    } };
+  const f = await failureFixture(false, 'A', false, `&window=${document.id}`, setup);
+  const x = () => f.view.querySelector<HTMLButtonElement>('[aria-label="Select primary group: Secondary X"]');
+  await settleApp(() => expect(x()).not.toBeNull());
+  await act(async () => x()!.click());
+  await settleApp(() => expect(x()?.getAttribute('aria-current')).toBe('true'));
+  const originalA = f.view.querySelector('[data-primary-group-id="primary-A"]');
+  if (navigation === 'directory') await act(async () => directory.onSelect(target));
+  else if (navigation === 'directory-open') await act(async () => directory.onOpen({ ...target, createdAt: 'now', updatedAt: 'now', state: 'idle' }));
+  else if (navigation === 'Favorites') await act(async () => favoritesMenu.onOpen({ ...target, starredAt: 1, available: true, online: true }));
+  else {
+    await act(async () => f.view.querySelector<HTMLButtonElement>('[aria-label="Tracked sessions"]')!.click());
+    await act(async () => [...f.view.querySelectorAll<HTMLButtonElement>('.lab-tracking-floating .lab-session-row')].find(row => row.textContent?.includes(target.title))!.click());
+  }
+  await settleApp(() => {
+    expect(f.view.querySelector('[aria-label="Select primary group: Destination D"]')?.getAttribute('aria-current')).toBe('true');
+    expect(f.view.querySelector('[data-primary-group-id="primary-X"]')?.textContent).toContain('Destination D');
+  });
+  expect(f.view.querySelector('[data-primary-group-id="primary-A"]')).toBe(originalA);
+  const current = navigation === 'Track' || navigation === 'Favorites' ? setup.windowDocument : JSON.parse(localStorage.getItem(`agent-remote:recovery:${f.scope}:shared-window:${document.id}`)!);
+  expect(current.selectedPrimaryViewId).toBe('primary-X');
+  expect(current.views.find((view: { id: string }) => view.id === 'primary-A')?.binding?.nativeSessionId).toBe('A');
+  expect(current.views.find((view: { id: string }) => view.id === 'primary-X')?.binding?.nativeSessionId).toBe('D');
+});
+
+it('selects another primary group while a native attachment is pending without restoring stale selection', async () => {
+  vi.stubGlobal('ResizeObserver', class { observe() {} disconnect() {} unobserve() {} });
+  const realManager = managerComponents.ChatSessionManager;
+  let manager!: ComponentProps<typeof realManager>;
+  vi.spyOn(managerComponents, 'ChatSessionManager').mockImplementation(props => { if (props.current.nativeSessionId === 'X') manager = props; return realManager(props); });
+  const binding = (id: string) => ({ hostId: 'host', providerId: 'recorded', nativeSessionId: id, title: `Group ${id}` });
+  const document: WorkspaceWindow = { schemaVersion: 2, id: 'pending-primary-test', title: 'Parallel pending', revision: 0,
+    selectedPrimaryViewId: 'primary-X', selectedViewId: 'primary-X',
+    views: [createWindowView('primary-A', binding('A'), 'primary'), createWindowView('primary-X', binding('X'), 'primary')] };
+  const f = await failureFixture(false, 'A', false, `&window=${document.id}`, { chain: [], seed(scope) {
+    localStorage.setItem(`agent-remote:recovery:${scope}:shared-window:${document.id}`, JSON.stringify(document));
+  } });
+  const selectA = () => f.view.querySelector<HTMLButtonElement>('.lab-primary-group-option:first-child > button:first-child');
+  await settleApp(() => { expect(selectA()).not.toBeNull(); expect(manager).toBeDefined(); });
+  const release = f.holdAttach('D');
+  try {
+    await act(async () => { manager.onOpen({ ...binding('D'), agentId: 'agent-D' }); });
+    await settleApp(() => expect(f.requests.some(request => request.url.endsWith('/attach') && request.body?.nativeSessionId === 'D')).toBe(true));
+    expect(JSON.parse(localStorage.getItem(`agent-remote:recovery:${f.scope}:shared-window:${document.id}`)!).views
+      .find((view: { id: string }) => view.id === 'primary-X')?.binding?.nativeSessionId).toBe('D');
+    await act(async () => selectA()!.click());
+    await settleApp(() => expect(selectA()?.getAttribute('aria-current')).toBe('true'));
+  } finally { await act(async () => release()); }
+  await settleApp(() => expect(f.frames.some(frame => frame.type === 'subscribe' && frame.agentId === 'agent-D')).toBe(true));
+  expect(selectA()?.getAttribute('aria-current')).toBe('true');
+  await settleApp(() => {
+    const saved = JSON.parse(localStorage.getItem(`agent-remote:recovery:${f.scope}:shared-window:${document.id}`)!);
+    expect(saved.selectedPrimaryViewId).toBe('primary-A');
+    expect(saved.views.find((view: { id: string }) => view.id === 'primary-X')?.binding?.nativeSessionId).toBe('D');
+  });
+});
+
+
+it.each([false, true])('binds the global directory selection into a focused ordinary dock view (empty=%s) without replacing primary', async empty => {
+  vi.stubGlobal('ResizeObserver', class { observe() {} disconnect() {} unobserve() {} });
+  const realDirectory = directoryComponents.SessionDirectory;
+  let directory!: ComponentProps<typeof realDirectory>;
+  vi.spyOn(directoryComponents, 'SessionDirectory').mockImplementation(props => { directory = props; return realDirectory(props); });
+  const binding = (id: string) => ({ hostId: 'host', providerId: 'recorded', nativeSessionId: id, title: `Group ${id}` });
+  const document: WorkspaceWindow = { schemaVersion: 2, id: 'focused-dock-test', title: 'Dock navigation', revision: 0,
+    selectedPrimaryViewId: 'primary-A', selectedViewId: 'primary-A',
+    views: [createWindowView('primary-A', binding('A'), 'primary'), createWindowView('ordinary-dock', empty ? undefined : binding('X'), 'dock')] };
+  const f = await failureFixture(false, 'A', false, `&window=${document.id}`, { chain: [], seed(scope) {
+    localStorage.setItem(`agent-remote:recovery:${scope}:shared-window:${document.id}`, JSON.stringify(document));
+  } });
+  const dock = () => f.view.querySelector<HTMLElement>('[data-view-id="ordinary-dock"]');
+  await settleApp(() => { expect(dock()).not.toBeNull(); expect(directory).toBeDefined(); });
+  await act(async () => dock()!.focus());
+  await settleApp(() => expect(dock()?.getAttribute('data-active')).toBe('true'));
+  await act(async () => directory.onSelect({ ...binding('D'), agentId: 'agent-D' }));
+  await settleApp(() => {
+    const saved = JSON.parse(localStorage.getItem(`agent-remote:recovery:${f.scope}:shared-window:${document.id}`)!);
+    expect(saved.selectedPrimaryViewId).toBe('primary-A');
+    expect(saved.views.find((view: { id: string }) => view.id === 'primary-A')?.binding?.nativeSessionId).toBe('A');
+    expect(saved.views.find((view: { id: string }) => view.id === 'ordinary-dock')?.binding?.nativeSessionId).toBe('D');
+  });
+  expect(f.view.querySelector('[data-primary-group-id="primary-A"]')).not.toBeNull();
+});
+
+
+it.each([false, true])('uses the focused mobile dock for Favorites context (empty=%s)', async empty => {
+  vi.stubGlobal('ResizeObserver', class { observe() {} disconnect() {} unobserve() {} });
+  vi.stubGlobal('matchMedia', vi.fn((query: string) => ({ matches: query.includes('max-width: 1180px'), media: query, addEventListener() {}, removeEventListener() {}, addListener() {}, removeListener() {} })));
+  const realFavorites = favoritesComponents.FavoritesMenu;
+  let menu!: ComponentProps<typeof realFavorites>;
+  vi.spyOn(favoritesComponents, 'FavoritesMenu').mockImplementation(props => { menu = props; return realFavorites(props); });
+  const binding = (id: string) => ({ hostId: 'host', providerId: 'recorded', nativeSessionId: id, title: `Group ${id}` });
+  const document: WorkspaceWindow = { schemaVersion: 2, id: 'mobile-favorites-dock', title: 'Mobile dock', revision: 0,
+    selectedPrimaryViewId: 'primary-A', selectedViewId: 'ordinary-dock',
+    views: [createWindowView('primary-A', binding('A'), 'primary'), createWindowView('ordinary-dock', empty ? undefined : binding('X'), 'dock')] };
+  const setup = { chain: [] as SessionSuccessionReplay[], userScoped: true, windowDocument: document };
+  const f = await failureFixture(false, 'A', false, `&window=${document.id}`, setup);
+  await settleApp(() => {
+    expect(menu).toBeDefined();
+    expect(menu.currentSession?.nativeSessionId).toBe(empty ? undefined : 'X');
+    expect(menu.title).toBe(empty ? 'Select session' : 'Group X');
+    expect(menu.activeKey).toBe(empty ? undefined : sessionKey(binding('X')));
+  });
+  await act(async () => menu.onOpen({ ...binding('D'), starredAt: 1, available: true, online: true }));
+  await settleApp(() => {
+    expect(setup.windowDocument.selectedPrimaryViewId).toBe('primary-A');
+    expect(setup.windowDocument.views.find(view => view.id === 'primary-A')?.binding?.nativeSessionId).toBe('A');
+    expect(setup.windowDocument.views.find(view => view.id === 'ordinary-dock')?.binding?.nativeSessionId).toBe('D');
+    expect(menu.currentSession?.nativeSessionId).toBe('D');
+  });
+});
+
+it.each([false, true])('targets Ask at the focused dock owner and disables an empty dock (empty=%s)', async empty => {
+  vi.stubGlobal('ResizeObserver', class { observe() {} disconnect() {} unobserve() {} });
+  const realAsk = askHooks.useAskConversations, realSuccession = successionHooks.useSessionSuccession;
+  let ask!: ReturnType<typeof realAsk>, succession!: ReturnType<typeof realSuccession>;
+  vi.spyOn(askHooks, 'useAskConversations').mockImplementation((...args) => { ask = realAsk(...args); return ask; });
+  vi.spyOn(successionHooks, 'useSessionSuccession').mockImplementation((...args) => { succession = realSuccession(...args); return succession; });
+  const binding = { hostId: 'host', providerId: 'recorded', nativeSessionId: 'A', title: 'Same native A' };
+  const document: WorkspaceWindow = { schemaVersion: 2, id: 'focused-ask-dock', title: 'Ask owner selection', revision: 0,
+    selectedPrimaryViewId: 'primary-A', selectedViewId: 'ordinary-dock',
+    views: [createWindowView('primary-A', binding, 'primary'), createWindowView('ordinary-dock', empty ? undefined : binding, 'dock')] };
+  const f = await failureFixture(false, 'A', false, `&window=${document.id}`, { chain: [], seed(scope) {
+    localStorage.setItem(`agent-remote:recovery:${scope}:shared-window:${document.id}`, JSON.stringify(document));
+  } });
+  await settleApp(() => expect(f.view.querySelector('[data-view-id="ordinary-dock"]')).not.toBeNull());
+  await act(async () => f.view.querySelector<HTMLButtonElement>('[aria-label="View options"]')!.click());
+  const toggle = () => f.view.querySelector<HTMLInputElement>('[data-view-control="ask"]');
+  await settleApp(() => expect(toggle()).not.toBeNull());
+  expect(toggle()!.disabled).toBe(empty);
+  expect(toggle()!.checked).toBe(false);
+  if (empty) return;
+  await act(async () => toggle()!.click());
+  await settleApp(() => {
+    const dockBinding = succession.document.windowBindings!.find(item => item.viewId === 'ordinary-dock')!;
+    const primaryBinding = succession.document.windowBindings!.find(item => item.viewId === 'primary-A')!;
+    expect(dockBinding).toBeDefined(); expect(primaryBinding).toBeDefined();
+    const dockOwner = succession.ownerFor(dockBinding.slotId), primaryOwner = succession.ownerFor(primaryBinding.slotId);
+    expect(dockOwner).not.toBe(primaryOwner);
+    expect(ask.isEnabled({ ...binding, agentId: 'agent-A' }, dockOwner)).toBe(true);
+    expect(ask.isEnabled({ ...binding, agentId: 'agent-A' }, primaryOwner)).toBe(false);
+    expect(f.view.querySelector('[data-view-id="ordinary-dock"] [aria-label="Ask about this session"]')).not.toBeNull();
+  });
+});
+
+it.each((['dock', 'attached', 'float'] as const).flatMap(placement => [false, true].map(empty => ({ placement, empty, mobile: false }))).concat([{ placement: 'dock', empty: true, mobile: true }]))
+('opens Track into the selected ordinary $placement view (empty=$empty, mobile=$mobile) and preserves primary', async ({ placement, empty, mobile }) => {
+  if (mobile) vi.stubGlobal('matchMedia', vi.fn((query: string) => ({ matches: query.includes('max-width: 1180px'), media: query, addEventListener() {}, removeEventListener() {}, addListener() {}, removeListener() {} })));
+  vi.stubGlobal('ResizeObserver', class { observe() {} disconnect() {} unobserve() {} });
+  const realAttention = attentionHooks.useSessionAttention;
+  vi.spyOn(attentionHooks, 'useSessionAttention').mockImplementation((...args) => ({ ...realAttention(...args), trackVisible: true }));
+  const binding = (id: string) => ({ hostId: 'host', providerId: 'recorded', nativeSessionId: id, title: `Track ${id}` });
+  const selected = createWindowView('selected-ordinary', empty ? undefined : binding('X'), placement);
+  if (placement === 'attached') selected.attachedTo = 'primary-A';
+  if (placement === 'float') selected.geometry = { x: 40, y: 60, width: 500, height: 600 };
+  const document: WorkspaceWindow = { schemaVersion: 2, id: `track-destination-${placement}-${empty}`, title: 'Track destination', revision: 0,
+    selectedPrimaryViewId: 'primary-A', selectedViewId: selected.id,
+    views: [createWindowView('primary-A', binding('A'), 'primary'), selected] };
+  const setup = { chain: [] as SessionSuccessionReplay[], userScoped: true, windowDocument: document,
+    seed(scope: string) { saveTrackedSessions(scope, [{ ...binding('D'), starredAt: 1 }]); } };
+  const f = await failureFixture(false, 'A', false, `&window=${document.id}`, setup);
+  const trigger = () => f.view.querySelector<HTMLButtonElement>('[aria-label="Tracked sessions"]');
+  await settleApp(() => { expect(trigger()).not.toBeNull(); expect(setup.windowDocument.selectedViewId).toBe(selected.id); });
+  await act(async () => trigger()!.click());
+  const row = () => [...f.view.querySelectorAll<HTMLButtonElement>('.lab-tracking-floating .lab-session-row')].find(item => item.textContent?.includes('Track D'));
+  await settleApp(() => { expect(row()).toBeDefined(); expect(row()!.disabled).toBe(false); });
+  await act(async () => row()!.click());
+  await settleApp(() => expect(setup.windowDocument.views.find(view => view.id === selected.id)?.binding?.nativeSessionId).toBe('D'));
+  expect(setup.windowDocument.selectedPrimaryViewId).toBe('primary-A');
+  expect(setup.windowDocument.selectedViewId).toBe(selected.id);
+  expect(setup.windowDocument.views.map(view => view.id)).toEqual(['primary-A', selected.id]);
+  expect(setup.windowDocument.views.find(view => view.id === 'primary-A')?.binding?.nativeSessionId).toBe('A');
+  const opened = setup.windowDocument.views.find(view => view.id === selected.id)!;
+  expect(opened.placement).toBe(placement);
+  expect(opened.attachedTo).toBe(selected.attachedTo);
+  expect(opened.geometry).toEqual(selected.geometry);
+});
+
+it('rejects Track replacement of the selected managed view without changing primary', async () => {
+  vi.stubGlobal('ResizeObserver', class { observe() {} disconnect() {} unobserve() {} });
+  const realAttention = attentionHooks.useSessionAttention;
+  vi.spyOn(attentionHooks, 'useSessionAttention').mockImplementation((...args) => ({ ...realAttention(...args), trackVisible: true }));
+  const binding = (id: string) => ({ hostId: 'host', providerId: 'recorded', nativeSessionId: id, title: `Managed ${id}` });
+  const managed = { ...createWindowView('managed-dock', binding('X'), 'dock'), bindingPolicy: 'managed' as const };
+  const document: WorkspaceWindow = { schemaVersion: 2, id: 'track-managed-destination', title: 'Managed Track boundary', revision: 0,
+    selectedPrimaryViewId: 'primary-A', selectedViewId: managed.id, views: [createWindowView('primary-A', binding('A'), 'primary'), managed] };
+  const setup = { chain: [] as SessionSuccessionReplay[], userScoped: true, windowDocument: document,
+    seed(scope: string) { saveTrackedSessions(scope, [{ ...binding('D'), starredAt: 1 }]); } };
+  const f = await failureFixture(false, 'A', false, `&window=${document.id}`, setup);
+  await settleApp(() => expect(f.view.querySelector('[aria-label="Tracked sessions"]')).not.toBeNull());
+  await act(async () => f.view.querySelector<HTMLButtonElement>('[aria-label="Tracked sessions"]')!.click());
+  const row = () => [...f.view.querySelectorAll<HTMLButtonElement>('.lab-tracking-floating .lab-session-row')].find(item => item.textContent?.includes('Managed D'));
+  await settleApp(() => { expect(row()).toBeDefined(); expect(row()!.disabled).toBe(false); });
+  await act(async () => row()!.click());
+  await settleApp(() => expect(f.view.textContent).toContain('Select an ordinary session view or create an empty view first.'));
+  expect(setup.windowDocument.views.find(view => view.id === 'primary-A')?.binding?.nativeSessionId).toBe('A');
+  expect(setup.windowDocument.views.find(view => view.id === managed.id)?.binding?.nativeSessionId).toBe('X');
+  expect(setup.windowDocument.selectedViewId).toBe(managed.id);
+});
+
+it('rejects a queued Track bind after its selected ordinary destination changes binding', async () => {
+  vi.stubGlobal('ResizeObserver', class { observe() {} disconnect() {} unobserve() {} });
+  const realAttention = attentionHooks.useSessionAttention, realWindow = windowWorkspaceHooks.useWindowWorkspace;
+  let workspace!: ReturnType<typeof realWindow>;
+  vi.spyOn(attentionHooks, 'useSessionAttention').mockImplementation((...args) => ({ ...realAttention(...args), trackVisible: true }));
+  vi.spyOn(windowWorkspaceHooks, 'useWindowWorkspace').mockImplementation((...args) => { workspace = realWindow(...args); return workspace; });
+  const binding = (id: string) => ({ hostId: 'host', providerId: 'recorded', nativeSessionId: id, title: `Queued ${id}` });
+  const document: WorkspaceWindow = { schemaVersion: 2, id: 'queued-track-destination', title: 'Queued Track', revision: 0,
+    selectedPrimaryViewId: 'primary-A', selectedViewId: 'ordinary-dock',
+    views: [createWindowView('primary-A', binding('A'), 'primary'), createWindowView('ordinary-dock', binding('X'), 'dock')] };
+  let release!: () => void;
+  const held = new Promise<void>(resolve => { release = resolve; });
+  let entered = false;
+  const setup = { chain: [] as SessionSuccessionReplay[], userScoped: true, windowDocument: document,
+    seed(scope: string) { saveTrackedSessions(scope, [{ ...binding('D'), starredAt: 1 }]); },
+    async beforeWindowMutation(mutation: WindowMutation) {
+      if (mutation.operation.type === 'view.bind' && mutation.operation.binding.nativeSessionId === 'Y') { entered = true; await held; }
+    } };
+  const f = await failureFixture(false, 'A', false, `&window=${document.id}`, setup);
+  await settleApp(() => expect(workspace.window?.selectedViewId).toBe('ordinary-dock'));
+  let replacement!: Promise<void>;
+  await act(async () => { replacement = workspace.operate({ type: 'view.bind', viewId: 'ordinary-dock', binding: binding('Y') }); });
+  try {
+    await settleApp(() => expect(entered).toBe(true));
+    await act(async () => f.view.querySelector<HTMLButtonElement>('[aria-label="Tracked sessions"]')!.click());
+    const row = () => [...f.view.querySelectorAll<HTMLButtonElement>('.lab-tracking-floating .lab-session-row')].find(item => item.textContent?.includes('Queued D'));
+    await settleApp(() => { expect(row()).toBeDefined(); expect(row()!.disabled).toBe(false); });
+    await act(async () => row()!.click());
+    expect(setup.windowDocument.views.find(view => view.id === 'ordinary-dock')?.binding?.nativeSessionId).toBe('X');
+  } finally { await act(async () => { release(); await replacement; }); }
+  await settleApp(() => expect(f.view.textContent).toContain('The target session view changed'));
+  const operation = f.requests.map(request => request.body?.operation as WindowMutation['operation'] | undefined)
+    .find(operation => operation?.type === 'view.bind' && operation.binding.nativeSessionId === 'D');
+  expect(operation).toMatchObject({ type: 'view.bind', viewId: 'ordinary-dock', expectedBinding: binding('X') });
+  expect(setup.windowDocument.views.find(view => view.id === 'ordinary-dock')?.binding?.nativeSessionId).toBe('Y');
+  expect(setup.windowDocument.views.find(view => view.id === 'primary-A')?.binding?.nativeSessionId).toBe('A');
+  expect(setup.windowDocument.selectedViewId).toBe('ordinary-dock');
 });

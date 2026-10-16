@@ -1,16 +1,16 @@
 import { createWindowSessionBridge, resolveCompositionWindowViewId } from '../window-composition.js';
-import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { WindowWorkspaceClient, WindowMutationUnknownError, WindowRequestError, type WindowOperationIdentity, type WindowSnapshot } from '@orchardworks/agent-remote-web';
 import type { WindowCreateRequest, WorkspaceWindow } from '@orchardworks/agent-remote-protocol';
 import { conversationLocalStorage, conversationSessionStorage } from '../conversation-storage.js';
 import { captureImportedWindowComposition, restoreImportedWindowComposition, commitImportedWindowComposition, importCompositionWindow, WindowWorkspaceStore } from '../window-workspace.js';
 import type { CompositionDocument } from '../session-composition.js';
-import { applyWindowOperation, createWindowView, isWindowCreateRequest, isWorkspaceWindow } from '@orchardworks/agent-remote-protocol';
+import { applyWindowOperation, createWindowView, decodeWorkspaceWindow, isWindowCreateRequest, windowPrimaryViewId } from '@orchardworks/agent-remote-protocol';
 
-interface PendingCreation { request: WindowCreateRequest; bindings: Array<[string, string]> }
+interface PendingCreation { request: WindowCreateRequest; candidate: WorkspaceWindow; bindings: Array<[string, string]> }
 interface CreatedWindow { candidate: WorkspaceWindow; snapshot: WindowSnapshot }
 const knownRejection = (error: unknown) => error instanceof WindowRequestError && (error.result?.status === 'rejected' || error.status >= 400 && error.status < 500);
-const emptyWindow = (): WorkspaceWindow => ({ schemaVersion: 1, id: crypto.randomUUID(), revision: 0, title: 'Window', primaryViewId: 'main', selectedViewId: 'main', mainMinimized: false, views: [createWindowView('main', undefined, 'primary')] });
+const emptyWindow = (): WorkspaceWindow => ({ schemaVersion: 2, id: crypto.randomUUID(), revision: 0, title: 'Window', selectedPrimaryViewId: 'main', selectedViewId: 'main', views: [createWindowView('main', undefined, 'primary')] });
 
 /** Product page catalog and URL selection; each chosen Window keeps its own store. */
 export function useWindowWorkspace(scope: string, hosted: boolean, enabled: boolean, composition: CompositionDocument, participating = true) {
@@ -26,6 +26,8 @@ export function useWindowWorkspace(scope: string, hosted: boolean, enabled: bool
   useEffect(() => { selection.active = true; return () => { selection.active = false; selection.generation++; currentStore.current = undefined; }; }, [selection]);
   const confirmedStores = useMemo(() => new WeakSet<WindowWorkspaceStore>(), [key, client]);
   const [unavailable, setUnavailable] = useState(false);
+  const currentlyUnavailable = useRef(unavailable); currentlyUnavailable.current = unavailable;
+  const readWindow = useCallback(() => currentlyUnavailable.current ? undefined : currentStore.current?.getSnapshot(), []);
   const [deleted, setDeleted] = useState(false);
   const selectStore = (next: WindowWorkspaceStore | undefined) => { currentStore.current = next; setStore(next); };
   const [windows, setWindows] = useState<WorkspaceWindow[]>([]);
@@ -47,8 +49,8 @@ export function useWindowWorkspace(scope: string, hosted: boolean, enabled: bool
   };
   const makeStore = (window: WorkspaceWindow) => new WindowWorkspaceStore(window, client, client ? cache : undefined, client ? undefined : async (source, operation) => {
     const commit = async () => {
-      const value: unknown = JSON.parse(conversationLocalStorage.getItem(`${key}:${source.id}`) ?? 'null');
-      if (!isWorkspaceWindow(value)) throw new Error('The local Window is unavailable.');
+      const value = decodeWorkspaceWindow(JSON.parse(conversationLocalStorage.getItem(`${key}:${source.id}`) ?? 'null'));
+      if (!value) throw new Error('The local Window is unavailable.');
       const replacesLayout = operation.type === 'layout.apply' || operation.type === 'batch' && operation.operations.some(edit => edit.type === 'layout.apply');
       if (replacesLayout && value.revision !== source.revision) throw new Error('The Window changed before applying this layout. Refresh and retry.');
       const next = applyWindowOperation(value, operation); persistLocal(next); return next;
@@ -60,9 +62,12 @@ export function useWindowWorkspace(scope: string, hosted: boolean, enabled: bool
     const saved = conversationSessionStorage.getItem(`${key}:pending-create`);
     if (!saved) { creation.pending = null; return; }
     const value: unknown = JSON.parse(saved);
-    if (!value || typeof value !== 'object' || !('request' in value) || !isWindowCreateRequest(value.request)) throw new Error('The pending Window creation cannot be recovered. Preserve its saved request before creating another Window.');
-    const pending: PendingCreation = { request: value.request, bindings: 'bindings' in value && Array.isArray(value.bindings) ? value.bindings : [] };
-    restoreImportedWindowComposition(composition, pending.request.window, pending.bindings);
+    const raw = value && typeof value === 'object' && 'request' in value ? value.request : undefined;
+    const candidate = raw && typeof raw === 'object' && 'window' in raw ? decodeWorkspaceWindow(raw.window) : undefined;
+    if (!candidate || !raw || typeof raw !== 'object' || !isWindowCreateRequest({ ...raw, window: candidate })) throw new Error('The pending Window creation cannot be recovered. Preserve its saved request before creating another Window.');
+    // Keep the serialized payload unchanged for legacy receipt fingerprints.
+    const pending: PendingCreation = { request: raw as WindowCreateRequest, candidate, bindings: value && typeof value === 'object' && 'bindings' in value && Array.isArray(value.bindings) ? value.bindings : [] };
+    restoreImportedWindowComposition(composition, candidate, pending.bindings);
     creation.pending = pending; return pending;
   };
   const clearPendingCreation = () => {
@@ -72,12 +77,12 @@ export function useWindowWorkspace(scope: string, hosted: boolean, enabled: bool
   const createHosted = (candidate: () => WorkspaceWindow, explicitRetry: boolean): Promise<CreatedWindow> => {
     if (creation.running) return creation.running;
     const previous = pendingCreation();
-    const window = previous?.request.window ?? candidate();
-    const pending = previous ?? { request: { operationId: crypto.randomUUID(), issuedAt: Date.now(), window }, bindings: captureImportedWindowComposition(window) };
+    const window = previous?.candidate ?? candidate();
+    const pending = previous ?? { request: { operationId: crypto.randomUUID(), issuedAt: Date.now(), window }, candidate: window, bindings: captureImportedWindowComposition(window) };
     const submit = () => {
-      conversationSessionStorage.setItem(`${key}:pending-create`, JSON.stringify(pending));
+      conversationSessionStorage.setItem(`${key}:pending-create`, JSON.stringify({ request: pending.request, bindings: pending.bindings }));
       creation.pending = pending;
-      return client!.create(window, pending.request).catch(error => {
+      return client!.create(pending.request.window, pending.request).catch(error => {
         // A refused replay does not establish what happened to the original request.
         if (previous && error instanceof WindowRequestError && !error.result) throw new WindowMutationUnknownError(window.id, pending.request, error);
         throw error;
@@ -85,7 +90,7 @@ export function useWindowWorkspace(scope: string, hosted: boolean, enabled: bool
     };
     const run = async () => {
       if (!previous) return submit();
-      try { return await client!.recoverCreate(window, pending.request); }
+      try { return await client!.recoverCreate(pending.request.window, pending.request); }
       catch (error) {
         if (!explicitRetry || !(error instanceof WindowMutationUnknownError) || error.result?.status === 'committed') throw error;
         return submit();
@@ -122,25 +127,27 @@ export function useWindowWorkspace(scope: string, hosted: boolean, enabled: bool
           && slot.intent.target.native.providerId === query.get('provider')
           && slot.intent.target.native.nativeSessionId === query.get('session'))?.metadata?.title || query.get('session')!,
         ...(query.get('parent') ? { parentNativeSessionId: query.get('parent')! } : {}),
+        ...(query.get('intent') === 'history' ? { sessionIntent: 'history' as const } : {}),
       };
       const existing = imported.views.find(view => view.binding?.hostId === target.hostId
-        && view.binding.providerId === target.providerId && view.binding.nativeSessionId === target.nativeSessionId);
-      if (existing) { imported.selectedViewId = existing.id; return imported; }
-      const bound = applyWindowOperation(imported, { type: 'view.bind', viewId: imported.primaryViewId, binding: target });
-      Object.assign(imported, bound, { revision: 0, title: target.title, selectedViewId: bound.primaryViewId });
+        && view.binding.providerId === target.providerId && view.binding.nativeSessionId === target.nativeSessionId
+        && view.binding.sessionIntent === target.sessionIntent);
+      if (existing) { imported.selectedViewId = existing.id; imported.selectedPrimaryViewId = windowPrimaryViewId(imported, existing.id) ?? imported.selectedPrimaryViewId; return imported; }
+      const bound = applyWindowOperation(imported, { type: 'view.bind', viewId: imported.selectedPrimaryViewId, binding: target });
+      Object.assign(imported, bound, { revision: 0, title: target.title, selectedViewId: bound.selectedPrimaryViewId });
       return imported;
     };
-    let cached: unknown; try { const selected = requested ?? (explicitSession ? undefined : conversationSessionStorage.getItem(key)); cached = selected ? JSON.parse(conversationLocalStorage.getItem(`${key}:${selected}`) ?? 'null') : undefined; } catch { /* Ignore an invalid cache. */ }
-    if (isWorkspaceWindow(cached) && (!requested || cached.id === requested)) choose(cached, false, !client);
+    let cached: WorkspaceWindow | undefined; try { const selected = requested ?? (explicitSession ? undefined : conversationSessionStorage.getItem(key)); cached = selected ? decodeWorkspaceWindow(JSON.parse(conversationLocalStorage.getItem(`${key}:${selected}`) ?? 'null')) : undefined; } catch { /* Ignore an invalid cache. */ }
+    if (cached && (!requested || cached.id === requested)) choose(cached, false, !client);
     else if (!client && requested) { setError('This Window is unavailable in the local workbench.'); setUnavailable(true); }
     else if (!client) { try { const imported = initialWindow(); choose(imported, true); } catch (error) { setError(String(error instanceof Error ? error.message : error)); } }
-    if (!client) { const local: WorkspaceWindow[] = []; for (const entry of conversationLocalStorage.keys().filter(entry => entry.startsWith(`${key}:`))) { try { const value: unknown = JSON.parse(conversationLocalStorage.getItem(entry) ?? 'null'); if (isWorkspaceWindow(value)) local.push(value); } catch { /* A corrupt cache is not a usable Window. */ } } setWindows(local); }
+    if (!client) { const local: WorkspaceWindow[] = []; for (const entry of conversationLocalStorage.keys().filter(entry => entry.startsWith(`${key}:`))) { try { const value = decodeWorkspaceWindow(JSON.parse(conversationLocalStorage.getItem(entry) ?? 'null')); if (value) local.push(value); } catch { /* A corrupt cache is not a usable Window. */ } } setWindows(local); }
     if (!enabled || !client) return;
     let current = true;
     void (async () => {
       const list = (await client.list()).filter(window => !selection.deleted.has(window.id)); if (!current || generation !== selection.generation) return; setWindows(list);
       if (requested) { const next = await client.inspect(requested); if (current && generation === selection.generation) choose(next.window); }
-      else if (isWorkspaceWindow(cached)) { const next = await client.inspect(cached.id); if (current && generation === selection.generation) choose(next.window); }
+      else if (cached) { const next = await client.inspect(cached.id); if (current && generation === selection.generation) choose(next.window); }
       else { const { candidate, snapshot: next } = await createHosted(initialWindow, false); if (current && generation === selection.generation) { commitImportedWindowComposition(composition, candidate, next.window); choose(next.window); setWindows([...list.filter(window => window.id !== next.window.id), next.window]); } }
     })().catch(error => { if (current && generation === selection.generation) { setError(String(error.message ?? error)); if (error?.status === 404) { selectStore(undefined); setUnavailable(true); } } });
     return () => { current = false; };
@@ -167,14 +174,14 @@ export function useWindowWorkspace(scope: string, hosted: boolean, enabled: bool
       if (!event.key?.startsWith(`${key}:`)) return;
       if (event.newValue === null) { forgetDeletedWindow(event.key.slice(key.length + 1)); return; }
       if (event.key !== `${key}:${store.getSnapshot().id}`) return;
-      try { const value: unknown = JSON.parse(event.newValue); if (isWorkspaceWindow(value)) store.accept(value); } catch { /* Invalid data never replaces a committed snapshot. */ }
+      try { const value = decodeWorkspaceWindow(JSON.parse(event.newValue)); if (value) store.accept(value); } catch { /* Invalid data never replaces a committed snapshot. */ }
     };
     globalThis.addEventListener('storage', receive); return () => globalThis.removeEventListener('storage', receive);
   }, [store, client, key]);
   const operate = async (operation: Parameters<WindowWorkspaceStore['operate']>[0]): Promise<void> => { if (!store || unavailable) throw new Error('Choose an available Window before editing its layout.'); try { await store.operate(operation); } catch (error) { setError(String(error instanceof Error ? error.message : error)); throw error; } };
   const dispatch = (operation: Parameters<WindowWorkspaceStore['operate']>[0]) => { void operate(operation).catch(() => {}); };
   const hasActiveWindow = !!store && confirmedStores.has(store) && !unavailable;
-  return { window, windows, error, client, deleted, hasActiveWindow, unavailable: participating && enabled && unavailable, operate, readWindow: () => unavailable ? undefined : store?.getSnapshot(),
+  return { window, windows, error, client, deleted, hasActiveWindow, unavailable: participating && enabled && unavailable, operate, readWindow,
     authority: window && !unavailable ? {
       window,
       operate: dispatch,
@@ -187,7 +194,7 @@ export function useWindowWorkspace(scope: string, hosted: boolean, enabled: bool
       let next: WorkspaceWindow;
       try {
         if (client) next = (await client.inspect(id)).window;
-        else { const cached: unknown = JSON.parse(conversationLocalStorage.getItem(`${key}:${id}`) ?? 'null'); if (!isWorkspaceWindow(cached) || cached.id !== id) throw new Error('This local Window is unavailable.'); next = cached; }
+        else { const cached = decodeWorkspaceWindow(JSON.parse(conversationLocalStorage.getItem(`${key}:${id}`) ?? 'null')); if (!cached || cached.id !== id) throw new Error('This local Window is unavailable.'); next = cached; }
       } catch (error) { if (generation === selection.generation) throw error; return; }
       if (generation !== selection.generation) return;
       setError(undefined); choose(next);

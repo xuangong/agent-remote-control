@@ -1,4 +1,4 @@
-import { act } from 'react';
+import { act, StrictMode } from 'react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import type { ImageDraft } from '../image-drafts.js';
 import { readImageDraft, writeImageDraft, inspectImageDraft, configureImageDraftPersistence } from '../image-drafts.js';
@@ -625,4 +625,22 @@ it('captures the image application before a text subscriber synchronously edits 
   });
   expect(handle.snapshot().revision).not.toBe(appliedRevision);
   expect(draft.parts).toEqual([{ type: 'text', text: 'selected' }]);
+});
+
+
+it('hydrates a StrictMode replacement after the previous editor finishes without waiting on itself', async () => {
+  let finishRead!: (value: undefined) => void;
+  vi.mocked(readImageDraft).mockImplementationOnce(() => new Promise(resolve => { finishRead = resolve; }));
+  const binding = { scope: 'strict-replacement', key: 'shared-editor' };
+  const previous = await render(<Harness scope={binding.scope} binding={binding} />);
+  await unmount(previous);
+  await render(<StrictMode><Harness scope={binding.scope} binding={binding} /></StrictMode>);
+  await act(async () => { finishRead(undefined); });
+  await vi.waitFor(async () => {
+    const handle = await inspectImageDraft(binding);
+    expect(handle.snapshot().status).toBe('ready');
+    expect((await handle.flush(handle.snapshot().revision, () => true)).status).toBe('ready');
+  });
+  await act(async () => draft.setText('Replacement edit'));
+  expect(draft.parts).toEqual([{ type: 'text', text: 'Replacement edit' }]);
 });

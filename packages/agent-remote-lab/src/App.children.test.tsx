@@ -6,6 +6,9 @@ import { App, type LabTransport } from './App.js';
 import { SessionDirectoryClient } from './directory-client.js';
 import { render, unmount } from './test/setup.js';
 import { replicaState } from './test/fixtures.js';
+import * as workbenchComponents from './components/LabWorkbench.js';
+
+const realWorkbench = workbenchComponents.LabWorkbench;
 
 const child: AgentChildSession = { nativeSessionId: 'native-child', title: 'Review transport', role: 'Reviewer', createdAt: '2026-09-10T00:00:00Z', status: 'idle', observation: 'live' };
 const parent = { ...replicaState.agent!, id: 'parent', providerId: 'codex', persistence: { providerId: 'codex', sessionId: 'native-parent', opaque: 'native-parent' }, capabilities: { ...replicaState.agent!.capabilities, commands: true }, runtimeInfo: { providerId: 'codex', sessionId: 'native-parent', status: 'idle' as const, childSessions: [child] } };
@@ -14,7 +17,8 @@ const snapshots = {
   child: { ...parent, id: 'child', persistence: { providerId: 'codex', sessionId: 'native-child', opaque: 'native-child' }, runtimeInfo: { providerId: 'codex', sessionId: 'native-child', status: 'idle' as const } },
 };
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); window.localStorage.clear(); window.sessionStorage.clear(); window.history.replaceState(null, '', '/'); });
-async function setup(reject = false, options: { live?: boolean; deferChild?: boolean; restricted?: boolean; discover?: boolean; navigation?: boolean; nested?: boolean; images?: boolean; desktop?: boolean; letters?: boolean; rootReference?: boolean; directChild?: boolean; ask?: boolean; restoreUrl?: string } = {}) {
+async function setup(reject = false, options: { live?: boolean; deferChild?: boolean; staleChild?: boolean; restricted?: boolean; discover?: boolean; navigation?: boolean; nested?: boolean; images?: boolean; desktop?: boolean; letters?: boolean; rootReference?: boolean; directChild?: boolean; ask?: boolean; restoreUrl?: string } = {}) {
+  vi.spyOn(workbenchComponents, 'LabWorkbench').mockImplementation(props => <div data-test-runtime-agent={props.state?.agent?.id}>{realWorkbench(props)}</div>);
   HTMLElement.prototype.scrollIntoView = vi.fn();
   Range.prototype.getClientRects = () => [] as unknown as DOMRectList;
   Range.prototype.getBoundingClientRect = () => new DOMRect();
@@ -23,6 +27,8 @@ async function setup(reject = false, options: { live?: boolean; deferChild?: boo
   if (options.ask) vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} });
   vi.stubGlobal('matchMedia', vi.fn((query: string) => ({ matches: options.desktop ? query.includes('min-width: 1181px') : query.includes('max-width: 1180px'), media: query, addEventListener() {}, removeEventListener() {}, addListener() {}, removeListener() {} })));
   let connections = 0;
+  const connectedAgents: string[] = [];
+  let childAttachCount = 0;
   let releaseChild: (() => void) | undefined;
   const childReady = options.deferChild ? new Promise<void>((resolve) => { releaseChild = resolve; }) : Promise.resolve();
   const sibling = { ...child, nativeSessionId: 'native-sibling', title: '/root/sibling' };
@@ -30,7 +36,7 @@ async function setup(reject = false, options: { live?: boolean; deferChild?: boo
     sibling: { ...snapshots.child, id: 'sibling', runtimeInfo: { ...snapshots.child.runtimeInfo, sessionId: 'native-sibling' } }, child: options.restricted ? { ...snapshots.child, capabilities: { ...snapshots.child.capabilities, sendMessage: false, cancel: false }, pendingInteractions: [{ kind: 'plan_approval' as const, requestId: 'child-plan', plan: 'Review the child plan', allowedActions: ['approve' as const] }] } : snapshots.child };
   if (options.nested) sessionSnapshots.child = { ...sessionSnapshots.child, runtimeInfo: Object.assign({}, sessionSnapshots.child.runtimeInfo, { childSessions: [{ ...child, nativeSessionId: 'native-grandchild', title: '/root/review/evidence', status: 'running' as const }] }) };
   if (options.images) sessionSnapshots.parent = { ...sessionSnapshots.parent, capabilities: { ...sessionSnapshots.parent.capabilities, imageInput: { mediaTypes: ['image/png'], maxImages: 8, maxImageBytes: 10485760, maxMessageBytes: 20971520 } } };
-  Object.assign(sessionSnapshots, { grandchild: { ...snapshots.child, id: 'grandchild', runtimeInfo: { providerId: 'codex', sessionId: 'native-grandchild', status: 'idle' } } });
+  Object.assign(sessionSnapshots, { 'old-child': { ...snapshots.child, id: 'old-child' }, grandchild: { ...snapshots.child, id: 'grandchild', runtimeInfo: { providerId: 'codex', sessionId: 'native-grandchild', status: 'idle' } } });
   Object.assign(sessionSnapshots, {
     ask: { ...parent, id: 'ask', persistence: { providerId: 'codex', sessionId: 'native-ask', opaque: 'native-ask' }, runtimeInfo: { providerId: 'codex', sessionId: 'native-ask', status: 'idle', childSessions: [{ ...child, nativeSessionId: 'native-ask-child', title: 'Ask reviewer' }] } },
     'ask-child': { ...snapshots.child, id: 'ask-child', runtimeInfo: { providerId: 'codex', sessionId: 'native-ask-child', status: 'idle' } },
@@ -45,7 +51,9 @@ async function setup(reject = false, options: { live?: boolean; deferChild?: boo
     if (options.ask && path.endsWith('/create')) return Response.json({ agentId: 'ask', nativeSessionId: 'native-ask' });
     if (path.endsWith('/attach')) {
       attachments.push({ path, body: JSON.parse(String(init?.body)) });
-      if (path.endsWith('/child/attach')) await childReady;
+      const staleChild = path.endsWith('/child/attach') && options.staleChild && childAttachCount++ === 0;
+      if (path.endsWith('/child/attach') && (!options.staleChild || staleChild)) await childReady;
+      if (staleChild) return Response.json({ agentId: 'old-child', nativeSessionId: 'native-child' });
       if (reject) return Response.json({ error: 'Child is unavailable.' }, { status: 409 });
       const nativeSessionId = JSON.parse(String(init?.body)).nativeSessionId;
       return Response.json({ agentId: nativeSessionId.replace('native-', ''), nativeSessionId });
@@ -58,18 +66,18 @@ async function setup(reject = false, options: { live?: boolean; deferChild?: boo
   const transport: LabTransport = {
     listProviders: async () => [{ providerId: 'codex', displayName: 'Codex' }],
     createAgent: async () => { throw new Error('Not used'); }, resumeAgent,
-    fetchSnapshot: async (agentId) => ({ protocolVersion: PROTOCOL_VERSION, type: 'agent_snapshot', payload: sessionSnapshots[agentId as keyof typeof sessionSnapshots] }),
+    fetchSnapshot: async (agentId) => ({ protocolVersion: PROTOCOL_VERSION, type: 'agent_snapshot', payload: sessionSnapshots[agentId as keyof typeof sessionSnapshots] ?? (() => { throw new Error(`Missing fixture snapshot: ${agentId}`); })() }),
     fetchTimeline: async (agentId) => ({ protocolVersion: PROTOCOL_VERSION, type: 'timeline_page', payload: {
       requestId: 'page', agentId, epoch: 'epoch', direction: 'tail', reset: false, staleCursor: false, gap: false,
       window: { minSeq: 1, maxSeq: options.ask && agentId === 'ask' ? 2 : options.letters ? (options.rootReference && agentId === 'child' ? 4 : 3) : options.navigation ? 1 : 0, nextSeq: options.ask && agentId === 'ask' ? 3 : options.letters ? (options.rootReference && agentId === 'child' ? 5 : 4) : options.navigation ? 2 : 1 }, startCursor: null, endCursor: null, entries: options.ask && agentId === 'ask' ? [activityEntry('native-ask-child'), { ...activityEntry('native-ask-child'), seqStart: 2, seqEnd: 2, item: { type: 'assistant_message', text: 'Read [the source](./ask-source.ts).' } }] : options.letters ? letterEntries(agentId, options.rootReference) : options.navigation ? [activityEntry(agentId === 'child' ? 'native-sibling' : agentId === 'sibling' ? 'native-parent' : 'native-child')] : [], hasOlder: false, hasNewer: false, error: null,
     } }),
     connect: (agentId, listener) => {
-      connections++;
+      connections++; connectedAgents.push(agentId);
       queueMicrotask(() => {
         listener.onOpen();
         listener.onMessage({ protocolVersion: PROTOCOL_VERSION, type: 'negotiated', sessionControl: true });
         listener.onMessage({ protocolVersion: PROTOCOL_VERSION, type: 'session_control', payload: { agentId, revision: 'control', access: 'control', available: false, token: 'control-token' } });
-        listener.onMessage({ protocolVersion: PROTOCOL_VERSION, type: 'agent_snapshot', payload: sessionSnapshots[agentId as keyof typeof sessionSnapshots] });
+        listener.onMessage({ protocolVersion: PROTOCOL_VERSION, type: 'agent_snapshot', payload: sessionSnapshots[agentId as keyof typeof sessionSnapshots] ?? (() => { throw new Error(`Missing fixture snapshot: ${agentId}`); })() });
       });
       return { close() {}, send(message) {
         if (message.type === 'resource_resolve_request') {
@@ -102,7 +110,7 @@ async function setup(reject = false, options: { live?: boolean; deferChild?: boo
   }
   const container = await render(<Harness />);
   await vi.waitFor(async () => { await act(async () => { await new Promise(resolve => setTimeout(resolve, 20)); }); expect(container.querySelector('[data-testid="prompt-input"]')).not.toBeNull(); });
-  return { container, attachments, resourceReads, sendMessage, respondToInteraction, releaseChild, resumeAgent, connections: () => connections };
+  return { container, connectedAgents, attachments, resourceReads, sendMessage, respondToInteraction, releaseChild, resumeAgent, connections: () => connections };
 
 }
 it('focuses the current discovered session without another attachment or stream connection', async () => {
@@ -204,6 +212,10 @@ it('shares the file preview host with Ask', async () => {
 it('resolves Side activity references within its source family', async () => {
   const f = await setup(false, { live: true, desktop: true, navigation: true });
   await act(async () => f.container.querySelector<HTMLButtonElement>('.lab-primary-conversation [data-child-session-id="native-child"]')!.click());
+  await waitForSession(f.container.querySelector<HTMLElement>('.lab-side-conversation')!, 'child');
+  await act(async () => f.container.querySelector<HTMLButtonElement>('.lab-side-conversation [aria-label="Session view options"]')!.click());
+  await act(async () => f.container.querySelector<HTMLInputElement>('.lab-side-conversation input[value="simple"]')!.click());
+  await act(async () => f.container.querySelector<HTMLButtonElement>('.lab-side-conversation [aria-label="Session view options"]')!.click());
   const link = f.container.querySelector<HTMLAnchorElement>('.lab-side-conversation .agent-session-reference');
   expect(link).not.toBeNull();
   expect(new URL(link!.href).searchParams.get('session')).toBe('native-sibling');
@@ -260,14 +272,18 @@ it('keeps the initial native parent image draft when returning after directory r
   expect(f.container.querySelector('[data-image-id]')?.textContent).toBe('[image #1]');
 });
 
-it('does not replace a newly connected parent when an older child attach finishes', async () => {
-  const f = await setup(false, { live: true, deferChild: true });
+it('keeps the selected child binding when an older transport attachment finishes', async () => {
+  const f = await setup(false, { live: true, deferChild: true, staleChild: true });
   await act(async () => f.container.querySelector<HTMLButtonElement>('[data-child-session-id]')!.click());
   await act(async () => f.container.querySelector<HTMLButtonElement>('[data-testid="replace-transport"]')!.click());
+  await waitForSession(f.container, 'child');
+  const savedWindow = () => Object.entries(localStorage).filter(([key]) => key.includes(':shared-window:')).map(([, value]) => JSON.parse(value) as { selectedViewId: string; views: Array<{ id: string; binding?: { nativeSessionId: string } }> })[0]!;
+  const selectedChild = savedWindow().selectedViewId;
+  expect(savedWindow().views.find(view => view.id === selectedChild)?.binding?.nativeSessionId).toBe('native-child');
   await act(async () => { f.releaseChild!(); });
-  await waitForSession(f.container, 'parent');
-  expect(f.container.querySelector('[data-testid="connection-summary"]')?.textContent).toContain('parent');
-  expect(f.container.querySelector('[aria-label="Conversation path"]')).toBeNull();
+  await waitForSession(f.container, 'child');
+  expect(savedWindow().selectedViewId).toBe(selectedChild);
+  expect(f.connectedAgents).not.toContain('old-child');
 });
 
 it('uses child input capabilities while keeping its native approval actionable', async () => {
@@ -326,7 +342,7 @@ it('releases view and delivery-persistence subscriptions while revisiting parent
     parentSubscriptions ??= count('parent'); childSubscriptions ??= count('child');
     expect(count('parent')).toBe(parentSubscriptions);
     expect(count('child')).toBe(childSubscriptions);
-    await act(async () => f.container.querySelector<HTMLButtonElement>('[aria-label="Earlier windows"] button')!.click());
+    await act(async () => f.container.querySelector<HTMLButtonElement>('[title="Back to parent session"]')!.click());
     restoredParentSubscriptions ??= count('parent'); restoredChildSubscriptions ??= count('child');
     expect(count('child')).toBe(restoredChildSubscriptions);
     expect(count('parent')).toBe(restoredParentSubscriptions);
@@ -388,7 +404,10 @@ function activityEntry(nativeSessionId: string) {
 
 async function waitForSession(container: HTMLElement, agent: string) {
   await act(async () => { await new Promise(resolve => setTimeout(resolve, 30)); });
-  expect(container.querySelector('[data-testid="connection-summary"]')?.textContent).toContain(agent);
+  const pane = [...(container.matches('.lab-session-family-pane, .lab-primary-conversation, .lab-side-conversation') ? [container] : []), ...container.querySelectorAll<HTMLElement>('.lab-session-family-pane, .lab-primary-conversation, .lab-side-conversation')].find(item => !item.closest('[hidden]'));
+  const runtime = pane?.querySelector('[data-test-runtime-agent]');
+  if (runtime) expect(runtime.getAttribute('data-test-runtime-agent')).toBe(agent);
+  else expect(pane?.querySelector('[data-testid="connection-summary"]')?.textContent).toContain(agent);
 }
 
 function conversationVisits() {
@@ -485,7 +504,7 @@ it('opens desktop subagents side by side and preserves both drafts when focusing
   expect(side.hidden).toBe(false);
   expect(promptText(primary)).toBe('Parent stays');
   expect(promptText(side)).toBe('Child stays');
-  await act(async () => side.querySelector<HTMLButtonElement>('.lab-side-close')!.click());
+  await act(async () => side.querySelector<HTMLButtonElement>('[aria-label="Close subagent"]')!.click());
   expect(!side.isConnected || side.hidden).toBe(true); expect(primary.hidden).toBe(false);
 });
 it('opens a letter from its original position, docks toward the receiver and reveals either direction without replacing the pair', async () => {
@@ -540,26 +559,29 @@ it('replaces the current mobile conversation with the letter recipient and prese
     primary.querySelector<HTMLButtonElement>('[aria-label="Open letter from /root to /root/review"]')!.click();
     await new Promise(resolve => setTimeout(resolve, 30));
   });
-  expect(primary.hidden).toBe(false);
-  expect(f.container.querySelector('.lab-side-conversation')).toBeNull();
-  expect(primary.querySelector('[data-inspected="true"]')?.getAttribute('data-entry-key')).toContain('task-letter');
+  const child = f.container.querySelector<HTMLElement>('.lab-side-conversation')!;
+  expect(primary.hidden).toBe(true);
+  expect(child.hidden).toBe(false);
+  expect(child.querySelector('[data-inspected="true"]')?.getAttribute('data-entry-key')).toContain('task-letter');
   await waitForSession(f.container, 'child');
-  expect(promptText(primary)).not.toBe('Parent draft stays');
-  await draft(primary, 'Child draft stays');
+  expect(promptText(child)).not.toBe('Parent draft stays');
+  await draft(child, 'Child draft stays');
   await act(async () => {
-    primary.querySelector<HTMLButtonElement>('[aria-label="Open letter from /root/review to /root"]')!.click();
+    child.querySelector<HTMLButtonElement>('[aria-label="Open letter from /root/review to /root"]')!.click();
     await new Promise(resolve => setTimeout(resolve, 30));
   });
   await waitForSession(f.container, 'parent');
   expect(primary.hidden).toBe(false);
-  expect(f.container.querySelector('.lab-side-conversation')).toBeNull();
+  expect(child.hidden).toBe(true);
   expect(primary.querySelector('[data-inspected="true"]')?.getAttribute('data-entry-key')).toContain('reply-letter');
   expect(promptText(primary)).toBe('Parent draft stays');
   await act(async () => {
     primary.querySelector<HTMLButtonElement>('[aria-label="Open letter from /root to /root/review"]')!.click();
     await new Promise(resolve => setTimeout(resolve, 30));
   });
-  expect(promptText(primary)).toBe('Child draft stays');
+  expect(primary.hidden).toBe(true);
+  expect(child.hidden).toBe(false);
+  expect(promptText(child)).toBe('Child draft stays');
 });
 it('opens the sender when the mobile view already belongs to the recipient', async () => {
   const f = await setup(false, { live: true, letters: true });
@@ -568,12 +590,13 @@ it('opens the sender when the mobile view already belongs to the recipient', asy
     primary.querySelector<HTMLButtonElement>('[aria-label="Open letter from /root/review to /root"]')!.click();
     await new Promise(resolve => setTimeout(resolve, 30));
   });
-  expect(primary.hidden).toBe(false);
-  expect(f.container.querySelector('.lab-side-conversation')).toBeNull();
+  const child = f.container.querySelector<HTMLElement>('.lab-side-conversation')!;
+  expect(primary.hidden).toBe(true);
+  expect(child.hidden).toBe(false);
   await waitForSession(f.container, 'child');
-  expect(primary.querySelector('[data-inspected="true"]')?.getAttribute('data-entry-key')).toContain('reply-letter');
+  expect(child.querySelector('[data-inspected="true"]')?.getAttribute('data-entry-key')).toContain('reply-letter');
   await act(async () => {
-    primary.querySelector<HTMLButtonElement>('[aria-label="Open letter from /root/review to /root"]')!.click();
+    child.querySelector<HTMLButtonElement>('[aria-label="Open letter from /root/review to /root"]')!.click();
     await new Promise(resolve => setTimeout(resolve, 30));
   });
   await waitForSession(f.container, 'parent');
@@ -592,8 +615,9 @@ it.each([false, true])('keeps the main session title when a child letter uses it
     await new Promise(resolve => setTimeout(resolve, 50));
   });
   if (!desktop) await waitForSession(f.container, 'parent');
-  const destination = desktop ? f.container.querySelector('.lab-side-conversation')! : primary;
-  expect(f.container.querySelector(desktop ? '.lab-side-title-text' : '.lab-mobile-session-title')?.textContent).toBe('Main project conversation');
+  const destination = f.container.querySelector<HTMLElement>('.lab-side-conversation')!;
+  expect(destination.hidden).toBe(false);
+  expect(destination.querySelector('.agent-session-title')?.textContent).toBe('Main project conversation');
   expect(destination.querySelector('[data-inspected="true"]')?.getAttribute('data-entry-key')).toContain('reply-letter');
 });
 

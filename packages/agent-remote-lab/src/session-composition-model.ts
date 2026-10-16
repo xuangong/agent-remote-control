@@ -136,7 +136,8 @@ export function parseComposition(value: unknown, scope: string): CompositionDocu
         && typeof entry.bindingKey === 'string' && entry.bindingKey.length <= 73760 && ids.has(entry.slotId));
       let binding: unknown;
       try { binding = JSON.parse(entry.bindingKey); } catch { requireValue(false); }
-      requireValue(Array.isArray(binding) && binding.length === 3 && binding.every(value => typeof value === 'string' && value.length > 0 && value.length <= 4096)
+      requireValue(Array.isArray(binding) && (binding.length === 3 || binding.length === 4 && binding[3] === 'history')
+        && binding.every(value => typeof value === 'string' && value.length > 0 && value.length <= 4096)
         && JSON.stringify(binding) === entry.bindingKey);
       const owner = JSON.stringify([entry.windowId, entry.viewId]);
       requireValue(!ownership.has(entry.slotId) || ownership.get(entry.slotId) === owner);

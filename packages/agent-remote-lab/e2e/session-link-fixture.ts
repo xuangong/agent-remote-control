@@ -6,7 +6,7 @@ import { createGatewayRelay } from '../src/server/gateway-relay.js';
 import { createGatewayStaticPages } from '../src/server/gateway-static.js';
 import { createRecordedLabProvider } from '../src/server/recorded.js';
 
-export async function sessionLinkFixture(options: { automaticSignIn?: boolean } = {}) {
+export async function sessionLinkFixture(options: { automaticSignIn?: boolean; listCreatedSessions?: boolean } = {}) {
   const secret = 'session-link-fixture-secret-01234567890123456789';
   let subject = 'alice';
   let url = '';
@@ -46,7 +46,7 @@ export async function sessionLinkFixture(options: { automaticSignIn?: boolean } 
     installationId: randomUUID(), name: 'Cross-device Host', providers: [{ providerId: 'recorded', displayName: 'Recorded Provider' }],
     resolveSession: (id) => [...natives.values()].includes(id) ? relay.requireAgent(id) : undefined,
     async control(control) {
-      if (control.path.startsWith('/remote/catalog')) return { status: 200, body: JSON.stringify({ items: [], hasMore: false, revision: '1' }) };
+      if (control.path.startsWith('/remote/catalog')) return { status: 200, body: JSON.stringify({ items: options.listCreatedSessions ? [...natives.keys()].map(nativeSessionId => ({ nativeSessionId, providerId: 'recorded', title: 'New session', createdAt: '2026-10-16T00:00:00Z', updatedAt: '2026-10-16T00:00:00Z', state: 'idle' })) : [], hasMore: false, revision: String(natives.size) }) };
       if (control.path.startsWith('/remote/workspaces')) return { status: 200, body: JSON.stringify({ workspaces: [] }) };
       const body = JSON.parse(control.body ?? '{}');
       if (control.path === '/remote/attach' || control.path === '/remote/child/attach') {

@@ -17,8 +17,8 @@ export interface SessionViewOperationScope {
   recipient?: ImageDraftRecipient; isCurrent(): boolean;
 }
 
-export function useSessionView({ agentId, transport, source, cachedReplica, pending = false, enabled = true }: {
-  agentId: string; transport: RemoteAgentTransport; source?: SessionConnectionSource; cachedReplica?: AgentReplica; pending?: boolean; enabled?: boolean;
+export function useSessionView({ agentId, transport, source, cachedReplica, pending = false, enabled = true, connect = true }: {
+  agentId: string; transport: RemoteAgentTransport; source?: SessionConnectionSource; cachedReplica?: AgentReplica; pending?: boolean; enabled?: boolean; connect?: boolean;
 }) {
   const connections = useMemo<SessionConnectionSource>(() => source ?? { acquire(id, replica) {
     const client = new RemoteSessionClient(id, transport, replica, { historyPageSize: 100, requireSessionControl: true, clientKind: 'web' });
@@ -32,12 +32,13 @@ export function useSessionView({ agentId, transport, source, cachedReplica, pend
   const [questions, setQuestions] = useState<Record<string, QuestionDraft>>({});
   const client = useRef<RemoteSessionClient>();
   const acquired = useRef<SessionConnectionLease>();
-  const access = useRef({ enabled, pending });
-  if (access.current.enabled !== enabled || access.current.pending !== pending) access.current = { enabled, pending };
+  const access = useRef({ enabled, pending, connect });
+  if (access.current.enabled !== enabled || access.current.pending !== pending || access.current.connect !== connect) access.current = { enabled, pending, connect };
   const recipient = useRef<ImageDraftRecipient>();
   const selection = useRef({ agentId, connections, cachedReplica });
   selection.current = { agentId, connections, cachedReplica };
   useEffect(() => {
+    if (!connect) { setState(undefined); setSessionState(remoteSessionState(undefined, 'connecting')); setQuestions({}); return; }
     const lease = connections.acquire(agentId, cachedReplica ?? new AgentReplica());
     const { replica, client: connection } = lease;
     acquired.current = lease;
@@ -61,11 +62,11 @@ export function useSessionView({ agentId, transport, source, cachedReplica, pend
       if (client.current === connection) { client.current = undefined; recipient.current = undefined; }
       if (acquired.current === lease) acquired.current = undefined;
     };
-  }, [agentId, connections, cachedReplica]);
+  }, [agentId, connections, cachedReplica, connect]);
   const active = client.current;
   const authority = access.current, lease = acquired.current;
   const viewCurrent = () => !!active && !!lease && client.current === active && acquired.current === lease
-    && access.current === authority && authority.enabled && !authority.pending
+    && access.current === authority && authority.enabled && authority.connect && !authority.pending
     && selection.current.agentId === agentId && selection.current.connections === connections && selection.current.cachedReplica === cachedReplica;
   function assertSendAuthority(): void {
     if (!viewCurrent()) throw new Error('The original session view is no longer current.');
@@ -77,7 +78,7 @@ export function useSessionView({ agentId, transport, source, cachedReplica, pend
       sendMessageContent: async (content, options) => { assertSendAuthority(); await active.sendMessageContent(content, options); },
     } satisfies SessionViewActions : {}),
   };
-  const actions: SessionViewActions = active && enabled && status === 'ready' && !pending ? {
+  const actions: SessionViewActions = active && connect && enabled && status === 'ready' && !pending ? {
     ...messageActions,
     takeControl: options => active.takeControl(options),
     uploadResource: (file, name, uploadId, options) => active.uploadResource(file, name, uploadId, options),
@@ -92,10 +93,10 @@ export function useSessionView({ agentId, transport, source, cachedReplica, pend
     respondToInteraction: sessionState.operations.interaction_response.allowed ? async (id, response) => { await active.respondToInteraction(id, response); } : undefined, requestResource: async binding => (await active.requestResource(binding.resourceId)).payload.state,
     resolveResource: (locator, sourceLocator) => active.resolveResource(locator, sourceLocator),
   } : messageActions;
-  const sendQueuedInput = active && enabled && sessionState.operations.send_message.allowed && !pending
+  const sendQueuedInput = active && connect && enabled && sessionState.operations.send_message.allowed && !pending
     ? async (text: string, operationId: string) => { assertSendAuthority(); return active.sendMessage(text, { operationId }); } : undefined;
   const imageRecipient = recipient.current?.isCurrent() ? recipient.current : undefined;
-  const operationScope: SessionViewOperationScope | undefined = enabled && !pending && status === 'ready' && active && lease && imageRecipient
+  const operationScope: SessionViewOperationScope | undefined = enabled && connect && !pending && status === 'ready' && active && lease && imageRecipient
     ? { agentId, client: active, replica: lease.replica, transport, recipient: imageRecipient,
       isCurrent: () => viewCurrent() && imageRecipient.isCurrent() }
     : undefined;

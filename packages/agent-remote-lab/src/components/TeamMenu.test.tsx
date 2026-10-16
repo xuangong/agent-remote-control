@@ -5,11 +5,13 @@ import { useState } from 'react';
 import type { Team, TeamSource } from '@orchardworks/agent-remote-protocol';
 import { AgentReplica, type RemoteAgentTransport } from '@orchardworks/agent-remote-web';
 import { ConversationConnections, ConversationConnectionScope } from '../conversation-connections.js';
-const fixture=vi.hoisted(()=>({teams:[] as any[],attached:[] as string[],actions:[] as any[],failure:'',listFailure:''}));
-vi.mock('@orchardworks/agent-remote-web/headless',async importOriginal=>({...await importOriginal<typeof import('@orchardworks/agent-remote-web/headless')>(),RemoteTeamClient:class{async list(){if(fixture.listFailure)throw new Error(fixture.listFailure);return structuredClone(fixture.teams);}async action(input:unknown){fixture.actions.push(input);if(fixture.failure)throw new Error(fixture.failure);return fixture.teams[0];}}}));
+const fixture=vi.hoisted(()=>({teams:[] as any[],attached:[] as string[],actions:[] as any[],failure:'',listFailure:'',create:undefined as ((input:unknown)=>Promise<Team>)|undefined}));
+vi.mock('@orchardworks/agent-remote-web/headless',async importOriginal=>({...await importOriginal<typeof import('@orchardworks/agent-remote-web/headless')>(),RemoteTeamClient:class{async create(input:unknown){return fixture.create!(input);}async list(){if(fixture.listFailure)throw new Error(fixture.listFailure);return structuredClone(fixture.teams);}async action(input:unknown){fixture.actions.push(input);if(fixture.failure)throw new Error(fixture.failure);return fixture.teams[0];}}}));
 vi.mock('../directory-client.js',()=>({SessionDirectoryClient:class{async attach(_:string,id:string){fixture.attached.push(id);return {agentId:id};}}}));
 vi.mock('../hooks/useConversationSession.js',()=>({useConversationSession:()=>({state:undefined,sessionState:undefined,status:'connected',actions:{},questions:{},setQuestions:()=>{}})}));
 vi.mock('./LabWorkbench.js',()=>({LabWorkbench:(props:any)=><div data-testid="standard-session-view">{props.conversationPath}<textarea aria-label="Message" /></div>}));
+import { createWindowView, type WorkspaceWindow } from '@orchardworks/agent-remote-protocol';
+import { WindowLayoutContext } from '../window-workspace-context.js';
 import { TeamMenu } from './TeamMenu.js';
 import { SessionTrackingMenu } from './SessionTrackingMenu.js';
 import type { SessionTracking } from '../hooks/useSessionTracking.js';
@@ -18,7 +20,7 @@ const team:Team={id:'team',operationId:'create',revision:1,title:'Cross-platform
   {id:'worker',hostId:'win',providerId:'fixture',nativeSessionId:'worker-session',role:'member',name:'Windows',responsibility:'Verify',creation:'ready',activity:'idle',summary:'',updatedAt:1},
 ],messages:[],createdAt:1,updatedAt:1};
 function App(){return <TeamMenu baseUrl="https://team.test" enabled hosts={[]} onOpen={async team=>{fixture.attached.push(team.id);return true;}} onOpenSession={async target=>{fixture.attached.push(target.nativeSessionId);return true;}}/>;}
-afterEach(()=>{localStorage.clear();sessionStorage.clear();fixture.attached=[];fixture.teams=[];fixture.actions=[];fixture.failure='';fixture.listFailure='';});
+afterEach(()=>{localStorage.clear();sessionStorage.clear();fixture.attached=[];fixture.teams=[];fixture.actions=[];fixture.failure='';fixture.listFailure='';fixture.create=undefined;});
 it('shares the loaded Team roster with Track even when the Team menu is hidden', async () => {
   fixture.teams = [structuredClone(team)];
   const sessions = [
@@ -210,4 +212,56 @@ it.each(['Confirm received', 'Confirm not executed'])('discovers compact uncerta
   await act(async () => button(view, label).click());
   expect(fixture.actions).toEqual([{ teamId: 'team', action: 'resolve_message', messageId: 'legacy', outcome: label === 'Confirm received' ? 'accepted' : 'rejected' }]);
   expect(fixture.attached).toEqual([]);
+});
+
+it.each(['selected-another-group', 'rebound', 'closed', 'another-window'] as const)('keeps Team creation source fixed and handles a late result after %s', async change => {
+  const binding = { ...team.source };
+  let window: WorkspaceWindow = { schemaVersion: 2, id: 'origin', revision: 0, title: 'Window', selectedPrimaryViewId: 'b', selectedViewId: 'b',
+    views: [createWindowView('a', binding, 'primary'), createWindowView('b', binding, 'primary')] };
+  let finish!: (value: Team) => void, refresh!: () => void;
+  const requests: unknown[] = [], opened = vi.fn(async () => true), catalog = vi.fn();
+  fixture.create = input => { requests.push(input); return new Promise(resolve => { finish = resolve; }); };
+  function Harness() {
+    const [, update] = useState(0); refresh = () => update(value => value + 1);
+    const selected = window.views.find(view => view.id === window.selectedPrimaryViewId)!;
+    return <WindowLayoutContext.Provider value={{ window, operate() {} }}><TeamMenu baseUrl="https://team.test" enabled
+      hosts={[{ id: 'mac', name: 'Mac', online: true, teamManagement: true }]} source={selected.binding}
+      sourceViewId={`${window.id}/${selected.id}`} onOpen={opened} onOpenSession={async () => true} onTeamsChange={catalog} /></WindowLayoutContext.Provider>;
+  }
+  const view = await render(<Harness />);
+  await act(async () => button(view, 'Teams').click());
+  await act(async () => button(view, 'New team').click());
+  await act(async () => {
+    if (change === 'another-window') window = { ...window, id: 'destination' };
+    if (change === 'selected-another-group' || change === 'closed') window = { ...window, selectedPrimaryViewId: 'a', selectedViewId: 'a',
+      views: change === 'closed' ? window.views.filter(value => value.id !== 'b') : window.views };
+    if (change === 'rebound') window = { ...window, views: window.views.map(value => value.id === 'b' ? { ...value, binding: { ...binding, nativeSessionId: 'replacement' } } : value) };
+    refresh();
+  });
+  await act(async () => { finish(structuredClone(team)); });
+  await vi.waitFor(() => expect(catalog).toHaveBeenLastCalledWith('https://team.test', [team]));
+  expect(requests).toEqual([{ operationId: expect.any(String), source: team.source }]);
+  if (change === 'selected-another-group') expect(opened).toHaveBeenCalledWith(team, 'origin/b');
+  else expect(opened).not.toHaveBeenCalled();
+});
+
+it('retries an uncertain Team creation with its original source and operation identity after selection changes', async () => {
+  let source = structuredClone(team.source), refresh!: () => void;
+  const requests: unknown[] = [], opened = vi.fn(async () => true);
+  fixture.create = async input => { requests.push(input); if (requests.length === 1) throw new Error('Receipt lost'); return structuredClone(team); };
+  function Harness() {
+    const [, update] = useState(0); refresh = () => update(value => value + 1);
+    return <TeamMenu baseUrl="https://team.test" enabled hosts={[{ id: 'mac', name: 'Mac', online: true, teamManagement: true }]}
+      source={source} sourceViewId="origin/b" onOpen={opened} onOpenSession={async () => true} />;
+  }
+  const view = await render(<Harness />);
+  await act(async () => button(view, 'Teams').click());
+  await act(async () => button(view, 'New team').click());
+  expect(view.textContent).toContain('Receipt lost');
+  await act(async () => { source = { ...source, nativeSessionId: 'replacement', title: 'Replacement primary' }; refresh(); });
+  expect(view.querySelector('[data-creation-source]')?.textContent).toContain('Main project');
+  await act(async () => button(view, 'Check previous creation').click());
+  expect(requests).toHaveLength(2); expect(requests[1]).toEqual(requests[0]);
+  expect(requests[1]).toEqual({ operationId: expect.any(String), source: team.source });
+  expect(opened).toHaveBeenCalledWith(team, 'origin/b');
 });

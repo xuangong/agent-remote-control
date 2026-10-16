@@ -111,7 +111,7 @@ it('keeps a focused view while selecting an identical native ID on another Host 
 
 it('retains shared Team member identity and validates its current roster locator after gather', async () => {
   const document = createCompositionDocument('shared-team');
-  let window: WorkspaceWindow = { schemaVersion: 1, id: 'shared-team', title: 'Team', revision: 0, primaryViewId: 'main', selectedViewId: 'main', mainMinimized: false, views: [createWindowView('main', undefined, 'primary')] };
+  let window: WorkspaceWindow = { schemaVersion: 2, id: 'shared-team', title: 'Team', revision: 0, selectedPrimaryViewId: 'main', selectedViewId: 'main', views: [createWindowView('main', undefined, 'primary')] };
   let current!: ReturnType<typeof useSessionWindows>;
   function Harness() {
     const [, save] = useReducer(n => n + 1, 0);
@@ -141,7 +141,7 @@ it('retains shared Team member identity and validates its current roster locator
 
 it('renders unknown and malformed feature associations as replaceable ordinary session views', async () => {
   const document = createCompositionDocument('opaque-features');
-  let window: WorkspaceWindow = { schemaVersion: 1, id: 'opaque', title: 'Window', revision: 0, primaryViewId: 'main', selectedViewId: 'unknown', mainMinimized: false, views: [
+  let window: WorkspaceWindow = { schemaVersion: 2, id: 'opaque', title: 'Window', revision: 0, selectedPrimaryViewId: 'main', selectedViewId: 'unknown', views: [
     createWindowView('main', undefined, 'primary'),
     { ...createWindowView('unknown', target('ordinary')), feature: { kind: 'external', id: 'tool', metadata: { role: 'member' } } },
     { ...createWindowView('invalid-team', target('other')), feature: { kind: 'team', id: 'team', metadata: { role: 'unsupported', memberId: 'member' } } },

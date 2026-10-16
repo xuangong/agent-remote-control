@@ -12,7 +12,7 @@ const help = `Usage: agent-remote-controller window <command> [--grant-file PATH
   rename <window-id> <title> | delete <window-id>
   apply <window-id> --file LAYOUT.json
   operation <window-id> <operation-id>
-  view create <window-id> [--view-id ID] [--session JSON] [--mode dock|float]
+  view create <window-id> [--view-id ID] [--session JSON] [--mode primary|dock|float]
   view bind <window-id> <view-id> --session JSON
   view close|select <window-id> <view-id>
   view move <window-id> <view-id> --after ID
@@ -21,7 +21,6 @@ const help = `Usage: agent-remote-controller window <command> [--grant-file PATH
   view collapse <window-id> <view-id> --value true|false
   view display <window-id> <view-id> --mode preview|simple|content [--letters true|false]
   view geometry <window-id> <view-id> --geometry JSON
-  minimize <window-id> --value true|false
 Mutations: [--base-revision N] [--operation-id ID --issued-at EPOCH_MS]
 Credentials: private grant file or AGENT_WINDOW_SERVER, AGENT_WINDOW_ID, AGENT_WINDOW_TOKEN.
 Timeout: --timeout-ms 100..60000 (default 15000). Output is JSON. Exit 0 committed,
@@ -138,7 +137,7 @@ export async function runWindowCommand(args: string[], env: NodeJS.ProcessEnv = 
       switch (action) {
         case 'create': {
           const view = createWindowView(options.get('view-id') ?? options.get('operation-id') ?? randomUUID(), options.has('session') ? binding(options.get('session')) : undefined);
-          const mode = options.get('mode'); if (mode) { if (mode !== 'dock' && mode !== 'float') error('invalid_argument', 'mode must be dock or float.'); view.placement = mode; }
+          const mode = options.get('mode'); if (mode) { if (mode !== 'primary' && mode !== 'dock' && mode !== 'float') error('invalid_argument', 'mode must be primary, dock or float.'); view.placement = mode; }
           operation = { type: 'view.create', view }; break;
         }
         case 'bind': operation = { type: 'view.bind', viewId, binding: binding(options.get('session')) }; break;
@@ -157,7 +156,6 @@ export async function runWindowCommand(args: string[], env: NodeJS.ProcessEnv = 
       }
     } else if (command === 'rename') operation = { type: 'rename', title: positional[2] ?? '' };
     else if (command === 'delete') operation = { type: 'delete' };
-    else if (command === 'minimize') operation = { type: 'main.minimize', minimized: boolean(options.get('value')) };
     else if (command === 'apply') {
       const file = options.get('file'); if (!file) error('invalid_argument', 'Provide --file with a Window layout export.');
       operation = { type: 'layout.apply', layout: json(await boundedFile(file), 'Layout') };

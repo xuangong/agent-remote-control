@@ -7,9 +7,11 @@ or that a native session is connected, ready, or idle. Session execution,
 messages, approvals, and lifecycle continue through their existing APIs.
 
 The Window ID identifies the workspace, independently of its sessions. This
-version preserves one primary session area plus additional views. Rebinding the
-primary view keeps the same Window and preserves independent docks. Attached
-Subagent views remain grouped with their source view.
+version supports multiple primary session groups plus independent docked and
+floating views. A primary View ID identifies its group; `attachedTo` ancestry
+determines its members. `closeWith` is a closure dependency, not membership.
+Rebinding a primary keeps the same Window and preserves independent docks.
+Attached Subagent views remain grouped with their source view.
 
 The product automatically creates a Window when none is selected. It is an
 ordinary shared Window, with no naming or save step required. Each committed
@@ -27,6 +29,27 @@ only changes its visibility. Less frequent actions are under **Window options**;
 renaming uses an explicit **Save** or **Cancel**, not focus changes. On narrow
 screens the panel stays inside the viewport and its content scrolls.
 
+## Select a session view
+
+The group selector above the conversations adds, selects, or closes primary
+groups. **New primary group** starts with an empty view. **New session view**
+adds an independent empty dock; both can receive a session from the sidebar.
+
+Click a conversation to focus its view, then use Favorites, Discover sessions,
+Track, or New session. These actions bind that exact ordinary view, including an empty
+one. A pending creation keeps its original destination when focus changes; a
+closed or rebound destination cannot silently receive the result elsewhere.
+Ask, Team, and TPM views have managed bindings and cannot be replaced this way.
+
+The selected primary group is marked separately from the focused view. Creation
+of Team or TPM work uses that primary group. Track restores its remembered family
+layout when the selected destination is a primary view; an independent or attached
+destination receives the clicked session without changing the primary group's
+Track memory. Ask and Side
+actions belong to their source view. Focusing an independent dock preserves the
+primary-group selection. On narrow screens, the visible conversation is the
+focused view; the same shared selection and layout are used on every page.
+
 ## Deployment and upgrades
 
 The website and Relay implement the shared Window service. Existing Controllers
@@ -34,6 +57,14 @@ can keep serving sessions without an upgrade because the native session protocol
 is unchanged. Using the new `agent-remote-controller window` commands requires a
 CLI build that includes them; those commands contact the service directly and do
 not require restarting the running Host daemon.
+
+Window schema version 2 requires matching service, browser assets, and Window CLI
+builds. The service automatically migrates valid persisted version 1 Windows,
+preserving Window/View IDs, revisions, and operation receipts. Older strict
+Window clients cannot read version 2. Rollback builds must retain the version 2
+reader. The layout now uses `selectedPrimaryViewId` instead of `primaryViewId`,
+and each primary's `collapsed` value instead of `mainMinimized`. Replace the
+retired `minimize` command with `view collapse WINDOW_ID PRIMARY_VIEW_ID`.
 
 The new Relay reads existing state that has no Windows. Once it stores a Window,
 the state contains `workspaceWindow` records that earlier Relay versions cannot
@@ -91,11 +122,16 @@ agent-remote-controller window view display WINDOW_ID notes --mode content --let
 agent-remote-controller window rename WINDOW_ID 'Project review'
 ```
 
-Additional commands include `view geometry --geometry JSON`, `minimize --value
-true|false`, `view close`, and `delete`. Display modes are `preview`, `simple`,
+Additional commands include `view geometry --geometry JSON`, `view close`, and
+`delete`. Display modes are `preview`, `simple`,
 and `content`; placement modes are `dock` and `float`. `view create` accepts
-`--session JSON` and `--mode dock|float`. Closing a view or deleting a Window
-does not stop or archive native work. The primary view cannot be closed.
+`--session JSON` and `--mode primary|dock|float`. Create a primary to add a group,
+then use the existing select, move, collapse, bind, and close commands on its ID.
+Selecting a primary or attached child selects its group; selecting an independent
+dock or float preserves the current primary selection. Moving a primary moves
+its attached chain together. Closing a primary closes dependent views but keeps
+independent docks; the last primary cannot be closed. Closing a view or deleting
+a Window does not stop or archive native work.
 
 Wait for each committed result before issuing dependent commands. Mutations
 normally inspect the latest revision first; use `--base-revision N` to require
@@ -137,6 +173,10 @@ the outcome with current authorization.
 Receipts are retained for 24 hours, survive service restart, and commit together
 with the document. Within retention, an identical operation ID and request
 returns its original result; different input returns `operation_conflict`.
+After a schema upgrade, preserve the original request payload for receipt
+recovery, including version 1 creation or layout fields. Existing exact payloads
+can recover their receipts; new legacy mutations are rejected. Do not rewrite
+an uncertain request into version 2 before retrying it.
 Receipts contain result metadata, not historical layout snapshots. A mutation
 response includes the current Window when it still exists. Its revision may
 therefore be newer than the original result revision on a retry.

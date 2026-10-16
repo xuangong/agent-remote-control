@@ -3,15 +3,48 @@ import { createWindowView, type WorkspaceWindow } from '@orchardworks/agent-remo
 import { createCompositionDocument, compositionRoleKey, createCompositionSlot, createAskOwner, parseComposition, type RoleCheckpoint } from './session-composition.js';
 import { ensureWindowCompositionSlot, projectWindowComposition, adoptWindowPrimaryRole, bindWindowCompositionSlot, createWindowSessionBridge, resolveCompositionWindowViewId } from './window-composition.js';
 const binding = { hostId: 'mac', providerId: 'codex', nativeSessionId: 's1', title: 'Project' };
+it('projects each selected primary family without losing another group owners', () => {
+  const doc = createCompositionDocument('scope');
+  const window: WorkspaceWindow = { schemaVersion: 2, id: 'w', revision: 1, title: 'Project', selectedPrimaryViewId: 'a', selectedViewId: 'a-child',
+    views: [createWindowView('a', binding, 'primary'), { ...createWindowView('a-child', { ...binding, nativeSessionId: 'child-a' }, 'attached'), attachedTo: 'a' },
+      createWindowView('b', binding, 'primary'), { ...createWindowView('b-child', { ...binding, nativeSessionId: 'child-b' }, 'attached'), attachedTo: 'b' }] };
+  projectWindowComposition(doc, window);
+  const a = doc.primary!, aChild = doc.focus!, aOwner = doc.asks.find(owner => owner.sourceSlot === a)!;
+  expect(aOwner).toBeDefined();
+  aOwner.records = [{ id: 'ask-a' }];
+  projectWindowComposition(doc, { ...window, selectedPrimaryViewId: 'b', selectedViewId: 'b-child' });
+  const b = doc.primary!, bChild = doc.focus!;
+  expect(b).not.toBe(a); expect(bChild).not.toBe(aChild);
+  expect(doc.edges).toEqual([{ source: b, target: bChild, selected: true }]);
+  expect(doc.slots).toHaveLength(4); expect(doc.asks.find(owner => owner.sourceSlot === a)).toBe(aOwner);
+  projectWindowComposition(doc, window);
+  expect(doc.primary).toBe(a); expect(doc.focus).toBe(aChild);
+  expect(doc.edges).toEqual([{ source: a, target: aChild, selected: true }]);
+  expect(doc.asks.find(owner => owner.sourceSlot === a)?.records).toEqual([{ id: 'ask-a' }]);
+});
 it('keeps runtime slots and draft owners distinct for two views of the same session', () => {
   const doc = createCompositionDocument('scope');
   const a = ensureWindowCompositionSlot(doc, 'w', 'a', binding), b = ensureWindowCompositionSlot(doc, 'w', 'b', binding);
   expect(a.id).not.toBe(b.id); expect(a.owners.text.key).not.toBe(b.owners.text.key);
   expect(ensureWindowCompositionSlot(doc, 'w', 'a', binding)).toBe(a);
 });
+it('restores separate concrete history and current-role owners for the same Window view', () => {
+  const doc = createCompositionDocument('scope');
+  const current = ensureWindowCompositionSlot(doc, 'w', 'a', binding);
+  const historyBinding = { ...binding, sessionIntent: 'history' as const };
+  const history = ensureWindowCompositionSlot(doc, 'w', 'a', historyBinding);
+  expect(history.id).not.toBe(current.id);
+  expect(history.intent.kind).toBe('history');
+  expect(history.origin.kind).toBe('history');
+  expect(history.owners).not.toEqual(current.owners);
+  expect(() => bindWindowCompositionSlot(doc, 'w', 'a', historyBinding, current.id)).toThrow(/does not match/);
+  const restored = parseComposition(JSON.parse(JSON.stringify(doc)), doc.scope);
+  expect(ensureWindowCompositionSlot(restored, 'w', 'a', historyBinding).id).toBe(history.id);
+  expect(ensureWindowCompositionSlot(restored, 'w', 'a', binding).id).toBe(current.id);
+});
 it('projects remote primary families without changing the Window and drops closed local edges', () => {
   const doc = createCompositionDocument('scope');
-  const window: WorkspaceWindow = { schemaVersion: 1, id: 'w', revision: 1, title: 'Project', primaryViewId: 'main', selectedViewId: 'child', mainMinimized: false,
+  const window: WorkspaceWindow = { schemaVersion: 2, id: 'w', revision: 1, title: 'Project', selectedPrimaryViewId: 'main', selectedViewId: 'child',
     views: [createWindowView('main', binding, 'primary'), { ...createWindowView('child', { ...binding, nativeSessionId: 's2' }, 'attached'), attachedTo: 'main' }, createWindowView('dock', binding)] };
   const before = JSON.stringify(window);
   expect(projectWindowComposition(doc, window)).toBe(true); expect(doc.edges).toHaveLength(1);
@@ -56,7 +89,7 @@ it('clears an empty primary presentation while retaining native slots and draft 
   const slot = ensureWindowCompositionSlot(doc, 'w', 'main', binding);
   doc.primary = slot.id; doc.address = slot.id; doc.focus = slot.id; doc.anchor = slot.id; doc.collapsed = [slot.id];
   const before = structuredClone(slot);
-  const window: WorkspaceWindow = { schemaVersion: 1, id: 'empty', revision: 0, title: 'Empty', primaryViewId: 'main', selectedViewId: 'main', mainMinimized: false, views: [createWindowView('main', undefined, 'primary')] };
+  const window: WorkspaceWindow = { schemaVersion: 2, id: 'empty', revision: 0, title: 'Empty', selectedPrimaryViewId: 'main', selectedViewId: 'main', views: [createWindowView('main', undefined, 'primary')] };
   expect(projectWindowComposition(doc, window)).toBe(true);
   expect(doc.primary).toBeUndefined(); expect(doc.focus).toBeUndefined(); expect(doc.collapsed).toEqual([]);
   expect(doc.slots.find(item => item.id === slot.id)).toEqual(before);
@@ -74,13 +107,13 @@ it('maps a verified primary directly without changing native, retained, or Ask o
   const source = createCompositionSlot('native', binding, 'scope'); source.intent = { kind: 'role', roleKey: compositionRoleKey(checkpoint), revision: 3, target: { hostId: 'mac', native: native('s3') } };
   doc.slots.push(source, createCompositionSlot('retained-B', { ...binding, nativeSessionId: 's2' }, 'scope')); doc.primary = source.id;
   doc.retained.push({ slot: 'retained-B', against: source.id });
-  const window: WorkspaceWindow = { schemaVersion: 1, id: 'w', revision: 0, title: 'Window', primaryViewId: 'main', selectedViewId: 'main', mainMinimized: false,
+  const window: WorkspaceWindow = { schemaVersion: 2, id: 'w', revision: 0, title: 'Window', selectedPrimaryViewId: 'main', selectedViewId: 'main',
     views: [createWindowView('main', { ...binding, nativeSessionId: 's2' }, 'primary')] };
   doc.asks.push(createAskOwner(source, doc.scope));
   const original = structuredClone({ source, retained: doc.retained, asks: doc.asks });
   const slot = adoptWindowPrimaryRole(doc, window)!;
   expect(slot.intent).toEqual(source.intent); expect(slot.owners).toEqual(source.owners); expect(slot).toBe(source);
-  expect(ensureWindowCompositionSlot(doc, window.id, window.primaryViewId, window.views[0]!.binding!)).toBe(slot);
+  expect(ensureWindowCompositionSlot(doc, window.id, window.selectedPrimaryViewId, window.views[0]!.binding!)).toBe(slot);
   expect(doc.slots.filter(candidate => candidate.id === slot.id)).toHaveLength(1);
   expect(doc.retained).toEqual([{ slot: 'retained-B', against: slot.id }]);
   expect({ source, retained: doc.retained, asks: doc.asks }).toEqual(original);
@@ -92,7 +125,7 @@ it('maps a verified primary directly without changing native, retained, or Ask o
 
 it('resolves application owners through the session bridge without changing layout authority', () => {
   const doc = createCompositionDocument('scope');
-  const window: WorkspaceWindow = { schemaVersion: 1, id: 'bridge', revision: 0, title: 'Window', primaryViewId: 'main', selectedViewId: 'main', mainMinimized: false,
+  const window: WorkspaceWindow = { schemaVersion: 2, id: 'bridge', revision: 0, title: 'Window', selectedPrimaryViewId: 'main', selectedViewId: 'main',
     views: [createWindowView('main', binding, 'primary')] };
   const bridge = createWindowSessionBridge(doc, window);
   const slot = bridge.slotForView('main')!;
@@ -126,6 +159,7 @@ it('rejects corrupt persisted binding maps before they can select native owners'
     [{ ...entry, slotId: 'missing' }],
     [{ ...entry, bindingKey: 'not-json' }],
     [{ ...entry, bindingKey: JSON.stringify(['host', 'provider']) }],
+    [{ ...entry, bindingKey: JSON.stringify(['host', 'provider', 'native', 'current']) }],
     [entry, { ...entry }],
     [entry, { ...entry, viewId: 'copy' }],
   ]) expect(() => parseComposition({ ...doc, windowBindings }, doc.scope)).toThrow();
@@ -145,7 +179,7 @@ it('retains a source reference for an open Ask after a fresh page sees a differe
   const { createWindowFeature } = await import('./window-feature-views.js');
   const { windowCompositionMapping, windowAskSourceMatches } = await import('./window-composition.js');
   const source = { ...binding, agentId: 'source-agent' };
-  const window: WorkspaceWindow = { schemaVersion: 1, id: 'fresh', revision: 2, title: 'Fresh', primaryViewId: 'main', selectedViewId: 'ask', mainMinimized: false,
+  const window: WorkspaceWindow = { schemaVersion: 2, id: 'fresh', revision: 2, title: 'Fresh', selectedPrimaryViewId: 'main', selectedViewId: 'ask',
     views: [createWindowView('main', { ...binding, nativeSessionId: 'independent-B' }, 'primary'),
       { ...createWindowView('ask', { ...binding, nativeSessionId: 'ask-A' }, 'dock'), closeWith: 'main', feature: createWindowFeature({ kind: 'ask', id: 'shared-A', source }) }] };
   const doc = createCompositionDocument('scope');

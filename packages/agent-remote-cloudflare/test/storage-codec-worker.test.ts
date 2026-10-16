@@ -64,7 +64,7 @@ test('Window documents, hashed management grants, operation receipts and deletio
   const f = await fixture({ completeCodec: true }); const state = codecState({ origin, issuer, secret });
   const now = Date.now();
   state.workspaceWindows = [{ subject: 'owner', id: 'window', generation: 1,
-    window: { schemaVersion: 1, id: 'window', title: 'Shared', revision: 1, primaryViewId: 'primary', selectedViewId: 'primary', mainMinimized: false,
+    window: { schemaVersion: 2, id: 'window', title: 'Shared', revision: 1, selectedPrimaryViewId: 'primary', selectedViewId: 'primary',
       views: [{ id: 'primary', placement: 'primary', width: 480, collapsed: false, display: { mode: 'content', lettersVisible: true } }] },
     manager: { generation: 1, hash: createHash('sha256').update('private-window-grant').digest('hex'), session: { hostId: 'mapped-host', providerId: 'fixture', nativeSessionId: 'A', title: 'Manager' } },
     receipts: [{ fingerprint: 'a'.repeat(64), result: { operationId: 'rename', status: 'committed', revision: 1, committedAt: now, expiresAt: now + 86400000 } }] }];

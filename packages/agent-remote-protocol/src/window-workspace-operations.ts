@@ -1,10 +1,16 @@
-import { isWindowOperation, isWorkspaceWindow, type WindowEdit, type WindowOperation, type WindowSessionBinding, type WindowView, type WorkspaceWindow } from './window-workspace.js';
+import { isWindowOperation, isWorkspaceWindow, primaryWindowViews, windowPrimaryViewId, type WindowEdit, type WindowOperation, type WindowSessionBinding, type WindowView, type WorkspaceWindow } from './window-workspace.js';
 
 export class WindowLayoutError extends Error {
   constructor(readonly code: string, message: string) { super(message); this.name = 'WindowLayoutError'; }
 }
 function fail(code: string, message: string): never { throw new WindowLayoutError(code, message); }
 const clone = <T>(value: T): T => JSON.parse(JSON.stringify(value));
+function sameBindingTarget(current: WindowSessionBinding | undefined, expected: WindowSessionBinding | null): boolean {
+  if (expected === null) return current === undefined;
+  return !!current && current.hostId === expected.hostId && current.providerId === expected.providerId
+    && current.nativeSessionId === expected.nativeSessionId && current.parentNativeSessionId === expected.parentNativeSessionId
+    && current.sessionIntent === expected.sessionIntent;
+}
 export function createWindowView(id: string, binding?: WindowSessionBinding, placement: WindowView['placement'] = 'dock'): WindowView {
   return { id, ...(binding ? { binding: clone(binding) } : {}), placement, width: 440, collapsed: false, display: { mode: 'preview', lettersVisible: true } };
 }
@@ -21,19 +27,14 @@ function descendants(window: WorkspaceWindow, root: string, cascadeClose = false
 }
 function remove(window: WorkspaceWindow, ids: Set<string>) {
   window.views = window.views.filter(view => !ids.has(view.id));
-  if (ids.has(window.selectedViewId)) window.selectedViewId = window.primaryViewId;
-  if (!window.views.some(view => view.placement === 'dock')) window.mainMinimized = false;
+  if (ids.has(window.selectedPrimaryViewId)) window.selectedPrimaryViewId = primaryWindowViews(window)[0]!.id;
+  if (ids.has(window.selectedViewId)) window.selectedViewId = window.selectedPrimaryViewId;
 }
 function edit(window: WorkspaceWindow, operation: WindowEdit): void {
   if (operation.type === 'rename') { window.title = operation.title; return; }
   if (operation.type === 'layout.apply') { Object.assign(window, clone(operation.layout)); return; }
-  if (operation.type === 'main.minimize') {
-    if (operation.minimized && !window.views.some(view => view.placement === 'dock')) fail('no_docked_view', 'Open a docked view before minimizing the main area.');
-    window.mainMinimized = operation.minimized; return;
-  }
   if (operation.type === 'view.create') {
     if (window.views.some(view => view.id === operation.view.id)) fail('view_exists', 'This view identity already exists.');
-    if (operation.view.placement === 'primary') fail('invalid_primary', 'A Window already has its primary view.');
     const view = clone(operation.view);
     if (view.attachedTo) {
       if (!window.views.some(item => item.id === view.attachedTo)) fail('view_not_found', 'The source view no longer exists.');
@@ -48,6 +49,9 @@ function edit(window: WorkspaceWindow, operation: WindowEdit): void {
   switch (operation.type) {
     case 'view.bind': {
       if (view.bindingPolicy === 'managed') fail('managed_view', 'This view has a managed binding. Open another view to select a different session.');
+      if (operation.expectedBinding !== undefined && !sameBindingTarget(view.binding, operation.expectedBinding)) {
+        fail('view_binding_changed', 'The target session view changed. Choose it again before opening a session.');
+      }
       const previous = view.binding;
       if (!previous || previous.hostId !== operation.binding.hostId || previous.providerId !== operation.binding.providerId || previous.nativeSessionId !== operation.binding.nativeSessionId) {
         const children = descendants(window, view.id); children.delete(view.id);
@@ -57,20 +61,24 @@ function edit(window: WorkspaceWindow, operation: WindowEdit): void {
       view.binding = clone(operation.binding); return;
     }
     case 'view.close':
-      if (view.id === window.primaryViewId) fail('primary_view_required', 'Replace the main session or delete the Window instead of closing its primary view.');
+      if (view.placement === 'primary' && primaryWindowViews(window).length === 1) fail('primary_view_required', 'Keep at least one primary Session group in the Window.');
       remove(window, descendants(window, view.id, true)); return;
-    case 'view.select': window.selectedViewId = view.id; view.collapsed = false; return;
+    case 'view.select': {
+      window.selectedViewId = view.id; view.collapsed = false;
+      const primaryId = windowPrimaryViewId(window, view.id);
+      if (primaryId) { window.selectedPrimaryViewId = primaryId; window.views.find(view => view.id === primaryId)!.collapsed = false; }
+      return;
+    }
     case 'view.resize': view.width = operation.width; return;
     case 'view.display': view.display = clone(operation.display); return;
     case 'view.geometry': view.geometry = clone(operation.geometry); return;
     case 'view.collapse': view.collapsed = operation.collapsed; return;
     case 'view.place':
-      if (view.id === window.primaryViewId || view.attachedTo) fail('attached_view', 'Move the source view with its attached views.');
+      if (view.placement === 'primary' || view.attachedTo) fail('attached_view', 'Move the source view with its attached views.');
       view.placement = operation.placement;
-      if (!window.views.some(item => item.placement === 'dock')) window.mainMinimized = false;
       return;
     case 'view.move': {
-      if (view.id === window.primaryViewId || view.attachedTo) fail('attached_view', 'Move the source view with its attached views.');
+      if (view.attachedTo) fail('attached_view', 'Move the source view with its attached views.');
       const group = descendants(window, view.id);
       if (group.has(operation.afterId)) fail('invalid_destination', 'A view cannot move after its own group.');
       let after = window.views.find(item => item.id === operation.afterId);

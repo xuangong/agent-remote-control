@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { createWindowView, type WorkspaceWindow } from '@orchardworks/agent-remote-protocol';
 import { WindowWorkspaceStore } from './window-workspace.js';
-const initial = (): WorkspaceWindow => ({ schemaVersion: 1, id: 'window-test', title: 'Test', revision: 0, primaryViewId: 'main', selectedViewId: 'main', mainMinimized: false, views: [createWindowView('main', undefined, 'primary')] });
+const initial = (): WorkspaceWindow => ({ schemaVersion: 2, id: 'window-test', title: 'Test', revision: 0, selectedPrimaryViewId: 'main', selectedViewId: 'main', views: [createWindowView('main', undefined, 'primary')] });
 describe('Window shared store', () => {
   it('serializes commands and preserves stable view identities without native connections', async () => {
     const store = new WindowWorkspaceStore(initial());
@@ -32,7 +32,7 @@ it('imports legacy layout once without copying native content or losing offline 
   expect(window.views.map(view => view.id)).toEqual(['main', 'view:empty', 'view:stable']);
   expect(window.views[1]).toMatchObject({ width: 650, placement: 'dock' });
   expect(window.views[2]?.binding).toEqual(target);
-  expect(window.mainMinimized).toBe(true);
+  expect(window.views.find(view => view.id === window.selectedPrimaryViewId)?.collapsed).toBe(true);
   expect(JSON.stringify(window)).not.toContain('owners');
 });
 

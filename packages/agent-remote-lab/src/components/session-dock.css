@@ -38,3 +38,12 @@
 .lab-empty-session-body { display: flex; flex: 1; flex-direction: column; align-items: center; justify-content: center; gap: 8px; padding: 24px; color: var(--obs-text-secondary); text-align: center; }
 .lab-session-open-target { display: flex; gap: 5px; padding: 8px 16px; min-width: 0; color: var(--obs-text-secondary); font-size: 12px; border-bottom: 1px solid var(--obs-border); }
 .lab-session-open-target strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--obs-text); font-weight: 500; }
+
+.lab-primary-group { position: relative; flex: none; min-width: 0; min-height: 0; height: 100%; border-right: 1px solid var(--obs-border); background: var(--obs-surface); }
+.lab-primary-group[data-selected] { outline: 2px solid var(--obs-action); outline-offset: -2px; }
+.lab-primary-group-content { height: 100%; min-width: 0; min-height: 0; }
+.lab-primary-group-content[hidden], .lab-primary-group[hidden] { display: none; }
+.lab-primary-group-minimize { position: absolute; top: 4px; right: 6px; z-index: 52; width: 28px; height: 28px; padding: 0; border-color: transparent; background: var(--obs-surface); color: var(--obs-text-secondary); }
+.lab-session-dock-rail[data-compact] > .lab-primary-group { flex: 1 1 0; width: 100%; border: 0; }
+
+.lab-primary-group:has(.lab-ask-viewport:not([hidden])) > .lab-primary-group-minimize { visibility: hidden; }

@@ -14,6 +14,7 @@ export const WINDOW_OPERATION_RETENTION_MS = 24 * 60 * 60 * 1000;
 export const WindowSessionBinding = Type.Object({
   hostId: nativeId, providerId: nativeId, nativeSessionId: nativeId, title,
   parentNativeSessionId: Type.Optional(nativeId),
+  sessionIntent: Type.Optional(Type.Literal('history')),
   role: Type.Optional(Type.Object({ controllerId: nativeId, roleId: nativeId, revision: counter }, strict)),
 }, strict);
 export type WindowSessionBinding = Static<typeof WindowSessionBinding>;
@@ -33,16 +34,17 @@ export const WindowView = Type.Object({
   width, collapsed: Type.Boolean(), display: WindowViewDisplay, geometry: Type.Optional(WindowViewGeometry),
 }, strict);
 export type WindowView = Static<typeof WindowView>;
-export const WindowLayout = Type.Object({ title, primaryViewId: id, selectedViewId: id, mainMinimized: Type.Boolean(),
+export const WindowLayout = Type.Object({ title, selectedPrimaryViewId: id, selectedViewId: id,
   views: Type.Array(WindowView, { minItems: 1, maxItems: WINDOW_VIEW_LIMIT }) }, strict);
 export type WindowLayout = Static<typeof WindowLayout>;
-export const WorkspaceWindow = Type.Object({ schemaVersion: Type.Literal(1), id, revision: counter, ...WindowLayout.properties }, strict);
+export const WorkspaceWindow = Type.Object({ schemaVersion: Type.Literal(2), id, revision: counter, ...WindowLayout.properties }, strict);
 export type WorkspaceWindow = Static<typeof WorkspaceWindow>;
 
 export const WindowEdit = Type.Union([
   Type.Object({ type: Type.Literal('rename'), title }, strict),
   Type.Object({ type: Type.Literal('view.create'), view: WindowView }, strict),
-  Type.Object({ type: Type.Literal('view.bind'), viewId: id, binding: WindowSessionBinding }, strict),
+  Type.Object({ type: Type.Literal('view.bind'), viewId: id, binding: WindowSessionBinding,
+    expectedBinding: Type.Optional(Type.Union([WindowSessionBinding, Type.Null()])) }, strict),
   Type.Object({ type: Type.Literal('view.close'), viewId: id }, strict),
   Type.Object({ type: Type.Literal('view.select'), viewId: id }, strict),
   Type.Object({ type: Type.Literal('view.move'), viewId: id, afterId: id }, strict),
@@ -51,7 +53,6 @@ export const WindowEdit = Type.Union([
   Type.Object({ type: Type.Literal('view.collapse'), viewId: id, collapsed: Type.Boolean() }, strict),
   Type.Object({ type: Type.Literal('view.display'), viewId: id, display: WindowViewDisplay }, strict),
   Type.Object({ type: Type.Literal('view.geometry'), viewId: id, geometry: WindowViewGeometry }, strict),
-  Type.Object({ type: Type.Literal('main.minimize'), minimized: Type.Boolean() }, strict),
   Type.Object({ type: Type.Literal('layout.apply'), layout: WindowLayout }, strict),
 ]);
 export type WindowEdit = Static<typeof WindowEdit>;
@@ -85,9 +86,9 @@ export function isWorkspaceWindow(value: unknown): value is WorkspaceWindow {
   for (const c of json) { const n = c.codePointAt(0)!; bytes += n <= 0x7f ? 1 : n <= 0x7ff ? 2 : n <= 0xffff ? 3 : 4; }
   if (bytes > WINDOW_DOCUMENT_MAX_BYTES) return false;
   const views = new Map(window.views.map(view => [view.id, view]));
-  if (views.size !== window.views.length || !views.has(window.selectedViewId) || views.get(window.primaryViewId)?.placement !== 'primary'
-    || window.views.filter(view => view.placement === 'primary').length !== 1 || window.views[0]?.id !== window.primaryViewId) return false;
-  if (window.mainMinimized && !window.views.some(view => view.placement === 'dock')) return false;
+  if (views.size !== window.views.length || !views.has(window.selectedViewId) || views.get(window.selectedPrimaryViewId)?.placement !== 'primary') return false;
+  const selectedPrimary = windowPrimaryViewId(window, window.selectedViewId);
+  if (selectedPrimary && selectedPrimary !== window.selectedPrimaryViewId) return false;
   const visited = new Set<string>();
   const active = new Set<string>();
   const visit = (current: string): boolean => {
@@ -103,7 +104,7 @@ export function isWorkspaceWindow(value: unknown): value is WorkspaceWindow {
   const attachedSources = new Set<string>();
   for (const view of window.views) {
     if ((view.placement === 'attached') !== (view.attachedTo !== undefined)) return false;
-    if (view.id === window.primaryViewId && (view.attachedTo || view.closeWith)) return false;
+    if (view.placement === 'primary' && (view.attachedTo || view.closeWith)) return false;
     if (!visit(view.id)) return false;
     if (view.attachedTo) {
       if (attachedSources.has(view.attachedTo)) return false;
@@ -115,4 +116,33 @@ export function isWorkspaceWindow(value: unknown): value is WorkspaceWindow {
     ancestry.push(view.id);
   }
   return true;
+}
+
+/** Primary roots define Session groups; lifecycle and feature tags do not establish membership. */
+export function primaryWindowViews(window: WorkspaceWindow): WindowView[] {
+  return window.views.filter(view => view.placement === 'primary');
+}
+export function windowPrimaryViewId(window: WorkspaceWindow, viewId: string): string | undefined {
+  const visited = new Set<string>();
+  let view = window.views.find(view => view.id === viewId);
+  while (view && !visited.has(view.id)) {
+    if (view.placement === 'primary') return view.id;
+    visited.add(view.id);
+    view = view.attachedTo ? window.views.find(candidate => candidate.id === view!.attachedTo) : undefined;
+  }
+}
+
+const LegacyWorkspaceWindow = Type.Object({ schemaVersion: Type.Literal(1), id, revision: counter, title,
+  primaryViewId: id, selectedViewId: id, mainMinimized: Type.Boolean(), views: Type.Array(WindowView, { minItems: 1, maxItems: WINDOW_VIEW_LIMIT }) }, strict);
+/** Decode persisted snapshots without changing layout identity or operation revisions. */
+export function decodeWorkspaceWindow(value: unknown): WorkspaceWindow | undefined {
+  if (isWorkspaceWindow(value)) return JSON.parse(JSON.stringify(value)) as WorkspaceWindow;
+  if (!Value.Check(LegacyWorkspaceWindow, value)) return;
+  const legacy = value as Static<typeof LegacyWorkspaceWindow>;
+  if (legacy.views.filter(view => view.placement === 'primary').length !== 1 || legacy.views[0]?.id !== legacy.primaryViewId
+    || legacy.mainMinimized && !legacy.views.some(view => view.placement === 'dock')) return;
+  const { primaryViewId, mainMinimized, ...rest } = JSON.parse(JSON.stringify(legacy)) as Static<typeof LegacyWorkspaceWindow>;
+  const migrated = { ...rest, schemaVersion: 2 as const, selectedPrimaryViewId: primaryViewId,
+    views: rest.views.map(view => view.id === primaryViewId ? { ...view, collapsed: mainMinimized || view.collapsed } : view) };
+  return isWorkspaceWindow(migrated) ? migrated : undefined;
 }

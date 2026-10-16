@@ -70,6 +70,7 @@ export function TpmMenu({ tpm, main, mainSessions, visible, triggerRef, inert, o
       {renderGroups(activeWorks)}
       {archivedWorks.length ? <details className="lab-tpm-archived"><summary>Archived ({archivedWorks.length})</summary>{renderGroups(archivedWorks)}</details> : null}
       {Object.entries(tpm.catalogs).filter(([, catalog]) => catalog.error).map(([host, catalog]) => <p key={host} className="lab-control-note" role="alert">{catalog.error}</p>)}
+      {main ? <p className="lab-control-note" data-creation-source title={main.title}>For: <strong>{main.title}</strong></p> : null}
       {canCreate ? <button type="button" className="lab-tpm-create-trigger" aria-label="Create TPM work" disabled={!!tpm.busy} onClick={() => {
         if (!main) return;
         setFailure(undefined);

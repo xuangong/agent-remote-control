@@ -6,7 +6,7 @@ import { runWindowCommand } from './window-command.js';
 const servers: Server[] = [];
 afterEach(async () => { for (const server of servers.splice(0)) { server.closeAllConnections(); await new Promise<void>(resolve => server.close(() => resolve())); } });
 async function fixture() {
-  let window: WorkspaceWindow = { schemaVersion: 1, id: 'w1', revision: 0, title: 'Project', primaryViewId: 'main', selectedViewId: 'main', mainMinimized: false, views: [createWindowView('main', undefined, 'primary')] };
+  let window: WorkspaceWindow = { schemaVersion: 2, id: 'w1', revision: 0, title: 'Project', selectedPrimaryViewId: 'main', selectedViewId: 'main', views: [createWindowView('main', undefined, 'primary')] };
   const receipts = new Map<string, { input: string; result: unknown; window: WorkspaceWindow }>(); const requests: string[] = [];
   const server = createServer(async (req, res) => {
     requests.push(req.url!); res.setHeader('content-type', 'application/json');
@@ -82,4 +82,13 @@ it('exports layout without document identity and leaves the current Window uncha
   expect(exported.id).toBeUndefined(); expect(exported.revision).toBeUndefined(); expect(exported.schemaVersion).toBeUndefined();
   expect(exported.views).toEqual(before.views);
   expect(f.window).toEqual(before);
+});
+it('creates, selects, collapses, moves and closes primary roots through the same view commands', async () => {
+  const f = await fixture();
+  expect((await f.run(['view', 'create', 'w1', '--view-id', 'second', '--mode', 'primary'])).code).toBe(0);
+  expect((await f.run(['view', 'select', 'w1', 'second'])).output.window.selectedPrimaryViewId).toBe('second');
+  expect((await f.run(['view', 'collapse', 'w1', 'second', '--value', 'true'])).output.window.views[1].collapsed).toBe(true);
+  expect((await f.run(['view', 'move', 'w1', 'second', '--after', 'main'])).code).toBe(0);
+  expect((await f.run(['view', 'close', 'w1', 'main'])).output.window.views.map((view: any) => view.id)).toEqual(['second']);
+  expect((await f.run(['minimize', 'w1', '--value', 'true'])).code).toBe(1);
 });

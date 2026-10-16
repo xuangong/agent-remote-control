@@ -12,6 +12,7 @@ import { App, type LabTransport } from './App.js';
 import { render, unmount, setPromptText, promptText } from './test/setup.js';
 import { replicaState } from './test/fixtures.js';
 import { SessionDirectoryClient } from './directory-client.js';
+import * as windowWorkspaceHooks from './hooks/useWindowWorkspace.js';
 
 describe('App', () => {
   it('renders a supplied Session View snapshot without a Window controller', async () => {
@@ -797,6 +798,11 @@ function deferred<T>(): { promise: Promise<T>; resolve(value: T): void } {
 }
 
 it('keeps a confirmed title when an older session attachment finishes afterward', async () => {
+  let workspace!: ReturnType<typeof windowWorkspaceHooks.useWindowWorkspace>;
+  const useWorkspace = windowWorkspaceHooks.useWindowWorkspace;
+  vi.spyOn(windowWorkspaceHooks, 'useWindowWorkspace').mockImplementation((...args) => {
+    workspace = useWorkspace(...args); return workspace;
+  });
   const baseUrl = 'http://localhost/title-race/';
   const target = { providerId: 'recorded', nativeSessionId: 'target-session', title: 'Old target title',
     state: 'idle' as const, createdAt: '2026-10-08T00:00:00Z', updatedAt: '2026-10-08T00:00:00Z' };
@@ -829,6 +835,13 @@ it('keeps a confirmed title when an older session attachment finishes afterward'
     expect(JSON.parse(localStorage.getItem(`agent-remote-opened:${baseUrl}`) ?? '[]')).toContainEqual(expect.objectContaining({
       nativeSessionId: target.nativeSessionId, title: 'Confirmed target title',
     }));
+    const view = workspace.window!.views.find(view => view.binding?.nativeSessionId === target.nativeSessionId)!;
+    await act(async () => workspace.operate({ type: 'view.bind', viewId: view.id,
+      binding: { ...view.binding!, title: 'Title from another page' } }));
+    const revision = workspace.readWindow()!.revision;
+    await act(async () => workspace.operate({ type: 'view.resize', viewId: view.id, width: 620 }));
+    expect(workspace.readWindow()!.revision).toBe(revision + 1);
+    expect(workspace.readWindow()!.views.find(item => item.id === view.id)?.binding?.title).toBe('Title from another page');
   } finally {
     vi.restoreAllMocks();
     localStorage.clear();

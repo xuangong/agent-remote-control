@@ -266,13 +266,13 @@ export function useSessionTracking(baseUrl: string, transport: RemoteAgentTransp
     // Projection persists navigation intent. The later explicit consumer owns attachment.
     return patchTrackedSessions(baseUrl, patches, expectedRevision, isCurrent, retainedDuplicates);
   }
-  const observers = useMemo(() => observedSessions.map(({ session, liveAgentId }) => <SessionObserver key={`${baseUrl}:${sessionKey(session)}:${retries[sessionKey(session)] ?? 0}`} session={session} liveAgentId={liveAgentId} baseUrl={baseUrl} transport={transport} update={update} enabled={enabled} />), [observedSessions, baseUrl, transport, update, retries, enabled]);
+  const observers = useMemo(() => observedSessions.map(({ session, liveAgentId }) => <SessionObserver key={`${baseUrl}:${sessionKey(session)}:${retries[sessionKey(session)] ?? 0}`} session={session} liveAgentId={liveAgentId} baseUrl={baseUrl} transport={transport} connections={connections} update={update} enabled={enabled} />), [observedSessions, baseUrl, transport, connections, update, retries, enabled]);
   useFeedbackToast('Session tracking', error);
   return { refresh, project, editRevision: () => trackingEditRevision(baseUrl), reorder, reconcileFavorites, rename, replace, sessions, backgroundSessions, observations, error, toggle, retry, acknowledge, observers };
 }
 export type SessionTracking = ReturnType<typeof useSessionTracking>;
 
-function SessionObserver({ session, liveAgentId, baseUrl, transport, update, enabled }: { session: SessionStar | OpenedSession; liveAgentId?: string; baseUrl: string; transport: RemoteAgentTransport; update(key: string, value: SessionObservation): void; enabled: boolean }) {
+function SessionObserver({ session, liveAgentId, baseUrl, transport, connections, update, enabled }: { session: SessionStar | OpenedSession; liveAgentId?: string; baseUrl: string; transport: RemoteAgentTransport; connections?: ConversationConnections; update(key: string, value: SessionObservation): void; enabled: boolean }) {
   const key = sessionKey(session);
   const binding = useRef<(agentId: string) => void>();
   const attachment = useRef<(enabled: boolean) => void>();
@@ -296,6 +296,8 @@ function SessionObserver({ session, liveAgentId, baseUrl, transport, update, ena
     attachment.current = ready => {
       stopAttachment?.(); stopAttachment = undefined;
       if (!ready || connectedAgentId) return;
+      const attached = connections?.find(session);
+      if (attached) { start(attached.agentId); return; }
       const directory = new SessionDirectoryClient(baseUrl, undefined, session.hostId);
       update(key, { connection: 'connecting' });
       stopAttachment = restoreSession({
@@ -309,7 +311,7 @@ function SessionObserver({ session, liveAgentId, baseUrl, transport, update, ena
     };
     return () => { abort.abort(); stopAttachment?.(); client?.stop(); binding.current = undefined; attachment.current = undefined; };
     // Native identity owns the observer; moving between tracked and open must not restart it.
-  }, [baseUrl, transport, key, update]);
+  }, [baseUrl, transport, connections, key, update]);
   useEffect(() => {
     if (enabled && liveAgentId) binding.current?.(liveAgentId);
     attachment.current?.(enabled);

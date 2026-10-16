@@ -212,13 +212,16 @@ export function useTpmWork(service: TpmService | undefined, hosts: readonly TpmH
     const current = shared.current; if (current) { const view = featureView(current.window, 'tpm', key); if (view && (view.collapsed || current.window.selectedViewId !== view.id)) current.operate({ type: 'view.select', viewId: view.id }); return; }
     setWindowOrder(current => !current.includes(key) || current.at(-1) === key ? current : [...current.filter(item => item !== key), key]);
   }, []);
-  const open = useCallback(async (key: string, restoring = false) => {
+  const open = useCallback(async (key: string, restoring = false, sourceView?: { windowId: string; viewId: string }) => {
     const item = find(key);
     if (!item) return;
     const requestedService = latest.current.service;
+    if (!restoring && sourceView && !shared.current) return;
     if (!restoring && shared.current) {
       const current = shared.current, main = tpmMainTarget(item);
-      const source = current.window.views.find(view => view.binding && view.binding.hostId === main.hostId && view.binding.providerId === main.providerId && view.binding.nativeSessionId === main.nativeSessionId);
+      const sourceId = sourceView ? sourceView.windowId === current.window.id ? sourceView.viewId : undefined : current.window.selectedPrimaryViewId;
+      const source = current.window.views.find(view => view.id === sourceId && view.binding && view.binding.hostId === main.hostId && view.binding.providerId === main.providerId && view.binding.nativeSessionId === main.nativeSessionId);
+      if (sourceView && !source) return;
       openFeatureView(current, { kind: 'tpm', id: key, hostId: item.hostId }, item.work.tpmNativeSessionId ? { hostId: item.hostId, providerId: item.work.providerId, nativeSessionId: item.work.tpmNativeSessionId, title: item.work.title } : undefined, source?.id);
     }
     if (!restoring && !shared.current) { setWindowOrder(current => current.at(-1) === key ? current : [...current.filter(item => item !== key), key]); setOpened(current => current.includes(key) ? current : [...current, key]); }
@@ -287,6 +290,9 @@ export function useTpmWork(service: TpmService | undefined, hosts: readonly TpmH
   const canCreate = useCallback((main?: SessionEntry) => {
     if (!main || !service || !enabled) return false;
     const hostId = main.hostId ?? 'local';
+    const window = shared.current?.window;
+    const source = window?.views.find(view => view.id === window.selectedPrimaryViewId)?.binding;
+    if (window && (!source || source.hostId !== hostId || source.providerId !== main.providerId || source.nativeSessionId !== main.nativeSessionId)) return false;
     const host = latest.current.hosts.find(host => host.id === hostId);
     const catalog = latest.current.catalogs[hostId];
     return !!host?.online && host.access !== 'shared' && !!catalog?.supported && !catalog.error && !!catalog.supportedProviders?.includes(main.providerId);
@@ -294,6 +300,8 @@ export function useTpmWork(service: TpmService | undefined, hosts: readonly TpmH
   const create = useCallback(async (main: SessionEntry, title?: string, requirement?: string) => {
     if (!canCreate(main) || !service) throw new Error('TPM creation is unavailable for this session.');
     if (mutation.current) throw new Error('Wait for the current TPM operation.');
+    const sourceWindow = shared.current?.window;
+    const sourceView = sourceWindow ? { windowId: sourceWindow.id, viewId: sourceWindow.selectedPrimaryViewId } : undefined;
     mutation.current = true; setBusy('create'); setError(undefined);
     try {
       const hostId = main.hostId ?? 'local';
@@ -304,7 +312,7 @@ export function useTpmWork(service: TpmService | undefined, hosts: readonly TpmH
       if (!authorized(hostId, service)) throw new Error('Workspace access changed before the TPM result arrived.');
       creationIntents.current.delete(intent);
       update(hostId, work);
-      await open(tpmKey(hostId, work.id));
+      await open(tpmKey(hostId, work.id), false, sourceView);
       return work;
     } catch (error) { if (latest.current.service === service) setError(message(error)); throw error; }
     finally { mutation.current = false; setBusy(undefined); }

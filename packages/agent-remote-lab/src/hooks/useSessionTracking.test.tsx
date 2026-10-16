@@ -151,6 +151,29 @@ it('retains opened tracked clients through access renewal and collects them only
   } finally { connections.clear(); }
 });
 
+it('reuses an existing conversation binding before open sessions are published', async () => {
+  const scope = 'http://localhost/u/existing-binding/';
+  saveTrackedSessions(scope, [star]);
+  const attach = vi.spyOn(SessionDirectoryClient.prototype, 'attach').mockRejectedValue(new Error('Unexpected attachment'));
+  const connect = vi.fn<RemoteAgentTransport['connect']>((_id, listener) => {
+    queueMicrotask(() => listener.onOpen());
+    return { send: () => {}, close: () => {} };
+  });
+  const transport = { connect, onDiagnostic: () => () => {}, onProtocolMessage: () => () => {} } as unknown as RemoteAgentTransport;
+  const connections = new ConversationConnections(transport);
+  const opened = connections.acquire('already-bound', new AgentReplica(), star);
+  function Fixture() {
+    const tracking = useSessionTracking(scope, transport, undefined, [], undefined, connections, true);
+    return <>{tracking.observers}</>;
+  }
+  try {
+    await render(<Fixture />);
+    await vi.waitFor(() => expect(connect).toHaveBeenCalledTimes(2));
+    expect(connect.mock.calls.map(([agentId]) => agentId)).toEqual(['already-bound', 'already-bound']);
+    expect(attach).not.toHaveBeenCalled();
+  } finally { opened.release(); connections.clear(); }
+});
+
 it('retries only an unbound observer after access renewal and ignores the suspended attachment result', async () => {
   saveTrackedSessions('http://localhost/u/alice/', [star]);
   const attachments: Array<{ signal?: AbortSignal; finish(value: { agentId: string }): void }> = [];

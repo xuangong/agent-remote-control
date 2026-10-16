@@ -174,7 +174,7 @@ it('moves an expanded session family as one dock without changing another dock o
 it('uses the shared Window for dock placement, resize, order and main minimization', async () => {
   let update!: (operation: Parameters<typeof applyWindowOperation>[1]) => void;
   function Harness() {
-    const [window, setWindow] = useState<WorkspaceWindow>({ schemaVersion: 1, id: 'window', revision: 0, title: 'Window', primaryViewId: 'main', selectedViewId: 'main', mainMinimized: false,
+    const [window, setWindow] = useState<WorkspaceWindow>({ schemaVersion: 2, id: 'window', revision: 0, title: 'Window', selectedPrimaryViewId: 'main', selectedViewId: 'main',
       views: [createWindowView('main', undefined, 'primary'), createWindowView('one', undefined, 'float'), createWindowView('two', undefined, 'float')] });
     update = operation => setWindow(current => applyWindowOperation(current, operation));
     return <WindowLayoutContext.Provider value={{ window, operate: update }}><SessionDockProvider enabled><SessionDockRail><MinimizeMainSession /><textarea defaultValue="Main draft" /></SessionDockRail>
@@ -191,6 +191,43 @@ it('uses the shared Window for dock placement, resize, order and main minimizati
   expect(view.querySelector<HTMLElement>('[data-dock-id="two"]')!.style.order).toBe('1');
   await act(async () => view.querySelector<HTMLButtonElement>('[aria-label="Minimize main session area"]')!.click());
   expect(view.querySelector('.lab-session-dock-base')!.getAttribute('data-minimized')).toBe('true');
-  await act(async () => update({ type: 'main.minimize', minimized: false }));
+  await act(async () => update({ type: 'view.collapse', viewId: 'main', collapsed: false }));
   expect(view.querySelector('[data-dock-id="one"] textarea')).toBe(input);
+});
+
+it.each([['A', 'keyboard'], ['B', 'keyboard'], ['B', 'drag']])('reorders interleaved docks independently of selected primary %s with %s and preserves attached children', async (selected, gesture) => {
+  let snapshot!: WorkspaceWindow;
+  function Harness() {
+    const [window, setWindow] = useState<WorkspaceWindow>({ schemaVersion: 2, id: 'interleaved', revision: 0, title: 'Window', selectedPrimaryViewId: selected, selectedViewId: selected,
+      views: [createWindowView('A', undefined, 'primary'), createWindowView('D1', undefined, 'dock'), createWindowView('B', undefined, 'primary'),
+        createWindowView('D2', undefined, 'dock'), { ...createWindowView('child', undefined, 'attached'), attachedTo: 'D2' }] });
+    snapshot = window;
+    return <WindowLayoutContext.Provider value={{ window, operate: operation => setWindow(current => applyWindowOperation(current, operation)) }}>
+      <SessionDockProvider enabled><SessionDockRail><div>Primary groups</div></SessionDockRail>
+        {['D1', 'D2'].map(id => <SessionViewPlacement key={id} id={id} title={id} visible>{({ controls }) => <section>{controls}<textarea defaultValue={`${id} draft`} /></section>}</SessionViewPlacement>)}
+      </SessionDockProvider>
+    </WindowLayoutContext.Provider>;
+  }
+  const view = await render(<Harness />);
+  const editor = view.querySelector('[data-dock-id="D2"] textarea');
+  const move = view.querySelector('[data-dock-id="D2"] [aria-label="Move D2"]')!;
+  if (gesture === 'drag') {
+    let frame!: FrameRequestCallback;
+    vi.stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback) => { frame = callback; return 1; });
+    vi.stubGlobal('cancelAnimationFrame', () => {});
+    Object.assign(move, { setPointerCapture() {}, hasPointerCapture: () => false });
+    for (const [index, pane] of [...view.querySelectorAll<HTMLElement>('[data-dock-id]')].entries()) {
+      pane.getBoundingClientRect = () => new DOMRect(index * 440, 0, 440, 600);
+    }
+    await act(async () => move.dispatchEvent(new MouseEvent('pointerdown', { button: 0, clientX: 10, bubbles: true })));
+    await act(async () => frame(0));
+    await act(async () => move.dispatchEvent(new MouseEvent('pointerup', { bubbles: true })));
+  } else await act(async () => move.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowLeft', bubbles: true })));
+  expect(snapshot.views.filter(item => item.placement === 'dock').map(item => item.id)).toEqual(['D2', 'D1']);
+  expect(view.querySelector<HTMLElement>('[data-dock-id="D2"]')!.style.order).toBe('1');
+  expect(snapshot.views.find(item => item.id === 'child')?.attachedTo).toBe('D2');
+  expect(snapshot.selectedPrimaryViewId).toBe(selected);
+  await act(async () => move.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true })));
+  expect(snapshot.views.filter(item => item.placement === 'dock').map(item => item.id)).toEqual(['D1', 'D2']);
+  expect(view.querySelector('[data-dock-id="D2"] textarea')).toBe(editor);
 });

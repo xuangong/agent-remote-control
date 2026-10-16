@@ -42,7 +42,7 @@ export function SessionDockProvider({ enabled, storageScope, children }: { enabl
   const [registered, setRegistered] = useState<Array<Omit<DockItem, 'width'>>>([]);
   const resolve = (id: string) => shared?.resolveViewId?.(id) ?? id;
   const localId = (id: string) => registered.find(item => resolve(item.id) === id)?.id ?? id;
-  const layout: DockLayout = shared ? { panes: shared.window.views.filter(view => view.placement === 'dock').map(view => ({ id: localId(view.id), width: view.width })), baseWidth: shared.window.views.find(view => view.id === shared.window.primaryViewId)?.width, mainMinimized: shared.window.mainMinimized } : localLayout;
+  const layout: DockLayout = shared ? { panes: shared.window.views.filter(view => view.placement === 'dock').map(view => ({ id: localId(view.id), width: view.width })), baseWidth: shared.window.views.find(view => view.id === shared.window.selectedPrimaryViewId)?.width, mainMinimized: shared.window.views.find(view => view.id === shared.window.selectedPrimaryViewId)?.collapsed } : localLayout;
   const hadVisibleDock = useRef(false);
   const register = useCallback((item: Omit<DockItem, 'width'>) => setRegistered(current => {
     const previous = current.find(value => value.id === item.id);
@@ -77,23 +77,33 @@ export function SessionDockProvider({ enabled, storageScope, children }: { enabl
     if (!shared && enabled && layout.mainMinimized && !visible && (hadVisibleDock.current || items.length === layout.panes.length)) minimizeMain(false);
     hadVisibleDock.current = visible;
   }, [enabled, items, layout.mainMinimized, layout.panes.length, minimizeMain]);
+  function orderSharedDocks(panes: DockLayout['panes']) {
+    if (!shared) return;
+    let afterId = shared.window.views.filter(view => view.placement === 'primary').at(-1)!.id;
+    shared.operate({ type: 'batch', operations: panes.map(pane => {
+      const viewId = resolve(pane.id);
+      const operation = { type: 'view.move' as const, viewId, afterId };
+      afterId = viewId;
+      return operation;
+    }) });
+  }
   const value: DockContext = shared ? { enabled, items, layout, register, unregister,
     add: id => shared.operate({ type: 'view.place', viewId: resolve(id), placement: 'dock' }),
     remove: id => shared.operate({ type: 'view.place', viewId: resolve(id), placement: 'float' }),
     resize: (id, width) => shared.operate({ type: 'view.resize', viewId: resolve(id), width: clampWidth(width) }),
-    resizeBase: width => shared.operate({ type: 'view.resize', viewId: shared.window.primaryViewId, width: clampWidth(width) }),
-    minimizeMain: minimized => shared.operate({ type: 'main.minimize', minimized }),
+    resizeBase: width => shared.operate({ type: 'view.resize', viewId: shared.window.selectedPrimaryViewId, width: clampWidth(width) }),
+    minimizeMain: minimized => shared.operate({ type: 'view.collapse', viewId: shared.window.selectedPrimaryViewId, collapsed: minimized }),
     move: (id, offset) => {
       const index = layout.panes.findIndex(item => item.id === id), next = Math.max(0, Math.min(layout.panes.length - 1, index + offset));
       if (index < 0 || index === next) return;
       const panes = [...layout.panes]; panes.splice(next, 0, panes.splice(index, 1)[0]!);
-      shared.operate({ type: 'view.move', viewId: resolve(id), afterId: next === 0 ? shared.window.primaryViewId : resolve(panes[next - 1]!.id) });
+      orderSharedDocks(panes);
     },
     reorder: (id, before) => {
       const source = layout.panes.findIndex(item => item.id === id), target = layout.panes.findIndex(item => item.id === before);
       if (source < 0 || target < 0 || source === target) return;
       const panes = [...layout.panes]; panes.splice(target, 0, panes.splice(source, 1)[0]!);
-      shared.operate({ type: 'view.move', viewId: resolve(id), afterId: target === 0 ? shared.window.primaryViewId : resolve(panes[target - 1]!.id) });
+      orderSharedDocks(panes);
     },
   } : { enabled, items, layout, register, unregister, add, remove, move, reorder, resize, resizeBase, minimizeMain };
   return <Context.Provider value={value}>{children}</Context.Provider>;
@@ -149,7 +159,18 @@ export function MinimizeMainSession() {
   </button>;
 }
 
-export function SessionDockRail({ children, minimizedHeader, mainTitle = 'Main session', minimumBaseWidth = minimumWidth, onCreateView }: { children: ReactNode; minimizedHeader?: ReactNode; mainTitle?: string; minimumBaseWidth?: number; onCreateView?(): void }) {
+export interface PrimarySessionGroupPane {
+  id: string; title: string; width: number; additionalWidth?: number;
+  collapsed: boolean; selected: boolean; content: ReactNode;
+}
+interface SessionDockRailProps {
+  children?: ReactNode; minimizedHeader?: ReactNode; mainTitle?: string; minimumBaseWidth?: number; onCreateView?(): void;
+  compact?: boolean; primaryGroups?: readonly PrimarySessionGroupPane[];
+  onSelectPrimaryGroup?(id: string): void;
+  onResizePrimaryGroup?(id: string, width: number): void;
+  onCollapsePrimaryGroup?(id: string, collapsed: boolean): void;
+}
+export function SessionDockRail({ children, minimizedHeader, mainTitle = 'Main session', minimumBaseWidth = minimumWidth, onCreateView, compact = false, primaryGroups, onSelectPrimaryGroup, onResizePrimaryGroup, onCollapsePrimaryGroup }: SessionDockRailProps) {
   const dock = useContext(Context);
   const rail = useRef<HTMLDivElement>(null);
   const [width, setWidth] = useState(0);
@@ -177,8 +198,8 @@ export function SessionDockRail({ children, minimizedHeader, mainTitle = 'Main s
     return () => observer.disconnect();
   }, []);
   const baseWidth = Math.max(minimumBaseWidth, preferredBaseWidth ?? width - defaultWidth);
-  return <div ref={rail} className="lab-session-dock-rail" data-docked={active.length > 0 || undefined}>
-    <div className="lab-session-dock-base" data-minimized={minimized || undefined} style={active.length ? { flexBasis: minimized ? 44 : baseWidth } : undefined}>
+  return <div ref={rail} className="lab-session-dock-rail" data-docked={active.length > 0 || primaryGroups && primaryGroups.length > 1 && !compact || undefined} data-primary-groups={primaryGroups ? true : undefined} data-compact={compact || undefined}>
+    {primaryGroups ? primaryGroups.map(group => <PrimaryGroupPane key={group.id} group={group} compact={compact} onSelect={onSelectPrimaryGroup} onResize={onResizePrimaryGroup} onCollapse={onCollapsePrimaryGroup} />) : <div className="lab-session-dock-base" data-minimized={minimized || undefined} style={active.length ? { flexBasis: minimized ? 44 : baseWidth } : undefined}>
       <div ref={content} id={contentId} className="lab-session-dock-main-content" hidden={minimized}>{children}</div>
       {minimized ? minimizedHeader : null}
       {minimized ? <button ref={restore} type="button" className="lab-session-main-restore" aria-label={`Restore main session: ${mainTitle}`} title={`Restore main session: ${mainTitle}`} aria-expanded={false} aria-controls={contentId}
@@ -187,10 +208,31 @@ export function SessionDockRail({ children, minimizedHeader, mainTitle = 'Main s
         <span className="lab-session-main-label">Main</span><span className="lab-session-main-title">{mainTitle}</span>
       </button> : null}
       {active.length && !minimized ? <DockResize title="Main conversation area" width={baseWidth} minimum={minimumBaseWidth} onResize={width => dock?.resizeBase(width)} /> : null}
-    </div>
+    </div>}
     {dock?.enabled && onCreateView ? <button type="button" className="lab-session-dock-add" style={{ order: active.length + 1 }} aria-label="New session view" title="New session view" onClick={onCreateView}>+</button> : null}
     {[...active].sort((a, b) => a.id.localeCompare(b.id)).map(item => <DockPane key={item.id} item={item} order={active.indexOf(item) + 1} />)}
   </div>;
+}
+
+function PrimaryGroupPane({ group, compact, onSelect, onResize, onCollapse }: {
+  group: PrimarySessionGroupPane; compact: boolean;
+  onSelect?: SessionDockRailProps['onSelectPrimaryGroup'];
+  onResize?: SessionDockRailProps['onResizePrimaryGroup'];
+  onCollapse?: SessionDockRailProps['onCollapsePrimaryGroup'];
+}) {
+  const minimized = !compact && group.collapsed;
+  const contentId = useId();
+  return <section className="lab-primary-group" data-primary-group-id={group.id} data-selected={group.selected || undefined}
+    data-minimized={minimized || undefined} hidden={compact && !group.selected} aria-label={`Primary group: ${group.title}`}
+    style={compact ? undefined : { width: minimized ? 44 : group.width + (group.additionalWidth ?? 0) }}
+    onPointerDownCapture={() => onSelect?.(group.id)} onFocusCapture={() => onSelect?.(group.id)}>
+    <div id={contentId} className="lab-primary-group-content" hidden={minimized}>{group.content}</div>
+    {minimized ? <button type="button" className="lab-session-main-restore" aria-label={`Restore primary group: ${group.title}`} aria-controls={contentId} aria-expanded={false}
+      onClick={() => onCollapse?.(group.id, false)}><span className="lab-session-main-label">Group</span><span className="lab-session-main-title">{group.title}</span></button>
+      : !compact && onCollapse ? <button type="button" className="lab-primary-group-minimize" aria-label={`Minimize primary group: ${group.title}`} aria-controls={contentId} aria-expanded={true}
+        onClick={() => onCollapse(group.id, true)}>−</button> : null}
+    {!compact && !minimized && onResize ? <DockResize title={group.title} width={group.width} additionalWidth={group.additionalWidth} minimum={240} onResize={width => onResize(group.id, width)} /> : null}
+  </section>;
 }
 
 function DockPane({ item, order }: { item: DockItem; order: number }) {
@@ -208,7 +250,7 @@ function DockPane({ item, order }: { item: DockItem; order: number }) {
   </section>;
 }
 
-export function DockResize({ title, width, minimum = minimumWidth, onResize }: { title: string; width: number; minimum?: number; onResize(width: number): void }) {
+export function DockResize({ title, width, additionalWidth = 0, minimum = minimumWidth, onResize }: { title: string; width: number; additionalWidth?: number; minimum?: number; onResize(width: number): void }) {
   const shared = useWindowLayout();
   const drag = useRef<{ x: number; width: number; preferred?: number; parent?: HTMLElement; property?: 'width' | 'flexBasis'; original?: string }>();
   const resize = (value: number) => onResize(Math.max(minimum, Math.min(maximumWidth, value)));
@@ -223,7 +265,7 @@ export function DockResize({ title, width, minimum = minimumWidth, onResize }: {
     title="Drag to resize. Arrow keys adjust width. Double-click to reset."
     onDoubleClick={() => resize(defaultWidth)}
     onPointerDown={event => { if (event.button !== 0) return; event.preventDefault(); event.stopPropagation(); event.currentTarget.focus({ preventScroll: true }); const parent = event.currentTarget.parentElement!; const property = parent.classList.contains('lab-session-dock-base') ? 'flexBasis' : 'width'; drag.current = { x: event.clientX, width, parent, property, original: parent.style[property] }; event.currentTarget.setPointerCapture(event.pointerId); }}
-    onPointerMove={event => { const gesture = drag.current; if (!gesture) return; const next = Math.max(minimum, Math.min(maximumWidth, gesture.width + event.clientX - gesture.x)); if (!shared) resize(next); else { gesture.preferred = next; if (gesture.parent && gesture.property) gesture.parent.style[gesture.property] = `${next}px`; } }}
+    onPointerMove={event => { const gesture = drag.current; if (!gesture) return; const next = Math.max(minimum, Math.min(maximumWidth, gesture.width + event.clientX - gesture.x)); if (!shared) resize(next); else { gesture.preferred = next; if (gesture.parent && gesture.property) gesture.parent.style[gesture.property] = `${next + additionalWidth}px`; } }}
     onPointerUp={stop} onPointerCancel={stop} onLostPointerCapture={stop}
     onKeyDown={event => {
       const step = event.shiftKey ? 40 : 10;

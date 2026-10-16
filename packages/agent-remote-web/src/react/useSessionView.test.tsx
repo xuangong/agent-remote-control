@@ -198,3 +198,27 @@ it.each(['send', 'queue', 'content', 'queued input'].flatMap(delivery => ['pendi
     }
   }, 10000,
 );
+
+it('waits for a native binding before acquiring and retires its lease and authority when binding disappears', async () => {
+  const release = vi.fn(), sendMessage = vi.fn(async () => {});
+  const replica = new AgentReplica();
+  const client = { subscribeSessionState(listener: (state: RemoteSessionState) => void) { listener(remoteSessionState(replica.getState(), 'ready')); return () => {}; }, sendMessage } as unknown as RemoteSessionClient;
+  const source = { acquire: vi.fn(() => ({ client, replica, release })) };
+  let result!: ReturnType<typeof useSessionView>;
+  function View({ connect }: { connect: boolean }) { result = useSessionView({ agentId: connect ? 'bound' : '', transport: {} as RemoteAgentTransport, source, connect }); return null; }
+  const container = await render(<View connect={false} />);
+  expect(source.acquire).not.toHaveBeenCalled();
+  expect(result.operationScope).toBeUndefined();
+  await rerender(container, <View connect />);
+  expect(source.acquire).toHaveBeenCalledExactlyOnceWith('bound', expect.any(AgentReplica));
+  const send = result.actions.sendMessage!;
+  await send('bound input');
+  expect(sendMessage).toHaveBeenCalledOnce();
+  await rerender(container, <View connect={false} />);
+  expect(release).toHaveBeenCalledOnce();
+  expect(result.actions.sendMessage).toBeUndefined();
+  expect(result.operationScope).toBeUndefined();
+  await expect(send('retired input')).rejects.toThrow('no longer current');
+  await unmount(container);
+  expect(release).toHaveBeenCalledOnce();
+});

@@ -1,4 +1,4 @@
-import { isWorkspaceWindow, isWindowOperationResult, isWindowSessionBinding, type WorkspaceWindow, type WindowCreateRequest, type WindowDeleteRequest, type WindowMutation, type WindowOperationResult, type WindowSessionBinding } from '@orchardworks/agent-remote-protocol';
+import { decodeWorkspaceWindow, isWindowOperationResult, isWindowSessionBinding, type WorkspaceWindow, type WindowCreateRequest, type WindowDeleteRequest, type WindowMutation, type WindowOperationResult, type WindowSessionBinding } from '@orchardworks/agent-remote-protocol';
 
 export class WindowRequestError extends Error {
   constructor(message: string, readonly status: number, readonly code?: string, readonly result?: WindowOperationResult) { super(message); this.name = 'WindowRequestError'; }
@@ -30,9 +30,9 @@ export class WindowWorkspaceClient {
     if (!response.ok) throw new WindowRequestError(value.error?.message ?? value.error ?? 'Window request failed.', response.status, value.code ?? value.error?.code);
     return { value, status: response.status };
   }
-  async list(): Promise<WorkspaceWindow[]> { const { value } = await this.request(''); if (!Array.isArray(value.windows) || !value.windows.every(isWorkspaceWindow)) throw new Error('Invalid Window list.'); return value.windows; }
+  async list(): Promise<WorkspaceWindow[]> { const { value } = await this.request(''); if (!Array.isArray(value.windows)) throw new Error('Invalid Window list.'); const windows = value.windows.map(decodeWorkspaceWindow); if (windows.some((window: WorkspaceWindow | undefined) => !window)) throw new Error('Invalid Window list.'); return windows as WorkspaceWindow[]; }
   async inspect(id: string, signal?: AbortSignal): Promise<WindowSnapshot> { const { value } = await this.request(`/${encodeURIComponent(id)}`, 'GET', undefined, signal); this.validate(value, id); return value; }
-  private validate(value: any, id: string): void { if (!isWorkspaceWindow(value.window) || value.window.id !== id || value.manager !== undefined && (!isWindowSessionBinding(value.manager?.session) || !Number.isSafeInteger(value.manager?.generation) || value.manager.generation < 0)) throw new Error('Invalid Window snapshot.'); }
+  private validate(value: any, id: string): void { const window = decodeWorkspaceWindow(value.window); if (!window || window.id !== id || value.manager !== undefined && (!isWindowSessionBinding(value.manager?.session) || !Number.isSafeInteger(value.manager?.generation) || value.manager.generation < 0)) throw new Error('Invalid Window snapshot.'); value.window = window; }
   private receipt({ value, status }: WindowResponse, operationId: string): WindowOperationResult {
     if (!isWindowOperationResult(value?.result) || value.result.operationId !== operationId) throw new WindowRequestError('Invalid Window receipt.', status, 'invalid_window_receipt');
     return value.result;

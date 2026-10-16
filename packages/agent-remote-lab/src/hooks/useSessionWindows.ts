@@ -47,7 +47,7 @@ export function useSessionWindows(scope: string, access: CompositionAccess) {
   const { document, shared } = access;
   const sharedEntries: SessionWindowEntry[] | undefined = shared?.window.views.filter(view => {
     const feature = parseWindowFeature(view.feature);
-    return view.id !== shared.window.primaryViewId && !view.attachedTo && (!feature || feature.kind === 'team');
+    return view.placement !== 'primary' && !view.attachedTo && (!feature || feature.kind === 'team');
   }).map(view => {
     const feature = parseWindowFeature(view.feature);
     const team = feature?.kind === 'team' ? feature : undefined;
@@ -70,7 +70,7 @@ export function useSessionWindows(scope: string, access: CompositionAccess) {
   const activeId = entries.find(view => view.id === selectedId && !view.managed)?.id;
   function focus(id?: string) {
     if (latest.current.shared) {
-      const authority = latest.current.shared, viewId = id ?? authority.window.primaryViewId;
+      const authority = latest.current.shared, viewId = id ?? authority.window.selectedPrimaryViewId;
       if (authority.window.selectedViewId === viewId && !authority.window.views.find(view => view.id === viewId)?.collapsed) return;
       authority.operate({ type: 'view.select', viewId }); return;
     }

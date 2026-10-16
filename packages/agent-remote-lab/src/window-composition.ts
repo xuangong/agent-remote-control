@@ -1,10 +1,12 @@
 import { parseWindowFeature, type WindowAskSourceAnchor } from './window-feature-views.js';
 import type { WindowSessionBridge } from './window-session-bridge-context.js';
 import type { WindowSessionBinding, WorkspaceWindow } from '@orchardworks/agent-remote-protocol';
-import { compositionOriginId, compositionRoleKey, compositionSelection, createAskOwner, createCompositionSlot, type CompositionDocument, type CompositionSlot } from './session-composition.js';
+import { compositionOriginId, compositionRoleKey, compositionSelection, createAskOwner, createCompositionSlot, createHistorySlot, type CompositionDocument, type CompositionSlot } from './session-composition.js';
 import { sessionKey } from './session-tree.js';
 
 export const windowSlotPrefix = (windowId: string, viewId: string) => `window:${encodeURIComponent(windowId)}:${encodeURIComponent(viewId)}:`;
+export const windowBindingKey = (binding: WindowSessionBinding) => binding.sessionIntent === 'history'
+  ? JSON.stringify([binding.hostId, binding.providerId, binding.nativeSessionId, 'history']) : sessionKey(binding);
 
 function ownsSlot(document: CompositionDocument, slotId: string, windowId: string, viewId: string): boolean {
   return !(document.windowBindings ?? []).some(entry => entry.slotId === slotId && (entry.windowId !== windowId || entry.viewId !== viewId));
@@ -12,6 +14,8 @@ function ownsSlot(document: CompositionDocument, slotId: string, windowId: strin
 
 function slotMatchesBinding(document: CompositionDocument, slot: CompositionSlot, binding: WindowSessionBinding): boolean {
   const key = sessionKey(binding);
+  if (binding.sessionIntent === 'history') return slot.intent.kind === 'history' && sessionKey(compositionSelection(slot)) === key;
+  if (slot.intent.kind === 'history') return false;
   if ([compositionSelection(slot), { hostId: slot.origin.target.hostId, ...slot.origin.target.native }].some(target => sessionKey(target) === key)) return true;
   if (slot.intent.kind !== 'role') return false;
   const intent = slot.intent;
@@ -27,7 +31,7 @@ export function bindWindowCompositionSlot(document: CompositionDocument, windowI
   if (!slot || !slotMatchesBinding(document, slot, binding)) throw new Error('The Window view does not match its local session slot.');
   if (!ownsSlot(document, slotId, windowId, viewId)) throw new Error('The local session slot already belongs to another Window view.');
   const entries = document.windowBindings ??= [];
-  const bindingKey = sessionKey(binding);
+  const bindingKey = windowBindingKey(binding);
   const existing = entries.find(entry => entry.windowId === windowId && entry.viewId === viewId && entry.bindingKey === bindingKey);
   if (existing?.slotId === slotId) return slot;
   if (existing) existing.slotId = slotId;
@@ -42,21 +46,23 @@ export function bindWindowCompositionSlot(document: CompositionDocument, windowI
 /** New duplicate views allocate owners; adopted views keep their existing native identity. */
 export function ensureWindowCompositionSlot(document: CompositionDocument, windowId: string, viewId: string, binding: WindowSessionBinding): CompositionSlot {
   const entries = (document.windowBindings ?? []).filter(entry => entry.windowId === windowId && entry.viewId === viewId);
-  const exact = entries.find(entry => entry.bindingKey === sessionKey(binding));
+  const exact = entries.find(entry => entry.bindingKey === windowBindingKey(binding));
   const existing = exact && document.slots.find(slot => slot.id === exact.slotId);
-  if (existing) return existing;
+  if (existing && slotMatchesBinding(document, existing, binding)) return existing;
   const current = entries.flatMap(entry => document.slots.filter(slot => slot.id === entry.slotId)).find(slot => slotMatchesBinding(document, slot, binding));
   if (current) return bindWindowCompositionSlot(document, windowId, viewId, binding, current.id);
   if ((document.windowBindings?.length ?? 0) >= 4096) throw new Error('The local Window binding capacity has been reached.');
-  const { role: _, ...session } = binding;
-  const slotId = `${windowSlotPrefix(windowId, viewId)}${compositionOriginId(binding)}`;
+  const { role: _, sessionIntent, ...session } = binding;
+  const slotId = `${windowSlotPrefix(windowId, viewId)}${compositionOriginId(binding, sessionIntent === 'history')}`;
   const retained = document.slots.find(slot => slot.id === slotId && slotMatchesBinding(document, slot, binding) && ownsSlot(document, slot.id, windowId, viewId));
   if (retained) {
     if (!document.asks.some(owner => owner.sourceSlot === retained.id)) { document.asks.push(createAskOwner(retained, document.scope)); document.editRevision++; }
     return bindWindowCompositionSlot(document, windowId, viewId, binding, retained.id);
   }
-  const slot = createCompositionSlot(slotId, session, document.scope);
-  const enrolled = document.slots.find(candidate => candidate.intent.kind === 'role' && sessionKey(compositionSelection(candidate)) === sessionKey(binding)
+  const slot = sessionIntent === 'history' ? createHistorySlot(slotId, { hostId: binding.hostId,
+    native: { providerId: binding.providerId, nativeSessionId: binding.nativeSessionId } }, document.scope) : createCompositionSlot(slotId, session, document.scope);
+  slot.metadata = { ...slot.metadata, title: binding.title, ...(binding.parentNativeSessionId ? { parentNativeSessionId: binding.parentNativeSessionId } : {}) };
+  const enrolled = sessionIntent !== 'history' && document.slots.find(candidate => candidate.intent.kind === 'role' && sessionKey(compositionSelection(candidate)) === sessionKey(binding)
     && document.roles.some(role => candidate.intent.kind === 'role' && compositionRoleKey(role) === candidate.intent.roleKey
       && role.appliedRevision >= candidate.intent.revision && role.documents.composition.status === 'applied'));
   if (enrolled) slot.intent = structuredClone(enrolled.intent);
@@ -66,12 +72,12 @@ export function ensureWindowCompositionSlot(document: CompositionDocument, windo
   return bindWindowCompositionSlot(document, windowId, viewId, binding, slot.id);
 }
 
-/** First adoption records a local primary identity; it never migrates native state. */
+/** First adoption records the selected primary identity; it never migrates native state. */
 export function adoptWindowPrimaryRole(document: CompositionDocument, window: WorkspaceWindow): CompositionSlot | undefined {
-  const binding = window.views.find(view => view.id === window.primaryViewId)?.binding;
+  const binding = window.views.find(view => view.id === window.selectedPrimaryViewId)?.binding;
   const source = document.slots.find(slot => slot.id === document.primary);
-  if (!binding || !source || !slotMatchesBinding(document, source, binding) || !ownsSlot(document, source.id, window.id, window.primaryViewId)) return;
-  return bindWindowCompositionSlot(document, window.id, window.primaryViewId, binding, source.id);
+  if (!binding || !source || !slotMatchesBinding(document, source, binding) || !ownsSlot(document, source.id, window.id, window.selectedPrimaryViewId)) return;
+  return bindWindowCompositionSlot(document, window.id, window.selectedPrimaryViewId, binding, source.id);
 }
 
 /** Source anchors are references; only locally verified role checkpoints authorize succession. */
@@ -122,15 +128,15 @@ export function windowCompositionMapping(document: CompositionDocument, window: 
     return [[view.id, slot] as const];
   }));
 }
-export function primaryWindowFamily(window: WorkspaceWindow): Set<string> {
-  const ids = new Set([window.primaryViewId]);
+export function primaryWindowFamily(window: WorkspaceWindow, primaryViewId = window.selectedPrimaryViewId): Set<string> {
+  const ids = new Set([primaryViewId]);
   for (const view of window.views) if (view.attachedTo && ids.has(view.attachedTo)) ids.add(view.id);
   return ids;
 }
-/** One-way projection: it must never emit a Window mutation or reconnect the primary. */
+/** One-way projection: it must never emit a Window mutation or reconnect the selected primary. */
 export function projectWindowComposition(document: CompositionDocument, window: WorkspaceWindow): boolean {
   const slots = windowCompositionMapping(document, window), family = primaryWindowFamily(window);
-  const primary = slots.get(window.primaryViewId);
+  const primary = slots.get(window.selectedPrimaryViewId);
   if (!primary) {
     if (!document.primary && !document.address && !document.focus && !document.anchor && !document.edges.length && !document.collapsed.length) return false;
     delete document.primary; delete document.address; delete document.focus; delete document.anchor;
@@ -152,7 +158,7 @@ export function windowSuccessionLayout(document: CompositionDocument, window: Wo
   let changed = false;
   const views = window.views.map(view => {
     const slot = slots.get(view.id);
-    if (!view.binding || !slot || slot.intent.kind !== 'role') return view;
+    if (!view.binding || view.binding.sessionIntent === 'history' || !slot || slot.intent.kind !== 'role') return view;
     const intent = slot.intent;
     const checkpoint = document.roles.find(role => compositionRoleKey(role) === intent.roleKey
       && role.appliedRevision >= intent.revision

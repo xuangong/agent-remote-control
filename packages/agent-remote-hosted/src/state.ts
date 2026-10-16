@@ -7,7 +7,7 @@ import { validSourceRelation } from './session-relations.js';
 import { MAX_SESSION_TITLES } from './session-titles.js';
 import { validBrowserId } from './browser-devices.js';
 import { validFavoritesState, type SavedFavoritesTree } from './favorites.js';
-import { decodeSessionChannelServerMessage, PROTOCOL_VERSION, type SessionTitleUpdate } from '@orchardworks/agent-remote-protocol';
+import { decodeSessionChannelServerMessage, decodeWorkspaceWindow, PROTOCOL_VERSION, type SessionTitleUpdate } from '@orchardworks/agent-remote-protocol';
 import type { SavedSessionMigration } from './session-migrations.js';
 import { validPairingHistory } from './pairing-keys.js';
 import { hasHostRecoveryMetadata, retainedHostIdentities, validHostRecovery, validRevokedHosts } from './host-recovery.js';
@@ -134,6 +134,7 @@ export function validateRelayState(value: unknown, auth: HostedAuthOptions): Hos
   if (!validFavoritesState(value as HostedRelayState)) return invalid();
   if (value.sessions.some((session: SavedHostedSession) => session.grant.profile !== undefined && (!record(session.grant.profile) || !string(session.grant.profile.name) || (session.grant.profile.email !== undefined && !string(session.grant.profile.email, 320))))) return invalid();
   const migrated = structuredClone(value);
+  if (migrated.workspaceWindows) for (const row of migrated.workspaceWindows) if (row.window) row.window = decodeWorkspaceWindow(row.window)!;
   delete migrated.sessionSuccessions;
   return migrated as HostedRelayState;
 }

@@ -40,6 +40,7 @@ it('creates and opens a TPM session directly without requiring a title or requir
   await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="TPM works"]')!.click());
   expect(container.querySelector('[aria-label="Refresh TPM works"]')).toBeNull();
   expect(container.querySelector('form')).toBeNull();
+  expect(container.querySelector('[data-creation-source]')?.textContent).toContain('Main session');
   await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="Create TPM work"]')!.click());
   expect(h.creates).toEqual([{ host: 'host', providerId: 'codex', mainNativeSessionId: 'main', operationId: expect.any(String) }]);
   expect(h.state().expanded).toBe(true);

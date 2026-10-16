@@ -9,13 +9,13 @@ import { SessionViewOperationsContext } from '../session-view-operations.js';
 import { sessionKey } from '../session-tree.js';
 
 /** Product retention and account policy compose the neutral session consumer. */
-export function useConversationSession(session: OpenedSession, transport: RemoteAgentTransport, cachedReplica?: AgentReplica, pending = false, following?: { nativePrefixOnly?: boolean; viewId?: string; externalAttachment?: boolean }) {
+export function useConversationSession(session: OpenedSession, transport: RemoteAgentTransport, cachedReplica?: AgentReplica, pending = false, following?: { nativePrefixOnly?: boolean; viewId?: string; externalAttachment?: boolean; sessionIntent?: 'history'; attachmentAvailable?: boolean }) {
   const enabled = useContext(WorkspaceReady);
   const operations = useContext(SessionViewOperationsContext);
-  let resolved = session, resolving = false, historical = false;
+  let resolved = session, resolving = false, historical = following?.sessionIntent === 'history';
   try {
     const target = operations?.resolveTarget(session, following);
-    if (target) { resolved = { ...session, ...target.target }; historical = !!target.historyRoleId; }
+    if (target) { resolved = { ...session, ...target.target }; historical ||= !!target.historyRoleId; }
   } catch { resolving = true; }
   const targetKey = sessionKey(resolved);
   const [attachment, setAttachment] = useState<{ session: OpenedSession; transport: RemoteAgentTransport; scope: string }>();
@@ -39,6 +39,6 @@ export function useConversationSession(session: OpenedSession, transport: Remote
   const connections = useMemo(() => shared ?? new ConversationConnections(transport, recoveryScope), [shared, transport, recoveryScope]);
   useEffect(() => () => { if (!shared) connections.clear(); }, [connections, shared]);
   const source = useMemo(() => ({ acquire: (agentId: string, replica: AgentReplica) => connections.acquire(agentId, replica, bound) }), [connections, bound.agentId, bound.hostId, bound.providerId, bound.nativeSessionId]);
-  const view = useSessionView({ agentId: bound.agentId, transport, source, cachedReplica: needsAttach ? undefined : cachedReplica, pending: pending || resolving || !current, enabled });
+  const view = useSessionView({ agentId: bound.agentId, transport, source, cachedReplica: needsAttach ? undefined : cachedReplica, pending: pending || resolving || !current, enabled, connect: following?.attachmentAvailable !== false });
   return { ...view, boundSession: bound, operationBinding: { source: bound, scope: view.operationScope, historical } };
 }

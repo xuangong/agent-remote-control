@@ -79,7 +79,9 @@ export function quoteHostedRecord(input: { kind: string; owner: string; key: str
 
 /** Exact logical bytes and per-record chunks; manifestBytes measures its explicit JSON fields, not physical storage allocation. */
 export function encodeHostedSnapshot(input: HostedRelayState, auth: HostedAuthOptions): HostedSnapshot {
-  const state = validateRelayState(input, auth);
+  return encodeValidatedHostedSnapshot(validateRelayState(input, auth));
+}
+function encodeValidatedHostedSnapshot(state: HostedRelayState): HostedSnapshot {
   const records = new Map<string, HostedEncodedRecord>();
   const tuples = new Set<string>(); const hashes = new Map<string, string>(); const costs: HostedRecordCost[] = [];
   function add<K extends HostedRecordKind>(kind: K, owner: string, key: string, payload: unknown): Identity<K> {
@@ -273,7 +275,10 @@ export function decodeHostedSnapshot(manifests: HostedManifest[], chunks: Hosted
   if (consumed.size !== records.size) invalid('orphan or unlisted record');
   const state = validateRelayState(relay, auth);
   // Re-encoding checks payload-derived identities, parent versions and complete coverage after the owning validators.
-  const expected = encodeHostedSnapshot(state, auth).records;
+  // Validate identities against the original Window bytes after their owning
+  // validator has accepted them; normalization must not invalidate old digests.
+  const expected = encodeValidatedHostedSnapshot({ ...state,
+    ...(relay.workspaceWindows === undefined ? {} : { workspaceWindows: relay.workspaceWindows as HostedRelayState['workspaceWindows'] }) }).records;
   if (expected.size !== manifests.length) invalid('identity coverage');
   for (const manifest of manifests) {
     const wanted = expected.get(physicalKey(manifest.kind, manifest.identity))?.manifest;

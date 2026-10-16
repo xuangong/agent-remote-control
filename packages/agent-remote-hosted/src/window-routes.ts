@@ -1,4 +1,4 @@
-import { isWindowCreateRequest, isWindowMutation, isWindowDeleteRequest, isWindowSessionBinding } from '@orchardworks/agent-remote-protocol';
+import { isWindowDeleteRequest, isWindowSessionBinding } from '@orchardworks/agent-remote-protocol';
 import { WindowServiceError, type WindowPrincipal, type createWindowWorkspaces } from './window-workspaces.js';
 const json = (status: number, body: unknown) => new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json', 'cache-control': 'no-store' } });
 export async function handleWindowRequest(service: ReturnType<typeof createWindowWorkspaces>, request: Request, principal: WindowPrincipal): Promise<Response> {
@@ -15,7 +15,7 @@ export async function handleWindowRequest(service: ReturnType<typeof createWindo
     };
     if (!id && parts.length === 2) {
       if (method === 'GET') return json(200, service.list(principal));
-      if (method === 'POST') { const input = await body(); if (!isWindowCreateRequest(input)) return json(400, { code: 'invalid_window' }); return json(200, await service.create(principal, input)); }
+      if (method === 'POST') { const input = await body(); return json(200, await service.create(principal, input)); }
     }
     if (id && parts.length === 3) {
       if (method === 'GET') return json(200, service.inspect(principal, id));
@@ -23,7 +23,7 @@ export async function handleWindowRequest(service: ReturnType<typeof createWindo
     }
     if (id && parts[3] === 'operations') {
       if (method === 'GET' && parts.length === 5) return json(200, service.operation(principal, id, decodeURIComponent(parts[4]!)));
-      if (method === 'POST' && parts.length === 4) { const input = await body(); if (!isWindowMutation(input)) return json(400, { code: 'invalid_operation' }); return json(200, await service.mutate(principal, id, input)); }
+      if (method === 'POST' && parts.length === 4) { const input = await body(); return json(200, await service.mutate(principal, id, input)); }
     }
     if (id && parts[3] === 'manager' && parts.length === 4 && method === 'POST') {
       const input = await body(); if (!input || Object.keys(input).join(',') !== 'session' || input.session !== null && !isWindowSessionBinding(input.session)) return json(400, { code: 'invalid_manager' });

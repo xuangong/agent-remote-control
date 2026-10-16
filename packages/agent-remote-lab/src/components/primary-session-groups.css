@@ -1,0 +1,17 @@
+.lab-primary-groups { display: flex; align-items: center; gap: 4px; min-width: 0; max-width: 100%; }
+.lab-primary-groups-list { display: flex; gap: 4px; min-width: 0; overflow-x: auto; scrollbar-width: thin; }
+.lab-primary-group-option { display: flex; flex: none; align-items: center; min-width: 0; border: 1px solid var(--obs-border); border-radius: var(--obs-radius-sm); }
+.lab-primary-group-option[data-selected] { border-color: var(--obs-action); background: var(--obs-surface-selected); }
+.lab-primary-group-option > button { display: inline-flex; align-items: center; gap: 8px; min-height: 36px; border: 0; background: transparent; padding: 6px 8px; }
+.lab-primary-group-option > button:first-child > span:first-child { max-width: 160px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.lab-primary-group-option > .lab-primary-group-close { padding: 6px; color: var(--obs-text-secondary); }
+.lab-primary-group-close:disabled { opacity: .35; }
+.lab-primary-group-create { flex: none; min-width: 36px; min-height: 36px; padding: 4px; font-size: 20px; }
+
+.lab-window-toolbar { display: flex; align-items: center; flex: none; gap: 8px; min-width: 0; padding: 4px 8px; border-bottom: 1px solid var(--obs-border); }
+.lab-window-toolbar > .lab-primary-groups { flex: 1; }
+.lab-window-toolbar > .lab-global-view-slot { flex: none; }
+.lab-window-workbench:not([hidden]) { display: flex; flex-direction: column; min-height: 0; }
+.lab-window-workbench > .lab-ordinary-workspace:not([hidden]) { display: flex; flex: 1; flex-direction: column; min-height: 0; }
+.lab-window-workbench > .lab-ordinary-workspace[hidden] { display: none; }
+.lab-window-workbench .lab-session-dock-rail { flex: 1; height: auto; min-height: 0; }

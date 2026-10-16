@@ -51,7 +51,8 @@ export function imageDraftRetention(key: string): 'page' | 'local' {
 }
 /** A released editor remains inspectable until its final current write has settled. */
 const releasedWriters = new Set<ImageDraftStorageHandle>();
-export function registerImageDraftWriter(binding: ImageDraftBinding, handle: ImageDraftStorageHandle): () => void {
+const writerOwners = new WeakMap<ImageDraftStorageHandle, object>();
+export function registerImageDraftWriter(binding: ImageDraftBinding, handle: ImageDraftStorageHandle, owner?: object): () => void {
   const key = bindingIdentity(binding);
   try { draftReleases.get(key)?.abort(); } catch { /* A completed release precedes this editor's ownership. */ }
   const writers = draftWriters.get(key) ?? new Set<ImageDraftStorageHandle>();
@@ -66,6 +67,7 @@ export function registerImageDraftWriter(binding: ImageDraftBinding, handle: Ima
       return result;
     },
   };
+  if (owner) writerOwners.set(registered, owner);
   writers.add(registered); draftWriters.set(key, writers);
   return () => {
     releasedWriters.add(registered);
@@ -73,27 +75,32 @@ export function registerImageDraftWriter(binding: ImageDraftBinding, handle: Ima
   };
 }
 /** A replacement editor hydrates only after the released editor's final write settles. */
-export async function flushReleasedImageDraftWriters(binding: ImageDraftBinding): Promise<void> {
+export async function flushReleasedImageDraftWriters(binding: ImageDraftBinding, hydratingOwner?: object): Promise<void> {
   const writers = draftWriters.get(bindingIdentity(binding));
   for (const writer of [...writers ?? []]) {
-    if (!releasedWriters.has(writer)) continue;
+    // StrictMode can release and re-register the same hydrating editor.
+    if (!releasedWriters.has(writer) || hydratingOwner && writerOwners.get(writer) === hydratingOwner) continue;
     const result = await writer.flush(writer.snapshot().revision, () => true);
     if (!(result.status === 'cancelled' && writer.snapshot().status === 'cancelled') && (result.status !== 'ready' || result.savedRevision !== result.revision)) throw new Error('The previous image editor still has unsaved content.');
   }
 }
 /** Reads current editors before disk; conflicting writers are unknown, never empty. */
 export async function inspectImageDraft(binding: ImageDraftBinding): Promise<ImageDraftStorageHandle> {
+  const initialWriters = draftWriters.get(bindingIdentity(binding));
+  if (initialWriters?.size === 1) return [...initialWriters][0]!;
+  const generation = imageDraftScopeGeneration(binding.scope);
+  let releaseFailed = false;
+  try { await flushReleasedImageDraftWriters(binding); } catch { releaseFailed = true; }
   const key = bindingIdentity(binding), writers = draftWriters.get(key);
   if (writers?.size === 1) return [...writers][0]!;
-  const generation = imageDraftScopeGeneration(binding.scope);
   const retention = imageDraftRetention(binding.key);
   let snapshot: ImageDraftStorageSnapshot = { status: 'failed', revision: 0, savedRevision: -1, retention: 'page' };
-  if (!writers?.size) {
+  if (!releaseFailed && !writers?.size) {
     try {
       const draft = await readImageDraft(binding.key);
       if (generation !== imageDraftScopeGeneration(binding.scope)) snapshot = { ...snapshot, status: 'cancelled' };
       else if (!draft || draft.scope === binding.scope) snapshot = { status: 'ready', revision: 0, savedRevision: 0, retention, ...(draft ? { draft: copyDraft(draft) } : {}) };
-    } catch { /* A failed read cannot certify empty retained content. */ }
+    } catch { /* Preserve unreadable drafts for explicit recovery. */ }
   }
   const current = () => generation === imageDraftScopeGeneration(binding.scope) && draftWriters.get(key) === writers;
   return {

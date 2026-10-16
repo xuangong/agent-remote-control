@@ -5,13 +5,15 @@ import type { Team, TeamAction, TeamSource } from '@orchardworks/agent-remote-pr
 import { workspaceFetch } from '../workspace-access.js';
 import { useTrackingPosition } from '../hooks/useTrackingPosition.js';
 import { ConversationConnectionScope } from '../conversation-connections.js';
+import { useWindowLayout } from '../window-workspace-context.js';
 import './team.css';
 
 interface Host { teamManagement?: true; id: string; name: string; online: boolean; providers?: Array<{providerId:string;displayName:string}> }
 interface Props {
   baseUrl: string; enabled: boolean; visible?: boolean; hosts: Host[]; source?: TeamSource;
   compact?: boolean; currentSession?: Pick<TeamSource, 'providerId' | 'nativeSessionId'> & { hostId?: string };
-  onOpen(team: Team): Promise<boolean>; onOpenSession(target: TeamSource & { teamId?: string; teamMemberId?: string }): Promise<boolean>;
+  sourceViewId?: string;
+  onOpen(team: Team, sourceViewId?: string): Promise<boolean>; onOpenSession(target: TeamSource & { teamId?: string; teamMemberId?: string }): Promise<boolean>;
   onTeamsChange?(baseUrl: string, teams: Team[]): void;
 }
 const errorMessage = (error: unknown) => error instanceof Error ? error.message : 'Team operation failed.';
@@ -20,11 +22,13 @@ const isCurrentMember = (member: Team['members'][number], current: Props['curren
 export function TeamMenu(props: Props) {
   const { baseUrl, enabled, visible = true, hosts, source } = props;
   const client = useMemo(() => new RemoteTeamClient(baseUrl, workspaceFetch), [baseUrl]);
+  const layout = useWindowLayout();
+  const currentPresentation = useRef({ layout, onOpen: props.onOpen }); currentPresentation.current = { layout, onOpen: props.onOpen };
   const connections = useContext(ConversationConnectionScope);
   const [rosterClient, setRosterClient] = useState<RemoteTeamClient>();
   const [teams, setTeams] = useState<Team[]>([]), [selected, setSelected] = useState('');
   const [open, setOpen] = useState(false), [loading, setLoading] = useState(false), [busy, setBusy] = useState(false), [error, setError] = useState(''), [loadError, setLoadError] = useState('');
-  const [pendingCreate, setPendingCreate] = useState<{operationId:string;source:TeamSource}>();
+  const [pendingCreate, setPendingCreate] = useState<{operationId:string;source:TeamSource;sourceViewId?:string;origin?:{windowId:string;viewId:string}}>();
 
   const { root, style, handlers } = useTrackingPosition('agent-remote:team-position');
   const trigger = useRef<HTMLButtonElement>(null);
@@ -80,13 +84,22 @@ export function TeamMenu(props: Props) {
     setRosterClient(client);
   }
   async function create() {
-    if (!source) return;
-    const input = pendingCreate ?? { operationId: crypto.randomUUID(), source }; setPendingCreate(input);
-    const created = await client.create(input); if (currentClient.current !== client) return;
-    setTeams(current => [...current.filter(value => value.id !== created.id), created]); setRosterClient(client); setPendingCreate(undefined); await openTeam(created);
+    if (!source && !pendingCreate) return;
+    const input = pendingCreate ?? { operationId: crypto.randomUUID(), source: structuredClone(source!), sourceViewId: props.sourceViewId,
+      ...(layout ? { origin: { windowId: layout.window.id, viewId: layout.window.selectedPrimaryViewId } } : {}) }; setPendingCreate(input);
+    const { sourceViewId, origin, ...request } = input;
+    const created = await client.create(request); if (currentClient.current !== client) return;
+    setTeams(current => [...current.filter(value => value.id !== created.id), created]); setRosterClient(client); setPendingCreate(undefined);
+    if (origin) {
+      const current = currentPresentation.current.layout?.window;
+      const binding = current?.id === origin.windowId ? current.views.find(view => view.id === origin.viewId && view.placement === 'primary')?.binding : undefined;
+      if (!binding || binding.hostId !== input.source.hostId || binding.providerId !== input.source.providerId || binding.nativeSessionId !== input.source.nativeSessionId) return;
+    }
+    if (!await currentPresentation.current.onOpen(created, sourceViewId)) throw new Error('The Team layout could not be opened. Retry after the main session is ready.');
+    setSelected(created.id); setOpen(false);
   }
-  async function openTeam(team: Team) {
-    if (!await props.onOpen(team)) throw new Error('The Team layout could not be opened. Retry after the main session is ready.');
+  async function openTeam(team: Team, sourceViewId?: string) {
+    if (!await props.onOpen(team, sourceViewId)) throw new Error('The Team layout could not be opened. Retry after the main session is ready.');
     setSelected(team.id); setOpen(false);
   }
   async function openSession(target: TeamSource) {
@@ -114,7 +127,8 @@ export function TeamMenu(props: Props) {
         {groups(false)}
         {!teams.some(item => item.status !== 'archived') ? <p className="lab-control-note">Start with a Leader. Discuss the work, then add members.</p> : null}
         {teams.some(item => item.status === 'archived') ? <details><summary>Archived</summary>{groups(true)}</details> : null}
-        <button type="button" disabled={busy || !source || !hosts.some(host => host.id === source.hostId && host.teamManagement && host.online)} onClick={() => void run(create)}>{pendingCreate ? 'Check previous creation' : 'New team'}</button>
+        {pendingCreate?.source || source ? <p className="lab-control-note" data-creation-source>For: <strong>{(pendingCreate?.source ?? source)!.title}</strong></p> : null}
+        <button type="button" disabled={busy || !(pendingCreate?.source ?? source) || !hosts.some(host => host.id === (pendingCreate?.source ?? source)?.hostId && host.teamManagement && host.online)} onClick={() => void run(create)}>{pendingCreate ? 'Check previous creation' : 'New team'}</button>
         {!source || source.hostId === 'local' ? <p className="lab-control-note">Open a session on a connected Host to create a Team.</p> : null}
         {error || loadError ? <p role="alert">{error || loadError}</p> : null}
       </section> : null}

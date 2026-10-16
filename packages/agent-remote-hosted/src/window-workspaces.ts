@@ -1,5 +1,5 @@
 import { createHash, randomBytes } from 'node:crypto';
-import { applyWindowOperation, isWorkspaceWindow, isWindowOperationResult, isWindowCreateRequest, isWindowMutation, isWindowDeleteRequest, isWindowSessionBinding, WINDOW_OPERATION_RETENTION_MS, type WorkspaceWindow, type WindowMutation, type WindowDeleteRequest, type WindowCreateRequest, type WindowSessionBinding, type WindowOperationResult } from '@orchardworks/agent-remote-protocol';
+import { applyWindowOperation, decodeWorkspaceWindow, isWorkspaceWindow, isWindowOperationResult, isWindowCreateRequest, isWindowMutation, isWindowDeleteRequest, isWindowSessionBinding, WINDOW_OPERATION_RETENTION_MS, type WorkspaceWindow, type WindowMutation, type WindowDeleteRequest, type WindowCreateRequest, type WindowSessionBinding, type WindowOperationResult } from '@orchardworks/agent-remote-protocol';
 import type { RelayState, HostedRelayState } from './state.js';
 
 export interface SavedWindowReceipt { fingerprint: string; result: WindowOperationResult }
@@ -38,10 +38,10 @@ export function validWindowState(value: unknown): value is SavedWorkspaceWindow[
   const ids = new Set<string>();
   return value.every(row => {
     if (!row || typeof row.subject !== 'string' || !row.subject || typeof row.id !== 'string' || !row.id || !Number.isSafeInteger(row.generation) || row.generation < 0
-      || (row.deleted !== true && !isWorkspaceWindow(row.window)) || (row.window && row.window.id !== row.id) || (row.deleted && row.window)
+      || (row.deleted !== true && !decodeWorkspaceWindow(row.window)) || (row.window && row.window.id !== row.id) || (row.deleted && row.window)
       || !Array.isArray(row.receipts) || row.receipts.length > 4096) return false;
     const key = JSON.stringify([row.subject, row.id]); if (ids.has(key)) return false; ids.add(key);
-    if (row.manager && (!/^[a-f0-9]{64}$/.test(row.manager.hash) || row.manager.generation !== row.generation || !isWorkspaceWindow({ schemaVersion: 1, id: 'validation', title: 'Validation', revision: 0, primaryViewId: 'primary', selectedViewId: 'primary', mainMinimized: false, views: [{ id: 'primary', binding: row.manager.session, placement: 'primary', width: 400, collapsed: false, display: { mode: 'content', lettersVisible: true } }] }))) return false;
+    if (row.manager && (!/^[a-f0-9]{64}$/.test(row.manager.hash) || row.manager.generation !== row.generation || !isWorkspaceWindow({ schemaVersion: 2, id: 'validation', title: 'Validation', revision: 0, selectedPrimaryViewId: 'primary', selectedViewId: 'primary', views: [{ id: 'primary', binding: row.manager.session, placement: 'primary', width: 400, collapsed: false, display: { mode: 'content', lettersVisible: true } }] }))) return false;
     const operations = new Set<string>();
     return row.receipts.every((receipt: SavedWindowReceipt) => {
       if (!/^[a-f0-9]{64}$/.test(receipt.fingerprint) || !isWindowOperationResult(receipt.result) || Object.keys(receipt).some(key => !['fingerprint', 'result'].includes(key)) || operations.has(receipt.result.operationId)) return false;
@@ -82,6 +82,15 @@ export function createWindowWorkspaces(state: RelayState, canReadSession: (subje
     row.receipts.push({ fingerprint, result });
     return { result, ...(row.window ? { window: row.window } : {}) };
   }
+  function replayLegacy(principal: WindowPrincipal, id: string | undefined, input: unknown) {
+    if (!id || !input || typeof input !== 'object' || typeof (input as { operationId?: unknown }).operationId !== 'string') fail(400, 'invalid_operation', 'A valid Window operation is required.');
+    const row = rowFor(state.read(), principal, id!, true);
+    const receipt = row.receipts.find(receipt => receipt.result.operationId === (input as { operationId: string }).operationId);
+    if (!receipt) fail(400, 'invalid_operation', 'Legacy Window requests may only resolve an existing operation.');
+    if (receipt!.fingerprint !== hash(canonical(input))) fail(409, 'operation_conflict', 'Operation ID was used with different input.');
+    if (receipt!.result.expiresAt <= now()) fail(410, 'operation_expired', 'Operation result expired.');
+    return { result: structuredClone(receipt!.result), ...(row.window ? { window: structuredClone(row.window) } : {}) };
+  }
   return {
     resolveToken(token: string): WindowPrincipal | undefined {
       const row = state.read().workspaceWindows?.find(row => row.manager?.hash === hash(token));
@@ -89,9 +98,9 @@ export function createWindowWorkspaces(state: RelayState, canReadSession: (subje
     },
     list(principal: WindowPrincipal) { if (principal.token) { const row = state.read().workspaceWindows?.find(row => row.subject === principal.subject && row.manager?.hash === hash(principal.token!)); if (!row) fail(403, 'manager_revoked', 'Window management grant is unavailable.'); rowFor(state.read(), principal, row!.id, true); return { windows: row!.window ? [structuredClone(row!.window)] : [] }; } if (principal.authorize?.() === false) fail(401, 'unauthorized', 'Authorization is unavailable.'); return { windows: state.read().workspaceWindows?.filter(row => row.subject === principal.subject && !row.deleted).map(row => structuredClone(row.window!)) ?? [] }; },
     inspect(principal: WindowPrincipal, id: string) { const row = rowFor(state.read(), principal, id); return { window: structuredClone(row.window!), ...(row.manager ? { manager: { session: structuredClone(row.manager.session), generation: row.manager.generation } } : {}) }; },
-    async create(principal: WindowPrincipal, input: WindowCreateRequest) {
+    async create(principal: WindowPrincipal, input: unknown) {
       assertInputSize(input);
-      if (!isWindowCreateRequest(input)) fail(400, 'invalid_window', 'A valid Window request is required.');
+      if (!isWindowCreateRequest(input)) return replayLegacy(principal, (input as { window?: { id?: string } })?.window?.id, input);
       if (principal.token) fail(403, 'scope_forbidden', 'Management grants cannot create Windows.');
       const outcome = await state.mutate(draft => {
         if (principal.authorize?.() === false) fail(401, 'unauthorized', 'Authorization is unavailable.');
@@ -100,9 +109,9 @@ export function createWindowWorkspaces(state: RelayState, canReadSession: (subje
         return settle(row, input, () => { if (row!.window || row!.deleted) fail(409, 'window_exists', 'Window identity is already used.'); row!.window = structuredClone(input.window); });
       }); notify(principal.subject, input.window.id); return outcome;
     },
-    async mutate(principal: WindowPrincipal, id: string, input: WindowMutation | WindowDeleteRequest) {
+    async mutate(principal: WindowPrincipal, id: string, input: unknown) {
       assertInputSize(input);
-      if (!isWindowMutation(input) && !isWindowDeleteRequest(input)) fail(400, 'invalid_operation', 'A valid Window operation is required.');
+      if (!isWindowMutation(input) && !isWindowDeleteRequest(input)) return replayLegacy(principal, id, input);
       const outcome = await state.mutate(draft => {
         const row = rowFor(draft, principal, id, true);
         return settle(row, input, () => {
@@ -114,7 +123,7 @@ export function createWindowWorkspaces(state: RelayState, canReadSession: (subje
       }); notify(principal.subject, id); return outcome;
     },
     operation(principal: WindowPrincipal, id: string, operationId: string) {
-      const row = rowFor(state.read(), principal, id, true); const receipt = row.receipts.find(item => item.result.operationId === operationId);
+      const row = rowFor(state.read(), principal, id!, true); const receipt = row.receipts.find(item => item.result.operationId === operationId);
       if (!receipt) fail(404, 'operation_unknown', 'Operation result is unknown; inspect before taking further action.');
       if (receipt!.result.expiresAt <= now()) fail(410, 'operation_expired', 'Operation result expired.'); return { result: structuredClone(receipt!.result) };
     },

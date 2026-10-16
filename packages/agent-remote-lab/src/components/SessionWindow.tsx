@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react';
+import { useRef, useState, type ComponentProps } from 'react';
 import type { RemoteAgentTransport } from '@orchardworks/agent-remote-web/headless';
 import type { ImageDraftBinding } from '@orchardworks/agent-remote-web/browser';
 import type { DraftBinding } from '../draft-store.js';
@@ -9,10 +9,14 @@ import { SessionViewPlacement, useRemoveSessionDocks } from './SessionDock.js';
 import { SessionFamily } from './SessionFamily.js';
 import { AskResize } from './AskResize.js';
 import { sessionKey } from '../session-tree.js';
+import { useWindowLayout } from '../window-workspace-context.js';
 
 interface Props {
   entry: SessionWindowEntry; baseUrl: string; visible: boolean; compact: boolean; hostLabel: string; offline: boolean;
   transport: RemoteAgentTransport; draftStore: DraftBinding['store']; draftBinding?: DraftBinding; imageDraftBinding?: ImageDraftBinding; navigation: SessionViewNavigationFactory;
+  onSessionBound?: ComponentProps<typeof SessionFamily>['onSessionBound'];
+  sessionPresentation?: ComponentProps<typeof SessionFamily>['sessionPresentation'];
+  renderSessionFooter?: ComponentProps<typeof SessionFamily>['renderSessionFooter'];
   actions?: React.ReactNode; selected?: boolean; closeWith?: string[];
   onFocus(): void; onChangeSession?(): void;
   onClose(): void;
@@ -28,9 +32,10 @@ export function SessionWindow(props: Props) {
     {({ docked, controls }) => <WindowBody {...props} onClose={close} docked={docked} controls={controls} onAdditionalWidthChange={setAdditionalWidth} />}
   </SessionViewPlacement>;
 }
-function WindowBody({ entry, baseUrl, visible, compact, hostLabel, offline, transport, draftStore, draftBinding, imageDraftBinding, navigation, docked, controls, actions, onClose, onAdditionalWidthChange, selected, onFocus, onChangeSession }: Props & {
+function WindowBody({ entry, baseUrl, visible, compact, hostLabel, offline, transport, draftStore, draftBinding, imageDraftBinding, navigation, docked, controls, actions, onClose, onAdditionalWidthChange, selected, onFocus, onChangeSession, onSessionBound, sessionPresentation, renderSessionFooter }: Props & {
   docked: boolean; controls: React.ReactNode; onAdditionalWidthChange(width: number): void;
 }) {
+  const shared = useWindowLayout();
   const title = entry.target?.title ?? 'Select session';
   const panel = useRef<HTMLElement>(null), anchor = useRef<HTMLSpanElement>(null);
   useAskPosition(panel, anchor, JSON.stringify([baseUrl, entry.id]), { docked });
@@ -42,7 +47,8 @@ function WindowBody({ entry, baseUrl, visible, compact, hostLabel, offline, tran
         data-view-id={entry.id} data-active={selected || undefined} tabIndex={-1}
         onPointerDownCapture={onFocus} onFocusCapture={onFocus}>
         {entry.target ? <SessionFamily storageScope={baseUrl} baseUrl={baseUrl} target={entry.target} hostLabel={hostLabel} offline={offline}
-          viewId={entry.slotId} nativePrefixOnly={entry.managed}
+          viewId={shared ? entry.id : entry.slotId} sessionIntent={shared?.window.views.find(view => view.id === entry.id)?.binding?.sessionIntent}
+          onSessionBound={onSessionBound} sessionPresentation={sessionPresentation} renderSessionFooter={renderSessionFooter} nativePrefixOnly={entry.managed}
           displayBinding={{ scope: baseUrl, key: entry.id }} active={visible} compact={compact} onAdditionalWidthChange={onAdditionalWidthChange}
           transport={transport} draftStore={draftStore} draftBinding={draftBinding} imageDraftBinding={imageDraftBinding} navigation={navigation} controls={windowControls} /> : <>
           <header className="lab-empty-session-heading"><strong>Select session</strong><div>{windowControls}</div></header>

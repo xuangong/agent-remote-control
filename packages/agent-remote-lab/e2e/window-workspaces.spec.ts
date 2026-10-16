@@ -28,7 +28,7 @@ test('two pages share Window UI edits and external commands across narrow presen
     await page.getByRole('link', { name: 'Sign in', exact: true }).click();
     await page.getByLabel('Connected Host').selectOption(fixture.hostId);
     await showNewSession(page); await page.getByTestId('session-create').click();
-    await expect(page.locator('.lab-primary-conversation').getByTestId('prompt-input')).toBeEnabled();
+    await expect(page.locator('.lab-primary-group[data-selected="true"]').getByTestId('prompt-input')).toBeEnabled();
     const menu = await openWindows(page);
     await expect(menu.locator('[data-window-id][aria-current="true"]')).toBeVisible();
     const windowId = (await menu.locator('[data-window-id][aria-current="true"]').getAttribute('data-window-id'))!;
@@ -45,17 +45,17 @@ test('two pages share Window UI edits and external commands across narrow presen
       expect(response.ok(), `${response.status()} ${await response.text()}`).toBe(true); return (await response.json()).window;
     };
     await expect.poll(async () => !!(await inspect()).views.find(view => view.placement === 'primary')?.binding).toBe(true);
-    const primary = page.locator('.lab-primary-conversation');
+    const primary = page.locator('.lab-primary-group[data-selected="true"]');
     await primary.getByTestId('prompt-input').fill('Draft kept when renaming this Window');
     const creations: string[] = [];
     context.on('request', request => {
       if (request.method() === 'POST' && /\/(?:windows|create)$/.test(new URL(request.url()).pathname)) creations.push(request.url());
     });
-    await second.locator('.lab-primary-conversation').getByTestId('prompt-input').fill('Second page retained draft');
+    await second.locator('.lab-primary-group[data-selected="true"]').getByTestId('prompt-input').fill('Second page retained draft');
     await second.reload();
-    await expect(second.locator('.lab-primary-conversation').getByTestId('prompt-input')).toBeEnabled();
+    await expect(second.locator('.lab-primary-group[data-selected="true"]').getByTestId('prompt-input')).toBeEnabled();
     expect(new URL(second.url()).searchParams.get('window')).toBe(windowId);
-    await expect(second.locator('.lab-primary-conversation').getByTestId('prompt-input')).toHaveText('Second page retained draft');
+    await expect(second.locator('.lab-primary-group[data-selected="true"]').getByTestId('prompt-input')).toHaveText('Second page retained draft');
     await openWindows(second);
     await expect(primary.getByTestId('prompt-input')).toHaveText('Draft kept when renaming this Window');
     expect(creations).toEqual([]);
@@ -100,10 +100,10 @@ test('two pages share Window UI edits and external commands across narrow presen
     await command(['view', 'resize', windowId, viewId, '--width', '620']);
     await expect(pane.getByRole('separator')).toHaveAttribute('aria-valuenow', '620');
     await expect(otherPane.getByRole('separator')).toHaveAttribute('aria-valuenow', '620');
-    await command(['minimize', windowId, '--value', 'true']);
-    await expect(page.locator('.lab-session-dock-base')).toHaveAttribute('data-minimized', 'true');
-    await expect(second.locator('.lab-session-dock-base')).toHaveAttribute('data-minimized', 'true');
-    await command(['minimize', windowId, '--value', 'false']);
+    await command(['view', 'collapse', windowId, (await inspect()).selectedPrimaryViewId, '--value', 'true']);
+    await expect(page.locator('.lab-primary-group[data-selected="true"]')).toHaveAttribute('data-minimized', 'true');
+    await expect(second.locator('.lab-primary-group[data-selected="true"]')).toHaveAttribute('data-minimized', 'true');
+    await command(['view', 'collapse', windowId, (await inspect()).selectedPrimaryViewId, '--value', 'false']);
     await command(['view', 'select', windowId, viewId]);
     await second.setViewportSize({ width: 390, height: 844 });
     await expect(second.locator(`[data-view-id="${viewId}"]`)).toBeVisible();
@@ -112,7 +112,7 @@ test('two pages share Window UI edits and external commands across narrow presen
     expect((await inspect()).views.find(view => view.id === viewId)?.width).toBe(620);
     await second.setViewportSize({ width: 1680, height: 1000 });
     await expect(otherPane.getByRole('separator')).toHaveAttribute('aria-valuenow', '620');
-    await command(['view', 'select', windowId, (await inspect()).primaryViewId]);
+    await command(['view', 'select', windowId, (await inspect()).selectedPrimaryViewId]);
     await primary.getByTestId('prompt-input').fill('/side Shared attached conversation');
     await primary.getByTestId('prompt-input').press('Enter');
     await expect(page.locator('.lab-side-conversation:visible .agent-message-assistant').last()).toContainText('Shared attached conversation');
@@ -121,15 +121,15 @@ test('two pages share Window UI edits and external commands across narrow presen
     await command(['view', 'select', windowId, child.id]);
     await second.setViewportSize({ width: 390, height: 844 });
     await expect(second.locator('.lab-side-conversation:visible').getByTestId('prompt-input')).toBeEnabled();
-    await expect(second.locator('.lab-primary-conversation')).toBeHidden();
+    await expect(second.locator('.lab-primary-group[data-selected="true"] .lab-primary-conversation')).toBeHidden();
     expect((await inspect()).selectedViewId).toBe(child.id);
     await second.setViewportSize({ width: 1680, height: 1000 });
-    await command(['view', 'bind', windowId, (await inspect()).primaryViewId, '--session', JSON.stringify({ hostId: fixture.hostId, providerId: 'recorded', nativeSessionId: bound.nativeSessionId, title: 'Different main' })]);
+    await command(['view', 'bind', windowId, (await inspect()).selectedPrimaryViewId, '--session', JSON.stringify({ hostId: fixture.hostId, providerId: 'recorded', nativeSessionId: bound.nativeSessionId, title: 'Different main' })]);
     await expect.poll(async () => (await inspect()).views.some(view => view.id === child.id)).toBe(false);
     await expect(page.locator('.lab-side-conversation:visible')).toHaveCount(0);
     await expect(second.locator('.lab-side-conversation:visible')).toHaveCount(0);
     await expect(primary.getByTestId('prompt-input')).toBeEnabled();
-    await expect(second.locator('.lab-primary-conversation').getByTestId('prompt-input')).toBeEnabled();
+    await expect(second.locator('.lab-primary-group[data-selected="true"]').getByTestId('prompt-input')).toBeEnabled();
     await expect(pane).toBeVisible(); await expect(otherPane).toBeVisible();
     await otherPane.getByRole('button', { name: 'Close Shared dock session', exact: true }).click();
     await expect(page.locator('[data-view-id]')).toHaveCount(0);
@@ -166,7 +166,7 @@ test('a fresh page restores an opening Ask, shares close and reopen, and survive
     await page.getByRole('link', { name: 'Sign in', exact: true }).click();
     await page.getByLabel('Connected Host').selectOption(fixture.hostId);
     await showNewSession(page); await page.getByTestId('session-create').click();
-    const primary = page.locator('.lab-primary-conversation');
+    const primary = page.locator('.lab-primary-group[data-selected="true"]');
     await expect(primary.getByTestId('prompt-input')).toBeEnabled();
     const askCreation = new Promise<void>(resolve => { releaseAsk = resolve; });
     await page.route('**/create', async route => { await askCreation; await route.continue(); });
@@ -239,7 +239,7 @@ for (const width of [320, 390]) test(`floating Window management remains usable 
     await page.getByRole('link', { name: 'Sign in', exact: true }).click();
     await page.getByLabel('Connected Host').selectOption(fixture.hostId);
     await showNewSession(page); await page.getByTestId('session-create').click();
-    await expect(page.locator('.lab-primary-conversation').getByTestId('prompt-input')).toBeEnabled();
+    await expect(page.locator('.lab-primary-group[data-selected="true"]').getByTestId('prompt-input')).toBeEnabled();
     const trigger = page.getByRole('button', { name: 'Windows', exact: true });
     const panel = await openWindows(page);
     if (width === 390) await page.screenshot({ path: `/tmp/window-menu-${test.info().project.name}-390.png` });
@@ -322,7 +322,7 @@ test('active Windows cannot be deleted and deleting another Window never creates
     await page.getByRole('link', { name: 'Sign in', exact: true }).click();
     await page.getByLabel('Connected Host').selectOption(fixture.hostId);
     await showNewSession(page); await page.getByTestId('session-create').click();
-    await expect(page.locator('.lab-primary-conversation').getByTestId('prompt-input')).toBeEnabled();
+    await expect(page.locator('.lab-primary-group[data-selected="true"]').getByTestId('prompt-input')).toBeEnabled();
     const panel = await openWindows(page);
     const current = panel.locator('[data-window-id][aria-current="true"]');
     await expect(current).toBeVisible();
@@ -340,7 +340,7 @@ test('active Windows cannot be deleted and deleting another Window never creates
     const snapshot = (await (await context.request.get(`${endpoint}/${deletedId}`)).json()).window as WorkspaceWindow;
     const emptied = await context.request.post(`${endpoint}/${deletedId}/operations`, { headers: { origin: fixture.url }, data: {
       operationId: crypto.randomUUID(), issuedAt: Date.now(), baseRevision: snapshot.revision,
-      operation: { type: 'layout.apply', layout: { title: 'Window', primaryViewId: 'main', selectedViewId: 'main', mainMinimized: false, views: [createWindowView('main', undefined, 'primary')] } },
+      operation: { type: 'layout.apply', layout: { title: 'Window', selectedPrimaryViewId: 'main', selectedViewId: 'main', views: [createWindowView('main', undefined, 'primary')] } },
     } });
     expect(emptied.ok(), await emptied.text()).toBe(true);
     await expect(panel.locator('[data-window-view-id="main"]')).toContainText('Empty view');
@@ -396,4 +396,202 @@ test('active Windows cannot be deleted and deleting another Window never creates
     await permittedDelete.click();
     await expect.poll(async () => (await catalog()).map(window => window.id)).toEqual([existingId]);
   } finally { await second?.close(); await page.close(); await fixture.close(); }
+});
+
+test('multiple primary families preserve independent drafts and mobile pages select their owning group', async ({ page, context }) => {
+  const fixture = await sessionLinkFixture({ automaticSignIn: true });
+  const errors: string[] = [];
+  page.on('pageerror', error => errors.push(error.message));
+  try {
+    await page.setViewportSize({ width: 1680, height: 1000 });
+    await page.goto(fixture.url);
+    await page.getByRole('link', { name: 'Sign in', exact: true }).click();
+    await page.getByLabel('Connected Host').selectOption(fixture.hostId);
+    await showNewSession(page); await page.getByTestId('session-create').click();
+    await expect(page.locator('.lab-primary-group').getByTestId('prompt-input')).toBeEnabled();
+    const windowId = new URL(page.url()).searchParams.get('window')!;
+    const access = await (await context.request.get(fixture.url + '/auth/status')).json();
+    const endpoint = `${fixture.url}${access.basePath}v1/windows/${encodeURIComponent(windowId)}`;
+    const inspect = async (): Promise<WorkspaceWindow> => (await (await context.request.get(endpoint)).json()).window;
+    const initial = await inspect();
+    const binding = initial.views.find(view => view.placement === 'primary')!.binding!;
+    const created = await context.request.post(`${fixture.url}${access.basePath}v1/remote/hosts/${encodeURIComponent(fixture.hostId)}/create`, {
+      headers: { origin: fixture.url }, data: { providerId: 'recorded', operationId: crypto.randomUUID() },
+    });
+    expect(created.ok(), await created.text()).toBe(true);
+    const child = await created.json();
+    const views = [
+      createWindowView('alpha', { ...binding, title: 'Alpha' }, 'primary'),
+      { ...createWindowView('alpha-child', { ...binding, nativeSessionId: child.nativeSessionId, parentNativeSessionId: binding.nativeSessionId, title: 'Alpha child' }, 'attached'), attachedTo: 'alpha' },
+      createWindowView('beta', { ...binding, title: 'Beta same native' }, 'primary'),
+      createWindowView('gamma', { ...binding, nativeSessionId: child.nativeSessionId, title: 'Gamma' }, 'primary'),
+    ];
+    const changed = await context.request.post(endpoint + '/operations', { headers: { origin: fixture.url }, data: {
+      operationId: crypto.randomUUID(), issuedAt: Date.now(), baseRevision: initial.revision,
+      operation: { type: 'layout.apply', layout: { title: initial.title, selectedPrimaryViewId: 'alpha', selectedViewId: 'alpha', views } },
+    } });
+    expect(changed.ok(), await changed.text()).toBe(true);
+    expect((await changed.json()).result.status).toBe('committed');
+    const group = (id: string) => page.locator(`[data-primary-group-id="${id}"]`);
+    const alphaRoot = group('alpha').locator('.lab-session-family-pane').first();
+    const betaRoot = group('beta').locator('.lab-session-family-pane').first();
+    const alphaChild = group('alpha').locator('.lab-session-family-pane').nth(1);
+    await expect(group('alpha')).toBeVisible(); await expect(group('beta')).toBeVisible(); await expect(group('gamma')).toBeVisible();
+    await expect(alphaRoot.getByTestId('prompt-input')).toBeEnabled();
+    await expect(betaRoot.getByTestId('prompt-input')).toBeEnabled();
+    await expect(alphaChild.getByTestId('prompt-input')).toBeEnabled();
+    await alphaRoot.getByTestId('prompt-input').fill('Alpha independent draft');
+    await betaRoot.getByTestId('prompt-input').fill('Beta independent draft');
+    await alphaChild.getByTestId('prompt-input').fill('Child independent draft');
+    await expect(alphaRoot.getByTestId('prompt-input')).toHaveText('Alpha independent draft');
+    await expect(betaRoot.getByTestId('prompt-input')).toHaveText('Beta independent draft');
+    await page.screenshot({ path: `/tmp/window-multi-${test.info().project.name}-desktop.png` });
+    await alphaRoot.getByRole('button', { name: 'More session actions', exact: true }).click();
+    await page.getByRole('button', { name: 'Share session link', exact: true }).click();
+    const sharedLink = page.getByRole('dialog', { name: 'Share session', exact: true });
+    await expect(sharedLink).toBeVisible();
+    expect(new URL(await sharedLink.getByLabel('Session URL', { exact: true }).inputValue()).searchParams.get('session')).toBe(binding.nativeSessionId);
+    await sharedLink.getByRole('button', { name: 'Close session link', exact: true }).click();
+    await page.getByRole('button', { name: 'Minimize primary group: Beta same native', exact: true }).click();
+    await expect(group('beta')).toHaveAttribute('data-minimized', 'true');
+    await page.getByRole('button', { name: 'Restore primary group: Beta same native', exact: true }).click();
+    await expect(betaRoot.getByTestId('prompt-input')).toHaveText('Beta independent draft');
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.getByRole('button', { name: 'Select primary group: Beta same native', exact: true }).click();
+    await expect(group('beta')).toBeVisible(); await expect(group('alpha')).toBeHidden();
+    await expect.poll(async () => { const value = await inspect(); return [value.selectedPrimaryViewId, value.selectedViewId]; }).toEqual(['beta', 'beta']);
+    await expect(betaRoot.getByTestId('prompt-input')).toHaveText('Beta independent draft');
+    await page.getByRole('button', { name: 'Select primary group: Alpha', exact: true }).click();
+    await expect(alphaRoot.getByTestId('prompt-input')).toBeVisible();
+    await expect.poll(async () => { const value = await inspect(); return [value.selectedPrimaryViewId, value.selectedViewId]; }).toEqual(['alpha', 'alpha']);
+    await expect(alphaRoot.getByTestId('prompt-input')).toHaveText('Alpha independent draft');
+    const beforeChild = await inspect();
+    const childSelection = await context.request.post(endpoint + '/operations', { headers: { origin: fixture.url }, data: {
+      operationId: crypto.randomUUID(), issuedAt: Date.now(), baseRevision: beforeChild.revision,
+      operation: { type: 'view.select', viewId: 'alpha-child' },
+    } });
+    expect(childSelection.ok(), await childSelection.text()).toBe(true);
+    expect((await childSelection.json()).result.status).toBe('committed');
+    await expect(alphaChild.getByTestId('prompt-input')).toBeVisible();
+    await expect(alphaRoot).toBeHidden();
+    await expect(page.getByRole('button', { name: 'Select primary group: Alpha', exact: true })).toHaveAttribute('aria-current', 'true');
+    await expect.poll(async () => { const value = await inspect(); return [value.selectedPrimaryViewId, value.selectedViewId]; }).toEqual(['alpha', 'alpha-child']);
+    await page.screenshot({ path: `/tmp/window-multi-${test.info().project.name}-mobile-child.png` });
+    await page.setViewportSize({ width: 1680, height: 1000 });
+    await expect(alphaChild.getByTestId('prompt-input')).toHaveText('Child independent draft');
+    await expect(betaRoot.getByTestId('prompt-input')).toHaveText('Beta independent draft');
+    await page.getByRole('button', { name: 'Close primary group: Gamma', exact: true }).click();
+    await expect(group('gamma')).toHaveCount(0);
+    expect((await inspect()).views.filter(view => view.placement === 'primary')).toHaveLength(2);
+    expect(errors).toEqual([]);
+  } finally { await page.close(); await fixture.close(); }
+});
+
+test('ordinary dock creation captures its selected view and directory opening rebinds that dock', async ({ page, context }) => {
+  const fixture = await sessionLinkFixture({ automaticSignIn: true, listCreatedSessions: true });
+  try {
+    await page.setViewportSize({ width: 1680, height: 1000 });
+    await page.goto(fixture.url);
+    await page.getByRole('link', { name: 'Sign in', exact: true }).click();
+    await page.getByLabel('Connected Host').selectOption(fixture.hostId);
+    await showNewSession(page); await page.getByTestId('session-create').click();
+    await expect(page.locator('.lab-primary-group[data-selected="true"]').getByTestId('prompt-input')).toBeEnabled();
+    const panel = await openWindows(page);
+    const windowId = (await panel.locator('[data-window-id][aria-current="true"]').getAttribute('data-window-id'))!;
+    await panel.getByRole('button', { name: 'Close Windows', exact: true }).click();
+    const access = await (await context.request.get(fixture.url + '/auth/status')).json();
+    const endpoint = `${fixture.url}${access.basePath}v1/windows/${windowId}`;
+    const inspect = async (): Promise<WorkspaceWindow> => (await (await context.request.get(endpoint)).json()).window;
+    const operate = async (operation: unknown) => {
+      const response = await context.request.post(endpoint + '/operations', { headers: { origin: fixture.url }, data: { operationId: crypto.randomUUID(), issuedAt: Date.now(), baseRevision: (await inspect()).revision, operation } });
+      expect(response.ok(), await response.text()).toBe(true);
+      expect((await response.json()).result.status).toBe('committed');
+    };
+    const primary = (await inspect()).views.find(view => view.placement === 'primary')!;
+    const original = primary.binding!;
+    await page.locator('.lab-session-dock-add').click();
+    const dockId = (await inspect()).views.find(view => view.placement === 'dock')!.id;
+    const dock = page.locator(`[data-dock-id="${dockId}"]`);
+    await dock.click();
+    await showNewSession(page);
+    let release!: () => void;
+    const barrier = new Promise<void>(resolve => { release = resolve; });
+    let requested!: () => void;
+    const captured = new Promise<void>(resolve => { requested = resolve; });
+    await page.route('**/v1/remote/hosts/*/create', async route => { requested(); await barrier; await route.continue(); });
+    await page.getByTestId('session-create').click();
+    await captured;
+    await operate({ type: 'view.select', viewId: primary.id });
+    release();
+    await expect.poll(async () => (await inspect()).views.find(view => view.id === dockId)?.binding?.nativeSessionId).not.toBeUndefined();
+    expect((await inspect()).views.find(view => view.id === primary.id)?.binding?.nativeSessionId).toBe(original.nativeSessionId);
+    const createdNative = (await inspect()).views.find(view => view.id === dockId)!.binding!.nativeSessionId;
+    await page.unroute('**/v1/remote/hosts/*/create');
+    await operate({ type: 'view.select', viewId: dockId });
+    await expect(dock.getByTestId('prompt-input')).toBeEnabled();
+    const { showSessions } = await import('./session-navigation');
+    await showSessions(page);
+    const discover = page.getByRole('region', { name: 'Discover sessions' });
+    await discover.getByRole('button', { name: 'Refresh', exact: true }).click();
+    await expect(discover.locator('.lab-session-row').first()).toBeVisible();
+    // Choose the original primary session from the actual directory.
+    const nativeKey = JSON.stringify([original.hostId, original.providerId, original.nativeSessionId]);
+    await discover.locator(`[data-session-key=${JSON.stringify(nativeKey)}]`).locator('.lab-session-row').first().click();
+    await expect.poll(async () => (await inspect()).views.find(view => view.id === dockId)?.binding?.nativeSessionId).toBe(original.nativeSessionId);
+    expect(createdNative).not.toBe(original.nativeSessionId);
+    expect((await inspect()).views.find(view => view.id === primary.id)?.binding?.nativeSessionId).toBe(original.nativeSessionId);
+  } finally { await fixture.close(); }
+});
+
+test('Track opens its session in the selected empty ordinary dock on mobile without replacing the primary', async ({ page, context }) => {
+  const fixture = await sessionLinkFixture({ automaticSignIn: true });
+  const errors: string[] = [];
+  page.on('pageerror', error => errors.push(error.message));
+  try {
+    await page.addInitScript(() => localStorage.setItem('agent-remote:track-view', 'true'));
+    await page.setViewportSize({ width: 1680, height: 1000 });
+    await page.goto(fixture.url);
+    await page.getByRole('link', { name: 'Sign in', exact: true }).click();
+    await page.getByLabel('Connected Host').selectOption(fixture.hostId);
+    await showNewSession(page); await page.getByTestId('session-create').click();
+    await expect(page.locator('.lab-primary-group[data-selected="true"]').getByTestId('prompt-input')).toBeEnabled();
+    const panel = await openWindows(page);
+    const windowId = (await panel.locator('[data-window-id][aria-current="true"]').getAttribute('data-window-id'))!;
+    await panel.getByRole('button', { name: 'Close Windows', exact: true }).click();
+    const access = await (await context.request.get(fixture.url + '/auth/status')).json();
+    const endpoint = `${fixture.url}${access.basePath}v1/windows/${windowId}`;
+    const inspect = async (): Promise<WorkspaceWindow> => (await (await context.request.get(endpoint)).json()).window;
+    const tracked = (await inspect()).views.find(view => view.placement === 'primary')!.binding!;
+    await page.locator('.lab-primary-group[data-selected="true"] .lab-star-button').click();
+    await page.getByRole('dialog').getByRole('button', { name: 'Save', exact: true }).click();
+    const { showSessions } = await import('./session-navigation');
+    await showSessions(page);
+    await page.locator('#lab-context').getByRole('button', { name: 'Favorites', exact: true }).click();
+    const favorite = page.locator('#lab-context').getByRole('treeitem').first();
+    await favorite.getByRole('button', { name: /^Actions for / }).click();
+    await page.getByRole('button', { name: 'Track', exact: true }).click();
+    await expect(favorite.getByLabel('Tracked on this device', { exact: true })).toBeVisible();
+    await showNewSession(page); await page.getByTestId('session-create').click();
+    await expect.poll(async () => (await inspect()).views.find(view => view.placement === 'primary')?.binding?.nativeSessionId).not.toBe(tracked.nativeSessionId);
+    const primary = (await inspect()).views.find(view => view.placement === 'primary')!;
+    await expect(page.locator('.lab-primary-group[data-selected="true"]').getByTestId('prompt-input')).toBeEnabled();
+    await page.locator('.lab-session-dock-add').click();
+    const dockId = (await inspect()).views.find(view => view.placement === 'dock')!.id;
+    await page.locator(`[data-dock-id="${dockId}"]`).click();
+    await expect.poll(async () => (await inspect()).selectedViewId).toBe(dockId);
+    expect((await inspect()).views.find(view => view.id === dockId)?.binding).toBeUndefined();
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.getByRole('button', { name: 'Tracked sessions', exact: true }).click();
+    const trackKey = JSON.stringify([tracked.hostId, tracked.providerId, tracked.nativeSessionId]);
+    await page.locator(`[data-tracked-key=${JSON.stringify(trackKey)}] .lab-session-row`).click();
+    await expect.poll(async () => (await inspect()).views.find(view => view.id === dockId)?.binding?.nativeSessionId).toBe(tracked.nativeSessionId);
+    const dock = page.locator(`.lab-bindable-session-window[data-view-id="${dockId}"]`);
+    await expect(dock).toBeVisible();
+    await expect(dock.getByTestId('prompt-input')).toBeEnabled();
+    await expect(dock).toContainText('Recorded history 1');
+    expect((await inspect()).selectedViewId).toBe(dockId);
+    expect((await inspect()).selectedPrimaryViewId).toBe(primary.id);
+    expect((await inspect()).views.find(view => view.id === primary.id)?.binding?.nativeSessionId).toBe(primary.binding!.nativeSessionId);
+    expect(errors).toEqual([]);
+  } finally { await fixture.close(); }
 });

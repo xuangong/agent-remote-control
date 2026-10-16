@@ -6,8 +6,9 @@ import { conversationLocalStorage, conversationSessionStorage } from './conversa
 import { sessionKey } from './session-tree.js';
 import { compositionSelection, type CompositionDocument } from './session-composition.js';
 
-export function windowSessionBinding(session: { hostId?: string; providerId: string; nativeSessionId: string; title: string; parentNativeSessionId?: string }): WindowSessionBinding {
+export function windowSessionBinding(session: { hostId?: string; providerId: string; nativeSessionId: string; title: string; parentNativeSessionId?: string; sessionIntent?: 'history' }, sessionIntent = session.sessionIntent): WindowSessionBinding {
   return { hostId: session.hostId ?? 'local', providerId: session.providerId, nativeSessionId: session.nativeSessionId, title: session.title,
+    ...(sessionIntent ? { sessionIntent } : {}),
     ...(session.parentNativeSessionId ? { parentNativeSessionId: session.parentNativeSessionId } : {}) };
 }
 const importedSlots = new WeakMap<WorkspaceWindow, Map<string, string>>();
@@ -24,6 +25,7 @@ export function restoreImportedWindowComposition(document: CompositionDocument, 
     const source = document.slots.find(slot => slot.id === slotId);
     const view = candidate.views.find(view => view.id === viewId);
     if (!source || !view?.binding || document.windowBindings?.some(binding => binding.slotId === slotId)
+      || (source.intent.kind === 'history') !== (view.binding.sessionIntent === 'history')
       || sessionKey(view.binding) !== sessionKey(compositionSelection(source))) continue;
     entries.set(slotId, viewId);
   }
@@ -37,7 +39,8 @@ export function commitImportedWindowComposition(document: CompositionDocument, c
     const view = committed.views.find(view => view.id === viewId);
     const source = document.slots.find(slot => slot.id === slotId);
     if (!view?.binding || !source || document.windowBindings?.some(entry => entry.slotId === slotId)) continue;
-    if (sessionKey(view.binding) !== sessionKey(compositionSelection(source))) continue;
+    if ((source.intent.kind === 'history') !== (view.binding.sessionIntent === 'history')
+      || sessionKey(view.binding) !== sessionKey(compositionSelection(source))) continue;
     bindWindowCompositionSlot(document, committed.id, viewId, view.binding, slotId);
   }
   importedSlots.delete(candidate);
@@ -51,10 +54,10 @@ export function importCompositionWindow(document: CompositionDocument): Workspac
   const ids = new Map((document.windows ?? []).map(entry => [entry.id, validId(entry.id)]));
   const primary = document.slots.find(slot => slot.id === document.primary);
   const binding = primary && compositionSelection(primary);
-  const main = createWindowView('main', binding && windowSessionBinding(binding), 'primary');
+  const main = createWindowView('main', binding && windowSessionBinding(binding, primary?.intent.kind === 'history' ? 'history' : undefined), 'primary');
   const views = [main, ...(document.windows ?? []).map(entry => {
     const slot = document.slots.find(slot => slot.id === entry.slotId), selected = slot && compositionSelection(slot);
-    const view = createWindowView(ids.get(entry.id)!, selected && windowSessionBinding(selected));
+    const view = createWindowView(ids.get(entry.id)!, selected && windowSessionBinding(selected, slot?.intent.kind === 'history' ? 'history' : undefined));
     if (entry.closeWith && ids.has(entry.closeWith)) view.closeWith = ids.get(entry.closeWith);
     const root = entry.closeWith ? document.windows?.find(root => root.id === entry.closeWith) : entry;
     const teamId = entry.groupId ?? root?.groupId ?? slot?.metadata?.teamId;
@@ -89,7 +92,7 @@ export function importCompositionWindow(document: CompositionDocument): Workspac
     const edge = document.edges.find(edge => edge.source === parentSlot && edge.selected);
     const child = document.slots.find(slot => slot.id === edge?.target);
     if (!child) break;
-    const view = createWindowView(`child-${crypto.randomUUID()}`, windowSessionBinding(compositionSelection(child)), 'attached');
+    const view = createWindowView(`child-${crypto.randomUUID()}`, windowSessionBinding(compositionSelection(child), child.intent.kind === 'history' ? 'history' : undefined), 'attached');
     view.attachedTo = parentView; view.collapsed = document.collapsed.includes(child.id);
     views.splice(views.findIndex(item => item.id === parentView) + 1, 0, view); slotViews.set(child.id, view.id);
     parentView = view.id; parentSlot = child.id;
@@ -149,8 +152,9 @@ export function importCompositionWindow(document: CompositionDocument): Workspac
   const ordered = [...mainGroup];
   for (const root of roots) { ordered.push(root); let parent = root.id; for (;;) { const child = views.find(view => view.attachedTo === parent); if (!child) break; ordered.push(child); parent = child.id; } }
   const selectedViewId = document.activeWindow && ids.get(document.activeWindow) || document.focus && slotViews.get(document.focus) || main.id;
-  const window: WorkspaceWindow = { schemaVersion: 1, id: crypto.randomUUID(), title: binding?.title ?? 'Window', revision: 0, primaryViewId: main.id,
-    selectedViewId, mainMinimized: dock?.mainMinimized === true && views.some(view => view.placement === 'dock'), views: ordered };
+  main.collapsed = dock?.mainMinimized === true && views.some(view => view.placement === 'dock');
+  const window: WorkspaceWindow = { schemaVersion: 2, id: crypto.randomUUID(), title: binding?.title ?? 'Window', revision: 0, selectedPrimaryViewId: main.id,
+    selectedViewId, views: ordered };
   if (!isWorkspaceWindow(window)) throw new Error('The saved presentation could not be imported. Its original stores have been preserved.');
   importedSlots.set(window, slotViews);
   return window;

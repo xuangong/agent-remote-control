@@ -1,12 +1,20 @@
 import { expect, it } from 'vitest';
-import { isWorkspaceWindow, isWindowMutation, type WorkspaceWindow } from './window-workspace.js';
+import { isWorkspaceWindow, isWindowMutation, decodeWorkspaceWindow, primaryWindowViews, windowPrimaryViewId, type WorkspaceWindow } from './window-workspace.js';
 import { applyWindowOperation, createWindowView } from './window-workspace-operations.js';
 
 const binding = { hostId: 'mac', providerId: 'codex', nativeSessionId: 's1', title: 'Project' };
 function workspace(): WorkspaceWindow {
-  return { schemaVersion: 1, id: 'w1', title: 'Project', revision: 0, primaryViewId: 'main', selectedViewId: 'main', mainMinimized: false,
+  return { schemaVersion: 2, id: 'w1', title: 'Project', revision: 0, selectedPrimaryViewId: 'main', selectedViewId: 'main',
     views: [createWindowView('main', binding, 'primary'), createWindowView('dock')] };
 }
+it('retains explicit concrete history intent without changing default current-role bindings', () => {
+  const original = workspace();
+  const history = applyWindowOperation(original, { type: 'view.bind', viewId: 'main', binding: { ...binding, sessionIntent: 'history' } });
+  expect(history.views[0]?.binding).toEqual({ ...binding, sessionIntent: 'history' });
+  expect(decodeWorkspaceWindow(JSON.parse(JSON.stringify(history)))).toEqual(history);
+  expect(applyWindowOperation(history, { type: 'view.bind', viewId: 'main', binding }).views[0]?.binding).toEqual(binding);
+  expect(isWorkspaceWindow({ ...history, views: [{ ...history.views[0], binding: { ...binding, sessionIntent: 'current' } }] })).toBe(false);
+});
 it('keeps presentation identities independent of empty and replacement session bindings', () => {
   const original = workspace();
   const bound = applyWindowOperation(original, { type: 'view.bind', viewId: 'dock', binding });
@@ -15,6 +23,39 @@ it('keeps presentation identities independent of empty and replacement session b
   expect(replaced.views.map(view => view.id)).toEqual(['main', 'dock']);
   expect(replaced.views[1]?.binding?.nativeSessionId).toBe('s1');
   expect(replaced.revision).toBe(2);
+});
+it('binds only the captured empty or native target while allowing title and role metadata updates', () => {
+  const original = workspace();
+  const next = { ...binding, nativeSessionId: 'created' };
+  const renamed = { ...binding, title: 'Renamed', role: { controllerId: 'controller', roleId: 'role', revision: 2 } };
+  original.views[0]!.binding = renamed;
+  const bound = applyWindowOperation(original, { type: 'view.bind', viewId: 'main', binding: next, expectedBinding: binding });
+  expect(bound.views[0]?.binding).toEqual(next);
+  expect(applyWindowOperation(original, { type: 'view.bind', viewId: 'dock', binding: next, expectedBinding: null }).views[1]?.binding).toEqual(next);
+  expect(original.views[0]?.binding).toEqual(renamed);
+});
+it.each([
+  null,
+  { ...binding, hostId: 'other-host' },
+  { ...binding, providerId: 'other-provider' },
+  { ...binding, nativeSessionId: 'other-session' },
+  { ...binding, sessionIntent: 'history' as const },
+  { ...binding, parentNativeSessionId: 'other-parent' },
+])('rejects a stale expected binding atomically: %j', expectedBinding => {
+  const original = workspace();
+  expect(() => applyWindowOperation(original, { type: 'batch', operations: [
+    { type: 'rename', title: 'Should not commit' },
+    { type: 'view.bind', viewId: 'main', binding: { ...binding, nativeSessionId: 'created' }, expectedBinding },
+  ] })).toThrow('The target session view changed');
+  expect(original.revision).toBe(0);
+  expect(original.title).toBe('Project');
+  expect(original.views[0]?.binding).toEqual(binding);
+});
+it('rejects an expected native binding for an empty view and validates its public mutation shape', () => {
+  const operation = { type: 'view.bind' as const, viewId: 'dock', binding, expectedBinding: binding };
+  expect(isWindowMutation({ operationId: 'guarded', issuedAt: 1, baseRevision: 0, operation })).toBe(true);
+  expect(isWindowMutation({ operationId: 'guarded', issuedAt: 1, baseRevision: 0, operation: { ...operation, expectedBinding: {} } })).toBe(false);
+  expect(() => applyWindowOperation(workspace(), operation)).toThrow('The target session view changed');
 });
 it('moves attached descendants with their source and rejects moving a child independently', () => {
   const w = workspace();
@@ -135,4 +176,43 @@ it('bounds opaque feature metadata without interpreting application names', () =
   for (const metadata of [Object.fromEntries(Array.from({ length: 17 }, (_, i) => [`key${i}`, 'value'])), { ['x'.repeat(65)]: 'value' }, { key: 'x'.repeat(4097) }]) {
     expect(isWorkspaceWindow({ ...valid, views: [valid.views[0], { ...valid.views[1], feature: { ...valid.views[1]!.feature, metadata } }] })).toBe(false);
   }
+});
+
+it('selects and closes primary groups independently while keeping standalone docks', () => {
+  let w = applyWindowOperation(workspace(), { type: 'view.create', view: createWindowView('second', binding, 'primary') });
+  w = applyWindowOperation(w, { type: 'view.create', view: { ...createWindowView('child', binding, 'attached'), attachedTo: 'second' } });
+  w = applyWindowOperation(w, { type: 'view.create', view: { ...createWindowView('ask'), closeWith: 'second', feature: { kind: 'ask', id: 'ask' } } });
+  expect(primaryWindowViews(w).map(view => view.id)).toEqual(['main', 'second']);
+  expect(windowPrimaryViewId(w, 'child')).toBe('second');
+  expect(windowPrimaryViewId(w, 'ask')).toBeUndefined();
+  w = applyWindowOperation(w, { type: 'view.select', viewId: 'child' });
+  expect(w.selectedPrimaryViewId).toBe('second');
+  w = applyWindowOperation(w, { type: 'view.select', viewId: 'dock' });
+  expect(w.selectedPrimaryViewId).toBe('second'); expect(w.selectedViewId).toBe('dock');
+  w = applyWindowOperation(w, { type: 'view.collapse', viewId: 'second', collapsed: true });
+  expect(w.views.find(view => view.id === 'second')?.collapsed).toBe(true);
+  w = applyWindowOperation(w, { type: 'view.close', viewId: 'second' });
+  expect(w.views.map(view => view.id)).toEqual(['main', 'dock']);
+  expect(w.selectedPrimaryViewId).toBe('main'); expect(w.selectedViewId).toBe('dock');
+  expect(() => applyWindowOperation(w, { type: 'view.close', viewId: 'main' })).toThrow();
+});
+it('moves a primary with its attached chain and rebinds only that chain', () => {
+  const w = workspace();
+  w.views.push(createWindowView('second', binding, 'primary'), { ...createWindowView('child', binding, 'attached'), attachedTo: 'second' }, { ...createWindowView('ask'), closeWith: 'second' });
+  const moved = applyWindowOperation(w, { type: 'view.move', viewId: 'second', afterId: 'main' });
+  expect(moved.views.map(view => view.id)).toEqual(['main', 'second', 'child', 'dock', 'ask']);
+  const rebound = applyWindowOperation(moved, { type: 'view.bind', viewId: 'second', binding: { ...binding, nativeSessionId: 'replacement' } });
+  expect(rebound.views.map(view => view.id)).toEqual(['main', 'second', 'dock', 'ask']);
+  expect(rebound.views.find(view => view.id === 'ask')?.closeWith).toBe('second');
+});
+it('migrates a v1 Window deterministically without changing its identities or revision', () => {
+  const { selectedPrimaryViewId, ...base } = workspace();
+  const legacy = { ...base, schemaVersion: 1, primaryViewId: selectedPrimaryViewId, mainMinimized: true };
+  const migrated = decodeWorkspaceWindow(legacy)!;
+  expect(migrated).toMatchObject({ schemaVersion: 2, id: 'w1', revision: 0, selectedPrimaryViewId: 'main' });
+  expect(migrated.views[0]).toMatchObject({ id: 'main', collapsed: true });
+  expect(migrated.views[1]).toEqual(legacy.views[1]);
+  expect(decodeWorkspaceWindow(legacy)).toEqual(migrated);
+  expect(legacy.views[0]?.collapsed).toBe(false);
+  expect(decodeWorkspaceWindow({ ...legacy, selectedPrimaryViewId: 'dock' })).toBeUndefined();
 });

@@ -96,7 +96,7 @@ export function useImageDraft({ scope: suppliedScope, sessionKey, text, enabled,
     current.restoring = true;
     const revision = current.revision;
     let savedDraftChanged = false;
-    current.restoration = (fromWriter ? Promise.resolve() : flushReleasedImageDraftWriters({ scope, key })).then(() => readImageDraft(key)).then(saved => {
+    current.restoration = (fromWriter ? Promise.resolve() : flushReleasedImageDraftWriters({ scope, key }, current)).then(() => readImageDraft(key)).then(saved => {
       if (current.generation !== imageDraftScopeGeneration(scope ?? '')) throw new Error('The image storage owner retired.');
       if (saved && saved.scope !== scope) throw new Error('The saved image scope does not match.');
       current.readFailed = false;
@@ -154,7 +154,7 @@ export function useImageDraft({ scope: suppliedScope, sessionKey, text, enabled,
   function replaceStorage(expectedRevision: number, draft: Omit<ImageDraft, 'key' | 'scope'>, isCurrent: () => boolean): Promise<ImageDraftStorageSnapshot> {
     return applyStorage(expectedRevision, draft, isCurrent).completion;
   }
-  useEffect(() => enabled ? registerImageDraftWriter({ scope: scope ?? '', key }, { snapshot: storageSnapshot, flush: flushStorage, apply: applyStorage, replace: replaceStorage }) : undefined, [entryKey, enabled]);
+  useEffect(() => enabled ? registerImageDraftWriter({ scope: scope ?? '', key }, { snapshot: storageSnapshot, flush: flushStorage, apply: applyStorage, replace: replaceStorage }, current) : undefined, [entryKey, enabled]);
   function retryStorage(): void {
     if (current.restoring || current.saving) return;
     if (current.readFailed || !current.hydrated) restore();

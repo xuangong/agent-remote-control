@@ -20,7 +20,7 @@ async function mount(scope: string, hosted = false, initialComposition?: Composi
   return () => current;
 }
 function windowFixture(id: string): WorkspaceWindow {
-  return { schemaVersion: 1, id, revision: 0, title: id, primaryViewId: 'main', selectedViewId: 'main', mainMinimized: false, views: [createWindowView('main', undefined, 'primary')] };
+  return { schemaVersion: 2, id, revision: 0, title: id, selectedPrimaryViewId: 'main', selectedViewId: 'main', views: [createWindowView('main', undefined, 'primary')] };
 }
 function hostedWindows(...windows: WorkspaceWindow[]) {
   const documents = new Map(windows.map(window => [window.id, window]));
@@ -45,11 +45,50 @@ it('keeps independent Window identities, opens local snapshots and restores brow
   await act(async () => { history.pushState(null, '', `/?window=${second}`); dispatchEvent(new PopStateEvent('popstate')); });
   expect(read().window!.id).toBe(second);
 });
+it('reads the current Window from a callback retained before a Window switch or unavailable route', async () => {
+  const read = await mount('retained-window-reader');
+  const captured = read().readWindow, first = captured()!.id;
+  await act(async () => read().create());
+  const second = read().window!.id;
+  expect(captured()?.id).toBe(second);
+  await act(async () => read().open(first));
+  expect(captured()?.id).toBe(first);
+  await act(async () => { history.pushState(null, '', '/?window=missing'); dispatchEvent(new PopStateEvent('popstate')); });
+  expect(read().unavailable).toBe(true);
+  expect(captured()).toBeUndefined();
+});
 it('honors an explicit legacy session link over an unrelated cached Window', async () => {
   const read = await mount('legacy-route'); const first = read().window!.id;
   await act(async () => { history.pushState(null, '', '/?host=offline&provider=codex&session=target'); dispatchEvent(new PopStateEvent('popstate')); });
   expect(read().window!.id).not.toBe(first);
   expect(read().window!.views[0]?.binding).toMatchObject({ hostId: 'offline', providerId: 'codex', nativeSessionId: 'target' });
+});
+
+it.each(['source', 'side'])('imports an explicit historical %s link without claiming its ordinary composition owners', async nativeSessionId => {
+  const scope = `history-import-${nativeSessionId}`;
+  const source = { hostId: 'host', providerId: 'recorded', nativeSessionId: 'source', title: 'Source' };
+  const main = createCompositionSlot('ordinary-main', source, scope);
+  const side = createCompositionSlot('ordinary-side', { ...source, nativeSessionId: 'side', title: 'Side' }, scope);
+  const composition = createCompositionDocument(scope, [main, side]);
+  composition.primary = main.id;
+  composition.edges.push({ source: main.id, target: side.id, selected: true });
+  history.replaceState(null, '', `/?host=host&provider=recorded&session=${nativeSessionId}&intent=history`);
+  const read = await mount(scope, false, composition);
+  expect(read().error).toBeUndefined();
+  expect(read().window?.views.find(view => view.id === read().window?.selectedPrimaryViewId)?.binding)
+    .toMatchObject({ hostId: 'host', providerId: 'recorded', nativeSessionId, sessionIntent: 'history' });
+  expect(composition.windowBindings?.some(binding => binding.viewId === 'main' && [main.id, side.id].includes(binding.slotId)) ?? false).toBe(false);
+  expect(main.intent.kind).toBe('fixed'); expect(side.intent.kind).toBe('fixed');
+});
+
+it('keeps an explicitly selected Window authoritative over a legacy history link', async () => {
+  const scope = 'window-before-legacy-history';
+  const window = windowFixture('selected');
+  window.views[0]!.binding = { hostId: 'host', providerId: 'recorded', nativeSessionId: 'current', title: 'Current' };
+  localStorage.setItem(`agent-remote:recovery:${scope}:shared-window:selected`, JSON.stringify(window));
+  history.replaceState(null, '', '/?window=selected&host=host&provider=recorded&session=history&intent=history');
+  const read = await mount(scope);
+  expect(read().window).toEqual(window);
 });
 
 it('keeps the chosen Window when an older Window operation completes', async () => {
@@ -90,7 +129,7 @@ it('rejects a local operation when authoritative storage cannot save its result'
 });
 
 it('preserves a newer selection when deletion of the previous Window finishes', async () => {
-  const first: WorkspaceWindow = { schemaVersion: 1, id: 'first', revision: 0, title: 'First', primaryViewId: 'main', selectedViewId: 'main', mainMinimized: false, views: [createWindowView('main', undefined, 'primary')] };
+  const first: WorkspaceWindow = { schemaVersion: 2, id: 'first', revision: 0, title: 'First', selectedPrimaryViewId: 'main', selectedViewId: 'main', views: [createWindowView('main', undefined, 'primary')] };
   const second = { ...first, id: 'second', title: 'Second' }, third = { ...first, id: 'third', title: 'Third' };
   history.replaceState(null, '', '/?window=second');
   vi.spyOn(WindowWorkspaceClient.prototype, 'list').mockResolvedValue([first, second, third]);
@@ -168,7 +207,7 @@ it('does not submit a creation unless its recovery identity can be retained', as
 it('retains an uncertain creation when a replay is refused after its receipt expires', async () => {
   const scope = 'https://expired-create.example/';
   const key = `agent-remote:recovery:${scope}:shared-window:pending-create`;
-  const window: WorkspaceWindow = { schemaVersion: 1, id: 'uncertain', revision: 0, title: 'Uncertain', primaryViewId: 'main', selectedViewId: 'main', mainMinimized: false, views: [createWindowView('main', undefined, 'primary')] };
+  const window: WorkspaceWindow = { schemaVersion: 2, id: 'uncertain', revision: 0, title: 'Uncertain', selectedPrimaryViewId: 'main', selectedViewId: 'main', views: [createWindowView('main', undefined, 'primary')] };
   const request = { operationId: 'retained-operation', issuedAt: 1, window };
   sessionStorage.setItem(key, JSON.stringify({ request, bindings: [] }));
   vi.spyOn(WindowWorkspaceClient.prototype, 'list').mockResolvedValue([]);
@@ -181,7 +220,7 @@ it('retains an uncertain creation when a replay is refused after its receipt exp
 });
 
 it('retains the original delete identity until its receipt can be settled', async () => {
-  const window: WorkspaceWindow = { schemaVersion: 1, id: 'pending-delete', revision: 2, title: 'Pending delete', primaryViewId: 'main', selectedViewId: 'main', mainMinimized: false, views: [createWindowView('main', undefined, 'primary')] };
+  const window: WorkspaceWindow = { schemaVersion: 2, id: 'pending-delete', revision: 2, title: 'Pending delete', selectedPrimaryViewId: 'main', selectedViewId: 'main', views: [createWindowView('main', undefined, 'primary')] };
   const active = { ...window, id: 'active-window' };
   history.replaceState(null, '', `/?window=${active.id}`);
   vi.spyOn(WindowWorkspaceClient.prototype, 'list').mockResolvedValue([window, active]);
@@ -213,7 +252,7 @@ it('retains the original delete identity until its receipt can be settled', asyn
 });
 
 it('keeps the latest requested Window when an earlier open returns later', async () => {
-  const first: WorkspaceWindow = { schemaVersion: 1, id: 'first-choice', revision: 0, title: 'First', primaryViewId: 'main', selectedViewId: 'main', mainMinimized: false, views: [createWindowView('main', undefined, 'primary')] };
+  const first: WorkspaceWindow = { schemaVersion: 2, id: 'first-choice', revision: 0, title: 'First', selectedPrimaryViewId: 'main', selectedViewId: 'main', views: [createWindowView('main', undefined, 'primary')] };
   const second = { ...first, id: 'second-choice' }, third = { ...first, id: 'third-choice' };
   history.replaceState(null, '', `/?window=${first.id}`);
   vi.spyOn(WindowWorkspaceClient.prototype, 'list').mockResolvedValue([first, second, third]);
@@ -232,7 +271,7 @@ it('keeps the latest requested Window when an earlier open returns later', async
 });
 
 it('does not let initialization replace a Window explicitly opened while its read was pending', async () => {
-  const first: WorkspaceWindow = { schemaVersion: 1, id: 'initial-choice', revision: 0, title: 'Initial', primaryViewId: 'main', selectedViewId: 'main', mainMinimized: false, views: [createWindowView('main', undefined, 'primary')] };
+  const first: WorkspaceWindow = { schemaVersion: 2, id: 'initial-choice', revision: 0, title: 'Initial', selectedPrimaryViewId: 'main', selectedViewId: 'main', views: [createWindowView('main', undefined, 'primary')] };
   const second = { ...first, id: 'manual-choice' };
   history.replaceState(null, '', `/?window=${first.id}`);
   vi.spyOn(WindowWorkspaceClient.prototype, 'list').mockResolvedValue([first, second]);
@@ -501,7 +540,7 @@ it('invalidates a deleted current Window after a different Window failed to open
 
 it('does not replace a missing explicit hosted Window even when its cache exists', async () => {
   const scope = 'https://cached-missing.example/';
-  const cached: WorkspaceWindow = { schemaVersion: 1, id: 'cached-missing', revision: 0, title: 'Cached', primaryViewId: 'main', selectedViewId: 'main', mainMinimized: false, views: [createWindowView('main', undefined, 'primary')] };
+  const cached: WorkspaceWindow = { schemaVersion: 2, id: 'cached-missing', revision: 0, title: 'Cached', selectedPrimaryViewId: 'main', selectedViewId: 'main', views: [createWindowView('main', undefined, 'primary')] };
   localStorage.setItem(`agent-remote:recovery:${scope}:shared-window:${cached.id}`, JSON.stringify(cached));
   history.replaceState(null, '', `/?window=${cached.id}`);
   vi.spyOn(WindowWorkspaceClient.prototype, 'list').mockResolvedValue([]);
@@ -531,7 +570,7 @@ it('blocks externally deleted Window edits when explicit creation fails', async 
 
 it.each(['unknown', 'committed'] as const)('leaves an unrelated %s creation untouched when the active Window is externally deleted', async outcome => {
   const scope = `https://${outcome}-prior-create.example/`;
-  const original: WorkspaceWindow = { schemaVersion: 1, id: 'selected-A', revision: 0, title: 'A', primaryViewId: 'main', selectedViewId: 'main', mainMinimized: false, views: [createWindowView('main', undefined, 'primary')] };
+  const original: WorkspaceWindow = { schemaVersion: 2, id: 'selected-A', revision: 0, title: 'A', selectedPrimaryViewId: 'main', selectedViewId: 'main', views: [createWindowView('main', undefined, 'primary')] };
   const prior = { ...original, id: 'unknown-C', views: [...original.views, createWindowView('unrelated-dock')] };
   const request = { window: prior, operationId: 'prior-create', issuedAt: Date.now() };
   sessionStorage.setItem(`agent-remote:recovery:${scope}:shared-window:pending-create`, JSON.stringify({ request, bindings: [] }));
@@ -547,7 +586,7 @@ it.each(['unknown', 'committed'] as const)('leaves an unrelated %s creation unto
 }, 10000);
 
 it('keeps an already requested navigation valid when the current Window is externally deleted', async () => {
-  const first: WorkspaceWindow = { schemaVersion: 1, id: 'deleted-before-navigation', revision: 0, title: 'First', primaryViewId: 'main', selectedViewId: 'main', mainMinimized: false, views: [createWindowView('main', undefined, 'primary')] };
+  const first: WorkspaceWindow = { schemaVersion: 2, id: 'deleted-before-navigation', revision: 0, title: 'First', selectedPrimaryViewId: 'main', selectedViewId: 'main', views: [createWindowView('main', undefined, 'primary')] };
   const second = { ...first, id: 'pending-destination', title: 'Second' };
   history.replaceState(null, '', `/?window=${first.id}`);
   vi.spyOn(WindowWorkspaceClient.prototype, 'list').mockResolvedValue([first, second]);
@@ -571,7 +610,7 @@ it('keeps an already requested navigation valid when the current Window is exter
 
 it('renders cached Window before hosted inspection completes without starting synchronization', async () => {
   const scope = 'https://deferred-cache.example/';
-  const cached: WorkspaceWindow = { schemaVersion: 1, id: 'early-cache', revision: 0, title: 'Cached', primaryViewId: 'main', selectedViewId: 'main', mainMinimized: false, views: [createWindowView('main', undefined, 'primary')] };
+  const cached: WorkspaceWindow = { schemaVersion: 2, id: 'early-cache', revision: 0, title: 'Cached', selectedPrimaryViewId: 'main', selectedViewId: 'main', views: [createWindowView('main', undefined, 'primary')] };
   localStorage.setItem(`agent-remote:recovery:${scope}:shared-window:${cached.id}`, JSON.stringify(cached));
   history.replaceState(null, '', `/?window=${cached.id}`);
   vi.spyOn(WindowWorkspaceClient.prototype, 'list').mockResolvedValue([cached]);
@@ -602,3 +641,41 @@ it('does not change the route when a nonactive deletion finishes after unmount',
   expect(sessionStorage.getItem(`agent-remote:recovery:${scope}:shared-window`)).toBe(original.id);
   expect(fixture.create).not.toHaveBeenCalled();
 }, 10000);
+
+it('migrates v1 local cache reads, storage events, authoritative edits, and explicit opens', async () => {
+  const scope = 'legacy-local', key = `agent-remote:recovery:${scope}:shared-window`;
+  const legacy = (id: string, revision = 0) => {
+    const { selectedPrimaryViewId, ...window } = windowFixture(id);
+    return { ...window, schemaVersion: 1, revision, primaryViewId: selectedPrimaryViewId, mainMinimized: false };
+  };
+  localStorage.setItem(`${key}:legacy`, JSON.stringify(legacy('legacy')));
+  sessionStorage.setItem(key, 'legacy');
+  const read = await mount(scope);
+  expect(read().window).toMatchObject({ schemaVersion: 2, id: 'legacy', selectedPrimaryViewId: 'main' });
+  const incoming = { ...legacy('legacy', 1), title: 'From another page' };
+  await act(async () => {
+    localStorage.setItem(`${key}:legacy`, JSON.stringify(incoming));
+    dispatchEvent(new StorageEvent('storage', { key: `${key}:legacy`, newValue: JSON.stringify(incoming) }));
+  });
+  expect(read().window).toMatchObject({ schemaVersion: 2, revision: 1, title: 'From another page' });
+  await act(async () => read().operate({ type: 'rename', title: 'Edited after migration' }));
+  expect(read().window).toMatchObject({ schemaVersion: 2, revision: 2, title: 'Edited after migration' });
+  localStorage.setItem(`${key}:other`, JSON.stringify(legacy('other', 3)));
+  await act(async () => read().open('other'));
+  expect(read().window).toMatchObject({ schemaVersion: 2, id: 'other', revision: 3 });
+});
+
+it('keeps a pending v1 creation payload unchanged while recovering its receipt', async () => {
+  const scope = 'https://legacy-pending.example/';
+  const { selectedPrimaryViewId, ...base } = windowFixture('legacy-pending');
+  const window = { ...base, schemaVersion: 1, primaryViewId: selectedPrimaryViewId, mainMinimized: false };
+  const request = { operationId: 'legacy-create', issuedAt: Date.now(), window };
+  sessionStorage.setItem(`agent-remote:recovery:${scope}:shared-window:pending-create`, JSON.stringify({ request, bindings: [] }));
+  const fixture = hostedWindows(windowFixture('legacy-pending'));
+  const recover = vi.spyOn(WindowWorkspaceClient.prototype, 'recoverCreate').mockResolvedValue({ window: windowFixture('legacy-pending') });
+  const read = await mount(scope, true);
+  await vi.waitFor(async () => { await act(async () => {}); expect(read().window?.id).toBe('legacy-pending'); });
+  expect(recover).toHaveBeenCalledWith(window, request);
+  expect(fixture.create).not.toHaveBeenCalled();
+  expect(read().window?.schemaVersion).toBe(2);
+});

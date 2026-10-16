@@ -5,6 +5,31 @@ import { render } from '../test/setup.js';
 import { useTpmWork, type TpmService } from './useTpmWork.js';
 import type { SessionEntry } from '../session-tree.js';
 import type { TpmHost } from './useTpmWork.js';
+import { applyWindowOperation, createWindowView, type WorkspaceWindow } from '@orchardworks/agent-remote-protocol';
+
+it('keeps the selected source view when a TPM creation finishes after switching between duplicate main views', async () => {
+  const binding = { hostId: main.hostId, providerId: main.providerId, nativeSessionId: main.nativeSessionId, title: main.title };
+  let document: WorkspaceWindow = { schemaVersion: 2, id: 'window', revision: 0, title: 'Window', selectedPrimaryViewId: 'b', selectedViewId: 'b',
+    views: [createWindowView('a', binding, 'primary'), createWindowView('b', binding, 'primary')] };
+  let finish!: (value: TpmWork) => void;
+  const service: TpmService = { tpmList: async () => ({ supported: true, supportedProviders: ['codex'], works: [] }),
+    tpmWork: async () => work(), tpmCreate: () => new Promise(resolve => { finish = resolve; }), tpmAction: async () => work() };
+  let state!: ReturnType<typeof useTpmWork>, refresh!: () => void;
+  function Harness() {
+    const [, update] = useState(0); refresh = () => update(value => value + 1);
+    state = useTpmWork(service, [{ id: 'one', name: 'One', online: true }], true, async value => ({ ...value, agentId: 'tpm-agent' }), true, 'source-test', {
+      window: document, operate(operation) { document = applyWindowOperation(document, operation); refresh(); },
+    });
+    return null;
+  }
+  await render(<Harness />);
+  let pending!: Promise<TpmWork>;
+  await act(async () => { pending = state.create(main); });
+  await act(async () => { document = applyWindowOperation(document, { type: 'view.select', viewId: 'a' }); refresh(); });
+  await act(async () => { finish(work()); await pending; });
+  expect(document.views.find(view => view.feature?.kind === 'tpm')?.closeWith).toBe('b');
+  expect(document.selectedPrimaryViewId).toBe('a');
+});
 
 afterEach(() => { sessionStorage.clear(); });
 const main = { hostId: 'one', providerId: 'codex', nativeSessionId: 'main', agentId: 'main-agent', title: 'Main' };
@@ -411,4 +436,33 @@ it('ignores a delayed old native attachment after the same TPM work follows its 
   expect(state.sessions[key]?.nativeSessionId).toBe('successor');
   expect(state.windows).toEqual([key]);
   expect(attach.mock.calls.map(([value]) => value.nativeSessionId)).toEqual(['tpm', 'successor']);
+});
+
+it.each(['rebound', 'closed', 'another-window'] as const)('retains the created TPM catalog without opening a late result after its source is %s', async change => {
+  const binding = { hostId: main.hostId, providerId: main.providerId, nativeSessionId: main.nativeSessionId, title: main.title };
+  let document: WorkspaceWindow = { schemaVersion: 2, id: 'origin', revision: 0, title: 'Window', selectedPrimaryViewId: 'b', selectedViewId: 'b',
+    views: [createWindowView('a', binding, 'primary'), createWindowView('b', binding, 'primary')] };
+  let finish!: (value: TpmWork) => void, refresh!: () => void, state!: ReturnType<typeof useTpmWork>;
+  const attach = vi.fn(async (value: SessionEntry) => ({ ...value, agentId: 'tpm-agent' }));
+  const service: TpmService = { tpmList: async () => ({ supported: true, supportedProviders: ['codex'], works: [] }),
+    tpmWork: async () => work(), tpmCreate: () => new Promise(resolve => { finish = resolve; }), tpmAction: async () => work() };
+  function Harness() {
+    const [, update] = useState(0); refresh = () => update(value => value + 1);
+    state = useTpmWork(service, [{ id: 'one', name: 'One', online: true }], true, attach, true, 'source-change', {
+      window: document, operate(operation) { document = applyWindowOperation(document, operation); refresh(); },
+    }); return null;
+  }
+  await render(<Harness />);
+  let pending!: Promise<TpmWork>;
+  await act(async () => { pending = state.create(main); });
+  await act(async () => {
+    document = change === 'another-window' ? { ...document, id: 'destination' }
+      : applyWindowOperation(document, change === 'closed' ? { type: 'view.close', viewId: 'b' }
+        : { type: 'view.bind', viewId: 'b', binding: { ...binding, nativeSessionId: 'replacement' } });
+    refresh();
+  });
+  await act(async () => { finish(work()); await pending; });
+  expect(state.works.map(item => item.work.id)).toContain('work');
+  expect(document.views.some(view => view.feature?.kind === 'tpm')).toBe(false);
+  expect(attach).not.toHaveBeenCalled();
 });

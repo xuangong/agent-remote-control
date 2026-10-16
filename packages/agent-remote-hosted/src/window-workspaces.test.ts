@@ -9,7 +9,7 @@ import { handleWindowRequest } from './window-routes.js';
 import { encodeHostedSnapshot, decodeHostedSnapshot } from './record-codec.js';
 const auth = { origin: 'https://relay.example', issuer: 'https://gateway.example', secret: 'windows-test-secret-01234567890123456789' };
 const binding = { hostId: 'host', providerId: 'codex', nativeSessionId: 'native', title: 'Session' };
-const window = (): WorkspaceWindow => ({ schemaVersion: 1, id: 'window', title: 'Window', revision: 0, primaryViewId: 'primary', selectedViewId: 'primary', mainMinimized: false, views: [createWindowView('primary', binding, 'primary')] });
+const window = (): WorkspaceWindow => ({ schemaVersion: 2, id: 'window', title: 'Window', revision: 0, selectedPrimaryViewId: 'primary', selectedViewId: 'primary', views: [createWindowView('primary', binding, 'primary')] });
 const servers: Server[] = []; const cleanups: Array<() => void> = [];
 afterEach(async () => { cleanups.splice(0).forEach(fn => fn()); await Promise.all(servers.splice(0).map(server => new Promise<void>(resolve => { server.closeAllConnections(); server.close(() => resolve()); }))); });
 async function fixture(initial?: HostedRelayState) {
@@ -34,6 +34,26 @@ async function fixture(initial?: HostedRelayState) {
   const mutation = (operationId: string, baseRevision: number, operation: unknown) => ({ operationId, issuedAt: clock, baseRevision, operation });
   return { service, state, call, create, mutation, saved: () => saved, tick: (ms: number) => { clock += ms; }, deny: () => { allowed = false; } };
 }
+it('preserves historical and current bindings together through HTTP mutations and storage restart', async () => {
+  const f = await fixture(); await f.create();
+  const history = { ...binding, sessionIntent: 'history' as const };
+  const input = f.mutation('history', 0, { type: 'batch', operations: [
+    { type: 'view.bind', viewId: 'primary', binding: history },
+    { type: 'view.create', view: createWindowView('other', { ...binding, nativeSessionId: 'live' }, 'primary') },
+    { type: 'view.select', viewId: 'other' },
+  ] });
+  expect((await f.call('/window/operations', 'POST', input)).body.result.status).toBe('committed');
+  const records = [...encodeHostedSnapshot(f.saved(), auth).records.values()];
+  const restored = decodeHostedSnapshot(records.map(row => row.manifest), records.flatMap(row => row.chunks), auth);
+  const restarted = await fixture(restored);
+  const snapshot = (await restarted.call('/window')).body.window;
+  expect(snapshot.selectedPrimaryViewId).toBe('other');
+  expect(snapshot.views[0].binding).toEqual(history);
+  expect(snapshot.views[1].binding).toEqual({ ...binding, nativeSessionId: 'live' });
+  const selected = await restarted.call('/window/operations', 'POST', restarted.mutation('select-history', snapshot.revision, { type: 'view.select', viewId: 'primary' }));
+  expect(selected.body.window.views[0].binding).toEqual(history);
+}, 10000);
+
 it('shares committed state across HTTP clients, rejects stale revisions, and deduplicates lost responses across restart', async () => {
   const f = await fixture(); expect((await f.create()).status).toBe(200);
   const input = f.mutation('add', 0, { type: 'view.create', view: createWindowView('dock') });
@@ -46,6 +66,14 @@ it('shares committed state across HTTP clients, rejects stale revisions, and ded
   const snapshot = encodeHostedSnapshot(f.saved(), auth); const records = [...snapshot.records.values()];
   const restored = decodeHostedSnapshot(records.map(row => row.manifest), records.flatMap(row => row.chunks), auth);
   expect(validateRelayState(restored, auth)).toEqual(f.saved());
+  const forged = structuredClone(records);
+  const forgedRecord = forged.find(record => record.manifest.kind === 'workspaceWindow')!;
+  const forgedEnvelope = JSON.parse(new TextDecoder().decode(forgedRecord.chunks[0]!.bytes));
+  forgedEnvelope.payload.id = forgedEnvelope.payload.window.id = 'different-window';
+  const forgedBytes = new TextEncoder().encode(JSON.stringify(forgedEnvelope));
+  forgedRecord.chunks = [{ ...forgedRecord.chunks[0]!, bytes: forgedBytes }];
+  forgedRecord.manifest = { ...forgedRecord.manifest, byte_length: forgedBytes.byteLength, digest: createHash('sha256').update(forgedBytes).digest('hex') };
+  expect(() => decodeHostedSnapshot(forged.map(record => record.manifest), forged.flatMap(record => record.chunks), auth)).toThrow('payload identity or header mismatch');
   const restarted = await fixture(restored);
   expect((await restarted.call('/window/operations/add')).body.result).toEqual(first.body.result);
   expect((await restarted.call('/window/operations', 'POST', input)).body).toEqual(first.body);
@@ -164,4 +192,58 @@ it('authorizes actual native bindings without interpreting opaque feature Host m
   }));
   expect(native.body.result).toMatchObject({ status: 'rejected', code: 'session_forbidden' });
   expect((await f.call('/window')).body.window.views[1].feature).toEqual(association);
+});
+it('shares independent primary groups through HTTP selection, closure, subscriptions and durable reload', async () => {
+  const f = await fixture(); expect((await f.create()).status).toBe(200);
+  const create = f.mutation('second-primary', 0, { type: 'view.create', view: createWindowView('second', binding, 'primary') });
+  expect((await f.call('/window/operations', 'POST', create)).body.result.status).toBe('committed');
+  const selected = f.mutation('select-second', 1, { type: 'view.select', viewId: 'second' });
+  const waiting = f.call('/window/changes?afterRevision=1');
+  await f.call('/window/operations', 'POST', selected);
+  expect((await waiting).body.window.selectedPrimaryViewId).toBe('second');
+  const initial = structuredClone(f.saved());
+  const snapshot = encodeHostedSnapshot(initial, auth), records = [...snapshot.records.values()];
+  const restarted = await fixture(decodeHostedSnapshot(records.map(row => row.manifest), records.flatMap(row => row.chunks), auth));
+  expect((await restarted.call('/window')).body.window.views.map((view: any) => view.id)).toEqual(['primary', 'second']);
+  expect((await restarted.call('/window/operations', 'POST', create)).body.result.revision).toBe(1);
+  const closed = await restarted.call('/window/operations', 'POST', restarted.mutation('close-primary', 2, { type: 'view.close', viewId: 'primary' }));
+  expect(closed.body.window).toMatchObject({ selectedPrimaryViewId: 'second', selectedViewId: 'second' });
+  expect((await restarted.call('/window/operations', 'POST', restarted.mutation('close-last', 3, { type: 'view.close', viewId: 'second' }))).body.result.status).toBe('rejected');
+});
+it('migrates legacy persisted Windows while replaying original v1 request fingerprints unchanged', async () => {
+  const canonical = (value: any): string => Array.isArray(value) ? '[' + value.map(canonical).join(',') + ']' : value && typeof value === 'object'
+    ? '{' + Object.keys(value).sort().map(key => JSON.stringify(key) + ':' + canonical(value[key])).join(',') + '}' : JSON.stringify(value);
+  const f = await fixture();
+  const { selectedPrimaryViewId, ...base } = window();
+  const legacy = { ...base, schemaVersion: 1, revision: 1, primaryViewId: selectedPrimaryViewId, mainMinimized: false };
+  const oldCreate = { operationId: 'old-create', issuedAt: Date.now(), window: { ...legacy, revision: 0 } };
+  const oldEdit = { operationId: 'old-layout', issuedAt: Date.now(), baseRevision: 0, operation: { type: 'layout.apply', layout: { title: legacy.title, primaryViewId: selectedPrimaryViewId, selectedViewId: legacy.selectedViewId, mainMinimized: false, views: legacy.views } } };
+  const result = (operationId: string, revision: number) => ({ operationId, status: 'committed' as const, revision, committedAt: Date.now(), expiresAt: Date.now() + 86400000 });
+  const initial = f.saved();
+  initial.workspaceWindows = [{ subject: 'alice', id: legacy.id, generation: 0, window: legacy as any,
+    receipts: [oldCreate, oldEdit].map((input, index) => ({ fingerprint: createHash('sha256').update(canonical(input)).digest('hex'), result: result(input.operationId, index) })) }];
+  const persisted = encodeHostedSnapshot(initial, auth);
+  const records = [...persisted.records.values()];
+  const physical = records.find(record => record.manifest.kind === 'workspaceWindow')!;
+  const envelope = JSON.parse(new TextDecoder().decode(physical.chunks[0]!.bytes));
+  envelope.payload.window = legacy;
+  const bytes = new TextEncoder().encode(JSON.stringify(envelope));
+  physical.chunks = [{ ...physical.chunks[0]!, bytes }];
+  physical.manifest = { ...physical.manifest, byte_length: bytes.byteLength, chunk_count: 1, digest: createHash('sha256').update(bytes).digest('hex') };
+  const restored = decodeHostedSnapshot(records.map(record => record.manifest), records.flatMap(record => record.chunks), auth);
+  const forged = structuredClone(records);
+  const forgedRecord = forged.find(record => record.manifest.kind === 'workspaceWindow')!;
+  const forgedEnvelope = JSON.parse(new TextDecoder().decode(forgedRecord.chunks[0]!.bytes));
+  forgedEnvelope.payload.id = forgedEnvelope.payload.window.id = 'different-window';
+  const forgedBytes = new TextEncoder().encode(JSON.stringify(forgedEnvelope));
+  forgedRecord.chunks = [{ ...forgedRecord.chunks[0]!, bytes: forgedBytes }];
+  forgedRecord.manifest = { ...forgedRecord.manifest, byte_length: forgedBytes.byteLength, digest: createHash('sha256').update(forgedBytes).digest('hex') };
+  expect(() => decodeHostedSnapshot(forged.map(record => record.manifest), forged.flatMap(record => record.chunks), auth)).toThrow('payload identity or header mismatch');
+  const restarted = await fixture(restored);
+  expect((await restarted.call('/window')).body.window).toMatchObject({ schemaVersion: 2, id: 'window', revision: 1, selectedPrimaryViewId: 'primary' });
+  expect((await restarted.call('', 'POST', oldCreate)).body.result).toEqual(initial.workspaceWindows[0]!.receipts[0]!.result);
+  expect((await restarted.call('/window/operations', 'POST', oldEdit)).body.result).toEqual(initial.workspaceWindows[0]!.receipts[1]!.result);
+  expect((await restarted.call('/window/operations', 'POST', { ...oldEdit, baseRevision: 5 })).status).toBe(409);
+  expect((await restarted.call('/window/operations', 'POST', { ...oldEdit, operationId: 'new-legacy' })).status).toBe(400);
+  expect(initial.workspaceWindows[0]!.window).toEqual(legacy);
 });

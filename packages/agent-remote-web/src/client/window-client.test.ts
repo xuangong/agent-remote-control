@@ -6,7 +6,7 @@ import type { WindowMutation, WorkspaceWindow } from '@orchardworks/agent-remote
 import { WindowRequestError, WindowWorkspaceClient } from './window-client.js';
 
 const window: WorkspaceWindow = {
-  schemaVersion: 1, id: 'window-one', revision: 0, title: 'One', primaryViewId: 'main', selectedViewId: 'main', mainMinimized: false,
+  schemaVersion: 2, id: 'window-one', revision: 0, title: 'One', selectedPrimaryViewId: 'main', selectedViewId: 'main',
   views: [{ id: 'main', placement: 'primary', width: 440, collapsed: false, display: { mode: 'preview', lettersVisible: true } }],
 };
 const mutation: WindowMutation = { operationId: 'rename-one', issuedAt: 100, baseRevision: 0, operation: { type: 'rename', title: 'Renamed' } };
@@ -26,6 +26,13 @@ async function withWindowServer(reply: (input: { operationId: string }) => { bod
 
 type Method = 'create' | 'mutate' | 'delete';
 const invoke = (client: WindowWorkspaceClient, method: Method) => method === 'mutate' ? client.mutate(window.id, mutation) : client[method](window);
+it('decodes explicit history intent from the HTTP Window snapshot', async () => {
+  const binding = { hostId: 'host', providerId: 'recorded', nativeSessionId: 'past', title: 'Past', sessionIntent: 'history' as const };
+  const snapshot = { ...window, views: [{ ...window.views[0]!, binding }] };
+  await withWindowServer(() => ({ body: { window: snapshot } }), async client => {
+    expect((await client.inspect(window.id)).window.views[0]?.binding).toEqual(binding);
+  });
+}, 10000);
 it('rejects a snapshot for a different Window and sends same-origin credentials', async () => {
   const fetcher = vi.fn(async () => new Response(JSON.stringify({ window: { id: 'other' } }), { status: 200 }));
   const client = new WindowWorkspaceClient('https://site.test/u/account/', fetcher as typeof fetch);
@@ -133,5 +140,27 @@ it.each(['create', 'delete'] as const)('preserves the complete %s request when r
     state.lookupAvailable = true;
     await client[method === 'create' ? 'recoverCreate' : 'recoverDelete'](window, error.request);
     expect(state.writes).toHaveLength(1);
+  });
+}, 10000);
+it('decodes legacy server snapshots without altering the original creation request used for receipt recovery', async () => {
+  const { selectedPrimaryViewId, ...base } = window;
+  const legacy = { ...base, schemaVersion: 1, primaryViewId: selectedPrimaryViewId, mainMinimized: false };
+  await withWindowServer(() => ({ body: { window: legacy } }), async client => {
+    const snapshot = await client.inspect(window.id);
+    expect(snapshot.window).toMatchObject({ schemaVersion: 2, id: window.id, revision: 0, selectedPrimaryViewId });
+    expect(snapshot.window.views).toEqual(window.views);
+    expect(legacy.schemaVersion).toBe(1);
+  });
+}, 10000);
+it('keeps a legacy creation replay payload unchanged while decoding its current snapshot', async () => {
+  const { selectedPrimaryViewId, ...base } = window;
+  const legacy = { ...base, schemaVersion: 1, primaryViewId: selectedPrimaryViewId, mainMinimized: false };
+  const operation = { operationId: 'legacy-create', issuedAt: 100 };
+  await withWindowServer(input => {
+    expect(input).toEqual({ ...operation, window: legacy });
+    return { body: { result: receipt(operation.operationId, 0), window: { ...window, revision: 2 } } };
+  }, async client => {
+    const snapshot = await client.create(legacy as unknown as WorkspaceWindow, operation);
+    expect(snapshot.window).toMatchObject({ schemaVersion: 2, id: window.id, revision: 2 });
   });
 }, 10000);

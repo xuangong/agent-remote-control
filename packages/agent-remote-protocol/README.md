@@ -40,11 +40,39 @@ session bindings are references; transcripts, drafts, runtime state, and credent
 are not layout data. `applyWindowOperation` validates and applies atomic layout
 changes without Provider or React dependencies.
 
-The current layout schema retains one primary session area and supports additional
-floating, docked, and attached views. This is a renderer contract, not a dependency
-of Window identity on a main session. Feature metadata is opaque to the reducer;
-generic binding policy and explicit attachment/close relationships determine layout
-behavior. The Window HTTP API is independent of the existing session wire and does
+A binding may set `sessionIntent: "history"` to retain its concrete native address
+when the owning role advances. Omitting it preserves current-role navigation.
+Clients keep history and current views distinct even when their native addresses
+match; the Window service stores this intent without interpreting native history.
+
+`view.bind` may include `expectedBinding` to protect an asynchronous selection.
+Omitting the field keeps an explicit bind unconditional; `null` requires an empty
+view. An object requires the same Host, Provider, native session, parent native
+session, and history intent when the operation commits. Title and role metadata
+changes do not invalidate this condition. A changed target rejects the entire
+operation, including a batch, without replacing the binding or its descendants.
+
+Window schema version 2 supports multiple primary session groups, alongside
+independent floating and docked views. `selectedPrimaryViewId` identifies the
+active root; `selectedViewId` identifies focus, which may also be an independent
+view. A root View ID identifies its group, and only `attachedTo` ancestry defines
+membership. `closeWith` expresses a closure dependency, not group membership.
+Selecting an attached view selects and expands its primary root. Selecting an
+independent dock or float preserves the selected primary. Primary roots use
+`collapsed` for minimization through `view.collapse`; `main.minimize` is retired.
+Closing a primary closes its dependent views, preserves independent docks, and
+is rejected when it would remove the last primary.
+
+`decodeWorkspaceWindow` migrates valid persisted version 1 documents to version 2,
+preserving Window/View IDs and revision. The service preserves existing receipt
+fingerprints and permits an old request only to recover an existing receipt with
+the exact original payload; it does not accept new version 1 mutations. Upgrade
+the Window service, browser assets, and Window CLI together. Older strict Window
+clients cannot decode version 2, and rollback builds must retain the version 2
+reader. Session-only Controllers do not require an upgrade for this change.
+
+Feature metadata is opaque to the reducer; generic binding policy and explicit
+attachment/close relationships determine layout behavior. The Window HTTP API is independent of the existing session wire and does
 not change recorded session replay. See the
 [Window operations guide](../../docs/guides/window-agent-operations.md) for command
 results, retention, authorization, and uncertain-outcome recovery.

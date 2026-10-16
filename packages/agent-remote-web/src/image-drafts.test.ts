@@ -306,3 +306,48 @@ it('reports actual image write retention and cancellation independently of uploa
   await clearImageDraftScope(value.scope);
   expect(await writeImageDraft(value, generation)).toEqual({ status: 'cancelled', retention: 'page' });
 });
+
+it('waits for a released writer final IndexedDB write before inspecting its replacement editor', async () => {
+  const saved = draft('inspect-released-writer');
+  let finish!: (bytes: ArrayBuffer) => void;
+  const convert = vi.spyOn(saved.images[saved.scope]!.blob!, 'arrayBuffer').mockImplementation(() => new Promise(resolve => { finish = resolve; }));
+  const pending = writeImageDraft(saved);
+  let unregisterActive: (() => void) | undefined;
+  try {
+    await vi.waitFor(() => expect(finish).toBeDefined());
+    const snapshot = () => ({ status: 'pending' as const, revision: 1, savedRevision: 0, retention: 'local' as const, draft: saved });
+    const unregisterReleased = draftStorage.registerImageDraftWriter(saved, { snapshot, async flush() { await pending; return { ...snapshot(), status: 'ready', savedRevision: 1 }; } });
+    unregisterReleased();
+    const activeDraft = { ...saved, parts: [{ type: 'text' as const, text: 'replacement editor' }], images: {} };
+    const activeSnapshot = { status: 'ready' as const, revision: 2, savedRevision: 2, retention: 'local' as const, draft: activeDraft };
+    unregisterActive = draftStorage.registerImageDraftWriter(saved, { snapshot: () => activeSnapshot, flush: async () => activeSnapshot });
+    let inspected = false;
+    const inspection = draftStorage.inspectImageDraft(saved).then(handle => { inspected = true; return handle; });
+    await Promise.resolve();
+    expect(inspected).toBe(false);
+    finish(new TextEncoder().encode('image bytes').buffer);
+    const handle = await inspection;
+    expect(handle.snapshot()).toEqual(activeSnapshot);
+    expect((await storedDraft(saved.key)).draft?.parts).toEqual(saved.parts);
+  } finally { convert.mockRestore(); unregisterActive?.(); await draftStorage.flushReleasedImageDraftWriters(saved); }
+}, 5000);
+
+it('still fails inspection for two active editors with the same image owner', async () => {
+  const saved = draft('inspect-active-conflict');
+  const snapshot = { status: 'ready' as const, revision: 1, savedRevision: 1, retention: 'local' as const, draft: saved };
+  const first = draftStorage.registerImageDraftWriter(saved, { snapshot: () => snapshot, flush: async () => snapshot });
+  const second = draftStorage.registerImageDraftWriter(saved, { snapshot: () => snapshot, flush: async () => snapshot });
+  try { expect((await draftStorage.inspectImageDraft(saved)).snapshot().status).toBe('failed'); }
+  finally { first(); second(); await draftStorage.flushReleasedImageDraftWriters(saved); }
+}, 5000);
+
+it('does not hide a failed released writer behind a ready replacement editor', async () => {
+  const saved = draft('inspect-release-failure');
+  let fail = true;
+  const snapshot = () => ({ status: fail ? 'failed' as const : 'ready' as const, revision: 1, savedRevision: fail ? 0 : 1, retention: 'page' as const, draft: saved });
+  const released = draftStorage.registerImageDraftWriter(saved, { snapshot, async flush() { if (fail) throw new Error('Final write failed'); return snapshot(); } });
+  released();
+  const active = draftStorage.registerImageDraftWriter(saved, { snapshot: () => ({ ...snapshot(), status: 'ready', savedRevision: 1 }), flush: async () => ({ ...snapshot(), status: 'ready', savedRevision: 1 }) });
+  try { expect((await draftStorage.inspectImageDraft(saved)).snapshot().status).toBe('failed'); }
+  finally { fail = false; active(); await draftStorage.flushReleasedImageDraftWriters(saved); }
+}, 5000);

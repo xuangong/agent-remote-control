@@ -15,7 +15,7 @@ const source = { hostId: 'local', providerId: 'codex', nativeSessionId: 'source'
 afterEach(() => { sessionStorage.clear(); localStorage.clear(); });
 
 it('restores one shared Ask through different page-local slots and owners without copying either owner', async () => {
-  let shared: WorkspaceWindow = { schemaVersion: 1, id: 'shared-window', revision: 0, title: 'Window', primaryViewId: 'source-view', selectedViewId: 'source-view', mainMinimized: false,
+  let shared: WorkspaceWindow = { schemaVersion: 2, id: 'shared-window', revision: 0, title: 'Window', selectedPrimaryViewId: 'source-view', selectedViewId: 'source-view',
     views: [createWindowView('source-view', windowSessionBinding(source), 'primary')] };
   const requests: string[] = [];
   const directory = new SessionDirectoryClient(scope, async (url, init) => {
@@ -26,7 +26,7 @@ it('restores one shared Ask through different page-local slots and owners withou
   async function page(slotId: string) {
     const slot = createCompositionSlot(slotId, source, scope), owner = createAskOwner(slot, scope);
     const document = createCompositionDocument(scope, [slot]); document.asks = [owner]; document.primary = slot.id;
-    bindWindowCompositionSlot(document, shared.id, shared.primaryViewId, source, slot.id);
+    bindWindowCompositionSlot(document, shared.id, shared.selectedPrimaryViewId, source, slot.id);
     let ask!: ReturnType<typeof useAskConversations>;
     const transport = {} as RemoteAgentTransport;
     function Harness() {
@@ -73,7 +73,7 @@ it('keeps the original Ask source owner after an independent main-view binding c
   const sourceB = { ...source, nativeSessionId: 'source-B', agentId: 'agent-B', title: 'B' };
   const slotA = createCompositionSlot('local-source-A', source, scope), ownerA = createAskOwner(slotA, scope);
   const document = createCompositionDocument(scope, [slotA]); document.asks = [ownerA]; document.primary = slotA.id;
-  let shared: WorkspaceWindow = { schemaVersion: 1, id: 'same-window', revision: 0, title: 'Window', primaryViewId: 'main', selectedViewId: 'main', mainMinimized: false,
+  let shared: WorkspaceWindow = { schemaVersion: 2, id: 'same-window', revision: 0, title: 'Window', selectedPrimaryViewId: 'main', selectedViewId: 'main',
     views: [createWindowView('main', windowSessionBinding(source), 'primary')] };
   bindWindowCompositionSlot(document, shared.id, 'main', source, slotA.id);
   const transport = {} as RemoteAgentTransport;
@@ -107,7 +107,7 @@ it('keeps the original Ask source owner after an independent main-view binding c
 });
 
 it('waits for another page to finish opening a shared Ask before attaching its published binding', async () => {
-  let shared: WorkspaceWindow = { schemaVersion: 1, id: 'opening-window', revision: 0, title: 'Window', primaryViewId: 'main', selectedViewId: 'main', mainMinimized: false,
+  let shared: WorkspaceWindow = { schemaVersion: 2, id: 'opening-window', revision: 0, title: 'Window', selectedPrimaryViewId: 'main', selectedViewId: 'main',
     views: [createWindowView('main', windowSessionBinding(source), 'primary')] };
   const listeners = new Set<(window: WorkspaceWindow) => void>();
   const requests: string[] = [];

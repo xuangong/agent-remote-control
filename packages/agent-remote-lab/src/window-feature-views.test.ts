@@ -3,7 +3,7 @@ import { applyWindowOperation, createWindowView, type WorkspaceWindow } from '@o
 import { createWindowFeature, featureView, openFeatureView, parseWindowFeature } from './window-feature-views.js';
 
 function initial(): WorkspaceWindow {
-  return { schemaVersion: 1, id: 'window', title: 'Window', revision: 0, primaryViewId: 'main', selectedViewId: 'main', mainMinimized: false,
+  return { schemaVersion: 2, id: 'window', title: 'Window', revision: 0, selectedPrimaryViewId: 'main', selectedViewId: 'main',
     views: [createWindowView('main', undefined, 'primary'), createWindowView('source')] };
 }
 it('keeps typed feature metadata stable and rejects unsupported business metadata', () => {

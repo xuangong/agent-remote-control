@@ -20,7 +20,7 @@ import type { SessionTracking } from './useSessionTracking.js';
 import { isAskAttached, askParticipantKey, type useAskConversations } from './useAskConversations.js';
 import type { SessionStars } from './useSessionStars.js';
 import { canonicalJson } from '../session-composition.js';
-import { readWorkspaceSnapshot, saveWorkspaceSnapshot, workspaceDisplayState } from '../workspace-cache.js';
+import { readWorkspaceSnapshot, workspaceDisplayState } from '../workspace-cache.js';
 
 type Selection = Pick<SessionEntry, 'hostId' | 'providerId' | 'nativeSessionId' | 'title'> & Partial<Pick<OpenedSession, 'agentId' | 'parentAgentId' | 'parentNativeSessionId' | 'createdAt'>> & { viewId?: string };
 interface NativeBinding {
@@ -134,12 +134,6 @@ export function useSessionSuccession(options: SuccessionOptions) {
   };
   function retireBinding(next?: Selection) {
     const key = next && sessionKey(next), previous = runtime.binding;
-    if (live() && previous?.isCurrent()) {
-      const state = previous.replica.getState();
-      setTimeout(() => {
-        if (recoveryGeneration(options.scope) === runtime.generation) saveWorkspaceSnapshot(options.scope, previous.session, state);
-      }, 0);
-    }
     if (runtime.navigationLease?.key !== key) { runtime.navigationLease?.release(); runtime.navigationLease = undefined; }
     if (key && previous?.isCurrent() && sessionKey(previous.session) === key && !runtime.navigationLease) {
       const lease = latest.current.connections.acquire(previous.session.agentId, previous.replica, previous.session);

@@ -132,6 +132,29 @@ it('keeps session sharing available before the native session attaches', async (
   expect(view.querySelector('[aria-label="Share session link"]')).not.toBeNull();
 });
 
+it('keeps the latest observed messages ahead of the old disk preview while history resynchronizes', async () => {
+  const { saveWorkspaceSnapshot } = await import('../workspace-cache.js');
+  const session = { hostId: 'local', providerId: 'recorded', nativeSessionId: 'recorded-session', agentId: 'agent-1', title: 'Working' };
+  const entry = (text: string) => ({ providerId: 'recorded', seqStart: 1, seqEnd: 1, timestamp: '2026-10-17T00:00:00Z', sourceSeqRanges: [], collapsed: [], resources: [],
+    item: { type: 'assistant_message' as const, text } });
+  saveWorkspaceSnapshot('http://fixture', session, { ...replicaState, timeline: { ...replicaState.timeline, entries: [entry('Previous turn on disk')] } });
+  const replica = new AgentReplica();
+  replica.applySnapshot({ protocolVersion: '1.8.0', type: 'agent_snapshot', payload: replicaState.agent! });
+  replica.applyHistory({ protocolVersion: '1.8.0', type: 'timeline_page', payload: {
+    requestId: 'history', agentId: 'agent-1', epoch: 'epoch-1', direction: 'tail', reset: false, staleCursor: false, gap: false, error: null,
+    window: { minSeq: 1, maxSeq: 1, nextSeq: 2 }, startCursor: null, endCursor: null, hasOlder: false, hasNewer: false,
+    entries: [entry('Latest visible working content')],
+  } });
+  const transport = { onDiagnostic: () => () => {}, onProtocolMessage: () => () => {}, connect: () => ({ close() {}, send() {} }) } as unknown as RemoteAgentTransport;
+  const view = await render(<WorkspaceReady.Provider value={false}><SessionFamily attachedSession={session} target={session}
+    storageScope="family-display" baseUrl="http://fixture" hostLabel="Local" compact active offline replica={replica}
+    transport={transport} draftStore={new DraftStore('family-display')} /></WorkspaceReady.Provider>);
+  expect(view.textContent).toContain('Latest visible working content');
+  await act(async () => replica.replaceTimeline('replacement-epoch'));
+  expect(view.textContent).toContain('Latest visible working content');
+  expect(view.textContent).not.toContain('Previous turn on disk');
+});
+
 it('addresses duplicate native sessions by their own composition slots when creating navigation', async () => {
   const session = { hostId: 'local', providerId: 'recorded', nativeSessionId: 'native', agentId: 'agent', title: 'Duplicate' };
   const sources: Array<OpenedSession & { viewId?: string }> = [];

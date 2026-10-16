@@ -48,11 +48,17 @@ function pruneSnapshots(scope: string): void {
   for (const key of keys) if (!retained.has(key)) conversationLocalStorage.removeItem(key);
 }
 
+/** Only observed history can replace a display snapshot; projected previews have no live cursor. */
+export function isWorkspaceSnapshotSource(target: ControllerLocation, state: AgentReplicaState): state is AgentReplicaState & { agent: NonNullable<AgentReplicaState['agent']> } {
+  return !!state.agent && state.timeline.initialized && !!target.nativeSessionId && !!state.timeline.epoch
+    && Number.isSafeInteger(state.timeline.nextSeq) && state.timeline.nextSeq > 0
+    && state.agent.providerId === target.providerId && state.agent.runtimeInfo.providerId === target.providerId
+    && state.agent.runtimeInfo.sessionId === target.nativeSessionId;
+}
+
 /** A bounded recent-session display cache per account. It never seeds a transport cursor or outbox. */
 export function saveWorkspaceSnapshot(scope: string, target: ControllerLocation, state: AgentReplicaState): void {
-  if (!state.agent || !state.timeline.initialized || !target.nativeSessionId || !state.timeline.epoch
-    || state.agent.providerId !== target.providerId || state.agent.runtimeInfo.providerId !== target.providerId
-    || state.agent.runtimeInfo.sessionId !== target.nativeSessionId) return;
+  if (!isWorkspaceSnapshotSource(target, state)) return;
   const agent = { ...state.agent, activeTurn: null, pendingInteractions: [] };
   const entries = state.timeline.entries.slice(-150);
   const history = { protocolVersion: PROTOCOL_VERSION, type: 'timeline_page', payload: {
@@ -62,6 +68,16 @@ export function saveWorkspaceSnapshot(scope: string, target: ControllerLocation,
     startCursor: null, endCursor: null, hasOlder: false, hasNewer: false, error: null, entries,
   } };
   try {
+    const current = conversationLocalStorage.getItem(snapshotKey(scope, identity(target)));
+    if (current && current.length <= maxCharacters) {
+      try {
+        const saved = JSON.parse(current), previous = saved?.history?.payload;
+        // Multiple pages may observe the same session at different speeds. Sequence order is scoped to an epoch.
+        if (saved?.identity === identity(target) && previous?.agentId === agent.id && previous?.epoch === state.timeline.epoch
+          && Number.isSafeInteger(previous?.window?.nextSeq) && previous.window.nextSeq > state.timeline.nextSeq
+          && readWorkspaceSnapshot(scope, target)) return;
+      } catch { /* A live observation replaces damaged display storage. */ }
+    }
     pruneSnapshots(scope);
     let encoded = JSON.stringify({ identity: identity(target), snapshot: { protocolVersion: PROTOCOL_VERSION, type: 'agent_snapshot', payload: agent }, history });
     while (encoded.length > maxCharacters && entries.length) {

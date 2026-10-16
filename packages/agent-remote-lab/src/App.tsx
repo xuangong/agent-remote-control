@@ -44,7 +44,6 @@ import { LayoutDiagnosticsSettings } from './components/LayoutDiagnosticsSetting
 import { stopLayoutDiagnostics } from './layout-diagnostics.js';
 import { conversationLocalStorage, conversationSessionStorage } from './conversation-storage.js';
 import { WorkspaceReady, workspaceFetch, workspaceSocket, readWorkspaceAccess } from './workspace-access.js';
-import { useWorkspaceDisplayCache } from './hooks/useWorkspaceDisplayCache.js';
 import { readWorkspaceSnapshot } from './workspace-cache.js';
 import { ControllerUpdates } from './components/ControllerUpdates.js';
 import { readPromptEditReservation, finishPromptEditReservation, type PromptEditReservation } from './prompt-edit-intent.js';
@@ -1443,7 +1442,6 @@ function AppContent({
     });
     return () => { remove?.(); clearTimeout(timer); };
   }, [transport, applySessionTitle]);
-  useWorkspaceDisplayCache(baseUrl, addressSession, state, accessReady && status === 'ready' && !!state?.timeline.epoch);
   const promptEditReservation = useMemo<{ current: PromptEditReservation | undefined }>(() => ({ current: readPromptEditReservation(baseUrl) }), [baseUrl]);
   const promptMigrations = useSessionMigrations({ baseUrl, enabled: userScoped && accessReady, transport, current: activeOpened, loaded: openWindows,
     blocked: () => transitionRef.current || activeView !== 'workbench' || supportingRailOpen,

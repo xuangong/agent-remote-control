@@ -130,3 +130,34 @@ it('bounds storage inventory scans independently of the number of saved conversa
   expect(readWorkspaceSnapshot(scope, target)?.agent?.id).toBe(replicaState.agent?.id);
   expect(localStorage.getItem('agent-remote:recovery:other:outbox:199')).toBe('retained');
 });
+
+it('does not let a delayed older writer replace newer content in the same epoch', () => {
+  const newer = { ...replicaState, timeline: { ...replicaState.timeline, nextSeq: 21, entries: [{
+    providerId: 'recorded', seqStart: 20, seqEnd: 20, timestamp: '2026-10-17T00:00:00Z', sourceSeqRanges: [], collapsed: [], resources: [],
+    item: { type: 'assistant_message' as const, text: 'Latest visible content' },
+  }] } };
+  saveWorkspaceSnapshot(scope, target, newer);
+  saveWorkspaceSnapshot(scope, target, replicaState);
+  expect(readWorkspaceSnapshot(scope, target)?.timeline.entries).toEqual(newer.timeline.entries);
+  saveWorkspaceSnapshot(scope, target, { ...replicaState, timeline: { ...replicaState.timeline, epoch: 'replacement-epoch' } });
+  expect(readWorkspaceSnapshot(scope, target)?.timeline.epoch).toBe('replacement-epoch');
+});
+
+it('never saves a display-only preview over an observed snapshot', () => {
+  saveWorkspaceSnapshot(scope, target, replicaState);
+  const saved = readWorkspaceSnapshot(scope, target);
+  const preview = workspaceDisplayState(replicaState);
+  saveWorkspaceSnapshot(scope, target, preview);
+  expect(readWorkspaceSnapshot(scope, target)).toEqual(saved);
+});
+
+it('repairs damaged display storage even when it claims a newer sequence', () => {
+  saveWorkspaceSnapshot(scope, target, { ...replicaState, timeline: { ...replicaState.timeline, nextSeq: 21 } });
+  const key = Object.keys(localStorage).find(key => key.startsWith(`agent-remote:recovery:${scope}:workspace:`))!;
+  const damaged = JSON.parse(localStorage.getItem(key)!);
+  damaged.snapshot = null;
+  localStorage.setItem(key, JSON.stringify(damaged));
+  expect(readWorkspaceSnapshot(scope, target)).toBeUndefined();
+  saveWorkspaceSnapshot(scope, target, replicaState);
+  expect(readWorkspaceSnapshot(scope, target)?.agent?.id).toBe('agent-1');
+});

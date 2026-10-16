@@ -2,6 +2,7 @@ import { createContext } from 'react';
 import { RemoteSessionClient, type AgentReplica, type RemoteAgentTransport, type SessionControlExtension } from '@orchardworks/agent-remote-web';
 import { recoverMessages } from './message-recovery.js';
 import { sessionKey, type SessionEntry } from './session-tree.js';
+import { observeWorkspaceDisplay } from './workspace-display-cache.js';
 
 type Identity = Pick<SessionEntry, 'hostId' | 'providerId' | 'nativeSessionId'>;
 interface Connection {
@@ -11,6 +12,7 @@ interface Connection {
   replica: AgentReplica;
   viewers: number;
   stopRecovery(): void;
+  stopDisplay(): void;
 }
 
 /** Keeps already opened conversations live while a view or retention owner needs them. */
@@ -48,12 +50,17 @@ export class ConversationConnections {
       connection = { agentId, key, replica, viewers: 0,
         client: new RemoteSessionClient(agentId, this.transport, replica, { historyPageSize: 100, requireSessionControl: true, clientKind: 'web', handoffTarget: key, controlExtension: this.controlExtension?.(agentId, session) }),
         stopRecovery: this.recoveryScope ? recoverMessages(replica, this.recoveryScope, key ?? agentId, agentId) : () => {},
+        stopDisplay: this.recoveryScope && session ? observeWorkspaceDisplay(this.recoveryScope, session, replica) : () => {},
       };
       this.connections.set(agentId, connection);
       try { connection.client.start(); }
       catch (error) { this.close(connection); throw error; }
     }
-    if (session) connection.key = sessionKey(session);
+    if (session && connection.key !== sessionKey(session)) {
+      connection.stopDisplay();
+      connection.key = sessionKey(session);
+      connection.stopDisplay = this.recoveryScope ? observeWorkspaceDisplay(this.recoveryScope, session, connection.replica) : () => {};
+    }
     connection.viewers += 1;
     if (!previous || previousKey !== connection.key) this.notify();
     const acquired = connection;
@@ -84,6 +91,7 @@ export class ConversationConnections {
 
   private close(connection: Connection): void {
     this.connections.delete(connection.agentId);
+    connection.stopDisplay();
     connection.client.stop();
     connection.stopRecovery();
     this.notify();

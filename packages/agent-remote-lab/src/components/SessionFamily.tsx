@@ -13,8 +13,7 @@ import { AgentReplica, sessionHandoffScope, SessionHandoffRejectedError } from '
 import type { NativeSessionOwner } from '@orchardworks/agent-remote-protocol';
 import './session-family.css';
 import { DirectoryError, SessionDirectoryClient, type OpenedSession } from '../directory-client.js';
-import { useWorkspaceDisplayCache } from '../hooks/useWorkspaceDisplayCache.js';
-import { readWorkspaceSnapshot } from '../workspace-cache.js';
+import { readWorkspaceSnapshot, workspaceDisplayState } from '../workspace-cache.js';
 import { useConversationSession } from '../hooks/useConversationSession.js';
 import { conversationSessionStorage } from '../conversation-storage.js';
 import type { ImageDraftBinding, ImageDraftRecipient } from '@orchardworks/agent-remote-web/browser';
@@ -300,9 +299,9 @@ function FamilyChat({ session, pending, transport, navigation, draftStore, draft
   const bound = nativeIdentityMatches && !!state?.timeline.initialized && !pending;
   const identityMismatch = !!state?.agent && !nativeIdentityMatches;
   const retainedDisplay = useRef<{ key: string; state: AgentReplicaState }>();
-  if (!pending && nativeIdentityMatches && state?.timeline.initialized) retainedDisplay.current = { key: sessionKey(session), state };
+  if (!pending && nativeIdentityMatches && state?.timeline.initialized) retainedDisplay.current = { key: sessionKey(session), state: workspaceDisplayState(state) };
   const retainedState = retainedDisplay.current?.key === sessionKey(target) ? retainedDisplay.current.state : undefined;
-  const displayedState = !pending && nativeIdentityMatches && state?.timeline.initialized ? state : preview ?? retainedState ?? (!pending && nativeIdentityMatches ? state : undefined);
+  const displayedState = !pending && nativeIdentityMatches && state?.timeline.initialized ? state : retainedState ?? preview ?? (!pending && nativeIdentityMatches ? state : undefined);
   const presentedSession = pending ? { ...target, agentId: session.agentId } : session;
   const safeActions = pending || identityMismatch ? {} : actions;
   const boundReceiver = useRef(onSessionBound); boundReceiver.current = onSessionBound;
@@ -310,8 +309,6 @@ function FamilyChat({ session, pending, transport, navigation, draftStore, draft
     if (bound) boundReceiver.current?.(session, viewId, windowViewId);
   }, [session.hostId, session.providerId, session.nativeSessionId, session.agentId, viewId, windowViewId, bound]);
   useEffect(() => { onSessionReady?.(conversation); return () => onSessionReady?.(undefined); }, [onSessionReady, conversation.sendQueuedInput, actions.sendMessage]);
-  const enabled = useContext(WorkspaceReady);
-  useWorkspaceDisplayCache(baseUrl, session, state, enabled && status === 'ready' && nativeIdentityMatches && !pending);
   const open = (destination: SessionEntry | AgentChildSessionView) => {
     if (pending) throw new Error('The session is still opening.');
     if (offline) throw new Error('The Host is offline. Reconnect it before opening a subagent.');

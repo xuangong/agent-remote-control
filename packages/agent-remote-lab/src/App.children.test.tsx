@@ -277,7 +277,7 @@ it('keeps the selected child binding when an older transport attachment finishes
   await act(async () => f.container.querySelector<HTMLButtonElement>('[data-child-session-id]')!.click());
   await act(async () => f.container.querySelector<HTMLButtonElement>('[data-testid="replace-transport"]')!.click());
   await waitForSession(f.container, 'child');
-  const savedWindow = () => Object.entries(localStorage).filter(([key]) => key.includes(':shared-window:')).map(([, value]) => JSON.parse(value) as { selectedViewId: string; views: Array<{ id: string; binding?: { nativeSessionId: string } }> })[0]!;
+  const savedWindow = () => JSON.parse(localStorage.getItem(`agent-remote:recovery:http://localhost/:shared-window:${new URL(location.href).searchParams.get('window')}`)!) as { selectedViewId: string; views: Array<{ id: string; binding?: { nativeSessionId: string } }> };
   const selectedChild = savedWindow().selectedViewId;
   expect(savedWindow().views.find(view => view.id === selectedChild)?.binding?.nativeSessionId).toBe('native-child');
   await act(async () => { f.releaseChild!(); });

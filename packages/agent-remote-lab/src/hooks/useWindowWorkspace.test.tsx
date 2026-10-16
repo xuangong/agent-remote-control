@@ -1,10 +1,10 @@
 import { WindowWorkspaceClient, WindowMutationUnknownError, WindowRequestError } from '@orchardworks/agent-remote-web';
-import { act } from 'react';
+import { act, StrictMode } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, expect, it, vi } from 'vitest';
 import { createCompositionDocument, createCompositionSlot, createAskOwner, type CompositionDocument } from '../session-composition.js';
 import { conversationLocalStorage } from '../conversation-storage.js';
-import { createWindowView, type WorkspaceWindow } from '@orchardworks/agent-remote-protocol';
+import { applyWindowOperation, createWindowView, type WorkspaceWindow } from '@orchardworks/agent-remote-protocol';
 import { useWindowWorkspace } from './useWindowWorkspace.js';
 import { WindowWorkspaces } from '../components/WindowWorkspaces.js';
 import { createServer } from 'node:http';
@@ -57,10 +57,10 @@ it('reads the current Window from a callback retained before a Window switch or 
   expect(read().unavailable).toBe(true);
   expect(captured()).toBeUndefined();
 });
-it('honors an explicit legacy session link over an unrelated cached Window', async () => {
+it('reuses its existing Window for an explicit legacy session link', async () => {
   const read = await mount('legacy-route'); const first = read().window!.id;
   await act(async () => { history.pushState(null, '', '/?host=offline&provider=codex&session=target'); dispatchEvent(new PopStateEvent('popstate')); });
-  expect(read().window!.id).not.toBe(first);
+  expect(read().window!.id).toBe(first);
   expect(read().window!.views[0]?.binding).toMatchObject({ hostId: 'offline', providerId: 'codex', nativeSessionId: 'target' });
 });
 
@@ -678,4 +678,167 @@ it('keeps a pending v1 creation payload unchanged while recovering its receipt',
   expect(recover).toHaveBeenCalledWith(window, request);
   expect(fixture.create).not.toHaveBeenCalled();
   expect(read().window?.schemaVersion).toBe(2);
+});
+
+
+it.each(['last-window', 'catalog', 'page-without-snapshot', 'page-before-last'] as const)('restores an existing hosted Window on reopen from %s without creating a duplicate', async source => {
+  const scope = `https://reopen-${source}.example/`, key = `agent-remote:recovery:${scope}:shared-window`;
+  const first = windowFixture('first'), recent = windowFixture('recent'), page = windowFixture('page');
+  const fixture = hostedWindows(first, recent, page);
+  if (source === 'last-window' || source === 'page-before-last') localStorage.setItem(`${key}:last-window`, recent.id);
+  if (source === 'page-without-snapshot' || source === 'page-before-last') sessionStorage.setItem(key, page.id);
+  const expected = source.startsWith('page-') ? page : source === 'last-window' ? recent : first;
+  const read = await mount(scope, true);
+  await vi.waitFor(async () => { await act(async () => {}); expect(read().window?.id).toBe(expected.id); });
+  expect(fixture.inspect).toHaveBeenCalledWith(expected.id);
+  expect(fixture.create).not.toHaveBeenCalled();
+  expect(new URL(location.href).searchParams.get('window')).toBe(expected.id);
+});
+
+it.each(['matching-view', 'ordinary-view', 'managed-view'] as const)('reuses the restored hosted Window for a legacy deep link with %s', async destination => {
+  const scope = `https://deep-link-${destination}.example/`;
+  const binding = (id: string) => ({ hostId: 'host', providerId: 'recorded', nativeSessionId: id, title: id });
+  const selected = { ...createWindowView('selected-dock', binding('X'), 'dock'), ...(destination === 'managed-view' ? { bindingPolicy: 'managed' as const } : {}) };
+  const existing = windowFixture('existing'); existing.selectedViewId = selected.id; existing.views.push(selected);
+  if (destination === 'matching-view') existing.views.push(createWindowView('matching-dock', binding('target'), 'dock'));
+  const fixture = hostedWindows(existing);
+  const mutate = vi.spyOn(WindowWorkspaceClient.prototype, 'mutate').mockImplementation(async (id, mutation) => {
+    const window = applyWindowOperation(fixture.documents.get(id)!, mutation.operation);
+    fixture.documents.set(id, window);
+    return { window, result: { operationId: mutation.operationId, status: 'committed', revision: window.revision, committedAt: Date.now(), expiresAt: Date.now() + 86400000 } };
+  });
+  history.replaceState(null, '', '/?host=host&provider=recorded&session=target');
+  const read = await mount(scope, true);
+  await vi.waitFor(async () => { await act(async () => {}); const window = read().window; expect(window?.id).toBe(existing.id); expect(window?.views.find(view => view.id === window.selectedViewId)?.binding?.nativeSessionId).toBe('target'); });
+  expect(fixture.create).not.toHaveBeenCalled();
+  const window = read().window!;
+  if (destination === 'matching-view') {
+    expect(window.selectedViewId).toBe('matching-dock'); expect(window.views.find(view => view.id === selected.id)?.binding?.nativeSessionId).toBe('X');
+  } else if (destination === 'ordinary-view') expect(window.selectedViewId).toBe(selected.id);
+  else {
+    expect(window.views.find(view => view.id === selected.id)).toMatchObject({ bindingPolicy: 'managed', binding: binding('X') });
+    const target = window.views.find(view => view.id === window.selectedViewId)!;
+    expect(target.id).not.toBe(selected.id); expect(target.placement).toBe('dock'); expect(target.bindingPolicy).not.toBe('managed');
+  }
+  expect(mutate).toHaveBeenCalled();
+});
+
+it('keeps an explicit missing hosted Window unavailable instead of restoring another Window on reopen', async () => {
+  const scope = 'https://explicit-missing-reopen.example/';
+  const fixture = hostedWindows(windowFixture('available'));
+  history.replaceState(null, '', '/?window=missing');
+  const read = await mount(scope, true);
+  await vi.waitFor(async () => { await act(async () => {}); expect(read().unavailable).toBe(true); });
+  expect(read().window).toBeUndefined(); expect(fixture.create).not.toHaveBeenCalled();
+  expect(new URL(location.href).searchParams.get('window')).toBe('missing');
+});
+
+it('settles a pending hosted creation receipt before restoring a nonempty catalog on reopen', async () => {
+  const scope = 'https://pending-reopen.example/', key = `agent-remote:recovery:${scope}:shared-window`;
+  const pending = windowFixture('pending'), request = { operationId: 'pending-create', issuedAt: Date.now(), window: pending };
+  sessionStorage.setItem(`${key}:pending-create`, JSON.stringify({ request, bindings: [] }));
+  const fixture = hostedWindows(windowFixture('available'), pending);
+  const recover = vi.spyOn(WindowWorkspaceClient.prototype, 'recoverCreate').mockResolvedValue({ window: pending });
+  const read = await mount(scope, true);
+  await vi.waitFor(async () => { await act(async () => {}); expect(read().window?.id).toBe(pending.id); });
+  expect(recover).toHaveBeenCalledWith(pending, request); expect(fixture.create).not.toHaveBeenCalled();
+  expect(sessionStorage.getItem(`${key}:pending-create`)).toBeNull();
+});
+
+it('renders the last local Window snapshot immediately while reopen list and inspection wait for confirmation', async () => {
+  const scope = 'https://recent-cache-reopen.example/', key = `agent-remote:recovery:${scope}:shared-window`;
+  const cached = windowFixture('recent-cached');
+  localStorage.setItem(`${key}:last-window`, cached.id);
+  localStorage.setItem(`${key}:${cached.id}`, JSON.stringify(cached));
+  const fixture = hostedWindows(cached);
+  const mutate = vi.spyOn(WindowWorkspaceClient.prototype, 'mutate');
+  let list!: () => void, inspect!: () => void;
+  fixture.list.mockImplementationOnce(() => new Promise(resolve => { list = () => resolve([cached]); }));
+  fixture.inspect.mockImplementationOnce(() => new Promise(resolve => { inspect = () => resolve({ window: cached }); }));
+  const read = await mount(scope, true);
+  expect(read().window).toEqual(cached);
+  expect(read().hasActiveWindow).toBe(false);
+  expect(fixture.changes).not.toHaveBeenCalled();
+  await act(async () => { await expect(read().operate({ type: 'rename', title: 'Unconfirmed edit' })).rejects.toThrow('synchronize'); });
+  expect(mutate).not.toHaveBeenCalled();
+  await act(async () => list());
+  await vi.waitFor(() => expect(fixture.inspect).toHaveBeenCalledWith(cached.id));
+  expect(read().window).toEqual(cached);
+  expect(read().hasActiveWindow).toBe(false);
+  await act(async () => { await expect(read().operate({ type: 'rename', title: 'Still unconfirmed' })).rejects.toThrow('synchronize'); });
+  expect(mutate).not.toHaveBeenCalled();
+  await act(async () => inspect());
+  await vi.waitFor(async () => { await act(async () => {}); expect(read().hasActiveWindow).toBe(true); });
+  expect(fixture.create).not.toHaveBeenCalled();
+});
+
+it('retains a legacy deep-link target while hosted access changes from disabled to enabled', async () => {
+  const scope = 'https://delayed-access-deep-link.example/', key = `agent-remote:recovery:${scope}:shared-window`;
+  const existing = windowFixture('access-window');
+  existing.views.push(createWindowView('target-view', { hostId: 'host', providerId: 'recorded', nativeSessionId: 'target', title: 'Target' }, 'dock'));
+  localStorage.setItem(`${key}:last-window`, existing.id);
+  localStorage.setItem(`${key}:${existing.id}`, JSON.stringify(existing));
+  const fixture = hostedWindows(existing);
+  const mutate = vi.spyOn(WindowWorkspaceClient.prototype, 'mutate').mockImplementation(async (id, mutation) => {
+    const window = applyWindowOperation(fixture.documents.get(id)!, mutation.operation); fixture.documents.set(id, window);
+    return { window, result: { operationId: mutation.operationId, status: 'committed', revision: window.revision, committedAt: Date.now(), expiresAt: Date.now() + 86400000 } };
+  });
+  history.replaceState(null, '', '/?host=host&provider=recorded&session=target');
+  const composition = createCompositionDocument(scope), element = document.createElement('div'); document.body.append(element); root = createRoot(element);
+  let current!: ReturnType<typeof useWindowWorkspace>;
+  function Harness({ enabled }: { enabled: boolean }) { current = useWindowWorkspace(scope, true, enabled, composition); return null; }
+  await act(async () => root!.render(<Harness enabled={false} />));
+  expect(fixture.list).not.toHaveBeenCalled(); expect(mutate).not.toHaveBeenCalled();
+  await act(async () => root!.render(<Harness enabled />));
+  await vi.waitFor(async () => { await act(async () => {}); expect(current.window?.id).toBe(existing.id); expect(current.window?.selectedViewId).toBe('target-view'); });
+  expect(current.window?.views.find(view => view.id === current.window?.selectedViewId)?.binding?.nativeSessionId).toBe('target');
+  expect(fixture.create).not.toHaveBeenCalled();
+});
+
+it.each([undefined, 'history'] as const)('applies a new legacy deep link after settling an older pending creation receipt (intent=%s)', async sessionIntent => {
+  const scope = `https://pending-new-deep-link-${sessionIntent ?? 'current'}.example/`, key = `agent-remote:recovery:${scope}:shared-window`;
+  const original = windowFixture('pending-original');
+  original.views[0]!.binding = { hostId: 'host', providerId: 'recorded', nativeSessionId: 'X', title: 'Original X' };
+  const request = { operationId: 'original-create', issuedAt: Date.now(), window: original };
+  const serialized = JSON.stringify(request);
+  sessionStorage.setItem(`${key}:pending-create`, JSON.stringify({ request, bindings: [] }));
+  const fixture = hostedWindows(original);
+  const recover = vi.spyOn(WindowWorkspaceClient.prototype, 'recoverCreate').mockResolvedValue({ window: original });
+  vi.spyOn(WindowWorkspaceClient.prototype, 'mutate').mockImplementation(async (id, mutation) => {
+    const window = applyWindowOperation(fixture.documents.get(id)!, mutation.operation); fixture.documents.set(id, window);
+    return { window, result: { operationId: mutation.operationId, status: 'committed', revision: window.revision, committedAt: Date.now(), expiresAt: Date.now() + 86400000 } };
+  });
+  history.replaceState(null, '', `/?host=host&provider=recorded&session=Y${sessionIntent ? '&intent=history' : ''}`);
+  const read = await mount(scope, true);
+  await vi.waitFor(async () => {
+    await act(async () => {});
+    const window = read().window;
+    expect(window?.id).toBe(original.id);
+    const target = window?.views.find(view => view.id === window.selectedViewId)?.binding;
+    expect(target?.nativeSessionId).toBe('Y');
+    expect(target?.sessionIntent).toBe(sessionIntent);
+  });
+  expect(recover).toHaveBeenCalledWith(original, request);
+  expect(JSON.stringify(recover.mock.calls[0]![1])).toBe(serialized);
+  expect(fixture.create).not.toHaveBeenCalled();
+  expect(sessionStorage.getItem(`${key}:pending-create`)).toBeNull();
+});
+
+
+it('restores a local legacy deep link once through StrictMode without a stale binding rejection', async () => {
+  const scope = 'local-strict-deep-link', key = `agent-remote:recovery:${scope}:shared-window`;
+  const existing = windowFixture('strict-existing');
+  existing.views[0]!.binding = { hostId: 'host', providerId: 'recorded', nativeSessionId: 'X', title: 'X' };
+  localStorage.setItem(`${key}:last-window`, existing.id);
+  localStorage.setItem(`${key}:${existing.id}`, JSON.stringify(existing));
+  history.replaceState(null, '', '/?host=host&provider=recorded&session=Y');
+  const composition = createCompositionDocument(scope), element = document.createElement('div'); document.body.append(element); root = createRoot(element);
+  let current!: ReturnType<typeof useWindowWorkspace>;
+  function Harness() { current = useWindowWorkspace(scope, false, true, composition); return null; }
+  await act(async () => root!.render(<StrictMode><Harness /></StrictMode>));
+  await vi.waitFor(async () => { await act(async () => {}); expect(current.window?.id).toBe(existing.id); expect(current.window?.views[0]?.binding?.nativeSessionId).toBe('Y'); });
+  expect(current.error).toBeUndefined();
+  const saved = JSON.parse(localStorage.getItem(`${key}:${existing.id}`)!);
+  expect(saved.views[0].binding.nativeSessionId).toBe('Y');
+  expect(saved.revision).toBe(1);
 });

@@ -223,3 +223,17 @@ it('rejects stale opening callbacks while the Window recovery surface is unavail
   expect(test.read().empty).toBe(true);
   expect(test.attached).not.toHaveBeenCalled(); expect(test.native).not.toHaveBeenCalled();
 }, 10000);
+
+it('does not project cached Window state or publish runtime layout changes while disabled', async () => {
+  const test = await harness(options => { options.window!.views[0]!.binding = windowSessionBinding(session); });
+  const original = structuredClone(test.options.window);
+  const slot = ensureWindowCompositionSlot(test.options.succession.document, 'window', 'main', windowSessionBinding(session));
+  slot.intent.target.native.nativeSessionId = 'unconfirmed-runtime';
+  test.options.succession.document.primary = slot.id;
+  test.options.succession.document.editRevision++;
+  await test.update();
+  expect(test.project).not.toHaveBeenCalled();
+  expect(test.native).not.toHaveBeenCalled();
+  expect(test.options.operate).not.toHaveBeenCalled();
+  expect(test.options.window).toEqual(original);
+});

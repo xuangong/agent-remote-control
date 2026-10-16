@@ -623,3 +623,165 @@ test('Track opens its session in the selected empty ordinary dock on mobile with
     expect(errors).toEqual([]);
   } finally { await fixture.close(); }
 });
+
+for (const entry of ['root', 'session deep link'] as const) test(`reopening ${entry} restores a Window until New Window is explicitly requested`, async ({ page, context }) => {
+  const fixture = await sessionLinkFixture({ automaticSignIn: true });
+  try {
+    await page.goto(fixture.url);
+    await page.getByRole('link', { name: 'Sign in', exact: true }).click();
+    await page.getByLabel('Connected Host').selectOption(fixture.hostId);
+    await showNewSession(page); await page.getByTestId('session-create').click();
+    await expect(page.locator('.lab-primary-group').getByTestId('prompt-input')).toBeEnabled();
+    const access = await (await context.request.get(fixture.url + '/auth/status')).json();
+    const endpoint = `${fixture.url}${access.basePath}v1/windows`;
+    const list = async (): Promise<WorkspaceWindow[]> => (await (await context.request.get(endpoint)).json()).windows;
+    const originalId = new URL(page.url()).searchParams.get('window')!;
+    const original = (await list()).find(window => window.id === originalId)!;
+    const originalBinding = original.views.find(view => view.binding)!.binding!;
+    const target = entry === 'root' ? originalBinding : {
+      ...originalBinding,
+      nativeSessionId: (await (await context.request.post(`${fixture.url}${access.basePath}v1/remote/hosts/${encodeURIComponent(fixture.hostId)}/create`, {
+        headers: { origin: fixture.url }, data: { providerId: 'recorded', operationId: crypto.randomUUID() },
+      })).json()).nativeSessionId as string,
+    };
+    const address = new URL(fixture.url);
+    if (entry === 'session deep link') {
+      address.searchParams.set('host', target.hostId);
+      address.searchParams.set('provider', target.providerId);
+      address.searchParams.set('session', target.nativeSessionId);
+    }
+    const creations: string[] = [];
+    context.on('request', request => {
+      if (request.method() === 'POST' && new URL(request.url()).pathname.endsWith('/v1/windows')) creations.push(request.url());
+    });
+    // New pages retain this device's local storage and authentication, but have fresh session storage.
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const reopened = await context.newPage();
+      await reopened.goto(address.href);
+      await expect.poll(() => new URL(reopened.url()).searchParams.get('window')).toBe(originalId);
+      const active = reopened.locator('.lab-primary-group[data-selected="true"]');
+      await expect(active.getByTestId('prompt-input')).toBeEnabled();
+      await expect.poll(async () => {
+        const window = (await list()).find(value => value.id === originalId)!;
+        return window.views.find(view => view.id === window.selectedViewId)?.binding?.nativeSessionId;
+      }).toBe(target.nativeSessionId);
+      expect(await list()).toHaveLength(1);
+      expect(creations).toHaveLength(0);
+      await reopened.close();
+    }
+    const panel = await openWindows(page);
+    await panel.getByRole('button', { name: 'New Window', exact: true }).click();
+    await expect.poll(async () => (await list()).length).toBe(2);
+    await expect.poll(() => new URL(page.url()).searchParams.get('window')).not.toBe(originalId);
+    expect(creations).toHaveLength(1);
+    const newestId = new URL(page.url()).searchParams.get('window')!;
+    const latest = await context.newPage();
+    await latest.goto(fixture.url);
+    await expect.poll(() => new URL(latest.url()).searchParams.get('window')).toBe(newestId);
+    await latest.close();
+    const explicit = await context.newPage();
+    const originalAddress = new URL(fixture.url); originalAddress.searchParams.set('window', originalId);
+    await explicit.goto(originalAddress.href);
+    await expect(explicit.locator(`[data-primary-group-id="${original.selectedPrimaryViewId}"]`).getByTestId('prompt-input')).toBeEnabled();
+    expect(new URL(explicit.url()).searchParams.get('window')).toBe(originalId);
+    expect(await list()).toHaveLength(2);
+    expect(creations).toHaveLength(1);
+    await explicit.close();
+  } finally { await fixture.close(); }
+});
+
+test('concurrent first root pages converge on one Window', async ({ page, context }) => {
+  const fixture = await sessionLinkFixture({ automaticSignIn: true });
+  try {
+    await page.goto(fixture.url);
+    await page.getByRole('link', { name: 'Sign in', exact: true }).click();
+    await expect.poll(() => new URL(page.url()).searchParams.get('window')).toBeTruthy();
+    const access = await (await context.request.get(fixture.url + '/auth/status')).json();
+    const endpoint = `${fixture.url}${access.basePath}v1/windows`;
+    const list = async (): Promise<WorkspaceWindow[]> => (await (await context.request.get(endpoint)).json()).windows;
+    await page.evaluate(() => { localStorage.clear(); sessionStorage.clear(); });
+    await page.close();
+    // Reset only this isolated fixture after authentication; both new pages start without a Window.
+    for (const window of await list()) {
+      const removed = await context.request.delete(`${endpoint}/${encodeURIComponent(window.id)}`, {
+        headers: { origin: fixture.url }, data: { operationId: crypto.randomUUID(), issuedAt: Date.now(), baseRevision: window.revision, operation: { type: 'delete' } },
+      });
+      expect(removed.ok(), await removed.text()).toBe(true);
+    }
+    expect(await list()).toHaveLength(0);
+    const creations: string[] = [];
+    context.on('request', request => {
+      if (request.method() === 'POST' && new URL(request.url()).pathname.endsWith('/v1/windows')) creations.push(request.url());
+    });
+    const first = await context.newPage(); const second = await context.newPage();
+    await Promise.all([first.goto(fixture.url), second.goto(fixture.url)]);
+    await expect.poll(() => new URL(first.url()).searchParams.get('window')).toBeTruthy();
+    await expect.poll(() => new URL(second.url()).searchParams.get('window')).toBe(new URL(first.url()).searchParams.get('window'));
+    await expect(first.locator('.lab-primary-group')).toBeVisible();
+    await expect(second.locator('.lab-primary-group')).toBeVisible();
+    expect(await list()).toHaveLength(1);
+    expect(creations).toHaveLength(1);
+    await first.close(); await second.close();
+  } finally { await fixture.close(); }
+});
+
+test('cold root displays cached Window layout and session messages before authority responds', async ({ page, context }) => {
+  const fixture = await sessionLinkFixture({ automaticSignIn: true });
+  let release!: () => void;
+  const barrier = new Promise<void>(resolve => { release = resolve; });
+  try {
+    await page.setViewportSize({ width: 1680, height: 1000 });
+    await page.goto(fixture.url);
+    await page.getByRole('link', { name: 'Sign in', exact: true }).click();
+    await page.getByLabel('Connected Host').selectOption(fixture.hostId);
+    await showNewSession(page); await page.getByTestId('session-create').click();
+    await expect(page.locator('.lab-primary-group')).toContainText('Recorded history 1');
+    const access = await (await context.request.get(fixture.url + '/auth/status')).json();
+    const endpoint = `${fixture.url}${access.basePath}v1/windows`;
+    const id = new URL(page.url()).searchParams.get('window')!;
+    const original: WorkspaceWindow = (await (await context.request.get(`${endpoint}/${id}`)).json()).window;
+    const dock = { ...createWindowView('cached-layout-dock', undefined, 'dock'), width: 620 };
+    const changed = await context.request.post(`${endpoint}/${id}/operations`, {
+      headers: { origin: fixture.url }, data: { operationId: crypto.randomUUID(), issuedAt: Date.now(), baseRevision: original.revision,
+        operation: { type: 'layout.apply', layout: { title: 'Cached layout', selectedPrimaryViewId: original.selectedPrimaryViewId, selectedViewId: original.selectedPrimaryViewId, views: [...original.views, dock] } } },
+    });
+    expect(changed.ok(), await changed.text()).toBe(true);
+    await expect(page.locator('[data-dock-id="cached-layout-dock"]').getByRole('separator')).toHaveAttribute('aria-valuenow', '620');
+    await expect.poll(() => page.evaluate(() => Object.keys(localStorage).some(key => key.includes(':workspace:') && localStorage.getItem(key)?.includes('Recorded history 1')))).toBe(true);
+    await page.close();
+    const reopened = await context.newPage();
+    // Mark the persisted display snapshot at cold startup, after the old page can no longer write it.
+    await reopened.addInitScript(() => {
+      for (const key of Object.keys(localStorage).filter(value => value.includes(':workspace:'))) {
+        const value = localStorage.getItem(key)!;
+        if (value.includes('Recorded history 1')) localStorage.setItem(key, value.replaceAll('Recorded history 1', 'Cached message before authority'));
+      }
+    });
+    await reopened.setViewportSize({ width: 1680, height: 1000 });
+    let blocked = 0; const creations: string[] = [];
+    reopened.on('request', request => {
+      if (request.method() === 'POST' && new URL(request.url()).pathname.endsWith('/v1/windows')) creations.push(request.url());
+    });
+    await reopened.route('**/v1/windows**', async route => {
+      const path = new URL(route.request().url()).pathname;
+      if (route.request().method() === 'GET' && /\/v1\/windows(?:\/[^/]+)?$/.test(path)) { blocked++; await barrier; }
+      await route.continue();
+    });
+    await reopened.route('**/v1/remote/hosts/*/attach', async route => { await barrier; await route.continue(); });
+    await reopened.goto(fixture.url);
+    await expect.poll(() => blocked).toBeGreaterThan(0);
+    await expect(reopened.locator('[data-dock-id="cached-layout-dock"]').getByRole('separator')).toHaveAttribute('aria-valuenow', '620');
+    await expect.poll(() => reopened.evaluate(() => Object.keys(localStorage).some(key => key.includes(':workspace:') && localStorage.getItem(key)?.includes('Cached message before authority')))).toBe(true);
+    await expect(reopened.locator('.lab-primary-group')).toContainText('Cached message before authority');
+    await reopened.screenshot({ path: `/tmp/window-reopen-cache-${test.info().project.name}.png` });
+    expect(creations).toHaveLength(0);
+    release();
+    await expect.poll(() => new URL(reopened.url()).searchParams.get('window')).toBe(id);
+    await expect(reopened.locator('.lab-primary-group').getByTestId('prompt-input')).toBeEnabled();
+    await expect(reopened.locator('.lab-primary-group')).toContainText('Recorded history 1');
+    await expect(reopened.locator('.lab-primary-group')).not.toContainText('Cached message before authority');
+    expect((await (await context.request.get(endpoint)).json()).windows).toHaveLength(1);
+    expect(creations).toHaveLength(0);
+    await reopened.close();
+  } finally { release(); await fixture.close(); }
+});

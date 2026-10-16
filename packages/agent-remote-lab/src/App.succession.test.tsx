@@ -1779,7 +1779,12 @@ it.each(['B', 'D'])('restores the selected Window owner while a new %s Window ke
   await settleApp(() => { expect(succession.document.focus).toBe(slot.id); expect(sideDraft()).toBe('Independent B draft'); });
   expect(succession.document.slots.find(value => value.id === slot.id)?.owners).toEqual(owners);
   expect(succession.ownerFor(slot.id)).toBe(askOwner);
-  await f.reload(selected);
+  await act(async () => f.view.querySelector<HTMLButtonElement>('button[aria-label="Windows"]')!.click());
+  const createWindow = [...f.view.querySelectorAll<HTMLButtonElement>('.lab-window-panel button')].find(button => button.textContent === 'New Window')!;
+  expect(createWindow).toBeDefined();
+  await act(async () => createWindow.click());
+  await settleApp(() => expect(new URL(window.location.href).searchParams.get('window')).not.toBe(windowId));
+  await act(async () => manager.onOpen({ hostId: 'host', providerId: 'recorded', nativeSessionId: selected, title: `Independent ${selected}` }));
   await settleApp(() => expect(succession.binding?.session.nativeSessionId).toBe(selected));
   expect(new URL(window.location.href).searchParams.get('window')).not.toBe(windowId);
   expect(succession.desired?.slot.id).not.toBe(slot.id); expect(succession.desired?.slot.id).not.toBe(primarySlot);

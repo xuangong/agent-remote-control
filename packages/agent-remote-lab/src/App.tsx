@@ -391,7 +391,7 @@ function AppContent({
     succession.rememberSide(session);
     setMountedViewSessions(values => JSON.stringify(values[view.id]) === JSON.stringify(session) ? values : { ...values, [view.id]: session });
   }
-  const windowSession = useWindowSessionBridge({ window: sharedWindow, unavailable: windowWorkspace.unavailable, readWindow: windowWorkspace.readWindow, operate: windowWorkspace.operate, succession, enabled: accessReady && activated && !windowWorkspace.unavailable,
+  const windowSession = useWindowSessionBridge({ window: sharedWindow, unavailable: windowWorkspace.unavailable, readWindow: windowWorkspace.readWindow, operate: windowWorkspace.operate, succession, enabled: accessReady && activated && !windowWorkspace.unavailable && (!sharedWindow || windowWorkspace.hasActiveWindow),
     onError: error => setSessionNotice(sessionConnectionFailure(error, false)) });
   const sharedSlots = windowSession.slots, sharedFamily = windowSession.family;
   const sharedViewForSlot = windowSession.viewForSlot;

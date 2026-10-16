@@ -102,11 +102,22 @@ A Window document describes:
 Management assignment and operation receipts are protected service metadata. A
 layout export must not carry credentials or grant management to its importer.
 
-The product automatically creates an ordinary Window when no Window is selected,
-including when opening a Session directly. No explicit workspace setup or naming
-step is required. Every Window uses the same durable service, committed revisions,
+The product restores an existing ordinary Window before considering creation.
+An explicit Window URL takes precedence; otherwise use the page's last selection,
+the browser's last Window, then an available service Window. Only an empty catalog
+or explicit **New Window** creates one. Session-only links open their target inside
+the restored Window without allocating another Window. An unresolved creation
+retains its original operation identity and is settled before fallback selection.
+No explicit workspace setup or naming step is required. Every Window uses the same durable service, committed revisions,
 sharing, and scoped Agent management. Changes persist through ordinary operations;
 there is no separate save action or temporary/saved lifecycle.
+
+Window structure snapshots and the last selected identity are cached locally,
+separately from session content. Cached presentation may appear before service
+confirmation, but it must not write back layout changes or establish native
+execution readiness. Session content caches retain session-scoped identity, so
+multiple Windows can reuse them. Normal concurrent first opens share a browser
+lock where supported; this does not provide cross-device creation deduplication.
 
 Refresh reuses the current Window identity. The Window list can delete an inactive
 Window; deleting the current page's active Window requires switching to or creating

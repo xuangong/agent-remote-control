@@ -13,10 +13,26 @@ determines its members. `closeWith` is a closure dependency, not membership.
 Rebinding a primary keeps the same Window and preserves independent docks.
 Attached Subagent views remain grouped with their source view.
 
-The product automatically creates a Window when none is selected. It is an
-ordinary shared Window, with no naming or save step required. Each committed
-change persists; refresh and shared links reuse its identity. **New Window**
-creates another Window. Each list row has a delete action; the current page's
+The product restores an existing Window when opening or reopening the page.
+An explicit Window URL takes precedence. Otherwise it restores the page's last
+selection, the browser's last Window, or an available Window from the service.
+It creates an ordinary shared Window only when none exists, or when the user
+chooses **New Window**. No naming or save step is required. A session-only link
+opens its target inside the restored Window, selecting an existing matching view
+or binding the selected ordinary view. If that view has a managed binding, the
+link opens a new ordinary dock instead.
+
+Window layout snapshots are cached separately from session content. Reopening
+a Window can show its cached bindings, order, widths, placement, and display
+preferences before the service responds; session content remains cached by
+session identity and can be reused across Windows. The service confirms the
+current layout before layout edits are enabled. An explicit link to a deleted
+or missing Window stays unavailable instead of silently creating a replacement.
+An unresolved creation is settled using its original operation identity before
+the page considers another creation. Concurrent first opens in the same browser
+use a browser lock when available; this is not a cross-device creation guarantee.
+
+Each list row has a delete action; the current page's
 active Window cannot be deleted. First switch to or create another Window, then
 delete the inactive one. Other pages can still have that Window open: they show
 **Window deleted** and wait for an explicit choice, without creating a replacement

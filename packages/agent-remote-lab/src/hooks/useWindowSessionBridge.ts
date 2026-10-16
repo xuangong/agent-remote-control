@@ -70,13 +70,13 @@ export function useWindowSessionBridge(options: Options) {
     return () => { cancelled = true; };
   }, [groupKey, window?.revision, primarySlot?.id, succession.document, enabled, concreteHistory, settled]);
   useEffect(() => {
-    if (!window || succession.discovering || pending.current.size) return;
+    if (!enabled || !window || succession.discovering || pending.current.size) return;
     const operation = windowSuccessionLayout(succession.document, window);
     const key = operation && JSON.stringify([window.id, window.revision, operation]);
     if (!operation || key === successionAttempt.current) return;
     successionAttempt.current = key;
     void options.operate(operation).catch(error => latest.current.onError(error));
-  }, [window?.id, window?.revision, succession.document.editRevision, succession.discovering, concreteHistory, settled]);
+  }, [window?.id, window?.revision, succession.document.editRevision, succession.discovering, concreteHistory, enabled, settled]);
 
   const openPrimary = useCallback(async (session: SessionEntry, attached?: OpenedSession, restoreLayout = false, keepOriginal?: boolean, slotId?: string, targetViewId?: string, sessionIntent?: 'history', expectedBinding?: WindowSessionBinding | null): Promise<boolean> => {
     const current = latest.current, targetWindow = current.window;

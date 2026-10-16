@@ -337,7 +337,7 @@ function FamilyChat({ session, pending, transport, navigation, draftStore, draft
   };
   const presentation = sessionPresentation?.(presentationContext);
   return <CommunicationNavigationContext.Provider value={inherited?.communication}><LabWorkbench displayBinding={familyDisplayBinding({ displayBinding, target, entries, viewId, windowViewId })} headingMode="inline" sessionManager={<><SessionLink session={target} />{controls}</>} defaultDisplayMode="content"
-    consoleCommands={consoleCommands} onExecuteConsoleCommand={onExecuteConsoleCommand} nativeTakeover={nativeTakeover}
+    sessionIdentity={presentedSession} consoleCommands={consoleCommands} onExecuteConsoleCommand={onExecuteConsoleCommand} nativeTakeover={nativeTakeover}
     childrenFor={childrenFor} onOpenChildSession={navigationActions.openChildSession}
     resolveSessionLink={id => inherited?.resolveSessionLink(id) ?? local.resolveSessionLink(id)} revealEntry={inherited?.revealEntry}
     composerNotice={availabilityError ? <p role="alert">{availabilityError}</p> : undefined}

@@ -6,6 +6,8 @@ import { replicaState } from '../test/fixtures.js';
 import { render } from '../test/setup.js';
 import { DraftStore } from '../draft-store.js';
 import type { TpmItem } from '../hooks/useTpmWork.js';
+import { SessionDescriptionsContext } from '../session-description-context.js';
+import { describeSession } from '../session-description.js';
 import { TpmWorkspace } from './TpmWorkspace.js';
 
 beforeEach(() => { vi.stubGlobal('ResizeObserver', class { observe() {} disconnect() {} }); });
@@ -21,7 +23,7 @@ it('preserves a draft when hidden, minimizes without pausing, and resolves uncer
   function Harness() {
     const trigger = useRef<HTMLButtonElement>(null);
     const [visible, setVisible] = useState(true); show = setVisible;
-    return <><button ref={trigger}>TPM</button><TpmWorkspace item={item} visible={visible} storageScope="tpm-workspace" triggerRef={trigger}
+    return <><button ref={trigger}>TPM</button><TpmWorkspace item={{ ...item, work: { ...item.work, tpmNativeSessionId: 'tpm' } }} visible={visible} storageScope="tpm-workspace" triggerRef={trigger}
       transport={{} as RemoteAgentTransport} draftBinding={{ store: drafts, key: item.key }} onClose={() => setVisible(false)} onShowList={() => setVisible(false)}
       onOpenMain={() => { mainOpened = true; }} onAction={async action => { actions.push(action); }} onResolve={async (id, resolution) => { resolutions.push({ id, resolution }); }} onRetry={() => {}} /></>;
   }
@@ -37,7 +39,8 @@ it('preserves a draft when hidden, minimizes without pausing, and resolves uncer
   expect(container.querySelector('[aria-label="Pause background follow-up"]')).toBeNull();
   await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="Plan & acceptance"]')!.click());
   expect(container.querySelector('article')?.textContent).toContain('Find matching items.');
-  await act(async () => container.querySelector<HTMLButtonElement>('[aria-label^="Open main session:"]')!.click());
+  await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="Show session attributions"]')!.click());
+  await act(async () => container.querySelector<HTMLButtonElement>('table[aria-label="Session attributions"] td button')!.click());
   expect(mainOpened).toBe(true);
   expect(resolutions).toEqual([]);
   await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="Mark uncertain as accepted"]')!.click());
@@ -76,17 +79,27 @@ it('keeps the ordinary Session View connected and its full chatbox draft across 
     },
   };
   const drafts = new DraftStore('tpm-session-retained');
+  const attachedItem: TpmItem = { ...item, work: { ...item.work, providerId: 'recorded', tpmNativeSessionId: 'tpm' } };
   let show!: (value: boolean) => void;
   function Harness() {
     const trigger = useRef<HTMLButtonElement>(null);
     const [visible, setVisible] = useState(true); show = setVisible;
-    return <><button ref={trigger}>TPM</button><TpmWorkspace item={item} visible={visible} storageScope="tpm-session-retained" triggerRef={trigger}
+    return <><button ref={trigger}>TPM</button><TpmWorkspace item={attachedItem} visible={visible} storageScope="tpm-session-retained" triggerRef={trigger}
       session={{ hostId: 'host', providerId: 'recorded', nativeSessionId: 'tpm', agentId: 'tpm-agent', title: 'Search' }}
       transport={transport} draftBinding={{ store: drafts, key: item.key }} onClose={() => setVisible(false)} onShowList={() => setVisible(false)}
       onOpenMain={() => {}} onAction={async () => { throw new Error('Presentation must not mutate work.'); }} onResolve={async () => {}} onRetry={() => {}} /></>;
   }
-  const container = await render(<Harness />);
+  const container = await render(<SessionDescriptionsContext.Provider value={{ describe: session => describeSession({ session, tpmWorks: [attachedItem] }), navigate: async () => {} }}><Harness /></SessionDescriptionsContext.Provider>);
   expect(container.textContent).toContain('Review the delivery evidence.');
+  const timeline = container.querySelector('[data-testid="timeline"]');
+  const attributionToggle = container.querySelector<HTMLButtonElement>('[aria-label="Show session attributions"]')!;
+  expect(container.querySelectorAll('[aria-label="Show session attributions"]')).toHaveLength(1);
+  await act(async () => attributionToggle.click());
+  expect(container.querySelector('table[aria-label="Session attributions"]')).not.toBeNull();
+  expect(container.querySelector('[data-testid="timeline"]')).toBe(timeline);
+  expect(connected).toBe(1);
+  expect(closes).toEqual([]);
+  await act(async () => attributionToggle.click());
   expect(container.querySelector<HTMLElement>('.lab-session-heading')!.hidden).toBe(true);
   expect(container.querySelector('[aria-label="Session view options"]')).not.toBeNull();
   expect(container.querySelector('[data-testid="prompt-submit"]')).not.toBeNull();

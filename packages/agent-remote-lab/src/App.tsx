@@ -11,6 +11,10 @@ import { WindowMenu } from './components/WindowMenu.js';
 import { useWindowVisibility } from './hooks/useWindowVisibility.js';
 import { teamViewTarget } from './team-view-binding.js';
 import { SessionViewOperationsContext } from './session-view-operations.js';
+import { SessionDescriptionsContext } from './session-description-context.js';
+import { describeSession } from './session-description.js';
+import { attributionWindowOperation } from './session-attribution-navigation.js';
+import type { SessionAttribution } from '@orchardworks/agent-remote-web';
 import { labSessionSuccessionDirectory, type SessionSuccessionDirectory } from './session-succession-directory.js';
 import { TeamViewScope, useTeamVisibility } from './hooks/useTeamVisibility.js';
 import { teamLayoutTargets } from './team-layout.js';
@@ -1117,6 +1121,7 @@ function AppContent({
   const askTriggerRef = useRef<HTMLButtonElement>(null);
   const tpmView = useTpmVisibility();
   const teamView = useTeamVisibility();
+  const [teamReveal, setTeamReveal] = useState<{ baseUrl: string; teamId: string; requestId: string }>();
   const windowView = useWindowVisibility();
   const updateTeamRoster = useCallback((baseUrl: string, teams: Team[]) => setTeamRoster({ baseUrl, teams }), []);
   const [tpmListOpen, setTpmListOpen] = useState(false);
@@ -1520,6 +1525,36 @@ function AppContent({
       communication: available ? letterNavigation(source, sourceState) : undefined,
       revealEntry: letterReveals[source.agentId],
     });
+  }
+
+  async function navigateAttribution(attribution: SessionAttribution): Promise<void> {
+    const target = attribution.target;
+    if (!target) return;
+    if (target.kind === 'group') {
+      if (target.groupType !== 'team' || teamRoster?.baseUrl !== baseUrl || !teamRoster.teams.some(team => team.id === target.groupId)) {
+        throw new Error('This group is no longer available.');
+      }
+      teamView.setVisible(true);
+      setTeamReveal({ baseUrl, teamId: target.groupId, requestId: crypto.randomUUID() });
+      return;
+    }
+    const current = windowWorkspace.readWindow();
+    setActiveView('workbench'); closeContext();
+    if (compactLayout) setInspectorOpen(false);
+    if (current) {
+      const operation = attributionWindowOperation(current, target, attribution.value, crypto.randomUUID());
+      if (operation.type === 'view.select') {
+        let view = current.views.find(view => view.id === operation.viewId);
+        while (view?.attachedTo) view = current.views.find(parent => parent.id === view!.attachedTo);
+        const feature = parseWindowFeature(view?.feature);
+        if (feature?.kind === 'ask') askView.setVisible(true);
+        if (feature?.kind === 'tpm') tpmView.setVisible(true);
+      }
+      // Navigation finishes locally; Window save state owns background persistence feedback.
+      void windowWorkspace.operate(operation).catch(() => {});
+    } else if (!await openSession({ ...target, title: attribution.value }, undefined, undefined, false, undefined, target.sessionIntent)) {
+      throw new Error('The related session could not be opened.');
+    }
   }
 
   function nextSideRequest(source: OpenedSession): number {
@@ -2022,7 +2057,11 @@ function AppContent({
       <WindowWorkspaces workspace={windowWorkspace} />
     </div>
   </main>;
-  return <SessionViewOperationsContext.Provider value={{ storageScope: baseUrl, transport, enabled: accessReady && activated, resolveTarget: (source, requested) => {
+  return <SessionDescriptionsContext.Provider value={{ describe: session => describeSession({ session,
+    sessions: [...favorites.stars, ...sessionEntries, ...tpmMainSessions.values()], forks: forkStore.all(), asks: ask.store.all(),
+    tpmWorks: tpm.works, teams: teamRoster?.baseUrl === baseUrl ? teamRoster.teams : [],
+    hostNames: new Map([['local', 'Lab server'], ...remoteHosts.map(host => [host.id, host.name] as const)]),
+  }), navigate: navigateAttribution }}><SessionViewOperationsContext.Provider value={{ storageScope: baseUrl, transport, enabled: accessReady && activated, resolveTarget: (source, requested) => {
     const roster = teamRosterRef.current;
     const member = teamViewTarget(succession.document, roster?.baseUrl === baseUrl ? roster.teams : undefined, source, requested?.viewId);
     const result = succession.resolveTarget(source, { ...requested, ...(member ? { nativePrefixOnly: true } : {}) });
@@ -2035,7 +2074,7 @@ function AppContent({
       visible={windowView.visible} inert={supportingRailOpen} />
     {userScoped && attention.trackVisible ? <SessionTrackingMenu catchUp={catchUp} tracking={tracking} teams={teamRoster?.baseUrl === baseUrl ? teamRoster.teams : []} knownSessions={[...favorites.stars, ...sessionEntries]} busy={transitioning} inert={supportingRailOpen} onOpen={item => void openTrackedSession(item)} /> : null}
     <TeamMenu visible={teamView.visible} baseUrl={baseUrl} enabled={accessReady && !!directory} hosts={remoteHosts} source={featureSource} sourceViewId={sharedWindow && presentedViewId ? `${sharedWindow.id}/${presentedViewId}` : undefined}
-      compact={compactLayout} currentSession={focusedMenuSession} onTeamsChange={updateTeamRoster}
+      compact={compactLayout} currentSession={focusedMenuSession} onTeamsChange={updateTeamRoster} reveal={teamReveal?.baseUrl === baseUrl ? teamReveal : undefined}
       onOpen={openTeamLayout} onOpenSession={target => openSession(target, undefined, undefined, false, undefined, undefined, undefined, undefined, compactLayout ? 'primary' : undefined)} />
     <TpmMenu tpm={tpm} open={tpmListOpen} onOpenChange={setTpmListOpen} mainSessions={tpmMainSessions} main={featureSource} visible={tpmView.visible} triggerRef={tpmTriggerRef} inert={supportingRailOpen} />
     <div className="lab-ask-workspaces" {...backgroundInert}>
@@ -2284,6 +2323,7 @@ function AppContent({
         <CollapsedConversations entries={sessionEntries} sessions={stackPath.slice(0, stackRange.start)} offset={0} onExpand={revealSession} />
         <ConversationPane className="lab-primary-conversation lab-session-composition" data-active={!sessionWindows.activeId || undefined} tabIndex={-1} hidden={!primaryExpanded} onFocusCapture={event => focusPrimaryContent(event.target)} onClickCapture={event => focusPrimaryContent(event.target)}>
         {windowSession.empty ? <div className="lab-empty-session-view" role="status"><p>This session view is empty.</p><button type="button" onClick={() => { setSessionPanel('new'); setContextOpen(true); setDesktopContextVisible(true); }}>New session</button>{successionProgress}</div> : <><CommunicationNavigationContext.Provider value={primaryCommunication}><LabWorkbench {...primaryNavigation}
+          sessionIdentity={stackRoot ?? succession.selected ?? activeOpened}
           operationBinding={succession.binding ? { source: succession.binding.session, historical: navigationIntent.sessionIntent === 'history', scope: { agentId: succession.binding.session.agentId, client: succession.binding.client, replica: succession.binding.replica, transport, recipient: succession.imageRecipient, isCurrent: succession.binding.isCurrent } } : undefined}
           headingMode={compactLayout ? 'toolbar' : 'inline'}
           headingStart={primaryExpanded ? <div ref={setSessionViewTarget} data-pane-selection-ignore className="lab-global-view-slot" /> : undefined}
@@ -2384,7 +2424,7 @@ function AppContent({
       <ReplicaInspector state={state} sessionStatus={status} providerName={providerName} />
     </SupportingRail>
     </WindowPresentationContext.Provider>
-  </main></RecoveryScope.Provider></PreviewScope></VscodeTunnelScope></ConversationConnectionScope.Provider></TrackViewScope.Provider></TpmViewScope.Provider></TeamViewScope.Provider></SessionDockProvider></WindowLayoutContext.Provider></WindowSessionBridgeContext.Provider></AskViewScope.Provider></SessionViewOperationsContext.Provider>;
+  </main></RecoveryScope.Provider></PreviewScope></VscodeTunnelScope></ConversationConnectionScope.Provider></TrackViewScope.Provider></TpmViewScope.Provider></TeamViewScope.Provider></SessionDockProvider></WindowLayoutContext.Provider></WindowSessionBridgeContext.Provider></AskViewScope.Provider></SessionViewOperationsContext.Provider></SessionDescriptionsContext.Provider>;
 }
 
 function PreviewScope({ client, host, polling, children }: { readonly client: HttpPreviewClient; readonly host?: RemoteHost; readonly polling: boolean; readonly children: ReactNode }) {

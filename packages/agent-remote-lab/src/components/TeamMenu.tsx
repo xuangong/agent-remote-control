@@ -13,6 +13,7 @@ interface Props {
   baseUrl: string; enabled: boolean; visible?: boolean; hosts: Host[]; source?: TeamSource;
   compact?: boolean; currentSession?: Pick<TeamSource, 'providerId' | 'nativeSessionId'> & { hostId?: string };
   sourceViewId?: string;
+  reveal?: { teamId: string; requestId: string };
   onOpen(team: Team, sourceViewId?: string): Promise<boolean>; onOpenSession(target: TeamSource & { teamId?: string; teamMemberId?: string }): Promise<boolean>;
   onTeamsChange?(baseUrl: string, teams: Team[]): void;
 }
@@ -28,10 +29,12 @@ export function TeamMenu(props: Props) {
   const [rosterClient, setRosterClient] = useState<RemoteTeamClient>();
   const [teams, setTeams] = useState<Team[]>([]), [selected, setSelected] = useState('');
   const [open, setOpen] = useState(false), [loading, setLoading] = useState(false), [busy, setBusy] = useState(false), [error, setError] = useState(''), [loadError, setLoadError] = useState('');
+  const [revealing, setRevealing] = useState(false);
   const [pendingCreate, setPendingCreate] = useState<{operationId:string;source:TeamSource;sourceViewId?:string;origin?:{windowId:string;viewId:string}}>();
 
   const { root, style, handlers } = useTrackingPosition('agent-remote:team-position');
   const trigger = useRef<HTMLButtonElement>(null);
+  const revealedRequest = useRef<string>();
   const currentClient = useRef(client); currentClient.current = client;
   const generation = useRef(0), mutating = useRef(false);
   const refresh = async () => {
@@ -68,6 +71,23 @@ export function TeamMenu(props: Props) {
   }, [baseUrl, client, rosterClient, teams, props.onTeamsChange]);
   useEffect(() => { if (!visible) setOpen(false); }, [visible]);
   useEffect(() => {
+    if (!enabled || !visible || !props.reveal) return;
+    setOpen(true); setSelected(props.reveal.teamId); setRevealing(true);
+  }, [enabled, visible, props.reveal?.teamId, props.reveal?.requestId]);
+  useEffect(() => {
+    if (!enabled || !visible || !open || !props.reveal) return;
+    const key = JSON.stringify([baseUrl, props.reveal.teamId, props.reveal.requestId]);
+    if (revealedRequest.current === key) return;
+    const row = [...root.current?.querySelectorAll<HTMLElement>('[data-team-id]') ?? []].find(row => row.dataset.teamId === props.reveal!.teamId);
+    const target = row?.querySelector<HTMLButtonElement>('.lab-session-row');
+    if (!row || !target) return;
+    for (let parent = row.parentElement; parent && root.current?.contains(parent); parent = parent.parentElement) {
+      if (parent instanceof HTMLDetailsElement) parent.open = true;
+    }
+    target.focus({ preventScroll: true }); target.scrollIntoView?.({ block: 'nearest' });
+    revealedRequest.current = key;
+  }, [baseUrl, enabled, visible, open, teams, root, props.reveal?.teamId, props.reveal?.requestId]);
+  useEffect(() => {
     if (!open) return;
     const dismiss = (event: PointerEvent) => { if (event.target instanceof Node && !root.current?.contains(event.target) && !(event.target instanceof Element && event.target.closest('[data-team-dialog]'))) setOpen(false); };
     document.addEventListener('pointerdown', dismiss); return () => document.removeEventListener('pointerdown', dismiss);
@@ -96,22 +116,22 @@ export function TeamMenu(props: Props) {
       if (!binding || binding.hostId !== input.source.hostId || binding.providerId !== input.source.providerId || binding.nativeSessionId !== input.source.nativeSessionId) return;
     }
     if (!await currentPresentation.current.onOpen(created, sourceViewId)) throw new Error('The Team layout could not be opened. Retry after the main session is ready.');
-    setSelected(created.id); setOpen(false);
+    setSelected(created.id); setOpen(false); setRevealing(false);
   }
   async function openTeam(team: Team, sourceViewId?: string) {
     if (!await props.onOpen(team, sourceViewId)) throw new Error('The Team layout could not be opened. Retry after the main session is ready.');
-    setSelected(team.id); setOpen(false);
+    setSelected(team.id); setOpen(false); setRevealing(false);
   }
   async function openSession(target: TeamSource) {
     if (!await props.onOpenSession(target)) throw new Error('The session could not be opened.');
-    setOpen(false);
+    setOpen(false); setRevealing(false);
   }
   function groups(archived: boolean) {
     const items = teams.filter(team => (team.status === 'archived') === archived);
     const keys = [...new Set(items.map(team => JSON.stringify([team.source.hostId, team.source.providerId, team.source.nativeSessionId])))];
     return keys.map(key => { const group = items.filter(team => JSON.stringify([team.source.hostId, team.source.providerId, team.source.nativeSessionId]) === key), main = group[0]!.source;
       return <section key={key} className="lab-tpm-group"><header className="lab-tpm-group-heading"><h3>{main.title}</h3><small>{hosts.find(host => host.id === main.hostId)?.name ?? main.hostId}</small></header>
-        <ul className="lab-tpm-list">{group.map(item => <TeamListItem key={item.id} team={item} selected={props.compact ? item.members.some(member => isCurrentMember(member, props.currentSession)) : selected === item.id} busy={busy}
+        <ul className="lab-tpm-list">{group.map(item => <TeamListItem key={item.id} team={item} selected={!revealing && props.compact ? item.members.some(member => isCurrentMember(member, props.currentSession)) : selected === item.id} busy={busy}
           onOpen={() => void run(() => openTeam(item))} onRename={title => run(() => change({action:'rename',teamId:item.id,title}))}
           navigation={props.compact ? <TeamSessionNavigation team={item} hosts={hosts} busy={busy} currentSession={props.currentSession} onOpen={target => void run(() => openSession(target))} /> : undefined}
           management={<TeamManagement team={item} hosts={hosts} busy={busy} failure={error} onChange={input => run(() => change(input))} onOpenSession={target => void run(() => openSession(target))} />} />)}</ul></section>;
@@ -120,7 +140,7 @@ export function TeamMenu(props: Props) {
   if (!enabled) return null;
   return <>
     <div ref={root} data-hidden={!visible || undefined} aria-hidden={!visible || undefined} style={style} {...handlers} className="lab-tracking-floating lab-team-floating" onKeyDown={event => { handlers.onKeyDown?.(event); if (event.key === 'Escape') { setOpen(false); trigger.current?.focus(); } }}>
-      <button ref={trigger} className="lab-session-popover-trigger" aria-expanded={open} aria-label="Teams" onClick={() => { setOpen(!open); void refresh().catch(error => setError(errorMessage(error))); }}><span>Team</span><span>{teams.filter(item => item.status !== 'archived').length}</span></button>
+      <button ref={trigger} className="lab-session-popover-trigger" aria-expanded={open} aria-label="Teams" onClick={() => { setOpen(!open); setRevealing(false); void refresh().catch(error => setError(errorMessage(error))); }}><span>Team</span><span>{teams.filter(item => item.status !== 'archived').length}</span></button>
       {open ? <section className="lab-session-popover-panel lab-tpm-panel" aria-label="Teams">
         <div className="lab-directory-heading"><h2>Teams</h2><button onClick={() => setOpen(false)} aria-label="Close Teams">×</button></div>
         {loading && !teams.length ? <p role="status">Loading teams…</p> : null}
@@ -155,7 +175,7 @@ function TeamListItem({ team, selected, busy, onOpen, onRename, navigation, mana
   const [editing, setEditing] = useState(false), [title, setTitle] = useState('');
   const renameButton = useRef<HTMLButtonElement>(null);
   function close() { setEditing(false); renameButton.current?.focus(); }
-  return <li>
+  return <li data-team-id={team.id}>
     <div className="lab-team-list-row">
       <button type="button" className="lab-session-row" aria-current={selected || undefined} onClick={onOpen}>
         <span className="lab-tracked-description"><strong>{team.title}</strong><small>{team.members.length} {team.members.length === 1 ? 'worker' : 'workers'}{team.status !== 'active' ? ` · ${team.status}` : ''}</small></span>

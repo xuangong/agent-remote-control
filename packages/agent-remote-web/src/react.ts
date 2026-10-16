@@ -65,3 +65,4 @@ export { TimelineSearch } from './react/TimelineSearch.js';
 export { CommunicationNavigationContext, type CommunicationNavigation } from './react/CommunicationNavigation.js';
 
 export { SessionTodoPanel, type SessionTodoPanelProps } from './react/SessionTodoPanel.js';
+export { SessionAttributions, type SessionAttributionsProps } from './react/SessionAttributions.js';

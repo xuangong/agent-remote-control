@@ -13,10 +13,16 @@ import { useSessionDisplayPreferences, type DisplayPreferenceBinding } from '../
 import { DraftRecoveryNotice } from './DraftRecoveryNotice.js';
 import { usePromptEditOperation } from '../hooks/usePromptEditOperation.js';
 import { SessionViewOperationsContext, type SessionOperationBinding } from '../session-view-operations.js';
+import { SessionDescriptionsContext } from '../session-description-context.js';
+import { describeSession } from '../session-description.js';
+import type { SessionEntry } from '../session-tree.js';
 export type { SessionViewActions as LabWorkbenchActions } from '@orchardworks/agent-remote-web/react';
 
 /** Product policy is supplied around the same session renderer used by ARDB. */
-export function LabWorkbench({ draftBinding, displayBinding, defaultDisplayMode, operationBinding, ...props }: ComponentProps<typeof SessionWorkbench> & { draftBinding?: DraftBinding; displayBinding?: DisplayPreferenceBinding; operationBinding?: SessionOperationBinding }) {
+export function LabWorkbench({ draftBinding, displayBinding, defaultDisplayMode, operationBinding, sessionIdentity, showAttributions = true, ...props }: ComponentProps<typeof SessionWorkbench> & { draftBinding?: DraftBinding; displayBinding?: DisplayPreferenceBinding; operationBinding?: SessionOperationBinding; sessionIdentity?: SessionEntry; showAttributions?: boolean }) {
+  const descriptions = useContext(SessionDescriptionsContext);
+  const source = sessionIdentity ?? operationBinding?.source;
+  const sessionDescription = showAttributions ? props.sessionDescription ?? (source ? descriptions?.describe(source) ?? describeSession({ session: source }) : undefined) : undefined;
   const trackCommand = useContext(TrackViewScope);
   const tpmCommand = useContext(TpmViewScope);
   const teamCommand = useContext(TeamViewScope);
@@ -31,6 +37,7 @@ export function LabWorkbench({ draftBinding, displayBinding, defaultDisplayMode,
   const [displayPreferences, onDisplayPreferencesChange] = useSessionDisplayPreferences(displayBinding?.scope ?? positions?.scope,
     displayBinding?.key ?? props.draftSessionKey ?? props.state?.agent?.runtimeInfo.sessionId ?? props.attachingAgentId, defaultDisplayMode);
   return <SessionWorkbench {...props}
+    sessionDescription={sessionDescription} onNavigateAttribution={props.onNavigateAttribution ?? descriptions?.navigate}
     readOnly={props.readOnly || promptEdit.recoveringDraft}
     actions={{ ...props.actions, ...(promptEdit.editPrompt ? { editPrompt: promptEdit.editPrompt } : {}) }}
     imageDraftBinding={imageBinding}

@@ -56,6 +56,44 @@ it('keeps archived Team management in the grouped floating menu',async()=>{
   expect(view.textContent).toContain('Archived');expect(view.textContent).toContain('Main project');
   await act(async()=>button(view,'Restore').click());expect(fixture.actions).toEqual([{teamId:'team',action:'restore'}]);expect(fixture.attached).toEqual([]);
 });
+it('reveals an attribution target without opening sessions and accepts repeated requests', async () => {
+  fixture.teams = [structuredClone(team)];
+  let reveal!: (requestId: string) => void;
+  function Harness() {
+    const [request, setRequest] = useState<{ teamId: string; requestId: string }>();
+    reveal = requestId => setRequest({ teamId: team.id, requestId });
+    return <TeamMenu baseUrl="https://team.test" enabled hosts={[]} reveal={request}
+      onOpen={async value => { fixture.attached.push(value.id); return true; }}
+      onOpenSession={async value => { fixture.attached.push(value.nativeSessionId); return true; }} />;
+  }
+  const view = await render(<Harness />);
+  expect(view.querySelector('section[aria-label="Teams"]')).toBeNull();
+  await act(async () => reveal('first'));
+  const target = button(view, 'Cross-platform diagnosis');
+  expect(target.getAttribute('aria-current')).toBe('true');
+  expect(document.activeElement).toBe(target);
+  expect(fixture.attached).toEqual([]);
+  expect(fixture.actions).toEqual([]);
+  await act(async () => button(view, 'Close Teams').click());
+  expect(view.querySelector('section[aria-label="Teams"]')).toBeNull();
+  await act(async () => reveal('second'));
+  expect(view.querySelector('section[aria-label="Teams"]')).not.toBeNull();
+  expect(document.activeElement).toBe(button(view, 'Cross-platform diagnosis'));
+  expect(fixture.attached).toEqual([]);
+});
+it('reveals an archived Team once its roster arrives and keeps compact navigation unchanged', async () => {
+  fixture.teams = [{ ...structuredClone(team), status: 'archived' }];
+  const opened = vi.fn(async () => true);
+  const view = await render(<TeamMenu baseUrl="https://team.test" enabled compact hosts={[]}
+    currentSession={{ hostId: 'other-host', providerId: 'fixture', nativeSessionId: 'elsewhere' }}
+    reveal={{ teamId: team.id, requestId: 'archived-target' }} onOpen={opened} onOpenSession={opened} />);
+  const target = button(view, 'Cross-platform diagnosis');
+  expect(target.getAttribute('aria-current')).toBe('true');
+  expect(target.closest('details')?.open).toBe(true);
+  expect(document.activeElement).toBe(target);
+  expect(opened).not.toHaveBeenCalled();
+  expect(view.querySelectorAll('.lab-team-session-navigation [aria-current]')).toHaveLength(0);
+});
 it('manages archive, recovery and member navigation without opening a Team layout',async()=>{
   fixture.teams=[structuredClone(team)];const view=await render(<App/>);await act(async()=>button(view,'Teams').click());
   await act(async()=>button(view,'Archive').click());expect(fixture.actions).toEqual([{teamId:'team',action:'archive'}]);

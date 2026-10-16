@@ -1,8 +1,8 @@
-import { useEffect, useLayoutEffect, useRef, useState, type RefObject, type ReactNode } from 'react';
+import { useContext, useEffect, useLayoutEffect, useRef, useState, type RefObject, type ReactNode } from 'react';
 import type { SessionTodoDecision } from '@orchardworks/agent-remote-protocol';
 import type { SessionTodoPanelProps } from '@orchardworks/agent-remote-web/react';
 import type { AgentReplica, RemoteAgentTransport } from '@orchardworks/agent-remote-web';
-import { CommunicationNavigationContext, MarkdownContent } from '@orchardworks/agent-remote-web/react';
+import { CommunicationNavigationContext, MarkdownContent, SessionAttributions } from '@orchardworks/agent-remote-web/react';
 import { useBoundDraft, type DraftBinding } from '../draft-store.js';
 import type { OpenedSession } from '../directory-client.js';
 import type { TpmAction, TpmItem } from '../hooks/useTpmWork.js';
@@ -11,6 +11,8 @@ import { useConversationSession } from '../hooks/useConversationSession.js';
 import type { SessionViewNavigationFactory } from '../session-view-navigation.js';
 import { sessionKey } from '../session-tree.js';
 import { tpmMainTarget } from '../tpm-main-sessions.js';
+import { SessionDescriptionsContext } from '../session-description-context.js';
+import { describeSession } from '../session-description.js';
 import { LabWorkbench } from './LabWorkbench.js';
 import { SessionViewPlacement } from './SessionDock.js';
 import { AskResize } from './AskResize.js';
@@ -34,6 +36,7 @@ function TpmWorkspaceContent({ item, mainTitle, session, replica, visible, stora
   onConfirmTodo?(decision: SessionTodoDecision): Promise<unknown>;
   onResolve(intentId: string, resolution: 'accepted' | 'rejected', nativeSessionId?: string): Promise<unknown>; onRetry(): void;
 }) {
+  const descriptions = useContext(SessionDescriptionsContext);
   const panel = useRef<HTMLElement>(null);
   const returnFocus = useRef<HTMLElement | null>(null);
   const [documentVisible, setDocumentVisible] = useState(false);
@@ -90,17 +93,24 @@ function TpmWorkspaceContent({ item, mainTitle, session, replica, visible, stora
   const work = item.work;
   const main = tpmMainTarget(item);
   const mainLabel = mainTitle?.trim() || main.nativeSessionId;
+  const identity = session ?? (work.tpmNativeSessionId ? { hostId: item.hostId, providerId: work.providerId, nativeSessionId: work.tpmNativeSessionId, title: work.title } : undefined);
+  const projected = identity ? descriptions?.describe(identity) ?? describeSession({ session: identity, tpmWorks: [item],
+    sessions: [{ ...main, title: mainTitle?.trim() || main.nativeSessionId }] }) : undefined;
+  const description = descriptions || !projected ? projected : { ...projected, attributions: projected.attributions.map(attribution => ({
+    ...attribution, target: attribution.target?.kind === 'session' && sessionKey(attribution.target) === sessionKey(main) ? attribution.target : undefined,
+  })) };
   const unavailable = !item.online || busy;
   const creationUnresolved = work.creationStatus === 'unknown' || work.creationStatus === 'abandoned';
   const archiveLabel = work.archived ? 'Restore TPM session' : work.phase === 'completed' ? 'Archive TPM session' : 'Stop and archive TPM session';
-  return <div className="lab-ask-viewport lab-tpm-viewport" style={{ zIndex: layer }} hidden={!visible}>
+  return <SessionAttributions description={description} onNavigate={descriptions?.navigate ?? onOpenMain}>{({ toggle, details }) => <div className="lab-ask-viewport lab-tpm-viewport" style={{ zIndex: layer }} hidden={!visible}>
     <section ref={panel} className="lab-ask-window lab-tpm-window" role="dialog" aria-label={`TPM: ${work.title}`} aria-modal="false" tabIndex={-1} onPointerDownCapture={onFocus} onFocusCapture={onFocus}>
       <header className="lab-ask-heading lab-tpm-heading"><div><span className="lab-tpm-eyebrow">TPM · {item.hostName}</span>{onRename ? <button ref={titleButton} type="button" className="lab-tpm-title-button" aria-label="Rename TPM session" title={work.title} disabled={!!unavailable || savingTitle} onClick={() => { setTitleDraft(work.title); setTitleError(undefined); setEditingTitle(true); }}><strong>{work.title}</strong><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" aria-hidden="true"><path d="m16 3 5 5-12 12-6 1 1-6ZM14 5l5 5" /></svg></button> : <strong title={work.title}>{work.title}</strong>}</div>
-        <div className="lab-ask-controls">{dockControls}<button type="button" disabled={!!unavailable} aria-label={archiveLabel} title={archiveLabel} onClick={() => run(async () => {
+        <div className="lab-ask-controls">{toggle}{dockControls}<button type="button" disabled={!!unavailable} aria-label={archiveLabel} title={archiveLabel} onClick={() => run(async () => {
           await onAction(work.archived ? 'unarchive' : 'archive');
           if (!work.archived) onShowList();
         })}><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M4 8v12h16V8M3 3h18v5H3z" /><path d={work.archived ? 'M12 17v-6m-3 3 3-3 3 3' : 'M9 12h6'} /></svg></button><button type="button" aria-label="Back to TPM works" title="Back to works" onClick={onShowList}>Works</button><button type="button" aria-label="Minimize TPM" title="Minimize TPM" onClick={onClose}>×</button></div>
       </header>
+      {details}
       {editingTitle ? <form className="lab-tpm-name-editor" onSubmit={event => { event.preventDefault(); void saveTitle(); }} onKeyDown={event => {
         if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); if (!savingTitle) cancelRename(); }
       }}>
@@ -113,7 +123,7 @@ function TpmWorkspaceContent({ item, mainTitle, session, replica, visible, stora
         {work.archived ? <span>{work.phase === 'completed' ? 'Archived' : 'Stopped · Archived'}</span> : work.paused && work.phase !== 'completed' ? <span>Work paused</span> : null}
         {!work.archived && !work.paused && work.phase !== 'completed' ? work.waiting === 'user' ? <span className="lab-tpm-needs-user">Waiting for your decision</span> : work.waiting === 'main_session' ? <span>Waiting for main-session progress</span> : null : null}
         {work.health ? <span className="lab-tpm-health">{work.health}</span> : null}{!item.online ? <span className="lab-tpm-health">Host offline</span> : null}
-        <button className="lab-tpm-main-link" type="button" aria-label={`Open main session: ${mainLabel}`} title={`${mainLabel} · ${main.providerId} · ${main.nativeSessionId}`} onClick={onOpenMain}><span>Main:</span><span className="lab-tpm-main-title">{mainLabel}</span><span aria-hidden="true">↗</span></button>
+        {!description ? <button className="lab-tpm-main-link" type="button" aria-label={`Open main session: ${mainLabel}`} title={`${mainLabel} · ${main.providerId} · ${main.nativeSessionId}`} onClick={onOpenMain}><span>Main:</span><span className="lab-tpm-main-title">{mainLabel}</span><span aria-hidden="true">↗</span></button> : null}
       </div>
       <nav className="lab-tpm-toolbar" aria-label="Work view">
         <button type="button" aria-pressed={!documentVisible} onClick={() => setDocumentVisible(false)}>Conversation</button>
@@ -155,7 +165,7 @@ function TpmWorkspaceContent({ item, mainTitle, session, replica, visible, stora
       </div>
       <AskResize label="TPM" />
     </section>
-  </div>;
+  </div>}</SessionAttributions>;
 }
 
 function TpmChat({ session, replica, transport, draftBinding, navigation, title, todo, displayBinding }: {
@@ -164,7 +174,7 @@ function TpmChat({ session, replica, transport, draftBinding, navigation, title,
 }) {
   const { state, sessionState, status, actions, questions, setQuestions, imageRecipient, operationBinding } = useConversationSession(session, transport, replica, false, { nativePrefixOnly: true });
   const { communication, ...viewNavigation } = navigation?.(session, state) ?? {};
-  return <CommunicationNavigationContext.Provider value={communication}><LabWorkbench displayBinding={displayBinding} todo={todo} defaultDisplayMode="content" headingMode="toolbar" {...viewNavigation}
+  return <CommunicationNavigationContext.Provider value={communication}><LabWorkbench showAttributions={false} displayBinding={displayBinding} todo={todo} defaultDisplayMode="content" headingMode="toolbar" {...viewNavigation}
     state={state} sessionState={sessionState} sessionStatus={status} attachingAgentId={operationBinding.source.agentId} actions={actions} operationBinding={operationBinding}
     draftSessionKey={sessionKey(session)} draftBinding={draftBinding} imageRecipient={imageRecipient} questionDrafts={questions}
     onQuestionDraftChange={(id, value) => setQuestions(current => ({ ...current, [id]: value }))}

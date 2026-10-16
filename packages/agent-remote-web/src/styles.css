@@ -974,3 +974,33 @@ body:has(.agent-image-preview[open]) { overflow: hidden; }
 .agent-resource-draft { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem; padding: 0.4rem 0.6rem; border: 1px solid var(--agent-border, #ddd); border-radius: 0.4rem; overflow-wrap: anywhere; }
 .agent-resource-draft > span:first-child { flex: 1; min-width: 0; }
 .agent-resource-draft small { display: block; opacity: 0.7; }
+
+.agent-session-attributions-toggle {
+  display: inline-grid; place-items: center; flex: 0 0 auto; width: 28px; min-height: 28px; padding: 0;
+  border: 0; border-radius: 4px; color: var(--agent-muted); background: transparent; cursor: pointer;
+}
+.agent-session-attributions-toggle:hover { color: var(--agent-ink); background: var(--agent-surface-selected); }
+.agent-session-attributions-toggle > svg { transition: transform 180ms ease; }
+.agent-session-attributions-toggle[aria-expanded="true"] > svg { transform: rotate(180deg); }
+.agent-session-attributions {
+  box-sizing: border-box; flex: 0 0 auto; min-width: 0; max-height: min(30dvh, 14rem); overflow: auto; overscroll-behavior: contain;
+  padding: 6px 16px 10px; color: var(--agent-ink); font-size: 12px; line-height: 1.5;
+}
+.agent-session-attributions table { width: 100%; max-width: 640px; margin-inline: auto; table-layout: fixed; border-collapse: collapse; }
+.agent-session-attributions :is(th, td) { padding: 3px 0; border: 0; text-align: left; vertical-align: top; overflow-wrap: anywhere; }
+.agent-session-attributions th { box-sizing: border-box; width: clamp(4rem, 22%, 6.5rem); padding-right: 12px; color: var(--agent-muted); font-weight: 400; }
+.agent-session-attribution-target {
+  display: inline-block; max-width: 100%; min-height: 24px; padding: 0; border: 0; background: transparent; color: var(--agent-action-text);
+  font: inherit; line-height: inherit; text-align: left; overflow-wrap: anywhere; cursor: pointer;
+}
+.agent-session-attribution-target > svg { margin-left: 4px; vertical-align: -1px; }
+.agent-session-attribution-target:hover { text-decoration: underline; text-underline-offset: 2px; }
+.agent-session-attribution-target:disabled { color: var(--agent-muted); background: transparent; cursor: progress; }
+.agent-session-attribution-detail, .agent-session-attribution-feedback { display: block; margin-top: 1px; color: var(--agent-muted); font-size: 11px; }
+.agent-session-attribution-feedback[role="alert"] { color: var(--agent-danger); }
+.agent-session-attributions-toggle:focus-visible, .agent-session-attribution-target:focus-visible { outline: 2px solid var(--agent-signal); outline-offset: 2px; }
+@media (pointer: coarse) {
+  .agent-session-attributions-toggle { width: 32px; min-height: 32px; }
+  .agent-session-attribution-target { min-height: 28px; }
+}
+@media (prefers-reduced-motion: reduce) { .agent-session-attributions-toggle > svg { transition: none; } }

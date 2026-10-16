@@ -1,11 +1,12 @@
-import { act, useState, type ComponentProps } from 'react';
+import { act, createRef, useState, type ComponentProps } from 'react';
 import { AgentReplica } from '@orchardworks/agent-remote-web';
+import { createWindowView } from '@orchardworks/agent-remote-protocol';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { render } from '../test/setup.js';
-import { replicaState } from '../test/fixtures.js';
 import { DraftStore } from '../draft-store.js';
 import { ForkStore, referenceForkContext } from '../session-forks.js';
 import { sessionKey } from '../session-tree.js';
+import { WindowLayoutContext, type WindowLayoutAuthority } from '../window-workspace-context.js';
 import { askParticipantKey, type AskEntry } from '../hooks/useAskConversations.js';
 import { SessionAsk } from './SessionAsk.js';
 
@@ -24,15 +25,92 @@ function fixture(entries: AskEntry[]) {
     restore, drafts: new DraftStore('session-ask-focus'), store: new ForkStore('session-ask-focus', sessionStorage),
     associationOwner: (id: string) => ({ id, sourceSlot: id, geometryScope: id, text: { scope: 'session-ask-focus', key: id }, input: { scope: 'session-ask-focus', key: id }, open: true }),
     draftBinding: (id: string) => ({ store: ask.drafts, key: id }),
-    close: vi.fn(), toggle: vi.fn(), sendInput: vi.fn(), discardInput: vi.fn(),
+    close: vi.fn(), minimize: vi.fn(), toggle: vi.fn(), sendInput: vi.fn(), discardInput: vi.fn(),
   } as unknown as AskProps['ask'];
   const props: Omit<AskProps, 'source'> = {
-    associationOwner: sessionKey(source), ask, visible: true, available: true, canRestore: false, storageScope: 'session-ask-focus',
+    associationOwner: sessionKey(source), ask, visible: true, canRestore: false, storageScope: 'session-ask-focus',
     synchronize: async () => {}, onOpen: vi.fn(), replicaFor: () => { throw new Error('A draft Ask has no native replica.'); },
-    transport: {} as AskProps['transport'], observations: {}, navigation: () => ({} as ReturnType<AskProps['navigation']>),
+    transport: {} as AskProps['transport'], navigation: () => ({} as ReturnType<AskProps['navigation']>),
+    triggerRef: createRef<HTMLButtonElement>(), onToggleEnabled: vi.fn(),
   };
   return { ask, restore, props };
 }
+
+function sharedFixture(ask: AskProps['ask'], pending = false) {
+  const primary = createWindowView('source-view', source, 'primary');
+  const other = createWindowView('sibling-view', sibling, 'primary');
+  const view = { ...createWindowView('shared-ask', { ...sibling, nativeSessionId: 'ask-target' }, 'float'), feature: { kind: 'ask', id: 'feature-ask' } };
+  const child = { ...createWindowView('ask-child', sibling, 'attached'), attachedTo: view.id };
+  const layout: WindowLayoutAuthority = { window: { schemaVersion: 2, id: 'window', title: 'Window', revision: 0,
+    selectedPrimaryViewId: primary.id, selectedViewId: primary.id, views: pending ? [primary, other] : [primary, other, view, child] }, operate: vi.fn() };
+  ask.sharedView = () => layout.window.views.find(value => value.id === view.id);
+  return { layout, view, child };
+}
+
+it('does not render a per-owner launcher when Ask is closed', async () => {
+  const { ask, props } = fixture([{ source }]);
+  ask.isOpen = () => false;
+  const container = await render(<SessionAsk {...props} source={source} />);
+  expect(container.querySelector('[aria-label="Ask about this session"]')).toBeNull();
+  expect(container.querySelector('[role="dialog"]')).toBeNull();
+});
+
+it('keeps an expanded Ask available independently of its old source launcher preference', async () => {
+  const { ask, props, restore } = fixture([{ source, restoring: true }]);
+  ask.isEnabled = () => false;
+  ask.drafts.set(sessionKey(source), 'Retained Ask question');
+  const container = await render(<SessionAsk {...props} source={source} canRestore />);
+  expect(container.querySelector<HTMLTextAreaElement>('[aria-label="Ask draft"]')?.value).toBe('Retained Ask question');
+  expect(restore).toHaveBeenCalledExactlyOnceWith(source, props.synchronize, sessionKey(source));
+});
+
+it('preserves a desktop Ask and its draft when selection moves to another source view', async () => {
+  const { ask, props } = fixture([{ source, restoring: true, restoreOnly: true }]);
+  const { layout, view } = sharedFixture(ask);
+  layout.window.selectedViewId = view.id;
+  ask.drafts.set(sessionKey(source), 'Question about Main');
+  let selectOther!: () => void;
+  function Harness() {
+    const [, update] = useState(0);
+    selectOther = () => { layout.window = { ...layout.window, selectedViewId: 'sibling-view' }; update(value => value + 1); };
+    return <WindowLayoutContext.Provider value={{ ...layout }}><SessionAsk {...props} source={source} /></WindowLayoutContext.Provider>;
+  }
+  const container = await render(<Harness />);
+  const dialog = container.querySelector('[role="dialog"]');
+  expect(container.querySelector<HTMLElement>('.lab-session-ask-surface')?.style.zIndex).toBe('2');
+  await act(async () => selectOther());
+  expect(container.querySelector('[role="dialog"]')).toBe(dialog);
+  expect(container.querySelector<HTMLTextAreaElement>('[aria-label="Ask draft"]')?.value).toBe('Question about Main');
+  expect(container.querySelector<HTMLElement>('.lab-session-ask-surface')?.style.zIndex).toBe('1');
+  await act(async () => {
+    const minimize = container.querySelector<HTMLButtonElement>('[aria-label="Minimize Ask"]')!;
+    minimize.focus(); minimize.click();
+  });
+  expect(ask.minimize).toHaveBeenCalledExactlyOnceWith(source, sessionKey(source));
+  expect(layout.operate).toHaveBeenCalledWith({ type: 'view.select', viewId: 'shared-ask' });
+});
+
+it('shows a compact Ask while its shared view is pending, then follows its selected family', async () => {
+  const { ask, props } = fixture([{ source, restoring: true, restoreOnly: true }]);
+  const { layout, view, child } = sharedFixture(ask, true);
+  let publish!: (selectedViewId: string) => void;
+  function Harness() {
+    const [, update] = useState(0);
+    publish = selectedViewId => {
+      layout.window = { ...layout.window, views: [...layout.window.views.filter(item => item.id !== view.id && item.id !== child.id), view, child], selectedViewId };
+      update(value => value + 1);
+    };
+    return <WindowLayoutContext.Provider value={{ ...layout }}><SessionAsk {...props} source={source} compact /></WindowLayoutContext.Provider>;
+  }
+  const container = await render(<Harness />);
+  expect(container.querySelector('[role="dialog"]')).not.toBeNull();
+  await act(async () => publish('source-view'));
+  expect(container.querySelector('[role="dialog"]')).toBeNull();
+  await act(async () => publish('shared-ask'));
+  expect(container.querySelector('[role="dialog"]')).not.toBeNull();
+  await act(async () => publish('ask-child'));
+  expect(container.querySelector('[role="dialog"]')).not.toBeNull();
+});
 
 it('restores multiple expanded Ask windows without moving focus or cancelling their source composition', async () => {
   const existing = await render(<input aria-label="Existing focus" />);
@@ -66,15 +144,61 @@ it('focuses an explicitly opened Ask and only minimizes the Ask containing the E
   ask.isOpen = session => sessionKey(session) === sessionKey(sibling) || open;
   function Harness() {
     const [, changed] = useState(0);
-    return <><div data-source="main"><SessionAsk {...props} state={replicaState} source={source} onOpen={() => { open = true; changed(value => value + 1); }} /></div>
+    return <><button ref={props.triggerRef} aria-label="Global Ask" onClick={() => { open = true; changed(value => value + 1); }}>Ask</button>
+      <div data-source="main"><SessionAsk {...props} source={source} /></div>
       <div data-source="side"><SessionAsk {...props} source={sibling} associationOwner={sessionKey(sibling)} /></div></>;
   }
   const container = await render(<Harness />);
-  await act(async () => { container.querySelector<HTMLButtonElement>('[data-source="main"] .lab-ask-trigger')!.click(); });
+  await act(async () => { container.querySelector<HTMLButtonElement>('[aria-label="Global Ask"]')!.click(); });
   const opened = container.querySelector('[data-source="main"] [role="dialog"]')!;
   expect(document.activeElement).toBe(opened);
   await act(async () => { opened.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })); });
-  expect(ask.close).toHaveBeenCalledExactlyOnceWith(source, sessionKey(source));
+  expect(ask.minimize).toHaveBeenCalledExactlyOnceWith(source, sessionKey(source));
+});
+
+it.each(['Escape', 'Minimize'])('returns focus to the launcher after %s removes the Ask portal', async action => {
+  const { ask, props } = fixture([{ source }]);
+  function Harness() {
+    const [open, setOpen] = useState(false);
+    ask.isOpen = () => open;
+    ask.minimize = () => setOpen(false);
+    return <><button ref={props.triggerRef} onClick={() => setOpen(true)}>Open Ask</button>
+      <SessionAsk {...props} source={source} /></>;
+  }
+  const container = await render(<Harness />);
+  const launcher = container.querySelector('button')!;
+  await act(async () => { launcher.focus(); launcher.click(); });
+  const dialog = container.querySelector<HTMLElement>('[role="dialog"]')!;
+  expect(document.activeElement).toBe(dialog);
+  await act(async () => {
+    if (action === 'Escape') dialog.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
+    else {
+      const minimize = dialog.querySelector<HTMLButtonElement>('[aria-label="Minimize Ask"]')!;
+      minimize.focus(); minimize.click();
+    }
+  });
+  expect(container.querySelector('[role="dialog"]')).toBeNull();
+  expect(document.activeElement).toBe(launcher);
+});
+
+it('preserves focus moved outside Ask while its close operation settles', async () => {
+  const { ask, props } = fixture([{ source }]);
+  function Harness() {
+    const [open, setOpen] = useState(false);
+    ask.isOpen = () => open;
+    ask.minimize = () => setOpen(false);
+    return <><button ref={props.triggerRef} onClick={() => setOpen(true)}>Open Ask</button><input aria-label="Other conversation" />
+      <SessionAsk {...props} source={source} /></>;
+  }
+  const container = await render(<Harness />);
+  await act(async () => { const launcher = container.querySelector('button')!; launcher.focus(); launcher.click(); });
+  const other = container.querySelector('input')!;
+  await act(async () => {
+    container.querySelector('[role="dialog"]')!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
+    other.focus();
+  });
+  expect(container.querySelector('[role="dialog"]')).toBeNull();
+  expect(document.activeElement).toBe(other);
 });
 
 it('retires the previous restoration when the owning workspace or transport changes', async () => {

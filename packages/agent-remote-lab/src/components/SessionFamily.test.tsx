@@ -3,7 +3,7 @@ import { expect, it, vi } from 'vitest';
 import { act, useState } from 'react';
 import { AgentReplica } from '@orchardworks/agent-remote-web';
 import type { RemoteAgentTransport } from '@orchardworks/agent-remote-web';
-import { render } from '../test/setup.js';
+import { promptText, render, setPromptText } from '../test/setup.js';
 import { replicaState } from '../test/fixtures.js';
 import type { OpenedSession, SessionDirectoryClient as DirectoryClient } from '../directory-client.js';
 import { DraftStore } from '../draft-store.js';
@@ -35,18 +35,18 @@ it('composes per-session presentation and footer from the native conversation an
   expect(context.controls).toBeDefined();
 });
 
-it('uses the primary view width alongside attached descendant widths', async () => {
+it.each(['primary', 'dock', 'float'] as const)('sizes a %s family within its placement alongside attached descendants', async placement => {
   const { WindowLayoutContext } = await import('../window-workspace-context.js');
   const { createWindowView } = await import('@orchardworks/agent-remote-protocol');
   const session = { hostId: 'local', providerId: 'recorded', nativeSessionId: 'native', agentId: 'agent', title: 'Root' };
-  const root = { ...createWindowView('primary', session, 'primary'), width: 260 };
+  const root = { ...createWindowView('primary', session, placement), width: 260 };
   const child = { ...createWindowView('child', { ...session, nativeSessionId: 'child', title: 'Child' }, 'attached'), attachedTo: root.id, width: 240 };
   const transport = { onDiagnostic: () => () => {}, onProtocolMessage: () => () => {}, connect: () => ({ close() {}, send() {} }) } as unknown as RemoteAgentTransport;
   const view = await render(<WorkspaceReady.Provider value={false}><WindowLayoutContext.Provider value={{ window: { schemaVersion: 2, id: 'window', title: 'Window', revision: 0, selectedPrimaryViewId: root.id, selectedViewId: root.id, views: [root, child] }, operate() {} }}>
     <SessionFamily attachedSession={session} target={session} viewId={root.id} storageScope="family-width" baseUrl="http://fixture" hostLabel="Local" compact={false} active offline transport={transport} draftStore={new DraftStore('family-width')} />
   </WindowLayoutContext.Provider></WorkspaceReady.Provider>);
   const panes = view.querySelectorAll<HTMLElement>('.lab-session-family-pane');
-  expect(panes[0]?.style.width).toBe('260px');
+  expect(panes[0]?.style.width).toBe(placement === 'float' ? '100%' : '260px');
   expect(panes[1]?.style.width).toBe('240px');
 });
 
@@ -280,4 +280,47 @@ it('keeps the selected child while primary heading navigation receives focus', a
   const editor = view.querySelector<HTMLElement>('.lab-primary-conversation [data-testid="prompt-input"]')!;
   await act(async () => editor.dispatchEvent(new Event('focusin', { bubbles: true })));
   expect(operate).toHaveBeenCalledExactlyOnceWith({ type: 'view.select', viewId: root.id });
+});
+
+
+it.each([false, true])('keeps the first draft editable between attachment and its native snapshot (rich: %s)', async rich => {
+  const session = { hostId: 'local', providerId: 'recorded', nativeSessionId: 'first-draft', agentId: 'first-draft-agent', title: 'New session' };
+  const transport = { onDiagnostic: () => () => {}, onProtocolMessage: () => () => {}, connect: () => ({ close() {}, send() {} }) } as unknown as RemoteAgentTransport;
+  const scope = `family-first-draft-${rich}`, key = 'first-draft-slot';
+  const drafts = new DraftStore(scope), replica = new AgentReplica();
+  let attach!: () => void;
+  function Harness() {
+    const [attached, setAttached] = useState(false); attach = () => setAttached(true);
+    return <WorkspaceReady.Provider value><SessionFamily target={session} attachedSession={attached ? session : undefined} attachmentManaged
+      storageScope={scope} baseUrl="http://fixture" hostLabel="Local" compact={false} active offline={false} transport={transport}
+      replica={replica} draftStore={drafts} draftBinding={{ store: drafts, key }} imageDraftBinding={rich ? { scope, key } : undefined} /></WorkspaceReady.Provider>;
+  }
+  const view = await render(<Harness />);
+  const editor = view.querySelector<HTMLElement>('[data-testid="prompt-input"]')!;
+  await act(async () => editor.focus());
+  expect(editor.closest('[hidden]')).toBeNull();
+  expect(document.activeElement).toBe(editor);
+  await act(async () => attach());
+  expect(view.querySelector('[data-testid="prompt-input"]')).toBe(editor);
+  expect(editor.closest('[hidden]')).toBeNull();
+  if (editor instanceof HTMLTextAreaElement) expect(editor.disabled).toBe(false);
+  else expect(editor.getAttribute('contenteditable')).toBe('true');
+  expect(document.activeElement).toBe(editor);
+  await act(async () => {
+    setPromptText(editor, '/ask');
+    editor.dispatchEvent(new Event('input', { bubbles: true }));
+  });
+  expect(drafts.get(key)).toBe('/ask');
+  expect(view.querySelector<HTMLButtonElement>('[data-testid="prompt-submit"]')!.disabled).toBe(true);
+  await act(async () => {
+    replica.applySnapshot({ protocolVersion: '1.8.0', type: 'agent_snapshot', payload: { ...replicaState.agent!, id: session.agentId,
+      runtimeInfo: { ...replicaState.agent!.runtimeInfo, sessionId: session.nativeSessionId } } });
+    replica.applyHistory({ protocolVersion: '1.8.0', type: 'timeline_page', payload: { requestId: 'history', agentId: session.agentId, epoch: 'first-draft', direction: 'tail', reset: false, staleCursor: false, gap: false, error: null,
+      window: { minSeq: 0, maxSeq: 0, nextSeq: 1 }, startCursor: null, endCursor: null, hasOlder: false, hasNewer: false, entries: [] } });
+  });
+  expect(view.querySelector('[data-testid="prompt-input"]')).toBe(editor);
+  expect(editor.closest('[hidden]')).toBeNull();
+  expect(promptText(editor)).toBe('/ask');
+  expect(drafts.get(key)).toBe('/ask');
+  expect(document.activeElement).toBe(editor);
 });

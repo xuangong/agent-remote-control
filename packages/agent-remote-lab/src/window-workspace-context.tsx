@@ -8,3 +8,5 @@ export interface WindowLayoutAuthority {
 }
 export const WindowLayoutContext = createContext<WindowLayoutAuthority | undefined>(undefined);
 export const useWindowLayout = () => useContext(WindowLayoutContext);
+/** Page-local fallback focus does not change shared selection or layout commands. */
+export const WindowPresentationContext = createContext<string | undefined>(undefined);

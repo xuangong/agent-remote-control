@@ -1,9 +1,40 @@
 import { AgentManager } from '@orchardworks/agent-remote-relay';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import { createRecordedLabProvider } from './recorded.js';
 
 describe('recorded Lab Provider', () => {
+  it.each(['create', 'resume'] as const)('executes %s session tools through validated callbacks and publishes their results', async (operation) => {
+    const { provider, controller } = createRecordedLabProvider();
+    const execute = vi.fn(async ({ query }: { query: string }) => `Source answer: ${query}`);
+    const extensions = { tools: [{
+      name: 'read_source_session', description: 'Read the fixed source.',
+      inputSchema: { type: 'object', properties: { query: { type: 'string' } }, required: ['query'], additionalProperties: false },
+      execute,
+    }] };
+    const session = operation === 'create'
+      ? await provider.createSession({ sessionId: 'tool-reader', ...extensions })
+      : await provider.resumeSession({ providerId: 'recorded', sessionId: 'tool-reader', opaque: 'recorded:tool-reader' }, extensions);
+    const iterator = session.observe()[Symbol.asyncIterator]();
+    try {
+      while ((await iterator.next()).value?.type !== 'history_boundary') {}
+      await expect(controller.executeTool('tool-reader', 'read_source_session', { query: 'source detail' })).resolves.toBe('Source answer: source detail');
+      expect(execute).toHaveBeenCalledExactlyOnceWith({ query: 'source detail' });
+      const running = await iterator.next();
+      expect(running).toMatchObject({ value: { type: 'observation', delivery: 'live', event: { type: 'timeline', item: {
+        type: 'tool_call', name: 'read_source_session', status: 'running',
+      } } } });
+      expect(await iterator.next()).toMatchObject({ value: { type: 'observation', delivery: 'live', event: { type: 'timeline', item: {
+        type: 'tool_call', name: 'read_source_session', status: 'completed',
+        result: { content: [{ type: 'text', text: 'Source answer: source detail' }] },
+      } } } });
+      await expect(controller.executeTool('tool-reader', 'read_source_session', { query: 12 })).rejects.toThrow('Invalid arguments');
+      expect(execute).toHaveBeenCalledTimes(1);
+    } finally { await session.dispose(); }
+    await expect(controller.executeTool('tool-reader', 'read_source_session', { query: 'after disposal' })).rejects.toThrow('was not found');
+    expect(execute).toHaveBeenCalledTimes(1);
+  });
+
   it('removes a disposed session from fixture controls', async () => {
     const { provider, controller } = createRecordedLabProvider();
     const session = await provider.createSession({ sessionId: 'disposed-session' });

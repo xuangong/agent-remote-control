@@ -1,5 +1,6 @@
 import { useEffect, useId, useRef, useState } from 'react';
 import type { TimelineDisplayMode } from '@orchardworks/agent-remote-web/react';
+import { useSessionMenuLayer } from '../hooks/useSessionMenuLayer.js';
 
 export interface SessionDisplayPreferences {
   mode: TimelineDisplayMode;
@@ -20,6 +21,8 @@ export function SessionViewOptions({ preferences, onChange }: {
   const id = useId();
   const container = useRef<HTMLDivElement>(null);
   const trigger = useRef<HTMLButtonElement>(null);
+  const panel = useRef<HTMLElement>(null);
+  useSessionMenuLayer(panel, trigger, open);
   useEffect(() => {
     if (!open) return;
     const dismiss = (event: PointerEvent) => {
@@ -45,7 +48,7 @@ export function SessionViewOptions({ preferences, onChange }: {
       </svg>
       <span>View</span>
     </button>
-    {open ? <section id={id} className="lab-session-view-options-panel" aria-label="Session view options" tabIndex={-1}>
+    {open ? <section ref={panel} id={id} className="lab-session-view-options-panel" aria-label="Session view options" tabIndex={-1}>
       <fieldset><legend>Display</legend>
         {modes.map(mode => <label key={mode.value}>
           <span>{mode.label}</span>

@@ -35,7 +35,7 @@ for (const engine of [chromium, webkit]) for (const width of [390, 1280]) {
       if (request.url === '/file-test.js') { response.setHeader('content-type', 'application/javascript; charset=utf-8'); response.end(browserScript); return true; }
       if (request.url === '/file-test') {
         response.setHeader('content-type', 'text/html');
-        response.end(`<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><style>${css} body { margin:0; } .test-stage { height:100dvh; } .test-chat { padding:16px; }</style><div id="root"></div><script src="/file-test.js"></script>`);
+        response.end(`<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><style>${css} body { margin:0; --agent-preview-layer:146; } .test-stage { height:100dvh; } .test-chat { padding:16px; } .test-global { position:fixed; z-index:145; right:0; top:80px; width:min(440px,100vw); height:240px; background:white; }</style><div id="root"></div><script src="/file-test.js"></script>`);
         return true;
       }
       return false;
@@ -47,16 +47,28 @@ for (const engine of [chromium, webkit]) for (const width of [390, 1280]) {
       import { AgentReplica, HttpWebSocketTransport, RemoteSessionClient } from '@orchardworks/agent-remote-web/headless';
       import { MarkdownContent } from '../../agent-remote-web/src/react/MarkdownContent.tsx';
       import { PreviewWorkspace } from '../../agent-remote-web/src/react/PreviewWorkspace.tsx';
+      import { PreviewProvider } from '../../agent-remote-web/src/react/PreviewContext.tsx';
+      import { FilePreviewScope } from '../../agent-remote-web/src/react/FilePreviewScope.tsx';
+      import { HttpPreviewClient } from '../../agent-remote-web/src/client/preview-client.ts';
       const replica = new AgentReplica();
       const client = new RemoteSessionClient(${JSON.stringify(fixture.agentId)}, new HttpWebSocketTransport(${JSON.stringify(fixture.url + fixture.alice.basePath)}), replica);
       const resolveResource = (locator, source) => client.resolveResource(locator, source);
       const requestResource = async binding => (await client.requestResource(binding.resourceId)).payload.state;
+      const previewClient = new HttpPreviewClient(${JSON.stringify(fixture.url + fixture.alice.basePath)});
       function View() {
         const state = useSyncExternalStore(callback => replica.subscribe(callback), () => replica.getState());
         const [scope, setScope] = useState('session');
-        window.switchScope = () => setScope('other');
+        const [globalScope, setGlobalScope] = useState('ask-a');
+        const [globalVisible, setGlobalVisible] = useState(false);
+        window.switchScope = () => setScope(value => value === 'session' ? 'other' : 'session');
+        window.showGlobal = () => setGlobalVisible(true);
+        window.replaceGlobal = () => setGlobalScope('ask-b');
+        window.hideGlobal = () => setGlobalVisible(false);
         const context = { scopeKey: state.agent.id, bindings: [], resources: state.resources, resolveResource, requestResource };
-        return <PreviewWorkspace className="test-stage" resourceScope={scope}><div className="test-chat"><textarea aria-label="Conversation input" /><MarkdownContent markdown={${JSON.stringify(markdown)}} resourceContext={context} /></div></PreviewWorkspace>;
+        return <PreviewProvider client={previewClient} hostId="host" canManage={false} enabled={false}>
+          {globalVisible ? <FilePreviewScope resourceScope={globalScope}><aside className="test-global"><MarkdownContent markdown="[Ask report](./docs/report.md)" resourceContext={context} /></aside></FilePreviewScope> : null}
+          <PreviewWorkspace className="test-stage" resourceScope={scope}><div className="test-chat"><textarea aria-label="Conversation input" /><MarkdownContent markdown={${JSON.stringify(markdown)}} resourceContext={context} /></div></PreviewWorkspace>
+        </PreviewProvider>;
       }
       const root = createRoot(document.getElementById('root'));
       client.subscribeStatus(status => { if (status === 'ready') root.render(<View />); });
@@ -163,6 +175,23 @@ for (const engine of [chromium, webkit]) for (const width of [390, 1280]) {
     expect((await imagePanel.boundingBox())!.width).toBeGreaterThanOrEqual(width * 0.98);
     await page.evaluate(() => (window as any).switchScope());
     await expect.poll(() => imagePanel.count()).toBe(0);
+    await page.evaluate(() => (window as any).showGlobal());
+    await page.getByRole('button', { name: 'Ask report', exact: true }).click();
+    await expect.poll(() => panel.locator('h1').textContent()).toBe('Report');
+    await page.evaluate(() => (window as any).switchScope());
+    expect(await panel.locator('h1').textContent()).toBe('Report');
+    expect(await panel.evaluate(element => {
+      const box = element.getBoundingClientRect();
+      return element.contains(document.elementFromPoint(box.right - 30, box.top + 24));
+    })).toBe(true);
+    await panel.getByRole('button', { name: 'Notes', exact: true }).click();
+    await expect.poll(() => panel.locator('h1').textContent()).toBe('Notes');
+    await page.evaluate(() => (window as any).replaceGlobal());
+    await expect.poll(() => panel.count()).toBe(0);
+    await page.getByRole('button', { name: 'Ask report', exact: true }).click();
+    await expect.poll(() => panel.locator('h1').textContent()).toBe('Report');
+    await page.evaluate(() => (window as any).hideGlobal());
+    await expect.poll(() => panel.count()).toBe(0);
     expect(fileRequests).toEqual([]);
     expect(errors).toEqual([]);
   }, 45_000);

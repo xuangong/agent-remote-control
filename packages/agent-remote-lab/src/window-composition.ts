@@ -1,4 +1,4 @@
-import { parseWindowFeature, type WindowAskSourceAnchor } from './window-feature-views.js';
+import { askFeatureView, parseWindowFeature, type WindowAskSourceAnchor } from './window-feature-views.js';
 import type { WindowSessionBridge } from './window-session-bridge-context.js';
 import type { WindowSessionBinding, WorkspaceWindow } from '@orchardworks/agent-remote-protocol';
 import { compositionOriginId, compositionRoleKey, compositionSelection, createAskOwner, createCompositionSlot, createHistorySlot, type CompositionDocument, type CompositionSlot } from './session-composition.js';
@@ -183,12 +183,16 @@ export function resolveCompositionWindowViewId(document: CompositionDocument, wi
   });
   if (direct) return direct.id;
   const askOwner = document.asks.find(owner => owner.id === localId || owner.display?.key === localId || `ask:${owner.geometryScope}` === localId);
-  if (askOwner) return window.views.find(view => {
-    const feature = parseWindowFeature(view.feature);
-    return feature?.kind === 'ask' && feature.id === askOwner.id;
-  })?.id;
+  if (askOwner) {
+    const slot = document.slots.find(slot => slot.id === askOwner.sourceSlot);
+    const source = slot && resolveSlotWindowViewId(document, window, slot);
+    return askFeatureView(window, askOwner.id, source, anchor => !!slot && windowAskSourceMatches(document, slot, anchor))?.id;
+  }
   const slot = document.slots.find(slot => slot.id === localId || slot.owners.display.key === localId);
-  if (!slot) return;
+  return slot && resolveSlotWindowViewId(document, window, slot);
+}
+
+function resolveSlotWindowViewId(document: CompositionDocument, window: WorkspaceWindow, slot: CompositionSlot): string | undefined {
   const mapped = document.windowBindings?.find(entry => entry.windowId === window.id && entry.slotId === slot.id);
   const stable = window.views.find(view => view.id === mapped?.viewId);
   if (stable) return stable.id;

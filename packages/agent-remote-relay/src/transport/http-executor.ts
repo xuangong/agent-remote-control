@@ -80,7 +80,7 @@ async function route(relay: AgentRemoteRelay, request: AgentRemoteHttpRequest, o
     return encodedResult(200, encodeProviderListResponse({
       protocolVersion: PROTOCOL_VERSION,
       type: 'provider_list',
-      payload: { providers: [...relay.listProviders()] },
+      payload: { providers: relay.listProviders().map(({ providerId, displayName }) => ({ providerId, displayName })) },
     }));
   }
 

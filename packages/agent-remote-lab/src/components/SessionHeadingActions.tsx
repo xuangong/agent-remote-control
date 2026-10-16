@@ -1,4 +1,5 @@
 import { useEffect, useId, useRef, useState, type ReactNode } from 'react';
+import { useSessionMenuLayer } from '../hooks/useSessionMenuLayer.js';
 
 /** Keeps application-supplied actions available when a Session View is narrow. */
 export function SessionHeadingActions({ children, sessionKey }: { children: ReactNode; sessionKey?: string }) {
@@ -6,6 +7,8 @@ export function SessionHeadingActions({ children, sessionKey }: { children: Reac
   const id = useId();
   const container = useRef<HTMLDivElement>(null);
   const trigger = useRef<HTMLButtonElement>(null);
+  const panel = useRef<HTMLDivElement>(null);
+  useSessionMenuLayer(panel, trigger, open);
   useEffect(() => setOpen(false), [sessionKey]);
   useEffect(() => {
     if (!open) return;
@@ -28,6 +31,6 @@ export function SessionHeadingActions({ children, sessionKey }: { children: Reac
     <button ref={trigger} type="button" className="lab-session-heading-actions-trigger"
       aria-label="More session actions" title="More session actions" aria-expanded={open} aria-controls={id}
       onClick={() => setOpen(value => !value)}>···</button>
-    <div id={id} className="lab-session-heading-actions-panel">{children}</div>
+    <div ref={panel} id={id} className="lab-session-heading-actions-panel">{children}</div>
   </div>;
 }

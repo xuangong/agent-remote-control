@@ -1,26 +1,17 @@
 .lab-session-composition {
   position: relative; isolation: isolate; width: 100%; height: 100%; min-width: 0; min-height: 0;
 }
-/* Keep portal geometry tied to its source pane without intercepting timeline input. */
+.lab-ask-workspaces {
+  position: absolute; inset: 0; grid-column: 1 / -1; grid-row: 2;
+  z-index: 145; pointer-events: none;
+}
+.lab-ask-workspaces > .lab-ask-floating { z-index: 3; }
+/* Keep page navigation above non-modal conversations and their launchers. */
+.lab-shell:has(> .lab-ask-workspaces .lab-ask-window) > :is(.lab-app-bar, .lab-mobile-navigation) { z-index: 147; }
+@media (max-width: 1180px) { .lab-ask-workspaces { grid-row: 3; } }
+/* Floating conversations share page space without intercepting the underlying views. */
 .lab-session-ask-surface { position: absolute; inset: 0; pointer-events: none; }
-.lab-ask-floating {
-  pointer-events: auto;
-  position: absolute; right: 0; top: var(--ask-dock-top, clamp(64px, 28%, 160px)); z-index: 39;
-  transform: translateX(var(--ask-dock-offset, 0px));
-}
-.lab-ask-floating[data-settling="true"] { transition: transform 240ms cubic-bezier(.2, .8, .2, 1); }
-.lab-ask-floating[data-hidden="true"] { visibility: hidden; pointer-events: none; }
-.lab-ask-trigger {
-  touch-action: none; user-select: none; cursor: grab; display: flex; align-items: center; gap: 6px; min-height: 44px;
-  padding: 8px 10px; border: 1px solid var(--obs-control-border); border-right-color: transparent; border-radius: 12px 0 0 12px;
-  background: var(--obs-surface); color: var(--obs-text); font-weight: 600;
-  box-shadow: -3px 2px 9px color-mix(in oklab, var(--obs-text) 9%, transparent);
-}
-.lab-ask-floating[data-dock="left"] .lab-ask-trigger {
-  border-right-color: var(--obs-control-border); border-left-color: transparent; border-radius: 0 12px 12px 0;
-  box-shadow: 3px 2px 9px color-mix(in oklab, var(--obs-text) 9%, transparent);
-}
-.lab-ask-floating[data-dragging="true"] .lab-ask-trigger { cursor: grabbing; border-color: var(--obs-control-border); border-radius: 12px; }
+.lab-tracking-floating.lab-ask-floating { pointer-events: auto; top: 276px; }
 .lab-ask-trigger:active:not(:disabled) { transform: none; }
 .lab-ask-trigger > svg { flex: none; color: var(--obs-action); }
 .lab-ask-trigger:focus-visible { outline: 2px solid var(--obs-action); outline-offset: -3px; }
@@ -47,16 +38,20 @@
   display: flex; align-items: center; gap: 8px; flex-wrap: nowrap; padding: 6px 10px 6px 16px;
   min-height: 48px; background: var(--obs-surface); border-bottom: 1px solid var(--obs-border);
 }
+.lab-ask-viewport[data-presentation="overlay"] > .lab-ask-window > .lab-ask-heading {
+  padding-left: max(16px, var(--ask-heading-inset-left, 0px));
+  padding-right: max(10px, var(--ask-heading-inset-right, 0px));
+}
 .lab-ask-controls { display: flex; align-items: center; gap: 4px; margin-left: auto; }
 .lab-ask-controls button { min-height: 36px; padding: 6px 10px; border-color: transparent; background: transparent; }
-.lab-ask-controls button:last-child { min-width: 36px; font-size: 22px; }
+.lab-ask-controls > button:last-child { min-width: 36px; font-size: 22px; }
 .lab-ask-draft { font-size: 16px; max-height: min(110px, 25%); }
 .lab-ask-error { flex: none; padding: 8px 12px; font-size: 12px; color: var(--obs-danger); background: var(--obs-danger-soft); max-height: 25%; overflow: auto; }
 .lab-ask-error button { margin-left: 8px; }
 .lab-ask-opening { flex: 1; min-height: 0; display: grid; place-content: center; padding: 12px; color: var(--obs-text-secondary); }
 .lab-ask-draft { margin: 10px; padding: 10px; min-width: 0; resize: none; border: 1px solid var(--obs-border); border-radius: 10px; background: var(--obs-canvas); color: var(--obs-text); }
 @keyframes ask-reveal { from { opacity: 0; } to { opacity: 1; } }
-@media (prefers-reduced-motion: reduce) { .lab-ask-window { animation: none; } .lab-ask-floating[data-settling="true"] { transition: none; } }
+@media (prefers-reduced-motion: reduce) { .lab-ask-window { animation: none; } }
 
 .lab-ask-waiting { flex: none; padding: 8px 12px; font-size: 12px; color: var(--obs-text-secondary); max-height: 20%; overflow: auto; overflow-wrap: anywhere; }
 

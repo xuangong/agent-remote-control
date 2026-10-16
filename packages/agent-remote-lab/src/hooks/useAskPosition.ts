@@ -65,8 +65,8 @@ function rememberPosition(scope: string, position?: Position, size?: WindowSize)
   entry.revision++; entry.dirty = true; entry.status = 'pending'; entry.retention = 'page'; return entry;
 }
 
-/** Ask stays within its source view, retaining that view's floating geometry when space allows. */
-export function useAskPosition(panel: RefObject<HTMLElement>, anchor: RefObject<HTMLElement>, storageScope: string, { initialOffset = 0, docked = false, belowAnchor = false }: { initialOffset?: number; docked?: boolean; belowAnchor?: boolean } = {}) {
+/** Floating conversations retain their own geometry within the containing surface. */
+export function useAskPosition(panel: RefObject<HTMLElement>, anchor: RefObject<HTMLElement>, storageScope: string, { initialOffset = 0, docked = false, belowAnchor = false, besideAnchor = false, edgeControls }: { initialOffset?: number; docked?: boolean; belowAnchor?: boolean; besideAnchor?: boolean; edgeControls?: string } = {}) {
   const shared = useWindowLayout();
   let viewId = shared?.resolveViewId?.(`ask:${storageScope}`);
   if (shared && !viewId) {
@@ -84,27 +84,38 @@ export function useAskPosition(panel: RefObject<HTMLElement>, anchor: RefObject<
     const geometryCurrent = () => savedGeometry.generation === recoveryGeneration(askGeometryRecoveryScope(storageScope));
     let floating = false;
     let manual: Position | undefined = shared ? geometry && { x: geometry.x, y: geometry.y } : savedGeometry.position;
-    let preferredSize: WindowSize | undefined = shared ? geometry && { width: geometry.width, height: geometry.height } : savedGeometry.size;
+    let preferredSize: WindowSize = (shared ? geometry && { width: geometry.width, height: geometry.height } : savedGeometry.size) ?? { width: 440, height: 560 };
     let appliedSize: WindowSize | undefined;
     let drag: { id: number; start: Position; origin: Position; moved: boolean } | undefined;
     let resize: { id: number; start: Position; origin: Position; size: WindowSize; preferred: WindowSize; moved: boolean } | undefined;
-
-    const positionWindow = (next: Position) => {
+    const controls = edgeControls ? [...document.querySelectorAll<HTMLElement>(edgeControls)] : [];
+    const availableBounds = () => {
       const bounds = viewport.getBoundingClientRect();
+      let left = margin, right = bounds.width - margin;
+      for (const control of controls) {
+        const rect = control.getBoundingClientRect();
+        if (!rect.width || !rect.height || control.closest('[hidden], [data-hidden="true"]') || getComputedStyle(control).visibility === 'hidden') continue;
+        if (rect.left <= bounds.left + 2 * margin && rect.right > bounds.left) left = Math.max(left, rect.right - bounds.left + margin);
+        if (rect.right >= bounds.right - 2 * margin && rect.left < bounds.right) right = Math.min(right, rect.left - bounds.left - margin);
+      }
+      return { left, right, height: bounds.height };
+    };
+    const positionWindow = (next: Position) => {
+      const bounds = availableBounds();
       const size = appliedSize ?? element.getBoundingClientRect();
       const point = {
-        x: Math.max(margin, Math.min(next.x, bounds.width - size.width - margin)),
+        x: Math.max(bounds.left, Math.min(next.x, bounds.right - size.width)),
         y: Math.max(margin, Math.min(next.y, bounds.height - size.height - margin)),
       };
       element.style.setProperty('--ask-left', point.x + 'px');
       element.style.setProperty('--ask-top', point.y + 'px');
       return point;
     };
-    const sizeWindow = (next: WindowSize, origin: Position = { x: margin, y: margin }) => {
-      const bounds = viewport.getBoundingClientRect();
+    const sizeWindow = (next: WindowSize, origin?: Position) => {
+      const bounds = availableBounds();
       const size = {
-        width: Math.min(Math.max(0, bounds.width - origin.x - margin), Math.max(360, next.width)),
-        height: Math.min(Math.max(0, bounds.height - origin.y - margin), Math.max(320, next.height)),
+        width: Math.min(Math.max(0, bounds.right - (origin?.x ?? bounds.left)), Math.max(360, next.width)),
+        height: Math.min(Math.max(0, bounds.height - (origin?.y ?? margin) - margin), Math.max(320, next.height)),
       };
       element.style.setProperty('--ask-width', size.width + 'px');
       element.style.setProperty('--ask-height', size.height + 'px');
@@ -128,12 +139,21 @@ export function useAskPosition(panel: RefObject<HTMLElement>, anchor: RefObject<
       const bounds = viewport.getBoundingClientRect();
       floating = bounds.width >= floatingWidth && bounds.height >= floatingHeight;
       viewport.dataset.presentation = floating ? 'floating' : 'overlay';
-      if (!floating) { clearGesture(); return; }
+      if (!floating) {
+        clearGesture();
+        const available = availableBounds();
+        element.style.setProperty('--ask-heading-inset-left', available.left + 'px');
+        element.style.setProperty('--ask-heading-inset-right', bounds.width - available.right + 'px');
+        return;
+      }
       if (drag || resize) return;
-      const size = sizeWindow(preferredSize ?? { width: 440, height: 560 });
+      const size = sizeWindow(preferredSize);
       const button = trigger.getBoundingClientRect();
+      const left = button.left + button.width / 2 - bounds.left < bounds.width / 2;
       positionWindow(manual ?? {
-        x: button.left + button.width / 2 - bounds.left < bounds.width / 2 ? margin + initialOffset : bounds.width - size.width - margin - initialOffset,
+        x: besideAnchor
+          ? left ? button.right - bounds.left + margin : button.left - bounds.left - size.width - margin
+          : left ? margin + initialOffset : bounds.width - size.width - margin - initialOffset,
         y: (belowAnchor ? button.bottom + 8 : button.top) - bounds.top + initialOffset,
       });
     };
@@ -208,6 +228,12 @@ export function useAskPosition(panel: RefObject<HTMLElement>, anchor: RefObject<
     const observer = new ResizeObserver(place);
     observer.observe(trigger);
     observer.observe(viewport);
+    const controlPositions = new MutationObserver(place);
+    for (const control of controls) {
+      observer.observe(control);
+      const launcher = control.closest('.lab-tracking-floating') ?? control.parentElement;
+      if (launcher) controlPositions.observe(launcher, { attributes: true, attributeFilter: ['style', 'hidden', 'data-hidden'] });
+    }
     element.addEventListener('pointerdown', down);
     element.addEventListener('pointermove', move);
     element.addEventListener('pointerup', finish);
@@ -216,6 +242,7 @@ export function useAskPosition(panel: RefObject<HTMLElement>, anchor: RefObject<
     element.addEventListener('keydown', keydown);
     return () => {
       observer.disconnect();
+      controlPositions.disconnect();
       element.removeEventListener('pointerdown', down);
       element.removeEventListener('pointermove', move);
       element.removeEventListener('pointerup', finish);
@@ -224,5 +251,5 @@ export function useAskPosition(panel: RefObject<HTMLElement>, anchor: RefObject<
       element.removeEventListener('keydown', keydown);
       clearGesture();
     };
-  }, [panel, anchor, storageScope, initialOffset, docked, belowAnchor, !!shared, viewId, geometry?.x, geometry?.y, geometry?.width, geometry?.height]);
+  }, [panel, anchor, storageScope, initialOffset, docked, belowAnchor, besideAnchor, edgeControls, !!shared, viewId, geometry?.x, geometry?.y, geometry?.width, geometry?.height]);
 }

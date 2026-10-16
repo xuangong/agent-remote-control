@@ -103,12 +103,14 @@ export function useImageDraft({ scope: suppliedScope, sessionKey, text, enabled,
       if (!current.dirty) { current.savedRevision = current.revision; current.result = { status: 'saved', retention: imageDraftRetention(key) }; }
       if (saved && revision === 0 && revision === current.revision) {
         savedDraftChanged = true;
-        current.draft = saved;
+        // Text recovery can outlive the rich document's delayed persistence.
+        const savedContent = saved.parts.some(part => part.type !== 'text' || part.text.length > 0);
+        current.draft = !savedContent && current.inputText ? { ...saved, parts: [{ type: 'text', text: current.inputText }] } : saved;
         for (const image of Object.values(saved.images)) {
           if (!image.blob) { image.status = 'unavailable'; image.error = 'Local image bytes are missing. Replace or remove this image.'; image.attachment = undefined; }
           else { cacheDraftImage(scope ?? '', image.imageId, image.blob, current.generation); if (image.status === 'uploading' || image.status === 'ready') image.status = 'pending'; }
         }
-        if (mounted.current && currentKey.current === entryKey) callbacks.current.onTextChange(draftText(saved.parts));
+        if (mounted.current && currentKey.current === entryKey) callbacks.current.onTextChange(draftText(current.draft.parts));
       }
     }).catch(() => { current.readFailed = true; }).finally(() => {
       current.hydrated = true;

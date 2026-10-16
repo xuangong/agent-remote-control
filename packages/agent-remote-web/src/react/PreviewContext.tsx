@@ -6,6 +6,7 @@ import type { PreviewController } from './PreviewActions.js';
 import { previewRegistrationKey, usePreviewRenewal } from './usePreviewRenewal.js';
 import { PreviewBrowser } from './PreviewBrowser.js';
 import { PreviewWorkspaceContext } from './PreviewWorkspace.js';
+import { FilePreviewProvider } from './FilePreviewScope.js';
 
 export interface PreviewContextValue extends PreviewController {
   readonly loading: boolean;
@@ -176,8 +177,10 @@ export function PreviewProvider({ client, hostId, canManage, polling = true, ena
     },
   }), [canManage, client, currentState, hostId, refresh, scope, requests, updateBrowsers]);
 
+  const browserOpen = currentBrowsers.some(entry => entry.key === activeKey);
   return <Context.Provider value={enabled ? value : undefined}><DockContext.Provider value={{ browsers: currentBrowsers, activeKey, resume: resumeBrowser, close: closeBrowser }}>
-    <PreviewWorkspaceContext.Provider value={{ open: currentBrowsers.some(entry => entry.key === activeKey), setContainer, hide: minimizeBrowser }}>
+    <PreviewWorkspaceContext.Provider value={{ open: browserOpen, setContainer, hide: minimizeBrowser }}>
+    <FilePreviewProvider browserOpen={browserOpen} onOpenFile={minimizeBrowser}>
     {children}
     {currentBrowsers.map(browser => {
       const selected = browser.registration ?? currentState.registrations.find(item => item.id === browser.id);
@@ -191,7 +194,7 @@ export function PreviewProvider({ client, hostId, canManage, polling = true, ena
         url={browser.url} target={browser.target} notice={notice} error={unavailable ?? browser.error} returnFocus={browser.returnFocus}
         onMinimize={minimizeBrowser} onClose={() => closeBrowser(browser.key)} />;
     })}
-  </PreviewWorkspaceContext.Provider></DockContext.Provider></Context.Provider>;
+  </FilePreviewProvider></PreviewWorkspaceContext.Provider></DockContext.Provider></Context.Provider>;
 }
 
 export function PreviewDock({ sessionId }: { readonly sessionId?: string }) {

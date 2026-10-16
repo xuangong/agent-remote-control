@@ -1,5 +1,4 @@
-.lab-tracking-floating.lab-window-floating { top: calc(168px + env(safe-area-inset-top, 0px)); z-index: 96; }
-.lab-window-floating[data-open="true"] { z-index: 148; }
+.lab-tracking-floating.lab-window-floating { top: calc(168px + env(safe-area-inset-top, 0px)); z-index: 146; }
 .lab-window-floating[data-hidden="true"] { visibility: hidden; pointer-events: none; }
 .lab-window-floating .lab-window-panel { display: flex; flex-direction: column; overflow: hidden; padding: 12px; }
 .lab-window-panel > .lab-directory-heading { flex: none; }

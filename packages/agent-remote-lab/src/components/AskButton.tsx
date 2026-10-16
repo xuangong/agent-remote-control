@@ -1,23 +1,23 @@
-import { useRef, type RefObject } from 'react';
+import type { RefObject } from 'react';
 import { observationLabel, type SessionObservation } from '../tracking-state.js';
-import { useAskDock } from '../hooks/useAskDock.js';
+import { useTrackingPosition } from '../hooks/useTrackingPosition.js';
 
-export function AskButton({ observation, hidden, disabled, onOpen, triggerRef, storageScope }: {
-  triggerRef: RefObject<HTMLButtonElement>; observation?: SessionObservation; hidden: boolean; disabled: boolean; storageScope: string; onOpen(): void;
+export function AskButton({ observation, sourceTitle, disabled, onOpen, triggerRef }: {
+  triggerRef: RefObject<HTMLButtonElement>; observation?: SessionObservation; sourceTitle?: string; disabled: boolean; onOpen(): void;
 }) {
-  const dock = useRef<HTMLDivElement>(null);
-  useAskDock(dock, triggerRef, storageScope, hidden || disabled);
+  const { root, style, handlers } = useTrackingPosition('agent-remote:ask-position');
   const ready = observation?.connection === 'ready';
   const activity = ready ? observation.activity : undefined;
   const alert = ready ? observation.attention : undefined;
   const status = activity === 'running' ? 'working' : activity === 'waiting' || activity === 'starting' ? 'pending' : activity === 'idle' ? 'idle' : 'unknown';
-  const label = observation ? observationLabel(observation) : 'Ask about this conversation';
-  return <div ref={dock} className="lab-ask-floating" data-hidden={hidden || undefined} aria-hidden={hidden || undefined}
+  const label = sourceTitle ? `Ask about ${sourceTitle}${observation ? ` · ${observationLabel(observation)}` : ''}`
+    : disabled ? 'Select a session to use Ask' : 'Ask about the selected session';
+  return <div ref={root} style={style} {...handlers} className="lab-tracking-floating lab-ask-floating" data-pane-selection-ignore
     data-status={status} data-alert={alert}>
-    <button ref={triggerRef} className="lab-ask-trigger" type="button" aria-label="Ask about this session" aria-haspopup="dialog" aria-expanded={hidden}
-      tabIndex={hidden ? -1 : undefined} disabled={disabled} onClick={onOpen}
+    <button ref={triggerRef} className="lab-session-popover-trigger lab-ask-trigger" type="button" aria-label="Ask about this session" aria-haspopup="dialog"
+      disabled={disabled} onClick={onOpen}
       aria-keyshortcuts="ArrowLeft ArrowRight ArrowUp ArrowDown"
-      aria-description="Drag anywhere in this session and release to dock at that height. Left and right arrow keys choose an edge; up and down move vertically."
+      aria-description="Drag to move, or focus and use arrow keys."
       title={label}>
       <svg width="17" height="17" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
         <path d="M16.5 9.2a6.5 6.5 0 0 1-9.3 5.9L3 16l.9-4.2a6.5 6.5 0 1 1 12.6-2.6Z" />

@@ -1,6 +1,22 @@
-import { expect, test } from '@playwright/test';
+import { expect, test, type Page } from '@playwright/test';
 import { showNewSession } from './session-navigation';
 import { activateComposerAction, revealComposerAction } from './composer-actions';
+
+async function createSourceAndOpenAsk(page: Page) {
+  await showNewSession(page);
+  const created = page.waitForResponse(response => new URL(response.url()).pathname.endsWith('/create'));
+  await page.getByTestId('session-create').click();
+  expect((await created).ok()).toBe(true);
+  await expect(page).toHaveTitle('New session · Agent Remote Control');
+  const primary = page.locator('.lab-primary-conversation > .lab-session-view');
+  const input = primary.getByTestId('prompt-input');
+  await expect(input).toBeEnabled();
+  await input.fill('/ask');
+  await expect(primary.getByTestId('prompt-submit')).toBeEnabled();
+  await input.press('Enter');
+  await page.getByRole('button', { name: 'Ask about this session', exact: true }).click();
+  return primary;
+}
 
 for (const running of [false, true]) test(`Ask exposes shared composer controls while ${running ? 'working' : 'idle'} without moving the conversation or losing its draft`, async ({ page }, info) => {
   let primaryAgent: string | undefined;
@@ -24,13 +40,7 @@ for (const running of [false, true]) test(`Ask exposes shared composer controls 
     });
   });
   await page.goto('/');
-  await showNewSession(page);
-  await page.getByTestId('session-create').click();
-  const primary = page.locator('.lab-primary-conversation > .lab-session-view');
-  await expect(primary.getByTestId('prompt-input')).toBeEnabled();
-  await primary.getByTestId('prompt-input').fill('/ask');
-  await primary.getByTestId('prompt-input').press('Enter');
-  await page.getByRole('button', { name: 'Ask about this session', exact: true }).click();
+  await createSourceAndOpenAsk(page);
   const ask = page.getByRole('dialog', { name: 'Ask', exact: true });
   const input = ask.getByTestId('prompt-input');
   await expect(input).toBeEnabled();
@@ -103,35 +113,32 @@ for (const running of [false, true]) test(`Ask exposes shared composer controls 
   await expect(ask).toHaveCount(0);
 });
 
-test('Ask handles Escape within its own settings and window without dismissing background session settings', async ({ page }) => {
+test('Ask handles Escape within its own settings and window without dismissing background session settings', async ({ page, isMobile }) => {
   await page.goto('/');
-  await showNewSession(page);
-  await page.getByTestId('session-create').click();
-  const primary = page.locator('.lab-primary-conversation > .lab-session-view');
-  const primaryInput = primary.getByTestId('prompt-input');
-  await expect(primaryInput).toBeEnabled();
-  await primaryInput.fill('/ask');
-  await primaryInput.press('Enter');
+  const primary = await createSourceAndOpenAsk(page);
   const openAsk = page.getByRole('button', { name: 'Ask about this session', exact: true });
-  await openAsk.click();
   const ask = page.getByRole('dialog', { name: 'Ask', exact: true });
   await expect(ask.getByTestId('prompt-input')).toBeEnabled();
   await ask.getByRole('button', { name: 'Minimize Ask' }).click();
 
   await activateComposerAction(primary, 'Model');
-  const backgroundSettings = primary.getByRole('region', { name: 'Model settings', exact: true });
+  const backgroundSettings = primary.getByRole('region', { name: 'Model settings', exact: true, includeHidden: true });
+  const expectBackgroundSettingsOpen = async () => {
+    await expect(backgroundSettings).toHaveJSProperty('hidden', false);
+    if (!isMobile) await expect(backgroundSettings).toBeVisible();
+  };
   await expect(backgroundSettings).toBeVisible();
   await openAsk.focus();
   await openAsk.press('Enter');
   await expect(ask).toBeFocused();
-  await expect(backgroundSettings).toBeVisible();
+  await expectBackgroundSettingsOpen();
 
   const askModel = await activateComposerAction(ask, 'Model', true);
   const askSettings = ask.getByRole('region', { name: 'Model settings', exact: true });
   await expect(askSettings).toBeVisible();
   await page.keyboard.press('Escape');
   await expect(askSettings).toBeHidden();
-  await expect(backgroundSettings).toBeVisible();
+  await expectBackgroundSettingsOpen();
   await expect(askModel).toBeFocused();
 
   await ask.press('Escape');
@@ -140,17 +147,11 @@ test('Ask handles Escape within its own settings and window without dismissing b
   await expect(openAsk).toBeFocused();
 });
 
-test('Ask opens a usable shared file preview while staying inside its resized source', async ({ page, isMobile }) => {
+test('Ask opens a usable shared file preview while staying inside the page', async ({ page, isMobile }) => {
   test.skip(isMobile, 'Desktop previews share the non-modal workspace.');
   await page.setViewportSize({ width: 1440, height: 1000 });
   await page.goto('/');
-  await showNewSession(page);
-  await page.getByTestId('session-create').click();
-  const input = page.locator('.lab-primary-conversation > .lab-session-view').getByTestId('prompt-input');
-  await expect(input).toBeEnabled();
-  await input.fill('/ask');
-  await input.press('Enter');
-  await page.getByRole('button', { name: 'Ask about this session', exact: true }).click();
+  await createSourceAndOpenAsk(page);
   const ask = page.getByRole('dialog', { name: 'Ask', exact: true });
   await expect(ask.getByTestId('prompt-input')).toBeEnabled();
   const file = ask.getByRole('button', { name: 'lab-proof.txt', exact: true });
@@ -163,7 +164,7 @@ test('Ask opens a usable shared file preview while staying inside its resized so
     return element.contains(document.elementFromPoint(rect.x + rect.width / 2, rect.y + rect.height / 2));
   })).toBe(true);
   await expect.poll(() => ask.evaluate(element => {
-    const rect = element.getBoundingClientRect(), owner = element.closest('.lab-session-composition')!.getBoundingClientRect();
+    const rect = element.getBoundingClientRect(), owner = element.closest('.lab-ask-workspaces')!.getBoundingClientRect();
     return rect.x >= owner.x && rect.y >= owner.y && rect.right <= owner.right && rect.bottom <= owner.bottom;
   })).toBe(true);
   await preview.getByRole('button', { name: 'Close file preview' }).click();

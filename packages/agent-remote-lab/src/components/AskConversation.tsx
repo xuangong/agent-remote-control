@@ -8,6 +8,8 @@ import type { SessionFork } from '../session-forks.js';
 import { useAskPosition } from '../hooks/useAskPosition.js';
 import { askCommand } from '../fork-actions.js';
 import { SessionFamily } from './SessionFamily.js';
+import { SessionHeadingActions } from './SessionHeadingActions.js';
+import { SessionLink } from './SessionLink.js';
 import { SessionViewPlacement } from './SessionDock.js';
 import { AskResize } from './AskResize.js';
 import type { ImageDraftBinding, ImageDraftRecipient } from '@orchardworks/agent-remote-web/browser';
@@ -28,43 +30,50 @@ function AskConversationContent({ docked, dockControls, entry, replica, transpor
 }) {
   const panel = useRef<HTMLElement>(null);
   const returnFocus = useRef<HTMLElement | null>(null);
+  const closingWithFocus = useRef(false);
   const busy = !!entry.busy || !!entry.restoring;
-  useAskPosition(panel, triggerRef, storageScope, { docked });
+  const close = useCallback(() => {
+    closingWithFocus.current = !!panel.current?.contains(document.activeElement);
+    onClose();
+  }, [onClose]);
+  useAskPosition(panel, triggerRef, storageScope, { docked, besideAnchor: true, edgeControls: '.lab-tracking-floating .lab-session-popover-trigger' });
   useEffect(() => {
     const dismiss = (event: KeyboardEvent) => {
       if (event.key !== 'Escape' || event.defaultPrevented || !(event.target instanceof Node) || !panel.current?.contains(event.target)) return;
       event.preventDefault();
-      onClose();
+      close();
     };
     window.addEventListener('keydown', dismiss);
     return () => window.removeEventListener('keydown', dismiss);
-  }, [onClose]);
+  }, [close]);
   useLayoutEffect(() => {
     const previous = document.activeElement;
     const element = panel.current;
     if (!element?.contains(previous)) returnFocus.current = previous instanceof HTMLElement && previous !== document.body ? previous : triggerRef.current;
     if (!entry.restoring && !entry.restoreOnly) element?.focus({ preventScroll: true });
     return () => {
-      if (!element?.contains(document.activeElement)) return;
+      if (!closingWithFocus.current && !element?.contains(document.activeElement)) return;
       const target = returnFocus.current;
-      // The minimized trigger becomes visible after the unmount commit.
+      // Restore focus after the conversation releases its controls.
       queueMicrotask(() => {
         if (document.activeElement === document.body && target?.isConnected) target.focus({ preventScroll: true });
       });
     };
   }, [triggerRef]);
-  const tools = <div className="lab-ask-controls">{dockControls}
+  const tools = <div className="lab-ask-controls"><SessionHeadingActions sessionKey={storageScope}>{dockControls}
     <button type="button" aria-label="Clean Ask" title="Start a fresh Ask conversation" disabled={busy || !!entry.inputs?.length} onClick={onClean}>Clean</button>
-    <button type="button" aria-label="Minimize Ask" title="Minimize Ask" onClick={onClose}>×</button>
+    </SessionHeadingActions>
+    <button type="button" aria-label="Minimize Ask" title="Minimize Ask" onClick={close}>×</button>
   </div>;
-  return <div className="lab-ask-viewport"><section className="lab-ask-window" role="dialog" aria-label="Ask" aria-modal="false" tabIndex={-1} ref={panel}>
-    {entry.inputs?.length ? <div className="lab-ask-waiting" role="status">Waiting to send: {entry.inputs.map(input => <div key={input.id}>
+  const notice = <>{entry.inputs?.length ? <div className="lab-ask-waiting" role="status">Waiting to send: {entry.inputs.map(input => <div key={input.id}>
       {input.text}<button type="button" aria-label="Discard saved question" onClick={() => onDiscardInput(input.id)}>Discard</button>
     </div>)}</div> : null}
-    {entry.error ? <div className="lab-ask-error" role="alert">{entry.error}<button type="button" disabled={busy} onClick={onRetry}>Retry</button></div> : null}
+    {entry.error ? <div className="lab-ask-error" role="alert">{entry.error}<button type="button" disabled={busy} onClick={onRetry}>Retry</button></div> : null}</>;
+  return <div className="lab-ask-viewport"><section className="lab-ask-window" role="dialog" aria-label="Ask" aria-modal="false" tabIndex={-1} ref={panel}>
     {isAskAttached(entry) ? <AskChat key={askParticipantKey(entry.record!)} record={entry.record!} executionTarget={entry.executionTarget} inputs={entry.error ? undefined : entry.inputs} onSendInput={onSendInput} replica={replica} transport={transport}
-      storageScope={storageScope} navigation={navigation} onToggleEnabled={onToggleEnabled} busy={busy} draftBinding={draftBinding} tools={tools} {...storageBindings} /> : <>
+      storageScope={storageScope} navigation={navigation} onToggleEnabled={onToggleEnabled} busy={busy} draftBinding={draftBinding} tools={tools} notice={notice} {...storageBindings} /> : <>
       <header className="lab-ask-heading"><strong>Ask</strong>{tools}</header>
+      {notice}
       {busy || !entry.error ? <div className="lab-ask-opening" role="status">{busy ? 'Opening Ask…' : 'Ask about this conversation.'}</div> : null}
       <AskDraft binding={draftBinding} />
     </>}
@@ -72,10 +81,10 @@ function AskConversationContent({ docked, dockControls, entry, replica, transpor
   </section></div>;
 }
 
-function AskChat({ storageScope, record, executionTarget, inputs, onSendInput, replica, transport, draftBinding, tools, busy, onToggleEnabled, navigation, ...storageBindings }: AskStorageBindings & {
+function AskChat({ storageScope, record, executionTarget, inputs, onSendInput, replica, transport, draftBinding, tools, notice, busy, onToggleEnabled, navigation, ...storageBindings }: AskStorageBindings & {
   storageScope: string; navigation?: SessionViewNavigationFactory;
   onToggleEnabled(): void; record: SessionFork; executionTarget?: import('../directory-client.js').OpenedSession; inputs?: AskInput[]; onSendInput(id: string, send: AskInputSender): void; replica?: AgentReplica; transport: RemoteAgentTransport;
-  draftBinding: DraftBinding; tools: ReactNode; busy?: boolean;
+  draftBinding: DraftBinding; tools: ReactNode; notice: ReactNode; busy?: boolean;
 }) {
   const session = executionTarget ?? record.target!;
   const sendMessage = useRef<ReturnType<typeof useConversationSession>['actions']['sendMessage']>(undefined);
@@ -87,6 +96,7 @@ function AskChat({ storageScope, record, executionTarget, inputs, onSendInput, r
     replica={replica} onSessionReady={onSessionReady} attachedSession={session} target={{ hostId: session.hostId ?? 'local', providerId: session.providerId, nativeSessionId: session.nativeSessionId, title: 'Ask' }} hostLabel={session.hostId ?? 'local'}
     compact={storageBindings.compact ?? false} active offline={false} nativePrefixOnly transport={transport}
     draftStore={draftBinding.store} draftBinding={draftBinding} navigation={navigation} controls={tools} {...storageBindings}
+    sessionPresentation={context => context.isRoot ? { headingStart: <SessionLink session={context.session} />, sessionManager: tools, composerNotice: notice } : {}}
     consoleCommands={[askCommand]} onExecuteConsoleCommand={async (_id, args) => {
       if (args.trim()) {
         if (!sendMessage.current) throw new Error('Wait for Ask to finish synchronizing.');

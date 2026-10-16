@@ -1,4 +1,5 @@
 import type { AgentHistoryQuery, AgentHistoryPage } from '@orchardworks/agent-provider-sdk';
+import { bindAgentSessionTools, boundToolResult } from '@orchardworks/agent-provider-sdk';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 
 import type {
@@ -9,6 +10,7 @@ import type {
   AgentRuntimeInfo,
   AgentSession,
   AgentSessionConfig,
+  AgentSessionTool,
   AgentStreamEvent,
   ProviderObservation,
   ProviderStreamItem,
@@ -30,6 +32,7 @@ const defaultCapabilities: AgentCapabilities = {
 };
 
 export interface RecordedLabController {
+  executeTool(sessionId: string, name: string, arguments_: unknown): Promise<string>;
   advance(sessionId: string): void;
   fail(sessionId: string): void;
   waitForDeferredSteer(sessionId: string): Promise<void>;
@@ -59,16 +62,16 @@ export function createRecordedLabProvider(options: RecordedLabProviderOptions = 
     },
   };
   const provider: AgentProviderAdapter = {
-    descriptor: { providerId: PROVIDER_ID, displayName: 'Recorded semantic Provider' },
+    descriptor: { providerId: PROVIDER_ID, displayName: 'Recorded semantic Provider', sessionExtensions: { instructions: false, tools: true } },
     async readSessionHistory(id, query) { return requireSession(sessions, id).historyPage(query); },
     async createSession(config) {
       return openSession(config);
     },
-    async resumeSession(handle) {
+    async resumeSession(handle, extensions) {
       if (handle.providerId !== PROVIDER_ID || handle.opaque !== persistenceOpaque(handle.sessionId)) {
         throw new Error('Recorded persistence handle does not match this Provider.');
       }
-      return openSession({ sessionId: handle.sessionId });
+      return openSession({ sessionId: handle.sessionId, ...extensions });
     },
   };
   function openSession(config: AgentSessionConfig): RecordedLabSession {
@@ -91,6 +94,7 @@ export function createRecordedLabProvider(options: RecordedLabProviderOptions = 
   return {
     provider,
     controller: {
+      async executeTool(sessionId, name, arguments_) { return requireSession(sessions, sessionId).executeTool(name, arguments_); },
       advance(sessionId) { requireSession(sessions, sessionId).advance(); },
       fail(sessionId) { requireSession(sessions, sessionId).fail(); },
       waitForDeferredSteer(sessionId) { return requireSession(sessions, sessionId).waitForDeferredSteer(); },
@@ -102,6 +106,7 @@ export function createRecordedLabProvider(options: RecordedLabProviderOptions = 
 }
 
 class RecordedLabSession implements AgentSession {
+  private readonly tools: AgentSessionTool[];
   private readonly history: Array<{ id: string; turnId: string; role: string; text: string }> = [];
   private readonly stream = new AsyncQueue<ProviderStreamItem>();
   private readonly pending = new Map<string, AgentInteractionRequest>();
@@ -126,6 +131,7 @@ class RecordedLabSession implements AgentSession {
     private readonly deferSteerObservation: boolean,
     private readonly onDispose: () => void,
   ) {
+    this.tools = bindAgentSessionTools(config.tools, () => this.assertOpen());
     for (const observation of recordedHistory(sessionId)) { this.remember(observation.event); this.stream.push(observation); }
     this.stream.push({ type: 'history_boundary' });
   }
@@ -152,6 +158,26 @@ class RecordedLabSession implements AgentSession {
     this.assertOpen();
     this.emitTimeline({ type: 'user_message', text, clientMessageId: `message-${this.nextSource}` });
     this.emitTimeline({ type: 'assistant_message', text: `Recorded reply: ${text}`, messageId: `reply-${this.nextSource}` });
+  }
+
+  async executeTool(name: string, arguments_: unknown): Promise<string> {
+    this.assertOpen();
+    const tool = this.tools.find(tool => tool.name === name);
+    if (!tool) throw new Error(`Recorded session tool is not available: ${name}`);
+    const item = {
+      type: 'tool_call' as const, callId: `recorded-extension-${this.nextSource}`, name,
+      detail: { type: 'other' as const, description: tool.description },
+    };
+    this.emitTimeline({ ...item, status: 'running', error: null });
+    try {
+      const text = await tool.execute(arguments_);
+      this.assertOpen();
+      this.emitTimeline({ ...item, status: 'completed', error: null, result: boundToolResult({ content: [{ type: 'text', text }] }) });
+      return text;
+    } catch (error) {
+      if (!this.closed) this.emitTimeline({ ...item, status: 'failed', error: error instanceof Error ? error.message : String(error) });
+      throw error;
+    }
   }
 
   async steer(text: string): Promise<void> {
@@ -212,7 +238,7 @@ class RecordedLabSession implements AgentSession {
       providerId: PROVIDER_ID,
       sessionId: this.sessionId,
       status: this.status,
-      ...(this.config.cwd ? { cwd: this.config.cwd } : {}),
+      cwd: this.config.cwd ?? process.cwd(),
       model: this.config.model ?? 'recorded-model',
       mode: 'deterministic',
       persistence: {

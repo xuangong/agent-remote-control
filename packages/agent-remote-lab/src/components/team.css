@@ -1,5 +1,5 @@
 .lab-team-floating[data-hidden="true"] { visibility: hidden; pointer-events: none; }
-.lab-tracking-floating.lab-team-floating { top: 220px; right: 12px; z-index: 95; }
+.lab-tracking-floating.lab-team-floating { top: 220px; right: 12px; z-index: 146; }
 @media (max-width: 599px), (max-height: 439px) {
   .lab-tracking-floating.lab-team-floating { left: 12px; right: auto; }
 }

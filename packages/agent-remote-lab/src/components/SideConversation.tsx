@@ -15,14 +15,13 @@ import { LabWorkbench } from './LabWorkbench.js';
 import { sessionKey } from '../session-tree.js';
 import type { SessionViewNavigationFactory } from '../session-view-navigation.js';
 
-export function SideConversation({ session, replica: cachedReplica, transport, store, draft, draftBinding, imageDraftBinding, displayBinding, onDraftChange, onClose, onOpenSource, onFork, onOpenFork, onUnlink, onRecover, standalone = false, onFocus, onActivityChange, initialInput, visible = true, expanded = true, focused = true, position = 1, selectedChild, navigation, renderAsk, headingStart, headingMode, onRenameTitle }: {
+export function SideConversation({ session, replica: cachedReplica, transport, store, draft, draftBinding, imageDraftBinding, displayBinding, onDraftChange, onClose, onOpenSource, onFork, onOpenFork, onUnlink, onRecover, standalone = false, onFocus, onActivityChange, initialInput, visible = true, expanded = true, focused = true, position = 1, selectedChild, navigation, headingStart, headingMode, onRenameTitle }: {
   navigation?: SessionViewNavigationFactory;
   imageDraftBinding?: import('@orchardworks/agent-remote-web/browser').ImageDraftBinding;
   displayBinding?: import('../hooks/useSessionDisplayPreferences.js').DisplayPreferenceBinding;
   headingStart?: ReactNode;
   headingMode?: 'inline' | 'toolbar';
   onRenameTitle?(): void;
-  renderAsk?(source: OpenedSession, state: AgentReplicaState | undefined): ReactNode;
   replica?: AgentReplica;
   standalone?: boolean; onUnlink?(fork: SessionFork): Promise<void>; onRecover?(fork: SessionFork): Promise<void>;
   expanded?: boolean; focused?: boolean; position?: number; selectedChild?: string | null;
@@ -59,6 +58,5 @@ export function SideConversation({ session, replica: cachedReplica, transport, s
       composerNotice={<>{initialInput?.pending ? <p className="lab-control-note" role="status">Sending the first branch message…</p> : initialInput?.error ? <p className="lab-control-note" role="alert">{initialInput.error}</p> : null}<ForkEntries forks={store.linked().filter((fork) => fork.target && sessionKey(sideNavigationSource(fork)) === sessionKey(session))} selectedChild={selectedChild} onOpen={onOpenFork} onUnlink={onUnlink} onRecover={onRecover} /></>}
       consoleCommands={status === 'ready' && !initialInput?.pending && state?.agent?.capabilities.sendMessage && state.agent.capabilities.history ? forkCommands : []}
       onExecuteConsoleCommand={(id, args) => { if (!state || status !== 'ready' || initialInput?.pending) return Promise.reject(new Error('The side session is not ready.')); return onFork(state, session, id, args); }} /></CommunicationNavigationContext.Provider>
-    {renderAsk?.(session, state)}
   </ConversationPane>;
 }

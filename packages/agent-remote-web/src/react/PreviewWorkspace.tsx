@@ -1,30 +1,29 @@
 import { createContext, useCallback, useContext, useEffect, useRef, useState, type CSSProperties, type HTMLAttributes } from 'react';
 
-import { FilePreviewContext, type FilePreviewRequest } from './FilePreviewContext.js';
-import { FilePreview } from './FilePreview.js';
+import { FilePreviewOutlet, FilePreviewProvider, FilePreviewScope, useFilePreviewWorkspace } from './FilePreviewScope.js';
 
 export const PreviewWorkspaceContext = createContext<{
   open: boolean; hide?(): void; setContainer(element: HTMLDivElement | null): void;
 } | undefined>(undefined);
 
-export function PreviewWorkspace({ children, className, style, resourceScope, ...props }: HTMLAttributes<HTMLDivElement> & { readonly resourceScope?: string }) {
+type PreviewWorkspaceProps = HTMLAttributes<HTMLDivElement> & { readonly resourceScope?: string };
+
+export function PreviewWorkspace(props: PreviewWorkspaceProps) {
+  const workspace = useFilePreviewWorkspace();
+  const browser = useContext(PreviewWorkspaceContext);
+  return workspace ? <PreviewWorkspaceContent {...props} />
+    : <FilePreviewProvider browserOpen={browser?.open} onOpenFile={browser?.hide}><PreviewWorkspaceContent {...props} /></FilePreviewProvider>;
+}
+
+function PreviewWorkspaceContent({ children, className, style, resourceScope, ...props }: PreviewWorkspaceProps) {
   const context = useContext(PreviewWorkspaceContext);
   const container = useRef<HTMLDivElement | null>(null);
   const [fraction, setFraction] = useState(0.5);
   const [width, setWidth] = useState(0);
   const [dragging, setDragging] = useState(false);
-  const [file, setFile] = useState<{ request: FilePreviewRequest; scope?: string; version: number }>();
+  const files = useFilePreviewWorkspace();
   const browserOpen = context?.open ?? false;
-  const selectedFile = file?.scope === resourceScope && !browserOpen ? file : undefined;
-  const open = browserOpen || !!selectedFile;
-  useEffect(() => { setFile(undefined); }, [resourceScope]);
-  useEffect(() => { if (browserOpen) setFile(undefined); }, [browserOpen]);
-  const openFile = useCallback((request: FilePreviewRequest) => {
-    context?.hide?.();
-    const trigger = request.returnFocus ?? (document.activeElement instanceof HTMLElement ? document.activeElement : undefined);
-    setFile(current => ({ request: { ...request, returnFocus: current && current.scope === resourceScope && trigger?.closest('dialog.agent-file-preview')
-      ? current.request.returnFocus : trigger }, scope: resourceScope, version: (current?.version ?? 0) + 1 }));
-  }, [context?.hide, resourceScope]);
+  const open = browserOpen || !!files?.file;
   const setContainer = context?.setContainer;
   const attach = useCallback((element: HTMLDivElement | null) => { container.current = element; setContainer?.(element); }, [setContainer]);
   useEffect(() => {
@@ -44,9 +43,8 @@ export function PreviewWorkspace({ children, className, style, resourceScope, ..
   return <div {...props} ref={attach}
     className={`agent-preview-workspace${className ? ` ${className}` : ''}`} data-preview-open={open || undefined}
     style={{ ...style, '--agent-preview-width': `${displayedFraction * 100}%` } as CSSProperties}>
-    <FilePreviewContext.Provider value={{ open: openFile, scopeKey: resourceScope }}><div className="agent-preview-workspace-content">{children}</div>
-    {selectedFile ? <FilePreview key={selectedFile.version} request={selectedFile.request} onClose={() => setFile(undefined)} /> : null}
-    </FilePreviewContext.Provider>
+    <FilePreviewScope resourceScope={resourceScope}><div className="agent-preview-workspace-content">{children}</div></FilePreviewScope>
+    <FilePreviewOutlet />
     {open ? <>
       {dragging ? <div className="agent-preview-resize-shield" /> : null}
       <div className="agent-preview-divider" role="separator" aria-label="Resize conversation and preview" aria-orientation="vertical"

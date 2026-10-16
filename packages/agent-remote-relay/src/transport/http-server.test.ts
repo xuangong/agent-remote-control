@@ -122,9 +122,10 @@ afterEach(async () => {
 });
 
 describe('Agent Remote HTTP transport', () => {
-  it('serves the strict protocol Provider list response', async () => {
-    const { url } = await start();
-    const response = await fetch(`${url}/v1/providers?protocolVersion=1.8.0`);
+  it('serves the strict protocol Provider list response without native extension metadata', async () => {
+    const { url, provider } = await start();
+    Object.assign(provider.descriptor, { sessionExtensions: { instructions: true, tools: true } });
+    const response = await fetch(`${url}/v1/providers?protocolVersion=1.8.0`, { signal: AbortSignal.timeout(5000) });
     const json = await response.text();
 
     expect(response.status).toBe(200);

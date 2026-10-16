@@ -55,7 +55,7 @@ function committed(from = 'A', to = 'B', revision = 2, roleId = 'primary', provi
       receipt: { ...request, to: native(to, providerId), phase: 'committed', committedRevision: revision, startedAt: 'now', updatedAt: 'now',
         prepared: { ...request, to: native(to, providerId), workspace, associationRevision: 1, participants: [], capture: { epoch: 'epoch', seq: 1, capturedAt: 'now' } } } } };
 }
-async function failureFixture(advanceDuringRecovery = false, nativeIdentity?: string | null, strict = false, flags = '', setup?: { hostService?: ComponentProps<typeof App>['hostService']; beforeWindowMutation?(mutation: WindowMutation): Promise<void>; windowDocument?: WorkspaceWindow; persistPrompt?: boolean; successionCommit?(): SuccessionActionResult; successionPrepare?(body: Record<string, unknown>): Promise<SuccessionActionResult>; teams?(): Team[]; chain?: SessionSuccessionReplay[]; replayFailure?: string; selected?: string; providerId?: string; userScoped?: boolean; favorites?: FavoritesSnapshot; holdRelationsInitially?: boolean; holdReplayInitially?: boolean; holdTimelineInitially?: boolean; holdSnapshotInitially?: boolean; holdAccessInitially?: boolean; nativeConnection?: 'connected' | 'restoring'; preserveNativeState?: boolean; children?: AgentChildSession[]; timeline?: ProjectedTimelineEntry[]; nativeStatus?: 'idle' | 'running'; successionDescription?: SuccessionDescription; successionStatus?(): SuccessionActionResult; attachmentFailure?(body: Record<string, unknown>): { status: number; payload: unknown } | undefined; seed?(scope: string, source: OpenedSession): void | Promise<void> }) {
+async function failureFixture(advanceDuringRecovery = false, nativeIdentity?: string | null, strict = false, flags = '', setup?: { hostService?: ComponentProps<typeof App>['hostService']; beforeWindowMutation?(mutation: WindowMutation): Promise<void>; windowDocument?: WorkspaceWindow; persistPrompt?: boolean; successionCommit?(): SuccessionActionResult; successionPrepare?(body: Record<string, unknown>): Promise<SuccessionActionResult>; teams?(): Team[]; chain?: SessionSuccessionReplay[]; replayFailure?: string; selected?: string; providerId?: string; userScoped?: boolean; favorites?: FavoritesSnapshot; liveActivity?: boolean; holdRelationsInitially?: boolean; holdReplayInitially?: boolean; holdTimelineInitially?: boolean; holdSnapshotInitially?: boolean; holdAccessInitially?: boolean; nativeConnection?: 'connected' | 'restoring'; preserveNativeState?: boolean; children?: AgentChildSession[]; timeline?: ProjectedTimelineEntry[]; nativeStatus?: 'idle' | 'running'; successionDescription?: SuccessionDescription; successionStatus?(): SuccessionActionResult; attachmentFailure?(body: Record<string, unknown>): { status: number; payload: unknown } | undefined; seed?(scope: string, source: OpenedSession): void | Promise<void> }) {
   configureImageDraftPersistence(() => setup?.persistPrompt === true);
   const requests: Array<{ url: string; body?: Record<string, unknown> }> = [];
   const hostedWindows = new Map<string, WorkspaceWindow>();
@@ -171,11 +171,17 @@ async function failureFixture(advanceDuringRecovery = false, nativeIdentity?: st
   const updates: Array<(identity: string | null, connection?: 'connected' | 'restoring') => void> = [];
   const updatesByAgent = new Map<string, (identity: string | null, connection?: 'connected' | 'restoring') => void>();
   const activeUpdates = new Map<string, Set<(identity: string | null, connection?: 'connected' | 'restoring') => void>>();
+  const activityUpdates = new Map<string, Set<(status: 'idle' | 'running' | 'waiting') => void>>();
   sockets.on('connection', socket => {
     const subscriptions = new Map<string, string>();
     const callbacks = new Map<string, (identity: string | null, connection?: 'connected' | 'restoring') => void>();
-    const retire = (id: string) => { const callback = callbacks.get(id); if (callback) activeUpdates.get(subscriptions.get(id)!)?.delete(callback); callbacks.delete(id); subscriptions.delete(id); };
-    socket.on('close', () => { for (const id of callbacks.keys()) retire(id); });
+    const activityCallbacks = new Map<string, (status: 'idle' | 'running' | 'waiting') => void>();
+    const retire = (id: string) => {
+      const callback = callbacks.get(id); if (callback) activeUpdates.get(subscriptions.get(id)!)?.delete(callback);
+      const activity = activityCallbacks.get(id); if (activity) activityUpdates.get(subscriptions.get(id)!)?.delete(activity);
+      callbacks.delete(id); activityCallbacks.delete(id); subscriptions.delete(id);
+    };
+    socket.on('close', () => { for (const id of subscriptions.keys()) retire(id); });
     socket.on('message', async data => {
       const frame = JSON.parse(String(data)); frames.push(frame);
       if (frame.type === 'unsubscribe') { retire(frame.subscriptionId); return; }
@@ -184,6 +190,12 @@ async function failureFixture(advanceDuringRecovery = false, nativeIdentity?: st
       const emit = (message: unknown) => socket.send(JSON.stringify({ protocolVersion: PROTOCOL_VERSION, type: 'message', subscriptionId: frame.subscriptionId, message }));
       if (frame.type === 'subscribe') {
         emit({ protocolVersion: PROTOCOL_VERSION, type: 'negotiated', sessionControl: true });
+        if (setup?.liveActivity && frame.message?.observation === 'activity') {
+          const update = (status: 'idle' | 'running' | 'waiting') => emit({ protocolVersion: PROTOCOL_VERSION, type: 'agent_activity', payload: { agentId, status } });
+          const active = activityUpdates.get(agentId) ?? new Set(); activityUpdates.set(agentId, active); active.add(update); activityCallbacks.set(frame.subscriptionId, update);
+          update('idle');
+          return;
+        }
         const update = (identity: string | null, connection: 'connected' | 'restoring' = 'connected') => emit({ protocolVersion: PROTOCOL_VERSION, type: 'agent_snapshot', payload: {
           ...replicaState.agent, id: frame.agentId, providerId, status: setup?.nativeStatus ?? 'idle', pendingInteractions: pendingInteractions(agentId), runtimeInfo: { ...replicaState.agent!.runtimeInfo, providerId, status: setup?.nativeStatus ?? 'idle', childSessions: setup?.children, sessionId: identity, connection: { state: connection } },
         } });
@@ -244,6 +256,7 @@ async function failureFixture(advanceDuringRecovery = false, nativeIdentity?: st
     setNativeIdentity(identity: string | null) { nativeIdentity = identity; },
     rebind(nativeSessionId: string, agentId: string) { nativeBindings.set(nativeSessionId, agentId); },
     setFavorites(snapshot: FavoritesSnapshot) { favorites = snapshot; },
+    emitActivity(agentId: string, status: 'idle' | 'running' | 'waiting') { for (const update of activityUpdates.get(agentId) ?? []) update(status); },
     failReplay(code?: string) { replayFailure = code; },
     holdCreate() { createGate = new Promise(resolve => { releaseCreate = resolve; }); return () => { releaseCreate?.(); createGate = undefined; }; },
     holdRelations() { relationsGate ??= new Promise(resolve => { releaseRelations = resolve; }); return () => { releaseRelations?.(); relationsGate = undefined; }; },
@@ -290,6 +303,17 @@ async function editVisiblePrompt(view: HTMLElement, text: string) {
     else editor.textContent = text;
     editor.dispatchEvent(new Event('input', { bubbles: true }));
   });
+}
+
+async function setGlobalAskVisible(view: HTMLElement, visible: boolean) {
+  const menu = view.querySelector<HTMLButtonElement>('[aria-label="View options"]')!;
+  await act(async () => menu.click());
+  await settleApp(() => expect(view.querySelector('[aria-label="Ask view"]'), view.textContent ?? '').not.toBeNull());
+  const toggle = view.querySelector<HTMLInputElement>('[aria-label="Ask view"]')!;
+  expect(toggle.disabled).toBe(false);
+  if (toggle.checked !== visible) await act(async () => toggle.click());
+  expect(toggle.checked).toBe(visible);
+  await act(async () => menu.click());
 }
 
 it.each(['recovering', 'attach-failed', 'identity-mismatch'] as const)('keeps sharing the selected session while %s', async phase => {
@@ -1265,6 +1289,7 @@ it('retains closed and nested Ask owners, and supplies T with its own replaceabl
   expect(ask.isOpen(original, primaryOwner)).toBe(false);
   expect(ask.entryFor(original, primaryOwner).record?.source).toEqual(original);
   expect(f.requests.filter(item => item.url.endsWith('/attach')).map(item => item.body?.nativeSessionId)).toEqual(['B']);
+  await setGlobalAskVisible(f.view, true);
   await act(async () => { await ask.open(undefined, succession.binding!.session, '', false, { associationOwner: primaryOwner }); });
   await vi.waitFor(() => expect(succession.recipientFor(target, primaryOwner)?.isCurrent()).toBe(true));
   const first = succession.recipientFor(target, primaryOwner)!, primary = succession.imageRecipient!;
@@ -2124,6 +2149,7 @@ it('follows an Ask native prefix with an execution recipient while preserving th
   } });
   await settleApp(() => expect(succession.binding?.session.nativeSessionId).toBe('B'));
   const owner = succession.ownerFor(succession.desired!.slot.id);
+  await setGlobalAskVisible(f.view, true);
   await act(async () => { await ask.open(undefined, succession.binding!.session, '', false, { associationOwner: owner }); });
   await settleApp(() => expect(succession.recipientFor(anchor, owner)?.isCurrent()).toBe(true));
   expect(succession.recipientFor(anchor, owner)?.identity).toContain('agent-Y');
@@ -2332,7 +2358,7 @@ it('restores an open Ask with its original source after rebinding main and openi
   } });
   await settleApp(() => expect(succession.binding?.session.nativeSessionId).toBe('A'));
   const sourceA = succession.binding!.session, ownerA = succession.ownerFor(sourceA.viewId);
-  await act(async () => ask.toggle(sourceA, ownerA));
+  await setGlobalAskVisible(f.view, true);
   await act(async () => f.view.querySelector<HTMLButtonElement>('[aria-label="Ask about this session"]')!.click());
   await settleApp(() => expect(ask.isOpen(sourceA, ownerA)).toBe(true));
   await settleApp(() => expect(f.view.querySelector('[role="dialog"][aria-label="Ask"] [data-testid="prompt-input"]')).not.toBeNull());
@@ -2355,14 +2381,136 @@ it('restores an open Ask with its original source after rebinding main and openi
   expect(ask.sharedView(currentOwner)).toBeUndefined();
   expect(ask.entryFor(succession.binding!.session, currentOwner).record?.target?.nativeSessionId).not.toBe('T');
   expect(() => parseComposition(succession.document, f.scope)).not.toThrow();
-  await act(async () => ask.toggle(succession.binding!.session, currentOwner));
-  expect(f.view.querySelector('.lab-primary-conversation [aria-label="Ask about this session"]')).not.toBeNull();
-  await act(async () => f.view.querySelector<HTMLButtonElement>('.lab-primary-conversation [aria-label="Ask about this session"]')!.click());
+  await act(async () => f.view.querySelector<HTMLElement>('.lab-primary-conversation')!.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true })));
+  expect(f.view.querySelectorAll('[aria-label="Ask about this session"]')).toHaveLength(1);
+  await settleApp(() => expect(f.view.querySelector<HTMLButtonElement>('[aria-label="Ask about this session"]')!.disabled).toBe(false));
+  await act(async () => f.view.querySelector<HTMLButtonElement>('[aria-label="Ask about this session"]')!.click());
   await settleApp(() => expect(ask.entryFor(succession.binding!.session, currentOwner).record?.target?.nativeSessionId).toBe('S'));
   expect(f.requests.filter(request => request.url.endsWith('/create')).map(request => request.body?.sourceNativeSessionId)).toEqual(['B']);
   expect(f.view.querySelectorAll('[role="dialog"][aria-label="Ask"]')).toHaveLength(2);
   expect(ask.entryFor(sourceA, restoredOwners[0]!.id).record?.target?.nativeSessionId).toBe('T');
 });
+
+it('keeps one global Ask launcher and retains the original Ask draft when another primary root is selected', async () => {
+  vi.stubGlobal('ResizeObserver', class { observe() {} disconnect() {} unobserve() {} });
+  const f = await failureFixture(false, 'A', false, '&window=global-ask-roots', { chain: [], seed(scope, source) {
+    const binding = (id: string) => ({ hostId: 'host', providerId: 'recorded', nativeSessionId: id, title: `Root ${id}` });
+    const document: WorkspaceWindow = { schemaVersion: 2, id: 'global-ask-roots', title: 'Ask roots', revision: 0,
+      selectedPrimaryViewId: 'primary-A', selectedViewId: 'primary-A',
+      views: [createWindowView('primary-A', binding('A'), 'primary'), createWindowView('primary-X', binding('X'), 'primary')] };
+    localStorage.setItem(`agent-remote:recovery:${scope}:shared-window:${document.id}`, JSON.stringify(document));
+    const store = new ForkStore(`ask:${scope}`, sessionStorage);
+    const record = store.prepare(referenceForkContext(source), { sourceNativeSessionId: 'A' });
+    store.bind(record.id, { ...source, nativeSessionId: 'T', agentId: 'agent-T', title: 'Ask for A' });
+    store.markConfigured(record.id); store.finishCreation(record.id);
+  } });
+  const group = (id: string) => f.view.querySelector<HTMLElement>(`[data-primary-group-id="${id}"]`)!;
+  const trigger = () => f.view.querySelector<HTMLButtonElement>('[aria-label="Ask about this session"]')!;
+  await settleApp(() => expect(f.view.querySelectorAll('.lab-primary-group [data-testid="prompt-input"]'), f.view.textContent ?? '').toHaveLength(2));
+  expect(trigger()).toBeNull();
+  await setGlobalAskVisible(f.view, true);
+  expect(f.view.querySelectorAll('[aria-label="Ask about this session"]')).toHaveLength(1);
+  expect(trigger().closest('[data-view-id], [data-primary-group-id]')).toBeNull();
+  expect(f.requests.filter(request => request.url.endsWith('/create'))).toHaveLength(0);
+  await settleApp(() => expect(trigger().disabled).toBe(false));
+  await act(async () => trigger().click());
+  await settleApp(() => expect(f.view.querySelector('[role="dialog"][aria-label="Ask"] [data-testid="prompt-input"]')).not.toBeNull());
+  const original = f.view.querySelector<HTMLElement>('[role="dialog"][aria-label="Ask"]')!;
+  await editVisiblePrompt(original, 'Keep the question about A');
+  await act(async () => group('primary-X').dispatchEvent(new MouseEvent('pointerdown', { bubbles: true })));
+  await settleApp(() => expect(group('primary-X').getAttribute('data-selected')).toBe('true'));
+  expect(f.view.contains(original)).toBe(true);
+  expect(original.closest('[hidden]')).toBeNull();
+  await settleApp(() => expect(original.querySelector('[data-testid="prompt-input"]')?.textContent).toBe('Keep the question about A'));
+  expect(f.view.querySelectorAll('[aria-label="Ask about this session"]')).toHaveLength(1);
+  await settleApp(() => expect(trigger().disabled).toBe(false));
+  await act(async () => trigger().click());
+  await settleApp(() => expect(f.requests.filter(request => request.url.endsWith('/create')).map(request => request.body?.sourceNativeSessionId)).toEqual(['X']));
+  await settleApp(() => expect(f.view.querySelectorAll('[role="dialog"][aria-label="Ask"] [data-testid="prompt-input"]')).toHaveLength(2));
+  expect(f.view.contains(original)).toBe(true);
+  expect(original.querySelector('[data-testid="prompt-input"]')?.textContent).toBe('Keep the question about A');
+  expect(f.view.querySelectorAll('[aria-label="Ask about this session"]')).toHaveLength(1);
+  await setGlobalAskVisible(f.view, false);
+  expect(f.view.querySelector('[aria-label="Ask about this session"]')).toBeNull();
+  expect(f.view.querySelector('[role="dialog"][aria-label="Ask"]')).toBeNull();
+  await setGlobalAskVisible(f.view, true);
+  await settleApp(() => expect([...f.view.querySelectorAll('[role="dialog"][aria-label="Ask"] [data-testid="prompt-input"]')]
+    .map(input => input.textContent)).toContain('Keep the question about A'));
+  expect(f.requests.filter(request => request.url.endsWith('/create')).map(request => request.body?.sourceNativeSessionId)).toEqual(['X']);
+}, 10000);
+
+it.each(['global-hidden', 'source-collapsed', 'source-rebound'] as const)('tracks Ask read state from its global presentation when %s', async scenario => {
+  vi.stubGlobal('ResizeObserver', class { observe() {} disconnect() {} unobserve() {} });
+  vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('visible');
+  const realTracking = trackingHooks.useSessionTracking;
+  let tracking!: ReturnType<typeof realTracking>;
+  vi.spyOn(trackingHooks, 'useSessionTracking').mockImplementation((...args) => { tracking = realTracking(...args); return tracking; });
+  const realManager = managerComponents.ChatSessionManager;
+  let manager!: ComponentProps<typeof realManager>;
+  vi.spyOn(managerComponents, 'ChatSessionManager').mockImplementation(props => { if (props.current?.nativeSessionId === 'A') manager = props; return realManager(props); });
+  const f = await failureFixture(false, 'A', false, '&window=global-ask-read-state', { chain: [], liveActivity: true, seed(scope, source) {
+    const binding = (id: string) => ({ hostId: 'host', providerId: 'recorded', nativeSessionId: id, title: `Root ${id}` });
+    const document: WorkspaceWindow = { schemaVersion: 2, id: 'global-ask-read-state', title: 'Ask read state', revision: 0,
+      selectedPrimaryViewId: 'primary-A', selectedViewId: 'primary-A',
+      views: [createWindowView('primary-A', binding('A'), 'primary'), createWindowView('primary-X', binding('X'), 'primary')] };
+    localStorage.setItem(`agent-remote:recovery:${scope}:shared-window:${document.id}`, JSON.stringify(document));
+    const target = { ...source, nativeSessionId: 'T', agentId: 'agent-T', title: 'Ask for A', hostId: 'host', starredAt: 1 };
+    saveTrackedSessions(scope, [target]);
+    const store = new ForkStore(`ask:${scope}`, sessionStorage);
+    const record = store.prepare(referenceForkContext(source), { sourceNativeSessionId: 'A' });
+    store.bind(record.id, target); store.markConfigured(record.id); store.finishCreation(record.id);
+  } });
+  const key = sessionKey({ hostId: 'host', providerId: 'recorded', nativeSessionId: 'T' });
+  await setGlobalAskVisible(f.view, true);
+  const trigger = () => f.view.querySelector<HTMLButtonElement>('[aria-label="Ask about this session"]')!;
+  await settleApp(() => expect(trigger().disabled).toBe(false));
+  await act(async () => trigger().click());
+  await settleApp(() => expect(f.view.querySelector('[role="dialog"][aria-label="Ask"] [data-testid="prompt-input"]')).not.toBeNull());
+  await settleApp(() => expect(tracking.observations[key]?.connection).toBe('ready'));
+  if (scenario === 'global-hidden') {
+    await setGlobalAskVisible(f.view, false);
+    expect(f.view.querySelector('[role="dialog"][aria-label="Ask"]')).toBeNull();
+  } else if (scenario === 'source-rebound') {
+    await act(async () => manager.onOpen({ hostId: 'host', providerId: 'recorded', nativeSessionId: 'B', title: 'Main B' }));
+    await settleApp(() => expect(f.view.querySelector('[data-primary-group-id="primary-A"]')?.textContent).toContain('Main B'));
+    expect(f.view.querySelector('[role="dialog"][aria-label="Ask"]')?.closest('[hidden]')).toBeNull();
+  } else {
+    const sourceGroup = f.view.querySelector<HTMLElement>('[data-primary-group-id="primary-A"]')!;
+    await act(async () => sourceGroup.querySelector<HTMLButtonElement>('.lab-primary-group-minimize')!.click());
+    const other = f.view.querySelector<HTMLElement>('[data-primary-group-id="primary-X"]')!;
+    await act(async () => other.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true })));
+    await settleApp(() => expect(other.getAttribute('data-selected')).toBe('true'));
+    expect(f.view.querySelector('[role="dialog"][aria-label="Ask"]')?.closest('[hidden]')).toBeNull();
+  }
+  await act(async () => f.emitActivity('agent-T', 'running'));
+  await settleApp(() => expect(tracking.observations[key]?.activity).toBe('running'));
+  await act(async () => f.emitActivity('agent-T', 'waiting'));
+  await settleApp(() => expect(tracking.observations[key]?.activity).toBe('waiting'));
+  expect(tracking.observations[key]?.attention).toBe(scenario === 'global-hidden' ? 'pending' : undefined);
+}, 10000);
+
+it('opens the global Ask overlay from the foreground session on a narrow screen', async () => {
+  vi.stubGlobal('ResizeObserver', class { observe() {} disconnect() {} unobserve() {} });
+  vi.stubGlobal('matchMedia', vi.fn((query: string) => ({ matches: query.includes('max-width: 1180px'), media: query, addEventListener() {}, removeEventListener() {}, addListener() {}, removeListener() {} })));
+  const binding = (id: string) => ({ hostId: 'host', providerId: 'recorded', nativeSessionId: id, title: `Root ${id}` });
+  const document: WorkspaceWindow = { schemaVersion: 2, id: 'global-ask-mobile', title: 'Mobile Ask', revision: 0,
+    selectedPrimaryViewId: 'primary-X', selectedViewId: 'primary-X',
+    views: [createWindowView('primary-A', binding('A'), 'primary'), createWindowView('primary-X', binding('X'), 'primary')] };
+  const f = await failureFixture(false, 'A', false, `&window=${document.id}`, { chain: [], selected: 'X', seed(scope) {
+    localStorage.setItem(`agent-remote:recovery:${scope}:shared-window:${document.id}`, JSON.stringify(document));
+  } });
+  await settleApp(() => expect(visibleQuery(f.view, '[data-primary-group-id="primary-X"] [data-testid="prompt-input"]')).not.toBeNull());
+  expect(f.view.querySelector('[data-primary-group-id="primary-A"]')?.closest('[hidden]')).not.toBeNull();
+  await setGlobalAskVisible(f.view, true);
+  const trigger = f.view.querySelector<HTMLButtonElement>('[aria-label="Ask about this session"]')!;
+  expect(trigger.closest('[hidden], [data-view-id], [data-primary-group-id]')).toBeNull();
+  expect(trigger.disabled).toBe(false);
+  await act(async () => trigger.click());
+  await settleApp(() => expect(f.requests.filter(request => request.url.endsWith('/create')).map(request => request.body?.sourceNativeSessionId)).toEqual(['X']));
+  await settleApp(() => expect(visibleQuery(f.view, '[role="dialog"][aria-label="Ask"] [data-testid="prompt-input"]')).not.toBeNull());
+  expect(f.view.querySelector('[role="dialog"][aria-label="Ask"]')?.closest('[data-primary-group-id]')).toBeNull();
+  expect(f.view.querySelectorAll('[aria-label="Ask about this session"]')).toHaveLength(1);
+}, 10000);
 
 it('keeps both primary conversations mounted with separate drafts and creates an empty dock without a primary selector', async () => {
   vi.stubGlobal('ResizeObserver', class { observe() {} disconnect() {} unobserve() {} });
@@ -2560,7 +2708,7 @@ it.each([false, true])('uses the focused mobile dock for Favorites context (empt
   });
 });
 
-it.each([false, true])('targets Ask at the focused dock owner and disables an empty dock (empty=%s)', async empty => {
+it.each([false, true])('keeps the global Ask preference independent of the focused dock and prevents creation from an empty dock (empty=%s)', async empty => {
   vi.stubGlobal('ResizeObserver', class { observe() {} disconnect() {} unobserve() {} });
   const realAsk = askHooks.useAskConversations, realSuccession = successionHooks.useSessionSuccession;
   let ask!: ReturnType<typeof realAsk>, succession!: ReturnType<typeof realSuccession>;
@@ -2574,13 +2722,29 @@ it.each([false, true])('targets Ask at the focused dock owner and disables an em
     localStorage.setItem(`agent-remote:recovery:${scope}:shared-window:${document.id}`, JSON.stringify(document));
   } });
   await settleApp(() => expect(f.view.querySelector('[data-view-id="ordinary-dock"]')).not.toBeNull());
+  expect(f.view.querySelector('[aria-label="Ask about this session"]')).toBeNull();
   await act(async () => f.view.querySelector<HTMLButtonElement>('[aria-label="View options"]')!.click());
-  const toggle = () => f.view.querySelector<HTMLInputElement>('[data-view-control="ask"]');
+  const toggle = () => f.view.querySelector<HTMLInputElement>('[aria-label="Ask view"]');
   await settleApp(() => expect(toggle()).not.toBeNull());
-  expect(toggle()!.disabled).toBe(empty);
+  expect(toggle()!.closest('label')?.textContent).toBe('Ask view');
+  expect(toggle()!.disabled).toBe(false);
   expect(toggle()!.checked).toBe(false);
-  if (empty) return;
   await act(async () => toggle()!.click());
+  expect(toggle()!.checked).toBe(true);
+  expect(localStorage.getItem('agent-remote:ask-view')).toBe('true');
+  const trigger = () => f.view.querySelector<HTMLButtonElement>('[aria-label="Ask about this session"]');
+  await settleApp(() => expect(trigger()).not.toBeNull());
+  expect(f.view.querySelectorAll('[aria-label="Ask about this session"]')).toHaveLength(1);
+  expect(trigger()!.closest('[data-view-id], [data-primary-group-id]')).toBeNull();
+  expect(trigger()!.disabled).toBe(empty);
+  expect(f.requests.filter(request => request.url.endsWith('/create'))).toHaveLength(0);
+  if (empty) {
+    await act(async () => trigger()!.click());
+    expect(f.view.querySelector('[role="dialog"][aria-label="Ask"]')).toBeNull();
+    expect(f.requests.filter(request => request.url.endsWith('/create'))).toHaveLength(0);
+    return;
+  }
+  await act(async () => trigger()!.click());
   await settleApp(() => {
     const dockBinding = succession.document.windowBindings!.find(item => item.viewId === 'ordinary-dock')!;
     const primaryBinding = succession.document.windowBindings!.find(item => item.viewId === 'primary-A')!;
@@ -2589,9 +2753,11 @@ it.each([false, true])('targets Ask at the focused dock owner and disables an em
     expect(dockOwner).not.toBe(primaryOwner);
     expect(ask.isEnabled({ ...binding, agentId: 'agent-A' }, dockOwner)).toBe(true);
     expect(ask.isEnabled({ ...binding, agentId: 'agent-A' }, primaryOwner)).toBe(false);
-    expect(f.view.querySelector('[data-view-id="ordinary-dock"] [aria-label="Ask about this session"]')).not.toBeNull();
+    expect(ask.entryFor({ ...binding, agentId: 'agent-A' }, dockOwner).record?.source.nativeSessionId).toBe('A');
+    expect(f.view.querySelector('[role="dialog"][aria-label="Ask"]')).not.toBeNull();
   });
-});
+  expect(f.requests.filter(request => request.url.endsWith('/create')).map(request => request.body?.sourceNativeSessionId)).toEqual(['A']);
+}, 10000);
 
 it.each((['dock', 'attached', 'float'] as const).flatMap(placement => [false, true].map(empty => ({ placement, empty, mobile: false }))).concat([{ placement: 'dock', empty: true, mobile: true }]))
 ('opens Track into the selected ordinary $placement view (empty=$empty, mobile=$mobile) and preserves primary', async ({ placement, empty, mobile }) => {

@@ -2,6 +2,7 @@ import { expect, it } from 'vitest';
 import { createWindowView, type WorkspaceWindow } from '@orchardworks/agent-remote-protocol';
 import { createCompositionDocument, compositionRoleKey, createCompositionSlot, createAskOwner, parseComposition, type RoleCheckpoint } from './session-composition.js';
 import { ensureWindowCompositionSlot, projectWindowComposition, adoptWindowPrimaryRole, bindWindowCompositionSlot, createWindowSessionBridge, resolveCompositionWindowViewId } from './window-composition.js';
+import { createWindowFeature } from './window-feature-views.js';
 const binding = { hostId: 'mac', providerId: 'codex', nativeSessionId: 's1', title: 'Project' };
 it('projects each selected primary family without losing another group owners', () => {
   const doc = createCompositionDocument('scope');
@@ -137,6 +138,19 @@ it('resolves application owners through the session bridge without changing layo
   expect(slot.owners.text.key).toBe(doc.slots[0]!.owners.text.key);
 });
 
+it('resolves an Ask when its owner and source slot share an identity', () => {
+  const document = createCompositionDocument('scope');
+  const source = createCompositionSlot('shared-owner', binding, document.scope);
+  const owner = { ...createAskOwner(source, document.scope), id: source.id };
+  document.slots.push(source); document.asks.push(owner);
+  bindWindowCompositionSlot(document, 'w', 'main', binding, source.id);
+  const window: WorkspaceWindow = { schemaVersion: 2, id: 'w', revision: 0, title: 'Window', selectedPrimaryViewId: 'main', selectedViewId: 'main',
+    views: [createWindowView('main', binding, 'primary'),
+      { ...createWindowView('ask'), feature: createWindowFeature({ kind: 'ask', id: 'shared-ask', source: binding }), closeWith: 'main' }] };
+  const restored = parseComposition(JSON.parse(JSON.stringify(document)), document.scope);
+  expect(resolveCompositionWindowViewId(restored, window, `ask:${owner.geometryScope}`)).toBe('ask');
+});
+
 it('persists mapping, rejects cross-view ownership, and restores independent A-B-A owners', () => {
   const doc = createCompositionDocument('scope');
   const source = createCompositionSlot('legacy', binding, doc.scope);
@@ -191,6 +205,8 @@ it('retains a source reference for an open Ask after a fresh page sees a differe
   expect(doc.asks.filter(owner => owner.sourceSlot === references[0]?.id)).toHaveLength(1);
   expect(mapping.get('main')?.intent.target.native.nativeSessionId).toBe('independent-B');
   expect(resolveCompositionWindowViewId(doc, window, references[0]!.id)).toBe('main');
+  const owner = doc.asks.find(owner => owner.sourceSlot === references[0]!.id)!;
+  expect(resolveCompositionWindowViewId(doc, window, `ask:${owner.geometryScope}`)).toBe('ask');
   const revision = doc.editRevision;
   windowCompositionMapping(doc, window);
   expect(doc.editRevision).toBe(revision);

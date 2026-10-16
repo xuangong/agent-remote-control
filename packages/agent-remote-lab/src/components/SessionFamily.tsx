@@ -5,7 +5,7 @@ import type { SessionWindowTarget } from '../hooks/useSessionWindows.js';
 import { WorkspaceReady } from '../workspace-access.js';
 import { ConversationConnectionScope } from '../conversation-connections.js';
 import { useWindowSessionBridgeContext } from '../window-session-bridge-context.js';
-import { useWindowLayout } from '../window-workspace-context.js';
+import { useWindowLayout, WindowPresentationContext } from '../window-workspace-context.js';
 import { DockResize } from './SessionDock.js';
 import { SessionLink } from './SessionLink.js';
 import { SessionControlNotice } from './SessionControlNotice.js';
@@ -71,6 +71,7 @@ export function SessionFamily(props: Props) {
   const storageKey = `agent-remote:recovery:${props.storageScope}:session-family:${props.displayBinding && !props.displayBinding.key.startsWith('session:') ? `${props.displayBinding.key}:` : ''}${sessionKey(target)}`;
   const [layoutKey, setLayoutKey] = useState(storageKey);
   const shared = useWindowLayout();
+  const presentedViewId = useContext(WindowPresentationContext) ?? shared?.window.selectedViewId;
   const sessionBridge = useWindowSessionBridgeContext();
   const sharedRootId = shared?.window.views.some(view => view.id === props.viewId) ? props.viewId
     : shared?.resolveViewId?.(props.displayBinding?.key ?? props.viewId ?? '') ?? props.viewId;
@@ -81,7 +82,7 @@ export function SessionFamily(props: Props) {
     for (;;) { const child = shared.window.views.find(view => view.attachedTo === parent && view.binding); if (!child) break; attached.push(child); parent = child.id; }
   }
   const [localLayout, setLayout] = useState(() => restore(storageKey, target));
-  const layout: Layout = shared && rootView ? { children: attached.map(view => view.binding!), focus: Math.max(0, [rootView, ...attached].findIndex(view => view.id === shared.window.selectedViewId)) } : localLayout;
+  const layout: Layout = shared && rootView ? { children: attached.map(view => view.binding!), focus: Math.max(0, [rootView, ...attached].findIndex(view => view.id === presentedViewId)) } : localLayout;
   const [widths, setWidths] = useState<Record<string, number>>(() => {
     try { return JSON.parse(conversationSessionStorage.getItem(`${storageKey}:widths`) ?? '{}') ?? {}; } catch { return {}; }
   });
@@ -195,7 +196,7 @@ export function SessionFamily(props: Props) {
       const childSlot = index > 0 && attached[index - 1] ? sessionBridge?.slotForView(attached[index - 1]!.id) : undefined;
       const controls = index === 0 ? props.controls : <button type="button" aria-label={compact ? `Back to ${path[index - 1]!.title}` : 'Close subagent'} title={compact ? 'Back to parent session' : 'Close subagent view'} onClick={() => compact ? show(index - 1) : close(index)}>{compact ? '←' : '×'}</button>;
       return <section key={index === 0 ? "root" : sessionKey(item)} className={`lab-session-family-pane lab-session-composition${shared && rootView?.placement === 'primary' ? index === 0 ? ' lab-primary-conversation' : ' lab-side-conversation' : ''}`} aria-label={item.title} hidden={compact && focus !== index || index > 0 && attached[index - 1]?.collapsed}
-        style={compact ? undefined : index === 0 ? rootView ? { width: rootView.width, minWidth: 240, flex: 'none' } : undefined : { width: childWidth(item), minWidth: shared ? 240 : 320, flex: 'none' }}
+        style={compact ? undefined : index === 0 ? rootView ? { width: rootView.placement === 'float' ? '100%' : rootView.width, minWidth: rootView.placement === 'float' ? 0 : 240, flex: 'none' } : undefined : { width: childWidth(item), minWidth: shared ? 240 : 320, flex: 'none' }}
         onPointerDownCapture={event => { if (!(event.target as Element).closest('[data-pane-selection-ignore],.lab-conversation-history,.lab-session-heading-actions-trigger,.lab-timeline-tools-toggle,.lab-session-main-minimize')) focusPane(index); }} onFocusCapture={event => { if (!(event.target as Element).closest('[data-pane-selection-ignore],.lab-conversation-history,.lab-session-heading-actions-trigger,.lab-timeline-tools-toggle,.lab-session-main-minimize')) focusPane(index); }}>
         {(visited || active || !compact) ? <FamilySession {...props} familyRoot={index === 0} controls={controls} target={item} entries={path}
           replica={index === 0 ? props.replica : undefined} onSessionReady={index === 0 ? props.onSessionReady : undefined}
@@ -335,7 +336,7 @@ function FamilyChat({ session, pending, transport, navigation, draftStore, draft
     childrenFor={childrenFor} onOpenChildSession={navigationActions.openChildSession}
     resolveSessionLink={id => inherited?.resolveSessionLink(id) ?? local.resolveSessionLink(id)} revealEntry={inherited?.revealEntry}
     composerNotice={availabilityError ? <p role="alert">{availabilityError}</p> : undefined}
-    state={displayedState} sessionState={pending ? undefined : sessionState} sessionStatus={pending ? 'connecting' : status} attachingAgentId={operationBinding.source.agentId} actions={safeActions} draftOnly={pending || identityMismatch} operationBinding={operationBinding}
+    state={displayedState} sessionState={pending ? undefined : sessionState} sessionStatus={pending ? 'connecting' : status} attachingAgentId={operationBinding.source.agentId} actions={safeActions} draftOnly={pending || !nativeIdentityMatches} operationBinding={operationBinding}
     draftSessionKey={key} draftBinding={draftBinding ?? { store: draftStore, key: `session:${key}` }} imageDraftBinding={imageDraftBinding} imageRecipient={pending ? undefined : explicitImageRecipient ?? imageRecipient} questionDrafts={pending ? {} : questions}
     onQuestionDraftChange={(id, value) => setQuestions(current => ({ ...current, [id]: value }))}
     conversationPath={<strong className="agent-session-title">{presentedSession.title}</strong>} {...presentation} />{renderSessionFooter?.(presentationContext)}</CommunicationNavigationContext.Provider>;

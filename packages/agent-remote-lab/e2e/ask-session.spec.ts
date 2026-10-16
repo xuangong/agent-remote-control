@@ -1,22 +1,43 @@
-import { expect, test, type Page } from '@playwright/test';
+import { expect, test, type Locator, type Page } from '@playwright/test';
 import { showNewSession, showSessions } from './session-navigation';
 
 async function start(page: Page, enableAsk = true) {
   await page.goto('/');
   await showNewSession(page);
+  const created = page.waitForResponse(response => new URL(response.url()).pathname.endsWith('/create'));
   await page.getByTestId('session-create').click();
+  expect((await created).ok()).toBe(true);
   const primary = page.locator('.lab-primary-conversation > .lab-session-view');
   await expect(primary.getByTestId('prompt-input')).toBeEnabled();
+  await expect(page).toHaveTitle('New session · Agent Remote Control');
   if (enableAsk) {
     await primary.getByTestId('prompt-input').fill('/ask');
+    await expect(primary.getByTestId('prompt-submit')).toBeEnabled();
     await primary.getByTestId('prompt-input').press('Enter');
     await expect(page.getByRole('button', { name: 'Ask about this session', exact: true })).toBeVisible();
   }
   return primary;
 }
 
-test('Ask floats over its source, preserves a minimized draft and starts fresh on Clean', async ({ page }, info) => {
+async function showAskView(page: Page, visible: boolean) {
+  await page.getByRole('button', { name: 'View options', exact: true }).click();
+  const options = page.getByRole('region', { name: 'View options', exact: true });
+  const toggle = options.getByRole('checkbox', { name: 'Ask view', exact: true });
+  if (await toggle.isChecked() !== visible) await toggle.click();
+  if (await options.isVisible()) await options.press('Escape');
+}
+
+async function cleanAsk(ask: Locator) {
+  await expect(ask.getByTestId('prompt-input')).toBeEnabled();
+  const action = ask.getByRole('button', { name: 'Clean Ask', exact: true });
+  if (!await action.isVisible()) await ask.getByRole('button', { name: 'More session actions', exact: true }).click();
+  await action.click();
+}
+
+test('Ask floats over the page, preserves its source and minimized draft, and starts fresh on Clean', async ({ page }, info) => {
+  const sourceCreated = page.waitForResponse(response => new URL(response.url()).pathname.endsWith('/create'));
   await start(page);
+  const source = await (await sourceCreated).json() as { nativeSessionId: string };
   const url = page.url();
   const creations: Record<string, unknown>[] = [];
   page.on('request', request => { if (new URL(request.url()).pathname.endsWith('/create')) creations.push(request.postDataJSON()); });
@@ -24,22 +45,23 @@ test('Ask floats over its source, preserves a minimized draft and starts fresh o
   const ask = page.getByRole('dialog', { name: 'Ask', exact: true });
   await expect(ask.getByTestId('prompt-input')).toBeEnabled();
   expect(creations).toHaveLength(1);
-  expect(creations[0]!.sourceNativeSessionId).toBe(new URL(url).searchParams.get('session'));
+  expect(creations[0]!.sourceNativeSessionId).toBe(source.nativeSessionId);
   await expect(ask.locator('.lab-fork-reference')).toHaveCount(0);
   await expect(page.getByRole('navigation', { name: 'Forked sessions' })).toHaveCount(0);
   await ask.getByTestId('prompt-input').fill('Explain the choice.');
+  await expect(ask.getByTestId('prompt-submit')).toBeEnabled();
   await ask.getByTestId('prompt-input').press('Enter');
   await expect(ask.locator('.agent-message-assistant').last()).toContainText('Explain the choice.');
   await ask.getByTestId('prompt-input').fill('A draft to keep');
   await ask.getByRole('button', { name: 'Minimize Ask' }).click();
   await expect(ask).toHaveCount(0);
   await page.getByRole('button', { name: 'Ask about this session', exact: true }).click();
-  await expect(ask.getByTestId('prompt-input')).toHaveValue('A draft to keep');
+  await expect(ask.getByTestId('prompt-input')).toHaveText('A draft to keep');
   await expect(ask.locator('.agent-message-assistant').last()).toContainText('Explain the choice.');
   expect(creations).toHaveLength(1);
-  await ask.getByRole('button', { name: 'Clean Ask' }).click();
+  await cleanAsk(ask);
   await expect.poll(() => creations.length).toBe(2);
-  await expect(ask.getByTestId('prompt-input')).toHaveValue('');
+  await expect(ask.getByTestId('prompt-input')).toHaveText('');
   await expect(ask.getByTestId('timeline')).not.toContainText('Explain the choice.');
   expect(creations[1]!.sourceNativeSessionId).toBe(creations[0]!.sourceNativeSessionId);
   expect(creations[1]!.operationId).not.toBe(creations[0]!.operationId);
@@ -49,29 +71,40 @@ test('Ask floats over its source, preserves a minimized draft and starts fresh o
   expect(box.y).toBeGreaterThanOrEqual(0);
   expect(box.y + box.height).toBeLessThanOrEqual(page.viewportSize()!.height);
   await ask.getByTestId('prompt-input').fill('What should I consider next?');
+  await expect(ask.getByTestId('prompt-submit')).toBeEnabled();
   await ask.getByTestId('prompt-input').press('Enter');
   await expect(ask.locator('.agent-message-assistant').last()).toContainText('What should I consider next?');
-  await page.screenshot({ path: `../../.tmp/ask-${info.project.name}.png` });
+  await page.screenshot({ path: info.outputPath('ask-session.png') });
 });
 
 test('/ask sends its question once and stays attached to the source when sessions change', async ({ page }) => {
+  const sourceCreated = page.waitForResponse(response => new URL(response.url()).pathname.endsWith('/create'));
   const primary = await start(page, false);
-  const originalUrl = page.url();
+  const source = await (await sourceCreated).json() as { nativeSessionId: string };
   await primary.getByTestId('prompt-input').fill('/ask Why was this approach chosen?');
+  await expect(primary.getByTestId('prompt-submit')).toBeEnabled();
   await primary.getByTestId('prompt-input').press('Enter');
   const ask = page.getByRole('dialog', { name: 'Ask', exact: true });
   await expect(ask.locator('.agent-message-assistant').last()).toContainText('Why was this approach chosen?');
   await expect(ask.locator('.agent-message-user').filter({ hasText: 'Why was this approach chosen?' })).toHaveCount(1);
   await ask.getByRole('button', { name: 'Minimize Ask' }).click();
   await showNewSession(page);
+  const nextCreated = page.waitForResponse(response => new URL(response.url()).pathname.endsWith('/create'));
   await page.getByTestId('session-create').click();
-  await expect(page.getByRole('button', { name: 'Ask about this session', exact: true })).toHaveCount(0);
-  await primary.getByTestId('prompt-input').fill('/ask');
-  await primary.getByTestId('prompt-input').press('Enter');
+  const nextSource = await (await nextCreated).json() as { nativeSessionId: string };
+  expect(nextSource.nativeSessionId).not.toBe(source.nativeSessionId);
+  await primary.getByTestId('prompt-input').focus();
+  await expect(page.getByRole('button', { name: 'Ask about this session', exact: true })).toBeEnabled();
   await page.getByRole('button', { name: 'Ask about this session', exact: true }).click();
   await expect(ask.getByTestId('prompt-input')).toBeEnabled();
   await expect(ask.getByTestId('timeline')).not.toContainText('Why was this approach chosen?');
-  await page.goto(originalUrl);
+  await ask.getByRole('button', { name: 'Minimize Ask' }).click();
+  await showSessions(page);
+  await page.locator('#lab-context').getByRole('button', { name: 'Sessions', exact: true }).click();
+  await page.getByRole('region', { name: 'Discover sessions', exact: true }).getByRole('button', { name: 'Refresh', exact: true }).click();
+  const sourceKey = JSON.stringify(['local', 'recorded', source.nativeSessionId]);
+  await page.locator(`.lab-session-directory [data-session-key=${JSON.stringify(sourceKey)}] > .lab-session-branch > button.lab-session-row`).click();
+  await primary.getByTestId('prompt-input').focus();
   await page.getByRole('button', { name: 'Ask about this session', exact: true }).click();
   await expect(ask.locator('.agent-message-assistant').last()).toContainText('Why was this approach chosen?');
 });
@@ -81,6 +114,7 @@ test('a lost Clean response keeps the old conversation and retries the same crea
   await page.getByRole('button', { name: 'Ask about this session', exact: true }).click();
   const ask = page.getByRole('dialog', { name: 'Ask', exact: true });
   await ask.getByTestId('prompt-input').fill('Keep this answer until reset succeeds');
+  await expect(ask.getByTestId('prompt-submit')).toBeEnabled();
   await ask.getByTestId('prompt-input').press('Enter');
   await expect(ask.locator('.agent-message-assistant').last()).toContainText('Keep this answer');
   await ask.getByTestId('prompt-input').fill('Reset this draft too');
@@ -91,18 +125,18 @@ test('a lost Clean response keeps the old conversation and retries the same crea
     if (operations.length === 1) await route.fulfill({ status: 504, json: { error: 'Creation outcome is unknown. Retry to reconnect.' } });
     else await route.fulfill({ response });
   });
-  await ask.getByRole('button', { name: 'Clean Ask' }).click();
+  await cleanAsk(ask);
   await expect(ask.getByRole('alert')).toContainText('Creation outcome is unknown');
   await expect(ask.locator('.agent-message-assistant').last()).toContainText('Keep this answer');
   await ask.getByRole('button', { name: 'Retry', exact: true }).click();
   await expect(ask.getByRole('alert')).toHaveCount(0);
   await expect(ask.getByTestId('timeline')).not.toContainText('Keep this answer');
-  await expect(ask.getByTestId('prompt-input')).toHaveValue('');
+  await expect(ask.getByTestId('prompt-input')).toHaveText('');
   expect(operations).toHaveLength(2);
   expect(operations[1]).toBe(operations[0]);
 });
 
-test('Ask stays within a small viewport and follows the visual keyboard viewport', async ({ page }) => {
+test('Ask stays within a small viewport and follows the visual keyboard viewport', async ({ page }, info) => {
   await start(page);
   await page.getByRole('button', { name: 'Ask about this session', exact: true }).click();
   const ask = page.getByRole('dialog', { name: 'Ask', exact: true });
@@ -114,6 +148,7 @@ test('Ask stays within a small viewport and follows the visual keyboard viewport
       return box.x >= 0 && box.y >= 0 && box.x + box.width <= size.width && box.y + box.height <= size.height;
     }).toBe(true);
   }
+  await page.screenshot({ path: info.outputPath('ask-small-viewport.png') });
   await page.evaluate(() => {
     Object.defineProperty(window.visualViewport!, 'height', { configurable: true, value: 340 });
     window.visualViewport!.dispatchEvent(new Event('resize'));
@@ -127,7 +162,7 @@ test('Ask stays within a small viewport and follows the visual keyboard viewport
 });
 
 
-for (const rich of [false, true]) test(`Ask keeps its heading and multiline ${rich ? 'rich editor' : 'textarea'} above a panned mobile keyboard`, async ({ page }, info) => {
+for (const rich of [false, true]) test(`Ask keeps its heading and multiline editor ${rich ? 'with' : 'without'} image capability above a panned mobile keyboard`, async ({ page }, info) => {
   if (rich) await page.routeWebSocket(/session-channel/, route => {
     const server = route.connectToServer();
     server.onMessage(message => {
@@ -178,11 +213,10 @@ for (const rich of [false, true]) test(`Ask keeps its heading and multiline ${ri
   });
   await expect.poll(async () => {
     const box = (await ask.boundingBox())!;
-    const owner = (await page.locator('.lab-primary-conversation').boundingBox())!;
+    const owner = (await page.locator('.lab-ask-workspaces').boundingBox())!;
     return Math.abs(box.y + box.height - owner.y - owner.height);
   }).toBeLessThan(2);
-  if (rich) await expect(input).toContainText('Question line 12');
-  else await expect(input).toHaveValue(/Question line 12/);
+  await expect(input).toContainText('Question line 12');
 });
 
 test('slash questions preserve an existing Ask draft', async ({ page }) => {
@@ -192,19 +226,22 @@ test('slash questions preserve an existing Ask draft', async ({ page }) => {
   await ask.getByTestId('prompt-input').fill('Keep my unfinished thought');
   await ask.getByRole('button', { name: 'Minimize Ask' }).click();
   await primary.getByTestId('prompt-input').fill('/ask A separate question');
+  await expect(primary.getByTestId('prompt-submit')).toBeEnabled();
   await primary.getByTestId('prompt-input').press('Enter');
   await expect(ask.locator('.agent-message-assistant').last()).toContainText('A separate question');
-  await expect(ask.getByTestId('prompt-input')).toHaveValue('Keep my unfinished thought');
+  await expect(ask.getByTestId('prompt-input')).toHaveText('Keep my unfinished thought');
 });
 
-test('changing focus to a side conversation keeps the primary Ask in its own view', async ({ page }, info) => {
+test('changing focus to a side conversation keeps the open Ask bound to the primary source', async ({ page }, info) => {
   test.skip(info.project.name !== 'chromium-desktop', 'Two visible conversations require desktop width.');
   const primary = await start(page);
   await primary.getByTestId('prompt-input').fill('/side');
+  await expect(primary.getByTestId('prompt-submit')).toBeEnabled();
   await primary.getByTestId('prompt-input').press('Enter');
-  const side = page.getByRole('complementary', { name: 'Side conversation' }).locator(':scope > .lab-session-view');
+  const side = page.locator('.lab-side-conversation');
   await expect(side.getByTestId('prompt-input')).toBeEnabled();
   await primary.getByTestId('prompt-input').fill('/ask Explain this conversation');
+  await expect(primary.getByTestId('prompt-submit')).toBeEnabled();
   await primary.getByTestId('prompt-input').press('Enter');
   const ask = page.getByRole('dialog', { name: 'Ask', exact: true });
   await expect(ask.getByTestId('prompt-input')).toBeEnabled();
@@ -231,12 +268,14 @@ test('a subsequent slash question keeps its uncertain delivery and retries with 
   });
   const primary = await start(page);
   await primary.getByTestId('prompt-input').fill('/ask First question');
+  await expect(primary.getByTestId('prompt-submit')).toBeEnabled();
   await primary.getByTestId('prompt-input').press('Enter');
   const ask = page.getByRole('dialog', { name: 'Ask', exact: true });
   await expect(ask.locator('.agent-message-assistant').last()).toContainText('First question');
   await ask.getByRole('button', { name: 'Minimize Ask' }).click();
   dropNext = true;
   await primary.getByTestId('prompt-input').fill('/ask Uncertain second question');
+  await expect(primary.getByTestId('prompt-submit')).toBeEnabled();
   await primary.getByTestId('prompt-input').press('Enter');
   await expect(ask.locator('[data-delivery-state="unconfirmed"]')).toContainText('Uncertain second question');
   await ask.getByRole('button', { name: 'Minimize Ask' }).click();
@@ -258,11 +297,12 @@ test('a question queued while Ask opens survives minimizing and reload', async (
     await route.fulfill({ response });
   });
   await primary.getByTestId('prompt-input').fill('/ask Keep this queued question');
+  await expect(primary.getByTestId('prompt-submit')).toBeEnabled();
   await primary.getByTestId('prompt-input').press('Enter');
   const ask = page.getByRole('dialog', { name: 'Ask', exact: true });
   await ask.getByRole('button', { name: 'Minimize Ask' }).click();
   release();
-  await expect(primary.getByTestId('prompt-input')).toHaveValue('');
+  await expect(primary.getByTestId('prompt-input')).toHaveText('');
   await expect(ask).toHaveCount(0);
   await page.reload();
   await page.getByRole('button', { name: 'Ask about this session', exact: true }).click();
@@ -280,28 +320,29 @@ test('Ask uses the same independent display controls as the source Session View'
   await trigger.click();
   const options = ask.getByRole('region', { name: 'Session view options', exact: true });
   await expect(options.getByRole('radio', { name: 'Content only', exact: true })).toBeChecked();
-  await options.getByRole('radio', { name: 'Simple conversation', exact: true }).check();
+  await options.getByRole('radio', { name: 'Simple conversation', exact: true }).click();
+  await expect(options.getByRole('radio', { name: 'Simple conversation', exact: true })).toBeChecked();
   await trigger.press('Escape');
   await expect(ask.locator('.agent-tool').first()).toBeVisible();
   await ask.getByRole('button', { name: 'Minimize Ask' }).click();
   await page.getByRole('button', { name: 'Ask about this session', exact: true }).click();
   await trigger.click();
   await expect(options.getByRole('radio', { name: 'Simple conversation', exact: true })).toBeChecked();
-  await options.getByRole('radio', { name: 'Content only', exact: true }).check();
+  await options.getByRole('radio', { name: 'Content only', exact: true }).click();
+  await expect(options.getByRole('radio', { name: 'Content only', exact: true })).toBeChecked();
   await trigger.press('Escape');
   await expect(ask.locator('.agent-reasoning, .agent-tool')).toHaveCount(0);
 });
 
-test('Ask remains attached to the source edge across resizing and reload', async ({ page }) => {
+test('the global Ask launcher stays within the viewport across resizing and reload', async ({ page }) => {
   await start(page);
-  const owner = page.locator('.lab-primary-conversation');
   const button = page.getByRole('button', { name: 'Ask about this session', exact: true });
   for (const width of [1440, 390, 1280]) {
     await page.setViewportSize({ width, height: 900 });
     await expect.poll(async () => {
-      const source = (await owner.boundingBox())!, edge = (await button.boundingBox())!;
-      return Math.abs(source.x + source.width - edge.x - edge.width);
-    }).toBeLessThan(1);
+      const box = (await button.boundingBox())!;
+      return box.x >= 12 && box.y >= 12 && box.x + box.width <= width - 12 && box.y + box.height <= 888;
+    }).toBe(true);
   }
   await page.reload();
   await expect(button).toBeVisible();
@@ -315,26 +356,41 @@ test('Ask remains attached to the source edge across resizing and reload', async
 test('Ask observes activity while minimized, signals changes itself, and switches subscriptions on Clean', async ({ page }) => {
   const activity = new Map<number, { agentId: string; emit(status: string): void }>();
   const content = new Map<number, string>();
+  const reportedStatuses = new Map<string, string>();
   let activityChannels = 0;
   await page.routeWebSocket(/session-channel/, route => {
     const server = route.connectToServer();
     const isActivity = new URL(route.url()).searchParams.get('observation') === 'activity';
-    if (isActivity) activityChannels++;
+    if (isActivity) {
+      activityChannels++;
+      server.onMessage(message => {
+        const envelope = JSON.parse(String(message));
+        const frame = envelope.type === 'message' ? envelope.message : envelope;
+        if (frame.type === 'agent_activity' && reportedStatuses.has(frame.payload.agentId)) {
+          frame.payload.status = reportedStatuses.get(frame.payload.agentId);
+        }
+        route.send(JSON.stringify(envelope));
+      });
+    }
     route.onMessage(message => {
       const frame = JSON.parse(String(message));
       if (frame.type === 'subscribe') {
-        if (isActivity) activity.set(frame.subscriptionId, { agentId: frame.agentId, emit: status => route.send(JSON.stringify({
+        if (isActivity) activity.set(frame.subscriptionId, { agentId: frame.agentId, emit: status => {
+          reportedStatuses.set(frame.agentId, status);
+          route.send(JSON.stringify({
           protocolVersion: '1.8.0', type: 'message', subscriptionId: frame.subscriptionId,
           message: { protocolVersion: '1.8.0', type: 'agent_activity', payload: { agentId: frame.agentId, status } },
-        })) });
+          }));
+        } });
         else content.set(frame.subscriptionId, frame.agentId);
       }
       if (frame.type === 'unsubscribe') (isActivity ? activity : content).delete(frame.subscriptionId);
       server.send(message);
     });
   });
+  const sourceCreated = page.waitForResponse(response => new URL(response.url()).pathname.endsWith('/create'));
   await start(page);
-  const primaryAgent = new URL(page.url()).searchParams.get('agent');
+  const { agentId: primaryAgent } = await (await sourceCreated).json() as { agentId: string };
   const button = page.getByRole('button', { name: 'Ask about this session', exact: true });
   const floating = page.locator('.lab-ask-floating');
   await button.click();
@@ -342,32 +398,40 @@ test('Ask observes activity while minimized, signals changes itself, and switche
   await expect(ask.getByTestId('prompt-input')).toBeEnabled();
   await expect.poll(() => activity.size).toBe(2);
   const first = [...activity.values()].find(item => item.agentId !== primaryAgent)!;
+  const emit = (status: string) => {
+    const subscription = [...activity.values()].find(item => item.agentId === first.agentId);
+    expect(subscription).toBeDefined();
+    subscription!.emit(status);
+  };
   await ask.getByRole('button', { name: 'Minimize Ask' }).click();
   await expect.poll(() => [...content.values()].includes(first.agentId)).toBe(false);
   expect([...activity.values()]).toContain(first);
   await expect(floating).toHaveAttribute('data-status', 'idle');
   const idleColor = await button.evaluate(element => getComputedStyle(element).backgroundColor);
-  first.emit('running');
+  emit('running');
   await expect(floating).toHaveAttribute('data-status', 'working');
   const workingColor = await button.evaluate(element => getComputedStyle(element).backgroundColor);
   expect(workingColor).not.toBe(idleColor);
-  first.emit('waiting');
+  emit('waiting');
   await expect(floating).toHaveAttribute('data-alert', 'pending');
   await expect(button).toHaveCSS('animation-name', 'lab-tracking-pending-pulse');
   await button.click();
+  await expect(ask.getByTestId('prompt-input')).toBeEnabled();
   await expect(floating).not.toHaveAttribute('data-alert');
   await ask.getByRole('button', { name: 'Minimize Ask' }).click();
   await expect(floating).toHaveAttribute('data-status', 'pending');
   await expect(button).toHaveCSS('animation-name', 'none');
   const pendingColor = await button.evaluate(element => getComputedStyle(element).backgroundColor);
   expect(pendingColor).not.toBe(workingColor); expect(pendingColor).not.toBe(idleColor);
-  first.emit('running'); first.emit('idle');
+  emit('running');
+  await expect(floating).toHaveAttribute('data-status', 'working');
+  emit('idle');
   await expect(floating).toHaveAttribute('data-alert', 'idle');
   await expect(button).toHaveCSS('animation-name', 'lab-tracking-idle-pulse');
   await page.emulateMedia({ reducedMotion: 'reduce' });
   await expect(button).toHaveCSS('animation-name', 'none');
   await button.click();
-  await ask.getByRole('button', { name: 'Clean Ask' }).click();
+  await cleanAsk(ask);
   await expect(ask.getByTestId('prompt-input')).toBeEnabled();
   await expect.poll(() => [...activity.values()].some(item => item.agentId === first.agentId)).toBe(false);
   expect(activity.size).toBe(2); expect(activityChannels).toBe(1);
@@ -410,19 +474,19 @@ test('Ask reconciles a delayed standalone keyboard viewport after focus and resu
   });
   await expect.poll(async () => {
     const box = (await ask.boundingBox())!;
-    const owner = (await page.locator('.lab-primary-conversation').boundingBox())!;
+    const owner = (await page.locator('.lab-ask-workspaces').boundingBox())!;
     return Math.abs(box.y + box.height - owner.y - owner.height);
   }).toBeLessThan(1);
-  await expect(input).toHaveValue('Standalone keyboard draft');
+  await expect(input).toHaveText('Standalone keyboard draft');
 });
 
 
-test('desktop Ask opens within its source and leaves global navigation outside the overlay', async ({ page, isMobile }) => {
+test('desktop Ask opens within the global surface and leaves navigation available', async ({ page, isMobile }) => {
   test.skip(isMobile, 'Desktop contained overlay.');
   await page.setViewportSize({ width: 1440, height: 1000 });
   await start(page);
   await showSessions(page);
-  const owner = page.locator('.lab-primary-conversation');
+  const owner = page.locator('.lab-ask-workspaces');
   const button = page.getByRole('button', { name: 'Ask about this session', exact: true });
   await button.click();
   const ask = page.getByRole('dialog', { name: 'Ask', exact: true });
@@ -452,7 +516,7 @@ test('desktop Ask keeps its controls visible in a wide short window', async ({ p
 });
 
 
-test('desktop Ask title dragging keeps its edge tab fixed and preserves position through reload', async ({ page, isMobile }) => {
+test('desktop Ask title dragging keeps its launcher fixed and preserves position through reload', async ({ page, isMobile }) => {
   test.skip(isMobile, 'Desktop window dragging.');
   await page.setViewportSize({ width: 1440, height: 1000 });
   await page.emulateMedia({ reducedMotion: 'reduce' });
@@ -466,10 +530,11 @@ test('desktop Ask title dragging keeps its edge tab fixed and preserves position
   await button.click();
   await ask.getByTestId('prompt-input').fill('Keep my question');
   const before = (await ask.boundingBox())!;
-  const heading = (await ask.locator('.lab-workbench-heading').boundingBox())!;
-  await page.mouse.move(heading.x + 60, heading.y + 24);
+  const heading = (await ask.locator('.lab-session-heading-title').boundingBox())!;
+  const titleCenter = { x: heading.x + heading.width / 2, y: heading.y + heading.height / 2 };
+  await page.mouse.move(titleCenter.x, titleCenter.y);
   await page.mouse.down();
-  await page.mouse.move(heading.x - 140, heading.y + 114, { steps: 12 });
+  await page.mouse.move(titleCenter.x - 200, titleCenter.y + 90, { steps: 12 });
   await page.mouse.up();
   await expect.poll(async () => (await ask.boundingBox())!.x).toBeCloseTo(before.x - 200, 0);
   const moved = (await ask.boundingBox())!;
@@ -477,15 +542,15 @@ test('desktop Ask title dragging keeps its edge tab fixed and preserves position
   expect(await floating.boundingBox()).toEqual(anchor);
   await ask.getByRole('button', { name: 'Minimize Ask' }).click();
   await button.click();
-  await expect(ask.getByTestId('prompt-input')).toHaveValue('Keep my question');
+  await expect(ask.getByTestId('prompt-input')).toHaveText('Keep my question');
   await expect.poll(() => ask.boundingBox()).toEqual(moved);
   await page.reload();
-  await expect(ask.getByTestId('prompt-input')).toHaveValue('Keep my question');
+  await expect(ask.getByTestId('prompt-input')).toHaveText('Keep my question');
   await expect.poll(() => ask.boundingBox()).toEqual(moved);
   expect(creations).toBe(1);
 });
 
-test('desktop Ask title dragging keeps controls inside the source at every edge', async ({ page, isMobile }) => {
+test('desktop Ask title dragging keeps controls inside the page at every edge', async ({ page, isMobile }) => {
   test.skip(isMobile, 'Desktop window dragging.');
   await page.setViewportSize({ width: 1280, height: 800 });
   await page.emulateMedia({ reducedMotion: 'reduce' });
@@ -493,10 +558,10 @@ test('desktop Ask title dragging keeps controls inside the source at every edge'
   await page.getByRole('button', { name: 'Ask about this session', exact: true }).click();
   const ask = page.getByRole('dialog', { name: 'Ask', exact: true });
   await expect(ask.getByTestId('prompt-input')).toBeEnabled();
-  const source = (await page.locator('.lab-primary-conversation').boundingBox())!;
+  const source = (await page.locator('.lab-ask-workspaces').boundingBox())!;
   for (const target of [{ x: 0, y: 0 }, { x: 1280, y: 800 }]) {
-    const heading = (await ask.locator('.lab-workbench-heading').boundingBox())!;
-    await page.mouse.move(heading.x + 60, heading.y + 24);
+    const heading = (await ask.locator('.lab-session-heading-title').boundingBox())!;
+    await page.mouse.move(heading.x + heading.width / 2, heading.y + heading.height / 2);
     await page.mouse.down(); await page.mouse.move(target.x, target.y, { steps: 10 }); await page.mouse.up();
     const box = (await ask.boundingBox())!;
     expect(box.x).toBeGreaterThanOrEqual(source.x + 12);
@@ -508,15 +573,15 @@ test('desktop Ask title dragging keeps controls inside the source at every edge'
   }
   const before = (await ask.boundingBox())!;
   await page.setViewportSize({ width: 1280, height: 450 });
-  await expect.poll(async () => { const box = (await ask.boundingBox())!; const owner = (await page.locator('.lab-primary-conversation').boundingBox())!; return box.y >= owner.y && box.y + box.height <= owner.y + owner.height; }).toBe(true);
+  await expect.poll(async () => { const box = (await ask.boundingBox())!; const owner = (await page.locator('.lab-ask-workspaces').boundingBox())!; return box.y >= owner.y && box.y + box.height <= owner.y + owner.height; }).toBe(true);
   await page.setViewportSize({ width: 1280, height: 800 });
   await expect.poll(async () => (await ask.boundingBox())!.y).toBeCloseTo(before.y, 0);
-  await ask.getByRole('button', { name: 'Clean Ask' }).click();
+  await cleanAsk(ask);
   await expect(ask.getByTestId('prompt-input')).toBeEnabled();
   expect((await ask.boundingBox())!.x).toBeCloseTo(before.x, 0);
 });
 
-test('mobile Ask continues covering its source when its heading is dragged', async ({ page }) => {
+test('mobile Ask continues covering the page when its heading is dragged', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await page.emulateMedia({ reducedMotion: 'reduce' });
   await start(page);
@@ -524,15 +589,16 @@ test('mobile Ask continues covering its source when its heading is dragged', asy
   const ask = page.getByRole('dialog', { name: 'Ask', exact: true });
   await expect(ask.getByTestId('prompt-input')).toBeEnabled();
   const before = (await ask.boundingBox())!;
-  const heading = (await ask.locator('.lab-workbench-heading').boundingBox())!;
-  await page.mouse.move(heading.x + 60, heading.y + 24);
-  await page.mouse.down(); await page.mouse.move(heading.x + 120, heading.y + 120, { steps: 8 }); await page.mouse.up();
+  const heading = (await ask.locator('.lab-session-heading-title').boundingBox())!;
+  const titleCenter = { x: heading.x + heading.width / 2, y: heading.y + heading.height / 2 };
+  await page.mouse.move(titleCenter.x, titleCenter.y);
+  await page.mouse.down(); await page.mouse.move(titleCenter.x + 60, titleCenter.y + 96, { steps: 8 }); await page.mouse.up();
   expect(await ask.boundingBox()).toEqual(before);
-  expect(before).toEqual(await page.locator('.lab-primary-conversation').boundingBox());
+  expect(before).toEqual(await page.locator('.lab-ask-workspaces').boundingBox());
 });
 
 
-test('/ask is off by default and toggles UI and subscriptions without losing the conversation', async ({ page }) => {
+test('/ask is off by default and hiding its view preserves the open conversation and activity', async ({ page }) => {
   const activity = new Map<number, string>();
   const content = new Map<number, string>();
   let creations = 0;
@@ -552,8 +618,9 @@ test('/ask is off by default and toggles UI and subscriptions without losing the
   const ask = page.getByRole('dialog', { name: 'Ask', exact: true });
   const toggle = async () => {
     await primary.getByTestId('prompt-input').fill('/ask');
+    await expect(primary.getByTestId('prompt-submit')).toBeEnabled();
     await primary.getByTestId('prompt-input').press('Enter');
-    await expect(primary.getByTestId('prompt-input')).toHaveValue('');
+    await expect(primary.getByTestId('prompt-input')).toHaveText('');
   };
   await expect(button).toHaveCount(0);
   await expect(ask).toHaveCount(0);
@@ -568,14 +635,16 @@ test('/ask is off by default and toggles UI and subscriptions without losing the
   await expect.poll(() => activity.size).toBe(2);
   await expect.poll(() => content.size).toBe(2);
   await ask.getByTestId('prompt-input').fill('Remember this answer');
+  await expect(ask.getByTestId('prompt-submit')).toBeEnabled();
   await ask.getByTestId('prompt-input').press('Enter');
   await expect(ask.locator('.agent-message-assistant').last()).toContainText('Remember this answer');
-  await ask.getByTestId('prompt-input').fill('Preserve this draft while disabled');
-  await toggle();
+  await ask.getByTestId('prompt-input').fill('Preserve this draft while hidden');
+  await showAskView(page, false);
   await expect(button).toHaveCount(0);
   await expect(ask).toHaveCount(0);
-  await expect.poll(() => activity.size).toBe(1);
+  await expect.poll(() => activity.size).toBe(2);
   await expect.poll(() => content.size).toBe(1);
+  activity.clear(); content.clear();
   await page.reload();
   // Reload may retain the previous page's control lease; Ask recovery does not bypass it.
   const restoredInput = primary.getByTestId('prompt-input');
@@ -584,11 +653,10 @@ test('/ask is off by default and toggles UI and subscriptions without losing the
   if (await takeControl.isVisible()) await takeControl.click();
   await expect(restoredInput).toBeEditable();
   await expect(button).toHaveCount(0);
-  await toggle();
+  await showAskView(page, true);
   await expect(button).toBeVisible();
-  await expect(ask).toHaveCount(0);
-  await button.click();
-  await expect(ask.getByTestId('prompt-input')).toHaveValue('Preserve this draft while disabled');
+  await expect(ask).toBeVisible();
+  await expect(ask.getByTestId('prompt-input')).toHaveText('Preserve this draft while hidden');
   await expect(ask.locator('.agent-message-assistant').last()).toContainText('Remember this answer');
   expect(creations).toBe(1);
   const askInput = ask.getByTestId('prompt-input');
@@ -597,21 +665,24 @@ test('/ask is off by default and toggles UI and subscriptions without losing the
   if (await takeAskControl.isVisible()) await takeAskControl.click();
   await expect(askInput).toBeEditable();
   await ask.getByTestId('prompt-input').fill('/ask');
+  await expect(ask.getByTestId('prompt-submit')).toBeEnabled();
   await ask.getByTestId('prompt-input').press('Enter');
   await expect(button).toHaveCount(0);
   await expect(ask).toHaveCount(0);
-  await expect.poll(() => activity.size).toBe(1);
+  await expect.poll(() => activity.size).toBe(2);
   await expect.poll(() => content.size).toBe(1);
 });
 
-for (const reopenEarly of [false, true]) test(`Ask handles disable during creation and reopens ${reopenEarly ? 'before' : 'after'} the response`, async ({ page }) => {
+for (const reopenEarly of [false, true]) test(`Ask handles hiding its view during creation and reopens ${reopenEarly ? 'before' : 'after'} the response`, async ({ page }) => {
   const frames: { type: string; agentId?: string }[] = [];
   await page.routeWebSocket(/session-channel/, route => {
     const server = route.connectToServer();
-    route.onMessage(message => { frames.push(JSON.parse(String(message))); server.send(message); });
+    const isActivity = new URL(route.url()).searchParams.get('observation') === 'activity';
+    route.onMessage(message => { if (!isActivity) frames.push(JSON.parse(String(message))); server.send(message); });
   });
+  const sourceCreated = page.waitForResponse(response => new URL(response.url()).pathname.endsWith('/create'));
   const primary = await start(page);
-  const primaryAgent = new URL(page.url()).searchParams.get('agent');
+  const { agentId: primaryAgent } = await (await sourceCreated).json() as { agentId: string };
   let release!: () => void;
   let held = false;
   let responded = false;
@@ -629,26 +700,21 @@ for (const reopenEarly of [false, true]) test(`Ask handles disable during creati
   const ask = page.getByRole('dialog', { name: 'Ask', exact: true });
   await button.click();
   await expect.poll(() => held).toBe(true);
-  await primary.getByTestId('prompt-input').fill('/ask');
-  await primary.getByTestId('prompt-input').press('Enter');
+  await showAskView(page, false);
   await expect(button).toHaveCount(0);
   await expect(ask).toHaveCount(0);
   if (reopenEarly) {
-    await primary.getByTestId('prompt-input').fill('/ask');
-    await primary.getByTestId('prompt-input').press('Enter');
-    await button.click();
+    await showAskView(page, true);
     await expect(ask).toBeVisible();
   }
   release();
   await expect.poll(() => responded).toBe(true);
-  await expect(primary.getByTestId('prompt-input')).toHaveValue('');
+  await expect(primary.getByTestId('prompt-input')).toHaveText('');
   if (!reopenEarly) {
     await expect(button).toHaveCount(0);
     await expect(ask).toHaveCount(0);
     expect(frames.filter(frame => frame.type === 'subscribe' && frame.agentId !== primaryAgent)).toHaveLength(0);
-    await primary.getByTestId('prompt-input').fill('/ask');
-    await primary.getByTestId('prompt-input').press('Enter');
-    await button.click();
+    await showAskView(page, true);
   }
   await expect(ask.getByTestId('prompt-input')).toBeEnabled();
   expect(creations).toBe(1);

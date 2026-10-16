@@ -125,12 +125,23 @@ it('invalidates a previous attachment when the native Ask is unavailable and ret
   expect(fixture.requests.at(-1)).toEqual({ path: '/v1/remote/attach', body: { providerId: 'codex', nativeSessionId: 'ask-native' } });
 });
 
-it('retains the attached Ask when an attempted Clean fails to create its replacement', async () => {
+it('retains the attached Ask after an uncertain Clean and retries its original creation without the source snapshot', async () => {
   const fixture = await setup();
   fixture.failCreate('Creation outcome is unknown');
   await act(async () => { await expect(fixture.current().open(state, source, '', true, { associationOwner: ownerId(source) })).rejects.toThrow('Creation outcome is unknown'); });
   expect(fixture.current().entryFor(source, ownerId(source))).toMatchObject({ attached: true, record: { target: { nativeSessionId: 'ask-native' } } });
   expect(fixture.current().drafts.get(sessionKey(source))).toBe('Unsent Ask draft');
+  const pending = fixture.current().entryFor(source, ownerId(source)).pending!;
+  expect(pending.creationKey).toBe(ownerId(source));
+  const recordIds = fixture.current().store.all().map(record => record.id);
+  fixture.failCreate();
+  await act(async () => { await fixture.current().open(undefined, source, '', false, { associationOwner: ownerId(source), existingOnly: true }); });
+  expect(fixture.requests).toHaveLength(3);
+  expect(fixture.requests[2]).toEqual(fixture.requests[1]);
+  expect(fixture.requests[2]).toMatchObject({ path: '/v1/remote/create', body: { operationId: pending.id, sourceNativeSessionId: source.nativeSessionId } });
+  expect(fixture.current().store.all().map(record => record.id)).toEqual(recordIds);
+  expect(fixture.current().entryFor(source, ownerId(source))).toMatchObject({ attached: true, pending: undefined, record: { id: pending.id } });
+  expect(fixture.current().drafts.get(sessionKey(source))).toBe('');
 });
 
 it.each(['minimize', 'disable'])('keeps Ask closed after %s and reload while retaining its identity and draft', async action => {
@@ -254,7 +265,7 @@ it('only retries an uncertain saved creation explicitly with its original operat
   expect(fixture.current().entryFor(source, ownerId(source)).error).toContain('saved Ask session');
   expect(fixture.requests).toHaveLength(2);
   fixture.failCreate();
-  await act(async () => { await fixture.current().open(state, source, '', false, { associationOwner: ownerId(source) }); });
+  await act(async () => { await fixture.current().open(undefined, source, '', false, { associationOwner: ownerId(source), existingOnly: true }); });
   expect(fixture.requests.at(-1)).toMatchObject({ path: '/v1/remote/create', body: { operationId } });
   expect(fixture.current().entryFor(source, ownerId(source))).toMatchObject({ attached: true, pending: undefined, record: { id: operationId } });
 });
@@ -442,10 +453,27 @@ it.each(['missing', 'denied', 'malformed'] as const)('rejects explicit retry of 
   });
   f.failCreate();
   try {
-    await act(async () => { await expect(f.current().open(state, source, '', false, { associationOwner: ownerId(source) })).rejects.toThrow(/unavailable/i); });
+    await act(async () => { await expect(f.current().open(undefined, source, '', false, { associationOwner: ownerId(source), existingOnly: true })).rejects.toThrow(/unavailable/i); });
     expect(f.requests).toHaveLength(2);
     expect(f.current().entryFor(source, ownerId(source)).pending?.id).toBe(pending.id);
   } finally { intercept.mockRestore(); }
+});
+
+it.each(['missing', 'changed'] as const)('does not retry an uncertain Clean when its original creation key is %s', async failure => {
+  const fixture = await setup();
+  fixture.failCreate('Creation outcome is unknown');
+  await act(async () => { await expect(fixture.current().open(state, source, '', true, { associationOwner: ownerId(source) })).rejects.toThrow('Creation outcome is unknown'); });
+  const pending = fixture.current().entryFor(source, ownerId(source)).pending!;
+  const raw = fixture.current().store.getLocal(pending.id)!;
+  conversationSessionStorage.setItem(`agent-remote-forks:ask:${baseUrl}:record:${pending.id}`,
+    JSON.stringify({ ...raw, creationKey: failure === 'missing' ? undefined : 'different-owner' }));
+  fixture.failCreate();
+  await act(async () => {
+    await expect(fixture.current().open(undefined, source, '', false, { associationOwner: ownerId(source), existingOnly: true })).rejects.toThrow('original Ask creation changed');
+  });
+  expect(fixture.requests).toHaveLength(2);
+  expect(fixture.current().entryFor(source, ownerId(source))).toMatchObject({ attached: true, pending: { id: pending.id }, record: { target: { nativeSessionId: 'ask-native' } } });
+  expect(fixture.current().drafts.get(sessionKey(source))).toBe('Unsent Ask draft');
 });
 
 it('requires configuration to finish before attachment success and invalidates current Ask on configuration failure', async () => {

@@ -3,10 +3,60 @@ import { ToastProvider } from './Toast.js';
 import { act, useEffect, useState } from 'react';
 import { describe, expect, it, vi } from 'vitest';
 
-import { render, unmount } from '../test/setup.js';
+import { render, setPromptText, unmount } from '../test/setup.js';
 import { replicaState } from '../test/fixtures.js';
 import { SessionControlNotice } from './SessionControlNotice.js';
 import { LabWorkbench } from './LabWorkbench.js';
+import { AskViewCommand, AskViewScope } from '../hooks/useAskVisibility.js';
+import { askCommand } from '../fork-actions.js';
+
+it('offers only the global Ask switch when a session has no source-question handler', async () => {
+  const execute = vi.fn(async () => ({ text: 'Ask view shown.' }));
+  const send = vi.fn(async () => {});
+  function Harness() {
+    const [draft, setDraft] = useState('/ask');
+    return <AskViewScope.Provider value={execute}>
+    <LabWorkbench state={replicaState} sessionStatus="ready" messageDraft={draft} onMessageDraftChange={setDraft} actions={{ sendMessage: send }} />
+    </AskViewScope.Provider>;
+  }
+  const container = await render(<Harness />);
+  expect(container.querySelector('[role="option"]')?.textContent).toContain(AskViewCommand.description);
+  expect(container.textContent).not.toContain('add a question');
+  await act(async () => {
+    const input = container.querySelector<HTMLElement>('[data-testid="prompt-input"]')!;
+    setPromptText(input, '/ask on'); input.dispatchEvent(new Event('input', { bubbles: true }));
+  });
+  await act(async () => container.querySelector<HTMLButtonElement>('[data-testid="prompt-submit"]')!.click());
+  expect(execute).toHaveBeenCalledWith(' on');
+  expect(send).not.toHaveBeenCalled();
+});
+
+it.each(['on', 'explain the current task'])('routes Ask arguments %s to the matching global or source handler', async args => {
+  const execute = vi.fn(async () => ({}));
+  const source = vi.fn(async () => ({}));
+  function Harness() {
+    const [draft, setDraft] = useState('/ask');
+    return <AskViewScope.Provider value={execute}>
+    <LabWorkbench state={replicaState} sessionStatus="ready" messageDraft={draft} onMessageDraftChange={setDraft} actions={{ sendMessage: vi.fn(async () => {}) }}
+      consoleCommands={[askCommand]} onExecuteConsoleCommand={source} />
+    </AskViewScope.Provider>;
+  }
+  const container = await render(<Harness />);
+  expect(container.querySelectorAll('[role="option"]')).toHaveLength(1);
+  expect(container.querySelector('[role="option"]')?.textContent).toContain(askCommand.description);
+  await act(async () => {
+    const input = container.querySelector<HTMLElement>('[data-testid="prompt-input"]')!;
+    setPromptText(input, `/ask ${args}`); input.dispatchEvent(new Event('input', { bubbles: true }));
+  });
+  await act(async () => container.querySelector<HTMLButtonElement>('[data-testid="prompt-submit"]')!.click());
+  if (args === 'on') {
+    expect(execute).toHaveBeenCalledWith(' on');
+    expect(source).not.toHaveBeenCalled();
+  } else {
+    expect(source).toHaveBeenCalledWith(askCommand.id, ` ${args}`);
+    expect(execute).not.toHaveBeenCalled();
+  }
+});
 
 it('offers sign-in inside the permission panel while preserving the session and draft', async () => {
   window.history.replaceState(null, '', '/?host=studio&provider=codex&session=native-1&debug=1');

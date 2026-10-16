@@ -36,7 +36,7 @@ afterEach(() => {
   localStorage.clear(); sessionStorage.clear();
 });
 
-async function fixture(historyPlacement?: 'dock' | 'float') {
+async function fixture(historyPlacement?: 'dock' | 'float', hiddenAskSource?: 'main' | 'ordinary-view' | 'side-view', askVisible = false) {
   configureImageDraftPersistence(() => false);
   vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} });
   const first: WorkspaceWindow = {
@@ -61,6 +61,17 @@ async function fixture(historyPlacement?: 'dock' | 'float') {
           ...(history ? {} : { predecessor }), ancestors: [] };
       } };
     });
+  }
+  if (hiddenAskSource) {
+    vi.stubGlobal('matchMedia', (media: string) => ({ matches: media === '(max-width: 1180px)', media, addEventListener() {}, removeEventListener() {} }));
+    if (hiddenAskSource === 'side-view') first.views.splice(1, 0, { ...createWindowView('side-view', {
+      hostId: 'local', providerId: 'recorded', nativeSessionId: 'side-session', title: 'Side',
+    }, 'attached'), attachedTo: 'main' });
+    const source = first.views.find(view => view.id === hiddenAskSource)!;
+    first.views.push({ ...createWindowView('selected-ask', undefined, 'float'), closeWith: source.id,
+      bindingPolicy: 'managed', feature: createWindowFeature({ kind: 'ask', id: 'saved-ask', source: source.binding! }) });
+    first.selectedViewId = 'selected-ask';
+    localStorage.setItem('agent-remote:ask-view', String(askVisible));
   }
   const second: WorkspaceWindow = { schemaVersion: 2, id: 'second', revision: 0, title: 'Second', selectedPrimaryViewId: 'main', selectedViewId: 'main', views: [createWindowView('main', undefined, 'primary')] };
   for (const window of [first, second]) localStorage.setItem(`agent-remote:recovery:${scope}:shared-window:${window.id}`, JSON.stringify(window));
@@ -110,6 +121,34 @@ it('does not gather Team members into a new Window when selecting its existing l
   const storedFirst = JSON.parse(localStorage.getItem(`agent-remote:recovery:${scope}:shared-window:first`)!);
   expect(storedFirst.selectedViewId).toBe('leader-view');
   expect(storedFirst.views).toHaveLength(2);
+}, 10000);
+
+it('restores source families behind the visible selected Ask', async () => {
+  const test = await fixture('dock', 'side-view', true);
+  await act(async () => { (test.container.querySelector('#lab-context .lab-rail-close') as HTMLButtonElement | null)?.click(); });
+  await vi.waitFor(() => {
+    expect(test.container.querySelector('.lab-primary-conversation .lab-session-view')).not.toBeNull();
+    expect(test.container.querySelector('.lab-side-conversation .lab-session-view')).not.toBeNull();
+  });
+  expect(test.read().window?.selectedViewId).toBe('selected-ask');
+}, 10000);
+
+it.each(['main', 'ordinary-view', 'side-view'] as const)('shows the hidden Ask source %s in compact layout without changing shared selection', async sourceViewId => {
+  const test = await fixture('dock', sourceViewId);
+  await act(async () => { (test.container.querySelector('#lab-context .lab-rail-close') as HTMLButtonElement | null)?.click(); });
+  await vi.waitFor(() => {
+    const source = test.container.querySelector(sourceViewId === 'main' ? '[data-primary-group-id="main"]'
+      : sourceViewId === 'side-view' ? '.lab-side-conversation' : '[data-view-id="ordinary-view"]');
+    expect(source).not.toBeNull();
+    expect(source?.closest('[hidden]')).toBeNull();
+    expect(source?.querySelector('.lab-session-view')).not.toBeNull();
+  });
+  expect(test.container.querySelector('[role="dialog"][aria-label="Ask"]')).toBeNull();
+  expect(test.menu().sourceViewId).toBe(`first/${sourceViewId}`);
+  expect(test.menu().source?.nativeSessionId).toBe(test.first.views.find(view => view.id === sourceViewId)?.binding?.nativeSessionId);
+  expect(test.menu().currentSession?.nativeSessionId).toBe(test.menu().source?.nativeSessionId);
+  expect(test.read().window?.selectedViewId).toBe('selected-ask');
+  expect(test.read().window?.views.find(view => view.id === 'selected-ask')?.collapsed).toBe(false);
 }, 10000);
 
 it.each(['dock', 'float'] as const)('opens handoff history and returns to current in the same ordinary %s', async placement => {

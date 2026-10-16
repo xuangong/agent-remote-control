@@ -3,7 +3,7 @@ import { AgentReplica, RemoteSessionClient, type RemoteAgentTransport } from '@o
 import type { LabWorkbenchActions } from './components/LabWorkbench.js';
 import { captureForkContext, contextPrefix, type ForkStore, type SessionFork } from './session-forks.js';
 
-export const askCommand = { id: 'console:ask', name: 'ask', kind: 'command' as const, description: 'Toggle Ask on/off, or add a question to start chatting' };
+export const askCommand = { id: 'console:ask', name: 'ask', kind: 'command' as const, description: 'Toggle global Ask view; use on/off, or add a question for this session' };
 export const forkCommands = [
   askCommand,
   { id: 'console:fork', name: 'fork', kind: 'command' as const, description: 'Create an independent session with this conversation’s context' },

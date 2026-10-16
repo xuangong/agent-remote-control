@@ -2,16 +2,36 @@ import { expect, test, type Locator, type Page } from '@playwright/test';
 import { showNewSession } from './session-navigation';
 
 const sourceView = (owner: Locator) => owner.locator(':scope > .lab-session-view');
-const askView = (owner: Locator) => owner.getByRole('dialog', { name: 'Ask', exact: true });
+const sourceIdentities = new WeakMap<Locator, string>();
+const askTrigger = (page: Page) => page.getByRole('button', { name: 'Ask about this session', exact: true });
+function askView(owner: Locator) {
+  const source = sourceIdentities.get(owner);
+  if (!source) throw new Error('The source session identity has not been captured.');
+  return owner.page().locator(`.lab-ask-workspaces [data-ask-source=${JSON.stringify(source)}]`)
+    .getByRole('dialog', { name: 'Ask', exact: true });
+}
+
+function createdSession(page: Page) {
+  return page.waitForResponse(response => new URL(response.url()).pathname.endsWith('/create'))
+    .then(async response => {
+      expect(response.ok(), await response.text()).toBe(true);
+      const { nativeSessionId } = await response.json() as { nativeSessionId: string };
+      const { providerId } = response.request().postDataJSON() as { providerId: string };
+      return { nativeSessionId, key: JSON.stringify(['local', providerId, nativeSessionId]) };
+    });
+}
 
 async function send(view: Locator, text: string) {
   await view.getByTestId('prompt-input').fill(text);
+  await expect(view.getByTestId('prompt-submit')).toBeEnabled();
   await view.getByTestId('prompt-input').press('Enter');
 }
 
 async function expandSessionActions(view: Locator) {
+  await expect(view).toBeVisible();
   const expand = view.getByRole('button', { name: 'Expand session actions', exact: true });
   if (await expand.isVisible()) await expand.click();
+  await expect(view.getByRole('button', { name: 'Session view options', exact: true })).toBeVisible();
 }
 
 async function buttonAppearance(button: Locator) {
@@ -27,13 +47,19 @@ async function openComposition(page: Page, isMobile: boolean) {
   await page.emulateMedia({ reducedMotion: 'reduce' });
   await page.goto('/');
   await showNewSession(page);
+  const primaryCreated = createdSession(page);
   await page.getByTestId('session-create').click();
+  const primaryIdentity = await primaryCreated;
   const primary = page.locator('.lab-primary-conversation');
+  sourceIdentities.set(primary, primaryIdentity.key);
   await expect(sourceView(primary).getByTestId('prompt-input')).toBeEnabled();
   await expect(page).toHaveTitle('New session · Agent Remote Control');
   const primaryTitle = await page.title();
+  const sideCreated = createdSession(page);
   await send(sourceView(primary), '/side A separately focused side conversation');
+  const sideIdentity = await sideCreated;
   const side = page.locator('.lab-side-conversation');
+  sourceIdentities.set(side, sideIdentity.key);
   await expect(sourceView(side).locator('.agent-message-assistant').last()).toContainText('A separately focused side conversation');
   const takeControl = sourceView(side).getByRole('button', { name: 'Take control', exact: true });
   if (await takeControl.isVisible()) await takeControl.click();
@@ -43,7 +69,7 @@ async function openComposition(page: Page, isMobile: boolean) {
     else await sourceView(owner).getByTestId('prompt-input').focus();
     await expect(sourceView(owner)).toBeVisible();
   };
-  return { primary, side, primaryTitle, select };
+  return { primary, side, primaryTitle, primaryIdentity, sideIdentity, select };
 }
 
 async function setDisplay(view: Locator, mode: string, letters: boolean) {
@@ -193,7 +219,7 @@ test('display mode and letters belong to each Session View and survive reload', 
   await expect(sourceView(primary).getByTestId('prompt-input')).toBeEnabled();
   await select(primary, 0);
   await expectDisplay(sourceView(primary), 'Content only', false);
-  await primary.getByRole('button', { name: 'Ask about this session', exact: true }).click();
+  await askTrigger(page).click();
   await expectDisplay(ask, 'Preview', true);
   await ask.getByRole('button', { name: 'Minimize Ask', exact: true }).click();
   await select(side, 1);
@@ -212,16 +238,22 @@ test('each source keeps its own expanded Ask and restoration does not duplicate 
     const message = envelope.type === 'message' ? envelope.message : envelope;
     if (message?.type === 'send_message') sends.push(JSON.stringify(message));
   }));
-  const { primary, side, select } = await openComposition(page, isMobile);
+  const { primary, side, primaryIdentity, sideIdentity, select } = await openComposition(page, isMobile);
+  const askIdentities: string[] = [];
   for (const [owner, index, label] of [[primary, 0, 'Primary'], [side, 1, 'Side']] as const) {
     await select(owner, index);
+    const askCreated = createdSession(page);
     await send(sourceView(owner), `/ask ${label} Ask answer`);
+    askIdentities.push((await askCreated).nativeSessionId);
     const ask = askView(owner);
     await expect(ask.locator('.agent-message-assistant').last()).toContainText(`${label} Ask answer`);
     await ask.getByTestId('prompt-input').fill(`${label} Ask draft`);
-    await expectContained(ask, owner, isMobile);
+    await expectContained(ask, page.locator('.lab-ask-workspaces'), isMobile);
   }
   expect(creations).toHaveLength(4);
+  expect(creations[2]).toMatchObject({ sourceNativeSessionId: primaryIdentity.nativeSessionId });
+  expect(creations[3]).toMatchObject({ sourceNativeSessionId: sideIdentity.nativeSessionId });
+  await expect(askTrigger(page)).toHaveCount(1);
   if (!isMobile) {
     await expect(page.getByRole('dialog', { name: 'Ask', exact: true })).toHaveCount(2);
     await expect(askView(primary)).toBeVisible();
@@ -230,48 +262,83 @@ test('each source keeps its own expanded Ask and restoration does not duplicate 
   await page.screenshot({ path: testInfo.outputPath('source-owned-ask.png') });
   const sentBeforeReload = [...sends];
   await page.reload();
-  await expect(askView(side).getByTestId('prompt-input')).toHaveValue('Side Ask draft');
+  await expect(askView(side).getByTestId('prompt-input')).toHaveText('Side Ask draft');
   await select(primary, 0);
-  await expect(askView(primary).getByTestId('prompt-input')).toHaveValue('Primary Ask draft');
+  if (isMobile) await askTrigger(page).click();
+  await askView(primary).getByTestId('prompt-input').focus();
+  await expect(askView(primary).getByTestId('prompt-input')).toHaveText('Primary Ask draft');
   await expect(askView(primary).locator('.agent-message-assistant').last()).toContainText('Primary Ask answer');
   await askView(primary).getByRole('button', { name: 'Minimize Ask', exact: true }).click();
   await select(side, 1);
+  if (isMobile) await askTrigger(page).click();
   await expect(askView(side)).toBeVisible();
-  await expect(askView(side).getByTestId('prompt-input')).toHaveValue('Side Ask draft');
+  await expect(askView(side).getByTestId('prompt-input')).toHaveText('Side Ask draft');
   expect(creations).toHaveLength(4);
   expect(sends).toEqual(sentBeforeReload);
-  await expect.poll(() => new Set(attachments).size).toBe(4);
+  await expect.poll(() => new Set(attachments)).toEqual(new Set([primaryIdentity.nativeSessionId, sideIdentity.nativeSessionId, ...askIdentities]));
   await page.reload();
   await select(primary, 0);
   await expect(askView(primary)).toHaveCount(0);
-  await expect(primary.getByRole('button', { name: 'Ask about this session', exact: true })).toBeVisible();
+  await expect(askTrigger(page)).toBeVisible();
+  await expect(askTrigger(page)).toHaveCount(1);
   await select(side, 1);
-  await expect(askView(side).getByTestId('prompt-input')).toHaveValue('Side Ask draft');
+  if (isMobile) await askTrigger(page).click();
+  await expect(askView(side).getByTestId('prompt-input')).toHaveText('Side Ask draft');
+  expect(creations).toHaveLength(4);
+  expect(sends).toEqual(sentBeforeReload);
 });
 
-test('a small desktop pane overlays only its own source and expands into a floating Ask when space returns', async ({ page, isMobile }, testInfo) => {
+test('Ask stays floating over the page while source panes resize and remain interactive', async ({ page, isMobile }, testInfo) => {
   test.skip(isMobile, 'Uses two visible desktop containers.');
   const { primary, side, select } = await openComposition(page, false);
   await select(primary, 0);
-  await send(sourceView(primary), '/ask A container-scoped overlay');
+  await send(sourceView(primary), '/ask A source-bound global floating conversation');
   const ask = askView(primary);
+  const workspace = page.locator('.lab-ask-workspaces');
+  const resize = ask.getByRole('button', { name: 'Resize Ask', exact: true });
   await expect(ask.getByTestId('prompt-input')).toBeEnabled();
-  await expect(ask.getByRole('button', { name: 'Resize Ask', exact: true })).toBeVisible();
-  await expectContained(ask, primary);
+  await expect(resize).toBeVisible();
+  await expectContained(ask, workspace);
+  const originalSourceWidth = (await primary.boundingBox())!.width;
+  const originalAsk = (await ask.boundingBox())!;
+  const sourceResize = page.getByRole('separator', { name: 'New session width', exact: true });
+  await ask.getByTestId('prompt-input').fill('Keep the Ask draft while resizing its source');
+  await sourceResize.press('Home');
+  await expect.poll(async () => (await primary.boundingBox())!.width).toBeLessThan(originalSourceWidth);
   await page.setViewportSize({ width: 1200, height: 1000 });
-  await expect(ask.getByRole('button', { name: 'Resize Ask', exact: true })).toBeHidden();
-  await expectContained(ask, primary, true);
-  await sourceView(side).getByTestId('prompt-input').fill('The sibling view remains interactive');
-  await expect(ask).toBeVisible();
-  await expect(sourceView(side).getByTestId('prompt-input')).toHaveValue('The sibling view remains interactive');
-  await page.screenshot({ path: testInfo.outputPath('narrow-source-overlay.png') });
+  await expect(resize).toBeVisible();
+  await expectContained(ask, workspace);
+  const narrowAsk = (await ask.boundingBox())!;
+  expect(narrowAsk.width).toBeCloseTo(originalAsk.width, 0);
+  expect(narrowAsk.height).toBeCloseTo(originalAsk.height, 0);
+  expect(narrowAsk.width).toBeLessThan((await workspace.boundingBox())!.width);
+  for (const [owner, label] of [[primary, 'Source'], [side, 'Sibling']] as const) {
+    const input = sourceView(owner).getByTestId('prompt-input');
+    await input.click();
+    await input.fill(`${label} remains interactive with Ask open`);
+    await expect(input).toBeFocused();
+    await expect(input).toHaveText(`${label} remains interactive with Ask open`);
+    await expect(ask).toBeVisible();
+  }
+  await expect(ask.getByTestId('prompt-input')).toHaveText('Keep the Ask draft while resizing its source');
+  await page.screenshot({ path: testInfo.outputPath('global-ask-narrow-sources.png') });
   await page.setViewportSize({ width: 1900, height: 1000 });
-  await expect(ask.getByRole('button', { name: 'Resize Ask', exact: true })).toBeVisible();
-  await expectContained(ask, primary);
+  await sourceResize.press('Enter');
+  await expect.poll(async () => (await primary.boundingBox())!.width).toBeGreaterThan(240);
+  await expect(resize).toBeVisible();
+  await expectContained(ask, workspace);
   await ask.getByRole('button', { name: 'Minimize Ask', exact: true }).click();
-  const edge = (await primary.getByRole('button', { name: 'Ask about this session', exact: true }).boundingBox())!;
-  const owner = (await primary.boundingBox())!;
-  expect(edge.x + edge.width).toBeCloseTo(owner.x + owner.width, 0);
+  await expect(ask).toHaveCount(0);
+  await select(primary, 0);
+  const launcher = askTrigger(page);
+  await expect(launcher).toHaveCount(1);
+  await expect(launcher).toBeEnabled();
+  await expectContained(launcher, workspace);
+  const floating = (await launcher.boundingBox())!;
+  await launcher.press('ArrowLeft');
+  await expect.poll(async () => (await launcher.boundingBox())!.x).toBeCloseTo(floating.x - 10, 0);
+  expect((await launcher.boundingBox())!.y).toBeCloseTo(floating.y, 0);
+  await expectContained(launcher, workspace);
 });
 
 test('browser tab title identifies the business primary session while Side and Ask receive focus', async ({ page, isMobile }) => {
@@ -322,7 +389,7 @@ test('account actions belong to the Header and View follows the visible owning t
   await expect(signOut).toBeHidden();
   if (!isMobile) {
     await setChromePanel(page, 'Sidebar', true);
-    await expectBeforeTitle(globalView, page.locator('#lab-context .lab-rail-heading').getByText('Workspace', { exact: true }));
+    await expectBeforeTitle(globalView, page.locator('#lab-context .lab-rail-heading').getByText('Window', { exact: true }));
     await setChromePanel(page, 'Sidebar', false);
   }
   const heading = isMobile ? page.locator('.lab-mobile-navigation') : sourceView(primary).locator('.lab-workbench-heading');
@@ -367,7 +434,7 @@ test('hidden global chrome keeps View in the primary heading without duplicating
       const heading = sourceView(owner).locator('.lab-workbench-heading');
       const options = heading.getByRole('button', { name: 'Session view options', exact: true });
       await expectContained(options, owner);
-      const title = heading.locator('.lab-primary-title, .lab-conversation-path, .lab-side-title-text').first();
+      const title = heading.locator('.lab-session-heading-title > .agent-session-title:visible');
       await expect(title).toBeVisible();
       await expect.poll(async () => (await title.boundingBox())!.width, { message: `Session title remains readable at ${width}px` }).toBeGreaterThan(60);
     }
@@ -433,7 +500,8 @@ test('mobile navigation keeps one title and session tools beside search with glo
     const options = view.getByRole('region', { name: 'Session view options', exact: true });
     await expect(options).toBeVisible();
     await expectContained(options, primary);
-    await options.getByRole('radio', { name: 'Content only', exact: true }).check();
+    await options.getByText('Content only', { exact: true }).click();
+    await expect(options.getByRole('radio', { name: 'Content only', exact: true })).toBeChecked();
     await expect.poll(() => page.evaluate(() => ({ left: window.scrollX, width: document.documentElement.scrollWidth })))
       .toEqual({ left: 0, width });
     await expect.poll(async () => (await primary.boundingBox())!.x).toBe(0);
@@ -529,7 +597,7 @@ test('mobile session actions start collapsed and toggle without moving the readi
     }, { message: 'Collapsed actions stay against the right edge of their Session View' }).toBeLessThanOrEqual(12);
     expect(await timeline.boundingBox()).toEqual(viewport);
     await expect.poll(() => timeline.evaluate(element => element.scrollTop)).toBe(readingTop);
-    await expect(input).toHaveValue('Keep this unsent draft');
+    await expect(input).toHaveText('Keep this unsent draft');
     expect(await page.evaluate(() => ({ left: scrollX, width: document.documentElement.scrollWidth }))).toEqual({ left: 0, width });
     await page.screenshot({ path: testInfo.outputPath(`mobile-session-actions-collapsed-${width}.png`) });
     await expand.click();
@@ -555,7 +623,7 @@ test('mobile session actions start collapsed and toggle without moving the readi
     await view.getByRole('searchbox').press('Escape');
     await expect(controls[1]).toBeVisible();
     await expect(controls[1]).toBeFocused();
-    await expect(input).toHaveValue('Keep this unsent draft');
+    await expect(input).toHaveText('Keep this unsent draft');
     expect(await page.evaluate(() => ({ left: scrollX, width: document.documentElement.scrollWidth }))).toEqual({ left: 0, width });
     await page.screenshot({ path: testInfo.outputPath(`mobile-session-actions-expanded-${width}.png`) });
     for (const { element } of originalTools) await element.dispose();
@@ -594,17 +662,19 @@ test('mobile action taps settle to a neutral appearance with normal motion', asy
       (element.querySelector('.lab-session-view-options-trigger') as HTMLButtonElement).click();
     });
     await expect(options).toBeVisible();
-    const menuOffsets = await options.evaluate(async element => {
+    const menuAnchorErrors = await options.evaluate(async element => {
       const content = element.closest('.lab-timeline-tools-content')!;
-      const offsets = [];
+      const errors = [];
       const started = performance.now();
       do {
-        offsets.push(element.getBoundingClientRect().right - content.getBoundingClientRect().right);
+        const viewport = window.visualViewport;
+        const right = (viewport?.offsetLeft ?? 0) + (viewport?.width ?? innerWidth) - 8;
+        errors.push(Math.abs(element.getBoundingClientRect().right - Math.min(content.getBoundingClientRect().right, right)));
         await new Promise<void>(resolve => requestAnimationFrame(() => resolve()));
       } while (performance.now() - started < 360);
-      return offsets;
+      return errors;
     });
-    expect(Math.max(...menuOffsets) - Math.min(...menuOffsets), 'The menu keeps its anchor while the toolbar finishes expanding').toBeLessThan(1);
+    expect(Math.max(...menuAnchorErrors), 'The menu follows its toolbar within the viewport').toBeLessThan(1);
     await expectContained(options, primary);
     await mode.tap();
     await expect(options).toBeHidden();

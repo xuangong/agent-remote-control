@@ -25,6 +25,25 @@ it('does not overwrite a new edit when saved draft hydration finishes late', asy
   expect(writeImageDraft).toHaveBeenLastCalledWith(expect.objectContaining({ parts: [{ type: 'text', text: 'Newer edit' }] }), 0);
 });
 
+it.each([{ parts: [] }, { parts: [{ type: 'text' as const, text: '' }] }])('keeps recovered text when the saved image document is empty ($parts)', async ({ parts }) => {
+  const saved: ImageDraft = { version: 1, key: '["recovered-text","a"]', scope: 'recovered-text', parts, images: {}, nextLabel: 1 };
+  vi.mocked(readImageDraft).mockResolvedValue(saved);
+  const onTextChange = vi.fn();
+  await render(<Harness scope="recovered-text" text="Keep the unsent Ask draft" onTextChange={onTextChange} />);
+  expect(draft.parts).toEqual([{ type: 'text', text: 'Keep the unsent Ask draft' }]);
+  expect(onTextChange).not.toHaveBeenCalledWith('');
+  expect(writeImageDraft).toHaveBeenLastCalledWith(expect.objectContaining({ parts: [{ type: 'text', text: 'Keep the unsent Ask draft' }] }), 0);
+});
+
+it.each([false, true])('restores a nonempty saved document over initial text (image: %s)', async image => {
+  const parts: ImageDraft['parts'] = [{ type: 'text', text: 'Saved rich draft' }, ...(image ? [{ type: 'image' as const, imageId: 'saved-image', label: 'image #1' }] : [])];
+  vi.mocked(readImageDraft).mockResolvedValue({ version: 1, key: '["retained-document","a"]', scope: 'retained-document', parts, images: {}, nextLabel: 2 });
+  const onTextChange = vi.fn();
+  await render(<Harness scope="retained-document" text="Initial text fallback" active={false} onTextChange={onTextChange} />);
+  expect(draft.parts).toEqual(parts);
+  expect(onTextChange).toHaveBeenCalledWith('Saved rich draft');
+});
+
 it('aborts the captured session upload and rejects late completion after switching', async () => {
   let resolve!: (value: typeof attachment) => void;
   let signal: AbortSignal | undefined;

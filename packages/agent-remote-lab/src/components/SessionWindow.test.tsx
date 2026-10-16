@@ -4,7 +4,6 @@ import { afterEach, expect, it, vi } from 'vitest';
 import { AgentReplica, type RemoteAgentTransport } from '@orchardworks/agent-remote-web';
 import { createWindowView } from '@orchardworks/agent-remote-protocol';
 import { SessionWindow } from './SessionWindow.js';
-import { SessionAskHome, SessionAskSurface, SessionAskSurfaceProvider } from './SessionAskSurface.js';
 import { WindowLayoutContext } from '../window-workspace-context.js';
 import { WindowSessionBridgeContext } from '../window-session-bridge-context.js';
 import { createCompositionSlot } from '../session-composition.js';
@@ -36,20 +35,17 @@ it.each([{ shared: true }, { shared: false }, { shared: true, intent: 'history' 
   const view = await render(<WorkspaceReady.Provider value={true}>
     <WindowLayoutContext.Provider value={shared ? { window, operate() {} } : undefined}>
       <WindowSessionBridgeContext.Provider value={{ slotForView: id => id === dock.id ? slot : undefined }}>
-        <SessionAskSurfaceProvider>
-          <SessionAskSurface id={slot.id}><aside>Dock Ask content</aside></SessionAskSurface>
           <SessionWindow entry={{ id: dock.id, slotId: slot.id, target: session, managed: false }} baseUrl="http://fixture" visible compact={false} hostLabel="Host" offline={false}
             transport={transport} draftStore={new DraftStore('dock-test')} navigation={() => ({ childrenFor: () => [], resolveSessionLink: () => undefined })} onFocus={focus} onClose={() => {}}
             onSessionBound={bound} sessionPresentation={context => { historical(context.operationBinding.historical); return { composerNotice: <p>{context.viewId} presentation</p> }; }}
-            renderSessionFooter={context => <SessionAskHome id={context.viewId!} />} />
-        </SessionAskSurfaceProvider>
+            renderSessionFooter={context => <aside>{context.viewId} footer</aside>} />
       </WindowSessionBridgeContext.Provider>
     </WindowLayoutContext.Provider>
   </WorkspaceReady.Provider>);
   await vi.waitFor(() => expect(bound).toHaveBeenCalledWith(expect.objectContaining(session), slot.id, shared ? dock.id : undefined));
   const pane = view.querySelector('.lab-session-family-pane')!;
   expect(pane.textContent).toContain(`${slot.id} presentation`);
-  expect(pane.textContent).toContain('Dock Ask content');
+  expect(pane.textContent).toContain(`${slot.id} footer`);
   expect(bound.mock.calls.every(call => call[1] === slot.id)).toBe(true);
   expect(historical).toHaveBeenLastCalledWith(intent === 'history');
   focus.mockClear();

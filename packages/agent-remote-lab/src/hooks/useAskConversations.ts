@@ -13,11 +13,11 @@ import { sessionKey, type SessionEntry } from '../session-tree.js';
 import { compositionMetadataKey, compositionRoleKey, compositionSelection, saveCompositionAskEnabled, saveCompositionDocument, type CompositionDocument } from '../session-composition-model.js';
 import { flushRecoveryWrites } from '../recovery-writes.js';
 import { recoveryGeneration } from '../conversation-recovery.js';
-import { inspectAskDock, flushAskDock } from './useAskDock.js';
 import { inspectAskPosition, flushAskPosition } from './useAskPosition.js';
 import { inspectSessionDisplayPreferences, flushSessionDisplayPreferences } from './useSessionDisplayPreferences.js';
 import { inspectImageDraft } from '@orchardworks/agent-remote-web/browser';
 import type { CompositionParticipantResult } from '../session-composition-application.js';
+import { isAskSelected } from '../ask-presentation.js';
 
 export type AskInputSender = (text: string, operationId: string) => Promise<unknown>;
 interface AskInputOwner { recordId: string; target?: string; creation?: string }
@@ -104,20 +104,25 @@ export function useAskConversations(document: CompositionDocument, transport: Re
     return { restoring: new Set(expanded), revision: 0, controllers: new Map<string, AbortController>() };
   }, [document]);
   useEffect(() => () => { for (const controller of windows.controllers.values()) controller.abort(); }, [windows]);
-  const expanded = (key: string) => shared.current ? pendingOpenViews.current.has(key) || !!sharedView(key) && !sharedView(key)!.collapsed : associationOwner(key)?.open === true;
+  const expanded = (key: string) => {
+    if (!shared.current) return associationOwner(key)?.open === true;
+    const view = sharedView(key);
+    return pendingOpenViews.current.has(key) || !!view && !view.collapsed;
+  };
   const sharedOpenKeys = authority ? document.asks.filter(owner => { const view = sharedView(owner.id); return view && !view.collapsed; }).map(owner => owner.id) : [];
   const previousSharedOpen = useRef(new Set(sharedOpenKeys));
   useEffect(() => {
     if (!authority) return;
     const current = new Set(sharedOpenKeys);
     for (const key of current) {
+      const openingHere = pendingOpenViews.current.has(key);
       const view = sharedView(key);
       if (view && view.id !== pendingCloseViews.current.get(key)) {
         pendingOpenViews.current.delete(key);
         pendingCloseViews.current.delete(key);
       }
+      if (!previousSharedOpen.current.has(key) && !openingHere) windows.restoring.add(key);
     }
-    for (const key of current) if (!previousSharedOpen.current.has(key)) windows.restoring.add(key);
     for (const key of previousSharedOpen.current) if (!current.has(key) && !pendingOpenViews.current.has(key)) { bindingProjections.current.delete(key); preparations.current.get(key)?.abort(); windows.controllers.get(key)?.abort(); windows.restoring.delete(key); }
     previousSharedOpen.current = current;
   }, [authority?.window.id, JSON.stringify(authority?.window.views.filter(view => parseWindowFeature(view.feature)?.kind === 'ask').map(view => [view.id, view.collapsed])), windows]);
@@ -127,7 +132,7 @@ export function useAskConversations(document: CompositionDocument, transport: Re
     if (sharedView(key)) return true;
     return associationOwner(key)?.enabled ?? !!entryFor(source, key).record?.remote;
   }
-  function setOpen(key: string, expanded: boolean) {
+  function setOpen(key: string, expanded: boolean, retainView = false) {
     const owner = associationOwner(key); if (!owner) throw new Error('Ask owner unavailable.');
     edited(key); windows.revision++;
     windows.controllers.get(key)?.abort(); windows.controllers.delete(key); windows.restoring.delete(key);
@@ -140,12 +145,20 @@ export function useAskConversations(document: CompositionDocument, transport: Re
         pendingOpenViews.current.add(key);
         const target = entries.get(key)?.record?.target;
         const slot = document.slots.find(slot => slot.id === owner.sourceSlot);
-        openFeatureView(current, { kind: 'ask', id: view?.feature?.id ?? `ask-${crypto.randomUUID()}`, ...(slot ? { source: { ...windowAskSourceAnchor(document, slot), ...(entries.get(key)?.source.agentId ? { agentId: entries.get(key)!.source.agentId, title: entries.get(key)!.source.title } : {}) } } : {}) }, target ? { hostId: target.hostId ?? 'local', providerId: target.providerId, nativeSessionId: target.nativeSessionId, title: target.title } : undefined, source, pendingCloseViews.current.get(key));
+        if (view && view.id !== pendingCloseViews.current.get(key)) current.operate({ type: 'view.select', viewId: view.id });
+        else openFeatureView(current, { kind: 'ask', id: view?.feature?.id ?? `ask-${crypto.randomUUID()}`, ...(slot ? { source: { ...windowAskSourceAnchor(document, slot), ...(entries.get(key)?.source.agentId ? { agentId: entries.get(key)!.source.agentId, title: entries.get(key)!.source.title } : {}) } } : {}) }, target ? { hostId: target.hostId ?? 'local', providerId: target.providerId, nativeSessionId: target.nativeSessionId, title: target.title } : undefined, source, pendingCloseViews.current.get(key));
       } else {
         pendingOpenViews.current.delete(key);
         if (view) {
-          pendingCloseViews.current.set(key, view.id);
-          current.operate({ type: 'view.close', viewId: view.id });
+          if (retainView) {
+            const collapse = { type: 'view.collapse' as const, viewId: view.id, collapsed: true };
+            const source = [view.closeWith, current.resolveViewId?.(owner.sourceSlot)]
+              .find(id => id !== view.id && current.window.views.some(candidate => candidate.id === id)) ?? current.window.selectedPrimaryViewId;
+            current.operate(isAskSelected(current.window, view) ? { type: 'batch', operations: [collapse, { type: 'view.select', viewId: source }] } : collapse);
+          } else {
+            pendingCloseViews.current.set(key, view.id);
+            current.operate({ type: 'view.close', viewId: view.id });
+          }
         }
       }
     } else { owner.open = expanded; document.editRevision++; persist(() => owners.current.active); }
@@ -161,13 +174,15 @@ export function useAskConversations(document: CompositionDocument, transport: Re
     return true;
   }
   function toggle(source: OpenedSession, associationOwner: string) { setEnabled(source, !isEnabled(source, associationOwner), associationOwner); }
-  function close(source: OpenedSession, associationOwner: string) {
+  function hide(source: OpenedSession, associationOwner: string, retainView: boolean) {
     const key = keyFor(source, associationOwner);
-    setOpen(key, false);
-    if (shared.current) update(key, { attached: false, attachedParticipant: undefined });
+    setOpen(key, false, retainView);
+    if (shared.current && !retainView) update(key, { attached: false, attachedParticipant: undefined });
     resumeRequested.current.delete(key);
     preparations.current.get(key)?.abort();
   }
+  function close(source: OpenedSession, associationOwner: string) { hide(source, associationOwner, false); }
+  function minimize(source: OpenedSession, associationOwner: string) { hide(source, associationOwner, true); }
   const drafts = useMemo(() => new DraftStore(`${baseUrl}:ask`), [baseUrl]);
   const draftStores = useMemo(() => new Map([[`${baseUrl}:ask`, drafts]]), [drafts, baseUrl]);
   function draftBinding(key: string) {
@@ -417,7 +432,10 @@ export function useAskConversations(document: CompositionDocument, transport: Re
       }
       const replacing = clean || !!(entry.pending && entry.record && entry.pending.id !== entry.record.id);
       let record = entry.pending ?? (!clean ? entry.record : undefined);
-      if ((restoring || existingOnly) && !record?.target || entry.restoreOnly && !clean && !record) throw new Error('The saved Ask session is not available yet. Retry to reconnect.');
+      const pendingCreation = !clean && record === entry.pending && !!record?.creationKey && !record.remote;
+      if (restoring && !record?.target || existingOnly && !record?.target && !pendingCreation || entry.restoreOnly && !clean && !record) {
+        throw new Error('The saved Ask session is not available yet. Retry to reconnect.');
+      }
       if (!record) {
         const agent = sourceState?.agent;
         if (!agent?.runtimeInfo.sessionId) throw new Error('Open the source session before starting Ask.');
@@ -434,6 +452,9 @@ export function useAskConversations(document: CompositionDocument, transport: Re
       // Raw original operations own creation/options/settings; a view owns navigation only.
       restoringCurrent = !!entry.record && askParticipantKey(record) === askParticipantKey(entry.record);
       record = record.remote ? record : checkedAskOperation(store, record);
+      if (existingOnly && !record.target && record.creationKey !== entry.pending?.creationKey) {
+        throw new Error('The original Ask creation changed. Retry after restoring its saved operation.');
+      }
       if (restoringCurrent) update(key, { attached: false, attachedParticipant: undefined });
       const savedTarget = record.target;
       const locator = savedTarget ? resolveExecution?.(savedTarget) ?? savedTarget : record.source;
@@ -552,11 +573,11 @@ export function useAskConversations(document: CompositionDocument, transport: Re
         if (!current()) return { status: 'pending', retention: 'page', code: 'ask_owner_edit' };
         if (textResult.status !== 'saved') throw new Error('Ask draft write failed.');
         retentions.push(textResult.retention);
-        const dock = inspectAskDock(owner.geometryScope), position = inspectAskPosition(owner.geometryScope);
-        checks.push(() => inspectAskDock(owner.geometryScope).revision === dock.revision && inspectAskPosition(owner.geometryScope).revision === position.revision);
-        const dockResult = flushAskDock(owner.geometryScope, dock.revision, current), positionResult = flushAskPosition(owner.geometryScope, position.revision, current);
-        if (dockResult.status !== 'ready' || positionResult.status !== 'ready') throw new Error('Ask geometry retention incomplete.');
-        retentions.push(dockResult.retention, positionResult.retention);
+        const position = inspectAskPosition(owner.geometryScope);
+        checks.push(() => inspectAskPosition(owner.geometryScope).revision === position.revision);
+        const positionResult = flushAskPosition(owner.geometryScope, position.revision, current);
+        if (positionResult.status !== 'ready') throw new Error('Ask geometry retention incomplete.');
+        retentions.push(positionResult.retention);
         if (owner.display) {
           const display = inspectSessionDisplayPreferences(owner.display), result = flushSessionDisplayPreferences(owner.display, display.revision, current);
           if (result.status !== 'ready') throw new Error('Ask display retention incomplete.');
@@ -579,7 +600,7 @@ export function useAskConversations(document: CompositionDocument, transport: Re
       return { status: 'applied', retention: retentions.includes('page') ? 'page' : retentions.includes('session') ? 'session' : 'local', retainedCurrent };
     } catch { return { status: 'failed', retention: 'page', code: 'ask_retention' }; }
   }
-  return { revision, sharedView, isEnabled, isOpen, toggle, store, entries, entryFor, drafts, draftBinding, setDraft, sendInput, discardInput, restore, open, close,
+  return { revision, sharedView, isEnabled, isOpen, toggle, store, entries, entryFor, drafts, draftBinding, setDraft, sendInput, discardInput, restore, open, close, minimize,
     associationOwner, ownerEditRevision, applySourceProjection, retainAssociationOwners };
 }
 

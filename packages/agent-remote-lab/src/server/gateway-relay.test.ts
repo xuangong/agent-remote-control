@@ -3,6 +3,7 @@ import { createHash, createHmac } from 'node:crypto';
 import { once } from 'node:events';
 import { WebSocket } from 'ws';
 import { afterEach, expect, it } from 'vitest';
+import { PROTOCOL_VERSION } from '@orchardworks/agent-remote-protocol';
 import { createGatewayRelay } from './gateway-relay.js';
 
 const secret = 'test-only-32-byte-secret-value-0123456789';
@@ -125,6 +126,40 @@ it('stops an already-open browser stream when its grant expires', async () => {
   expect((await fetch(f.url + '/auth/status', { headers: { authorization: `Bearer ${short}` } })).status).toBe(401);
   host.close();
 }, 5000);
+it('still requires recent authentication for production permission changes on a real session WebSocket', async () => {
+  const f = await setup(); const alice = await f.login('alice');
+  const pair = await (await alice.request('v1/remote/pairings', {})).json() as { key: string };
+  const host = new WebSocket(f.url.replace('http:', 'ws:') + '/ws/remote-host', { headers: { authorization: `Bearer ${pair.key}` }, handshakeTimeout: 3000 });
+  await once(host, 'open'); const registration = once(host, 'message');
+  host.send(JSON.stringify({ uplinkVersion: 2, type: 'register', installationId: 'production-permissions', name: 'Host', providers: [{ providerId: 'codex', displayName: 'Codex' }] }));
+  const { hostId } = JSON.parse((await registration)[0].toString());
+  const forwarded: unknown[] = [];
+  let receive!: (value: unknown) => void; const received = new Promise(resolve => { receive = resolve; });
+  host.on('message', raw => {
+    const message = JSON.parse(raw.toString());
+    if (message.type === 'rpc_request') host.send(JSON.stringify({ uplinkVersion: 2, type: 'rpc_response', requestId: message.requestId, status: 200,
+      body: JSON.stringify({ agentId: 'production-agent', nativeSessionId: 'native' }) }));
+    if (message.type === 'stream_open') {
+      host.send(JSON.stringify({ uplinkVersion: 2, type: 'stream_opened', streamId: message.streamId }));
+      host.send(JSON.stringify({ uplinkVersion: 2, type: 'stream_message', streamId: message.streamId, message: 'connected' }));
+    }
+    if (message.type === 'stream_message') { const value = JSON.parse(message.message); forwarded.push(value); receive(value); }
+  });
+  expect((await alice.request(`v1/remote/hosts/${hostId}/attach`, { providerId: 'codex', nativeSessionId: 'native' })).status).toBe(200);
+  const grant = ticket(f.url, 'alice', { authenticatedAt: Date.now() - 11 * 60_000 });
+  const headers = { authorization: `Bearer ${grant}`, origin: f.url };
+  expect((await (await fetch(f.url + '/auth/sessions', { headers })).json()).recentAuthentication).toBe(false);
+  const stream = new WebSocket((f.url + alice.state.basePath + 'v1/sessions/production-agent/events').replace('http:', 'ws:'), { headers, handshakeTimeout: 3000 });
+  expect((await once(stream, 'message'))[0].toString()).toBe('connected');
+  const setting = { protocolVersion: PROTOCOL_VERSION, type: 'set_session_setting', payload: { agentId: 'production-agent', settingId: 'sandbox', value: 'workspace-write',
+    requestId: 'permission-change', operationId: '00000000-0000-4000-8000-000000000001' } };
+  const refused = once(stream, 'message'); stream.send(JSON.stringify(setting));
+  expect(JSON.parse((await refused)[0].toString())).toMatchObject({ type: 'protocol_error', payload: { code: 'reauthentication_required', requestId: 'permission-change' } });
+  expect(forwarded).toEqual([]);
+  const model = { ...setting, payload: { ...setting.payload, settingId: 'model', value: 'native-model', requestId: 'model-change' } };
+  stream.send(JSON.stringify(model)); expect(await received).toEqual(model);
+  stream.close(); host.close();
+}, 10000);
 it('keeps the same installation ID isolated across users and restores an owner Host on reconnect', async () => {
   const f = await setup(); const alice = await f.login('alice'); const bob = await f.login('bob');
   async function connect(key: string) {

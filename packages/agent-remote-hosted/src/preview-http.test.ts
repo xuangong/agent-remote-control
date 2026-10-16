@@ -39,3 +39,38 @@ it('preserves isolated application authorization and cookie paths while filterin
   expect(response.getSetCookie()).toEqual(['__Host-app=one; Secure; Path=/', 'section=two; Path=/docs']);
   expect(response.get('location')).toBe('/next?q=1');
 });
+
+it.each([false, true])('filters both built-in and configured Relay cookies from preview requests (root: %s)', root => {
+  const route = { ...registration, root, cookiePrefix: 'devbox' };
+  const request = new Request('https://preview.example' + (root ? '/api' : '/p/abc/api'), { headers: {
+    cookie: 'arc_preview=private; __Host-arc_session=private; __Secure-arc_challenge=private; devbox_session=private; __Host-devbox_browser=private; __Secure-devbox_login=private; app=one; devboxish=public; other_session=public',
+  } });
+  expect(Object.fromEntries(previewRequest(request, route).headers)).toEqual({ cookie: 'app=one; devboxish=public; other_session=public' });
+}, 10000);
+
+it.each([false, true])('prevents preview responses from overwriting either Relay cookie namespace (root: %s)', root => {
+  const route = { ...registration, root, cookiePrefix: 'devbox' };
+  const response = previewResponseHeaders([
+    ['set-cookie', 'arc_preview=forged; Path=/'], ['set-cookie', '__Host-arc_session=forged; Path=/; Secure'],
+    ['set-cookie', 'devbox_session=forged; Path=/'], ['set-cookie', '__Host-devbox_browser=forged; Path=/; Secure'],
+    ['set-cookie', '__Secure-devbox_login=forged; Path=/; Secure'], ['set-cookie', 'app=one; Path=/'],
+    ['set-cookie', 'devboxish=public; Path=/'],
+  ], route, '/api');
+  expect(response.getSetCookie()).toEqual(root
+    ? ['app=one; Path=/', 'devboxish=public; Path=/']
+    : ['app=one; Path=/p/abc/', 'devboxish=public; Path=/p/abc/']);
+}, 10000);
+
+it('keeps nested Devbox authentication cookies as application cookies under the default Relay namespace', () => {
+  const route = { ...registration, root: true };
+  const outgoing = previewRequest(new Request('https://preview.example/auth/status', { headers: {
+    cookie: '__Host-arc_preview=private; devbox_session=nested; __Host-devbox_browser=nested-browser',
+  } }), route);
+  expect(Object.fromEntries(outgoing.headers)).toEqual({ cookie: 'devbox_session=nested; __Host-devbox_browser=nested-browser' });
+  const response = previewResponseHeaders([
+    ['set-cookie', 'devbox_session=nested; Path=/; HttpOnly'],
+    ['set-cookie', '__Host-devbox_browser=nested-browser; Path=/; Secure'],
+    ['set-cookie', '__Host-arc_preview=forged; Path=/; Secure'],
+  ], route, '/auth/session');
+  expect(response.getSetCookie()).toEqual(['devbox_session=nested; HttpOnly; Path=/', '__Host-devbox_browser=nested-browser; Secure; Path=/']);
+}, 10000);

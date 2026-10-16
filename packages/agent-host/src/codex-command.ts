@@ -27,8 +27,8 @@ export async function runCodexCommand(args: string[], stateDir: string, environm
     origin: environment.AGENT_HOST_DAEMON_ORIGIN === 'website' ? 'website' : 'cli',
     operationId: /^[a-f0-9-]{36}$/i.test(environment.AGENT_HOST_DAEMON_OPERATION_ID ?? '') ? environment.AGENT_HOST_DAEMON_OPERATION_ID : undefined }, run);
   const daemon = args[0] === 'daemon';
-  // Both native Unix lifecycle commands and the Windows manager inherit this environment.
-  if (daemon && ['start', 'restart'].includes(args[1] ?? '')) env.OPENAI_API_KEY = 'arc';
+  // Keep the local-provider fallback without replacing credentials inherited by either platform.
+  if (daemon && ['start', 'restart'].includes(args[1] ?? '')) env.OPENAI_API_KEY ||= 'arc';
   if (process.platform === 'win32' && daemon) {
     if (configured.AGENT_HOST_CODEX_SOCKET) throw new Error('Windows shared Codex selects its daemon through CODEX_HOME; remove the Unix socket override.');
     if (configured.AGENT_HOST_CODEX_NOFILE) throw new Error('AGENT_HOST_CODEX_NOFILE is only supported on Unix.');

@@ -5,6 +5,7 @@ import { chmod, cp, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/prom
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { packageManager } from './lib/package-manager.mjs';
+import { controllerBuildProvenance } from './lib/build-provenance.mjs';
 
 const root = resolve(import.meta.dirname, '..');
 const exec = promisify(execFile);
@@ -45,9 +46,8 @@ try {
     files: ['dist', 'README.md', 'licenses', 'NOTICE', 'build-info.json'],
     dependencies: sdkDependencies,
   }, null, 2) + '\n');
-  const { stdout: revision } = await exec('git', ['rev-parse', 'HEAD'], { cwd: root });
-  const { stdout: changes } = await exec('git', ['status', '--porcelain'], { cwd: root });
-  await writeFile(join(stage, 'build-info.json'), JSON.stringify({ version: manifest.version, revision: revision.trim(), dirty: changes.length > 0,
+  const provenance = await controllerBuildProvenance(root);
+  await writeFile(join(stage, 'build-info.json'), JSON.stringify({ version: manifest.version, ...provenance,
     builtAt: new Date().toISOString(), dependencies: sdkDependencies }, null, 2) + '\n');
   await cp(join(root, 'packages/agent-host/README.md'), join(stage, 'README.md'));
   await cp(join(root, 'NOTICE.md'), join(stage, 'NOTICE'));

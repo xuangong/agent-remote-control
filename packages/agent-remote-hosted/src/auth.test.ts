@@ -1,6 +1,6 @@
 import { createHmac } from 'node:crypto';
 import { expect, it, vi } from 'vitest';
-import { authenticateGatewayRequest, readGatewayCookie, verifyGatewayGrant } from './auth.js';
+import { authenticateGatewayRequest, gatewayCookieName, readGatewayCookie, verifyGatewayGrant } from './auth.js';
 
 const auth = { origin: 'https://agents.example', issuer: 'https://gateway.example', secret: 'portable-auth-secret-01234567890123456789' };
 function ticket() {
@@ -28,4 +28,13 @@ it('verifies independent HS256 bytes and the stable issuer-subject namespace', (
       namespace: '7c1c385902e0ae7f484f5274fbad49131a97fc0771fac9b71f56d093232f49cd' });
     expect(verifyGatewayGrant(token.slice(0, -1) + 'B', auth)).toBeUndefined();
   } finally { now.mockRestore(); }
+}, 10000);
+
+it('reads only the configured legacy session cookie while preserving default cookie names', () => {
+  const options = { ...auth, cookiePrefix: 'devbox' };
+  const token = ticket();
+  expect(authenticateGatewayRequest(new Request(auth.origin, { headers: { cookie: `__Host-devbox_session=${token}; __Host-arc_session=other` } }), options)?.subject).toBe('alice');
+  expect(authenticateGatewayRequest(new Request(auth.origin, { headers: { cookie: `__Host-arc_session=${token}` } }), options)).toBeUndefined();
+  expect(gatewayCookieName(auth.origin, 'session')).toBe('__Host-arc_session');
+  expect(gatewayCookieName('http://127.0.0.1:5910', 'login', 'devbox')).toBe('devbox_login');
 }, 10000);

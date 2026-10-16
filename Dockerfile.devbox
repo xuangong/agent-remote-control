@@ -1,0 +1,67 @@
+# A complete local trial environment built from this source tree.
+FROM node:22-bookworm-slim AS build
+ARG NPM_REGISTRY=https://mirrors.cloud.tencent.com/npm/
+RUN --mount=type=cache,target=/root/.npm,id=arc-devbox-npm \
+    npm install --global --registry="${NPM_REGISTRY}" pnpm@10.34.5
+WORKDIR /source
+COPY . .
+# Runtime CLIs are installed below; the build stage only needs their SDK types.
+RUN --mount=type=cache,target=/pnpm/store,id=arc-devbox-pnpm \
+    node scripts/prepare-relay-docker-lock.mjs pnpm-lock.yaml /tmp/devbox-lock.yaml \
+    && mv /tmp/devbox-lock.yaml pnpm-lock.yaml \
+    && pnpm config set registry "${NPM_REGISTRY}" \
+    && pnpm config set store-dir /pnpm/store \
+    && pnpm install --frozen-lockfile
+ARG SOURCE_REVISION=0000000000000000000000000000000000000000
+ARG SOURCE_DIRTY=true
+RUN pnpm build:devbox \
+    && AGENT_HOST_BUILD_REVISION="${SOURCE_REVISION}" AGENT_HOST_BUILD_DIRTY="${SOURCE_DIRTY}" pnpm build:agent-remote-controller
+
+FROM node:22-bookworm-slim AS devbox
+ARG NPM_REGISTRY=https://mirrors.cloud.tencent.com/npm/
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ca-certificates curl git lsof procps ripgrep python3 \
+    && rm -rf /var/lib/apt/lists/*
+ARG CODEX_VERSION=0.162.0
+ARG CLAUDE_VERSION=2.1.247
+ARG COPILOT_VERSION=1.0.83
+ARG OPENCODE_VERSION=2.0.25
+# Keep fixed native installations cached when the application source changes.
+RUN --mount=type=cache,target=/root/.npm,id=arc-devbox-npm \
+    npm install --global --registry="${NPM_REGISTRY}" \
+    "@openai/codex@${CODEX_VERSION}" "@anthropic-ai/claude-code@${CLAUDE_VERSION}" \
+    "@github/copilot@${COPILOT_VERSION}" "@opencode/cli@${OPENCODE_VERSION}" \
+    && codex --version && claude --version && COPILOT_AUTO_UPDATE=false copilot --version && opencode --version
+COPY --from=build /source/dist/agent-remote-controller/*.tgz /tmp/controller/
+RUN --mount=type=cache,target=/root/.npm,id=arc-devbox-npm \
+    npm install --global --registry="${NPM_REGISTRY}" /tmp/controller/*.tgz \
+    && node /usr/local/lib/node_modules/@orchardworks/agent-remote-controller/dist/cli.js --version \
+    && rm -rf /tmp/controller
+ARG SOURCE_REVISION=0000000000000000000000000000000000000000
+LABEL org.opencontainers.image.title="Agent Remote Control Devbox" \
+    org.opencontainers.image.description="Local, single-user trial and branch validation environment" \
+    org.opencontainers.image.source="https://github.com/xuangong/agent-remote-control" \
+    org.opencontainers.image.revision="${SOURCE_REVISION}"
+WORKDIR /app
+COPY --from=build --chown=node:node /source/dist/devbox ./dist/devbox
+COPY --from=build --chown=node:node /source/dist/relay/web ./dist/relay/web
+COPY --chown=node:node scripts/devbox ./scripts/devbox
+COPY --chown=node:node scripts/controller/entrypoint.mjs ./scripts/controller/entrypoint.mjs
+RUN mkdir -p /data/host /data/relay /workspace && chown -R node:node /data /workspace
+ENV NODE_ENV=production \
+    NPM_CONFIG_REGISTRY=${NPM_REGISTRY} \
+    DEVBOX_PORT=5910 DEVBOX_BIND=0.0.0.0 DEVBOX_STATE_DIR=/data/relay \
+    DEVBOX_CONTROLLER=/usr/local/lib/node_modules/@orchardworks/agent-remote-controller/dist/cli.js \
+    AGENT_HOST_STATE_DIR=/data/host AGENT_HOST_WORKSPACE=/workspace \
+    AGENT_HOST_TRUSTED_FULL_CONTROL=1 \
+    AGENT_HOST_NAME=Devbox AGENT_HOST_COPILOT=/usr/local/bin/copilot \
+    AGENT_HOST_CODEX_CONNECTION=shared AGENT_HOST_CODEX_AUTO_START=1 \
+    AGENT_HOST_OPENCODE_AUTO_START=1 AGENT_HOST_CODEX_NOFILE=8192 \
+    COPILOT_AUTO_UPDATE=false DISABLE_AUTOUPDATER=1 OPENCODE_DISABLE_AUTOUPDATE=1 LC_ALL=C
+USER node
+WORKDIR /workspace
+VOLUME ["/data", "/home/node", "/workspace"]
+EXPOSE 5910
+HEALTHCHECK --interval=10s --timeout=5s --start-period=90s \
+    CMD node /app/scripts/devbox/health.mjs
+ENTRYPOINT ["node", "/app/scripts/devbox/start.mjs"]

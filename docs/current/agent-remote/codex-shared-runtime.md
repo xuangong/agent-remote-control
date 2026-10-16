@@ -61,13 +61,15 @@ in `<CODEX_HOME>/agent-remote-daemon`. Keep that directory private to your accou
 Unix socket and file-descriptor-limit overrides must be unset on Windows.
 On macOS/Linux, the Controller daemon start/restart command defaults to a soft
 file descriptor limit of `8192`, configurable through `AGENT_HOST_CODEX_NOFILE`.
-On every platform, `agent-remote-controller codex daemon start|restart` explicitly
-sets `OPENAI_API_KEY=arc` for the daemon process, replacing any inherited value.
-The `codex app-server daemon start|restart` aliases do the same. No shell-specific
-environment assignment is needed in PowerShell, Command Prompt, or Unix shells.
-This leaves `CODEX_GATEWAY_API_KEY` and ordinary Codex CLI invocation credentials
-unchanged. Starting an already running daemon does not change its environment;
-use an explicit restart to apply it.
+On every platform, `agent-remote-controller codex daemon start|restart` preserves
+an inherited `OPENAI_API_KEY`. Only when it is unset or empty does the Controller
+supply the existing `arc` placeholder for local provider configurations that
+require a non-empty environment key. That placeholder is not an OpenAI credential;
+configure native Codex authentication for providers that require it. The
+`codex app-server daemon start|restart` aliases do the same. This leaves
+`CODEX_GATEWAY_API_KEY` and ordinary Codex CLI invocation credentials unchanged.
+Starting an already running daemon does not change its environment; use an
+explicit restart to apply it.
 
 Use `agent-remote-controller codex daemon status|restart|stop` to manage this
 independent runtime. Stopping the Controller or closing a client leaves it running.
@@ -248,10 +250,10 @@ not advertise it.
 The Controller runs `codex daemon restart`, followed by `codex daemon status`.
 On macOS and Linux, the explicit restart invokes native `app-server daemon
 bootstrap` so both the daemon and its updater inherit the same Controller
-environment, including the existing `OPENAI_API_KEY=arc` injection, Gateway key,
-locale, and Unix file descriptor limit. Native `restart` can retain an updater
-with an older environment, which would propagate that environment to the daemon
-on its next automatic update.
+environment, including the inherited OpenAI API key (or the `arc` fallback),
+Gateway key, locale, and Unix file descriptor limit. Native `restart` can retain
+an updater with an older environment, which would propagate that environment to
+the daemon on its next automatic update.
 
 This maintenance path requires Codex CLI 0.156.0 or newer: older bootstrap
 implementations can overwrite settings or ignore the selected daemon package and

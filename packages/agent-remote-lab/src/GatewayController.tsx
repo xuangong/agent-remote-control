@@ -12,9 +12,11 @@ import { WorkspaceReady, retireWorkspace, workspaceSignedOut, previousWorkspaceP
 
 const jsonPost = { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' };
 const navigateToLogin = (url: string) => window.location.replace(url);
-export function GatewayController({ children, navigate = navigateToLogin }: {
+export function GatewayController({ children, navigate = navigateToLogin, automaticAccess = false }: {
   children(baseUrl: string, accountAction: ReactNode, ready: boolean): ReactNode;
   navigate?(url: string): void;
+  /** The dedicated local Devbox supplies access without an interactive account. */
+  automaticAccess?: boolean;
 }) {
   const [access, setAccess] = useState<WorkspaceAccess | null | undefined>(() => {
     const cached = readWorkspaceAccess();
@@ -115,7 +117,7 @@ export function GatewayController({ children, navigate = navigateToLogin }: {
     }
     const storageChanged = (event: StorageEvent) => {
       if (event.key !== 'agent-remote:signed-out' && event.key !== 'agent-remote:workspace-access') return;
-      if (workspaceSignedOut()) {
+      if (!automaticAccess && workspaceSignedOut()) {
         stopRequests();
         if (display.current) { retireWorkspace(display.current.basePath); clearConversationRecovery(new URL(display.current.basePath, window.location.origin).href); }
         setSecurityOpen(false); setAccess(null); setFailed(false);
@@ -143,14 +145,14 @@ export function GatewayController({ children, navigate = navigateToLogin }: {
       void request(false);
     });
     pause();
-    if (workspaceSignedOut()) { stopped = true; setAccess(null); } else void request(false);
+    if (!automaticAccess && workspaceSignedOut()) { stopped = true; setAccess(null); } else void request(false);
     return () => {
       unwatch(); stopRequests(); window.removeEventListener('storage', storageChanged);
       window.removeEventListener('pageshow', beforeShow, true);
       document.removeEventListener('visibilitychange', beforeVisible, true);
       window.removeEventListener('online', beforeOnline, true);
     };
-  }, [attempt, navigate]);
+  }, [attempt, navigate, automaticAccess]);
   function signedOut(): void {
     stop.current(); if (access) retireWorkspace(access.basePath); setSecurityOpen(false); forgetWorkspaceAccess(); setAccess(null); setFailed(false);
     clearConversationRecovery(access ? new URL(access.basePath, window.location.origin).href : undefined);
@@ -180,7 +182,7 @@ export function GatewayController({ children, navigate = navigateToLogin }: {
     setSecurityOpen(false);
     requestAnimationFrame(() => securityTrigger.current?.focus());
   }
-  const accountAction = <>
+  const accountAction = automaticAccess ? null : <>
     {access?.user ? <span className="gateway-account-identity" aria-label="Account" title={[access.user.name, access.user.email, `User: ${access.user.id}`].filter(Boolean).join(' · ')}><span aria-hidden="true">◉</span> {access.user.name || access.user.email || access.user.id}</span> : null}
     <button type="button" disabled={!ready} onClick={event => { securityTrigger.current = event.currentTarget; setSecurityOpen(true); }}>Security</button>
     <button type="button" onClick={() => void logout()}>Sign out</button>

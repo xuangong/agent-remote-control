@@ -1,7 +1,7 @@
 import { isWindowDeleteRequest, isWindowSessionBinding } from '@orchardworks/agent-remote-protocol';
 import { WindowServiceError, type WindowPrincipal, type createWindowWorkspaces } from './window-workspaces.js';
 const json = (status: number, body: unknown) => new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json', 'cache-control': 'no-store' } });
-export async function handleWindowRequest(service: ReturnType<typeof createWindowWorkspaces>, request: Request, principal: WindowPrincipal): Promise<Response> {
+export async function handleWindowRequest(service: ReturnType<typeof createWindowWorkspaces>, request: Request, principal: WindowPrincipal, changesWaitMs?: number): Promise<Response> {
   try {
     const url = new URL(request.url); const parts = url.pathname.split('/').filter(Boolean);
     const id = parts[2] && decodeURIComponent(parts[2]); const method = request.method;
@@ -32,7 +32,7 @@ export async function handleWindowRequest(service: ReturnType<typeof createWindo
     if (id && parts[3] === 'changes' && parts.length === 4 && method === 'GET') {
       const raw = url.searchParams.get('afterRevision'); const revision = raw === null ? NaN : Number(raw);
       if (!Number.isSafeInteger(revision) || revision < 0) return json(400, { code: 'invalid_revision' });
-      return json(200, await service.changes(principal, id, revision, request.signal));
+      return json(200, await service.changes(principal, id, revision, request.signal, changesWaitMs));
     }
     return json(405, { code: 'method_not_allowed' });
   } catch (error) { if (error instanceof WindowServiceError) return json(error.status, { code: error.code, error: error.message }); throw error; }

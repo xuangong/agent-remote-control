@@ -26,7 +26,8 @@ const fixtureAction = fixtureEndpoint ? async (
 } : undefined;
 
 const gatewayMode = document.querySelector('meta[name="agent-remote-auth"]')?.getAttribute('content') === 'gateway';
+const devbox = document.querySelector('meta[name="agent-remote-devbox"]')?.getAttribute('content') === 'true';
 const shell = <WorkspaceShell />;
 createRoot(root).render(<StrictMode>{gatewayMode
-  ? <GatewayController>{(baseUrl, accountAction) => <Suspense fallback={shell}><App baseUrl={baseUrl} accountAction={accountAction} userScoped /></Suspense>}</GatewayController>
+  ? <GatewayController automaticAccess={devbox}>{(baseUrl, accountAction) => <Suspense fallback={shell}><App baseUrl={baseUrl} accountAction={accountAction} userScoped /></Suspense>}</GatewayController>
   : <Suspense fallback={shell}><App fixtureAction={fixtureAction} /></Suspense>}</StrictMode>);

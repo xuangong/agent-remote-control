@@ -6,6 +6,32 @@ The local diagnostic workbench has no account system. Generate a temporary key l
 
 Use **… → Resource** in the composer to attach ordinary files as `[resource #N]` references. Agents receive verified Host-local files, and sent messages provide downloads. Team members can exchange archives and reports through `upload_team_resource`, `send_team_message`, and `download_team_resource` without encoding file contents in message text. See [Resource attachments](docs/resource-attachments.md) for usage, storage, and limits.
 
+## Local Devbox
+
+Run the complete product in one Docker container for a local trial or to validate
+feature changes before deployment. It includes the full website, persistent Node
+Relay, automatically configured Controller, Codex, Claude Code, Copilot and
+OpenCode. Window, Ask, Side, TPM, Team, Track and Favourites use the ordinary
+product implementation; this is not the diagnostic Lab.
+
+From the source checkout you want to try:
+
+```sh
+docker compose -p arc-devbox -f deploy/devbox/compose.yaml up -d --build
+```
+
+Open **http://localhost:5910**. Website authentication is skipped for a fixed
+local Devbox identity, and Controller pairing is automatic. No Google or main
+site is needed. Configure a native provider's own login or model credentials to
+start using that provider; missing model credentials do not prevent the website
+from opening. The default port is exposed on host loopback only.
+
+The website and Controller are built from the same source tree. Docker volumes
+retain application state, native profiles, sessions and the workspace across
+restarts and image rebuilds. This local entry does not change production login.
+See [Devbox setup and usage](docs/devbox.md) for provider login, alternate ports,
+workspace mounts, logs, rebuilds and data retention.
+
 ## Private deployment
 
 Host the website and Relay yourself, then install **Agent Remote Controller** on

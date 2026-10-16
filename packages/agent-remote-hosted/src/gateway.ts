@@ -56,13 +56,19 @@ export type HostedRelayOptions = HostedAuthOptions & {
   diagnosticContext?: RelayDiagnosticContext;
   scheduler?: RelayScheduler;
   maxTenants?: number;
+  /** Window long-poll wait in milliseconds, from 1 to 25000. Defaults to 25000. */
+  windowChangesWaitMs?: number;
   clientAddress?(request: Request): string;
   keyLifetimeMs?: number;
+  /** Trusted composition may override the additional interactive sign-in requirement. */
+  recentAuthentication?(grant: HostedGrant): boolean | undefined;
 }
 type Tenant = { subject: string; namespace: string; authorityUntil: number; authorityRefreshAt: number; authorityDenied: boolean;
   checking?: Promise<'active' | 'denied' | 'unavailable'>; broker: ReturnType<typeof createHostBroker>; expiresAt: number };
 export function createHostedRelay(options: HostedRelayOptions) {
   const auth = resolveHostedAuth(options);
+  const windowChangesWaitMs = options.windowChangesWaitMs === undefined ? 25000 : options.windowChangesWaitMs;
+  if (!Number.isSafeInteger(windowChangesWaitMs) || windowChangesWaitMs < 1 || windowChangesWaitMs > 25000) throw new Error('Window changes wait must be an integer between 1 and 25000 milliseconds.');
   const tenants = new Map<string, Tenant>();
   const diagnostics = createDiagnosticJournal({storage:options.diagnosticStorage,context:options.diagnosticContext});
   const hostKeyOperations = new Map<string, Promise<unknown>>();
@@ -177,6 +183,7 @@ export function createHostedRelay(options: HostedRelayOptions) {
   const domainOrigin = (broker: ReturnType<typeof createHostBroker>, hostId: string, id: string) => previewDomainOrigin(broker.previews.nameId(hostId, id), options.previewDomain!, auth.origin);
 
   const security = createSecurityPolicy(state);
+  const recentAuthentication = (grant: HostedGrant) => options.recentAuthentication?.(grant) ?? security.recent(grant.authenticatedAt);
   const verifyControl = auth.provider === 'mainsite' ? createGatewayControlVerifier(auth, state) : undefined;
   function failClosed() {
     failed = true;
@@ -298,7 +305,7 @@ export function createHostedRelay(options: HostedRelayOptions) {
   const originAllowed = (request: Request) => request.headers.get('origin') === auth.origin;
   function context(request: Request, grant: HostedGrant): BrokerRequestContext {
     return { principalSubject: () => grant.subject, authorizeMessage: raw => {
-      try { const message = JSON.parse(raw); return message.type !== 'set_session_setting' || !['approval', 'sandbox', 'permissions'].includes(message.payload?.settingId) || security.recent(grant.authenticatedAt); } catch { return true; }
+      try { const message = JSON.parse(raw); return message.type !== 'set_session_setting' || !['approval', 'sandbox', 'permissions'].includes(message.payload?.settingId) || recentAuthentication(grant); } catch { return true; }
     }, authorize: () => !closing && !failed && sessions.expiresAt(request, grant) > Date.now(),
       validateMutation: () => ({ status: 'allowed' }), connectionExpiresAt: () => failed || closing ? 0 : sessions.expiresAt(request, grant) };
   }
@@ -356,9 +363,9 @@ export function createHostedRelay(options: HostedRelayOptions) {
     await security.record(grant.subject, 'signed_in', 'allowed');
     const response = redirect ? new Response(null, { status: 303, headers: { location: pending.returnPath ?? '/' } })
       : json(200, { ...browserState(exchange.grant), ...(pending.returnPath ? { returnPath: pending.returnPath } : {}), ...(pending.hostId ? { hostId: pending.hostId } : {}) });
-    response.headers.append('set-cookie', `${gatewayCookieName(auth.origin, 'session')}=${exchange.token}; ${cookieFlags}; Max-Age=${Math.max(0, Math.floor((exchange.expiresAt - Date.now()) / 1000))}`);
-    if (exchange.browserCookie) response.headers.append('set-cookie', `${gatewayCookieName(auth.origin, 'browser')}=${exchange.browserCookie}; ${cookieFlags}; Max-Age=31536000`);
-    response.headers.append('set-cookie', `${gatewayCookieName(auth.origin, 'login')}=; ${cookieFlags}; Max-Age=0`);
+    response.headers.append('set-cookie', `${gatewayCookieName(auth.origin, 'session', auth.cookiePrefix)}=${exchange.token}; ${cookieFlags}; Max-Age=${Math.max(0, Math.floor((exchange.expiresAt - Date.now()) / 1000))}`);
+    if (exchange.browserCookie) response.headers.append('set-cookie', `${gatewayCookieName(auth.origin, 'browser', auth.cookiePrefix)}=${exchange.browserCookie}; ${cookieFlags}; Max-Age=31536000`);
+    response.headers.append('set-cookie', `${gatewayCookieName(auth.origin, 'login', auth.cookiePrefix)}=; ${cookieFlags}; Max-Age=0`);
     return response;
   }
   async function handle(request: Request): Promise<Response | undefined> {
@@ -427,7 +434,7 @@ export function createHostedRelay(options: HostedRelayOptions) {
       });
       if (!added) return json(429, { error: 'Too many pending sign-ins.' });
       return new Response(null, { status: 303, headers: {
-        'set-cookie': `${gatewayCookieName(auth.origin, 'login')}=${verifier}; ${cookieFlags}; Max-Age=300`,
+        'set-cookie': `${gatewayCookieName(auth.origin, 'login', auth.cookiePrefix)}=${verifier}; ${cookieFlags}; Max-Age=300`,
         location: `${auth.issuer}/agent-remote?challenge=${challenge}${hostId ? '&host=' + encodeURIComponent(hostId) : ''}${reauthenticate ? '&reauthenticate=1' : ''}`,
       } });
     }
@@ -436,7 +443,7 @@ export function createHostedRelay(options: HostedRelayOptions) {
       if (request.headers.get('content-type')?.split(';')[0] !== 'application/json') return json(415, { error: 'JSON is required.' });
       const body = await readJson(request); const grant = verifyGatewayGrant(body?.ticket, auth);
       if (!grant) return json(401, { error: 'Gateway grant is invalid or expired.' });
-      const verifier = readGatewayCookie(request, gatewayCookieName(auth.origin, 'login'));
+      const verifier = readGatewayCookie(request, gatewayCookieName(auth.origin, 'login', auth.cookiePrefix));
       const challenge = verifier && /^[A-Za-z0-9_-]{43}$/.test(verifier) ? createHash('sha256').update(verifier).digest('base64url') : undefined;
       if (!challenge || challenge !== grant.nonce) return json(401, { error: 'Start sign-in from this browser before opening the gateway.' });
       const owned = tenant(grant); if (!owned) return json(429, { error: 'Relay tenant capacity reached.' });
@@ -458,7 +465,7 @@ export function createHostedRelay(options: HostedRelayOptions) {
       const grant = await authorize(request); if (grant instanceof Response) return grant;
       const response = json(200, browserState(grant));
       const browser = await sessions.browserCookie(request);
-      if (browser) response.headers.append('set-cookie', `${gatewayCookieName(auth.origin, 'browser')}=${browser}; ${cookieFlags}; Max-Age=31536000`);
+      if (browser) response.headers.append('set-cookie', `${gatewayCookieName(auth.origin, 'browser', auth.cookiePrefix)}=${browser}; ${cookieFlags}; Max-Age=31536000`);
       return response;
     }
     if (['/auth/refresh', '/auth/logout'].includes(url.pathname) && request.method === 'POST') {
@@ -466,7 +473,7 @@ export function createHostedRelay(options: HostedRelayOptions) {
       if (request.headers.get('content-type')?.split(';')[0] !== 'application/json') return json(415, {error:'JSON is required.'});
       const body = await readJson(request);
       if (!body || Object.keys(body).length) return json(400, {error:'No parameters are accepted.'});
-      const credential = readGatewayCookie(request, gatewayCookieName(auth.origin, 'session')) ?? '';
+      const credential = readGatewayCookie(request, gatewayCookieName(auth.origin, 'session', auth.cookiePrefix)) ?? '';
       if (!security.allow(url.pathname + ':' + hash(credential), 30, 60_000) || !security.allow(url.pathname + ':global', 600, 60_000)) return json(429, {error:'Too many authentication requests.'});
     }
     if (url.pathname === '/auth/refresh' && request.method === 'POST') {
@@ -474,7 +481,7 @@ export function createHostedRelay(options: HostedRelayOptions) {
       const grant = await authorize(request, true); if (grant instanceof Response) return grant;
       const response = json(200, browserState(grant));
       const browser = await sessions.browserCookie(request);
-      if (browser) response.headers.append('set-cookie', `${gatewayCookieName(auth.origin, 'browser')}=${browser}; ${cookieFlags}; Max-Age=31536000`);
+      if (browser) response.headers.append('set-cookie', `${gatewayCookieName(auth.origin, 'browser', auth.cookiePrefix)}=${browser}; ${cookieFlags}; Max-Age=31536000`);
       return response;
     }
     if (url.pathname === '/auth/logout' && request.method === 'POST') {
@@ -483,15 +490,15 @@ export function createHostedRelay(options: HostedRelayOptions) {
       await sessions.logout(request);
       if (current.grant) await security.record(current.grant.subject, 'signed_out', 'allowed');
       const response = json(200, { ok: true });
-      response.headers.set('set-cookie', `${gatewayCookieName(auth.origin, 'session')}=; ${cookieFlags}; Max-Age=0`); return response;
+      response.headers.set('set-cookie', `${gatewayCookieName(auth.origin, 'session', auth.cookiePrefix)}=; ${cookieFlags}; Max-Age=0`); return response;
     }
     if (['/auth/sessions', '/auth/sessions/revoke', '/auth/sessions/revoke-all', '/auth/audit'].includes(url.pathname)) {
       const grant = await authorize(request); if (grant instanceof Response) return grant;
       if (request.headers.has('origin') && !originAllowed(request)) return json(403, {error:'Origin is not allowed.'});
       if (request.method === 'GET' && url.pathname === '/auth/sessions') {
         const browser = await sessions.browserCookie(request);
-        const response = json(200, { sessions: sessions.list(grant.subject, request), authenticatedAt: grant.authenticatedAt ?? null, recentAuthentication: security.recent(grant.authenticatedAt) });
-        if (browser) response.headers.append('set-cookie', `${gatewayCookieName(auth.origin, 'browser')}=${browser}; ${cookieFlags}; Max-Age=31536000`);
+        const response = json(200, { sessions: sessions.list(grant.subject, request), authenticatedAt: grant.authenticatedAt ?? null, recentAuthentication: recentAuthentication(grant) });
+        if (browser) response.headers.append('set-cookie', `${gatewayCookieName(auth.origin, 'browser', auth.cookiePrefix)}=${browser}; ${cookieFlags}; Max-Age=31536000`);
         return response;
       }
       if (request.method === 'GET' && url.pathname === '/auth/audit') return json(200, {events:security.events(grant.subject)});
@@ -512,7 +519,7 @@ export function createHostedRelay(options: HostedRelayOptions) {
         await security.record(grant.subject, 'all_sessions_revoked', 'allowed');
       } else return json(405, {error:'Method is not allowed.'});
       const response = json(200, {ok:true,current});
-      if (current) response.headers.set('set-cookie', `${gatewayCookieName(auth.origin, 'session')}=; ${cookieFlags}; Max-Age=0`);
+      if (current) response.headers.set('set-cookie', `${gatewayCookieName(auth.origin, 'session', auth.cookiePrefix)}=; ${cookieFlags}; Max-Age=0`);
       return response;
     }
     if (url.pathname === '/auth/callback' && request.method === 'GET') return authenticationCallback(auth.origin);
@@ -523,7 +530,7 @@ export function createHostedRelay(options: HostedRelayOptions) {
       const principal = token && windows.resolveToken(token);
       if (!principal) return json(401, { code: 'invalid_window_grant' });
       if (request.method !== 'GET' && !security.allow('mutation:' + principal.subject, 60, 60_000)) return json(429, { code: 'rate_limited' });
-      return handleWindowRequest(windows, request, principal);
+      return handleWindowRequest(windows, request, principal, windowChangesWaitMs);
     }
     const grant = await authorize(request); if (grant instanceof Response) return grant;
     if (request.headers.has('origin') && !originAllowed(request)) return json(403, { error: 'Origin is not allowed.' });
@@ -539,13 +546,13 @@ export function createHostedRelay(options: HostedRelayOptions) {
     if (request.method !== 'GET') {
       if (!security.allow('mutation:' + grant.subject, 60, 60_000)) return json(429, {error:'Too many control requests.'});
       const sensitive = path.startsWith('/v1/remote/pairings') || /\/rotate$/.test(path);
-      if (sensitive && accountBacked && !security.recent(grant.authenticatedAt)) {
+      if (sensitive && accountBacked && !recentAuthentication(grant)) {
         await security.record(grant.subject, 'recent_authentication_required', 'denied');
         return json(403, {code:'reauthentication_required',error:'Sign in again before managing device credentials.',loginUrl:'/auth/login?reauthenticate=1'});
       }
       if (path === '/v1/remote/pairings' && request.method === 'POST' && !security.allow('pair:' + grant.subject, 5, 60_000)) return json(429, {error:'Too many pairing invitations.'});
     }
-    if (/^\/v1\/windows(?:\/|$)/.test(path)) return handleWindowRequest(windows, relative, { subject: grant.subject, authorize: () => !closing && !failed && sessions.expiresAt(request, grant) > Date.now() });
+    if (/^\/v1\/windows(?:\/|$)/.test(path)) return handleWindowRequest(windows, relative, { subject: grant.subject, authorize: () => !closing && !failed && sessions.expiresAt(request, grant) > Date.now() }, windowChangesWaitMs);
     if (path === '/v1/session-relations/reset') {
       if (request.method !== 'POST') return json(405,{error:'Method is not allowed.'});
       const input = await readJson(request);
@@ -834,7 +841,7 @@ export function createHostedRelay(options: HostedRelayOptions) {
     const unwatch = accessManager.watch(access, cancel);
     const cleanup = () => { unwatch(); request.signal.removeEventListener('abort', cancel); };
     try {
-      const route = isolated ? { ...registration, root: true } : registration;
+      const route = { ...registration, root: isolated, cookiePrefix: auth.cookiePrefix };
       const outgoing = previewRequest(request, route);
       const activity = () => { if (!abort.signal.aborted && accessManager.activity(access)) owned!.broker.previews.activity(access.hostId, access.previewId); };
       activity();
@@ -876,7 +883,7 @@ export function createHostedRelay(options: HostedRelayOptions) {
       const registration = owned?.broker.previews.lookup(access.hostId, access.previewId);
       const bridge = owned?.broker.previews.bridge(access.hostId);
       if (!bridge || !registration) return json(503, {});
-      const route = isolated ? { ...registration, root: true } : registration;
+      const route = { ...registration, root: isolated, cookiePrefix: auth.cookiePrefix };
       const outgoing = previewRequest(request, route);
       const abort = new AbortController();
       let applicationSocket: TunnelSocket | undefined;

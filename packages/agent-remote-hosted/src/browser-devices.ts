@@ -6,11 +6,11 @@ export const browserActivityWindow = 7 * 86_400_000;
 export const validBrowserId = (value: unknown): value is string => typeof value === 'string' && /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/.test(value);
 
 // This signed identifier groups logins; it never grants access to an account.
-export function browserIdentity(auth: Pick<GatewayAuthOptions, 'origin' | 'secret'>) {
+export function browserIdentity(auth: Pick<GatewayAuthOptions, 'origin' | 'secret' | 'cookiePrefix'>) {
   const signature = (id: string) => createHmac('sha256', auth.secret).update(`browser:${auth.origin}:${id}`).digest('base64url');
   return {
     read(request?: Request) {
-      const cookie = request && readGatewayCookie(request, gatewayCookieName(auth.origin, 'browser'));
+      const cookie = request && readGatewayCookie(request, gatewayCookieName(auth.origin, 'browser', auth.cookiePrefix));
       if (!cookie || cookie.length > 100) return undefined;
       const [id, proof, extra] = cookie.split('.');
       if (!validBrowserId(id) || !proof || extra !== undefined) return undefined;

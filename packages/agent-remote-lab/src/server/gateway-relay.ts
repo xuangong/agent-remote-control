@@ -4,7 +4,7 @@ import { WebSocketServer } from 'ws';
 import { createHmac } from 'node:crypto';
 import { join } from 'node:path';
 import { InputResourceStore } from '@orchardworks/agent-remote-relay';
-import { BROKER_MAX_FRAME_BYTES, createHostedRelay, hostedAuthStorageIdentity, hostedRecordEncodingCosts, isPreviewDomain, migrateLegacyNodeState, resolveHostedAuth, type HostedAuthOptions } from '@orchardworks/agent-remote-hosted';
+import { BROKER_MAX_FRAME_BYTES, createHostedRelay, hostedAuthStorageIdentity, hostedRecordEncodingCosts, isPreviewDomain, migrateLegacyNodeState, resolveHostedAuth, type HostedAuthOptions, type HostedRelayOptions } from '@orchardworks/agent-remote-hosted';
 import { openGatewayState } from './gateway-state.js';
 import { openGatewayDiagnostics } from './gateway-diagnostics.js';
 import { InvalidHttpRequest, relaySocket, rejectUpgrade, webRequest, writeResponse } from './remote-host-broker.js';
@@ -17,9 +17,21 @@ export type GatewayRelayOptions = HostedAuthOptions & {
   stateFile?: string;
   keyLifetimeMs?: number;
   servePage?(request: IncomingMessage, response: ServerResponse): Promise<boolean>;
+  /** Trusted runtime composition only; production entrypoints do not install authentication interceptors. */
+  requestInterceptor?: GatewayRelayRequestInterceptor;
+  recentAuthentication?: HostedRelayOptions['recentAuthentication'];
+  windowChangesWaitMs?: HostedRelayOptions['windowChangesWaitMs'];
+  /** Trusted equivalent transport origins; production entrypoints do not configure aliases. */
+  originAliases?: readonly string[];
 }
+export type GatewayRelayRequestInterceptor = (request: Request, dispatch: (request: Request) => Promise<Response | undefined>) => Promise<Response | undefined>;
 export function createGatewayRelay(options: GatewayRelayOptions) {
   const auth = resolveHostedAuth(options);
+  const originAliases = new Set(options.originAliases ?? []);
+  for (const origin of originAliases) {
+    const alias = new URL(origin);
+    if (alias.origin !== origin || alias.protocol !== new URL(auth.origin).protocol) throw new Error('Relay aliases must be explicit origins using the Relay protocol.');
+  }
   const protocols = new WeakMap<IncomingMessage, string | undefined>();
   const websockets = new WebSocketServer({ noServer: true, maxPayload: BROKER_MAX_FRAME_BYTES,
     handleProtocols(offered, request) { return protocols.has(request) ? protocols.get(request) ?? false : offered.values().next().value ?? false; } });
@@ -29,20 +41,30 @@ export function createGatewayRelay(options: GatewayRelayOptions) {
   let previewOrigin = options.previewOrigin;
   function requestUrl(request: IncomingMessage) {
     const candidate = new URL(auth.origin).protocol + '//' + request.headers.host;
-    const selected = isPreviewDomain(candidate, options.previewDomain, auth.origin) ? candidate : [auth.origin, previewOrigin].filter((value): value is string => !!value).find(value => new URL(value).host === request.headers.host);
+    const alias = originAliases.has(candidate.toLowerCase());
+    const selected = alias ? auth.origin : isPreviewDomain(candidate, options.previewDomain, auth.origin) ? candidate : [auth.origin, previewOrigin].filter((value): value is string => !!value).find(value => new URL(value).host === request.headers.host);
     if (!selected) throw new InvalidHttpRequest();
-    const url = new URL(request.url ?? '/', selected);
+    const path = request.url ?? '/';
+    if (alias && (!path.startsWith('/') || path.startsWith('//') || path.includes('\\'))) throw new InvalidHttpRequest();
+    const url = new URL(path, selected);
     if (url.origin !== selected) throw new InvalidHttpRequest();
     return url;
+  }
+  function forwardRequest(request: IncomingMessage, body: boolean, signal?: AbortSignal): Request {
+    const forwarded = webRequest(request, requestUrl(request), body, signal);
+    const origin = forwarded.headers.get('origin');
+    if (origin && originAliases.has(origin.toLowerCase())) forwarded.headers.set('origin', auth.origin);
+    return forwarded;
   }
   const server = createServer((request, response) => {
     void (async () => {
       if (!runtime) throw new Error('Relay is starting.');
       const abort = new AbortController();
       response.once('close', () => abort.abort()); request.once('aborted', () => abort.abort());
-      const forwarded = webRequest(request, requestUrl(request), true, abort.signal);
+      const forwarded = forwardRequest(request, true, abort.signal);
       clientAddresses.set(forwarded, request.socket.remoteAddress ?? 'unknown');
-      const result = await runtime.fetch(forwarded);
+      const dispatch = (input: Request) => runtime!.fetch(input);
+      const result = await options.requestInterceptor?.(forwarded, dispatch) ?? await dispatch(forwarded);
       if (result) return writeResponse(response, result);
       response.setHeader('cache-control', 'no-store'); response.setHeader('referrer-policy', 'no-referrer'); response.setHeader('x-content-type-options', 'nosniff');
       if (await options.servePage?.(request, response)) return;
@@ -56,7 +78,7 @@ export function createGatewayRelay(options: GatewayRelayOptions) {
   server.on('upgrade', (request, socket, head) => {
     void (async () => {
       if (!runtime) return rejectUpgrade(socket, 503);
-      const forwarded = webRequest(request, requestUrl(request), false);
+      const forwarded = forwardRequest(request, false);
       const preview = await runtime.preparePreviewUpgrade(forwarded);
       if (preview) {
         if (preview instanceof Response) return rejectUpgrade(socket, preview.status);
@@ -78,7 +100,7 @@ export function createGatewayRelay(options: GatewayRelayOptions) {
       try {
         if (options.stateFile) storage = openGatewayState(options.stateFile, auth.secret, hostedAuthStorageIdentity(auth));
         const initial = storage ? migrateLegacyNodeState(storage.initial, auth) : undefined;
-        runtime = createHostedRelay({ ...auth, previewOrigin, previewDomain: options.previewDomain, clientAddress: request => clientAddresses.get(request) ?? 'unknown', maxTenants: options.maxTenants, keyLifetimeMs: options.keyLifetimeMs,
+        runtime = createHostedRelay({ ...auth, previewOrigin, previewDomain: options.previewDomain, clientAddress: request => clientAddresses.get(request) ?? 'unknown', maxTenants: options.maxTenants, keyLifetimeMs: options.keyLifetimeMs, recentAuthentication: options.recentAuthentication, windowChangesWaitMs: options.windowChangesWaitMs,
           ...(storage ? { successionEnrollment: true, successionEncodingCosts: { ...hostedRecordEncodingCosts(auth), acceptsSnapshot: storage.acceptsSnapshot } } : {}),
           ...(options.stateFile ? { diagnosticStorage: openGatewayDiagnostics(options.stateFile, auth) } : {}),
           ...(options.stateFile ? { teamResources: (namespace: string) => new InputResourceStore({ directory: join(options.stateFile + '.resources', createHmac('sha256', auth.secret).update(JSON.stringify([auth.origin, auth.issuer, namespace])).digest('hex')) }) } : {}),

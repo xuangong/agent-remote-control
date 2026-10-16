@@ -13,7 +13,7 @@ export function createHostedSessions(auth: HostedAuthOptions, state: RelayState,
   const hash = (value: string) => createHash('sha256').update(value).digest('hex');
   function recordFor(request: Request) {
     if (request.headers.has('authorization')) return undefined;
-    const token = readGatewayCookie(request, gatewayCookieName(auth.origin, 'session'));
+    const token = readGatewayCookie(request, gatewayCookieName(auth.origin, 'session', auth.cookiePrefix));
     return token ? state.read().sessions.find(record => record.hash === hash(token)) : undefined;
   }
   async function renew(record: SavedGatewaySession): Promise<'active' | 'denied' | 'unavailable'> {

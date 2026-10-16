@@ -19,7 +19,7 @@ function relaySocket(socket: WebSocket): RelaySocket {
     onClose(listener) { const close = (code: number) => listener({ code }); socket.on('close', close); return () => { socket.off('close', close); }; },
     onError(listener) { socket.on('error', listener); return () => { socket.off('error', listener); }; } };
 }
-async function fixture(durable = true) {
+async function fixture(durable = true, cookiePrefix?: string) {
   const keys = await generateKeyPair('RS256');
   const wrongKeys = await generateKeyPair('RS256');
   const jwk = { ...await exportJWK(keys.publicKey), kid: 'fixture', alg: 'RS256', use: 'sig' };
@@ -57,7 +57,7 @@ async function fixture(durable = true) {
   await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
   closers.push(async () => { server.closeAllConnections(); await new Promise<void>(resolve => server.close(() => resolve())); });
   const providerOrigin = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
-  const auth = { provider: 'google' as const, origin, secret, google: { clientId: 'fixture-client', clientSecret: 'fixture-secret', allowedEmails: ['allowed@example.com'], sessionLifetimeMs: 3_600_000,
+  const auth = { provider: 'google' as const, origin, secret, cookiePrefix, google: { clientId: 'fixture-client', clientSecret: 'fixture-secret', allowedEmails: ['allowed@example.com'], sessionLifetimeMs: 3_600_000,
     endpoints: { authorization: providerOrigin + '/authorize', token: providerOrigin + '/token', jwks: providerOrigin + '/jwks' } } };
   let saved: HostedRelayState | undefined;
   function start(initial?: HostedRelayState, options = auth) {
@@ -78,7 +78,7 @@ async function fixture(durable = true) {
   async function finish(login: Awaited<ReturnType<typeof begin>>, target = relay, extraCookie = '') {
     return (await target.fetch(new Request(login.callback, { headers: { cookie: [login.cookie, extraCookie].filter(Boolean).join('; ') } })))!;
   }
-  async function signIn() { const login = await begin(); const callback = await finish(login); expect(callback.status).toBe(303); return { callback, cookie: callback.headers.getSetCookie().filter(value => !value.includes('arc_login=')).map(value => value.split(';')[0]).join('; ') }; }
+  async function signIn() { const login = await begin(); const callback = await finish(login); expect(callback.status).toBe(303); return { callback, cookie: callback.headers.getSetCookie().filter(value => !value.includes('Max-Age=0')).map(value => value.split(';')[0]).join('; ') }; }
   return { auth, relay, start, begin, finish, signIn, request, saved: () => saved!, claims: (value: JWTPayload) => { claims = value; }, wrongSignature: () => { invalidSignature = true; } };
 }
 
@@ -94,6 +94,30 @@ it('admits a signed allowlisted Google identity through bound PKCE and keeps its
   expect(snapshot.sessions[0]!.grant).not.toHaveProperty('continuation');
   await f.relay.close(); const restarted = f.start(snapshot);
   expect((await restarted.fetch(f.request('/auth/status', cookie)))!.status).toBe(200);
+}, 10000);
+
+it('uses the configured login cookie and retains browser grouping across Google callbacks', async () => {
+  const f = await fixture(true, 'devbox');
+  const first = await f.begin();
+  expect(first.login.headers.getSetCookie()[0]).toMatch(/^__Host-devbox_login=/);
+  const callback = await f.finish(first);
+  expect(callback.status).toBe(303);
+  expect(callback.headers.getSetCookie().map(value => value.split('=')[0])).toEqual([
+    '__Host-devbox_session', '__Host-devbox_browser', '__Host-devbox_login',
+  ]);
+  const cookie = callback.headers.getSetCookie().filter(value => !value.includes('Max-Age=0')).map(value => value.split(';')[0]).join('; ');
+  expect((await f.relay.fetch(f.request('/auth/status', cookie)))!.status).toBe(200);
+  const second = await f.begin(f.relay, cookie);
+  const result = await f.finish(second);
+  expect(result.status).toBe(303);
+  const secondCookie = result.headers.getSetCookie().filter(value => !value.includes('Max-Age=0')).map(value => value.split(';')[0]).join('; ');
+  const listing = await (await f.relay.fetch(f.request('/auth/sessions', secondCookie)))!.json();
+  expect(listing.sessions).toHaveLength(1);
+  expect(listing.sessions[0]).toMatchObject({ current: true, sessionCount: 2 });
+  expect((await f.relay.fetch(f.request('/auth/refresh', secondCookie, {})))!.status).toBe(200);
+  const logout = (await f.relay.fetch(f.request('/auth/logout', secondCookie, {})))!;
+  expect(logout.headers.getSetCookie()[0]).toContain('__Host-devbox_session=;');
+  expect((await f.relay.fetch(f.request('/auth/status', secondCookie)))!.status).toBe(401);
 }, 10000);
 
 it.each([

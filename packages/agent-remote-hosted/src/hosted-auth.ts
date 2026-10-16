@@ -11,9 +11,9 @@ export interface GoogleAuthConfiguration {
   endpoints?: { authorization: string; token: string; jwks: string };
 }
 export type HostedAuthOptions = (GatewayAuthOptions & { provider?: 'mainsite' | 'gateway' }) |
-  { provider: 'google'; origin: string; secret: string; google: GoogleAuthConfiguration };
-export type ResolvedHostedAuth = (GatewayAuthOptions & { provider: 'mainsite' }) |
-  (GatewayAuthOptions & { provider: 'google'; google: GoogleAuthConfiguration & { sessionLifetimeMs: number; endpoints: NonNullable<GoogleAuthConfiguration['endpoints']> } });
+  { provider: 'google'; origin: string; secret: string; cookiePrefix?: string; google: GoogleAuthConfiguration };
+export type ResolvedHostedAuth = ((GatewayAuthOptions & { provider: 'mainsite' }) |
+  (GatewayAuthOptions & { provider: 'google'; google: GoogleAuthConfiguration & { sessionLifetimeMs: number; endpoints: NonNullable<GoogleAuthConfiguration['endpoints']> } })) & { cookiePrefix: string };
 export interface HostedAuthEnvironment {
   AGENT_REMOTE_AUTH_PROVIDER?: string;
   AGENT_REMOTE_RELAY_URL?: string;
@@ -32,8 +32,10 @@ export function validAllowedEmail(email: unknown): email is string {
 }
 export function resolveHostedAuth(options: HostedAuthOptions): ResolvedHostedAuth {
   const origin = validateGatewayOrigin(options.origin);
+  const cookiePrefix = options.cookiePrefix === undefined ? 'arc' : options.cookiePrefix;
+  if (typeof cookiePrefix !== 'string' || !/^[a-z][a-z0-9_-]{0,31}$/.test(cookiePrefix)) throw new Error('Cookie prefix must start with a lowercase letter and contain at most 32 lowercase letters, digits, underscores or hyphens.');
   if (typeof options.secret !== 'string' || Buffer.byteLength(options.secret) < 32) throw new Error('Relay signing secret must contain at least 32 bytes.');
-  if (options.provider === undefined || options.provider === 'mainsite' || options.provider === 'gateway') return { provider: 'mainsite', origin, issuer: validateGatewayOrigin(options.issuer), secret: options.secret };
+  if (options.provider === undefined || options.provider === 'mainsite' || options.provider === 'gateway') return { provider: 'mainsite', origin, issuer: validateGatewayOrigin(options.issuer), secret: options.secret, cookiePrefix };
   if (options.provider !== 'google') throw new Error('Unsupported authentication provider.');
   const input = options.google;
   if (!input || !input.clientId?.trim() || input.clientId.length > 512 || !input.clientSecret?.trim() || input.clientSecret.length > 4096) throw new Error('Google client ID and client secret are required.');
@@ -46,7 +48,7 @@ export function resolveHostedAuth(options: HostedAuthOptions): ResolvedHostedAut
     const url = new URL(endpoint); validateGatewayOrigin(url.origin);
     if (url.username || url.password || url.search || url.hash) throw new Error('Google endpoints must be trusted HTTPS URLs or loopback HTTP URLs without query parameters.');
   }
-  return { provider: 'google', origin, issuer: googleIssuer, secret: options.secret, google: { clientId: input.clientId.trim(), clientSecret: input.clientSecret, allowedEmails, sessionLifetimeMs, endpoints: { ...endpoints } } };
+  return { provider: 'google', origin, issuer: googleIssuer, secret: options.secret, cookiePrefix, google: { clientId: input.clientId.trim(), clientSecret: input.clientSecret, allowedEmails, sessionLifetimeMs, endpoints: { ...endpoints } } };
 }
 export function hostedAuthFromEnv(env: HostedAuthEnvironment): ResolvedHostedAuth {
   const required = (name: keyof HostedAuthEnvironment) => { const value = env[name]; if (!value?.trim()) throw new Error(`${name} is required.`); return value; };

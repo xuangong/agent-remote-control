@@ -1,6 +1,10 @@
-interface Route { id: string; target: string; pathMode: 'strip' | 'preserve'; root?: boolean }
+interface Route { id: string; target: string; pathMode: 'strip' | 'preserve'; root?: boolean; cookiePrefix?: string }
 const hopHeaders = new Set(['connection', 'keep-alive', 'proxy-authenticate', 'proxy-authorization', 'te', 'trailer', 'transfer-encoding', 'upgrade']);
-const privateCookie = (name: string) => /^(?:__Host-|__Secure-)?arc[_-]/i.test(name.trim());
+const privateCookie = (name: string, prefix = 'arc') => {
+  const bare = name.trim().replace(/^(?:__Host-|__Secure-)/i, '').toLowerCase();
+  // Preview access always uses arc; authentication may use its own cookie namespace.
+  return /^arc[_-]/.test(bare) || bare.startsWith(prefix.toLowerCase() + '_') || bare.startsWith(prefix.toLowerCase() + '-');
+};
 export function previewRequest(request: Request, route: Route) {
   const url = new URL(request.url); const prefix = route.root ? '' : `/p/${route.id}`;
   if (!url.pathname.startsWith(prefix + '/') && url.pathname !== prefix) throw new Error('Preview path does not match registration.');
@@ -13,7 +17,7 @@ export function previewRequest(request: Request, route: Route) {
   request.headers.forEach((value, name) => {
     if (excluded.has(name) || name.startsWith('x-forwarded-') || name.startsWith('sec-websocket-') || name.startsWith('x-arc-') || name.startsWith('cf-')) return;
     if (name === 'cookie') {
-      const app = value.split(';').filter(cookie => !privateCookie(cookie.split('=', 1)[0]!)).map(cookie => cookie.trim()).join('; ');
+      const app = value.split(';').filter(cookie => !privateCookie(cookie.split('=', 1)[0]!, route.cookiePrefix)).map(cookie => cookie.trim()).join('; ');
       if (app) headers.push([name, app]);
     } else headers.push([name, name === 'origin' ? route.target : value]);
   });
@@ -40,7 +44,7 @@ export function previewResponseHeaders(input: Array<[string, string]>, route: Ro
       }
     } else if (name === 'set-cookie') {
       const parts = value.split(';').map(value => value.trim());
-      if (privateCookie(parts[0]!.split('=', 1)[0]!) || (!route.root && parts[0]!.startsWith('__Host-'))) continue;
+      if (privateCookie(parts[0]!.split('=', 1)[0]!, route.cookiePrefix) || (!route.root && parts[0]!.startsWith('__Host-'))) continue;
       const pathPart = parts.find(part => /^path=/i.test(part));
       const original = pathPart?.slice(5) || '/';
       const path = route.pathMode === 'preserve' && original.startsWith(prefix + '/') ? original : prefix + (original.startsWith('/') ? original : '/');

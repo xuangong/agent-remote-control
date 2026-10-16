@@ -29,22 +29,35 @@ it('loads the managed Gateway key and private home from the saved opt-in for nat
     environment: { AGENT_HOST_BOOTSTRAP_CODEX: '1', AGENT_HOST_CODEX: f.environment.AGENT_HOST_CODEX } }));
   expect(await runCodexCommand(['exec', 'hello'], f.root, { TEST_CAPTURE: f.environment.TEST_CAPTURE })).toBe(0);
   expect(await f.captured()).toEqual({ args: ['--remote', `unix://${home}/app-server-control/app-server-control.sock`, 'exec', 'hello'], home, key: 'sk_private_gateway_key', locale: 'C' });
+  expect(await runCodexCommand(['daemon', 'start'], f.root, {
+    TEST_CAPTURE: f.environment.TEST_CAPTURE, OPENAI_API_KEY: 'inherited-key',
+  })).toBe(0);
+  expect(await f.captured()).toEqual({ args: ['app-server', 'daemon', 'start'], home,
+    key: 'sk_private_gateway_key', openaiKey: 'inherited-key', locale: 'C' });
 }, 10000);
 
 it.each([
   ['daemon', 'start'], ['daemon', 'restart'],
   ['app-server', 'daemon', 'start'], ['app-server', 'daemon', 'restart'],
-])('injects the daemon API key for %j', async (...args) => {
+])('preserves configured daemon API keys and supplies only a missing fallback for %j', async (...args) => {
   const f = await fixture();
-  for (const inheritedKey of [undefined, '', 'inherited-key']) {
-    expect(await runCodexCommand(args, f.root, {
-      ...f.environment, CODEX_HOME: join(f.root, 'home'), OPENAI_API_KEY: inheritedKey,
-      CODEX_GATEWAY_API_KEY: 'gateway-key',
-    })).toBe(0);
-    expect(await f.captured()).toMatchObject({
-      args: ['app-server', 'daemon', args.at(-1) === 'restart' ? 'bootstrap' : 'start'],
-      openaiKey: 'arc', key: 'gateway-key', locale: 'C',
-    });
+  for (const { inheritedKey, expectedKey } of [
+    { inheritedKey: undefined, expectedKey: 'arc' },
+    { inheritedKey: '', expectedKey: 'arc' },
+    { inheritedKey: 'inherited-key', expectedKey: 'inherited-key' },
+  ]) {
+    for (const gatewayKey of [undefined, 'gateway-key']) {
+      expect(await runCodexCommand(args, f.root, {
+        ...f.environment, CODEX_HOME: join(f.root, 'home'), OPENAI_API_KEY: inheritedKey,
+        CODEX_GATEWAY_API_KEY: gatewayKey,
+      })).toBe(0);
+      const captured = await f.captured();
+      expect(captured).toMatchObject({
+        args: ['app-server', 'daemon', args.at(-1) === 'restart' ? 'bootstrap' : 'start'],
+        openaiKey: expectedKey, locale: 'C',
+      });
+      expect(captured.key).toBe(gatewayKey);
+    }
   }
 }, 10000);
 it.each([['exec', 'hello'], ['daemon', 'status'], ['daemon', 'stop']])(

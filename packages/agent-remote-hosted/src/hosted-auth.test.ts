@@ -1,5 +1,7 @@
 import { expect, it } from 'vitest';
 import { hostedAuthFromEnv, hostedAuthMetadata, hostedAuthNamespace, hostedAuthStateConfig, hostedAuthStorageIdentity, resolveHostedAuth } from './hosted-auth.js';
+import type { HostedAuthOptions } from './hosted-auth.js';
+import { emptyRelayState, validateRelayState } from './state.js';
 
 const common = { AGENT_REMOTE_RELAY_URL: 'https://relay.example', AGENT_REMOTE_SIGNING_SECRET: 'configuration-fixture-secret-01234567890123456789' };
 it.each(['mainsite', 'gateway', undefined] as const)('resolves %s as main-site auth without changing existing identity or storage', provider => {
@@ -33,3 +35,26 @@ it('rejects unknown providers, missing secrets, and unbounded local session life
   expect(() => hostedAuthFromEnv({ ...common, AGENT_REMOTE_AUTH_PROVIDER: 'google' })).toThrow();
   expect(() => resolveHostedAuth({ provider: 'google', origin: common.AGENT_REMOTE_RELAY_URL, secret: common.AGENT_REMOTE_SIGNING_SECRET, google: { clientId: 'client', clientSecret: 'secret', allowedEmails: ['a@example.com'], sessionLifetimeMs: Infinity } })).toThrow(/lifetime/i);
 });
+
+const cookieOptions: HostedAuthOptions[] = [
+  { origin: common.AGENT_REMOTE_RELAY_URL, issuer: 'https://gateway.example', secret: common.AGENT_REMOTE_SIGNING_SECRET },
+  { provider: 'google', origin: common.AGENT_REMOTE_RELAY_URL, secret: common.AGENT_REMOTE_SIGNING_SECRET,
+    google: { clientId: 'client', clientSecret: 'secret', allowedEmails: ['alice@example.com'] } },
+];
+it.each(cookieOptions)('changes cookie names independently of persisted auth identity for $provider', options => {
+  const defaultAuth = resolveHostedAuth(options);
+  const customAuth = resolveHostedAuth({ ...options, cookiePrefix: 'devbox' });
+  expect(defaultAuth.cookiePrefix).toBe('arc');
+  expect(customAuth.cookiePrefix).toBe('devbox');
+  expect(hostedAuthStateConfig(customAuth)).toEqual(hostedAuthStateConfig(defaultAuth));
+  expect(hostedAuthStorageIdentity(customAuth)).toBe(hostedAuthStorageIdentity(defaultAuth));
+  expect(hostedAuthNamespace(customAuth, 'alice')).toBe(hostedAuthNamespace(defaultAuth, 'alice'));
+  const persisted = emptyRelayState(defaultAuth);
+  expect(validateRelayState(persisted, customAuth)).toEqual(persisted);
+}, 10000);
+
+it.each(['', 'two words', 'devbox;', '__Host-devbox', 'a'.repeat(33), null, 12])('rejects unsafe cookie prefix %j before creating auth', cookiePrefix => {
+  for (const options of cookieOptions) {
+    expect(() => resolveHostedAuth({ ...options, cookiePrefix } as HostedAuthOptions)).toThrow(/cookie prefix/i);
+  }
+}, 10000);

@@ -9,7 +9,11 @@ export interface HostedGrantIdentity { profile?: GatewayProfile; subject: string
 export interface GatewayGrant extends HostedGrantIdentity { provider?: 'gateway'; ticket: string; nonce: string; continuation?: string; sessionExpiresAt?: number }
 export interface GoogleGrant extends HostedGrantIdentity { provider: 'google'; sessionExpiresAt: number; authenticatedAt: number }
 export type HostedGrant = GatewayGrant | GoogleGrant;
-export interface GatewayAuthOptions { origin: string; issuer: string; secret: string }
+export interface GatewayAuthOptions {
+  origin: string; issuer: string; secret: string;
+  /** Browser cookie namespace only; does not affect account or persisted state identity. */
+  cookiePrefix?: string;
+}
 export function validateGatewayOrigin(value: string): string {
   const url = new URL(value);
   if (url.username || url.password || url.search || url.hash || url.pathname !== '/' ||
@@ -47,12 +51,12 @@ export function verifyGatewayGrant(ticket: unknown, options: GatewayAuthOptions)
 export function authenticateGatewayRequest(request: Request, options: GatewayAuthOptions): GatewayGrant | undefined {
   const authorization = request.headers.get('authorization');
   const token = authorization ? /^Bearer ([^\s]+)$/i.exec(authorization)?.[1]
-    : readGatewayCookie(request, gatewayCookieName(options.origin, 'session'));
+    : readGatewayCookie(request, gatewayCookieName(options.origin, 'session', options.cookiePrefix));
   return verifyGatewayGrant(token, options);
 }
 
-export function gatewayCookieName(origin: string, kind: 'session' | 'login' | 'browser'): string {
-  return `${origin.startsWith('https:') ? '__Host-' : ''}arc_${kind}`;
+export function gatewayCookieName(origin: string, kind: 'session' | 'login' | 'browser', prefix = 'arc'): string {
+  return `${origin.startsWith('https:') ? '__Host-' : ''}${prefix}_${kind}`;
 }
 export function readGatewayCookie(request: Request, name: string): string | undefined {
   const matches = (request.headers.get('cookie') ?? '').split(';').map(value => value.trim()).filter(value => value.startsWith(name + '='));

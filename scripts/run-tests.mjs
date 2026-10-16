@@ -22,6 +22,8 @@ if (successionEvidence) {
 if (mode === 'claude' && !process.env.AGENT_CLAUDE_TEST_EXECUTABLE) throw new Error('Set AGENT_CLAUDE_TEST_EXECUTABLE to Claude Code 2.1.247 or newer for native Claude tests.');
 if (mode === 'codex-shared' && !process.env.AGENT_REMOTE_SHARED_CODEX_TEST_EXECUTABLE) throw new Error('Set AGENT_REMOTE_SHARED_CODEX_TEST_EXECUTABLE to the native Codex executable for shared-runtime tests.');
 const commands = {
+  devbox: ['exec', 'node', '--test', '--test-timeout=18000', 'scripts/devbox/start.test.mjs', 'scripts/devbox/codex-profile.test.mjs', 'scripts/lib/build-provenance.test.mjs', 'scripts/controller/entrypoint.test.mjs'],
+  'devbox-server': ['--filter', '@orchardworks/agent-remote-lab', 'exec', 'vitest', 'run', 'src/server/devbox.test.ts', 'src/server/devbox-preview.test.ts', 'src/server/gateway-relay.test.ts', '--testTimeout=15000', '--hookTimeout=15000'],
   'opencode-server-native': ['exec', 'node', '--test', '--test-timeout=60000', '--test-concurrency=1', 'scripts/opencode-managed-server-native.test.mjs'],
   'opencode-server': ['--filter', '@orchardworks/agent-remote-controller', 'exec', 'vitest', 'run', 'src/opencode-server.test.ts', 'src/opencode-server-supervisor.test.ts', 'src/provider-discovery.test.ts', 'src/registrations.test.ts', 'src/opencode-command.test.ts', 'src/opencode-executable.test.ts', 'src/connection-config.test.ts', 'src/host.test.ts', 'src/cli-bootstrap.test.ts', '--testTimeout=15000', '--hookTimeout=15000', '--maxWorkers=1'],
   'opencode-succession-adapter': ['exec', 'node', '--test', '--test-timeout=115000', '--test-concurrency=1', '--test-name-pattern=actual adapter', 'scripts/opencode-native-succession-evidence.test.mjs'],
@@ -62,7 +64,7 @@ function stop(signal) {
     if (error.code !== 'ESRCH') throw error;
   }
 }
-const outerDeadlineMs = mode === 'opencode-server-native' ? 90_000 : successionEvidence || opencodeSuccessionEvidence ? 120_000 : 540_000;
+const outerDeadlineMs = mode === 'devbox' ? 30_000 : mode === 'devbox-server' ? 80_000 : mode === 'opencode-server-native' ? 90_000 : successionEvidence || opencodeSuccessionEvidence ? 120_000 : 540_000;
 const deadline = setTimeout(() => {
   process.stderr.write(`${mode} suite exceeded its ${outerDeadlineMs / 1000} second deadline.\n`);
   stop('SIGKILL');

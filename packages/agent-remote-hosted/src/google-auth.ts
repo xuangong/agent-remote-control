@@ -36,11 +36,11 @@ export function createGoogleLogin(auth: GoogleAuth, state: RelayState) {
       for (const [name, value] of Object.entries(parameters)) destination.searchParams.set(name, value);
       // The cross-site, top-level OAuth callback needs Lax; access cookies remain Strict.
       return new Response(null, { status: 303, headers: { location: destination.href,
-        'set-cookie': `${gatewayCookieName(auth.origin, 'login')}=${browser}; Path=/; HttpOnly; SameSite=Lax${auth.origin.startsWith('https:') ? '; Secure' : ''}; Max-Age=300` } });
+        'set-cookie': `${gatewayCookieName(auth.origin, 'login', auth.cookiePrefix)}=${browser}; Path=/; HttpOnly; SameSite=Lax${auth.origin.startsWith('https:') ? '; Secure' : ''}; Max-Age=300` } });
     },
     async callback(request: Request): Promise<{ status: 'active'; grant: GoogleGrant; pending: LoginChallenge } | { status: 'denied' | 'unavailable' | 'capacity'; returnPath?: string }> {
       const url = new URL(request.url), id = url.searchParams.get('state'), code = url.searchParams.get('code');
-      const browser = readGatewayCookie(request, gatewayCookieName(auth.origin, 'login'));
+      const browser = readGatewayCookie(request, gatewayCookieName(auth.origin, 'login', auth.cookiePrefix));
       if (!validOpaque(id) || !validOpaque(browser) || url.searchParams.getAll('state').length !== 1 || url.searchParams.getAll('code').length > 1) return { status: 'denied' };
       // Consume durably before contacting the provider, so concurrent callbacks and restarts cannot replay the code.
       const pending = await state.mutate(draft => {

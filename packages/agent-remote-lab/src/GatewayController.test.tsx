@@ -6,6 +6,17 @@ import { rememberWorkspaceAccess, forgetWorkspaceAccess } from './workspace-acce
 beforeEach(() => { localStorage.clear(); sessionStorage.clear(); });
 
 afterEach(() => { vi.unstubAllGlobals(); vi.useRealTimers(); });
+it('opens automatic local access despite an earlier sign-out and does not offer interactive account controls', async () => {
+  forgetWorkspaceAccess();
+  const basePath = '/u/' + 'a'.repeat(64) + '/';
+  const fetcher = vi.fn(async () => Response.json({ user: { id: 'devbox', name: 'Devbox' }, basePath, expiresAt: Date.now() + 120000 }));
+  vi.stubGlobal('fetch', fetcher);
+  const view = await render(<GatewayController automaticAccess>{(baseUrl, accountAction, ready) => <><p>{ready ? baseUrl : 'Restoring'}</p>{accountAction}</>}</GatewayController>);
+  expect(view.textContent).toBe(window.location.origin + basePath);
+  expect(view.querySelector('button, a')).toBeNull();
+  expect(fetcher).toHaveBeenCalledWith('/auth/status', expect.any(Object));
+  expect(localStorage.getItem('agent-remote:signed-out')).toBeNull();
+});
 it('offers gateway login without loading private controllers when the grant is missing', async () => {
   vi.stubGlobal('fetch', vi.fn(async () => Response.json({ error: 'Sign in' }, { status: 401 })));
   const view = await render(<GatewayController>{() => <p>Private controller</p>}</GatewayController>);

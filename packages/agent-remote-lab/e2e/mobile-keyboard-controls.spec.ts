@@ -1,4 +1,4 @@
-import { expect, test } from '@playwright/test';
+import { expect, test, type Page } from '@playwright/test';
 import { showNewSession } from './session-navigation';
 
 test.beforeEach(async ({ page }) => {
@@ -61,7 +61,7 @@ for (const visualClientRects of [false, true]) {
   });
 }
 
-test('pulls down a focused composer to dismiss the keyboard while preserving its draft', async ({ page }) => {
+async function openFocusedComposer(page: Page, draft: string) {
   await page.addInitScript(() => {
     const viewport = Object.assign(new EventTarget(), { width: 390, height: 844, offsetTop: 0, offsetLeft: 0, scale: 1 });
     Object.defineProperty(window, 'visualViewport', { configurable: true, value: viewport });
@@ -71,7 +71,6 @@ test('pulls down a focused composer to dismiss the keyboard while preserving its
   await page.getByTestId('session-create').click();
   const input = page.locator('.lab-primary-conversation').getByTestId('prompt-input');
   await expect(input).toBeEnabled();
-  const draft = 'Keep this draft while dismissing the keyboard';
   await input.fill(draft);
   await expect(page.locator('.lab-primary-conversation').getByTestId('prompt-submit')).toBeEnabled();
   await input.focus();
@@ -81,6 +80,12 @@ test('pulls down a focused composer to dismiss the keyboard while preserving its
   });
   await expect(page.locator('.lab-shell')).toHaveAttribute('data-viewport-occluded', 'true');
   await expect(input).toBeFocused();
+  return input;
+}
+
+test('pulls down a focused composer to dismiss the keyboard while preserving its draft', async ({ page }) => {
+  const draft = 'Keep this draft while dismissing the keyboard';
+  const input = await openFocusedComposer(page, draft);
   const result = await input.evaluate(element => {
     const dispatch = (type: string, screenY: number, clientY: number) => {
       const touch = { identifier: 1, target: element, screenX: 120, screenY, clientX: 120, clientY };
@@ -103,4 +108,104 @@ test('pulls down a focused composer to dismiss the keyboard while preserving its
   await expect(page.locator('.lab-shell')).toHaveAttribute('data-viewport-occluded', 'false');
   await expect.poll(async () => (await page.locator('.lab-shell').boundingBox())!.height).toBeCloseTo(844, 1);
   expect(await page.evaluate(() => window.scrollY)).toBe(0);
+});
+
+for (const releaseBetweenDirections of [false, true]) {
+  test(`keeps the focused composer fixed before downward dismissal (separate touches=${releaseBetweenDirections})`, async ({ page }) => {
+    const draft = 'Keep the draft through an upward and downward drag';
+    const input = await openFocusedComposer(page, draft);
+    const result = await input.evaluate((element, release) => {
+      const dispatch = (type: string, screenY: number, clientY = screenY) => {
+        const touch = { identifier: 1, target: element, screenX: 120, screenY, clientX: 120, clientY };
+        const event = new Event(type, { bubbles: true, cancelable: true });
+        Object.defineProperties(event, { touches: { value: type === 'touchend' ? [] : [touch] }, changedTouches: { value: [touch] } });
+        return element.dispatchEvent(event);
+      };
+      const shell = document.querySelector('.lab-shell')!;
+      const initialTop = shell.getBoundingClientRect().top;
+      dispatch('touchstart', 300);
+      const firstUp = dispatch('touchmove', 280);
+      const secondUp = dispatch('touchmove', 260);
+      const focusedAfterUp = document.activeElement === element;
+      const topAfterUp = shell.getBoundingClientRect().top;
+      if (release) { dispatch('touchend', 260); dispatch('touchstart', 260); }
+      // Reverse below the original touch position rather than crossing it again.
+      const downward = dispatch('touchmove', 278);
+      const blurred = document.activeElement !== element;
+      Object.assign(window.visualViewport!, { height: 844, offsetTop: 0 });
+      window.visualViewport!.dispatchEvent(new Event('resize'));
+      const closing = dispatch('touchmove', 290, 130);
+      dispatch('touchend', 290, 130);
+      return { firstUp, secondUp, focusedAfterUp, initialTop, topAfterUp, downward, blurred, closing, scrollY: window.scrollY };
+    }, releaseBetweenDirections);
+    expect(result.firstUp).toBe(false);
+    expect(result.secondUp).toBe(false);
+    expect(result.focusedAfterUp).toBe(true);
+    expect(result.topAfterUp).toBe(result.initialTop);
+    expect(result.downward).toBe(false);
+    expect(result.blurred).toBe(true);
+    expect(result.closing).toBe(false);
+    expect(result.scrollY).toBe(0);
+    await expect(input).not.toBeFocused();
+    expect(await input.evaluate(element => element instanceof HTMLTextAreaElement ? element.value : element.textContent)).toBe(draft);
+    await expect(page.locator('.lab-shell')).toHaveAttribute('data-viewport-occluded', 'false');
+    await expect.poll(async () => (await page.locator('.lab-shell').boundingBox())!.height).toBeCloseTo(844, 1);
+  });
+}
+
+test('owns native touch scrolling in a focused long draft and consumes its dismissal gesture', async ({ page, browserName }, testInfo) => {
+  test.skip(browserName !== 'chromium', 'Trusted touch injection uses Chromium CDP. WebKit covers the event and viewport contract above.');
+  const draft = Array.from({ length: 35 }, (_, index) => `Draft segment ${index + 1}: preserve the complete message while dismissing the keyboard.`).join(' ');
+  const input = await openFocusedComposer(page, draft);
+  expect(await input.evaluate(element => element instanceof HTMLTextAreaElement ? element.value : element.textContent)).toBe(draft);
+  const start = await input.evaluate(element => {
+    const editor = element as HTMLElement;
+    editor.scrollTop = 80;
+    const box = editor.getBoundingClientRect();
+    const events: Array<{ trusted: boolean; prevented: boolean; focused: boolean }> = [];
+    (editor as HTMLElement & { gestureEvents: typeof events }).gestureEvents = events;
+    editor.closest('.agent-composer')!.addEventListener('touchmove', event => {
+      events.push({ trusted: event.isTrusted, prevented: event.defaultPrevented, focused: document.activeElement === editor });
+    });
+    return { x: box.x + box.width / 2, y: box.bottom - 16, scrollTop: editor.scrollTop, clientHeight: editor.clientHeight, scrollHeight: editor.scrollHeight };
+  });
+  expect(start.scrollHeight).toBeGreaterThan(start.clientHeight);
+  expect(start.scrollTop).toBeGreaterThan(0);
+  const shell = page.locator('.lab-shell');
+  const beforeUp = (await shell.boundingBox())!;
+  const cdp = await page.context().newCDPSession(page);
+  const touch = (type: 'touchStart' | 'touchMove' | 'touchEnd', y = start.y) => cdp.send('Input.dispatchTouchEvent', {
+    type, touchPoints: type === 'touchEnd' ? [] : [{ id: 1, x: start.x, y, radiusX: 1, radiusY: 1, force: 1 }],
+  });
+  try {
+    await touch('touchStart');
+    await touch('touchMove', start.y - 20);
+    await touch('touchMove', start.y - 35);
+    await expect(input).toBeFocused();
+    expect(await input.evaluate(element => element.scrollTop)).toBe(start.scrollTop);
+    const afterUp = (await shell.boundingBox())!;
+    expect(afterUp.y).toBeCloseTo(beforeUp.y, 1);
+    expect(await page.evaluate(() => window.scrollY)).toBe(0);
+    await touch('touchMove', start.y - 15);
+    await expect(input).not.toBeFocused();
+    await page.evaluate(() => {
+      Object.assign(window.visualViewport!, { height: 844, offsetTop: 0 });
+      window.visualViewport!.dispatchEvent(new Event('resize'));
+    });
+    await expect(shell).toHaveAttribute('data-viewport-occluded', 'false');
+    const afterDismissal = await input.evaluate(element => element.scrollTop);
+    await touch('touchMove', start.y + 20);
+    await touch('touchMove', start.y + 40);
+    await touch('touchEnd');
+    expect(await input.evaluate(element => element.scrollTop)).toBe(afterDismissal);
+    expect(await page.evaluate(() => window.scrollY)).toBe(0);
+    const events = await input.evaluate(element => (element as HTMLElement & { gestureEvents: Array<{ trusted: boolean; prevented: boolean; focused: boolean }> }).gestureEvents);
+    expect(events.length).toBeGreaterThanOrEqual(4);
+    expect(events.every(event => event.trusted && event.prevented)).toBe(true);
+    expect(events.some(event => event.focused)).toBe(true);
+    expect(events.some(event => !event.focused)).toBe(true);
+    expect(await input.evaluate(element => element instanceof HTMLTextAreaElement ? element.value : element.textContent)).toBe(draft);
+    await expect.poll(async () => (await shell.boundingBox())!.height).toBeCloseTo(844, 1);
+    await testInfo.attach('trusted-composer-touch.json', { contentType: 'application/json', body: JSON.stringify({ start, beforeUp, afterUp, afterDismissal, events }, null, 2) });
+  } finally { await cdp.detach(); }
 });

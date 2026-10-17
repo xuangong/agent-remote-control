@@ -6,10 +6,11 @@ interface DismissGesture {
   x: number;
   y: number;
   started: number;
+  moved: boolean;
   dismissed: boolean;
 }
 
-/** A downward gesture at the input boundary dismisses focus without moving the page. */
+/** A focused composer owns dragging; a downward gesture dismisses its keyboard. */
 export function useComposerKeyboardDismiss() {
   const ref = useRef<HTMLElement>(null);
   useEffect(() => {
@@ -32,13 +33,8 @@ export function useComposerKeyboardDismiss() {
         || !editor.matches('.agent-composer-draft textarea:not(:disabled):not([readonly]), .agent-composer-editor[contenteditable="true"]')
         || selected(editor) || !target) return;
       if (target.closest('button, a, input, select, [role="button"], [contenteditable="false"], .agent-command-menu, .agent-session-panel')) return;
-      // An input with earlier lines still above the viewport owns the entire swipe.
-      // Reaching its top does not turn that same native scroll into a dismissal.
-      for (let element: Element | null = target; element && element !== root; element = element.parentElement) {
-        if (element.scrollTop > 1 && element.scrollHeight > element.clientHeight + 1 && /auto|scroll/.test(getComputedStyle(element).overflowY)) return;
-      }
       const touch = event.touches[0]!;
-      gesture = { editor, touchId: touch.identifier, x: touch.screenX, y: touch.screenY, started: Date.now(), dismissed: false };
+      gesture = { editor, touchId: touch.identifier, x: touch.screenX, y: touch.screenY, started: Date.now(), moved: false, dismissed: false };
     }
     function move(event: TouchEvent): void {
       if (!gesture) return;
@@ -48,11 +44,18 @@ export function useComposerKeyboardDismiss() {
       if (event.defaultPrevented || event.touches.length !== 1 || composing || document.activeElement !== gesture.editor || selected(gesture.editor)) { reset(); return; }
       const touch = event.touches[0]!;
       if (touch.identifier !== gesture.touchId) { reset(); return; }
+      // Keep long-press editing native, but do not time out an ongoing drag.
+      if (!gesture.moved && Date.now() - gesture.started > 350) { reset(); return; }
+      // Own the first movement, before the browser starts panning the viewport.
+      if (event.cancelable) event.preventDefault();
       const dx = Math.abs(touch.screenX - gesture.x);
       const dy = touch.screenY - gesture.y;
-      if (Math.max(dx, Math.abs(dy)) < 10) return;
-      if (Date.now() - gesture.started > 350 || dy <= 0 || dy < dx * 1.4 || !event.cancelable) { reset(); return; }
-      event.preventDefault();
+      if (!gesture.moved && Math.max(dx, Math.abs(dy)) < 10) return;
+      gesture.moved = true;
+      // Follow upward or sideways motion so a downward reversal does not have
+      // to travel back past the original touch point to close the keyboard.
+      if (dy <= 0 || dy < dx * 1.4) { gesture.x = touch.screenX; gesture.y = touch.screenY; return; }
+      if (dy < 10) return;
       gesture.dismissed = true;
       gesture.editor.blur();
     }

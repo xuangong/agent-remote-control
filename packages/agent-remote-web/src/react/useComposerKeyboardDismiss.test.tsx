@@ -27,8 +27,8 @@ async function composer(rich = false) {
   return { container, editor, send };
 }
 
-async function touch(target: Element, type: string, x = 100, y = 100, count = 1) {
-  const event = new Event(type, { bubbles: true, cancelable: true });
+async function touch(target: Element, type: string, x = 100, y = 100, count = 1, cancelable = true) {
+  const event = new Event(type, { bubbles: true, cancelable });
   Object.defineProperty(event, 'touches', { value: Array.from({ length: count }, (_, identifier) => ({ identifier, clientX: x, clientY: y, screenX: x, screenY: y })) });
   await act(async () => target.dispatchEvent(event));
   return event;
@@ -40,7 +40,7 @@ for (const rich of [false, true]) {
     const { editor, send } = await composer(rich);
     const blur = vi.fn(); editor.addEventListener('blur', blur);
     await touch(editor, 'touchstart');
-    expect((await touch(editor, 'touchmove', 101, 106)).defaultPrevented).toBe(false);
+    expect((await touch(editor, 'touchmove', 101, 106)).defaultPrevented).toBe(true);
     expect(document.activeElement).toBe(editor);
     expect((await touch(editor, 'touchmove', 102, 126)).defaultPrevented).toBe(true);
     expect(document.activeElement).not.toBe(editor);
@@ -53,19 +53,40 @@ for (const rich of [false, true]) {
     expect((await touch(editor, 'touchmove', 102, 160)).defaultPrevented).toBe(false);
   });
 
-  it(`preserves ${label} scrolling until a separate downward gesture starts at the top`, async () => {
+  it(`dismisses from a scrolled ${label} without scrolling the input or page`, async () => {
     const { editor } = await composer(rich);
     editor.style.overflowY = 'auto';
     Object.defineProperties(editor, { clientHeight: { value: 80 }, scrollHeight: { value: 240 } });
     editor.scrollTop = 45;
     await touch(editor, 'touchstart');
-    expect((await touch(editor, 'touchmove', 100, 130)).defaultPrevented).toBe(false);
-    editor.scrollTop = 0;
-    expect((await touch(editor, 'touchmove', 100, 170)).defaultPrevented).toBe(false);
-    expect(document.activeElement).toBe(editor);
-    await touch(editor, 'touchend', 100, 170, 0);
-    await touch(editor, 'touchstart');
     expect((await touch(editor, 'touchmove', 100, 130)).defaultPrevented).toBe(true);
+    expect(document.activeElement).not.toBe(editor);
+    expect(editor.scrollTop).toBe(45);
+  });
+
+  it(`holds ${label} still on upward movement and dismisses on reversal without returning to the starting point`, async () => {
+    const { editor } = await composer(rich);
+    vi.useFakeTimers({ toFake: ['Date'] });
+    await touch(editor, 'touchstart');
+    expect((await touch(editor, 'touchmove', 100, 65)).defaultPrevented).toBe(true);
+    expect(document.activeElement).toBe(editor);
+    vi.advanceTimersByTime(600);
+    expect((await touch(editor, 'touchmove', 100, 40)).defaultPrevented).toBe(true);
+    expect((await touch(editor, 'touchmove', 100, 46)).defaultPrevented).toBe(true);
+    expect(document.activeElement).toBe(editor);
+    expect((await touch(editor, 'touchmove', 100, 56)).defaultPrevented).toBe(true);
+    expect(document.activeElement).not.toBe(editor);
+    expect((await touch(editor, 'touchmove', 100, 70)).defaultPrevented).toBe(true);
+  });
+
+  it(`also dismisses ${label} when downward movement starts in a new touch`, async () => {
+    const { editor } = await composer(rich);
+    await touch(editor, 'touchstart');
+    expect((await touch(editor, 'touchmove', 100, 65)).defaultPrevented).toBe(true);
+    await touch(editor, 'touchend', 100, 65, 0);
+    expect(document.activeElement).toBe(editor);
+    await touch(editor, 'touchstart');
+    expect((await touch(editor, 'touchmove', 100, 120)).defaultPrevented).toBe(true);
     expect(document.activeElement).not.toBe(editor);
   });
 
@@ -87,15 +108,26 @@ for (const rich of [false, true]) {
   });
 }
 
-it.each([
-  ['upward', 100, 65],
-  ['horizontal', 145, 105],
-] as const)('leaves an initially %s gesture native even when it changes direction', async (_name, x, y) => {
+it('does not dismiss from horizontal movement and holds the composer still', async () => {
   const { editor } = await composer();
   await touch(editor, 'touchstart');
-  expect((await touch(editor, 'touchmove', x, y)).defaultPrevented).toBe(false);
-  expect((await touch(editor, 'touchmove', 100, 170)).defaultPrevented).toBe(false);
+  expect((await touch(editor, 'touchmove', 145, 105)).defaultPrevented).toBe(true);
   expect(document.activeElement).toBe(editor);
+});
+
+it('still dismisses if the browser has made a later touch event non-cancelable', async () => {
+  const { editor } = await composer();
+  await touch(editor, 'touchstart');
+  await touch(editor, 'touchmove', 100, 65);
+  await touch(editor, 'touchmove', 100, 85, 1, false);
+  expect(document.activeElement).not.toBe(editor);
+});
+
+it('does not capture input scrolling without input focus', async () => {
+  const { editor } = await composer();
+  await act(async () => editor.blur());
+  await touch(editor, 'touchstart');
+  expect((await touch(editor, 'touchmove', 100, 65)).defaultPrevented).toBe(false);
 });
 
 it('preserves long presses, multiple fingers, and cancelled gestures', async () => {

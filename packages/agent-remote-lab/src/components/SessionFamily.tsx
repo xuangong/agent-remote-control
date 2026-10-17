@@ -195,7 +195,7 @@ export function SessionFamily(props: Props) {
     }
     setLayout({ children, focus: children.length }); setReveal({ index: children.length });
   }
-  return <div className="lab-session-family" ref={container} hidden={!active} aria-label={`${target.title} session family`}>
+  return <div className="lab-session-family" ref={container} data-compact={compact || undefined} hidden={!active} aria-label={`${target.title} session family`}>
     {path.map((item, index) => {
       const childSlot = index > 0 && attached[index - 1] ? sessionBridge?.slotForView(attached[index - 1]!.id) : undefined;
       const controls = index === 0 ? props.controls : <button type="button" aria-label={compact ? `Back to ${path[index - 1]!.title}` : 'Close subagent'} title={compact ? 'Back to parent session' : 'Close subagent view'} onClick={() => compact ? show(index - 1) : close(index)}>{compact ? '←' : '×'}</button>;

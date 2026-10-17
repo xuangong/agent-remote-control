@@ -8,3 +8,4 @@
 .lab-session-windows { display: contents; }
 @media (max-width: 599px) { .lab-session-family-pane { min-width: 0; } }
 .lab-session-dock-content .lab-session-family { overflow: visible; }
+.lab-session-family[data-compact] { overflow: clip; }

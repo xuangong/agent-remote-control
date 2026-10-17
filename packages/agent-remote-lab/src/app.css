@@ -1502,13 +1502,13 @@ html[data-input-modality="pointer"] :focus { outline: none !important; }
 .lab-timeline-tools-toggle { position: relative; display: grid; place-items: center; flex: 0 0 44px; width: 44px; min-width: 44px; min-height: 44px; padding: 0; border: 0; border-radius: 10px; color: var(--obs-text-secondary); background: transparent; pointer-events: auto; }
 .lab-timeline-tools-toggle::before, .lab-timeline-tools-toggle::after { content: ''; position: absolute; pointer-events: none; border: 1px solid var(--obs-border); background: var(--obs-surface); transition: opacity var(--lab-tools-duration) var(--lab-tools-easing), transform var(--lab-tools-duration) var(--lab-tools-easing); }
 .lab-timeline-tools-toggle::before { inset: 0; border-left: 0; border-radius: 0 10px 10px 0; }
-.lab-timeline-tools-toggle::after { inset: 0 -1px 0 13px; border-radius: 12px 0 0 12px; box-shadow: 0 2px 8px color-mix(in oklab, var(--obs-text) 6%, transparent); opacity: 0; transform: translateX(4px); }
+.lab-timeline-tools-toggle::after { inset: 0 0 0 13px; border-radius: 12px 0 0 12px; box-shadow: 0 2px 8px color-mix(in oklab, var(--obs-text) 6%, transparent); opacity: 0; transform: translateX(-4px); }
 .lab-timeline-tools-toggle > svg { position: relative; z-index: 1; transition: transform var(--lab-tools-duration) var(--lab-tools-easing); }
 .lab-timeline-tools-toggle :is(.lab-timeline-tools-expand-icon, .lab-timeline-tools-collapse-icon) { transform-origin: center; transition: opacity 140ms ease-out, transform var(--lab-tools-duration) var(--lab-tools-easing); }
 .lab-timeline-tools-expand-icon { opacity: 0; transform: scale(.8); }
 .lab-timeline-tools[data-collapsed] { transform: none; }
 .lab-timeline-tools[data-collapsed] > .lab-timeline-tools-content { opacity: 0; visibility: hidden; pointer-events: none; transform: translateX(24px) scale(.96); transition: opacity 140ms ease-out, transform var(--lab-tools-duration) var(--lab-tools-easing), visibility 0s var(--lab-tools-duration); }
-.lab-timeline-tools[data-collapsed] > .lab-timeline-tools-toggle::before { opacity: 0; transform: translateX(4px); }
+.lab-timeline-tools[data-collapsed] > .lab-timeline-tools-toggle::before { opacity: 0; transform: translateX(-4px); }
 .lab-timeline-tools[data-collapsed] > .lab-timeline-tools-toggle::after { opacity: 1; transform: none; }
 .lab-timeline-tools[data-collapsed] > .lab-timeline-tools-toggle > svg { transform: translateX(7px); }
 .lab-timeline-tools[data-collapsed] .lab-timeline-tools-expand-icon { opacity: 1; transform: none; }

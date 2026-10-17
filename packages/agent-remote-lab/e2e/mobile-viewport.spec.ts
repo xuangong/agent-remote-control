@@ -1,7 +1,37 @@
 import { expect, test } from '@playwright/test';
+import { showNewSession } from './session-navigation';
 
 test.beforeEach(async ({}, testInfo) => {
   test.skip(!testInfo.project.name.includes('mobile'), 'Mobile keyboard layout.');
+});
+
+test('keeps the compact session fixed horizontally while its conversation scrolls vertically', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto('/');
+  await showNewSession(page);
+  await page.getByTestId('session-create').click();
+  const input = page.getByTestId('prompt-input');
+  await expect(input).toBeEnabled();
+  await input.fill('Keep the conversation readable while scrolling. '.repeat(60));
+  await input.press('Enter');
+  const family = page.locator('.lab-session-family:visible');
+  const timeline = family.getByTestId('timeline');
+  await expect(timeline).toContainText('Keep the conversation readable while scrolling.');
+  for (const width of [320, 390, 844]) {
+    await page.setViewportSize({ width, height: width > 390 ? 390 : 844 });
+    await expect.poll(() => family.evaluate(element => element.scrollWidth - element.clientWidth)).toBe(0);
+    const initial = await timeline.boundingBox();
+    for (const offset of [200, -200]) {
+      const moved = await family.evaluate((element, offset) => { element.scrollLeft = offset; return element.scrollLeft; }, offset);
+      expect(moved).toBe(0);
+      expect((await timeline.boundingBox())!.x).toBe(initial!.x);
+    }
+    expect(await timeline.evaluate(element => { element.scrollTop = -100; return element.scrollTop; })).toBeLessThan(0);
+    await family.getByRole('button', { name: 'Expand session actions', exact: true }).click();
+    await expect.poll(() => family.evaluate(element => element.scrollWidth - element.clientWidth)).toBe(0);
+    await family.getByRole('button', { name: 'Collapse session actions', exact: true }).click();
+    await expect.poll(() => family.evaluate(element => element.scrollWidth - element.clientWidth)).toBe(0);
+  }
 });
 
 for (const recovery of ['delayed-viewport', 'window-first'] as const) {

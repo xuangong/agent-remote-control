@@ -666,6 +666,7 @@ textarea {
   :is(.lab-shell, .lab-session-view) .agent-remote-surface input[type="radio"] { width: 18px; height: 18px; min-width: 18px; min-height: 18px; }
   :is(.lab-shell, .lab-session-view) .agent-question-options > label { min-height: 44px; }
   :is(.lab-shell, .lab-session-view) a[href] { display: inline-flex; align-items: center; }
+  :is(.lab-shell, .lab-session-view) .agent-session-attributions button { min-width: 0; min-height: 28px; }
 }
 
 @media (prefers-reduced-motion: reduce) {

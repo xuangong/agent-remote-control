@@ -29,6 +29,7 @@ export function describeSession({ session, sessions = [], forks = [], asks = [],
   const currentKey = sessionKey(session);
   const current = { ...session, parentNativeSessionId: session.parentNativeSessionId ?? known.get(currentKey)?.parentNativeSessionId };
   const attributions = new Map<string, SessionAttribution>();
+  const relatedIds = new Set<string>();
   const add = (row: SessionAttribution) => { if (!attributions.has(row.id)) attributions.set(row.id, row); };
   const matches = (target: DescribedSession | undefined) => !!target && sessionKey(target) === currentKey;
   const label = (target: DescribedSession): string => {
@@ -89,7 +90,10 @@ export function describeSession({ session, sessions = [], forks = [], asks = [],
       const navigation = kind === 'ask' ? source : sideNavigationSource(record);
       const linked = kind === 'ask' ? record.linked !== false : sideLinkVisible(record);
       if (linked && matches(navigation) && !matches(target)) {
-        addSession(`${prefix}:related`, kind, kind === 'ask' ? 'Ask' : record.mode === 'reference' ? 'Side' : 'Fork', target);
+        const name = kind === 'ask' ? 'Ask' : record.mode === 'reference' ? 'Side' : 'Fork';
+        const id = `${kind}:${sessionKey(target)}:${name}:related`;
+        addSession(id, kind, name, target);
+        relatedIds.add(id);
       }
     }
   }
@@ -155,6 +159,17 @@ export function describeSession({ session, sessions = [], forks = [], asks = [],
     if (child.parentNativeSessionId && matches({ ...child, nativeSessionId: child.parentNativeSessionId }) && !matches(child)) {
       addSession(`child:${sessionKey(child)}`, 'child', 'Child', child);
     }
+  }
+  const related = [...attributions.values()].filter(row => relatedIds.has(row.id));
+  for (const row of related) {
+    if (row.target?.kind !== 'session') continue;
+    const nativeId = row.target.nativeSessionId;
+    const peers = related.filter(candidate => candidate.kind === row.kind && candidate.id !== row.id);
+    if (!['Ask', 'Side', 'Fork', 'Source session', nativeId].includes(row.value) && !peers.some(candidate => candidate.value === row.value)) continue;
+    let length = Math.min(8, nativeId.length);
+    while (length < nativeId.length && peers.some(candidate => candidate.target?.kind === 'session'
+      && candidate.target.nativeSessionId !== nativeId && candidate.target.nativeSessionId.slice(-length) === nativeId.slice(-length))) length++;
+    attributions.set(row.id, { ...row, value: `${row.value === nativeId ? row.label : row.value} · ${nativeId.slice(-length)}` });
   }
   return { identity: identity(current), attributions: [...attributions.values()] };
 }

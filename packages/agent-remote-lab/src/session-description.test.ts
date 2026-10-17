@@ -209,4 +209,49 @@ describe('session attribution projection', () => {
     expect(combined.filter(row => row.kind === 'role').map(row => row.value)).toEqual(['Ask', 'Side']);
     expect(combined.some(row => row.kind === 'parent')).toBe(true);
   });
+
+  it('merges duplicate related Ask destinations without discarding distinct conversations', () => {
+    const first = session('01a0-first-12345678', { title: 'Ask' });
+    const second = session('01a0-next-87654321', { title: 'Ask' });
+    const description = rows({ session: session('main'), asks: [
+      reference({ id: 'local', target: first }), reference({ id: 'shared', relationId: 'server', target: first }),
+      reference({ id: 'other', target: second }),
+    ] });
+    expect(description).toHaveLength(2);
+    expect(description.map(row => row.value)).toEqual(['Ask · 12345678', 'Ask · 87654321']);
+    expect(description.map(row => row.target)).toEqual([
+      expect.objectContaining({ nativeSessionId: first.nativeSessionId }),
+      expect.objectContaining({ nativeSessionId: second.nativeSessionId }),
+    ]);
+  });
+
+  it('prefers known related titles and distinguishes genuine conversations with the same title', () => {
+    const first = session('first-12345678', { title: 'Ask' });
+    const second = session('second-87654321', { title: 'Ask' });
+    const asks = [reference({ id: 'first', target: first }), reference({ id: 'second', target: second })];
+    const sessions = [{ ...first, title: 'Release questions' }, { ...second, title: 'Platform questions' }];
+    expect(rows({ session: session('main'), asks, sessions }).map(row => row.value))
+      .toEqual(['Release questions', 'Platform questions']);
+    expect(rows({ session: session('main'), asks, sessions: sessions.map(item => ({ ...item, title: 'Discussion' })) })
+      .map(row => row.value)).toEqual(['Discussion · 12345678', 'Discussion · 87654321']);
+  });
+
+  it('uses enough of the native identity to disambiguate colliding related session suffixes', () => {
+    const description = rows({ session: session('main'), asks: [
+      reference({ id: 'first', target: session('first-a12345678', { title: 'Ask' }) }),
+      reference({ id: 'second', target: session('second-b12345678', { title: 'Ask' }) }),
+    ] });
+    expect(description.map(row => row.value)).toEqual(['Ask · a12345678', 'Ask · b12345678']);
+  });
+
+  it('keeps related targets in different scopes and different relationship kinds distinct', () => {
+    const target = session('12345678', { title: 'Ask' });
+    const description = rows({ session: session('main'), asks: [reference({ id: 'first', target }),
+      reference({ id: 'remote', target: { ...target, hostId: 'windows' } }),
+      reference({ id: 'provider', target: { ...target, providerId: 'claude' } })],
+    forks: [reference({ id: 'side', target })] });
+    expect(description.filter(row => row.kind === 'ask')).toHaveLength(3);
+    expect(description.filter(row => row.kind === 'side')).toHaveLength(1);
+    expect(description.filter(row => row.kind === 'ask').map(row => row.detail)).toEqual([undefined, 'windows', 'claude']);
+  });
 });

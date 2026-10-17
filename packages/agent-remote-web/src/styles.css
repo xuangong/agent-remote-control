@@ -983,15 +983,17 @@ body:has(.agent-image-preview[open]) { overflow: hidden; }
 .agent-session-attributions-toggle > svg { transition: transform 180ms ease; }
 .agent-session-attributions-toggle[aria-expanded="true"] > svg { transform: rotate(180deg); }
 .agent-session-attributions {
+  --agent-attribution-line-height: 24px;
   box-sizing: border-box; flex: 0 0 auto; min-width: 0; max-height: min(30dvh, 14rem); overflow: auto; overscroll-behavior: contain;
-  padding: 6px 16px 10px; color: var(--agent-ink); font-size: 12px; line-height: 1.5;
+  padding: 4px 12px 6px; color: var(--agent-ink); font-size: 12px; line-height: 1.5;
 }
 .agent-session-attributions table { width: 100%; max-width: 640px; margin-inline: auto; table-layout: fixed; border-collapse: collapse; }
-.agent-session-attributions :is(th, td) { padding: 3px 0; border: 0; text-align: left; vertical-align: top; overflow-wrap: anywhere; }
-.agent-session-attributions th { box-sizing: border-box; width: clamp(4rem, 22%, 6.5rem); padding-right: 12px; color: var(--agent-muted); font-weight: 400; }
+.agent-session-attributions :is(th, td) { padding: 2px 0; border: 0; text-align: left; vertical-align: top; overflow-wrap: anywhere; }
+.agent-session-attributions th { box-sizing: border-box; width: 6.5rem; padding-right: 12px; color: var(--agent-muted); font-weight: 400; line-height: var(--agent-attribution-line-height); }
+.agent-session-attributions td > span { display: inline-block; line-height: var(--agent-attribution-line-height); vertical-align: top; }
 .agent-session-attribution-target {
-  display: inline-block; max-width: 100%; min-height: 24px; padding: 0; border: 0; background: transparent; color: var(--agent-action-text);
-  font: inherit; line-height: inherit; text-align: left; overflow-wrap: anywhere; cursor: pointer;
+  display: inline-block; max-width: 100%; min-height: var(--agent-attribution-line-height); padding: 0; border: 0; background: transparent; color: var(--agent-action-text);
+  font: inherit; line-height: var(--agent-attribution-line-height); text-align: left; vertical-align: top; overflow-wrap: anywhere; cursor: pointer;
 }
 .agent-session-attribution-target > svg { margin-left: 4px; vertical-align: -1px; }
 .agent-session-attribution-target:hover { text-decoration: underline; text-underline-offset: 2px; }
@@ -1001,6 +1003,6 @@ body:has(.agent-image-preview[open]) { overflow: hidden; }
 .agent-session-attributions-toggle:focus-visible, .agent-session-attribution-target:focus-visible { outline: 2px solid var(--agent-signal); outline-offset: 2px; }
 @media (pointer: coarse) {
   .agent-session-attributions-toggle { width: 32px; min-height: 32px; }
-  .agent-session-attribution-target { min-height: 28px; }
+  .agent-session-attributions { --agent-attribution-line-height: 28px; }
 }
 @media (prefers-reduced-motion: reduce) { .agent-session-attributions-toggle > svg { transition: none; } }

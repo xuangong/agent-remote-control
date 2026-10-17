@@ -1,4 +1,4 @@
-import { expect, test, type Page } from '@playwright/test';
+import { expect, test, type Locator, type Page } from '@playwright/test';
 import { showNewSession } from './session-navigation';
 
 test.beforeEach(async ({ page }) => {
@@ -83,6 +83,224 @@ async function openFocusedComposer(page: Page, draft: string) {
   return input;
 }
 
+async function focusWithKeyboard(page: Page, input: Locator) {
+  await input.focus();
+  await page.evaluate(() => {
+    Object.assign(window.visualViewport!, { height: 420, offsetTop: 160 });
+    window.visualViewport!.dispatchEvent(new Event('resize'));
+  });
+  await expect(input).toBeFocused();
+}
+
+async function closeKeyboardViewport(page: Page) {
+  await page.evaluate(() => {
+    Object.assign(window.visualViewport!, { height: 844, offsetTop: 0 });
+    window.visualViewport!.dispatchEvent(new Event('resize'));
+  });
+}
+
+async function expectDraft(input: Locator, draft: string) {
+  await expect.poll(() => input.evaluate(element => element instanceof HTMLTextAreaElement ? element.value
+    : Array.from(element.childNodes, node => node.nodeName === 'BR' && !(node as Element).classList.contains('ProseMirror-trailingBreak')
+      ? '\n' : node.textContent ?? '').join(''))).toBe(draft);
+}
+
+async function syntheticControlDrag(control: Locator) {
+  return control.evaluate(element => {
+    const editor = document.activeElement;
+    const dispatch = (type: string, y: number) => {
+      const touch = { identifier: 1, target: element, screenX: 120, screenY: y, clientX: 120, clientY: y };
+      const event = new Event(type, { bubbles: true, cancelable: true });
+      Object.defineProperties(event, { touches: { value: type === 'touchend' ? [] : [touch] }, changedTouches: { value: [touch] } });
+      return element.dispatchEvent(event);
+    };
+    dispatch('touchstart', 300);
+    const up = dispatch('touchmove', 270);
+    const focusedAfterUp = document.activeElement === editor;
+    const down = dispatch('touchmove', 285);
+    const blurred = document.activeElement !== editor;
+    const closing = dispatch('touchmove', 310);
+    const end = dispatch('touchend', 310);
+    const click = element.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, detail: 1 }));
+    return { up, focusedAfterUp, down, blurred, closing, end, click };
+  });
+}
+
+test('applies keyboard-dismiss dragging to controls while preserving their next activation', async ({ page, browserName }) => {
+  const draft = 'A control drag must not submit this draft';
+  const input = await openFocusedComposer(page, draft);
+  const view = page.locator('.lab-primary-conversation');
+  const controls = [view.getByTestId('session-model-button'), view.getByRole('button', { name: 'Hide message input', exact: true }), view.getByTestId('prompt-submit')];
+  for (const [index, control] of controls.entries()) {
+    await focusWithKeyboard(page, input);
+    await expect(control).toBeVisible();
+    expect(await syntheticControlDrag(control)).toEqual({ up: false, focusedAfterUp: true, down: false, blurred: true, closing: false, end: false, click: false });
+    await closeKeyboardViewport(page);
+    await expect(input).toBeVisible();
+    await expectDraft(input, draft);
+    await expect(view.locator('.agent-session-panel:visible')).toHaveCount(0);
+    await expect(view.locator('.agent-message-user').filter({ hasText: draft })).toHaveCount(0);
+    if (index === 2 && browserName === 'webkit') {
+      // Linux WebKit suppresses click after Send's prevented pointerdown even
+      // with the unchanged hook. Verify keyboard activation here; Chromium
+      // verifies a real follow-up tap, including after a native drag below.
+      await control.focus();
+      await control.press('Enter');
+    } else await control.tap();
+    if (index === 0) {
+      await expect(view.getByRole('region', { name: 'Model settings' })).toBeVisible();
+      await view.getByRole('button', { name: 'Close session controls' }).tap();
+    } else if (index === 1) {
+      await expect(input).toBeHidden();
+      await view.getByRole('button', { name: 'Show message input', exact: true }).tap();
+      await expect(input).toBeVisible();
+    } else {
+      await expectDraft(input, '');
+      await expect(view.locator('.agent-message-user').filter({ hasText: draft })).toHaveCount(1);
+    }
+  }
+});
+
+test('owns native drags starting on toolbar and outer collapse controls', async ({ page, browserName }, testInfo) => {
+  test.skip(browserName !== 'chromium', 'Trusted touch injection uses Chromium CDP. WebKit covers the control event contract.');
+  const draft = 'Keep the composer open and its controls inactive during a drag';
+  const input = await openFocusedComposer(page, draft);
+  const view = page.locator('.lab-primary-conversation');
+  const cdp = await page.context().newCDPSession(page);
+  const observations = [];
+  try {
+    for (const control of [view.getByTestId('session-model-button'), view.getByRole('button', { name: 'Hide message input', exact: true }), view.getByTestId('prompt-submit')]) {
+      await focusWithKeyboard(page, input);
+      await expect(control).toBeVisible();
+      const start = await control.evaluate(element => {
+        const boundary = element.closest('.lab-composer-input-shell')!;
+        const events: Array<{ trusted: boolean; prevented: boolean }> = [];
+        (element as HTMLElement & { gestureEvents: typeof events }).gestureEvents = events;
+        boundary.addEventListener('touchmove', event => events.push({ trusted: event.isTrusted, prevented: event.defaultPrevented }));
+        const box = element.getBoundingClientRect();
+        return { x: box.x + box.width / 2, y: box.y + box.height / 2 };
+      });
+      const touch = (type: 'touchStart' | 'touchMove' | 'touchEnd', y = start.y) => cdp.send('Input.dispatchTouchEvent', {
+        type, touchPoints: type === 'touchEnd' ? [] : [{ id: 1, x: start.x, y, radiusX: 1, radiusY: 1, force: 1 }],
+      });
+      await touch('touchStart');
+      await touch('touchMove', start.y - 30);
+      await touch('touchMove', start.y - 70);
+      await expect(input).toBeFocused();
+      await touch('touchMove', start.y - 55);
+      await expect(input).not.toBeFocused();
+      await closeKeyboardViewport(page);
+      await touch('touchMove', start.y + 10);
+      await touch('touchEnd');
+      await expect(input).toBeVisible();
+      await expectDraft(input, draft);
+      await expect(view.locator('.agent-session-panel:visible')).toHaveCount(0);
+      await expect(view.locator('.agent-message-user').filter({ hasText: draft })).toHaveCount(0);
+      expect(await page.evaluate(() => window.scrollY)).toBe(0);
+      const events = await control.evaluate(element => (element as HTMLElement & { gestureEvents: Array<{ trusted: boolean; prevented: boolean }> }).gestureEvents);
+      expect(events.length).toBeGreaterThanOrEqual(3);
+      expect(events.every(event => event.trusted && event.prevented)).toBe(true);
+      observations.push({ control: await control.getAttribute('aria-label'), start, events });
+    }
+    await testInfo.attach('trusted-control-touch.json', { contentType: 'application/json', body: JSON.stringify(observations, null, 2) });
+  } finally { await cdp.detach(); }
+});
+
+test('cancels the Send hold after a small native drag but preserves a stationary hold and tap', async ({ page, browserName }, testInfo) => {
+  test.skip(browserName !== 'chromium', 'Trusted pointer and touch ordering requires Chromium CDP.');
+  const draft = 'Small movement is a drag';
+  const input = await openFocusedComposer(page, draft);
+  const view = page.locator('.lab-primary-conversation');
+  const send = view.getByTestId('prompt-submit');
+  const start = await send.evaluate(element => {
+    const events: Array<{ type: string; trusted: boolean; prevented: boolean; x?: number; y?: number }> = [];
+    (element as HTMLElement & { gestureEvents: typeof events }).gestureEvents = events;
+    const boundary = element.closest('.lab-composer-input-shell')!;
+    for (const type of ['pointerdown', 'pointermove', 'pointercancel', 'touchstart', 'touchmove', 'touchend', 'click']) {
+      boundary.addEventListener(type, event => {
+        const point = 'touches' in event ? (event as TouchEvent).touches[0] : event as PointerEvent;
+        events.push({ type: event.type, trusted: event.isTrusted, prevented: event.defaultPrevented, x: point?.clientX, y: point?.clientY });
+      });
+    }
+    const box = element.getBoundingClientRect();
+    return { x: box.x + box.width / 2, y: box.y + box.height / 2 };
+  });
+  const cdp = await page.context().newCDPSession(page);
+  const touch = (type: 'touchStart' | 'touchMove' | 'touchEnd', y = start.y) => cdp.send('Input.dispatchTouchEvent', {
+    type, touchPoints: type === 'touchEnd' ? [] : [{ id: 1, x: start.x, y, radiusX: 1, radiusY: 1, force: 1 }],
+  });
+  try {
+    await touch('touchStart');
+    await touch('touchMove', start.y - 6);
+    // Deliberately cross the hold deadline without further movement.
+    await page.waitForTimeout(650);
+    const events = await send.evaluate(element => (element as HTMLElement & { gestureEvents: unknown[] }).gestureEvents);
+    await testInfo.attach('small-send-drag.json', { contentType: 'application/json', body: JSON.stringify({ start, events, html: await input.evaluate(element => element.outerHTML) }, null, 2) });
+    await expectDraft(input, draft);
+    await touch('touchMove', start.y - 40);
+    await touch('touchMove', start.y - 25);
+    await expect(input).not.toBeFocused();
+    await touch('touchEnd');
+    await expectDraft(input, draft);
+    await expect(view.locator('.agent-message-user').filter({ hasText: draft })).toHaveCount(0);
+    await focusWithKeyboard(page, input);
+    const held = (await send.boundingBox())!;
+    await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ id: 1, x: held.x + held.width / 2, y: held.y + held.height / 2 }] });
+    await expectDraft(input, `${draft}\n`);
+    await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+    await expectDraft(input, `${draft}\n`);
+    await expect(view.locator('.agent-message-user').filter({ hasText: draft })).toHaveCount(0);
+    // A slight tremor is still a tap, rather than a deliberate drag.
+    const tapped = (await send.boundingBox())!;
+    const point = { id: 1, x: tapped.x + tapped.width / 2, y: tapped.y + tapped.height / 2 };
+    await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [point] });
+    await cdp.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ ...point, y: point.y - 2 }] });
+    await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+    await expectDraft(input, '');
+    await expect(view.locator('.agent-message-user').filter({ hasText: draft })).toHaveCount(1);
+  } finally { await cdp.detach(); }
+});
+
+test('drags an image atom without opening its preview and still previews on a tap', async ({ page, browserName }) => {
+  await page.addInitScript(() => {
+    const viewport = Object.assign(new EventTarget(), { width: 390, height: 420, offsetTop: 160, offsetLeft: 0, scale: 1 });
+    Object.defineProperty(window, 'visualViewport', { configurable: true, value: viewport });
+  });
+  await page.goto('/e2e/fixtures/image-input.html');
+  const input = page.getByTestId('prompt-input');
+  await expect(input).toBeVisible();
+  await page.getByRole('button', { name: 'Add images' }).click();
+  await page.locator('input[type=file][multiple]').setInputFiles({
+    name: 'pixel.png', mimeType: 'image/png',
+    buffer: Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a5XcAAAAASUVORK5CYII=', 'base64'),
+  });
+  const atom = input.locator('[data-image-id]');
+  await expect(atom).toBeVisible();
+  await input.focus();
+  if (browserName === 'chromium') {
+    const box = (await atom.boundingBox())!;
+    const cdp = await page.context().newCDPSession(page);
+    const touch = (type: 'touchStart' | 'touchMove' | 'touchEnd', y = box.y + box.height / 2) => cdp.send('Input.dispatchTouchEvent', {
+      type, touchPoints: type === 'touchEnd' ? [] : [{ id: 1, x: box.x + box.width / 2, y }],
+    });
+    try {
+      await touch('touchStart');
+      await touch('touchMove', box.y - 40);
+      await expect(input).toBeFocused();
+      await touch('touchMove', box.y - 25);
+      await expect(input).not.toBeFocused();
+      await touch('touchEnd');
+    } finally { await cdp.detach(); }
+  } else {
+    expect(await syntheticControlDrag(atom)).toEqual({ up: false, focusedAfterUp: true, down: false, blurred: true, closing: false, end: false, click: false });
+  }
+  await expect(page.getByRole('dialog', { name: 'Image preview' })).toHaveCount(0);
+  await expect(input).toHaveText('[image #1]');
+  await expect(page.getByTestId('sent-content')).toHaveText('[]');
+  await atom.tap();
+  await expect(page.getByRole('dialog', { name: 'Image preview' })).toBeVisible();
+});
+
 test('pulls down a focused composer to dismiss the keyboard while preserving its draft', async ({ page }) => {
   const draft = 'Keep this draft while dismissing the keyboard';
   const input = await openFocusedComposer(page, draft);
@@ -166,7 +384,7 @@ test(`owns a native curved touch outside the composer and back (empty=${empty})`
     const box = editor.getBoundingClientRect();
     const events: Array<{ trusted: boolean; prevented: boolean; focused: boolean; x: number; y: number; outside: boolean }> = [];
     (editor as HTMLElement & { gestureEvents: typeof events }).gestureEvents = events;
-    const composer = editor.closest('.agent-composer')!;
+    const composer = editor.closest('.lab-composer-input-shell')!;
     composer.addEventListener('touchmove', event => {
       const point = (event as TouchEvent).touches[0]!;
       const bounds = composer.getBoundingClientRect();

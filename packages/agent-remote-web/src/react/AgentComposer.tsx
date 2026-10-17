@@ -1,7 +1,7 @@
 import type { ImageDraftBinding, ImageDraftRecipient } from '../image-drafts.js';
 import { remoteSessionState, type RemoteSessionState } from '../client/session-state.js';
 import type { ResourceResponseState } from '@orchardworks/agent-remote-protocol';
-import { useEffect, useId, useLayoutEffect, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
+import { useEffect, useId, useLayoutEffect, useRef, useState, type KeyboardEvent, type ReactNode, type RefObject } from 'react';
 import type { AgentReplicaState } from '../replica/types.js';
 import { AgentSessionSettings, type SessionControlView } from './AgentSessionSettings.js';
 import type { AgentCommand, AgentCommandResult, AgentMessageOptions, ResourceBinding } from '@orchardworks/agent-remote-protocol';
@@ -25,6 +25,8 @@ export interface PendingFirstInputContext {
   onRetry?(): void;
 }
 export interface AgentComposerProps {
+  /** Stable ancestor containing this composer and adjacent controls that share its touch gestures. */
+  keyboardDismissBoundaryRef?: RefObject<HTMLElement>;
   sessionState?: RemoteSessionState;
   /** @deprecated Layout follows the containing Session View; this option no longer hides controls. */
   compact?: boolean;
@@ -90,10 +92,10 @@ interface Draft {
   feedback?: { kind: 'success' | 'error'; message: string; delivery?: boolean };
 }
 
-export function AgentComposer({ sessionState: suppliedSessionState, readOnly: forcedReadOnly = false, draftOnly = false, mutationBlocked = false, readOnlyLabel, readOnlyNotice, readOnlyCollapsed = false, state, sessionControls, renderSessionSettingError, sessionKey, disabled = false, disabledLabel, recovering = false, pendingFirstInputContext: firstInputContext, draft: controlledDraft, onDraftChange, onPendingInputChange, onSendMessage, onCancel, onSetSessionSetting, onListCommands, onExecuteCommand, onInspectCommand, onRequestResource, onResolveResource, attachments, consoleCommands = [], onExecuteConsoleCommand, visible = true, activityVisible = visible, draftScope, imageDraftBinding, imageRecipient, onUploadImage, onUploadResource, onSendMessageContent }: AgentComposerProps) {
+export function AgentComposer({ keyboardDismissBoundaryRef, sessionState: suppliedSessionState, readOnly: forcedReadOnly = false, draftOnly = false, mutationBlocked = false, readOnlyLabel, readOnlyNotice, readOnlyCollapsed = false, state, sessionControls, renderSessionSettingError, sessionKey, disabled = false, disabledLabel, recovering = false, pendingFirstInputContext: firstInputContext, draft: controlledDraft, onDraftChange, onPendingInputChange, onSendMessage, onCancel, onSetSessionSetting, onListCommands, onExecuteCommand, onInspectCommand, onRequestResource, onResolveResource, attachments, consoleCommands = [], onExecuteConsoleCommand, visible = true, activityVisible = visible, draftScope, imageDraftBinding, imageRecipient, onUploadImage, onUploadResource, onSendMessageContent }: AgentComposerProps) {
   const pendingFirstInputContext = firstInputContext !== undefined;
   const controlId = `composer-${useId().replace(/:/gu, '')}`;
-  const composerRef = useComposerKeyboardDismiss();
+  const composerRef = useComposerKeyboardDismiss(keyboardDismissBoundaryRef);
   const drafts = useRef(new Map<string, Draft>());
   const agentId = sessionKey ?? state?.agent?.id ?? '';
   const editorIdentity = imageDraftBinding ? JSON.stringify([imageDraftBinding.scope, imageDraftBinding.key]) : agentId;

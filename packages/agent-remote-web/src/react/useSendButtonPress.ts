@@ -37,7 +37,15 @@ export function useSendButtonPress(sessionKey: string, enabled: boolean, onNewli
     },
     onPointerMove(event) {
       const start = pointer.current;
-      if (start?.id === event.pointerId && Math.hypot(event.clientX - start.x, event.clientY - start.y) > 10) cancel();
+      // Touch pointers can move before the browser emits its first touchmove.
+      // Cancel that early drag while allowing small contact jitter during a tap.
+      const tolerance = event.pointerType === 'touch' ? 3 : 10;
+      if (start?.id === event.pointerId && Math.hypot(event.clientX - start.x, event.clientY - start.y) > tolerance) cancel();
+    },
+    onTouchMove(event) {
+      // The enclosing composer consumes even a small keyboard-dismiss drag.
+      // Cancel the hold before its timer can turn that movement into a newline.
+      if (event.defaultPrevented) cancel();
     },
     onPointerUp(event) {
       if (pointer.current?.id !== event.pointerId) return;
@@ -49,7 +57,8 @@ export function useSendButtonPress(sessionKey: string, enabled: boolean, onNewli
     onContextMenu(event) { event.preventDefault(); },
     onKeyDown(event) { if (event.key === 'Enter' || event.key === ' ') suppressClick.current = false; },
     onClick(event) {
-      if (suppressClick.current) { event.preventDefault(); suppressClick.current = false; return; }
+      if (suppressClick.current && event.detail !== 0) { event.preventDefault(); suppressClick.current = false; return; }
+      suppressClick.current = false;
       onSend();
     },
   };

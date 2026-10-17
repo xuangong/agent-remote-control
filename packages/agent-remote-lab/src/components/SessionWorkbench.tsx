@@ -76,6 +76,7 @@ export function SessionWorkbench({ sessionDescription, onNavigateAttribution, to
   const composerId = useId();
   const [timelineToolsTarget, setTimelineToolsTarget] = useState<HTMLDivElement | null>(null);
   const toastAnchor = useToastAnchor(visible && !!state?.agent && !composerHidden);
+  const composerTouchBoundary = useRef<HTMLDivElement>(null);
   const toastToggleAnchor = useToastAnchor<HTMLButtonElement>(visible && !!state?.agent);
   const [inspected, setInspected] = useState<{ agentId: string; command: AgentCommand }>();
   const selectedCommand = inspected?.agentId === state?.agent?.id ? inspected?.command : undefined;
@@ -158,7 +159,7 @@ export function SessionWorkbench({ sessionDescription, onNavigateAttribution, to
         {composerNotice}
         {reauthenticate ? authenticationNotice : null}
       </div>
-      <div className="lab-composer-input-shell">
+      <div ref={composerTouchBoundary} className="lab-composer-input-shell">
         <button ref={toastToggleAnchor} type="button" className="lab-composer-toggle" aria-controls={composerId} aria-expanded={!composerHidden}
           aria-label={composerHidden ? 'Show message input' : 'Hide message input'} title={composerHidden ? 'Show message input' : 'Hide message input'}
           onClick={() => setComposerHidden(hidden => !hidden)}>
@@ -168,6 +169,7 @@ export function SessionWorkbench({ sessionDescription, onNavigateAttribution, to
         </button>
         <div id={composerId} className="lab-composer-body" hidden={composerHidden && !controlReadOnly}>
           <DraftComposer
+            keyboardDismissBoundaryRef={composerTouchBoundary}
             sessionState={session}
             draftOnly={draftOnly}
             mutationBlocked={mutationBlocked}

@@ -1,4 +1,4 @@
-import { act } from 'react';
+import { act, createRef } from 'react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { createReplicaState } from '../replica/reducer.js';
 import { render } from '../test/setup.js';
@@ -13,23 +13,40 @@ beforeEach(() => {
 });
 afterEach(() => { vi.useRealTimers(); document.getSelection()?.removeAllRanges(); });
 
-async function composer(rich = false) {
-  const state = { ...createReplicaState(), agent: {
+async function composer(rich = false, outerBoundary = false) {
+  const state = { ...createReplicaState(), timeline: { ...createReplicaState().timeline, initialized: true }, agent: {
     id: crypto.randomUUID(), providerId: 'test', createdAt: '2026-10-17T00:00:00Z', updatedAt: '2026-10-17T00:00:00Z', status: 'idle' as const,
     activeTurn: null, pendingInteractions: [], runtimeInfo: { providerId: 'test', status: 'idle' as const },
     capabilities: { history: true, sendMessage: true, steer: false, cancel: false, readResource: false,
       ...(rich ? { imageInput: { mediaTypes: ['image/png' as const], maxImages: 8, maxImageBytes: 10485760, maxMessageBytes: 20971520 } } : {}) },
   } };
   const send = vi.fn(async () => {});
-  const container = await render(<AgentComposer state={state} draft={draft} onSendMessage={send} />);
+  const change = vi.fn();
+  const collapse = vi.fn();
+  const boundary = createRef<HTMLDivElement>();
+  const controls = <AgentComposer state={state} draft={draft} onDraftChange={change} onSendMessage={send}
+    keyboardDismissBoundaryRef={outerBoundary ? boundary : undefined} />;
+  const container = await render(outerBoundary ? <div ref={boundary} role="dialog"><button onClick={collapse}>Collapse input</button>{controls}</div> : controls);
   const editor = container.querySelector<Editor>('[data-testid="prompt-input"]')!;
   await act(async () => editor.focus());
-  return { container, editor, send };
+  return { container, editor, send, change, collapse };
 }
 
 async function touch(target: Element, type: string, x = 100, y = 100, count = 1, cancelable = true) {
   const event = new Event(type, { bubbles: true, cancelable });
   Object.defineProperty(event, 'touches', { value: Array.from({ length: count }, (_, identifier) => ({ identifier, clientX: x, clientY: y, screenX: x, screenY: y })) });
+  await act(async () => target.dispatchEvent(event));
+  return event;
+}
+
+async function pointer(target: Element, type: string, y = 100) {
+  const event = new Event(type, { bubbles: true, cancelable: true });
+  Object.assign(event, { button: 0, isPrimary: true, pointerId: 1, pointerType: 'touch', clientX: 100, clientY: y });
+  await act(async () => target.dispatchEvent(event));
+}
+
+async function click(target: Element, detail = 1) {
+  const event = new MouseEvent('click', { bubbles: true, cancelable: true, detail });
   await act(async () => target.dispatchEvent(event));
   return event;
 }
@@ -193,20 +210,151 @@ it.each([false, true])('leaves ongoing IME composition intact (rich: %s)', async
   expect((await touch(editor, 'touchmove', 100, 140)).defaultPrevented).toBe(true);
 });
 
-it('dismisses from composer whitespace but keeps toolbar actions and other composers untouched', async () => {
+it('dismisses from composer whitespace without touching other composers', async () => {
   const first = await composer();
   const second = await composer();
   await touch(first.container.querySelector('.agent-composer')!, 'touchstart');
   expect((await touch(first.container.querySelector('.agent-composer')!, 'touchmove', 100, 140)).defaultPrevented).toBe(false);
   expect(document.activeElement).toBe(second.editor);
-  const button = second.container.querySelector('[aria-label="Open chat commands"]')!;
-  await touch(button, 'touchstart');
-  expect((await touch(button, 'touchmove', 100, 140)).defaultPrevented).toBe(false);
-  expect(document.activeElement).toBe(second.editor);
   const root = second.container.querySelector('.agent-composer')!;
   await touch(root, 'touchstart');
   expect((await touch(root, 'touchmove', 100, 140)).defaultPrevented).toBe(true);
   expect(document.activeElement).not.toBe(second.editor);
+});
+
+it.each([false, true])('consumes a drag from toolbar content without opening it, including with selected text (rich: %s)', async rich => {
+  const { container, editor } = await composer(rich);
+  if (editor instanceof HTMLTextAreaElement) editor.setSelectionRange(0, 4);
+  else { const range = document.createRange(); range.selectNodeContents(editor); document.getSelection()!.addRange(range); }
+  const button = container.querySelector('[aria-label="Open chat commands"]')!;
+  const target = button.firstElementChild ?? button;
+  await touch(target, 'touchstart');
+  expect((await touch(target, 'touchmove', 100, 70)).defaultPrevented).toBe(true);
+  expect(document.activeElement).toBe(editor);
+  expect((await touch(target, 'touchmove', 100, 80)).defaultPrevented).toBe(true);
+  expect(document.activeElement).not.toBe(editor);
+  await touch(target, 'touchend', 100, 80, 0);
+  expect((await click(target)).defaultPrevented).toBe(true);
+  expect(container.querySelector('.agent-command-menu')).toBeNull();
+  // A new tap must not inherit suppression from the preceding drag.
+  await touch(target, 'touchstart');
+  await touch(target, 'touchend', 100, 100, 0);
+  await click(target);
+  expect(container.querySelector('.agent-command-menu')).not.toBeNull();
+});
+
+it('includes an outer dialog control without consuming its ordinary click', async () => {
+  const { container, editor, collapse } = await composer(false, true);
+  const button = container.querySelector('button')!;
+  await touch(button, 'touchstart');
+  await touch(button, 'touchmove', 100, 130);
+  await touch(button, 'touchend', 100, 130, 0);
+  expect(document.activeElement).not.toBe(editor);
+  await click(button);
+  expect(collapse).not.toHaveBeenCalled();
+  await pointer(button, 'pointerdown');
+  await click(button);
+  expect(collapse).toHaveBeenCalledOnce();
+});
+
+it('preserves keyboard and assistive activation after a toolbar drag', async () => {
+  const { container } = await composer();
+  const button = container.querySelector('[aria-label="Open chat commands"]')!;
+  await touch(button, 'touchstart');
+  await touch(button, 'touchmove', 100, 130);
+  await touch(button, 'touchend', 100, 130, 0);
+  await click(button, 0);
+  expect(container.querySelector('.agent-command-menu')).not.toBeNull();
+});
+
+it.each(['before', 'during'])('dismisses from a toolbar when IME starts %s its gesture', async timing => {
+  const { container, editor } = await composer();
+  const button = container.querySelector('[aria-label="Open chat commands"]')!;
+  const compose = () => act(async () => editor.dispatchEvent(new CompositionEvent('compositionstart', { bubbles: true })));
+  if (timing === 'before') await compose();
+  await touch(button, 'touchstart');
+  if (timing === 'during') await compose();
+  expect((await touch(button, 'touchmove', 100, 130)).defaultPrevented).toBe(true);
+  expect(document.activeElement).not.toBe(editor);
+});
+
+it('preserves assistive Send activation after suppressing a drag click', async () => {
+  const { container, send } = await composer();
+  const button = container.querySelector<HTMLButtonElement>('[data-testid="prompt-submit"]')!;
+  button.setPointerCapture = vi.fn();
+  await pointer(button, 'pointerdown');
+  await touch(button, 'touchstart');
+  await pointer(button, 'pointermove', 130);
+  await touch(button, 'touchmove', 100, 130);
+  await pointer(button, 'pointerup', 130);
+  await touch(button, 'touchend', 100, 130, 0);
+  await click(button);
+  expect(send).not.toHaveBeenCalled();
+  await click(button, 0);
+  expect(send).toHaveBeenCalledWith(draft);
+});
+
+it('leaves the expanded command menu scrollable while its editor stays focused', async () => {
+  const { container, editor } = await composer();
+  await click(container.querySelector('[aria-label="Open chat commands"]')!);
+  const menu = container.querySelector('.agent-command-menu')!;
+  await act(async () => editor.focus());
+  await touch(menu, 'touchstart');
+  expect((await touch(menu, 'touchmove', 100, 140)).defaultPrevented).toBe(false);
+  expect(document.activeElement).toBe(editor);
+});
+
+it('cancels Send hold on the first small drag and never submits on release', async () => {
+  const { container, editor, send, change } = await composer();
+  const button = container.querySelector<HTMLButtonElement>('[data-testid="prompt-submit"]')!;
+  button.setPointerCapture = vi.fn();
+  vi.useFakeTimers();
+  await pointer(button, 'pointerdown');
+  await touch(button, 'touchstart');
+  await pointer(button, 'pointermove', 94);
+  expect((await touch(button, 'touchmove', 100, 94)).defaultPrevented).toBe(true);
+  await act(async () => vi.advanceTimersByTime(600));
+  expect(change).not.toHaveBeenCalled();
+  expect(document.activeElement).toBe(editor);
+  await pointer(button, 'pointermove', 104);
+  expect((await touch(button, 'touchmove', 100, 104)).defaultPrevented).toBe(true);
+  expect(document.activeElement).not.toBe(editor);
+  await pointer(button, 'pointerup', 104);
+  await touch(button, 'touchend', 100, 104, 0);
+  await click(button);
+  expect(send).not.toHaveBeenCalled();
+});
+
+it('cancels Send hold when a touch pointer moves before the browser emits touchmove', async () => {
+  const { container, send, change } = await composer();
+  const button = container.querySelector<HTMLButtonElement>('[data-testid="prompt-submit"]')!;
+  button.setPointerCapture = vi.fn();
+  vi.useFakeTimers();
+  await pointer(button, 'pointerdown');
+  await touch(button, 'touchstart');
+  await pointer(button, 'pointermove', 94);
+  await act(async () => vi.advanceTimersByTime(600));
+  expect(change).not.toHaveBeenCalled();
+  await pointer(button, 'pointerup', 94);
+  await touch(button, 'touchend', 100, 94, 0);
+  await click(button);
+  expect(send).not.toHaveBeenCalled();
+});
+
+it.each([['tap', 0], ['hold', 0], ['tap', 2], ['hold', 2]] as const)('preserves Send %s with %spx of touch jitter', async (action, jitter) => {
+  const { container, send, change } = await composer();
+  const button = container.querySelector<HTMLButtonElement>('[data-testid="prompt-submit"]')!;
+  button.setPointerCapture = vi.fn();
+  vi.useFakeTimers();
+  await pointer(button, 'pointerdown');
+  await touch(button, 'touchstart');
+  if (jitter) await pointer(button, 'pointermove', 100 + jitter);
+  if (action === 'hold') await act(async () => vi.advanceTimersByTime(500));
+  await pointer(button, 'pointerup');
+  await touch(button, 'touchend', 100, 100, 0);
+  await click(button);
+  if (action === 'tap') { expect(send).toHaveBeenCalledWith(draft); expect(change).not.toHaveBeenCalledWith(`${draft}\n`); }
+  else { expect(send).not.toHaveBeenCalled(); expect(change).toHaveBeenCalledOnce(); }
 });
 
 it('finishes an accepted gesture even if another finger joins while the keyboard is closing', async () => {

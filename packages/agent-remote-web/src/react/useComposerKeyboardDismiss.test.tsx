@@ -90,6 +90,28 @@ for (const rich of [false, true]) {
     expect(document.activeElement).not.toBe(editor);
   });
 
+  it(`keeps owning a small ${label} movement when the finger pauses before continuing`, async () => {
+    const { editor } = await composer(rich);
+    vi.useFakeTimers({ toFake: ['Date'] });
+    await touch(editor, 'touchstart');
+    expect((await touch(editor, 'touchmove', 100, 96)).defaultPrevented).toBe(true);
+    vi.advanceTimersByTime(600);
+    expect((await touch(editor, 'touchmove', 100, 40)).defaultPrevented).toBe(true);
+    expect(document.activeElement).toBe(editor);
+    expect((await touch(editor, 'touchmove', 104, 56)).defaultPrevented).toBe(true);
+    expect(document.activeElement).not.toBe(editor);
+  });
+
+  it(`dismisses ${label} after an upward drag curves sideways and then down`, async () => {
+    const { editor } = await composer(rich);
+    await touch(editor, 'touchstart', 100, 300);
+    for (const [x, y] of [[95, 260], [110, 180], [130, 140], [145, 142], [149, 147], [153, 152]]) {
+      expect((await touch(editor, 'touchmove', x, y)).defaultPrevented).toBe(true);
+    }
+    expect(document.activeElement).not.toBe(editor);
+    expect((await touch(editor, 'touchmove', 160, 200)).defaultPrevented).toBe(true);
+  });
+
   it(`leaves ${label} selections and selection-handle drags alone`, async () => {
     const { editor } = await composer(rich);
     const select = () => {
@@ -113,6 +135,19 @@ it('does not dismiss from horizontal movement and holds the composer still', asy
   await touch(editor, 'touchstart');
   expect((await touch(editor, 'touchmove', 145, 105)).defaultPrevented).toBe(true);
   expect(document.activeElement).toBe(editor);
+  expect((await touch(editor, 'touchmove', 180, 102)).defaultPrevented).toBe(true);
+  expect((await touch(editor, 'touchmove', 220, 106)).defaultPrevented).toBe(true);
+  expect(document.activeElement).toBe(editor);
+});
+
+it('accumulates downward movement from the highest point even with sideways motion', async () => {
+  const { editor } = await composer();
+  await touch(editor, 'touchstart');
+  await touch(editor, 'touchmove', 90, 60);
+  expect((await touch(editor, 'touchmove', 150, 69)).defaultPrevented).toBe(true);
+  expect(document.activeElement).toBe(editor);
+  expect((await touch(editor, 'touchmove', 160, 70)).defaultPrevented).toBe(true);
+  expect(document.activeElement).not.toBe(editor);
 });
 
 it('still dismisses if the browser has made a later touch event non-cancelable', async () => {
@@ -200,4 +235,33 @@ it('does not dismiss when the editor already owns the gesture', async () => {
   await touch(editor, 'touchstart');
   await touch(editor, 'touchmove', 100, 140);
   expect(document.activeElement).toBe(editor);
+});
+
+it('retains a drag when another listener cancels an intermediate move', async () => {
+  const { editor } = await composer();
+  await touch(editor, 'touchstart');
+  await touch(editor, 'touchmove', 100, 70);
+  editor.addEventListener('touchmove', event => event.preventDefault(), { once: true });
+  await touch(editor, 'touchmove', 100, 60);
+  expect((await touch(editor, 'touchmove', 104, 85)).defaultPrevented).toBe(true);
+  expect(document.activeElement).not.toBe(editor);
+});
+
+it.each(['selection', 'composition', 'focus'])('keeps a captured drag from panning after %s changes without blurring the editor', async change => {
+  const { editor } = await composer();
+  const blur = vi.fn();
+  await touch(editor, 'touchstart');
+  await touch(editor, 'touchmove', 100, 70);
+  await act(async () => {
+    if (change === 'selection') (editor as HTMLTextAreaElement).setSelectionRange(0, 4);
+    if (change === 'composition') editor.dispatchEvent(new CompositionEvent('compositionstart', { bubbles: true }));
+    if (change === 'focus') editor.blur();
+  });
+  editor.addEventListener('blur', blur);
+  expect((await touch(editor, 'touchmove', 100, 110)).defaultPrevented).toBe(true);
+  expect((await touch(editor, 'touchmove', 100, 140)).defaultPrevented).toBe(true);
+  expect(blur).not.toHaveBeenCalled();
+  if (change !== 'focus') expect(document.activeElement).toBe(editor);
+  await touch(editor, 'touchend', 100, 140, 0);
+  expect((await touch(editor, 'touchmove', 100, 160)).defaultPrevented).toBe(false);
 });

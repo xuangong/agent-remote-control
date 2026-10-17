@@ -777,6 +777,7 @@ summary.agent-child-heading:focus-visible { outline: 2px solid var(--agent-signa
 
 .agent-composer-editor-container { min-width: 0; position: relative; }
 .agent-composer-editor { min-height: 24px; max-height: 200px; overflow-y: auto; white-space: pre-wrap; overflow-wrap: anywhere; outline: none; padding: 8px 0; font: inherit; line-height: 1.6; }
+.agent-composer :is(textarea, .agent-composer-editor) { overscroll-behavior-y: contain; }
 .agent-composer .agent-composer-editor:focus-visible { outline: none; }
 .agent-composer-editor:empty::before { content: attr(data-placeholder); color: var(--agent-text-muted, #888); pointer-events: none; }
 .agent-composer-editor[aria-disabled="true"] { opacity: .65; }

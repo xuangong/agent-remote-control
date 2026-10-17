@@ -13,6 +13,7 @@ import { useResourceDraft, type UploadResource } from './useResourceDraft.js';
 import { ImageUploadStatus } from './ImageUploadStatus.js';
 import { useImageDraft, type UploadImage } from './useImageDraft.js';
 import { draftHasContent, snapshotContent } from './composer-document.js';
+import { useComposerKeyboardDismiss } from './useComposerKeyboardDismiss.js';
 import type { MessagePart } from '@orchardworks/agent-remote-protocol';
 import { useSendButtonPress } from './useSendButtonPress.js';
 import { usePendingSend } from './usePendingSend.js';
@@ -92,6 +93,7 @@ interface Draft {
 export function AgentComposer({ sessionState: suppliedSessionState, readOnly: forcedReadOnly = false, draftOnly = false, mutationBlocked = false, readOnlyLabel, readOnlyNotice, readOnlyCollapsed = false, state, sessionControls, renderSessionSettingError, sessionKey, disabled = false, disabledLabel, recovering = false, pendingFirstInputContext: firstInputContext, draft: controlledDraft, onDraftChange, onPendingInputChange, onSendMessage, onCancel, onSetSessionSetting, onListCommands, onExecuteCommand, onInspectCommand, onRequestResource, onResolveResource, attachments, consoleCommands = [], onExecuteConsoleCommand, visible = true, activityVisible = visible, draftScope, imageDraftBinding, imageRecipient, onUploadImage, onUploadResource, onSendMessageContent }: AgentComposerProps) {
   const pendingFirstInputContext = firstInputContext !== undefined;
   const controlId = `composer-${useId().replace(/:/gu, '')}`;
+  const composerRef = useComposerKeyboardDismiss();
   const drafts = useRef(new Map<string, Draft>());
   const agentId = sessionKey ?? state?.agent?.id ?? '';
   const editorIdentity = imageDraftBinding ? JSON.stringify([imageDraftBinding.scope, imageDraftBinding.key]) : agentId;
@@ -474,7 +476,7 @@ export function AgentComposer({ sessionState: suppliedSessionState, readOnly: fo
     disabled: pendingFirstInputContext || !session.operations.queue_message.allowed || waiting.items.length > 0 || !ready || !capabilities?.sendMessage || !hasContent || !imageSendReady || isCommand || Boolean(selectedSkill) || busy || (!onSendMessage && !onSendMessageContent),
     run: () => void run('queue') });
 
-  return <section className="agent-composer" aria-label="Live provider controls" aria-busy={busy || richEnabled && !imageDraft.hydrated} data-control-readonly={ownershipReadOnly || undefined}>
+  return <section ref={composerRef} className="agent-composer" aria-label="Live provider controls" aria-busy={busy || richEnabled && !imageDraft.hydrated} data-control-readonly={ownershipReadOnly || undefined}>
     {richEnabled ? <input ref={fileInputRef} type="file" hidden multiple accept="image/png,image/jpeg,image/webp" onChange={event => { const files = Array.from(event.currentTarget.files ?? []); event.currentTarget.value = ''; if (filePickerAgent.current === agentId) editorRef.current?.insertParts(addImageFiles(files)); }} /> : null}
     {capabilities?.resourceInput ? <input ref={resourceInputRef} type="file" hidden multiple aria-label="Choose resources" onChange={event => {
       const files = Array.from(event.currentTarget.files ?? []); event.currentTarget.value = '';

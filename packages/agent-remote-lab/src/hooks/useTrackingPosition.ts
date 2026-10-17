@@ -43,16 +43,29 @@ export function useTrackingPosition(storageKey = 'agent-remote-tracking-position
   }
 
   useLayoutEffect(() => {
-    const rect = root.current?.getBoundingClientRect();
-    if (!rect) return;
-    let initial = { x: rect.left, y: rect.top };
+    const element = root.current;
+    if (!element) return;
+    const rect = element.getBoundingClientRect();
+    const resolved = getComputedStyle(element);
+    const left = parseFloat(resolved.left), top = parseFloat(resolved.top);
+    // Fixed CSS coordinates and client rect coordinates differ in WebKit when
+    // the keyboard moves the visual viewport. Keep positioning in CSS space.
+    let initial = { x: Number.isFinite(left) ? left : rect.left, y: Number.isFinite(top) ? top : rect.top };
     try {
       const saved: unknown = JSON.parse(localStorage.getItem(storageKey) ?? 'null');
       if (saved && typeof saved === 'object' && 'x' in saved && 'y' in saved
         && typeof saved.x === 'number' && Number.isFinite(saved.x) && typeof saved.y === 'number' && Number.isFinite(saved.y)) initial = { x: saved.x, y: saved.y };
     } catch { /* Ignore invalid saved positions. */ }
     move(initial);
-    const resize = () => { if (position.current) move(position.current); };
+    const resize = () => {
+      const previous = position.current;
+      if (!previous) return;
+      const next = move(previous);
+      if (next && drag.current) {
+        drag.current.origin.x += next.x - previous.x;
+        drag.current.origin.y += next.y - previous.y;
+      }
+    };
     window.addEventListener('resize', resize);
     window.visualViewport?.addEventListener('resize', resize);
     window.visualViewport?.addEventListener('scroll', resize);
@@ -70,10 +83,10 @@ export function useTrackingPosition(storageKey = 'agent-remote-tracking-position
   const handlers: HTMLAttributes<HTMLDivElement> = {
     onPointerDownCapture(event) {
       if (!isTrigger(event.target) || event.button !== 0 || !event.isPrimary) return;
-      const rect = event.currentTarget.getBoundingClientRect();
+      if (!position.current) return;
       suppressClick.current = false;
       if (event.target instanceof Element) event.target.closest('button')?.setPointerCapture(event.pointerId);
-      drag.current = { id: event.pointerId, start: { x: event.clientX, y: event.clientY }, origin: { x: rect.left, y: rect.top }, moved: false };
+      drag.current = { id: event.pointerId, start: { x: event.clientX, y: event.clientY }, origin: { ...position.current }, moved: false };
     },
     onPointerMoveCapture(event) {
       const value = drag.current;

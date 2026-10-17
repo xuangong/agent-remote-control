@@ -65,6 +65,7 @@
   .lab-composer-dock .agent-composer :is(textarea, .agent-composer-editor) { font-size: 16px; }
   .lab-composer-dock .agent-composer :is(textarea, .agent-composer-editor) { min-height: 44px; }
   .lab-composer-dock .agent-composer-actions button { min-height: 44px; }
+  .lab-composer-dock .agent-activity > button { min-height: 30px; padding-block: 2px; line-height: 1.5; }
   .lab-composer-dock .agent-session-toolbar { --agent-toolbar-target: 44px; }
   .lab-composer-dock .agent-composer-actions > button[data-testid="prompt-submit"] { flex: 0 0 44px; min-width: 44px; margin-left: 0; }
   .lab-composer-dock .agent-activity[data-active="true"]:not([data-connection-pending="true"]) { order: -1; flex-basis: 100%; margin: 0; justify-content: space-between; }

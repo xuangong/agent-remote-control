@@ -1,17 +1,19 @@
 import { StrictMode, useEffect, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { applyWindowOperation, createWindowView, type WorkspaceWindow, type WindowOperation } from '@orchardworks/agent-remote-protocol';
-import type { RemoteAgentTransport } from '@orchardworks/agent-remote-web/headless';
+import type { AgentReplicaState, RemoteAgentTransport } from '@orchardworks/agent-remote-web/headless';
 import { SessionDockProvider, SessionDockRail } from '../../src/components/SessionDock';
 import { SessionFamily } from '../../src/components/SessionFamily';
 import { SessionWindow } from '../../src/components/SessionWindow';
 import { DraftStore } from '../../src/draft-store';
 import { WindowLayoutContext } from '../../src/window-workspace-context';
 import { WorkspaceReady } from '../../src/workspace-access';
+import { replicaState } from '../../src/test/fixtures';
 import '../../src/session-view-styles';
 import '../../src/ask.css';
 
 const primaryOnly = new URLSearchParams(location.search).has('primary-only');
+const withContent = new URLSearchParams(location.search).has('content');
 const storageKey = `session-family-resize-window${primaryOnly ? '-primary' : ''}`;
 const target = (id: string, title: string) => ({ hostId: 'fixture', providerId: 'recorded', nativeSessionId: id, title });
 function initialWindow(): WorkspaceWindow {
@@ -29,6 +31,19 @@ function restore(): WorkspaceWindow {
   catch { return initialWindow(); }
 }
 const drafts = new DraftStore('session-family-resize-fixture');
+const columns = Array.from({ length: 16 }, (_, index) => `Field ${index + 1}`);
+const markdown = [
+  '| ' + columns.join(' | ') + ' |', '| ' + columns.map(() => '---').join(' | ') + ' |',
+  '| ' + columns.map((_, index) => `Value ${index + 1}`).join(' | ') + ' |',
+  '', '```text', 'An intentionally long code line: ' + 'column_value '.repeat(24), '```',
+].join('\n');
+const contentState: AgentReplicaState = { ...replicaState, timeline: {
+  ...replicaState.timeline, hasOlder: false, nextSeq: 2, entries: [{
+    providerId: 'recorded', seqStart: 1, seqEnd: 1, timestamp: '2026-10-19T00:00:00Z', sourceSeqRanges: [], collapsed: [], resources: [],
+    item: { type: 'assistant_message', text: markdown },
+  }],
+} };
+const sessionPresentation = withContent ? () => ({ state: contentState }) : undefined;
 // Layout exercises real Session Views without opening native sessions or network connections.
 const transport = {
   onDiagnostic: () => () => {}, onProtocolMessage: () => () => {},
@@ -61,12 +76,13 @@ function Fixture() {
             selected: true, collapsed: false,
             content: <SessionFamily target={primary.binding!} viewId={primary.id} compact={compact} active offline
               storageScope="family-resize" baseUrl="http://fixture.invalid" hostLabel="Fixture"
-              transport={transport} draftStore={drafts} onAdditionalWidthChange={setAdditionalWidth} />,
+              transport={transport} draftStore={drafts} onAdditionalWidthChange={setAdditionalWidth} sessionPresentation={sessionPresentation} />,
           }]}
             onSelectPrimaryGroup={viewId => operate({ type: 'view.select', viewId })}
             onResizePrimaryGroup={(viewId, width) => operate({ type: 'view.resize', viewId, width })} />
           {dock ? <SessionWindow entry={{ id: dock.id, target: dock.binding }} baseUrl="http://fixture.invalid" visible={!compact}
             compact={compact} hostLabel="Fixture" offline transport={transport} draftStore={drafts}
+            sessionPresentation={sessionPresentation}
             navigation={() => ({ childrenFor: () => [], resolveSessionLink: () => undefined })}
             onFocus={() => operate({ type: 'view.select', viewId: dock.id })} onClose={() => {}} /> : null}
         </main>

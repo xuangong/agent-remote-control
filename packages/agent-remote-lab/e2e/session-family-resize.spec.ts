@@ -98,6 +98,63 @@ test('one primary family can scroll to every child without another dock', async 
     .toBe('Primary leaf width');
 });
 
+test('the window rail owns pane scrolling while Markdown content scrolls independently', async ({ page, isMobile }, testInfo) => {
+  test.skip(isMobile, 'Wide layouts have a horizontal window rail.');
+  test.setTimeout(30_000);
+  await page.setViewportSize({ width: 1760, height: 900 });
+  await page.goto(`${fixture}?content`);
+  await expect(page.getByRole('separator')).toHaveCount(6);
+  const rail = page.locator('.lab-session-dock-rail');
+  const families = page.locator('.lab-session-family');
+  for (const family of await families.all()) {
+    const metrics = await family.evaluate(element => {
+      element.scrollLeft = 100;
+      return { label: element.getAttribute('aria-label'), client: element.clientWidth, scroll: element.scrollWidth,
+        left: element.scrollLeft, overflow: getComputedStyle(element).overflowX };
+    });
+    expect(metrics.scroll, `${metrics.label} must fit its pane group`).toBeLessThanOrEqual(metrics.client);
+    expect(['auto', 'scroll'], `${metrics.label} must not own pane scrolling`).not.toContain(metrics.overflow);
+    expect(metrics.left, `${metrics.label} must not move independently of the window`).toBe(0);
+  }
+  await rail.evaluate(element => { element.scrollLeft = 0; });
+  const primary = pane(page, 'Primary');
+  for (const selector of ['.agent-markdown-table', '.agent-markdown pre']) {
+    const content = primary.locator(selector);
+    await expect(content).toBeVisible();
+    await content.evaluate(element => { element.scrollLeft = element.scrollWidth; });
+    await expect.poll(() => content.evaluate(element => element.scrollLeft)).toBeGreaterThan(0);
+    expect(await rail.evaluate(element => element.scrollLeft)).toBe(0);
+  }
+  await rail.evaluate(element => { element.scrollLeft = element.scrollWidth; });
+  await expect.poll(() => rail.evaluate(element => element.scrollLeft)).toBeGreaterThan(0);
+  const edge = (await rail.boundingBox())!, leaf = (await pane(page, 'Dock leaf').boundingBox())!;
+  expect(leaf.x + leaf.width).toBeLessThanOrEqual(edge.x + edge.width + 1);
+  await page.screenshot({ path: testInfo.outputPath('window-scroll-owner.png') });
+});
+
+test('a floating family keeps its own scrolling to reach attached sessions', async ({ page, isMobile }) => {
+  test.skip(isMobile, 'Wide layouts allow floating session families.');
+  test.setTimeout(30_000);
+  await page.setViewportSize({ width: 1760, height: 900 });
+  await page.goto(fixture);
+  await expect(page.getByRole('separator')).toHaveCount(6);
+  await page.getByRole('button', { name: 'Float Dock', exact: true }).click();
+  await expect(page.locator('.lab-session-dock-pane')).toHaveCount(0);
+  const family = page.locator('.lab-bindable-session-window[data-view-id="dock"] .lab-session-family');
+  await expect(family).toBeVisible();
+  await family.evaluate(element => { element.scrollLeft = element.scrollWidth; });
+  await expect.poll(() => family.evaluate(element => element.scrollLeft)).toBeGreaterThan(0);
+  const viewport = (await family.boundingBox())!, leaf = (await pane(page, 'Dock leaf').boundingBox())!;
+  expect(leaf.x).toBeGreaterThanOrEqual(viewport.x);
+  expect(leaf.x + leaf.width).toBeLessThanOrEqual(viewport.x + viewport.width + 1);
+  // Invoke the placement action without scrolling its root control into view first.
+  await page.getByRole('button', { name: 'Dock Dock', exact: true }).dispatchEvent('click');
+  await expect(page.locator('.lab-session-dock-pane')).toHaveCount(1);
+  await expect.poll(() => family.evaluate(element => element.scrollLeft)).toBe(0);
+  const parent = (await page.locator('.lab-session-dock-pane').boundingBox())!, root = (await pane(page, 'Dock').boundingBox())!;
+  expect(Math.abs(root.x - parent.x)).toBeLessThanOrEqual(1);
+});
+
 test('narrow presentation cancels a resize and removes handles without horizontal overflow', async ({ page }) => {
   test.setTimeout(30_000);
   await page.setViewportSize({ width: 1760, height: 900 });

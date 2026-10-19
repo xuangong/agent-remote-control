@@ -33,7 +33,7 @@ export function SessionAsk({ source, ask, visible, canRestore, storageScope, syn
   const expanded = ask.isOpen(source, associationOwner);
   const { shown, selected } = resolveAskPresentation({ window: shared?.window, view: sharedView, visible, expanded, compact });
   const focus = (event: { target: EventTarget }) => {
-    if (!shared || !sharedView || event.target instanceof Element && event.target.closest('.lab-session-family-pane')) return;
+    if (!shared || !sharedView || event.target instanceof Element && event.target.closest('[data-pane-selection-ignore],.lab-session-family-pane')) return;
     if ((shared.readWindow?.() ?? shared.window).selectedViewId !== sharedView.id) shared.operate({ type: 'view.select', viewId: sharedView.id });
   };
   useEffect(() => {

@@ -24,14 +24,28 @@ it.each([
   vi.stubGlobal('ResizeObserver', class { observe() {} disconnect() {} });
   const target = { hostId: 'host', providerId: 'recorded', nativeSessionId: 'native', title: 'Session' };
   const pane = createWindowView('pane', bound ? target : undefined, placement);
-  const close = vi.fn(), change = vi.fn(), operate = vi.fn();
+  const selected = createWindowView('selected-pane');
+  const close = vi.fn(), change = vi.fn(), operate = vi.fn(), focus = vi.fn(), openView = vi.fn();
   const view = await render(<WorkspaceReady.Provider value={false}><WindowLayoutContext.Provider value={{ window: {
-    schemaVersion: 3, id: 'window', title: 'Window', revision: 0, selectedPrimaryViewId: null, selectedViewId: pane.id, views: [pane],
-  }, operate }}><SessionDockProvider enabled><SessionDockRail primaryGroups={[]} />
+    schemaVersion: 3, id: 'window', title: 'Window', revision: 0, selectedPrimaryViewId: null, selectedViewId: selected.id, views: [pane, selected],
+  }, operate }}><SessionDockProvider enabled leadingControls={<button type="button" data-pane-selection-ignore aria-label="Global View options" onClick={openView}>View</button>}><SessionDockRail primaryGroups={[]} />
     <SessionWindow entry={{ id: pane.id, slotId: 'slot', target: bound ? target : undefined, managed: false }} baseUrl="http://fixture" visible compact={false} hostLabel="Host" offline
       transport={transport} draftStore={new DraftStore('window-menu')} navigation={() => ({ childrenFor: () => [], resolveSessionLink: () => undefined })}
-      actions={<button type="button">Favorite</button>} onFocus={() => {}} onClose={close} onChangeSession={change} />
+      actions={<button type="button">Favorite</button>} onFocus={focus} onClose={close} onChangeSession={change} />
   </SessionDockProvider></WindowLayoutContext.Provider></WorkspaceReady.Provider>);
+  const globalView = view.querySelector<HTMLButtonElement>('[aria-label="Global View options"]');
+  if (placement === 'dock') {
+    expect(globalView?.closest(bound ? '.lab-session-heading' : '.lab-empty-session-heading')).not.toBeNull();
+    focus.mockClear(); operate.mockClear();
+    await act(async () => {
+      globalView!.dispatchEvent(new Event('pointerdown', { bubbles: true }));
+      globalView!.dispatchEvent(new FocusEvent('focusin', { bubbles: true }));
+      globalView!.click();
+    });
+    expect(openView).toHaveBeenCalledOnce();
+    expect(focus).not.toHaveBeenCalled();
+    expect(operate).not.toHaveBeenCalled();
+  } else expect(globalView).toBeNull();
   const menu = view.querySelector<HTMLDivElement>('.lab-session-heading-actions-panel')!;
   expect(view.querySelectorAll('[aria-label="More session actions"]')).toHaveLength(1);
   expect(menu.hidden).toBe(true);

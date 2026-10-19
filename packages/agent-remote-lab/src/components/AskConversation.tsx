@@ -11,7 +11,7 @@ import { SessionFamily } from './SessionFamily.js';
 import { SessionHeadingActions } from './SessionHeadingActions.js';
 import { SessionTitleInteractionContext } from './SessionTitleInteraction.js';
 import { SessionLink } from './SessionLink.js';
-import { SessionViewPlacement } from './SessionDock.js';
+import { SessionDockHeadingStart, SessionViewPlacement } from './SessionDock.js';
 import { AskResize } from './AskResize.js';
 import type { ImageDraftBinding, ImageDraftRecipient } from '@orchardworks/agent-remote-web/browser';
 import type { DisplayPreferenceBinding } from '../hooks/useSessionDisplayPreferences.js';
@@ -81,7 +81,7 @@ function AskConversationContent({ docked, dockControls, onAdditionalWidthChange,
     data-selected={selected || undefined} aria-current={selected ? 'true' : undefined}>
     {isAskAttached(entry) ? <AskChat key={askParticipantKey(entry.record!)} record={entry.record!} executionTarget={entry.executionTarget} inputs={entry.error ? undefined : entry.inputs} onSendInput={onSendInput} replica={replica} transport={transport}
       storageScope={storageScope} navigation={navigation} onToggleEnabled={onToggleEnabled} busy={busy} draftBinding={draftBinding} tools={tools} notice={notice} onAdditionalWidthChange={onAdditionalWidthChange} {...storageBindings} /> : <>
-      <header className="lab-ask-heading"><strong {...titleInteraction}>Ask</strong>{tools}</header>
+      <header className="lab-ask-heading"><SessionDockHeadingStart /><strong {...titleInteraction}>Ask</strong>{tools}</header>
       {notice}
       {busy || !entry.error ? <div className="lab-ask-opening" role="status">{busy ? 'Opening Ask…' : 'Ask about this conversation.'}</div> : null}
       <AskDraft binding={draftBinding} />

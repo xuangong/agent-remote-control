@@ -6,7 +6,7 @@ import { WorkspaceReady } from '../workspace-access.js';
 import { ConversationConnectionScope } from '../conversation-connections.js';
 import { useWindowSessionBridgeContext } from '../window-session-bridge-context.js';
 import { useWindowLayout, WindowPresentationContext } from '../window-workspace-context.js';
-import { DockResize } from './SessionDock.js';
+import { DockResize, SessionDockHeadingStart } from './SessionDock.js';
 import { SessionLink } from './SessionLink.js';
 import { SessionHeadingActions } from './SessionHeadingActions.js';
 import { SessionTitleInteractionContext } from './SessionTitleInteraction.js';
@@ -349,6 +349,7 @@ function FamilyChat({ session, pending, transport, navigation, draftStore, draft
     draftSessionKey={key} draftBinding={draftBinding ?? { store: draftStore, key: `session:${key}` }} imageDraftBinding={imageDraftBinding} imageRecipient={pending ? undefined : explicitImageRecipient ?? imageRecipient} questionDrafts={pending ? {} : questions}
     onQuestionDraftChange={(id, value) => setQuestions(current => ({ ...current, [id]: value }))}
     conversationPath={<strong className="agent-session-title">{presentedSession.title}</strong>} {...presentation}
+    headingStart={<>{familyRoot ? <SessionDockHeadingStart /> : null}{presentation?.headingStart}</>}
     composerNotice={<>{availabilityError ? <p role="alert">{availabilityError} <button type="button" onClick={onRetryAttachment} disabled={!onRetryAttachment}>Retry</button></p> : null}{presentation?.composerNotice}</>} />{renderSessionFooter?.(presentationContext)}</CommunicationNavigationContext.Provider>;
 }
 

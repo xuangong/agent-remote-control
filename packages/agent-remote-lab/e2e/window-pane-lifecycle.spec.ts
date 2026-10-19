@@ -35,6 +35,17 @@ async function expectGlobalView(page: Page) {
   await expect(options).toHaveCount(0);
 }
 
+async function expectDockHeadingView(page: Page, id: string) {
+  const heading = page.locator(`.lab-bindable-session-window[data-view-id="${id}"] .lab-session-heading`).first();
+  const view = heading.getByRole('button', { name: 'View options', exact: true });
+  await expect(view).toBeVisible();
+  await expect.poll(async () => {
+    const [button, title] = await Promise.all([view.boundingBox(), heading.locator('.lab-session-heading-title').boundingBox()]);
+    if (!button || !title) return Number.POSITIVE_INFINITY;
+    return Math.abs(button.y + button.height / 2 - title.y - title.height / 2);
+  }).toBeLessThanOrEqual(1);
+}
+
 async function createWorkspace(page: Page, context: BrowserContext) {
   const fixture = await sessionLinkFixture({ automaticSignIn: true, listCreatedSessions: true });
   const errors: string[] = [];
@@ -134,11 +145,19 @@ test('closing the selected and final primary leaves usable independent docks and
     await first.getByTestId('prompt-input').fill('A surviving dock remains interactive');
     await expectGlobalView(page);
     if (!isMobile) {
+      await page.getByRole('button', { name: 'View options', exact: true }).click();
+      const options = page.getByRole('region', { name: 'View options', exact: true });
+      await options.getByRole('button', { name: 'Hide all', exact: true }).click();
+      if (await options.isVisible()) await options.press('Escape');
+      await expectDockHeadingView(page, 'dock-one');
+      await test.info().attach('dock-heading-view', { body: await page.screenshot(), contentType: 'image/png' });
       await first.locator('[data-session-title-draggable]').press('Alt+ArrowRight');
       await expect.poll(async () => (await workspace.inspect()).views.map(view => view.id)).toEqual(['dock-two', 'dock-one']);
       await expect.poll(async () => page.locator('[data-dock-id="dock-two"]').evaluate(element => Number((element as HTMLElement).style.order))).toBe(1);
+      await expectDockHeadingView(page, 'dock-two');
       await first.locator('[data-session-title-draggable]').press('Alt+ArrowLeft');
       await expect.poll(async () => (await workspace.inspect()).views.map(view => view.id)).toEqual(['dock-one', 'dock-two']);
+      await expectDockHeadingView(page, 'dock-one');
       await expect(first.getByTestId('prompt-input')).toHaveText('A surviving dock remains interactive');
     }
     const panel = await openWindows(page);
@@ -146,7 +165,24 @@ test('closing the selected and final primary leaves usable independent docks and
     await closeWindows(page);
     await expect(page.locator('.lab-bindable-session-window[data-view-id="dock-two"]').getByTestId('prompt-input')).toBeEnabled();
     await expect.poll(async () => (await workspace.inspect()).selectedViewId).toBe('dock-two');
+    await expectGlobalView(page);
+    await expect(page.locator('.lab-bindable-session-window[data-view-id="dock-two"] .lab-session-family-pane').first()).toHaveAttribute('data-selected', 'true');
+    expect((await workspace.inspect()).selectedViewId).toBe('dock-two');
+    await closeListedView(page, 'dock-one');
+    await closeListedView(page, 'dock-two');
+    await closeWindows(page);
+    await expect.poll(async () => (await workspace.inspect()).views).toEqual([]);
+    await expect(page.getByTestId('empty-window')).toBeVisible();
+    await expectGlobalView(page);
     expect(workspace.errors).toEqual([]);
+  } catch (error) {
+    await test.info().attach('dock-heading-view-state', { body: JSON.stringify(await page.evaluate(() => {
+      const view = document.querySelector('[aria-label="View options"]');
+      const heading = document.querySelector('.lab-bindable-session-window .lab-session-heading');
+      return { viewRect: view?.getBoundingClientRect().toJSON(), headingRect: heading?.getBoundingClientRect().toJSON(),
+        dockId: view?.closest('[data-view-id]')?.getAttribute('data-view-id'), standalone: !!view?.closest('.lab-window-controls') };
+    }), null, 2), contentType: 'application/json' });
+    throw error;
   } finally { await workspace.close(); }
 });
 

@@ -16,7 +16,7 @@ import { describeSession } from '../session-description.js';
 import { useWindowLayout, WindowPresentationContext } from '../window-workspace-context.js';
 import { featureView } from '../window-feature-views.js';
 import { LabWorkbench } from './LabWorkbench.js';
-import { SessionViewPlacement } from './SessionDock.js';
+import { SessionDockHeadingStart, SessionViewPlacement } from './SessionDock.js';
 import { SessionHeadingActions } from './SessionHeadingActions.js';
 import { SessionTitleInteractionContext } from './SessionTitleInteraction.js';
 import { AskResize } from './AskResize.js';
@@ -111,10 +111,14 @@ function TpmWorkspaceContent({ item, mainTitle, session, replica, visible, stora
   const unavailable = !item.online || busy;
   const creationUnresolved = work.creationStatus === 'unknown' || work.creationStatus === 'abandoned';
   const archiveLabel = work.archived ? 'Restore TPM session' : work.phase === 'completed' ? 'Archive TPM session' : 'Stop and archive TPM session';
+  const focusWorkspace = (event: { target: EventTarget }) => {
+    if (event.target instanceof Element && event.target.closest('[data-pane-selection-ignore]')) return;
+    onFocus?.();
+  };
   return <SessionAttributions description={description} onNavigate={descriptions?.navigate ?? onOpenMain}>{({ toggle, details }) => <div className="lab-ask-viewport lab-tpm-viewport" style={{ zIndex: layer }} hidden={!visible}>
     <section ref={panel} className="lab-ask-window lab-tpm-window lab-session-pane-selection" role="dialog" aria-label={`TPM: ${work.title}`} aria-modal="false" tabIndex={-1}
-      data-view-id={sharedView?.id} data-selected={selected || undefined} aria-current={selected || undefined} onPointerDownCapture={onFocus} onFocusCapture={onFocus}>
-      <header className="lab-ask-heading lab-tpm-heading"><div {...titleInteraction}><span className="lab-tpm-eyebrow">TPM · {item.hostName}</span>{onRename ? <button ref={titleButton} type="button" className="lab-tpm-title-button" aria-label="Rename TPM session" title={work.title} disabled={!!unavailable || savingTitle} onClick={() => { setTitleDraft(work.title); setTitleError(undefined); setEditingTitle(true); }}><strong>{work.title}</strong><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" aria-hidden="true"><path d="m16 3 5 5-12 12-6 1 1-6ZM14 5l5 5" /></svg></button> : <strong title={work.title}>{work.title}</strong>}</div>
+      data-view-id={sharedView?.id} data-selected={selected || undefined} aria-current={selected || undefined} onPointerDownCapture={focusWorkspace} onFocusCapture={focusWorkspace}>
+      <header className="lab-ask-heading lab-tpm-heading"><SessionDockHeadingStart /><div className="lab-tpm-heading-title" {...titleInteraction}><span className="lab-tpm-eyebrow">TPM · {item.hostName}</span>{onRename ? <button ref={titleButton} type="button" className="lab-tpm-title-button" aria-label="Rename TPM session" title={work.title} disabled={!!unavailable || savingTitle} onClick={() => { setTitleDraft(work.title); setTitleError(undefined); setEditingTitle(true); }}><strong>{work.title}</strong><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" aria-hidden="true"><path d="m16 3 5 5-12 12-6 1 1-6ZM14 5l5 5" /></svg></button> : <strong title={work.title}>{work.title}</strong>}</div>
         <div className="lab-ask-controls">{toggle}{dockControls ? <SessionHeadingActions sessionKey={item.key} alwaysCollapsed>{dockControls}</SessionHeadingActions> : null}<button type="button" disabled={!!unavailable} aria-label={archiveLabel} title={archiveLabel} onClick={() => run(async () => {
           await onAction(work.archived ? 'unarchive' : 'archive');
           if (!work.archived) onShowList();

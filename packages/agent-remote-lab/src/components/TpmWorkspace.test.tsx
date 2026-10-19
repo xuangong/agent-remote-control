@@ -20,12 +20,12 @@ const item: TpmItem = { key: '["host","work"]', hostId: 'host', hostName: 'Host'
 
 it('keeps TPM placement in a collapsed menu without hiding its work and minimize actions', async () => {
   const drafts = new DraftStore('tpm-menu');
-  const close = vi.fn(), showList = vi.fn();
+  const close = vi.fn(), showList = vi.fn(), focus = vi.fn(), openView = vi.fn();
   function Harness() {
     const trigger = useRef<HTMLButtonElement>(null);
-    return <SessionDockProvider enabled><SessionDockRail>Main session</SessionDockRail><button ref={trigger}>TPM</button>
+    return <SessionDockProvider enabled leadingControls={<button type="button" data-pane-selection-ignore aria-label="Global View options" onClick={openView}>View</button>}><SessionDockRail>Main session</SessionDockRail><button ref={trigger}>TPM</button>
       <TpmWorkspace item={item} visible storageScope="tpm-menu" triggerRef={trigger} transport={{} as RemoteAgentTransport}
-        draftBinding={{ store: drafts, key: item.key }} onClose={close} onShowList={showList} onOpenMain={() => {}}
+        draftBinding={{ store: drafts, key: item.key }} onFocus={focus} onClose={close} onShowList={showList} onOpenMain={() => {}}
         onAction={async () => {}} onResolve={async () => {}} onRetry={() => {}} />
     </SessionDockProvider>;
   }
@@ -43,6 +43,16 @@ it('keeps TPM placement in a collapsed menu without hiding its work and minimize
   await act(async () => menu.querySelector<HTMLButtonElement>('[aria-label="Dock Search"]')!.click());
   expect(container.querySelector('[aria-label="Docked Search"]')).not.toBeNull();
   expect(container.querySelector('.lab-tpm-heading > [data-session-title-draggable]')).not.toBeNull();
+  const globalView = container.querySelector<HTMLButtonElement>('.lab-tpm-heading > [aria-label="Global View options"]')!;
+  expect(globalView).not.toBeNull();
+  focus.mockClear();
+  await act(async () => {
+    globalView.dispatchEvent(new Event('pointerdown', { bubbles: true }));
+    globalView.dispatchEvent(new FocusEvent('focusin', { bubbles: true }));
+    globalView.click();
+  });
+  expect(openView).toHaveBeenCalledOnce();
+  expect(focus).not.toHaveBeenCalled();
   await act(async () => list.click());
   expect(showList).toHaveBeenCalledOnce();
   await act(async () => minimize.click());

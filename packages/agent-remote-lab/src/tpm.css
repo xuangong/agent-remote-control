@@ -20,7 +20,7 @@
 .lab-tpm-health { color: var(--obs-danger); }
 .lab-tpm-create-trigger { width: 100%; margin-top: 8px; min-height: 44px; }
 .lab-tpm-viewport { position: fixed; inset: var(--lab-viewport-top, 0px) 0 auto; height: var(--lab-viewport-height, 100dvh); z-index: 145; }
-.lab-tpm-heading > div:first-child { min-width: 0; display: grid; gap: 2px; }
+.lab-tpm-heading-title { min-width: 0; display: grid; gap: 2px; }
 .lab-tpm-heading strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 15px; }
 .lab-tpm-eyebrow { color: var(--obs-text-secondary); font-size: 10px; letter-spacing: .06em; }
 .lab-tpm-work-status { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; padding: 8px 16px 4px; font-size: 11px; color: var(--obs-text-secondary); }

@@ -5,7 +5,7 @@ import type { DraftBinding } from '../draft-store.js';
 import type { SessionViewNavigationFactory } from '../session-view-navigation.js';
 import { type SessionWindowEntry } from '../hooks/useSessionWindows.js';
 import { useAskPosition } from '../hooks/useAskPosition.js';
-import { SessionViewPlacement, useRemoveSessionDocks } from './SessionDock.js';
+import { SessionDockHeadingStart, SessionViewPlacement, useRemoveSessionDocks } from './SessionDock.js';
 import { SessionFamily } from './SessionFamily.js';
 import { SessionHeadingActions } from './SessionHeadingActions.js';
 import { SessionTitleInteractionContext } from './SessionTitleInteraction.js';
@@ -43,6 +43,7 @@ function WindowBody({ entry, baseUrl, visible, compact, hostLabel, offline, tran
   const panel = useRef<HTMLElement>(null), anchor = useRef<HTMLSpanElement>(null);
   useAskPosition(panel, anchor, JSON.stringify([baseUrl, entry.id]), { docked });
   const focusWindow = (event: { target: EventTarget }) => {
+    if (event.target instanceof Element && event.target.closest('[data-pane-selection-ignore]')) return;
     if (shared && event.target instanceof Element && event.target.closest('.lab-session-family-pane')) return;
     onFocus();
   };
@@ -60,7 +61,7 @@ function WindowBody({ entry, baseUrl, visible, compact, hostLabel, offline, tran
           onSessionBound={onSessionBound} sessionPresentation={sessionPresentation} renderSessionFooter={renderSessionFooter} nativePrefixOnly={entry.managed}
           displayBinding={{ scope: baseUrl, key: entry.id }} active={visible} compact={compact} onAdditionalWidthChange={onAdditionalWidthChange}
           transport={transport} draftStore={draftStore} draftBinding={draftBinding} imageDraftBinding={imageDraftBinding} navigation={navigation} controls={windowControls} menuActions={menuActions} /> : <>
-          <header className="lab-empty-session-heading"><strong {...titleInteraction}>Select session</strong><div>{menuActions ? <SessionHeadingActions sessionKey={entry.id} alwaysCollapsed>{menuActions}</SessionHeadingActions> : null}{windowControls}</div></header>
+          <header className="lab-empty-session-heading"><SessionDockHeadingStart /><strong {...titleInteraction}>Select session</strong><div>{menuActions ? <SessionHeadingActions sessionKey={entry.id} alwaysCollapsed>{menuActions}</SessionHeadingActions> : null}{windowControls}</div></header>
           <div className="lab-empty-session-body"><p>Choose a session from the sidebar</p>
             <button type="button" onClick={onChangeSession}>Open sidebar</button></div>
         </>}

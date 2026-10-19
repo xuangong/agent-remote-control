@@ -52,7 +52,7 @@ function sharedFixture(ask: AskProps['ask'], pending = false) {
 
 it('keeps draft Ask placement and cleanup in one menu while minimize stays visible', async () => {
   const { props } = fixture([{ source }]);
-  const container = await render(<SessionDockProvider enabled><SessionDockRail>Main session</SessionDockRail>
+  const container = await render(<SessionDockProvider enabled leadingControls={<button type="button" data-pane-selection-ignore aria-label="Global View options">View</button>}><SessionDockRail>Main session</SessionDockRail>
     <SessionAsk {...props} source={source} />
   </SessionDockProvider>);
   const menu = container.querySelector<HTMLDivElement>('.lab-session-heading-actions-panel')!;
@@ -67,6 +67,7 @@ it('keeps draft Ask placement and cleanup in one menu while minimize stays visib
   expect(container.querySelector('[aria-label="Docked Ask"]')).not.toBeNull();
   expect(menu.querySelector('[aria-label="Float Ask"]')).not.toBeNull();
   expect(container.querySelector('.lab-ask-heading > strong[data-session-title-draggable]')).not.toBeNull();
+  expect(container.querySelectorAll('.lab-ask-heading > [aria-label="Global View options"]')).toHaveLength(1);
 });
 
 it('includes attached session widths in a docked Ask as its family changes', async () => {
@@ -81,12 +82,13 @@ it('includes attached session widths in a docked Ask as its family changes', asy
   const replica = new AgentReplica();
   const transport = { ...props.transport, connect: () => ({ close() {}, send() {} }),
     onDiagnostic: () => () => {}, onProtocolMessage: () => () => {} };
+  const openView = vi.fn();
   let edit!: (operation: Parameters<typeof applyWindowOperation>[1]) => void;
   function Harness() {
     const [, update] = useState(0);
     edit = operation => { layout.window = applyWindowOperation(layout.window, operation); update(value => value + 1); };
     return <WorkspaceReady.Provider value={false}><WindowLayoutContext.Provider value={{ ...layout, operate: edit }}>
-      <SessionDockProvider enabled><SessionDockRail>Main session</SessionDockRail>
+      <SessionDockProvider enabled leadingControls={<button type="button" data-pane-selection-ignore aria-label="Global View options" onClick={openView}>View</button>}><SessionDockRail>Main session</SessionDockRail>
         <SessionAsk {...props} source={source} replicaFor={() => replica} transport={transport} />
       </SessionDockProvider>
     </WindowLayoutContext.Provider></WorkspaceReady.Provider>;
@@ -95,6 +97,19 @@ it('includes attached session widths in a docked Ask as its family changes', asy
   const dock = () => container.querySelector<HTMLElement>('[aria-label="Docked Ask"]')!;
   expect(dock().style.width).toBe('780px');
   expect(dock().querySelectorAll('.lab-session-family-pane')).toHaveLength(2);
+  const heading = dock().querySelector('.lab-session-family-pane .lab-session-heading')!;
+  const globalView = heading.querySelector<HTMLButtonElement>('[aria-label="Global View options"]')!;
+  expect(globalView).not.toBeNull();
+  expect(dock().querySelectorAll('[aria-label="Global View options"]')).toHaveLength(1);
+  expect(heading.querySelector('[aria-label="Share session link"]')).not.toBeNull();
+  await act(async () => edit({ type: 'view.select', viewId: 'source-view' }));
+  await act(async () => {
+    globalView.dispatchEvent(new Event('pointerdown', { bubbles: true }));
+    globalView.dispatchEvent(new FocusEvent('focusin', { bubbles: true }));
+    globalView.click();
+  });
+  expect(openView).toHaveBeenCalledOnce();
+  expect(layout.window.selectedViewId).toBe('source-view');
   const menu = dock().querySelector<HTMLDivElement>('.lab-session-family-pane .lab-session-heading-actions-panel')!;
   expect(menu.hidden).toBe(true);
   expect(menu.querySelector('[aria-label="Float Ask"]')).not.toBeNull();
@@ -105,6 +120,16 @@ it('includes attached session widths in a docked Ask as its family changes', asy
   await act(async () => { entry.attached = false; edit({ type: 'view.select', viewId: view.id }); });
   expect(dock().style.width).toBe('420px');
   expect(dock().querySelectorAll('.lab-session-family-pane')).toHaveLength(0);
+  const draftGlobalView = dock().querySelector<HTMLButtonElement>('.lab-ask-heading > [aria-label="Global View options"]')!;
+  expect(draftGlobalView).not.toBeNull();
+  await act(async () => edit({ type: 'view.select', viewId: 'source-view' }));
+  await act(async () => {
+    draftGlobalView.dispatchEvent(new Event('pointerdown', { bubbles: true }));
+    draftGlobalView.dispatchEvent(new FocusEvent('focusin', { bubbles: true }));
+    draftGlobalView.click();
+  });
+  expect(openView).toHaveBeenCalledTimes(2);
+  expect(layout.window.selectedViewId).toBe('source-view');
   await act(async () => { entry.attached = true; edit({ type: 'view.select', viewId: view.id }); });
   expect(dock().style.width).toBe('920px');
   await act(async () => edit({ type: 'view.close', viewId: child.id }));

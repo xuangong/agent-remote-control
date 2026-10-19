@@ -292,6 +292,74 @@ for (const placement of ['primary', 'dock'] as const) {
   });
 }
 
+for (const placement of ['primary', 'dock'] as const) {
+  for (const savedTarget of ['missing pane', 'another session pane'] as const) {
+    test(`${placement} Side footer survives refresh with a saved target pointing to ${savedTarget}`, async ({ page, context }) => {
+      const workspace = await createWorkspace(page, context);
+      let phase = 'prepare';
+      try {
+        const dock = await workspace.createNative('Dock source');
+        const sourceId = placement === 'primary' ? 'main' : 'dock';
+        await workspace.apply([
+          createWindowView('main', { ...workspace.binding, title: 'Primary source' }, 'primary'),
+          createWindowView('dock', dock),
+        ], 'main', sourceId);
+        const shell = page.locator(placement === 'primary' ? '[data-primary-group-id="main"]' : '.lab-bindable-session-window[data-view-id="dock"]');
+        const source = shell.locator('.lab-session-family-pane').first();
+        await expect(source.getByTestId('prompt-input')).toBeEnabled();
+        await source.getByTestId('prompt-input').fill(`/side Preserve the ${placement} source across refresh`);
+        await source.getByTestId('prompt-submit').click();
+        await expect.poll(async () => (await workspace.inspect()).views.some(view => view.attachedTo === sourceId)).toBe(true);
+        const side = (await workspace.inspect()).views.find(view => view.attachedTo === sourceId)!;
+        expect(side.binding?.nativeSessionId).toBeTruthy();
+        await closeListedView(page, side.id);
+        await (await openWindows(page)).locator(`[data-window-view-id="${sourceId}"]`).click();
+        await closeWindows(page);
+        await expect(source.getByTestId('prompt-input')).toBeEnabled();
+        phase = 'restore a fork record saved by an older client';
+        const seeded = await page.evaluate(({ nativeSessionId, windowId, sourceId, savedTarget }) => {
+          const recordKey = Object.keys(localStorage).find(key => key.startsWith('agent-remote-forks:') && key.includes(':record:')
+            && JSON.parse(localStorage.getItem(key)!).target?.nativeSessionId === nativeSessionId);
+          if (!recordKey) throw new Error('The created Side has no saved fork record.');
+          const record = JSON.parse(localStorage.getItem(recordKey)!);
+          const documents = Object.keys(sessionStorage).filter(key => key.endsWith(':composition-v2'))
+            .map(key => JSON.parse(sessionStorage.getItem(key)!));
+          const sourceSlot = documents.flatMap(document => document.windowBindings ?? [])
+            .find((binding: { windowId: string; viewId: string }) => binding.windowId === windowId && binding.viewId === sourceId)?.slotId;
+          if (!sourceSlot) throw new Error('The source pane has no saved composition binding.');
+          record.target.viewId = savedTarget === 'missing pane' ? 'removed-window-pane' : sourceSlot;
+          localStorage.setItem(recordKey, JSON.stringify(record));
+          return { targetViewId: record.target.viewId, sourceSlot };
+        }, { nativeSessionId: side.binding!.nativeSessionId, windowId: workspace.windowId, sourceId, savedTarget });
+        expect(seeded.targetViewId).toBe(savedTarget === 'missing pane' ? 'removed-window-pane' : seeded.sourceSlot);
+        phase = 'reload and reopen the saved Side';
+        await page.reload();
+        await expect(source.getByTestId('prompt-input')).toBeEnabled();
+        const link = source.getByRole('navigation', { name: 'Forked sessions', exact: true }).getByRole('button', { name: /^Side 1 ·/ });
+        await expect(link).toBeVisible();
+        await expect(link).toHaveAttribute('aria-pressed', 'false');
+        const creations: string[] = [];
+        page.on('request', request => {
+          if (request.method() === 'POST' && new URL(request.url()).pathname.endsWith('/create')) creations.push(request.url());
+        });
+        await link.click();
+        await expect.poll(async () => (await workspace.inspect()).views.find(view => view.attachedTo === sourceId)?.binding?.nativeSessionId).toBe(side.binding!.nativeSessionId);
+        const reopened = (await workspace.inspect()).views.find(view => view.attachedTo === sourceId)!;
+        await expect.poll(async () => (await workspace.inspect()).selectedViewId).toBe(reopened.id);
+        await expect(shell.locator('.lab-session-family-pane').nth(1).getByTestId('prompt-input')).toBeEnabled();
+        expect((await workspace.inspect()).views.filter(view => view.attachedTo === sourceId)).toHaveLength(1);
+        expect(creations).toEqual([]);
+        await expect(page.getByText('The selected session view no longer matches this session.', { exact: true })).toHaveCount(0);
+        expect(workspace.errors).toEqual([]);
+      } catch (error) {
+        await test.info().attach('saved-side-navigation-state', { body: JSON.stringify({ phase, window: await workspace.inspect(), errors: workspace.errors,
+          visibleText: await page.locator('body').innerText() }, null, 2), contentType: 'application/json' });
+        throw error;
+      } finally { await workspace.close(); }
+    });
+  }
+}
+
 test('a dock Side opens beside its source when the same native session is already open in the primary', async ({ page, context }) => {
   const workspace = await createWorkspace(page, context);
   let phase = 'prepare';

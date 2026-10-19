@@ -2,7 +2,7 @@ import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState, type 
 import { createPortal } from 'react-dom';
 import type { OpenedSession } from '../directory-client.js';
 import { sessionKey } from '../session-tree.js';
-import { currentForkSource, sideNavigationTarget, sideLinkPending, sideLinkVisible, type SessionFork } from '../session-forks.js';
+import { originalForkSource, currentForkSource, sideNavigationTarget, sideLinkPending, sideLinkVisible, type SessionFork } from '../session-forks.js';
 
 export function ForkIcon() {
   return <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true"><circle cx="4" cy="3" r="1.75" /><circle cx="12" cy="3" r="1.75" /><circle cx="4" cy="13" r="1.75" /><path d="M4 4.75v6.5M12 4.75v1a3 3 0 0 1-3 3H4" /></svg>;
@@ -31,7 +31,7 @@ export function ForkReference({ fork, onOpen, onUnlink, onRecover }: { fork: Ses
       <small>Boundary {fork.boundary.epoch} / {fork.boundary.seq}</small>
       </>}
       <code>{contextId}</code>
-      {sourceKnown ? <button type="button" onClick={() => onOpen(fork.source)}>Open source session</button> : null}
+      {sourceKnown ? <button type="button" onClick={() => onOpen(originalForkSource(fork))}>Open source session</button> : null}
       {!sourceKnown || sessionKey(currentSource) !== sessionKey(fork.source) ? <button type="button" onClick={() => onOpen(currentSource)}>Open current source session</button> : null}
       {onUnlink ? <UnlinkAction fork={fork} onUnlink={onUnlink} onRecover={onRecover} /> : null}
     </div>

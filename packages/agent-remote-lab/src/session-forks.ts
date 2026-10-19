@@ -54,6 +54,15 @@ const MAX_CONTEXT_ENTRIES = 20_000;
 interface ForkNavigationIdentity { hostId: string; controllerId: string; target: string; relationId: string; originalSource: string }
 interface ForkNavigation { source: string; controllerId?: string; linked: boolean; revision: number; relationId?: string; editedTarget?: OpenedSession; identity?: ForkNavigationIdentity }
 
+/** Fork endpoints outlive local panes and never carry their view identity. */
+function forkSessionReference(session: OpenedSession): OpenedSession {
+  return { agentId: session.agentId, providerId: session.providerId, nativeSessionId: session.nativeSessionId, title: session.title,
+    ...(session.hostId !== undefined ? { hostId: session.hostId } : {}),
+    ...(session.parentAgentId !== undefined ? { parentAgentId: session.parentAgentId } : {}),
+    ...(session.parentNativeSessionId !== undefined ? { parentNativeSessionId: session.parentNativeSessionId } : {}),
+    ...(session.createdAt !== undefined ? { createdAt: session.createdAt } : {}) };
+}
+
 /** A single projection freezes lifecycle updates together with their original entries. */
 export async function captureForkContext(transport: Pick<RemoteAgentTransport, 'fetchTimeline'>, source: OpenedSession): Promise<SnapshotForkContext> {
   const signal = AbortSignal.timeout(30_000);
@@ -230,7 +239,7 @@ export class ForkStore {
     if (!record.target || !this.storage) throw new Error('The side link could not be saved. Free browser storage before continuing.');
     const key = this.navigationKey + sessionKey(record.target);
     const identity = record.remote ? navigationIdentity(record) : undefined;
-    const value: ForkNavigation = { ...(identity ? { identity } : {}), source: sessionKey(record.source), ...(record.hostLocator?{controllerId:record.hostLocator.controllerId}:{}), linked, revision, relationId: record.relationId, ...(editedTarget ? { editedTarget } : {}) };
+    const value: ForkNavigation = { ...(identity ? { identity } : {}), source: sessionKey(record.source), ...(record.hostLocator?{controllerId:record.hostLocator.controllerId}:{}), linked, revision, relationId: record.relationId, ...(editedTarget ? { editedTarget: forkSessionReference(editedTarget) } : {}) };
     try { if (this.storage.getItem(key) !== JSON.stringify(value)) this.storage.setItem(key, JSON.stringify(value)); }
     catch { throw new Error('The side link could not be saved. Free browser storage before continuing.'); }
   }
@@ -258,7 +267,7 @@ export class ForkStore {
     return matches.length === 1 ? matches[0] : undefined;
   }
   prepare(context: ForkContext, options: CreateSessionOptions = {}, settings: SessionFork['settings'] = [], creationKey?: string): SessionFork {
-    const record: SessionFork = { ...context, id: crypto.randomUUID(), delivery: 'pending', options, settings, creationKey };
+    const record: SessionFork = { ...context, source: forkSessionReference(context.source), id: crypto.randomUUID(), delivery: 'pending', options, settings, creationKey };
     this.save(record);
     return record;
   }
@@ -274,8 +283,9 @@ export class ForkStore {
     }
     record ??= this.get(id);
     if (record.target && sessionKey(record.target) !== sessionKey(target)) throw new Error('The fork target changed. Open its original session before continuing.');
-    if (!record.remote) { this.update(id, { target }, true); return; }
-    this.shared.set(record.id, { ...record, target });
+    const reference = forkSessionReference(target);
+    if (!record.remote) { this.update(id, { target: reference }, true); return; }
+    this.shared.set(record.id, { ...record, target: reference });
     for (const listener of this.listeners) listener();
   }
   private update(id: string, change: Partial<ForkDelivery>, requireLocal = false): void {
@@ -352,7 +362,9 @@ export function sideLinkPending(record: SessionFork): boolean {
 }
 export function sideLinkVisible(record: SessionFork): boolean { return record.linked !== false || sideLinkPending(record); }
 
-export function currentForkSource(record: SessionFork): OpenedSession { return record.currentSource ?? record.source; }
+export function originalForkSource(record: SessionFork): OpenedSession { return forkSessionReference(record.source); }
+export function currentForkSource(record: SessionFork): OpenedSession { return record.currentSource ? forkSessionReference(record.currentSource) : originalForkSource(record); }
+/** Only an explicit live navigation source may identify the pane that owns this click. */
 export function sideNavigationSource(record: SessionFork): OpenedSession { return record.navigationSource ?? currentForkSource(record); }
 
 /** Product Host IDs and native installation IDs are independent identity evidence. */
@@ -377,7 +389,10 @@ function deliveryMatchesRelation(record: SessionFork, relation: SessionFork): bo
     && (!record.relationId || record.relationId === relation.relationId);
 }
 
-export function sideNavigationTarget(record: SessionFork): OpenedSession | undefined { return record.currentTarget ?? record.target; }
+export function sideNavigationTarget(record: SessionFork): OpenedSession | undefined {
+  const target = record.currentTarget ?? record.target;
+  return target && forkSessionReference(target);
+}
 function validEditedTarget(value: OpenedSession, original: OpenedSession): boolean {
   return !!value && typeof value === 'object' && ['agentId', 'providerId', 'nativeSessionId', 'title'].every(key => typeof value[key as keyof OpenedSession] === 'string')
     && (value.hostId ?? 'local') === (original.hostId ?? 'local') && value.providerId === original.providerId;

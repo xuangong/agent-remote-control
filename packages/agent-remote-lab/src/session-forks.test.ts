@@ -1,6 +1,6 @@
 import { afterEach, expect, it, vi } from 'vitest';
 import { PROTOCOL_VERSION, type HistoryPage, type ProjectedTimelineEntry } from '@orchardworks/agent-remote-protocol';
-import { captureForkContext, ForkStore, contextPrefix, referenceForkContext } from './session-forks.js';
+import { captureForkContext, ForkStore, contextPrefix, referenceForkContext, sideNavigationSource, sideNavigationTarget } from './session-forks.js';
 import type { SessionRelation } from '@orchardworks/agent-remote-hosted/session-relations';
 import { RemoteOperationError } from '@orchardworks/agent-remote-web';
 
@@ -10,6 +10,40 @@ function page(entries: ProjectedTimelineEntry[], hasOlder = false, epoch = 'one'
   return { protocolVersion: PROTOCOL_VERSION, type: 'timeline_page', payload: { requestId: 'r', agentId: 'parent', direction: 'tail', epoch, entries, hasOlder, hasNewer: false, reset: false, staleCursor: false, gap: false, error: null, window: { minSeq: 1, maxSeq: 9, nextSeq: 10 }, startCursor: entries[0] ? { epoch, seq: entries[0].seqStart } : null, endCursor: entries.at(-1) ? { epoch, seq: entries.at(-1)!.seqEnd } : null } };
 }
 afterEach(() => localStorage.clear());
+it.each(['reference', 'snapshot'])('stores %s fork endpoints independently of the panes that created them', async mode => {
+  const sourceView = { ...source, viewId: 'source-pane' };
+  const target = { ...source, agentId: 'side-agent', nativeSessionId: 'side', title: 'Side',
+    parentAgentId: source.agentId, parentNativeSessionId: source.nativeSessionId, createdAt: '2026-10-19T00:00:00.000Z' };
+  const edited = { ...target, agentId: 'edited-agent', nativeSessionId: 'edited-side' };
+  const targetView = { ...target, viewId: 'side-pane' }, editedView = { ...edited, viewId: 'edited-pane' };
+  const store = new ForkStore('session-endpoints');
+  const context = mode === 'reference' ? referenceForkContext(sourceView) : await captureForkContext({ fetchTimeline: async () => page([]) }, sourceView);
+  const record = store.prepare(context, { sourceNativeSessionId: source.nativeSessionId });
+  store.bind(record.id, targetView);
+  expect(new ForkStore('session-endpoints').getLocal(record.id)).toMatchObject({ source, target });
+  expect(new ForkStore('session-endpoints').getLocal(record.id)?.source).not.toHaveProperty('viewId');
+  expect(new ForkStore('session-endpoints').getLocal(record.id)?.target).not.toHaveProperty('viewId');
+  store.followEditedSide(record.id, target, editedView);
+  expect(new ForkStore('session-endpoints').get(record.id).currentTarget).toEqual(edited);
+});
+
+it('opens legacy fork targets by session identity and keeps the live source pane explicit', () => {
+  const store = new ForkStore('legacy-endpoints');
+  const record = store.prepare(referenceForkContext(source), { sourceNativeSessionId: source.nativeSessionId });
+  const target = { ...source, agentId: 'side-agent', nativeSessionId: 'side', title: 'Side' };
+  const legacy = { ...record, source: { ...source, viewId: 'retired-source-pane' }, target: { ...target, viewId: 'retired-side-pane' } };
+  localStorage.setItem(`agent-remote-forks:legacy-endpoints:record:${record.id}`, JSON.stringify(legacy));
+  const restored = new ForkStore('legacy-endpoints').get(record.id);
+  expect(sideNavigationSource(restored)).toEqual(source);
+  expect(sideNavigationTarget(restored)).toEqual(target);
+  const liveSource = { ...source, viewId: 'current-source-pane' };
+  expect(sideNavigationSource({ ...restored, navigationSource: liveSource })).toEqual(liveSource);
+  const edited = { ...target, nativeSessionId: 'edited-side' };
+  const editedView = { ...edited, viewId: 'retired-edited-pane' };
+  expect(sideNavigationTarget({ ...restored, currentTarget: editedView })).toEqual(edited);
+  expect(store.getLocal(record.id)).toEqual(legacy);
+});
+
 it('allows replacement after the first image input is rejected before native dispatch', async () => {
   const store = new ForkStore('rejected-image');
   const record = store.prepare(await captureForkContext({ fetchTimeline: async () => page([]) }, source));

@@ -82,6 +82,22 @@ it('attributes the original snapshot while opening the explicit current source',
   expect(opened).toEqual(['B', 'parent-session']);
 });
 
+it('opens original and current source sessions without their retired pane identities', async () => {
+  const original = { ...fork.source, hostId: 'host', parentAgentId: 'ancestor-agent', parentNativeSessionId: 'ancestor', createdAt: '2026-10-01T00:00:00Z' };
+  const current = { ...original, nativeSessionId: 'current-session', agentId: 'current-agent', title: 'Current' };
+  const legacyOriginal = { ...original, viewId: 'retired-original-pane' }, legacyCurrent = { ...current, viewId: 'retired-current-pane' };
+  const legacy: SessionFork = { ...fork, source: legacyOriginal, currentSource: legacyCurrent };
+  const opened: SessionFork['source'][] = [];
+  const container = await render(<ForkReference fork={legacy} onOpen={session => opened.push(session)} />);
+  await act(async () => container.querySelector('summary')!.click());
+  const button = (label: string) => [...container.querySelectorAll<HTMLButtonElement>('button')].find(value => value.textContent === label)!;
+  await act(async () => button('Open source session').click());
+  await act(async () => button('Open current source session').click());
+  expect(opened).toEqual([original, current]);
+  expect(legacy.source).toBe(legacyOriginal);
+  expect(legacy.currentSource).toBe(legacyCurrent);
+});
+
 
 it('shows known original reference identity without inventing an attachment for a shared-only source', async () => {
   const current = { ...fork.source, hostId: 'host', providerId: 'claude', nativeSessionId: 'B', agentId: 'B-agent', title: 'Current B' };

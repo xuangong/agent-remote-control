@@ -33,6 +33,12 @@ it.each([false, true])('follows an edited Side without retargeting its original 
     await expect(local.send(localRecord.id, 'unknown X input', async () => { throw new Error('lost'); }, async () => false)).rejects.toThrow('lost');
   }
   const rawBefore = localRecord ? local.getLocal(localRecord.id) : undefined;
+  if (localRecord) {
+    const key = `agent-remote-forks:${baseUrl}:record:${localRecord.id}`;
+    const legacy = JSON.parse(localStorage.getItem(key)!);
+    legacy.target.viewId = 'retired-side-pane';
+    localStorage.setItem(key, JSON.stringify(legacy));
+  }
   let projection = {
     id: localRecord?.id ?? 'relation', kind: 'side', createdAt: '2026-10-10T00:00:00.000Z', source: current, target: side, nativeSourceRef: origin,
     sourceBinding: { kind: 'fixed', source: origin }, hostLocator: { hostId: 'host', controllerId: 'controller' },
@@ -112,7 +118,10 @@ it.each([false, true])('follows an edited Side without retargeting its original 
   try {
     await waitFor(() => expect(container.querySelector('.lab-fork-entries')).not.toBeNull());
     await act(async () => container.querySelector<HTMLButtonElement>('.lab-fork-entry > button')!.click());
-    await waitFor(() => expect(container.querySelectorAll('.lab-side-conversation:not([hidden])')).toHaveLength(1));
+    await waitFor(() => {
+      expect(container.textContent).not.toContain('The selected session view no longer matches this session.');
+      expect(container.querySelectorAll('.lab-side-conversation:not([hidden])')).toHaveLength(1);
+    });
     await act(async () => receiveMigration({ id: 'edit-X-Y', from: { ...side, hostId: 'host' }, to: { ...edited, hostId: 'host' }, createdAt: 1 }));
     const follow = [...container.querySelectorAll<HTMLButtonElement>('.lab-prompt-edit-notice button')].find(button => button.textContent === 'Open edited branch');
     expect(follow).toBeDefined();

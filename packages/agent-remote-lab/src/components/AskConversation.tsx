@@ -1,5 +1,5 @@
 import { useBoundDraft, type DraftBinding } from '../draft-store.js';
-import { useCallback, useEffect, useLayoutEffect, useRef, type RefObject, type ReactNode } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type RefObject, type ReactNode } from 'react';
 import type { AgentReplica, RemoteAgentTransport } from '@orchardworks/agent-remote-web';
 import type { SessionViewNavigationFactory } from '../session-view-navigation.js';
 import { isAskAttached, askParticipantKey, type AskEntry, type AskInput, type AskInputSender } from '../hooks/useAskConversations.js';
@@ -16,14 +16,16 @@ import type { ImageDraftBinding, ImageDraftRecipient } from '@orchardworks/agent
 import type { DisplayPreferenceBinding } from '../hooks/useSessionDisplayPreferences.js';
 interface AskStorageBindings { baseUrl?: string; viewId?: string; compact?: boolean; imageDraftBinding?: ImageDraftBinding; imageRecipient?: ImageDraftRecipient; displayBinding?: DisplayPreferenceBinding }
 
-export function AskConversation(props: Omit<Parameters<typeof AskConversationContent>[0], 'docked' | 'dockControls'>) {
-  return <SessionViewPlacement id={`ask:${props.storageScope}`} title="Ask" visible>
-    {({ docked, controls }) => <AskConversationContent {...props} docked={docked} dockControls={controls} />}
+export function AskConversation(props: Omit<Parameters<typeof AskConversationContent>[0], 'docked' | 'dockControls' | 'onAdditionalWidthChange'>) {
+  const [additionalWidth, setAdditionalWidth] = useState(0);
+  return <SessionViewPlacement id={`ask:${props.storageScope}`} title="Ask" visible additionalWidth={isAskAttached(props.entry) ? additionalWidth : 0}>
+    {({ docked, controls }) => <AskConversationContent {...props} docked={docked} dockControls={controls} onAdditionalWidthChange={setAdditionalWidth} />}
   </SessionViewPlacement>;
 }
 
-function AskConversationContent({ docked, dockControls, entry, replica, transport, draftBinding, onClose, onToggleEnabled, onClean, onRetry, onSendInput, onDiscardInput, triggerRef, storageScope, navigation, ...storageBindings }: AskStorageBindings & {
+function AskConversationContent({ docked, dockControls, onAdditionalWidthChange, entry, replica, transport, draftBinding, onClose, onToggleEnabled, onClean, onRetry, onSendInput, onDiscardInput, triggerRef, storageScope, navigation, ...storageBindings }: AskStorageBindings & {
   docked: boolean; dockControls: ReactNode;
+  onAdditionalWidthChange(width: number): void;
   navigation?: SessionViewNavigationFactory;
   storageScope: string; triggerRef: RefObject<HTMLButtonElement>; entry: AskEntry; replica?: AgentReplica; transport: RemoteAgentTransport;
   draftBinding: DraftBinding; onClose(): void; onToggleEnabled(): void; onClean(): void; onRetry(): void; onSendInput(id: string, send: AskInputSender): void; onDiscardInput(id: string): void;
@@ -71,7 +73,7 @@ function AskConversationContent({ docked, dockControls, entry, replica, transpor
     {entry.error ? <div className="lab-ask-error" role="alert">{entry.error}<button type="button" disabled={busy} onClick={onRetry}>Retry</button></div> : null}</>;
   return <div className="lab-ask-viewport"><section className="lab-ask-window" role="dialog" aria-label="Ask" aria-modal="false" tabIndex={-1} ref={panel}>
     {isAskAttached(entry) ? <AskChat key={askParticipantKey(entry.record!)} record={entry.record!} executionTarget={entry.executionTarget} inputs={entry.error ? undefined : entry.inputs} onSendInput={onSendInput} replica={replica} transport={transport}
-      storageScope={storageScope} navigation={navigation} onToggleEnabled={onToggleEnabled} busy={busy} draftBinding={draftBinding} tools={tools} notice={notice} {...storageBindings} /> : <>
+      storageScope={storageScope} navigation={navigation} onToggleEnabled={onToggleEnabled} busy={busy} draftBinding={draftBinding} tools={tools} notice={notice} onAdditionalWidthChange={onAdditionalWidthChange} {...storageBindings} /> : <>
       <header className="lab-ask-heading"><strong>Ask</strong>{tools}</header>
       {notice}
       {busy || !entry.error ? <div className="lab-ask-opening" role="status">{busy ? 'Opening Ask…' : 'Ask about this conversation.'}</div> : null}
@@ -81,8 +83,9 @@ function AskConversationContent({ docked, dockControls, entry, replica, transpor
   </section></div>;
 }
 
-function AskChat({ storageScope, record, executionTarget, inputs, onSendInput, replica, transport, draftBinding, tools, notice, busy, onToggleEnabled, navigation, ...storageBindings }: AskStorageBindings & {
+function AskChat({ storageScope, record, executionTarget, inputs, onSendInput, replica, transport, draftBinding, tools, notice, busy, onToggleEnabled, navigation, onAdditionalWidthChange, ...storageBindings }: AskStorageBindings & {
   storageScope: string; navigation?: SessionViewNavigationFactory;
+  onAdditionalWidthChange(width: number): void;
   onToggleEnabled(): void; record: SessionFork; executionTarget?: import('../directory-client.js').OpenedSession; inputs?: AskInput[]; onSendInput(id: string, send: AskInputSender): void; replica?: AgentReplica; transport: RemoteAgentTransport;
   draftBinding: DraftBinding; tools: ReactNode; notice: ReactNode; busy?: boolean;
 }) {
@@ -95,7 +98,7 @@ function AskChat({ storageScope, record, executionTarget, inputs, onSendInput, r
   return <SessionFamily storageScope={storageScope} baseUrl={storageBindings.baseUrl ?? storageScope}
     replica={replica} onSessionReady={onSessionReady} attachedSession={session} target={{ hostId: session.hostId ?? 'local', providerId: session.providerId, nativeSessionId: session.nativeSessionId, title: 'Ask' }} hostLabel={session.hostId ?? 'local'}
     compact={storageBindings.compact ?? false} active offline={false} nativePrefixOnly transport={transport}
-    draftStore={draftBinding.store} draftBinding={draftBinding} navigation={navigation} controls={tools} {...storageBindings}
+    draftStore={draftBinding.store} draftBinding={draftBinding} navigation={navigation} controls={tools} onAdditionalWidthChange={onAdditionalWidthChange} {...storageBindings}
     sessionPresentation={context => context.isRoot ? { headingStart: <SessionLink session={context.session} />, sessionManager: tools, composerNotice: notice } : {}}
     consoleCommands={[askCommand]} onExecuteConsoleCommand={async (_id, args) => {
       if (args.trim()) {

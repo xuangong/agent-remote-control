@@ -187,6 +187,8 @@ it('uses the shared Window for dock placement, resize, order and main minimizati
   const input = view.querySelector('[data-dock-id="one"] textarea');
   await act(async () => update({ type: 'view.resize', viewId: 'one', width: 610 }));
   expect(view.querySelector<HTMLElement>('[data-dock-id="one"]')!.style.width).toBe('610px');
+  await act(async () => view.querySelector('[data-dock-id="one"] [aria-label="one width"]')!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Home', bubbles: true })));
+  expect(view.querySelector<HTMLElement>('[data-dock-id="one"]')!.style.width).toBe('240px');
   await act(async () => view.querySelector('[data-dock-id="two"] [aria-label="Move two"]')!.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowLeft', bubbles: true })));
   expect(view.querySelector<HTMLElement>('[data-dock-id="two"]')!.style.order).toBe('1');
   await act(async () => view.querySelector<HTMLButtonElement>('[aria-label="Minimize main session area"]')!.click());

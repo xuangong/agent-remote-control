@@ -1,14 +1,17 @@
 import { act, createRef, useState, type ComponentProps } from 'react';
 import { AgentReplica } from '@orchardworks/agent-remote-web';
-import { createWindowView } from '@orchardworks/agent-remote-protocol';
+import { applyWindowOperation, createWindowView } from '@orchardworks/agent-remote-protocol';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { render } from '../test/setup.js';
 import { DraftStore } from '../draft-store.js';
 import { ForkStore, referenceForkContext } from '../session-forks.js';
 import { sessionKey } from '../session-tree.js';
 import { WindowLayoutContext, type WindowLayoutAuthority } from '../window-workspace-context.js';
+import { windowSessionBinding } from '../window-workspace.js';
 import { askParticipantKey, type AskEntry } from '../hooks/useAskConversations.js';
 import { SessionAsk } from './SessionAsk.js';
+import { SessionDockProvider, SessionDockRail } from './SessionDock.js';
+import { WorkspaceReady } from '../workspace-access.js';
 
 type AskProps = ComponentProps<typeof SessionAsk>;
 const source = { hostId: 'local', providerId: 'codex', nativeSessionId: 'main', agentId: 'main-agent', title: 'Main' };
@@ -37,15 +40,53 @@ function fixture(entries: AskEntry[]) {
 }
 
 function sharedFixture(ask: AskProps['ask'], pending = false) {
-  const primary = createWindowView('source-view', source, 'primary');
-  const other = createWindowView('sibling-view', sibling, 'primary');
-  const view = { ...createWindowView('shared-ask', { ...sibling, nativeSessionId: 'ask-target' }, 'float'), feature: { kind: 'ask', id: 'feature-ask' } };
-  const child = { ...createWindowView('ask-child', sibling, 'attached'), attachedTo: view.id };
+  const primary = createWindowView('source-view', windowSessionBinding(source), 'primary');
+  const other = createWindowView('sibling-view', windowSessionBinding(sibling), 'primary');
+  const view = { ...createWindowView('shared-ask', { ...windowSessionBinding(sibling), nativeSessionId: 'ask-target' }, 'float'), feature: { kind: 'ask', id: 'feature-ask' } };
+  const child = { ...createWindowView('ask-child', windowSessionBinding(sibling), 'attached'), attachedTo: view.id };
   const layout: WindowLayoutAuthority = { window: { schemaVersion: 2, id: 'window', title: 'Window', revision: 0,
     selectedPrimaryViewId: primary.id, selectedViewId: primary.id, views: pending ? [primary, other] : [primary, other, view, child] }, operate: vi.fn() };
   ask.sharedView = () => layout.window.views.find(value => value.id === view.id);
   return { layout, view, child };
 }
+
+it('includes attached session widths in a docked Ask as its family changes', async () => {
+  const entry: AskEntry = { source, attached: true };
+  const { ask, props } = fixture([entry]);
+  const { layout, view, child } = sharedFixture(ask);
+  view.placement = 'dock'; view.width = 420; child.width = 360;
+  layout.resolveViewId = id => id === `ask:${sessionKey(source)}` ? view.id : id;
+  const record = ask.store.prepare(referenceForkContext(source), { sourceNativeSessionId: source.nativeSessionId });
+  ask.store.bind(record.id, { ...sibling, nativeSessionId: 'ask-target', title: 'Ask' });
+  entry.record = ask.store.get(record.id); entry.attachedParticipant = askParticipantKey(entry.record);
+  const replica = new AgentReplica();
+  const transport = { ...props.transport, connect: () => ({ close() {}, send() {} }),
+    onDiagnostic: () => () => {}, onProtocolMessage: () => () => {} };
+  let edit!: (operation: Parameters<typeof applyWindowOperation>[1]) => void;
+  function Harness() {
+    const [, update] = useState(0);
+    edit = operation => { layout.window = applyWindowOperation(layout.window, operation); update(value => value + 1); };
+    return <WorkspaceReady.Provider value={false}><WindowLayoutContext.Provider value={{ ...layout, operate: edit }}>
+      <SessionDockProvider enabled><SessionDockRail>Main session</SessionDockRail>
+        <SessionAsk {...props} source={source} replicaFor={() => replica} transport={transport} />
+      </SessionDockProvider>
+    </WindowLayoutContext.Provider></WorkspaceReady.Provider>;
+  }
+  const container = await render(<Harness />);
+  const dock = () => container.querySelector<HTMLElement>('[aria-label="Docked Ask"]')!;
+  expect(dock().style.width).toBe('780px');
+  expect(dock().querySelectorAll('.lab-session-family-pane')).toHaveLength(2);
+  await act(async () => edit({ type: 'view.resize', viewId: child.id, width: 500 }));
+  expect(dock().style.width).toBe('920px');
+  await act(async () => { entry.attached = false; edit({ type: 'view.select', viewId: view.id }); });
+  expect(dock().style.width).toBe('420px');
+  expect(dock().querySelectorAll('.lab-session-family-pane')).toHaveLength(0);
+  await act(async () => { entry.attached = true; edit({ type: 'view.select', viewId: view.id }); });
+  expect(dock().style.width).toBe('920px');
+  await act(async () => edit({ type: 'view.close', viewId: child.id }));
+  expect(dock().style.width).toBe('420px');
+  expect(dock().querySelectorAll('.lab-session-family-pane')).toHaveLength(1);
+});
 
 it('does not render a per-owner launcher when Ask is closed', async () => {
   const { ask, props } = fixture([{ source }]);

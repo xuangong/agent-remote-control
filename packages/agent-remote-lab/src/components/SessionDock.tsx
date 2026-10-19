@@ -20,7 +20,7 @@ interface DockContext {
   minimizeMain(minimized: boolean): void;
 }
 const Context = createContext<DockContext | undefined>(undefined);
-const clampWidth = (width: number) => Math.max(minimumWidth, Math.min(maximumWidth, width));
+const clampWidth = (width: number, minimum = minimumWidth) => Math.max(minimum, Math.min(maximumWidth, width));
 function readLayout(key?: string): DockLayout {
   try {
     const saved = key && JSON.parse(conversationSessionStorage.getItem(key) ?? 'null');
@@ -90,8 +90,8 @@ export function SessionDockProvider({ enabled, storageScope, children }: { enabl
   const value: DockContext = shared ? { enabled, items, layout, register, unregister,
     add: id => shared.operate({ type: 'view.place', viewId: resolve(id), placement: 'dock' }),
     remove: id => shared.operate({ type: 'view.place', viewId: resolve(id), placement: 'float' }),
-    resize: (id, width) => shared.operate({ type: 'view.resize', viewId: resolve(id), width: clampWidth(width) }),
-    resizeBase: width => shared.operate({ type: 'view.resize', viewId: shared.window.selectedPrimaryViewId, width: clampWidth(width) }),
+    resize: (id, width) => shared.operate({ type: 'view.resize', viewId: resolve(id), width: clampWidth(width, 240) }),
+    resizeBase: width => shared.operate({ type: 'view.resize', viewId: shared.window.selectedPrimaryViewId, width: clampWidth(width, 240) }),
     minimizeMain: minimized => shared.operate({ type: 'view.collapse', viewId: shared.window.selectedPrimaryViewId, collapsed: minimized }),
     move: (id, offset) => {
       const index = layout.panes.findIndex(item => item.id === id), next = Math.max(0, Math.min(layout.panes.length - 1, index + offset));
@@ -198,7 +198,7 @@ export function SessionDockRail({ children, minimizedHeader, mainTitle = 'Main s
     return () => observer.disconnect();
   }, []);
   const baseWidth = Math.max(minimumBaseWidth, preferredBaseWidth ?? width - defaultWidth);
-  return <div ref={rail} className="lab-session-dock-rail" data-docked={active.length > 0 || primaryGroups && primaryGroups.length > 1 && !compact || undefined} data-primary-groups={primaryGroups ? true : undefined} data-compact={compact || undefined}>
+  return <div ref={rail} className="lab-session-dock-rail" data-docked={active.length > 0 || primaryGroups && !compact || undefined} data-primary-groups={primaryGroups ? true : undefined} data-compact={compact || undefined}>
     {primaryGroups ? primaryGroups.map((group, index) => <PrimaryGroupPane key={group.id} group={group} compact={compact} minimizedHeader={index === 0 ? minimizedHeader : undefined} onSelect={onSelectPrimaryGroup} onResize={onResizePrimaryGroup} onCollapse={onCollapsePrimaryGroup} />) : <div className="lab-session-dock-base" data-minimized={minimized || undefined} style={active.length ? { flexBasis: minimized ? 44 : baseWidth } : undefined}>
       <div ref={content} id={contentId} className="lab-session-dock-main-content" hidden={minimized}>{children}</div>
       {minimized ? minimizedHeader : null}
@@ -226,7 +226,7 @@ function PrimaryGroupPane({ group, compact, minimizedHeader, onSelect, onResize,
     if (event.target instanceof Element && event.target.closest('[data-pane-selection-ignore],.lab-session-family-pane')) return;
     onSelect?.(group.id);
   };
-  return <section className="lab-primary-group" data-primary-group-id={group.id} data-selected={group.selected || undefined}
+  return <section className="lab-primary-group" data-session-family-shell data-primary-group-id={group.id} data-selected={group.selected || undefined}
     data-minimized={minimized || undefined} hidden={compact && !group.selected} aria-label={`Primary group: ${group.title}`}
     style={compact ? undefined : { width: minimized ? 44 : group.width + (group.additionalWidth ?? 0) }}
     onPointerDownCapture={select} onFocusCapture={select}>
@@ -243,34 +243,75 @@ function PrimaryGroupPane({ group, compact, minimizedHeader, onSelect, onResize,
 function DockPane({ item, order }: { item: DockItem; order: number }) {
   const target = useRef<HTMLDivElement>(null);
   const dock = useContext(Context)!;
+  const shared = useWindowLayout();
   useLayoutEffect(() => {
     const element = target.current!;
     moveSessionHost(item.host, element);
     const frame = requestAnimationFrame(() => element.scrollIntoView?.({ block: 'nearest', inline: 'nearest' }));
     return () => cancelAnimationFrame(frame);
   }, [item.host]);
-  return <section className="lab-session-dock-pane" data-dock-id={item.id} aria-label={`Docked ${item.title}`} style={{ width: item.width + (item.additionalWidth ?? 0), order }}>
+  return <section className="lab-session-dock-pane" data-session-family-shell data-dock-id={item.id} aria-label={`Docked ${item.title}`} style={{ width: item.width + (item.additionalWidth ?? 0), minWidth: shared ? 240 : undefined, order }}>
     <div ref={target} className="lab-session-dock-content" />
-    <DockResize title={item.title} width={item.width} onResize={width => dock.resize(item.id, width)} />
+    <DockResize title={item.title} width={item.width} additionalWidth={item.additionalWidth} onResize={width => dock.resize(item.id, width)} />
   </section>;
 }
 
-export function DockResize({ title, width, additionalWidth = 0, minimum = minimumWidth, onResize }: { title: string; width: number; additionalWidth?: number; minimum?: number; onResize(width: number): void }) {
+export function DockResize({ title, width, additionalWidth = 0, minimum: preferredMinimum, onResize }: { title: string; width: number; additionalWidth?: number; minimum?: number; onResize(width: number): void }) {
   const shared = useWindowLayout();
-  const drag = useRef<{ x: number; width: number; preferred?: number; parent?: HTMLElement; property?: 'width' | 'flexBasis'; original?: string }>();
+  const minimum = preferredMinimum ?? (shared ? 240 : minimumWidth);
+  const drag = useRef<{ x: number; width: number; preferred?: number;
+    styles: Array<{ element: HTMLElement; property: string; original: string; width: number; preview?: string }> }>();
+  const restorePreview = () => {
+    const gesture = drag.current; drag.current = undefined;
+    for (const style of gesture?.styles ?? []) {
+      if (style.preview === undefined || style.element.style.getPropertyValue(style.property) !== style.preview) continue;
+      if (style.original) style.element.style.setProperty(style.property, style.original);
+      else style.element.style.removeProperty(style.property);
+    }
+    return gesture;
+  };
+  useEffect(() => () => { restorePreview(); }, []);
   const resize = (value: number) => onResize(Math.max(minimum, Math.min(maximumWidth, value)));
   const stop = (event: ReactPointerEvent<HTMLElement>) => {
-    const gesture = drag.current; drag.current = undefined;
-    if (gesture?.parent && gesture.property) gesture.parent.style[gesture.property] = gesture.original ?? '';
+    const gesture = restorePreview();
     if (gesture?.preferred !== undefined) resize(gesture.preferred);
     if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
   };
   return <div className="lab-session-dock-resize" role="separator" tabIndex={0} aria-label={`${title} width`} aria-orientation="vertical"
+    style={additionalWidth > 0 ? { left: `calc(var(--lab-session-family-root-width, ${width}px) - 6px)`, right: 'auto' } : undefined}
     aria-valuemin={minimum} aria-valuemax={maximumWidth} aria-valuenow={Math.round(width)} aria-valuetext={`${Math.round(width)} pixels`}
     title="Drag to resize. Arrow keys adjust width. Double-click to reset."
     onDoubleClick={() => resize(defaultWidth)}
-    onPointerDown={event => { if (event.button !== 0) return; event.preventDefault(); event.stopPropagation(); event.currentTarget.focus({ preventScroll: true }); const parent = event.currentTarget.parentElement!; const property = parent.classList.contains('lab-session-dock-base') ? 'flexBasis' : 'width'; drag.current = { x: event.clientX, width, parent, property, original: parent.style[property] }; event.currentTarget.setPointerCapture(event.pointerId); }}
-    onPointerMove={event => { const gesture = drag.current; if (!gesture) return; const next = Math.max(minimum, Math.min(maximumWidth, gesture.width + event.clientX - gesture.x)); if (!shared) resize(next); else { gesture.preferred = next; if (gesture.parent && gesture.property) gesture.parent.style[gesture.property] = `${next + additionalWidth}px`; } }}
+    onPointerDown={event => {
+      if (event.button !== 0 || drag.current) return;
+      event.preventDefault(); event.stopPropagation(); event.currentTarget.focus({ preventScroll: true });
+      const parent = event.currentTarget.parentElement!;
+      const property = parent.classList.contains('lab-session-dock-base') ? 'flex-basis' : 'width';
+      const styles = [{ element: parent, property, original: parent.style.getPropertyValue(property), width: width + additionalWidth }];
+      const shell = parent.closest<HTMLElement>('[data-session-family-shell]');
+      if (shell === parent) {
+        const property = '--lab-session-family-root-width';
+        styles.push({ element: shell, property, original: shell.style.getPropertyValue(property), width });
+      } else if (shell) {
+        styles.push({ element: shell, property: 'width', original: shell.style.width,
+          width: Number.parseFloat(shell.style.width) || shell.getBoundingClientRect().width });
+      }
+      drag.current = { x: event.clientX, width, styles };
+      event.currentTarget.setPointerCapture(event.pointerId);
+    }}
+    onPointerMove={event => {
+      const gesture = drag.current; if (!gesture) return;
+      const next = Math.max(minimum, Math.min(maximumWidth, gesture.width + event.clientX - gesture.x));
+      if (!shared) resize(next);
+      else {
+        gesture.preferred = next;
+        // Preview the pane and its family together without saving every pointer movement.
+        for (const style of gesture.styles) {
+          style.preview = `${style.width + next - gesture.width}px`;
+          style.element.style.setProperty(style.property, style.preview);
+        }
+      }
+    }}
     onPointerUp={stop} onPointerCancel={stop} onLostPointerCapture={stop}
     onKeyDown={event => {
       const step = event.shiftKey ? 40 : 10;

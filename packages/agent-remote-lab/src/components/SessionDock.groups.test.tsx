@@ -57,7 +57,9 @@ it('retains attached widths during a primary group resize preview and commits on
   await act(async () => separator.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true, button: 0, clientX: 100 })));
   await act(async () => separator.dispatchEvent(new MouseEvent('pointermove', { bubbles: true, clientX: 120 })));
   expect(pane.style.width).toBe('660px');
+  expect(resized).not.toHaveBeenCalled();
   await act(async () => separator.dispatchEvent(new MouseEvent('pointerup', { bubbles: true, clientX: 120 })));
+  expect(resized).toHaveBeenCalledTimes(1);
   expect(resized).toHaveBeenCalledWith('a', 420);
   expect(pane.style.width).toBe('640px');
 });

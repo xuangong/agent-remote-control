@@ -5,7 +5,7 @@
 .lab-session-dock-rail[data-docked] > .lab-session-dock-base { flex-grow: 0; flex-shrink: 0; }
 .lab-session-dock-pane { position: relative; flex: none; min-width: 320px; height: 100%; border-left: 1px solid var(--obs-border); background: var(--obs-surface); }
 .lab-session-dock-pane[data-dragging] { box-shadow: inset 0 0 0 2px var(--obs-action); }
-.lab-session-dock-content { position: absolute; inset: 0 4px 0 0; min-width: 0; min-height: 0; }
+.lab-session-dock-content { position: absolute; inset: 0; min-width: 0; min-height: 0; }
 .lab-session-dock-content .lab-ask-viewport { position: absolute; inset: 0; width: 100%; height: 100%; z-index: auto !important; }
 .lab-session-dock-content .lab-ask-window { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; border-radius: 0; box-shadow: none; animation: none; }
 .lab-session-dock-content .lab-ask-resize-footer { display: none; }

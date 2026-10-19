@@ -10,7 +10,7 @@ it.each(['empty', 'bound'] as const)('rejects a delayed %s destination after an 
   const source = { hostId: 'host', providerId: 'recorded', nativeSessionId: 'source', title: 'Source' };
   const replacement = { ...source, nativeSessionId: 'replacement', title: 'Replacement' };
   const created = { ...source, nativeSessionId: 'created', title: 'Created' };
-  const initial: WorkspaceWindow = { schemaVersion: 2, id: 'window', title: 'Window', revision: 0,
+  const initial: WorkspaceWindow = { schemaVersion: 3, id: 'window', title: 'Window', revision: 0,
     selectedPrimaryViewId: 'main', selectedViewId: 'main', views: [createWindowView('main', mode === 'bound' ? source : undefined, 'primary')] };
   const state = createRelayState(auth, { initial: emptyRelayState(auth), async commit() {} }, () => {}, () => {});
   const service = createWindowWorkspaces(state, subject => subject === 'alice');

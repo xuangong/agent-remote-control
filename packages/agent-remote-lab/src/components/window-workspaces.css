@@ -28,6 +28,7 @@
 .lab-window-note { margin: 6px 0 10px; color: var(--obs-text-secondary); font-size: 12px; line-height: 1.5; overflow-wrap: anywhere; }
 .lab-window-delete { display: grid; place-items: center; flex: 0 0 40px; min-height: 44px; padding: 8px; border-color: transparent; color: var(--obs-danger); }
 .lab-window-delete:disabled { color: var(--obs-text-secondary); opacity: .35; }
+.lab-window-view-close { flex: 0 0 36px; min-height: 44px; padding: 6px; border-color: transparent; color: var(--obs-text-secondary); font-size: 18px; }
 .lab-window-unavailable { display: flex; justify-content: center; align-items: flex-start; padding: max(24px, env(safe-area-inset-top)) 16px; }
 .lab-window-recovery { width: min(440px, 100%); min-width: 0; }
 .lab-window-recovery > [role="status"] { margin: 12px 0 24px; color: var(--obs-text-secondary); }

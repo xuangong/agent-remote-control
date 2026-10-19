@@ -8,7 +8,7 @@ import { WindowWorkspaces } from './WindowWorkspaces.js';
 afterEach(() => vi.restoreAllMocks());
 
 async function fixture() {
-  let window: WorkspaceWindow = { schemaVersion: 2, id: 'window', title: 'Project', revision: 0, selectedPrimaryViewId: 'main', selectedViewId: 'main', views: [createWindowView('main', undefined, 'primary')] };
+  let window: WorkspaceWindow = { schemaVersion: 3, id: 'window', title: 'Project', revision: 0, selectedPrimaryViewId: 'main', selectedViewId: 'main', views: [createWindowView('main', undefined, 'primary')] };
   let rejectSave!: (error: Error) => void;
   const saved = new Promise<void>((_resolve, reject) => { rejectSave = reject; });
   let redraw!: () => void, rejectLocal = false;
@@ -95,4 +95,21 @@ it('offers an explicit saved-layout fallback without blocking pane edits during 
   expect(test.button('New session view').disabled).toBe(false);
   await act(async () => test.button('New session view').click());
   expect(test.container.querySelectorAll('[data-window-view-id]')).toHaveLength(2);
+});
+
+it('closes every pane locally, including the last one, and can create a view in the same empty Window', async () => {
+  const test = await fixture();
+  await act(async () => test.button('New session view').click());
+  const selected = test.read().selectedViewId;
+  await act(async () => test.container.querySelector<HTMLButtonElement>('[data-window-view-close="main"]')!.click());
+  expect(test.read().selectedViewId).toBe(selected);
+  expect(test.read().views).toHaveLength(1);
+  await act(async () => test.container.querySelector<HTMLButtonElement>('[data-window-view-close]')!.click());
+  expect(test.read()).toMatchObject({ id: 'window', selectedViewId: null, selectedPrimaryViewId: null, views: [] });
+  expect(test.container.textContent).toContain('No session views');
+  expect(test.button('New session view').disabled).toBe(false);
+  await act(async () => test.button('New session view').click());
+  expect(test.read().id).toBe('window');
+  expect(test.read().views).toHaveLength(1);
+  expect(test.read().selectedViewId).toBe(test.read().views[0]!.id);
 });

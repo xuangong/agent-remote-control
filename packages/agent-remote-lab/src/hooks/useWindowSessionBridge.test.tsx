@@ -2,14 +2,14 @@ import { act, useReducer } from 'react';
 import { expect, it, vi } from 'vitest';
 import { applyWindowOperation, createWindowView, type WorkspaceWindow } from '@orchardworks/agent-remote-protocol';
 import { windowSessionBinding } from '../window-workspace.js';
-import { compositionRoleKey, createCompositionDocument } from '../session-composition.js';
+import { compositionRoleKey, createAskOwner, createCompositionDocument, createCompositionSlot } from '../session-composition.js';
 import { bindWindowCompositionSlot, ensureWindowCompositionSlot, projectWindowComposition } from '../window-composition.js';
 import { render } from '../test/setup.js';
 import { useWindowSessionBridge } from './useWindowSessionBridge.js';
 
 type Options = Parameters<typeof useWindowSessionBridge>[0];
 const session = { agentId: 'agent', hostId: 'host', providerId: 'recorded', nativeSessionId: 'native', title: 'Session' };
-const emptyWindow = (id = 'window'): WorkspaceWindow => ({ schemaVersion: 2, id, revision: 0, title: 'Window', selectedPrimaryViewId: 'main', selectedViewId: 'main', views: [createWindowView('main', undefined, 'primary')] });
+const emptyWindow = (id = 'window'): WorkspaceWindow => ({ schemaVersion: 3, id, revision: 0, title: 'Window', selectedPrimaryViewId: 'main', selectedViewId: 'main', views: [createWindowView('main', undefined, 'primary')] });
 async function harness(configure?: (options: Options) => void) {
   const document = createCompositionDocument('bridge');
   const native = vi.fn(async (..._args: Parameters<Options['succession']['open']>) => true), attached = vi.fn(async () => true), clear = vi.fn(), project = vi.fn((window?: WorkspaceWindow) => { if (window) projectWindowComposition(document, window); });
@@ -25,6 +25,58 @@ async function harness(configure?: (options: Options) => void) {
   await render(<Harness />);
   return { options, native, attached, clear, project, read: () => bridge, update: async () => { await act(async () => update()); } };
 }
+it('keeps an empty Window without recreating a primary view or reopening a native session', async () => {
+  const test = await harness(options => {
+    options.enabled = true;
+    options.window = { ...emptyWindow(), selectedPrimaryViewId: null, selectedViewId: null, views: [] };
+  });
+  expect(test.read().empty).toBe(true);
+  expect(test.read().family).toEqual(new Set());
+  expect(test.options.window!.views).toEqual([]);
+  expect(test.options.operate).not.toHaveBeenCalled();
+  expect(test.native).not.toHaveBeenCalled();
+  expect(test.clear).toHaveBeenCalledOnce();
+});
+
+it.each([false, true])('creates a primary view only when explicitly opening a session without an existing primary (retained dock: %s)', async retainedDock => {
+  const test = await harness(options => {
+    options.window = { ...emptyWindow(), selectedPrimaryViewId: null, selectedViewId: retainedDock ? 'dock' : null,
+      views: retainedDock ? [createWindowView('dock', windowSessionBinding({ ...session, nativeSessionId: 'retained' }))] : [] };
+  });
+  await act(async () => { expect(await test.read().openAttached(session)).toBe(true); });
+  const window = test.options.window!;
+  const primary = window.views.find(view => view.placement === 'primary')!;
+  expect(primary.binding).toMatchObject({ nativeSessionId: session.nativeSessionId });
+  expect(window.selectedPrimaryViewId).toBe(primary.id);
+  expect(window.selectedViewId).toBe(primary.id);
+  expect(window.views).toHaveLength(retainedDock ? 2 : 1);
+  expect(window.views.find(view => view.id === 'dock')?.binding?.nativeSessionId).toBe(retainedDock ? 'retained' : undefined);
+  expect(test.native).toHaveBeenCalledOnce();
+});
+
+it('does not recreate a new primary closed while its native opening is pending', async () => {
+  let complete!: (opened: boolean) => void;
+  const pending = new Promise<boolean>(resolve => { complete = resolve; });
+  const test = await harness(options => {
+    options.window = { ...emptyWindow(), selectedPrimaryViewId: null, selectedViewId: null, views: [] };
+    options.succession.open = vi.fn(() => pending);
+  });
+  let opening!: Promise<boolean>;
+  await act(async () => { opening = test.read().openPrimary(session); });
+  await act(async () => { await test.options.operate({ type: 'view.close', viewId: test.options.window!.selectedViewId! }); });
+  await act(async () => { complete(true); expect(await opening).toBe(false); });
+  expect(test.options.window).toMatchObject({ views: [], selectedPrimaryViewId: null, selectedViewId: null });
+});
+
+it('does not silently replace an explicitly requested missing primary view', async () => {
+  const test = await harness(options => {
+    options.window = { ...emptyWindow(), selectedPrimaryViewId: null, selectedViewId: null, views: [] };
+  });
+  await expect(test.read().openPrimary(session, undefined, false, undefined, undefined, 'closed')).rejects.toThrow('The target primary view is unavailable.');
+  expect(test.options.operate).not.toHaveBeenCalled();
+  expect(test.native).not.toHaveBeenCalled();
+});
+
 it('opens an attached native Session View from its local binding while saving remains pending', async () => {
   const test = await harness();
   let finish!: () => void;
@@ -84,6 +136,27 @@ it('projects another primary immediately while native discovery is pending', asy
   expect(test.options.succession.document.slots.find(slot => slot.id === test.options.succession.document.primary)?.intent.target.native.nativeSessionId).toBe('other-native');
   expect(test.native.mock.calls.at(-1)?.[0]).toMatchObject({ nativeSessionId: 'other-native' });
 }, 10000);
+
+it('retains local draft and Ask owners before native discovery can open the explicit Window binding', async () => {
+  const source = createCompositionSlot('legacy-session', session, 'bridge');
+  const ask = { ...createAskOwner(source, 'bridge'), records: [{ id: 'existing-ask' }] };
+  const test = await harness(options => {
+    options.enabled = true;
+    options.window!.views[0]!.binding = windowSessionBinding(session);
+    options.succession.document.slots.push(source); options.succession.document.asks.push(ask);
+    options.succession.discovering = true;
+  });
+  expect(test.options.succession.document.windowBindings).toEqual([{
+    windowId: 'window', viewId: 'main', bindingKey: JSON.stringify(['host', 'recorded', 'native']), slotId: source.id,
+  }]);
+  expect(test.options.succession.document.asks).toEqual([ask]);
+  expect(test.options.succession.document.primary).toBeUndefined();
+  expect(test.native).not.toHaveBeenCalled();
+  test.options.succession.discovering = false;
+  await test.update();
+  expect(test.read().slots?.get('main')).toBe(source);
+  expect(test.native).toHaveBeenCalledWith(expect.objectContaining({ nativeSessionId: 'native' }), undefined, undefined, source.id);
+});
 
 it('retains an opening target after another primary is selected without stealing focus', async () => {
   const test = await harness(options => { options.window!.views.push(createWindowView('other', { ...windowSessionBinding(session), nativeSessionId: 'other-native' }, 'primary')); });

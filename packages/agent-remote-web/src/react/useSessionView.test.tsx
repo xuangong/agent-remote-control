@@ -7,6 +7,7 @@ import type { RemoteSessionClient, RemoteSessionStatus } from '../client/remote-
 import type { RemoteAgentTransport } from '../client/transport.js';
 import { render, rerender, unmount } from '../test/setup.js';
 import { useSessionView, type SessionConnectionSource } from './useSessionView.js';
+import type { SessionViewActions } from './session-view-actions.js';
 
 it('retires exact draft recipients on reconnect, lease replacement, session switch and unmount', async () => {
   const replica = new AgentReplica();
@@ -222,3 +223,72 @@ it('waits for a native binding before acquiring and retires its lease and author
   await unmount(container);
   expect(release).toHaveBeenCalledOnce();
 });
+
+it.each(['unmount', 'session switch', 'lease replacement', 'pending', 'pending then current', 'disabled', 'disabled then current', 'disconnected binding'] as const)(
+  'rejects native mutations from a captured view after %s while its peer keeps the shared session usable', async boundary => {
+    const mutations: Array<{ name: keyof SessionViewActions; invoke(actions: SessionViewActions): Promise<unknown> }> = [
+      { name: 'takeControl', invoke: actions => actions.takeControl!() },
+      { name: 'uploadResource', invoke: actions => actions.uploadResource!(new Blob(['resource']), 'resource.txt', 'resource-upload') },
+      { name: 'uploadImage', invoke: actions => actions.uploadImage!(new Blob(['image']), 'image-upload') },
+      { name: 'retryMessage', invoke: actions => actions.retryMessage!('saved-message') },
+      { name: 'deleteMessage', invoke: async actions => { actions.deleteMessage!('saved-message'); } },
+      { name: 'cancel', invoke: actions => actions.cancel!() },
+      { name: 'setPlanning', invoke: actions => actions.setPlanning!(true) },
+      { name: 'setSessionSetting', invoke: actions => actions.setSessionSetting!('model', 'model-b') },
+      { name: 'executeCommand', invoke: actions => actions.executeCommand!('command', 'arguments') },
+      { name: 'respondToInteraction', invoke: actions => actions.respondToInteraction!('question', { kind: 'question', answers: [] }) },
+    ];
+    function connection() {
+      const replica = new AgentReplica();
+      const initial = remoteSessionState(replica.getState(), 'ready');
+      const calls = Object.fromEntries(mutations.map(({ name }) => [name, vi.fn(async (..._args: unknown[]) => {})]));
+      const client = { ...calls, subscribeSessionState(listener: (state: RemoteSessionState) => void) {
+        listener({ ...initial, operations: { ...initial.operations, send_message: { allowed: true }, cancel: { allowed: true },
+          set_planning: { allowed: true }, set_session_setting: { allowed: true }, execute_command: { allowed: true },
+          interaction_response: { allowed: true } } });
+        return () => {};
+      } } as unknown as RemoteSessionClient;
+      return { client, replica, calls };
+    }
+    const retained = connection(), replacement = connection();
+    const releases: ReturnType<typeof vi.fn>[] = [];
+    const acquire: SessionConnectionSource['acquire'] = agentId => {
+      const release = vi.fn(); releases.push(release);
+      return { ...(agentId === 'A' ? retained : replacement), release };
+    };
+    const first: SessionConnectionSource = { acquire }, second: SessionConnectionSource = { acquire };
+    const transport = {} as RemoteAgentTransport;
+    const views = new Map<string, ReturnType<typeof useSessionView>>();
+    type ViewProps = { name: string; agentId?: string; source?: SessionConnectionSource; pending?: boolean; enabled?: boolean; connect?: boolean };
+    function View({ name, agentId = 'A', source = first, ...options }: ViewProps) {
+      views.set(name, useSessionView({ agentId, source, transport, ...options })); return null;
+    }
+    function Views({ visible = true, ...options }: Omit<ViewProps, 'name'> & { visible?: boolean }) {
+      return <>{visible ? <View key="original" name="original" {...options} /> : null}<View key="peer" name="peer" /></>;
+    }
+    const container = await render(<Views />);
+    const original = views.get('original')!, peer = views.get('peer')!;
+    const authority = original.operationScope!;
+    expect(authority.client).toBe(peer.operationScope!.client);
+    if (boundary === 'unmount') await rerender(container, <Views visible={false} />);
+    else if (boundary === 'session switch') await rerender(container, <Views agentId="B" />);
+    else if (boundary === 'lease replacement') await rerender(container, <Views source={second} />);
+    else if (boundary === 'disconnected binding') await rerender(container, <Views connect={false} />);
+    else if (boundary.startsWith('pending')) await rerender(container, <Views pending />);
+    else await rerender(container, <Views enabled={false} />);
+    if (boundary.endsWith('then current')) await rerender(container, <Views />);
+    expect(authority.isCurrent()).toBe(false);
+    expect(peer.operationScope!.isCurrent()).toBe(true);
+    for (const mutation of mutations) {
+      await expect(mutation.invoke(original.actions), mutation.name).rejects.toThrow('The original session view is no longer current.');
+      expect(retained.calls[mutation.name], mutation.name).not.toHaveBeenCalled();
+      expect(replacement.calls[mutation.name], mutation.name).not.toHaveBeenCalled();
+      await mutation.invoke(peer.actions);
+      expect(retained.calls[mutation.name], mutation.name).toHaveBeenCalledOnce();
+    }
+    if (['unmount', 'session switch', 'lease replacement', 'disconnected binding'].includes(boundary)) expect(releases[0]).toHaveBeenCalledOnce();
+    else expect(releases[0]).not.toHaveBeenCalled();
+    expect(releases[1]).not.toHaveBeenCalled();
+    await unmount(container);
+  }, 10000,
+);

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { createWindowView, type WorkspaceWindow } from '@orchardworks/agent-remote-protocol';
 import { WindowWorkspaceStore } from './window-workspace.js';
-const initial = (): WorkspaceWindow => ({ schemaVersion: 2, id: 'window-test', title: 'Test', revision: 0, selectedPrimaryViewId: 'main', selectedViewId: 'main', views: [createWindowView('main', undefined, 'primary')] });
+const initial = (): WorkspaceWindow => ({ schemaVersion: 3, id: 'window-test', title: 'Test', revision: 0, selectedPrimaryViewId: 'main', selectedViewId: 'main', views: [createWindowView('main', undefined, 'primary')] });
 describe('Window shared store', () => {
   it('serializes commands and preserves stable view identities without native connections', async () => {
     const store = new WindowWorkspaceStore(initial());
@@ -15,7 +15,7 @@ describe('Window shared store', () => {
   });
   it('failed layout changes leave the observable document unchanged', async () => {
     const store = new WindowWorkspaceStore(initial()); const before = store.getSnapshot();
-    await expect(store.operate({ type: 'view.close', viewId: 'main' })).rejects.toThrow();
+    await expect(store.operate({ type: 'view.close', viewId: 'missing' })).rejects.toThrow();
     expect(store.getSnapshot()).toBe(before);
   });
 });

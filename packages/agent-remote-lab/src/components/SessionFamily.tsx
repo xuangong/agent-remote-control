@@ -8,6 +8,8 @@ import { useWindowSessionBridgeContext } from '../window-session-bridge-context.
 import { useWindowLayout, WindowPresentationContext } from '../window-workspace-context.js';
 import { DockResize } from './SessionDock.js';
 import { SessionLink } from './SessionLink.js';
+import { SessionHeadingActions } from './SessionHeadingActions.js';
+import { SessionTitleInteractionContext } from './SessionTitleInteraction.js';
 import { SessionControlNotice } from './SessionControlNotice.js';
 import { AgentReplica, sessionHandoffScope, SessionHandoffRejectedError } from '@orchardworks/agent-remote-web';
 import type { NativeSessionOwner } from '@orchardworks/agent-remote-protocol';
@@ -27,7 +29,7 @@ import { SessionViewOperationsContext } from '../session-view-operations.js';
 export type FamilySessionPresentationContext = ReturnType<typeof useConversationSession> & {
   session: OpenedSession; viewId?: string; windowViewId?: string;
   conversation: ReturnType<typeof useConversationSession>;
-  pending: boolean; offline: boolean; isRoot: boolean; controls?: ReactNode;
+  pending: boolean; offline: boolean; isRoot: boolean; controls?: ReactNode; menuActions?: ReactNode;
 };
 
 type FamilyTarget = SessionWindowTarget;
@@ -43,7 +45,7 @@ interface Props extends Pick<ComponentProps<typeof LabWorkbench>, 'consoleComman
   sessionPresentation?(context: FamilySessionPresentationContext): Partial<ComponentProps<typeof LabWorkbench>>;
   renderSessionFooter?(context: FamilySessionPresentationContext): ReactNode;
   storageScope: string; baseUrl: string; target: SessionWindowTarget; hostLabel: string;
-  compact: boolean; active: boolean; offline: boolean; controls?: ReactNode;
+  compact: boolean; active: boolean; offline: boolean; controls?: ReactNode; menuActions?: ReactNode;
   transport: RemoteAgentTransport; draftStore: DraftBinding['store']; draftBinding?: DraftBinding; imageDraftBinding?: ImageDraftBinding; imageRecipient?: ImageDraftRecipient; navigation?: SessionViewNavigationFactory;
   displayBinding?: DisplayPreferenceBinding;
   onAdditionalWidthChange?(width: number): void;
@@ -67,6 +69,7 @@ function restore(key: string, root: SessionWindowTarget): Layout {
 /** Each session window owns its visible descendant chain, independently of other participants. */
 export function SessionFamily(props: Props) {
   const { target, compact, active } = props;
+  const titleInteraction = useContext(SessionTitleInteractionContext);
   const storageKey = `agent-remote:recovery:${props.storageScope}:session-family:${props.displayBinding && !props.displayBinding.key.startsWith('session:') ? `${props.displayBinding.key}:` : ''}${sessionKey(target)}`;
   const [layoutKey, setLayoutKey] = useState(storageKey);
   const shared = useWindowLayout();
@@ -206,7 +209,7 @@ export function SessionFamily(props: Props) {
         style={compact ? undefined : index === 0 ? rootView ? { width: rootView.placement === 'float' ? '100%' : rootView.width, minWidth: rootView.placement === 'float' ? 0 : 240,
           flex: rootView.placement === 'float' ? 'none' : '0 0 var(--lab-session-family-root-width, auto)' } : undefined : { width: childWidth(item), minWidth: shared ? 240 : 320, flex: 'none' }}
         onPointerDownCapture={event => { if (!(event.target as Element).closest('[data-pane-selection-ignore],.lab-conversation-history,.lab-session-heading-actions-trigger,.lab-timeline-tools-toggle,.lab-session-main-minimize')) focusPane(index); }} onFocusCapture={event => { if (!(event.target as Element).closest('[data-pane-selection-ignore],.lab-conversation-history,.lab-session-heading-actions-trigger,.lab-timeline-tools-toggle,.lab-session-main-minimize')) focusPane(index); }}>
-        {(visited || active || !compact) ? <FamilySession {...props} familyRoot={index === 0} controls={controls} target={item} entries={path}
+        {(visited || active || !compact) ? <SessionTitleInteractionContext.Provider value={index === 0 ? titleInteraction : undefined}><FamilySession {...props} familyRoot={index === 0} controls={controls} menuActions={index === 0 ? props.menuActions : undefined} target={item} entries={path}
           replica={index === 0 ? props.replica : undefined} onSessionReady={index === 0 ? props.onSessionReady : undefined}
           attachedSession={index === 0 ? props.attachedSession : openedChildren[sessionKey(item)]}
           attachmentManaged={index === 0 ? props.attachmentManaged : undefined} attachmentNotice={index === 0 ? props.attachmentNotice : undefined}
@@ -216,7 +219,7 @@ export function SessionFamily(props: Props) {
           windowViewId={index === 0 ? rootView?.id ?? props.windowViewId : attached[index - 1]?.id}
           displayBinding={index > 0 && attached[index - 1] && props.displayBinding ? { ...props.displayBinding, key: attached[index - 1]!.id } : props.displayBinding}
           draftBinding={index === 0 ? props.draftBinding : childSlot ? { store: props.draftStore, key: childSlot.owners.text.key } : undefined} imageDraftBinding={index === 0 ? props.imageDraftBinding : childSlot?.owners.image}
-          onNavigate={(destination, childrenFor, source) => open(index, destination, childrenFor, source)} /> : null}
+          onNavigate={(destination, childrenFor, source) => open(index, destination, childrenFor, source)} /></SessionTitleInteractionContext.Provider> : null}
         {!compact && index > 0 ? <DockResize title={item.title} width={childWidth(item)} onResize={width => { const view = attached[index - 1]; if (shared && view) shared.operate({ type: 'view.resize', viewId: view.id, width }); else setWidths(current => ({ ...current, [sessionKey(item)]: width })); }} /> : null}
       </section>;
     })}
@@ -293,9 +296,10 @@ function FamilySession(props: SessionProps) {
   }, [baseUrl, currentTarget.hostId, currentTarget.providerId, currentTarget.nativeSessionId, currentTarget.parentNativeSessionId, historyRoleId, resolutionError, attempt, connections, enabled, directory, props.attachedSession?.agentId, props.attachmentManaged]);
   const displayedSession = session && sessionKey(session) === targetKey ? session : undefined;
   const pending = !!resolutionError || !displayedSession;
-  return <FamilyChat {...props} session={session ?? { ...currentTarget, agentId: '' }} attachmentAvailable={!!session} target={currentTarget} pending={pending} preview={preview} availabilityError={owner ? undefined : resolutionError ?? error} nativeTakeover={nativeTakeover} />;
+  return <FamilyChat {...props} session={session ?? { ...currentTarget, agentId: '' }} attachmentAvailable={!!session} target={currentTarget} pending={pending} preview={preview} availabilityError={owner ? undefined : resolutionError ?? error} nativeTakeover={nativeTakeover}
+    onRetryAttachment={enabled && !props.offline && !props.attachmentManaged ? () => setAttempt(value => value + 1) : undefined} />;
 }
-function FamilyChat({ session, pending, transport, navigation, draftStore, draftBinding, imageDraftBinding, imageRecipient: explicitImageRecipient, controls, offline, entries, onNavigate, displayBinding, baseUrl, target, preview, viewId, nativePrefixOnly, availabilityError, consoleCommands, onExecuteConsoleCommand, replica, replicaFor, onSessionReady, onSessionBound, windowViewId, sessionPresentation, renderSessionFooter, familyRoot, nativeTakeover, sessionIntent, attachmentAvailable }: SessionProps & { nativeTakeover?: ReactNode; attachmentAvailable: boolean; session: OpenedSession; pending: boolean; preview?: AgentReplicaState; availabilityError?: string }) {
+function FamilyChat({ session, pending, transport, navigation, draftStore, draftBinding, imageDraftBinding, imageRecipient: explicitImageRecipient, controls, menuActions, offline, entries, onNavigate, displayBinding, baseUrl, target, preview, viewId, nativePrefixOnly, availabilityError, onRetryAttachment, consoleCommands, onExecuteConsoleCommand, replica, replicaFor, onSessionReady, onSessionBound, windowViewId, sessionPresentation, renderSessionFooter, familyRoot, nativeTakeover, sessionIntent, attachmentAvailable }: SessionProps & { nativeTakeover?: ReactNode; attachmentAvailable: boolean; session: OpenedSession; pending: boolean; preview?: AgentReplicaState; availabilityError?: string; onRetryAttachment?(): void }) {
   const conversation = useConversationSession(session, transport, replica ?? replicaFor?.(session.agentId), pending, { viewId, nativePrefixOnly, externalAttachment: true, sessionIntent, attachmentAvailable });
   const { state, sessionState, status, actions, questions, setQuestions, imageRecipient, operationBinding } = conversation;
   const nativeIdentityMatches = state?.agent?.id === session.agentId && state.agent.providerId === session.providerId
@@ -331,21 +335,21 @@ function FamilyChat({ session, pending, transport, navigation, draftStore, draft
   };
   const key = JSON.stringify([target.hostId, target.providerId, target.nativeSessionId]);
   const presentationContext: FamilySessionPresentationContext = {
-    ...conversation, session: presentedSession, viewId, windowViewId, conversation, pending, offline, controls, isRoot: familyRoot,
+    ...conversation, session: presentedSession, viewId, windowViewId, conversation, pending, offline, controls, menuActions, isRoot: familyRoot,
     actions: safeActions,
     state: displayedState,
     imageRecipient: explicitImageRecipient ?? imageRecipient,
   };
   const presentation = sessionPresentation?.(presentationContext);
-  return <CommunicationNavigationContext.Provider value={inherited?.communication}><LabWorkbench displayBinding={familyDisplayBinding({ displayBinding, target, entries, viewId, windowViewId })} headingMode="inline" sessionManager={<><SessionLink session={target} />{controls}</>} defaultDisplayMode="content"
+  return <CommunicationNavigationContext.Provider value={inherited?.communication}><LabWorkbench displayBinding={familyDisplayBinding({ displayBinding, target, entries, viewId, windowViewId })} headingMode="inline" sessionManager={<>{controls}<SessionHeadingActions sessionKey={key} alwaysCollapsed={!!menuActions}><SessionLink session={target} />{menuActions}</SessionHeadingActions></>} defaultDisplayMode="content"
     sessionIdentity={presentedSession} consoleCommands={consoleCommands} onExecuteConsoleCommand={onExecuteConsoleCommand} nativeTakeover={nativeTakeover}
     childrenFor={childrenFor} onOpenChildSession={navigationActions.openChildSession}
     resolveSessionLink={id => inherited?.resolveSessionLink(id) ?? local.resolveSessionLink(id)} revealEntry={inherited?.revealEntry}
-    composerNotice={availabilityError ? <p role="alert">{availabilityError}</p> : undefined}
     state={displayedState} sessionState={pending ? undefined : sessionState} sessionStatus={pending ? 'connecting' : status} attachingAgentId={operationBinding.source.agentId} actions={safeActions} draftOnly={pending || !nativeIdentityMatches} operationBinding={operationBinding}
     draftSessionKey={key} draftBinding={draftBinding ?? { store: draftStore, key: `session:${key}` }} imageDraftBinding={imageDraftBinding} imageRecipient={pending ? undefined : explicitImageRecipient ?? imageRecipient} questionDrafts={pending ? {} : questions}
     onQuestionDraftChange={(id, value) => setQuestions(current => ({ ...current, [id]: value }))}
-    conversationPath={<strong className="agent-session-title">{presentedSession.title}</strong>} {...presentation} />{renderSessionFooter?.(presentationContext)}</CommunicationNavigationContext.Provider>;
+    conversationPath={<strong className="agent-session-title">{presentedSession.title}</strong>} {...presentation}
+    composerNotice={<>{availabilityError ? <p role="alert">{availabilityError} <button type="button" onClick={onRetryAttachment} disabled={!onRetryAttachment}>Retry</button></p> : null}{presentation?.composerNotice}</>} />{renderSessionFooter?.(presentationContext)}</CommunicationNavigationContext.Provider>;
 }
 
 function familyDisplayBinding({ displayBinding, target, entries, viewId, windowViewId }: Pick<SessionProps, 'displayBinding' | 'target' | 'entries' | 'viewId' | 'windowViewId'>) {

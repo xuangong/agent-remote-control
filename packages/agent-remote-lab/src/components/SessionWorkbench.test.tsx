@@ -1,11 +1,42 @@
-import { act } from 'react';
+import { act, useState } from 'react';
 import { expect, it, vi } from 'vitest';
 import { render } from '../test/setup.js';
 import { replicaState } from '../test/fixtures.js';
 import { SessionWorkbench } from './SessionWorkbench.js';
 import { LabWorkbench } from './LabWorkbench.js';
 import { SessionControlNotice } from './SessionControlNotice.js';
+import { SessionHeadingActions } from './SessionHeadingActions.js';
 import type { AgentReplicaState } from '@orchardworks/agent-remote-web';
+
+it('uses only the containing toolbar disclosure when heading actions move into the timeline', async () => {
+  const change = vi.fn();
+  let switchHeading!: (value: 'inline' | 'toolbar') => void;
+  function Harness() {
+    const [headingMode, setHeadingMode] = useState<'inline' | 'toolbar'>('inline'); switchHeading = setHeadingMode;
+    return <SessionWorkbench state={replicaState} sessionStatus="ready" actions={{}} headingMode={headingMode}
+      sessionManager={<SessionHeadingActions alwaysCollapsed><button type="button" onClick={change}>Change session</button></SessionHeadingActions>} />;
+  }
+  const container = await render(<Harness />);
+  const inlineMenu = container.querySelector<HTMLDivElement>('.lab-session-heading-actions-panel')!;
+  expect(inlineMenu.hidden).toBe(true);
+  await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="More session actions"]')!.click());
+  expect(inlineMenu.hidden).toBe(false);
+  await act(async () => switchHeading('toolbar'));
+  const toolbar = container.querySelector<HTMLElement>('[role="toolbar"][aria-label="Session actions"]')!;
+  expect(toolbar.querySelector('[aria-label="More session actions"]')).toBeNull();
+  expect(toolbar.querySelector('.lab-session-heading-actions-panel')).toBeNull();
+  const action = [...toolbar.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent === 'Change session')!;
+  expect(action.closest('[inert]')).not.toBeNull();
+  await act(async () => toolbar.querySelector<HTMLButtonElement>('[aria-label="Expand session actions"]')!.click());
+  expect(action.closest('[inert], [hidden]')).toBeNull();
+  await act(async () => action.click());
+  expect(change).toHaveBeenCalledOnce();
+  await act(async () => toolbar.querySelector<HTMLButtonElement>('[aria-label="Collapse session actions"]')!.click());
+  expect(action.closest('[inert]')).not.toBeNull();
+  await act(async () => switchHeading('inline'));
+  expect(container.querySelectorAll('[aria-label="More session actions"]')).toHaveLength(1);
+  expect(container.querySelector<HTMLDivElement>('.lab-session-heading-actions-panel')!.hidden).toBe(true);
+});
 
 it('keeps the original composer dock editable without native state in draft-only mode', async () => {
   const send = vi.fn();

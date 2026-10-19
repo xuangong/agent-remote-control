@@ -152,7 +152,7 @@ export function importCompositionWindow(document: CompositionDocument): Workspac
   for (const root of roots) { ordered.push(root); let parent = root.id; for (;;) { const child = views.find(view => view.attachedTo === parent); if (!child) break; ordered.push(child); parent = child.id; } }
   const selectedViewId = document.activeWindow && ids.get(document.activeWindow) || document.focus && slotViews.get(document.focus) || main.id;
   main.collapsed = dock?.mainMinimized === true && views.some(view => view.placement === 'dock');
-  const window: WorkspaceWindow = { schemaVersion: 2, id: crypto.randomUUID(), title: binding?.title ?? 'Window', revision: 0, selectedPrimaryViewId: main.id,
+  const window: WorkspaceWindow = { schemaVersion: 3, id: crypto.randomUUID(), title: binding?.title ?? 'Window', revision: 0, selectedPrimaryViewId: main.id,
     selectedViewId, views: ordered };
   if (!isWorkspaceWindow(window)) throw new Error('The saved presentation could not be imported. Its original stores have been preserved.');
   importedSlots.set(window, slotViews);

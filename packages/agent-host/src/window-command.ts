@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { readFile, stat } from 'node:fs/promises';
-import { createWindowView, isWindowOperation, isWindowOperationResult, isWindowSessionBinding, isWorkspaceWindow,
+import { createWindowView, decodeWorkspaceWindow, isWindowOperation, isWindowOperationResult, isWindowSessionBinding,
   type WindowOperation, type WindowSessionBinding, type WorkspaceWindow } from '@orchardworks/agent-remote-protocol';
 
 class CommandError extends Error {
@@ -109,13 +109,15 @@ export async function runWindowCommand(args: string[], env: NodeJS.ProcessEnv = 
     const path = `/${encodeURIComponent(windowId)}`;
     const snapshot = async (): Promise<WorkspaceWindow> => {
       const data = await request(path);
-      if (!isWorkspaceWindow(data.window) || data.window.id !== windowId) error('invalid_response', 'Window service returned an invalid or mismatched snapshot.');
-      return data.window;
+      const window = decodeWorkspaceWindow(data.window);
+      if (!window || window.id !== windowId) error('invalid_response', 'Window service returned an invalid or mismatched snapshot.');
+      return window;
     };
     if (command === 'list') {
       const data = await request('');
-      if (!Array.isArray(data.windows) || data.windows.some((w: unknown) => !isWorkspaceWindow(w) || w.id !== windowId)) error('invalid_response', 'Window list is invalid.');
-      output(data); return 0;
+      const windows = Array.isArray(data.windows) ? data.windows.map(decodeWorkspaceWindow) : undefined;
+      if (!windows || windows.some((window: WorkspaceWindow | undefined) => !window || window.id !== windowId)) error('invalid_response', 'Window list is invalid.');
+      output({ ...data, windows }); return 0;
     }
     if (command === 'inspect' || command === 'export') {
       const window = await snapshot();
@@ -169,9 +171,10 @@ export async function runWindowCommand(args: string[], env: NodeJS.ProcessEnv = 
     const baseRevision = options.has('base-revision') ? number(options.get('base-revision'), 'base-revision') : (observed ?? await snapshot()).revision;
     pending = { operationId, issuedAt, baseRevision, windowId };
     const data = await request(operation.type === 'delete' ? path : `${path}/operations`, operation.type === 'delete' ? 'DELETE' : 'POST', { operationId, issuedAt, baseRevision, operation });
+    const window = data.window === undefined || data.window === null ? data.window : decodeWorkspaceWindow(data.window);
     if (!isWindowOperationResult(data.result) || data.result.operationId !== operationId
-      || data.window !== undefined && data.window !== null && (!isWorkspaceWindow(data.window) || data.window.id !== windowId)) error('invalid_response', 'Window service returned an invalid or mismatched operation result.');
-    pending = undefined; output(data); return data.result.status === 'committed' ? 0 : 2;
+      || data.window !== undefined && data.window !== null && (!window || window.id !== windowId)) error('invalid_response', 'Window service returned an invalid or mismatched operation result.');
+    pending = undefined; output({ ...data, ...(data.window !== undefined ? { window } : {}) }); return data.result.status === 'committed' ? 0 : 2;
   } catch (cause) {
     const code = cause instanceof CommandError ? cause.code : 'request_failed';
     const message = cause instanceof CommandError ? cause.message : 'Could not communicate with the Window service.';

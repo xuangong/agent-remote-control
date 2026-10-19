@@ -65,14 +65,15 @@ export function useSessionWindows(scope: string, access: CompositionAccess) {
     const selected = slot && compositionSelection(slot);
     return { ...view, ...(selected ? { target: { ...selected, hostId: selected.hostId ?? 'local' } } : {}), dockRequest: requests[view.id] };
   });
-  let selectedId = shared?.window.selectedViewId ?? document.activeWindow;
+  let selectedId = shared ? shared.window.selectedViewId ?? undefined : document.activeWindow;
   if (shared) { let selected = shared.window.views.find(view => view.id === selectedId); while (selected?.attachedTo) selected = shared.window.views.find(view => view.id === selected!.attachedTo); selectedId = selected?.id; }
   const activeId = entries.find(view => view.id === selectedId && !view.managed)?.id;
   function focus(id?: string) {
     if (latest.current.shared) {
       const authority = latest.current.shared, window = authority.readWindow?.() ?? authority.window;
       const viewId = id ?? window.selectedPrimaryViewId;
-      if (window.selectedViewId === viewId && !window.views.find(view => view.id === viewId)?.collapsed) return;
+      const view = window.views.find(view => view.id === viewId);
+      if (!viewId || !view || window.selectedViewId === viewId && !view.collapsed) return;
       authority.operate({ type: 'view.select', viewId }); return;
     }
     const { document, save } = latest.current;

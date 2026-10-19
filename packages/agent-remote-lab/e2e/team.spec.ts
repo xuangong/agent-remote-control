@@ -1,3 +1,4 @@
+import { clickSessionAction, showSessionAction } from './session-actions';
 import { expect, test, type Page } from '@playwright/test';
 async function openView(page: Page) {
  const trigger = page.getByRole('button', { name: 'View options', exact: true });
@@ -185,10 +186,10 @@ test('Team applies an ordinary layout and its menu visibility does not hide sess
  await expect(leaderInput).toBeVisible();await expect(leaderInput).toContainText('Keep Leader draft');
  if(!isMobile){
   await expect(page.getByRole('button',{name:'Exit Team mode'})).toHaveCount(0);
-  await leaderInput.click();await page.getByRole('button',{name:'Float Leader',exact:true}).click();
+  await leaderInput.click();await clickSessionAction(page, 'Float Leader');
   await expect(page.getByRole('region',{name:'Docked Leader',exact:true})).toHaveCount(0);
   await expect(page.getByRole('region',{name:'Leader',exact:true}).getByTestId('prompt-input')).toContainText('Keep Leader draft');
-  await page.getByRole('button',{name:'Dock Leader',exact:true}).click();
+  await clickSessionAction(page, 'Dock Leader');
   await expect(leaderInput).toBeVisible();
  }
  await page.reload();await expect(leaderInput).toBeVisible();
@@ -405,6 +406,10 @@ test('Team management adds members in a modal and preserves drafts after rejecti
 
 test('Applying another Team keeps existing docks and repeated opens do not duplicate sessions', async ({ page, isMobile }) => {
  test.skip(isMobile, 'Independent docks require a wide workspace.');
+ await page.route('**/v1/remote/hosts/*/child/attach', route => {
+  const nativeSessionId = route.request().postDataJSON().nativeSessionId;
+  return route.fulfill({ json: { agentId: nativeSessionId, nativeSessionId } });
+ });
  const other={...team,id:'other-team',title:'Other Team',source:{...team.source,nativeSessionId:'other-source',title:'Other project'},members:[{...team.members[0],id:'other-leader',nativeSessionId:'other-leader',name:'Other leader'}]};
  await page.route('**/v1/remote/teams',route=>route.fulfill({json:{teams:[team,other]}}));
  await page.goto('/e2e/fixtures/team.html?children');
@@ -412,14 +417,15 @@ test('Applying another Team keeps existing docks and repeated opens do not dupli
  await open(team.title);
  const leader=page.getByRole('region',{name:'Leader',exact:true});
  await leader.getByTestId('prompt-input').fill('Keep across Team opens');
- await leader.locator('.agent-child-sessions > summary').click();await leader.locator('[data-child-session-id="leader-child"]').click();
+ await expect(leader.getByTestId('prompt-submit')).toBeEnabled();
+ await leader.getByRole('group', { name: 'Session subagents', exact: true }).locator('summary').click();await leader.locator('[data-child-session-id="leader-child"]').click();
  await expect(page.getByRole('region',{name:'leader-child',exact:true})).toBeVisible();
  await open(other.title);
  await expect(page.getByRole('region',{name:'Other project',exact:true})).toBeVisible();
  await expect(page.locator('.lab-session-dock-pane')).toHaveCount(3);
  await expect(leader.getByTestId('prompt-input')).toContainText('Keep across Team opens');
  await expect(page.getByRole('region',{name:'leader-child',exact:true})).toBeVisible();
- await leader.getByRole('button',{name:'Move Leader',exact:true}).focus();await page.keyboard.press('ArrowRight');
+ await leader.locator('[data-session-title-draggable]').focus();await page.keyboard.press('Alt+ArrowRight');
  await expect(page.getByRole('region',{name:'Docked Leader',exact:true})).toHaveCSS('order','2');
  await expect(page.getByRole('region',{name:'Docked Leader',exact:true}).getByRole('region',{name:'leader-child',exact:true})).toBeVisible();
  await open(team.title);await expect(page.locator('.lab-session-dock-pane')).toHaveCount(3);
@@ -431,12 +437,12 @@ test('Applying another Team keeps existing docks and repeated opens do not dupli
  await expect(leader).toBeVisible();
  await leader.getByRole('button',{name:'Gather team members',exact:true}).click();
  const member=page.getByRole('region',{name:'Windows validation',exact:true});
- await member.locator('.agent-child-sessions > summary').click();
+ await member.getByRole('group', { name: 'Session subagents', exact: true }).locator('summary').click();
  await member.locator('[data-child-session-id="member-child"]').click();
  await expect(page.getByRole('region',{name:'member-child',exact:true})).toBeVisible();
  // The close group survives reload and floating a member out of the rail.
  await page.reload();
- await page.getByRole('button',{name:'Float Windows validation',exact:true}).click();
+ await clickSessionAction(page, 'Float Windows validation');
  await page.getByRole('button',{name:'Close Leader',exact:true}).click();
  await expect(leader).toHaveCount(0);
  await expect(member).toHaveCount(0);
@@ -460,9 +466,9 @@ test('Gather uses the current roster and preserves existing floating members and
  await page.locator('.lab-session-row').filter({hasText:team.title}).click();
  const leader=page.getByRole('region',{name:'Leader',exact:true}), member=page.getByRole('region',{name:'Windows validation',exact:true});
  await member.getByTestId('prompt-input').fill('Keep member draft');
- await member.getByRole('button',{name:'Float Windows validation',exact:true}).click();
+ await clickSessionAction(member, 'Float Windows validation');
  await page.reload();
- await expect(member.getByRole('button',{name:'Dock Windows validation',exact:true})).toBeVisible();
+ await showSessionAction(member, 'Dock Windows validation');
  roster={...roster,members:[...roster.members,{...roster.members[1]!,id:'linux',nativeSessionId:'linux-member',name:'Linux validation'}]};
  fail=true;
  await leader.getByRole('button',{name:'Gather team members',exact:true}).click();
@@ -471,7 +477,7 @@ test('Gather uses the current roster and preserves existing floating members and
  fail=false;
  await leader.getByRole('button',{name:'Gather team members',exact:true}).click();
  await expect(page.getByRole('region',{name:'Linux validation',exact:true})).toBeVisible();
- await expect(member.getByRole('button',{name:'Dock Windows validation',exact:true})).toBeVisible();
+ await showSessionAction(member, 'Dock Windows validation');
  await expect(member.getByTestId('prompt-input')).toContainText('Keep member draft');
  await expect(page.getByRole('region',{name:'Project',exact:true})).toBeVisible();
  await leader.getByRole('button',{name:'Gather team members',exact:true}).click();

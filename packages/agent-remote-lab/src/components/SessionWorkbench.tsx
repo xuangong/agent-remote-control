@@ -21,6 +21,7 @@ import { PlanningControl } from './PlanningControl.js';
 import { SessionViewOptions, type SessionDisplayPreferences } from './SessionViewOptions.js';
 import { SessionTodoPanel, type SessionTodoPanelProps } from '@orchardworks/agent-remote-web/react';
 import { SessionHeading } from './SessionHeading.js';
+import { SessionHeadingActionsPresentationContext } from './SessionHeadingActions.js';
 import { SessionTimelineTools } from './SessionTimelineTools.js';
 
 import { useTimelineScroll } from '../hooks/useTimelineScroll.js';
@@ -150,7 +151,7 @@ export function SessionWorkbench({ sessionDescription, onNavigateAttribution, to
       agentFailure={failureInTimeline ? undefined : agentFailure} connectionFailure={connectionFailure} runtimeNotice={runtimeNotice} runtimeMutationDisabled={runtimeMutationDisabled}
       onInspectEntry={onInspectEntry} onOpenChildSession={onOpenChildSession} childrenFor={childrenFor} resolveSessionLink={resolveSessionLink}
       questionDrafts={questionDrafts} onQuestionDraftChange={onQuestionDraftChange} />
-    {headingMode === 'toolbar' && timelineToolsTarget ? createPortal(<>{sessionManager}{viewOptions}{toggle}</>, timelineToolsTarget) : null}
+    {headingMode === 'toolbar' && timelineToolsTarget ? createPortal(<SessionHeadingActionsPresentationContext.Provider value="inline">{sessionManager}{viewOptions}{toggle}</SessionHeadingActionsPresentationContext.Provider>, timelineToolsTarget) : null}
     <div className="lab-composer-region">
     {composerStatus}
     <div ref={toastAnchor} className="lab-composer-dock" hidden={!state?.agent && !nativeTakeover && !draftOnly} data-collapsed={composerHidden || undefined}>

@@ -67,7 +67,7 @@ it('opens Devbox through a root preview and retains its browser identity, Window
   const windows = state.basePath + 'v1/windows';
   const created = await f.fetch(windows, { method: 'POST', headers, body: JSON.stringify({
     operationId: 'preview-create-window', issuedAt: Date.now(),
-    window: { schemaVersion: 2, id: 'devbox-preview-window', title: 'Preview transport', revision: 0,
+    window: { schemaVersion: 3, id: 'devbox-preview-window', title: 'Preview transport', revision: 0,
       selectedPrimaryViewId: 'main', selectedViewId: 'main', views: [createWindowView('main', undefined, 'primary')] },
   }) });
   expect(created.status, await created.clone().text()).toBe(200);

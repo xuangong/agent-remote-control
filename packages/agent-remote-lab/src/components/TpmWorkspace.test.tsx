@@ -9,6 +9,7 @@ import type { TpmItem } from '../hooks/useTpmWork.js';
 import { SessionDescriptionsContext } from '../session-description-context.js';
 import { describeSession } from '../session-description.js';
 import { TpmWorkspace } from './TpmWorkspace.js';
+import { SessionDockProvider, SessionDockRail } from './SessionDock.js';
 import { WindowLayoutContext, WindowPresentationContext } from '../window-workspace-context.js';
 
 beforeEach(() => { vi.stubGlobal('ResizeObserver', class { observe() {} disconnect() {} }); });
@@ -16,10 +17,42 @@ afterEach(() => { vi.unstubAllGlobals(); sessionStorage.clear(); });
 const item: TpmItem = { key: '["host","work"]', hostId: 'host', hostName: 'Host', online: true, unread: false,
   work: { id: 'work', revision: 1, title: 'Search', providerId: 'codex', mainNativeSessionId: 'main', phase: 'implementing', waiting: 'main_session', paused: false, summary: 'Awaiting changes', nextAction: 'Review result', document: '# Search specification\n\nFind matching items.', acceptance: '- [ ] Search works', evidence: ['Acceptance receipt'], createdAt: '2026-10-09T00:00:00Z', updatedAt: '2026-10-09T00:00:00Z', nextCheckAt: 100,
     outbox: [{ id: 'uncertain', target: 'main', status: 'unknown', purpose: 'implementation', text: 'Build search', createdAt: '2026-10-09T00:00:00Z' }] } };
+
+it('keeps TPM placement in a collapsed menu without hiding its work and minimize actions', async () => {
+  const drafts = new DraftStore('tpm-menu');
+  const close = vi.fn(), showList = vi.fn();
+  function Harness() {
+    const trigger = useRef<HTMLButtonElement>(null);
+    return <SessionDockProvider enabled><SessionDockRail>Main session</SessionDockRail><button ref={trigger}>TPM</button>
+      <TpmWorkspace item={item} visible storageScope="tpm-menu" triggerRef={trigger} transport={{} as RemoteAgentTransport}
+        draftBinding={{ store: drafts, key: item.key }} onClose={close} onShowList={showList} onOpenMain={() => {}}
+        onAction={async () => {}} onResolve={async () => {}} onRetry={() => {}} />
+    </SessionDockProvider>;
+  }
+  const container = await render(<Harness />);
+  const menu = container.querySelector<HTMLDivElement>('.lab-session-heading-actions-panel')!;
+  expect(container.querySelectorAll('[aria-label="More session actions"]')).toHaveLength(1);
+  expect(menu.hidden).toBe(true);
+  expect(menu.querySelector('[aria-label="Dock Search"]')).not.toBeNull();
+  const minimize = container.querySelector<HTMLButtonElement>('[aria-label="Minimize TPM"]')!;
+  const list = container.querySelector<HTMLButtonElement>('[aria-label="Back to TPM works"]')!;
+  expect(minimize.closest('.lab-session-heading-actions-panel')).toBeNull();
+  expect(list.closest('.lab-session-heading-actions-panel')).toBeNull();
+  await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="More session actions"]')!.click());
+  expect(menu.hidden).toBe(false);
+  await act(async () => menu.querySelector<HTMLButtonElement>('[aria-label="Dock Search"]')!.click());
+  expect(container.querySelector('[aria-label="Docked Search"]')).not.toBeNull();
+  expect(container.querySelector('.lab-tpm-heading > [data-session-title-draggable]')).not.toBeNull();
+  await act(async () => list.click());
+  expect(showList).toHaveBeenCalledOnce();
+  await act(async () => minimize.click());
+  expect(close).toHaveBeenCalledOnce();
+});
+
 it('marks only the presented TPM pane when different works display the same native session', async () => {
   const second = { ...item, key: '["host","second"]', work: { ...item.work, id: 'second', title: 'Review' } };
   const binding = { hostId: 'host', providerId: 'codex', nativeSessionId: 'same-session', title: 'Shared native session' };
-  const document: WorkspaceWindow = { schemaVersion: 2, id: 'window', revision: 0, title: 'Window', selectedPrimaryViewId: 'main', selectedViewId: 'second-pane',
+  const document: WorkspaceWindow = { schemaVersion: 3, id: 'window', revision: 0, title: 'Window', selectedPrimaryViewId: 'main', selectedViewId: 'second-pane',
     views: [createWindowView('main', undefined, 'primary'), ...[item, second].map((work, index) => ({
       ...createWindowView(index ? 'second-pane' : 'first-pane', binding), feature: { kind: 'tpm', id: work.key, metadata: { hostId: work.hostId } },
     }))] };

@@ -23,7 +23,7 @@ function service() {
 }
 const session = (id: string): WindowSessionBinding => ({ hostId: 'host', providerId: 'recorded', nativeSessionId: id, title: id });
 function snapshot(id: string, manager?: WindowSessionBinding, generation = 1) {
-  const window: WorkspaceWindow = { schemaVersion: 2, id, title: id, revision: 0, selectedPrimaryViewId: 'main', selectedViewId: 'main',
+  const window: WorkspaceWindow = { schemaVersion: 3, id, title: id, revision: 0, selectedPrimaryViewId: 'main', selectedViewId: 'main',
     views: [{ id: 'main', placement: 'primary', width: 480, collapsed: false, display: { mode: 'content', lettersVisible: true } }] };
   return { window, ...(manager ? { manager: { session: manager, generation } } : {}) };
 }

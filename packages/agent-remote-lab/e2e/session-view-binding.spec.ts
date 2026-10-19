@@ -1,3 +1,4 @@
+import { clickSessionAction, showSessionAction } from './session-actions';
 import { expect, test, type Page } from '@playwright/test';
 import { showNewSession, showSessions } from './session-navigation';
 
@@ -33,11 +34,11 @@ test('empty views bind and replace sessions without changing main, placement or 
   const nativeRequests: string[] = [];
   page.on('request', request => { if (/\/(attach|create)$/.test(new URL(request.url()).pathname)) nativeRequests.push(request.url()); });
   await page.locator('.lab-session-dock-add').click();
-  const view = page.locator('[data-view-id]');
+  const view = page.locator('.lab-bindable-session-window[data-view-id]');
   await expect(view).toHaveCount(1); await expect(view.getByText('Choose a session from the sidebar')).toBeVisible();
   const id = await view.getAttribute('data-view-id');
   expect(nativeRequests).toEqual([]);
-  await expect(page.locator('.lab-session-open-target')).toContainText('New session view');
+  await expect(page.locator('.lab-session-open-target')).toContainText('Empty session view');
   await choose(page, 'Window alpha');
   await expect(view.getByTestId('prompt-input')).toBeEnabled();
   await view.getByTestId('prompt-input').fill('Alpha draft belongs to alpha');
@@ -47,29 +48,29 @@ test('empty views bind and replace sessions without changing main, placement or 
   const dock = page.locator('.lab-session-dock-pane');
   await dock.getByRole('separator').focus(); await page.keyboard.press('ArrowRight');
   const width = await dock.evaluate(node => node.style.width);
-  await view.getByRole('button', { name: 'Change session', exact: true }).click();
+  await clickSessionAction(view, 'Change session');
   await choose(page, 'Window beta');
   await expect(view.getByTestId('prompt-input')).toBeEnabled();
   await expect(view.getByTestId('prompt-input')).toBeEmpty();
   await expect(view).toHaveAttribute('data-view-id', id!); await expect(dock).toHaveCSS('width', width);
   await expect(view.getByRole('button', { name: 'Session view options', exact: true })).toHaveAttribute('title', 'View: Simple conversation');
   await expect(page).toHaveURL(address);
-  await view.getByRole('button', { name: 'Change session', exact: true }).click(); await choose(page, 'Window alpha');
+  await clickSessionAction(view, 'Change session'); await choose(page, 'Window alpha');
   await expect(view.getByTestId('prompt-input')).toContainText('Alpha draft belongs to alpha');
   await page.locator('.lab-session-dock-add').click();
-  await expect(page.locator('[data-view-id]')).toHaveCount(2);
+  await expect(page.locator('.lab-bindable-session-window[data-view-id]')).toHaveCount(2);
   await page.reload();
-  await expect(page.locator('[data-view-id]')).toHaveCount(2);
-  const alpha = page.locator(`[data-view-id="${id}"]`);
+  await expect(page.locator('.lab-bindable-session-window[data-view-id]')).toHaveCount(2);
+  const alpha = page.locator(`.lab-bindable-session-window[data-view-id="${id}"]`);
   await expect(alpha.getByTestId('prompt-input')).toContainText('Alpha draft belongs to alpha');
-  await expect(page.locator('[data-view-id][data-active]')).toContainText('Select session');
+  await expect(page.locator('.lab-bindable-session-window[data-view-id][data-active]')).toContainText('Select session');
   await page.screenshot({ path: info.outputPath('empty-and-bound-views.png') });
-  // A narrow viewport hides dock creation without destroying its layout.
+  // A narrow viewport shows the selected pane without destroying the wider layout.
   await page.setViewportSize({ width: 390, height: 844 });
   await expect(page.locator('.lab-session-dock-add')).toHaveCount(0);
-  await expect(page.locator('[data-view-id]:visible')).toHaveCount(0);
+  await expect(page.locator('.lab-bindable-session-window[data-view-id]:visible')).toHaveCount(1);
   await page.setViewportSize({ width: 1680, height: 1000 });
-  await expect(page.locator('[data-view-id]:visible')).toHaveCount(2);
+  await expect(page.locator('.lab-bindable-session-window[data-view-id]:visible')).toHaveCount(2);
   await expect(page).toHaveURL(address); expect(errors).toEqual([]);
 });
 
@@ -84,14 +85,14 @@ test('rebind and close invalidate old attachments; a failed binding remains retr
     } else await route.continue();
   });
   await page.locator('.lab-session-dock-add').click();
-  const view = page.locator('[data-view-id]');
+  const view = page.locator('.lab-bindable-session-window[data-view-id]');
   await choose(page, 'Window alpha'); await expect.poll(() => arrived).toBe(true);
-  await expect(view.getByText('Opening session…')).toBeVisible();
-  await view.getByRole('button', { name: 'Change session', exact: true }).click(); await choose(page, 'Window beta');
+  await expect(view.getByRole('heading', { name: /^Opening session/ })).toBeVisible();
+  await clickSessionAction(view, 'Change session'); await choose(page, 'Window beta');
   await expect(view.getByTestId('prompt-input')).toBeEnabled(); release!();
   await expect(view.getByRole('region', { name: 'Window beta', exact: true })).toBeVisible();
   arrived = false;
-  await view.getByRole('button', { name: 'Change session', exact: true }).click(); await choose(page, 'Window alpha');
+  await clickSessionAction(view, 'Change session'); await choose(page, 'Window alpha');
   await expect.poll(() => arrived).toBe(true);
   await view.getByRole('button', { name: 'Close Window alpha', exact: true }).click(); release!();
   await expect(view).toHaveCount(0);
@@ -100,9 +101,13 @@ test('rebind and close invalidate old attachments; a failed binding remains retr
   await page.route('**/v1/remote/attach', route => fail ? route.fulfill({ status: 503, json: { error: 'Host temporarily unavailable' } }) : route.continue());
   await page.locator('.lab-session-dock-add').click(); await choose(page, 'Window alpha');
   await expect(view.getByRole('alert')).toContainText('Host temporarily unavailable');
-  await expect(view.getByRole('button', { name: 'Change session', exact: true })).toBeVisible();
+  await showSessionAction(view, 'Change session');
   fail = false; await view.getByRole('button', { name: 'Retry', exact: true }).click();
-  await expect(view.getByTestId('prompt-input')).toBeEnabled(); await expect(page).toHaveURL(address);
+  await expect(view.locator('.agent-message-user')).toContainText('Recorded history 1');
+  await expect(view.getByRole('heading', { name: /^Opening session/ })).toHaveCount(0);
+  await view.getByTestId('prompt-input').fill('Ready after retry');
+  await expect(view.getByTestId('prompt-submit')).toBeEnabled();
+  await expect(page).toHaveURL(address);
 });
 
 test('favorites target the focused view, while Track and explicit main navigation preserve docks', async ({ page, isMobile }) => {
@@ -119,7 +124,7 @@ test('favorites target the focused view, while Track and explicit main navigatio
   await page.goto('/e2e/fixtures/session-stars.html?switching=1');
   await page.getByRole('button', { name: 'View options', exact: true }).click();
   await page.getByRole('region', { name: 'View options', exact: true }).getByRole('button', { name: 'New session view', exact: true }).click();
-  const view = page.locator('[data-view-id]');
+  const view = page.locator('.lab-bindable-session-window[data-view-id]');
   await expect(view.getByText('Choose a session from the sidebar')).toBeVisible();
   const address = page.url();
   await page.locator('.lab-sidebar-tabs').getByRole('button', { name: 'Favorites', exact: true }).click();
@@ -140,7 +145,7 @@ test('a restored bound view shows cached content and keeps its draft before atta
   test.skip(isMobile, 'Creation belongs to the wide workspace.');
   const { targets } = await setup(page);
   await page.locator('.lab-session-dock-add').click(); await choose(page, 'Window alpha');
-  const view = page.locator('[data-view-id]');
+  const view = page.locator('.lab-bindable-session-window[data-view-id]');
   await expect(view.getByTestId('prompt-input')).toBeEnabled();
   await expect(view.locator('.agent-message-user')).toContainText('Recorded history 1');
   await view.getByTestId('prompt-input').fill('Draft while reconnecting');
@@ -166,7 +171,7 @@ test('two ordinary views of the same session reuse its draft owner and live conn
   const attachments: string[] = [];
   page.on('request', request => { if (new URL(request.url()).pathname.endsWith('/attach')) attachments.push(request.url()); });
   await page.locator('.lab-session-dock-add').click(); await choose(page, 'New session');
-  const view = page.locator('[data-view-id]');
+  const view = page.locator('.lab-bindable-session-window[data-view-id]');
   await expect(view.getByTestId('prompt-input')).toContainText('Shared session draft');
   await view.getByTestId('prompt-input').fill('Changed from the second view');
   await expect(main.getByTestId('prompt-input')).toContainText('Changed from the second view');

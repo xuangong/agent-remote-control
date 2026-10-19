@@ -1,4 +1,4 @@
-import { useRef, useState, type ComponentProps } from 'react';
+import { useContext, useRef, useState, type ComponentProps } from 'react';
 import type { RemoteAgentTransport } from '@orchardworks/agent-remote-web/headless';
 import type { ImageDraftBinding } from '@orchardworks/agent-remote-web/browser';
 import type { DraftBinding } from '../draft-store.js';
@@ -7,6 +7,8 @@ import { type SessionWindowEntry } from '../hooks/useSessionWindows.js';
 import { useAskPosition } from '../hooks/useAskPosition.js';
 import { SessionViewPlacement, useRemoveSessionDocks } from './SessionDock.js';
 import { SessionFamily } from './SessionFamily.js';
+import { SessionHeadingActions } from './SessionHeadingActions.js';
+import { SessionTitleInteractionContext } from './SessionTitleInteraction.js';
 import { AskResize } from './AskResize.js';
 import { sessionKey } from '../session-tree.js';
 import { useWindowLayout } from '../window-workspace-context.js';
@@ -36,6 +38,7 @@ function WindowBody({ entry, baseUrl, visible, compact, hostLabel, offline, tran
   docked: boolean; controls: React.ReactNode; onAdditionalWidthChange(width: number): void;
 }) {
   const shared = useWindowLayout();
+  const titleInteraction = useContext(SessionTitleInteractionContext);
   const title = entry.target?.title ?? 'Select session';
   const panel = useRef<HTMLElement>(null), anchor = useRef<HTMLSpanElement>(null);
   useAskPosition(panel, anchor, JSON.stringify([baseUrl, entry.id]), { docked });
@@ -43,7 +46,8 @@ function WindowBody({ entry, baseUrl, visible, compact, hostLabel, offline, tran
     if (shared && event.target instanceof Element && event.target.closest('.lab-session-family-pane')) return;
     onFocus();
   };
-  const windowControls = <>{actions}{controls}{onChangeSession && entry.target ? <button type="button" aria-label="Change session" title="Choose a session from the sidebar" onClick={onChangeSession}>↔</button> : null}<button type="button" aria-label={`Close ${title}`} title="Close session view" onClick={onClose}>×</button></>;
+  const menuActions = controls || onChangeSession && entry.target ? <>{controls}{onChangeSession && entry.target ? <button type="button" aria-label="Change session" title="Choose a session from the sidebar" onClick={onChangeSession}>↔</button> : null}</> : undefined;
+  const windowControls = <>{actions}<button type="button" aria-label={`Close ${title}`} title="Close session view" onClick={onClose}>×</button></>;
   return <>
     <span ref={anchor} />
     <div className="lab-ask-viewport" hidden={!visible}>
@@ -55,8 +59,8 @@ function WindowBody({ entry, baseUrl, visible, compact, hostLabel, offline, tran
           viewId={shared ? entry.id : entry.slotId} sessionIntent={shared?.window.views.find(view => view.id === entry.id)?.binding?.sessionIntent}
           onSessionBound={onSessionBound} sessionPresentation={sessionPresentation} renderSessionFooter={renderSessionFooter} nativePrefixOnly={entry.managed}
           displayBinding={{ scope: baseUrl, key: entry.id }} active={visible} compact={compact} onAdditionalWidthChange={onAdditionalWidthChange}
-          transport={transport} draftStore={draftStore} draftBinding={draftBinding} imageDraftBinding={imageDraftBinding} navigation={navigation} controls={windowControls} /> : <>
-          <header className="lab-empty-session-heading"><strong>Select session</strong><div>{windowControls}</div></header>
+          transport={transport} draftStore={draftStore} draftBinding={draftBinding} imageDraftBinding={imageDraftBinding} navigation={navigation} controls={windowControls} menuActions={menuActions} /> : <>
+          <header className="lab-empty-session-heading"><strong {...titleInteraction}>Select session</strong><div>{menuActions ? <SessionHeadingActions sessionKey={entry.id} alwaysCollapsed>{menuActions}</SessionHeadingActions> : null}{windowControls}</div></header>
           <div className="lab-empty-session-body"><p>Choose a session from the sidebar</p>
             <button type="button" onClick={onChangeSession}>Open sidebar</button></div>
         </>}

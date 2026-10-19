@@ -3,6 +3,7 @@ import { act, useState } from 'react';
 import { describe, expect, it, vi } from 'vitest';
 import {
   PROTOCOL_VERSION,
+  createWindowView,
   type AgentProviderDescriptor,
   type AgentSessionResponse,
   type WindowOperation,
@@ -825,6 +826,103 @@ it('creates and selects an empty pane with one layout command and opens its sess
       { type: 'view.create', view: pane }, { type: 'view.select', viewId: pane.id },
     ] }]);
   } finally { vi.restoreAllMocks(); localStorage.clear(); sessionStorage.clear(); }
+});
+
+it('keeps the tab title on the leftmost bound session independently of pane selection', async () => {
+  let workspace!: ReturnType<typeof windowWorkspaceHooks.useWindowWorkspace>;
+  const useWorkspace = windowWorkspaceHooks.useWindowWorkspace;
+  vi.spyOn(windowWorkspaceHooks, 'useWindowWorkspace').mockImplementation((...args) => {
+    workspace = useWorkspace(...args); return workspace;
+  });
+  const baseUrl = 'http://localhost/leftmost-title/';
+  const directory = new SessionDirectoryClient(baseUrl);
+  vi.spyOn(SessionDirectoryClient.prototype, 'attach').mockRejectedValue(new Error('Offline title fixture'));
+  vi.spyOn(SessionDirectoryClient.prototype, 'list').mockResolvedValue({ items: [], hasMore: false, revision: '1' });
+  vi.spyOn(SessionDirectoryClient.prototype, 'workspaces').mockResolvedValue({ workspaces: [] });
+  history.replaceState(null, '', '/');
+  let container: HTMLDivElement | undefined;
+  try {
+    container = await render(<App baseUrl={baseUrl} directory={directory} transport={labTransport()}
+      hostService={{ hosts: async () => ({ hosts: [] }), pair: async () => { throw new Error('Pairing is not used'); } }} />);
+    const binding = (title: string) => ({ hostId: 'local', providerId: 'recorded', nativeSessionId: title, title });
+    const dock = createWindowView('title-dock', binding('Dock session'));
+    const left = createWindowView('title-left', binding('Left session'), 'primary');
+    const right = createWindowView('title-right', binding('Right session'), 'primary');
+    await act(async () => workspace.operate({ type: 'batch', operations: [
+      { type: 'view.create', view: dock }, { type: 'view.create', view: left }, { type: 'view.create', view: right },
+      { type: 'view.select', viewId: right.id },
+    ] }));
+    expect(document.title).toBe('Left session · Agent Remote Control');
+    for (const viewId of [dock.id, 'main', right.id]) {
+      await act(async () => workspace.operate({ type: 'view.select', viewId }));
+      expect(document.title).toBe('Left session · Agent Remote Control');
+    }
+    await act(async () => workspace.operate({ type: 'view.move', viewId: right.id, afterId: 'main' }));
+    expect(document.title).toBe('Right session · Agent Remote Control');
+    await act(async () => workspace.operate({ type: 'view.move', viewId: left.id, afterId: 'main' }));
+    expect(document.title).toBe('Left session · Agent Remote Control');
+    await act(async () => workspace.operate({ type: 'view.close', viewId: left.id }));
+    expect(document.title).toBe('Right session · Agent Remote Control');
+    await act(async () => workspace.operate({ type: 'view.close', viewId: right.id }));
+    expect(document.title).toBe('Dock session · Agent Remote Control');
+    await act(async () => workspace.operate({ type: 'batch', operations: [
+      { type: 'view.close', viewId: dock.id }, { type: 'view.close', viewId: 'main' }, { type: 'rename', title: 'Empty Window' },
+    ] }));
+    expect(document.title).toBe('Empty Window · Agent Remote Control');
+  } finally {
+    if (container) await unmount(container);
+    vi.restoreAllMocks(); localStorage.clear(); sessionStorage.clear(); history.replaceState(null, '', '/');
+  }
+});
+
+it('uses a rendered root title and skips descendants hidden behind empty roots', async () => {
+  let workspace!: ReturnType<typeof windowWorkspaceHooks.useWindowWorkspace>;
+  const useWorkspace = windowWorkspaceHooks.useWindowWorkspace;
+  vi.spyOn(windowWorkspaceHooks, 'useWindowWorkspace').mockImplementation((...args) => {
+    workspace = useWorkspace(...args); return workspace;
+  });
+  const baseUrl = 'http://localhost/attached-title/';
+  vi.stubGlobal('ResizeObserver', class { observe() {} disconnect() {} });
+  vi.spyOn(SessionDirectoryClient.prototype, 'attach').mockRejectedValue(new Error('Offline title fixture'));
+  vi.spyOn(SessionDirectoryClient.prototype, 'list').mockResolvedValue({ items: [], hasMore: false, revision: '1' });
+  vi.spyOn(SessionDirectoryClient.prototype, 'workspaces').mockResolvedValue({ workspaces: [] });
+  history.replaceState(null, '', '/');
+  let container: HTMLDivElement | undefined;
+  try {
+    container = await render(<App baseUrl={baseUrl} directory={new SessionDirectoryClient(baseUrl)} transport={labTransport()}
+      hostService={{ hosts: async () => ({ hosts: [] }), pair: async () => { throw new Error('Pairing is not used'); } }} />);
+    const binding = (title: string) => ({ hostId: 'local', providerId: 'recorded', nativeSessionId: title, title });
+    const child = (id: string, attachedTo: string, title?: string) => ({ ...createWindowView(id, title ? binding(title) : undefined, 'attached'), attachedTo });
+    await act(async () => workspace.operate({ type: 'batch', operations: [
+      { type: 'view.create', view: createWindowView('empty-dock') },
+      { type: 'view.create', view: child('dock-child', 'empty-dock', 'Dock child') },
+      { type: 'view.create', view: createWindowView('empty-float', undefined, 'float') },
+      { type: 'view.create', view: child('float-child', 'empty-float', 'Float child') },
+      { type: 'view.create', view: child('empty-child', 'main') },
+      { type: 'view.create', view: child('first-bound', 'empty-child', 'First bound descendant') },
+      { type: 'view.create', view: createWindowView('right-primary', binding('Right session'), 'primary') },
+      { type: 'view.create', view: createWindowView('bound-dock', binding('Dock session')) },
+      { type: 'view.create', view: createWindowView('bound-float', binding('Float session'), 'float') },
+      { type: 'rename', title: 'Empty roots' },
+      { type: 'view.select', viewId: 'right-primary' },
+    ] }));
+    for (const viewId of ['first-bound', 'dock-child', 'float-child']) {
+      expect(container.querySelector(`.lab-session-family-pane[data-view-id="${viewId}"]`)).toBeNull();
+    }
+    expect(container.querySelector('.lab-session-family-pane[data-view-id="right-primary"]')?.getAttribute('aria-label')).toBe('Right session');
+    expect(document.title).toBe('Right session · Agent Remote Control');
+    await act(async () => workspace.operate({ type: 'view.close', viewId: 'right-primary' }));
+    expect(container.querySelector('.lab-session-family-pane[data-view-id="bound-dock"]')?.getAttribute('aria-label')).toBe('Dock session');
+    expect(document.title).toBe('Dock session · Agent Remote Control');
+    await act(async () => workspace.operate({ type: 'view.close', viewId: 'bound-dock' }));
+    expect(container.querySelector('.lab-session-family-pane[data-view-id="bound-float"]')?.getAttribute('aria-label')).toBe('Float session');
+    expect(document.title).toBe('Float session · Agent Remote Control');
+    await act(async () => workspace.operate({ type: 'view.close', viewId: 'bound-float' }));
+    expect(document.title).toBe('Empty roots · Agent Remote Control');
+  } finally {
+    if (container) await unmount(container);
+    vi.restoreAllMocks(); vi.unstubAllGlobals(); localStorage.clear(); sessionStorage.clear(); history.replaceState(null, '', '/');
+  }
 });
 
 it('keeps a confirmed title when an older session attachment finishes afterward', async () => {

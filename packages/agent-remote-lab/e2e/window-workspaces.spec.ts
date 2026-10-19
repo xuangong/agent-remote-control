@@ -46,6 +46,7 @@ test('two pages share Window UI edits and external commands across narrow presen
     };
     await expect.poll(async () => !!(await inspect()).views.find(view => view.placement === 'primary')?.binding).toBe(true);
     const primaryId = (await inspect()).selectedPrimaryViewId;
+    if (!primaryId) throw new Error('The initial session must have a primary view.');
     const primary = page.locator(`[data-primary-group-id="${primaryId}"]`);
     const otherPrimary = second.locator(`[data-primary-group-id="${primaryId}"]`);
     await primary.getByTestId('prompt-input').fill('Draft kept when renaming this Window');
@@ -102,7 +103,7 @@ test('two pages share Window UI edits and external commands across narrow presen
     await command(['view', 'resize', windowId, viewId, '--width', '620']);
     await expect(pane.getByRole('separator')).toHaveAttribute('aria-valuenow', '620');
     await expect(otherPane.getByRole('separator')).toHaveAttribute('aria-valuenow', '620');
-    await command(['view', 'collapse', windowId, (await inspect()).selectedPrimaryViewId, '--value', 'true']);
+    await command(['view', 'collapse', windowId, primaryId, '--value', 'true']);
     await expect(primary).toHaveAttribute('data-minimized', 'true');
     await expect(otherPrimary).toHaveAttribute('data-minimized', 'true');
     const minimizedOptions = page.getByRole('button', { name: 'View options', exact: true });
@@ -111,7 +112,7 @@ test('two pages share Window UI edits and external commands across narrow presen
     await expect(page.getByRole('region', { name: 'View options', exact: true })).toBeVisible();
     await page.keyboard.press('Escape');
     await page.screenshot({ path: `/tmp/window-primary-minimized-${test.info().project.name}.png` });
-    await command(['view', 'collapse', windowId, (await inspect()).selectedPrimaryViewId, '--value', 'false']);
+    await command(['view', 'collapse', windowId, primaryId, '--value', 'false']);
     await command(['view', 'select', windowId, viewId]);
     await second.setViewportSize({ width: 390, height: 844 });
     await expect(second.locator(`[data-view-id="${viewId}"]`)).toBeVisible();
@@ -120,7 +121,7 @@ test('two pages share Window UI edits and external commands across narrow presen
     expect((await inspect()).views.find(view => view.id === viewId)?.width).toBe(620);
     await second.setViewportSize({ width: 1680, height: 1000 });
     await expect(otherPane.getByRole('separator')).toHaveAttribute('aria-valuenow', '620');
-    await command(['view', 'select', windowId, (await inspect()).selectedPrimaryViewId]);
+    await command(['view', 'select', windowId, primaryId]);
     await primary.getByTestId('prompt-input').fill('/side Shared attached conversation');
     await primary.getByTestId('prompt-input').press('Enter');
     await expect(page.locator('.lab-side-conversation:visible .agent-message-assistant').last()).toContainText('Shared attached conversation');
@@ -132,7 +133,7 @@ test('two pages share Window UI edits and external commands across narrow presen
     await expect(otherPrimary.locator('.lab-primary-conversation')).toBeHidden();
     expect((await inspect()).selectedViewId).toBe(child.id);
     await second.setViewportSize({ width: 1680, height: 1000 });
-    await command(['view', 'bind', windowId, (await inspect()).selectedPrimaryViewId, '--session', JSON.stringify({ hostId: fixture.hostId, providerId: 'recorded', nativeSessionId: bound.nativeSessionId, title: 'Different main' })]);
+    await command(['view', 'bind', windowId, primaryId, '--session', JSON.stringify({ hostId: fixture.hostId, providerId: 'recorded', nativeSessionId: bound.nativeSessionId, title: 'Different main' })]);
     await expect.poll(async () => (await inspect()).views.some(view => view.id === child.id)).toBe(false);
     await expect(page.locator('.lab-side-conversation:visible')).toHaveCount(0);
     await expect(second.locator('.lab-side-conversation:visible')).toHaveCount(0);
@@ -180,6 +181,7 @@ test('a fresh page restores an opening Ask, shares close and reopen, and survive
     await page.route('**/create', async route => { await askCreation; await route.continue(); });
     const initialAskRequest = page.waitForRequest(request => request.method() === 'POST' && new URL(request.url()).pathname.endsWith('/create'));
     await primary.getByTestId('prompt-input').fill('/ask Shared Ask question');
+    await expect(primary.getByTestId('prompt-submit')).toBeEnabled();
     await primary.getByTestId('prompt-input').press('Enter');
     const ask = page.getByRole('dialog', { name: 'Ask', exact: true });
     await expect(ask).toBeVisible();

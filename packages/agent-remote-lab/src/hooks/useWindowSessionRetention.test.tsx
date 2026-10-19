@@ -8,7 +8,7 @@ import { createRecordedValidationServer } from '../server/recorded.js';
 import { render, unmount } from '../test/setup.js';
 import { useWindowSessionRetention } from './useWindowSessionRetention.js';
 
-const windowWith = (id: string, targets: WindowSessionBinding[]): WorkspaceWindow => ({ schemaVersion: 2, id, title: id,
+const windowWith = (id: string, targets: WindowSessionBinding[]): WorkspaceWindow => ({ schemaVersion: 3, id, title: id,
   revision: 0, selectedPrimaryViewId: 'primary', selectedViewId: 'primary', views: targets.length
     ? targets.map((target, index) => createWindowView(index ? `view-${index}` : 'primary', target, 'primary'))
     : [createWindowView('primary', undefined, 'primary')],

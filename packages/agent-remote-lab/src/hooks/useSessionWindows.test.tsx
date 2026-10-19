@@ -1,4 +1,4 @@
-import { applyWindowOperation, createWindowView, type Team, type WorkspaceWindow } from '@orchardworks/agent-remote-protocol';
+import { applyWindowOperation, createWindowView, type Team, type WindowOperation, type WorkspaceWindow } from '@orchardworks/agent-remote-protocol';
 import { ensureWindowCompositionSlot } from '../window-composition.js';
 import { teamViewTarget } from '../team-view-binding.js';
 import { act, useReducer } from 'react';
@@ -111,7 +111,7 @@ it('keeps a focused view while selecting an identical native ID on another Host 
 
 it('uses the latest local selection before React renders a newly created view', async () => {
   const document = createCompositionDocument('local-selection');
-  let window: WorkspaceWindow = { schemaVersion: 2, id: 'local-selection', title: 'Window', revision: 0, selectedPrimaryViewId: 'main', selectedViewId: 'main', views: [createWindowView('main', undefined, 'primary')] };
+  let window: WorkspaceWindow = { schemaVersion: 3, id: 'local-selection', title: 'Window', revision: 0, selectedPrimaryViewId: 'main', selectedViewId: 'main', views: [createWindowView('main', undefined, 'primary')] };
   let current!: ReturnType<typeof useSessionWindows>;
   function Harness() {
     const [, save] = useReducer(n => n + 1, 0);
@@ -130,9 +130,38 @@ it('uses the latest local selection before React renders a newly created view', 
   expect(element.querySelector('output')?.textContent).toBe(id);
 });
 
+it('keeps an empty shared Window empty until a view is explicitly created and allows closing it again', async () => {
+  const document = createCompositionDocument('empty-shared'); document.activeWindow = 'stale-local-view';
+  let window: WorkspaceWindow = { schemaVersion: 3, id: 'empty-shared', title: 'Window', revision: 0,
+    selectedPrimaryViewId: null, selectedViewId: null, views: [] };
+  let current!: ReturnType<typeof useSessionWindows>;
+  const operations: WindowOperation[] = [];
+  function Harness() {
+    const [, save] = useReducer(n => n + 1, 0);
+    current = useSessionWindows(document.scope, { document, save,
+      ensureView: selection => ensureWindowCompositionSlot(document, window.id, 'fallback', selection),
+      shared: { window, readWindow: () => window, operate(operation) { operations.push(operation); window = applyWindowOperation(window, operation); save(); } },
+    });
+    return null;
+  }
+  await render(<Harness />);
+  expect(current.selectedId).toBeUndefined();
+  await act(async () => { current.focus(); current.focus('closed'); });
+  expect(operations).toEqual([]);
+  let id = '';
+  await act(async () => { id = current.create(); });
+  expect(window.views).toHaveLength(1);
+  expect(window.views[0]).toMatchObject({ id, placement: 'dock' });
+  expect(current.selectedId).toBe(id);
+  await act(async () => { current.close(id); });
+  expect(window).toMatchObject({ views: [], selectedViewId: null, selectedPrimaryViewId: null });
+  expect(current.selectedId).toBeUndefined();
+  expect(operations).toHaveLength(2);
+});
+
 it('opens the same local session once before the first render commits', async () => {
   const document = createCompositionDocument('local-open');
-  let window: WorkspaceWindow = { schemaVersion: 2, id: 'local-open', title: 'Window', revision: 0, selectedPrimaryViewId: 'main', selectedViewId: 'main', views: [createWindowView('main', undefined, 'primary')] };
+  let window: WorkspaceWindow = { schemaVersion: 3, id: 'local-open', title: 'Window', revision: 0, selectedPrimaryViewId: 'main', selectedViewId: 'main', views: [createWindowView('main', undefined, 'primary')] };
   let current!: ReturnType<typeof useSessionWindows>;
   function Harness() {
     const [, save] = useReducer(n => n + 1, 0);
@@ -151,7 +180,7 @@ it('opens the same local session once before the first render commits', async ()
 
 it('retains shared Team member identity and validates its current roster locator after gather', async () => {
   const document = createCompositionDocument('shared-team');
-  let window: WorkspaceWindow = { schemaVersion: 2, id: 'shared-team', title: 'Team', revision: 0, selectedPrimaryViewId: 'main', selectedViewId: 'main', views: [createWindowView('main', undefined, 'primary')] };
+  let window: WorkspaceWindow = { schemaVersion: 3, id: 'shared-team', title: 'Team', revision: 0, selectedPrimaryViewId: 'main', selectedViewId: 'main', views: [createWindowView('main', undefined, 'primary')] };
   let current!: ReturnType<typeof useSessionWindows>;
   function Harness() {
     const [, save] = useReducer(n => n + 1, 0);
@@ -181,7 +210,7 @@ it('retains shared Team member identity and validates its current roster locator
 
 it('renders unknown and malformed feature associations as replaceable ordinary session views', async () => {
   const document = createCompositionDocument('opaque-features');
-  let window: WorkspaceWindow = { schemaVersion: 2, id: 'opaque', title: 'Window', revision: 0, selectedPrimaryViewId: 'main', selectedViewId: 'unknown', views: [
+  let window: WorkspaceWindow = { schemaVersion: 3, id: 'opaque', title: 'Window', revision: 0, selectedPrimaryViewId: 'main', selectedViewId: 'unknown', views: [
     createWindowView('main', undefined, 'primary'),
     { ...createWindowView('unknown', target('ordinary')), feature: { kind: 'external', id: 'tool', metadata: { role: 'member' } } },
     { ...createWindowView('invalid-team', target('other')), feature: { kind: 'team', id: 'team', metadata: { role: 'unsupported', memberId: 'member' } } },

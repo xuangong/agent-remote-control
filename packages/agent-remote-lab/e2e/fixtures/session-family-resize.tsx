@@ -17,8 +17,9 @@ const primaryOnly = parameters.has('primary-only');
 const selection = parameters.has('selection');
 const withContent = parameters.has('content') || selection;
 const withEmpty = parameters.has('empty');
+const titleDrag = parameters.has('title-drag');
 const presentationFallback = parameters.has('presentation-fallback');
-const storageKey = `session-family-resize-window${primaryOnly ? '-primary' : ''}${selection ? '-selection' : ''}`;
+const storageKey = `session-family-resize-window${primaryOnly ? '-primary' : ''}${selection ? '-selection' : ''}${titleDrag ? '-title-drag' : ''}`;
 const target = (id: string, title: string) => ({ hostId: 'fixture', providerId: 'recorded', nativeSessionId: id, title });
 function initialWindow(): WorkspaceWindow {
   const primary = { ...createWindowView('primary', target('primary', 'Primary'), 'primary'), width: primaryOnly ? 1600 : 440 };
@@ -27,9 +28,11 @@ function initialWindow(): WorkspaceWindow {
     { ...createWindowView(`${root.id}-child`, target(`${root.id}-child`, `${root.binding!.title} child`), 'attached'), attachedTo: root.id, width: 320 },
     { ...createWindowView(`${root.id}-leaf`, target(`${root.id}-leaf`, `${root.binding!.title} leaf`), 'attached'), attachedTo: `${root.id}-child`, width: 320 },
   ];
-  const workspace: WorkspaceWindow = { schemaVersion: 2, id: 'resize-window', title: 'Resize window', revision: 0,
+  const workspace: WorkspaceWindow = { schemaVersion: 3, id: 'resize-window', title: 'Resize window', revision: 0,
     selectedPrimaryViewId: primary.id, selectedViewId: primary.id,
-    views: [primary, ...children(primary), ...(primaryOnly ? [] : [dock, ...children(dock)]), ...(withEmpty ? [createWindowView('empty', undefined, 'dock')] : [])] };
+    views: titleDrag ? [{ ...primary, width: 240 }, { ...dock, width: 320 }, ...children(dock).map(view => ({ ...view, width: 240 })),
+      { ...createWindowView('peer', target('peer', 'Peer'), 'dock'), width: 320 }, { ...createWindowView('empty', undefined, 'dock'), width: 280 }]
+      : [primary, ...children(primary), ...(primaryOnly ? [] : [dock, ...children(dock)]), ...(withEmpty ? [createWindowView('empty', undefined, 'dock')] : [])] };
   const selected = presentationFallback ? 'dock-child' : parameters.get('selected');
   return selected ? applyWindowOperation(workspace, { type: 'view.select', viewId: selected }) : workspace;
 }
@@ -77,8 +80,7 @@ function Fixture() {
     setWorkspace(next);
   }
   const primary = workspace.views.find(view => view.id === 'primary')!;
-  const dock = workspace.views.find(view => view.id === 'dock')!;
-  const empty = workspace.views.find(view => view.id === 'empty');
+  const dockViews = workspace.views.filter(view => view.placement === 'dock' || view.placement === 'float');
   return <WorkspaceReady.Provider value={false}>
     <WindowLayoutContext.Provider value={{ window: workspace, readWindow: () => latest.current, operate }}>
       <WindowPresentationContext.Provider value={compact && presentationFallback ? 'primary-child' : undefined}>
@@ -94,16 +96,13 @@ function Fixture() {
           }]}
             onSelectPrimaryGroup={viewId => operate({ type: 'view.select', viewId })}
             onResizePrimaryGroup={(viewId, width) => operate({ type: 'view.resize', viewId, width })} />
-          {dock ? <SessionWindow entry={{ id: dock.id, target: dock.binding }} baseUrl="http://fixture.invalid" visible={!compact}
+          {dockViews.map(dock => <SessionWindow key={dock.id} entry={{ id: dock.id, target: dock.binding }} baseUrl="http://fixture.invalid" visible={!compact || titleDrag && workspace.selectedViewId === dock.id}
             compact={compact} hostLabel="Fixture" offline transport={transport} draftStore={drafts}
             selected={workspace.selectedViewId === dock.id}
             sessionPresentation={sessionPresentation}
             navigation={() => ({ childrenFor: () => [], resolveSessionLink: () => undefined })}
-            onFocus={() => operate({ type: 'view.select', viewId: dock.id })} onClose={() => {}} /> : null}
-          {empty ? <SessionWindow entry={{ id: empty.id }} baseUrl="http://fixture.invalid" visible={!compact}
-            compact={compact} hostLabel="Fixture" offline transport={transport} draftStore={drafts}
-            selected={workspace.selectedViewId === empty.id} navigation={() => ({ childrenFor: () => [], resolveSessionLink: () => undefined })}
-            onFocus={() => operate({ type: 'view.select', viewId: empty.id })} onChangeSession={() => {}} onClose={() => {}} /> : null}
+            onFocus={() => operate({ type: 'view.select', viewId: dock.id })}
+            onChangeSession={() => { document.documentElement.dataset.fixtureChangeSession = dock.id; }} onClose={() => {}} />)}
         </main>
       </SessionDockProvider>
       </WindowPresentationContext.Provider>

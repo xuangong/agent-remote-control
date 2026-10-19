@@ -64,7 +64,7 @@ it('applies root handoff context without replacing a descendant own presentation
   const session = { hostId: 'host', providerId: 'recorded', nativeSessionId: 'A', agentId: 'A', title: 'Root' };
   const root = createWindowView('primary', session, 'primary');
   const child = { ...createWindowView('child', { ...session, nativeSessionId: 'child', title: 'Child' }, 'attached'), attachedTo: root.id };
-  const view = await render(<WindowLayoutContext.Provider value={{ window: { schemaVersion: 2, id: 'window', title: 'Window', revision: 0, selectedPrimaryViewId: root.id, selectedViewId: root.id, views: [root, child] }, operate() {} }}>
+  const view = await render(<WindowLayoutContext.Provider value={{ window: { schemaVersion: 3, id: 'window', title: 'Window', revision: 0, selectedPrimaryViewId: root.id, selectedViewId: root.id, views: [root, child] }, operate() {} }}>
     <PrimarySessionFamily attachedSession={session} target={session} viewId={root.id} storageScope="primary-child-context" baseUrl="http://fixture" hostLabel="Host" compact={false} active offline={false}
       transport={transport} draftStore={new DraftStore('primary-child-context')}
       successionContext={{ operationId: 'A', target: { controllerId: 'controller', providerId: 'recorded', nativeSessionId: 'A' } }}

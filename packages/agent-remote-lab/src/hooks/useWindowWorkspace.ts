@@ -10,16 +10,16 @@ import { applyWindowOperation, createWindowView, decodeWorkspaceWindow, isWindow
 interface PendingCreation { request: WindowCreateRequest; candidate: WorkspaceWindow; bindings: Array<[string, string]> }
 interface CreatedWindow { candidate: WorkspaceWindow; snapshot: WindowSnapshot }
 const knownRejection = (error: unknown) => error instanceof WindowRequestError && (error.result?.status === 'rejected' || error.status >= 400 && error.status < 500);
-const emptyWindow = (): WorkspaceWindow => ({ schemaVersion: 2, id: crypto.randomUUID(), revision: 0, title: 'Window', selectedPrimaryViewId: 'main', selectedViewId: 'main', views: [createWindowView('main', undefined, 'primary')] });
+const emptyWindow = (): WorkspaceWindow => ({ schemaVersion: 3, id: crypto.randomUUID(), revision: 0, title: 'Window', selectedPrimaryViewId: 'main', selectedViewId: 'main', views: [createWindowView('main', undefined, 'primary')] });
 
 function sessionLinkOperation(window: WorkspaceWindow, binding: WindowSessionBinding): WindowOperation | undefined {
-  const selected = window.views.find(view => view.id === window.selectedViewId)!;
-  const matches = (view: typeof selected) => view.binding?.hostId === binding.hostId && view.binding.providerId === binding.providerId
+  const selected = window.views.find(view => view.id === window.selectedViewId);
+  const matches = (view: WorkspaceWindow['views'][number]) => view.binding?.hostId === binding.hostId && view.binding.providerId === binding.providerId
     && view.binding.nativeSessionId === binding.nativeSessionId && view.binding.sessionIntent === binding.sessionIntent;
-  const matching = matches(selected) ? selected : window.views.find(matches);
-  if (matching) return matching.id === selected.id && !matching.collapsed ? undefined : { type: 'view.select', viewId: matching.id };
-  if (selected.bindingPolicy === 'managed') {
-    const view = createWindowView(crypto.randomUUID(), binding);
+  const matching = selected && matches(selected) ? selected : window.views.find(matches);
+  if (matching) return matching.id === selected?.id && !matching.collapsed ? undefined : { type: 'view.select', viewId: matching.id };
+  if (!selected || selected.bindingPolicy === 'managed') {
+    const view = createWindowView(crypto.randomUUID(), binding, selected ? 'dock' : 'primary');
     return { type: 'batch', operations: [{ type: 'view.create', view }, { type: 'view.select', viewId: view.id }] };
   }
   return { type: 'batch', operations: [
@@ -208,8 +208,9 @@ export function useWindowWorkspace(scope: string, hosted: boolean, enabled: bool
         && view.binding.providerId === target.providerId && view.binding.nativeSessionId === target.nativeSessionId
         && view.binding.sessionIntent === target.sessionIntent);
       if (existing) { imported.selectedViewId = existing.id; imported.selectedPrimaryViewId = windowPrimaryViewId(imported, existing.id) ?? imported.selectedPrimaryViewId; return imported; }
-      const bound = applyWindowOperation(imported, { type: 'view.bind', viewId: imported.selectedPrimaryViewId, binding: target });
-      Object.assign(imported, bound, { revision: 0, title: target.title, selectedViewId: bound.selectedPrimaryViewId });
+      const operation = imported.selectedPrimaryViewId ? { type: 'view.bind' as const, viewId: imported.selectedPrimaryViewId, binding: target } : sessionLinkOperation(imported, target);
+      const bound = operation ? applyWindowOperation(imported, operation) : imported;
+      Object.assign(imported, bound, { revision: 0, title: target.title, selectedViewId: bound.selectedPrimaryViewId ?? bound.selectedViewId });
       return imported;
     };
     const preferredIds = () => {

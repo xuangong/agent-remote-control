@@ -9,7 +9,7 @@ import { handleWindowRequest } from './window-routes.js';
 import { encodeHostedSnapshot, decodeHostedSnapshot } from './record-codec.js';
 const auth = { origin: 'https://relay.example', issuer: 'https://gateway.example', secret: 'windows-test-secret-01234567890123456789' };
 const binding = { hostId: 'host', providerId: 'codex', nativeSessionId: 'native', title: 'Session' };
-const window = (): WorkspaceWindow => ({ schemaVersion: 2, id: 'window', title: 'Window', revision: 0, selectedPrimaryViewId: 'primary', selectedViewId: 'primary', views: [createWindowView('primary', binding, 'primary')] });
+const window = (): WorkspaceWindow => ({ schemaVersion: 3, id: 'window', title: 'Window', revision: 0, selectedPrimaryViewId: 'primary', selectedViewId: 'primary', views: [createWindowView('primary', binding, 'primary')] });
 const servers: Server[] = []; const cleanups: Array<() => void> = [];
 afterEach(async () => { cleanups.splice(0).forEach(fn => fn()); await Promise.all(servers.splice(0).map(server => new Promise<void>(resolve => { server.closeAllConnections(); server.close(() => resolve()); }))); });
 async function fixture(initial?: HostedRelayState) {
@@ -208,16 +208,23 @@ it('shares independent primary groups through HTTP selection, closure, subscript
   expect((await restarted.call('/window/operations', 'POST', create)).body.result.revision).toBe(1);
   const closed = await restarted.call('/window/operations', 'POST', restarted.mutation('close-primary', 2, { type: 'view.close', viewId: 'primary' }));
   expect(closed.body.window).toMatchObject({ selectedPrimaryViewId: 'second', selectedViewId: 'second' });
-  expect((await restarted.call('/window/operations', 'POST', restarted.mutation('close-last', 3, { type: 'view.close', viewId: 'second' }))).body.result.status).toBe('rejected');
+  const empty = await restarted.call('/window/operations', 'POST', restarted.mutation('close-last', 3, { type: 'view.close', viewId: 'second' }));
+  expect(empty.body.result.status).toBe('committed');
+  expect(empty.body.window).toMatchObject({ id: 'window', revision: 4, views: [], selectedViewId: null, selectedPrimaryViewId: null });
 });
-it('migrates legacy persisted Windows while replaying original v1 request fingerprints unchanged', async () => {
+it.each([1, 2] as const)('migrates legacy persisted Windows while replaying original v%s request fingerprints unchanged', async version => {
   const canonical = (value: any): string => Array.isArray(value) ? '[' + value.map(canonical).join(',') + ']' : value && typeof value === 'object'
     ? '{' + Object.keys(value).sort().map(key => JSON.stringify(key) + ':' + canonical(value[key])).join(',') + '}' : JSON.stringify(value);
   const f = await fixture();
   const { selectedPrimaryViewId, ...base } = window();
-  const legacy = { ...base, schemaVersion: 1, revision: 1, primaryViewId: selectedPrimaryViewId, mainMinimized: false };
+  const legacy = version === 1
+    ? { ...base, schemaVersion: 1, revision: 1, primaryViewId: selectedPrimaryViewId, mainMinimized: false }
+    : { ...base, schemaVersion: 2, revision: 1, selectedPrimaryViewId };
   const oldCreate = { operationId: 'old-create', issuedAt: Date.now(), window: { ...legacy, revision: 0 } };
-  const oldEdit = { operationId: 'old-layout', issuedAt: Date.now(), baseRevision: 0, operation: { type: 'layout.apply', layout: { title: legacy.title, primaryViewId: selectedPrimaryViewId, selectedViewId: legacy.selectedViewId, mainMinimized: false, views: legacy.views } } };
+  const oldEdit = { operationId: 'old-layout', issuedAt: Date.now(), baseRevision: 0, operation: { type: 'layout.apply', layout: {
+    title: legacy.title, selectedViewId: legacy.selectedViewId, views: legacy.views,
+    ...(version === 1 ? { primaryViewId: selectedPrimaryViewId, mainMinimized: false } : { selectedPrimaryViewId }),
+  } } };
   const result = (operationId: string, revision: number) => ({ operationId, status: 'committed' as const, revision, committedAt: Date.now(), expiresAt: Date.now() + 86400000 });
   const initial = f.saved();
   initial.workspaceWindows = [{ subject: 'alice', id: legacy.id, generation: 0, window: legacy as any,
@@ -240,10 +247,45 @@ it('migrates legacy persisted Windows while replaying original v1 request finger
   forgedRecord.manifest = { ...forgedRecord.manifest, byte_length: forgedBytes.byteLength, digest: createHash('sha256').update(forgedBytes).digest('hex') };
   expect(() => decodeHostedSnapshot(forged.map(record => record.manifest), forged.flatMap(record => record.chunks), auth)).toThrow('payload identity or header mismatch');
   const restarted = await fixture(restored);
-  expect((await restarted.call('/window')).body.window).toMatchObject({ schemaVersion: 2, id: 'window', revision: 1, selectedPrimaryViewId: 'primary' });
+  expect((await restarted.call('/window')).body.window).toMatchObject({ schemaVersion: 3, id: 'window', revision: 1, selectedPrimaryViewId: 'primary' });
   expect((await restarted.call('', 'POST', oldCreate)).body.result).toEqual(initial.workspaceWindows[0]!.receipts[0]!.result);
   expect((await restarted.call('/window/operations', 'POST', oldEdit)).body.result).toEqual(initial.workspaceWindows[0]!.receipts[1]!.result);
   expect((await restarted.call('/window/operations', 'POST', { ...oldEdit, baseRevision: 5 })).status).toBe(409);
-  expect((await restarted.call('/window/operations', 'POST', { ...oldEdit, operationId: 'new-legacy' })).status).toBe(400);
+  expect((await restarted.call('', 'POST', { ...oldCreate, operationId: 'new-legacy' })).status).toBe(400);
+  if (version === 1) expect((await restarted.call('/window/operations', 'POST', { ...oldEdit, operationId: 'new-legacy-layout' })).status).toBe(400);
   expect(initial.workspaceWindows[0]!.window).toEqual(legacy);
+});
+
+it('retains an empty Window, its manager and close receipt across HTTP subscription and durable restart', async () => {
+  const f = await fixture(); await f.create();
+  const assigned = await f.call('/window/manager', 'POST', { session: binding });
+  const headers = { authorization: 'Bearer ' + assigned.body.token };
+  const close = f.mutation('close-last', 0, { type: 'view.close', viewId: 'primary' });
+  const waiting = f.call('/window/changes?afterRevision=0', 'GET', undefined, headers);
+  const closed = await f.call('/window/operations', 'POST', close, headers);
+  const empty = { ...window(), revision: 1, views: [], selectedViewId: null, selectedPrimaryViewId: null };
+  expect(closed.body).toMatchObject({ result: { status: 'committed', revision: 1 }, window: empty });
+  expect((await waiting).body.window).toEqual(empty);
+  expect((await f.call('', 'GET', undefined, headers)).body.windows).toEqual([empty]);
+  expect(f.saved().workspaceWindows![0]!.deleted).toBeUndefined();
+  const records = [...encodeHostedSnapshot(f.saved(), auth).records.values()];
+  const restored = decodeHostedSnapshot(records.map(row => row.manifest), records.flatMap(row => row.chunks), auth);
+  const restarted = await fixture(restored);
+  expect((await restarted.call('/window', 'GET', undefined, headers)).body.window).toEqual(empty);
+  expect((await restarted.call('/window/operations', 'POST', close, headers)).body).toEqual(closed.body);
+  const create = restarted.mutation('first-dock', 1, { type: 'view.create', view: createWindowView('dock', binding) });
+  const opened = await restarted.call('/window/operations', 'POST', create, headers);
+  expect(opened.body).toMatchObject({ result: { status: 'committed', revision: 2 }, window: { id: 'window', selectedViewId: 'dock', selectedPrimaryViewId: null } });
+  expect(opened.body.window.views).toEqual([createWindowView('dock', binding)]);
+  const replay = await restarted.call('/window/operations', 'POST', close, headers);
+  expect(replay.body.result).toEqual(closed.body.result);
+  expect(replay.body.window).toEqual(opened.body.window);
+});
+
+it('creates an empty Window through HTTP without synthesizing a primary pane', async () => {
+  const f = await fixture();
+  const empty = { ...window(), views: [], selectedViewId: null, selectedPrimaryViewId: null };
+  const created = await f.call('', 'POST', { operationId: 'empty-create', issuedAt: Date.now(), window: empty });
+  expect(created.body).toMatchObject({ result: { status: 'committed' }, window: empty });
+  expect((await f.call('/window')).body.window).toEqual(empty);
 });

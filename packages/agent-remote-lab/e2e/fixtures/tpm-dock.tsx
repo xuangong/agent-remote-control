@@ -56,7 +56,7 @@ function Fixture() {
   const service = useMemo<TpmService>(() => ({ tpmList: async () => ({ supported: true, supportedProviders: ['codex'], works: records.current }),
     tpmWork: async (_host, id) => records.current.find(work => work.id === id)!, tpmCreate: async () => records.current[0]!,
     tpmAction: async (_host, id, input) => {
-      records.current = records.current.map(work => work.id === id ? { ...work, revision: work.revision + 1, ...(input.action === 'set_delegated' ? { delegated: input.delegated } : { archived: input.action === 'archive', paused: input.action === 'archive' }) } : work);
+      records.current = records.current.map(work => work.id === id ? { ...work, revision: work.revision + 1, ...(input.action === 'set_delegated' ? { delegated: input.delegated } : input.action === 'rename' ? { title: input.title } : { archived: input.action === 'archive', paused: input.action === 'archive' }) } : work);
       return records.current.find(work => work.id === id)!;
     } }), []);
   const tpm = useTpmWork(service, [{ id: 'host', name: 'Mac mini', online: true }], true, async target => ({ ...target, agentId: target.nativeSessionId }), true, 'tpm-dock-fixture');
@@ -71,7 +71,7 @@ function Fixture() {
       return <TpmWorkspace key={key} item={item} mainTitle={labels.get(sessionKey(tpmMainTarget(item)))?.title} session={tpm.sessions[key]} transport={transport} storageScope="fixture" triggerRef={trigger}
         visible={tpm.windows.includes(key) && (!compact || tpm.selected === key)} layer={tpm.windows.indexOf(key) + 1} initialOffset={index * 28}
         onFocus={() => tpm.focus(key)} draftBinding={{ store: drafts, key }} onClose={() => tpm.close(key)} onShowList={() => setListOpen(true)}
-        onOpenMain={() => {}} onAction={action => tpm.action(key, action)} onResolve={async () => {}} onRetry={() => { void tpm.open(key); }} />;
+        onOpenMain={() => {}} onRename={title => tpm.rename(key, title)} onAction={action => tpm.action(key, action)} onResolve={async () => {}} onRetry={() => { void tpm.open(key); }} />;
     })}</div>
     <SessionDockRail mainTitle={main.title} minimumBaseWidth={compact ? 320 : 640}><ConversationSplit compact={compact} start={0} end={compact ? 0 : 1}>
       <ConversationPane className="lab-primary-conversation lab-session-composition"><SessionWorkbench state={replicaState} sessionStatus="ready" conversationPath={<strong>Main agent</strong>} sessionManager={<MinimizeMainSession />} actions={{ sendMessage: async () => {} }} />

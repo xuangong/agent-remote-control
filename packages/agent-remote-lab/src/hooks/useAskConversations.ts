@@ -154,7 +154,7 @@ export function useAskConversations(document: CompositionDocument, transport: Re
             const collapse = { type: 'view.collapse' as const, viewId: view.id, collapsed: true };
             const source = [view.closeWith, current.resolveViewId?.(owner.sourceSlot)]
               .find(id => id !== view.id && current.window.views.some(candidate => candidate.id === id)) ?? current.window.selectedPrimaryViewId;
-            current.operate(isAskSelected(current.window, view) ? { type: 'batch', operations: [collapse, { type: 'view.select', viewId: source }] } : collapse);
+            current.operate(source && isAskSelected(current.window, view) ? { type: 'batch', operations: [collapse, { type: 'view.select', viewId: source }] } : collapse);
           } else {
             pendingCloseViews.current.set(key, view.id);
             current.operate({ type: 'view.close', viewId: view.id });

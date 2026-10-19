@@ -4,7 +4,7 @@ import { attributionWindowOperation } from './session-attribution-navigation.js'
 
 const binding = (nativeSessionId: string, hostId = 'mac') => ({ hostId, providerId: 'codex', nativeSessionId, title: nativeSessionId });
 function layout() {
-  const window: WorkspaceWindow = { schemaVersion: 2, id: 'window', title: 'Window', revision: 0,
+  const window: WorkspaceWindow = { schemaVersion: 3, id: 'window', title: 'Window', revision: 0,
     selectedPrimaryViewId: 'main', selectedViewId: 'main', views: [createWindowView('main', binding('main'), 'primary')] };
   window.views.push(createWindowView('dock', binding('source')), createWindowView('other', binding('other')));
   return window;

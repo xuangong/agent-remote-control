@@ -12,7 +12,7 @@ afterEach(async () => {
   root = undefined; container?.remove(); container = undefined;
   vi.restoreAllMocks(); localStorage.clear(); sessionStorage.clear(); history.replaceState(null, '', '/');
 });
-const windowFixture = (id: string): WorkspaceWindow => ({ schemaVersion: 2, id, revision: 0, title: id,
+const windowFixture = (id: string): WorkspaceWindow => ({ schemaVersion: 3, id, revision: 0, title: id,
   selectedPrimaryViewId: 'main', selectedViewId: 'main', views: [createWindowView('main', undefined, 'primary')] });
 const journalKey = (scope: string, id: string) => `agent-remote:recovery:${scope}:shared-window:pending:${id}`;
 const cacheKey = (scope: string, id: string) => `agent-remote:recovery:${scope}:shared-window:${id}`;

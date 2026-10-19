@@ -20,7 +20,7 @@ it.each([
   const managerToken = 'm'.repeat(43), browserToken = 'b'.repeat(43);
   const initial = emptyRelayState(auth);
   const namespace = hostedAuthNamespace(auth, 'alice');
-  const document: WorkspaceWindow = { schemaVersion: 2, id: 'window', title: 'Window', revision: 0,
+  const document: WorkspaceWindow = { schemaVersion: 3, id: 'window', title: 'Window', revision: 0,
     selectedPrimaryViewId: 'primary', selectedViewId: 'primary', views: [createWindowView('primary', undefined, 'primary')] };
   initial.workspaceWindows = [{ subject: 'alice', id: 'window', window: document, generation: 1, receipts: [], manager: {
     session: { hostId: 'host', providerId: 'codex', nativeSessionId: 'native', title: 'Manager' }, generation: 1,

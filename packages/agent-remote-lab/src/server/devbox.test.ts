@@ -114,7 +114,7 @@ it('opens the hosted product without sign-in and retains its opaque browser sess
   const headers = { cookie, origin: f.origin, 'content-type': 'application/json' };
   const windows = f.origin + state.basePath + 'v1/windows';
   const created = await request(windows, { method: 'POST', headers, body: JSON.stringify({ operationId: 'create-window', issuedAt: Date.now(),
-    window: { schemaVersion: 2, id: 'devbox-window', title: 'Feature validation', revision: 0, selectedPrimaryViewId: 'main', selectedViewId: 'main', views: [createWindowView('main', undefined, 'primary')] } }) });
+    window: { schemaVersion: 3, id: 'devbox-window', title: 'Feature validation', revision: 0, selectedPrimaryViewId: 'main', selectedViewId: 'main', views: [createWindowView('main', undefined, 'primary')] } }) });
   expect(created.status).toBe(200);
   expect(await created.json()).toMatchObject({ result: { status: 'committed' } });
   for (const route of ['v1/favorites', 'v1/remote/teams', 'v1/session-relations']) {

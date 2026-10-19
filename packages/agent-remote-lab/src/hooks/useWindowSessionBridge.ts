@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useReducer } from 'react';
-import type { WindowOperation, WindowSessionBinding, WorkspaceWindow } from '@orchardworks/agent-remote-protocol';
+import { createWindowView, type WindowOperation, type WindowSessionBinding, type WorkspaceWindow } from '@orchardworks/agent-remote-protocol';
 import { compositionSelection } from '../session-composition.js';
 import { adoptWindowPrimaryRole, primaryWindowFamily, windowBindingKey, windowCompositionMapping, windowSuccessionLayout } from '../window-composition.js';
 import { windowSessionBinding } from '../window-workspace.js';
@@ -40,11 +40,12 @@ export function useWindowSessionBridge(options: Options) {
   const primary = window?.views.find(view => view.id === window.selectedPrimaryViewId);
   const concreteHistory = window ? primary?.binding?.sessionIntent === 'history' : history;
   const initialized = adopted.current.size > 0;
-  if (window && groupKey && enabled && (!succession.discovering || initialized) && !adopted.current.has(groupKey)) {
-    adoptWindowPrimaryRole(succession.document, window); adopted.current.add(groupKey);
+  if (window && groupKey && !adopted.current.has(groupKey)) {
+    adoptWindowPrimaryRole(succession.document, window);
+    if (enabled && (!succession.discovering || initialized)) adopted.current.add(groupKey);
   }
   const slots = window && (!succession.discovering || initialized || adopted.current.has(groupKey!)) ? windowCompositionMapping(succession.document, window) : undefined;
-  const primarySlot = window && slots?.get(window.selectedPrimaryViewId);
+  const primarySlot = window?.selectedPrimaryViewId ? slots?.get(window.selectedPrimaryViewId) : undefined;
   const empty = !!options.unavailable || !!window && !primary?.binding;
   useEffect(() => {
     if (!enabled || groupKey && pending.current.has(groupKey)) return;
@@ -83,12 +84,14 @@ export function useWindowSessionBridge(options: Options) {
     const current = latest.current, targetWindow = current.readWindow ? current.readWindow() : current.window;
     if (current.unavailable) throw new Error('Choose an available Window before opening a session.');
     if (!targetWindow) return sessionIntent ? current.succession.open(session, sessionIntent, keepOriginal, slotId) : attached ? current.succession.openAttached(attached, restoreLayout) : current.succession.open(session);
-    const viewId = targetViewId ?? targetWindow.selectedPrimaryViewId, targetGroup = JSON.stringify([targetWindow.id, viewId]);
-    if (!targetWindow.views.some(view => view.id === viewId && view.placement === 'primary')) throw new Error('The target primary view is unavailable.');
+    const destination = targetViewId ?? targetWindow.selectedPrimaryViewId;
+    if (destination && !targetWindow.views.some(view => view.id === destination && view.placement === 'primary')) throw new Error('The target primary view is unavailable.');
     const requestedBinding = windowSessionBinding(session, sessionIntent);
+    const created = destination === null ? createWindowView(crypto.randomUUID(), requestedBinding, 'primary') : undefined;
+    const viewId = created?.id ?? destination!, targetGroup = JSON.stringify([targetWindow.id, viewId]);
     const operation: WindowOperation = { type: 'batch', operations: [
-      { type: 'view.bind', viewId, binding: requestedBinding, ...(expectedBinding !== undefined ? { expectedBinding } : {}) },
-      ...(targetWindow.selectedPrimaryViewId === viewId ? [{ type: 'view.select' as const, viewId }] : []),
+      created ? { type: 'view.create', view: created } : { type: 'view.bind', viewId, binding: requestedBinding, ...(expectedBinding !== undefined ? { expectedBinding } : {}) },
+      ...(created || targetWindow.selectedPrimaryViewId === viewId ? [{ type: 'view.select' as const, viewId }] : []),
     ] };
     if (slotId && !current.succession.document.windowBindings?.some(entry => entry.slotId === slotId && (entry.windowId !== targetWindow.id || entry.viewId !== viewId))) {
       current.succession.bindWindowView(targetWindow.id, viewId, requestedBinding, slotId);

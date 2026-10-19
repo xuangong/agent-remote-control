@@ -1,5 +1,5 @@
 import { createHash, randomBytes } from 'node:crypto';
-import { applyWindowOperation, decodeWorkspaceWindow, isWorkspaceWindow, isWindowOperationResult, isWindowCreateRequest, isWindowMutation, isWindowDeleteRequest, isWindowSessionBinding, WINDOW_OPERATION_RETENTION_MS, type WorkspaceWindow, type WindowMutation, type WindowDeleteRequest, type WindowCreateRequest, type WindowSessionBinding, type WindowOperationResult } from '@orchardworks/agent-remote-protocol';
+import { applyWindowOperation, decodeWorkspaceWindow, isWindowOperationResult, isWindowCreateRequest, isWindowMutation, isWindowDeleteRequest, isWindowSessionBinding, WINDOW_OPERATION_RETENTION_MS, type WorkspaceWindow, type WindowMutation, type WindowDeleteRequest, type WindowCreateRequest, type WindowSessionBinding, type WindowOperationResult } from '@orchardworks/agent-remote-protocol';
 import type { RelayState, HostedRelayState } from './state.js';
 
 export interface SavedWindowReceipt { fingerprint: string; result: WindowOperationResult }
@@ -41,7 +41,7 @@ export function validWindowState(value: unknown): value is SavedWorkspaceWindow[
       || (row.deleted !== true && !decodeWorkspaceWindow(row.window)) || (row.window && row.window.id !== row.id) || (row.deleted && row.window)
       || !Array.isArray(row.receipts) || row.receipts.length > 4096) return false;
     const key = JSON.stringify([row.subject, row.id]); if (ids.has(key)) return false; ids.add(key);
-    if (row.manager && (!/^[a-f0-9]{64}$/.test(row.manager.hash) || row.manager.generation !== row.generation || !isWorkspaceWindow({ schemaVersion: 2, id: 'validation', title: 'Validation', revision: 0, selectedPrimaryViewId: 'primary', selectedViewId: 'primary', views: [{ id: 'primary', binding: row.manager.session, placement: 'primary', width: 400, collapsed: false, display: { mode: 'content', lettersVisible: true } }] }))) return false;
+    if (row.manager && (!/^[a-f0-9]{64}$/.test(row.manager.hash) || row.manager.generation !== row.generation || !isWindowSessionBinding(row.manager.session))) return false;
     const operations = new Set<string>();
     return row.receipts.every((receipt: SavedWindowReceipt) => {
       if (!/^[a-f0-9]{64}$/.test(receipt.fingerprint) || !isWindowOperationResult(receipt.result) || Object.keys(receipt).some(key => !['fingerprint', 'result'].includes(key)) || operations.has(receipt.result.operationId)) return false;

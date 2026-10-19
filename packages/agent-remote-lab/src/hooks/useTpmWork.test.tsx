@@ -10,10 +10,10 @@ import { applyWindowOperation, createWindowView, type WorkspaceWindow } from '@o
 it('selects a TPM once when pointer and focus arrive before the next render', async () => {
   const key = '["one","work"]';
   const { agentId: _, ...binding } = main;
-  let document: WorkspaceWindow = { schemaVersion: 2, id: 'window', revision: 0, title: 'Window', selectedPrimaryViewId: 'main', selectedViewId: 'main',
+  let document: WorkspaceWindow = { schemaVersion: 3, id: 'window', revision: 0, title: 'Window', selectedPrimaryViewId: 'main', selectedViewId: 'main',
     views: [createWindowView('main', binding, 'primary'), { ...createWindowView('tpm', { ...binding, nativeSessionId: 'tpm', title: 'Deliver search' }),
       feature: { kind: 'tpm', id: key, metadata: { hostId: 'one' } } }] };
-  const selections: string[] = [];
+  const selections: Array<string | null> = [];
   const service: TpmService = { tpmList: async () => ({ supported: true, supportedProviders: ['codex'], works: [work()] }),
     tpmWork: async () => work(), tpmCreate: async () => work(), tpmAction: async () => work() };
   let state!: ReturnType<typeof useTpmWork>;
@@ -33,7 +33,7 @@ it('selects a TPM once when pointer and focus arrive before the next render', as
 
 it('creates a TPM for the presented source while a hidden Ask remains the shared selection', async () => {
   const { agentId: _, ...binding } = main;
-  let document: WorkspaceWindow = { schemaVersion: 2, id: 'window', revision: 0, title: 'Window', selectedPrimaryViewId: 'front', selectedViewId: 'ask',
+  let document: WorkspaceWindow = { schemaVersion: 3, id: 'window', revision: 0, title: 'Window', selectedPrimaryViewId: 'front', selectedViewId: 'ask',
     views: [createWindowView('front', binding, 'primary'), createWindowView('duplicate', binding),
       { ...createWindowView('ask', { ...binding, nativeSessionId: 'ask' }, 'float'), feature: { kind: 'ask', id: 'ask' }, closeWith: 'front' }] };
   let finish!: (value: TpmWork) => void, state!: ReturnType<typeof useTpmWork>, selectPresented!: (id: string) => void;
@@ -61,10 +61,11 @@ it('creates a TPM for the presented source while a hidden Ask remains the shared
   expect(document.views.find(view => view.id === 'ask')?.binding?.nativeSessionId).toBe('ask');
 });
 
-it.each(['missing', 'another-window'])('rejects an unavailable presented source (%s) instead of creating for the shared selection', async invalid => {
+it.each(['missing', 'another-window', 'empty-window'])('rejects an unavailable presented source (%s) instead of creating for the shared selection', async invalid => {
   const { agentId: _, ...binding } = main;
-  const document: WorkspaceWindow = { schemaVersion: 2, id: 'window', revision: 0, title: 'Window', selectedPrimaryViewId: 'main', selectedViewId: 'main',
+  const document: WorkspaceWindow = { schemaVersion: 3, id: 'window', revision: 0, title: 'Window', selectedPrimaryViewId: 'main', selectedViewId: 'main',
     views: [createWindowView('main', binding, 'primary')] };
+  if (invalid === 'empty-window') { document.views = []; document.selectedViewId = null; document.selectedPrimaryViewId = null; }
   const requests: unknown[] = [];
   const service: TpmService = { tpmList: async () => ({ supported: true, supportedProviders: ['codex'], works: [] }),
     tpmWork: async () => work(), tpmCreate: async input => { requests.push(input); return work(); }, tpmAction: async () => work() };
@@ -72,7 +73,7 @@ it.each(['missing', 'another-window'])('rejects an unavailable presented source 
   function Harness() {
     state = useTpmWork(service, [{ id: 'one', name: 'One', online: true }], true, async value => ({ ...value, agentId: 'tpm-agent' }), true, 'missing-source', {
       window: document, readWindow: () => document, operate() {},
-    }, { windowId: invalid === 'another-window' ? invalid : document.id, viewId: invalid === 'missing' ? invalid : 'main' });
+    }, invalid === 'empty-window' ? undefined : { windowId: invalid === 'another-window' ? invalid : document.id, viewId: invalid === 'missing' ? invalid : 'main' });
     return null;
   }
   await render(<Harness />);
@@ -83,7 +84,7 @@ it.each(['missing', 'another-window'])('rejects an unavailable presented source 
 
 it('keeps the selected source view when a TPM creation finishes after switching between duplicate main views', async () => {
   const binding = { hostId: main.hostId, providerId: main.providerId, nativeSessionId: main.nativeSessionId, title: main.title };
-  let document: WorkspaceWindow = { schemaVersion: 2, id: 'window', revision: 0, title: 'Window', selectedPrimaryViewId: 'b', selectedViewId: 'b',
+  let document: WorkspaceWindow = { schemaVersion: 3, id: 'window', revision: 0, title: 'Window', selectedPrimaryViewId: 'b', selectedViewId: 'b',
     views: [createWindowView('a', binding, 'primary'), createWindowView('b', binding, 'primary')] };
   let finish!: (value: TpmWork) => void;
   const service: TpmService = { tpmList: async () => ({ supported: true, supportedProviders: ['codex'], works: [] }),
@@ -109,7 +110,7 @@ it.each(['dock', 'attached', 'float'] as const)('creates TPM work from the selec
   const binding = { hostId: main.hostId, providerId: main.providerId, nativeSessionId: main.nativeSessionId, title: main.title };
   const primary = { ...binding, nativeSessionId: 'primary-session', title: 'Primary' };
   const source = { ...createWindowView('source', binding, placement), ...(placement === 'attached' ? { attachedTo: 'primary' } : {}) };
-  let document: WorkspaceWindow = { schemaVersion: 2, id: 'window', revision: 0, title: 'Window', selectedPrimaryViewId: 'primary', selectedViewId: source.id,
+  let document: WorkspaceWindow = { schemaVersion: 3, id: 'window', revision: 0, title: 'Window', selectedPrimaryViewId: 'primary', selectedViewId: source.id,
     views: [createWindowView('primary', primary, 'primary'), source, createWindowView('duplicate', binding)] };
   let finish!: (value: TpmWork) => void, refresh!: () => void, state!: ReturnType<typeof useTpmWork>;
   const requests: unknown[] = [];
@@ -139,7 +140,7 @@ it.each(['dock', 'attached', 'float'] as const)('creates TPM work from the selec
 it.each(['dock', 'attached', 'float'] as const)('opens an existing TPM beside its selected %s source', async placement => {
   const binding = { hostId: main.hostId, providerId: main.providerId, nativeSessionId: main.nativeSessionId, title: main.title };
   const source = { ...createWindowView('source', binding, placement), ...(placement === 'attached' ? { attachedTo: 'primary' } : {}) };
-  let document: WorkspaceWindow = { schemaVersion: 2, id: 'window', revision: 0, title: 'Window', selectedPrimaryViewId: 'primary', selectedViewId: source.id,
+  let document: WorkspaceWindow = { schemaVersion: 3, id: 'window', revision: 0, title: 'Window', selectedPrimaryViewId: 'primary', selectedViewId: source.id,
     views: [createWindowView('primary', { ...binding, nativeSessionId: 'other' }, 'primary'), source] };
   let refresh!: () => void, state!: ReturnType<typeof useTpmWork>;
   const service: TpmService = { tpmList: async () => ({ supported: true, supportedProviders: ['codex'], works: [work()] }),
@@ -567,7 +568,7 @@ it.each((['primary', 'dock', 'attached', 'float'] as const).flatMap(placement =>
   (['rebound', 'closed', 'another-window'] as const).map(change => ({ placement, change }))))('retains the created TPM catalog without opening a late result after its $placement source is $change', async ({ placement, change }) => {
   const binding = { hostId: main.hostId, providerId: main.providerId, nativeSessionId: main.nativeSessionId, title: main.title };
   const source = { ...createWindowView('b', binding, placement), ...(placement === 'attached' ? { attachedTo: 'a' } : {}) };
-  let document: WorkspaceWindow = { schemaVersion: 2, id: 'origin', revision: 0, title: 'Window', selectedPrimaryViewId: placement === 'primary' ? 'b' : 'a', selectedViewId: 'b',
+  let document: WorkspaceWindow = { schemaVersion: 3, id: 'origin', revision: 0, title: 'Window', selectedPrimaryViewId: placement === 'primary' ? 'b' : 'a', selectedViewId: 'b',
     views: [createWindowView('a', binding, 'primary'), source] };
   let finish!: (value: TpmWork) => void, refresh!: () => void, state!: ReturnType<typeof useTpmWork>;
   const attach = vi.fn(async (value: SessionEntry) => ({ ...value, agentId: 'tpm-agent' }));

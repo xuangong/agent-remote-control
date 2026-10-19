@@ -52,24 +52,30 @@ session, and history intent when the operation commits. Title and role metadata
 changes do not invalidate this condition. A changed target rejects the entire
 operation, including a batch, without replacing the binding or its descendants.
 
-Window schema version 2 supports multiple primary session groups, alongside
+Window schema version 3 supports multiple primary session groups, alongside
 independent floating and docked views. `selectedPrimaryViewId` identifies the
 active root; `selectedViewId` identifies focus, which may also be an independent
 view. A root View ID identifies its group, and only `attachedTo` ancestry defines
 membership. `closeWith` expresses a closure dependency, not group membership.
-Selecting an attached view selects and expands its primary root. Selecting an
-independent dock or float preserves the selected primary. Primary roots use
+Selecting an attached view expands its entire ancestor chain and selects its
+primary root when present. Selecting an independent dock or float preserves the selected primary. Primary roots use
 `collapsed` for minimization through `view.collapse`; `main.minimize` is retired.
-Closing a primary closes its dependent views, preserves independent docks, and
-is rejected when it would remove the last primary.
+Every pane can be closed. Closing a primary closes its dependent views and
+preserves independent docks. Closing the final pane keeps the same empty Window,
+with `views: []` and both required selection fields set to `null`. A nonempty
+Window requires an exact selection; its primary selection is `null` exactly when
+no primary remains. No pane is automatically created or promoted to primary.
+Creation in an empty Window selects the first pane.
 
-`decodeWorkspaceWindow` migrates valid persisted version 1 documents to version 2,
-preserving Window/View IDs and revision. The service preserves existing receipt
-fingerprints and permits an old request only to recover an existing receipt with
-the exact original payload; it does not accept new version 1 mutations. Upgrade
-the Window service, browser assets, and Window CLI together. Older strict Window
-clients cannot decode version 2, and rollback builds must retain the version 2
-reader. Session-only Controllers do not require an upgrade for this change.
+`decodeWorkspaceWindow` migrates valid persisted version 1 and 2 documents to
+version 3, preserving Window/View IDs, bindings, and revision. The service
+preserves existing receipt fingerprints. Unsupported old request shapes can
+only recover an existing receipt with the exact original payload; valid older
+operations whose shape is unchanged remain usable. Upgrade the Window service,
+browser assets, and Window CLI together. Older strict Window clients cannot
+decode version 3 responses, including a successful mutation reply, and rollback
+builds must retain the version 3 reader. Session-only Controllers do not require
+an upgrade: Window schema and the native Remote session protocol are separate.
 
 Feature metadata is opaque to the reducer; generic binding policy and explicit
 attachment/close relationships determine layout behavior. The Window HTTP API is independent of the existing session wire and does

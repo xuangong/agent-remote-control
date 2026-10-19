@@ -3,7 +3,7 @@ import { applyWindowOperation, createWindowView, type WindowMutation, type Windo
 import { WindowRequestError, type WindowCommit, type WindowWorkspaceClient } from '@orchardworks/agent-remote-web';
 import { WindowWorkspaceStore } from './window-workspace.js';
 
-const initial = (): WorkspaceWindow => ({ schemaVersion: 2, id: 'local-first-window', title: 'Window', revision: 0,
+const initial = (): WorkspaceWindow => ({ schemaVersion: 3, id: 'local-first-window', title: 'Window', revision: 0,
   selectedPrimaryViewId: 'main', selectedViewId: 'main', views: [createWindowView('main', undefined, 'primary')] });
 const withDock = (): WorkspaceWindow => ({ ...initial(), views: [...initial().views, createWindowView('dock')] });
 function deferred<T>() {

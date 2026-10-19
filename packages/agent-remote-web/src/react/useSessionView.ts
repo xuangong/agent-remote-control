@@ -68,33 +68,36 @@ export function useSessionView({ agentId, transport, source, cachedReplica, pend
   const viewCurrent = () => !!active && !!lease && client.current === active && acquired.current === lease
     && access.current === authority && authority.enabled && authority.connect && !authority.pending
     && selection.current.agentId === agentId && selection.current.connections === connections && selection.current.cachedReplica === cachedReplica;
-  function assertSendAuthority(): void {
+  function assertViewAuthority(): void {
     if (!viewCurrent()) throw new Error('The original session view is no longer current.');
   }
   const messageActions: SessionViewActions = {
-    deleteMessage: id => active?.deleteMessage(id),
+    deleteMessage: id => { if (!active) return; assertViewAuthority(); active.deleteMessage(id); },
     ...(active && !pending ? {
-      sendMessage: async (text, options) => { assertSendAuthority(); await active.sendMessage(text, options); },
-      sendMessageContent: async (content, options) => { assertSendAuthority(); await active.sendMessageContent(content, options); },
+      sendMessage: async (text, options) => { assertViewAuthority(); await active.sendMessage(text, options); },
+      sendMessageContent: async (content, options) => { assertViewAuthority(); await active.sendMessageContent(content, options); },
     } satisfies SessionViewActions : {}),
   };
   const actions: SessionViewActions = active && connect && enabled && status === 'ready' && !pending ? {
     ...messageActions,
-    takeControl: options => active.takeControl(options),
-    uploadResource: (file, name, uploadId, options) => active.uploadResource(file, name, uploadId, options),
+    takeControl: async options => { assertViewAuthority(); await active.takeControl(options); },
+    uploadResource: async (file, name, uploadId, options) => { assertViewAuthority(); return active.uploadResource(file, name, uploadId, options); },
     downloadResource: resourceId => active.downloadResource(resourceId),
-    uploadImage: (file, uploadId, options) => active.uploadImage(file, uploadId, options),
-    retryMessage: sessionState.operations.send_message.allowed ? async id => { await active.retryMessage(id); } : undefined,
+    uploadImage: async (file, uploadId, options) => { assertViewAuthority(); return active.uploadImage(file, uploadId, options); },
+    retryMessage: sessionState.operations.send_message.allowed ? async id => { assertViewAuthority(); await active.retryMessage(id); } : undefined,
     searchTimeline: (query, options) => active.searchTimeline(query, options),
     loadSearchMatch: (match, options) => active.loadSearchMatch(match, options),
-    loadOlder: () => active.loadOlder(), cancel: sessionState.operations.cancel.allowed ? async () => { await active.cancel(); } : undefined,
-    setPlanning: sessionState.operations.set_planning.allowed ? async value => { await active.setPlanning(value); } : undefined, setSessionSetting: sessionState.operations.set_session_setting.allowed ? async (id, value) => { await active.setSessionSetting(id, value); } : undefined,
-    listCommands: () => active.listCommands(), executeCommand: sessionState.operations.execute_command.allowed ? (id, args) => active.executeCommand(id, args) : undefined,
-    respondToInteraction: sessionState.operations.interaction_response.allowed ? async (id, response) => { await active.respondToInteraction(id, response); } : undefined, requestResource: async binding => (await active.requestResource(binding.resourceId)).payload.state,
+    loadOlder: () => active.loadOlder(), cancel: sessionState.operations.cancel.allowed ? async () => { assertViewAuthority(); await active.cancel(); } : undefined,
+    setPlanning: sessionState.operations.set_planning.allowed ? async value => { assertViewAuthority(); await active.setPlanning(value); } : undefined,
+    setSessionSetting: sessionState.operations.set_session_setting.allowed ? async (id, value) => { assertViewAuthority(); await active.setSessionSetting(id, value); } : undefined,
+    listCommands: () => active.listCommands(),
+    executeCommand: sessionState.operations.execute_command.allowed ? async (id, args) => { assertViewAuthority(); return active.executeCommand(id, args); } : undefined,
+    respondToInteraction: sessionState.operations.interaction_response.allowed ? async (id, response) => { assertViewAuthority(); await active.respondToInteraction(id, response); } : undefined,
+    requestResource: async binding => (await active.requestResource(binding.resourceId)).payload.state,
     resolveResource: (locator, sourceLocator) => active.resolveResource(locator, sourceLocator),
   } : messageActions;
   const sendQueuedInput = active && connect && enabled && sessionState.operations.send_message.allowed && !pending
-    ? async (text: string, operationId: string) => { assertSendAuthority(); return active.sendMessage(text, { operationId }); } : undefined;
+    ? async (text: string, operationId: string) => { assertViewAuthority(); return active.sendMessage(text, { operationId }); } : undefined;
   const imageRecipient = recipient.current?.isCurrent() ? recipient.current : undefined;
   const operationScope: SessionViewOperationScope | undefined = enabled && connect && !pending && status === 'ready' && active && lease && imageRecipient
     ? { agentId, client: active, replica: lease.replica, transport, recipient: imageRecipient,

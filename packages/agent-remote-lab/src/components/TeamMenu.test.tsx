@@ -255,7 +255,7 @@ it.each(['Confirm received', 'Confirm not executed'])('discovers compact uncerta
 it.each((['primary', 'dock', 'attached', 'float'] as const).flatMap(placement =>
   (['selected-another-view', 'rebound', 'closed', 'another-window'] as const).map(change => ({ placement, change }))))('keeps Team creation source in $placement fixed after $change', async ({ placement, change }) => {
   const binding = { ...team.source };
-  let window: WorkspaceWindow = { schemaVersion: 2, id: 'origin', revision: 0, title: 'Window', selectedPrimaryViewId: placement === 'primary' ? 'b' : 'a', selectedViewId: 'b',
+  let window: WorkspaceWindow = { schemaVersion: 3, id: 'origin', revision: 0, title: 'Window', selectedPrimaryViewId: placement === 'primary' ? 'b' : 'a', selectedViewId: 'b',
     views: [createWindowView('a', binding, 'primary'), { ...createWindowView('b', binding, placement), ...(placement === 'attached' ? { attachedTo: 'a' } : {}) }] };
   let finish!: (value: Team) => void, refresh!: () => void;
   const requests: unknown[] = [], opened = vi.fn(async () => true), catalog = vi.fn();

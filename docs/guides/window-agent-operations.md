@@ -52,6 +52,9 @@ View does not disconnect other consumers; an inactive retained Session continues
 receiving updates. Track and Team retention remain independent. A full page reload
 creates a new browser network connection and restores cached content while native
 session synchronization runs; layout restoration does not establish native readiness.
+Retaining a connection does not retain a closed or rebound View's action authority.
+Mutating callbacks verify their original View lease before sending or changing its
+outbox. Other Views of the same Session keep their own valid action authority.
 
 An unresolved creation is settled using its original operation identity before
 the page considers another creation. Concurrent first opens in the same browser
@@ -79,8 +82,21 @@ The Window can contain multiple top-level sessions; it has no unique main sessio
 Parent and feature-source relationships remain independent of pane selection.
 There is no separate primary-group selector. **New session view** adds an
 independent empty dock with the same selection and layout controls as a bound
-view. Select it and choose a session from the sidebar. A primary group can be
-closed from its own view when another primary group remains.
+view. Select it and choose a session from the sidebar. Every pane, including the
+last primary or the last pane, can be closed. Closing the last pane leaves the
+same empty Window; opening another pane is an explicit action.
+
+When the selected pane closes, selection returns to a surviving attached ancestor,
+then the closest surviving preceding pane in the previous `views` document order,
+or the next surviving pane if none precedes it. This is document order, independent
+of viewport geometry. The selected replacement and all its attached ancestors expand. Closing an
+unselected pane preserves the exact current selection. Independent docks are
+never promoted to primary views automatically.
+
+The browser tab uses the title of the leftmost bound top-level Session View in
+the horizontal layout, skipping empty roots. Changing selection does not change
+the tab title; reordering or closing that leftmost pane does. With no bound
+horizontal root, it uses the first bound floating root, then the Window title.
 
 Click a conversation to focus its view, then use Favorites, Discover sessions,
 Track, or New session. These actions bind that exact ordinary view, including an empty
@@ -97,6 +113,10 @@ destination receives the clicked session without changing the primary group's
 Track memory. Ask and Side actions also belong to their source view. On narrow
 screens, the foreground conversation is the selected view, with no additional
 selection control. The same shared selection and layout are used on every page.
+Opening a Side places it beside its source Pane even if another Pane already
+shows that Session. Reopening the same Side selects the existing attached Pane.
+If the source Pane closes or changes binding while opening, the delayed result
+cannot attach to its replacement.
 
 ## Deployment and upgrades
 
@@ -106,13 +126,30 @@ is unchanged. Using the new `agent-remote-controller window` commands requires a
 CLI build that includes them; those commands contact the service directly and do
 not require restarting the running Host daemon.
 
-Window schema version 2 requires matching service, browser assets, and Window CLI
-builds. The service automatically migrates valid persisted version 1 Windows,
-preserving Window/View IDs, revisions, and operation receipts. Older strict
-Window clients cannot read version 2. Rollback builds must retain the version 2
-reader. The layout now uses `selectedPrimaryViewId` instead of `primaryViewId`,
-and each primary's `collapsed` value instead of `mainMinimized`. Replace the
-retired `minimize` command with `view collapse WINDOW_ID PRIMARY_VIEW_ID`.
+Window schema version 3 requires matching service, browser assets, and Window CLI
+builds. It is separate from the native Remote session protocol. The service
+automatically migrates valid persisted version 1 and 2 Windows, preserving
+Window/View IDs, revisions, bindings, and operation receipts. Migration does not
+rewrite historical request fingerprints. Older strict Window CLIs cannot read
+version 3 responses; an older CLI can report an uncertain mutation after the
+service has committed it. Upgrade the CLI before using Window commands and
+resolve such a receipt using its original operation ID. Rollback builds must
+retain the version 3 reader.
+
+Controller 0.2.52 reads both version 2 and version 3 Window responses, so the CLI
+can be upgraded before the service. Publish this compatible Controller before
+deploying version 3 website and Relay artifacts together. Reload open browser
+pages after deployment; an already running older page does not acquire the new
+decoder automatically. Existing Host daemons may continue serving native sessions.
+
+Version 3 permits `views: []` and requires explicit `null` values for both
+selection fields in an empty Window. A nonempty Window always has a valid
+`selectedViewId`; `selectedPrimaryViewId` is `null` exactly when no primary exists.
+Creating the first pane selects it. Adding the first primary establishes the
+primary selection without replacing the current exact pane selection. Version 1
+imports use `selectedPrimaryViewId` instead of `primaryViewId`, and each primary's
+`collapsed` value instead of `mainMinimized`. Replace the retired `minimize`
+command with `view collapse WINDOW_ID PRIMARY_VIEW_ID`.
 
 The new Relay reads existing state that has no Windows. Once it stores a Window,
 the state contains `workspaceWindow` records that earlier Relay versions cannot
@@ -180,8 +217,10 @@ dock or float preserves the primary group used for family layout and history.
 This grouping metadata does not override the selected view as the operation target.
 Moving a primary moves
 its attached chain together. Closing a primary closes dependent views but keeps
-independent docks; the last primary cannot be closed. Closing a view or deleting
-a Window does not stop or archive native work.
+independent docks. An empty Window retains its identity, manager grant, revision,
+and operation receipts; it can be inspected, exported, or populated again using
+the same commands. Only `delete` deletes the Window. Closing a view or deleting a
+Window does not stop or archive native work.
 
 Wait for each committed result before issuing dependent commands. Mutations
 normally inspect the latest revision first; use `--base-revision N` to require

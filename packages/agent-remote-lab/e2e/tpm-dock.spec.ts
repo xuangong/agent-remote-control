@@ -1,3 +1,4 @@
+import { clickSessionAction } from './session-actions';
 import { expect, test } from '@playwright/test';
 
 test('TPM groups remain usable while multiple workspaces are open', async ({ page, isMobile }, testInfo) => {
@@ -52,7 +53,7 @@ test('desktop Dock preserves sessions, resizes and reorders only the appended vi
     const view = page.getByRole('dialog', { name: `TPM: ${title}` });
     await view.getByTestId('prompt-input').fill(`Draft for ${title}`);
     await view.getByTestId('prompt-input').evaluate(element => { element.setAttribute('data-instance', 'original'); });
-    await view.getByRole('button', { name: `Dock ${title}`, exact: true }).click();
+    await clickSessionAction(view, `Dock ${title}`);
     await expect(page.locator('.lab-session-dock-pane').filter({ hasText: title })).toBeVisible();
     await expect(view.getByTestId('prompt-input')).toHaveAttribute('data-instance', 'original');
   }
@@ -67,13 +68,13 @@ test('desktop Dock preserves sessions, resizes and reorders only the appended vi
   await page.mouse.move(boundary.x + 3, boundary.y + 200); await page.mouse.down();
   await page.mouse.move(boundary.x + 53, boundary.y + 200, { steps: 8 }); await page.mouse.up();
   await expect(separator).toHaveAttribute('aria-valuenow', '500');
-  const handle = second.getByRole('button', { name: 'Move Connection recovery' });
+  const handle = second.locator('[data-session-title-draggable]').first();
   await handle.scrollIntoViewIfNeeded();
   const grip = (await handle.boundingBox())!, target = (await first.boundingBox())!;
   await page.mouse.move(grip.x + grip.width / 2, grip.y + grip.height / 2); await page.mouse.down();
   await page.mouse.move(target.x + target.width / 3, grip.y + grip.height / 2, { steps: 20 });
-  await expect.poll(async () => Number(await second.evaluate(element => (element as HTMLElement).style.order))).toBe(1);
   await page.mouse.up();
+  await expect.poll(async () => Number(await second.evaluate(element => (element as HTMLElement).style.order))).toBe(1);
   await expect(first).toHaveCSS('order', '2');
   await expect(page.locator('.lab-session-dock-base .lab-primary-conversation')).toHaveCount(1);
   await expect(page.locator('.lab-session-dock-base .lab-side-conversation')).toHaveCount(1);
@@ -99,7 +100,7 @@ test('desktop Dock preserves sessions, resizes and reorders only the appended vi
   expect((await page.locator('.lab-session-dock-base').boundingBox())!.width).toBe(originalWidth);
   await expect(page.getByRole('button', { name: 'Minimize main session area' })).toBeFocused();
   await page.screenshot({ path: testInfo.outputPath('dock-reordered.png') });
-  await first.getByRole('button', { name: 'Float Search delivery', exact: true }).click();
+  await clickSessionAction(first, 'Float Search delivery');
   const floating = page.getByRole('dialog', { name: 'TPM: Search delivery' });
   await expect(floating.getByTestId('prompt-input')).toHaveAttribute('data-instance', 'original');
   await expect(floating.getByTestId('prompt-input')).toContainText('Draft for Search delivery');
@@ -109,9 +110,9 @@ test('desktop Dock preserves sessions, resizes and reorders only the appended vi
   await page.getByRole('button', { name: 'Open Ask', exact: true }).click();
   const ask = page.getByRole('dialog', { name: 'Ask', exact: true });
   await ask.getByRole('textbox', { name: 'Ask draft' }).fill('Ask stays the same view');
-  await ask.getByRole('button', { name: 'Dock Ask', exact: true }).click();
+  await clickSessionAction(ask, 'Dock Ask');
   await expect(page.getByRole('region', { name: 'Docked Ask', exact: true })).toBeVisible();
-  await ask.getByRole('button', { name: 'Float Ask', exact: true }).click();
+  await clickSessionAction(ask, 'Float Ask');
   await expect(ask.getByRole('textbox', { name: 'Ask draft' })).toHaveValue('Ask stays the same view');
   expect(errors).toEqual([]);
 });
@@ -127,7 +128,7 @@ test('Dock follows viewport width even on touch devices and restores after narro
   const composer = view.getByTestId('prompt-input');
   await composer.fill('Keep this draft across layout changes');
   await composer.evaluate(element => element.setAttribute('data-instance', 'before-resize'));
-  await view.getByRole('button', { name: 'Dock Search delivery', exact: true }).click();
+  await clickSessionAction(view, 'Dock Search delivery');
   await expect(page.locator('.lab-session-dock-pane')).toHaveCount(1);
   const connections = await page.locator('html').getAttribute('data-fixture-connections');
   await page.getByRole('button', { name: 'Minimize main session area' }).click();
@@ -143,7 +144,7 @@ test('Dock follows viewport width even on touch devices and restores after narro
   await expect(composer).toHaveAttribute('data-instance', 'before-resize');
   await expect(composer).toContainText('Keep this draft across layout changes');
   await expect(page.locator('.lab-primary-conversation')).toBeHidden();
-  await view.getByRole('button', { name: 'Float Search delivery', exact: true }).click();
+  await clickSessionAction(view, 'Float Search delivery');
   await expect(page.locator('.lab-primary-conversation')).toBeVisible();
   await expect(page.locator('html')).toHaveAttribute('data-fixture-connections', connections!);
 });
@@ -189,12 +190,12 @@ test('reload restores multiple TPM docks with their widths, order and drafts', a
     await list.getByRole('button', { name: 'Close TPM works' }).click();
     const view = page.getByRole('dialog', { name: `TPM: ${title}` });
     await view.getByTestId('prompt-input').fill(`Draft for ${title}`);
-    await view.getByRole('button', { name: `Dock ${title}`, exact: true }).click();
+    await clickSessionAction(view, `Dock ${title}`);
   }
   const first = page.getByRole('region', { name: 'Docked Search delivery', exact: true });
   const second = page.getByRole('region', { name: 'Docked Connection recovery', exact: true });
-  await second.getByRole('button', { name: 'Move Connection recovery' }).focus();
-  await second.getByRole('button', { name: 'Move Connection recovery' }).press('ArrowLeft');
+  await second.locator('[data-session-title-draggable]').first().focus();
+  await second.locator('[data-session-title-draggable]').first().press('Alt+ArrowLeft');
   await first.getByRole('separator').focus(); await first.getByRole('separator').press('ArrowRight');
   await page.reload();
   await expect(first).toBeVisible(); await expect(second).toBeVisible();

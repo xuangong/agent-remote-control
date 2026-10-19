@@ -47,7 +47,7 @@ it('retains attached widths during a primary group resize preview and commits on
   const { WindowLayoutContext } = await import('../window-workspace-context.js');
   const { createWindowView } = await import('@orchardworks/agent-remote-protocol');
   const resized = vi.fn();
-  const view = await render(<WindowLayoutContext.Provider value={{ window: { schemaVersion: 2, id: 'window', title: 'Window', revision: 0, selectedPrimaryViewId: 'a', selectedViewId: 'a', views: [createWindowView('a', undefined, 'primary')] }, operate() {} }}>
+  const view = await render(<WindowLayoutContext.Provider value={{ window: { schemaVersion: 3, id: 'window', title: 'Window', revision: 0, selectedPrimaryViewId: 'a', selectedViewId: 'a', views: [createWindowView('a', undefined, 'primary')] }, operate() {} }}>
     <SessionDockRail primaryGroups={[{ id: 'a', title: 'A', width: 400, additionalWidth: 240, collapsed: false, selected: true, content: <div>Attached session</div> }]} onResizePrimaryGroup={resized} />
   </WindowLayoutContext.Provider>);
   const pane = view.querySelector<HTMLElement>('[data-primary-group-id="a"]')!;
@@ -72,5 +72,16 @@ it('does not change the selected view when using global controls inside a pane',
     onSelectPrimaryGroup={selected} /></SessionDockProvider>);
   const button = view.querySelector<HTMLButtonElement>('button')!;
   await act(async () => { button.dispatchEvent(new Event('pointerdown', { bubbles: true })); button.focus(); });
+  expect(selected).not.toHaveBeenCalled();
+});
+
+it('can close a minimized group without restoring or selecting it first', async () => {
+  const selected = vi.fn(), closed = vi.fn();
+  const view = await render(<SessionDockProvider enabled><SessionDockRail
+    primaryGroups={[{ id: 'a', title: 'A', width: 400, collapsed: true, selected: false, content: <div>Conversation</div> }]}
+    onSelectPrimaryGroup={selected} onClosePrimaryGroup={closed} /></SessionDockProvider>);
+  const button = view.querySelector<HTMLButtonElement>('[aria-label="Close primary group: A"]')!;
+  await act(async () => { button.dispatchEvent(new Event('pointerdown', { bubbles: true })); button.focus(); button.click(); });
+  expect(closed).toHaveBeenCalledWith('a');
   expect(selected).not.toHaveBeenCalled();
 });

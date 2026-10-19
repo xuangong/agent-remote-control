@@ -10,6 +10,7 @@ import { DraftStore } from '../draft-store.js';
 import { WorkspaceReady } from '../workspace-access.js';
 import { SessionFamily, type FamilySessionPresentationContext } from './SessionFamily.js';
 import { SessionDockProvider, SessionDockRail } from './SessionDock.js';
+import { SessionTitleInteractionContext } from './SessionTitleInteraction.js';
 import { WindowLayoutContext, WindowPresentationContext } from '../window-workspace-context.js';
 import { applyWindowOperation, createWindowView, type WorkspaceWindow } from '@orchardworks/agent-remote-protocol';
 
@@ -22,6 +23,7 @@ it('composes per-session presentation and footer from the native conversation an
   const view = await render(<WorkspaceReady.Provider value={false}><SessionFamily attachedSession={session} target={session}
     storageScope="family-presentation" baseUrl="http://fixture" hostLabel="Local" compact={false} active offline
     viewId="composition-slot" transport={transport} draftStore={new DraftStore('family-presentation')} controls={<button>Native controls</button>}
+    menuActions={<button>Placement action</button>}
     sessionPresentation={presentation} renderSessionFooter={context => <footer>{context.session.nativeSessionId} footer</footer>} />
   </WorkspaceReady.Provider>);
   expect(view.textContent).toContain('Custom session heading');
@@ -36,6 +38,9 @@ it('composes per-session presentation and footer from the native conversation an
   expect(context.actions).toBe(context.conversation.actions);
   expect(context.operationBinding.source).toEqual(session);
   expect(context.controls).toBeDefined();
+  expect(context.menuActions).toBeDefined();
+  expect(view.querySelector('.lab-session-heading-actions-panel')?.textContent).toContain('Placement action');
+  expect([...view.querySelectorAll('button')].find(button => button.textContent === 'Native controls')?.closest('.lab-session-heading-actions-panel')).toBeNull();
 });
 
 it.each(['primary', 'dock', 'float'] as const)('sizes a %s family within its placement alongside attached descendants', async placement => {
@@ -45,12 +50,19 @@ it.each(['primary', 'dock', 'float'] as const)('sizes a %s family within its pla
   const root = { ...createWindowView('primary', session, placement), width: 260 };
   const child = { ...createWindowView('child', { ...session, nativeSessionId: 'child', title: 'Child' }, 'attached'), attachedTo: root.id, width: 240 };
   const transport = { onDiagnostic: () => () => {}, onProtocolMessage: () => () => {}, connect: () => ({ close() {}, send() {} }) } as unknown as RemoteAgentTransport;
-  const view = await render(<WorkspaceReady.Provider value={false}><WindowLayoutContext.Provider value={{ window: { schemaVersion: 2, id: 'window', title: 'Window', revision: 0, selectedPrimaryViewId: root.id, selectedViewId: root.id, views: [root, child] }, operate() {} }}>
-    <SessionFamily attachedSession={session} target={session} viewId={root.id} storageScope="family-width" baseUrl="http://fixture" hostLabel="Local" compact={false} active offline transport={transport} draftStore={new DraftStore('family-width')} />
+  const view = await render(<WorkspaceReady.Provider value={false}><WindowLayoutContext.Provider value={{ window: { schemaVersion: 3, id: 'window', title: 'Window', revision: 0, selectedPrimaryViewId: root.id, selectedViewId: root.id, views: [root, child] }, operate() {} }}>
+    <SessionTitleInteractionContext.Provider value={{ 'data-session-title-draggable': true }}>
+      <SessionFamily attachedSession={session} target={session} viewId={root.id} storageScope="family-width" baseUrl="http://fixture" hostLabel="Local" compact={false} active offline transport={transport} draftStore={new DraftStore('family-width')}
+        menuActions={<button>Move root</button>} />
+    </SessionTitleInteractionContext.Provider>
   </WindowLayoutContext.Provider></WorkspaceReady.Provider>);
   const panes = view.querySelectorAll<HTMLElement>('.lab-session-family-pane');
   expect(panes[0]?.style.width).toBe(placement === 'float' ? '100%' : '260px');
   expect(panes[1]?.style.width).toBe('240px');
+  expect(panes[0]?.querySelector('[data-session-title-draggable]')).not.toBeNull();
+  expect(panes[1]?.querySelector('[data-session-title-draggable]')).toBeNull();
+  expect(panes[0]?.querySelector('.lab-session-heading-actions-panel')?.textContent).toContain('Move root');
+  expect(panes[1]?.querySelector('.lab-session-heading-actions-panel')?.textContent).not.toContain('Move root');
 });
 
 it.each(['pointer', 'keyboard'])('selects a child directly within its primary group using %s without a redundant parent transition', async gesture => {
@@ -58,8 +70,8 @@ it.each(['pointer', 'keyboard'])('selects a child directly within its primary gr
   const { agentId: _, ...binding } = session;
   const root = createWindowView('root', binding, 'primary');
   const child = { ...createWindowView('child', { ...binding, nativeSessionId: 'child', title: 'Child' }, 'attached'), attachedTo: root.id };
-  let window: WorkspaceWindow = { schemaVersion: 2, id: 'selection', title: 'Window', revision: 0, selectedPrimaryViewId: 'other', selectedViewId: 'other', views: [createWindowView('other', undefined, 'primary'), root, child] };
-  const selections: string[] = [];
+  let window: WorkspaceWindow = { schemaVersion: 3, id: 'selection', title: 'Window', revision: 0, selectedPrimaryViewId: 'other', selectedViewId: 'other', views: [createWindowView('other', undefined, 'primary'), root, child] };
+  const selections: Array<string | null> = [];
   const transport = { onDiagnostic: () => () => {}, onProtocolMessage: () => () => {}, connect: () => ({ close() {}, send() {} }) } as unknown as RemoteAgentTransport;
   const drafts = new DraftStore(`family-selection-${gesture}`);
   function Harness() {
@@ -108,7 +120,7 @@ it('marks the presented compact pane without changing the shared selection', asy
   const operate = vi.fn();
   const transport = { onDiagnostic: () => () => {}, onProtocolMessage: () => () => {}, connect: () => ({ close() {}, send() {} }) } as unknown as RemoteAgentTransport;
   const view = await render(<WorkspaceReady.Provider value={false}><WindowLayoutContext.Provider value={{ window: {
-    schemaVersion: 2, id: 'window', title: 'Window', revision: 0, selectedPrimaryViewId: root.id, selectedViewId: child.id, views: [root, child],
+    schemaVersion: 3, id: 'window', title: 'Window', revision: 0, selectedPrimaryViewId: root.id, selectedViewId: child.id, views: [root, child],
   }, operate }}><WindowPresentationContext.Provider value={root.id}>
     <SessionFamily attachedSession={session} target={session} viewId={root.id} storageScope="family-presented-selection" baseUrl="http://fixture"
       hostLabel="Local" compact active offline transport={transport} draftStore={new DraftStore('family-presented-selection')} />
@@ -154,6 +166,35 @@ it('keeps session sharing available before the native session attaches', async (
     storageScope="family-opening" baseUrl="http://fixture" hostLabel="Local" compact={false} active offline
     transport={{} as RemoteAgentTransport} draftStore={new DraftStore('family-opening')} /></WorkspaceReady.Provider>);
   expect(view.querySelector('[aria-label="Share session link"]')).not.toBeNull();
+});
+
+it('preserves attachment failures and retry alongside product notices without losing the draft', async () => {
+  const { SessionDirectoryClient } = await import('../directory-client.js');
+  const attach = vi.spyOn(SessionDirectoryClient.prototype, 'attach')
+    .mockRejectedValueOnce(new Error('Host temporarily unavailable'))
+    .mockResolvedValueOnce({ agentId: 'agent-1', nativeSessionId: 'recorded-session' });
+  const target = { hostId: 'local', providerId: 'recorded', nativeSessionId: 'recorded-session', title: 'Retry session' };
+  const transport = { onDiagnostic: () => () => {}, onProtocolMessage: () => () => {}, connect: () => ({ close() {}, send() {} }) } as unknown as RemoteAgentTransport;
+  try {
+    const view = await render(<WorkspaceReady.Provider value><SessionFamily target={target}
+      storageScope="family-retry" baseUrl="http://fixture" hostLabel="Local" compact={false} active offline={false}
+      transport={transport} draftStore={new DraftStore('family-retry')}
+      sessionPresentation={() => ({ composerNotice: <p>Product notice</p> })} /></WorkspaceReady.Provider>);
+    await vi.waitFor(() => expect(view.querySelector('[role="alert"]')?.textContent).toContain('Host temporarily unavailable'));
+    expect(view.textContent).toContain('Product notice');
+    expect(view.querySelector('[aria-label="Share session link"]')).not.toBeNull();
+    const input = view.querySelector<HTMLElement>('[data-testid="prompt-input"]')!;
+    await act(async () => {
+      setPromptText(input, 'Keep this draft while retrying');
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    const retry = [...view.querySelectorAll('button')].find(button => button.textContent === 'Retry')!;
+    await act(async () => retry.click());
+    await vi.waitFor(() => expect(attach).toHaveBeenCalledTimes(2));
+    expect(view.querySelector('[role="alert"]')).toBeNull();
+    expect(view.textContent).toContain('Product notice');
+    expect(promptText(view.querySelector<HTMLElement>('[data-testid="prompt-input"]')!)).toBe('Keep this draft while retrying');
+  } finally { attach.mockRestore(); }
 });
 
 it('keeps the latest observed messages ahead of the old disk preview while history resynchronizes', async () => {
@@ -363,7 +404,7 @@ it('keeps the selected child while primary heading navigation receives focus', a
   const child = { ...createWindowView('child', { ...session, nativeSessionId: 'child', title: 'Child' }, 'attached'), attachedTo: root.id };
   const operate = vi.fn();
   const transport = { onDiagnostic: () => () => {}, onProtocolMessage: () => () => {}, connect: () => ({ close() {}, send() {} }) } as unknown as RemoteAgentTransport;
-  const view = await render(<WorkspaceReady.Provider value={false}><WindowLayoutContext.Provider value={{ window: { schemaVersion: 2, id: 'window', title: 'Window', revision: 0, selectedPrimaryViewId: root.id, selectedViewId: child.id, views: [root, child] }, operate }}>
+  const view = await render(<WorkspaceReady.Provider value={false}><WindowLayoutContext.Provider value={{ window: { schemaVersion: 3, id: 'window', title: 'Window', revision: 0, selectedPrimaryViewId: root.id, selectedViewId: child.id, views: [root, child] }, operate }}>
     <SessionFamily attachedSession={session} target={session} viewId={root.id} controls={<button className="lab-session-heading-actions-trigger">More session actions</button>}
       storageScope="family-heading-focus" baseUrl="http://fixture" hostLabel="Local" compact={false} active offline transport={transport} draftStore={new DraftStore('family-heading-focus')} />
   </WindowLayoutContext.Provider></WorkspaceReady.Provider>);

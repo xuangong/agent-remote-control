@@ -4,6 +4,7 @@ import { afterEach, expect, it, vi } from 'vitest';
 import { AgentReplica, type RemoteAgentTransport } from '@orchardworks/agent-remote-web';
 import { createWindowView } from '@orchardworks/agent-remote-protocol';
 import { SessionWindow } from './SessionWindow.js';
+import { SessionDockProvider, SessionDockRail } from './SessionDock.js';
 import { WindowLayoutContext } from '../window-workspace-context.js';
 import { WindowSessionBridgeContext } from '../window-session-bridge-context.js';
 import { createCompositionSlot } from '../session-composition.js';
@@ -15,6 +16,42 @@ import * as conversationHooks from '../hooks/useConversationSession.js';
 
 const transport = { onDiagnostic: () => () => {}, onProtocolMessage: () => () => {}, connect: () => ({ close() {}, send() {} }) } as unknown as RemoteAgentTransport;
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); });
+
+it.each([
+  { placement: 'dock' as const, bound: true }, { placement: 'float' as const, bound: true },
+  { placement: 'dock' as const, bound: false }, { placement: 'float' as const, bound: false },
+])('keeps placement and binding actions in one menu while close stays visible: %j', async ({ placement, bound }) => {
+  vi.stubGlobal('ResizeObserver', class { observe() {} disconnect() {} });
+  const target = { hostId: 'host', providerId: 'recorded', nativeSessionId: 'native', title: 'Session' };
+  const pane = createWindowView('pane', bound ? target : undefined, placement);
+  const close = vi.fn(), change = vi.fn(), operate = vi.fn();
+  const view = await render(<WorkspaceReady.Provider value={false}><WindowLayoutContext.Provider value={{ window: {
+    schemaVersion: 3, id: 'window', title: 'Window', revision: 0, selectedPrimaryViewId: null, selectedViewId: pane.id, views: [pane],
+  }, operate }}><SessionDockProvider enabled><SessionDockRail primaryGroups={[]} />
+    <SessionWindow entry={{ id: pane.id, slotId: 'slot', target: bound ? target : undefined, managed: false }} baseUrl="http://fixture" visible compact={false} hostLabel="Host" offline
+      transport={transport} draftStore={new DraftStore('window-menu')} navigation={() => ({ childrenFor: () => [], resolveSessionLink: () => undefined })}
+      actions={<button type="button">Favorite</button>} onFocus={() => {}} onClose={close} onChangeSession={change} />
+  </SessionDockProvider></WindowLayoutContext.Provider></WorkspaceReady.Provider>);
+  const menu = view.querySelector<HTMLDivElement>('.lab-session-heading-actions-panel')!;
+  expect(view.querySelectorAll('[aria-label="More session actions"]')).toHaveLength(1);
+  expect(menu.hidden).toBe(true);
+  const placementAction = menu.querySelector<HTMLButtonElement>(`[aria-label="${placement === 'dock' ? 'Float' : 'Dock'} ${bound ? 'Session' : 'Select session'}"]`)!;
+  expect(placementAction).not.toBeNull();
+  const closeAction = view.querySelector<HTMLButtonElement>(`[aria-label="Close ${bound ? 'Session' : 'Select session'}"]`)!;
+  expect(closeAction.closest('.lab-session-heading-actions-panel')).toBeNull();
+  expect([...view.querySelectorAll('button')].find(button => button.textContent === 'Favorite')?.closest('.lab-session-heading-actions-panel')).toBeNull();
+  await act(async () => view.querySelector<HTMLButtonElement>('[aria-label="More session actions"]')!.click());
+  expect(menu.hidden).toBe(false);
+  await act(async () => placementAction.click());
+  expect(operate).toHaveBeenCalledWith({ type: 'view.place', viewId: pane.id, placement: placement === 'dock' ? 'float' : 'dock' });
+  const changeAction = bound ? menu.querySelector<HTMLButtonElement>('[aria-label="Change session"]')
+    : [...view.querySelectorAll('button')].find(button => button.textContent === 'Open sidebar');
+  expect(changeAction).toBeDefined();
+  await act(async () => changeAction!.click());
+  expect(change).toHaveBeenCalledOnce();
+  await act(async () => closeAction.click());
+  expect(close).toHaveBeenCalledOnce();
+});
 
 it.each([{ shared: true }, { shared: false }, { shared: true, intent: 'history' as const }])('keeps dock ownership and explicit history intent through the real family: %j', async ({ shared, intent }) => {
   vi.stubGlobal('ResizeObserver', class { observe() {} disconnect() {} });
@@ -31,7 +68,7 @@ it.each([{ shared: true }, { shared: false }, { shared: true, intent: 'history' 
   const bound = vi.fn();
   const focus = vi.fn();
   const historical = vi.fn();
-  const window = { schemaVersion: 2 as const, id: 'window', title: 'Window', revision: 0, selectedPrimaryViewId: primary.id, selectedViewId: dock.id, views: [primary, dock] };
+  const window = { schemaVersion: 3 as const, id: 'window', title: 'Window', revision: 0, selectedPrimaryViewId: primary.id, selectedViewId: dock.id, views: [primary, dock] };
   const view = await render(<WorkspaceReady.Provider value={true}>
     <WindowLayoutContext.Provider value={shared ? { window, operate() {} } : undefined}>
       <WindowSessionBridgeContext.Provider value={{ slotForView: id => id === dock.id ? slot : undefined }}>

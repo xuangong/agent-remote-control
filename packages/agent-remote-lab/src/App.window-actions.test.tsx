@@ -40,7 +40,7 @@ async function fixture(historyPlacement?: 'dock' | 'float', hiddenAskSource?: 'm
   configureImageDraftPersistence(() => false);
   vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} });
   const first: WorkspaceWindow = {
-    schemaVersion: 2, id: 'first', revision: 0, title: 'First', selectedPrimaryViewId: 'main', selectedViewId: 'main',
+    schemaVersion: 3, id: 'first', revision: 0, title: 'First', selectedPrimaryViewId: 'main', selectedViewId: 'main',
     views: [createWindowView('main', undefined, 'primary'), {
       ...createWindowView('leader-view', { hostId: 'local', providerId: 'recorded', nativeSessionId: 'leader-session', title: 'Leader' }),
       feature: createWindowFeature({ kind: 'team', id: team.id, role: 'leader', memberId: 'leader' }), bindingPolicy: 'managed',
@@ -73,7 +73,7 @@ async function fixture(historyPlacement?: 'dock' | 'float', hiddenAskSource?: 'm
     first.selectedViewId = 'selected-ask';
     localStorage.setItem('agent-remote:ask-view', String(askVisible));
   }
-  const second: WorkspaceWindow = { schemaVersion: 2, id: 'second', revision: 0, title: 'Second', selectedPrimaryViewId: 'main', selectedViewId: 'main', views: [createWindowView('main', undefined, 'primary')] };
+  const second: WorkspaceWindow = { schemaVersion: 3, id: 'second', revision: 0, title: 'Second', selectedPrimaryViewId: 'main', selectedViewId: 'main', views: [createWindowView('main', undefined, 'primary')] };
   for (const window of [first, second]) localStorage.setItem(`agent-remote:recovery:${scope}:shared-window:${window.id}`, JSON.stringify(window));
   history.replaceState(null, '', '/?window=first');
   vi.spyOn(SessionDirectoryClient.prototype, 'attach').mockImplementation(async (_providerId, nativeSessionId) => ({ agentId: nativeSessionId, nativeSessionId }));
@@ -192,6 +192,23 @@ it('gathers missing Team members after same-Window leader selection clones its f
       feature: createWindowFeature({ kind: 'team', id: team.id, role: 'member', memberId: 'worker' }) });
 }, 10000);
 
+it('opens an existing Team in the same empty Window without reviving a closed source view', async () => {
+  const test = await fixture();
+  await act(async () => { await test.read().operate({ type: 'layout.apply', layout: {
+    title: 'First', selectedViewId: null, selectedPrimaryViewId: null, views: [],
+  } }); });
+  expect(test.container.querySelector('[data-testid="empty-window"]')).not.toBeNull();
+  expect(test.menu().source).toBeUndefined();
+  let opened = false;
+  await act(async () => { opened = await test.menu().onOpen(team); });
+  expect(opened).toBe(true);
+  expect(test.read().window?.id).toBe('first');
+  expect(test.read().window?.views).toHaveLength(3);
+  expect(test.read().window?.views.some(view => view.id === 'main')).toBe(false);
+  expect(test.read().window?.views.find(view => view.id === test.read().window?.selectedViewId)?.binding?.nativeSessionId).toBe('source');
+  expect(test.read().window?.views.filter(view => parseWindowFeature(view.feature)?.kind === 'team')).toHaveLength(2);
+});
+
 async function settleTrackedPrimary(check: () => void) {
   await vi.waitFor(async () => {
     await act(async () => {});
@@ -199,7 +216,7 @@ async function settleTrackedPrimary(check: () => void) {
   }, { timeout: 3000, interval: 20 });
 }
 
-async function trackedPrimaryFixture(staleAgent = false) {
+async function trackedPrimaryFixture(staleAgent = false, focus: 'primary' | 'side' = 'side') {
   configureImageDraftPersistence(() => false);
   vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} });
   localStorage.setItem('agent-remote:track-view', 'true');
@@ -211,11 +228,11 @@ async function trackedPrimaryFixture(staleAgent = false) {
   const composition = createCompositionDocument(scope, slots);
   composition.asks = slots.map(slot => createAskOwner(slot, scope));
   composition.tracks = [{ entryId: sessionKey(target), slotId: 'tracked-slot', view: {
-    primarySlot: 'tracked-slot', selections: { 'tracked-slot': 'tracked-side-slot' }, focus: 'tracked-side-slot', anchor: 'tracked-slot',
+    primarySlot: 'tracked-slot', selections: { 'tracked-slot': 'tracked-side-slot' }, focus: focus === 'primary' ? 'tracked-slot' : 'tracked-side-slot', anchor: 'tracked-slot',
   } }];
   sessionStorage.setItem(compositionMetadataKey(scope), JSON.stringify(composition));
   saveTrackedSessions(scope, [target]);
-  let document: WorkspaceWindow = { schemaVersion: 2, id: 'tracked-primary', title: 'Tracked primary', revision: 0,
+  let document: WorkspaceWindow = { schemaVersion: 3, id: 'tracked-primary', title: 'Tracked primary', revision: 0,
     selectedPrimaryViewId: 'main', selectedViewId: 'main', views: [createWindowView('main', session('A'), 'primary')] };
   history.replaceState(null, '', '/?window=tracked-primary');
   vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -291,8 +308,8 @@ async function trackedPrimaryFixture(staleAgent = false) {
     timelineRequested: () => timelineRequested, releaseTimeline, open: () => menu.onOpen(target) };
 }
 
-it('restores a saved primary Track side after native confirmation finishes later than the Window binding', async () => {
-  const test = await trackedPrimaryFixture();
+it.each(['primary', 'side'] as const)('restores a saved Track with %s focus after native confirmation finishes later than the Window binding', async focus => {
+  const test = await trackedPrimaryFixture(false, focus);
   try {
     await act(async () => test.open());
     await settleTrackedPrimary(() => { expect(test.timelineRequested()).toBe(true); expect(test.workspace().window?.views[0]?.binding?.nativeSessionId).toBe('D'); });
@@ -302,7 +319,7 @@ it('restores a saved primary Track side after native confirmation finishes later
     await settleTrackedPrimary(() => expect(test.confirmed).toContain('D'));
     await settleTrackedPrimary(() => expect(test.workspace().window?.views.find(view => view.attachedTo === 'main')?.binding?.nativeSessionId).toBe('S'));
     const side = test.workspace().window!.views.find(view => view.attachedTo === 'main')!;
-    expect(test.workspace().window?.selectedViewId).toBe(side.id);
+    expect(test.workspace().window?.selectedViewId).toBe(focus === 'primary' ? 'main' : side.id);
     expect(test.succession().document.windowBindings?.find(binding => binding.viewId === 'main' && binding.slotId === 'tracked-slot')).toBeDefined();
   } finally { test.releaseTimeline(); }
 }, 10000);

@@ -32,7 +32,7 @@ function handoff(): SessionSuccessionReplay {
 async function fixture(shared = false) {
   const a = { hostId: 'host', providerId: 'recorded', nativeSessionId: 'A', title: 'Group A' };
   const b = { ...a, nativeSessionId: 'B', title: 'Group B' };
-  const window: WorkspaceWindow = { schemaVersion: 2, id: 'workspace', revision: 1, title: 'Window', selectedPrimaryViewId: 'a', selectedViewId: 'a',
+  const window: WorkspaceWindow = { schemaVersion: 3, id: 'workspace', revision: 1, title: 'Window', selectedPrimaryViewId: 'a', selectedViewId: 'a',
     views: [createWindowView('a', a, 'primary'), createWindowView('b', b, 'primary')] };
   let persistedWindow = structuredClone(window);
   const attachments: Array<{ nativeSessionId: string; parentNativeSessionId?: string }> = [];

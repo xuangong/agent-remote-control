@@ -310,7 +310,9 @@ export function useTpmWork(service: TpmService | undefined, hosts: readonly TpmH
     if (!canCreate(main) || !service) throw new Error('TPM creation is unavailable for this session.');
     if (mutation.current) throw new Error('Wait for the current TPM operation.');
     const sourceWindow = shared.current?.readWindow?.() ?? shared.current?.window;
-    const sourceView = sourceWindow ? { windowId: sourceWindow.id, viewId: latest.current.presentedSource?.viewId ?? sourceWindow.selectedViewId } : undefined;
+    const sourceViewId = latest.current.presentedSource?.viewId ?? sourceWindow?.selectedViewId;
+    if (sourceWindow && !sourceViewId) throw new Error('The TPM source view is unavailable in this Window.');
+    const sourceView = sourceWindow && sourceViewId ? { windowId: sourceWindow.id, viewId: sourceViewId } : undefined;
     mutation.current = true; setBusy('create'); setError(undefined);
     try {
       const hostId = main.hostId ?? 'local';

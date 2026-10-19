@@ -9,6 +9,7 @@ import { useAskPosition } from '../hooks/useAskPosition.js';
 import { askCommand } from '../fork-actions.js';
 import { SessionFamily } from './SessionFamily.js';
 import { SessionHeadingActions } from './SessionHeadingActions.js';
+import { SessionTitleInteractionContext } from './SessionTitleInteraction.js';
 import { SessionLink } from './SessionLink.js';
 import { SessionViewPlacement } from './SessionDock.js';
 import { AskResize } from './AskResize.js';
@@ -32,6 +33,7 @@ function AskConversationContent({ docked, dockControls, onAdditionalWidthChange,
   draftBinding: DraftBinding; onClose(): void; onToggleEnabled(): void; onClean(): void; onRetry(): void; onSendInput(id: string, send: AskInputSender): void; onDiscardInput(id: string): void;
 }) {
   const shared = useWindowLayout();
+  const titleInteraction = useContext(SessionTitleInteractionContext);
   const presentedViewId = useContext(WindowPresentationContext) ?? shared?.window.selectedViewId;
   const selected = !isAskAttached(entry) && !!storageBindings.viewId && storageBindings.viewId === presentedViewId;
   const panel = useRef<HTMLElement>(null);
@@ -66,7 +68,7 @@ function AskConversationContent({ docked, dockControls, onAdditionalWidthChange,
       });
     };
   }, [triggerRef]);
-  const tools = <div className="lab-ask-controls"><SessionHeadingActions sessionKey={storageScope}>{dockControls}
+  const tools = <div className="lab-ask-controls"><SessionHeadingActions sessionKey={storageScope} alwaysCollapsed>{dockControls}
     <button type="button" aria-label="Clean Ask" title="Start a fresh Ask conversation" disabled={busy || !!entry.inputs?.length} onClick={onClean}>Clean</button>
     </SessionHeadingActions>
     <button type="button" aria-label="Minimize Ask" title="Minimize Ask" onClick={close}>×</button>
@@ -79,7 +81,7 @@ function AskConversationContent({ docked, dockControls, onAdditionalWidthChange,
     data-selected={selected || undefined} aria-current={selected ? 'true' : undefined}>
     {isAskAttached(entry) ? <AskChat key={askParticipantKey(entry.record!)} record={entry.record!} executionTarget={entry.executionTarget} inputs={entry.error ? undefined : entry.inputs} onSendInput={onSendInput} replica={replica} transport={transport}
       storageScope={storageScope} navigation={navigation} onToggleEnabled={onToggleEnabled} busy={busy} draftBinding={draftBinding} tools={tools} notice={notice} onAdditionalWidthChange={onAdditionalWidthChange} {...storageBindings} /> : <>
-      <header className="lab-ask-heading"><strong>Ask</strong>{tools}</header>
+      <header className="lab-ask-heading"><strong {...titleInteraction}>Ask</strong>{tools}</header>
       {notice}
       {busy || !entry.error ? <div className="lab-ask-opening" role="status">{busy ? 'Opening Ask…' : 'Ask about this conversation.'}</div> : null}
       <AskDraft binding={draftBinding} />

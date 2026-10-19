@@ -6,7 +6,7 @@ import type { WindowMutation, WorkspaceWindow } from '@orchardworks/agent-remote
 import { WindowRequestError, WindowWorkspaceClient } from './window-client.js';
 
 const window: WorkspaceWindow = {
-  schemaVersion: 2, id: 'window-one', revision: 0, title: 'One', selectedPrimaryViewId: 'main', selectedViewId: 'main',
+  schemaVersion: 3, id: 'window-one', revision: 0, title: 'One', selectedPrimaryViewId: 'main', selectedViewId: 'main',
   views: [{ id: 'main', placement: 'primary', width: 440, collapsed: false, display: { mode: 'preview', lettersVisible: true } }],
 };
 const mutation: WindowMutation = { operationId: 'rename-one', issuedAt: 100, baseRevision: 0, operation: { type: 'rename', title: 'Renamed' } };
@@ -147,7 +147,7 @@ it('decodes legacy server snapshots without altering the original creation reque
   const legacy = { ...base, schemaVersion: 1, primaryViewId: selectedPrimaryViewId, mainMinimized: false };
   await withWindowServer(() => ({ body: { window: legacy } }), async client => {
     const snapshot = await client.inspect(window.id);
-    expect(snapshot.window).toMatchObject({ schemaVersion: 2, id: window.id, revision: 0, selectedPrimaryViewId });
+    expect(snapshot.window).toMatchObject({ schemaVersion: 3, id: window.id, revision: 0, selectedPrimaryViewId });
     expect(snapshot.window.views).toEqual(window.views);
     expect(legacy.schemaVersion).toBe(1);
   });
@@ -161,6 +161,26 @@ it('keeps a legacy creation replay payload unchanged while decoding its current 
     return { body: { result: receipt(operation.operationId, 0), window: { ...window, revision: 2 } } };
   }, async client => {
     const snapshot = await client.create(legacy as unknown as WorkspaceWindow, operation);
-    expect(snapshot.window).toMatchObject({ schemaVersion: 2, id: window.id, revision: 2 });
+    expect(snapshot.window).toMatchObject({ schemaVersion: 3, id: window.id, revision: 2 });
+  });
+}, 10000);
+
+it('accepts an empty Window in a committed close result, inspection and listing over HTTP', async () => {
+  const empty = { ...window, revision: 1, views: [], selectedViewId: null, selectedPrimaryViewId: null };
+  await withWindowServer(input => ({ body: { window: empty, windows: [empty], ...(input.operationId ? { result: receipt(input.operationId) } : {}) } }), async client => {
+    const closed = await client.mutate(window.id, { ...mutation, operation: { type: 'view.close', viewId: 'main' } });
+    expect(closed.window).toEqual(empty);
+    expect((await client.inspect(window.id)).window).toEqual(empty);
+    expect(await client.list()).toEqual([empty]);
+  });
+}, 10000);
+
+it('creates an explicitly empty Window and migrates valid v2 server snapshots to v3', async () => {
+  const empty = { ...window, views: [], selectedViewId: null, selectedPrimaryViewId: null };
+  await withWindowServer(input => ({ body: { result: receipt(input.operationId, 0), window: empty } }), async client => {
+    expect((await client.create(empty)).window).toEqual(empty);
+  });
+  await withWindowServer(() => ({ body: { window: { ...window, schemaVersion: 2 } } }), async client => {
+    expect((await client.inspect(window.id)).window).toEqual(window);
   });
 }, 10000);

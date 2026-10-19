@@ -3,6 +3,8 @@ import { createPortal } from 'react-dom';
 import './session-dock.css';
 import { useWindowLayout } from '../window-workspace-context.js';
 import { conversationSessionStorage } from '../conversation-storage.js';
+import { SessionTitleInteractionContext } from './SessionTitleInteraction.js';
+import { useSessionDockDrag } from '../hooks/useSessionDockDrag.js';
 
 const defaultWidth = 440, minimumWidth = 320, maximumWidth = 1600;
 interface DockItem { id: string; title: string; host: HTMLElement; visible: boolean; width: number; additionalWidth?: number }
@@ -78,21 +80,23 @@ export function SessionDockProvider({ enabled, storageScope, children }: { enabl
     hadVisibleDock.current = visible;
   }, [enabled, items, layout.mainMinimized, layout.panes.length, minimizeMain]);
   function orderSharedDocks(panes: DockLayout['panes']) {
-    if (!shared) return;
-    let afterId = shared.window.views.filter(view => view.placement === 'primary').at(-1)!.id;
-    shared.operate({ type: 'batch', operations: panes.map(pane => {
+    if (!shared || !panes.length) return;
+    const primary = shared.window.views.filter(view => view.placement === 'primary').at(-1);
+    let afterId = primary?.id ?? resolve(panes[0]!.id);
+    const operations = (primary ? panes : panes.slice(1)).map(pane => {
       const viewId = resolve(pane.id);
       const operation = { type: 'view.move' as const, viewId, afterId };
       afterId = viewId;
       return operation;
-    }) });
+    });
+    if (operations.length) shared.operate({ type: 'batch', operations });
   }
   const value: DockContext = shared ? { enabled, items, layout, register, unregister,
     add: id => shared.operate({ type: 'view.place', viewId: resolve(id), placement: 'dock' }),
     remove: id => shared.operate({ type: 'view.place', viewId: resolve(id), placement: 'float' }),
     resize: (id, width) => shared.operate({ type: 'view.resize', viewId: resolve(id), width: clampWidth(width, 240) }),
-    resizeBase: width => shared.operate({ type: 'view.resize', viewId: shared.window.selectedPrimaryViewId, width: clampWidth(width, 240) }),
-    minimizeMain: minimized => shared.operate({ type: 'view.collapse', viewId: shared.window.selectedPrimaryViewId, collapsed: minimized }),
+    resizeBase: width => { if (shared.window.selectedPrimaryViewId) shared.operate({ type: 'view.resize', viewId: shared.window.selectedPrimaryViewId, width: clampWidth(width, 240) }); },
+    minimizeMain: minimized => { if (shared.window.selectedPrimaryViewId) shared.operate({ type: 'view.collapse', viewId: shared.window.selectedPrimaryViewId, collapsed: minimized }); },
     move: (id, offset) => {
       const index = layout.panes.findIndex(item => item.id === id), next = Math.max(0, Math.min(layout.panes.length - 1, index + offset));
       if (index < 0 || index === next) return;
@@ -140,14 +144,14 @@ export function SessionViewPlacement({ id, title, visible, additionalWidth, dock
   }, [host, docked]);
   useLayoutEffect(() => { register?.({ id, title, host, visible, additionalWidth }); }, [register, id, title, host, visible, additionalWidth]);
   useLayoutEffect(() => () => { unregister?.(id, host); host.remove(); }, [unregister, id, host]);
+  const titleInteraction = useSessionDockDrag({ id, title, enabled: docked, move: dock?.move, reorder: dock?.reorder });
   const controls = dock?.enabled ? <>
-    {docked ? <DockMove id={id} title={title} /> : null}
     <button type="button" className="lab-session-dock-toggle" aria-label={`${docked ? 'Float' : 'Dock'} ${title}`} title={docked ? 'Return to floating window' : 'Dock to the right of the conversations'}
       onClick={() => docked ? dock.remove(id) : dock.add(id)}>
       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" aria-hidden="true"><rect x={docked ? '5' : '3'} y={docked ? '5' : '4'} width="16" height="16" rx="2" />{docked ? <path d="M3 16V3h13" /> : <path d="M13 4v16" />}</svg>
     </button>
   </> : null;
-  return <><div ref={home} className="lab-session-placement-home" />{mounted ? createPortal(children({ docked, controls }), host) : null}</>;
+  return <><div ref={home} className="lab-session-placement-home" />{mounted ? createPortal(<SessionTitleInteractionContext.Provider value={titleInteraction}>{children({ docked, controls })}</SessionTitleInteractionContext.Provider>, host) : null}</>;
 }
 
 export function MinimizeMainSession() {
@@ -169,8 +173,9 @@ interface SessionDockRailProps {
   onSelectPrimaryGroup?(id: string): void;
   onResizePrimaryGroup?(id: string, width: number): void;
   onCollapsePrimaryGroup?(id: string, collapsed: boolean): void;
+  onClosePrimaryGroup?(id: string): void;
 }
-export function SessionDockRail({ children, minimizedHeader, mainTitle = 'Main session', minimumBaseWidth = minimumWidth, onCreateView, compact = false, primaryGroups, onSelectPrimaryGroup, onResizePrimaryGroup, onCollapsePrimaryGroup }: SessionDockRailProps) {
+export function SessionDockRail({ children, minimizedHeader, mainTitle = 'Main session', minimumBaseWidth = minimumWidth, onCreateView, compact = false, primaryGroups, onSelectPrimaryGroup, onResizePrimaryGroup, onCollapsePrimaryGroup, onClosePrimaryGroup }: SessionDockRailProps) {
   const dock = useContext(Context);
   const rail = useRef<HTMLDivElement>(null);
   const [width, setWidth] = useState(0);
@@ -199,7 +204,7 @@ export function SessionDockRail({ children, minimizedHeader, mainTitle = 'Main s
   }, []);
   const baseWidth = Math.max(minimumBaseWidth, preferredBaseWidth ?? width - defaultWidth);
   return <div ref={rail} className="lab-session-dock-rail" data-docked={active.length > 0 || primaryGroups && !compact || undefined} data-primary-groups={primaryGroups ? true : undefined} data-compact={compact || undefined}>
-    {primaryGroups ? primaryGroups.map((group, index) => <PrimaryGroupPane key={group.id} group={group} compact={compact} minimizedHeader={index === 0 ? minimizedHeader : undefined} onSelect={onSelectPrimaryGroup} onResize={onResizePrimaryGroup} onCollapse={onCollapsePrimaryGroup} />) : <div className="lab-session-dock-base" data-minimized={minimized || undefined} style={active.length ? { flexBasis: minimized ? 44 : baseWidth } : undefined}>
+    {primaryGroups ? primaryGroups.map((group, index) => <PrimaryGroupPane key={group.id} group={group} compact={compact} minimizedHeader={index === 0 ? minimizedHeader : undefined} onSelect={onSelectPrimaryGroup} onResize={onResizePrimaryGroup} onCollapse={onCollapsePrimaryGroup} onClose={onClosePrimaryGroup} />) : <div className="lab-session-dock-base" data-minimized={minimized || undefined} style={active.length ? { flexBasis: minimized ? 44 : baseWidth } : undefined}>
       <div ref={content} id={contentId} className="lab-session-dock-main-content" hidden={minimized}>{children}</div>
       {minimized ? minimizedHeader : null}
       {minimized ? <button ref={restore} type="button" className="lab-session-main-restore" aria-label={`Restore main session: ${mainTitle}`} title={`Restore main session: ${mainTitle}`} aria-expanded={false} aria-controls={contentId}
@@ -214,11 +219,12 @@ export function SessionDockRail({ children, minimizedHeader, mainTitle = 'Main s
   </div>;
 }
 
-function PrimaryGroupPane({ group, compact, minimizedHeader, onSelect, onResize, onCollapse }: {
+function PrimaryGroupPane({ group, compact, minimizedHeader, onSelect, onResize, onCollapse, onClose }: {
   group: PrimarySessionGroupPane; compact: boolean; minimizedHeader?: ReactNode;
   onSelect?: SessionDockRailProps['onSelectPrimaryGroup'];
   onResize?: SessionDockRailProps['onResizePrimaryGroup'];
   onCollapse?: SessionDockRailProps['onCollapsePrimaryGroup'];
+  onClose?: SessionDockRailProps['onClosePrimaryGroup'];
 }) {
   const minimized = !compact && group.collapsed;
   const contentId = useId();
@@ -232,6 +238,8 @@ function PrimaryGroupPane({ group, compact, minimizedHeader, onSelect, onResize,
     onPointerDownCapture={select} onFocusCapture={select}>
     <div id={contentId} className="lab-primary-group-content" hidden={minimized}>{group.content}</div>
     {minimized ? minimizedHeader : null}
+    {minimized && onClose ? <button type="button" data-pane-selection-ignore className="lab-primary-group-close" aria-label={`Close primary group: ${group.title}`}
+      title="Close this session view. Agent sessions keep running." onClick={() => onClose(group.id)}>×</button> : null}
     {minimized ? <button type="button" className="lab-session-main-restore" aria-label={`Restore primary group: ${group.title}`} aria-controls={contentId} aria-expanded={false}
       onClick={() => onCollapse?.(group.id, false)}><span className="lab-session-main-label">Group</span><span className="lab-session-main-title">{group.title}</span></button>
       : !compact && onCollapse ? <button type="button" className="lab-primary-group-minimize" aria-label={`Minimize primary group: ${group.title}`} aria-controls={contentId} aria-expanded={true}
@@ -318,42 +326,6 @@ export function DockResize({ title, width, additionalWidth = 0, minimum: preferr
       const next = event.key === 'ArrowRight' ? width + step : event.key === 'ArrowLeft' ? width - step : event.key === 'Home' ? minimum : event.key === 'Enter' ? defaultWidth : undefined;
       if (next !== undefined) { event.preventDefault(); event.stopPropagation(); resize(next); }
     }} />;
-}
-
-function DockMove({ id, title }: { id: string; title: string }) {
-  const dock = useContext(Context)!;
-  const gesture = useRef<{ x: number; rail: HTMLElement; pane: HTMLElement; frame: number }>();
-  const stop = () => { if (gesture.current) { cancelAnimationFrame(gesture.current.frame); delete gesture.current.pane.dataset.dragging; gesture.current = undefined; } };
-  useEffect(() => stop, []);
-  const tick = () => {
-    const drag = gesture.current;
-    if (!drag) return;
-    const bounds = drag.rail.getBoundingClientRect();
-    const edge = 48;
-    const speed = drag.x < bounds.left + edge ? -12 : drag.x > bounds.right - edge ? 12 : 0;
-    if (speed) drag.rail.scrollLeft += speed;
-    const origin = Number(drag.pane.style.order);
-    for (const pane of drag.rail.querySelectorAll<HTMLElement>('.lab-session-dock-pane')) {
-      const rect = pane.getBoundingClientRect(), order = Number(pane.style.order);
-      if (pane === drag.pane || drag.x < rect.left || drag.x > rect.right) continue;
-      if (order > origin && drag.x > rect.left + rect.width / 2 || order < origin && drag.x < rect.left + rect.width / 2) dock.reorder(id, pane.dataset.dockId!);
-    }
-    drag.frame = requestAnimationFrame(tick);
-  };
-  return <button type="button" className="lab-session-dock-move" aria-label={`Move ${title}`} title="Drag to reorder docked views. Arrow keys move left or right."
-    onPointerDown={event => {
-      if (event.button !== 0) return;
-      const pane = event.currentTarget.closest<HTMLElement>('.lab-session-dock-pane'), rail = pane?.parentElement;
-      if (!pane || !rail) return;
-      event.preventDefault(); event.stopPropagation(); event.currentTarget.focus({ preventScroll: true });
-      stop(); pane.dataset.dragging = 'true'; gesture.current = { x: event.clientX, rail, pane, frame: requestAnimationFrame(tick) };
-      event.currentTarget.setPointerCapture(event.pointerId);
-    }} onPointerMove={event => { if (gesture.current) gesture.current.x = event.clientX; }}
-    onPointerUp={event => { stop(); if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId); }}
-    onPointerCancel={stop} onLostPointerCapture={stop}
-    onKeyDown={event => { if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') { event.preventDefault(); event.stopPropagation(); dock.move(id, event.key === 'ArrowLeft' ? -1 : 1); } }}>
-    <svg width="14" height="16" viewBox="0 0 14 16" fill="currentColor" aria-hidden="true"><path d="M4 3h2v2H4zm4 0h2v2H8zM4 7h2v2H4zm4 0h2v2H8zM4 11h2v2H4zm4 0h2v2H8z" /></svg>
-  </button>;
 }
 
 export function useSessionDocked(id: string): boolean {

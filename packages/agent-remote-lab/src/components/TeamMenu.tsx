@@ -106,7 +106,7 @@ export function TeamMenu(props: Props) {
   async function create() {
     if (!source && !pendingCreate) return;
     const input = pendingCreate ?? { operationId: crypto.randomUUID(), source: structuredClone(source!), sourceViewId: props.sourceViewId,
-      ...(layout ? { origin: { windowId: layout.window.id, viewId: layout.window.selectedViewId } } : {}) }; setPendingCreate(input);
+      ...(layout?.window.selectedViewId ? { origin: { windowId: layout.window.id, viewId: layout.window.selectedViewId } } : {}) }; setPendingCreate(input);
     const { sourceViewId, origin, ...request } = input;
     const created = await client.create(request); if (currentClient.current !== client) return;
     setTeams(current => [...current.filter(value => value.id !== created.id), created]); setRosterClient(client); setPendingCreate(undefined);

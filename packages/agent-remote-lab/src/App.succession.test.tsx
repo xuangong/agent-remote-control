@@ -969,7 +969,7 @@ it('old desktop A notification still opens concrete A history after B and C conf
   expect(succession.desired?.slot.owners.text.key).toMatch(/^view:/);
   expect(f.view.textContent).toContain('Original A completion');
   expect(visibleQuery(f.view, '[data-testid="prompt-input"]')?.textContent).toBe('');
-  expect(f.requests.slice(beforeClick).filter(item => item.url.endsWith('/attach')).map(item => item.body?.nativeSessionId)).toEqual(['A']);
+  expect(f.requests.slice(beforeClick).filter(item => item.url.endsWith('/attach'))).toEqual([]);
   expect(f.frames.some(frame => ['send_message', 'execute_command', 'image_upload_begin'].includes(frame.message?.type ?? ''))).toBe(false);
 });
 
@@ -1618,7 +1618,7 @@ it('keeps A outbox, question drafts and reading cursor concrete through B confir
   expect(older.searchParams.get('direction')).toBe('before');
   expect(older.searchParams.get('epoch')).toBe('epoch-agent-A');
   expect(older.searchParams.get('seq')).toBe('1');
-  expect(f.requests.filter(item => item.url.endsWith('/attach')).map(item => item.body?.nativeSessionId)).toEqual(['A', 'B', 'A']);
+  expect(f.requests.filter(item => item.url.endsWith('/attach')).map(item => item.body?.nativeSessionId)).toEqual(['A', 'B']);
 });
 
 it.each([['damaged', '{broken'], ['unsupported', JSON.stringify({ version: 99 })], ['capacity', ' '.repeat(1048577)]])('preserves %s composition bytes without attaching the saved predecessor', async (_kind, original) => {
@@ -1848,6 +1848,42 @@ it('reattaches a restored Side to its new runtime binding while preserving the v
   expect(f.frames.filter(frame => frame.message && ['send_message', 'execute_command', 'image_upload_begin'].includes(frame.message.type))).toEqual([]);
 });
 
+it('reopening an attached Side preserves its existing draft owner despite an unowned legacy slot', async () => {
+  const real = successionHooks.useSessionSuccession, realWindow = windowWorkspaceHooks.useWindowWorkspace;
+  let succession!: ReturnType<typeof real>, workspace!: ReturnType<typeof realWindow>, side!: OpenedSession;
+  vi.spyOn(successionHooks, 'useSessionSuccession').mockImplementation((...args) => { succession = real(...args); return succession; });
+  vi.spyOn(windowWorkspaceHooks, 'useWindowWorkspace').mockImplementation((...args) => { workspace = realWindow(...args); return workspace; });
+  const f = await failureFixture(false, 'B', false, '', { chain: [], seed(scope, source) {
+    side = { ...source, nativeSessionId: 'S', agentId: 'agent-S', title: 'Side S' };
+    localStorage.setItem(`agent-remote-opened:${scope}`, JSON.stringify([source, side]));
+    const store = new ForkStore(scope), record = store.prepare(referenceForkContext(source), { sourceNativeSessionId: source.nativeSessionId });
+    store.bind(record.id, side); store.markConfigured(record.id); store.finishCreation(record.id);
+    const drafts = new DraftStore(scope); drafts.set(side.agentId, 'Existing Side draft'); drafts.flush();
+  } });
+  await settleApp(() => expect(succession.binding?.session.nativeSessionId).toBe('A'));
+  const openSide = () => f.view.querySelector<HTMLButtonElement>('.lab-primary-conversation .lab-fork-entry > button')!.click();
+  await act(async () => openSide());
+  await settleApp(() => expect(workspace.window?.views.find(view => view.attachedTo)?.binding?.nativeSessionId).toBe('S'));
+  const child = workspace.window!.views.find(view => view.attachedTo)!;
+  const mapping = () => succession.document.windowBindings!.find(entry => entry.windowId === workspace.window!.id && entry.viewId === child.id)!;
+  const originalSlotId = mapping().slotId;
+  const originalSlot = succession.document.slots.find(slot => slot.id === originalSlotId)!;
+  await settleApp(() => expect(f.view.querySelector('.lab-side-conversation [data-testid="prompt-input"]')?.textContent).toBe('Existing Side draft'));
+  const owners = structuredClone(originalSlot.owners);
+  await act(async () => {
+    const legacy = createCompositionSlot('legacy-side', side, f.scope);
+    legacy.owners.text.key = 'legacy-side-draft';
+    succession.document.slots.unshift(legacy); succession.document.editRevision++; succession.save();
+  });
+  await act(async () => openSide());
+  await settleApp(() => {
+    expect(mapping().slotId).toBe(originalSlotId);
+    expect(succession.document.slots.find(slot => slot.id === mapping().slotId)!.owners).toEqual(owners);
+    expect(f.view.querySelector('.lab-side-conversation [data-testid="prompt-input"]')?.textContent).toBe('Existing Side draft');
+  });
+  expect(workspace.window!.views.filter(view => view.attachedTo)).toHaveLength(1);
+});
+
 it.each(['ordinary', 'Track'] as const)('leaves a focused unlinked Side through %s navigation and keeps its independent view', async navigation => {
   const real = successionHooks.useSessionSuccession, realManager = managerComponents.ChatSessionManager, realAttention = attentionHooks.useSessionAttention;
   let succession!: ReturnType<typeof real>, manager!: ComponentProps<typeof realManager>;
@@ -1904,13 +1940,13 @@ it.each(['ordinary', 'Track'] as const)('leaves a focused unlinked Side through 
     });
   }
   if (sharedWindow && navigation === 'Track') {
-    await act(async () => { await workspace.operate({ type: 'view.select', viewId: workspace.window!.selectedPrimaryViewId }); });
+    await act(async () => { await workspace.operate({ type: 'view.select', viewId: workspace.window!.selectedPrimaryViewId! }); });
   }
   await open(target);
   expect(f.view.querySelectorAll('.lab-side-conversation:not([hidden])')).toHaveLength(0);
   if (sharedWindow && navigation === 'Track') {
     const dock = workspace.window!.views.find(view => view.placement === 'dock' && view.binding?.nativeSessionId === 'S')!;
-    await act(async () => { await workspace.operate({ type: 'view.collapse', viewId: dock.id, collapsed: true }); await workspace.operate({ type: 'view.select', viewId: workspace.window!.selectedPrimaryViewId }); });
+    await act(async () => { await workspace.operate({ type: 'view.collapse', viewId: dock.id, collapsed: true }); await workspace.operate({ type: 'view.select', viewId: workspace.window!.selectedPrimaryViewId! }); });
   }
   await open(side);
   if (sharedWindow) {
@@ -2395,7 +2431,7 @@ it('keeps one global Ask launcher and retains the original Ask draft when anothe
   vi.stubGlobal('ResizeObserver', class { observe() {} disconnect() {} unobserve() {} });
   const f = await failureFixture(false, 'A', false, '&window=global-ask-roots', { chain: [], seed(scope, source) {
     const binding = (id: string) => ({ hostId: 'host', providerId: 'recorded', nativeSessionId: id, title: `Root ${id}` });
-    const document: WorkspaceWindow = { schemaVersion: 2, id: 'global-ask-roots', title: 'Ask roots', revision: 0,
+    const document: WorkspaceWindow = { schemaVersion: 3, id: 'global-ask-roots', title: 'Ask roots', revision: 0,
       selectedPrimaryViewId: 'primary-A', selectedViewId: 'primary-A',
       views: [createWindowView('primary-A', binding('A'), 'primary'), createWindowView('primary-X', binding('X'), 'primary')] };
     localStorage.setItem(`agent-remote:recovery:${scope}:shared-window:${document.id}`, JSON.stringify(document));
@@ -2450,7 +2486,7 @@ it.each(['global-hidden', 'source-collapsed', 'source-rebound'] as const)('track
   vi.spyOn(managerComponents, 'ChatSessionManager').mockImplementation(props => { if (props.current?.nativeSessionId === 'A') manager = props; return realManager(props); });
   const f = await failureFixture(false, 'A', false, '&window=global-ask-read-state', { chain: [], liveActivity: true, seed(scope, source) {
     const binding = (id: string) => ({ hostId: 'host', providerId: 'recorded', nativeSessionId: id, title: `Root ${id}` });
-    const document: WorkspaceWindow = { schemaVersion: 2, id: 'global-ask-read-state', title: 'Ask read state', revision: 0,
+    const document: WorkspaceWindow = { schemaVersion: 3, id: 'global-ask-read-state', title: 'Ask read state', revision: 0,
       selectedPrimaryViewId: 'primary-A', selectedViewId: 'primary-A',
       views: [createWindowView('primary-A', binding('A'), 'primary'), createWindowView('primary-X', binding('X'), 'primary')] };
     localStorage.setItem(`agent-remote:recovery:${scope}:shared-window:${document.id}`, JSON.stringify(document));
@@ -2493,7 +2529,7 @@ it('opens the global Ask overlay from the foreground session on a narrow screen'
   vi.stubGlobal('ResizeObserver', class { observe() {} disconnect() {} unobserve() {} });
   vi.stubGlobal('matchMedia', vi.fn((query: string) => ({ matches: query.includes('max-width: 1180px'), media: query, addEventListener() {}, removeEventListener() {}, addListener() {}, removeListener() {} })));
   const binding = (id: string) => ({ hostId: 'host', providerId: 'recorded', nativeSessionId: id, title: `Root ${id}` });
-  const document: WorkspaceWindow = { schemaVersion: 2, id: 'global-ask-mobile', title: 'Mobile Ask', revision: 0,
+  const document: WorkspaceWindow = { schemaVersion: 3, id: 'global-ask-mobile', title: 'Mobile Ask', revision: 0,
     selectedPrimaryViewId: 'primary-X', selectedViewId: 'primary-X',
     views: [createWindowView('primary-A', binding('A'), 'primary'), createWindowView('primary-X', binding('X'), 'primary')] };
   const f = await failureFixture(false, 'A', false, `&window=${document.id}`, { chain: [], selected: 'X', seed(scope) {
@@ -2521,7 +2557,7 @@ it('keeps both primary conversations mounted with separate drafts and creates an
       display: { mode: 'content', lettersVisible: true }, bindingPolicy: 'replaceable',
       binding: { hostId: session.hostId, providerId: session.providerId, nativeSessionId: session.nativeSessionId, title: session.title } });
     localStorage.setItem(`agent-remote:recovery:${scope}:shared-window:multi-primary-test`, JSON.stringify({
-      schemaVersion: 2, id: 'multi-primary-test', title: 'Parallel work', revision: 0,
+      schemaVersion: 3, id: 'multi-primary-test', title: 'Parallel work', revision: 0,
       selectedPrimaryViewId: 'primary-A', selectedViewId: 'primary-A', views: [view('primary-A', source), view('primary-X', secondary)],
     }));
   } });
@@ -2533,6 +2569,11 @@ it('keeps both primary conversations mounted with separate drafts and creates an
   await settleApp(() => expect(f.view.querySelectorAll('.lab-primary-group [data-testid="prompt-input"]')).toHaveLength(2));
   const conversations = [...f.view.querySelectorAll<HTMLElement>('.lab-primary-group')];
   expect(conversations.some(pane => pane.querySelector('[data-testid="prompt-input"]')?.textContent === 'A local draft')).toBe(true);
+  await settleApp(() => {
+    const editor = visibleQuery(conversations[1]!, '[data-testid="prompt-input"]');
+    expect(editor).not.toBeNull();
+    expect(editor?.getAttribute('aria-disabled')).not.toBe('true');
+  });
   await editVisiblePrompt(conversations[1]!, 'X independent draft');
   expect(conversations[0]!.querySelector('[data-testid="prompt-input"]')?.textContent).toBe('A local draft');
   expect(conversations[1]!.querySelector('[data-testid="prompt-input"]')?.textContent).toBe('X independent draft');
@@ -2576,7 +2617,7 @@ it.each(['directory', 'directory-open', 'Favorites', 'Track'] as const)('opens a
   let favoritesMenu!: ComponentProps<typeof realFavorites>;
   vi.spyOn(favoritesComponents, 'FavoritesMenu').mockImplementation(props => { favoritesMenu = props; return realFavorites(props); });
   const binding = (id: string, title: string) => ({ hostId: 'host', providerId: 'recorded', nativeSessionId: id, title });
-  const document: WorkspaceWindow = { schemaVersion: 2, id: 'navigation-primary-test', title: 'Parallel navigation', revision: 0,
+  const document: WorkspaceWindow = { schemaVersion: 3, id: 'navigation-primary-test', title: 'Parallel navigation', revision: 0,
     selectedPrimaryViewId: 'primary-A', selectedViewId: 'primary-A',
     views: [createWindowView('primary-A', binding('A', 'Retained primary'), 'primary'), createWindowView('primary-X', binding('X', 'Secondary X'), 'primary')] };
   const target = { ...binding('D', 'Destination D'), agentId: 'agent-D' };
@@ -2626,7 +2667,7 @@ it('selects another primary group while a native attachment is pending without r
   let manager!: ComponentProps<typeof realManager>;
   vi.spyOn(managerComponents, 'ChatSessionManager').mockImplementation(props => { if (props.current.nativeSessionId === 'X') manager = props; return realManager(props); });
   const binding = (id: string) => ({ hostId: 'host', providerId: 'recorded', nativeSessionId: id, title: `Group ${id}` });
-  const document: WorkspaceWindow = { schemaVersion: 2, id: 'pending-primary-test', title: 'Parallel pending', revision: 0,
+  const document: WorkspaceWindow = { schemaVersion: 3, id: 'pending-primary-test', title: 'Parallel pending', revision: 0,
     selectedPrimaryViewId: 'primary-X', selectedViewId: 'primary-X',
     views: [createWindowView('primary-A', binding('A'), 'primary'), createWindowView('primary-X', binding('X'), 'primary')] };
   const f = await failureFixture(false, 'A', false, `&window=${document.id}`, { chain: [], seed(scope) {
@@ -2660,7 +2701,7 @@ it.each([false, true])('binds the global directory selection into a focused ordi
   let directory!: ComponentProps<typeof realDirectory>;
   vi.spyOn(directoryComponents, 'SessionDirectory').mockImplementation(props => { directory = props; return realDirectory(props); });
   const binding = (id: string) => ({ hostId: 'host', providerId: 'recorded', nativeSessionId: id, title: `Group ${id}` });
-  const document: WorkspaceWindow = { schemaVersion: 2, id: 'focused-dock-test', title: 'Dock navigation', revision: 0,
+  const document: WorkspaceWindow = { schemaVersion: 3, id: 'focused-dock-test', title: 'Dock navigation', revision: 0,
     selectedPrimaryViewId: 'primary-A', selectedViewId: 'primary-A',
     views: [createWindowView('primary-A', binding('A'), 'primary'), createWindowView('ordinary-dock', empty ? undefined : binding('X'), 'dock')] };
   const f = await failureFixture(false, 'A', false, `&window=${document.id}`, { chain: [], seed(scope) {
@@ -2688,7 +2729,7 @@ it.each([false, true])('uses the focused mobile dock for Favorites context (empt
   let menu!: ComponentProps<typeof realFavorites>;
   vi.spyOn(favoritesComponents, 'FavoritesMenu').mockImplementation(props => { menu = props; return realFavorites(props); });
   const binding = (id: string) => ({ hostId: 'host', providerId: 'recorded', nativeSessionId: id, title: `Group ${id}` });
-  const document: WorkspaceWindow = { schemaVersion: 2, id: 'mobile-favorites-dock', title: 'Mobile dock', revision: 0,
+  const document: WorkspaceWindow = { schemaVersion: 3, id: 'mobile-favorites-dock', title: 'Mobile dock', revision: 0,
     selectedPrimaryViewId: 'primary-A', selectedViewId: 'ordinary-dock',
     views: [createWindowView('primary-A', binding('A'), 'primary'), createWindowView('ordinary-dock', empty ? undefined : binding('X'), 'dock')] };
   const setup = { chain: [] as SessionSuccessionReplay[], userScoped: true, windowDocument: document };
@@ -2715,7 +2756,7 @@ it.each([false, true])('keeps the global Ask preference independent of the focus
   vi.spyOn(askHooks, 'useAskConversations').mockImplementation((...args) => { ask = realAsk(...args); return ask; });
   vi.spyOn(successionHooks, 'useSessionSuccession').mockImplementation((...args) => { succession = realSuccession(...args); return succession; });
   const binding = { hostId: 'host', providerId: 'recorded', nativeSessionId: 'A', title: 'Same native A' };
-  const document: WorkspaceWindow = { schemaVersion: 2, id: 'focused-ask-dock', title: 'Ask owner selection', revision: 0,
+  const document: WorkspaceWindow = { schemaVersion: 3, id: 'focused-ask-dock', title: 'Ask owner selection', revision: 0,
     selectedPrimaryViewId: 'primary-A', selectedViewId: 'ordinary-dock',
     views: [createWindowView('primary-A', binding, 'primary'), createWindowView('ordinary-dock', empty ? undefined : binding, 'dock')] };
   const f = await failureFixture(false, 'A', false, `&window=${document.id}`, { chain: [], seed(scope) {
@@ -2769,7 +2810,7 @@ it.each((['dock', 'attached', 'float'] as const).flatMap(placement => [false, tr
   const selected = createWindowView('selected-ordinary', empty ? undefined : binding('X'), placement);
   if (placement === 'attached') selected.attachedTo = 'primary-A';
   if (placement === 'float') selected.geometry = { x: 40, y: 60, width: 500, height: 600 };
-  const document: WorkspaceWindow = { schemaVersion: 2, id: `track-destination-${placement}-${empty}`, title: 'Track destination', revision: 0,
+  const document: WorkspaceWindow = { schemaVersion: 3, id: `track-destination-${placement}-${empty}`, title: 'Track destination', revision: 0,
     selectedPrimaryViewId: 'primary-A', selectedViewId: selected.id,
     views: [createWindowView('primary-A', binding('A'), 'primary'), selected] };
   const setup = { chain: [] as SessionSuccessionReplay[], userScoped: true, windowDocument: document,
@@ -2798,7 +2839,7 @@ it('rejects Track replacement of the selected managed view without changing prim
   vi.spyOn(attentionHooks, 'useSessionAttention').mockImplementation((...args) => ({ ...realAttention(...args), trackVisible: true }));
   const binding = (id: string) => ({ hostId: 'host', providerId: 'recorded', nativeSessionId: id, title: `Managed ${id}` });
   const managed = { ...createWindowView('managed-dock', binding('X'), 'dock'), bindingPolicy: 'managed' as const };
-  const document: WorkspaceWindow = { schemaVersion: 2, id: 'track-managed-destination', title: 'Managed Track boundary', revision: 0,
+  const document: WorkspaceWindow = { schemaVersion: 3, id: 'track-managed-destination', title: 'Managed Track boundary', revision: 0,
     selectedPrimaryViewId: 'primary-A', selectedViewId: managed.id, views: [createWindowView('primary-A', binding('A'), 'primary'), managed] };
   const setup = { chain: [] as SessionSuccessionReplay[], userScoped: true, windowDocument: document,
     seed(scope: string) { saveTrackedSessions(scope, [{ ...binding('D'), starredAt: 1 }]); } };
@@ -2814,14 +2855,14 @@ it('rejects Track replacement of the selected managed view without changing prim
   expect(setup.windowDocument.selectedViewId).toBe(managed.id);
 });
 
-it('rejects a queued Track bind after its selected ordinary destination changes binding', async () => {
+it('opens Track against the latest local binding while an earlier save is pending', async () => {
   vi.stubGlobal('ResizeObserver', class { observe() {} disconnect() {} unobserve() {} });
   const realAttention = attentionHooks.useSessionAttention, realWindow = windowWorkspaceHooks.useWindowWorkspace;
   let workspace!: ReturnType<typeof realWindow>;
   vi.spyOn(attentionHooks, 'useSessionAttention').mockImplementation((...args) => ({ ...realAttention(...args), trackVisible: true }));
   vi.spyOn(windowWorkspaceHooks, 'useWindowWorkspace').mockImplementation((...args) => { workspace = realWindow(...args); return workspace; });
   const binding = (id: string) => ({ hostId: 'host', providerId: 'recorded', nativeSessionId: id, title: `Queued ${id}` });
-  const document: WorkspaceWindow = { schemaVersion: 2, id: 'queued-track-destination', title: 'Queued Track', revision: 0,
+  const document: WorkspaceWindow = { schemaVersion: 3, id: 'queued-track-destination', title: 'Queued Track', revision: 0,
     selectedPrimaryViewId: 'primary-A', selectedViewId: 'ordinary-dock',
     views: [createWindowView('primary-A', binding('A'), 'primary'), createWindowView('ordinary-dock', binding('X'), 'dock')] };
   let release!: () => void;
@@ -2842,13 +2883,13 @@ it('rejects a queued Track bind after its selected ordinary destination changes 
     const row = () => [...f.view.querySelectorAll<HTMLButtonElement>('.lab-tracking-floating .lab-session-row')].find(item => item.textContent?.includes('Queued D'));
     await settleApp(() => { expect(row()).toBeDefined(); expect(row()!.disabled).toBe(false); });
     await act(async () => row()!.click());
+    expect(workspace.readWindow()?.views.find(view => view.id === 'ordinary-dock')?.binding?.nativeSessionId).toBe('D');
     expect(setup.windowDocument.views.find(view => view.id === 'ordinary-dock')?.binding?.nativeSessionId).toBe('X');
   } finally { await act(async () => { release(); await replacement; }); }
-  await settleApp(() => expect(f.view.textContent).toContain('The target session view changed'));
+  await settleApp(() => expect(setup.windowDocument.views.find(view => view.id === 'ordinary-dock')?.binding?.nativeSessionId).toBe('D'));
   const operation = f.requests.map(request => request.body?.operation as WindowMutation['operation'] | undefined)
     .find(operation => operation?.type === 'view.bind' && operation.binding.nativeSessionId === 'D');
-  expect(operation).toMatchObject({ type: 'view.bind', viewId: 'ordinary-dock', expectedBinding: binding('X') });
-  expect(setup.windowDocument.views.find(view => view.id === 'ordinary-dock')?.binding?.nativeSessionId).toBe('Y');
+  expect(operation).toMatchObject({ type: 'view.bind', viewId: 'ordinary-dock', expectedBinding: binding('Y') });
   expect(setup.windowDocument.views.find(view => view.id === 'primary-A')?.binding?.nativeSessionId).toBe('A');
   expect(setup.windowDocument.selectedViewId).toBe('ordinary-dock');
 });
@@ -2875,7 +2916,7 @@ it.each((['dock', 'attached', 'empty-dock'] as const).flatMap(destination => (['
   const binding = (id: string) => ({ hostId: 'host', providerId: 'recorded', nativeSessionId: id, title: `Source ${id}` });
   const selected = createWindowView('feature-source', destination === 'empty-dock' ? undefined : binding('X'), destination === 'attached' ? 'attached' : 'dock');
   if (destination === 'attached') selected.attachedTo = 'primary-A';
-  const document: WorkspaceWindow = { schemaVersion: 2, id: `feature-selected-${destination}-${feature}`, title: 'Selected feature source', revision: 0,
+  const document: WorkspaceWindow = { schemaVersion: 3, id: `feature-selected-${destination}-${feature}`, title: 'Selected feature source', revision: 0,
     selectedPrimaryViewId: 'primary-A', selectedViewId: 'primary-A', views: [createWindowView('primary-A', binding('A'), 'primary'), selected] };
   const setup = { chain: [] as SessionSuccessionReplay[], userScoped: true, windowDocument: document, hostService };
   const f = await failureFixture(false, 'A', false, `&window=${document.id}`, setup);
@@ -2929,7 +2970,7 @@ it('selects a managed Team view directly for pointer and focus without first sel
     messages: [], createdAt: 1, updatedAt: 1 };
   const managed = { ...createWindowView('team-leader', binding('X'), 'dock'), bindingPolicy: 'managed' as const,
     feature: createWindowFeature({ kind: 'team', id: team.id, role: 'leader', memberId: 'leader' }) };
-  const document: WorkspaceWindow = { schemaVersion: 2, id: 'team-direct-focus', title: 'Team focus', revision: 0,
+  const document: WorkspaceWindow = { schemaVersion: 3, id: 'team-direct-focus', title: 'Team focus', revision: 0,
     selectedPrimaryViewId: 'primary-A', selectedViewId: 'primary-A', views: [createWindowView('primary-A', binding('A'), 'primary'), managed] };
   const selections: string[] = [];
   const setup = { chain: [] as SessionSuccessionReplay[], userScoped: true, windowDocument: document, teams: () => [team],
@@ -2958,7 +2999,7 @@ it('keeps the selected shared attached child on repeated pointer and focus witho
   vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} });
   const binding = (id: string) => ({ hostId: 'host', providerId: 'recorded', nativeSessionId: id, title: id });
   const child = { ...createWindowView('attached-child', binding('Y'), 'attached'), attachedTo: 'dock-root' };
-  const document: WorkspaceWindow = { schemaVersion: 2, id: 'attached-direct-focus', title: 'Attached focus', revision: 0,
+  const document: WorkspaceWindow = { schemaVersion: 3, id: 'attached-direct-focus', title: 'Attached focus', revision: 0,
     selectedPrimaryViewId: 'primary-A', selectedViewId: child.id,
     views: [createWindowView('primary-A', binding('A'), 'primary'), createWindowView('dock-root', binding('X'), 'dock'), child] };
   const selections: string[] = [];
@@ -2987,7 +3028,7 @@ it('opens an existing Team from a managed view by selecting its new ordinary sou
     members: [{ ...originalTeam.members[0]!, id: 'unopened-leader', nativeSessionId: 'T', name: 'Unopened Leader' }] };
   const managed = { ...createWindowView('original-leader-view', binding('X'), 'dock'), bindingPolicy: 'managed' as const,
     feature: createWindowFeature({ kind: 'team', id: originalTeam.id, role: 'leader', memberId: 'original-leader' }) };
-  const document: WorkspaceWindow = { schemaVersion: 2, id: 'team-managed-fallback', title: 'Team navigation', revision: 0,
+  const document: WorkspaceWindow = { schemaVersion: 3, id: 'team-managed-fallback', title: 'Team navigation', revision: 0,
     selectedPrimaryViewId: 'primary-A', selectedViewId: managed.id, views: [createWindowView('primary-A', binding('A'), 'primary'), managed] };
   const setup = { chain: [] as SessionSuccessionReplay[], userScoped: true, windowDocument: document, teams: () => [originalTeam, unopenedTeam] };
   const f = await failureFixture(false, 'A', false, `&window=${document.id}`, setup);

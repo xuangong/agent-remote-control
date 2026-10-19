@@ -42,7 +42,7 @@ async function fixture({ sourceOpen = true, offline = false, compact = false, hi
     messages: [], createdAt: 1, updatedAt: 1,
   };
   const first: WorkspaceWindow = {
-    schemaVersion: 2, id: 'relations', revision: 0, title: 'Relations', selectedPrimaryViewId: 'main', selectedViewId: 'leader-view',
+    schemaVersion: 3, id: 'relations', revision: 0, title: 'Relations', selectedPrimaryViewId: 'main', selectedViewId: 'leader-view',
     views: [createWindowView('main', session('different', 'Different project'), 'primary'),
       ...(sourceOpen ? [createWindowView('source-view', team.source)] : []),
       { ...createWindowView('leader-view', session('leader', 'Coordinator')),

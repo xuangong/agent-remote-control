@@ -9,10 +9,13 @@ import { replicaState } from './test/fixtures.js';
 import { render, unmount } from './test/setup.js';
 import * as windowWorkspaceHooks from './hooks/useWindowWorkspace.js';
 import * as successionHooks from './hooks/useSessionSuccession.js';
+import { saveLastSession } from './conversation-recovery.js';
+import { saveWorkspaceSnapshot } from './workspace-cache.js';
+import { WorkspaceReady } from './workspace-access.js';
 
 function target(id: string) { return { hostId: 'local', providerId: 'recorded', nativeSessionId: `native-${id}`, title: `Session ${id}` }; }
 function windowFixture(id: string, native: string): WorkspaceWindow {
-  return { schemaVersion: 2, id, revision: 0, title: id, selectedPrimaryViewId: 'main', selectedViewId: 'main',
+  return { schemaVersion: 3, id, revision: 0, title: id, selectedPrimaryViewId: 'main', selectedViewId: 'main',
     views: [createWindowView('main', target(native), 'primary')] };
 }
 function transportFixture(timelineGate?: Promise<void>) {
@@ -58,6 +61,64 @@ function transportFixture(timelineGate?: Promise<void>) {
 async function until(check: () => void) {
   await vi.waitFor(async () => { await act(async () => {}); check(); }, { timeout: 2000, interval: 1 });
 }
+
+it.each(['url', 'last-session'] as const)('opens an empty Window without restoring the stale %s native session', async source => {
+  const scope = `http://localhost/empty-window-${source}/`;
+  const empty: WorkspaceWindow = { schemaVersion: 3, id: 'empty', revision: 1, title: 'Empty Window',
+    selectedPrimaryViewId: null, selectedViewId: null, views: [] };
+  localStorage.setItem(`agent-remote:recovery:${scope}:shared-window:${empty.id}`, JSON.stringify(empty));
+  saveLastSession(scope, { ...target('stale'), agentId: 'agent-stale' });
+  history.replaceState(null, '', `/?window=${empty.id}${source === 'url' ? '&host=local&provider=recorded&session=native-stale&agent=agent-stale' : ''}`);
+  let workspace!: ReturnType<typeof windowWorkspaceHooks.useWindowWorkspace>;
+  const useWorkspace = windowWorkspaceHooks.useWindowWorkspace;
+  vi.spyOn(windowWorkspaceHooks, 'useWindowWorkspace').mockImplementation((...args) => { workspace = useWorkspace(...args); return workspace; });
+  const directory = new SessionDirectoryClient(scope);
+  vi.spyOn(directory, 'list').mockResolvedValue({ items: [], hasMore: false, revision: '1' });
+  vi.spyOn(directory, 'workspaces').mockResolvedValue({ workspaces: [] });
+  const attach = vi.spyOn(directory, 'attach').mockResolvedValue({ agentId: 'agent-stale', nativeSessionId: 'native-stale' });
+  const fixture = transportFixture();
+  const snapshot = vi.spyOn(fixture.transport, 'fetchSnapshot');
+  let container: HTMLDivElement | undefined;
+  try {
+    container = await render(<App baseUrl={scope} directory={directory} transport={fixture.transport}
+      hostService={{ hosts: async () => ({ hosts: [] }), pair: async () => { throw new Error('No pairing is required.'); } }} />);
+    await until(() => expect(workspace.window).toEqual(empty));
+    expect(container.querySelector('[data-testid="empty-window"]')).not.toBeNull();
+    expect(attach).not.toHaveBeenCalled();
+    expect(snapshot).not.toHaveBeenCalled();
+    expect(fixture.channels).toEqual([]);
+  } finally {
+    if (container) await unmount(container);
+    vi.restoreAllMocks(); localStorage.clear(); sessionStorage.clear(); history.replaceState(null, '', '/');
+  }
+}, 10000);
+
+it('shows the explicit Window binding cache before access checks instead of the stale session URL', async () => {
+  const scope = 'http://localhost/window-binding-preview/';
+  const cached = windowFixture('cached', 'one');
+  localStorage.setItem(`agent-remote:recovery:${scope}:shared-window:${cached.id}`, JSON.stringify(cached));
+  for (const id of ['one', 'stale']) {
+    saveWorkspaceSnapshot(scope, target(id), { ...replicaState, agent: { ...replicaState.agent!, id: `agent-${id}`,
+      runtimeInfo: { ...replicaState.agent!.runtimeInfo, sessionId: `native-${id}` } }, timeline: { ...replicaState.timeline, entries: [{
+      providerId: 'recorded', seqStart: 1, seqEnd: 1, timestamp: '2026-10-19T00:00:00Z', sourceSeqRanges: [], collapsed: [], resources: [],
+      item: { type: 'assistant_message', text: `${id} cached conversation` },
+    }] } });
+  }
+  history.replaceState(null, '', `/?window=${cached.id}&host=local&provider=recorded&session=native-stale`);
+  const fixture = transportFixture();
+  const fetcher = vi.spyOn(globalThis, 'fetch').mockRejectedValue(new Error('Business requests must wait.'));
+  let container: HTMLDivElement | undefined;
+  try {
+    container = await render(<WorkspaceReady.Provider value={false}><App baseUrl={scope} userScoped transport={fixture.transport} /></WorkspaceReady.Provider>);
+    expect(container.textContent).toContain('one cached conversation');
+    expect(container.textContent).not.toContain('stale cached conversation');
+    expect(fetcher).not.toHaveBeenCalled();
+    expect(fixture.channels).toEqual([]);
+  } finally {
+    if (container) await unmount(container);
+    vi.restoreAllMocks(); localStorage.clear(); sessionStorage.clear(); history.replaceState(null, '', '/');
+  }
+}, 10000);
 
 it('reuses the same Session client and replica across Windows and releases a deleted Window retention', async () => {
   const scope = 'http://localhost/window-retention-app/';
@@ -120,7 +181,7 @@ it('starts the cached Window native Session before Window inspection settles wit
   const scope = 'http://localhost/window-native-before-inspect/';
   const cached = windowFixture('cached', 'one');
   localStorage.setItem(`agent-remote:recovery:${scope}:shared-window:${cached.id}`, JSON.stringify(cached));
-  history.replaceState(null, '', `/?window=${cached.id}`);
+  history.replaceState(null, '', `/?window=${cached.id}&host=local&provider=recorded&session=native-stale&agent=agent-stale`);
   let completeInspection!: (snapshot: WindowSnapshot) => void, completeTimeline!: () => void;
   const inspection = new Promise<WindowSnapshot>(resolve => { completeInspection = resolve; });
   const timeline = new Promise<void>(resolve => { completeTimeline = resolve; });
@@ -149,6 +210,7 @@ it('starts the cached Window native Session before Window inspection settles wit
     expect(workspace.window?.id).toBe(cached.id);
     expect(workspace.hasActiveWindow).toBe(false);
     await until(() => expect(attach).toHaveBeenCalled());
+    expect(attach.mock.calls.map(([, nativeSessionId]) => nativeSessionId)).toEqual(['native-one']);
     await until(() => expect(fixture.channels.filter(channel => channel.observation === 'session')).toHaveLength(1));
     expect(succession.binding).toBeUndefined();
     expect(succession.sessionState.synchronized).toBe(false);

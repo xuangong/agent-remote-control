@@ -8,7 +8,7 @@ function viewTitle(view: WindowView): string {
   return view.binding?.title || (view.feature ? `${view.feature.kind.toUpperCase()} view` : 'Empty view');
 }
 function viewRole(view: WindowView): string {
-  return view.attachedTo ? 'Attached' : view.placement === 'primary' ? 'Main' : view.placement === 'float' ? 'Floating' : 'Dock';
+  return view.attachedTo ? 'Attached' : view.placement === 'primary' ? 'Top-level' : view.placement === 'float' ? 'Floating' : 'Dock';
 }
 
 export function WindowWorkspaces({ workspace, current, active = true }: {
@@ -92,13 +92,18 @@ export function WindowWorkspaces({ workspace, current, active = true }: {
         const view = createWindowView(crypto.randomUUID());
         edit({ type: 'batch', operations: [{ type: 'view.create', view }, { type: 'view.select', viewId: view.id }] });
       }}>New session view</button></div>
-      <nav className="lab-window-list lab-window-views" aria-label="Session views">{workspace.window.views.map(view => <button key={view.id} type="button" data-window-view-id={view.id}
-        data-attached={!!view.attachedTo || undefined} disabled={busy || workspace.unavailable}
+      <nav className="lab-window-list lab-window-views" aria-label="Session views">{workspace.window.views.map(view => <div key={view.id} className="lab-window-row" data-window-view-row={view.id} data-attached={!!view.attachedTo || undefined}>
+        <button type="button" className="lab-window-open" data-window-view-id={view.id} disabled={busy || workspace.unavailable}
         aria-current={view.id === workspace.window!.selectedViewId || undefined}
         onClick={() => edit({ type: 'view.select', viewId: view.id })}>
         <span><strong>{viewTitle(view)}</strong><small>{viewRole(view)}</small></span>
         {view.id === workspace.window!.selectedViewId ? <span className="lab-window-selected" aria-label="Selected view">✓</span> : null}
-      </button>)}</nav>
+        </button>
+        <button type="button" className="lab-window-view-close" data-window-view-close={view.id} aria-label={`Close session view: ${viewTitle(view)}`}
+          title="Close this session view. Agent sessions keep running." disabled={busy || workspace.unavailable}
+          onClick={() => edit({ type: 'view.close', viewId: view.id })}>×</button>
+      </div>)}</nav>
+      {!workspace.window.views.length ? <p className="lab-window-note">No session views. Add one or open a session from the sidebar.</p> : null}
       <details ref={options} className="lab-window-options"><summary>Window options</summary>
         <div className="lab-window-actions">
           <button ref={renameButton} type="button" disabled={busy || workspace.unavailable} onClick={() => { setTitle(workspace.window!.title); setEditing(true); }}>Rename Window</button>

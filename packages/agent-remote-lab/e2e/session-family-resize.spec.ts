@@ -1,3 +1,4 @@
+import { clickSessionAction } from './session-actions';
 import { expect, test, type Locator, type Page } from '@playwright/test';
 
 const names = ['Primary', 'Primary child', 'Primary leaf', 'Dock', 'Dock child', 'Dock leaf'];
@@ -138,7 +139,7 @@ test('a floating family keeps its own scrolling to reach attached sessions', asy
   await page.setViewportSize({ width: 1760, height: 900 });
   await page.goto(fixture);
   await expect(page.getByRole('separator')).toHaveCount(6);
-  await page.getByRole('button', { name: 'Float Dock', exact: true }).click();
+  await clickSessionAction(page, 'Float Dock');
   await expect(page.locator('.lab-session-dock-pane')).toHaveCount(0);
   const family = page.locator('.lab-bindable-session-window[data-view-id="dock"] .lab-session-family');
   await expect(family).toBeVisible();
@@ -148,7 +149,7 @@ test('a floating family keeps its own scrolling to reach attached sessions', asy
   expect(leaf.x).toBeGreaterThanOrEqual(viewport.x);
   expect(leaf.x + leaf.width).toBeLessThanOrEqual(viewport.x + viewport.width + 1);
   // Invoke the placement action without scrolling its root control into view first.
-  await page.getByRole('button', { name: 'Dock Dock', exact: true }).dispatchEvent('click');
+  await page.getByRole('button', { name: 'Dock Dock', exact: true, includeHidden: true }).dispatchEvent('click');
   await expect(page.locator('.lab-session-dock-pane')).toHaveCount(1);
   await expect.poll(() => family.evaluate(element => element.scrollLeft)).toBe(0);
   const parent = (await page.locator('.lab-session-dock-pane').boundingBox())!, root = (await pane(page, 'Dock').boundingBox())!;

@@ -74,10 +74,20 @@ export function ensureWindowCompositionSlot(document: CompositionDocument, windo
 
 /** First adoption records the selected primary identity; it never migrates native state. */
 export function adoptWindowPrimaryRole(document: CompositionDocument, window: WorkspaceWindow): CompositionSlot | undefined {
-  const binding = window.views.find(view => view.id === window.selectedPrimaryViewId)?.binding;
-  const source = document.slots.find(slot => slot.id === document.primary);
-  if (!binding || !source || !slotMatchesBinding(document, source, binding) || !ownsSlot(document, source.id, window.id, window.selectedPrimaryViewId)) return;
-  return bindWindowCompositionSlot(document, window.id, window.selectedPrimaryViewId, binding, source.id);
+  const viewId = window.selectedPrimaryViewId;
+  if (!viewId) return;
+  const binding = window.views.find(view => view.id === viewId)?.binding;
+  if (!binding) return;
+  const registered = document.windowBindings?.some(entry => entry.windowId === window.id && entry.viewId === viewId && entry.bindingKey === windowBindingKey(binding));
+  const retainedId = `${windowSlotPrefix(window.id, viewId)}${compositionOriginId(binding, binding.sessionIntent === 'history')}`;
+  if (registered || document.slots.some(slot => slot.id === retainedId)) return ensureWindowCompositionSlot(document, window.id, viewId, binding);
+  const selected = document.slots.find(slot => slot.id === document.primary);
+  // Local owners can be adopted from a Window binding without opening a legacy native session first.
+  const unassigned = selected ? [] : document.slots.filter(slot => !slot.id.startsWith('window:')
+    && !document.windowBindings?.some(entry => entry.slotId === slot.id) && slotMatchesBinding(document, slot, binding));
+  const source = selected ?? (unassigned.length === 1 ? unassigned[0] : undefined);
+  if (!source || !slotMatchesBinding(document, source, binding) || !ownsSlot(document, source.id, window.id, viewId)) return;
+  return bindWindowCompositionSlot(document, window.id, viewId, binding, source.id);
 }
 
 /** Source anchors are references; only locally verified role checkpoints authorize succession. */
@@ -129,6 +139,7 @@ export function windowCompositionMapping(document: CompositionDocument, window: 
   }));
 }
 export function primaryWindowFamily(window: WorkspaceWindow, primaryViewId = window.selectedPrimaryViewId): Set<string> {
+  if (!primaryViewId) return new Set();
   const ids = new Set([primaryViewId]);
   for (const view of window.views) if (view.attachedTo && ids.has(view.attachedTo)) ids.add(view.id);
   return ids;
@@ -136,16 +147,16 @@ export function primaryWindowFamily(window: WorkspaceWindow, primaryViewId = win
 /** One-way projection: it must never emit a Window mutation or reconnect the selected primary. */
 export function projectWindowComposition(document: CompositionDocument, window: WorkspaceWindow): boolean {
   const slots = windowCompositionMapping(document, window), family = primaryWindowFamily(window);
-  const primary = slots.get(window.selectedPrimaryViewId);
+  const primary = window.selectedPrimaryViewId ? slots.get(window.selectedPrimaryViewId) : undefined;
   if (!primary) {
     if (!document.primary && !document.address && !document.focus && !document.anchor && !document.edges.length && !document.collapsed.length) return false;
     delete document.primary; delete document.address; delete document.focus; delete document.anchor;
     document.edges = []; document.collapsed = []; document.editRevision++; return true;
   }
-  const selected = slots.get(window.selectedViewId);
+  const selected = window.selectedViewId ? slots.get(window.selectedViewId) : undefined;
   const edges = window.views.flatMap(view => view.attachedTo && family.has(view.id) && slots.has(view.id) && slots.has(view.attachedTo)
     ? [{ source: slots.get(view.attachedTo)!.id, target: slots.get(view.id)!.id, selected: true }] : []);
-  const focus = selected && family.has(window.selectedViewId) ? selected.id : primary.id;
+  const focus = selected && window.selectedViewId && family.has(window.selectedViewId) ? selected.id : primary.id;
   const next = { primary: primary.id, address: focus, focus, anchor: focus, edges,
     collapsed: window.views.filter(view => family.has(view.id) && view.collapsed && slots.has(view.id)).map(view => slots.get(view.id)!.id) };
   if (Object.entries(next).every(([key, value]) => JSON.stringify(document[key as keyof CompositionDocument]) === JSON.stringify(value))) return false;

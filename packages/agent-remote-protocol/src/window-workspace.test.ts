@@ -4,7 +4,7 @@ import { applyWindowOperation, createWindowView } from './window-workspace-opera
 
 const binding = { hostId: 'mac', providerId: 'codex', nativeSessionId: 's1', title: 'Project' };
 function workspace(): WorkspaceWindow {
-  return { schemaVersion: 2, id: 'w1', title: 'Project', revision: 0, selectedPrimaryViewId: 'main', selectedViewId: 'main',
+  return { schemaVersion: 3, id: 'w1', title: 'Project', revision: 0, selectedPrimaryViewId: 'main', selectedViewId: 'main',
     views: [createWindowView('main', binding, 'primary'), createWindowView('dock')] };
 }
 it('retains explicit concrete history intent without changing default current-role bindings', () => {
@@ -91,7 +91,7 @@ it('commits a batch once, preserving source state when a later edit fails', () =
   expect(result).toMatchObject({ revision: 1, selectedViewId: 'dock' });
   expect(result.views[1]?.width).toBe(600);
   expect(() => applyWindowOperation(w, { type: 'batch', operations: [
-    { type: 'rename', title: 'Changed' }, { type: 'view.close', viewId: 'main' },
+    { type: 'rename', title: 'Changed' }, { type: 'view.close', viewId: 'missing' },
   ] })).toThrow();
   expect(w.title).toBe('Project'); expect(w.revision).toBe(0);
 });
@@ -194,7 +194,9 @@ it('selects and closes primary groups independently while keeping standalone doc
   w = applyWindowOperation(w, { type: 'view.close', viewId: 'second' });
   expect(w.views.map(view => view.id)).toEqual(['main', 'dock']);
   expect(w.selectedPrimaryViewId).toBe('main'); expect(w.selectedViewId).toBe('dock');
-  expect(() => applyWindowOperation(w, { type: 'view.close', viewId: 'main' })).toThrow();
+  const standalone = applyWindowOperation(w, { type: 'view.close', viewId: 'main' });
+  expect(standalone).toMatchObject({ selectedPrimaryViewId: null, selectedViewId: 'dock' });
+  expect(standalone.views).toEqual([createWindowView('dock')]);
 });
 it('moves a primary with its attached chain and rebinds only that chain', () => {
   const w = workspace();
@@ -209,10 +211,122 @@ it('migrates a v1 Window deterministically without changing its identities or re
   const { selectedPrimaryViewId, ...base } = workspace();
   const legacy = { ...base, schemaVersion: 1, primaryViewId: selectedPrimaryViewId, mainMinimized: true };
   const migrated = decodeWorkspaceWindow(legacy)!;
-  expect(migrated).toMatchObject({ schemaVersion: 2, id: 'w1', revision: 0, selectedPrimaryViewId: 'main' });
+  expect(migrated).toMatchObject({ schemaVersion: 3, id: 'w1', revision: 0, selectedPrimaryViewId: 'main' });
   expect(migrated.views[0]).toMatchObject({ id: 'main', collapsed: true });
   expect(migrated.views[1]).toEqual(legacy.views[1]);
   expect(decodeWorkspaceWindow(legacy)).toEqual(migrated);
   expect(legacy.views[0]?.collapsed).toBe(false);
+  expect(decodeWorkspaceWindow({ ...legacy, selectedPrimaryViewId: 'dock' })).toBeUndefined();
+});
+
+it('closes the last pane without replacing the Window or creating a new pane', () => {
+  const original = workspace();
+  original.views = [original.views[0]!];
+  const empty = applyWindowOperation(original, { type: 'view.close', viewId: 'main' });
+  expect(empty).toEqual({ ...original, revision: 1, views: [], selectedViewId: null, selectedPrimaryViewId: null });
+  expect(isWorkspaceWindow(empty)).toBe(true);
+  expect(original.views[0]?.binding).toEqual(binding);
+});
+
+it.each(['dock', 'float', 'primary'] as const)('selects the first %s pane created in an empty Window', placement => {
+  const empty: WorkspaceWindow = { ...workspace(), views: [], selectedViewId: null, selectedPrimaryViewId: null };
+  const created = applyWindowOperation(empty, { type: 'view.create', view: { ...createWindowView('first', binding, placement), collapsed: true } });
+  expect(created).toMatchObject({ id: empty.id, revision: 1, selectedViewId: 'first', selectedPrimaryViewId: placement === 'primary' ? 'first' : null });
+  expect(created.views[0]).toMatchObject({ id: 'first', placement, collapsed: false });
+  expect(applyWindowOperation(created, { type: 'view.create', view: createWindowView('next-primary', undefined, 'primary') }))
+    .toMatchObject({ selectedViewId: 'first', selectedPrimaryViewId: placement === 'primary' ? 'first' : 'next-primary' });
+});
+
+it('selects a surviving attached ancestor before a closer sibling and expands the family', () => {
+  const original = workspace();
+  original.views.splice(1, 0,
+    { ...createWindowView('child', binding, 'attached'), attachedTo: 'main', collapsed: true },
+    { ...createWindowView('grandchild', binding, 'attached'), attachedTo: 'child' });
+  original.views[0]!.collapsed = true;
+  original.selectedViewId = 'grandchild';
+  const closed = applyWindowOperation(original, { type: 'view.close', viewId: 'grandchild' });
+  expect(closed).toMatchObject({ selectedViewId: 'child', selectedPrimaryViewId: 'main' });
+  expect(closed.views.slice(0, 2).every(view => !view.collapsed)).toBe(true);
+});
+
+it.each(['select', 'close'] as const)('expands all attached dock ancestors when %s changes the exact selection', action => {
+  const original = workspace();
+  original.views[1]!.collapsed = true;
+  original.views.push(
+    { ...createWindowView('child', binding, 'attached'), attachedTo: 'dock', collapsed: true },
+    { ...createWindowView('grandchild', binding, 'attached'), attachedTo: 'child' },
+    { ...createWindowView('unrelated'), collapsed: true });
+  if (action === 'close') original.selectedViewId = 'grandchild';
+  const changed = applyWindowOperation(original, { type: action === 'close' ? 'view.close' : 'view.select', viewId: 'grandchild' });
+  expect(changed).toMatchObject({ selectedViewId: action === 'close' ? 'child' : 'grandchild', selectedPrimaryViewId: 'main' });
+  expect(changed.views.filter(view => ['dock', 'child'].includes(view.id)).every(view => !view.collapsed)).toBe(true);
+  expect(changed.views.find(view => view.id === 'unrelated')?.collapsed).toBe(true);
+});
+
+it('selects the closest surviving preceding pane before the next pane in document order after cascaded closure', () => {
+  const original = workspace();
+  original.views.push(createWindowView('before'),
+    { ...createWindowView('dependent'), closeWith: 'dock' }, createWindowView('after'));
+  original.views[2]!.collapsed = true;
+  original.selectedViewId = 'dependent';
+  const closed = applyWindowOperation(original, { type: 'view.close', viewId: 'dock' });
+  expect(closed.views.map(view => view.id)).toEqual(['main', 'before', 'after']);
+  expect(closed).toMatchObject({ selectedViewId: 'before', selectedPrimaryViewId: 'main' });
+  expect(closed.views[1]?.collapsed).toBe(false);
+
+  const right = applyWindowOperation(workspace(), { type: 'view.close', viewId: 'main' });
+  expect(right).toMatchObject({ selectedViewId: 'dock', selectedPrimaryViewId: null });
+});
+
+it('preserves an unrelated exact selection when its selected primary closes', () => {
+  const original = workspace();
+  original.views.push(createWindowView('second', undefined, 'primary'));
+  original.selectedViewId = 'dock';
+  const closed = applyWindowOperation(original, { type: 'view.close', viewId: 'main' });
+  expect(closed).toMatchObject({ selectedViewId: 'dock', selectedPrimaryViewId: 'second' });
+});
+
+it('rebinds a non-primary root and returns its selected attached descendant to the root', () => {
+  const original = workspace();
+  original.views.push({ ...createWindowView('child', binding, 'attached'), attachedTo: 'dock' });
+  original.selectedViewId = 'child';
+  original.views[1]!.collapsed = true;
+  const changed = applyWindowOperation(original, { type: 'view.bind', viewId: 'dock', binding });
+  expect(changed).toMatchObject({ selectedViewId: 'dock', selectedPrimaryViewId: 'main' });
+  expect(changed.views.map(view => view.id)).toEqual(['main', 'dock']);
+  expect(changed.views[1]?.collapsed).toBe(false);
+});
+
+it('applies an empty layout with explicit null selections and permits close-then-create batches', () => {
+  const emptyLayout = { title: 'Empty', views: [], selectedViewId: null, selectedPrimaryViewId: null };
+  const empty = applyWindowOperation(workspace(), { type: 'layout.apply', layout: emptyLayout });
+  expect(empty).toEqual({ ...emptyLayout, schemaVersion: 3, id: 'w1', revision: 1 });
+  const original = workspace(); original.views = [original.views[0]!];
+  const replaced = applyWindowOperation(original, { type: 'batch', operations: [
+    { type: 'view.close', viewId: 'main' }, { type: 'view.create', view: createWindowView('replacement') },
+  ] });
+  expect(replaced).toMatchObject({ revision: 1, selectedViewId: 'replacement', selectedPrimaryViewId: null });
+  expect(replaced.views.map(view => view.id)).toEqual(['replacement']);
+});
+
+it('validates nullable selections against actual pane and primary membership', () => {
+  const empty: WorkspaceWindow = { ...workspace(), views: [], selectedViewId: null, selectedPrimaryViewId: null };
+  expect(isWorkspaceWindow(empty)).toBe(true);
+  expect(isWorkspaceWindow({ ...empty, selectedViewId: 'main' })).toBe(false);
+  expect(isWorkspaceWindow({ ...empty, selectedPrimaryViewId: 'main' })).toBe(false);
+  const { selectedViewId: _, ...missingSelection } = empty;
+  expect(isWorkspaceWindow(missingSelection)).toBe(false);
+  expect(isWorkspaceWindow({ ...workspace(), selectedViewId: null })).toBe(false);
+  expect(isWorkspaceWindow({ ...workspace(), selectedPrimaryViewId: null })).toBe(false);
+  expect(isWorkspaceWindow({ ...empty, selectedViewId: 'dock', views: [createWindowView('dock')] })).toBe(true);
+  expect(isWorkspaceWindow({ ...empty, selectedViewId: 'dock', selectedPrimaryViewId: 'dock', views: [createWindowView('dock')] })).toBe(false);
+});
+
+it('migrates only valid v2 Windows while preserving identity, bindings and revision', () => {
+  const legacy = { ...workspace(), schemaVersion: 2, revision: 7 };
+  expect(decodeWorkspaceWindow(legacy)).toEqual({ ...legacy, schemaVersion: 3 });
+  expect(legacy.schemaVersion).toBe(2);
+  expect(decodeWorkspaceWindow({ ...legacy, views: [], selectedViewId: null, selectedPrimaryViewId: null })).toBeUndefined();
+  expect(decodeWorkspaceWindow({ ...legacy, views: [createWindowView('dock')], selectedViewId: 'dock', selectedPrimaryViewId: null })).toBeUndefined();
   expect(decodeWorkspaceWindow({ ...legacy, selectedPrimaryViewId: 'dock' })).toBeUndefined();
 });

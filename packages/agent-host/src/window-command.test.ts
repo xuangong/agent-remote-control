@@ -1,29 +1,34 @@
 import { afterEach, expect, it } from 'vitest';
 import { createServer, type Server } from 'node:http';
 import { once } from 'node:events';
+import { mkdtemp, writeFile, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { createWindowView, applyWindowOperation, type WorkspaceWindow } from '@orchardworks/agent-remote-protocol';
 import { runWindowCommand } from './window-command.js';
 const servers: Server[] = [];
 afterEach(async () => { for (const server of servers.splice(0)) { server.closeAllConnections(); await new Promise<void>(resolve => server.close(() => resolve())); } });
-async function fixture() {
-  let window: WorkspaceWindow = { schemaVersion: 2, id: 'w1', revision: 0, title: 'Project', selectedPrimaryViewId: 'main', selectedViewId: 'main', views: [createWindowView('main', undefined, 'primary')] };
+async function fixture(wireVersion: 2 | 3 = 3) {
+  let window: WorkspaceWindow = { schemaVersion: 3, id: 'w1', revision: 0, title: 'Project', selectedPrimaryViewId: 'main', selectedViewId: 'main', views: [createWindowView('main', undefined, 'primary')] };
+  const snapshot = (value = window) => ({ ...value, schemaVersion: wireVersion });
   const receipts = new Map<string, { input: string; result: unknown; window: WorkspaceWindow }>(); const requests: string[] = [];
   const server = createServer(async (req, res) => {
     requests.push(req.url!); res.setHeader('content-type', 'application/json');
     if (req.headers.authorization !== 'Bearer secret-grant') { res.writeHead(403).end(JSON.stringify({ code: 'window_access_denied' })); return; }
-    if (req.method === 'GET' && req.url === '/v1/windows/w1') { res.end(JSON.stringify({ window })); return; }
+    if (req.method === 'GET' && req.url === '/v1/windows/w1') { res.end(JSON.stringify({ window: snapshot() })); return; }
+    if (req.method === 'GET' && req.url === '/v1/windows') { res.end(JSON.stringify({ windows: [snapshot()] })); return; }
     if (req.method === 'GET' && req.url?.includes('/operations/')) { res.end(JSON.stringify({ result: receipts.get(req.url.split('/').at(-1)!)?.result })); return; }
     let raw = ''; for await (const chunk of req) raw += chunk;
     const input = JSON.parse(raw);
     const previous = receipts.get(input.operationId);
     if (previous) {
       if (previous.input !== raw) { res.writeHead(409).end(JSON.stringify({ code: 'operation_conflict' })); return; }
-      res.end(JSON.stringify({ result: previous.result, window: previous.window })); return;
+      res.end(JSON.stringify({ result: previous.result, window: snapshot(previous.window) })); return;
     }
-    if (input.baseRevision !== window.revision) { res.end(JSON.stringify({ result: { operationId: input.operationId, status: 'rejected', revision: window.revision, committedAt: Date.now(), expiresAt: Date.now() + 86400000, code: 'revision_conflict' }, window })); return; }
+    if (input.baseRevision !== window.revision) { res.end(JSON.stringify({ result: { operationId: input.operationId, status: 'rejected', revision: window.revision, committedAt: Date.now(), expiresAt: Date.now() + 86400000, code: 'revision_conflict' }, window: snapshot() })); return; }
     window = applyWindowOperation(window, input.operation);
     const result = { operationId: input.operationId, status: 'committed', revision: window.revision, committedAt: Date.now(), expiresAt: Date.now() + 86400000 };
-    receipts.set(input.operationId, { input: raw, result, window: structuredClone(window) }); res.end(JSON.stringify({ result, window }));
+    receipts.set(input.operationId, { input: raw, result, window: structuredClone(window) }); res.end(JSON.stringify({ result, window: snapshot() }));
   });
   servers.push(server); server.listen(0, '127.0.0.1'); await once(server, 'listening');
   const address = server.address() as { port: number };
@@ -42,6 +47,17 @@ it('operates over HTTP and preserves stable view IDs through creation, binding, 
   expect((await f.run(['view', 'select', 'w1', 'dock'])).code).toBe(0);
   expect(f.window.selectedViewId).toBe('dock'); expect(f.window.views[1]?.width).toBe(620);
   expect((await f.run(['operation', 'w1', created.output.result.operationId])).output.result.status).toBe('committed');
+});
+
+it('reads and mutates version 2 Windows before the Relay upgrade', async () => {
+  const f = await fixture(2);
+  expect((await f.run(['inspect', 'w1'])).output.window).toEqual(f.window);
+  expect((await f.run(['list'])).output.windows).toEqual([f.window]);
+  expect((await f.run(['export', 'w1'])).output.views).toEqual(f.window.views);
+  const renamed = await f.run(['rename', 'w1', 'Upgraded Controller']);
+  expect(renamed.code).toBe(0);
+  expect(renamed.output.window).toEqual(f.window);
+  expect(renamed.output.window).toMatchObject({ schemaVersion: 3, revision: 1, title: 'Upgraded Controller' });
 });
 it('replays explicit view creation identities without generating another view or changing the request', async () => {
   const f = await fixture();
@@ -91,4 +107,24 @@ it('creates, selects, collapses, moves and closes primary roots through the same
   expect((await f.run(['view', 'move', 'w1', 'second', '--after', 'main'])).code).toBe(0);
   expect((await f.run(['view', 'close', 'w1', 'main'])).output.window.views.map((view: any) => view.id)).toEqual(['second']);
   expect((await f.run(['minimize', 'w1', '--value', 'true'])).code).toBe(1);
+});
+
+it('closes, inspects, exports, applies and repopulates an empty Window over HTTP', async () => {
+  const f = await fixture();
+  const closed = await f.run(['view', 'close', 'w1', 'main']);
+  expect(closed.code).toBe(0);
+  expect(closed.output.window).toMatchObject({ id: 'w1', schemaVersion: 3, revision: 1, views: [], selectedViewId: null, selectedPrimaryViewId: null });
+  expect((await f.run(['inspect', 'w1'])).output.window).toEqual(closed.output.window);
+  expect((await f.run(['list'])).output.windows).toEqual([closed.output.window]);
+  const exported = (await f.run(['export', 'w1'])).output;
+  expect(exported).toEqual({ title: 'Project', views: [], selectedViewId: null, selectedPrimaryViewId: null });
+  const directory = await mkdtemp(join(tmpdir(), 'window-empty-layout-'));
+  try {
+    const file = join(directory, 'layout.json'); await writeFile(file, JSON.stringify(exported));
+    expect((await f.run(['apply', 'w1', '--file', file])).code).toBe(0);
+    const created = await f.run(['view', 'create', 'w1', '--view-id', 'first-dock']);
+    expect(created.code).toBe(0);
+    expect(created.output.window).toMatchObject({ id: 'w1', revision: 3, selectedViewId: 'first-dock', selectedPrimaryViewId: null });
+    expect(created.output.window.views).toEqual([createWindowView('first-dock')]);
+  } finally { await rm(directory, { recursive: true, force: true }); }
 });

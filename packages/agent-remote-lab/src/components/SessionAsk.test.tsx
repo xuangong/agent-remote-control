@@ -44,11 +44,30 @@ function sharedFixture(ask: AskProps['ask'], pending = false) {
   const other = createWindowView('sibling-view', windowSessionBinding(sibling), 'primary');
   const view = { ...createWindowView('shared-ask', { ...windowSessionBinding(sibling), nativeSessionId: 'ask-target' }, 'float'), feature: { kind: 'ask', id: 'feature-ask' } };
   const child = { ...createWindowView('ask-child', windowSessionBinding(sibling), 'attached'), attachedTo: view.id };
-  const layout: WindowLayoutAuthority = { window: { schemaVersion: 2, id: 'window', title: 'Window', revision: 0,
+  const layout: WindowLayoutAuthority = { window: { schemaVersion: 3, id: 'window', title: 'Window', revision: 0,
     selectedPrimaryViewId: primary.id, selectedViewId: primary.id, views: pending ? [primary, other] : [primary, other, view, child] }, operate: vi.fn() };
   ask.sharedView = () => layout.window.views.find(value => value.id === view.id);
   return { layout, view, child };
 }
+
+it('keeps draft Ask placement and cleanup in one menu while minimize stays visible', async () => {
+  const { props } = fixture([{ source }]);
+  const container = await render(<SessionDockProvider enabled><SessionDockRail>Main session</SessionDockRail>
+    <SessionAsk {...props} source={source} />
+  </SessionDockProvider>);
+  const menu = container.querySelector<HTMLDivElement>('.lab-session-heading-actions-panel')!;
+  expect(container.querySelectorAll('[aria-label="More session actions"]')).toHaveLength(1);
+  expect(menu.hidden).toBe(true);
+  expect(menu.querySelector('[aria-label="Dock Ask"]')).not.toBeNull();
+  expect(menu.querySelector('[aria-label="Clean Ask"]')).not.toBeNull();
+  expect(container.querySelector('[aria-label="Minimize Ask"]')?.closest('.lab-session-heading-actions-panel')).toBeNull();
+  await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="More session actions"]')!.click());
+  expect(menu.hidden).toBe(false);
+  await act(async () => menu.querySelector<HTMLButtonElement>('[aria-label="Dock Ask"]')!.click());
+  expect(container.querySelector('[aria-label="Docked Ask"]')).not.toBeNull();
+  expect(menu.querySelector('[aria-label="Float Ask"]')).not.toBeNull();
+  expect(container.querySelector('.lab-ask-heading > strong[data-session-title-draggable]')).not.toBeNull();
+});
 
 it('includes attached session widths in a docked Ask as its family changes', async () => {
   const entry: AskEntry = { source, attached: true };
@@ -76,6 +95,11 @@ it('includes attached session widths in a docked Ask as its family changes', asy
   const dock = () => container.querySelector<HTMLElement>('[aria-label="Docked Ask"]')!;
   expect(dock().style.width).toBe('780px');
   expect(dock().querySelectorAll('.lab-session-family-pane')).toHaveLength(2);
+  const menu = dock().querySelector<HTMLDivElement>('.lab-session-family-pane .lab-session-heading-actions-panel')!;
+  expect(menu.hidden).toBe(true);
+  expect(menu.querySelector('[aria-label="Float Ask"]')).not.toBeNull();
+  expect(menu.querySelector('[aria-label="Clean Ask"]')).not.toBeNull();
+  expect(dock().querySelector('[aria-label="Minimize Ask"]')?.closest('.lab-session-heading-actions-panel')).toBeNull();
   await act(async () => edit({ type: 'view.resize', viewId: child.id, width: 500 }));
   expect(dock().style.width).toBe('920px');
   await act(async () => { entry.attached = false; edit({ type: 'view.select', viewId: view.id }); });

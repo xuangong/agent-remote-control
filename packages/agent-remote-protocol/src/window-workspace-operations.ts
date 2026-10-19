@@ -26,9 +26,32 @@ function descendants(window: WorkspaceWindow, root: string, cascadeClose = false
   return ids;
 }
 function remove(window: WorkspaceWindow, ids: Set<string>) {
+  const previousViews = window.views;
+  const previousSelection = window.selectedViewId;
   window.views = window.views.filter(view => !ids.has(view.id));
-  if (ids.has(window.selectedPrimaryViewId)) window.selectedPrimaryViewId = primaryWindowViews(window)[0]!.id;
-  if (ids.has(window.selectedViewId)) window.selectedViewId = window.selectedPrimaryViewId;
+  const surviving = new Set(window.views.map(view => view.id));
+  if (previousSelection !== null && !surviving.has(previousSelection)) {
+    let ancestor = previousViews.find(view => view.id === previousSelection)?.attachedTo;
+    while (ancestor && !surviving.has(ancestor)) ancestor = previousViews.find(view => view.id === ancestor)?.attachedTo;
+    const selectedIndex = previousViews.findIndex(view => view.id === previousSelection);
+    const neighbor = previousViews.slice(0, selectedIndex).reverse().find(view => surviving.has(view.id))
+      ?? previousViews.slice(selectedIndex + 1).find(view => surviving.has(view.id));
+    window.selectedViewId = ancestor ?? neighbor?.id ?? null;
+    if (window.selectedViewId !== null) expandSelection(window, window.selectedViewId);
+  }
+  reconcilePrimarySelection(window);
+}
+function reconcilePrimarySelection(window: WorkspaceWindow): void {
+  const primaries = primaryWindowViews(window);
+  window.selectedPrimaryViewId = windowPrimaryViewId(window, window.selectedViewId)
+    ?? primaries.find(view => view.id === window.selectedPrimaryViewId)?.id ?? primaries[0]?.id ?? null;
+}
+function expandSelection(window: WorkspaceWindow, viewId: string): void {
+  let view = window.views.find(view => view.id === viewId);
+  while (view) {
+    view.collapsed = false;
+    view = view.attachedTo ? window.views.find(candidate => candidate.id === view!.attachedTo) : undefined;
+  }
 }
 function edit(window: WorkspaceWindow, operation: WindowEdit): void {
   if (operation.type === 'rename') { window.title = operation.title; return; }
@@ -42,6 +65,11 @@ function edit(window: WorkspaceWindow, operation: WindowEdit): void {
       const index = window.views.reduce((last, item, index) => group.has(item.id) ? index : last, -1);
       window.views.splice(index + 1, 0, view);
     } else window.views.push(view);
+    if (window.selectedViewId === null) {
+      window.selectedViewId = view.id;
+      expandSelection(window, view.id);
+    }
+    reconcilePrimarySelection(window);
     return;
   }
   const view = window.views.find(view => view.id === operation.viewId);
@@ -61,12 +89,11 @@ function edit(window: WorkspaceWindow, operation: WindowEdit): void {
       view.binding = clone(operation.binding); return;
     }
     case 'view.close':
-      if (view.placement === 'primary' && primaryWindowViews(window).length === 1) fail('primary_view_required', 'Keep at least one primary Session group in the Window.');
       remove(window, descendants(window, view.id, true)); return;
     case 'view.select': {
-      window.selectedViewId = view.id; view.collapsed = false;
-      const primaryId = windowPrimaryViewId(window, view.id);
-      if (primaryId) { window.selectedPrimaryViewId = primaryId; window.views.find(view => view.id === primaryId)!.collapsed = false; }
+      window.selectedViewId = view.id;
+      expandSelection(window, view.id);
+      reconcilePrimarySelection(window);
       return;
     }
     case 'view.resize': view.width = operation.width; return;

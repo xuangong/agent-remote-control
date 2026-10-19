@@ -3,7 +3,7 @@ import { applyWindowOperation, createWindowView, type WindowMutation, type Windo
 import { WindowRequestError, type WindowWorkspaceClient } from '@orchardworks/agent-remote-web';
 import { WindowWorkspaceStore } from './window-workspace-store.js';
 
-const initial = (): WorkspaceWindow => ({ schemaVersion: 2, id: 'recovery-window', title: 'Before', revision: 0,
+const initial = (): WorkspaceWindow => ({ schemaVersion: 3, id: 'recovery-window', title: 'Before', revision: 0,
   selectedPrimaryViewId: 'main', selectedViewId: 'main', views: [createWindowView('main', undefined, 'primary'), createWindowView('dock')] });
 const receipt = (mutation: WindowMutation, window: WorkspaceWindow, code?: string): WindowOperationResult => ({
   operationId: mutation.operationId, status: code ? 'rejected' : 'committed', revision: window.revision,

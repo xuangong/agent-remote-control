@@ -26,7 +26,7 @@ const children: Record<string, string[]> = {
  source: ['source-child'], leader: ['leader-child', 'leader-other'], member: ['member-child'], 'leader-child': ['leader-grandchild'],
 };
 const snapshot = (id: string): AgentSnapshot => ({ protocolVersion: '1.8.0', type: 'agent_snapshot', payload: {
- ...replicaState.agent!, id, capabilities: { ...replicaState.agent!.capabilities, sessionSettings: settingsEnabled }, runtimeInfo: { ...replicaState.agent!.runtimeInfo, sessionId: id,
+ ...replicaState.agent!, id, providerId: 'codex', capabilities: { ...replicaState.agent!.capabilities, sessionSettings: settingsEnabled }, runtimeInfo: { ...replicaState.agent!.runtimeInfo, providerId: 'codex', sessionId: id,
  ...(settingsEnabled ? { settings: [{ id: 'approval', category: 'permissions' as const, label: 'Approval policy', value: permissions.get(id) ?? 'ask', mutable: true, scope: 'session' as const,
  options: [{ value: 'ask', label: 'Ask' }, { value: 'allow', label: 'Allow' }] }] } : {}),
  childSessions: new URLSearchParams(location.search).has('children') ? (children[id] ?? []).map(nativeSessionId => ({
@@ -36,7 +36,7 @@ const snapshot = (id: string): AgentSnapshot => ({ protocolVersion: '1.8.0', typ
 const timeline = (id: string): HistoryPage => ({ protocolVersion: '1.8.0', type: 'timeline_page', payload: {
   agentId: id, requestId: 'history', direction: 'tail', epoch: 'epoch', reset: false, staleCursor: false, gap: false,
   window: { minSeq: 1, maxSeq: 20, nextSeq: 21 }, startCursor: { epoch: 'epoch', seq: 1 }, endCursor: { epoch: 'epoch', seq: 20 },
-  entries: Array.from({ length: 20 }, (_, index) => ({ providerId: 'recorded', seqStart: index + 1, seqEnd: index + 1, timestamp: '2026-10-12T00:00:00Z', sourceSeqRanges: [], collapsed: [], resources: [], item: { ...(index < 4 ? { background: { id: 'fixture-review', kind: 'review' as const, status: 'silent' as const } } : {}), type: 'assistant_message' as const, text: `Review ${index + 1}: We can keep this session focused on one delivery while checking the main session for progress.\n\nThe acceptance criteria and next steps stay visible in this conversation.` } })),
+  entries: Array.from({ length: 20 }, (_, index) => ({ providerId: 'codex', seqStart: index + 1, seqEnd: index + 1, timestamp: '2026-10-12T00:00:00Z', sourceSeqRanges: [], collapsed: [], resources: [], item: { ...(index < 4 ? { background: { id: 'fixture-review', kind: 'review' as const, status: 'silent' as const } } : {}), type: 'assistant_message' as const, text: `Review ${index + 1}: We can keep this session focused on one delivery while checking the main session for progress.\n\nThe acceptance criteria and next steps stay visible in this conversation.` } })),
   hasOlder: false, hasNewer: false, error: null } });
 let connections = 0;
 const pendingInputs = new Map<string, Extract<ClientMessage, { type: 'send_message' }>>();
@@ -48,7 +48,7 @@ function settleInput(id: string, outcome: 'ack' | 'echo' | 'reject') {
  if (outcome === 'echo') {
   const seq = nextSeq.get(id) ?? 21; nextSeq.set(id, seq + 1);
   listener.onMessage({ protocolVersion: '1.8.0', type: 'agent_stream', payload: { agentId: id, epoch: 'epoch', seq, timestamp: new Date().toISOString(),
-   event: { type: 'timeline', providerId: 'recorded', item: { type: 'user_message', text: 'text' in input.payload ? input.payload.text : 'Image input' }, resources: [] } } });
+   event: { type: 'timeline', providerId: 'codex', item: { type: 'user_message', text: 'text' in input.payload ? input.payload.text : 'Image input' }, resources: [] } } });
  } else if (outcome === 'ack') {
   listener.onMessage({ protocolVersion: '1.8.0', type: 'command_acknowledged', payload: { agentId: id, requestId: input.payload.requestId, command: 'send_message' } });
  } else listener.onMessage({ protocolVersion: '1.8.0', type: 'protocol_error', payload: { requestId: input.payload.requestId, code: 'agent_busy', message: 'Fixture rejected input.', recoverable: true } });

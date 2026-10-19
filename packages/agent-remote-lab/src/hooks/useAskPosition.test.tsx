@@ -167,7 +167,7 @@ it.each(['resize', 'move'])('writes source-anchored Ask geometry after %s and re
   const source = { hostId: 'local', providerId: 'codex', nativeSessionId: 'source', agentId: 'source-agent', title: 'Source' };
   const slot = createCompositionSlot('source-slot', source, scope), owner = createAskOwner(slot, scope);
   const document = createCompositionDocument(scope, [slot]); document.asks = [owner]; document.primary = slot.id;
-  let shared: WorkspaceWindow = { schemaVersion: 2, id: 'geometry-window', revision: 0, title: 'Window',
+  let shared: WorkspaceWindow = { schemaVersion: 3, id: 'geometry-window', revision: 0, title: 'Window',
     selectedPrimaryViewId: 'main', selectedViewId: 'shared-ask', views: [createWindowView('main', windowSessionBinding(source), 'primary'),
       { ...createWindowView('shared-ask', windowSessionBinding({ ...source, nativeSessionId: 'ask-native' }), 'float'), closeWith: 'main',
         feature: createWindowFeature({ kind: 'ask', id: 'independent-shared-feature', source }), bindingPolicy: 'managed' }] };

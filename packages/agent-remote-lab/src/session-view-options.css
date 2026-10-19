@@ -56,6 +56,24 @@
 .lab-timeline-tools .lab-session-heading-actions > .lab-session-heading-actions-panel { display: contents; }
 .lab-timeline-tools .lab-session-heading-actions > .lab-session-heading-actions-trigger { display: none; }
 
+.lab-session-heading-actions[data-always-collapsed] { display: block; position: relative; flex: 0 0 auto; }
+.lab-session-heading-actions[data-always-collapsed] > .lab-session-heading-actions-trigger {
+  display: inline-flex; align-items: center; justify-content: center; width: 36px; min-height: 36px;
+  padding: 0; border-color: transparent; background: transparent; color: var(--obs-text-secondary); font-size: 22px;
+}
+.lab-session-heading-actions[data-always-collapsed] > .lab-session-heading-actions-trigger[aria-expanded="true"] { color: var(--obs-action); background: var(--obs-surface-selected); }
+.lab-session-heading-actions[data-always-collapsed] > .lab-session-heading-actions-panel {
+  position: absolute; z-index: 50; top: calc(100% + 5px); right: 0;
+  display: flex; align-items: center; gap: 8px; width: max-content; max-width: min(calc(100cqw - 24px), var(--session-menu-width-limit, 100vw));
+  padding: 6px; border: 1px solid var(--obs-border); border-radius: 10px;
+  background: var(--obs-surface); box-shadow: 0 8px 24px color-mix(in oklab, var(--obs-text) 14%, transparent);
+}
+.lab-session-heading-actions[data-always-collapsed] > .lab-session-heading-actions-panel[hidden] { display: none; }
+.lab-timeline-tools .lab-session-heading-actions[data-always-collapsed] { position: static; }
+@media (pointer: coarse) {
+  .lab-session-heading-actions[data-always-collapsed] > .lab-session-heading-actions-trigger { width: 44px; min-height: 44px; }
+}
+
 .lab-session-view-options-panel[popover]:popover-open,
 .lab-session-heading-actions-panel[popover]:popover-open {
   position: fixed; inset: auto; margin: 0;

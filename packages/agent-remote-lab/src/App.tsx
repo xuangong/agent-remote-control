@@ -14,6 +14,7 @@ import { SessionViewOperationsContext } from './session-view-operations.js';
 import { SessionDescriptionsContext } from './session-description-context.js';
 import { describeSession } from './session-description.js';
 import { attributionWindowOperation } from './session-attribution-navigation.js';
+import { sideWindowOperation } from './window-side-navigation.js';
 import type { SessionAttribution } from '@orchardworks/agent-remote-web';
 import { labSessionSuccessionDirectory, type SessionSuccessionDirectory } from './session-succession-directory.js';
 import { TeamViewScope, useTeamVisibility } from './hooks/useTeamVisibility.js';
@@ -321,6 +322,7 @@ function AppContent({
   const [sidebarViewTarget, setSidebarViewTarget] = useState<HTMLDivElement | null>(null);
   const [minimizedViewTarget, setMinimizedViewTarget] = useState<HTMLDivElement | null>(null);
   const [sessionViewTarget, setSessionViewTarget] = useState<HTMLDivElement | null>(null);
+  const [windowViewTarget, setWindowViewTarget] = useState<HTMLDivElement | null>(null);
   const [mobileViewTarget, setMobileViewTarget] = useState<HTMLDivElement | null>(null);
   const [traceViewTarget, setTraceViewTarget] = useState<HTMLDivElement | null>(null);
   const connectionSummaryRef = useRef<HTMLDetailsElement>(null);
@@ -339,6 +341,8 @@ function AppContent({
   const draftStores = useMemo(() => new Map([[baseUrl, messageDrafts]]), [baseUrl, messageDrafts]);
   const [teamRoster, setTeamRoster] = useState<{ baseUrl: string; teams: Team[] }>();
   const teamRosterRef = useRef(teamRoster); teamRosterRef.current = teamRoster;
+  // An explicit Window restores its own bindings; session parameters may describe a pane that was closed.
+  const [initialSession] = useState(() => initialState || new URLSearchParams(window.location.search).has('window') ? undefined : requested.target);
   const succession = useSessionSuccession({
     targetRevision: JSON.stringify(teamRoster),
     validateTarget(selection, viewId, document) {
@@ -347,7 +351,7 @@ function AppContent({
       if (target && sessionKey(target) !== sessionKey(selection)) throw new Error('The Team execution locator is still synchronizing. Its history and draft are preserved.');
     },
     scope: baseUrl, transport, enabled: activated && accessReady,
-    initial: initialState ? undefined : requested.target, initialDisplayState: cachedState, initialLayout,
+    initial: initialSession, initialDisplayState: cachedState, initialLayout: initialSession ? initialLayout : undefined,
     connections, replicaFor, directory: hostId => hostId === selectedHost.id && directory ? directory : new SessionDirectoryClient(baseUrl, undefined, hostId),
     cachedReplicaFor: target => {
       const saved = openedSessionsRef.current.find(item => sessionKey(item) === sessionKey(target));
@@ -377,8 +381,7 @@ function AppContent({
       if (error instanceof DirectoryError && error.nativeOwner) setNativeTakeover({ item: selection, owner: error.nativeOwner, message: error.message });
     },
   });
-  const [nativeBootstrap] = useState(() => !initialState && !new URL(location.href).searchParams.has('window')
-    && !requested.target?.nativeSessionId && !!requested.target?.agentId);
+  const [nativeBootstrap] = useState(() => !initialSession?.nativeSessionId && !!initialSession?.agentId);
   const [bootstrapComplete, setBootstrapComplete] = useState(!nativeBootstrap);
   useEffect(() => { if (nativeBootstrap && succession.binding) setBootstrapComplete(true); }, [nativeBootstrap, succession.binding]);
   // A supplied snapshot is a standalone rendering input; it does not require a Window controller.
@@ -470,6 +473,11 @@ function AppContent({
   const sideSelections = useMemo<SideSelections>(() => Object.fromEntries(succession.document.edges.filter(edge => edge.selected).map(edge => [edge.source, edge.target])), [succession.document, succession.document.editRevision]);
   const sideFocus = succession.document.focus, sideAnchor = succession.document.anchor;
   function selectedChildKey(sourceId: string) {
+    if (sharedWindow) {
+      const source = sharedViewForSlot(sourceId);
+      const child = source && sharedWindow.views.find(view => view.attachedTo === source.id);
+      return child?.binding ? sessionKey(child.binding) : undefined;
+    }
     const slot = succession.document.slots.find(slot => slot.id === sideSelections[sourceId]);
     return slot ? sessionKey(compositionSelection(slot)) : undefined;
   }
@@ -506,7 +514,13 @@ function AppContent({
   }
   function setSideFocus(change: string | undefined | ((current: string | undefined) => string | undefined)) {
     const next = typeof change === 'function' ? change(succession.document.focus) : change;
-    if (sharedWindow) { const view = sharedViewForSlot(next); if (view && view.id !== sharedWindow.selectedViewId) windowWorkspace.authority?.operate({ type: 'view.select', viewId: view.id }); return; }
+    if (sharedWindow) {
+      // Restoring children can change the selected view before React renders the new layout.
+      const current = windowWorkspace.readWindow();
+      const view = next && current?.views.find(view => view.binding && succession.ensureWindowView(current.id, view.id, view.binding).id === next);
+      if (view && view.id !== current?.selectedViewId) windowWorkspace.authority?.operate({ type: 'view.select', viewId: view.id });
+      return;
+    }
     if (next === succession.document.focus) return;
     succession.document.focus = next; succession.document.editRevision++; succession.save();
   }
@@ -1039,7 +1053,7 @@ function AppContent({
   }
   function selectPrimaryGroup(id: string) {
     const current = windowWorkspace.readWindow();
-    if (current?.selectedPrimaryViewId === id && windowPrimaryViewId(current, current.selectedViewId) === id) return;
+    if (current?.selectedPrimaryViewId === id && current.selectedViewId && windowPrimaryViewId(current, current.selectedViewId) === id) return;
     windowWorkspace.authority?.operate({ type: 'view.select', viewId: id });
   }
   function createSessionView() {
@@ -1103,11 +1117,11 @@ function AppContent({
     }
     if (current) {
       const destination = current.views.find(view => view.id === (captured?.[1] ?? presentedSelection(current)?.id));
-      if (!destination) return false;
-      const sameSource = destination.binding && sessionKey(destination.binding) === sessionKey(layout.main);
+      if (captured && !destination) return false;
+      const sameSource = destination?.binding && sessionKey(destination.binding) === sessionKey(layout.main);
       if (captured && !sameSource) return false;
       if (!sameSource) {
-        if (destination.bindingPolicy === 'managed') {
+        if (!destination || destination.bindingPolicy === 'managed') {
           const source = createWindowView(crypto.randomUUID(), windowSessionBinding(layout.main));
           editWindow({ type: 'batch', operations: [{ type: 'view.create', view: source }, { type: 'view.select', viewId: source.id }] });
         } else if (!await bindDirectorySession(layout.main, { windowId: current.id, viewId: destination.id, binding: JSON.stringify(destination.binding ?? null) })) return false;
@@ -1220,8 +1234,13 @@ function AppContent({
   const renamePrimaryTitle = canRenamePrimary && visibleStackRoot?.hostId ? () => {
     setRenamingSession({ scope: baseUrl, session: { ...visibleStackRoot, hostId: visibleStackRoot.hostId! } });
   } : undefined;
-  const pageTitleBinding = sharedWindow?.views.find(view => view.id === sharedWindow.selectedPrimaryViewId)?.binding;
-  const pageTitle = sharedWindow ? pageTitleBinding && (confirmedTitles?.get(sessionKey(pageTitleBinding)) ?? pageTitleBinding.title) : featureSource?.title;
+  const pageTitleBinding = (() => {
+    if (!sharedWindow) return;
+    const roots = [...primaryGroups, ...sharedWindow.views.filter(view => view.placement === 'dock'),
+      ...sharedWindow.views.filter(view => view.placement === 'float')];
+    return roots.find(view => view.binding)?.binding;
+  })();
+  const pageTitle = sharedWindow ? (pageTitleBinding && (confirmedTitles?.get(sessionKey(pageTitleBinding)) ?? pageTitleBinding.title)) || sharedWindow.title : featureSource?.title;
   useEffect(() => {
     document.title = pageTitle?.trim() ? `${pageTitle.trim()} · Agent Remote Control` : 'Agent Remote Control';
     return () => { document.title = 'Agent Remote Control'; };
@@ -1566,6 +1585,23 @@ function AppContent({
     return (source as OpenedSession & { viewId?: string }).viewId ?? sessionKey(source);
   }
   function selectSide(source: OpenedSession, session: OpenedSession): void {
+    if (sharedWindow) {
+      const origin = sharedViewForSlot(viewKey(viewSession(source)));
+      if (!origin?.binding || sessionKey(origin.binding) !== sessionKey(source)) throw new Error('The source view changed. Open the Side session again.');
+      const binding = windowSessionBinding(session);
+      const { operation, viewId } = sideWindowOperation(windowWorkspace.readWindow(), { windowId: sharedWindow.id, viewId: origin.id, binding: origin.binding }, binding, crypto.randomUUID());
+      const candidate = viewSession(session);
+      const targetSlot = succession.document.slots.find(slot => slot.id === candidate.viewId)!;
+      const slot = operation.type !== 'view.select' && !succession.document.windowBindings?.some(entry => entry.slotId === targetSlot.id)
+        ? succession.bindWindowView(sharedWindow.id, viewId, binding, targetSlot.id)
+        : succession.ensureWindowView(sharedWindow.id, viewId, binding);
+      const opened = { ...session, viewId: slot.id };
+      succession.rememberSide(opened);
+      setSideSessions(current => [...current.filter(entry => viewKey(entry) !== opened.viewId), opened]);
+      nextSideRequest(source);
+      editWindow(operation);
+      return;
+    }
     nextSideRequest(source);
     const opened = viewSession(session), sourceId = viewKey(viewSession(source));
     succession.rememberSide(opened);
@@ -1774,7 +1810,7 @@ function AppContent({
         await configureFork(transport, forkStore, forkStore.get(record.id));
       } else forkStore.followEditedSide(record.id, saved, session);
       rememberSession(session);
-      if (sideRequests.current.get(sideRequestKey(source)) === request && sideLinkVisible(forkStore.get(record.id)) && session.agentId !== activeAgentId) selectSide(source, session);
+      if (sideRequests.current.get(sideRequestKey(source)) === request && sideLinkVisible(forkStore.get(record.id)) && sessionKey(session) !== sessionKey(source)) selectSide(source, session);
     } catch (error) {
       if (sideRequests.current.get(sideRequestKey(source)) === request) setFailure(message(error, 'Forked session could not be opened.'));
     }
@@ -2032,11 +2068,12 @@ function AppContent({
           : Promise.resolve(false)} />,
       composerContext: fork ? <ForkReference fork={fork} onOpen={revealSession} onUnlink={unlinkSide} onRecover={record => refreshRelations.reconcile(record)} /> : undefined,
       composerNotice: <ForkEntries forks={sourceForks} selectedChild={selectedChildKey(source.viewId)} onOpen={record => void openFork({ ...record, navigationSource: source })} onUnlink={unlinkSide} onRecover={record => refreshRelations.reconcile(record)} />,
-      sessionManager: <>{context.controls}{isPrimary && primaryGroups.length > 1 ? <button type="button" aria-label={`Close primary group: ${source.title}`}
+      sessionManager: <>{context.controls}{isPrimary ? <button type="button" data-pane-selection-ignore aria-label={`Close primary group: ${source.title}`}
         title="Close this session view. Agent sessions keep running."
         onClick={() => windowWorkspace.authority?.operate({ type: 'view.close', viewId: view.id })}>×</button> : null}
         {!compactLayout ? <StarButton session={source} favorites={favorites} /> : null}
-        <SessionHeadingActions sessionKey={sessionKey(source)}>
+        <SessionHeadingActions sessionKey={sessionKey(source)} alwaysCollapsed={!!context.menuActions}>
+          {context.menuActions}
           {isPrimary && (!compactLayout || succession.localViews().length > 0) && directory ? <ChatSessionManager current={source} entries={sessionEntries} busy={false}
             localViews={succession.localViews()} activeSlot={context.viewId} onOpenView={view => void openLocalView(view.slotId)}
             onOpen={item => void openSession(item, undefined, undefined, false, undefined, undefined, undefined, undefined, 'primary', view.id)} /> : null}
@@ -2115,7 +2152,7 @@ function AppContent({
     <ViewOptions onCreateSessionView={createSessionView} attentionControls={<>
       {askView.controls}
       {windowView.controls}{userScoped ? attention.controls : null}{tpmView.controls}{teamView.controls}
-    </>} target={!headerHidden ? headerViewTarget : compactLayout ? mobileViewTarget : desktopContextVisible ? sidebarViewTarget : activeView === 'trace' ? traceViewTarget : minimizedViewTarget ?? sessionViewTarget}
+    </>} target={!headerHidden ? headerViewTarget : compactLayout ? mobileViewTarget : desktopContextVisible ? sidebarViewTarget : activeView === 'trace' ? traceViewTarget : sharedWindow && !primaryGroups.length ? windowViewTarget : minimizedViewTarget ?? sessionViewTarget}
       triggerRef={viewTriggerRef} headerVisible={!headerHidden} sidebarVisible={contextVisible}
       inspectorVisible={inspectorOpen} compact={compactLayout} inert={supportingRailOpen}
       onSetAllVisible={setAllPanelsVisible} onToggleHeader={() => setHeaderHidden((value) => !value)} onToggleSidebar={toggleContext}
@@ -2265,6 +2302,7 @@ function AppContent({
         tabIndex={-1}
         hidden={activeView !== 'workbench'}
       >
+        {sharedWindow && !primaryGroups.length && !compactLayout ? <div ref={setWindowViewTarget} data-pane-selection-ignore className="lab-global-view-slot lab-window-controls" /> : null}
         <div className="lab-session-windows">{sessionWindows.entries.map(entry => <SessionWindow key={entry.id} entry={entry} baseUrl={baseUrl}
           visible={activeView === 'workbench' && !supportingRailOpen && (!compactLayout || (sharedWindow ? presentedRootView?.id : sessionWindows.selectedId) === entry.id)} compact={compactLayout}
           closeWith={sessionWindows.entries.filter(child => child.closeWith === entry.id).map(child => child.id)}
@@ -2276,7 +2314,10 @@ function AppContent({
           onSessionBound={entry.managed ? undefined : receiveViewSession}
           sessionPresentation={entry.managed ? undefined : sessionViewPresentation}
           transport={transport} draftStore={messageDrafts} {...windowDraftBinding(entry)} navigation={viewNavigation} onClose={() => sessionWindows.close(entry.id)} />)}</div>
-        <div className="lab-ordinary-workspace" hidden={compactLayout && !!sharedWindow && !presentedPrimaryViewId}>
+        {sharedWindow && !sharedWindow.views.length ? <div className="lab-window-empty" data-testid="empty-window">
+          <p>No session views</p><button type="button" onClick={createSessionView}>New session view</button>
+        </div> : null}
+        <div className="lab-ordinary-workspace" hidden={!!sharedWindow && (!sharedWindow.views.length || compactLayout && !presentedPrimaryViewId)}>
         {sessionNotice && !nativeTakeover && !(compactLayout && contextOpen) ? <SessionConnectionNotice notice={sessionNotice} /> : null}
         {succession.error && succession.error !== nativeTakeover?.message ? <p role="alert">{succession.error}{!nativeTakeover ? <button type="button" onClick={succession.retry}>{succession.result?.status === 'applied' ? 'Retry session' : 'Retry synchronization'}</button> : null}</p> : null}
         {promptMigrations.notice}
@@ -2286,6 +2327,7 @@ function AppContent({
           onSelectPrimaryGroup={selectPrimaryGroup}
           onResizePrimaryGroup={(viewId, width) => windowWorkspace.authority?.operate({ type: 'view.resize', viewId, width })}
           onCollapsePrimaryGroup={(viewId, collapsed) => windowWorkspace.authority?.operate({ type: 'view.collapse', viewId, collapsed })}
+          onClosePrimaryGroup={viewId => windowWorkspace.authority?.operate({ type: 'view.close', viewId })}
           primaryGroups={primaryGroups.map(view => {
             const pendingSlot = view.id === sharedWindow.selectedPrimaryViewId ? succession.displaySlot : undefined;
             const slot = sharedSlots?.get(view.id) ?? (pendingSlot && view.binding
@@ -2312,8 +2354,8 @@ function AppContent({
                   <header className="lab-empty-session-heading">
                     {!compactLayout && view.id === primaryGroups[0]?.id ? <div ref={setSessionViewTarget} data-pane-selection-ignore className="lab-global-view-slot" /> : null}
                     <strong>Select session</strong>
-                    {primaryGroups.length > 1 ? <button type="button" aria-label="Close primary group: Select session" title="Close session view"
-                      onClick={() => windowWorkspace.authority?.operate({ type: 'view.close', viewId: view.id })}>×</button> : null}
+                    <button type="button" data-pane-selection-ignore aria-label="Close primary group: Select session" title="Close session view"
+                      onClick={() => windowWorkspace.authority?.operate({ type: 'view.close', viewId: view.id })}>×</button>
                   </header><p>This session view is empty.</p>
                   <button type="button" onClick={() => { selectPrimaryGroup(view.id); setSessionPanel('list'); setContextOpen(true); setDesktopContextVisible(true); }}>Choose session</button>
                   <button type="button" onClick={() => { selectPrimaryGroup(view.id); setSessionPanel('new'); setContextOpen(true); setDesktopContextVisible(true); }}>New session</button></div>,

@@ -22,7 +22,7 @@ function deferred<T>() {
   return { promise, resolve, reject };
 }
 function windowFixture(id: string): WorkspaceWindow {
-  return { schemaVersion: 2, id, revision: 0, title: id, selectedPrimaryViewId: 'main', selectedViewId: 'main',
+  return { schemaVersion: 3, id, revision: 0, title: id, selectedPrimaryViewId: 'main', selectedViewId: 'main',
     views: [createWindowView('main', undefined, 'primary'), createWindowView('dock')] };
 }
 function saveCache(scope: string, window: WorkspaceWindow) {

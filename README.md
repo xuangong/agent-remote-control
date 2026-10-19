@@ -1,10 +1,64 @@
 # Agent Remote Control
 
-An independent workbench for discovering, creating, connecting to, and debugging agent sessions. It includes the remote protocol, provider SDK, DSH, Codex, Claude Code, and Copilot adapters, Node relay, browser client and renderer, terminal debugger, recorded scenarios, and an independent Agent Host runtime.
+Run your coding agents on your own machines and work with them from one browser workspace. Agent Remote Control connects to Codex, Claude Code, GitHub Copilot, OpenCode, and DSH, with shared session views, saved Window layouts, and collaboration across Hosts.
 
-The local diagnostic workbench has no account system. Generate a temporary key locally, pair an Agent Host or DSH Host plugin with that key, and select an advertised Provider under the connected installation to browse its native sessions and workspaces. Chat, questions, approvals, Timeline, Trace, and Replica Inspector share the existing public protocol.
+Use a wide screen to work across several conversations, or open the same workspace on a phone to focus on one at a time. Self-host the website with Docker or Cloudflare Workers; Controller connects the machines where your agents and project directories live.
+
+[Feature tour](#feature-tour) · [Try the Devbox](#local-devbox) · [Private deployment](#private-deployment) · [Install Controller](#install-controller) · [Pair a Host](#pair-controller-with-your-site)
+
+## Feature tour
+
+### Work across sessions without losing your place
+
+[![Several Session Views arranged side by side, with Host and provider discovery in the sidebar.](docs/images/session-workspace.png)](docs/images/session-workspace.png)
+
+Keep an implementation conversation, a review, and another project's work open together. Each **Session View** has its own conversation, composer, runtime status, and display mode. On wide screens, resize panes and scroll the workspace horizontally; attached subagents stay beside their source view as a group.
+
+Click a pane's title, conversation, or composer to select it. Choosing a session from the sidebar, Favorites, or Track, or creating a new session, replaces that pane's conversation. To keep the current conversation open, first use **Window → New session view** to add an empty pane and select its session afterward. Ask, Team, and TPM panes stay attached to their own conversations; use an ordinary or empty pane to open a different session.
+
+Use **Ask** for a separate contextual discussion and **/side** for a related working conversation. Show the Ask entry with **View → Ask view** or **/ask**. Both use the same Session View as other sessions. Ask can float above the workspace or **Dock** alongside it when there is enough room. On narrow screens, the foreground conversation is already selected; switch views through the Window list instead of navigating a horizontal canvas.
+
+*Screenshots show real working sessions. Click any image to view it at full size.*
+
+### Keep and share your Window layouts
+
+<a href="docs/images/window-manager.png"><img src="docs/images/window-manager.png" alt="Window manager with two saved Windows and a list of selectable, closable Session Views." width="360"></a>
+
+A **Window** holds a layout of Session Views. Use the floating **Window** button to switch workspaces, add an empty view, or return to an existing pane. For example, keep one Window for a feature and another for deployment work, each with the conversations you need.
+
+Layouts restore on refresh and reopen. Pane changes appear locally first while saving and synchronization happen in the background. Opening the same Window link in another page shares its layout and selection. Closing panes changes the layout without stopping native sessions; dependent views close together, such as a Leader and its member panes. To delete a Window, switch to another valid Window first, then delete the inactive one from the list.
+
+An authorized agent can also inspect and arrange a Window through `agent-remote-controller window` commands. See [Shared Window workspaces](#shared-window-workspaces) and the [Window command guide](docs/guides/window-agent-operations.md).
+
+### Put a Team on work that spans machines
+
+[![A Team Leader and a Windows member working in neighboring Session Views within the horizontally scrolled workspace.](docs/images/team-workspace.png)](docs/images/team-workspace.png)
+
+Use a **Team** when a task needs agents in different environments: investigate on a Mac, reproduce on Windows, and validate on Linux. Select the source project session, open **Team**, and choose **New team**. A separate Leader starts in the source working directory. Discuss the goal with the Leader, then use **Manage team → Add member** to select an online paired Host, a provider, and a working directory from that Host's folder browser.
+
+The Leader can implement work itself and send tasks to members, collect their findings, and coordinate validation. Members run in their own native environments and permissions. The source session stays separate from this collaboration; it does not need to manage the Team.
+
+<a href="docs/images/team-manager.png"><img src="docs/images/team-manager.png" alt="Team manager grouping Teams by source session, with worker counts, Rename, Manage team, Archived, and New team controls." width="360"></a>
+
+The Team list groups work by source session so you can see which project each group belongs to. **Manage team** holds membership and archive actions. Opening a Team arranges its source, Leader, and members using ordinary Session Views on wide screens. **Gather** brings missing member views back; closing a member pane does not remove the member. On a phone, opening the Team shows its Leader; use the session selector in the Team list to switch to members.
+
+Use **View → Team view** or **/team** to show or hide the management entry. For files such as logs, reports, or build archives, members can use explicit [Team resource transfers](docs/guides/team-resources.md); working directories are not automatically shared between Hosts.
+
+### Give one deliverable a dedicated TPM
+
+<a href="docs/images/tpm-manager.png"><img src="docs/images/tpm-manager.png" alt="TPM work list grouped by source session, with Needs you and New indicators, archived work, and New TPM session." width="360"></a>
+
+A **TPM** is a conversation dedicated to clarifying a requirement and following it through delivery. Select the session doing the implementation, open **TPM**, and choose **New TPM session**. Start talking without filling in a title or a specification first; the work can be named as the goal becomes clear.
+
+The TPM helps develop the plan and acceptance criteria, sends requests to its source session, checks progress and evidence, and reports back. Unlike a Team Leader, it coordinates implementation with that session rather than implementing product code itself. The TPM list groups work by source session and highlights items that need your attention. On a phone, open one TPM conversation at a time and use this list to switch between work items.
+
+New work starts in manual mode. Choose **Delegate** in the TPM workspace to enable Controller-owned background follow-up, including heartbeats. This continues while the browser is closed, provided the Host and model service remain available. Click **Delegated** to return to manual discussion; archive the work when it is finished. Use **View → TPM view** or **/tpm** to show the entry. See [TPM delivery](docs/tpm-delivery.md) for plans, acceptance, and recovery behavior.
+
+### Attach files and share results
 
 Use **… → Resource** in the composer to attach ordinary files as `[resource #N]` references. Agents receive verified Host-local files, and sent messages provide downloads. Team members can exchange archives and reports through `upload_team_resource`, `send_team_message`, and `download_team_resource` without encoding file contents in message text. See [Resource attachments](docs/resource-attachments.md) for usage, storage, and limits.
+
+To try the full product on one machine, start with the [Local Devbox](#local-devbox). For your own site and multiple Hosts, follow [Private deployment](#private-deployment), then install and pair Controller on each participating machine. Available session controls and collaboration features depend on the provider and the Host's advertised capabilities.
 
 ## Local Devbox
 
@@ -490,16 +544,23 @@ ordinary restart or update.
 
 ## Shared Window workspaces
 
-A Window is a workspace with its own identity. The product automatically creates
-one when no Window is selected, without requiring a name or a setup step.
-Changes persist as they commit, so refresh, sharing, and returning later use the
-same Window. Use **Delete Window** to remove its layout; the page then creates
-an empty Window without stopping any native sessions.
+A Window is a workspace with its own identity, independent of any session.
+The product restores an existing Window on reopen; it creates one only when none
+exists or when you choose **New Window**. No naming or save step is required.
+Cached layouts appear before synchronization completes, and local edits apply
+immediately while saving continues in the background.
 
-This version retains one primary session area and additional views; replacing its primary session keeps
-the same Window. Open its shared link in multiple pages to share layout, selection, docking,
-widths, and per-view display preferences. Narrow screens show the selected view;
-they do not replace the saved wide-screen layout. Closing a view does not stop its
+A Window can contain multiple top-level sessions, attached subagents, and docked
+or floating views. Click a view's title, conversation, or composer to select it;
+sidebar, Favorites, Track, and new-session actions target that selected ordinary
+view. **New session view** creates an empty dock that can be bound afterward.
+Ask, Team, and TPM views keep their managed bindings. The selected session is
+also the source for creating related Ask, Side, Team, or TPM work.
+
+Open a Window's shared link in multiple pages to share layout, selection, docking,
+widths, and per-view display preferences. Narrow screens show the selected view
+without replacing the saved wide-screen layout. Every pane can be closed;
+closing the last leaves the same empty Window. Closing a view does not stop its
 native session or archive a Team or TPM task.
 
 Use the floating **Window** button to switch Windows and select their session
@@ -665,7 +726,11 @@ pnpm start --codex /absolute/path/to/codex --claude /absolute/path/to/claude \
 
 The launcher builds Agent Host and Web, installs the DSH Host plugin, starts both native Hosts, pairs them automatically, and prints the controller URL after all three providers are ready. Keep the terminal open; Ctrl+C stops this environment. Use `pnpm start --config .runtime/controller.json` for repeatable configuration, or `--dsh-repo` for a DSH source checkout. See the [complete startup guide](docs/runbooks/controller-start.md) for profiles, ports, configuration, and lifecycle.
 
-To start only the workbench and pair Hosts manually:
+The local diagnostic workbench has no account system. Its pairing keys are
+temporary and process-local. Chat, questions, approvals, Timeline, Trace, and
+Replica Inspector use the same public session protocol as the product.
+
+To start only that workbench and pair Hosts manually:
 
 ```bash
 pnpm install --frozen-lockfile
@@ -807,5 +872,3 @@ Optional main-site integration: see [Main-site authentication](docs/current/agen
 ### OpenCode
 
 OpenCode is available as a shared HTTP/SSE provider for Controller and ARDB. See [OpenCode setup and capabilities](docs/opencode.md).
-
-TPM delivery workspaces coordinate a single work item with an existing main session, using Controller-owned follow-up and the ordinary Session View. See [TPM delivery](docs/tpm-delivery.md) for usage, recovery, and verified provider boundaries.

@@ -9,7 +9,7 @@ const access = () => ({ basePath, expiresAt: Date.now() + 120_000, refreshAfterM
 type ResumeEvent = 'visibility' | 'pageshow' | 'online';
 
 beforeEach(() => { localStorage.clear(); sessionStorage.clear(); vi.useFakeTimers(); });
-afterEach(() => { vi.unstubAllGlobals(); vi.useRealTimers(); });
+afterEach(() => { vi.unstubAllGlobals(); vi.useRealTimers(); vi.restoreAllMocks(); });
 
 function resume(kind: ResumeEvent): void {
   if (kind === 'visibility') {
@@ -93,7 +93,7 @@ it('replaces a frozen renewal without interrupting still valid access or accepti
   socket.close();
 });
 
-it('immediately retires valid access when foreground renewal is denied', async () => {
+it.each(['foreground', 'background'])('immediately retires valid access when %s renewal is denied', async state => {
   const sockets = nativeSockets();
   let finish!: (response: Response) => void;
   vi.stubGlobal('fetch', vi.fn().mockResolvedValueOnce(Response.json(access()))
@@ -101,14 +101,17 @@ it('immediately retires valid access when foreground renewal is denied', async (
   const view = await render(<GatewayController>{() => <input aria-label="Draft" />}</GatewayController>);
   const socket = workspaceSocket(new URL(basePath + 'v1/session-channel', location.origin).href);
   await Promise.resolve();
-  await act(async () => resume('online'));
+  if (state === 'background') {
+    vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('hidden');
+    await act(async () => { await vi.advanceTimersByTimeAsync(60_000); });
+  } else await act(async () => resume('online'));
   expect(sockets[0]!.close).not.toHaveBeenCalled();
   await act(async () => finish(Response.json({}, { status: 403 })));
   expect(sockets[0]!.close).toHaveBeenCalledOnce();
   expect(view.querySelector('input')).toBeNull();
   await expect(workspaceFetch(new URL(basePath + 'v1/providers', location.origin))).rejects.toThrow(/retired/i);
   socket.close();
-});
+}, 10_000);
 
 it('retires the previous account socket when foreground renewal confirms a different account', async () => {
   const sockets = nativeSockets();
@@ -168,3 +171,37 @@ it('retries a failed foreground status check without forcing an upstream renewal
   expect(requests.at(-1)).toBe('/auth/refresh');
   socket.close();
 });
+
+it.each([true, false])('preserves valid background access after renewal failure (recovery succeeds: %s)', async recovers => {
+  const sockets = nativeSockets();
+  let refreshStatus = 503;
+  const requests: string[] = [];
+  vi.stubGlobal('fetch', async (url: string) => {
+    requests.push(url);
+    return url === '/auth/status' || refreshStatus === 200
+      ? Response.json(access()) : Response.json({}, { status: refreshStatus });
+  });
+  const view = await render(<GatewayController>{(_url, _account, ready) => <input aria-label={ready ? 'Live draft' : 'Cached draft'} />}</GatewayController>);
+  const draft = view.querySelector('input');
+  const socket = workspaceSocket(new URL(basePath + 'v1/session-channel', location.origin).href);
+  await Promise.resolve();
+  vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('hidden');
+  await act(async () => { await vi.advanceTimersByTimeAsync(60_000); });
+  expect(requests).toEqual(['/auth/status', '/auth/refresh']);
+  expect(sockets[0]!.close).not.toHaveBeenCalled();
+  expect(() => socket.send('still authorized after a temporary failure')).not.toThrow();
+
+  if (recovers) refreshStatus = 200;
+  await act(async () => { await vi.advanceTimersByTimeAsync(60_001); });
+  expect(view.querySelector('input')).toBe(draft);
+  if (recovers) {
+    expect(sockets[0]!.close).not.toHaveBeenCalled();
+    expect(draft?.getAttribute('aria-label')).toBe('Live draft');
+    expect(() => socket.send('authorized after retry')).not.toThrow();
+  } else {
+    expect(sockets[0]!.close).toHaveBeenCalledOnce();
+    expect(draft?.getAttribute('aria-label')).toBe('Cached draft');
+    await expect(workspaceFetch(new URL(basePath + 'v1/command', location.origin), { method: 'POST' })).rejects.toThrow(/restoring/i);
+  }
+  socket.close();
+}, 10_000);

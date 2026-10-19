@@ -54,7 +54,8 @@ export function GatewayController({ children, navigate = navigateToLogin, automa
     stop.current = stopRequests;
     const schedule = (delay: number, renew = true) => {
       clearTimeout(refresh);
-      refresh = setTimeout(() => { if (document.visibilityState !== 'hidden') void request(renew); }, delay);
+      // Background pages still own live session channels and must renew before their lease expires.
+      refresh = setTimeout(() => { void request(renew); }, delay);
     };
     const unavailable = (renew: boolean) => {
       setFailed(true);

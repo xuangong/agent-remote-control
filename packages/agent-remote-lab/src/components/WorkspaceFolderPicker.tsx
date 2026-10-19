@@ -75,7 +75,8 @@ export function WorkspaceFolderPicker({ directory, providerId, initialPath, work
     }
   }
   return createPortal(<dialog ref={dialog} className="lab-folder-dialog" aria-labelledby="folder-picker-title"
-    onCancel={event => { event.preventDefault(); if (!creating) onClose(); }} onKeyDown={event => event.stopPropagation()}>
+    onCancel={event => { event.preventDefault(); event.stopPropagation(); if (!creating) onClose(); }}
+    onSubmit={event => event.stopPropagation()} onKeyDown={event => event.stopPropagation()}>
     <header><div><h2 id="folder-picker-title">Choose a workspace folder</h2><p>Folders on the selected Controller</p></div>
       <button type="button" aria-label="Close folder picker" disabled={creating} onClick={onClose}>×</button></header>
     <fieldset className="lab-folder-navigation" disabled={creating}>

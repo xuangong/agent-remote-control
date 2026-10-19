@@ -100,5 +100,6 @@ it('keeps registered workspace selection without offering folder browsing to sha
   vi.spyOn(directory, 'workspaces').mockResolvedValue({ workspaces: [{ id: 'project', name: 'Project', path: '/work/project' }] });
   const container = await render(<SessionConfiguration directory={directory} providerId="codex" value={{}} disabled={false} canBrowse={false} onChange={() => {}} />);
   expect([...container.querySelectorAll('button')].some(button => button.textContent === 'Browse…')).toBe(false);
-  expect(container.querySelector('#session-workspace')?.textContent).toContain('Project');
+  const label = [...container.querySelectorAll('label')].find(label => label.textContent === 'Workspace')!;
+  expect(label.control?.textContent).toContain('Project');
 });

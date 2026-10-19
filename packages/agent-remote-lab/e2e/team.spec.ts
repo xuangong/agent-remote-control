@@ -378,9 +378,10 @@ test('Dock child navigation uses the live channel without replacing the main ses
  await expect(page).toHaveURL(address);
 });
 
-test('Team management adds members in a modal and preserves drafts after rejection', async ({ page }) => {
+test('Add member requires a selected Workspace and preserves the request identity after rejection', async ({ page }, info) => {
  const actions: any[] = [];
  let fail = true;
+ await page.route('**/v1/remote/hosts/*/workspaces?*', route => route.fulfill({json:{workspaces:[{id:'project',name:'Project',path:'C:\\work\\project'}]}}));
  await page.route('**/v1/remote/teams/action', route => {
   const input = route.request().postDataJSON(); actions.push(input);
   return fail ? route.fulfill({status:503,json:{error:'Host temporarily unavailable'}}) : route.fulfill({json:team});
@@ -392,16 +393,129 @@ test('Team management adds members in a modal and preserves drafts after rejecti
  await panel.getByRole('button',{name:'Add member',exact:true}).click();
  const dialog=page.getByRole('dialog',{name:'Add member',exact:true});
  await expect(dialog).toBeVisible();await dialog.getByRole('combobox',{name:'Host',exact:true}).selectOption('win');
- await dialog.getByRole('textbox',{name:'Name',exact:true}).fill('Linux investigator');
- await dialog.getByRole('textbox',{name:'Working directory',exact:true}).fill('/work/project');
+ await dialog.getByRole('textbox',{name:'Name',exact:true}).fill('Windows investigator');
+ const workspace=dialog.getByRole('combobox',{name:'Workspace',exact:true});
+ await expect(workspace).toHaveValue('');
+ await expect(dialog.getByRole('button',{name:'Add member',exact:true})).toBeDisabled();
+ await expect(workspace.locator('option:checked')).toHaveText('Choose a workspace…');
+ await expect(workspace).toBeEnabled();
+ await workspace.selectOption('project');
+ await expect(dialog.getByRole('button',{name:'Add member',exact:true})).toBeEnabled();
+ await page.screenshot({path:info.outputPath('team-member-workspace.png')});
  await dialog.getByRole('button',{name:'Add member',exact:true}).click();
  await expect(dialog.getByRole('alert')).toBeVisible();
- await expect(dialog.getByRole('textbox',{name:'Name',exact:true})).toHaveValue('Linux investigator');
+ await expect(dialog.getByRole('textbox',{name:'Name',exact:true})).toHaveValue('Windows investigator');
+ await expect(workspace).toHaveValue('project');
  fail=false;await dialog.getByRole('button',{name:'Add member',exact:true}).click();
  await expect(dialog).toHaveCount(0);expect(actions).toHaveLength(2);expect(actions[0]).toEqual(actions[1]);
+ expect(actions[0]).toMatchObject({action:'add_member',teamId:'team',hostId:'win',providerId:'codex',name:'Windows investigator',cwd:'C:\\work\\project'});
+ expect(actions[0].operationId).toEqual(expect.any(String));
  await expect(panel).toBeVisible();await expect(page.locator('.lab-session-dock-pane')).toHaveCount(0);
  await panel.getByRole('button',{name:'Archive',exact:true}).click();
  expect(actions.at(-1)).toEqual({teamId:'team',action:'archive'});
+});
+
+test('Add member Browse isolates folder forms and preserves the draft when the picker closes', async ({ page }, info) => {
+ const actions: any[] = [], folderRequests: Array<{hostId:string;providerId:string|null;path:string|null}> = [], creations: any[] = [];
+ const root='C:\\work', chosen='C:\\work\\diagnostics', created='C:\\work\\diagnostics\\new-check';
+ await page.route('**/v1/remote/hosts/*/workspaces?*', route => route.fulfill({json:{workspaces:[{id:'root',name:'Existing workspace',path:root}]}}));
+ await page.route('**/v1/remote/hosts/*/workspace-folders?*', route => {
+  const url=new URL(route.request().url()), path=url.searchParams.get('path') ?? root;
+  folderRequests.push({hostId:url.pathname.split('/')[4]!,providerId:url.searchParams.get('providerId'),path:url.searchParams.get('path')});
+  return route.fulfill({json:{path,parentPath:path===root?null:root,roots:[root],folders:[],nextOffset:null}});
+ });
+ await page.route('**/v1/remote/hosts/*/workspace-folders/create', route => {
+  creations.push({hostId:new URL(route.request().url()).pathname.split('/')[4]!,...route.request().postDataJSON()});
+  return route.fulfill({json:{path:created}});
+ });
+ await page.route('**/v1/remote/teams/action', route => {actions.push(route.request().postDataJSON());return route.fulfill({json:team});});
+ await page.goto('/e2e/fixtures/team.html');
+ await page.getByRole('button',{name:'Teams',exact:true}).click();
+ const panel=page.getByRole('region',{name:'Teams',exact:true});
+ await panel.locator('.lab-team-management > summary').click();
+ await panel.getByRole('button',{name:'Add member',exact:true}).click();
+ const dialog=page.getByRole('dialog',{name:'Add member',exact:true});
+ await dialog.getByRole('combobox',{name:'Host',exact:true}).selectOption('win');
+ await dialog.getByRole('combobox',{name:'Provider',exact:true}).selectOption('claude-code');
+ await dialog.getByRole('textbox',{name:'Name',exact:true}).fill('Windows diagnosis');
+ await dialog.getByRole('textbox',{name:'Responsibility',exact:true}).fill('Inspect the service without changing configuration.');
+ await dialog.getByRole('combobox',{name:'Workspace',exact:true}).selectOption('root');
+ await expect(dialog.getByRole('button',{name:'Add member',exact:true})).toBeEnabled();
+ const browse=dialog.getByRole('button',{name:'Browse…',exact:true});
+ await browse.click();
+ const picker=page.getByRole('dialog',{name:'Choose a workspace folder',exact:true});
+ await expect(picker.getByLabel('Folder path')).toHaveValue(root);
+ expect(folderRequests.at(-1)).toEqual({hostId:'win',providerId:'claude-code',path:root});
+ await picker.getByLabel('Folder path').fill(chosen);
+ await picker.getByRole('button',{name:'Go',exact:true}).click();
+ await expect(picker.locator('footer > span')).toHaveText(chosen);
+ expect(actions).toEqual([]);
+ await picker.getByRole('button',{name:'New folder',exact:true}).click();
+ await picker.getByLabel('New folder name').fill('new-check');
+ await picker.getByLabel('New folder name').press('Enter');
+ await expect(picker.getByLabel('Folder path')).toHaveValue(created);
+ expect(creations).toEqual([{hostId:'win',providerId:'claude-code',parentPath:chosen,name:'new-check'}]);
+ expect(actions).toEqual([]);
+ const pickerBounds=await picker.boundingBox();
+ expect(pickerBounds!.x).toBeGreaterThanOrEqual(0);
+ expect(pickerBounds!.x+pickerBounds!.width).toBeLessThanOrEqual(page.viewportSize()!.width);
+ expect(await picker.evaluate(element=>element.scrollWidth-element.clientWidth)).toBeLessThanOrEqual(1);
+ await page.screenshot({path:info.outputPath('team-member-folder-picker.png')});
+ await page.keyboard.press('Escape');
+ await expect(picker).toHaveCount(0);
+ await expect(dialog).toBeVisible();
+ await expect(browse).toBeFocused();
+ await expect(dialog.getByRole('textbox',{name:'Name',exact:true})).toHaveValue('Windows diagnosis');
+ await expect(dialog.getByRole('textbox',{name:'Responsibility',exact:true})).toHaveValue('Inspect the service without changing configuration.');
+ await expect(dialog.getByRole('combobox',{name:'Workspace',exact:true})).toHaveValue('root');
+ await expect(dialog.getByRole('button',{name:'Add member',exact:true})).toBeEnabled();
+ await browse.click();
+ await expect(picker.getByRole('button',{name:'Select folder',exact:true})).toBeEnabled();
+ await picker.getByRole('button',{name:'Close folder picker',exact:true}).click();
+ await expect(dialog).toBeVisible();
+ await expect(browse).toBeFocused();
+ await browse.click();
+ await expect(picker.getByRole('button',{name:'Select folder',exact:true})).toBeEnabled();
+ await picker.getByLabel('Folder path').fill(created);
+ await picker.getByLabel('Folder path').press('Enter');
+ await expect(picker.locator('footer > span')).toHaveText(created);
+ await picker.getByRole('button',{name:'Select folder',exact:true}).click();
+ await expect(dialog.getByRole('combobox',{name:'Workspace',exact:true}).locator('option:checked')).toHaveText(created);
+ await dialog.getByRole('button',{name:'Add member',exact:true}).click();
+ await expect(dialog).toHaveCount(0);
+ expect(actions).toHaveLength(1);
+ expect(actions[0]).toMatchObject({hostId:'win',providerId:'claude-code',cwd:created,name:'Windows diagnosis'});
+ expect(folderRequests.every(request=>request.hostId==='win'&&request.providerId==='claude-code')).toBe(true);
+});
+
+test('Add member clears Workspace selection when Host or Provider changes', async ({ page }) => {
+ const requests: Array<{hostId:string;providerId:string|null}> = [];
+ await page.route('**/v1/remote/hosts/*/workspaces?*', route => {
+  const url=new URL(route.request().url()), hostId=url.pathname.split('/')[4]!, providerId=url.searchParams.get('providerId');
+  requests.push({hostId,providerId});
+  return route.fulfill({json:{workspaces:[{id:`${hostId}-${providerId}`,name:'Project',path:hostId==='mac'?'/work/project':`C:\\work\\${providerId}`}]}});
+ });
+ await page.goto('/e2e/fixtures/team.html');
+ await page.getByRole('button',{name:'Teams',exact:true}).click();
+ const panel=page.getByRole('region',{name:'Teams',exact:true});
+ await panel.locator('.lab-team-management > summary').click();
+ await panel.getByRole('button',{name:'Add member',exact:true}).click();
+ const dialog=page.getByRole('dialog',{name:'Add member',exact:true}), workspace=dialog.getByRole('combobox',{name:'Workspace',exact:true});
+ const add=dialog.getByRole('button',{name:'Add member',exact:true});
+ await workspace.selectOption('mac-codex');
+ await expect(add).toBeEnabled();
+ await dialog.getByRole('combobox',{name:'Host',exact:true}).selectOption('win');
+ await expect(workspace).toHaveValue('');
+ await expect(add).toBeDisabled();
+ await workspace.selectOption('win-codex');
+ await expect(add).toBeEnabled();
+ await dialog.getByRole('combobox',{name:'Provider',exact:true}).selectOption('claude-code');
+ await expect(workspace).toHaveValue('');
+ await expect(add).toBeDisabled();
+ await expect(workspace.locator('option[value="win-codex"]')).toHaveCount(0);
+ await workspace.selectOption('win-claude-code');
+ await expect(add).toBeEnabled();
+ expect(requests).toEqual(expect.arrayContaining([{hostId:'mac',providerId:'codex'},{hostId:'win',providerId:'codex'},{hostId:'win',providerId:'claude-code'}]));
 });
 
 test('Applying another Team keeps existing docks and repeated opens do not duplicate sessions', async ({ page, isMobile }) => {

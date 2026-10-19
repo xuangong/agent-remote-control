@@ -90,7 +90,7 @@ it('routes Provider creation to each selected DSH Host and clears settings when 
   await f.selectHost('desk');
   expect(f.container.querySelector<HTMLSelectElement>('#remote-host')?.value).toBe('desk');
   expect(f.container.querySelector('#session-mode')).toBeNull();
-  const workspace = f.container.querySelector<HTMLSelectElement>('#session-workspace')!;
+  const workspace = [...f.container.querySelectorAll('label')].find(label => label.textContent === 'Workspace')!.control as HTMLSelectElement;
   await act(async () => { workspace.value = 'desk-workspace'; workspace.dispatchEvent(new Event('change', { bubbles: true })); });
   await act(async () => f.create().click());
   expect(f.requests[0]).toEqual({ path: '/v1/remote/hosts/desk/create', body: { providerId: 'dsh', operationId: expect.any(String), workspaceId: 'desk-workspace' } });

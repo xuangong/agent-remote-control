@@ -1120,6 +1120,7 @@ textarea {
 /* Dialogs and panels restore focus without turning pointer actions into keyboard highlights. */
 html[data-input-modality="pointer"] :focus { outline: none !important; }
 
+.lab-workspace-selection { display: grid; gap: 6px; min-width: 0; }
 .lab-workspace-field { display: flex; gap: 6px; min-width: 0; }
 .lab-workspace-field select { flex: 1; min-width: 0; }
 .lab-workspace-field button { flex: none; }

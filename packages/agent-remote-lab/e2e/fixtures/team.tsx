@@ -103,7 +103,7 @@ function Fixture() {
      return slot;
    },
  });
- const hosts=[{id:'mac',name:'Mac',online:true,teamManagement:true as const,providers:[{providerId:'codex',displayName:'Codex'}]},{id:'win',name:'Windows',online:true,teamManagement:true as const,providers:[{providerId:'codex',displayName:'Codex'}]}];
+ const hosts=[{id:'mac',name:'Mac',online:true,teamManagement:true as const,providers:[{providerId:'codex',displayName:'Codex'}]},{id:'win',name:'Windows',online:true,teamManagement:true as const,providers:[{providerId:'codex',displayName:'Codex'},{providerId:'claude-code',displayName:'Claude Code'}]}];
  const navigation: import('../../src/session-view-navigation').SessionViewNavigationFactory=(source,state,actions)=>sessionViewNavigation({source,state,entries:[],...actions});
  const open=async(target:SessionWindowTarget)=>{setMain(target);sessionStorage.setItem('fixture:main',JSON.stringify(target));return true;};
  useEffect(()=>{const resize=()=>setCompact(window.innerWidth<=1180);window.addEventListener('resize',resize);return()=>window.removeEventListener('resize',resize);},[]);

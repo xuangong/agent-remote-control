@@ -6,6 +6,8 @@ import { workspaceFetch } from '../workspace-access.js';
 import { useTrackingPosition } from '../hooks/useTrackingPosition.js';
 import { ConversationConnectionScope } from '../conversation-connections.js';
 import { useWindowLayout } from '../window-workspace-context.js';
+import { SessionDirectoryClient } from '../directory-client.js';
+import { WorkspaceSelect, type WorkspaceSelection } from './WorkspaceSelect.js';
 import './team.css';
 
 interface Host { teamManagement?: true; id: string; name: string; online: boolean; providers?: Array<{providerId:string;displayName:string}> }
@@ -134,7 +136,7 @@ export function TeamMenu(props: Props) {
         <ul className="lab-tpm-list">{group.map(item => <TeamListItem key={item.id} team={item} selected={!revealing && props.compact ? item.members.some(member => isCurrentMember(member, props.currentSession)) : selected === item.id} busy={busy}
           onOpen={() => void run(() => openTeam(item))} onRename={title => run(() => change({action:'rename',teamId:item.id,title}))}
           navigation={props.compact ? <TeamSessionNavigation team={item} hosts={hosts} busy={busy} currentSession={props.currentSession} onOpen={target => void run(() => openSession(target))} /> : undefined}
-          management={<TeamManagement team={item} hosts={hosts} busy={busy} failure={error} onChange={input => run(() => change(input))} onOpenSession={target => void run(() => openSession(target))} />} />)}</ul></section>;
+          management={<TeamManagement baseUrl={baseUrl} team={item} hosts={hosts} busy={busy} failure={error} onChange={input => run(() => change(input))} onOpenSession={target => void run(() => openSession(target))} />} />)}</ul></section>;
     });
   }
   if (!enabled) return null;
@@ -198,8 +200,8 @@ function TeamListItem({ team, selected, busy, onOpen, onRename, navigation, mana
   </li>;
 }
 
-function TeamManagement({ team, hosts, busy, failure, onChange, onOpenSession }: {
-  team: Team; hosts: Host[]; busy: boolean; failure?: string; onChange(input: TeamAction): Promise<boolean>; onOpenSession(target: TeamSource & { teamId?: string; teamMemberId?: string }): void;
+function TeamManagement({ baseUrl, team, hosts, busy, failure, onChange, onOpenSession }: {
+  baseUrl: string; team: Team; hosts: Host[]; busy: boolean; failure?: string; onChange(input: TeamAction): Promise<boolean>; onOpenSession(target: TeamSource & { teamId?: string; teamMemberId?: string }): void;
 }) {
   const [adding, setAdding] = useState(false);
   const recovery = [...team.messages.filter(message => ['unknown', 'dispatching', 'rejected'].includes(message.status)
@@ -210,7 +212,7 @@ function TeamManagement({ team, hosts, busy, failure, onChange, onOpenSession }:
       <button disabled={busy || team.status === 'archiving'} onClick={() => void onChange({teamId:team.id,action:team.status === 'archived' ? 'restore' : 'archive'})}>{team.status === 'archived' ? 'Restore' : team.status === 'archiving' ? 'Archiving…' : 'Archive'}</button>
       <button disabled={busy} onClick={() => onOpenSession(team.source)}>Open main session</button>
     </div>
-    {adding ? <AddTeamMember failure={failure} teamId={team.id} hosts={hosts.filter(host => host.teamManagement)} busy={busy} onChange={onChange} onClose={() => setAdding(false)} /> : null}
+    {adding ? <AddTeamMember baseUrl={baseUrl} failure={failure} teamId={team.id} hosts={hosts.filter(host => host.teamManagement)} busy={busy} onChange={onChange} onClose={() => setAdding(false)} /> : null}
     <ul className="lab-team-members">{team.members.filter(member => member.creation !== 'abandoned').map(member => <li key={member.id}>
       <button disabled={busy || member.creation !== 'ready' || !member.nativeSessionId} onClick={() => onOpenSession({teamId:team.id,teamMemberId:member.id,hostId:member.hostId,providerId:member.providerId,nativeSessionId:member.nativeSessionId!,title:member.name})}>{member.name}</button>
       <small>{member.role} · {hosts.find(host => host.id === member.hostId)?.name ?? member.hostId} · {member.activity}</small>
@@ -223,8 +225,10 @@ function TeamManagement({ team, hosts, busy, failure, onChange, onOpenSession }:
   </details>;
 }
 
-function AddTeamMember({ teamId, hosts, busy, failure, onChange, onClose }: {teamId:string;hosts:Host[];busy:boolean;failure?:string;onChange(input:TeamAction):Promise<boolean>;onClose():void}) {
-  const [hostId,setHostId] = useState(hosts.find(host => host.online)?.id ?? ''), [providerId,setProviderId] = useState(''), [name,setName] = useState(''), [cwd,setCwd] = useState(''), [responsibility,setResponsibility] = useState('');
+function AddTeamMember({ baseUrl, teamId, hosts, busy, failure, onChange, onClose }: {baseUrl:string;teamId:string;hosts:Host[];busy:boolean;failure?:string;onChange(input:TeamAction):Promise<boolean>;onClose():void}) {
+  const [hostId,setHostId] = useState(hosts.find(host => host.online)?.id ?? ''), [providerId,setProviderId] = useState(''), [name,setName] = useState(''), [responsibility,setResponsibility] = useState('');
+  const directory = useMemo(() => new SessionDirectoryClient(baseUrl, workspaceFetch, hostId), [baseUrl, hostId]);
+  const [workspace, setWorkspace] = useState<{ directory: SessionDirectoryClient; providerId: string; value: WorkspaceSelection }>();
   const operation = useRef<{ signature: string; id: string }>();
   const dialog = useRef<HTMLDialogElement>(null), label = useId();
   const [error, setError] = useState('');
@@ -235,13 +239,18 @@ function AddTeamMember({ teamId, hosts, busy, failure, onChange, onClose }: {tea
   }, []);
   const host = hosts.find(host => host.id === hostId), providers = host?.providers ?? [];
   const provider = providers.some(value => value.providerId === providerId) ? providerId : providers[0]?.providerId ?? '';
+  useEffect(() => { setWorkspace(undefined); }, [directory, provider]);
+  const selection = workspace?.directory === directory && workspace.providerId === provider ? workspace.value : {};
+  const cwd = selection.path ?? '';
+  const pathError = cwd.length > 2048 ? 'Choose a folder with a path no longer than 2,048 characters.' : '';
+  const canAdd = !busy && !!host?.online && !!provider && !!cwd && !pathError;
   return createPortal(<dialog ref={dialog} className="lab-favorite-dialog" data-team-dialog aria-labelledby={label}
     onKeyDown={event => event.stopPropagation()} onPointerDown={event => event.stopPropagation()} onClick={event => event.stopPropagation()}
     onCancel={event => { event.preventDefault(); if (!busy) onClose(); }}>
     <header><h2 id={label}>Add member</h2><button type="button" aria-label="Close member editor" disabled={busy} onClick={onClose}>×</button></header>
     <form onSubmit={event => {
-      event.preventDefault(); if (busy) return;
-      const fields = {hostId,providerId:provider,name:name.trim() || host?.name || 'Member',cwd:cwd.trim(),responsibility};
+      event.preventDefault(); if (!canAdd) return;
+      const fields = {hostId,providerId:provider,name:name.trim() || host?.name || 'Member',cwd,responsibility};
       const signature = JSON.stringify(fields);
       if (operation.current?.signature !== signature) operation.current = { signature, id: crypto.randomUUID() };
       setError('');
@@ -250,9 +259,11 @@ function AddTeamMember({ teamId, hosts, busy, failure, onChange, onClose }: {tea
     <label>Host<select disabled={busy} value={hostId} onChange={event => {setHostId(event.target.value);}}>{hosts.map(host => <option key={host.id} value={host.id} disabled={!host.online}>{host.name}{!host.online ? ' · Offline' : ''}</option>)}</select></label>
     <label>Provider<select disabled={busy} value={provider} onChange={event => {setProviderId(event.target.value);}}>{providers.map(provider => <option key={provider.providerId} value={provider.providerId}>{provider.displayName}</option>)}</select></label>
     <label>Name<input disabled={busy} maxLength={256} value={name} placeholder="Optional" onChange={event => setName(event.target.value)} /></label>
-    <label>Working directory<input disabled={busy} maxLength={2048} value={cwd} placeholder="Host default directory" onChange={event => setCwd(event.target.value)} /></label>
+    <WorkspaceSelect directory={directory} providerId={provider} disabled={busy || !host?.online} value={selection} required
+      onChange={value => setWorkspace({ directory, providerId: provider, value })} />
+    {pathError ? <p role="alert">{pathError}</p> : null}
     <label>Responsibility<textarea disabled={busy} maxLength={2048} value={responsibility} placeholder="Can be discussed with the Leader after joining" onChange={event => setResponsibility(event.target.value)} /></label>
     {failure || error ? <p role="alert">{failure || error}</p> : null}
-    <footer><button type="button" disabled={busy} onClick={onClose}>Cancel</button><button className="lab-favorite-primary" disabled={busy || !host?.online || !provider}>Add member</button></footer>
+    <footer><button type="button" disabled={busy} onClick={onClose}>Cancel</button><button className="lab-favorite-primary" disabled={!canAdd}>Add member</button></footer>
   </form></dialog>, document.body);
 }

@@ -34,7 +34,7 @@ The Leader's **Gather** action reads the current Team roster and opens missing r
 
 1. Public Team schemas and bounded state; protocol validation tests.
 2. Relay membership, authorization, durable reservation and mailbox settlement; real uplink transport tests.
-3. Controller session tools, persistence, idle dispatch and reconnect recovery; observable runtime tests.
+3. Controller session tools, persistence, capability-based timely dispatch and reconnect recovery; observable runtime tests.
 4. Owner APIs and responsive Team workspace, grouped menu, archive/recovery controls; component and browser checks.
 5. Compatibility metadata, type checks and regression review. Do not deploy or publish without a separate user request.
 
@@ -44,13 +44,13 @@ Acceptance covers source isolation, cross-Host registration, leader/member role 
 
 1. Open the source project session, open **Team**, and choose **New team**. Its Host must advertise Team support. The Leader starts in the source working directory, with a separate native conversation and a bounded source-history reader; this is not a provider-native fork.
 2. Discuss the requirement with the Leader. Use **Add member** to select an online Host and provider. Supply that machine's working directory where needed. A name and initial responsibility can be supplied without predefining the complete solution.
-3. Registration notifies the Leader. The Leader uses `read_team`, `describe_team_member`, `send_team_message`, and `report_team_progress`; members use the read, send, and progress tools. Messages are asynchronous tasks or replies, not synchronous remote shell calls.
+3. Registration notifies the Leader. The Leader uses `read_team`, `acknowledge_team_messages`, `describe_team_member`, `send_team_message`, and `report_team_progress`; members use the read, acknowledge, send, and progress tools. Messages are asynchronous tasks or replies, not synchronous remote shell calls. Read returns bounded pages of complete incoming messages; acknowledging fully read messages confirms receipt without waiting for task completion.
 4. On narrow screens, opening a Team opens only the Leader. The session selector can switch to a member or the source. On wide screens, resize pane dividers or scroll horizontally. Exit Team mode to return to the retained ordinary workspace.
 5. Archive after delivery. Archive closes new claim admission and cancels unclaimed messages. Previously claimed native work may still start or finish. Native queued acceptance, unknown delivery, and unavailable members keep archiving pending. Restore never replays canceled messages.
 
 ## Recovery and limits
 
-The communication journal is an operation record, not a complete copy of session history. It retains up to 200 messages / 128 KiB per Team; the account supports 32 Teams and 12 seats per Team, including the Leader and abandoned slots, within a 2 MiB total state limit. These are explicit capacity errors, not silent eviction; archiving does not free identity or deduplication records. Controllers retain up to 384 local seats. Automatic compaction and permanent Team deletion are not included.
+The communication queue is an operation record, not a complete copy of session history. It retains up to 200 unresolved messages / 128 KiB of stable input fields per Team; the account supports 32 Teams and 12 seats per Team, including the Leader and abandoned slots, within a 2 MiB total state limit. These are explicit capacity errors, not silent eviction of pending work. Settlement compacts bodies into bounded retry receipts; archiving does not delete Team identities or resource grants. Controllers retain up to 384 local seats. Permanent Team deletion is not included.
 
 Successful SDK submission records acceptance without inventing a native started/queued disposition. An explicit queued disposition blocks final archive until a later native receipt or explicit user resolution. Completion and validation remain separate, evidence-backed statements from the workers. Unknown dispatch is never automatically resent, including after Controller restart. Inspect the receiving session before confirming received / not executed in Delivery status.
 
@@ -77,3 +77,7 @@ Use `/team` or **View → Team view** to toggle the Team management entry. Expli
 ## Delivery queue settlement
 
 `Team.messages` is the unresolved delivery queue, not the communication archive. Accepted input leaves it once it is no longer reported as queued; explicit rejection and cancellation also leave it. Unknown effects remain for reconciliation. Settlement atomically removes the body and stores a bounded Relay-only fingerprint/outcome receipt. Restoring existing state compacts legacy settled messages. Attachment recipient grants are independent of queue lifetime. See [Team resources](../guides/team-resources.md#limits-and-retention) for retry-window and capacity semantics. Public Team schemas and existing Controller polling remain compatible.
+
+Running sessions no longer wait unconditionally for idle. Controllers select immediate delivery when native steer is available, otherwise next-turn delivery when queuing is available. An active turn waiting for a question or approval can also receive input through these capabilities; delivery does not resolve the pending interaction. Pending interactions without an active turn still wait. Native interpretation stays in adapters. Codex confirms queue admission from its steer response and consumption from the correlated native user-message event, rather than inferring consumption from turn completion.
+
+`read_team` is still a query. The agent-facing projection exposes only complete incoming bodies plus compact outgoing status and receipts; internal Controller reconciliation retains the full read response. `acknowledge_team_messages` is a separate, exact-recipient-bound receipt operation. It validates the full batch before consumption and cannot clear a claimed or unknown native delivery. A successful acknowledgement prevents a stale poll from claiming the same body. This closes the read-then-later-inject duplication path without claiming exactly-once delivery across the read/claim race. The additive acknowledgement call requires the negotiated `teamInbox` capability; deploy Relay first and update Controllers on participating Hosts.

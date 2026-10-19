@@ -1,4 +1,5 @@
 import { TeamResourceFiles } from './team-resource-files.js';
+import { teamInbox, teamMemberUpdate } from './team-inbox.js';
 import { createHash, randomUUID } from 'node:crypto';
 import { mkdir, readFile, open, rename } from 'node:fs/promises';
 import { join } from 'node:path';
@@ -24,6 +25,19 @@ function operationId(value: string) {
 function idle(lease: RemoteHostSessionLease): boolean {
   const state = lease.agent.snapshot().payload;
   return state.status === 'idle' && state.activeTurn === null && !state.pendingInteractions.length && sessionOperationAvailability(state, 'send_message').allowed;
+}
+type TeamDelivery = 'immediate' | 'next_turn';
+function deliveryAllowed(lease: RemoteHostSessionLease, delivery: TeamDelivery): boolean {
+  const state = lease.agent.snapshot().payload;
+  const readyIdle = state.status === 'idle' && state.activeTurn === null && !state.pendingInteractions.length;
+  const active = state.activeTurn !== null && (state.status === 'running' || state.status === 'waiting');
+  if (!readyIdle && !active) return false;
+  if (!sessionOperationAvailability(state, delivery === 'next_turn' ? 'queue_message' : 'send_message').allowed) return false;
+  return delivery === 'next_turn' || readyIdle || sessionOperationAvailability(state, 'steer').allowed;
+}
+function availableDelivery(lease: RemoteHostSessionLease): TeamDelivery | undefined {
+  if (deliveryAllowed(lease, 'immediate')) return 'immediate';
+  if (deliveryAllowed(lease, 'next_turn')) return 'next_turn';
 }
 
 /** Local native bindings and delivery evidence outlive browser and transport connections. */
@@ -126,21 +140,22 @@ export class TeamRuntime {
       const id = actual(); if (!id) throw new Error('Team recipient is not attached.');
       this.access.sessionRouting.assertCurrent(this.anchor(seat), { controllerId: this.access.controllerId, providerId: member.providerId, nativeSessionId: id });
     };
-    const request = (input: TeamHostCall) => { assertCurrent(); return this.request(input); };
+    const request = async (input: TeamHostCall) => { assertCurrent(); const value = await this.request(input); assertCurrent(); return value; };
     const call = (input: Omit<TeamHostCall, 'teamId' | 'memberId'>) => request({ ...input, teamId, memberId: member.id } as TeamHostCall);
     const text = { type: 'string', minLength: 1, maxLength: 16000 }, id = { type: 'string', minLength: 1, maxLength: 256 };
     const tool = (name: string, description: string, properties: Record<string, unknown>, required: string[], execute: (args: Record<string, string>) => Promise<unknown>): AgentSessionTool => ({
       name, description, inputSchema: { type: 'object', properties, required, additionalProperties: false }, execute: async args => JSON.stringify(await execute(args as Record<string, string>)),
     });
     const tools = [
-      tool('read_team', 'Read registered members, responsibilities, progress and message receipts. Accepted input is not completed work.', {}, [], () => call({ action: 'read' })),
+      tool('read_team', 'Read members, responsibilities, progress, compact delivery status and a bounded page of complete messages addressed to you. This does not consume messages. Fully read incoming messages, then acknowledge their IDs with acknowledge_team_messages before acting. Use nextAfterMessageId as afterMessageId while hasMore is true. Accepted input is not completed work.', { afterMessageId: id }, [], async args => teamInbox(await call({ action: 'read' }), member.id, args.afterMessageId)),
+      tool('acknowledge_team_messages', 'Acknowledge incoming message IDs you have completely read through read_team before acting on them. This records receipt, not task completion, and prevents later native reinjection. Never acknowledge unread or truncated bodies. Retry the same IDs after a lost response; accepted delivery receipts are idempotent. Claimed or uncertain native deliveries cannot be cleared by this tool.', { messageIds: { type: 'array', items: id, minItems: 1, maxItems: 32, uniqueItems: true } }, ['messageIds'], args => request({ action: 'acknowledge', teamId, memberId: member.id, messageIds: args.messageIds as unknown as string[], expectedNativeSessionId: actual()! })),
       tool('send_team_message', 'Send a task, question or evidence. Reuse operationId for the same request. Delivery is asynchronous; inspect read_team for its receipt. Members may send only to their Leader. Attach up to 8 uploaded or received resource IDs using resources; file bytes are not embedded in text.', { to: id, operationId: id, text, resources: {type:'array',items:id,minItems:1,maxItems:8,uniqueItems:true} }, ['to', 'operationId', 'text'], args => request({ action: 'send', teamId, memberId: member.id, to: args.to!, operationId: args.operationId!, text: args.text!, ...(args.resources ? {resources:args.resources as unknown as string[]} : {}) })),
       tool('upload_team_resource', 'Upload a regular file from an absolute path on this Host, up to 50 MiB. Reuse operationId to resume. Returns a verified resourceId for send_team_message resources; does not send or execute the file.', {path:{type:'string',minLength:1,maxLength:4096},operationId:id}, ['path','operationId'], args => this.resourceFiles.upload(teamId,member.id,args.path!,args.operationId!, assertCurrent)),
       tool('download_team_resource', 'Download a resource you uploaded or received to this Host and verify size and SHA256. Returns a localPath. Optional outputDirectory must be absolute. Existing different files are never overwritten; downloaded files are never executed.', {resourceId:id,outputDirectory:{type:'string',minLength:1,maxLength:4096}}, ['resourceId'], args => this.resourceFiles.download(teamId,member.id,args.resourceId!,args.outputDirectory, assertCurrent)),
-      tool('report_team_progress', 'Record current progress, blocking questions or completion evidence. Also message the Leader when it needs to act.', { summary: { type: 'string', maxLength: 2048 } }, ['summary'], args => request({ action: 'report', teamId, memberId: member.id, summary: args.summary! })),
+      tool('report_team_progress', 'Record current progress, blocking questions or completion evidence. Also message the Leader when it needs to act.', { summary: { type: 'string', maxLength: 2048 } }, ['summary'], async args => teamMemberUpdate(await request({ action: 'report', teamId, memberId: member.id, summary: args.summary! }), member.id)),
     ];
     if (member.role === 'leader') {
-      tools.push(tool('describe_team_member', 'Record responsibilities agreed with the user. Include task scope, environment, permissions, dependencies and expected evidence. This does not dispatch work or grant native permissions.', { target: id, responsibility: { type: 'string', maxLength: 2048 } }, ['target', 'responsibility'], args => request({ action: 'describe_member', teamId, memberId: member.id, target: args.target!, responsibility: args.responsibility! })));
+      tools.push(tool('describe_team_member', 'Record responsibilities agreed with the user. Include task scope, environment, permissions, dependencies and expected evidence. This does not dispatch work or grant native permissions.', { target: id, responsibility: { type: 'string', maxLength: 2048 } }, ['target', 'responsibility'], async args => teamMemberUpdate(await request({ action: 'describe_member', teamId, memberId: member.id, target: args.target!, responsibility: args.responsibility! }), args.target!)));
       tools.push(tool('read_source_session', 'Read a bounded page from the source conversation for context. The source agent has no Team tools and receives no automatic Team messages.', { before: { type: 'object', properties: { epoch: { type: 'string' }, seq: { type: 'integer' } }, required: ['epoch','seq'], additionalProperties: false } }, [], async args => {
         assertCurrent();
         const source = await this.access.acquire(seat.source.providerId, seat.source.nativeSessionId);
@@ -150,9 +165,10 @@ export class TeamRuntime {
         finally { source.release(); }
       }));
     }
-    return { instructions: member.role === 'leader'
+    const inboxInstructions = ' After completely reading incoming messages from read_team, acknowledge those IDs with acknowledge_team_messages before acting on them. This confirms receipt, not task completion. Never acknowledge unread or truncated message bodies. Follow hasMore with nextAfterMessageId to read additional pages. Retry acknowledgement with the same IDs after a lost response; no user confirmation is needed.';
+    return { instructions: (member.role === 'leader'
       ? `You are the executing Leader of Team ${teamId}, member ${member.id}. Discuss requirements with the user, analyze and implement directly, coordinate registered members, validate evidence and report delivery. Read the source session for necessary context, but do not ask its agent to do your work. Read read_team before delegating. Establish each member's responsibilities with the user and record them with describe_team_member. Remote paths and environments are independent. Shared working directories do not isolate file edits: coordinate changes with the user. Do not assume members remain available. Native permissions still apply. Await responses instead of repeatedly sending the same task.`
-      : `You are worker ${member.id} in Team ${teamId}. Read read_team to find your Leader and current responsibility. Directly investigate, implement and verify assigned tasks in your local environment. Return evidence or clarification questions to the Leader with send_team_message. Do not implement until a task is assigned. Do not assume the Leader's paths exist here. Do not delegate to other members or change your authority. Native permissions still apply.`,
+      : `You are worker ${member.id} in Team ${teamId}. Read read_team to find your Leader and current responsibility. Directly investigate, implement and verify assigned tasks in your local environment. Return evidence or clarification questions to the Leader with send_team_message. Do not implement until a task is assigned. Do not assume the Leader's paths exist here. Do not delegate to other members or change your authority. Native permissions still apply.`) + inboxInstructions,
       tools: bindAgentSessionTools(tools, assertCurrent) };
   }
   async tick(): Promise<void> {
@@ -189,7 +205,7 @@ export class TeamRuntime {
               // A claim survived but its local effect boundary did not. Never infer it was unexecuted.
               await this.settle(team.id, member.id, message.id, { status: 'unknown', resolvedTarget: message.resolvedTarget, error: 'Delivery claim has no local receipt. Inspect this session before resolving.' }); continue;
             }
-            if (message.status === 'queued' && team.status === 'active' && idle(lease)) await this.dispatch(record, team, message, lease, target);
+            if (message.status === 'queued' && team.status === 'active' && availableDelivery(lease)) await this.dispatch(record, team, message, lease, target);
           }
           this.access.sessionRouting.assertCurrent(this.anchor(record.seat), target);
           await this.request({ action: 'presence', teamId: team.id, memberId: member.id, activity: idle(lease) ? 'idle' : 'busy' });
@@ -220,27 +236,33 @@ export class TeamRuntime {
     return this.request({ action: 'settle', teamId, memberId, messageId, outcome: receipt.status as 'accepted'|'rejected'|'unknown', ...(receipt.resolvedTarget ? {resolvedTarget:receipt.resolvedTarget} : {}), ...(receipt.acceptance ? {acceptance:receipt.acceptance} : {}), ...(receipt.error ? {error:receipt.error} : {}) });
   }
   private async dispatch(record: LocalSeat, team: Team, message: TeamMessage, lease: RemoteHostSessionLease, target: NativeSessionRef) {
+    const delivery = availableDelivery(lease);
+    if (!delivery || this.closed || !this.access.available()) return;
+    this.access.sessionRouting.assertCurrent(this.anchor(record.seat), target);
     let receipt: LocalSeat['receipts'][string] | undefined;
-    const check = () => { this.access.sessionRouting.assertCurrent(this.anchor(record.seat), target); if (this.closed || !this.access.available() || !idle(lease)) throw new AgentOperationRejectedError('team_not_idle', 'Team session is not ready for this input.'); };
+    const check = () => {
+      try { this.access.sessionRouting.assertCurrent(this.anchor(record.seat), target); }
+      catch (error) { throw new AgentOperationRejectedError('team_recipient_unavailable', errorText(error)); }
+      if (this.closed || !this.access.available() || !deliveryAllowed(lease, delivery)) throw new AgentOperationRejectedError('team_not_ready', 'Team session is not ready for this input delivery.');
+    };
     const sender = team.members.find(member => member.id === message.from);
     const attachments = message.resources?.map((resource,index) => `[resource #${index+1}] ${JSON.stringify(resource)} (Use download_team_resource with resourceId to obtain a verified local file.)`).join('\n');
     const text = `[Team ${team.id}; message ${message.id}; from ${sender?.name ?? message.from}]\n${message.text}${attachments ? `\n\nAttached resources:\n${attachments}` : ''}`;
     try {
+      const claim = await this.request({ action: 'claim', teamId: team.id, memberId: record.seat.member.id, messageId: message.id, expectedNativeSessionId: target.nativeSessionId }) as TeamMessage;
+      if (!claim.resolvedTarget || nativeSessionRefKey(claim.resolvedTarget) !== nativeSessionRefKey(target)) throw new Error('Claim recipient could not be verified.');
+      receipt = { text: message.text, status: 'dispatching', resolvedTarget: structuredClone(claim.resolvedTarget) };
+      record.receipts[message.id] = receipt; await this.save();
       const onAcceptance = (acceptance: AgentInputAcceptance) => {
         if (!receipt || !['started','queued','handled'].includes(acceptance.disposition) || this.closed) return;
         if (receipt.acceptance !== 'started' && receipt.acceptance !== 'handled') receipt.acceptance = acceptance.disposition;
         receipt.status = 'accepted'; delete receipt.error;
         void this.save().then(() => this.settle(team.id, record.seat.member.id, message.id, receipt!)).catch(() => {});
       };
-      const result = await this.access.execute(lease.agent, { operationId: operationId(message.id), kind: 'send_message', parameters: { text }, maximumResultBytes: 4096 }, {
+      const result = await this.access.execute(lease.agent, { operationId: operationId(message.id), kind: 'send_message', parameters: { text, delivery }, maximumResultBytes: 4096 }, {
         beforeDispatch: check,
         dispatch: async () => {
-          check();
-          const claim = await this.request({ action: 'claim', teamId: team.id, memberId: record.seat.member.id, messageId: message.id, expectedNativeSessionId: target.nativeSessionId }) as TeamMessage;
-          if (!claim.resolvedTarget || nativeSessionRefKey(claim.resolvedTarget) !== nativeSessionRefKey(target)) throw new Error('Claim recipient could not be verified.');
-          receipt = { text: message.text, status: 'dispatching', resolvedTarget: structuredClone(claim.resolvedTarget) };
-          record.receipts[message.id] = receipt; await this.save();
-          check(); return lease.agent.sendMessage(text, {onAcceptance});
+          check(); return lease.agent.sendMessage(text, {delivery,onAcceptance});
         },
       });
       if (result && typeof result === 'object' && 'disposition' in result && ['started','queued','handled'].includes(String(result.disposition))) onAcceptance(result as AgentInputAcceptance);

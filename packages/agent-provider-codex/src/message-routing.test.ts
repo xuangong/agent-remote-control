@@ -46,6 +46,130 @@ async function harness(steer: (expected: string, attempt: number) => unknown | P
 const input = (text: string) => [{ type: 'text', text, text_elements: [] }];
 
 describe('Codex immediate message delivery', () => {
+  it.each(['sendMessage', 'steer'] as const)('settles %s input only after its exact native user-message echo', async method => {
+    const h = await harness();
+    await h.session.sendMessage('Start');
+    const accepted: unknown[] = [];
+    expect(await h.session[method]!('Follow up', { onAcceptance: value => accepted.push(value) })).toEqual({ disposition: 'queued' });
+    expect(accepted).toEqual([{ disposition: 'queued' }]);
+    const request = h.requests.find(row => row.method === 'turn/steer')!;
+    expect(request.params.clientUserMessageId).toEqual(expect.any(String));
+    const echo = { turnId: 'turn-1', item: { type: 'userMessage', id: 'native-input', clientId: request.params.clientUserMessageId, content: input('Follow up') } };
+    h.notify('item/started', { ...echo, threadId: 'unrelated-thread' });
+    h.notify('item/started', { ...echo, turnId: 'unrelated-turn' });
+    h.notify('item/started', { ...echo, item: { ...echo.item, clientId: 'unrelated-input' } });
+    h.notify('item/started', { ...echo, item: { ...echo.item, content: input('Different input') } });
+    await new Promise<void>(resolve => setImmediate(resolve));
+    expect(accepted).toEqual([{ disposition: 'queued' }]);
+    h.notify('item/started', echo);
+    h.notify('item/started', echo);
+    await new Promise<void>(resolve => setImmediate(resolve));
+    expect(accepted).toEqual([{ disposition: 'queued' }, { disposition: 'handled' }]);
+    expect((await h.session.runtimeInfo()).status).toBe('running');
+    expect(h.requests.filter(row => row.method === 'turn/start')).toHaveLength(1);
+  });
+
+  it('retains native consumption evidence when it precedes the steer response', async () => {
+    const h = await harness(expected => {
+      const request = h.requests.at(-1)!;
+      h.notify('item/started', { turnId: expected, item: { type: 'userMessage', id: 'native-input', clientId: request.params.clientUserMessageId, content: input('Follow up') } });
+      return { turnId: expected };
+    });
+    await h.session.sendMessage('Start');
+    const accepted: unknown[] = [];
+    expect(await h.session.sendMessage('Follow up', { onAcceptance: value => accepted.push(value) })).toEqual({ disposition: 'handled' });
+    expect(accepted).toEqual([{ disposition: 'handled' }]);
+  });
+
+  it('preserves exact consumption evidence when the later steer response fails', async () => {
+    const h = await harness(expected => {
+      const request = h.requests.at(-1)!;
+      h.notify('item/started', { turnId: expected, item: { type: 'userMessage', id: 'native-input', clientId: request.params.clientUserMessageId, content: input('Follow up') } });
+      throw new NativeFailure('native response lost', -32603);
+    });
+    await h.session.sendMessage('Start');
+    const accepted: unknown[] = [];
+    expect(await h.session.sendMessage('Follow up', { onAcceptance: value => accepted.push(value) })).toEqual({ disposition: 'handled' });
+    expect(accepted).toEqual([{ disposition: 'handled' }]);
+    expect(h.requests.filter(row => row.method === 'turn/steer')).toHaveLength(1);
+    expect(h.requests.filter(row => row.method === 'turn/start')).toHaveLength(1);
+  });
+
+  it('can settle a timed-out steer from a later exact native echo without resubmitting', async () => {
+    const h = await harness(() => new Promise(() => {}), 20);
+    await h.session.sendMessage('Start');
+    const accepted: unknown[] = [];
+    await expect(h.session.sendMessage('Follow up', { onAcceptance: value => accepted.push(value) })).rejects.toThrow(/timed out/i);
+    expect(accepted).toEqual([]);
+    const request = h.requests.find(row => row.method === 'turn/steer')!;
+    h.notify('item/started', { turnId: 'turn-1', item: { type: 'userMessage', id: 'native-input', clientId: request.params.clientUserMessageId, content: input('Follow up') } });
+    await new Promise<void>(resolve => setImmediate(resolve));
+    expect(accepted).toEqual([{ disposition: 'handled' }]);
+    expect(h.requests.filter(row => row.method === 'turn/steer')).toHaveLength(1);
+    expect(h.requests.filter(row => row.method === 'turn/start')).toHaveLength(1);
+  });
+
+  it('does not infer steer consumption from turn completion', async () => {
+    const h = await harness();
+    await h.session.sendMessage('Start');
+    const accepted: unknown[] = [];
+    expect(await h.session.sendMessage('Follow up', { onAcceptance: value => accepted.push(value) })).toEqual({ disposition: 'queued' });
+    h.notify('turn/completed', { turn: { id: 'turn-1', status: 'completed' } });
+    await new Promise<void>(resolve => setImmediate(resolve));
+    expect((await h.session.runtimeInfo()).status).toBe('idle');
+    expect(accepted).toEqual([{ disposition: 'queued' }]);
+  });
+
+  it.each([['missing', {}], ['mismatched', { turnId: 'different-turn' }]] as const)('leaves a %s native steer receipt unresolved', async (_name, response) => {
+    const h = await harness(() => response);
+    await h.session.sendMessage('Start');
+    const accepted: unknown[] = [];
+    expect(await h.session.sendMessage('Follow up', { onAcceptance: value => accepted.push(value) })).toBeUndefined();
+    expect(accepted).toEqual([]);
+    expect(h.requests.filter(row => row.method === 'turn/steer')).toHaveLength(1);
+  });
+
+  it('keeps separate consumption receipts for identical steered input', async () => {
+    const h = await harness();
+    await h.session.sendMessage('Start');
+    const first: unknown[] = [], second: unknown[] = [];
+    await h.session.sendMessage('Same text', { onAcceptance: value => first.push(value) });
+    await h.session.sendMessage('Same text', { onAcceptance: value => second.push(value) });
+    const requests = h.requests.filter(row => row.method === 'turn/steer');
+    expect(requests[0]!.params.clientUserMessageId).not.toBe(requests[1]!.params.clientUserMessageId);
+    h.notify('item/started', { turnId: 'turn-1', item: { type: 'userMessage', id: 'second-input', clientId: requests[1]!.params.clientUserMessageId, content: input('Same text') } });
+    await new Promise<void>(resolve => setImmediate(resolve));
+    expect(first).toEqual([{ disposition: 'queued' }]);
+    expect(second).toEqual([{ disposition: 'queued' }, { disposition: 'handled' }]);
+  });
+
+  it('does not settle a rejected steer from a later stray echo', async () => {
+    const h = await harness(() => { throw new NativeFailure('cannot steer a review turn'); });
+    await h.session.sendMessage('Start');
+    const accepted: unknown[] = [];
+    await expect(h.session.steer!('Follow up', { onAcceptance: value => accepted.push(value) })).rejects.toThrow('cannot steer');
+    const request = h.requests.find(row => row.method === 'turn/steer')!;
+    h.notify('item/started', { turnId: 'turn-1', item: { type: 'userMessage', id: 'native-input', clientId: request.params.clientUserMessageId, content: input('Follow up') } });
+    await new Promise<void>(resolve => setImmediate(resolve));
+    expect(accepted).toEqual([]);
+  });
+
+  it.each(['interrupted', 'disposed'] as const)('does not emit late consumption receipts after the session is %s', async state => {
+    const h = await harness();
+    await h.session.sendMessage('Start');
+    const accepted: unknown[] = [];
+    await h.session.sendMessage('Follow up', { onAcceptance: value => accepted.push(value) });
+    const request = h.requests.find(row => row.method === 'turn/steer')!;
+    if (state === 'disposed') await h.session.dispose();
+    else {
+      await h.session.cancel!();
+      h.notify('turn/completed', { turn: { id: 'turn-1', status: 'interrupted' } });
+    }
+    h.notify('item/started', { turnId: 'turn-1', item: { type: 'userMessage', id: 'native-input', clientId: request.params.clientUserMessageId, content: input('Follow up') } });
+    await new Promise<void>(resolve => setImmediate(resolve));
+    expect(accepted).toEqual([{ disposition: 'queued' }]);
+  });
+
   it.each(['question', 'approval'] as const)('steers an active turn with pending %s without answering or closing it', async (kind) => {
     const h = await harness();
     await h.session.sendMessage('Start');
@@ -95,7 +219,7 @@ describe('Codex immediate message delivery', () => {
     await h.session.sendMessage('Start');
     await h.session.sendMessage('  also check\nthis  ');
     expect(h.requests.filter(({ method }) => method === 'turn/start')).toHaveLength(1);
-    expect(h.requests.find(({ method }) => method === 'turn/steer')?.params).toEqual({ threadId: 'thread', expectedTurnId: 'turn-1', input: input('  also check\nthis  ') });
+    expect(h.requests.find(({ method }) => method === 'turn/steer')?.params).toEqual({ threadId: 'thread', expectedTurnId: 'turn-1', clientUserMessageId: expect.any(String), input: input('  also check\nthis  ') });
     expect(h.requests.find(({ method }) => method === 'turn/start')?.params).toMatchObject({ collaborationMode: { mode: 'plan' } });
     expect((await h.session.runtimeInfo()).planning?.active).toBe(true);
     h.notify('turn/completed', { turn: { id: 'turn-1', status: 'completed' } });

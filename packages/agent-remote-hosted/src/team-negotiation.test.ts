@@ -17,13 +17,14 @@ afterEach(async () => { for (const dispose of close.splice(0).reverse()) await d
 const ref = (nativeSessionId: string) => ({ controllerId: 'controller', providerId: 'codex', nativeSessionId });
 const heartbeat = { intervalMs: 30000, timeoutMs: 10000 };
 const claim: TeamHostCall = { action: 'claim', teamId: 'team', memberId: 'worker', messageId: 'message', expectedNativeSessionId: 'A' };
+const inboxAcknowledgement: TeamHostCall = { action: 'acknowledge', teamId: 'team', memberId: 'worker', messageIds: ['message'], expectedNativeSessionId: 'A' };
 
 async function legacyRelay() {
   const server = new WebSocketServer({ host: '127.0.0.1', port: 0 });
   await once(server, 'listening', { signal: AbortSignal.timeout(3000) });
   close.push(async () => { for (const socket of server.clients) socket.terminate(); await new Promise<void>(done => server.close(() => done())); });
   const packets: any[] = [], sockets: WebSocket[] = [], invalid: unknown[] = [], offers: Array<string | null> = [];
-  let acknowledge = false;
+  let acknowledge = false, inbox = false;
   server.on('connection', (socket, request) => {
     sockets.push(socket);
     socket.on('message', data => {
@@ -32,12 +33,12 @@ async function legacyRelay() {
       packets.push(packet);
       if (packet.type === 'register') {
         offers.push(new URL(request.url!, 'http://localhost').searchParams.get('teamRecipients'));
-        socket.send(JSON.stringify({ uplinkVersion: 2, type: 'registered', hostId: 'host', teamManagement: true, ...(acknowledge ? { teamRecipients: 1 } : {}), heartbeat }));
+        socket.send(JSON.stringify({ uplinkVersion: 2, type: 'registered', hostId: 'host', teamManagement: true, ...(acknowledge ? { teamRecipients: 1 } : {}), ...(inbox ? { teamInbox: 1 } : {}), heartbeat }));
       }
       if (packet.type === 'team_request') socket.send(JSON.stringify({ uplinkVersion: 2, type: 'team_response', requestId: packet.requestId, status: 200, body: JSON.stringify(packet.call.action === 'poll' ? [] : { resolvedTarget: ref('A') }) }));
     });
   });
-  return { server, packets, sockets, invalid, offers, acknowledge(value: boolean) { acknowledge = value; }, url: `ws://127.0.0.1:${(server.address() as { port: number }).port}/ws/remote-host` };
+  return { server, packets, sockets, invalid, offers, acknowledge(value: boolean) { acknowledge = value; }, inbox(value: boolean) { inbox = value; }, url: `ws://127.0.0.1:${(server.address() as { port: number }).port}/ws/remote-host` };
 }
 
 async function client(url: string) {
@@ -50,6 +51,7 @@ async function client(url: string) {
 test('new Controller rejects unacknowledged recipient calls locally while legacy management, polling and heartbeat remain reachable', async () => {
   const f = await legacyRelay(), host = await client(f.url);
   await expect(host.teamRequest(claim)).rejects.toThrow(/Update the Relay/);
+  await expect(host.teamRequest(inboxAcknowledgement)).rejects.toThrow(/Update the Relay/);
   await expect(host.teamRequest({ action: 'settle', teamId: 'team', memberId: 'worker', messageId: 'message', outcome: 'unknown', resolvedTarget: ref('A') })).rejects.toThrow(/Update the Relay/);
   expect(await host.teamRequest({ action: 'poll' })).toEqual([]);
   f.sockets[0]!.send(JSON.stringify({ uplinkVersion: 2, type: 'heartbeat', nonce: 'still-alive' }));
@@ -57,6 +59,21 @@ test('new Controller rejects unacknowledged recipient calls locally while legacy
   await expect.poll(() => f.packets.some(p => p.type === 'heartbeat_ack' && p.nonce === 'still-alive')).toBe(true);
   await expect.poll(() => f.packets.find(p => p.type === 'rpc_response' && p.requestId === 'update')?.body).toBe('{"update":"reachable"}');
   expect(f.offers).toEqual(['1']); expect(f.invalid).toEqual([]); expect(f.sockets[0]!.readyState).toBe(WebSocket.OPEN);
+}, 10000);
+
+test('inbox acknowledgement is negotiated separately and reset after Relay downgrade', async () => {
+  const f = await legacyRelay(); f.acknowledge(true); const host = await client(f.url);
+  await expect(host.teamRequest(inboxAcknowledgement)).rejects.toThrow(/Update the Relay/);
+  expect(f.packets.some(packet => packet.call?.action === 'acknowledge')).toBe(false);
+  f.inbox(true); f.sockets[0]!.close();
+  await expect.poll(() => f.packets.filter(p => p.type === 'register').length).toBe(2);
+  await expect.poll(async () => { try { return await host.teamRequest(inboxAcknowledgement); } catch { return undefined; } }).toMatchObject({ resolvedTarget: ref('A') });
+  f.inbox(false); f.sockets.at(-1)!.close();
+  await expect.poll(() => f.packets.filter(p => p.type === 'register').length).toBe(3);
+  await expect.poll(async () => { try { return await host.teamRequest({ action: 'poll' }); } catch { return undefined; } }).toEqual([]);
+  const count = f.packets.filter(packet => packet.call?.action === 'acknowledge').length;
+  await expect(host.teamRequest(inboxAcknowledgement)).rejects.toThrow(/Update the Relay/);
+  expect(f.packets.filter(packet => packet.call?.action === 'acknowledge')).toHaveLength(count);
 }, 10000);
 
 test('recipient acknowledgement is reset after reconnecting to a downgraded Relay', async () => {
@@ -103,8 +120,8 @@ async function currentRelay(team: SavedTeam | SavedTeam[] = savedTeam(), success
   });
   close.push(async () => { broker.close(); for (const socket of ws.clients) socket.terminate(); await new Promise<void>(done => ws.close(() => done())); http.closeAllConnections(); await new Promise<void>(done => http.close(() => done())); });
   const request = async (path = '', input?: unknown, recipientAware = false) => fetch(`${origin}/v1/remote/teams${path}`, { signal: AbortSignal.timeout(3000), headers: { ...(recipientAware ? { 'x-arc-team-recipients': '1' } : {}), 'content-type': 'application/json' }, ...(input ? { method: 'POST', body: JSON.stringify(input) } : {}) });
-  async function connect(recipientAware = false) {
-    const socket = new WebSocket(`${origin.replace('http:', 'ws:')}/ws/remote-host?team=1${recipientAware ? '&teamRecipients=1' : ''}`);
+  async function connect(recipientAware = false, inbox = false) {
+    const socket = new WebSocket(`${origin.replace('http:', 'ws:')}/ws/remote-host?team=1${recipientAware ? '&teamRecipients=1' : ''}${inbox ? '&teamInbox=1' : ''}`);
     close.push(() => { socket.terminate(); });
     const packets: any[] = []; socket.on('message', data => { const packet = JSON.parse(data.toString()); packets.push(packet); if (packet.type === 'heartbeat') socket.send(JSON.stringify({ uplinkVersion: 2, type: 'heartbeat_ack', nonce: packet.nonce })); });
     await once(socket, 'open', { signal: AbortSignal.timeout(3000) });
@@ -120,6 +137,17 @@ async function currentRelay(team: SavedTeam | SavedTeam[] = savedTeam(), success
   }
   return { origin, request, connect, snapshot: () => saved, restart() { broker.close(); broker = make(); } };
 }
+
+test('current Relay acknowledges inbox support only when offered and persists the exact receipt', async () => {
+  const f = await currentRelay(), old = await f.connect(true);
+  expect(old.packets[0].teamInbox).toBeUndefined();
+  const modern = await f.connect(true, true);
+  expect(modern.packets[0].teamInbox).toBe(1);
+  expect(await modern.call(inboxAcknowledgement)).toMatchObject({ status: 200, value: { acknowledged: [{ id: 'message', acceptance: 'handled', resolvedTarget: ref('A') }] } });
+  expect(f.snapshot().teams![0]!.messages).toEqual([]);
+  f.restart(); const resumed = await f.connect(true, true);
+  expect((await resumed.call(inboxAcknowledgement)).status).toBe(200);
+}, 10000);
 
 test('legacy Controller ordinary claims, polls and cached browser responses stay valid while exact recipients persist across restart', async () => {
   const f = await currentRelay(), legacy = await f.connect();

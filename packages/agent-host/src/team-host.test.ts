@@ -12,35 +12,39 @@ import { createHash } from 'node:crypto';
 
 class NativeSession implements AgentSession {
   capabilities: AgentCapabilities = {history:true,sendMessage:true,queueMessage:false,steer:false,cancel:false,readResource:false,interactions:{question:false,toolApproval:false,planApproval:false}};
-  sent:string[]=[]; failReceipt=false; queued=false; voidReceipt=false; acceptance?:AgentMessageOptions['onAcceptance']; status:'idle'|'running'='idle'; closed=false; sequence=0;
+  sent:string[]=[]; deliveries:AgentMessageOptions['delivery'][]=[]; failReceipt=false; queued=false; voidReceipt=false; acceptance?:AgentMessageOptions['onAcceptance']; status:'idle'|'running'='idle'; closed=false; sequence=0;
   private events:ProviderStreamItem[]=[{type:'history_boundary'}]; private wake?:()=>void;
-  constructor(readonly id:string,readonly cwd:string){}
+  constructor(readonly id:string,readonly cwd:string,capabilities:Partial<AgentCapabilities>={}){Object.assign(this.capabilities,capabilities);}
   async *observe(){while(!this.closed){if(this.events.length)yield this.events.shift()!;else await new Promise<void>(resolve=>{this.wake=resolve;});}}
   async runtimeInfo():Promise<AgentRuntimeInfo>{return {providerId:'fixture',sessionId:this.id,cwd:this.cwd,status:this.status,persistence:{providerId:'fixture',sessionId:this.id,opaque:'{}'}};}
-  async sendMessage(text:string, options?:AgentMessageOptions){this.acceptance=options?.onAcceptance;this.sent.push(text);this.status='running';this.emit({type:'turn_started',provider:'fixture',turnId:'turn'});this.emit({type:'runtime_updated',provider:'fixture',runtimeInfo:await this.runtimeInfo(),activeTurnId:'turn'});if(this.failReceipt)throw new Error('Native receipt lost');if(this.voidReceipt)return;return {disposition:this.queued ? 'queued' as const : 'started' as const};}
+  async sendMessage(text:string, options?:AgentMessageOptions){const running=this.status==='running';this.acceptance=options?.onAcceptance;this.sent.push(text);this.deliveries.push(options?.delivery);this.status='running';if(!running)this.emit({type:'turn_started',provider:'fixture',turnId:'turn'});this.emit({type:'runtime_updated',provider:'fixture',runtimeInfo:await this.runtimeInfo(),activeTurnId:'turn'});if(this.failReceipt)throw new Error('Native receipt lost');if(this.voidReceipt)return;if(options?.delivery==='next_turn')this.queued=true;return {disposition:this.queued ? 'queued' as const : running && this.capabilities.steer ? 'handled' as const : 'started' as const};}
   emit(event:any){this.events.push({type:'observation',sourceKey:String(++this.sequence),delivery:'live',occurredAt:Date.now(),event});this.wake?.();}
   async finish(){if(this.queued){this.acceptance?.({disposition:'started'});this.queued=false;}this.status='idle';this.emit({type:'turn_completed',provider:'fixture',turnId:'turn'});this.emit({type:'runtime_updated',provider:'fixture',runtimeInfo:await this.runtimeInfo(),activeTurnId:null});}
   async respondToInteraction(){}
   async dispose(){this.closed=true;this.wake?.();}
 }
-it('registers two real Host uplinks, injects scoped tools, delivers both ways without a browser and archives after native idle',async()=>{
+async function teamTransport(){
   const root=await mkdtemp(join(tmpdir(),'arc-team-'));
   const resourceRows=new Map<string,Uint8Array>();const teamResources=new PortableTeamResourceStore({storage:{async get(key){return resourceRows.get(key);},async put(key,value){resourceRows.set(key,value);},async delete(key){resourceRows.delete(key);},async list(prefix){return [...resourceRows.keys()].filter(key=>key.startsWith(prefix));}}});
   const server=createServer(), broker=createRemoteHostBroker({teamResources,origin:'http://127.0.0.1:6175',ownerSubject:'owner',principalSubject:()=> 'owner'});
   broker.install(server);server.listen(0,'127.0.0.1');await once(server,'listening');const base=`http://127.0.0.1:${(server.address() as {port:number}).port}`;
   const request=async(path:string,body?:unknown)=>{const response=await fetch(base+path,{signal:AbortSignal.timeout(5000),...(body===undefined?{}:{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)})});const value=await response.json();if(!response.ok)throw new Error(`${response.status}: ${JSON.stringify(value)}`);return value;};
   const hosts:Array<ReturnType<typeof createAgentHost>>=[];
-  async function host(name:string){
+  async function host(name:string,capabilities:Partial<AgentCapabilities>={}){
     const sessions=new Map<string,NativeSession>(), extensions=new Map<string,AgentSessionExtensions>();
     const directory:AgentHostDirectory={providerId:'fixture',list:()=>[],workspaces:()=>[],
-      async create(input){const id=`${name}-${sessions.size}`;sessions.set(id,new NativeSession(id,input.cwd ?? root));extensions.set(id,input);return id;},
-      async open(id,options){if(options?.extensions)extensions.set(id,options.extensions);let session=sessions.get(id);if(!session||session.closed){session=new NativeSession(id,root);sessions.set(id,session);}return session;},
+      async create(input){const id=`${name}-${sessions.size}`;sessions.set(id,new NativeSession(id,input.cwd ?? root,capabilities));extensions.set(id,input);return id;},
+      async open(id,options){if(options?.extensions)extensions.set(id,options.extensions);let session=sessions.get(id);if(!session||session.closed){session=new NativeSession(id,root,capabilities);sessions.set(id,session);}return session;},
       async close(){await Promise.all([...sessions.values()].map(session=>session.dispose()));}};
     let key=(await request('/v1/remote/pairings',{})).key;
     const start=()=>createAgentHost({installationId:name,name,team:{stateDirectory:join(root,name),tickMs:20},registrations:[{directory,adapter:{descriptor:{providerId:'fixture',displayName:'Fixture',sessionExtensions:{instructions:true,tools:true}},async createSession(){throw new Error('Use directory');},async resumeSession(){throw new Error('Use directory');}}}],uplink:{url:base.replace('http:','ws:')+'/ws/remote-host',remoteKey:key,onCredential:async value=>{key=value;}}});
     let instance=start();
     hosts.push(instance);return {instance,sessions,extensions,id:(await instance.ready).hostId,async restart(){await instance.close();instance=start();hosts.push(instance);await instance.ready;}};
   }
+  return {root,request,host,async close(){await Promise.all(hosts.map(host=>host.close()));await broker.close();server.closeAllConnections();await new Promise<void>(resolve=>server.close(()=>resolve()));await rm(root,{recursive:true,force:true});}};
+}
+it('registers two real Host uplinks, injects scoped tools, delivers both ways without a browser and archives after native idle',async()=>{
+  const transport=await teamTransport(),{root,request,host}=transport;
   try{
     const mac=await host('mac'),win=await host('win');
     const team=await request('/v1/remote/teams/create',{operationId:'create-team',source:{hostId:mac.id,providerId:'fixture',nativeSessionId:'source',title:'Main project'}});
@@ -51,7 +55,6 @@ it('registers two real Host uplinks, injects scoped tools, delivers both ways wi
     const member=updated.members[1];expect(member.creation).toBe('ready');
     await expect.poll(()=>mac.sessions.get(leader.nativeSessionId)?.sent.length,{timeout:5000}).toBe(1);
     expect(mac.sessions.get(leader.nativeSessionId)?.sent[0]).toContain('member registered');
-    await mac.sessions.get(leader.nativeSessionId)!.finish();
     const call=async(target:typeof mac,nativeId:string,name:string,args:unknown)=>JSON.parse(await target.extensions.get(nativeId)!.tools!.find(tool=>tool.name===name)!.execute(args));
     expect(win.extensions.get(member.nativeSessionId)?.tools?.some(tool=>tool.name==='describe_team_member')).toBe(false);
     win.sessions.get(member.nativeSessionId)!.voidReceipt=true;
@@ -73,9 +76,26 @@ it('registers two real Host uplinks, injects scoped tools, delivers both ways wi
     win.sessions.get(member.nativeSessionId)!.acceptance?.({disposition:'started'});
     await expect.poll(async()=> (await request('/v1/remote/teams')).teams[0].messages.some((message:any)=>message.text===task.text),{timeout:5000}).toBe(false);
     expect((await call(mac,leader.nativeSessionId,'read_team',{})).receipts).toEqual(expect.arrayContaining([expect.objectContaining({to:member.id,status:'accepted'})]));
-    await call(win,member.nativeSessionId,'send_team_message',{to:leader.id,operationId:'result-1',text:'Evidence: the service is disabled.',resources:[reportResource.resourceId]});
-    await expect.poll(()=>mac.sessions.get(leader.nativeSessionId)?.sent.length,{timeout:5000}).toBe(2);
+    const evidence={to:leader.id,operationId:'result-1',text:'Evidence: the service is disabled.',resources:[reportResource.resourceId]};
+    expect(mac.sessions.get(leader.nativeSessionId)?.status).toBe('running');
+    expect(win.sessions.get(member.nativeSessionId)?.status).toBe('running');
+    const queued=await call(win,member.nativeSessionId,'send_team_message',evidence);
+    const inbox=await call(mac,leader.nativeSessionId,'read_team',{});
+    expect(inbox.messages).toEqual(expect.arrayContaining([expect.objectContaining({id:queued.id,text:evidence.text,status:'queued',resources:[expect.objectContaining({resourceId:reportResource.resourceId})]})]));
+    expect((await request('/v1/remote/teams')).teams[0].messages.find((message:any)=>message.id===queued.id)?.status).toBe('queued');
+    expect(mac.sessions.get(leader.nativeSessionId)?.sent).toHaveLength(1);
+    expect(mac.extensions.get(leader.nativeSessionId)?.tools?.find(tool=>tool.name==='acknowledge_team_messages')).toBeDefined();
+    const accepted=await call(mac,leader.nativeSessionId,'acknowledge_team_messages',{messageIds:[queued.id]});
+    expect(accepted.acknowledged).toEqual([expect.objectContaining({id:queued.id,status:'accepted',acceptance:'handled'})]);
+    expect((await request('/v1/remote/teams')).teams[0].messages).toEqual([]);
+    expect(await call(mac,leader.nativeSessionId,'acknowledge_team_messages',{messageIds:[queued.id]})).toEqual(accepted);
+    expect(await call(win,member.nativeSessionId,'send_team_message',evidence)).toMatchObject({id:queued.id,status:'accepted',acceptance:'handled'});
     const returned=await call(mac,leader.nativeSessionId,'download_team_resource',{resourceId:reportResource.resourceId});expect(JSON.parse(await readFile(returned.localPath,'utf8'))).toEqual({sha256:resource.sha256,verified:true});
+    await mac.sessions.get(leader.nativeSessionId)!.finish();
+    await expect.poll(async()=> (await request('/v1/remote/teams')).teams[0].members.find((member:any)=>member.id===leader.id)?.activity,{timeout:5000}).toBe('idle');
+    expect(mac.sessions.get(leader.nativeSessionId)?.sent).toHaveLength(1);
+    await call(win,member.nativeSessionId,'send_team_message',{...evidence,operationId:'result-2'});
+    await expect.poll(()=>mac.sessions.get(leader.nativeSessionId)?.sent.length,{timeout:5000}).toBe(2);
     await win.sessions.get(member.nativeSessionId)!.finish();
     win.sessions.get(member.nativeSessionId)!.failReceipt=true;
     await call(mac,leader.nativeSessionId,'send_team_message',{...task,operationId:'uncertain-task'});
@@ -92,5 +112,39 @@ it('registers two real Host uplinks, injects scoped tools, delivers both ways wi
     await expect(call(mac,leader.nativeSessionId,'send_team_message',{...task,operationId:'too-late'})).rejects.toThrow('not active');
     await win.sessions.get(member.nativeSessionId)!.finish();await mac.sessions.get(leader.nativeSessionId)!.finish();
     await expect.poll(async()=> (await request('/v1/remote/teams')).teams[0].status,{timeout:5000}).toBe('archived');
-  }finally{await Promise.all(hosts.map(host=>host.close()));await broker.close();server.closeAllConnections();await new Promise<void>(resolve=>server.close(()=>resolve()));await rm(root,{recursive:true,force:true});}
+  }finally{await transport.close();}
 },20000);
+
+it.each([
+  {capabilities:{steer:true,queueMessage:true},delivery:'immediate',acceptance:'handled'},
+  {capabilities:{steer:false,queueMessage:true},delivery:'next_turn',acceptance:'queued'},
+] as const)('delivers to a running native recipient with $delivery and settles only on acceptance evidence',async({capabilities,delivery,acceptance})=>{
+  const transport=await teamTransport(),{root,request,host}=transport;
+  try{
+    const mac=await host('mac',capabilities),win=await host('win');
+    const team=await request('/v1/remote/teams/create',{operationId:'create',source:{hostId:mac.id,providerId:'fixture',nativeSessionId:'source',title:'Running project'}});
+    const leader=team.members[0];
+    const registered=await request('/v1/remote/teams/action',{teamId:team.id,action:'add_member',operationId:'worker',hostId:win.id,providerId:'fixture',name:'Worker',cwd:root,responsibility:'Return evidence'});
+    const member=registered.members[1];
+    await expect.poll(()=>mac.sessions.get(leader.nativeSessionId)?.sent.length,{timeout:3000}).toBe(1);
+    const session=mac.sessions.get(leader.nativeSessionId)!;
+    expect(session.status).toBe('running');
+    const send=win.extensions.get(member.nativeSessionId)!.tools!.find(tool=>tool.name==='send_team_message')!;
+    const message=JSON.parse(await send.execute({to:leader.id,operationId:'result',text:'Fresh evidence while work is running.'}));
+    await expect.poll(()=>session.sent.length,{timeout:3000}).toBe(2);
+    expect(session.status).toBe('running');
+    expect(session.deliveries[1]).toBe(delivery);
+    const read=mac.extensions.get(leader.nativeSessionId)!.tools!.find(tool=>tool.name==='read_team')!;
+    if(acceptance==='queued'){
+      await expect.poll(async()=>JSON.parse(await read.execute({})).messages.find((row:any)=>row.id===message.id)?.acceptance,{timeout:3000}).toBe('queued');
+      expect((await request('/v1/remote/teams')).teams[0].messages.find((row:any)=>row.id===message.id)).toMatchObject({status:'accepted',acceptance:'queued'});
+      expect(session.sent).toHaveLength(2);
+      session.acceptance?.({disposition:'handled'});
+    }
+    await expect.poll(async()=>JSON.parse(await read.execute({})).receipts.find((row:any)=>row.id===message.id)?.acceptance,{timeout:3000}).toBe('handled');
+    expect((await request('/v1/remote/teams')).teams[0].messages).toEqual([]);
+    await session.finish();
+    await expect.poll(async()=> (await request('/v1/remote/teams')).teams[0].members.find((row:any)=>row.id===leader.id)?.activity,{timeout:3000}).toBe('idle');
+    expect(session.sent).toHaveLength(2);
+  }finally{await transport.close();}
+},10000);

@@ -150,6 +150,30 @@ export class TeamBroker {
       if (self.hostId !== hostId || self.creation !== 'ready') fail('This Host is not the registered Team member.');
       if (!recipientAware && this.resolveRecipientFromAnchor(self).nativeSessionId !== self.nativeSessionId) fail(upgradeRequired);
       if (call.action === 'read') return { ...this.project(team, recipientAware), receipts: team.deliveryReceipts?.map(({ fingerprint: _hash, settledAt: _time, ...receipt }) => projectDelivery(receipt)) ?? [] };
+      if (call.action === 'acknowledge') {
+        if (!recipientAware) fail(upgradeRequired);
+        const target = this.resolveRecipientFromAnchor(self);
+        if (target.nativeSessionId !== call.expectedNativeSessionId) fail('Team recipient moved or does not match the acknowledgement.');
+        this.ports.assertRecipient?.(target);
+        // Validate the whole batch before consuming any input. A native claim owns its effect boundary.
+        const messages = call.messageIds.map(id => {
+          const message = team.messages.find(item => item.id === id) ?? team.deliveryReceipts?.find(item => item.id === id);
+          if (!message) return fail('Message acknowledgement is unavailable. Read the current inbox before retrying.');
+          if (message.to !== self.id) fail('Message is not addressed to this member.');
+          if (message.resolvedTarget && nativeSessionRefKey(message.resolvedTarget) !== nativeSessionRefKey(target)) fail('Message belongs to a different Team recipient.');
+          if (message.status === 'queued') { active(team); return message; }
+          if (message.status === 'accepted' && ['started', 'handled'].includes(message.acceptance ?? '') && message.resolvedTarget) return message;
+          if (unresolvedTeamDelivery(message)) fail('Message has entered native delivery. Inspect its receipt; do not resend or acknowledge it as unread.');
+          return fail('Message was not accepted and cannot be acknowledged as received.');
+        });
+        let changed = false;
+        for (const message of messages) if (message.status === 'queued') {
+          message.resolvedTarget = structuredClone(target); message.status = 'accepted'; message.acceptance = 'handled'; changed = true;
+        }
+        if (changed) touch(team, now);
+        return { acknowledged: messages.map(message => ({ id: message.id, from: message.from, to: message.to,
+          status: message.status, acceptance: message.acceptance, createdAt: message.createdAt, resolvedTarget: message.resolvedTarget })) };
+      }
       if (call.action === 'presence') { if (self.activity === call.activity && team.status !== 'archiving') return team.status; self.activity = call.activity; self.updatedAt = now; settleArchive(team, now); return team.status; }
       if (call.action === 'settle' || call.action === 'claim') {
         const message = team.messages.find(item => item.id === call.messageId && item.to === self.id);

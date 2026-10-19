@@ -98,6 +98,13 @@ interface RawNotification {
   params: unknown;
 }
 
+interface SteerInputAcceptance {
+  turnId: string;
+  input: CodexInput[];
+  handled: boolean;
+  onAcceptance?: AgentMessageOptions['onAcceptance'];
+}
+
 export class CodexAppServerSession implements AgentSession {
   readonly capabilities: AgentCapabilities = { ...CODEX_CAPABILITIES, interactions: { ...CODEX_CAPABILITIES.interactions } };
   readonly nativeEvidence: CodexSessionNativeEvidence;
@@ -135,6 +142,7 @@ export class CodexAppServerSession implements AgentSession {
   private readonly preReadyEvents: ProviderObservation[] = [];
   private liveQueue = new AsyncQueue<ProviderStreamItem>();
   private readonly pendingInteractions = new Map<string, NativePendingInteraction>();
+  private readonly steerInputAcceptances = new Map<string, SteerInputAcceptance>();
   private ready = false;
   private observing = false;
   private disposed = false;
@@ -672,8 +680,7 @@ export class CodexAppServerSession implements AgentSession {
       for (let attempt = 0; ; attempt += 1) {
         const revision = this.statusRevision;
         try {
-          await this.steerTurn(input, expectedTurnId);
-          return;
+          return await this.steerTurn(input, expectedTurnId, options);
         } catch (error) {
           if (!(error instanceof CodexAppServerRpcError) || error.code !== -32602) throw error;
           this.assertMessageReady();
@@ -708,19 +715,48 @@ export class CodexAppServerSession implements AgentSession {
     if (this.changingSetting || this.startingTurn) throw new AgentOperationRejectedError('operation_rejected', 'A Codex turn or setting change is already active');
   }
 
-  async steer(text: string): Promise<void> {
+  async steer(text: string, options?: AgentMessageOptions): Promise<AgentInputAcceptance | void> {
     this.assertDirectInput();
     if (!this.activeTurnId) throw new AgentOperationRejectedError('operation_rejected', 'Codex has no active turn.');
     if (!text.trim()) throw new AgentOperationRejectedError('operation_rejected', 'Codex message must not be empty.');
-    await this.steerTurn(codexMessageInput([{ type: 'text', text }]), this.activeTurnId);
+    return this.steerTurn(codexMessageInput([{ type: 'text', text }]), this.activeTurnId, options);
   }
 
-  private async steerTurn(input: CodexInput[], expectedTurnId: string): Promise<void> {
+  private async steerTurn(input: CodexInput[], expectedTurnId: string, options?: AgentMessageOptions): Promise<AgentInputAcceptance | void> {
     this.nativeEvidence.invalidate();
-    await this.transport.request('turn/steer', {
-      threadId: this.threadId, expectedTurnId,
-      input,
-    });
+    const clientUserMessageId = randomUUID();
+    const pending: SteerInputAcceptance = { turnId: expectedTurnId, input, handled: false, onAcceptance: options?.onAcceptance };
+    this.steerInputAcceptances.set(clientUserMessageId, pending);
+    try {
+      const result = await this.transport.request('turn/steer', { threadId: this.threadId, expectedTurnId, clientUserMessageId, input });
+      if (pending.handled) return { disposition: 'handled' };
+      // A steer receipt confirms native queue admission, not consumption by the active turn.
+      if (!isRecord(result) || result.turnId !== expectedTurnId) return;
+      this.notifySteerAcceptance(pending, 'queued');
+      return { disposition: 'queued' };
+    } catch (error) {
+      if (pending.handled) return { disposition: 'handled' };
+      if (error instanceof CodexAppServerRpcError && error.code === -32602) this.steerInputAcceptances.delete(clientUserMessageId);
+      throw error;
+    } finally {
+      if (!options?.onAcceptance) this.steerInputAcceptances.delete(clientUserMessageId);
+    }
+  }
+
+  private notifySteerAcceptance(pending: SteerInputAcceptance, disposition: AgentInputAcceptance['disposition']): void {
+    if (this.disposed || this.released) return;
+    try { pending.onAcceptance?.({ disposition }); } catch { /* An observer cannot change native input acceptance. */ }
+  }
+
+  private observeSteerInput(method: string, params: unknown): void {
+    if (this.disposed || this.released || method !== 'item/started' || !isRecord(params) || params.threadId !== this.threadId || !isRecord(params.item)) return;
+    const item = params.item, clientId = readString(item.clientId);
+    if (item.type !== 'userMessage' || !readString(item.id) || !clientId) return;
+    const pending = this.steerInputAcceptances.get(clientId);
+    if (!pending || params.turnId !== pending.turnId || !isDeepStrictEqual(item.content, pending.input)) return;
+    pending.handled = true;
+    this.steerInputAcceptances.delete(clientId);
+    this.notifySteerAcceptance(pending, 'handled');
   }
 
   async cancel(): Promise<void> {
@@ -1080,6 +1116,7 @@ export class CodexAppServerSession implements AgentSession {
   async dispose(): Promise<void> {
     if (this.disposed || this.released) return;
     this.nativeEvidence.invalidate();
+    this.steerInputAcceptances.clear();
     if (!this.ownsRuntime) {
       this.released = true;
       this.observing = false;
@@ -1234,6 +1271,7 @@ export class CodexAppServerSession implements AgentSession {
   }
 
   private handleNotification(method: string, params: unknown): void {
+    this.observeSteerInput(method, params);
     if (this.handleRuntimeNotification(method, params)) return;
     if (this.handleServerRequestResolved(method, params)) return;
     if (!this.ready || !this.projector) {
@@ -1296,6 +1334,7 @@ export class CodexAppServerSession implements AgentSession {
       || observation.event.type === 'turn_failed'
       || observation.event.type === 'turn_canceled'
     ) {
+      for (const [id, pending] of this.steerInputAcceptances) if (pending.turnId === observation.event.turnId) this.steerInputAcceptances.delete(id);
       if (this.activeTurnId && observation.event.turnId !== this.activeTurnId) return;
       this.latestFailure = observation.event.type === 'turn_failed'
         ? { message: observation.event.error, ...(observation.event.turnId ? { turnId: observation.event.turnId } : {}) } : undefined;

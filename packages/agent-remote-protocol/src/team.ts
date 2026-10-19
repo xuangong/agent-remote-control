@@ -57,6 +57,8 @@ export const TeamHostCall = Type.Union([
   Type.Object({ action: Type.Literal('resource_metadata'), teamId: id, memberId: id, resourceId: id }, object),
   Type.Object({ action: Type.Literal('resource_read'), teamId: id, memberId: id, resourceId: id, offset: Type.Integer({ minimum: 0 }) }, object),
   Type.Object({ action: Type.Literal('read'), teamId: id, memberId: id }, object),
+  Type.Object({ action: Type.Literal('acknowledge'), teamId: id, memberId: id,
+    messageIds: Type.Array(id, { minItems: 1, maxItems: 32, uniqueItems: true }), expectedNativeSessionId: NativeSessionRef.properties.nativeSessionId }, object),
   Type.Object({ action: Type.Literal('send'), teamId: id, memberId: id, to: id, operationId: id, text, resources: Type.Optional(Type.Array(id, { minItems: 1, maxItems: 8, uniqueItems: true })) }, object),
   Type.Object({ action: Type.Literal('describe_member'), teamId: id, memberId: id, target: id, responsibility: short }, object),
   Type.Object({ action: Type.Literal('report'), teamId: id, memberId: id, summary: short }, object),

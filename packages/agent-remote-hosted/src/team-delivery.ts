@@ -14,10 +14,9 @@ export interface SavedTeam extends Omit<Team, 'unresolvedReceipts'> {
 const receiptLifetimeMs = 24 * 60 * 60 * 1000;
 const receiptCount = TEAM_DELIVERY_RECEIPT_LIMIT;
 const receiptBytes = 32 * 1024;
-// Every native reference string can occupy six JSON bytes per code unit.
-const recipientGrowthBytes = Buffer.byteLength(JSON.stringify({ resolvedTarget: { controllerId: '\u0000'.repeat(512), providerId: '\u0000'.repeat(512), nativeSessionId: '\u0000'.repeat(512) } })) - 1;
-export const teamMessageBudgetBytes = (team: Team, reserveRecipients = false) => Buffer.byteLength(JSON.stringify(team.messages.map(({ resources: _resources, ...message }) => message)))
-  + (reserveRecipients ? team.messages.filter(message => message.status === 'queued' && !message.resolvedTarget).length * recipientGrowthBytes : 0);
+// Input capacity stays stable while delivery evidence grows. Resources, recipients,
+// and settlement metadata remain bounded by their schemas and the full state limit.
+export const teamMessageBudgetBytes = (team: Team) => Buffer.byteLength(JSON.stringify(team.messages.map(({ id, from, to, text, createdAt }) => ({ id, from, to, text, createdAt }))));
 
 export function stripPrivateTeamEvidence(team: SavedTeam): Omit<Team, 'unresolvedReceipts'> {
   const { deliveryReceipts: _receipts, resourceGrants: _grants, ...value } = team;
@@ -115,7 +114,7 @@ export function replayTeamDelivery(team: SavedTeam, id: string, input: { to: str
 }
 
 export function assertTeamQueueCapacity(team: Team, message: TeamMessage): void {
-  if (team.messages.length >= 200 || teamMessageBudgetBytes({ ...team, messages: [...team.messages, message] }, true) > 128 * 1024) {
+  if (team.messages.length >= 200 || teamMessageBudgetBytes({ ...team, messages: [...team.messages, message] }) > 128 * 1024) {
     throw new Error('Team communication capacity reached. Wait for pending deliveries to settle.');
   }
 }

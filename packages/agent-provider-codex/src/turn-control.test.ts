@@ -15,7 +15,7 @@ it('steers and interrupts the active native turn and rejects controls after comp
     await session.sendMessage('Start');
     await session.steer!('Use a smaller example');
     await session.cancel!();
-    expect(app.requests.find((r) => r.method === 'turn/steer')?.params).toEqual({ threadId: 'thread', expectedTurnId: 'turn', input: [{ type: 'text', text: 'Use a smaller example', text_elements: [] }] });
+    expect(app.requests.find((r) => r.method === 'turn/steer')?.params).toEqual({ threadId: 'thread', expectedTurnId: 'turn', clientUserMessageId: expect.any(String), input: [{ type: 'text', text: 'Use a smaller example', text_elements: [] }] });
     expect(app.requests.find((r) => r.method === 'turn/interrupt')?.params).toEqual({ threadId: 'thread', turnId: 'turn' });
     app.child.stdout.write(JSON.stringify({ method: 'turn/completed', params: { threadId: 'thread', turn: { id: 'turn', status: 'interrupted' } } }) + '\n');
     await expect(session.steer!('Too late')).rejects.toThrow('active turn');

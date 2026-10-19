@@ -2,7 +2,7 @@ import { expect, it } from 'vitest';
 import type { Team, TeamSeat } from '@orchardworks/agent-remote-protocol';
 import { TeamBroker } from './teams.js';
 import { createHostBroker } from './broker.js';
-import { validSavedTeam, deliveryFingerprint, trimTeamDeliveryReceipts, type SavedTeam } from './team-delivery.js';
+import { validSavedTeam, deliveryFingerprint, trimTeamDeliveryReceipts, teamMessageBudgetBytes, type SavedTeam } from './team-delivery.js';
 import { isTeam } from '@orchardworks/agent-remote-protocol';
 import { PortableTeamResourceStore, type TeamResourceStorage } from './team-resources.js';
 import { createHash } from 'node:crypto';
@@ -272,20 +272,22 @@ it('projects every Team response through the current recipient and pins claim ev
 });
 
 
-it('reserves bounded recipient evidence before admitting a queue that can later be claimed', async () => {
+it('keeps recipient evidence outside the pending input budget while persisting valid claims', async () => {
   const f = await group();
-  const nativeSessionId = '\u0000'.repeat(512);
-  f.ports.resolveSession = (_host, providerId) => ({ controllerId: '\u0000'.repeat(512), providerId, nativeSessionId });
+  const nativeSessionId = '\uffff'.repeat(512);
+  f.ports.resolveSession = (_host, providerId) => ({ controllerId: '\uffff'.repeat(512), providerId, nativeSessionId });
   const ids: string[] = [];
   for (let index = 0; index < 30; index++) {
     try { const result = await f.broker.hostCall('mac', {action:'send',teamId:f.team.id,memberId:f.leader.id,to:f.worker.id,operationId:`bounded-${index}`,text:'x'.repeat(16000)}) as any; ids.push(result.id); }
     catch { break; }
   }
-  expect(ids.length).toBeGreaterThan(0);
+  expect(ids).toHaveLength(8);
   for (const messageId of ids) {
     await f.broker.hostCall('win', {action:'claim',teamId:f.team.id,memberId:f.worker.id,messageId,expectedNativeSessionId:nativeSessionId});
-    expect(Buffer.byteLength(JSON.stringify(f.snapshot()[0]!.messages))).toBeLessThanOrEqual(128 * 1024);
+    expect(teamMessageBudgetBytes(f.snapshot()[0]!)).toBeLessThanOrEqual(128 * 1024);
+    expect(validSavedTeam(f.snapshot()[0]!)).toBe(true);
   }
+  expect(Buffer.byteLength(JSON.stringify(f.snapshot()[0]!.messages))).toBeGreaterThan(128 * 1024);
 });
 
 

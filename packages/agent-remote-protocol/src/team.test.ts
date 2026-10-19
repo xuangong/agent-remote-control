@@ -1,6 +1,17 @@
 import { expect, it } from 'vitest';
 import { decodeRemoteHostUplinkMessage, encodeRemoteHostUplinkMessage } from './remote-host-uplink.js';
 import { isTeam, isTeamAction, isTeamCreate, isTeamHostCall } from './team.js';
+it('bounds explicit inbox acknowledgement and requires its exact recipient', () => {
+  const call = { action: 'acknowledge', teamId: 'team', memberId: 'leader', messageIds: ['message'], expectedNativeSessionId: 'native' };
+  expect(isTeamHostCall(call)).toBe(true);
+  const envelope = { uplinkVersion: 2, type: 'team_request', requestId: 'ack', call };
+  expect(decodeRemoteHostUplinkMessage(JSON.stringify(envelope)).status).toBe('ok');
+  for (const invalid of [{ ...call, messageIds: [] }, { ...call, messageIds: ['message', 'message'] },
+    { ...call, messageIds: Array.from({ length: 33 }, (_, index) => String(index)) },
+    { ...call, expectedNativeSessionId: undefined }, { ...call, expectedNativeSessionId: '' }, { ...call, force: true }]) {
+    expect(isTeamHostCall(invalid)).toBe(false);
+  }
+});
 it('admits only the bounded Team contract over the Host uplink',()=>{
   const call={action:'send',teamId:'team',memberId:'leader',to:'worker',operationId:'op',text:'Inspect logs'};
   expect(isTeamHostCall(call)).toBe(true);

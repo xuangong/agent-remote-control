@@ -6,15 +6,19 @@ import { SessionDockProvider, SessionDockRail } from '../../src/components/Sessi
 import { SessionFamily } from '../../src/components/SessionFamily';
 import { SessionWindow } from '../../src/components/SessionWindow';
 import { DraftStore } from '../../src/draft-store';
-import { WindowLayoutContext } from '../../src/window-workspace-context';
+import { WindowLayoutContext, WindowPresentationContext } from '../../src/window-workspace-context';
 import { WorkspaceReady } from '../../src/workspace-access';
 import { replicaState } from '../../src/test/fixtures';
 import '../../src/session-view-styles';
 import '../../src/ask.css';
 
-const primaryOnly = new URLSearchParams(location.search).has('primary-only');
-const withContent = new URLSearchParams(location.search).has('content');
-const storageKey = `session-family-resize-window${primaryOnly ? '-primary' : ''}`;
+const parameters = new URLSearchParams(location.search);
+const primaryOnly = parameters.has('primary-only');
+const selection = parameters.has('selection');
+const withContent = parameters.has('content') || selection;
+const withEmpty = parameters.has('empty');
+const presentationFallback = parameters.has('presentation-fallback');
+const storageKey = `session-family-resize-window${primaryOnly ? '-primary' : ''}${selection ? '-selection' : ''}`;
 const target = (id: string, title: string) => ({ hostId: 'fixture', providerId: 'recorded', nativeSessionId: id, title });
 function initialWindow(): WorkspaceWindow {
   const primary = { ...createWindowView('primary', target('primary', 'Primary'), 'primary'), width: primaryOnly ? 1600 : 440 };
@@ -23,8 +27,11 @@ function initialWindow(): WorkspaceWindow {
     { ...createWindowView(`${root.id}-child`, target(`${root.id}-child`, `${root.binding!.title} child`), 'attached'), attachedTo: root.id, width: 320 },
     { ...createWindowView(`${root.id}-leaf`, target(`${root.id}-leaf`, `${root.binding!.title} leaf`), 'attached'), attachedTo: `${root.id}-child`, width: 320 },
   ];
-  return { schemaVersion: 2, id: 'resize-window', title: 'Resize window', revision: 0,
-    selectedPrimaryViewId: primary.id, selectedViewId: primary.id, views: [primary, ...children(primary), ...(primaryOnly ? [] : [dock, ...children(dock)])] };
+  const workspace: WorkspaceWindow = { schemaVersion: 2, id: 'resize-window', title: 'Resize window', revision: 0,
+    selectedPrimaryViewId: primary.id, selectedViewId: primary.id,
+    views: [primary, ...children(primary), ...(primaryOnly ? [] : [dock, ...children(dock)]), ...(withEmpty ? [createWindowView('empty', undefined, 'dock')] : [])] };
+  const selected = presentationFallback ? 'dock-child' : parameters.get('selected');
+  return selected ? applyWindowOperation(workspace, { type: 'view.select', viewId: selected }) : workspace;
 }
 function restore(): WorkspaceWindow {
   try { return JSON.parse(sessionStorage.getItem(storageKey) ?? 'null') ?? initialWindow(); }
@@ -44,6 +51,10 @@ const contentState: AgentReplicaState = { ...replicaState, timeline: {
   }],
 } };
 const sessionPresentation = withContent ? () => ({ state: contentState }) : undefined;
+const globalControls = <span data-pane-selection-ignore>
+  <button type="button" aria-label="Global View">View</button>
+  <button type="button" aria-label="Global sidebar">Sidebar</button>
+</span>;
 // Layout exercises real Session Views without opening native sessions or network connections.
 const transport = {
   onDiagnostic: () => () => {}, onProtocolMessage: () => () => {},
@@ -67,8 +78,10 @@ function Fixture() {
   }
   const primary = workspace.views.find(view => view.id === 'primary')!;
   const dock = workspace.views.find(view => view.id === 'dock')!;
+  const empty = workspace.views.find(view => view.id === 'empty');
   return <WorkspaceReady.Provider value={false}>
     <WindowLayoutContext.Provider value={{ window: workspace, readWindow: () => latest.current, operate }}>
+      <WindowPresentationContext.Provider value={compact && presentationFallback ? 'primary-child' : undefined}>
       <SessionDockProvider enabled={!compact}>
         <main className="lab-shell" style={{ display: 'flex', height: '100dvh', padding: 0 }}>
           <SessionDockRail compact={compact} primaryGroups={[{
@@ -76,17 +89,24 @@ function Fixture() {
             selected: true, collapsed: false,
             content: <SessionFamily target={primary.binding!} viewId={primary.id} compact={compact} active offline
               storageScope="family-resize" baseUrl="http://fixture.invalid" hostLabel="Fixture"
+              controls={selection && !compact ? globalControls : undefined}
               transport={transport} draftStore={drafts} onAdditionalWidthChange={setAdditionalWidth} sessionPresentation={sessionPresentation} />,
           }]}
             onSelectPrimaryGroup={viewId => operate({ type: 'view.select', viewId })}
             onResizePrimaryGroup={(viewId, width) => operate({ type: 'view.resize', viewId, width })} />
           {dock ? <SessionWindow entry={{ id: dock.id, target: dock.binding }} baseUrl="http://fixture.invalid" visible={!compact}
             compact={compact} hostLabel="Fixture" offline transport={transport} draftStore={drafts}
+            selected={workspace.selectedViewId === dock.id}
             sessionPresentation={sessionPresentation}
             navigation={() => ({ childrenFor: () => [], resolveSessionLink: () => undefined })}
             onFocus={() => operate({ type: 'view.select', viewId: dock.id })} onClose={() => {}} /> : null}
+          {empty ? <SessionWindow entry={{ id: empty.id }} baseUrl="http://fixture.invalid" visible={!compact}
+            compact={compact} hostLabel="Fixture" offline transport={transport} draftStore={drafts}
+            selected={workspace.selectedViewId === empty.id} navigation={() => ({ childrenFor: () => [], resolveSessionLink: () => undefined })}
+            onFocus={() => operate({ type: 'view.select', viewId: empty.id })} onChangeSession={() => {}} onClose={() => {}} /> : null}
         </main>
       </SessionDockProvider>
+      </WindowPresentationContext.Provider>
     </WindowLayoutContext.Provider>
   </WorkspaceReady.Provider>;
 }

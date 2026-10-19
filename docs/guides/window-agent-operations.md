@@ -72,7 +72,11 @@ screens the panel stays inside the viewport and its content scrolls.
 
 ## Select a session view
 
-Select a session view directly by clicking its conversation or controls.
+Select a session view directly by clicking its title, conversation, or composer.
+A fine border and lightly tinted heading mark that exact pane, including an
+empty pane. Opening global controls or the sidebar retains the selected target.
+The Window can contain multiple top-level sessions; it has no unique main session.
+Parent and feature-source relationships remain independent of pane selection.
 There is no separate primary-group selector. **New session view** adds an
 independent empty dock with the same selection and layout controls as a bound
 view. Select it and choose a session from the sidebar. A primary group can be

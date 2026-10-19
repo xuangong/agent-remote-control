@@ -37,7 +37,8 @@ function accessDenied(error: unknown): boolean {
 
 /** Catalog observation stays active independently of floating-view visibility. */
 export function useTpmWork(service: TpmService | undefined, hosts: readonly TpmHost[], enabled: boolean,
-  attach: (session: SessionEntry) => Promise<OpenedSession>, presentationVisible = true, storageScope?: string, authority?: WindowLayoutAuthority) {
+  attach: (session: SessionEntry) => Promise<OpenedSession>, presentationVisible = true, storageScope?: string, authority?: WindowLayoutAuthority,
+  presentedSource?: { windowId: string; viewId: string }) {
   const storageKey = storageScope ? `agent-remote:recovery:${storageScope}:tpm-windows` : undefined;
   const shared = useRef(authority); shared.current = authority;
   const [restored] = useState(() => authority ? [] : readWindows(storageKey));
@@ -69,8 +70,8 @@ export function useTpmWork(service: TpmService | undefined, hosts: readonly TpmH
   const selectedFeature = authority?.window.views.find(view => view.id === authority.window.selectedViewId)?.feature;
   const selected = selectedFeature?.kind === 'tpm' && windows.includes(selectedFeature.id) ? selectedFeature.id : windows.at(-1);
   const expanded = windows.length > 0;
-  const latest = useRef({ catalogs: visibleCatalogs, sessions, details, hosts: stableHosts, attach, selected, expanded, enabled, presentationVisible, service });
-  latest.current = { catalogs: visibleCatalogs, sessions, details, hosts: stableHosts, attach, selected, expanded, enabled, presentationVisible, service };
+  const latest = useRef({ catalogs: visibleCatalogs, sessions, details, hosts: stableHosts, attach, selected, expanded, enabled, presentationVisible, service, presentedSource });
+  latest.current = { catalogs: visibleCatalogs, sessions, details, hosts: stableHosts, attach, selected, expanded, enabled, presentationVisible, service, presentedSource };
   const generation = useRef(0);
   const attachmentPromises = useRef(new Map<string, Promise<void>>());
   const attachmentTargets = useRef(new Map<string, string>());
@@ -209,7 +210,13 @@ export function useTpmWork(service: TpmService | undefined, hosts: readonly TpmH
     return promise;
   }, [find, authorized]);
   const focus = useCallback((key: string) => {
-    const current = shared.current; if (current) { const view = featureView(current.window, 'tpm', key); if (view && (view.collapsed || current.window.selectedViewId !== view.id)) current.operate({ type: 'view.select', viewId: view.id }); return; }
+    const current = shared.current;
+    if (current) {
+      const window = current.readWindow?.() ?? current.window;
+      const view = featureView(window, 'tpm', key);
+      if (view && (view.collapsed || window.selectedViewId !== view.id)) current.operate({ type: 'view.select', viewId: view.id });
+      return;
+    }
     setWindowOrder(current => !current.includes(key) || current.at(-1) === key ? current : [...current.filter(item => item !== key), key]);
   }, []);
   const open = useCallback(async (key: string, restoring = false, sourceView?: { windowId: string; viewId: string }) => {
@@ -218,7 +225,7 @@ export function useTpmWork(service: TpmService | undefined, hosts: readonly TpmH
     const requestedService = latest.current.service;
     if (!restoring && sourceView && !shared.current) return;
     if (!restoring && shared.current) {
-      const current = shared.current, main = tpmMainTarget(item);
+      const authority = shared.current, current = { ...authority, window: authority.readWindow?.() ?? authority.window }, main = tpmMainTarget(item);
       const sourceId = sourceView ? sourceView.windowId === current.window.id ? sourceView.viewId : undefined : current.window.selectedViewId;
       const source = current.window.views.find(view => view.id === sourceId && view.binding && view.binding.hostId === main.hostId && view.binding.providerId === main.providerId && view.binding.nativeSessionId === main.nativeSessionId);
       if (sourceView && !source) return;
@@ -290,8 +297,10 @@ export function useTpmWork(service: TpmService | undefined, hosts: readonly TpmH
   const canCreate = useCallback((main?: SessionEntry) => {
     if (!main || !service || !enabled) return false;
     const hostId = main.hostId ?? 'local';
-    const window = shared.current?.window;
-    const source = window?.views.find(view => view.id === window.selectedViewId)?.binding;
+    const window = shared.current?.readWindow?.() ?? shared.current?.window;
+    const presented = latest.current.presentedSource;
+    const sourceId = presented ? presented.windowId === window?.id ? presented.viewId : undefined : window?.selectedViewId;
+    const source = window?.views.find(view => view.id === sourceId)?.binding;
     if (window && (!source || source.hostId !== hostId || source.providerId !== main.providerId || source.nativeSessionId !== main.nativeSessionId)) return false;
     const host = latest.current.hosts.find(host => host.id === hostId);
     const catalog = latest.current.catalogs[hostId];
@@ -300,8 +309,8 @@ export function useTpmWork(service: TpmService | undefined, hosts: readonly TpmH
   const create = useCallback(async (main: SessionEntry, title?: string, requirement?: string) => {
     if (!canCreate(main) || !service) throw new Error('TPM creation is unavailable for this session.');
     if (mutation.current) throw new Error('Wait for the current TPM operation.');
-    const sourceWindow = shared.current?.window;
-    const sourceView = sourceWindow ? { windowId: sourceWindow.id, viewId: sourceWindow.selectedViewId } : undefined;
+    const sourceWindow = shared.current?.readWindow?.() ?? shared.current?.window;
+    const sourceView = sourceWindow ? { windowId: sourceWindow.id, viewId: latest.current.presentedSource?.viewId ?? sourceWindow.selectedViewId } : undefined;
     mutation.current = true; setBusy('create'); setError(undefined);
     try {
       const hostId = main.hostId ?? 'local';

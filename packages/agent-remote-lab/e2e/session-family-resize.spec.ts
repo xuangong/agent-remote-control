@@ -181,3 +181,100 @@ test('narrow presentation cancels a resize and removes handles without horizonta
   expect(await page.locator('[data-session-family-shell]').evaluateAll(elements => elements.map(element =>
     (element as HTMLElement).style.getPropertyValue('--lab-session-family-root-width')))).toEqual(['', '']);
 });
+
+async function expectSelectedPane(page: Page, name: string) {
+  await expect(page.locator('.lab-session-family-pane[data-selected="true"]')).toHaveCount(1);
+  await expect(pane(page, name)).toHaveAttribute('data-selected', 'true');
+  await expect(pane(page, name)).toHaveAttribute('aria-current', 'true');
+  await expect(page.locator('.lab-session-family-pane[aria-current="true"]')).toHaveCount(1);
+}
+
+test('pane selection follows title, message and composer interaction without highlighting the whole family', async ({ page, isMobile }, testInfo) => {
+  test.skip(isMobile, 'Wide layouts expose multiple session panes at once.');
+  test.setTimeout(30_000);
+  await page.setViewportSize({ width: 1760, height: 900 });
+  await page.goto(`${fixture}?selection`);
+  await expectSelectedPane(page, 'Primary');
+  await pane(page, 'Primary child').locator('.lab-session-heading .agent-session-title:visible').click();
+  await expectSelectedPane(page, 'Primary child');
+  await pane(page, 'Dock child').locator('.agent-markdown-table').click({ position: { x: 20, y: 20 } });
+  await expectSelectedPane(page, 'Dock child');
+  await pane(page, 'Primary').getByRole('textbox').click();
+  await expectSelectedPane(page, 'Primary');
+  await pane(page, 'Dock child').getByRole('textbox').focus();
+  await expectSelectedPane(page, 'Dock child');
+  const selected = pane(page, 'Dock child'), sibling = pane(page, 'Dock');
+  const treatment = await selected.evaluate(element => ({ border: getComputedStyle(element, '::before').borderTopStyle,
+    width: getComputedStyle(element, '::before').borderTopWidth }));
+  expect(treatment.border).toBe('solid');
+  expect(treatment.width).toBe('1px');
+  const inactiveHeading = await sibling.locator('.lab-session-heading').evaluate(element => getComputedStyle(element).backgroundColor);
+  await expect.poll(() => selected.locator('.lab-session-heading').evaluate(element => getComputedStyle(element).backgroundColor)).not.toBe(inactiveHeading);
+  for (const selector of ['.lab-primary-group', '.lab-session-dock-pane', '.lab-bindable-session-window']) {
+    for (const group of await page.locator(selector).all()) {
+      expect(await group.evaluate(element => getComputedStyle(element).outlineStyle), `${selector} must not outline the entire family`).toBe('none');
+      expect(await group.evaluate(element => getComputedStyle(element, '::before').borderTopStyle), `${selector} must not draw a second selection border`).toBe('none');
+    }
+  }
+  await selected.scrollIntoViewIfNeeded();
+  await page.screenshot({ path: testInfo.outputPath('selected-dock-child.png') });
+});
+
+test('pane selection survives global controls and page refresh', async ({ page, isMobile }) => {
+  test.skip(isMobile, 'Wide layouts expose global controls beside another selected pane.');
+  test.setTimeout(30_000);
+  await page.setViewportSize({ width: 1760, height: 900 });
+  await page.goto(`${fixture}?selection`);
+  await pane(page, 'Primary child').locator('.lab-session-heading .agent-session-title:visible').click();
+  await expectSelectedPane(page, 'Primary child');
+  for (const name of ['Global View', 'Global sidebar']) {
+    await page.getByRole('button', { name, exact: true }).click();
+    await expectSelectedPane(page, 'Primary child');
+  }
+  await page.reload();
+  await expectSelectedPane(page, 'Primary child');
+});
+
+test('empty pane selection uses the same visible treatment and clears the previous session target', async ({ page, isMobile }, testInfo) => {
+  test.skip(isMobile, 'Empty dock panes are part of the wide layout.');
+  test.setTimeout(30_000);
+  await page.setViewportSize({ width: 1760, height: 900 });
+  await page.goto(`${fixture}?selection&empty`);
+  await expectSelectedPane(page, 'Primary');
+  const empty = page.getByRole('region', { name: 'Session: Select session', exact: true });
+  await empty.getByRole('button', { name: 'Open sidebar', exact: true }).click();
+  await expect(empty).toHaveAttribute('aria-current', 'true');
+  await expect(page.locator('.lab-session-family-pane[data-selected="true"]')).toHaveCount(0);
+  await page.evaluate(() => { document.documentElement.dataset.inputModality = 'pointer'; });
+  await empty.focus();
+  const treatment = await empty.evaluate(element => ({ border: getComputedStyle(element, '::before').borderTopStyle,
+    width: getComputedStyle(element, '::before').borderTopWidth }));
+  expect(treatment.border).toBe('solid');
+  expect(treatment.width).toBe('1px');
+  await expect.poll(() => empty.locator('header').evaluate(element => getComputedStyle(element).backgroundColor)).not.toBe('rgba(0, 0, 0, 0)');
+  await page.screenshot({ path: testInfo.outputPath('selected-empty-pane.png') });
+});
+
+test('narrow pane selection follows the foreground child and its parent navigation', async ({ page }, testInfo) => {
+  test.setTimeout(30_000);
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto(`${fixture}?selection&selected=primary-child`);
+  await expectSelectedPane(page, 'Primary child');
+  await expect(page.locator('.lab-session-family-pane:visible')).toHaveCount(1);
+  await pane(page, 'Primary child').getByRole('button', { name: 'Back to Primary', exact: true }).click();
+  await expectSelectedPane(page, 'Primary');
+  await expect(page.locator('.lab-session-family-pane:visible')).toHaveCount(1);
+  await page.reload();
+  await expectSelectedPane(page, 'Primary');
+  await page.screenshot({ path: testInfo.outputPath('selected-mobile-pane.png') });
+});
+
+test('narrow presentation selection can show its fallback without rewriting shared selection', async ({ page }) => {
+  test.setTimeout(30_000);
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto(`${fixture}?selection&presentation-fallback`);
+  await expectSelectedPane(page, 'Primary child');
+  await expect(page.locator('.lab-session-family-pane:visible')).toHaveCount(1);
+  await page.setViewportSize({ width: 1760, height: 900 });
+  await expectSelectedPane(page, 'Dock child');
+});

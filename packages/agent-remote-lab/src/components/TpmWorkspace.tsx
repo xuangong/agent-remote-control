@@ -13,6 +13,8 @@ import { sessionKey } from '../session-tree.js';
 import { tpmMainTarget } from '../tpm-main-sessions.js';
 import { SessionDescriptionsContext } from '../session-description-context.js';
 import { describeSession } from '../session-description.js';
+import { useWindowLayout, WindowPresentationContext } from '../window-workspace-context.js';
+import { featureView } from '../window-feature-views.js';
 import { LabWorkbench } from './LabWorkbench.js';
 import { SessionViewPlacement } from './SessionDock.js';
 import { AskResize } from './AskResize.js';
@@ -37,6 +39,10 @@ function TpmWorkspaceContent({ item, mainTitle, session, replica, visible, stora
   onResolve(intentId: string, resolution: 'accepted' | 'rejected', nativeSessionId?: string): Promise<unknown>; onRetry(): void;
 }) {
   const descriptions = useContext(SessionDescriptionsContext);
+  const shared = useWindowLayout();
+  const presentedViewId = useContext(WindowPresentationContext) ?? shared?.window.selectedViewId;
+  const sharedView = shared && featureView(shared.window, 'tpm', item.key);
+  const selected = !!sharedView && sharedView.id === presentedViewId;
   const panel = useRef<HTMLElement>(null);
   const returnFocus = useRef<HTMLElement | null>(null);
   const [documentVisible, setDocumentVisible] = useState(false);
@@ -103,7 +109,8 @@ function TpmWorkspaceContent({ item, mainTitle, session, replica, visible, stora
   const creationUnresolved = work.creationStatus === 'unknown' || work.creationStatus === 'abandoned';
   const archiveLabel = work.archived ? 'Restore TPM session' : work.phase === 'completed' ? 'Archive TPM session' : 'Stop and archive TPM session';
   return <SessionAttributions description={description} onNavigate={descriptions?.navigate ?? onOpenMain}>{({ toggle, details }) => <div className="lab-ask-viewport lab-tpm-viewport" style={{ zIndex: layer }} hidden={!visible}>
-    <section ref={panel} className="lab-ask-window lab-tpm-window" role="dialog" aria-label={`TPM: ${work.title}`} aria-modal="false" tabIndex={-1} onPointerDownCapture={onFocus} onFocusCapture={onFocus}>
+    <section ref={panel} className="lab-ask-window lab-tpm-window lab-session-pane-selection" role="dialog" aria-label={`TPM: ${work.title}`} aria-modal="false" tabIndex={-1}
+      data-view-id={sharedView?.id} data-selected={selected || undefined} aria-current={selected || undefined} onPointerDownCapture={onFocus} onFocusCapture={onFocus}>
       <header className="lab-ask-heading lab-tpm-heading"><div><span className="lab-tpm-eyebrow">TPM · {item.hostName}</span>{onRename ? <button ref={titleButton} type="button" className="lab-tpm-title-button" aria-label="Rename TPM session" title={work.title} disabled={!!unavailable || savingTitle} onClick={() => { setTitleDraft(work.title); setTitleError(undefined); setEditingTitle(true); }}><strong>{work.title}</strong><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" aria-hidden="true"><path d="m16 3 5 5-12 12-6 1 1-6ZM14 5l5 5" /></svg></button> : <strong title={work.title}>{work.title}</strong>}</div>
         <div className="lab-ask-controls">{toggle}{dockControls}<button type="button" disabled={!!unavailable} aria-label={archiveLabel} title={archiveLabel} onClick={() => run(async () => {
           await onAction(work.archived ? 'unarchive' : 'archive');

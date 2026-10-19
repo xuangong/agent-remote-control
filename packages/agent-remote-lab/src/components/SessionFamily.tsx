@@ -197,9 +197,12 @@ export function SessionFamily(props: Props) {
   }
   return <div className="lab-session-family" ref={container} data-compact={compact || undefined} hidden={!active} aria-label={`${target.title} session family`}>
     {path.map((item, index) => {
+      const paneView = index === 0 ? rootView : attached[index - 1];
+      const selected = !!paneView && paneView.id === presentedViewId;
       const childSlot = index > 0 && attached[index - 1] ? sessionBridge?.slotForView(attached[index - 1]!.id) : undefined;
       const controls = index === 0 ? props.controls : <button type="button" aria-label={compact ? `Back to ${path[index - 1]!.title}` : 'Close subagent'} title={compact ? 'Back to parent session' : 'Close subagent view'} onClick={() => compact ? show(index - 1) : close(index)}>{compact ? '←' : '×'}</button>;
-      return <section key={index === 0 ? "root" : sessionKey(item)} className={`lab-session-family-pane lab-session-composition${shared && rootView?.placement === 'primary' ? index === 0 ? ' lab-primary-conversation' : ' lab-side-conversation' : ''}`} aria-label={item.title} hidden={compact && focus !== index || index > 0 && attached[index - 1]?.collapsed}
+      return <section key={index === 0 ? "root" : sessionKey(item)} className={`lab-session-family-pane lab-session-pane-selection lab-session-composition${shared && rootView?.placement === 'primary' ? index === 0 ? ' lab-primary-conversation' : ' lab-side-conversation' : ''}`} aria-label={item.title} hidden={compact && focus !== index || index > 0 && attached[index - 1]?.collapsed}
+        data-view-id={paneView?.id} data-selected={selected || undefined} aria-current={selected ? 'true' : undefined}
         style={compact ? undefined : index === 0 ? rootView ? { width: rootView.placement === 'float' ? '100%' : rootView.width, minWidth: rootView.placement === 'float' ? 0 : 240,
           flex: rootView.placement === 'float' ? 'none' : '0 0 var(--lab-session-family-root-width, auto)' } : undefined : { width: childWidth(item), minWidth: shared ? 240 : 320, flex: 'none' }}
         onPointerDownCapture={event => { if (!(event.target as Element).closest('[data-pane-selection-ignore],.lab-conversation-history,.lab-session-heading-actions-trigger,.lab-timeline-tools-toggle,.lab-session-main-minimize')) focusPane(index); }} onFocusCapture={event => { if (!(event.target as Element).closest('[data-pane-selection-ignore],.lab-conversation-history,.lab-session-heading-actions-trigger,.lab-timeline-tools-toggle,.lab-session-main-minimize')) focusPane(index); }}>

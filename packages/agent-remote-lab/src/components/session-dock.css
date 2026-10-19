@@ -39,7 +39,21 @@
 .lab-minimized-view-slot .lab-view-options-trigger > span { display: none; }
 
 .lab-session-dock-add { flex: 0 0 32px; align-self: flex-start; margin: 8px 4px; padding: 4px; border: 0; background: transparent; color: var(--obs-text-secondary); font-size: 22px; }
-.lab-bindable-session-window[data-active] { outline: 2px solid var(--obs-action); outline-offset: -2px; }
+/* Persistent selection is separate from keyboard focus and consumes no pane width. */
+.lab-session-pane-selection[data-selected]::before,
+.lab-primary-group[data-selected]:is([data-minimized], :not(:has(.lab-session-family)))::before {
+  content: ''; position: absolute; inset: 0; z-index: 40; pointer-events: none;
+  border: 1px solid color-mix(in oklab, var(--obs-action) 55%, var(--obs-border));
+  border-radius: inherit;
+}
+.lab-session-pane-selection :is(.lab-session-heading, .lab-ask-heading, .lab-empty-session-heading) { transition: background-color 140ms ease; }
+.lab-session-pane-selection[data-selected] :is(.lab-session-heading, .lab-ask-heading, .lab-empty-session-heading),
+.lab-primary-group[data-selected]:not(:has(.lab-session-family)) .lab-empty-session-heading {
+  background: color-mix(in oklab, var(--obs-action) 6%, var(--obs-surface));
+}
+@media (prefers-reduced-motion: reduce) {
+  .lab-session-pane-selection :is(.lab-session-heading, .lab-ask-heading, .lab-empty-session-heading) { transition: none; }
+}
 .lab-empty-session-heading { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 12px; border-bottom: 1px solid var(--obs-border); }
 .lab-empty-session-heading > div { display: flex; align-items: center; gap: 4px; }
 .lab-empty-session-body { display: flex; flex: 1; flex-direction: column; align-items: center; justify-content: center; gap: 8px; padding: 24px; color: var(--obs-text-secondary); text-align: center; }
@@ -47,14 +61,12 @@
 .lab-session-open-target strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--obs-text); font-weight: 500; }
 
 .lab-primary-group { position: relative; flex: none; min-width: 0; min-height: 0; height: 100%; background: var(--obs-surface); }
-.lab-primary-group[data-selected] { outline: 2px solid var(--obs-action); outline-offset: -2px; }
 .lab-primary-group[data-minimized] { display: flex; flex-direction: column; }
 .lab-primary-group-content { height: 100%; min-width: 0; min-height: 0; }
 .lab-primary-group-content[hidden], .lab-primary-group[hidden] { display: none; }
 .lab-primary-group-minimize { position: absolute; top: 4px; right: 6px; z-index: 52; width: 28px; height: 28px; padding: 0; border-color: transparent; background: var(--obs-surface); color: var(--obs-text-secondary); }
 .lab-session-dock-rail[data-compact] > .lab-primary-group { flex: 1 1 0; width: 100%; }
 .lab-session-dock-rail[data-compact] > .lab-primary-group::after { display: none; }
-.lab-session-dock-rail[data-compact] > .lab-primary-group[data-selected] { outline: none; }
 
 .lab-window-workbench:not([hidden]) { display: flex; flex-direction: column; min-height: 0; }
 .lab-window-workbench > .lab-ordinary-workspace:not([hidden]) { display: flex; flex: 1; flex-direction: column; min-height: 0; }

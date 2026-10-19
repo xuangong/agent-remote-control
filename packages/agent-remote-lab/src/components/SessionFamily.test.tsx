@@ -10,7 +10,7 @@ import { DraftStore } from '../draft-store.js';
 import { WorkspaceReady } from '../workspace-access.js';
 import { SessionFamily, type FamilySessionPresentationContext } from './SessionFamily.js';
 import { SessionDockProvider, SessionDockRail } from './SessionDock.js';
-import { WindowLayoutContext } from '../window-workspace-context.js';
+import { WindowLayoutContext, WindowPresentationContext } from '../window-workspace-context.js';
 import { applyWindowOperation, createWindowView, type WorkspaceWindow } from '@orchardworks/agent-remote-protocol';
 
 it('composes per-session presentation and footer from the native conversation and stable slot', async () => {
@@ -79,6 +79,7 @@ it.each(['pointer', 'keyboard'])('selects a child directly within its primary gr
     </SessionDockProvider></WindowLayoutContext.Provider></WorkspaceReady.Provider>;
   }
   const view = await render(<Harness />);
+  expect(view.querySelectorAll('.lab-session-family-pane[aria-current="true"]')).toHaveLength(0);
   const action = view.querySelector<HTMLButtonElement>('[data-session-action="child"]')!;
   await act(async () => {
     if (gesture === 'pointer') action.dispatchEvent(new MouseEvent('pointerdown', { button: 0, bubbles: true }));
@@ -87,13 +88,36 @@ it.each(['pointer', 'keyboard'])('selects a child directly within its primary gr
   expect(window.selectedViewId).toBe('child');
   expect(window.selectedPrimaryViewId).toBe('root');
   expect(selections).toEqual(['child']);
+  expect(view.querySelectorAll('.lab-session-family-pane[data-selected]')).toHaveLength(1);
+  expect(view.querySelector('.lab-session-family-pane[aria-current="true"]')?.getAttribute('aria-label')).toBe('Child');
   const global = view.querySelector<HTMLButtonElement>('[data-global-action="native"]')!;
   await act(async () => { global.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true })); global.focus(); });
   expect(window.selectedViewId).toBe('child');
   expect(selections).toEqual(['child']);
+  expect(view.querySelector('.lab-session-family-pane[aria-current="true"]')?.getAttribute('aria-label')).toBe('Child');
   await act(async () => view.querySelector('.lab-primary-group-content')!.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true })));
   expect(window.selectedViewId).toBe('root');
   expect(selections).toEqual(['child', 'root']);
+  expect(view.querySelector('.lab-session-family-pane[aria-current="true"]')?.getAttribute('aria-label')).toBe('Root');
+});
+
+it('marks the presented compact pane without changing the shared selection', async () => {
+  const session = { hostId: 'local', providerId: 'recorded', nativeSessionId: 'native', agentId: 'agent', title: 'Root' };
+  const root = createWindowView('root', session, 'primary');
+  const child = { ...createWindowView('child', { ...session, nativeSessionId: 'child', title: 'Child' }, 'attached'), attachedTo: root.id };
+  const operate = vi.fn();
+  const transport = { onDiagnostic: () => () => {}, onProtocolMessage: () => () => {}, connect: () => ({ close() {}, send() {} }) } as unknown as RemoteAgentTransport;
+  const view = await render(<WorkspaceReady.Provider value={false}><WindowLayoutContext.Provider value={{ window: {
+    schemaVersion: 2, id: 'window', title: 'Window', revision: 0, selectedPrimaryViewId: root.id, selectedViewId: child.id, views: [root, child],
+  }, operate }}><WindowPresentationContext.Provider value={root.id}>
+    <SessionFamily attachedSession={session} target={session} viewId={root.id} storageScope="family-presented-selection" baseUrl="http://fixture"
+      hostLabel="Local" compact active offline transport={transport} draftStore={new DraftStore('family-presented-selection')} />
+  </WindowPresentationContext.Provider></WindowLayoutContext.Provider></WorkspaceReady.Provider>);
+  const selected = view.querySelector<HTMLElement>('.lab-session-family-pane[aria-current="true"]');
+  expect(selected?.getAttribute('aria-label')).toBe('Root');
+  expect(selected?.hidden).toBe(false);
+  expect(view.querySelectorAll('.lab-session-family-pane[data-selected]')).toHaveLength(1);
+  expect(operate).not.toHaveBeenCalled();
 });
 
 

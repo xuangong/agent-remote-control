@@ -1,5 +1,5 @@
 import { useBoundDraft, type DraftBinding } from '../draft-store.js';
-import { useCallback, useEffect, useLayoutEffect, useRef, useState, type RefObject, type ReactNode } from 'react';
+import { useCallback, useContext, useEffect, useLayoutEffect, useRef, useState, type RefObject, type ReactNode } from 'react';
 import type { AgentReplica, RemoteAgentTransport } from '@orchardworks/agent-remote-web';
 import type { SessionViewNavigationFactory } from '../session-view-navigation.js';
 import { isAskAttached, askParticipantKey, type AskEntry, type AskInput, type AskInputSender } from '../hooks/useAskConversations.js';
@@ -14,6 +14,7 @@ import { SessionViewPlacement } from './SessionDock.js';
 import { AskResize } from './AskResize.js';
 import type { ImageDraftBinding, ImageDraftRecipient } from '@orchardworks/agent-remote-web/browser';
 import type { DisplayPreferenceBinding } from '../hooks/useSessionDisplayPreferences.js';
+import { useWindowLayout, WindowPresentationContext } from '../window-workspace-context.js';
 interface AskStorageBindings { baseUrl?: string; viewId?: string; compact?: boolean; imageDraftBinding?: ImageDraftBinding; imageRecipient?: ImageDraftRecipient; displayBinding?: DisplayPreferenceBinding }
 
 export function AskConversation(props: Omit<Parameters<typeof AskConversationContent>[0], 'docked' | 'dockControls' | 'onAdditionalWidthChange'>) {
@@ -30,6 +31,9 @@ function AskConversationContent({ docked, dockControls, onAdditionalWidthChange,
   storageScope: string; triggerRef: RefObject<HTMLButtonElement>; entry: AskEntry; replica?: AgentReplica; transport: RemoteAgentTransport;
   draftBinding: DraftBinding; onClose(): void; onToggleEnabled(): void; onClean(): void; onRetry(): void; onSendInput(id: string, send: AskInputSender): void; onDiscardInput(id: string): void;
 }) {
+  const shared = useWindowLayout();
+  const presentedViewId = useContext(WindowPresentationContext) ?? shared?.window.selectedViewId;
+  const selected = !isAskAttached(entry) && !!storageBindings.viewId && storageBindings.viewId === presentedViewId;
   const panel = useRef<HTMLElement>(null);
   const returnFocus = useRef<HTMLElement | null>(null);
   const closingWithFocus = useRef(false);
@@ -71,7 +75,8 @@ function AskConversationContent({ docked, dockControls, onAdditionalWidthChange,
       {input.text}<button type="button" aria-label="Discard saved question" onClick={() => onDiscardInput(input.id)}>Discard</button>
     </div>)}</div> : null}
     {entry.error ? <div className="lab-ask-error" role="alert">{entry.error}<button type="button" disabled={busy} onClick={onRetry}>Retry</button></div> : null}</>;
-  return <div className="lab-ask-viewport"><section className="lab-ask-window" role="dialog" aria-label="Ask" aria-modal="false" tabIndex={-1} ref={panel}>
+  return <div className="lab-ask-viewport"><section className="lab-ask-window lab-session-pane-selection" role="dialog" aria-label="Ask" aria-modal="false" tabIndex={-1} ref={panel}
+    data-selected={selected || undefined} aria-current={selected ? 'true' : undefined}>
     {isAskAttached(entry) ? <AskChat key={askParticipantKey(entry.record!)} record={entry.record!} executionTarget={entry.executionTarget} inputs={entry.error ? undefined : entry.inputs} onSendInput={onSendInput} replica={replica} transport={transport}
       storageScope={storageScope} navigation={navigation} onToggleEnabled={onToggleEnabled} busy={busy} draftBinding={draftBinding} tools={tools} notice={notice} onAdditionalWidthChange={onAdditionalWidthChange} {...storageBindings} /> : <>
       <header className="lab-ask-heading"><strong>Ask</strong>{tools}</header>

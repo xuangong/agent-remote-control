@@ -47,8 +47,9 @@ function WindowBody({ entry, baseUrl, visible, compact, hostLabel, offline, tran
   return <>
     <span ref={anchor} />
     <div className="lab-ask-viewport" hidden={!visible}>
-      <section ref={panel} className="lab-ask-window lab-bindable-session-window" aria-label={`Session: ${title}`}
+      <section ref={panel} className="lab-ask-window lab-bindable-session-window lab-session-pane-selection" aria-label={`Session: ${title}`}
         data-view-id={entry.id} data-active={selected || undefined} tabIndex={-1}
+        data-selected={!entry.target && selected || undefined} aria-current={!entry.target && selected ? 'true' : undefined}
         onPointerDownCapture={focusWindow} onFocusCapture={focusWindow}>
         {entry.target ? <SessionFamily storageScope={baseUrl} baseUrl={baseUrl} target={entry.target} hostLabel={hostLabel} offline={offline}
           viewId={shared ? entry.id : entry.slotId} sessionIntent={shared?.window.views.find(view => view.id === entry.id)?.binding?.sessionIntent}

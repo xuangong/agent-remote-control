@@ -1,7 +1,7 @@
 import { act, useRef, useState } from 'react';
 import { beforeEach, afterEach, expect, it, vi } from 'vitest';
 import type { RemoteAgentTransport } from '@orchardworks/agent-remote-web';
-import type { AgentSnapshot, HistoryPage } from '@orchardworks/agent-remote-protocol';
+import { createWindowView, type WorkspaceWindow, type AgentSnapshot, type HistoryPage } from '@orchardworks/agent-remote-protocol';
 import { replicaState } from '../test/fixtures.js';
 import { render } from '../test/setup.js';
 import { DraftStore } from '../draft-store.js';
@@ -9,12 +9,45 @@ import type { TpmItem } from '../hooks/useTpmWork.js';
 import { SessionDescriptionsContext } from '../session-description-context.js';
 import { describeSession } from '../session-description.js';
 import { TpmWorkspace } from './TpmWorkspace.js';
+import { WindowLayoutContext, WindowPresentationContext } from '../window-workspace-context.js';
 
 beforeEach(() => { vi.stubGlobal('ResizeObserver', class { observe() {} disconnect() {} }); });
 afterEach(() => { vi.unstubAllGlobals(); sessionStorage.clear(); });
 const item: TpmItem = { key: '["host","work"]', hostId: 'host', hostName: 'Host', online: true, unread: false,
   work: { id: 'work', revision: 1, title: 'Search', providerId: 'codex', mainNativeSessionId: 'main', phase: 'implementing', waiting: 'main_session', paused: false, summary: 'Awaiting changes', nextAction: 'Review result', document: '# Search specification\n\nFind matching items.', acceptance: '- [ ] Search works', evidence: ['Acceptance receipt'], createdAt: '2026-10-09T00:00:00Z', updatedAt: '2026-10-09T00:00:00Z', nextCheckAt: 100,
     outbox: [{ id: 'uncertain', target: 'main', status: 'unknown', purpose: 'implementation', text: 'Build search', createdAt: '2026-10-09T00:00:00Z' }] } };
+it('marks only the presented TPM pane when different works display the same native session', async () => {
+  const second = { ...item, key: '["host","second"]', work: { ...item.work, id: 'second', title: 'Review' } };
+  const binding = { hostId: 'host', providerId: 'codex', nativeSessionId: 'same-session', title: 'Shared native session' };
+  const document: WorkspaceWindow = { schemaVersion: 2, id: 'window', revision: 0, title: 'Window', selectedPrimaryViewId: 'main', selectedViewId: 'second-pane',
+    views: [createWindowView('main', undefined, 'primary'), ...[item, second].map((work, index) => ({
+      ...createWindowView(index ? 'second-pane' : 'first-pane', binding), feature: { kind: 'tpm', id: work.key, metadata: { hostId: work.hostId } },
+    }))] };
+  const drafts = new DraftStore('tpm-pane-selection');
+  let present!: (id: string) => void;
+  function Harness() {
+    const trigger = useRef<HTMLButtonElement>(null);
+    const [presented, setPresented] = useState('main'); present = setPresented;
+    return <WindowLayoutContext.Provider value={{ window: document, operate() {} }}><WindowPresentationContext.Provider value={presented}>
+      {[item, second].map(work => <TpmWorkspace key={work.key} item={work} visible storageScope="tpm-pane-selection" triggerRef={trigger}
+        transport={{} as RemoteAgentTransport} draftBinding={{ store: drafts, key: work.key }}
+        onClose={() => {}} onShowList={() => {}} onOpenMain={() => {}} onAction={async () => {}} onResolve={async () => {}} onRetry={() => {}} />)}
+    </WindowPresentationContext.Provider></WindowLayoutContext.Provider>;
+  }
+  const container = await render(<Harness />);
+  expect(container.querySelectorAll('.lab-tpm-window[aria-current="true"]')).toHaveLength(0);
+  await act(async () => present('first-pane'));
+  let selected = container.querySelector<HTMLElement>('.lab-tpm-window[aria-current="true"]');
+  expect(selected?.getAttribute('aria-label')).toBe('TPM: Search');
+  expect(selected?.getAttribute('data-view-id')).toBe('first-pane');
+  expect(selected?.classList.contains('lab-session-pane-selection')).toBe(true);
+  expect(container.querySelectorAll('.lab-tpm-window[data-selected]')).toHaveLength(1);
+  await act(async () => present('second-pane'));
+  selected = container.querySelector<HTMLElement>('.lab-tpm-window[aria-current="true"]');
+  expect(selected?.getAttribute('aria-label')).toBe('TPM: Review');
+  expect(container.querySelectorAll('.lab-tpm-window[data-selected]')).toHaveLength(1);
+});
+
 it('preserves a draft when hidden, minimizes without pausing, and resolves uncertainty only through explicit controls', async () => {
   const drafts = new DraftStore('tpm-workspace');
   const actions: string[] = [], resolutions: unknown[] = [];

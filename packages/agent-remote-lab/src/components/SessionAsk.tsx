@@ -32,7 +32,10 @@ export function SessionAsk({ source, ask, visible, canRestore, storageScope, syn
   const participant = entry.record ? askParticipantKey(entry.record) : undefined;
   const expanded = ask.isOpen(source, associationOwner);
   const { shown, selected } = resolveAskPresentation({ window: shared?.window, view: sharedView, visible, expanded, compact });
-  const focus = () => { if (shared && sharedView && !selected) shared.operate({ type: 'view.select', viewId: sharedView.id }); };
+  const focus = (event: { target: EventTarget }) => {
+    if (!shared || !sharedView || event.target instanceof Element && event.target.closest('.lab-session-family-pane')) return;
+    if ((shared.readWindow?.() ?? shared.window).selectedViewId !== sharedView.id) shared.operate({ type: 'view.select', viewId: sharedView.id });
+  };
   useEffect(() => {
     if (!shown || !canRestore) return;
     return ask.restore(source, synchronize, associationOwner);

@@ -7,6 +7,80 @@ import type { SessionEntry } from '../session-tree.js';
 import type { TpmHost } from './useTpmWork.js';
 import { applyWindowOperation, createWindowView, type WorkspaceWindow } from '@orchardworks/agent-remote-protocol';
 
+it('selects a TPM once when pointer and focus arrive before the next render', async () => {
+  const key = '["one","work"]';
+  const { agentId: _, ...binding } = main;
+  let document: WorkspaceWindow = { schemaVersion: 2, id: 'window', revision: 0, title: 'Window', selectedPrimaryViewId: 'main', selectedViewId: 'main',
+    views: [createWindowView('main', binding, 'primary'), { ...createWindowView('tpm', { ...binding, nativeSessionId: 'tpm', title: 'Deliver search' }),
+      feature: { kind: 'tpm', id: key, metadata: { hostId: 'one' } } }] };
+  const selections: string[] = [];
+  const service: TpmService = { tpmList: async () => ({ supported: true, supportedProviders: ['codex'], works: [work()] }),
+    tpmWork: async () => work(), tpmCreate: async () => work(), tpmAction: async () => work() };
+  let state!: ReturnType<typeof useTpmWork>;
+  function Harness() {
+    const [, refresh] = useState(0);
+    state = useTpmWork(service, [{ id: 'one', name: 'One', online: true }], true, async value => ({ ...value, agentId: 'tpm-agent' }), true, 'tpm-focus', {
+      window: document, readWindow: () => document,
+      operate(operation) { document = applyWindowOperation(document, operation); selections.push(document.selectedViewId); refresh(value => value + 1); },
+    });
+    return null;
+  }
+  await render(<Harness />);
+  await act(async () => { state.focus(key); state.focus(key); });
+  expect(document.selectedViewId).toBe('tpm');
+  expect(selections).toEqual(['tpm']);
+});
+
+it('creates a TPM for the presented source while a hidden Ask remains the shared selection', async () => {
+  const { agentId: _, ...binding } = main;
+  let document: WorkspaceWindow = { schemaVersion: 2, id: 'window', revision: 0, title: 'Window', selectedPrimaryViewId: 'front', selectedViewId: 'ask',
+    views: [createWindowView('front', binding, 'primary'), createWindowView('duplicate', binding),
+      { ...createWindowView('ask', { ...binding, nativeSessionId: 'ask' }, 'float'), feature: { kind: 'ask', id: 'ask' }, closeWith: 'front' }] };
+  let finish!: (value: TpmWork) => void, state!: ReturnType<typeof useTpmWork>, selectPresented!: (id: string) => void;
+  const requests: unknown[] = [];
+  const service: TpmService = { tpmList: async () => ({ supported: true, supportedProviders: ['codex'], works: [] }),
+    tpmWork: async () => work(), tpmCreate: (hostId, input) => { requests.push({ hostId, ...input }); return new Promise(resolve => { finish = resolve; }); }, tpmAction: async () => work() };
+  function Harness() {
+    const [presentedViewId, setPresented] = useState('front'); selectPresented = setPresented;
+    const [, refresh] = useState(0);
+    state = useTpmWork(service, [{ id: 'one', name: 'One', online: true }], true, async value => ({ ...value, agentId: 'tpm-agent' }), true, 'presented-source', {
+      window: document, readWindow: () => document,
+      operate(operation) { document = applyWindowOperation(document, operation); refresh(value => value + 1); },
+    }, { windowId: document.id, viewId: presentedViewId });
+    return null;
+  }
+  await render(<Harness />);
+  expect(state.canCreate(main)).toBe(true);
+  expect(state.canCreate({ ...main, nativeSessionId: 'ask' })).toBe(false);
+  let pending!: Promise<TpmWork>;
+  await act(async () => { pending = state.create(main); });
+  await act(async () => selectPresented('duplicate'));
+  await act(async () => { finish(work()); await pending; });
+  expect(requests).toEqual([{ hostId: 'one', providerId: 'codex', mainNativeSessionId: 'main', operationId: expect.any(String) }]);
+  expect(document.views.find(view => view.feature?.kind === 'tpm')?.closeWith).toBe('front');
+  expect(document.views.find(view => view.id === 'ask')?.binding?.nativeSessionId).toBe('ask');
+});
+
+it.each(['missing', 'another-window'])('rejects an unavailable presented source (%s) instead of creating for the shared selection', async invalid => {
+  const { agentId: _, ...binding } = main;
+  const document: WorkspaceWindow = { schemaVersion: 2, id: 'window', revision: 0, title: 'Window', selectedPrimaryViewId: 'main', selectedViewId: 'main',
+    views: [createWindowView('main', binding, 'primary')] };
+  const requests: unknown[] = [];
+  const service: TpmService = { tpmList: async () => ({ supported: true, supportedProviders: ['codex'], works: [] }),
+    tpmWork: async () => work(), tpmCreate: async input => { requests.push(input); return work(); }, tpmAction: async () => work() };
+  let state!: ReturnType<typeof useTpmWork>;
+  function Harness() {
+    state = useTpmWork(service, [{ id: 'one', name: 'One', online: true }], true, async value => ({ ...value, agentId: 'tpm-agent' }), true, 'missing-source', {
+      window: document, readWindow: () => document, operate() {},
+    }, { windowId: invalid === 'another-window' ? invalid : document.id, viewId: invalid === 'missing' ? invalid : 'main' });
+    return null;
+  }
+  await render(<Harness />);
+  expect(state.canCreate(main)).toBe(false);
+  await expect(state.create(main)).rejects.toThrow('unavailable');
+  expect(requests).toEqual([]);
+});
+
 it('keeps the selected source view when a TPM creation finishes after switching between duplicate main views', async () => {
   const binding = { hostId: main.hostId, providerId: main.providerId, nativeSessionId: main.nativeSessionId, title: main.title };
   let document: WorkspaceWindow = { schemaVersion: 2, id: 'window', revision: 0, title: 'Window', selectedPrimaryViewId: 'b', selectedViewId: 'b',

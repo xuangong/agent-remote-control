@@ -96,6 +96,28 @@ it('does not render a per-owner launcher when Ask is closed', async () => {
   expect(container.querySelector('[role="dialog"]')).toBeNull();
 });
 
+it.each(['pointer', 'keyboard'])('selects an Ask child directly through %s interaction', async interaction => {
+  const entry: AskEntry = { source, attached: true, restoreOnly: true };
+  const { ask, props } = fixture([entry]);
+  const { layout, view, child } = sharedFixture(ask);
+  const record = ask.store.prepare(referenceForkContext(source), { sourceNativeSessionId: source.nativeSessionId });
+  ask.store.bind(record.id, { ...sibling, nativeSessionId: 'ask-target', title: 'Ask' });
+  entry.record = ask.store.get(record.id); entry.attachedParticipant = askParticipantKey(entry.record);
+  const operate = vi.fn((operation: Parameters<typeof applyWindowOperation>[1]) => { layout.window = applyWindowOperation(layout.window, operation); });
+  const transport = { ...props.transport, connect: () => ({ close() {}, send() {} }), onDiagnostic: () => () => {}, onProtocolMessage: () => () => {} };
+  const container = await render(<WorkspaceReady.Provider value={false}><WindowLayoutContext.Provider value={{ ...layout, readWindow: () => layout.window, operate }}>
+    <SessionAsk {...props} source={source} replicaFor={() => new AgentReplica()} transport={transport} />
+  </WindowLayoutContext.Provider></WorkspaceReady.Provider>);
+  const pane = container.querySelectorAll('.lab-session-family-pane')[1]!;
+  await act(async () => {
+    if (interaction === 'pointer') pane.dispatchEvent(new Event('pointerdown', { bubbles: true }));
+    pane.dispatchEvent(new FocusEvent('focusin', { bubbles: true }));
+  });
+  expect(operate).toHaveBeenCalledExactlyOnceWith({ type: 'view.select', viewId: child.id });
+  expect(layout.window.selectedViewId).toBe(child.id);
+  expect(layout.window.selectedViewId).not.toBe(view.id);
+});
+
 it('keeps an expanded Ask available independently of its old source launcher preference', async () => {
   const { ask, props, restore } = fixture([{ source, restoring: true }]);
   ask.isEnabled = () => false;
@@ -118,9 +140,11 @@ it('preserves a desktop Ask and its draft when selection moves to another source
   }
   const container = await render(<Harness />);
   const dialog = container.querySelector('[role="dialog"]');
+  expect(dialog?.getAttribute('aria-current')).toBe('true');
   expect(container.querySelector<HTMLElement>('.lab-session-ask-surface')?.style.zIndex).toBe('2');
   await act(async () => selectOther());
   expect(container.querySelector('[role="dialog"]')).toBe(dialog);
+  expect(dialog?.hasAttribute('aria-current')).toBe(false);
   expect(container.querySelector<HTMLTextAreaElement>('[aria-label="Ask draft"]')?.value).toBe('Question about Main');
   expect(container.querySelector<HTMLElement>('.lab-session-ask-surface')?.style.zIndex).toBe('1');
   await act(async () => {

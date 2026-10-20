@@ -10,7 +10,7 @@ import { createSessionMigrations } from './session-migrations.js';
 import { PROTOCOL_VERSION, encodeSessionChannelServerMessage } from '@orchardworks/agent-remote-protocol';
 import { acceptSessionChannel } from '@orchardworks/agent-remote-protocol';
 import { createSessionStars, StarError } from './session-stars.js';
-import { unavailableRoute } from './session-errors.js';
+import { sessionSubscriptionRefusal, unavailableRoute } from './session-errors.js';
 import { createSecurityPolicy } from './security.js';
 import { authenticationFailure } from './auth-error.js';
 import { authenticationCallback } from './auth-callback.js';
@@ -796,10 +796,7 @@ export function createHostedRelay(options: HostedRelayOptions) {
           target.pathname = `${prefix}v1/sessions/${encodeURIComponent(agentId)}/events`;
           target.search = '';
           const prepared = await prepare(new Request(target, request));
-          if (!prepared || prepared instanceof Response) {
-            const status = prepared?.status ?? 404;
-            return { code: status >= 500 || status === 429 ? 1013 : 1008, reason: 'Session subscription is unavailable.' };
-          }
+          if (!prepared || prepared instanceof Response) return sessionSubscriptionRefusal(prepared);
           return prepared;
         }, route.searchParams.get('successions') === '1' ? { successions: 1 } : {});
         publishMigrations(socket, browserChannels.get(socket)!);

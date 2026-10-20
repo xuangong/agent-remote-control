@@ -41,10 +41,16 @@ export class RemoteOperationError extends Error {
   }
 }
 
+/** How a session subscription ended. Permanent means the Relay refused it, so retrying cannot succeed without user action. */
+export interface RemoteDisconnectReason {
+  readonly permanent: boolean;
+  readonly reason: string;
+}
+
 export interface RemoteTransportListener {
   onOpen(): void;
   onMessage(message: RemoteServerMessage): void;
-  onDisconnect(): void;
+  onDisconnect(closure?: RemoteDisconnectReason): void;
 }
 
 export interface RemoteConnection {

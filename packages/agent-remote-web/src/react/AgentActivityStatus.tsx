@@ -25,7 +25,8 @@ export function AgentActivityStatus({ state, sessionState, visible = true, disab
   const runtimeConnection = session.runtime;
   const runtimeUnavailable = runtimeConnection !== undefined && runtimeConnection.state !== 'connected';
   const unavailable = disabled || runtimeUnavailable;
-  const connectionLabel = session.connection === 'disconnected' ? 'Reconnecting'
+  const connectionLabel = session.connection === 'unavailable' ? 'Unavailable'
+    : session.connection === 'disconnected' ? 'Reconnecting'
     : session.connection === 'connecting' ? 'Opening session'
     : session.controlChecking ? 'Checking access'
     : session.connection === 'catching_up' ? 'Synchronizing'

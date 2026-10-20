@@ -256,6 +256,24 @@ it.each([204, 205, 304])('preserves a native RPC HTTP status %s that cannot carr
   expect(await result!.text()).toBe('');
 }, 10_000);
 
+it.each([
+  [409, { code: 'native_session_owned', nativeOwner: { kind: 'native_cli', generation: '54f9039d-d511-4a28-a373-8b5b53f63963', token: 'private' } }, 409, 'native_session_owned'],
+  [404, { code: 'native_session_unavailable' }, 404, 'native_session_unavailable'],
+  [503, { code: 'native_runtime_unavailable' }, 503, 'native_runtime_unavailable'],
+])('rejects a browser upgrade with the Host recovery refusal %i so clients can tell permanent from transient failure', async (hostStatus, hostBody, status, code) => {
+  const { broker, native } = await restoredFixture();
+  native.onMessage(data => {
+    const message = JSON.parse(data); if (message.type !== 'rpc_request') return;
+    native.send(JSON.stringify({ uplinkVersion: 2, type: 'rpc_response', requestId: message.requestId, status: hostStatus, body: JSON.stringify(hostBody) }));
+  });
+  const rejected = await broker.prepareUpgrade(new Request('https://relay.example/v1/sessions/agent/events', { headers: { origin: 'https://relay.example' } }));
+  expect(rejected).toBeInstanceOf(Response);
+  expect((rejected as Response).status).toBe(status);
+  const body = await (rejected as Response).json();
+  expect(body).toMatchObject({ code, error: expect.any(String) });
+  expect(JSON.stringify(body)).not.toContain('private');
+}, 10_000);
+
 it('prepares a browser upgrade only after authorization and native binding recovery complete', async () => {
   const { broker, native } = await restoredFixture();
   const request = () => new Request('https://relay.example/v1/sessions/agent/events', { headers: { origin: 'https://relay.example' } });
@@ -320,7 +338,8 @@ it('returns an explicit rejection when native recovery fails and leaves unowned 
   });
   const rejected = await broker.prepareUpgrade(new Request('https://relay.example/v1/sessions/agent/events', { headers: { origin: 'https://relay.example' } }));
   expect(rejected).toBeInstanceOf(Response);
-  expect((rejected as Response).status).toBe(503);
+  expect((rejected as Response).status).toBe(409);
+  expect(await (rejected as Response).json()).toMatchObject({ code: 'session_attach_failed' });
   expect(await broker.handleRequest(new Request('https://relay.example/health'))).toBeUndefined();
   expect(await broker.prepareUpgrade(new Request('https://relay.example/v1/sessions/unowned/events'))).toBeUndefined();
 }, 10_000);

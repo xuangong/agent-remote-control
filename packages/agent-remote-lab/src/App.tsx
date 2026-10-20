@@ -2505,6 +2505,7 @@ function sessionStatusLabel(status: RemoteSessionStatus): string {
     case 'connecting': return 'Opening session';
     case 'catching_up': return 'Synchronizing';
     case 'disconnected': return 'Reconnecting';
+    case 'unavailable': return 'Unavailable';
     case 'ready': return 'Ready';
     case 'idle': return 'Ready';
   }

@@ -12,7 +12,7 @@ export interface SessionRecording {
   warnings: string[];
   events: { at: number; record: DebuggerRecord }[];
 }
-const statuses = ['idle', 'connecting', 'catching_up', 'ready', 'disconnected'];
+const statuses = ['idle', 'connecting', 'catching_up', 'ready', 'disconnected', 'unavailable'];
 const object = (value: unknown): value is Record<string, unknown> => !!value && typeof value === 'object' && !Array.isArray(value);
 const text = (value: unknown): value is string => typeof value === 'string' && value.length > 0;
 const position = (value: unknown): value is number => Number.isSafeInteger(value) && Number(value) >= 0;

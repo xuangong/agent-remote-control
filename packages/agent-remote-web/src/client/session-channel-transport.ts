@@ -8,7 +8,7 @@ import {
 import type { WebSocketLike } from './http-websocket-transport.js';
 import { watchPageResume } from './page-resume.js';
 import type {
-  RemoteConnection, RemoteProtocolObservation, RemoteTransportDiagnostic, RemoteTransportListener,
+  RemoteConnection, RemoteDisconnectReason, RemoteProtocolObservation, RemoteTransportDiagnostic, RemoteTransportListener,
 } from './transport.js';
 
 type Mode = 'session' | 'activity';
@@ -205,7 +205,7 @@ export class SessionChannelPool {
       } else {
         const subscription = channel.subscriptions.get(frame.subscriptionId);
         if (!subscription?.active) return;
-        if (frame.type === 'closed') this.disconnect(subscription);
+        if (frame.type === 'closed') this.disconnect(subscription, { permanent: frame.code === 1008, reason: frame.reason });
         else {
           this.observe('inbound', frame.message);
           subscription.listener.onMessage(frame.message);
@@ -358,10 +358,10 @@ export class SessionChannelPool {
     }
   }
 
-  private disconnect(subscription: Subscription): void {
+  private disconnect(subscription: Subscription, closure?: RemoteDisconnectReason): void {
     if (!subscription.active) return;
     this.retire(subscription);
-    subscription.listener.onDisconnect();
+    subscription.listener.onDisconnect(closure);
   }
 
   private write(channel: Channel, message: SessionChannelClientMessage): void {

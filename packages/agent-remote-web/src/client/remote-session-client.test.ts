@@ -379,6 +379,29 @@ describe('RemoteSessionClient', () => {
     expect(replica.getState().timeline.nextSeq).toBe(5);
   });
 
+  it('stops reconnecting when the Relay permanently refuses the session and retries once the page resumes', async () => {
+    const transport = new FakeTransport();
+    const replica = new AgentReplica();
+    const client = new RemoteSessionClient('agent-one', transport, replica, { scheduleReconnect: scheduleReconnectImmediately });
+    const statuses: string[] = [];
+    client.subscribeStatus(status => statuses.push(status));
+    client.start();
+    const reason = 'This session is controlled by another native client. Take control to interrupt it and resume here.';
+    transport.disconnect({ permanent: true, reason });
+    await transport.settle();
+    expect(transport.connections).toBe(1);
+    expect(client.getSessionState().connection).toBe('unavailable');
+    expect(replica.getState().diagnostics.at(-1)).toEqual({ code: 'session_unavailable', message: reason, recoverable: false });
+    window.dispatchEvent(new Event('online'));
+    await transport.settle();
+    expect(transport.connections).toBe(2);
+    expect(statuses.at(-1)).toBe('connecting');
+    transport.disconnect();
+    await transport.settle();
+    expect(transport.connections).toBe(3);
+    client.stop();
+  });
+
   it('reconnects from the retained cursor and keeps the existing Timeline during Snapshot refresh', async () => {
     const transport = new FakeTransport();
     const replica = new AgentReplica();
@@ -1096,7 +1119,7 @@ class FakeTransport implements RemoteAgentTransport {
   onDiagnostic(): () => void { return () => undefined; }
   onProtocolMessage(): () => void { return () => undefined; }
   open(): void { this.listener?.onOpen(); }
-  disconnect(): void { this.listener?.onDisconnect(); }
+  disconnect(closure?: Parameters<RemoteTransportListener["onDisconnect"]>[0]): void { this.listener?.onDisconnect(closure); }
   emit(message: ServerMessage): void { this.listener?.onMessage(message); }
   resolveTimeline(value: HistoryPage): void {
     const pending = this.timelineRequestsPending.shift();

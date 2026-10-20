@@ -1784,7 +1784,11 @@ export function createHostBroker(options: HostBrokerOptions) {
     const binding = match && bindings.get(match[1]!);
     if (!binding || !sessionAllowed(binding, principal(context)) || !await permitted(context) || request.headers.get('origin') !== origin) return rejectUpgrade(403);
     let host: Host;
-    try { host = requireHost(binding.hostId); await recoverBinding(host, binding); } catch { return rejectUpgrade(503); }
+    try { host = requireHost(binding.hostId); await recoverBinding(host, binding); }
+    catch (error) {
+      // A Host refusal such as native ownership is permanent until the user acts; only unknown failures stay retryable.
+      return error instanceof BrokerError ? new Response(JSON.stringify({ code: error.code, error: error.message }), { status: error.status, headers: { 'content-type': 'application/json' } }) : rejectUpgrade(503);
+    }
     const subject = principal(context);
     const userStreams = () => subject === undefined ? 0 : options.userStreamCount?.(subject) ?? activeStreamCount(subject);
     if (host.streams.size >= 128 || userStreams() >= 32) return rejectUpgrade(429);

@@ -40,3 +40,14 @@ export function unavailableRoute(path: string): { code: string; error: string } 
     ? { code: 'session_binding_unavailable', error: 'This session link has no accessible remote binding. Open the session from the Host session list; if it is missing, check your Host access.' }
     : { code: 'route_not_found', error: 'This Remote Host route is unavailable. Refresh the page and check that the client and Relay versions are compatible.' };
 }
+
+/** A refused subscription closes with 1008 when retrying cannot help and 1013 when it may, carrying the public reason. */
+export async function sessionSubscriptionRefusal(response: Response | undefined): Promise<{ code: number; reason: string }> {
+  const status = response?.status ?? 404;
+  let reason = 'Session subscription is unavailable.';
+  try {
+    const error = (await response?.json() as { error?: unknown } | undefined)?.error;
+    if (typeof error === 'string' && error.trim()) reason = error.length > 240 ? `${error.slice(0, 237)}...` : error;
+  } catch { /* Bodyless and non-JSON refusals keep the generic reason. */ }
+  return { code: status >= 500 || status === 429 || status === 408 ? 1013 : 1008, reason };
+}

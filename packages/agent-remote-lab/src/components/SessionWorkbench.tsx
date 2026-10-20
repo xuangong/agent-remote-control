@@ -86,6 +86,7 @@ export function SessionWorkbench({ sessionDescription, onNavigateAttribution, to
   const loadingLabel = sessionStatus === 'catching_up' ? 'Loading conversation' : 'Opening session';
   const connectionFailure = sessionStatus === 'connecting'
     ? state?.diagnostics.find((diagnostic) => !diagnostic.recoverable)
+    : sessionStatus === 'unavailable' ? [...(state?.diagnostics ?? [])].reverse().find((diagnostic) => !diagnostic.recoverable)
     : undefined;
   const nativeFailure = state?.agent?.runtimeInfo.failure;
   const agentFailure = state?.agent?.status === 'failed'
@@ -115,6 +116,7 @@ export function SessionWorkbench({ sessionDescription, onNavigateAttribution, to
   const activity = session.activity;
   const activityLabel = state?.sessionControl?.nativeOwner ? (state.sessionControl.nativeOwner.kind === 'native_cli' ? 'Native CLI has control' : 'Native control transferred')
     : agentFailure ? 'Agent failed'
+    : sessionStatus === 'unavailable' ? 'Unavailable'
     : connectionFailure ? 'Connection failed'
     : sessionStatus === 'disconnected' ? 'Reconnecting'
     : sessionStatus === 'connecting' ? 'Opening session'
@@ -308,7 +310,7 @@ const WorkbenchTimeline = memo(function WorkbenchTimeline({ nativeTakeover, read
         <div className="lab-conversation-content" ref={scroll.contentRef}>
           {hasReplica ? <>
             {agentFailure ? <p className="lab-control-note" role="alert">Agent failed: {agentFailure}</p>
-              : connectionFailure ? <p className="lab-control-note" role="alert">Agent connection failed: {connectionFailure.message}</p>
+              : connectionFailure ? <p className="lab-control-note" role="alert">{sessionStatus === 'unavailable' ? connectionFailure.message : `Agent connection failed: ${connectionFailure.message}`}</p>
               : sessionStatus === 'disconnected' ? <p className="lab-control-note" role="alert">Timeline synchronization is reconnecting.</p> : null}
             {runtimeNotice ? <p className="lab-control-note" role="status">{runtimeNotice}</p> : null}
             <AgentTimeline

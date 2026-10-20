@@ -39,7 +39,8 @@ import {
   type RemoteServerMessage,
 } from './transport.js';
 
-export type RemoteSessionStatus = 'idle' | 'connecting' | 'catching_up' | 'ready' | 'disconnected';
+/** unavailable: the Relay refused the session (for example a native client owns it); it is not retried until the page resumes or the session reopens. */
+export type RemoteSessionStatus = 'idle' | 'connecting' | 'catching_up' | 'ready' | 'disconnected' | 'unavailable';
 
 export interface RemoteSessionClientOptions {
   /** Share across transport replacement within one authority; defaults to the transport lifetime. */
@@ -152,7 +153,7 @@ export class RemoteSessionClient {
       this.pageHidden = false;
       queueMicrotask(() => {
         if (this.pageHidden) return;
-        if (this.cancelReconnect) {
+        if (this.cancelReconnect || this.currentStatus === 'unavailable') {
           this.reconnectAttempt = 0;
           this.connect();
         } else if (this.currentStatus === 'connecting' || this.currentStatus === 'catching_up') this.armConnectionDeadline(this.generation);
@@ -194,9 +195,10 @@ export class RemoteSessionClient {
         this.send({ protocolVersion: PROTOCOL_VERSION, type: 'negotiate' });
       },
       onMessage: (message) => this.receive(generation, message),
-      onDisconnect: () => {
+      onDisconnect: (closure) => {
         if (generation !== this.generation) return;
-        this.restartDisconnected(generation);
+        if (closure?.permanent) this.refuseDisconnected(generation, closure.reason);
+        else this.restartDisconnected(generation);
       },
     });
   }
@@ -835,6 +837,15 @@ export class RemoteSessionClient {
     const nextGeneration = this.generation;
     this.setStatus('disconnected');
     this.scheduleRestart(nextGeneration);
+  }
+
+  private refuseDisconnected(generation: number, reason: string): void {
+    if (generation !== this.generation) return;
+    this.generation += 1;
+    this.rejectPendingOperations('session_unavailable', reason || 'The session is unavailable.', false);
+    this.stopConnection();
+    this.replica.reportDiagnostic('session_unavailable', reason || 'The session is unavailable.', false);
+    this.setStatus('unavailable');
   }
 
   private scheduleRestart(generation: number): void {

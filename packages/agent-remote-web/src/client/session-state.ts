@@ -30,7 +30,7 @@ export function remoteSessionState(replica: AgentReplicaState | undefined, conne
   return {
     connection, synchronized, activity,
     busy: activity === 'running' || activity === 'waiting', controlChecking, readOnly,
-    recovering: !readOnly && runtime?.state !== 'unavailable' && (!synchronized || controlChecking || runtime?.state === 'reconnecting' || runtime?.state === 'restoring'),
+    recovering: !readOnly && connection !== 'unavailable' && runtime?.state !== 'unavailable' && (!synchronized || controlChecking || runtime?.state === 'reconnecting' || runtime?.state === 'restoring'),
     runtime, control,
     operations: Object.fromEntries(operations.map(operation => [operation, sessionOperationAvailability(replica?.agent ?? null, operation,
       { synchronized, control: control?.access })])) as Record<SessionOperationKind, SessionOperationAvailability>,

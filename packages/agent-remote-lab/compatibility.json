@@ -13,6 +13,7 @@
         "pnpm-lock.yaml",
         "pnpm-workspace.yaml",
         "scripts",
+        "packages/.claude/.cc-writes",
         "packages/agent-host/.claude",
         "packages/agent-host/README.md",
         "packages/agent-host/package.json",
@@ -23,6 +24,7 @@
         "packages/agent-platform/package.json",
         "packages/agent-platform/src",
         "packages/agent-platform/tsconfig.json",
+        "packages/agent-provider-claude/.claude",
         "packages/agent-provider-claude/README.md",
         "packages/agent-provider-claude/package.json",
         "packages/agent-provider-claude/src",
@@ -126,7 +128,7 @@
         "packages/codex-daemon-client/src",
         "packages/codex-daemon-client/tsconfig.json"
       ],
-      "digest": "sha256:7840c94c950fe1f45fc4adccc076303ea20f5c9e9b5a546cd1197647da1fa3a7"
+      "digest": "sha256:a3bbf98a2c22732ac0c02c6239c87f7ef0029ad04731ee001496b7ae92d28c3b"
     }
   },
   "providers": [

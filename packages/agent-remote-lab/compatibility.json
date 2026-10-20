@@ -40,6 +40,7 @@
         "packages/agent-provider-copilot/src",
         "packages/agent-provider-copilot/tests",
         "packages/agent-provider-copilot/tsconfig.json",
+        "packages/agent-provider-copilot/tsconfig.test.json",
         "packages/agent-provider-dsh/fixtures",
         "packages/agent-provider-dsh/package.json",
         "packages/agent-provider-dsh/scripts",
@@ -49,6 +50,7 @@
         "packages/agent-provider-opencode/package.json",
         "packages/agent-provider-opencode/src",
         "packages/agent-provider-opencode/tsconfig.json",
+        "packages/agent-provider-opencode/tsconfig.test.json",
         "packages/agent-provider-sdk/README.md",
         "packages/agent-provider-sdk/package.json",
         "packages/agent-provider-sdk/src",
@@ -126,9 +128,10 @@
         "packages/codex-daemon-client/examples",
         "packages/codex-daemon-client/package.json",
         "packages/codex-daemon-client/src",
-        "packages/codex-daemon-client/tsconfig.json"
+        "packages/codex-daemon-client/tsconfig.json",
+        "packages/codex-daemon-client/tsconfig.test.json"
       ],
-      "digest": "sha256:a3bbf98a2c22732ac0c02c6239c87f7ef0029ad04731ee001496b7ae92d28c3b"
+      "digest": "sha256:49a5f93087c3e92960d8505c2168c4570e581814d59cc6ca599412fc2edcae84"
     }
   },
   "providers": [

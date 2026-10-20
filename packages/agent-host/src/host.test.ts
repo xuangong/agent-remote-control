@@ -1033,6 +1033,18 @@ it('routes workspace browsing over the uplink without disrupting heartbeats', as
 });
 
 
+it('reports Controller health with the update status over the uplink', async () => {
+  const broker = await uplinkBroker('health-host');
+  const host = createAgentHost({ registrations: [fixture('codex')], installationId: 'health-installation', name: 'Host',
+    uplink: { url: broker.url, remoteKey: 'test-key' }, onRelayDiagnostics: () => {}, health: { snapshot: () => ({ warnings: [{ code: 'uplink_unstable' }] }) } });
+  try {
+    await host.ready;
+    const result = await broker.rpc('GET', '/remote/controller-update');
+    expect(result.status).toBe(200);
+    expect(JSON.parse(result.body)).toEqual({ diagnosticDelivery: 3, health: { warnings: [{ code: 'uplink_unstable' }] } });
+  } finally { await host.close(); await broker.close(); }
+});
+
 it('reports a confirmed attach failure over a real uplink without classifying it as a mutation', async () => {
   const broker = await uplinkBroker('diagnostic-host');
   const registration = fixture('codex');

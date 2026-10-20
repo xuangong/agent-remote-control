@@ -3,6 +3,7 @@ import { compareControllerVersions, releaseCoversHost, PROTOCOL_VERSION, control
 import { watchPagePolling } from '@orchardworks/agent-remote-web';
 import type { HostPairingService, RemoteHost } from './HostPairing.js';
 import { hostDisplayLabel } from './host-environment.js';
+import { readControllerHealth, type ControllerHealthView } from '../controller-health-view.js';
 
 export function controllerUpdateCoverage(release: ControllerRelease | null, hosts: readonly RemoteHost[], bridge?: ControllerRelease | readonly ControllerRelease[]) {
   const owned = hosts.filter(host => host.access !== 'shared');
@@ -52,8 +53,10 @@ export function ControllerUpdates({ service, hosts }: { service: HostPairingServ
     return () => { retired = true; stop(); };
   }, [service]);
   const pending = Object.values(statuses).some(status => ['downloading', 'waiting', 'restarting'].includes(status.phase));
+  const health = Object.fromEntries(Object.entries(statuses).flatMap(([hostId, status]) => { const value = readControllerHealth(status); return value ? [[hostId, value] as const] : []; }));
+  const problems = Object.values(health).reduce((total, value) => total + value.warnings.filter(warning => warning.severity === 'warning').length, 0);
   useEffect(() => {
-    if (!expanded && !pending) return;
+    // A collapsed panel still checks occasionally so Controller problems surface in its heading.
     let retired = false, loading = false;
     const stop = watchPagePolling(async () => {
       if (loading || !service.controllerUpdate) return; loading = true;
@@ -64,7 +67,7 @@ export function ControllerUpdates({ service, hosts }: { service: HostPairingServ
         }));
         if (!retired && epoch === mutationEpoch.current) setStatuses(previous => ({ ...previous, ...Object.fromEntries(values.filter(value => value !== undefined)) }));
       } finally { loading = false; }
-    }, pending ? 3000 : 15000);
+    }, pending ? 3000 : expanded ? 15000 : 300000);
     return () => { retired = true; stop(); };
   }, [service, expanded, pending]);
   async function update(targets: readonly RemoteHost[]) {
@@ -91,7 +94,7 @@ export function ControllerUpdates({ service, hosts }: { service: HostPairingServ
   }
   if (!service.controllerRelease || !owned.length) return null;
   return <section className="lab-controller-updates" aria-label="Controller updates">
-    <button type="button" aria-expanded={expanded} onClick={() => setExpanded(value => !value)}>Controller updates{available ? ` · ${release!.version} available` : ''}</button>
+    <button type="button" aria-expanded={expanded} onClick={() => setExpanded(value => !value)}>Controller updates{available ? ` · ${release!.version} available` : ''}{problems ? ` · ${problems} ${problems === 1 ? 'problem' : 'problems'}` : ''}</button>
     {expanded ? <div>
       {error ? <p role="alert">{error}</p> : null}
       {bridgeError ? <p role="alert">{bridgeError}</p> : null}
@@ -109,6 +112,7 @@ export function ControllerUpdates({ service, hosts }: { service: HostPairingServ
           {status && status.phase !== 'idle' ? <small role="status">{completed ? 'Updated' : continueUpdate ? `Continue update to ${release?.version}` : status.phase === 'succeeded' && status.version !== release?.version ? 'Upgrade component installed; waiting for Host confirmation…' : labels[status.phase]}{!completed && status.message ? ` ${status.message}` : ''}</small> : null}
           {needsBridge ? <small>{target ? `Upgrade component: ${target.version}. Reconnect, then continue to ${release?.version}.` : 'A compatible upgrade component is required before this Host can update.'}</small> : null}
           {!host.controller?.remoteUpdate ? <small>Install the release launcher once on this Host to enable remote updates.</small> : null}
+          {health[host.id] ? <ControllerHealthDetails value={health[host.id]!} /> : null}
           {needs && eligible.includes(host) ? <button type="button" disabled={busy || (!!status && ['downloading', 'waiting', 'restarting'].includes(status.phase))} onClick={() => setConfirm([host.id])}>{status?.phase === 'failed' ? 'Retry update' : 'Update Host'}</button> : null}
         </li>;
       })}</ul>
@@ -120,4 +124,14 @@ export function ControllerUpdates({ service, hosts }: { service: HostPairingServ
       </div> : null}
     </div> : null}
   </section>;
+}
+
+function ControllerHealthDetails({ value }: { value: ControllerHealthView }) {
+  const versions = [...value.natives.map(native => `${native.providerId} ${native.version}`), ...(value.launcher?.managed ? [`launcher ${value.launcher.version ?? 'before 0.2.57'}`] : [])];
+  return <div className="lab-controller-health" role="group" aria-label="Controller health">
+    {value.warnings.length ? <ul>{value.warnings.map(warning => <li key={warning.code} data-severity={warning.severity}>
+      <small role={warning.severity === 'warning' ? 'alert' : undefined}>{warning.message}</small></li>)}</ul>
+      : <small>No Controller problems in the last hour.</small>}
+    {versions.length ? <small>{versions.join(' · ')}</small> : null}
+  </div>;
 }

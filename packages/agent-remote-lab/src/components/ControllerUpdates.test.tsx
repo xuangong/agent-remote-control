@@ -166,3 +166,20 @@ it('confirms the correct upgrade component for each legacy version in a mixed fl
   await act(async () => button(container, 'Confirm update').click());
   expect(requests).toEqual([['0.2.30', '0.2.32'], ['0.2.31', '0.2.33'], ['0.2.39', '0.2.40']]);
 });
+it('surfaces Controller health problems in the collapsed heading and lists them per Host', async () => {
+  const health = { warnings: [
+    { code: 'repeated_attach_failure', severity: 'warning', message: 'Browsers asked to reopen a session owned by a native CLI 80 times in the last hour.' },
+    { code: 'unverified_native_version', severity: 'notice', message: 'codex 0.163.0 is newer than 0.162.0.' },
+  ], natives: [{ providerId: 'codex', version: '0.163.0', verified: '0.162.0', newer: true }], launcher: { managed: true } };
+  const service: HostPairingService = { hosts: async () => ({ hosts: [host] }), pair: async () => { throw new Error('unused'); }, controllerRelease: async () => ({ release }),
+    controllerUpdate: async () => ({ phase: 'idle' as const, updatedAt: 0, health }) as never };
+  const container = await render(<ControllerUpdates service={service} hosts={[host]} />);
+  await act(async () => { await new Promise(resolve => setTimeout(resolve, 0)); });
+  expect(container.querySelector('button')!.textContent).toContain('1 problem');
+  await act(async () => container.querySelector('button')!.click());
+  const details = container.querySelector('[aria-label="Controller health"]')!;
+  expect(details.textContent).toContain('native CLI 80 times');
+  expect(details.textContent).toContain('codex 0.163.0 is newer');
+  expect(details.textContent).toContain('codex 0.163.0 · launcher before 0.2.57');
+  expect(details.querySelectorAll('[role="alert"]')).toHaveLength(1);
+});

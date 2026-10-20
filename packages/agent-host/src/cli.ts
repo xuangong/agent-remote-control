@@ -4,6 +4,7 @@ import {runClaudeCommand} from './claude-command.js';
 import { createDaemonMonitor } from './codex-daemon-monitor.js';
 import { restartCodexDaemon, supportsCodexDaemonControl } from './codex-daemon-runner.js';
 import { controllerIdentity, pruneControllerPackages, refreshInstalledLauncher, requestLauncherRestart } from './controller-update.js';
+import { createControllerHealth } from './controller-health.js';
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { spawn } from 'node:child_process';
 import { appendFileSync, realpathSync } from 'node:fs';
@@ -152,11 +153,19 @@ async function serveConfigured(daemon: boolean, diagnosticLog: DiagnosticLog | u
   const executionPolicy = await createHostExecutionPolicy(environment);
   if (executionPolicy) environment.AGENT_HOST_WORKSPACE = executionPolicy.defaultWorkspace;
   let daemonMonitor: ReturnType<typeof createDaemonMonitor> | undefined;
+  let healthRegistrations: () => Array<{ directory: { providerId: string }; nativeVersion?: string }> = () => [];
+  const health = createControllerHealth({ natives: () => healthRegistrations().map(item => ({ providerId: item.directory.providerId, version: item.nativeVersion })),
+    launcher: { managed: !!process.env.AGENT_HOST_LAUNCHER, ...(process.env.AGENT_HOST_LAUNCHER_VERSION ? { version: process.env.AGENT_HOST_LAUNCHER_VERSION } : {}) } });
   const providerDiscovery = await createHostProviderDiscovery({ stateDir, env: environment,
     onDiagnostic: (line) => {
       writeDiagnostic(line, diagnosticSecrets);
+      if (line.includes('"event":"native_process_exited"')) {
+        try { const exit = JSON.parse(line) as { providerId?: unknown; outcome?: unknown }; if (typeof exit.providerId === 'string' && typeof exit.outcome === 'string') health.nativeExit(exit.providerId, exit.outcome); }
+        catch { /* Health only counts well-formed exits. */ }
+      }
       if (line.includes('"outcome":"unavailable"') || line.includes('"phase":"initialize"')) void daemonMonitor?.sample('native_connection');
     } });
+  healthRegistrations = () => providerDiscovery.registrations;
   if (supportsCodexDaemonControl(environment)) {
     try {
       daemonMonitor = createDaemonMonitor(stateDir, environment.AGENT_REMOTE_CODEX_HOME ?? environment.CODEX_HOME ?? join(homedir(), '.codex'));
@@ -174,8 +183,11 @@ async function serveConfigured(daemon: boolean, diagnosticLog: DiagnosticLog | u
       protectedPorts: (environment.AGENT_HOST_PREVIEW_PROTECTED_PORTS ?? '').split(',').filter(Boolean).map(Number),
       diagnostic: event => { writeDiagnostic(JSON.stringify({ event, time: new Date().toISOString() }), diagnosticSecrets); } },
     onSessionLifecycleDiagnostic: diagnostic => { writeDiagnostic(JSON.stringify({ ...diagnostic, timestamp: new Date().toISOString(), pid: process.pid }), diagnosticSecrets); },
-    onRequestDiagnostic: diagnostic => { writeDiagnostic(JSON.stringify({ ...diagnostic, timestamp: new Date().toISOString(), pid: process.pid }), diagnosticSecrets); },
-    onDiagnostic: diagnostic => { writeDiagnostic(uplinkDiagnosticLine(diagnostic), diagnosticSecrets); },
+    onRequestDiagnostic: diagnostic => {
+      if (diagnostic.event === 'host_request_completed' && diagnostic.status !== undefined) health.request(diagnostic.operation, diagnostic.status, diagnostic.code);
+      writeDiagnostic(JSON.stringify({ ...diagnostic, timestamp: new Date().toISOString(), pid: process.pid }), diagnosticSecrets);
+    },
+    onDiagnostic: diagnostic => { if (diagnostic.event === 'disconnected') health.uplinkDrop(); writeDiagnostic(uplinkDiagnosticLine(diagnostic), diagnosticSecrets); }, health,
     onRelayDiagnostics: createRelayDiagnosticSink({ path: join(stateDir, 'relay-diagnostics.log') }).append,
     executionPolicy, uplink: { url: uplinkUrl(serverUrl), remoteKey: configuration.remoteKey, onCredential: credential => {
       diagnosticSecrets.add(credential); return saveIssuedCredential(stateDir, configuration, credential);

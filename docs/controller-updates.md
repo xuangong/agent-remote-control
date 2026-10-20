@@ -68,6 +68,12 @@ have been retired or upgraded; removing them is a separate rollout. Candidate
 startup rollback verifies registration, not every session feature, so validate both
 management reconnection and session behavior before releasing a new runtime.
 
+## Controller health
+
+Each Controller keeps one hour of failure signals and reports them with its update status, so **Controller updates** shows them without a separate Relay route. The heading counts problems even while collapsed; it checks every five minutes, and every 15 seconds while open. Problems are repeated session attach failures from the same cause (for example a session owned by a native CLI that browsers keep reopening), a native agent exiting unexpectedly five times within ten minutes, and six or more Relay connection drops within an hour. Notices list native agents newer than the versions verified with this Controller and a service launcher that predates launcher updates. Only counts and error codes are kept; request content is not.
+
+After an update commits, the Controller replaces the service launcher installed with the first package with the release launcher. It does so only after the release launcher reads this installation in its `_launcher-check` mode. The previous file remains as `launcher.js.previous`. The running launcher keeps its code until the service next restarts.
+
 ## Windows
 
 Windows x64 uses the same release discovery, owner confirmation, checksum verification,

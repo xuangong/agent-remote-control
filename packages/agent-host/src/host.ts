@@ -86,6 +86,8 @@ export interface AgentHostProviderRegistration {
   preservesWorkOnDisconnect?: boolean;
   /** Trust native permission controls without disabling Host workspace admission. */
   nativePermissionControl?: boolean;
+  /** Version reported by the native CLI this registration runs. */
+  nativeVersion?: string;
 }
 export interface AgentHostRuntimeOptions {
   /** Trusted process configuration; never read from a create request. */
@@ -145,6 +147,8 @@ export interface AgentHostOptions extends AgentHostRuntimeOptions {
   controller?: { identity: ControllerIdentity; stateDir: string; restart(version: string, clean?: boolean): void | Promise<void> };
   vscodeTunnel?: Omit<VscodeTunnelOptions, 'installationId'>;
   preview?: { stateDirectory: string; ttlMs?: number; protectedPorts?: number[]; diagnostic?(event: string): void };
+  /** Owner-visible Controller failure signals; see controller-health.ts. */
+  health?: { snapshot(): object };
   installationId: string;
   name: string;
   environment?: HostEnvironment;
@@ -203,7 +207,9 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
         try {
           if (request.method === 'GET') {
             if (!updater && !options.onRelayDiagnostics) return { status: 404, body: '' };
-            return { status: 200, body: JSON.stringify({ ...(await updater?.status()), ...(options.onRelayDiagnostics ? { diagnosticDelivery: 3 } : {}) }) };
+            // Health rides on the update status, which every Relay already forwards to the owner unchanged.
+            return { status: 200, body: JSON.stringify({ ...(await updater?.status()), ...(options.onRelayDiagnostics ? { diagnosticDelivery: 3 } : {}),
+              ...(options.health ? { health: options.health.snapshot() } : {}) }) };
           }
           if (!updater) return { status: 404, body: '' };
           const body = JSON.parse(request.body ?? '{}');

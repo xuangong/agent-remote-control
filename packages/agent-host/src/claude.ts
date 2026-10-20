@@ -36,5 +36,5 @@ export async function createClaudeHostRegistration(options: ClaudeHostRegistrati
   const ownership = {root: join(canonicalProfile, '.arc-session-owners'), onDiagnostic: (event: unknown) => options.onDiagnostic?.(JSON.stringify(event))};
   const scope = createHash('sha256').update(canonicalProfile).digest('hex');
   const references = new SessionReferenceStore(options.referenceDirectory ?? join(homedir(), '.agent-remote-control', 'session-references', 'claude', scope), 'claude');
-  return { nativePermissionControl: true, adapter: provider, directory: createClaudeSessionDirectory(provider, options.workspaces ?? [], ownership, references) };
+  return { nativePermissionControl: true, nativeVersion: `${match[1]}.${match[2]}.${match[3]}`, adapter: provider, directory: createClaudeSessionDirectory(provider, options.workspaces ?? [], ownership, references) };
 }

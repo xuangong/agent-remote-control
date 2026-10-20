@@ -9,5 +9,5 @@
   "files": ["dist", "README.md"],
   "engines": { "node": ">=22" },
   "scripts": { "build": "tsc", "typecheck": "tsc --noEmit", "test": "vitest run --testTimeout=10000 --hookTimeout=15000" },
-  "devDependencies": { "@types/node": "24.13.3", "typescript": "5.9.3", "vitest": "4.1.10" }
+  "devDependencies": { "@types/node": "24.13.3", "typescript": "5.9.3", "vitest": "4.1.11" }
 }

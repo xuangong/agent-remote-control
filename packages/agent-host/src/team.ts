@@ -50,6 +50,8 @@ export class TeamRuntime {
   private readonly resourceFiles: TeamResourceFiles;
   private ticking = false;
   private closed = false;
+  /** Recipients with a claim request in flight, before its receipt is durable. */
+  private readonly claiming = new Map<string, number>();
   private readonly timer: ReturnType<typeof setInterval>;
   constructor(private readonly directory: string, private readonly access: TeamRuntimeAccess, private readonly request: (call: TeamHostCall) => Promise<unknown>, tickMs = 3000) {
     this.resourceFiles = new TeamResourceFiles(directory, request);
@@ -83,6 +85,7 @@ export class TeamRuntime {
     return { controllerId: this.access.controllerId, providerId: seat.member.providerId, nativeSessionId: seat.member.nativeSessionId };
   }
   hasUnsettledRecipient(target: NativeSessionRef): boolean {
+    if (this.claiming.has(nativeSessionRefKey(target))) return true;
     return this.records.some(record => Object.values(record.receipts).some(receipt => {
       if (!['dispatching', 'unknown'].includes(receipt.status) && !(receipt.status === 'accepted' && !['started', 'handled'].includes(receipt.acceptance ?? ''))) return false;
       if (receipt.resolvedTarget) return nativeSessionRefKey(receipt.resolvedTarget) === nativeSessionRefKey(target);
@@ -249,10 +252,18 @@ export class TeamRuntime {
     const attachments = message.resources?.map((resource,index) => `[resource #${index+1}] ${JSON.stringify(resource)} (Use download_team_resource with resourceId to obtain a verified local file.)`).join('\n');
     const text = `[Team ${team.id}; message ${message.id}; from ${sender?.name ?? message.from}]\n${message.text}${attachments ? `\n\nAttached resources:\n${attachments}` : ''}`;
     try {
-      const claim = await this.request({ action: 'claim', teamId: team.id, memberId: record.seat.member.id, messageId: message.id, expectedNativeSessionId: target.nativeSessionId }) as TeamMessage;
-      if (!claim.resolvedTarget || nativeSessionRefKey(claim.resolvedTarget) !== nativeSessionRefKey(target)) throw new Error('Claim recipient could not be verified.');
-      receipt = { text: message.text, status: 'dispatching', resolvedTarget: structuredClone(claim.resolvedTarget) };
-      record.receipts[message.id] = receipt; await this.save();
+      // Succession must not prepare between the claim and its durable receipt, which then takes over as the fence.
+      const recipient = nativeSessionRefKey(target);
+      this.claiming.set(recipient, (this.claiming.get(recipient) ?? 0) + 1);
+      try {
+        const claim = await this.request({ action: 'claim', teamId: team.id, memberId: record.seat.member.id, messageId: message.id, expectedNativeSessionId: target.nativeSessionId }) as TeamMessage;
+        if (!claim.resolvedTarget || nativeSessionRefKey(claim.resolvedTarget) !== nativeSessionRefKey(target)) throw new Error('Claim recipient could not be verified.');
+        receipt = { text: message.text, status: 'dispatching', resolvedTarget: structuredClone(claim.resolvedTarget) };
+        record.receipts[message.id] = receipt; await this.save();
+      } finally {
+        const remaining = (this.claiming.get(recipient) ?? 1) - 1;
+        if (remaining > 0) this.claiming.set(recipient, remaining); else this.claiming.delete(recipient);
+      }
       const onAcceptance = (acceptance: AgentInputAcceptance) => {
         if (!receipt || !['started','queued','handled'].includes(acceptance.disposition) || this.closed) return;
         if (receipt.acceptance !== 'started' && receipt.acceptance !== 'handled') receipt.acceptance = acceptance.disposition;

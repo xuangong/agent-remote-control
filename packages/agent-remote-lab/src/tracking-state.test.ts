@@ -1,5 +1,5 @@
 import { expect, it } from 'vitest';
-import { nextObservation, readTrackedSessions, saveTrackedSessions, readTrackedSessionsChecked, patchTrackedSessions, trackingEditRevision } from './tracking-state.js';
+import { nextObservation, observationLabel, readTrackedSessions, saveTrackedSessions, readTrackedSessionsChecked, patchTrackedSessions, trackingEditRevision } from './tracking-state.js';
 const session = { hostId: 'host', providerId: 'codex', nativeSessionId: 'native', title: 'My session', starredAt: 1 };
 it('keeps tracking on this client and isolates different user namespaces', () => {
   saveTrackedSessions('alice', [session]);
@@ -139,4 +139,9 @@ it('suppresses quiet review completion while preserving input requests and visib
   expect(nextObservation(running, { connection: 'ready', activity: 'waiting', cursor, background }).attention).toBe('pending');
   const visible = nextObservation(quiet, { connection: 'ready', activity: 'idle', cursor: { ...cursor, seq: 3 }, background: { ...background, status: 'visible' } });
   expect(visible).toMatchObject({ changed: true, attention: 'idle' });
+});
+
+it('labels a refused tracking subscription as unavailable rather than a connection failure', () => {
+  expect(observationLabel({ connection: 'unavailable', error: 'A native CLI owns this session.' })).toBe('Unavailable');
+  expect(observationLabel({ connection: 'disconnected', error: 'Tracking could not connect.' })).toBe('Connection failed');
 });

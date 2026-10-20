@@ -189,12 +189,13 @@ describe('RemoteSessionClient', () => {
     client.stop();
   });
 
-  it('uses capped exponential reconnect delays through an injectable scheduler', () => {
+  it.each([[1, [10, 20, 25, 25]], [0, [5, 10, 12.5, 12.5]]])('uses capped exponential reconnect delays spread by jitter %s through an injectable scheduler', (jitter, delays) => {
     const transport = new FakeTransport();
     const scheduled: Array<{ delayMs: number; run: () => void; cancel: () => void }> = [];
     const client = new RemoteSessionClient('agent-one', transport, new AgentReplica(), {
       reconnectInitialDelayMs: 10,
       reconnectMaxDelayMs: 25,
+      reconnectJitter: () => jitter,
       scheduleReconnect(delayMs, reconnect) {
         let cancelled = false;
         const task = {
@@ -214,7 +215,7 @@ describe('RemoteSessionClient', () => {
       scheduled[attempt]?.run();
     }
 
-    expect(scheduled.map(({ delayMs }) => delayMs)).toEqual([10, 20, 25, 25]);
+    expect(scheduled.map(({ delayMs }) => delayMs)).toEqual(delays);
     expect(transport.connections).toBe(5);
     client.stop();
   });

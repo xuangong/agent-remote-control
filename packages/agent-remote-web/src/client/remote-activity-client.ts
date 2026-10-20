@@ -1,9 +1,11 @@
 import { watchPageResume } from './page-resume.js';
+import { equalJitter } from './reconnect-delay.js';
 import { PROTOCOL_VERSION, type TimelineCursor, type AgentStatus } from '@orchardworks/agent-remote-protocol';
 import type { RemoteAgentTransport, RemoteConnection, RemoteServerMessage } from './transport.js';
 
 export interface RemoteActivityState {
-  connection: 'connecting' | 'ready' | 'disconnected';
+  /** Unavailable means the Relay refused the subscription; it is checked again only when the page resumes. */
+  connection: 'connecting' | 'ready' | 'disconnected' | 'unavailable';
   activity?: AgentStatus;
   background?: import('@orchardworks/agent-remote-protocol').BackgroundActivity;
   cursor?: TimelineCursor;
@@ -19,10 +21,11 @@ export class RemoteActivityClient {
   private attempts = 0;
   private awaitingActivity = false;
   private pageHidden = false;
+  private refused = false;
   constructor(private readonly agentId: string, private readonly transport: RemoteAgentTransport,
-    private readonly changed: (state: RemoteActivityState) => void) {}
+    private readonly changed: (state: RemoteActivityState) => void, private readonly random: () => number = Math.random) {}
   start(): void {
-    this.stop(); this.attempts = 0;
+    this.stop(); this.attempts = 0; this.refused = false;
     this.pageHidden = typeof document !== 'undefined' && document.visibilityState === 'hidden';
     this.unwatchResume = watchPageResume(suspendedMs => {
       this.pageHidden = false;
@@ -30,7 +33,7 @@ export class RemoteActivityClient {
       if (suspendedMs === Infinity) this.clearDeadline();
       queueMicrotask(() => {
         if (this.pageHidden) return;
-        if (this.timer) {
+        if (this.timer || this.refused) {
           this.closeConnection(); this.attempts = 0; this.connect();
         } else this.armDeadline();
       });
@@ -61,7 +64,7 @@ export class RemoteActivityClient {
     this.deadline = setTimeout(() => this.failed(generation, 'The Host did not confirm activity tracking. Retrying…'), 20000);
   }
   private connect(): void {
-    this.timer = undefined;
+    this.timer = undefined; this.refused = false;
     const generation = ++this.generation;
     this.awaitingActivity = true;
     this.changed({ connection: 'connecting' });
@@ -70,7 +73,7 @@ export class RemoteActivityClient {
       this.connection = this.transport.connect(this.agentId, {
         onOpen: () => { if (generation === this.generation) this.connection?.send({ protocolVersion: PROTOCOL_VERSION, type: 'negotiate', observation: 'activity' }); },
         onMessage: message => { if (generation === this.generation) this.receive(generation, message); },
-        onDisconnect: () => this.failed(generation),
+        onDisconnect: closure => { if (closure?.permanent) this.refuse(generation, closure.reason); else this.failed(generation); },
       });
     } catch { this.failed(generation, 'Activity tracking could not connect. Retrying…'); }
   }
@@ -90,6 +93,11 @@ export class RemoteActivityClient {
     if (generation !== this.generation) return;
     this.closeConnection();
     this.changed({ connection: 'disconnected', ...(error ? { error } : {}) });
-    if (retry) this.timer = setTimeout(() => this.connect(), Math.min(1000 * 2 ** this.attempts++, 15000));
+    if (retry) this.timer = setTimeout(() => this.connect(), equalJitter(Math.min(1000 * 2 ** this.attempts++, 15000), this.random));
+  }
+  private refuse(generation: number, reason: string): void {
+    if (generation !== this.generation) return;
+    this.closeConnection(); this.refused = true;
+    this.changed({ connection: 'unavailable', error: reason || 'The session is unavailable.' });
   }
 }

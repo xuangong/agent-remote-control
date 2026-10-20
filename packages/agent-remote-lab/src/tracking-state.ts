@@ -102,6 +102,7 @@ export function patchTrackedSessions(scope: string, patches: readonly TrackedSes
 }
 export function observationLabel(value?: SessionObservation): string {
   if (!value) return 'Connecting';
+  if (value.connection === 'unavailable') return 'Unavailable';
   if (value.error) return 'Connection failed';
   if (value.connection !== 'ready') return value.connection === 'disconnected' ? 'Disconnected' : 'Connecting';
   return value.activity === 'starting' ? 'Starting' : value.activity === 'running' ? 'Working' : value.activity === 'waiting' ? 'Waiting' : value.activity === 'failed' ? 'Failed' : value.activity === 'closed' ? 'Closed' : 'Ready';

@@ -3,6 +3,7 @@ import { timelineEntryKey } from '../replica/timeline-entry-key.js';
 import { sessionHandoffScope, type SessionHandoffScope, type SessionHandoff, type SessionControlExtension, type SessionTakeControlOptions } from './session-control-extension.js';
 import { remoteSessionState, type RemoteSessionState } from './session-state.js';
 import { watchPageResume } from './page-resume.js';
+import { equalJitter } from './reconnect-delay.js';
 import { isSessionMutation, type SessionControlClientKind, type SessionControlMessage, type SessionControlState } from '@orchardworks/agent-remote-protocol';
 import {
   PROTOCOL_VERSION,
@@ -60,6 +61,8 @@ export interface RemoteSessionClientOptions {
   readonly reconnectInitialDelayMs?: number;
   readonly reconnectMaxDelayMs?: number;
   readonly scheduleReconnect?: (delayMs: number, reconnect: () => void) => () => void;
+  /** Random source in [0, 1] that spreads each reconnect delay over its upper half. */
+  readonly reconnectJitter?: () => number;
   readonly requestId?: () => string;
   readonly operationId?: () => string;
 }
@@ -103,6 +106,7 @@ export class RemoteSessionClient {
   private readonly reconnectInitialDelayMs: number;
   private readonly reconnectMaxDelayMs: number;
   private readonly scheduleReconnectTask: (delayMs: number, reconnect: () => void) => () => void;
+  private readonly reconnectJitter: () => number;
   private readonly createRequestId: () => string;
   private readonly createOperationId: () => string;
   private readonly statusListeners = new Set<(status: RemoteSessionStatus) => void>();
@@ -142,6 +146,7 @@ export class RemoteSessionClient {
     this.reconnectInitialDelayMs = options.reconnectInitialDelayMs ?? 250;
     this.reconnectMaxDelayMs = options.reconnectMaxDelayMs ?? 5_000;
     this.scheduleReconnectTask = options.scheduleReconnect ?? scheduleReconnect;
+    this.reconnectJitter = options.reconnectJitter ?? Math.random;
     this.createRequestId = options.requestId ?? (() => `remote-web-${++this.requestCounter}`);
     this.createOperationId = options.operationId ?? (() => crypto.randomUUID());
   }
@@ -851,7 +856,7 @@ export class RemoteSessionClient {
   private scheduleRestart(generation: number): void {
     if (generation !== this.generation || this.cancelReconnect) return;
     const exponent = Math.min(this.reconnectAttempt, 30);
-    const delayMs = Math.min(this.reconnectMaxDelayMs, this.reconnectInitialDelayMs * (2 ** exponent));
+    const delayMs = equalJitter(Math.min(this.reconnectMaxDelayMs, this.reconnectInitialDelayMs * (2 ** exponent)), this.reconnectJitter);
     this.reconnectAttempt += 1;
     this.cancelReconnect = this.scheduleReconnectTask(delayMs, () => {
       this.cancelReconnect = undefined;

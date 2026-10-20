@@ -39,6 +39,19 @@ it('shows an unsupported Host without falling back to content or retrying foreve
   client.stop();
 });
 
+it('spreads retries over the upper half of the backoff delay', async () => {
+  vi.useFakeTimers();
+  const connections: RemoteTransportListener[] = [];
+  const transport = { connect: (_id: string, listener: RemoteTransportListener) => { connections.push(listener); return { send() {}, close() {} }; } } as unknown as RemoteAgentTransport;
+  const client = new RemoteActivityClient('agent', transport, () => {}, () => 0);
+  client.start(); connections[0]!.onDisconnect();
+  await vi.advanceTimersByTimeAsync(499);
+  expect(connections).toHaveLength(1);
+  await vi.advanceTimersByTimeAsync(1);
+  expect(connections).toHaveLength(2);
+  client.stop();
+});
+
 it('passes the observed content cursor without inferring one when absent', () => {
   let listener!: RemoteTransportListener;
   const transport = { connect: (_id: string, next: RemoteTransportListener) => { listener = next; return { send: vi.fn(), close: vi.fn() }; } } as unknown as RemoteAgentTransport;
@@ -158,6 +171,27 @@ describe('activity confirmation across page suspension', () => {
     await vi.advanceTimersByTimeAsync(60_000);
     expect(h.connections).toHaveLength(2);
     expect(h.values.at(-1)).toEqual({ connection: 'ready', activity: 'running' });
+  });
+
+  it('stops retrying a permanently refused subscription and checks again when the page resumes', async () => {
+    const h = setup();
+    h.connections[0]!.onDisconnect({ permanent: true, reason: 'A native CLI owns this session.' });
+    expect(h.values.at(-1)).toEqual({ connection: 'unavailable', error: 'A native CLI owns this session.' });
+    await vi.advanceTimersByTimeAsync(10 * 60_000);
+    expect(h.connections).toHaveLength(1);
+    expect(vi.getTimerCount()).toBe(0);
+    h.hide(); h.show(); await Promise.resolve();
+    expect(h.connections).toHaveLength(2);
+    h.confirm();
+    expect(h.values.at(-1)).toEqual({ connection: 'ready', activity: 'running' });
+  });
+
+  it('keeps retrying a temporary closure', async () => {
+    const h = setup();
+    h.connections[0]!.onDisconnect({ permanent: false, reason: 'Host restarting' });
+    expect(h.values.at(-1)).toEqual({ connection: 'disconnected' });
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(h.connections).toHaveLength(2);
   });
 
   it.each(['hide', 'stop'])('does not rearm a queued recovery after %s', async action => {

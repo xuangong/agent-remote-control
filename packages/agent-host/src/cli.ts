@@ -218,7 +218,8 @@ async function serveConfigured(daemon: boolean, diagnosticLog: DiagnosticLog | u
   await atomicJson(stateFile, { ...(process.env.AGENT_HOST_LAUNCHER_PID ? { launcherPid: Number(process.env.AGENT_HOST_LAUNCHER_PID) } : {}), pid: process.pid, token, socket, startedAt: new Date().toISOString(), ...(supervisor ? { supervisor } : {}) });
   const shutdown = async () => {
     clearInterval(discoveryTimer);
-    await providerDiscovery.stop();
+    // An in-flight provider scan can wait on native startup for tens of seconds; it must not delay closing sessions.
+    await within(providerDiscovery.stop(), shutdownTimeout());
     daemonMonitor?.dispose();
     management.close();
     try { await within(host.close(), shutdownTimeout()); }

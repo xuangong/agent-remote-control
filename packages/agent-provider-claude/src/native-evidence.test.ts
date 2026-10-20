@@ -61,22 +61,33 @@ describe('Claude native evidence', () => {
     finally { await session.dispose(); }
   });
 
-  it('retains confirmed empty-session settings in its updated descriptor', async () => {
+  it.each(['acceptEdits', 'bypassPermissions'] as const)('retains confirmed empty-session settings with %s in its updated descriptor', async (mode) => {
     const f = fixture();
     const result = await f.provider.nativeEvidence.createEmpty({ sessionId: sid, cwd: process.cwd() });
     if (result.status !== 'created') throw new Error('Missing descriptor');
     const session = await f.provider.resumeSession(result.handle, {}, { initializeEmpty: true });
     await session.setSessionSetting!('reasoning_effort', 'high');
     await session.setSessionSetting!('model', 'sonnet');
-    await session.setSessionSetting!('permissions', 'acceptEdits');
+    await session.setSessionSetting!('permissions', mode);
     f.events.push({ type: 'user', uuid: randomUUID(), session_id: sid, parent_tool_use_id: null, message: { role: 'user', content: '<local-command-stdout>Set model to sonnet</local-command-stdout>' } });
     await tick();
     const saved = (await session.runtimeInfo()).persistence!;
     await session.dispose();
     const second = fixture();
     const reopened = await second.provider.resumeSession(saved, {}, { initializeEmpty: true });
-    try { expect(second.launches[0]).toMatchObject({ sessionId: sid, model: 'sonnet', effort: 'high', permissionMode: 'acceptEdits' }); }
+    try { expect(second.launches[0]).toMatchObject({ sessionId: sid, model: 'sonnet', effort: 'high', permissionMode: mode }); }
     finally { await reopened.dispose(); }
+  });
+
+  it.each(['plan', 'auto', 'nope'])('rejects an empty descriptor whose permission mode is %s', async (mode) => {
+    const f = fixture();
+    const result = await f.provider.nativeEvidence.createEmpty({ sessionId: sid, cwd: process.cwd() });
+    if (result.status !== 'created') throw new Error('Missing descriptor');
+    const descriptor = JSON.parse(result.handle.opaque);
+    descriptor.config.permissionMode = mode;
+    const tampered = { ...result.handle, opaque: JSON.stringify(descriptor) };
+    await expect(f.provider.resumeSession(tampered, {}, { initializeEmpty: true })).rejects.toMatchObject({ code: 'native_evidence_invalid' });
+    expect(f.query).not.toHaveBeenCalled();
   });
 
   it('inherits the latest confirmed effort override and removes an override cleared by native readback', async () => {

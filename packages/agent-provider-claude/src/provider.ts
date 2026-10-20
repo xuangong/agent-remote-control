@@ -3,6 +3,7 @@ import { realpath, stat } from 'node:fs/promises';
 import type { AgentHistoryPage, AgentHistoryQuery, AgentPersistenceHandle, AgentProviderAdapter, AgentSession, AgentSessionConfig, AgentSessionExtensions, AgentSessionResumeOptions, AgentProviderNativeEvidence } from '@orchardworks/agent-provider-sdk';
 import { createClaudeCatalog, type ClaudeCatalog } from './catalog.js';
 import { ClaudeShutdownError, ClaudeAgentSession, type ClaudeSessionConfig, type ClaudeSessionOptions } from './session.js';
+import { isResumableClaudePermissionMode } from './permission-modes.js';
 import { record } from './projector.js';
 import { claudeEmptyHandle, readClaudeEmptyDescriptor, claudeEvidenceReject, validClaudeId } from './native-evidence.js';
 
@@ -154,6 +155,6 @@ function readConfig(opaque: string): Partial<ClaudeSessionConfig> {
   const config: Partial<ClaudeSessionConfig> = {};
   for (const key of ['cwd', 'model', 'reasoningEffort', 'systemPrompt', 'instructions'] as const) if (typeof value[key] === 'string') config[key] = value[key];
   if (typeof value.planning === 'boolean') config.planning = value.planning;
-  if (typeof value.permissionMode === 'string' && ['default', 'acceptEdits', 'dontAsk'].includes(value.permissionMode)) config.permissionMode = value.permissionMode as ClaudeSessionConfig['permissionMode'];
+  if (isResumableClaudePermissionMode(value.permissionMode)) config.permissionMode = value.permissionMode;
   return config;
 }

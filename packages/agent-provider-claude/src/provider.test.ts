@@ -51,7 +51,7 @@ it('reserves a native parent during resume, releases failed loads, and keeps the
   try { expect(queries).toBe(3); } finally { await reopened.dispose(); }
 }, 10000);
 
-it('resumes the selected native permission mode and retains it across a saved planning session', async () => {
+it.each(['acceptEdits', 'bypassPermissions'] as const)('resumes %s and retains it across a saved planning session', async (mode) => {
   const launched: any[] = [];
   const modes: string[] = [];
   const provider = new ClaudeAgentProvider({ catalog: { list: async () => [], info: async () => ({ cwd: process.cwd() }) as any,
@@ -59,10 +59,10 @@ it('resumes the selected native permission mode and retains it across a saved pl
     launched.push(options);
     const events = new Channel<any>();
     return { [Symbol.asyncIterator]: () => events[Symbol.asyncIterator](), initializationResult: async () => ({ models: [] }),
-      setPermissionMode: async (mode: string) => { modes.push(mode); }, close: () => events.close() } as any;
+      setPermissionMode: async (next: string) => { modes.push(next); }, close: () => events.close() } as any;
   } });
   const first = await provider.createSession({ sessionId: 'proposed' });
-  await first.setSessionSetting!('permissions', 'acceptEdits');
+  await first.setSessionSetting!('permissions', mode);
   await first.setPlanning!(true);
   const handle = (await first.runtimeInfo()).persistence!;
   await first.dispose();
@@ -70,8 +70,22 @@ it('resumes the selected native permission mode and retains it across a saved pl
   try {
     expect(launched[1].permissionMode).toBe('plan');
     await resumed.setPlanning!(false);
-    expect(modes).toEqual(['acceptEdits', 'plan', 'acceptEdits']);
+    expect(modes).toEqual([mode, 'plan', mode]);
   } finally { await resumed.dispose(); }
+});
+
+it('ignores an unrecognized stored permission mode and resumes with the default', async () => {
+  const launched: any[] = [];
+  const provider = new ClaudeAgentProvider({ catalog: { list: async () => [], info: async () => ({ cwd: process.cwd() }) as any,
+    messages: async () => [], children: async () => [] }, query: ({ options }) => {
+    launched.push(options);
+    const events = new Channel<any>();
+    return { [Symbol.asyncIterator]: () => events[Symbol.asyncIterator](), initializationResult: async () => ({ models: [] }),
+      setPermissionMode: async () => {}, close: () => events.close() } as any;
+  } });
+  const handle = { providerId: 'claude', sessionId: '11111111-1111-4111-8111-111111111111', opaque: JSON.stringify({ cwd: process.cwd(), permissionMode: 'auto' }) };
+  const resumed = await provider.resumeSession(handle);
+  try { expect(launched[0].permissionMode).toBe('default'); } finally { await resumed.dispose(); }
 });
 
 it('resolves workspace by native ID even when the catalog list omits it', async () => {

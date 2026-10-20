@@ -7,6 +7,7 @@ import { AGENT_NATIVE_EVIDENCE_REASONS, AgentOperationRejectedError, parseAgentI
   type AgentInputMaterialization, type AgentInputPart, type AgentMessageOptions, type AgentNativeAuthorityScope,
   type AgentNativeEvidenceCode, type AgentNativeReadiness, type AgentNativeValidityToken, type AgentPersistenceHandle,
   type AgentPreparedTextInput, type AgentSessionNativeEvidence } from '@orchardworks/agent-provider-sdk';
+import { isResumableClaudePermissionMode } from './permission-modes.js';
 import type { ClaudeSessionConfig, ClaudeSessionOptions } from './session.js';
 
 export function claudeEvidenceReject(code: AgentNativeEvidenceCode): never { throw new AgentOperationRejectedError(code, AGENT_NATIVE_EVIDENCE_REASONS[code]); }
@@ -49,7 +50,7 @@ export function readClaudeEmptyDescriptor(handle: AgentPersistenceHandle, option
     || Object.keys(value.config).some(key => !fields.includes(key))) claudeEvidenceReject('native_evidence_invalid');
   for (const key of ['model', 'reasoningEffort', 'systemPrompt', 'instructions']) if (value.config[key] !== undefined && typeof value.config[key] !== 'string') claudeEvidenceReject('native_evidence_invalid');
   if (value.config.planning !== undefined && typeof value.config.planning !== 'boolean') claudeEvidenceReject('native_evidence_invalid');
-  if (value.config.permissionMode !== undefined && !['default', 'acceptEdits', 'dontAsk'].includes(value.config.permissionMode)) claudeEvidenceReject('native_evidence_invalid');
+  if (value.config.permissionMode !== undefined && !isResumableClaudePermissionMode(value.config.permissionMode)) claudeEvidenceReject('native_evidence_invalid');
   return value;
 }
 

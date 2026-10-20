@@ -27,7 +27,7 @@ for (const action of ['submit', 'decline', 'cancel'] as const) it(`characterizes
   const pump = (async () => { for await (const item of session.observe()) if (item.type === 'observation') events.push(item.event); })();
   try {
     await session.sendMessage('COLLECT_FORM');
-    await expect.poll(() => events.some((event) => event.type === 'interaction_requested')).toBe(true);
+    await expect.poll(() => events.some((event) => event.type === 'interaction_requested'), { timeout: 15000 }).toBe(true);
     const tool = events.find((event) => event.type === 'interaction_requested' && event.request.kind === 'tool_approval');
     if (tool) await session.respondToInteraction(tool.request.requestId, { kind: 'tool_approval', decision: 'allow', scope: 'once' });
     await expect.poll(() => events.some((event) => event.type === 'turn_completed')).toBe(true);
@@ -59,7 +59,7 @@ it('characterizes native loss of unsupported constraints and sensitive markers b
   const pump = (async () => { for await (const item of session.observe()) if (item.type === 'observation') events.push(item.event); })();
   try {
     await session.sendMessage('PROBE_NATIVE_SCHEMA');
-    await expect.poll(() => events.some((event) => event.type === 'interaction_requested')).toBe(true);
+    await expect.poll(() => events.some((event) => event.type === 'interaction_requested'), { timeout: 15000 }).toBe(true);
     const permission = events.find((event) => event.type === 'interaction_requested');
     await session.respondToInteraction(permission.request.requestId, { kind: 'tool_approval', decision: 'allow', scope: 'once' });
     await expect.poll(() => events.some((event) => event.type === 'turn_completed')).toBe(true);

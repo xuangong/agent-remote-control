@@ -1,11 +1,11 @@
 import { execFile } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { promisify } from 'node:util';
-import { mkdtemp, readFile, rm, writeFile, mkdir } from 'node:fs/promises';
+import { mkdtemp, readFile, readdir, rm, writeFile, mkdir } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, expect, it, vi } from 'vitest';
-import { controllerNpm, createControllerUpdater, installControllerRelease } from './controller-update.js';
+import { controllerNpm, createControllerUpdater, installControllerRelease, pruneControllerPackages } from './controller-update.js';
 const roots: string[] = [];
 afterEach(async () => { vi.useRealTimers(); for (const root of roots.splice(0)) await rm(root, { recursive: true, force: true }); });
 async function directory() { const root = await mkdtemp(join(tmpdir(), 'controller-update-')); roots.push(root); return root; }
@@ -169,4 +169,36 @@ it('installs across a session protocol change while retaining platform checks', 
     await expect.poll(() => restart.mock.calls.length).toBe(1);
     expect(restart).toHaveBeenCalledWith(release.version);
   } finally { await updater.close(); }
+});
+
+async function installed(stateDir: string, names: string[], saved?: string, status?: string) {
+  for (const name of names) await mkdir(join(stateDir, 'controller-updates/packages', name, 'node_modules'), { recursive: true });
+  if (saved) await writeFile(join(stateDir, 'controller-updates/current.json'), JSON.stringify({ version: saved }));
+  if (status) await writeFile(join(stateDir, 'controller-updates/status.json'), JSON.stringify({ phase: status }));
+  return async () => (await readdir(join(stateDir, 'controller-updates/packages'))).sort();
+}
+it('prunes releases older than the newest previous one once the running release is committed', async () => {
+  const stateDir = await directory();
+  const names = ['0.2.9', '0.2.10', '0.2.53', '0.2.54', '0.2.55', '0.2.56', '0.2.52.local-72e55b16', '0.2.57.staging-abc', '0.2.55.clean-backup'];
+  const remaining = await installed(stateDir, names, '0.2.55', 'succeeded');
+  expect((await pruneControllerPackages(stateDir, '0.2.55')).sort()).toEqual(['0.2.10', '0.2.53', '0.2.9']);
+  expect(await remaining()).toEqual(['0.2.52.local-72e55b16', '0.2.54', '0.2.55', '0.2.55.clean-backup', '0.2.56', '0.2.57.staging-abc']);
+  expect(await pruneControllerPackages(stateDir, '0.2.55')).toEqual([]);
+});
+it.each([
+  ['the launcher has not committed the running release', '0.2.54', 'succeeded'],
+  ['an update is in progress', '0.2.55', 'downloading'],
+  ['an activation is in progress', '0.2.55', 'restarting'],
+])('keeps every release while %s', async (_case, saved, status) => {
+  const stateDir = await directory();
+  const remaining = await installed(stateDir, ['0.2.53', '0.2.54', '0.2.55'], saved, status);
+  expect(await pruneControllerPackages(stateDir, '0.2.55')).toEqual([]);
+  expect(await remaining()).toEqual(['0.2.53', '0.2.54', '0.2.55']);
+});
+it('keeps every release while a clean reinstall journal awaits recovery', async () => {
+  const stateDir = await directory();
+  const remaining = await installed(stateDir, ['0.2.53', '0.2.54', '0.2.55'], '0.2.55', 'succeeded');
+  await writeFile(join(stateDir, 'controller-updates/reinstall.json'), JSON.stringify({ version: '0.2.55' }));
+  expect(await pruneControllerPackages(stateDir, '0.2.55')).toEqual([]);
+  expect(await remaining()).toEqual(['0.2.53', '0.2.54', '0.2.55']);
 });

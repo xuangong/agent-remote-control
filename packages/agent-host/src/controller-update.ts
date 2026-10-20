@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import { access, mkdir, mkdtemp, readFile, writeFile, rm, realpath } from 'node:fs/promises';
+import { access, mkdir, mkdtemp, readFile, readdir, writeFile, rm, realpath } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { compareControllerVersions, releaseCoversHost, type ControllerIdentity, type ControllerRelease, type ControllerUpdateStatus } from '@orchardworks/agent-remote-protocol';
@@ -71,6 +71,28 @@ export async function installControllerRelease(stateDir: string, release: Contro
     try { await rm(stage, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 }); } catch { /* A retry uses a fresh staging directory. */ }
     throw error;
   }
+}
+const releaseDirectory = /^(0|[1-9][0-9]{0,8})\.(0|[1-9][0-9]{0,8})\.(0|[1-9][0-9]{0,8})$/;
+/**
+ * Each installed release holds several hundred megabytes of native runtimes. Once the launcher has committed the
+ * running release, keep it, any newer installation, and the newest older release; remove the older ones.
+ */
+export async function pruneControllerPackages(stateDir: string, runningVersion: string): Promise<string[]> {
+  const updates = join(stateDir, 'controller-updates');
+  const read = async (name: string) => {
+    try { return JSON.parse(await readFile(join(updates, name), 'utf8')) as { version?: unknown; phase?: unknown }; }
+    catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return undefined; throw error; }
+  };
+  if ((await read('current.json'))?.version !== runningVersion || await read('reinstall.json')) return [];
+  if (['downloading', 'waiting', 'restarting'].includes((await read('status.json'))?.phase as string)) return [];
+  const older = (await readdir(join(updates, 'packages'))).filter(name => releaseDirectory.test(name) && compareControllerVersions(name, runningVersion) < 0)
+    .sort(compareControllerVersions);
+  const removed: string[] = [];
+  for (const version of older.slice(0, -1)) {
+    try { await rm(join(updates, 'packages', version), { recursive: true, force: true, maxRetries: 3, retryDelay: 200 }); removed.push(version); }
+    catch { /* A locked file keeps that release until the next start. */ }
+  }
+  return removed;
 }
 export function createControllerUpdater(options: {
   stateDir: string; identity: ControllerIdentity; release?: (version: string) => Promise<ControllerRelease>;

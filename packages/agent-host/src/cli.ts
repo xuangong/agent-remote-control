@@ -3,7 +3,7 @@ import { runWindowCommand } from './window-command.js';
 import {runClaudeCommand} from './claude-command.js';
 import { createDaemonMonitor } from './codex-daemon-monitor.js';
 import { restartCodexDaemon, supportsCodexDaemonControl } from './codex-daemon-runner.js';
-import { controllerIdentity, requestLauncherRestart } from './controller-update.js';
+import { controllerIdentity, pruneControllerPackages, requestLauncherRestart } from './controller-update.js';
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { spawn } from 'node:child_process';
 import { appendFileSync, realpathSync } from 'node:fs';
@@ -239,6 +239,13 @@ async function serveConfigured(daemon: boolean, diagnosticLog: DiagnosticLog | u
   process.once('SIGINT', stopDaemon);
   watchLauncherShutdown(stopDaemon);
   void registered.then(() => { process.send?.({ type: 'controller-ready', version: identity?.version }); }).catch(() => undefined);
+  if (identity?.remoteUpdate) {
+    // The launcher commits the running release after readiness; prune only once that is durable.
+    void registered.then(() => new Promise(resolve => setTimeout(resolve, 60_000).unref()))
+      .then(() => pruneControllerPackages(stateDir, identity.version))
+      .then(removed => { if (removed.length) writeDiagnostic(JSON.stringify({ event: 'controller_packages_pruned', versions: removed, timestamp: new Date().toISOString(), pid: process.pid }), diagnosticSecrets); })
+      .catch(() => undefined);
+  }
   await new Promise<void>(() => undefined);
 }
 

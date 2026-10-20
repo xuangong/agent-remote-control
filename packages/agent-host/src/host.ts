@@ -267,6 +267,9 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
   };
 }
 
+/** Browsers poll catalog revisions every few seconds; a full native listing can take seconds, so checks reuse one this recent. */
+const catalogRevisionMaxAgeMs = 15_000;
+
 function hasCurrentNativeEvidence(owner: Pick<AgentProviderAdapter | AgentSession, 'nativeEvidence'>): boolean {
   const evidence = owner.nativeEvidence?.availability(); return evidence?.status === 'configured' && evidence.version === 2;
 }
@@ -425,7 +428,7 @@ export function createAgentHostRuntime(options: AgentHostRuntimeOptions): AgentH
     uncertain: agent => { uncertainAgents.add(bindingFor(agent).agentId); },
   }, ...(options.inputImages ? { inputImageStore: new InputImageStore(options.inputImages) } : {}),
     ...(options.inputResources ? { inputResourceStore: new InputResourceStore(options.inputResources) } : {}) });
-  const catalogs = new Map(options.registrations.map(({ directory }) => [directory.providerId, new RemoteHostCatalog({ roots: directory.list })]));
+  const catalogs = new Map(options.registrations.map(({ directory }) => [directory.providerId, new RemoteHostCatalog({ roots: directory.list, revisionMaxAgeMs: catalogRevisionMaxAgeMs })]));
   const bindings = new SessionBindings();
   const pending = new Set<Promise<unknown>>();
   const idle = createIdleSessions({ graceMs: options.idleGraceMs, reconcileMs: options.idleReconcileMs });
@@ -1134,7 +1137,7 @@ export function createAgentHostRuntime(options: AgentHostRuntimeOptions): AgentH
       resumeSession: value.adapter.resumeSession.bind(value.adapter),
     });
     registrations.set(id, registration);
-    catalogs.set(id, new RemoteHostCatalog({ roots: registration.directory.list }));
+    catalogs.set(id, new RemoteHostCatalog({ roots: registration.directory.list, revisionMaxAgeMs: catalogRevisionMaxAgeMs }));
     bindHandoff(registration.directory);
     bindSourceReader(registration.directory);
     bindSourceReferenceAncestry(registration.directory);

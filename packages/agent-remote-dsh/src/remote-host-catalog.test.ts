@@ -119,6 +119,29 @@ describe('RemoteHostCatalog', () => {
     ]);
   });
 
+  it('answers revision checks from a recent listing and refreshes stale ones without waiting', async () => {
+    let roots = [summary('a')];
+    let now = 0, calls = 0, release: (() => void) | undefined;
+    const catalog = new RemoteHostCatalog({ now: () => now, revisionMaxAgeMs: 30_000, roots: async () => {
+      calls++;
+      if (release === undefined && calls > 1) await new Promise<void>(resolve => { release = resolve; });
+      return roots;
+    } });
+    const first = await catalog.revision();
+    expect(calls).toBe(1);
+    now = 29_999; roots = [summary('a', { title: 'Renamed' })];
+    expect(await catalog.revision()).toBe(first);
+    expect(calls).toBe(1);
+    now = 30_000;
+    expect(await catalog.revision()).toBe(first);
+    expect(calls).toBe(2);
+    expect(await catalog.revision()).toBe(first);
+    expect(calls).toBe(2);
+    release!();
+    await vi.waitFor(async () => expect(await catalog.revision()).not.toBe(first));
+    expect((await catalog.page()).items[0]!.title).toBe('Renamed');
+  });
+
   it('changes revision only when metadata or membership changes', async () => {
     let roots = [summary('a'), summary('b')];
     const catalog = new RemoteHostCatalog({ roots: () => roots });

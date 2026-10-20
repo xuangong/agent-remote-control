@@ -24,6 +24,8 @@ export interface RemoteHostCatalogOptions {
   viewTtlMs?: number;
   maxViews?: number;
   maxViewBytes?: number;
+  /** Revision checks reuse a listing this recent and refresh older ones in the background. Zero always lists first. */
+  revisionMaxAgeMs?: number;
 }
 
 export class RemoteHostCatalogError extends Error {
@@ -64,6 +66,8 @@ export class RemoteHostCatalog {
   private readonly viewTtlMs: number;
   private readonly maxViews: number;
   private readonly maxViewBytes: number;
+  private readonly revisionMaxAgeMs: number;
+  private listedAt: number | undefined;
   private entries = new Map<string, CatalogEntry>();
   private readonly views = new Map<string, CatalogView>();
   private retainedBytes = 0;
@@ -78,8 +82,12 @@ export class RemoteHostCatalog {
     this.viewTtlMs = options.viewTtlMs ?? 120_000;
     this.maxViews = options.maxViews ?? 16;
     this.maxViewBytes = options.maxViewBytes ?? 16 * 1024 * 1024;
+    this.revisionMaxAgeMs = options.revisionMaxAgeMs ?? 0;
     if (![this.viewTtlMs, this.maxViews, this.maxViewBytes].every((value) => Number.isSafeInteger(value) && value > 0)) {
       throw new RemoteHostCatalogError('invalid_request', 'Catalog limits must be positive safe integers.');
+    }
+    if (!Number.isSafeInteger(this.revisionMaxAgeMs) || this.revisionMaxAgeMs < 0) {
+      throw new RemoteHostCatalogError('invalid_request', 'Catalog revision age must be a non-negative safe integer.');
     }
   }
 
@@ -127,7 +135,8 @@ export class RemoteHostCatalog {
 
   async revision(): Promise<string> {
     this.assertActive();
-    await this.reconcile();
+    if (this.listedAt === undefined || this.revisionMaxAgeMs === 0) await this.reconcile();
+    else if (this.now() - this.listedAt >= this.revisionMaxAgeMs) void this.reconcile().catch(() => undefined);
     return this.currentRevision();
   }
 
@@ -179,6 +188,7 @@ export class RemoteHostCatalog {
     }
     if (changed || next.size !== this.entries.size) this.revisionNumber++;
     this.entries = next;
+    this.listedAt = this.now();
   }
 
   private readPage(view: CatalogView, offset: number): RemoteCatalogPage {

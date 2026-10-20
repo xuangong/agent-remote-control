@@ -457,7 +457,7 @@ function AppContent({
   const [compactLayout, setCompactLayout] = useState(compactLayoutRef.current);
   const closeContext = useCallback(() => { setContextOpen(false); setDesktopContextVisible(false); }, []);
 
-  const { hosts: remoteHosts, error: hostError, retry: retryHosts } = useRemoteHosts(hostClient, accessReady && directory !== undefined, (compactLayout ? contextOpen : desktopContextVisible) || status !== 'ready' || creationLocked, selectedHost.id);
+  const { hosts: remoteHosts, loaded: hostsLoaded, error: hostError, retry: retryHosts } = useRemoteHosts(hostClient, accessReady && directory !== undefined, (compactLayout ? contextOpen : desktopContextVisible) || status !== 'ready' || creationLocked, selectedHost.id);
   const currentHost = remoteHosts.find((host) => host.id === selectedHost.id);
   const availableProviders = selectedHost.id === 'local' ? providers : hostProviders(currentHost);
   const preferredProviderId = selectedHost.id === 'local' ? localProviderId : selectedHost.providerId;
@@ -604,9 +604,10 @@ function AppContent({
   const selectedHostOffline = selectedHost.id !== 'local' && remoteHosts.find((host) => host.id === selectedHost.id)?.online !== true;
   const selectedQuota = remoteHosts.find((host) => host.id === selectedHost.id)?.sessionQuota;
   const creationQuotaExhausted = selectedQuota !== undefined && selectedQuota.used >= selectedQuota.limit && !creationReservation.current;
-  const requestedHostUnavailable = requestedHostId && requestedHostId !== 'local' && !restoredHostSelection.current && !remoteHosts.some((host) => host.id === requestedHostId)
+  const requestedHostUnavailable = hostsLoaded && requestedHostId && requestedHostId !== 'local' && !restoredHostSelection.current && !remoteHosts.some((host) => host.id === requestedHostId)
     ? 'Requested Host is unavailable or is not shared with you. Retry Hosts or select another Host.' : undefined;
-  const creationUnavailableReason = requestedHostUnavailable ?? (selectedHostOffline ? 'This Host is offline. Reconnect it or select another Host.'
+  const creationUnavailableReason = requestedHostUnavailable ?? (selectedHost.id !== 'local' && !hostsLoaded && !hostError ? 'Loading Hosts…'
+    : selectedHostOffline ? 'This Host is offline. Reconnect it or select another Host.'
     : creationQuotaExhausted ? 'Session creation limit reached. Existing sessions remain available. Ask the owner to raise your limit.'
     : selectedHost.id !== 'local' && !providerId ? 'No providers available on this Host. Check installed agents and provider settings.' : undefined);
 

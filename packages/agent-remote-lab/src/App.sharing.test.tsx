@@ -12,8 +12,8 @@ afterEach(() => {
   window.history.replaceState(null, '', '/');
 });
 
-async function setup({ used = 0, limit = 1, outcome = 'success', empty = false, active = false }: {
-  used?: number; limit?: number; outcome?: 'success' | 'quota' | 'unknown'; empty?: boolean; active?: boolean;
+async function setup({ used = 0, limit = 1, outcome = 'success', empty = false, active = false, hostsLoaded }: {
+  used?: number; limit?: number; outcome?: 'success' | 'quota' | 'unknown'; empty?: boolean; active?: boolean; hostsLoaded?: Promise<void>;
 } = {}) {
   const requests: Array<{ path: string; body?: Record<string, unknown> }> = [];
   let quota = { used, limit };
@@ -22,6 +22,7 @@ async function setup({ used = 0, limit = 1, outcome = 'success', empty = false, 
     if (url.pathname.endsWith('/session-successions')) return Response.json({ code: 'route_not_found', error: 'Unsupported' }, { status: 404 });
     requests.push({ path: url.pathname, ...(init?.body ? { body: JSON.parse(String(init.body)) } : {}) });
     if (url.pathname === '/v1/providers') return Response.json({ protocolVersion: '1.8.0', type: 'provider_list', payload: { providers: [{ providerId: 'recorded', displayName: 'Recorded Provider' }] } });
+    if (url.pathname.endsWith('/hosts')) await hostsLoaded;
     if (url.pathname.endsWith('/hosts')) return Response.json({ hosts: empty ? [] : [
       { id: 'owner', name: 'Owner Host', online: true, managed: true, access: 'owner', providers: [{ providerId: 'codex', displayName: 'Codex CLI' }] },
       { id: 'shared', name: 'Shared Studio', online: true, managed: false, access: 'shared', sessionQuota: quota, providers: [{ providerId: 'codex', displayName: 'Codex CLI' }] },
@@ -82,6 +83,20 @@ it.each([false, true])('does not substitute another Host for an unknown deep lin
   expect(f.hosts().value).not.toBe('owner');
   expect(f.container.textContent).toContain('Requested Host is unavailable');
   expect(f.container.querySelector<HTMLSelectElement>('#provider-select')?.value).toBe('');
+});
+
+it('does not report a requested Host as unavailable before the Host list loads', async () => {
+  window.history.replaceState(null, '', '/?host=shared');
+  let release!: () => void;
+  const f = await setup({ hostsLoaded: new Promise<void>(resolve => { release = resolve; }) });
+  expect(f.container.textContent).not.toContain('Requested Host is unavailable');
+  expect(document.body.textContent).not.toContain('Requested Host is unavailable');
+  expect(f.container.textContent).toContain('Loading Hosts…');
+  expect(f.container.textContent).not.toContain('This Host is offline');
+  await act(async () => { release(); await new Promise(resolve => setTimeout(resolve, 0)); });
+  expect(f.hosts().value).toBe('shared');
+  expect(document.body.textContent).not.toContain('Requested Host is unavailable');
+  expect(f.container.textContent).not.toContain('Loading Hosts…');
 });
 
 it('keeps existing shared sessions available when cumulative creation quota is exhausted', async () => {

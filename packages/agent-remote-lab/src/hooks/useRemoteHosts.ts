@@ -4,6 +4,8 @@ import type { HostPairingService, RemoteHost } from '../components/HostPairing.j
 
 export function useRemoteHosts(service: HostPairingService, enabled: boolean, discovery = true, activeHostId?: string) {
   const [hosts, setHosts] = useState<RemoteHost[]>([]);
+  /** Until the first list arrives, an empty list does not mean a Host is missing. */
+  const [loaded, setLoaded] = useState(false);
   const [error, setError] = useState<string>();
   const [generation, setGeneration] = useState(0);
   const retry = useCallback(() => setGeneration((value) => value + 1), []);
@@ -21,7 +23,7 @@ export function useRemoteHosts(service: HostPairingService, enabled: boolean, di
       try {
         const result = await service.hosts();
         offline = !!activeHostId && activeHostId !== 'local' && result.hosts.find(host => host.id === activeHostId)?.online !== true;
-        if (!retired && request === current) { setHosts(previous => JSON.stringify(previous) === JSON.stringify(result.hosts) ? previous : result.hosts); setError(undefined); }
+        if (!retired && request === current) { setHosts(previous => JSON.stringify(previous) === JSON.stringify(result.hosts) ? previous : result.hosts); setLoaded(true); setError(undefined); }
       } catch (reason) { if (!retired && request === current) setError(reason instanceof Error ? reason.message : 'Could not load Hosts.'); }
       finally {
         if (request === current) inFlight = false;
@@ -33,5 +35,5 @@ export function useRemoteHosts(service: HostPairingService, enabled: boolean, di
     void load();
     return () => { retired = true; unwatch(); clearTimeout(timer); };
   }, [service, enabled, generation, discovery, activeHostId]);
-  return { hosts, error, retry };
+  return { hosts, loaded, error, retry };
 }

@@ -643,6 +643,11 @@ or disabled access and **503** for temporary authority/storage failure. A 200
 response with `active:false` is not a denial response in this protocol. The Relay
 uses a five-second request deadline, does not follow redirects, and treats
 malformed responses/network errors as unavailable rather than renewing access.
+While the authority is unavailable, access it last confirmed stays usable for up to
+15 minutes after that confirmation, so a short authority outage does not disconnect
+Hosts and browsers; a 401/403 still ends access immediately. Set
+`AGENT_REMOTE_AUTHORITY_OUTAGE_GRACE_MS` (0 to 3600000) on the Worker to change
+that window; 0 restores the previous behaviour of ending access with the lease.
 
 Server-to-server requests carry `Authorization: Bearer <proof>` and JSON with no
 browser Cookie or Origin. Verify HS256 with exact JWT header

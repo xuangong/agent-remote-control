@@ -2,11 +2,11 @@ import { browserActivity, browserGroups, browserIdentity, validBrowserId } from 
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { gatewayCookieName, readGatewayCookie, type HostedGrant } from './auth.js';
 import { createAuthenticationProvider, type HostedAuthenticationProvider } from './auth-provider.js';
-import { resolveHostedAuth, type HostedAuthOptions } from './hosted-auth.js';
+import { authorityOutageGraceMs, resolveHostedAuth, type HostedAuthOptions } from './hosted-auth.js';
 import type { RelayState, SavedGatewaySession } from './state.js';
 export type { SavedGatewaySession } from './state.js';
 
-export function createHostedSessions(auth: HostedAuthOptions, state: RelayState, durable: boolean, provider: HostedAuthenticationProvider = createAuthenticationProvider(resolveHostedAuth(auth), state)) {
+export function createHostedSessions(auth: HostedAuthOptions, state: RelayState, durable: boolean, provider: HostedAuthenticationProvider = createAuthenticationProvider(resolveHostedAuth(auth), state), outageGraceMs = authorityOutageGraceMs) {
   const pending = new Map<string, Promise<'active' | 'denied' | 'unavailable'>>();
   let closed = false;
   const identity = browserIdentity(auth);
@@ -23,7 +23,16 @@ export function createHostedSessions(auth: HostedAuthOptions, state: RelayState,
       const result = record.sessionExpiresAt <= Date.now()
         ? { status: 'denied' as const } : await provider.renew(record.grant);
       if (closed) return 'denied' as const;
-      if (result.status === 'unavailable') return result.status;
+      if (result.status === 'unavailable') {
+        const graceEnd = (record.authorityConfirmedAt ?? 0) + outageGraceMs;
+        if (graceEnd <= Date.now() || record.sessionExpiresAt <= Date.now()) return result.status;
+        return state.mutate(draft => {
+          const current = draft.sessions.find(value => value.hash === record.hash);
+          if (!current || current.authorityConfirmedAt !== record.authorityConfirmedAt) return 'unavailable' as const;
+          current.grant.expiresAt = Math.max(current.grant.expiresAt, Math.min(current.sessionExpiresAt, graceEnd));
+          return 'active' as const;
+        });
+      }
       return state.mutate(draft => {
         const current = draft.sessions.find(value => value.hash === record.hash);
         if (!current) return 'denied' as const;
@@ -34,6 +43,7 @@ export function createHostedSessions(auth: HostedAuthOptions, state: RelayState,
         if (current.grant.provider !== 'google') current.grant.authenticatedAt = result.authenticatedAt;
         current.grant.profile = result.profile;
         current.grant.expiresAt = Math.min(current.sessionExpiresAt, result.validUntil);
+        current.authorityConfirmedAt = Date.now();
         return 'active' as const;
       });
     })();
@@ -64,7 +74,7 @@ export function createHostedSessions(auth: HostedAuthOptions, state: RelayState,
         const activity = browserActivity([...draft.sessions
           .filter(record => record.grant.subject === grant.subject && record.browserId === browserId)
           .flatMap(record => record.activity ?? [record.lastSeenAt ?? 0]), now], now);
-        draft.sessions.push({ browserId, activity, hash: hash(token), grant: current, sessionExpiresAt,
+        draft.sessions.push({ browserId, activity, hash: hash(token), grant: current, sessionExpiresAt, authorityConfirmedAt: now,
           id: randomUUID(), createdAt: now, lastSeenAt: now, label: browserLabel(request?.headers.get('user-agent')) });
         return { status: 'active' as const, token, grant: current, expiresAt: sessionExpiresAt, browserCookie: identity.cookie(browserId) };
       });

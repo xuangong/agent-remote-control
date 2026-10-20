@@ -26,6 +26,11 @@ export interface HostedAuthEnvironment {
 export const googleIssuer = 'https://accounts.google.com';
 export const googleSessionLifetimeMs = 12 * 60 * 60_000;
 export const localAuthorityLifetimeMs = 120_000;
+/**
+ * When the account authority cannot be reached, access it last confirmed stays usable for this long after that
+ * confirmation. An explicit denial still ends access at once.
+ */
+export const authorityOutageGraceMs = 15 * 60_000;
 export function normalizeAllowedEmail(email: string): string { return email.trim().toLowerCase(); }
 export function validAllowedEmail(email: unknown): email is string {
   return typeof email === 'string' && email.length <= 320 && /^[^\s@*]+@[^\s@*]+\.[^\s@*]+$/.test(email);

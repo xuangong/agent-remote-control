@@ -30,7 +30,7 @@ it('retries a failed owner renewal before expiry while preserving the same Host 
 }, 15000);
 
 it.each([403, 503])('still disconnects on denied or persistently unavailable authority (%s)', async status => {
-  const f = await fixture(); f.setAuthority(200, 1600);
+  const f = await fixture({ authorityOutageGraceMs: 0 }); f.setAuthority(200, 1600);
   const alice = await f.login('alice');
   const pairing = await (await f.json(alice.basePath + 'v1/remote/pairings', alice.cookie, {})).json() as { key: string };
   const { socket } = await f.host(pairing.key);
@@ -87,3 +87,28 @@ it('delivers authority renewal failures and recovery to the owning Controller', 
   expect(entries).toContainEqual(expect.objectContaining({ event: 'authority_refresh_completed', reason: 'authority_active', status: 200 }));
   expect(JSON.stringify(entries)).not.toMatch(/Bearer|alice|continuation/);
 }, 10000);
+
+it('keeps a Host connected through an authority outage until the grace after its last confirmation ends', async () => {
+  const f = await fixture({ authorityOutageGraceMs: 5000 }); f.setAuthority(200, 1600);
+  const alice = await f.login('alice');
+  const pairing = await (await f.json(alice.basePath + 'v1/remote/pairings', alice.cookie, {})).json() as { key: string };
+  const { socket } = await f.host(pairing.key);
+  const started = Date.now();
+  const closed = new Promise<number>(resolve => socket.addEventListener('close', event => resolve(event.code), { once: true }));
+  f.setAuthority(503);
+  await new Promise(resolve => setTimeout(resolve, 3000));
+  expect(socket.readyState).toBe(1);
+  expect(await closed).toBe(1013);
+  expect(Date.now() - started).toBeGreaterThan(3000);
+}, 20000);
+
+it('renews a browser session through an authority outage and stops at an explicit denial', async () => {
+  const f = await fixture({ authorityOutageGraceMs: 60_000 }); f.setAuthority(200, 1600);
+  const alice = await f.login('alice');
+  f.setAuthority(503);
+  const during = await f.json('/auth/refresh', alice.cookie, {});
+  expect(during.status).toBe(200);
+  expect((await during.json() as { expiresAt: number }).expiresAt).toBeGreaterThan(Date.now() + 30_000);
+  f.setAuthority(403);
+  expect((await f.json('/auth/refresh', alice.cookie, {})).status).toBe(401);
+}, 20000);

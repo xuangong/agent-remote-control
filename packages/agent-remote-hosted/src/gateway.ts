@@ -22,7 +22,7 @@ import { SharingError } from './host-sharing.js';
 import { createHostedSessions } from './sessions.js';
 import { createAuthenticationProvider } from './auth-provider.js';
 import { createGoogleLogin } from './google-auth.js';
-import { resolveHostedAuth, hostedAuthMetadata, type HostedAuthOptions } from './hosted-auth.js';
+import { authorityOutageGraceMs, localAuthorityLifetimeMs, resolveHostedAuth, hostedAuthMetadata, type HostedAuthOptions } from './hosted-auth.js';
 import { queryGatewayAuthority, type AuthorityDiagnostic } from './authority.js';
 import { provisionGatewayHostKey, revokeGatewayHostKey, validateBootstrapBody } from './host-bootstrap.js';
 import { createRelayState, stageRelayState, type HostedRelayState, type RelayStateStore } from './state.js';
@@ -62,8 +62,10 @@ export type HostedRelayOptions = HostedAuthOptions & {
   keyLifetimeMs?: number;
   /** Trusted composition may override the additional interactive sign-in requirement. */
   recentAuthentication?(grant: HostedGrant): boolean | undefined;
+  /** How long access last confirmed by an unreachable account authority stays usable, from 0 to one hour. */
+  authorityOutageGraceMs?: number;
 }
-type Tenant = { subject: string; namespace: string; authorityUntil: number; authorityRefreshAt: number; authorityDenied: boolean;
+type Tenant = { subject: string; namespace: string; authorityUntil: number; authorityRefreshAt: number; authorityDenied: boolean; authorityConfirmedAt?: number;
   checking?: Promise<'active' | 'denied' | 'unavailable'>; broker: ReturnType<typeof createHostBroker>; expiresAt: number };
 export function createHostedRelay(options: HostedRelayOptions) {
   const auth = resolveHostedAuth(options);
@@ -83,7 +85,9 @@ export function createHostedRelay(options: HostedRelayOptions) {
   let renewalAt = Date.now() + 60_000;
   const state = createRelayState(auth, options.storage, failClosed, published, options.successionEncodingCosts);
   const authentication = createAuthenticationProvider(auth, state);
-  const sessions = createHostedSessions(auth, state, durable, authentication);
+  const outageGraceMs = options.authorityOutageGraceMs ?? authorityOutageGraceMs;
+  if (!Number.isSafeInteger(outageGraceMs) || outageGraceMs < 0 || outageGraceMs > 3_600_000) throw new Error('Authority outage grace must be from 0 to 3600000 milliseconds.');
+  const sessions = createHostedSessions(auth, state, durable, authentication, outageGraceMs);
   const googleLogin = auth.provider === 'google' ? createGoogleLogin(auth, state) : undefined;
   const starAccess = (subject: string, item: import('./session-stars.js').StarIdentity) => {
     const broker = [...tenants.values()].find(value => value.broker.canStarSession(item, subject))?.broker;
@@ -229,10 +233,13 @@ export function createHostedRelay(options: HostedRelayOptions) {
       let detail: AuthorityDiagnostic | undefined;
       const result = await authentication.userStatus(owned.subject, value => { detail = value; });
       if (closing || failed) return 'unavailable' as const;
-      if (result.status === 'active' && result.subject === owned.subject) { owned.authorityUntil = result.validUntil; owned.authorityDenied = false; }
-      else if (result.status === 'denied' || result.status === 'active') { owned.authorityUntil = 0; owned.authorityDenied = true; }
-      // Renewal must finish before expiry. A transient outage retries within the
-      // existing lease; it never grants additional time without authority approval.
+      if (result.status === 'active' && result.subject === owned.subject) { owned.authorityUntil = result.validUntil; owned.authorityDenied = false; owned.authorityConfirmedAt = Date.now(); }
+      else if (result.status === 'denied' || result.status === 'active') { owned.authorityUntil = 0; owned.authorityDenied = true; owned.authorityConfirmedAt = undefined; }
+      else if (!owned.authorityDenied && owned.authorityConfirmedAt !== undefined) {
+        // An unreachable authority keeps the last confirmed access for a bounded grace period, in lease-sized steps.
+        owned.authorityUntil = Math.max(owned.authorityUntil, Math.min(Date.now() + localAuthorityLifetimeMs, owned.authorityConfirmedAt + outageGraceMs));
+      }
+      // Renewal must finish before expiry. A transient outage retries within the existing lease and its grace.
       const remaining = owned.authorityUntil - Date.now();
       owned.authorityRefreshAt = Date.now() + (remaining > 0
         ? Math.max(result.status === 'active' ? 1 : 250, Math.floor(Math.min(result.status === 'active' ? 60_000 : 10_000, remaining / 2)))
@@ -357,7 +364,7 @@ export function createHostedRelay(options: HostedRelayOptions) {
     if (exchange.status !== 'active') return redirect ? authenticationFailure(auth.origin, exchange.status, pending.returnPath)
       : json(exchange.status === 'unavailable' ? 503 : exchange.status === 'capacity' ? 429 : 401, { error: 'Sign-in access could not be renewed.' });
     if (authentication.persistent(grant)) {
-      owned.authorityUntil = exchange.grant.expiresAt; owned.authorityDenied = false;
+      owned.authorityUntil = exchange.grant.expiresAt; owned.authorityDenied = false; owned.authorityConfirmedAt = Date.now();
       owned.authorityRefreshAt = Date.now() + Math.max(1, Math.floor(Math.min(60_000, (owned.authorityUntil - Date.now()) / 2)));
     }
     await security.record(grant.subject, 'signed_in', 'allowed');

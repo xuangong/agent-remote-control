@@ -9,6 +9,8 @@ import { WorkerPreviewSocket } from './preview-socket.js';
 export interface RelayEnvironment extends HostedAuthEnvironment {
   AGENT_REMOTE_PREVIEW_URL?: string;
   AGENT_REMOTE_PREVIEW_DOMAIN?: string;
+  /** Milliseconds that access confirmed before an account authority outage stays usable; defaults to 15 minutes. */
+  AGENT_REMOTE_AUTHORITY_OUTAGE_GRACE_MS?: string;
   AGENT_REMOTE_RELAY_URL: string;
   AGENT_REMOTE_SIGNING_SECRET: string;
   RELAY: DurableObjectNamespace;
@@ -44,7 +46,7 @@ export class RelayObject {
         await this.context.storage.setAlarm(Date.now() + 60_000);
       },
     };
-    this.core = createHostedRelay({ ...auth, previewOrigin: this.env.AGENT_REMOTE_PREVIEW_URL, previewDomain: this.env.AGENT_REMOTE_PREVIEW_DOMAIN, storage, successionEnrollment: true, diagnosticStorage: new SqliteDiagnosticStore(this.context.storage, auth),
+    this.core = createHostedRelay({ ...auth, ...(this.env.AGENT_REMOTE_AUTHORITY_OUTAGE_GRACE_MS ? { authorityOutageGraceMs: Number(this.env.AGENT_REMOTE_AUTHORITY_OUTAGE_GRACE_MS) } : {}), previewOrigin: this.env.AGENT_REMOTE_PREVIEW_URL, previewDomain: this.env.AGENT_REMOTE_PREVIEW_DOMAIN, storage, successionEnrollment: true, diagnosticStorage: new SqliteDiagnosticStore(this.context.storage, auth),
       teamResources: namespace => new PortableTeamResourceStore({ storage: new SqliteTeamResourceStorage(this.context.storage, createHmac('sha256', auth.secret).update(JSON.stringify([auth.origin, auth.issuer, namespace])).digest('hex')) }),
       successionEncodingCosts: hostedRecordEncodingCosts(auth),
       diagnosticContext: { runtimeInstanceId: this.runtimeInstanceId, workerVersionId: this.env.CF_VERSION_METADATA?.id, startReason }, scheduler, clientAddress: request => request.headers.get('cf-connecting-ip') ?? 'unknown' });

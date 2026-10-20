@@ -156,7 +156,7 @@ it('preserves pending alarms, tolerates duplicate delivery, and recovers durable
 });
 
 it('expires HTTP and socket access during a Gateway outage even without alarm delivery, then renews after recovery', async () => {
-  const f = await fixture(); f.setAuthority(200, 400);
+  const f = await fixture({ authorityOutageGraceMs: 0 }); f.setAuthority(200, 400);
   const alice = await f.login('alice');
   const pairing = await (await f.json(alice.basePath + 'v1/remote/pairings', alice.cookie, {})).json() as any;
   const { socket, key } = await f.host(pairing.key);

@@ -13,8 +13,8 @@
         "pnpm-lock.yaml",
         "pnpm-workspace.yaml",
         "scripts",
-        "packages/.claude/.cc-writes",
         "packages/agent-host/.claude",
+        "packages/agent-host/.worktrees",
         "packages/agent-host/README.md",
         "packages/agent-host/package.json",
         "packages/agent-host/src",
@@ -24,7 +24,6 @@
         "packages/agent-platform/package.json",
         "packages/agent-platform/src",
         "packages/agent-platform/tsconfig.json",
-        "packages/agent-provider-claude/.claude",
         "packages/agent-provider-claude/README.md",
         "packages/agent-provider-claude/package.json",
         "packages/agent-provider-claude/src",
@@ -121,7 +120,6 @@
         "packages/agent-remote-web/src",
         "packages/agent-remote-web/tsconfig.json",
         "packages/agent-remote-web/vitest.config.ts",
-        "packages/codex-daemon-client/.claude",
         "packages/codex-daemon-client/LICENSE",
         "packages/codex-daemon-client/NOTICE",
         "packages/codex-daemon-client/README.md",
@@ -131,7 +129,7 @@
         "packages/codex-daemon-client/tsconfig.json",
         "packages/codex-daemon-client/tsconfig.test.json"
       ],
-      "digest": "sha256:49a5f93087c3e92960d8505c2168c4570e581814d59cc6ca599412fc2edcae84"
+      "digest": "sha256:9c7e5712258c05294844648db0c16b470c18bca09abdb6d0eb83a73cd4b7969e"
     }
   },
   "providers": [

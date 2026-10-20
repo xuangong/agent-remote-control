@@ -74,6 +74,27 @@ it.each(['acceptEdits', 'bypassPermissions'] as const)('resumes %s and retains i
   } finally { await resumed.dispose(); }
 });
 
+it('resumes with the default mode after the native runtime reported an unrecognized one', async () => {
+  const launched: any[] = [];
+  const natives: Channel<any>[] = [];
+  const provider = new ClaudeAgentProvider({ catalog: { list: async () => [], info: async () => ({ cwd: process.cwd() }) as any,
+    messages: async () => [], children: async () => [] }, query: ({ options }) => {
+    launched.push(options);
+    const events = new Channel<any>();
+    natives.push(events);
+    return { [Symbol.asyncIterator]: () => events[Symbol.asyncIterator](), initializationResult: async () => ({ models: [] }),
+      setPermissionMode: async () => {}, close: () => events.close() } as any;
+  } });
+  const first = await provider.createSession({ sessionId: 'proposed' });
+  await first.setSessionSetting!('permissions', 'acceptEdits');
+  natives[0]!.push({ type: 'system', subtype: 'status', permissionMode: 'auto' });
+  await expect.poll(async () => (await first.runtimeInfo()).settings!.find(setting => setting.id === 'permissions')!.value).toBe('auto');
+  const handle = (await first.runtimeInfo()).persistence!;
+  await first.dispose();
+  const resumed = await provider.resumeSession(handle);
+  try { expect(launched[1].permissionMode).toBe('default'); } finally { await resumed.dispose(); }
+});
+
 it('ignores an unrecognized stored permission mode and resumes with the default', async () => {
   const launched: any[] = [];
   const provider = new ClaudeAgentProvider({ catalog: { list: async () => [], info: async () => ({ cwd: process.cwd() }) as any,

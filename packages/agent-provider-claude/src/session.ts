@@ -17,7 +17,7 @@ import { ClaudeChildren } from './children.js';
 import { createClaudeCatalog, type ClaudeCatalog } from './catalog.js';
 import { createClaudeSessionTools } from './session-tools.js';
 import { ClaudeNativeEvidence, claudeEmptyHandle } from './native-evidence.js';
-import { CLAUDE_ALLOWS_BYPASS_PERMISSIONS, claudePermissionModeOptions, isResumableClaudePermissionMode } from './permission-modes.js';
+import { CLAUDE_ALLOWS_BYPASS_PERMISSIONS, claudePermissionModeOptions, isResumableClaudePermissionMode, type ResumableClaudePermissionMode } from './permission-modes.js';
 
 export type ClaudeQuery = AsyncIterable<SDKMessage> & Pick<Query, 'initializationResult' | 'interrupt' | 'setPermissionMode' | 'close' | 'supportedCommands' | 'reloadSkills' | 'supportedModels' | 'setModel'> & Partial<Pick<Query, 'applyFlagSettings'>> & {
   /** The pinned SDK implements this control without declaring it on public Query. */
@@ -69,7 +69,7 @@ export class ClaudeAgentSession implements AgentSession {
   private cancelRequested = false;
   private planning = false;
   private permissionMode: PermissionMode = 'default';
-  private resumePermissionMode: PermissionMode = 'default';
+  private resumePermissionMode: ResumableClaudePermissionMode = 'default';
   private models: ModelInfo[] = [];
   private appliedEffort: string | null | undefined;
   private settingsRevision = 0;
@@ -297,7 +297,7 @@ export class ClaudeAgentSession implements AgentSession {
     this.settingsRevision++;
     this.permissionMode = mode;
     this.planning = mode === 'plan';
-    if (!this.planning) this.resumePermissionMode = mode;
+    if (!this.planning) this.resumePermissionMode = isResumableClaudePermissionMode(mode) ? mode : 'default';
   }
   private async readNativeSettings(refreshModel = false, restoreModel = false): Promise<void> {
     const revision = this.settingsRevision;

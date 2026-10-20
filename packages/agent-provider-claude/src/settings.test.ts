@@ -310,3 +310,16 @@ it('offers YOLO without activating it and waits for native confirmation before r
     expect((await session.runtimeInfo()).settings).toContainEqual(expect.objectContaining({ id: 'permissions', value: 'default' }));
   } finally { confirm?.(); await session.dispose(); }
 });
+
+it.each([
+  ['auto', 'status'], ['futureMode', 'status'], ['auto', 'init'], ['futureMode', 'init'],
+] as const)('resets the resume target to the default mode when the native runtime reports unmodeled %s in a %s message', async (reported, subtype) => {
+  const native = fixture();
+  const session = await ClaudeAgentSession.open({ sessionId: 'native' }, { query: native.factory });
+  try {
+    await session.setSessionSetting!('permissions', 'bypassPermissions');
+    native.events.push({ type: 'system', subtype, permissionMode: reported, model: 'sonnet', uuid: subtype, session_id: 'native' });
+    await expect.poll(async () => (await session.runtimeInfo()).settings!.find(setting => setting.id === 'permissions')!.value).toBe(reported);
+    expect(JSON.parse((await session.runtimeInfo()).persistence!.opaque)).toMatchObject({ permissionMode: 'default' });
+  } finally { await session.dispose(); }
+});

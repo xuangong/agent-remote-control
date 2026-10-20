@@ -11,6 +11,7 @@ const server = createGatewayRelay({
   stateFile: join(process.env.AGENT_REMOTE_STATE_DIR ?? join(homedir(), '.agent-remote-control', 'gateway-relay'), 'state.json'),
   previewOrigin: process.env.AGENT_REMOTE_PREVIEW_URL,
   previewDomain: process.env.AGENT_REMOTE_PREVIEW_DOMAIN,
+  ...(process.env.AGENT_REMOTE_AUTHORITY_OUTAGE_GRACE_MS ? { authorityOutageGraceMs: Number(process.env.AGENT_REMOTE_AUTHORITY_OUTAGE_GRACE_MS) } : {}),
   servePage: await createGatewayStaticPages(process.env.AGENT_REMOTE_WEB_DIST ?? fileURLToPath(new URL('../../dist', import.meta.url)), { origin: auth.origin, previewDomain: process.env.AGENT_REMOTE_PREVIEW_DOMAIN }),
 });
 const port = Number(process.env.AGENT_REMOTE_PORT ?? 5910);

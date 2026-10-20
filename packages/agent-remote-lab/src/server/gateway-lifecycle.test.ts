@@ -11,7 +11,8 @@ import { createGatewayRelay } from './gateway-relay.js';
 const secret = 'lifecycle-test-secret-01234567890123456789';
 const cleanups: Array<() => Promise<void>> = [];
 afterEach(async () => { for (const close of cleanups.reverse()) await close(); cleanups.length = 0; });
-async function fixture() {
+/** Lease tests run without outage grace unless they pass one. */
+async function fixture(graceMs = 0) {
   let disabled = false; let unavailable = false; const authenticatedAt = Date.now();
   const authority = createServer(async (req, res) => {
     let body = ''; for await (const chunk of req) body += chunk;
@@ -30,7 +31,7 @@ async function fixture() {
   let relay: ReturnType<typeof createGatewayRelay>;
   let url: string;
   let closed = true;
-  const start = async () => { relay = createGatewayRelay({ origin: url ?? 'http://127.0.0.1:0', issuer, secret, stateFile }); const address = await relay.listen(url ? Number(new URL(url).port) : 0); url = address.url; closed = false; };
+  const start = async () => { relay = createGatewayRelay({ origin: url ?? 'http://127.0.0.1:0', issuer, secret, stateFile, authorityOutageGraceMs: graceMs }); const address = await relay.listen(url ? Number(new URL(url).port) : 0); url = address.url; closed = false; };
   const stop = async () => { if (!closed) { closed = true; await relay.close(); } }; cleanups.push(stop);
   await start();
   const begin = await fetch(url! + '/auth/login', { redirect: 'manual' });
@@ -86,6 +87,14 @@ it('does not extend access during an authority outage', async () => {
   expect((await f.request('/auth/refresh', {})).status).toBe(503);
   await new Promise(resolve => setTimeout(resolve, Math.max(0, state.expiresAt - Date.now() + 30)));
   expect((await f.request(f.state.basePath + 'v1/remote/hosts')).status).toBe(503);
+}, 10000);
+
+it('keeps browser access through a short authority outage when configured with grace', async () => {
+  const f = await fixture(60_000); const state = await (await f.request('/auth/status')).json(); f.outage();
+  const refreshed = await f.request('/auth/refresh', {});
+  expect(refreshed.status).toBe(200);
+  await new Promise(resolve => setTimeout(resolve, Math.max(0, state.expiresAt - Date.now() + 30)));
+  expect((await f.request(f.state.basePath + 'v1/remote/hosts')).status).toBe(200);
 }, 10000);
 
 it('lets the production Host uplink reconnect after an authority outage without pairing again', async () => {

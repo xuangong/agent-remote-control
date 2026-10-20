@@ -36,7 +36,6 @@ async function eventually(assertion: () => void): Promise<void> {
 
 async function fixture() {
   localStorage.clear(); sessionStorage.clear();
-  vi.useFakeTimers({ toFake: ['Date', 'setTimeout', 'clearTimeout', 'setInterval', 'clearInterval'] });
   let visibility: DocumentVisibilityState = 'visible';
   vi.spyOn(document, 'visibilityState', 'get').mockImplementation(() => visibility);
   const recorded = createRecordedLabProvider();
@@ -47,6 +46,8 @@ async function fixture() {
   const creator = new HttpWebSocketTransport(relayUrl, { fetch: nativeFetch });
   const ids = Array.from({ length: 5 }, (_, index) => `background-session-${index}`);
   for (const id of ids) await creator.createAgent(id, 'recorded', { sessionId: id });
+  // Real HTTP setup runs before faking time; faked Date stalls undici's pooled connections.
+  vi.useFakeTimers({ toFake: ['Date', 'setTimeout', 'clearTimeout', 'setInterval', 'clearInterval'] });
 
   const basePath = '/u/' + 'a'.repeat(64) + '/';
   vi.stubGlobal('fetch', async (input: RequestInfo | URL) => {

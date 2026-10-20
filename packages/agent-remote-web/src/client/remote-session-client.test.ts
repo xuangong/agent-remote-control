@@ -1623,7 +1623,7 @@ it('rejects new input on a disconnected connection without writing to the socket
 it('recovers a stalled handshake instead of waiting forever', async () => {
   vi.useFakeTimers();
   const transport = new FakeTransport();
-  const client = new RemoteSessionClient('agent-one', transport, new AgentReplica(), { connectionTimeoutMs: 100 });
+  const client = new RemoteSessionClient('agent-one', transport, new AgentReplica(), { connectionTimeoutMs: 100, reconnectJitter: () => 1 });
   try {
     client.start(); transport.open();
     await vi.advanceTimersByTimeAsync(350);

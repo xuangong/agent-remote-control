@@ -410,6 +410,7 @@ it('starts an unspecified TPM conversation and persists its name after clarifica
   const duplicate = await f.coordinator.create(input, 'browser-scope');
   expect(duplicate.id).toBe(created.id);
   expect(f.creates).toHaveLength(1);
+  await expect.poll(async () => (await f.coordinator.get(created.id)).outbox?.[0]?.status).toBe('accepted');
   const current = await f.coordinator.get(created.id);
   await f.call(current, 'update_work', { revision: current.revision, title: 'Improve session search', phase: 'clarifying', waiting: 'user', summary: 'Discussing search scope', nextAction: 'Agree on acceptance criteria' });
   expect((await f.coordinator.list()).works[0]!.title).toBe('Improve session search');

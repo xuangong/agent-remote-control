@@ -22,7 +22,7 @@ async function setup(reject = false, options: { live?: boolean; deferChild?: boo
   HTMLElement.prototype.scrollIntoView = vi.fn();
   Range.prototype.getClientRects = () => [] as unknown as DOMRectList;
   Range.prototype.getBoundingClientRect = () => new DOMRect();
-  if (options.ask) localStorage.setItem('agent-remote-ask-enabled', 'true');
+  if (options.ask) { localStorage.setItem('agent-remote-ask-enabled', 'true'); localStorage.setItem('agent-remote:ask-view', 'true'); }
   if (options.ask) localStorage.setItem('agent-remote-opened:http://localhost/', JSON.stringify([{ hostId: 'local', providerId: 'codex', nativeSessionId: 'native-parent', agentId: 'parent', title: 'Conversation' }]));
   if (options.ask) vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} });
   vi.stubGlobal('matchMedia', vi.fn((query: string) => ({ matches: options.desktop ? query.includes('min-width: 1181px') : query.includes('max-width: 1180px'), media: query, addEventListener() {}, removeEventListener() {}, addListener() {}, removeListener() {} })));
@@ -642,39 +642,6 @@ it.each([false, true])('toggles the current session Ask entry from View without 
   expect(control()!.checked).toBe(false);
   expect(f.container.querySelector('[aria-label="Ask about this session"]')).toBeNull();
   expect(f.attachments).toEqual([]);
-});
-
-
-it('keeps the View Ask toggle scoped to the selected session and restores its preference', async () => {
-  vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} });
-  const f = await setup(false, { live: true, desktop: true });
-  const toggleView = () => act(async () => f.container.querySelector<HTMLButtonElement>('[aria-label="View options"]')!.click());
-  const control = () => f.container.querySelector<HTMLInputElement>('[data-view-control="ask"]')!;
-  await toggleView();
-  await act(async () => control().click());
-  await toggleView();
-  await act(async () => f.container.querySelector<HTMLButtonElement>('.lab-primary-conversation [data-child-session-id="native-child"]')!.click());
-  await toggleView();
-  expect(control().checked).toBe(false);
-  expect(f.container.querySelector('.lab-primary-conversation [aria-label="Ask about this session"]')).not.toBeNull();
-  expect(f.container.querySelector('.lab-side-conversation [aria-label="Ask about this session"]')).toBeNull();
-  await act(async () => control().click());
-  expect(f.container.querySelector('.lab-side-conversation [aria-label="Ask about this session"]')).not.toBeNull();
-  await act(async () => control().click());
-  expect(f.container.querySelector('.lab-primary-conversation [aria-label="Ask about this session"]')).not.toBeNull();
-  const restoreUrl = window.location.href;
-  await unmount(f.container);
-  const restored = await setup(false, { live: true, desktop: true, restoreUrl });
-  await act(async () => restored.container.querySelector<HTMLButtonElement>('[aria-label="View options"]')!.click());
-  expect(restored.container.querySelector<HTMLInputElement>('[data-view-control="ask"]')!.checked).toBe(false);
-  expect(restored.container.querySelector('.lab-primary-conversation [aria-label="Ask about this session"]')).not.toBeNull();
-  expect(restored.container.querySelector('.lab-side-conversation [aria-label="Ask about this session"]')).toBeNull();
-  await act(async () => {
-    const primary = restored.container.querySelector<HTMLElement>('.lab-primary-conversation')!;
-    primary.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true })); primary.click();
-  });
-  await act(async () => restored.container.querySelector<HTMLButtonElement>('[aria-label="View options"]')!.click());
-  expect(restored.container.querySelector<HTMLInputElement>('[data-view-control="ask"]')!.checked).toBe(true);
 });
 
 

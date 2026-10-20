@@ -1,5 +1,4 @@
 import { rename } from 'node:fs/promises';
-import { setTimeout as delay } from 'node:timers/promises';
 import type { PlatformFilesystem } from './types.js';
 
 export const windowsFilesystem: PlatformFilesystem = {
@@ -10,7 +9,7 @@ export const windowsFilesystem: PlatformFilesystem = {
       try { await rename(source, target); return; }
       catch (error) {
         if (attempt >= policy.retries || !isWindowsSharingError(error)) throw error;
-        await delay(Math.min(policy.delayMs * (attempt + 1), policy.maxDelayMs));
+        await new Promise(resolve => setTimeout(resolve, Math.min(policy.delayMs * (attempt + 1), policy.maxDelayMs)));
       }
     }
   },

@@ -13,8 +13,6 @@
         "pnpm-lock.yaml",
         "pnpm-workspace.yaml",
         "scripts",
-        "packages/agent-host/.claude",
-        "packages/agent-host/.worktrees",
         "packages/agent-host/README.md",
         "packages/agent-host/package.json",
         "packages/agent-host/src",
@@ -129,7 +127,7 @@
         "packages/codex-daemon-client/tsconfig.json",
         "packages/codex-daemon-client/tsconfig.test.json"
       ],
-      "digest": "sha256:9c7e5712258c05294844648db0c16b470c18bca09abdb6d0eb83a73cd4b7969e"
+      "digest": "sha256:bcb2fec352ff076c89497c0fe93ef1eb22e1b76158007882046e50a904bbd1b6"
     }
   },
   "providers": [

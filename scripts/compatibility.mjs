@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { execFileSync } from 'node:child_process';
 import { lstatSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { dirname, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -7,12 +8,22 @@ const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const path = resolve(root, 'packages/agent-remote-lab/compatibility.json');
 const manifest = JSON.parse(readFileSync(path, 'utf8'));
 const scope = ['package.json', 'pnpm-lock.yaml', 'pnpm-workspace.yaml', 'scripts'];
+function ignored(entry) {
+  try { execFileSync('git', ['check-ignore', '-q', '--no-index', entry], { cwd: root, stdio: 'ignore' }); return true; }
+  catch (error) { if (error.status === 1) return false; throw error; }
+}
+function containsFile(target) {
+  const identity = lstatSync(target);
+  return !identity.isDirectory() || readdirSync(target).some(name => containsFile(resolve(target, name)));
+}
 for (const name of readdirSync(resolve(root, 'packages')).sort()) {
   const prefix = `packages/${name}`;
   for (const entry of readdirSync(resolve(root, prefix)).sort()) {
     if (['node_modules', 'dist', '.tmp', 'coverage', 'test-results', 'playwright-report', '.wrangler', 'compatibility.json'].includes(entry)) continue;
     if (entry === '.dev.vars' || (entry.startsWith('.dev.vars.') && !entry.endsWith('.example'))) continue;
     if (entry.endsWith('.tsbuildinfo') || entry === '.DS_Store') continue;
+    // Local tool state such as ignored worktrees or empty editor directories is not part of the implementation.
+    if (ignored(`${prefix}/${entry}`) || !containsFile(resolve(root, prefix, entry))) continue;
     scope.push(`${prefix}/${entry}`);
   }
 }

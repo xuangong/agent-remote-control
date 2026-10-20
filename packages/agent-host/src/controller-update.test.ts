@@ -5,7 +5,7 @@ import { mkdtemp, readFile, readdir, rm, writeFile, mkdir } from 'node:fs/promis
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, expect, it, vi } from 'vitest';
-import { controllerNpm, createControllerUpdater, installControllerRelease, pruneControllerPackages, refreshInstalledLauncher } from './controller-update.js';
+import { controllerNpm, createControllerUpdater, installControllerRelease, pruneControllerPackages, refreshInstalledLauncher, removeUnusedClaudeRuntime } from './controller-update.js';
 const roots: string[] = [];
 afterEach(async () => { vi.useRealTimers(); for (const root of roots.splice(0)) await rm(root, { recursive: true, force: true }); });
 async function directory() { const root = await mkdtemp(join(tmpdir(), 'controller-update-')); roots.push(root); return root; }
@@ -232,4 +232,14 @@ it('leaves the installed launcher alone unless the running release is committed 
   await expect(refreshInstalledLauncher({ ...f, runningVersion: '0.2.57', check: async () => '{"ok":false}' })).rejects.toThrow('could not read');
   expect(await readFile(f.installed, 'utf8')).toBe('old launcher');
   await expect(readFile(f.installed + '.previous')).rejects.toMatchObject({ code: 'ENOENT' });
+});
+
+it('removes only the Claude SDK platform runtime from an installed release', async () => {
+  const nodeModules = join(await directory(), 'node_modules');
+  for (const name of ['@anthropic-ai/claude-agent-sdk', '@anthropic-ai/claude-agent-sdk-darwin-arm64', '@anthropic-ai/claude-agent-sdk-linux-x64-musl', '@anthropic-ai/sdk', '@github/copilot-darwin-arm64'])
+    await mkdir(join(nodeModules, name), { recursive: true });
+  await removeUnusedClaudeRuntime(nodeModules);
+  expect((await readdir(join(nodeModules, '@anthropic-ai'))).sort()).toEqual(['claude-agent-sdk', 'sdk']);
+  expect(await readdir(join(nodeModules, '@github'))).toEqual(['copilot-darwin-arm64']);
+  await removeUnusedClaudeRuntime(join(nodeModules, 'missing'));
 });

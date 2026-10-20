@@ -36,6 +36,16 @@ export async function controllerNpm(nodePath = process.execPath): Promise<string
   }
   throw new Error('npm is unavailable in this Node installation. Install npm before updating this Controller.');
 }
+/**
+ * The Claude provider always runs the Claude Code installed on this computer, never the copy the Claude SDK
+ * installs as a platform package, which is several hundred megabytes per release.
+ */
+export async function removeUnusedClaudeRuntime(nodeModules: string): Promise<void> {
+  const scope = join(nodeModules, '@anthropic-ai');
+  let names: string[];
+  try { names = await readdir(scope); } catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return; throw error; }
+  for (const name of names) if (/^claude-agent-sdk-[a-z0-9-]+$/.test(name)) await rm(join(scope, name), { recursive: true, force: true });
+}
 export async function installControllerRelease(stateDir: string, release: ControllerRelease, fetcher: typeof fetch = fetch, clean = false): Promise<void> {
   const root = join(stateDir, 'controller-updates/packages'); await mkdir(root, { recursive: true, mode: 0o700 });
   const target = join(root, release.version + (clean ? '.reinstall' : ''));
@@ -61,6 +71,7 @@ export async function installControllerRelease(stateDir: string, release: Contro
     try { await exec(process.execPath, [npm, 'install', '--prefix', stage, '--ignore-scripts', '--no-audit', '--no-fund', '--no-package-lock', archive],
       { timeout: 240000, maxBuffer: 1024 * 1024, windowsHide: true }); }
     catch { throw new Error('Controller package installation failed. Check Host network and npm access, then retry.'); }
+    await removeUnusedClaudeRuntime(join(stage, 'node_modules'));
     const packageRoot = join(stage, 'node_modules/@orchardworks/agent-remote-controller');
     const info = JSON.parse(await readFile(join(packageRoot, 'build-info.json'), 'utf8'));
     if (info.version !== release.version || info.revision !== release.revision || info.dirty !== false) throw new Error('Installed Controller identity does not match the release.');

@@ -8,6 +8,9 @@ import type { AgentProviderAdapter, AgentPersistenceHandle, AgentSession, AgentH
 import type { AgentHostDirectory, AgentHostWorkspace } from './host.js';
 import { requireSessionExtensionIdentity, sessionExtensionIdentity } from './session-extension-identity.js';
 
+const codexProbeLimit = 10;
+const codexFullListingMaxAgeMs = 5 * 60_000;
+
 /** Keeps new native sessions alive before and after their relay projection is attached. */
 export function createCodexSessionDirectory(
   provider: Pick<CodexAppServerProvider, 'listSessions' | 'createSession' | 'resumeSession' | 'openChildSession'> & Pick<AgentProviderAdapter, 'nativePrefix'> & Partial<Pick<CodexAppServerProvider, 'createdSessionIdMaxLength' | 'inspectSessionOwner' | 'releaseSessionOwner' | 'readSessionTitle' | 'renameSession' | 'readSessionHistory' | 'readSessionWorkspace' | 'canReleaseSession' | 'reconcileIdleSession' | 'forkSession' | 'forkForPromptEdit' | 'validatePromptEdit'>>,
@@ -39,7 +42,14 @@ export function createCodexSessionDirectory(
       return { ...await readSource(source, query), sourceSessionId: source };
     });
   }
-  async function discover(): Promise<CodexSessionSummary[]> {
+  let listing: { sessions: CodexSessionSummary[]; completedAt: number } | undefined;
+  let listingGeneration = 0;
+  const rememberListing = (sessions: CodexSessionSummary[], completedAt: number, generation: number) => {
+    if (generation === listingGeneration) listing = { sessions, completedAt };
+    return sessions;
+  };
+  async function listAll(): Promise<CodexSessionSummary[]> {
+    const generation = listingGeneration;
     const summaries = new Map<string, CodexSessionSummary>();
     let cursor: string | undefined;
     const cursors = new Set<string>();
@@ -51,6 +61,28 @@ export function createCodexSessionDirectory(
       if (cursors.has(cursor)) throw new Error('Codex returned a repeated catalog cursor.');
       cursors.add(cursor);
     }
+    return rememberListing([...summaries.values()], Date.now(), generation);
+  }
+  /**
+   * Codex reads every listed session, so a full listing costs several seconds per hundred sessions. Sessions sort by
+   * update time, and anything created or updated since the last listing sorts above every session it saw unchanged.
+   * When the newest few sessions end with an unchanged one, the rest of the previous listing is still current, except
+   * for removals below that point, which the next full listing picks up.
+   */
+  async function listChanged(): Promise<CodexSessionSummary[]> {
+    const previous = listing, generation = listingGeneration;
+    if (!previous || Date.now() - previous.completedAt >= codexFullListingMaxAgeMs) return listAll();
+    const probe = await provider.listSessions({ limit: codexProbeLimit });
+    if (!probe.nextCursor) return rememberListing(probe.sessions, Date.now(), generation);
+    const boundary = probe.sessions.at(-1);
+    const known = boundary && previous.sessions.find(summary => summary.nativeSessionId === boundary.nativeSessionId);
+    if (!boundary || known?.updatedAt !== boundary.updatedAt) return listAll();
+    const probed = new Set(probe.sessions.map(summary => summary.nativeSessionId));
+    const unchanged = previous.sessions.filter(summary => !probed.has(summary.nativeSessionId) && Date.parse(summary.updatedAt) <= Date.parse(boundary.updatedAt));
+    return rememberListing([...probe.sessions, ...unchanged], previous.completedAt, generation);
+  }
+  async function discover(): Promise<CodexSessionSummary[]> {
+    const summaries = new Map((await listChanged()).map(summary => [summary.nativeSessionId, summary]));
     for (const [nativeSessionId, entry] of opened) {
       const info = await entry.session.runtimeInfo();
       const previous = summaries.get(nativeSessionId);
@@ -80,7 +112,10 @@ export function createCodexSessionDirectory(
   return {
     providerId: 'codex',
     ...(provider.readSessionTitle ? { sessionTitle: provider.readSessionTitle.bind(provider) } : {}),
-    ...(provider.renameSession ? { renameSession: provider.renameSession.bind(provider) } : {}),
+    ...(provider.renameSession ? { async renameSession(nativeSessionId: string, title: string) {
+      // A rename need not move the session in update order, so the next listing must read it again.
+      try { return await provider.renameSession!(nativeSessionId, title); } finally { listing = undefined; listingGeneration++; }
+    } } : {}),
     requiresController: id => controllerTools.has(id),
     supportsPromptEditing: !!provider.forkForPromptEdit,
     async supportsNativePrefix(target) {

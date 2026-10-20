@@ -2,7 +2,7 @@ import { once } from 'node:events';
 
 import { describe, expect, it, vi } from 'vitest';
 
-import { CodexAppServerTransport, CodexAppServerRpcError } from './app-server-transport.js';
+import { CodexAppServerTransport, CodexAppServerRpcError, CodexTransportUnavailableError } from './app-server-transport.js';
 import { createFakeChildProcess } from './test-utils/fake-child.js';
 
 describe('CodexAppServerTransport', () => {
@@ -60,6 +60,35 @@ describe('CodexAppServerTransport', () => {
     await expect(pending).rejects.toThrow('Codex app-server transport is closed');
     expect(vi.getTimerCount()).toBe(0);
     vi.useRealTimers();
+  });
+
+  it('ends only the transport when the child closes stdin under a pending write', async () => {
+    const child = createFakeChildProcess();
+    const transport = new CodexAppServerTransport(child);
+    const terminated = new Promise<Error>(resolve => transport.setTerminationHandler(resolve));
+    const pending = transport.request('thread/read', {});
+
+    child.stdin.emit('error', Object.assign(new Error('write EPIPE'), { code: 'EPIPE' }));
+
+    const error = await terminated;
+    expect(error).toBeInstanceOf(CodexTransportUnavailableError);
+    expect(error.message).toBe('write EPIPE');
+    await expect(pending).rejects.toThrow('write EPIPE');
+    await transport.dispose();
+  });
+
+  it('ends only the transport when a notification handler throws', async () => {
+    const child = createFakeChildProcess();
+    const transport = new CodexAppServerTransport(child);
+    transport.setNotificationHandler(() => { throw new Error('projection failed'); });
+    const terminated = new Promise<Error>(resolve => transport.setTerminationHandler(resolve));
+    const pending = transport.request('thread/read', {});
+
+    child.stdout.write('{"method":"thread/started","params":{}}\n');
+
+    await expect(terminated).resolves.toMatchObject({ message: 'projection failed' });
+    await expect(pending).rejects.toThrow('projection failed');
+    await transport.dispose();
   });
 });
 

@@ -70,7 +70,7 @@ export class CodexAppServerTransport {
     if (socket) {
       socket.on('message', (data, binary) => {
         if (binary) { this.handleTermination(new Error('Codex shared app-server sent a binary JSON-RPC frame')); socket.terminate(); return; }
-        void this.handleLine(data.toString());
+        this.receive(data.toString());
       });
       socket.once('error', error => this.handleTermination(error));
       socket.once('close', () => this.handleTermination(new Error('Codex shared app-server connection closed. Restore the daemon and restart the Host connection.')));
@@ -78,11 +78,13 @@ export class CodexAppServerTransport {
     }
     if (!child) throw new Error('Codex transport requires a process or a shared socket.');
     this.lines = readline.createInterface({ input: child.stdout });
-    this.lines.on('line', (line) => void this.handleLine(line));
+    this.lines.on('line', (line) => this.receive(line));
     child.stderr.on('data', (chunk) => {
       this.stderr = `${this.stderr}${String(chunk)}`.slice(-8192);
     });
     child.once('error', (error) => this.handleTermination(error));
+    // A write racing the child's exit fails with EPIPE on stdin; without a listener Node rethrows it and ends the Host.
+    child.stdin.on('error', (error) => this.handleTermination(error));
     child.once('exit', (code, signal) => {
       const suffix = this.stderr.trim() ? `\n${this.stderr.trim()}` : '';
       this.handleTermination(new Error(
@@ -227,6 +229,11 @@ export class CodexAppServerTransport {
       pending.reject(error);
     }
     this.pending.clear();
+  }
+
+  /** A failure while handling one message ends this transport rather than the Host process. */
+  private receive(line: string): void {
+    this.handleLine(line).catch((error: unknown) => this.handleTermination(error instanceof Error ? error : new Error(String(error))));
   }
 
   private async handleLine(line: string): Promise<void> {

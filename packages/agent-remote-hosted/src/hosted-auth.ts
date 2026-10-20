@@ -35,6 +35,8 @@ export function resolveHostedAuth(options: HostedAuthOptions): ResolvedHostedAut
   const cookiePrefix = options.cookiePrefix === undefined ? 'arc' : options.cookiePrefix;
   if (typeof cookiePrefix !== 'string' || !/^[a-z][a-z0-9_-]{0,31}$/.test(cookiePrefix)) throw new Error('Cookie prefix must start with a lowercase letter and contain at most 32 lowercase letters, digits, underscores or hyphens.');
   if (typeof options.secret !== 'string' || Buffer.byteLength(options.secret) < 32) throw new Error('Relay signing secret must contain at least 32 bytes.');
+  // Published example values are long enough to pass the length check; anyone could forge sessions signed with them.
+  if (options.secret.startsWith('replace-with-')) throw new Error('Relay signing secret is still the example placeholder. Generate one with openssl rand -base64 32.');
   if (options.provider === undefined || options.provider === 'mainsite' || options.provider === 'gateway') return { provider: 'mainsite', origin, issuer: validateGatewayOrigin(options.issuer), secret: options.secret, cookiePrefix };
   if (options.provider !== 'google') throw new Error('Unsupported authentication provider.');
   const input = options.google;

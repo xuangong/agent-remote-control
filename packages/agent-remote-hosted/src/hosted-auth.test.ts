@@ -30,6 +30,9 @@ it('resolves Google without a Gateway issuer and normalizes an explicit email al
 it.each(['', '   ', '*', '*@example.com', 'not-an-email'])('rejects unsafe Google allowlist %j', allowedEmails => {
   expect(() => hostedAuthFromEnv({ ...common, AGENT_REMOTE_AUTH_PROVIDER: 'google', AGENT_REMOTE_GOOGLE_CLIENT_ID: 'client', AGENT_REMOTE_GOOGLE_CLIENT_SECRET: 'secret', AGENT_REMOTE_GOOGLE_ALLOWED_EMAILS: allowedEmails })).toThrow(/email/i);
 });
+it.each(['replace-with-a-random-shared-secret', 'replace-with-at-least-32-random-bytes'])('rejects the published example signing secret %s', secret => {
+  expect(() => resolveHostedAuth({ provider: 'mainsite', origin: common.AGENT_REMOTE_RELAY_URL, issuer: 'https://gateway.example', secret })).toThrow(/example placeholder/);
+});
 it('rejects unknown providers, missing secrets, and unbounded local session lifetimes', () => {
   expect(() => hostedAuthFromEnv({ ...common, AGENT_REMOTE_AUTH_PROVIDER: 'other' })).toThrow(/provider/i);
   expect(() => hostedAuthFromEnv({ ...common, AGENT_REMOTE_AUTH_PROVIDER: 'google' })).toThrow();

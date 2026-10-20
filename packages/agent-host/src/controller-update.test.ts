@@ -5,7 +5,7 @@ import { mkdtemp, readFile, readdir, rm, writeFile, mkdir } from 'node:fs/promis
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, expect, it, vi } from 'vitest';
-import { controllerNpm, createControllerUpdater, installControllerRelease, pruneControllerPackages } from './controller-update.js';
+import { controllerNpm, createControllerUpdater, installControllerRelease, pruneControllerPackages, refreshInstalledLauncher } from './controller-update.js';
 const roots: string[] = [];
 afterEach(async () => { vi.useRealTimers(); for (const root of roots.splice(0)) await rm(root, { recursive: true, force: true }); });
 async function directory() { const root = await mkdtemp(join(tmpdir(), 'controller-update-')); roots.push(root); return root; }
@@ -201,4 +201,35 @@ it('keeps every release while a clean reinstall journal awaits recovery', async 
   await writeFile(join(stateDir, 'controller-updates/reinstall.json'), JSON.stringify({ version: '0.2.55' }));
   expect(await pruneControllerPackages(stateDir, '0.2.55')).toEqual([]);
   expect(await remaining()).toEqual(['0.2.53', '0.2.54', '0.2.55']);
+});
+
+async function launchers(saved = '0.2.57') {
+  const stateDir = await directory();
+  const bootstrap = join(stateDir, 'bootstrap/dist'), release = join(stateDir, 'controller-updates/packages/0.2.57/dist');
+  await mkdir(bootstrap, { recursive: true }); await mkdir(release, { recursive: true });
+  await writeFile(join(bootstrap, 'cli.js'), 'bootstrap cli'); await writeFile(join(bootstrap, 'launcher.js'), 'old launcher');
+  await writeFile(join(release, 'launcher.js'), 'new launcher');
+  await writeFile(join(stateDir, 'controller-updates/current.json'), JSON.stringify({ version: saved }));
+  return { stateDir, installed: join(bootstrap, 'launcher.js'), release: join(release, 'launcher.js') };
+}
+it('replaces the installed launcher with a checked release launcher and keeps the previous one', async () => {
+  const f = await launchers(); const checked: string[] = [];
+  const check = async (launcher: string) => { checked.push(launcher); return '{"ok":true}\n'; };
+  expect(await refreshInstalledLauncher({ ...f, runningVersion: '0.2.57', check })).toBe('replaced');
+  expect(checked).toEqual([f.release]);
+  expect(await readFile(f.installed, 'utf8')).toBe('new launcher');
+  expect(await readFile(f.installed + '.previous', 'utf8')).toBe('old launcher');
+  expect(await refreshInstalledLauncher({ ...f, runningVersion: '0.2.57', check })).toBe('current');
+  expect(checked).toHaveLength(1);
+});
+it('leaves the installed launcher alone unless the running release is committed and its launcher passes the check', async () => {
+  const uncommitted = await launchers('0.2.56');
+  expect(await refreshInstalledLauncher({ ...uncommitted, runningVersion: '0.2.57', check: async () => '{"ok":true}' })).toBe('skipped');
+  const f = await launchers();
+  expect(await refreshInstalledLauncher({ ...f, installed: undefined, runningVersion: '0.2.57' })).toBe('skipped');
+  expect(await refreshInstalledLauncher({ ...f, installed: f.release, runningVersion: '0.2.57' })).toBe('skipped');
+  await expect(refreshInstalledLauncher({ ...f, runningVersion: '0.2.57', check: async () => { throw new Error('crashed'); } })).rejects.toThrow('crashed');
+  await expect(refreshInstalledLauncher({ ...f, runningVersion: '0.2.57', check: async () => '{"ok":false}' })).rejects.toThrow('could not read');
+  expect(await readFile(f.installed, 'utf8')).toBe('old launcher');
+  await expect(readFile(f.installed + '.previous')).rejects.toMatchObject({ code: 'ENOENT' });
 });

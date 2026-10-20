@@ -119,3 +119,23 @@ it.each([false,true])('restores an interrupted same-version clean install (new f
   await expect(readFile(join(updates,'reinstall.json'))).rejects.toMatchObject({code:'ENOENT'});
  }finally{await stopLauncher(child);await rm(root,{recursive:true,force:true});}
 },10000);
+it('checks a launcher against the installation without starting a Controller or changing state', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'controller-launcher-check-'));
+  try {
+    const cli = join(root, 'controller-updates/packages/0.2.0/node_modules/@orchardworks/agent-remote-controller/dist/cli.js');
+    await mkdir(join(cli, '..'), { recursive: true });
+    await writeFile(join(root, 'package.json'), '{"type":"module"}');
+    await writeFile(join(root, 'controller-updates/current.json'), JSON.stringify({ version: '0.2.0' }));
+    await writeFile(join(root, 'controller-updates/status.json'), JSON.stringify({ phase: 'restarting', version: '0.2.0' }));
+    await writeFile(cli, `require('node:fs').writeFileSync(${JSON.stringify(join(root, 'started'))}, '1');`);
+    await cp(fileURLToPath(new URL('../../../scripts/controller-launcher.mjs', import.meta.url)), join(root, 'launcher.mjs'));
+    const { stdout } = await new Promise<{ stdout: string }>((done, fail) => execFile(process.execPath, [join(root, 'launcher.mjs'), '_launcher-check'],
+      { env: { ...process.env, AGENT_HOST_STATE_DIR: root }, timeout: 10000, windowsHide: true }, (error, out) => error ? fail(error) : done({ stdout: out })));
+    expect(JSON.parse(stdout.trim())).toEqual({ ok: true });
+    await expect(readFile(join(root, 'started'))).rejects.toMatchObject({ code: 'ENOENT' });
+    expect(JSON.parse(await readFile(join(root, 'controller-updates/status.json'), 'utf8')).phase).toBe('restarting');
+    await rm(cli);
+    await expect(new Promise((done, fail) => execFile(process.execPath, [join(root, 'launcher.mjs'), '_launcher-check'],
+      { env: { ...process.env, AGENT_HOST_STATE_DIR: root }, timeout: 10000, windowsHide: true }, error => error ? fail(error) : done(undefined)))).rejects.toBeTruthy();
+  } finally { await rm(root, { recursive: true, force: true }); }
+}, 15000);

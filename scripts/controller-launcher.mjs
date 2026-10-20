@@ -12,6 +12,8 @@ const args = process.argv.slice(2);
 const service = ['_serve', 'foreground'].includes(args[0]);
 const versionPattern = /^(0|[1-9][0-9]{0,8})\.(0|[1-9][0-9]{0,8})\.(0|[1-9][0-9]{0,8})$/;
 const cliFor = version => join(updates, 'packages', version, 'node_modules/@orchardworks/agent-remote-controller/dist/cli.js');
+// The package build stamps the release version; a launcher copied from source reports none.
+const launcherVersion = /* launcher-version */ undefined;
 async function read(name) { try { return JSON.parse(await readFile(join(updates, name), 'utf8')); } catch (e) { if (e.code === 'ENOENT') return undefined; throw e; } }
 async function save(name, value) { await mkdir(updates, { recursive: true, mode: 0o700 }); const path = join(updates, name), temp = `${path}.${process.pid}.tmp`;
   await writeFile(temp, JSON.stringify(value), { mode: 0o600 });
@@ -86,7 +88,8 @@ if (process.connected) {
 }
 function start(cli) {
   child = spawn(process.execPath, [cli, ...args], { stdio: ['inherit', 'inherit', 'inherit', 'ipc'], windowsHide: true,
-    env: { ...process.env, AGENT_HOST_LAUNCHER: launcher, AGENT_HOST_LAUNCHER_PID: String(process.pid), AGENT_HOST_MANAGED_UPDATES: '1', AGENT_HOST_CLEAN_INSTALL: '1' } });
+    env: { ...process.env, AGENT_HOST_LAUNCHER: launcher, AGENT_HOST_LAUNCHER_PID: String(process.pid), AGENT_HOST_MANAGED_UPDATES: '1', AGENT_HOST_CLEAN_INSTALL: '1',
+      ...(launcherVersion ? { AGENT_HOST_LAUNCHER_VERSION: launcherVersion } : {}) } });
   const running = child;
   running.on('message', message => { void (async () => {
     if (stopping || !service || running !== child) return;
@@ -148,6 +151,12 @@ function start(cli) {
     process.exitCode = code ?? (signal ? 1 : 0);
     if (process.connected) process.disconnect();
   })().catch(error => { console.error(error.message); process.exitCode = 1; }); });
+}
+// A replacement launcher proves it can read this installation's state before it is put in place; it starts nothing.
+if (args[0] === '_launcher-check') {
+  await access(current);
+  process.stdout.write(JSON.stringify({ ok: true, ...(launcherVersion ? { version: launcherVersion } : {}) }) + '\n');
+  process.exit(0);
 }
 if (service && (await read('status.json'))?.phase === 'restarting') {
   await status('failed', 'The update was interrupted. The saved Controller version is being restored; retry after reconnecting.');

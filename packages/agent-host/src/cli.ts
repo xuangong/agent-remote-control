@@ -3,7 +3,7 @@ import { runWindowCommand } from './window-command.js';
 import {runClaudeCommand} from './claude-command.js';
 import { createDaemonMonitor } from './codex-daemon-monitor.js';
 import { restartCodexDaemon, supportsCodexDaemonControl } from './codex-daemon-runner.js';
-import { controllerIdentity, pruneControllerPackages, requestLauncherRestart } from './controller-update.js';
+import { controllerIdentity, pruneControllerPackages, refreshInstalledLauncher, requestLauncherRestart } from './controller-update.js';
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { spawn } from 'node:child_process';
 import { appendFileSync, realpathSync } from 'node:fs';
@@ -240,11 +240,17 @@ async function serveConfigured(daemon: boolean, diagnosticLog: DiagnosticLog | u
   watchLauncherShutdown(stopDaemon);
   void registered.then(() => { process.send?.({ type: 'controller-ready', version: identity?.version }); }).catch(() => undefined);
   if (identity?.remoteUpdate) {
-    // The launcher commits the running release after readiness; prune only once that is durable.
-    void registered.then(() => new Promise(resolve => setTimeout(resolve, 60_000).unref()))
-      .then(() => pruneControllerPackages(stateDir, identity.version))
-      .then(removed => { if (removed.length) writeDiagnostic(JSON.stringify({ event: 'controller_packages_pruned', versions: removed, timestamp: new Date().toISOString(), pid: process.pid }), diagnosticSecrets); })
-      .catch(() => undefined);
+    // The launcher commits the running release after readiness; act on installed files only once that is durable.
+    const record = (value: Record<string, unknown>) => writeDiagnostic(JSON.stringify({ ...value, timestamp: new Date().toISOString(), pid: process.pid }), diagnosticSecrets);
+    void registered.then(() => new Promise(resolve => setTimeout(resolve, 60_000).unref())).then(async () => {
+      const removed = await pruneControllerPackages(stateDir, identity.version).catch(() => []);
+      if (removed.length) record({ event: 'controller_packages_pruned', versions: removed });
+      try {
+        const launcher = await refreshInstalledLauncher({ stateDir, runningVersion: identity.version, installed: process.env.AGENT_HOST_LAUNCHER,
+          release: fileURLToPath(new URL('./launcher.js', import.meta.url)) });
+        if (launcher === 'replaced') record({ event: 'controller_launcher_replaced', version: identity.version });
+      } catch (error) { record({ event: 'controller_launcher_refresh_failed', message: error instanceof Error ? error.message.slice(0, 200) : 'unknown' }); }
+    }).catch(() => undefined);
   }
   await new Promise<void>(() => undefined);
 }

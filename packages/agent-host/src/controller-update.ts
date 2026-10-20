@@ -1,8 +1,8 @@
 import { createHash } from 'node:crypto';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import { access, mkdir, mkdtemp, readFile, readdir, writeFile, rm, realpath } from 'node:fs/promises';
-import { dirname, join, resolve } from 'node:path';
+import { access, mkdir, mkdtemp, readFile, readdir, rename, writeFile, rm, realpath } from 'node:fs/promises';
+import { basename, dirname, isAbsolute, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { compareControllerVersions, releaseCoversHost, type ControllerIdentity, type ControllerRelease, type ControllerUpdateStatus } from '@orchardworks/agent-remote-protocol';
 import { controllerAssetUrl, controllerReleases } from '@orchardworks/agent-remote-hosted';
@@ -93,6 +93,32 @@ export async function pruneControllerPackages(stateDir: string, runningVersion: 
     catch { /* A locked file keeps that release until the next start. */ }
   }
   return removed;
+}
+/**
+ * The service runs the launcher from the first installed package, and updates never replace that package. Once the
+ * launcher has committed the running release, put this release's launcher in its place after it proves it can read
+ * this installation. The running launcher keeps its code until the service next restarts; the replaced file stays
+ * beside it as launcher.js.previous.
+ */
+export async function refreshInstalledLauncher(options: { stateDir: string; runningVersion: string; installed: string | undefined; release: string;
+  check?: (launcher: string) => Promise<string> }): Promise<'current' | 'replaced' | 'skipped'> {
+  const { installed, release } = options;
+  if (!installed || !isAbsolute(installed) || basename(installed) !== 'launcher.js' || resolve(installed) === resolve(release)) return 'skipped';
+  try {
+    const saved = JSON.parse(await readFile(join(options.stateDir, 'controller-updates/current.json'), 'utf8')) as { version?: unknown };
+    if (saved.version !== options.runningVersion) return 'skipped';
+    await access(join(dirname(installed), 'cli.js'));
+  } catch { return 'skipped'; }
+  const [current, next] = await Promise.all([readFile(installed), readFile(release)]);
+  if (current.equals(next)) return 'current';
+  const check = options.check ?? (async (launcher: string) => (await exec(process.execPath, [launcher, '_launcher-check'],
+    { env: { ...process.env, AGENT_HOST_STATE_DIR: options.stateDir }, timeout: 15000, maxBuffer: 65536, windowsHide: true })).stdout);
+  const output = (await check(release)).trim().split('\n').at(-1) ?? '';
+  if ((JSON.parse(output) as { ok?: unknown }).ok !== true) throw new Error('The release launcher could not read this installation.');
+  await writeFile(installed + '.previous', current, { mode: 0o755 });
+  await writeFile(installed + '.next', next, { mode: 0o755 });
+  await rename(installed + '.next', installed);
+  return 'replaced';
 }
 export function createControllerUpdater(options: {
   stateDir: string; identity: ControllerIdentity; release?: (version: string) => Promise<ControllerRelease>;

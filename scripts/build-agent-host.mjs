@@ -35,7 +35,10 @@ try {
   });
   await cp(join(root, 'packages/agent-provider-opencode/dist/bridge-plugin.mjs'), join(stage, 'dist/bridge-plugin.mjs'));
   await chmod(join(stage, 'dist/cli.js'), 0o755);
-  await cp(join(root, 'scripts/controller-launcher.mjs'), join(stage, 'dist/launcher.js'));
+  const launcherSource = await readFile(join(root, 'scripts/controller-launcher.mjs'), 'utf8');
+  const launcherStamp = '/* launcher-version */ undefined';
+  if (launcherSource.split(launcherStamp).length !== 2) throw new Error('The launcher version stamp is missing.');
+  await writeFile(join(stage, 'dist/launcher.js'), launcherSource.replace(launcherStamp, JSON.stringify(manifest.version)));
   await chmod(join(stage, 'dist/launcher.js'), 0o755);
   await writeFile(join(stage, 'package.json'), JSON.stringify({
     name: manifest.name, version: manifest.version,

@@ -16,7 +16,7 @@ export const CLAUDE_PERMISSION_MODES = [
   { value: 'dontAsk', label: 'Deny unapproved tools', resumable: true },
   { value: 'plan', label: 'Plan', resumable: false },
   { value: 'bypassPermissions', label: 'YOLO',
-    description: 'Skip permission prompts. Existing sandbox restrictions still apply.', resumable: true },
+    description: 'Runs every tool without asking. A Host-enforced sandbox confines shell commands only, not file, MCP or web tools.', resumable: true },
 ] as const satisfies readonly ClaudePermissionMode[];
 
 /** The native runtime requires this acknowledgement before it accepts the bypass mode. */

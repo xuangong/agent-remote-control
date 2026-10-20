@@ -385,13 +385,14 @@ Codex sessions and supported Claude modes. Shared Codex sessions accept permissi
 changes from the web and publish native permission updates from other clients on
 Windows, macOS, and Linux. Claude exposes `default`, `acceptEdits`, `dontAsk`,
 `plan`, and **YOLO** (`bypassPermissions`) through its native permission setter.
-YOLO skips native permission prompts while preserving the existing command
-sandbox and workspace admission rules. Sessions start in `default` unless a
-trusted session restores a previously selected mode; selecting YOLO requires
-native confirmation and native policy may reject it. Restricted sessions reset
-saved elevated modes to `default` when reopened.
-Native requirements and idle-session checks still apply; workspace admission
-remains enforced. Model controls remain available. These rules apply to the CLI. Embedders can provide the same trusted
+YOLO removes native permission prompts for every tool; workspace admission still
+applies, and in restricted sessions the command sandbox below still confines
+shell commands but not file, MCP, or web tools. Sessions start in `default`
+unless a trusted session restores a previously selected mode; selecting YOLO
+requires native confirmation and native policy may reject it. Restricted
+sessions reset saved elevated modes to `default` when reopened. Native
+requirements and idle-session checks still apply. Model controls remain
+available. These rules apply to the CLI. Embedders can provide the same trusted
 `executionPolicy` through `createAgentHostRuntime` or `createAgentHost`, and
 should also configure Codex/Claude providers with `restrictedNative: true` to
 enforce their native permission and sandbox boundaries.
@@ -409,8 +410,10 @@ different execution guarantees:
 - Claude requests the SDK command sandbox with `enabled: true`,
   `failIfUnavailable: true`, and `allowUnsandboxedCommands: false`. Unsupported
   platforms fail closed. Saved elevated permission modes are reset to `default`.
-  The command sandbox does not establish isolation for every native tool,
-  external MCP service, hook, or filesystem read.
+  The sandbox confines shell commands only; it does not establish isolation for
+  native file tools, web tools, external MCP services, hooks, or filesystem
+  reads. Permission prompts, not the sandbox, gate those tools, so YOLO in a
+  restricted session runs them unprompted and unconfined.
 - Copilot has no filesystem sandbox guarantee supplied by this integration.
   Workspace admission and existing native interactive permissions still apply.
 

@@ -147,6 +147,7 @@ import { TraceView } from './components/TraceView.js';
 import { HostPreviewGroups } from './components/HostPreviewGroups.js';
 import { HostVscodeTunnel } from './components/HostVscodeTunnel.js';
 import { HttpVscodeTunnelClient, VscodeTunnelScope } from './vscode-tunnel.js';
+import { useDeploymentUpdate } from './hooks/useDeploymentUpdate.js';
 
 export interface LabTransport extends RemoteAgentTransport {
   listProviders(): Promise<readonly AgentProviderDescriptor[]>;
@@ -442,6 +443,7 @@ function AppContent({
   useFeedbackToast('Session operation', failure);
   useFeedbackToast('Session connection', nativeTakeover ? undefined : sessionNotice?.message, sessionNotice?.tone === 'alert' ? 'error' : 'info');
   useFeedbackToast('Provider catalog', catalogError);
+  useDeploymentUpdate(userScoped);
   const [activeView, setActiveView] = useState<'workbench' | 'trace'>('workbench');
   const [traceNavigation, setTraceNavigation] = useState<{ scope: string; key: string; requestId: number; view: 'workbench' | 'trace' }>();
   const traceRequestCounter = useRef(0);

@@ -43,19 +43,18 @@ it('publishes confirmed model choices, rejects stale choices, and changes permis
   } finally { await session.dispose(); }
 });
 
-it('restores selected permission mode after planning and preserves it for resume', async () => {
+it.each(['acceptEdits', 'bypassPermissions'] as const)('restores %s after planning and preserves it for resume', async (mode) => {
   const native = fixture();
   const session = await ClaudeAgentSession.open({ sessionId: 'native' }, { query: native.factory });
   try {
-    await session.setSessionSetting!('permissions', 'acceptEdits');
+    await session.setSessionSetting!('permissions', mode);
     await session.setPlanning(true);
     await session.setPlanning(false);
-    expect(native.changes).toEqual(['acceptEdits', 'plan', 'acceptEdits']);
-    expect(JSON.parse((await session.runtimeInfo()).persistence!.opaque)).toMatchObject({ permissionMode: 'acceptEdits' });
+    expect(native.changes).toEqual([mode, 'plan', mode]);
+    expect(JSON.parse((await session.runtimeInfo()).persistence!.opaque)).toMatchObject({ permissionMode: mode });
     native.setUpdate(async () => { throw new Error('admin restriction'); });
     await expect(session.setSessionSetting!('permissions', 'dontAsk')).rejects.toThrow('admin restriction');
-    expect((await session.runtimeInfo()).settings).toContainEqual(expect.objectContaining({ category: 'permissions', value: 'acceptEdits' }));
-    await expect(session.setSessionSetting!('permissions', 'bypassPermissions')).rejects.toThrow(/Unavailable/);
+    expect((await session.runtimeInfo()).settings).toContainEqual(expect.objectContaining({ category: 'permissions', value: mode }));
   } finally { await session.dispose(); }
 });
 
@@ -73,15 +72,22 @@ it('closes an ambiguous timed-out setting change instead of allowing work with s
   } finally { await session.dispose(); }
 });
 
-it('requires the native sandbox without unsandboxed fallback and resets saved elevated permission mode', async () => {
+it.each(['dontAsk', 'bypassPermissions'] as const)('requires the native sandbox and resets saved %s', async (mode) => {
   const native = fixture(); let launched: any;
-  const session = await ClaudeAgentSession.open({ sessionId: 'native', permissionMode: 'dontAsk' }, {
+  const session = await ClaudeAgentSession.open({ sessionId: 'native', permissionMode: mode }, {
     restrictedNative: true, query: input => { launched = input.options; return native.factory(); },
   });
   try { expect(launched).toMatchObject({ permissionMode: 'default', sandbox: { enabled: true, failIfUnavailable: true, allowUnsandboxedCommands: false } }); }
   finally { await session.dispose(); }
 });
 
+it.each([['bypassPermissions', 'bypassPermissions'], ['plan', 'default']] as const)('resumes a saved %s as %s without a forced sandbox', async (saved, expected) => {
+  const native = fixture(); let launched: any;
+  const session = await ClaudeAgentSession.open({ sessionId: 'native', permissionMode: saved }, {
+    query: input => { launched = input.options; return native.factory(); },
+  });
+  try { expect(launched.permissionMode).toBe(expected); } finally { await session.dispose(); }
+});
 
 it('changes supported native permissions while retaining the restricted sandbox', async () => {
   const native = fixture(); let launched: any;
@@ -91,12 +97,15 @@ it('changes supported native permissions while retaining the restricted sandbox'
   try {
     const permissions = (await session.runtimeInfo()).settings!.find(setting => setting.id === 'permissions')!;
     expect(permissions.mutable).toBe(true);
-    for (const mode of ['acceptEdits', 'dontAsk', 'plan', 'default']) {
+    for (const mode of ['acceptEdits', 'dontAsk', 'bypassPermissions', 'plan', 'default']) {
       await session.setSessionSetting!('permissions', mode);
       expect((await session.runtimeInfo()).settings!.find(setting => setting.id === 'permissions')!.value).toBe(mode);
     }
-    expect(native.changes).toEqual(['acceptEdits', 'dontAsk', 'plan', 'default']);
-    await expect(session.setSessionSetting!('permissions', 'bypassPermissions')).rejects.toThrow(/Unavailable/);
+    expect(native.changes).toEqual(['acceptEdits', 'dontAsk', 'bypassPermissions', 'plan', 'default']);
+    const changesBeforeRejection = [...native.changes];
+    await expect(session.setSessionSetting!('permissions', 'notAMode')).rejects.toThrow(/Unavailable/);
+    expect(native.changes).toEqual(changesBeforeRejection);
+    expect(launched.allowDangerouslySkipPermissions).toBe(true);
     expect(launched.sandbox).toEqual({ enabled: true, failIfUnavailable: true, allowUnsandboxedCommands: false });
     native.setUpdate(async () => { throw new Error('Native permission policy rejected the change'); });
     await expect(session.setSessionSetting!('permissions', 'acceptEdits')).rejects.toThrow(/rejected/);
@@ -276,4 +285,28 @@ it.each(['stale result', 'stale failure'])('does not let a late settings read ov
     expect((await session.runtimeInfo()).model).toBe('sonnet');
     expect((await session.runtimeInfo()).settings).toContainEqual(expect.objectContaining({ id: 'reasoning_effort', value: 'max' }));
   } finally { release?.(); await session.dispose(); }
+});
+
+it('offers YOLO without activating it and waits for native confirmation before reporting it', async () => {
+  const native = fixture(); let launched: any; let confirm: (() => void) | undefined;
+  const session = await ClaudeAgentSession.open({ sessionId: 'native' }, {
+    query: input => { launched = input.options; return native.factory(); },
+  });
+  try {
+    expect(launched).toMatchObject({ permissionMode: 'default', allowDangerouslySkipPermissions: true });
+    expect((await session.runtimeInfo()).settings!.find(setting => setting.id === 'permissions')!.options)
+      .toContainEqual(expect.objectContaining({ value: 'bypassPermissions', label: 'YOLO' }));
+    native.setUpdate(() => new Promise<void>(resolve => { confirm = resolve; }));
+    const changing = session.setSessionSetting('permissions', 'bypassPermissions');
+    void changing.catch(() => {});
+    await expect.poll(() => typeof confirm).toBe('function');
+    expect((await session.runtimeInfo()).settings).toContainEqual(expect.objectContaining({ id: 'permissions', value: 'default' }));
+    confirm!(); await changing;
+    expect((await session.runtimeInfo()).settings).toContainEqual(expect.objectContaining({ id: 'permissions', value: 'bypassPermissions' }));
+    native.setUpdate(async () => {});
+    await session.setSessionSetting('permissions', 'default');
+    native.setUpdate(async () => { throw new Error('Native policy disallows bypass'); });
+    await expect(session.setSessionSetting('permissions', 'bypassPermissions')).rejects.toThrow('Native policy disallows bypass');
+    expect((await session.runtimeInfo()).settings).toContainEqual(expect.objectContaining({ id: 'permissions', value: 'default' }));
+  } finally { confirm?.(); await session.dispose(); }
 });

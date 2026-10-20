@@ -19,6 +19,9 @@ export const CLAUDE_PERMISSION_MODES = [
     description: 'Skip permission prompts. Existing sandbox restrictions still apply.', resumable: true },
 ] as const satisfies readonly ClaudePermissionMode[];
 
+/** The native runtime requires this acknowledgement before it accepts the bypass mode. */
+export const CLAUDE_ALLOWS_BYPASS_PERMISSIONS = CLAUDE_PERMISSION_MODES.some(mode => mode.value === 'bypassPermissions');
+
 /** The permission modes a session may persist and resume into. */
 export type ResumableClaudePermissionMode = Extract<(typeof CLAUDE_PERMISSION_MODES)[number], { resumable: true }>['value'];
 

@@ -17,6 +17,7 @@ import { ClaudeChildren } from './children.js';
 import { createClaudeCatalog, type ClaudeCatalog } from './catalog.js';
 import { createClaudeSessionTools } from './session-tools.js';
 import { ClaudeNativeEvidence, claudeEmptyHandle } from './native-evidence.js';
+import { CLAUDE_ALLOWS_BYPASS_PERMISSIONS, claudePermissionModeOptions, isResumableClaudePermissionMode } from './permission-modes.js';
 
 export type ClaudeQuery = AsyncIterable<SDKMessage> & Pick<Query, 'initializationResult' | 'interrupt' | 'setPermissionMode' | 'close' | 'supportedCommands' | 'reloadSkills' | 'supportedModels' | 'setModel'> & Partial<Pick<Query, 'applyFlagSettings'>> & {
   /** The pinned SDK implements this control without declaring it on public Query. */
@@ -93,7 +94,7 @@ export class ClaudeAgentSession implements AgentSession {
     this.timeout = options.requestTimeoutMs ?? 15_000;
     if (!Number.isFinite(this.timeout) || this.timeout <= 0) throw new Error('Claude request timeout must be positive.');
     this.planning = config.planning ?? false;
-    this.resumePermissionMode = !options.restrictedNative && ['default', 'acceptEdits', 'dontAsk'].includes(config.permissionMode ?? '') ? config.permissionMode! : 'default';
+    this.resumePermissionMode = !options.restrictedNative && isResumableClaudePermissionMode(config.permissionMode) ? config.permissionMode : 'default';
     this.permissionMode = this.planning ? 'plan' : this.resumePermissionMode;
     this.images = new ClaudeImageRegistry(config.sessionId);
     this.projector = new ClaudeEventProjector(config.sessionId, 'live', this.images);
@@ -139,7 +140,7 @@ export class ClaudeAgentSession implements AgentSession {
           : { type: 'preset', preset: 'claude_code', ...(config.instructions ? { append: config.instructions } : {}) },
         ...(session.hostTools ? { mcpServers: { agent_host: session.hostTools } } : {}),
         ...(options.restrictedNative ? { sandbox: { enabled: true, failIfUnavailable: true, allowUnsandboxedCommands: false } } : {}),
-        permissionMode: session.permissionMode, canUseTool: session.interactions.request,
+        permissionMode: session.permissionMode, allowDangerouslySkipPermissions: CLAUDE_ALLOWS_BYPASS_PERMISSIONS, canUseTool: session.interactions.request,
         hooks: { Stop: [{ hooks: [async input => { if (input.hook_event_name === 'Stop') session.nativeEvidence.noteStop(input); return {}; }] }] },
         stderr: options.onDiagnostic, spawnClaudeCodeProcess: session.process.spawn,
       } });
@@ -332,8 +333,7 @@ export class ClaudeAgentSession implements AgentSession {
       options: this.models.map((model) => ({ value: model.value, label: model.displayName, description: model.description })),
       mutable: true, scope: 'session' },
     { id: 'permissions', category: 'permissions', label: 'Permissions', value: this.permissionMode,
-      options: [{ value: 'default', label: 'Ask for permissions' }, { value: 'acceptEdits', label: 'Accept edits' },
-        { value: 'dontAsk', label: 'Deny unapproved tools' }, { value: 'plan', label: 'Plan' }],
+      options: claudePermissionModeOptions(this.permissionMode),
       mutable: true, scope: 'session' }];
     const metadata = this.models.find(entry => entry.value === model || entry.resolvedModel === model);
     if (metadata?.supportsEffort && metadata.supportedEffortLevels?.length && this.appliedEffort !== undefined && this.native.applyFlagSettings && this.native.getSettings) {

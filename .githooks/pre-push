@@ -1,0 +1,16 @@
+#!/bin/sh
+# There is no hosted CI, so a branch push runs the checks a release relies on.
+# Native CLI suites depend on this machine's installed agents; run them with `pnpm test:local`.
+zero=0000000000000000000000000000000000000000
+branch_update=false
+while read -r local_ref local_sha remote_ref remote_sha; do
+  case "$remote_ref" in refs/heads/*) [ "$local_sha" != "$zero" ] && branch_update=true ;; esac
+done
+[ "$branch_update" = true ] || exit 0
+cd "$(git rev-parse --show-toplevel)" || exit 1
+if [ -n "$(git status --porcelain --untracked-files=no)" ]; then
+  echo 'pre-push: commit or stash tracked changes so the checks run on what is pushed.' >&2
+  exit 1
+fi
+pnpm install --frozen-lockfile --offline >/dev/null || exit 1
+exec pnpm verify

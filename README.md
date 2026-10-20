@@ -821,16 +821,18 @@ Keys are valid for new connections for 24 hours and bind to one installation. Es
 ## Development and verification
 
 ```bash
-pnpm typecheck
-pnpm test
+pnpm verify          # compatibility check, build, typecheck and unit tests
+pnpm test:local      # native CLI suites that need this machine's signed-in agents
 pnpm test:conformance
 pnpm test:e2e
 pnpm lint:docs
 ```
 
+There is no hosted CI. Run `pnpm hooks:install` once per clone so every branch push runs `pnpm verify` through `.githooks/pre-push`; tag-only pushes skip it. The unit suite (`pnpm test`) excludes `*.local.test.ts` files and must pass on any machine; `pnpm test:local` runs those native suites one package at a time.
+
 Test scripts enforce per-test and outer process deadlines. Browser tests use separate configurable ports and refuse to reuse an existing server. Set `AGENT_REMOTE_TEST_RELAY_PORT` and `AGENT_REMOTE_TEST_WEB_PORT` to free ports for concurrent testing. Run `pnpm compatibility:update` after source changes, then `pnpm compatibility:check` to verify the declared implementation digest.
 
-The root test runner probes each selected native executable with a five-second `--version` deadline before starting native suites. It reports the resolved path, actual version and test baseline. Unit tests require `BORGEE_CODEX_TEST_EXECUTABLE` to name an explicit absolute executable whose complete version output matches the Lab compatibility manifest (currently `codex-cli 0.162.0`). `BORGEE_AGENT_REMOTE_COMPATIBILITY_MANIFEST` selects an alternative manifest, resolving relative paths from the Lab package. Shared and optional Codex native suites require 0.162.0+ instead. Claude Code requires 2.1.247+ and uses `AGENT_CLAUDE_TEST_EXECUTABLE` or `PATH`. Copilot requires 1.0.83+, uses its installed package entry, and reports the package version separately because its native cache can select a newer runtime. Explicit OpenCode native suites require 2.x at 2.0.25+, while existing evidence experiments retain their exact-version requirements. These are test prerequisites, not product compatibility guarantees; fixture-only suites do not acquire native dependencies. `pnpm test:setup` includes the preflight behavior tests.
+The root test runner probes each selected native executable with a five-second `--version` deadline before starting native suites. It reports the resolved path, actual version and test baseline. Local native tests require `BORGEE_CODEX_TEST_EXECUTABLE` to name an explicit absolute executable whose complete version output matches the Lab compatibility manifest (currently `codex-cli 0.162.0`). `BORGEE_AGENT_REMOTE_COMPATIBILITY_MANIFEST` selects an alternative manifest, resolving relative paths from the Lab package. Shared and optional Codex native suites require 0.162.0+ instead. Claude Code requires 2.1.247+ and uses `AGENT_CLAUDE_TEST_EXECUTABLE` or `PATH`. Copilot requires 1.0.83+, uses its installed package entry, and reports the package version separately because its native cache can select a newer runtime. Explicit OpenCode native suites require 2.x at 2.0.25+, while existing evidence experiments retain their exact-version requirements. These are test prerequisites, not product compatibility guarantees; fixture-only suites do not acquire native dependencies. `pnpm test:setup` includes the preflight behavior tests.
 
 `pnpm dev` runs the Recorded-backed workbench and pairing broker. `pnpm agent-remote-controller start` starts the selected native providers in the managed Host daemon so a later `pnpm agent-remote-controller pair` can replace its uplink without stopping native sessions. `pnpm agent-remote-controller foreground` is an attached debugging mode without daemon pairing control. `pnpm dev codex-fixture` remains a clearly labeled direct fixture composition for adapter validation; `pnpm dev recorded` runs the Recorded fixture and broker. The optional DSH fixture launcher and installed-release preparation tools remain documented in the [Lab guide](packages/agent-remote-lab/README.md).
 

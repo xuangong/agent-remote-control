@@ -55,14 +55,20 @@ it.each([false, true])('changes native model and permissions with restricted san
   } finally { await session.dispose(); await pump; await fixture.close(); }
 }, 10000);
 
+/** Native plan mode names a plan file in its prompt; the model writes the plan there and then calls ExitPlanMode. */
+function planningReply(plan: string, exitId: string, finalText: string) {
+  return (body: any, response: Parameters<typeof nativeReply>[0]) => {
+    const text = JSON.stringify(body);
+    const path = /create your plan at (\/[^ "\\]+\.md)/.exec(text)?.[1];
+    if (!text.includes('write-plan')) nativeReply(response, path ? [{ type: 'tool_use', id: 'write-plan', name: 'Write', input: { file_path: path, content: plan } }] : [{ type: 'text', text: 'NO_PLAN_FILE' }]);
+    else if (!text.includes(exitId)) nativeReply(response, [{ type: 'tool_use', id: exitId, name: 'ExitPlanMode', input: {} }]);
+    else nativeReply(response, [{ type: 'text', text: finalText }]);
+  };
+}
+
 for (const permissionMode of ['default', 'acceptEdits']) it(`reviews native ExitPlanMode and restores ${permissionMode} before execution`, async () => {
-  let calls = 0;
   const plan = '# Verified native plan\nKeep the public API unchanged.';
-  const fixture = await nativeFixture((_body, response) => {
-    nativeReply(response, ++calls === 1
-      ? [{ type: 'tool_use', id: 'plan-review', name: 'ExitPlanMode', input: { plan } }]
-      : [{ type: 'text', text: 'PLAN_ACCEPTED' }]);
-  });
+  const fixture = await nativeFixture(planningReply(plan, 'plan-review', 'PLAN_ACCEPTED'));
   const session = await ClaudeAgentSession.open({ sessionId: randomUUID(), cwd: fixture.cwd, model: 'claude-sonnet-4-5-20250929' }, fixture.options);
   const events: any[] = [];
   const pump = (async () => { for await (const item of session.observe()) if (item.type === 'observation') events.push(item.event); })();
@@ -70,7 +76,7 @@ for (const permissionMode of ['default', 'acceptEdits']) it(`reviews native Exit
     await session.setSessionSetting('permissions', permissionMode);
     await session.setPlanning(true);
     await session.sendMessage('REVIEW_THE_PLAN');
-    await expect.poll(() => events.some((event) => event.type === 'interaction_requested' && event.request.kind === 'plan_approval')).toBe(true);
+    await expect.poll(() => events.some((event) => event.type === 'interaction_requested' && event.request.kind === 'plan_approval'), { timeout: 8000 }).toBe(true);
     const review = events.find((event) => event.type === 'interaction_requested' && event.request.kind === 'plan_approval');
     expect(review.request.plan).toBe(plan);
     await session.respondToInteraction(review.request.requestId, { kind: 'plan_approval', action: 'approve_and_resume' });
@@ -81,20 +87,17 @@ for (const permissionMode of ['default', 'acceptEdits']) it(`reviews native Exit
 }, 10000);
 
 it('returns exact plan feedback to the native tool without leaving plan mode', async () => {
-  let calls = 0;
-  const fixture = await nativeFixture((_body, response) => nativeReply(response, ++calls === 1
-    ? [{ type: 'tool_use', id: 'rejected-plan', name: 'ExitPlanMode', input: { plan: '# Plan needing revision' } }]
-    : [{ type: 'text', text: 'PLAN_REJECTED' }]));
+  const fixture = await nativeFixture(planningReply('# Plan needing revision', 'rejected-plan', 'PLAN_REJECTED'));
   const session = await ClaudeAgentSession.open({ sessionId: randomUUID(), cwd: fixture.cwd, planning: true }, fixture.options);
   const events: any[] = [];
   const pump = (async () => { for await (const item of session.observe()) if (item.type === 'observation') events.push(item.event); })();
   try {
     await session.sendMessage('PLAN_FEEDBACK');
-    await expect.poll(() => events.some((event) => event.type === 'interaction_requested' && event.request.kind === 'plan_approval')).toBe(true);
+    await expect.poll(() => events.some((event) => event.type === 'interaction_requested' && event.request.kind === 'plan_approval'), { timeout: 8000 }).toBe(true);
     const review = events.find((event) => event.type === 'interaction_requested' && event.request.kind === 'plan_approval');
     await session.respondToInteraction(review.request.requestId, { kind: 'plan_approval', action: 'reject', feedback: 'Keep the existing API.' });
     await expect.poll(() => events.some((event) => event.type === 'turn_completed')).toBe(true);
-    expect(JSON.stringify(fixture.bodies[1].messages)).toContain('Keep the existing API.');
+    expect(JSON.stringify(fixture.bodies.at(-1).messages)).toContain('Keep the existing API.');
     expect((await session.runtimeInfo()).planning?.active).toBe(true);
     await expect(session.respondToInteraction(review.request.requestId, { kind: 'plan_approval', action: 'approve_and_resume' })).rejects.toThrow(/no longer active/);
   } finally { await session.dispose(); await pump; await fixture.close(); }

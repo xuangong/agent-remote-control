@@ -16,7 +16,7 @@ async function fixture(messages: SessionMessageInfo[]) {
     const url = new URL(request.url!, 'http://fixture'); requests.push(url.pathname);
     if (url.pathname !== '/api/session/ses_input/message') { response.writeHead(404).end(); return; }
     const offset = Number(url.searchParams.get('cursor') ?? 0), limit = Number(url.searchParams.get('limit') ?? 200);
-    const data = messages.toReversed().slice(offset, offset + limit);
+    const data = [...messages].reverse().slice(offset, offset + limit);
     response.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify({ data, cursor: { next: String(offset + limit) } }));
   });
   await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));

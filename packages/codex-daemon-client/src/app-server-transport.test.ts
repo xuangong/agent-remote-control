@@ -41,9 +41,10 @@ describe('CodexAppServerTransport', () => {
     const request = transport.request('thread/read', {});
     child.stdout.write('{"id":1,"error":{"code":-32602,"message":"invalid thread","data":{"field":"threadId"}}}\n');
 
-    await expect(request).rejects.toMatchObject<CodexAppServerRpcError>({
+    await expect(request).rejects.toMatchObject({
       name: 'CodexAppServerRpcError', code: -32602, data: { field: 'threadId' },
     });
+    await expect(request).rejects.toBeInstanceOf(CodexAppServerRpcError);
     await transport.dispose();
   });
 

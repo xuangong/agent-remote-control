@@ -171,7 +171,7 @@ it('preserves native message sequence and turn identity when timestamps run back
 }, 10000);
 
 it('creates, sends once, observes authoritative activity, and renames through the v2 API', async () => {
-  const f = await fixture(); const session = await f.provider.createSession({ cwd: process.cwd() });
+  const f = await fixture(); const session = await f.provider.createSession({ sessionId: 'requested', cwd: process.cwd() });
   const accepted: unknown[] = [];
   await session.sendMessage('Native input', { onAcceptance: value => accepted.push(value) });
   await expect.poll(async () => (await session.runtimeInfo()).status).toBe('running');
@@ -184,7 +184,7 @@ it('creates, sends once, observes authoritative activity, and renames through th
 }, 10000);
 
 it('admits busy steer after exact native delivery without waiting for history refresh', async () => {
-  const f = await fixture(); const session = await f.provider.createSession({ cwd: process.cwd() });
+  const f = await fixture(); const session = await f.provider.createSession({ sessionId: 'requested', cwd: process.cwd() });
   f.state.prompt = 'ack-only';
   const history = f.block(`/api/session/${session.nativeId}/message`);
   try {
@@ -404,7 +404,7 @@ it('maps project-persistent native approval explicitly and disallows session-onl
 });
 
 it('stores Host instructions once in the native session and confirms their readback', async () => {
-  const f = await fixture(), session = await f.provider.createSession({cwd:process.cwd(), systemPrompt:'Stay within this task.'});
+  const f = await fixture(), session = await f.provider.createSession({sessionId:'requested', cwd:process.cwd(), systemPrompt:'Stay within this task.'});
   const runtime = await session.runtimeInfo();
   expect(f.instructions.get(session.nativeId)).toEqual([{key:'arc.host.system', value:'Stay within this task.'}]);
   const other = await f.provider.resumeSession(runtime.persistence!, {systemPrompt:'Stay within this task.'});

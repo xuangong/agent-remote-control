@@ -13,7 +13,8 @@ it('distinguishes path access from the subsequent read-tool approval', () => {
  const read = permission(raw, {kind: 'read', path: '/outside', intention: 'Read source'});
  expect(path).toMatchObject({toolName: 'Path access', summary: 'Allow read access to this path.'});
  expect(read).toMatchObject({toolName: 'read', summary: 'Read source', allowScopes: ['once', 'session']});
- expect(read?.summary).not.toContain('toolCallId');
+ if (read?.kind !== 'tool_approval') throw new Error('Expected a tool approval request.');
+ expect(read.summary).not.toContain('toolCallId');
 });
 it('offers session command approval only when the native prompt allows it', () => {
  expect(permission({kind: 'shell', fullCommandText: 'pwd'}, {kind: 'commands', commandIdentifiers: ['pwd'], canOfferSessionApproval: true})).toMatchObject({allowScopes: ['once', 'session']});

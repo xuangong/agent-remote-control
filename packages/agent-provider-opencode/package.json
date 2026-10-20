@@ -13,7 +13,7 @@
   "types": "./dist/index.d.ts",
   "scripts": {
     "build": "tsc && node ../../scripts/build-opencode-plugin.mjs",
-    "typecheck": "tsc --noEmit",
+    "typecheck": "tsc --noEmit && tsc -p tsconfig.test.json",
     "test": "vitest run --testTimeout=10000"
   },
   "dependencies": {

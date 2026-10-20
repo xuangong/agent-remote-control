@@ -121,8 +121,12 @@ test.each(['team', 'tpm'] as const)('retained %s tools cannot execute on a prede
   });
   const access = { controllerId: 'host', sessionRouting: service.executionRouting, available: () => true,
     supportedProviders: () => ['codex'], acquire: unavailable, create: unavailable, execute: unavailable };
+  const team = { id: 'team', operationId: 'create', title: 'Team', revision: 1, status: 'active', createdAt: 1, updatedAt: 1,
+    source: { hostId: 'relay-host', providerId: 'codex', nativeSessionId: 'source', title: 'Source' },
+    members: [{ id: 'member', hostId: 'relay-host', providerId: 'codex', nativeSessionId: 'A', role: 'leader', name: 'Role', responsibility: 'Verify', creation: 'ready', activity: 'idle', summary: '', updatedAt: 1 }],
+    messages: [] };
   const runtime = role === 'team'
-    ? new TeamRuntime(join(root, 'team'), access, async () => ({ id: 'team' }), 1_000_000)
+    ? new TeamRuntime(join(root, 'team'), access, async () => team, 1_000_000)
     : new TpmCoordinator({ stateDirectory: join(root, 'tpm'), tickMs: 1_000_000 }, access);
   try {
     await service.ready; await runtime.ready;

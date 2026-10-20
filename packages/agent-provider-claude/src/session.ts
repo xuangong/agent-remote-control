@@ -4,7 +4,7 @@ import {ClaudeNativeProcess} from './native-process.js';
 import { claudeMessageContent } from './message-content.js';
 import { randomUUID } from 'node:crypto';
 import { query, type Options, type ModelInfo, type PermissionMode, type Query, type SDKMessage, type SDKUserMessage, type SessionMessage } from '@anthropic-ai/claude-agent-sdk';
-import type { AgentCapabilities, AgentInputPart, AgentInteractionResponse, AgentMessageOptions, AgentRuntimeInfo, AgentSession, AgentSessionConfig,
+import type { AgentCapabilities, AgentInputAcceptance, AgentInputPart, AgentInteractionResponse, AgentMessageOptions, AgentRuntimeInfo, AgentSession, AgentSessionConfig,
   AgentStreamEvent, ProviderStreamItem } from '@orchardworks/agent-provider-sdk';
 import { IMAGE_INPUT_CAPABILITIES, validateSessionSetting, type AgentSessionSetting } from '@orchardworks/agent-provider-sdk';
 import { Channel, deadline, DeadlineError } from './channel.js';
@@ -50,9 +50,12 @@ export class ClaudeShutdownError extends Error {
 export class ClaudeAgentSession implements AgentSession {
   readonly nativeEvidence: ClaudeNativeEvidence;
   private acceptance?: AgentMessageOptions['onAcceptance'];
-  readonly capabilities: AgentCapabilities = { resourceInput: RESOURCE_INPUT_CAPABILITIES, imageInput: IMAGE_INPUT_CAPABILITIES, history: true, sendMessage: true, steer: false, cancel: true, readResource: true,
+  readonly capabilities: AgentCapabilities = { resourceInput: RESOURCE_INPUT_CAPABILITIES, imageInput: IMAGE_INPUT_CAPABILITIES, history: true, sendMessage: true, steer: true, cancel: true, readResource: true,
     planning: true, commands: true, sessionSettings: true, interactions: { question: true, toolApproval: true, planApproval: true } };
   private readonly input = new Channel<SDKUserMessage>();
+  /** Input submitted during an active turn. The native runtime folds it into that turn or runs it next, as its command lifecycle reports. */
+  private readonly steering = new Map<string, { message: SDKUserMessage & { uuid: ReturnType<typeof randomUUID> }; started: boolean;
+    onAcceptance?: AgentMessageOptions['onAcceptance'] }>();
   private readonly output = new Channel<ProviderStreamItem>();
   private readonly projector: ClaudeEventProjector;
   private readonly images: ClaudeImageRegistry;
@@ -104,12 +107,16 @@ export class ClaudeAgentSession implements AgentSession {
       options.catalog ?? createClaudeCatalog(options.env ?? {}, this.timeout), () => this.runtimeUpdated());
     this.nativeEvidence = new ClaudeNativeEvidence({ id: config.sessionId, cwd: config.cwd ?? process.cwd(), options,
       open: () => !this.disposed && !this.failure, mutable: () => this.nativeModelConfirmed && !this.changingSetting && !this.preparingMessage,
-      counts: () => ({ pendingInteractions: this.interactions?.size ?? 0, activeChildren: this.children.descriptors().filter(child => child.status === 'running' || child.status === 'waiting').length, pendingInput: Boolean(this.turnId) }),
+      counts: () => ({ pendingInteractions: this.interactions?.size ?? 0, activeChildren: this.children.descriptors().filter(child => child.status === 'running' || child.status === 'waiting').length, pendingInput: this.inputPending() }),
       selections: () => ({ model: this.config.model ?? 'default', reasoningEffort: this.appliedEffort === undefined ? this.config.reasoningEffort ?? 'default' : this.appliedEffort ?? 'default',
         ...(this.config.systemPrompt !== undefined ? { system: this.config.systemPrompt } : {}),
         providerOptions: JSON.stringify({ permissionMode: this.permissionMode, planning: this.planning, ...(this.config.instructions ? { instructions: this.config.instructions } : {}) }) }),
       messages: () => (options.catalog ?? createClaudeCatalog(options.env ?? {}, this.timeout)).messages(config.sessionId),
-      dispatch: (text, inputId) => { this.assertMessageReady({}); this.dispatchMessage(text, inputId); },
+      dispatch: (text, inputId) => {
+        this.assertMessageReady({});
+        if (this.turnId || this.steering.size) throw new AgentOperationRejectedError('operation_rejected', 'Claude already has an active turn.');
+        this.dispatchMessage(text, inputId);
+      },
     });
     this.interactions = new ClaudeInteractions((event) => {
       this.emit(event);
@@ -173,7 +180,15 @@ export class ClaudeAgentSession implements AgentSession {
   async sendMessage(text: string, options: AgentMessageOptions = {}): Promise<void> {
     this.assertMessageReady(options);
     if (!text.trim()) throw new AgentOperationRejectedError('operation_rejected', 'Claude message cannot be empty.');
-    this.dispatchMessage(text, undefined, options);
+    if (this.inputPending()) this.steerMessage(text, options);
+    else this.dispatchMessage(text, undefined, options);
+  }
+
+  async steer(text: string, options: AgentMessageOptions = {}): Promise<void> {
+    this.assertMessageReady(options);
+    if (!this.turnId) throw new AgentOperationRejectedError('operation_rejected', 'Claude has no active turn.');
+    if (!text.trim()) throw new AgentOperationRejectedError('operation_rejected', 'Claude message cannot be empty.');
+    this.steerMessage(text, options);
   }
 
   async sendMessageContent(parts: readonly AgentInputPart[], options: AgentMessageOptions = {}): Promise<void> {
@@ -184,30 +199,72 @@ export class ClaudeAgentSession implements AgentSession {
     try {
       const content = await prepareAgentOperation(() => claudeMessageContent(snapshot));
       this.requireOpen();
-      this.dispatchMessage(content, undefined, options);
+      if (this.inputPending()) this.steerMessage(content, options);
+      else this.dispatchMessage(content, undefined, options);
     } finally { this.preparingMessage = false; if (!this.disposed && !this.failure) this.runtimeUpdated(); }
   }
 
   private assertMessageReady(options: AgentMessageOptions): void {
     this.requireOpen();
     if (options.delivery === 'next_turn') throw new AgentOperationRejectedError('operation_rejected', 'Claude queued delivery is not supported.');
-    if (this.turnId || this.changingSetting || this.preparingMessage) throw new AgentOperationRejectedError('operation_rejected', 'Claude already has an active turn or setting change.');
+    if (this.changingSetting || this.preparingMessage) throw new AgentOperationRejectedError('operation_rejected', 'Claude already has a setting change or message submission in progress.');
   }
 
   private dispatchMessage(content: SDKUserMessage['message']['content'], turnId = randomUUID(), options: AgentMessageOptions = {}): void {
-    const message: SDKUserMessage = { type: 'user', uuid: turnId, session_id: this.config.sessionId,
-      parent_tool_use_id: null, message: { role: 'user', content } };
+    const message = { type: 'user' as const, uuid: turnId, session_id: this.config.sessionId,
+      parent_tool_use_id: null, message: { role: 'user' as const, content } };
     this.input.push(message);
-    this.turnId = turnId;
-    this.inputDispatched = true;
     this.acceptance = options.onAcceptance;
-    this.nativeEvidence.noteDispatch(turnId);
+    this.beginTurn(message);
+  }
+
+  private beginTurn(message: SDKUserMessage & { uuid: ReturnType<typeof randomUUID> }): void {
+    this.turnId = message.uuid;
+    this.inputDispatched = true;
+    this.nativeEvidence.noteDispatch(message.uuid);
     this.usage.startTurn();
     this.status = 'running';
     this.cancelRequested = false;
-    this.emit({ type: 'turn_started', provider: 'claude', turnId });
+    this.emit({ type: 'turn_started', provider: 'claude', turnId: message.uuid });
     for (const observation of this.projector.project(message)) this.output.push({ ...observation, event: this.withTurn(observation.event) });
     this.runtimeUpdated();
+  }
+
+  /** A turn is running or steered input has not yet started, so new input must follow it through the native queue. */
+  private inputPending(): boolean {
+    return Boolean(this.turnId) || [...this.steering.values()].some(steered => !steered.started);
+  }
+
+  /** Native streaming input accepts a message mid-turn; acceptance follows its command lifecycle. */
+  private steerMessage(content: SDKUserMessage['message']['content'], options: AgentMessageOptions): void {
+    const message = { type: 'user' as const, uuid: randomUUID(), session_id: this.config.sessionId,
+      parent_tool_use_id: null, message: { role: 'user' as const, content } };
+    this.steering.set(message.uuid, { message, started: false, onAcceptance: options.onAcceptance });
+    this.input.push(message);
+  }
+
+  private noteCommandLifecycle(commandUuid: string, state: string): void {
+    const steered = this.steering.get(commandUuid);
+    if (!steered) return;
+    if (state === 'queued') this.acceptSteered(steered, 'queued');
+    else if (state === 'started' && !steered.started) {
+      // A command that starts while the turn is still active was folded into it; otherwise it runs as the next turn.
+      if (this.turnId) {
+        steered.started = true;
+        for (const observation of this.projector.project(steered.message)) this.output.push({ ...observation, event: this.withTurn(observation.event) });
+        this.acceptSteered(steered, 'handled');
+      } else this.startSteeredTurn(steered);
+    } else if (state === 'completed' || state === 'cancelled') this.steering.delete(commandUuid);
+  }
+
+  private startSteeredTurn(steered: NonNullable<ReturnType<typeof this.steering.get>>): void {
+    steered.started = true;
+    this.beginTurn(steered.message);
+    this.acceptSteered(steered, 'started');
+  }
+
+  private acceptSteered(steered: NonNullable<ReturnType<typeof this.steering.get>>, disposition: AgentInputAcceptance['disposition']): void {
+    try { steered.onAcceptance?.({ disposition }); } catch { /* Observers cannot fail the native runtime. */ }
   }
 
   async respondToInteraction(requestId: string, response: AgentInteractionResponse): Promise<void> {
@@ -364,7 +421,7 @@ export class ClaudeAgentSession implements AgentSession {
       this.images.stop();
       this.interactions.close();
       this.status = 'closed';
-      this.input.close();
+      this.input.close(); this.steering.clear();
       this.native?.close();
     }
     return this.closing = (async () => {
@@ -415,7 +472,7 @@ export class ClaudeAgentSession implements AgentSession {
     void this.children.close();
     this.runtimeUpdated();
     this.output.fail(this.failure);
-    this.input.close();
+    this.input.close(); this.steering.clear();
     this.native.close();
   }
 
@@ -424,6 +481,11 @@ export class ClaudeAgentSession implements AgentSession {
       for await (const message of this.native) {
         if (this.disposed) break;
         if (message.session_id && message.session_id !== this.config.sessionId) throw new Error('Claude returned a different native session identity.');
+        const lifecycle = message as { type: string; command_uuid?: unknown; state?: unknown };
+        if (lifecycle.type === 'command_lifecycle') {
+          if (typeof lifecycle.command_uuid === 'string' && typeof lifecycle.state === 'string') this.noteCommandLifecycle(lifecycle.command_uuid, lifecycle.state);
+          continue;
+        }
         if (this.nativeEvidence.noteMessage(message)) {
           const acceptance = this.acceptance; this.acceptance = undefined;
           try { acceptance?.({ disposition: 'started' }); } catch { /* Observers cannot fail the native runtime. */ }

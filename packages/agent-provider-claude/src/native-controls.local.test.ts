@@ -51,7 +51,7 @@ it.each([false, true])('changes native model and permissions with restricted san
     await session.sendMessage('VERIFY_SETTINGS');
     await expect.poll(() => events.some((event) => event.type === 'turn_completed')).toBe(true);
     expect(fixture.bodies[0].model).toBe((await session.runtimeInfo()).model?.replace(/\[1m\]$/, ''));
-    expect(session.capabilities.steer).toBe(false);
+    expect(session.capabilities.steer).toBe(true);
   } finally { await session.dispose(); await pump; await fixture.close(); }
 }, 10000);
 

@@ -58,14 +58,13 @@ describe('Claude persistent session', () => {
     await session.dispose();
   });
 
-  it('uses native streaming input across turns and rejects concurrent message submission', async () => {
+  it('uses native streaming input across turns', async () => {
     const native = runtime();
     const session = await ClaudeAgentSession.open({ sessionId: 'native', cwd: '/workspace' }, { query: native.factory });
     const output = session.observe()[Symbol.asyncIterator]();
     expect((await output.next()).value).toEqual({ type: 'history_boundary' });
     await session.sendMessage('First');
     expect((await native.nextInput()).value).toMatchObject({ type: 'user', session_id: 'native', message: { content: 'First' } });
-    await expect(session.sendMessage('racing')).rejects.toThrow(/active/);
     native.push({ type: 'result', subtype: 'success', is_error: false, session_id: 'native', uuid: 'done', usage: { input_tokens: 7, output_tokens: 3 } });
     await nextEvent(output, 'turn_completed');
     await session.sendMessage('Second');
@@ -108,6 +107,68 @@ describe('Claude persistent session', () => {
     const factory = (args: any) => ({ ...native.factory(args), initializationResult: () => new Promise(() => undefined) });
     await expect(ClaudeAgentSession.open({ sessionId: 'native' }, { query: factory, requestTimeoutMs: 20 })).rejects.toThrow(/timed out/);
     expect(native.closed).toBe(true);
+  });
+});
+
+describe('Claude input during an active turn', () => {
+  const lifecycle = (command_uuid: string, state: string) => ({ type: 'command_lifecycle', session_id: 'native', uuid: `${command_uuid}-${state}`, command_uuid, state });
+  const result = (user_message_uuid: string) => ({ type: 'result', subtype: 'success', is_error: false, session_id: 'native', uuid: `result-${user_message_uuid}`, user_message_uuid, usage: {} });
+
+  it('folds a message into the running turn when the native runtime starts it before the turn ends', async () => {
+    const native = runtime();
+    const session = await ClaudeAgentSession.open({ sessionId: 'native' }, { query: native.factory });
+    const output = session.observe()[Symbol.asyncIterator]();
+    try {
+      await session.sendMessage('First');
+      const first = (await native.nextInput()).value;
+      const acceptances: string[] = [];
+      await session.sendMessage('Steer', { onAcceptance: ({ disposition }) => acceptances.push(disposition) });
+      const steered = (await native.nextInput()).value;
+      expect(steered).toMatchObject({ type: 'user', message: { content: 'Steer' } });
+      expect(steered.uuid).not.toBe(first.uuid);
+      native.push(lifecycle(steered.uuid, 'queued'));
+      native.push(lifecycle(steered.uuid, 'started'));
+      await expect.poll(() => acceptances).toEqual(['queued', 'handled']);
+      native.push(lifecycle(steered.uuid, 'completed'));
+      native.push(result(first.uuid));
+      const completed = await nextEvent(output, 'turn_completed');
+      expect(completed).toMatchObject({ turnId: first.uuid });
+      expect((await session.runtimeInfo()).status).toBe('idle');
+    } finally { await session.dispose(); }
+  });
+
+  it('runs a message as the next turn when the native runtime starts it after the turn ends', async () => {
+    const native = runtime();
+    const session = await ClaudeAgentSession.open({ sessionId: 'native' }, { query: native.factory });
+    const output = session.observe()[Symbol.asyncIterator]();
+    try {
+      await session.sendMessage('First');
+      const first = (await native.nextInput()).value;
+      const acceptances: string[] = [];
+      await session.steer('Next', { onAcceptance: ({ disposition }) => acceptances.push(disposition) });
+      const steered = (await native.nextInput()).value;
+      native.push(lifecycle(steered.uuid, 'queued'));
+      native.push(result(first.uuid));
+      await nextEvent(output, 'turn_completed');
+      await session.sendMessage('Behind');
+      expect((await native.nextInput()).value).toMatchObject({ message: { content: 'Behind' } });
+      native.push(lifecycle(steered.uuid, 'started'));
+      expect(await nextEvent(output, 'turn_started')).toMatchObject({ turnId: steered.uuid });
+      expect(acceptances).toEqual(['queued', 'started']);
+      expect((await session.runtimeInfo()).status).toBe('running');
+      native.push(result(steered.uuid));
+      expect(await nextEvent(output, 'turn_completed')).toMatchObject({ turnId: steered.uuid });
+    } finally { await session.dispose(); }
+  });
+
+  it('rejects steering without an active turn and keeps next-turn delivery unsupported', async () => {
+    const native = runtime();
+    const session = await ClaudeAgentSession.open({ sessionId: 'native' }, { query: native.factory });
+    try {
+      expect(session.capabilities.steer).toBe(true);
+      await expect(session.steer('nothing to steer')).rejects.toThrow(/no active turn/);
+      await expect(session.sendMessage('First', { delivery: 'next_turn' })).rejects.toThrow(/queued delivery/);
+    } finally { await session.dispose(); }
   });
 });
 
@@ -204,7 +265,7 @@ it('revokes native image reads after transport failure', async () => {
   } finally { await session.dispose(); }
 });
 
-it('sends ordered base64 image blocks and rejects busy rich input', async () => {
+it('sends ordered base64 image blocks and forwards rich input during an active turn', async () => {
   const root = await mkdtemp(join(tmpdir(), 'claude-input-'));
   const native = runtime();
   const session = await ClaudeAgentSession.open({ sessionId: 'native' }, { query: native.factory });
@@ -225,12 +286,10 @@ it('sends ordered base64 image blocks and rejects busy rich input', async () => 
     expect(sent.message.content.map((part: any) => part.type)).toEqual(['text', 'image', 'text', 'image', 'text']);
     expect(sent.message.content[1].source).toEqual({ type: 'base64', media_type: 'image/png', data: png.toString('base64') });
     expect(sent.message.content[3].source.data).toBe(jpg.toString('base64'));
-    await expect(session.sendMessageContent([parts[1]])).rejects.toThrow(/active/);
-    const output = session.observe()[Symbol.asyncIterator]();
-    native.push({ type: 'result', subtype: 'success', session_id: 'native', uuid: 'done-image', usage: {} });
-    await nextEvent(output, 'turn_completed');
     await session.sendMessageContent([parts[1]]);
-    expect((await native.nextInput()).value.message.content).toHaveLength(1);
+    const steered = (await native.nextInput()).value;
+    expect(steered.message.content).toHaveLength(1);
+    expect(steered.uuid).not.toBe(sent.uuid);
     expect(session.capabilities.imageInput).toMatchObject({ maxImages: 8 });
   } finally { await session.dispose(); await rm(root, { recursive: true, force: true }); }
 });
@@ -242,7 +301,7 @@ it('reserves submission during image reads and releases it on a failed image pre
   try {
     const path = join(root, 'missing.png');
     const sending = session.sendMessageContent([{ type: 'image', path, sha256: 'a'.repeat(64), mediaType: 'image/png', label: 'image #1' }]);
-    await expect(session.sendMessage('racing')).rejects.toThrow(/active/);
+    await expect(session.sendMessage('racing')).rejects.toThrow(/submission in progress/);
     await expect(session.setPlanning(true)).rejects.toThrow(/idle/);
     await expect(sending).rejects.toThrow(/ENOENT/);
     expect((await session.runtimeInfo()).status).toBe('idle');
@@ -252,12 +311,3 @@ it('reserves submission during image reads and releases it on a failed image pre
 });
 
 
-it('reports local busy rejection without enqueuing a second input', async () => {
-  const native = runtime();
-  const session = await ClaudeAgentSession.open({ sessionId: 'native' }, { query: native.factory });
-  try {
-    await session.sendMessage('First');
-    await expect(session.sendMessage('Second')).rejects.toMatchObject({ name: 'AgentOperationRejectedError' });
-    expect((await native.nextInput()).value.message.content).toBe('First');
-  } finally { await session.dispose(); }
-});

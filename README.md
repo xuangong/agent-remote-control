@@ -399,6 +399,9 @@ The repository-root installers are [install.sh](install.sh) for macOS/Linux and
 your site's `/install.sh` and `/install.ps1`; the download commands below use them.
 Pass your site's `--server` / `-Server` explicitly so first installation does not
 select the default public service.
+Published releases currently list only macOS arm64, the platform they are tested
+on, so the installers and remote updates refuse other platforms until releases are
+tested there again (see [Controller releases](docs/controller-updates.md)).
 
 The installer downloads a published Controller package from this project's
 **GitHub Releases**, verifies its manifest/platform/Node compatibility and SHA-256,

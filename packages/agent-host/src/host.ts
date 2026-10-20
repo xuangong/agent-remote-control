@@ -17,6 +17,7 @@ import { nativeSessionRefKey, nativePrefixSegmentAncestors, isNativeSessionRef, 
 import { TpmCoordinator, type TpmOptions, type TpmSessionAccess } from './tpm.js';
 import { isTpmCreate, isTpmAction } from '@orchardworks/agent-remote-protocol';
 import { SessionBindings, SessionBindingError } from '@orchardworks/agent-remote-relay';
+import { createNativeStartBackoff, nativeStartTarget } from './native-start-backoff.js';
 import type { HostProviderDiscovery } from './provider-discovery.js';
 import {NativeSessionOwnerError, type NativeOwnerIdentity, type NativeHandoffGrant} from './native-session-owner.js';
 import { createCodexDaemonControl } from './codex-daemon-control.js';
@@ -877,6 +878,7 @@ export function createAgentHostRuntime(options: AgentHostRuntimeOptions): AgentH
     });
     return json(200, publicBinding(await tracked(project(providerId, proposedAgentId, nativeSessionId, undefined, undefined, false, undefined, qualified && !savedCreation))));
   }
+  const nativeStarts = createNativeStartBackoff();
   async function control(request: RemoteHostControlRequest, context?: TrustedSuccessionContext): Promise<AgentRemoteHttpResult> {
     const requestId = request.requestId && /^[a-zA-Z0-9-]{1,80}$/.test(request.requestId) ? request.requestId : randomUUID();
     const operation = request.path === '/remote/attach' || request.path === '/remote/child/attach' ? 'session_attach'
@@ -887,7 +889,10 @@ export function createAgentHostRuntime(options: AgentHostRuntimeOptions): AgentH
         ...(status === undefined ? {} : { status }), ...(code ? { code } : {}) }); } catch { /* Diagnostics cannot change request outcomes. */ }
     };
     diagnostic('host_request_started');
-    const result = await controlRequest(request, context);
+    const start = nativeStartTarget(request.path, request.method, request.body);
+    const backedOff = start && nativeStarts.blocked(start);
+    const result = backedOff || await controlRequest(request, context);
+    if (start && !backedOff) nativeStarts.settle(start, result);
     const data = result.status >= 400 ? JSON.parse(result.body) : {};
     diagnostic('host_request_completed', result.status, typeof data.code === 'string' ? data.code : undefined);
     return result.status >= 400 ? { ...result, body: JSON.stringify({ ...data, requestId }) } : result;

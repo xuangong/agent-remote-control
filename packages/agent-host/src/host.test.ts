@@ -1053,6 +1053,35 @@ it('reports a confirmed attach failure over a real uplink without classifying it
   } finally { await host.close(); await broker.close(); }
 });
 
+it('backs off repeated native start failures instead of spawning on every client retry', async () => {
+  let now = 1_000_000;
+  const clock = vi.spyOn(Date, 'now').mockImplementation(() => now);
+  const registration = fixture('codex');
+  let opens = 0, failing = true;
+  const open = registration.directory.open.bind(registration.directory);
+  registration.directory.open = async (id, options) => { opens++; if (failing) throw new Error('native process exited'); return open(id, options); };
+  const host = createAgentHostRuntime({ registrations: [registration] });
+  const attach = (sessionId: string) => host.control({ method: 'POST', path: '/remote/attach', sessionId, body: JSON.stringify({ providerId: 'codex', nativeSessionId: 'native' }) });
+  try {
+    expect((await attach('relay-1')).status).toBe(503);
+    expect(opens).toBe(1);
+    now += 4_999;
+    const repeated = await attach('relay-2');
+    expect(repeated.status).toBe(503);
+    expect(JSON.parse(repeated.body)).toMatchObject({ code: 'session_attach_failed' });
+    expect(opens).toBe(1);
+    now += 1;
+    expect((await attach('relay-3')).status).toBe(503);
+    expect(opens).toBe(2);
+    now += 9_999;
+    expect((await attach('relay-4')).status).toBe(503);
+    expect(opens).toBe(2);
+    failing = false; now += 1;
+    expect((await attach('relay-5')).status).toBe(200);
+    expect(opens).toBe(3);
+  } finally { clock.mockRestore(); await host.close(); }
+});
+
 it.each(['workspace', 'resume'] as const)('preserves confirmed native session unavailability from %s through the Host and Relay uplink', async stage => {
   const broker = createHostBroker({ origin: 'http://relay.test', rpcTimeoutMs: 1000 });
   const pairing = await broker.handleRequest(new Request('http://relay.test/v1/remote/pairings', { method: 'POST', body: '{}' }));

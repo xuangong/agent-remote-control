@@ -383,9 +383,13 @@ outside those roots and sessions whose workspace cannot be established. Native
 permission settings are read-only to remote controllers except for trusted shared
 Codex sessions and supported Claude modes. Shared Codex sessions accept permission
 changes from the web and publish native permission updates from other clients on
-Windows, macOS, and Linux. Claude exposes `default`, `acceptEdits`, `dontAsk`, and
-`plan` through its native permission setter. These controls preserve the restricted
-native sandbox and do not expose `bypassPermissions`.
+Windows, macOS, and Linux. Claude exposes `default`, `acceptEdits`, `dontAsk`,
+`plan`, and **YOLO** (`bypassPermissions`) through its native permission setter.
+YOLO skips native permission prompts while preserving the existing command
+sandbox and workspace admission rules. Sessions start in `default` unless a
+trusted session restores a previously selected mode; selecting YOLO requires
+native confirmation and native policy may reject it. Restricted sessions reset
+saved elevated modes to `default` when reopened.
 Native requirements and idle-session checks still apply; workspace admission
 remains enforced. Model controls remain available. These rules apply to the CLI. Embedders can provide the same trusted
 `executionPolicy` through `createAgentHostRuntime` or `createAgentHost`, and

@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { afterEach, expect, it } from 'vitest';
 import { runDiagnosticsCommand } from './diagnostics-command.js';
 const roots: string[] = [];
-afterEach(async () => { await Promise.all(roots.splice(0).map(root => rm(root, { recursive: true, force: true }))); });
+afterEach(async () => { await Promise.all(roots.splice(0).map(root => rm(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }))); });
 async function setup() { const root = await mkdtemp(join(tmpdir(), 'diagnostics-command-')); roots.push(root); return root; }
 async function run(root: string, args: string[]) { let output = ''; await runDiagnosticsCommand(args, root, text => { output += text; }); return JSON.parse(output); }
 const relay = { id: 'e1', timestamp: '2026-09-20T01:00:00.000Z', source: 'relay', hostId: 'h1', relayInstanceId: 'r1', event: 'host_disconnected' };

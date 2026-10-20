@@ -168,5 +168,5 @@ it.each(['claude', 'copilot'])('fences transferred %s content input before it re
     const session = await directory.open('reader'); await session.sendMessageContent!([{ type: 'text', text: 'allowed' }]); expect(inputs).toBe(1);
     const owner = await inspectNativeOwner(key); cli = await acquireNativeSession({ ...key, kind: 'native_cli', takeOver: owner!.generation }); cli.activate(async () => 'requested');
     await expect(session.sendMessageContent!([{ type: 'text', text: 'stale' }])).rejects.toThrow(/control|ownership/i); expect(inputs).toBe(1);
-  } finally { await cli?.release(); await directory.close(); await rm(root, { recursive: true, force: true }); }
+  } finally { await cli?.release(); await directory.close(); await rm(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }); }
 }, 10000);

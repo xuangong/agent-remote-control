@@ -18,7 +18,7 @@ async function fixture(options?: Parameters<typeof createOperationCache>[0]) {
   const cache = createOperationCache(options);
   const boundary = new SessionSuccessionBoundary(contexts, () => {}, () => undefined, cache);
   const leases: NativeSessionLease[] = [];
-  cleanup.push(async () => { await Promise.all(leases.map(lease => lease.release())); await boundary.close(); await cache.close(); await rm(root, { recursive: true, force: true }); });
+  cleanup.push(async () => { await Promise.all(leases.map(lease => lease.release())); await boundary.close(); await cache.close(); await rm(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }); });
   const key = { root: join(root, 'owners'), providerId: 'fixture', sessionId: 'A' };
   const acquire = async (takeOver?: string) => { const lease = await acquireNativeSession({ ...key, kind: takeOver ? 'native_cli' : 'controller', takeOver, requestTimeoutMs: 1500 }); leases.push(lease); return lease; };
   const old = await acquire();

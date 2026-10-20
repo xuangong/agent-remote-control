@@ -7,7 +7,7 @@ import { afterEach, expect, it } from 'vitest';
 
 const execute = promisify(execFile);
 const roots: string[] = [];
-afterEach(async () => { await Promise.all(roots.splice(0).map(path => rm(path, { recursive: true, force: true }))); });
+afterEach(async () => { await Promise.all(roots.splice(0).map(path => rm(path, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }))); });
 async function fixture(saved: Record<string, string> = {}) {
   const root = await mkdtemp(join(tmpdir(), 'arc-codex-cli-')); roots.push(root);
   const executable = join(root, 'native codex');

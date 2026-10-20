@@ -53,7 +53,7 @@ async function fixture() {
   return { runtime, payload, deliveries, message,
     raceAdmission(change: 'connection' | 'route') { changeOnAdmission = change; },
     read: async () => await broker.hostCall('host', { action: 'read', teamId: team.id, memberId: member.id }) as Team & { receipts: TeamMessage[] },
-    async close() { await runtime.close(); await cache.close(); await rm(directory, { recursive: true, force: true }); },
+    async close() { await runtime.close(); await cache.close(); await rm(directory, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }); },
   };
 }
 

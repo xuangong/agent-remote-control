@@ -5,7 +5,7 @@ import { afterEach, expect, it } from 'vitest';
 import { clearAutostartConnection, prepareAutostartConnection, resolveAutostartConnection } from './autostart-state.js';
 
 const roots: string[] = [];
-afterEach(async () => { await Promise.all(roots.splice(0).map(root => rm(root, { recursive: true, force: true }))); });
+afterEach(async () => { await Promise.all(roots.splice(0).map(root => rm(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }))); });
 
 it('reads an existing macOS startup envelope and clears only its owned generation', async () => {
   const root = await mkdtemp(join(tmpdir(), 'agent-host-autostart-')); roots.push(root);

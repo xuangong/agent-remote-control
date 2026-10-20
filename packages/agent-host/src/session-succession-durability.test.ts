@@ -15,7 +15,7 @@ vi.mock('node:fs/promises', async importOriginal => {
   return { ...original, open: vi.fn(original.open), rename: vi.fn(original.rename), unlink: vi.fn(original.unlink), link: vi.fn(original.link) };
 });
 const roots: string[] = [];
-afterEach(async () => { vi.restoreAllMocks(); vi.unstubAllGlobals(); const original = await vi.importActual<typeof fs>('node:fs/promises'); for (const name of ['open', 'rename', 'unlink', 'link'] as const) { vi.mocked(fs[name]).mockReset(); vi.mocked(fs[name]).mockImplementation(original[name] as never); } await Promise.all(roots.splice(0).map(root => fs.rm(root, { recursive: true, force: true }))); });
+afterEach(async () => { vi.restoreAllMocks(); vi.unstubAllGlobals(); const original = await vi.importActual<typeof fs>('node:fs/promises'); for (const name of ['open', 'rename', 'unlink', 'link'] as const) { vi.mocked(fs[name]).mockReset(); vi.mocked(fs[name]).mockImplementation(original[name] as never); } await Promise.all(roots.splice(0).map(root => fs.rm(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }))); });
 const ref = (nativeSessionId: string) => ({ controllerId: 'host', providerId: 'fixture', nativeSessionId });
 const request = { operationId: 'op', roleId: 'role', expectedRevision: 1, from: ref('A') };
 async function root() { const directory = await fs.mkdtemp(join(tmpdir(), 'succession-durable-')); roots.push(directory); return directory; }

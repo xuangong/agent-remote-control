@@ -184,7 +184,7 @@ test('real WebSocket sends inject context and reject later input and the superse
     expect(running.sessions.get('A')!.sent).toEqual([]);
   } finally {
     await running?.close();
-    await rm(root, { recursive: true, force: true });
+    await rm(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
   }
 });
 
@@ -216,6 +216,6 @@ test('disconnected and cold-restarted clients recover the original receipt witho
     expect(running.contexts.read('handoff').deliveries).toHaveLength(1);
   } finally {
     await running?.close();
-    await rm(root, { recursive: true, force: true });
+    await rm(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
   }
 });

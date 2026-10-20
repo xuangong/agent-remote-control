@@ -14,7 +14,7 @@ const dirs: string[] = [];
 afterEach(async () => {
   const original = await vi.importActual<typeof import('node:fs/promises')>('node:fs/promises');
   vi.mocked(open).mockReset(); vi.mocked(open).mockImplementation(original.open);
-  await Promise.all(dirs.splice(0).map(dir => rm(dir, { recursive: true, force: true })));
+  await Promise.all(dirs.splice(0).map(dir => rm(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 })));
 });
 const ref = (nativeSessionId: string, providerId = 'p') => ({ controllerId: 'controller', providerId, nativeSessionId });
 const authority = { version: 1 as const, origin: 'https://relay.example', issuer: 'issuer', namespace: 'tenant', ownerSubject: 'owner' };

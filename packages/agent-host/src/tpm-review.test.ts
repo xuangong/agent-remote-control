@@ -41,7 +41,7 @@ async function fixture() {
   };
   const coordinator = new TpmCoordinator({ stateDirectory: directory, now: () => 100000, tickMs: 1000000, minimumReviewMs: 1 }, access);
   await coordinator.ready;
-  cleanups.push(async () => { await coordinator.close(); await rm(directory, { recursive: true, force: true }); });
+  cleanups.push(async () => { await coordinator.close(); await rm(directory, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }); });
   const tick = async () => { available = true; await coordinator.tick(); await new Promise(resolve => setTimeout(resolve, 20)); };
   return { coordinator, access, messages, listeners, statuses, recovery, tick };
 }
@@ -223,7 +223,7 @@ it('isolates corrupt TPM recovery from ordinary session extensions and shutdown'
   const f = await fixture(); const directory = await mkdtemp(join(tmpdir(), 'tpm-corrupt-'));
   await writeFile(join(directory, 'invalid.json'), '{invalid');
   const coordinator = new TpmCoordinator({ stateDirectory: directory }, f.access);
-  cleanups.push(async () => { await coordinator.close(); await rm(directory, { recursive: true, force: true }); });
+  cleanups.push(async () => { await coordinator.close(); await rm(directory, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }); });
   await expect(coordinator.ready).rejects.toThrow();
   await expect(coordinator.extensions('codex', 'ordinary')).resolves.toBeUndefined();
   await expect(coordinator.list()).rejects.toThrow();

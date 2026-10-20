@@ -25,7 +25,7 @@ async function control(owner: Owner, action = 'status', token = owner.token) {
 }
 async function fixture(mode = 'ready') {
   const directory = await mkdtemp(join(tmpdir(), 'arc-opencode-supervisor-'));
-  cleanup.push(() => rm(directory, { recursive: true, force: true }));
+  cleanup.push(() => rm(directory, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }));
   const executable = join(directory, 'opencode.mjs');
   const url = `http://127.0.0.1:${await availablePort()}`;
   await writeFile(join(directory, 'config.json'), JSON.stringify({ url, username: 'opencode', password: 'private-native-password' }));

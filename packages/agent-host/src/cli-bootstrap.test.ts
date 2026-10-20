@@ -13,7 +13,7 @@ const cleanups: Array<() => Promise<unknown>> = [];
 afterEach(async () => { for (const cleanup of cleanups.splice(0).reverse()) await cleanup(); });
 async function fixture(purpose: 'host-only' | 'gateway-setup' | 'legacy' = 'gateway-setup') {
   const root = await mkdtemp(join(tmpdir(), 'arc-bootstrap-cli-'));
-  cleanups.push(() => rm(root, { recursive: true, force: true }));
+  cleanups.push(() => rm(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }));
   const apiKey = 'sk_bootstrap_private_llm_credential'; const deviceKey = 'arc_device_saved_credential';
   const sequence: string[] = []; const registrations: Array<{ installationId: string; providers: unknown[]; key?: string; successionEnrollment?: number }> = [];
   let status = 200; let nativeFails = false; let child: ChildProcess | undefined; let output = ''; let bootstrapKey: string | undefined;

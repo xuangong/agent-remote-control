@@ -7,7 +7,7 @@ import { createCopilotHostRegistration } from './copilot.js';
 import { SessionReferenceStore } from './session-reference.js';
 
 const temporary: string[] = [];
-afterEach(async () => { await Promise.all(temporary.splice(0).map((path) => rm(path, { recursive: true, force: true }))); });
+afterEach(async () => { await Promise.all(temporary.splice(0).map((path) => rm(path, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }))); });
 async function entry(source: string) {
   const directory = await mkdtemp(join(tmpdir(), 'copilot-host-')); temporary.push(directory);
   const path = join(directory, 'copilot.mjs');

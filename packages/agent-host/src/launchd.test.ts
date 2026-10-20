@@ -7,7 +7,7 @@ import { prepareAutostartConnection, resolveAutostartConnection } from './autost
 import { saveIssuedCredential, saveRegisteredConnection } from './connection-config.js';
 
 const roots: string[] = [];
-afterEach(async () => { await Promise.all(roots.splice(0).map(root => rm(root, { recursive: true, force: true }))); });
+afterEach(async () => { await Promise.all(roots.splice(0).map(root => rm(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }))); });
 async function setup(missingDomain = false) {
   const root = await mkdtemp(join(tmpdir(), 'agent-host-launchd-')); roots.push(root);
   let loaded = false;

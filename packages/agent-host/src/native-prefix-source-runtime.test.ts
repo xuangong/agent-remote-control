@@ -48,7 +48,7 @@ for (const providerId of ['codex', 'opencode'] as const) test.each(['side', 'ask
   const authority = { version: 1 as const, origin, issuer: 'issuer', namespace: 'tenant', ownerSubject: 'owner' };
   const context = { authority, installationId: 'host', successionEnrollmentVersion: 3 as const };
   const post = async (path: string, input: unknown, agent?: string) => { const response = await fetch(origin + path, { method: 'POST', headers: agent ? { 'x-agent': agent } : {}, body: JSON.stringify(input), signal: AbortSignal.timeout(3000) }); return { status: response.status, data: await response.json() }; };
-  cleanup.push(async () => { http.closeIdleConnections(); await new Promise<void>(resolve => http.close(() => resolve())); await host.close(); await rm(root, { recursive: true, force: true }); });
+  cleanup.push(async () => { http.closeIdleConnections(); await new Promise<void>(resolve => http.close(() => resolve())); await host.close(); await rm(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }); });
   expect((await post('/remote/attach', { providerId, nativeSessionId: 'A' }, 'A')).status).toBe(200);
   const stale = bound.get('A')!.tools![0]!;
   const described = await post('/enroll', { action: 'describe', providerId, nativeSessionId: 'A', preparation: { kind: 'native_prefix', turnId: 'turn', messageId: 'message' } });

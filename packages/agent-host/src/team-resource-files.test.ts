@@ -71,7 +71,7 @@ it.each(['upload', 'download'] as const)('stops a %s when its attachment retires
     await expect(direction === 'upload' ? files.upload('team', 'member', path, 'operation', guard)
       : files.download('team', 'member', 'resource', undefined, guard)).rejects.toThrow('Attachment retired');
     expect(calls).toEqual(direction === 'upload' ? ['resource_begin', 'resource_chunk'] : ['resource_metadata', 'resource_read']);
-  } finally { await rm(root, { recursive: true, force: true }); }
+  } finally { await rm(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }); }
 });
 
 
@@ -86,5 +86,5 @@ it('does not publish the final local download if the attachment retires during t
   try {
     await expect(files.download('team', 'member', 'resource', root, () => { if (!current) throw new Error('Retired'); })).rejects.toThrow('Retired');
     expect(await readdir(root)).toEqual([]);
-  } finally { await rm(root, { recursive: true, force: true }); }
+  } finally { await rm(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }); }
 });

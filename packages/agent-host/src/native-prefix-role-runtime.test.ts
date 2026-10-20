@@ -158,5 +158,5 @@ for (const providerId of ['codex', 'opencode'] as const) test.each(['leader', 'm
     expect(forks).toBe(1);
     if (role === 'tpm') { const store = new TpmStore(tpmDirectory); await store.ready; expect(store.get('work').work.tpmNativeSessionId).toBe('A'); }
     else expect(JSON.parse(await readFile(join(teamDirectory, 'seats.json'), 'utf8'))[0].seat).toEqual(seat);
-  } finally { releaseClaim?.(); allowPoll = false; await host.close(); server.closeAllConnections(); await new Promise<void>(resolve => server.close(() => resolve())); await rm(root, { recursive: true, force: true }); }
+  } finally { releaseClaim?.(); allowPoll = false; await host.close(); server.closeAllConnections(); await new Promise<void>(resolve => server.close(() => resolve())); await rm(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }); }
 }, 10000);

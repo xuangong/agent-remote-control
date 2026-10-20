@@ -8,7 +8,7 @@ import { SessionSuccessionCoordinator } from './session-succession.js';
 import { LocalSuccessionPreparation, type LocalSuccessionAccess, type SuccessionReadiness } from './local-succession-preparation.js';
 
 const roots: string[] = [];
-afterEach(async () => { await Promise.all(roots.splice(0).map(root => rm(root, { recursive: true, force: true }))); });
+afterEach(async () => { await Promise.all(roots.splice(0).map(root => rm(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }))); });
 const source = { controllerId: 'host', providerId: 'codex', nativeSessionId: 'A' };
 const target = { ...source, nativeSessionId: 'B' };
 const request = { roleId: 'role', operationId: 'op', expectedRevision: 1, from: source };

@@ -33,7 +33,7 @@ async function run(input: string, legacy = false) {
   } finally {
     if (child && child.exitCode === null && child.signalCode === null) { const done = once(child, 'close'); child.kill('SIGKILL'); await done; }
     await new Promise<void>(resolve => server.close(() => resolve()));
-    await rm(root, { recursive: true, force: true });
+    await rm(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
   }
 }
 it('runs the built CLI through its authenticated socket and accepts buffered interactive answers', async () => {

@@ -10,7 +10,7 @@ import { spawnCodexAppServer } from '../../agent-provider-codex/src/native.js';
 import { CodexAppServerTransport } from '../../codex-daemon-client/src/app-server-transport.js';
 
 const directories: string[] = [];
-afterEach(async () => { for (const directory of directories.splice(0)) await rm(directory, { recursive: true, force: true }); });
+afterEach(async () => { for (const directory of directories.splice(0)) await rm(directory, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }); });
 async function directory() {
   const path = await mkdtemp(join(tmpdir(), 'controller native & spaces '));
   directories.push(path); return path;

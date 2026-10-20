@@ -36,7 +36,7 @@ it('preserves OpenCode grant and disposal causes after native completion and ref
     expect(failure).toBeInstanceOf(AggregateError); expect(failure).not.toBeInstanceOf(AgentOperationRejectedError);
     expect(failure.errors).toEqual([grantFailure, disposalFailure]); expect(completed).toBe(1); expect(f.counts().creates).toBe(1);
     await expect(f.extensions().tools![0]!.execute({})).rejects.toThrow(/identity.*ready/i);
-  } finally { await directory.close(); await rm(root, { recursive: true, force: true }); }
+  } finally { await directory.close(); await rm(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }); }
 }, 10000);
 it('retains OpenCode native handle validation and disposal failures after one create', async () => {
   const root = await mkdtemp(join(tmpdir(), 'opencode-native-cleanup-')), f = fixture(root), cleanup = new Error('native cleanup uncertain');
@@ -48,7 +48,7 @@ it('retains OpenCode native handle validation and disposal failures after one cr
     const failure = await directory.create({}).catch(error => error);
     expect(failure).toBeInstanceOf(AggregateError); expect(failure).not.toBeInstanceOf(AgentOperationRejectedError);
     expect(failure.errors[0].message).toMatch(/native persistence handle/); expect(failure.errors[1]).toBe(cleanup); expect(f.counts().creates).toBe(1);
-  } finally { await directory.close(); await rm(root, { recursive: true, force: true }); }
+  } finally { await directory.close(); await rm(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }); }
 }, 10000);
 it('persists provider-scoped Ask grants, restores callbacks, and prevents release or editing', async () => {
   const root = await mkdtemp(join(tmpdir(), 'arc-opencode-ask-')); const f = fixture(root);
@@ -67,7 +67,7 @@ it('persists provider-scoped Ask grants, restores callbacks, and prevents releas
     expect(f.extensions().tools![0]!.name).toBe('read_source_session'); expect(directory.requiresController!('ask')).toBe(true);
     expect(f.counts()).toEqual({ creates: 1, resumes: 1, reads: 1 });
     await expect(new SessionReferenceStore(root).get('ask')).rejects.toThrow(/invalid/);
-  } finally { await directory.close(); await rm(root, { recursive: true, force: true }); }
+  } finally { await directory.close(); await rm(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }); }
 }, 10000);
 it('rechecks source authorization on create, callback read, and resume', async () => {
   const root = await mkdtemp(join(tmpdir(), 'arc-opencode-source-')); const f = fixture(root);
@@ -81,7 +81,7 @@ it('rechecks source authorization on create, callback read, and resume', async (
     await (await directory.open('ask')).dispose();
     await expect(directory.open('ask')).rejects.toThrow(/outside/); expect(f.counts().resumes).toBe(0);
     expect(checked).toEqual(['source', 'source', 'source', 'source']);
-  } finally { await directory.close(); await rm(root, { recursive: true, force: true }); }
+  } finally { await directory.close(); await rm(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }); }
 }, 10000);
 it('fails closed on saved Ask grants while ordinary sessions work without the plugin', async () => {
   const root = await mkdtemp(join(tmpdir(), 'arc-opencode-offline-')); const f = fixture(root);
@@ -92,5 +92,5 @@ it('fails closed on saved Ask grants while ordinary sessions work without the pl
     await expect(directory.open('ask')).rejects.toThrow(/plugin/);
     await expect(directory.create({ sourceNativeSessionId: 'source' })).rejects.toThrow(/plugin/);
     expect((await (await directory.open('ordinary')).runtimeInfo()).sessionId).toBe('ordinary');
-  } finally { await directory.close(); await rm(root, { recursive: true, force: true }); }
+  } finally { await directory.close(); await rm(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }); }
 }, 10000);

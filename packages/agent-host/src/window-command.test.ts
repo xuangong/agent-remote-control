@@ -126,5 +126,5 @@ it('closes, inspects, exports, applies and repopulates an empty Window over HTTP
     expect(created.code).toBe(0);
     expect(created.output.window).toMatchObject({ id: 'w1', revision: 3, selectedViewId: 'first-dock', selectedPrimaryViewId: null });
     expect(created.output.window.views).toEqual([createWindowView('first-dock')]);
-  } finally { await rm(directory, { recursive: true, force: true }); }
+  } finally { await rm(directory, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }); }
 });

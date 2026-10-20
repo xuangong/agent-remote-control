@@ -12,7 +12,7 @@ const cleanups: Array<() => Promise<void>> = [];
 afterEach(async () => { for (const close of cleanups.splice(0).reverse()) await close(); }, 5000);
 async function fixture(first: boolean) {
   const cwd = await realpath(await mkdtemp(join(tmpdir(), 'arc-native-prefix-recovery-')));
-  cleanups.push(() => rm(cwd, { recursive: true, force: true }));
+  cleanups.push(() => rm(cwd, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }));
   const ref = (nativeSessionId: string) => ({ controllerId: 'host', providerId: 'opencode', nativeSessionId });
   const store = new SessionSuccessionStore(join(cwd, 'roles')); await store.ready;
   await store.createRole({ id: 'role', revision: 1, origin: ref('A'), current: ref('A'), workspace: { controllerId: 'host', canonicalCwd: cwd } });

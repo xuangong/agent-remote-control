@@ -6,7 +6,7 @@ import { createClaudeHostRegistration } from './claude.js';
 import { SessionReferenceStore } from './session-reference.js';
 
 const roots: string[] = [];
-afterEach(async () => { await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true }))); });
+afterEach(async () => { await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }))); });
 
 async function executable(version: string, expectedHome?: string) {
   const root = await mkdtemp(join(tmpdir(), 'claude-host-version-')); roots.push(root);

@@ -69,7 +69,7 @@ async function fixture() {
     const response = await fetch(`http://127.0.0.1:${address.port}${path}`, { method: 'POST', headers: { 'content-type': 'application/json', ...(agent ? { 'x-agent': agent } : {}) }, body: JSON.stringify(payload), signal: AbortSignal.timeout(3000) });
     return { status: response.status, data: await response.json() };
   };
-  cleanup.push(async () => { server.closeIdleConnections(); await new Promise<void>(resolve => server.close(() => resolve())); await host.close(); await rm(root, { recursive: true, force: true }); });
+  cleanup.push(async () => { server.closeIdleConnections(); await new Promise<void>(resolve => server.close(() => resolve())); await host.close(); await rm(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }); });
   const prepare = (id = randomUUID()) => post('/remote/succession/prepare', { operationId: id, roleId: 'role', expectedRevision: 1, from: ref('A') });
   await post('/remote/attach', { providerId: 'fixture', nativeSessionId: 'A' }, 'A');
   return { root, sessions, host, post, prepare, configurations, grants, creates: () => configurations.length, renames: () => renameCalls, opens: () => openCalls,
@@ -175,7 +175,7 @@ test('ordinary authenticated owner takeover interrupts a working managed session
     adapter: { descriptor: { providerId: 'fixture', displayName: 'Fixture' }, createSession: async () => native, resumeSession: async () => native }, directory,
   }] });
   let next: NativeSessionLease | undefined;
-  cleanup.push(async () => { await next?.release(); await host.close(); await rm(root, { recursive: true, force: true }); });
+  cleanup.push(async () => { await next?.release(); await host.close(); await rm(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }); });
   expect((await host.control({ method: 'POST', path: '/remote/attach', sessionId: 'A', body: JSON.stringify({ providerId: 'fixture', nativeSessionId: 'A' }) })).status).toBe(200);
   const { inspectNativeOwner } = await import('./native-session-owner.js');
   const owner = await inspectNativeOwner({ root: owners, providerId: 'fixture', sessionId: 'A' });

@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { configureGatewayCodex, loadGatewayCodexEnvironment, managedCodexHome } from './gateway-codex.js';
 const roots: string[] = [];
-afterEach(async () => { await Promise.all(roots.splice(0).map(root => rm(root, { recursive: true, force: true }))); });
+afterEach(async () => { await Promise.all(roots.splice(0).map(root => rm(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }))); });
 async function fixture(status = 200, value: unknown = { apiKey: 'test-only-gateway-token-1234567890', keyId: 'key-one', baseUrl: 'https://gateway.example/v1', model: 'test-model' }) {
   const root = await mkdtemp(join(tmpdir(), 'arc-gateway-codex-')); roots.push(root);
   const requests: Array<{ url?: string; authorization?: string }> = [];

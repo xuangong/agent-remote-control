@@ -40,7 +40,7 @@ class SessionManager {
   steer = vi.fn(async () => {});
 }
 const fixtures: Array<{ coordinator: TpmCoordinator; directory: string }> = [];
-afterEach(async () => { for (const f of fixtures.splice(0)) { await f.coordinator.close(); await rm(f.directory, { recursive: true, force: true }); } });
+afterEach(async () => { for (const f of fixtures.splice(0)) { await f.coordinator.close(); await rm(f.directory, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }); } });
 async function fixture(queueMessage = false, tickMs = 1_000_000) {
   const directory = await mkdtemp(join(tmpdir(), 'arc-tpm-coordinator-'));
   const sessions = new Map<string, SessionManager>([['main', new SessionManager('main', queueMessage)]]);

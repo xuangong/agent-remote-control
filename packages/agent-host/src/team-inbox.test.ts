@@ -36,7 +36,7 @@ async function fixture() {
   return { team, calls, runtime, get extensions() { return extensions!; }, ref,
     setCurrent(value: string) { current = value; }, freeze() { frozen = true; }, pause() { paused = true; }, release() { release?.(); },
     async call(name: string, args: unknown = {}, source = extensions!) { const tool = source.tools!.find(tool => tool.name === name); expect(tool, `Team tool ${name}`).toBeDefined(); return JSON.parse(await tool!.execute(args)); },
-    async close() { await runtime.close(); await rm(directory, { recursive: true, force: true }); },
+    async close() { await runtime.close(); await rm(directory, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }); },
   };
 }
 

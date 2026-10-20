@@ -103,7 +103,7 @@ async function teamTransport() {
       await broker.close();
       server.closeAllConnections();
       await new Promise<void>(resolve => server.close(() => resolve()));
-      await rm(root, { recursive: true, force: true });
+      await rm(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
     },
   };
 }

@@ -30,7 +30,7 @@ interface NativeRun { pid: number; args: string[]; username?: string; password?:
 
 async function fixture(overrides: NodeJS.ProcessEnv = {}) {
   const directory = await mkdtemp(join(tmpdir(), 'arc-opencode-manager-'));
-  cleanup.push(() => rm(directory, { recursive: true, force: true }));
+  cleanup.push(() => rm(directory, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }));
   const executable = join(directory, 'opencode.mjs');
   const report = join(directory, 'native.jsonl');
   await writeFile(executable, `

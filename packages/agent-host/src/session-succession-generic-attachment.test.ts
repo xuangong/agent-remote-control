@@ -93,7 +93,7 @@ for (const providerId of ['codex', 'opencode'] as const) for (const role of ['no
       expect(await references.list()).toEqual([]);
     } finally {
       server.closeAllConnections(); await new Promise<void>(resolve => server.close(() => resolve()));
-      await host.close(); await rm(root, { recursive: true, force: true });
+      await host.close(); await rm(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
     }
   }, 10000);
 
@@ -107,7 +107,7 @@ test('local resumed generic successor has its own attachment without inherited s
     expect((await session.runtimeInfo()).sessionId).toBe('B');
     expect(bound.get('B')?.tools ?? []).toEqual([]);
     expect(() => local.service.executionRouting.resolve(ref('codex', 'A'))).toThrow(/generic succession/);
-  } finally { await local.close(); await rm(root, { recursive: true, force: true }); }
+  } finally { await local.close(); await rm(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }); }
 }, 5000);
 
 
@@ -137,5 +137,5 @@ test.each(['team', 'tpm'] as const)('retained %s tools cannot execute on a prede
     await expect(retained.execute({})).rejects.toThrow(/generic succession/);
     await expect(runtime.extensions('codex', 'A')).resolves.toBeUndefined();
     await expect(runtime.extensions('codex', 'B')).resolves.toBeUndefined();
-  } finally { await runtime.close(); await rm(root, { recursive: true, force: true }); }
+  } finally { await runtime.close(); await rm(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }); }
 }, 5000);

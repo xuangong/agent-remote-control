@@ -20,7 +20,7 @@ it.skipIf(process.platform === 'win32')('checks a real process environment witho
     expect(JSON.stringify(snapshot)).not.toContain('private-key-for-test');
     await writeFile(path, JSON.stringify({ pid: child.pid, processStartTime: 'different process' }));
     expect(await readDaemonProcess(root, 'daemon')).toMatchObject({ verification: 'stale' });
-  } finally { child.kill(); await once(child, 'exit'); await rm(root, { recursive: true, force: true }); }
+  } finally { child.kill(); await once(child, 'exit'); await rm(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }); }
 }, 15000);
 it('diagnostic storage failures never change command outcomes', async () => {
   const root = await mkdtemp(join(tmpdir(), 'daemon-log-failure-'));
@@ -30,7 +30,7 @@ it('diagnostic storage failures never change command outcomes', async () => {
     expect(await recordDaemonCommand(options, async () => 4)).toBe(4);
     const original = new Error('original failure');
     await expect(recordDaemonCommand(options, async () => { throw original; })).rejects.toBe(original);
-  } finally { await rm(root, { recursive: true, force: true }); }
+  } finally { await rm(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }); }
 }, 10000);
 it('treats a malformed PID record as unavailable without blocking a native command', async () => {
   const root = await mkdtemp(join(tmpdir(), 'daemon-malformed-'));
@@ -38,5 +38,5 @@ it('treats a malformed PID record as unavailable without blocking a native comma
     await mkdir(join(root, 'app-server-daemon'));
     await writeFile(join(root, 'app-server-daemon', 'app-server.pid'), 'null');
     expect(await recordDaemonCommand({ stateDir: root, home: root, action: 'restart', environment: {} }, async () => 0)).toBe(0);
-  } finally { await rm(root, { recursive: true, force: true }); }
+  } finally { await rm(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }); }
 }, 10000);

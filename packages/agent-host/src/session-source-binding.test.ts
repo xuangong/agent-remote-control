@@ -8,7 +8,7 @@ import { SessionSourceBindings } from './session-source-binding.js';
 import { sourceSessionExtensions } from './session-reference.js';
 
 const directories: string[] = [];
-afterEach(async () => { await Promise.all(directories.splice(0).map(dir => rm(dir, { recursive: true, force: true }))); });
+afterEach(async () => { await Promise.all(directories.splice(0).map(dir => rm(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }))); });
 const ref = (nativeSessionId: string) => ({ controllerId: 'host', providerId: 'codex', nativeSessionId });
 const workspace = { controllerId: 'host', canonicalCwd: '/workspace' };
 async function fixture() {

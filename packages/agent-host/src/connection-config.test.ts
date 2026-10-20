@@ -22,7 +22,7 @@ it('retains shared Codex connection settings across Host restarts', async () => 
   await saveRegisteredConnection(path, config, Promise.resolve({ hostId: 'h1' }));
   expect((await resolveHostConnection(path, {})).environment).toMatchObject({ AGENT_HOST_CODEX_CONNECTION: 'shared', AGENT_HOST_CODEX_SOCKET: '/tmp/codex.sock', AGENT_HOST_CODEX_TRUST_SHARED: '1' });
 });
-afterEach(async () => { await Promise.all(temporary.splice(0).map(path => rm(path, { recursive: true, force: true }))); });
+afterEach(async () => { await Promise.all(temporary.splice(0).map(path => rm(path, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }))); });
 async function directory() { const path = await mkdtemp(join(tmpdir(), 'host-connection-')); temporary.push(path); return path; }
 it('saves accepted connection settings privately and restores them without environment settings', async () => {
   const path = await directory();

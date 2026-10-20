@@ -105,7 +105,7 @@ test.each(providers)('%s production directory admits a trusted v2 source create 
     expect(restored.status, restored.body).toBe(200);
     expect(JSON.parse(restored.body).nativeSessionId).toBe(f.nativeSessionId);
     expect(f.creates()).toBe(1);
-  } finally { await f.close(); await rm(root, { recursive: true, force: true }); }
+  } finally { await f.close(); await rm(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }); }
 }, 10000);
 
 test.each(providers)('%s directory refuses undeclared or unbounded native producers before source creation', async providerId => {
@@ -124,5 +124,5 @@ test.each(providers)('%s directory refuses undeclared or unbounded native produc
     expect(await f.directory.supportsBoundedSourceCreate?.({ sourceNativeSessionId: 'source' })).toBe(true);
     await f.close();
     expect(await f.directory.supportsBoundedSourceCreate?.({ sourceNativeSessionId: 'source' })).toBe(false);
-  } finally { await f.close(); await rm(root, { recursive: true, force: true }); }
+  } finally { await f.close(); await rm(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }); }
 }, 10000);

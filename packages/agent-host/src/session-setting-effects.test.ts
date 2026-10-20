@@ -66,7 +66,7 @@ async function fixture(options: OperationCacheOptions = {}, preEnabled = true) {
         event: { type: 'runtime_updated', provider: 'fixture', runtimeInfo: runtime() } });
       wake.resolve(); await vi.advanceTimersByTimeAsync(0);
     },
-    async close() { await manager.close(); disable(); await boundary.close(); await cache.close(); await rm(root, { recursive: true, force: true }); },
+    async close() { await manager.close(); disable(); await boundary.close(); await cache.close(); await rm(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }); },
   };
 }
 const flush = () => vi.advanceTimersByTimeAsync(0);

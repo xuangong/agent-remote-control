@@ -7,7 +7,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { acquireStartupLock, authenticateSavedDaemon, createControllerDiagnosticLog, daemonDiagnosticLine, removeOwnedDaemonState, uplinkDiagnosticLine, withDaemonLifecycleLock, within } from './cli.js';
 
 const temporary: string[] = [];
-afterEach(async () => { await Promise.all(temporary.splice(0).map((path) => rm(path, { recursive: true, force: true }))); });
+afterEach(async () => { await Promise.all(temporary.splice(0).map((path) => rm(path, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }))); });
 
 describe('Agent Host daemon lifecycle', () => {
   it('formats timestamped uplink diagnostics as one JSON line using only safe fields', () => {

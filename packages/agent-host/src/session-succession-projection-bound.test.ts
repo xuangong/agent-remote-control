@@ -5,7 +5,7 @@ import { afterEach, expect, test, vi } from 'vitest';
 import type { SuccessionAssociationFreeze, SuccessionParticipant } from '@orchardworks/agent-remote-protocol';
 import { SessionSuccessionStore } from './session-succession-store.js';
 const directories: string[] = [];
-afterEach(async () => { vi.restoreAllMocks(); await Promise.all(directories.splice(0).map(path => rm(path, { recursive: true, force: true }))); }, 5000);
+afterEach(async () => { vi.restoreAllMocks(); await Promise.all(directories.splice(0).map(path => rm(path, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }))); }, 5000);
 const time = '2026-10-10T00:00:00.000Z';
 const max = '\ud800'.repeat(512);
 const ref = (nativeSessionId: string) => ({ controllerId: 'host', providerId: 'fixture', nativeSessionId });

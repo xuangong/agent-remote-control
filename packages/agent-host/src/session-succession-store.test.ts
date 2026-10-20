@@ -5,7 +5,7 @@ import { afterEach, expect, test } from 'vitest';
 import { SessionSuccessionStore } from './session-succession-store.js';
 
 const directories: string[] = [];
-afterEach(async () => { await Promise.all(directories.splice(0).map(dir => rm(dir, { recursive: true, force: true }))); });
+afterEach(async () => { await Promise.all(directories.splice(0).map(dir => rm(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }))); });
 const source = { controllerId: 'host', providerId: 'codex', nativeSessionId: 'A' };
 const workspace = { controllerId: 'host', canonicalCwd: '/workspace' };
 const role = { id: 'role', revision: 1, origin: source, current: source, workspace };

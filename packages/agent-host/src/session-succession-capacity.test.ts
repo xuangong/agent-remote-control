@@ -6,7 +6,7 @@ import { SessionSuccessionContextStore } from './session-succession-context.js';
 import { SessionSuccessionStore } from './session-succession-store.js';
 import { jsonBytes, SUCCESSION_STORE_BYTES } from './succession-persistence.js';
 const roots: string[] = [];
-afterEach(async () => { await Promise.all(roots.splice(0).map(root => rm(root, { recursive: true, force: true }))); });
+afterEach(async () => { await Promise.all(roots.splice(0).map(root => rm(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }))); });
 const ref = (nativeSessionId: string) => ({ controllerId: 'host', providerId: 'fixture', nativeSessionId });
 const request = { operationId: 'op', roleId: 'role', expectedRevision: 1, from: ref('A') };
 const capture = { epoch: 'epoch', seq: 1, capturedAt: '2026-10-10T00:00:00Z' };

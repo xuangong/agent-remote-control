@@ -88,5 +88,5 @@ it.each(['leader', 'member'] as const)('keeps the %s seat and tools on a release
     routeUnavailable = true; await runtime.tick();
     expect(broker.list()[0]!.members.find(member => member.id === seat.id)!.nativeSessionId).toBeUndefined();
     expect(retained.get('B')).toBe(0); expect(deliveries.filter(id => id === 'B')).toEqual(['B']);
-  } finally { available = false; await runtime.close(); server.closeAllConnections(); await new Promise<void>(done => server.close(() => done())); await rm(root, { recursive: true, force: true }); }
+  } finally { available = false; await runtime.close(); server.closeAllConnections(); await new Promise<void>(done => server.close(() => done())); await rm(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }); }
 }, 10000);

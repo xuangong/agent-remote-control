@@ -69,6 +69,6 @@ it('runs the Linux CLI without systemd, reconnects, and persists the manual star
     }
     for (const socket of server.clients) socket.terminate();
     await new Promise<void>(resolve => server.close(() => resolve()));
-    await rm(directory, { recursive: true, force: true });
+    await rm(directory, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
   }
 }, 30000);

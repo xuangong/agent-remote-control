@@ -53,7 +53,7 @@ it('keeps grant and disposal failure causes after admitted stdio creation and di
     expect(failure).toBeInstanceOf(AggregateError); expect(failure).not.toBeInstanceOf(AgentOperationRejectedError);
     expect(failure.errors).toEqual([grantFailure, disposalFailure]); expect(completed).toBe(1); expect(f.configurations).toHaveLength(1);
     await expect(f.configurations[0]!.tools![0]!.execute({})).rejects.toThrow(/identity.*ready|unavailable/i);
-  } finally { canExit = true; await directory.close(); await rm(root, { recursive: true, force: true }); }
+  } finally { canExit = true; await directory.close(); await rm(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }); }
 }, 10000);
 
 it('composes user tools and instructions, dynamically routes source reads, and restores durable grants on cold open', async () => {
@@ -91,7 +91,7 @@ it('composes user tools and instructions, dynamically routes source reads, and r
     expect(recovered.systemPrompt).toBe('User native base'); expect(recovered.tools!.map(tool => tool.name)).toEqual(['user_tool', 'read_source_session']);
     expect(JSON.parse(await recovered.tools!.find(tool => tool.name === 'read_source_session')!.execute({}))).toMatchObject({ sourceSessionId: 'A' });
     await expect(read.execute({})).rejects.toThrow(/closed|ready/i);
-  } finally { await directory.close(); await rm(root, { recursive: true, force: true }); }
+  } finally { await directory.close(); await rm(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }); }
 }, 10000);
 
 it('fences source callbacks during managed shutdown and retains a failed grant-cleanup lease', async () => {
@@ -112,7 +112,7 @@ it('fences source callbacks during managed shutdown and retains a failed grant-c
     await expect(acquireNativeSession({ ...key, kind: 'native_cli' })).rejects.toMatchObject({ code: 'native_session_owned' });
     await expect(f.configurations[0]!.tools!.find(tool => tool.name === 'read_source_session')!.execute({})).rejects.toThrow(/closed|ready/i);
     canExit = true; await directory.close(); expect(await inspectNativeOwner(key)).toBeUndefined();
-  } finally { canExit = true; await captured?.dispose(); await directory.close(); await rm(root, { recursive: true, force: true }); }
+  } finally { canExit = true; await captured?.dispose(); await directory.close(); await rm(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }); }
 }, 10000);
 
 it('rejects source creation without both history and storage and enforces per-read access', async () => {
@@ -129,7 +129,7 @@ it('rejects source creation without both history and storage and enforces per-re
     directory.setSourceAccessCheck!(async () => { throw new Error('Access denied'); });
     await expect(read.execute({})).rejects.toThrow(/denied/); expect(f.reads).toEqual([]);
     await expect(noHistory.open('reader')).rejects.toThrow(/history.*unavailable/i);
-  } finally { await Promise.all([directory.close(), noHistory.close(), noStore.close()]); await rm(root, { recursive: true, force: true }); }
+  } finally { await Promise.all([directory.close(), noHistory.close(), noStore.close()]); await rm(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }); }
 }, 10000);
 
 it('rejects conflicting tool names and verifies synthesized extensions for cached and concurrent opens', async () => {
@@ -151,7 +151,7 @@ it('rejects conflicting tool names and verifies synthesized extensions for cache
     const bad = directory.open('reader', { extensions: { instructions: 'different', tools: [userTool] } });
     const rejected = expect(bad).rejects.toThrow(/extensions differ/i);
     finish(); const session = await one; expect(await two).toBe(session); await rejected;
-  } finally { await directory.close(); await rm(root, { recursive: true, force: true }); }
+  } finally { await directory.close(); await rm(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }); }
 }, 10000);
 
 it('rejects mismatched cold native identity and disables source callbacks if durable grant persistence fails', async () => {
@@ -165,7 +165,7 @@ it('rejects mismatched cold native identity and disables source callbacks if dur
     await expect(directory.create({ sourceNativeSessionId: 'A' })).rejects.toThrow(/Store write failed/);
     await expect(f.configurations.at(-1)!.tools!.find(tool => tool.name === 'read_source_session')!.execute({})).rejects.toThrow(/closed|ready/i);
     expect(f.reads).toEqual([]);
-  } finally { await directory.close(); await rm(root, { recursive: true, force: true }); }
+  } finally { await directory.close(); await rm(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }); }
 }, 10000);
 
 it('does not revive an obsolete source callback when the same directory reopens the native reader', async () => {
@@ -179,7 +179,7 @@ it('does not revive an obsolete source callback when the same directory reopens 
     await expect(oldRead.execute({})).rejects.toThrow(/closed|ready|obsolete/i);
     expect(JSON.parse(await f.configurations.at(-1)!.tools!.find(tool => tool.name === 'read_source_session')!.execute({}))).toMatchObject({ sourceSessionId: 'A' });
     expect(f.reads).toEqual(['A']);
-  } finally { await directory.close(); await rm(root, { recursive: true, force: true }); }
+  } finally { await directory.close(); await rm(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }); }
 }, 10000);
 
 it.each([false, true])('rejects source tool callbacks while native shutdown is pending (managed ownership: %s)', async owned => {
@@ -195,7 +195,7 @@ it.each([false, true])('rejects source tool callbacks while native shutdown is p
     const read = f.configurations[0]!.tools!.find(tool => tool.name === 'read_source_session')!;
     try { await expect(read.execute({})).rejects.toThrow(/closed|control|ownership/i); expect(f.reads).toEqual([]); }
     finally { finish(); await closing; }
-  } finally { finish(); await directory.close(); await rm(root, { recursive: true, force: true }); }
+  } finally { finish(); await directory.close(); await rm(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }); }
 }, 10000);
 
 it('validates ordinary cold-open tools before creating a runtime', async () => {
@@ -219,7 +219,7 @@ it('rejects source creation when the directory closes during the durable grant w
     await ready; await directory.close(); finish(); await rejected;
     await expect(f.configurations[0]!.tools!.find(tool => tool.name === 'read_source_session')!.execute({})).rejects.toThrow(/closed/i);
     expect(f.reads).toEqual([]);
-  } finally { finish(); await creating.catch(() => undefined); await directory.close(); await rm(root, { recursive: true, force: true }); }
+  } finally { finish(); await creating.catch(() => undefined); await directory.close(); await rm(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }); }
 }, 10000);
 
 it('restores explicit empty and omitted base prompts distinctly and rejects conflicting persisted prompts', async () => {
@@ -232,7 +232,7 @@ it('restores explicit empty and omitted base prompts distinctly and rejects conf
       await directory.close(); directory = createManagedStdioDirectory('claude', 'Claude', f.provider, [], undefined, store);
       if (systemPrompt === '') await expect(directory.open('reader', { extensions: { systemPrompt: 'Conflicting base' } })).rejects.toThrow(/conflicting.*prompt/i);
       await directory.open('reader'); expect(f.configurations.at(-1)!.systemPrompt).toBe(systemPrompt);
-    } finally { await directory.close(); await rm(root, { recursive: true, force: true }); }
+    } finally { await directory.close(); await rm(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }); }
   }
 }, 10000);
 
@@ -249,7 +249,7 @@ it('retains rejected native identities for cleanup when their first disposal fai
     await expect(directory.open('expected')).rejects.toThrow(/unconfirmed|cleanup/i);
     expect(await inspectNativeOwner(key)).toMatchObject({ kind: 'controller' });
     canExit = true; await directory.close(); expect(await inspectNativeOwner(key)).toBeUndefined();
-  } finally { canExit = true; await directory.close(); await rm(root, { recursive: true, force: true }); }
+  } finally { canExit = true; await directory.close(); await rm(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }); }
 }, 10000);
 
 it('validates source prompt presence metadata while preserving legacy grants', async () => {
@@ -265,7 +265,7 @@ it('validates source prompt presence metadata while preserving legacy grants', a
       await writeFile(path, JSON.stringify({ ...grant, ...invalid }));
       await expect(store.get('reader')).rejects.toThrow(/invalid/i);
     }
-  } finally { await rm(root, { recursive: true, force: true }); }
+  } finally { await rm(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }); }
 }, 10000);
 
 it.each(['runtime provider', 'persistence provider', 'persistence session'] as const)('rejects mismatched %s before source routing', async field => {
@@ -283,7 +283,7 @@ it.each(['runtime provider', 'persistence provider', 'persistence session'] as c
     await expect(directory.create({ sourceNativeSessionId: 'A' })).rejects.toThrow(/identity/i);
     await expect(f.configurations[0]!.tools!.find(tool => tool.name === 'read_source_session')!.execute({})).rejects.toThrow(/identity|ready|closed/i);
     expect(f.reads).toEqual([]);
-  } finally { await directory.close(); await rm(root, { recursive: true, force: true }); }
+  } finally { await directory.close(); await rm(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }); }
 }, 10000);
 
 const heldReadCases = ['dispose', 'reopen', 'transfer', 'revoke', 'close'] as const;
@@ -316,7 +316,7 @@ for (const routed of [false, true]) {
       io.release(); await rejected;
       expect(f.reads).toEqual([routed ? 'B' : 'A']); expect(routes).toBe(routed ? 1 : 0);
       if (change === 'revoke') expect(checks).toBe(2);
-    } finally { io.release(); await cli?.release(); await directory.close(); await rm(root, { recursive: true, force: true }); }
+    } finally { io.release(); await cli?.release(); await directory.close(); await rm(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }); }
   }, 10000);
 
   it.each(['dispose', 'replace access check'] as const)(`rejects held ${routed ? 'routed' : 'local'} source content when post-read access validation awaits %s`, async change => {
@@ -333,7 +333,7 @@ for (const routed of [false, true]) {
       if (change === 'dispose') await (await directory.open('reader')).dispose();
       else directory.setSourceAccessCheck!(async () => { throw new Error('Replacement source policy'); });
       check.release(); await rejected; expect(f.reads).toEqual([routed ? 'B' : 'A']);
-    } finally { check.release(); await directory.close(); await rm(root, { recursive: true, force: true }); }
+    } finally { check.release(); await directory.close(); await rm(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }); }
   }, 10000);
 
   it.each(['dispose', 'runtime identity', 'revoke'] as const)(`rejects held ${routed ? 'routed' : 'local'} source content when final runtime validation awaits %s`, async change => {
@@ -358,7 +358,7 @@ for (const routed of [false, true]) {
       if (change === 'dispose') { const disposing = session.dispose(); held = false; runtime.release(); await disposing; }
       else { if (change === 'runtime identity') mismatched = true; else allowed = false; runtime.release(); }
       await rejected;
-    } finally { held = false; runtime.release(); await directory.close(); await rm(root, { recursive: true, force: true }); }
+    } finally { held = false; runtime.release(); await directory.close(); await rm(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }); }
   }, 10000);
 
   it.each(['dispose', 'replace access check', 'close'] as const)(`rejects held ${routed ? 'routed' : 'local'} source content when final access validation awaits %s`, async change => {
@@ -376,7 +376,7 @@ for (const routed of [false, true]) {
       else if (change === 'close') await directory.close();
       else directory.setSourceAccessCheck!(async () => { throw new Error('Replacement source policy'); });
       check.release(); await rejected; expect(f.reads).toEqual([routed ? 'B' : 'A']);
-    } finally { check.release(); await directory.close(); await rm(root, { recursive: true, force: true }); }
+    } finally { check.release(); await directory.close(); await rm(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }); }
   }, 10000);
 }
 
@@ -393,5 +393,5 @@ it('rejects a held cross-provider router result after reader disposal without re
     const pending = read.execute({}); const rejected = expect(pending).rejects.toThrow(/closed|control/i);
     await route.entered(); await (await directory.open('reader')).dispose(); route.release(); await rejected;
     expect(f.reads).toEqual([]);
-  } finally { route.release(); await directory.close(); await rm(root, { recursive: true, force: true }); }
+  } finally { route.release(); await directory.close(); await rm(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }); }
 }, 10000);

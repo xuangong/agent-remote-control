@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { afterEach, expect, it } from 'vitest';
 import { createDaemonMonitor } from './codex-daemon-monitor.js';
 const roots: string[] = [];
-afterEach(async () => { await Promise.all(roots.splice(0).map(root => rm(root, { recursive: true, force: true }))); });
+afterEach(async () => { await Promise.all(roots.splice(0).map(root => rm(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }))); });
 it('records changes once and imports bounded native events without carrying arbitrary fields', async () => {
   const root = await mkdtemp(join(tmpdir(), 'daemon-monitor-')); roots.push(root);
   const home = join(root, 'home'); const directory = join(home, 'app-server-daemon'); await mkdir(directory, { recursive: true });

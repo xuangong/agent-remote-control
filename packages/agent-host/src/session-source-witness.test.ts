@@ -7,7 +7,7 @@ import { SessionSuccessionStore, type SourceAssociationResult } from './session-
 import { jsonBytes, SUCCESSION_STORE_BYTES } from './succession-persistence.js';
 
 const roots: string[] = [];
-afterEach(async () => { await Promise.all(roots.splice(0).map(root => rm(root, { recursive: true, force: true }))); });
+afterEach(async () => { await Promise.all(roots.splice(0).map(root => rm(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }))); });
 const ref = (nativeSessionId: string) => ({ controllerId: 'host', providerId: 'fixture', nativeSessionId });
 const widestId = '\ud800'.repeat(512);
 function input(operationId = 'operation', scope = 'scope') {

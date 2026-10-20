@@ -7,7 +7,7 @@ import { SessionSuccessionBoundary } from './session-succession-boundary.js';
 import { AgentOperationRejectedError, AgentRuntimeError, AGENT_NATIVE_EVIDENCE_REASONS, type AgentEmptyCreationResult, type AgentSession } from '@orchardworks/agent-provider-sdk';
 
 const roots: string[] = [];
-afterEach(async () => { await Promise.all(roots.splice(0).map(root => rm(root, { recursive: true, force: true }))); });
+afterEach(async () => { await Promise.all(roots.splice(0).map(root => rm(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }))); });
 const ref = (nativeSessionId: string) => ({ controllerId: 'host', providerId: 'fixture', nativeSessionId });
 const request = { operationId: 'handoff', roleId: 'role', expectedRevision: 1, from: ref('A') };
 function deferred<T>() { let resolve!: (value: T) => void; const promise = new Promise<T>(done => { resolve = done; }); return { promise, resolve }; }

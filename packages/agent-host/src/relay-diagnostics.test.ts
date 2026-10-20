@@ -5,7 +5,7 @@ import { afterEach, expect, it } from 'vitest';
 import { createRelayDiagnosticSink } from './relay-diagnostics.js';
 
 const roots: string[] = [];
-afterEach(async () => { await Promise.all(roots.splice(0).map(root => rm(root, { recursive: true, force: true }))); });
+afterEach(async () => { await Promise.all(roots.splice(0).map(root => rm(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }))); });
 async function location() { const root = await mkdtemp(join(tmpdir(), 'relay-diagnostics-')); roots.push(root); return join(root, 'relay-diagnostics.log'); }
 const entry = { id: 'event-1', timestamp: '2026-09-20T01:02:03.000Z', source: 'relay' as const,
   hostId: 'host-1', relayInstanceId: 'relay-1', event: 'host_disconnected' as const };

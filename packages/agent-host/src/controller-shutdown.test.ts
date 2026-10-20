@@ -62,6 +62,6 @@ it.each([
     await exited;
     for (const socket of server.clients) socket.terminate();
     await new Promise<void>(done => server.close(() => done()));
-    await rm(root, { recursive: true, force: true });
+    await rm(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
   }
 }, 15000);

@@ -106,7 +106,7 @@ describe('Agent Host runtime', () => {
       if (part.type !== 'resource') throw new Error('Expected a resource input.');
       expect(part.name).toBe('diagnostics.zip');
       expect(await readFile(part.path)).toEqual(bytes);
-    } finally { await host.close(); await rm(root, { recursive: true, force: true }); }
+    } finally { await host.close(); await rm(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }); }
   });
 
   it('validates a prompt edit before dispatch and never reports a known rejection as an unknown mutation', async () => {
@@ -1029,7 +1029,7 @@ it('routes workspace browsing over the uplink without disrupting heartbeats', as
     await expect.poll(() => broker.heartbeatAcknowledgements(), { timeout: 3000 }).toBeGreaterThan(0);
     expect(broker.registrations()).toBe(1);
     expect(runtime.state).toBe('registered');
-  } finally { await runtime.close(); await broker.close(); await rm(root, { recursive: true, force: true }); }
+  } finally { await runtime.close(); await broker.close(); await rm(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }); }
 });
 
 
@@ -1606,7 +1606,7 @@ it('activates an owner update over the real uplink while an approval is pending'
     expect(rejected.status).toBe(503);
     expect(JSON.parse(rejected.body).code).toBe('controller_updating');
     expect(registration.createCount()).toBe(1);
-  } finally { lookup.mockRestore(); await host.close(); await broker.close(); await rm(stateDir, { recursive: true, force: true }); }
+  } finally { lookup.mockRestore(); await host.close(); await broker.close(); await rm(stateDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }); }
 });
 
 it('acknowledges relay diagnostic RPC only after the sink completes and isolates malformed batches', async () => {
@@ -1643,7 +1643,7 @@ it.each([false, true])('returns a retryable relay diagnostic failure only when a
     expect(response.status).toBe(installed ? 503 : 404);
     expect(response.body).not.toContain(root);
     expect((await broker.rpc('GET', '/remote/catalog?providerId=codex')).status).toBe(200);
-  } finally { await host.close(); await broker.close(); await rm(root, { recursive: true, force: true }); }
+  } finally { await host.close(); await broker.close(); await rm(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }); }
 });
 
 it.each([false, true])('advertises diagnostic delivery only when a local sink exists (%s)', async installed => {
@@ -1682,7 +1682,7 @@ it.each([false, true])('preserves diagnostic capability independently of unreada
     const update = await broker.rpc('POST', '/remote/controller-update', undefined, { version: '0.2.0', operationId: 'requested-update' });
     expect(update.status).toBe(409);
     expect(JSON.parse(update.body).diagnosticDelivery).toBeUndefined();
-  } finally { await host.close(); await broker.close(); await rm(stateDir, { recursive: true, force: true }); }
+  } finally { await host.close(); await broker.close(); await rm(stateDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }); }
 });
 
 it.each(['codex', 'copilot', 'claude', 'opencode'])('renames by native identity once per operation without loading a session (%s)', async providerId => {
@@ -1748,7 +1748,7 @@ it('keeps daemon restart jobs alive across uplink replacement and reports the sa
     await expect.poll(async () => JSON.parse((await broker.rpc('GET', '/remote/codex-daemon')).body).phase).toBe('ready');
     expect(JSON.parse((await broker.rpc('POST', '/remote/codex-daemon', undefined, input)).body).phase).toBe('ready');
     expect(calls).toBe(1);
-  } finally { finish?.(); await host.close(); await broker.close(); await rm(stateDir, { recursive: true, force: true }); }
+  } finally { finish?.(); await host.close(); await broker.close(); await rm(stateDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }); }
 }, 10000);
 
 it('discovers providers and persists owner preferences over a real uplink without interrupting sessions', async () => {
@@ -1806,5 +1806,5 @@ it('discovers providers and persists owner preferences over a real uplink withou
     const recovered = await broker.handleRequest(new Request(`http://relay.test/v1/sessions/${agentId}/snapshot?protocolVersion=1.8.0`), owner);
     expect(recovered?.status, await recovered?.text()).toBe(200);
     expect(codex.sessions.get('active')?.disposed).toBe(false);
-  } finally { await discovery.stop(); await host.close(); await broker.close(); await new Promise<void>(resolve => server.close(() => resolve())); await rm(stateDir, { recursive: true, force: true }); }
+  } finally { await discovery.stop(); await host.close(); await broker.close(); await new Promise<void>(resolve => server.close(() => resolve())); await rm(stateDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }); }
 });

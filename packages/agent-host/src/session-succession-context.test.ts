@@ -11,7 +11,7 @@ const source = { ...target, nativeSessionId: 'A' };
 const attachment = { operationId: 'succession', roleId: 'primary', roleRevision: 2, source, target,
   capturedAt: '2026-10-10T00:00:00.000Z', boundary: { epoch: 'epoch', seq: 3 }, text: '[{"role":"user","text":"old"}]', itemCount: 1 };
 const directories: string[] = [];
-afterEach(async () => { await Promise.all(directories.splice(0).map(path => rm(path, { recursive: true, force: true }))); });
+afterEach(async () => { await Promise.all(directories.splice(0).map(path => rm(path, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }))); });
 async function setup() { const path = await mkdtemp(join(tmpdir(), 'succession-context-')); directories.push(path); const store = new SessionSuccessionContextStore(path); await store.ready; await store.attach(attachment); return { path, store, dispatcher: new SessionSuccessionInputDispatcher(store) }; }
 const input = (operationId = 'input') => ({ operationId, target, roleId: 'primary', roleRevision: 2, text: 'new' });
 const admitted = async () => {};

@@ -5,7 +5,7 @@ import { afterEach, expect, it } from 'vitest';
 import { resolveOpenCodeExecutable } from './opencode-executable.js';
 
 const roots: string[] = [];
-afterEach(async () => { await Promise.all(roots.splice(0).map(root => rm(root, { recursive: true, force: true }))); });
+afterEach(async () => { await Promise.all(roots.splice(0).map(root => rm(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }))); });
 it.skipIf(process.platform === 'win32')('discovers a native user installation outside the login service PATH without overriding PATH or explicit configuration', async () => {
   const home = await mkdtemp(join(tmpdir(), 'arc-opencode-path-')); roots.push(home);
   const directory = join(home, '.opencode', 'bin');

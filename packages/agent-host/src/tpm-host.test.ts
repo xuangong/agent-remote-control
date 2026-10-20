@@ -139,7 +139,7 @@ it.each([false, true])('creates a scoped TPM over the real Host uplink and keeps
     }).toMatchObject({ turnId: 'review-2', result: { notify: false } });
     expect(native.sent[1]).toContain('Heartbeat.'); expect(sessions.get('main')!.closed).toBe(false);
     expect(sessions.get('main')!.observed).toBe(1); expect(native.observed).toBe(1);
-  } finally { releaseReceipt(); await host.close(); await broker.close(); await rm(root, { recursive: true, force: true }); }
+  } finally { releaseReceipt(); await host.close(); await broker.close(); await rm(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }); }
 }, 10000);
 
 
@@ -156,7 +156,7 @@ it('isolates corrupt TPM persistence from ordinary native session attachment', a
     const tpm = await host.control({ method: 'GET', path: '/remote/tpm' }); expect(tpm.status).toBe(409);
     const ordinary = await host.control({ method: 'POST', path: '/remote/attach', sessionId: 'ordinary-agent', body: JSON.stringify({ providerId: 'codex', nativeSessionId: 'ordinary' }) });
     expect(ordinary.status).toBe(200); expect(session.observed).toBe(1);
-  } finally { await host.close(); await rm(root, { recursive: true, force: true }); }
+  } finally { await host.close(); await rm(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }); }
 }, 10000);
 
 it.each(['attach', 'snapshot', 'relay-restart'] as const)('restores a TPM-owned main session after Host restart through %s without changing the public identity', async firstRead => {
@@ -267,6 +267,6 @@ it.each(['attach', 'snapshot', 'relay-restart'] as const)('restores a TPM-owned 
     for (const socket of sockets.clients) socket.terminate();
     await new Promise<void>(resolve => sockets.close(() => resolve()));
     await new Promise<void>(resolve => http.close(() => resolve()));
-    await rm(root, { recursive: true, force: true });
+    await rm(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
   }
 }, 10000);

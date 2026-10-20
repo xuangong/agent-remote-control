@@ -7,7 +7,7 @@ import { runCodexCommand } from './codex-command.js';
 const roots: string[] = [];
 // Native commands inherit the Host environment, so a developer's own Codex credentials must not reach the captured child.
 beforeEach(() => { for (const key of ['OPENAI_API_KEY', 'CODEX_HOME', 'CODEX_GATEWAY_API_KEY', 'AGENT_REMOTE_CODEX_HOME']) vi.stubEnv(key, undefined); });
-afterEach(async () => { vi.unstubAllEnvs(); await Promise.all(roots.splice(0).map(root => rm(root, { recursive: true, force: true }))); });
+afterEach(async () => { vi.unstubAllEnvs(); await Promise.all(roots.splice(0).map(root => rm(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }))); });
 async function fixture() {
   const root = await mkdtemp(join(tmpdir(), 'arc-codex-command-')); roots.push(root);
   const capture = join(root, 'native.json'); const executable = join(root, 'codex');

@@ -11,7 +11,7 @@ afterEach(async () => { for (const dispose of disposers.splice(0).reverse()) awa
 
 async function manager(mode = 'ready', disconnectTimeoutMs = 300_000) {
   const directory = await mkdtemp(join(tmpdir(), 'arc-vscode-test-'));
-  disposers.push(() => rm(directory, { recursive: true, force: true }));
+  disposers.push(() => rm(directory, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }));
   const script = join(directory, 'cli.cjs');
   await writeFile(script, `
 const fs = require('node:fs');
@@ -109,7 +109,7 @@ test('distinguishes a live process from a disconnected tunnel and recovers its l
 
 test('reports a missing executable and rejects starts after shutdown', async () => {
   const directory = await mkdtemp(join(tmpdir(), 'arc-vscode-missing-'));
-  disposers.push(() => rm(directory, { recursive: true, force: true }));
+  disposers.push(() => rm(directory, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }));
   const value = createVscodeTunnelManager({ stateDirectory: directory, installationId: 'missing', executable: join(directory, 'missing') });
   disposers.push(() => value.close());
   await value.start(true);
@@ -151,7 +151,7 @@ test('disables a CLI without the tunnel subcommand without starting a tunnel', a
 
 test('disables the feature when code is absent from the Controller PATH', async () => {
   const directory = await mkdtemp(join(tmpdir(), 'arc-vscode-path-'));
-  disposers.push(() => rm(directory, { recursive: true, force: true }));
+  disposers.push(() => rm(directory, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }));
   vi.stubEnv('PATH', directory);
   const value = createVscodeTunnelManager({ stateDirectory: directory, installationId: 'missing-path' });
   disposers.push(() => value.close());

@@ -7,7 +7,7 @@ import { createCodexDaemonControl } from './codex-daemon-control.js';
 import { CodexDaemonRestartRejected } from './codex-daemon-restart-error.js';
 
 const roots: string[] = [];
-afterEach(async () => { await Promise.all(roots.splice(0).map(root => rm(root, { recursive: true, force: true }))); });
+afterEach(async () => { await Promise.all(roots.splice(0).map(root => rm(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }))); });
 async function setup(restart: () => Promise<void>) {
   const stateDir = await mkdtemp(join(tmpdir(), 'arc-daemon-control-')); roots.push(stateDir);
   const manager = createCodexDaemonControl({ stateDir, restart });

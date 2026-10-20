@@ -86,7 +86,7 @@ it.each([
         failure ? ['old', 'old', 'old'] : ['old', 'new', 'new']);
       expect(JSON.parse(await readFile(join(updates, 'status.json'), 'utf8')).phase).toBe(failure ? 'failed' : 'succeeded');
     }
-  } finally { await stopLauncher(child); await rm(root, { recursive: true, force: true }); }
+  } finally { await stopLauncher(child); await rm(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }); }
 }, 10000);
 it('recovers an interrupted restart to the saved version and allows another attempt', async () => {
   const root = await mkdtemp(join(tmpdir(), 'controller-interrupted-'));
@@ -99,7 +99,7 @@ it('recovers an interrupted restart to the saved version and allows another atte
   try {
     await expect.poll(async () => JSON.parse(await readFile(join(root, 'controller-updates/status.json'), 'utf8')).phase).toBe('failed');
     expect(child.exitCode).toBeNull();
-  } finally { await stopLauncher(child); await rm(root, { recursive: true, force: true }); }
+  } finally { await stopLauncher(child); await rm(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }); }
 }, 10000);
 it.each([false,true])('restores an interrupted same-version clean install (new files activated: %s)',async activated=>{
  const root=await mkdtemp(join(tmpdir(),'controller-clean-recovery-'));
@@ -137,5 +137,5 @@ it('checks a launcher against the installation without starting a Controller or 
     await rm(cli);
     await expect(new Promise((done, fail) => execFile(process.execPath, [join(root, 'launcher.mjs'), '_launcher-check'],
       { env: { ...process.env, AGENT_HOST_STATE_DIR: root }, timeout: 10000, windowsHide: true }, error => error ? fail(error) : done(undefined)))).rejects.toBeTruthy();
-  } finally { await rm(root, { recursive: true, force: true }); }
+  } finally { await rm(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }); }
 }, 15000);

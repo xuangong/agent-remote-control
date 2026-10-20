@@ -13,7 +13,7 @@ const fixture = async () => {
   const contexts = new SessionSuccessionContextStore(root); await contexts.ready;
   const cache = createOperationCache();
   const boundary = new SessionSuccessionBoundary(contexts, () => {}, () => undefined, cache);
-  return { cache, boundary, close: async () => { await cache.close(); await rm(root, { recursive: true, force: true }); } };
+  return { cache, boundary, close: async () => { await cache.close(); await rm(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }); } };
 };
 
 test('ordinary admission and source reservation exclude each other synchronously', async () => {

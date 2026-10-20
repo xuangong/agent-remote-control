@@ -6,7 +6,7 @@ import { browseWorkspaceFolders, createWorkspaceFolder } from './workspace-folde
 import type { HostExecutionPolicy } from './execution-policy.js';
 
 const temporary: string[] = [];
-afterEach(async () => { await Promise.all(temporary.splice(0).map(path => rm(path, { recursive: true, force: true }))); });
+afterEach(async () => { await Promise.all(temporary.splice(0).map(path => rm(path, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }))); });
 async function fixture() {
   const base = await realpath(await mkdtemp(join(tmpdir(), 'workspace-folders-'))); temporary.push(base);
   const root = join(base, 'allowed'); await mkdir(root);

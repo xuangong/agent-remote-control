@@ -44,7 +44,7 @@ test.each(['codex', 'opencode'] as const)('%s prefix readers reconstruct extensi
     directory.setSourceBindingReader!((actual, source, query, legacy, anchor) => service.bindings(providerId).read(actual, source, query, legacy, anchor));
     cleanup.push(async () => { await directory.close(); }); return directory;
   };
-  cleanup.push(async () => { await rm(root, { recursive: true, force: true }); });
+  cleanup.push(async () => { await rm(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }); });
   const directory = make(); await directory.open('A');
   const stale = bound.get('A')!.tools![0]!;
   const old = JSON.parse(await stale.execute({}));

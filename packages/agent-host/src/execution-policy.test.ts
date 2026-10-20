@@ -7,7 +7,7 @@ import { createHostExecutionPolicy, protectHostDirectory, sanitizeNativeEnvironm
 import { createAgentHostRuntime, type AgentHostDirectory } from './host.js';
 
 const paths: string[] = [];
-afterEach(async () => { await Promise.all(paths.splice(0).map(path => rm(path, { recursive: true, force: true }))); });
+afterEach(async () => { await Promise.all(paths.splice(0).map(path => rm(path, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }))); });
 async function fixture() {
   const root = await mkdtemp(join(tmpdir(), 'host-policy-')); paths.push(root);
   await mkdir(join(root, 'allowed')); await mkdir(join(root, 'outside')); await symlink(join(root, 'outside'), join(root, 'allowed', 'escape'), process.platform === 'win32' ? 'junction' : 'dir');

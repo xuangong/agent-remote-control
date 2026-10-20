@@ -69,7 +69,7 @@ async function fixture(operationCache?: OperationCacheOptions) {
   }
   return { host, sessions, url, attach, control, creates: () => creates,
     prepare: (id = 'handoff') => control('prepare', { operationId: id, roleId: 'role', expectedRevision: 1, from: ref('A') }),
-    async close() { await server.close(); await host.close(); await rm(root, { recursive: true, force: true }); },
+    async close() { await server.close(); await host.close(); await rm(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }); },
   };
 }
 

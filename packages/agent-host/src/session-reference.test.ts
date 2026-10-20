@@ -25,7 +25,7 @@ it('preserves grant and disposal causes after Codex creation without claiming re
     expect(failure).toBeInstanceOf(AggregateError); expect(failure).not.toBeInstanceOf(AgentOperationRejectedError);
     expect(failure.errors).toEqual([grantFailure, disposalFailure]); expect(creates).toBe(1); expect(completed).toBe(1);
     await expect(read()).rejects.toThrow(/identity.*ready/i);
-  } finally { await directory.close(); await rm(root, { recursive: true, force: true }); }
+  } finally { await directory.close(); await rm(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }); }
 }, 10000);
 
 it('does not turn a grant rejection after native creation into replay permission when disposal succeeds', async () => {
@@ -41,7 +41,7 @@ it('does not turn a grant rejection after native creation into replay permission
     const failure = await directory.create({ sourceNativeSessionId: 'source' }).catch(error => error);
     expect(failure).not.toBeInstanceOf(AgentOperationRejectedError); expect(failure.cause).toBe(original); expect(failure.message).toMatch(/unresolved/);
     expect(creates).toBe(1); expect(disposed).toBe(1);
-  } finally { await directory.close(); await rm(root, { recursive: true, force: true }); }
+  } finally { await directory.close(); await rm(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }); }
 }, 10000);
 
 it('retains Codex native readiness and disposal causes after a single native creation', async () => {
@@ -85,7 +85,7 @@ it('persists the grant and restores tools and instructions after directory recre
     expect((await restored.runtimeInfo()).sessionId).toBe('side');
     expect(natives[1]!.requests.find(request => request.method === 'thread/resume')?.params).toMatchObject({ developerInstructions: expect.stringContaining('read_source_session') });
     expect(await new SessionReferenceStore(root).get('side')).toMatchObject({ sourceNativeSessionId: 'source', handle: { sessionId: 'side' } });
-  } finally { await directory.close(); await rm(root, { recursive: true, force: true }); }
+  } finally { await directory.close(); await rm(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }); }
 });
 
 
@@ -107,7 +107,7 @@ it('rechecks source workspace on every tool call, including native child sources
     native.child.stdout.write(JSON.stringify({ id: 'denied', method: 'item/tool/call', params: { threadId: 'side', turnId: 't', callId: 'c', tool: 'read_source_session', arguments: {} } }) + '\n');
     expect((await response).result).toMatchObject({ success: false, contentItems: [{ text: expect.stringMatching(/outside.*allowed/i) }] });
     expect(native.requests.some(request => request.method === 'thread/items/list')).toBe(false);
-  } finally { lines.close(); await directory.close(); await rm(root, { recursive: true, force: true }); }
+  } finally { lines.close(); await directory.close(); await rm(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }); }
 });
 
 it('restores idle source sessions with native saved settings and the granted source tools', async () => {
@@ -129,7 +129,7 @@ it('restores idle source sessions with native saved settings and the granted sou
     expect(request.cwd).toBeUndefined(); expect(request.model).toBeUndefined();
     expect(request.developerInstructions).toContain('read_source_session');
     expect(await restored.runtimeInfo()).toMatchObject({ sessionId: 'side', cwd: '/new', model: 'new-model' });
-  } finally { await directory.close(); await rm(root, { recursive: true, force: true }); }
+  } finally { await directory.close(); await rm(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }); }
 });
 
 it('uses a newly installed binding reader in an already-open native source tool', async () => {
@@ -155,7 +155,7 @@ it('uses a newly installed binding reader in an already-open native source tool'
     expect(JSON.parse(result.contentItems[0].text)).toMatchObject({ sourceSessionId: 'B', sourceRoleId: 'role', sourceRoleRevision: 2 });
     expect(history.requests.find(request => request.method === 'thread/items/list')?.params).toMatchObject({ threadId: 'B' });
     expect(await directory.sourceReferences!()).toMatchObject([{ nativeSessionId: 'ask', sourceNativeSessionId: 'A' }]);
-  } finally { lines.close(); await directory.close(); await rm(root, { recursive: true, force: true }); }
+  } finally { lines.close(); await directory.close(); await rm(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }); }
 });
 
 it('retains a native fork as a new primary session but refuses to fork a source-bound Ask', async () => {
@@ -173,5 +173,5 @@ it('retains a native fork as a new primary session but refuses to fork a source-
     const grants = new SessionReferenceStore(root);
     await grants.set({ sourceNativeSessionId: 'A', systemPrompt: 'Source reference', handle: { providerId: 'codex', sessionId: 'ask', opaque: '{}' } });
     await expect(directory.forkSession!('ask')).rejects.toThrow(/side|Ask/i);
-  } finally { await directory.close(); await rm(root, { recursive: true, force: true }); }
+  } finally { await directory.close(); await rm(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }); }
 });

@@ -53,7 +53,7 @@ async function terminal(steps: Array<{ wait: string; keys: string }>, args = ['l
       const closed = once(child, 'close'); process.kill(-child.pid, 'SIGKILL'); await closed;
     }
     await new Promise<void>(resolve => server.close(() => resolve()));
-    await rm(root, { recursive: true, force: true });
+    await rm(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
   }
 }
 

@@ -8,7 +8,7 @@ const cleanups: Array<() => Promise<unknown>> = [];
 afterEach(async () => { for (const cleanup of cleanups.splice(0).reverse()) await cleanup(); });
 async function fixture(providers: string) {
   const root = await mkdtemp(join(tmpdir(), 'gateway-providers-'));
-  cleanups.push(() => rm(root, { recursive: true, force: true }));
+  cleanups.push(() => rm(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }));
   let requests = 0;
   const apiKey = 'test-gateway-token-1234567890';
   const server = createServer((request, response) => {

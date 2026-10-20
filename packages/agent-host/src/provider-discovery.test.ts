@@ -6,7 +6,7 @@ import { createHostProviderDiscovery } from './provider-discovery.js';
 import { OpenCodeServerError } from './opencode-server.js';
 import type { AgentHostProviderRegistration } from './host.js';
 const roots: string[] = [];
-afterEach(async () => { await Promise.all(roots.splice(0).map(root => rm(root, { recursive: true, force: true }))); });
+afterEach(async () => { await Promise.all(roots.splice(0).map(root => rm(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }))); });
 async function root() { const value = await mkdtemp(join(tmpdir(), 'arc-provider-discovery-')); roots.push(value); return value; }
 const registration = (providerId: string): AgentHostProviderRegistration => ({ adapter: { descriptor: { providerId, displayName: providerId }, createSession: vi.fn(), resumeSession: vi.fn() }, directory: { providerId, list: () => [], workspaces: () => [], create: vi.fn(), open: vi.fn(), close: vi.fn() } });
 it('discovers every supported provider despite an old saved codex selection and isolates failures', async () => {

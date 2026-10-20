@@ -30,7 +30,7 @@ it('runs restart then checks readiness with the selected Controller environment'
     await expect(restartCodexDaemon({ stateDir: root, environment: {}, cli })).rejects.toThrow();
     await writeFile(cli, "process.on('SIGTERM',()=>{}); setInterval(()=>{},1000);");
     await expect(restartCodexDaemon({ stateDir: root, environment: {}, cli, timeoutMs: 250 })).rejects.toThrow(/unknown/);
-  } finally { await rm(root, { recursive: true, force: true }); }
+  } finally { await rm(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }); }
 }, 10000);
 
 it.each([
@@ -90,7 +90,7 @@ setInterval(()=>{if(fs.existsSync(path.join(process.env.AGENT_HOST_STATE_DIR,'re
     await writeFile(join(root, 'release-status'), '');
     await operation;
     Object.defineProperty(execFile, promisify.custom, custom);
-    await rm(root, { recursive: true, force: true });
+    await rm(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
   }
 }, 10000);
 
@@ -109,7 +109,7 @@ it.each([
     expect(error).toBeInstanceOf(Error);
     expect(error.message).toBe(scenario.safe ? scenario.stderr : 'Codex daemon did not confirm restart and readiness.');
     expect(error instanceof CodexDaemonRestartRejected).toBe(scenario.safe);
-  } finally { await rm(root, { recursive: true, force: true }); }
+  } finally { await rm(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }); }
 }, 10000);
 
 it('only allows lifecycle management for the configured shared default daemon', () => {

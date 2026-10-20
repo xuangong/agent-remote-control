@@ -36,7 +36,7 @@ class Native implements AgentSession {
 }
 async function fixture(certificate: boolean | undefined, nativeId = 'reader', cache?: { maxResultBytes?: number; maxBytes?: number; ttlMs?: number; now?: () => number }, policy = false, fileGrants = false, shutdownTimeoutMs?: number) {
   const root = await realpath(await mkdtemp(join(tmpdir(), 'source-create-')));
-  closeables.push(() => rm(root, { recursive: true, force: true }));
+  closeables.push(() => rm(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }));
   let creates = 0, certificates = 0, granted = true, loseResult = false, rejectNative = false;
   let beforeCreate = async () => {}, beforeOpen = async (_id: string) => {};
   let closingDirectory!: () => void;

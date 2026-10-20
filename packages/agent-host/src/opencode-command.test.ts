@@ -6,7 +6,7 @@ import { afterEach, expect, it, vi } from 'vitest';
 import { runOpenCodeCommand } from './opencode-command.js';
 import { ensureOpenCodeServerConfig, openCodeServerLocation } from './opencode-server-state.js';
 const roots: string[] = [];
-afterEach(async () => { await Promise.all(roots.splice(0).map(root => rm(root, { recursive: true, force: true }))); });
+afterEach(async () => { await Promise.all(roots.splice(0).map(root => rm(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }))); });
 async function fixture() {
   const root = await mkdtemp(join(tmpdir(), 'arc-opencode-command-')); roots.push(root);
   const executable = join(root, 'native.mjs'); const output = join(root, 'output.json');

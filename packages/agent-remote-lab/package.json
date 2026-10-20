@@ -11,7 +11,7 @@
     "prepare:dsh-release": "node --import tsx/esm scripts/prepare-dsh-release.ts",
     "typecheck": "tsc --noEmit && tsc -p tsconfig.e2e.json --noEmit",
     "typecheck:e2e": "tsc -p tsconfig.e2e.json --noEmit",
-    "test": "vitest run --testTimeout=10000",
+    "test": "vitest run --testTimeout=10000 --exclude '**/*.local.test.ts' --exclude '**/*.local.test.tsx'",
     "test:conformance": "node scripts/run-relay-conformance.mjs"
   },
   "dependencies": {

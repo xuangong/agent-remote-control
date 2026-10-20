@@ -73,9 +73,9 @@ function meetsBaseline(actual, target, range) {
 export async function verifyNativeTestVersions(mode, env = process.env) {
   const selections = [];
   const add = (provider, variable, fallback, range = 'exact') => selections.push({ provider, variable, selected: env[variable] ?? fallback, range });
-  if (['unit', 'claude', 'claude-succession-evidence'].includes(mode))
+  if (['local', 'claude', 'claude-succession-evidence'].includes(mode))
     add('claude', 'AGENT_CLAUDE_TEST_EXECUTABLE', 'claude', mode === 'claude-succession-evidence' ? 'exact' : 'minimum');
-  if (mode === 'unit') {
+  if (mode === 'local') {
     const cwd = join(root, 'packages/agent-remote-lab');
     const manifestPath = resolve(cwd, env.BORGEE_AGENT_REMOTE_COMPATIBILITY_MANIFEST ?? 'compatibility.json');
     const manifest = JSON.parse(await readFile(manifestPath, 'utf8'));
@@ -89,7 +89,7 @@ export async function verifyNativeTestVersions(mode, env = process.env) {
       add('codex', 'AGENT_REMOTE_WINDOWS_CODEX_TEST_EXECUTABLE', undefined, 'minimum');
   }
   if (mode === 'codex-shared') add('codex', 'AGENT_REMOTE_SHARED_CODEX_TEST_EXECUTABLE', undefined, 'minimum');
-  if (['unit', 'copilot'].includes(mode)) {
+  if (['local', 'copilot'].includes(mode)) {
     const manifestPath = createRequire(join(root, 'packages/agent-provider-copilot/package.json')).resolve('@github/copilot/package.json');
     const manifest = JSON.parse(await readFile(manifestPath, 'utf8'));
     selections.push({ provider: 'copilot', selected: resolve(dirname(manifestPath), manifest.bin.copilot), packageVersion: manifest.version, variable: 'the @github/copilot native runtime and its cache', range: 'minimum' });

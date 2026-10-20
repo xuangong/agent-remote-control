@@ -20,7 +20,7 @@
   "scripts": {
     "build": "tsc",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run --testTimeout=10000"
+    "test": "vitest run --testTimeout=10000 --exclude '**/*.local.test.ts' --exclude '**/*.local.test.tsx'"
   },
   "dependencies": {
     "@orchardworks/agent-provider-claude": "workspace:*",

@@ -47,7 +47,10 @@ const commands = {
   'claude-succession-evidence': ['--filter', '@orchardworks/agent-provider-claude', 'exec', 'vitest', 'run', 'src/native-succession-evidence.local.test.ts', '--testTimeout=30000', '--hookTimeout=10000', '--maxWorkers=1'],
   copilot: ['--filter', '@orchardworks/agent-provider-copilot', 'run', 'test', '--hookTimeout=30000'],
   setup: ['exec', 'node', '--test', '--test-timeout=60000', 'scripts/native-test-versions.test.mjs', 'scripts/dsh-debug.test.mjs', 'scripts/start.test.mjs', 'scripts/relay-local.test.mjs', 'scripts/prepare-relay-docker-lock.test.mjs', 'scripts/controller/entrypoint.test.mjs', 'scripts/controller/create-host.test.mjs', 'scripts/controller/install.test.mjs'],
-  unit: ['-r', 'run', 'test'],
+  // Each package's Vitest already uses every core; running packages one at a time avoids load-induced timeouts.
+  unit: ['-r', '--workspace-concurrency=1', 'run', 'test'],
+  // Native CLI tests depend on this machine's installed and signed-in agents, so the unit suite excludes them.
+  local: ['-r', '--workspace-concurrency=1', 'exec', 'vitest', 'run', '--passWithNoTests', '--testTimeout=60000', '--hookTimeout=30000', '--maxWorkers=1', 'local.test'],
   e2e: ['--filter', '@orchardworks/agent-remote-lab', 'exec', 'playwright', 'test', '--timeout=30000', '--global-timeout=480000', ...process.argv.slice(3)],
   conformance: ['--filter', '@orchardworks/agent-remote-lab', 'run', 'test:conformance'],
 };

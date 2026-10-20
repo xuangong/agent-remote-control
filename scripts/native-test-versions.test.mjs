@@ -51,63 +51,63 @@ async function run(f, mode, extra = {}) {
 }
 
 const options = { timeout: 10000, skip: process.platform === 'win32' };
-test('an old explicit Claude executable blocks the unit runner before tests start', options, async t => {
+test('an old explicit Claude executable blocks the local native runner before tests start', options, async t => {
   const f = await fixture(t); const selected = await f.executable('selected-claude', "console.log('2.1.128 (Claude Code)');");
-  const result = await run(f, 'unit', { AGENT_CLAUDE_TEST_EXECUTABLE: selected });
+  const result = await run(f, 'local', { AGENT_CLAUDE_TEST_EXECUTABLE: selected });
   assert.notEqual(result.code, 0); assert.doesNotMatch(result.output, /TEST_RUNNER_STARTED/);
   assert.ok(result.output.includes(selected)); assert.match(result.output, /2\.1\.128/); assert.match(result.output, /2\.1\.247/);
   assert.match(result.output, /AGENT_CLAUDE_TEST_EXECUTABLE/);
 });
 
-test('matching unit binaries are reported and Copilot uses its pinned package entry', options, async t => {
-  const f = await fixture(t); const result = await run(f, 'unit');
+test('matching local native binaries are reported and Copilot uses its pinned package entry', options, async t => {
+  const f = await fixture(t); const result = await run(f, 'local');
   assert.equal(result.code, 0, result.output); assert.match(result.output, /TEST_RUNNER_STARTED/);
   for (const value of [join(f.directory, 'bin/claude'), join(f.directory, 'bin/codex'), f.copilot, '2.1.247', '0.162.0', '1.0.83']) assert.ok(result.output.includes(value), result.output);
 });
 
-test('newer Claude and exact explicit Codex binaries can run unit tests', options, async t => {
+test('newer Claude and exact explicit Codex binaries can run local native tests', options, async t => {
   const f = await fixture(t);
   const codex = await f.executable('selected-codex.cjs', "console.log('codex-cli 0.162.0');");
   const claude = await f.executable('new-claude', "console.log('2.1.248 (Claude Code)');");
   await f.executable('bin/codex', "console.log('codex-cli 0.100.0');");
   await f.executable('bin/claude', "console.log('2.1.128 (Claude Code)');");
-  const result = await run(f, 'unit', { BORGEE_CODEX_TEST_EXECUTABLE: codex, AGENT_CLAUDE_TEST_EXECUTABLE: claude });
+  const result = await run(f, 'local', { BORGEE_CODEX_TEST_EXECUTABLE: codex, AGENT_CLAUDE_TEST_EXECUTABLE: claude });
   assert.equal(result.code, 0, result.output); assert.match(result.output, /TEST_RUNNER_STARTED/);
   for (const value of [codex, claude, '0.162.0', '2.1.248']) assert.ok(result.output.includes(value), result.output);
 });
 
-for (const selection of [undefined, 'codex', './bin/codex']) test(`unit tests reject ${selection ?? 'missing'} explicit Codex selection before pnpm`, options, async t => {
-  const f = await fixture(t); const result = await run(f, 'unit', { BORGEE_CODEX_TEST_EXECUTABLE: selection });
+for (const selection of [undefined, 'codex', './bin/codex']) test(`local native tests reject ${selection ?? 'missing'} explicit Codex selection before pnpm`, options, async t => {
+  const f = await fixture(t); const result = await run(f, 'local', { BORGEE_CODEX_TEST_EXECUTABLE: selection });
   assert.notEqual(result.code, 0); assert.doesNotMatch(result.output, /TEST_RUNNER_STARTED/);
   assert.match(result.output, /BORGEE_CODEX_TEST_EXECUTABLE/); assert.match(result.output, /absolute|explicit/i);
 });
 
-for (const version of ['0.161.0', '0.162.1']) test(`unit tests reject Codex ${version} outside the exact manifest target`, options, async t => {
+for (const version of ['0.161.0', '0.162.1']) test(`local native tests reject Codex ${version} outside the exact manifest target`, options, async t => {
   const f = await fixture(t); const selected = await f.executable('selected-codex', `console.log('codex-cli ${version}');`);
-  const result = await run(f, 'unit', { BORGEE_CODEX_TEST_EXECUTABLE: selected });
+  const result = await run(f, 'local', { BORGEE_CODEX_TEST_EXECUTABLE: selected });
   assert.notEqual(result.code, 0); assert.doesNotMatch(result.output, /TEST_RUNNER_STARTED/);
   assert.ok(result.output.includes(`actual=${version}`), result.output); assert.match(result.output, /required baseline=0\.162\.0/);
 });
 
-test('unit preflight reads an overridden compatibility manifest relative to the Lab package', options, async t => {
+test('local native preflight reads an overridden compatibility manifest relative to the Lab package', options, async t => {
   const f = await fixture(t), manifest = 'alternate-compatibility.json';
   await writeFile(join(f.directory, 'packages/agent-remote-lab', manifest), JSON.stringify({ providers: [{ providerId: 'codex', native: { name: 'fixture-codex', version: '0.163.0' } }] }));
   const newer = await f.executable('newer-codex', "console.log('fixture-codex 0.163.0');");
-  const rejected = await run(f, 'unit', { BORGEE_AGENT_REMOTE_COMPATIBILITY_MANIFEST: manifest });
+  const rejected = await run(f, 'local', { BORGEE_AGENT_REMOTE_COMPATIBILITY_MANIFEST: manifest });
   assert.notEqual(rejected.code, 0); assert.match(rejected.output, /required baseline=0\.163\.0/); assert.doesNotMatch(rejected.output, /TEST_RUNNER_STARTED/);
-  const accepted = await run(f, 'unit', { BORGEE_AGENT_REMOTE_COMPATIBILITY_MANIFEST: manifest, BORGEE_CODEX_TEST_EXECUTABLE: newer });
+  const accepted = await run(f, 'local', { BORGEE_AGENT_REMOTE_COMPATIBILITY_MANIFEST: manifest, BORGEE_CODEX_TEST_EXECUTABLE: newer });
   assert.equal(accepted.code, 0, accepted.output); assert.match(accepted.output, /TEST_RUNNER_STARTED/);
 });
 
-test('unit preflight requires the complete exact Codex version output', options, async t => {
+test('local native preflight requires the complete exact Codex version output', options, async t => {
   const f = await fixture(t); const selected = await f.executable('selected-codex', "console.log('codex-cli 0.162.0\\nunexpected extra output');");
-  const result = await run(f, 'unit', { BORGEE_CODEX_TEST_EXECUTABLE: selected });
+  const result = await run(f, 'local', { BORGEE_CODEX_TEST_EXECUTABLE: selected });
   assert.notEqual(result.code, 0); assert.doesNotMatch(result.output, /TEST_RUNNER_STARTED/); assert.match(result.output, /codex-cli 0\.162\.0/);
 });
 
-test('unit preflight matches normalized stdout while keeping stderr separate like the Lab fixture', options, async t => {
+test('local native preflight matches normalized stdout while keeping stderr separate like the Lab fixture', options, async t => {
   const f = await fixture(t); const selected = await f.executable('selected-codex', "process.stderr.write('fixture warning\\n'); process.stdout.write('codex-cli 0.162.0\\r\\n');");
-  const result = await run(f, 'unit', { BORGEE_CODEX_TEST_EXECUTABLE: selected });
+  const result = await run(f, 'local', { BORGEE_CODEX_TEST_EXECUTABLE: selected });
   assert.equal(result.code, 0, result.output); assert.match(result.output, /TEST_RUNNER_STARTED/);
 });
 
@@ -147,14 +147,14 @@ for (const version of ['1.0.70', '1.0.83-1']) test(`a current Copilot package ca
 test('package-local PATH executables take precedence over the inherited PATH', options, async t => {
   const f = await fixture(t);
   const selected = await f.executable('packages/agent-provider-claude/node_modules/.bin/claude', "console.log('2.1.128 (Claude Code)');");
-  const result = await run(f, 'unit');
+  const result = await run(f, 'local');
   assert.notEqual(result.code, 0); assert.ok(result.output.includes(selected), result.output);
   assert.match(result.output, /2\.1\.128/); assert.doesNotMatch(result.output, /TEST_RUNNER_STARTED/);
 });
 
 test('an enabled optional Codex binary is checked without overriding its selection', options, async t => {
   const f = await fixture(t); const selected = await f.executable('optional-codex', "console.log('codex-cli 0.100.0');");
-  const result = await run(f, 'unit', { ARC_PROMPT_EDIT_TEST_EXECUTABLE: selected });
+  const result = await run(f, 'local', { ARC_PROMPT_EDIT_TEST_EXECUTABLE: selected });
   assert.notEqual(result.code, 0); assert.doesNotMatch(result.output, /TEST_RUNNER_STARTED/);
   assert.ok(result.output.includes(selected)); assert.match(result.output, /ARC_PROMPT_EDIT_TEST_EXECUTABLE/);
 });

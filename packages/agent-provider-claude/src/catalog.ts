@@ -9,6 +9,8 @@ export interface ClaudeCatalog {
   rename?(sessionId: string, title: string): Promise<void>;
   info(sessionId: string): Promise<SDKSessionInfo | undefined>;
   messages(sessionId: string): Promise<SessionMessage[]>;
+  /** Conversation rows for presentation, including input the native runtime folded into a running turn. */
+  timelineMessages?(sessionId: string): Promise<SessionMessage[]>;
   history?(sessionId: string, query: AgentHistoryQuery): Promise<AgentHistoryPage>;
   children?(sessionId: string): Promise<Array<{ id: string; messages: SessionMessage[] }>>;
   childMessages?(sessionId: string, childId: string): Promise<SessionMessage[]>;
@@ -30,5 +32,5 @@ export function createClaudeCatalog(env: NodeJS.ProcessEnv, timeout: number): Cl
       if (!result.page || result.error) throw new Error(result.error ?? 'Claude source history is unavailable.');
       return result.page;
     },
-    messages: (id) => execute('messages', id), children: (id) => execute('children', id), childMessages: (id, child) => execute('child-messages', id, child) };
+    messages: (id) => execute('messages', id), timelineMessages: (id) => execute('timeline-messages', id), children: (id) => execute('children', id), childMessages: (id, child) => execute('child-messages', id, child) };
 }

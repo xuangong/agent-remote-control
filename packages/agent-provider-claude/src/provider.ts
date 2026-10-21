@@ -123,7 +123,7 @@ export class ClaudeAgentProvider implements AgentProviderAdapter {
       const cwd = info?.cwd ?? stored.cwd;
       if (descriptor && cwd !== descriptor.cwd) claudeEvidenceReject('native_evidence_stale');
       if (!cwd) throw new Error('Claude session workspace is unavailable.');
-      const messages = info ? await this.catalog.messages(sessionId) : [];
+      const messages = info ? await (this.catalog.timelineMessages?.(sessionId) ?? this.catalog.messages(sessionId)) : [];
       session = await ClaudeAgentSession.open({ ...stored, ...extensions, sessionId, cwd: await workspace(cwd) },
         { ...this.options, catalog: this.catalog, emptyDescriptor: Boolean(descriptor), restoreNativeModel: Boolean(descriptor && info), onDispose: () => {
           if (session && this.sessions.get(sessionId) === session) this.sessions.delete(sessionId);

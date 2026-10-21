@@ -2,7 +2,7 @@ import { useEffect, useId, useLayoutEffect, useRef, useState, type ReactNode, ty
 
 /** Keeps floating actions within their Session View without covering the reading area. */
 export function SessionTimelineTools({ collapsible, searchOpen, searchPanel, timelineRef, onDismissSearch, children }: {
-  collapsible: boolean; searchOpen: boolean; searchPanel?: ReactNode; timelineRef: RefObject<HTMLElement>; onDismissSearch(): void; children: ReactNode;
+  collapsible: boolean; searchOpen: boolean; searchPanel?: ReactNode; timelineRef: RefObject<HTMLElement>; onDismissSearch(): void; children?: ReactNode;
 }) {
   const [collapsed, setCollapsed] = useState(true);
   const contentId = useId();
@@ -42,7 +42,7 @@ export function SessionTimelineTools({ collapsible, searchOpen, searchPanel, tim
   }, [collapsible, hidden, timelineRef]);
   const label = hidden ? 'Expand session actions' : 'Collapse session actions';
   return <div ref={container} className="lab-timeline-controls">
-    <div className="lab-timeline-tools" role="toolbar" aria-label="Session actions"
+    {children ? <div className="lab-timeline-tools" role="toolbar" aria-label="Session actions"
     data-collapsible={collapsible || undefined} data-collapsed={hidden || undefined}>
     <div ref={content} id={contentId} className="lab-timeline-tools-content"
       aria-hidden={hidden || undefined} {...(hidden ? { inert: '' } : {})}>{children}</div>
@@ -57,7 +57,7 @@ export function SessionTimelineTools({ collapsible, searchOpen, searchPanel, tim
         <path className="lab-timeline-tools-collapse-icon" d="m10 6 6 6-6 6" />
       </svg>
     </button> : null}
-    </div>
+    </div> : null}
     {searchPanel}
   </div>;
 }

@@ -76,6 +76,7 @@ export function SessionWorkbench({ sessionDescription, onNavigateAttribution, to
   const [composerHidden, setComposerHidden] = useState(false);
   const composerId = useId();
   const [timelineToolsTarget, setTimelineToolsTarget] = useState<HTMLDivElement | null>(null);
+  const [headingSearchTarget, setHeadingSearchTarget] = useState<HTMLSpanElement | null>(null);
   const toastAnchor = useToastAnchor(visible && !!state?.agent && !composerHidden);
   const composerTouchBoundary = useRef<HTMLDivElement>(null);
   const toastToggleAnchor = useToastAnchor<HTMLButtonElement>(visible && !!state?.agent);
@@ -138,7 +139,7 @@ export function SessionWorkbench({ sessionDescription, onNavigateAttribution, to
     <SessionAttributions description={sessionDescription} onNavigate={onNavigateAttribution}>{({ toggle, details }) => <SessionViewFrame className={layoutClass}>
     <div className="lab-workbench-heading-group" hidden={headingMode === 'toolbar' && !headingContext && !details}>
     <SessionHeading hidden={headingMode === 'toolbar'}
-      leading={headingMode === 'inline' ? <>{headingStart}{workspaceLink}{viewOptions}</> : undefined}
+      leading={headingMode === 'inline' ? <>{headingStart}{workspaceLink}{viewOptions}<span className="lab-heading-search-slot" ref={setHeadingSearchTarget} /></> : undefined}
       trailing={headingMode === 'inline' ? <>{sessionManager}{toggle}<span className="lab-conversation-status">{hasReplica ? activityLabel : isAttaching ? loadingLabel : 'Awaiting Agent'}</span></> : undefined}>
         {conversationPath}
         <h2 hidden={!!conversationPath} className="agent-session-title" data-session-status={activity}>{hasReplica ? 'Conversation' : isAttaching ? `${sessionStatus === 'catching_up' ? 'Loading conversation' : 'Opening session'} ${attachingAgentId}` : 'Ready for a session'}</h2>
@@ -148,7 +149,8 @@ export function SessionWorkbench({ sessionDescription, onNavigateAttribution, to
     </div>
     {todo ? <SessionTodoPanel key={displayScope} {...todo} disabled={todo.disabled || readOnly || mutationBlocked} /> : null}
     <PreviewDock sessionId={state?.agent?.id ?? attachingAgentId} />
-    <WorkbenchTimeline toolsTargetRef={setTimelineToolsTarget} toolsCollapsible={headingMode === 'toolbar'} toolsScope={displayScope} nativeTakeover={!!nativeTakeover} readOnly={readOnly} state={state} sessionStatus={sessionStatus} attachingAgentId={attachingAgentId}
+    <WorkbenchTimeline toolsTargetRef={setTimelineToolsTarget} toolsCollapsible={headingMode === 'toolbar'} toolsScope={displayScope}
+      searchTriggerTarget={headingMode === 'inline' ? headingSearchTarget : undefined} nativeTakeover={!!nativeTakeover} readOnly={readOnly} state={state} sessionStatus={sessionStatus} attachingAgentId={attachingAgentId}
       visible={visible} readingPositions={readingPositions} actions={actions} revealEntry={revealEntry}
       agentFailure={failureInTimeline ? undefined : agentFailure} connectionFailure={connectionFailure} runtimeNotice={runtimeNotice} runtimeMutationDisabled={runtimeMutationDisabled}
       onInspectEntry={onInspectEntry} onOpenChildSession={onOpenChildSession} childrenFor={childrenFor} resolveSessionLink={resolveSessionLink}
@@ -253,8 +255,10 @@ function useActionFeedback(actions: LabWorkbenchActions, sessionId: string | und
 
 const WorkbenchTimeline = memo(function WorkbenchTimeline({ nativeTakeover, readOnly, state, sessionStatus, attachingAgentId, visible, readingPositions, actions, revealEntry,
   agentFailure, connectionFailure, runtimeNotice, runtimeMutationDisabled, onInspectEntry, onOpenChildSession, childrenFor, resolveSessionLink,
-  questionDrafts, onQuestionDraftChange, toolsTargetRef, toolsCollapsible, toolsScope }: Pick<Parameters<typeof SessionWorkbench>[0], 'readOnly' | 'state' | 'sessionStatus' | 'attachingAgentId' | 'visible' | 'actions' | 'revealEntry' | 'onInspectEntry' | 'onOpenChildSession' | 'childrenFor' | 'resolveSessionLink' | 'questionDrafts' | 'onQuestionDraftChange'> & {
+  questionDrafts, onQuestionDraftChange, toolsTargetRef, toolsCollapsible, toolsScope, searchTriggerTarget }: Pick<Parameters<typeof SessionWorkbench>[0], 'readOnly' | 'state' | 'sessionStatus' | 'attachingAgentId' | 'visible' | 'actions' | 'revealEntry' | 'onInspectEntry' | 'onOpenChildSession' | 'childrenFor' | 'resolveSessionLink' | 'questionDrafts' | 'onQuestionDraftChange'> & {
     readingPositions: NonNullable<Parameters<typeof useTimelineScroll>[2]>; toolsTargetRef(node: HTMLDivElement | null): void; toolsCollapsible: boolean; toolsScope?: string; agentFailure?: string;
+    /** A visible heading hosts the search trigger so it never covers Timeline content; null until it mounts. */
+    searchTriggerTarget?: HTMLElement | null;
     connectionFailure?: { message: string }; runtimeNotice?: string; runtimeMutationDisabled: boolean; nativeTakeover?: boolean;
   }) {
   const searchScope = JSON.stringify([state?.agent?.id, state?.timeline.epoch]);
@@ -285,6 +289,11 @@ const WorkbenchTimeline = memo(function WorkbenchTimeline({ nativeTakeover, read
   }, [visible, selectedSearchKey, searchSelection?.request]);
   const hasReplica = state !== undefined;
   const isAttaching = !hasReplica && attachingAgentId !== undefined;
+  const searchButton = state?.timeline.initialized ? <button ref={searchTrigger} type="button" className="lab-timeline-search-trigger"
+    hidden={searchOpen && !searchTriggerTarget} aria-label="Search this session" title="Search this session" aria-expanded={searchOpen}
+    onClick={() => { if (searchOpen) closeSearch(); else setOpenSearchScope(searchScope); }}>
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5" /><path d="m16 16 5 5" /></svg>
+  </button> : null;
   return <div className="lab-timeline-stage" onKeyDownCapture={event => {
       if (event.target instanceof Node && !event.currentTarget.contains(event.target)) return;
       if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'f' && state?.timeline.initialized) {
@@ -299,13 +308,12 @@ const WorkbenchTimeline = memo(function WorkbenchTimeline({ nativeTakeover, read
             signal.throwIfAborted();
             setSearchSelection(previous => ({ scope: searchScope, key: match.key, request: (previous?.request ?? 0) + 1 }));
           }} /> : null}>
-      <div className="lab-timeline-session-tools" ref={toolsTargetRef} />
-      {state?.timeline.initialized ? <button ref={searchTrigger} type="button" className="lab-timeline-search-trigger"
-        hidden={searchOpen} aria-label="Search this session" title="Search this session" aria-expanded={searchOpen}
-        onClick={() => setOpenSearchScope(searchScope)}>
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5" /><path d="m16 16 5 5" /></svg>
-      </button> : null}
+      {searchTriggerTarget === undefined ? <>
+        <div className="lab-timeline-session-tools" ref={toolsTargetRef} />
+        {searchButton}
+      </> : null}
       </SessionTimelineTools>
+      {searchTriggerTarget && searchButton ? createPortal(searchButton, searchTriggerTarget) : null}
       <div className="lab-timeline-scroll" data-testid="timeline" ref={scroll.viewportRef} tabIndex={0} onScroll={scroll.onScroll} onWheel={scroll.onWheel} onPointerDown={scroll.onPointerDown} onKeyDown={scroll.onKeyDown} onFocus={scroll.onFocus} onTouchStart={scroll.onTouchStart} onTouchMove={scroll.onTouchMove}>
         <div className="lab-conversation-content" ref={scroll.contentRef}>
           {hasReplica ? <>

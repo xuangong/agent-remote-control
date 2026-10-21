@@ -103,6 +103,29 @@ it('renders authoritative idle activity even when retained turn metadata is pres
   expect(container.querySelector('[data-testid="turn-elapsed"]')).toBeNull();
 });
 
+it('keeps session search in a visible heading instead of over the Timeline', async () => {
+  let switchHeading!: (value: 'inline' | 'toolbar') => void;
+  function Harness() {
+    const [headingMode, setHeadingMode] = useState<'inline' | 'toolbar'>('inline'); switchHeading = setHeadingMode;
+    return <SessionWorkbench state={replicaState} sessionStatus="ready" actions={{}} headingMode={headingMode} />;
+  }
+  const container = await render(<Harness />);
+  const triggers = () => container.querySelectorAll<HTMLButtonElement>('[aria-label="Search this session"]');
+  expect(triggers()).toHaveLength(1);
+  expect(triggers()[0]!.closest('.lab-session-heading')).not.toBeNull();
+  expect(container.querySelector('[role="toolbar"][aria-label="Session actions"]')).toBeNull();
+  await act(async () => triggers()[0]!.click());
+  expect(container.querySelector('[aria-label="Search session history"]')).not.toBeNull();
+  expect(triggers()[0]!.hidden).toBe(false);
+  expect(triggers()[0]!.getAttribute('aria-expanded')).toBe('true');
+  await act(async () => triggers()[0]!.click());
+  expect(container.querySelector('[aria-label="Search session history"]')).toBeNull();
+
+  await act(async () => switchHeading('toolbar'));
+  expect(triggers()).toHaveLength(1);
+  expect(triggers()[0]!.closest('[role="toolbar"][aria-label="Session actions"]')).not.toBeNull();
+});
+
 it('does not open session search from an image portal but keeps the timeline shortcut', async () => {
   Object.defineProperties(HTMLDialogElement.prototype, {
     showModal: { configurable: true, value() { this.open = true; } },
@@ -122,10 +145,10 @@ it('does not open session search from an image portal but keeps the timeline sho
   expect(dialog).not.toBeNull();
   const search = container.querySelector<HTMLButtonElement>('[aria-label="Search this session"]')!;
   await act(async () => dialog.dispatchEvent(new KeyboardEvent('keydown', { key: 'f', metaKey: true, bubbles: true, cancelable: true })));
-  expect(search.hidden).toBe(false);
+  expect(search.getAttribute('aria-expanded')).toBe('false');
   await act(async () => dialog.querySelector<HTMLButtonElement>('[aria-label="Close image preview"]')!.click());
   await act(async () => container.querySelector('[data-testid="timeline"]')!.dispatchEvent(new KeyboardEvent('keydown', { key: 'f', ctrlKey: true, bubbles: true, cancelable: true })));
-  expect(search.hidden).toBe(true);
+  expect(search.getAttribute('aria-expanded')).toBe('true');
 });
 
 it('reopens a collapsed runtime notice group when the same search result is requested again', async () => {

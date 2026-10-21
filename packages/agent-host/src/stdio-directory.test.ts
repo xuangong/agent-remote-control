@@ -170,3 +170,59 @@ it.each(['claude', 'copilot'])('fences transferred %s content input before it re
     await expect(session.sendMessageContent!([{ type: 'text', text: 'stale' }])).rejects.toThrow(/control|ownership/i); expect(inputs).toBe(1);
   } finally { await cli?.release(); await directory.close(); await rm(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }); }
 }, 10000);
+
+it('branches a Claude prompt through the native prefix capability and reopens only its original handle', async () => {
+  const handle = {providerId:'claude', sessionId:'branch', opaque:'{"cwd":"/work"}'};
+  const target = {nativeSessionId:'source', turnId:'prompt', messageId:'prompt'};
+  const calls: string[] = [], resumed: unknown[] = [];
+  const native = (): AgentSession => ({
+    capabilities:{history:true,sendMessage:true,steer:false,cancel:false,readResource:false,interactions:{question:false,planApproval:false,toolApproval:false}},
+    async *observe(){yield {type:'history_boundary'};},
+    async runtimeInfo(){return {providerId:'claude',sessionId:'branch',status:'idle',persistence:handle};},
+    async sendMessage(){}, async respondToInteraction(){}, async dispose(){},
+  });
+  const provider = {listSessions:async()=>[], createSession:async()=>{throw new Error('unused');},
+    resumeSession:async (original: typeof handle, _extensions?: unknown, options?: unknown)=>{resumed.push({original, options}); return native();},
+    nativePrefix:{createdSessionIdMaxLength:36,
+      async validate(){calls.push('validate');},
+      async create(_target: unknown, _extensions: unknown, checkpoint: (value: typeof handle) => Promise<void>){calls.push('create'); await checkpoint(handle); calls.push('created'); return native();},
+      async verify(_target: unknown, original: typeof handle){expect(original).toEqual(handle); calls.push('verify');}}};
+  const make = () => createManagedStdioDirectory('claude','Claude',provider,[]);
+  const directory = make();
+  try {
+    expect(await directory.supportsNativePrefix!(target)).toBe(true);
+    await expect(directory.createNativePrefix!(target,{},undefined,undefined as never)).rejects.toThrow(/checkpoint/);
+    expect(await directory.createNativePrefix!(target,{},undefined,async original=>{expect(original).toEqual(handle); calls.push('checkpoint');})).toEqual(handle);
+    expect(calls).toEqual(['validate','create','checkpoint','created']);
+    await directory.open('branch',{nativePrefix:handle});
+    expect(resumed).toEqual([]);
+    await expect(directory.open('branch',{nativePrefix:{...handle,opaque:'changed'}})).rejects.toThrow(/prefix/);
+    await directory.verifyNativePrefix!(target,handle);
+    expect(calls.at(-1)).toBe('verify');
+    const restored = make();
+    try {
+      await restored.open('branch',{nativePrefix:handle});
+      // An empty first-prompt branch has no transcript until its first message; its prefix handle authorizes that state.
+      expect(resumed).toEqual([{original:handle, options:{initializeEmpty:true}}]);
+    } finally {await restored.close();}
+  } finally {await directory.close();}
+});
+
+it('offers no Claude prompt edit without a complete capability or in a Side or Ask conversation', async () => {
+  const target = {nativeSessionId:'source', turnId:'prompt', messageId:'prompt'};
+  const base = {listSessions:async()=>[], createSession:async()=>{throw new Error('unused');}, resumeSession:async()=>{throw new Error('unused');}};
+  for (const nativePrefix of [undefined, {createdSessionIdMaxLength:36, async validate(){}, async create(){throw new Error('unused');}}]) {
+    const directory = createManagedStdioDirectory('claude','Claude',{...base, nativePrefix: nativePrefix as never},[]);
+    try { expect(directory.supportsNativePrefix).toBeUndefined(); expect(directory.createNativePrefix).toBeUndefined(); } finally {await directory.close();}
+  }
+  let creates = 0;
+  const references = {get:async(id: string)=>id==='source'?{sourceNativeSessionId:'origin'}:undefined} as never;
+  const directory = createManagedStdioDirectory('claude','Claude',{...base, nativePrefix:{createdSessionIdMaxLength:36, async validate(){}, async verify(){},
+    async create(){creates++; throw new Error('unexpected native create');}}},[],undefined,references);
+  try {
+    expect(await directory.supportsNativePrefix!(target)).toBe(false);
+    await expect(directory.createNativePrefix!(target,{},undefined,async()=>{})).rejects.toThrow(/side or Ask/i);
+    await expect(directory.validatePromptEdit!(target)).rejects.toThrow(/side or Ask/i);
+    expect(creates).toBe(0);
+  } finally {await directory.close();}
+});

@@ -11,11 +11,12 @@ import type { AgentPersistenceHandle, AgentSession, AgentSessionExtensions, Agen
 import { createAgentHostRuntime, type AgentHostDirectory, type AgentHostRuntime } from './host.js';
 import { createCodexSessionDirectory } from './directory.js';
 import { createOpenCodeSessionDirectory } from './opencode-directory.js';
+import { createManagedStdioDirectory } from './stdio-directory.js';
 import { TpmStore } from './tpm-store.js';
 import { TeamBroker } from '../../agent-remote-hosted/src/teams.js';
 import type { SavedTeam } from '../../agent-remote-hosted/src/team-delivery.js';
 
-for (const providerId of ['codex', 'opencode'] as const) test.each(['leader', 'member', 'tpm'] as const)(`${providerId} first prefix attachment restores %s tools with exact recipient and release fencing`, async role => {
+for (const providerId of ['codex', 'opencode', 'claude'] as const) test.each(['leader', 'member', 'tpm'] as const)(`${providerId} first prefix attachment restores %s tools with exact recipient and release fencing`, async role => {
   const root = await realpath(await mkdtemp(join(tmpdir(), 'arc-prefix-role-'))), teamDirectory = join(root, 'team'), tpmDirectory = join(root, 'tpm');
   const bound = new Map<string, AgentSessionExtensions>(); let forks = 0, allowPoll = false, polls = 0;
   const deliveries: string[] = []; let acceptance: AgentMessageOptions['onAcceptance'];
@@ -38,7 +39,8 @@ for (const providerId of ['codex', 'opencode'] as const) test.each(['leader', 'm
   const handoffs = new WeakMap<AgentHostRuntime, Parameters<NonNullable<AgentHostDirectory['setSessionHandoffHandler']>>[0]>();
   let now = 1_000_000;
   const make = () => {
-    const directory = providerId === 'codex' ? createCodexSessionDirectory({ ...provider, listSessions: async () => ({ sessions: [] }) }, []) : createOpenCodeSessionDirectory({ ...provider, listSessions: async () => [] }, [], undefined, true);
+    const directory = providerId === 'codex' ? createCodexSessionDirectory({ ...provider, listSessions: async () => ({ sessions: [] }) }, [])
+      : providerId === 'claude' ? createManagedStdioDirectory('claude', 'Claude', { ...provider, listSessions: async () => [], sessionWorkspace: async () => root }, []) : createOpenCodeSessionDirectory({ ...provider, listSessions: async () => [] }, [], undefined, true);
     let handoff: Parameters<NonNullable<AgentHostDirectory['setSessionHandoffHandler']>>[0] | undefined;
     // Model the native ownership callback; no installed provider or real CLI is invoked.
     directory.setSessionHandoffHandler = handler => { handoff = handler; };

@@ -1,5 +1,5 @@
-import { successionResumeHandle } from './local-succession-preparation.js';
-import { serializeAgentEmptyCreationResult } from '@orchardworks/agent-provider-sdk';
+import { nativePrefixResumeHandle, successionResumeHandle } from './local-succession-preparation.js';
+import { resolveAgentNativePrefixCapability, serializeAgentEmptyCreationResult, type AgentNativePrefixTarget } from '@orchardworks/agent-provider-sdk';
 import {acquireNativeSession, inspectNativeOwner, NativeSessionOwnerError, type NativeSessionLease, type NativeOwnerDiagnostic, type NativeOwnerIdentity, type NativeHandoffGrant} from './native-session-owner.js';
 import { randomUUID } from 'node:crypto';
 import type {RemoteSessionSummary} from '@orchardworks/agent-remote-relay';
@@ -8,7 +8,8 @@ import type { AgentHostDirectory, AgentHostWorkspace } from './host.js';
 import { requireSessionExtensionIdentity, sessionExtensionIdentity } from './session-extension-identity.js';
 import { SessionReferenceStore, disposeAfterSourceGrantFailure, sourceSessionExtensions, type SourceBindingReader } from './session-reference.js';
 
-export type ManagedStdioProvider = Pick<AgentProviderAdapter, 'createSession' | 'resumeSession' | 'readSessionHistory'> & {
+export type ManagedStdioProvider = Pick<AgentProviderAdapter, 'createSession' | 'resumeSession' | 'readSessionHistory' | 'nativePrefix'> & {
+    validatePromptEdit?(target: AgentNativePrefixTarget): Promise<void>;
     /** Pre-effect guarantee: ordinary createSession returns a same-provider ID with nonempty trim,
      * at most this many UTF-16 units. Covers every selected create mode, not resume/fork or history. */
     readonly createdSessionIdMaxLength?: number;
@@ -35,7 +36,7 @@ export function createManagedStdioDirectory(
   ownership?: {root: string; onDiagnostic?: (event: NativeOwnerDiagnostic) => void},
   references?: SessionReferenceStore,
 ): AgentHostDirectory {
-  const opened = new Map<string, { session: AgentSession; handle: AgentPersistenceHandle; createdAt: string; extensionIdentity: string; sourceAvailable: boolean; nativeCreation?: string; owner?: NativeSessionLease }>();
+  const opened = new Map<string, { session: AgentSession; handle: AgentPersistenceHandle; createdAt: string; extensionIdentity: string; sourceAvailable: boolean; nativeCreation?: string; nativePrefix?: string; owner?: NativeSessionLease }>();
   const leases = new Map<string, NativeSessionLease>();
   const yielded = new Set<string>();
   const unconfirmedStarts = new Set<string>();
@@ -277,14 +278,62 @@ export function createManagedStdioDirectory(
       readerSession = entry.session;
       return id;
     },
+    ...(resolveAgentNativePrefixCapability(provider) ? {
+      async supportsNativePrefix(target: AgentNativePrefixTarget) {
+        const capability = resolveAgentNativePrefixCapability(provider);
+        if (closed || !capability || capability.createdSessionIdMaxLength > 512) return false;
+        await requireSourceAccess(target.nativeSessionId);
+        if (await references?.get(target.nativeSessionId)) return false;
+        await capability.validate(target); return true;
+      },
+      async createNativePrefix(target: AgentNativePrefixTarget, extensions: AgentSessionExtensions, evidence: { completed(): void } | undefined, candidateKnown: (handle: AgentPersistenceHandle) => Promise<void>) {
+        const capability = resolveAgentNativePrefixCapability(provider);
+        if (closed || !capability || capability.createdSessionIdMaxLength > 512) throw new Error('Native prefix preparation is unavailable.');
+        if (typeof candidateKnown !== 'function') throw new Error('Native prefix creation requires a checkpoint.');
+        await requireSourceAccess(target.nativeSessionId);
+        if (await references?.get(target.nativeSessionId)) throw new Error('Editing previous prompts is unavailable in side or Ask conversations.');
+        composeExtensions(extensions);
+        let checkpoint: AgentPersistenceHandle | undefined;
+        const session = await capability.create(target, extensions, async handle => {
+          checkpoint = nativePrefixResumeHandle(providerId, handle.sessionId, handle);
+          await candidateKnown(checkpoint);
+        });
+        if (!checkpoint) { await session.dispose(); throw new Error('Native prefix creation did not checkpoint its handle.'); }
+        evidence?.completed();
+        const id = await remember(session, undefined, sessionExtensionIdentity(extensions), checkpoint.sessionId);
+        const handle = nativePrefixResumeHandle(providerId, id, checkpoint);
+        opened.get(id)!.nativePrefix = JSON.stringify(handle);
+        if (extensions.tools?.length) controllerTools.add(id);
+        return handle;
+      },
+      async verifyNativePrefix(target: AgentNativePrefixTarget, handle: AgentPersistenceHandle) {
+        const capability = resolveAgentNativePrefixCapability(provider);
+        if (closed || !capability || capability.createdSessionIdMaxLength > 512) throw new Error('Native prefix verification is unavailable.');
+        await requireSourceAccess(target.nativeSessionId);
+        await capability.verify(target, nativePrefixResumeHandle(providerId, handle.sessionId, handle));
+      },
+      async validatePromptEdit(target: AgentNativePrefixTarget) {
+        await requireSourceAccess(target.nativeSessionId);
+        if (await references?.get(target.nativeSessionId)) throw new Error('Editing previous prompts is unavailable in side or Ask conversations.');
+        await resolveAgentNativePrefixCapability(provider)!.validate(target);
+      },
+    } : {}),
     setSessionHandoffHandler(handler) { onHandoff = handler; },
     setSessionHandoffAdmission(handler) { onHandoffAdmission = handler; },
     async open(nativeSessionId, options) {
       if (closed) throw new Error(`${displayName} directory is closed.`);
-      const handle = successionResumeHandle(providerId, nativeSessionId, options?.nativeCreation, options?.resumeHandle);
+      if (options?.nativePrefix && (options.nativeCreation || options.resumeHandle || options.resumeOptions)) throw new Error('Native prefix cannot use empty creation recovery options.');
+      const prefixHandle = options?.nativePrefix && nativePrefixResumeHandle(providerId, nativeSessionId, options.nativePrefix);
+      const prefixIdentity = prefixHandle ? JSON.stringify(prefixHandle) : undefined;
+      const handle = prefixHandle || successionResumeHandle(providerId, nativeSessionId, options?.nativeCreation, options?.resumeHandle);
       if (options?.resumeOptions?.initializeEmpty && !handle) throw new Error('Empty initialization requires original creation evidence.');
+      // A prefix branch of a first prompt is still empty until its first message; its handle is the original creation evidence.
+      const resumeOptions = prefixHandle ? { initializeEmpty: true } : options?.resumeOptions;
       const creationIdentity = options?.nativeCreation ? serializeAgentEmptyCreationResult(options.nativeCreation) : undefined;
-      const assertCreation = () => { if (creationIdentity && opened.get(nativeSessionId)?.nativeCreation !== creationIdentity) throw new Error('Existing attachment does not match the original native creation evidence.'); };
+      const assertCreation = () => {
+        if (creationIdentity && opened.get(nativeSessionId)?.nativeCreation !== creationIdentity) throw new Error('Existing attachment does not match the original native creation evidence.');
+        if (prefixIdentity && opened.get(nativeSessionId)?.nativePrefix !== prefixIdentity) throw new Error('Existing attachment does not match the original native prefix handle.');
+      };
       const pending = loading.get(nativeSessionId);
       if (pending) {
         const session = await pending;
@@ -313,7 +362,7 @@ export function createManagedStdioDirectory(
         const identity = sessionExtensionIdentity(extensions);
         let session: AgentSession;
         try {
-          session = await provider.resumeSession(handle ?? existing?.handle ?? { providerId, sessionId: nativeSessionId, opaque: '{}' }, extensions, options?.resumeOptions);
+          session = await provider.resumeSession(handle ?? existing?.handle ?? { providerId, sessionId: nativeSessionId, opaque: '{}' }, extensions, resumeOptions);
         } catch (error) {
           if (owner) {
             unconfirmedStarts.add(nativeSessionId);
@@ -323,6 +372,7 @@ export function createManagedStdioDirectory(
         }
         await remember(session, owner, identity, nativeSessionId);
         if (creationIdentity) opened.get(nativeSessionId)!.nativeCreation = creationIdentity;
+        if (prefixIdentity) opened.get(nativeSessionId)!.nativePrefix = prefixIdentity;
         if (extensions?.tools?.length) controllerTools.add(nativeSessionId);
         readerReady = true;
         readerSession = opened.get(nativeSessionId)!.session;

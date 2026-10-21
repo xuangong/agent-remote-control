@@ -153,3 +153,69 @@ it('renames Claude native metadata once without starting a query and reads it ba
   for(const name of ['', 'x'.repeat(513), 'line\nline']) await expect(provider.renameSession(id,name)).rejects.toThrow(/name/i);
   await expect(provider.renameSession('../bad','New')).rejects.toThrow(/identity/);
 });
+
+describe('Claude prompt editing', () => {
+  const source = '11111111-1111-4111-8111-111111111111', branch = '22222222-2222-4222-8222-222222222222';
+  const target = { nativeSessionId: source, turnId: '33333333-3333-4333-8333-333333333333', messageId: '33333333-3333-4333-8333-333333333333' };
+  async function fixture(forked: string | null) {
+    const { realpath } = await import('node:fs/promises');
+    const cwd = await realpath(process.cwd());
+    const calls: string[] = [];
+    const launched: any[] = [];
+    const provider = new ClaudeAgentProvider({ catalog: { list: async () => [], info: async (id) => id === branch || id === source ? { cwd } as any : undefined,
+      messages: async () => [], children: async () => [],
+      promptEdit: {
+        inspect: async () => { calls.push('inspect'); return { cwd, forkPoint: forked ? 'previous-entry' : null }; },
+        fork: async () => { calls.push('fork'); return { cwd, sessionId: forked }; },
+        verify: async (_target, candidate) => { calls.push(`verify:${candidate === branch ? 'branch' : 'empty'}`); },
+      } }, query: ({ options }) => {
+      launched.push(options); calls.push('open');
+      const events = new Channel<any>();
+      return { [Symbol.asyncIterator]: () => events[Symbol.asyncIterator](), initializationResult: async () => ({ models: [] }),
+        setPermissionMode: async () => {}, interrupt: async () => {}, close: () => events.close() } as any;
+    } });
+    return { provider, calls, launched, cwd };
+  }
+
+  it('checkpoints the branch before verifying and opening it, and leaves the source unchanged', async () => {
+    const { provider, calls, launched, cwd } = await fixture(branch);
+    const handles: any[] = [];
+    const session = await provider.nativePrefix!.create(target, {}, async handle => { calls.push('checkpoint'); handles.push(handle); });
+    try {
+      expect(calls).toEqual(['inspect', 'fork', 'checkpoint', 'inspect', 'verify:branch', 'open']);
+      expect(handles[0]).toMatchObject({ providerId: 'claude', sessionId: branch });
+      expect(JSON.parse(handles[0].opaque)).toMatchObject({ cwd });
+      expect(launched[0]).toMatchObject({ resume: branch });
+      expect((await session.runtimeInfo()).sessionId).toBe(branch);
+    } finally { await session.dispose(); }
+  });
+
+  it('starts an empty conversation when the first prompt is edited', async () => {
+    const { provider, calls, launched } = await fixture(null);
+    const handles: any[] = [];
+    const session = await provider.nativePrefix!.create(target, {}, async handle => { calls.push('checkpoint'); handles.push(handle); });
+    try {
+      expect(calls).toEqual(['inspect', 'fork', 'checkpoint', 'open']);
+      expect(JSON.parse(handles[0].opaque)).toMatchObject({ kind: 'claude-empty-session', sessionId: handles[0].sessionId });
+      expect(handles[0].sessionId).not.toBe(source);
+      expect(launched[0].resume).toBeUndefined();
+      await expect(provider.nativePrefix!.verify(target, handles[0])).resolves.toBeUndefined();
+      expect(calls.at(-1)).toBe('verify:empty');
+    } finally { await session.dispose(); }
+  });
+
+  it('refuses to branch while the loaded source is still working', async () => {
+    const { provider, calls } = await fixture(branch);
+    const loaded = await provider.resumeSession({ providerId: 'claude', sessionId: source, opaque: '{}' });
+    try {
+      await loaded.sendMessage('Still running');
+      await expect(provider.nativePrefix!.validate(target)).rejects.toThrow('Wait for Claude to finish');
+      await expect(provider.nativePrefix!.create(target, {}, async () => {})).rejects.toThrow('Wait for Claude to finish');
+      expect(calls).not.toContain('fork');
+    } finally { await loaded.dispose(); }
+  });
+
+  it('offers no native prefix without a catalog that can fork transcripts', () => {
+    expect(new ClaudeAgentProvider({ catalog: { list: async () => [], info: async () => undefined, messages: async () => [] } }).nativePrefix).toBeUndefined();
+  });
+});

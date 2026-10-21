@@ -5,7 +5,7 @@ import { claudeMessageContent } from './message-content.js';
 import { randomUUID } from 'node:crypto';
 import { query, type Options, type ModelInfo, type PermissionMode, type Query, type SDKMessage, type SDKUserMessage, type SessionMessage } from '@anthropic-ai/claude-agent-sdk';
 import type { AgentCapabilities, AgentInputAcceptance, AgentInputPart, AgentInteractionResponse, AgentMessageOptions, AgentRuntimeInfo, AgentSession, AgentSessionConfig,
-  AgentStreamEvent, ProviderStreamItem } from '@orchardworks/agent-provider-sdk';
+  AgentStreamEvent, AgentNativeValidityToken, AgentPromptEditEvidence, ProviderStreamItem } from '@orchardworks/agent-provider-sdk';
 import { IMAGE_INPUT_CAPABILITIES, validateSessionSetting, type AgentSessionSetting } from '@orchardworks/agent-provider-sdk';
 import { Channel, deadline, DeadlineError } from './channel.js';
 import { ClaudeInteractions } from './interactions.js';
@@ -14,7 +14,7 @@ import { ClaudeImageRegistry } from './images.js';
 import { ClaudeEventProjector } from './projector.js';
 import { discoverClaudeCommands } from './commands.js';
 import { ClaudeChildren } from './children.js';
-import { createClaudeCatalog, type ClaudeCatalog } from './catalog.js';
+import { createClaudeCatalog, type ClaudeCatalog, type ClaudeTimelineMessage } from './catalog.js';
 import { createClaudeSessionTools } from './session-tools.js';
 import { ClaudeNativeEvidence, claudeEmptyHandle } from './native-evidence.js';
 import { CLAUDE_ALLOWS_BYPASS_PERMISSIONS, claudePermissionModeOptions, isResumableClaudePermissionMode, type ResumableClaudePermissionMode } from './permission-modes.js';
@@ -53,6 +53,13 @@ export class ClaudeShutdownError extends Error {
 
 export class ClaudeAgentSession implements AgentSession {
   readonly nativeEvidence: ClaudeNativeEvidence;
+  /** Prompt edits branch from the native transcript, so readiness is the session's own quiescence. */
+  readonly promptEditEvidence: AgentPromptEditEvidence = Object.freeze({
+    version: 1 as const,
+    inspectReadiness: () => this.nativeEvidence.inspectReadiness(),
+    captureValidity: () => this.nativeEvidence.captureValidity(),
+    isCurrent: (token: AgentNativeValidityToken) => this.nativeEvidence.isCurrent(token),
+  });
   private acceptance?: AgentMessageOptions['onAcceptance'];
   readonly capabilities: AgentCapabilities = { resourceInput: RESOURCE_INPUT_CAPABILITIES, imageInput: IMAGE_INPUT_CAPABILITIES, history: true, sendMessage: true, steer: true, cancel: true, readResource: true,
     planning: true, commands: true, sessionSettings: true, interactions: { question: true, toolApproval: true, planApproval: true } };
@@ -96,7 +103,7 @@ export class ClaudeAgentSession implements AgentSession {
   private pump!: Promise<void>;
 
   private constructor(private readonly config: ClaudeSessionConfig, private readonly options: ClaudeSessionOptions,
-    messages: SessionMessage[]) {
+    messages: ClaudeTimelineMessage[]) {
     this.inputDispatched = messages.some(message => message.type === 'user');
     this.nativeModelConfirmed = !options.restoreNativeModel;
     this.process = new ClaudeNativeProcess(options.onDiagnostic);
@@ -108,7 +115,8 @@ export class ClaudeAgentSession implements AgentSession {
     this.images = new ClaudeImageRegistry(config.sessionId);
     this.projector = new ClaudeEventProjector(config.sessionId, 'live', this.images);
     const history = new ClaudeEventProjector(config.sessionId, 'history', this.images);
-    this.history = messages.flatMap((message) => history.project(message));
+    this.history = messages.flatMap(message => history.project(message).map(observation => message.turnId && observation.type === 'observation'
+      && observation.event.type !== 'runtime_updated' && observation.event.type !== 'thread_started' ? { ...observation, event: { ...observation.event, turnId: message.turnId } } : observation));
     this.children = new ClaudeChildren(config.sessionId, config.cwd,
       options.catalog ?? createClaudeCatalog(options.env ?? {}, this.timeout), () => this.runtimeUpdated());
     this.nativeEvidence = new ClaudeNativeEvidence({ id: config.sessionId, cwd: config.cwd ?? process.cwd(), options,
@@ -138,7 +146,7 @@ export class ClaudeAgentSession implements AgentSession {
     });
   }
 
-  static async open(config: ClaudeSessionConfig, options: ClaudeSessionOptions = {}, messages: SessionMessage[] = [], resume = false): Promise<ClaudeAgentSession> {
+  static async open(config: ClaudeSessionConfig, options: ClaudeSessionOptions = {}, messages: ClaudeTimelineMessage[] = [], resume = false): Promise<ClaudeAgentSession> {
     if (config.reasoningEffort && !['low', 'medium', 'high', 'xhigh', 'max'].includes(config.reasoningEffort)) throw new Error('Unsupported Claude reasoning effort.');
     const session = new ClaudeAgentSession(config, options, messages);
     try {

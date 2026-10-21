@@ -48,7 +48,7 @@ export async function withFoldedInput(sessionId: string, messages: SessionMessag
   return messages.flatMap(message => [message, ...(after.get(message.uuid) ?? [])]);
 }
 
-async function transcriptFile(sessionId: string, env: NodeJS.ProcessEnv): Promise<string | undefined> {
+export async function transcriptFile(sessionId: string, env: NodeJS.ProcessEnv): Promise<string | undefined> {
   if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(sessionId)) return undefined;
   const projects = join(env.CLAUDE_CONFIG_DIR ?? join(env.HOME ?? homedir(), '.claude'), 'projects');
   let directories: string[];

@@ -108,6 +108,25 @@ describe('Claude persistent session', () => {
     await session.dispose();
   });
 
+  it('replays saved history with the turn each entry belongs to, so reopened prompts stay editable', async () => {
+    const native = runtime();
+    const row = (uuid: string, type: 'user' | 'assistant', content: unknown, turnId?: string) => ({ type, uuid, session_id: 'native', parent_tool_use_id: null,
+      parent_agent_id: null, message: { role: type, id: `${uuid}-msg`, content }, ...(turnId ? { turnId } : {}) });
+    const session = await ClaudeAgentSession.open({ sessionId: 'native', cwd: '/workspace' }, { query: native.factory,
+      catalog: { list: async () => [], info: async () => undefined, messages: async () => [], children: async () => [] } }, [
+      row('summary', 'user', 'Compaction summary'),
+      row('prompt', 'user', 'Saved prompt', 'prompt'),
+      row('reply', 'assistant', [{ type: 'text', text: 'Saved reply' }], 'prompt'),
+    ] as never, true);
+    const items: Array<{ text?: string; turnId?: string }> = [];
+    for await (const item of session.observe()) {
+      if (item.type === 'history_boundary') break;
+      if (item.type === 'observation' && item.event.type === 'timeline') items.push({ text: (item.event.item as { text?: string }).text, turnId: item.event.turnId });
+    }
+    expect(items).toEqual([{ text: 'Compaction summary', turnId: undefined }, { text: 'Saved prompt', turnId: 'prompt' }, { text: 'Saved reply', turnId: 'prompt' }]);
+    await session.dispose();
+  });
+
   it('fails and cleans up a query that never finishes initialization', async () => {
     const native = runtime();
     const factory = (args: any) => ({ ...native.factory(args), initializationResult: () => new Promise(() => undefined) });

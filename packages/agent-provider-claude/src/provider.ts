@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { realpath, stat } from 'node:fs/promises';
-import type { AgentHistoryPage, AgentHistoryQuery, AgentPersistenceHandle, AgentProviderAdapter, AgentSession, AgentSessionConfig, AgentSessionExtensions, AgentSessionResumeOptions, AgentProviderNativeEvidence } from '@orchardworks/agent-provider-sdk';
+import type { AgentHistoryPage, AgentHistoryQuery, AgentNativePrefixCapability, AgentNativePrefixTarget, AgentPersistenceHandle, AgentProviderAdapter, AgentSession, AgentSessionConfig, AgentSessionExtensions, AgentSessionResumeOptions, AgentProviderNativeEvidence } from '@orchardworks/agent-provider-sdk';
 import { createClaudeCatalog, type ClaudeCatalog } from './catalog.js';
 import { ClaudeShutdownError, ClaudeAgentSession, type ClaudeSessionConfig, type ClaudeSessionOptions } from './session.js';
 import { isResumableClaudePermissionMode } from './permission-modes.js';
@@ -34,6 +34,22 @@ export class ClaudeAgentProvider implements AgentProviderAdapter {
       return { status: 'created', handle: claudeEmptyHandle({ ...selections, sessionId: config.sessionId, cwd }, this.options) };
     },
   };
+  /**
+   * Codex semantics: a branch holds the conversation before the selected prompt, the original is unchanged,
+   * and files are not reverted. Available only with a catalog that can read and fork native transcripts.
+   */
+  get nativePrefix(): AgentNativePrefixCapability | undefined {
+    if (!this.catalog.promptEdit) return undefined;
+    return {
+      createdSessionIdMaxLength: this.createdSessionIdMaxLength,
+      validate: target => this.validatePromptEdit(target),
+      create: (target, extensions, checkpoint) => {
+        if (typeof checkpoint !== 'function') return Promise.reject(new Error('Native prefix creation requires a checkpoint.'));
+        return this.createPromptEditPrefix(target, extensions, checkpoint);
+      },
+      verify: (target, handle) => this.verifyPromptEditBranch(target, handle),
+    };
+  }
   private readonly catalog: ClaudeCatalog;
   private readonly sessions = new Map<string, ClaudeAgentSession>();
   private readonly loading = new Set<string>();
@@ -134,6 +150,59 @@ export class ClaudeAgentProvider implements AgentProviderAdapter {
       if (error instanceof ClaudeShutdownError) { session = error.session; this.sessions.set(sessionId, session); }
       throw error;
     } finally { this.loading.delete(sessionId); }
+  }
+
+  async validatePromptEdit(target: AgentNativePrefixTarget): Promise<void> {
+    await this.promptEditBoundary(target);
+  }
+
+  /** Non-durable convenience fork. Host succession uses nativePrefix.create. */
+  async forkForPromptEdit(target: AgentNativePrefixTarget, extensions: AgentSessionExtensions = {}): Promise<AgentSession> {
+    return this.createPromptEditPrefix(target, extensions);
+  }
+
+  async verifyPromptEditBranch(target: AgentNativePrefixTarget, handle: AgentPersistenceHandle): Promise<void> {
+    const promptEdit = this.requirePromptEdit();
+    if (handle.providerId !== 'claude' || !validClaudeId(handle.sessionId) || handle.sessionId === target.nativeSessionId) throw new Error('Invalid Claude prompt-edit candidate identity.');
+    const stored = readClaudeEmptyDescriptor(handle, this.options)?.config ?? readConfig(handle.opaque);
+    const boundary = await promptEdit.inspect(target);
+    if (!stored.cwd || await realpath(stored.cwd) !== boundary.cwd) throw new Error('Claude candidate workspace does not match.');
+    await promptEdit.verify(target, handle.sessionId);
+  }
+
+  private requirePromptEdit() {
+    if (!this.catalog.promptEdit) throw new Error('Claude prompt editing is unavailable.');
+    return this.catalog.promptEdit;
+  }
+
+  /** The transcript decides the boundary; a loaded source must also be quiet, because its next turn would extend it. */
+  private async promptEditBoundary(target: AgentNativePrefixTarget) {
+    const boundary = await this.requirePromptEdit().inspect(target);
+    const source = this.sessions.get(target.nativeSessionId);
+    if (source) {
+      const readiness = await source.nativeEvidence.inspectReadiness();
+      if (!readiness.idle) throw new Error('Wait for Claude to finish before editing a prompt.');
+      if (readiness.pendingInputs || readiness.pendingInteractions) throw new Error('Resolve pending Claude questions and queued input before editing a prompt.');
+      if (readiness.activeChildren) throw new Error('Wait for Claude background tasks to finish before editing a prompt.');
+    }
+    return { boundary, selections: source?.selectionConfig() ?? {} };
+  }
+
+  private async createPromptEditPrefix(target: AgentNativePrefixTarget, extensions: AgentSessionExtensions = {}, candidateKnown?: (handle: AgentPersistenceHandle) => Promise<void>): Promise<AgentSession> {
+    // The Host supplies the branch's system prompt and tools as extensions; only native selections carry over.
+    const { selections: { systemPrompt: _systemPrompt, ...selections } } = await this.promptEditBoundary(target);
+    const branch = await this.requirePromptEdit().fork(target);
+    const config = { ...selections, cwd: branch.cwd };
+    if (!branch.sessionId) {
+      // Editing the first prompt starts an empty conversation; Claude creates its transcript with the first message.
+      const handle = claudeEmptyHandle({ ...config, sessionId: randomUUID() }, this.options);
+      await candidateKnown?.(handle);
+      return this.resumeSession(handle, extensions, { initializeEmpty: true });
+    }
+    const handle = { providerId: 'claude', sessionId: branch.sessionId, opaque: JSON.stringify(config) };
+    await candidateKnown?.(handle);
+    await this.verifyPromptEditBranch(target, handle);
+    return this.resumeSession(handle, extensions);
   }
 
   async openChildSession(parentNativeSessionId: string, nativeSessionId: string): Promise<AgentSession> {

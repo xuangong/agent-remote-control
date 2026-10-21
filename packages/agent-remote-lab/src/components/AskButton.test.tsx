@@ -135,3 +135,14 @@ it('continues dragging from the visible position after the keyboard clamps the b
   await pointer(button, 'pointermove', 285, 530, 'touch');
   expect(button.getBoundingClientRect()).toMatchObject({ left: afterClamp.left + 5, top: afterClamp.top - 10 });
 });
+
+it('reports when it rests against the right edge so wide layouts can reserve its column', async () => {
+  const container = await render(<Harness />);
+  const root = container.querySelector<HTMLElement>('.lab-ask-floating')!;
+  const button = container.querySelector('button')!;
+  expect(root.dataset.edge).toBe('right');
+  await key(button, 'ArrowLeft', true);
+  expect(root.dataset.edge).toBeUndefined();
+  await key(button, 'ArrowRight', true);
+  expect(root.dataset.edge).toBe('right');
+});

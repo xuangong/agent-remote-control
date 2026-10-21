@@ -34,7 +34,7 @@ export function TeamMenu(props: Props) {
   const [revealing, setRevealing] = useState(false);
   const [pendingCreate, setPendingCreate] = useState<{operationId:string;source:TeamSource;sourceViewId?:string;origin?:{windowId:string;viewId:string}}>();
 
-  const { root, style, handlers } = useTrackingPosition('agent-remote:team-position');
+  const { root, style, handlers, edge } = useTrackingPosition('agent-remote:team-position');
   const trigger = useRef<HTMLButtonElement>(null);
   const revealedRequest = useRef<string>();
   const currentClient = useRef(client); currentClient.current = client;
@@ -141,7 +141,7 @@ export function TeamMenu(props: Props) {
   }
   if (!enabled) return null;
   return <>
-    <div ref={root} data-hidden={!visible || undefined} aria-hidden={!visible || undefined} style={style} {...handlers} className="lab-tracking-floating lab-team-floating" onKeyDown={event => { handlers.onKeyDown?.(event); if (event.key === 'Escape') { setOpen(false); trigger.current?.focus(); } }}>
+    <div ref={root} data-hidden={!visible || undefined} aria-hidden={!visible || undefined} style={style} {...handlers} className="lab-tracking-floating lab-team-floating" data-edge={edge} onKeyDown={event => { handlers.onKeyDown?.(event); if (event.key === 'Escape') { setOpen(false); trigger.current?.focus(); } }}>
       <button ref={trigger} className="lab-session-popover-trigger" aria-expanded={open} aria-label="Teams" onClick={() => { setOpen(!open); setRevealing(false); void refresh().catch(error => setError(errorMessage(error))); }}><span>Team</span><span>{teams.filter(item => item.status !== 'archived').length}</span></button>
       {open ? <section className="lab-session-popover-panel lab-tpm-panel" aria-label="Teams">
         <div className="lab-directory-heading"><h2>Teams</h2><button onClick={() => setOpen(false)} aria-label="Close Teams">×</button></div>

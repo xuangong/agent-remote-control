@@ -18,6 +18,7 @@ export function useTrackingPosition(storageKey = 'agent-remote-tracking-position
   const drag = useRef<{ id: number; start: Position; origin: Position; moved: boolean }>();
   const suppressClick = useRef(false);
   const [style, setStyle] = useState<CSSProperties>({});
+  const [edge, setEdge] = useState<'right'>();
 
   function move(next: Position, persist = false) {
     const element = root.current;
@@ -28,6 +29,7 @@ export function useTrackingPosition(storageKey = 'agent-remote-tracking-position
       y: Math.max(view.y + margin, Math.min(next.y, view.y + view.height - rect.height - margin)),
     };
     position.current = point;
+    setEdge(point.x + rect.width >= view.x + view.width - margin - 1 ? 'right' : undefined);
     const below = view.y + view.height - point.y - rect.height - margin - 8;
     const above = point.y - view.y - margin - 8;
     const openAbove = above > below;
@@ -120,5 +122,6 @@ export function useTrackingPosition(storageKey = 'agent-remote-tracking-position
       move({ x: position.current.x + delta.x * step, y: position.current.y + delta.y * step }, true);
     },
   };
-  return { root, style, handlers, move, current: () => position.current };
+  /** `edge` reports a position held against the right viewport margin, where wide layouts reserve a column. */
+  return { root, style, handlers, edge, move, current: () => position.current };
 }

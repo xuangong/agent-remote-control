@@ -9,7 +9,7 @@ export function WindowMenu({ workspace, current, visible, inert = false }: {
   workspace: ReturnType<typeof useWindowWorkspace>; current?: WindowSessionBinding; visible: boolean; inert?: boolean;
 }) {
   const [open, setOpen] = useState(false);
-  const { root, style, handlers } = useTrackingPosition('agent-remote:window-position');
+  const { root, style, handlers, edge } = useTrackingPosition('agent-remote:window-position');
   const trigger = useRef<HTMLButtonElement>(null);
   const panelId = useId();
   const expanded = open && visible && !inert;
@@ -24,7 +24,7 @@ export function WindowMenu({ workspace, current, visible, inert = false }: {
     return () => document.removeEventListener('pointerdown', dismiss);
   }, [expanded, root]);
   function close() { setOpen(false); trigger.current?.focus({ preventScroll: true }); }
-  return <div ref={root} className="lab-tracking-floating lab-window-floating" style={style} {...handlers}
+  return <div ref={root} className="lab-tracking-floating lab-window-floating" data-edge={edge} style={style} {...handlers}
     data-hidden={!visible || undefined} data-open={expanded || undefined} aria-hidden={!visible || undefined}
     {...(!visible || inert ? { inert: '' } : {})}
     onKeyDown={event => { if (event.key === 'Escape' && expanded) { event.preventDefault(); event.stopPropagation(); close(); } }}>

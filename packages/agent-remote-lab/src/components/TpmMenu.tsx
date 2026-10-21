@@ -10,7 +10,7 @@ export function TpmMenu({ tpm, main, mainSessions, visible, triggerRef, inert, o
   mainSessions?: ReadonlyMap<string, TpmMainSession>; open: boolean; onOpenChange(open: boolean): void;
   tpm: ReturnType<typeof useTpmWork>; main?: SessionEntry; visible: boolean; triggerRef: RefObject<HTMLButtonElement>; inert: boolean;
 }) {
-  const { root, style, handlers } = useTrackingPosition('agent-remote:tpm-position');
+  const { root, style, handlers, edge } = useTrackingPosition('agent-remote:tpm-position');
   const panel = useRef<HTMLElement>(null);
   const id = useId();
   const [failure, setFailure] = useState<string>();
@@ -53,7 +53,7 @@ export function TpmMenu({ tpm, main, mainSessions, visible, triggerRef, inert, o
     </header>
     <ul className="lab-tpm-list">{group.works.map(renderWork)}</ul>
   </section>);
-  return <div ref={root} style={style} {...handlers} className="lab-tracking-floating lab-tpm-floating" hidden={!visible} data-attention={needsUser} data-workspace-open={tpm.expanded}
+  return <div ref={root} style={style} {...handlers} className="lab-tracking-floating lab-tpm-floating" data-edge={edge} hidden={!visible} data-attention={needsUser} data-workspace-open={tpm.expanded}
     {...(inert ? { inert: '' } : {})} onKeyDown={event => {
       handlers.onKeyDown?.(event);
       if (event.key === 'Escape' && open && !event.defaultPrevented) { event.preventDefault(); event.stopPropagation(); close(); }

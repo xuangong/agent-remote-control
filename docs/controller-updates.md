@@ -1,6 +1,6 @@
 # Controller releases and remote updates
 
-GitHub Releases under `xuangong/agent-remote-control` are the release authority. A stable `controller-vX.Y.Z` release supplies `controller-release.json` and a standalone npm tarball. The manifest binds the version, Git revision, SHA-256, Node minimum and supported OS/architecture pairs. A release lists only the platforms its tests ran on. Releases are currently built and tested on macOS arm64 only, so they list `darwin-arm64`. Installations on macOS x64, Linux and Windows keep their current version and their installers report that the release does not support the platform. The Windows and Linux sections below describe the supported update path once releases list those platforms again. The Relay caches discovery; Hosts independently resolve the requested published version and verify the downloaded bytes. Browser input cannot select an arbitrary executable, URL, package or command.
+GitHub Releases under `xuangong/agent-remote-control` are the release authority. A stable `controller-vX.Y.Z` release supplies `controller-release.json` and a standalone npm tarball. The manifest binds the version, Git revision, SHA-256, Node minimum and supported OS/architecture pairs. Every release lists `darwin-arm64`, `darwin-x64`, `linux-arm64`, `linux-x64` and `win32-x64`, so each supported platform can install and update; see [Platform coverage](#platform-coverage) for how the platforms are checked. The Relay caches discovery; Hosts independently resolve the requested published version and verify the downloaded bytes. Browser input cannot select an arbitrary executable, URL, package or command.
 
 If the GitHub REST release catalog returns 403 or 429, discovery falls back to GitHub's public latest stable release redirect. The redirect must identify a stable Controller tag in the same repository, and its manifest and package must be available. This fallback only verifies the current latest release; it never substitutes another version for a requested update. Other upstream errors and invalid release metadata remain failures. No GitHub credentials are required.
 
@@ -19,6 +19,16 @@ Once an owner confirms an update, a verified installation activates immediately.
 The first installation of this launcher is manual for legacy Controllers. Updating the package manager installation later should continue to use the same state directory. Releases do not automatically publish to npm; npm publication remains a separate explicit workflow.
 
 The stable launcher itself remains at its bootstrap version and supervises versioned Controller children. A future incompatible launcher contract requires an explicit local bootstrap. Package dependencies are installed with npm without lifecycle scripts; updates need registry access as well as GitHub access.
+
+## Platform coverage
+
+Releases are built on one macOS arm64 machine, so only macOS arm64 runs every check natively. The other platforms must stay installable: they can only be tested by using them. Each release therefore lists every supported platform and reduces, rather than removes, the risk for the platforms it cannot run natively:
+
+- `pnpm verify` runs the platform-neutral update, launcher and rollback tests, and the Linux CLI and systemd service tests with simulated systemd. Tests that need Windows itself (process trees, npm shims, login entries, the PowerShell installer) run only on Windows.
+- `pnpm test:setup` validates the shell installer, including fresh Linux installations with a simulated `uname`.
+- The package contains no native binaries. Its dependencies are installed by npm on the Host, without lifecycle scripts, for that platform.
+- On a Windows or Linux machine with a checkout, `pnpm test:platform:windows` or `pnpm test:platform:linux` runs the native profile from [native platform testing](platform-testing.md). Release notes state which platforms ran native tests for that release.
+- Updates stay owner-confirmed per Host and verify the package checksum. A Controller that fails to start rolls back to the previous package, which is kept. Update one Windows or Linux Host first and confirm its sessions work before updating the others.
 
 ## Session protocol transitions
 

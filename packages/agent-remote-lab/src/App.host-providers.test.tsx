@@ -147,11 +147,14 @@ it('uses the remote Host descriptor when opening an existing session', async () 
 });
 
 it('controls the selected Host tunnel while keeping another Host session open', async () => {
+  vi.stubGlobal('matchMedia', (query: string) => ({ matches: false, media: query, onchange: null, addEventListener: vi.fn(), removeEventListener: vi.fn(), addListener: vi.fn(), removeListener: vi.fn(), dispatchEvent: vi.fn() }));
   const f = await setup('ready', true);
   await f.selectHost('desk');
   await f.selectProvider('codex');
   await act(async () => [...f.container.querySelectorAll<HTMLButtonElement>('.lab-session-row')].find(button => button.textContent?.includes('Existing Codex'))!.click());
   const panel = () => f.container.querySelector<HTMLElement>('[aria-label="Host VS Code tunnel"]')!;
+  expect(panel()).toBeNull();
+  await act(async () => f.container.querySelector<HTMLButtonElement>('[aria-label="Sidebar settings"]')!.click());
   expect(panel().textContent).toContain('Desk Host');
   await act(async () => panel().querySelector<HTMLInputElement>('input[type=checkbox]')!.click());
 
@@ -257,4 +260,19 @@ it('lets conversation history leave an offline Host for a visited session on ano
   await act(async () => { back.click(); await new Promise(resolve => setTimeout(resolve, 30)); });
   expect(new URLSearchParams(location.search).get('host')).toBe('studio');
   expect(f.container.querySelector('[data-testid="connection-summary"]')?.textContent).toContain('Studio Host');
+});
+
+it('keeps the session list ahead of Host details and Previews in the wide sidebar', async () => {
+  const f = await setup('ready', true);
+  await f.selectHost('desk');
+  const content = f.container.querySelector<HTMLElement>('.lab-sidebar-content')!;
+  const hosts = content.querySelector<HTMLElement>('[aria-label="Remote Hosts"]')!;
+  const details = hosts.querySelector<HTMLDetailsElement>('details.lab-host-disclosure')!;
+  expect(details.open).toBe(false);
+  expect(details.contains(hosts.querySelector('#host-environment-filter'))).toBe(true);
+  expect(content.querySelector('[aria-label="Host VS Code tunnel"]')).toBeNull();
+  const list = content.querySelector<HTMLElement>('.lab-directory-panel')!;
+  const previews = content.querySelector<HTMLElement>('[aria-label="Host previews"]')!;
+  expect(hosts.compareDocumentPosition(list) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  expect(list.compareDocumentPosition(previews) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
 });

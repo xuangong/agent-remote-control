@@ -719,6 +719,20 @@ textarea {
 /* WebKit can include native option text in the parent scroll overflow. */
 .lab-host-pairing select { width: 100%; overflow: hidden; text-overflow: ellipsis; }
 .lab-host-pairing > label { font-size: .85rem; color: var(--obs-text-secondary); }
+/* The session list stays near the top; Host details are one disclosure away. */
+.lab-host-pairing-compact { gap: 6px; }
+.lab-host-pairing-compact .lab-directory-heading { margin-bottom: 0; }
+.lab-host-pairing-compact .lab-directory-heading h2 { font-size: 12px; color: var(--obs-text-secondary); }
+.lab-host-pairing-compact .lab-directory-heading button { min-height: 32px; padding: 4px 8px; border-color: transparent; background: transparent; color: var(--obs-text-secondary); font-size: 12px; }
+.lab-host-pairing-compact .lab-directory-heading button:hover:not(:disabled) { border-color: transparent; color: var(--obs-action); }
+.lab-host-disclosure > summary { display: flex; align-items: center; gap: 8px; min-height: 32px; cursor: pointer; list-style: none; color: var(--obs-text-secondary); font-size: 12px; }
+.lab-host-disclosure > summary::-webkit-details-marker { display: none; }
+.lab-host-disclosure > summary::before { content: '›'; font-size: 18px; transition: transform 120ms ease-out; }
+.lab-host-disclosure[open] > summary::before { transform: rotate(90deg); }
+.lab-host-disclosure > summary > span { margin-left: auto; color: var(--obs-action); }
+.lab-host-disclosure > div { display: grid; gap: 8px; padding-bottom: 8px; }
+.lab-host-disclosure label { font-size: 12px; color: var(--obs-text-secondary); }
+@media (prefers-reduced-motion: reduce) { .lab-host-disclosure > summary::before { transition: none; } }
 .lab-pair-host { width: 100%; }
 .lab-pairing-details { display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; }
 .lab-pairing-details textarea { font-family: var(--obs-mono); font-size: .78rem; overflow-wrap: anywhere; }
@@ -1014,16 +1028,9 @@ textarea {
   .lab-context-rail .lab-session-list { max-height: none; overflow: visible; }
   .lab-context-rail .lab-session-search > span { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
   .lab-context-rail .lab-session-search { gap: 0; }
-  .lab-context-rail .lab-host-pairing-compact { position: relative; gap: 6px; margin: 0 0 16px; padding: 0 0 12px; }
-  .lab-host-pairing-compact .lab-directory-heading { margin-bottom: 0; }
-  .lab-host-pairing-compact .lab-directory-heading h2 { font-size: 12px; color: var(--obs-text-secondary); }
-  .lab-host-pairing-compact .lab-directory-heading button { min-height: 44px; padding: 6px 8px; border-color: transparent; background: transparent; font-size: 12px; }
-  .lab-host-disclosure > summary { display: flex; align-items: center; gap: 8px; min-height: 44px; cursor: pointer; list-style: none; color: var(--obs-text-secondary); font-size: 12px; }
-  .lab-host-disclosure > summary::-webkit-details-marker { display: none; }
-  .lab-host-disclosure > summary::before { content: '›'; font-size: 18px; transition: transform 120ms ease-out; }
-  .lab-host-disclosure[open] > summary::before { transform: rotate(90deg); }
-  .lab-host-disclosure > summary > span { margin-left: auto; color: var(--obs-action); }
-  .lab-host-disclosure > div { display: grid; gap: 8px; padding-bottom: 8px; }
+  .lab-context-rail .lab-host-pairing-compact { position: relative; margin: 0 0 16px; padding: 0 0 12px; }
+  .lab-host-pairing-compact .lab-directory-heading button { min-height: 44px; padding: 6px 8px; }
+  .lab-host-disclosure > summary { min-height: 44px; }
   .lab-context-rail .lab-directory-panel > .lab-session-directory { margin-top: 0; }
   .lab-context-rail .lab-directory-heading h2 { font-size: 14px; }
   .lab-context-rail .lab-vscode-consent { align-items: center; min-height: 44px; }

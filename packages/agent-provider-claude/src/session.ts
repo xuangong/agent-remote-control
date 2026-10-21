@@ -19,7 +19,7 @@ import { createClaudeSessionTools } from './session-tools.js';
 import { ClaudeNativeEvidence, claudeEmptyHandle } from './native-evidence.js';
 import { CLAUDE_ALLOWS_BYPASS_PERMISSIONS, claudePermissionModeOptions, isResumableClaudePermissionMode, type ResumableClaudePermissionMode } from './permission-modes.js';
 
-export type ClaudeQuery = AsyncIterable<SDKMessage> & Pick<Query, 'initializationResult' | 'setPermissionMode' | 'close' | 'supportedCommands' | 'reloadSkills' | 'supportedModels' | 'setModel'> & Partial<Pick<Query, 'applyFlagSettings'>> & {
+export type ClaudeQuery = AsyncIterable<SDKMessage> & Pick<Query, 'initializationResult' | 'setPermissionMode' | 'close' | 'supportedCommands' | 'reloadSkills' | 'supportedModels' | 'setModel'> & Partial<Pick<Query, 'applyFlagSettings' | 'getContextUsage'>> & {
   /** The pinned SDK implements this control without declaring it on public Query. */
   getSettings?: () => Promise<unknown>;
   /** The pinned SDK forwards cancelQueued without declaring it on public Query; the response lists cancelled input. */
@@ -176,11 +176,26 @@ export class ClaudeAgentSession implements AgentSession {
       session.status = 'idle';
       session.nativeEvidence.initialize();
       session.runtimeUpdated();
+      if (resume) void session.reportContext();
       return session;
     } catch (error) {
       try { await session.dispose(); } catch (shutdownError) { throw new ClaudeShutdownError(session, shutdownError); }
       throw error;
     }
+  }
+
+  /**
+   * A reopened conversation reports how full its context is before the next turn, so the owner can tell whether
+   * to compact here or edit an earlier prompt first. Best effort: an older runtime or a slow count leaves it unreported.
+   */
+  private async reportContext(): Promise<void> {
+    if (!this.native.getContextUsage) return;
+    try {
+      const usage = await deadline(this.native.getContextUsage(), this.timeout, 'Claude context usage');
+      if (this.disposed || this.failure || this.turnId || !Number.isSafeInteger(usage.totalTokens) || !Number.isSafeInteger(usage.rawMaxTokens)
+        || usage.totalTokens < 0 || usage.rawMaxTokens <= 0) return;
+      this.emit({ type: 'usage_updated', provider: 'claude', usage: { contextScope: 'current', contextWindowUsedTokens: usage.totalTokens, contextWindowMaxTokens: usage.rawMaxTokens } });
+    } catch { /* Context usage is informational. */ }
   }
 
   async *observe(): AsyncIterable<ProviderStreamItem> {

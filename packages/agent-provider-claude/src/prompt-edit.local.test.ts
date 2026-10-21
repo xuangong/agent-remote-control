@@ -9,7 +9,7 @@ const model = 'claude-sonnet-4-5-20250929';
 type Prompt = { text: string; turnId?: string; messageId?: string };
 
 function observe(session: AgentSession) {
-  const prompts: Prompt[] = [], texts: string[] = [];
+  const prompts: Prompt[] = [], texts: string[] = [], contexts: number[] = [];
   let completed = 0, boundary = false;
   const pump = (async () => {
     for await (const item of session.observe()) {
@@ -17,12 +17,13 @@ function observe(session: AgentSession) {
       if (item.type !== 'observation') continue;
       const event = item.event;
       if (event.type === 'turn_completed') completed++;
+      if (event.type === 'usage_updated' && event.usage.contextScope === 'current' && event.usage.contextWindowUsedTokens !== undefined) contexts.push(event.usage.contextWindowUsedTokens);
       if (event.type !== 'timeline') continue;
       if (event.item.type === 'user_message') prompts.push({ text: event.item.text, turnId: event.turnId, messageId: event.item.messageId });
       if (event.item.type === 'assistant_message') texts.push(event.item.text);
     }
   })();
-  return { prompts, texts, pump, completed: () => completed, ready: () => boundary };
+  return { prompts, texts, contexts, pump, completed: () => completed, ready: () => boundary };
 }
 
 it('branches before a prompt with Codex semantics and keeps the original conversation', async () => {
@@ -57,6 +58,8 @@ it('branches before a prompt with Codex semantics and keeps the original convers
     const edited = observe(branch);
     await expect.poll(() => edited.ready(), { timeout: 10000 }).toBe(true);
     expect(edited.prompts.map(prompt => prompt.text)).toEqual(['FIRST_PROMPT']);
+    // The branch reports its context before the next turn, so the owner can decide whether to compact here.
+    await expect.poll(() => edited.contexts.length, { timeout: 15000 }).toBeGreaterThan(0);
     await send(branch, edited, 'EDITED_PROMPT');
     const request = JSON.stringify(fixture.bodies.at(-1)!.messages);
     expect(request).toContain('FIRST_PROMPT');

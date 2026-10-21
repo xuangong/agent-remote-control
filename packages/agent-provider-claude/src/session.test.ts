@@ -108,6 +108,20 @@ describe('Claude persistent session', () => {
     await session.dispose();
   });
 
+  it('reports how full a reopened conversation is before its next turn', async () => {
+    for (const resume of [true, false]) {
+      const native = runtime();
+      let asked = 0;
+      const factory = (args: any) => Object.assign(native.factory(args), { getContextUsage: async () => { asked++; return { totalTokens: 824_541, rawMaxTokens: 1_000_000 }; } });
+      const session = await ClaudeAgentSession.open({ sessionId: 'native', cwd: '/workspace' }, { query: factory,
+        catalog: { list: async () => [], info: async () => undefined, messages: async () => [], children: async () => [] } }, [], resume);
+      const output = session.observe()[Symbol.asyncIterator]();
+      if (resume) expect(await nextEvent(output, 'usage_updated')).toMatchObject({ usage: { contextScope: 'current', contextWindowUsedTokens: 824_541, contextWindowMaxTokens: 1_000_000 } });
+      else { await new Promise(resolve => setTimeout(resolve, 20)); expect(asked).toBe(0); }
+      await session.dispose();
+    }
+  });
+
   it('replays saved history with the turn each entry belongs to, so reopened prompts stay editable', async () => {
     const native = runtime();
     const row = (uuid: string, type: 'user' | 'assistant', content: unknown, turnId?: string) => ({ type, uuid, session_id: 'native', parent_tool_use_id: null,

@@ -1170,6 +1170,8 @@ html[data-input-modality="pointer"] :focus { outline: none !important; }
 .lab-workbench-with-notice > .lab-session-dock-rail { flex: 1; height: auto; }
 .lab-session-notice { flex: 0 0 auto; margin: 8px 12px; overflow-wrap: anywhere; }
 .lab-session-notice p { margin: 0; }
+.lab-session-notice p[role="alert"] { color: var(--obs-danger); }
+.lab-session-notice > button { margin-top: 6px; min-height: 30px; padding: 3px 10px; font-size: 12px; }
 .lab-session-notice details { margin-top: 4px; }
 .lab-session-notice summary { cursor: pointer; }
 .lab-session-notice dl { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 2px 10px; margin: 6px 0; }

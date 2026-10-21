@@ -1,3 +1,4 @@
+import type { ReactNode } from 'react';
 import { NativeDaemonRecovery } from './NativeSessionCommands.js';
 import { DirectoryError } from '../directory-client.js';
 
@@ -8,6 +9,10 @@ export interface SessionConnectionMessage {
   code?: string;
   status?: number;
   requestId?: string;
+  /** The original failure text when a plain-language description replaces it. */
+  detail?: string;
+  /** The session succession error this notice already explains; its retry belongs here. */
+  successionError?: string;
 }
 
 export function sessionConnectionFailure(error: unknown, retrying: boolean): SessionConnectionMessage {
@@ -30,22 +35,25 @@ export function sessionConnectionFailure(error: unknown, retrying: boolean): Ses
     session_binding_unavailable: 'This session link has no accessible remote binding. Reopen it from the Host session list; if it is missing, check your Host access.',
   };
   const description = code && Object.hasOwn(descriptions, code) ? descriptions[code]! : error instanceof Error ? error.message : 'The session could not be opened.';
+  const original = error instanceof Error && error.message.trim() && error.message !== description ? error.message : undefined;
   return { tone: waiting ? 'status' : 'alert',
     message: description + (retrying ? ' Retrying automatically; no messages will be resent.' : waiting ? ' Wait briefly, then reopen the same session from the list.' : ''),
-    code, status: detail?.status, requestId: detail?.requestId };
+    code, status: detail?.status, requestId: detail?.requestId, ...(original ? { detail: original } : {}) };
 }
 
-export function SessionConnectionNotice({ notice }: { notice: SessionConnectionMessage }) {
+export function SessionConnectionNotice({ notice, action }: { notice: SessionConnectionMessage; action?: ReactNode }) {
   return <div className="lab-session-notice lab-control-note">
     <p role={notice.tone}>{notice.message}</p>
+    {action}
     {notice.code === 'native_file_limit' ? <NativeDaemonRecovery /> : null}
-    {notice.code || notice.status || notice.requestId ? <details>
+    {notice.code || notice.status || notice.requestId || notice.detail ? <details>
       <summary>Connection details</summary>
       <dl>
         <dt>Operation</dt><dd>{notice.operation ?? 'Open existing session'}</dd>
         {notice.code ? <><dt>Code</dt><dd>{notice.code}</dd></> : null}
         {notice.status ? <><dt>HTTP status</dt><dd>{notice.status}</dd></> : null}
         {notice.requestId ? <><dt>Request ID</dt><dd>{notice.requestId}</dd></> : null}
+        {notice.detail ? <><dt>Detail</dt><dd>{notice.detail}</dd></> : null}
       </dl>
     </details> : null}
   </div>;

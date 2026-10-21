@@ -351,7 +351,7 @@ const WorkbenchTimeline = memo(function WorkbenchTimeline({ nativeTakeover, read
           </> : nativeTakeover ? null : isAttaching ? <div className="lab-empty-state">
             <span className="lab-empty-icon" aria-hidden="true">↗</span>
             <h3>{sessionStatus === 'catching_up' ? 'Loading conversation' : 'Opening session'} {attachingAgentId}</h3>
-            <p>The Timeline will appear when the Agent Snapshot is available.</p>
+            <p>The conversation appears here once the Host has loaded it.</p>
           </div> : <div className="lab-empty-state">
             <span className="lab-empty-icon" aria-hidden="true">↗</span>
             <h3>Start with a Provider</h3>

@@ -379,7 +379,7 @@ function AppContent({
       setProviderName(providerConnectionName(session.hostId ?? 'local', session.providerId));
     },
     failed: (error, selection, retrying = false) => {
-      setSessionNotice(sessionConnectionFailure(error, retrying));
+      setSessionNotice({ ...sessionConnectionFailure(error, retrying), successionError: error instanceof Error ? error.message : 'The session could not be opened.' });
       if (error instanceof DirectoryError && error.nativeOwner) setNativeTakeover({ item: selection, owner: error.nativeOwner, message: error.message });
     },
   });
@@ -2098,6 +2098,10 @@ function AppContent({
       <WindowWorkspaces workspace={windowWorkspace} />
     </div>
   </main>;
+  const successionFailure = succession.error && succession.error !== nativeTakeover?.message ? succession.error : undefined;
+  const successionRetry = successionFailure && !nativeTakeover ? <button type="button" onClick={succession.retry}>{succession.result?.status === 'applied' ? 'Retry session' : 'Retry synchronization'}</button> : undefined;
+  // One failure gets one notice; the connection notice already explains this succession failure.
+  const successionNotice = !!successionFailure && !nativeTakeover && sessionNotice?.successionError === successionFailure;
   return <SessionDescriptionsContext.Provider value={{ describe: session => describeSession({ session,
     sessions: [...favorites.stars, ...sessionEntries, ...tpmMainSessions.values()], forks: forkStore.all(), asks: ask.store.all(),
     tpmWorks: tpm.works, teams: teamRoster?.baseUrl === baseUrl ? teamRoster.teams : [],
@@ -2286,7 +2290,7 @@ function AppContent({
         onStopReader={clientActions.stopReader}
       /> : null}
       </div>
-      {sessionNotice && !nativeTakeover && compactLayout && contextOpen ? <SessionConnectionNotice notice={sessionNotice} /> : null}
+      {sessionNotice && !nativeTakeover && compactLayout && contextOpen ? <SessionConnectionNotice notice={sessionNotice} action={successionNotice ? successionRetry : undefined} /> : null}
       {failure ? <p className="lab-control-note" role="alert">{failure}</p> : null}
       </div>
       {compactLayout && sessionPanel !== 'new' ? <footer className="lab-session-panel-footer"><button type="button" onClick={() => setSessionPanel('new')}><span aria-hidden="true">＋</span> New session</button></footer> : null}
@@ -2319,8 +2323,8 @@ function AppContent({
           <p>No session views</p><button type="button" onClick={createSessionView}>New session view</button>
         </div> : null}
         <div className="lab-ordinary-workspace" hidden={!!sharedWindow && (!sharedWindow.views.length || compactLayout && !presentedPrimaryViewId)}>
-        {sessionNotice && !nativeTakeover && !(compactLayout && contextOpen) ? <SessionConnectionNotice notice={sessionNotice} /> : null}
-        {succession.error && succession.error !== nativeTakeover?.message ? <p role="alert">{succession.error}{!nativeTakeover ? <button type="button" onClick={succession.retry}>{succession.result?.status === 'applied' ? 'Retry session' : 'Retry synchronization'}</button> : null}</p> : null}
+        {sessionNotice && !nativeTakeover && !(compactLayout && contextOpen) ? <SessionConnectionNotice notice={sessionNotice} action={successionNotice ? successionRetry : undefined} /> : null}
+        {successionFailure && !successionNotice ? <SessionConnectionNotice notice={{ tone: 'alert', message: successionFailure }} action={successionRetry} /> : null}
         {promptMigrations.notice}
         {uncertainMutation ? <p className="lab-control-note" role="alert">The previous action may have completed before the connection was interrupted. Its result is unknown. It will not be replayed automatically.</p> : null}
         {sharedWindow ? <SessionDockRail compact={compactLayout} onCreateView={createSessionView}

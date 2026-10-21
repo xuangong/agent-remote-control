@@ -1670,12 +1670,26 @@ it('permanently retires primary image lifetimes across page resume and same-nati
 
 it('reconciles metadata on page resume without retrying an HTTP attachment failure', async () => {
   const f = await failureFixture();
-  await vi.waitFor(async () => { await act(async () => { await new Promise(resolve => setTimeout(resolve, 20)); }); expect(f.view.textContent).toContain('Fixture successor unavailable.'); });
+  await vi.waitFor(async () => { await act(async () => { await new Promise(resolve => setTimeout(resolve, 20)); }); expect(f.view.textContent).toContain('Retry session'); });
   const reads = f.requests.filter(item => item.url.includes('/session-successions')).length;
   await act(async () => { window.dispatchEvent(new Event('pagehide')); window.dispatchEvent(new Event('pageshow')); });
   await vi.waitFor(async () => { await act(async () => { await new Promise(resolve => setTimeout(resolve, 20)); }); expect(f.requests.filter(item => item.url.includes('/session-successions')).length).toBeGreaterThan(reads); });
   expect(f.requests.filter(item => item.url.endsWith('/attach')).map(item => item.body?.nativeSessionId)).toEqual(['B']);
   expect(f.view.textContent).toContain('Retry session');
+});
+
+it('reports a failed attachment once in the workbench with its Retry action', async () => {
+  const f = await failureFixture();
+  const workbench = f.view.querySelector<HTMLElement>('#lab-workbench')!;
+  const description = 'The Host is offline or its connection was interrupted.';
+  await vi.waitFor(async () => { await act(async () => { await new Promise(resolve => setTimeout(resolve, 20)); }); expect(workbench.textContent).toContain(description); });
+  expect(workbench.textContent!.split(description).length - 1).toBe(1);
+  const notices = workbench.querySelectorAll<HTMLElement>('.lab-session-notice');
+  expect(notices).toHaveLength(1);
+  expect([...notices[0]!.querySelectorAll('button')].map(button => button.textContent)).toEqual(['Retry session']);
+  // The Host's own wording stays available as a diagnostic, not as a second headline.
+  expect(workbench.textContent!.split('Fixture successor unavailable.').length - 1).toBe(1);
+  expect(notices[0]!.querySelector('details')?.textContent).toContain('Fixture successor unavailable.');
 });
 
 it('opens retained B and the role through local view entries without sharing their owners or replacing the native connection', async () => {

@@ -25,7 +25,8 @@ export type AgentToolCallTimelineItem = AgentToolCallBase & (
 );
 
 export type AgentTimelineItem = (
-  | { type: 'user_message'; text: string; content?: import('./image-input.js').AgentUserMessagePart[]; messageId?: string; clientMessageId?: string }
+  /** withdrawn marks input that was accepted into a native queue and removed before it ran. */
+  | { type: 'user_message'; text: string; content?: import('./image-input.js').AgentUserMessagePart[]; messageId?: string; clientMessageId?: string; withdrawn?: import('./provider.js').AgentInputWithdrawal }
   | { type: 'assistant_message'; text: string; messageId?: string }
   | { type: 'agent_communication'; messageId: string; sender: string; recipient: string; text: string }
   | { type: 'reasoning'; text: string }

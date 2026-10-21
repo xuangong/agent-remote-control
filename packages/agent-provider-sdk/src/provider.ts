@@ -155,6 +155,13 @@ export interface AgentMessageOptions {
   /** Process-local evidence for this invocation, possibly after its receipt was lost.
    * Never serialized or used as operation identity. A queued disposition is not settlement. */
   onAcceptance?: (acceptance: AgentInputAcceptance) => void;
+  /** Process-local evidence that queued input was removed before it ran, so it had no effect.
+   * Reported only with native proof and never after started or handled acceptance. */
+  onWithdrawn?: (withdrawal: AgentInputWithdrawal) => void;
+}
+
+export interface AgentInputWithdrawal {
+  reason: 'stopped';
 }
 
 /** Evidence about this input at acceptance time, never the current session execution state.

@@ -88,6 +88,12 @@
 .agent-item-header > div { display: flex; flex-wrap: wrap; min-width: 0; align-items: baseline; gap: 10px; }
 
 .agent-message-user { background: var(--agent-surface-selected); }
+.agent-message-withdrawn { background: var(--agent-surface-muted); border: 1px dashed var(--agent-rule); color: var(--agent-muted); }
+.agent-message-withdrawn-note { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; margin: 8px 0 0; font-size: 12px; color: var(--agent-muted); }
+.agent-message-withdrawn-copy { border: 0; background: none; padding: 0; color: var(--agent-action-text); font: inherit; cursor: pointer; }
+.agent-message-withdrawn-copy:hover { text-decoration: underline; }
+.agent-message-withdrawn-copy:focus-visible { outline: 2px solid var(--agent-signal); outline-offset: 2px; border-radius: 2px; }
+@media (pointer: coarse) { .agent-message-withdrawn-copy { min-height: 44px; padding: 0 8px; } }
 .agent-outgoing-message { background: var(--agent-surface-selected); }
 .agent-outgoing-message[data-delivery-state="pending"] > .agent-message { animation: agent-message-pending 1.8s ease-in-out infinite; }
 .agent-message-delivery { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 0; padding: 0 18px 12px; color: var(--agent-muted); font-size: 12px; }

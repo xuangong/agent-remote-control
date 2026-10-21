@@ -14,15 +14,21 @@ function runtime() {
   let input!: AsyncIterator<any>;
   let options!: Options;
   const push = (frame: any) => { pending.push(frame); release?.(); };
+  const interrupts: unknown[] = [];
+  let cancelled: string[] = [];
   const query = {
     async *[Symbol.asyncIterator]() { while (!closed) { if (pending.length) { const value = pending.shift(); if (value instanceof Error) throw value; yield value; }
       else await new Promise<void>((resolve) => { release = resolve; }); } },
     async initializationResult() { return {}; },
-    async interrupt() { push({ type: 'result', subtype: 'success', is_error: false, session_id: 'native', uuid: 'cancel-result', usage: {} }); },
+    async interrupt(options?: unknown) {
+      interrupts.push(options);
+      push({ type: 'result', subtype: 'success', is_error: false, session_id: 'native', uuid: `cancel-result-${interrupts.length}`, usage: {} });
+      return { still_queued: [], cancelled };
+    },
     async setPermissionMode() {},
     close() { closed = true; release?.(); },
   };
-  return { push, get options() { return options; }, get closed() { return closed; },
+  return { push, interrupts, cancelOnInterrupt(ids: string[]) { cancelled = ids; }, get options() { return options; }, get closed() { return closed; },
     nextInput: () => input.next(),
     factory(args: any) { input = args.prompt[Symbol.asyncIterator](); options = args.options; return query as any; } };
 }
@@ -160,6 +166,101 @@ describe('Claude input during an active turn', () => {
       expect(await nextEvent(output, 'turn_completed')).toMatchObject({ turnId: steered.uuid });
     } finally { await session.dispose(); }
   });
+
+  function collect(session: ClaudeAgentSession) {
+    const events: any[] = [];
+    void (async () => { for await (const item of session.observe()) if (item.type === 'observation') events.push(item.event); })().catch(() => {});
+    return events;
+  }
+  const withdrawnItems = (events: any[]) => events.filter(event => event.type === 'timeline' && event.item.type === 'user_message' && event.item.withdrawn);
+
+  it('stops queued input with the running turn and reports it withdrawn once', async () => {
+    const native = runtime();
+    const session = await ClaudeAgentSession.open({ sessionId: 'native' }, { query: native.factory });
+    const events = collect(session);
+    try {
+      await session.sendMessage('First');
+      const first = (await native.nextInput()).value;
+      const acceptances: string[] = [], withdrawals: string[] = [];
+      await session.sendMessage('Queued', { onAcceptance: ({ disposition }) => acceptances.push(disposition), onWithdrawn: ({ reason }) => withdrawals.push(reason) });
+      const steered = (await native.nextInput()).value;
+      native.push(lifecycle(steered.uuid, 'queued'));
+      await expect.poll(() => acceptances).toEqual(['queued']);
+      native.cancelOnInterrupt([steered.uuid]);
+      await session.cancel();
+      expect(native.interrupts).toEqual([{ cancelQueued: true }]);
+      native.push(lifecycle(steered.uuid, 'cancelled'));
+      await expect.poll(() => events.some(event => event.type === 'turn_canceled')).toBe(true);
+      await expect.poll(() => withdrawnItems(events).length).toBe(1);
+      expect(withdrawnItems(events)[0].item).toMatchObject({ text: 'Queued', withdrawn: { reason: 'stopped' } });
+      expect(withdrawals).toEqual(['stopped']);
+      expect(events.filter(event => event.type === 'turn_started').map(event => event.turnId)).toEqual([first.uuid]);
+      expect((await session.runtimeInfo()).status).toBe('idle');
+    } finally { await session.dispose(); }
+  });
+
+  it('withdraws queued input reported only by its cancelled lifecycle and never input that already ran', async () => {
+    const native = runtime();
+    const session = await ClaudeAgentSession.open({ sessionId: 'native' }, { query: native.factory });
+    const events = collect(session);
+    try {
+      await session.sendMessage('First');
+      await native.nextInput();
+      const withdrawals: string[] = [];
+      await session.sendMessage('Folded', { onWithdrawn: ({ reason }) => withdrawals.push(reason) });
+      const folded = (await native.nextInput()).value;
+      await session.sendMessage('Queued', { onWithdrawn: ({ reason }) => withdrawals.push(`queued:${reason}`) });
+      const queued = (await native.nextInput()).value;
+      native.push(lifecycle(folded.uuid, 'queued'));
+      native.push(lifecycle(folded.uuid, 'started'));
+      native.push(lifecycle(queued.uuid, 'queued'));
+      await session.cancel();
+      native.push(lifecycle(folded.uuid, 'cancelled'));
+      native.push(lifecycle(queued.uuid, 'cancelled'));
+      await expect.poll(() => withdrawals).toEqual(['queued:stopped']);
+      expect(withdrawnItems(events).map(event => event.item.text)).toEqual(['Queued']);
+    } finally { await session.dispose(); }
+  });
+
+  it('stops queued input that waits between turns and keeps planning unchanged until it is resolved', async () => {
+    const native = runtime();
+    const session = await ClaudeAgentSession.open({ sessionId: 'native' }, { query: native.factory });
+    const events = collect(session);
+    try {
+      await session.sendMessage('First');
+      const first = (await native.nextInput()).value;
+      const withdrawals: string[] = [];
+      await session.sendMessage('Next', { onWithdrawn: ({ reason }) => withdrawals.push(reason) });
+      const steered = (await native.nextInput()).value;
+      native.push(lifecycle(steered.uuid, 'queued'));
+      native.push(result(first.uuid));
+      await expect.poll(() => events.some(event => event.type === 'turn_completed')).toBe(true);
+      await expect(session.setPlanning(true)).rejects.toThrow(/only change while idle/);
+      native.cancelOnInterrupt([steered.uuid]);
+      await session.cancel();
+      expect(native.interrupts).toEqual([{ cancelQueued: true }]);
+      expect(withdrawals).toEqual(['stopped']);
+      expect(events.some(event => event.type === 'turn_canceled')).toBe(false);
+      await expect(session.cancel()).resolves.toBeUndefined();
+      expect(native.interrupts).toHaveLength(1);
+    } finally { await session.dispose(); }
+  });
+
+  it.each([[['msg_lifecycle_v1', 'interrupt_cancel_queued_v1'], true], [['msg_lifecycle_v1'], false], [[], false]] as const)(
+    'accepts input during a turn only when Claude Code reports %j', async (capabilities, accepted) => {
+      const native = runtime();
+      const session = await ClaudeAgentSession.open({ sessionId: 'native' }, { query: native.factory });
+      try {
+        await session.sendMessage('First');
+        await native.nextInput();
+        native.push({ type: 'system', subtype: 'init', session_id: 'native', model: 'native-model', permissionMode: 'default', capabilities });
+        await expect.poll(async () => (await session.runtimeInfo()).model).toBe('native-model');
+        if (accepted) {
+          await session.sendMessage('During');
+          expect((await native.nextInput()).value).toMatchObject({ message: { content: 'During' } });
+        } else await expect(session.sendMessage('During')).rejects.toThrow(/cannot accept input while a turn is running/);
+      } finally { await session.dispose(); }
+    });
 
   it('rejects steering without an active turn and keeps next-turn delivery unsupported', async () => {
     const native = runtime();

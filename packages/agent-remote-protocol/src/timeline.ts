@@ -48,6 +48,8 @@ export const AgentTimelineItem = Type.Union([
     text: Type.String(),
     messageId: Type.Optional(NonEmptyString),
     clientMessageId: Type.Optional(NonEmptyString),
+    /** Input accepted into a native queue and removed before it ran. */
+    withdrawn: Type.Optional(Strict({ reason: Type.Literal('stopped') })),
   }),
   Item({
     type: Type.Literal('assistant_message'),

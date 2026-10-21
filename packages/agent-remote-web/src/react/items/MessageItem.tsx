@@ -34,9 +34,10 @@ export function MessageItem({ item }: { readonly item: Message }) {
 
 function MessageBubble({ item, messageGroup = 'single', resourceContext }: MessageItemProps<Message>) {
   const user = item.type === 'user_message';
+  const withdrawn = item.type === 'user_message' && item.withdrawn !== undefined;
   return <article
-    className={`agent-timeline-item agent-message agent-message-${user ? 'user' : 'assistant'} agent-message-group-${messageGroup}`}
-    aria-label={user ? 'User message' : 'Assistant message'}
+    className={`agent-timeline-item agent-message agent-message-${user ? 'user' : 'assistant'} agent-message-group-${messageGroup}${withdrawn ? ' agent-message-withdrawn' : ''}`}
+    aria-label={withdrawn ? 'User message, not sent' : user ? 'User message' : 'Assistant message'}
     data-message-group={messageGroup}
   >
     <header className="agent-item-header">
@@ -48,6 +49,7 @@ function MessageBubble({ item, messageGroup = 'single', resourceContext }: Messa
         : part.type === 'resource' ? <ResourceDownload key={index} resourceId={part.locator.replace(/^input-resource:/, '')} label={part.label} name={part.name} byteLength={part.byteLength} sha256={part.sha256} />
         : <MessageImageTag key={index} label={part.label} locator={part.locator} context={resourceContext} />)}</div>
       : <MarkdownContent markdown={item.text} resourceContext={resourceContext} />}
+    {withdrawn ? <WithdrawnNote text={item.text} /> : null}
   </article>;
 }
 
@@ -81,4 +83,16 @@ export function AgentCommunicationItem({ item, resourceContext }: {
   return <article className="agent-timeline-item agent-message agent-message-assistant agent-message-group-single" aria-label="Agent communication">
     <CommunicationContent item={item} resourceContext={resourceContext} />
   </article>;
+}
+
+/** Input removed from the native queue when the work was stopped; it never reached the agent. */
+function WithdrawnNote({ text }: { readonly text: string }) {
+  const [copied, setCopied] = useState(false);
+  return <p className="agent-message-withdrawn-note" role="note">
+    <span>Not sent. The work was stopped before this message ran.</span>
+    {text.trim() && typeof navigator !== 'undefined' && navigator.clipboard
+      ? <button type="button" className="agent-message-withdrawn-copy" onClick={() => { void navigator.clipboard.writeText(text).then(() => setCopied(true), () => {}); }}>
+        {copied ? 'Copied' : 'Copy text'}
+      </button> : null}
+  </p>;
 }

@@ -19,10 +19,14 @@ import { createClaudeSessionTools } from './session-tools.js';
 import { ClaudeNativeEvidence, claudeEmptyHandle } from './native-evidence.js';
 import { CLAUDE_ALLOWS_BYPASS_PERMISSIONS, claudePermissionModeOptions, isResumableClaudePermissionMode, type ResumableClaudePermissionMode } from './permission-modes.js';
 
-export type ClaudeQuery = AsyncIterable<SDKMessage> & Pick<Query, 'initializationResult' | 'interrupt' | 'setPermissionMode' | 'close' | 'supportedCommands' | 'reloadSkills' | 'supportedModels' | 'setModel'> & Partial<Pick<Query, 'applyFlagSettings'>> & {
+export type ClaudeQuery = AsyncIterable<SDKMessage> & Pick<Query, 'initializationResult' | 'setPermissionMode' | 'close' | 'supportedCommands' | 'reloadSkills' | 'supportedModels' | 'setModel'> & Partial<Pick<Query, 'applyFlagSettings'>> & {
   /** The pinned SDK implements this control without declaring it on public Query. */
   getSettings?: () => Promise<unknown>;
+  /** The pinned SDK forwards cancelQueued without declaring it on public Query; the response lists cancelled input. */
+  interrupt(options?: { cancelQueued?: boolean }): Promise<unknown>;
 };
+/** Native capabilities that make input during a turn observable and stoppable. */
+const STEER_CAPABILITIES = ['msg_lifecycle_v1', 'interrupt_cancel_queued_v1'] as const;
 export interface ClaudeSessionOptions {
   executable?: string;
   /** Adapter-owned descriptor, only supplied after provider validation. */
@@ -55,7 +59,9 @@ export class ClaudeAgentSession implements AgentSession {
   private readonly input = new Channel<SDKUserMessage>();
   /** Input submitted during an active turn. The native runtime folds it into that turn or runs it next, as its command lifecycle reports. */
   private readonly steering = new Map<string, { message: SDKUserMessage & { uuid: ReturnType<typeof randomUUID> }; started: boolean;
-    onAcceptance?: AgentMessageOptions['onAcceptance'] }>();
+    onAcceptance?: AgentMessageOptions['onAcceptance']; onWithdrawn?: AgentMessageOptions['onWithdrawn'] }>();
+  /** Reported by native initialization with the first turn; unknown until then. */
+  private nativeCapabilities?: ReadonlySet<string>;
   private readonly output = new Channel<ProviderStreamItem>();
   private readonly projector: ClaudeEventProjector;
   private readonly images: ClaudeImageRegistry;
@@ -237,9 +243,12 @@ export class ClaudeAgentSession implements AgentSession {
 
   /** Native streaming input accepts a message mid-turn; acceptance follows its command lifecycle. */
   private steerMessage(content: SDKUserMessage['message']['content'], options: AgentMessageOptions): void {
+    if (this.nativeCapabilities && STEER_CAPABILITIES.some(capability => !this.nativeCapabilities!.has(capability))) {
+      throw new AgentOperationRejectedError('operation_rejected', 'This Claude Code version cannot accept input while a turn is running. Wait for the turn to finish or update Claude Code.');
+    }
     const message = { type: 'user' as const, uuid: randomUUID(), session_id: this.config.sessionId,
       parent_tool_use_id: null, message: { role: 'user' as const, content } };
-    this.steering.set(message.uuid, { message, started: false, onAcceptance: options.onAcceptance });
+    this.steering.set(message.uuid, { message, started: false, onAcceptance: options.onAcceptance, onWithdrawn: options.onWithdrawn });
     this.input.push(message);
   }
 
@@ -254,7 +263,22 @@ export class ClaudeAgentSession implements AgentSession {
         for (const observation of this.projector.project(steered.message)) this.output.push({ ...observation, event: this.withTurn(observation.event) });
         this.acceptSteered(steered, 'handled');
       } else this.startSteeredTurn(steered);
-    } else if (state === 'completed' || state === 'cancelled') this.steering.delete(commandUuid);
+    } else if (state === 'cancelled') this.withdrawSteered(commandUuid);
+    else if (state === 'completed') this.steering.delete(commandUuid);
+  }
+
+  /** Input removed from the native queue before it ran keeps its text visible, marked as never sent. */
+  private withdrawSteered(commandUuid: string): void {
+    const steered = this.steering.get(commandUuid);
+    if (!steered) return;
+    this.steering.delete(commandUuid);
+    if (steered.started) return;
+    for (const observation of this.projector.project(steered.message)) {
+      const event = observation.event.type === 'timeline' && observation.event.item.type === 'user_message'
+        ? { ...observation.event, item: { ...observation.event.item, withdrawn: { reason: 'stopped' as const } } } : observation.event;
+      this.output.push({ ...observation, event: this.withTurn(event) });
+    }
+    try { steered.onWithdrawn?.({ reason: 'stopped' }); } catch { /* Observers cannot fail the native runtime. */ }
   }
 
   private startSteeredTurn(steered: NonNullable<ReturnType<typeof this.steering.get>>): void {
@@ -291,13 +315,18 @@ export class ClaudeAgentSession implements AgentSession {
     } finally { this.changingSetting = false; if (!this.disposed && !this.failure) this.runtimeUpdated(); }
   }
 
+  /** Stop ends the running turn and removes input still waiting in the native queue. */
   async cancel(): Promise<void> {
     this.requireOpen();
-    if (!this.turnId) return;
-    this.cancelRequested = true;
+    if (!this.inputPending()) return;
+    if (this.turnId) this.cancelRequested = true;
     this.interactions.cancelAll();
-    try { await deadline(this.native.interrupt(), this.timeout, 'Claude interrupt'); }
+    let response: unknown;
+    try { response = await deadline(this.native.interrupt({ cancelQueued: true }), this.timeout, 'Claude interrupt'); }
     catch (error) { this.fail(error); this.native.close(); throw error; }
+    // The receipt lists cancelled input even when its lifecycle notification has not arrived yet.
+    const cancelled = response && typeof response === 'object' && 'cancelled' in response && Array.isArray(response.cancelled) ? response.cancelled : [];
+    for (const uuid of cancelled) if (typeof uuid === 'string') this.withdrawSteered(uuid);
   }
 
   async setSessionSetting(id: string, value: string): Promise<void | { status: 'deferred' }> {
@@ -333,7 +362,7 @@ export class ClaudeAgentSession implements AgentSession {
 
   async setPlanning(active: boolean): Promise<void> {
     this.requireOpen();
-    if (this.turnId || this.changingSetting || this.preparingMessage) throw new AgentOperationRejectedError('operation_rejected', 'Claude planning can only change while idle.');
+    if (this.inputPending() || this.changingSetting || this.preparingMessage) throw new AgentOperationRejectedError('operation_rejected', 'Claude planning can only change while idle.');
     this.changingSetting = true;
     try {
       await this.updatePermissionMode(active ? 'plan' : this.resumePermissionMode);
@@ -502,6 +531,8 @@ export class ClaudeAgentSession implements AgentSession {
         for (const observation of this.projector.project(message)) this.output.push({ ...observation,
           event: this.withTurn(observation.event) });
         if (message.type === 'system' && message.subtype === 'init') {
+          const capabilities = (message as { capabilities?: unknown }).capabilities;
+          this.nativeCapabilities = new Set(Array.isArray(capabilities) ? capabilities.filter((value): value is string => typeof value === 'string') : []);
           this.config.model = message.model;
           this.nativeModelConfirmed = true;
           this.confirmPermissionMode(message.permissionMode);

@@ -8,6 +8,8 @@ export function serializeNormalizedHistory(entries: readonly ProjectedTimelineEn
   if (entries.length > MAX_NORMALIZED_CONTEXT_ENTRIES) throw new Error('Normalized history entry limit exceeded.');
   let shortenedToolCount = 0;
   const rows = entries.flatMap(({ item }) => {
+    // Withdrawn input never reached the agent, so it is not part of the conversation it saw.
+    if (item.type === 'user_message' && item.withdrawn) return [];
     if (item.type === 'user_message' || item.type === 'assistant_message') return [{ role: item.type === 'user_message' ? 'user' : 'assistant', text: item.text }];
     if (item.type === 'tool_call') {
       let shortened = false;

@@ -715,6 +715,16 @@ it.each(['pending', 'failed', 'timed_out'] as const)('round trips shared %s sett
   expect(decodeAgentSnapshot(JSON.stringify({ ...message, payload: { ...message.payload, settingChanges: [{ ...change, category: 'invented' }] } })).status).toBe('rejected');
 });
 
+it('roundtrips withdrawn user input and rejects an unknown withdrawal reason', () => {
+  const message: AgentStreamMessage = { protocolVersion: '1.8.0', type: 'agent_stream', payload: {
+    agentId: 'agent', timestamp: '2026-10-21T00:00:00Z', epoch: 'epoch', seq: 4,
+    event: { type: 'timeline', providerId: 'claude', item: { type: 'user_message', text: 'Also update the README', withdrawn: { reason: 'stopped' } }, resources: [] },
+  } };
+  expect(decodeAgentStreamMessage(JSON.stringify(message))).toEqual({ status: 'ok', value: message });
+  const invented = JSON.parse(JSON.stringify(message)); invented.payload.event.item.withdrawn = { reason: 'expired' };
+  expect(decodeAgentStreamMessage(JSON.stringify(invented)).status).toBe('rejected');
+});
+
 it('roundtrips explicit background outcomes independently of native timeline rows', () => {
   const message: AgentStreamMessage = { protocolVersion: '1.8.0', type: 'agent_stream', payload: {
     agentId: 'agent', timestamp: '2026-10-12T00:00:00Z', event: { type: 'background_activity_updated', providerId: 'provider',

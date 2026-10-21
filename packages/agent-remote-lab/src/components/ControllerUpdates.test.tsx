@@ -183,3 +183,14 @@ it('surfaces Controller health problems in the collapsed heading and lists them 
   expect(details.textContent).toContain('codex 0.163.0 · launcher before 0.2.57');
   expect(details.querySelectorAll('[role="alert"]')).toHaveLength(1);
 });
+it('offers to continue only when the Host can install the latest release', async () => {
+  const windows = { ...host, id: 'windows', name: 'Windows', controller: { ...host.controller!, version: '0.1.5', platform: 'win32', arch: 'x64' } };
+  const finished: ControllerUpdateStatus = { phase: 'succeeded', version: '0.1.5', operationId: 'previous', updatedAt: 1 };
+  const service: HostPairingService = { hosts: async () => ({ hosts: [windows] }), pair: async () => { throw new Error('unused'); },
+    controllerRelease: async () => ({ release }), controllerUpdate: async () => finished };
+  const container = await render(<ControllerUpdates service={service} hosts={[windows]} />);
+  await act(async () => container.querySelector('button')!.click());
+  await vi.waitFor(() => expect(container.textContent).toContain('0.2.0 does not support this Host'));
+  expect(container.textContent).not.toContain('Continue update');
+  expect([...container.querySelectorAll('button')].some(item => item.textContent === 'Update Host')).toBe(false);
+});

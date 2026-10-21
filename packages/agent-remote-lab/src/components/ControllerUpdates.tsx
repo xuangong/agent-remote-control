@@ -106,12 +106,13 @@ export function ControllerUpdates({ service, hosts }: { service: HostPairingServ
         const status = statuses[host.id]; const needs = outdated.includes(host);
         const target = release && host.controller && controllerUpdateTarget(release, host.controller, bridge);
         const needsBridge = release && host.controller && controllerUpgradeBridgeVersion(release, host.controller);
-        const continueUpdate = needs && status?.phase === 'succeeded' && status.version === host.controller?.version && status.version !== release?.version && host.online;
+        const continueUpdate = needs && eligible.includes(host) && status?.phase === 'succeeded' && status.version === host.controller?.version && status.version !== release?.version;
         const completed = status?.version === host.controller?.version && host.controller?.revision === release?.revision && host.online;
         return <li key={host.id}><div className="lab-controller-host-name" title={hostDisplayLabel(host)} role="region" aria-label="Host name" tabIndex={0}><strong>{host.name}</strong></div><span>{host.controller?.version ?? 'Version not reported'} · {host.online ? 'Online' : 'Offline'}</span>
           {status && status.phase !== 'idle' ? <small role="status">{completed ? 'Updated' : continueUpdate ? `Continue update to ${release?.version}` : status.phase === 'succeeded' && status.version !== release?.version ? 'Upgrade component installed; waiting for Host confirmation…' : labels[status.phase]}{!completed && status.message ? ` ${status.message}` : ''}</small> : null}
           {needsBridge ? <small>{target ? `Upgrade component: ${target.version}. Reconnect, then continue to ${release?.version}.` : 'A compatible upgrade component is required before this Host can update.'}</small> : null}
           {!host.controller?.remoteUpdate ? <small>Install the release launcher once on this Host to enable remote updates.</small> : null}
+          {needs && release && host.controller && !target && !needsBridge ? <small>{release.version} does not support this Host's platform, Node version or session protocol. It keeps {host.controller.version}.</small> : null}
           {health[host.id] ? <ControllerHealthDetails value={health[host.id]!} /> : null}
           {needs && eligible.includes(host) ? <button type="button" disabled={busy || (!!status && ['downloading', 'waiting', 'restarting'].includes(status.phase))} onClick={() => setConfirm([host.id])}>{status?.phase === 'failed' ? 'Retry update' : 'Update Host'}</button> : null}
         </li>;

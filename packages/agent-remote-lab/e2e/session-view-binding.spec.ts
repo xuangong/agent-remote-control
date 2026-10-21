@@ -122,8 +122,7 @@ test('favorites target the focused view, while Track and explicit main navigatio
     localStorage.setItem(`agent-remote-tracking:${location.origin}/u/alice/`, JSON.stringify([{ hostId: 'host', providerId: 'recorded', nativeSessionId: 'background-session', title: 'Build checks', starredAt: 1 }]));
   });
   await page.goto('/e2e/fixtures/session-stars.html?switching=1');
-  await page.getByRole('button', { name: 'View options', exact: true }).click();
-  await page.getByRole('region', { name: 'View options', exact: true }).getByRole('button', { name: 'New session view', exact: true }).click();
+  await page.locator('.lab-session-dock-add').click();
   const view = page.locator('.lab-bindable-session-window[data-view-id]');
   await expect(view.getByText('Choose a session from the sidebar')).toBeVisible();
   const address = page.url();

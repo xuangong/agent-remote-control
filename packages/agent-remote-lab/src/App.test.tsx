@@ -816,6 +816,11 @@ it('creates and selects an empty pane with one layout command and opens its sess
     const container = await render(<App baseUrl={baseUrl} directory={directory} transport={labTransport()}
       hostService={{ hosts: async () => ({ hosts: [] }), pair: async () => { throw new Error('Pairing is not used'); } }} />);
     operations.length = 0;
+    // The workbench's add button is the single place to create a pane.
+    await act(async () => container.querySelector<HTMLButtonElement>('button[aria-label="View options"]')!.click());
+    const viewOptions = container.querySelector<HTMLElement>('#lab-view-options-panel')!;
+    expect([...viewOptions.querySelectorAll('button')].map(button => button.textContent)).not.toContain('New session view');
+    await act(async () => container.querySelector<HTMLButtonElement>('button[aria-label="View options"]')!.click());
     await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="New session view"]')!.click());
     const pane = workspace.readWindow()!.views.find(view => view.id === workspace.readWindow()!.selectedViewId)!;
     expect(pane.placement).toBe('dock');

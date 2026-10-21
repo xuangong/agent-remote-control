@@ -2159,7 +2159,7 @@ function AppContent({
         </select>
       </div> : null}
     </nav> : null}
-    <ViewOptions onCreateSessionView={createSessionView} attentionControls={<>
+    <ViewOptions attentionControls={<>
       {askView.controls}
       {windowView.controls}{userScoped ? attention.controls : null}{tpmView.controls}{teamView.controls}
     </>} target={!headerHidden ? headerViewTarget : compactLayout ? mobileViewTarget : desktopContextVisible ? sidebarViewTarget : activeView === 'trace' ? traceViewTarget : sharedWindow && !primaryGroups.length ? dockViewTarget ?? windowViewTarget : minimizedViewTarget ?? sessionViewTarget}

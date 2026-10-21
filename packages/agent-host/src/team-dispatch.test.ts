@@ -20,6 +20,7 @@ async function fixture() {
     runtimeInfo: { providerId: 'fixture', sessionId: 'worker', status: 'running', cwd: directory, connection: { state: 'connected' } },
   };
   const deliveries: Array<{ text: string; delivery: AgentMessageOptions['delivery'] }> = [];
+  let acceptance: 'started' | 'queued' | 'handled' = 'handled', lastOptions: AgentMessageOptions | undefined;
   const agents = new Map<string, SessionWireAgent>();
   function agent(id: string): SessionWireAgent {
     let value = agents.get(id);
@@ -28,7 +29,7 @@ async function fixture() {
         agentId: id,
         snapshot: () => ({ protocolVersion: '1.8.0', type: 'agent_snapshot', payload: id === 'worker' ? structuredClone(payload) : { ...structuredClone(payload), id, runtimeInfo: { ...payload.runtimeInfo, sessionId: id }, capabilities: { ...payload.capabilities, steer: false, queueMessage: false } } }),
         subscribe: () => () => {}, async fetchTimeline() { throw new Error('Unexpected history read'); }, async respondToInteraction(requestId) { payload.pendingInteractions = payload.pendingInteractions.filter(request => request.requestId !== requestId); },
-        async sendMessage(text, options) { deliveries.push({ text, delivery: options?.delivery }); return { disposition: 'handled' }; },
+        async sendMessage(text, options) { deliveries.push({ text, delivery: options?.delivery }); lastOptions = options; return { disposition: acceptance }; },
       };
       agents.set(id, value);
     }
@@ -50,7 +51,10 @@ async function fixture() {
   team = await broker.action({ action: 'add_member', teamId: team.id, operationId: 'member', hostId: 'host', providerId: 'fixture', cwd: directory, name: 'Worker', responsibility: 'Verify' });
   const leader = team.members[0]!, member = team.members[1]!;
   const message = await broker.hostCall('host', { action: 'send', teamId: team.id, memberId: leader.id, to: member.id, operationId: 'task', text: 'Read the result while working.' }) as TeamMessage;
-  return { runtime, payload, deliveries, message,
+  return { runtime, payload, deliveries, message, recipient: ref('worker'),
+    acceptAs(value: typeof acceptance) { acceptance = value; },
+    withdrawLast() { lastOptions?.onWithdrawn?.({ reason: 'stopped' }); },
+    settle: (outcome: 'rejected') => broker.hostCall('host', { action: 'settle', teamId: team.id, memberId: member.id, messageId: message.id, outcome, error: 'late' }),
     raceAdmission(change: 'connection' | 'route') { changeOnAdmission = change; },
     read: async () => await broker.hostCall('host', { action: 'read', teamId: team.id, memberId: member.id }) as Team & { receipts: TeamMessage[] },
     async close() { await runtime.close(); await cache.close(); await rm(directory, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }); },
@@ -105,5 +109,33 @@ it.each(['connection', 'route'] as const)('settles a claim rejected by a %s chan
     context.payload.runtimeInfo.connection = { state: 'connected' };
     await context.runtime.tick();
     expect(context.deliveries).toEqual([]);
+  } finally { await context.close(); }
+}, 5000);
+
+it('reports a queued message withdrawn by stopping its recipient as undelivered and releases the recipient', async () => {
+  const context = await fixture();
+  try {
+    context.acceptAs('queued');
+    await context.runtime.tick();
+    expect((await context.read()).messages.find(message => message.id === context.message.id)).toMatchObject({ status: 'accepted', acceptance: 'queued' });
+    expect(context.runtime.hasUnsettledRecipient(context.recipient)).toBe(true);
+    context.withdrawLast();
+    await expect.poll(async () => (await context.read()).receipts.find(receipt => receipt.id === context.message.id)?.status).toBe('rejected');
+    expect((await context.read()).receipts.find(receipt => receipt.id === context.message.id)).toMatchObject({ error: expect.stringContaining('stopped before this message ran') });
+    expect(context.runtime.hasUnsettledRecipient(context.recipient)).toBe(false);
+    await context.runtime.tick();
+    expect(context.deliveries).toHaveLength(1);
+  } finally { await context.close(); }
+}, 5000);
+
+it.each(['started', 'handled'] as const)('keeps a message %s by its recipient delivered when a withdrawal arrives late', async disposition => {
+  const context = await fixture();
+  try {
+    context.acceptAs(disposition);
+    await context.runtime.tick();
+    context.withdrawLast();
+    await context.runtime.tick();
+    expect((await context.read()).receipts.find(receipt => receipt.id === context.message.id)).toMatchObject({ status: 'accepted', acceptance: disposition });
+    await expect(context.settle('rejected')).rejects.toThrow(/already settled/);
   } finally { await context.close(); }
 }, 5000);

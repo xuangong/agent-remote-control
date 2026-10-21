@@ -270,10 +270,16 @@ export class TeamRuntime {
         receipt.status = 'accepted'; delete receipt.error;
         void this.save().then(() => this.settle(team.id, record.seat.member.id, message.id, receipt!)).catch(() => {});
       };
+      // Stopping the recipient removed this message before it ran; report it undelivered so the sender can resend.
+      const onWithdrawn = () => {
+        if (!receipt || receipt.acceptance === 'started' || receipt.acceptance === 'handled' || this.closed) return;
+        receipt.status = 'rejected'; delete receipt.acceptance; receipt.error = 'The recipient was stopped before this message ran. Send it again if it is still needed.';
+        void this.save().then(() => this.settle(team.id, record.seat.member.id, message.id, receipt!)).catch(() => {});
+      };
       const result = await this.access.execute(lease.agent, { operationId: operationId(message.id), kind: 'send_message', parameters: { text, delivery }, maximumResultBytes: 4096 }, {
         beforeDispatch: check,
         dispatch: async () => {
-          check(); return lease.agent.sendMessage(text, {delivery,onAcceptance});
+          check(); return lease.agent.sendMessage(text, {delivery,onAcceptance,onWithdrawn});
         },
       });
       if (result && typeof result === 'object' && 'disposition' in result && ['started','queued','handled'].includes(String(result.disposition))) onAcceptance(result as AgentInputAcceptance);

@@ -600,6 +600,12 @@ export class TpmCoordinator {
           if (!this.closed) void this.recordFailure(id, error);
         });
       };
+      const onWithdrawn = () => {
+        if (this.closed) return;
+        void settle({ status: 'rejected', error: 'The recipient was stopped before this follow-up ran.' }, true).catch(error => {
+          if (!this.closed) void this.recordFailure(id, error);
+        });
+      };
       const check = () => {
         const record = this.store.get(id); this.admit(record.work.providerId);
         if (candidate.target === 'main') {
@@ -632,7 +638,7 @@ export class TpmCoordinator {
               if (candidate.target === 'tpm') { record.reviewIntentId = intent.id; record.reviewVersion = record.changeVersion ?? 0; record.lastReviewAt = this.now(); record.work.nextCheckAt = this.now() + this.heartbeat(record.work); }
             });
             if (!claimed) throw new AgentOperationRejectedError('tpm_dispatch_deferred', 'TPM intent is no longer prepared.');
-            check(); return target.agent.sendMessage(candidate.text, { ...options, onAcceptance });
+            check(); return target.agent.sendMessage(candidate.text, { ...options, onAcceptance, onWithdrawn });
           },
         });
         const acceptance = result && typeof result === 'object' && 'disposition' in result && ['started', 'queued', 'handled'].includes(String(result.disposition))

@@ -2,7 +2,7 @@ import { assertTeamQueueCapacity, compactTeamDeliveries, unresolvedTeamDelivery,
 export { teamMessageBudgetBytes } from './team-delivery.js';
 import type { TeamResourceStore } from './team-resources.js';
 import { createHash, randomUUID } from 'node:crypto';
-import { nativeSessionRefKey, type NativeSessionRef, isTeamMember, type Team, type TeamAction, type TeamCreate, type TeamHostCall, type TeamMember, type TeamSeat, type TeamResource } from '@orchardworks/agent-remote-protocol';
+import { nativeSessionRefKey, type NativeSessionRef, isTeamMember, type Team, type TeamAction, type TeamCreate, type TeamHostCall, type TeamMember, type TeamMessage, type TeamSeat, type TeamResource } from '@orchardworks/agent-remote-protocol';
 
 export interface TeamBrokerPorts {
   resolveSession(hostId: string, providerId: string, anchorNativeId: string): NativeSessionRef;
@@ -24,6 +24,8 @@ const find = (teams: SavedTeam[], id: string) => teams.find(team => team.id === 
 const member = (team: Team, id: string) => team.members.find(item => item.id === id) ?? fail('Team member not found.');
 const active = (team: Team) => { if (team.status !== 'active') fail('Team is not active.'); };
 function touch(team: Team, now: number) { team.revision++; team.updatedAt = now; }
+/** Queued input that never ran can still be reported undelivered when its recipient is stopped. */
+const withdrawable = (message: TeamMessage, outcome: string) => message.status === 'accepted' && message.acceptance === 'queued' && outcome === 'rejected';
 function settleArchive(team: SavedTeam, now: number) {
   if (team.status === 'archiving' && team.members.every(item => item.creation === 'abandoned' || item.creation === 'ready' && item.activity === 'idle' && item.updatedAt >= team.updatedAt)
     && ![...team.messages, ...(team.deliveryReceipts ?? [])].some(unresolvedTeamDelivery)) { team.status = 'archived'; touch(team, now); }
@@ -194,7 +196,7 @@ export class TeamBroker {
           this.ports.assertRecipient?.(target);
           message.resolvedTarget = structuredClone(target); message.status = 'dispatching'; self.activity = 'busy';
         }
-        else { if (!recipientAware && message.resolvedTarget && nativeSessionRefKey(message.resolvedTarget) !== nativeSessionRefKey(this.resolveRecipientFromAnchor(self))) fail(upgradeRequired); if (call.resolvedTarget && (!message.resolvedTarget || nativeSessionRefKey(call.resolvedTarget) !== nativeSessionRefKey(message.resolvedTarget))) fail('Team receipt recipient changed.'); if (message.status !== 'dispatching' && message.status !== 'unknown' && message.status !== call.outcome) fail('Message is already settled.'); message.status = call.outcome; if (message.acceptance !== 'started' && message.acceptance !== 'handled') message.acceptance = call.acceptance; message.error = call.error; }
+        else { if (!recipientAware && message.resolvedTarget && nativeSessionRefKey(message.resolvedTarget) !== nativeSessionRefKey(this.resolveRecipientFromAnchor(self))) fail(upgradeRequired); if (call.resolvedTarget && (!message.resolvedTarget || nativeSessionRefKey(call.resolvedTarget) !== nativeSessionRefKey(message.resolvedTarget))) fail('Team receipt recipient changed.'); if (message.status !== 'dispatching' && message.status !== 'unknown' && message.status !== call.outcome && !withdrawable(message, call.outcome)) fail('Message is already settled.'); message.status = call.outcome; if (message.acceptance !== 'started' && message.acceptance !== 'handled') message.acceptance = call.acceptance; message.error = call.error; }
         return projectDelivery(message);
       }
       active(team);

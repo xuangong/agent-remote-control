@@ -845,6 +845,22 @@ it.each(['void', 'queued', 'unknown', 'rejected'] as const)('preserves acceptanc
   expect(f.coordinator.hasUnsettledRecipient(route.origin)).toBe(false); expect(main.messages).toHaveLength(1);
 }, 10000);
 
+it('rejects a queued main follow-up withdrawn by stopping the recipient and releases the recipient', async () => {
+  const f = await fixture(); const route = successionRouting(f); const work = await f.create();
+  const main = f.sessions.get('main')!; let options: AgentMessageOptions | undefined;
+  main.sendMessage = (async (text: string, value?: AgentMessageOptions) => {
+    main.messages.push({ text, options: value }); options = value; return { disposition: 'queued' };
+  }) as typeof main.sendMessage;
+  const receipt = await f.call(work, 'send_main_message', { operationId: 'withdrawn', purpose: 'consultation', text: 'Assess once' });
+  await f.coordinator.tick();
+  expect(f.coordinator.hasUnsettledRecipient(route.origin)).toBe(true);
+  options!.onWithdrawn!({ reason: 'stopped' });
+  await expect.poll(async () => (await f.coordinator.get(work.id)).outbox!.find(item => item.id === receipt.id)?.status).toBe('rejected');
+  expect((await f.coordinator.get(work.id)).outbox!.find(item => item.id === receipt.id)!.error).toMatch(/stopped before this follow-up ran/);
+  expect(f.coordinator.hasUnsettledRecipient(route.origin)).toBe(false);
+  expect(main.messages).toHaveLength(1);
+}, 10000);
+
 it.each(['unknown', 'void'] as const)('does not manufacture acceptance after coordinator replacement with %s outcome', async outcome => {
   const f = await fixture(); const route = successionRouting(f); const work = await f.create();
   const main = f.sessions.get('main')!; let notify: AgentMessageOptions['onAcceptance'];

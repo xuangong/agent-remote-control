@@ -172,14 +172,18 @@ async function failureFixture(advanceDuringRecovery = false, nativeIdentity?: st
   const updatesByAgent = new Map<string, (identity: string | null, connection?: 'connected' | 'restoring') => void>();
   const activeUpdates = new Map<string, Set<(identity: string | null, connection?: 'connected' | 'restoring') => void>>();
   const activityUpdates = new Map<string, Set<(status: 'idle' | 'running' | 'waiting') => void>>();
+  // A shown conversation reports activity through its content subscription.
+  const contentStatus = new Map<string, Set<(status: 'idle' | 'running' | 'waiting') => void>>();
   sockets.on('connection', socket => {
     const subscriptions = new Map<string, string>();
     const callbacks = new Map<string, (identity: string | null, connection?: 'connected' | 'restoring') => void>();
     const activityCallbacks = new Map<string, (status: 'idle' | 'running' | 'waiting') => void>();
+    const statusCallbacks = new Map<string, (status: 'idle' | 'running' | 'waiting') => void>();
     const retire = (id: string) => {
       const callback = callbacks.get(id); if (callback) activeUpdates.get(subscriptions.get(id)!)?.delete(callback);
       const activity = activityCallbacks.get(id); if (activity) activityUpdates.get(subscriptions.get(id)!)?.delete(activity);
-      callbacks.delete(id); activityCallbacks.delete(id); subscriptions.delete(id);
+      const status = statusCallbacks.get(id); if (status) contentStatus.get(subscriptions.get(id)!)?.delete(status);
+      callbacks.delete(id); activityCallbacks.delete(id); statusCallbacks.delete(id); subscriptions.delete(id);
     };
     socket.on('close', () => { for (const id of subscriptions.keys()) retire(id); });
     socket.on('message', async data => {
@@ -200,6 +204,10 @@ async function failureFixture(advanceDuringRecovery = false, nativeIdentity?: st
           ...replicaState.agent, id: frame.agentId, providerId, status: setup?.nativeStatus ?? 'idle', pendingInteractions: pendingInteractions(agentId), runtimeInfo: { ...replicaState.agent!.runtimeInfo, providerId, status: setup?.nativeStatus ?? 'idle', childSessions: setup?.children, sessionId: identity, connection: { state: connection } },
         } });
         const active = activeUpdates.get(agentId) ?? new Set(); activeUpdates.set(agentId, active); active.add(update); callbacks.set(frame.subscriptionId, update);
+        const status = (value: 'idle' | 'running' | 'waiting') => emit({ protocolVersion: PROTOCOL_VERSION, type: 'agent_snapshot', payload: {
+          ...replicaState.agent, id: frame.agentId, providerId, status: value, pendingInteractions: pendingInteractions(agentId), runtimeInfo: { ...replicaState.agent!.runtimeInfo, providerId, status: value, childSessions: setup?.children, sessionId: nativeFor(agentId), connection: { state: 'connected' } },
+        } });
+        const statuses = contentStatus.get(agentId) ?? new Set(); contentStatus.set(agentId, statuses); statuses.add(status); statusCallbacks.set(frame.subscriptionId, status);
         updates.push(update); updatesByAgent.set(agentId, (identity, connection) => { for (const callback of activeUpdates.get(agentId) ?? []) callback(identity, connection); });
         if (snapshotGate) await snapshotGate;
         update(agentId === 'agent-B' ? nativeIdentity ?? null : nativeFor(agentId), setup?.nativeConnection);
@@ -256,7 +264,10 @@ async function failureFixture(advanceDuringRecovery = false, nativeIdentity?: st
     setNativeIdentity(identity: string | null) { nativeIdentity = identity; },
     rebind(nativeSessionId: string, agentId: string) { nativeBindings.set(nativeSessionId, agentId); },
     setFavorites(snapshot: FavoritesSnapshot) { favorites = snapshot; },
-    emitActivity(agentId: string, status: 'idle' | 'running' | 'waiting') { for (const update of activityUpdates.get(agentId) ?? []) update(status); },
+    emitActivity(agentId: string, status: 'idle' | 'running' | 'waiting') {
+      for (const update of activityUpdates.get(agentId) ?? []) update(status);
+      if (setup?.liveActivity) for (const update of contentStatus.get(agentId) ?? []) update(status);
+    },
     failReplay(code?: string) { replayFailure = code; },
     holdCreate() { createGate = new Promise(resolve => { releaseCreate = resolve; }); return () => { releaseCreate?.(); createGate = undefined; }; },
     holdRelations() { relationsGate ??= new Promise(resolve => { releaseRelations = resolve; }); return () => { releaseRelations?.(); relationsGate = undefined; }; },

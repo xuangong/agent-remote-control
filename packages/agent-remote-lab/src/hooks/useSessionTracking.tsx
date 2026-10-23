@@ -1,7 +1,8 @@
 import type { ConversationConnections } from '../conversation-connections.js';
 import type { TimelineCursor } from '@orchardworks/agent-remote-protocol';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { RemoteActivityClient, type RemoteAgentTransport } from '@orchardworks/agent-remote-web';
+import { RemoteActivityClient, type RemoteActivityState, type RemoteAgentTransport } from '@orchardworks/agent-remote-web';
+import { observeConversation } from '../conversation-activity.js';
 import { SessionDirectoryClient, type OpenedSession } from '../directory-client.js';
 import { sessionKey } from '../session-tree.js';
 import type { SessionStar } from '../session-stars-client.js';
@@ -21,8 +22,6 @@ const noAuxiliarySessions: readonly AuxiliarySession[] = [];
 export function useSessionTracking(baseUrl: string, transport: RemoteAgentTransport, currentSessionKey?: string, openSessions: readonly OpenedSession[] = noOpenSessions, auxiliarySessions: readonly AuxiliarySession[] = noAuxiliarySessions, connections?: ConversationConnections, enabled = true, visibleSessions?: readonly OpenedSession[], onObservation?: (session: SessionStar | OpenedSession, value: SessionObservation) => void) {
   const [selection, setSelection] = useState(() => ({ scope: baseUrl, sessions: readTrackedSessions(baseUrl) }));
   const sessions = useMemo(() => selection.scope === baseUrl ? selection.sessions : [], [selection, baseUrl]);
-  // Authorization gates network access; only tracking changes release retained conversations.
-  useEffect(() => { if (enabled) connections?.retainSessions('tracked', sessions); }, [connections, sessions, enabled]);
   const [observationState, setObservationState] = useState<{ scope: string; transport: RemoteAgentTransport; values: Record<string, SessionObservation> }>(() => ({ scope: baseUrl, transport, values: {} }));
   const observations = observationState.scope === baseUrl && observationState.transport === transport ? observationState.values : {};
   const latestObservations = useRef(observations); latestObservations.current = observations;
@@ -279,17 +278,32 @@ function SessionObserver({ session, liveAgentId, baseUrl, transport, connections
   useEffect(() => {
     const abort = new AbortController();
     let stopAttachment: (() => void) | undefined;
-    let client: RemoteActivityClient | undefined;
+    // A shown conversation's own connection reports its activity, so one session holds one stream;
+    // otherwise an activity-only subscription does.
+    let source: { shown: boolean; stop(): void } | undefined;
     let connectedAgentId: string | undefined;
+    const stopSource = () => { source?.stop(); source = undefined; };
+    const choose = () => {
+      const agentId = connectedAgentId;
+      if (abort.signal.aborted || !agentId) return;
+      const shown = connections?.shown(session, agentId);
+      if (source && source.shown === !!shown) return;
+      stopSource();
+      const report = (value: RemoteActivityState) => {
+        if (!abort.signal.aborted && connectedAgentId === agentId) update(key, { ...value, agentId });
+      };
+      if (shown) { source = { shown: true, stop: observeConversation(shown, report) }; return; }
+      const client = new RemoteActivityClient(agentId, transport, report);
+      client.start();
+      source = { shown: false, stop: () => client.stop() };
+    };
+    const unwatchConnections = connections?.subscribe(choose);
     const start = (agentId: string) => {
       if (abort.signal.aborted || agentId === connectedAgentId) return;
-      client?.stop();
+      stopSource();
       connectedAgentId = agentId;
       stopAttachment?.(); stopAttachment = undefined;
-      client = new RemoteActivityClient(agentId, transport, value => {
-        if (!abort.signal.aborted && connectedAgentId === agentId) update(key, { ...value, agentId });
-      });
-      client.start();
+      choose();
     };
     binding.current = start;
     update(key, { connection: 'connecting' });
@@ -309,7 +323,7 @@ function SessionObserver({ session, liveAgentId, baseUrl, transport, connections
         failed: error => update(key, { connection: 'disconnected', error: error instanceof Error ? error.message : 'Tracking could not connect. Try again.' }),
       });
     };
-    return () => { abort.abort(); stopAttachment?.(); client?.stop(); binding.current = undefined; attachment.current = undefined; };
+    return () => { abort.abort(); stopAttachment?.(); unwatchConnections?.(); stopSource(); binding.current = undefined; attachment.current = undefined; };
     // Native identity owns the observer; moving between tracked and open must not restart it.
   }, [baseUrl, transport, connections, key, update]);
   useEffect(() => {

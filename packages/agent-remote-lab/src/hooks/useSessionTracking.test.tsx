@@ -2,11 +2,12 @@ import { act, useEffect, useLayoutEffect, useState } from 'react';
 import { afterEach, expect, it, vi } from 'vitest';
 import { AgentReplica, RemoteActivityClient, type RemoteAgentTransport } from '@orchardworks/agent-remote-web';
 import { render } from '../test/setup.js';
+import { replicaState } from '../test/fixtures.js';
 import { SessionDirectoryClient } from '../directory-client.js';
 import { useSessionTracking, type SessionTracking } from './useSessionTracking.js';
 import { readTrackedSessions, saveTrackedSessions, trackingEditRevision } from '../tracking-state.js';
 import { useSessionStars } from './useSessionStars.js';
-import { SessionStarsClient } from '../session-stars-client.js';
+import { SessionStarsClient, type SessionStar } from '../session-stars-client.js';
 import { sessionKey } from '../session-tree.js';
 import { ConversationConnections } from '../conversation-connections.js';
 const star = { hostId: 'host', providerId: 'codex', nativeSessionId: 'native', title: 'Research', starredAt: 1 };
@@ -115,7 +116,18 @@ it('does not let queued publication or mutation overwrite a later synchronous Tr
   expect(readTrackedSessions(scope)).toEqual(tracking.sessions);
 });
 
-it('retains opened tracked clients through access renewal and collects them only after untracking', async () => {
+/**
+ * Keeps a conversation open while no view shows it, as a Window does for one it showed earlier. Track then
+ * observes it through its own activity subscription, which is what these read-state scenarios exercise.
+ */
+function keepOpen(connections: ConversationConnections, agentId: string, replica: AgentReplica, session: SessionStar) {
+  const owner = `kept:${agentId}`;
+  connections.retainSessions(owner, [session]);
+  connections.acquire(agentId, replica, session).release();
+  return { release: () => connections.retainSessions(owner, []) };
+}
+
+it('does not keep a tracked conversation open by itself, leaving that to Window recency', async () => {
   saveTrackedSessions('alice', [star]);
   const close = vi.fn();
   const transport: RemoteAgentTransport = {
@@ -128,24 +140,15 @@ it('retains opened tracked clients through access renewal and collects them only
     },
   };
   const connections = new ConversationConnections(transport);
-  let tracking!: SessionTracking, accessReady!: (value: boolean) => void;
   function Fixture() {
-    const [ready, setReady] = useState(true); accessReady = setReady;
-    tracking = useSessionTracking('alice', transport, undefined, undefined, undefined, connections, ready);
+    useSessionTracking('alice', transport, undefined, undefined, undefined, connections, true);
     return null;
   }
   try {
     await render(<Fixture />);
     const opened = connections.acquire('agent', new AgentReplica(), star);
-    opened.release();
-    await act(async () => accessReady(false));
-    expect(connections.find(star)?.client).toBe(opened.client);
-    expect(close).not.toHaveBeenCalled();
-    await act(async () => accessReady(true));
-    const reopened = connections.acquire('agent', new AgentReplica(), star);
-    expect(reopened.client).toBe(opened.client);
-    reopened.release();
-    await act(async () => tracking.toggle(star));
+    await act(async () => opened.release());
+    // Track's own status subscription is separate; the conversation closes once nothing retains it.
     expect(connections.find(star)).toBeUndefined();
     expect(close).toHaveBeenCalledOnce();
   } finally { connections.clear(); }
@@ -168,8 +171,9 @@ it('reuses an existing conversation binding before open sessions are published',
   }
   try {
     await render(<Fixture />);
-    await vi.waitFor(() => expect(connect).toHaveBeenCalledTimes(2));
-    expect(connect.mock.calls.map(([agentId]) => agentId)).toEqual(['already-bound', 'already-bound']);
+    // Track reads the shown conversation through its connection instead of subscribing again.
+    await act(async () => {});
+    expect(connect.mock.calls.map(([agentId]) => agentId)).toEqual(['already-bound']);
     expect(attach).not.toHaveBeenCalled();
   } finally { opened.release(); connections.clear(); }
 });
@@ -598,7 +602,7 @@ it.each(['before', 'after'] as const)('acknowledges updates only after their vis
   });
   const replica = new AgentReplica(); replica.applyHistory(page(1));
   const connections = new ConversationConnections(transport);
-  let acquired = timing === 'before' ? connections.acquire(primary.agentId, replica, primary) : undefined;
+  let acquired = timing === 'before' ? keepOpen(connections, primary.agentId, replica, primary) : undefined;
   const visibility = vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('visible');
   let tracking!: SessionTracking, show!: (sessions: typeof primary[]) => void;
   function Fixture() {
@@ -615,7 +619,7 @@ it.each(['before', 'after'] as const)('acknowledges updates only after their vis
     expect(tracking.observations[sessionKey(star)]?.changed).toBe(true);
     await act(async () => show([primary]));
     expect(tracking.observations[sessionKey(star)]?.changed).toBe(true);
-    if (timing === 'after') await act(async () => { acquired = connections.acquire(primary.agentId, replica, primary); });
+    if (timing === 'after') await act(async () => { acquired = keepOpen(connections, primary.agentId, replica, primary); });
     await act(async () => { replica.applyHistory(page(2)); });
     expect(tracking.observations[sessionKey(star)]?.changed).toBe(false);
     await act(async () => { visibility.mockReturnValue('hidden'); document.dispatchEvent(new Event('visibilitychange')); });
@@ -663,7 +667,7 @@ it.each([
   });
   const replica = new AgentReplica(); replica.applyHistory(page(1));
   const connections = new ConversationConnections(transport);
-  const acquired = connections.acquire(primary.agentId, replica, primary);
+  const acquired = keepOpen(connections, primary.agentId, replica, primary);
   const visibility = vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('visible');
   let tracking!: SessionTracking, show!: (sessions: typeof primary[]) => void;
   let renders = 0;
@@ -736,7 +740,7 @@ it.each(['scope', 'transport'] as const)('does not reuse read content after the 
       item: { type: 'assistant_message', text: 'Content seen in the initial scope' } }],
   } });
   const connections = new ConversationConnections(initialTransport);
-  const acquired = connections.acquire(primary.agentId, replica, primary);
+  const acquired = keepOpen(connections, primary.agentId, replica, primary);
   vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('visible');
   let tracking!: SessionTracking, hide!: () => void, replace!: () => void;
   function Fixture() {
@@ -761,4 +765,67 @@ it.each(['scope', 'transport'] as const)('does not reuse read content after the 
     await emit(activeTransport, 2);
     expect(tracking.observations[sessionKey(star)]?.changed).toBe(true);
   } finally { await act(async () => { acquired.release(); connections.clear(); }); }
+});
+
+it('reads a shown conversation through its connection and subscribes to activity once no view shows it', async () => {
+  const primary = { ...star, agentId: 'native' };
+  saveTrackedSessions('alice', [star]);
+  const connected: string[] = [];
+  let activity: Parameters<RemoteAgentTransport['connect']>[1] | undefined;
+  let content: Parameters<RemoteAgentTransport['connect']>[1] | undefined;
+  const page = (seq: number): import('@orchardworks/agent-remote-protocol').HistoryPage => ({
+    protocolVersion: '1.8.0', type: 'timeline_page', payload: {
+      requestId: 'history', agentId: 'native', direction: 'tail', epoch: 'content', reset: false, staleCursor: false, gap: false, error: null,
+      window: { minSeq: 1, maxSeq: seq, nextSeq: seq + 1 }, startCursor: { epoch: 'content', seq: 1 }, endCursor: { epoch: 'content', seq },
+      hasOlder: false, hasNewer: false, entries: [{ providerId: 'codex', seqStart: 1, seqEnd: seq, sourceSeqRanges: [{ startSeq: 1, endSeq: seq }], collapsed: [], resources: [],
+        timestamp: '2026-10-23T00:00:00Z', item: { type: 'assistant_message', text: `Output ${seq}` } }],
+    },
+  });
+  const snapshot = (status: 'idle' | 'running') => ({ protocolVersion: '1.8.0' as const, type: 'agent_snapshot' as const,
+    payload: { ...replicaState.agent!, id: 'native', providerId: 'codex', status, runtimeInfo: { ...replicaState.agent!.runtimeInfo, providerId: 'codex', sessionId: 'native', status } } });
+  const transport: RemoteAgentTransport = {
+    fetchSnapshot: async () => snapshot('idle'),
+    fetchTimeline: async () => page(2),
+    onDiagnostic: () => () => {}, onProtocolMessage: () => () => {},
+    connect(id, listener) {
+      queueMicrotask(() => listener.onOpen());
+      return { close: () => {}, send: message => {
+        if (message.type === 'negotiate' && message.observation === 'activity') {
+          connected.push('activity'); activity = listener;
+          listener.onMessage({ protocolVersion: '1.8.0', type: 'agent_activity', payload: { agentId: id, status: 'idle', cursor: { epoch: 'content', seq: 2 } } });
+        } else if (message.type === 'negotiate') {
+          connected.push('content'); content = listener;
+          listener.onMessage({ protocolVersion: '1.8.0', type: 'negotiated', sessionControl: true });
+          listener.onMessage({ protocolVersion: '1.8.0', type: 'session_control', payload: { agentId: id, revision: 'control', access: 'control', available: false, token: 'control-token' } });
+          listener.onMessage(snapshot('running'));
+        } else if (message.type === 'session_control_request') {
+          listener.onMessage({ protocolVersion: '1.8.0', type: 'session_control', payload: { agentId: id, requestId: message.payload.requestId, revision: 'control', access: 'control', available: false, token: 'control-token' } });
+        } else if (message.type === 'timeline_subscription') {
+          listener.onMessage({ protocolVersion: '1.8.0', type: 'timeline_subscribed', payload: { requestId: message.payload.requestId, agentIds: [id] } });
+        }
+      } };
+    },
+  };
+  const connections = new ConversationConnections(transport);
+  const shown = connections.acquire(primary.agentId, new AgentReplica(), primary);
+  vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('visible');
+  let tracking!: SessionTracking, show!: (sessions: typeof primary[]) => void;
+  function Fixture() {
+    const [visible, setVisible] = useState<typeof primary[]>([primary]); show = setVisible;
+    tracking = useSessionTracking('alice', transport, undefined, visible, undefined, connections, true, visible);
+    return <>{tracking.observers}</>;
+  }
+  try {
+    await render(<Fixture />);
+    await vi.waitFor(() => expect(tracking.observations[sessionKey(star)]).toMatchObject({ connection: 'ready', activity: 'running', changed: false }));
+    expect(connected).toEqual(['content']);
+    await act(async () => content!.onMessage(snapshot('idle')));
+    expect(tracking.observations[sessionKey(star)]).toMatchObject({ connection: 'ready', activity: 'idle' });
+    // Once its view closes, Track subscribes to activity; content already read stays read.
+    await act(async () => { show([]); shown.release(); });
+    await vi.waitFor(() => expect(connected).toEqual(['content', 'activity']));
+    expect(tracking.observations[sessionKey(star)]).toMatchObject({ connection: 'ready', activity: 'idle', changed: false });
+    await act(async () => activity!.onMessage({ protocolVersion: '1.8.0', type: 'agent_activity', payload: { agentId: 'native', status: 'idle', cursor: { epoch: 'content', seq: 3 } } }));
+    expect(tracking.observations[sessionKey(star)]?.changed).toBe(true);
+  } finally { connections.clear(); }
 });

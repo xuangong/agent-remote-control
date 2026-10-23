@@ -11,7 +11,7 @@ Desktop session notifications are enabled by default. When permission is undecid
 
 ## Activity and delivery
 
-Notifications reuse the existing read-only activity subscription for open, auxiliary and tracked sessions. Entering `waiting` produces a pending-input reminder; `running` → `idle` produces a completion reminder. The first observation is a baseline. Repeated states, a new timeline epoch and failed/closed states do not produce completion notifications. Reconnection retains the last observed activity, allowing an actual transition during the interruption to be reported without repeating unchanged pending state.
+Notifications reuse the existing read-only activity subscription for open, auxiliary and tracked sessions, or the conversation's own connection while a view shows it. Entering `waiting` produces a pending-input reminder; `running` → `idle` produces a completion reminder. The first observation is a baseline. Repeated states, a new timeline epoch and failed/closed states do not produce completion notifications. Reconnection retains the last observed activity, allowing an actual transition during the interruption to be reported without repeating unchanged pending state.
 
 These rules use provider-normalized activity rather than interpreting text or maintaining another native session status. They do not introduce another network subscription, timeline aggregation or provider operation.
 

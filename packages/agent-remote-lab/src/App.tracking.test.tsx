@@ -32,6 +32,7 @@ async function fixture(target: SessionStar, activityReady = true, other?: Sessio
   const contentClosed = vi.fn();
   const contentListeners = new Map<string, RemoteTransportListener>();
   const activityListeners = new Map<string, RemoteTransportListener>();
+  const openActivity = new Set<object>();
   const snapshot = { protocolVersion: '1.8.0' as const, type: 'agent_snapshot' as const,
     payload: { ...replicaState.agent!, id: 'live-agent', providerId: target.providerId,
       runtimeInfo: { ...replicaState.agent!.runtimeInfo, providerId: target.providerId, sessionId: target.nativeSessionId, ...(navigation ? { childSessions: [{ nativeSessionId: 'child', title: 'Tracked child', status: 'idle' as const, observation: 'live' as const, createdAt: '2026-09-20T00:00:00Z' }] } : {}) } } };
@@ -55,13 +56,14 @@ async function fixture(target: SessionStar, activityReady = true, other?: Sessio
     onDiagnostic: () => () => {}, onProtocolMessage: () => () => {},
     connect(agentId, listener) {
       let observing = false;
+      const subscription = {};
       queueMicrotask(() => listener.onOpen());
-      return { close: () => { if (observing) activityClosed(agentId); else contentClosed(agentId); }, send: message => {
+      return { close: () => { if (observing) { openActivity.delete(subscription); activityClosed(agentId); } else contentClosed(agentId); }, send: message => {
         if (message.type === 'negotiate') {
           listener.onMessage({ protocolVersion: '1.8.0', type: 'negotiated', sessionControl: true });
           if (message.observation !== 'activity') listener.onMessage({ protocolVersion: '1.8.0', type: 'session_control', payload: { agentId, revision: 'control', access: 'control', available: false, token: 'control-token' } });
           if (message.observation === 'activity') {
-            observing = true; activity = listener; activityListeners.set(agentId, listener);
+            observing = true; activity = listener; activityListeners.set(agentId, listener); openActivity.add(subscription);
             if (activityReady) listener.onMessage({ protocolVersion: '1.8.0', type: 'agent_activity', payload: { agentId, status: 'idle', cursor: { epoch: 'tracked-epoch', seq: 1 } } });
           } else { contentConnections.push(agentId); contentListeners.set(agentId, listener); listener.onMessage(snapshotFor(agentId)); }
         } else if (message.type === 'session_control_request') {
@@ -93,7 +95,14 @@ async function fixture(target: SessionStar, activityReady = true, other?: Sessio
       agentId, status: 'idle', cursor: { epoch: 'tracked-epoch', seq },
     } });
   });
-  return { container, attach, open, activity, emitActivity, contentConnections, fetchTimeline, activityClosed, contentClosed, contentListeners, hide, setAccessReady };
+  // A shown conversation reports activity through its own connection.
+  const emitContent = (agentId: string, seq: number) => act(async () => {
+    contentListeners.get(agentId)!.onMessage({ protocolVersion: '1.8.0', type: 'agent_stream', payload: {
+      agentId, epoch: 'tracked-epoch', seq, timestamp: '2026-09-20T00:00:01Z',
+      event: { type: 'timeline', providerId: target.providerId, resources: [], item: { type: 'assistant_message', text: `Update ${seq}` } },
+    } });
+  });
+  return { container, attach, open, activity, emitActivity, emitContent, openActivity, contentConnections, fetchTimeline, activityClosed, contentClosed, contentListeners, hide, setAccessReady };
 }
 
 it('retains tracked bindings and opened conversation clients while workspace authorization renews', async () => {
@@ -112,7 +121,7 @@ it('retains tracked bindings and opened conversation clients while workspace aut
   expect(f.contentConnections).toEqual(['live-agent', 'other-agent']);
   expect(f.fetchTimeline).toHaveBeenCalledTimes(2);
   await act(async () => f.hide());
-  expect(f.activityClosed).toHaveBeenCalledTimes(2);
+  expect(f.openActivity.size).toBe(0);
   expect(f.contentClosed).toHaveBeenCalledTimes(2);
 });
 
@@ -138,7 +147,9 @@ it.each([
   expect(f.attach).toHaveBeenCalledOnce();
   expect(f.contentConnections).toEqual(['live-agent']);
   expect(f.fetchTimeline).toHaveBeenCalledOnce();
-  expect(f.activityClosed).not.toHaveBeenCalledWith('live-agent');
+  // Track reads the shown conversation through its connection instead of a second subscription.
+  expect(f.activityClosed).toHaveBeenCalledWith('live-agent');
+  expect(f.openActivity.size).toBe(0);
   expect(new URLSearchParams(location.search).get('session')).toBe(target.nativeSessionId);
 });
 
@@ -201,10 +212,11 @@ it('retains opened tracked content across switches without preconnecting unopene
   await act(async () => f.container.querySelector<HTMLButtonElement>('[aria-label="Filter tracked favorites"]')!.click());
   await act(async () => f.container.querySelector<HTMLButtonElement>(`[aria-label="Actions for ${other.title}"]`)!.click());
   await act(async () => [...document.querySelectorAll<HTMLButtonElement>('.lab-favorite-menu button')].find(button => button.textContent === 'Untrack')!.click());
-  expect(f.contentClosed).toHaveBeenCalledWith('other-agent');
-  expect(f.contentClosed).not.toHaveBeenCalledWith('live-agent');
+  // Untracking leaves an opened conversation to recency, like any other one shown earlier.
+  expect(f.contentClosed).not.toHaveBeenCalled();
   await act(async () => f.hide());
   expect(f.contentClosed).toHaveBeenCalledWith('live-agent');
+  expect(f.contentClosed).toHaveBeenCalledWith('other-agent');
 });
 
 it('recovers a delayed fork migration before removing a tracking identity missing from favorites', async () => {
@@ -297,7 +309,7 @@ it('keeps a closed side conversation in tracking and preserves its unseen conten
   const side = f.container.querySelector<HTMLElement>('.lab-side-conversation')!;
   await act(async () => side.querySelector<HTMLButtonElement>('.lab-side-close')!.click());
   expect(side.hidden).toBe(true);
-  await f.emitActivity('child-agent', 2);
+  await f.emitContent('child-agent', 2);
   await act(async () => f.container.querySelector<HTMLButtonElement>('[aria-label="Tracked sessions"]')!.click());
   const row = [...f.container.querySelectorAll<HTMLButtonElement>('.lab-tracking-floating .lab-session-row')].find(button => button.textContent?.includes(child.title));
   expect(row).toBeDefined();

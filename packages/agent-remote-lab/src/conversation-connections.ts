@@ -8,9 +8,12 @@ type Identity = Pick<SessionEntry, 'hostId' | 'providerId' | 'nativeSessionId'>;
 interface Connection {
   agentId: string;
   key?: string;
+  session?: Identity;
   client: RemoteSessionClient;
   replica: AgentReplica;
   viewers: number;
+  /** A view shows the conversation; reported to the Relay and to Track. */
+  shown: boolean;
   stopRecovery(): void;
   stopDisplay(): void;
 }
@@ -20,6 +23,7 @@ export class ConversationConnections {
   private readonly connections = new Map<string, Connection>();
   private readonly listeners = new Set<() => void>();
   private readonly retained = new Map<string, Set<string>>();
+  private clearing = false;
 
   constructor(private readonly transport: RemoteAgentTransport, private readonly recoveryScope?: string, private readonly controlExtension?: (agentId: string, session?: Identity) => SessionControlExtension | undefined) {}
 
@@ -47,7 +51,7 @@ export class ConversationConnections {
     const previousKey = connection?.key;
     if (!connection) {
       const key = session ? sessionKey(session) : undefined;
-      connection = { agentId, key, replica, viewers: 0,
+      connection = { agentId, key, ...(session ? { session } : {}), replica, viewers: 0, shown: false,
         client: new RemoteSessionClient(agentId, this.transport, replica, { historyPageSize: 100, requireSessionControl: true, clientKind: 'web', handoffTarget: key, controlExtension: this.controlExtension?.(agentId, session) }),
         stopRecovery: this.recoveryScope ? recoverMessages(replica, this.recoveryScope, key ?? agentId, agentId) : () => {},
         stopDisplay: this.recoveryScope && session ? observeWorkspaceDisplay(this.recoveryScope, session, replica) : () => {},
@@ -59,6 +63,7 @@ export class ConversationConnections {
     if (session && connection.key !== sessionKey(session)) {
       connection.stopDisplay();
       connection.key = sessionKey(session);
+      connection.session = session;
       connection.stopDisplay = this.recoveryScope ? observeWorkspaceDisplay(this.recoveryScope, session, connection.replica) : () => {};
     }
     connection.viewers += 1;
@@ -76,17 +81,34 @@ export class ConversationConnections {
     } };
   }
 
+  /** Conversations a view shows now. */
+  shownSessions(): Identity[] {
+    return [...this.connections.values()].flatMap(connection => connection.shown && connection.session ? [connection.session] : []);
+  }
+
+  /** The connection of a conversation a view shows, which Track reads instead of opening its own subscription. */
+  shown(session: Identity, agentId: string): { client: RemoteSessionClient; replica: AgentReplica } | undefined {
+    const connection = this.find(session);
+    return connection?.agentId === agentId && connection.shown ? { client: connection.client, replica: connection.replica } : undefined;
+  }
+
   /** A connection retained while no view shows it yields its Relay stream first. */
   private use(connection: Connection): void {
-    if (this.connections.get(connection.agentId) === connection) connection.client.setActive(connection.viewers > 0);
+    if (this.connections.get(connection.agentId) !== connection || connection.shown === connection.viewers > 0) return;
+    connection.shown = connection.viewers > 0;
+    connection.client.setActive(connection.shown);
+    this.notify();
   }
 
   async takeControlAfterNativeResume(agentId: string): Promise<void> {
     await this.connections.get(agentId)?.client.takeControlAfterNativeResume();
   }
 
+  /** Discards the pool; listeners are not told, since nothing should reopen what it held. */
   clear(): void {
-    for (const connection of this.connections.values()) this.close(connection);
+    this.clearing = true;
+    try { for (const connection of this.connections.values()) this.close(connection); }
+    finally { this.clearing = false; }
   }
 
   private collect(connection: Connection): void {
@@ -104,6 +126,7 @@ export class ConversationConnections {
   }
 
   private notify(): void {
+    if (this.clearing) return;
     for (const listener of this.listeners) listener();
   }
 }

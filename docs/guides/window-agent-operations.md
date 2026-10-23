@@ -46,10 +46,13 @@ native session. Full-layout replacement retains its revision/conflict checks.
 
 Session reuse includes the live Remote client, canonical Replica, and state
 subscriptions, as well as cached content. Within a page, Views of the same Session
-share that connection across Windows. The page retains up to 24 recently presented,
-already connected Sessions, without preconnecting unopened Sessions. Closing one
-View does not disconnect other consumers; an inactive retained Session continues
-receiving updates. Track and Team retention remain independent. A full page reload
+share that connection across Windows. The page retains already connected Sessions by
+when they were last shown, up to 24, without preconnecting unopened Sessions. Each
+Window's Sessions form one unit, and a Session that left its pane, such as one opened
+from Track and later replaced, is a unit of its own; the least recently shown units are
+released whole, and the current Window is always kept. Closing one View does not
+disconnect other consumers; an inactive retained Session continues receiving updates.
+Team retention remains independent. A full page reload
 creates a new browser network connection and restores cached content while native
 session synchronization runs; layout restoration does not establish native readiness.
 Retaining a connection does not retain a closed or rebound View's action authority.

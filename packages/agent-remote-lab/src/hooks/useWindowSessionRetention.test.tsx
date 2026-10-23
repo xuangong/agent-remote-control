@@ -34,12 +34,12 @@ async function fixture() {
   };
 }
 
-async function harness(connections: ConversationConnections, window?: WorkspaceWindow) {
+async function harness(connections: ConversationConnections, window?: WorkspaceWindow, limit?: number) {
   let update!: (value: { connections: ConversationConnections; window?: WorkspaceWindow }) => void;
   let retained!: ReturnType<typeof useWindowSessionRetention>;
   function Harness() {
     const [value, setValue] = useState<{ connections: ConversationConnections; window?: WorkspaceWindow }>({ connections, window }); update = setValue;
-    retained = useWindowSessionRetention(value.connections, value.window);
+    retained = useWindowSessionRetention(value.connections, value.window, limit);
     return null;
   }
   const container = await render(<Harness />);
@@ -148,4 +148,46 @@ it('releases its retention at pool replacement and unmount without removing trac
     expect(next.find(target)).toBeUndefined();
     expect(f.connections.find(tracked)?.client).toBe(trackedLease.client);
   } finally { await view.close(); next.clear(); await f.close(); }
+}, 10000);
+
+it('releases the least recently shown Window whole instead of splitting it', async () => {
+  const f = await fixture(), [a, b, c, d] = await Promise.all(['a', 'b', 'c', 'd'].map(id => f.session(id)));
+  const view = await harness(f.connections, undefined, 3);
+  const show = async (id: string, targets: WindowSessionBinding[]) => {
+    await view.update(windowWith(id, targets));
+    for (const target of targets) { const opened = f.acquire(target); opened.release(); }
+    await act(async () => {});
+  };
+  try {
+    await show('pair', [a!, b!]);
+    await show('single', [c!]);
+    expect(f.connections.agentIds.sort()).toEqual(['agent-a', 'agent-b', 'agent-c']);
+    await show('next', [d!]);
+    expect(f.connections.agentIds.sort()).toEqual(['agent-c', 'agent-d']);
+  } finally { await view.close(); await f.close(); }
+}, 10000);
+
+it('keeps a conversation that left its pane, such as one opened from Track, in its own place', async () => {
+  const f = await fixture(), [x, a, b] = await Promise.all(['x', 'a', 'b'].map(id => f.session(id)));
+  const view = await harness(f.connections, undefined, 2);
+  const open = async (target: WindowSessionBinding) => { f.acquire(target).release(); await act(async () => {}); };
+  try {
+    await view.update(windowWith('old', [x!])); await open(x!);
+    await view.update(windowWith('main', [a!])); await open(a!);
+    // Replacing the pane's conversation keeps the replaced one as a unit shown more recently than the old Window.
+    await view.update(windowWith('main', [b!])); await open(b!);
+    await view.update(windowWith('third', []));
+    expect(f.connections.agentIds.sort()).toEqual(['agent-a', 'agent-b']);
+  } finally { await view.close(); await f.close(); }
+}, 10000);
+
+it('retains conversations shown without a Window workspace by when they were last shown', async () => {
+  const f = await fixture(), [s, t] = await Promise.all(['s', 't'].map(id => f.session(id)));
+  const view = await harness(f.connections, undefined, 1);
+  try {
+    const first = f.acquire(s!); first.release(); await act(async () => {});
+    expect(f.connections.agentIds).toEqual(['agent-s']);
+    const second = f.acquire(t!); second.release(); await act(async () => {});
+    expect(f.connections.agentIds).toEqual(['agent-t']);
+  } finally { await view.close(); await f.close(); }
 }, 10000);

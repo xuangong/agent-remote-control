@@ -1008,6 +1008,10 @@ export class RemoteSessionClient {
   private setStatus(status: RemoteSessionStatus): void {
     if (status === this.currentStatus) return;
     this.currentStatus = status;
+    // A capacity refusal explains only the wait it caused; later interruptions get the ordinary notice.
+    if ((status === 'catching_up' || status === 'ready') && this.replica.getState().diagnostics.at(-1)?.code === 'session_capacity') {
+      this.replica.reportDiagnostic('session_capacity_released', 'The Relay admitted this session again.', true);
+    }
     this.stopMessageEchoSync?.();
     this.stopMessageEchoSync = status === 'ready'
       ? watchMessageEchoes(this.agentId, this.transport, this.replica, this.historyPageSize) : undefined;

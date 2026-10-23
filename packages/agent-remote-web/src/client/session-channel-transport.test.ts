@@ -276,7 +276,12 @@ describe('session channel transport', () => {
     expect(replica.getState().diagnostics.at(-1)).toEqual({ code: 'session_capacity', message: reason, recoverable: true });
     // Capacity can free up, so the session keeps retrying instead of becoming unavailable.
     vi.advanceTimersByTime(400); await Promise.resolve();
-    expect(sockets[0]!.sent.filter(frame => frame.type === 'subscribe')).toHaveLength(2);
+    const retry = sockets[0]!.sent.filter(frame => frame.type === 'subscribe');
+    expect(retry).toHaveLength(2);
+    // Once admitted, the refusal no longer explains a later interruption.
+    sockets[0]!.receive({ protocolVersion: version, type: 'message', subscriptionId: retry[1]!.subscriptionId, message: { protocolVersion: version, type: 'negotiated' } });
+    expect(client.getSessionState().connection).toBe('catching_up');
+    expect(replica.getState().diagnostics.at(-1)).toMatchObject({ code: 'session_capacity_released', recoverable: true });
     client.stop(); transport.dispose();
   });
 

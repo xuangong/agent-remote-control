@@ -203,7 +203,10 @@ export class RemoteSessionClient {
       onDisconnect: (closure) => {
         if (generation !== this.generation) return;
         if (closure?.permanent) this.refuseDisconnected(generation, closure.reason);
-        else this.restartDisconnected(generation);
+        else {
+          if (closure?.capacity) this.replica.reportDiagnostic('session_capacity', closure.reason, true);
+          this.restartDisconnected(generation);
+        }
       },
     });
   }

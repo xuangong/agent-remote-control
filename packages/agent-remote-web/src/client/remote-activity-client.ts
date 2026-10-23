@@ -73,7 +73,7 @@ export class RemoteActivityClient {
       this.connection = this.transport.connect(this.agentId, {
         onOpen: () => { if (generation === this.generation) this.connection?.send({ protocolVersion: PROTOCOL_VERSION, type: 'negotiate', observation: 'activity' }); },
         onMessage: message => { if (generation === this.generation) this.receive(generation, message); },
-        onDisconnect: closure => { if (closure?.permanent) this.refuse(generation, closure.reason); else this.failed(generation); },
+        onDisconnect: closure => { if (closure?.permanent) this.refuse(generation, closure.reason); else this.failed(generation, closure?.capacity ? closure.reason : undefined); },
       });
     } catch { this.failed(generation, 'Activity tracking could not connect. Retrying…'); }
   }

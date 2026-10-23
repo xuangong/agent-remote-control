@@ -1,4 +1,4 @@
-import type {NativeSessionOwner} from '@orchardworks/agent-remote-protocol';
+import {SESSION_CAPACITY_CLOSE_CODE, type NativeSessionOwner} from '@orchardworks/agent-remote-protocol';
 /** Public attach failures use fixed copy rather than arbitrary native error text. */
 const sessionErrors: Readonly<Record<string, string>> = {
   native_file_limit: 'The shared Codex daemon reached its file descriptor limit. Review active work before restarting it on the Host computer.',
@@ -41,7 +41,10 @@ export function unavailableRoute(path: string): { code: string; error: string } 
     : { code: 'route_not_found', error: 'This Remote Host route is unavailable. Refresh the page and check that the client and Relay versions are compatible.' };
 }
 
-/** A refused subscription closes with 1008 when retrying cannot help and 1013 when it may, carrying the public reason. */
+/**
+ * A refused subscription closes with 1008 when retrying cannot help and 1013 when it may, carrying the public reason.
+ * Stream capacity has its own code so clients can say why the session waits instead of only reconnecting.
+ */
 export async function sessionSubscriptionRefusal(response: Response | undefined): Promise<{ code: number; reason: string }> {
   const status = response?.status ?? 404;
   let reason = 'Session subscription is unavailable.';
@@ -49,5 +52,5 @@ export async function sessionSubscriptionRefusal(response: Response | undefined)
     const error = (await response?.json() as { error?: unknown } | undefined)?.error;
     if (typeof error === 'string' && error.trim()) reason = error.length > 240 ? `${error.slice(0, 237)}...` : error;
   } catch { /* Bodyless and non-JSON refusals keep the generic reason. */ }
-  return { code: status >= 500 || status === 429 || status === 408 ? 1013 : 1008, reason };
+  return { code: status === 429 ? SESSION_CAPACITY_CLOSE_CODE : status >= 500 || status === 408 ? 1013 : 1008, reason };
 }

@@ -204,3 +204,19 @@ describe('activity confirmation across page suspension', () => {
     expect(vi.getTimerCount()).toBe(0);
   });
 });
+it('shows why tracking waits when the Relay refuses it for stream capacity, and keeps retrying', async () => {
+  vi.useFakeTimers();
+  let listener!: RemoteTransportListener;
+  const connect = vi.fn((_id, next) => { listener = next; return { send: vi.fn(), close: vi.fn() }; });
+  const values: RemoteActivityState[] = [];
+  const client = new RemoteActivityClient('agent', { connect } as unknown as RemoteAgentTransport, state => values.push(state));
+  client.start(); listener.onOpen();
+  const reason = 'Too many sessions are open across your browsers and devices (limit 32).';
+  listener.onDisconnect({ permanent: false, reason, capacity: true });
+  expect(values.at(-1)).toEqual({ connection: 'disconnected', error: reason });
+  await vi.advanceTimersByTimeAsync(2000);
+  expect(connect).toHaveBeenCalledTimes(2);
+  listener.onDisconnect({ permanent: false, reason: 'Socket closed' });
+  expect(values.at(-1)).toEqual({ connection: 'disconnected' });
+  client.stop();
+});

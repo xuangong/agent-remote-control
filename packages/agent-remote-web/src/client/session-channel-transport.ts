@@ -2,7 +2,7 @@ import {
   PROTOCOL_VERSION, decodeSessionChannelServerMessage, encodeClientMessage,
   encodeSessionChannelClientMessage,
   SESSION_CHANNEL_MAX_FRAME_BYTES, SESSION_CHANNEL_MAX_BUFFERED_BYTES,
-  SESSION_CHANNEL_MAX_SUBSCRIPTIONS, SESSION_CHANNEL_MAX_PENDING_FRAMES,
+  SESSION_CHANNEL_MAX_SUBSCRIPTIONS, SESSION_CHANNEL_MAX_PENDING_FRAMES, SESSION_CAPACITY_CLOSE_CODE,
   type ClientMessage, type SessionChannelClientMessage,
 } from '@orchardworks/agent-remote-protocol';
 import type { WebSocketLike } from './http-websocket-transport.js';
@@ -209,7 +209,8 @@ export class SessionChannelPool {
       } else {
         const subscription = channel.subscriptions.get(frame.subscriptionId);
         if (!subscription?.active) return;
-        if (frame.type === 'closed') this.disconnect(subscription, { permanent: frame.code === 1008, reason: frame.reason });
+        if (frame.type === 'closed') this.disconnect(subscription, { permanent: frame.code === 1008, reason: frame.reason,
+          ...(frame.code === SESSION_CAPACITY_CLOSE_CODE ? { capacity: true as const } : {}) });
         else {
           this.observe('inbound', frame.message);
           subscription.listener.onMessage(frame.message);

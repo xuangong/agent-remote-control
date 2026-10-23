@@ -45,6 +45,8 @@ export class RemoteOperationError extends Error {
 export interface RemoteDisconnectReason {
   readonly permanent: boolean;
   readonly reason: string;
+  /** Too many session streams are open; the subscription can succeed once another closes. */
+  readonly capacity?: true;
 }
 
 export interface RemoteTransportListener {

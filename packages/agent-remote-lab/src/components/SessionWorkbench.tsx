@@ -112,7 +112,7 @@ export function SessionWorkbench({ sessionDescription, onNavigateAttribution, to
     visible && !readOnly && !runtimeError && !agentFailure,
   );
   useFeedbackToast('Session runtime', visible && !readOnly ? runtimeError
-    ?? (recoveryNoticeDue ? runtimeNotice ?? 'Timeline synchronization is reconnecting.' : undefined) : undefined,
+    ?? (recoveryNoticeDue ? runtimeNotice ?? reconnectingNotice(state) : undefined) : undefined,
     runtimeError ? 'error' : 'info');
   const activity = session.activity;
   const activityLabel = state?.sessionControl?.nativeOwner ? (state.sessionControl.nativeOwner.kind === 'native_cli' ? 'Native CLI has control' : 'Native control transferred')
@@ -224,6 +224,11 @@ export function SessionWorkbench({ sessionDescription, onNavigateAttribution, to
 
 
 const noAuthenticationError = () => false;
+/** A refusal for stream capacity explains what frees a slot; other interruptions only reconnect. */
+function reconnectingNotice(state: AgentReplicaState | undefined): string {
+  const latest = state?.diagnostics.at(-1);
+  return latest?.code === 'session_capacity' ? latest.message : 'Timeline synchronization is reconnecting.';
+}
 
 function useActionFeedback(actions: LabWorkbenchActions, sessionId: string | undefined, isAuthenticationError: (error: unknown) => boolean): { actions: LabWorkbenchActions; reauthenticate: boolean } {
   const activeSession = useRef(sessionId);
@@ -319,7 +324,7 @@ const WorkbenchTimeline = memo(function WorkbenchTimeline({ nativeTakeover, read
           {hasReplica ? <>
             {agentFailure ? <p className="lab-control-note" role="alert">Agent failed: {agentFailure}</p>
               : connectionFailure ? <p className="lab-control-note" role="alert">{sessionStatus === 'unavailable' ? connectionFailure.message : `Agent connection failed: ${connectionFailure.message}`}</p>
-              : sessionStatus === 'disconnected' ? <p className="lab-control-note" role="alert">Timeline synchronization is reconnecting.</p> : null}
+              : sessionStatus === 'disconnected' ? <p className="lab-control-note" role="alert">{reconnectingNotice(state)}</p> : null}
             {runtimeNotice ? <p className="lab-control-note" role="status">{runtimeNotice}</p> : null}
             <AgentTimeline
               state={state}

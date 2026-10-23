@@ -255,6 +255,31 @@ describe('session channel transport', () => {
     client.stop(); transport.dispose(); expect(vi.getTimerCount()).toBe(0);
   });
 
+  it('tells a session why it waits when the Relay refuses it for stream capacity', async () => {
+    vi.useFakeTimers(); cleanups.push(() => vi.useRealTimers());
+    const sockets: ControlledSocket[] = [];
+    const transport = new HttpWebSocketTransport('http://relay.test', { sessionChannels: true, webSocketFactory: () => {
+      const socket = new ControlledSocket(); sockets.push(socket); return socket;
+    } });
+    cleanups.push(() => transport.dispose());
+    const replica = new AgentReplica();
+    const client = new RemoteSessionClient('a', transport, replica, { connectionTimeoutMs: 20_000, reconnectInitialDelayMs: 250 });
+    cleanups.push(() => client.stop());
+    client.start(); await Promise.resolve();
+    sockets[0]!.onopen?.({});
+    sockets[0]!.receive({ protocolVersion: version, type: 'ready' });
+    await Promise.resolve();
+    const subscription = sockets[0]!.sent.find(frame => frame.type === 'subscribe')!;
+    const reason = 'Too many sessions are open across your browsers and devices (limit 32).';
+    sockets[0]!.receive({ protocolVersion: version, type: 'closed', subscriptionId: subscription.subscriptionId, code: 4029, reason });
+    expect(client.getSessionState().connection).toBe('disconnected');
+    expect(replica.getState().diagnostics.at(-1)).toEqual({ code: 'session_capacity', message: reason, recoverable: true });
+    // Capacity can free up, so the session keeps retrying instead of becoming unavailable.
+    vi.advanceTimersByTime(400); await Promise.resolve();
+    expect(sockets[0]!.sent.filter(frame => frame.type === 'subscribe')).toHaveLength(2);
+    client.stop(); transport.dispose();
+  });
+
   it('bounds a connecting physical channel despite staggered logical session retries', async () => {
     vi.useFakeTimers(); cleanups.push(() => vi.useRealTimers());
     const sockets: ControlledSocket[] = [];

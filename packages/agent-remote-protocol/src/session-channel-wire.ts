@@ -29,6 +29,8 @@ const MAX_OPENS_PER_MINUTE = 120;
  * the session streams it holds, which otherwise count against the account's stream limit indefinitely.
  */
 export const SESSION_CHANNEL_IDLE_TIMEOUT_MS = 5 * 60_000;
+/** A subscription refused because the account or Host has too many open session streams; retrying later can succeed. */
+export const SESSION_CAPACITY_CLOSE_CODE = 4029;
 // Keep browser/Worker/Node host types out of the public schema package.
 const runtime = globalThis as unknown as {
   TextEncoder: new () => { encode(value: string): Uint8Array };

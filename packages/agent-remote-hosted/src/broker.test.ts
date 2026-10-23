@@ -385,6 +385,10 @@ it('limits concurrently prepared streams at acceptance without reserving abandon
   expect(opened).toBe(128);
   expect(browsers.filter(pair => pair.native.readyState === 1)).toHaveLength(128);
   expect(browsers[128]!.native.closeCode).toBe(1013);
+  const refused = await prepare();
+  if (!(refused instanceof Response)) throw new Error('A full Host accepted another stream');
+  expect(refused.status).toBe(429);
+  expect(await refused.json()).toMatchObject({ code: 'session_stream_capacity', error: expect.stringContaining('limit 128') });
   browsers[0]!.native.close();
   const next = await prepare();
   if (!next || next instanceof Response) throw new Error('Closed stream capacity was not released');

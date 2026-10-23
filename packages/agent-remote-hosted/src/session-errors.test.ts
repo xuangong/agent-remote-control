@@ -12,7 +12,7 @@ describe('session subscription refusal', () => {
     [404, { code: 'native_session_unavailable', error: 'The native runtime could not find this session.' }, 1008],
     [403, undefined, 1008],
     [503, { code: 'native_runtime_unavailable', error: 'The native runtime connection is unavailable.' }, 1013],
-    [429, undefined, 1013],
+    [429, { code: 'session_stream_capacity', error: 'Too many sessions are open across your browsers and devices (limit 32).' }, 4029],
   ])('closes a %i refusal with a code that separates permanent from retryable failure', async (status, body, code) => {
     const closure = await sessionSubscriptionRefusal(new Response(body ? JSON.stringify(body) : null, { status }));
     expect(closure.code).toBe(code);

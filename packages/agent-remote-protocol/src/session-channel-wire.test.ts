@@ -69,6 +69,53 @@ describe('session channel server adapter', () => {
       cleanup();
     } finally { vi.useRealTimers(); }
   });
+  it('tells the opener when each subscription was last in use and lets it preempt the least recently used', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] }); vi.setSystemTime(100_000);
+    try {
+      const socket = new Socket();
+      const registered: protocol.PreemptibleSubscription[] = [];
+      const opened = new Map<string, () => number>();
+      const released: string[] = [];
+      const cleanup = protocol.acceptSessionChannel(socket, 'session', async (agentId, lastUsed) => {
+        opened.set(agentId, lastUsed);
+        return { accept(stream) { stream.onClose(() => released.push(agentId)); } };
+      }, {}, undefined, { register(subscription) { registered.push(subscription); return () => registered.splice(registered.indexOf(subscription), 1); } });
+      expect(socket.sent[0]).toEqual({ protocolVersion, type: 'ready', preemption: 1 });
+      socket.subscribe(1, 'shown');
+      socket.receive('subscribe', { subscriptionId: 2, agentId: 'retained', message: negotiate, idleMs: 30_000 });
+      await tick();
+      // A subscription in use outranks any other; an unused one carries when it was last used.
+      expect(opened.get('shown')!()).toBe(Number.POSITIVE_INFINITY);
+      expect(opened.get('retained')!()).toBe(70_000);
+      expect(registered.map(subscription => subscription.lastUsed())).toEqual([Number.POSITIVE_INFINITY, 70_000]);
+      vi.setSystemTime(110_000);
+      socket.receive('intent', { active: false, subscriptionIds: [1, 99] });
+      socket.receive('intent', { active: false, subscriptionIds: [1] });
+      expect(opened.get('shown')!()).toBe(110_000);
+      socket.receive('intent', { active: true, subscriptionIds: [2] });
+      expect(opened.get('retained')!()).toBe(Number.POSITIVE_INFINITY);
+      registered[0]!.preempt();
+      expect(socket.sent.at(-1)).toEqual({ protocolVersion, type: 'closed', subscriptionId: 1, code: protocol.SESSION_PREEMPTED_CLOSE_CODE,
+        reason: expect.stringContaining('Return to this window') });
+      expect(released).toEqual(['shown']);
+      expect(registered).toHaveLength(1);
+      socket.receive('unsubscribe', { subscriptionId: 2 });
+      expect(registered).toHaveLength(0);
+      cleanup();
+    } finally { vi.useRealTimers(); }
+  });
+  it('ignores intent and keeps every subscription in use for clients that did not request preemption', async () => {
+    const socket = new Socket();
+    let lastUsed: (() => number) | undefined;
+    const cleanup = protocol.acceptSessionChannel(socket, 'session', async (_agentId, used) => { lastUsed = used; return { accept() {} }; });
+    expect(socket.sent[0]).toEqual({ protocolVersion, type: 'ready' });
+    socket.receive('subscribe', { subscriptionId: 1, agentId: 'a', message: negotiate, idleMs: 5_000 });
+    socket.receive('intent', { active: false, subscriptionIds: [1] });
+    await tick();
+    expect(lastUsed!()).toBe(Number.POSITIVE_INFINITY);
+    expect(socket.closed).toEqual([]);
+    cleanup();
+  });
   it('exports a pure socket adapter', () => { expect(protocol.acceptSessionChannel).toBeTypeOf('function'); });
   it('announces ready immediately and answers ping without opening a session', () => {
     const { socket } = setup();

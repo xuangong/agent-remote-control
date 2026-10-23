@@ -16,7 +16,8 @@ import { authenticationFailure } from './auth-error.js';
 import { authenticationCallback } from './auth-callback.js';
 import { controllerPath, readControllerLocation } from './controller-location.js';
 import { createHash, randomBytes } from 'node:crypto';
-import { createHostBroker, type RemoteHostBrokerState, type HostBrokerOptions } from './broker.js';
+import { createHostBroker, USER_STREAM_LIMIT, type RemoteHostBrokerState, type HostBrokerOptions } from './broker.js';
+import { createStreamPreemption } from './stream-preemption.js';
 import { createGatewayControlVerifier } from './control.js';
 import { SharingError } from './host-sharing.js';
 import { createHostedSessions } from './sessions.js';
@@ -75,6 +76,8 @@ export function createHostedRelay(options: HostedRelayOptions) {
   const diagnostics = createDiagnosticJournal({storage:options.diagnosticStorage,context:options.diagnosticContext});
   const hostKeyOperations = new Map<string, Promise<unknown>>();
   const browserChannels = new Map<RelaySocket, { subject: string; expiresAt(): number; migrations?: Set<string>; titles?: Map<string, string>; successions?: Set<string> }>();
+  const userStreamCount = (subject: string) => [...tenants.values()].reduce((sum, owned) => sum + owned.broker.activeStreamCount(subject), 0);
+  const preemption = createStreamPreemption(userStreamCount, USER_STREAM_LIMIT);
   const scheduler = options.scheduler ?? createTimerRelayScheduler();
   const durable = options.storage !== undefined;
   const accountBacked = durable || auth.provider === 'google';
@@ -286,7 +289,7 @@ export function createHostedRelay(options: HostedRelayOptions) {
         ownerSubject: grant.subject, durable, accountBacked, initialState, diagnostics, gatewaySetup: auth.provider === 'mainsite',
         teamResources: options.teamResources?.(grant.namespace),
         ...(options.successionEnrollment ? { successionEnrollment: { version: 1, origin: auth.origin, issuer: auth.issuer, namespace: grant.namespace, ownerSubject: grant.subject } as const, successionProjectionAllowance: allowance } : {}),
-        userStreamCount: subject => [...tenants.values()].reduce((sum, owned) => sum + owned.broker.activeStreamCount(subject), 0),
+        userStreamCount,
         onStateChange: async broker => { await state.mutate(draft => {
           stageBroker(draft, broker);
         }); await scheduling; },
@@ -796,16 +799,25 @@ export function createHostedRelay(options: HostedRelayOptions) {
         browserChannels.set(socket, { subject: grant.subject, expiresAt: () => sessions.expiresAt(request, grant), ...(route.searchParams.get('migrations') === '1' ? { migrations: new Set<string>() } : {}), ...(route.searchParams.get('titles') === '1' ? { titles: new Map<string, string>() } : {}), ...(route.searchParams.get('successions') === '1' ? { successions: new Set<string>() } : {}) });
         socket.onClose(() => { browserChannels.delete(socket); queueSchedule(); });
         queueSchedule();
-        acceptSessionChannel(socket, mode, async agentId => {
+        // Clients that report which subscriptions are in use let the account's least recently used streams go first.
+        const preemptible = route.searchParams.get('preemption') === '1' ? preemption.channel(grant.subject) : undefined;
+        acceptSessionChannel(socket, mode, async (agentId, lastUsed) => {
           // Reuse the authenticated per-session route, including cross-Host sharing,
           // native binding recovery, expiry, and resource/command authorization.
           const target = new URL(request.url);
           target.pathname = `${prefix}v1/sessions/${encodeURIComponent(agentId)}/events`;
           target.search = '';
-          const prepared = await prepare(new Request(target, request));
+          let prepared = await prepare(new Request(target, request));
+          if (preemptible && prepared instanceof Response && prepared.status === 429) {
+            preemption.makeRoom(grant.subject, lastUsed());
+            prepared = await prepare(new Request(target, request));
+          }
           if (!prepared || prepared instanceof Response) return sessionSubscriptionRefusal(prepared);
-          return prepared;
-        }, route.searchParams.get('successions') === '1' ? { successions: 1 } : {});
+          if (!preemptible) return prepared;
+          const accepted = prepared;
+          // Other subscriptions may have opened while this one was prepared.
+          return { accept(stream: RelaySocket) { preemption.makeRoom(grant.subject, lastUsed()); accepted.accept(stream); } };
+        }, route.searchParams.get('successions') === '1' ? { successions: 1 } : {}, undefined, preemptible);
         publishMigrations(socket, browserChannels.get(socket)!);
         publishTitles(socket, browserChannels.get(socket)!);
         publishSuccessions(socket, browserChannels.get(socket)!);

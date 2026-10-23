@@ -31,6 +31,20 @@ const MAX_OPENS_PER_MINUTE = 120;
 export const SESSION_CHANNEL_IDLE_TIMEOUT_MS = 5 * 60_000;
 /** A subscription refused because the account or Host has too many open session streams; retrying later can succeed. */
 export const SESSION_CAPACITY_CLOSE_CODE = 4029;
+/** A subscription closed so that one in more recent use could open; the client resumes it when it is in use again. */
+export const SESSION_PREEMPTED_CLOSE_CODE = 4030;
+const PREEMPTED_REASON = 'Paused to free a connection for a window used more recently. Return to this window to resume.';
+
+/** An open subscription the Relay may close so that one in more recent use can open. */
+export interface PreemptibleSubscription {
+  /** When the subscription was last in use, or Infinity while it is in use. */
+  lastUsed(): number;
+  preempt(): void;
+}
+/** Offered to clients that request it; the channel registers each open subscription until it closes. */
+export interface SessionChannelPreemption {
+  register(subscription: PreemptibleSubscription): () => void;
+}
 // Keep browser/Worker/Node host types out of the public schema package.
 const runtime = globalThis as unknown as {
   TextEncoder: new () => { encode(value: string): Uint8Array };
@@ -54,15 +68,22 @@ interface Stream {
   opening: boolean;
   reserved: boolean;
   timer?: unknown;
+  inUse: boolean;
+  lastUsedAt: number;
+  unregister?: () => void;
 }
 
-/** Multiplex existing session wires; the opener owns authorization and routing. */
+/**
+ * Multiplex existing session wires; the opener owns authorization and routing. With preemption, the
+ * opener learns when each subscription was last in use and may close less recently used ones.
+ */
 export function acceptSessionChannel(
   socket: SessionChannelSocket,
   mode: SessionChannelMode,
-  openSession: (agentId: string) => Promise<SessionChannelOpenResult>,
+  openSession: (agentId: string, lastUsed: () => number) => Promise<SessionChannelOpenResult>,
   readiness: { successions?: 1 } = {},
   idleTimeoutMs = SESSION_CHANNEL_IDLE_TIMEOUT_MS,
+  preemption?: SessionChannelPreemption,
 ): () => void {
   const streams = new Map<number, Stream>();
   const removers: (() => void)[] = [];
@@ -93,6 +114,7 @@ export function acceptSessionChannel(
   function finish(stream: Stream, code = 1000, reason = '', notify = true) {
     if (stream.closed) return;
     stream.closed = true;
+    stream.unregister?.();
     runtime.clearTimeout(stream.timer);
     streams.delete(stream.id);
     pendingBytes -= stream.pendingBytes;
@@ -157,7 +179,7 @@ export function acceptSessionChannel(
     void drain(stream);
   }
 
-  function subscribe(id: number, agentId: string, message: ClientMessage) {
+  function subscribe(id: number, agentId: string, message: ClientMessage, idleMs?: number) {
     // Replayed IDs never create another incarnation or close an existing one.
     if (id <= highestId) return;
     highestId = id;
@@ -170,7 +192,9 @@ export function acceptSessionChannel(
     const stream: Stream = {
       id, socket: undefined as unknown as SessionChannelSocket, messages: new Set(), closes: new Set(), errors: new Set(),
       queue: [], pendingBytes: 0, closed: false, attached: false, draining: false, opening: false, reserved: true,
+      inUse: !preemption || idleMs === undefined, lastUsedAt: now - (preemption ? idleMs ?? 0 : 0),
     };
+    const lastUsed = () => stream.inUse ? Number.POSITIVE_INFINITY : stream.lastUsedAt;
     stream.socket = {
       get readyState() { return stream.closed || stopped ? 3 : socket.readyState; },
       get bufferedAmount() { return socket.bufferedAmount; },
@@ -204,17 +228,28 @@ export function acceptSessionChannel(
     // work retains its capacity reservation until the injected factory settles.
     void (async () => {
       try {
-        const opened = await openSession(agentId);
+        const opened = await openSession(agentId, lastUsed);
         if (stream.closed || stopped) return;
         runtime.clearTimeout(stream.timer);
         if ('code' in opened) { finish(stream, opened.code, opened.reason); return; }
         opened.accept(stream.socket);
         if (stream.closed || stopped) return;
         stream.attached = true;
+        stream.unregister = preemption?.register({ lastUsed, preempt: () => finish(stream, SESSION_PREEMPTED_CLOSE_CODE, PREEMPTED_REASON) });
         void drain(stream);
       } catch { finish(stream, 1011, 'Session open failed'); }
       finally { stream.opening = false; release(stream); }
     })();
+  }
+
+  function intent(ids: readonly number[], active: boolean) {
+    const now = Date.now();
+    for (const id of ids) {
+      const stream = streams.get(id);
+      if (!stream) continue;
+      if (active) stream.inUse = true;
+      else if (stream.inUse) { stream.inUse = false; stream.lastUsedAt = now; }
+    }
   }
 
   removers.push(socket.onMessage((data, binary) => {
@@ -226,7 +261,8 @@ export function acceptSessionChannel(
     if (decoded.status !== 'ok') { stop(1008, 'Invalid channel frame'); return; }
     const message = decoded.value;
     if (message.type === 'ping') { send({ protocolVersion: PROTOCOL_VERSION, type: 'pong' }); return; }
-    if (message.type === 'subscribe') { subscribe(message.subscriptionId, message.agentId, message.message); return; }
+    if (message.type === 'subscribe') { subscribe(message.subscriptionId, message.agentId, message.message, message.idleMs); return; }
+    if (message.type === 'intent') { if (preemption) intent(message.subscriptionIds, message.active); return; }
     const stream = streams.get(message.subscriptionId);
     if (!stream) return;
     if (message.type === 'unsubscribe') finish(stream, 1000, 'Unsubscribed', false);
@@ -234,7 +270,7 @@ export function acceptSessionChannel(
   }));
   removers.push(socket.onClose(() => stop(1001, 'Channel disconnected', false)));
   removers.push(socket.onError(() => stop(1011, 'Channel socket error')));
-  send({ protocolVersion: PROTOCOL_VERSION, type: 'ready', ...readiness });
+  send({ protocolVersion: PROTOCOL_VERSION, type: 'ready', ...readiness, ...(preemption ? { preemption: 1 as const } : {}) });
   if (!stopped) watchIdle(idleTimeoutMs);
   return () => stop();
 }

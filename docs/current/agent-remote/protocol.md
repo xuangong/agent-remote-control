@@ -160,6 +160,12 @@ A browser multiplexes its session and activity subscriptions over two session ch
 
 Clients ping every 30 seconds while their page is visible and every minute while it is hidden, without requiring replies while hidden. The Relay closes a channel that has sent nothing for five minutes, which releases the streams of pages a browser froze or a device dropped without closing their connections. A page that resumes after that probes its channel and reconnects.
 
+### Allocation by recent use
+
+A client that opens its channel with `preemption=1` reports which subscriptions are in use, and the Relay answers with `preemption: 1` in `ready`. A subscription is in use while its page is visible and a view in the page's current Window shows it, or Track observes it. Conversations a page keeps open for other Windows are not in use. A `subscribe` frame for a subscription not in use carries `idleMs`, how long ago it was last in use; an `intent` frame reports changes as `{ active, subscriptionIds }`, and the Relay records the time an inactive report arrives. Clients send neither to a Relay whose `ready` lacks `preemption`.
+
+When the account is at its limit, a subscription opens by closing the account's least recently used subscriptions first, with close code 4030. A subscription in use, or used at least as recently as the one opening, is never closed for it, and only subscriptions from channels that requested preemption are closed or close others. A subscription that cannot take a stream this way is refused with 4029. A client does not retry a subscription closed with 4030, or one refused with 4029 while not in use; it reconnects when the subscription is in use again, so two pages cannot keep taking streams from each other on their own. Clients that do not know 4030 treat it as a retryable refusal.
+
 ## Inline image input (1.5.0)
 
 `capabilities.imageInput` advertises PNG/JPEG/WebP input limits: at most eight image

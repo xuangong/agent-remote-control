@@ -2153,7 +2153,7 @@ function rejectUpgrade(status: number) { return new Response(null, { status }); 
  * an account holds at most USER_STREAM_LIMIT across all its browsers, devices and Hosts.
  */
 const HOST_STREAM_LIMIT = 128;
-const USER_STREAM_LIMIT = 64;
+export const USER_STREAM_LIMIT = 64;
 /** Open views of every browser and device share these limits, so the refusal says what frees a slot. */
 function capacityRefusal(host: boolean) {
   return new Response(JSON.stringify({ code: 'session_stream_capacity', error: host

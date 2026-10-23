@@ -156,7 +156,7 @@ Normal negotiation remains unchanged. Opening a tracked session establishes the 
 
 ## Session channel liveness and stream capacity
 
-A browser multiplexes its session and activity subscriptions over two session channels. Every subscription holds one Relay stream, and an account may hold at most 32 streams across all its browsers, devices and Hosts; a Host accepts at most 128. A subscription refused at either limit closes with code 4029 and a reason that says what frees a slot. Clients keep retrying it and show the reason instead of only reporting a reconnect; older clients treat the code as a retryable refusal.
+A browser multiplexes its session and activity subscriptions over two session channels. Every subscription holds one Relay stream, and an account may hold at most 64 streams across all its browsers, devices and Hosts; a Host accepts at most 128. A subscription refused at either limit closes with code 4029 and a reason that says what frees a slot. Clients keep retrying it and show the reason instead of only reporting a reconnect; older clients treat the code as a retryable refusal.
 
 Clients ping every 30 seconds while their page is visible and every minute while it is hidden, without requiring replies while hidden. The Relay closes a channel that has sent nothing for five minutes, which releases the streams of pages a browser froze or a device dropped without closing their connections. A page that resumes after that probes its channel and reconnects.
 

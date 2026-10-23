@@ -211,7 +211,7 @@ it('shows why tracking waits when the Relay refuses it for stream capacity, and 
   const values: RemoteActivityState[] = [];
   const client = new RemoteActivityClient('agent', { connect } as unknown as RemoteAgentTransport, state => values.push(state));
   client.start(); listener.onOpen();
-  const reason = 'Too many sessions are open across your browsers and devices (limit 32).';
+  const reason = 'Too many sessions are open across your browsers and devices (limit 64).';
   listener.onDisconnect({ permanent: false, reason, capacity: true });
   expect(values.at(-1)).toEqual({ connection: 'disconnected', error: reason });
   await vi.advanceTimersByTimeAsync(2000);

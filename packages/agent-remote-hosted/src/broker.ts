@@ -1791,10 +1791,10 @@ export function createHostBroker(options: HostBrokerOptions) {
     }
     const subject = principal(context);
     const userStreams = () => subject === undefined ? 0 : options.userStreamCount?.(subject) ?? activeStreamCount(subject);
-    if (host.streams.size >= 128 || userStreams() >= 32) return capacityRefusal(host.streams.size >= 128);
+    if (host.streams.size >= HOST_STREAM_LIMIT || userStreams() >= USER_STREAM_LIMIT) return capacityRefusal(host.streams.size >= HOST_STREAM_LIMIT);
     return { accept(client: RelaySocket) {
       if (!sessionAllowed(binding, principal(context))) { client.close(1008, 'Session access is unavailable'); return; }
-      if (host.streams.size >= 128 || userStreams() >= 32) { client.close(1013, 'Remote stream capacity reached'); return; }
+      if (host.streams.size >= HOST_STREAM_LIMIT || userStreams() >= USER_STREAM_LIMIT) { client.close(1013, 'Remote stream capacity reached'); return; }
       track(client);
       const expiry = () => sessionAllowed(binding, principal(context)) ? context.connectionExpiresAt?.() : 0;
       expire(client, expiry);
@@ -2148,11 +2148,17 @@ function rawJson(result: RpcResponse) {
   return new Response(body, { status: result.status, headers: { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' } });
 }
 function rejectUpgrade(status: number) { return new Response(null, { status }); }
+/**
+ * Every open session view and tracked session holds one stream. A Host serves at most HOST_STREAM_LIMIT;
+ * an account holds at most USER_STREAM_LIMIT across all its browsers, devices and Hosts.
+ */
+const HOST_STREAM_LIMIT = 128;
+const USER_STREAM_LIMIT = 64;
 /** Open views of every browser and device share these limits, so the refusal says what frees a slot. */
 function capacityRefusal(host: boolean) {
   return new Response(JSON.stringify({ code: 'session_stream_capacity', error: host
-    ? 'This Host has too many sessions open in browsers (limit 128). Close session views you no longer use; this session connects again automatically.'
-    : 'Too many sessions are open across your browsers and devices (limit 32). Close tabs, windows or session views you no longer use; this session connects again automatically.' }),
+    ? `This Host has too many sessions open in browsers (limit ${HOST_STREAM_LIMIT}). Close session views you no longer use; this session connects again automatically.`
+    : `Too many sessions are open across your browsers and devices (limit ${USER_STREAM_LIMIT}). Close tabs, windows or session views you no longer use; this session connects again automatically.` }),
   { status: 429, headers: { 'content-type': 'application/json' } });
 }
 

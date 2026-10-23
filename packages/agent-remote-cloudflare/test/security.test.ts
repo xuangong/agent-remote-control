@@ -136,8 +136,10 @@ it('shares one per-user stream allowance across different Host owners and releas
     paths.push(bob.basePath + `v1/sessions/quota-agent-${index}/events`);
   }
   const sockets = [];
-  for (let i = 0; i < 32; i++) { const socket = await f.upgrade(paths[i % 2]!, { origin, cookie: bob.cookie }); await event(socket, 'message'); sockets.push(socket); }
-  expect((await f.request(paths[1]!, { headers: { upgrade: 'websocket', origin, cookie: bob.cookie } })).status).toBe(429);
+  for (let i = 0; i < 64; i++) { const socket = await f.upgrade(paths[i % 2]!, { origin, cookie: bob.cookie }); await event(socket, 'message'); sockets.push(socket); }
+  const refused = await f.request(paths[1]!, { headers: { upgrade: 'websocket', origin, cookie: bob.cookie } });
+  expect(refused.status).toBe(429);
+  expect(await refused.json()).toMatchObject({ code: 'session_stream_capacity', error: expect.stringContaining('limit 64') });
   const released = event(sockets[0]!, 'close'); sockets[0]!.close(); await released;
   const next = await f.upgrade(paths[1]!, { origin, cookie: bob.cookie }); await event(next, 'message');
 }, 30000);

@@ -202,7 +202,7 @@ it('keeps handoff recovery visible before a native session is available', async 
 }, 5000);
 
 it('explains a stream capacity refusal instead of only reporting a reconnect', async () => {
-  const message = 'Too many sessions are open across your browsers and devices (limit 32). Close tabs, windows or session views you no longer use.';
+  const message = 'Too many sessions are open across your browsers and devices (limit 64). Close tabs, windows or session views you no longer use.';
   const capacity: AgentReplicaState = { ...replicaState, diagnostics: [{ code: 'session_capacity', message, recoverable: true }] };
   const refused = await render(<SessionWorkbench state={capacity} sessionStatus="disconnected" actions={{}} />);
   expect(refused.querySelector('[role="alert"]')?.textContent).toBe(message);

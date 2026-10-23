@@ -270,7 +270,7 @@ describe('session channel transport', () => {
     sockets[0]!.receive({ protocolVersion: version, type: 'ready' });
     await Promise.resolve();
     const subscription = sockets[0]!.sent.find(frame => frame.type === 'subscribe')!;
-    const reason = 'Too many sessions are open across your browsers and devices (limit 32).';
+    const reason = 'Too many sessions are open across your browsers and devices (limit 64).';
     sockets[0]!.receive({ protocolVersion: version, type: 'closed', subscriptionId: subscription.subscriptionId, code: 4029, reason });
     expect(client.getSessionState().connection).toBe('disconnected');
     expect(replica.getState().diagnostics.at(-1)).toEqual({ code: 'session_capacity', message: reason, recoverable: true });

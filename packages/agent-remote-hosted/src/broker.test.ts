@@ -362,6 +362,32 @@ it('keeps the persisted shared native request identity byte compatible', () => {
   );
 }, 10_000);
 
+it('limits the streams of one account below the Host limit and says what frees a slot', async () => {
+  const { broker, native } = await restoredFixture();
+  native.onMessage(data => {
+    const message = JSON.parse(data);
+    if (message.type === 'rpc_request') native.send(JSON.stringify({ uplinkVersion: 2, type: 'rpc_response', requestId: message.requestId, status: 200,
+      body: '{"agentId":"agent","nativeSessionId":"native-session"}' }));
+    if (message.type === 'stream_open') native.send(JSON.stringify({ uplinkVersion: 2, type: 'stream_opened', streamId: message.streamId }));
+  });
+  const prepare = (subject: string) => broker.prepareUpgrade(new Request('https://relay.example/v1/sessions/agent/events', { headers: { origin: 'https://relay.example' } }),
+    { principalSubject: () => subject });
+  const browsers = await Promise.all(Array.from({ length: 64 }, async () => {
+    const preparation = await prepare('alice');
+    if (!preparation || preparation instanceof Response) throw new Error('An account was refused below its stream limit');
+    const pair = transportPair(); preparation.accept(pair.server); return pair;
+  }));
+  await Promise.resolve();
+  expect(browsers.filter(pair => pair.native.readyState === 1)).toHaveLength(64);
+  const refused = await prepare('alice');
+  if (!(refused instanceof Response)) throw new Error('A full account accepted another stream');
+  expect(refused.status).toBe(429);
+  expect(await refused.json()).toMatchObject({ code: 'session_stream_capacity', error: expect.stringContaining('limit 64') });
+  // Another account on the same Host is unaffected.
+  const other = await prepare('bob');
+  expect(other && !(other instanceof Response)).toBe(true);
+}, 10_000);
+
 it('limits concurrently prepared streams at acceptance without reserving abandoned preparations', async () => {
   const { broker, native } = await restoredFixture();
   let opened = 0;

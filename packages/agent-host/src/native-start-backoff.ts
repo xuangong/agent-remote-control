@@ -4,13 +4,14 @@ const initialDelayMs = 5_000;
 const maxDelayMs = 60_000;
 
 /** Which native session an attach request would start, and whether it is an explicit takeover. */
-export function nativeStartTarget(path: string, method: string, requestBody: string | undefined): { key: string; takeOver: boolean } | undefined {
+export function nativeStartTarget(path: string, method: string, requestBody: string | undefined): { key: string; takeOver: boolean; providerId: string; nativeSessionId: string } | undefined {
   if (method !== 'POST' || (path !== '/remote/attach' && path !== '/remote/child/attach')) return undefined;
   try {
     const payload = JSON.parse(requestBody ?? '') as Record<string, unknown> | null;
     if (!payload || typeof payload.providerId !== 'string' || typeof payload.nativeSessionId !== 'string') return undefined;
     const parent = path === '/remote/child/attach' && typeof payload.parentNativeSessionId === 'string' ? payload.parentNativeSessionId : null;
-    return { key: JSON.stringify([payload.providerId, parent, payload.nativeSessionId]), takeOver: payload.takeOver !== undefined };
+    return { key: JSON.stringify([payload.providerId, parent, payload.nativeSessionId]), takeOver: payload.takeOver !== undefined,
+      providerId: payload.providerId, nativeSessionId: payload.nativeSessionId };
   } catch { return undefined; }
 }
 

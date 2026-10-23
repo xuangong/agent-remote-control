@@ -12,7 +12,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { WebSocketServer, type WebSocket } from 'ws';
 import { createRelayDiagnosticSink } from './relay-diagnostics.js';
 import { createCodexSessionDirectory } from './directory.js';
-import { createAgentHost, createAgentHostRuntime, type AgentHostDirectory, type AgentHostUplinkDiagnostic } from './host.js';
+import { createAgentHost, createAgentHostRuntime, type AgentHostDirectory, type AgentHostRequestDiagnostic, type AgentHostUplinkDiagnostic } from './host.js';
 import { CodexAppServerProvider } from '../../agent-provider-codex/src/provider.js';
 import { CodexAppServerTransport } from '../../agent-provider-codex/src/app-server-transport.js';
 import { createScriptedAppServer } from '../../agent-provider-codex/src/test-utils/scripted-app-server.js';
@@ -1045,6 +1045,9 @@ it('reports Controller health with the update status over the uplink', async () 
   } finally { await host.close(); await broker.close(); }
 });
 
+/** Attach diagnostics name a native session by the same digest Codex request diagnostics use. */
+const nativeRef = createHash('sha256').update('native').digest('hex').slice(0, 16);
+
 it('reports a confirmed attach failure over a real uplink without classifying it as a mutation', async () => {
   const broker = await uplinkBroker('diagnostic-host');
   const registration = fixture('codex');
@@ -1059,9 +1062,10 @@ it('reports a confirmed attach failure over a real uplink without classifying it
     expect(JSON.parse(result.body)).toMatchObject({ code: 'session_attach_failed', requestId: 'rpc-1' });
     expect(diagnostics).toEqual([
       expect.objectContaining({ event: 'host_request_started', requestId: 'rpc-1', operation: 'session_attach' }),
-      expect.objectContaining({ event: 'host_request_completed', requestId: 'rpc-1', operation: 'session_attach', code: 'session_attach_failed', status: 503, elapsedMs: expect.any(Number) }),
+      expect.objectContaining({ event: 'host_request_completed', requestId: 'rpc-1', operation: 'session_attach', code: 'session_attach_failed', status: 503, elapsedMs: expect.any(Number),
+        providerId: 'codex', sessionRef: nativeRef, cause: 'Error' }),
     ]);
-    expect(JSON.stringify(diagnostics)).not.toMatch(/arc_secret|native payload/);
+    expect(JSON.stringify(diagnostics)).not.toMatch(/arc_secret|native payload|"native"/);
   } finally { await host.close(); await broker.close(); }
 });
 
@@ -1072,7 +1076,8 @@ it('backs off repeated native start failures instead of spawning on every client
   let opens = 0, failing = true;
   const open = registration.directory.open.bind(registration.directory);
   registration.directory.open = async (id, options) => { opens++; if (failing) throw new Error('native process exited'); return open(id, options); };
-  const host = createAgentHostRuntime({ registrations: [registration] });
+  const completed: AgentHostRequestDiagnostic[] = [];
+  const host = createAgentHostRuntime({ registrations: [registration], onRequestDiagnostic: diagnostic => { if (diagnostic.event === 'host_request_completed') completed.push(diagnostic); } });
   const attach = (sessionId: string) => host.control({ method: 'POST', path: '/remote/attach', sessionId, body: JSON.stringify({ providerId: 'codex', nativeSessionId: 'native' }) });
   try {
     expect((await attach('relay-1')).status).toBe(503);
@@ -1082,6 +1087,11 @@ it('backs off repeated native start failures instead of spawning on every client
     expect(repeated.status).toBe(503);
     expect(JSON.parse(repeated.body)).toMatchObject({ code: 'session_attach_failed' });
     expect(opens).toBe(1);
+    // The log names the session and tells a repeated result from a new native start failure.
+    expect(completed.map(({ providerId, sessionRef, backoff, cause }) => ({ providerId, sessionRef, backoff, cause }))).toEqual([
+      { providerId: 'codex', sessionRef: nativeRef, backoff: undefined, cause: 'Error' },
+      { providerId: 'codex', sessionRef: nativeRef, backoff: true, cause: 'Error' },
+    ]);
     now += 1;
     expect((await attach('relay-3')).status).toBe(503);
     expect(opens).toBe(2);

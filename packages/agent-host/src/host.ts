@@ -31,7 +31,7 @@ import { createControllerPreviews } from './previews.js';
 import { createVscodeTunnelManager, type VscodeTunnelOptions } from './vscode-tunnel.js';
 import { createOperationCache, OperationCacheError, type OperationCacheOptions } from '@orchardworks/agent-remote-relay';
 import { join } from 'node:path';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import type { AgentProviderAdapter, AgentSession, AgentSessionConfig, AgentSessionExtensions, AgentEmptyCreationResult, AgentNativeValidityToken, AgentPersistenceHandle, AgentSessionResumeOptions } from '@orchardworks/agent-provider-sdk';
 import { AgentOperationRejectedError, AgentSessionInUseError, AgentRuntimeError, serializeAgentEmptyCreationResult, serializeAgentInputMaterialization } from '@orchardworks/agent-provider-sdk';
 import { PROTOCOL_VERSION, type HostEnvironment } from '@orchardworks/agent-remote-protocol';
@@ -126,6 +126,16 @@ export interface AgentHostRequestDiagnostic {
   elapsedMs: number;
   status?: number;
   code?: string;
+  /**
+   * The native session an attach opens, so a repeating failure names its session. Like Codex request
+   * diagnostics, the log carries a digest of the native identity rather than the identity itself.
+   */
+  providerId?: string;
+  sessionRef?: string;
+  /** The result repeats an earlier native start failure instead of starting the session again. */
+  backoff?: true;
+  /** The class and code of the error behind a generic failure; native error text can carry content, so it is never recorded. */
+  cause?: string;
 }
 export interface AgentHostRuntime {
   readonly executionRouting?: SessionExecutionRouting;
@@ -885,22 +895,34 @@ export function createAgentHostRuntime(options: AgentHostRuntimeOptions): AgentH
     return json(200, publicBinding(await tracked(project(providerId, proposedAgentId, nativeSessionId, undefined, undefined, false, undefined, qualified && !savedCreation))));
   }
   const nativeStarts = createNativeStartBackoff();
+  // Generic failure responses do not describe their cause; the Controller log records its class and code.
+  const failureCauses = new WeakMap<AgentRemoteHttpResult, string>();
+  const describeFailure = (result: AgentRemoteHttpResult, error: unknown) => {
+    const name = error instanceof Error && /^[A-Za-z][A-Za-z0-9]{0,63}$/.test(error.name) ? error.name : typeof error;
+    const code = error && typeof error === 'object' && 'code' in error && typeof error.code === 'string' && /^[a-z][a-z0-9_]{0,63}$/.test(error.code) ? error.code : undefined;
+    failureCauses.set(result, code ? `${name} ${code}` : name);
+    return result;
+  };
   async function control(request: RemoteHostControlRequest, context?: TrustedSuccessionContext): Promise<AgentRemoteHttpResult> {
     const requestId = request.requestId && /^[a-zA-Z0-9-]{1,80}$/.test(request.requestId) ? request.requestId : randomUUID();
     const operation = request.path === '/remote/attach' || request.path === '/remote/child/attach' ? 'session_attach'
       : request.path === '/remote/create' ? 'session_create' : request.method === 'GET' ? 'catalog_read' : 'host_control';
     const started = Date.now();
-    const diagnostic = (event: AgentHostRequestDiagnostic['event'], status?: number, code?: string) => {
+    const start = nativeStartTarget(request.path, request.method, request.body);
+    const diagnostic = (event: AgentHostRequestDiagnostic['event'], status?: number, code?: string, detail: Pick<AgentHostRequestDiagnostic, 'backoff' | 'cause'> = {}) => {
       try { options.onRequestDiagnostic?.({ event, requestId, operation, elapsedMs: Date.now() - started,
-        ...(status === undefined ? {} : { status }), ...(code ? { code } : {}) }); } catch { /* Diagnostics cannot change request outcomes. */ }
+        ...(status === undefined ? {} : { status }), ...(code ? { code } : {}),
+        ...(start ? { providerId: start.providerId, sessionRef: createHash('sha256').update(start.nativeSessionId).digest('hex').slice(0, 16) } : {}),
+        ...detail }); } catch { /* Diagnostics cannot change request outcomes. */ }
     };
     diagnostic('host_request_started');
-    const start = nativeStartTarget(request.path, request.method, request.body);
     const backedOff = start && nativeStarts.blocked(start);
     const result = backedOff || await controlRequest(request, context);
     if (start && !backedOff) nativeStarts.settle(start, result);
     const data = result.status >= 400 ? JSON.parse(result.body) : {};
-    diagnostic('host_request_completed', result.status, typeof data.code === 'string' ? data.code : undefined);
+    const cause = failureCauses.get(result);
+    diagnostic('host_request_completed', result.status, typeof data.code === 'string' ? data.code : undefined,
+      { ...(backedOff ? { backoff: true as const } : {}), ...(cause ? { cause } : {}) });
     return result.status >= 400 ? { ...result, body: JSON.stringify({ ...data, requestId }) } : result;
   }
   async function controlRequest(request: RemoteHostControlRequest, context?: TrustedSuccessionContext): Promise<AgentRemoteHttpResult> {
@@ -1118,8 +1140,8 @@ export function createAgentHostRuntime(options: AgentHostRuntimeOptions): AgentH
       if (error instanceof HostRequestError) return json(error.status, { error: error.message, code: error.code });
       if (error instanceof RemoteHostCatalogError) return json(error.status, { error: error.message, code: error.code });
       if (request.method === 'GET') return json(503, { error: 'The Remote Host catalog is unavailable.', code: 'catalog_unavailable' });
-      if (request.path === '/remote/attach' || request.path === '/remote/child/attach') return json(503, { error: 'The Host could not open the native session. Check the Controller log and reopen it from the session list.', code: 'session_attach_failed' });
-      return json(503, { error: 'Remote Host operation outcome is unknown.', code: 'mutation_outcome_unknown' });
+      if (request.path === '/remote/attach' || request.path === '/remote/child/attach') return describeFailure(json(503, { error: 'The Host could not open the native session. Check the Controller log and reopen it from the session list.', code: 'session_attach_failed' }), error);
+      return describeFailure(json(503, { error: 'Remote Host operation outcome is unknown.', code: 'mutation_outcome_unknown' }), error);
     }
   }
   async function cancelAgent(agentId: string) {

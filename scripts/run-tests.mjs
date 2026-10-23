@@ -19,6 +19,7 @@ if (successionEvidence) {
   if (!isAbsolute(process.env.AGENT_CLAUDE_TEST_EXECUTABLE ?? '')) throw new Error('Set an absolute AGENT_CLAUDE_TEST_EXECUTABLE for the installed SDK-bundled Claude 2.1.247.');
   if (!isAbsolute(process.env.AGENT_CLAUDE_SUCCESSION_EVIDENCE_OUTPUT ?? '')) throw new Error('Set AGENT_CLAUDE_SUCCESSION_EVIDENCE_OUTPUT to a new absolute JSON output path.');
 }
+if (mode === 'affected' && !/^[0-9a-f]{7,40}$/.test(process.argv[3] ?? '')) throw new Error('The affected suite needs the commit to compare with.');
 if (mode === 'claude' && !process.env.AGENT_CLAUDE_TEST_EXECUTABLE) throw new Error('Set AGENT_CLAUDE_TEST_EXECUTABLE to Claude Code 2.1.247 or newer for native Claude tests.');
 if (mode === 'codex-shared' && !process.env.AGENT_REMOTE_SHARED_CODEX_TEST_EXECUTABLE) throw new Error('Set AGENT_REMOTE_SHARED_CODEX_TEST_EXECUTABLE to the native Codex executable for shared-runtime tests.');
 const commands = {
@@ -49,6 +50,8 @@ const commands = {
   setup: ['exec', 'node', '--test', '--test-timeout=60000', 'scripts/native-test-versions.test.mjs', 'scripts/dsh-debug.test.mjs', 'scripts/start.test.mjs', 'scripts/relay-local.test.mjs', 'scripts/prepare-relay-docker-lock.test.mjs', 'scripts/controller/entrypoint.test.mjs', 'scripts/controller/create-host.test.mjs', 'scripts/controller/install.test.mjs'],
   // Each package's Vitest already uses every core; running packages one at a time avoids load-induced timeouts.
   unit: ['-r', '--workspace-concurrency=1', 'run', 'test'],
+  // The packages changed since a commit and the packages that depend on them; the workspace root runs everything.
+  affected: ['-r', '--workspace-concurrency=1', '--filter', `...[${process.argv[3]}]`, '--filter', '!@orchardworks/agent-remote-control', 'run', 'test'],
   // Native CLI tests depend on this machine's installed and signed-in agents, so the unit suite excludes them.
   local: ['-r', '--workspace-concurrency=1', 'exec', 'vitest', 'run', '--passWithNoTests', '--testTimeout=60000', '--hookTimeout=30000', '--maxWorkers=1', 'local.test'],
   e2e: ['--filter', '@orchardworks/agent-remote-lab', 'exec', 'playwright', 'test', '--timeout=30000', '--global-timeout=480000', ...process.argv.slice(3)],

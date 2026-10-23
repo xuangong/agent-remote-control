@@ -834,7 +834,7 @@ pnpm test:e2e
 pnpm lint:docs
 ```
 
-There is no hosted CI. Run `pnpm hooks:install` once per clone so every branch push runs `pnpm verify` through `.githooks/pre-push`; tag-only pushes skip it. The unit suite (`pnpm test`) excludes `*.local.test.ts` files and must pass on any machine; `pnpm test:local` runs those native suites one package at a time.
+There is no hosted CI. Run `pnpm hooks:install` once per clone so every branch push runs checks through `.githooks/pre-push`: the compatibility check, the full build and type check, and the unit suites of the packages the push changes and of the packages that depend on them. A push that changes workspace files outside `packages/` and `docs/` runs the full `pnpm verify`, which releases also run; tag-only pushes skip the hook. The unit suite (`pnpm test`) excludes `*.local.test.ts` files and must pass on any machine; `pnpm test:local` runs those native suites one package at a time.
 
 Test scripts enforce per-test and outer process deadlines. Browser tests use separate configurable ports and refuse to reuse an existing server. Set `AGENT_REMOTE_TEST_RELAY_PORT` and `AGENT_REMOTE_TEST_WEB_PORT` to free ports for concurrent testing. Run `pnpm compatibility:update` after source changes, then `pnpm compatibility:check` to verify the declared implementation digest.
 

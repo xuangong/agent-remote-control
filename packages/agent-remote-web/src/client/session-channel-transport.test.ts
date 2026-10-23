@@ -87,7 +87,7 @@ describe('session channel transport', () => {
     const b = connect(harness.transport, 'b');
     const activity = connect(harness.transport, 'a', true);
     await vi.waitFor(() => expect(harness.frames).toHaveLength(3));
-    expect(harness.urls.sort()).toEqual(['/base/v1/session-channel?observation=activity&migrations=1&titles=1', '/base/v1/session-channel?observation=session&migrations=1&titles=1']);
+    expect(harness.urls.sort()).toEqual(['/base/v1/session-channel?observation=activity&migrations=1&titles=1&preemption=1', '/base/v1/session-channel?observation=session&migrations=1&titles=1&preemption=1']);
     const subscriptions = harness.frames.map(({ frame }) => frame);
     expect(subscriptions.map((frame) => frame.type)).toEqual(['subscribe', 'subscribe', 'subscribe']);
     const firstId = subscriptions.find((frame) => frame.agentId === 'a' && !frame.message.observation).subscriptionId;
@@ -136,7 +136,7 @@ describe('session channel transport', () => {
     expect(() => a.connection.send(negotiate)).toThrow();
     connect(harness.transport, 'a');
     await vi.waitFor(() => expect(harness.frames).toHaveLength(4));
-    expect(harness.urls).toEqual(['/base/v1/session-channel?observation=session&migrations=1&titles=1', '/base/v1/session-channel?observation=session&migrations=1&titles=1']);
+    expect(harness.urls).toEqual(['/base/v1/session-channel?observation=session&migrations=1&titles=1&preemption=1', '/base/v1/session-channel?observation=session&migrations=1&titles=1&preemption=1']);
     expect(harness.frames.filter(({ frame }) => frame.type === 'message')).toHaveLength(1);
   }, 10_000);
 
@@ -146,7 +146,7 @@ describe('session channel transport', () => {
     await vi.waitFor(() => expect(harness.sockets).toHaveLength(1));
     harness.sockets[0]!.close();
     await vi.waitFor(() => expect(harness.frames).toHaveLength(1));
-    expect(harness.urls).toEqual(['/base/v1/session-channel?observation=session&migrations=1&titles=1', '/base/v1/sessions/agent%20one/events']);
+    expect(harness.urls).toEqual(['/base/v1/session-channel?observation=session&migrations=1&titles=1&preemption=1', '/base/v1/sessions/agent%20one/events']);
     expect(harness.frames[0]!.frame).toEqual(negotiate);
     expect(a.opened).toHaveBeenCalledTimes(1);
     expect(a.disconnect).not.toHaveBeenCalled();
@@ -163,13 +163,13 @@ describe('session channel transport', () => {
     const harness = await server(false);
     const a = connect(harness.transport, 'agent one');
     await vi.waitFor(() => expect(harness.frames).toHaveLength(1), { timeout: 12000 });
-    expect(harness.urls).toEqual(['/base/v1/session-channel?observation=session&migrations=1&titles=1', '/base/v1/sessions/agent%20one/events']);
+    expect(harness.urls).toEqual(['/base/v1/session-channel?observation=session&migrations=1&titles=1&preemption=1', '/base/v1/sessions/agent%20one/events']);
     expect(harness.frames[0]!.frame).toEqual(negotiate);
     expect(a.opened).toHaveBeenCalledOnce();
     expect(a.disconnect).not.toHaveBeenCalled();
     connect(harness.transport, 'b');
     await vi.waitFor(() => expect(harness.sockets).toHaveLength(3));
-    expect(harness.urls[2]).toBe('/base/v1/session-channel?observation=session&migrations=1&titles=1');
+    expect(harness.urls[2]).toBe('/base/v1/session-channel?observation=session&migrations=1&titles=1&preemption=1');
     harness.sockets[2]!.send(JSON.stringify({ protocolVersion: version, type: 'ready' }));
     await vi.waitFor(() => expect(harness.frames).toHaveLength(2));
     expect(harness.frames[1]!.frame).toMatchObject({ type: 'subscribe', agentId: 'b' });
@@ -282,6 +282,111 @@ describe('session channel transport', () => {
     sockets[0]!.receive({ protocolVersion: version, type: 'message', subscriptionId: retry[1]!.subscriptionId, message: { protocolVersion: version, type: 'negotiated' } });
     expect(client.getSessionState().connection).toBe('catching_up');
     expect(replica.getState().diagnostics.at(-1)).toMatchObject({ code: 'session_capacity_released', recoverable: true });
+    client.stop(); transport.dispose();
+  });
+
+  it('tells a Relay that offers preemption which subscriptions are in use, coalescing changes within a turn', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval', 'Date'] }); cleanups.push(() => vi.useRealTimers());
+    vi.setSystemTime(1_000_000);
+    const document = Object.assign(new EventTarget(), { visibilityState: 'visible' });
+    vi.stubGlobal('window', new EventTarget()); vi.stubGlobal('document', document);
+    cleanups.push(() => vi.unstubAllGlobals());
+    const sockets: ControlledSocket[] = [];
+    const transport = new HttpWebSocketTransport('http://relay.test', { sessionChannels: true, webSocketFactory: () => {
+      const socket = new ControlledSocket(); sockets.push(socket); return socket;
+    } });
+    cleanups.push(() => transport.dispose());
+    const shown = connect(transport, 'shown');
+    const retained = connect(transport, 'retained');
+    retained.connection.setActive!(false, 970_000);
+    await Promise.resolve();
+    sockets[0]!.receive({ protocolVersion: version, type: 'ready', preemption: 1 });
+    const frames = () => sockets[0]!.sent as any[];
+    // A subscription nobody uses opens with how long ago it was last used.
+    expect(frames().filter(frame => frame.type === 'subscribe').map(frame => [frame.agentId, frame.idleMs])).toEqual([['shown', undefined], ['retained', 30_000]]);
+    const id = (agentId: string) => frames().find(frame => frame.type === 'subscribe' && frame.agentId === agentId).subscriptionId;
+    const intents = () => frames().filter(frame => frame.type === 'intent').map(frame => [frame.active, frame.subscriptionIds]);
+    shown.connection.setActive!(false); shown.connection.setActive!(true);
+    await Promise.resolve();
+    expect(intents()).toEqual([]);
+    retained.connection.setActive!(true);
+    await Promise.resolve();
+    expect(intents()).toEqual([[true, [id('retained')]]]);
+    // Nothing is in use in a hidden page; showing it again restores what its views use.
+    shown.connection.setActive!(false);
+    document.visibilityState = 'hidden'; document.dispatchEvent(new Event('visibilitychange'));
+    await Promise.resolve();
+    expect(intents().slice(1)).toEqual([[false, [id('shown'), id('retained')]]]);
+    document.visibilityState = 'visible'; document.dispatchEvent(new Event('visibilitychange'));
+    await Promise.resolve();
+    expect(intents().slice(2)).toEqual([[true, [id('retained')]]]);
+    sockets[0]!.receive({ protocolVersion: version, type: 'closed', subscriptionId: id('shown'), code: 4030, reason: 'Paused.' });
+    expect(shown.disconnect).toHaveBeenCalledWith({ permanent: false, reason: 'Paused.', preempted: true });
+  });
+
+  it('sends no intent to a Relay that does not offer preemption', async () => {
+    const sockets: ControlledSocket[] = [];
+    const transport = new HttpWebSocketTransport('http://relay.test', { sessionChannels: true, webSocketFactory: () => {
+      const socket = new ControlledSocket(); sockets.push(socket); return socket;
+    } });
+    cleanups.push(() => transport.dispose());
+    const a = connect(transport, 'a');
+    a.connection.setActive!(false, 0);
+    await Promise.resolve();
+    sockets[0]!.receive({ protocolVersion: version, type: 'ready' });
+    a.connection.setActive!(true); a.connection.setActive!(false);
+    await Promise.resolve();
+    expect(sockets[0]!.sent).toEqual([expect.objectContaining({ type: 'subscribe', subscriptionId: 1 })]);
+    expect((sockets[0]!.sent[0] as any).idleMs).toBeUndefined();
+  });
+
+  it('pauses a session the Relay preempted until it is in use again, and pauses an unused one refused for capacity', async () => {
+    vi.useFakeTimers(); cleanups.push(() => vi.useRealTimers());
+    const document = Object.assign(new EventTarget(), { visibilityState: 'visible' });
+    vi.stubGlobal('window', new EventTarget()); vi.stubGlobal('document', document);
+    cleanups.push(() => vi.unstubAllGlobals());
+    const sockets: ControlledSocket[] = [];
+    const transport = new HttpWebSocketTransport('http://relay.test', { sessionChannels: true, webSocketFactory: () => {
+      const socket = new ControlledSocket(); sockets.push(socket); return socket;
+    } });
+    cleanups.push(() => transport.dispose());
+    const replica = new AgentReplica();
+    const client = new RemoteSessionClient('a', transport, replica, { connectionTimeoutMs: 20_000, reconnectInitialDelayMs: 250 });
+    cleanups.push(() => client.stop());
+    client.start(); await Promise.resolve();
+    sockets[0]!.onopen?.({});
+    sockets[0]!.receive({ protocolVersion: version, type: 'ready', preemption: 1 });
+    await Promise.resolve();
+    const subscriptions = () => (sockets[0]!.sent as any[]).filter(frame => frame.type === 'subscribe');
+    const latest = () => subscriptions().at(-1).subscriptionId;
+    client.setActive(false);
+    await Promise.resolve();
+    sockets[0]!.receive({ protocolVersion: version, type: 'closed', subscriptionId: latest(), code: 4030, reason: 'Paused for a window used more recently.' });
+    expect(client.getSessionState().connection).toBe('disconnected');
+    expect(replica.getState().diagnostics.at(-1)).toEqual({ code: 'session_paused', message: 'Paused for a window used more recently.', recoverable: true });
+    // A paused session does not compete for a stream on its own, also when the page resumes.
+    vi.advanceTimersByTime(10_000);
+    document.visibilityState = 'hidden'; document.dispatchEvent(new Event('visibilitychange'));
+    document.visibilityState = 'visible'; document.dispatchEvent(new Event('visibilitychange'));
+    sockets[0]!.receive({ protocolVersion: version, type: 'pong' });
+    await Promise.resolve(); await Promise.resolve();
+    expect(subscriptions()).toHaveLength(1);
+    client.setActive(true);
+    await Promise.resolve();
+    expect(subscriptions()).toHaveLength(2);
+    expect(subscriptions()[1].idleMs).toBeUndefined();
+    // Refused for capacity while unused, it waits as well instead of retrying.
+    client.setActive(false);
+    await Promise.resolve();
+    sockets[0]!.receive({ protocolVersion: version, type: 'closed', subscriptionId: latest(), code: 4029, reason: 'Too many sessions are open (limit 64).' });
+    vi.advanceTimersByTime(10_000); await Promise.resolve();
+    expect(subscriptions()).toHaveLength(2);
+    expect(replica.getState().diagnostics.at(-1)).toMatchObject({ code: 'session_paused' });
+    client.setActive(true);
+    await Promise.resolve();
+    expect(subscriptions()).toHaveLength(3);
+    sockets[0]!.receive({ protocolVersion: version, type: 'message', subscriptionId: latest(), message: { protocolVersion: version, type: 'negotiated' } });
+    expect(replica.getState().diagnostics.at(-1)).toMatchObject({ code: 'session_capacity_released' });
     client.stop(); transport.dispose();
   });
 

@@ -125,6 +125,11 @@ export class RemoteSessionClient {
   private cancelReconnect: (() => void) | undefined;
   private subscriptionRequestId: string | undefined;
   private currentStatus: RemoteSessionStatus = 'idle';
+  /** A view shows the session; the Relay gives streams to sessions in use first. */
+  private active = true;
+  private inactiveSince?: number;
+  /** The Relay closed the subscription for one in more recent use; it reconnects when it is in use again. */
+  private paused = false;
 
   constructor(
     private readonly agentId: string,
@@ -158,7 +163,8 @@ export class RemoteSessionClient {
       this.pageHidden = false;
       queueMicrotask(() => {
         if (this.pageHidden) return;
-        if (this.cancelReconnect || this.currentStatus === 'unavailable') {
+        if (this.paused) { if (this.active) this.resume(); }
+        else if (this.cancelReconnect || this.currentStatus === 'unavailable') {
           this.reconnectAttempt = 0;
           this.connect();
         } else if (this.currentStatus === 'connecting' || this.currentStatus === 'catching_up') this.armConnectionDeadline(this.generation);
@@ -168,6 +174,23 @@ export class RemoteSessionClient {
       clearTimeout(this.connectionDeadline);
       this.connectionDeadline = undefined;
     });
+    this.reconnectAttempt = 0;
+    this.paused = false;
+    this.connect();
+  }
+
+  /** Views report whether they show the session, so an unused one yields its stream first. */
+  setActive(active: boolean): void {
+    if (active === this.active) return;
+    this.active = active;
+    this.inactiveSince = active ? undefined : Date.now();
+    this.connection?.setActive?.(active, this.inactiveSince);
+    if (active && this.paused && !this.pageHidden) this.resume();
+  }
+
+  private resume(): void {
+    if (!this.paused) return;
+    this.paused = false;
     this.reconnectAttempt = 0;
     this.connect();
   }
@@ -203,17 +226,21 @@ export class RemoteSessionClient {
       onDisconnect: (closure) => {
         if (generation !== this.generation) return;
         if (closure?.permanent) this.refuseDisconnected(generation, closure.reason);
+        // A session nobody uses waits for its next use instead of competing for a stream.
+        else if (closure?.preempted || closure?.capacity && (!this.active || this.pageHidden)) this.pauseDisconnected(generation, closure.reason);
         else {
           if (closure?.capacity) this.replica.reportDiagnostic('session_capacity', closure.reason, true);
           this.restartDisconnected(generation);
         }
       },
     });
+    if (!this.active) this.connection.setActive?.(false, this.inactiveSince);
   }
 
   stop(): void {
     this.nativeTakeover?.abort();
     this.unwatchResume?.(); this.unwatchResume = undefined;
+    this.paused = false;
     this.generation += 1;
     this.rejectPendingOperations('operation_stopped', 'Remote session client was stopped.', false);
     this.stopConnection();
@@ -847,6 +874,18 @@ export class RemoteSessionClient {
     this.scheduleRestart(nextGeneration);
   }
 
+  private pauseDisconnected(generation: number, reason: string): void {
+    if (generation !== this.generation) return;
+    this.generation += 1;
+    this.rejectPendingOperations('connection_disconnected', 'Remote session connection disconnected.', true);
+    this.stopConnection();
+    this.paused = true;
+    this.replica.reportDiagnostic('session_paused', reason, true);
+    this.setStatus('disconnected');
+    // The session came into use while the Relay was closing its subscription.
+    if (this.active && !this.pageHidden) queueMicrotask(() => { if (this.active && !this.pageHidden) this.resume(); });
+  }
+
   private refuseDisconnected(generation: number, reason: string): void {
     if (generation !== this.generation) return;
     this.generation += 1;
@@ -1009,7 +1048,7 @@ export class RemoteSessionClient {
     if (status === this.currentStatus) return;
     this.currentStatus = status;
     // A capacity refusal explains only the wait it caused; later interruptions get the ordinary notice.
-    if ((status === 'catching_up' || status === 'ready') && this.replica.getState().diagnostics.at(-1)?.code === 'session_capacity') {
+    if ((status === 'catching_up' || status === 'ready') && ['session_capacity', 'session_paused'].includes(this.replica.getState().diagnostics.at(-1)?.code ?? '')) {
       this.replica.reportDiagnostic('session_capacity_released', 'The Relay admitted this session again.', true);
     }
     this.stopMessageEchoSync?.();

@@ -47,6 +47,8 @@ export interface RemoteDisconnectReason {
   readonly reason: string;
   /** Too many session streams are open; the subscription can succeed once another closes. */
   readonly capacity?: true;
+  /** The Relay closed the subscription for one in more recent use; resume it when it is in use again. */
+  readonly preempted?: true;
 }
 
 export interface RemoteTransportListener {
@@ -58,6 +60,11 @@ export interface RemoteTransportListener {
 export interface RemoteConnection {
   send(message: ClientMessage): void;
   close(): void;
+  /**
+   * Whether the owner uses the subscription now, or since when it has not. The Relay gives an account's
+   * streams to subscriptions in use and, when they run out, closes the least recently used ones first.
+   */
+  setActive?(active: boolean, inactiveSince?: number): void;
 }
 
 export type SessionSuccessionSupport = 'disabled' | 'unknown' | 'supported' | 'unsupported';

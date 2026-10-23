@@ -208,4 +208,7 @@ it('explains a stream capacity refusal instead of only reporting a reconnect', a
   expect(refused.querySelector('[role="alert"]')?.textContent).toBe(message);
   const interrupted = await render(<SessionWorkbench state={{ ...replicaState, diagnostics: [...capacity.diagnostics, { code: 'connection_timeout', message: 'Timed out.', recoverable: true }] }} sessionStatus="disconnected" actions={{}} />);
   expect(interrupted.querySelector('[role="alert"]')?.textContent).toBe('Timeline synchronization is reconnecting.');
+  const resume = 'Paused to free a connection for a window used more recently. Return to this window to resume.';
+  const paused = await render(<SessionWorkbench state={{ ...replicaState, diagnostics: [{ code: 'session_paused', message: resume, recoverable: true }] }} sessionStatus="disconnected" actions={{}} />);
+  expect(paused.querySelector('[role="alert"]')?.textContent).toBe(resume);
 });

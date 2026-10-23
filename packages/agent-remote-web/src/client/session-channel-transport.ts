@@ -2,7 +2,7 @@ import {
   PROTOCOL_VERSION, decodeSessionChannelServerMessage, encodeClientMessage,
   encodeSessionChannelClientMessage,
   SESSION_CHANNEL_MAX_FRAME_BYTES, SESSION_CHANNEL_MAX_BUFFERED_BYTES,
-  SESSION_CHANNEL_MAX_SUBSCRIPTIONS, SESSION_CHANNEL_MAX_PENDING_FRAMES, SESSION_CAPACITY_CLOSE_CODE,
+  SESSION_CHANNEL_MAX_SUBSCRIPTIONS, SESSION_CHANNEL_MAX_PENDING_FRAMES, SESSION_CAPACITY_CLOSE_CODE, SESSION_PREEMPTED_CLOSE_CODE,
   type ClientMessage, type SessionChannelClientMessage,
 } from '@orchardworks/agent-remote-protocol';
 import type { WebSocketLike } from './http-websocket-transport.js';
@@ -36,6 +36,12 @@ interface Subscription {
   subscribed: boolean;
   queued: ClientMessage[];
   queuedBytes: number;
+  /** The owner uses the subscription; while the page is hidden, nothing is in use. */
+  inUse: boolean;
+  /** When the owner stopped using it, in this page's clock. */
+  inactiveSince?: number;
+  /** Whether the Relay last learned that the subscription is in use. */
+  reported?: boolean;
 }
 interface Channel {
   readonly mode: Mode;
@@ -45,6 +51,8 @@ interface Channel {
   opened: boolean;
   ready: boolean;
   successions?: boolean;
+  /** The Relay allocates streams by use and accepts intent reports. */
+  preemption?: boolean;
   openTimer?: ReturnType<typeof setTimeout>;
   readyTimer?: ReturnType<typeof setTimeout>;
   pingTimer?: ReturnType<typeof setInterval>;
@@ -71,10 +79,14 @@ export class SessionChannelPool {
   private disposed = false;
   private pendingBytes = 0;
   private pageHidden = typeof document !== 'undefined' && document.visibilityState === 'hidden';
+  private pageHiddenSince = this.pageHidden ? Date.now() : undefined;
+  private readonly intents = new Set<Subscription>();
 
   constructor(private readonly dependencies: Dependencies) {
     this.unwatch = watchPageResume(() => {
       this.pageHidden = false;
+      this.pageHiddenSince = undefined;
+      this.reportAll();
       for (const channel of [...this.channels.values()]) {
         this.stopKeepalive(channel);
         if ((channel.socket.readyState ?? 1) >= 2) this.failChannel(channel, false);
@@ -88,6 +100,8 @@ export class SessionChannelPool {
       }
     }, () => {
       this.pageHidden = true;
+      this.pageHiddenSince = Date.now();
+      this.reportAll();
       for (const channel of this.channels.values()) { this.pauseDeadlines(channel); this.startKeepalive(channel); }
     });
   }
@@ -99,14 +113,66 @@ export class SessionChannelPool {
     }
     const subscription: Subscription = {
       id: 0, agentId, listener, active: true, directReady: false,
-      subscribed: false, queued: [], queuedBytes: 0,
+      subscribed: false, queued: [], queuedBytes: 0, inUse: true,
     };
     this.subscriptions.add(subscription);
     queueMicrotask(() => { if (subscription.active) listener.onOpen(); });
     return {
       send: (message) => this.send(subscription, message),
       close: () => this.retire(subscription),
+      setActive: (active, inactiveSince) => {
+        if (!subscription.active) return;
+        if (!active && subscription.inUse) subscription.inactiveSince = inactiveSince ?? Date.now();
+        subscription.inUse = active;
+        this.report(subscription);
+      },
     };
+  }
+
+  private used(subscription: Subscription): boolean {
+    return subscription.inUse && !this.pageHidden;
+  }
+
+  /** How long ago the subscription was last in use; undefined while it is. */
+  private idleMs(subscription: Subscription, now: number): number | undefined {
+    if (this.used(subscription)) return undefined;
+    const since = Math.min(subscription.inUse ? Infinity : subscription.inactiveSince ?? now, this.pageHidden ? this.pageHiddenSince ?? now : Infinity);
+    return Math.max(0, Math.round(now - since));
+  }
+
+  private reportAll(): void {
+    for (const subscription of this.subscriptions) this.report(subscription);
+  }
+
+  /** Intent changes within one turn reach the Relay together, and a reversed change sends nothing. */
+  private report(subscription: Subscription): void {
+    if (!subscription.subscribed || !subscription.channel?.preemption) return;
+    if (!this.intents.size) queueMicrotask(() => this.flushIntents());
+    this.intents.add(subscription);
+  }
+
+  private flushIntents(): void {
+    const changes = new Map<Channel, { active: number[]; inactive: number[] }>();
+    for (const subscription of this.intents) {
+      const channel = subscription.channel;
+      if (!subscription.active || !subscription.subscribed || !channel?.active || !channel.ready || !channel.preemption) continue;
+      const used = this.used(subscription);
+      if (subscription.reported === used) continue;
+      subscription.reported = used;
+      let change = changes.get(channel);
+      if (!change) changes.set(channel, change = { active: [], inactive: [] });
+      (used ? change.active : change.inactive).push(subscription.id);
+    }
+    this.intents.clear();
+    for (const [channel, change] of changes) {
+      try {
+        for (const [active, ids] of [[true, change.active], [false, change.inactive]] as const) {
+          for (let index = 0; index < ids.length; index += 128) {
+            this.write(channel, { protocolVersion: PROTOCOL_VERSION, type: 'intent', active, subscriptionIds: ids.slice(index, index + 128) });
+          }
+        }
+      } catch { /* write retires the channel and its subscriptions. */ }
+    }
   }
 
   dispose(): void {
@@ -191,6 +257,7 @@ export class SessionChannelPool {
       if (frame.type === 'ready' && !channel.ready) {
         channel.ready = true;
         channel.successions = this.dependencies.sessionSuccessions === true && frame.successions === 1;
+        channel.preemption = frame.preemption === 1;
         this.dependencies.onSuccessionSupport?.(channel.successions);
         channel.opened = true;
         clearTimeout(channel.openTimer);
@@ -210,7 +277,8 @@ export class SessionChannelPool {
         const subscription = channel.subscriptions.get(frame.subscriptionId);
         if (!subscription?.active) return;
         if (frame.type === 'closed') this.disconnect(subscription, { permanent: frame.code === 1008, reason: frame.reason,
-          ...(frame.code === SESSION_CAPACITY_CLOSE_CODE ? { capacity: true as const } : {}) });
+          ...(frame.code === SESSION_CAPACITY_CLOSE_CODE ? { capacity: true as const } : {}),
+          ...(frame.code === SESSION_PREEMPTED_CLOSE_CODE ? { preempted: true as const } : {}) });
         else {
           this.observe('inbound', frame.message);
           subscription.listener.onMessage(frame.message);
@@ -297,11 +365,14 @@ export class SessionChannelPool {
   private subscribe(subscription: Subscription): void {
     if (!subscription.active || subscription.subscribed) return;
     try {
-      this.write(subscription.channel!, {
+      const channel = subscription.channel!;
+      const idleMs = channel.preemption ? this.idleMs(subscription, Date.now()) : undefined;
+      this.write(channel, {
         protocolVersion: PROTOCOL_VERSION, type: 'subscribe', subscriptionId: subscription.id,
-        agentId: subscription.agentId, message: subscription.negotiation!,
+        agentId: subscription.agentId, message: subscription.negotiation!, ...(idleMs === undefined ? {} : { idleMs }),
       });
       subscription.subscribed = true;
+      subscription.reported = idleMs === undefined;
       this.observe('outbound', subscription.negotiation!);
       const queued = subscription.queued.splice(0);
       this.pendingBytes -= subscription.queuedBytes;

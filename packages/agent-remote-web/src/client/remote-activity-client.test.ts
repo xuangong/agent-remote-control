@@ -220,3 +220,33 @@ it('shows why tracking waits when the Relay refuses it for stream capacity, and 
   expect(values.at(-1)).toEqual({ connection: 'disconnected' });
   client.stop();
 });
+it('waits for the page to resume after the Relay gives its stream to a subscription in more recent use', async () => {
+  vi.useFakeTimers();
+  const document = Object.assign(new EventTarget(), { visibilityState: 'visible' });
+  vi.stubGlobal('window', new EventTarget()); vi.stubGlobal('document', document);
+  try {
+    let listener!: RemoteTransportListener;
+    const connect = vi.fn((_id, next) => { listener = next; return { send: vi.fn(), close: vi.fn() }; });
+    const values: RemoteActivityState[] = [];
+    const client = new RemoteActivityClient('agent', { connect } as unknown as RemoteAgentTransport, state => values.push(state));
+    client.start(); listener.onOpen();
+    document.visibilityState = 'hidden'; document.dispatchEvent(new Event('visibilitychange'));
+    const reason = 'Paused to free a connection for a window used more recently. Return to this window to resume.';
+    listener.onDisconnect({ permanent: false, reason, preempted: true });
+    expect(values.at(-1)).toEqual({ connection: 'disconnected', error: reason });
+    await vi.advanceTimersByTimeAsync(60000);
+    expect(connect).toHaveBeenCalledOnce();
+    document.visibilityState = 'visible'; document.dispatchEvent(new Event('visibilitychange'));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(connect).toHaveBeenCalledTimes(2);
+    // Refused for capacity while hidden, it waits as well.
+    document.visibilityState = 'hidden'; document.dispatchEvent(new Event('visibilitychange'));
+    listener.onDisconnect({ permanent: false, reason: 'Too many sessions are open (limit 64).', capacity: true });
+    await vi.advanceTimersByTimeAsync(60000);
+    expect(connect).toHaveBeenCalledTimes(2);
+    document.visibilityState = 'visible'; document.dispatchEvent(new Event('visibilitychange'));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(connect).toHaveBeenCalledTimes(3);
+    client.stop();
+  } finally { vi.unstubAllGlobals(); }
+});

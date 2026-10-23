@@ -22,10 +22,12 @@ export class RemoteActivityClient {
   private awaitingActivity = false;
   private pageHidden = false;
   private refused = false;
+  /** While the page was hidden, the Relay gave the stream to a subscription in more recent use or had none; it reconnects when the page resumes. */
+  private paused = false;
   constructor(private readonly agentId: string, private readonly transport: RemoteAgentTransport,
     private readonly changed: (state: RemoteActivityState) => void, private readonly random: () => number = Math.random) {}
   start(): void {
-    this.stop(); this.attempts = 0; this.refused = false;
+    this.stop(); this.attempts = 0; this.refused = false; this.paused = false;
     this.pageHidden = typeof document !== 'undefined' && document.visibilityState === 'hidden';
     this.unwatchResume = watchPageResume(suspendedMs => {
       this.pageHidden = false;
@@ -33,7 +35,7 @@ export class RemoteActivityClient {
       if (suspendedMs === Infinity) this.clearDeadline();
       queueMicrotask(() => {
         if (this.pageHidden) return;
-        if (this.timer || this.refused) {
+        if (this.timer || this.refused || this.paused) {
           this.closeConnection(); this.attempts = 0; this.connect();
         } else this.armDeadline();
       });
@@ -64,7 +66,7 @@ export class RemoteActivityClient {
     this.deadline = setTimeout(() => this.failed(generation, 'The Host did not confirm activity tracking. Retrying…'), 20000);
   }
   private connect(): void {
-    this.timer = undefined; this.refused = false;
+    this.timer = undefined; this.refused = false; this.paused = false;
     const generation = ++this.generation;
     this.awaitingActivity = true;
     this.changed({ connection: 'connecting' });
@@ -73,7 +75,11 @@ export class RemoteActivityClient {
       this.connection = this.transport.connect(this.agentId, {
         onOpen: () => { if (generation === this.generation) this.connection?.send({ protocolVersion: PROTOCOL_VERSION, type: 'negotiate', observation: 'activity' }); },
         onMessage: message => { if (generation === this.generation) this.receive(generation, message); },
-        onDisconnect: closure => { if (closure?.permanent) this.refuse(generation, closure.reason); else this.failed(generation, closure?.capacity ? closure.reason : undefined); },
+        onDisconnect: closure => {
+          if (closure?.permanent) this.refuse(generation, closure.reason);
+          else if (closure?.preempted || closure?.capacity && this.pageHidden) this.pause(generation, closure.reason);
+          else this.failed(generation, closure?.capacity ? closure.reason : undefined);
+        },
       });
     } catch { this.failed(generation, 'Activity tracking could not connect. Retrying…'); }
   }
@@ -94,6 +100,13 @@ export class RemoteActivityClient {
     this.closeConnection();
     this.changed({ connection: 'disconnected', ...(error ? { error } : {}) });
     if (retry) this.timer = setTimeout(() => this.connect(), equalJitter(Math.min(1000 * 2 ** this.attempts++, 15000), this.random));
+  }
+  private pause(generation: number, reason: string): void {
+    if (generation !== this.generation) return;
+    this.closeConnection(); this.paused = true;
+    this.changed({ connection: 'disconnected', error: reason });
+    // The page became visible while the Relay was closing the subscription.
+    if (!this.pageHidden) queueMicrotask(() => { if (this.paused && !this.pageHidden) { this.attempts = 0; this.connect(); } });
   }
   private refuse(generation: number, reason: string): void {
     if (generation !== this.generation) return;

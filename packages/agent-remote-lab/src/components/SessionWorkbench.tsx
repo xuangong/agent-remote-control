@@ -224,10 +224,10 @@ export function SessionWorkbench({ sessionDescription, onNavigateAttribution, to
 
 
 const noAuthenticationError = () => false;
-/** A refusal for stream capacity explains what frees a slot; other interruptions only reconnect. */
+/** Stream capacity explains what frees a slot, and a paused session says how it resumes; other interruptions only reconnect. */
 function reconnectingNotice(state: AgentReplicaState | undefined): string {
   const latest = state?.diagnostics.at(-1);
-  return latest?.code === 'session_capacity' ? latest.message : 'Timeline synchronization is reconnecting.';
+  return latest && ['session_capacity', 'session_paused'].includes(latest.code) ? latest.message : 'Timeline synchronization is reconnecting.';
 }
 
 function useActionFeedback(actions: LabWorkbenchActions, sessionId: string | undefined, isAuthenticationError: (error: unknown) => boolean): { actions: LabWorkbenchActions; reauthenticate: boolean } {

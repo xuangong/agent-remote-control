@@ -143,7 +143,7 @@ export class HttpWebSocketTransport implements RemoteAgentTransport {
           if (this.migrations.size > 1024) this.migrations.delete(this.migrations.keys().next().value!);
           for (const listener of this.migrationListeners) listener(migration);
         },
-        createSocket: (mode) => this.createWebSocket(this.websocketUrl(`v1/session-channel?observation=${mode}&migrations=1&titles=1${dependencies.sessionSuccessions ? '&successions=1' : ''}`)),
+        createSocket: (mode) => this.createWebSocket(this.websocketUrl(`v1/session-channel?observation=${mode}&migrations=1&titles=1&preemption=1${dependencies.sessionSuccessions ? '&successions=1' : ''}`)),
         connectDirect: (agentId, listener) => this.connectDirect(agentId, listener),
         observe: (observation) => this.observe(observation),
         diagnostic: (diagnostic) => this.diagnostic(diagnostic),

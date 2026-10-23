@@ -62,6 +62,7 @@ export class ConversationConnections {
       connection.stopDisplay = this.recoveryScope ? observeWorkspaceDisplay(this.recoveryScope, session, connection.replica) : () => {};
     }
     connection.viewers += 1;
+    this.use(connection);
     if (!previous || previousKey !== connection.key) this.notify();
     const acquired = connection;
     let released = false;
@@ -71,8 +72,13 @@ export class ConversationConnections {
       acquired.viewers -= 1;
       // A layout transfer can release and reacquire the same session in one turn.
       // Let the next view retain its client before collecting unused subscriptions.
-      queueMicrotask(() => this.collect(acquired));
+      queueMicrotask(() => { this.use(acquired); this.collect(acquired); });
     } };
+  }
+
+  /** A connection retained while no view shows it yields its Relay stream first. */
+  private use(connection: Connection): void {
+    if (this.connections.get(connection.agentId) === connection) connection.client.setActive(connection.viewers > 0);
   }
 
   async takeControlAfterNativeResume(agentId: string): Promise<void> {

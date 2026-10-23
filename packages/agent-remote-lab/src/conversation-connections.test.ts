@@ -1,7 +1,7 @@
 // @vitest-environment node
 import { expect, it, vi } from 'vitest';
 import WebSocket from 'ws';
-import { AgentReplica, HttpWebSocketTransport, type RemoteSessionStatus, type WebSocketLike } from '@orchardworks/agent-remote-web';
+import { AgentReplica, HttpWebSocketTransport, type RemoteAgentTransport, type RemoteSessionStatus, type WebSocketLike } from '@orchardworks/agent-remote-web';
 import { ConversationConnections } from './conversation-connections.js';
 import { createRecordedValidationServer } from './server/recorded.js';
 
@@ -216,4 +216,28 @@ it.each([false, true])('reuses an untracked session across a same-turn view tran
     await vi.waitFor(() => expect(f.connections.agentIds).toEqual([]));
     expect(next.client.getSessionState().connection).toBe('idle');
   } finally { await f.close(); }
+});
+
+it('reports a retained conversation as unused once no view shows it, and in use when one shows it again', async () => {
+  const intents: boolean[] = [];
+  const transport = { connect: vi.fn(() => ({ send() {}, close() {}, setActive: (active: boolean) => { intents.push(active); } })),
+    onDiagnostic: () => () => {}, onProtocolMessage: () => () => {} } as unknown as RemoteAgentTransport;
+  const connections = new ConversationConnections(transport);
+  const session = { hostId: 'host', providerId: 'codex', nativeSessionId: 'native' };
+  try {
+    connections.retainSessions('window-sessions', [session]);
+    const shown = connections.acquire('agent', new AgentReplica(), session);
+    // A layout transfer releases and reacquires the view within one turn and changes nothing.
+    shown.release();
+    const moved = connections.acquire('agent', new AgentReplica(), session);
+    await Promise.resolve();
+    expect(intents).toEqual([]);
+    moved.release();
+    await Promise.resolve();
+    expect(intents).toEqual([false]);
+    connections.acquire('agent', new AgentReplica(), session).release();
+    await Promise.resolve();
+    expect(intents).toEqual([false, true, false]);
+    expect(transport.connect).toHaveBeenCalledOnce();
+  } finally { connections.clear(); }
 });

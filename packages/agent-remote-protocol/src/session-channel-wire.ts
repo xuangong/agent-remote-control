@@ -23,6 +23,12 @@ export const SESSION_CHANNEL_MAX_PENDING_FRAMES = 64;
 export const SESSION_CHANNEL_MAX_BUFFERED_BYTES = 16 * 1024 * 1024;
 const OPEN_TIMEOUT_MS = 35_000;
 const MAX_OPENS_PER_MINUTE = 120;
+/**
+ * Clients ping at least once a minute, also while their page is hidden. A channel silent for longer
+ * belongs to a frozen or vanished page whose network connection was never closed; releasing it frees
+ * the session streams it holds, which otherwise count against the account's stream limit indefinitely.
+ */
+export const SESSION_CHANNEL_IDLE_TIMEOUT_MS = 5 * 60_000;
 // Keep browser/Worker/Node host types out of the public schema package.
 const runtime = globalThis as unknown as {
   TextEncoder: new () => { encode(value: string): Uint8Array };
@@ -54,6 +60,7 @@ export function acceptSessionChannel(
   mode: SessionChannelMode,
   openSession: (agentId: string) => Promise<SessionChannelOpenResult>,
   readiness: { successions?: 1 } = {},
+  idleTimeoutMs = SESSION_CHANNEL_IDLE_TIMEOUT_MS,
 ): () => void {
   const streams = new Map<number, Stream>();
   const removers: (() => void)[] = [];
@@ -62,6 +69,17 @@ export function acceptSessionChannel(
   let highestId = 0;
   let pendingBytes = 0;
   let reservations = 0;
+  let lastFrameAt = Date.now();
+  let idleTimer: unknown;
+  function watchIdle(delay: number) {
+    idleTimer = runtime.setTimeout(() => {
+      if (stopped) return;
+      const quiet = Date.now() - lastFrameAt;
+      if (quiet >= idleTimeoutMs) { stop(1001, 'Channel idle'); return; }
+      watchIdle(idleTimeoutMs - quiet);
+    }, delay);
+    (idleTimer as { unref?(): void }).unref?.();
+  }
 
   function release(stream: Stream) {
     if (stream.reserved && stream.closed && !stream.opening && !stream.draining) {
@@ -87,6 +105,7 @@ export function acceptSessionChannel(
   function stop(code = 1000, reason = 'Channel disposed', closePhysical = true) {
     if (stopped) return;
     stopped = true;
+    runtime.clearTimeout(idleTimer);
     for (const remove of removers.splice(0)) remove();
     for (const stream of [...streams.values()]) finish(stream, code, reason, false);
     if (closePhysical && socket.readyState === 1) { try { socket.close(code, reason); } catch { /* Already disconnected. */ } }
@@ -198,6 +217,7 @@ export function acceptSessionChannel(
 
   removers.push(socket.onMessage((data, binary) => {
     if (stopped) return;
+    lastFrameAt = Date.now();
     if (binary) { stop(1003, 'Channel requires text frames'); return; }
     if (utf8.encode(data).byteLength > SESSION_CHANNEL_MAX_FRAME_BYTES) { stop(1009, 'Channel frame too large'); return; }
     const decoded = decodeSessionChannelClientMessage(data);
@@ -213,5 +233,6 @@ export function acceptSessionChannel(
   removers.push(socket.onClose(() => stop(1001, 'Channel disconnected', false)));
   removers.push(socket.onError(() => stop(1011, 'Channel socket error')));
   send({ protocolVersion: PROTOCOL_VERSION, type: 'ready', ...readiness });
+  if (!stopped) watchIdle(idleTimeoutMs);
   return () => stop();
 }

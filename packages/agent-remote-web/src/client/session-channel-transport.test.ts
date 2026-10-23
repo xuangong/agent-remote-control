@@ -207,6 +207,36 @@ describe('session channel transport', () => {
     transport.dispose(); expect(vi.getTimerCount()).toBe(0);
   });
 
+  it('keeps a hidden page alive to the Relay without failing it for late replies', async () => {
+    vi.useFakeTimers(); cleanups.push(() => vi.useRealTimers());
+    const document = Object.assign(new EventTarget(), { visibilityState: 'visible' });
+    vi.stubGlobal('window', new EventTarget()); vi.stubGlobal('document', document);
+    cleanups.push(() => vi.unstubAllGlobals());
+    const sockets: ControlledSocket[] = [];
+    const transport = new HttpWebSocketTransport('http://relay.test', { sessionChannels: true, webSocketFactory: () => {
+      const socket = new ControlledSocket(); sockets.push(socket); return socket;
+    } });
+    cleanups.push(() => transport.dispose());
+    const a = connect(transport, 'a'); await Promise.resolve();
+    sockets[0]!.onopen?.({});
+    sockets[0]!.receive({ protocolVersion: version, type: 'ready' });
+    const pings = () => sockets[0]!.sent.filter(frame => frame.type === 'ping').length;
+    document.visibilityState = 'hidden'; document.dispatchEvent(new Event('visibilitychange'));
+    vi.advanceTimersByTime(10 * 60_000);
+    // Ten minutes hidden without replies: the Relay keeps hearing from the page and the page keeps its channel.
+    expect(pings()).toBe(10);
+    expect(sockets).toHaveLength(1);
+    expect(a.disconnect).not.toHaveBeenCalled();
+    document.visibilityState = 'visible'; document.dispatchEvent(new Event('visibilitychange'));
+    const resumed = pings();
+    sockets[0]!.receive({ protocolVersion: version, type: 'pong' });
+    vi.advanceTimersByTime(30_000);
+    // Visible again: the heartbeat that expects replies resumes, and the hidden keepalive stops.
+    expect(pings()).toBe(resumed + 1);
+    expect(sockets).toHaveLength(1);
+    transport.dispose(); expect(vi.getTimerCount()).toBe(0);
+  });
+
   it('replaces a socket that never opens when the session connection deadline expires', async () => {
     vi.useFakeTimers(); cleanups.push(() => vi.useRealTimers());
     const sockets: ControlledSocket[] = [];
@@ -410,9 +440,10 @@ describe('session channel transport', () => {
     document.visibilityState = 'hidden'; document.dispatchEvent(new Event('visibilitychange'));
     vi.advanceTimersByTime(60_000);
     expect(a.disconnect).not.toHaveBeenCalled();
-    expect(socket.sent.filter((frame: any) => frame.type === 'ping')).toHaveLength(1);
-    document.visibilityState = 'visible'; document.dispatchEvent(new Event('visibilitychange'));
+    // One unanswered keepalive while hidden does not fail the channel.
     expect(socket.sent.filter((frame: any) => frame.type === 'ping')).toHaveLength(2);
+    document.visibilityState = 'visible'; document.dispatchEvent(new Event('visibilitychange'));
+    expect(socket.sent.filter((frame: any) => frame.type === 'ping')).toHaveLength(3);
     vi.advanceTimersByTime(3999);
     expect(a.disconnect).not.toHaveBeenCalled();
     socket.receive({protocolVersion: version, type: 'pong'});

@@ -49,6 +49,7 @@ interface Channel {
   readyTimer?: ReturnType<typeof setTimeout>;
   pingTimer?: ReturnType<typeof setInterval>;
   pongTimer?: ReturnType<typeof setTimeout>;
+  keepaliveTimer?: ReturnType<typeof setInterval>;
   probingResume?: boolean;
 }
 
@@ -56,6 +57,8 @@ const utf8 = new TextEncoder();
 const channelOpenTimeoutMs = 20_000;
 const channelReadyTimeoutMs = 10_000;
 const foregroundProbeTimeoutMs = 4_000;
+/** Well inside the Relay's idle limit even when a browser throttles hidden-page timers to once a minute. */
+const hiddenKeepaliveMs = 60_000;
 
 /** Owns physical channels while existing session clients own reconnect and replay decisions. */
 export class SessionChannelPool {
@@ -73,6 +76,7 @@ export class SessionChannelPool {
     this.unwatch = watchPageResume(() => {
       this.pageHidden = false;
       for (const channel of [...this.channels.values()]) {
+        this.stopKeepalive(channel);
         if ((channel.socket.readyState ?? 1) >= 2) this.failChannel(channel, false);
         else if (channel.ready) {
           this.startHeartbeat(channel);
@@ -84,7 +88,7 @@ export class SessionChannelPool {
       }
     }, () => {
       this.pageHidden = true;
-      for (const channel of this.channels.values()) this.pauseDeadlines(channel);
+      for (const channel of this.channels.values()) { this.pauseDeadlines(channel); this.startKeepalive(channel); }
     });
   }
 
@@ -238,8 +242,27 @@ export class SessionChannelPool {
     }
   }
 
+  /**
+   * A hidden page keeps telling the Relay it is alive without enforcing replies, which a throttled page
+   * could miss. A page the browser freezes stops pinging, so the Relay can release the sessions it held.
+   */
+  private startKeepalive(channel: Channel): void {
+    if (!channel.active || !channel.ready || channel.keepaliveTimer) return;
+    channel.keepaliveTimer = setInterval(() => {
+      if (!channel.active) return;
+      try { this.write(channel, { protocolVersion: PROTOCOL_VERSION, type: 'ping' }); }
+      catch { /* write retires the channel. */ }
+    }, hiddenKeepaliveMs);
+  }
+
+  private stopKeepalive(channel: Channel): void {
+    clearInterval(channel.keepaliveTimer);
+    channel.keepaliveTimer = undefined;
+  }
+
   private startHeartbeat(channel: Channel): void {
-    if (this.pageHidden || channel.pingTimer) return;
+    if (this.pageHidden) { this.startKeepalive(channel); return; }
+    if (channel.pingTimer) return;
     channel.pingTimer = setInterval(() => {
       if (!channel.active || this.pageHidden || channel.pongTimer) return;
       channel.pongTimer = setTimeout(() => this.failChannel(channel, false), 10_000);
@@ -258,6 +281,7 @@ export class SessionChannelPool {
     channel.pingTimer = undefined;
     channel.pongTimer = undefined;
     channel.probingResume = false;
+    this.stopKeepalive(channel);
   }
 
   private probeResume(channel: Channel): void {

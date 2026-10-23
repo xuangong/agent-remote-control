@@ -51,6 +51,24 @@ describe('session channel server adapter', () => {
       expect(socket.sent.at(-1)).toMatchObject({ type: 'pong' });
     } finally { cleanup(); }
   });
+  it('releases the sessions of a channel whose client stopped sending frames', async () => {
+    vi.useFakeTimers();
+    try {
+      const { socket, streams, cleanup } = setup();
+      const released: string[] = [];
+      socket.subscribe(1, 'a'); await vi.advanceTimersByTimeAsync(0);
+      streams.get('a')!.onClose(() => released.push('a'));
+      for (let minute = 0; minute < 10; minute++) { await vi.advanceTimersByTimeAsync(60_000); socket.receive('ping'); }
+      expect(socket.closed).toEqual([]);
+      expect(released).toEqual([]);
+      await vi.advanceTimersByTimeAsync(protocol.SESSION_CHANNEL_IDLE_TIMEOUT_MS - 1);
+      expect(socket.closed).toEqual([]);
+      await vi.advanceTimersByTimeAsync(1);
+      expect(socket.closed).toEqual([{ code: 1001, reason: 'Channel idle' }]);
+      expect(released).toEqual(['a']);
+      cleanup();
+    } finally { vi.useRealTimers(); }
+  });
   it('exports a pure socket adapter', () => { expect(protocol.acceptSessionChannel).toBeTypeOf('function'); });
   it('announces ready immediately and answers ping without opening a session', () => {
     const { socket } = setup();

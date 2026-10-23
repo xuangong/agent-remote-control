@@ -122,6 +122,6 @@ export function useTrackingPosition(storageKey = 'agent-remote-tracking-position
       move({ x: position.current.x + delta.x * step, y: position.current.y + delta.y * step }, true);
     },
   };
-  /** `edge` reports a position held against the right viewport margin, where wide layouts reserve a column. */
+  /** `edge` reports a position held against the right viewport margin. */
   return { root, style, handlers, edge, move, current: () => position.current };
 }

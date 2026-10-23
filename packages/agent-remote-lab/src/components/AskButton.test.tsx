@@ -136,7 +136,7 @@ it('continues dragging from the visible position after the keyboard clamps the b
   expect(button.getBoundingClientRect()).toMatchObject({ left: afterClamp.left + 5, top: afterClamp.top - 10 });
 });
 
-it('reports when it rests against the right edge so wide layouts can reserve its column', async () => {
+it('reports when it rests against the right viewport edge', async () => {
   const container = await render(<Harness />);
   const root = container.querySelector<HTMLElement>('.lab-ask-floating')!;
   const button = container.querySelector('button')!;

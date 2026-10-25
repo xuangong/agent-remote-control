@@ -17,7 +17,7 @@ import { ClaudeChildren } from './children.js';
 import { createClaudeCatalog, type ClaudeCatalog, type ClaudeTimelineMessage } from './catalog.js';
 import { createClaudeSessionTools } from './session-tools.js';
 import { ClaudeNativeEvidence, claudeEmptyHandle } from './native-evidence.js';
-import { CLAUDE_ALLOWS_BYPASS_PERMISSIONS, claudePermissionModeOptions, isResumableClaudePermissionMode, type ResumableClaudePermissionMode } from './permission-modes.js';
+import { CLAUDE_ALLOWS_BYPASS_PERMISSIONS, claudePermissionModeOptions, claudeSandbox, isResumableClaudePermissionMode, type ResumableClaudePermissionMode } from './permission-modes.js';
 
 export type ClaudeQuery = AsyncIterable<SDKMessage> & Pick<Query, 'initializationResult' | 'setPermissionMode' | 'close' | 'supportedCommands' | 'reloadSkills' | 'supportedModels' | 'setModel'> & Partial<Pick<Query, 'applyFlagSettings' | 'getContextUsage'>> & {
   /** The pinned SDK implements this control without declaring it on public Query. */
@@ -86,6 +86,8 @@ export class ClaudeAgentSession implements AgentSession {
   private planning = false;
   private permissionMode: PermissionMode = 'default';
   private resumePermissionMode: ResumableClaudePermissionMode = 'default';
+  /** The sandbox flag setting the native process applies, as JSON; YOLO lifts it. */
+  private sandbox = 'null';
   private models: ModelInfo[] = [];
   private appliedEffort: string | null | undefined;
   private settingsRevision = 0;
@@ -152,6 +154,8 @@ export class ClaudeAgentSession implements AgentSession {
     try {
       if (config.tools?.length) session.hostTools = createClaudeSessionTools(config.tools, () => session.requireOpen());
       if (resume) await session.children.restore();
+      const sandbox = claudeSandbox(session.permissionMode, !!options.restrictedNative);
+      session.sandbox = JSON.stringify(sandbox);
       session.native = (options.query ?? query)({ prompt: session.input, options: {
         ...(resume ? { resume: config.sessionId } : { sessionId: config.sessionId }), cwd: config.cwd,
         model: config.model, ...(config.reasoningEffort ? { effort: config.reasoningEffort as Options['effort'] } : {}),
@@ -160,7 +164,7 @@ export class ClaudeAgentSession implements AgentSession {
         systemPrompt: config.systemPrompt !== undefined ? [config.systemPrompt, config.instructions].filter(value => value !== undefined && value !== '').join('\n\n')
           : { type: 'preset', preset: 'claude_code', ...(config.instructions ? { append: config.instructions } : {}) },
         ...(session.hostTools ? { mcpServers: { agent_host: session.hostTools } } : {}),
-        ...(options.restrictedNative ? { sandbox: { enabled: true, failIfUnavailable: true, allowUnsandboxedCommands: false } } : {}),
+        ...(sandbox ? { sandbox } : {}),
         permissionMode: session.permissionMode, allowDangerouslySkipPermissions: CLAUDE_ALLOWS_BYPASS_PERMISSIONS, canUseTool: session.interactions.request,
         hooks: { Stop: [{ hooks: [async input => { if (input.hook_event_name === 'Stop') session.nativeEvidence.noteStop(input); return {}; }] }] },
         stderr: options.onDiagnostic, spawnClaudeCodeProcess: session.process.spawn,
@@ -393,10 +397,25 @@ export class ClaudeAgentSession implements AgentSession {
     } finally { this.changingSetting = false; if (!this.disposed && !this.failure) this.runtimeUpdated(); }
   }
 
+  /** The sandbox is lifted only after YOLO is confirmed and restored before any other mode applies. */
   private async updatePermissionMode(mode: PermissionMode): Promise<void> {
+    if (mode !== 'bypassPermissions') await this.applySandbox(mode);
     await this.updateNative(this.native.setPermissionMode(mode), 'Claude permission update');
     if (this.disposed) throw new Error('Claude closed before permission confirmation.');
     this.confirmPermissionMode(mode);
+    if (mode === 'bypassPermissions') await this.applySandbox(mode);
+  }
+  private async applySandbox(mode: PermissionMode): Promise<void> {
+    const sandbox = claudeSandbox(mode, !!this.options.restrictedNative), applied = JSON.stringify(sandbox);
+    if (applied === this.sandbox) return;
+    if (!this.native.applyFlagSettings) {
+      // Without a Host sandbox, the user's own settings keep governing a native process that cannot change it.
+      if (!this.options.restrictedNative) return;
+      throw new AgentOperationRejectedError('operation_rejected', 'This Claude Code version cannot change its sandbox during a session. Update Claude Code.');
+    }
+    await this.updateNative(this.native.applyFlagSettings({ sandbox }), 'Claude sandbox update');
+    if (this.disposed) throw new Error('Claude closed before sandbox confirmation.');
+    this.sandbox = applied;
   }
   private async updateNative(operation: Promise<void>, label: string): Promise<void> {
     try { await deadline(operation, this.timeout, label); }

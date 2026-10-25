@@ -6,14 +6,16 @@ import { Channel } from './channel.js';
 function fixture() {
   const events = new Channel<any>();
   const changes: string[] = [];
+  const sandboxes: unknown[] = [];
   let models: ModelInfo[] = [{ value: 'sonnet', displayName: 'Sonnet', description: 'Native Sonnet' }];
   let update: () => Promise<void> = async () => {};
   const query = { [Symbol.asyncIterator]: () => events[Symbol.asyncIterator](),
     initializationResult: async () => ({ models }), supportedModels: async () => models,
     setModel: async (value: string) => { await update(); changes.push(value); },
     setPermissionMode: async (value: string) => { await update(); changes.push(value); },
+    applyFlagSettings: async (settings: { sandbox?: unknown }) => { sandboxes.push(settings.sandbox); },
     interrupt: async () => {}, close: () => events.close() };
-  return { changes, events, setModels(value: typeof models) { models = value; },
+  return { changes, sandboxes, events, setModels(value: typeof models) { models = value; },
     setUpdate(value: typeof update) { update = value; }, factory: () => query as any };
 }
 
@@ -86,10 +88,67 @@ it.each([['bypassPermissions', 'bypassPermissions'], ['plan', 'default']] as con
   const session = await ClaudeAgentSession.open({ sessionId: 'native', permissionMode: saved }, {
     query: input => { launched = input.options; return native.factory(); },
   });
-  try { expect(launched.permissionMode).toBe(expected); } finally { await session.dispose(); }
+  try {
+    expect(launched.permissionMode).toBe(expected);
+    // YOLO also lifts a sandbox the user's own settings would apply; other modes leave those settings in charge.
+    expect(launched.sandbox).toEqual(expected === 'bypassPermissions' ? { enabled: false } : undefined);
+  } finally { await session.dispose(); }
 });
 
-it('changes supported native permissions while retaining the restricted sandbox', async () => {
+it.each([false, true])('runs YOLO without a sandbox and restores the previous one when leaving it (restricted: %s)', async restrictedNative => {
+  const native = fixture(); const order: string[] = [];
+  const query = native.factory();
+  const applyFlagSettings = query.applyFlagSettings, setPermissionMode = query.setPermissionMode;
+  query.applyFlagSettings = async (settings: { sandbox?: { enabled?: boolean } | null }) => { order.push(`sandbox:${settings.sandbox?.enabled ?? 'user'}`); await applyFlagSettings(settings); };
+  query.setPermissionMode = async (mode: string) => { order.push(mode); await setPermissionMode(mode); };
+  const restricted = { enabled: true, failIfUnavailable: true, allowUnsandboxedCommands: false };
+  const session = await ClaudeAgentSession.open({ sessionId: 'native' }, { restrictedNative, query: () => query });
+  try {
+    await session.setSessionSetting!('permissions', 'bypassPermissions');
+    await session.setPlanning(true);
+    await session.setPlanning(false);
+    await session.setSessionSetting!('permissions', 'acceptEdits');
+    await session.setSessionSetting!('permissions', 'default');
+    // The sandbox is lifted after YOLO is confirmed, restored before planning, and lifted again on return.
+    expect(order).toEqual(['bypassPermissions', 'sandbox:false', `sandbox:${restrictedNative || 'user'}`, 'plan', 'bypassPermissions', 'sandbox:false',
+      `sandbox:${restrictedNative || 'user'}`, 'acceptEdits', 'default']);
+    expect(native.sandboxes).toEqual([{ enabled: false }, restrictedNative ? restricted : null, { enabled: false }, restrictedNative ? restricted : null]);
+  } finally { await session.dispose(); }
+});
+
+it('keeps YOLO sandboxed and says so when the native process cannot lift its sandbox, and never leaves a sandbox off for another mode', async () => {
+  const native = fixture();
+  const query = native.factory();
+  let fail = true;
+  query.applyFlagSettings = async (settings: { sandbox?: unknown }) => { if (fail) throw new Error('Native sandbox update rejected'); native.sandboxes.push(settings.sandbox); };
+  const session = await ClaudeAgentSession.open({ sessionId: 'native' }, { restrictedNative: true, query: () => query });
+  const permissions = async () => (await session.runtimeInfo()).settings!.find(setting => setting.id === 'permissions')!.value;
+  try {
+    await expect(session.setSessionSetting!('permissions', 'bypassPermissions')).rejects.toThrow('Native sandbox update rejected');
+    expect(native.sandboxes).toEqual([]);
+    fail = false;
+    await session.setSessionSetting!('permissions', 'bypassPermissions');
+    expect(native.sandboxes).toEqual([{ enabled: false }]);
+    fail = true;
+    await expect(session.setSessionSetting!('permissions', 'acceptEdits')).rejects.toThrow('Native sandbox update rejected');
+    expect(native.changes).toEqual(['bypassPermissions', 'bypassPermissions']);
+    expect(await permissions()).toBe('bypassPermissions');
+  } finally { await session.dispose(); }
+});
+
+it('refuses to lift a restricted Host sandbox on a native process that cannot change it', async () => {
+  const native = fixture();
+  const query = native.factory();
+  delete query.applyFlagSettings;
+  const session = await ClaudeAgentSession.open({ sessionId: 'native' }, { restrictedNative: true, query: () => query });
+  try {
+    await session.setSessionSetting!('permissions', 'acceptEdits');
+    await expect(session.setSessionSetting!('permissions', 'bypassPermissions')).rejects.toThrow(/cannot change its sandbox/);
+    expect(native.changes).toEqual(['acceptEdits', 'bypassPermissions']);
+  } finally { await session.dispose(); }
+});
+
+it('changes supported native permissions while retaining the restricted sandbox outside YOLO', async () => {
   const native = fixture(); let launched: any;
   const session = await ClaudeAgentSession.open({ sessionId: 'native' }, {
     restrictedNative: true, query: input => { launched = input.options; return native.factory(); },
@@ -102,6 +161,8 @@ it('changes supported native permissions while retaining the restricted sandbox'
       expect((await session.runtimeInfo()).settings!.find(setting => setting.id === 'permissions')!.value).toBe(mode);
     }
     expect(native.changes).toEqual(['acceptEdits', 'dontAsk', 'bypassPermissions', 'plan', 'default']);
+    // Only YOLO lifts the restricted sandbox.
+    expect(native.sandboxes).toEqual([{ enabled: false }, { enabled: true, failIfUnavailable: true, allowUnsandboxedCommands: false }]);
     const changesBeforeRejection = [...native.changes];
     await expect(session.setSessionSetting!('permissions', 'notAMode')).rejects.toThrow(/Unavailable/);
     expect(native.changes).toEqual(changesBeforeRejection);

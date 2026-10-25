@@ -1,4 +1,4 @@
-import type { PermissionMode } from '@anthropic-ai/claude-agent-sdk';
+import type { Options, PermissionMode } from '@anthropic-ai/claude-agent-sdk';
 import type { AgentSessionSettingOption } from '@orchardworks/agent-provider-sdk';
 
 /** A permission mode this adapter knows, how it is offered, and whether a session may resume into it. */
@@ -16,8 +16,21 @@ export const CLAUDE_PERMISSION_MODES = [
   { value: 'dontAsk', label: 'Deny unapproved tools', resumable: true },
   { value: 'plan', label: 'Plan', resumable: false },
   { value: 'bypassPermissions', label: 'YOLO',
-    description: 'Runs every tool without asking. A Host-enforced sandbox confines shell commands only, not file, MCP or web tools.', resumable: true },
+    description: 'Runs every tool without asking and without a sandbox, with full access to this computer.', resumable: true },
 ] as const satisfies readonly ClaudePermissionMode[];
+
+/** The sandbox a restricted Host requires for native commands. */
+export const CLAUDE_RESTRICTED_SANDBOX = { enabled: true, failIfUnavailable: true, allowUnsandboxedCommands: false } as const;
+
+/**
+ * The sandbox a permission mode runs under, as a native flag setting. YOLO runs without one, above the user's and
+ * the project's own settings; an organization's managed policy still applies. Other modes keep a restricted Host's
+ * sandbox, or else whatever the user's settings choose (null clears the flag).
+ */
+export function claudeSandbox(mode: PermissionMode, restricted: boolean): NonNullable<Options['sandbox']> | null {
+  if (mode === 'bypassPermissions') return { enabled: false };
+  return restricted ? CLAUDE_RESTRICTED_SANDBOX : null;
+}
 
 /** The native runtime requires this acknowledgement before it accepts the bypass mode. */
 export const CLAUDE_ALLOWS_BYPASS_PERMISSIONS = CLAUDE_PERMISSION_MODES.some(mode => mode.value === 'bypassPermissions');

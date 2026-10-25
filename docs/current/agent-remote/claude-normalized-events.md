@@ -50,7 +50,7 @@ Successful `Edit`, `MultiEdit` and `Write` structured output becomes the existin
 
 Session permission updates are native rules, not a blanket adapter allow-list. A repeated ordinary shell command is verified to prompt once. Native path/safety checks may still prompt again for a command with redirection even after a suggested session grant. Grants never write persistent user/project settings and are not promised to survive Query restart.
 
-The Host allows the adapter's supported permission modes (`default`, `acceptEdits`, `dontAsk`, `plan`, `bypassPermissions` labeled YOLO) while preserving workspace admission and the restricted native command sandbox. YOLO removes permission prompts only; the sandbox confines shell commands, not file, MCP or web tools. Native policy rejection remains authoritative.
+The Host allows the adapter's supported permission modes (`default`, `acceptEdits`, `dontAsk`, `plan`, `bypassPermissions` labeled YOLO) while preserving workspace admission. YOLO removes permission prompts and runs without a sandbox: selecting it lifts the restricted native command sandbox, and any sandbox the user's or project's settings enable, through the native flag settings, after the mode is confirmed; leaving it restores the previous sandbox before the next mode applies. A managed policy sandbox still applies. Other modes keep the restricted sandbox, which confines shell commands, not file, MCP or web tools. Native policy rejection remains authoritative.
 
 Before the first native init event, an unspecified model selects the native catalog's `default` option when advertised. No concrete model is guessed or pinned; native init replaces the selection with the reported model.
 

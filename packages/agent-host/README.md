@@ -385,9 +385,13 @@ Codex sessions and supported Claude modes. Shared Codex sessions accept permissi
 changes from the web and publish native permission updates from other clients on
 Windows, macOS, and Linux. Claude exposes `default`, `acceptEdits`, `dontAsk`,
 `plan`, and **YOLO** (`bypassPermissions`) through its native permission setter.
-YOLO removes native permission prompts for every tool; workspace admission still
-applies, and in restricted sessions the command sandbox below still confines
-shell commands but not file, MCP, or web tools. Sessions start in `default`
+YOLO removes native permission prompts for every tool and runs shell commands
+without a sandbox, also in restricted sessions and above a sandbox the user's or
+project's own Claude settings enable; an organization's managed policy still
+applies. YOLO therefore gives the session full access to this computer.
+Workspace admission still chooses where a session starts. The sandbox is lifted
+only once YOLO is confirmed and restored before any other mode takes effect.
+Sessions start in `default`
 unless a trusted session restores a previously selected mode; selecting YOLO
 requires native confirmation and native policy may reject it. Restricted
 sessions reset saved elevated modes to `default` when reopened. Native
@@ -412,8 +416,9 @@ different execution guarantees:
   platforms fail closed. Saved elevated permission modes are reset to `default`.
   The sandbox confines shell commands only; it does not establish isolation for
   native file tools, web tools, external MCP services, hooks, or filesystem
-  reads. Permission prompts, not the sandbox, gate those tools, so YOLO in a
-  restricted session runs them unprompted and unconfined.
+  reads. Permission prompts, not the sandbox, gate those tools. YOLO lifts the
+  sandbox for as long as it is selected, so a remote controller that may select
+  it has full access to the Host.
 - Copilot has no filesystem sandbox guarantee supplied by this integration.
   Workspace admission and existing native interactive permissions still apply.
 

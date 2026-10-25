@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
-import { readFile } from 'node:fs/promises';
-import { join } from 'node:path';
+import { mkdir, mkdtemp, readFile, rm } from 'node:fs/promises';
+import { join, resolve } from 'node:path';
 import { expect, it } from 'vitest';
 import { ClaudeAgentSession } from './session.js';
 import { nativeFixture, nativeReply } from './test-utils/native-fixture.js';
@@ -49,3 +49,38 @@ it.each([false, true])('executes a native tool in YOLO without approval with res
     expect((await session.runtimeInfo()).settings).toContainEqual(expect.objectContaining({ id: 'permissions', value: 'default' }));
   } finally { await close(); }
 }, 20000);
+
+const toolResults = (body: any): number => (body.messages ?? []).flatMap((message: any) => Array.isArray(message.content) ? message.content : [])
+  .filter((part: any) => part?.type === 'tool_result').length;
+
+it.each([false, true])('runs shell commands outside the workspace in YOLO without a sandbox, and sandboxes them again after (restricted: %s)', async restrictedNative => {
+  // Outside the workspace and the temporary directory, which a sandbox may write to.
+  await mkdir(resolve('.tmp'), { recursive: true });
+  const outside = await mkdtemp(resolve('.tmp/yolo-'));
+  let answered = 0, writes = 0;
+  const fixture = await nativeFixture((body, response) => {
+    const results = toolResults(body);
+    if (results > answered) { answered = results; nativeReply(response, [{ type: 'text', text: 'SHELL_DONE' }]); return; }
+    nativeReply(response, [{ type: 'tool_use', id: `native-shell-${writes}`, name: 'Bash',
+      input: { command: `echo written > ${join(outside, `write-${writes++}.txt`)}`, description: 'Write outside the workspace' } }]);
+  });
+  const session = await ClaudeAgentSession.open({ sessionId: randomUUID(), cwd: fixture.cwd, model: 'claude-sonnet-4-5-20250929' }, { ...fixture.options, restrictedNative });
+  const events: any[] = [];
+  const pump = (async () => { for await (const item of session.observe()) if (item.type === 'observation') events.push(item.event); })();
+  const turn = async (count: number) => {
+    await session.sendMessage('Write a file outside the workspace.');
+    await expect.poll(() => events.filter(event => event.type === 'turn_completed').length, { timeout: 15000 }).toBe(count);
+  };
+  const written = (index: number) => readFile(join(outside, `write-${index}.txt`), 'utf8').catch(() => undefined);
+  try {
+    await session.setSessionSetting('permissions', 'bypassPermissions');
+    await turn(1);
+    expect(await written(0)).toBe('written\n');
+    expect(events.some(event => event.type === 'interaction_requested')).toBe(false);
+    if (restrictedNative) {
+      await session.setSessionSetting('permissions', 'acceptEdits');
+      await turn(2);
+      expect(await written(1)).toBeUndefined();
+    }
+  } finally { await session.dispose(); await pump; await fixture.close(); await rm(outside, { recursive: true, force: true }); }
+}, 40000);

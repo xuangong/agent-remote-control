@@ -106,7 +106,7 @@ function AskChat({ storageScope, record, executionTarget, inputs, onSendInput, r
     replica={replica} onSessionReady={onSessionReady} attachedSession={session} target={{ hostId: session.hostId ?? 'local', providerId: session.providerId, nativeSessionId: session.nativeSessionId, title: 'Ask' }} hostLabel={session.hostId ?? 'local'}
     compact={storageBindings.compact ?? false} active offline={false} nativePrefixOnly transport={transport}
     draftStore={draftBinding.store} draftBinding={draftBinding} navigation={navigation} controls={tools} onAdditionalWidthChange={onAdditionalWidthChange} {...storageBindings}
-    sessionPresentation={context => context.isRoot ? { headingStart: <SessionLink session={context.session} />, sessionManager: tools, composerNotice: notice } : {}}
+    sessionPresentation={context => context.isRoot ? { headingMode: 'inline', headingStart: <SessionLink session={context.session} />, sessionManager: tools, composerNotice: notice } : {}}
     consoleCommands={[askCommand]} onExecuteConsoleCommand={async (_id, args) => {
       if (args.trim()) {
         if (!sendMessage.current) throw new Error('Wait for Ask to finish synchronizing.');

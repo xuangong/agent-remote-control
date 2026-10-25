@@ -43,6 +43,26 @@ it('composes per-session presentation and footer from the native conversation an
   expect([...view.querySelectorAll('button')].find(button => button.textContent === 'Native controls')?.closest('.lab-session-heading-actions-panel')).toBeNull();
 });
 
+it.each([false, true])('collapses the session actions into an edge toggle on a narrow screen, also without a presentation (compact: %s)', async compact => {
+  const session = { hostId: 'local', providerId: 'recorded', nativeSessionId: 'native', agentId: 'agent', title: 'Team leader' };
+  const transport = { onDiagnostic: () => () => {}, onProtocolMessage: () => () => {}, connect: () => ({ close() {}, send() {} }) } as unknown as RemoteAgentTransport;
+  const view = await render(<WorkspaceReady.Provider value={false}><SessionFamily attachedSession={session} target={session}
+    storageScope={`family-toolbar-${compact}`} baseUrl="http://fixture" hostLabel="Local" compact={compact} active offline
+    transport={transport} draftStore={new DraftStore(`family-toolbar-${compact}`)} controls={<button>Gather</button>} />
+  </WorkspaceReady.Provider>);
+  const gather = [...view.querySelectorAll('button')].find(button => button.textContent === 'Gather')!;
+  const toggle = view.querySelector<HTMLButtonElement>('.lab-timeline-tools-toggle');
+  if (!compact) {
+    expect(toggle).toBeNull();
+    expect(gather.closest('.lab-timeline-tools')).toBeNull();
+    return;
+  }
+  expect(gather.closest('.lab-timeline-tools')?.hasAttribute('data-collapsed')).toBe(true);
+  expect(toggle?.getAttribute('aria-label')).toBe('Expand session actions');
+  await act(async () => toggle!.click());
+  expect(gather.closest('.lab-timeline-tools')?.hasAttribute('data-collapsed')).toBe(false);
+});
+
 it.each(['primary', 'dock', 'float'] as const)('sizes a %s family within its placement alongside attached descendants', async placement => {
   const { WindowLayoutContext } = await import('../window-workspace-context.js');
   const { createWindowView } = await import('@orchardworks/agent-remote-protocol');

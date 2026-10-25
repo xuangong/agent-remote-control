@@ -245,7 +245,9 @@ export function createManagedStdioDirectory(
         return provider.renameSession!(id, title);
       },
     } : {}),
-    ...(provider.sessionWorkspace ? {sessionWorkspace: provider.sessionWorkspace.bind(provider)} : {}),
+    ...(provider.sessionWorkspace ? { async sessionWorkspace(id: string, handle?: AgentPersistenceHandle) {
+      return provider.sessionWorkspace!(id, handle ?? (await references?.get(id))?.handle);
+    } } : {}),
     async create(input, evidence) {
       if (closed) throw new Error(`${displayName} directory is closed.`);
       const selected = input.workspaceId === undefined ? undefined : workspaces.find(({ id }) => id === input.workspaceId);
@@ -360,9 +362,14 @@ export function createManagedStdioDirectory(
         const extensions = await resumedExtensions(nativeSessionId, options?.extensions, () => readerReady ? nativeSessionId : undefined, () => readerSession);
         const owner = await lease(nativeSessionId, options?.takeOver);
         const identity = sessionExtensionIdentity(extensions);
+        // A Side created here keeps its creation handle. One that never received input may have no native history
+        // after a restart; only then does that handle reopen it empty. With history, native state wins as usual.
+        const grant = handle || existing?.handle || !provider.sessionWorkspace ? undefined : await references?.get(nativeSessionId);
+        const created = grant && !await provider.sessionWorkspace!(nativeSessionId) ? grant.handle : undefined;
         let session: AgentSession;
         try {
-          session = await provider.resumeSession(handle ?? existing?.handle ?? { providerId, sessionId: nativeSessionId, opaque: '{}' }, extensions, resumeOptions);
+          session = await provider.resumeSession(handle ?? existing?.handle ?? created ?? { providerId, sessionId: nativeSessionId, opaque: '{}' }, extensions,
+            created ? { ...resumeOptions, initializeEmpty: true } : resumeOptions);
         } catch (error) {
           if (owner) {
             unconfirmedStarts.add(nativeSessionId);

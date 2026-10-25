@@ -80,7 +80,9 @@ it('rejects missing or disallowed authoritative workspaces even when discovery s
   const f = await fixture();
   for (const cwd of [undefined, f.outside, join(f.allowed, 'escape')]) {
     const directory = protectHostDirectory({ ...f.source, async sessionWorkspace() { return cwd; } }, f.policy!);
-    await expect(directory.open('session')).rejects.toThrow(/workspace/i);
+    // An unknown workspace means the session does not exist here, which is reported as such rather than as a policy refusal.
+    await expect(directory.open('session')).rejects.toThrow(cwd === undefined
+      ? expect.objectContaining({ name: 'AgentRuntimeError', code: 'native_session_unavailable' }) : /workspace/i);
   }
   expect(f.calls).toEqual([]);
 });

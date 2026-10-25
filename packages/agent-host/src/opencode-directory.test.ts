@@ -49,7 +49,7 @@ it('validates native workspace by ID even when the native catalog omits the sess
     expect((await (await directory.open('native')).runtimeInfo()).cwd).toBe(cwd);
     f.summaries.set('outside', { id: 'outside', title: 'Outside', cwd: '/', updatedAt: new Date().toISOString() });
     await expect(directory.open('outside')).rejects.toThrow(/workspace/i);
-    await expect(directory.open('missing')).rejects.toThrow(/workspace/i);
+    await expect(directory.open('missing')).rejects.toThrow(/session is unavailable/i);
     expect(f.counts().resumes).toBe(1);
   } finally { await directory.close(); }
 }, 10000);

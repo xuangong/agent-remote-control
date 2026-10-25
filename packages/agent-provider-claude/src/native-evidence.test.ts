@@ -47,6 +47,27 @@ describe('Claude native evidence', () => {
     } finally { await session.dispose(); }
   });
 
+  it('reopens a session the Host created and never used from its own persistence handle, only with initialization permission', async () => {
+    const f = fixture();
+    const created = { providerId: 'claude', sessionId: sid, opaque: JSON.stringify({ cwd: process.cwd(), model: 'sonnet', sessionId: sid, permissionMode: 'default' }) };
+    expect(await f.provider.sessionWorkspace(sid, created)).toBe(process.cwd());
+    await expect(f.provider.resumeSession(created)).rejects.toThrow(/unavailable/);
+    await expect(f.provider.resumeSession({ ...created, opaque: JSON.stringify({ cwd: process.cwd(), sessionId: randomUUID() }) }, {}, { initializeEmpty: true })).rejects.toThrow(/unavailable/);
+    expect(f.query).not.toHaveBeenCalled();
+    const session = await f.provider.resumeSession(created, { instructions: 'Side instructions' }, { initializeEmpty: true });
+    try {
+      // Claude has no transcript for it yet, so it starts under the same identity instead of resuming.
+      expect(f.launches[0]).toMatchObject({ sessionId: sid, cwd: process.cwd(), model: 'sonnet' });
+      expect(f.launches[0]).not.toHaveProperty('resume');
+      expect(f.inputs).toEqual([]);
+    } finally { await session.dispose(); }
+    // Once it has a transcript, the same request resumes it.
+    const g = fixture();
+    g.setInfo({ sessionId: sid, cwd: process.cwd() });
+    const resumed = await g.provider.resumeSession(created, {}, { initializeEmpty: true });
+    try { expect(g.launches[0].resume).toBe(sid); } finally { await resumed.dispose(); }
+  });
+
   it('prioritizes native history and rejects foreign descriptors even with initialization permission', async () => {
     const f = fixture();
     const result = await f.provider.nativeEvidence.createEmpty({ sessionId: sid, cwd: process.cwd() });

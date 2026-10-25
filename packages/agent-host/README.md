@@ -379,7 +379,12 @@ also be unable to read its stored format; configure a compatible
 
 Host checks real paths, including symbolic links, before creating or importing
 sessions and before native input or settings mutations. Catalogs omit sessions
-outside those roots and sessions whose workspace cannot be established. Native
+outside those roots and sessions whose workspace cannot be established; opening
+a session whose workspace cannot be established reports it as unavailable rather
+than as a workspace refusal. A Claude Side keeps the creation handle saved with
+its source reference, so one that never received a message, and therefore has no
+native transcript after a Controller restart, reopens empty under the same
+identity; once it has history, native state is resumed as usual. Native
 permission settings are read-only to remote controllers except for trusted shared
 Codex sessions and supported Claude modes. Shared Codex sessions accept permission
 changes from the web and publish native permission updates from other clients on

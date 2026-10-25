@@ -1,6 +1,6 @@
 import { realpath, stat } from 'node:fs/promises';
 import { isAbsolute, relative, resolve, sep } from 'node:path';
-import type { AgentRuntimeInfo, AgentSession, AgentSessionNativeEvidence, AgentPersistenceHandle } from '@orchardworks/agent-provider-sdk';
+import { AgentRuntimeError, type AgentRuntimeInfo, type AgentSession, type AgentSessionNativeEvidence, type AgentPersistenceHandle } from '@orchardworks/agent-provider-sdk';
 import type { AgentHostDirectory } from './host.js';
 import { successionCreationHandle, nativePrefixResumeHandle } from './local-succession-preparation.js';
 
@@ -60,6 +60,8 @@ export function protectHostDirectory(directory: AgentHostDirectory, policy: Host
   const checkSource = async (id: string, handle?: AgentPersistenceHandle) => {
     const workspace = directory.sessionWorkspace ? await directory.sessionWorkspace(id, handle)
       : (await directory.list()).find(entry => entry.nativeSessionId === id)?.workspace;
+    // A session without a known workspace does not exist here; that is not a workspace policy refusal.
+    if (!workspace) throw new AgentRuntimeError('native_session_unavailable', 'The native session is unavailable on this Host.');
     await allowedWorkspace(policy, workspace);
   };
   directory.setSourceAccessCheck?.(checkSource);

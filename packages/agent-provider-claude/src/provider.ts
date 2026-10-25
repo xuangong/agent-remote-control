@@ -91,7 +91,8 @@ export class ClaudeAgentProvider implements AgentProviderAdapter {
     if (handle && (handle.providerId !== 'claude' || handle.sessionId !== sessionId)) claudeEvidenceReject('native_evidence_invalid');
     const descriptor = handle ? readClaudeEmptyDescriptor(handle, this.options) : undefined;
     const session = this.sessions.get(sessionId);
-    return session ? (await session.runtimeInfo()).cwd : (await this.catalog.info(sessionId))?.cwd ?? descriptor?.cwd;
+    // A session without a transcript yet takes its workspace from the creation handle the Host saved.
+    return session ? (await session.runtimeInfo()).cwd : (await this.catalog.info(sessionId))?.cwd ?? descriptor?.cwd ?? (handle && !descriptor ? readConfig(handle.opaque).cwd : undefined);
   }
 
   async releaseSession(sessionId: string): Promise<void> {
@@ -133,7 +134,10 @@ export class ClaudeAgentProvider implements AgentProviderAdapter {
     try {
       const descriptor = readClaudeEmptyDescriptor(handle, this.options);
       const info = await this.catalog.info(sessionId);
-      if (!info && !(descriptor && resumeOptions.initializeEmpty === true)) throw new Error('Claude native session is unavailable.');
+      // Claude writes a transcript only with the first message. A caller that knows no input was sent, such as
+      // a Side created on this Host and never used, may reopen the session empty from its creation handle.
+      // A creation handle must name the session: an empty descriptor, or Claude's own persistence handle.
+      if (!info && (resumeOptions.initializeEmpty !== true || !descriptor && createdSessionId(handle.opaque) !== sessionId)) throw new Error('Claude native session is unavailable.');
       const stored = descriptor ? { ...descriptor.config } : readConfig(handle.opaque);
       if (descriptor && info) delete stored.model;
       const cwd = info?.cwd ?? stored.cwd;
@@ -216,6 +220,10 @@ async function workspace(cwd?: string): Promise<string> {
   const path = await realpath(cwd ?? process.cwd());
   if (!(await stat(path)).isDirectory()) throw new Error('Claude workspace must be a directory.');
   return path;
+}
+function createdSessionId(opaque: string): string | undefined {
+  try { const value: unknown = JSON.parse(opaque); return record(value) && typeof value.sessionId === 'string' ? value.sessionId : undefined; }
+  catch { return undefined; }
 }
 function readConfig(opaque: string): Partial<ClaudeSessionConfig> {
   let value: unknown;

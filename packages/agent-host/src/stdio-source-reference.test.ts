@@ -395,3 +395,24 @@ it('rejects a held cross-provider router result after reader disposal without re
     expect(f.reads).toEqual([]);
   } finally { route.release(); await directory.close(); await rm(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }); }
 }, 10000);
+
+it('reopens a Side that never received input from its saved creation handle, and lets native history win once it has some', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'arc-stdio-empty-side-')); const f = fixture();
+  const resumes: { opaque: string; initializeEmpty?: boolean }[] = [];
+  let history: string | undefined;
+  const provider: ManagedStdioProvider = { ...f.provider, async sessionWorkspace() { return history; },
+    async resumeSession(handle, extensions, options) { resumes.push({ opaque: handle.opaque, ...(options?.initializeEmpty ? { initializeEmpty: true } : {}) }); return f.provider.resumeSession(handle, extensions, options); } };
+  let directory = createManagedStdioDirectory('claude', 'Claude', provider, [], undefined, new SessionReferenceStore(root, 'claude'));
+  try {
+    const id = await directory.create({ sourceNativeSessionId: 'A' });
+    await directory.close();
+    directory = createManagedStdioDirectory('claude', 'Claude', provider, [], undefined, new SessionReferenceStore(root, 'claude'));
+    await directory.open(id);
+    expect(resumes).toEqual([{ opaque: JSON.stringify({ model: 'native-model' }), initializeEmpty: true }]);
+    await directory.close();
+    history = '/workspace';
+    directory = createManagedStdioDirectory('claude', 'Claude', provider, [], undefined, new SessionReferenceStore(root, 'claude'));
+    await directory.open(id);
+    expect(resumes.at(-1)).toEqual({ opaque: '{}' });
+  } finally { await directory.close(); await rm(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }); }
+});

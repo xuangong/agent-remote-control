@@ -113,7 +113,8 @@ it('checks a cold Copilot workspace by ID without relying on the catalog', async
     expect(lookup).toHaveBeenCalledWith('cold', undefined);
     expect(list).not.toHaveBeenCalled();
     lookup.mockResolvedValue(undefined);
-    await expect(directory.open('missing')).rejects.toThrow(/workspace/i);
+    // A session without a known workspace is unavailable, not refused by the workspace policy.
+    await expect(directory.open('missing')).rejects.toThrow(/session is unavailable/i);
     lookup.mockResolvedValue('/');
     await expect(directory.open('outside')).rejects.toThrow(/workspace/i);
     expect(resume).toHaveBeenCalledTimes(1);

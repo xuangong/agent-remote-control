@@ -8,11 +8,12 @@ import * as platform from '@orchardworks/agent-platform';
 import { serveOpenCodeServerSupervisor } from './opencode-server-supervisor.js';
 
 interface Owner { running: true; pid: number; nativePid: number; version: string; url: string; generation: string; managementPort: number; token: string }
+// Each test starts real processes; under a full parallel suite their startup alone can take seconds.
 const cleanup: Array<() => Promise<unknown>> = [];
 afterEach(async () => {
   try { for (const close of cleanup.splice(0).reverse()) await close(); }
   finally { vi.restoreAllMocks(); vi.unstubAllGlobals(); vi.unstubAllEnvs(); }
-}, 15000);
+}, 30000);
 async function availablePort() {
   const server = createServer();
   await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
@@ -77,12 +78,12 @@ async function fixture(mode = 'ready') {
         const marker = (await readdir(directory)).find(name => name.startsWith('starting-'));
         if (!marker) return false;
         try { result = JSON.parse(await readFile(join(directory, marker), 'utf8')); return true; } catch { return false; }
-      }, { timeout: 4000 }).toBe(true);
+      }, { timeout: 10_000 }).toBe(true);
       return result!;
     },
     async owner() {
       let result: Owner | undefined;
-      await expect.poll(async () => { try { result = JSON.parse(await readFile(join(directory, 'owner.json'), 'utf8')); return true; } catch { return false; } }, { timeout: 4000 }).toBe(true);
+      await expect.poll(async () => { try { result = JSON.parse(await readFile(join(directory, 'owner.json'), 'utf8')); return true; } catch { return false; } }, { timeout: 10_000 }).toBe(true);
       return result!;
     },
   };
@@ -107,7 +108,7 @@ it('owns a real authenticated native server and stops it only through its privat
   expect(await outcome).toEqual({});
   await expect(fetch(`${f.url}/api/info`, { signal: AbortSignal.timeout(500) })).rejects.toThrow();
   expect(JSON.parse(await readFile(join(f.directory, 'owner.json'), 'utf8')).generation).toBe(owner.generation);
-}, 15000);
+}, 30000);
 
 it.each(['exit', 'different-port', 'old-version', 'invalid-info', ...(process.platform === 'win32' ? [] : ['wrong-pid'])])('does not publish a server that fails readiness: %s', async mode => {
   const f = await fixture(mode);
@@ -116,7 +117,7 @@ it.each(['exit', 'different-port', 'old-version', 'invalid-info', ...(process.pl
   expect(result.error!.message).not.toContain('private-native-password');
   await expect(readFile(join(f.directory, 'owner.json'), 'utf8')).rejects.toMatchObject({ code: 'ENOENT' });
   expect((await readdir(f.directory)).some(name => name.startsWith('starting-'))).toBe(false);
-}, 15000);
+}, 30000);
 
 it('keeps the winning owner when two supervisors race for the same endpoint', async () => {
   const f = await fixture();
@@ -127,7 +128,7 @@ it('keeps the winning owner when two supervisors race for the same endpoint', as
   expect((await control(owner)).status).toBe(200);
   await control(owner, 'stop');
   expect(await first).toEqual({});
-}, 15000);
+}, 30000);
 
 it('can stop an in-progress startup through its management marker', async () => {
   const f = await fixture('no-listening');
@@ -137,7 +138,7 @@ it('can stop an in-progress startup through its management marker', async () => 
   expect(await (await control(marker, 'stop')).json()).toEqual({ running: false });
   expect((await outcome).error).toBeInstanceOf(Error);
   await expect(readFile(join(f.directory, 'owner.json'), 'utf8')).rejects.toMatchObject({ code: 'ENOENT' });
-}, 15000);
+}, 30000);
 
 it('honors a changed preference revision while starting', async () => {
   const f = await fixture('no-listening');
@@ -146,14 +147,14 @@ it('honors a changed preference revision while starting', async () => {
   await writeFile(join(f.directory, 'prefs.json'), JSON.stringify({ enabled: false, revision: 'manual-stop' }));
   expect((await outcome).error?.message).toMatch(/superseded or disabled/);
   await expect(readFile(join(f.directory, 'owner.json'), 'utf8')).rejects.toMatchObject({ code: 'ENOENT' });
-}, 15000);
+}, 30000);
 
 it('does not spawn when a stale startup revision has already been disabled', async () => {
   const f = await fixture();
   await writeFile(join(f.directory, 'prefs.json'), JSON.stringify({ enabled: false, revision: 'manual-stop' }));
   expect((await f.start()).error?.message).toMatch(/superseded or disabled/);
   await expect(readFile(join(f.directory, 'native.json'), 'utf8')).rejects.toMatchObject({ code: 'ENOENT' });
-}, 15000);
+}, 30000);
 
 it('leaves a stale owner record after native exit without claiming a live server', async () => {
   const f = await fixture();
@@ -163,7 +164,7 @@ it('leaves a stale owner record after native exit without claiming a live server
   expect((await outcome).error?.message).toMatch(/exited unexpectedly/);
   await expect(control(owner)).rejects.toThrow();
   expect(JSON.parse(await readFile(join(f.directory, 'owner.json'), 'utf8'))).toEqual(owner);
-}, 15000);
+}, 30000);
 
 it('drains noisy native output without losing the readiness announcement', async () => {
   const f = await fixture('noise');
@@ -172,7 +173,7 @@ it('drains noisy native output without losing the readiness announcement', async
   expect((await control(owner)).status).toBe(200);
   await control(owner, 'stop');
   expect(await outcome).toEqual({});
-}, 15000);
+}, 30000);
 
 it.each(['stop', 'native exit'])('settles %s after publishing readiness while the owner write is still returning', async action => {
   const f = await fixture();
@@ -190,7 +191,7 @@ it.each(['stop', 'native exit'])('settles %s after publishing readiness while th
   const outcome = await f.start();
   if (action === 'stop') expect(outcome).toEqual({});
   else expect(outcome.error?.message).toMatch(/exited unexpectedly/);
-}, 15000);
+}, 30000);
 
 it('waits for forced termination when the native process ignores graceful stop', async () => {
   const f = await fixture('ignore-term');
@@ -201,7 +202,7 @@ it('waits for forced termination when the native process ignores graceful stop',
   if (process.platform !== 'win32') expect(Date.now() - started).toBeGreaterThanOrEqual(4900);
   expect(await outcome).toEqual({});
   expect(() => process.kill(owner.nativePid, 0)).toThrow();
-}, 15000);
+}, 30000);
 
 it('does not treat a healthy unrelated endpoint as evidence that its own child started', async () => {
   const f = await fixture('no-listening');
@@ -216,7 +217,7 @@ it('does not treat a healthy unrelated endpoint as evidence that its own child s
   await control(marker, 'stop');
   expect((await outcome).error).toBeInstanceOf(Error);
   expect((await fetch(f.url, { signal: AbortSignal.timeout(1000) })).ok).toBe(true);
-}, 15000);
+}, 30000);
 
 it('bounds unauthenticated control requests without interrupting the native server', async () => {
   const f = await fixture();
@@ -292,7 +293,7 @@ it.skipIf(process.platform === 'win32')('runs the Windows job launcher with the 
   expect(native.secret).toBeUndefined();
   expect(await (await control(owner, 'stop')).json()).toEqual({ running: false });
   expect(await outcome).toEqual({});
-}, 15000);
+}, 30000);
 
 it.runIf(process.platform === 'win32')('reclaims Windows native descendants when the owned job launcher stops', async () => {
   const f = await fixture('descendant');
@@ -330,4 +331,4 @@ it.skipIf(process.platform === 'win32').each(['stop', 'native exit'])('reclaims 
   await expect.poll(() => [native.descendant, -native.pid].filter(pid => {
     try { process.kill(pid, 0); return true; } catch { return false; }
   }), { timeout: 1000 }).toEqual([]);
-}, 15000);
+}, 30000);

@@ -44,3 +44,4 @@
 @media (pointer: coarse) {
   .lab-window-workspaces button { min-height: 44px; }
 }
+.lab-window-panel .lab-window-overview-trigger { margin-left: auto; min-height: 32px; padding: 4px 8px; border-color: transparent; color: var(--obs-action); font-size: 12px; }

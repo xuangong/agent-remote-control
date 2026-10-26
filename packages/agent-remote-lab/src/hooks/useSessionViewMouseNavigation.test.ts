@@ -1,5 +1,5 @@
 import { expect, it } from 'vitest';
-import { adjacentSessionView, railWheelStep, sessionViewShortcut } from './useSessionViewMouseNavigation.js';
+import { adjacentSessionView, navigationArrow, railWheelStep, sessionViewShortcut } from './useSessionViewMouseNavigation.js';
 
 function rail(views: Array<{ id: string; left: number; hidden?: boolean; inner?: boolean }>) {
   const root = document.createElement('div');
@@ -89,5 +89,16 @@ it('steps with Ctrl+Shift+Left and Right, leaving text fields their word selecti
   for (const init of [{ ctrlKey: true }, { shiftKey: true }, { ctrlKey: true, shiftKey: true, altKey: true }, { ctrlKey: true, shiftKey: true, metaKey: true }]) {
     expect(sessionViewShortcut(key(pane, { key: 'ArrowRight', ...init }), true)).toBeUndefined();
   }
+  expect(sessionViewShortcut(key(pane, { key: 'ArrowUp', ctrlKey: true, shiftKey: true }), true)).toBeUndefined();
+});
+
+it('reports Ctrl+Shift+Up and Down for Window navigation under the same text field rule', () => {
+  const pane = document.createElement('section');
+  const field = document.createElement('textarea'); pane.append(field);
+  expect(navigationArrow(key(pane, { key: 'ArrowUp', ctrlKey: true, shiftKey: true }), false)).toBe('ArrowUp');
+  expect(navigationArrow(key(pane, { key: 'ArrowDown', ctrlKey: true, shiftKey: true }), false)).toBe('ArrowDown');
+  expect(navigationArrow(key(field, { key: 'ArrowUp', ctrlKey: true, shiftKey: true }), false)).toBeUndefined();
+  expect(navigationArrow(key(field, { key: 'ArrowUp', ctrlKey: true, shiftKey: true }), true)).toBe('ArrowUp');
+  // Up and Down do not step through session views.
   expect(sessionViewShortcut(key(pane, { key: 'ArrowUp', ctrlKey: true, shiftKey: true }), true)).toBeUndefined();
 });

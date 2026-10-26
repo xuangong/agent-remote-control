@@ -790,3 +790,71 @@ test('cold root displays cached Window layout and session messages before author
     await reopened.close();
   } finally { release(); await fixture.close(); }
 });
+
+test('the Window overview shows every Window by recent use and switches with the keyboard on wide screens only', async ({ page }) => {
+  const fixture = await sessionLinkFixture({ automaticSignIn: true });
+  try {
+    await page.setViewportSize({ width: 1680, height: 1000 });
+    await page.goto(fixture.url);
+    await page.getByRole('link', { name: 'Sign in', exact: true }).click();
+    await page.getByLabel('Connected Host').selectOption(fixture.hostId);
+    await showNewSession(page); await page.getByTestId('session-create').click();
+    await expect(page.locator('.lab-primary-group[data-selected="true"]').getByTestId('prompt-input')).toBeEnabled();
+    const panel = await openWindows(page);
+    const current = panel.locator('[data-window-id][aria-current="true"]');
+    const ids: Record<string, string> = {};
+    for (const [index, title] of ['First', 'Second', 'Third'].entries()) {
+      if (index) {
+        const previous = await current.getAttribute('data-window-id');
+        await panel.getByRole('button', { name: 'New Window', exact: true }).click();
+        await expect(current).not.toHaveAttribute('data-window-id', previous!);
+      }
+      ids[title] = (await current.getAttribute('data-window-id'))!;
+      await renameCurrentWindow(panel);
+      await panel.getByLabel('Window title').fill(title);
+      await panel.getByRole('button', { name: 'Save', exact: true }).click();
+      await expect(current).toContainText(title);
+    }
+    const overview = page.getByRole('dialog', { name: 'All Windows' });
+    const cards = overview.locator('[data-window-card]');
+    const titles = () => cards.locator('.lab-window-card-caption strong').allTextContents();
+    // The Window menu offers the overview; Escape returns without switching.
+    await panel.getByRole('button', { name: 'Show all Windows', exact: true }).click();
+    await expect(overview).toBeVisible();
+    await expect.poll(titles).toEqual(['Third', 'Second', 'First']);
+    await expect(cards.first()).toBeFocused();
+    await expect(cards.first()).toHaveAttribute('aria-current', 'true');
+    // The first Window's thumbnail shows its session pane.
+    const first = overview.locator(`[data-window-card="${ids.First}"]`);
+    await expect(first.locator('.lab-window-card-pane')).toHaveCount(1);
+    await expect(first.locator('.lab-window-card-pane[data-selected]')).toHaveCount(1);
+    await overview.evaluate(async element => { await Promise.all(element.getAnimations({ subtree: true }).map(animation => animation.finished)); });
+    await page.screenshot({ path: test.info().outputPath('window-overview.png') });
+    await page.keyboard.press('Escape');
+    await expect(overview).toBeHidden();
+    expect(new URL(page.url()).searchParams.get('window')).toBe(ids.Third);
+    // Focus returns where it was.
+    await expect(panel.getByRole('button', { name: 'Show all Windows', exact: true })).toHaveCount(0);
+    await expect(page.getByRole('button', { name: 'Windows', exact: true })).toBeFocused();
+    // Ctrl+Shift+Up opens it from the keyboard, arrows move, and Enter opens the focused Window.
+    await page.locator('body').click({ position: { x: 5, y: 5 } }).catch(() => undefined);
+    await page.keyboard.press('Control+Shift+ArrowUp');
+    await expect(overview).toBeVisible();
+    await page.keyboard.press('ArrowRight');
+    await expect(overview.locator(`[data-window-card="${ids.Second}"]`)).toBeFocused();
+    await page.keyboard.press('Enter');
+    await expect(overview).toBeHidden();
+    await expect.poll(() => new URL(page.url()).searchParams.get('window')).toBe(ids.Second);
+    await page.keyboard.press('Control+Shift+ArrowUp');
+    await expect.poll(titles).toEqual(['Second', 'Third', 'First']);
+    await page.keyboard.press('Control+Shift+ArrowDown');
+    await expect(overview).toBeHidden();
+    expect(new URL(page.url()).searchParams.get('window')).toBe(ids.Second);
+    // Narrow screens keep only the floating Window list.
+    await page.setViewportSize({ width: 390, height: 667 });
+    await page.keyboard.press('Control+Shift+ArrowUp');
+    await page.waitForTimeout(300);
+    await expect(overview).toHaveCount(0);
+    await expect((await openWindows(page)).getByRole('button', { name: 'Show all Windows', exact: true })).toHaveCount(0);
+  } finally { await page.close(); await fixture.close(); }
+});

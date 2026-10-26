@@ -5,8 +5,10 @@ import { useTrackingPosition } from '../hooks/useTrackingPosition.js';
 import { WindowWorkspaces } from './WindowWorkspaces.js';
 
 /** The floating entry manages presentation; hiding it does not change the Window. */
-export function WindowMenu({ workspace, current, visible, inert = false }: {
+export function WindowMenu({ workspace, current, visible, inert = false, onOverview }: {
   workspace: ReturnType<typeof useWindowWorkspace>; current?: WindowSessionBinding; visible: boolean; inert?: boolean;
+  /** Shows every Window side by side; offered where the overview is available. */
+  onOverview?(): void;
 }) {
   const [open, setOpen] = useState(false);
   const { root, style, handlers, edge } = useTrackingPosition('agent-remote:window-position');
@@ -33,7 +35,10 @@ export function WindowMenu({ workspace, current, visible, inert = false }: {
       <span>Window</span><span>{count}</span>
     </button>
     <section id={panelId} className="lab-session-popover-panel lab-window-panel" aria-label="Windows" hidden={!expanded}>
-      <div className="lab-directory-heading"><h2>Windows</h2><button type="button" aria-label="Close Windows" onClick={close}>×</button></div>
+      <div className="lab-directory-heading"><h2>Windows</h2>
+        {onOverview ? <button type="button" className="lab-window-overview-trigger" aria-label="Show all Windows" title="Show all Windows (Ctrl+Shift+Up)" aria-keyshortcuts="Control+Shift+ArrowUp"
+          onClick={() => { close(); onOverview(); }}>All Windows</button> : null}
+        <button type="button" aria-label="Close Windows" onClick={close}>×</button></div>
       <div className="lab-window-panel-scroll"><WindowWorkspaces workspace={workspace} current={current} active={expanded} /></div>
     </section>
   </div>;

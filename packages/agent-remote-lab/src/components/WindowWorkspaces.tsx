@@ -4,7 +4,7 @@ import { createWindowView, type WindowOperation, type WindowSessionBinding, type
 import type { useWindowWorkspace } from '../hooks/useWindowWorkspace.js';
 import { useWindowManager } from '../hooks/useWindowManager.js';
 
-function viewTitle(view: WindowView): string {
+export function viewTitle(view: WindowView): string {
   return view.binding?.title || (view.feature ? `${view.feature.kind.toUpperCase()} view` : 'Empty view');
 }
 function viewRole(view: WindowView): string {

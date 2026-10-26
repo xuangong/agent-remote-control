@@ -64,21 +64,27 @@ export function useSessionRailWheel(rail: RefObject<HTMLElement>) {
 }
 
 /** Whether the page runs on Apple systems, where Ctrl+Shift+Arrow does not edit text. */
-function applePlatform() {
+export function applePlatform() {
   const platform = (navigator as Navigator & { userAgentData?: { platform?: string } }).userAgentData?.platform ?? navigator.platform;
   return /mac|iphone|ipad/i.test(platform);
 }
 
 /**
- * The step Ctrl+Shift+Left or Right takes through session views, if the key press is that shortcut. Elsewhere than on
- * Apple systems, the shortcut selects text by word in text fields, which keep it.
+ * The arrow key of a Ctrl+Shift+Arrow press that navigates the page. Elsewhere than on Apple systems, the shortcut
+ * selects text in text fields, which keep it.
  */
-export function sessionViewShortcut(event: KeyboardEvent, apple = applePlatform()): -1 | 1 | undefined {
+export function navigationArrow(event: KeyboardEvent, apple = applePlatform()): 'ArrowLeft' | 'ArrowRight' | 'ArrowUp' | 'ArrowDown' | undefined {
   if (!event.ctrlKey || !event.shiftKey || event.altKey || event.metaKey || event.isComposing) return undefined;
-  if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return undefined;
+  if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight' && event.key !== 'ArrowUp' && event.key !== 'ArrowDown') return undefined;
   const target = event.target instanceof Element ? event.target : null;
   if (!apple && target && ((target as HTMLElement).isContentEditable || target.closest('input, textarea, select, [contenteditable="true"], [contenteditable="plaintext-only"]'))) return undefined;
-  return event.key === 'ArrowLeft' ? -1 : 1;
+  return event.key;
+}
+
+/** The step Ctrl+Shift+Left or Right takes through session views, if the key press is that shortcut. */
+export function sessionViewShortcut(event: KeyboardEvent, apple = applePlatform()): -1 | 1 | undefined {
+  const arrow = navigationArrow(event, apple);
+  return arrow === 'ArrowLeft' ? -1 : arrow === 'ArrowRight' ? 1 : undefined;
 }
 
 /**

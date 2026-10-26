@@ -1,0 +1,51 @@
+.lab-window-overview {
+  box-sizing: border-box; width: calc(100vw - 48px); max-width: 1600px; height: calc(100dvh - 48px); max-height: none; margin: auto; padding: 0;
+  border: 1px solid var(--obs-border-strong); border-radius: 14px; background: var(--obs-canvas); color: var(--obs-text); box-shadow: var(--obs-overlay-shadow);
+}
+.lab-window-overview::backdrop { background: color-mix(in oklab, var(--obs-text) 28%, transparent); }
+.lab-window-overview[open] { animation: lab-window-overview-in 160ms ease-out both; }
+@keyframes lab-window-overview-in { from { opacity: 0; transform: scale(.985); } to { opacity: 1; transform: none; } }
+@media (prefers-reduced-motion: reduce) { .lab-window-overview[open] { animation: none; } }
+.lab-window-overview-body { display: flex; flex-direction: column; height: 100%; min-height: 0; }
+.lab-window-overview-heading { display: flex; align-items: center; gap: 12px; flex: none; padding: 14px 16px 10px 24px; }
+.lab-window-overview-heading > h2 { margin: 0; font-size: 16px; font-weight: 600; }
+.lab-window-overview-hint { flex: 1; min-width: 0; color: var(--obs-text-secondary); font-size: 12px; }
+.lab-window-overview-heading > button { flex: none; min-width: 36px; min-height: 36px; padding: 4px; border-color: transparent; color: var(--obs-text-secondary); font-size: 20px; }
+.lab-window-overview-notice { flex: none; margin: 0 24px 10px; color: var(--obs-text-secondary); font-size: 12px; }
+.lab-window-overview-notice[role="alert"] { color: var(--obs-danger); }
+.lab-window-overview-grid {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); align-content: start; gap: 18px;
+  flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: 6px 24px 24px;
+}
+.lab-window-card {
+  display: flex; flex-direction: column; gap: 10px; min-width: 0; padding: 10px; text-align: left;
+  border: 1px solid var(--obs-border); border-radius: 10px; background: var(--obs-surface); color: inherit; cursor: pointer;
+  transition: border-color 120ms ease, box-shadow 120ms ease;
+}
+.lab-window-card:hover { border-color: var(--obs-border-strong); }
+.lab-window-card:focus-visible { outline: none; border-color: var(--obs-action); box-shadow: 0 0 0 2px color-mix(in oklab, var(--obs-action) 40%, transparent); }
+.lab-window-card[aria-current="true"] { background: var(--obs-surface-selected); }
+.lab-window-card[aria-busy="true"] { cursor: progress; }
+@media (prefers-reduced-motion: reduce) { .lab-window-card { transition: none; } }
+/* The Window's rail in miniature: every pane keeps its share of the rail's width. */
+.lab-window-card-layout {
+  display: flex; gap: 2px; height: 128px; min-width: 0; overflow: hidden; padding: 2px;
+  border-radius: 6px; background: var(--obs-border);
+}
+.lab-window-card-pane {
+  display: flex; flex-direction: column; gap: 4px; flex-basis: 0; min-width: 6px; overflow: hidden; padding: 6px;
+  border-radius: 4px; background: var(--obs-surface);
+}
+.lab-window-card-pane[data-attached] { background: color-mix(in oklab, var(--obs-surface) 92%, var(--obs-text)); }
+.lab-window-card-pane[data-collapsed] { flex-grow: 0 !important; flex-basis: 10px; padding: 0; }
+.lab-window-card-pane[data-selected] { box-shadow: inset 0 0 0 1.5px var(--obs-action); }
+.lab-window-card-pane-title {
+  display: -webkit-box; -webkit-line-clamp: 4; -webkit-box-orient: vertical; overflow: hidden; overflow-wrap: anywhere;
+  font-size: 11px; line-height: 1.35; color: var(--obs-text);
+}
+.lab-window-card-provider { margin-top: auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 10px; color: var(--obs-text-secondary); }
+.lab-window-card-empty { display: grid; place-items: center; flex: 1; border-radius: 4px; background: var(--obs-surface); color: var(--obs-text-secondary); font-size: 12px; }
+.lab-window-card-caption { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 8px; min-width: 0; }
+.lab-window-card-caption > strong { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; font-weight: 600; }
+.lab-window-card-caption > small { order: 3; flex-basis: 100%; color: var(--obs-text-secondary); font-size: 11px; }
+.lab-window-card-current { flex: none; color: var(--obs-action); font-size: 11px; font-weight: 600; }

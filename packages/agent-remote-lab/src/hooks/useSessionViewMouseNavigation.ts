@@ -63,18 +63,58 @@ export function useSessionRailWheel(rail: RefObject<HTMLElement>) {
   }, [rail]);
 }
 
+/** Whether the page runs on Apple systems, where Ctrl+Shift+Arrow does not edit text. */
+function applePlatform() {
+  const platform = (navigator as Navigator & { userAgentData?: { platform?: string } }).userAgentData?.platform ?? navigator.platform;
+  return /mac|iphone|ipad/i.test(platform);
+}
+
 /**
- * The mouse back and forward buttons select the previous or next session view in the rail and scroll it into view,
- * instead of leaving the page through browser history. Inactive while a dialog is open or the rail is not shown.
+ * The step Ctrl+Shift+Left or Right takes through session views, if the key press is that shortcut. Elsewhere than on
+ * Apple systems, the shortcut selects text by word in text fields, which keep it.
+ */
+export function sessionViewShortcut(event: KeyboardEvent, apple = applePlatform()): -1 | 1 | undefined {
+  if (!event.ctrlKey || !event.shiftKey || event.altKey || event.metaKey || event.isComposing) return undefined;
+  if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return undefined;
+  const target = event.target instanceof Element ? event.target : null;
+  if (!apple && target && ((target as HTMLElement).isContentEditable || target.closest('input, textarea, select, [contenteditable="true"], [contenteditable="plaintext-only"]'))) return undefined;
+  return event.key === 'ArrowLeft' ? -1 : 1;
+}
+
+/**
+ * Moves the keyboard focus to a session view the shortcut selected: to its composer on Apple systems, and elsewhere,
+ * where a text field keeps the shortcut, to the first control of its heading so that the shortcut keeps working.
+ */
+function focusSessionView(view: HTMLElement, apple = applePlatform()) {
+  const target = apple ? view.querySelector<HTMLElement>('[data-testid="prompt-input"]')
+    : view.querySelector<HTMLElement>(':is(.lab-session-heading, .lab-ask-heading, .lab-empty-session-heading) :is(button, [tabindex]:not([tabindex="-1"])):not(:disabled)');
+  target?.focus({ preventScroll: true });
+}
+
+/**
+ * The mouse back and forward buttons, and Ctrl+Shift+Left and Right on the keyboard, select the previous or next
+ * session view in the rail and scroll it into view. The mouse buttons no longer leave the page through browser
+ * history. When the keyboard focus was in the rail, the shortcut moves it to the selected view. Inactive while a
+ * dialog is open or the rail is not shown.
  */
 export function useSessionViewMouseNavigation(rail: RefObject<HTMLElement>, enabled: boolean, selectedId: string | null | undefined, select: (viewId: string) => void) {
   const latest = useRef({ selectedId, select }); latest.current = { selectedId, select };
   useEffect(() => {
     if (!enabled) return;
-    const applies = (event: MouseEvent) => {
+    const shown = () => {
       const element = rail.current;
-      return (event.button === BACK || event.button === FORWARD) && !!element?.isConnected && element.getClientRects().length > 0
-        && !element.closest('[hidden],[inert]') && !document.querySelector('dialog[open]');
+      return !!element?.isConnected && element.getClientRects().length > 0 && !element.closest('[hidden],[inert]') && !document.querySelector('dialog[open]');
+    };
+    const applies = (event: MouseEvent) => (event.button === BACK || event.button === FORWARD) && shown();
+    const step = (direction: -1 | 1, moveFocus: boolean) => {
+      const element = rail.current!;
+      const target = adjacentSessionView(element, latest.current.selectedId, direction);
+      const id = target?.dataset.viewId;
+      if (!target || !id) return;
+      if (id !== latest.current.selectedId) latest.current.select(id);
+      const reduced = globalThis.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+      target.scrollIntoView?.({ block: 'nearest', inline: 'nearest', behavior: reduced ? 'auto' : 'smooth' });
+      if (moveFocus && element.contains(document.activeElement)) focusSessionView(target);
     };
     // Pressing the button over a pane must not select that pane first, so the press stops here. Cancelling the
     // pointerdown would also suppress the mouseup, and only a cancelled mouseup stops history navigation.
@@ -83,22 +123,26 @@ export function useSessionViewMouseNavigation(rail: RefObject<HTMLElement>, enab
     const navigate = (event: MouseEvent) => {
       if (!applies(event)) return;
       event.preventDefault();
-      const target = adjacentSessionView(rail.current!, latest.current.selectedId, event.button === BACK ? -1 : 1);
-      const id = target?.dataset.viewId;
-      if (!target || !id) return;
-      if (id !== latest.current.selectedId) latest.current.select(id);
-      const reduced = globalThis.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
-      target.scrollIntoView?.({ block: 'nearest', inline: 'nearest', behavior: reduced ? 'auto' : 'smooth' });
+      step(event.button === BACK ? -1 : 1, false);
+    };
+    const key = (event: KeyboardEvent) => {
+      if (event.defaultPrevented) return;
+      const direction = sessionViewShortcut(event);
+      if (!direction || !shown()) return;
+      event.preventDefault();
+      step(direction, true);
     };
     window.addEventListener('pointerdown', isolate, true);
     window.addEventListener('mousedown', suppress, true);
     window.addEventListener('mouseup', navigate, true);
     window.addEventListener('auxclick', suppress, true);
+    window.addEventListener('keydown', key);
     return () => {
       window.removeEventListener('pointerdown', isolate, true);
       window.removeEventListener('mousedown', suppress, true);
       window.removeEventListener('mouseup', navigate, true);
       window.removeEventListener('auxclick', suppress, true);
+      window.removeEventListener('keydown', key);
     };
   }, [rail, enabled]);
 }

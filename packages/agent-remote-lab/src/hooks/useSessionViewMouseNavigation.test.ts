@@ -1,5 +1,5 @@
 import { expect, it } from 'vitest';
-import { adjacentSessionView, railWheelStep } from './useSessionViewMouseNavigation.js';
+import { adjacentSessionView, railWheelStep, sessionViewShortcut } from './useSessionViewMouseNavigation.js';
 
 function rail(views: Array<{ id: string; left: number; hidden?: boolean; inner?: boolean }>) {
   const root = document.createElement('div');
@@ -67,4 +67,27 @@ it('scrolls the rail with a sideways wheel unless content under the pointer scro
   root.scrollLeft = 1000;
   expect(railWheelStep(root, wheel(timeline, { deltaX: 120 }))).toBe(0);
   expect(railWheelStep(root, wheel(timeline, { deltaX: -120 }))).toBe(-120);
+});
+
+function key(target: Element, init: KeyboardEventInit) {
+  const event = new KeyboardEvent('keydown', { bubbles: true, cancelable: true, ...init });
+  Object.defineProperty(event, 'target', { value: target });
+  return event;
+}
+
+it('steps with Ctrl+Shift+Left and Right, leaving text fields their word selection outside Apple systems', () => {
+  const pane = document.createElement('section');
+  const field = document.createElement('textarea');
+  const editor = document.createElement('div'); editor.setAttribute('contenteditable', 'true');
+  pane.append(field, editor);
+  expect(sessionViewShortcut(key(pane, { key: 'ArrowLeft', ctrlKey: true, shiftKey: true }), false)).toBe(-1);
+  expect(sessionViewShortcut(key(pane, { key: 'ArrowRight', ctrlKey: true, shiftKey: true }), false)).toBe(1);
+  for (const target of [field, editor]) {
+    expect(sessionViewShortcut(key(target, { key: 'ArrowRight', ctrlKey: true, shiftKey: true }), false)).toBeUndefined();
+    expect(sessionViewShortcut(key(target, { key: 'ArrowRight', ctrlKey: true, shiftKey: true }), true)).toBe(1);
+  }
+  for (const init of [{ ctrlKey: true }, { shiftKey: true }, { ctrlKey: true, shiftKey: true, altKey: true }, { ctrlKey: true, shiftKey: true, metaKey: true }]) {
+    expect(sessionViewShortcut(key(pane, { key: 'ArrowRight', ...init }), true)).toBeUndefined();
+  }
+  expect(sessionViewShortcut(key(pane, { key: 'ArrowUp', ctrlKey: true, shiftKey: true }), true)).toBeUndefined();
 });

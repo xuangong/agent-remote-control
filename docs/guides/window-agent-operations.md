@@ -87,7 +87,11 @@ The Window can contain multiple top-level sessions; it has no unique main sessio
 Parent and feature-source relationships remain independent of pane selection.
 On wide screens the mouse back and forward buttons select the previous or next
 session view in on-screen order and scroll it into view, instead of navigating
-browser history; pressing them over a pane does not select that pane first. A
+browser history; pressing them over a pane does not select that pane first.
+Ctrl+Shift+Left and Ctrl+Shift+Right do the same from the keyboard and move the
+focus to the selected view: to its composer on macOS, and elsewhere to its
+heading, because outside macOS a text field keeps the shortcut for selecting
+text by word. A
 horizontal mouse wheel, or a vertical one with Shift held, scrolls the row of
 session views from anywhere over a pane, unless the pointer is over content that
 scrolls sideways itself and has room left in that direction.

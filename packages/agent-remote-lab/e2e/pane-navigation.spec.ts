@@ -75,3 +75,42 @@ test('the mouse back and forward buttons select the adjacent session view and br
   await expect.poll(() => rail.evaluate(element => element.scrollLeft)).toBe(0);
   expect(page.url()).toBe(start);
 });
+
+for (const [system, apple] of [['macOS', true], ['Windows', false]] as const) test(`Ctrl+Shift+Left and Right select the adjacent session view and bring it into view on ${system}`, async ({ page, isMobile }) => {
+  test.skip(isMobile, 'Wide layouts have a horizontal window rail.');
+  await page.addInitScript(platform => {
+    Object.defineProperty(Navigator.prototype, 'platform', { get: () => platform });
+    Object.defineProperty(Navigator.prototype, 'userAgentData', { get: () => undefined });
+  }, apple ? 'MacIntel' : 'Win32');
+  const rail = await open(page);
+  const visible = async (name: string) => {
+    const edge = (await rail.boundingBox())!;
+    const box = (await pane(page, name).boundingBox())!;
+    return box.x >= edge.x - 1 && box.x + box.width <= edge.x + edge.width + 1;
+  };
+  const inPane = (name: string) => page.evaluate(label => !!document.activeElement?.closest(`.lab-session-family-pane[aria-label="${label}"]`), name);
+  // Start from the composer on Apple systems and from the heading elsewhere, where the composer keeps the shortcut.
+  const prompt = pane(page, 'Primary').getByTestId('prompt-input');
+  if (apple) await prompt.focus();
+  else await pane(page, 'Primary').locator('.lab-session-heading').locator('button').first().focus();
+  expect(await selected(page)).toBe('Primary');
+  for (const name of ['Primary child', 'Primary leaf', 'Dock', 'Dock child', 'Dock leaf']) {
+    await page.keyboard.press('Control+Shift+ArrowRight');
+    await expect.poll(() => selected(page)).toBe(name);
+    await expect.poll(() => visible(name)).toBe(true);
+    await expect.poll(() => inPane(name)).toBe(true);
+  }
+  for (const name of ['Dock child', 'Dock', 'Primary leaf', 'Primary child', 'Primary']) {
+    await page.keyboard.press('Control+Shift+ArrowLeft');
+    await expect.poll(() => selected(page)).toBe(name);
+    await expect.poll(() => visible(name)).toBe(true);
+  }
+  await expect.poll(() => rail.evaluate(element => element.scrollLeft)).toBe(0);
+  if (!apple) {
+    // Outside Apple systems the shortcut selects text by word in the composer.
+    await prompt.focus();
+    await page.keyboard.press('Control+Shift+ArrowRight');
+    await page.waitForTimeout(200);
+    expect(await selected(page)).toBe('Primary');
+  }
+});

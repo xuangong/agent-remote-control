@@ -2,6 +2,7 @@ import { createContext, useCallback, useContext, useEffect, useId, useLayoutEffe
 import { createPortal } from 'react-dom';
 import './session-dock.css';
 import { useWindowLayout } from '../window-workspace-context.js';
+import { useSessionViewMouseNavigation } from '../hooks/useSessionViewMouseNavigation.js';
 import { conversationSessionStorage } from '../conversation-storage.js';
 import { SessionTitleInteractionContext } from './SessionTitleInteraction.js';
 import { useSessionDockDrag } from '../hooks/useSessionDockDrag.js';
@@ -189,6 +190,8 @@ interface SessionDockRailProps {
 export function SessionDockRail({ children, minimizedHeader, mainTitle = 'Main session', minimumBaseWidth = minimumWidth, onCreateView, compact = false, primaryGroups, onSelectPrimaryGroup, onResizePrimaryGroup, onCollapsePrimaryGroup, onClosePrimaryGroup }: SessionDockRailProps) {
   const dock = useContext(Context);
   const rail = useRef<HTMLDivElement>(null);
+  const shared = useWindowLayout();
+  useSessionViewMouseNavigation(rail, !!shared && !compact, shared?.window.selectedViewId, viewId => shared?.operate({ type: 'view.select', viewId }));
   const [width, setWidth] = useState(0);
   const content = useRef<HTMLDivElement>(null);
   const restore = useRef<HTMLButtonElement>(null);

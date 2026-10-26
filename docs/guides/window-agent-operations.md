@@ -85,6 +85,11 @@ A fine border and lightly tinted heading mark that exact pane, including an
 empty pane. Opening global controls or the sidebar retains the selected target.
 The Window can contain multiple top-level sessions; it has no unique main session.
 Parent and feature-source relationships remain independent of pane selection.
+On wide screens the mouse back and forward buttons select the previous or next
+session view in on-screen order and scroll it into view, instead of navigating
+browser history; pressing them over a pane does not select that pane first. A
+horizontal mouse wheel scrolls the row of session views from anywhere over a
+conversation, unless the pointer is over content that scrolls sideways itself.
 There is no separate primary-group selector. **New session view** adds an
 independent empty dock with the same selection and layout controls as a bound
 view. Select it and choose a session from the sidebar. Every pane, including the

@@ -1,5 +1,6 @@
 import { createAgentHostRuntime } from '../../agent-host/src/host.js';
 import { createCodexSessionDirectory } from '../../agent-host/src/directory.js';
+import { createHostExecutionPolicy, protectHostDirectory } from '../../agent-host/src/execution-policy.js';
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import { once } from 'node:events';
 import { mkdtemp, realpath, rm, writeFile, stat } from 'node:fs/promises';
@@ -351,6 +352,30 @@ it.runIf(executable)('reconciles an unknown send and resumes after release while
   } finally { await host.close(); await f.close(); }
 }, 30000);
 
+
+it.runIf(executable)('reopens a session that never received input after its idle release and a daemon restart', async () => {
+  const f = await fixture();
+  const provider = f.provider();
+  // The policy reads the session's workspace before opening it, as an installed Controller does.
+  const directory = protectHostDirectory(createCodexSessionDirectory(provider, []), (await createHostExecutionPolicy({ AGENT_HOST_WORKSPACE: f.home }))!);
+  const host = createAgentHostRuntime({ registrations: [{ adapter: provider, directory }], idleGraceMs: 100, idleReconcileMs: 100 });
+  try {
+    const native = await directory.create({ cwd: f.home });
+    expect((await host.control({ method: 'POST', path: '/remote/attach', sessionId: 'empty',
+      body: JSON.stringify({ providerId: 'codex', nativeSessionId: native }) })).status).toBe(200);
+    const lease = await host.acquireSession('empty');
+    const original = await directory.open(native);
+    lease!.release();
+    await expect.poll(async () => (await original.runtimeInfo()).status).toBe('closed');
+    await stop(f.daemon); await f.restartDaemon();
+    const restored = await host.acquireSession('empty');
+    expect(restored!.agent.snapshot().payload.runtimeInfo.sessionId).toBe(native);
+    expect(f.modelRequests).toBe(0);
+    await restored!.agent.sendMessage('First input after reopening');
+    await expect.poll(() => JSON.stringify(host.relay.requireAgent('empty').fetchTimeline({ requestId: 'tail', agentId: 'empty', direction: 'tail', limit: 100 })), { timeout: 8000 }).toContain('SHARED_OK');
+    restored!.release();
+  } finally { await host.close(); await f.close(); }
+}, 30000);
 
 it.runIf(executable)('keeps a running turn alive with no Controller subscriber during an upgrade', async () => {
   const f = await fixture();

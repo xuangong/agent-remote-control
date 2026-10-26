@@ -78,7 +78,7 @@ it('persists the grant and restores tools and instructions after directory recre
     expect(await directory.create({ sourceNativeSessionId: 'source' })).toBe('side');
     const start = natives[0]!.requests.find(request => request.method === 'thread/start')!;
     expect(start.params).toMatchObject({ dynamicTools: [{ name: 'read_source_session' }], developerInstructions: expect.stringContaining('source') });
-    expect(natives[0]!.requests.some(request => request.method === 'thread/read' || request.method === 'thread/items/list')).toBe(false);
+    expect(natives[0]!.requests.some(request => (request.method === 'thread/read' || request.method === 'thread/items/list') && (request.params as { threadId?: string }).threadId === 'source')).toBe(false);
     await directory.close();
     directory = createCodexSessionDirectory(makeProvider(), [], new SessionReferenceStore(root));
     const restored = await directory.open('side');

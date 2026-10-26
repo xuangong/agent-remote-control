@@ -7,6 +7,7 @@ import type { AgentHistoryQuery, AgentPersistenceHandle, AgentProviderAdapter, A
 import type { AgentHostDirectory, AgentHostWorkspace } from './host.js';
 import { requireSessionExtensionIdentity, sessionExtensionIdentity } from './session-extension-identity.js';
 import { SessionReferenceStore, disposeAfterSourceGrantFailure, sourceSessionExtensions, type SourceBindingReader } from './session-reference.js';
+import type { SessionCreationStore } from './session-creation-store.js';
 
 export type ManagedStdioProvider = Pick<AgentProviderAdapter, 'createSession' | 'resumeSession' | 'readSessionHistory' | 'nativePrefix'> & {
     validatePromptEdit?(target: AgentNativePrefixTarget): Promise<void>;
@@ -35,6 +36,8 @@ export function createManagedStdioDirectory(
   workspaces: readonly AgentHostWorkspace[],
   ownership?: {root: string; onDiagnostic?: (event: NativeOwnerDiagnostic) => void},
   references?: SessionReferenceStore,
+  /** Where the creation handles of sessions created here are kept, for an agent that saves a session only with its first message. */
+  creations?: SessionCreationStore,
 ): AgentHostDirectory {
   const opened = new Map<string, { session: AgentSession; handle: AgentPersistenceHandle; createdAt: string; extensionIdentity: string; sourceAvailable: boolean; nativeCreation?: string; nativePrefix?: string; owner?: NativeSessionLease }>();
   const leases = new Map<string, NativeSessionLease>();
@@ -246,7 +249,7 @@ export function createManagedStdioDirectory(
       },
     } : {}),
     ...(provider.sessionWorkspace ? { async sessionWorkspace(id: string, handle?: AgentPersistenceHandle) {
-      return provider.sessionWorkspace!(id, handle ?? (await references?.get(id))?.handle);
+      return provider.sessionWorkspace!(id, handle ?? (await references?.get(id))?.handle ?? await creations?.get(id));
     } } : {}),
     async create(input, evidence) {
       if (closed) throw new Error(`${displayName} directory is closed.`);
@@ -273,6 +276,9 @@ export function createManagedStdioDirectory(
             await entry.session.dispose(); if (opened.get(id) === entry) opened.delete(id); controllerTools.delete(id);
           });
         }
+      } else {
+        // Without it the session still works; it only cannot reopen before its first message after a restart.
+        await creations?.set(entry.handle).catch(() => undefined);
       }
       if (closed) throw new Error(`${displayName} directory is closed.`);
       if (opened.get(id) !== entry || !entry.sourceAvailable || entry.owner && !entry.owner.active) throw new Error('Source reader control was transferred or closed during creation.');
@@ -362,13 +368,14 @@ export function createManagedStdioDirectory(
         const extensions = await resumedExtensions(nativeSessionId, options?.extensions, () => readerReady ? nativeSessionId : undefined, () => readerSession);
         const owner = await lease(nativeSessionId, options?.takeOver);
         const identity = sessionExtensionIdentity(extensions);
-        // A Side created here keeps its creation handle. One that never received input may have no native history
-        // after a restart; only then does that handle reopen it empty. With history, native state wins as usual.
-        const grant = handle || existing?.handle || !provider.sessionWorkspace ? undefined : await references?.get(nativeSessionId);
-        const created = grant && !await provider.sessionWorkspace!(nativeSessionId) ? grant.handle : undefined;
+        // A session created here keeps its creation handle, a Side with its source reference. One that never received
+        // input has no native history once its process is gone; only then does it reopen empty, from its latest handle.
+        // With history, native state wins as usual.
+        const creation = handle || !provider.sessionWorkspace ? undefined : (await references?.get(nativeSessionId))?.handle ?? await creations?.get(nativeSessionId);
+        const created = creation && !await provider.sessionWorkspace!(nativeSessionId) ? existing?.handle ?? creation : undefined;
         let session: AgentSession;
         try {
-          session = await provider.resumeSession(handle ?? existing?.handle ?? created ?? { providerId, sessionId: nativeSessionId, opaque: '{}' }, extensions,
+          session = await provider.resumeSession(handle ?? created ?? existing?.handle ?? { providerId, sessionId: nativeSessionId, opaque: '{}' }, extensions,
             created ? { ...resumeOptions, initializeEmpty: true } : resumeOptions);
         } catch (error) {
           if (owner) {

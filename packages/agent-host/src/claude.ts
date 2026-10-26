@@ -9,6 +9,7 @@ import { nativeInvocation, resolveNativeExecutable } from './platform/executable
 import { createClaudeSessionDirectory } from './claude-directory.js';
 import type { AgentHostProviderRegistration, AgentHostWorkspace } from './host.js';
 import {SessionReferenceStore} from './session-reference.js';
+import {SessionCreationStore} from './session-creation-store.js';
 import {SessionPermissionModeStore} from './permission-mode-store.js';
 
 export interface ClaudeHostRegistrationOptions {
@@ -20,6 +21,8 @@ export interface ClaudeHostRegistrationOptions {
   workspaces?: readonly AgentHostWorkspace[];
   claudeHome?: string;
   referenceDirectory?: string;
+  /** Where the creation handles of sessions created here are kept; defaults to the Controller state for this profile. */
+  creationDirectory?: string;
   /** Where each session's last confirmed permission mode is kept; defaults to the Controller state for this profile. */
   permissionModeDirectory?: string;
 }
@@ -40,5 +43,7 @@ export async function createClaudeHostRegistration(options: ClaudeHostRegistrati
   const provider = new ClaudeAgentProvider({ executable, env, restrictedNative: options.restrictedNative, requestTimeoutMs: options.requestTimeoutMs, onDiagnostic: options.onDiagnostic, permissionModes });
   const ownership = {root: join(canonicalProfile, '.arc-session-owners'), onDiagnostic: (event: unknown) => options.onDiagnostic?.(JSON.stringify(event))};
   const references = new SessionReferenceStore(options.referenceDirectory ?? join(homedir(), '.agent-remote-control', 'session-references', 'claude', scope), 'claude');
-  return { nativePermissionControl: true, nativeVersion: `${match[1]}.${match[2]}.${match[3]}`, adapter: provider, directory: createClaudeSessionDirectory(provider, options.workspaces ?? [], ownership, references) };
+  // Claude saves a session only with its first message.
+  const creations = new SessionCreationStore(options.creationDirectory ?? join(homedir(), '.agent-remote-control', 'session-creations', 'claude', scope), 'claude');
+  return { nativePermissionControl: true, nativeVersion: `${match[1]}.${match[2]}.${match[3]}`, adapter: provider, directory: createClaudeSessionDirectory(provider, options.workspaces ?? [], ownership, references, creations) };
 }

@@ -127,7 +127,7 @@ describe('Codex native children', () => {
       await expect.poll(() => h.requests.filter(({ method }) => method === 'thread/read').length).toBeGreaterThan(0);
       await new Promise(resolve => setImmediate(resolve));
       expect((await h.parent.runtimeInfo()).childSessions).toEqual([]);
-      expect(h.requests.filter(({ method, params }) => method === 'thread/read' && params.includeTurns === true)).toEqual([]);
+      expect(h.requests.filter(({ method, params }) => method === 'thread/read' && params.threadId === 'foreign' && params.includeTurns === true)).toEqual([]);
     } finally { await h.parent.dispose(); }
   });
 
@@ -413,7 +413,7 @@ describe('Codex native children', () => {
       await expect.poll(async () => (await h.parent.runtimeInfo()).childSessions?.length).toBe(1);
       const child = await h.provider.openChildSession('parent', 'child');
       expect(await observations(child, 2)).toMatchObject([{ delivery: 'history', event: { item: { text: 'Early reply after snapshot' } } }, { type: 'history_boundary' }]);
-      expect(h.requests.filter(({ method, params }) => method === 'thread/read' && params.includeTurns)).toHaveLength(2);
+      expect(h.requests.filter(({ method, params }) => method === 'thread/read' && params.threadId === 'child' && params.includeTurns)).toHaveLength(2);
     } finally { await h.parent.dispose(); }
   });
 

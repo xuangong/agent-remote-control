@@ -900,6 +900,8 @@ describe('shared Codex recovery', () => {
 
 it('restores ten latest turns over Unix WebSocket and serves older history through the public wire', async () => {
   const { server, session } = await harness({ initialDelayMs: 5, maximumDelayMs: 5 }, false);
+  // Creation reads the new thread's full history once to save it; recovery must not.
+  const created = server.requests.length;
   server.thread.status = { type: 'active', activeFlags: ['waitingOnApproval'] };
   const turns = Array.from({ length: 23 }, (_, i) => ({ id: `page-turn-${i + 1}`, status: 'completed',
     items: [{ id: `page-message-${i + 1}`, type: 'agentMessage', text: `Message ${i + 1}` }] }));
@@ -939,7 +941,7 @@ it('restores ten latest turns over Unix WebSocket and serves older history throu
     expect(output.at(-1)).toMatchObject({ status: 'ok', value: { type: 'timeline_page', payload: { requestId: 'oldest', hasOlder: false, entries: [{ turnId: 'page-turn-1' }, { turnId: 'page-turn-2' }, { turnId: 'page-turn-3' }] } } });
     expect(manager.timelineCursor()).toEqual(cursor);
     expect(manager.snapshot().payload.status).toBe('waiting');
-    expect(server.requests.filter(request => request.method === 'thread/read' && request.params.includeTurns === true)).toHaveLength(0);
+    expect(server.requests.slice(created).filter(request => request.method === 'thread/read' && request.params.includeTurns === true)).toHaveLength(0);
     expect(server.requests.filter(request => request.method === 'thread/turns/list').map(request => request.params.limit)).toEqual([10, 10, 10]);
   } finally { wire.close(); }
 });

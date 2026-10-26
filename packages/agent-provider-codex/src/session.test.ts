@@ -19,9 +19,14 @@ function createSessionHarness() {
     for (const line of lines) {
       if (!line) continue;
       const message = JSON.parse(line) as { id?: number; method?: string; params?: unknown };
+      const previous = requests.at(-1)?.method;
       if (typeof message.id === 'number' && message.method) requests.push(message as typeof requests[number]);
       if (typeof message.id === 'number' && message.method === 'thread/turns/list') {
         child.stdout.write(`${JSON.stringify({ id: message.id, error: { code: -32601, message: 'Method not found' } })}\n`);
+      }
+      // A new thread is saved by reading its full history, which Codex refuses to list while it has no turns.
+      if (typeof message.id === 'number' && message.method === 'thread/read' && previous === 'thread/start') {
+        child.stdout.write(`${JSON.stringify({ id: message.id, error: { code: -32601, message: 'list_turns is not supported yet' } })}\n`);
       }
       if (typeof message.id === 'number' && ['collaborationMode/list', 'model/list', 'configRequirements/read'].includes(message.method ?? '')) {
         child.stdout.write(`${JSON.stringify({ id: message.id, result: { data: [] } })}\n`);

@@ -453,6 +453,10 @@ export class CodexAppServerSession implements AgentSession {
       ...(sessionInstructions(stored) ? { developerInstructions: sessionInstructions(stored) } : {}),
     });
     session.setThreadFromResponse(response, 'thread/start');
+    // Codex saves a thread with its first turn, so one that never received input is lost once Codex unloads it.
+    // Reading its full history saves it now; some versions save it but refuse to list zero turns.
+    await transport.request('thread/read', { threadId: session.threadId, includeTurns: true })
+      .catch((error: unknown) => { if (!(error instanceof CodexAppServerRpcError)) throw error; });
     session.finishBootstrap([], new Map());
     return session;
   }

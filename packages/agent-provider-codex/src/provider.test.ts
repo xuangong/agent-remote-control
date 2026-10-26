@@ -61,8 +61,10 @@ describe('CodexAppServerProvider contract', () => {
     await session.sendMessage('Hello');
 
     expect(appServer.requests.map((request) => request.method)).toEqual([
-      'initialize', 'model/list', 'configRequirements/read', 'collaborationMode/list', 'thread/start', 'turn/start',
+      'initialize', 'model/list', 'configRequirements/read', 'collaborationMode/list', 'thread/start', 'thread/read', 'turn/start',
     ]);
+    // Reading the full history saves the new thread before its first turn.
+    expect(appServer.requests[5]!.params).toEqual({ threadId: 'thread-1', includeTurns: true });
     await expect(session.runtimeInfo()).resolves.toMatchObject({
       providerId: 'codex', sessionId: 'thread-1', status: 'running',
       persistence: { providerId: 'codex', sessionId: 'thread-1' },

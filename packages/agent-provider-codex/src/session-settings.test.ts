@@ -255,7 +255,9 @@ describe('Codex session settings', () => {
         { model: 'b', supportedReasoningEfforts: [{ reasoningEffort: 'high' }, { reasoningEffort: 'low' }] },
       ] }),
       'configRequirements/read': () => ({ requirements: null }),
-      'thread/read': () => {
+      'thread/read': params => {
+        // Creation saves the new thread by reading its full history.
+        if ((params as { includeTurns?: boolean }).includeTurns) return { thread: { id: 'readback', turns: [] } };
         if (mode === 'superseded') server.child.stdout.write(`${JSON.stringify({ method: 'thread/settings/updated', params: { threadId: 'readback', threadSettings: { model: 'b', effort: 'high' } } })}\n`);
         return { thread: { id: 'readback', status: { type: mode === 'unloaded' ? 'notLoaded' : 'idle' }, model: 'b', reasoningEffort: 'low', approvalPolicy: 'never' } };
       },
@@ -267,7 +269,7 @@ describe('Codex session settings', () => {
       expect(refreshed.model).toBe(mode === 'unloaded' ? 'a' : 'b');
       expect(refreshed.settings?.find(setting => setting.id === 'effort')?.value).toBe(mode === 'fresh' ? 'low' : 'high');
       expect(refreshed.settings?.find(setting => setting.id === 'approval')?.value).toBe('on-request');
-      expect(server.requests.filter(request => request.method === 'thread/read')).toMatchObject([{ params: { threadId: 'readback', includeTurns: false } }]);
+      expect(server.requests.filter(request => request.method === 'thread/read').slice(1)).toMatchObject([{ params: { threadId: 'readback', includeTurns: false } }]);
       expect(server.requests.some(request => request.method === 'thread/resume' || request.method === 'thread/settings/update')).toBe(false);
     } finally { await session.dispose(); }
   });

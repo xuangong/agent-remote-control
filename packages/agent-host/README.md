@@ -381,10 +381,18 @@ Host checks real paths, including symbolic links, before creating or importing
 sessions and before native input or settings mutations. Catalogs omit sessions
 outside those roots and sessions whose workspace cannot be established; opening
 a session whose workspace cannot be established reports it as unavailable rather
-than as a workspace refusal. A Claude Side keeps the creation handle saved with
-its source reference, so one that never received a message, and therefore has no
-native transcript after a Controller restart, reopens empty under the same
-identity; once it has history, native state is resumed as usual. Native
+than as a workspace refusal.
+
+A session created here reopens even if it never received a message. Codex saves
+a thread only with its first turn and forgets an unsaved one once the shared
+daemon unloads it, for example after the Host releases an idle session or the
+daemon restarts, so the Host has Codex save each new thread when it creates it.
+Claude writes a transcript only with the first message, so the Host keeps the
+creation handle of each session it creates under
+`~/.agent-remote-control/session-creations/claude/` for 30 days, and a Side keeps
+it with its source reference. A session with no native transcript after a
+Controller restart reopens empty from that handle under the same identity; once
+it has history, native state is resumed as usual. Native
 permission settings are read-only to remote controllers except for trusted shared
 Codex sessions and supported Claude modes. Shared Codex sessions accept permission
 changes from the web and publish native permission updates from other clients on

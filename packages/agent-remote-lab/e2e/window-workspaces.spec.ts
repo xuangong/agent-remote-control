@@ -895,3 +895,58 @@ test('the Window overview shows shared session states that the Controller report
     await expect(pane.locator('.lab-window-card-state')).toHaveText('Host offline');
   } finally { await page.close(); await fixture.close(); }
 });
+
+test('a session the Host no longer has shows as an empty view, without reopening, until another session takes its place', async ({ page, context }) => {
+  const fixture = await sessionLinkFixture({ automaticSignIn: true });
+  const errors: string[] = [];
+  page.on('pageerror', error => errors.push(error.message));
+  try {
+    await page.setViewportSize({ width: 1680, height: 1000 });
+    await page.goto(fixture.url);
+    await page.getByRole('link', { name: 'Sign in', exact: true }).click();
+    await page.getByLabel('Connected Host').selectOption(fixture.hostId);
+    await showNewSession(page); await page.getByTestId('session-create').click();
+    await expect(page.locator('.lab-primary-group[data-selected="true"]').getByTestId('prompt-input')).toBeEnabled();
+    const panel = await openWindows(page);
+    const windowId = (await panel.locator('[data-window-id][aria-current="true"]').getAttribute('data-window-id'))!;
+    await panel.getByRole('button', { name: 'Close Windows', exact: true }).click();
+    const access = await (await context.request.get(fixture.url + '/auth/status')).json();
+    const endpoint = `${fixture.url}${access.basePath}v1/windows/${windowId}`;
+    const inspect = async (): Promise<WorkspaceWindow> => (await (await context.request.get(endpoint)).json()).window;
+    const primary = (await inspect()).views.find(view => view.placement === 'primary')!;
+    await page.locator('.lab-session-dock-add').click();
+    const dockId = (await inspect()).views.find(view => view.placement === 'dock')!.id;
+    await page.locator(`[data-dock-id="${dockId}"]`).click();
+    await showNewSession(page); await page.getByTestId('session-create').click();
+    await expect.poll(async () => (await inspect()).views.find(view => view.id === dockId)?.binding?.nativeSessionId).not.toBeUndefined();
+    const docked = (await inspect()).views.find(view => view.id === dockId)!.binding!;
+    const dock = page.locator(`.lab-bindable-session-window[data-view-id="${dockId}"]`);
+    await expect(dock.getByTestId('prompt-input')).toBeEnabled();
+    fixture.forgetSession(primary.binding!.nativeSessionId); fixture.forgetSession(docked.nativeSessionId);
+    const attaches: string[] = [];
+    page.on('request', request => { if (request.url().endsWith('/attach')) attaches.push(JSON.parse(request.postData() ?? '{}').nativeSessionId); });
+    await page.reload();
+    // The selected primary view, which the page restores itself, and a dock that opens its own session.
+    const primaryView = page.locator(`.lab-empty-session-view[data-view-id="${primary.id}"]`);
+    await expect(primaryView.locator('.lab-missing-session-note')).toHaveText('“New session” no longer exists on Cross-device Host. It was deleted, or it was never saved because it received no message.');
+    await expect(primaryView.getByRole('button', { name: 'New session', exact: true })).toBeVisible();
+    await expect(dock.locator('.lab-missing-session-note')).toBeVisible();
+    await expect(dock.getByRole('button', { name: 'Open sidebar', exact: true })).toBeVisible();
+    await expect(dock.getByTestId('prompt-input')).toHaveCount(0);
+    await expect(page.locator('.lab-session-notice')).toHaveCount(0);
+    await expect(page.getByText(/could not find this session/)).toHaveCount(0);
+    await page.screenshot({ path: test.info().outputPath('missing-session-views.png') });
+    const attempts = attaches.length;
+    expect(attaches.filter(id => id === primary.binding!.nativeSessionId).length).toBeGreaterThan(0);
+    await page.waitForTimeout(6000);
+    expect(attaches).toHaveLength(attempts);
+    // The Window keeps the reference until the view holds another session.
+    expect((await inspect()).views.find(view => view.id === primary.id)?.binding?.nativeSessionId).toBe(primary.binding!.nativeSessionId);
+    await primaryView.getByRole('button', { name: 'New session', exact: true }).click();
+    await page.getByTestId('session-create').click();
+    await expect.poll(async () => (await inspect()).views.find(view => view.id === primary.id)?.binding?.nativeSessionId).not.toBe(primary.binding!.nativeSessionId);
+    await expect(page.locator(`.lab-primary-group[data-primary-group-id="${primary.id}"]`).getByTestId('prompt-input')).toBeEnabled();
+    await expect(page.locator(`.lab-empty-session-view[data-view-id="${primary.id}"]`)).toHaveCount(0);
+    expect(errors).toEqual([]);
+  } finally { await fixture.close(); }
+});

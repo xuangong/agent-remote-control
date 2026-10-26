@@ -58,3 +58,8 @@ export function SessionConnectionNotice({ notice, action }: { notice: SessionCon
     </details> : null}
   </div>;
 }
+
+/** Shown in place of a session the Host confirmed missing; the view itself is then empty and can hold another session. */
+export function MissingSessionNote({ title, host }: { title: string; host: string }) {
+  return <p className="lab-missing-session-note">“{title}” no longer exists on {host}. It was deleted, or it was never saved because it received no message.</p>;
+}

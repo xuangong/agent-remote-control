@@ -15,7 +15,7 @@ HTTP failures retain `code`, `error`, and an optional `requestId`. The Relay ass
 | `host_timeout` | Another operation did not return before the Relay deadline; its outcome is uncertain. | Check the session before retrying. Preserve the operation identity. |
 | `native_file_limit` | A shared Codex daemon RPC reported file descriptor exhaustion. | Review active work, then optionally copy the daemon restart command and run it on the Host. All attached sessions disconnect and running work can be interrupted. |
 | `native_runtime_unavailable` | The adapter could not establish or retain its native connection. | Check the daemon and the Controller's configured local socket. |
-| `native_session_unavailable` | A direct native identity lookup or resume confirmed that the runtime could not find the requested session. This does not establish whether it was empty, deleted, or previously used. | Directory attachment restoration stops with HTTP 404. Check the native client and Controller diagnostics, then explicitly retry the same identity. |
+| `native_session_unavailable` | A direct native identity lookup or resume confirmed that the runtime could not find the requested session. This does not establish whether it was empty, deleted, or previously used. | Directory attachment restoration stops with HTTP 404. A Window view shows the session as empty instead; open or create another session in it, or close it. |
 | `native_resume_timeout` | The native resume request reached its own deadline. | Inspect Controller diagnostics and reopen the session. |
 | `native_history_timeout` | The native history request reached its own deadline. | Inspect Controller diagnostics and reopen the session. |
 | `native_request_timeout` | Another native initialization or catalog request reached its deadline. | Inspect Controller diagnostics. |
@@ -28,6 +28,8 @@ HTTP failures retain `code`, `error`, and an optional `requestId`. The Relay ass
 Missing and inaccessible session bindings have identical responses. Unknown native error messages are not forwarded during attach or recovery; recognized adapter errors use fixed public descriptions. Older Hosts with unclassified failures fall back to `session_attach_failed`. The workbench interprets legacy `host_timeout` in the context of an existing-session open only; mutation uncertainty remains unchanged.
 
 ## Workbench behavior
+
+A Window view whose own session the Host confirms missing (`native_session_unavailable`) shows as an empty view that names the missing session, with the usual controls to choose or create a session there; it raises no alert and is not opened again while the page stays open. The Window keeps the reference until the view holds another session or is closed, so a later page load checks the Host once more and opens the session if it has returned, for example after a Controller configuration is corrected. Subagent, history, and Side panes keep reporting the failure in place.
 
 Opening and unconfirmed wait deadlines appear as status messages. Confirmed native failures appear as alerts, even when automatic restoration will retry. Connection details disclose the code, HTTP status, and request ID when available. Browser wait deadlines cannot include an ID that the browser never received. Successful restoration clears the notice; changing selection prevents an obsolete response from attaching the previous session.
 

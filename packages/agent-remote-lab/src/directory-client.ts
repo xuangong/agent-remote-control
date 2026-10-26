@@ -26,6 +26,8 @@ export interface OpenedSession { hostId?: string; agentId: string; providerId: s
 export class DirectoryError extends Error {
   constructor(message: string, readonly code?: string, readonly status?: number, readonly requestId?: string, readonly nativeOwner?: NativeSessionOwner) { super(message); }
 }
+/** The Host's native agent looked the session up by its identity and has no such session, so opening it again cannot succeed. */
+export const nativeSessionMissing = (error: unknown): boolean => error instanceof DirectoryError && error.code === 'native_session_unavailable';
 export interface SuccessionPrepareInput { operationId: string; providerId: string; nativeSessionId: string; expectedRevision: number; targetProviderId?: string; preparation?: NativePrefixSelection }
 export class SessionDirectoryClient {
   readonly cachedPages = new Map<string, SessionCatalogPage>();

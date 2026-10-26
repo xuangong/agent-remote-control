@@ -71,6 +71,8 @@
 .lab-empty-session-heading > strong { flex: 1; min-width: 0; }
 .lab-empty-session-heading > div { display: flex; align-items: center; gap: 4px; }
 .lab-empty-session-body { display: flex; flex: 1; flex-direction: column; align-items: center; justify-content: center; gap: 8px; padding: 24px; color: var(--obs-text-secondary); text-align: center; }
+.lab-empty-session-actions { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; }
+.lab-primary-group-content > .lab-empty-session-view { display: flex; flex-direction: column; height: 100%; }
 .lab-session-open-target { display: flex; gap: 5px; padding: 8px 16px; min-width: 0; color: var(--obs-text-secondary); font-size: 12px; border-bottom: 1px solid var(--obs-border); }
 .lab-session-open-target strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--obs-text); font-weight: 500; }
 

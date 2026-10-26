@@ -78,7 +78,7 @@ import { FavoritesHeading, FavoritesList, FavoritesMenu, StarButton } from './co
 import { SessionTrackingMenu } from './components/SessionTrackingMenu.js';
 import { TrackedSessionViews, unlinkSideView, type TrackedSessionView } from './tracked-session-views.js';
 import { ToastProvider, useFeedbackToast, useToast } from './components/Toast.js';
-import { SessionConnectionNotice, sessionConnectionFailure, type SessionConnectionMessage } from './components/SessionConnectionNotice.js';
+import { MissingSessionNote, SessionConnectionNotice, sessionConnectionFailure, type SessionConnectionMessage } from './components/SessionConnectionNotice.js';
 import type { ResourceResponseState } from '@orchardworks/agent-remote-protocol';
 import { readControllerLocation, type ControllerLocation } from '@orchardworks/agent-remote-hosted/controller-location';
 import { MobileDisplaySettings } from './components/MobileDisplaySettings.js';
@@ -121,7 +121,7 @@ import { compositionSession, compositionSelection, type StoreOwner } from './ses
 import { useRemoteHosts } from './hooks/useRemoteHosts.js';
 import { useVisualViewport } from './hooks/useVisualViewport.js';
 import { HostPairing, type HostPairingService, type RemoteHost } from './components/HostPairing.js';
-import { DirectoryError, RemoteHostClient, SessionDirectoryClient, type CreateSessionOptions, type OpenedSession, type SessionSummary } from './directory-client.js';
+import { DirectoryError, nativeSessionMissing, RemoteHostClient, SessionDirectoryClient, type CreateSessionOptions, type OpenedSession, type SessionSummary } from './directory-client.js';
 import { SessionConfiguration, SessionDirectory } from './components/SessionDirectory.js';
 import { useSessionEntries } from './hooks/useSessionEntries.js';
 import { readCurrentConversationLayout, useConversationHistory } from './hooks/useConversationHistory.js';
@@ -348,6 +348,13 @@ function AppContent({
   const teamRosterRef = useRef(teamRoster); teamRosterRef.current = teamRoster;
   // An explicit Window restores its own bindings; session parameters may describe a pane that was closed.
   const [initialSession] = useState(() => initialState || new URLSearchParams(window.location.search).has('window') ? undefined : requested.target);
+  // Sessions the Host confirmed missing during this page's lifetime. Their views show as empty instead of reopening them;
+  // the Window keeps the reference until the view holds another session or closes, so a later page load checks again.
+  const [missingSessions, setMissingSessions] = useState<ReadonlySet<string>>(() => new Set());
+  const markSessionMissing = useCallback((session: Pick<OpenedSession, 'hostId' | 'providerId' | 'nativeSessionId'>) => {
+    const key = sessionKey(session);
+    setMissingSessions(current => current.has(key) ? current : new Set([...current, key]));
+  }, []);
   const succession = useSessionSuccession({
     targetRevision: JSON.stringify(teamRoster),
     validateTarget(selection, viewId, document) {
@@ -382,6 +389,7 @@ function AppContent({
       setProviderName(providerConnectionName(session.hostId ?? 'local', session.providerId));
     },
     failed: (error, selection, retrying = false) => {
+      if (!retrying && nativeSessionMissing(error)) markSessionMissing(selection);
       setSessionNotice({ ...sessionConnectionFailure(error, retrying), successionError: error instanceof Error ? error.message : 'The session could not be opened.' });
       if (error instanceof DirectoryError && error.nativeOwner) setNativeTakeover({ item: selection, owner: error.nativeOwner, message: error.message });
     },
@@ -441,7 +449,11 @@ function AppContent({
   const [nativeTakeover, setNativeTakeover] = useState<{item: Pick<SessionSummary, 'providerId' | 'nativeSessionId' | 'title'> & {hostId?: string}; owner: NativeSessionOwner; message: string}>();
   const openingHandoff = nativeTakeover ? sessionHandoffScope(transport).forTarget(sessionKey({ ...nativeTakeover.item, hostId: nativeTakeover.item.hostId ?? selectedHost.id })) : undefined;
   useEffect(() => openingHandoff?.subscribe(() => refreshOpeningHandoff(version => version + 1)), [openingHandoff]);
-  const [sessionNotice, setSessionNotice] = useState<SessionConnectionMessage>();
+  const [storedSessionNotice, setSessionNotice] = useState<SessionConnectionMessage>();
+  const selectedPrimaryBinding = sharedWindow?.views.find(view => view.id === sharedWindow.selectedPrimaryViewId)?.binding;
+  const selectedPrimaryMissing = !!selectedPrimaryBinding && missingSessions.has(sessionKey(selectedPrimaryBinding));
+  // The selected view already shows its missing session as an empty view.
+  const sessionNotice = selectedPrimaryMissing && storedSessionNotice?.code === 'native_session_unavailable' ? undefined : storedSessionNotice;
   const [failure, setFailure] = useState<string | undefined>(requested.error);
   useFeedbackToast('Session operation', failure);
   useFeedbackToast('Session connection', nativeTakeover ? undefined : sessionNotice?.message, sessionNotice?.tone === 'alert' ? 'error' : 'info');
@@ -2114,7 +2126,7 @@ function AppContent({
       <WindowWorkspaces workspace={windowWorkspace} />
     </div>
   </main>;
-  const successionFailure = succession.error && succession.error !== nativeTakeover?.message ? succession.error : undefined;
+  const successionFailure = succession.error && succession.error !== nativeTakeover?.message && !selectedPrimaryMissing ? succession.error : undefined;
   const successionRetry = successionFailure && !nativeTakeover ? <button type="button" onClick={succession.retry}>{succession.result?.status === 'applied' ? 'Retry session' : 'Retry synchronization'}</button> : undefined;
   // One failure gets one notice; the connection notice already explains this succession failure.
   const successionNotice = !!successionFailure && !nativeTakeover && sessionNotice?.successionError === successionFailure;
@@ -2334,6 +2346,7 @@ function AppContent({
           offline={entry.target ? remoteHosts.find(host => host.id === entry.target!.hostId)?.online === false : false}
           actions={entry.groupId ? <TeamGatherButton baseUrl={baseUrl} entry={entry} onGather={targets => sessionWindows.gather(entry, targets)} /> : undefined}
           onSessionBound={entry.managed ? undefined : receiveViewSession}
+          missing={!!entry.target && missingSessions.has(sessionKey(entry.target))} onSessionUnavailable={markSessionMissing}
           sessionPresentation={entry.managed ? undefined : sessionViewPresentation}
           transport={transport} draftStore={messageDrafts} {...windowDraftBinding(entry)} navigation={viewNavigation} onClose={() => sessionWindows.close(entry.id)} />)}</div>
         {sharedWindow && !sharedWindow.views.length ? <div className="lab-window-empty" data-testid="empty-window">
@@ -2356,9 +2369,10 @@ function AppContent({
               && [compositionSelection(pendingSlot), { hostId: pendingSlot.origin.target.hostId, ...pendingSlot.origin.target.native }]
                 .some(source => sessionKey(source) === sessionKey(view.binding!)) ? pendingSlot : undefined);
             const additionalWidth = sharedWindow.views.filter(child => child.id !== view.id && windowPrimaryViewId(sharedWindow, child.id) === view.id && !child.collapsed).reduce((total, child) => total + child.width, 0);
-            return { id: view.id, title: view.binding?.title ?? 'Select session', width: view.width, additionalWidth,
+            const missing = !!view.binding && missingSessions.has(sessionKey(view.binding));
+            return { id: view.id, title: view.binding && !missing ? view.binding.title : 'Select session', width: view.width, additionalWidth,
               selected: view.id === presentedPrimaryViewId, collapsed: view.collapsed,
-              content: view.binding ? <PrimarySessionFamily baseUrl={baseUrl} storageScope={baseUrl} target={view.binding} viewId={view.id}
+              content: view.binding && !missing ? <PrimarySessionFamily baseUrl={baseUrl} storageScope={baseUrl} target={view.binding} viewId={view.id}
                 sessionIntent={view.binding.sessionIntent}
                 successionContext={succession.successionContextFor(slot?.id)}
                 directoryFor={hostId => hostId === selectedHost.id ? directory : undefined}
@@ -2368,7 +2382,7 @@ function AppContent({
                 hostLabel={remoteHosts.find(host => host.id === view.binding!.hostId)?.name ?? view.binding.hostId}
                 offline={remoteHosts.find(host => host.id === view.binding!.hostId)?.online === false}
                 compact={compactLayout} active={activeView === 'workbench' && !supportingRailOpen && (!compactLayout || view.id === (presentedPrimaryViewId ?? sharedWindow.selectedPrimaryViewId))}
-                transport={transport} draftStore={messageDrafts} replicaFor={replicaFor} onSessionBound={receiveViewSession}
+                transport={transport} draftStore={messageDrafts} replicaFor={replicaFor} onSessionBound={receiveViewSession} onSessionUnavailable={markSessionMissing}
                 draftBinding={slot ? draftOwnerBinding(slot.owners.text) : undefined} imageDraftBinding={slot?.owners.image}
                 displayBinding={{ scope: baseUrl, key: view.id }} navigation={viewNavigation}
                 sessionPresentation={sessionViewPresentation} />
@@ -2378,9 +2392,12 @@ function AppContent({
                     <strong>Select session</strong>
                     <button type="button" data-pane-selection-ignore aria-label="Close primary group: Select session" title="Close session view"
                       onClick={() => windowWorkspace.authority?.operate({ type: 'view.close', viewId: view.id })}>×</button>
-                  </header><p>This session view is empty.</p>
-                  <button type="button" onClick={() => { selectPrimaryGroup(view.id); setSessionPanel('list'); setContextOpen(true); setDesktopContextVisible(true); }}>Choose session</button>
-                  <button type="button" onClick={() => { selectPrimaryGroup(view.id); setSessionPanel('new'); setContextOpen(true); setDesktopContextVisible(true); }}>New session</button></div>,
+                  </header><div className="lab-empty-session-body">
+                    {view.binding ? <MissingSessionNote title={view.binding.title} host={remoteHosts.find(host => host.id === view.binding!.hostId)?.name ?? view.binding.hostId} /> : <p>This session view is empty.</p>}
+                    <div className="lab-empty-session-actions">
+                      <button type="button" onClick={() => { selectPrimaryGroup(view.id); setSessionPanel('list'); setContextOpen(true); setDesktopContextVisible(true); }}>Choose session</button>
+                      <button type="button" onClick={() => { selectPrimaryGroup(view.id); setSessionPanel('new'); setContextOpen(true); setDesktopContextVisible(true); }}>New session</button>
+                    </div></div></div>,
             };
           })} /> : <SessionDockRail onCreateView={createSessionView} minimizedHeader={<div ref={setMinimizedViewTarget} data-pane-selection-ignore className="lab-global-view-slot lab-minimized-view-slot" />} mainTitle={stackRoot?.title ?? activeOpened?.title} minimumBaseWidth={stackRange.end > stackRange.start ? 640 : 320}><ConversationSplit compact={compactLayout} start={stackRange.start} end={stackRange.end}>
         <CollapsedConversations entries={sessionEntries} sessions={stackPath.slice(0, stackRange.start)} offset={0} onExpand={revealSession} />

@@ -116,6 +116,13 @@ view. Select it and choose a session from the sidebar. Every pane, including the
 last primary or the last pane, can be closed. Closing the last pane leaves the
 same empty Window; opening another pane is an explicit action.
 
+When the Host reports that a view's session no longer exists, for example a
+session deleted natively or one an older Controller never saved because it
+received no message, the view shows as empty and names the missing session
+instead of raising an error. Choose or create a session there, or close the
+view. The page does not try to open it again; the Window keeps the reference
+until the view holds another session, so a later page load checks once more.
+
 When the selected pane closes, selection returns to a surviving attached ancestor,
 then the closest surviving preceding pane in the previous `views` document order,
 or the next surviving pane if none precedes it. This is document order, independent

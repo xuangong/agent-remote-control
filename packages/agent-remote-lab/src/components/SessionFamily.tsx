@@ -14,7 +14,7 @@ import { SessionControlNotice } from './SessionControlNotice.js';
 import { AgentReplica, sessionHandoffScope, SessionHandoffRejectedError } from '@orchardworks/agent-remote-web';
 import type { NativeSessionOwner } from '@orchardworks/agent-remote-protocol';
 import './session-family.css';
-import { DirectoryError, SessionDirectoryClient, type OpenedSession } from '../directory-client.js';
+import { DirectoryError, nativeSessionMissing, SessionDirectoryClient, type OpenedSession } from '../directory-client.js';
 import { readWorkspaceSnapshot, workspaceDisplayState } from '../workspace-cache.js';
 import { useConversationSession } from '../hooks/useConversationSession.js';
 import { conversationSessionStorage } from '../conversation-storage.js';
@@ -40,6 +40,8 @@ interface Props extends Pick<ComponentProps<typeof LabWorkbench>, 'consoleComman
   replica?: import('@orchardworks/agent-remote-web').AgentReplica;
   replicaFor?(agentId: string): import('@orchardworks/agent-remote-web').AgentReplica;
   onSessionBound?(session: OpenedSession, viewId?: string, windowViewId?: string): void;
+  /** The Host confirmed that the view's own session no longer exists; the container presents the view as empty instead. */
+  onSessionUnavailable?(target: SessionWindowTarget): void;
   onSessionReady?(session: ReturnType<typeof useConversationSession> | undefined): void;
   attachedSession?: OpenedSession; viewId?: string; windowViewId?: string; nativePrefixOnly?: boolean;
   sessionPresentation?(context: FamilySessionPresentationContext): Partial<ComponentProps<typeof LabWorkbench>>;
@@ -291,7 +293,13 @@ function FamilySession(props: SessionProps) {
       if (stopped) return;
       if (value.nativeSessionId && value.nativeSessionId !== currentTarget.nativeSessionId) throw new Error('The Host returned a different session. Reopen this subagent from its parent.');
       setSession({ ...currentTarget, agentId: value.agentId }); setNativeOwner(undefined);
-    }).catch(error => { if (!stopped) { setError(error instanceof DirectoryError && error.nativeOwner ? '' : error instanceof Error ? error.message : 'The session could not be opened.'); setNativeOwner(error instanceof DirectoryError && error.nativeOwner ? { targetKey, owner: error.nativeOwner } : undefined); } });
+    }).catch(error => {
+      if (stopped) return;
+      if (props.familyRoot && props.onSessionUnavailable && nativeSessionMissing(error) && !historyRoleId && !currentTarget.parentNativeSessionId
+        && sessionKey(currentTarget) === sessionKey(target)) { props.onSessionUnavailable(currentTarget); return; }
+      setError(error instanceof DirectoryError && error.nativeOwner ? '' : error instanceof Error ? error.message : 'The session could not be opened.');
+      setNativeOwner(error instanceof DirectoryError && error.nativeOwner ? { targetKey, owner: error.nativeOwner } : undefined);
+    });
     return () => { stopped = true; abort.abort(); };
   }, [baseUrl, currentTarget.hostId, currentTarget.providerId, currentTarget.nativeSessionId, currentTarget.parentNativeSessionId, historyRoleId, resolutionError, attempt, connections, enabled, directory, props.attachedSession?.agentId, props.attachmentManaged]);
   const displayedSession = session && sessionKey(session) === targetKey ? session : undefined;

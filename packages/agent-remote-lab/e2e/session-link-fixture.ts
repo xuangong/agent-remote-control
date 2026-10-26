@@ -63,7 +63,9 @@ export async function sessionLinkFixture(options: { automaticSignIn?: boolean; l
       const body = JSON.parse(control.body ?? '{}');
       if (control.path === '/remote/attach' || control.path === '/remote/child/attach') {
         const agentId = natives.get(body.nativeSessionId);
-        return { status: agentId ? 200 : 404, body: JSON.stringify(agentId ? { agentId, nativeSessionId: body.nativeSessionId } : { error: 'Session unavailable' }) };
+        // A Controller reports a session its native agent does not have this way.
+        return { status: agentId ? 200 : 404, body: JSON.stringify(agentId ? { agentId, nativeSessionId: body.nativeSessionId }
+          : { error: 'The native session is unavailable on this Host.', code: 'native_session_unavailable' }) };
       }
       if (control.path !== '/remote/create') return { status: 404, body: '{}' };
       const nativeSessionId = randomUUID(); const agentId = randomUUID();
@@ -78,6 +80,8 @@ export async function sessionLinkFixture(options: { automaticSignIn?: boolean; l
   return { url, hostId, setSubject(value: string) { subject = value; },
     holdSessionState(nativeSessionId: string, state?: SessionActivityState) { if (state) heldStates.set(nativeSessionId, state); else heldStates.delete(nativeSessionId); },
     nativeSessionIds: () => [...natives.keys()],
+    /** The native agent loses the session, as Codex did with a thread it never saved. */
+    forgetSession(nativeSessionId: string) { natives.delete(nativeSessionId); },
     disconnectHost: () => uplink.close(),
     async close() {
     await uplink.close(); await relay.close(); await gateway.close();

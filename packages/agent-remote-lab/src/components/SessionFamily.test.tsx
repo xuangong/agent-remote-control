@@ -217,6 +217,23 @@ it('preserves attachment failures and retry alongside product notices without lo
   } finally { attach.mockRestore(); }
 });
 
+it('hands a session the Host confirms missing to its container instead of offering a retry', async () => {
+  const { DirectoryError, SessionDirectoryClient } = await import('../directory-client.js');
+  const missing = new DirectoryError('The native session is unavailable on this Host.', 'native_session_unavailable', 404);
+  const attach = vi.spyOn(SessionDirectoryClient.prototype, 'attach').mockRejectedValue(missing);
+  const target = { hostId: 'local', providerId: 'recorded', nativeSessionId: 'never-saved', title: 'New session' };
+  const transport = { onDiagnostic: () => () => {}, onProtocolMessage: () => () => {}, connect: () => ({ close() {}, send() {} }) } as unknown as RemoteAgentTransport;
+  const reported: unknown[] = [];
+  try {
+    const view = await render(<WorkspaceReady.Provider value><SessionFamily target={target} onSessionUnavailable={session => reported.push(session)}
+      storageScope="family-missing" baseUrl="http://fixture" hostLabel="Local" compact={false} active offline={false}
+      transport={transport} draftStore={new DraftStore('family-missing')} /></WorkspaceReady.Provider>);
+    await vi.waitFor(() => expect(reported).toEqual([target]));
+    expect(attach).toHaveBeenCalledTimes(1);
+    expect(view.querySelector('[role="alert"]')).toBeNull();
+  } finally { attach.mockRestore(); }
+});
+
 it('keeps the latest observed messages ahead of the old disk preview while history resynchronizes', async () => {
   const { saveWorkspaceSnapshot } = await import('../workspace-cache.js');
   const session = { hostId: 'local', providerId: 'recorded', nativeSessionId: 'recorded-session', agentId: 'agent-1', title: 'Working' };

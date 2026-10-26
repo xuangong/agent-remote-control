@@ -850,6 +850,12 @@ test('the Window overview shows every Window by recent use and switches with the
     await page.keyboard.press('Control+Shift+ArrowDown');
     await expect(overview).toBeHidden();
     expect(new URL(page.url()).searchParams.get('window')).toBe(ids.Second);
+    // A click beside the cards returns too.
+    await page.keyboard.press('Control+Shift+ArrowUp');
+    await expect(overview).toBeVisible();
+    await page.mouse.click(840, 900);
+    await expect(overview).toBeHidden();
+    expect(new URL(page.url()).searchParams.get('window')).toBe(ids.Second);
     // Narrow screens keep only the floating Window list.
     await page.setViewportSize({ width: 390, height: 667 });
     await page.keyboard.press('Control+Shift+ArrowUp');

@@ -1,30 +1,37 @@
+/* Cards float over the blurred page rather than inside a panel. */
 .lab-window-overview {
-  box-sizing: border-box; width: calc(100vw - 48px); max-width: 1600px; height: calc(100dvh - 48px); max-height: none; margin: auto; padding: 0;
-  border: 1px solid var(--obs-border-strong); border-radius: 14px; background: var(--obs-canvas); color: var(--obs-text); box-shadow: var(--obs-overlay-shadow);
+  box-sizing: border-box; width: 100vw; height: 100dvh; max-width: none; max-height: none; margin: 0; padding: 0;
+  border: 0; background: transparent; color: var(--obs-text); overflow: hidden;
 }
-.lab-window-overview::backdrop { background: color-mix(in oklab, var(--obs-text) 28%, transparent); }
-.lab-window-overview[open] { animation: lab-window-overview-in 160ms ease-out both; }
-@keyframes lab-window-overview-in { from { opacity: 0; transform: scale(.985); } to { opacity: 1; transform: none; } }
+.lab-window-overview::backdrop {
+  background: color-mix(in oklab, var(--obs-canvas) 30%, transparent);
+  -webkit-backdrop-filter: blur(10px) saturate(1.1); backdrop-filter: blur(10px) saturate(1.1);
+}
+.lab-window-overview[open] { animation: lab-window-overview-in 180ms ease-out both; }
+@keyframes lab-window-overview-in { from { opacity: 0; transform: scale(1.02); } to { opacity: 1; transform: none; } }
 @media (prefers-reduced-motion: reduce) { .lab-window-overview[open] { animation: none; } }
-.lab-window-overview-body { display: flex; flex-direction: column; height: 100%; min-height: 0; }
-.lab-window-overview-heading { display: flex; align-items: center; gap: 12px; flex: none; padding: 14px 16px 10px 24px; }
-.lab-window-overview-heading > h2 { margin: 0; font-size: 16px; font-weight: 600; }
-.lab-window-overview-hint { flex: 1; min-width: 0; color: var(--obs-text-secondary); font-size: 12px; }
-.lab-window-overview-heading > button { flex: none; min-width: 36px; min-height: 36px; padding: 4px; border-color: transparent; color: var(--obs-text-secondary); font-size: 20px; }
-.lab-window-overview-notice { flex: none; margin: 0 24px 10px; color: var(--obs-text-secondary); font-size: 12px; }
+.lab-window-overview-body { display: flex; flex-direction: column; align-items: center; gap: 14px; height: 100%; min-height: 0; padding-top: max(28px, env(safe-area-inset-top)); }
+.lab-window-overview-heading {
+  display: flex; align-items: center; gap: 12px; flex: none; max-width: calc(100% - 48px); padding: 4px 4px 4px 16px;
+  border: 1px solid var(--obs-border); border-radius: 999px; background: color-mix(in oklab, var(--obs-surface) 88%, transparent); box-shadow: var(--obs-overlay-shadow);
+}
+.lab-window-overview-heading > h2 { margin: 0; font-size: 14px; font-weight: 600; }
+.lab-window-overview-hint { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--obs-text-secondary); font-size: 12px; }
+.lab-window-overview-heading > button { flex: none; min-width: 32px; min-height: 32px; padding: 2px; border-color: transparent; border-radius: 999px; color: var(--obs-text-secondary); font-size: 18px; }
+.lab-window-overview-notice { flex: none; margin: 0 24px; padding: 6px 12px; border-radius: 8px; background: var(--obs-surface); box-shadow: var(--obs-overlay-shadow); color: var(--obs-text-secondary); font-size: 12px; }
 .lab-window-overview-notice[role="alert"] { color: var(--obs-danger); }
 .lab-window-overview-grid {
-  display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); align-content: start; gap: 18px;
-  flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: 6px 24px 24px;
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 340px)); justify-content: center; align-content: start; gap: 24px;
+  box-sizing: border-box; width: 100%; max-width: 1640px; flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: 18px 32px 40px;
 }
 .lab-window-card {
   display: flex; flex-direction: column; gap: 10px; min-width: 0; padding: 10px; text-align: left;
-  border: 1px solid var(--obs-border); border-radius: 10px; background: var(--obs-surface); color: inherit; cursor: pointer;
-  transition: border-color 120ms ease, box-shadow 120ms ease;
+  border: 1px solid var(--obs-border); border-radius: 12px; background: var(--obs-surface); color: inherit; cursor: pointer;
+  box-shadow: var(--obs-overlay-shadow); transition: border-color 120ms ease, box-shadow 120ms ease, transform 120ms ease;
 }
-.lab-window-card:hover { border-color: var(--obs-border-strong); }
-.lab-window-card:focus-visible { outline: none; border-color: var(--obs-action); box-shadow: 0 0 0 2px color-mix(in oklab, var(--obs-action) 40%, transparent); }
-.lab-window-card[aria-current="true"] { background: var(--obs-surface-selected); }
+.lab-window-card:hover { border-color: var(--obs-border-strong); transform: translateY(-2px); }
+.lab-window-card:focus-visible { outline: none; border-color: var(--obs-action); box-shadow: 0 0 0 2px color-mix(in oklab, var(--obs-action) 40%, transparent), var(--obs-overlay-shadow); transform: translateY(-2px); }
+.lab-window-card[aria-current="true"] { border-color: color-mix(in oklab, var(--obs-action) 45%, var(--obs-border)); }
 .lab-window-card[aria-busy="true"] { cursor: progress; }
 @media (prefers-reduced-motion: reduce) { .lab-window-card { transition: none; } }
 /* The Window's rail in miniature: every pane keeps its share of the rail's width. */

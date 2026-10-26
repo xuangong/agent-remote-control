@@ -79,12 +79,13 @@ layout edits. Less frequent actions are under **Window options**. On narrow
 screens the panel stays inside the viewport and its content scrolls.
 
 On wide screens, Ctrl+Shift+Up or **All Windows** in the Window panel shows every
-Window side by side, the ones this device used most recently first. Each card
+Window as cards floating over the blurred page, the ones this device used most
+recently first. Each card
 draws the Window's panes in their rail order and relative widths, with each
 pane's session title and agent, and marks the selected pane; floating views are
 counted. The overview only reads the saved layouts, so it opens no session
 connections. Arrow keys move between cards, Enter or a click opens a Window, and
-Escape or Ctrl+Shift+Down returns to the current one. Outside macOS a text field
+Escape, Ctrl+Shift+Down or a click beside the cards returns to the current one. Outside macOS a text field
 keeps Ctrl+Shift+Up for selecting text. Narrow screens offer only the Window
 panel.
 

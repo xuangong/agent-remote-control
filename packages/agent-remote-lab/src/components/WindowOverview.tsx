@@ -108,7 +108,8 @@ export function WindowOverview({ workspace, scope, enabled, open, onOpenChange }
     const cards = [...grid.current?.querySelectorAll<HTMLElement>('[data-window-card]') ?? []];
     const index = cards.indexOf(document.activeElement as HTMLElement);
     if (index < 0) return;
-    const columns = Math.max(1, getComputedStyle(grid.current!).gridTemplateColumns.split(' ').filter(Boolean).length);
+    // Columns without cards collapse to zero width.
+    const columns = Math.max(1, getComputedStyle(grid.current!).gridTemplateColumns.split(' ').filter(track => track && parseFloat(track) > 0).length);
     const next = ({ ArrowLeft: index - 1, ArrowRight: index + 1, ArrowUp: index - columns, ArrowDown: index + columns, Home: 0, End: cards.length - 1 } as Record<string, number>)[event.key];
     if (next === undefined) return;
     event.preventDefault();
@@ -118,7 +119,8 @@ export function WindowOverview({ workspace, scope, enabled, open, onOpenChange }
   }
   if (!shown) return null;
   return <dialog ref={dialog} className="lab-window-overview" aria-label="All Windows" onCancel={event => { event.preventDefault(); onOpenChange(false); }}
-    onClick={event => { if (event.target === event.currentTarget) onOpenChange(false); }}>
+    // A click beside the cards returns, as on the blurred page behind them.
+    onClick={event => { if (event.target === event.currentTarget || (event.target as Element).matches('.lab-window-overview-body, .lab-window-overview-grid')) onOpenChange(false); }}>
     <div className="lab-window-overview-body">
       <div className="lab-window-overview-heading">
         <h2>Windows</h2>

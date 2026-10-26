@@ -13,6 +13,8 @@ import { spawnWindowsJob } from './platform/processes/windows-job.js';
 
 const STARTUP_TIMEOUT_MS = 15_000;
 const STOP_TIMEOUT_MS = 5_000;
+// A killed tree only has to be reaped, but a loaded machine can take seconds to do that.
+const KILL_CONFIRMATION_MS = 3_000;
 const CONTROL_TIMEOUT_MS = 2_000;
 const MAX_CONTROL_BYTES = 2_048;
 const MAX_NATIVE_LINE_BYTES = 8_192;
@@ -119,7 +121,7 @@ export async function serveOpenCodeServerSupervisor(directory: string, environme
       signalNative('SIGTERM');
       if (await waitForTree(STOP_TIMEOUT_MS)) return;
       signalNative('SIGKILL');
-      if (!await waitForTree(1_000)) throw new Error('The managed OpenCode process tree did not confirm that it stopped.');
+      if (!await waitForTree(KILL_CONFIRMATION_MS)) throw new Error('The managed OpenCode process tree did not confirm that it stopped.');
     })();
   };
   const handleSignal = () => { void stop().catch(() => undefined); };

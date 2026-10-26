@@ -869,3 +869,40 @@ it('restores a local legacy deep link once through StrictMode without a stale bi
   expect(saved.views[0].binding.nativeSessionId).toBe('Y');
   expect(saved.revision).toBe(1);
 });
+
+it('renames a hosted Window that is not open without switching to it, and forgets one deleted elsewhere', async () => {
+  const scope = 'https://rename-other-window.example/';
+  const fixture = hostedWindows(windowFixture('current'), windowFixture('other'), windowFixture('gone'));
+  const mutate = vi.spyOn(WindowWorkspaceClient.prototype, 'mutate').mockImplementation(async (id, mutation) => {
+    const window = applyWindowOperation(fixture.documents.get(id)!, mutation.operation);
+    fixture.documents.set(id, window);
+    return { window, result: { operationId: mutation.operationId, status: 'committed', revision: window.revision, committedAt: Date.now(), expiresAt: Date.now() + 86400000 } };
+  });
+  history.replaceState(null, '', '/?window=current');
+  const read = await mount(scope, true);
+  await vi.waitFor(async () => { await act(async () => {}); expect(read().window?.id).toBe('current'); expect(read().windows.map(window => window.id)).toContain('other'); });
+  let saved!: Promise<void>;
+  await act(async () => { ({ saved } = await read().rename('other', 'Research')); });
+  expect(read().windows.find(window => window.id === 'other')?.title).toBe('Research');
+  await act(async () => { await saved; });
+  expect(mutate).toHaveBeenCalledWith('other', expect.objectContaining({ baseRevision: 0, operation: { type: 'rename', title: 'Research' } }));
+  expect(fixture.documents.get('other')).toMatchObject({ title: 'Research', revision: 1 });
+  expect(read().window?.id).toBe('current');
+  expect(new URL(location.href).searchParams.get('window')).toBe('current');
+  // Opening it later shows the saved title.
+  await act(async () => read().open('other'));
+  expect(read().window).toMatchObject({ id: 'other', title: 'Research' });
+  fixture.documents.delete('gone');
+  await act(async () => { await expect(read().rename('gone', 'Too late')).rejects.toThrow('Window deleted'); });
+  expect(read().windows.map(window => window.id)).not.toContain('gone');
+});
+
+it('renames a local Window that is not open in this browser storage', async () => {
+  const read = await mount('local-rename-other'); const first = read().window!.id;
+  await act(async () => read().create()); const second = read().window!.id;
+  let saved!: Promise<void>;
+  await act(async () => { ({ saved } = await read().rename(first, 'Local research')); await saved; });
+  expect(read().window!.id).toBe(second);
+  expect(read().windows.find(window => window.id === first)?.title).toBe('Local research');
+  expect(JSON.parse(localStorage.getItem(`agent-remote:recovery:local-rename-other:shared-window:${first}`)!)).toMatchObject({ title: 'Local research' });
+});

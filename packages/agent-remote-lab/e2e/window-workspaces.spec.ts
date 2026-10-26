@@ -12,6 +12,12 @@ async function openWindows(page: Page) {
   return page.locator('.lab-window-panel');
 }
 
+/** Every Window row offers rename; this starts it for the current Window. */
+async function renameCurrentWindow(panel: ReturnType<Page['locator']>) {
+  const id = await panel.locator('[data-window-id][aria-current="true"]').getAttribute('data-window-id');
+  await panel.locator(`[data-window-rename="${id}"]`).click();
+}
+
 async function openWindowOptions(panel: ReturnType<Page['locator']>) {
   const options = panel.locator('.lab-window-options');
   if (!await options.evaluate(element => element.hasAttribute('open'))) await options.locator('summary').first().click();
@@ -76,8 +82,7 @@ test('two pages share Window UI edits and external commands across narrow presen
     };
     // Browser actions commit through the same service observed by the other page.
     await openWindows(page);
-    await openWindowOptions(menu);
-    await menu.getByRole('button', { name: 'Rename Window', exact: true }).click();
+    await renameCurrentWindow(menu);
     await menu.getByLabel('Window title').fill('Shared browser workspace');
     await menu.getByRole('button', { name: 'Save', exact: true }).click();
     await expect(second.locator('[data-window-id][aria-current="true"]')).toContainText('Shared browser workspace');
@@ -256,8 +261,7 @@ for (const width of [320, 390]) test(`floating Window management remains usable 
     const currentWindow = panel.locator('[data-window-id][aria-current="true"]');
     const first = (await currentWindow.getAttribute('data-window-id'))!;
     const title = 'A long Window title keeps the current workspace readable on a narrow phone screen';
-    await openWindowOptions(panel);
-    await panel.getByRole('button', { name: 'Rename Window', exact: true }).click();
+    await renameCurrentWindow(panel);
     await panel.getByLabel('Window title', { exact: true }).fill(title);
     const bounds = async () => panel.evaluate(element => {
       const box = element.getBoundingClientRect();
@@ -337,8 +341,7 @@ test('active Windows cannot be deleted and deleting another Window never creates
     const current = panel.locator('[data-window-id][aria-current="true"]');
     await expect(current).toBeVisible();
     const existingId = (await current.getAttribute('data-window-id'))!;
-    await openWindowOptions(panel);
-    await panel.getByRole('button', { name: 'Rename Window', exact: true }).click();
+    await renameCurrentWindow(panel);
     await panel.getByLabel('Window title').fill('Existing workspace');
     await panel.getByRole('button', { name: 'Save', exact: true }).click();
     await expect(current).toContainText('Existing workspace');

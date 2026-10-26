@@ -15,11 +15,13 @@ export function WindowWorkspaces({ workspace, current, active = true }: {
   workspace: ReturnType<typeof useWindowWorkspace>; current?: WindowSessionBinding; active?: boolean;
 }) {
   const [notice, setNotice] = useState<string>();
-  const [editing, setEditing] = useState(false), [title, setTitle] = useState('');
+  // The Window whose title is being edited in the list, and the scope it belongs to.
+  const [renaming, setRenaming] = useState<{ id: string; client: typeof workspace.client }>(), [title, setTitle] = useState(''), [saving, setSaving] = useState(false);
   const [agentControl, setAgentControl] = useState(false);
   const [openingId, setOpeningId] = useState<string>();
   const navigation = useRef(0);
-  const renameButton = useRef<HTMLButtonElement>(null);
+  const renameReturn = useRef<string>();
+  const root = useRef<HTMLDivElement>(null);
   const options = useRef<HTMLDetailsElement>(null);
   const manager = useWindowManager(workspace.client, workspace.window?.id, active && agentControl);
   const currentScope = useRef({ client: workspace.client, id: workspace.window?.id });
@@ -28,10 +30,11 @@ export function WindowWorkspaces({ workspace, current, active = true }: {
   const [running, setRunning] = useState<typeof pending.current>();
   const busy = !!running && running.client === workspace.client && running.id === workspace.window?.id;
   useEffect(() => {
-    setNotice(undefined); setEditing(false); setAgentControl(false);
+    setNotice(undefined); setAgentControl(false);
     if (options.current) options.current.open = false;
   }, [workspace.client, workspace.window?.id]);
-  useEffect(() => { if (!active) setEditing(false); }, [active]);
+  useEffect(() => { if (!active) setRenaming(undefined); }, [active]);
+  useEffect(() => { setRenaming(current => current && current.client !== workspace.client ? undefined : current); }, [workspace.client]);
   async function run(action: () => Promise<unknown>): Promise<boolean> {
     const scope = currentScope.current;
     if (pending.current && pending.current.client === scope.client && pending.current.id === scope.id) return false;
@@ -61,26 +64,61 @@ export function WindowWorkspaces({ workspace, current, active = true }: {
       if (generation === navigation.current && currentScope.current.client === client) setNotice(error instanceof Error ? error.message : String(error));
     } finally { if (generation === navigation.current) setOpeningId(undefined); }
   }
-  function closeRename() { setEditing(false); renameButton.current?.focus({ preventScroll: true }); }
+  function startRename(window: { id: string; title: string }) {
+    renameReturn.current = window.id; setTitle(window.title); setNotice(undefined); setRenaming({ id: window.id, client: workspace.client });
+  }
+  function closeRename() { setRenaming(undefined); }
+  // After an edit ends, focus returns to the row action that started it.
+  useEffect(() => {
+    if (renaming || !renameReturn.current) return;
+    const id = renameReturn.current; renameReturn.current = undefined;
+    [...root.current?.querySelectorAll<HTMLButtonElement>('[data-window-rename]') ?? []].find(button => button.dataset.windowRename === id)?.focus({ preventScroll: true });
+  }, [renaming]);
+  async function saveRename(id: string) {
+    const next = title.trim(), client = workspace.client;
+    if (!next || saving) return;
+    if (next === catalog.find(window => window.id === id)?.title) { closeRename(); return; }
+    const report = (error: unknown) => { if (currentScope.current.client === client) setNotice(error instanceof Error ? error.message : String(error)); };
+    setSaving(true); setNotice(undefined);
+    try {
+      // The title applies at once; like other layout edits, saving continues in the background and reports failures.
+      const { saved } = await workspace.rename(id, next);
+      void saved.catch(report);
+      if (currentScope.current.client === client) closeRename();
+    } catch (error) { report(error); }
+    finally { setSaving(false); }
+  }
   function saveGrant() {
     if (!manager.grant) return;
     const blob = new Blob([JSON.stringify({ serverUrl: location.origin, ...manager.grant }, null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob), link = document.createElement('a');
     link.href = url; link.download = `window-${manager.grant.windowId}-grant.json`; link.click(); URL.revokeObjectURL(url);
   }
-  return <div className="lab-window-workspaces">
+  return <div ref={root} className="lab-window-workspaces">
     <div className="lab-window-section-heading"><span>Windows</span><button type="button" disabled={busy} onClick={() => void run(workspace.create)}>New Window</button></div>
-    <nav className="lab-window-list" aria-label="Windows">{catalog.map(window => <div key={window.id} className="lab-window-row" data-window-row={window.id}>
+    <nav className="lab-window-list" aria-label="Windows">{catalog.map(window => <div key={window.id} className="lab-window-row" data-window-row={window.id} data-renaming={renaming?.id === window.id || undefined}>
+      {renaming?.id === window.id ? <form className="lab-window-rename" aria-label={`Rename Window: ${window.title}`} onKeyDown={event => {
+        if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); if (!saving) closeRename(); }
+      }} onSubmit={event => { event.preventDefault(); void saveRename(window.id); }}>
+        <input autoFocus required maxLength={256} aria-label="Window title" value={title} disabled={saving} onChange={event => setTitle(event.target.value)}
+          onFocus={event => event.currentTarget.select()} />
+        <button type="submit" disabled={saving || !title.trim()}>Save</button>
+        <button type="button" disabled={saving} onClick={closeRename}>Cancel</button>
+      </form> : <>
       <button type="button" className="lab-window-open" data-window-id={window.id}
       aria-current={window.id === workspace.window?.id || undefined} aria-busy={openingId === window.id || undefined} onClick={() => void openWindow(window.id)}>
       <span><strong>{window.title}</strong><small>{openingId === window.id ? 'Opening…' : `${window.views.length} ${window.views.length === 1 ? 'session view' : 'session views'}`}</small></span>
       {window.id === workspace.window?.id ? <span className="lab-window-selected" aria-label="Current Window">✓</span> : null}
       </button>
+      <button type="button" className="lab-window-rename-trigger" data-window-rename={window.id} aria-label={`Rename Window: ${window.title}`} title="Rename this Window"
+        disabled={!!renaming || (window.id === workspace.window?.id && workspace.unavailable)} onClick={() => startRename(window)}>
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M4 20h4L19 9l-4-4L4 16v4zM14 6l4 4" /></svg>
+      </button>
       <button type="button" className="lab-window-delete" aria-label={`Delete Window: ${window.title}`}
         title={!workspace.hasActiveWindow ? 'Open or create a Window before deleting another one.' : window.id === workspace.window?.id ? 'Switch to another Window before deleting this one.' : 'Delete this layout. Agent sessions keep running.'}
         disabled={busy || !workspace.hasActiveWindow || window.id === workspace.window?.id} onClick={() => void run(() => workspace.remove(window.id))}>
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M3 6h18M9 6V4h6v2M5 6l1 14h12l1-14M10 10v6m4-6v6" /></svg>
-      </button>
+      </button></>}
     </div>)}</nav>
     {catalog.length ? <p className="lab-window-note">{workspace.hasActiveWindow ? 'Switch to another Window before deleting the active one.' : 'Open or create a Window before deleting another one.'}</p> : null}
     {workspace.saveState?.state === 'saving' ? <p className="lab-window-note" role="status">Saving…</p>
@@ -106,7 +144,6 @@ export function WindowWorkspaces({ workspace, current, active = true }: {
       {!workspace.window.views.length ? <p className="lab-window-note">No session views. Add one or open a session from the sidebar.</p> : null}
       <details ref={options} className="lab-window-options"><summary>Window options</summary>
         <div className="lab-window-actions">
-          <button ref={renameButton} type="button" disabled={busy || workspace.unavailable} onClick={() => { setTitle(workspace.window!.title); setEditing(true); }}>Rename Window</button>
           <button type="button" onClick={() => void run(async () => {
             const id = workspace.window!.id, client = workspace.client;
             const url = new URL(location.href); url.searchParams.set('window', id);
@@ -114,17 +151,6 @@ export function WindowWorkspaces({ workspace, current, active = true }: {
             if (currentScope.current.id === id && currentScope.current.client === client) setNotice('Window link copied.');
           })}>Copy link</button>
         </div>
-        {editing ? <form className="lab-window-rename" onKeyDown={event => {
-          if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); if (!busy) closeRename(); }
-        }} onSubmit={event => {
-          event.preventDefault(); if (busy || !title.trim()) return;
-          const id = workspace.window!.id, client = workspace.client;
-          if (title.trim() === workspace.window!.title) { closeRename(); return; }
-          if (edit({ type: 'rename', title: title.trim() }) && currentScope.current.id === id && currentScope.current.client === client) closeRename();
-        }}>
-          <label>Window title<input autoFocus required maxLength={256} value={title} disabled={busy} onChange={event => setTitle(event.target.value)} /></label>
-          <div className="lab-window-actions"><button type="button" disabled={busy} onClick={closeRename}>Cancel</button><button type="submit" disabled={busy || !title.trim()}>Save</button></div>
-        </form> : null}
         {workspace.client ? <details className="lab-window-agent" open={agentControl} onToggle={event => setAgentControl(event.currentTarget.open)}>
           <summary>Agent control</summary>
           <p className="lab-window-note">Let one Agent session manage this Window through the CLI.</p>

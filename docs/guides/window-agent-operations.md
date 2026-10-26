@@ -72,8 +72,10 @@ confirmed active Window; an unavailable page must open or create one first.
 
 Open the floating **Window** button to choose a workspace and select one of its
 session views. The entry remembers its dragged position. **View → Window view**
-only changes its visibility. Less frequent actions are under **Window options**;
-renaming uses an explicit **Save** or **Cancel**, not focus changes. On narrow
+only changes its visibility. Rename any Window, open or not, with the pencil on
+its list row; renaming uses an explicit **Save** or **Cancel** (Enter or Escape),
+not focus changes. The title shows at once and saves in the background like other
+layout edits. Less frequent actions are under **Window options**. On narrow
 screens the panel stays inside the viewport and its content scrolls.
 
 ## Select a session view

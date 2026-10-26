@@ -365,6 +365,32 @@ export function useWindowWorkspace(scope: string, hosted: boolean, enabled: bool
       else created = candidate();
       choose(created, true); setError(undefined); setWindows(current => [...current.filter(window => window.id !== created.id), created]);
     },
+    /**
+     * Renames any Window in the catalog, resolving once the title is applied locally; `saved` settles with the
+     * background save. Another Window saves through its own store, like edits made while it was open.
+     */
+    async rename(id: string, title: string): Promise<{ saved: Promise<void> }> {
+      const operation: WindowOperation = { type: 'rename', title };
+      if (currentStore.current?.getSnapshot().id === id) return { saved: operate(operation) };
+      if (!inScope()) throw new Error('The Window scope changed before renaming.');
+      if (selection.deleted.has(id) || deletions.has(id)) throw new Error('This Window is being deleted.');
+      let target = stores.get(id);
+      if (!target) {
+        let window: WorkspaceWindow | undefined;
+        try { window = client ? (await client.inspect(id)).window : readCached(id); }
+        catch (error) {
+          if (error instanceof WindowRequestError && error.status === 404) forgetDeletedWindow(id);
+          throw error;
+        }
+        if (!window || window.id !== id) throw new Error('This Window is unavailable.');
+        if (!inScope() || selection.deleted.has(id)) throw new Error('The Window scope changed before renaming.');
+        target = stores.get(id) ?? makeStore(window);
+      }
+      const store = target, saved = store.operate(operation);
+      updateCatalog(store.getSnapshot());
+      void saved.finally(() => updateCatalog(store.getSnapshot())).catch(() => {});
+      return { saved };
+    },
     async remove(id: string) {
       const assertInactive = () => {
         if (!id) throw new Error('Choose a Window to delete.');

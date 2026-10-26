@@ -6,7 +6,7 @@ import { SessionSuccessionService, type SessionSuccessionPorts } from './session
 const roots: string[] = [];
 afterEach(async () => { await Promise.all(roots.splice(0).map(root => rm(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }))); });
 const ref = (nativeSessionId: string) => ({ controllerId: 'host', providerId: 'fixture', nativeSessionId });
-async function fixture() {
+async function fixture(native: Partial<SessionSuccessionPorts> = {}) {
  const root = await realpath(await mkdtemp(join(tmpdir(), 'succession-service-'))); roots.push(root);
  let created = 0, captures = 0, denied = false;
  const ports: SessionSuccessionPorts = {
@@ -17,6 +17,7 @@ async function fixture() {
   authorizeRead: async () => { if (denied) throw new Error('access revoked'); },
   readHistory: async () => ({entries:[]}),
   reconcileDelivery: async () => undefined,
+  ...native,
  };
  const service = new SessionSuccessionService(join(root,'state'),'host',ports); await service.ready;
  await service.createRole({id:'role',revision:1,origin:ref('A'),current:ref('A'),workspace:{controllerId:'host',canonicalCwd:root}});
@@ -75,6 +76,18 @@ test('refuses a corrupt persisted cursor key rather than replacing historical cu
  const restored=new SessionSuccessionService(join(f.root,'state'),'host',f.ports);
  await expect(restored.ready).rejects.toThrow('signing key');
  expect(await readFile(join(f.root,'state','source-cursor.key'),'utf8')).toBe('invalid');
+});
+
+test('a prompt edit description gives the current provider\'s reason for refusing it', async () => {
+ let refusal: Error | undefined = new Error('Wait for the agent to finish before editing a prompt.');
+ const f=await fixture({ createNativePrefix: async () => { throw new Error('Not prepared.'); }, verifyNativePrefix: async () => {},
+  retainVerification: async () => { throw new Error('Not prepared.'); }, supportsNativePrefix: async () => { if (refusal) throw refusal; return false; } });
+ const role=f.service.store.read('role').role, preparation={kind:'native_prefix' as const,turnId:'turn',messageId:'turn'};
+ const targets=[{providerId:'fixture',displayName:'Fixture'},{providerId:'other',displayName:'Other'}];
+ expect(await f.service.describe(role,ref('A'),targets,preparation)).toMatchObject({targets:[],eligibility:{status:'unavailable',reason:'Wait for the agent to finish before editing a prompt.'}});
+ refusal=undefined;
+ expect(await f.service.describe(role,ref('A'),targets,preparation)).toMatchObject({targets:[],eligibility:{status:'unavailable',code:'succession_unsupported_provider',reason:'Native prefix preparation is unavailable for this provider.'}});
+ expect(f.created()).toBe(0);expect(f.service.store.read('role').operations).toEqual([]);
 });
 
 test('description reuses native quiescence and bounded support without reserving or creating', async () => {

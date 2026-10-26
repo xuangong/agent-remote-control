@@ -44,9 +44,18 @@ independent native clients outside ARC.
 
 Readiness comes from the adapter's current native observation, not a historical
 idle marker. Claude combines a complete Stop task/cron snapshot with the result
-for the exact input reporting no queued turns; the other adapters use their
-corresponding live native evidence. Reading a saved transcript alone cannot
-establish that a runtime is idle or that an old interaction remains actionable.
+for the exact input reporting no queued turns. Claude runs Stop hooks only after
+a turn that ended normally, so the adapter also enables Claude's session state
+events: their idle state ends a turn the model API rejected or the user
+interrupted. Session crons are listed only by a Stop snapshot; after a cron tool
+runs, an unknown wakeup counts as active work until the next snapshot. The other
+adapters use their corresponding live native evidence. Reading a saved transcript
+alone cannot establish that a runtime is idle or that an old interaction remains
+actionable.
+
+For a prompt edit, which stays with the current provider, the description reports
+that provider's reason when it cannot prepare one, for example that Claude is
+still working, instead of the general provider-pair message.
 
 Preparation and commit send no model input. The first real successor input
 receives the captured normalized history once. That first input must be plain

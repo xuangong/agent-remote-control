@@ -172,7 +172,8 @@ export class ClaudeAgentSession implements AgentSession {
       session.native = (options.query ?? query)({ prompt: session.input, options: {
         ...(resume ? { resume: config.sessionId } : { sessionId: config.sessionId }), cwd: config.cwd,
         model: config.model, ...(config.reasoningEffort ? { effort: config.reasoningEffort as Options['effort'] } : {}),
-        pathToClaudeCodeExecutable: options.executable ?? 'claude', env: { ...process.env, ...options.env },
+        // Stop hooks run only after a turn that ended normally; the session state event also ends a failed or interrupted one.
+        pathToClaudeCodeExecutable: options.executable ?? 'claude', env: { ...process.env, ...options.env, CLAUDE_CODE_EMIT_SESSION_STATE_EVENTS: '1' },
         includePartialMessages: true, forwardSubagentText: true, persistSession: true, settingSources: ['user', 'project', 'local'],
         systemPrompt: config.systemPrompt !== undefined ? [config.systemPrompt, config.instructions].filter(value => value !== undefined && value !== '').join('\n\n')
           : { type: 'preset', preset: 'claude_code', ...(config.instructions ? { append: config.instructions } : {}) },

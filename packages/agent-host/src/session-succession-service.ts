@@ -104,15 +104,23 @@ export class SessionSuccessionService {
   async describe(role: PrimaryRole, source: NativeSessionRef, candidates: SuccessionDescription['targets'], preparation?: NativePrefixSelection): Promise<SuccessionDescription> {
     await this.ready;
     const targets: SuccessionDescription['targets'] = [];
+    let refusal: unknown;
     for (const candidate of candidates) {
       try {
         await this.preparation.supports(role, candidate.providerId, preparation);
         await this.preparation.supportsBoundedProjection(role, candidate.providerId, preparation);
         targets.push(candidate);
-      } catch { /* An unverified provider pair cannot be offered for new preparation. */ }
+      } catch (error) {
+        // An unverified provider pair cannot be offered for new preparation.
+        if (candidate.providerId === role.current.providerId) refusal = error;
+      }
     }
     const unavailable = (code: string, reason: string): SuccessionDescription => ({ role, targets, eligibility: { status: 'unavailable', code, reason } });
     if (nativeSessionRefKey(role.current) !== nativeSessionRefKey(source)) return unavailable('session_superseded', 'Open the current primary session before handoff.');
+    // A prompt edit stays with the current provider, so its refusal is the reason.
+    if (!targets.length && preparation && refusal instanceof Error && refusal.message) {
+      return unavailable(refusal instanceof SuccessionPreparationRejected ? refusal.code : 'succession_unsupported_provider', refusal.message.slice(0, 4096));
+    }
     if (!targets.length) return unavailable('succession_unsupported_provider', 'No available provider pair supports safe handoff.');
     try {
       this.coordinator.assertAdmission(source);

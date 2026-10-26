@@ -1,3 +1,4 @@
+import type { ServerResponse } from 'node:http';
 import { expect, it } from 'vitest';
 import type { AgentPersistenceHandle, AgentSession } from '@orchardworks/agent-provider-sdk';
 import { ClaudeAgentProvider } from './provider.js';
@@ -10,20 +11,21 @@ type Prompt = { text: string; turnId?: string; messageId?: string };
 
 function observe(session: AgentSession) {
   const prompts: Prompt[] = [], texts: string[] = [], contexts: number[] = [];
-  let completed = 0, boundary = false;
+  let completed = 0, ended = 0, boundary = false;
   const pump = (async () => {
     for await (const item of session.observe()) {
       if (item.type === 'history_boundary') { boundary = true; continue; }
       if (item.type !== 'observation') continue;
       const event = item.event;
       if (event.type === 'turn_completed') completed++;
+      if (event.type === 'turn_completed' || event.type === 'turn_failed' || event.type === 'turn_canceled') ended++;
       if (event.type === 'usage_updated' && event.usage.contextScope === 'current' && event.usage.contextWindowUsedTokens !== undefined) contexts.push(event.usage.contextWindowUsedTokens);
       if (event.type !== 'timeline') continue;
       if (event.item.type === 'user_message') prompts.push({ text: event.item.text, turnId: event.turnId, messageId: event.item.messageId });
       if (event.item.type === 'assistant_message') texts.push(event.item.text);
     }
   })();
-  return { prompts, texts, contexts, pump, completed: () => completed, ready: () => boundary };
+  return { prompts, texts, contexts, pump, completed: () => completed, ended: () => ended, ready: () => boundary };
 }
 
 it('branches before a prompt with Codex semantics and keeps the original conversation', async () => {
@@ -88,4 +90,52 @@ it('branches before a prompt with Codex semantics and keeps the original convers
     await empty.dispose(); await restarted.pump;
     await reopened.dispose(); await history.pump;
   } finally { await provider.dispose(); await fixture.close(); }
+}, 120000);
+
+it('edits a prompt after its turn was rejected by the model API or interrupted', async () => {
+  const pending: ServerResponse[] = [];
+  const fixture = await nativeFixture((body, response) => {
+    const content = body.messages.at(-1).content;
+    const texts: string[] = typeof content === 'string' ? [content]
+      : content.filter((block: { type: string }) => block.type === 'text').map((block: { text: string }) => block.text);
+    const prompt = texts.filter(text => text.endsWith('_PROMPT')).at(-1);
+    if (prompt === 'REJECTED_PROMPT') {
+      response.writeHead(403, { 'content-type': 'application/json' });
+      response.end(JSON.stringify({ type: 'error', error: { type: 'permission_error', message: 'The model is not available on this gateway.' } }));
+    } else if (prompt === 'INTERRUPTED_PROMPT') pending.push(response);
+    else nativeReply(response, [{ type: 'text', text: 'FIRST_REPLY' }]);
+  });
+  const provider = new ClaudeAgentProvider({ ...fixture.options, catalog: createClaudeCatalog(fixture.options.env, 15000) });
+  try {
+    const source = await provider.createSession({ cwd: fixture.cwd, model });
+    const sourceId = (await source.runtimeInfo()).sessionId;
+    const live = observe(source);
+    const target = (text: string) => {
+      const prompt = live.prompts.find(item => item.text === text)!;
+      return { nativeSessionId: sourceId, turnId: prompt.turnId!, messageId: prompt.messageId! };
+    };
+    const editable = (text: string) => expect.poll(() => provider.nativePrefix!.validate(target(text)).then(() => true, (error: Error) => error.message), { timeout: 10000 }).toBe(true);
+    for (const text of ['FIRST_PROMPT', 'REJECTED_PROMPT']) {
+      const before = live.ended();
+      await source.sendMessage(text);
+      await expect.poll(() => live.ended(), { timeout: 20000 }).toBe(before + 1);
+    }
+    expect(live.completed()).toBe(1);
+    await editable('REJECTED_PROMPT');
+
+    const requests = fixture.bodies.length, before = live.ended();
+    await source.sendMessage('INTERRUPTED_PROMPT');
+    await expect.poll(() => fixture.bodies.length, { timeout: 20000 }).toBeGreaterThan(requests);
+    await source.cancel();
+    await expect.poll(() => live.ended(), { timeout: 20000 }).toBe(before + 1);
+    await editable('INTERRUPTED_PROMPT');
+
+    // Editing the rejected prompt keeps only the conversation before it.
+    const branch = await provider.nativePrefix!.create(target('REJECTED_PROMPT'), {}, async () => {});
+    const edited = observe(branch);
+    await expect.poll(() => edited.ready(), { timeout: 10000 }).toBe(true);
+    expect(edited.prompts.map(prompt => prompt.text)).toEqual(['FIRST_PROMPT']);
+    await branch.dispose(); await edited.pump;
+    await source.dispose(); await live.pump;
+  } finally { for (const response of pending) response.destroy(); await provider.dispose(); await fixture.close(); }
 }, 120000);

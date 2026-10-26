@@ -264,6 +264,47 @@ it('blocks succession while a Stop snapshot includes background work or schedule
   } finally { await session.dispose(); }
 });
 
+it('ends a turn without a Stop hook, such as one the model API rejected, when Claude reports the session idle', async () => {
+  const f = fixture(); const session = await f.provider.createSession({ sessionId: sid, cwd: process.cwd() });
+  try {
+    expect(f.launches[0].env.CLAUDE_CODE_EMIT_SESSION_STATE_EVENTS).toBe('1');
+    await session.sendMessage('Work'); await tick(); const input = f.inputs[0];
+    f.events.push({ type: 'assistant', uuid: randomUUID(), session_id: input.session_id, parent_tool_use_id: null, user_message_uuid: input.uuid, error: 'authentication_failed', message: { id: 'failed', role: 'assistant', content: [] } });
+    f.events.push({ type: 'result', subtype: 'success', uuid: randomUUID(), session_id: input.session_id, user_message_uuid: input.uuid, is_error: true, result: 'Failed to authenticate.', usage: {}, modelUsage: {}, queued_turn_count: 0 });
+    await tick(); expect((await session.nativeEvidence!.inspectReadiness()).idle).toBe(false);
+    f.events.push({ type: 'system', subtype: 'session_state_changed', uuid: randomUUID(), session_id: input.session_id, state: 'idle' });
+    await tick(); expect(await session.nativeEvidence!.inspectReadiness()).toMatchObject({ idle: true, pendingInputs: 0, activeChildren: 0 });
+  } finally { await session.dispose(); }
+});
+
+for (const ending of ['rejected by the model API', 'interrupted'] as const) it(`reports input started when Claude answers it, even if its turn was ${ending}`, async () => {
+  const f = fixture(); const session = await f.provider.createSession({ sessionId: sid, cwd: process.cwd() });
+  try {
+    const accepted = vi.fn();
+    await session.sendMessage('Work', { onAcceptance: accepted }); await tick(); const input = f.inputs[0];
+    if (ending === 'interrupted') f.events.push({ type: 'result', subtype: 'error_during_execution', uuid: randomUUID(), session_id: input.session_id, user_message_uuid: input.uuid, is_error: true, errors: [], usage: {}, modelUsage: {}, queued_turn_count: 0 });
+    else f.events.push({ type: 'assistant', uuid: randomUUID(), session_id: input.session_id, parent_tool_use_id: null, user_message_uuid: input.uuid, error: 'authentication_failed', message: { id: 'failed', role: 'assistant', content: [] } });
+    await tick(); expect(accepted).toHaveBeenCalledExactlyOnceWith({ disposition: 'started' });
+  } finally { await session.dispose(); }
+});
+
+it('counts a session cron scheduled since the last Stop snapshot as pending work until the next snapshot', async () => {
+  const f = fixture(); const session = await f.provider.createSession({ sessionId: sid, cwd: process.cwd() });
+  try {
+    await session.sendMessage('Schedule'); await tick(); const input = f.inputs[0];
+    f.events.push({ type: 'assistant', uuid: randomUUID(), session_id: input.session_id, parent_tool_use_id: null, user_message_uuid: input.uuid,
+      message: { id: 'schedule', role: 'assistant', content: [{ type: 'tool_use', id: 'wakeup', name: 'ScheduleWakeup', input: {} }] } });
+    f.events.push({ type: 'result', subtype: 'error_during_execution', uuid: randomUUID(), session_id: input.session_id, user_message_uuid: input.uuid, is_error: true, errors: [], usage: {}, modelUsage: {}, queued_turn_count: 0 });
+    f.events.push({ type: 'system', subtype: 'session_state_changed', uuid: randomUUID(), session_id: input.session_id, state: 'idle' });
+    await tick(); expect(await session.nativeEvidence!.inspectReadiness()).toMatchObject({ idle: true, activeChildren: 1 });
+    await expect(session.nativeEvidence!.prepareInput([{ type: 'text', text: 'Wakeup pending' }])).rejects.toThrow();
+    await session.sendMessage('Next'); await tick(); const next = f.inputs[1];
+    await f.launches[0].hooks.Stop[0].hooks[0]({ hook_event_name: 'Stop', session_id: next.session_id, cwd: process.cwd(), background_tasks: [], session_crons: [] });
+    f.events.push({ type: 'result', subtype: 'success', uuid: randomUUID(), session_id: next.session_id, user_message_uuid: next.uuid, is_error: false, result: 'done', usage: {}, modelUsage: {}, queued_turn_count: 0 });
+    await tick(); expect(await session.nativeEvidence!.inspectReadiness()).toMatchObject({ idle: true, activeChildren: 0 });
+  } finally { await session.dispose(); }
+});
+
 it('treats unsolicited native activity as work even without an adapter-owned input', async () => {
   const f = fixture(); const session = await f.provider.createSession({ sessionId: sid, cwd: process.cwd() });
   try {

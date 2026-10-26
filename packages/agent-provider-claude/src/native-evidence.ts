@@ -19,6 +19,8 @@ function canonical(value: unknown): string {
 }
 function same(a: unknown, b: unknown) { return canonical(a) === canonical(b); }
 function unknown(code: AgentNativeEvidenceCode): AgentInputMaterialization { return { status: 'unknown', code, reason: AGENT_NATIVE_EVIDENCE_REASONS[code] }; }
+/** Native tools that schedule or cancel a later turn of this session. */
+const sessionCronTools = new Set(['CronCreate', 'CronDelete', 'ScheduleWakeup']);
 export function validClaudeId(id: string): boolean { return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id); }
 
 /** Stable profile namespace; owned-runtime does not claim a shared service or process survival. */
@@ -72,6 +74,8 @@ export class ClaudeNativeEvidence implements AgentSessionNativeEvidence {
   private queuedInputs = 0;
   private backgroundTasks = 0;
   private scheduledTasks = 0;
+  /** Only a Stop snapshot lists session crons, so one created or deleted since the last snapshot leaves their count unknown. */
+  private scheduledTasksUnconfirmed = false;
   private stopInput?: string;
   private readonly tokens = new WeakMap<AgentNativeValidityToken, number>();
   private prepared?: { id: string; encoded: string; revision: number };
@@ -86,16 +90,19 @@ export class ClaudeNativeEvidence implements AgentSessionNativeEvidence {
     this.stopInput = undefined; this.invalidate();
     if (!this.available() || !this.ports.counts().pendingInput || !this.dispatched || input.agent_id || input.session_id !== this.ports.id
       || input.cwd !== this.ports.cwd || !Array.isArray(input.background_tasks) || !Array.isArray(input.session_crons)) return;
-    this.backgroundTasks = input.background_tasks.length; this.scheduledTasks = input.session_crons.length;
+    this.backgroundTasks = input.background_tasks.length; this.scheduledTasks = input.session_crons.length; this.scheduledTasksUnconfirmed = false;
     this.stopInput = this.dispatched.id; this.invalidate();
   }
   noteMessage(message: SDKMessage): boolean {
+    if (!this.scheduledTasksUnconfirmed && message.type === 'assistant'
+      && message.message.content.some(block => block.type === 'tool_use' && sessionCronTools.has(block.name))) { this.scheduledTasksUnconfirmed = true; this.invalidate(); }
     if ('parent_tool_use_id' in message && message.parent_tool_use_id) return false;
     if (message.type === 'stream_event' || message.type === 'assistant' || message.type === 'system' && message.subtype === 'background_tasks_changed') this.stopInput = undefined;
     if (message.type === 'stream_event' && (message.event.type as string) !== 'ping' || message.type === 'assistant'
       || message.type === 'system' && message.subtype === 'status' && message.status !== null) this.nativeState = 'running';
     let started = false;
-    if ((message.type === 'stream_event' && (message.event.type as string) !== 'ping' || message.type === 'assistant' && !message.error)
+    // A turn the model API rejected answers only with an error, and one interrupted before any reply only with its result.
+    if ((message.type === 'stream_event' && (message.event.type as string) !== 'ping' || message.type === 'assistant' || message.type === 'result')
       && message.user_message_uuid && message.user_message_uuid === this.dispatched?.id) {
       if (!this.dispatched.executionId) { this.dispatched.executionId = message.uuid; started = true; }
       this.queuedInputs = 0;
@@ -119,7 +126,7 @@ export class ClaudeNativeEvidence implements AgentSessionNativeEvidence {
     const counts = this.ports.counts();
     return { cwd: this.ports.cwd, idle: this.nativeState === 'idle' && this.ports.mutable(),
       pendingInputs: Math.max(this.queuedInputs, counts.pendingInput ? 1 : 0), pendingInteractions: counts.pendingInteractions,
-      activeChildren: Math.max(this.backgroundTasks, counts.activeChildren) + this.scheduledTasks };
+      activeChildren: Math.max(this.backgroundTasks, counts.activeChildren) + (this.scheduledTasksUnconfirmed ? Math.max(this.scheduledTasks, 1) : this.scheduledTasks) };
   }
   async inspectReadiness(): Promise<AgentNativeReadiness> { if (!this.available()) claudeEvidenceReject('native_evidence_unavailable'); return this.ready(); }
   captureValidity(): AgentNativeValidityToken {

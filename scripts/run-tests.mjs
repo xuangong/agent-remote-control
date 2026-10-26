@@ -1,5 +1,6 @@
-import { spawn } from 'node:child_process';
-import { isAbsolute } from 'node:path';
+import { execFileSync, spawn } from 'node:child_process';
+import { existsSync, readFileSync } from 'node:fs';
+import { isAbsolute, join } from 'node:path';
 import { packageManager } from './lib/package-manager.mjs';
 import { verifyNativeTestVersions } from './lib/native-test-versions.mjs';
 
@@ -22,6 +23,21 @@ if (successionEvidence) {
 if (mode === 'affected' && !/^[0-9a-f]{7,40}$/.test(process.argv[3] ?? '')) throw new Error('The affected suite needs the commit to compare with.');
 if (mode === 'claude' && !process.env.AGENT_CLAUDE_TEST_EXECUTABLE) throw new Error('Set AGENT_CLAUDE_TEST_EXECUTABLE to Claude Code 2.1.247 or newer for native Claude tests.');
 if (mode === 'codex-shared' && !process.env.AGENT_REMOTE_SHARED_CODEX_TEST_EXECUTABLE) throw new Error('Set AGENT_REMOTE_SHARED_CODEX_TEST_EXECUTABLE to the native Codex executable for shared-runtime tests.');
+/**
+ * Filters for the workspace packages changed since a commit, with their dependents. pnpm's own `...[commit]` filter
+ * matches no package when the workspace is a nested git worktree, so the changed packages are found with git here.
+ */
+function affectedFilters(base) {
+  const files = execFileSync('git', ['diff', '--name-only', base, 'HEAD'], { encoding: 'utf8' }).split('\n');
+  const directories = new Set(files.map(file => /^packages\/[^/]+/.exec(file)?.[0]).filter(Boolean));
+  return [...directories].filter(directory => existsSync(join(directory, 'package.json')))
+    .flatMap(directory => ['--filter', `...${JSON.parse(readFileSync(join(directory, 'package.json'), 'utf8')).name}`]);
+}
+const affected = mode === 'affected' ? affectedFilters(process.argv[3]) : [];
+if (mode === 'affected' && !affected.length) {
+  console.log('No workspace package changed, so no unit suite runs.');
+  process.exit(0);
+}
 const commands = {
   'live-cache-browser': ['--filter', '@orchardworks/agent-remote-lab', 'exec', 'playwright', 'test', '--config=e2e/session-live-cache.playwright.config.ts'],
   devbox: ['exec', 'node', '--test', '--test-timeout=18000', 'scripts/devbox/start.test.mjs', 'scripts/devbox/codex-profile.test.mjs', 'scripts/lib/build-provenance.test.mjs', 'scripts/controller/entrypoint.test.mjs'],
@@ -51,7 +67,7 @@ const commands = {
   // Each package's Vitest already uses every core; running packages one at a time avoids load-induced timeouts.
   unit: ['-r', '--workspace-concurrency=1', 'run', 'test'],
   // The packages changed since a commit and the packages that depend on them; the workspace root runs everything.
-  affected: ['-r', '--workspace-concurrency=1', '--filter', `...[${process.argv[3]}]`, '--filter', '!@orchardworks/agent-remote-control', 'run', 'test'],
+  affected: ['-r', '--workspace-concurrency=1', ...affected, 'run', 'test'],
   // Native CLI tests depend on this machine's installed and signed-in agents, so the unit suite excludes them.
   local: ['-r', '--workspace-concurrency=1', 'exec', 'vitest', 'run', '--passWithNoTests', '--testTimeout=60000', '--hookTimeout=30000', '--maxWorkers=1', 'local.test'],
   e2e: ['--filter', '@orchardworks/agent-remote-lab', 'exec', 'playwright', 'test', '--timeout=30000', '--global-timeout=480000', ...process.argv.slice(3)],

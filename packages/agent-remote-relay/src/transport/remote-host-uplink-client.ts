@@ -5,7 +5,7 @@ import { WebSocket } from 'ws';
 import {
   successionAuthorityKey, decodeRemoteHostUplinkMessage, REMOTE_HOST_UPLINK_VERSION, UPLINK_MAX_FRAME_BYTES,
   type ControllerIdentity, type RemoteHostHeartbeat, type HostEnvironment, type PairingPurpose,
-  type PreviewRegistrationSnapshot, type TrustedSuccessionContext,
+  type HostSessionStates, type PreviewRegistrationSnapshot, type TrustedSuccessionContext,
 } from '@orchardworks/agent-remote-protocol';
 
 import type { AgentRemoteRelay } from '../relay.js';
@@ -39,6 +39,11 @@ export interface RemoteHostUplinkClientOptions {
     subscribe(listener: (snapshot: PreviewRegistrationSnapshot) => void): () => void;
     registered(info: { hostId: string; tunnelToken: string }): void;
     disconnected(): void;
+  };
+  /** Session states shared through the Relay, sent once it acknowledges them: complete reports and changes. */
+  readonly sessionStates?: {
+    snapshot(): HostSessionStates['states'];
+    subscribe(listener: (report: HostSessionStates) => void): () => void;
   };
   readonly relay: AgentRemoteRelay;
   readonly installationId: string;
@@ -126,6 +131,7 @@ export function createRemoteHostUplinkClient(options: RemoteHostUplinkClientOpti
     options.onStateChange?.('connecting');
     const endpoint = new URL(options.url);
     if (options.successionEnrollment) endpoint.searchParams.set('successionEnrollment', '3');
+    if (options.sessionStates) endpoint.searchParams.set('sessionStates', '1');
     if (options.teamManagement) { endpoint.searchParams.set('team', '1'); endpoint.searchParams.set('teamInbox', '1'); endpoint.searchParams.set('teamRecipients', '1'); endpoint.searchParams.set('teamResources', '1'); }
     const socket = new WebSocket(endpoint, {
       headers: { authorization: `Bearer ${remoteKey}` },
@@ -147,6 +153,7 @@ export function createRemoteHostUplinkClient(options: RemoteHostUplinkClientOpti
     let successionContext: TrustedSuccessionContext | undefined;
     let unsubscribeProviders: (() => void) | undefined;
     let unsubscribePreviews: (() => void) | undefined;
+    let unsubscribeStates: (() => void) | undefined;
     function details(): DiagnosticDetails {
       return { connectionId, registered,
         ...(cloudHeartbeat ? { heartbeatTimeoutMs: cloudHeartbeat.intervalMs + cloudHeartbeat.timeoutMs } : {}),
@@ -177,6 +184,7 @@ export function createRemoteHostUplinkClient(options: RemoteHostUplinkClientOpti
       rejectTeam();
       retired = true;
       unsubscribeProviders?.(); unsubscribeProviders = undefined; unsubscribePreviews?.();
+      unsubscribeStates?.(); unsubscribeStates = undefined;
       if (registered) options.previews?.disconnected();
       retirement = { ...details(), ...cause };
       clearTimeout(registrationDeadline);
@@ -283,6 +291,11 @@ export function createRemoteHostUplinkClient(options: RemoteHostUplinkClientOpti
           const publish = () => { if (!retired) writer.send(JSON.stringify({ uplinkVersion: 2, type: 'provider_snapshot', providers: options.providerChanges!.current() })); };
           unsubscribeProviders = options.providerChanges.subscribe(publish);
           publish();
+        }
+        if (options.sessionStates && decoded.value.sessionStates === 1) {
+          const publish = (report: HostSessionStates) => { if (!retired) writer.send(JSON.stringify({ uplinkVersion: 2, type: 'session_states', ...report })); };
+          unsubscribeStates = options.sessionStates.subscribe(publish);
+          publish({ full: true, states: options.sessionStates.snapshot() });
         }
         if (options.previews && decoded.value.tunnelToken) {
           const publish = (snapshot: PreviewRegistrationSnapshot) => {

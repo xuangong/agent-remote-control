@@ -23,6 +23,7 @@ import { decodeClientMessage, PROTOCOL_VERSION, controllerUpdateTarget, controll
 import { MAX_PAIRING_HISTORY, pairingStatus, visiblePairing, type SavedPairingKey } from './pairing-keys.js';
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { decodeRemoteHostUplinkMessage, type RemoteHostUplinkMessage, type HostEnvironment, isPairingPurpose, type PairingPurpose } from '@orchardworks/agent-remote-protocol';
+import { SESSION_STATE_LIMIT, type HostSessionState } from '@orchardworks/agent-remote-protocol';
 import { sessionAttachFailure } from './session-errors.js';
 import { HostSharing, SharingError, type HostSharingState } from './host-sharing.js';
 import { createHostPreviews, type HostPreviewState } from './host-previews.js';
@@ -34,7 +35,12 @@ type SharedCreation = { subject: string; operationId: string; fingerprint: strin
 type RpcResponse = { status: number; body: string; requestId?: string };
 type ProviderDescriptor = { providerId: string; displayName: string; promptEditing?: true; sessionRename?: true; daemonControl?: true };
 type DeviceCredential = { recovery?: HostRecoverySelection; pairingId?: string; purpose?: PairingPurpose; claimedAt?: number; expires: number; installationId?: string; kind?: 'device'; requiresRotation?: boolean };
+/** A Host's latest session states, kept in memory while it is connected. changedAt: when the state last changed. */
+type HostStates = { confirmedAt?: number; states: Map<string, HostSessionState & { changedAt: number }> };
+/** What one subject may see of a Host's session states. confirmedAt: when the Host last confirmed all of them. */
+export type VisibleHostStates = { hostId: string; online: boolean; confirmedAt?: number; states: Array<HostSessionState & { changedAt: number }> };
 type Host = {
+  sessionStates?: HostStates;
   successionEnrollmentVersion?: 1 | 2 | 3;
   providerManagement?: true;
   tpmManagement?: true;
@@ -92,6 +98,8 @@ export interface HostBrokerOptions {
   durable?: boolean;
   initialState?: RemoteHostBrokerState;
   onStateChange?(state: RemoteHostBrokerState): void | Promise<void>;
+  /** A Host's session states or connection changed. */
+  onSessionStates?(): void;
   now?(): number;
   scheduler?: BrokerScheduler;
 }
@@ -585,6 +593,32 @@ export function createHostBroker(options: HostBrokerOptions) {
     if (!hosts.has(hostId)) throw new SharingError(404, 'host_not_found', 'Host is unavailable.');
     if (!hostAllowed(hostId, subject)) throw new SharingError(403, 'host_forbidden', 'Host access is unavailable.');
   }
+  function notifySessionStates() {
+    try { options.onSessionStates?.(); } catch { /* Sharing states never affects the Host connection. */ }
+  }
+  function receiveSessionStates(target: HostStates, report: Extract<RemoteHostUplinkMessage, { type: 'session_states' }>) {
+    const at = now(), stateKey = (state: { providerId: string; nativeSessionId: string }) => JSON.stringify([state.providerId, state.nativeSessionId]);
+    const next = report.full ? new Map<string, HostSessionState & { changedAt: number }>() : target.states;
+    for (const removed of report.removed ?? []) next.delete(stateKey(removed));
+    for (const state of report.states) {
+      const id = stateKey(state), previous = target.states.get(id);
+      if (!next.has(id) && next.size >= SESSION_STATE_LIMIT) continue;
+      const unchanged = previous && previous.state === state.state && previous.updatedAt === state.updatedAt;
+      next.set(id, { ...state, changedAt: unchanged ? previous.changedAt : at });
+    }
+    target.states = next;
+    if (report.full) target.confirmedAt = at;
+  }
+  /** Session states a subject may see: every session on its own Hosts, and on shared Hosts only the sessions it created. */
+  function sessionStates(subject: string): VisibleHostStates[] {
+    return [...hosts.values()].filter(host => hostAllowed(host.id, subject)).map(host => {
+      const created = owner(subject) ? undefined : new Set([...bindings.values()].filter(binding => binding.hostId === host.id && binding.creatorSubject === subject)
+        .map(binding => JSON.stringify([binding.providerId, binding.nativeSessionId])));
+      const states = [...host.sessionStates?.states.values() ?? []].filter(state => !created || created.has(JSON.stringify([state.providerId, state.nativeSessionId])));
+      return { hostId: host.id, online: host.ready === true && host.socket?.readyState === RELAY_SOCKET_OPEN,
+        ...(host.sessionStates?.confirmedAt === undefined ? {} : { confirmedAt: host.sessionStates.confirmedAt }), states };
+    });
+  }
   function visibleHosts(subject?: string) {
     return [...hosts.values()].filter(host => hostAllowed(host.id, subject)).map(({ id, name, providers, legacyDsh, socket, ready, credentialRotation, environment, controller, providerManagement, tpmManagement, teamManagement }) => ({
       ...(teamManagement ? { teamManagement } : {}),
@@ -663,7 +697,8 @@ export function createHostBroker(options: HostBrokerOptions) {
     host.stopDiagnostics?.(); host.stopDiagnostics=undefined;
     diagnostic(host, {event:'host_disconnected',reason,closeCode,heartbeatAgeMs,wasClean,pendingRequests:[...host.pending.values()].filter(p=>!p.diagnostic).length,streams:host.streams.size});
     previews.disconnect(host.id); host.tunnelToken = undefined;
-    host.socket = undefined; host.ready = false;
+    host.socket = undefined; host.ready = false; host.sessionStates = undefined;
+    notifySessionStates();
     for (const [requestId, pending] of host.pending) {
       clearTimeout(pending.timer);
       const attach = pending.path === '/remote/attach' || pending.path === '/remote/child/attach';
@@ -679,7 +714,7 @@ export function createHostBroker(options: HostBrokerOptions) {
     }
     host.streams.clear();
   }
-  function register(socket: RelaySocket, credential: DeviceCredential, context: BrokerRequestContext, credentialHash: string, enrollmentRequested?: 1 | 2 | 3, teamRequested = false, resourcesRequested = false, recipientsRequested = false, inboxRequested = false) {
+  function register(socket: RelaySocket, credential: DeviceCredential, context: BrokerRequestContext, credentialHash: string, enrollmentRequested?: 1 | 2 | 3, teamRequested = false, resourcesRequested = false, recipientsRequested = false, inboxRequested = false, statesRequested = false) {
     let host: Host | undefined;
     let pendingCredential: {hash: string; value: DeviceCredential} | undefined;
     let issuing: Promise<void> | undefined;
@@ -717,9 +752,11 @@ export function createHostBroker(options: HostBrokerOptions) {
     function registered() {
       if (retired || !host || host.socket !== socket) return;
       host.tunnelToken ??= randomBytes(32).toString('base64url');
-      send(host, { uplinkVersion: 2, type: 'registered', ...(host.teamRecipients === 1 && inboxRequested ? { teamInbox: 1 } : {}), ...(host.teamRecipients === 1 ? { teamRecipients: 1 } : {}), ...(host.teamManagement && resourcesRequested && options.teamResources ? {teamResources:true} : {}), ...(host.teamManagement ? {teamManagement: true} : {}), hostId: host.id, ...(host.successionEnrollmentVersion && options.successionEnrollment ? { successionEnrollment: options.successionEnrollment, ...(host.successionEnrollmentVersion !== 1 ? { successionEnrollmentVersion: host.successionEnrollmentVersion } : {}) } : {}), pairingPurpose: host.pairingPurpose ?? (host.gatewayKeyRequested ? 'gateway-setup' : 'host-only'), heartbeat, tunnelToken: host.tunnelToken });
+      send(host, { uplinkVersion: 2, type: 'registered', ...(statesRequested ? { sessionStates: 1 } : {}), ...(host.teamRecipients === 1 && inboxRequested ? { teamInbox: 1 } : {}), ...(host.teamRecipients === 1 ? { teamRecipients: 1 } : {}), ...(host.teamManagement && resourcesRequested && options.teamResources ? {teamResources:true} : {}), ...(host.teamManagement ? {teamManagement: true} : {}), hostId: host.id, ...(host.successionEnrollmentVersion && options.successionEnrollment ? { successionEnrollment: options.successionEnrollment, ...(host.successionEnrollmentVersion !== 1 ? { successionEnrollmentVersion: host.successionEnrollmentVersion } : {}) } : {}), pairingPurpose: host.pairingPurpose ?? (host.gatewayKeyRequested ? 'gateway-setup' : 'host-only'), heartbeat, tunnelToken: host.tunnelToken });
       if (retired || host.socket !== socket) return;
       host.ready = true;
+      if (statesRequested) host.sessionStates ??= { states: new Map() };
+      notifySessionStates();
       if (!heartbeatStarted) {
         heartbeatStarted = true; lastHeartbeatAck = now(); heartbeatTimer = setTimeout(sendHeartbeat, heartbeat.intervalMs);
         diagnostic(host, {event:'host_registered'});
@@ -875,6 +912,10 @@ export function createHostBroker(options: HostBrokerOptions) {
         });
       } else if (message.type === 'preview_snapshot') {
         await previews.update(host.id, message.snapshot);
+      } else if (message.type === 'session_states') {
+        if (!host.sessionStates) return closeConnection(1008, 'Session states were not acknowledged');
+        receiveSessionStates(host.sessionStates, message);
+        notifySessionStates();
       } else closeConnection(1008, 'Unexpected uplink message');
       } catch (error) {
         const code = error instanceof BrokerError && error.status === 401 ? 1008 : error instanceof BrokerError && error.status === 429 ? 1013 : 1011;
@@ -1777,7 +1818,7 @@ export function createHostBroker(options: HostBrokerOptions) {
       return { accept(client: RelaySocket) {
         if (unavailable || keys.get(hash!) !== key || key.claimedAt !== undefined || key.expires <= now()) { client.close(1008, 'Device credential revoked'); return; }
         track(client);
-        register(client, key, context, hash!, url.searchParams.get('successionEnrollment') === '3' ? 3 : url.searchParams.get('successionEnrollment') === '2' ? 2 : url.searchParams.get('successionEnrollment') === '1' ? 1 : undefined, url.searchParams.get('team') === '1', url.searchParams.get('teamResources') === '1', url.searchParams.get('teamRecipients') === '1', url.searchParams.get('teamInbox') === '1');
+        register(client, key, context, hash!, url.searchParams.get('successionEnrollment') === '3' ? 3 : url.searchParams.get('successionEnrollment') === '2' ? 2 : url.searchParams.get('successionEnrollment') === '1' ? 1 : undefined, url.searchParams.get('team') === '1', url.searchParams.get('teamResources') === '1', url.searchParams.get('teamRecipients') === '1', url.searchParams.get('teamInbox') === '1', url.searchParams.get('sessionStates') === '1');
       } };
     }
     const match = /^\/v1\/sessions\/([^/]+)\/events$/.exec(url.pathname);
@@ -1899,6 +1940,7 @@ export function createHostBroker(options: HostBrokerOptions) {
     visibleHosts,
     hasHost: (hostId: string) => hosts.has(hostId),
     canAccessHost: hostAllowed,
+    sessionStates,
     canStarSession: (item: { hostId: string; providerId: string; nativeSessionId: string }, subject: string) => {
       const host = hosts.get(item.hostId);
       if (!hostAllowed(item.hostId, subject) || !host?.providers.some(provider => provider.providerId === item.providerId)) return false;

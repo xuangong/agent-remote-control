@@ -46,6 +46,30 @@ function connect(transport: HttpWebSocketTransport, agentId: string, activity = 
   return { connection, messages, disconnect, opened };
 }
 
+describe('shared session states', () => {
+  it('keeps one activity channel open while states are watched, applies snapshots and reopens it after a loss', async () => {
+    const harness = await server();
+    const views: Array<(ref: { hostId: string; providerId: string; nativeSessionId: string }) => string> = [];
+    const stop = harness.transport.watchSessionStates(view => views.push(ref => view.state(ref).state));
+    await vi.waitFor(() => expect(harness.urls).toHaveLength(1));
+    expect(harness.urls[0]).toContain('observation=activity');
+    expect(harness.urls[0]).toContain('states=1');
+    const thread = { hostId: 'host', providerId: 'codex', nativeSessionId: 'thread' };
+    harness.sockets[0]!.send(JSON.stringify({ protocolVersion: version, type: 'session_states', snapshot: true, hosts: [{ hostId: 'host', online: true, confirmedAgeMs: 0 }],
+      states: [{ ...thread, state: 'waiting', ageMs: 0 }] }));
+    await vi.waitFor(() => expect(views.at(-1)!(thread)).toBe('waiting'));
+    // Session channels for content do not ask for states.
+    connect(harness.transport, 'session');
+    await vi.waitFor(() => expect(harness.urls).toHaveLength(2));
+    expect(harness.urls[1]).not.toContain('states=1');
+    harness.sockets[0]!.terminate();
+    await vi.waitFor(() => expect(harness.urls.filter(url => url.includes('states=1'))).toHaveLength(2), { timeout: 4000 });
+    harness.sockets.at(-1)!.send(JSON.stringify({ protocolVersion: version, type: 'session_states', snapshot: true, hosts: [{ hostId: 'host', online: false }] }));
+    await vi.waitFor(() => expect(views.at(-1)!(thread)).toBe('offline'));
+    stop();
+  });
+});
+
 describe('session channel transport', () => {
   it('delivers ordered title updates once across channels and replays the latest name', async () => {
     const harness = await server(); connect(harness.transport, 'session'); connect(harness.transport, 'session', true);
@@ -87,7 +111,7 @@ describe('session channel transport', () => {
     const b = connect(harness.transport, 'b');
     const activity = connect(harness.transport, 'a', true);
     await vi.waitFor(() => expect(harness.frames).toHaveLength(3));
-    expect(harness.urls.sort()).toEqual(['/base/v1/session-channel?observation=activity&migrations=1&titles=1&preemption=1', '/base/v1/session-channel?observation=session&migrations=1&titles=1&preemption=1']);
+    expect(harness.urls.sort()).toEqual(['/base/v1/session-channel?observation=activity&migrations=1&titles=1&preemption=1&states=1', '/base/v1/session-channel?observation=session&migrations=1&titles=1&preemption=1']);
     const subscriptions = harness.frames.map(({ frame }) => frame);
     expect(subscriptions.map((frame) => frame.type)).toEqual(['subscribe', 'subscribe', 'subscribe']);
     const firstId = subscriptions.find((frame) => frame.agentId === 'a' && !frame.message.observation).subscriptionId;

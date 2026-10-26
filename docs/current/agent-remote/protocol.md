@@ -252,6 +252,44 @@ without replacing the session or restarting its observation. Older clients do no
 opt in and receive no new frame type. Deploy the server before upgraded Controllers;
 the UI requires the new Controller capability before exposing the action.
 
+## Shared session states
+
+A Controller reports the state of its sessions to the Relay, which shares it with
+every page of the account without opening session streams, so watching states
+does not count against the account's stream limit. The Controller adds
+`sessionStates=1` to its uplink URL; only then does the Relay acknowledge with
+`sessionStates: 1` in `registered`, and only after that acknowledgement does the
+Controller send `session_states`, so older Relays and Controllers never see the
+new fields. A report carries `{ full, states, removed? }`, where each state is
+`{ providerId, nativeSessionId, state, updatedAt? }` with `state` one of
+`running`, `waiting`, `idle` or `failed`, and `updatedAt` the native update time
+in milliseconds. No titles or content travel. A full report replaces the Host's
+states and confirms them; the Controller sends one at least every 60 seconds
+(`SESSION_STATE_CONFIRMATION_MS`). Other reports change or remove the listed
+states and confirm only those. At most 4,096 states per Host are kept.
+
+The Controller reads the sessions it holds open from memory every two seconds and
+sends their changes at once: pending approvals or questions read as `waiting`.
+Provider catalogs are read about once a minute; a catalog that reports nothing
+beyond the open sessions is read again after ten minutes. Catalog states not read
+again within three minutes are dropped. Codex reports states from its own catalog,
+including threads the Controller does not hold open; other providers report
+states only for sessions the Controller holds open, and their others are unknown.
+
+The Relay keeps states in memory while the Host is connected and forgets them when
+it disconnects. A subject sees every session on its own Hosts and, on shared
+Hosts, only the sessions it created. Session-channel clients opt in with
+`states=1`; the website asks only on its activity channel. The `session_states`
+frame carries optional `snapshot: true`, `hosts: [{ hostId, online,
+confirmedAgeMs? }]`, `states: [{ hostId, providerId, nativeSessionId, state,
+updatedAt?, ageMs }]` and `removed`. The first frame on a channel is a snapshot
+that replaces everything known before; later frames carry only what changed.
+Ages are relative to sending, so clients need no clock agreement. A state counts
+until neither its own change nor its Host's last full report is younger than three
+minutes (`SESSION_STATE_STALE_MS`); after that clients treat it as unknown. A Host
+that is not connected, or no longer accessible, reads as offline. Deploy the Relay
+before Controllers that report states.
+
 This synchronization covers website-initiated renames. External CLI rename
 notifications are not currently projected into saved Favorites automatically.
 Validation includes real HTTP/WebSocket Worker tests, Chromium/WebKit at mobile and

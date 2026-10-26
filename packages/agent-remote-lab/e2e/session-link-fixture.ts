@@ -5,8 +5,10 @@ import { createAgentRemoteRelay, createRemoteHostUplinkClient } from '@orchardwo
 import { createGatewayRelay } from '../src/server/gateway-relay.js';
 import { createGatewayStaticPages } from '../src/server/gateway-static.js';
 import { createRecordedLabProvider } from '../src/server/recorded.js';
+import { createSessionStatePublisher, liveSessionState } from '../../agent-host/src/session-state-publisher.js';
+import type { SessionActivityState } from '@orchardworks/agent-remote-protocol';
 
-export async function sessionLinkFixture(options: { automaticSignIn?: boolean; listCreatedSessions?: boolean } = {}) {
+export async function sessionLinkFixture(options: { automaticSignIn?: boolean; listCreatedSessions?: boolean; sessionStates?: boolean } = {}) {
   const secret = 'session-link-fixture-secret-01234567890123456789';
   let subject = 'alice';
   let url = '';
@@ -42,7 +44,17 @@ export async function sessionLinkFixture(options: { automaticSignIn?: boolean; l
   const invitation = await pairing.json();
   const relay = createAgentRemoteRelay({ providers: [createRecordedLabProvider().provider] });
   const natives = new Map<string, string>();
+  // Shared session states as a Controller reports them; a test may hold a session in a state its recording never reaches.
+  const heldStates = new Map<string, SessionActivityState>();
+  const sessionStates = options.sessionStates ? createSessionStatePublisher({
+    live: () => [...natives].flatMap(([nativeSessionId, agentId]) => {
+      const state = heldStates.get(nativeSessionId) ?? liveSessionState(relay.requireAgent(agentId).handoffAdmissionState());
+      return state ? [{ providerId: 'recorded', nativeSessionId, state }] : [];
+    }),
+    catalogs: () => [],
+  }, { liveIntervalMs: 200 }) : undefined;
   const uplink = createRemoteHostUplinkClient({ relay, url: url.replace('http:', 'ws:') + '/ws/remote-host', remoteKey: invitation.key,
+    ...(sessionStates ? { sessionStates } : {}),
     installationId: randomUUID(), name: 'Cross-device Host', providers: [{ providerId: 'recorded', displayName: 'Recorded Provider' }],
     resolveSession: (id) => [...natives.values()].includes(id) ? relay.requireAgent(id) : undefined,
     async control(control) {
@@ -63,7 +75,11 @@ export async function sessionLinkFixture(options: { automaticSignIn?: boolean; l
     },
   });
   const { hostId } = await uplink.ready;
-  return { url, hostId, setSubject(value: string) { subject = value; }, async close() {
+  return { url, hostId, setSubject(value: string) { subject = value; },
+    holdSessionState(nativeSessionId: string, state?: SessionActivityState) { if (state) heldStates.set(nativeSessionId, state); else heldStates.delete(nativeSessionId); },
+    nativeSessionIds: () => [...natives.keys()],
+    disconnectHost: () => uplink.close(),
+    async close() {
     await uplink.close(); await relay.close(); await gateway.close();
     authority.closeAllConnections(); await new Promise<void>((resolve) => authority.close(() => resolve()));
   } };

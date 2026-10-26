@@ -227,3 +227,34 @@ it('keeps an older Team Relay connected and rejects unnegotiated resource calls 
   await expect(client.teamRequest({action:'resource_metadata',teamId:'team',memberId:'member',resourceId:'resource'})).rejects.toThrow('resources are unavailable');
   expect(requests).toBe(0);expect(await client.teamRequest({action:'poll'})).toEqual([]);expect(requests).toBe(1);
 });
+
+it.each([true, false])('reports session states only to a Relay that acknowledged them (acknowledged=%s)', async acknowledged => {
+  const server = new WebSocketServer({ host: '127.0.0.1', port: 0 });
+  await new Promise<void>(resolve => server.once('listening', resolve));
+  closeables.push(() => new Promise<void>(resolve => { for (const socket of server.clients) socket.terminate(); server.close(() => resolve()); }));
+  const reports: unknown[] = []; let requested: string | null = null;
+  server.on('connection', (socket, request) => {
+    requested = new URL(request.url!, 'http://relay').searchParams.get('sessionStates');
+    socket.on('message', data => {
+      const message = JSON.parse(data.toString());
+      if (message.type === 'register') socket.send(JSON.stringify({ uplinkVersion: 2, type: 'registered', hostId: 'host', heartbeat: { intervalMs: 30000, timeoutMs: 10000 }, ...(acknowledged ? { sessionStates: 1 } : {}) }));
+      if (message.type === 'session_states') reports.push(message);
+    });
+  });
+  const listeners = new Set<(report: { full: boolean; states: never[] }) => void>();
+  const relay = createAgentRemoteRelay({ providers: [] }); closeables.push(() => relay.close());
+  const running = { providerId: 'codex', nativeSessionId: 'thread', state: 'running' as const };
+  const client = createRemoteHostUplinkClient({ relay, installationId: 'machine', name: 'Machine', remoteKey: 'key', providers: [],
+    url: `ws://127.0.0.1:${(server.address() as { port: number }).port}/ws/remote-host`, resolveSession: () => undefined, control: async () => ({ status: 404, body: '{}' }),
+    sessionStates: { snapshot: () => [running] as never[], subscribe: listener => { listeners.add(listener); return () => listeners.delete(listener); } } });
+  closeables.push(() => client.close()); await client.ready;
+  expect(requested).toBe('1');
+  if (!acknowledged) { await delay(50); expect(reports).toEqual([]); expect(listeners.size).toBe(0); return; }
+  await until(() => reports.length === 1);
+  expect(reports[0]).toEqual({ uplinkVersion: 2, type: 'session_states', full: true, states: [running] });
+  for (const listener of listeners) listener({ full: false, states: [], removed: [{ providerId: 'codex', nativeSessionId: 'thread' }] } as never);
+  await until(() => reports.length === 2);
+  expect(reports[1]).toEqual({ uplinkVersion: 2, type: 'session_states', full: false, states: [], removed: [{ providerId: 'codex', nativeSessionId: 'thread' }] });
+  await client.close();
+  expect(listeners.size).toBe(0);
+});

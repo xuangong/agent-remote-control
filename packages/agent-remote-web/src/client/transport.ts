@@ -80,6 +80,11 @@ export interface RemoteAgentTransport {
   readonly timelineRecovery?: 'http' | 'websocket';
   onSessionTitle?(listener: (session: import('@orchardworks/agent-remote-protocol').SessionTitleUpdate) => void): () => void;
   onSessionMigration?(listener: (migration: import('@orchardworks/agent-remote-protocol').SessionMigration) => void): () => void;
+  /**
+   * Session states the Relay shares for every Host this account may use, without opening session streams. The
+   * listener receives the current view at once and again whenever a state changes or turns unknown.
+   */
+  watchSessionStates?(listener: (states: import('./session-states.js').SessionStatesView) => void): () => void;
   fetchSnapshot(agentId: string, options?: RemoteRequestOptions): Promise<AgentSnapshot>;
   fetchTimeline(
     agentId: string,

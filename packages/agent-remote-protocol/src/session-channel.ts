@@ -1,5 +1,6 @@
 import { SessionSuccessionReplay } from './session-succession-replay.js';
 import { SessionMigration } from './session-migration.js';
+import { SessionStateHost, SessionStateRef, SessionStateUpdate, SESSION_STATE_LIMIT } from './session-states.js';
 import { type Static, Type } from '@sinclair/typebox';
 import { ClientMessage, IncompatibleProtocolVersionErrorMessage, NegotiateRequest, ServerMessage } from './messages.js';
 import { ProtocolVersionSchema } from './version.js';
@@ -28,6 +29,10 @@ export const SessionChannelServerMessage = Type.Union([
   Strict({ protocolVersion: ProtocolVersionSchema, type: Type.Literal('session_succession_committed'), succession: SessionSuccessionReplay }),
   Strict({ protocolVersion: ProtocolVersionSchema, type: Type.Literal('session_title_updated'), session: SessionTitleUpdate }),
   Strict({ protocolVersion: ProtocolVersionSchema, type: Type.Literal('session_migrated'), migration: SessionMigration }),
+  // Only on channels that requested states. A snapshot replaces everything known before; other frames change the listed entries.
+  Strict({ protocolVersion: ProtocolVersionSchema, type: Type.Literal('session_states'), snapshot: Type.Optional(Type.Literal(true)),
+    hosts: Type.Optional(Type.Array(SessionStateHost, { maxItems: 1024 })), states: Type.Optional(Type.Array(SessionStateUpdate, { maxItems: 16 * SESSION_STATE_LIMIT })),
+    removed: Type.Optional(Type.Array(SessionStateRef, { maxItems: 16 * SESSION_STATE_LIMIT })) }),
   Strict({ protocolVersion: ProtocolVersionSchema, type: Type.Literal('ready'), successions: Type.Optional(Type.Literal(1)), preemption: Type.Optional(Type.Literal(1)) }),
   Strict({ protocolVersion: ProtocolVersionSchema, type: Type.Literal('message'), subscriptionId: SubscriptionId, message: Type.Union([ServerMessage, IncompatibleProtocolVersionErrorMessage]) }),
   Strict({ protocolVersion: ProtocolVersionSchema, type: Type.Literal('closed'), subscriptionId: SubscriptionId, code: Type.Integer(), reason: Type.String() }),

@@ -56,3 +56,17 @@
 .lab-window-card-caption > strong { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; font-weight: 600; }
 .lab-window-card-caption > small { order: 3; flex-basis: 100%; color: var(--obs-text-secondary); font-size: 11px; }
 .lab-window-card-current { flex: none; color: var(--obs-action); font-size: 11px; font-weight: 600; }
+/* Shared session states: only what needs attention or is working stands out. */
+.lab-window-card-state {
+  align-self: flex-start; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  padding: 1px 6px; border-radius: 999px; font-size: 10px; font-weight: 600; line-height: 1.5;
+  color: var(--obs-text-secondary); background: color-mix(in oklab, var(--obs-text-secondary) 12%, var(--obs-surface));
+}
+.lab-window-card-pane[data-state="running"] .lab-window-card-state { color: var(--obs-action); background: color-mix(in oklab, var(--obs-action) 12%, var(--obs-surface)); }
+.lab-window-card-pane[data-state="waiting"] { background: var(--obs-warning-soft); }
+.lab-window-card-pane[data-state="waiting"] .lab-window-card-state { color: var(--obs-surface); background: var(--obs-warning); }
+.lab-window-card-pane[data-state="failed"] .lab-window-card-state { color: var(--obs-danger); background: var(--obs-danger-soft); }
+.lab-window-card-pane[data-state="offline"] { opacity: .7; }
+.lab-window-card[data-attention] { border-color: color-mix(in oklab, var(--obs-warning) 60%, var(--obs-border)); }
+.lab-window-card-summary { color: var(--obs-text); }
+.lab-window-card[data-attention] .lab-window-card-summary { color: var(--obs-warning); font-weight: 600; }

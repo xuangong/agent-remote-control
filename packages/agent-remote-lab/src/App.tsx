@@ -10,6 +10,7 @@ import { WindowWorkspaces } from './components/WindowWorkspaces.js';
 import { WindowMenu } from './components/WindowMenu.js';
 import { WindowOverview } from './components/WindowOverview.js';
 import { touchWindow } from './window-recency.js';
+import { useSessionStates } from './hooks/useSessionStates.js';
 import { useWindowVisibility } from './hooks/useWindowVisibility.js';
 import { teamViewTarget } from './team-view-binding.js';
 import { SessionViewOperationsContext } from './session-view-operations.js';
@@ -989,7 +990,9 @@ function AppContent({
   }
   const supportingRailOpen = compactLayout && (contextOpen || inspectorOpen);
   // Compact layouts keep only the floating Windows list.
+  const [windowOverviewOpen, setWindowOverviewOpen] = useState(false);
   const windowOverviewAvailable = !compactLayout && !initialState && !windowWorkspace.unavailable && (windowWorkspace.windows.length > 0 || !!windowWorkspace.window);
+  const sessionStates = useSessionStates(transport, windowOverviewAvailable && windowOverviewOpen);
   const backgroundInert = supportingRailOpen ? { inert: '' } : {};
 
   const activeAgentId = state?.agent?.id ?? (succession.active ? undefined : attachingAgentId);
@@ -1147,7 +1150,6 @@ function AppContent({
   const windowView = useWindowVisibility();
   const updateTeamRoster = useCallback((baseUrl: string, teams: Team[]) => setTeamRoster({ baseUrl, teams }), []);
   const [tpmListOpen, setTpmListOpen] = useState(false);
-  const [windowOverviewOpen, setWindowOverviewOpen] = useState(false);
   // Most recent use orders the Window overview; a page in front counts as using its Window.
   useEffect(() => {
     const id = sharedWindow?.id;
@@ -2132,7 +2134,7 @@ function AppContent({
     {activated ? tracking.observers : null}
     <WindowMenu workspace={windowWorkspace} current={sharedWindow ? directoryView?.binding : currentSession ? windowSessionBinding(currentSession) : undefined}
       visible={windowView.visible} inert={supportingRailOpen} onOverview={windowOverviewAvailable ? () => setWindowOverviewOpen(true) : undefined} />
-    <WindowOverview workspace={windowWorkspace} scope={baseUrl} enabled={windowOverviewAvailable} open={windowOverviewOpen} onOpenChange={setWindowOverviewOpen} />
+    <WindowOverview workspace={windowWorkspace} scope={baseUrl} enabled={windowOverviewAvailable} open={windowOverviewOpen} states={sessionStates} onOpenChange={setWindowOverviewOpen} />
     {userScoped && attention.trackVisible ? <SessionTrackingMenu catchUp={catchUp} tracking={tracking} teams={teamRoster?.baseUrl === baseUrl ? teamRoster.teams : []} knownSessions={[...favorites.stars, ...sessionEntries]} busy={transitioning} inert={supportingRailOpen} onOpen={item => void openTrackedSession(item)} /> : null}
     <TeamMenu visible={teamView.visible} baseUrl={baseUrl} enabled={accessReady && !!directory} hosts={remoteHosts} source={featureSource} sourceViewId={sharedWindow && presentedViewId ? `${sharedWindow.id}/${presentedViewId}` : undefined}
       compact={compactLayout} currentSession={focusedMenuSession} onTeamsChange={updateTeamRoster} reveal={teamReveal?.baseUrl === baseUrl ? teamReveal : undefined}

@@ -7,7 +7,7 @@ import type { RelayDiagnosticStore, RelayDiagnosticContext } from './relay-diagn
 import { createFavorites } from './favorites.js';
 import { createSessionTitles, pruneSessionTitles } from './session-titles.js';
 import { createSessionMigrations } from './session-migrations.js';
-import { PROTOCOL_VERSION, encodeSessionChannelServerMessage } from '@orchardworks/agent-remote-protocol';
+import { PROTOCOL_VERSION, encodeSessionChannelServerMessage, SESSION_STATE_LIMIT, type SessionChannelServerMessage, type SessionStateHost, type SessionStateRef, type SessionStateUpdate } from '@orchardworks/agent-remote-protocol';
 import { acceptSessionChannel } from '@orchardworks/agent-remote-protocol';
 import { createSessionStars, StarError } from './session-stars.js';
 import { sessionSubscriptionRefusal, unavailableRoute } from './session-errors.js';
@@ -75,7 +75,9 @@ export function createHostedRelay(options: HostedRelayOptions) {
   const tenants = new Map<string, Tenant>();
   const diagnostics = createDiagnosticJournal({storage:options.diagnosticStorage,context:options.diagnosticContext});
   const hostKeyOperations = new Map<string, Promise<unknown>>();
-  const browserChannels = new Map<RelaySocket, { subject: string; expiresAt(): number; migrations?: Set<string>; titles?: Map<string, string>; successions?: Set<string> }>();
+  /** What a channel was last sent of each Host and session state; a fresh feed starts with a snapshot. */
+  type StateFeed = { snapshot: boolean; hosts: Map<string, string>; entries: Map<string, string> };
+  const browserChannels = new Map<RelaySocket, { subject: string; expiresAt(): number; migrations?: Set<string>; titles?: Map<string, string>; successions?: Set<string>; states?: StateFeed }>();
   const userStreamCount = (subject: string) => [...tenants.values()].reduce((sum, owned) => sum + owned.broker.activeStreamCount(subject), 0);
   const preemption = createStreamPreemption(userStreamCount, USER_STREAM_LIMIT);
   const scheduler = options.scheduler ?? createTimerRelayScheduler();
@@ -162,6 +164,53 @@ export function createHostedRelay(options: HostedRelayOptions) {
     }
     for (const key of channel.titles.keys()) if (!keys.has(key)) channel.titles.delete(key);
   }
+  /** Shares the session states of every Host the channel's subject may use, sending only what changed since last time. */
+  function publishStates(socket: RelaySocket, channel: { subject: string; states?: StateFeed }) {
+    const feed = channel.states;
+    if (!feed || socket.readyState !== 1) return;
+    const at = Date.now(), hosts: SessionStateHost[] = [], states: SessionStateUpdate[] = [], removed: SessionStateRef[] = [];
+    const seenHosts = new Set<string>(), seenStates = new Set<string>();
+    for (const tenant of tenants.values()) for (const host of tenant.broker.sessionStates(channel.subject)) {
+      if (seenHosts.has(host.hostId)) continue;
+      seenHosts.add(host.hostId);
+      const hostValue = JSON.stringify([host.online, host.confirmedAt]);
+      if (feed.snapshot || feed.hosts.get(host.hostId) !== hostValue) {
+        hosts.push({ hostId: host.hostId, online: host.online, ...(host.confirmedAt === undefined ? {} : { confirmedAgeMs: Math.max(0, at - host.confirmedAt) }) });
+        feed.hosts.set(host.hostId, hostValue);
+      }
+      for (const { changedAt, ...state } of host.states) {
+        const id = JSON.stringify([host.hostId, state.providerId, state.nativeSessionId]), value = JSON.stringify([state.state, state.updatedAt, changedAt]);
+        seenStates.add(id);
+        if (!feed.snapshot && feed.entries.get(id) === value) continue;
+        states.push({ hostId: host.hostId, ...state, ageMs: Math.max(0, at - changedAt) });
+        feed.entries.set(id, value);
+      }
+    }
+    for (const id of feed.entries.keys()) if (!seenStates.has(id)) {
+      const [hostId, providerId, nativeSessionId] = JSON.parse(id) as [string, string, string];
+      removed.push({ hostId, providerId, nativeSessionId }); feed.entries.delete(id);
+    }
+    // A Host the subject may no longer use reads as offline.
+    for (const hostId of feed.hosts.keys()) if (!seenHosts.has(hostId)) { hosts.push({ hostId, online: false }); feed.hosts.delete(hostId); }
+    if (!feed.snapshot && !hosts.length && !states.length && !removed.length) return;
+    const frames: SessionChannelServerMessage[] = [];
+    const chunk = SESSION_STATE_LIMIT;
+    for (let index = 0; index === 0 || index < Math.max(states.length, removed.length); index += chunk) {
+      frames.push({ protocolVersion: PROTOCOL_VERSION, type: 'session_states', ...(index === 0 && feed.snapshot ? { snapshot: true as const } : {}),
+        ...(index === 0 && hosts.length ? { hosts } : {}), ...(states.length > index ? { states: states.slice(index, index + chunk) } : {}),
+        ...(removed.length > index ? { removed: removed.slice(index, index + chunk) } : {}) });
+    }
+    feed.snapshot = false;
+    for (const frame of frames) {
+      const encoded = encodeSessionChannelServerMessage(frame);
+      if (encoded.status !== 'ok') continue;
+      if ((socket.bufferedAmount ?? 0) + encoded.json.length * 3 > 16 * 1024 * 1024) { socket.close(1013, 'Session state backlog'); return; }
+      try { socket.send(encoded.json); } catch { socket.close(1011, 'Session state delivery failed'); return; }
+    }
+  }
+  function publishAllStates() {
+    for (const [socket, channel] of browserChannels) publishStates(socket, channel);
+  }
   const previewOrigin = validateGatewayOrigin(options.previewOrigin || auth.origin);
   const previewAccess = createPreviewAccess({ origin: auth.origin, previewOrigin,
     authorizeBrowser: async (request, entry) => {
@@ -204,7 +253,7 @@ export function createHostedRelay(options: HostedRelayOptions) {
   }
   function published() {
     enforceChannels();
-    for (const [socket, channel] of browserChannels) { publishMigrations(socket, channel); publishTitles(socket, channel); publishSuccessions(socket, channel); }
+    for (const [socket, channel] of browserChannels) { publishMigrations(socket, channel); publishTitles(socket, channel); publishSuccessions(socket, channel); publishStates(socket, channel); }
     for (const owned of tenants.values()) owned.broker.enforceExpiry();
     void previewAccess.enforce(); void subdomainAccess?.enforce();
     if (initialized && !refreshing) queueSchedule();
@@ -290,6 +339,7 @@ export function createHostedRelay(options: HostedRelayOptions) {
         teamResources: options.teamResources?.(grant.namespace),
         ...(options.successionEnrollment ? { successionEnrollment: { version: 1, origin: auth.origin, issuer: auth.issuer, namespace: grant.namespace, ownerSubject: grant.subject } as const, successionProjectionAllowance: allowance } : {}),
         userStreamCount,
+        onSessionStates: () => publishAllStates(),
         onStateChange: async broker => { await state.mutate(draft => {
           stageBroker(draft, broker);
         }); await scheduling; },
@@ -796,7 +846,8 @@ export function createHostedRelay(options: HostedRelayOptions) {
       return { accept(socket: RelaySocket) {
         if (closing || failed || sessions.expiresAt(request, grant) <= Date.now()) { socket.close(1008, 'Session expired'); return; }
         if (count() >= 16) { socket.close(1013, 'Channel capacity reached'); return; }
-        browserChannels.set(socket, { subject: grant.subject, expiresAt: () => sessions.expiresAt(request, grant), ...(route.searchParams.get('migrations') === '1' ? { migrations: new Set<string>() } : {}), ...(route.searchParams.get('titles') === '1' ? { titles: new Map<string, string>() } : {}), ...(route.searchParams.get('successions') === '1' ? { successions: new Set<string>() } : {}) });
+        browserChannels.set(socket, { subject: grant.subject, expiresAt: () => sessions.expiresAt(request, grant), ...(route.searchParams.get('migrations') === '1' ? { migrations: new Set<string>() } : {}), ...(route.searchParams.get('titles') === '1' ? { titles: new Map<string, string>() } : {}), ...(route.searchParams.get('successions') === '1' ? { successions: new Set<string>() } : {}),
+          ...(route.searchParams.get('states') === '1' ? { states: { snapshot: true, hosts: new Map<string, string>(), entries: new Map<string, string>() } } : {}) });
         socket.onClose(() => { browserChannels.delete(socket); queueSchedule(); });
         queueSchedule();
         // Clients that report which subscriptions are in use let the account's least recently used streams go first.
@@ -821,6 +872,7 @@ export function createHostedRelay(options: HostedRelayOptions) {
         publishMigrations(socket, browserChannels.get(socket)!);
         publishTitles(socket, browserChannels.get(socket)!);
         publishSuccessions(socket, browserChannels.get(socket)!);
+        publishStates(socket, browserChannels.get(socket)!);
       } };
     }
     const destination = routeTenant(route.pathname, grant.subject) ?? owned;

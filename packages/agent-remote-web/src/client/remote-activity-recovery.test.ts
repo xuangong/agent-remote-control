@@ -23,7 +23,7 @@ async function activityChannel(initiallyHidden: boolean) {
   const sent: SessionChannelClientMessage[] = [];
   const received: SessionChannelServerMessage[] = [];
   wss.on('connection', (socket, request) => {
-    expect(request.url).toBe('/v1/session-channel?observation=activity&migrations=1&titles=1&preemption=1');
+    expect(request.url).toBe('/v1/session-channel?observation=activity&migrations=1&titles=1&preemption=1&states=1');
     sockets.push(socket);
     socket.on('message', data => {
       const frame = JSON.parse(String(data)) as SessionChannelClientMessage;

@@ -34,7 +34,8 @@ import { join } from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
 import type { AgentProviderAdapter, AgentSession, AgentSessionConfig, AgentSessionExtensions, AgentEmptyCreationResult, AgentNativeValidityToken, AgentPersistenceHandle, AgentSessionResumeOptions } from '@orchardworks/agent-provider-sdk';
 import { AgentOperationRejectedError, AgentSessionInUseError, AgentRuntimeError, serializeAgentEmptyCreationResult, serializeAgentInputMaterialization } from '@orchardworks/agent-provider-sdk';
-import { PROTOCOL_VERSION, type HostEnvironment } from '@orchardworks/agent-remote-protocol';
+import { PROTOCOL_VERSION, type HostEnvironment, type HostSessionState } from '@orchardworks/agent-remote-protocol';
+import { createSessionStatePublisher, liveSessionState, type SessionStatePublisher } from './session-state-publisher.js';
 import { InputImageStore, type InputImageStoreOptions, InputResourceStore, type InputResourceStoreOptions, createAgentRemoteRelay, createRemoteHostUplinkClient, type AgentRemoteHttpResult, type AgentRemoteRelay,
   RemoteHostCatalog, RemoteHostCatalogError, UnsupportedAgentCapabilityError, type RemoteHostControlRequest, type RemoteHostUplinkClient, type RemoteHostUplinkDiagnostic, type RemoteSessionSummary,
   type RemoteHostSessionLease, type SessionWireAgent, type SessionWireOperationExecutor } from '@orchardworks/agent-remote-relay';
@@ -140,6 +141,8 @@ export interface AgentHostRequestDiagnostic {
 export interface AgentHostRuntime {
   readonly executionRouting?: SessionExecutionRouting;
   readonly relay: AgentRemoteRelay;
+  /** Session states the Relay shares with the owner's pages. */
+  readonly sessionStates: SessionStatePublisher;
   addRegistration(registration: AgentHostProviderRegistration): void;
   control(request: RemoteHostControlRequest): Promise<AgentRemoteHttpResult>;
   enrollFromRelay(request: RemoteHostControlRequest, context: TrustedSuccessionContext): Promise<AgentRemoteHttpResult>;
@@ -204,6 +207,7 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
       ...(options.team ? { teamManagement: true } : {}),
       ...(options.tpm ? { tpmManagement: true } : {}),
       ...(options.succession?.enrollment ? { successionEnrollment: { control: runtime.enrollFromRelay } } : {}),
+      sessionStates: runtime.sessionStates,
       providers: describeProviders(), ...(options.providerDiscovery ? { providerChanges: { current: describeProviders, subscribe: options.providerDiscovery.subscribe } } : {}), url: config.url, remoteKey: config.remoteKey,
       onCredential: config.onCredential ? credential => {
         const pending = credentialPersistence.catch(() => undefined).then(async () => {
@@ -292,6 +296,15 @@ function hasCurrentNativeEvidence(owner: Pick<AgentProviderAdapter | AgentSessio
 }
 
 interface Binding { agentId: string; providerId: string; nativeSessionId: string; parentNativeSessionId?: string }
+
+/** Catalog states worth sharing; an unknown state is left out. */
+function catalogSessionStates(summaries: readonly RemoteSessionSummary[]): HostSessionState[] {
+  return summaries.flatMap(summary => {
+    const state = summary.state === 'unavailable' ? 'failed' : summary.state === 'unknown' ? undefined : summary.state;
+    const updatedAt = Date.parse(summary.updatedAt);
+    return state ? [{ providerId: summary.providerId, nativeSessionId: summary.nativeSessionId, state, ...(Number.isFinite(updatedAt) && updatedAt >= 0 ? { updatedAt } : {}) }] : [];
+  });
+}
 
 export function createAgentHostRuntime(options: AgentHostRuntimeOptions): AgentHostRuntime {
   if (options.executionPolicy) options = { ...options, registrations: options.registrations.map(registration => ({ ...registration,
@@ -447,6 +460,14 @@ export function createAgentHostRuntime(options: AgentHostRuntimeOptions): AgentH
     ...(options.inputResources ? { inputResourceStore: new InputResourceStore(options.inputResources) } : {}) });
   const catalogs = new Map(options.registrations.map(({ directory }) => [directory.providerId, new RemoteHostCatalog({ roots: directory.list, revisionMaxAgeMs: catalogRevisionMaxAgeMs })]));
   const bindings = new SessionBindings();
+  const sessionStates = createSessionStatePublisher({
+    live: () => [...bindings.values()].flatMap(binding => {
+      const live = liveAgent(binding.agentId), state = live && liveSessionState(live.handoffAdmissionState());
+      return state ? [{ providerId: binding.providerId, nativeSessionId: binding.nativeSessionId, state }] : [];
+    }),
+    catalogs: () => [...registrations.values()].filter(({ directory }) => options.providerEnabled?.(directory.providerId) !== false)
+      .map(({ directory }) => ({ providerId: directory.providerId, read: async () => catalogSessionStates(await directory.list()) })),
+  });
   const pending = new Set<Promise<unknown>>();
   const idle = createIdleSessions({ graceMs: options.idleGraceMs, reconcileMs: options.idleReconcileMs });
   const uncertainAgents = new Set<string>();
@@ -1218,7 +1239,7 @@ export function createAgentHostRuntime(options: AgentHostRuntimeOptions): AgentH
     }
     return enrollment.control(request, context);
   };
-  return { relay, executionRouting: successionService?.executionRouting, addRegistration, control: request => control(request), enrollFromRelay, executeOperation, acquireSession, setRelayConnected: idle.setConnected,
+  return { relay, sessionStates, executionRouting: successionService?.executionRouting, addRegistration, control: request => control(request), enrollFromRelay, executeOperation, acquireSession, setRelayConnected: idle.setConnected,
     beginControllerRestart() {
       if (closed || draining) return false;
       // An owner-confirmed update closes admission immediately. Shutdown and the

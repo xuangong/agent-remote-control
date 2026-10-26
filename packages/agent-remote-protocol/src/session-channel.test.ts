@@ -15,6 +15,15 @@ describe('session channel framing', () => {
     if (encoded.status === 'ok') expect(protocol.decodeSessionChannelServerMessage(encoded.json)).toEqual({ status: 'ok', value: message });
     expect(protocol.decodeSessionChannelServerMessage(JSON.stringify(frame('session_migrated', { migration: { ...migration, to: { nativeSessionId: 'branch' } } }))).status).toBe('rejected');
   });
+  it('round trips session state feeds and rejects unknown states', () => {
+    const update = frame('session_states', { snapshot: true, hosts: [{ hostId: 'host', online: true, confirmedAgeMs: 5 }],
+      states: [{ hostId: 'host', providerId: 'codex', nativeSessionId: 'thread', state: 'waiting', updatedAt: 10, ageMs: 2 }],
+      removed: [{ hostId: 'host', providerId: 'claude', nativeSessionId: 'gone' }] });
+    const encoded = protocol.encodeSessionChannelServerMessage(update as never);
+    expect(encoded.status).toBe('ok');
+    if (encoded.status === 'ok') expect(protocol.decodeSessionChannelServerMessage(encoded.json)).toEqual({ status: 'ok', value: update });
+    expect(protocol.decodeSessionChannelServerMessage(JSON.stringify(frame('session_states', { states: [{ hostId: 'host', providerId: 'codex', nativeSessionId: 'thread', state: 'unknown', ageMs: 0 }] }))).status).toBe('rejected');
+  });
   it('round trips all client and server frame kinds', () => {
     expect(protocol.encodeSessionChannelClientMessage).toBeTypeOf('function');
     for (const value of [frame('subscribe', { subscriptionId: 1, agentId: 'a', message: negotiate }), frame('message', { subscriptionId: 1, message: negotiate }), frame('unsubscribe', { subscriptionId: 1 }), frame('ping')]) {

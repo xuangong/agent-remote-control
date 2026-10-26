@@ -19,6 +19,8 @@ interface Dependencies {
   onSuccessionSupport?(supported: boolean): void;
   onTitle?(session: import('@orchardworks/agent-remote-protocol').SessionTitleUpdate): void;
   onMigration?(migration: import('@orchardworks/agent-remote-protocol').SessionMigration): void;
+  /** Shared session states, delivered on the activity channel while someone watches them. */
+  onSessionStates?(frame: Extract<import('@orchardworks/agent-remote-protocol').SessionChannelServerMessage, { type: 'session_states' }>): void;
   createSocket(mode: Mode): WebSocketLike;
   connectDirect(agentId: string, listener: RemoteTransportListener): RemoteConnection;
   observe(observation: RemoteProtocolObservation): void;
@@ -81,6 +83,9 @@ export class SessionChannelPool {
   private pageHidden = typeof document !== 'undefined' && document.visibilityState === 'hidden';
   private pageHiddenSince = this.pageHidden ? Date.now() : undefined;
   private readonly intents = new Set<Subscription>();
+  private stateWatchers = 0;
+  private stateRetry?: ReturnType<typeof setTimeout>;
+  private stateRetryDelay = 1_000;
 
   constructor(private readonly dependencies: Dependencies) {
     this.unwatch = watchPageResume(() => {
@@ -127,6 +132,36 @@ export class SessionChannelPool {
         this.report(subscription);
       },
     };
+  }
+
+  /**
+   * Keeps the activity channel open, which carries shared session states, until every watcher stops. A lost channel
+   * is reopened with backoff; the Relay then sends a fresh snapshot.
+   */
+  watchStates(): () => void {
+    if (this.disposed) return () => {};
+    this.stateWatchers++;
+    this.ensureStateChannel();
+    let watching = true;
+    return () => {
+      if (!watching) return;
+      watching = false;
+      if (--this.stateWatchers === 0) { clearTimeout(this.stateRetry); this.stateRetry = undefined; }
+    };
+  }
+
+  private ensureStateChannel(): void {
+    if (this.disposed || !this.stateWatchers || this.channels.has('activity') || this.legacyModes.has('activity')) return;
+    clearTimeout(this.stateRetry); this.stateRetry = undefined;
+    try { this.openChannel('activity'); }
+    catch { this.retryStateChannel(); }
+  }
+
+  private retryStateChannel(): void {
+    if (this.disposed || !this.stateWatchers || this.stateRetry) return;
+    const delay = this.stateRetryDelay;
+    this.stateRetryDelay = Math.min(30_000, delay * 2);
+    this.stateRetry = setTimeout(() => { this.stateRetry = undefined; this.ensureStateChannel(); }, delay);
   }
 
   private used(subscription: Subscription): boolean {
@@ -179,6 +214,7 @@ export class SessionChannelPool {
     if (this.disposed) return;
     this.disposed = true;
     this.unwatch();
+    clearTimeout(this.stateRetry); this.stateRetry = undefined;
     for (const channel of [...this.channels.values()]) this.stopChannel(channel);
     for (const subscription of [...this.subscriptions]) this.retire(subscription);
   }
@@ -253,6 +289,7 @@ export class SessionChannelPool {
         this.dependencies.onSuccession?.(frame.succession); return;
       }
       if (frame.type === 'session_title_updated') { this.dependencies.onTitle?.(frame.session); return; }
+      if (frame.type === 'session_states') { if (channel.ready) this.dependencies.onSessionStates?.(frame); return; }
       if (frame.type === 'session_migrated') { this.dependencies.onMigration?.(frame.migration); return; }
       if (frame.type === 'ready' && !channel.ready) {
         channel.ready = true;
@@ -266,6 +303,7 @@ export class SessionChannelPool {
         clearTimeout(channel.readyTimer);
         channel.readyTimer = undefined;
         this.startHeartbeat(channel);
+        if (mode === 'activity') this.stateRetryDelay = 1_000;
         for (const subscription of [...channel.subscriptions.values()]) this.subscribe(subscription);
       } else if (!channel.ready || frame.type === 'ready') {
         this.invalidBody(); this.failChannel(channel);
@@ -419,6 +457,7 @@ export class SessionChannelPool {
       if (fallback && subscription.active) this.openDirect(subscription);
       else this.disconnect(subscription);
     }
+    if (channel.mode === 'activity') this.retryStateChannel();
   }
 
   private stopChannel(channel: Channel): void {
@@ -444,7 +483,7 @@ export class SessionChannelPool {
     const channel = subscription.channel;
     if (!channel) return;
     channel.subscriptions.delete(subscription.id);
-    if (!channel.ready && channel.subscriptions.size === 0) {
+    if (!channel.ready && channel.subscriptions.size === 0 && !(channel.mode === 'activity' && this.stateWatchers)) {
       this.stopChannel(channel);
       return;
     }

@@ -6,6 +6,7 @@ import { SuccessionAssociationAuthority } from './succession-enrollment.js';
 import { PairingPurpose } from './pairing.js';
 import { ControllerIdentity } from './controller-release.js';
 import { HostEnvironment } from './host-environment.js';
+import { HostSessionStates } from './session-states.js';
 
 import type { WireDecodeResult, WireEncodeResult } from './codec.js';
 
@@ -53,9 +54,11 @@ export const RemoteHostUplinkMessage = Type.Union([
   ]),
   Type.Object({ uplinkVersion: version, type: Type.Literal('credential_issued'), credential: Type.String({ minLength: 1, maxLength: 512, pattern: '^[!-~]+$' }) }, object),
   Type.Object({ uplinkVersion: version, type: Type.Literal('credential_saved') }, object),
-  Type.Object({ uplinkVersion: version, type: Type.Literal('registered'), teamInbox: Type.Optional(Type.Literal(1)), teamRecipients: Type.Optional(Type.Literal(1)), teamResources: Type.Optional(Type.Literal(true)), teamManagement: Type.Optional(Type.Literal(true)), hostId: identity, successionEnrollment: Type.Optional(SuccessionAssociationAuthority), successionEnrollmentVersion: Type.Optional(Type.Union([Type.Literal(2), Type.Literal(3)])), pairingPurpose: Type.Optional(PairingPurpose), heartbeat: RemoteHostHeartbeat, tunnelToken: Type.Optional(identity) }, object),
+  Type.Object({ uplinkVersion: version, type: Type.Literal('registered'), sessionStates: Type.Optional(Type.Literal(1)), teamInbox: Type.Optional(Type.Literal(1)), teamRecipients: Type.Optional(Type.Literal(1)), teamResources: Type.Optional(Type.Literal(true)), teamManagement: Type.Optional(Type.Literal(true)), hostId: identity, successionEnrollment: Type.Optional(SuccessionAssociationAuthority), successionEnrollmentVersion: Type.Optional(Type.Union([Type.Literal(2), Type.Literal(3)])), pairingPurpose: Type.Optional(PairingPurpose), heartbeat: RemoteHostHeartbeat, tunnelToken: Type.Optional(identity) }, object),
   Type.Object({ uplinkVersion: version, type: Type.Literal('provider_snapshot'), providers: Type.Array(provider, { maxItems: 64 }) }, object),
   Type.Object({ uplinkVersion: version, type: Type.Literal('preview_snapshot'), snapshot: PreviewRegistrationSnapshot }, object),
+  // Only after the Relay acknowledged sessionStates in registered.
+  Type.Object({ uplinkVersion: version, type: Type.Literal('session_states'), ...HostSessionStates.properties }, object),
   Type.Object({ uplinkVersion: version, type: Type.Literal('heartbeat'), nonce: heartbeatNonce }, object),
   Type.Object({ uplinkVersion: version, type: Type.Literal('heartbeat_ack'), nonce: heartbeatNonce }, object),
   Type.Object({ ...rpc, type: Type.Literal('rpc_request'), method: Type.Union([Type.Literal('GET'), Type.Literal('POST')]),

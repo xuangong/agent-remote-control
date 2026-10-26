@@ -83,7 +83,11 @@ Window as cards floating over the blurred page, the ones this device used most
 recently first. Each card
 draws the Window's panes in their rail order and relative widths, with each
 pane's session title and agent, and marks the selected pane; floating views are
-counted. The overview only reads the saved layouts, so it opens no session
+counted. Panes show the state their Controller shares through the Relay:
+**Running**, **Needs you** for a pending approval or question, **Failed**, or
+**Host offline**; idle sessions and sessions without a recently confirmed state
+show none, and a card lists how many of its sessions need you or are running.
+The overview reads saved layouts and shared states, so it opens no session
 connections. Arrow keys move between cards, Enter or a click opens a Window, and
 Escape, Ctrl+Shift+Down or a click beside the cards returns to the current one. Outside macOS a text field
 keeps Ctrl+Shift+Up for selecting text. Narrow screens offer only the Window

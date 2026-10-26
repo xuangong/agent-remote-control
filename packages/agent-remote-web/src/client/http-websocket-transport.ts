@@ -23,6 +23,7 @@ import {
 
 import { watchPageResume } from './page-resume.js';
 import { SessionChannelPool } from './session-channel-transport.js';
+import { SessionStateStore, type SessionStatesView } from './session-states.js';
 import { RemoteOperationError } from './transport.js';
 import type {
   RemoteAgentTransport,
@@ -98,6 +99,12 @@ export class HttpWebSocketTransport implements RemoteAgentTransport {
     return () => { this.titleListeners.delete(listener); };
   }
   private readonly migrationListeners = new Set<(migration: SessionMigration) => void>();
+  private readonly sessionStates = new SessionStateStore();
+  watchSessionStates(listener: (states: SessionStatesView) => void): () => void {
+    if (!this.sessionChannels) { listener(this.sessionStates.view()); return () => {}; }
+    const unsubscribe = this.sessionStates.subscribe(listener), stopWatching = this.sessionChannels.watchStates();
+    return () => { unsubscribe(); stopWatching(); };
+  }
   private readonly migrations = new Map<string, SessionMigration>();
   onSessionMigration(listener: (migration: SessionMigration) => void): () => void {
     this.migrationListeners.add(listener);
@@ -143,7 +150,9 @@ export class HttpWebSocketTransport implements RemoteAgentTransport {
           if (this.migrations.size > 1024) this.migrations.delete(this.migrations.keys().next().value!);
           for (const listener of this.migrationListeners) listener(migration);
         },
-        createSocket: (mode) => this.createWebSocket(this.websocketUrl(`v1/session-channel?observation=${mode}&migrations=1&titles=1&preemption=1${dependencies.sessionSuccessions ? '&successions=1' : ''}`)),
+        onSessionStates: frame => this.sessionStates.apply(frame),
+        // Only the activity channel carries shared session states, so a page receives them once.
+        createSocket: (mode) => this.createWebSocket(this.websocketUrl(`v1/session-channel?observation=${mode}&migrations=1&titles=1&preemption=1${dependencies.sessionSuccessions ? '&successions=1' : ''}${mode === 'activity' ? '&states=1' : ''}`)),
         connectDirect: (agentId, listener) => this.connectDirect(agentId, listener),
         observe: (observation) => this.observe(observation),
         diagnostic: (diagnostic) => this.diagnostic(diagnostic),
@@ -264,6 +273,7 @@ export class HttpWebSocketTransport implements RemoteAgentTransport {
     this.sessionChannels?.dispose();
     this.titles.clear(); this.titleListeners.clear();
     this.migrations.clear(); this.migrationListeners.clear();
+    this.sessionStates.dispose();
   }
 
   private connectDirect(agentId: string, listener: RemoteTransportListener): RemoteConnection {

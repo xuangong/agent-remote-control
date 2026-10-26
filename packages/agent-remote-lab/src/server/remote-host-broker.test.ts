@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { IMAGE_INPUT_CAPABILITIES, type AgentInputPart } from '@orchardworks/agent-provider-sdk';
 import { WebSocket } from 'ws';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createRemoteHostBroker } from './remote-host-broker.js';
 import type { AgentMessageOptions, AgentSession } from '@orchardworks/agent-provider-sdk';
 
@@ -67,20 +67,15 @@ describe('Remote Host broker', () => {
     } });
     const native = await providerHost(f.url, 'arc_fixture');
     let upgrades = 0;
-    let releaseUpgrades!: () => void;
-    const allUpgrades = new Promise<void>(resolve => { releaseUpgrades = resolve; });
-    f.server.on('upgrade', request => {
-      if (request.url === '/v1/sessions/capacity-agent/events' && ++upgrades === 129) releaseUpgrades();
-    });
+    f.server.on('upgrade', request => { if (request.url === '/v1/sessions/capacity-agent/events') upgrades++; });
     const recovery = once(native.socket, 'message');
     let nativeOpens = 0;
     native.socket.on('message', raw => {
       const message = JSON.parse(raw.toString());
       if (message.type === 'stream_open') nativeOpens += 1;
     });
-    const browsers = Array.from({ length: 129 }, () => {
+    const open = () => {
       const socket = new WebSocket(f.url.replace('http:', 'ws:') + '/v1/sessions/capacity-agent/events', {
-        // 129 handshakes compete with the rest of the suite for the machine.
         headers: { origin: 'http://127.0.0.1:6175' }, handshakeTimeout: 15_000,
       });
       socket.on('error', () => undefined);
@@ -91,10 +86,15 @@ describe('Remote Host broker', () => {
         transport.write(Buffer.from([0x81, 0x01, 0x78]));
       });
       return { socket, closed };
-    });
+    };
+    // macOS accepts at most 128 queued connections by default, so opening all 129 at once can drop one under load.
+    const browsers: ReturnType<typeof open>[] = [];
     cleanup.push(async () => { for (const { socket } of browsers) socket.terminate(); });
+    while (browsers.length < 129) {
+      for (let index = 0; index < 32 && browsers.length < 129; index++) browsers.push(open());
+      await vi.waitFor(() => expect(upgrades).toBe(browsers.length), { timeout: 15_000, interval: 10 });
+    }
     const [raw] = await recovery;
-    await allUpgrades;
     const request = JSON.parse(raw.toString());
     expect(request.path).toBe('/remote/attach');
     native.socket.send(JSON.stringify({ uplinkVersion: 2, type: 'rpc_response', requestId: request.requestId, status: 200,

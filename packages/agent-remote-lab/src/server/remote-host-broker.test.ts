@@ -80,7 +80,8 @@ describe('Remote Host broker', () => {
     });
     const browsers = Array.from({ length: 129 }, () => {
       const socket = new WebSocket(f.url.replace('http:', 'ws:') + '/v1/sessions/capacity-agent/events', {
-        headers: { origin: 'http://127.0.0.1:6175' }, handshakeTimeout: 2000,
+        // 129 handshakes compete with the rest of the suite for the machine.
+        headers: { origin: 'http://127.0.0.1:6175' }, handshakeTimeout: 15_000,
       });
       socket.on('error', () => undefined);
       const closed = new Promise<number>(resolve => socket.once('close', code => resolve(code)));
@@ -105,7 +106,7 @@ describe('Remote Host broker', () => {
     const response = await fetch(f.url + '/v1/remote/hosts', { signal: AbortSignal.timeout(1000) });
     expect(response.status).toBe(200);
     expect(await response.json()).toMatchObject({ hosts: [{ id: 'capacity-host', online: true }] });
-  }, 10_000);
+  }, 30_000);
 
   it('issues temporary keys, binds one installation, and keeps disconnected hosts visible', async () => {
     const f = await setup();

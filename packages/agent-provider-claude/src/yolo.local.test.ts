@@ -2,7 +2,11 @@ import { randomUUID } from 'node:crypto';
 import { mkdir, mkdtemp, readFile, rm } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import { expect, it } from 'vitest';
+import type { AgentSession } from '@orchardworks/agent-provider-sdk';
 import { ClaudeAgentSession } from './session.js';
+import { ClaudeAgentProvider } from './provider.js';
+// The real catalog runs its worker process from the build output.
+import { createClaudeCatalog } from '../dist/catalog.js';
 import { nativeFixture, nativeReply } from './test-utils/native-fixture.js';
 
 const hasToolResult = (body: any): boolean => Array.isArray(body.messages)
@@ -84,3 +88,40 @@ it.each([false, true])('runs shell commands outside the workspace in YOLO withou
     }
   } finally { await session.dispose(); await pump; await fixture.close(); await rm(outside, { recursive: true, force: true }); }
 }, 40000);
+
+it('reopens a YOLO session on a restricted Host after a Controller restart still in YOLO and unsandboxed', async () => {
+  await mkdir(resolve('.tmp'), { recursive: true });
+  const outside = await mkdtemp(resolve('.tmp/yolo-restart-'));
+  let answered = 0, writes = 0;
+  const fixture = await nativeFixture((body, response) => {
+    const results = toolResults(body);
+    if (results > answered) { answered = results; nativeReply(response, [{ type: 'text', text: 'SHELL_DONE' }]); return; }
+    nativeReply(response, [{ type: 'tool_use', id: `restart-shell-${writes}`, name: 'Bash',
+      input: { command: `echo written > ${join(outside, `restart-${writes++}.txt`)}`, description: 'Write outside the workspace' } }]);
+  });
+  const saved = new Map<string, any>();
+  const permissionModes = { read: async (id: string) => saved.get(id), write: async (id: string, mode: string) => { saved.set(id, mode); } };
+  const options = { ...fixture.options, restrictedNative: true, permissionModes, catalog: createClaudeCatalog(fixture.options.env, 15000) };
+  const run = async (session: AgentSession) => {
+    let completed = 0;
+    const pump = (async () => { for await (const item of session.observe()) if (item.type === 'observation' && item.event.type === 'turn_completed') completed++; })();
+    await session.sendMessage('Write a file outside the workspace.');
+    await expect.poll(() => completed, { timeout: 15000 }).toBe(1);
+    // Wrapped so awaiting the turn does not wait for the observation stream to end.
+    return { pump };
+  };
+  try {
+    const first = await new ClaudeAgentProvider(options).createSession({ cwd: fixture.cwd, model: 'claude-sonnet-4-5-20250929' });
+    const id = (await first.runtimeInfo()).sessionId;
+    await first.setSessionSetting!('permissions', 'bypassPermissions');
+    const { pump: firstPump } = await run(first);
+    await first.dispose(); await firstPump;
+    expect(saved.get(id)).toBe('bypassPermissions');
+    // A restarted Controller has a new provider, and its handle carries no mode.
+    const reopened = await new ClaudeAgentProvider(options).resumeSession({ providerId: 'claude', sessionId: id, opaque: '{}' });
+    expect((await reopened.runtimeInfo()).settings).toContainEqual(expect.objectContaining({ id: 'permissions', value: 'bypassPermissions' }));
+    const { pump } = await run(reopened);
+    expect(await readFile(join(outside, 'restart-1.txt'), 'utf8')).toBe('written\n');
+    await reopened.dispose(); await pump;
+  } finally { await fixture.close(); await rm(outside, { recursive: true, force: true }); }
+}, 60000);

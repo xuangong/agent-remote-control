@@ -74,13 +74,42 @@ it('closes an ambiguous timed-out setting change instead of allowing work with s
   } finally { await session.dispose(); }
 });
 
-it.each(['dontAsk', 'bypassPermissions'] as const)('requires the native sandbox and resets saved %s', async (mode) => {
+it.each(['dontAsk', 'bypassPermissions'] as const)('keeps a saved %s on a restricted Host, sandboxed outside YOLO', async (mode) => {
   const native = fixture(); let launched: any;
   const session = await ClaudeAgentSession.open({ sessionId: 'native', permissionMode: mode }, {
     restrictedNative: true, query: input => { launched = input.options; return native.factory(); },
   });
-  try { expect(launched).toMatchObject({ permissionMode: 'default', sandbox: { enabled: true, failIfUnavailable: true, allowUnsandboxedCommands: false } }); }
-  finally { await session.dispose(); }
+  try {
+    expect(launched).toMatchObject({ permissionMode: mode, sandbox: mode === 'bypassPermissions' ? { enabled: false } : { enabled: true, failIfUnavailable: true, allowUnsandboxedCommands: false } });
+  } finally { await session.dispose(); }
+});
+
+it('saves each confirmed permission mode once, in order, and never the transient planning mode', async () => {
+  const native = fixture(); const writes: string[] = [];
+  let release!: () => void;
+  const slow = new Promise<void>(resolve => { release = resolve; });
+  const permissionModes = { read: async () => undefined, write: async (id: string, mode: string) => { if (!writes.length) await slow; writes.push(`${id}:${mode}`); } };
+  const session = await ClaudeAgentSession.open({ sessionId: 'native' }, { restrictedNative: true, permissionModes, query: native.factory });
+  try {
+    await session.setSessionSetting!('permissions', 'bypassPermissions');
+    await session.setPlanning(true);
+    await session.setPlanning(false);
+    await session.setSessionSetting!('permissions', 'acceptEdits');
+    await session.setSessionSetting!('permissions', 'acceptEdits');
+    release();
+    await expect.poll(() => writes).toEqual(['native:bypassPermissions', 'native:acceptEdits']);
+  } finally { await session.dispose(); }
+});
+
+it('reports a permission mode that could not be saved without failing the change', async () => {
+  const native = fixture(); const diagnostics: string[] = [];
+  const permissionModes = { read: async () => undefined, write: async () => { throw new Error('disk full'); } };
+  const session = await ClaudeAgentSession.open({ sessionId: 'native' }, { permissionModes, onDiagnostic: line => diagnostics.push(line), query: native.factory });
+  try {
+    await session.setSessionSetting!('permissions', 'bypassPermissions');
+    expect((await session.runtimeInfo()).settings).toContainEqual(expect.objectContaining({ id: 'permissions', value: 'bypassPermissions' }));
+    await expect.poll(() => diagnostics).toEqual([expect.stringContaining('permission mode could not be saved')]);
+  } finally { await session.dispose(); }
 });
 
 it.each([['bypassPermissions', 'bypassPermissions'], ['plan', 'default']] as const)('resumes a saved %s as %s without a forced sandbox', async (saved, expected) => {

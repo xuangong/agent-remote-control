@@ -396,10 +396,11 @@ project's own Claude settings enable; an organization's managed policy still
 applies. YOLO therefore gives the session full access to this computer.
 Workspace admission still chooses where a session starts. The sandbox is lifted
 only once YOLO is confirmed and restored before any other mode takes effect.
-Sessions start in `default`
-unless a trusted session restores a previously selected mode; selecting YOLO
-requires native confirmation and native policy may reject it. Restricted
-sessions reset saved elevated modes to `default` when reopened. Native
+New sessions start in `default`; selecting YOLO requires native confirmation
+and native policy may reject it. A session keeps the mode its owner last
+confirmed, on restricted Hosts too: the Controller saves it under
+`~/.agent-remote-control/session-permissions/claude/`, so the session reopens
+in it after an idle release or a Controller restart until it is changed. Native
 requirements and idle-session checks still apply. Model controls remain
 available. These rules apply to the CLI. Embedders can provide the same trusted
 `executionPolicy` through `createAgentHostRuntime` or `createAgentHost`, and
@@ -418,7 +419,7 @@ different execution guarantees:
   details.
 - Claude requests the SDK command sandbox with `enabled: true`,
   `failIfUnavailable: true`, and `allowUnsandboxedCommands: false`. Unsupported
-  platforms fail closed. Saved elevated permission modes are reset to `default`.
+  platforms fail closed. A session reopens in its saved permission mode.
   The sandbox confines shell commands only; it does not establish isolation for
   native file tools, web tools, external MCP services, hooks, or filesystem
   reads. Permission prompts, not the sandbox, gate those tools. YOLO lifts the

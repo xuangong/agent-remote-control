@@ -34,6 +34,8 @@ export interface ClaudeSessionOptions {
   /** Native history is authoritative for the model after materialization. */
   restoreNativeModel?: boolean;
   restrictedNative?: boolean;
+  /** Remembers each session's confirmed permission mode, so a reopened session keeps it. */
+  permissionModes?: ClaudePermissionModeStore;
   env?: NodeJS.ProcessEnv;
   requestTimeoutMs?: number;
   onDiagnostic?: (line: string) => void;
@@ -43,6 +45,12 @@ export interface ClaudeSessionOptions {
 }
 
 export interface ClaudeSessionConfig extends AgentSessionConfig { permissionMode?: PermissionMode }
+
+/** Host-owned storage of the permission mode a session's owner last confirmed. */
+export interface ClaudePermissionModeStore {
+  read(sessionId: string): Promise<ResumableClaudePermissionMode | undefined>;
+  write(sessionId: string, mode: ResumableClaudePermissionMode): Promise<void>;
+}
 
 /** Retains the owned runtime when failed startup could not confirm native shutdown. */
 export class ClaudeShutdownError extends Error {
@@ -86,6 +94,9 @@ export class ClaudeAgentSession implements AgentSession {
   private planning = false;
   private permissionMode: PermissionMode = 'default';
   private resumePermissionMode: ResumableClaudePermissionMode = 'default';
+  /** The mode the permission store holds for this session, and its pending writes in order. */
+  private storedPermissionMode: ResumableClaudePermissionMode = 'default';
+  private permissionModeWrites = Promise.resolve();
   /** The sandbox flag setting the native process applies, as JSON; YOLO lifts it. */
   private sandbox = 'null';
   private models: ModelInfo[] = [];
@@ -112,7 +123,9 @@ export class ClaudeAgentSession implements AgentSession {
     this.timeout = options.requestTimeoutMs ?? 15_000;
     if (!Number.isFinite(this.timeout) || this.timeout <= 0) throw new Error('Claude request timeout must be positive.');
     this.planning = config.planning ?? false;
-    this.resumePermissionMode = !options.restrictedNative && isResumableClaudePermissionMode(config.permissionMode) ? config.permissionMode : 'default';
+    // The owner's last confirmed mode is kept on restricted Hosts too; YOLO there also lifts the sandbox.
+    this.resumePermissionMode = isResumableClaudePermissionMode(config.permissionMode) ? config.permissionMode : 'default';
+    this.storedPermissionMode = this.resumePermissionMode;
     this.permissionMode = this.planning ? 'plan' : this.resumePermissionMode;
     this.images = new ClaudeImageRegistry(config.sessionId);
     this.projector = new ClaudeEventProjector(config.sessionId, 'live', this.images);
@@ -426,6 +439,15 @@ export class ClaudeAgentSession implements AgentSession {
     this.permissionMode = mode;
     this.planning = mode === 'plan';
     if (!this.planning) this.resumePermissionMode = isResumableClaudePermissionMode(mode) ? mode : 'default';
+    this.rememberPermissionMode();
+  }
+  private rememberPermissionMode(): void {
+    const store = this.options.permissionModes, mode = this.resumePermissionMode;
+    if (!store || mode === this.storedPermissionMode) return;
+    this.storedPermissionMode = mode;
+    this.permissionModeWrites = this.permissionModeWrites.then(() => store.write(this.config.sessionId, mode)).catch(() => {
+      this.options.onDiagnostic?.('Claude permission mode could not be saved; a reopened session may start in its previous mode.');
+    });
   }
   private async readNativeSettings(refreshModel = false, restoreModel = false): Promise<void> {
     const revision = this.settingsRevision;

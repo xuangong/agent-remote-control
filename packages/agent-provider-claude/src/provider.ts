@@ -139,6 +139,11 @@ export class ClaudeAgentProvider implements AgentProviderAdapter {
       // A creation handle must name the session: an empty descriptor, or Claude's own persistence handle.
       if (!info && (resumeOptions.initializeEmpty !== true || !descriptor && createdSessionId(handle.opaque) !== sessionId)) throw new Error('Claude native session is unavailable.');
       const stored = descriptor ? { ...descriptor.config } : readConfig(handle.opaque);
+      // A handle from a cold open carries no mode; the Host's store keeps the owner's last choice.
+      if (stored.permissionMode === undefined) {
+        const saved = await this.options.permissionModes?.read(sessionId).catch(() => undefined);
+        if (saved) stored.permissionMode = saved;
+      }
       if (descriptor && info) delete stored.model;
       const cwd = info?.cwd ?? stored.cwd;
       if (descriptor && cwd !== descriptor.cwd) claudeEvidenceReject('native_evidence_stale');

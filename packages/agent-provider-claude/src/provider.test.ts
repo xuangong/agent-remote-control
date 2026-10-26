@@ -74,6 +74,32 @@ it.each(['acceptEdits', 'bypassPermissions'] as const)('resumes %s and retains i
   } finally { await resumed.dispose(); }
 });
 
+it('reopens a session cold in the mode the Host remembered, while a handle that carries a mode wins', async () => {
+  const launched: any[] = [];
+  const saved = new Map<string, string>();
+  const permissionModes = { read: async (id: string) => saved.get(id) as any, write: async (id: string, mode: string) => { saved.set(id, mode); } };
+  const provider = new ClaudeAgentProvider({ restrictedNative: true, permissionModes, catalog: { list: async () => [], info: async () => ({ cwd: process.cwd() }) as any,
+    messages: async () => [], children: async () => [] }, query: ({ options }) => {
+    launched.push(options);
+    const events = new Channel<any>();
+    return { [Symbol.asyncIterator]: () => events[Symbol.asyncIterator](), initializationResult: async () => ({ models: [] }),
+      setPermissionMode: async () => {}, applyFlagSettings: async () => {}, close: () => events.close() } as any;
+  } });
+  const first = await provider.createSession({ sessionId: 'proposed' });
+  const id = (await first.runtimeInfo()).sessionId;
+  await first.setSessionSetting!('permissions', 'bypassPermissions');
+  await first.dispose();
+  await expect.poll(() => saved.get(id)).toBe('bypassPermissions');
+  // A Controller restart opens the session without the mode in its handle.
+  const reopened = await provider.resumeSession({ providerId: 'claude', sessionId: id, opaque: '{}' });
+  try {
+    expect(launched.at(-1)).toMatchObject({ permissionMode: 'bypassPermissions', sandbox: { enabled: false } });
+    expect((await reopened.runtimeInfo()).settings).toContainEqual(expect.objectContaining({ id: 'permissions', value: 'bypassPermissions' }));
+  } finally { await reopened.dispose(); }
+  const fromHandle = await provider.resumeSession({ providerId: 'claude', sessionId: id, opaque: JSON.stringify({ permissionMode: 'acceptEdits' }) });
+  try { expect(launched.at(-1).permissionMode).toBe('acceptEdits'); } finally { await fromHandle.dispose(); }
+});
+
 it('resumes with the default mode after the native runtime reported an unrecognized one', async () => {
   const launched: any[] = [];
   const natives: Channel<any>[] = [];

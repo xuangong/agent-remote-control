@@ -20,6 +20,49 @@ export function adjacentSessionView(rail: Element, selectedId: string | null | u
   return index < 0 ? (step > 0 ? ordered[0] : ordered.at(-1)) : ordered[index + step];
 }
 
+/** Whether an element scrolls sideways itself and has room left in the direction of the step. */
+function scrollsSideways(element: Element, step: number) {
+  const { overflowX } = getComputedStyle(element);
+  if (overflowX !== 'auto' && overflowX !== 'scroll') return false;
+  const room = element.scrollWidth - element.clientWidth;
+  return room > 0 && (step > 0 ? element.scrollLeft < room - 1 : element.scrollLeft > 0);
+}
+
+/**
+ * How far a sideways wheel scrolls the rail, in pixels, or 0 when the browser should handle it. Content between the
+ * pointer and the rail that scrolls sideways itself, such as a table or code block with room left, keeps the wheel.
+ * A vertical wheel with Shift held scrolls sideways, as browsers do.
+ */
+export function railWheelStep(rail: Element, event: WheelEvent): number {
+  if (event.ctrlKey || event.defaultPrevented) return 0;
+  const delta = Math.abs(event.deltaX) > Math.abs(event.deltaY) ? event.deltaX : event.shiftKey && !event.deltaX ? event.deltaY : 0;
+  if (!delta) return 0;
+  const step = event.deltaMode === WheelEvent.DOM_DELTA_LINE ? delta * 16 : event.deltaMode === WheelEvent.DOM_DELTA_PAGE ? delta * rail.clientWidth : delta;
+  for (let node = event.target instanceof Element ? event.target : null; node && node !== rail; node = node.parentElement) {
+    if (scrollsSideways(node, step)) return 0;
+  }
+  return scrollsSideways(rail, step) ? step : 0;
+}
+
+/**
+ * A sideways wheel anywhere over the rail scrolls the rail. Panes contain their vertical overscroll, and browsers
+ * differ in whether such containment also stops a sideways wheel from reaching the rail, so the rail scrolls itself.
+ */
+export function useSessionRailWheel(rail: RefObject<HTMLElement>) {
+  useEffect(() => {
+    const element = rail.current;
+    if (!element) return;
+    const wheel = (event: WheelEvent) => {
+      const step = railWheelStep(element, event);
+      if (!step) return;
+      event.preventDefault();
+      element.scrollBy({ left: step, behavior: 'instant' });
+    };
+    element.addEventListener('wheel', wheel, { passive: false });
+    return () => element.removeEventListener('wheel', wheel);
+  }, [rail]);
+}
+
 /**
  * The mouse back and forward buttons select the previous or next session view in the rail and scroll it into view,
  * instead of leaving the page through browser history. Inactive while a dialog is open or the rail is not shown.

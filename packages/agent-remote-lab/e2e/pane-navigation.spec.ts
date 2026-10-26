@@ -16,16 +16,22 @@ async function open(page: Page) {
 test('a horizontal mouse wheel over a conversation, its heading or its composer scrolls the window rail', async ({ page, isMobile }) => {
   test.skip(isMobile, 'Wide layouts have a horizontal window rail.');
   const rail = await open(page);
-  const primary = pane(page, 'Primary');
-  for (const selector of ['.lab-timeline-scroll', '.lab-session-heading', '.lab-composer-dock']) {
-    await rail.evaluate(element => { element.scrollLeft = 0; });
-    const box = (await primary.locator(selector).first().boundingBox())!;
-    // Inside the conversation, away from tables and code blocks, which scroll on their own.
-    await page.mouse.move(box.x + box.width / 2, Math.min(box.y + box.height, 900) - Math.min(40, box.height / 2));
-    await page.mouse.wheel(300, 0);
-    await expect.poll(() => rail.evaluate(element => element.scrollLeft), { message: selector }).toBeGreaterThan(200);
-    await page.mouse.wheel(-300, 0);
-    await expect.poll(() => rail.evaluate(element => element.scrollLeft), { message: selector }).toBe(0);
+  // Containing overscroll in every direction stops a sideways wheel in some browsers; the rail must still scroll.
+  await page.locator('.lab-timeline-scroll').evaluateAll(elements => elements.forEach(element => { (element as HTMLElement).style.overscrollBehavior = 'contain'; }));
+  for (const name of ['Primary', 'Dock']) {
+    for (const selector of ['.lab-timeline-scroll', '.lab-session-heading', '.lab-composer-dock']) {
+      const target = pane(page, name).locator(selector).first();
+      await rail.evaluate(element => { element.scrollLeft = 0; });
+      await target.scrollIntoViewIfNeeded();
+      const start = await rail.evaluate(element => element.scrollLeft);
+      const box = (await target.boundingBox())!;
+      // Inside the conversation, away from tables and code blocks, which scroll on their own.
+      await page.mouse.move(box.x + box.width / 2, Math.min(box.y + box.height, 900) - Math.min(40, box.height / 2));
+      await page.mouse.wheel(150, 0);
+      await expect.poll(() => rail.evaluate(element => element.scrollLeft), { message: `${name} ${selector}` }).toBeGreaterThan(start + 100);
+      await page.mouse.wheel(-150, 0);
+      await expect.poll(() => rail.evaluate(element => element.scrollLeft), { message: `${name} ${selector}` }).toBe(start);
+    }
   }
 });
 

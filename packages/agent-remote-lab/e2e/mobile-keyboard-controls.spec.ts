@@ -32,9 +32,10 @@ for (const visualClientRects of [false, true]) {
     const trigger = page.getByRole('button', { name: 'Ask about this session', exact: true });
     await expect(trigger).toBeEnabled();
     const root = page.locator('.lab-ask-floating');
+    // A floating control keeps its spot in the visible area, which the keyboard pans.
     const position = () => root.evaluate(element => {
       const style = getComputedStyle(element);
-      return { x: parseFloat(style.left), y: parseFloat(style.top), width: parseFloat(style.width) };
+      return { x: parseFloat(style.left) - window.visualViewport!.offsetLeft, y: parseFloat(style.top) - window.visualViewport!.offsetTop, width: parseFloat(style.width) };
     });
     const initial = await position();
     // The default is right-aligned, with no saved left coordinate.
@@ -60,6 +61,56 @@ for (const visualClientRects of [false, true]) {
     await expect(page.getByRole('dialog', { name: 'Ask', exact: true })).toBeVisible();
   });
 }
+
+test('keeps floating controls the keyboard covers apart and returns them when it closes', async ({ page }, testInfo) => {
+  await page.addInitScript(() => {
+    const viewport = Object.assign(new EventTarget(), { width: 390, height: 844, offsetTop: 0, offsetLeft: 0, scale: 1 });
+    Object.defineProperty(window, 'visualViewport', { configurable: true, value: viewport });
+    localStorage.setItem('agent-remote:window-position', JSON.stringify({ x: 260, y: 600 }));
+    localStorage.setItem('agent-remote:ask-position', JSON.stringify({ x: 260, y: 700 }));
+  });
+  await page.goto('/');
+  await showNewSession(page);
+  await page.getByTestId('session-create').click();
+  const input = page.locator('.lab-primary-conversation').getByTestId('prompt-input');
+  await expect(input).toBeEnabled();
+  await input.fill('/ask');
+  await expect(page.locator('.lab-primary-conversation').getByTestId('prompt-submit')).toBeEnabled();
+  await input.press('Enter');
+  await expect(page.getByRole('button', { name: 'Ask about this session', exact: true })).toBeEnabled();
+  const boxes = () => page.evaluate(() => {
+    const box = (selector: string) => {
+      const element = document.querySelector<HTMLElement>(selector)!;
+      const top = parseFloat(getComputedStyle(element).top) - window.visualViewport!.offsetTop;
+      return { top, bottom: top + element.offsetHeight };
+    };
+    return { window: box('.lab-window-floating'), ask: box('.lab-ask-floating') };
+  });
+  await expect.poll(async () => (await boxes()).window.top).toBe(600);
+  expect((await boxes()).ask.top).toBe(700);
+
+  await focusWithKeyboard(page, input);
+  await expect(page.locator('.lab-shell')).toHaveAttribute('data-viewport-occluded', 'true');
+  await expect.poll(async () => (await boxes()).ask.bottom).toBe(420 - 12);
+  const covered = await boxes();
+  // The lower control takes the bottom of the visible area; the one above keeps clear of it.
+  expect(covered.window.bottom + 8).toBeLessThanOrEqual(covered.ask.top);
+  expect(covered.window.top).toBeGreaterThanOrEqual(12);
+  await page.screenshot({ path: testInfo.outputPath('keyboard-floating-controls.png') });
+
+  // Standalone WebKit can expose the final keyboard bounds after its viewport events.
+  await page.evaluate(() => {
+    Object.assign(window.visualViewport!, { height: 380, offsetTop: 200 });
+    window.dispatchEvent(new Event('focus'));
+  });
+  await expect.poll(async () => (await boxes()).ask.bottom).toBe(380 - 12);
+  const settled = await boxes();
+  expect(settled.window.bottom + 8).toBeLessThanOrEqual(settled.ask.top);
+
+  await closeKeyboardViewport(page);
+  await expect.poll(async () => (await boxes()).window.top).toBe(600);
+  expect((await boxes()).ask.top).toBe(700);
+});
 
 async function openFocusedComposer(page: Page, draft: string) {
   await page.addInitScript(() => {

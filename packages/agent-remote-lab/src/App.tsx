@@ -121,6 +121,7 @@ import { ReadingPositions, RecoveryScope, readLastSession, saveLastSession } fro
 import { compositionSession, compositionSelection, type StoreOwner } from './session-composition.js';
 import { useRemoteHosts } from './hooks/useRemoteHosts.js';
 import { useVisualViewport } from './hooks/useVisualViewport.js';
+import { arrangeFloatingEntries } from './hooks/useTrackingPosition.js';
 import { HostPairing, type HostPairingService, type RemoteHost } from './components/HostPairing.js';
 import { DirectoryError, nativeSessionMissing, RemoteHostClient, SessionDirectoryClient, type CreateSessionOptions, type OpenedSession, type SessionSummary } from './directory-client.js';
 import { SessionConfiguration, SessionDirectory } from './components/SessionDirectory.js';
@@ -217,7 +218,7 @@ function AppContent({
   const [activated, setActivated] = useState(accessReady);
   useEffect(() => { if (accessReady) setActivated(true); }, [accessReady]);
   const accessReadyRef = useRef(accessReady); accessReadyRef.current = accessReady;
-  const shellRef = useVisualViewport();
+  const shellRef = useVisualViewport(arrangeFloatingEntries);
   useEffect(() => () => stopLayoutDiagnostics('unmount'), []);
   const readingPositions = useMemo(() => new ReadingPositions(baseUrl), [baseUrl]);
   const transport = useMemo<LabTransport>(() => injectedTransport

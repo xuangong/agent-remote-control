@@ -95,7 +95,7 @@ it.each([false, true])('keeps touch movement aligned with fixed coordinates when
   visualClientRects = visual;
   const viewport = Object.assign(new EventTarget(), { offsetLeft: 50, offsetTop: 200, width: 600, height: 300 });
   vi.stubGlobal('visualViewport', viewport);
-  localStorage.setItem('agent-remote:ask-position', JSON.stringify({ x: 240, y: 360 }));
+  localStorage.setItem('agent-remote:ask-position', JSON.stringify({ x: 240, y: 60 }));
   const container = await render(<Harness />);
   const button = container.querySelector('button')!;
   const before = button.getBoundingClientRect();
@@ -103,19 +103,20 @@ it.each([false, true])('keeps touch movement aligned with fixed coordinates when
   await pointer(button, 'pointermove', before.left + 35, before.top + 40, 'touch');
   await pointer(button, 'pointerup', before.left + 35, before.top + 40, 'touch');
   expect(button.getBoundingClientRect()).toMatchObject({ left: before.left + 15, top: before.top + 20 });
-  expect(JSON.parse(localStorage.getItem('agent-remote:ask-position')!)).toEqual({ x: 255, y: 380 });
+  // The saved placement is relative to the visible area, which the keyboard has panned.
+  expect(JSON.parse(localStorage.getItem('agent-remote:ask-position')!)).toEqual({ x: 255, y: 80 });
 });
 
-it('uses the resolved CSS position when first mounted above an open keyboard', async () => {
+it('places the resolved CSS position within the visible area when first mounted above an open keyboard', async () => {
   visualClientRects = true;
   vi.stubGlobal('visualViewport', Object.assign(new EventTarget(), { offsetLeft: 50, offsetTop: 200, width: 750, height: 350 }));
   const css = document.createElement('style');
-  css.textContent = '.lab-ask-floating { position: fixed; left: 680px; top: 300px; }';
+  css.textContent = '.lab-ask-floating { position: fixed; left: 600px; top: 100px; }';
   document.head.append(css);
   try {
     const container = await render(<Harness />);
     const root = container.querySelector<HTMLElement>('.lab-ask-floating')!;
-    expect(root.style.left).toBe('680px');
+    expect(root.style.left).toBe('650px');
     expect(root.style.top).toBe('300px');
   } finally { css.remove(); }
 });

@@ -7,7 +7,8 @@ import { nativeSessionRefKey, type NativeSessionRef, isTeamMember, type Team, ty
 export interface TeamBrokerPorts {
   resolveSession(hostId: string, providerId: string, anchorNativeId: string): NativeSessionRef;
   assertRecipient?(target: NativeSessionRef): void;
-  assertRecipientSupport?(hostId: string): void;
+  /** generic: the replacement is a generic succession, which may also change the recipient's provider. */
+  assertRecipientSupport?(hostId: string, generic?: boolean): void;
   resources?: TeamResourceStore;
   resourceDraftTtlMs?: number;
   read(): SavedTeam[];
@@ -20,6 +21,7 @@ const upgradeRequired = 'Update the Controller for exact Team recipients. Reload
 type StoredRecipientAnchor = Pick<TeamMember, 'hostId' | 'providerId' | 'nativeSessionId'>;
 const withoutRecipient = <T extends { id: string; resolvedTarget?: NativeSessionRef }>(value: T): Omit<T, 'resolvedTarget'> => { const { resolvedTarget: _target, ...legacy } = value; return legacy; };
 const fail = (message: string): never => { throw new Error(message); };
+const sameRecipient = (current: NativeSessionRef, anchor: StoredRecipientAnchor) => current.providerId === anchor.providerId && current.nativeSessionId === anchor.nativeSessionId;
 const find = (teams: SavedTeam[], id: string) => teams.find(team => team.id === id) ?? fail('Team not found.');
 const member = (team: Team, id: string) => team.members.find(item => item.id === id) ?? fail('Team member not found.');
 const active = (team: Team) => { if (team.status !== 'active') fail('Team is not active.'); };
@@ -55,7 +57,7 @@ export class TeamBroker {
       if (unresolved.length || saved.members.some(anchor => {
         if (!anchor.nativeSessionId) return anchor.creation === 'ready';
         if (anchor.nativeSessionId.length > 256) return true;
-        try { return this.resolveRecipientFromAnchor(anchor).nativeSessionId !== anchor.nativeSessionId; }
+        try { return !sameRecipient(this.resolveRecipientFromAnchor(anchor), anchor); }
         catch { return false; } // Offline seats retain their persisted anchor for read-only display.
       })) fail(upgradeRequired);
       team.messages = team.messages.map(withoutRecipient);
@@ -63,23 +65,21 @@ export class TeamBroker {
     }
     for (const [index, anchor] of saved.members.entries()) if (anchor.nativeSessionId) {
       const recipient = team.members[index]!;
-      try { recipient.nativeSessionId = this.resolveRecipientFromAnchor(anchor).nativeSessionId; }
+      try { const current = this.resolveRecipientFromAnchor(anchor); recipient.providerId = current.providerId; recipient.nativeSessionId = current.nativeSessionId; }
       catch { delete recipient.nativeSessionId; }
     }
     return team;
   }
+  /** The session that holds the member's role now, which a handoff may have moved to another provider. */
   private resolveRecipientFromAnchor(anchor: StoredRecipientAnchor): NativeSessionRef {
     if (!anchor.nativeSessionId) fail('Team recipient is unavailable.');
-    const target = this.ports.resolveSession(anchor.hostId, anchor.providerId, anchor.nativeSessionId!);
-    if (target.providerId !== anchor.providerId) fail('Team recipient provider changed.');
-    return target;
+    return this.ports.resolveSession(anchor.hostId, anchor.providerId, anchor.nativeSessionId!);
   }
   hasUnsettledRecipient(target: NativeSessionRef): boolean {
     return this.ports.read().some(team => [...team.messages, ...(team.deliveryReceipts ?? [])].some(message => {
       if (!unresolvedTeamDelivery(message)) return false;
       if (message.resolvedTarget) return nativeSessionRefKey(message.resolvedTarget) === nativeSessionRefKey(target);
       const seat = member(team, message.to);
-      if (seat.providerId !== target.providerId) return false;
       try {
         const actual = this.ports.resolveSession(seat.hostId, target.providerId, target.nativeSessionId);
         if (actual.controllerId !== target.controllerId) return false;
@@ -89,9 +89,9 @@ export class TeamBroker {
     }));
   }
   readForClient(teamId: string, recipientAware: boolean): Team { return this.project(find(this.ports.read(), teamId), recipientAware); }
-  assertReplacementSupported(target: NativeSessionRef, hostId: string): void {
+  assertReplacementSupported(target: NativeSessionRef, hostId: string, generic = false): void {
     for (const team of this.ports.read()) for (const seat of team.members) {
-      if (seat.hostId === hostId && seat.providerId === target.providerId && seat.creation === 'ready' && nativeSessionRefKey(this.resolveRecipientFromAnchor(seat)) === nativeSessionRefKey(target)) this.ports.assertRecipientSupport?.(seat.hostId);
+      if (seat.hostId === hostId && seat.creation === 'ready' && nativeSessionRefKey(this.resolveRecipientFromAnchor(seat)) === nativeSessionRefKey(target)) this.ports.assertRecipientSupport?.(seat.hostId, generic);
     }
   }
   list(recipientAware = true): Team[] { return this.ports.read().map(saved => {
@@ -150,7 +150,7 @@ export class TeamBroker {
       assertCurrent();
       const team = find(teams, call.teamId), self = member(team, call.memberId), now = this.ports.now();
       if (self.hostId !== hostId || self.creation !== 'ready') fail('This Host is not the registered Team member.');
-      if (!recipientAware && this.resolveRecipientFromAnchor(self).nativeSessionId !== self.nativeSessionId) fail(upgradeRequired);
+      if (!recipientAware && !sameRecipient(this.resolveRecipientFromAnchor(self), self)) fail(upgradeRequired);
       if (call.action === 'read') return { ...this.project(team, recipientAware), receipts: team.deliveryReceipts?.map(({ fingerprint: _hash, settledAt: _time, ...receipt }) => projectDelivery(receipt)) ?? [] };
       if (call.action === 'acknowledge') {
         if (!recipientAware) fail(upgradeRequired);

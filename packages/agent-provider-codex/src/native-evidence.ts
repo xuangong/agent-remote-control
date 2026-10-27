@@ -9,7 +9,7 @@ import {
   type AgentEmptyCreationResult, type AgentEmptySessionConfig, type AgentInputAcceptance, type AgentInputMaterialization,
   type AgentInputPart, type AgentMessageOptions, type AgentNativeAuthorityScope, type AgentNativeEvidenceCode,
   type AgentNativeReadiness, type AgentNativeValidityToken, type AgentPersistenceHandle, type AgentPreparedTextInput,
-  type AgentProviderNativeEvidence, type AgentSessionNativeEvidence,
+  type AgentProviderNativeEvidence, type AgentSessionNativeEvidence, type AgentSessionTool,
 } from '@orchardworks/agent-provider-sdk';
 import { CodexAppServerRpcError, type CodexAppServerTransport } from './app-server-transport.js';
 import { initializeCodexTransport } from './initialize.js';
@@ -83,6 +83,10 @@ export async function updateCodexEvidenceSettings(
     return settings;
   } finally { clearTimeout(timer); unsubscribe(); }
 }
+/** Codex fixes a thread's dynamic tools when the thread starts; their execution is bound by each attachment. */
+export function codexDynamicTools(tools: readonly Pick<AgentSessionTool, 'name' | 'description' | 'inputSchema'>[] | undefined) {
+  return tools?.length ? tools.map(({ name, description, inputSchema }) => ({ type: 'function', name, description, inputSchema })) : undefined;
+}
 function handle(id: string, cwd: string, authority: AgentNativeAuthorityScope, settings?: CodexEvidenceSettings, failed = false,
   extensions?: Pick<CodexEvidenceSource, 'systemPrompt' | 'instructions' | 'collaborationMode'>): AgentPersistenceHandle {
   const result = { providerId: 'codex', sessionId: id, opaque: codexEvidenceJson({ kind: failed ? 'codex.empty-recovery' : 'codex.empty', version: 2,
@@ -107,10 +111,13 @@ export class CodexProviderNativeEvidence implements AgentProviderNativeEvidence 
     const cwd = await realpath(config.cwd ?? process.cwd()).catch(() => reject('native_evidence_invalid'));
     const selected = config.selectionSourceSessionId ? await this.ports.sourceSettings(config.selectionSourceSessionId) : undefined;
     const source = selected ? readCodexEvidenceSettings(selected) : undefined;
-    const extensions = selected ? { ...(selected.systemPrompt !== undefined ? { systemPrompt: selected.systemPrompt } : {}),
-      ...(selected.instructions !== undefined ? { instructions: selected.instructions } : {}),
-      ...(selected.collaborationMode ? { collaborationMode: selected.collaborationMode } : {}) } : undefined;
+    // A role taken over by this successor brings its own instructions instead of the source's.
+    const role = config.extensions, prompt = role ?? selected;
+    const extensions = selected || role ? { ...(prompt?.systemPrompt !== undefined ? { systemPrompt: prompt.systemPrompt } : {}),
+      ...(prompt?.instructions !== undefined ? { instructions: prompt.instructions } : {}),
+      ...(selected?.collaborationMode ? { collaborationMode: selected.collaborationMode } : {}) } : undefined;
     const instructions = [extensions?.systemPrompt, extensions?.instructions].filter(Boolean).join('\n\n');
+    const dynamicTools = codexDynamicTools(role?.tools);
     if (config.selectionSourceSessionId && !source) reject('native_evidence_unavailable');
     handle('B'.repeat(256), cwd, this.ports.authority, source, false, extensions);
     const transport = await this.ports.transport(cwd);
@@ -119,6 +126,7 @@ export class CodexProviderNativeEvidence implements AgentProviderNativeEvidence 
       await initializeCodexTransport(transport);
       let response = await transport.request('thread/start', { cwd,
         ...(instructions ? { developerInstructions: instructions } : {}),
+        ...(dynamicTools ? { dynamicTools } : {}),
         ...(source ? { model: source.model, modelProvider: source.modelProvider,
           config: { ...(source.reasoningEffort ? { model_reasoning_effort: source.reasoningEffort } : {}) } } : {}) });
       if (!isRecord(response) || !isRecord(response.thread) || !readString(response.thread.id)) return unknown('native_evidence_identity_unusable');

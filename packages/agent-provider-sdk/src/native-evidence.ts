@@ -1,4 +1,4 @@
-import { AgentOperationRejectedError, type AgentInputAcceptance, type AgentMessageOptions, type AgentPersistenceHandle, type AgentSessionConfig } from './provider.js';
+import { AgentOperationRejectedError, type AgentInputAcceptance, type AgentMessageOptions, type AgentPersistenceHandle, type AgentSessionConfig, type AgentSessionExtensions } from './provider.js';
 import type { AgentInputPart } from './image-input.js';
 
 export const AGENT_NATIVE_EVIDENCE_REASONS = Object.freeze({
@@ -27,6 +27,12 @@ export type AgentNativeEvidenceAvailability = { status: 'configured'; version: 2
 export type AgentEmptySessionConfig = Pick<AgentSessionConfig, 'sessionId' | 'cwd'> & {
   /** Same-provider native selection source only; never forks history or creates a parent relation. */
   selectionSourceSessionId?: string;
+  /**
+   * The role this empty successor takes over, such as a Team member's instructions and tools. Its instructions replace
+   * any copied from the selection source. A provider that fixes tools when it creates a native session registers these
+   * definitions now; tool execution is bound only when the session is attached with the same extensions.
+   */
+  extensions?: AgentSessionExtensions;
 };
 /** Created may be a prepared empty descriptor. It must retain the same native identity without input; resume never implies permission to initialize missing history. */
 export type AgentEmptyCreationResult = { status: 'created'; handle: AgentPersistenceHandle } | { status: 'known_rejected'; handle: AgentPersistenceHandle; code: AgentNativeEvidenceCode; reason: string } | { status: 'unknown'; code: AgentNativeEvidenceCode; reason: string };

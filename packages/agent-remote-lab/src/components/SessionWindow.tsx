@@ -63,7 +63,7 @@ function WindowBody({ entry, baseUrl, visible, compact, hostLabel, offline, tran
         onPointerDownCapture={focusWindow} onFocusCapture={focusWindow}>
         {target ? <SessionFamily storageScope={baseUrl} baseUrl={baseUrl} target={target} hostLabel={hostLabel} offline={offline}
           viewId={shared ? entry.id : entry.slotId} sessionIntent={shared?.window.views.find(view => view.id === entry.id)?.binding?.sessionIntent}
-          onSessionBound={onSessionBound} onSessionUnavailable={onSessionUnavailable} sessionPresentation={sessionPresentation} renderSessionFooter={renderSessionFooter} nativePrefixOnly={entry.managed}
+          onSessionBound={onSessionBound} onSessionUnavailable={onSessionUnavailable} sessionPresentation={sessionPresentation} renderSessionFooter={renderSessionFooter}
           displayBinding={{ scope: baseUrl, key: entry.id }} active={visible} compact={compact} onAdditionalWidthChange={onAdditionalWidthChange}
           transport={transport} draftStore={draftStore} draftBinding={draftBinding} imageDraftBinding={imageDraftBinding} navigation={navigation} controls={windowControls} menuActions={menuActions} /> : <>
           <header className="lab-empty-session-heading"><SessionDockHeadingStart /><strong {...titleInteraction}>Select session</strong><div>{menuActions ? <SessionHeadingActions sessionKey={entry.id} alwaysCollapsed>{menuActions}</SessionHeadingActions> : null}{windowControls}</div></header>

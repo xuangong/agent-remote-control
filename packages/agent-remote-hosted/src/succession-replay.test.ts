@@ -237,8 +237,8 @@ async function controller(f: Awaited<ReturnType<typeof fixture>>, failAtCommit =
   const sockets: any[] = [];
   let decline = false, loseRelease = false;
   let describeHold: { entered(): void; waiting: Promise<void> } | undefined;
-  async function connect(recipientAware = teamRecipients) {
-    const socket = new WebSocket(f.origin.replace('http', 'ws') + `/ws/remote-host?successionEnrollment=${enrollmentVersion}&team=1${recipientAware ? '&teamRecipients=1' : ''}`, { headers: { authorization: 'Bearer ' + f.credential } }); sockets.push(socket);
+  async function connect(recipientAware = teamRecipients, teamSuccession = false) {
+    const socket = new WebSocket(f.origin.replace('http', 'ws') + `/ws/remote-host?successionEnrollment=${enrollmentVersion}&team=1${recipientAware ? '&teamRecipients=1' : ''}${teamSuccession ? '&teamSuccession=1' : ''}`, { headers: { authorization: 'Bearer ' + f.credential } }); sockets.push(socket);
     socket.on('message', async (data: { toString(): string }) => {
       const message = JSON.parse(data.toString());
       if (message.type === 'heartbeat') { socket.send(JSON.stringify({ uplinkVersion: 2, type: 'heartbeat_ack', nonce: message.nonce })); return; }
@@ -1533,6 +1533,23 @@ test.each(['inline', 'compact-legacy', 'compact-target'] as const)('recovers %s 
   }
 }, 10000);
 
+
+test('a generic Team handoff also requires the Controller to move Team recipients, at both prepare and commit', async () => {
+  const f = await fixture(seedPrefixTeam, false, true, true), host = await controller(f, false, false, 3);
+  const request = { operationId: 'generic-team', providerId: 'fixture', nativeSessionId: 'A', expectedRevision: 1 };
+  const prepare = () => f.request('v1/remote/hosts/mapped-host/succession/prepare', 'owner', request);
+  const legacy = await prepare(); expect(legacy.status).toBe(409); expect(await legacy.json()).toMatchObject({ code: 'team_succession_upgrade_required' });
+  expect(host.effects.prepare).toBe(0);
+  await host.connect(true, true); expect((await prepare()).status).toBe(200); expect(host.effects.prepare).toBe(1);
+  await host.connect(true, false);
+  const committed = await f.request('v1/remote/hosts/mapped-host/succession/commit', 'owner', { operationId: request.operationId });
+  expect(committed.status).toBe(409); expect(await committed.json()).toMatchObject({ code: 'team_succession_upgrade_required' });
+  expect(host.effects.commit).toBe(0);
+  await host.connect(true, true);
+  expect((await f.request('v1/remote/hosts/mapped-host/succession/commit', 'owner', { operationId: request.operationId })).status).toBe(200);
+  const teams = await (await f.request('v1/remote/teams')).json();
+  expect(teams.teams[0].members.find((member: { id: string }) => member.id === 'worker')).toMatchObject({ providerId: 'fixture', nativeSessionId: 'B' });
+}, 10000);
 
 test('Team role replacement requires a live recipient acknowledgement at both prepare and commit', async () => {
   const f = await fixture(seedPrefixTeam, false, true, true), host = await controller(f, false, false, 3, false);

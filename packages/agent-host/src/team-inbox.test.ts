@@ -87,7 +87,7 @@ it('limits inbox payload without truncating a body or losing the next page', asy
 it('validates acknowledgement IDs and binds acknowledgements to the current recipient before and after the request', async () => {
   const context = await fixture();
   try {
-    const candidate = (await context.runtime.extensions('fixture', 'A', () => 'B'))!;
+    const candidate = (await context.runtime.extensions(context.ref('A'), () => context.ref('B')))!;
     await expect(context.call('acknowledge_team_messages', { messageIds: ['seen'] }, candidate)).rejects.toThrow(/current/);
     expect(context.calls).toEqual([]);
     context.setCurrent('B');

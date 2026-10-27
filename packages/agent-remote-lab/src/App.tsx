@@ -2052,8 +2052,10 @@ function AppContent({
       onOpen={clean => openAsk(source, sourceState, clean)} replicaFor={replicaFor} transport={transport}
       navigation={viewNavigation} />;
   }
-  function sessionViewPresentation(context: FamilySessionPresentationContext) {
-    const source = { ...withConfirmedTitle(context.session), hostId: context.session.hostId ?? 'local', viewId: context.viewId! };
+  /** team: a Team Leader or Member view, which shows the member's name and offers Handoff like a primary view. */
+  function sessionViewPresentation(context: FamilySessionPresentationContext, options: { team?: boolean } = {}) {
+    const team = options.team === true;
+    const source = { ...(team ? context.session : withConfirmedTitle(context.session)), hostId: context.session.hostId ?? 'local', viewId: context.viewId! };
     const view = sharedWindow?.views.find(view => view.id === context.windowViewId);
     const isPrimary = view?.placement === 'primary';
     const fork = forkStore.find(source);
@@ -2061,9 +2063,9 @@ function AppContent({
     const gated = successionGated && successionDialog?.scope === baseUrl && viewKey(successionDialog.source) === source.viewId;
     const host = remoteHosts.find(host => host.id === source.hostId);
     const available = accessReady && !context.offline && context.status === 'ready' && !context.pending && sourceCurrent(source);
-    const handoffAvailable = available && isPrimary && !successionDialog && userScoped && !!directory && !source.parentNativeSessionId
+    const handoffAvailable = available && (isPrimary || team) && !successionDialog && userScoped && !!directory && !source.parentNativeSessionId
       && !context.sessionState.readOnly && !context.operationBinding.historical && host?.access !== 'shared' && host?.online === true;
-    const mayRename = userScoped && host?.online && host.access !== 'shared' && host.providers?.some(provider => provider.providerId === source.providerId && provider.sessionRename);
+    const mayRename = !team && userScoped && host?.online && host.access !== 'shared' && host.providers?.some(provider => provider.providerId === source.providerId && provider.sessionRename);
     const sourceForks = forkStore.linked().filter(item => item.target && sessionKey(sideNavigationSource(item)) === sessionKey(source));
     return {
       headingMode: compactLayout ? 'toolbar' as const : 'inline' as const,
@@ -2081,13 +2083,13 @@ function AppContent({
         setActiveView('trace');
       },
       revealEntry: letterReveals[source.agentId] ?? (traceRequest?.view === 'workbench' && context.state?.agent?.id === state?.agent?.id ? traceRequest : undefined),
-      onPendingInputChange: isPrimary ? (count: number) => setPendingGroupInputs(values => values[source.viewId] === count ? values : { ...values, [source.viewId]: count }) : undefined,
+      onPendingInputChange: isPrimary || team ? (count: number) => setPendingGroupInputs(values => values[source.viewId] === count ? values : { ...values, [source.viewId]: count }) : undefined,
       actions: forkInputStatus?.pending && forkInputStatus.agentId === source.agentId ? { deleteMessage: commands.deleteMessage } : commands,
       consoleCommands: [...(available && directory && context.state?.agent?.capabilities.sendMessage && context.state.agent.capabilities.history ? forkCommands : []), ...(handoffAvailable ? [handoffCommand] : [])],
       onExecuteConsoleCommand: async (id: string, args: string): Promise<AgentCommandResult> => {
         assertSourceCurrent(source);
         if (id === handoffCommand.id) {
-          if (!handoffAvailable) throw new Error('Handoff is available on a current main conversation with authorized Host access.');
+          if (!handoffAvailable) throw new Error('Handoff is available on a current main conversation or Team member with authorized Host access.');
           setSuccessionDialog({ scope: baseUrl, source, visible: true, initialProvider: handoffProvider(args), directory: labSessionSuccessionDirectory(new SessionDirectoryClient(baseUrl, undefined, source.hostId)) });
           return {};
         }
@@ -2137,7 +2139,8 @@ function AppContent({
   }), navigate: navigateAttribution }}><SessionViewOperationsContext.Provider value={{ storageScope: baseUrl, transport, enabled: accessReady && activated, resolveTarget: (source, requested) => {
     const roster = teamRosterRef.current;
     const member = teamViewTarget(succession.document, roster?.baseUrl === baseUrl ? roster.teams : undefined, source, requested?.viewId);
-    const result = succession.resolveTarget(source, { ...requested, ...(member ? { nativePrefixOnly: true } : {}) });
+    // A Team member follows prompt edits and handoffs alike: Team routing moves its seat to the successor.
+    const result = succession.resolveTarget(source, requested);
     if (member && sessionKey(member) !== sessionKey(result.target)) throw new Error('The Team execution locator is still synchronizing.');
     return { ...result, target: { ...result.target, ...(member ? { teamId: member.teamId, teamMemberId: member.teamMemberId } : {}) } };
   }, directory: source => labSessionSuccessionDirectory(new SessionDirectoryClient(baseUrl, undefined, source.hostId)), refreshSettled: succession.refreshSettled }}><AskViewScope.Provider value={askView.execute}><WindowSessionBridgeContext.Provider value={windowWorkspace.sessionBridge}><WindowLayoutContext.Provider value={windowWorkspace.authority}><SessionDockProvider key={baseUrl} storageScope={baseUrl} enabled={!compactLayout && activeView === 'workbench'}
@@ -2347,7 +2350,7 @@ function AppContent({
           actions={entry.groupId ? <TeamGatherButton baseUrl={baseUrl} entry={entry} onGather={targets => sessionWindows.gather(entry, targets)} /> : undefined}
           onSessionBound={entry.managed ? undefined : receiveViewSession}
           missing={!!entry.target && missingSessions.has(sessionKey(entry.target))} onSessionUnavailable={markSessionMissing}
-          sessionPresentation={entry.managed ? undefined : sessionViewPresentation}
+          sessionPresentation={context => sessionViewPresentation(context, { team: !!entry.groupId || !!entry.teamMemberId })}
           transport={transport} draftStore={messageDrafts} {...windowDraftBinding(entry)} navigation={viewNavigation} onClose={() => sessionWindows.close(entry.id)} />)}</div>
         {sharedWindow && !sharedWindow.views.length ? <div className="lab-window-empty" data-testid="empty-window">
           <p>No session views</p><button type="button" onClick={createSessionView}>New session view</button>

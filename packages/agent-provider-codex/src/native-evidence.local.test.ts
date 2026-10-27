@@ -151,3 +151,20 @@ it.runIf(!!process.env.ARC_CODEX_SUCCESSION_TEST_EXECUTABLE)('retains native dyn
     expect(f.bodies.some(body => body.input?.some((item: any) => item.type === 'function_call_output' && JSON.stringify(item).includes('SOURCE_NATIVE_OK')))).toBe(true);
   } finally { await f.close(); }
 }, 30000);
+
+it.runIf(!!process.env.ARC_CODEX_SUCCESSION_TEST_EXECUTABLE)('an empty successor created with a role carries its instructions and tools into its first turn', async () => {
+  const f = await fixture(true); let calls = 0;
+  const tool = { name: 'read_source_session', description: 'Read the source session', inputSchema: { type: 'object', properties: {} },
+    execute: async () => { calls++; return 'ROLE_TOOL_OK'; } };
+  try {
+    const creation = await f.provider.nativeEvidence.createEmpty({ sessionId: 'successor', cwd: f.directory,
+      extensions: { instructions: 'You hold the Team role.', tools: [{ ...tool, execute: async () => { throw new Error('Not attached'); } }] } });
+    if (creation.status !== 'created') throw new Error(JSON.stringify({ creation, diagnostics: f.diagnostics }));
+    const session = await f.provider.resumeSession(creation.handle, { instructions: 'You hold the Team role.', tools: [tool] }); f.sessions.push(session);
+    await completed(session, () => session.sendMessage('Use your role.'));
+    expect(calls).toBe(1);
+    const request = JSON.stringify(f.bodies[0]);
+    expect(request).toContain('You hold the Team role.');
+    expect(f.bodies[0].tools?.some((item: { name?: string }) => item.name === 'read_source_session')).toBe(true);
+  } finally { await f.close(); }
+}, 30000);

@@ -137,7 +137,8 @@ export class CopilotAgentProvider implements AgentProviderAdapter {
       ...(typeof saved.instructions === 'string' ? { instructions: saved.instructions } : {}), ...extensions, sessionId: handle.sessionId, cwd }, true);
   }
   private async createEmpty(config:AgentEmptySessionConfig) {
-    if(Object.keys(config).some(key=>!['sessionId','cwd','selectionSourceSessionId'].includes(key))) rejectNativeEvidence('native_evidence_invalid');
+    if(Object.keys(config).some(key=>!['sessionId','cwd','selectionSourceSessionId','extensions'].includes(key))) rejectNativeEvidence('native_evidence_invalid');
+    // Copilot registers tools when a session opens, so a role's extensions apply on attachment.
     nativeIdentity(config.sessionId);if(config.selectionSourceSessionId!==undefined) nativeIdentity(config.selectionSourceSessionId);
     const cwd=await realpath(config.cwd??process.cwd());if(!(await stat(cwd)).isDirectory()) rejectNativeEvidence('native_evidence_invalid');
     await this.ready();await this.assertSessionAvailable(config.sessionId);

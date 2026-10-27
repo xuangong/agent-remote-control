@@ -222,6 +222,8 @@ The conversation Sessions menu highlights running subagent rows and reports the 
 
 Teams remain ordinary session layout presets. Wide layouts open the main session and dock the Leader and members. Compact layouts initially open the Leader; the floating Team list exposes each member directly, including its role, Host and current-session marker. Selecting a member replaces the primary conversation through normal session navigation, with the same model, permission and status controls. The current marker matches Host, Provider and native session identity, including after refresh. Unfinished member slots cannot be opened, and failed navigation keeps the list available for retry. Team management remains in its existing disclosure.
 
+A Leader or member view keeps the member's name as its title and offers the same session commands as other views: `/side` and `/btw` open a Side beside it, `/fork` copies its context, and `/handoff [provider]` hands the member off to a new session, on the same or another provider. The member keeps its seat: the Team list shows its new provider and session, its Team tools move to the new session, Team messages addressed to it are delivered there, and the new session's first input carries the conversation so far. The handoff is offered only to providers that run Team tools on that Host, and requires a Controller and Relay that move Team members; otherwise its dialog explains what to update. Gather recognizes a Leader by its member identity, so it keeps working after the Leader was handed off.
+
 ## Ordered image input
 
 Image-capable Codex and Claude sessions use a minimal inline editor: text, newlines,

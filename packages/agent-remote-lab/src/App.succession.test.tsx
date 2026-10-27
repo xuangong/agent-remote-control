@@ -2987,6 +2987,44 @@ it.each((['dock', 'attached', 'empty-dock'] as const).flatMap(destination => (['
 });
 
 
+// After a handoff the view keeps the member's original binding and shows its current session.
+it.each([false, true])('offers Side and Handoff in a Team member view, keeping the member name as its title (handed off: %s)', async handedOff => {
+  const current = handedOff ? 'Y' : 'X';
+  vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} });
+  Object.defineProperty(HTMLDialogElement.prototype, 'showModal', { configurable: true, value() { this.open = true; } });
+  const real = workbenchComponents.LabWorkbench;
+  let member: ComponentProps<typeof real> | undefined;
+  vi.spyOn(workbenchComponents, 'LabWorkbench').mockImplementation(props => { if (props.sessionIdentity?.nativeSessionId === current && props.state?.agent) member = props; return real(props); });
+  const binding = (id: string) => ({ hostId: 'host', providerId: 'recorded', nativeSessionId: id, title: id });
+  const team: Team = { id: 'actions-team', operationId: 'create', revision: 1, title: 'Team', status: 'active', source: binding('A'),
+    members: [{ id: 'leader', hostId: 'host', providerId: 'recorded', nativeSessionId: 'L', role: 'leader', name: 'Leader', responsibility: '', creation: 'ready', activity: 'idle', summary: '', updatedAt: 1 },
+      { id: 'worker', hostId: 'host', providerId: 'recorded', nativeSessionId: current, role: 'member', name: 'Worker', responsibility: '', creation: 'ready', activity: 'idle', summary: '', updatedAt: 1 }],
+    messages: [], createdAt: 1, updatedAt: 1 };
+  const managed = { ...createWindowView('team-worker', { ...binding('X'), title: 'Worker' }, 'dock'), bindingPolicy: 'managed' as const,
+    feature: createWindowFeature({ kind: 'team', id: team.id, role: 'member', memberId: 'worker' }) };
+  const document: WorkspaceWindow = { schemaVersion: 3, id: 'team-actions', title: 'Team actions', revision: 0,
+    selectedPrimaryViewId: 'primary-A', selectedViewId: 'primary-A', views: [createWindowView('primary-A', binding('A'), 'primary'), managed] };
+  const description: SuccessionDescription = { role: { id: 'worker-role', revision: handedOff ? 2 : 1, origin: native('X'), current: native(current), workspace: { controllerId: 'installation', canonicalCwd: '/fixture' } },
+    targets: [{ providerId: 'recorded', displayName: 'Recorded' }, { providerId: 'claude-code', displayName: 'Claude Code' }], eligibility: { status: 'ready' } };
+  const setup = { chain: handedOff ? [committed('X', 'Y', 2, 'worker-role')] : [] as SessionSuccessionReplay[], userScoped: true, windowDocument: document, teams: () => [team], successionDescription: description };
+  const f = await failureFixture(false, 'A', false, `&window=${document.id}`, setup);
+  // The view can try to open before the Team roster arrives; it opens on retry once the roster names its member.
+  const retry = () => [...f.view.querySelectorAll<HTMLButtonElement>('[data-view-id="team-worker"] button')].find(button => button.textContent === 'Retry');
+  await settleApp(() => expect(member?.sessionStatus === 'ready' || !!retry()).toBe(true));
+  if (retry()) await act(async () => retry()!.click());
+  await settleApp(() => { expect(member?.sessionStatus).toBe('ready'); });
+  const commands = member!.consoleCommands?.map(command => command.id) ?? [];
+  expect(commands).toEqual(expect.arrayContaining(['console:side', 'console:fork', 'console:handoff']));
+  expect(f.view.querySelector('[data-view-id="team-worker"] .agent-session-title')?.textContent).toBe('Worker');
+  // A Side reads the member's session and opens beside its view.
+  await act(async () => { await member!.onExecuteConsoleCommand!('console:side', ''); });
+  expect(f.requests.find(request => request.url.endsWith('/create'))?.body).toMatchObject({ providerId: 'recorded', sourceNativeSessionId: current, conversationKind: 'side' });
+  await settleApp(() => expect(setup.windowDocument.views.find(view => view.attachedTo === 'team-worker')?.binding?.nativeSessionId).toBe('S'));
+  await act(async () => { await member!.onExecuteConsoleCommand!('console:handoff', 'claude'); });
+  await settleApp(() => expect(f.requests.find(request => request.url.endsWith('/succession/describe'))?.body).toEqual({ providerId: 'recorded', nativeSessionId: current }));
+  expect(f.requests.some(request => request.url.endsWith('/succession/prepare'))).toBe(false);
+});
+
 it('selects a managed Team view directly for pointer and focus without first selecting primary', async () => {
   vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} });
   const binding = (id: string) => ({ hostId: 'host', providerId: 'recorded', nativeSessionId: id, title: id });

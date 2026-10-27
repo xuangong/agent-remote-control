@@ -422,6 +422,34 @@ These boundaries cover Host entry points, not independent native writers. Native
 readiness, SQL admission and product recovery remain separate checks; passing one
 does not bypass another.
 
+## Role routing and role extensions
+
+Two routings resolve where work addressed to a session goes after its committed
+successions. Native-prefix routing (`resolveNativePrefix`) follows prompt-edit
+branches only and fails across a generic succession, whose successor starts from
+captured context instead of the native history; source-reader ancestry, prompt-edit
+metadata, TPM and Ask use it. Role routing (`resolveRoleSuccession`) follows every
+committed succession of the role, including a handoff to another provider; Team
+seats use it on the Controller and the Relay, so a Team member's seat, messages and
+roster entry follow a handoff. Both validate the complete committed lineage first.
+
+Some sessions get Controller tools from a role, such as a Team seat. On the
+Controller each such role implements `SessionRole`
+(`packages/agent-host/src/session-role-succession.ts`): it gives the extensions of
+the role a session holds, bound to the session that runs them, and decides whether
+a generic succession may keep the role. A Team seat may move when the Relay
+acknowledged Team succession and the target provider runs session instructions and
+tools; a TPM session may not, and its handoff is refused before preparation with the
+role's reason. Sessions without a role move freely; a Side or Ask keeps reading its
+source through the source relation.
+
+A generic successor takes its source's role from creation. The Controller passes the
+role's extensions to `createEmpty`, where a provider that fixes tools at native
+creation registers their definitions (Codex), and attaches the successor, before and
+after commit, with the extensions of its source's role bound to the successor. The
+role's tools check routing on every call, so they run only on the session that holds
+the role: the successor's are fenced until commit, the predecessor's afterwards.
+
 ## Provider evidence and recovery
 
 Native evidence uses either a trusted service namespace or an owned runtime.

@@ -107,3 +107,24 @@ test('prefix metadata ancestry stops at each generic boundary without granting e
   expect(api.resolveNativePrefix(edges[1]!.to, edges).target).toEqual(edges[2]!.to);
   expect(() => api.nativePrefixSegmentAncestors(edges[2]!.to, [edges[1]!, edges[2]!])).toThrow(/invalid committed lineage/);
 }, 5000);
+
+function genericEdge(from: NativeRef, to: NativeRef, revision: number) {
+  const request = { operationId: `op-${revision}`, roleId: 'role', expectedRevision: revision, from,
+    ...(to.providerId !== from.providerId ? { targetProviderId: to.providerId } : {}) };
+  return { ...request, to, phase: 'committed' as const, committedRevision: revision + 1, startedAt: 'now', updatedAt: 'now',
+    prepared: { ...request, to, workspace, associationRevision: 0, participants: [], capture: { epoch: 'epoch', seq: 4, capturedAt: 'now' } } };
+}
+type NativeRef = typeof source;
+test('role routing follows every committed succession of a role, including a provider change', async () => {
+  const api = await import('./session-succession.js');
+  const claude = { ...source, providerId: 'claude', nativeSessionId: 'C' };
+  const edges = [committedEdge('A', 'B', 1), genericEdge({ ...source, nativeSessionId: 'B' }, claude, 2), genericEdge(claude, { ...claude, nativeSessionId: 'D' }, 3)];
+  expect(api.resolveRoleSuccession(source, edges)).toEqual({ anchor: source, target: { ...claude, nativeSessionId: 'D' }, operationIds: ['op-1', 'op-2', 'op-3'] });
+  expect(api.resolveRoleSuccession(claude, edges).target).toEqual({ ...claude, nativeSessionId: 'D' });
+  expect(api.resolveRoleSuccession({ ...source, nativeSessionId: 'other' }, edges).target).toEqual({ ...source, nativeSessionId: 'other' });
+  // Native prefix routing keeps stopping at the generic boundary.
+  expect(() => api.resolveNativePrefix(source, edges)).toThrow(/generic succession/);
+  // The same lineage validation applies.
+  expect(() => api.resolveRoleSuccession(source, [edges[1]!])).toThrow(/invalid committed lineage/);
+  expect(() => api.resolveRoleSuccession({ ...source, nativeSessionId: '' }, edges)).toThrow(/invalid anchor/);
+}, 5000);

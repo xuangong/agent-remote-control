@@ -32,6 +32,16 @@ function deliver(value:any) {mock.events.push(value);mock.handler(value);}
 function input(messageId='native-message-1',text='exact') {return event('user.message',{content:text,messageId,interactionId:'interaction-1',delivery:'idle'},'user-record-1');}
 function start(extra={}) {return event('assistant.turn_start',{interactionId:'interaction-1',turnId:'0'},'execution-record-1',extra);}
 
+it('accepts the role an empty successor takes over and leaves it to the attachment',async () => {
+  const p=provider();
+  try {
+    const role={instructions:'Team role',tools:[{name:'read_team',description:'Read the Team',inputSchema:{type:'object'},execute:async()=>'unbound'}]};
+    const created=await p.nativeEvidence!.createEmpty({sessionId:'successor',cwd:process.cwd(),extensions:role});
+    expect(created.status).toBe('created');
+    await expect(p.nativeEvidence!.createEmpty({sessionId:'other',cwd:process.cwd(),unknown:true} as never)).rejects.toThrow();
+  } finally {await p.dispose();}
+});
+
 it('retains a bounded empty descriptor and only initializes a missing native session with explicit permission',async () => {
   const p=provider();
   try {

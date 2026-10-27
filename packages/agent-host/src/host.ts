@@ -27,6 +27,7 @@ import type { ControllerIdentity, ControllerUpdateStatus } from '@orchardworks/a
 import { createIdleSessions } from './idle-sessions.js';
 import { browseWorkspaceFolders, createWorkspaceFolder, WorkspaceFolderError } from './workspace-folders.js';
 import { allowedWorkspace, HostExecutionPolicyError, protectHostDirectory, type HostExecutionPolicy } from './execution-policy.js';
+import { SessionRoles, type SessionRole } from './session-role-succession.js';
 import { createControllerPreviews } from './previews.js';
 import { createVscodeTunnelManager, type VscodeTunnelOptions } from './vscode-tunnel.js';
 import { createOperationCache, OperationCacheError, type OperationCacheOptions } from '@orchardworks/agent-remote-relay';
@@ -104,7 +105,9 @@ export interface AgentHostRuntimeOptions {
   executionPolicy?: HostExecutionPolicy;
   operationCache?: OperationCacheOptions;
   tpm?: TpmOptions;
-  team?: { stateDirectory: string; request?: (call: TeamHostCall) => Promise<unknown>; tickMs?: number };
+  team?: { stateDirectory: string; request?: (call: TeamHostCall) => Promise<unknown>; tickMs?: number;
+    /** The Relay routes Team recipients across a generic succession of their session. */
+    genericSuccession?(): boolean };
   /** Internal wiring until provider readiness and product projection are certified together. */
   succession?: { controllerId: string; enrollment?: true } & ({
     stateDirectory: string;
@@ -140,6 +143,8 @@ export interface AgentHostRequestDiagnostic {
 }
 export interface AgentHostRuntime {
   readonly executionRouting?: SessionExecutionRouting;
+  /** Role routing, which Team recipients follow across every committed succession. */
+  readonly roleRouting?: SessionExecutionRouting;
   readonly relay: AgentRemoteRelay;
   /** Session states the Relay shares with the owner's pages. */
   readonly sessionStates: SessionStatePublisher;
@@ -184,7 +189,8 @@ export interface AgentHost {
 export function createAgentHost(options: AgentHostOptions): AgentHost {
   if (options.succession?.enrollment && options.succession.controllerId !== options.installationId) throw new Error('Succession Controller identity must match the installed Controller.');
   const stateDirectory = options.preview?.stateDirectory ?? options.vscodeTunnel?.stateDirectory;
-  const runtime = createAgentHostRuntime({ ...options, ...(options.team ? { team: { ...options.team, request: (call: TeamHostCall) => connection.client.teamRequest(call) } } : {}), controllerId: options.installationId,
+  const runtime = createAgentHostRuntime({ ...options, ...(options.team ? { team: { ...options.team, request: (call: TeamHostCall) => connection.client.teamRequest(call),
+    genericSuccession: () => connection.client.teamSuccession } } : {}), controllerId: options.installationId,
     ...(options.inputImages ? {} : stateDirectory ? { inputImages: { directory: join(stateDirectory, 'input-images') } } : {}),
     ...(options.inputResources ? {} : stateDirectory ? { inputResources: { directory: join(stateDirectory, 'input-resources') } } : {}) });
   options.providerDiscovery?.onRegistration(runtime.addRegistration);
@@ -339,6 +345,9 @@ export function createAgentHostRuntime(options: AgentHostRuntimeOptions): AgentH
         const target = registration(targetProviderId);
         if (options.providerEnabled?.(targetProviderId) === false || !target.adapter.readSessionHistory
           || !target.directory.setSourceBindingReader || !target.directory.sourceReferences) return false;
+        // A generic successor takes over the role its source holds, or the handoff is refused.
+        const role = await roles.genericSuccession(source, targetProviderId);
+        if (!role.allowed) throw new SuccessionPreparationRejected('succession_role_unavailable', role.reason);
         if (nativeSuccession) return await nativeSuccession.supports(source, targetProviderId) === true;
         return target.directory.supportsSourceReferences === true && hasCurrentNativeEvidence(target.adapter) && hasCurrentNativeEvidence(registration(source.providerId).adapter);
       },
@@ -390,7 +399,10 @@ export function createAgentHostRuntime(options: AgentHostRuntimeOptions): AgentH
         if (!hasCurrentNativeEvidence(registration(targetProviderId).adapter)) return undefined;
         const role = succession?.store.all().find(state => nativeSessionRefKey(state.role.current) === nativeSessionRefKey(source))?.role;
         if (!role) throw new Error('Native succession role is unavailable.');
-        const config = { sessionId: directoryOperationId(operationId), cwd: role.workspace.canonicalCwd, ...(source.providerId === targetProviderId ? { selectionSourceSessionId: source.nativeSessionId } : {}) };
+        // The successor carries its source's role from creation; the role's tools run only once it is attached.
+        const extensions = await roles.extensions(source, () => undefined);
+        const config = { sessionId: directoryOperationId(operationId), cwd: role.workspace.canonicalCwd, ...(source.providerId === targetProviderId ? { selectionSourceSessionId: source.nativeSessionId } : {}),
+          ...(extensions ? { extensions } : {}) };
         return () => evidence!.createEmpty(config);
       },
       retainVerification,
@@ -579,6 +591,17 @@ export function createAgentHostRuntime(options: AgentHostRuntimeOptions): AgentH
     }
     return result;
   }
+  /** The source a generic successor took its role over from, while that succession is pending or once it committed. */
+  function genericSuccessionSource(target: NativeSessionRef): NativeSessionRef | undefined {
+    let result: NativeSessionRef | undefined;
+    for (const state of succession?.store.all() ?? []) for (const operation of state.operations) {
+      const progress = succession!.store.progress(operation.operationId), candidate = operation.to ?? progress?.orphanCandidate;
+      if (!candidate || nativeSessionRefKey(candidate) !== nativeSessionRefKey(target) || operation.preparation) continue;
+      if (result && nativeSessionRefKey(result) !== nativeSessionRefKey(operation.from)) throw new Error('Generic succession source identity conflicts.');
+      result = operation.from;
+    }
+    return result;
+  }
   /** Rebuild each native attachment from stable role anchors and its own actual recipient. */
   async function nativePrefixExtensions(source: NativeSessionRef, actual: () => string | undefined): Promise<AgentSessionExtensions> {
     const directory = registration(source.providerId).directory;
@@ -586,7 +609,7 @@ export function createAgentHostRuntime(options: AgentHostRuntimeOptions): AgentH
     const grants = (await directory.sourceReferences?.() ?? []).filter(grant => ancestry.some(ref => ref.nativeSessionId === grant.nativeSessionId));
     if (grants.length > 1) throw new Error('Source reference ancestry is ambiguous.');
     const sourceTools = grants.length === 1 && !!directory.setSourceReferenceAncestors && !!directory.setSourceBindingReader;
-    const teamTools = await team?.extensions(source.providerId, source.nativeSessionId, actual);
+    const teamTools = await team?.extensions(source, () => { const id = actual(); return id ? { ...source, nativeSessionId: id } : undefined; });
     const tpmTools = await tpm?.extensions(source.providerId, source.nativeSessionId, actual);
     if (teamTools && tpmTools) throw new SuccessionPreparationRejected('succession_prefix_extensions_unavailable', 'Native recipient has conflicting role extensions.');
     if (directory.requiresController?.(source.nativeSessionId) && !sourceTools && !teamTools && !tpmTools) throw new SuccessionPreparationRejected('succession_prefix_extensions_unavailable', 'Native prefix extensions cannot be reconstructed.');
@@ -795,7 +818,10 @@ export function createAgentHostRuntime(options: AgentHostRuntimeOptions): AgentH
             if (!parent) throw new Error('Native parent session is unavailable.');
           }
         }
-        const extensions = nativePrefix ? await nativePrefixExtensions(nativePrefix.source, () => nativeSessionId) : await team?.extensions(providerId, nativeSessionId) ?? await tpm?.extensions(providerId, nativeSessionId);
+        const attached = nativeRef({ providerId, nativeSessionId });
+        // A generic successor holds the role of its source, so every attachment of it gets the same extensions.
+        const extensions = nativePrefix ? await nativePrefixExtensions(nativePrefix.source, () => nativeSessionId)
+          : await roles.extensions(genericSuccessionSource(attached) ?? attached, () => attached);
         const open = () => source.open(nativeSessionId, { ...(takeOver ? { takeOver } : {}), ...(extensions ? { extensions } : {}), ...(nativePrefix ? { nativePrefix: nativePrefix.handle } : {}), ...(nativeCreation ? { nativeCreation, resumeHandle: succession?.contexts.forTarget(nativeRef({ providerId, nativeSessionId }))?.resumeHandle, resumeOptions: { initializeEmpty: succession?.contexts.canInitializeEmpty(nativeRef({ providerId, nativeSessionId })) === true } } : {}) });
         const nativeSession = parentNativeSessionId === undefined ? await (takeOver
           ? directoryNativeEffect(successionBoundary?.currentEntry(), successionBoundary?.currentEntry()?.targets ?? [], async () => {
@@ -1228,7 +1254,9 @@ export function createAgentHostRuntime(options: AgentHostRuntimeOptions): AgentH
     execute: executeOperation('host:tpm'),
   };
   const tpm = options.tpm ? new TpmCoordinator(options.tpm, automationAccess) : undefined;
-  const team = options.team?.request ? new TeamRuntime(options.team.stateDirectory, {...automationAccess, sessionRouting: automationAccess.sessionRouting!, execute: executeOperation('host:team')}, options.team.request, options.team.tickMs) : undefined;
+  const team = options.team?.request ? new TeamRuntime(options.team.stateDirectory, {...automationAccess, sessionRouting: successionService?.roleRouting ?? automationAccess.sessionRouting!,
+    genericSuccession: () => !!successionService && options.team?.genericSuccession?.() === true, execute: executeOperation('host:team')}, options.team.request, options.team.tickMs) : undefined;
+  const roles = new SessionRoles([...(team ? [team] : []), ...(tpm ? [tpmRole(tpm)] : [])]);
   const enrollment = successionService ? new SessionSuccessionEnrollment(successionService, successionConfig!.controllerId, () => [...registrations.values()], () => tpm?.store.all() ?? [], source => authorizeSuccessionRead(source, source), directoryOperation) : undefined;
   const enrollFromRelay = async (request: RemoteHostControlRequest, context: TrustedSuccessionContext) => {
     if (!options.succession?.enrollment || !enrollment || closed || draining) return json(403, { code: 'succession_enrollment_unavailable', error: 'Trusted succession enrollment is unavailable.' });
@@ -1239,7 +1267,7 @@ export function createAgentHostRuntime(options: AgentHostRuntimeOptions): AgentH
     }
     return enrollment.control(request, context);
   };
-  return { relay, sessionStates, executionRouting: successionService?.executionRouting, addRegistration, control: request => control(request), enrollFromRelay, executeOperation, acquireSession, setRelayConnected: idle.setConnected,
+  return { relay, sessionStates, executionRouting: successionService?.executionRouting, roleRouting: successionService?.roleRouting, addRegistration, control: request => control(request), enrollFromRelay, executeOperation, acquireSession, setRelayConnected: idle.setConnected,
     beginControllerRestart() {
       if (closed || draining) return false;
       // An owner-confirmed update closes admission immediately. Shutdown and the
@@ -1296,4 +1324,13 @@ async function receiveRelayDiagnostics(body: string | undefined, sink: AgentHost
   if (!entries) return { status: 400, body: '{"error":"Invalid relay diagnostic batch."}' };
   try { await sink(entries); return { status: 204, body: '' }; }
   catch { return { status: 503, body: '{"error":"Relay diagnostics could not be appended."}' }; }
+}
+
+/** TPM sessions keep their native history: a prompt edit can branch one, a generic handoff cannot move it. */
+function tpmRole(tpm: TpmCoordinator): SessionRole {
+  return {
+    extensions: (holder, actual) => tpm.extensions(holder.providerId, holder.nativeSessionId, () => actual()?.nativeSessionId),
+    genericSuccession: async holder => await tpm.extensions(holder.providerId, holder.nativeSessionId)
+      ? { allowed: false, reason: 'A TPM session keeps its native history, so it cannot be handed off. Edit a prompt instead.' } : undefined,
+  };
 }

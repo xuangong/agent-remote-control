@@ -105,10 +105,10 @@ export interface NativePrefixResolution {
   operationIds: readonly string[];
 }
 /** Validate complete committed role histories before routing or inheritance lookup. */
-function nativePrefixEdges(committed: readonly SuccessionRecord[]) {
+function committedSuccessionEdges(committed: readonly SuccessionRecord[]) {
   const groups = new Map<string, SuccessionRecord[]>(), owners = new Map<string, string>(), operations = new Set<string>();
   const forward = new Map<string, SuccessionRecord>(), reverse = new Map<string, SuccessionRecord>();
-  const unavailable = () => { throw new Error('Native prefix execution routing is unavailable: invalid committed lineage.'); };
+  const unavailable = () => { throw new Error('Succession routing is unavailable: invalid committed lineage.'); };
   for (const receipt of committed) {
     if (!isSuccessionRecord(receipt) || receipt.phase !== 'committed' || operations.has(receipt.operationId)) unavailable();
     operations.add(receipt.operationId);
@@ -137,9 +137,13 @@ function nativePrefixEdges(committed: readonly SuccessionRecord[]) {
   }
   return { forward, reverse };
 }
+/**
+ * Native-prefix routing: the session that continues `anchor` with its exact native history. It follows only prompt-edit
+ * branches and fails across a generic succession, whose successor starts from captured context instead.
+ */
 export function resolveNativePrefix(anchor: NativeSessionRef, committed: readonly SuccessionRecord[]): NativePrefixResolution {
   if (!isNativeSessionRef(anchor)) throw new Error('Native prefix execution routing is unavailable: invalid anchor.');
-  const { forward } = nativePrefixEdges(committed), operationIds: string[] = [];
+  const { forward } = committedSuccessionEdges(committed), operationIds: string[] = [];
   let target = anchor;
   for (let edge = forward.get(nativeSessionRefKey(target)); edge; edge = forward.get(nativeSessionRefKey(target))) {
     if (!edge.preparation) throw new Error('Native prefix execution routing is unavailable across generic succession.');
@@ -147,10 +151,24 @@ export function resolveNativePrefix(anchor: NativeSessionRef, committed: readonl
   }
   return { anchor: { ...anchor }, target: { ...target }, operationIds };
 }
+/**
+ * Role routing: the session that currently holds the role `anchor` once held. It follows every committed succession,
+ * prompt-edit branch or generic handoff, including one to another provider. Use it for work addressed to a role,
+ * such as a Team member; use native-prefix routing where exact native history matters.
+ */
+export function resolveRoleSuccession(anchor: NativeSessionRef, committed: readonly SuccessionRecord[]): NativePrefixResolution {
+  if (!isNativeSessionRef(anchor)) throw new Error('Role routing is unavailable: invalid anchor.');
+  const { forward } = committedSuccessionEdges(committed), operationIds: string[] = [];
+  let target = anchor;
+  for (let edge = forward.get(nativeSessionRefKey(target)); edge; edge = forward.get(nativeSessionRefKey(target))) {
+    operationIds.push(edge.operationId); target = edge.to!;
+  }
+  return { anchor: { ...anchor }, target: { ...target }, operationIds };
+}
 /** Inclusive metadata ancestry within one contiguous native-prefix segment. Generic succession stops inheritance. */
 export function nativePrefixSegmentAncestors(target: NativeSessionRef, committed: readonly SuccessionRecord[]): readonly NativeSessionRef[] {
   if (!isNativeSessionRef(target)) throw new Error('Native prefix execution routing is unavailable: invalid target.');
-  const { reverse } = nativePrefixEdges(committed), ancestors = [target];
+  const { reverse } = committedSuccessionEdges(committed), ancestors = [target];
   let current = target;
   for (let edge = reverse.get(nativeSessionRefKey(current)); edge; edge = reverse.get(nativeSessionRefKey(current))) {
     if (!edge.preparation) break;

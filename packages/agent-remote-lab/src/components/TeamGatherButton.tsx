@@ -21,7 +21,9 @@ export function TeamGatherButton({ baseUrl, entry, onGather }: {
       const team = teams.find(team => team.id === entry.groupId);
       if (!team) throw new Error('This Team is no longer available. Check the Team list.');
       const layout = teamLayoutTargets(team, false);
-      if (!layout.groupRoot || !entry.target || sessionKey(layout.groupRoot) !== sessionKey(entry.target)) throw new Error('The Team Leader has changed. Reopen the Team from its list.');
+      // A handoff moves the Leader to another session, so the Leader is identified by its member ID.
+      const leader = entry.teamMemberId ?? entry.target?.teamMemberId;
+      if (!layout.groupRoot || !entry.target || (leader ? layout.groupRoot.teamMemberId !== leader : sessionKey(layout.groupRoot) !== sessionKey(entry.target))) throw new Error('The Team Leader has changed. Reopen the Team from its list.');
       onGather(layout.dock);
       const unavailable = team.members.filter(member => member.creation !== 'abandoned' && (member.creation !== 'ready' || !member.nativeSessionId)).length;
       if (unavailable) setNotice(`${unavailable} member session(s) have no current execution locator. Check their status in the Team list.`);

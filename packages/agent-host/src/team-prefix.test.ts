@@ -54,11 +54,11 @@ it.each(['leader', 'member'] as const)('keeps the %s seat and tools on a release
     if (role === 'member') team = await broker.action({ action: 'add_member', teamId: team.id, operationId: 'member', hostId: 'host', providerId: 'codex', cwd: root, name: 'Worker', responsibility: 'Verify' });
     const seat = team.members.find(member => member.nativeSessionId === 'A')!;
     const stale = extensions.get('A')!.tools!.find(tool => tool.name === 'read_team')!;
-    const candidate = (await runtime.extensions('codex', 'A', () => 'B'))!.tools!.find(tool => tool.name === 'read_team')!;
+    const candidate = (await runtime.extensions(ref('A'), () => ref('B')))!.tools!.find(tool => tool.name === 'read_team')!;
     await expect(candidate.execute({})).rejects.toThrow(/current|released/);
     await runtime.tick();
     current = 'B'; frozen = true;
-    await expect(runtime.extensions('codex', 'A')).resolves.toBeUndefined();
+    await expect(runtime.extensions(ref('A'))).resolves.toBeUndefined();
     await expect(stale.execute({})).rejects.toThrow(/current|released/);
     await expect(candidate.execute({})).rejects.toThrow(/current|released/);
     const message = { id: 'delivery', from: team.members[0]!.id, to: seat.id, text: 'Once', createdAt: 1, status: 'queued' as const };
@@ -74,7 +74,7 @@ it.each(['leader', 'member'] as const)('keeps the %s seat and tools on a release
     expect(retained.get('A')).toBe(0);
     await runtime.close(); runtime = new TeamRuntime(root, access, request, 1000000); await runtime.ready;
     await runtime.tick(); expect(deliveries.filter(id => id === 'B')).toEqual(['B']);
-    expect((await runtime.extensions('codex', 'B'))?.tools?.map(tool => tool.name)).toContain('read_team');
+    expect((await runtime.extensions(ref('B')))?.tools?.map(tool => tool.name)).toContain('read_team');
     const saved = JSON.parse(await readFile(join(root, 'seats.json'), 'utf8'));
     expect(saved.find((row: any) => row.seat.member.id === seat.id).seat.member.nativeSessionId).toBe('A');
     expect(saved.find((row: any) => row.seat.member.id === seat.id).receipts.delivery.resolvedTarget).toEqual(ref('B'));

@@ -5,12 +5,16 @@ import { mkdir, readFile, open, rename } from 'node:fs/promises';
 import { join } from 'node:path';
 import { AgentOperationRejectedError, bindAgentSessionTools, type AgentInputAcceptance, type AgentSessionExtensions, type AgentSessionTool } from '@orchardworks/agent-provider-sdk';
 import type { SessionExecutionRouting } from './session-succession-service.js';
+import type { RoleSuccessionDecision, SessionRole } from './session-role-succession.js';
 import { isNativeSessionRef, nativeSessionRefKey, type NativeSessionRef, isTeam, isTeamSeat, sessionOperationAvailability, type Team, type TeamHostCall, type TeamMember, type TeamMessage, type TeamSeat } from '@orchardworks/agent-remote-protocol';
 import { OperationCacheError, type RemoteHostSessionLease, type SessionWireOperationExecutor } from '@orchardworks/agent-remote-relay';
 
 export interface TeamRuntimeAccess {
   controllerId: string;
+  /** Role routing: a seat follows every committed succession of its session, including one to another provider. */
   sessionRouting: SessionExecutionRouting;
+  /** The Relay routes Team recipients across a generic succession of their session. */
+  genericSuccession?(): boolean;
   available(): boolean;
   supportedProviders(): string[];
   create(provider: string, cwd: string | undefined, extensions: AgentSessionExtensions): Promise<string>;
@@ -41,7 +45,7 @@ function availableDelivery(lease: RemoteHostSessionLease): TeamDelivery | undefi
 }
 
 /** Local native bindings and delivery evidence outlive browser and transport connections. */
-export class TeamRuntime {
+export class TeamRuntime implements SessionRole {
   readonly ready: Promise<void>;
   private records: LocalSeat[] = [];
   private persistence: Promise<unknown> = Promise.resolve();
@@ -63,7 +67,7 @@ export class TeamRuntime {
     await mkdir(this.directory, { recursive: true, mode: 0o700 });
     try { this.records = JSON.parse(await readFile(join(this.directory, 'seats.json'), 'utf8')); }
     catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; }
-    if (!Array.isArray(this.records) || this.records.length > 384 || this.records.some(record => !record || !isTeamSeat(record.seat) || record.creation === 'ready' && !record.seat.member.nativeSessionId || !record.receipts || typeof record.receipts !== 'object' || Array.isArray(record.receipts) || Object.values(record.receipts).some(receipt => !receipt || typeof receipt.text !== 'string' || !['dispatching','accepted','rejected','unknown'].includes(receipt.status) || receipt.acceptance !== undefined && !['started','queued','handled'].includes(receipt.acceptance) || receipt.resolvedTarget !== undefined && (!isNativeSessionRef(receipt.resolvedTarget) || receipt.resolvedTarget.controllerId !== this.access.controllerId || receipt.resolvedTarget.providerId !== record.seat.member.providerId)) || !['dispatching','ready','unknown'].includes(record.creation))) throw new Error('Invalid saved Team bindings.');
+    if (!Array.isArray(this.records) || this.records.length > 384 || this.records.some(record => !record || !isTeamSeat(record.seat) || record.creation === 'ready' && !record.seat.member.nativeSessionId || !record.receipts || typeof record.receipts !== 'object' || Array.isArray(record.receipts) || Object.values(record.receipts).some(receipt => !receipt || typeof receipt.text !== 'string' || !['dispatching','accepted','rejected','unknown'].includes(receipt.status) || receipt.acceptance !== undefined && !['started','queued','handled'].includes(receipt.acceptance) || receipt.resolvedTarget !== undefined && (!isNativeSessionRef(receipt.resolvedTarget) || receipt.resolvedTarget.controllerId !== this.access.controllerId)) || !['dispatching','ready','unknown'].includes(record.creation))) throw new Error('Invalid saved Team bindings.');
     for (const record of this.records) {
       if (record.creation === 'dispatching') record.creation = 'unknown';
       for (const receipt of Object.values(record.receipts)) if (receipt.status === 'dispatching') { receipt.status = 'unknown'; receipt.error = 'Controller restarted after dispatch began. Inspect the session before resolving.'; }
@@ -89,22 +93,32 @@ export class TeamRuntime {
     return this.records.some(record => Object.values(record.receipts).some(receipt => {
       if (!['dispatching', 'unknown'].includes(receipt.status) && !(receipt.status === 'accepted' && !['started', 'handled'].includes(receipt.acceptance ?? ''))) return false;
       if (receipt.resolvedTarget) return nativeSessionRefKey(receipt.resolvedTarget) === nativeSessionRefKey(target);
-      if (target.controllerId !== this.access.controllerId || target.providerId !== record.seat.member.providerId) return false;
+      if (target.controllerId !== this.access.controllerId) return false;
       try { return nativeSessionRefKey(this.access.sessionRouting.resolve(this.anchor(record.seat)).target) === nativeSessionRefKey(this.access.sessionRouting.resolve(target).target); }
       catch { return true; }
     }));
   }
-  async extensions(provider: string, nativeSessionId: string, actual: () => string | undefined = () => nativeSessionId): Promise<AgentSessionExtensions | undefined> {
+  async extensions(holder: NativeSessionRef, actual: () => NativeSessionRef | undefined = () => holder): Promise<AgentSessionExtensions | undefined> {
     await this.ready;
-    // Before native creation the source is current; on restoration the actual attachment can already be current.
-    const recipients = new Set([nativeSessionId, actual()].filter((id): id is string => !!id)
-      .map(id => nativeSessionRefKey({ controllerId: this.access.controllerId, providerId: provider, nativeSessionId: id })));
+    // Before a successor's commit its source holds the seat; afterwards, or on restoration, the successor already does.
+    const record = this.seatHeldBy([holder, actual()]);
+    return record ? this.tools(record.seat, actual) : undefined;
+  }
+  async genericSuccession(holder: NativeSessionRef, targetProviderId: string): Promise<RoleSuccessionDecision | undefined> {
+    await this.ready;
+    if (!this.seatHeldBy([holder])) return undefined;
+    if (this.access.genericSuccession?.() !== true) return { allowed: false, reason: 'Update the Relay to hand off Team members.' };
+    if (!this.access.supportedProviders().includes(targetProviderId)) return { allowed: false, reason: 'This provider cannot run Team tools on this Host.' };
+    return { allowed: true };
+  }
+  private seatHeldBy(recipients: ReadonlyArray<NativeSessionRef | undefined>): LocalSeat | undefined {
+    const keys = new Set(recipients.filter((ref): ref is NativeSessionRef => !!ref).map(nativeSessionRefKey));
     const records = this.records.filter(item => {
-      if (item.creation !== 'ready' || item.seat.member.providerId !== provider) return false;
-      try { return recipients.has(nativeSessionRefKey(this.access.sessionRouting.resolve(this.anchor(item.seat)).target)); } catch { return false; }
+      if (item.creation !== 'ready') return false;
+      try { return keys.has(nativeSessionRefKey(this.access.sessionRouting.resolve(this.anchor(item.seat)).target)); } catch { return false; }
     });
     if (records.length > 1) throw new Error('Team recipient has ambiguous role anchors.');
-    return records[0] ? this.tools(records[0].seat, actual) : undefined;
+    return records[0];
   }
   create(seat: TeamSeat): Promise<TeamMember> {
     const key = `${seat.teamId}:${seat.member.id}`, pending = this.creations.get(key); if (pending) return pending;
@@ -130,18 +144,18 @@ export class TeamRuntime {
     const record: LocalSeat = { seat, creation: 'dispatching', receipts: Object.create(null) };
     this.records.push(record); await this.save();
     try {
-      let actual: string | undefined;
+      let actual: NativeSessionRef | undefined;
       seat.member.nativeSessionId = await this.access.create(seat.member.providerId, seat.member.cwd, this.tools(seat, () => actual));
-      actual = seat.member.nativeSessionId;
+      actual = this.anchor(seat);
       record.creation = 'ready'; seat.member.creation = 'ready'; seat.member.activity = 'unknown'; await this.save(); return seat.member;
     } catch (error) { record.creation = 'unknown'; seat.member.creation = 'unknown'; await this.save(); throw error; }
   }
-  private tools(seat: TeamSeat, actual: () => string | undefined = () => seat.member.nativeSessionId): AgentSessionExtensions {
+  private tools(seat: TeamSeat, actual: () => NativeSessionRef | undefined = () => this.anchor(seat)): AgentSessionExtensions {
     const { member, teamId } = seat;
     const assertCurrent = () => {
       if (this.closed || !this.access.available()) throw new Error('Team Host is unavailable.');
-      const id = actual(); if (!id) throw new Error('Team recipient is not attached.');
-      this.access.sessionRouting.assertCurrent(this.anchor(seat), { controllerId: this.access.controllerId, providerId: member.providerId, nativeSessionId: id });
+      const recipient = actual(); if (!recipient) throw new Error('Team recipient is not attached.');
+      this.access.sessionRouting.assertCurrent(this.anchor(seat), recipient);
     };
     const request = async (input: TeamHostCall) => { assertCurrent(); const value = await this.request(input); assertCurrent(); return value; };
     const call = (input: Omit<TeamHostCall, 'teamId' | 'memberId'>) => request({ ...input, teamId, memberId: member.id } as TeamHostCall);
@@ -151,7 +165,7 @@ export class TeamRuntime {
     });
     const tools = [
       tool('read_team', 'Read members, responsibilities, progress, compact delivery status and a bounded page of complete messages addressed to you. This does not consume messages. Fully read incoming messages, then acknowledge their IDs with acknowledge_team_messages before acting. Use nextAfterMessageId as afterMessageId while hasMore is true. Accepted input is not completed work.', { afterMessageId: id }, [], async args => teamInbox(await call({ action: 'read' }), member.id, args.afterMessageId)),
-      tool('acknowledge_team_messages', 'Acknowledge incoming message IDs you have completely read through read_team before acting on them. This records receipt, not task completion, and prevents later native reinjection. Never acknowledge unread or truncated bodies. Retry the same IDs after a lost response; accepted delivery receipts are idempotent. Claimed or uncertain native deliveries cannot be cleared by this tool.', { messageIds: { type: 'array', items: id, minItems: 1, maxItems: 32, uniqueItems: true } }, ['messageIds'], args => request({ action: 'acknowledge', teamId, memberId: member.id, messageIds: args.messageIds as unknown as string[], expectedNativeSessionId: actual()! })),
+      tool('acknowledge_team_messages', 'Acknowledge incoming message IDs you have completely read through read_team before acting on them. This records receipt, not task completion, and prevents later native reinjection. Never acknowledge unread or truncated bodies. Retry the same IDs after a lost response; accepted delivery receipts are idempotent. Claimed or uncertain native deliveries cannot be cleared by this tool.', { messageIds: { type: 'array', items: id, minItems: 1, maxItems: 32, uniqueItems: true } }, ['messageIds'], args => request({ action: 'acknowledge', teamId, memberId: member.id, messageIds: args.messageIds as unknown as string[], expectedNativeSessionId: actual()!.nativeSessionId })),
       tool('send_team_message', 'Send a task, question or evidence. Reuse operationId for the same request. Delivery is asynchronous; inspect read_team for its receipt. Members may send only to their Leader. Attach up to 8 uploaded or received resource IDs using resources; file bytes are not embedded in text.', { to: id, operationId: id, text, resources: {type:'array',items:id,minItems:1,maxItems:8,uniqueItems:true} }, ['to', 'operationId', 'text'], args => request({ action: 'send', teamId, memberId: member.id, to: args.to!, operationId: args.operationId!, text: args.text!, ...(args.resources ? {resources:args.resources as unknown as string[]} : {}) })),
       tool('upload_team_resource', 'Upload a regular file from an absolute path on this Host, up to 50 MiB. Reuse operationId to resume. Returns a verified resourceId for send_team_message resources; does not send or execute the file.', {path:{type:'string',minLength:1,maxLength:4096},operationId:id}, ['path','operationId'], args => this.resourceFiles.upload(teamId,member.id,args.path!,args.operationId!, assertCurrent)),
       tool('download_team_resource', 'Download a resource you uploaded or received to this Host and verify size and SHA256. Returns a localPath. Optional outputDirectory must be absolute. Existing different files are never overwritten; downloaded files are never executed.', {resourceId:id,outputDirectory:{type:'string',minLength:1,maxLength:4096}}, ['resourceId'], args => this.resourceFiles.download(teamId,member.id,args.resourceId!,args.outputDirectory, assertCurrent)),

@@ -120,8 +120,8 @@ async function currentRelay(team: SavedTeam | SavedTeam[] = savedTeam(), success
   });
   close.push(async () => { broker.close(); for (const socket of ws.clients) socket.terminate(); await new Promise<void>(done => ws.close(() => done())); http.closeAllConnections(); await new Promise<void>(done => http.close(() => done())); });
   const request = async (path = '', input?: unknown, recipientAware = false) => fetch(`${origin}/v1/remote/teams${path}`, { signal: AbortSignal.timeout(3000), headers: { ...(recipientAware ? { 'x-arc-team-recipients': '1' } : {}), 'content-type': 'application/json' }, ...(input ? { method: 'POST', body: JSON.stringify(input) } : {}) });
-  async function connect(recipientAware = false, inbox = false) {
-    const socket = new WebSocket(`${origin.replace('http:', 'ws:')}/ws/remote-host?team=1${recipientAware ? '&teamRecipients=1' : ''}${inbox ? '&teamInbox=1' : ''}`);
+  async function connect(recipientAware = false, inbox = false, succession = false) {
+    const socket = new WebSocket(`${origin.replace('http:', 'ws:')}/ws/remote-host?team=1${recipientAware ? '&teamRecipients=1' : ''}${inbox ? '&teamInbox=1' : ''}${succession ? '&teamSuccession=1' : ''}`);
     close.push(() => { socket.terminate(); });
     const packets: any[] = []; socket.on('message', data => { const packet = JSON.parse(data.toString()); packets.push(packet); if (packet.type === 'heartbeat') socket.send(JSON.stringify({ uplinkVersion: 2, type: 'heartbeat_ack', nonce: packet.nonce })); });
     await once(socket, 'open', { signal: AbortSignal.timeout(3000) });
@@ -147,6 +147,23 @@ test('current Relay acknowledges inbox support only when offered and persists th
   expect(f.snapshot().teams![0]!.messages).toEqual([]);
   f.restart(); const resumed = await f.connect(true, true);
   expect((await resumed.call(inboxAcknowledgement)).status).toBe(200);
+}, 10000);
+
+test('current Relay acknowledges Team succession only with exact recipients and when offered', async () => {
+  const f = await currentRelay();
+  expect((await f.connect(true, true)).packets[0].teamSuccession).toBeUndefined();
+  expect((await f.connect(false, false, true)).packets[0].teamSuccession).toBeUndefined();
+  expect((await f.connect(true, true, true)).packets[0].teamSuccession).toBe(1);
+}, 10000);
+
+test('the Controller offers Team succession and learns from each registration whether the Relay supports it', async () => {
+  const f = await legacyRelay(); f.acknowledge(true);
+  const host = await client(f.url);
+  expect(host.teamSuccession).toBe(false);
+  const current = await currentRelay(), modern = createRemoteHostUplinkClient({ relay: createAgentRemoteRelay({ providers: [] }), url: `${current.origin.replace('http:', 'ws:')}/ws/remote-host`, installationId: 'controller', name: 'Host', remoteKey: 'key',
+    teamManagement: true, providers: [], resolveSession: () => undefined, control: () => ({ status: 200, body: '{}' }) });
+  close.push(() => modern.close()); await modern.ready;
+  expect(modern.teamSuccession).toBe(true);
 }, 10000);
 
 test('legacy Controller ordinary claims, polls and cached browser responses stay valid while exact recipients persist across restart', async () => {

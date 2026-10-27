@@ -10,7 +10,7 @@ import { homedir } from 'node:os';
 import path from 'node:path';
 import { CodexSessionSettings } from './session-settings.js';
 import { CodexSessionNativeEvidence, codexEvidenceAuthority, codexEvidenceJson, codexEvidenceSelection, codexEvidenceTurnSettings,
-  readCodexEvidenceSettings, updateCodexEvidenceSettings, type CodexEvidenceSettings, type CodexEvidenceSource } from './native-evidence.js';
+  readCodexEvidenceSettings, updateCodexEvidenceSettings, codexDynamicTools, type CodexEvidenceSettings, type CodexEvidenceSource } from './native-evidence.js';
 import { isDeepStrictEqual } from 'node:util';
 
 import type {
@@ -445,7 +445,7 @@ export class CodexAppServerSession implements AgentSession {
     session.tools = bindAgentSessionTools(config.tools, () => session.assertOpen());
     await session.initialize();
     const response = await transport.request('thread/start', {
-      ...(session.tools.length ? { dynamicTools: session.tools.map(({ name, description, inputSchema }) => ({ type: 'function', name, description, inputSchema })) } : {}),
+      ...(session.tools.length ? { dynamicTools: codexDynamicTools(session.tools) } : {}),
       config: { 'features.default_mode_request_user_input': true },
       ...(restrictedNative ? { sandbox: 'workspace-write', approvalPolicy: 'never' } : {}),
       ...(stored.model ? { model: stored.model } : {}),
@@ -510,7 +510,7 @@ export class CodexAppServerSession implements AgentSession {
       ...(boundary.beforeTurnId ? { threadId: target.nativeSessionId, beforeTurnId: boundary.beforeTurnId, excludeTurns: true } : {}),
       ...(boundary.cwd ? { cwd: boundary.cwd } : {}),
       // Native forks inherit declarations from source metadata; only thread/start registers tools.
-      ...(!boundary.beforeTurnId && session.tools.length ? { dynamicTools: session.tools.map(({ name, description, inputSchema }) => ({ type: 'function', name, description, inputSchema })) } : {}),
+      ...(!boundary.beforeTurnId && session.tools.length ? { dynamicTools: codexDynamicTools(session.tools) } : {}),
       ...(sessionInstructions(session.config) ? { developerInstructions: sessionInstructions(session.config) } : {}),
       config: { 'features.default_mode_request_user_input': true },
       ...(restrictedNative ? { sandbox: 'workspace-write', approvalPolicy: 'never' } : {}),

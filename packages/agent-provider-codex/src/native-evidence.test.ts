@@ -68,6 +68,21 @@ it('creates a zero-input native successor and restores its confirmed selection',
   } finally { await session.dispose(); }
 });
 
+it('registers the role it takes over when it creates an empty successor, replacing the source instructions', async () => {
+  const f = fixture();
+  const source = await f.provider.createSession({ sessionId: 'source', cwd: f.cwd, instructions: 'Source role' });
+  try {
+    const tool = { name: 'read_team', description: 'Read the Team', inputSchema: { type: 'object', properties: {}, additionalProperties: false }, execute: async () => 'unbound' };
+    const creation = await f.provider.nativeEvidence.createEmpty({ sessionId: 'successor', cwd: f.cwd, selectionSourceSessionId: 'native-B',
+      extensions: { instructions: 'Team role', tools: [tool] } });
+    expect(creation.status).toBe('created');
+    const start = f.requests.filter(request => request.method === 'thread/start').at(-1)!.params;
+    expect(start.developerInstructions).toBe('Team role');
+    expect(start.dynamicTools).toEqual([{ type: 'function', name: 'read_team', description: 'Read the Team', inputSchema: tool.inputSchema }]);
+    if (creation.status === 'created') expect(JSON.parse(creation.handle.opaque).instructions).toBe('Team role');
+  } finally { await source.dispose(); }
+});
+
 it('uses authoritative native queue state to reject preparation while input is pending', async () => {
   const f = fixture();
   const session = await f.provider.createSession({ sessionId: 'logical', cwd: f.cwd });

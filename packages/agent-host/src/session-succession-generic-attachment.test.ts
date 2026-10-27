@@ -62,8 +62,9 @@ function providerFixture(providerId: string, root: string) {
   return { provider, bound };
 }
 
+// A Team seat follows a generic succession to the session that took it over; a TPM session keeps its native history.
 for (const providerId of ['codex', 'opencode'] as const) for (const role of ['none', 'team', 'tpm'] as const) test.each(['A', 'B'])(
-  `${providerId} HTTP cold attach %s after generic succession does not require or inherit ${role} execution tools`, async nativeSessionId => {
+  `${providerId} HTTP cold attach %s after generic succession gives only the current holder its ${role} execution tools`, async nativeSessionId => {
     const root = await realpath(await mkdtemp(join(tmpdir(), 'arc-generic-attachment-')));
     const teamDirectory = join(root, 'team'), tpmDirectory = join(root, 'tpm');
     await commitGeneric(new SessionSuccessionStore(join(root, 'roles')), providerId, root);
@@ -87,7 +88,8 @@ for (const providerId of ['codex', 'opencode'] as const) for (const role of ['no
       expect(response.status, body).toBe(200);
       const agent = host.resolveSession(JSON.parse(body).agentId)!;
       expect(agent.snapshot().payload.runtimeInfo.sessionId).toBe(nativeSessionId);
-      expect(bound.get(nativeSessionId)?.tools ?? []).toEqual([]);
+      const tools = (bound.get(nativeSessionId)?.tools ?? []).map(tool => tool.name);
+      if (role === 'team' && nativeSessionId === 'B') expect(tools).toContain('read_team'); else expect(tools).toEqual([]);
       expect(() => host.executionRouting!.resolve(ref(providerId, 'A'))).toThrow(/generic succession/);
       expect(host.executionRouting!.resolve(ref(providerId, 'B')).target).toEqual(ref(providerId, 'B'));
       expect(await references.list()).toEqual([]);
@@ -119,7 +121,7 @@ test.each(['team', 'tpm'] as const)('retained %s tools cannot execute on a prede
     supports: async () => false, inspect: unavailable, createIdle: unavailable,
     captureTimeline: unavailable, authorizeRead: unavailable, readHistory: unavailable, reconcileDelivery: async () => undefined,
   });
-  const access = { controllerId: 'host', sessionRouting: service.executionRouting, available: () => true,
+  const access = { controllerId: 'host', sessionRouting: role === 'team' ? service.roleRouting : service.executionRouting, available: () => true,
     supportedProviders: () => ['codex'], acquire: unavailable, create: unavailable, execute: unavailable };
   const team = { id: 'team', operationId: 'create', title: 'Team', revision: 1, status: 'active', createdAt: 1, updatedAt: 1,
     source: { hostId: 'relay-host', providerId: 'codex', nativeSessionId: 'source', title: 'Source' },
@@ -130,12 +132,17 @@ test.each(['team', 'tpm'] as const)('retained %s tools cannot execute on a prede
     : new TpmCoordinator({ stateDirectory: join(root, 'tpm'), tickMs: 1_000_000 }, access);
   try {
     await service.ready; await runtime.ready;
-    const extensions = await runtime.extensions('codex', 'A');
+    const extensions = runtime instanceof TeamRuntime ? await runtime.extensions(ref('codex', 'A')) : await runtime.extensions('codex', 'A');
     const retained = extensions!.tools!.find(tool => tool.name === (role === 'team' ? 'read_team' : 'read_work'))!;
     expect(JSON.parse(await retained.execute({})).id).toBe(role === 'team' ? 'team' : 'work');
     await commitGeneric(service.store, 'codex', root);
-    await expect(retained.execute({})).rejects.toThrow(/generic succession/);
-    await expect(runtime.extensions('codex', 'A')).resolves.toBeUndefined();
-    await expect(runtime.extensions('codex', 'B')).resolves.toBeUndefined();
+    await expect(retained.execute({})).rejects.toThrow(role === 'team' ? /no longer current/ : /generic succession/);
+    if (runtime instanceof TeamRuntime) {
+      await expect(runtime.extensions(ref('codex', 'A'))).resolves.toBeUndefined();
+      expect((await runtime.extensions(ref('codex', 'B')))?.tools?.map(tool => tool.name)).toContain('read_team');
+    } else {
+      await expect(runtime.extensions('codex', 'A')).resolves.toBeUndefined();
+      await expect(runtime.extensions('codex', 'B')).resolves.toBeUndefined();
+    }
   } finally { await runtime.close(); await rm(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }); }
 }, 5000);

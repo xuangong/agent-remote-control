@@ -2,7 +2,7 @@ import { randomBytes, randomUUID } from 'node:crypto';
 import { link, mkdir, open, readFile, unlink } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { AgentHistoryPage, AgentHistoryQuery, AgentPersistenceHandle } from '@orchardworks/agent-provider-sdk';
-import { nativeSessionRefKey, resolveNativePrefix, type NativePrefixResolution, type SuccessionAssociationFreeze, serializeNormalizedHistory, type NativeSessionRef, type PreparedSuccession, type PrimaryRole, type ProjectedTimelineEntry, type SuccessionDescription, type SuccessionRequest, type TimelineCursor, type NativePrefixSelection } from '@orchardworks/agent-remote-protocol';
+import { nativeSessionRefKey, resolveNativePrefix, resolveRoleSuccession, type NativePrefixResolution, type SuccessionAssociationFreeze, serializeNormalizedHistory, type NativeSessionRef, type PreparedSuccession, type PrimaryRole, type ProjectedTimelineEntry, type SuccessionDescription, type SuccessionRecord, type SuccessionRequest, type TimelineCursor, type NativePrefixSelection } from '@orchardworks/agent-remote-protocol';
 import { LocalSuccessionPreparation, SuccessionPreparationRejected, type NativePrefixCandidate, type NativePrefixCandidateKnown, type NativeSuccessionCreate, type RetainedSuccessionVerification, type SuccessionReadiness } from './local-succession-preparation.js';
 import { isSuccessionDeliveryUnresolved, SessionSuccessionContextStore, type SuccessionContextDelivery, type SuccessionContextPreparation } from './session-succession-context.js';
 import { SessionSuccessionStore } from './session-succession-store.js';
@@ -44,17 +44,10 @@ export class SessionSuccessionService {
   readonly store: SessionSuccessionStore;
   readonly contexts: SessionSuccessionContextStore;
   readonly coordinator: SessionSuccessionCoordinator;
-  readonly executionRouting: SessionExecutionRouting = {
-    resolve: anchor => {
-      if (!this.cursorKey || anchor.controllerId !== this.controllerId) throw new Error('Execution routing is unavailable for this Host.');
-      return resolveNativePrefix(anchor, this.store.all().flatMap(state => state.operations.filter(record => record.phase === 'committed')));
-    },
-    assertCurrent: (anchor, actual) => {
-      const { target } = this.executionRouting.resolve(anchor);
-      if (target.controllerId !== this.controllerId || nativeSessionRefKey(target) !== nativeSessionRefKey(actual)) throw new Error('Execution recipient is no longer current.');
-      this.coordinator.assertAdmission(actual);
-    },
-  };
+  /** Native-prefix routing: follows prompt-edit branches only, for work that relies on the exact native history. */
+  readonly executionRouting: SessionExecutionRouting = this.routing(resolveNativePrefix);
+  /** Role routing: follows every committed succession, including a handoff to another provider. */
+  readonly roleRouting: SessionExecutionRouting = this.routing(resolveRoleSuccession);
   private readonly preparation: LocalSuccessionPreparation;
   private cursorKey?: Buffer;
   private readonly bindingReaders = new Map<string, SessionSourceBindings>();
@@ -81,6 +74,20 @@ export class SessionSuccessionService {
     }, this.contexts);
     this.coordinator = new SessionSuccessionCoordinator(this.store, preparation);
     this.ready = this.initialize();
+  }
+  private routing(resolver: (anchor: NativeSessionRef, committed: readonly SuccessionRecord[]) => NativePrefixResolution): SessionExecutionRouting {
+    const routing: SessionExecutionRouting = {
+      resolve: anchor => {
+        if (!this.cursorKey || anchor.controllerId !== this.controllerId) throw new Error('Execution routing is unavailable for this Host.');
+        return resolver(anchor, this.store.all().flatMap(state => state.operations.filter(record => record.phase === 'committed')));
+      },
+      assertCurrent: (anchor, actual) => {
+        const { target } = routing.resolve(anchor);
+        if (target.controllerId !== this.controllerId || nativeSessionRefKey(target) !== nativeSessionRefKey(actual)) throw new Error('Execution recipient is no longer current.');
+        this.coordinator.assertAdmission(actual);
+      },
+    };
+    return routing;
   }
   bindings(providerId: string): SessionSourceBindings {
     if (!this.cursorKey) throw new Error('Succession service is not ready.');
@@ -117,8 +124,9 @@ export class SessionSuccessionService {
     }
     const unavailable = (code: string, reason: string): SuccessionDescription => ({ role, targets, eligibility: { status: 'unavailable', code, reason } });
     if (nativeSessionRefKey(role.current) !== nativeSessionRefKey(source)) return unavailable('session_superseded', 'Open the current primary session before handoff.');
-    // A prompt edit stays with the current provider, so its refusal is the reason.
-    if (!targets.length && preparation && refusal instanceof Error && refusal.message) {
+    // A prompt edit stays with the current provider, so its refusal is the reason; so is a role its session cannot hand over.
+    if (!targets.length && refusal instanceof Error && refusal.message
+      && (preparation || refusal instanceof SuccessionPreparationRejected && refusal.code === 'succession_role_unavailable')) {
       return unavailable(refusal instanceof SuccessionPreparationRejected ? refusal.code : 'succession_unsupported_provider', refusal.message.slice(0, 4096));
     }
     if (!targets.length) return unavailable('succession_unsupported_provider', 'No available provider pair supports safe handoff.');

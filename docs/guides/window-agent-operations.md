@@ -159,8 +159,8 @@ cannot attach to its replacement.
 
 To give a session part of another session's conversation without letting it read
 that session, select the messages in the source view and quote them into a
-destination view. Choose **Quote messages** in the source's actions menu, or
-**Quote this message** on a message. Click messages or their checkboxes to add or
+destination view. Choose **Quote messages** (the quotation-mark icon) in the
+source's actions, or **Quote this message** on a message. Click messages or their checkboxes to add or
 remove them; Shift-click adds every message shown between two. The selection can
 span several turns, and the messages need not be adjacent.
 

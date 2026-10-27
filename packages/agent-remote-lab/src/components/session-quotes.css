@@ -1,3 +1,6 @@
+/* Sized like the Share session icon beside it. */
+.lab-quote-trigger { display: inline-grid; place-items: center; flex: 0 0 32px; width: 32px; min-height: 32px; padding: 0; border-color: transparent; background: transparent; }
+@media (max-width: 1180px) { .lab-quote-trigger { flex-basis: 44px; width: 44px; min-height: 44px; } }
 .lab-quote-bar { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 8px 12px; margin: 0 0 6px; padding: 8px 10px; border: 1px solid var(--obs-action); border-radius: 8px; background: var(--obs-surface); }
 .lab-quote-bar > p { display: flex; flex-direction: column; gap: 2px; flex: 1 1 160px; margin: 0; font-weight: 600; }
 .lab-quote-bar > p > small { color: var(--obs-text-secondary); font-weight: 400; }

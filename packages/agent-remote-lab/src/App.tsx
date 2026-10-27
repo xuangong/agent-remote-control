@@ -144,7 +144,7 @@ import { configureFork, forkActions, forkCommands, sendForkInput } from './fork-
 import { createSessionExcerpt, type SessionExcerpt } from '@orchardworks/agent-remote-protocol';
 import { SessionExcerptNavigation, type TimelineEntrySelection } from '@orchardworks/agent-remote-web/react';
 import { addQuote, restoreQuotes, withViewQuotes } from './session-quotes.js';
-import { NEW_SESSION_TARGET, QuoteAttachments, QuoteNotice, QuoteSelectionBar, type QuoteTargetWindow } from './components/SessionQuotes.js';
+import { NEW_SESSION_TARGET, QuoteAttachments, QuoteMessagesButton, QuoteNotice, QuoteSelectionBar, type QuoteTargetWindow } from './components/SessionQuotes.js';
 import type { QuestionDraft } from '@orchardworks/agent-remote-web/react';
 import { ReplicaInspector } from './components/ReplicaInspector.js';
 import { ProviderSessionControls, type ProviderCatalogStatus } from './components/ProviderSessionControls.js';
@@ -2224,8 +2224,8 @@ function AppContent({
             <button type="button" aria-label="Forward to next conversation" title="Forward" disabled={!conversationHistory.canForward} onClick={conversationHistory.forward}>→</button>
           </nav> : null}
           <SessionLink session={available ? source : windowSessionBinding(source)} sessionIntent={context.operationBinding.historical ? 'history' : undefined} />
-          {quoteView && context.state && quoteSelection?.viewId !== quoteView ? <button type="button" title="Select messages to quote in another session view"
-            onClick={() => quoteEntrySelection(quoteView, context.state!.timeline.epoch).select([], true)}>Quote messages</button> : null}
+          {quoteView && context.state && quoteSelection?.viewId !== quoteView
+            ? <QuoteMessagesButton onClick={() => quoteEntrySelection(quoteView, context.state!.timeline.epoch).select([], true)} /> : null}
         </SessionHeadingActions></>,
       conversationPath: <SessionTitle className={isPrimary ? 'lab-primary-title' : undefined} title={source.title} status={context.state?.agent?.status}
         onRename={mayRename ? () => setRenamingSession({ scope: baseUrl, session: { ...source, hostId: source.hostId ?? 'local' } }) : undefined} />,

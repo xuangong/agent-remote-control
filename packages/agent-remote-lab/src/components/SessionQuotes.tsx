@@ -9,6 +9,15 @@ export interface QuoteTargetWindow { id: string; title: string; current: boolean
 /** A new session in the source's workspace, opened beside it in the current Window. */
 export const NEW_SESSION_TARGET = 'new-session';
 
+/** Starts selecting this view's messages; an icon, so it keeps the session toolbar one row high. */
+export function QuoteMessagesButton({ onClick }: { onClick(): void }) {
+  return <button type="button" className="lab-quote-trigger" aria-label="Quote messages" title="Select messages to quote in another session view" onClick={onClick}>
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M10 11H6a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h3a1 1 0 0 1 1 1v4c0 3-1.5 5-4 6M19 11h-4a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h3a1 1 0 0 1 1 1v4c0 3-1.5 5-4 6" />
+    </svg>
+  </button>;
+}
+
 /** Shown in the view whose messages are being selected: the count, where to quote them, and the action. */
 export function QuoteSelectionBar({ count, windows, busy, error, onQuote, onCancel }: {
   count: number; windows: readonly QuoteTargetWindow[]; busy: boolean; error?: string;

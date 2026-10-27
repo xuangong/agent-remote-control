@@ -1,4 +1,4 @@
-import { expect, test, type Page } from '@playwright/test';
+import { expect, test, type Locator, type Page } from '@playwright/test';
 import { runWindowCommand } from '../../agent-host/src/window-command.js';
 import { createWindowView, type WorkspaceWindow } from '@orchardworks/agent-remote-protocol';
 import { sessionLinkFixture } from './session-link-fixture';
@@ -1027,7 +1027,13 @@ test('quotes messages of several turns from one session view into another, whose
     await page.setViewportSize({ width: 390, height: 844 });
     await expect(dock.getByTestId('prompt-input')).toBeEnabled();
     await dock.getByRole('button', { name: 'Expand session actions', exact: true }).click();
-    await dock.getByRole('button', { name: 'Quote messages', exact: true }).click();
+    // An icon like the Share session one beside it, so the toolbar stays one row high.
+    const quoteButton = dock.getByRole('button', { name: 'Quote messages', exact: true });
+    // Layout sizes: the toolbar scales while it expands.
+    const size = (button: Locator) => button.evaluate(element => [(element as HTMLElement).offsetWidth, (element as HTMLElement).offsetHeight]);
+    expect(await size(quoteButton)).toEqual(await size(dock.getByRole('button', { name: 'Share session link', exact: true })));
+    await page.screenshot({ path: test.info().outputPath('quote-toolbar-narrow.png'), animations: 'disabled' });
+    await quoteButton.click();
     const narrow = dock.locator('.lab-quote-bar');
     await expect(narrow.getByLabel('Session view').locator('option')).toHaveText(['New session · Main', 'New session in this workspace']);
     await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);

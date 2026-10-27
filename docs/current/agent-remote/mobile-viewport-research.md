@@ -414,3 +414,6 @@ keyboard, which gets no `focusin`. Diagnostics now record element `focus` events
 recording of the first opening shows whether a pan follows the requests.
 JavaScript cannot interrupt a pan WebKit starts: `window.scrollTo` requests a
 position update that does not stop the scroll view's animation.
+
+On 2026-10-28, after deploying the click refocus (8b167376), the user confirmed on
+the same device that the first keyboard opening no longer pans either.

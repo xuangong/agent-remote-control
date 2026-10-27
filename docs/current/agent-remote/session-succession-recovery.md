@@ -48,7 +48,12 @@ for the exact input reporting no queued turns. Claude runs Stop hooks only after
 a turn that ended normally, so the adapter also enables Claude's session state
 events: their idle state ends a turn the model API rejected or the user
 interrupted. Session crons are listed only by a Stop snapshot; after a cron tool
-runs, an unknown wakeup counts as active work until the next snapshot. The other
+runs, an unknown wakeup counts as active work until the next snapshot. Every Stop
+of the main agent updates the task/cron snapshot, including the Stop of a turn
+Claude started itself, such as a fired one-shot cron that has deleted itself.
+Without it, the deleted cron would block a prompt edit until the user's next turn.
+The hook's `cwd` is the Bash tool's current directory, so it does not identify the
+session. The other
 adapters use their corresponding live native evidence. Reading a saved transcript
 alone cannot establish that a runtime is idle or that an old interaction remains
 actionable.

@@ -305,6 +305,48 @@ it('counts a session cron scheduled since the last Stop snapshot as pending work
   } finally { await session.dispose(); }
 });
 
+it('accepts a Stop snapshot after a command changed directory, since Stop reports the Bash tool directory', async () => {
+  const f = fixture(); const session = await f.provider.createSession({ sessionId: sid, cwd: process.cwd() });
+  try {
+    await session.sendMessage('Schedule'); await tick(); const input = f.inputs[0];
+    f.events.push({ type: 'assistant', uuid: randomUUID(), session_id: input.session_id, parent_tool_use_id: null, user_message_uuid: input.uuid,
+      message: { id: 'schedule', role: 'assistant', content: [{ type: 'tool_use', id: 'cron', name: 'CronDelete', input: {} }] } });
+    await tick();
+    await f.launches[0].hooks.Stop[0].hooks[0]({ hook_event_name: 'Stop', session_id: input.session_id, cwd: `${process.cwd()}/src`, background_tasks: [], session_crons: [] });
+    f.events.push({ type: 'result', subtype: 'success', uuid: randomUUID(), session_id: input.session_id, user_message_uuid: input.uuid, is_error: false, result: 'done', usage: {}, modelUsage: {}, queued_turn_count: 0 });
+    await tick(); expect(await session.nativeEvidence!.inspectReadiness()).toMatchObject({ idle: true, activeChildren: 0 });
+  } finally { await session.dispose(); }
+});
+
+it('takes background work and session crons from the Stop of a turn Claude started itself, such as a fired cron', async () => {
+  const f = fixture(); const session = await f.provider.createSession({ sessionId: sid, cwd: process.cwd() });
+  try {
+    await session.sendMessage('Schedule once'); await tick(); const input = f.inputs[0];
+    await f.launches[0].hooks.Stop[0].hooks[0]({ hook_event_name: 'Stop', session_id: input.session_id, cwd: process.cwd(), background_tasks: [], session_crons: [{ id: 'once' }] });
+    f.events.push({ type: 'result', subtype: 'success', uuid: randomUUID(), session_id: input.session_id, user_message_uuid: input.uuid, is_error: false, result: 'done', usage: {}, modelUsage: {}, queued_turn_count: 0 });
+    await tick(); expect(await session.nativeEvidence!.inspectReadiness()).toMatchObject({ idle: true, activeChildren: 1 });
+    // The one-shot cron fires and deletes itself; no Controller input started this turn.
+    f.events.push({ type: 'system', subtype: 'session_state_changed', uuid: randomUUID(), session_id: input.session_id, state: 'running' });
+    f.events.push({ type: 'stream_event', session_id: input.session_id, uuid: randomUUID(), parent_tool_use_id: null,
+      event: { type: 'message_start', message: { id: 'cron-turn', role: 'assistant', content: [], usage: { input_tokens: 0, output_tokens: 0 } } } });
+    await tick();
+    await f.launches[0].hooks.Stop[0].hooks[0]({ hook_event_name: 'Stop', session_id: input.session_id, cwd: process.cwd(), background_tasks: [], session_crons: [] });
+    f.events.push({ type: 'system', subtype: 'session_state_changed', uuid: randomUUID(), session_id: input.session_id, state: 'idle' });
+    await tick(); expect(await session.nativeEvidence!.inspectReadiness()).toMatchObject({ idle: true, activeChildren: 0 });
+  } finally { await session.dispose(); }
+});
+
+it('ignores the Stop snapshot of a subagent or another session', async () => {
+  const f = fixture(); const session = await f.provider.createSession({ sessionId: sid, cwd: process.cwd() });
+  try {
+    await session.sendMessage('Work'); await tick(); const input = f.inputs[0];
+    await f.launches[0].hooks.Stop[0].hooks[0]({ hook_event_name: 'Stop', session_id: input.session_id, cwd: process.cwd(), background_tasks: [{ id: 'shell' }], session_crons: [] });
+    await f.launches[0].hooks.Stop[0].hooks[0]({ hook_event_name: 'Stop', session_id: input.session_id, agent_id: 'child', cwd: process.cwd(), background_tasks: [], session_crons: [] });
+    await f.launches[0].hooks.Stop[0].hooks[0]({ hook_event_name: 'Stop', session_id: randomUUID(), cwd: process.cwd(), background_tasks: [], session_crons: [] });
+    expect((await session.nativeEvidence!.inspectReadiness()).activeChildren).toBe(1);
+  } finally { await session.dispose(); }
+});
+
 it('treats unsolicited native activity as work even without an adapter-owned input', async () => {
   const f = fixture(); const session = await f.provider.createSession({ sessionId: sid, cwd: process.cwd() });
   try {

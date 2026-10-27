@@ -88,10 +88,13 @@ export class ClaudeNativeEvidence implements AgentSessionNativeEvidence {
   noteDispatch(id: string): void { this.stopInput = undefined; this.nativeState = 'running'; this.queuedInputs = 1; this.dispatched = { id }; this.invalidate(); }
   noteStop(input: StopHookInput): void {
     this.stopInput = undefined; this.invalidate();
-    if (!this.available() || !this.ports.counts().pendingInput || !this.dispatched || input.agent_id || input.session_id !== this.ports.id
-      || input.cwd !== this.ports.cwd || !Array.isArray(input.background_tasks) || !Array.isArray(input.session_crons)) return;
+    // The main agent's Stop describes this session. Its cwd is the Bash tool's current directory, which a command may have changed.
+    if (!this.available() || input.agent_id || input.session_id !== this.ports.id
+      || !Array.isArray(input.background_tasks) || !Array.isArray(input.session_crons)) return;
+    // Background work and session crons are session state, so a turn Claude started itself, such as a fired cron, reports them too.
     this.backgroundTasks = input.background_tasks.length; this.scheduledTasks = input.session_crons.length; this.scheduledTasksUnconfirmed = false;
-    this.stopInput = this.dispatched.id; this.invalidate();
+    if (this.ports.counts().pendingInput && this.dispatched) this.stopInput = this.dispatched.id;
+    this.invalidate();
   }
   noteMessage(message: SDKMessage): boolean {
     if (!this.scheduledTasksUnconfirmed && message.type === 'assistant'

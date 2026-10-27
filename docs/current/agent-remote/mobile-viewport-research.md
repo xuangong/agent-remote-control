@@ -350,3 +350,42 @@ also applies to ordinary browser tabs; check their landscape margins and control
 If the shift remains,
 record the new geometry and inspect native root movement separately before
 changing another layout variable.
+
+## Keyboard reveal pan
+
+The user's 2026-10-27 recording (Home Screen, Safari 27.2, 402 × 874 screen)
+covers three keyboard openings on the main composer. Each time, about 90 ms after
+focus, one visual viewport resize reports the final state at once: viewport and
+window height 415 px, `offsetTop`, `scrollY` and root `scrollTop` 397 px, the
+fixed shell at y = −397 px and the composer at 263–415 px. One frame later the
+hook writes `top: 397px` and `height: 415px`, which places the shell in the visible
+area. No intermediate frame changes geometry. Closing reverses this: the root
+scroll returns to 0 and the next frame removes the overrides.
+
+The document cannot otherwise scroll (`scrollHeight` equals `clientHeight`), so the
+397 px is WebKit revealing the focused composer above the keyboard. DOM geometry
+takes the final offset immediately while the native scroll view animates to it.
+The shell, already moved to the final offset, therefore starts 397 px low and
+slides up with that animation: the "page appears from below" the user reported.
+
+In WebKit, `-[WKContentView _zoomToRevealFocusedElement]` returns early when the
+focused element information carries `preventScroll`, which comes from the focus
+options of the last `WebPage::elementDidFocus` before the deferred update reaches
+the UI process. Focusing the already focused element calls `elementDidRefocus`,
+which replaces that pending update while the input view is not yet shown. `focusin`
+is dispatched after the client is notified of the user's focus, so a `focusin`
+handler that refocuses with `{ preventScroll: true }` makes WebKit skip the reveal.
+`interactive-widget=resizes-content` is implemented in WebKit main from July 2026;
+this recording shows Safari 27.2 not resizing the layout viewport.
+
+The hook now does this for touch focus inside the shell unless focus moves from
+another field. Then `offsetTop` stays 0, and the shell resizes once to the
+visual viewport, as it does today, while the keyboard slides up beneath the
+composer. Moving between fields is left to WebKit: the keyboard stays, the shell
+already keeps the new field visible, and the refocus would hide the previous field
+from WebKit's switch between input sessions.
+
+A hardware keyboard's shortcut bar reduces the viewport by less than the 100 px
+occlusion threshold, so the shell keeps its CSS height; without the reveal, the
+bar can cover the bottom of the composer. Browser tests cover the refocus and
+editing after a tap; only a device recording can confirm the absent pan.

@@ -1,6 +1,8 @@
 import { useEffect, useRef } from 'react';
 import { getLayoutDiagnosticsStatus, recordViewportDecision } from '../layout-diagnostics.js';
 
+const editable = 'input, textarea, [contenteditable="true"], [contenteditable="plaintext-only"]';
+
 export function useVisualViewport(onUpdate?: () => void) {
   const latestUpdate = useRef(onUpdate);
   latestUpdate.current = onUpdate;
@@ -28,7 +30,7 @@ export function useVisualViewport(onUpdate?: () => void) {
         const height = aligned ? Math.min(viewport.height, window.innerHeight) : window.innerHeight;
         if (height <= 0) return;
         const layoutHeight = Math.max(window.innerHeight, document.documentElement.clientHeight);
-        const editing = document.activeElement?.matches('input, textarea, [contenteditable="true"], [contenteditable="plaintext-only"]') ?? false;
+        const editing = document.activeElement?.matches(editable) ?? false;
         const retainReference = coarsePointer.matches && (editing || occluded);
         // Some mobile windows shrink with the keyboard. Keep the pre-focus height
         // until dismissal, but never reuse portrait geometry after a width change.
@@ -74,6 +76,16 @@ export function useVisualViewport(onUpdate?: () => void) {
       settling = [120, 350, 800, 1500, 2500].map(delay => window.setTimeout(update, delay));
     };
     const reorient = () => { referenceWidth = Number.NaN; settle(); };
+    // WebKit reveals a field the keyboard will cover by animating the page upward, while the
+    // shell already moves into the visible area, so the page slides up from below. The shell
+    // keeps its fields above the keyboard, so refocus before WebKit presents the keyboard and
+    // ask it not to scroll. Moving between fields keeps the keyboard and WebKit's field switch.
+    const keepPage = (event: FocusEvent) => {
+      const { target, relatedTarget } = event;
+      if (!coarsePointer.matches || !(target instanceof HTMLElement) || !target.matches(editable) || !shell.contains(target)) return;
+      if (relatedTarget instanceof Element && relatedTarget.matches(editable)) return;
+      target.focus({ preventScroll: true });
+    };
     settle();
     viewport.addEventListener('resize', settle);
     viewport.addEventListener('scroll', update);
@@ -82,6 +94,7 @@ export function useVisualViewport(onUpdate?: () => void) {
     window.addEventListener('pageshow', settle);
     window.addEventListener('focus', settle);
     window.addEventListener('orientationchange', reorient);
+    document.addEventListener('focusin', keepPage);
     document.addEventListener('focusin', settle);
     document.addEventListener('focusout', settle);
     document.addEventListener('visibilitychange', settle);
@@ -95,6 +108,7 @@ export function useVisualViewport(onUpdate?: () => void) {
       window.removeEventListener('pageshow', settle);
       window.removeEventListener('focus', settle);
       window.removeEventListener('orientationchange', reorient);
+      document.removeEventListener('focusin', keepPage);
       document.removeEventListener('focusin', settle);
       document.removeEventListener('focusout', settle);
       document.removeEventListener('visibilitychange', settle);

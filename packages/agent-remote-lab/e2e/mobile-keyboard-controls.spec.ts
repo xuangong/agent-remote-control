@@ -112,6 +112,33 @@ test('keeps floating controls the keyboard covers apart and returns them when it
   expect((await boxes()).ask.top).toBe(700);
 });
 
+test('a tap that opens the keyboard asks the browser not to pan the page and keeps editing', async ({ page, hasTouch }) => {
+  test.skip(!hasTouch, 'The shell adapts only coarse pointers to the software keyboard.');
+  await page.addInitScript(() => {
+    const focus = HTMLElement.prototype.focus;
+    const refocused: string[] = [];
+    Object.assign(window, { refocused });
+    HTMLElement.prototype.focus = function (options?: FocusOptions) {
+      if (options?.preventScroll && this === document.activeElement) refocused.push(this.dataset.testid ?? this.tagName);
+      return focus.call(this, options);
+    };
+  });
+  await page.goto('/');
+  await showNewSession(page);
+  await page.getByTestId('session-create').click();
+  const input = page.locator('.lab-primary-conversation').getByTestId('prompt-input');
+  await expect(input).toBeEnabled();
+  await input.fill('Keep this draft');
+  await input.blur();
+  await page.evaluate(() => { (window as unknown as { refocused: string[] }).refocused.length = 0; });
+  await input.tap();
+  await expect(input).toBeFocused();
+  expect(await page.evaluate(() => (window as unknown as { refocused: string[] }).refocused)).toEqual(['prompt-input']);
+  await page.keyboard.press('End');
+  await page.keyboard.type(' and type');
+  await expectDraft(input, 'Keep this draft and type');
+});
+
 async function openFocusedComposer(page: Page, draft: string) {
   await page.addInitScript(() => {
     const viewport = Object.assign(new EventTarget(), { width: 390, height: 844, offsetTop: 0, offsetLeft: 0, scale: 1 });
@@ -141,6 +168,8 @@ async function focusWithKeyboard(page: Page, input: Locator) {
     window.visualViewport!.dispatchEvent(new Event('resize'));
   });
   await expect(input).toBeFocused();
+  // The shell applies keyboard bounds in its next animation frame; measure controls after it.
+  await expect(page.locator('.lab-shell')).toHaveCSS('top', '160px');
 }
 
 async function closeKeyboardViewport(page: Page) {

@@ -11,7 +11,7 @@ function property(target: object, key: string, value: unknown) {
 }
 function Harness() {
   const ref = useVisualViewport();
-  return <main ref={ref}><textarea defaultValue="Keep this draft" /></main>;
+  return <main ref={ref}><textarea defaultValue="Keep this draft" /><input aria-label="Title" /></main>;
 }
 async function advance(ms: number) {
   await act(async () => { vi.advanceTimersByTime(ms); });
@@ -39,6 +39,7 @@ afterEach(() => {
     if (descriptor) Object.defineProperty(target, key, descriptor);
     else Reflect.deleteProperty(target, key);
   }
+  vi.restoreAllMocks();
   vi.useRealTimers();
 });
 
@@ -224,4 +225,42 @@ it('keeps CSS sizing when standalone rotation bounds arrive separately', async (
   await advance(32);
   expect(height(shell)).toBe('');
   expect(shell.dataset.viewportOccluded).toBe('false');
+});
+
+function refocused(element: Element, focus: { mock: { calls: unknown[][]; contexts: unknown[] } }) {
+  return focus.mock.calls.some((call, index) => focus.mock.contexts[index] === element && JSON.stringify(call[0]) === JSON.stringify({ preventScroll: true }));
+}
+
+it('asks WebKit not to pan the page when a touch opens the keyboard on a field the shell keeps visible', async () => {
+  const shell = await mount();
+  const focus = vi.spyOn(HTMLElement.prototype, 'focus');
+  const textarea = shell.querySelector('textarea')!;
+  textarea.focus();
+  expect(refocused(textarea, focus)).toBe(true);
+  expect(document.activeElement).toBe(textarea);
+  expect(textarea.value).toBe('Keep this draft');
+});
+
+it('leaves focus moving between fields and fields outside the shell to the browser', async () => {
+  const shell = await mount();
+  const outside = document.body.appendChild(document.createElement('input'));
+  try {
+    const focus = vi.spyOn(HTMLElement.prototype, 'focus');
+    shell.querySelector('textarea')!.focus();
+    const title = shell.querySelector('input')!;
+    title.focus();
+    expect(refocused(title, focus)).toBe(false);
+    title.blur();
+    outside.focus();
+    expect(refocused(outside, focus)).toBe(false);
+  } finally { outside.remove(); }
+});
+
+it('does not refocus for a fine pointer', async () => {
+  property(window, 'matchMedia', () => ({ matches: false }));
+  const shell = await mount();
+  const focus = vi.spyOn(HTMLElement.prototype, 'focus');
+  const textarea = shell.querySelector('textarea')!;
+  textarea.focus();
+  expect(refocused(textarea, focus)).toBe(false);
 });

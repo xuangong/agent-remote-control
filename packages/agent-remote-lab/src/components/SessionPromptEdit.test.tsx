@@ -3,7 +3,7 @@ import { act, useRef, useState } from 'react';
 import { Blob as NativeBlob } from 'node:buffer';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { AgentReplica, type RemoteAgentTransport, type RemoteTransportListener } from '@orchardworks/agent-remote-web';
-import type { AgentSnapshot, ClientMessage, HistoryPage } from '@orchardworks/agent-remote-protocol';
+import { appendSessionExcerpts, createSessionExcerpt, type AgentSnapshot, type ClientMessage, type HistoryPage, type SessionExcerpt } from '@orchardworks/agent-remote-protocol';
 import { inspectImageDraft, readImageDraft, type ImageDraftRecipient } from '@orchardworks/agent-remote-web/browser';
 import * as imageDraftStorage from '../../../agent-remote-web/dist/image-drafts.js';
 import { ConversationConnections, ConversationConnectionScope } from '../conversation-connections.js';
@@ -50,7 +50,7 @@ beforeEach(() => {
 });
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 
-function fixture(images = false, unavailableImage = false, queue = false) {
+function fixture(images = false, unavailableImage = false, queue = false, quote?: SessionExcerpt) {
   const listeners = new Map<string, RemoteTransportListener>();
   const resourceRequests: string[] = [];
   const sent: Extract<ClientMessage, { type: 'send_message' }>[] = [];
@@ -63,7 +63,7 @@ function fixture(images = false, unavailableImage = false, queue = false) {
   const page = (id: string): HistoryPage => ({ protocolVersion: '1.8.0', type: 'timeline_page', payload: {
     agentId: id, requestId: 'history', direction: 'tail', epoch: `epoch-${id}`, reset: false, staleCursor: false, gap: false,
     window: { minSeq: 1, maxSeq: 2, nextSeq: 3 }, startCursor: null, endCursor: null,
-    entries: [1, 2].map(index => ({ providerId: 'recorded', turnId: `turn-${index}`, item: { type: 'user_message' as const, text: `Selected ${id} prompt ${index}`, messageId: `message-${index}`, ...(images ? { content: [{ type: 'text' as const, text: `Selected ${id} prompt ${index}` }, { type: 'image' as const, locator: '/selected.png', label: 'image #1', mediaType: 'image/png', sha256: 'image-sha' }] } : {}) }, resources: images ? [{ locator: '/selected.png', resourceId: 'selected-image', status: 'available' as const }] : [], timestamp: '2026-10-15T00:00:00Z', seqStart: index, seqEnd: index, sourceSeqRanges: [{ startSeq: index, endSeq: index }], collapsed: [] })), hasOlder: false, hasNewer: false, error: null,
+    entries: [1, 2].map(index => ({ providerId: 'recorded', turnId: `turn-${index}`, item: { type: 'user_message' as const, text: quote && index === 2 ? appendSessionExcerpts(`Selected ${id} prompt ${index}`, [quote]) : `Selected ${id} prompt ${index}`, messageId: `message-${index}`, ...(images ? { content: [{ type: 'text' as const, text: `Selected ${id} prompt ${index}` }, { type: 'image' as const, locator: '/selected.png', label: 'image #1', mediaType: 'image/png', sha256: 'image-sha' }] } : {}) }, resources: images ? [{ locator: '/selected.png', resourceId: 'selected-image', status: 'available' as const }] : [], timestamp: '2026-10-15T00:00:00Z', seqStart: index, seqEnd: index, sourceSeqRanges: [{ startSeq: index, endSeq: index }], collapsed: [] })), hasOlder: false, hasNewer: false, error: null,
   } });
   const transport: RemoteAgentTransport = {
     fetchSnapshot: async id => snapshot(id), fetchTimeline: async id => page(id),
@@ -109,8 +109,8 @@ function fixture(images = false, unavailableImage = false, queue = false) {
 
 const promptEditor = (view: ParentNode) => view.querySelector<HTMLElement>('[data-testid="prompt-input"]')!;
 type Placement = 'debugger' | 'main' | 'side' | 'window' | 'team-leader' | 'team-member' | 'compact-leader' | 'compact-member' | 'child' | 'ask' | 'tpm';
-async function setupEdit(kind: Placement, options: { outcome?: 'ready' | 'unknown' | 'rejected' | 'cancelled'; holdCommit?: boolean; holdPrepare?: boolean; windowChild?: boolean; commitBoundaryChanged?: boolean; explicitRecipient?: boolean; unavailable?: boolean; historical?: boolean; images?: boolean; unavailableImage?: boolean; queue?: boolean } = {}) {
-  const f = fixture(options.images, options.unavailableImage, options.queue);
+async function setupEdit(kind: Placement, options: { outcome?: 'ready' | 'unknown' | 'rejected' | 'cancelled'; holdCommit?: boolean; holdPrepare?: boolean; windowChild?: boolean; commitBoundaryChanged?: boolean; explicitRecipient?: boolean; unavailable?: boolean; historical?: boolean; images?: boolean; unavailableImage?: boolean; queue?: boolean; quote?: SessionExcerpt; receiveQuotes?(excerpts: readonly SessionExcerpt[]): void } = {}) {
+  const f = fixture(options.images, options.unavailableImage, options.queue, options.quote);
   let recipientCurrent = true;
   const explicitRecipient: ImageDraftRecipient = { identity: 'explicit-A', lifetime: {}, isCurrent: () => recipientCurrent };
   const scope = `http://fixture/${crypto.randomUUID()}/`;
@@ -161,7 +161,7 @@ async function setupEdit(kind: Placement, options: { outcome?: 'ready' | 'unknow
     const view = useConversationSession(session, f.transport);
     const Workbench = kind === 'debugger' ? DebugWorkbench : LabWorkbench;
     return <Workbench displaySessionKey="selected-owner" state={view.state} sessionState={view.sessionState} sessionStatus={view.status} actions={view.actions} operationBinding={view.operationBinding}
-      draftBinding={changedOwner ? { store: replacementDrafts, key: 'selected-owner' } : draftBinding} imageDraftBinding={imageDraftBinding} imageRecipient={options.explicitRecipient ? explicitRecipient : view.imageRecipient} draftSessionKey="main-draft" />;
+      draftBinding={changedOwner ? { store: replacementDrafts, key: 'selected-owner' } : draftBinding} imageDraftBinding={imageDraftBinding} imageRecipient={options.explicitRecipient ? explicitRecipient : view.imageRecipient} draftSessionKey="main-draft" {...(options.receiveQuotes ? { receiveQuotes: options.receiveQuotes } : {})} />;
   }
   function Harness() {
     const [current, update] = useState(native); setCurrent = update;
@@ -359,6 +359,20 @@ it.each(['cancelled', 'rejected'] as const)('releases the %s operation on Done w
   expect(await persistedPrompt(retained.prompt.key)).toEqual({ draft: undefined, images: [] });
   expect(f.requests.filter(item => item.path.endsWith('/prepare'))).toHaveLength(1);
 }, 10000);
+it.each([true, false])('returns the quotes an edited prompt carried to a view that receives quotes (%s), and otherwise keeps them in its text', async receives => {
+  const quote = createSessionExcerpt({ id: 'quote', capturedAt: 'now', source: { providerId: 'recorded', nativeSessionId: 'Q', title: 'Quoted session' },
+    entries: [{ providerId: 'recorded', item: { type: 'assistant_message', text: 'Quoted answer' }, resources: [], timestamp: 'now', seqStart: 1, seqEnd: 1, sourceSeqRanges: [], collapsed: [] }], selected: () => true });
+  const receiveQuotes = vi.fn();
+  const f = await setupEdit('main', { quote, ...(receives ? { receiveQuotes } : {}) });
+  await clickPrompt(f.view, 1);
+  await vi.waitFor(() => expect(promptText(promptEditor(f.view))).toContain('Selected A prompt 2'));
+  if (receives) {
+    expect(promptText(promptEditor(f.view))).toBe('Selected A prompt 2');
+    expect(receiveQuotes).toHaveBeenCalledTimes(1);
+    expect(receiveQuotes.mock.calls[0]![0]).toEqual([quote]);
+  } else expect(promptText(promptEditor(f.view))).toContain('<session-excerpt id="quote">');
+  expect(f.sent).toHaveLength(0);
+});
 it('edits the first prompt and repeats B to C with separate exact operations', async () => {
   const f = await setupEdit('side');
   await clickPrompt(f.view);

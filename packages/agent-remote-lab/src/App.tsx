@@ -112,6 +112,7 @@ import {
   HttpWebSocketTransport,
   RemoteSessionClient,
   HttpPreviewClient,
+  timelineEntryKey,
   type AgentReplicaState,
   type RemoteAgentTransport,
   type RemoteSessionStatus,
@@ -140,6 +141,10 @@ import { MinimizeMainSession, SessionDockProvider, SessionDockRail } from './com
 import { ConversationPane, ConversationSplit } from './components/ConversationSplit.js';
 import { expandedSideRange, sidePath, type SideSelections } from './side-tree.js';
 import { configureFork, forkActions, forkCommands, sendForkInput } from './fork-actions.js';
+import { createSessionExcerpt, type SessionExcerpt } from '@orchardworks/agent-remote-protocol';
+import { SessionExcerptNavigation, type TimelineEntrySelection } from '@orchardworks/agent-remote-web/react';
+import { addQuote, restoreQuotes, withViewQuotes } from './session-quotes.js';
+import { NEW_SESSION_TARGET, QuoteAttachments, QuoteNotice, QuoteSelectionBar, type QuoteTargetWindow } from './components/SessionQuotes.js';
 import type { QuestionDraft } from '@orchardworks/agent-remote-web/react';
 import { ReplicaInspector } from './components/ReplicaInspector.js';
 import { ProviderSessionControls, type ProviderCatalogStatus } from './components/ProviderSessionControls.js';
@@ -286,6 +291,9 @@ function AppContent({
   const forkReservation = useRef<{ key: string; record: SessionFork }>();
   const forkBusy = useRef(false);
   const [forkInputStatus, setForkInputStatus] = useState<{ agentId: string; pending: boolean; error?: string }>();
+  // Messages being selected in one session view to quote into another; creationId keeps a retried new session single.
+  const [quoteSelection, setQuoteSelection] = useState<{ viewId: string; epoch: string | null; keys: ReadonlySet<string>; creationId?: string; busy?: boolean; error?: string }>();
+  const [quoteNotice, setQuoteNotice] = useState<{ viewId: string; message: string; open?(): Promise<void> }>();
   const [sessionOptions, setSessionOptions] = useState<CreateSessionOptions>({});
   const [directoryRevision, setDirectoryRevision] = useState(0);
   const creationReservation = useRef<{ operationId: string; options: CreateSessionOptions; providerId: string; destination?: { windowId: string; viewId: string; binding: string } }>();
@@ -1578,6 +1586,7 @@ function AppContent({
     });
   }
 
+  const navigateAttributionRef = useRef(navigateAttribution); navigateAttributionRef.current = navigateAttribution;
   async function navigateAttribution(attribution: SessionAttribution): Promise<void> {
     const target = attribution.target;
     if (!target) return;
@@ -2052,6 +2061,94 @@ function AppContent({
       onOpen={clean => openAsk(source, sourceState, clean)} replicaFor={replicaFor} transport={transport}
       navigation={viewNavigation} />;
   }
+  /** Session views of every Window that can receive a quote from `sourceViewId`, located by Window and session. */
+  function quoteTargets(sourceViewId: string, source: OpenedSession): QuoteTargetWindow[] {
+    const current = windowWorkspace.readWindow() ?? sharedWindow;
+    const catalog = [...new Map([...(windowWorkspace.windows ?? []), ...(current ? [current] : [])].map(window => [window.id, window])).values()];
+    const placement = { primary: 'Main', dock: 'Docked', float: 'Floating', attached: 'Side' } as const;
+    return catalog.map(window => ({ id: window.id, title: window.title || 'Untitled Window', current: window.id === current?.id,
+      views: window.views.filter(view => {
+        const feature = parseWindowFeature(view.feature);
+        return view.id !== sourceViewId && !!view.binding && view.binding.sessionIntent !== 'history' && !view.binding.parentNativeSessionId
+          && (!feature || feature.kind === 'team') && sessionKey(view.binding) !== sessionKey(source);
+      }).map(view => ({ viewId: view.id, title: view.binding!.title || 'Untitled session', detail: placement[view.placement] })) }))
+      .filter(window => window.current || window.views.length).sort((a, b) => Number(b.current) - Number(a.current));
+  }
+  /** A new session in the source's workspace, with its provider and model, opened as a dock of the current Window. */
+  async function createQuoteSession(source: OpenedSession, sourceState: AgentReplicaState, operationId: string): Promise<string> {
+    const agent = sourceState.agent;
+    if (!directory || !agent) throw new Error('A new session cannot be created here.');
+    const target = (source.hostId ?? 'local') === selectedHost.id ? directory : new SessionDirectoryClient(baseUrl, undefined, source.hostId);
+    const quota = remoteHosts.find(host => host.id === source.hostId)?.sessionQuota;
+    if (quota && quota.used >= quota.limit) throw new Error('Session creation limit reached. Existing sessions remain available. Ask the owner to raise your limit.');
+    const options: CreateSessionOptions = { ...(agent.cwd ? { cwd: agent.cwd } : {}), ...(agent.model && source.providerId !== 'dsh' ? { model: agent.model } : {}) };
+    let created: { agentId: string; nativeSessionId?: string };
+    try { created = await target.create(source.providerId, operationId, options); }
+    finally { if (source.hostId && source.hostId !== 'local') retryHosts(); }
+    const session = { agentId: created.agentId, nativeSessionId: created.nativeSessionId ?? created.agentId, providerId: source.providerId, hostId: source.hostId ?? 'local', title: 'New session' };
+    rememberSession(session); setDirectoryRevision(value => value + 1);
+    const view = createWindowView(crypto.randomUUID(), windowSessionBinding(session), 'dock');
+    editWindow({ type: 'batch', operations: [{ type: 'view.create', view }] });
+    return view.id;
+  }
+  function revealQuoteTarget(viewId: string): void {
+    void windowWorkspace.operate({ type: 'view.select', viewId }).catch(() => {});
+    const id = viewId.replace(/["\\]/g, '\\$&');
+    requestAnimationFrame(() => document.querySelector<HTMLElement>(`[data-view-id="${id}"] [data-testid="prompt-input"], [data-primary-group-id="${id}"] [data-testid="prompt-input"]`)?.focus({ preventScroll: true }));
+  }
+  async function quoteSelected(viewId: string, source: OpenedSession, sourceState: AgentReplicaState, target: { windowId: string; viewId: string }): Promise<void> {
+    const selection = quoteSelection;
+    if (selection?.viewId !== viewId || selection.busy) return;
+    const epoch = sourceState.timeline.epoch;
+    try {
+      if (epoch !== selection.epoch) throw new Error('This conversation was reloaded. Select the messages again.');
+      const excerpt = createSessionExcerpt({ id: crypto.randomUUID(), capturedAt: new Date().toISOString(), entries: sourceState.timeline.entries,
+        source: { hostId: source.hostId ?? 'local', providerId: source.providerId, nativeSessionId: source.nativeSessionId, title: source.title },
+        selected: entry => selection.keys.has(timelineEntryKey(epoch, entry)) });
+      let destination = target.viewId;
+      if (destination === NEW_SESSION_TARGET) {
+        const creationId = selection.creationId ?? crypto.randomUUID();
+        setQuoteSelection(current => current?.viewId === viewId ? { ...current, creationId, busy: true, error: undefined } : current);
+        destination = await createQuoteSession(source, sourceState, creationId);
+      }
+      addQuote(baseUrl, destination, excerpt);
+      setQuoteSelection(current => current?.viewId === viewId ? undefined : current);
+      const window = quoteTargets(viewId, source).find(item => item.id === target.windowId);
+      if (!window || window.current) { revealQuoteTarget(destination); return; }
+      const title = window.views.find(item => item.viewId === destination)?.title ?? 'the session';
+      setQuoteNotice({ viewId, message: `Quoted into “${title}” in Window “${window.title}”.`, async open() {
+        await windowWorkspace.open(target.windowId); revealQuoteTarget(destination);
+      } });
+    } catch (error) {
+      setQuoteSelection(current => current?.viewId === viewId ? { ...current, busy: false, error: message(error, 'The messages could not be quoted.') } : current);
+    }
+  }
+  const openExcerptSource = useCallback((source: { hostId?: string; providerId: string; nativeSessionId: string; title: string }) =>
+    navigateAttributionRef.current({ id: 'excerpt-source', kind: 'quote', label: 'Quoted from', value: source.title,
+      target: { kind: 'session', hostId: source.hostId, providerId: source.providerId, nativeSessionId: source.nativeSessionId } }).catch(() => undefined), []);
+  // Stable wrappers keep memoized timelines from rendering again on unrelated changes.
+  const quotedActionCache = useRef(new WeakMap<LabWorkbenchActions, Map<string, LabWorkbenchActions>>());
+  function quotedActions(base: LabWorkbenchActions, viewId: string): LabWorkbenchActions {
+    let byView = quotedActionCache.current.get(base);
+    if (!byView) quotedActionCache.current.set(base, byView = new Map());
+    const key = JSON.stringify([baseUrl, viewId]);
+    let wrapped = byView.get(key);
+    if (!wrapped) byView.set(key, wrapped = withViewQuotes(base, baseUrl, viewId));
+    return wrapped;
+  }
+  /** Starting a selection in another view replaces the one in progress. */
+  function quoteEntrySelection(viewId: string, epoch: string | null): TimelineEntrySelection {
+    const selected = quoteSelection?.viewId === viewId && quoteSelection.epoch === epoch ? quoteSelection.keys : undefined;
+    return { label: 'Quote', selected, select(keys, value) {
+      setQuoteNotice(undefined);
+      setQuoteSelection(current => {
+        const same = current?.viewId === viewId && current.epoch === epoch;
+        const next = new Set(same ? current.keys : []);
+        for (const key of keys) if (value) next.add(key); else next.delete(key);
+        return { ...(same ? current : {}), viewId, epoch, keys: next, error: undefined };
+      });
+    } };
+  }
   /** team: a Team Leader or Member view, which shows the member's name and offers Handoff like a primary view. */
   function sessionViewPresentation(context: FamilySessionPresentationContext, options: { team?: boolean } = {}) {
     const team = options.team === true;
@@ -2067,6 +2164,8 @@ function AppContent({
       && !context.sessionState.readOnly && !context.operationBinding.historical && host?.access !== 'shared' && host?.online === true;
     const mayRename = !team && userScoped && host?.online && host.access !== 'shared' && host.providers?.some(provider => provider.providerId === source.providerId && provider.sessionRename);
     const sourceForks = forkStore.linked().filter(item => item.target && sessionKey(sideNavigationSource(item)) === sessionKey(source));
+    // Quoting happens between the session views of shared Windows.
+    const quoteView = sharedWindow && context.windowViewId && !source.parentNativeSessionId ? context.windowViewId : undefined;
     return {
       headingMode: compactLayout ? 'toolbar' as const : 'inline' as const,
       headingStart: !compactLayout && view?.id === primaryGroups[0]?.id ? <div ref={setSessionViewTarget} data-pane-selection-ignore className="lab-global-view-slot" /> : undefined,
@@ -2084,7 +2183,9 @@ function AppContent({
       },
       revealEntry: letterReveals[source.agentId] ?? (traceRequest?.view === 'workbench' && context.state?.agent?.id === state?.agent?.id ? traceRequest : undefined),
       onPendingInputChange: isPrimary || team ? (count: number) => setPendingGroupInputs(values => values[source.viewId] === count ? values : { ...values, [source.viewId]: count }) : undefined,
-      actions: forkInputStatus?.pending && forkInputStatus.agentId === source.agentId ? { deleteMessage: commands.deleteMessage } : commands,
+      actions: forkInputStatus?.pending && forkInputStatus.agentId === source.agentId ? { deleteMessage: commands.deleteMessage } : quoteView ? quotedActions(commands, quoteView) : commands,
+      ...(quoteView && context.state ? { entrySelection: quoteEntrySelection(quoteView, context.state.timeline.epoch) } : {}),
+      ...(quoteView ? { receiveQuotes: (excerpts: readonly SessionExcerpt[]) => restoreQuotes(baseUrl, quoteView, excerpts) } : {}),
       consoleCommands: [...(available && directory && context.state?.agent?.capabilities.sendMessage && context.state.agent.capabilities.history ? forkCommands : []), ...(handoffAvailable ? [handoffCommand] : [])],
       onExecuteConsoleCommand: async (id: string, args: string): Promise<AgentCommandResult> => {
         assertSourceCurrent(source);
@@ -2096,12 +2197,18 @@ function AppContent({
         if (!context.state || !available) throw new Error('Wait for this session to finish synchronizing.');
         return createFork(context.state, source, id, args);
       },
-      composerStatus: gated || successionDialog && viewKey(successionDialog.source) === source.viewId ? successionProgress : undefined,
+      composerStatus: <>{gated || successionDialog && viewKey(successionDialog.source) === source.viewId ? successionProgress : null}
+        {quoteView && quoteSelection?.viewId === quoteView && context.state ? <QuoteSelectionBar count={quoteSelection.keys.size} windows={quoteTargets(quoteView, source)}
+          busy={!!quoteSelection.busy} error={quoteSelection.error} onCancel={() => setQuoteSelection(undefined)}
+          onQuote={target => void quoteSelected(quoteView, source, context.state!, target)} /> : null}
+        {quoteView && quoteNotice?.viewId === quoteView ? <QuoteNotice message={quoteNotice.message} onDismiss={() => setQuoteNotice(undefined)}
+          onOpen={quoteNotice.open ? () => { const open = quoteNotice.open!; setQuoteNotice(undefined); void open().catch(() => {}); } : undefined} /> : null}</>,
       headingContext: <SessionSuccessionHistory navigation={succession.historyNavigationFor(source)}
         onOpen={(session, intent) => view && sharedWindow
           ? bindDirectorySession({ ...session, sessionIntent: intent }, { windowId: sharedWindow.id, viewId: view.id, binding: JSON.stringify(view.binding ?? null) })
           : Promise.resolve(false)} />,
-      composerContext: fork ? <ForkReference fork={fork} onOpen={revealSession} onUnlink={unlinkSide} onRecover={record => refreshRelations.reconcile(record)} /> : undefined,
+      composerContext: <>{fork ? <ForkReference fork={fork} onOpen={revealSession} onUnlink={unlinkSide} onRecover={record => refreshRelations.reconcile(record)} /> : null}
+        {quoteView ? <QuoteAttachments scope={baseUrl} viewId={quoteView} /> : null}</>,
       composerNotice: <ForkEntries forks={sourceForks} selectedChild={selectedChildKey(source.viewId)} onOpen={record => void openFork({ ...record, navigationSource: source })} onUnlink={unlinkSide} onRecover={record => refreshRelations.reconcile(record)} />,
       sessionManager: <>{context.controls}{isPrimary ? <button type="button" data-pane-selection-ignore aria-label={`Close primary group: ${source.title}`}
         title="Close this session view. Agent sessions keep running."
@@ -2117,6 +2224,8 @@ function AppContent({
             <button type="button" aria-label="Forward to next conversation" title="Forward" disabled={!conversationHistory.canForward} onClick={conversationHistory.forward}>→</button>
           </nav> : null}
           <SessionLink session={available ? source : windowSessionBinding(source)} sessionIntent={context.operationBinding.historical ? 'history' : undefined} />
+          {quoteView && context.state && quoteSelection?.viewId !== quoteView ? <button type="button" title="Select messages to quote in another session view"
+            onClick={() => quoteEntrySelection(quoteView, context.state!.timeline.epoch).select([], true)}>Quote messages</button> : null}
         </SessionHeadingActions></>,
       conversationPath: <SessionTitle className={isPrimary ? 'lab-primary-title' : undefined} title={source.title} status={context.state?.agent?.status}
         onRename={mayRename ? () => setRenamingSession({ scope: baseUrl, session: { ...source, hostId: source.hostId ?? 'local' } }) : undefined} />,
@@ -2136,7 +2245,7 @@ function AppContent({
     sessions: [...favorites.stars, ...sessionEntries, ...tpmMainSessions.values()], forks: forkStore.all(), asks: ask.store.all(),
     tpmWorks: tpm.works, teams: teamRoster?.baseUrl === baseUrl ? teamRoster.teams : [],
     hostNames: new Map([['local', 'Lab server'], ...remoteHosts.map(host => [host.id, host.name] as const)]),
-  }), navigate: navigateAttribution }}><SessionViewOperationsContext.Provider value={{ storageScope: baseUrl, transport, enabled: accessReady && activated, resolveTarget: (source, requested) => {
+  }), navigate: navigateAttribution }}><SessionExcerptNavigation.Provider value={openExcerptSource}><SessionViewOperationsContext.Provider value={{ storageScope: baseUrl, transport, enabled: accessReady && activated, resolveTarget: (source, requested) => {
     const roster = teamRosterRef.current;
     const member = teamViewTarget(succession.document, roster?.baseUrl === baseUrl ? roster.teams : undefined, source, requested?.viewId);
     // A Team member follows prompt edits and handoffs alike: Team routing moves its seat to the successor.
@@ -2507,7 +2616,7 @@ function AppContent({
       <ReplicaInspector state={state} sessionStatus={status} providerName={providerName} />
     </SupportingRail>
     </WindowPresentationContext.Provider>
-  </main></RecoveryScope.Provider></PreviewScope></VscodeTunnelScope></ConversationConnectionScope.Provider></TrackViewScope.Provider></TpmViewScope.Provider></TeamViewScope.Provider></SessionDockProvider></WindowLayoutContext.Provider></WindowSessionBridgeContext.Provider></AskViewScope.Provider></SessionViewOperationsContext.Provider></SessionDescriptionsContext.Provider>;
+  </main></RecoveryScope.Provider></PreviewScope></VscodeTunnelScope></ConversationConnectionScope.Provider></TrackViewScope.Provider></TpmViewScope.Provider></TeamViewScope.Provider></SessionDockProvider></WindowLayoutContext.Provider></WindowSessionBridgeContext.Provider></AskViewScope.Provider></SessionViewOperationsContext.Provider></SessionExcerptNavigation.Provider></SessionDescriptionsContext.Provider>;
 }
 
 function PreviewScope({ client, host, polling, children }: { readonly client: HttpPreviewClient; readonly host?: RemoteHost; readonly polling: boolean; readonly children: ReactNode }) {

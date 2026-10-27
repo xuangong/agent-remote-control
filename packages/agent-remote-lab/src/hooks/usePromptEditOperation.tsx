@@ -1,6 +1,6 @@
 import { useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import type { ProjectedTimelineEntry } from '@orchardworks/agent-remote-protocol';
-import { preparePromptDraft } from '@orchardworks/agent-remote-web/react';
+import type { ProjectedTimelineEntry, SessionExcerpt } from '@orchardworks/agent-remote-protocol';
+import { preparePromptDraft, withoutSessionExcerpts } from '@orchardworks/agent-remote-web/react';
 import { inspectImageDraft, readImageDraft, type ImageDraftBinding, type ImageDraftRecipient } from '@orchardworks/agent-remote-web/browser';
 import { SessionSuccessionDialog } from '../components/SessionSuccessionDialog.js';
 import { ComposerDraftOwner, type DraftOwnerToken } from '../composer-draft-owner.js';
@@ -8,10 +8,16 @@ import type { DraftBinding } from '../draft-store.js';
 import { SessionViewOperationsContext, type SessionOperationBinding } from '../session-view-operations.js';
 import { readPrefixEdit, retainPrefixEdit, savePrefixEdit, finishPrefixEdit, type PrefixEditIntent } from '../prompt-edit-succession.js';
 
-/** One initiating view retains its original operation independently of current navigation. */
+/**
+ * One initiating view retains its original operation independently of current navigation. A view that receives quotes
+ * gets back the quotes an edited prompt carried; elsewhere they stay in the prompt's text.
+ */
 export function usePromptEditOperation(binding: SessionOperationBinding | undefined, text: DraftBinding | undefined,
-  image: ImageDraftBinding | undefined, viewId: string | undefined, explicitRecipient?: ImageDraftRecipient) {
+  image: ImageDraftBinding | undefined, viewId: string | undefined, explicitRecipient?: ImageDraftRecipient,
+  receiveQuotes?: (excerpts: readonly SessionExcerpt[]) => void) {
   const environment = useContext(SessionViewOperationsContext);
+  const quoteReceiver = useRef(receiveQuotes);
+  quoteReceiver.current = receiveQuotes;
   const scope = environment?.storageScope;
   const key = viewId ?? text?.key;
   const identity = JSON.stringify([scope, key]);
@@ -113,7 +119,9 @@ export function usePromptEditOperation(binding: SessionOperationBinding | undefi
       const owner = new ComposerDraftOwner(text, handle), captured = owner.capture();
       baselineHandle.current = { identity, operationId: operation.operationId, token: captured.token };
       const current = selection.binding.scope!, state = current.replica.getState();
-      const draft = await preparePromptDraft(selection.entry.item, { scopeKey: JSON.stringify([current.agentId, state.timeline.epoch]),
+      // Quotes the prompt carried return as quotes, not as text in the composer.
+      const { item: prompt, excerpts } = quoteReceiver.current ? withoutSessionExcerpts(selection.entry.item) : { item: selection.entry.item, excerpts: [] };
+      const draft = await preparePromptDraft(prompt, { scopeKey: JSON.stringify([current.agentId, state.timeline.epoch]),
         bindings: selection.entry.resources, resources: state.resources,
         resolveResource: current.client.resolveResource.bind(current.client), requestResource: async resource => (await current.client.requestResource(resource.resourceId)).payload.state });
       assertSource();
@@ -121,7 +129,7 @@ export function usePromptEditOperation(binding: SessionOperationBinding | undefi
         try { assertSource(); } catch { return false; }
         return current.isCurrent() && owner.matches(captured.token) && handle.snapshot().status === 'ready';
       };
-      const retained = await retainPrefixEdit(scope, key, { version: 1, source, operation,
+      const retained = await retainPrefixEdit(scope, key, { version: 1, source, operation, ...(excerpts.length ? { excerpts } : {}),
         owner: { textKey: text.key, image }, baseline: { text: captured.text, textRevision: captured.textRevision,
           imageRevision: captured.imageRevision, imageParts: captured.imageParts } }, draft, ownerCurrent);
       assertSource(); preparing.current = retained;
@@ -185,6 +193,7 @@ export function usePromptEditOperation(binding: SessionOperationBinding | undefi
       }
       if (receipt.persistence.text !== 'saved') throw new Error('The restored prompt is not yet retained. Keep this view open.');
       if (!targetCurrent() || !composer.matches(receipt.application.token)) throw new Error('A newer draft is preserved. The original prompt edit remains available for recovery.');
+      if (saved.excerpts?.length) quoteReceiver.current?.(saved.excerpts);
       savePrefixEdit(scope, key, { ...saved, restored: true });
     }}
     onClose={async retain => {

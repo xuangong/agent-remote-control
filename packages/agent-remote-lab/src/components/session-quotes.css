@@ -1,0 +1,19 @@
+.lab-quote-bar { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 8px 12px; margin: 0 0 6px; padding: 8px 10px; border: 1px solid var(--obs-action); border-radius: 8px; background: var(--obs-surface); }
+.lab-quote-bar > p { display: flex; flex-direction: column; gap: 2px; flex: 1 1 160px; margin: 0; font-weight: 600; }
+.lab-quote-bar > p > small { color: var(--obs-text-secondary); font-weight: 400; }
+.lab-quote-bar > p[role="alert"] { flex-basis: 100%; color: var(--obs-danger); font-weight: 400; }
+.lab-quote-target { display: flex; flex-wrap: wrap; gap: 8px; flex: 10 1 260px; min-width: 0; }
+.lab-quote-target label { display: flex; flex-direction: column; gap: 2px; flex: 1 1 120px; min-width: 0; color: var(--obs-text-secondary); font-size: 12px; }
+.lab-quote-target select { min-width: 0; max-width: 100%; min-height: 32px; }
+.lab-quote-actions { display: flex; gap: 6px; }
+.lab-quote-actions button { min-height: 32px; }
+@media (hover: none) { .lab-quote-bar > p > small { display: none; } }
+.lab-quote-notice { display: flex; align-items: center; gap: 8px; margin: 0 0 6px; padding: 6px 10px; border-radius: 8px; background: var(--obs-surface); color: var(--obs-text-secondary); font-size: 13px; }
+.lab-quote-notice button { min-height: 28px; padding: 2px 8px; }
+.lab-quote-notice button:first-of-type { margin-left: auto; }
+.lab-quote-attachments { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 6px; padding: 0; list-style: none; }
+.lab-quote-attachments li { display: flex; align-items: center; gap: 6px; max-width: 100%; min-width: 0; padding: 2px 2px 2px 10px; border: 1px solid var(--obs-border); border-radius: 999px; background: var(--obs-surface); font-size: 12px; }
+.lab-quote-attachment-kicker { color: var(--obs-text-secondary); }
+.lab-quote-attachment-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
+.lab-quote-attachment-count { flex: none; color: var(--obs-text-secondary); }
+.lab-quote-attachments button { flex: none; min-width: 24px; min-height: 24px; padding: 0; border-color: transparent; border-radius: 999px; background: transparent; }

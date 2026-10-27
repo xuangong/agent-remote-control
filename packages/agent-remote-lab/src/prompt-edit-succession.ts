@@ -1,4 +1,4 @@
-import { isNativePrefixSelection } from '@orchardworks/agent-remote-protocol';
+import { isNativePrefixSelection, isSessionExcerpt, type SessionExcerpt } from '@orchardworks/agent-remote-protocol';
 import { releaseImageDraft, writeImageDraft, type ImageDraft, type ImageDraftBinding } from '@orchardworks/agent-remote-web/browser';
 import type { OpenedSession, SuccessionPrepareInput } from './directory-client.js';
 import { clearCacheOnClose, conversationSessionStorage } from './conversation-storage.js';
@@ -9,6 +9,8 @@ export interface PrefixEditIntent {
   baseline: { text: string; textRevision: number; imageRevision: number; imageParts: string };
   prompt: ImageDraftBinding; cancelRequested?: boolean; restored?: boolean;
   restoration?: { text: string; imageParts: string };
+  /** Quotes the edited prompt carried; they return to the composer with its text. */
+  excerpts?: SessionExcerpt[];
 }
 const storageKey = (scope: string, view: string) => `agent-remote:recovery:${scope}:prefix-edit:${view}`;
 const promptKey = (scope: string, view: string, operationId: string) => JSON.stringify([scope, 'prefix-edit-prompt', view, operationId]);
@@ -41,6 +43,7 @@ export function readPrefixEdit(scope: string, view: string): PrefixEditIntent | 
     || !Number.isSafeInteger(value.operation.expectedRevision) || value.operation.expectedRevision < 1
     || typeof value.baseline.text !== 'string' || typeof value.baseline.imageParts !== 'string'
     || value.restoration !== undefined && (typeof value.restoration?.text !== 'string' || typeof value.restoration?.imageParts !== 'string')
+    || value.excerpts !== undefined && (!Array.isArray(value.excerpts) || !value.excerpts.every(isSessionExcerpt))
     || ![value.baseline.textRevision, value.baseline.imageRevision].every(item => Number.isSafeInteger(item) && item >= 0)) {
     throw new Error('The original prompt edit could not be read. Its saved intent has been preserved.');
   }

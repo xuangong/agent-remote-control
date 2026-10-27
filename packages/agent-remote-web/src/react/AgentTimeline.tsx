@@ -25,6 +25,20 @@ import { useTimelineAction } from './useTimelineAction.js';
 
 export type AgentTimelineState = AgentReplicaState;
 
+/** Lets the user pick conversation messages, for example to quote them elsewhere. */
+export interface TimelineEntrySelection {
+  /** Keys of the selected entries; undefined until the user starts selecting. */
+  readonly selected?: ReadonlySet<string>;
+  /** Names what selecting is for, such as "Quote"; it labels the action that starts a selection. */
+  readonly label: string;
+  /** Selects or deselects entries, given by their entry keys. */
+  select(keys: readonly string[], selected: boolean): void;
+}
+/** Conversation messages and tool calls can be selected; other entries are not part of the conversation. */
+export function isSelectableTimelineItem(item: AgentReplicaState['timeline']['entries'][number]['item']): boolean {
+  return item.type === 'user_message' ? !item.withdrawn : item.type === 'assistant_message' || item.type === 'tool_call';
+}
+
 export interface AgentTimelineProps {
   readonly onDownloadResource?: DownloadResource;
   readonly searchEntryKey?: string;
@@ -53,6 +67,7 @@ export interface AgentTimelineProps {
   readonly questionDrafts?: Readonly<Record<string, QuestionDraft>>;
   readonly onQuestionDraftChange?: (requestId: string, draft: QuestionDraft) => void;
   readonly previewController?: PreviewController;
+  readonly entrySelection?: TimelineEntrySelection;
 }
 
 export function AgentTimeline({
@@ -83,6 +98,7 @@ export function AgentTimeline({
   onInspectEntry,
   inspectedEntryKey,
   inspectedRequestId,
+  entrySelection,
 }: AgentTimelineProps) {
   const inheritedPreviewController = usePreviewController();
   const previews = previewController ?? inheritedPreviewController;
@@ -117,6 +133,17 @@ export function AgentTimeline({
     });
   }, [contentOnly, lettersVisible, state.timeline.entries, state.timeline.epoch, searchEntryKey]);
   const renderModel = useMemo(() => createTimelineRenderModel(state.timeline.epoch, entries), [state.timeline.epoch, entries]);
+  // A range is taken over the entries shown, so hidden activity is never selected unseen.
+  const selectionAnchor = useRef<string>();
+  const selectedKeys = entrySelection?.selected;
+  if (!selectedKeys) selectionAnchor.current = undefined;
+  const selectEntry = useTimelineAction(scopeKey, entrySelection ? (key: string, extend: boolean) => {
+    const order = renderModel.filter(row => isSelectableTimelineItem(row.entry.item)).map(row => row.key);
+    const anchor = selectionAnchor.current, from = anchor === undefined ? -1 : order.indexOf(anchor), to = order.indexOf(key);
+    selectionAnchor.current = key;
+    if (extend && from >= 0 && to >= 0) entrySelection.select(order.slice(Math.min(from, to), Math.max(from, to) + 1), true);
+    else entrySelection.select([key], !selectedKeys?.has(key));
+  } : undefined);
   const rows = useMemo(() => {
     const result: Array<ReturnType<typeof groupRuntimeNotices>[number] | Extract<BackgroundRow, { type: 'background' }>> = [];
     let ordinary: TimelineRenderEntry[] = [];
@@ -133,6 +160,8 @@ export function AgentTimeline({
       searchSelected={key === searchEntryKey} messageGroup={messageGroup} contentOnly={contentOnly} agentId={state.agent?.id}
       scopeKey={scopeKey} resources={state.resources}
       onEditPrompt={editablePrompts.has(entry) ? editPrompt : undefined}
+      selection={selectEntry && isSelectableTimelineItem(entry.item) ? selectedKeys ? selectedKeys.has(key) ? 'selected' : 'unselected' : 'available' : undefined}
+      selectionLabel={entrySelection?.label} onSelect={selectEntry}
       onInspectEntry={!contentOnly ? inspectEntry : undefined} inspected={inspectedEntryKey === key}
       resolveSessionLink={entry.item.type === 'tool_call' ? resolveSessionLink : undefined}
       onResourceResolve={resolveResource} onResourceRequest={requestResource}

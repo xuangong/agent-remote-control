@@ -155,6 +155,25 @@ shows that Session. Reopening the same Side selects the existing attached Pane.
 If the source Pane closes or changes binding while opening, the delayed result
 cannot attach to its replacement.
 
+## Quote messages into another session view
+
+To give a session part of another session's conversation without letting it read
+that session, select the messages in the source view and quote them into a
+destination view. Choose **Quote messages** in the source's actions menu, or
+**Quote this message** on a message. Click messages or their checkboxes to add or
+remove them; Shift-click adds every message shown between two. The selection can
+span several turns, and the messages need not be adjacent.
+
+The bar above the source's composer locates the destination: first its **Window**,
+then a **Session view** of that Window, listed by session title and placement
+(Main, Docked, Floating or Side). The current Window also offers
+**New session in this workspace**. **Quote** attaches the messages to the
+destination's composer as a chip; nothing is sent yet. A destination in the
+current Window is selected at once; for another Window, choose **Open** in the
+notice. The next message sent from the destination carries the quote once, after
+the user's text. The destination's agent receives a copy of the selected messages
+only, with no access to the source session.
+
 ## Deployment and upgrades
 
 The website and Relay implement the shared Window service. Existing Controllers

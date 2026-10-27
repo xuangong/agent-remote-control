@@ -950,3 +950,90 @@ test('a session the Host no longer has shows as an empty view, without reopening
     expect(errors).toEqual([]);
   } finally { await fixture.close(); }
 });
+
+test('quotes messages of several turns from one session view into another, whose next message carries them once', async ({ page, context }) => {
+  const fixture = await sessionLinkFixture({ automaticSignIn: true });
+  const errors: string[] = [];
+  page.on('pageerror', error => errors.push(error.message));
+  try {
+    await page.setViewportSize({ width: 1680, height: 1000 });
+    await page.goto(fixture.url);
+    await page.getByRole('link', { name: 'Sign in', exact: true }).click();
+    await page.getByLabel('Connected Host').selectOption(fixture.hostId);
+    await showNewSession(page); await page.getByTestId('session-create').click();
+    await expect(page.locator('.lab-primary-group[data-selected="true"]').getByTestId('prompt-input')).toBeEnabled();
+    const panel = await openWindows(page);
+    const windowId = (await panel.locator('[data-window-id][aria-current="true"]').getAttribute('data-window-id'))!;
+    await panel.getByRole('button', { name: 'Close Windows', exact: true }).click();
+    const access = await (await context.request.get(fixture.url + '/auth/status')).json();
+    const endpoint = `${fixture.url}${access.basePath}v1/windows/${windowId}`;
+    const inspect = async (): Promise<WorkspaceWindow> => (await (await context.request.get(endpoint)).json()).window;
+    const primary = (await inspect()).views.find(view => view.placement === 'primary')!;
+    const source = page.locator(`.lab-primary-group[data-primary-group-id="${primary.id}"]`);
+    for (const text of ['First question', 'Second question']) {
+      await source.getByTestId('prompt-input').fill(text);
+      await source.getByTestId('prompt-input').press('Enter');
+      await expect(source.locator('.agent-message-assistant').last()).toContainText(`Recorded reply: ${text}`);
+    }
+    await page.locator('.lab-session-dock-add').click();
+    const dockId = (await inspect()).views.find(view => view.placement === 'dock')!.id;
+    await page.locator(`[data-dock-id="${dockId}"]`).click();
+    await showNewSession(page); await page.getByTestId('session-create').click();
+    await expect.poll(async () => (await inspect()).views.find(view => view.id === dockId)?.binding?.nativeSessionId).not.toBeUndefined();
+    const dock = page.locator(`.lab-bindable-session-window[data-view-id="${dockId}"]`);
+    await expect(dock.getByTestId('prompt-input')).toBeEnabled();
+
+    const entry = (role: 'user' | 'assistant', text: string) => source.locator('.agent-timeline-entry').filter({ has: page.locator(`.agent-message-${role}`) }).filter({ hasText: text });
+    await source.getByRole('button', { name: 'More session actions', exact: true }).click();
+    await page.getByRole('button', { name: 'Quote messages', exact: true }).click();
+    const bar = source.locator('.lab-quote-bar');
+    await expect(bar.getByRole('status')).toContainText('Select the messages to quote');
+    // Two turns by range, then one message taken out: the excerpt keeps two separate parts.
+    await entry('user', 'First question').locator('.agent-message-user').click();
+    await entry('assistant', 'Recorded reply: Second question').locator('.agent-message-assistant').click({ modifiers: ['Shift'] });
+    await expect(bar.getByRole('status')).toContainText('4 messages selected');
+    await entry('assistant', 'Recorded reply: First question').getByRole('checkbox').click();
+    await expect(bar.getByRole('status')).toContainText('3 messages selected');
+    await expect(entry('assistant', 'Recorded reply: First question').getByRole('checkbox')).toHaveAttribute('aria-checked', 'false');
+    await expect(bar.getByLabel('Window')).toHaveValue(windowId);
+    await expect(bar.getByLabel('Session view').locator('option')).toHaveText(['New session · Docked', 'New session in this workspace']);
+    await page.screenshot({ path: test.info().outputPath('quote-selection.png') });
+    await bar.getByRole('button', { name: 'Quote', exact: true }).click();
+    await expect(bar).toHaveCount(0);
+    await expect(source.locator('[data-selecting]')).toHaveCount(0);
+    const chip = dock.locator('.lab-quote-attachments li');
+    await expect(chip).toHaveText(/^QuoteNew session3 messages×$/);
+    await expect(dock.getByTestId('prompt-input')).toBeFocused();
+    await expect.poll(async () => (await inspect()).selectedViewId).toBe(dockId);
+
+    await dock.getByTestId('prompt-input').fill('Compare these answers.');
+    await page.screenshot({ path: test.info().outputPath('quote-attached.png') });
+    await dock.getByTestId('prompt-input').press('Enter');
+    const sent = dock.locator('.agent-message-user').last();
+    await expect(sent.locator('.agent-markdown')).toHaveText('Compare these answers.');
+    await expect(sent.locator('summary')).toHaveText('QuotedNew session3 messages in 2 parts');
+    await expect(chip).toHaveCount(0);
+    // The agent received the copy with the message.
+    await expect(dock.locator('.agent-message-assistant').last()).toContainText('Recorded reply: Compare these answers.');
+    await expect(dock.locator('.agent-message-assistant').last()).toContainText('Second question');
+    await sent.locator('summary').click();
+    await expect(sent.locator('.agent-session-excerpt-text')).toHaveText(['First question', 'Second question', 'Recorded reply: Second question']);
+    await page.screenshot({ path: test.info().outputPath('quote-sent.png') });
+    await dock.getByTestId('prompt-input').fill('Without quotes');
+    await dock.getByTestId('prompt-input').press('Enter');
+    await expect(dock.locator('.agent-message-assistant .agent-markdown').last()).toHaveText('Recorded reply: Without quotes');
+
+    // The selection bar fits a phone.
+    await page.setViewportSize({ width: 390, height: 844 });
+    await expect(dock.getByTestId('prompt-input')).toBeEnabled();
+    await dock.getByRole('button', { name: 'Expand session actions', exact: true }).click();
+    await dock.getByRole('button', { name: 'Quote messages', exact: true }).click();
+    const narrow = dock.locator('.lab-quote-bar');
+    await expect(narrow.getByLabel('Session view').locator('option')).toHaveText(['New session · Main', 'New session in this workspace']);
+    await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
+    await page.screenshot({ path: test.info().outputPath('quote-selection-narrow.png') });
+    await narrow.getByRole('button', { name: 'Cancel', exact: true }).click();
+    await expect(narrow).toHaveCount(0);
+    expect(errors).toEqual([]);
+  } finally { await fixture.close(); }
+});

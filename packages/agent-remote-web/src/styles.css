@@ -1013,3 +1013,32 @@ body:has(.agent-image-preview[open]) { overflow: hidden; }
   .agent-session-attributions { --agent-attribution-line-height: 28px; }
 }
 @media (prefers-reduced-motion: reduce) { .agent-session-attributions-toggle > svg { transition: none; } }
+
+/* Selecting messages, for example to quote them in another session. */
+.agent-select-entry { display: grid; place-items: center; flex: none; width: 26px; height: 26px; padding: 0; border: 1px solid var(--agent-rule); border-radius: 5px; background: var(--agent-panel-raised); color: var(--agent-muted); cursor: pointer; }
+.agent-select-entry:hover, .agent-select-entry:focus-visible { color: var(--agent-ink); }
+.agent-select-entry:focus-visible { outline: 2px solid currentColor; outline-offset: 2px; }
+@media (hover: none) { .agent-select-entry { display: none; } }
+.agent-timeline-entry[data-selecting] { cursor: pointer; }
+.agent-timeline-entry[data-selecting] > .agent-entry-content { padding-left: 32px; }
+.agent-timeline-entry[data-selected] { background: color-mix(in oklab, var(--agent-signal) 9%, transparent); }
+.agent-entry-checkbox { position: absolute; top: 14px; left: 8px; z-index: 2; box-sizing: border-box; width: 18px; height: 18px; min-height: 0; padding: 0; border: 1.5px solid var(--agent-muted); border-radius: 4px; background: var(--agent-panel); cursor: pointer; }
+.agent-entry-checkbox[aria-checked="true"] { border-color: var(--agent-signal); background: var(--agent-signal); }
+.agent-entry-checkbox[aria-checked="true"]::after { content: ""; position: absolute; left: 4.5px; top: 1px; width: 5px; height: 9px; border: solid var(--agent-panel); border-width: 0 2px 2px 0; transform: rotate(45deg); }
+.agent-entry-checkbox:focus-visible { outline: 2px solid var(--agent-signal); outline-offset: 2px; }
+@media (pointer: coarse) { .agent-entry-checkbox { width: 22px; height: 22px; } .agent-entry-checkbox[aria-checked="true"]::after { left: 6px; top: 2px; } }
+
+/* Excerpts quoted from other sessions read as attachments of a message. */
+.agent-session-excerpts { display: flex; flex-direction: column; gap: 6px; margin: 8px 0 0; padding: 0; list-style: none; }
+.agent-session-excerpt { border: 1px solid var(--agent-rule); border-radius: 8px; background: var(--agent-panel); font-size: 13px; }
+.agent-session-excerpt > summary { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 8px; padding: 6px 10px; cursor: pointer; list-style-position: inside; }
+.agent-session-excerpt-kicker { color: var(--agent-muted); font-size: 11px; text-transform: uppercase; letter-spacing: .04em; }
+.agent-session-excerpt-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
+.agent-session-excerpt-count { color: var(--agent-muted); font-size: 12px; }
+.agent-session-excerpt-body { display: flex; flex-direction: column; gap: 8px; max-height: 360px; overflow: auto; padding: 4px 10px 10px; border-top: 1px solid var(--agent-rule); }
+.agent-session-excerpt-open { align-self: flex-start; padding: 2px 6px; min-height: 28px; font-size: 12px; }
+.agent-session-excerpt-segment { display: flex; flex-direction: column; gap: 6px; margin: 0; padding: 0; list-style: none; }
+.agent-session-excerpt-segment + .agent-session-excerpt-segment { padding-top: 8px; border-top: 1px dashed var(--agent-rule); }
+.agent-session-excerpt-segment > li { display: flex; flex-direction: column; gap: 2px; }
+.agent-session-excerpt-role { color: var(--agent-muted); font-size: 11px; }
+.agent-session-excerpt-text { white-space: pre-wrap; overflow-wrap: anywhere; }

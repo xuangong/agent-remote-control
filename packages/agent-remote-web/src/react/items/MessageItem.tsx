@@ -9,6 +9,7 @@ import { MarkdownContent } from '../MarkdownContent.js';
 import { CommunicationContent } from '../CommunicationContent.js';
 import type { MessageGroupPosition } from '../timeline-render-model.js';
 import type { MarkdownResourceContext } from '../markdown-resources.js';
+import { SessionExcerptList, withoutSessionExcerpts } from '../SessionExcerpts.js';
 
 type Message = Extract<AgentTimelineItem, { type: 'user_message' | 'assistant_message' }>;
 
@@ -32,8 +33,10 @@ export function MessageItem({ item }: { readonly item: Message }) {
     : <AssistantMessageItem item={item} />;
 }
 
-function MessageBubble({ item, messageGroup = 'single', resourceContext }: MessageItemProps<Message>) {
-  const user = item.type === 'user_message';
+function MessageBubble({ item: message, messageGroup = 'single', resourceContext }: MessageItemProps<Message>) {
+  const user = message.type === 'user_message';
+  // Quoted excerpts travel at the end of the user's text; they read as attachments of the message.
+  const { item, excerpts } = message.type === 'user_message' ? withoutSessionExcerpts(message) : { item: message, excerpts: [] };
   const withdrawn = item.type === 'user_message' && item.withdrawn !== undefined;
   return <article
     className={`agent-timeline-item agent-message agent-message-${user ? 'user' : 'assistant'} agent-message-group-${messageGroup}${withdrawn ? ' agent-message-withdrawn' : ''}`}
@@ -48,7 +51,8 @@ function MessageBubble({ item, messageGroup = 'single', resourceContext }: Messa
         ? <Fragment key={index}><span className="agent-message-part-space">{part.text.match(/^\s*/)?.[0]}</span>{part.text.trim() ? <MarkdownContent markdown={part.text} className="agent-message-text-part" resourceContext={resourceContext} /> : null}<span className="agent-message-part-space">{part.text.trim() ? part.text.match(/\s*$/)?.[0] : null}</span></Fragment>
         : part.type === 'resource' ? <ResourceDownload key={index} resourceId={part.locator.replace(/^input-resource:/, '')} label={part.label} name={part.name} byteLength={part.byteLength} sha256={part.sha256} />
         : <MessageImageTag key={index} label={part.label} locator={part.locator} context={resourceContext} />)}</div>
-      : <MarkdownContent markdown={item.text} resourceContext={resourceContext} />}
+      : item.text || !excerpts.length ? <MarkdownContent markdown={item.text} resourceContext={resourceContext} /> : null}
+    <SessionExcerptList excerpts={excerpts} />
     {withdrawn ? <WithdrawnNote text={item.text} /> : null}
   </article>;
 }

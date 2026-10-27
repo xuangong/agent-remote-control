@@ -25,19 +25,24 @@ interface ConversationEntryProps extends Pick<AgentTimelineProps, 'onEditPrompt'
   searchSelected?: boolean;
   previews?: PreviewController;
   extension?: ReactNode;
+  /** available: a selection can start here; selected or unselected while one is in progress. */
+  selection?: 'available' | 'selected' | 'unselected';
+  selectionLabel?: string;
+  onSelect?(entryKey: string, extend: boolean): void;
 }
 
 // Unchanged history stays mounted without rebuilding its controls on every delta.
 export const ConversationEntry = memo(function ConversationEntry({ entry, entryKey, messageGroup, contentOnly, agentId,
   scopeKey, resources, onEditPrompt, onInspectEntry, inspected, searchSelected, resolveSessionLink, onResourceResolve, onResourceRequest,
-  previews, extension, noticeExpanded, noticeCount, onToggleNotice, noticeDetailsId, noticeControls }: ConversationEntryProps) {
+  previews, extension, noticeExpanded, noticeCount, onToggleNotice, noticeDetailsId, noticeControls, selection, selectionLabel, onSelect }: ConversationEntryProps) {
   const collapsed = noticeExpanded === false;
   const attachments = useMemo(() => messageResources(entry.item, entry.resources, contentOnly),
     [entry.item, entry.resources, contentOnly]);
   return <TimelineSearchReveal.Provider value={!!searchSelected}><TimelineEntry entryKey={entryKey}
     onEdit={onEditPrompt && !entry.item.background && entry.item.type === 'user_message' && !entry.item.withdrawn && entry.item.messageId && entry.turnId ? () => onEditPrompt(entry) : undefined}
     timestamp={entry.timestamp} sent={entry.item.type === 'user_message'} sequence={entry.seqStart}
-    inspected={inspected || !!searchSelected} inspect={!contentOnly && onInspectEntry ? () => onInspectEntry(entryKey) : undefined}>
+    inspected={inspected || !!searchSelected} inspect={!contentOnly && onInspectEntry ? () => onInspectEntry(entryKey) : undefined}
+    selection={selection} selectionLabel={selectionLabel} onSelect={onSelect ? extend => onSelect(entryKey, extend) : undefined}>
     {entry.item.type === 'error' && noticeExpanded !== undefined && noticeDetailsId !== undefined
       ? <RuntimeNoticeItem item={entry.item} expanded={noticeExpanded} count={noticeCount} toggle={onToggleNotice}
           detailsId={noticeDetailsId} controls={noticeControls} />

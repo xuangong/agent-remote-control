@@ -4,10 +4,11 @@ import { createHash, webcrypto } from 'node:crypto';
 import { act, StrictMode, useContext, useState, type ComponentProps } from 'react';
 import { WebSocket, WebSocketServer } from 'ws';
 import { afterEach, expect, it, vi } from 'vitest';
-import { PROTOCOL_VERSION, applyWindowOperation, createWindowView, type WindowMutation, type WorkspaceWindow, type AgentChildSession, type ProjectedTimelineEntry, type SessionSuccessionReplay, type Team } from '@orchardworks/agent-remote-protocol';
+import { PROTOCOL_VERSION, applyWindowOperation, createWindowView, splitSessionExcerpts, type WindowMutation, type WorkspaceWindow, type AgentChildSession, type ProjectedTimelineEntry, type SessionSuccessionReplay, type Team } from '@orchardworks/agent-remote-protocol';
 import { configureImageDraftPersistence, inspectImageDraft, readImageDraft, writeImageDraft } from '@orchardworks/agent-remote-web/browser';
 import { HttpWebSocketTransport } from '@orchardworks/agent-remote-web';
 import { createWindowFeature } from './window-feature-views.js';
+import { readQuotes } from './session-quotes.js';
 import { RemoteTeamClient } from '@orchardworks/agent-remote-web/headless';
 import { CommunicationNavigationContext, type CommunicationNavigation } from '@orchardworks/agent-remote-web/react';
 import { App, type LabTransport } from './App.js';
@@ -55,12 +56,13 @@ function committed(from = 'A', to = 'B', revision = 2, roleId = 'primary', provi
       receipt: { ...request, to: native(to, providerId), phase: 'committed', committedRevision: revision, startedAt: 'now', updatedAt: 'now',
         prepared: { ...request, to: native(to, providerId), workspace, associationRevision: 1, participants: [], capture: { epoch: 'epoch', seq: 1, capturedAt: 'now' } } } } };
 }
-async function failureFixture(advanceDuringRecovery = false, nativeIdentity?: string | null, strict = false, flags = '', setup?: { hostService?: ComponentProps<typeof App>['hostService']; beforeWindowMutation?(mutation: WindowMutation): Promise<void>; windowDocument?: WorkspaceWindow; persistPrompt?: boolean; successionCommit?(): SuccessionActionResult; successionPrepare?(body: Record<string, unknown>): Promise<SuccessionActionResult>; teams?(): Team[]; chain?: SessionSuccessionReplay[]; replayFailure?: string; selected?: string; providerId?: string; userScoped?: boolean; favorites?: FavoritesSnapshot; liveActivity?: boolean; holdRelationsInitially?: boolean; holdReplayInitially?: boolean; holdTimelineInitially?: boolean; holdSnapshotInitially?: boolean; holdAccessInitially?: boolean; nativeConnection?: 'connected' | 'restoring'; preserveNativeState?: boolean; children?: AgentChildSession[]; timeline?: ProjectedTimelineEntry[]; nativeStatus?: 'idle' | 'running'; successionDescription?: SuccessionDescription; successionStatus?(): SuccessionActionResult; attachmentFailure?(body: Record<string, unknown>): { status: number; payload: unknown } | undefined; seed?(scope: string, source: OpenedSession): void | Promise<void> }) {
+async function failureFixture(advanceDuringRecovery = false, nativeIdentity?: string | null, strict = false, flags = '', setup?: { otherWindows?: WorkspaceWindow[]; hostService?: ComponentProps<typeof App>['hostService']; beforeWindowMutation?(mutation: WindowMutation): Promise<void>; windowDocument?: WorkspaceWindow; persistPrompt?: boolean; successionCommit?(): SuccessionActionResult; successionPrepare?(body: Record<string, unknown>): Promise<SuccessionActionResult>; teams?(): Team[]; chain?: SessionSuccessionReplay[]; replayFailure?: string; selected?: string; providerId?: string; userScoped?: boolean; favorites?: FavoritesSnapshot; liveActivity?: boolean; holdRelationsInitially?: boolean; holdReplayInitially?: boolean; holdTimelineInitially?: boolean; holdSnapshotInitially?: boolean; holdAccessInitially?: boolean; nativeConnection?: 'connected' | 'restoring'; preserveNativeState?: boolean; children?: AgentChildSession[]; timeline?: ProjectedTimelineEntry[]; nativeStatus?: 'idle' | 'running'; successionDescription?: SuccessionDescription; successionStatus?(): SuccessionActionResult; attachmentFailure?(body: Record<string, unknown>): { status: number; payload: unknown } | undefined; seed?(scope: string, source: OpenedSession): void | Promise<void> }) {
   configureImageDraftPersistence(() => setup?.persistPrompt === true);
   const requests: Array<{ url: string; body?: Record<string, unknown> }> = [];
   const hostedWindows = new Map<string, WorkspaceWindow>();
   const windowReceipts = new Map<string, unknown>();
   if (setup?.windowDocument) hostedWindows.set(setup.windowDocument.id, setup.windowDocument);
+  for (const other of setup?.otherWindows ?? []) hostedWindows.set(other.id, other);
   const providerId = setup?.providerId ?? 'recorded';
   const nativeBindings = new Map<string, string>();
   const nativeFor = (agentId: string) => [...nativeBindings].find(([, binding]) => binding === agentId)?.[0] ?? agentId.slice('agent-'.length);
@@ -3023,6 +3025,82 @@ it.each([false, true])('offers Side and Handoff in a Team member view, keeping t
   await act(async () => { await member!.onExecuteConsoleCommand!('console:handoff', 'claude'); });
   await settleApp(() => expect(f.requests.find(request => request.url.endsWith('/succession/describe'))?.body).toEqual({ providerId: 'recorded', nativeSessionId: current }));
   expect(f.requests.some(request => request.url.endsWith('/succession/prepare'))).toBe(false);
+});
+
+it('quotes messages of several turns selected in one session view into another view, which sends them with its next message', async () => {
+  vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} });
+  const real = workbenchComponents.LabWorkbench;
+  const views = new Map<string, ComponentProps<typeof real>>();
+  vi.spyOn(workbenchComponents, 'LabWorkbench').mockImplementation(props => { if (props.state?.agent && props.sessionIdentity) views.set(props.sessionIdentity.nativeSessionId, props); return real(props); });
+  const binding = (id: string) => ({ hostId: 'host', providerId: 'recorded', nativeSessionId: id, title: `Session ${id}` });
+  const row = (seq: number, type: 'user_message' | 'assistant_message', text: string) => ({ providerId: 'recorded', seqStart: seq, seqEnd: seq, timestamp: 'now', turnId: `turn-${Math.ceil(seq / 2)}`,
+    resources: [], collapsed: [], sourceSeqRanges: [{ startSeq: seq, endSeq: seq }], item: { type, text } }) as ProjectedTimelineEntry;
+  const timeline = [row(1, 'user_message', 'First prompt'), row(2, 'assistant_message', 'First reply'), row(3, 'user_message', 'Second prompt'), row(4, 'assistant_message', 'Second reply'), row(5, 'user_message', 'Third prompt')];
+  const document: WorkspaceWindow = { schemaVersion: 3, id: 'quotes', title: 'Quotes', revision: 0, selectedPrimaryViewId: 'primary-A', selectedViewId: 'primary-A',
+    views: [createWindowView('primary-A', binding('A'), 'primary'), createWindowView('dock-Q', binding('Q'), 'dock')] };
+  const setup = { chain: [] as SessionSuccessionReplay[], userScoped: true, windowDocument: document, timeline };
+  const f = await failureFixture(false, 'A', false, `&window=${document.id}`, setup);
+  const source = () => f.view.querySelector<HTMLElement>('[data-primary-group-id="primary-A"]')!;
+  const entry = (text: string) => [...source().querySelectorAll<HTMLElement>('.agent-timeline-entry')].find(node => node.textContent?.includes(text))!;
+  await settleApp(() => { expect(views.get('Q')?.sessionStatus).toBe('ready'); expect(entry('Third prompt')).toBeDefined(); });
+  await act(async () => entry('First prompt').querySelector<HTMLButtonElement>('[aria-label="Quote this message"]')!.click());
+  await act(async () => entry('Second prompt').dispatchEvent(new MouseEvent('click', { bubbles: true, shiftKey: true })));
+  // Messages outside one range: unselected messages between selected ones separate the excerpt's parts.
+  await act(async () => entry('Third prompt').querySelector<HTMLButtonElement>('[role="checkbox"]')!.click());
+  await act(async () => entry('First reply').querySelector<HTMLButtonElement>('[role="checkbox"]')!.click());
+  const bar = () => source().querySelector<HTMLElement>('.lab-quote-bar');
+  expect(bar()?.querySelector('[role="status"]')?.textContent).toContain('3 messages selected');
+  expect([...bar()!.querySelectorAll<HTMLSelectElement>('select')[1]!.options].map(option => option.textContent)).toEqual(['Session Q · Docked', 'New session in this workspace']);
+  await act(async () => [...bar()!.querySelectorAll('button')].find(button => button.textContent === 'Quote')!.click());
+  await settleApp(() => expect(bar()).toBeNull());
+  const chips = () => [...f.view.querySelectorAll('[data-view-id="dock-Q"] .lab-quote-attachments li')];
+  await settleApp(() => expect(chips().map(chip => chip.textContent)).toEqual([`Quote${source().querySelector('.agent-session-title')!.textContent}3 messages×`]));
+  expect(setup.windowDocument.selectedViewId).toBe('dock-Q');
+  await act(async () => { await views.get('Q')!.actions!.sendMessage!('Compare these.'); });
+  const sent = f.frames.filter(frame => frame.message?.type === 'send_message').map(frame => ({ agentId: frame.agentId, text: String(frame.message!.payload!.text) }));
+  expect(sent).toHaveLength(1);
+  const quoted = splitSessionExcerpts(sent[0]!.text);
+  expect(quoted.text).toBe('Compare these.');
+  expect(quoted.excerpts[0]).toMatchObject({ source: { hostId: 'host', providerId: 'recorded', nativeSessionId: 'A' },
+    segments: [[{ role: 'user', text: 'First prompt' }], [{ role: 'user', text: 'Second prompt' }], [{ role: 'user', text: 'Third prompt' }]] });
+  await settleApp(() => expect(chips()).toEqual([]));
+});
+
+it.each(['other Window', 'new session'] as const)('quotes into a session view of the %s', async destination => {
+  vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} });
+  const binding = (id: string) => ({ hostId: 'host', providerId: 'recorded', nativeSessionId: id, title: `Session ${id}` });
+  const timeline = [{ providerId: 'recorded', seqStart: 1, seqEnd: 1, timestamp: 'now', turnId: 'turn', resources: [], collapsed: [], sourceSeqRanges: [{ startSeq: 1, endSeq: 1 }],
+    item: { type: 'assistant_message', text: 'Worth quoting' } }] as ProjectedTimelineEntry[];
+  const document: WorkspaceWindow = { schemaVersion: 3, id: 'quotes', title: 'Quotes', revision: 0, selectedPrimaryViewId: 'primary-A', selectedViewId: 'primary-A',
+    views: [createWindowView('primary-A', binding('A'), 'primary')] };
+  const other: WorkspaceWindow = { schemaVersion: 3, id: 'other', title: 'Other work', revision: 0, selectedPrimaryViewId: 'primary-R', selectedViewId: 'primary-R',
+    views: [createWindowView('primary-R', binding('R'), 'primary')] };
+  const setup = { chain: [] as SessionSuccessionReplay[], userScoped: true, windowDocument: document, otherWindows: [other], timeline };
+  const f = await failureFixture(false, 'A', false, `&window=${document.id}`, setup);
+  const source = () => f.view.querySelector<HTMLElement>('[data-primary-group-id="primary-A"]')!;
+  const quote = () => source().querySelector<HTMLButtonElement>('[aria-label="Quote this message"]');
+  await settleApp(() => expect(quote()).not.toBeNull());
+  await act(async () => quote()!.click());
+  const selects = () => source().querySelectorAll<HTMLSelectElement>('.lab-quote-bar select');
+  await settleApp(() => expect([...selects()[0]!.options].map(option => option.textContent)).toEqual(['Quotes (this Window)', 'Other work']));
+  // This Window has no other view, so only a new session can receive the quote here.
+  expect([...selects()[1]!.options].map(option => option.textContent)).toEqual(['New session in this workspace']);
+  if (destination === 'other Window') {
+    await act(async () => { selects()[0]!.value = 'other'; selects()[0]!.dispatchEvent(new Event('change', { bubbles: true })); });
+    expect([...selects()[1]!.options].map(option => option.textContent)).toEqual(['Session R · Main']);
+  }
+  await act(async () => [...source().querySelectorAll<HTMLButtonElement>('.lab-quote-bar button')].find(button => button.textContent === 'Quote')!.click());
+  if (destination === 'other Window') {
+    await settleApp(() => expect(source().querySelector('.lab-quote-notice')?.textContent).toContain('Quoted into “Session R” in Window “Other work”.'));
+    expect(readQuotes(f.scope, 'primary-R').map(excerpt => excerpt.segments)).toEqual([[[{ role: 'assistant', text: 'Worth quoting' }]]]);
+    expect(f.requests.some(request => request.url.endsWith('/create'))).toBe(false);
+  } else {
+    await settleApp(() => expect(setup.windowDocument.views.find(view => view.binding?.nativeSessionId === 'S')?.placement).toBe('dock'));
+    expect(f.requests.find(request => request.url.endsWith('/create'))?.body).toMatchObject({ providerId: 'recorded' });
+    const created = setup.windowDocument.views.find(view => view.binding?.nativeSessionId === 'S')!;
+    expect(readQuotes(f.scope, created.id)).toHaveLength(1);
+    await settleApp(() => expect(f.view.querySelector(`[data-view-id="${created.id}"] .lab-quote-attachments li`)).not.toBeNull());
+  }
 });
 
 it('selects a managed Team view directly for pointer and focus without first selecting primary', async () => {

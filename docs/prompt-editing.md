@@ -2,7 +2,7 @@
 
 The hosted workbench follows the installed Codex app-server's verified Esc behavior. Codex 0.155.1 creates a native branch before the selected turn; editing the first prompt starts an empty thread. The original thread remains unchanged. This implementation rejects unverified native versions instead of guessing between fork, rollback, and revert.
 
-User messages expose an edit action on desktop and beside the swipe-revealed timestamp on mobile. The initiating browser restores the selected text and ordered image tags into the new composer without sending. Missing images, unsupported native input bindings, review prompts, native child sessions, side/Ask references, active turns, and mid-turn steers cannot be edited through this action.
+User messages expose an edit action on desktop and beside the swipe-revealed timestamp on mobile. The initiating browser restores the selected text and ordered image tags into the new composer without sending. Messages quoted from another session that the prompt carried return as quotes in the composer of a view that receives quotes, and otherwise stay in its text. Missing images, unsupported native input bindings, review prompts, native child sessions, side/Ask references, active turns, and mid-turn steers cannot be edited through this action.
 
 ## Account and device behavior
 

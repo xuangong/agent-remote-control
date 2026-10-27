@@ -389,3 +389,28 @@ A hardware keyboard's shortcut bar reduces the viewport by less than the 100 px
 occlusion threshold, so the shell keeps its CSS height; without the reveal, the
 bar can cover the bottom of the composer. Browser tests cover the refocus and
 editing after a tap; only a device recording can confirm the absent pan.
+
+### First keyboard after the change
+
+The 2026-10-27 recording after deployment (Settings detour to start recording, then
+two openings) shows the reveal pan remaining on the first opening only: 397 px,
+as before. The second opening keeps `offsetTop` at 0 and the shell resizes once
+to 415 px. The first focus came from a button that took focus when Settings closed;
+the second came from no focused element. Both went through `focusin`, so the
+refocus ran each time.
+
+WebKit's source shows no difference that JavaScript can observe between these
+cases. Two paths remain candidates. A later focus of the same element during the
+tap could replace the request before WebKit sends it. A first keyboard
+presentation could also reveal through a path not gated by `preventScroll`, such
+as `-[WKWebView _scrollToAndRevealSelectionIfNeeded]` when the keyboard frame changes
+while shown.
+
+The tap's click is the last script before `completeSyntheticClick` flushes the
+pending focus update, so the hook also refocuses there while the keyboard is
+closed. This covers the first candidate and a field that kept focus without the
+keyboard, which gets no `focusin`. Diagnostics now record element `focus` events,
+`document.hasFocus()` and each refocus (`refocus-focusin`, `refocus-click`), so a
+recording of the first opening shows whether a pan follows the requests.
+JavaScript cannot interrupt a pan WebKit starts: `window.scrollTo` requests a
+position update that does not stop the scroll view's animation.

@@ -264,3 +264,19 @@ it('does not refocus for a fine pointer', async () => {
   textarea.focus();
   expect(refocused(textarea, focus)).toBe(false);
 });
+
+it('asks again when a tap reaches a focused field while the keyboard is closed, but not while it is open', async () => {
+  const shell = await mount();
+  const textarea = shell.querySelector('textarea')!;
+  textarea.focus();
+  const focus = vi.spyOn(HTMLElement.prototype, 'focus');
+  textarea.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+  expect(refocused(textarea, focus)).toBe(true);
+  focus.mockClear();
+  viewport.height = 400;
+  viewport.dispatchEvent(new Event('resize'));
+  await advance(32);
+  expect(shell.dataset.viewportOccluded).toBe('true');
+  textarea.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+  expect(refocused(textarea, focus)).toBe(false);
+});

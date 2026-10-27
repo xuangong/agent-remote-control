@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
-import { clearLayoutDiagnostics, exportLayoutDiagnostics, getLayoutDiagnosticsStatus, startLayoutDiagnostics, stopLayoutDiagnostics } from './layout-diagnostics.js';
+import { clearLayoutDiagnostics, exportLayoutDiagnostics, getLayoutDiagnosticsStatus, recordKeyboardRefocus, startLayoutDiagnostics, stopLayoutDiagnostics } from './layout-diagnostics.js';
 
 function readReport() {
   const report = JSON.parse(exportLayoutDiagnostics());
@@ -82,4 +82,15 @@ it('stops frame sampling after settling and while hidden, then captures restorat
   expect(readReport().samples.at(-1).reason).toBe('visibilitychange');
   window.dispatchEvent(new Event('pagehide'));
   expect(getLayoutDiagnosticsStatus().recording).toBe(false);
+});
+
+it('records element focus and the shell asking the browser not to scroll', () => {
+  startLayoutDiagnostics();
+  document.querySelector('textarea')!.focus();
+  recordKeyboardRefocus('focusin');
+  stopLayoutDiagnostics();
+  const reasons = readReport().samples.map((sample: any) => sample.reason);
+  expect(reasons).toEqual(expect.arrayContaining(['focus', 'focusin', 'refocus-focusin']));
+  expect(readReport().samples.at(-1).pageFocused).toEqual(expect.any(Boolean));
+  expect(exportLayoutDiagnostics()).not.toContain('private');
 });

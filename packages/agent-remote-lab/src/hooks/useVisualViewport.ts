@@ -1,5 +1,5 @@
 import { useEffect, useRef } from 'react';
-import { getLayoutDiagnosticsStatus, recordViewportDecision } from '../layout-diagnostics.js';
+import { getLayoutDiagnosticsStatus, recordKeyboardRefocus, recordViewportDecision } from '../layout-diagnostics.js';
 
 const editable = 'input, textarea, [contenteditable="true"], [contenteditable="plaintext-only"]';
 
@@ -85,6 +85,16 @@ export function useVisualViewport(onUpdate?: () => void) {
       if (!coarsePointer.matches || !(target instanceof HTMLElement) || !target.matches(editable) || !shell.contains(target)) return;
       if (relatedTarget instanceof Element && relatedTarget.matches(editable)) return;
       target.focus({ preventScroll: true });
+      recordKeyboardRefocus('focusin');
+    };
+    // The click of a tap is the last script before WebKit sends the tap's focus to present the
+    // keyboard. Refocus there too: a field that kept focus without the keyboard, as after
+    // returning to the app, gets no focusin, and no later focus of the tap replaces the request.
+    const keepPageOnTap = (event: MouseEvent) => {
+      const field = event.target instanceof Element ? event.target.closest(editable) : null;
+      if (occluded || !coarsePointer.matches || !(field instanceof HTMLElement) || field !== document.activeElement || !shell.contains(field)) return;
+      field.focus({ preventScroll: true });
+      recordKeyboardRefocus('click');
     };
     settle();
     viewport.addEventListener('resize', settle);
@@ -95,6 +105,7 @@ export function useVisualViewport(onUpdate?: () => void) {
     window.addEventListener('focus', settle);
     window.addEventListener('orientationchange', reorient);
     document.addEventListener('focusin', keepPage);
+    document.addEventListener('click', keepPageOnTap, true);
     document.addEventListener('focusin', settle);
     document.addEventListener('focusout', settle);
     document.addEventListener('visibilitychange', settle);
@@ -109,6 +120,7 @@ export function useVisualViewport(onUpdate?: () => void) {
       window.removeEventListener('focus', settle);
       window.removeEventListener('orientationchange', reorient);
       document.removeEventListener('focusin', keepPage);
+      document.removeEventListener('click', keepPageOnTap, true);
       document.removeEventListener('focusin', settle);
       document.removeEventListener('focusout', settle);
       document.removeEventListener('visibilitychange', settle);

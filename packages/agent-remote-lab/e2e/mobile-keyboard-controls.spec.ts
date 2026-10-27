@@ -130,12 +130,18 @@ test('a tap that opens the keyboard asks the browser not to pan the page and kee
   await expect(input).toBeEnabled();
   await input.fill('Keep this draft');
   await input.blur();
-  await page.evaluate(() => { (window as unknown as { refocused: string[] }).refocused.length = 0; });
+  const refocused = () => page.evaluate(() => (window as unknown as { refocused: string[] }).refocused.splice(0));
+  await refocused();
   await input.tap();
   await expect(input).toBeFocused();
-  expect(await page.evaluate(() => (window as unknown as { refocused: string[] }).refocused)).toEqual(['prompt-input']);
+  // Once as focus enters the field and again at the tap's click.
+  expect(await refocused()).toEqual(['prompt-input', 'prompt-input']);
   await page.keyboard.press('End');
   await page.keyboard.type(' and type');
+  await expectDraft(input, 'Keep this draft and type');
+  // A field that kept focus without the keyboard asks again when tapped.
+  await input.tap();
+  expect(await refocused()).toEqual(['prompt-input']);
   await expectDraft(input, 'Keep this draft and type');
 });
 

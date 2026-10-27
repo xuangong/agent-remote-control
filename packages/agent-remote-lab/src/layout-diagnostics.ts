@@ -52,7 +52,7 @@ function capture(reason: string, decision?: ViewportDecision) {
       filter: headerStyle.filter, backdropFilter: headerStyle.backdropFilter } : null,
     safeArea: safeArea ? { top: safeArea.paddingTop, bottom: safeArea.paddingBottom, left: safeArea.paddingLeft, right: safeArea.paddingRight } : null,
     orientation: screen.orientation?.type ?? null, angle: screen.orientation?.angle ?? null,
-    visibility: document.visibilityState,
+    visibility: document.visibilityState, pageFocused: document.hasFocus(),
     focus: active?.matches('input, textarea') ? active.tagName.toLowerCase() : active?.matches('[contenteditable="true"], [contenteditable="plaintext-only"]') ? 'contenteditable' : 'other',
   };
   const signature = JSON.stringify(geometry);
@@ -65,6 +65,11 @@ function capture(reason: string, decision?: ViewportDecision) {
 
 export function recordViewportDecision(phase: 'before' | 'after', decision: ViewportDecision) {
   capture(`viewport-${phase}`, decision);
+}
+
+/** Records the shell asking the browser not to scroll for a field the keyboard will cover. */
+export function recordKeyboardRefocus(trigger: 'focusin' | 'click') {
+  capture(`refocus-${trigger}`);
 }
 
 export function startLayoutDiagnostics() {
@@ -99,13 +104,15 @@ export function startLayoutDiagnostics() {
     until = performance.now() + limits.frameWindowMs;
     if (!frame) frame = requestAnimationFrame(tick);
   };
-  const listen = (target: EventTarget, name: string, reason = name) => {
+  const listen = (target: EventTarget, name: string, reason = name, capture = false) => {
     const handler = () => transition(reason);
-    target.addEventListener(name, handler, { passive: true });
-    removals.push(() => target.removeEventListener(name, handler));
+    target.addEventListener(name, handler, { passive: true, capture });
+    removals.push(() => target.removeEventListener(name, handler, { capture }));
   };
   for (const name of ['orientationchange', 'resize', 'scroll', 'pageshow', 'focus']) listen(window, name, `window-${name}`);
   for (const name of ['focusin', 'focusout', 'visibilitychange']) listen(document, name);
+  // The browser can focus an element again without focusin, as when the page itself gains focus.
+  listen(document, 'focus', 'focus', true);
   if (window.visualViewport) for (const name of ['resize', 'scroll']) listen(window.visualViewport, name, `visualViewport-${name}`);
   if (screen.orientation) listen(screen.orientation, 'change', 'screen-orientation');
   const pagehide = () => stopLayoutDiagnostics('pagehide');

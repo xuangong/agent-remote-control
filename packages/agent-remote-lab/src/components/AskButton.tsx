@@ -2,15 +2,16 @@ import type { RefObject } from 'react';
 import { observationLabel, type SessionObservation } from '../tracking-state.js';
 import { useTrackingPosition } from '../hooks/useTrackingPosition.js';
 
-export function AskButton({ observation, sourceTitle, disabled, onOpen, triggerRef }: {
-  triggerRef: RefObject<HTMLButtonElement>; observation?: SessionObservation; sourceTitle?: string; disabled: boolean; onOpen(): void;
+/** `unavailable` says why Ask cannot open for the named session. */
+export function AskButton({ observation, sourceTitle, disabled, unavailable, onOpen, triggerRef }: {
+  triggerRef: RefObject<HTMLButtonElement>; observation?: SessionObservation; sourceTitle?: string; disabled: boolean; unavailable?: string; onOpen(): void;
 }) {
   const { root, style, handlers, edge } = useTrackingPosition('agent-remote:ask-position');
   const ready = observation?.connection === 'ready';
   const activity = ready ? observation.activity : undefined;
   const alert = ready ? observation.attention : undefined;
   const status = activity === 'running' ? 'working' : activity === 'waiting' || activity === 'starting' ? 'pending' : activity === 'idle' ? 'idle' : 'unknown';
-  const label = sourceTitle ? `Ask about ${sourceTitle}${observation ? ` · ${observationLabel(observation)}` : ''}`
+  const label = sourceTitle ? `Ask about ${sourceTitle}${unavailable ? ` · ${unavailable}` : observation ? ` · ${observationLabel(observation)}` : ''}`
     : disabled ? 'Select a session to use Ask' : 'Ask about the selected session';
   return <div ref={root} style={style} {...handlers} className="lab-tracking-floating lab-ask-floating" data-edge={edge} data-pane-selection-ignore
     data-status={status} data-alert={alert}>

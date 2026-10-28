@@ -72,7 +72,7 @@ import { useTpmMainSessions } from './hooks/useTpmMainSessions.js';
 import { tpmMainTarget } from './tpm-main-sessions.js';
 import { TpmMenu } from './components/TpmMenu.js';
 import { TpmWorkspace } from './components/TpmWorkspace.js';
-import { useSessionSuccession } from './hooks/useSessionSuccession.js';
+import { useSessionSuccession, type SourceStaleness } from './hooks/useSessionSuccession.js';
 import { useSessionTracking } from './hooks/useSessionTracking.js';
 import { FavoritesHeading, FavoritesList, FavoritesMenu, StarButton } from './components/SessionFavorites.js';
 import { SessionTrackingMenu } from './components/SessionTrackingMenu.js';
@@ -200,6 +200,16 @@ export interface AppProps {
 export function App(props: AppProps) {
   return <ToastProvider><AppContent {...props} /></ToastProvider>;
 }
+
+/** Explains a disabled Ask launcher, after the session it names. */
+const askStaleness: Record<SourceStaleness | '', string | undefined> = {
+  '': undefined,
+  inactive: 'waiting for this page to restore its sessions',
+  view: 'this view now shows another session',
+  connecting: 'waiting for the session to connect',
+  agent: 'waiting for the session to reattach',
+  native: 'waiting for the session to continue its current conversation',
+};
 
 function AppContent({
   baseUrl = window.location.origin,
@@ -1316,9 +1326,13 @@ function AppContent({
   const focusedAskEntry = focusedAskSession && focusedAskOwner ? ask.entryFor(focusedAskSession, focusedAskOwner) : undefined;
   const focusedAskState = focusedAskSession?.agentId === state?.agent?.id ? state
     : focusedAskSession ? replicaFor(focusedAskSession.agentId).getState() : undefined;
-  const canOpenFocusedAsk = !!directory && !!focusedAskSession && accessReady && !transitioning
-    && remoteHosts.find(host => host.id === focusedAskSession.hostId)?.online !== false
-    && (!!focusedAskEntry?.record?.target || sourceCurrent(focusedAskSession) && !!focusedAskState?.agent);
+  const focusedAskUnavailable = !focusedAskSession ? undefined
+    : !directory || !accessReady ? 'waiting for access'
+    : transitioning ? 'waiting for the session switch to finish'
+    : remoteHosts.find(host => host.id === focusedAskSession.hostId)?.online === false ? 'its Controller is offline'
+    : focusedAskEntry?.record?.target ? undefined
+    : askStaleness[sourceStale(focusedAskSession) ?? (focusedAskState?.agent ? '' : 'connecting')];
+  const canOpenFocusedAsk = !!focusedAskSession && !focusedAskUnavailable;
   const refreshRelations = useSessionRelations(baseUrl, userScoped && accessReady, forkStore, ask.store, addressSession ? sessionKey(addressSession) : undefined, userScoped);
   const pendingSideSources = useRef(new Map<string, OpenedSession>());
   useLayoutEffect(() => {
@@ -1373,13 +1387,18 @@ function AppContent({
     });
   }
   function sourceCurrent(source: OpenedSession): boolean {
+    return !sourceStale(source);
+  }
+  function sourceStale(source: OpenedSession): SourceStaleness | undefined {
     if (initialState && !succession.active) {
       const id = (source as { viewId?: string }).viewId;
       const agent = initialState.agent, slot = succession.document.slots.find(slot => slot.id === id);
-      return !!slot && sessionKey(compositionSelection(slot)) === sessionKey(source) && agent?.id === source.agentId
-        && agent.providerId === source.providerId && agent.runtimeInfo.sessionId === source.nativeSessionId;
+      if (!slot || sessionKey(compositionSelection(slot)) !== sessionKey(source)) return 'view';
+      if (!agent) return 'connecting';
+      if (agent.id !== source.agentId) return 'agent';
+      return agent.providerId === source.providerId && agent.runtimeInfo.sessionId === source.nativeSessionId ? undefined : 'native';
     }
-    return succession.sourceCurrent(source);
+    return succession.sourceStale(source);
   }
   function assertSourceCurrent(source: OpenedSession): void {
     if (!accessReadyRef.current || mountedTransport.current !== transport || !sourceCurrent(source)) throw new Error('The source session changed. Wait for its current native identity before continuing.');
@@ -2267,7 +2286,7 @@ function AppContent({
     <TpmMenu tpm={tpm} open={tpmListOpen} onOpenChange={setTpmListOpen} mainSessions={tpmMainSessions} main={featureSource} visible={tpmView.visible} triggerRef={tpmTriggerRef} inert={supportingRailOpen} />
     <div className="lab-ask-workspaces" {...backgroundInert}>
       {askSurfaceVisible ? <AskButton triggerRef={askTriggerRef}
-        disabled={!canOpenFocusedAsk} sourceTitle={focusedAskSession?.title}
+        disabled={!canOpenFocusedAsk} sourceTitle={focusedAskSession?.title} unavailable={focusedAskUnavailable}
         observation={focusedAskEntry?.record?.target ? tracking.observations[sessionKey(focusedAskEntry.record.target)] : undefined}
         onOpen={() => { if (canOpenFocusedAsk && focusedAskSession) openAsk(focusedAskSession, focusedAskState); }} /> : null}
       {askSources.flatMap(({ source, owner }) => {

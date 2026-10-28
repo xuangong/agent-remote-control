@@ -23,9 +23,9 @@ beforeEach(() => {
 });
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); localStorage.clear(); });
 
-function Harness({ onOpen = () => {}, disabled = false, sourceTitle = 'Source' }: { onOpen?(): void; disabled?: boolean; sourceTitle?: string }) {
+function Harness({ onOpen = () => {}, disabled = false, sourceTitle = 'Source', unavailable }: { onOpen?(): void; disabled?: boolean; sourceTitle?: string; unavailable?: string }) {
   const trigger = useRef<HTMLButtonElement>(null);
-  return <AskButton triggerRef={trigger} sourceTitle={sourceTitle} disabled={disabled} onOpen={onOpen} />;
+  return <AskButton triggerRef={trigger} sourceTitle={sourceTitle} disabled={disabled} unavailable={unavailable} onOpen={onOpen} />;
 }
 async function pointer(button: HTMLButtonElement, type: string, x: number, y: number, pointerType = 'mouse') {
   await act(async () => { button.dispatchEvent(Object.assign(new MouseEvent(type, { bubbles: true, cancelable: true, button: 0, clientX: x, clientY: y }),
@@ -89,6 +89,13 @@ it('does not open when the selected view has no available source', async () => {
   expect(button.disabled).toBe(true);
   await act(async () => button.click());
   expect(onOpen).not.toHaveBeenCalled();
+});
+
+it('says why Ask cannot open for the selected session', async () => {
+  const container = await render(<Harness disabled unavailable="waiting for the session to connect" />);
+  const button = container.querySelector('button')!;
+  expect(button.title).toBe('Ask about Source · waiting for the session to connect');
+  expect(container.querySelector('[role="status"]')!.textContent).toBe('Ask about Source · waiting for the session to connect');
 });
 
 it.each([false, true])('keeps touch movement aligned with fixed coordinates when client rects use the visual viewport (%s)', async visual => {

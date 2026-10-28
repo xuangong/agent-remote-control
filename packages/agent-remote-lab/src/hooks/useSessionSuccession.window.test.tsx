@@ -305,5 +305,9 @@ it.each(['selected', 'unselected'])('accepts a %s group independently connected 
   expect(test.read().sourceCurrent(source)).toBe(true);
   expect(test.read().sourceCurrent({ ...source, agentId: 'wrong-agent' })).toBe(false);
   expect(test.read().sourceCurrent({ ...source, viewId: test.bSlot.id })).toBe(false);
+  expect(test.read().sourceStale(source)).toBeUndefined();
+  expect(test.read().sourceStale({ ...source, agentId: 'wrong-agent' })).toBe('agent');
+  expect(test.read().sourceStale({ ...source, viewId: test.bSlot.id })).toBe('view');
+  expect(test.read().sourceStale({ ...source, nativeSessionId: 'B' })).toBe('view');
   lease.release();
 }, 10000);

@@ -52,6 +52,8 @@ const selectionFor = compositionSelection;
 const identityConfirmationError = 'The native session identity could not be confirmed.';
 const unavailable = (code: string): CompositionParticipantResult => ({ status: 'pending', retention: 'page', code });
 
+/** Why a view's source is not its current native session: the page lost authority, the view moved, or the session is still connecting or reattached. */
+export type SourceStaleness = 'inactive' | 'view' | 'connecting' | 'agent' | 'native';
 export interface SessionSuccessionHistoryNavigation {
   roleKey: string; history: boolean; session: SessionEntry; current: SessionEntry;
   predecessor?: SessionEntry; ancestors: SessionEntry[];
@@ -1006,6 +1008,16 @@ export function useSessionSuccession(options: SuccessionOptions) {
     }
     return localIds.size > 1 ? runtime.document.slots.filter(slot => localIds.has(slot.id)).map(slot => ({ slotId: slot.id, session: { ...selectionFor(slot), title: slotTitle(slot) } })) : [];
   }
+  function sourceStale(source: OpenedSession & { viewId?: string }): SourceStaleness | undefined {
+    const id = source.viewId, slot = runtime.document.slots.find(slot => slot.id === id);
+    if (!live()) return 'inactive';
+    if (!slot || sessionKey(selectionFor(slot)) !== sessionKey(source)) return 'view';
+    if (id === desired?.slot.id && runtime.binding?.isCurrent() && runtime.binding.session.agentId === source.agentId) return;
+    const connection = latest.current.connections.find(source), agent = connection?.replica.getState().agent;
+    if (!agent) return 'connecting';
+    if (agent.id !== source.agentId) return 'agent';
+    if (agent.providerId !== source.providerId || agent.runtimeInfo.providerId !== source.providerId || agent.runtimeInfo.sessionId !== source.nativeSessionId) return 'native';
+  }
   return {
     active: runtime.active && (options.enabled || !!desired), discovering: options.enabled && (!runtime.discovered || runtime.discovering), document: runtime.document, desired, selected, displaySlot,
     state: visibleState, sessionState: runtime.binding?.getSessionState() ?? remoteSessionState(undefined, runtime.active ? 'connecting' : 'idle'),
@@ -1063,13 +1075,8 @@ export function useSessionSuccession(options: SuccessionOptions) {
       const supplier = runtime.askRecipients.get(owner);
       return supplier?.targetKey === sessionKey(target) ? supplier.recipient : undefined;
     },
-    sourceCurrent: (source: OpenedSession & { viewId?: string }) => {
-      const id = source.viewId, slot = runtime.document.slots.find(slot => slot.id === id);
-      if (!live() || !slot || sessionKey(selectionFor(slot)) !== sessionKey(source)) return false;
-      if (id === desired?.slot.id && runtime.binding?.isCurrent() && runtime.binding.session.agentId === source.agentId) return true;
-      const connection = latest.current.connections.find(source), agent = connection?.replica.getState().agent;
-      return agent?.id === source.agentId && agent.providerId === source.providerId
-        && agent.runtimeInfo.providerId === source.providerId && agent.runtimeInfo.sessionId === source.nativeSessionId;
-    },
+    sourceCurrent: (source: OpenedSession & { viewId?: string }) => !sourceStale(source),
+    /** Why a source is not the current native session of its view, for display; undefined when it is. */
+    sourceStale,
   };
 }

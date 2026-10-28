@@ -90,6 +90,15 @@ test('a prompt edit description gives the current provider\'s reason for refusin
  expect(f.created()).toBe(0);expect(f.service.store.read('role').operations).toEqual([]);
 });
 
+test('description explains a session fenced by an unconfirmed operation from before a restart', async () => {
+ const f=await fixture(); await f.service.contexts.markMutation(ref('A'),'before');
+ const restored=new SessionSuccessionService(join(f.root,'state'),'host',{...f.ports,supportsBoundedProjection:async()=>true,
+  inspect:async source=>({...await f.ports.inspect(source),managed:restored.contexts.coverageAvailable(source)})});
+ await restored.ready;
+ const role=restored.store.read('role').role, targets=[{providerId:'fixture',displayName:'Fixture'}];
+ expect(await restored.describe(role,ref('A'),targets)).toMatchObject({eligibility:{status:'blocked',code:'succession_restart_settling',
+  reason:expect.stringMatching(/unconfirmed operation when the Controller restarted.*about 5 minutes if the session stays idle/)}});
+});
 test('description reuses native quiescence and bounded support without reserving or creating', async () => {
  const f=await fixture(), role=f.service.store.read('role').role;
  f.ports.supportsBoundedProjection=async(_source,target)=>target==='fixture';

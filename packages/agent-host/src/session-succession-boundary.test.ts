@@ -1,4 +1,4 @@
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, expect, test, vi } from 'vitest';
@@ -244,6 +244,51 @@ test('close drains direct coverage reconciliation and rejects new reconciliation
     const restored = new SessionSuccessionContextStore(f.root); await restored.ready;
     expect(restored.coverageAvailable(target)).toBe(true);
   } finally { if (deadline) clearTimeout(deadline); release(); await reconciliation; await closing; spy.mockRestore(); }
+});
+
+test('clears restored markers of sessions nobody reopens once the restart settles', async () => {
+  const f = await fixture(), idle = ref('idle'), busy = ref('busy');
+  await f.contexts.markMutation(idle, 'before'); await f.contexts.markMutation(busy, 'before');
+  let now = 0;
+  const restored = new SessionSuccessionContextStore(f.root, { restartSettleMs: 10, now: () => now }); await restored.ready;
+  const cache = createOperationCache();
+  const unsettled = vi.spyOn(cache, 'hasUnsettledMutation').mockImplementation(key => key === nativeSessionRefKey(busy));
+  const boundary = new SessionSuccessionBoundary(restored, () => {}, () => undefined, cache);
+  try {
+    now = 10;
+    const markers = async () => (JSON.parse(await readFile(join(f.root, 'context.json'), 'utf8')).coverage as Array<{ target: { nativeSessionId: string } }>)
+      .map(marker => marker.target.nativeSessionId).sort();
+    await vi.waitFor(async () => expect(await markers()).toEqual(['busy']), { timeout: 3_000, interval: 50 });
+    expect(restored.coverageAvailable(idle)).toBe(true);
+    expect(restored.coverageAvailable(busy)).toBe(true);
+    expect(() => boundary.checkSource(busy)).toThrow(/unsettled/i);
+  } finally { unsettled.mockRestore(); await boundary.close(); await cache.close(); }
+});
+
+test('an unreadable store at restart settlement keeps its markers without an uncaught error', async () => {
+  const f = await fixture(), target = ref('idle');
+  await f.contexts.markMutation(target, 'before');
+  let now = 0;
+  const restored = new SessionSuccessionContextStore(f.root, { restartSettleMs: 10, now: () => now }); await restored.ready;
+  const boundary = new SessionSuccessionBoundary(restored, () => {}, () => undefined);
+  await new Promise(resolve => setImmediate(resolve));
+  const settlement = vi.spyOn(restored, 'restartSettlement').mockImplementation(() => { throw new Error('Succession context store is not ready.'); });
+  try {
+    now = 10;
+    await vi.waitFor(() => expect(settlement).toHaveBeenCalled(), { timeout: 3_000, interval: 50 });
+    expect(JSON.parse(await readFile(join(f.root, 'context.json'), 'utf8')).coverage).toEqual([{ target, operationId: 'before' }]);
+  } finally { settlement.mockRestore(); await boundary.close(); }
+});
+
+test('close cancels a pending restart settlement', async () => {
+  const f = await fixture(), target = ref('idle');
+  await f.contexts.markMutation(target, 'before');
+  const restored = new SessionSuccessionContextStore(f.root, { restartSettleMs: 10 }); await restored.ready;
+  const boundary = new SessionSuccessionBoundary(restored, () => {}, () => undefined);
+  await Promise.resolve(); await boundary.close();
+  const clearing = vi.spyOn(restored, 'clearMutation');
+  await new Promise(resolve => setTimeout(resolve, 1_100));
+  expect(clearing).not.toHaveBeenCalled();
 });
 
 async function recoveryFixture() {

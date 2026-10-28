@@ -29,6 +29,7 @@ export class SessionSuccessionBoundary {
   private readonly recoveryWrites = new Set<Promise<unknown>>();
   private coverageFailure?: Error;
   private closePromise?: Promise<void>;
+  private restartSettlement?: ReturnType<typeof setTimeout>;
   private coverageRetired = false;
   constructor(private readonly contexts: SessionSuccessionContextStore,
     private readonly assertAdmission: (target: NativeSessionRef) => void,
@@ -43,6 +44,7 @@ export class SessionSuccessionBoundary {
       const target = this.targetFromKey(key);
       if (target) void this.reconcileCoverage(target).catch(() => undefined);
     });
+    void contexts.ready.then(() => this.scheduleRestartSettlement()).catch(() => undefined);
     this.unsubscribeDelivery = contexts.subscribeDelivery(delivery => {
       if (delivery.state !== 'rejected' && !['started', 'handled'].includes(delivery.inputAcceptance?.disposition ?? '')) return;
       const invocation = this.preparedInvocations.get(delivery.operationId);
@@ -74,8 +76,24 @@ export class SessionSuccessionBoundary {
     }
     return { ...result, submittedTextSha256: delivery.preparedInput.witness.content.sha256 };
   }
+  /** Markers of sessions nobody reopens would otherwise remain in the store after their restart fence lifts. */
+  private scheduleRestartSettlement(): void {
+    if (this.closePromise) return;
+    const { delayMs, targets } = this.contexts.restartSettlement();
+    if (!targets.length) return;
+    // Timers can fire slightly early; settlement is checked against the store's clock.
+    this.restartSettlement = setTimeout(() => {
+      this.restartSettlement = undefined;
+      // An unreadable store keeps its markers; the next restart settles them.
+      let targets: NativeSessionRef[];
+      try { targets = this.contexts.restartSettlement().targets; } catch { return; }
+      for (const target of targets) void this.reconcileCoverage(target).catch(() => undefined);
+    }, delayMs + 1_000);
+    this.restartSettlement.unref?.();
+  }
   close(): Promise<void> {
     if (this.closePromise) return this.closePromise;
+    if (this.restartSettlement) { clearTimeout(this.restartSettlement); this.restartSettlement = undefined; }
     this.unsubscribeDelivery(); this.unsubscribeSettlement?.(); this.preparedInvocations.clear();
     return this.closePromise = (async () => {
       try {
@@ -147,7 +165,7 @@ export class SessionSuccessionBoundary {
     }
   }
   checkSource(target: NativeSessionRef): void {
-    if (!this.contexts.coverageAvailable(target)) throw new Error('Session mutation coverage was lost across Controller restart.');
+    if (!this.contexts.coverageAvailable(target)) throw new Error(this.contexts.restartFenceMessage(target));
     if (this.pending(target) || this.cache?.hasUnsettledMutation(nativeSessionRefKey(target))) throw new Error('Session has unsettled Host mutations.');
     this.assertHostState(target, undefined, true);
   }
@@ -188,7 +206,7 @@ export class SessionSuccessionBoundary {
     }
   }
   private assertQuiescent(target: NativeSessionRef, boundary?: TimelineCursor): void {
-    if (!this.contexts.coverageAvailable(target)) throw new Error('Session mutation coverage was lost across Controller restart.');
+    if (!this.contexts.coverageAvailable(target)) throw new Error(this.contexts.restartFenceMessage(target));
     if (this.pending(target) || this.cache?.hasUnsettledMutation(nativeSessionRefKey(target))) throw new Error('Session has unsettled Host mutations.');
     this.assertHostState(target, boundary);
   }

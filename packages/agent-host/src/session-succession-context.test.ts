@@ -180,6 +180,44 @@ it('retains dirty mutation coverage across restart and a new operation cannot er
   expect(restored.coverageAvailable(source)).toBe(false);
   expect(JSON.parse(await readFile(join(path, 'context.json'), 'utf8')).coverage).toEqual([{ target: source, operationId: 'ordinary' }]);
 });
+it('lifts a restored fence once the restart settles and then clears the clean marker', async () => {
+  const { path, store } = await setup(); let now = 10_000;
+  await store.markMutation(source, 'ordinary');
+  const restored = new SessionSuccessionContextStore(path, { restartSettleMs: 120_000, now: () => now }); await restored.ready;
+  expect(restored.coverageAvailable(source)).toBe(false);
+  expect(restored.restartSettlingMs(source)).toBe(120_000);
+  expect(restored.restartFenceMessage(source)).toMatch(/restarted.*about 2 minutes if the session stays idle/);
+  expect(restored.restartSettlement()).toEqual({ delayMs: 120_000, targets: [source] });
+  now += 119_999; expect(restored.coverageAvailable(source)).toBe(false);
+  now += 1; expect(restored.coverageAvailable(source)).toBe(true);
+  expect(restored.restartSettlingMs(source)).toBeUndefined();
+  await restored.clearMutation(source, () => true);
+  expect(JSON.parse(await readFile(join(path, 'context.json'), 'utf8')).coverage).toEqual([]);
+  expect(restored.restartSettlement().targets).toEqual([]);
+});
+it('keeps the marker while work admitted after the restart is unsettled and treats it as ordinary afterwards', async () => {
+  const { path, store } = await setup(); let now = 0;
+  await store.markMutation(source, 'before');
+  const restored = new SessionSuccessionContextStore(path, { restartSettleMs: 1_000, now: () => now }); await restored.ready;
+  now = 1_000; await restored.markMutation(source, 'after');
+  expect(restored.coverageAvailable(source)).toBe(true);
+  await restored.clearMutation(source, () => false);
+  expect(JSON.parse(await readFile(join(path, 'context.json'), 'utf8')).coverage).toHaveLength(1);
+  await restored.clearMutation(source, () => true);
+  expect(JSON.parse(await readFile(join(path, 'context.json'), 'utf8')).coverage).toEqual([]);
+});
+it('keeps a first input with an unconfirmed outcome fenced after the restart settles', async () => {
+  const { path, store } = await setup(), witness = prepared(); let now = 0;
+  await store.markMutation(target, 'input'); await store.begin('succession', input(), witness); await store.markPreparedMutation(target, 'input');
+  await store.settle('succession', 'input', 'unknown');
+  const restored = new SessionSuccessionContextStore(path, { restartSettleMs: 1_000, now: () => now }); await restored.ready;
+  now = 60_000;
+  expect(restored.coverageAvailable(target)).toBe(false);
+  expect(restored.restartSettlingMs(target)).toBeUndefined();
+  expect(restored.restartFenceMessage(target)).toMatch(/first input/);
+  expect(restored.restartSettlement().targets).toEqual([]);
+  await restored.clearMutation(target, () => true); expect(restored.coverageAvailable(target)).toBe(false);
+});
 it('clears live dirty coverage only after checking the current cache inside serialized persistence', async () => {
   const { path, store } = await setup();
   await store.markMutation(source, 'one'); let clean = true;

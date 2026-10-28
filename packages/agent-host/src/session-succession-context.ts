@@ -67,6 +67,8 @@ export interface SuccessionDeliveryEvidence {
 interface MutationCoverage { target: NativeSessionRef; operationId?: string; prepared?: true }
 interface ContextState { version: 3; attachments: SuccessionContextRecord[]; preparations?: ContextPreparationRecord[]; coverage?: MutationCoverage[] }
 const MAX_STORE_BYTES = 8 * 1024 * 1024;
+/** How long a restarted Controller fences a session whose mutation outcome the previous process could not confirm. */
+export const RESTART_SETTLE_MS = 5 * 60_000;
 const sameRef = (a: NativeSessionRef, b: NativeSessionRef) => nativeSessionRefKey(a) === nativeSessionRefKey(b);
 const attachmentIdentity = (input: SuccessionContextAttachment) => JSON.stringify([input.operationId, input.roleId, input.roleRevision, nativeSessionRefKey(input.source), nativeSessionRefKey(input.target), input.capturedAt, input.boundary.epoch, input.boundary.seq, input.text, input.itemCount, input.shortenedToolCount ?? 0, input.inheritedFrom ? [input.inheritedFrom.operationId, nativeSessionRefKey(input.inheritedFrom.source), input.inheritedFrom.boundary.epoch, input.inheritedFrom.boundary.seq, input.inheritedFrom.capturedAt] : null]);
 const inputIdentity = (input: SuccessionInput) => JSON.stringify([input.operationId, input.roleId, input.roleRevision, nativeSessionRefKey(input.target), input.text, input.contentIdentity ?? null]);
@@ -91,17 +93,55 @@ export class SessionSuccessionContextStore {
     return delivery;
   }
   private readonly dispatchTails = new Map<string, Promise<unknown>>();
-  constructor(private readonly directory: string) { this.ready = this.restore(); }
-  /** A cold dirty marker cannot be repaired by idle state or by a later operation. */
+  private restoredAt = 0;
+  constructor(private readonly directory: string, private readonly options: { restartSettleMs?: number; now?: () => number } = {}) { this.ready = this.restore(); }
+  /**
+   * A marker restored from the previous process covers work whose outcome that process could not confirm, so it
+   * fences succession while that work could still reach the native session. Succession separately requires the
+   * native session to be idle with no pending input, approval or child work; the fence lifts once the restart has
+   * settled. A first input to the session recovers only from its own native evidence.
+   */
   coverageAvailable(target: NativeSessionRef): boolean {
-    this.assertReadable(); return !this.lostCoverage.has(nativeSessionRefKey(target));
+    this.assertReadable();
+    const key = nativeSessionRefKey(target);
+    this.settleRestart(key, this.state);
+    return !this.lostCoverage.has(key);
+  }
+  /** Time until a restored marker stops fencing succession, or undefined when time does not lift it. */
+  restartSettlingMs(target: NativeSessionRef): number | undefined {
+    this.assertReadable();
+    const key = nativeSessionRefKey(target);
+    if (!this.lostCoverage.has(key) || this.firstInputUnresolved(key, this.state)) return undefined;
+    return Math.max(0, this.restoredAt + (this.options.restartSettleMs ?? RESTART_SETTLE_MS) - this.now());
+  }
+  /** Explains why a session without coverage cannot hand off or edit a prompt yet. */
+  restartFenceMessage(target: NativeSessionRef): string {
+    const remaining = this.restartSettlingMs(target);
+    if (remaining === undefined) return 'This session has a first input whose outcome is unconfirmed since the Controller restarted. Reconcile it before continuing.';
+    const minutes = Math.max(1, Math.ceil(remaining / 60_000));
+    return `This session had an unconfirmed operation when the Controller restarted. Handoff and prompt edits resume in about ${minutes} minute${minutes === 1 ? '' : 's'} if the session stays idle.`;
+  }
+  /** Sessions still fenced by restored markers, and when time lifts their fences. */
+  restartSettlement(): { delayMs: number; targets: NativeSessionRef[] } {
+    this.assertReadable();
+    const targets = (this.state.coverage ?? []).map(marker => marker.target).filter(target => this.restartSettlingMs(target) !== undefined);
+    return { delayMs: Math.max(0, ...targets.map(target => this.restartSettlingMs(target)!)), targets: structuredClone(targets) };
+  }
+  private now(): number { return (this.options.now ?? Date.now)(); }
+  private settleRestart(key: string, state: ContextState): void {
+    if (this.lostCoverage.has(key) && !this.firstInputUnresolved(key, state)
+      && this.now() - this.restoredAt >= (this.options.restartSettleMs ?? RESTART_SETTLE_MS)) this.lostCoverage.delete(key);
+  }
+  private firstInputUnresolved(key: string, state: ContextState): boolean {
+    return state.attachments.some(record => record.deliveries.some(delivery => nativeSessionRefKey(delivery.target) === key && isSuccessionDeliveryUnresolved(delivery)));
   }
   markMutation(target: NativeSessionRef, operationId: string): Promise<void> {
-    const address = structuredClone(target);
+    const address = structuredClone(target), key = nativeSessionRefKey(address);
     return this.mutate(state => {
+      this.settleRestart(key, state);
       const prior = state.coverage?.find(item => sameRef(item.target, address));
       if (prior) {
-        if (!this.lostCoverage.has(nativeSessionRefKey(address)) && prior.operationId !== operationId) { delete prior.operationId; delete prior.prepared; }
+        if (!this.lostCoverage.has(key) && prior.operationId !== operationId) { delete prior.operationId; delete prior.prepared; }
       } else (state.coverage ??= []).push({ target: address, operationId });
     });
   }
@@ -116,6 +156,7 @@ export class SessionSuccessionContextStore {
     await this.mutate(state => {
       const marker = state.coverage?.find(item => sameRef(item.target, target));
       if (!marker || !isClean()) return;
+      this.settleRestart(key, state);
       if (this.lostCoverage.has(key)) {
         const delivery = state.attachments.flatMap(item => item.deliveries).find(item => item.operationId === marker.operationId && sameRef(item.target, target));
         if (!marker.prepared || !delivery?.preparedInput || isSuccessionDeliveryUnresolved(delivery)
@@ -492,6 +533,7 @@ export class SessionSuccessionContextStore {
     this.updateReservations(state); this.checkCapacity(state);
     if (changed) await this.write(state);
     this.state = state;
+    this.restoredAt = this.now();
     for (const marker of state.coverage ?? []) this.lostCoverage.add(nativeSessionRefKey(marker.target));
     this.loaded = true;
   }

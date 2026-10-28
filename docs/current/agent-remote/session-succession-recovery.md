@@ -546,9 +546,19 @@ process or database ownership assertion. Exact user U proves materialization onl
 assistant R in B with parent U proves execution started, not task completion.
 HTTP 204, idle and an unrelated assistant message do not settle an input. The
 existing context store saves a dirty ARC-coverage marker before native effects.
-Cold restart cannot clear ordinary unknown coverage from a later idle snapshot;
-prepared delivery may recover only from its original persisted identity and exact
-native evidence. Process-local operation deduplication is not a restart guarantee.
+After a cold restart, an ordinary unknown marker fences handoff and prompt edits of
+its session for five minutes (`RESTART_SETTLE_MS`). Succession separately requires
+the native session to be idle with no pending input, approval or child work, so the
+fence then lifts and settlement removes the clean marker; the Controller also
+reconciles markers of sessions nobody reopens once the restart settles. While fenced,
+eligibility reports `succession_restart_settling` with the remaining time. Markers
+used to remain permanently: every restart during active work locked that session,
+and the shared marker list could fill and reject ordinary mutations of every session.
+The residual risk is an input a surviving runtime (shared Codex daemon, OpenCode
+server) accepted before the restart but starts more than five minutes later while
+reporting idle; that turn would land in the predecessor. A prepared first input
+still recovers only from its original persisted identity and exact native evidence
+and keeps its fence. Process-local operation deduplication is not a restart guarantee.
 
 ## Local preparation and cancellation
 

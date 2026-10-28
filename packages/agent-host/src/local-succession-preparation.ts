@@ -90,6 +90,9 @@ export class LocalSuccessionPreparation {
     const state = await (inspect ? inspect(session) : this.access.inspect(session, preparation));
     const context = this.pendingContext(session);
     if (context?.deliveries.some(isSuccessionDeliveryUnresolved)) throw new SuccessionPreparationRejected('succession_context_unknown', 'Reconcile the first input before another succession.');
+    if (state.managed !== true && this.contexts && !this.contexts.coverageAvailable(session)) {
+      throw new SuccessionPreparationRejected('succession_restart_settling', this.contexts.restartFenceMessage(session));
+    }
     if (state.idle !== true || state.managed !== true || state.pendingInputs !== 0 || state.inFlightInputs !== 0 || state.pendingInteractions !== 0 || state.activeChildren !== 0) {
       throw new SuccessionPreparationRejected('succession_not_quiescent', 'Finish pending input, approvals and child work before handoff. Native ownership must be confirmed.');
     }

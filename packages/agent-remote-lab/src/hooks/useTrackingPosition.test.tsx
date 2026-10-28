@@ -1,4 +1,4 @@
-import { act } from 'react';
+import { act, useState } from 'react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { render } from '../test/setup.js';
 import { useTrackingPosition } from './useTrackingPosition.js';
@@ -90,5 +90,50 @@ it('does not move entries for one that is not shown', async () => {
     const container = await render(<><Entry name="a" /><Entry name="b" className="unseen" /></>);
     await view({ height: 400 });
     expect([top(container, 'a'), top(container, 'b')]).toEqual([344, 344]);
+  } finally { css.remove(); }
+});
+
+let setLate: (value: { shown: boolean; hidden: boolean }) => void = () => {};
+function Late({ name }: { name: string }) {
+  const [{ shown, hidden }, set] = useState({ shown: false, hidden: false });
+  setLate = set;
+  const { root, style, handlers } = useTrackingPosition(name);
+  if (!shown) return null;
+  return <div ref={root} style={style} {...handlers} className="lab-tracking-floating" data-name={name} hidden={hidden}>
+    <button type="button" className="lab-session-popover-trigger">{name}</button>
+  </div>;
+}
+
+it('positions and moves a root rendered after mounting, as Team once workspace access is confirmed', async () => {
+  place('late', 300, 500);
+  const container = await render(<Late name="late" />);
+  await act(async () => setLate({ shown: true, hidden: false }));
+  expect(top(container, 'late')).toBe(500);
+  const button = container.querySelector('button')!;
+  await pointer(button, 'pointerdown', 340, 520);
+  await pointer(button, 'pointermove', 340, 570);
+  await pointer(button, 'pointerup', 340, 570);
+  expect(top(container, 'late')).toBe(550);
+  await view({ height: 400 });
+  expect(top(container, 'late')).toBe(344);
+  // Rendered again, as after foreground recovery, it keeps the owner's placement.
+  await act(async () => setLate({ shown: false, hidden: false }));
+  await act(async () => setLate({ shown: true, hidden: false }));
+  await view({ height: 800 });
+  expect(top(container, 'late')).toBe(550);
+});
+
+it('reads the stylesheet placement of an entry first rendered hidden once it is shown', async () => {
+  const css = document.createElement('style');
+  css.textContent = '.lab-tracking-floating[data-name="hidden"] { position: fixed; left: 280px; top: 114px; } [hidden] { display: none; }';
+  document.head.append(css);
+  try {
+    const container = await render(<Late name="hidden" />);
+    await act(async () => setLate({ shown: true, hidden: true }));
+    expect(container.querySelector<HTMLElement>('[data-name="hidden"]')!.style.top).toBe('');
+    await act(async () => setLate({ shown: true, hidden: false }));
+    await view({});
+    expect(container.querySelector<HTMLElement>('[data-name="hidden"]')!.style.left).toBe('280px');
+    expect(top(container, 'hidden')).toBe(114);
   } finally { css.remove(); }
 });

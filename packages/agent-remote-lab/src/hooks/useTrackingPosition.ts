@@ -23,12 +23,25 @@ function clamp(next: Position, size: { width: number; height: number }, view: Vi
 interface FloatingEntry {
   element: HTMLElement;
   /** Where the owner put the entry, relative to the visible area; only the owner changes it. */
-  placement: Position;
+  placement?: Position;
   /** The fixed CSS point of an entry being dragged, which the arrangement leaves in place. */
   held(): Position | undefined;
   show(point: Position, view: View): void;
 }
 const entries = new Set<FloatingEntry>();
+
+/**
+ * The stylesheet places an entry on the unobscured screen, as the owner does. A hidden entry has no laid-out
+ * position yet, so its placement is read once it is shown and before it is ever positioned inline.
+ */
+function stylesheetPlacement(element: HTMLElement): Position | undefined {
+  const resolved = getComputedStyle(element);
+  if (resolved.display === 'none') return undefined;
+  const rect = element.getBoundingClientRect(), left = parseFloat(resolved.left), top = parseFloat(resolved.top);
+  // Fixed CSS coordinates and client rect coordinates differ in WebKit when
+  // the keyboard moves the visual viewport. Keep positioning in CSS space.
+  return { x: Number.isFinite(left) ? left : rect.left, y: Number.isFinite(top) ? top : rect.top };
+}
 
 /**
  * Shows every entry at its placement within the visible area, which the software keyboard shrinks and pans.
@@ -38,13 +51,15 @@ const entries = new Set<FloatingEntry>();
  */
 export function arrangeFloatingEntries() {
   const view = viewport();
-  const items = [...entries].map(entry => {
+  const items = [...entries].flatMap(entry => {
+    const placement = entry.placement ??= stylesheetPlacement(entry.element);
+    if (!placement) return [];
     const { width, height } = entry.element.getBoundingClientRect(), size = { width, height };
     const held = entry.held();
-    const desired = held ?? { x: view.x + entry.placement.x, y: view.y + entry.placement.y };
+    const desired = held ?? { x: view.x + placement.x, y: view.y + placement.y };
     const point = clamp(desired, size, view);
-    return { entry, size, desired, point, held: !!held, moved: point.x !== desired.x || point.y !== desired.y,
-      solid: width > 0 && height > 0 && getComputedStyle(entry.element).visibility !== 'hidden' };
+    return [{ entry, size, desired, point, held: !!held, moved: point.x !== desired.x || point.y !== desired.y,
+      solid: width > 0 && height > 0 && getComputedStyle(entry.element).visibility !== 'hidden' }];
   }).sort((a, b) => b.desired.y + b.size.height - a.desired.y - a.size.height);
   type Item = typeof items[number];
   const overlaps = (a: Item, b: Item) => a.point.x < b.point.x + b.size.width && b.point.x < a.point.x + a.size.width
@@ -70,6 +85,11 @@ export function useTrackingPosition(storageKey = 'agent-remote-tracking-position
   const drag = useRef<{ id: number; start: Position; origin: Position; moved: boolean }>();
   const suppressClick = useRef(false);
   const shownStyle = useRef<string>();
+  // A consumer can render its root after mounting, as Team does once workspace access is confirmed.
+  const [element, setElement] = useState<HTMLDivElement | null>(null);
+  useLayoutEffect(() => { if (root.current !== element) setElement(root.current); });
+  /** A root rendered again keeps its placement; its inline style no longer shows the stylesheet's. */
+  const kept = useRef<{ storageKey: string; placement: Position }>();
   const [style, setStyle] = useState<CSSProperties>({});
   const [edge, setEdge] = useState<'right'>();
 
@@ -109,20 +129,14 @@ export function useTrackingPosition(storageKey = 'agent-remote-tracking-position
   }
 
   useLayoutEffect(() => {
-    const element = root.current;
     if (!element) return;
-    const rect = element.getBoundingClientRect();
-    const resolved = getComputedStyle(element);
-    const left = parseFloat(resolved.left), top = parseFloat(resolved.top);
-    // Fixed CSS coordinates and client rect coordinates differ in WebKit when
-    // the keyboard moves the visual viewport. Keep positioning in CSS space.
-    // The stylesheet places an entry on the unobscured screen, as the owner does.
-    let placement = { x: Number.isFinite(left) ? left : rect.left, y: Number.isFinite(top) ? top : rect.top };
+    let placement: Position | undefined;
     try {
       const saved: unknown = JSON.parse(localStorage.getItem(storageKey) ?? 'null');
       if (saved && typeof saved === 'object' && 'x' in saved && 'y' in saved
         && typeof saved.x === 'number' && Number.isFinite(saved.x) && typeof saved.y === 'number' && Number.isFinite(saved.y)) placement = { x: saved.x, y: saved.y };
     } catch { /* Ignore invalid saved positions. */ }
+    placement ??= kept.current?.storageKey === storageKey ? kept.current.placement : undefined;
     const current: FloatingEntry = { element, placement, held: () => drag.current && position.current, show };
     entry.current = current;
     entries.add(current);
@@ -142,8 +156,9 @@ export function useTrackingPosition(storageKey = 'agent-remote-tracking-position
     window.visualViewport?.addEventListener('resize', resize);
     window.visualViewport?.addEventListener('scroll', resize);
     const observer = typeof ResizeObserver === 'undefined' ? undefined : new ResizeObserver(resize);
-    observer?.observe(root.current!);
+    observer?.observe(element);
     return () => {
+      if (current.placement) kept.current = { storageKey, placement: current.placement };
       entries.delete(current);
       entry.current = undefined;
       observer?.disconnect();
@@ -152,7 +167,7 @@ export function useTrackingPosition(storageKey = 'agent-remote-tracking-position
       window.visualViewport?.removeEventListener('scroll', resize);
       arrangeFloatingEntries();
     };
-  }, [storageKey]);
+  }, [storageKey, element]);
 
   const isTrigger = (target: EventTarget) => target instanceof Element && !!target.closest(triggerSelector);
   const handlers: HTMLAttributes<HTMLDivElement> = {

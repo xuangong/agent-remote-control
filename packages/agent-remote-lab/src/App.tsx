@@ -1324,8 +1324,7 @@ function AppContent({
     ? compositionSession(focusedAskSlot) : undefined : addressSession;
   const focusedAskOwner = focusedAskSession ? succession.ownerFor(viewKey(focusedAskSession)) : undefined;
   const focusedAskEntry = focusedAskSession && focusedAskOwner ? ask.entryFor(focusedAskSession, focusedAskOwner) : undefined;
-  const focusedAskState = focusedAskSession?.agentId === state?.agent?.id ? state
-    : focusedAskSession ? replicaFor(focusedAskSession.agentId).getState() : undefined;
+  const focusedAskState = focusedAskSession ? sourceStateFor(focusedAskSession) : undefined;
   const focusedAskUnavailable = !focusedAskSession ? undefined
     : !directory || !accessReady ? 'waiting for access'
     : transitioning ? 'waiting for the session switch to finish'
@@ -1388,6 +1387,12 @@ function AppContent({
   }
   function sourceCurrent(source: OpenedSession): boolean {
     return !sourceStale(source);
+  }
+  /** A source's state as its view shows it: the view's connection may hold its own replica, not the cached one. */
+  function sourceStateFor(source: OpenedSession): AgentReplicaState | undefined {
+    if (source.agentId === state?.agent?.id) return state;
+    const connection = connections.find(source);
+    return (connection?.agentId === source.agentId ? connection.replica : replicas.get(source.agentId))?.getState();
   }
   function sourceStale(source: OpenedSession): SourceStaleness | undefined {
     if (initialState && !succession.active) {
@@ -1478,7 +1483,7 @@ function AppContent({
       const entry = ask.entryFor(session, succession.ownerFor(viewKey(session)));
       return entry.record?.target && sessionKey(entry.record.target) === sessionKey(item);
     });
-    if (source) { revealSession(source); openAsk(source, replicas.get(source.agentId)?.getState()); }
+    if (source) { revealSession(source); openAsk(source, sourceStateFor(source)); }
     else void openSession(item, undefined, undefined, false, undefined, 'history');
   });
   const notificationTargets = JSON.stringify([...openWindows, ...askActivitySessions.map(entry => entry.session)].map(sessionKey).sort());
@@ -2291,7 +2296,7 @@ function AppContent({
         onOpen={() => { if (canOpenFocusedAsk && focusedAskSession) openAsk(focusedAskSession, focusedAskState); }} /> : null}
       {askSources.flatMap(({ source, owner }) => {
         return ask.isOpen(source, owner)
-          ? [renderAsk(source, source.agentId === state?.agent?.id ? state : replicaFor(source.agentId).getState())] : [];
+          ? [renderAsk(source, sourceStateFor(source))] : [];
       })}
     </div>
     <WindowPresentationContext.Provider value={presentedViewId}>

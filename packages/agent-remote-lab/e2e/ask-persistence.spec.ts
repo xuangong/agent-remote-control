@@ -210,3 +210,35 @@ test('minimizing Ask while relations are pending does not later reopen or create
     expect(writes.filter(url => new URL(url).pathname.endsWith('/create'))).toHaveLength(1);
   } finally { release(); await fixture.close(); }
 });
+
+test('Ask opens for a session shown in a Window dock', async ({ page, isMobile }) => {
+  test.skip(isMobile, 'Docks are a desktop Window presentation.');
+  const fixture = await sessionLinkFixture({ automaticSignIn: true, listCreatedSessions: true });
+  try {
+    await page.setViewportSize({ width: 1680, height: 1000 });
+    await page.goto(fixture.url);
+    await page.getByRole('link', { name: 'Sign in', exact: true }).click();
+    await page.getByLabel('Connected Host').selectOption(fixture.hostId);
+    await showNewSession(page); await page.getByTestId('session-create').click();
+    const primary = page.locator('.lab-primary-group[data-selected="true"]').getByTestId('prompt-input');
+    await expect(primary).toBeEnabled();
+    await primary.fill('/ask');
+    await primary.press('Enter');
+    const trigger = page.getByRole('button', { name: 'Ask about this session', exact: true });
+    await expect(trigger).toBeEnabled();
+    await page.locator('.lab-session-dock-add').click();
+    const dock = page.locator('[data-dock-id]').first();
+    await dock.click();
+    await showNewSession(page);
+    const created = page.waitForResponse(response => new URL(response.url()).pathname.endsWith('/create'));
+    await page.getByTestId('session-create').click();
+    const docked = await (await created).json() as { nativeSessionId: string };
+    await expect(dock.getByTestId('prompt-input')).toBeEnabled();
+    // The dock's view connection holds its own replica of the session.
+    await expect(trigger).toBeEnabled();
+    const askCreation = page.waitForRequest(request => new URL(request.url()).pathname.endsWith('/create'));
+    await trigger.click();
+    expect((await askCreation).postDataJSON().sourceNativeSessionId).toBe(docked.nativeSessionId);
+    await expect(page.getByRole('dialog', { name: 'Ask', exact: true }).getByTestId('prompt-input')).toBeEnabled();
+  } finally { await fixture.close(); }
+});

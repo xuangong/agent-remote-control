@@ -25,7 +25,8 @@ it('shares a Host\'s session states with every page of its owner over the sessio
   };
   const first = await listen(alice), other = await listen(second), stranger = await listen(bob), plain = await listen(alice, 'observation=activity');
   await expect.poll(() => first.states()[0]).toMatchObject({ snapshot: true, hosts: [{ hostId, online: true }] });
-  expect(stranger.states()).toEqual([{ protocolVersion: '1.8.0', type: 'session_states', snapshot: true }]);
+  // Each page's snapshot arrives on its own socket, in no particular order.
+  await expect.poll(() => stranger.states()).toEqual([{ protocolVersion: '1.8.0', type: 'session_states', snapshot: true }]);
   send(host, { type: 'session_states', full: true, states: [{ providerId: 'codex', nativeSessionId: 'thread', state: 'running', updatedAt: 5 }] });
   for (const page of [first, other]) {
     await expect.poll(() => page.states().at(-1)).toMatchObject({ hosts: [{ hostId, online: true, confirmedAgeMs: expect.any(Number) }],

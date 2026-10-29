@@ -21,7 +21,7 @@ export interface ClaudeAgentProviderOptions extends ClaudeSessionOptions { catal
 export class ClaudeAgentProvider implements AgentProviderAdapter {
   /** Ordinary create supplies a nonempty UUID; this does not bound resume, fork, or history. */
   readonly createdSessionIdMaxLength: number = 36;
-  readonly descriptor = { providerId: 'claude', displayName: 'Claude Code', sessionExtensions: { instructions: true, tools: true }, sessionAccess: { readOnly: true as const } };
+  readonly descriptor = { providerId: 'claude', displayName: 'Claude Code', sessionExtensions: { instructions: true, tools: true, toolNamespaces: 'live' as const }, sessionAccess: { readOnly: true as const } };
   readonly nativeEvidence: AgentProviderNativeEvidence = {
     availability: () => ({ status: 'configured', version: 2 }),
     createEmpty: async config => {

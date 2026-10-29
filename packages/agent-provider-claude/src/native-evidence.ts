@@ -31,7 +31,7 @@ export function claudeAuthority(sessionId: string, cwd: string, options: ClaudeS
 }
 export interface ClaudeEmptyDescriptor { version: 2; kind: 'claude-empty-session'; sessionId: string; cwd: string; authority: AgentNativeAuthorityScope; config: Partial<ClaudeSessionConfig> }
 export function claudeEmptyHandle(config: ClaudeSessionConfig, options: ClaudeSessionOptions): AgentPersistenceHandle {
-  const { tools: _tools, ...saved } = config;
+  const { tools: _tools, toolNamespaces: _toolNamespaces, ...saved } = config;
   const descriptor: ClaudeEmptyDescriptor = { version: 2, kind: 'claude-empty-session', sessionId: config.sessionId,
     cwd: config.cwd!, authority: claudeAuthority(config.sessionId, config.cwd!, options), config: saved };
   const handle = { providerId: 'claude', sessionId: config.sessionId, opaque: canonical(descriptor) };

@@ -1,11 +1,11 @@
 import { RESOURCE_INPUT_CAPABILITIES } from '@orchardworks/agent-provider-sdk';
-import { AgentOperationRejectedError, prepareAgentOperation } from '@orchardworks/agent-provider-sdk';
+import { AgentOperationRejectedError, bindAgentSessionToolNamespaces, prepareAgentOperation } from '@orchardworks/agent-provider-sdk';
 import {ClaudeNativeProcess} from './native-process.js';
 import { claudeMessageContent } from './message-content.js';
 import { randomUUID } from 'node:crypto';
 import { query, type Options, type ModelInfo, type PermissionMode, type Query, type SDKMessage, type SDKUserMessage, type SessionMessage } from '@anthropic-ai/claude-agent-sdk';
 import type { AgentCapabilities, AgentInputAcceptance, AgentInputPart, AgentInteractionResponse, AgentMessageOptions, AgentRuntimeInfo, AgentSession, AgentSessionConfig,
-  AgentStreamEvent, AgentNativeValidityToken, AgentPromptEditEvidence, ProviderStreamItem } from '@orchardworks/agent-provider-sdk';
+  AgentSessionToolNamespace, AgentStreamEvent, AgentNativeValidityToken, AgentPromptEditEvidence, ProviderStreamItem } from '@orchardworks/agent-provider-sdk';
 import { IMAGE_INPUT_CAPABILITIES, validateSessionSetting, type AgentSessionSetting } from '@orchardworks/agent-provider-sdk';
 import { Channel, deadline, DeadlineError } from './channel.js';
 import { ClaudeInteractions } from './interactions.js';
@@ -15,11 +15,11 @@ import { ClaudeEventProjector } from './projector.js';
 import { discoverClaudeCommands } from './commands.js';
 import { ClaudeChildren } from './children.js';
 import { createClaudeCatalog, type ClaudeCatalog, type ClaudeTimelineMessage } from './catalog.js';
-import { createClaudeSessionTools } from './session-tools.js';
+import { claudeToolDeclaration, createClaudeSessionTools, type ClaudeSessionTools } from './session-tools.js';
 import { ClaudeNativeEvidence, claudeEmptyHandle } from './native-evidence.js';
 import { CLAUDE_ALLOWS_BYPASS_PERMISSIONS, claudePermissionModeOptions, claudeReadOnlyOptions, claudeSandbox, isResumableClaudePermissionMode, type ResumableClaudePermissionMode } from './permission-modes.js';
 
-export type ClaudeQuery = AsyncIterable<SDKMessage> & Pick<Query, 'initializationResult' | 'setPermissionMode' | 'close' | 'supportedCommands' | 'reloadSkills' | 'supportedModels' | 'setModel'> & Partial<Pick<Query, 'applyFlagSettings' | 'getContextUsage'>> & {
+export type ClaudeQuery = AsyncIterable<SDKMessage> & Pick<Query, 'initializationResult' | 'setPermissionMode' | 'close' | 'supportedCommands' | 'reloadSkills' | 'supportedModels' | 'setModel'> & Partial<Pick<Query, 'applyFlagSettings' | 'getContextUsage' | 'setMcpServers'>> & {
   /** The pinned SDK implements this control without declaring it on public Query. */
   getSettings?: () => Promise<unknown>;
   /** The pinned SDK forwards cancelQueued without declaring it on public Query; the response lists cancelled input. */
@@ -111,7 +111,10 @@ export class ClaudeAgentSession implements AgentSession {
   private disposed = false;
   private failure: Error | undefined;
   private native!: ClaudeQuery;
-  private hostTools?: ReturnType<typeof createClaudeSessionTools>;
+  private hostTools?: ClaudeSessionTools;
+  /** One MCP server per tool namespace, named after it; Claude names their tools mcp__<namespace>__<tool>. */
+  private namespaceServers = new Map<string, ClaudeSessionTools>();
+  private namespaceUpdates = Promise.resolve();
   private get readOnly(): boolean { return this.config.access === 'read_only'; }
   private readonly process: ClaudeNativeProcess;
   private closing?: Promise<void>;
@@ -170,6 +173,10 @@ export class ClaudeAgentSession implements AgentSession {
     const session = new ClaudeAgentSession(config, options, messages);
     try {
       if (config.tools?.length) session.hostTools = createClaudeSessionTools(config.tools, () => session.requireOpen());
+      for (const namespace of bindAgentSessionToolNamespaces(config.toolNamespaces, () => session.requireOpen())) {
+        session.namespaceServers.set(namespace.name, createClaudeSessionTools(namespace.tools, () => session.requireOpen(), namespace.name));
+      }
+      const servers = session.mcpServers(), allow = session.hostToolRules(session.namespaceServers.keys());
       if (resume) await session.children.restore();
       const readOnly = session.readOnly ? claudeReadOnlyOptions(config.cwd ?? process.cwd()) : undefined;
       const sandbox = readOnly?.sandbox ?? claudeSandbox(session.permissionMode, !!options.restrictedNative);
@@ -182,7 +189,8 @@ export class ClaudeAgentSession implements AgentSession {
         includePartialMessages: true, forwardSubagentText: true, persistSession: true, settingSources: ['user', 'project', 'local'],
         systemPrompt: config.systemPrompt !== undefined ? [config.systemPrompt, config.instructions].filter(value => value !== undefined && value !== '').join('\n\n')
           : { type: 'preset', preset: 'claude_code', ...(config.instructions ? { append: config.instructions } : {}) },
-        ...(session.hostTools ? { mcpServers: { agent_host: session.hostTools } } : {}),
+        ...(Object.keys(servers).length ? { mcpServers: servers } : {}),
+        ...(allow.length ? { settings: { permissions: { allow } } } : {}),
         ...(sandbox ? { sandbox } : {}),
         permissionMode: session.permissionMode, allowDangerouslySkipPermissions: CLAUDE_ALLOWS_BYPASS_PERMISSIONS, canUseTool: session.interactions.request,
         hooks: { Stop: [{ hooks: [async input => { if (input.hook_event_name === 'Stop') session.nativeEvidence.noteStop(input); return {}; }] }] },
@@ -440,9 +448,48 @@ export class ClaudeAgentSession implements AgentSession {
     if (this.disposed) throw new Error('Claude closed before sandbox confirmation.');
     this.sandbox = applied;
   }
-  private async updateNative(operation: Promise<void>, label: string): Promise<void> {
-    try { await deadline(operation, this.timeout, label); }
+  private async updateNative<T>(operation: Promise<T>, label: string): Promise<T> {
+    try { return await deadline(operation, this.timeout, label); }
     catch (error) { if (error instanceof DeadlineError) this.fail(error); throw error; }
+  }
+
+  /** Tool namespaces change on the running native process; updates apply in order. */
+  updateToolNamespaces(namespaces: readonly AgentSessionToolNamespace[]): Promise<void> {
+    const update = this.namespaceUpdates.then(() => this.applyToolNamespaces(namespaces));
+    this.namespaceUpdates = update.catch(() => {});
+    return update;
+  }
+  private async applyToolNamespaces(namespaces: readonly AgentSessionToolNamespace[]): Promise<void> {
+    this.requireOpen();
+    const bound = bindAgentSessionToolNamespaces(namespaces, () => this.requireOpen());
+    if (!this.native.setMcpServers || !this.native.applyFlagSettings) {
+      throw new AgentOperationRejectedError('operation_rejected', 'This Claude Code version cannot change tools during a session. Update Claude Code.');
+    }
+    const current = this.namespaceServers, next = new Map<string, ClaudeSessionTools>();
+    for (const namespace of bound) {
+      const existing = current.get(namespace.name);
+      if (existing?.declaration === claudeToolDeclaration(namespace.tools)) { existing.rebind(namespace.tools); next.set(namespace.name, existing); }
+      else next.set(namespace.name, createClaudeSessionTools(namespace.tools, () => this.requireOpen(), namespace.name));
+    }
+    // Host tools run without asking, so their rules are in place before Claude can offer them.
+    await this.updateNative(this.native.applyFlagSettings({ permissions: { allow: this.hostToolRules(new Set([...current.keys(), ...next.keys()])) } }), 'Claude tool permission update');
+    // Claude keeps a connected server by name, so a server whose declaration changed is removed before it returns.
+    const kept = new Map([...current].filter(([name, tools]) => next.get(name) === tools));
+    if (kept.size !== current.size) await this.updateNative(this.native.setMcpServers(this.mcpServers(kept)), 'Claude tool update');
+    const result = await this.updateNative(this.native.setMcpServers(this.mcpServers(next)), 'Claude tool update');
+    for (const [name, tools] of current) if (next.get(name) !== tools) await tools.server.instance.close();
+    const failed = Object.entries(result.errors ?? {});
+    for (const [name] of failed) { await next.get(name)?.server.instance.close(); next.delete(name); }
+    this.namespaceServers = next;
+    await this.updateNative(this.native.applyFlagSettings({ permissions: { allow: this.hostToolRules(next.keys()) } }), 'Claude tool permission update');
+    if (failed.length) throw new Error(`Claude could not add tool namespace ${failed[0]![0]}: ${failed[0]![1]}`);
+  }
+  private mcpServers(namespaces: ReadonlyMap<string, ClaudeSessionTools> = this.namespaceServers) {
+    return { ...(this.hostTools ? { agent_host: this.hostTools.server } : {}), ...Object.fromEntries([...namespaces].map(([name, tools]) => [name, tools.server])) };
+  }
+  /** Namespace tools belong to the Host, which governs what they do. A read-only session cannot ask, so its Host tools are allowed too. */
+  private hostToolRules(namespaces: Iterable<string>): string[] {
+    return [...(this.readOnly && this.hostTools ? ['mcp__agent_host'] : []), ...[...namespaces].map(name => `mcp__${name}`)];
   }
   private confirmPermissionMode(mode: PermissionMode): void {
     this.settingsRevision++;
@@ -530,7 +577,8 @@ export class ClaudeAgentSession implements AgentSession {
     }
     return this.closing = (async () => {
       await this.children.close();
-      if (this.hostTools) await this.hostTools.instance.close();
+      if (this.hostTools) await this.hostTools.server.instance.close();
+      for (const tools of this.namespaceServers.values()) await tools.server.instance.close();
       if (firstClose) {
         if (!this.failure) this.runtimeUpdated();
         this.output.close();
@@ -638,4 +686,4 @@ export class ClaudeAgentSession implements AgentSession {
   }
 }
 
-function persistedConfig({ tools: _tools, ...config }: ClaudeSessionConfig) { return config; }
+function persistedConfig({ tools: _tools, toolNamespaces: _toolNamespaces, ...config }: ClaudeSessionConfig) { return config; }

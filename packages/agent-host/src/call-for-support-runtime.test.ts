@@ -251,3 +251,18 @@ it('keeps an ordinary Team member held so the presence of a session the user dri
     expect(h.released.filter(id => id === leader)).toEqual([]);
   } finally { await h.close(); }
 });
+
+it('removes the worktree of a supporter whose creation failed, since that seat is never created again', async () => {
+  const h = await supportHarness({ failCreate: creation => !!creation.cwd?.includes('.agent-remote') });
+  try {
+    const profile = h.profile({ ...reviewProfile, mandate: { ...reviewProfile.mandate, supporters: [{ providerId: 'codex', model: 'gpt-5.5' }], workspaces: ['worktree'] } }); h.enable([profile.id]);
+    const { roleId } = await h.call({ operationId: 'op-1', profileId: profile.id });
+    const coordinator = await h.runtime.extensions(h.ref('codex', h.team(roleId).members[0]!.nativeSessionId!));
+    await run(coordinator, 'propose_roster', { operationId: 'roster', rationale: 'A fix.',
+      members: [{ name: 'Fixer', responsibility: 'Write the fix.', providerId: 'codex', model: 'gpt-5.5', workspace: 'worktree' }] }).catch(() => undefined);
+    const supporter = h.team(roleId).members[2]!;
+    expect(supporter.creation).toBe('unknown');
+    expect(existsSync(join(h.directory, '.agent-remote', 'worktrees', roleId, supporter.id))).toBe(false);
+    expect(h.git('worktree', 'list')).not.toContain(supporter.id);
+  } finally { await h.close(); }
+});

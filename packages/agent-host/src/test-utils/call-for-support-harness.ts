@@ -17,7 +17,7 @@ export const reviewProfile: CallForSupportProfileInput = { name: 'Cross review',
   enableByDefault: false, mandate: { supporters: [{ providerId: 'claude', model: 'opus' }], maxSupporters: 2, workspaces: ['shared'], remoteHosts: [], approval: 'within_mandate' } };
 
 /** A Relay Team broker with Call For Support and a Controller Team runtime over fake native sessions. */
-export async function supportHarness(options: { callForSupport?: boolean } = {}) {
+export async function supportHarness(options: { callForSupport?: boolean; failCreate?: (creation: SessionCreation) => boolean } = {}) {
   const directory = await realpath(await mkdtemp(join(tmpdir(), 'call-for-support-'))), cache = createOperationCache();
   // The worker works in a git repository with one commit.
   const git = (...args: string[]) => execFileSync('git', ['-C', directory, '-c', 'user.email=t@t', '-c', 'user.name=t', ...args], { encoding: 'utf8' }).trim();
@@ -58,7 +58,7 @@ export async function supportHarness(options: { callForSupport?: boolean } = {})
     controllerId: 'controller', available: () => true, supportedProviders: () => ['codex', 'claude', 'copilot'], readOnlyProviders: () => ['codex', 'claude'],
     callForSupport: () => options.callForSupport ?? true, genericSuccession: () => true,
     sessionRouting: { resolve: anchor => ({ anchor, target: anchor, operationIds: [] }), assertCurrent: (anchor, target) => { if (anchor.nativeSessionId !== target.nativeSessionId) throw new Error('Wrong recipient'); } },
-    async create(provider, creation, extensions) { const id = `native-${created.length}`; created.push({ id, provider, creation, extensions }); session(id, provider); return id; },
+    async create(provider, creation, extensions) { if (options.failCreate?.(creation)) throw new Error('The native session could not start.'); const id = `native-${created.length}`; created.push({ id, provider, creation, extensions }); session(id, provider); return id; },
     async acquire(_provider, id) { if (!sessions.has(id)) throw new Error('Session is unavailable.'); acquired.push(id); return { agent: agent(id), release() { released.push(id); } }; },
     execute: createOperationExecutor(cache, 'call-for-support-test'),
   };

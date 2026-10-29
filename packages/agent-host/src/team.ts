@@ -8,7 +8,7 @@ import type { SessionExecutionRouting } from './session-succession-service.js';
 import type { RoleSuccessionDecision, SessionRole } from './session-role-succession.js';
 import type { SessionCreation } from './role-session-creation.js';
 import { coordinatorInstructions, coordinatorTools, supporterInstructions } from './call-for-support-roles.js';
-import { collectPatch, createBundle, fetchBundle, prepareWorktree, removeWorktree } from './call-for-support-workspaces.js';
+import { collectPatch, createBundle, fetchBundle, prepareWorktree, removeWorktree, repositoryRoot, worktreePath } from './call-for-support-workspaces.js';
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { accountUsage, type SupportUsage } from './call-for-support-usage.js';
 import { tmpdir } from 'node:os';
@@ -32,7 +32,7 @@ export interface TeamRuntimeAccess {
   execute: SessionWireOperationExecutor;
 }
 interface LocalSeat { seat: TeamSeat; creation: 'dispatching' | 'ready' | 'unknown';
-  /** A supporter's own worktree, removed once when the supporter is released or its Team archives. */
+  /** A supporter's own worktree, removed once its creation failed, the supporter is released or its Team archives. */
   worktree?: { root: string; path: string; removed?: true };
   /** A coordinator's or supporter's usage, and what the Relay last accepted of it. */
   usage?: SupportUsage & { reported?: { tokens: number; costUsd?: number; at: number } };
@@ -166,14 +166,21 @@ export class TeamRuntime implements SessionRole {
     const workspace = seat.member.workspace;
     if (workspace?.kind === 'worktree' || workspace?.kind === 'remote') {
       if (!seat.member.cwd) throw new Error('The supporter\'s repository is unknown.');
-      // A remote supporter's repository first receives the commit from the bundle the worker's Host uploaded.
-      if (workspace.kind === 'remote') {
-        if (!workspace.bundle) throw new Error('The support bundle is missing.');
-        const bundle = await this.resourceFiles.download(seat.teamId, seat.member.id, workspace.bundle);
-        try { await fetchBundle(workspace.repository, bundle.localPath, seat.teamId, seat.member.id); } finally { await rm(bundle.localPath, { force: true }); }
+      const repository = workspace.kind === 'remote' ? workspace.repository : seat.member.cwd;
+      try {
+        // A remote supporter's repository first receives the commit from the bundle the worker's Host uploaded.
+        if (workspace.kind === 'remote') {
+          if (!workspace.bundle) throw new Error('The support bundle is missing.');
+          const bundle = await this.resourceFiles.download(seat.teamId, seat.member.id, workspace.bundle);
+          try { await fetchBundle(workspace.repository, bundle.localPath, seat.teamId, seat.member.id); } finally { await rm(bundle.localPath, { force: true }); }
+        }
+        const prepared = await prepareWorktree(repository, seat.teamId, seat.member.id, workspace.commit);
+        seat.member.cwd = prepared.cwd; worktree = { root: prepared.root, path: prepared.worktree };
+      } catch (error) {
+        // Nothing records this member yet, so what its preparation left (a fetched ref, a worktree) is removed now.
+        await repositoryRoot(repository).then(root => removeWorktree(root, worktreePath(root, seat.teamId, seat.member.id))).catch(() => undefined);
+        throw error;
       }
-      const prepared = await prepareWorktree(workspace.kind === 'remote' ? workspace.repository : seat.member.cwd, seat.teamId, seat.member.id, workspace.commit);
-      seat.member.cwd = prepared.cwd; worktree = { root: prepared.root, path: prepared.worktree };
     }
     const record: LocalSeat = { seat, creation: 'dispatching', receipts: Object.create(null), ...(worktree ? { worktree } : {}) };
     this.records.push(record); await this.save();
@@ -182,7 +189,17 @@ export class TeamRuntime implements SessionRole {
       seat.member.nativeSessionId = await this.access.create(seat.member.providerId, { cwd: seat.member.cwd, model: seat.member.model, reasoningEffort: seat.member.reasoningEffort }, this.tools(seat, () => actual));
       actual = this.anchor(seat);
       record.creation = 'ready'; seat.member.creation = 'ready'; seat.member.activity = 'unknown'; await this.save(); return seat.member;
-    } catch (error) { record.creation = 'unknown'; seat.member.creation = 'unknown'; await this.save(); throw error; }
+    } catch (error) {
+      record.creation = 'unknown'; seat.member.creation = 'unknown'; await this.save();
+      // A seat whose creation outcome is unknown is never created again, so its worktree is removed now.
+      await this.removeSeatWorktree(record);
+      throw error;
+    }
+  }
+  /** Removes a seat's worktree once; a failure is retried on a later tick. */
+  private async removeSeatWorktree(record: LocalSeat): Promise<void> {
+    if (!record.worktree || record.worktree.removed) return;
+    try { await removeWorktree(record.worktree.root, record.worktree.path); record.worktree.removed = true; await this.save(); } catch { /* Retried on the next tick. */ }
   }
   /** A bundle of a commit in the worker's repository, uploaded as the worker's seat for a remote supporter. */
   async supportBundle(input: { teamId: string; memberId: string; commit: string; base?: string; operationId: string }): Promise<unknown> {
@@ -262,6 +279,7 @@ export class TeamRuntime implements SessionRole {
     this.ticking = true;
     try {
       await this.ready;
+      for (const record of this.records) if (record.creation === 'unknown') await this.removeSeatWorktree(record);
       if (!this.records.some(record => record.creation === 'ready')) return;
       const value = await this.request({ action: 'poll' });
       if (!Array.isArray(value) || !value.every(isTeam)) throw new Error('Invalid Team catalog.');
@@ -270,9 +288,7 @@ export class TeamRuntime implements SessionRole {
         const team = (value as Team[]).find(team => team.id === record.seat.teamId);
         try { await this.reconcileReceipts(record, team); } catch { /* Retry receipt reads independently of other seats and lease cleanup. */ }
         const member = team?.members.find(item => item.id === record.seat.member.id);
-        if (record.worktree && !record.worktree.removed && (member?.creation === 'released' || team?.status === 'archiving')) {
-          try { await removeWorktree(record.worktree.root, record.worktree.path); record.worktree.removed = true; await this.save(); } catch { /* Retried on the next tick. */ }
-        }
+        if (member?.creation === 'released' || team?.status === 'archiving') await this.removeSeatWorktree(record);
       }
       for (const team of value as Team[]) for (const member of team.members) {
         const record = this.records.find(item => item.seat.teamId === team.id && item.seat.member.id === member.id && item.creation === 'ready');

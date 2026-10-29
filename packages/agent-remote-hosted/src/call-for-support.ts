@@ -196,23 +196,46 @@ export function workerGroup(teams: SavedTeam[], resolve: TeamBrokerPorts['resolv
   });
 }
 
-const oldestArchivedGroup = (teams: SavedTeam[]) => teams.filter(team => team.callForSupport && team.status === 'archived')
-  .reduce<SavedTeam | undefined>((found, team) => !found || team.updatedAt < found.updatedAt ? team : found, undefined);
+/** A group without an open or queued call is archived after this long, so it can be removed to make room. */
+export const CALL_FOR_SUPPORT_IDLE_ARCHIVE_MS = 7 * 24 * 60 * 60 * 1000;
+/** A group used this recently is never removed: an operation retried in this window finds its group. */
+export const CALL_FOR_SUPPORT_RECENT_MS = 60 * 60 * 1000;
 
-/**
- * Makes room for one more Team. At the Team limit the oldest archived support group is removed: groups are created automatically
- * and nothing else would remove them. Ordinary Teams are never removed.
- */
-export function admitTeam(teams: SavedTeam[]): void {
-  if (teams.length < CALL_FOR_SUPPORT_TEAM_LIMIT) return;
-  const oldest = oldestArchivedGroup(teams) ?? fail('Team capacity reached.');
-  teams.splice(teams.indexOf(oldest), 1);
+/** When a group last received a call or a report. */
+const lastUsed = (team: SavedTeam) => Math.max(team.createdAt, ...group(team).calls.map(call => call.reportedAt ?? call.createdAt));
+const idle = (team: SavedTeam) => !group(team).calls.some(call => call.status === 'open' || call.status === 'queued');
+
+/** The next group to remove for room: archived groups first, then idle ones, least recently used first, never one used recently. */
+function removableGroup(teams: SavedTeam[], now: number): SavedTeam | undefined {
+  const archived = (team: SavedTeam) => team.status === 'archived' ? 0 : 1;
+  return teams.filter(team => team.callForSupport && now - lastUsed(team) >= CALL_FOR_SUPPORT_RECENT_MS && (team.status === 'archived' || idle(team)))
+    .sort((a, b) => archived(a) - archived(b) || lastUsed(a) - lastUsed(b) || a.updatedAt - b.updatedAt)[0];
 }
 
-/** Removes the oldest archived support groups while the Team state is larger than the retention bound. */
-export function pruneArchivedGroups(teams: SavedTeam[]): void {
-  for (let oldest = oldestArchivedGroup(teams); oldest && Buffer.byteLength(JSON.stringify(teams)) > CALL_FOR_SUPPORT_RETENTION_BYTES; oldest = oldestArchivedGroup(teams)) {
-    teams.splice(teams.indexOf(oldest), 1);
+/**
+ * Makes room for one more Team. At the Team limit a support group is removed (see removableGroup): groups are created
+ * automatically and nothing else would remove them. Ordinary Teams are never removed.
+ */
+export function admitTeam(teams: SavedTeam[], now: number): void {
+  if (teams.length < CALL_FOR_SUPPORT_TEAM_LIMIT) return;
+  const removed = removableGroup(teams, now) ?? fail('Team capacity reached.');
+  teams.splice(teams.indexOf(removed), 1);
+}
+
+/** Removes support groups (see removableGroup) while the Team state is larger than the retention bound. */
+export function pruneGroups(teams: SavedTeam[], now: number): void {
+  for (let removed = removableGroup(teams, now); removed && Buffer.byteLength(JSON.stringify(teams)) > CALL_FOR_SUPPORT_RETENTION_BYTES; removed = removableGroup(teams, now)) {
+    teams.splice(teams.indexOf(removed), 1);
+  }
+}
+
+/** Archives groups that have had no open or queued call for a week; their members' Controllers complete the archive. */
+export function archiveIdleGroups(teams: SavedTeam[], now: number): void {
+  for (const team of teams) {
+    if (!team.callForSupport || team.status !== 'active' || !idle(team) || now - lastUsed(team) < CALL_FOR_SUPPORT_IDLE_ARCHIVE_MS) continue;
+    team.status = 'archiving';
+    for (const message of team.messages) if (message.status === 'queued') message.status = 'canceled';
+    team.revision++; team.updatedAt = now;
   }
 }
 
@@ -253,10 +276,11 @@ export class CallForSupportGroups {
         if (!created.callForSupport || JSON.stringify(created.source) !== JSON.stringify(input.source) || created.callForSupport.profileId !== profile.id) fail('Creation identity has different input.');
         return { team: created, call: addCall(created, { ...input.call, id: callForSupportCallId(created.id, input.operationId), origin: input.origin }, now), created: true };
       }
-      const current = workerGroup(teams, this.broker.ports.resolveSession, input.source.hostId, input.source, team => team.callForSupport?.profileId === profile.id);
+      // An archiving group takes no calls: a call for its profile starts a new group.
+      const current = workerGroup(teams, this.broker.ports.resolveSession, input.source.hostId, input.source, team => team.callForSupport?.profileId === profile.id && team.status === 'active');
       if (current && !input.fresh) return { team: current, call: addCall(current, { ...input.call, id: callForSupportCallId(current.id, input.operationId), origin: input.origin }, now), created: false };
       if (current) { current.status = 'archiving'; for (const message of current.messages) if (message.status === 'queued') message.status = 'canceled'; current.revision++; current.updatedAt = now; }
-      admitTeam(teams);
+      admitTeam(teams, now);
       const team = newGroup({ operationId: input.operationId, source: input.source, profile, coordinatorProviderId }, now);
       teams.push(team);
       return { team, call: addCall(team, { ...input.call, id: callForSupportCallId(team.id, input.operationId), origin: input.origin }, now), created: true };

@@ -63,7 +63,8 @@ it('raises the budget and resumes a paused role', async () => {
 
 it('finds a session\'s support roles and enabled profiles', () => {
   const team = supportTeam();
-  expect(workerGroups([team, { ...team, id: 'other', members: team.members.map(member => member.role === 'requester' ? { ...member, nativeSessionId: 'else' } : member) }], source).map(item => item.id)).toEqual(['group']);
+  expect(workerGroups([team, { ...team, id: 'other', members: team.members.map(member => member.role === 'requester' ? { ...member, nativeSessionId: 'else' } : member) },
+    { ...team, id: 'archiving', status: 'archiving' }], source).map(item => item.id)).toEqual(['group']);
   const profile = { id: 'p', name: 'P', description: '', coordinator: {}, enableByDefault: true, revision: 1, updatedAt: 1, mandate: team.callForSupport!.mandate };
   expect(enabledProfiles({ profiles: [profile], enablement: [] }, source)).toEqual({ profiles: [profile], explicit: false });
   expect(enabledProfiles({ profiles: [profile], enablement: [{ ...source, profileIds: [], updatedAt: 1 }] }, source)).toEqual({ profiles: [], explicit: true });

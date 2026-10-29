@@ -10,7 +10,8 @@ const errorMessage = (error: unknown) => error instanceof Error ? error.message 
 const sameSession = (a: Pick<TeamSource, 'hostId' | 'providerId' | 'nativeSessionId'>, b: Pick<TeamSource, 'hostId' | 'providerId' | 'nativeSessionId'>) =>
   a.hostId === b.hostId && a.providerId === b.providerId && a.nativeSessionId === b.nativeSessionId;
 /** The support groups that serve this session as their worker. */
-export const workerGroups = (teams: readonly Team[], source: TeamSource) => teams.filter(team => team.callForSupport && team.status !== 'archived'
+/** The session's support roles that take calls; an archiving role takes none, and calling on its profile starts a new role. */
+export const workerGroups = (teams: readonly Team[], source: TeamSource) => teams.filter(team => team.callForSupport && team.status === 'active'
   && team.members.some(member => member.role === 'requester' && member.nativeSessionId && sameSession({ ...member, nativeSessionId: member.nativeSessionId }, source)));
 /** The profiles this session may call for: its own choice, or else the profiles enabled by default. */
 export function enabledProfiles(settings: CallForSupportSettings, source: TeamSource): { profiles: CallForSupportProfile[]; explicit: boolean } {

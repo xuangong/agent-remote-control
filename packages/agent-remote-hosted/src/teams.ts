@@ -1,7 +1,7 @@
 import { assertTeamQueueCapacity, compactTeamDeliveries, unresolvedTeamDelivery, stripPrivateTeamEvidence, replayTeamDelivery, validSavedTeam, type SavedTeam } from './team-delivery.js';
 export { teamMessageBudgetBytes } from './team-delivery.js';
 import type { TeamResourceStore } from './team-resources.js';
-import { admitTeam, CallForSupportGroups, compactCallForSupport, pruneArchivedGroups, type CallForSupportPorts } from './call-for-support.js';
+import { admitTeam, archiveIdleGroups, CallForSupportGroups, compactCallForSupport, pruneGroups, type CallForSupportPorts } from './call-for-support.js';
 import { createHash, randomUUID } from 'node:crypto';
 import { nativeSessionRefKey, type NativeSessionRef, isTeamMember, type Team, type TeamAction, type TeamCreate, type TeamHostCall, type TeamMember, type TeamMessage, type TeamSeat, type TeamResource } from '@orchardworks/agent-remote-protocol';
 
@@ -55,7 +55,7 @@ export class TeamBroker {
       const existing = teams.map(team => team.id);
       const result = update(teams);
       for (const team of teams) { compactTeamDeliveries(team, this.ports.now()); compactCallForSupport(team); }
-      pruneArchivedGroups(teams);
+      archiveIdleGroups(teams, this.ports.now()); pruneGroups(teams, this.ports.now());
       const remaining = new Set(teams.map(team => team.id));
       removed = existing.some(id => !remaining.has(id));
       return result;
@@ -125,7 +125,7 @@ export class TeamBroker {
     const team = await this.change(teams => {
       const existing = teams.find(item => item.operationId === input.operationId);
       if (existing) { if (JSON.stringify(existing.source) !== JSON.stringify(input.source)) fail('Creation identity has different input.'); return existing; }
-      admitTeam(teams);
+      admitTeam(teams, this.ports.now());
       const now = this.ports.now();
       const leader: TeamMember = { id: randomUUID(), role: 'leader', hostId: input.source.hostId, providerId: input.source.providerId,
         name: 'Leader', responsibility: 'Discuss requirements, implement directly, coordinate members, validate and report delivery.',

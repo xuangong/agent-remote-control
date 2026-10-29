@@ -47,5 +47,7 @@ export function supportFixture(options: { capable?: string[]; readOnly?: boolean
   const worker = (nativeSessionId = 'worker') => ({ providerId: 'codex', nativeSessionId, title: 'Implement login' });
   const call = (input: Partial<Extract<TeamHostCall, { action: 'call_for_support' }>> & { operationId: string }, hostId = 'mac') =>
     broker.hostCall(hostId, { action: 'call_for_support', worker: worker(), task: 'Review the change.', deliverable: 'findings', context: { commit: 'abcdef1' }, ...input } as TeamHostCall) as Promise<any>;
-  return { broker, ports, state, seats, bundles, profile, enable, call, worker, teams: () => teams, team: (id: string) => teams.find(team => team.id === id)! };
+  return { broker, ports, state, seats, bundles, profile, enable, call, worker, teams: () => teams, team: (id: string) => teams.find(team => team.id === id)!,
+    /** Moves the Relay's clock forward. */
+    advance: (ms: number) => { now += ms; } };
 }

@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import { expect, it } from 'vitest';
 import type { TeamHostCall } from '@orchardworks/agent-remote-protocol';
-import { CALL_FOR_SUPPORT_TEAM_LIMIT } from './call-for-support.js';
+import { CALL_FOR_SUPPORT_IDLE_ARCHIVE_MS, CALL_FOR_SUPPORT_RECENT_MS, CALL_FOR_SUPPORT_TEAM_LIMIT } from './call-for-support.js';
 import { supportFixture } from './test-utils/call-for-support-fixture.js';
 
 /** Uploads and pins one resource as a group's worker seat, as a report attachment would be. */
@@ -25,6 +25,7 @@ it('makes room at capacity by removing the oldest archived support group with it
     const template = teams.find(team => team.id === plain.id)!;
     while (teams.length < CALL_FOR_SUPPORT_TEAM_LIMIT) teams.push({ ...structuredClone(template), id: `filler-${teams.length}`, operationId: `filler-${teams.length}`, status: 'active' });
   });
+  f.advance(CALL_FOR_SUPPORT_RECENT_MS);
 
   const next = await group('w3');
   expect(f.teams()).toHaveLength(CALL_FOR_SUPPORT_TEAM_LIMIT);
@@ -48,6 +49,7 @@ it('deletes files of Teams that no longer exist on the next removal, including t
   const orphan = await group('w3'), orphanResource = await pinnedResource(f, orphan);
   await f.ports.change(teams => { teams.splice(teams.findIndex(team => team.id === orphan), 1); Object.assign(teams.find(team => team.id === archived)!, { status: 'archived', updatedAt: 1 }); });
   await f.ports.change(teams => { while (teams.length < CALL_FOR_SUPPORT_TEAM_LIMIT) teams.push({ ...structuredClone(teams.find(team => team.id === kept)!), id: `filler-${teams.length}`, operationId: `filler-${teams.length}` }); });
+  f.advance(CALL_FOR_SUPPORT_RECENT_MS);
   await group('w4');
   await expect(f.ports.resources!.getMetadata(`team:${archived}`, archivedResource)).rejects.toThrow();
   await expect(f.ports.resources!.getMetadata(`team:${orphan}`, orphanResource)).rejects.toThrow();
@@ -78,4 +80,42 @@ it('tells the coordinator to collect again when an unattached upload expired bef
   clock = 2000;
   await expect(f.broker.hostCall('mac', { action: 'report_support', teamId: roleId, memberId: coordinator.id, callId, operationId: 'report',
     report: { status: 'reported', summary: 'A fix.', findings: [], resources: [resource.resourceId] } })).rejects.toThrow('no longer stored; collect or upload it again');
+});
+
+/** Reports a group's open call, as its coordinator would, so the group is idle. */
+async function reportOpenCall(f: ReturnType<typeof supportFixture>, teamId: string) {
+  const team = f.team(teamId), call = team.callForSupport!.calls.find(item => item.status === 'open')!;
+  await f.broker.hostCall('mac', { action: 'report_support', teamId, memberId: team.members[0]!.id, callId: call.id, operationId: `report-${teamId}`,
+    report: { status: 'reported', summary: 'Done.', findings: [] } });
+}
+
+it('archives a group a week after its last call, while a group with a waiting call stays active', async () => {
+  const f = supportFixture(); const profile = f.profile();
+  const group = async (worker: string) => { f.enable(worker, [profile.id]); return (await f.call({ operationId: `call-${worker}`, profileId: profile.id, worker: f.worker(worker) })).roleId as string; };
+  const idle = await group('w1'), waiting = await group('w2');
+  await reportOpenCall(f, idle);
+  f.advance(CALL_FOR_SUPPORT_IDLE_ARCHIVE_MS);
+  await group('w3');
+  expect([f.team(idle).status, f.team(waiting).status]).toEqual(['archiving', 'active']);
+  // The worker's next call for the profile starts a new group instead of failing on the archiving one.
+  const again = await f.call({ operationId: 'call-w1-again', profileId: profile.id, worker: f.worker('w1') });
+  expect(again).toMatchObject({ status: 'accepted' });
+  expect(again.roleId).not.toBe(idle);
+});
+
+it('makes room by removing the least recently used idle group, never one used within the last hour', async () => {
+  const f = supportFixture(); const profile = f.profile();
+  const group = async (worker: string) => { f.enable(worker, [profile.id]); return (await f.call({ operationId: `call-${worker}`, profileId: profile.id, worker: f.worker(worker) })).roleId as string; };
+  const older = await group('w1'), newer = await group('w2'), waiting = await group('w3');
+  await reportOpenCall(f, older); await reportOpenCall(f, newer);
+  await f.ports.change(teams => {
+    const template = teams.find(team => !team.callForSupport) ?? teams.find(team => team.id === waiting)!;
+    while (teams.length < CALL_FOR_SUPPORT_TEAM_LIMIT) teams.push({ ...structuredClone(template), id: `filler-${teams.length}`, operationId: `filler-${teams.length}` });
+  });
+  // Fillers copy the waiting group, whose call is open, so only the two idle groups can make room.
+  await expect(group('w4')).rejects.toThrow('Team capacity reached.');
+  f.advance(CALL_FOR_SUPPORT_RECENT_MS);
+  const added = await group('w4');
+  expect(f.teams().some(team => team.id === older)).toBe(false);
+  expect(f.teams().map(team => team.id)).toEqual(expect.arrayContaining([newer, waiting, added]));
 });

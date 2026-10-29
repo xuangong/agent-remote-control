@@ -3,7 +3,7 @@ import { once } from 'node:events';
 import { afterEach, expect, test } from 'vitest';
 import { WebSocket, WebSocketServer } from 'ws';
 import { CALL_FOR_SUPPORT_GROUP_BYTES, type TeamHostCall } from '@orchardworks/agent-remote-protocol';
-import { CALL_FOR_SUPPORT_RETENTION_BYTES } from './call-for-support.js';
+import { CALL_FOR_SUPPORT_RECENT_MS, CALL_FOR_SUPPORT_RETENTION_BYTES } from './call-for-support.js';
 import { relaySocket } from '../../agent-remote-lab/src/server/remote-host-broker.js';
 import { createHostBroker, type RemoteHostBrokerState } from './broker.js';
 import { validSavedTeam, type SavedTeam } from './team-delivery.js';
@@ -27,7 +27,7 @@ function fullGroup(id: string, plain = false): SavedTeam {
   return team;
 }
 
-async function connectedBroker(teams: SavedTeam[], query: string) {
+async function connectedBroker(teams: SavedTeam[], query: string, now = 100) {
   const installationId = 'controller';
   let saved: RemoteHostBrokerState = {
     keys: [[createHash('sha256').update('key').digest('hex'), { kind: 'device', installationId, expires: Number.MAX_SAFE_INTEGER }]],
@@ -37,7 +37,7 @@ async function connectedBroker(teams: SavedTeam[], query: string) {
   const server = new WebSocketServer({ host: '127.0.0.1', port: 0 });
   await once(server, 'listening', { signal: AbortSignal.timeout(3000) });
   const origin = `http://127.0.0.1:${(server.address() as { port: number }).port}`;
-  const broker = createHostBroker({ origin, initialState: saved, now: () => 100, onStateChange(state) { saved = structuredClone(state); } });
+  const broker = createHostBroker({ origin, initialState: saved, now: () => now, onStateChange(state) { saved = structuredClone(state); } });
   server.on('connection', (socket, request) => {
     void broker.prepareUpgrade(new Request(origin + request.url, { headers: { authorization: 'Bearer key' } })).then(upgrade => {
       if (!upgrade || upgrade instanceof Response) socket.close();
@@ -125,7 +125,8 @@ test('removes the oldest archived groups when Team state nears its bound, so act
   // Without removing archived groups, a full ledger would cross the bound.
   expect(Buffer.byteLength(JSON.stringify(teams))).toBeLessThanOrEqual(2 * 1024 * 1024);
   expect(Buffer.byteLength(JSON.stringify(teams)) + 16000).toBeGreaterThan(2 * 1024 * 1024);
-  const f = await connectedBroker(teams, capable);
+  // The groups' last calls were reported long ago, so none is protected as recently used.
+  const f = await connectedBroker(teams, capable, 2 * CALL_FOR_SUPPORT_RECENT_MS);
   expect((await f.call({ action: 'write_ledger', teamId: 'group-0', memberId: 'coordinator', revision: 1, text: 'l'.repeat(16000) })).value).toEqual({ revision: 2 });
   const kept = f.snapshot();
   expect(Buffer.byteLength(JSON.stringify(kept))).toBeLessThanOrEqual(CALL_FOR_SUPPORT_RETENTION_BYTES);

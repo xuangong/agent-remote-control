@@ -1,4 +1,6 @@
 import { TeamBroker, teamMessageBudgetBytes } from './teams.js';
+import { CallForSupportProfileError, emptyCallForSupportState, executeProfileCommand, isCallForSupportProfileCommand, projectEnablement, setEnablement,
+  validCallForSupportState, type CallForSupportState } from './call-for-support-profiles.js';
 import { compactTeamDeliveries, trimTeamDeliveryReceipts, validSavedTeam, type SavedTeam } from './team-delivery.js';
 import type { TeamResourceStore } from './team-resources.js';
 import { isTeamCreate, isTeamAction } from '@orchardworks/agent-remote-protocol';
@@ -67,6 +69,8 @@ class BrokerError extends Error {
 }
 export interface RemoteHostBrokerState {
   teams?: SavedTeam[];
+  /** Call For Support profiles and session enablement of this account. */
+  callForSupport?: CallForSupportState;
   revokedHosts?: RevokedHost[];
   associations?: BrokerAssociationState;
   pairings?: SavedPairingKey[];
@@ -150,11 +154,13 @@ export function createHostBroker(options: HostBrokerOptions) {
   }
   let associations = migrateBrokerAssociations(options.initialState?.associations ?? { version: 6, revision: 0, admissions: [], freezes: [], relationChanges: [], relationResets: [] });
   let teamState = structuredClone(options.initialState?.teams ?? []);
+  let callForSupportState = options.initialState?.callForSupport && structuredClone(options.initialState.callForSupport);
+  if (callForSupportState && !validCallForSupportState(callForSupportState)) throw new Error('Invalid saved Call For Support state.');
   if (!teamState.every(validSavedTeam)) throw new Error('Invalid saved Teams.');
   for (const team of teamState) compactTeamDeliveries(team, now());
   trimTeamDeliveryReceipts(teamState, 2 * 1024 * 1024);
   function snapshot(): RemoteHostBrokerState {
-    return { teams: structuredClone(teamState), ...(revokedHosts ? { revokedHosts: structuredClone(revokedHosts) } : {}), ...(options.successionEnrollment || options.initialState?.associations ? { associations: structuredClone(associations) } : {}), pairings: structuredClone(pairings), previews: previews.snapshot(), ...(options.ownerSubject ? { sharing: sharing.snapshot() } : {}), keys: [...keys].map(([key, value]) => [key, structuredClone(value)]),
+    return { teams: structuredClone(teamState), ...(callForSupportState ? { callForSupport: structuredClone(callForSupportState) } : {}), ...(revokedHosts ? { revokedHosts: structuredClone(revokedHosts) } : {}), ...(options.successionEnrollment || options.initialState?.associations ? { associations: structuredClone(associations) } : {}), pairings: structuredClone(pairings), previews: previews.snapshot(), ...(options.ownerSubject ? { sharing: sharing.snapshot() } : {}), keys: [...keys].map(([key, value]) => [key, structuredClone(value)]),
       hosts: [...hosts.values()].map(({ id, installationId, name, providers, legacyDsh, credentialRotation, gatewayKeyRequested, environment, pairingPurpose, controller, providerManagement, tpmManagement, teamManagement }) => ({ ...(teamManagement ? { teamManagement } : {}), ...(tpmManagement ? { tpmManagement } : {}), ...(providerManagement ? { providerManagement } : {}), ...(controller ? { controller } : {}), ...(pairingPurpose ? { pairingPurpose } : {}), ...(environment ? { environment } : {}), id, installationId, name, providers, legacyDsh, ...(credentialRotation ? {credentialRotation} : {}), ...(gatewayKeyRequested ? { gatewayKeyRequested } : {}) })),
       bindings: [...bindings.values()].map(({ generation: _generation, recovery: _recovery, ...binding }) => binding),
       creations: [...completedCreations] };
@@ -212,12 +218,22 @@ export function createHostBroker(options: HostBrokerOptions) {
     commits = operation.catch(() => undefined);
     return operation;
   }
+  /** The session that holds the role of a session on a Host now, across handoffs. */
+  function resolveRole(hostId: string, providerId: string, anchorNativeId: string): NativeSessionRef {
+    const host = hosts.get(hostId);
+    if (!host) throw new Error('Team recipient Host is unavailable.');
+    return resolveRoleSuccession(associationSource(host, providerId, anchorNativeId), prefixRecords(host)).target;
+  }
+  function callForSupportChange<T>(update: (state: CallForSupportState) => T): Promise<T> {
+    return commit(draft => {
+      const next = structuredClone(callForSupportState ?? emptyCallForSupportState()), value = structuredClone(update(next));
+      if (isDeepStrictEqual(next, callForSupportState ?? emptyCallForSupportState())) return { value, unchanged: true, publish() {} };
+      if (!validCallForSupportState(next)) throw new Error('Invalid Call For Support state.');
+      draft.callForSupport = next; return { value, publish() { callForSupportState = next; } };
+    });
+  }
   const teams = new TeamBroker({
-    resolveSession(hostId, providerId, anchorNativeId) {
-      const host = hosts.get(hostId);
-      if (!host) throw new Error('Team recipient Host is unavailable.');
-      return resolveRoleSuccession(associationSource(host, providerId, anchorNativeId), prefixRecords(host)).target;
-    },
+    resolveSession: resolveRole,
     assertRecipient: target => assertAssociationOpen(target),
     assertRecipientSupport(hostId, generic) {
       const host = requireHost(hostId);
@@ -1514,6 +1530,35 @@ export function createHostBroker(options: HostBrokerOptions) {
         return json(400, { error: 'Invalid Team request.' });
       } catch (error) { return json(409, { error: error instanceof Error ? error.message : 'Team request failed.' }); }
     }
+    if (url.pathname === '/v1/remote/call-for-support' || url.pathname === '/v1/remote/call-for-support/profiles' || url.pathname === '/v1/remote/call-for-support/enablement') {
+      requireOwner(subject);
+      const resolveVisible = (hostId: string, providerId: string, nativeSessionId: string) => hostAllowed(hostId, subject) ? resolveRole(hostId, providerId, nativeSessionId) : undefined;
+      const view = () => ({ profiles: structuredClone(callForSupportState?.profiles ?? []), enablement: projectEnablement(callForSupportState, resolveVisible) });
+      if (url.pathname === '/v1/remote/call-for-support') return request.method === 'GET' ? json(200, view()) : json(405, { error: 'Method is not allowed.' });
+      if (request.method !== 'POST') return json(405, { error: 'Method is not allowed.' });
+      const input = await readBody(request); requireOwner(principal(context));
+      try {
+        if (url.pathname.endsWith('/profiles')) {
+          if (!isCallForSupportProfileCommand(input)) return json(400, { error: 'Invalid support profile request.' });
+          const profile = await callForSupportChange(state => executeProfileCommand(state, input, now()));
+          requireOwner(principal(context));
+          return json(200, { ...(profile ? { profile } : {}), ...view() });
+        }
+        const target = input as { hostId?: unknown; providerId?: unknown; nativeSessionId?: unknown; profileIds?: unknown };
+        if (!target || typeof target !== 'object' || Object.keys(target).sort().join() !== 'hostId,nativeSessionId,profileIds,providerId' || typeof target.hostId !== 'string'
+          || typeof target.providerId !== 'string' || typeof target.nativeSessionId !== 'string' || !Array.isArray(target.profileIds) || !target.profileIds.every(id => typeof id === 'string')) {
+          return json(400, { error: 'Invalid Call For Support enablement.' });
+        }
+        requireAccess(target.hostId, principal(context));
+        const worker = { hostId: target.hostId, providerId: target.providerId, nativeSessionId: target.nativeSessionId };
+        await callForSupportChange(state => setEnablement(state, resolveRole, worker, target.profileIds as string[], now()));
+        requireOwner(principal(context));
+        return json(200, view());
+      } catch (error) {
+        if (error instanceof CallForSupportProfileError) return json(error.code === 'not_found' ? 404 : error.code === 'invalid' ? 400 : 409, { code: error.code, error: error.message });
+        throw error;
+      }
+    }
     const tpm = /^\/v1\/remote\/hosts\/([^/]+)\/tpm(?:\/(create|action|work))?$/.exec(url.pathname);
     if (tpm) {
       requireOwner(subject); requireAccess(tpm[1]!, subject);
@@ -1905,7 +1950,7 @@ export function createHostBroker(options: HostBrokerOptions) {
   }
   const handlesRequest = (url: URL) => {
     const session = /^\/v1\/sessions\/([^/]+)\//.exec(url.pathname);
-    return url.pathname === '/v1/remote/controller-release' || /^\/v1\/remote\/(hosts|pairings|teams)(\/|$)/.test(url.pathname) || !!(session && bindings.has(session[1]!));
+    return url.pathname === '/v1/remote/controller-release' || /^\/v1\/remote\/(hosts|pairings|teams|call-for-support)(\/|$)/.test(url.pathname) || !!(session && bindings.has(session[1]!));
   };
   const handlesUpgrade = (url: URL) => {
     const session = /^\/v1\/sessions\/([^/]+)\//.exec(url.pathname);

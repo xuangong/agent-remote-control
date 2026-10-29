@@ -1,6 +1,6 @@
 import { afterEach, expect, it } from 'vitest';
 import { decodeRemoteHostUplinkMessage } from '@orchardworks/agent-remote-protocol';
-import { createHostBroker, type RelaySocket } from './index.js';
+import { createHostBroker, type RelaySocket, type RemoteHostBrokerState } from './index.js';
 
 const close: Array<() => void | Promise<void>> = [];
 afterEach(async () => { for (const dispose of close.splice(0).reverse()) await dispose(); });
@@ -38,4 +38,30 @@ it('acknowledges Call For Support only for a Host that also follows Team recipie
   expect(capable.hosts[0].providers).toEqual([{ providerId: 'codex', displayName: 'Codex', readOnly: true }, { providerId: 'opencode', displayName: 'OpenCode' }]);
   expect((await register('team=1&teamRecipients=1&callForSupport=1')).message).not.toHaveProperty('callForSupport');
   expect((await register('team=1&teamRecipients=1&teamSuccession=1')).message).not.toHaveProperty('callForSupport');
+});
+
+it('serves profiles and session enablement to the account owner and keeps them across a restart', async () => {
+  let saved: RemoteHostBrokerState | undefined;
+  const initialState: RemoteHostBrokerState = { keys: [], hosts: [{ id: 'mac', installationId: 'controller', name: 'Mac', providers: [{ providerId: 'codex', displayName: 'Codex' }], legacyDsh: false }],
+    bindings: [], creations: [] };
+  const start = (state: RemoteHostBrokerState) => { const broker = createHostBroker({ origin: 'https://relay.example', initialState: state, onStateChange: next => { saved = structuredClone(next); } }); close.push(() => broker.close()); return broker; };
+  const call = async (broker: ReturnType<typeof createHostBroker>, path: string, body?: unknown) => {
+    const response = await broker.handleRequest(new Request(`https://relay.example/v1/remote/call-for-support${path}`, body === undefined ? {} : { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) }));
+    return { status: response!.status, body: await response!.json() };
+  };
+  const broker = start(initialState);
+  const profile = { name: 'Cross review', description: '', coordinator: {}, enableByDefault: false,
+    mandate: { supporters: [{ providerId: 'claude', model: 'opus' }], maxSupporters: 2, workspaces: ['shared'], remoteHosts: [], approval: 'every_roster' } };
+  const created = await call(broker, '/profiles', { type: 'create', profile });
+  expect(created).toMatchObject({ status: 200, body: { profile: { ...profile, revision: 1 }, profiles: [{ name: 'Cross review' }], enablement: [] } });
+  const id = created.body.profile.id;
+  expect(await call(broker, '/profiles', { type: 'update', id, revision: 2, profile })).toMatchObject({ status: 409, body: { code: 'conflict' } });
+  expect((await call(broker, '/profiles', { type: 'create', profile: { ...profile, mandate: { ...profile.mandate, maxSupporters: 9 } } })).status).toBe(400);
+  expect(await call(broker, '/enablement', { hostId: 'mac', providerId: 'codex', nativeSessionId: 'worker', profileIds: [id] }))
+    .toMatchObject({ status: 200, body: { enablement: [{ hostId: 'mac', providerId: 'codex', nativeSessionId: 'worker', profileIds: [id] }] } });
+  expect((await call(broker, '/enablement', { hostId: 'linux', providerId: 'codex', nativeSessionId: 'worker', profileIds: [id] })).status).toBeGreaterThanOrEqual(400);
+  expect((await call(broker, '/enablement', { hostId: 'mac', providerId: 'codex', nativeSessionId: 'worker', profileIds: ['missing'] })).status).toBe(404);
+  await broker.close();
+  const restarted = start(saved!);
+  expect(await call(restarted, '')).toMatchObject({ status: 200, body: { profiles: [{ id, revision: 1 }], enablement: [{ nativeSessionId: 'worker', profileIds: [id] }] } });
 });

@@ -278,12 +278,13 @@ export class TeamRuntime implements SessionRole {
         const record = this.records.find(item => item.seat.teamId === team.id && item.seat.member.id === member.id && item.creation === 'ready');
         if (!record || member.creation !== 'ready') continue;
         if (!member.nativeSessionId) continue;
-        // A member's runtime is held while something must reach it, until it reports idle, and while an archive needs its presence;
+        // A support group member's runtime is held while something must reach it, until it reports idle, and while an archive needs its presence;
         // otherwise the Host releases it when idle and the next delivery resumes the same session.
+        // Ordinary Teams keep every member held: the user drives their sessions directly, and only a held runtime reports that presence.
         const pending = team.messages.some(item => item.to === member.id && (['queued','dispatching','unknown'].includes(item.status) || item.status === 'accepted' && !['started','handled'].includes(item.acceptance ?? '')));
         const leaseKey = `${team.id}:${member.id}`, current = this.leases.get(leaseKey);
         // The live session decides for a held runtime: reported presence can lag a delivery that just started a turn.
-        if (!pending && member.activity === 'idle' && team.status !== 'archiving' && !(current && !idle(current.lease))) continue;
+        if (record.seat.callForSupport && !pending && member.activity === 'idle' && team.status !== 'archiving' && !(current && !idle(current.lease))) continue;
         try {
           const target = this.access.sessionRouting.resolve(this.anchor(record.seat)).target;
           if (target.providerId !== member.providerId || target.nativeSessionId !== member.nativeSessionId) continue;

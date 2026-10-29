@@ -102,7 +102,7 @@ it('keeps read-only seats on providers that enforce read-only sessions', async (
   } finally { await h.close(); }
 });
 
-it('holds a member\'s runtime only while a delivery to it is pending or its Team is archiving', async () => {
+it('holds a support group member\'s runtime only while a delivery to it is pending or its Team is archiving', async () => {
   const h = await supportHarness();
   try {
     const profile = h.profile(); h.enable([profile.id]);
@@ -235,5 +235,19 @@ it('keeps a member\'s runtime while its live session works, even when its report
     h.busy(coordinator, false);
     await h.runtime.tick(); await h.runtime.tick();
     expect(h.released.filter(id => id === coordinator)).toHaveLength(1);
+  } finally { await h.close(); }
+});
+
+it('keeps an ordinary Team member held so the presence of a session the user drives stays current', async () => {
+  const h = await supportHarness();
+  try {
+    const team = await h.broker.create({ operationId: 'plain', source: { hostId: 'host', providerId: 'codex', nativeSessionId: 'worker', title: 'Plain' } });
+    const leader = team.members[0]!.nativeSessionId!;
+    await h.runtime.tick(); await h.runtime.tick();
+    expect(h.team(team.id).members[0]!.activity).toBe('idle');
+    h.busy(leader, true);
+    await h.runtime.tick();
+    expect(h.team(team.id).members[0]!.activity).toBe('busy');
+    expect(h.released.filter(id => id === leader)).toEqual([]);
   } finally { await h.close(); }
 });

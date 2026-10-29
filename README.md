@@ -44,6 +44,14 @@ The Team list groups work by source session so you can see which project each gr
 
 Use **View → Team view** or **/team** to show or hide the management entry. For files such as logs, reports, or build archives, members can use explicit [Team resource transfers](docs/guides/team-resources.md); working directories are not automatically shared between Hosts.
 
+### Call for support from another model or machine
+
+A session can **call for support** when it needs help it cannot give itself: an independent code review before a pull request, a stronger model's opinion, or tests on another machine. Define the kinds of support in **Settings → Call For Support**: each profile names the coordinator, the supporter providers, models and efforts it may use, where supporters work (reading the worker's repository, their own worktree, or a repository on another Host), how many may run at once, a token or cost budget, and whether you approve every roster.
+
+Choose the profiles a session may use in its **Team** panel. The session then calls with its own tools, and you can call for it there too. A coordinator organizes supporters, merges their findings and returns one report, which reaches the session as advice it may adopt; the session keeps ownership of its task and workspace. Follow-ups on the same role reach the same coordinator and supporters with their context. Code a supporter writes comes back as a patch the session applies itself.
+
+Support roles appear in the Team list with their calls, reports, usage and supporters. The Team button marks a roster waiting for your approval or a role paused by its budget. See [Call For Support](docs/current/agent-remote/call-for-support.md) for the contracts and limits.
+
 ### Give one deliverable a dedicated TPM
 
 <a href="docs/images/tpm-manager.png"><img src="docs/images/tpm-manager.png" alt="TPM work list grouped by source session, with Needs you and New indicators, archived work, and New TPM session." width="360"></a>

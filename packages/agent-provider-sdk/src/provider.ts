@@ -30,8 +30,11 @@ export interface AgentCapabilities {
 export interface AgentProviderDescriptor {
   providerId: string;
   displayName: string;
-  /** Native support for Host-owned extensions on creation and reattachment. */
-  sessionExtensions?: { instructions: boolean; tools: boolean };
+  /** Native support for Host-owned extensions on creation and reattachment.
+   * toolNamespaces: 'creation' when namespaces are fixed when the session starts, 'live' when they can change at any time. */
+  sessionExtensions?: { instructions: boolean; tools: boolean; toolNamespaces?: 'creation' | 'live' };
+  /** The adapter enforces AgentSessionExtensions.access natively on creation and reattachment. */
+  sessionAccess?: { readOnly: true };
 }
 
 export interface AgentPersistenceHandle {
@@ -82,12 +85,24 @@ export interface AgentSessionTool {
   inputSchema: Record<string, unknown>;
   execute(arguments_: unknown): Promise<string>;
 }
+/** Tools a provider exposes as one group: a Codex dynamic tool namespace, a Claude MCP server. */
+export interface AgentSessionToolNamespace {
+  name: string;
+  description: string;
+  tools: readonly AgentSessionTool[];
+  /** Registered but offered to the model only through tool search, where the provider supports it. */
+  deferred?: boolean;
+}
 export interface AgentSessionExtensions {
   tools?: readonly AgentSessionTool[];
   /** Additional role instructions. Preserve the provider's native base prompt and policy. */
   instructions?: string;
   /** Existing provider-specific prompt configuration; use instructions for appended roles. */
   systemPrompt?: string;
+  toolNamespaces?: readonly AgentSessionToolNamespace[];
+  /** The session must not write its working directory, by any tool or command. Adapters without
+   * descriptor.sessionAccess.readOnly reject it. Permission settings of such a session cannot change. */
+  access?: 'read_only';
 }
 export interface AgentHistoryQuery {
   cursor?: string;
@@ -197,6 +212,9 @@ export interface AgentSession {
   steer?(text: string, options?: AgentMessageOptions): Promise<AgentInputAcceptance | void>;
   cancel?(): Promise<void>;
   setPlanning?(active: boolean): Promise<void>;
+  /** Replaces the session's tool namespaces. 'live' adapters may add and remove namespaces; 'creation' adapters
+   * may only rebind the executors of namespaces declared when the session started and reject anything else. */
+  updateToolNamespaces?(namespaces: readonly AgentSessionToolNamespace[]): Promise<void>;
   /** Deferred has not been submitted and may be retried after native state changes.
    * Pending has been accepted by native code and must not be submitted again.
    * Runtime settings report confirmed native selections in every case. */

@@ -72,6 +72,17 @@ Run on 2026-10-29 in the worktree, against local scripted model servers (no mode
 
 The pinned Codex for compatibility tests is 0.162.0. The native namespace and read-only tests pass on 0.162.0 and 0.165.0, so the pin stays.
 
+## Refinements
+
+Found while planning the Relay work (2026-10-29); they refine the sections below.
+
+- Profiles and enablement live in the tenant broker state next to Teams, not next to favorites in the gateway state. The tenant broker is per account, and group creation reads profiles in the same commit. Routes: `GET /v1/remote/call-for-support`, `POST /v1/remote/call-for-support/profiles`, `POST /v1/remote/call-for-support/enablement`, owner only.
+- A session's effective enablement is its explicit entry if the user set one, possibly empty, otherwise the profiles with `enableByDefault`.
+- A call that arrives while another is open has status `queued`; reporting the open call opens the next. A call's task is at most 12000 characters so its framed message fits a Team message.
+- The Relay frames call and report messages; Controllers deliver them like other Team messages.
+- Roster decisions reach the coordinator as `[Call For Support]` notes from the requester seat.
+- A report is at most 24 KiB of JSON. A group's Call For Support state is compacted to 64 KiB: evidence of all but the latest reported call first, then findings of the oldest reported calls, then the oldest reported calls.
+
 ## Built on Team
 
 Team already provides most of a support group:

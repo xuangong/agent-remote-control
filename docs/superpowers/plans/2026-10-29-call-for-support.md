@@ -524,39 +524,90 @@ git commit -m "feat(controller): create Team seats with a model, effort and acce
 
 Outcome: the Relay stores profiles and enablement, creates and reuses groups, validates and provisions rosters in both approval modes, records calls, reports, ledgers, releases and usage, and hides groups from incapable Controllers.
 
+Refinements found while expanding this milestone (recorded in the spec's "Refinements" section):
+- Profiles and enablement live in the tenant broker state (`RemoteHostBrokerState.callForSupport`) next to `teams`, not in the gateway's favorites state: the tenant broker is per account, and group creation must read profiles in the same commit. Routes: `GET /v1/remote/call-for-support`, `POST /v1/remote/call-for-support/profiles`, `POST /v1/remote/call-for-support/enablement`, owner only like Teams.
+- Effective enablement of a session: its explicit entry if the user set one (possibly empty), otherwise the profiles with `enableByDefault`.
+- Call status gains `queued`: a call that arrives while another is open waits; reporting the open call opens the next one and queues its message. A call's `task` is at most 12000 characters so its framed message fits the 16000-character Team message.
+- The Relay frames call and report messages; Controllers deliver them like other Team messages.
+- A roster decision reaches the coordinator as a message from the requester seat, prefixed `[Call For Support]`, because Team messages always have a member sender.
+- Storage: a report is at most 24 KiB of JSON; a group's `callForSupport` is kept within 64 KiB by compaction (evidence of all but the latest reported call, then findings of the oldest reported calls, then the oldest reported calls); the tenant's 2 MiB Team state bound is unchanged.
+
 ### Task 2.1: Call For Support schemas
-- Create `packages/agent-remote-protocol/src/call-for-support.ts` with TypeBox schemas and `is…` validators for `CallForSupportProfile`, `CallForSupportMandate`, `CallForSupportCall`, `CallForSupportReport`, `CallForSupportRoster`, `CallForSupportGroup` exactly as in the spec, with the stated bounds; export from `index.ts`.
-- Tests: valid and boundary values for each; rejection of unknown fields, out-of-range counts, `shared` combined with write access, `remote` without `remoteHosts`.
+**Files:** create `packages/agent-remote-protocol/src/call-for-support.ts`, `call-for-support.test.ts`; export from `src/index.ts`.
+- TypeBox schemas, all `additionalProperties: false`:
+  - `CallForSupportSupporterConfiguration { providerId; model (1..256); reasoningEffort? (1..64) }`.
+  - `CallForSupportMandate { supporters (1..8); maxSupporters (1..6); workspaces (1..3 unique of shared|worktree|remote); remoteHosts ({ hostId; workspace (1..2048) }, 0..8); approval; budget? { tokensPerCall? ≥1; tokensTotal? ≥1; costUsdTotal? >0 } }`.
+  - `CallForSupportCoordinatorConfiguration { providerId?; model?; reasoningEffort? }`.
+  - `CallForSupportProfile { id; name (1..128); description (≤4000); mandate; coordinator; enableByDefault; revision ≥1; updatedAt }`.
+  - `CallForSupportContext { commit? and base? (git object names `^[0-9a-f]{7,64}$`); files? (≤64 of 1..2048); conversation? }`.
+  - `CallForSupportFinding`, `CallForSupportReport` (findings ≤64, resources `TeamResource` 1..8), `CallForSupportUsage { tokens ≥0 integer; costUsd? ≥0 }`.
+  - `CallForSupportCall { id; task (1..12000); followUpOf?; context?; deliverable; origin; status open|queued|reported|needs_input|failed; createdAt; reportedAt?; usage; report? }`.
+  - `CallForSupportRosterMember { name; responsibility; providerId; model; reasoningEffort?; workspace; hostId? }`, `CallForSupportRoster { id; status; members (1..6); release? (≤12 ids); rationale (≤4000); withinMandate; createdAt; decidedAt?; note? }`.
+  - `CallForSupportGroup { profileId?; profileRevision?; role (1..256); description (≤4000); mandate; coordinator { providerId; model?; reasoningEffort? }; status active|paused_budget; pauseReason?; calls (≤64); roster?; ledger { text ≤16000; revision ≥0 }; usage }`.
+- Validators `isCallForSupportMandate` etc. add: `remote` in `workspaces` ⇒ `remoteHosts` non-empty; unique supporter configurations; unique remote hosts; `isCallForSupportRoster`: `hostId` present exactly for `remote` members; `isCallForSupportGroup`: unique call IDs, `followUpOf` names a listed call or is absent, at most one `open` call, report present exactly for reported/needs_input/failed calls with matching status.
+- `callForSupportReportBytes(report)` and the constants `CALL_FOR_SUPPORT_REPORT_BYTES = 24 * 1024`, `CALL_FOR_SUPPORT_GROUP_BYTES = 64 * 1024`, `CALL_FOR_SUPPORT_PROFILE_LIMIT = 32`.
+- Tests: a full valid value of each; each bound at its limit and over; unknown fields; `remote` without hosts; duplicate configurations; two open calls; report/status mismatch.
 
 ### Task 2.2: Team additions and invariants
-- `team.ts`: member role `requester`, creation `released`, `model`, `reasoningEffort`, `access`, `workspace`, `usage`; message `callForSupportCallId`; `Team.callForSupport`; `TeamCreate.callForSupport`; the new `TeamAction` and `TeamHostCall` members; `isTeam` invariants (one requester exactly when `callForSupport` is set, never at index 0; members' configurations within the mandate; `shared` members read-only and on the source host; message call IDs exist; released members are never message targets).
-- Tests: existing Team fixtures still validate; each invariant rejects a crafted violation.
-- `packages/agent-host/src/team.ts`: seat creation passes `{ cwd, model, reasoningEffort }` and `access` in the extensions (from Task 1.6); a Team-host test asserts the forwarding and the refusal of `read_only` on a provider without `sessionAccess.readOnly`.
+**Files:** `packages/agent-remote-protocol/src/team.ts`, `team.test.ts` (create if absent); `packages/agent-host/src/team.ts` and a Team-host test.
+- `TeamMember`: role `requester`; creation `released`; `model?`, `reasoningEffort?`, `access?: 'read_only'`, `workspace?` (`{kind:'shared'} | {kind:'worktree'; commit} | {kind:'remote'; commit; repository}`), `usage?: { tokens; costUsd?; updatedAt }`.
+- `TeamMessage.callForSupportCallId?`; `Team.callForSupport?: CallForSupportGroup`.
+- `TeamCreate.callForSupport?: { profileId; call: { task; context?; deliverable }; fresh? }`.
+- `TeamAction` adds `call_for_support { teamId; operationId; task; context?; deliverable; followUpOf? }`, `resolve_roster { teamId; rosterId; decision; note? }`, `release_member { teamId; memberId }`, `update_mandate { teamId; mandate; profileRevision? }`, `resume_group { teamId }`.
+- `TeamHostCall` adds `propose_roster { teamId; memberId; operationId; members; release?; rationale }`, `report_support { teamId; memberId; callId; operationId; report: { status; summary; findings; resources? (resource IDs) } }`, `write_ledger { teamId; memberId; revision; text }`, `release_supporter { teamId; memberId; target }`, `report_usage { teamId; memberId; tokens; costUsd? }`, `call_for_support { worker: { providerId; nativeSessionId; title? }; operationId; roleId?; profileId?; task; context?; deliverable; followUpOf?; fresh? }`, `support_status { worker: { providerId; nativeSessionId }; roleId?; callId? }`.
+- `isTeam` additions: members after the Leader are `member` or `requester`; exactly one requester when `callForSupport` is set and none otherwise, never at index 0; `workspace`, `model`, `reasoningEffort`, `access` and `usage` only in groups; `shared` members are `read_only` and on the source host; `callForSupportCallId` only in groups; no `queued` message targets a `released` member; `isCallForSupportGroup(team.callForSupport)`.
+- `packages/agent-host/src/team.ts`: seat creation passes `{ cwd, model, reasoningEffort }` and `access` in the extensions. Test in `team-host.test.ts` style: a member with `model`, `reasoningEffort`, `access` reaches `directory.create` with them.
+- Tests: existing Team tests unchanged; a valid group Team; each invariant rejects a crafted violation.
 
 ### Task 2.3: Uplink capability and provider flag
-- `remote-host-uplink.ts`: `callForSupport: 1` in `registered`, the request parameter like `teamSuccession`; provider entries gain `readOnly?: true`, set by the Controller's `describeProviders` (`packages/agent-host/src/host.ts`) from `descriptor.sessionAccess.readOnly`.
-- Tests: schema accepts and round-trips both; old messages still validate.
+**Files:** `packages/agent-remote-protocol/src/remote-host-uplink.ts` (+ test), `packages/agent-remote-hosted/src/broker.ts`, `packages/agent-host/src/host.ts` (`describeProviders`), `packages/agent-remote-relay/src/transport/remote-host-uplink-client.ts` (+ test).
+- `registered.callForSupport?: 1`; provider entries `readOnly?: true`.
+- Broker: the query parameter `callForSupport=1`, honored only with `teamSuccession`, sets `host.callForSupport = 1` for the connection, like `teamRecipients`, and the Relay acknowledges it.
+- Uplink client: option `callForSupport?: true` requests it; `client.callForSupport` reports the acknowledgement; registration mismatch handling like `teamSuccession`.
+- Controller: `describeProviders` adds `readOnly: true` from `adapter.descriptor.sessionAccess?.readOnly`; the Host requests `callForSupport` when `team` is configured (Milestone 3 implements the Controller side; until then it is not requested).
+- Tests: schema round trip; broker acknowledges only when requested; uplink client tracks it.
 
 ### Task 2.4: Profiles store and session enablement
-- Create `packages/agent-remote-hosted/src/call-for-support-profiles.ts` modeled on `favorites.ts`: per subject list ≤ 32, revision-checked commands (`create`, `update`, `delete`), enablement map keyed by session identity following committed succession like favorites (`favorites-succession.ts`), served from `gateway.ts` at `GET/POST /v1/call-for-support/profiles` and `/v1/call-for-support/enablement`.
-- Tests (`call-for-support-profiles.test.ts`): CRUD with revisions, conflicts, capacity, enablement following a handoff, per-subject isolation.
+**Files:** create `packages/agent-remote-hosted/src/call-for-support-profiles.ts` (+ test); `broker.ts` state and routes.
+- `RemoteHostBrokerState.callForSupport?: { profiles: CallForSupportProfile[]; enablement: Array<{ hostId; providerId; nativeSessionId; profileIds: string[]; updatedAt }> }` (enablement ≤ 1024 entries, oldest dropped).
+- Pure functions on the state: `executeProfileCommand(state, command, now)` for `{ type: 'create'; profile: Omit<…, 'id'|'revision'|'updatedAt'> } | { type: 'update'; id; revision; profile } | { type: 'delete'; id; revision }` with conflicts on revision mismatch and capacity 32; `setEnablement(state, anchor, profileIds, now)` (profile IDs must exist); `effectiveProfiles(state, resolve, worker)` returning the explicit entry whose anchor resolves to the worker, else `enableByDefault` profiles.
+- Broker routes (owner only): `GET /v1/remote/call-for-support` → `{ profiles, enablement }` with enablement anchors projected to their current sessions; `POST …/profiles` and `POST …/enablement`.
+- Tests: CRUD with revisions, conflicts, capacity, unknown profile in enablement, enablement following a handoff (resolve through a succession), default profiles, per-tenant isolation through two brokers.
 
 ### Task 2.5: Group creation, reuse and calls
-- Create `packages/agent-remote-hosted/src/call-for-support.ts` (`CallForSupportBroker`, built on `TeamBroker` ports): `createOrReuseGroup(worker, profile, call, fresh)`, `call(teamId, input)`; creation provisions the coordinator (leader) and the requester seat (binding, no native creation) and queues the call message; `fresh` archives the previous group. Requires `callForSupport` on the worker's host.
-- Wire into `teams.ts` `create`/`action`/`hostCall` and `broker.ts` routes; requester host calls `call_for_support` and `support_status`.
-- Tests: create, reuse by (role anchor, profile), `fresh`, follow-up validation, call ordering (queued behind an open call), incapable host rejection.
+**Files:** create `packages/agent-remote-hosted/src/call-for-support.ts` (pure group operations on `SavedTeam`) + test; `teams.ts` (wire), `broker.ts` (ports).
+- `TeamBrokerPorts` gains `callForSupport?: { profiles(): CallForSupportProfile[]; effectiveProfiles(hostId, worker): CallForSupportProfile[]; assertHost(hostId): void; readOnly(hostId, providerId): boolean }`.
+- `createGroup(teams, input, now)`: Team with `callForSupport` from the profile (role = profile name, description, mandate and coordinator copied, `profileId`, `profileRevision`), Leader = coordinator (worker host, coordinator provider or the worker's, model, effort, `read_only`, `shared`), member 1 = requester (worker host and provider, `nativeSessionId` of the worker, responsibility "Worker"), first call, and the call message requester → Leader. Team count limit 128.
+- Provisioning order: the requester seat first (Controller binds and reports `cwd`), then the Leader with the requester's `cwd`.
+- `addCall(team, input, now)`: validates `followUpOf`; status `open` and message queued when no call is open, else `queued`.
+- Worker host calls: `call_for_support` resolves the worker on the calling host, checks effective enablement (`unavailable` otherwise), uses `roleId` (group whose requester resolves to the worker) or `profileId` (reuse the active group for worker+profile unless `fresh`, which archives it; else create), returns `{ status, callId, roleId, message }`; neither → `needs_approval`. `support_status` returns enabled profiles, the worker's groups (roleId, role, status, requester member ID, open and queued calls, last report summary) or one call with its report.
+- User: `TeamCreate.callForSupport` creates a group from the website; `TeamAction.call_for_support` adds a call.
+- `send`: a Leader may not message the requester; a requester may not use `send`.
+- Tests: create (members, provisioning order, call message), reuse, `fresh`, follow-up validation, queued calls, disabled session, unknown role, incapable host.
 
 ### Task 2.6: Rosters, approval modes and provisioning
-- `propose_roster` validation per the spec; `every_roster` waits; `within_mandate` provisions valid rosters at once and waits for others with `withinMandate: false`; `resolve_roster`; provisioning releases listed members then calls `createSeat` with configuration, access, workspace and cwd; `release_member`/`release_supporter`.
-- Tests: each validation rule; both approval modes; releases before additions; count with releases; `remote` host and repository rules; read-only provider flag required for `shared`.
+**Files:** `call-for-support.ts`, `teams.ts`.
+- `propose_roster` (Leader only): hard errors (group paused, unknown or incapable host, provider not on the host, `shared` with a provider without `readOnly`, `worktree`/`remote` without a commit on the open call, release of a non-supporter, Team member capacity); mandate checks set `withinMandate` (configuration in `supporters`, workspace in `workspaces`, `remote` host in `remoteHosts`, active supporters after releases ≤ `maxSupporters`). A new proposal replaces a pending one.
+- `every_roster` or outside the mandate → `pending`; otherwise `approved` and provisioned at once. `resolve_roster` approves or rejects; rejection queues a `[Call For Support]` note to the Leader.
+- Provisioning: release listed members (creation `released`, queued messages to them canceled), add members with IDs derived from roster ID and index, `cwd` = requester `cwd` for `shared` and `worktree`, the repository for `remote`, `workspace` with the open call's commit, `access: 'read_only'` for `shared`; provision each; roster `provisioned`.
+- `release_member` (user) and `release_supporter` (Leader) release one supporter.
+- Tests: each rule; both approval modes; releases before additions; replacement of a pending proposal; rejection note.
 
 ### Task 2.7: Reports, ledger, usage and pause
-- `report_support` (only coordinator → requester, resources accessible to the coordinator, call status update, report stored on the call), `write_ledger` (revision-checked, ≤ 16000), `report_usage` (monotonic per member; updates member, open call, group), budget bounds pause the group and report `needs_input`; `update_mandate`, `resume_group`.
-- Tests: report framing data, ledger conflicts, usage aggregation, each budget bound, pause blocks deliveries, resume.
+**Files:** `call-for-support.ts`, `teams.ts`.
+- `report_support` (Leader only, open call or replay of the same `operationId`): resources accessible to the Leader; report ≤ 24 KiB; stored on the call; framed message to the requester with `callForSupportCallId` and the resources; next queued call opens.
+- Report framing: `[Support report · <role> · call <id> · <status>]`, summary, findings without evidence (`- [severity] location: problem → suggestion (agreement)`), resource lines, and the fixed advice note; truncated findings end with "Read the full report with read_support_report.".
+- `write_ledger` (Leader only, revision-checked, ≤16000).
+- `report_usage` (the member's own Host; monotonic per member): adds the increase to the member, the open call and the group; reaching `tokensPerCall`, `tokensTotal` or `costUsdTotal` sets `paused_budget` with the reason and reports the open call `needs_input` to the requester. While paused, `claim` refuses messages to the Leader and supporters, and new calls answer `unavailable`.
+- `update_mandate` replaces the mandate (and `profileRevision`); `resume_group` reactivates if no bound is reached.
+- Compaction to 64 KiB after each change.
+- Tests: framing text; replay; ledger conflict; usage aggregation and monotonicity; each bound; pause effects; resume; compaction order.
 
 ### Task 2.8: Projection, capacity and compatibility
-- `poll`/`read` omit support groups for hosts without `callForSupport`; Team count limit 128; budget checks with a full group (64 calls with reports at maximum size, full ledger) stay within 2 MiB and 128 KiB per Team, trimming oldest reported calls' evidence first.
-- Tests: projection for capable and incapable hosts; capacity test; existing broker suites unchanged.
+**Files:** `teams.ts`, `broker.ts`.
+- `poll` and member host calls omit or refuse groups for hosts without `callForSupport`; browsers receive groups.
+- Capacity test: 24 groups at their 64 KiB bound fit in 2 MiB with their messages; adding full groups until the bound fails with "Team storage capacity reached" and leaves the state unchanged.
+- Existing hosted suites unchanged.
 
 Milestone 2 exit: `pnpm --filter @orchardworks/agent-remote-protocol test`, `pnpm --filter @orchardworks/agent-remote-hosted test`, Cloudflare package tests, typecheck.
 

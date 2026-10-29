@@ -77,3 +77,13 @@ it('describes the worker, the coordinator and supporters of a support role', () 
   expect(JSON.stringify(roles('coordinator-native'))).toContain('Support coordinator');
   expect(JSON.stringify(roles('reviewer-native'))).toContain('Supporter');
 });
+
+it('lets the user settle a delivery whose outcome is uncertain', async () => {
+  const changes: TeamAction[] = [];
+  const team = supportTeam();
+  team.messages = [{ id: 'm1', from: 'reviewer', to: 'coordinator', text: 'Opus reviewer: input is unchecked.', status: 'unknown', createdAt: 1, error: 'The operation may have reached the native runtime.' }];
+  const view = await render(<SupportGroup team={team} hosts={[]} busy={false} onChange={async input => { changes.push(input); return true; }} onOpenSession={() => {}} />);
+  expect(view.textContent).toContain('Opus reviewer → Coordinator: Opus reviewer: input is unchecked.');
+  await act(async () => button(view, 'Confirm not received').click());
+  expect(changes).toEqual([{ teamId: 'group', action: 'resolve_message', messageId: 'm1', outcome: 'rejected' }]);
+});

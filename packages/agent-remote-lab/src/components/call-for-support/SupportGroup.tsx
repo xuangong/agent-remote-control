@@ -17,6 +17,9 @@ export function SupportGroup({ team, hosts, busy, onChange, onOpenSession }: {
   const hostName = (id: string) => hosts.find(host => host.id === id)?.name ?? id;
   const supporters = team.members.filter(member => member.role === 'member');
   const worker = team.members.find(member => member.role === 'requester');
+  const name = (id: string) => team.members.find(member => member.id === id)?.name ?? id;
+  // Deliveries whose outcome is uncertain hold the group until the user says what happened.
+  const uncertain = [...team.messages.filter(message => message.status === 'unknown'), ...(team.unresolvedReceipts ?? [])];
   return <section className="lab-support-group" aria-label={`Support role ${support.role}`}>
     <p className="lab-support-muted">{support.description || 'Support for this session.'} · {usageText(support.usage)}</p>
     {support.status === 'paused_budget' ? <div className="lab-support-card" data-attention>
@@ -42,6 +45,17 @@ export function SupportGroup({ team, hosts, busy, onChange, onOpenSession }: {
         <button type="button" disabled={busy} onClick={() => void onChange({ teamId: team.id, action: 'resolve_roster', rosterId: roster.id, decision: 'approve', ...(note.trim() ? { note: note.trim() } : {}) })}>Approve</button>
         <button type="button" disabled={busy} onClick={() => void onChange({ teamId: team.id, action: 'resolve_roster', rosterId: roster.id, decision: 'reject', ...(note.trim() ? { note: note.trim() } : {}) })}>Reject</button>
       </div>
+    </div> : null}
+    {uncertain.length ? <div className="lab-support-card" data-attention aria-label="Uncertain deliveries">
+      <h4>Deliveries to check</h4>
+      {uncertain.map(message => <div key={message.id}>
+        <p>{name(message.from)} → {name(message.to)}: {'text' in message ? message.text.slice(0, 160) : 'The message body is no longer available.'}</p>
+        <p className="lab-support-muted">{message.error ?? 'Open the receiving session to check before deciding.'}</p>
+        <div className="lab-support-actions">
+          <button type="button" disabled={busy} onClick={() => void onChange({ teamId: team.id, action: 'resolve_message', messageId: message.id, outcome: 'accepted' })}>Confirm received</button>
+          <button type="button" disabled={busy} onClick={() => void onChange({ teamId: team.id, action: 'resolve_message', messageId: message.id, outcome: 'rejected' })}>Confirm not received</button>
+        </div>
+      </div>)}
     </div> : null}
     {support.calls.length ? <details open={support.calls.some(call => call.status === 'open')}><summary>Calls ({support.calls.length})</summary>
       {[...support.calls].reverse().map(call => <SupportCall key={call.id} call={call} />)}</details> : null}

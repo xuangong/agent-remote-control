@@ -305,7 +305,7 @@ export class TeamRuntime implements SessionRole {
               // A claim survived but its local effect boundary did not. Never infer it was unexecuted.
               await this.settle(team.id, member.id, message.id, { status: 'unknown', resolvedTarget: message.resolvedTarget, error: 'Delivery claim has no local receipt. Inspect this session before resolving.' }); continue;
             }
-            if (message.status === 'queued' && team.status === 'active' && availableDelivery(lease, member.role !== 'requester')) await this.dispatch(record, team, message, lease, target);
+            if (message.status === 'queued' && team.status === 'active' && availableDelivery(lease, !record.seat.callForSupport)) await this.dispatch(record, team, message, lease, target);
           }
           this.access.sessionRouting.assertCurrent(this.anchor(record.seat), target);
           await this.request({ action: 'presence', teamId: team.id, memberId: member.id, activity: idle(lease) ? 'idle' : 'busy' });
@@ -337,7 +337,8 @@ export class TeamRuntime implements SessionRole {
     return this.request({ action: 'settle', teamId, memberId, messageId, outcome: receipt.status as 'accepted'|'rejected'|'unknown', ...(receipt.resolvedTarget ? {resolvedTarget:receipt.resolvedTarget} : {}), ...(receipt.acceptance ? {acceptance:receipt.acceptance} : {}), ...(receipt.error ? {error:receipt.error} : {}) });
   }
   private async dispatch(record: LocalSeat, team: Team, message: TeamMessage, lease: RemoteHostSessionLease, target: NativeSessionRef) {
-    const worker = record.seat.member.role === 'requester', delivery = availableDelivery(lease, !worker);
+    // Support groups deliver between turns: steering races a turn that is ending, and support work does not need it.
+    const worker = record.seat.member.role === 'requester', delivery = availableDelivery(lease, !record.seat.callForSupport);
     if (!delivery || this.closed || !this.access.available()) return;
     this.access.sessionRouting.assertCurrent(this.anchor(record.seat), target);
     let receipt: LocalSeat['receipts'][string] | undefined;

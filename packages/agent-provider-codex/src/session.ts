@@ -1,8 +1,8 @@
 import { RESOURCE_INPUT_CAPABILITIES } from '@orchardworks/agent-provider-sdk';
-import { AgentOperationRejectedError, prepareAgentOperation, bindAgentSessionTools } from '@orchardworks/agent-provider-sdk';
+import { AgentOperationRejectedError, prepareAgentOperation, bindAgentSessionTools, bindAgentSessionToolNamespaces } from '@orchardworks/agent-provider-sdk';
 import { preparePromptEdit, type CodexPromptEditTarget } from './prompt-edit.js';
 import { prepareNativeFork } from './session-fork.js';
-import type { AgentSessionExtensions, AgentSessionTool } from '@orchardworks/agent-provider-sdk';
+import type { AgentSessionExtensions, AgentSessionTool, AgentSessionToolNamespace } from '@orchardworks/agent-provider-sdk';
 import { codexMessageInput, type CodexInput } from './message-content.js';
 import { discoverCodexCommands, expandCodexPrompt, readCodexCommandDocumentation } from './commands.js';
 import { randomUUID } from 'node:crypto';
@@ -91,6 +91,8 @@ function sandboxParams(access: StoredSessionConfig['access'], restrictedNative: 
   return restrictedNative ? { sandbox: 'workspace-write', approvalPolicy: 'never' } as const : {};
 }
 const READ_ONLY_PERMISSIONS = 'This session is read-only; its permissions cannot change.';
+const namespaceDeclaration = (namespaces: readonly AgentSessionToolNamespace[]) =>
+  JSON.stringify(namespaces.map(namespace => [namespace.name, !!namespace.deferred, namespace.tools.map(tool => tool.name)]));
 
 interface NativePendingInteraction {
   kind: AgentInteractionRequest['kind'];
@@ -285,6 +287,9 @@ export class CodexAppServerSession implements AgentSession {
   }
 
   private tools: readonly AgentSessionTool[] = [];
+  private toolNamespaces: readonly AgentSessionToolNamespace[] = [];
+  /** Codex keeps namespace declarations from thread start in the thread; only their executors can change. */
+  private declaredNamespaces = '[]';
 
   receiveRequest(method: string, params: unknown, id: string | number): Promise<unknown> {
     this.nativeEvidence.invalidate();
@@ -296,10 +301,25 @@ export class CodexAppServerSession implements AgentSession {
     return this.handlePermissionRequest(params, id);
   }
 
+  private bindNamespaces(namespaces: readonly AgentSessionToolNamespace[] | undefined): void {
+    this.toolNamespaces = bindAgentSessionToolNamespaces(namespaces, () => this.assertOpen());
+    this.declaredNamespaces = namespaceDeclaration(this.toolNamespaces);
+  }
+
+  async updateToolNamespaces(namespaces: readonly AgentSessionToolNamespace[]): Promise<void> {
+    this.assertOpen();
+    const bound = bindAgentSessionToolNamespaces(namespaces, () => this.assertOpen());
+    if (namespaceDeclaration(bound) !== this.declaredNamespaces) {
+      throw new AgentOperationRejectedError('operation_rejected', 'Codex tool namespaces are fixed at thread start; only their executors can change.');
+    }
+    this.toolNamespaces = bound;
+  }
+
   private async callTool(params: unknown): Promise<unknown> {
     try {
-      if (!isRecord(params) || params.threadId !== this.threadId || params.namespace != null) throw new Error('Session tool is unavailable.');
-      const tool = this.tools.find(tool => tool.name === params.tool);
+      if (!isRecord(params) || params.threadId !== this.threadId) throw new Error('Session tool is unavailable.');
+      const tools = params.namespace == null ? this.tools : this.toolNamespaces.find(namespace => namespace.name === params.namespace)?.tools ?? [];
+      const tool = tools.find(tool => tool.name === params.tool);
       if (!tool) throw new Error('Session tool is unavailable. Reopen this session through its Host.');
       return { success: true, contentItems: [{ type: 'inputText', text: await tool.execute(params.arguments) }] };
     } catch (error) {
@@ -455,9 +475,10 @@ export class CodexAppServerSession implements AgentSession {
     const stored = toStoredConfig(config, collaborationMode);
     const session = new CodexAppServerSession(transport, stored, codexHome, undefined, restrictedNative, recoveryPlan);
     session.tools = bindAgentSessionTools(config.tools, () => session.assertOpen());
+    session.bindNamespaces(config.toolNamespaces);
     await session.initialize();
     const response = await transport.request('thread/start', {
-      ...(session.tools.length ? { dynamicTools: codexDynamicTools(session.tools) } : {}),
+      ...(session.tools.length || session.toolNamespaces.length ? { dynamicTools: codexDynamicTools(session.tools, session.toolNamespaces) } : {}),
       config: { 'features.default_mode_request_user_input': true },
       ...sandboxParams(stored.access, restrictedNative),
       ...(stored.model ? { model: stored.model } : {}),
@@ -517,13 +538,14 @@ export class CodexAppServerSession implements AgentSession {
     const session = new CodexAppServerSession(transport, { systemPrompt: extensions.systemPrompt, instructions: extensions.instructions,
       ...(extensions.access ? { access: extensions.access } : {}) }, codexHome, undefined, restrictedNative, recoveryPlan);
     session.tools = bindAgentSessionTools(extensions.tools, () => session.assertOpen());
+    session.bindNamespaces(extensions.toolNamespaces);
     await session.initialize();
     const boundary = await preparePromptEdit(transport, target);
     const response = await transport.request(boundary.beforeTurnId ? 'thread/fork' : 'thread/start', {
       ...(boundary.beforeTurnId ? { threadId: target.nativeSessionId, beforeTurnId: boundary.beforeTurnId, excludeTurns: true } : {}),
       ...(boundary.cwd ? { cwd: boundary.cwd } : {}),
       // Native forks inherit declarations from source metadata; only thread/start registers tools.
-      ...(!boundary.beforeTurnId && session.tools.length ? { dynamicTools: codexDynamicTools(session.tools) } : {}),
+      ...(!boundary.beforeTurnId && (session.tools.length || session.toolNamespaces.length) ? { dynamicTools: codexDynamicTools(session.tools, session.toolNamespaces) } : {}),
       ...(sessionInstructions(session.config) ? { developerInstructions: sessionInstructions(session.config) } : {}),
       config: { 'features.default_mode_request_user_input': true },
       ...sandboxParams(extensions.access, restrictedNative),
@@ -576,6 +598,7 @@ export class CodexAppServerSession implements AgentSession {
       ...(extensions.access ? { access: extensions.access } : {}) };
     const session = new CodexAppServerSession(transport, stored, codexHome, undefined, restrictedNative, recoveryPlan);
     session.tools = bindAgentSessionTools(extensions.tools, () => session.assertOpen());
+    session.bindNamespaces(extensions.toolNamespaces);
     session.threadId = handle.sessionId;
     session.runtime.registerRoot(handle.sessionId);
     await session.initialize();

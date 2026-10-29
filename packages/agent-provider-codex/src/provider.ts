@@ -58,7 +58,7 @@ export class CodexAppServerProvider implements AgentProviderAdapter {
   }
   readonly nativeEvidence: CodexProviderNativeEvidence;
   readonly descriptor: AgentProviderDescriptor = {
-    sessionExtensions: { instructions: true, tools: true },
+    sessionExtensions: { instructions: true, tools: true, toolNamespaces: 'creation' },
     sessionAccess: { readOnly: true },
     providerId: 'codex',
     displayName: 'Codex',

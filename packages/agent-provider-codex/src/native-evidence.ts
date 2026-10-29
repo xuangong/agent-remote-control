@@ -9,7 +9,7 @@ import {
   type AgentEmptyCreationResult, type AgentEmptySessionConfig, type AgentInputAcceptance, type AgentInputMaterialization,
   type AgentInputPart, type AgentMessageOptions, type AgentNativeAuthorityScope, type AgentNativeEvidenceCode,
   type AgentNativeReadiness, type AgentNativeValidityToken, type AgentPersistenceHandle, type AgentPreparedTextInput,
-  type AgentProviderNativeEvidence, type AgentSessionNativeEvidence, type AgentSessionTool,
+  type AgentProviderNativeEvidence, type AgentSessionNativeEvidence, type AgentSessionTool, type AgentSessionToolNamespace,
 } from '@orchardworks/agent-provider-sdk';
 import { CodexAppServerRpcError, type CodexAppServerTransport } from './app-server-transport.js';
 import { initializeCodexTransport } from './initialize.js';
@@ -84,8 +84,12 @@ export async function updateCodexEvidenceSettings(
   } finally { clearTimeout(timer); unsubscribe(); }
 }
 /** Codex fixes a thread's dynamic tools when the thread starts; their execution is bound by each attachment. */
-export function codexDynamicTools(tools: readonly Pick<AgentSessionTool, 'name' | 'description' | 'inputSchema'>[] | undefined) {
-  return tools?.length ? tools.map(({ name, description, inputSchema }) => ({ type: 'function', name, description, inputSchema })) : undefined;
+export function codexDynamicTools(tools: readonly Pick<AgentSessionTool, 'name' | 'description' | 'inputSchema'>[] | undefined,
+  namespaces: readonly AgentSessionToolNamespace[] = []) {
+  const declared = [...(tools ?? []).map(({ name, description, inputSchema }) => ({ type: 'function', name, description, inputSchema })),
+    ...namespaces.map(namespace => ({ type: 'namespace', name: namespace.name, description: namespace.description,
+      tools: namespace.tools.map(({ name, description, inputSchema }) => ({ type: 'function', name, description, inputSchema, ...(namespace.deferred ? { deferLoading: true } : {}) })) }))];
+  return declared.length ? declared : undefined;
 }
 function handle(id: string, cwd: string, authority: AgentNativeAuthorityScope, settings?: CodexEvidenceSettings, failed = false,
   extensions?: Pick<CodexEvidenceSource, 'systemPrompt' | 'instructions' | 'collaborationMode'>): AgentPersistenceHandle {
@@ -117,7 +121,7 @@ export class CodexProviderNativeEvidence implements AgentProviderNativeEvidence 
       ...(prompt?.instructions !== undefined ? { instructions: prompt.instructions } : {}),
       ...(selected?.collaborationMode ? { collaborationMode: selected.collaborationMode } : {}) } : undefined;
     const instructions = [extensions?.systemPrompt, extensions?.instructions].filter(Boolean).join('\n\n');
-    const dynamicTools = codexDynamicTools(role?.tools);
+    const dynamicTools = codexDynamicTools(role?.tools, role?.toolNamespaces);
     if (config.selectionSourceSessionId && !source) reject('native_evidence_unavailable');
     handle('B'.repeat(256), cwd, this.ports.authority, source, false, extensions);
     const transport = await this.ports.transport(cwd);

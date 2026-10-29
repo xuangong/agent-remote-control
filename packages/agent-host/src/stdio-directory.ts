@@ -212,8 +212,11 @@ export function createManagedStdioDirectory(
     const tools = [...(base.tools ?? []), ...(additional.tools ?? [])];
     if (new Set(tools.map(tool => tool.name)).size !== tools.length) throw new Error('Duplicate or conflicting session tool names.');
     const instructions = [...new Set([base.instructions, additional.instructions].filter((value): value is string => !!value))].join('\n\n');
+    const toolNamespaces = [...(base.toolNamespaces ?? []), ...(additional.toolNamespaces ?? [])];
+    if (new Set(toolNamespaces.map(namespace => namespace.name)).size !== toolNamespaces.length) throw new Error('Duplicate session tool namespaces.');
     return { ...(base.systemPrompt !== undefined || additional.systemPrompt !== undefined ? { systemPrompt: base.systemPrompt ?? additional.systemPrompt } : {}),
-      ...(instructions ? { instructions } : {}), ...(tools.length ? { tools } : {}) };
+      ...(instructions ? { instructions } : {}), ...(tools.length ? { tools } : {}), ...(toolNamespaces.length ? { toolNamespaces } : {}),
+      ...(base.access ?? additional.access ? { access: base.access ?? additional.access } : {}) };
   }
   async function resumedExtensions(id: string, requested: AgentSessionExtensions | undefined, reader: () => string | undefined, readerSession?: () => AgentSession | undefined) {
     const grant = await references?.get(id);

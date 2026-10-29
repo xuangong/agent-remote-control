@@ -37,6 +37,8 @@ export class WorkerSupport {
     if (!this.ports.available()) return false;
     return this.enablement.sessions.get(nativeSessionRefKey(ref)) ?? this.enablement.defaultEnabled;
   }
+  /** Whether a session the Controller is about to create will be enabled: only a profile's default can say so yet. */
+  enabledByDefault(): boolean { return this.ports.available() && this.enablement.defaultEnabled; }
   onChange(listener: () => void): () => void { this.listeners.add(listener); return () => { this.listeners.delete(listener); }; }
   /** Reads enablement from the Relay; listeners hear about any change. */
   async refresh(controllerId: string): Promise<void> {

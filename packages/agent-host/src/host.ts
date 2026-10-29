@@ -29,6 +29,7 @@ import { browseWorkspaceFolders, createWorkspaceFolder, WorkspaceFolderError } f
 import { allowedWorkspace, HostExecutionPolicyError, protectHostDirectory, type HostExecutionPolicy } from './execution-policy.js';
 import { SessionRoles, type SessionRole } from './session-role-succession.js';
 import { roleSessionConfig } from './role-session-creation.js';
+import { WorkerSupport } from './call-for-support-worker.js';
 import { createControllerPreviews } from './previews.js';
 import { createVscodeTunnelManager, type VscodeTunnelOptions } from './vscode-tunnel.js';
 import { createOperationCache, OperationCacheError, type OperationCacheOptions } from '@orchardworks/agent-remote-relay';
@@ -403,7 +404,7 @@ export function createAgentHostRuntime(options: AgentHostRuntimeOptions): AgentH
         const role = succession?.store.all().find(state => nativeSessionRefKey(state.role.current) === nativeSessionRefKey(source))?.role;
         if (!role) throw new Error('Native succession role is unavailable.');
         // The successor carries its source's role from creation; the role's tools run only once it is attached.
-        const extensions = await roles.extensions(source, () => undefined);
+        const extensions = await roles.extensions(source, () => undefined) ?? workerExtensions(targetProviderId, source, () => undefined);
         const config = { sessionId: directoryOperationId(operationId), cwd: role.workspace.canonicalCwd, ...(source.providerId === targetProviderId ? { selectionSourceSessionId: source.nativeSessionId } : {}),
           ...(extensions ? { extensions } : {}) };
         return () => evidence!.createEmpty(config);
@@ -616,7 +617,30 @@ export function createAgentHostRuntime(options: AgentHostRuntimeOptions): AgentH
     const tpmTools = await tpm?.extensions(source.providerId, source.nativeSessionId, actual);
     if (teamTools && tpmTools) throw new SuccessionPreparationRejected('succession_prefix_extensions_unavailable', 'Native recipient has conflicting role extensions.');
     if (directory.requiresController?.(source.nativeSessionId) && !sourceTools && !teamTools && !tpmTools) throw new SuccessionPreparationRejected('succession_prefix_extensions_unavailable', 'Native prefix extensions cannot be reconstructed.');
-    return teamTools ?? tpmTools ?? {};
+    return teamTools ?? tpmTools ?? workerExtensions(source.providerId, source, () => { const id = actual(); return id ? { ...source, nativeSessionId: id } : undefined; }) ?? {};
+  }
+  /** Worker tools for a session without a role: declared at creation where providers fix tools then, present only while enabled elsewhere. */
+  function workerExtensions(providerId: string, holder: NativeSessionRef | undefined, actual: () => NativeSessionRef | undefined): AgentSessionExtensions | undefined {
+    if (!workerSupport) return undefined;
+    const capability = registration(providerId).adapter.descriptor.sessionExtensions?.toolNamespaces;
+    const enabled = holder ? workerSupport.enabled(holder) : workerSupport.enabledByDefault();
+    if (capability === 'creation') return { toolNamespaces: [workerSupport.namespace(actual, !enabled)] };
+    if (capability === 'live' && enabled) return { toolNamespaces: [workerSupport.namespace(actual, false)] };
+    return undefined;
+  }
+  /** Applies enablement changes to live sessions whose provider can change tools during a session. */
+  async function applyWorkerTools(): Promise<void> {
+    if (!workerSupport) return;
+    for (const binding of [...bindings.values()]) {
+      const agent = liveAgent(binding.agentId), session = agent && nativeAttachments.get(agent)?.session;
+      if (!session?.updateToolNamespaces || registration(binding.providerId).adapter.descriptor.sessionExtensions?.toolNamespaces !== 'live') continue;
+      const ref = nativeRef(binding);
+      if (await roles.extensions(ref, () => ref)) continue;
+      const enabled = workerSupport.enabled(ref);
+      if ((workerToolsApplied.get(binding.agentId) ?? false) === enabled) continue;
+      try { await session.updateToolNamespaces(enabled ? [workerSupport.namespace(() => ref, false)] : []); workerToolsApplied.set(binding.agentId, enabled); }
+      catch { /* The next enablement change or attachment applies it again. */ }
+    }
   }
   async function authorizeSuccessionRead(reader: NativeSessionRef, source: NativeSessionRef): Promise<void> {
     for (const target of [reader, source]) {
@@ -824,7 +848,8 @@ export function createAgentHostRuntime(options: AgentHostRuntimeOptions): AgentH
         const attached = nativeRef({ providerId, nativeSessionId });
         // A generic successor holds the role of its source, so every attachment of it gets the same extensions.
         const extensions = nativePrefix ? await nativePrefixExtensions(nativePrefix.source, () => nativeSessionId)
-          : await roles.extensions(genericSuccessionSource(attached) ?? attached, () => attached);
+          : await roles.extensions(genericSuccessionSource(attached) ?? attached, () => attached) ?? workerExtensions(providerId, attached, () => attached);
+        workerToolsApplied.set(proposedAgentId, !!extensions?.toolNamespaces?.some(namespace => namespace.name === 'agent_remote' && !namespace.deferred));
         const open = () => source.open(nativeSessionId, { ...(takeOver ? { takeOver } : {}), ...(extensions ? { extensions } : {}), ...(nativePrefix ? { nativePrefix: nativePrefix.handle } : {}), ...(nativeCreation ? { nativeCreation, resumeHandle: succession?.contexts.forTarget(nativeRef({ providerId, nativeSessionId }))?.resumeHandle, resumeOptions: { initializeEmpty: succession?.contexts.canInitializeEmpty(nativeRef({ providerId, nativeSessionId })) === true } } : {}) });
         const nativeSession = parentNativeSessionId === undefined ? await (takeOver
           ? directoryNativeEffect(successionBoundary?.currentEntry(), successionBoundary?.currentEntry()?.targets ?? [], async () => {
@@ -934,7 +959,10 @@ export function createAgentHostRuntime(options: AgentHostRuntimeOptions): AgentH
       beforeDispatch: () => { if (!savedCreation) successionBoundary?.recheck(targets); },
       dispatch: entry => {
         if (savedCreation) return Promise.resolve(savedCreation.reader.nativeSessionId);
-        const create = () => directoryNativeEffect(entry, targets.map(nativeSessionRefKey), evidence => directory.create(settings, evidence));
+        // A new conversation gets the worker tools its provider must declare at creation; Sides and prompt edits do not.
+        let created: string | undefined;
+        const worker = editing || settings.sourceNativeSessionId ? undefined : workerExtensions(providerId, undefined, () => created ? nativeRef({ providerId, nativeSessionId: created }) : undefined);
+        const create = () => directoryNativeEffect(entry, targets.map(nativeSessionRefKey), async evidence => { created = await directory.create({ ...settings, ...worker }, evidence); return created; });
         const work = () => settings.sourceNativeSessionId && enrollment
           ? enrollment.sourceMutation(scope, operationId, sourceReader!, settings, create,
             async id => (await directory.sourceReferences?.())?.some(grant => grant.nativeSessionId === id && grant.sourceNativeSessionId === settings.sourceNativeSessionId) === true, qualified, directory) : create();
@@ -1265,6 +1293,12 @@ export function createAgentHostRuntime(options: AgentHostRuntimeOptions): AgentH
     readOnlyProviders: () => automationAccess.supportedProviders().filter(providerId => registration(providerId).adapter.descriptor.sessionAccess?.readOnly),
     execute: executeOperation('host:team')}, options.team.request, options.team.tickMs) : undefined;
   const roles = new SessionRoles([...(team ? [team] : []), ...(tpm ? [tpmRole(tpm)] : [])]);
+  const workerSupport = options.team?.request ? new WorkerSupport({ request: options.team.request, available: () => options.team?.callForSupport?.() === true,
+    stateDirectory: options.team.stateDirectory, title: async ref => await registration(ref.providerId).directory.sessionTitle?.(ref.nativeSessionId) }) : undefined;
+  const workerToolsApplied = new Map<string, boolean>();
+  workerSupport?.onChange(() => { void applyWorkerTools().catch(() => undefined); });
+  const workerSupportTimer = workerSupport ? setInterval(() => { if (!closed) void workerSupport.refresh(automationAccess.controllerId).catch(() => undefined); }, options.team?.tickMs ?? 3000) : undefined;
+  workerSupportTimer?.unref?.();
   const enrollment = successionService ? new SessionSuccessionEnrollment(successionService, successionConfig!.controllerId, () => [...registrations.values()], () => tpm?.store.all() ?? [], source => authorizeSuccessionRead(source, source), directoryOperation) : undefined;
   const enrollFromRelay = async (request: RemoteHostControlRequest, context: TrustedSuccessionContext) => {
     if (!options.succession?.enrollment || !enrollment || closed || draining) return json(403, { code: 'succession_enrollment_unavailable', error: 'Trusted succession enrollment is unavailable.' });
@@ -1288,6 +1322,7 @@ export function createAgentHostRuntime(options: AgentHostRuntimeOptions): AgentH
     close(): Promise<void> { return closePromise ??= (async () => {
       closed = true; draining = true;
       await bounded(successionReady, shutdownTimeoutMs).catch(() => undefined);
+      if (workerSupportTimer) clearInterval(workerSupportTimer);
       await bounded(team?.close() ?? Promise.resolve(), shutdownTimeoutMs).catch(() => undefined);
       await bounded(tpm?.close() ?? Promise.resolve(), shutdownTimeoutMs).catch(() => undefined);
       try {

@@ -1,3 +1,4 @@
+import type { SessionCreation } from './role-session-creation.js';
 import type { SessionExecutionRouting } from './session-succession-service.js';
 import { createHash, randomUUID } from 'node:crypto';
 import type { AgentInputAcceptance, AgentSessionExtensions, AgentSessionTool } from '@orchardworks/agent-provider-sdk';
@@ -34,7 +35,7 @@ export interface TpmSessionAccess {
   supportedProviders(): string[];
   available(): boolean;
   acquire(providerId: string, nativeSessionId: string): Promise<RemoteHostSessionLease>;
-  create(providerId: string, cwd: string | undefined, extensions: AgentSessionExtensions): Promise<string>;
+  create(providerId: string, creation: SessionCreation, extensions: AgentSessionExtensions): Promise<string>;
   recover?(providerId: string, nativeSessionId: string, extensions: AgentSessionExtensions): Promise<void>;
   execute: SessionWireOperationExecutor;
 }
@@ -195,7 +196,7 @@ export class TpmCoordinator {
         try {
           this.admit(input.providerId);
           let actual: string | undefined;
-          const nativeId = await this.access.create(input.providerId, main.agent.snapshot().payload.runtimeInfo.cwd, this.boundExtensions(id, () => actual));
+          const nativeId = await this.access.create(input.providerId, { cwd: main.agent.snapshot().payload.runtimeInfo.cwd }, this.boundExtensions(id, () => actual));
           actual = nativeId;
           const introduction = input.requirement
             ? `User requirement:\n${input.requirement}\n\nBegin by understanding the user's need and discussing the plan.`

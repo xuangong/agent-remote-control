@@ -28,6 +28,7 @@ import { createIdleSessions } from './idle-sessions.js';
 import { browseWorkspaceFolders, createWorkspaceFolder, WorkspaceFolderError } from './workspace-folders.js';
 import { allowedWorkspace, HostExecutionPolicyError, protectHostDirectory, type HostExecutionPolicy } from './execution-policy.js';
 import { SessionRoles, type SessionRole } from './session-role-succession.js';
+import { roleSessionConfig } from './role-session-creation.js';
 import { createControllerPreviews } from './previews.js';
 import { createVscodeTunnelManager, type VscodeTunnelOptions } from './vscode-tunnel.js';
 import { createOperationCache, OperationCacheError, type OperationCacheOptions } from '@orchardworks/agent-remote-relay';
@@ -1250,7 +1251,10 @@ export function createAgentHostRuntime(options: AgentHostRuntimeOptions): AgentH
       if (info.sessionId !== nativeSessionId) throw new Error('Recovered native session identity does not match.');
       if (options.executionPolicy) await allowedWorkspace(options.executionPolicy, info.cwd);
     },
-    create: (providerId, cwd, extensions) => directoryNativeEffect(successionBoundary?.currentEntry(), successionBoundary?.currentEntry()?.targets ?? [], evidence => registration(providerId).directory.create({ ...(cwd ? { cwd } : {}), ...extensions }, evidence)),
+    async create(providerId, creation, extensions) {
+      const config = roleSessionConfig(registration(providerId).adapter.descriptor, creation, extensions);
+      return directoryNativeEffect(successionBoundary?.currentEntry(), successionBoundary?.currentEntry()?.targets ?? [], evidence => registration(providerId).directory.create(config, evidence));
+    },
     execute: executeOperation('host:tpm'),
   };
   const tpm = options.tpm ? new TpmCoordinator(options.tpm, automationAccess) : undefined;

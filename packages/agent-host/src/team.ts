@@ -6,6 +6,7 @@ import { join } from 'node:path';
 import { AgentOperationRejectedError, bindAgentSessionTools, type AgentInputAcceptance, type AgentSessionExtensions, type AgentSessionTool } from '@orchardworks/agent-provider-sdk';
 import type { SessionExecutionRouting } from './session-succession-service.js';
 import type { RoleSuccessionDecision, SessionRole } from './session-role-succession.js';
+import type { SessionCreation } from './role-session-creation.js';
 import { isNativeSessionRef, nativeSessionRefKey, type NativeSessionRef, isTeam, isTeamSeat, sessionOperationAvailability, type Team, type TeamHostCall, type TeamMember, type TeamMessage, type TeamSeat } from '@orchardworks/agent-remote-protocol';
 import { OperationCacheError, type RemoteHostSessionLease, type SessionWireOperationExecutor } from '@orchardworks/agent-remote-relay';
 
@@ -17,7 +18,7 @@ export interface TeamRuntimeAccess {
   genericSuccession?(): boolean;
   available(): boolean;
   supportedProviders(): string[];
-  create(provider: string, cwd: string | undefined, extensions: AgentSessionExtensions): Promise<string>;
+  create(provider: string, creation: SessionCreation, extensions: AgentSessionExtensions): Promise<string>;
   acquire(provider: string, sessionId: string): Promise<RemoteHostSessionLease>;
   execute: SessionWireOperationExecutor;
 }
@@ -145,7 +146,7 @@ export class TeamRuntime implements SessionRole {
     this.records.push(record); await this.save();
     try {
       let actual: NativeSessionRef | undefined;
-      seat.member.nativeSessionId = await this.access.create(seat.member.providerId, seat.member.cwd, this.tools(seat, () => actual));
+      seat.member.nativeSessionId = await this.access.create(seat.member.providerId, { cwd: seat.member.cwd }, this.tools(seat, () => actual));
       actual = this.anchor(seat);
       record.creation = 'ready'; seat.member.creation = 'ready'; seat.member.activity = 'unknown'; await this.save(); return seat.member;
     } catch (error) { record.creation = 'unknown'; seat.member.creation = 'unknown'; await this.save(); throw error; }

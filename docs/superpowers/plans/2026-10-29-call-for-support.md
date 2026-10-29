@@ -498,6 +498,8 @@ export interface TeamRuntimeAccess {
 
 Expose `readOnlyProviders(): string[]` from the Host (registrations whose descriptor declares `sessionAccess.readOnly` and are enabled) for milestone 3's provider snapshot.
 
+*As built:* the configuration is `roleSessionConfig(descriptor, creation, extensions)` in `packages/agent-host/src/role-session-creation.ts`, unit-tested directly. Team passes `{ cwd }` until Task 2.2 gives `TeamMember` its `model`, `reasoningEffort` and `access`; the Team-level forwarding test moves there. `readOnlyProviders()` is not added: Task 2.3 reports `readOnly` in `describeProviders` from `descriptor.sessionAccess` directly.
+
 - [ ] **Step 4: Run the agent-host suite**
 
 Run: `npx vitest run src/team-seat-configuration.test.ts && pnpm test`
@@ -529,9 +531,10 @@ Outcome: the Relay stores profiles and enablement, creates and reuses groups, va
 ### Task 2.2: Team additions and invariants
 - `team.ts`: member role `requester`, creation `released`, `model`, `reasoningEffort`, `access`, `workspace`, `usage`; message `callForSupportCallId`; `Team.callForSupport`; `TeamCreate.callForSupport`; the new `TeamAction` and `TeamHostCall` members; `isTeam` invariants (one requester exactly when `callForSupport` is set, never at index 0; members' configurations within the mandate; `shared` members read-only and on the source host; message call IDs exist; released members are never message targets).
 - Tests: existing Team fixtures still validate; each invariant rejects a crafted violation.
+- `packages/agent-host/src/team.ts`: seat creation passes `{ cwd, model, reasoningEffort }` and `access` in the extensions (from Task 1.6); a Team-host test asserts the forwarding and the refusal of `read_only` on a provider without `sessionAccess.readOnly`.
 
 ### Task 2.3: Uplink capability and provider flag
-- `remote-host-uplink.ts`: `callForSupport: 1` in `registered`, the request parameter like `teamSuccession`; provider entries gain `readOnly?: true`.
+- `remote-host-uplink.ts`: `callForSupport: 1` in `registered`, the request parameter like `teamSuccession`; provider entries gain `readOnly?: true`, set by the Controller's `describeProviders` (`packages/agent-host/src/host.ts`) from `descriptor.sessionAccess.readOnly`.
 - Tests: schema accepts and round-trips both; old messages still validate.
 
 ### Task 2.4: Profiles store and session enablement
@@ -564,7 +567,7 @@ Milestone 2 exit: `pnpm --filter @orchardworks/agent-remote-protocol test`, `pnp
 Outcome: Controllers negotiate the capability, bind requester seats, give coordinators and supporters their extensions, deliver reports as framed input, and release idle members' runtimes.
 
 ### Task 3.1: Negotiation and provider snapshot
-- `remote-host-uplink-client.ts`: request `callForSupport` and track the acknowledgement; provider snapshot entries carry `readOnly` from `readOnlyProviders()`.
+- `remote-host-uplink-client.ts`: request `callForSupport` and track the acknowledgement; provider snapshot entries carry `readOnly` from `describeProviders` (Task 2.3).
 - Tests: uplink client negotiation with and without acknowledgement; snapshot contents.
 
 ### Task 3.2: Requester seats
@@ -573,7 +576,8 @@ Outcome: Controllers negotiate the capability, bind requester seats, give coordi
 
 ### Task 3.3: Coordinator and supporter extensions
 - Create `call-for-support-instructions.ts` (coordinator and supporter texts from the spec) and `call-for-support-tools.ts` (coordinator tools: `propose_roster`, `release_supporter`, `report_support`, `write_ledger`, `collect_supporter_patch` (milestone 5), plus existing Team tools); `team.ts` `tools()` branches on support groups.
-- Tests: tool lists per role, argument schemas, host call payloads, instructions contain the encapsulation rules.
+- Team `genericSuccession`: a read-only seat may only move to a provider whose descriptor declares `sessionAccess.readOnly`.
+- Tests: tool lists per role, argument schemas, host call payloads, instructions contain the encapsulation rules; a read-only seat's handoff to a provider without read-only enforcement is refused.
 
 ### Task 3.4: Report delivery and idle lease release
 - Report framing and delivery mode (busy → `next_turn`, idle → `immediate`); the Team tick retains a lease only for members with queued, dispatching or unsettled deliveries, and while archiving needs presence; presence for unleased members is not reported, and archive acquires to confirm idleness.

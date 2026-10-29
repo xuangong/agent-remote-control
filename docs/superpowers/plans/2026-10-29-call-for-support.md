@@ -682,17 +682,28 @@ Milestone 4 exit: agent-host suite and typecheck. Native Controller-level accept
 
 Outcome: `worktree` and `remote` supporters get their own worktrees at the call's commit, and their patches reach the worker.
 
+Decisions (verified with git 2.54 in a scratch repository):
+- A bundle names a temporary ref `refs/agent-remote/bundle/<id>` at the commit (`<base>..<ref>` when a base is known); the remote fetches it to `refs/agent-remote/support/<id>`, which keeps the commit reachable, and adds a detached worktree.
+- A patch is `git add -A` in the supporter's own worktree, then `git diff --cached --binary <commit>`: one patch with committed, uncommitted and new files, applicable with `git apply` at the commit.
+- The Relay drives both exchanges with new Controller paths `/remote/team/support-bundle` (the worker's Host creates and uploads the bundle as its seat) and `/remote/team/support-patch` (the supporter's Host produces and uploads the patch as the supporter), and grants the resulting resource to the member that needs it. A member still being created may read resources granted to it, on its own Host.
+- Worktrees are removed when the Controller sees their member released or their Team archiving.
+
 ### Task 5.1: Worktrees
-- `call-for-support-workspaces.ts`: `prepareWorktree(repo, teamId, memberId, commit)` (exclude entry, `git worktree add --detach`), `removeWorktree`, path validation inside the repository and allowed roots.
-- Tests against temporary git repositories: creation at the commit, exclude entry written once, removal and prune, missing commit error.
+**Files:** create `packages/agent-host/src/call-for-support-workspaces.ts` + test.
+- `repositoryRoot(cwd)`; `worktreePath(root, teamId, memberId)` = `<root>/.agent-remote/worktrees/<teamId>/<memberId>` (identifiers checked); `prepareWorktree(cwd, teamId, memberId, commit)` writes `.agent-remote/` to the common `info/exclude` once, checks the commit exists, reuses an existing worktree at that commit, else `git worktree add --detach`, and returns the path plus the worker's relative subdirectory; `removeWorktree(root, path)` (`git worktree remove --force`, `git worktree prune`).
+- `TeamRuntime` seat creation for `worktree` members creates the session in the worktree; the tick removes worktrees of released members and of archiving Teams, once.
+- Tests against temporary repositories: creation at the commit, exclude entry written once, reuse, removal and prune, missing commit error; a worktree seat created in its worktree and cleaned up on release.
 
 ### Task 5.2: Remote bundles
-- Requester side: `createBundle(repo, base, commit)` uploaded as a Team resource; remote side: fetch the bundle into the configured repository, then `prepareWorktree`. Seat creation for `remote` waits for the bundle resource.
-- Tests: bundle with and without base, fetch into a clone that lacks the commit, failure messages.
+**Files:** `call-for-support-workspaces.ts` (`createBundle`, `fetchBundle`), `packages/agent-host/src/host.ts` (`/remote/team/support-bundle`), `team.ts`, protocol `requestPath` and `TeamMemberWorkspace.remote.bundle?`, `packages/agent-remote-hosted/src/call-for-support.ts` (provisioning), `teams.ts` (resource reads of members being created).
+- Relay: before creating a `remote` member, it asks the worker's Host for a bundle of the call's commit (base when given), grants the resource to the member and records it in `workspace.bundle`.
+- Remote Controller: downloads the bundle as the member, fetches it into the repository, prepares the worktree, creates the session there.
+- Tests: bundle with and without base, fetch into a clone that lacks the commit, failure messages; Relay provisioning order with a fake Host.
 
 ### Task 5.3: Patch collection
-- `collect_supporter_patch(target)`: the supporter's Controller produces `git diff --binary <commit>` and `git format-patch <commit>..HEAD` into one resource; the coordinator attaches it to a report.
-- Tests: patch from uncommitted changes, from commits, empty patch, application with `git apply --check` in a fresh worktree.
+**Files:** `call-for-support-workspaces.ts` (`collectPatch`), `host.ts` (`/remote/team/support-patch`), `team.ts`, protocol (`TeamHostCall` `collect_supporter_patch`), Relay `call-for-support.ts`, coordinator tool in `call-for-support-roles.ts`.
+- `collect_supporter_patch { teamId; memberId; target; operationId }` (coordinator only, target a `worktree` or `remote` supporter): the Relay asks the target's Host for the patch, grants it to the coordinator and returns the resource; an empty patch returns `{ empty: true }`.
+- Tests: patch from uncommitted changes, from commits and new files, empty patch, `git apply --check` at the commit in a fresh worktree; coordinator flow against the support harness.
 
 Milestone 5 exit: workspace tests, agent-host suite.
 

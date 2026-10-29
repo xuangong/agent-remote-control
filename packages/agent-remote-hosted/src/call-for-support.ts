@@ -28,6 +28,8 @@ export interface CallForSupportPorts {
   readOnly(hostId: string, providerId: string): boolean;
   /** Asks the worker's Host to upload a bundle of the commit as the worker's seat. */
   supportBundle(hostId: string, input: { teamId: string; memberId: string; commit: string; base?: string; operationId: string }): Promise<unknown>;
+  /** Asks a supporter's Host to upload the patch of its worktree as the supporter; { empty: true } when it changed nothing. */
+  supportPatch(hostId: string, input: { teamId: string; memberId: string; operationId: string }): Promise<unknown>;
 }
 type WorkerCall = Extract<TeamHostCall, { action: 'call_for_support' }>;
 type CallResult = { status: 'accepted' | 'needs_approval' | 'unavailable'; message: string; callId?: string; roleId?: string };
@@ -274,9 +276,10 @@ export class CallForSupportGroups {
     return within;
   }
   /** Requests from the group's sessions: the coordinator's, and every member's usage. */
-  async memberCall(hostId: string, call: Extract<TeamHostCall, { action: 'propose_roster' | 'release_supporter' | 'report_support' | 'write_ledger' | 'report_usage' }>): Promise<unknown> {
+  async memberCall(hostId: string, call: Extract<TeamHostCall, { action: 'propose_roster' | 'release_supporter' | 'report_support' | 'write_ledger' | 'report_usage' | 'collect_supporter_patch' }>): Promise<unknown> {
     this.ports.assertHost(hostId);
     if (call.action === 'propose_roster' || call.action === 'release_supporter') return this.rosterCall(hostId, call);
+    if (call.action === 'collect_supporter_patch') return this.collectPatch(hostId, call);
     if (call.action === 'report_support' && call.report.resources?.length) {
       this.coordinator(structuredClone(this.broker.ports.read().find(team => team.id === call.teamId) ?? fail('Team not found.')), hostId, call.memberId);
       await this.broker.pinResources(call.teamId, call.memberId, call.report.resources);
@@ -394,6 +397,28 @@ export class CallForSupportGroups {
       const team = teams.find(item => item.id === teamId)!, roster = team.callForSupport?.roster;
       if (roster?.id === rosterId && roster.status === 'approved') { roster.status = 'provisioned'; team.revision++; team.updatedAt = this.broker.ports.now(); }
     });
+  }
+  /** The patch of a supporter's own worktree, for the coordinator to review and attach to a report. */
+  private async collectPatch(hostId: string, call: Extract<TeamHostCall, { action: 'collect_supporter_patch' }>): Promise<unknown> {
+    const team = this.broker.ports.read().find(item => item.id === call.teamId) ?? fail('Team not found.');
+    this.coordinator(structuredClone(team), hostId, call.memberId);
+    if (team.status !== 'active') fail('Team is not active.');
+    const target = team.members.find(member => member.id === call.target) ?? fail('Team member not found.');
+    if (target.role !== 'member' || (target.workspace?.kind !== 'worktree' && target.workspace?.kind !== 'remote')) fail('Only supporters with their own worktree have a patch.');
+    if (target.creation !== 'ready') fail('The supporter is not available; collect its patch before releasing it.');
+    const result: unknown = await this.ports.supportPatch(target.hostId, { teamId: team.id, memberId: target.id, operationId: digest(['patch', team.id, call.memberId, call.operationId]) });
+    if (result && typeof result === 'object' && 'empty' in result && result.empty === true) return { empty: true, message: 'The supporter changed nothing.' };
+    if (!isTeamResource(result)) throw new Error('Invalid supporter patch.');
+    await this.broker.pinResources(team.id, target.id, [result.resourceId]);
+    await this.broker.change(teams => {
+      const current = teams.find(item => item.id === team.id) ?? fail('Team not found.');
+      this.broker.resource(current, target.id, result.resourceId);
+      const grants = current.resourceGrants ??= [];
+      let grant = grants.find(item => item.resourceId === result.resourceId);
+      if (!grant) { grant = { resourceId: result.resourceId, memberIds: [] }; grants.push(grant); }
+      if (!grant.memberIds.includes(call.memberId)) grant.memberIds.push(call.memberId);
+    });
+    return { resource: result, message: 'Review the patch, then attach its resourceId to report_support if the worker should have it.' };
   }
   /** A remote supporter starts from a bundle of the call's commit that the worker's Host uploads; only that supporter may read it. */
   private async attachBundle(teamId: string, memberId: string): Promise<void> {

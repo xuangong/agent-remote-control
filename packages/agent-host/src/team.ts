@@ -8,8 +8,9 @@ import type { SessionExecutionRouting } from './session-succession-service.js';
 import type { RoleSuccessionDecision, SessionRole } from './session-role-succession.js';
 import type { SessionCreation } from './role-session-creation.js';
 import { coordinatorInstructions, coordinatorTools, supporterInstructions } from './call-for-support-roles.js';
-import { createBundle, fetchBundle, prepareWorktree, removeWorktree } from './call-for-support-workspaces.js';
-import { rm } from 'node:fs/promises';
+import { collectPatch, createBundle, fetchBundle, prepareWorktree, removeWorktree } from './call-for-support-workspaces.js';
+import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
 import { isNativeSessionRef, nativeSessionRefKey, type NativeSessionRef, isTeam, isTeamSeat, sessionOperationAvailability, type Team, type TeamHostCall, type TeamMember, type TeamMessage, type TeamSeat } from '@orchardworks/agent-remote-protocol';
 import { OperationCacheError, type RemoteHostSessionLease, type SessionWireOperationExecutor } from '@orchardworks/agent-remote-relay';
 
@@ -188,6 +189,18 @@ export class TeamRuntime implements SessionRole {
     const bundle = await createBundle(record.seat.member.cwd, input.commit, input.base);
     try { return await this.resourceFiles.upload(input.teamId, input.memberId, bundle.file, input.operationId); }
     finally { await rm(bundle.directory, { recursive: true, force: true }); }
+  }
+  /** The patch of a supporter's worktree, uploaded as the supporter; empty when it changed nothing. */
+  async supportPatch(input: { teamId: string; memberId: string; operationId: string }): Promise<unknown> {
+    await this.ready;
+    const record = this.records.find(item => item.seat.teamId === input.teamId && item.seat.member.id === input.memberId && item.creation === 'ready');
+    const workspace = record?.seat.member.workspace;
+    if (!record?.worktree || record.worktree.removed || (workspace?.kind !== 'worktree' && workspace?.kind !== 'remote')) throw new Error('The supporter\'s worktree is not on this Host.');
+    const patch = await collectPatch(record.worktree.path, workspace.commit);
+    if (!patch) return { empty: true };
+    const directory = await mkdtemp(join(tmpdir(), 'agent-remote-patch-')), file = join(directory, `${record.seat.member.id}.patch`);
+    try { await writeFile(file, patch); return await this.resourceFiles.upload(input.teamId, input.memberId, file, input.operationId); }
+    finally { await rm(directory, { recursive: true, force: true }); }
   }
   /** A support group's worker seat binds the existing worker session and reports where it works. */
   private async bindWorker(seat: TeamSeat): Promise<TeamMember> {

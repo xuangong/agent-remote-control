@@ -171,7 +171,7 @@ export class TeamBroker {
     const projectDelivery = <T extends { id: string; resolvedTarget?: NativeSessionRef }>(value: T) => recipientAware ? value : withoutRecipient(value);
     if (call.action === 'call_for_support' || call.action === 'support_status') return (this.groups ?? fail(unavailableGroups)).workerCall(hostId, call);
     if (call.action === 'support_enablement') return (this.groups ?? fail(unavailableGroups)).enablement(hostId);
-    if (call.action === 'propose_roster' || call.action === 'release_supporter' || call.action === 'report_support' || call.action === 'write_ledger' || call.action === 'report_usage') {
+    if (call.action === 'propose_roster' || call.action === 'release_supporter' || call.action === 'report_support' || call.action === 'write_ledger' || call.action === 'report_usage' || call.action === 'collect_supporter_patch') {
       assertCurrent(); return (this.groups ?? fail(unavailableGroups)).memberCall(hostId, call);
     }
     if (call.action === 'resource_begin' || call.action === 'resource_chunk' || call.action === 'resource_finish' || call.action === 'resource_metadata' || call.action === 'resource_read') return this.resourceCall(hostId, call, assertCurrent);

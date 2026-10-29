@@ -1042,6 +1042,13 @@ export function createAgentHostRuntime(options: AgentHostRuntimeOptions): AgentH
           return json(409, { code: error instanceof SuccessionPreparationRejected ? error.code : 'succession_request_failed', error: error instanceof Error ? error.message : 'Session succession failed.' });
         }
       }
+      if (url.pathname === '/remote/team/support-patch') {
+        if (!team) return json(404, {error: 'Update the Controller to use Teams.'});
+        const input = payload as { teamId?: unknown; memberId?: unknown; operationId?: unknown };
+        if (request.method !== 'POST' || typeof input.teamId !== 'string' || typeof input.memberId !== 'string' || typeof input.operationId !== 'string') return json(400, {error: 'Invalid supporter patch request.'});
+        try { return json(200, await team.supportPatch({ teamId: input.teamId, memberId: input.memberId, operationId: input.operationId })); }
+        catch (error) { return json(409, {error: error instanceof Error ? error.message : 'The supporter patch failed.'}); }
+      }
       if (url.pathname === '/remote/team/support-bundle') {
         if (!team) return json(404, {error: 'Update the Controller to use Teams.'});
         const input = payload as { teamId?: unknown; memberId?: unknown; commit?: unknown; base?: unknown; operationId?: unknown };

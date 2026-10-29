@@ -1,7 +1,7 @@
 import type { AgentSessionTool } from '@orchardworks/agent-provider-sdk';
 import type { TeamHostCall, TeamSeat } from '@orchardworks/agent-remote-protocol';
 
-type CoordinatorCall = Extract<TeamHostCall, { action: 'propose_roster' | 'release_supporter' | 'report_support' | 'write_ledger' }>;
+type CoordinatorCall = Extract<TeamHostCall, { action: 'propose_roster' | 'release_supporter' | 'report_support' | 'write_ledger' | 'collect_supporter_patch' }>;
 type Call = (input: CoordinatorCall extends infer T ? T extends unknown ? Omit<T, 'teamId' | 'memberId'> : never : never) => Promise<unknown>;
 const id = { type: 'string', minLength: 1, maxLength: 256 };
 const text = (maxLength: number, minLength = 0) => ({ type: 'string', ...(minLength ? { minLength } : {}), maxLength });
@@ -60,6 +60,8 @@ export function coordinatorTools(call: Call): AgentSessionTool[] {
         resources: { type: 'array', items: id, minItems: 1, maxItems: 8, uniqueItems: true } }, ['callId', 'operationId', 'status', 'summary', 'findings']),
       args => call({ action: 'report_support', callId: args.callId, operationId: args.operationId,
         report: { status: args.status, summary: args.summary, findings: args.findings, ...(args.resources?.length ? { resources: args.resources } : {}) } })),
+    tool('collect_supporter_patch', 'Collect everything a worktree or remote supporter changed in its own worktree since the call\'s commit, as one patch resource you may read. Review it, then attach its resourceId to report_support for the worker to apply itself. Collect before releasing the supporter. Reuse operationId to retry.',
+      object({ target: id, operationId: id }, ['target', 'operationId']), args => call({ action: 'collect_supporter_patch', target: args.target, operationId: args.operationId })),
     tool('write_ledger', 'Replace your ledger: the durable state of this role, such as reviewed commits, findings and their status, and open questions. Pass the revision you read with read_team; a stale revision is refused.',
       object({ revision: { type: 'integer', minimum: 0 }, text: text(16000) }, ['revision', 'text']), args => call({ action: 'write_ledger', revision: args.revision, text: args.text })),
   ];

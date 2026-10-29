@@ -100,6 +100,7 @@ export const TeamHostCall = Type.Union([
       resources: Type.Optional(Type.Array(id, { minItems: 1, maxItems: 8, uniqueItems: true })) }, object) }, object),
   Type.Object({ action: Type.Literal('write_ledger'), teamId: id, memberId: id, revision: Type.Integer({ minimum: 0 }), text: Type.String({ maxLength: 16000 }) }, object),
   Type.Object({ action: Type.Literal('release_supporter'), teamId: id, memberId: id, target: id }, object),
+  Type.Object({ action: Type.Literal('collect_supporter_patch'), teamId: id, memberId: id, target: id, operationId: id }, object),
   // A Controller reports cumulative usage of one of its members' sessions.
   Type.Object({ action: Type.Literal('report_usage'), teamId: id, memberId: id, tokens: Type.Integer({ minimum: 0 }), costUsd: Type.Optional(Type.Number({ minimum: 0 })) }, object),
   // A worker's own tools, by the worker's session on the calling Host.

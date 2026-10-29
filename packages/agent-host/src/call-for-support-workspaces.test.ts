@@ -4,7 +4,7 @@ import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promi
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, expect, it } from 'vitest';
-import { createBundle, fetchBundle, prepareWorktree, removeWorktree, worktreePath } from './call-for-support-workspaces.js';
+import { collectPatch, createBundle, fetchBundle, prepareWorktree, removeWorktree, worktreePath } from './call-for-support-workspaces.js';
 
 const cleanup: string[] = [];
 afterEach(async () => { for (const path of cleanup.splice(0)) await rm(path, { recursive: true, force: true }); });
@@ -72,4 +72,23 @@ it('explains a bundle whose base the remote repository lacks', async () => {
   execFileSync('git', ['-C', empty, 'init', '-q']);
   const bundle = await createBundle(repo.root, repo.second, repo.first); cleanup.push(bundle.directory);
   await expect(fetchBundle(empty, bundle.file, 'team', 'member')).rejects.toThrow('call again without a base');
+});
+
+it('collects committed, uncommitted and new files as one patch that applies at the commit', async () => {
+  const repo = await repository();
+  const { worktree } = await prepareWorktree(repo.root, 'team', 'fixer', repo.second);
+  expect(await collectPatch(worktree, repo.second)).toBe('');
+  await writeFile(join(worktree, 'src', 'a.ts'), 'three\n');
+  execFileSync('git', ['-C', worktree, '-c', 'user.email=t@t', '-c', 'user.name=t', 'commit', '-qam', 'three']);
+  await writeFile(join(worktree, 'src', 'a.ts'), 'four\n');
+  await writeFile(join(worktree, 'src', 'b.bin'), Buffer.from([0, 1, 2, 255]));
+  const patch = await collectPatch(worktree, repo.second);
+  expect(patch).toContain('diff --git a/src/a.ts b/src/a.ts');
+  expect(patch).toContain('GIT binary patch');
+  const { worktree: fresh } = await prepareWorktree(repo.root, 'team', 'check', repo.second);
+  const file = join(fresh, '..', 'fix.patch'); await writeFile(file, patch);
+  execFileSync('git', ['-C', fresh, 'apply', '--check', file]);
+  execFileSync('git', ['-C', fresh, 'apply', file]);
+  expect(await readFile(join(fresh, 'src', 'a.ts'), 'utf8')).toBe('four\n');
+  expect(await readFile(join(fresh, 'src', 'b.bin'))).toEqual(Buffer.from([0, 1, 2, 255]));
 });

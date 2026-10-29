@@ -87,7 +87,7 @@ export interface RemoteHostUplinkClient {
 }
 
 /** Host calls only a Relay that acknowledged Call For Support understands. */
-const callForSupportActions = new Set<string>(['propose_roster', 'report_support', 'write_ledger', 'release_supporter', 'report_usage', 'call_for_support', 'support_status', 'support_enablement']);
+const callForSupportActions = new Set<string>(['propose_roster', 'report_support', 'write_ledger', 'release_supporter', 'collect_supporter_patch', 'report_usage', 'call_for_support', 'support_status', 'support_enablement']);
 
 export function createRemoteHostUplinkClient(options: RemoteHostUplinkClientOptions): RemoteHostUplinkClient {
   validateConfiguration(options);

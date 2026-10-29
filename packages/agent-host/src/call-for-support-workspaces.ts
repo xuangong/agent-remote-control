@@ -81,6 +81,13 @@ export async function removeWorktree(root: string, worktree: string): Promise<vo
 
 const BUNDLE_LIMIT = 50 * 1024 * 1024;
 
+/** Everything a supporter changed in its worktree since the commit, including commits and new files, as one binary patch. */
+export async function collectPatch(worktree: string, commit: string): Promise<string> {
+  if (!COMMIT.test(commit)) throw new Error('Invalid commit.');
+  await git(worktree, ['add', '-A']);
+  return git(worktree, ['diff', '--cached', '--binary', commit], { maxBuffer: BUNDLE_LIMIT });
+}
+
 /**
  * A bundle of the commit for a remote supporter: only the commits after base when base is given, else the full history.
  * The caller removes the returned directory.

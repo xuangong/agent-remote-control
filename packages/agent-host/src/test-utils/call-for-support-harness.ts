@@ -47,7 +47,8 @@ export async function supportHarness(options: { callForSupport?: boolean } = {})
     async createSeat(_host, seat) { return runtime.create(seat); },
     resources: new PortableTeamResourceStore({ storage: { async get(key) { return rows.get(key); }, async put(key, value) { rows.set(key, value); }, async delete(key) { rows.delete(key); },
       async list(prefix) { return [...rows.keys()].filter(key => key.startsWith(prefix)); } } }),
-    callForSupport: { state: () => support, capable: () => true, assertHost() {}, readOnly: () => true, supportBundle: (_host, input) => runtime.supportBundle(input) },
+    callForSupport: { state: () => support, capable: () => true, assertHost() {}, readOnly: () => true, supportBundle: (_host, input) => runtime.supportBundle(input),
+      supportPatch: (_host, input) => runtime.supportPatch(input) },
   });
   const created: Array<{ id: string; provider: string; creation: SessionCreation; extensions: AgentSessionExtensions }> = [];
   const access: TeamRuntimeAccess = {

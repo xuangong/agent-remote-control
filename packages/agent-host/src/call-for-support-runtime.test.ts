@@ -1,6 +1,6 @@
 import { execFileSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
-import { mkdtemp, realpath, rm } from 'node:fs/promises';
+import { mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { expect, it } from 'vitest';
@@ -70,7 +70,7 @@ it('gives the coordinator coordination tools and the group state, and supporters
     const { roleId, callId } = await h.call({ operationId: 'op-1', profileId: profile.id });
     const coordinatorRef = h.ref('codex', h.team(roleId).members[0]!.nativeSessionId!);
     const coordinator = await h.runtime.extensions(coordinatorRef);
-    expect(coordinator!.tools!.map(tool => tool.name).sort()).toEqual(['acknowledge_team_messages', 'download_team_resource', 'propose_roster', 'read_source_session', 'read_team',
+    expect(coordinator!.tools!.map(tool => tool.name).sort()).toEqual(['acknowledge_team_messages', 'collect_supporter_patch', 'download_team_resource', 'propose_roster', 'read_source_session', 'read_team',
       'release_supporter', 'report_support', 'report_team_progress', 'send_team_message', 'upload_team_resource', 'write_ledger']);
     expect(coordinator!.instructions).toContain('You coordinate Call For Support for the role "Cross review"');
     expect(coordinator!.instructions).toContain('Never edit the worker\'s workspace');
@@ -169,4 +169,23 @@ it('starts a remote supporter in its repository from a bundle of the call\'s com
     expect(existsSync(worktree)).toBe(false);
     expect(execFileSync('git', ['-C', remote, 'for-each-ref', 'refs/agent-remote'], { encoding: 'utf8' }).trim()).toBe('');
   } finally { await h.close(); await rm(remote, { recursive: true, force: true }); }
+});
+
+it('lets the coordinator collect a worktree supporter\'s patch and give it to the worker', async () => {
+  const h = await supportHarness();
+  try {
+    const profile = h.profile({ ...reviewProfile, mandate: { ...reviewProfile.mandate, supporters: [{ providerId: 'codex', model: 'gpt-5.5' }], workspaces: ['worktree'] } }); h.enable([profile.id]);
+    const { roleId, callId } = await h.call({ operationId: 'op-1', profileId: profile.id, deliverable: 'patch' });
+    const coordinator = await h.runtime.extensions(h.ref('codex', h.team(roleId).members[0]!.nativeSessionId!));
+    await run(coordinator, 'propose_roster', { operationId: 'roster', rationale: 'A fix.', members: [{ name: 'Fixer', responsibility: 'Fix.', providerId: 'codex', model: 'gpt-5.5', workspace: 'worktree' }] });
+    const supporter = h.team(roleId).members[2]!;
+    expect(await run(coordinator, 'collect_supporter_patch', { target: supporter.id, operationId: 'empty' })).toMatchObject({ empty: true });
+    await writeFile(join(supporter.cwd!, 'a.txt'), 'fixed\n');
+    const collected = await run(coordinator, 'collect_supporter_patch', { target: supporter.id, operationId: 'patch' });
+    expect(collected.resource).toMatchObject({ name: `${supporter.id}.patch` });
+    const local = await run(coordinator, 'download_team_resource', { resourceId: collected.resource.resourceId });
+    expect(await readFile(local.localPath, 'utf8')).toContain('+fixed');
+    await run(coordinator, 'report_support', { callId, operationId: 'report', status: 'reported', summary: 'Patch attached.', findings: [], resources: [collected.resource.resourceId] });
+    await expect(run(coordinator, 'collect_supporter_patch', { target: h.team(roleId).members[1]!.id, operationId: 'worker' })).rejects.toThrow('own worktree');
+  } finally { await h.close(); }
 });

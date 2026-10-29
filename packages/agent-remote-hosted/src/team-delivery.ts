@@ -84,7 +84,7 @@ export function validSavedTeam(value: unknown): value is SavedTeam {
   if (receipts !== undefined) {
     if (!Array.isArray(receipts) || receipts.length > receiptCount || Buffer.byteLength(JSON.stringify(receipts)) > receiptBytes) return false;
     if (!receipts.every(receipt => receipt && typeof receipt === 'object'
-      && Object.keys(receipt).every(key => ['id', 'from', 'to', 'status', 'acceptance', 'createdAt', 'error', 'fingerprint', 'settledAt', 'resolvedTarget'].includes(key))
+      && Object.keys(receipt).every(key => ['id', 'from', 'to', 'status', 'acceptance', 'createdAt', 'error', 'fingerprint', 'settledAt', 'resolvedTarget', 'callForSupportCallId'].includes(key))
       && typeof receipt.fingerprint === 'string' && /^[a-f0-9]{64}$/.test(receipt.fingerprint)
       && Number.isSafeInteger(receipt.settledAt) && receipt.settledAt >= 0)) return false;
     // Older versions compacted accepted input without a native disposition. Keep that evidence unresolved.

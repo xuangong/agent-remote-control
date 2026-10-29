@@ -59,7 +59,7 @@ function unique<T>(values: T[], key: (value: T) => string) { return new Set(valu
 function validBroker(value: unknown): value is RemoteHostBrokerState {
   if (!record(value) || !Array.isArray(value.keys) || value.keys.length > 128 || !Array.isArray(value.hosts) || value.hosts.length > 128 ||
     !Array.isArray(value.bindings) || value.bindings.length > 4096 || !Array.isArray(value.creations) || value.creations.length > 4096) return false;
-  if (value.teams !== undefined && (!Array.isArray(value.teams) || value.teams.length > 32 || !value.teams.every(validSavedTeam) || !unique(value.teams, (team: {id:string}) => team.id))) return false;
+  if (value.teams !== undefined && (!Array.isArray(value.teams) || value.teams.length > 128 || !value.teams.every(validSavedTeam) || !unique(value.teams, (team: {id:string}) => team.id))) return false;
   if (value.callForSupport !== undefined && !validCallForSupportState(value.callForSupport)) return false;
   if (value.associations !== undefined) { try { migrateBrokerAssociations(value.associations); } catch { return false; } }
   if (value.revokedHosts !== undefined && !validRevokedHosts(value.revokedHosts)) return false;

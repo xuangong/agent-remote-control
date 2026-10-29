@@ -254,6 +254,11 @@ export function createHostBroker(options: HostBrokerOptions) {
       const result = await rpc(requireHost(hostId), 'POST', '/remote/team/create-seat', undefined, JSON.stringify(seat));
       const value = JSON.parse(result.body); if (result.status !== 200) throw new Error(value.error ?? 'Team session creation failed.'); return value;
     },
+    callForSupport: {
+      state: () => callForSupportState,
+      assertHost(hostId) { if (requireHost(hostId).callForSupport !== 1) throw new BrokerError(409, 'call_for_support_upgrade_required', 'Update the Controller to use Call For Support.'); },
+      readOnly: (hostId, providerId) => !!hosts.get(hostId)?.providers.some(provider => provider.providerId === providerId && provider.readOnly),
+    },
   });
   function assertAssociationCapacity(state: BrokerAssociationState) {
     if (!validBrokerAssociations(state) || state.revision > Number.MAX_SAFE_INTEGER - remainingAssociationRevisions(state)) throw new BrokerError(409, 'association_capacity', 'Association storage or revision headroom is exhausted.');

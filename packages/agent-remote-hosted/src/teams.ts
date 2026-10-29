@@ -1,6 +1,7 @@
 import { assertTeamQueueCapacity, compactTeamDeliveries, unresolvedTeamDelivery, stripPrivateTeamEvidence, replayTeamDelivery, validSavedTeam, type SavedTeam } from './team-delivery.js';
 export { teamMessageBudgetBytes } from './team-delivery.js';
 import type { TeamResourceStore } from './team-resources.js';
+import { CALL_FOR_SUPPORT_TEAM_LIMIT, CallForSupportGroups, type CallForSupportPorts } from './call-for-support.js';
 import { createHash, randomUUID } from 'node:crypto';
 import { nativeSessionRefKey, type NativeSessionRef, isTeamMember, type Team, type TeamAction, type TeamCreate, type TeamHostCall, type TeamMember, type TeamMessage, type TeamSeat, type TeamResource } from '@orchardworks/agent-remote-protocol';
 
@@ -16,13 +17,16 @@ export interface TeamBrokerPorts {
   createSeat(hostId: string, seat: TeamSeat): Promise<TeamMember>;
   assertHost(hostId: string, providerId: string): void;
   now(): number;
+  /** Absent: this Relay has no Call For Support groups. */
+  callForSupport?: CallForSupportPorts;
 }
 const upgradeRequired = 'Update the Controller for exact Team recipients. Reload the browser after updating the Relay to inspect this Team safely.';
 type StoredRecipientAnchor = Pick<TeamMember, 'hostId' | 'providerId' | 'nativeSessionId'>;
 const withoutRecipient = <T extends { id: string; resolvedTarget?: NativeSessionRef }>(value: T): Omit<T, 'resolvedTarget'> => { const { resolvedTarget: _target, ...legacy } = value; return legacy; };
 const fail = (message: string): never => { throw new Error(message); };
 const callForSupportHostActions = new Set<string>(['propose_roster', 'report_support', 'write_ledger', 'release_supporter', 'report_usage']);
-const callForSupportActions = new Set<string>(['call_for_support', 'resolve_roster', 'release_member', 'update_mandate', 'resume_group']);
+const callForSupportActions = new Set<string>(['resolve_roster', 'release_member', 'update_mandate', 'resume_group']);
+const unavailableGroups = 'Call For Support is unavailable on this Relay.';
 const sameRecipient = (current: NativeSessionRef, anchor: StoredRecipientAnchor) => current.providerId === anchor.providerId && current.nativeSessionId === anchor.nativeSessionId;
 const find = (teams: SavedTeam[], id: string) => teams.find(team => team.id === id) ?? fail('Team not found.');
 const member = (team: Team, id: string) => team.members.find(item => item.id === id) ?? fail('Team member not found.');
@@ -38,7 +42,11 @@ function settleArchive(team: SavedTeam, now: number) {
 /** Membership authority and durable mailboxes; provider execution stays on Controllers. */
 export class TeamBroker {
   private creating = new Map<string, Promise<Team>>();
-  constructor(private readonly ports: TeamBrokerPorts) {}
+  private readonly groups?: CallForSupportGroups;
+  constructor(private readonly ports: TeamBrokerPorts) {
+    if (ports.callForSupport) this.groups = new CallForSupportGroups({ ports, change: update => this.change(update), provision: (teamId, memberId) => this.provision(teamId, memberId),
+      project: team => this.project(team) }, ports.callForSupport);
+  }
   private change<T>(update: (teams: SavedTeam[]) => T): Promise<T> {
     return this.ports.change(teams => {
       for (const team of teams) compactTeamDeliveries(team, this.ports.now());
@@ -100,12 +108,16 @@ export class TeamBroker {
     const team = structuredClone(saved); compactTeamDeliveries(team, this.ports.now()); return this.project(team, recipientAware);
   }); }
   async create(input: TeamCreate): Promise<Team> {
-    if (input.callForSupport) fail('Call For Support is unavailable on this Relay.');
+    if (input.callForSupport) {
+      const groups = this.groups ?? fail(unavailableGroups);
+      return (await groups.call({ operationId: input.operationId, source: input.source, profileId: input.callForSupport.profileId, call: input.callForSupport.call, origin: 'user',
+        ...(input.callForSupport.fresh ? { fresh: true } : {}) })).team;
+    }
     this.ports.assertHost(input.source.hostId, input.source.providerId);
     const team = await this.change(teams => {
       const existing = teams.find(item => item.operationId === input.operationId);
       if (existing) { if (JSON.stringify(existing.source) !== JSON.stringify(input.source)) fail('Creation identity has different input.'); return existing; }
-      if (teams.length >= 32) fail('Team capacity reached.');
+      if (teams.length >= CALL_FOR_SUPPORT_TEAM_LIMIT) fail('Team capacity reached.');
       const now = this.ports.now();
       const leader: TeamMember = { id: randomUUID(), role: 'leader', hostId: input.source.hostId, providerId: input.source.providerId,
         name: 'Leader', responsibility: 'Discuss requirements, implement directly, coordinate members, validate and report delivery.',
@@ -116,7 +128,12 @@ export class TeamBroker {
     return this.provision(team.id, team.members[0]!.id);
   }
   async action(input: TeamAction): Promise<Team> {
-    if (callForSupportActions.has(input.action)) fail('Call For Support is unavailable on this Relay.');
+    if (input.action === 'call_for_support') {
+      const groups = this.groups ?? fail(unavailableGroups);
+      return groups.userCall(input.teamId, { operationId: input.operationId, task: input.task, ...(input.context ? { context: input.context } : {}), deliverable: input.deliverable,
+        ...(input.followUpOf ? { followUpOf: input.followUpOf } : {}) });
+    }
+    if (callForSupportActions.has(input.action)) fail(unavailableGroups);
     if (input.action === 'add_member') this.ports.assertHost(input.hostId, input.providerId);
     const result = await this.change(teams => {
       const team = find(teams, input.teamId), now = this.ports.now();
@@ -148,7 +165,8 @@ export class TeamBroker {
     if (!recipientAware && (call.action === 'claim' && call.expectedNativeSessionId !== undefined || call.action === 'settle' && call.resolvedTarget)) fail(upgradeRequired);
     if (call.action === 'poll') return this.ports.read().filter(team => team.status !== 'archived' && team.members.some(item => item.hostId === hostId && item.creation === 'ready')).map(team => this.project(team, recipientAware));
     const projectDelivery = <T extends { id: string; resolvedTarget?: NativeSessionRef }>(value: T) => recipientAware ? value : withoutRecipient(value);
-    if (call.action === 'call_for_support' || call.action === 'support_status' || callForSupportHostActions.has(call.action)) return fail('Call For Support is unavailable on this Relay.');
+    if (call.action === 'call_for_support' || call.action === 'support_status') return (this.groups ?? fail(unavailableGroups)).workerCall(hostId, call);
+    if (callForSupportHostActions.has(call.action)) return fail(unavailableGroups);
     if (call.action === 'resource_begin' || call.action === 'resource_chunk' || call.action === 'resource_finish' || call.action === 'resource_metadata' || call.action === 'resource_read') return this.resourceCall(hostId, call, assertCurrent);
     if (call.action === 'send' && call.resources?.length) await this.prepareResources(hostId,call,assertCurrent);
     return this.change(teams => {
@@ -207,6 +225,8 @@ export class TeamBroker {
       active(team);
       if (call.action === 'send') {
         const target = member(team, call.to);
+        if (self.role === 'requester') fail('The worker calls for support with call_for_support.');
+        if (target.role === 'requester') fail('Reports reach the worker through report_support.');
         if (target.id === self.id || self.role !== 'leader' && target.role !== 'leader') fail('Members can communicate only with their Leader.');
         if (target.creation !== 'ready') fail('Target member is not registered.');
         const id = createHash('sha256').update(JSON.stringify([self.id, call.operationId])).digest('hex');
@@ -308,7 +328,9 @@ export class TeamBroker {
     } catch (error) { result = { ...item, creation: 'unknown', error: error instanceof Error ? error.message.slice(0, 2048) : 'Member creation is uncertain.' }; }
     return this.change(teams => {
       const current = find(teams, teamId), slot = member(current, memberId);
-      if (result.creation === 'ready' && teams.some(other => other.members.some(candidate => candidate !== slot && candidate.creation === 'ready' && candidate.hostId === result.hostId && candidate.providerId === result.providerId && candidate.nativeSessionId === result.nativeSessionId))) fail('Native session is already bound to a Team member.');
+      // A worker may have several support roles; any other session holds one Team seat.
+      if (result.creation === 'ready' && teams.some(other => other.members.some(candidate => candidate !== slot && candidate.creation === 'ready' && candidate.hostId === result.hostId && candidate.providerId === result.providerId && candidate.nativeSessionId === result.nativeSessionId
+        && (candidate.role !== 'requester' || result.role !== 'requester')))) fail('Native session is already bound to a Team member.');
       const registering = slot.creation !== 'ready' && slot.creation !== 'abandoned' && result.creation === 'ready';
       if (slot.creation !== 'abandoned') Object.assign(slot, result);
       if (registering && result.role === 'member' && current.status === 'active') {

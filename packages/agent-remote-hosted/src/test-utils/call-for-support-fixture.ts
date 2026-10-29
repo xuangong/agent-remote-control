@@ -2,6 +2,7 @@ import type { CallForSupportProfileInput, TeamHostCall, TeamSeat } from '@orchar
 import { TeamBroker, type TeamBrokerPorts } from '../teams.js';
 import { validSavedTeam, type SavedTeam } from '../team-delivery.js';
 import { emptyCallForSupportState, executeProfileCommand, setEnablement, type CallForSupportState } from '../call-for-support-profiles.js';
+import { PortableTeamResourceStore } from '../team-resources.js';
 
 export const review: CallForSupportProfileInput = { name: 'Cross review', description: 'Independent reviewers.', coordinator: { model: 'gpt-5.5', reasoningEffort: 'high' }, enableByDefault: false,
   mandate: { supporters: [{ providerId: 'claude', model: 'opus' }], maxSupporters: 2, workspaces: ['shared'], remoteHosts: [], approval: 'every_roster' } };
@@ -11,8 +12,11 @@ export function supportFixture(options: { capable?: string[]; readOnly?: boolean
   const state: CallForSupportState = emptyCallForSupportState();
   const seats: TeamSeat[] = [];
   const resolve = (hostId: string, providerId: string, nativeSessionId: string) => ({ controllerId: hostId, providerId, nativeSessionId });
+  const rows = new Map<string, Uint8Array>();
+  const resources = new PortableTeamResourceStore({ storage: { async get(key) { return rows.get(key); }, async put(key, value) { rows.set(key, value); }, async delete(key) { rows.delete(key); },
+    async list(prefix) { return [...rows.keys()].filter(key => key.startsWith(prefix)); } } });
   const ports: TeamBrokerPorts = {
-    resolveSession: resolve, read: () => teams, now: () => ++now, assertHost: () => {},
+    resolveSession: resolve, read: () => teams, now: () => ++now, assertHost: () => {}, resources,
     change: async update => { const draft = structuredClone(teams), value = structuredClone(update(draft)); if (!draft.every(validSavedTeam)) throw new Error('Invalid Team state.'); teams = draft; return value; },
     createSeat: async (_hostId, seat) => {
       seats.push(structuredClone(seat));

@@ -1,7 +1,7 @@
 import { assertTeamQueueCapacity, compactTeamDeliveries, unresolvedTeamDelivery, stripPrivateTeamEvidence, replayTeamDelivery, validSavedTeam, type SavedTeam } from './team-delivery.js';
 export { teamMessageBudgetBytes } from './team-delivery.js';
 import type { TeamResourceStore } from './team-resources.js';
-import { CALL_FOR_SUPPORT_TEAM_LIMIT, CallForSupportGroups, type CallForSupportPorts } from './call-for-support.js';
+import { CALL_FOR_SUPPORT_TEAM_LIMIT, CallForSupportGroups, compactCallForSupport, type CallForSupportPorts } from './call-for-support.js';
 import { createHash, randomUUID } from 'node:crypto';
 import { nativeSessionRefKey, type NativeSessionRef, isTeamMember, type Team, type TeamAction, type TeamCreate, type TeamHostCall, type TeamMember, type TeamMessage, type TeamSeat, type TeamResource } from '@orchardworks/agent-remote-protocol';
 
@@ -24,8 +24,7 @@ const upgradeRequired = 'Update the Controller for exact Team recipients. Reload
 type StoredRecipientAnchor = Pick<TeamMember, 'hostId' | 'providerId' | 'nativeSessionId'>;
 const withoutRecipient = <T extends { id: string; resolvedTarget?: NativeSessionRef }>(value: T): Omit<T, 'resolvedTarget'> => { const { resolvedTarget: _target, ...legacy } = value; return legacy; };
 const fail = (message: string): never => { throw new Error(message); };
-const callForSupportHostActions = new Set<string>(['report_support', 'write_ledger', 'report_usage']);
-const callForSupportActions = new Set<string>(['update_mandate', 'resume_group']);
+
 const unavailableGroups = 'Call For Support is unavailable on this Relay.';
 const sameRecipient = (current: NativeSessionRef, anchor: StoredRecipientAnchor) => current.providerId === anchor.providerId && current.nativeSessionId === anchor.nativeSessionId;
 const find = (teams: SavedTeam[], id: string) => teams.find(team => team.id === id) ?? fail('Team not found.');
@@ -45,13 +44,14 @@ export class TeamBroker {
   private readonly groups?: CallForSupportGroups;
   constructor(private readonly ports: TeamBrokerPorts) {
     if (ports.callForSupport) this.groups = new CallForSupportGroups({ ports, change: update => this.change(update), provision: (teamId, memberId) => this.provision(teamId, memberId),
-      project: team => this.project(team) }, ports.callForSupport);
+      project: team => this.project(team), resource: (team, memberId, resourceId) => this.resourceAccess(team, memberId, resourceId),
+      pinResources: (teamId, memberId, resourceIds) => this.pinResources(teamId, memberId, resourceIds) }, ports.callForSupport);
   }
   private change<T>(update: (teams: SavedTeam[]) => T): Promise<T> {
     return this.ports.change(teams => {
       for (const team of teams) compactTeamDeliveries(team, this.ports.now());
       const result = update(teams);
-      for (const team of teams) compactTeamDeliveries(team, this.ports.now());
+      for (const team of teams) { compactTeamDeliveries(team, this.ports.now()); compactCallForSupport(team); }
       return result;
     });
   }
@@ -133,8 +133,7 @@ export class TeamBroker {
       return groups.userCall(input.teamId, { operationId: input.operationId, task: input.task, ...(input.context ? { context: input.context } : {}), deliverable: input.deliverable,
         ...(input.followUpOf ? { followUpOf: input.followUpOf } : {}) });
     }
-    if (input.action === 'resolve_roster' || input.action === 'release_member') return (this.groups ?? fail(unavailableGroups)).userAction(input);
-    if (callForSupportActions.has(input.action)) fail(unavailableGroups);
+    if (input.action === 'resolve_roster' || input.action === 'release_member' || input.action === 'update_mandate' || input.action === 'resume_group') return (this.groups ?? fail(unavailableGroups)).userAction(input);
     if (input.action === 'add_member') this.ports.assertHost(input.hostId, input.providerId);
     const result = await this.change(teams => {
       const team = find(teams, input.teamId), now = this.ports.now();
@@ -167,8 +166,9 @@ export class TeamBroker {
     if (call.action === 'poll') return this.ports.read().filter(team => team.status !== 'archived' && team.members.some(item => item.hostId === hostId && item.creation === 'ready')).map(team => this.project(team, recipientAware));
     const projectDelivery = <T extends { id: string; resolvedTarget?: NativeSessionRef }>(value: T) => recipientAware ? value : withoutRecipient(value);
     if (call.action === 'call_for_support' || call.action === 'support_status') return (this.groups ?? fail(unavailableGroups)).workerCall(hostId, call);
-    if (call.action === 'propose_roster' || call.action === 'release_supporter') { assertCurrent(); return (this.groups ?? fail(unavailableGroups)).coordinatorCall(hostId, call); }
-    if (callForSupportHostActions.has(call.action)) return fail(unavailableGroups);
+    if (call.action === 'propose_roster' || call.action === 'release_supporter' || call.action === 'report_support' || call.action === 'write_ledger' || call.action === 'report_usage') {
+      assertCurrent(); return (this.groups ?? fail(unavailableGroups)).memberCall(hostId, call);
+    }
     if (call.action === 'resource_begin' || call.action === 'resource_chunk' || call.action === 'resource_finish' || call.action === 'resource_metadata' || call.action === 'resource_read') return this.resourceCall(hostId, call, assertCurrent);
     if (call.action === 'send' && call.resources?.length) await this.prepareResources(hostId,call,assertCurrent);
     return this.change(teams => {
@@ -216,6 +216,7 @@ export class TeamBroker {
         }
         if (call.action === 'claim') {
           active(team); if (message.status !== 'queued') fail('Message is already claimed.');
+          if (team.callForSupport?.status === 'paused_budget' && self.role !== 'requester') fail('Support is paused by its budget.');
           const target = this.resolveRecipientFromAnchor(self);
           if (call.expectedNativeSessionId === undefined ? target.nativeSessionId !== self.nativeSessionId : call.expectedNativeSessionId !== target.nativeSessionId) fail('Team recipient moved or does not match the claim.');
           this.ports.assertRecipient?.(target);
@@ -251,6 +252,16 @@ export class TeamBroker {
     const referenced=!!grant || team.messages.some(message=>message.resources?.some(resource=>resource.resourceId===resourceId));
     if (!upload || !referenced && upload.expiresAt <= this.ports.now() || upload.ownerMemberId !== memberId && !grant?.memberIds.includes(memberId) && !team.messages.some(message => message.to === memberId && message.resources?.some(resource => resource.resourceId === resourceId))) fail('Resource access is not granted to this member.');
     return upload!.resource;
+  }
+  /** Verifies the stored bytes of resources a member may attach and keeps them while referenced. */
+  private async pinResources(teamId: string, memberId: string, resourceIds: string[]): Promise<void> {
+    const store = this.ports.resources ?? fail('Team resource storage is unavailable on this Relay.');
+    for (const resourceId of resourceIds) {
+      const team = structuredClone(find(this.ports.read(), teamId)); compactTeamDeliveries(team, this.ports.now());
+      const ref = this.resourceAccess(team, memberId, resourceId), actual = await store.getMetadata(`team:${teamId}`, resourceId);
+      if ((['resourceId', 'name', 'mediaType', 'sha256', 'byteLength'] as const).some(key => ref[key] !== actual[key])) fail('Resource metadata does not match stored bytes.');
+      await store.pin(`team:${teamId}`, resourceId);
+    }
   }
   private pruneResourceUploads(team:SavedTeam) {
     if(!team.resourceUploads)return;

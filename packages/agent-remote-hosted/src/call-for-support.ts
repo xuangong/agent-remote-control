@@ -1,6 +1,7 @@
 import { createHash, randomUUID } from 'node:crypto';
-import { CALL_FOR_SUPPORT_CALL_LIMIT, nativeSessionRefKey, type CallForSupportCall, type CallForSupportCallInput, type CallForSupportGroup, type CallForSupportProfile,
-  type CallForSupportRoster, type CallForSupportRosterMember, type Team, type TeamAction, type TeamHostCall, type TeamMember, type TeamSource } from '@orchardworks/agent-remote-protocol';
+import { CALL_FOR_SUPPORT_CALL_LIMIT, CALL_FOR_SUPPORT_GROUP_BYTES, CALL_FOR_SUPPORT_REPORT_BYTES, callForSupportReportBytes, nativeSessionRefKey, type CallForSupportCall,
+  type CallForSupportCallInput, type CallForSupportGroup, type CallForSupportProfile, type CallForSupportReport, type CallForSupportRoster, type CallForSupportRosterMember, type Team,
+  type TeamAction, type TeamHostCall, type TeamMember, type TeamResource, type TeamSource } from '@orchardworks/agent-remote-protocol';
 import { assertTeamQueueCapacity, type SavedTeam } from './team-delivery.js';
 import { effectiveProfiles, type CallForSupportState } from './call-for-support-profiles.js';
 import type { TeamBrokerPorts } from './teams.js';
@@ -11,6 +12,10 @@ export interface CallForSupportBrokerPorts {
   change<T>(update: (teams: SavedTeam[]) => T): Promise<T>;
   provision(teamId: string, memberId: string): Promise<Team>;
   project(team: SavedTeam): Team;
+  /** A resource the member may attach, or a failure. */
+  resource(team: SavedTeam, memberId: string, resourceId: string): TeamResource;
+  /** Verifies stored bytes and keeps the resources while referenced. */
+  pinResources(teamId: string, memberId: string, resourceIds: string[]): Promise<void>;
 }
 /** The account and Host facts groups depend on. */
 export interface CallForSupportPorts {
@@ -93,6 +98,74 @@ function noteToCoordinator(team: SavedTeam, id: string, text: string, now: numbe
   const message = { id, from: requester(team).id, to: team.members[0]!.id, text: `[Call For Support] ${text}`, status: 'queued' as const, createdAt: now };
   assertTeamQueueCapacity(team, message);
   team.messages.push(message);
+}
+
+const FINDINGS_TEXT = 9000;
+/** The worker's view of a report: advice, labeled with its call and role, with details on demand. */
+export function reportMessageText(team: Team, call: CallForSupportCall, report: CallForSupportReport): string {
+  const lines = [`[Support report · ${group(team).role} · call ${call.id} · ${report.status}]`, report.summary];
+  let budget = FINDINGS_TEXT, shown = 0;
+  for (const finding of report.findings) {
+    const line = clip(`- [${finding.severity}] ${finding.location ? `${finding.location}: ` : ''}${finding.problem}${finding.suggestion ? ` → ${finding.suggestion}` : ''}${finding.agreement ? ` (${finding.agreement})` : ''}`, 1500);
+    if (line.length > budget) break;
+    if (!shown) lines.push('Findings:');
+    lines.push(line); budget -= line.length; shown++;
+  }
+  if (shown < report.findings.length) lines.push(`${report.findings.length - shown} more findings. Read the full report with read_support_report.`);
+  for (const resource of report.resources ?? []) lines.push(`Resource ${resource.resourceId}: ${resource.name} (${resource.mediaType}, ${resource.byteLength} bytes).`);
+  lines.push(`This report is advice. You own the decision and your workspace: adopt what convinces you and verify it before relying on it. Read details and evidence with read_support_report for call ${call.id}${report.resources?.length ? ', download resources with download_support_resource; never run or apply them unread' : ''}. Follow up with call_for_support on roleId ${team.id}.`);
+  return lines.join('\n');
+}
+
+/** Records a report on a call, delivers it to the worker and opens the next waiting call. */
+function settleCall(team: SavedTeam, call: CallForSupportCall, report: CallForSupportReport, now: number): void {
+  call.report = report; call.status = report.status; call.reportedAt = now;
+  const message = { id: digest(['report', team.id, call.id]), from: team.members[0]!.id, to: requester(team).id, text: reportMessageText(team, call, report),
+    ...(report.resources?.length ? { resources: structuredClone(report.resources) } : {}), status: 'queued' as const, createdAt: now, callForSupportCallId: call.id };
+  assertTeamQueueCapacity(team, message);
+  team.messages.push(message);
+  openNextCall(team, now);
+}
+function openNextCall(team: SavedTeam, now: number): void {
+  const support = group(team);
+  if (support.status !== 'active' || team.status !== 'active' || support.calls.some(call => call.status === 'open')) return;
+  const next = support.calls.find(call => call.status === 'queued');
+  if (next) { next.status = 'open'; queueCall(team, next, now); }
+}
+
+/** Why the group must pause for its budget, if it must. */
+export function budgetReason(support: CallForSupportGroup): string | undefined {
+  const budget = support.mandate.budget, open = support.calls.find(call => call.status === 'open');
+  if (!budget) return undefined;
+  if (budget.tokensPerCall && open && open.usage.tokens >= budget.tokensPerCall) return `Call ${open.id} used ${open.usage.tokens} tokens of its ${budget.tokensPerCall}-token budget.`;
+  if (budget.tokensTotal && support.usage.tokens >= budget.tokensTotal) return `This role used ${support.usage.tokens} tokens of its ${budget.tokensTotal}-token budget.`;
+  if (budget.costUsdTotal && (support.usage.costUsd ?? 0) >= budget.costUsdTotal) return `This role cost $${(support.usage.costUsd ?? 0).toFixed(2)} of its $${budget.costUsdTotal} budget.`;
+  return undefined;
+}
+function pauseForBudget(team: SavedTeam, reason: string, now: number): void {
+  const support = group(team);
+  support.status = 'paused_budget'; support.pauseReason = clip(reason, 2048);
+  const open = support.calls.find(call => call.status === 'open');
+  if (open) settleCall(team, open, { status: 'needs_input', summary: `Support paused: ${reason} The user can raise the budget and resume this role.`, findings: [] }, now);
+}
+
+const groupBytes = (support: CallForSupportGroup) => Buffer.byteLength(JSON.stringify(support));
+/** Keeps a group within its storage bound: evidence of older reports first, then their findings, then the oldest reported calls. */
+export function compactCallForSupport(team: SavedTeam): void {
+  const support = team.callForSupport;
+  if (!support || groupBytes(support) <= CALL_FOR_SUPPORT_GROUP_BYTES) return;
+  const reported = () => support.calls.filter(call => call.report);
+  const latest = reported().at(-1);
+  for (const call of reported()) if (call !== latest) for (const finding of call.report!.findings) if (finding.evidence !== undefined) { delete finding.evidence; call.report!.compacted = true; }
+  for (const call of reported()) {
+    if (groupBytes(support) <= CALL_FOR_SUPPORT_GROUP_BYTES) return;
+    if (call !== latest && call.report!.findings.length) { call.report!.findings = []; call.report!.compacted = true; }
+  }
+  while (groupBytes(support) > CALL_FOR_SUPPORT_GROUP_BYTES) {
+    const index = support.calls.findIndex(call => call.report && call !== latest);
+    if (index < 0) break;
+    support.calls.splice(index, 1);
+  }
 }
 
 /** Queues the open call's message from the worker's seat to the coordinator. */
@@ -196,14 +269,68 @@ export class CallForSupportGroups {
     if (activeSupporters(team).filter(member => !released.has(member.id)).length + proposal.members.length > support.mandate.maxSupporters) within = false;
     return within;
   }
-  /** The coordinator's own requests about its group. */
-  async coordinatorCall(hostId: string, call: Extract<TeamHostCall, { action: 'propose_roster' | 'release_supporter' }>): Promise<unknown> {
+  /** Requests from the group's sessions: the coordinator's, and every member's usage. */
+  async memberCall(hostId: string, call: Extract<TeamHostCall, { action: 'propose_roster' | 'release_supporter' | 'report_support' | 'write_ledger' | 'report_usage' }>): Promise<unknown> {
+    if (call.action === 'propose_roster' || call.action === 'release_supporter') return this.rosterCall(hostId, call);
+    if (call.action === 'report_support' && call.report.resources?.length) {
+      this.coordinator(structuredClone(this.broker.ports.read().find(team => team.id === call.teamId) ?? fail('Team not found.')), hostId, call.memberId);
+      await this.broker.pinResources(call.teamId, call.memberId, call.report.resources);
+    }
+    return this.broker.change(teams => {
+      const team = teams.find(item => item.id === call.teamId) ?? fail('Team not found.'), now = this.broker.ports.now(), support = group(team);
+      if (call.action === 'report_usage') return this.usage(team, hostId, call, now);
+      this.coordinator(team, hostId, call.memberId);
+      if (team.status !== 'active') fail('Team is not active.');
+      if (call.action === 'write_ledger') {
+        if (call.revision !== support.ledger.revision) fail('The ledger changed. Read it with read_team, merge, and write again.');
+        support.ledger = { text: call.text, revision: call.revision + 1 }; team.revision++; team.updatedAt = now;
+        return { revision: support.ledger.revision };
+      }
+      const target = support.calls.find(item => item.id === call.callId) ?? fail('Support call not found.');
+      const report: CallForSupportReport = { status: call.report.status, summary: call.report.summary, findings: structuredClone(call.report.findings),
+        ...(call.report.resources?.length ? { resources: call.report.resources.map(id => this.broker.resource(team, call.memberId, id)) } : {}) };
+      if (target.report) {
+        const { compacted: _compacted, ...stored } = target.report;
+        if (JSON.stringify(stored) === JSON.stringify(report)) return { callId: target.id, status: target.status };
+        fail('This call was already reported. Answer follow-up calls instead.');
+      }
+      if (target.status !== 'open') fail('Report the open call first; this call is waiting behind it.');
+      if (new Set(report.findings.map(finding => finding.id)).size !== report.findings.length) fail('Finding IDs must be unique.');
+      if (callForSupportReportBytes(report) > CALL_FOR_SUPPORT_REPORT_BYTES) fail('The report is too large. Keep evidence short and attach long material as a resource.');
+      settleCall(team, target, report, now); team.revision++; team.updatedAt = now;
+      return { callId: target.id, status: target.status };
+    });
+  }
+  private coordinator(team: SavedTeam, hostId: string, memberId: string): TeamMember {
+    const self = team.members.find(member => member.id === memberId) ?? fail('Team member not found.');
+    if (self.hostId !== hostId || self.creation !== 'ready') fail('This Host is not the registered Team member.');
+    if (self.role !== 'leader') fail('Only the coordinator does this.');
+    return self;
+  }
+  /** Cumulative usage of a coordinator or supporter session; increases count toward the open call and the role. */
+  private usage(team: SavedTeam, hostId: string, call: Extract<TeamHostCall, { action: 'report_usage' }>, now: number) {
+    const support = group(team), self = team.members.find(member => member.id === call.memberId) ?? fail('Team member not found.');
+    if (self.hostId !== hostId || self.creation !== 'ready' && self.creation !== 'released') fail('This Host is not the registered Team member.');
+    if (self.role === 'requester') fail('The worker\'s own usage is not support usage.');
+    const previous: { tokens: number; costUsd?: number } = self.usage ?? { tokens: 0 };
+    if (call.tokens < previous.tokens || call.costUsd !== undefined && call.costUsd < (previous.costUsd ?? 0)) fail('Usage is cumulative and cannot decrease.');
+    const tokens = call.tokens - previous.tokens, cost = call.costUsd === undefined ? 0 : call.costUsd - (previous.costUsd ?? 0);
+    if (!tokens && !cost) return { tokens: support.usage.tokens, status: support.status };
+    self.usage = { tokens: call.tokens, ...(call.costUsd !== undefined ? { costUsd: call.costUsd } : previous.costUsd !== undefined ? { costUsd: previous.costUsd } : {}), updatedAt: now };
+    const add = (usage: { tokens: number; costUsd?: number }) => { usage.tokens += tokens; if (cost) usage.costUsd = (usage.costUsd ?? 0) + cost; };
+    add(support.usage);
+    const open = support.calls.find(item => item.status === 'open');
+    if (open) add(open.usage);
+    const reason = support.status === 'active' ? budgetReason(support) : undefined;
+    if (reason) pauseForBudget(team, reason, now);
+    team.revision++; team.updatedAt = now;
+    return { tokens: support.usage.tokens, status: support.status };
+  }
+  /** The coordinator's roster requests. */
+  private async rosterCall(hostId: string, call: Extract<TeamHostCall, { action: 'propose_roster' | 'release_supporter' }>): Promise<unknown> {
     const result = await this.broker.change(teams => {
       const team = teams.find(item => item.id === call.teamId) ?? fail('Team not found.'), now = this.broker.ports.now();
-      const self = team.members.find(member => member.id === call.memberId) ?? fail('Team member not found.');
-      if (self.hostId !== hostId || self.creation !== 'ready') fail('This Host is not the registered Team member.');
-      if (self.role !== 'leader') fail('Only the coordinator manages supporters.');
-      const support = group(team);
+      const self = this.coordinator(team, hostId, call.memberId), support = group(team);
       if (team.status !== 'active') fail('Team is not active.');
       if (call.action === 'release_supporter') { releaseSupporter(team, call.target, now); team.revision++; team.updatedAt = now; return { team, provision: false }; }
       const id = digest(['roster', team.id, self.id, call.operationId]);
@@ -253,10 +380,22 @@ export class CallForSupportGroups {
     });
   }
   /** The user's decisions on a group. */
-  async userAction(input: Extract<TeamAction, { action: 'resolve_roster' | 'release_member' }>): Promise<Team> {
+  async userAction(input: Extract<TeamAction, { action: 'resolve_roster' | 'release_member' | 'update_mandate' | 'resume_group' }>): Promise<Team> {
     const result = await this.broker.change(teams => {
       const team = teams.find(item => item.id === input.teamId) ?? fail('Team not found.'), now = this.broker.ports.now(), support = group(team);
       if (team.status !== 'active') fail('Team is not active.');
+      if (input.action === 'update_mandate') {
+        support.mandate = structuredClone(input.mandate);
+        if (input.profileRevision !== undefined) support.profileRevision = input.profileRevision;
+        team.revision++; team.updatedAt = now; return { team, provision: false };
+      }
+      if (input.action === 'resume_group') {
+        if (support.status === 'active') return { team, provision: false };
+        const reason = budgetReason(support);
+        if (reason) fail(`Raise the budget before resuming: ${reason}`);
+        support.status = 'active'; delete support.pauseReason;
+        openNextCall(team, now); team.revision++; team.updatedAt = now; return { team, provision: false };
+      }
       if (input.action === 'release_member') { releaseSupporter(team, input.memberId, now); team.revision++; team.updatedAt = now; return { team, provision: false }; }
       const roster = support.roster;
       if (!roster || roster.id !== input.rosterId) fail('Roster not found.');

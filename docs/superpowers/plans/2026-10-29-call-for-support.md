@@ -640,7 +640,7 @@ Outcome: Controllers negotiate the capability, bind requester seats, give coordi
 
 ### Task 3.4: Idle lease release
 **Files:** `packages/agent-host/src/team.ts` + test.
-- The tick holds a member's lease only while a message to it is queued, dispatching or unsettled, or while its Team is archiving; it reports presence only for leased members; released and abandoned members are skipped. Applies to all Teams.
+- The tick holds a member's lease while a message to it is queued, dispatching or unsettled, until the member reports idle, and while its Team is archiving; it reports presence only for leased members, so presence stays current until idle; released and abandoned members are skipped. Applies to all Teams.
 - Tests: an idle member without messages holds no lease; a queued message acquires, delivers and releases after settlement; archiving acquires to report presence and completes.
 
 Milestone 3 exit: agent-host suite, Team suites, typecheck.

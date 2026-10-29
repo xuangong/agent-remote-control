@@ -231,6 +231,10 @@ export class TeamRuntime implements SessionRole {
         const record = this.records.find(item => item.seat.teamId === team.id && item.seat.member.id === member.id && item.creation === 'ready');
         if (!record || member.creation !== 'ready') continue;
         if (!member.nativeSessionId) continue;
+        // A member's runtime is held while something must reach it, until it reports idle, and while an archive needs its presence;
+        // otherwise the Host releases it when idle and the next delivery resumes the same session.
+        const pending = team.messages.some(item => item.to === member.id && (['queued','dispatching','unknown'].includes(item.status) || item.status === 'accepted' && !['started','handled'].includes(item.acceptance ?? '')));
+        if (!pending && member.activity === 'idle' && team.status !== 'archiving') continue;
         const leaseKey = `${team.id}:${member.id}`;
         try {
           const target = this.access.sessionRouting.resolve(this.anchor(record.seat)).target;

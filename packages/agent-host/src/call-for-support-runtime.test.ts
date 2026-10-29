@@ -96,3 +96,30 @@ it('keeps read-only seats on providers that enforce read-only sessions', async (
     expect(await h.runtime.genericSuccession(coordinator, 'copilot')).toEqual({ allowed: false, reason: 'This provider cannot keep this session read-only.' });
   } finally { await h.close(); }
 });
+
+it('holds a member\'s runtime only while a delivery to it is pending or its Team is archiving', async () => {
+  const h = await supportHarness();
+  try {
+    const profile = h.profile(); h.enable([profile.id]);
+    const { roleId } = await h.call({ operationId: 'op-1', profileId: profile.id });
+    const coordinator = h.team(roleId).members[0]!.nativeSessionId!;
+    const leases = () => ({ acquired: h.acquired.filter(id => id === coordinator).length, released: h.released.filter(id => id === coordinator).length });
+    const workerLeases = h.acquired.filter(id => id === 'worker').length;
+    await h.runtime.tick();
+    expect(h.sessions.get(coordinator)!.deliveries).toHaveLength(1);
+    expect(leases()).toEqual({ acquired: 1, released: 0 });
+    // Delivered; held until the coordinator reports idle, then released.
+    await h.runtime.tick();
+    expect(h.team(roleId).members[0]!.activity).toBe('idle');
+    await h.runtime.tick();
+    expect(leases()).toEqual({ acquired: 1, released: 1 });
+    await h.runtime.tick();
+    expect(leases()).toEqual({ acquired: 1, released: 1 });
+    // The worker was leased once to learn its presence, and not again while nothing is addressed to it.
+    expect(h.acquired.filter(id => id === 'worker')).toHaveLength(workerLeases + 1);
+
+    await h.broker.action({ teamId: roleId, action: 'archive' });
+    await h.runtime.tick();
+    expect(h.team(roleId).status).toBe('archived');
+  } finally { await h.close(); }
+});

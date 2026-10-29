@@ -67,9 +67,10 @@ Run on 2026-10-29 in the worktree, against local scripted model servers (no mode
 - **Claude read-only** (Claude Code 2.1.247, Agent SDK 0.3.247): `permissionMode: 'dontAsk'`, `disallowedTools: ['Write', 'Edit', 'MultiEdit', 'NotebookEdit']`, `sandbox: { enabled: true, failIfUnavailable: true, allowUnsandboxedCommands: false, autoAllowBashIfSandboxed: true, filesystem: { denyWrite: [cwd] } }`. Edit tools are unavailable; `echo > file` and `git commit` in the workspace fail with "operation not permitted"; `cat` and `git show` work; writing to `$TMPDIR` works; no approval is requested. `permissionMode: 'plan'` only blocked writes through the approval callback, and `dontAsk` alone relies on Claude's classification of shell commands; both were rejected.
 - **Codex read-only** (codex-cli 0.165.0): `thread/start` with `sandbox: 'read-only'`, `approvalPolicy: 'never'`. Shell writes and `git commit` fail with "operation not permitted"; git reads work; no server requests.
 - **Codex deferred tool** (0.165.0): a `dynamicTools` namespace `agent_remote` with a `deferLoading` function is absent from the model's tool list. With a model whose catalog entry supports the search tool (for example `gpt-5.5`), `tool_search` returns it, the model calls it, the app-server sends `item/tool/call` with `namespace`, `tool` and `arguments`, and the client's result reaches the model. With a model without search support the deferred tool is not offered at all.
-- **Claude dynamic tool**: `setMcpServers({ agent_remote: server })` on a running streaming query adds `mcp__agent_remote__call_for_support` to the next turn; the model's call executes and its result reaches the model.
+- **Claude dynamic tool**: `setMcpServers({ agent_remote: server })` on a running streaming query adds `mcp__agent_remote__call_for_support` to the next turn; the model's call executes and its result reaches the model. Claude keeps a connected SDK server by name, so a server whose tool declarations change must be removed and added again.
+- **Claude Host tool approval**: Host MCP tools ask for approval in `default` mode and are denied in `dontAsk` mode, including read-only sessions, unless an allow rule names them. A flag-layer rule `mcp__<server>` (initial `settings`, later `applyFlagSettings({ permissions })`) lets them run without asking in both modes.
 
-The pinned Codex for compatibility tests is 0.162.0. The native tests below run the deferred-tool path on the pinned version; if 0.162.0 lacks it, the pin moves to the first version that has it.
+The pinned Codex for compatibility tests is 0.162.0. The native namespace and read-only tests pass on 0.162.0 and 0.165.0, so the pin stays.
 
 ## Built on Team
 
@@ -268,7 +269,7 @@ The coordinator serves one role for one worker. It:
 - `AgentSession.updateToolNamespaces?(namespaces)`: replaces the session's namespaces. `live` adapters may add and remove namespaces; `creation` adapters may only rebind the executors of namespaces declared when the session started, and reject anything else.
 
 - **Codex**: `thread/start` and `thread/resume` with `sandbox: 'read-only'` and `approvalPolicy: 'never'` for read-only sessions. Dynamic tool namespaces with `deferLoading`. `item/tool/call` requests with a namespace are routed to the namespace's tools.
-- **Claude**: read-only sessions use the verified options (see "Evidence"); the `permissions` setting is locked, so bypass mode, which disables the sandbox, cannot be selected. `setMcpServers` support on the session for the `agent_remote` server.
+- **Claude**: read-only sessions use the verified options (see "Evidence") plus `EnterPlanMode` and `ExitPlanMode` removed and bypass not allowed; the `permissions` setting and planning are locked, and read-only access persists in the session's handle. Each namespace is its own MCP server, changed with `setMcpServers`. Namespace tools, and the `agent_host` tools of read-only sessions, are allowed by flag-layer rules: the Host governs them, and a read-only session cannot ask. The `agent_host` tools of writable sessions keep asking as before.
 - **Copilot, OpenCode**: they may be supporters only in `worktree` and `remote` workspaces until they enforce read-only natively, and they cannot receive worker tools after creation until a dynamic mechanism is verified for them.
 
 ## Website (`packages/agent-remote-lab`)

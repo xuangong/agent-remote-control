@@ -4,7 +4,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { AgentMessageOptions, AgentSessionExtensions } from '@orchardworks/agent-provider-sdk';
 import type { AgentSnapshotPayload, CallForSupportProfileInput, NativeSessionRef, Team, TeamHostCall } from '@orchardworks/agent-remote-protocol';
-import { createOperationCache, createOperationExecutor, type SessionWireAgent } from '@orchardworks/agent-remote-relay';
+import { createOperationCache, createOperationExecutor, type AgentManagerEvent, type SessionWireAgent } from '@orchardworks/agent-remote-relay';
+import type { AgentUsage } from '@orchardworks/agent-remote-protocol';
 import { TeamBroker } from '../../../agent-remote-hosted/src/teams.js';
 import type { SavedTeam } from '../../../agent-remote-hosted/src/team-delivery.js';
 import { PortableTeamResourceStore } from '../../../agent-remote-hosted/src/team-resources.js';
@@ -32,9 +33,11 @@ export async function supportHarness(options: { callForSupport?: boolean } = {})
   };
   session('worker');
   const acquired: string[] = [], released: string[] = [];
+  const listeners = new Map<string, Set<(event: AgentManagerEvent) => void>>();
   const agent = (id: string): SessionWireAgent => ({
     agentId: id, snapshot: () => ({ protocolVersion: '1.8.0', type: 'agent_snapshot', payload: structuredClone(sessions.get(id)!.payload) }),
-    subscribe: () => () => {}, async fetchTimeline() { return { payload: { entries: [] } } as never; }, async respondToInteraction() {},
+    subscribe: (listener: (event: AgentManagerEvent) => void) => { const set = listeners.get(id) ?? new Set(); set.add(listener); listeners.set(id, set); return () => { set.delete(listener); }; },
+    async fetchTimeline() { return { payload: { entries: [] } } as never; }, async respondToInteraction() {},
     async sendMessage(text: string, messageOptions?: AgentMessageOptions) { sessions.get(id)!.deliveries.push({ text, delivery: messageOptions?.delivery }); return { disposition: 'started' }; },
   } as unknown as SessionWireAgent);
   let teams: SavedTeam[] = [];
@@ -69,6 +72,11 @@ export async function supportHarness(options: { callForSupport?: boolean } = {})
     host: (call: TeamHostCall) => broker.hostCall('host', call) as Promise<any>,
     call: (input: Record<string, unknown>) => broker.hostCall('host', { action: 'call_for_support', worker: { providerId: 'codex', nativeSessionId: 'worker', title: 'Implement login' },
       task: 'Review the change.', deliverable: 'findings', context: { commit }, ...input } as TeamHostCall) as Promise<any>,
+    /** A live usage report from a session, as its provider would stream it. */
+    usage(id: string, usage: AgentUsage, turnCompleted = false) {
+      const event = turnCompleted ? { type: 'turn_completed' as const, turnId: 'turn', usage } : { type: 'usage_updated' as const, usage };
+      for (const listener of listeners.get(id) ?? []) listener({ type: 'agent_stream', agentId: id, event: event as never, delivery: 'live', timestamp: new Date().toISOString() });
+    },
     busy(id: string, active: boolean) {
       const payload = sessions.get(id)!.payload;
       payload.status = active ? 'running' : 'idle'; payload.activeTurn = active ? { turnId: 'turn' } : null; payload.runtimeInfo.status = payload.status;

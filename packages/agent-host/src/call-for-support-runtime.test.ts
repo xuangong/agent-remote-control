@@ -189,3 +189,51 @@ it('lets the coordinator collect a worktree supporter\'s patch and give it to th
     await expect(run(coordinator, 'collect_supporter_patch', { target: h.team(roleId).members[1]!.id, operationId: 'worker' })).rejects.toThrow('own worktree');
   } finally { await h.close(); }
 });
+
+it('accounts coordinator and supporter usage, pauses at the budget and continues after the user raises it', async () => {
+  const h = await supportHarness();
+  try {
+    const profile = h.profile({ ...reviewProfile, mandate: { ...reviewProfile.mandate, budget: { tokensTotal: 1000 } } }); h.enable([profile.id]);
+    const first = await h.call({ operationId: 'op-1', profileId: profile.id });
+    const queued = await h.call({ operationId: 'op-2', roleId: first.roleId, task: 'Then the tests.' });
+    const coordinator = h.team(first.roleId).members[0]!.nativeSessionId!;
+    // The coordinator works on the call; its runtime stays held while it is busy.
+    h.busy(coordinator, true);
+    await h.runtime.tick();
+    expect(h.sessions.get(coordinator)!.deliveries).toHaveLength(1);
+    await h.runtime.tick();
+    h.usage(coordinator, { tokenScope: 'session', totalTokens: 400 });
+    await h.runtime.tick();
+    expect(h.team(first.roleId).callForSupport!.usage).toEqual({ tokens: 400 });
+    expect(h.team(first.roleId).members[0]!.usage).toMatchObject({ tokens: 400 });
+    h.usage(coordinator, { tokenScope: 'session', totalTokens: 1100 }, true);
+    await expect.poll(() => h.team(first.roleId).callForSupport!.status).toBe('paused_budget');
+    await h.runtime.tick();
+    expect(h.sessions.get('worker')!.deliveries.at(-1)!.text).toContain('Support paused');
+    expect(h.team(first.roleId).callForSupport!.calls.find(call => call.id === queued.callId)!.status).toBe('queued');
+
+    await h.broker.action({ teamId: first.roleId, action: 'update_mandate', mandate: { ...h.team(first.roleId).callForSupport!.mandate, budget: { tokensTotal: 5000 } } });
+    await h.broker.action({ teamId: first.roleId, action: 'resume_group' });
+    await h.runtime.tick();
+    expect(h.sessions.get(coordinator)!.deliveries.at(-1)!.text).toContain(`[Support call ${queued.callId}`);
+  } finally { await h.close(); }
+});
+
+it('keeps a member\'s runtime while its live session works, even when its reported presence lags', async () => {
+  const h = await supportHarness();
+  try {
+    const profile = h.profile(); h.enable([profile.id]);
+    const { roleId } = await h.call({ operationId: 'op-1', profileId: profile.id });
+    const coordinator = h.team(roleId).members[0]!.nativeSessionId!;
+    await h.runtime.tick();
+    expect(h.team(roleId).members[0]!.activity).toBe('idle');
+    // The delivered call started a turn after presence was reported.
+    h.busy(coordinator, true);
+    await h.runtime.tick();
+    h.usage(coordinator, { tokenScope: 'runtime', totalTokens: 250, totalCostUsd: 0.25 }, true);
+    await expect.poll(() => h.team(roleId).callForSupport!.usage).toEqual({ tokens: 250, costUsd: 0.25 });
+    h.busy(coordinator, false);
+    await h.runtime.tick(); await h.runtime.tick();
+    expect(h.released.filter(id => id === coordinator)).toHaveLength(1);
+  } finally { await h.close(); }
+});

@@ -10,9 +10,10 @@ import type { SessionCreation } from './role-session-creation.js';
 import { coordinatorInstructions, coordinatorTools, supporterInstructions } from './call-for-support-roles.js';
 import { collectPatch, createBundle, fetchBundle, prepareWorktree, removeWorktree } from './call-for-support-workspaces.js';
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { accountUsage, type SupportUsage } from './call-for-support-usage.js';
 import { tmpdir } from 'node:os';
 import { isNativeSessionRef, nativeSessionRefKey, type NativeSessionRef, isTeam, isTeamSeat, sessionOperationAvailability, type Team, type TeamHostCall, type TeamMember, type TeamMessage, type TeamSeat } from '@orchardworks/agent-remote-protocol';
-import { OperationCacheError, type RemoteHostSessionLease, type SessionWireOperationExecutor } from '@orchardworks/agent-remote-relay';
+import { OperationCacheError, type AgentManagerEvent, type RemoteHostSessionLease, type SessionWireOperationExecutor } from '@orchardworks/agent-remote-relay';
 
 export interface TeamRuntimeAccess {
   controllerId: string;
@@ -33,6 +34,8 @@ export interface TeamRuntimeAccess {
 interface LocalSeat { seat: TeamSeat; creation: 'dispatching' | 'ready' | 'unknown';
   /** A supporter's own worktree, removed once when the supporter is released or its Team archives. */
   worktree?: { root: string; path: string; removed?: true };
+  /** A coordinator's or supporter's usage, and what the Relay last accepted of it. */
+  usage?: SupportUsage & { reported?: { tokens: number; costUsd?: number; at: number } };
   receipts: Record<string, { text: string; status: 'dispatching' | 'accepted' | 'rejected' | 'unknown'; error?: string; acceptance?: AgentInputAcceptance['disposition']; resolvedTarget?: NativeSessionRef }> }
 const errorText = (error: unknown) => (error instanceof Error ? error.message : 'Team operation failed.').slice(0, 2048);
 function operationId(value: string) {
@@ -63,7 +66,7 @@ export class TeamRuntime implements SessionRole {
   private records: LocalSeat[] = [];
   private persistence: Promise<unknown> = Promise.resolve();
   private creations = new Map<string, Promise<TeamMember>>();
-  private leases = new Map<string, { target: NativeSessionRef; lease: RemoteHostSessionLease }>();
+  private leases = new Map<string, { target: NativeSessionRef; lease: RemoteHostSessionLease; unsubscribe?: () => void }>();
   private readonly resourceFiles: TeamResourceFiles;
   private ticking = false;
   private closed = false;
@@ -278,15 +281,21 @@ export class TeamRuntime implements SessionRole {
         // A member's runtime is held while something must reach it, until it reports idle, and while an archive needs its presence;
         // otherwise the Host releases it when idle and the next delivery resumes the same session.
         const pending = team.messages.some(item => item.to === member.id && (['queued','dispatching','unknown'].includes(item.status) || item.status === 'accepted' && !['started','handled'].includes(item.acceptance ?? '')));
-        if (!pending && member.activity === 'idle' && team.status !== 'archiving') continue;
-        const leaseKey = `${team.id}:${member.id}`;
+        const leaseKey = `${team.id}:${member.id}`, current = this.leases.get(leaseKey);
+        // The live session decides for a held runtime: reported presence can lag a delivery that just started a turn.
+        if (!pending && member.activity === 'idle' && team.status !== 'archiving' && !(current && !idle(current.lease))) continue;
         try {
           const target = this.access.sessionRouting.resolve(this.anchor(record.seat)).target;
           if (target.providerId !== member.providerId || target.nativeSessionId !== member.nativeSessionId) continue;
           this.access.sessionRouting.assertCurrent(this.anchor(record.seat), target);
           let held = this.leases.get(leaseKey);
-          if (held && nativeSessionRefKey(held.target) !== nativeSessionRefKey(target)) { held.lease.release(); this.leases.delete(leaseKey); held = undefined; }
-          if (!held) { const lease = await this.access.acquire(target.providerId, target.nativeSessionId); held = { target, lease }; this.leases.set(leaseKey, held); }
+          if (held && nativeSessionRefKey(held.target) !== nativeSessionRefKey(target)) { this.release(leaseKey, held); held = undefined; }
+          if (!held) {
+            const lease = await this.access.acquire(target.providerId, target.nativeSessionId); held = { target, lease };
+            // While held, a support group's coordinator and supporters account their usage toward the group's budget.
+            if (record.seat.callForSupport && member.role !== 'requester') { const seat = record; held.unsubscribe = lease.agent.subscribe(event => this.observeUsage(seat, event)); }
+            this.leases.set(leaseKey, held);
+          }
           this.access.sessionRouting.assertCurrent(this.anchor(record.seat), target);
           retained.add(leaseKey); const lease = held.lease;
           for (const message of team.messages.filter(item => item.to === member.id && (['queued','dispatching','unknown'].includes(item.status) || item.status === 'accepted' && !['started','handled'].includes(item.acceptance ?? '')))) {
@@ -302,7 +311,8 @@ export class TeamRuntime implements SessionRole {
           await this.request({ action: 'presence', teamId: team.id, memberId: member.id, activity: idle(lease) ? 'idle' : 'busy' });
         } catch { /* Pending records remain durable; next poll retries reads and receipts, never uncertain effects. */ }
       }
-      for (const [id, held] of this.leases) if (!retained.has(id)) { held.lease.release(); this.leases.delete(id); }
+      for (const [id, held] of this.leases) if (!retained.has(id)) this.release(id, held);
+      for (const record of this.records) if (record.usage) await this.reportUsage(record).catch(() => undefined);
     } finally { this.ticking = false; }
   }
   private async reconcileReceipts(record: LocalSeat, team?: Team): Promise<void> {
@@ -380,5 +390,22 @@ export class TeamRuntime implements SessionRole {
     }
     if (receipt) { await this.save(); await this.settle(team.id, record.seat.member.id, message.id, receipt); }
   }
-  async close() { this.closed = true; clearInterval(this.timer); for (const held of this.leases.values()) held.lease.release(); this.leases.clear(); await this.persistence; }
+  private release(key: string, held: { lease: RemoteHostSessionLease; unsubscribe?: () => void }) { held.unsubscribe?.(); held.lease.release(); this.leases.delete(key); }
+  private observeUsage(record: LocalSeat, event: AgentManagerEvent): void {
+    if (event.type !== 'agent_stream' || event.delivery === 'history') return;
+    const update = event.event.type === 'usage_updated' ? event.event.usage : event.event.type === 'turn_completed' ? event.event.usage : undefined;
+    if (!update || !accountUsage(record.usage ??= { tokens: 0 }, update, event.event.type === 'turn_completed')) return;
+    if (event.event.type === 'turn_completed' || Date.now() - (record.usage.reported?.at ?? 0) >= 10_000) void this.reportUsage(record).catch(() => undefined);
+  }
+  /** Sends a member's cumulative usage when it grew; the Relay counts the increase toward the call and the group. */
+  private async reportUsage(record: LocalSeat): Promise<void> {
+    const usage = record.usage;
+    if (!usage || usage.tokens === (usage.reported?.tokens ?? 0) && usage.costUsd === usage.reported?.costUsd) return;
+    const tokens = usage.tokens, costUsd = usage.costUsd;
+    await this.save();
+    await this.request({ action: 'report_usage', teamId: record.seat.teamId, memberId: record.seat.member.id, tokens, ...(costUsd !== undefined ? { costUsd } : {}) });
+    usage.reported = { tokens, ...(costUsd !== undefined ? { costUsd } : {}), at: Date.now() };
+    await this.save();
+  }
+  async close() { this.closed = true; clearInterval(this.timer); for (const held of this.leases.values()) { held.unsubscribe?.(); held.lease.release(); } this.leases.clear(); await this.persistence; }
 }

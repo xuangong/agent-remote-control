@@ -712,12 +712,13 @@ Milestone 5 exit: workspace tests, agent-host suite.
 ## Milestone 6: Usage and budgets
 
 ### Task 6.1: Accounting
-- `call-for-support-usage.ts`: per-session accumulators for `session`, `runtime` and `turn` scopes and `totalCostUsd`; subscribed for coordinator and supporter sessions; cumulative `report_usage` calls throttled to one per member per 10 seconds and on turn completion.
-- Tests: each scope, runtime reset handling, throttle, monotonic reports after restart (persisted accumulators).
+- `call-for-support-usage.ts`: `accountUsage(total, usage, turnCompleted)` for `session` and `runtime` cumulative scopes (a runtime decrease starts a new runtime), `turn` (on completion) and `call` scopes, and `totalCostUsd`; totals persist with the seat.
+- `team.ts`: while a coordinator's or supporter's runtime is held, its live `usage_updated` and `turn_completed` events are accounted; `report_usage` is sent on turn completion, at most every 10 seconds otherwise, and on each tick when the total grew. A held runtime stays held while its live session works, because reported presence can lag a delivery that just started a turn.
+- Tests: each scope, runtime restart, saved totals after a restart; lease retention under lagging presence.
 
 ### Task 6.2: Pause and resume end to end
-- Controller stops delivering to a paused group; the coordinator and requester receive the pause note; resume after `update_mandate`.
-- Tests with a fake broker.
+- The Relay refuses claims to a paused group's coordinator and supporters, and reports the open call `needs_input` to the worker (Task 2.7); after `update_mandate` and `resume_group` the next call is delivered.
+- Test against the support harness: usage pauses the group, the worker gets the pause report, the queued call waits, and after the raise and resume it reaches the coordinator.
 
 ---
 

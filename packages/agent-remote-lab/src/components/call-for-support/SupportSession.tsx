@@ -42,6 +42,7 @@ export function SupportSession({ baseUrl, source, teams, teamClient, busy, run, 
       <div className="lab-support-inline" role="group" aria-label="Profiles this session may call for">{settings.profiles.map(profile => <label key={profile.id}>
         <input type="checkbox" disabled={busy} checked={selected.includes(profile.id)} onChange={event => setChoice(event.target.checked ? [...selected, profile.id] : selected.filter(id => id !== profile.id))} />{profile.name}</label>)}</div>
       <p className="lab-support-muted">{effective.explicit ? 'Chosen for this session.' : 'Following the profiles enabled by default.'} The session calls with its own tools; you can also call for it here.</p>
+      {!effective.profiles.length && choice === undefined ? <p className="lab-control-note">Call For Support is available: choose the profiles this session may call for.</p> : null}
       {changed ? <div className="lab-support-actions"><button type="button" disabled={busy} onClick={() => void run(async () => {
         setSettings(await client.enable({ hostId: source.hostId, providerId: source.providerId, nativeSessionId: source.nativeSessionId, profileIds: selected })); setChoice(undefined);
       })}>Save for this session</button><button type="button" disabled={busy} onClick={() => setChoice(undefined)}>Discard</button></div> : null}

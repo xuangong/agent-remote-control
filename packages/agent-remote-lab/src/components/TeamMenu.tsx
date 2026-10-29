@@ -145,9 +145,11 @@ export function TeamMenu(props: Props) {
     });
   }
   if (!enabled) return null;
+  // A support roster waiting for approval or a role paused by its budget needs the user.
+  const attention = teams.some(team => team.status === 'active' && (team.callForSupport?.roster?.status === 'pending' || team.callForSupport?.status === 'paused_budget'));
   return <>
     <div ref={root} data-hidden={!visible || undefined} aria-hidden={!visible || undefined} style={style} {...handlers} className="lab-tracking-floating lab-team-floating" data-edge={edge} onKeyDown={event => { handlers.onKeyDown?.(event); if (event.key === 'Escape') { setOpen(false); trigger.current?.focus(); } }}>
-      <button ref={trigger} className="lab-session-popover-trigger" aria-expanded={open} aria-label="Teams" onClick={() => { setOpen(!open); setRevealing(false); void refresh().catch(error => setError(errorMessage(error))); }}><span>Team</span><span>{teams.filter(item => item.status !== 'archived').length}</span></button>
+      <button ref={trigger} className="lab-session-popover-trigger" aria-expanded={open} aria-label={attention ? 'Teams, a decision is waiting' : 'Teams'} onClick={() => { setOpen(!open); setRevealing(false); void refresh().catch(error => setError(errorMessage(error))); }}><span>Team</span><span>{teams.filter(item => item.status !== 'archived').length}</span>{attention ? <span className="lab-support-badge" data-tone="warning" aria-hidden="true">!</span> : null}</button>
       {open ? <section className="lab-session-popover-panel lab-tpm-panel" aria-label="Teams">
         <div className="lab-directory-heading"><h2>Teams</h2><button onClick={() => setOpen(false)} aria-label="Close Teams">×</button></div>
         {loading && !teams.length ? <p role="status">Loading teams…</p> : null}

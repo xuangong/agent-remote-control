@@ -83,6 +83,8 @@ Found while planning the Relay work (2026-10-29); they refine the sections below
 - Roster decisions reach the coordinator as `[Call For Support]` notes from the requester seat.
 - Controllers poll enablement with a `support_enablement` host call. Worker tools go only to sessions without a Team or TPM role.
 - Enabling sends no separate note to the worker: it would start a turn on an idle worker. Tool and namespace descriptions say when to call.
+- The website offers Call For Support in the Team panel of the current session. Its suggestion appears while profiles exist and none is enabled for the session; the website does not inspect file changes or git state. The Team button marks a roster waiting for approval or a role paused by its budget.
+- Models in profiles are entered as text; a Controller refuses a model its provider does not know when it creates the session.
 - A report is at most 24 KiB of JSON. A group's Call For Support state is compacted to 64 KiB: evidence of all but the latest reported call first, then findings of the oldest reported calls, then the oldest reported calls.
 
 ## Built on Team

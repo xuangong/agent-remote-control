@@ -617,22 +617,31 @@ Milestone 2 exit: `pnpm --filter @orchardworks/agent-remote-protocol test`, `pnp
 
 Outcome: Controllers negotiate the capability, bind requester seats, give coordinators and supporters their extensions, deliver reports as framed input, and release idle members' runtimes.
 
-### Task 3.1: Negotiation and provider snapshot
-- `remote-host-uplink-client.ts`: request `callForSupport` and track the acknowledgement; provider snapshot entries carry `readOnly` from `describeProviders` (Task 2.3).
-- Tests: uplink client negotiation with and without acknowledgement; snapshot contents.
+### Task 3.1: Negotiation and group seats
+**Files:** `packages/agent-remote-protocol/src/team.ts` (`TeamSeat`), `packages/agent-remote-hosted/src/teams.ts` (`provisionOnce`), `packages/agent-host/src/host.ts` (`createAgentHost`, `automationAccess`), `packages/agent-host/src/team.ts`.
+- `TeamSeat.callForSupport?: { role; description }`, set by the Relay for every seat of a group.
+- `createAgentHost` requests `callForSupport` when Teams are configured and passes `callForSupport: () => client.callForSupport` to the Team runtime; `TeamRuntimeAccess` gains `callForSupport?(): boolean` and `readOnlyProviders?(): string[]` (registrations whose descriptor declares `sessionAccess.readOnly`).
+- `TeamRuntime.create` refuses group seats unless the Relay acknowledged the capability.
+- Tests: uplink option wiring in a Team-host test; refusal without acknowledgement.
 
 ### Task 3.2: Requester seats
-- `team.ts` `createOnce`: role `requester` binds the source session (verify it exists on this Controller with `access.acquire`, read `cwd`), no `access.create`; restore and succession like members; `extensions()` returns only Call For Support tools for requesters (milestone 4) and nothing else.
-- Tests: binding, cwd report, succession following, no Team tools on the requester.
+**Files:** `packages/agent-host/src/team.ts` + `team-requester.test.ts`.
+- `createOnce` for `requester`: acquire the source session (the worker), read its `cwd`, release, record the seat `ready` with the worker's `nativeSessionId`; no native creation.
+- `seatHeldBy` ignores requester seats: they carry no Team tools, so the worker keeps its own role and moves freely in handoffs; its seat follows by role routing.
+- Delivery to a requester: the message text as framed by the Relay, without the Team header; `immediate` when the worker is idle, `next_turn` while it is busy (never steered into a running turn).
+- Tests: binding reports `cwd` without `create`; no extensions for the worker; a report delivered verbatim, queued for the next turn while busy and started when idle.
 
 ### Task 3.3: Coordinator and supporter extensions
-- Create `call-for-support-instructions.ts` (coordinator and supporter texts from the spec) and `call-for-support-tools.ts` (coordinator tools: `propose_roster`, `release_supporter`, `report_support`, `write_ledger`, `collect_supporter_patch` (milestone 5), plus existing Team tools); `team.ts` `tools()` branches on support groups.
-- Team `genericSuccession`: a read-only seat may only move to a provider whose descriptor declares `sessionAccess.readOnly`.
-- Tests: tool lists per role, argument schemas, host call payloads, instructions contain the encapsulation rules; a read-only seat's handoff to a provider without read-only enforcement is refused.
+**Files:** create `packages/agent-host/src/call-for-support-roles.ts` (instructions and coordinator tools) + test; `team.ts` (`tools`, `genericSuccession`); `team-inbox.ts`.
+- Coordinator (`leader` of a group): instructions from the spec's "Coordinator instructions"; tools `read_team` (with the group's calls, roster, ledger and mandate), `acknowledge_team_messages`, `send_team_message`, `read_source_session`, `upload_team_resource`, `download_team_resource`, `report_team_progress`, `propose_roster`, `release_supporter`, `report_support`, `write_ledger`.
+- Supporter (`member` of a group): supporter instructions (work only on the brief, report evidence to the coordinator, never write outside the own worktree, read `shared` code at the commit through git); the existing member tools; `read_team` without the group state.
+- Read-only seats move only to providers in `readOnlyProviders()`.
+- Tests: tool lists per role; argument schemas; host-call payloads of the new tools; instructions name the encapsulation rules; supporters do not see the group state; a read-only seat's handoff to a provider without read-only enforcement is refused.
 
-### Task 3.4: Report delivery and idle lease release
-- Report framing and delivery mode (busy → `next_turn`, idle → `immediate`); the Team tick retains a lease only for members with queued, dispatching or unsettled deliveries, and while archiving needs presence; presence for unleased members is not reported, and archive acquires to confirm idleness.
-- Tests: framing text, delivery modes, lease retention and release across ticks, archive completion, resume on the next delivery (fake Host `idle.retain` accounting).
+### Task 3.4: Idle lease release
+**Files:** `packages/agent-host/src/team.ts` + test.
+- The tick holds a member's lease only while a message to it is queued, dispatching or unsettled, or while its Team is archiving; it reports presence only for leased members; released and abandoned members are skipped. Applies to all Teams.
+- Tests: an idle member without messages holds no lease; a queued message acquires, delivers and releases after settlement; archiving acquires to report presence and completes.
 
 Milestone 3 exit: agent-host suite, Team suites, typecheck.
 

@@ -19,6 +19,12 @@
 - Commit after every task. Never push or deploy before milestone 8.
 - Milestones 2–8 list their tasks with files, contracts, tests and acceptance. Before starting a milestone, expand its tasks in this file to step level (test code, implementation code, commands) against the code as it then exists, commit the expansion, then execute it.
 
+## Progress
+
+- Milestones 1–7 and Tasks 8.1–8.2 are implemented and committed on `feat/call-for-support`.
+- Task 8.1 found a stall: a coordinator message steered into a Codex turn that was ending became `unknown`. Support group seats now deliver between turns, and the group view lets the user confirm an uncertain delivery. The native acceptance then passed 19 of 20 runs; the remaining failure did not reproduce in 20 further runs and its diagnostics are in the test's failure message.
+- Task 8.3: the verification gate runs before any outward step; deploying, merging and releasing wait for the user's go-ahead.
+
 ## File map
 
 | Path | Milestone | Responsibility |
@@ -58,7 +64,7 @@ Outcome: adapters can create and resume read-only sessions that cannot widen the
 - Modify: `packages/agent-provider-sdk/src/session-tools.ts`
 - Test: `packages/agent-provider-sdk/src/session-tools.test.ts`
 
-- [ ] **Step 1: Write the failing test** (append to `session-tools.test.ts`)
+- [x] **Step 1: Write the failing test** (append to `session-tools.test.ts`)
 
 ```ts
 import { bindAgentSessionToolNamespaces } from './session-tools.js';
@@ -80,12 +86,12 @@ it('rejects a call while the session is unavailable', async () => {
 });
 ```
 
-- [ ] **Step 2: Run it to verify it fails**
+- [x] **Step 2: Run it to verify it fails**
 
 Run: `cd packages/agent-provider-sdk && npx vitest run src/session-tools.test.ts`
 Expected: FAIL, `bindAgentSessionToolNamespaces` is not exported.
 
-- [ ] **Step 3: Implement**
+- [x] **Step 3: Implement**
 
 In `provider.ts`:
 
@@ -156,12 +162,12 @@ export function bindAgentSessionToolNamespaces(namespaces: readonly AgentSession
 
 Export it from the package index if `session-tools.ts` is re-exported there (check `packages/agent-provider-sdk/src/index.ts`; add `bindAgentSessionToolNamespaces` next to `bindAgentSessionTools`).
 
-- [ ] **Step 4: Run the tests**
+- [x] **Step 4: Run the tests**
 
 Run: `npx vitest run src/session-tools.test.ts && cd ../.. && pnpm --filter @orchardworks/agent-provider-sdk build && pnpm --filter @orchardworks/agent-provider-sdk typecheck`
 Expected: PASS; build and typecheck clean.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 pnpm compatibility:update && pnpm compatibility:check
@@ -177,7 +183,7 @@ git commit -m "feat(sdk): describe read-only sessions and tool namespaces"
 - Test: `packages/agent-provider-codex/src/session-access.test.ts` (new, scripted app-server)
 - Test: `packages/agent-provider-codex/src/read-only.local.test.ts` (new, native)
 
-- [ ] **Step 1: Write the failing unit test** with the scripted app-server used by existing tests (`src/test-utils/scripted-app-server.ts`; read its exports first and follow `session.test.ts` usage):
+- [x] **Step 1: Write the failing unit test** with the scripted app-server used by existing tests (`src/test-utils/scripted-app-server.ts`; read its exports first and follow `session.test.ts` usage):
 
 ```ts
 import { expect, it } from 'vitest';
@@ -207,12 +213,12 @@ it('refuses to widen a read-only session', async () => {
 
 Adapt helper names to the scripted server's real API while keeping the assertions.
 
-- [ ] **Step 2: Run it to verify it fails**
+- [x] **Step 2: Run it to verify it fails**
 
 Run: `cd packages/agent-provider-codex && npx vitest run src/session-access.test.ts`
 Expected: FAIL (`sessionAccess` undefined; `thread/start` lacks `sandbox`).
 
-- [ ] **Step 3: Implement**
+- [x] **Step 3: Implement**
 
 - Descriptor in `provider.ts`: add `sessionAccess: { readOnly: true }` and `sessionExtensions.toolNamespaces: 'creation'`.
 - `session.ts`: add `private readonly access?: 'read_only'` to `CodexAppServerSession` (constructor parameter after `recoveryPlan`), and a helper:
@@ -228,19 +234,19 @@ function sandboxParams(access: 'read_only' | undefined, restrictedNative: boolea
 - In `setSessionSetting` and in the `permissions` command path, when `this.access === 'read_only'` and the setting's category is `permissions` (or the command is `permissions`), throw `new AgentOperationRejectedError('operation_rejected', 'This session is read-only; its permissions cannot change.')`.
 - Children opened from a read-only session inherit `access`.
 
-- [ ] **Step 4: Run the unit tests**
+- [x] **Step 4: Run the unit tests**
 
 Run: `npx vitest run src/session-access.test.ts && npx vitest run`
 Expected: PASS, no regressions.
 
-- [ ] **Step 5: Write the native test** `read-only.local.test.ts`, converted from the experiment `/tmp/codex-ro-experiment.mjs` `readonly` mode: a scripted Responses server issues `exec_command` writes (`echo shell > shell.txt`, `git commit --allow-empty`) and reads (`git show HEAD:existing.txt`) through `CodexAppServerProvider.createSession({ access: 'read_only' })`; assert `shell.txt` absent, commit count unchanged, the read output contains `original`, and no approval interactions were requested.
+- [x] **Step 5: Write the native test** `read-only.local.test.ts`, converted from the experiment `/tmp/codex-ro-experiment.mjs` `readonly` mode: a scripted Responses server issues `exec_command` writes (`echo shell > shell.txt`, `git commit --allow-empty`) and reads (`git show HEAD:existing.txt`) through `CodexAppServerProvider.createSession({ access: 'read_only' })`; assert `shell.txt` absent, commit count unchanged, the read output contains `original`, and no approval interactions were requested.
 
-- [ ] **Step 6: Run it**
+- [x] **Step 6: Run it**
 
 Run: `BORGEE_CODEX_TEST_EXECUTABLE=<pinned codex> npx vitest run src/read-only.local.test.ts`
 Expected: PASS.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 pnpm compatibility:update && pnpm compatibility:check
@@ -256,7 +262,7 @@ git commit -m "feat(codex): run read-only sessions in the read-only sandbox"
 - Test: `packages/agent-provider-codex/src/tool-namespaces.test.ts` (new)
 - Test: `packages/agent-provider-codex/src/tool-namespaces.local.test.ts` (new, native)
 
-- [ ] **Step 1: Write the failing unit test**
+- [x] **Step 1: Write the failing unit test**
 
 ```ts
 it('declares namespaces at thread start and routes namespaced calls', async () => {
@@ -282,12 +288,12 @@ it('declares namespaces at thread start and routes namespaced calls', async () =
 });
 ```
 
-- [ ] **Step 2: Run it to verify it fails**
+- [x] **Step 2: Run it to verify it fails**
 
 Run: `npx vitest run src/tool-namespaces.test.ts`
 Expected: FAIL.
 
-- [ ] **Step 3: Implement**
+- [x] **Step 3: Implement**
 
 `native-evidence.ts`:
 
@@ -308,19 +314,19 @@ export function codexDynamicTools(tools: readonly Pick<AgentSessionTool, 'name' 
 - `callTool`: when `params.namespace != null`, find the namespace by name and the tool inside it; otherwise use `this.tools`. Unknown namespace or tool → `success: false` with "Session tool is unavailable."
 - `updateToolNamespaces(namespaces)`: bind them; reject with `AgentOperationRejectedError('operation_rejected', 'Codex tool namespaces are fixed at thread start; only their executors can change.')` if any name, tool name set or deferral differs from the declared namespaces recorded when the thread started (record a declaration signature `JSON.stringify(namespaces.map(n => [n.name, !!n.deferred, n.tools.map(t => t.name)]))`; on resume, the signature is the one from the extensions given to `resume`); otherwise replace `this.toolNamespaces`.
 
-- [ ] **Step 4: Run the unit tests**
+- [x] **Step 4: Run the unit tests**
 
 Run: `npx vitest run src/tool-namespaces.test.ts && npx vitest run`
 Expected: PASS.
 
-- [ ] **Step 5: Write the native test**, converted from the experiment's `search` mode: model `gpt-5.5` in the fixture config (a catalog model with the search tool), a deferred `agent_remote.call_for_support`; the scripted model emits `tool_search_call` then a namespaced `function_call`; assert the first request's tools omit `call_for_support`, the search output contains it, the executor ran with `{ role: 'code reviewer' }`, and the function output reached the model. A second case with model `mock-model` and `deferred: false` asserts the tool is in the first request's tools.
+- [x] **Step 5: Write the native test**, converted from the experiment's `search` mode: model `gpt-5.5` in the fixture config (a catalog model with the search tool), a deferred `agent_remote.call_for_support`; the scripted model emits `tool_search_call` then a namespaced `function_call`; assert the first request's tools omit `call_for_support`, the search output contains it, the executor ran with `{ role: 'code reviewer' }`, and the function output reached the model. A second case with model `mock-model` and `deferred: false` asserts the tool is in the first request's tools.
 
-- [ ] **Step 6: Run it on the pinned version**
+- [x] **Step 6: Run it on the pinned version**
 
 Run: `BORGEE_CODEX_TEST_EXECUTABLE=<codex 0.162.0> npx vitest run src/tool-namespaces.local.test.ts`
 Expected: PASS. If 0.162.0 rejects namespaces or `deferLoading`, install the first version that passes, update the pin in `packages/agent-remote-lab/src/server/compatibility.ts` and its manifest consumers in the same commit, and record the reason in the compatibility manifest.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 pnpm compatibility:update && pnpm compatibility:check
@@ -337,7 +343,7 @@ git commit -m "feat(codex): declare tool namespaces at thread start and route na
 - Test: `packages/agent-provider-claude/src/permission-modes.test.ts`, `session-access.test.ts` (new, fake query)
 - Test: `packages/agent-provider-claude/src/read-only.local.test.ts` (new, native; replaces `zz-read-only-experiment.local.test.ts`)
 
-- [ ] **Step 1: Write the failing unit tests**
+- [x] **Step 1: Write the failing unit tests**
 
 ```ts
 // permission-modes.test.ts
@@ -361,12 +367,12 @@ it('opens a read-only session with read-only options and refuses permission chan
 
 `openFakeClaudeSession` is the helper the existing session unit tests use; reuse it (search `options.query` in `src/*.test.ts`).
 
-- [ ] **Step 2: Run them to verify they fail**
+- [x] **Step 2: Run them to verify they fail**
 
 Run: `cd packages/agent-provider-claude && npx vitest run src/permission-modes.test.ts src/session-access.test.ts`
 Expected: FAIL.
 
-- [ ] **Step 3: Implement**
+- [x] **Step 3: Implement**
 
 `permission-modes.ts`:
 
@@ -387,19 +393,19 @@ export function claudeReadOnlyOptions(cwd: string) {
 
 `provider.ts`: descriptor `sessionAccess: { readOnly: true }`; pass `access` from `config.access` on create and from `extensions.access` on resume.
 
-- [ ] **Step 4: Run the unit tests**
+- [x] **Step 4: Run the unit tests**
 
 Run: `npx vitest run`
 Expected: PASS.
 
-- [ ] **Step 5: Convert the experiment into the native test** `read-only.local.test.ts` through `ClaudeAgentSession.open({ …, access: 'read_only' }, fixture.options)`: the scripted model attempts Read, Edit, Write, `echo > shell.txt`, `git commit --allow-empty`, `git show HEAD:existing.txt`, `cat`, and a write to `$TMPDIR`; assert the workspace is unchanged, the git read and `cat` succeed, the scratch write succeeds, and no `interaction_requested` event occurred. Delete `zz-read-only-experiment.local.test.ts`.
+- [x] **Step 5: Convert the experiment into the native test** `read-only.local.test.ts` through `ClaudeAgentSession.open({ …, access: 'read_only' }, fixture.options)`: the scripted model attempts Read, Edit, Write, `echo > shell.txt`, `git commit --allow-empty`, `git show HEAD:existing.txt`, `cat`, and a write to `$TMPDIR`; assert the workspace is unchanged, the git read and `cat` succeed, the scratch write succeeds, and no `interaction_requested` event occurred. Delete `zz-read-only-experiment.local.test.ts`.
 
-- [ ] **Step 6: Run it**
+- [x] **Step 6: Run it**
 
 Run: `AGENT_CLAUDE_TEST_EXECUTABLE=$HOME/.nvm/versions/node/v22.23.2/bin/claude npx vitest run src/read-only.local.test.ts`
 Expected: PASS.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 pnpm compatibility:update && pnpm compatibility:check
@@ -416,7 +422,7 @@ git commit -m "feat(claude): run read-only sessions without edit tools in a writ
 - Test: `packages/agent-provider-claude/src/session-tools.test.ts`, `session-namespaces.test.ts` (new)
 - Test: `packages/agent-provider-claude/src/tool-namespaces.local.test.ts` (new, native; replaces `zz-dynamic-mcp-experiment.local.test.ts`)
 
-- [ ] **Step 1: Write the failing unit test**
+- [x] **Step 1: Write the failing unit test**
 
 ```ts
 it('adds and removes namespace servers on the running query, keeping the host server', async () => {
@@ -436,31 +442,31 @@ it('declares namespaces present at open as their own servers', async () => {
 
 `hostTool(name)` returns an `AgentSessionTool` with an object schema; add it to the test file.
 
-- [ ] **Step 2: Run it to verify it fails**
+- [x] **Step 2: Run it to verify it fails**
 
 Run: `npx vitest run src/session-namespaces.test.ts`
 Expected: FAIL.
 
-- [ ] **Step 3: Implement**
+- [x] **Step 3: Implement**
 
 - `session-tools.ts`: `createClaudeSessionTools(definitions, assertAvailable, name = 'agent_host')` names its server.
 - `session.ts`: `private namespaceServers = new Map<string, ReturnType<typeof createClaudeSessionTools>>()`; at open, build one server per `config.toolNamespaces` entry (deferral is ignored: Claude has no deferred MCP tools); query options `mcpServers: { ...(hostTools ? { agent_host: hostTools } : {}), ...Object.fromEntries(namespaceServers) }`.
 - `updateToolNamespaces(namespaces)`: bind with `bindAgentSessionToolNamespaces`, build servers, call `this.native.setMcpServers({ agent_host?, ...new })`, check `errors` is empty (throw the first error otherwise), close servers that were removed, then replace the map. Serialize with the existing settings change guard so it cannot race a turn start.
 - `dispose`: close every namespace server.
 
-- [ ] **Step 4: Run the unit tests**
+- [x] **Step 4: Run the unit tests**
 
 Run: `npx vitest run`
 Expected: PASS.
 
-- [ ] **Step 5: Convert the experiment into the native test** `tool-namespaces.local.test.ts` through `ClaudeAgentSession`: open without namespaces, send a first turn, call `updateToolNamespaces` with `agent_remote.call_for_support`, send a second turn scripted to call `mcp__agent_remote__call_for_support`; assert the second request's tools include it, the executor ran, and the turn result contains the tool output. Then remove the namespace and assert the next request no longer lists it. Delete `zz-dynamic-mcp-experiment.local.test.ts`.
+- [x] **Step 5: Convert the experiment into the native test** `tool-namespaces.local.test.ts` through `ClaudeAgentSession`: open without namespaces, send a first turn, call `updateToolNamespaces` with `agent_remote.call_for_support`, send a second turn scripted to call `mcp__agent_remote__call_for_support`; assert the second request's tools include it, the executor ran, and the turn result contains the tool output. Then remove the namespace and assert the next request no longer lists it. Delete `zz-dynamic-mcp-experiment.local.test.ts`.
 
-- [ ] **Step 6: Run it**
+- [x] **Step 6: Run it**
 
 Run: `AGENT_CLAUDE_TEST_EXECUTABLE=$HOME/.nvm/versions/node/v22.23.2/bin/claude npx vitest run src/tool-namespaces.local.test.ts`
 Expected: PASS.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 pnpm compatibility:update && pnpm compatibility:check
@@ -475,16 +481,16 @@ git commit -m "feat(claude): expose tool namespaces as MCP servers that can chan
 - Modify: `packages/agent-host/src/host.ts:1251` (`automationAccess.create`), provider registration read-only report
 - Test: `packages/agent-host/src/team-host.test.ts` or a new `team-seat-configuration.test.ts`
 
-- [ ] **Step 1: Write the failing test**: create a Team seat whose member has `model: 'm'`, `reasoningEffort: 'high'`, `access: 'read_only'` through `TeamRuntime.create` with a fake `TeamRuntimeAccess`; assert `access.create` received `{ providerId, cwd, model: 'm', reasoningEffort: 'high', extensions: { …, access: 'read_only' } }`; and a Host-level test that `automationAccess.create` forwards `model`, `reasoningEffort` and `access` to `directory.create`, and rejects `access: 'read_only'` for a registration whose adapter lacks `descriptor.sessionAccess.readOnly`.
+- [x] **Step 1: Write the failing test**: create a Team seat whose member has `model: 'm'`, `reasoningEffort: 'high'`, `access: 'read_only'` through `TeamRuntime.create` with a fake `TeamRuntimeAccess`; assert `access.create` received `{ providerId, cwd, model: 'm', reasoningEffort: 'high', extensions: { …, access: 'read_only' } }`; and a Host-level test that `automationAccess.create` forwards `model`, `reasoningEffort` and `access` to `directory.create`, and rejects `access: 'read_only'` for a registration whose adapter lacks `descriptor.sessionAccess.readOnly`.
 
 Until milestone 2 adds the fields to `TeamMember`, the test builds the seat with a local type that extends `TeamSeat`; milestone 2 replaces it with the protocol type.
 
-- [ ] **Step 2: Run it to verify it fails.**
+- [x] **Step 2: Run it to verify it fails.**
 
 Run: `cd packages/agent-host && npx vitest run src/team-seat-configuration.test.ts`
 Expected: FAIL.
 
-- [ ] **Step 3: Implement**
+- [x] **Step 3: Implement**
 
 ```ts
 export interface TeamSeatCreation { cwd?: string; model?: string; reasoningEffort?: string }
@@ -500,12 +506,12 @@ Expose `readOnlyProviders(): string[]` from the Host (registrations whose descri
 
 *As built:* the configuration is `roleSessionConfig(descriptor, creation, extensions)` in `packages/agent-host/src/role-session-creation.ts`, unit-tested directly. Team passes `{ cwd }` until Task 2.2 gives `TeamMember` its `model`, `reasoningEffort` and `access`; the Team-level forwarding test moves there. `readOnlyProviders()` is not added: Task 2.3 reports `readOnly` in `describeProviders` from `descriptor.sessionAccess` directly.
 
-- [ ] **Step 4: Run the agent-host suite**
+- [x] **Step 4: Run the agent-host suite**
 
 Run: `npx vitest run src/team-seat-configuration.test.ts && pnpm test`
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 pnpm compatibility:update && pnpm compatibility:check
@@ -515,8 +521,8 @@ git commit -m "feat(controller): create Team seats with a model, effort and acce
 
 ### Milestone 1 exit
 
-- [ ] `pnpm -r run build && pnpm typecheck` clean; unit suites of the SDK, Codex, Claude and agent-host pass; the four native tests pass.
-- [ ] Remove `/tmp` experiment leftovers from the worktree if any remain (`git status` clean apart from committed work).
+- [x] `pnpm -r run build && pnpm typecheck` clean; unit suites of the SDK, Codex, Claude and agent-host pass; the four native tests pass.
+- [x] Remove `/tmp` experiment leftovers from the worktree if any remain (`git status` clean apart from committed work).
 
 ---
 

@@ -63,7 +63,8 @@ The `agent_remote` namespace holds `call_for_support`, `support_status`, `read_s
 ### Retention
 
 - An archived group is final: the Relay refuses to restore it and the website shows it as history. Calling for support again starts a new group.
-- Groups are created automatically, so the oldest archived groups are removed when a new Team would exceed the 128-Team limit, and on every Team change while the account's Team state is above 1.5 MiB (its bound is 2 MiB). Ordinary Teams are never removed.
+- A group without an open or queued call for a week is archived automatically. A group that is archiving takes no calls: a call for its profile starts a new group, and the website offers only active roles.
+- Groups are created automatically, so groups are removed when a new Team would exceed the 128-Team limit, and on every Team change while the account's Team state is above 1.5 MiB (its bound is 2 MiB). Archived groups go first, then groups without an open or queued call, least recently used first (by their last call or report). A group used within the last hour is never removed, so an operation retried in that window finds its group. Ordinary Teams are never removed.
 - A removal sweeps stored files, keeping only those of Teams that still exist, so files an interrupted sweep left go with the next removal.
 - Bundles and collected patches are checked against their stored bytes but not pinned: like other unattached uploads they expire 24 hours after their last use, and attaching an expired one tells the coordinator to collect or upload it again. A report pins the resources it attaches until its group is removed.
 - Controllers ask about groups missing from their poll with `support_group_states`, at most every ten minutes each, and forget the seats of archived and removed groups, so their local seat capacity is not exhausted. A seat whose worktree cannot be removed yet stays until it can; a removal that left an empty directory is finished, and a directory with content is left alone.
@@ -85,7 +86,7 @@ The `agent_remote` namespace holds `call_for_support`, `support_status`, `read_s
 - A remote fetch fails when the repository lacks the call's base; call again without a base. A remote supporter starts from its bundle within 24 hours, since the bundle is not kept longer.
 - Writing only to their own worktree is a supporter's instruction and its provider's permissions, not an enforced sandbox; `shared` supporters are read-only natively.
 - Rolling the Relay back to a version before Call For Support is safe only until the first group exists: older Relays reject saved groups and more than 32 Teams. After that, fix forward.
-- Retrying a call's operation after its group was archived and removed starts a new group: the removed group took the operation's record with it.
+- A removed group's calls and reports are gone from the Relay: the worker keeps the reports it received, and `read_support_report` no longer finds them.
 
 ## Verification
 

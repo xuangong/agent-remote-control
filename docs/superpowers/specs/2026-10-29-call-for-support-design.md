@@ -91,7 +91,7 @@ Found in the release review (2026-10-29):
 
 - Read-only providers travel as `readOnlyProvider` query parameters with `callForSupport=1`, not in provider descriptors: Relays before Call For Support validate descriptors strictly and would refuse an updated Controller.
 - Idle release applies to support groups only. Ordinary Teams keep every member held, because the user drives those sessions and only a held runtime reports their presence.
-- An archived group is final; Restore is refused. The oldest archived groups are removed with their stored files at the 128-Team limit and while the Team state is above 1.5 MiB of its 2 MiB bound; a removal sweeps the files of every Team that no longer exists. Controllers learn about archived and removed groups with `support_group_states` and forget their seats, which keeps their local seat capacity.
+- An archived group is final; Restore is refused. A group without an open or queued call for a week is archived, and an archiving group takes no calls. At the 128-Team limit and while the Team state is above 1.5 MiB of its 2 MiB bound, groups are removed with their stored files: archived first, then idle, least recently used first, never one used within the last hour; a removal sweeps the files of every Team that no longer exists. Controllers learn about archived and removed groups with `support_group_states` and forget their seats, which keeps their local seat capacity.
 - Bundles and collected patches are not pinned; they expire like other unattached uploads. A report pins what it attaches.
 - A supporter's worktree is removed at once when its creation fails, and is reused or patched only where the path is its own git top level.
 

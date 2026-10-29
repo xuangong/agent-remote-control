@@ -81,7 +81,16 @@ interface StoredSessionConfig {
   instructions?: string;
   collaborationMode?: 'plan';
   nativeSettings?: CodexEvidenceSettings;
+  /** A read-only session runs in the read-only sandbox and cannot change its permissions. */
+  access?: 'read_only';
 }
+
+/** Read-only sessions take the read-only sandbox; restricted Hosts otherwise confine writes to the workspace. */
+function sandboxParams(access: StoredSessionConfig['access'], restrictedNative: boolean) {
+  if (access === 'read_only') return { sandbox: 'read-only', approvalPolicy: 'never' } as const;
+  return restrictedNative ? { sandbox: 'workspace-write', approvalPolicy: 'never' } as const : {};
+}
+const READ_ONLY_PERMISSIONS = 'This session is read-only; its permissions cannot change.';
 
 interface NativePendingInteraction {
   kind: AgentInteractionRequest['kind'];
@@ -161,6 +170,9 @@ export class CodexAppServerSession implements AgentSession {
   private startingTurn = false;
   private sendingMessage = false;
   private activeTurnId: string | undefined;
+
+  /** Local Host policy or a read-only session forbids any change to native permissions. */
+  private get permissionsLocked(): boolean { return this.restrictedNative || this.config.access === 'read_only'; }
 
   private constructor(
     private transport: CodexAppServerTransport,
@@ -305,7 +317,7 @@ export class CodexAppServerSession implements AgentSession {
   }
 
   private createNativeChild(thread: Record<string, unknown>, history: unknown, buffered: CodexRawNotification[]): CodexAppServerSession {
-    const child = new CodexAppServerSession(this.transport, {}, this.codexHome, this.runtime, this.restrictedNative, undefined, this.communicationHistory);
+    const child = new CodexAppServerSession(this.transport, this.config.access ? { access: this.config.access } : {}, this.codexHome, this.runtime, this.restrictedNative, undefined, this.communicationHistory);
     child.interactionGeneration = this.interactionGeneration;
     child.sharedInteractionIdentity = this.sharedInteractionIdentity;
     child.settings.inheritCatalog(this.settings);
@@ -447,7 +459,7 @@ export class CodexAppServerSession implements AgentSession {
     const response = await transport.request('thread/start', {
       ...(session.tools.length ? { dynamicTools: codexDynamicTools(session.tools) } : {}),
       config: { 'features.default_mode_request_user_input': true },
-      ...(restrictedNative ? { sandbox: 'workspace-write', approvalPolicy: 'never' } : {}),
+      ...sandboxParams(stored.access, restrictedNative),
       ...(stored.model ? { model: stored.model } : {}),
       ...(stored.cwd ? { cwd: stored.cwd } : {}),
       ...(sessionInstructions(stored) ? { developerInstructions: sessionInstructions(stored) } : {}),
@@ -474,7 +486,7 @@ export class CodexAppServerSession implements AgentSession {
     const response = await transport.request('thread/fork', {
       threadId: nativeSessionId, cwd: boundary.cwd, excludeTurns: true,
       config: { 'features.default_mode_request_user_input': true },
-      ...(restrictedNative ? { sandbox: 'workspace-write', approvalPolicy: 'never' } : {}),
+      ...sandboxParams(undefined, restrictedNative),
     });
     session.setThreadFromResponse(response, 'thread/fork');
     if (session.threadId === nativeSessionId || session.config.cwd !== boundary.cwd) throw new Error('Codex did not confirm an independent fork in the same working directory.');
@@ -502,7 +514,8 @@ export class CodexAppServerSession implements AgentSession {
     extensions: AgentSessionExtensions = {},
     candidateKnown?: (handle: AgentPersistenceHandle) => Promise<void>,
   ): Promise<CodexAppServerSession> {
-    const session = new CodexAppServerSession(transport, { systemPrompt: extensions.systemPrompt, instructions: extensions.instructions }, codexHome, undefined, restrictedNative, recoveryPlan);
+    const session = new CodexAppServerSession(transport, { systemPrompt: extensions.systemPrompt, instructions: extensions.instructions,
+      ...(extensions.access ? { access: extensions.access } : {}) }, codexHome, undefined, restrictedNative, recoveryPlan);
     session.tools = bindAgentSessionTools(extensions.tools, () => session.assertOpen());
     await session.initialize();
     const boundary = await preparePromptEdit(transport, target);
@@ -513,7 +526,7 @@ export class CodexAppServerSession implements AgentSession {
       ...(!boundary.beforeTurnId && session.tools.length ? { dynamicTools: codexDynamicTools(session.tools) } : {}),
       ...(sessionInstructions(session.config) ? { developerInstructions: sessionInstructions(session.config) } : {}),
       config: { 'features.default_mode_request_user_input': true },
-      ...(restrictedNative ? { sandbox: 'workspace-write', approvalPolicy: 'never' } : {}),
+      ...sandboxParams(extensions.access, restrictedNative),
     });
     session.setThreadFromResponse(response, boundary.beforeTurnId ? 'thread/fork' : 'thread/start');
     if (session.threadId === target.nativeSessionId) throw new Error('Codex did not create an independent prompt-edit branch.');
@@ -559,7 +572,8 @@ export class CodexAppServerSession implements AgentSession {
       throw new Error(`Cannot resume ${handle.providerId} with the Codex provider`);
     }
     const stored = { ...parseStoredConfig(handle.opaque), ...(extensions.systemPrompt ? { systemPrompt: extensions.systemPrompt } : {}),
-      ...(extensions.instructions !== undefined ? { instructions: extensions.instructions } : {}), ...(collaborationMode ? { collaborationMode } : {}) };
+      ...(extensions.instructions !== undefined ? { instructions: extensions.instructions } : {}), ...(collaborationMode ? { collaborationMode } : {}),
+      ...(extensions.access ? { access: extensions.access } : {}) };
     const session = new CodexAppServerSession(transport, stored, codexHome, undefined, restrictedNative, recoveryPlan);
     session.tools = bindAgentSessionTools(extensions.tools, () => session.assertOpen());
     session.threadId = handle.sessionId;
@@ -584,7 +598,7 @@ export class CodexAppServerSession implements AgentSession {
       threadId: handle.sessionId,
       excludeTurns: !hydrateEmpty,
       config: { 'features.default_mode_request_user_input': true },
-      ...(restrictedNative ? { sandbox: 'workspace-write', approvalPolicy: 'never' } : {}),
+      ...sandboxParams(stored.access, restrictedNative),
       ...(stored.cwd ? { cwd: stored.cwd } : {}),
       ...(!expectedNativeSettings && stored.model ? { model: stored.model } : {}),
       ...(sessionInstructions(stored) ? { developerInstructions: sessionInstructions(stored) } : {}),
@@ -820,8 +834,8 @@ export class CodexAppServerSession implements AgentSession {
 
   private async applySessionSetting(id: string, value: string, waitForConfirmation = true): Promise<void | { status: 'pending' | 'deferred' }> {
     this.assertDirectInput();
-    if (this.restrictedNative && this.settings.describe(this.config.model, this.config.reasoningEffort).some(setting => setting.id === id && setting.category === 'permissions')) {
-      throw new AgentOperationRejectedError('operation_rejected', 'Native permission settings are locked by local Host policy.');
+    if (this.permissionsLocked && this.settings.describe(this.config.model, this.config.reasoningEffort).some(setting => setting.id === id && setting.category === 'permissions')) {
+      throw new AgentOperationRejectedError('operation_rejected', this.config.access === 'read_only' ? READ_ONLY_PERMISSIONS : 'Native permission settings are locked by local Host policy.');
     }
     const modelSetting = id === 'model' || id === 'effort';
     const liveTurnId = !waitForConfirmation && modelSetting ? this.activeTurnId : undefined;
@@ -973,13 +987,13 @@ export class CodexAppServerSession implements AgentSession {
   async listCommands(): Promise<AgentCommand[]> {
     this.assertOpen();
     const commands = await discoverCodexCommands(this.transport, this.config.cwd, this.codexHome);
-    return commands.filter(command => !this.restrictedNative || command.descriptor.id !== 'permissions').map(({ descriptor }) => descriptor);
+    return commands.filter(command => !this.permissionsLocked || command.descriptor.id !== 'permissions').map(({ descriptor }) => descriptor);
   }
 
   async executeCommand(id: string, args: string): Promise<AgentCommandResult> {
     this.nativeEvidence.invalidate();
     this.assertCommandIdle();
-    if (this.restrictedNative && id === 'permissions') throw new AgentOperationRejectedError('operation_rejected', 'Native permission commands are locked by local Host policy.');
+    if (this.permissionsLocked && id === 'permissions') throw new AgentOperationRejectedError('operation_rejected', this.config.access === 'read_only' ? READ_ONLY_PERMISSIONS : 'Native permission commands are locked by local Host policy.');
     if (this.executingCommand) throw new AgentOperationRejectedError('operation_rejected', 'A Codex command is already active.');
     if (this.commandInteractions.pending) throw new AgentOperationRejectedError('operation_rejected', 'Codex has pending command interactions.');
     this.executingCommand = true;
@@ -1100,7 +1114,7 @@ export class CodexAppServerSession implements AgentSession {
       childSessions: this.threadId ? this.runtime.childSessions(this.threadId) : [],
       ...(this.config.cwd ? { cwd: this.config.cwd } : {}),
       model: this.config.model ?? null,
-      settings: this.describeSessionSettings().map((setting) => this.acceptsDirectInput && !(this.restrictedNative && setting.category === 'permissions') ? setting : { ...setting, mutable: false }),
+      settings: this.describeSessionSettings().map((setting) => this.acceptsDirectInput && !(this.permissionsLocked && setting.category === 'permissions') ? setting : { ...setting, mutable: false }),
       mode: this.config.collaborationMode ?? null,
       ...(this.planningModes ? { planning: { active: this.config.collaborationMode === 'plan' } } : {}),
       persistence: this.threadId ? {
@@ -1598,7 +1612,7 @@ export class CodexAppServerSession implements AgentSession {
 
   private handlePermissionRequest(params: unknown, id: string | number): Promise<unknown> {
     this.assertRequestThread(params);
-    if (this.restrictedNative) return Promise.resolve({ permissions: {}, scope: 'turn' });
+    if (this.permissionsLocked) return Promise.resolve({ permissions: {}, scope: 'turn' });
     try {
       const { permissions, grant } = mapCodexPermissions(params.permissions);
       const cwd = readString(params.cwd);
@@ -1691,6 +1705,7 @@ function toStoredConfig(config: AgentSessionConfig, collaborationMode?: 'plan'):
     ...(config.systemPrompt ? { systemPrompt: config.systemPrompt } : {}),
     ...(config.instructions ? { instructions: config.instructions } : {}),
     ...(config.planning === true || (config.planning === undefined && collaborationMode) ? { collaborationMode: 'plan' as const } : {}),
+    ...(config.access === 'read_only' ? { access: 'read_only' as const } : {}),
   };
 }
 
@@ -1713,6 +1728,7 @@ function parseStoredConfig(opaque: string): StoredSessionConfig {
     ...(readString(parsed.instructions) ? { instructions: readString(parsed.instructions) } : {}),
     ...(parsed.collaborationMode === 'plan' ? { collaborationMode: 'plan' as const } : {}),
     ...(nativeSettings ? { nativeSettings } : {}),
+    ...(parsed.access === 'read_only' ? { access: 'read_only' as const } : {}),
   };
 }
 

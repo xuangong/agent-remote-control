@@ -1,6 +1,6 @@
 import { execFile } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import { mkdir, mkdtemp, readFile, realpath, rm, stat, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, realpath, rm, rmdir, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join, relative, resolve, sep } from 'node:path';
 import { promisify } from 'node:util';
@@ -83,7 +83,8 @@ export async function removeWorktree(root: string, worktree: string): Promise<vo
   const base = join(root, '.agent-remote', 'worktrees') + sep;
   if (!resolve(worktree).startsWith(base)) throw new Error('Refusing to remove a directory outside the support worktrees.');
   let failure: unknown;
-  if (await exists(worktree)) await git(root, ['worktree', 'remove', '--force', worktree]).catch(error => { failure = error; });
+  // A removal that deleted the files but not the directory leaves an empty directory git no longer knows; only an empty one is removed.
+  if (await exists(worktree)) await git(root, ['worktree', 'remove', '--force', worktree]).catch(async error => { if (!await rmdir(worktree).then(() => true, () => false)) failure = error; });
   await git(root, ['worktree', 'prune']);
   // A remote supporter's fetched commit is kept reachable by its own ref.
   const [teamId, memberId] = relative(base, resolve(worktree)).split(sep);

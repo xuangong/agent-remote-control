@@ -1,8 +1,8 @@
 import { execFileSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
-import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { afterEach, expect, it } from 'vitest';
 import { collectPatch, createBundle, fetchBundle, prepareWorktree, removeWorktree, worktreePath } from './call-for-support-workspaces.js';
 
@@ -58,10 +58,20 @@ it('removes a worktree and prunes it, and refuses directories outside the suppor
   await expect(removeWorktree(repo.root, join(repo.root, 'src'))).rejects.toThrow('outside the support worktrees');
 });
 
+it('finishes a removal that deleted a worktree\'s files but not its directory', async () => {
+  const repo = await repository();
+  const { worktree } = await prepareWorktree(repo.root, 'team', 'member', repo.second);
+  await chmod(dirname(worktree), 0o500);
+  try { await expect(removeWorktree(repo.root, worktree)).rejects.toThrow(); } finally { await chmod(dirname(worktree), 0o700); }
+  expect(existsSync(worktree)).toBe(true);
+  await removeWorktree(repo.root, worktree);
+  expect(existsSync(worktree)).toBe(false);
+});
+
 it('deletes a supporter\'s support ref even when its directory is not a worktree it can remove', async () => {
   const repo = await repository();
   const stray = worktreePath(repo.root, 'team', 'member');
-  await mkdir(stray, { recursive: true });
+  await mkdir(stray, { recursive: true }); await writeFile(join(stray, 'notes.txt'), 'not ours');
   repo.git('update-ref', 'refs/agent-remote/support/team/member', repo.first);
   await expect(removeWorktree(repo.root, stray)).rejects.toThrow('git worktree failed');
   expect(repo.git('for-each-ref', 'refs/agent-remote')).toBe('');

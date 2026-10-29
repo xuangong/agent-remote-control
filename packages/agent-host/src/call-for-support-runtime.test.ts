@@ -1,9 +1,9 @@
 import { execFileSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
-import { mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises';
+import { chmod, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { expect, it } from 'vitest';
+import { expect, it, vi } from 'vitest';
 import { reviewProfile, supportHarness } from './test-utils/call-for-support-harness.js';
 
 it('binds the worker without creating a session and creates a read-only coordinator with the profile\'s configuration', async () => {
@@ -283,4 +283,30 @@ it('forgets the seats of an archived support group, and keeps an archived ordina
     expect(await h.runtime.extensions(coordinator)).toBeUndefined();
     expect(await h.runtime.extensions(leader)).toBeDefined();
   } finally { await h.close(); }
+});
+
+it('keeps an ended group\'s seat until its worktree is removed, and retries at the group\'s next check', async () => {
+  const h = await supportHarness();
+  const teamDirectory = () => join(h.directory, '.agent-remote', 'worktrees', roleId);
+  let roleId = '';
+  try {
+    const profile = h.profile({ ...reviewProfile, mandate: { ...reviewProfile.mandate, supporters: [{ providerId: 'codex', model: 'gpt-5.5' }], workspaces: ['worktree'] } }); h.enable([profile.id]);
+    roleId = (await h.call({ operationId: 'op-1', profileId: profile.id })).roleId;
+    const coordinator = h.ref('codex', h.team(roleId).members[0]!.nativeSessionId!);
+    await run(await h.runtime.extensions(coordinator), 'propose_roster', { operationId: 'roster', rationale: 'A fix.',
+      members: [{ name: 'Fixer', responsibility: 'Write the fix.', providerId: 'codex', model: 'gpt-5.5', workspace: 'worktree' }] });
+    const supporter = h.team(roleId).members[2]!, fixer = h.ref('codex', supporter.nativeSessionId!), worktree = join(teamDirectory(), supporter.id);
+    await chmod(teamDirectory(), 0o500);
+    await h.broker.action({ teamId: roleId, action: 'archive' });
+    await h.runtime.tick(); await h.runtime.tick();
+    expect(h.team(roleId).status).toBe('archived');
+    expect(existsSync(worktree)).toBe(true);
+    expect(await h.runtime.extensions(coordinator)).toBeUndefined();
+    expect(await h.runtime.extensions(fixer)).toBeDefined();
+    await chmod(teamDirectory(), 0o700);
+    vi.useFakeTimers({ toFake: ['Date'] }); vi.setSystemTime(Date.now() + 11 * 60_000);
+    await h.runtime.tick();
+    expect(existsSync(worktree)).toBe(false);
+    expect(await h.runtime.extensions(fixer)).toBeUndefined();
+  } finally { vi.useRealTimers(); if (roleId) await chmod(teamDirectory(), 0o700).catch(() => undefined); await h.close(); }
 });

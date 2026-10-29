@@ -353,13 +353,16 @@ export class TeamRuntime implements SessionRole {
     const ended = new Set(states.filter(state => state && typeof state === 'object' && due.includes(state.teamId) && (state.status === 'archived' || state.status === 'missing'))
       .map(state => state.teamId as string));
     if (!ended.size) return;
+    const forgotten = new Set<LocalSeat>();
     for (const record of this.records.filter(item => ended.has(item.seat.teamId))) {
-      if (record.worktree && !record.worktree.removed) await removeWorktree(record.worktree.root, record.worktree.path).catch(() => undefined);
       const key = `${record.seat.teamId}:${record.seat.member.id}`, held = this.leases.get(key);
       if (held) this.release(key, held);
+      // A seat whose worktree could not be removed stays until it can: it is the only record of where the worktree is.
+      await this.removeSeatWorktree(record);
+      if (!record.worktree || record.worktree.removed) forgotten.add(record);
     }
-    this.records = this.records.filter(item => !ended.has(item.seat.teamId));
-    for (const id of ended) this.groupChecks.delete(id);
+    this.records = this.records.filter(item => !forgotten.has(item));
+    for (const id of ended) if (!this.records.some(item => item.seat.teamId === id)) this.groupChecks.delete(id);
     await this.save();
   }
   private async reconcileReceipts(record: LocalSeat, team?: Team): Promise<void> {

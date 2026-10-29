@@ -26,6 +26,7 @@ const withoutRecipient = <T extends { id: string; resolvedTarget?: NativeSession
 const fail = (message: string): never => { throw new Error(message); };
 
 const unavailableGroups = 'Call For Support is unavailable on this Relay.';
+const callForSupportUpgrade = 'Update the Controller to use Call For Support.';
 const sameRecipient = (current: NativeSessionRef, anchor: StoredRecipientAnchor) => current.providerId === anchor.providerId && current.nativeSessionId === anchor.nativeSessionId;
 const find = (teams: SavedTeam[], id: string) => teams.find(team => team.id === id) ?? fail('Team not found.');
 const member = (team: Team, id: string) => team.members.find(item => item.id === id) ?? fail('Team member not found.');
@@ -163,7 +164,9 @@ export class TeamBroker {
   async hostCall(hostId: string, call: TeamHostCall, assertCurrent: () => void = () => {}, recipientAware = true): Promise<unknown> {
     assertCurrent();
     if (!recipientAware && (call.action === 'claim' && call.expectedNativeSessionId !== undefined || call.action === 'settle' && call.resolvedTarget)) fail(upgradeRequired);
-    if (call.action === 'poll') return this.ports.read().filter(team => team.status !== 'archived' && team.members.some(item => item.hostId === hostId && item.creation === 'ready')).map(team => this.project(team, recipientAware));
+    // A Controller that does not run Call For Support groups never sees them.
+    const visible = (team: SavedTeam) => !team.callForSupport || this.ports.callForSupport?.capable(hostId) === true;
+    if (call.action === 'poll') return this.ports.read().filter(team => team.status !== 'archived' && visible(team) && team.members.some(item => item.hostId === hostId && item.creation === 'ready')).map(team => this.project(team, recipientAware));
     const projectDelivery = <T extends { id: string; resolvedTarget?: NativeSessionRef }>(value: T) => recipientAware ? value : withoutRecipient(value);
     if (call.action === 'call_for_support' || call.action === 'support_status') return (this.groups ?? fail(unavailableGroups)).workerCall(hostId, call);
     if (call.action === 'propose_roster' || call.action === 'release_supporter' || call.action === 'report_support' || call.action === 'write_ledger' || call.action === 'report_usage') {
@@ -175,6 +178,7 @@ export class TeamBroker {
       assertCurrent();
       const team = find(teams, call.teamId), self = member(team, call.memberId), now = this.ports.now();
       if (self.hostId !== hostId || self.creation !== 'ready') fail('This Host is not the registered Team member.');
+      if (!visible(team)) fail(callForSupportUpgrade);
       if (!recipientAware && !sameRecipient(this.resolveRecipientFromAnchor(self), self)) fail(upgradeRequired);
       if (call.action === 'read') return { ...this.project(team, recipientAware), receipts: team.deliveryReceipts?.map(({ fingerprint: _hash, settledAt: _time, ...receipt }) => projectDelivery(receipt)) ?? [] };
       if (call.action === 'acknowledge') {
@@ -297,6 +301,7 @@ export class TeamBroker {
       assertCurrent();
       const team = find(this.ports.read(), call.teamId), self = member(team, call.memberId);
       if (self.hostId !== hostId || self.creation !== 'ready') fail('This Host is not the registered Team member.');
+      if (team.callForSupport && this.ports.callForSupport?.capable(hostId) !== true) fail(callForSupportUpgrade);
       return {team,self};
     };
     const {team,self} = authorize(), scope = `team:${team.id}`;

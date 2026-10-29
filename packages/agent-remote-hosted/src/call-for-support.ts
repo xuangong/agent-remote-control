@@ -20,6 +20,8 @@ export interface CallForSupportBrokerPorts {
 /** The account and Host facts groups depend on. */
 export interface CallForSupportPorts {
   state(): CallForSupportState | undefined;
+  /** The Host runs Call For Support groups; others never see them. */
+  capable(hostId: string): boolean;
   /** Throws unless the Host runs Call For Support groups. */
   assertHost(hostId: string): void;
   /** The provider enforces read-only sessions on the Host. */
@@ -271,6 +273,7 @@ export class CallForSupportGroups {
   }
   /** Requests from the group's sessions: the coordinator's, and every member's usage. */
   async memberCall(hostId: string, call: Extract<TeamHostCall, { action: 'propose_roster' | 'release_supporter' | 'report_support' | 'write_ledger' | 'report_usage' }>): Promise<unknown> {
+    this.ports.assertHost(hostId);
     if (call.action === 'propose_roster' || call.action === 'release_supporter') return this.rosterCall(hostId, call);
     if (call.action === 'report_support' && call.report.resources?.length) {
       this.coordinator(structuredClone(this.broker.ports.read().find(team => team.id === call.teamId) ?? fail('Team not found.')), hostId, call.memberId);

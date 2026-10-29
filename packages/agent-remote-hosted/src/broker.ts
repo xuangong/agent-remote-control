@@ -256,6 +256,7 @@ export function createHostBroker(options: HostBrokerOptions) {
     },
     callForSupport: {
       state: () => callForSupportState,
+      capable: hostId => hosts.get(hostId)?.callForSupport === 1,
       assertHost(hostId) { if (requireHost(hostId).callForSupport !== 1) throw new BrokerError(409, 'call_for_support_upgrade_required', 'Update the Controller to use Call For Support.'); },
       readOnly: (hostId, providerId) => !!hosts.get(hostId)?.providers.some(provider => provider.providerId === providerId && provider.readOnly),
     },

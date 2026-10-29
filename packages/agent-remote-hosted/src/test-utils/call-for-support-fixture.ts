@@ -25,6 +25,7 @@ export function supportFixture(options: { capable?: string[]; readOnly?: boolean
     },
     callForSupport: {
       state: () => state,
+      capable: hostId => (options.capable ?? ['mac', 'linux']).includes(hostId),
       assertHost: hostId => { if (!(options.capable ?? ['mac', 'linux']).includes(hostId)) throw new Error('Update the Controller to use Call For Support.'); },
       readOnly: (hostId, providerId) => typeof options.readOnly === 'function' ? options.readOnly(hostId, providerId) : options.readOnly ?? true,
     },

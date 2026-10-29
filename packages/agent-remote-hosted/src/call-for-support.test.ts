@@ -94,3 +94,13 @@ it('keeps the worker and the coordinator to calls and reports', async () => {
   await expect(f.broker.hostCall('mac', { action: 'send', teamId: roleId, memberId: coordinator.id, to: worker.id, operationId: 'x', text: 'Done.' })).rejects.toThrow('report_support');
   await expect(f.broker.hostCall('mac', { action: 'send', teamId: roleId, memberId: worker.id, to: coordinator.id, operationId: 'x', text: 'Hi.' })).rejects.toThrow('call_for_support');
 });
+
+it('tells a Host which of its sessions may call for support', async () => {
+  const f = supportFixture(); const profile = f.profile();
+  expect(await f.broker.hostCall('mac', { action: 'support_enablement' })).toEqual({ defaultEnabled: false, sessions: [] });
+  f.enable('worker', [profile.id]); f.enable('other', []); f.enable('remote', [profile.id], 'linux');
+  f.profile({ ...review, name: 'Default', enableByDefault: true });
+  expect(await f.broker.hostCall('mac', { action: 'support_enablement' })).toEqual({ defaultEnabled: true,
+    sessions: [{ providerId: 'codex', nativeSessionId: 'worker', enabled: true }, { providerId: 'codex', nativeSessionId: 'other', enabled: false }] });
+  await expect(f.broker.hostCall('win', { action: 'support_enablement' })).rejects.toThrow('Update the Controller');
+});

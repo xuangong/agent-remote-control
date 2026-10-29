@@ -169,6 +169,7 @@ export class TeamBroker {
     if (call.action === 'poll') return this.ports.read().filter(team => team.status !== 'archived' && visible(team) && team.members.some(item => item.hostId === hostId && item.creation === 'ready')).map(team => this.project(team, recipientAware));
     const projectDelivery = <T extends { id: string; resolvedTarget?: NativeSessionRef }>(value: T) => recipientAware ? value : withoutRecipient(value);
     if (call.action === 'call_for_support' || call.action === 'support_status') return (this.groups ?? fail(unavailableGroups)).workerCall(hostId, call);
+    if (call.action === 'support_enablement') return (this.groups ?? fail(unavailableGroups)).enablement(hostId);
     if (call.action === 'propose_roster' || call.action === 'release_supporter' || call.action === 'report_support' || call.action === 'write_ledger' || call.action === 'report_usage') {
       assertCurrent(); return (this.groups ?? fail(unavailableGroups)).memberCall(hostId, call);
     }

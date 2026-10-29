@@ -86,6 +86,9 @@ export interface RemoteHostUplinkClient {
   close(): Promise<void>;
 }
 
+/** Host calls only a Relay that acknowledged Call For Support understands. */
+const callForSupportActions = new Set<string>(['propose_roster', 'report_support', 'write_ledger', 'release_supporter', 'report_usage', 'call_for_support', 'support_status', 'support_enablement']);
+
 export function createRemoteHostUplinkClient(options: RemoteHostUplinkClientOptions): RemoteHostUplinkClient {
   validateConfiguration(options);
   const registrationTimeout = positive(options.registrationTimeoutMs ?? 5000);
@@ -344,6 +347,7 @@ export function createRemoteHostUplinkClient(options: RemoteHostUplinkClientOpti
       if (call.action === 'acknowledge' && (!teamInbox || !teamRecipients)) return Promise.reject(new Error('Update the Relay to support Team inbox acknowledgement before confirming these messages.'));
       if (!teamRecipients && (call.action === 'claim' || call.action === 'settle' && call.resolvedTarget)) return Promise.reject(new Error('Update the Relay to support exact Team recipients before dispatching or settling this delivery.'));
       if ((call.action.startsWith('resource_') || call.action === 'send' && call.resources?.length) && !teamResources) return Promise.reject(new Error('Team resources are unavailable on this Relay. Update the Relay or configure resource storage.'));
+      if (!callForSupport && callForSupportActions.has(call.action)) return Promise.reject(new Error('Update the Relay to use Call For Support.'));
       if (!sendTeam || closed || teamPending.size >= 32) return Promise.reject(new Error('Team transport is unavailable.'));
       const requestId = randomUUID();
       return new Promise((resolve, reject) => {

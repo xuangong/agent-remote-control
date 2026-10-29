@@ -273,4 +273,5 @@ it.each([[true, true], [true, false], [false, true]])('requests Call For Support
   closeables.push(()=>client.close());await client.ready;
   expect(new URL(endpoint,'http://localhost').searchParams.get('callForSupport')).toBe(requested?'1':null);
   expect(client.callForSupport).toBe(requested&&acknowledged);
+  if(!(requested&&acknowledged))await expect(client.teamRequest({action:'support_enablement'})).rejects.toThrow('Update the Relay to use Call For Support.');
 });

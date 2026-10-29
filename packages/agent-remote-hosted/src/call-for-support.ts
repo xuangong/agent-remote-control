@@ -433,6 +433,16 @@ export class CallForSupportGroups {
     });
     return this.broker.project(team);
   }
+  /** Which of a Host's sessions may call: explicit entries, resolved to the sessions that hold them now, and the default for the rest. */
+  enablement(hostId: string): { defaultEnabled: boolean; sessions: Array<{ providerId: string; nativeSessionId: string; enabled: boolean }> } {
+    this.ports.assertHost(hostId);
+    const state = this.ports.state();
+    const sessions = (state?.enablement ?? []).filter(entry => entry.hostId === hostId).flatMap(entry => {
+      try { const current = this.broker.ports.resolveSession(entry.hostId, entry.providerId, entry.nativeSessionId); return [{ providerId: current.providerId, nativeSessionId: current.nativeSessionId, enabled: entry.profileIds.length > 0 }]; }
+      catch { return []; }
+    });
+    return { defaultEnabled: !!state?.profiles.some(profile => profile.enableByDefault), sessions };
+  }
   /** The worker's own tool calls, made by its Controller on its behalf. */
   async workerCall(hostId: string, call: WorkerCall | Extract<TeamHostCall, { action: 'support_status' }>): Promise<unknown> {
     this.ports.assertHost(hostId);

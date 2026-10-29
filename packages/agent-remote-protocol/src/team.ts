@@ -105,6 +105,8 @@ export const TeamHostCall = Type.Union([
     operationId: id, roleId: Type.Optional(id), profileId: Type.Optional(id), ...CallForSupportCallInput.properties, followUpOf: Type.Optional(id), fresh: Type.Optional(Type.Boolean()) }, object),
   Type.Object({ action: Type.Literal('support_status'), worker: Type.Object({ providerId: id, nativeSessionId: NativeSessionRef.properties.nativeSessionId }, object),
     roleId: Type.Optional(id), callId: Type.Optional(id) }, object),
+  // Which of the calling Host's sessions may call for support.
+  Type.Object({ action: Type.Literal('support_enablement') }, object),
 ]);
 export type TeamHostCall = Static<typeof TeamHostCall>;
 export const TeamSeat = Type.Object({ teamId: id, source: TeamSource, member: TeamMember,

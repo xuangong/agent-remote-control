@@ -259,6 +259,10 @@ export function createHostBroker(options: HostBrokerOptions) {
       capable: hostId => hosts.get(hostId)?.callForSupport === 1,
       assertHost(hostId) { if (requireHost(hostId).callForSupport !== 1) throw new BrokerError(409, 'call_for_support_upgrade_required', 'Update the Controller to use Call For Support.'); },
       readOnly: (hostId, providerId) => !!hosts.get(hostId)?.providers.some(provider => provider.providerId === providerId && provider.readOnly),
+      async supportBundle(hostId, input) {
+        const result = await rpc(requireHost(hostId), 'POST', '/remote/team/support-bundle', undefined, JSON.stringify(input));
+        const value = JSON.parse(result.body); if (result.status !== 200) throw new Error(value.error ?? 'The support bundle failed.'); return value;
+      },
     },
   });
   function assertAssociationCapacity(state: BrokerAssociationState) {

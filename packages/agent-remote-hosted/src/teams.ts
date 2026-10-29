@@ -299,10 +299,12 @@ export class TeamBroker {
   }
   private async resourceCall(hostId: string, call: Extract<TeamHostCall, { action: `resource_${string}` }>, assertCurrent: () => void): Promise<unknown> {
     const store = this.ports.resources ?? fail('Team resource storage is unavailable on this Relay.');
+    // A member still being created may read what was granted to it, such as the bundle it starts from.
+    const reading = call.action === 'resource_metadata' || call.action === 'resource_read';
     const authorize = () => {
       assertCurrent();
       const team = find(this.ports.read(), call.teamId), self = member(team, call.memberId);
-      if (self.hostId !== hostId || self.creation !== 'ready') fail('This Host is not the registered Team member.');
+      if (self.hostId !== hostId || self.creation !== 'ready' && !(reading && (self.creation === 'reserved' || self.creation === 'unknown'))) fail('This Host is not the registered Team member.');
       if (team.callForSupport && this.ports.callForSupport?.capable(hostId) !== true) fail(callForSupportUpgrade);
       return {team,self};
     };

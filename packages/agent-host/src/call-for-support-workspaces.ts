@@ -1,5 +1,7 @@
 import { execFile } from 'node:child_process';
-import { mkdir, readFile, realpath, stat, writeFile } from 'node:fs/promises';
+import { randomUUID } from 'node:crypto';
+import { mkdir, mkdtemp, readFile, realpath, rm, stat, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
 import { dirname, join, relative, resolve, sep } from 'node:path';
 import { promisify } from 'node:util';
 
@@ -72,4 +74,40 @@ export async function removeWorktree(root: string, worktree: string): Promise<vo
   if (!resolve(worktree).startsWith(base)) throw new Error('Refusing to remove a directory outside the support worktrees.');
   if (await exists(worktree)) await git(root, ['worktree', 'remove', '--force', worktree]);
   await git(root, ['worktree', 'prune']);
+  // A remote supporter's fetched commit is kept reachable by its own ref.
+  const [teamId, memberId] = relative(base, resolve(worktree)).split(sep);
+  if (teamId && memberId) await git(root, ['update-ref', '-d', `refs/agent-remote/support/${teamId}/${memberId}`]).catch(() => undefined);
+}
+
+const BUNDLE_LIMIT = 50 * 1024 * 1024;
+
+/**
+ * A bundle of the commit for a remote supporter: only the commits after base when base is given, else the full history.
+ * The caller removes the returned directory.
+ */
+export async function createBundle(cwd: string, commit: string, base?: string): Promise<{ directory: string; file: string }> {
+  if (!COMMIT.test(commit) || base !== undefined && !COMMIT.test(base)) throw new Error('Invalid commit.');
+  const root = await repositoryRoot(cwd);
+  if (!await hasCommit(root, commit)) throw new Error(`Commit ${commit} is not in the repository at ${root}. Commit the work and call again.`);
+  if (base && !await hasCommit(root, base)) throw new Error(`Base ${base} is not in the repository at ${root}.`);
+  const ref = `refs/agent-remote/bundle/${randomUUID()}`, directory = await mkdtemp(join(tmpdir(), 'agent-remote-bundle-')), file = join(directory, 'support.bundle');
+  try {
+    await git(root, ['update-ref', ref, commit]);
+    // A base equal to the commit leaves nothing to send; the full history still lets the remote start there.
+    try { await git(root, ['bundle', 'create', file, base ? `${base}..${ref}` : ref]); }
+    catch (error) { if (!base) throw error; await git(root, ['bundle', 'create', file, ref]); }
+    if ((await stat(file)).size > BUNDLE_LIMIT) throw new Error('The bundle exceeds 50 MiB. Call with a base commit the remote repository has.');
+    return { directory, file };
+  } catch (error) { await rm(directory, { recursive: true, force: true }); throw error; }
+  finally { await git(root, ['update-ref', '-d', ref]).catch(() => undefined); }
+}
+
+/** Fetches a bundle into a repository under a ref that keeps its commit reachable for the supporter's worktree. */
+export async function fetchBundle(repository: string, file: string, teamId: string, memberId: string): Promise<void> {
+  worktreePath('/', teamId, memberId);
+  const root = await repositoryRoot(repository);
+  const heads = (await git(root, ['bundle', 'list-heads', file])).trim().split('\n').map(line => line.split(' ')[1]).filter((ref): ref is string => !!ref);
+  if (heads.length !== 1) throw new Error('The support bundle must name exactly one commit.');
+  try { await git(root, ['fetch', '--no-tags', file, `${heads[0]}:refs/agent-remote/support/${teamId}/${memberId}`]); }
+  catch (error) { throw new Error(`${error instanceof Error ? error.message : 'git fetch failed.'} If the repository lacks the base commit, call again without a base.`); }
 }

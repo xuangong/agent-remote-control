@@ -16,7 +16,9 @@ export type TeamSource = Static<typeof TeamSource>;
 export const TeamMemberWorkspace = Type.Union([
   Type.Object({ kind: Type.Literal('shared') }, object),
   Type.Object({ kind: Type.Literal('worktree'), commit: gitObject }, object),
-  Type.Object({ kind: Type.Literal('remote'), commit: gitObject, repository: Type.String({ minLength: 1, maxLength: 2048 }) }, object),
+  Type.Object({ kind: Type.Literal('remote'), commit: gitObject, repository: Type.String({ minLength: 1, maxLength: 2048 }),
+    /** The bundle of the commit the worker's Host uploaded, granted to this member. */
+    bundle: Type.Optional(id) }, object),
 ]);
 export type TeamMemberWorkspace = Static<typeof TeamMemberWorkspace>;
 export const TeamMember = Type.Object({

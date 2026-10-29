@@ -8,7 +8,8 @@ import type { SessionExecutionRouting } from './session-succession-service.js';
 import type { RoleSuccessionDecision, SessionRole } from './session-role-succession.js';
 import type { SessionCreation } from './role-session-creation.js';
 import { coordinatorInstructions, coordinatorTools, supporterInstructions } from './call-for-support-roles.js';
-import { prepareWorktree, removeWorktree } from './call-for-support-workspaces.js';
+import { createBundle, fetchBundle, prepareWorktree, removeWorktree } from './call-for-support-workspaces.js';
+import { rm } from 'node:fs/promises';
 import { isNativeSessionRef, nativeSessionRefKey, type NativeSessionRef, isTeam, isTeamSeat, sessionOperationAvailability, type Team, type TeamHostCall, type TeamMember, type TeamMessage, type TeamSeat } from '@orchardworks/agent-remote-protocol';
 import { OperationCacheError, type RemoteHostSessionLease, type SessionWireOperationExecutor } from '@orchardworks/agent-remote-relay';
 
@@ -158,9 +159,16 @@ export class TeamRuntime implements SessionRole {
       if (!seat.member.cwd) throw new Error('Source working directory is unavailable.');
     }
     let worktree: LocalSeat['worktree'];
-    if (seat.member.workspace?.kind === 'worktree') {
-      if (!seat.member.cwd) throw new Error('The worker\'s working directory is unknown.');
-      const prepared = await prepareWorktree(seat.member.cwd, seat.teamId, seat.member.id, seat.member.workspace.commit);
+    const workspace = seat.member.workspace;
+    if (workspace?.kind === 'worktree' || workspace?.kind === 'remote') {
+      if (!seat.member.cwd) throw new Error('The supporter\'s repository is unknown.');
+      // A remote supporter's repository first receives the commit from the bundle the worker's Host uploaded.
+      if (workspace.kind === 'remote') {
+        if (!workspace.bundle) throw new Error('The support bundle is missing.');
+        const bundle = await this.resourceFiles.download(seat.teamId, seat.member.id, workspace.bundle);
+        try { await fetchBundle(workspace.repository, bundle.localPath, seat.teamId, seat.member.id); } finally { await rm(bundle.localPath, { force: true }); }
+      }
+      const prepared = await prepareWorktree(workspace.kind === 'remote' ? workspace.repository : seat.member.cwd, seat.teamId, seat.member.id, workspace.commit);
       seat.member.cwd = prepared.cwd; worktree = { root: prepared.root, path: prepared.worktree };
     }
     const record: LocalSeat = { seat, creation: 'dispatching', receipts: Object.create(null), ...(worktree ? { worktree } : {}) };
@@ -171,6 +179,15 @@ export class TeamRuntime implements SessionRole {
       actual = this.anchor(seat);
       record.creation = 'ready'; seat.member.creation = 'ready'; seat.member.activity = 'unknown'; await this.save(); return seat.member;
     } catch (error) { record.creation = 'unknown'; seat.member.creation = 'unknown'; await this.save(); throw error; }
+  }
+  /** A bundle of a commit in the worker's repository, uploaded as the worker's seat for a remote supporter. */
+  async supportBundle(input: { teamId: string; memberId: string; commit: string; base?: string; operationId: string }): Promise<unknown> {
+    await this.ready;
+    const record = this.records.find(item => item.seat.teamId === input.teamId && item.seat.member.id === input.memberId && item.seat.member.role === 'requester' && item.creation === 'ready');
+    if (!record?.seat.member.cwd) throw new Error('The worker seat is not on this Host.');
+    const bundle = await createBundle(record.seat.member.cwd, input.commit, input.base);
+    try { return await this.resourceFiles.upload(input.teamId, input.memberId, bundle.file, input.operationId); }
+    finally { await rm(bundle.directory, { recursive: true, force: true }); }
   }
   /** A support group's worker seat binds the existing worker session and reports where it works. */
   private async bindWorker(seat: TeamSeat): Promise<TeamMember> {

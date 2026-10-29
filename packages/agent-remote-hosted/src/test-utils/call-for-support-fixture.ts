@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import type { CallForSupportProfileInput, TeamHostCall, TeamSeat } from '@orchardworks/agent-remote-protocol';
 import { TeamBroker, type TeamBrokerPorts } from '../teams.js';
 import { validSavedTeam, type SavedTeam } from '../team-delivery.js';
@@ -11,6 +12,7 @@ export function supportFixture(options: { capable?: string[]; readOnly?: boolean
   let teams: SavedTeam[] = [], now = 100;
   const state: CallForSupportState = emptyCallForSupportState();
   const seats: TeamSeat[] = [];
+  const bundles: Array<{ teamId: string; memberId: string; commit: string; base?: string; operationId: string }> = [];
   const resolve = (hostId: string, providerId: string, nativeSessionId: string) => ({ controllerId: hostId, providerId, nativeSessionId });
   const rows = new Map<string, Uint8Array>();
   const resources = new PortableTeamResourceStore({ storage: { async get(key) { return rows.get(key); }, async put(key, value) { rows.set(key, value); }, async delete(key) { rows.delete(key); },
@@ -28,6 +30,14 @@ export function supportFixture(options: { capable?: string[]; readOnly?: boolean
       capable: hostId => (options.capable ?? ['mac', 'linux']).includes(hostId),
       assertHost: hostId => { if (!(options.capable ?? ['mac', 'linux']).includes(hostId)) throw new Error('Update the Controller to use Call For Support.'); },
       readOnly: (hostId, providerId) => typeof options.readOnly === 'function' ? options.readOnly(hostId, providerId) : options.readOnly ?? true,
+      // The worker's Host uploads a bundle as the worker's seat.
+      async supportBundle(hostId, input) {
+        bundles.push(structuredClone(input));
+        const bytes = Buffer.from(`bundle ${input.commit} ${input.base ?? ''}`), seat = { teamId: input.teamId, memberId: input.memberId, operationId: input.operationId };
+        await broker.hostCall(hostId, { ...seat, action: 'resource_begin', name: 'support.bundle', mediaType: 'application/octet-stream', byteLength: bytes.length, sha256: createHash('sha256').update(bytes).digest('hex') });
+        await broker.hostCall(hostId, { ...seat, action: 'resource_chunk', offset: 0, contentBase64: bytes.toString('base64') });
+        return (await broker.hostCall(hostId, { ...seat, action: 'resource_finish' }) as { resource: unknown }).resource;
+      },
     },
   };
   const broker = new TeamBroker(ports);
@@ -36,5 +46,5 @@ export function supportFixture(options: { capable?: string[]; readOnly?: boolean
   const worker = (nativeSessionId = 'worker') => ({ providerId: 'codex', nativeSessionId, title: 'Implement login' });
   const call = (input: Partial<Extract<TeamHostCall, { action: 'call_for_support' }>> & { operationId: string }, hostId = 'mac') =>
     broker.hostCall(hostId, { action: 'call_for_support', worker: worker(), task: 'Review the change.', deliverable: 'findings', context: { commit: 'abcdef1' }, ...input } as TeamHostCall) as Promise<any>;
-  return { broker, ports, state, seats, profile, enable, call, worker, teams: () => teams, team: (id: string) => teams.find(team => team.id === id)! };
+  return { broker, ports, state, seats, bundles, profile, enable, call, worker, teams: () => teams, team: (id: string) => teams.find(team => team.id === id)! };
 }

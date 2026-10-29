@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto';
-import { CALL_FOR_SUPPORT_CALL_LIMIT, CALL_FOR_SUPPORT_GROUP_BYTES, CALL_FOR_SUPPORT_REPORT_BYTES, callForSupportReportBytes, nativeSessionRefKey, type CallForSupportCall,
+import { CALL_FOR_SUPPORT_CALL_LIMIT, CALL_FOR_SUPPORT_GROUP_BYTES, CALL_FOR_SUPPORT_REPORT_BYTES, callForSupportReportBytes, isTeamResource, nativeSessionRefKey, type CallForSupportCall,
   type CallForSupportCallInput, type CallForSupportGroup, type CallForSupportProfile, type CallForSupportReport, type CallForSupportRoster, type CallForSupportRosterMember, type Team,
   type TeamAction, type TeamHostCall, type TeamMember, type TeamResource, type TeamSource } from '@orchardworks/agent-remote-protocol';
 import { assertTeamQueueCapacity, type SavedTeam } from './team-delivery.js';
@@ -26,6 +26,8 @@ export interface CallForSupportPorts {
   assertHost(hostId: string): void;
   /** The provider enforces read-only sessions on the Host. */
   readOnly(hostId: string, providerId: string): boolean;
+  /** Asks the worker's Host to upload a bundle of the commit as the worker's seat. */
+  supportBundle(hostId: string, input: { teamId: string; memberId: string; commit: string; base?: string; operationId: string }): Promise<unknown>;
 }
 type WorkerCall = Extract<TeamHostCall, { action: 'call_for_support' }>;
 type CallResult = { status: 'accepted' | 'needs_approval' | 'unavailable'; message: string; callId?: string; roleId?: string };
@@ -376,10 +378,39 @@ export class CallForSupportGroups {
       team.revision++; team.updatedAt = now;
       return members.map(member => member.id);
     });
-    for (const memberId of added) await this.broker.provision(teamId, memberId);
+    for (const memberId of added) {
+      const member = this.broker.ports.read().find(team => team.id === teamId)?.members.find(item => item.id === memberId);
+      if (member?.workspace?.kind === 'remote' && !member.workspace.bundle) {
+        try { await this.attachBundle(teamId, memberId); }
+        catch (error) {
+          await this.broker.change(teams => { const target = teams.find(team => team.id === teamId)?.members.find(item => item.id === memberId);
+            if (target?.creation === 'reserved') { target.creation = 'unknown'; target.error = (error instanceof Error ? error.message : 'The support bundle failed.').slice(0, 2048); } });
+          continue;
+        }
+      }
+      await this.broker.provision(teamId, memberId);
+    }
     if (added.length) await this.broker.change(teams => {
       const team = teams.find(item => item.id === teamId)!, roster = team.callForSupport?.roster;
       if (roster?.id === rosterId && roster.status === 'approved') { roster.status = 'provisioned'; team.revision++; team.updatedAt = this.broker.ports.now(); }
+    });
+  }
+  /** A remote supporter starts from a bundle of the call's commit that the worker's Host uploads; only that supporter may read it. */
+  private async attachBundle(teamId: string, memberId: string): Promise<void> {
+    const team = this.broker.ports.read().find(item => item.id === teamId) ?? fail('Team not found.'), worker = requester(team);
+    const member = team.members.find(item => item.id === memberId)!, workspace = member.workspace as Extract<TeamMember['workspace'], { kind: 'remote' }>;
+    const base = group(team).calls.find(call => call.status === 'open')?.context?.base;
+    const resource = await this.ports.supportBundle(worker.hostId, { teamId, memberId: worker.id, commit: workspace.commit, ...(base ? { base } : {}), operationId: digest(['bundle', teamId, memberId]) });
+    if (!isTeamResource(resource)) throw new Error('Invalid support bundle.');
+    await this.broker.pinResources(teamId, worker.id, [resource.resourceId]);
+    await this.broker.change(teams => {
+      const current = teams.find(item => item.id === teamId) ?? fail('Team not found.'), target = current.members.find(item => item.id === memberId) ?? fail('Team member not found.');
+      this.broker.resource(current, worker.id, resource.resourceId);
+      const grants = current.resourceGrants ??= [];
+      let grant = grants.find(item => item.resourceId === resource.resourceId);
+      if (!grant) { grant = { resourceId: resource.resourceId, memberIds: [] }; grants.push(grant); }
+      if (!grant.memberIds.includes(memberId)) grant.memberIds.push(memberId);
+      if (target.workspace?.kind === 'remote') target.workspace = { ...target.workspace, bundle: resource.resourceId };
     });
   }
   /** The user's decisions on a group. */

@@ -54,7 +54,22 @@ it('creates worktree and remote supporters at the call\'s commit', async () => {
   const [fixer, tester] = g.supporters();
   expect(fixer).toMatchObject({ hostId: 'mac', cwd: '/repo', workspace: { kind: 'worktree', commit: 'abcdef1' } });
   expect(fixer).not.toHaveProperty('access');
-  expect(tester).toMatchObject({ hostId: 'linux', cwd: '/srv/repo', workspace: { kind: 'remote', commit: 'abcdef1', repository: '/srv/repo' } });
+  expect(tester).toMatchObject({ hostId: 'linux', cwd: '/srv/repo', creation: 'ready', workspace: { kind: 'remote', commit: 'abcdef1', repository: '/srv/repo', bundle: expect.any(String) } });
+  // The worker's Host made the bundle; only the remote supporter may read it, also while it is being created.
+  expect(g.bundles).toEqual([expect.objectContaining({ teamId: g.roleId, memberId: g.team(g.roleId).members[1]!.id, commit: 'abcdef1' })]);
+  const seat = g.seats.find(item => item.member.id === tester!.id)!;
+  expect(seat.member.workspace).toMatchObject({ kind: 'remote', bundle: (tester!.workspace as { bundle: string }).bundle });
+  const bundle = (tester!.workspace as { bundle: string }).bundle;
+  expect(await g.broker.hostCall('linux', { action: 'resource_metadata', teamId: g.roleId, memberId: tester!.id, resourceId: bundle })).toMatchObject({ resourceId: bundle, name: 'support.bundle' });
+  await expect(g.broker.hostCall('mac', { action: 'resource_metadata', teamId: g.roleId, memberId: fixer!.id, resourceId: bundle })).rejects.toThrow('not granted');
+});
+
+it('reports a remote supporter whose bundle failed as uncertain, with the reason', async () => {
+  const g = await group({ approval: 'within_mandate', workspaces: ['remote'], remoteHosts: [{ hostId: 'linux', workspace: '/srv/repo' }], supporters: [{ providerId: 'codex', model: 'gpt-5.5' }] });
+  g.ports.callForSupport!.supportBundle = async () => { throw new Error('git bundle failed: unknown revision'); };
+  await g.propose('r1', [{ ...opus, providerId: 'codex', model: 'gpt-5.5', name: 'Linux tester', workspace: 'remote', hostId: 'linux' }]);
+  expect(g.supporters()[0]).toMatchObject({ creation: 'unknown', error: 'git bundle failed: unknown revision' });
+  expect(g.seats.filter(seat => seat.member.role === 'member')).toEqual([]);
 });
 
 it('replaces a pending roster, tells the coordinator about a rejection and releases supporters', async () => {

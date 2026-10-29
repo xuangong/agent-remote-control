@@ -1,4 +1,7 @@
+import { execFileSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
+import { mkdtemp, realpath, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { expect, it } from 'vitest';
 import { reviewProfile, supportHarness } from './test-utils/call-for-support-harness.js';
@@ -144,4 +147,26 @@ it('creates a worktree supporter at the call\'s commit and removes its worktree 
     await h.runtime.tick();
     expect(existsSync(worktree)).toBe(false);
   } finally { await h.close(); }
+});
+
+it('starts a remote supporter in its repository from a bundle of the call\'s commit', async () => {
+  const h = await supportHarness();
+  const remote = await realpath(await mkdtemp(join(tmpdir(), 'cfs-remote-')));
+  execFileSync('git', ['-C', remote, 'init', '-q']);
+  try {
+    const profile = h.profile({ ...reviewProfile, mandate: { ...reviewProfile.mandate, supporters: [{ providerId: 'codex', model: 'gpt-5.5' }], workspaces: ['remote'], remoteHosts: [{ hostId: 'host', workspace: remote }] } });
+    h.enable([profile.id]);
+    const { roleId } = await h.call({ operationId: 'op-1', profileId: profile.id });
+    const coordinator = await h.runtime.extensions(h.ref('codex', h.team(roleId).members[0]!.nativeSessionId!));
+    expect(await run(coordinator, 'propose_roster', { operationId: 'roster', rationale: 'Linux.',
+      members: [{ name: 'Linux tester', responsibility: 'Run the tests.', providerId: 'codex', model: 'gpt-5.5', workspace: 'remote', hostId: 'host' }] })).toMatchObject({ status: 'provisioned' });
+    const supporter = h.team(roleId).members[2]!, worktree = join(remote, '.agent-remote', 'worktrees', roleId, supporter.id);
+    expect(supporter).toMatchObject({ creation: 'ready', cwd: worktree, workspace: { kind: 'remote', commit: h.commit, repository: remote } });
+    expect(execFileSync('git', ['-C', worktree, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim()).toBe(h.commit);
+    expect(h.git('for-each-ref', 'refs/agent-remote')).toBe('');
+    await run(coordinator, 'release_supporter', { target: supporter.id });
+    await h.runtime.tick();
+    expect(existsSync(worktree)).toBe(false);
+    expect(execFileSync('git', ['-C', remote, 'for-each-ref', 'refs/agent-remote'], { encoding: 'utf8' }).trim()).toBe('');
+  } finally { await h.close(); await rm(remote, { recursive: true, force: true }); }
 });

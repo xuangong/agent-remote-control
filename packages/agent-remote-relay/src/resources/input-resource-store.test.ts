@@ -31,12 +31,12 @@ describe('durable incoming resources',()=>{
   now=11;expect((await store.getMetadata('s',id)).byteLength).toBe(0); expect((await store.readChunk('s',id,0)).contentBase64).toBe('');
   await store.begin('s',{...empty,uploadId:'replacement',byteLength:4});
  });
- it('releases every resource and upload of a scope, pinned or not, after a restart too',async()=>{
+ it('keeps only resources and uploads of listed scopes, pinned or not, after a restart too',async()=>{
   const {directory,store}=await fixture(); const bytes=Buffer.from('bytes'), source=join(directory,'source.txt'); await writeFile(source,bytes);
   const id=(await store.importLocal('team:a',source,{uploadId:'pinned'})).resourceId;
   await store.pin('team:a',id); await store.begin('team:a',{uploadId:'partial',name:'p',mediaType:'text/plain',byteLength:bytes.length,sha256:sha(bytes)});
   const other=(await store.importLocal('team:b',source,{uploadId:'other'})).resourceId;
-  await store.release('team:a');
+  await store.retain(()=>['team:b']);
   await expect(store.getMetadata('team:a',id)).rejects.toThrow();
   const restored=new InputResourceStore({directory});
   await expect(restored.getMetadata('team:a',id)).rejects.toThrow();

@@ -11,8 +11,8 @@ export interface TeamResourceStore {
   getMetadata(scope: string, resourceId: string): Promise<TeamResource>;
   readChunk(scope: string, resourceId: string, offset: number): Promise<TeamResource & { offset: number; contentBase64: string }>;
   pin(scope: string, resourceId: string): Promise<void>;
-  /** Deletes every resource of the scope, pinned or not. */
-  release(scope: string): Promise<void>;
+  /** Deletes every resource, pinned or not, whose scope is not listed; the list is read when the deletion runs. */
+  retain(scopes: () => Iterable<string>): Promise<void>;
 }
 /** Keys are opaque. Each value fits within a Durable Object storage value limit. */
 export interface TeamResourceStorage {
@@ -107,5 +107,5 @@ export class PortableTeamResourceStore implements TeamResourceStore {
     return {...metadata(value),offset,contentBase64:Buffer.from(bytes).toString('base64')};
   });}
   pin(scope:string,resourceId:string):Promise<void>{return this.serial(async()=>{const value=await this.resource(scope,resourceId);value.pinned=true;await this.persist(value);});}
-  release(scope:string):Promise<void>{return this.serial(async()=>{for(const item of await this.manifests())if(item.scopeHash===hash(scope))await this.remove(item);});}
+  retain(scopes:()=>Iterable<string>):Promise<void>{return this.serial(async()=>{const kept=new Set([...scopes()].map(scope=>hash(scope)));for(const item of await this.manifests())if(!kept.has(item.scopeHash))await this.remove(item);});}
 }

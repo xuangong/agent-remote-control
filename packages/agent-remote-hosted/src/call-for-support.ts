@@ -16,8 +16,6 @@ export interface CallForSupportBrokerPorts {
   resource(team: SavedTeam, memberId: string, resourceId: string): TeamResource;
   /** Verifies stored bytes; keep pins them for as long as their Team exists. */
   pinResources(teamId: string, memberId: string, resourceIds: string[], keep?: boolean): Promise<void>;
-  /** Deletes the stored resources of a Team that no longer exists. */
-  releaseResources(teamId: string): Promise<void>;
 }
 /** The account and Host facts groups depend on. */
 export interface CallForSupportPorts {
@@ -38,6 +36,8 @@ type CallResult = { status: 'accepted' | 'needs_approval' | 'unavailable'; messa
 interface GroupCall extends CallForSupportCallInput { id: string; followUpOf?: string; origin: CallForSupportCall['origin'] }
 
 export const CALL_FOR_SUPPORT_TEAM_LIMIT = 128;
+/** Archived groups are removed above this size of the account's Team state, which may not exceed 2 MiB, so active Teams keep room to grow. */
+export const CALL_FOR_SUPPORT_RETENTION_BYTES = 1536 * 1024;
 const TEAM_MEMBER_LIMIT = 12;
 const WAITING_CALL_LIMIT = 8;
 const fail = (message: string): never => { throw new Error(message); };
@@ -196,16 +196,24 @@ export function workerGroup(teams: SavedTeam[], resolve: TeamBrokerPorts['resolv
   });
 }
 
+const oldestArchivedGroup = (teams: SavedTeam[]) => teams.filter(team => team.callForSupport && team.status === 'archived')
+  .reduce<SavedTeam | undefined>((found, team) => !found || team.updatedAt < found.updatedAt ? team : found, undefined);
+
 /**
- * Makes room for one more Team. At capacity the oldest archived support group is removed: groups are created automatically and
- * nothing else would remove them. Returns its ID, whose stored resources the caller releases once the change is committed.
+ * Makes room for one more Team. At the Team limit the oldest archived support group is removed: groups are created automatically
+ * and nothing else would remove them. Ordinary Teams are never removed.
  */
-export function admitTeam(teams: SavedTeam[]): string | undefined {
-  if (teams.length < CALL_FOR_SUPPORT_TEAM_LIMIT) return undefined;
-  const oldest = teams.filter(team => team.callForSupport && team.status === 'archived')
-    .reduce<SavedTeam | undefined>((found, team) => !found || team.updatedAt < found.updatedAt ? team : found, undefined) ?? fail('Team capacity reached.');
+export function admitTeam(teams: SavedTeam[]): void {
+  if (teams.length < CALL_FOR_SUPPORT_TEAM_LIMIT) return;
+  const oldest = oldestArchivedGroup(teams) ?? fail('Team capacity reached.');
   teams.splice(teams.indexOf(oldest), 1);
-  return oldest.id;
+}
+
+/** Removes the oldest archived support groups while the Team state is larger than the retention bound. */
+export function pruneArchivedGroups(teams: SavedTeam[]): void {
+  for (let oldest = oldestArchivedGroup(teams); oldest && Buffer.byteLength(JSON.stringify(teams)) > CALL_FOR_SUPPORT_RETENTION_BYTES; oldest = oldestArchivedGroup(teams)) {
+    teams.splice(teams.indexOf(oldest), 1);
+  }
 }
 
 /** A new group for a worker: the coordinator as Leader, then the worker's seat, then the first call. */
@@ -238,7 +246,6 @@ export class CallForSupportGroups {
     const coordinatorProviderId = profile.coordinator.providerId ?? input.source.providerId;
     this.broker.ports.assertHost(input.source.hostId, coordinatorProviderId);
     if (!this.ports.readOnly(input.source.hostId, coordinatorProviderId)) fail('The coordinator\'s provider cannot run read-only sessions on the worker\'s Host.');
-    let removed: string | undefined;
     const result = await this.broker.change(teams => {
       const now = this.broker.ports.now();
       const created = teams.find(team => team.operationId === input.operationId);
@@ -249,12 +256,11 @@ export class CallForSupportGroups {
       const current = workerGroup(teams, this.broker.ports.resolveSession, input.source.hostId, input.source, team => team.callForSupport?.profileId === profile.id);
       if (current && !input.fresh) return { team: current, call: addCall(current, { ...input.call, id: callForSupportCallId(current.id, input.operationId), origin: input.origin }, now), created: false };
       if (current) { current.status = 'archiving'; for (const message of current.messages) if (message.status === 'queued') message.status = 'canceled'; current.revision++; current.updatedAt = now; }
-      removed = admitTeam(teams);
+      admitTeam(teams);
       const team = newGroup({ operationId: input.operationId, source: input.source, profile, coordinatorProviderId }, now);
       teams.push(team);
       return { team, call: addCall(team, { ...input.call, id: callForSupportCallId(team.id, input.operationId), origin: input.origin }, now), created: true };
     });
-    if (removed) await this.broker.releaseResources(removed);
     if (!result.created) return { team: this.broker.project(result.team), call: result.call };
     return { team: await this.provision(result.team.id), call: result.call };
   }

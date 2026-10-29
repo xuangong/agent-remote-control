@@ -3,6 +3,7 @@ import { once } from 'node:events';
 import { afterEach, expect, test } from 'vitest';
 import { WebSocket, WebSocketServer } from 'ws';
 import { CALL_FOR_SUPPORT_GROUP_BYTES, type TeamHostCall } from '@orchardworks/agent-remote-protocol';
+import { CALL_FOR_SUPPORT_RETENTION_BYTES } from './call-for-support.js';
 import { relaySocket } from '../../agent-remote-lab/src/server/remote-host-broker.js';
 import { createHostBroker, type RemoteHostBrokerState } from './broker.js';
 import { validSavedTeam, type SavedTeam } from './team-delivery.js';
@@ -106,3 +107,28 @@ test('takes read-only providers from the Call For Support request, not from prov
   expect(await propose(await connectedBroker([structuredClone(team)], capable))).toMatchObject({ status: 409, value: { error: expect.stringContaining('cannot run read-only sessions') } });
   expect(await propose(await connectedBroker([structuredClone(team)], `${capable}&readOnlyProvider=codex`))).toMatchObject({ status: 200 });
 });
+
+test('removes the oldest archived groups when Team state nears its bound, so active Teams keep growing', async () => {
+  const teams: SavedTeam[] = [];
+  while (Buffer.byteLength(JSON.stringify([...teams, fullGroup(`group-${teams.length}`)])) <= 2 * 1024 * 1024 - 64 * 1024) teams.push(fullGroup(`group-${teams.length}`));
+  // All but the first group are archived history, oldest first.
+  teams.forEach((team, index) => { if (index) Object.assign(team, { status: 'archived', updatedAt: index }); });
+  teams[0]!.callForSupport!.ledger.text = 'short';
+  // An ordinary Team's pending messages bring the state within 1000 bytes of the bound; it is never removed.
+  const plain = fullGroup('plain', true); teams.push(plain);
+  const message = (index: number, length: number) => ({ id: `pad-${index}`, from: 'coordinator', to: 'helper', text: 'x'.repeat(length), status: 'queued' as const, createdAt: 1 });
+  for (let index = 0; ; index++) {
+    const spare = 2 * 1024 * 1024 - 1000 - Buffer.byteLength(JSON.stringify(teams)) - Buffer.byteLength(JSON.stringify(message(index, 0))) - 1;
+    if (spare <= 0) break;
+    plain.messages.push(message(index, Math.min(16000, spare)));
+  }
+  // Without removing archived groups, a full ledger would cross the bound.
+  expect(Buffer.byteLength(JSON.stringify(teams))).toBeLessThanOrEqual(2 * 1024 * 1024);
+  expect(Buffer.byteLength(JSON.stringify(teams)) + 16000).toBeGreaterThan(2 * 1024 * 1024);
+  const f = await connectedBroker(teams, capable);
+  expect((await f.call({ action: 'write_ledger', teamId: 'group-0', memberId: 'coordinator', revision: 1, text: 'l'.repeat(16000) })).value).toEqual({ revision: 2 });
+  const kept = f.snapshot();
+  expect(Buffer.byteLength(JSON.stringify(kept))).toBeLessThanOrEqual(CALL_FOR_SUPPORT_RETENTION_BYTES);
+  expect(kept.map(team => team.id)).toEqual(expect.arrayContaining(['group-0', 'plain', `group-${teams.length - 2}`]));
+  expect(kept.some(team => team.id === 'group-1')).toBe(false);
+}, 15000);

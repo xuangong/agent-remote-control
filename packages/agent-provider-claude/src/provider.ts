@@ -21,7 +21,7 @@ export interface ClaudeAgentProviderOptions extends ClaudeSessionOptions { catal
 export class ClaudeAgentProvider implements AgentProviderAdapter {
   /** Ordinary create supplies a nonempty UUID; this does not bound resume, fork, or history. */
   readonly createdSessionIdMaxLength: number = 36;
-  readonly descriptor = { providerId: 'claude', displayName: 'Claude Code', sessionExtensions: { instructions: true, tools: true } };
+  readonly descriptor = { providerId: 'claude', displayName: 'Claude Code', sessionExtensions: { instructions: true, tools: true }, sessionAccess: { readOnly: true as const } };
   readonly nativeEvidence: AgentProviderNativeEvidence = {
     availability: () => ({ status: 'configured', version: 2 }),
     createEmpty: async config => {
@@ -149,7 +149,9 @@ export class ClaudeAgentProvider implements AgentProviderAdapter {
       if (descriptor && cwd !== descriptor.cwd) claudeEvidenceReject('native_evidence_stale');
       if (!cwd) throw new Error('Claude session workspace is unavailable.');
       const messages = info ? await (this.catalog.timelineMessages?.(sessionId) ?? this.catalog.messages(sessionId)) : [];
-      session = await ClaudeAgentSession.open({ ...stored, ...extensions, sessionId, cwd: await workspace(cwd) },
+      // Read-only access persists: a session that was read-only stays so whatever its next attachment supplies.
+      const access = extensions.access ?? stored.access;
+      session = await ClaudeAgentSession.open({ ...stored, ...extensions, ...(access ? { access } : {}), sessionId, cwd: await workspace(cwd) },
         { ...this.options, catalog: this.catalog, emptyDescriptor: Boolean(descriptor), restoreNativeModel: Boolean(descriptor && info), onDispose: () => {
           if (session && this.sessions.get(sessionId) === session) this.sessions.delete(sessionId);
         } }, messages, Boolean(info));
@@ -238,5 +240,6 @@ function readConfig(opaque: string): Partial<ClaudeSessionConfig> {
   for (const key of ['cwd', 'model', 'reasoningEffort', 'systemPrompt', 'instructions'] as const) if (typeof value[key] === 'string') config[key] = value[key];
   if (typeof value.planning === 'boolean') config.planning = value.planning;
   if (isResumableClaudePermissionMode(value.permissionMode)) config.permissionMode = value.permissionMode;
+  if (value.access === 'read_only') config.access = 'read_only';
   return config;
 }

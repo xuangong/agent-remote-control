@@ -47,12 +47,13 @@ export function readClaudeEmptyDescriptor(handle: AgentPersistenceHandle, option
     || typeof value.cwd !== 'string' || !value.cwd || value.cwd.includes('\0') || !value.config || typeof value.config !== 'object'
     || value.config.sessionId !== handle.sessionId || value.config.cwd !== value.cwd
     || !same(value.authority, claudeAuthority(handle.sessionId, value.cwd, options))) claudeEvidenceReject('native_evidence_stale');
-  const fields = ['sessionId', 'cwd', 'model', 'reasoningEffort', 'systemPrompt', 'instructions', 'planning', 'permissionMode'];
+  const fields = ['sessionId', 'cwd', 'model', 'reasoningEffort', 'systemPrompt', 'instructions', 'planning', 'permissionMode', 'access'];
   if (Object.keys(value).some(key => !['version', 'kind', 'sessionId', 'cwd', 'authority', 'config'].includes(key))
     || Object.keys(value.config).some(key => !fields.includes(key))) claudeEvidenceReject('native_evidence_invalid');
   for (const key of ['model', 'reasoningEffort', 'systemPrompt', 'instructions']) if (value.config[key] !== undefined && typeof value.config[key] !== 'string') claudeEvidenceReject('native_evidence_invalid');
   if (value.config.planning !== undefined && typeof value.config.planning !== 'boolean') claudeEvidenceReject('native_evidence_invalid');
   if (value.config.permissionMode !== undefined && !isResumableClaudePermissionMode(value.config.permissionMode)) claudeEvidenceReject('native_evidence_invalid');
+  if (value.config.access !== undefined && value.config.access !== 'read_only') claudeEvidenceReject('native_evidence_invalid');
   return value;
 }
 

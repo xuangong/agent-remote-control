@@ -32,6 +32,17 @@ export function claudeSandbox(mode: PermissionMode, restricted: boolean): NonNul
   return restricted ? CLAUDE_RESTRICTED_SANDBOX : null;
 }
 
+/**
+ * A read-only session: no edit or planning tools, and commands run in a required sandbox that denies writes to the
+ * workspace. Nothing asks; reads and scratch writes outside the workspace work. Verified with Claude Code 2.1.247;
+ * planning alone is not enough, because it relies on approvals rather than the sandbox.
+ */
+export function claudeReadOnlyOptions(cwd: string) {
+  return { permissionMode: 'dontAsk' as const, allowDangerouslySkipPermissions: false,
+    disallowedTools: ['Write', 'Edit', 'MultiEdit', 'NotebookEdit', 'EnterPlanMode', 'ExitPlanMode'],
+    sandbox: { ...CLAUDE_RESTRICTED_SANDBOX, autoAllowBashIfSandboxed: true, filesystem: { denyWrite: [cwd] } } } satisfies Options;
+}
+
 /** The native runtime requires this acknowledgement before it accepts the bypass mode. */
 export const CLAUDE_ALLOWS_BYPASS_PERMISSIONS = CLAUDE_PERMISSION_MODES.some(mode => mode.value === 'bypassPermissions');
 

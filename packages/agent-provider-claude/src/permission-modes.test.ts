@@ -1,5 +1,5 @@
 import { expect, it } from 'vitest';
-import { CLAUDE_PERMISSION_MODES, claudePermissionModeOptions, isResumableClaudePermissionMode } from './permission-modes.js';
+import { CLAUDE_PERMISSION_MODES, claudePermissionModeOptions, claudeReadOnlyOptions, isResumableClaudePermissionMode } from './permission-modes.js';
 
 it('offers every table mode in presentation order and labels the bypass mode YOLO', () => {
   const options = claudePermissionModeOptions('default');
@@ -22,4 +22,10 @@ it('resumes every known mode except planning', () => {
   expect(isResumableClaudePermissionMode('plan')).toBe(false);
   expect(isResumableClaudePermissionMode('auto')).toBe(false);
   expect(isResumableClaudePermissionMode(undefined)).toBe(false);
+});
+
+it('builds read-only options that remove edit and planning tools and deny workspace writes in a required sandbox', () => {
+  expect(claudeReadOnlyOptions('/w')).toEqual({ permissionMode: 'dontAsk', allowDangerouslySkipPermissions: false,
+    disallowedTools: ['Write', 'Edit', 'MultiEdit', 'NotebookEdit', 'EnterPlanMode', 'ExitPlanMode'],
+    sandbox: { enabled: true, failIfUnavailable: true, allowUnsandboxedCommands: false, autoAllowBashIfSandboxed: true, filesystem: { denyWrite: ['/w'] } } });
 });

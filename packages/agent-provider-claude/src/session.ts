@@ -17,7 +17,7 @@ import { ClaudeChildren } from './children.js';
 import { createClaudeCatalog, type ClaudeCatalog, type ClaudeTimelineMessage } from './catalog.js';
 import { createClaudeSessionTools } from './session-tools.js';
 import { ClaudeNativeEvidence, claudeEmptyHandle } from './native-evidence.js';
-import { CLAUDE_ALLOWS_BYPASS_PERMISSIONS, claudePermissionModeOptions, claudeSandbox, isResumableClaudePermissionMode, type ResumableClaudePermissionMode } from './permission-modes.js';
+import { CLAUDE_ALLOWS_BYPASS_PERMISSIONS, claudePermissionModeOptions, claudeReadOnlyOptions, claudeSandbox, isResumableClaudePermissionMode, type ResumableClaudePermissionMode } from './permission-modes.js';
 
 export type ClaudeQuery = AsyncIterable<SDKMessage> & Pick<Query, 'initializationResult' | 'setPermissionMode' | 'close' | 'supportedCommands' | 'reloadSkills' | 'supportedModels' | 'setModel'> & Partial<Pick<Query, 'applyFlagSettings' | 'getContextUsage'>> & {
   /** The pinned SDK implements this control without declaring it on public Query. */
@@ -27,6 +27,7 @@ export type ClaudeQuery = AsyncIterable<SDKMessage> & Pick<Query, 'initializatio
 };
 /** Native capabilities that make input during a turn observable and stoppable. */
 const STEER_CAPABILITIES = ['msg_lifecycle_v1', 'interrupt_cancel_queued_v1'] as const;
+const READ_ONLY_PERMISSIONS = 'This session is read-only; its permissions cannot change.';
 export interface ClaudeSessionOptions {
   executable?: string;
   /** Adapter-owned descriptor, only supplied after provider validation. */
@@ -111,6 +112,7 @@ export class ClaudeAgentSession implements AgentSession {
   private failure: Error | undefined;
   private native!: ClaudeQuery;
   private hostTools?: ReturnType<typeof createClaudeSessionTools>;
+  private get readOnly(): boolean { return this.config.access === 'read_only'; }
   private readonly process: ClaudeNativeProcess;
   private closing?: Promise<void>;
   private pump!: Promise<void>;
@@ -122,9 +124,11 @@ export class ClaudeAgentSession implements AgentSession {
     this.process = new ClaudeNativeProcess(options.onDiagnostic);
     this.timeout = options.requestTimeoutMs ?? 15_000;
     if (!Number.isFinite(this.timeout) || this.timeout <= 0) throw new Error('Claude request timeout must be positive.');
-    this.planning = config.planning ?? false;
+    // A read-only session never plans and keeps the mode its read-only options set.
+    if (this.readOnly) this.capabilities = { ...this.capabilities, planning: false, interactions: { ...this.capabilities.interactions, planApproval: false } };
+    this.planning = !this.readOnly && (config.planning ?? false);
     // The owner's last confirmed mode is kept on restricted Hosts too; YOLO there also lifts the sandbox.
-    this.resumePermissionMode = isResumableClaudePermissionMode(config.permissionMode) ? config.permissionMode : 'default';
+    this.resumePermissionMode = this.readOnly ? 'dontAsk' : isResumableClaudePermissionMode(config.permissionMode) ? config.permissionMode : 'default';
     this.storedPermissionMode = this.resumePermissionMode;
     this.permissionMode = this.planning ? 'plan' : this.resumePermissionMode;
     this.images = new ClaudeImageRegistry(config.sessionId);
@@ -167,7 +171,8 @@ export class ClaudeAgentSession implements AgentSession {
     try {
       if (config.tools?.length) session.hostTools = createClaudeSessionTools(config.tools, () => session.requireOpen());
       if (resume) await session.children.restore();
-      const sandbox = claudeSandbox(session.permissionMode, !!options.restrictedNative);
+      const readOnly = session.readOnly ? claudeReadOnlyOptions(config.cwd ?? process.cwd()) : undefined;
+      const sandbox = readOnly?.sandbox ?? claudeSandbox(session.permissionMode, !!options.restrictedNative);
       session.sandbox = JSON.stringify(sandbox);
       session.native = (options.query ?? query)({ prompt: session.input, options: {
         ...(resume ? { resume: config.sessionId } : { sessionId: config.sessionId }), cwd: config.cwd,
@@ -182,6 +187,7 @@ export class ClaudeAgentSession implements AgentSession {
         permissionMode: session.permissionMode, allowDangerouslySkipPermissions: CLAUDE_ALLOWS_BYPASS_PERMISSIONS, canUseTool: session.interactions.request,
         hooks: { Stop: [{ hooks: [async input => { if (input.hook_event_name === 'Stop') session.nativeEvidence.noteStop(input); return {}; }] }] },
         stderr: options.onDiagnostic, spawnClaudeCodeProcess: session.process.spawn,
+        ...readOnly,
       } });
       session.pump = session.consume();
       const initialized = await deadline(session.native.initializationResult(), session.timeout, 'Claude initialization');
@@ -372,6 +378,7 @@ export class ClaudeAgentSession implements AgentSession {
 
   async setSessionSetting(id: string, value: string): Promise<void | { status: 'deferred' }> {
     this.requireOpen();
+    if (this.readOnly && id === 'permissions') throw new AgentOperationRejectedError('operation_rejected', READ_ONLY_PERMISSIONS);
     if (this.changingSetting || this.preparingMessage) return { status: 'deferred' };
     this.changingSetting = true;
     try {
@@ -403,6 +410,7 @@ export class ClaudeAgentSession implements AgentSession {
 
   async setPlanning(active: boolean): Promise<void> {
     this.requireOpen();
+    if (this.readOnly) throw new AgentOperationRejectedError('operation_rejected', READ_ONLY_PERMISSIONS);
     if (this.inputPending() || this.changingSetting || this.preparingMessage) throw new AgentOperationRejectedError('operation_rejected', 'Claude planning can only change while idle.');
     this.changingSetting = true;
     try {
@@ -413,6 +421,7 @@ export class ClaudeAgentSession implements AgentSession {
 
   /** The sandbox is lifted only after YOLO is confirmed and restored before any other mode applies. */
   private async updatePermissionMode(mode: PermissionMode): Promise<void> {
+    if (this.readOnly) throw new AgentOperationRejectedError('operation_rejected', READ_ONLY_PERMISSIONS);
     if (mode !== 'bypassPermissions') await this.applySandbox(mode);
     await this.updateNative(this.native.setPermissionMode(mode), 'Claude permission update');
     if (this.disposed) throw new Error('Claude closed before permission confirmation.');
@@ -444,7 +453,8 @@ export class ClaudeAgentSession implements AgentSession {
   }
   private rememberPermissionMode(): void {
     const store = this.options.permissionModes, mode = this.resumePermissionMode;
-    if (!store || mode === this.storedPermissionMode) return;
+    // A read-only session's mode belongs to its access, not to its owner's last choice.
+    if (!store || this.readOnly || mode === this.storedPermissionMode) return;
     this.storedPermissionMode = mode;
     this.permissionModeWrites = this.permissionModeWrites.then(() => store.write(this.config.sessionId, mode)).catch(() => {
       this.options.onDiagnostic?.('Claude permission mode could not be saved; a reopened session may start in its previous mode.');
@@ -484,8 +494,8 @@ export class ClaudeAgentSession implements AgentSession {
       options: this.models.map((model) => ({ value: model.value, label: model.displayName, description: model.description })),
       mutable: true, scope: 'session' },
     { id: 'permissions', category: 'permissions', label: 'Permissions', value: this.permissionMode,
-      options: claudePermissionModeOptions(this.permissionMode),
-      mutable: true, scope: 'session' }];
+      options: this.readOnly ? [{ value: this.permissionMode, label: 'Read-only' }] : claudePermissionModeOptions(this.permissionMode),
+      mutable: !this.readOnly, scope: 'session' }];
     const metadata = this.models.find(entry => entry.value === model || entry.resolvedModel === model);
     if (metadata?.supportsEffort && metadata.supportedEffortLevels?.length && this.appliedEffort !== undefined && this.native.applyFlagSettings && this.native.getSettings) {
       settings.push({ id: 'reasoning_effort', category: 'model', label: 'Reasoning effort',

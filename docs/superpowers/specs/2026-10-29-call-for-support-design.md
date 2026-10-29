@@ -87,6 +87,14 @@ Found while planning the Relay work (2026-10-29); they refine the sections below
 - Models in profiles are entered as text; a Controller refuses a model its provider does not know when it creates the session.
 - A report is at most 24 KiB of JSON. A group's Call For Support state is compacted to 64 KiB: evidence of all but the latest reported call first, then findings of the oldest reported calls, then the oldest reported calls.
 
+Found in the release review (2026-10-29):
+
+- Read-only providers travel as `readOnlyProvider` query parameters with `callForSupport=1`, not in provider descriptors: Relays before Call For Support validate descriptors strictly and would refuse an updated Controller.
+- Idle release applies to support groups only. Ordinary Teams keep every member held, because the user drives those sessions and only a held runtime reports their presence.
+- An archived group is final; Restore is refused. At the 128-Team limit the oldest archived group is removed with its stored files. Controllers learn about archived and removed groups with `support_group_states` and forget their seats, which keeps their local seat capacity.
+- Bundles and collected patches are not pinned; they expire like other unattached uploads. A report pins what it attaches.
+- A supporter's worktree is removed at once when its creation fails, and is reused or patched only where the path is its own git top level.
+
 ## Built on Team
 
 Team already provides most of a support group:
@@ -316,7 +324,7 @@ Idle runtimes are released by the Host. A delivery resumes the same native sessi
 The requester seat follows the worker's role succession, as members do. Reports go to the current worker session; its tools are re-injected on attach. Supporters are unchanged.
 
 ### Archive
-Archiving a group follows today's Team archive and removes its worktrees. `fresh` archives the previous group of the role.
+Archiving a group follows today's Team archive and removes its worktrees. `fresh` archives the previous group of the role. An archived group is not restored (see Refinements).
 
 ## Failure modes
 
@@ -337,7 +345,8 @@ Archiving a group follows today's Team archive and removes its worktrees. `fresh
 
 - Protocol additions are optional fields and new union members, guarded by the `callForSupport` capability for Controllers. The website and Relay deploy together.
 - Order: deploy the website (Relay accepts profiles and groups, hides groups from hosts without the capability), then release the Controller, then update hosts.
-- Existing Teams: unchanged data and behavior, except the idle lease change, which only stops holding idle members' runtimes.
+- Existing Teams: unchanged data and behavior.
+- A Relay rollback to a version before Call For Support is safe only until the first group exists; after that, fix forward.
 
 ## Milestones
 

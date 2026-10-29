@@ -23,7 +23,8 @@
 
 - Milestones 1–7 and Tasks 8.1–8.2 are implemented and committed on `feat/call-for-support`.
 - Task 8.1 found a stall: a coordinator message steered into a Codex turn that was ending became `unknown`. Support group seats now deliver between turns, and the group view lets the user confirm an uncertain delivery. The native acceptance then passed 19 of 20 runs; the remaining failure did not reproduce in 20 further runs and its diagnostics are in the test's failure message.
-- Task 8.3: the verification gate runs before any outward step; deploying, merging and releasing wait for the user's go-ahead.
+- A release review found six risks, fixed in five commits: read-only providers no longer ride in provider descriptors (an older Relay refused updated Controllers); idle release is limited to support groups; archived groups are final and removed at capacity with their files, bundles are not pinned, and Controllers forget ended groups' seats; worktrees are verified before reuse and patching; failed supporters' worktrees are removed.
+- Task 8.3: the verification gate runs before any outward step; deploying, merging and releasing wait for the user's go-ahead. After deploying the website, check it before the first support group is created: a Relay rollback is safe only until then.
 
 ## File map
 
@@ -36,7 +37,7 @@
 | `packages/agent-provider-claude/src/session.ts`, `permission-modes.ts`, `session-tools.ts` | 1 | read-only options, permission lock, one MCP server per namespace, live `setMcpServers` |
 | `packages/agent-remote-protocol/src/team.ts` | 2 | Team additions and invariants |
 | `packages/agent-remote-protocol/src/call-for-support.ts` (new) | 2 | profile, mandate, call, report, roster schemas and validators |
-| `packages/agent-remote-protocol/src/remote-host-uplink.ts` | 2 | `callForSupport` capability, provider `readOnly` flag |
+| `packages/agent-remote-protocol/src/remote-host-uplink.ts` | 2 | `callForSupport` capability (read-only providers travel with the request) |
 | `packages/agent-remote-hosted/src/call-for-support-profiles.ts` (new) | 2 | per-account profiles and session enablement |
 | `packages/agent-remote-hosted/src/call-for-support.ts` (new) | 2 | group creation, calls, rosters, reports, usage, mandate validation |
 | `packages/agent-remote-hosted/src/teams.ts`, `team-delivery.ts`, `broker.ts`, `gateway.ts` | 2 | wiring, projection by capability, capacity, routes |

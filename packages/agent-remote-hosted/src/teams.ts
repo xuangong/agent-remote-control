@@ -21,6 +21,8 @@ const upgradeRequired = 'Update the Controller for exact Team recipients. Reload
 type StoredRecipientAnchor = Pick<TeamMember, 'hostId' | 'providerId' | 'nativeSessionId'>;
 const withoutRecipient = <T extends { id: string; resolvedTarget?: NativeSessionRef }>(value: T): Omit<T, 'resolvedTarget'> => { const { resolvedTarget: _target, ...legacy } = value; return legacy; };
 const fail = (message: string): never => { throw new Error(message); };
+const callForSupportHostActions = new Set<string>(['propose_roster', 'report_support', 'write_ledger', 'release_supporter', 'report_usage']);
+const callForSupportActions = new Set<string>(['call_for_support', 'resolve_roster', 'release_member', 'update_mandate', 'resume_group']);
 const sameRecipient = (current: NativeSessionRef, anchor: StoredRecipientAnchor) => current.providerId === anchor.providerId && current.nativeSessionId === anchor.nativeSessionId;
 const find = (teams: SavedTeam[], id: string) => teams.find(team => team.id === id) ?? fail('Team not found.');
 const member = (team: Team, id: string) => team.members.find(item => item.id === id) ?? fail('Team member not found.');
@@ -98,6 +100,7 @@ export class TeamBroker {
     const team = structuredClone(saved); compactTeamDeliveries(team, this.ports.now()); return this.project(team, recipientAware);
   }); }
   async create(input: TeamCreate): Promise<Team> {
+    if (input.callForSupport) fail('Call For Support is unavailable on this Relay.');
     this.ports.assertHost(input.source.hostId, input.source.providerId);
     const team = await this.change(teams => {
       const existing = teams.find(item => item.operationId === input.operationId);
@@ -113,6 +116,7 @@ export class TeamBroker {
     return this.provision(team.id, team.members[0]!.id);
   }
   async action(input: TeamAction): Promise<Team> {
+    if (callForSupportActions.has(input.action)) fail('Call For Support is unavailable on this Relay.');
     if (input.action === 'add_member') this.ports.assertHost(input.hostId, input.providerId);
     const result = await this.change(teams => {
       const team = find(teams, input.teamId), now = this.ports.now();
@@ -144,7 +148,8 @@ export class TeamBroker {
     if (!recipientAware && (call.action === 'claim' && call.expectedNativeSessionId !== undefined || call.action === 'settle' && call.resolvedTarget)) fail(upgradeRequired);
     if (call.action === 'poll') return this.ports.read().filter(team => team.status !== 'archived' && team.members.some(item => item.hostId === hostId && item.creation === 'ready')).map(team => this.project(team, recipientAware));
     const projectDelivery = <T extends { id: string; resolvedTarget?: NativeSessionRef }>(value: T) => recipientAware ? value : withoutRecipient(value);
-    if (call.action.startsWith('resource_')) return this.resourceCall(hostId, call, assertCurrent);
+    if (call.action === 'call_for_support' || call.action === 'support_status' || callForSupportHostActions.has(call.action)) return fail('Call For Support is unavailable on this Relay.');
+    if (call.action === 'resource_begin' || call.action === 'resource_chunk' || call.action === 'resource_finish' || call.action === 'resource_metadata' || call.action === 'resource_read') return this.resourceCall(hostId, call, assertCurrent);
     if (call.action === 'send' && call.resources?.length) await this.prepareResources(hostId,call,assertCurrent);
     return this.change(teams => {
       assertCurrent();
@@ -253,8 +258,7 @@ export class TeamBroker {
     }
     check();
   }
-  private async resourceCall(hostId: string, call: TeamHostCall, assertCurrent: () => void): Promise<unknown> {
-    if (call.action === 'poll') throw new Error('Invalid resource call.');
+  private async resourceCall(hostId: string, call: Extract<TeamHostCall, { action: `resource_${string}` }>, assertCurrent: () => void): Promise<unknown> {
     const store = this.ports.resources ?? fail('Team resource storage is unavailable on this Relay.');
     const authorize = () => {
       assertCurrent();

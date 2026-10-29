@@ -649,21 +649,32 @@ Milestone 3 exit: agent-host suite, Team suites, typecheck.
 
 ## Milestone 4: Worker tools
 
-Outcome: enabled sessions can call, list, read and download; tools are injected on attach and on enablement changes.
+Outcome: enabled sessions can call, list, read and download; tools are injected on attach, at creation and on enablement changes.
 
-### Task 4.1: Tool definitions
-- `call-for-support-tools.ts`: `call_for_support`, `support_status`, `read_support_report`, `download_support_resource` with the spec's schemas; results as compact JSON; `unavailable` when not enabled.
-- Tests: schemas, each result shape, disabled behavior.
+Decisions:
+- The Controller learns enablement by polling the Relay (`support_enablement` host call): the explicit entries for its sessions, resolved to the sessions that hold them now, and whether any profile is enabled by default.
+- Worker tools go only to sessions without a role (no Team or TPM seat); a worker's requester seat carries no role, so the worker keeps them.
+- Codex (`toolNamespaces: 'creation'`): the `agent_remote` namespace is declared on every Controller-created thread that has no role (website creation, handoff successors, prompt-edit branches), direct when the session is enabled at creation and deferred otherwise; attachments rebind its executors. Claude (`'live'`): the namespace is present only while enabled, and changes are applied with `updateToolNamespaces` on live attachments.
+- No separate enablement note is sent: it would start a turn on an idle worker. Tool and namespace descriptions say when to call; the website's call path always works. (Spec refinement.)
 
-### Task 4.2: Injection and enablement
-- `host.ts`: on attach of any session, compute the `agent_remote` namespace (Claude: only when enabled; Codex: always declared on Controller-created threads, deferred unless enabled at creation) and pass it in extensions; on an enablement change from the Relay (pushed through the uplink as a Team poll field or a new control message), call `updateToolNamespaces` on attached sessions and queue the enablement note to the worker.
-- Tests: Claude live add and remove, Codex declaration at creation and executor rebinding, note delivery once per enablement.
+### Task 4.1: Enablement feed
+**Files:** `packages/agent-remote-protocol/src/team.ts` (`TeamHostCall` `support_enablement`), `packages/agent-remote-hosted/src/call-for-support.ts` + test.
+- `{ action: 'support_enablement' }` → `{ defaultEnabled: boolean; sessions: Array<{ providerId; nativeSessionId; enabled: boolean }> }` for the calling Host, entries resolved through role succession.
+- Tests: explicit entries on and off, defaults, entries of other Hosts omitted, a handed-off session reported as its successor.
 
-### Task 4.3: Requester host calls
-- The tools issue `call_for_support`/`support_status` host calls with the worker's seat; `read_support_report` reads from the group; `download_support_resource` uses Team resource download into a verified local path.
-- Tests: end-to-end against a fake broker: call accepted, status, report read with and without `findingId`, download verification.
+### Task 4.2: Worker tools
+**Files:** create `packages/agent-host/src/call-for-support-worker.ts` + test.
+- `WorkerSupport` (ports: `request`, `available`, resource files): polls enablement on its own interval while the Relay acknowledged Call For Support; `enabled(ref)`; `namespace(actual, deferred)` returning `agent_remote` with `call_for_support`, `support_status`, `read_support_report`, `download_support_resource`.
+- Tools: `call_for_support` and `support_status` forward to the Relay with the worker's current session; `read_support_report` reads the call through `support_status` and returns the report or one finding with its evidence; `download_support_resource` checks the resource belongs to the call's report and downloads it through the worker seat with Team resource files into a verified local path.
+- Tests: schemas; each tool against a support harness; unavailable answers while disabled; download verification.
 
-Milestone 4 exit: agent-host suite; native: a Claude session gains the tools on enablement and calls; a Codex session created enabled calls directly, one created disabled finds the tool by search after enablement.
+### Task 4.3: Injection
+**Files:** `packages/agent-host/src/host.ts`, `stdio-directory.ts` (`composeExtensions` keeps `access` and `toolNamespaces`), + `call-for-support-injection.test.ts`.
+- Extensions of a session = its role's extensions, else the worker namespace per provider capability (above); used on attach, for handoff successors created empty, for prompt-edit branches and for website creation (dispatch only, never in cached operation parameters).
+- On an enablement change, `updateToolNamespaces` on live attachments of `live` providers that hold no role.
+- Tests: Codex creation declares the namespace deferred or direct; Claude attach includes it only when enabled; an enablement change adds and removes it on a live Claude session; role sessions never get it; `composeExtensions` keeps the fields.
+
+Milestone 4 exit: agent-host suite and typecheck. Native Controller-level acceptance of the worker tools runs in Milestone 8.
 
 ---
 

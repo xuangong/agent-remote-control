@@ -258,3 +258,19 @@ it.each([true, false])('reports session states only to a Relay that acknowledged
   await client.close();
   expect(listeners.size).toBe(0);
 });
+
+it.each([[true, true], [true, false], [false, true]])('requests Call For Support only when asked and tracks the acknowledgement (requested=%s, acknowledged=%s)', async (requested, acknowledged) => {
+  const server = new WebSocketServer({host:'127.0.0.1',port:0}); await new Promise<void>(resolve=>server.once('listening',resolve));
+  closeables.push(()=>new Promise<void>(resolve=>{for(const socket of server.clients)socket.terminate();server.close(()=>resolve());}));
+  let endpoint='';
+  server.on('connection',(socket,request)=>{endpoint=request.url!;socket.on('message',data=>{
+    const message=JSON.parse(data.toString());
+    const offered=new URL(endpoint,'http://localhost').searchParams.get('callForSupport')==='1';
+    if(message.type==='register')socket.send(JSON.stringify({uplinkVersion:2,type:'registered',hostId:'host',heartbeat:{intervalMs:30000,timeoutMs:10000},teamManagement:true,teamRecipients:1,teamSuccession:1,...(acknowledged&&offered?{callForSupport:1}:{})}));
+  });});
+  const relay=createAgentRemoteRelay({providers:[]});closeables.push(()=>relay.close());
+  const client=createRemoteHostUplinkClient({relay,installationId:'host',name:'Host',remoteKey:'key',providers:[{providerId:'codex',displayName:'Codex',readOnly:true}],teamManagement:true,...(requested?{callForSupport:true as const}:{}),url:`ws://127.0.0.1:${(server.address() as {port:number}).port}/ws/remote-host`,resolveSession:()=>undefined,control:()=>({status:404,body:'{}'})});
+  closeables.push(()=>client.close());await client.ready;
+  expect(new URL(endpoint,'http://localhost').searchParams.get('callForSupport')).toBe(requested?'1':null);
+  expect(client.callForSupport).toBe(requested&&acknowledged);
+});

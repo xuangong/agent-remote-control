@@ -52,7 +52,9 @@ export interface RemoteHostUplinkClientOptions {
   readonly controller?: ControllerIdentity;
   readonly tpmManagement?: true;
   readonly teamManagement?: true;
-  readonly providers?: readonly { providerId: string; displayName: string; promptEditing?: true; sessionRename?: true; daemonControl?: true }[];
+  /** Request Call For Support groups; honored only with teamManagement. */
+  readonly callForSupport?: true;
+  readonly providers?: readonly { providerId: string; displayName: string; promptEditing?: true; sessionRename?: true; daemonControl?: true; readOnly?: true }[];
   readonly providerChanges?: { current(): NonNullable<RemoteHostUplinkClientOptions['providers']>; subscribe(listener: () => void): () => void };
   readonly remoteKey: string;
   /** Must durably persist the offered credential before resolving. */
@@ -78,6 +80,8 @@ export interface RemoteHostUplinkClient {
   teamRequest(call: TeamHostCall): Promise<unknown>;
   /** The Relay routes Team recipients across a generic succession of their session, including a provider change. */
   readonly teamSuccession: boolean;
+  /** The Relay sends this Host Call For Support groups. */
+  readonly callForSupport: boolean;
   readonly ready: Promise<{ hostId: string; pairingPurpose?: PairingPurpose }>;
   close(): Promise<void>;
 }
@@ -100,8 +104,9 @@ export function createRemoteHostUplinkClient(options: RemoteHostUplinkClientOpti
   let teamResources = false;
   let teamRecipients = false;
   let teamSuccession = false;
+  let callForSupport = false;
   let sendTeam: ((json: string) => void) | undefined;
-  const rejectTeam = () => { teamInbox = false; teamRecipients = false; teamSuccession = false; teamResources = false; sendTeam = undefined; for (const pending of teamPending.values()) { clearTimeout(pending.timer); pending.reject(new Error('Team transport disconnected; query the original operation before retrying.')); } teamPending.clear(); };
+  const rejectTeam = () => { teamInbox = false; teamRecipients = false; teamSuccession = false; callForSupport = false; teamResources = false; sendTeam = undefined; for (const pending of teamPending.values()) { clearTimeout(pending.timer); pending.reject(new Error('Team transport disconnected; query the original operation before retrying.')); } teamPending.clear(); };
   let remoteKey = options.remoteKey;
   let credentialWrite: Promise<void> | undefined;
   let closed = false;
@@ -135,7 +140,7 @@ export function createRemoteHostUplinkClient(options: RemoteHostUplinkClientOpti
     const endpoint = new URL(options.url);
     if (options.successionEnrollment) endpoint.searchParams.set('successionEnrollment', '3');
     if (options.sessionStates) endpoint.searchParams.set('sessionStates', '1');
-    if (options.teamManagement) { endpoint.searchParams.set('team', '1'); endpoint.searchParams.set('teamInbox', '1'); endpoint.searchParams.set('teamRecipients', '1'); endpoint.searchParams.set('teamSuccession', '1'); endpoint.searchParams.set('teamResources', '1'); }
+    if (options.teamManagement) { endpoint.searchParams.set('team', '1'); endpoint.searchParams.set('teamInbox', '1'); endpoint.searchParams.set('teamRecipients', '1'); endpoint.searchParams.set('teamSuccession', '1'); endpoint.searchParams.set('teamResources', '1'); if (options.callForSupport) endpoint.searchParams.set('callForSupport', '1'); }
     const socket = new WebSocket(endpoint, {
       headers: { authorization: `Bearer ${remoteKey}` },
       maxPayload: UPLINK_MAX_FRAME_BYTES,
@@ -262,7 +267,7 @@ export function createRemoteHostUplinkClient(options: RemoteHostUplinkClientOpti
       }
       if (registered && decoded.value.type === 'registered') {
         if ((decoded.value.successionEnrollment && JSON.stringify([successionAuthorityKey(decoded.value.successionEnrollment), decoded.value.successionEnrollmentVersion])) !== registeredEnrollmentIdentity || decoded.value.hostId !== registeredHostId
-          || (decoded.value.teamInbox === 1) !== teamInbox || !!decoded.value.teamManagement !== !!sendTeam || !!decoded.value.teamResources !== teamResources || (decoded.value.teamRecipients === 1) !== teamRecipients || (decoded.value.teamSuccession === 1) !== teamSuccession
+          || (decoded.value.teamInbox === 1) !== teamInbox || !!decoded.value.teamManagement !== !!sendTeam || !!decoded.value.teamResources !== teamResources || (decoded.value.teamRecipients === 1) !== teamRecipients || (decoded.value.teamSuccession === 1) !== teamSuccession || (decoded.value.callForSupport === 1) !== callForSupport
           || decoded.value.heartbeat?.intervalMs !== cloudHeartbeat?.intervalMs
           || decoded.value.heartbeat?.timeoutMs !== cloudHeartbeat?.timeoutMs) retire({ reason: 'protocol_error' });
         return;
@@ -276,6 +281,7 @@ export function createRemoteHostUplinkClient(options: RemoteHostUplinkClientOpti
         teamResources = decoded.value.teamResources === true;
         teamRecipients = options.teamManagement === true && decoded.value.teamManagement === true && decoded.value.teamRecipients === 1;
         teamSuccession = teamRecipients && decoded.value.teamSuccession === 1;
+        callForSupport = teamSuccession && options.callForSupport === true && decoded.value.callForSupport === 1;
         sendTeam = decoded.value.teamManagement ? json => { writer.send(json); } : undefined;
         registeredHostId = decoded.value.hostId;
         registeredEnrollmentIdentity = decoded.value.successionEnrollment && JSON.stringify([successionAuthorityKey(decoded.value.successionEnrollment), decoded.value.successionEnrollmentVersion]);
@@ -333,6 +339,7 @@ export function createRemoteHostUplinkClient(options: RemoteHostUplinkClientOpti
   return {
     ready,
     get teamSuccession() { return teamSuccession; },
+    get callForSupport() { return callForSupport; },
     teamRequest(call) {
       if (call.action === 'acknowledge' && (!teamInbox || !teamRecipients)) return Promise.reject(new Error('Update the Relay to support Team inbox acknowledgement before confirming these messages.'));
       if (!teamRecipients && (call.action === 'claim' || call.action === 'settle' && call.resolvedTarget)) return Promise.reject(new Error('Update the Relay to support exact Team recipients before dispatching or settling this delivery.'));

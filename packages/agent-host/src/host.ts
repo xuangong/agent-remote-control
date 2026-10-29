@@ -206,7 +206,7 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
   interface Connection { client: RemoteHostUplinkClient; superseded: boolean }
   let connection: Connection;
   let credentialPersistence: Promise<void> = Promise.resolve();
-  const describeProviders = () => options.registrations.filter(item => options.providerEnabled?.(item.directory.providerId) !== false).map(({ adapter, directory }) => ({ providerId: adapter.descriptor.providerId, displayName: adapter.descriptor.displayName, ...(codexDaemon && adapter.descriptor.providerId === 'codex' ? { daemonControl: true as const } : {}), ...(directory.renameSession ? { sessionRename: true as const } : {}), ...(directory.supportsPromptEditing ? { promptEditing: true as const } : {}) }));
+  const describeProviders = () => options.registrations.filter(item => options.providerEnabled?.(item.directory.providerId) !== false).map(({ adapter, directory }) => ({ providerId: adapter.descriptor.providerId, displayName: adapter.descriptor.displayName, ...(codexDaemon && adapter.descriptor.providerId === 'codex' ? { daemonControl: true as const } : {}), ...(directory.renameSession ? { sessionRename: true as const } : {}), ...(directory.supportsPromptEditing ? { promptEditing: true as const } : {}), ...(adapter.descriptor.sessionAccess?.readOnly ? { readOnly: true as const } : {}) }));
   const connect = (config: AgentHostOptions['uplink']): Connection => {
     runtime.setRelayConnected(false);
     const current = ++generation;

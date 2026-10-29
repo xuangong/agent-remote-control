@@ -21,7 +21,8 @@ export type RemoteHostHeartbeat = Static<typeof RemoteHostHeartbeat>;
 const heartbeatNonce = Type.String({ minLength: 1, maxLength: 128 });
 const rpc = { uplinkVersion: version, requestId: identity };
 const stream = { uplinkVersion: version, streamId: identity };
-const provider = Type.Object({ providerId: identity, displayName: identity, promptEditing: Type.Optional(Type.Literal(true)), sessionRename: Type.Optional(Type.Literal(true)), daemonControl: Type.Optional(Type.Literal(true)) }, object);
+// readOnly: the provider enforces read-only sessions natively.
+const provider = Type.Object({ providerId: identity, displayName: identity, promptEditing: Type.Optional(Type.Literal(true)), sessionRename: Type.Optional(Type.Literal(true)), daemonControl: Type.Optional(Type.Literal(true)), readOnly: Type.Optional(Type.Literal(true)) }, object);
 export const PreviewRegistrationSnapshot = Type.Object({
   epoch: identity, revision: Type.Integer({ minimum: 0 }),
   registrations: Type.Array(Type.Object({
@@ -55,7 +56,8 @@ export const RemoteHostUplinkMessage = Type.Union([
   Type.Object({ uplinkVersion: version, type: Type.Literal('credential_issued'), credential: Type.String({ minLength: 1, maxLength: 512, pattern: '^[!-~]+$' }) }, object),
   Type.Object({ uplinkVersion: version, type: Type.Literal('credential_saved') }, object),
   // teamSuccession: Team recipients follow a generic succession of their session, including one to another provider.
-  Type.Object({ uplinkVersion: version, type: Type.Literal('registered'), sessionStates: Type.Optional(Type.Literal(1)), teamInbox: Type.Optional(Type.Literal(1)), teamRecipients: Type.Optional(Type.Literal(1)), teamSuccession: Type.Optional(Type.Literal(1)), teamResources: Type.Optional(Type.Literal(true)), teamManagement: Type.Optional(Type.Literal(true)), hostId: identity, successionEnrollment: Type.Optional(SuccessionAssociationAuthority), successionEnrollmentVersion: Type.Optional(Type.Union([Type.Literal(2), Type.Literal(3)])), pairingPurpose: Type.Optional(PairingPurpose), heartbeat: RemoteHostHeartbeat, tunnelToken: Type.Optional(identity) }, object),
+  // callForSupport: the Host runs Call For Support groups: requester seats, coordinators and supporters.
+  Type.Object({ uplinkVersion: version, type: Type.Literal('registered'), sessionStates: Type.Optional(Type.Literal(1)), teamInbox: Type.Optional(Type.Literal(1)), teamRecipients: Type.Optional(Type.Literal(1)), teamSuccession: Type.Optional(Type.Literal(1)), callForSupport: Type.Optional(Type.Literal(1)), teamResources: Type.Optional(Type.Literal(true)), teamManagement: Type.Optional(Type.Literal(true)), hostId: identity, successionEnrollment: Type.Optional(SuccessionAssociationAuthority), successionEnrollmentVersion: Type.Optional(Type.Union([Type.Literal(2), Type.Literal(3)])), pairingPurpose: Type.Optional(PairingPurpose), heartbeat: RemoteHostHeartbeat, tunnelToken: Type.Optional(identity) }, object),
   Type.Object({ uplinkVersion: version, type: Type.Literal('provider_snapshot'), providers: Type.Array(provider, { maxItems: 64 }) }, object),
   Type.Object({ uplinkVersion: version, type: Type.Literal('preview_snapshot'), snapshot: PreviewRegistrationSnapshot }, object),
   // Only after the Relay acknowledged sessionStates in registered.

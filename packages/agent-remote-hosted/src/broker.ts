@@ -33,7 +33,7 @@ import { isSuccessionCapacityError, remainingAssociationRevisions, SUCCESSION_FE
 
 type SharedCreation = { subject: string; operationId: string; fingerprint: string; reservation: ReturnType<HostSharing['reserve']> };
 type RpcResponse = { status: number; body: string; requestId?: string };
-type ProviderDescriptor = { providerId: string; displayName: string; promptEditing?: true; sessionRename?: true; daemonControl?: true };
+type ProviderDescriptor = { providerId: string; displayName: string; promptEditing?: true; sessionRename?: true; daemonControl?: true; readOnly?: true };
 type DeviceCredential = { recovery?: HostRecoverySelection; pairingId?: string; purpose?: PairingPurpose; claimedAt?: number; expires: number; installationId?: string; kind?: 'device'; requiresRotation?: boolean };
 /** A Host's latest session states, kept in memory while it is connected. changedAt: when the state last changed. */
 type HostStates = { confirmedAt?: number; states: Map<string, HostSessionState & { changedAt: number }> };
@@ -48,6 +48,8 @@ type Host = {
   teamRecipients?: 1;
   /** Team recipients follow a generic succession of their session on this Host, including to another provider. */
   teamSuccession?: 1;
+  /** The Host runs Call For Support groups: requester seats, coordinators and supporters. */
+  callForSupport?: 1;
   connectionId?: string; stopDiagnostics?(): void;
   pairingPurpose?: PairingPurpose;
   environment?: HostEnvironment;
@@ -720,7 +722,7 @@ export function createHostBroker(options: HostBrokerOptions) {
     }
     host.streams.clear();
   }
-  function register(socket: RelaySocket, credential: DeviceCredential, context: BrokerRequestContext, credentialHash: string, enrollmentRequested?: 1 | 2 | 3, teamRequested = false, resourcesRequested = false, recipientsRequested = false, inboxRequested = false, statesRequested = false, successionRequested = false) {
+  function register(socket: RelaySocket, credential: DeviceCredential, context: BrokerRequestContext, credentialHash: string, enrollmentRequested?: 1 | 2 | 3, teamRequested = false, resourcesRequested = false, recipientsRequested = false, inboxRequested = false, statesRequested = false, successionRequested = false, callForSupportRequested = false) {
     let host: Host | undefined;
     let pendingCredential: {hash: string; value: DeviceCredential} | undefined;
     let issuing: Promise<void> | undefined;
@@ -758,7 +760,7 @@ export function createHostBroker(options: HostBrokerOptions) {
     function registered() {
       if (retired || !host || host.socket !== socket) return;
       host.tunnelToken ??= randomBytes(32).toString('base64url');
-      send(host, { uplinkVersion: 2, type: 'registered', ...(statesRequested ? { sessionStates: 1 } : {}), ...(host.teamRecipients === 1 && inboxRequested ? { teamInbox: 1 } : {}), ...(host.teamRecipients === 1 ? { teamRecipients: 1 } : {}), ...(host.teamSuccession === 1 ? { teamSuccession: 1 } : {}), ...(host.teamManagement && resourcesRequested && options.teamResources ? {teamResources:true} : {}), ...(host.teamManagement ? {teamManagement: true} : {}), hostId: host.id, ...(host.successionEnrollmentVersion && options.successionEnrollment ? { successionEnrollment: options.successionEnrollment, ...(host.successionEnrollmentVersion !== 1 ? { successionEnrollmentVersion: host.successionEnrollmentVersion } : {}) } : {}), pairingPurpose: host.pairingPurpose ?? (host.gatewayKeyRequested ? 'gateway-setup' : 'host-only'), heartbeat, tunnelToken: host.tunnelToken });
+      send(host, { uplinkVersion: 2, type: 'registered', ...(statesRequested ? { sessionStates: 1 } : {}), ...(host.teamRecipients === 1 && inboxRequested ? { teamInbox: 1 } : {}), ...(host.teamRecipients === 1 ? { teamRecipients: 1 } : {}), ...(host.teamSuccession === 1 ? { teamSuccession: 1 } : {}), ...(host.callForSupport === 1 ? { callForSupport: 1 } : {}), ...(host.teamManagement && resourcesRequested && options.teamResources ? {teamResources:true} : {}), ...(host.teamManagement ? {teamManagement: true} : {}), hostId: host.id, ...(host.successionEnrollmentVersion && options.successionEnrollment ? { successionEnrollment: options.successionEnrollment, ...(host.successionEnrollmentVersion !== 1 ? { successionEnrollmentVersion: host.successionEnrollmentVersion } : {}) } : {}), pairingPurpose: host.pairingPurpose ?? (host.gatewayKeyRequested ? 'gateway-setup' : 'host-only'), heartbeat, tunnelToken: host.tunnelToken });
       if (retired || host.socket !== socket) return;
       host.ready = true;
       if (statesRequested) host.sessionStates ??= { states: new Map() };
@@ -831,7 +833,7 @@ export function createHostBroker(options: HostBrokerOptions) {
             ? existing.pairingPurpose ?? (existing.gatewayKeyRequested ? 'gateway-setup' : 'host-only')
             : credential.purpose ?? 'host-only';
           const providers = 'providers' in message ? [...message.providers] : [{ providerId: 'dsh', displayName: 'DeepSeek DSH' }];
-          const next = { id: existing?.id ?? recovery?.hostId ?? randomUUID(), installationId: message.installationId, name: message.name, environment: message.environment, controller: message.controller, providerManagement: message.providerManagement, tpmManagement: message.tpmManagement, teamManagement: teamRequested ? true as const : undefined, teamRecipients: teamRequested && recipientsRequested ? 1 as const : undefined, teamSuccession: teamRequested && recipientsRequested && successionRequested ? 1 as const : undefined, pairingPurpose: purpose,
+          const next = { id: existing?.id ?? recovery?.hostId ?? randomUUID(), installationId: message.installationId, name: message.name, environment: message.environment, controller: message.controller, providerManagement: message.providerManagement, tpmManagement: message.tpmManagement, teamManagement: teamRequested ? true as const : undefined, teamRecipients: teamRequested && recipientsRequested ? 1 as const : undefined, teamSuccession: teamRequested && recipientsRequested && successionRequested ? 1 as const : undefined, callForSupport: teamRequested && recipientsRequested && successionRequested && callForSupportRequested ? 1 as const : undefined, pairingPurpose: purpose,
             ...(existing?.gatewayKeyRequested ? { gatewayKeyRequested: true } : {}),
             providers, legacyDsh: 'providerId' in message, ...(message.credentialRotation ? {credentialRotation:true} : {credentialRotation:undefined}) };
           draft.hosts = draft.hosts.filter(value => value.id !== next.id); draft.hosts.push(next);
@@ -1824,7 +1826,7 @@ export function createHostBroker(options: HostBrokerOptions) {
       return { accept(client: RelaySocket) {
         if (unavailable || keys.get(hash!) !== key || key.claimedAt !== undefined || key.expires <= now()) { client.close(1008, 'Device credential revoked'); return; }
         track(client);
-        register(client, key, context, hash!, url.searchParams.get('successionEnrollment') === '3' ? 3 : url.searchParams.get('successionEnrollment') === '2' ? 2 : url.searchParams.get('successionEnrollment') === '1' ? 1 : undefined, url.searchParams.get('team') === '1', url.searchParams.get('teamResources') === '1', url.searchParams.get('teamRecipients') === '1', url.searchParams.get('teamInbox') === '1', url.searchParams.get('sessionStates') === '1', url.searchParams.get('teamSuccession') === '1');
+        register(client, key, context, hash!, url.searchParams.get('successionEnrollment') === '3' ? 3 : url.searchParams.get('successionEnrollment') === '2' ? 2 : url.searchParams.get('successionEnrollment') === '1' ? 1 : undefined, url.searchParams.get('team') === '1', url.searchParams.get('teamResources') === '1', url.searchParams.get('teamRecipients') === '1', url.searchParams.get('teamInbox') === '1', url.searchParams.get('sessionStates') === '1', url.searchParams.get('teamSuccession') === '1', url.searchParams.get('callForSupport') === '1');
       } };
     }
     const match = /^\/v1\/sessions\/([^/]+)\/events$/.exec(url.pathname);

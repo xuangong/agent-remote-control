@@ -1,7 +1,7 @@
 import { assertTeamQueueCapacity, compactTeamDeliveries, unresolvedTeamDelivery, stripPrivateTeamEvidence, replayTeamDelivery, validSavedTeam, type SavedTeam } from './team-delivery.js';
 export { teamMessageBudgetBytes } from './team-delivery.js';
 import type { TeamResourceStore } from './team-resources.js';
-import { CALL_FOR_SUPPORT_TEAM_LIMIT, CallForSupportGroups, compactCallForSupport, type CallForSupportPorts } from './call-for-support.js';
+import { admitTeam, CallForSupportGroups, compactCallForSupport, type CallForSupportPorts } from './call-for-support.js';
 import { createHash, randomUUID } from 'node:crypto';
 import { nativeSessionRefKey, type NativeSessionRef, isTeamMember, type Team, type TeamAction, type TeamCreate, type TeamHostCall, type TeamMember, type TeamMessage, type TeamSeat, type TeamResource } from '@orchardworks/agent-remote-protocol';
 
@@ -46,7 +46,8 @@ export class TeamBroker {
   constructor(private readonly ports: TeamBrokerPorts) {
     if (ports.callForSupport) this.groups = new CallForSupportGroups({ ports, change: update => this.change(update), provision: (teamId, memberId) => this.provision(teamId, memberId),
       project: team => this.project(team), resource: (team, memberId, resourceId) => this.resourceAccess(team, memberId, resourceId),
-      pinResources: (teamId, memberId, resourceIds) => this.pinResources(teamId, memberId, resourceIds) }, ports.callForSupport);
+      pinResources: (teamId, memberId, resourceIds, keep) => this.pinResources(teamId, memberId, resourceIds, keep),
+      releaseResources: teamId => this.releaseResources(teamId) }, ports.callForSupport);
   }
   private change<T>(update: (teams: SavedTeam[]) => T): Promise<T> {
     return this.ports.change(teams => {
@@ -115,10 +116,11 @@ export class TeamBroker {
         ...(input.callForSupport.fresh ? { fresh: true } : {}) })).team;
     }
     this.ports.assertHost(input.source.hostId, input.source.providerId);
+    let removed: string | undefined;
     const team = await this.change(teams => {
       const existing = teams.find(item => item.operationId === input.operationId);
       if (existing) { if (JSON.stringify(existing.source) !== JSON.stringify(input.source)) fail('Creation identity has different input.'); return existing; }
-      if (teams.length >= CALL_FOR_SUPPORT_TEAM_LIMIT) fail('Team capacity reached.');
+      removed = admitTeam(teams);
       const now = this.ports.now();
       const leader: TeamMember = { id: randomUUID(), role: 'leader', hostId: input.source.hostId, providerId: input.source.providerId,
         name: 'Leader', responsibility: 'Discuss requirements, implement directly, coordinate members, validate and report delivery.',
@@ -126,6 +128,7 @@ export class TeamBroker {
       const created: SavedTeam = { id: randomUUID(), operationId: input.operationId, revision: 1, source: input.source, title: 'New team', status: 'active', members: [leader], messages: [], createdAt: now, updatedAt: now };
       teams.push(created); return created;
     });
+    if (removed) await this.releaseResources(removed);
     return this.provision(team.id, team.members[0]!.id);
   }
   async action(input: TeamAction): Promise<Team> {
@@ -140,7 +143,12 @@ export class TeamBroker {
       const team = find(teams, input.teamId), now = this.ports.now();
       if (input.action === 'archive') {
         if (team.status === 'active') { team.status = 'archiving'; for (const message of team.messages) if (message.status === 'queued') message.status = 'canceled'; touch(team, now); }
-      } else if (input.action === 'restore') { if (team.status !== 'archived') fail('Finish archiving before restoring this Team.'); team.status = 'active'; touch(team, now); }
+      } else if (input.action === 'restore') {
+        if (team.status !== 'archived') fail('Finish archiving before restoring this Team.');
+        // Controllers forget an archived group's seats, and the Relay removes archived groups to make room.
+        if (team.callForSupport) fail('An archived support group cannot be restored. Call for support again to start a new group.');
+        team.status = 'active'; touch(team, now);
+      }
       else if (input.action === 'rename') { team.title = input.title; touch(team, now); }
       else if (input.action === 'add_member') {
         active(team);
@@ -171,6 +179,7 @@ export class TeamBroker {
     const projectDelivery = <T extends { id: string; resolvedTarget?: NativeSessionRef }>(value: T) => recipientAware ? value : withoutRecipient(value);
     if (call.action === 'call_for_support' || call.action === 'support_status') return (this.groups ?? fail(unavailableGroups)).workerCall(hostId, call);
     if (call.action === 'support_enablement') return (this.groups ?? fail(unavailableGroups)).enablement(hostId);
+    if (call.action === 'support_group_states') return (this.groups ?? fail(unavailableGroups)).groupStates(hostId, call.teamIds);
     if (call.action === 'propose_roster' || call.action === 'release_supporter' || call.action === 'report_support' || call.action === 'write_ledger' || call.action === 'report_usage' || call.action === 'collect_supporter_patch') {
       assertCurrent(); return (this.groups ?? fail(unavailableGroups)).memberCall(hostId, call);
     }
@@ -259,15 +268,19 @@ export class TeamBroker {
     if (!upload || !referenced && upload.expiresAt <= this.ports.now() || upload.ownerMemberId !== memberId && !grant?.memberIds.includes(memberId) && !team.messages.some(message => message.to === memberId && message.resources?.some(resource => resource.resourceId === resourceId))) fail('Resource access is not granted to this member.');
     return upload!.resource;
   }
-  /** Verifies the stored bytes of resources a member may attach and keeps them while referenced. */
-  private async pinResources(teamId: string, memberId: string, resourceIds: string[]): Promise<void> {
+  /** Verifies the stored bytes of resources a member may attach; keep pins them for as long as their Team exists. */
+  private async pinResources(teamId: string, memberId: string, resourceIds: string[], keep = true): Promise<void> {
     const store = this.ports.resources ?? fail('Team resource storage is unavailable on this Relay.');
     for (const resourceId of resourceIds) {
       const team = structuredClone(find(this.ports.read(), teamId)); compactTeamDeliveries(team, this.ports.now());
       const ref = this.resourceAccess(team, memberId, resourceId), actual = await store.getMetadata(`team:${teamId}`, resourceId);
       if ((['resourceId', 'name', 'mediaType', 'sha256', 'byteLength'] as const).some(key => ref[key] !== actual[key])) fail('Resource metadata does not match stored bytes.');
-      await store.pin(`team:${teamId}`, resourceId);
+      if (keep) await store.pin(`team:${teamId}`, resourceId);
     }
+  }
+  /** A removed Team's resources go with it; a failure leaves them to the storage quota rather than failing the change that removed it. */
+  private async releaseResources(teamId: string): Promise<void> {
+    await this.ports.resources?.release(`team:${teamId}`).catch(() => undefined);
   }
   private pruneResourceUploads(team:SavedTeam) {
     if(!team.resourceUploads)return;

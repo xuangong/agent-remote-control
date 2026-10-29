@@ -35,3 +35,14 @@ it('keeps pinned files while expiring unfinished uploads', async () => {
   await store.begin('team',declaration(bytes,'pending'));now=11;
   await store.begin('team',declaration(bytes,'new'));expect(await store.getMetadata('team',resource.resourceId)).toEqual(resource);
 });
+it('releases every resource of a removed Team, pinned or not, and keeps other Teams\' resources', async () => {
+  const disk=storage(), store=new PortableTeamResourceStore({storage:disk}), bytes=Buffer.from('bytes');
+  const upload=async(scope:string,uploadId:string)=>{await store.begin(scope,declaration(bytes,uploadId));await store.chunk(scope,{uploadId,offset:0,contentBase64:bytes.toString('base64')});return (await store.finish(scope,uploadId)).resource!.resourceId;};
+  const pinned=await upload('team:a','pinned'), draft=await upload('team:a','draft'), other=await upload('team:b','other');
+  await store.pin('team:a',pinned);await store.begin('team:a',declaration(bytes,'partial'));
+  await store.release('team:a');
+  for(const id of [pinned,draft])await expect(store.getMetadata('team:a',id)).rejects.toThrow('unavailable');
+  expect(await store.getMetadata('team:b',other)).toMatchObject({resourceId:other});
+  // Only the other Team's manifest, chunk and index remain.
+  expect(await disk.list('')).toHaveLength(3);
+});

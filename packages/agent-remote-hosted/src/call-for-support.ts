@@ -14,8 +14,10 @@ export interface CallForSupportBrokerPorts {
   project(team: SavedTeam): Team;
   /** A resource the member may attach, or a failure. */
   resource(team: SavedTeam, memberId: string, resourceId: string): TeamResource;
-  /** Verifies stored bytes and keeps the resources while referenced. */
-  pinResources(teamId: string, memberId: string, resourceIds: string[]): Promise<void>;
+  /** Verifies stored bytes; keep pins them for as long as their Team exists. */
+  pinResources(teamId: string, memberId: string, resourceIds: string[], keep?: boolean): Promise<void>;
+  /** Deletes the stored resources of a Team that no longer exists. */
+  releaseResources(teamId: string): Promise<void>;
 }
 /** The account and Host facts groups depend on. */
 export interface CallForSupportPorts {
@@ -194,6 +196,18 @@ export function workerGroup(teams: SavedTeam[], resolve: TeamBrokerPorts['resolv
   });
 }
 
+/**
+ * Makes room for one more Team. At capacity the oldest archived support group is removed: groups are created automatically and
+ * nothing else would remove them. Returns its ID, whose stored resources the caller releases once the change is committed.
+ */
+export function admitTeam(teams: SavedTeam[]): string | undefined {
+  if (teams.length < CALL_FOR_SUPPORT_TEAM_LIMIT) return undefined;
+  const oldest = teams.filter(team => team.callForSupport && team.status === 'archived')
+    .reduce<SavedTeam | undefined>((found, team) => !found || team.updatedAt < found.updatedAt ? team : found, undefined) ?? fail('Team capacity reached.');
+  teams.splice(teams.indexOf(oldest), 1);
+  return oldest.id;
+}
+
 /** A new group for a worker: the coordinator as Leader, then the worker's seat, then the first call. */
 export function newGroup(input: { operationId: string; source: TeamSource; profile: CallForSupportProfile; coordinatorProviderId: string }, now: number): SavedTeam {
   const { profile, source } = input;
@@ -224,6 +238,7 @@ export class CallForSupportGroups {
     const coordinatorProviderId = profile.coordinator.providerId ?? input.source.providerId;
     this.broker.ports.assertHost(input.source.hostId, coordinatorProviderId);
     if (!this.ports.readOnly(input.source.hostId, coordinatorProviderId)) fail('The coordinator\'s provider cannot run read-only sessions on the worker\'s Host.');
+    let removed: string | undefined;
     const result = await this.broker.change(teams => {
       const now = this.broker.ports.now();
       const created = teams.find(team => team.operationId === input.operationId);
@@ -234,11 +249,12 @@ export class CallForSupportGroups {
       const current = workerGroup(teams, this.broker.ports.resolveSession, input.source.hostId, input.source, team => team.callForSupport?.profileId === profile.id);
       if (current && !input.fresh) return { team: current, call: addCall(current, { ...input.call, id: callForSupportCallId(current.id, input.operationId), origin: input.origin }, now), created: false };
       if (current) { current.status = 'archiving'; for (const message of current.messages) if (message.status === 'queued') message.status = 'canceled'; current.revision++; current.updatedAt = now; }
-      if (teams.length >= CALL_FOR_SUPPORT_TEAM_LIMIT) fail('Team capacity reached.');
+      removed = admitTeam(teams);
       const team = newGroup({ operationId: input.operationId, source: input.source, profile, coordinatorProviderId }, now);
       teams.push(team);
       return { team, call: addCall(team, { ...input.call, id: callForSupportCallId(team.id, input.operationId), origin: input.origin }, now), created: true };
     });
+    if (removed) await this.broker.releaseResources(removed);
     if (!result.created) return { team: this.broker.project(result.team), call: result.call };
     return { team: await this.provision(result.team.id), call: result.call };
   }
@@ -409,7 +425,8 @@ export class CallForSupportGroups {
     const result: unknown = await this.ports.supportPatch(target.hostId, { teamId: team.id, memberId: target.id, operationId: digest(['patch', team.id, call.memberId, call.operationId]) });
     if (result && typeof result === 'object' && 'empty' in result && result.empty === true) return { empty: true, message: 'The supporter changed nothing.' };
     if (!isTeamResource(result)) throw new Error('Invalid supporter patch.');
-    await this.broker.pinResources(team.id, target.id, [result.resourceId]);
+    // Kept only once a report attaches it; otherwise it expires like any unattached upload.
+    await this.broker.pinResources(team.id, target.id, [result.resourceId], false);
     await this.broker.change(teams => {
       const current = teams.find(item => item.id === team.id) ?? fail('Team not found.');
       this.broker.resource(current, target.id, result.resourceId);
@@ -427,7 +444,8 @@ export class CallForSupportGroups {
     const base = group(team).calls.find(call => call.status === 'open')?.context?.base;
     const resource = await this.ports.supportBundle(worker.hostId, { teamId, memberId: worker.id, commit: workspace.commit, ...(base ? { base } : {}), operationId: digest(['bundle', teamId, memberId]) });
     if (!isTeamResource(resource)) throw new Error('Invalid support bundle.');
-    await this.broker.pinResources(teamId, worker.id, [resource.resourceId]);
+    // Read once while the supporter is created, so it expires like any unattached upload instead of filling the account's storage.
+    await this.broker.pinResources(teamId, worker.id, [resource.resourceId], false);
     await this.broker.change(teams => {
       const current = teams.find(item => item.id === teamId) ?? fail('Team not found.'), target = current.members.find(item => item.id === memberId) ?? fail('Team member not found.');
       this.broker.resource(current, worker.id, resource.resourceId);
@@ -498,6 +516,18 @@ export class CallForSupportGroups {
       catch { return []; }
     });
     return { defaultEnabled: !!state?.profiles.some(profile => profile.enableByDefault), sessions };
+  }
+  /**
+   * The status of groups the Host holds seats in. A group that no longer exists, or in which the Host has no seat, is missing:
+   * the Host forgets its seats in archived and missing groups, which are never restored.
+   */
+  groupStates(hostId: string, teamIds: string[]): { states: Array<{ teamId: string; status: SavedTeam['status'] | 'missing' }> } {
+    this.ports.assertHost(hostId);
+    const teams = this.broker.ports.read();
+    return { states: teamIds.map(teamId => {
+      const team = teams.find(item => item.id === teamId);
+      return { teamId, status: team?.callForSupport && team.members.some(member => member.hostId === hostId) ? team.status : 'missing' };
+    }) };
   }
   /** The worker's own tool calls, made by its Controller on its behalf. */
   async workerCall(hostId: string, call: WorkerCall | Extract<TeamHostCall, { action: 'support_status' }>): Promise<unknown> {

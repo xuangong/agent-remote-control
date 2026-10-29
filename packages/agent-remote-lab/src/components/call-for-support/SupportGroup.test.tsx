@@ -87,3 +87,13 @@ it('lets the user settle a delivery whose outcome is uncertain', async () => {
   await act(async () => button(view, 'Confirm not received').click());
   expect(changes).toEqual([{ teamId: 'group', action: 'resolve_message', messageId: 'm1', outcome: 'rejected' }]);
 });
+
+it('archives a role and shows an archived one as history without restoring it', async () => {
+  const changes: TeamAction[] = [];
+  const active = await render(<SupportGroup team={supportTeam()} hosts={[]} busy={false} onChange={async input => { changes.push(input); return true; }} onOpenSession={() => {}} />);
+  await act(async () => button(active, 'Archive').click());
+  expect(changes).toEqual([{ teamId: 'group', action: 'archive' }]);
+  const archived = await render(<SupportGroup team={{ ...supportTeam(), status: 'archived' }} hosts={[]} busy={false} onChange={async () => true} onOpenSession={() => {}} />);
+  expect(archived.textContent).toContain('Archived');
+  expect(button(archived, 'Restore')).toBeUndefined();
+});

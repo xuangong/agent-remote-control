@@ -11,6 +11,8 @@ export interface TeamResourceStore {
   getMetadata(scope: string, resourceId: string): Promise<TeamResource>;
   readChunk(scope: string, resourceId: string, offset: number): Promise<TeamResource & { offset: number; contentBase64: string }>;
   pin(scope: string, resourceId: string): Promise<void>;
+  /** Deletes every resource of the scope, pinned or not. */
+  release(scope: string): Promise<void>;
 }
 /** Keys are opaque. Each value fits within a Durable Object storage value limit. */
 export interface TeamResourceStorage {
@@ -62,12 +64,13 @@ export class PortableTeamResourceStore implements TeamResourceStore {
     const value=parseManifest(bytes,key);
     if(value.scopeHash!==hash(scope)||value.resourceId!==resourceId||!value.complete||!value.pinned&&this.now()-value.touchedAt>this.ttl)throw new Error('Resource unavailable.');return value;
   }
+  private async remove(item:Manifest){
+    for(const key of await this.options.storage.list(`chunk:${item.key}:`))await this.options.storage.delete(key);
+    await this.options.storage.delete(`resource:${hash(item.resourceId)}`);
+    await this.options.storage.delete(`manifest:${item.key}`);
+  }
   private async expire(){
-    for(const item of await this.manifests())if(!item.pinned&&this.now()-item.touchedAt>this.ttl){
-      for(const key of await this.options.storage.list(`chunk:${item.key}:`))await this.options.storage.delete(key);
-      await this.options.storage.delete(`resource:${hash(item.resourceId)}`);
-      await this.options.storage.delete(`manifest:${item.key}`);
-    }
+    for(const item of await this.manifests())if(!item.pinned&&this.now()-item.touchedAt>this.ttl)await this.remove(item);
   }
   begin(scope:string,input:TeamResourceDeclaration):Promise<TeamResourceReceipt>{return this.serial(async()=>{
     if(!scope||!input.uploadId||input.uploadId.length>256||!input.name||input.name.length>255||/[\x00-\x1f]/.test(input.name)||!input.mediaType||input.mediaType.length>255||!Number.isSafeInteger(input.byteLength)||input.byteLength<0||input.byteLength>MAX_BYTES||!/^[a-f0-9]{64}$/.test(input.sha256))throw new Error('Invalid resource declaration; maximum file size is 50 MiB.');
@@ -104,4 +107,5 @@ export class PortableTeamResourceStore implements TeamResourceStore {
     return {...metadata(value),offset,contentBase64:Buffer.from(bytes).toString('base64')};
   });}
   pin(scope:string,resourceId:string):Promise<void>{return this.serial(async()=>{const value=await this.resource(scope,resourceId);value.pinned=true;await this.persist(value);});}
+  release(scope:string):Promise<void>{return this.serial(async()=>{for(const item of await this.manifests())if(item.scopeHash===hash(scope))await this.remove(item);});}
 }

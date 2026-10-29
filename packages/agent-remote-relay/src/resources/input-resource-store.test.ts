@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from 'vitest';
-import { mkdtemp, rm, readFile } from 'node:fs/promises';
+import { mkdtemp, rm, readFile, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createHash } from 'node:crypto';
@@ -30,6 +30,18 @@ describe('durable incoming resources',()=>{
   await expect(store.begin('s',{...empty,uploadId:'overflow',byteLength:1})).rejects.toThrow(/quota/);
   now=11;expect((await store.getMetadata('s',id)).byteLength).toBe(0); expect((await store.readChunk('s',id,0)).contentBase64).toBe('');
   await store.begin('s',{...empty,uploadId:'replacement',byteLength:4});
+ });
+ it('releases every resource and upload of a scope, pinned or not, after a restart too',async()=>{
+  const {directory,store}=await fixture(); const bytes=Buffer.from('bytes'), source=join(directory,'source.txt'); await writeFile(source,bytes);
+  const id=(await store.importLocal('team:a',source,{uploadId:'pinned'})).resourceId;
+  await store.pin('team:a',id); await store.begin('team:a',{uploadId:'partial',name:'p',mediaType:'text/plain',byteLength:bytes.length,sha256:sha(bytes)});
+  const other=(await store.importLocal('team:b',source,{uploadId:'other'})).resourceId;
+  await store.release('team:a');
+  await expect(store.getMetadata('team:a',id)).rejects.toThrow();
+  const restored=new InputResourceStore({directory});
+  await expect(restored.getMetadata('team:a',id)).rejects.toThrow();
+  expect((await restored.begin('team:a',{uploadId:'partial',name:'p',mediaType:'text/plain',byteLength:bytes.length,sha256:sha(bytes)})).offset).toBe(0);
+  expect((await restored.getMetadata('team:b',other)).resourceId).toBe(other);
  });
 });
 it('rejects conflicting retry bytes, oversize chunks and invalid offsets',async()=>{

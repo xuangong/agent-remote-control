@@ -1,4 +1,4 @@
-import { expect, it } from 'vitest';
+import { expect, it, vi } from 'vitest';
 import type { CallForSupportMandate, CallForSupportRosterMember, TeamHostCall } from '@orchardworks/agent-remote-protocol';
 import { review, supportFixture } from './test-utils/call-for-support-fixture.js';
 
@@ -50,6 +50,7 @@ it('creates worktree and remote supporters at the call\'s commit', async () => {
   const g = await group({ approval: 'within_mandate', maxSupporters: 2, workspaces: ['worktree', 'remote'], remoteHosts: [{ hostId: 'linux', workspace: '/srv/repo' }],
     supporters: [{ providerId: 'codex', model: 'gpt-5.5' }] });
   const codex = { ...opus, providerId: 'codex', model: 'gpt-5.5' };
+  const pin = vi.spyOn(g.ports.resources!, 'pin');
   expect(await g.propose('r1', [{ ...codex, name: 'Fixer', workspace: 'worktree' }, { ...codex, name: 'Linux tester', workspace: 'remote', hostId: 'linux' }])).toMatchObject({ status: 'provisioned' });
   const [fixer, tester] = g.supporters();
   expect(fixer).toMatchObject({ hostId: 'mac', cwd: '/repo', workspace: { kind: 'worktree', commit: 'abcdef1' } });
@@ -62,6 +63,8 @@ it('creates worktree and remote supporters at the call\'s commit', async () => {
   const bundle = (tester!.workspace as { bundle: string }).bundle;
   expect(await g.broker.hostCall('linux', { action: 'resource_metadata', teamId: g.roleId, memberId: tester!.id, resourceId: bundle })).toMatchObject({ resourceId: bundle, name: 'support.bundle' });
   await expect(g.broker.hostCall('mac', { action: 'resource_metadata', teamId: g.roleId, memberId: fixer!.id, resourceId: bundle })).rejects.toThrow('not granted');
+  // Read once while the supporter is created, the bundle is not pinned: it expires instead of filling the account's storage.
+  expect(pin).not.toHaveBeenCalled();
 });
 
 it('reports a remote supporter whose bundle failed as uncertain, with the reason', async () => {

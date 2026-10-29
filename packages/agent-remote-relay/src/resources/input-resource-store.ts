@@ -165,6 +165,11 @@ export class InputResourceStore {
     return this.serial(async () => { await this.expire(); const item = this.requireResource(scope, resourceId); item.pinned = true; await this.touch(item); });
   }
 
+  /** Deletes every resource and upload of the scope, pinned or not. */
+  release(scope: string): Promise<void> {
+    return this.serial(async () => { for (const item of [...this.manifests.values()]) if (item.scopeHash === digest(scope)) await this.remove(item); });
+  }
+
   readChunk(scope: string, resourceId: string, offset: number): Promise<ResourceMetadata & { offset: number; contentBase64: string }> {
     return this.serial(async () => {
       await this.expire();
@@ -232,12 +237,12 @@ export class InputResourceStore {
   private async persist(item: Manifest): Promise<void> {
     await atomicWriteFile(this.path(item.key, 'json'), JSON.stringify(item));
   }
+  private async remove(item: Manifest): Promise<void> {
+    await Promise.all(['part', 'resource', 'json', 'json.tmp'].map(extension => rm(this.path(item.key, extension), { force: true })));
+    this.manifests.delete(item.key);
+  }
   private async expire(): Promise<void> {
-    for (const item of this.manifests.values()) {
-      if (item.pinned || this.now() - item.touchedAt < this.draftTtlMs) continue;
-      await Promise.all(['part', 'resource', 'json', 'json.tmp'].map(extension => rm(this.path(item.key, extension), { force: true })));
-      this.manifests.delete(item.key);
-    }
+    for (const item of [...this.manifests.values()]) if (!item.pinned && this.now() - item.touchedAt >= this.draftTtlMs) await this.remove(item);
   }
 }
 function digest(value: string | Uint8Array): string { return createHash('sha256').update(value).digest('hex'); }

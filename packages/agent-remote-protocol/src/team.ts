@@ -110,6 +110,8 @@ export const TeamHostCall = Type.Union([
     roleId: Type.Optional(id), callId: Type.Optional(id) }, object),
   // Which of the calling Host's sessions may call for support.
   Type.Object({ action: Type.Literal('support_enablement') }, object),
+  // The status of groups the calling Host holds seats in, so it can forget the seats of archived and removed groups.
+  Type.Object({ action: Type.Literal('support_group_states'), teamIds: Type.Array(id, { minItems: 1, maxItems: 64, uniqueItems: true }) }, object),
 ]);
 export type TeamHostCall = Static<typeof TeamHostCall>;
 export const TeamSeat = Type.Object({ teamId: id, source: TeamSource, member: TeamMember,

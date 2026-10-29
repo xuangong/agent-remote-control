@@ -266,3 +266,21 @@ it('removes the worktree of a supporter whose creation failed, since that seat i
     expect(h.git('worktree', 'list')).not.toContain(supporter.id);
   } finally { await h.close(); }
 });
+
+it('forgets the seats of an archived support group, and keeps an archived ordinary Team\'s for a restore', async () => {
+  const h = await supportHarness();
+  try {
+    const profile = h.profile(); h.enable([profile.id]);
+    const { roleId } = await h.call({ operationId: 'op-1', profileId: profile.id });
+    const coordinator = h.ref('codex', h.team(roleId).members[0]!.nativeSessionId!);
+    const plain = await h.broker.create({ operationId: 'plain', source: { hostId: 'host', providerId: 'codex', nativeSessionId: 'worker', title: 'Plain' } });
+    const leader = h.ref('codex', plain.members[0]!.nativeSessionId!);
+    await h.runtime.tick();
+    expect(await h.runtime.extensions(coordinator)).toBeDefined();
+    for (const teamId of [roleId, plain.id]) await h.broker.action({ teamId, action: 'archive' });
+    await h.runtime.tick(); await h.runtime.tick();
+    expect([h.team(roleId).status, h.team(plain.id).status]).toEqual(['archived', 'archived']);
+    expect(await h.runtime.extensions(coordinator)).toBeUndefined();
+    expect(await h.runtime.extensions(leader)).toBeDefined();
+  } finally { await h.close(); }
+});

@@ -72,6 +72,8 @@ export class TeamRuntime implements SessionRole {
   private closed = false;
   /** Recipients with a claim request in flight, before its receipt is durable. */
   private readonly claiming = new Map<string, number>();
+  /** When to ask again about a support group missing from the poll, which omits archived groups. */
+  private readonly groupChecks = new Map<string, number>();
   private readonly timer: ReturnType<typeof setInterval>;
   constructor(private readonly directory: string, private readonly access: TeamRuntimeAccess, private readonly request: (call: TeamHostCall) => Promise<unknown>, tickMs = 3000) {
     this.resourceFiles = new TeamResourceFiles(directory, request);
@@ -283,6 +285,7 @@ export class TeamRuntime implements SessionRole {
       if (!this.records.some(record => record.creation === 'ready')) return;
       const value = await this.request({ action: 'poll' });
       if (!Array.isArray(value) || !value.every(isTeam)) throw new Error('Invalid Team catalog.');
+      await this.forgetEndedGroups(value as Team[]);
       const retained = new Set<string>();
       for (const record of this.records.filter(item => item.creation === 'ready')) {
         const team = (value as Team[]).find(team => team.id === record.seat.teamId);
@@ -331,6 +334,33 @@ export class TeamRuntime implements SessionRole {
       for (const [id, held] of this.leases) if (!retained.has(id)) this.release(id, held);
       for (const record of this.records) if (record.usage) await this.reportUsage(record).catch(() => undefined);
     } finally { this.ticking = false; }
+  }
+  /**
+   * Forgets the seats of support groups that were archived or removed: an archived group is never restored, and the Relay removes
+   * archived groups to make room. The poll omits archived groups, so the Relay is asked about missing ones, each at most every ten minutes.
+   */
+  private async forgetEndedGroups(listed: readonly Team[]): Promise<void> {
+    if (this.access.callForSupport?.() !== true) return;
+    const now = Date.now(), present = new Set(listed.map(team => team.id));
+    for (const id of [...this.groupChecks.keys()]) if (present.has(id)) this.groupChecks.delete(id);
+    const due = [...new Set(this.records.filter(record => record.seat.callForSupport && record.creation !== 'dispatching' && !present.has(record.seat.teamId)).map(record => record.seat.teamId))]
+      .filter(id => (this.groupChecks.get(id) ?? 0) <= now).slice(0, 64);
+    if (!due.length) return;
+    for (const id of due) this.groupChecks.set(id, now + 600_000);
+    let states: unknown;
+    try { states = (await this.request({ action: 'support_group_states', teamIds: due }) as { states?: unknown }).states; } catch { return; }
+    if (!Array.isArray(states)) return;
+    const ended = new Set(states.filter(state => state && typeof state === 'object' && due.includes(state.teamId) && (state.status === 'archived' || state.status === 'missing'))
+      .map(state => state.teamId as string));
+    if (!ended.size) return;
+    for (const record of this.records.filter(item => ended.has(item.seat.teamId))) {
+      if (record.worktree && !record.worktree.removed) await removeWorktree(record.worktree.root, record.worktree.path).catch(() => undefined);
+      const key = `${record.seat.teamId}:${record.seat.member.id}`, held = this.leases.get(key);
+      if (held) this.release(key, held);
+    }
+    this.records = this.records.filter(item => !ended.has(item.seat.teamId));
+    for (const id of ended) this.groupChecks.delete(id);
+    await this.save();
   }
   private async reconcileReceipts(record: LocalSeat, team?: Team): Promise<void> {
     const pending = Object.entries(record.receipts).filter(([id, receipt]) => !team?.messages.some(message => message.id === id)

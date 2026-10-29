@@ -44,6 +44,7 @@ import {SessionControlNotice, type TakeControlOptions} from './components/Sessio
 import type {NativeSessionOwner} from '@orchardworks/agent-remote-protocol';
 import { ConversationConnections, ConversationConnectionScope } from './conversation-connections.js';
 import { CachePrivacySettings } from './components/CachePrivacySettings.js';
+import { CallForSupportSettings } from './components/call-for-support/CallForSupportSettings.js';
 import { LayoutDiagnosticsSettings } from './components/LayoutDiagnosticsSettings.js';
 import { stopLayoutDiagnostics } from './layout-diagnostics.js';
 import { conversationLocalStorage, conversationSessionStorage } from './conversation-storage.js';
@@ -2417,6 +2418,7 @@ function AppContent({
       {sessionPanel === 'settings' ? <section className="lab-mobile-settings" aria-label="Controller settings">
         <MobileDisplaySettings />
         <CachePrivacySettings />
+        <CallForSupportSettings baseUrl={baseUrl} enabled={accessReady && !!directory} hosts={remoteHosts} />
         <LayoutDiagnosticsSettings />
       </section> : null}
       {userScoped && sessionPanel === 'favorites' ? <section className="lab-session-directory lab-favorites-section" aria-label="Favorites"><div className="lab-directory-heading"><h2><FavoritesHeading loading={favorites.loading} /></h2></div><FavoritesList favorites={favorites} tracking={tracking} trackedOnly={trackedOnly} onFilterChange={setTrackedOnly} activeKey={focusedSessionKey} busy={transitioning && !sidebarWindow} onOpen={item => void openDirectorySession(item)} /></section> : null}

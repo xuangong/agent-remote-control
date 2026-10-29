@@ -25,7 +25,7 @@ export function TeamGatherButton({ baseUrl, entry, onGather }: {
       const leader = entry.teamMemberId ?? entry.target?.teamMemberId;
       if (!layout.groupRoot || !entry.target || (leader ? layout.groupRoot.teamMemberId !== leader : sessionKey(layout.groupRoot) !== sessionKey(entry.target))) throw new Error('The Team Leader has changed. Reopen the Team from its list.');
       onGather(layout.dock);
-      const unavailable = team.members.filter(member => member.creation !== 'abandoned' && (member.creation !== 'ready' || !member.nativeSessionId)).length;
+      const unavailable = team.members.filter(member => member.creation !== 'abandoned' && member.creation !== 'released' && member.role !== 'requester' && (member.creation !== 'ready' || !member.nativeSessionId)).length;
       if (unavailable) setNotice(`${unavailable} member session(s) have no current execution locator. Check their status in the Team list.`);
     } catch (error) { if (active.current) setNotice(error instanceof Error ? error.message : 'Team members could not be loaded. Retry Gather.'); }
     finally { pending.current = false; if (active.current) setBusy(false); }

@@ -8,6 +8,8 @@ import { ConversationConnectionScope } from '../conversation-connections.js';
 import { useWindowLayout } from '../window-workspace-context.js';
 import { SessionDirectoryClient } from '../directory-client.js';
 import { WorkspaceSelect, type WorkspaceSelection } from './WorkspaceSelect.js';
+import { SupportGroup, usageText } from './call-for-support/SupportGroup.js';
+import { SupportSession } from './call-for-support/SupportSession.js';
 import './team.css';
 
 interface Host { teamManagement?: true; id: string; name: string; online: boolean; providers?: Array<{providerId:string;displayName:string}> }
@@ -63,7 +65,8 @@ export function TeamMenu(props: Props) {
   useEffect(() => {
     // Temporary access or catalog failures must not discard the last confirmed retention set.
     if (!enabled || rosterClient !== client) return;
-    connections?.retainSessions('team-leaders', teams.filter(team => team.status !== 'archived').flatMap(team => team.members
+    // Support coordinators are not kept connected: their runtimes are released while idle.
+    connections?.retainSessions('team-leaders', teams.filter(team => team.status !== 'archived' && !team.callForSupport).flatMap(team => team.members
       .filter(member => member.role === 'leader' && member.creation === 'ready' && member.nativeSessionId)
       .map(member => ({ hostId: member.hostId, providerId: member.providerId, nativeSessionId: member.nativeSessionId! }))));
   }, [connections, client, rosterClient, enabled, teams]);
@@ -136,7 +139,9 @@ export function TeamMenu(props: Props) {
         <ul className="lab-tpm-list">{group.map(item => <TeamListItem key={item.id} team={item} selected={!revealing && props.compact ? item.members.some(member => isCurrentMember(member, props.currentSession)) : selected === item.id} busy={busy}
           onOpen={() => void run(() => openTeam(item))} onRename={title => run(() => change({action:'rename',teamId:item.id,title}))}
           navigation={props.compact ? <TeamSessionNavigation team={item} hosts={hosts} busy={busy} currentSession={props.currentSession} onOpen={target => void run(() => openSession(target))} /> : undefined}
-          management={<TeamManagement baseUrl={baseUrl} team={item} hosts={hosts} busy={busy} failure={error} onChange={input => run(() => change(input))} onOpenSession={target => void run(() => openSession(target))} />} />)}</ul></section>;
+          management={item.callForSupport
+            ? <SupportGroup team={item} hosts={hosts} busy={busy} onChange={input => run(() => change(input))} onOpenSession={target => void run(() => openSession(target))} />
+            : <TeamManagement baseUrl={baseUrl} team={item} hosts={hosts} busy={busy} failure={error} onChange={input => run(() => change(input))} onOpenSession={target => void run(() => openSession(target))} />} />)}</ul></section>;
     });
   }
   if (!enabled) return null;
@@ -150,6 +155,8 @@ export function TeamMenu(props: Props) {
         {!teams.some(item => item.status !== 'archived') ? <p className="lab-control-note">Start with a Leader. Discuss the work, then add members.</p> : null}
         {teams.some(item => item.status === 'archived') ? <details><summary>Archived</summary>{groups(true)}</details> : null}
         {pendingCreate?.source || source ? <p className="lab-control-note" data-creation-source>For: <strong>{(pendingCreate?.source ?? source)!.title}</strong></p> : null}
+        {source && source.hostId !== 'local' && rosterClient === client ? <SupportSession baseUrl={baseUrl} source={source} teams={teams} teamClient={client} busy={busy}
+          run={action => run(action)} onTeam={team => { setTeams(current => [...current.filter(value => value.id !== team.id), team]); setRosterClient(client); }} /> : null}
         <button type="button" disabled={busy || !(pendingCreate?.source ?? source) || !hosts.some(host => host.id === (pendingCreate?.source ?? source)?.hostId && host.teamManagement && host.online)} onClick={() => void run(create)}>{pendingCreate ? 'Check previous creation' : 'New team'}</button>
         {!source || source.hostId === 'local' ? <p className="lab-control-note">Open a session on a connected Host to create a Team.</p> : null}
         {error || loadError ? <p role="alert">{error || loadError}</p> : null}
@@ -180,7 +187,9 @@ function TeamListItem({ team, selected, busy, onOpen, onRename, navigation, mana
   return <li data-team-id={team.id}>
     <div className="lab-team-list-row">
       <button type="button" className="lab-session-row" aria-current={selected || undefined} onClick={onOpen}>
-        <span className="lab-tracked-description"><strong>{team.title}</strong><small>{team.members.length} {team.members.length === 1 ? 'worker' : 'workers'}{team.status !== 'active' ? ` · ${team.status}` : ''}</small></span>
+        <span className="lab-tracked-description"><strong>{team.title}</strong><small>{team.callForSupport
+          ? `Support · ${team.callForSupport.status === 'paused_budget' ? 'paused' : `${team.callForSupport.calls.filter(call => call.status === 'open' || call.status === 'queued').length} open`}${team.callForSupport.roster?.status === 'pending' ? ' · roster waits for you' : ''} · ${usageText(team.callForSupport.usage)}`
+          : `${team.members.length} ${team.members.length === 1 ? 'worker' : 'workers'}`}{team.status !== 'active' ? ` · ${team.status}` : ''}</small></span>
       </button>
       <button ref={renameButton} type="button" className="lab-team-rename" disabled={busy} aria-label="Rename Team" title={`Rename ${team.title}`} onClick={() => { setTitle(team.title); setEditing(true); }}>Rename</button>
     </div>

@@ -3,7 +3,8 @@ import type { SessionWindowTarget } from './hooks/useSessionWindows.js';
 
 /** Teams supply a layout preset; the workspace owns navigation and window lifetime. */
 export function teamLayoutTargets(team: Team, compact: boolean): { main: SessionWindowTarget; dock: SessionWindowTarget[]; groupRoot?: SessionWindowTarget } {
-  const ready = team.members.filter(member => member.creation === 'ready' && member.nativeSessionId);
+  // A support group's worker is its main session, not one of its dock members.
+  const ready = team.members.filter(member => member.creation === 'ready' && member.nativeSessionId && member.role !== 'requester');
   const target = (member: (typeof ready)[number]): SessionWindowTarget => ({
     teamId: team.id, teamMemberId: member.id, hostId: member.hostId, providerId: member.providerId, nativeSessionId: member.nativeSessionId!, title: member.name,
   });

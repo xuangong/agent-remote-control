@@ -122,8 +122,11 @@ export function describeSession({ session, sessions = [], forks = [], asks = [],
     const leader = team.members.find(member => member.role === 'leader');
     const leaderSession = leader?.nativeSessionId ? { ...leader, nativeSessionId: leader.nativeSessionId, title: leader.name } : undefined;
     const prefix = `team:${team.id}`;
-    const addTeam = () => add({ id: `${prefix}:group`, kind: 'team', label: 'Team', value: team.title,
-      ...(team.status === 'archived' ? { detail: 'Archived' } : {}), target: { kind: 'group', groupType: 'team', groupId: team.id } });
+    const support = team.callForSupport;
+    const open = support?.calls.filter(call => call.status === 'open' || call.status === 'queued').length ?? 0;
+    const addTeam = () => add({ id: `${prefix}:group`, kind: 'team', label: support ? 'Support' : 'Team', value: support ? support.role : team.title,
+      ...(team.status === 'archived' ? { detail: 'Archived' } : support ? { detail: support.status === 'paused_budget' ? 'Paused' : `${open} open ${open === 1 ? 'call' : 'calls'}` } : {}),
+      target: { kind: 'group', groupType: 'team', groupId: team.id } });
     const addMember = (member: Team['members'][number], kind: string, name: string) => {
       const id = `${prefix}:${kind}:${member.id}`;
       if (member.nativeSessionId) addSession(id, kind, name, { ...member, nativeSessionId: member.nativeSessionId, title: member.name });
@@ -135,8 +138,9 @@ export function describeSession({ session, sessions = [], forks = [], asks = [],
         : session.teamId === team.id && session.teamMemberId === member.id
           && (current.hostId ?? 'local') === member.hostId && current.providerId === member.providerId;
       if (!matchesMember) continue;
-      addRole(member.role === 'leader' ? 'Team leader' : 'Team member');
+      addRole(support ? member.role === 'leader' ? 'Support coordinator' : member.role === 'requester' ? 'Calls for support' : 'Supporter' : member.role === 'leader' ? 'Team leader' : 'Team member');
       addTeam();
+      if (member.role === 'requester') continue;
       if (member.role !== 'leader' && leader) addMember(leader, 'leader', 'Leader');
       addSession(`${prefix}:main`, 'main', 'Main', team.source);
       if (member.role === 'leader') {

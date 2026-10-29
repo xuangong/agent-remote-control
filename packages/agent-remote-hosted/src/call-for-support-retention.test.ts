@@ -66,3 +66,16 @@ it('tells a Host the status of groups it holds seats in, and never restores an a
   expect(await states('mac', [roleId])).toEqual({ states: [{ teamId: roleId, status: 'archived' }] });
   await expect(f.broker.action({ teamId: roleId, action: 'restore' })).rejects.toThrow('cannot be restored');
 });
+
+it('tells the coordinator to collect again when an unattached upload expired before its report', async () => {
+  let clock = 0;
+  const f = supportFixture({ resourceClock: { now: () => clock, ttlMs: 1000 } }); const profile = f.profile(); f.enable('worker', [profile.id]);
+  const { roleId, callId } = await f.call({ operationId: 'op', profileId: profile.id });
+  const coordinator = f.team(roleId).members[0]!, seat = { teamId: roleId, memberId: coordinator.id, operationId: 'patch' }, bytes = Buffer.from('patch');
+  await f.broker.hostCall('mac', { ...seat, action: 'resource_begin', name: 'fix.patch', mediaType: 'text/x-diff', byteLength: bytes.length, sha256: createHash('sha256').update(bytes).digest('hex') } as TeamHostCall);
+  await f.broker.hostCall('mac', { ...seat, action: 'resource_chunk', offset: 0, contentBase64: bytes.toString('base64') } as TeamHostCall);
+  const { resource } = await f.broker.hostCall('mac', { ...seat, action: 'resource_finish' } as TeamHostCall) as { resource: { resourceId: string } };
+  clock = 2000;
+  await expect(f.broker.hostCall('mac', { action: 'report_support', teamId: roleId, memberId: coordinator.id, callId, operationId: 'report',
+    report: { status: 'reported', summary: 'A fix.', findings: [], resources: [resource.resourceId] } })).rejects.toThrow('no longer stored; collect or upload it again');
+});

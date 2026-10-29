@@ -8,7 +8,7 @@ import { PortableTeamResourceStore } from '../team-resources.js';
 export const review: CallForSupportProfileInput = { name: 'Cross review', description: 'Independent reviewers.', coordinator: { model: 'gpt-5.5', reasoningEffort: 'high' }, enableByDefault: false,
   mandate: { supporters: [{ providerId: 'claude', model: 'opus' }], maxSupporters: 2, workspaces: ['shared'], remoteHosts: [], approval: 'every_roster' } };
 
-export function supportFixture(options: { capable?: string[]; readOnly?: boolean | ((hostId: string, providerId: string) => boolean) } = {}) {
+export function supportFixture(options: { capable?: string[]; readOnly?: boolean | ((hostId: string, providerId: string) => boolean); resourceClock?: { now(): number; ttlMs: number } } = {}) {
   let teams: SavedTeam[] = [], now = 100;
   const state: CallForSupportState = emptyCallForSupportState();
   const seats: TeamSeat[] = [];
@@ -16,7 +16,8 @@ export function supportFixture(options: { capable?: string[]; readOnly?: boolean
   const resolve = (hostId: string, providerId: string, nativeSessionId: string) => ({ controllerId: hostId, providerId, nativeSessionId });
   const rows = new Map<string, Uint8Array>();
   const resources = new PortableTeamResourceStore({ storage: { async get(key) { return rows.get(key); }, async put(key, value) { rows.set(key, value); }, async delete(key) { rows.delete(key); },
-    async list(prefix) { return [...rows.keys()].filter(key => key.startsWith(prefix)); } } });
+    async list(prefix) { return [...rows.keys()].filter(key => key.startsWith(prefix)); } },
+    ...(options.resourceClock ? { now: options.resourceClock.now, draftTtlMs: options.resourceClock.ttlMs } : {}) });
   const ports: TeamBrokerPorts = {
     resolveSession: resolve, read: () => teams, now: () => ++now, assertHost: () => {}, resources,
     change: async update => { const draft = structuredClone(teams), value = structuredClone(update(draft)); if (!draft.every(validSavedTeam)) throw new Error('Invalid Team state.'); teams = draft; return value; },

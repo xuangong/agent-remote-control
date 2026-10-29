@@ -277,7 +277,9 @@ export class TeamBroker {
     const store = this.ports.resources ?? fail('Team resource storage is unavailable on this Relay.');
     for (const resourceId of resourceIds) {
       const team = structuredClone(find(this.ports.read(), teamId)); compactTeamDeliveries(team, this.ports.now());
-      const ref = this.resourceAccess(team, memberId, resourceId), actual = await store.getMetadata(`team:${teamId}`, resourceId);
+      const ref = this.resourceAccess(team, memberId, resourceId);
+      // An unpinned upload (a collected patch, a bundle) expires a day after its last use.
+      const actual = await store.getMetadata(`team:${teamId}`, resourceId).catch(() => fail(`Resource ${resourceId} is no longer stored; collect or upload it again.`));
       if ((['resourceId', 'name', 'mediaType', 'sha256', 'byteLength'] as const).some(key => ref[key] !== actual[key])) fail('Resource metadata does not match stored bytes.');
       if (keep) await store.pin(`team:${teamId}`, resourceId);
     }

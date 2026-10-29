@@ -1,6 +1,7 @@
 import { Type, type Static } from '@sinclair/typebox';
 import { NativeSessionRef } from './session-succession.js';
 import { Value } from '@sinclair/typebox/value';
+import { TeamResource } from './team-resource.js';
 const object = { additionalProperties: false } as const;
 const id = Type.String({ minLength: 1, maxLength: 256 });
 const short = Type.String({ maxLength: 2048 });
@@ -15,8 +16,7 @@ export const TeamMember = Type.Object({
   summary: short, updatedAt: Type.Number(), error: Type.Optional(short),
 }, object);
 export type TeamMember = Static<typeof TeamMember>;
-export const TeamResource = Type.Object({ resourceId: id, name: Type.String({ minLength: 1, maxLength: 255 }), mediaType: Type.String({ minLength: 1, maxLength: 255 }), byteLength: Type.Integer({ minimum: 0, maximum: 50 * 1024 * 1024 }), sha256: Type.String({ pattern: '^[a-f0-9]{64}$' }) }, object);
-export type TeamResource = Static<typeof TeamResource>;
+export { TeamResource };
 export const TeamResourceUpload = Type.Object({ ownerMemberId: id, expiresAt: Type.Number(), resource: TeamResource }, object);
 export type TeamResourceUpload = Static<typeof TeamResourceUpload>;
 export const TeamMessage = Type.Object({ id, from: id, to: id, text, resources: Type.Optional(Type.Array(TeamResource, { minItems: 1, maxItems: 8 })),

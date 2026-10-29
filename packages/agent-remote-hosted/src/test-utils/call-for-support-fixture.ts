@@ -6,7 +6,7 @@ import { emptyCallForSupportState, executeProfileCommand, setEnablement, type Ca
 export const review: CallForSupportProfileInput = { name: 'Cross review', description: 'Independent reviewers.', coordinator: { model: 'gpt-5.5', reasoningEffort: 'high' }, enableByDefault: false,
   mandate: { supporters: [{ providerId: 'claude', model: 'opus' }], maxSupporters: 2, workspaces: ['shared'], remoteHosts: [], approval: 'every_roster' } };
 
-export function supportFixture(options: { capable?: string[]; readOnly?: boolean } = {}) {
+export function supportFixture(options: { capable?: string[]; readOnly?: boolean | ((hostId: string, providerId: string) => boolean) } = {}) {
   let teams: SavedTeam[] = [], now = 100;
   const state: CallForSupportState = emptyCallForSupportState();
   const seats: TeamSeat[] = [];
@@ -22,7 +22,7 @@ export function supportFixture(options: { capable?: string[]; readOnly?: boolean
     callForSupport: {
       state: () => state,
       assertHost: hostId => { if (!(options.capable ?? ['mac', 'linux']).includes(hostId)) throw new Error('Update the Controller to use Call For Support.'); },
-      readOnly: () => options.readOnly ?? true,
+      readOnly: (hostId, providerId) => typeof options.readOnly === 'function' ? options.readOnly(hostId, providerId) : options.readOnly ?? true,
     },
   };
   const broker = new TeamBroker(ports);

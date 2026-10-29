@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { CALL_FOR_SUPPORT_CALL_LIMIT, nativeSessionRefKey, type CallForSupportCall, type CallForSupportCallInput, type CallForSupportGroup, type CallForSupportProfile,
-  type Team, type TeamHostCall, type TeamMember, type TeamSource } from '@orchardworks/agent-remote-protocol';
+  type CallForSupportRoster, type CallForSupportRosterMember, type Team, type TeamAction, type TeamHostCall, type TeamMember, type TeamSource } from '@orchardworks/agent-remote-protocol';
 import { assertTeamQueueCapacity, type SavedTeam } from './team-delivery.js';
 import { effectiveProfiles, type CallForSupportState } from './call-for-support-profiles.js';
 import type { TeamBrokerPorts } from './teams.js';
@@ -25,6 +25,7 @@ type CallResult = { status: 'accepted' | 'needs_approval' | 'unavailable'; messa
 interface GroupCall extends CallForSupportCallInput { id: string; followUpOf?: string; origin: CallForSupportCall['origin'] }
 
 export const CALL_FOR_SUPPORT_TEAM_LIMIT = 128;
+const TEAM_MEMBER_LIMIT = 12;
 const WAITING_CALL_LIMIT = 8;
 const fail = (message: string): never => { throw new Error(message); };
 const digest = (value: unknown) => createHash('sha256').update(JSON.stringify(value)).digest('hex');
@@ -70,6 +71,28 @@ export function addCall(team: SavedTeam, input: GroupCall, now: number): CallFor
   }
   if (open) queueCall(team, call, now);
   return call;
+}
+
+/** Supporters that count toward the mandate: not released or abandoned. */
+export const activeSupporters = (team: Team) => team.members.filter(member => member.role === 'member' && member.creation !== 'released' && member.creation !== 'abandoned');
+const sameConfiguration = (a: { providerId: string; model: string; reasoningEffort?: string }, b: typeof a) => a.providerId === b.providerId && a.model === b.model && a.reasoningEffort === b.reasoningEffort;
+
+/** Stops delivering to a supporter. Its session is kept for history. */
+export function releaseSupporter(team: SavedTeam, memberId: string, now: number): void {
+  const target = team.members.find(member => member.id === memberId) ?? fail('Team member not found.');
+  if (target.role !== 'member') fail('Only supporters can be released.');
+  if (target.creation === 'released') return;
+  if (target.creation === 'abandoned') fail('The supporter was abandoned.');
+  target.creation = 'released'; target.activity = 'idle'; target.updatedAt = now;
+  for (const message of team.messages) if (message.to === memberId && message.status === 'queued') message.status = 'canceled';
+}
+
+/** A note to the coordinator from the worker's seat, which every Team message needs as sender. */
+function noteToCoordinator(team: SavedTeam, id: string, text: string, now: number): void {
+  if (team.messages.some(message => message.id === id)) return;
+  const message = { id, from: requester(team).id, to: team.members[0]!.id, text: `[Call For Support] ${text}`, status: 'queued' as const, createdAt: now };
+  assertTeamQueueCapacity(team, message);
+  team.messages.push(message);
 }
 
 /** Queues the open call's message from the worker's seat to the coordinator. */
@@ -150,6 +173,112 @@ export class CallForSupportGroups {
     if (cwd && !team.members[0]!.cwd) await this.broker.change(teams => { const current = teams.find(item => item.id === teamId)!; if (!current.members[0]!.cwd) current.members[0]!.cwd = cwd; });
     team = await this.broker.provision(teamId, team.members[0]!.id);
     return team;
+  }
+  /** Checks a roster against the Hosts and the mandate. Problems no approval can fix throw; the rest only leave the mandate. */
+  private assessRoster(team: SavedTeam, proposal: { members: CallForSupportRosterMember[]; release?: string[] }): boolean {
+    const support = group(team), open = support.calls.find(call => call.status === 'open');
+    for (const id of proposal.release ?? []) {
+      const target = team.members.find(member => member.id === id);
+      if (!target || target.role !== 'member' || target.creation === 'released' || target.creation === 'abandoned') fail(`Cannot release ${id}: it is not an active supporter.`);
+    }
+    if (team.members.length + proposal.members.length > TEAM_MEMBER_LIMIT) fail('The group has no room for more members. Archive it and call again with fresh.');
+    let within = true;
+    for (const member of proposal.members) {
+      const hostId = member.workspace === 'remote' ? member.hostId! : team.source.hostId;
+      this.ports.assertHost(hostId);
+      this.broker.ports.assertHost(hostId, member.providerId);
+      if (member.workspace === 'shared' && !this.ports.readOnly(hostId, member.providerId)) fail(`${member.providerId} cannot run read-only sessions on the worker's Host; use a worktree.`);
+      if (member.workspace === 'remote' && !support.mandate.remoteHosts.some(host => host.hostId === member.hostId)) fail('Remote supporters need a Host and repository from the mandate.');
+      if (member.workspace !== 'shared' && !open?.context?.commit) fail('Worktree and remote supporters start at the call\'s commit. Report needs_input and ask the worker to commit and call again.');
+      if (!support.mandate.supporters.some(allowed => sameConfiguration(allowed, member)) || !support.mandate.workspaces.includes(member.workspace)) within = false;
+    }
+    const released = new Set(proposal.release ?? []);
+    if (activeSupporters(team).filter(member => !released.has(member.id)).length + proposal.members.length > support.mandate.maxSupporters) within = false;
+    return within;
+  }
+  /** The coordinator's own requests about its group. */
+  async coordinatorCall(hostId: string, call: Extract<TeamHostCall, { action: 'propose_roster' | 'release_supporter' }>): Promise<unknown> {
+    const result = await this.broker.change(teams => {
+      const team = teams.find(item => item.id === call.teamId) ?? fail('Team not found.'), now = this.broker.ports.now();
+      const self = team.members.find(member => member.id === call.memberId) ?? fail('Team member not found.');
+      if (self.hostId !== hostId || self.creation !== 'ready') fail('This Host is not the registered Team member.');
+      if (self.role !== 'leader') fail('Only the coordinator manages supporters.');
+      const support = group(team);
+      if (team.status !== 'active') fail('Team is not active.');
+      if (call.action === 'release_supporter') { releaseSupporter(team, call.target, now); team.revision++; team.updatedAt = now; return { team, provision: false }; }
+      const id = digest(['roster', team.id, self.id, call.operationId]);
+      if (support.roster?.id === id) return { team, provision: false };
+      if (support.status === 'paused_budget') fail(`Support is paused: ${support.pauseReason ?? 'its budget is reached'}.`);
+      const withinMandate = this.assessRoster(team, call);
+      const automatic = withinMandate && support.mandate.approval === 'within_mandate';
+      const roster: CallForSupportRoster = { id, status: automatic ? 'approved' : 'pending', members: structuredClone(call.members), ...(call.release?.length ? { release: [...call.release] } : {}),
+        rationale: call.rationale, withinMandate, createdAt: now, ...(automatic ? { decidedAt: now } : {}) };
+      support.roster = roster; team.revision++; team.updatedAt = now;
+      return { team, provision: automatic };
+    });
+    if (call.action === 'release_supporter') return { released: call.target };
+    const roster = result.team.callForSupport!.roster!;
+    if (result.provision) await this.provisionRoster(result.team.id, roster.id);
+    const current = this.broker.ports.read().find(team => team.id === result.team.id)!.callForSupport!.roster!;
+    return { rosterId: current.id, status: current.status, withinMandate: current.withinMandate,
+      message: current.status === 'pending' ? (current.withinMandate ? 'Waiting for the user to approve the roster.' : 'The roster is outside the mandate and waits for the user.')
+        : current.status === 'provisioned' ? 'Provisioned. Each supporter sends a registration message when it is ready.' : `Roster ${current.status}.` };
+  }
+  /** Releases the roster's members, then adds and creates its new ones. */
+  private async provisionRoster(teamId: string, rosterId: string): Promise<void> {
+    const added = await this.broker.change(teams => {
+      const team = teams.find(item => item.id === teamId) ?? fail('Team not found.'), now = this.broker.ports.now();
+      const support = group(team), roster = support.roster;
+      if (!roster || roster.id !== rosterId || roster.status !== 'approved') return [];
+      this.assessRoster(team, roster);
+      for (const id of roster.release ?? []) releaseSupporter(team, id, now);
+      const worker = requester(team), commit = support.calls.find(call => call.status === 'open')?.context?.commit;
+      const members = roster.members.map((member, index): TeamMember => {
+        const remote = member.workspace === 'remote' ? support.mandate.remoteHosts.find(host => host.hostId === member.hostId)! : undefined;
+        return { id: digest(['roster-member', rosterId, index]).slice(0, 32), hostId: remote?.hostId ?? team.source.hostId, providerId: member.providerId, role: 'member',
+          name: member.name, responsibility: member.responsibility, ...(remote ? { cwd: remote.workspace } : worker.cwd ? { cwd: worker.cwd } : {}),
+          model: member.model, ...(member.reasoningEffort ? { reasoningEffort: member.reasoningEffort } : {}),
+          ...(member.workspace === 'shared' ? { access: 'read_only' as const, workspace: { kind: 'shared' as const } }
+            : member.workspace === 'worktree' ? { workspace: { kind: 'worktree' as const, commit: commit! } } : { workspace: { kind: 'remote' as const, commit: commit!, repository: remote!.workspace } }),
+          creation: 'reserved', activity: 'unknown', summary: '', updatedAt: now };
+      });
+      for (const member of members) if (!team.members.some(item => item.id === member.id)) team.members.push(member);
+      team.revision++; team.updatedAt = now;
+      return members.map(member => member.id);
+    });
+    for (const memberId of added) await this.broker.provision(teamId, memberId);
+    if (added.length) await this.broker.change(teams => {
+      const team = teams.find(item => item.id === teamId)!, roster = team.callForSupport?.roster;
+      if (roster?.id === rosterId && roster.status === 'approved') { roster.status = 'provisioned'; team.revision++; team.updatedAt = this.broker.ports.now(); }
+    });
+  }
+  /** The user's decisions on a group. */
+  async userAction(input: Extract<TeamAction, { action: 'resolve_roster' | 'release_member' }>): Promise<Team> {
+    const result = await this.broker.change(teams => {
+      const team = teams.find(item => item.id === input.teamId) ?? fail('Team not found.'), now = this.broker.ports.now(), support = group(team);
+      if (team.status !== 'active') fail('Team is not active.');
+      if (input.action === 'release_member') { releaseSupporter(team, input.memberId, now); team.revision++; team.updatedAt = now; return { team, provision: false }; }
+      const roster = support.roster;
+      if (!roster || roster.id !== input.rosterId) fail('Roster not found.');
+      if (roster!.status !== 'pending') {
+        // Approving again resumes a provisioning that stopped part way.
+        if (roster!.status === 'approved' && input.decision === 'approve') return { team, provision: true };
+        if (roster!.status === 'rejected' && input.decision === 'reject' || roster!.status === 'provisioned' && input.decision === 'approve') return { team, provision: false };
+        fail('The roster was already decided.');
+      }
+      roster!.decidedAt = now; if (input.note) roster!.note = input.note;
+      if (input.decision === 'reject') {
+        roster!.status = 'rejected';
+        noteToCoordinator(team, digest(['roster-decision', roster!.id]), `The user rejected roster ${roster!.id}.${input.note ? ` Note: ${input.note}` : ''} Propose another roster or report needs_input.`, now);
+      } else {
+        if (support.status === 'paused_budget') fail('Resume the group before approving a roster.');
+        roster!.status = 'approved';
+      }
+      team.revision++; team.updatedAt = now;
+      return { team, provision: input.decision === 'approve' };
+    });
+    if (result.provision) await this.provisionRoster(result.team.id, (input as { rosterId: string }).rosterId);
+    return this.broker.project(this.broker.ports.read().find(team => team.id === input.teamId)!);
   }
   /** A call from the user on an existing group. */
   async userCall(teamId: string, input: CallForSupportCallInput & { operationId: string; followUpOf?: string }): Promise<Team> {

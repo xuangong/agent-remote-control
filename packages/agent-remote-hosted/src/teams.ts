@@ -24,8 +24,8 @@ const upgradeRequired = 'Update the Controller for exact Team recipients. Reload
 type StoredRecipientAnchor = Pick<TeamMember, 'hostId' | 'providerId' | 'nativeSessionId'>;
 const withoutRecipient = <T extends { id: string; resolvedTarget?: NativeSessionRef }>(value: T): Omit<T, 'resolvedTarget'> => { const { resolvedTarget: _target, ...legacy } = value; return legacy; };
 const fail = (message: string): never => { throw new Error(message); };
-const callForSupportHostActions = new Set<string>(['propose_roster', 'report_support', 'write_ledger', 'release_supporter', 'report_usage']);
-const callForSupportActions = new Set<string>(['resolve_roster', 'release_member', 'update_mandate', 'resume_group']);
+const callForSupportHostActions = new Set<string>(['report_support', 'write_ledger', 'report_usage']);
+const callForSupportActions = new Set<string>(['update_mandate', 'resume_group']);
 const unavailableGroups = 'Call For Support is unavailable on this Relay.';
 const sameRecipient = (current: NativeSessionRef, anchor: StoredRecipientAnchor) => current.providerId === anchor.providerId && current.nativeSessionId === anchor.nativeSessionId;
 const find = (teams: SavedTeam[], id: string) => teams.find(team => team.id === id) ?? fail('Team not found.');
@@ -35,7 +35,7 @@ function touch(team: Team, now: number) { team.revision++; team.updatedAt = now;
 /** Queued input that never ran can still be reported undelivered when its recipient is stopped. */
 const withdrawable = (message: TeamMessage, outcome: string) => message.status === 'accepted' && message.acceptance === 'queued' && outcome === 'rejected';
 function settleArchive(team: SavedTeam, now: number) {
-  if (team.status === 'archiving' && team.members.every(item => item.creation === 'abandoned' || item.creation === 'ready' && item.activity === 'idle' && item.updatedAt >= team.updatedAt)
+  if (team.status === 'archiving' && team.members.every(item => item.creation === 'abandoned' || item.creation === 'released' || item.creation === 'ready' && item.activity === 'idle' && item.updatedAt >= team.updatedAt)
     && ![...team.messages, ...(team.deliveryReceipts ?? [])].some(unresolvedTeamDelivery)) { team.status = 'archived'; touch(team, now); }
 }
 
@@ -133,6 +133,7 @@ export class TeamBroker {
       return groups.userCall(input.teamId, { operationId: input.operationId, task: input.task, ...(input.context ? { context: input.context } : {}), deliverable: input.deliverable,
         ...(input.followUpOf ? { followUpOf: input.followUpOf } : {}) });
     }
+    if (input.action === 'resolve_roster' || input.action === 'release_member') return (this.groups ?? fail(unavailableGroups)).userAction(input);
     if (callForSupportActions.has(input.action)) fail(unavailableGroups);
     if (input.action === 'add_member') this.ports.assertHost(input.hostId, input.providerId);
     const result = await this.change(teams => {
@@ -166,6 +167,7 @@ export class TeamBroker {
     if (call.action === 'poll') return this.ports.read().filter(team => team.status !== 'archived' && team.members.some(item => item.hostId === hostId && item.creation === 'ready')).map(team => this.project(team, recipientAware));
     const projectDelivery = <T extends { id: string; resolvedTarget?: NativeSessionRef }>(value: T) => recipientAware ? value : withoutRecipient(value);
     if (call.action === 'call_for_support' || call.action === 'support_status') return (this.groups ?? fail(unavailableGroups)).workerCall(hostId, call);
+    if (call.action === 'propose_roster' || call.action === 'release_supporter') { assertCurrent(); return (this.groups ?? fail(unavailableGroups)).coordinatorCall(hostId, call); }
     if (callForSupportHostActions.has(call.action)) return fail(unavailableGroups);
     if (call.action === 'resource_begin' || call.action === 'resource_chunk' || call.action === 'resource_finish' || call.action === 'resource_metadata' || call.action === 'resource_read') return this.resourceCall(hostId, call, assertCurrent);
     if (call.action === 'send' && call.resources?.length) await this.prepareResources(hostId,call,assertCurrent);

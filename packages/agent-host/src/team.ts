@@ -7,6 +7,7 @@ import { AgentOperationRejectedError, bindAgentSessionTools, type AgentInputAcce
 import type { SessionExecutionRouting } from './session-succession-service.js';
 import type { RoleSuccessionDecision, SessionRole } from './session-role-succession.js';
 import type { SessionCreation } from './role-session-creation.js';
+import { coordinatorInstructions, coordinatorTools, supporterInstructions } from './call-for-support-roles.js';
 import { isNativeSessionRef, nativeSessionRefKey, type NativeSessionRef, isTeam, isTeamSeat, sessionOperationAvailability, type Team, type TeamHostCall, type TeamMember, type TeamMessage, type TeamSeat } from '@orchardworks/agent-remote-protocol';
 import { OperationCacheError, type RemoteHostSessionLease, type SessionWireOperationExecutor } from '@orchardworks/agent-remote-relay';
 
@@ -112,9 +113,11 @@ export class TeamRuntime implements SessionRole {
   }
   async genericSuccession(holder: NativeSessionRef, targetProviderId: string): Promise<RoleSuccessionDecision | undefined> {
     await this.ready;
-    if (!this.seatHeldBy([holder])) return undefined;
+    const record = this.seatHeldBy([holder]);
+    if (!record) return undefined;
     if (this.access.genericSuccession?.() !== true) return { allowed: false, reason: 'Update the Relay to hand off Team members.' };
     if (!this.access.supportedProviders().includes(targetProviderId)) return { allowed: false, reason: 'This provider cannot run Team tools on this Host.' };
+    if (record.seat.member.access === 'read_only' && !(this.access.readOnlyProviders?.() ?? []).includes(targetProviderId)) return { allowed: false, reason: 'This provider cannot keep this session read-only.' };
     return { allowed: true };
   }
   private seatHeldBy(recipients: ReadonlyArray<NativeSessionRef | undefined>): LocalSeat | undefined {
@@ -182,8 +185,9 @@ export class TeamRuntime implements SessionRole {
     const tool = (name: string, description: string, properties: Record<string, unknown>, required: string[], execute: (args: Record<string, string>) => Promise<unknown>): AgentSessionTool => ({
       name, description, inputSchema: { type: 'object', properties, required, additionalProperties: false }, execute: async args => JSON.stringify(await execute(args as Record<string, string>)),
     });
+    const group = seat.callForSupport, coordinator = !!group && member.role === 'leader';
     const tools = [
-      tool('read_team', 'Read members, responsibilities, progress, compact delivery status and a bounded page of complete messages addressed to you. This does not consume messages. Fully read incoming messages, then acknowledge their IDs with acknowledge_team_messages before acting. Use nextAfterMessageId as afterMessageId while hasMore is true. Accepted input is not completed work.', { afterMessageId: id }, [], async args => teamInbox(await call({ action: 'read' }), member.id, args.afterMessageId)),
+      tool('read_team', 'Read members, responsibilities, progress, compact delivery status and a bounded page of complete messages addressed to you. This does not consume messages. Fully read incoming messages, then acknowledge their IDs with acknowledge_team_messages before acting. Use nextAfterMessageId as afterMessageId while hasMore is true. Accepted input is not completed work.', { afterMessageId: id }, [], async args => teamInbox(await call({ action: 'read' }), member.id, args.afterMessageId, { group: coordinator })),
       tool('acknowledge_team_messages', 'Acknowledge incoming message IDs you have completely read through read_team before acting on them. This records receipt, not task completion, and prevents later native reinjection. Never acknowledge unread or truncated bodies. Retry the same IDs after a lost response; accepted delivery receipts are idempotent. Claimed or uncertain native deliveries cannot be cleared by this tool.', { messageIds: { type: 'array', items: id, minItems: 1, maxItems: 32, uniqueItems: true } }, ['messageIds'], args => request({ action: 'acknowledge', teamId, memberId: member.id, messageIds: args.messageIds as unknown as string[], expectedNativeSessionId: actual()!.nativeSessionId })),
       tool('send_team_message', 'Send a task, question or evidence. Reuse operationId for the same request. Delivery is asynchronous; inspect read_team for its receipt. Members may send only to their Leader. Attach up to 8 uploaded or received resource IDs using resources; file bytes are not embedded in text.', { to: id, operationId: id, text, resources: {type:'array',items:id,minItems:1,maxItems:8,uniqueItems:true} }, ['to', 'operationId', 'text'], args => request({ action: 'send', teamId, memberId: member.id, to: args.to!, operationId: args.operationId!, text: args.text!, ...(args.resources ? {resources:args.resources as unknown as string[]} : {}) })),
       tool('upload_team_resource', 'Upload a regular file from an absolute path on this Host, up to 50 MiB. Reuse operationId to resume. Returns a verified resourceId for send_team_message resources; does not send or execute the file.', {path:{type:'string',minLength:1,maxLength:4096},operationId:id}, ['path','operationId'], args => this.resourceFiles.upload(teamId,member.id,args.path!,args.operationId!, assertCurrent)),
@@ -191,7 +195,7 @@ export class TeamRuntime implements SessionRole {
       tool('report_team_progress', 'Record current progress, blocking questions or completion evidence. Also message the Leader when it needs to act.', { summary: { type: 'string', maxLength: 2048 } }, ['summary'], async args => teamMemberUpdate(await request({ action: 'report', teamId, memberId: member.id, summary: args.summary! }), member.id)),
     ];
     if (member.role === 'leader') {
-      tools.push(tool('describe_team_member', 'Record responsibilities agreed with the user. Include task scope, environment, permissions, dependencies and expected evidence. This does not dispatch work or grant native permissions.', { target: id, responsibility: { type: 'string', maxLength: 2048 } }, ['target', 'responsibility'], async args => teamMemberUpdate(await request({ action: 'describe_member', teamId, memberId: member.id, target: args.target!, responsibility: args.responsibility! }), args.target!)));
+      if (!group) tools.push(tool('describe_team_member', 'Record responsibilities agreed with the user. Include task scope, environment, permissions, dependencies and expected evidence. This does not dispatch work or grant native permissions.', { target: id, responsibility: { type: 'string', maxLength: 2048 } }, ['target', 'responsibility'], async args => teamMemberUpdate(await request({ action: 'describe_member', teamId, memberId: member.id, target: args.target!, responsibility: args.responsibility! }), args.target!)));
       tools.push(tool('read_source_session', 'Read a bounded page from the source conversation for context. The source agent has no Team tools and receives no automatic Team messages.', { before: { type: 'object', properties: { epoch: { type: 'string' }, seq: { type: 'integer' } }, required: ['epoch','seq'], additionalProperties: false } }, [], async args => {
         assertCurrent();
         const source = await this.access.acquire(seat.source.providerId, seat.source.nativeSessionId);
@@ -201,7 +205,10 @@ export class TeamRuntime implements SessionRole {
         finally { source.release(); }
       }));
     }
+    if (coordinator) tools.push(...coordinatorTools(input => call(input as Omit<TeamHostCall, 'teamId' | 'memberId'>)));
     const inboxInstructions = ' After completely reading incoming messages from read_team, acknowledge those IDs with acknowledge_team_messages before acting on them. This confirms receipt, not task completion. Never acknowledge unread or truncated message bodies. Follow hasMore with nextAfterMessageId to read additional pages. Retry acknowledgement with the same IDs after a lost response; no user confirmation is needed.';
+    if (group) return { instructions: (coordinator ? coordinatorInstructions(seat) : supporterInstructions(seat)) + inboxInstructions,
+      tools: bindAgentSessionTools(tools, assertCurrent), ...(member.access ? { access: member.access } : {}) };
     return { instructions: (member.role === 'leader'
       ? `You are the executing Leader of Team ${teamId}, member ${member.id}. Discuss requirements with the user, analyze and implement directly, coordinate registered members, validate evidence and report delivery. Read the source session for necessary context, but do not ask its agent to do your work. Read read_team before delegating. Establish each member's responsibilities with the user and record them with describe_team_member. Remote paths and environments are independent. Shared working directories do not isolate file edits: coordinate changes with the user. Do not assume members remain available. Native permissions still apply. Await responses instead of repeatedly sending the same task.`
       : `You are worker ${member.id} in Team ${teamId}. Read read_team to find your Leader and current responsibility. Directly investigate, implement and verify assigned tasks in your local environment. Return evidence or clarification questions to the Leader with send_team_message. Do not implement until a task is assigned. Do not assume the Leader's paths exist here. Do not delegate to other members or change your authority. Native permissions still apply.`) + inboxInstructions,

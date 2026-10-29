@@ -46,7 +46,7 @@ export async function supportHarness(options: { callForSupport?: boolean } = {})
   });
   const created: Array<{ id: string; provider: string; creation: SessionCreation; extensions: AgentSessionExtensions }> = [];
   const access: TeamRuntimeAccess = {
-    controllerId: 'controller', available: () => true, supportedProviders: () => ['codex', 'claude'], readOnlyProviders: () => ['codex', 'claude'],
+    controllerId: 'controller', available: () => true, supportedProviders: () => ['codex', 'claude', 'copilot'], readOnlyProviders: () => ['codex', 'claude'],
     callForSupport: () => options.callForSupport ?? true, genericSuccession: () => true,
     sessionRouting: { resolve: anchor => ({ anchor, target: anchor, operationIds: [] }), assertCurrent: (anchor, target) => { if (anchor.nativeSessionId !== target.nativeSessionId) throw new Error('Wrong recipient'); } },
     async create(provider, creation, extensions) { const id = `native-${created.length}`; created.push({ id, provider, creation, extensions }); session(id, provider); return id; },

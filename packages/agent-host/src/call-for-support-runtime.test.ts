@@ -54,3 +54,45 @@ it('refuses group seats until the Relay acknowledged Call For Support', async ()
     expect(h.created).toEqual([]);
   } finally { await h.close(); }
 });
+
+const run = async (extensions: { tools?: readonly { name: string; execute(args: unknown): Promise<string> }[] } | undefined, name: string, args: unknown = {}) =>
+  JSON.parse(await extensions!.tools!.find(tool => tool.name === name)!.execute(args));
+
+it('gives the coordinator coordination tools and the group state, and supporters only their brief', async () => {
+  const h = await supportHarness();
+  try {
+    const profile = h.profile(); h.enable([profile.id]);
+    const { roleId, callId } = await h.call({ operationId: 'op-1', profileId: profile.id });
+    const coordinatorRef = h.ref('codex', h.team(roleId).members[0]!.nativeSessionId!);
+    const coordinator = await h.runtime.extensions(coordinatorRef);
+    expect(coordinator!.tools!.map(tool => tool.name).sort()).toEqual(['acknowledge_team_messages', 'download_team_resource', 'propose_roster', 'read_source_session', 'read_team',
+      'release_supporter', 'report_support', 'report_team_progress', 'send_team_message', 'upload_team_resource', 'write_ledger']);
+    expect(coordinator!.instructions).toContain('You coordinate Call For Support for the role "Cross review"');
+    expect(coordinator!.instructions).toContain('Never edit the worker\'s workspace');
+    expect((await run(coordinator, 'read_team')).callForSupport).toMatchObject({ role: 'Cross review', calls: [{ id: callId, status: 'open' }] });
+    expect(await run(coordinator, 'write_ledger', { revision: 0, text: 'Reviewing abcdef1.' })).toEqual({ revision: 1 });
+
+    expect(await run(coordinator, 'propose_roster', { operationId: 'roster', rationale: 'An independent model.',
+      members: [{ name: 'Opus reviewer', responsibility: 'Review for correctness.', providerId: 'claude', model: 'opus', workspace: 'shared' }] })).toMatchObject({ status: 'provisioned' });
+    const created = h.created.at(-1)!;
+    expect(created).toMatchObject({ provider: 'claude', creation: { cwd: h.directory, model: 'opus' }, extensions: { access: 'read_only' } });
+    expect(created.extensions.instructions).toContain('read-only for you');
+    expect(created.extensions.tools!.map(tool => tool.name)).not.toContain('report_support');
+    expect(await run(created.extensions, 'read_team')).not.toHaveProperty('callForSupport');
+
+    expect(await run(coordinator, 'report_support', { callId, operationId: 'report', status: 'reported', summary: 'No blocking findings.', findings: [] })).toEqual({ callId, status: 'reported' });
+    await h.runtime.tick();
+    expect(h.sessions.get('worker')!.deliveries.at(-1)!.text).toContain('No blocking findings.');
+  } finally { await h.close(); }
+});
+
+it('keeps read-only seats on providers that enforce read-only sessions', async () => {
+  const h = await supportHarness();
+  try {
+    const profile = h.profile(); h.enable([profile.id]);
+    const { roleId } = await h.call({ operationId: 'op-1', profileId: profile.id });
+    const coordinator = h.ref('codex', h.team(roleId).members[0]!.nativeSessionId!);
+    expect(await h.runtime.genericSuccession(coordinator, 'claude')).toEqual({ allowed: true });
+    expect(await h.runtime.genericSuccession(coordinator, 'copilot')).toEqual({ allowed: false, reason: 'This provider cannot keep this session read-only.' });
+  } finally { await h.close(); }
+});

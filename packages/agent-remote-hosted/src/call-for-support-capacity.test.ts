@@ -30,7 +30,7 @@ async function connectedBroker(teams: SavedTeam[], query: string) {
   const installationId = 'controller';
   let saved: RemoteHostBrokerState = {
     keys: [[createHash('sha256').update('key').digest('hex'), { kind: 'device', installationId, expires: Number.MAX_SAFE_INTEGER }]],
-    hosts: [{ id: 'host', installationId, name: 'Host', legacyDsh: false, teamManagement: true, providers: [{ providerId: 'codex', displayName: 'Codex', readOnly: true }] }],
+    hosts: [{ id: 'host', installationId, name: 'Host', legacyDsh: false, teamManagement: true, providers: [{ providerId: 'codex', displayName: 'Codex' }] }],
     bindings: [], creations: [], teams,
   };
   const server = new WebSocketServer({ host: '127.0.0.1', port: 0 });
@@ -47,7 +47,7 @@ async function connectedBroker(teams: SavedTeam[], query: string) {
   const socket = new WebSocket(`${origin.replace('http:', 'ws:')}/ws/remote-host?${query}`);
   await once(socket, 'open', { signal: AbortSignal.timeout(3000) });
   const registered = once(socket, 'message', { signal: AbortSignal.timeout(3000) });
-  socket.send(JSON.stringify({ uplinkVersion: 2, type: 'register', installationId, name: 'Host', providers: [{ providerId: 'codex', displayName: 'Codex', readOnly: true }] }));
+  socket.send(JSON.stringify({ uplinkVersion: 2, type: 'register', installationId, name: 'Host', providers: [{ providerId: 'codex', displayName: 'Codex' }] }));
   await registered;
   let sequence = 0;
   return {
@@ -97,3 +97,12 @@ test('keeps the account\'s Team state bound with full groups and leaves it uncha
   expect(f.snapshot()[0]!.callForSupport!.ledger.revision).toBe(1);
   expect((await f.call({ action: 'write_ledger', teamId: 'group-0', memberId: 'coordinator', revision: 1, text: 'short' })).value).toEqual({ revision: 2 });
 }, 15000);
+
+test('takes read-only providers from the Call For Support request, not from provider descriptors', async () => {
+  const team = fullGroup('group');
+  team.callForSupport!.calls = [{ id: 'c0', task: 'Review.', deliverable: 'findings', origin: 'worker', status: 'open', createdAt: 1, usage: { tokens: 0 } }];
+  const propose = (f: Awaited<ReturnType<typeof connectedBroker>>) => f.call({ action: 'propose_roster', teamId: 'group', memberId: 'coordinator', operationId: 'roster',
+    members: [{ name: 'Reviewer', responsibility: 'Review.', providerId: 'codex', model: 'gpt-5.5', workspace: 'shared' }], rationale: 'A second model.' });
+  expect(await propose(await connectedBroker([structuredClone(team)], capable))).toMatchObject({ status: 409, value: { error: expect.stringContaining('cannot run read-only sessions') } });
+  expect(await propose(await connectedBroker([structuredClone(team)], `${capable}&readOnlyProvider=codex`))).toMatchObject({ status: 200 });
+});

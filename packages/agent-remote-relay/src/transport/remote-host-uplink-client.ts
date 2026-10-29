@@ -54,7 +54,12 @@ export interface RemoteHostUplinkClientOptions {
   readonly teamManagement?: true;
   /** Request Call For Support groups; honored only with teamManagement. */
   readonly callForSupport?: true;
-  readonly providers?: readonly { providerId: string; displayName: string; promptEditing?: true; sessionRename?: true; daemonControl?: true; readOnly?: true }[];
+  /**
+   * Providers that enforce read-only sessions natively, sent with the Call For Support request.
+   * They travel in the connection's query, which older Relays ignore, never in the provider descriptors they validate strictly.
+   */
+  readonly readOnlyProviders?: readonly string[];
+  readonly providers?: readonly { providerId: string; displayName: string; promptEditing?: true; sessionRename?: true; daemonControl?: true }[];
   readonly providerChanges?: { current(): NonNullable<RemoteHostUplinkClientOptions['providers']>; subscribe(listener: () => void): () => void };
   readonly remoteKey: string;
   /** Must durably persist the offered credential before resolving. */
@@ -143,7 +148,7 @@ export function createRemoteHostUplinkClient(options: RemoteHostUplinkClientOpti
     const endpoint = new URL(options.url);
     if (options.successionEnrollment) endpoint.searchParams.set('successionEnrollment', '3');
     if (options.sessionStates) endpoint.searchParams.set('sessionStates', '1');
-    if (options.teamManagement) { endpoint.searchParams.set('team', '1'); endpoint.searchParams.set('teamInbox', '1'); endpoint.searchParams.set('teamRecipients', '1'); endpoint.searchParams.set('teamSuccession', '1'); endpoint.searchParams.set('teamResources', '1'); if (options.callForSupport) endpoint.searchParams.set('callForSupport', '1'); }
+    if (options.teamManagement) { endpoint.searchParams.set('team', '1'); endpoint.searchParams.set('teamInbox', '1'); endpoint.searchParams.set('teamRecipients', '1'); endpoint.searchParams.set('teamSuccession', '1'); endpoint.searchParams.set('teamResources', '1'); if (options.callForSupport) { endpoint.searchParams.set('callForSupport', '1'); for (const providerId of options.readOnlyProviders ?? []) endpoint.searchParams.append('readOnlyProvider', providerId); } }
     const socket = new WebSocket(endpoint, {
       headers: { authorization: `Bearer ${remoteKey}` },
       maxPayload: UPLINK_MAX_FRAME_BYTES,
@@ -393,6 +398,8 @@ function validateConfiguration(options: RemoteHostUplinkClientOptions): void {
       ids.add(provider.providerId);
     }
   }
+  if (options.readOnlyProviders !== undefined && (options.readOnlyProviders.length > 64 || new Set(options.readOnlyProviders).size !== options.readOnlyProviders.length
+    || options.readOnlyProviders.some(providerId => !providerId.trim() || providerId.length > 512))) throw new Error('Remote Host uplink requires valid, unique read-only provider identities.');
 }
 
 function positive(value: number): number {

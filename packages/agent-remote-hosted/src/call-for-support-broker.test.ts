@@ -26,7 +26,7 @@ async function register(query: string) {
   const registered = new Promise<Record<string, unknown>>(resolve => native.onMessage(data => { const message = JSON.parse(data); if (message.type === 'registered') resolve(message); }));
   prepared.accept(server);
   native.send(JSON.stringify({ uplinkVersion: 2, type: 'register', installationId: 'controller', name: 'Mac',
-    providers: [{ providerId: 'codex', displayName: 'Codex', readOnly: true }, { providerId: 'opencode', displayName: 'OpenCode' }] }));
+    providers: [{ providerId: 'codex', displayName: 'Codex' }, { providerId: 'opencode', displayName: 'OpenCode' }] }));
   const message = await registered;
   expect(decodeRemoteHostUplinkMessage(JSON.stringify(message)).status).toBe('ok');
   return { message, hosts: (await (await broker.handleRequest(request('/v1/remote/hosts')))!.json()).hosts };
@@ -35,7 +35,7 @@ async function register(query: string) {
 it('acknowledges Call For Support only for a Host that also follows Team recipients across handoffs', async () => {
   const capable = await register('team=1&teamRecipients=1&teamSuccession=1&callForSupport=1');
   expect(capable.message).toMatchObject({ teamSuccession: 1, callForSupport: 1 });
-  expect(capable.hosts[0].providers).toEqual([{ providerId: 'codex', displayName: 'Codex', readOnly: true }, { providerId: 'opencode', displayName: 'OpenCode' }]);
+  expect(capable.hosts[0].providers).toEqual([{ providerId: 'codex', displayName: 'Codex' }, { providerId: 'opencode', displayName: 'OpenCode' }]);
   expect((await register('team=1&teamRecipients=1&callForSupport=1')).message).not.toHaveProperty('callForSupport');
   expect((await register('team=1&teamRecipients=1&teamSuccession=1')).message).not.toHaveProperty('callForSupport');
 });

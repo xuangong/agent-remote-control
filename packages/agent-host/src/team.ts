@@ -8,6 +8,7 @@ import type { SessionExecutionRouting } from './session-succession-service.js';
 import type { RoleSuccessionDecision, SessionRole } from './session-role-succession.js';
 import type { SessionCreation } from './role-session-creation.js';
 import { coordinatorInstructions, coordinatorTools, supporterInstructions } from './call-for-support-roles.js';
+import { prepareWorktree, removeWorktree } from './call-for-support-workspaces.js';
 import { isNativeSessionRef, nativeSessionRefKey, type NativeSessionRef, isTeam, isTeamSeat, sessionOperationAvailability, type Team, type TeamHostCall, type TeamMember, type TeamMessage, type TeamSeat } from '@orchardworks/agent-remote-protocol';
 import { OperationCacheError, type RemoteHostSessionLease, type SessionWireOperationExecutor } from '@orchardworks/agent-remote-relay';
 
@@ -27,7 +28,10 @@ export interface TeamRuntimeAccess {
   acquire(provider: string, sessionId: string): Promise<RemoteHostSessionLease>;
   execute: SessionWireOperationExecutor;
 }
-interface LocalSeat { seat: TeamSeat; creation: 'dispatching' | 'ready' | 'unknown'; receipts: Record<string, { text: string; status: 'dispatching' | 'accepted' | 'rejected' | 'unknown'; error?: string; acceptance?: AgentInputAcceptance['disposition']; resolvedTarget?: NativeSessionRef }> }
+interface LocalSeat { seat: TeamSeat; creation: 'dispatching' | 'ready' | 'unknown';
+  /** A supporter's own worktree, removed once when the supporter is released or its Team archives. */
+  worktree?: { root: string; path: string; removed?: true };
+  receipts: Record<string, { text: string; status: 'dispatching' | 'accepted' | 'rejected' | 'unknown'; error?: string; acceptance?: AgentInputAcceptance['disposition']; resolvedTarget?: NativeSessionRef }> }
 const errorText = (error: unknown) => (error instanceof Error ? error.message : 'Team operation failed.').slice(0, 2048);
 function operationId(value: string) {
   const hex = createHash('sha256').update(value).digest('hex'); return `${hex.slice(0,8)}-${hex.slice(8,12)}-8${hex.slice(13,16)}-a${hex.slice(17,20)}-${hex.slice(20,32)}`;
@@ -153,7 +157,13 @@ export class TeamRuntime implements SessionRole {
       try { seat.member.cwd = source.agent.snapshot().payload.runtimeInfo.cwd; } finally { source.release(); }
       if (!seat.member.cwd) throw new Error('Source working directory is unavailable.');
     }
-    const record: LocalSeat = { seat, creation: 'dispatching', receipts: Object.create(null) };
+    let worktree: LocalSeat['worktree'];
+    if (seat.member.workspace?.kind === 'worktree') {
+      if (!seat.member.cwd) throw new Error('The worker\'s working directory is unknown.');
+      const prepared = await prepareWorktree(seat.member.cwd, seat.teamId, seat.member.id, seat.member.workspace.commit);
+      seat.member.cwd = prepared.cwd; worktree = { root: prepared.root, path: prepared.worktree };
+    }
+    const record: LocalSeat = { seat, creation: 'dispatching', receipts: Object.create(null), ...(worktree ? { worktree } : {}) };
     this.records.push(record); await this.save();
     try {
       let actual: NativeSessionRef | undefined;
@@ -226,6 +236,10 @@ export class TeamRuntime implements SessionRole {
       for (const record of this.records.filter(item => item.creation === 'ready')) {
         const team = (value as Team[]).find(team => team.id === record.seat.teamId);
         try { await this.reconcileReceipts(record, team); } catch { /* Retry receipt reads independently of other seats and lease cleanup. */ }
+        const member = team?.members.find(item => item.id === record.seat.member.id);
+        if (record.worktree && !record.worktree.removed && (member?.creation === 'released' || team?.status === 'archiving')) {
+          try { await removeWorktree(record.worktree.root, record.worktree.path); record.worktree.removed = true; await this.save(); } catch { /* Retried on the next tick. */ }
+        }
       }
       for (const team of value as Team[]) for (const member of team.members) {
         const record = this.records.find(item => item.seat.teamId === team.id && item.seat.member.id === member.id && item.creation === 'ready');

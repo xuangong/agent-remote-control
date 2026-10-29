@@ -1,5 +1,7 @@
+import { existsSync } from 'node:fs';
+import { join } from 'node:path';
 import { expect, it } from 'vitest';
-import { supportHarness } from './test-utils/call-for-support-harness.js';
+import { reviewProfile, supportHarness } from './test-utils/call-for-support-harness.js';
 
 it('binds the worker without creating a session and creates a read-only coordinator with the profile\'s configuration', async () => {
   const h = await supportHarness();
@@ -121,5 +123,25 @@ it('holds a member\'s runtime only while a delivery to it is pending or its Team
     await h.broker.action({ teamId: roleId, action: 'archive' });
     await h.runtime.tick();
     expect(h.team(roleId).status).toBe('archived');
+  } finally { await h.close(); }
+});
+
+it('creates a worktree supporter at the call\'s commit and removes its worktree when it is released', async () => {
+  const h = await supportHarness();
+  try {
+    const profile = h.profile({ ...reviewProfile, mandate: { ...reviewProfile.mandate, supporters: [{ providerId: 'codex', model: 'gpt-5.5' }], workspaces: ['worktree'] } }); h.enable([profile.id]);
+    const { roleId } = await h.call({ operationId: 'op-1', profileId: profile.id });
+    const coordinator = await h.runtime.extensions(h.ref('codex', h.team(roleId).members[0]!.nativeSessionId!));
+    expect(await run(coordinator, 'propose_roster', { operationId: 'roster', rationale: 'A fix.',
+      members: [{ name: 'Fixer', responsibility: 'Write the fix.', providerId: 'codex', model: 'gpt-5.5', workspace: 'worktree' }] })).toMatchObject({ status: 'provisioned' });
+    const supporter = h.team(roleId).members[2]!, worktree = join(h.directory, '.agent-remote', 'worktrees', roleId, supporter.id);
+    expect(supporter).toMatchObject({ creation: 'ready', cwd: worktree, workspace: { kind: 'worktree', commit: h.commit } });
+    expect(h.created.at(-1)).toMatchObject({ creation: { cwd: worktree } });
+    expect(h.created.at(-1)!.extensions).not.toHaveProperty('access');
+    expect(h.git('-C', worktree, 'rev-parse', 'HEAD')).toBe(h.commit);
+    expect(h.git('status', '--porcelain')).toBe('');
+    await run(coordinator, 'release_supporter', { target: supporter.id });
+    await h.runtime.tick();
+    expect(existsSync(worktree)).toBe(false);
   } finally { await h.close(); }
 });

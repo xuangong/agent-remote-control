@@ -1,4 +1,5 @@
-import { mkdtemp, rm } from 'node:fs/promises';
+import { execFileSync } from 'node:child_process';
+import { mkdtemp, realpath, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { AgentMessageOptions, AgentSessionExtensions } from '@orchardworks/agent-provider-sdk';
@@ -16,7 +17,11 @@ export const reviewProfile: CallForSupportProfileInput = { name: 'Cross review',
 
 /** A Relay Team broker with Call For Support and a Controller Team runtime over fake native sessions. */
 export async function supportHarness(options: { callForSupport?: boolean } = {}) {
-  const directory = await mkdtemp(join(tmpdir(), 'call-for-support-')), cache = createOperationCache();
+  const directory = await realpath(await mkdtemp(join(tmpdir(), 'call-for-support-'))), cache = createOperationCache();
+  // The worker works in a git repository with one commit.
+  const git = (...args: string[]) => execFileSync('git', ['-C', directory, '-c', 'user.email=t@t', '-c', 'user.name=t', ...args], { encoding: 'utf8' }).trim();
+  git('init', '-q'); await writeFile(join(directory, 'a.txt'), 'one\n'); git('add', 'a.txt'); git('commit', '-qm', 'one');
+  const commit = git('rev-parse', 'HEAD');
   const ref = (providerId: string, nativeSessionId: string): NativeSessionRef => ({ controllerId: 'controller', providerId, nativeSessionId });
   const sessions = new Map<string, { payload: AgentSnapshotPayload; deliveries: Array<{ text: string; delivery: AgentMessageOptions['delivery'] }> }>();
   const session = (id: string, providerId = 'codex') => {
@@ -53,19 +58,20 @@ export async function supportHarness(options: { callForSupport?: boolean } = {})
     async acquire(_provider, id) { if (!sessions.has(id)) throw new Error('Session is unavailable.'); acquired.push(id); return { agent: agent(id), release() { released.push(id); } }; },
     execute: createOperationExecutor(cache, 'call-for-support-test'),
   };
-  runtime = new TeamRuntime(join(directory, 'team'), access, call => broker.hostCall('host', call), 1_000_000);
+  const state = await realpath(await mkdtemp(join(tmpdir(), 'call-for-support-state-')));
+  runtime = new TeamRuntime(join(state, 'team'), access, call => broker.hostCall('host', call), 1_000_000);
   const profile = (input: CallForSupportProfileInput = reviewProfile) => executeProfileCommand(support, { type: 'create', profile: input }, Date.now())!;
   const enable = (profileIds: string[]) => setEnablement(support, resolve, { hostId: 'host', providerId: 'codex', nativeSessionId: 'worker' }, profileIds, Date.now());
   return {
-    directory, broker, runtime, sessions, created, acquired, released, ref, profile, enable,
+    directory, commit, git, broker, runtime, sessions, created, acquired, released, ref, profile, enable,
     team: (id: string): Team => structuredClone(teams.find(team => team.id === id)!) as Team,
     host: (call: TeamHostCall) => broker.hostCall('host', call) as Promise<any>,
     call: (input: Record<string, unknown>) => broker.hostCall('host', { action: 'call_for_support', worker: { providerId: 'codex', nativeSessionId: 'worker', title: 'Implement login' },
-      task: 'Review the change.', deliverable: 'findings', context: { commit: 'abcdef1' }, ...input } as TeamHostCall) as Promise<any>,
+      task: 'Review the change.', deliverable: 'findings', context: { commit }, ...input } as TeamHostCall) as Promise<any>,
     busy(id: string, active: boolean) {
       const payload = sessions.get(id)!.payload;
       payload.status = active ? 'running' : 'idle'; payload.activeTurn = active ? { turnId: 'turn' } : null; payload.runtimeInfo.status = payload.status;
     },
-    async close() { await runtime.close(); await cache.close(); await rm(directory, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }); },
+    async close() { await runtime.close(); await cache.close(); for (const path of [directory, state]) await rm(path, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }); },
   };
 }

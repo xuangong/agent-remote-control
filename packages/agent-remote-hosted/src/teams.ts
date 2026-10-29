@@ -166,7 +166,8 @@ export class TeamBroker {
     if (!recipientAware && (call.action === 'claim' && call.expectedNativeSessionId !== undefined || call.action === 'settle' && call.resolvedTarget)) fail(upgradeRequired);
     // A Controller that does not run Call For Support groups never sees them.
     const visible = (team: SavedTeam) => !team.callForSupport || this.ports.callForSupport?.capable(hostId) === true;
-    if (call.action === 'poll') return this.ports.read().filter(team => team.status !== 'archived' && visible(team) && team.members.some(item => item.hostId === hostId && item.creation === 'ready')).map(team => this.project(team, recipientAware));
+    // A released member's Host keeps seeing its Team, to clean up what the member left.
+    if (call.action === 'poll') return this.ports.read().filter(team => team.status !== 'archived' && visible(team) && team.members.some(item => item.hostId === hostId && (item.creation === 'ready' || item.creation === 'released'))).map(team => this.project(team, recipientAware));
     const projectDelivery = <T extends { id: string; resolvedTarget?: NativeSessionRef }>(value: T) => recipientAware ? value : withoutRecipient(value);
     if (call.action === 'call_for_support' || call.action === 'support_status') return (this.groups ?? fail(unavailableGroups)).workerCall(hostId, call);
     if (call.action === 'support_enablement') return (this.groups ?? fail(unavailableGroups)).enablement(hostId);

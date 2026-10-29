@@ -29,6 +29,17 @@ it('creates a detached worktree at the commit inside the repository and excludes
   await expect(prepareWorktree(repo.root, 'team-1', 'member-1', repo.second)).rejects.toThrow('another commit');
 });
 
+it('refuses a directory at a worktree path that is not its own worktree, and never stages the worker\'s changes from it', async () => {
+  const repo = await repository();
+  const stray = worktreePath(repo.root, 'team', 'stray');
+  await mkdir(stray, { recursive: true });
+  await expect(prepareWorktree(repo.root, 'team', 'stray', repo.second)).rejects.toThrow('is not a support worktree');
+  await writeFile(join(repo.root, 'src', 'a.ts'), 'worker edit\n');
+  await expect(collectPatch(stray, repo.second)).rejects.toThrow('is not a support worktree');
+  expect(repo.git('diff', '--cached', '--name-only')).toBe('');
+  expect(repo.git('status', '--porcelain')).toContain('src/a.ts');
+});
+
 it('explains a missing commit and refuses unsafe identities', async () => {
   const repo = await repository();
   await expect(prepareWorktree(repo.root, 'team', 'member', 'abcdef1234567')).rejects.toThrow('Commit abcdef1234567 is not in the repository');
@@ -45,6 +56,16 @@ it('removes a worktree and prunes it, and refuses directories outside the suppor
   expect(repo.git('worktree', 'list')).not.toContain('member');
   await removeWorktree(repo.root, worktree);
   await expect(removeWorktree(repo.root, join(repo.root, 'src'))).rejects.toThrow('outside the support worktrees');
+});
+
+it('deletes a supporter\'s support ref even when its directory is not a worktree it can remove', async () => {
+  const repo = await repository();
+  const stray = worktreePath(repo.root, 'team', 'member');
+  await mkdir(stray, { recursive: true });
+  repo.git('update-ref', 'refs/agent-remote/support/team/member', repo.first);
+  await expect(removeWorktree(repo.root, stray)).rejects.toThrow('git worktree failed');
+  expect(repo.git('for-each-ref', 'refs/agent-remote')).toBe('');
+  expect(existsSync(stray)).toBe(true);
 });
 
 it('bundles the commit with and without a base and fetches it into a clone that lacks it', async () => {

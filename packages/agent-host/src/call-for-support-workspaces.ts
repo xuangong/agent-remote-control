@@ -42,6 +42,12 @@ async function excludeWorktrees(root: string): Promise<void> {
   await writeFile(file, `${current}${current && !current.endsWith('\n') ? '\n' : ''}${EXCLUDE}\n`);
 }
 
+/** A support worktree is its own git top level; a stray directory inside the repository would resolve to the worker's repository instead. */
+async function assertOwnWorktree(worktree: string): Promise<void> {
+  const top = await git(worktree, ['rev-parse', '--show-toplevel']).then(value => realpath(value.trim()), () => undefined);
+  if (top !== await realpath(worktree)) throw new Error(`${worktree} is not a support worktree. Remove the directory and call again.`);
+}
+
 async function hasCommit(root: string, commit: string): Promise<boolean> {
   return git(root, ['cat-file', '-e', `${commit}^{commit}`]).then(() => true, () => false);
 }
@@ -58,6 +64,7 @@ export async function prepareWorktree(cwd: string, teamId: string, memberId: str
   if (!await hasCommit(root, commit)) throw new Error(`Commit ${commit} is not in the repository at ${root}. Commit the work and call again.`);
   await excludeWorktrees(root);
   if (await exists(worktree)) {
+    await assertOwnWorktree(worktree);
     const head = (await git(worktree, ['rev-parse', 'HEAD']).catch(() => '')).trim();
     if (!head.startsWith(commit) && head !== commit) throw new Error(`A support worktree already exists at ${worktree} on another commit.`);
   } else {
@@ -68,15 +75,20 @@ export async function prepareWorktree(cwd: string, teamId: string, memberId: str
   return { root, worktree, cwd: await exists(target) ? target : worktree };
 }
 
-/** Removes a supporter's worktree; a missing one is already removed. */
+/**
+ * Removes a supporter's worktree and its support ref; a missing one is already removed.
+ * The ref goes even when the directory cannot (a worktree's own HEAD keeps its commit), and the failure is reported for a retry.
+ */
 export async function removeWorktree(root: string, worktree: string): Promise<void> {
   const base = join(root, '.agent-remote', 'worktrees') + sep;
   if (!resolve(worktree).startsWith(base)) throw new Error('Refusing to remove a directory outside the support worktrees.');
-  if (await exists(worktree)) await git(root, ['worktree', 'remove', '--force', worktree]);
+  let failure: unknown;
+  if (await exists(worktree)) await git(root, ['worktree', 'remove', '--force', worktree]).catch(error => { failure = error; });
   await git(root, ['worktree', 'prune']);
   // A remote supporter's fetched commit is kept reachable by its own ref.
   const [teamId, memberId] = relative(base, resolve(worktree)).split(sep);
   if (teamId && memberId) await git(root, ['update-ref', '-d', `refs/agent-remote/support/${teamId}/${memberId}`]).catch(() => undefined);
+  if (failure) throw failure;
 }
 
 const BUNDLE_LIMIT = 50 * 1024 * 1024;
@@ -84,6 +96,8 @@ const BUNDLE_LIMIT = 50 * 1024 * 1024;
 /** Everything a supporter changed in its worktree since the commit, including commits and new files, as one binary patch. */
 export async function collectPatch(worktree: string, commit: string): Promise<string> {
   if (!COMMIT.test(commit)) throw new Error('Invalid commit.');
+  // Staging runs in the supporter's own worktree, never in the worker's repository that contains it.
+  await assertOwnWorktree(worktree);
   await git(worktree, ['add', '-A']);
   return git(worktree, ['diff', '--cached', '--binary', commit], { maxBuffer: BUNDLE_LIMIT });
 }

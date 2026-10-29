@@ -341,7 +341,8 @@ export class TeamBroker {
     if (item.creation === 'ready') return this.project(team);
     let result: TeamMember;
     try {
-      result = await this.ports.createSeat(item.hostId, { teamId, source: team.source, member: item });
+      result = await this.ports.createSeat(item.hostId, { teamId, source: team.source, member: item,
+        ...(team.callForSupport ? { callForSupport: { role: team.callForSupport.role, description: team.callForSupport.description } } : {}) });
       if (!isTeamMember(result) || result.id !== item.id || result.hostId !== item.hostId || result.providerId !== item.providerId || result.role !== item.role || result.creation !== 'ready' || !result.nativeSessionId) fail('Invalid Host member registration.');
     } catch (error) { result = { ...item, creation: 'unknown', error: error instanceof Error ? error.message.slice(0, 2048) : 'Member creation is uncertain.' }; }
     return this.change(teams => {

@@ -108,7 +108,9 @@ export interface AgentHostRuntimeOptions {
   tpm?: TpmOptions;
   team?: { stateDirectory: string; request?: (call: TeamHostCall) => Promise<unknown>; tickMs?: number;
     /** The Relay routes Team recipients across a generic succession of their session. */
-    genericSuccession?(): boolean };
+    genericSuccession?(): boolean;
+    /** The Relay sends this Controller Call For Support groups. */
+    callForSupport?(): boolean };
   /** Internal wiring until provider readiness and product projection are certified together. */
   succession?: { controllerId: string; enrollment?: true } & ({
     stateDirectory: string;
@@ -191,7 +193,7 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
   if (options.succession?.enrollment && options.succession.controllerId !== options.installationId) throw new Error('Succession Controller identity must match the installed Controller.');
   const stateDirectory = options.preview?.stateDirectory ?? options.vscodeTunnel?.stateDirectory;
   const runtime = createAgentHostRuntime({ ...options, ...(options.team ? { team: { ...options.team, request: (call: TeamHostCall) => connection.client.teamRequest(call),
-    genericSuccession: () => connection.client.teamSuccession } } : {}), controllerId: options.installationId,
+    genericSuccession: () => connection.client.teamSuccession, callForSupport: () => connection.client.callForSupport } } : {}), controllerId: options.installationId,
     ...(options.inputImages ? {} : stateDirectory ? { inputImages: { directory: join(stateDirectory, 'input-images') } } : {}),
     ...(options.inputResources ? {} : stateDirectory ? { inputResources: { directory: join(stateDirectory, 'input-resources') } } : {}) });
   options.providerDiscovery?.onRegistration(runtime.addRegistration);
@@ -211,7 +213,7 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
     runtime.setRelayConnected(false);
     const current = ++generation;
     return { superseded: false, client: createRemoteHostUplinkClient({ relay: runtime.relay, installationId: options.installationId, name: options.name, environment: options.environment, controller: options.controller?.identity,
-      ...(options.team ? { teamManagement: true } : {}),
+      ...(options.team ? { teamManagement: true, callForSupport: true } : {}),
       ...(options.tpm ? { tpmManagement: true } : {}),
       ...(options.succession?.enrollment ? { successionEnrollment: { control: runtime.enrollFromRelay } } : {}),
       sessionStates: runtime.sessionStates,
@@ -1259,7 +1261,9 @@ export function createAgentHostRuntime(options: AgentHostRuntimeOptions): AgentH
   };
   const tpm = options.tpm ? new TpmCoordinator(options.tpm, automationAccess) : undefined;
   const team = options.team?.request ? new TeamRuntime(options.team.stateDirectory, {...automationAccess, sessionRouting: successionService?.roleRouting ?? automationAccess.sessionRouting!,
-    genericSuccession: () => !!successionService && options.team?.genericSuccession?.() === true, execute: executeOperation('host:team')}, options.team.request, options.team.tickMs) : undefined;
+    genericSuccession: () => !!successionService && options.team?.genericSuccession?.() === true, callForSupport: () => options.team?.callForSupport?.() === true,
+    readOnlyProviders: () => automationAccess.supportedProviders().filter(providerId => registration(providerId).adapter.descriptor.sessionAccess?.readOnly),
+    execute: executeOperation('host:team')}, options.team.request, options.team.tickMs) : undefined;
   const roles = new SessionRoles([...(team ? [team] : []), ...(tpm ? [tpmRole(tpm)] : [])]);
   const enrollment = successionService ? new SessionSuccessionEnrollment(successionService, successionConfig!.controllerId, () => [...registrations.values()], () => tpm?.store.all() ?? [], source => authorizeSuccessionRead(source, source), directoryOperation) : undefined;
   const enrollFromRelay = async (request: RemoteHostControlRequest, context: TrustedSuccessionContext) => {

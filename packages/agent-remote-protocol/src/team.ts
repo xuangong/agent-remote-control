@@ -107,7 +107,9 @@ export const TeamHostCall = Type.Union([
     roleId: Type.Optional(id), callId: Type.Optional(id) }, object),
 ]);
 export type TeamHostCall = Static<typeof TeamHostCall>;
-export const TeamSeat = Type.Object({ teamId: id, source: TeamSource, member: TeamMember }, object);
+export const TeamSeat = Type.Object({ teamId: id, source: TeamSource, member: TeamMember,
+  /** The seat belongs to a Call For Support group serving this role. */
+  callForSupport: Type.Optional(Type.Object({ role: Type.String({ minLength: 1, maxLength: 256 }), description: Type.String({ maxLength: 4000 }) }, object)) }, object);
 export type TeamSeat = Static<typeof TeamSeat>;
 const groupFields = ['model', 'reasoningEffort', 'access', 'workspace', 'usage'] as const;
 /** A Call For Support group has exactly one requester after its Leader; other Teams have none and no group fields. */

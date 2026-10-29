@@ -16,6 +16,10 @@ export interface TeamRuntimeAccess {
   sessionRouting: SessionExecutionRouting;
   /** The Relay routes Team recipients across a generic succession of their session. */
   genericSuccession?(): boolean;
+  /** The Relay sends this Controller Call For Support groups. */
+  callForSupport?(): boolean;
+  /** Providers that run Team tools and enforce read-only sessions natively. */
+  readOnlyProviders?(): string[];
   available(): boolean;
   supportedProviders(): string[];
   create(provider: string, creation: SessionCreation, extensions: AgentSessionExtensions): Promise<string>;
@@ -40,8 +44,9 @@ function deliveryAllowed(lease: RemoteHostSessionLease, delivery: TeamDelivery):
   if (!sessionOperationAvailability(state, delivery === 'next_turn' ? 'queue_message' : 'send_message').allowed) return false;
   return delivery === 'next_turn' || readyIdle || sessionOperationAvailability(state, 'steer').allowed;
 }
-function availableDelivery(lease: RemoteHostSessionLease): TeamDelivery | undefined {
-  if (deliveryAllowed(lease, 'immediate')) return 'immediate';
+/** steer: input may join a running turn. A worker's support reports never do; they wait for its next turn. */
+function availableDelivery(lease: RemoteHostSessionLease, steer = true): TeamDelivery | undefined {
+  if (deliveryAllowed(lease, 'immediate') && (steer || lease.agent.snapshot().payload.activeTurn === null)) return 'immediate';
   if (deliveryAllowed(lease, 'next_turn')) return 'next_turn';
 }
 
@@ -115,7 +120,8 @@ export class TeamRuntime implements SessionRole {
   private seatHeldBy(recipients: ReadonlyArray<NativeSessionRef | undefined>): LocalSeat | undefined {
     const keys = new Set(recipients.filter((ref): ref is NativeSessionRef => !!ref).map(nativeSessionRefKey));
     const records = this.records.filter(item => {
-      if (item.creation !== 'ready') return false;
+      // A worker's seat in a support group carries no Team tools; the worker keeps its own role.
+      if (item.creation !== 'ready' || item.seat.member.role === 'requester') return false;
       try { return keys.has(nativeSessionRefKey(this.access.sessionRouting.resolve(this.anchor(item.seat)).target)); } catch { return false; }
     });
     if (records.length > 1) throw new Error('Team recipient has ambiguous role anchors.');
@@ -127,7 +133,8 @@ export class TeamRuntime implements SessionRole {
   }
   private async createOnce(seat: TeamSeat): Promise<TeamMember> {
     await this.ready;
-    if (!isTeamSeat(seat) || !this.access.available() || !this.access.supportedProviders().includes(seat.member.providerId)) throw new Error('Provider does not support Team tools on this Host.');
+    if (!isTeamSeat(seat) || !this.access.available() || seat.member.role !== 'requester' && !this.access.supportedProviders().includes(seat.member.providerId)) throw new Error('Provider does not support Team tools on this Host.');
+    if ((seat.callForSupport || seat.member.role === 'requester') && this.access.callForSupport?.() !== true) throw new Error('Update the Relay to use Call For Support.');
     const existing = this.records.find(item => item.seat.teamId === seat.teamId && item.seat.member.id === seat.member.id);
     if (existing) {
       const previous = existing.seat;
@@ -137,6 +144,7 @@ export class TeamRuntime implements SessionRole {
     }
     if (this.records.length >= 384) throw new Error('Local Team session capacity reached.');
     seat = structuredClone(seat);
+    if (seat.member.role === 'requester') return this.bindWorker(seat);
     if (seat.member.role === 'leader') {
       const source = await this.access.acquire(seat.source.providerId, seat.source.nativeSessionId);
       try { seat.member.cwd = source.agent.snapshot().payload.runtimeInfo.cwd; } finally { source.release(); }
@@ -150,6 +158,16 @@ export class TeamRuntime implements SessionRole {
       actual = this.anchor(seat);
       record.creation = 'ready'; seat.member.creation = 'ready'; seat.member.activity = 'unknown'; await this.save(); return seat.member;
     } catch (error) { record.creation = 'unknown'; seat.member.creation = 'unknown'; await this.save(); throw error; }
+  }
+  /** A support group's worker seat binds the existing worker session and reports where it works. */
+  private async bindWorker(seat: TeamSeat): Promise<TeamMember> {
+    if (seat.member.providerId !== seat.source.providerId || seat.member.nativeSessionId !== seat.source.nativeSessionId) throw new Error('The worker seat must name the worker session.');
+    const worker = await this.access.acquire(seat.source.providerId, seat.source.nativeSessionId);
+    try { seat.member.cwd = worker.agent.snapshot().payload.runtimeInfo.cwd; } finally { worker.release(); }
+    if (!seat.member.cwd) throw new Error('The worker\'s working directory is unavailable.');
+    seat.member.creation = 'ready'; seat.member.activity = 'unknown';
+    this.records.push({ seat, creation: 'ready', receipts: Object.create(null) }); await this.save();
+    return seat.member;
   }
   private tools(seat: TeamSeat, actual: () => NativeSessionRef | undefined = () => this.anchor(seat)): AgentSessionExtensions {
     const { member, teamId } = seat;
@@ -223,7 +241,7 @@ export class TeamRuntime implements SessionRole {
               // A claim survived but its local effect boundary did not. Never infer it was unexecuted.
               await this.settle(team.id, member.id, message.id, { status: 'unknown', resolvedTarget: message.resolvedTarget, error: 'Delivery claim has no local receipt. Inspect this session before resolving.' }); continue;
             }
-            if (message.status === 'queued' && team.status === 'active' && availableDelivery(lease)) await this.dispatch(record, team, message, lease, target);
+            if (message.status === 'queued' && team.status === 'active' && availableDelivery(lease, member.role !== 'requester')) await this.dispatch(record, team, message, lease, target);
           }
           this.access.sessionRouting.assertCurrent(this.anchor(record.seat), target);
           await this.request({ action: 'presence', teamId: team.id, memberId: member.id, activity: idle(lease) ? 'idle' : 'busy' });
@@ -254,7 +272,7 @@ export class TeamRuntime implements SessionRole {
     return this.request({ action: 'settle', teamId, memberId, messageId, outcome: receipt.status as 'accepted'|'rejected'|'unknown', ...(receipt.resolvedTarget ? {resolvedTarget:receipt.resolvedTarget} : {}), ...(receipt.acceptance ? {acceptance:receipt.acceptance} : {}), ...(receipt.error ? {error:receipt.error} : {}) });
   }
   private async dispatch(record: LocalSeat, team: Team, message: TeamMessage, lease: RemoteHostSessionLease, target: NativeSessionRef) {
-    const delivery = availableDelivery(lease);
+    const worker = record.seat.member.role === 'requester', delivery = availableDelivery(lease, !worker);
     if (!delivery || this.closed || !this.access.available()) return;
     this.access.sessionRouting.assertCurrent(this.anchor(record.seat), target);
     let receipt: LocalSeat['receipts'][string] | undefined;
@@ -265,7 +283,8 @@ export class TeamRuntime implements SessionRole {
     };
     const sender = team.members.find(member => member.id === message.from);
     const attachments = message.resources?.map((resource,index) => `[resource #${index+1}] ${JSON.stringify(resource)} (Use download_team_resource with resourceId to obtain a verified local file.)`).join('\n');
-    const text = `[Team ${team.id}; message ${message.id}; from ${sender?.name ?? message.from}]\n${message.text}${attachments ? `\n\nAttached resources:\n${attachments}` : ''}`;
+    // A worker reads support reports as the Relay framed them; Team internals stay with the coordinator.
+    const text = worker ? message.text : `[Team ${team.id}; message ${message.id}; from ${sender?.name ?? message.from}]\n${message.text}${attachments ? `\n\nAttached resources:\n${attachments}` : ''}`;
     try {
       // Succession must not prepare between the claim and its durable receipt, which then takes over as the fence.
       const recipient = nativeSessionRefKey(target);

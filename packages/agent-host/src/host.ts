@@ -626,7 +626,8 @@ export function createAgentHostRuntime(options: AgentHostRuntimeOptions): AgentH
     const capability = registration(providerId).adapter.descriptor.sessionExtensions?.toolNamespaces;
     const enabled = holder ? workerSupport.enabled(holder) : workerSupport.enabledByDefault();
     if (capability === 'creation') return { toolNamespaces: [workerSupport.namespace(actual, !enabled)] };
-    if (capability === 'live' && enabled) return { toolNamespaces: [workerSupport.namespace(actual, false)] };
+    // Without tool search, a session gets the namespace while enabled; an 'attachment' adapter receives an enablement change on its next attachment.
+    if ((capability === 'live' || capability === 'attachment') && enabled) return { toolNamespaces: [workerSupport.namespace(actual, false)] };
     return undefined;
   }
   /** Applies enablement changes to live sessions whose provider can change tools during a session. */

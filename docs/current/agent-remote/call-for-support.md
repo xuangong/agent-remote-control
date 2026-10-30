@@ -53,6 +53,8 @@ A session may call for the profiles of its explicit enablement entry (`POST …/
 The `agent_remote` namespace holds `call_for_support`, `support_status`, `read_support_report` and `download_support_resource`. Only sessions without a Team or TPM role get it.
 
 - Codex fixes dynamic tools at thread start, so every Controller-started thread without a role declares the namespace: direct when the session is enabled at creation, deferred otherwise, found with `tool_search` by search-capable models. Attachments rebind its executors.
+- A Codex thread that did not declare the namespace, such as one started in the Codex CLI or app, gets it as an MCP server on resume (`tool-bridge.ts`). The first record of its rollout (`session_meta.dynamic_tools`) tells which namespaces it declared. The Codex provider serves the others on loopback HTTP and passes `mcp_servers.<namespace>` config overrides to `thread/resume`, with a per-session bearer token in `http_headers` and `default_tools_approval_mode = "approve"`; Codex keeps neither the token nor the address, so every resume passes them again. The model sees the namespace as `mcp__agent_remote`, found with `tool_search` by search-capable models (Codex defers MCP tools for them). Requests need the token and the loopback Host and no Origin. When the user's Codex config has a server of the same name, the overrides are invalid and the session opens without them.
+- Copilot takes tools on every open but has no namespaces (`toolNamespaces: 'attachment'`): a session enabled when it is attached, including one started elsewhere, gets the namespace's tools under their own names, without a permission prompt. An enablement change reaches it on its next attachment.
 - Claude gets the namespace as its own MCP server while enabled; enablement changes use `setMcpServers` on the live session. Namespace tools, and a read-only session's `agent_host` tools, are allowed by flag-layer permission rules so they run without native approval.
 - No separate note is sent on enablement; tool descriptions say when to call.
 
@@ -85,7 +87,8 @@ The `agent_remote` namespace holds `call_for_support`, `support_status`, `read_s
 
 - The website offers Call For Support in the Team panel; its suggestion appears while profiles exist and none is enabled for the session. It does not inspect file changes or git state.
 - A Codex session enabled after creation needs a search-capable model to find the deferred tools; the website call path always works.
-- Copilot and OpenCode do not enforce read-only sessions and cannot receive tools after creation; they may be supporters only in `worktree` and `remote` workspaces.
+- Codex applies a resume's MCP servers only to a thread no other client has open: a thread open in another Codex client when the Controller resumes it keeps its tools as they were, until it is resumed with no other client.
+- Copilot and OpenCode do not enforce read-only sessions; they may be supporters only in `worktree` and `remote` workspaces. OpenCode sessions get no worker tools.
 - A remote fetch fails when the repository lacks the call's base; call again without a base. A remote supporter starts from its bundle within 24 hours, since the bundle is not kept longer.
 - Writing only to their own worktree is a supporter's instruction and its provider's permissions, not an enforced sandbox; `shared` supporters are read-only natively.
 - Rolling the Relay back to a version before Call For Support is safe only until the first group exists: older Relays reject saved groups and more than 32 Teams. After that, fix forward.
@@ -94,6 +97,6 @@ The `agent_remote` namespace holds `call_for_support`, `support_status`, `read_s
 ## Verification
 
 - Protocol, Relay, Controller and website unit suites cover schemas, invariants, profiles, enablement, groups, rosters, reports, ledger, usage, pauses, projection, capacity, retention, negotiation, requester seats, extensions, deliveries, idle release, worktrees, bundles, patches, worker tools and injection.
-- Native provider tests: `agent-provider-codex/src/read-only.local.test.ts`, `tool-namespaces.local.test.ts`; `agent-provider-claude/src/read-only.local.test.ts`, `tool-namespaces.local.test.ts`.
+- Native provider tests: `agent-provider-codex/src/read-only.local.test.ts`, `tool-namespaces.local.test.ts` (including a thread started without the namespace and resumed with it); `agent-provider-copilot/tests/worker-tools.test.ts`; `agent-provider-claude/src/read-only.local.test.ts`, `tool-namespaces.local.test.ts`.
 - End to end: `packages/agent-host/src/call-for-support.local.test.ts` (Codex worker on a search-capable fixture model, Codex coordinator, read-only Claude and Codex reviewers, a worktree fixer whose patch applies, and a follow-up that reuses the sessions). Run with `AGENT_CLAUDE_TEST_EXECUTABLE` and `BORGEE_CODEX_TEST_EXECUTABLE`.
 - Browser: `packages/agent-remote-lab/e2e/call-for-support.spec.ts`.

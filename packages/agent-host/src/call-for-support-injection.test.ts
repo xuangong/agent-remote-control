@@ -39,10 +39,11 @@ async function fixture() {
     async create(input) { const id = `${providerId}-${created.length}`; created.push({ providerId, input }); sessions.set(id, new Native(providerId, id, root)); return id; },
     async open(id, options) { opened.push({ providerId, id, ...(options?.extensions ? { extensions: options.extensions } : {}) }); let session = sessions.get(id); if (!session) { session = new Native(providerId, id, root); sessions.set(id, session); } return session; },
     close() {} });
-  const adapter = (providerId: string, toolNamespaces: 'creation' | 'live') => ({ descriptor: { providerId, displayName: providerId, sessionExtensions: { instructions: true, tools: true, toolNamespaces } },
+  const adapter = (providerId: string, toolNamespaces: 'creation' | 'attachment' | 'live') => ({ descriptor: { providerId, displayName: providerId, sessionExtensions: { instructions: true, tools: true, toolNamespaces } },
     createSession: async () => { throw new Error('Use the directory.'); }, resumeSession: async () => { throw new Error('Use the directory.'); } });
   const runtime = createAgentHostRuntime({ controllerId: 'host', team: { stateDirectory: join(root, 'team'), tickMs: 10, callForSupport: () => true, request: call => broker.hostCall('relay-host', call) },
-    registrations: [{ directory: directory('codex'), adapter: adapter('codex', 'creation') }, { directory: directory('claude'), adapter: adapter('claude', 'live') }] });
+    registrations: [{ directory: directory('codex'), adapter: adapter('codex', 'creation') }, { directory: directory('claude'), adapter: adapter('claude', 'live') },
+      { directory: directory('copilot'), adapter: adapter('copilot', 'attachment') }] });
   const profile = executeProfileCommand(support, { type: 'create', profile: reviewProfile }, 1)!;
   let agents = 0;
   const control = async (path: string, body: Record<string, unknown>) => {
@@ -78,6 +79,23 @@ it('gives a Claude session the worker namespace only while it is enabled, also w
     f.enable('claude', 'claude-worker', false);
     await expect.poll(() => f.sessions.get('claude-worker')!.namespaces.at(-1)).toEqual([]);
     expect(f.sessions.get('claude-worker')!.namespaces).toHaveLength(2);
+  } finally { await f.close(); }
+});
+
+it('gives a Copilot session the worker tools when it is attached while enabled, including a session started elsewhere', async () => {
+  const f = await fixture();
+  try {
+    await f.control('/remote/attach', { providerId: 'copilot', nativeSessionId: 'copilot-0' });
+    expect(worker(f.opened.at(-1)!.extensions)).toBeUndefined();
+    // Without tool search, the namespace comes undeferred, and only to sessions enabled when they are attached.
+    f.support.profiles[0]!.enableByDefault = true;
+    let attached = 0;
+    await expect.poll(async () => {
+      const id = `copilot-${++attached}`;
+      await f.control('/remote/attach', { providerId: 'copilot', nativeSessionId: id });
+      return worker(f.opened.find(entry => entry.id === id)?.extensions);
+    }).toMatchObject({ name: 'agent_remote', tools: [{ name: 'call_for_support' }, { name: 'support_status' }, { name: 'read_support_report' }, { name: 'download_support_resource' }] });
+    expect(worker(f.opened.at(-1)!.extensions)).not.toHaveProperty('deferred');
   } finally { await f.close(); }
 });
 

@@ -31,8 +31,11 @@ export interface AgentProviderDescriptor {
   providerId: string;
   displayName: string;
   /** Native support for Host-owned extensions on creation and reattachment.
-   * toolNamespaces: 'creation' when namespaces are fixed when the session starts, 'live' when they can change at any time. */
-  sessionExtensions?: { instructions: boolean; tools: boolean; toolNamespaces?: 'creation' | 'live' };
+   * toolNamespaces: 'creation' when namespaces are declared when the session starts, deferred ones found by tool search;
+   * a reattachment offers namespaces the session did not declare another way where the adapter can (Codex: MCP servers).
+   * 'attachment' when namespaces are given at creation and every reattachment, fixed while attached, with no tool search.
+   * 'live' when they can change at any time. */
+  sessionExtensions?: { instructions: boolean; tools: boolean; toolNamespaces?: 'creation' | 'attachment' | 'live' };
   /** The adapter enforces AgentSessionExtensions.access natively on creation and reattachment. */
   sessionAccess?: { readOnly: true };
 }

@@ -50,6 +50,7 @@ import { readCodexPlanningModes, type CodexPlanningModes } from './planning.js';
 import { initializeCodexTransport } from './initialize.js';
 import { CodexSessionRuntime, historyOverlapsNotifications, type CodexRawNotification } from './runtime.js';
 import type { CodexSharedRecoveryPlan } from './shared-recovery.js';
+import { bridgeableNamespace, declaredToolNamespaces, type CodexToolBridge, type CodexToolBridgeRegistration } from './tool-bridge.js';
 
 const PROVIDER_ID = 'codex';
 
@@ -249,6 +250,7 @@ export class CodexAppServerSession implements AgentSession {
   }
 
   private notifyRuntimeClosed(): void {
+    this.releaseToolBridge?.();
     for (const listener of this.runtimeClosedListeners) listener();
     this.runtimeClosedListeners.clear();
   }
@@ -288,6 +290,8 @@ export class CodexAppServerSession implements AgentSession {
 
   private tools: readonly AgentSessionTool[] = [];
   private toolNamespaces: readonly AgentSessionToolNamespace[] = [];
+  /** Ends the MCP servers that offer namespaces this thread did not declare, when the session ends. */
+  private releaseToolBridge: (() => void) | undefined;
   /** Codex keeps namespace declarations from thread start in the thread; only their executors can change. */
   private declaredNamespaces = '[]';
 
@@ -589,6 +593,23 @@ export class CodexAppServerSession implements AgentSession {
     restrictedNative = false,
     recoveryPlan?: CodexSharedRecoveryPlan,
     extensions: AgentSessionExtensions = {},
+    toolBridge?: CodexToolBridge,
+  ): Promise<CodexAppServerSession> {
+    const bridged: { registration?: CodexToolBridgeRegistration } = {};
+    try { return await CodexAppServerSession.resumeThread(transport, handle, collaborationMode, codexHome, restrictedNative, recoveryPlan, extensions, toolBridge, bridged); }
+    catch (error) { bridged.registration?.release(); throw error; }
+  }
+
+  private static async resumeThread(
+    transport: CodexAppServerTransport,
+    handle: AgentPersistenceHandle,
+    collaborationMode: 'plan' | undefined,
+    codexHome: string | undefined,
+    restrictedNative: boolean,
+    recoveryPlan: CodexSharedRecoveryPlan | undefined,
+    extensions: AgentSessionExtensions,
+    toolBridge: CodexToolBridge | undefined,
+    bridged: { registration?: CodexToolBridgeRegistration },
   ): Promise<CodexAppServerSession> {
     if (handle.providerId !== PROVIDER_ID) {
       throw new Error(`Cannot resume ${handle.providerId} with the Codex provider`);
@@ -617,14 +638,27 @@ export class CodexAppServerSession implements AgentSession {
         hydrateEmpty = true;
       }
     }
-    const resumed = await transport.request('thread/resume', {
+    if (toolBridge && session.toolNamespaces.length) {
+      // Namespaces the thread did not declare when it started reach it as MCP servers, which Codex loads on every resume.
+      const declared = await declaredNamespacesOf(transport, handle.sessionId);
+      const names = session.toolNamespaces.map(namespace => namespace.name).filter(name => !declared?.has(name) && bridgeableNamespace(name));
+      if (names.length) bridged.registration = await toolBridge.register(names, () => session.toolNamespaces);
+      session.releaseToolBridge = () => bridged.registration?.release();
+    }
+    const resumeThread = (servers?: Record<string, unknown>) => transport.request('thread/resume', {
       threadId: handle.sessionId,
       excludeTurns: !hydrateEmpty,
-      config: { 'features.default_mode_request_user_input': true },
+      config: { 'features.default_mode_request_user_input': true, ...servers },
       ...sandboxParams(stored.access, restrictedNative),
       ...(stored.cwd ? { cwd: stored.cwd } : {}),
       ...(!expectedNativeSettings && stored.model ? { model: stored.model } : {}),
       ...(sessionInstructions(stored) ? { developerInstructions: sessionInstructions(stored) } : {}),
+    });
+    const resumed = await resumeThread(bridged.registration?.config).catch((error: unknown) => {
+      // A server of the same name in the user's Codex config makes the overrides invalid: open the session without them.
+      if (!bridged.registration || !(error instanceof CodexAppServerRpcError) || !error.message.includes('mcp_servers')) throw error;
+      bridged.registration.release(); bridged.registration = undefined;
+      return resumeThread();
     }).catch((error: unknown) => {
       if (error instanceof CodexAppServerRpcError && error.code === -32600
         && error.message === `thread ${handle.sessionId} already has an active writer`) {
@@ -1159,6 +1193,7 @@ export class CodexAppServerSession implements AgentSession {
     this.nativeEvidence.invalidate();
     this.steerInputAcceptances.clear();
     if (!this.ownsRuntime) {
+      this.releaseToolBridge?.();
       this.released = true;
       this.observing = false;
       this.historyRefreshNeeded = true;
@@ -1730,6 +1765,15 @@ function toStoredConfig(config: AgentSessionConfig, collaborationMode?: 'plan'):
     ...(config.planning === true || (config.planning === undefined && collaborationMode) ? { collaborationMode: 'plan' as const } : {}),
     ...(config.access === 'read_only' ? { access: 'read_only' as const } : {}),
   };
+}
+
+/** The namespaces a thread declared at its start; undefined when its rollout cannot tell. */
+async function declaredNamespacesOf(transport: CodexAppServerTransport, threadId: string): Promise<Set<string> | undefined> {
+  try {
+    const read = await transport.request('thread/read', { threadId, includeTurns: false });
+    const path = isRecord(read) && isRecord(read.thread) ? readString(read.thread.path) : undefined;
+    return path ? await declaredToolNamespaces(path, threadId) : undefined;
+  } catch { return undefined; }
 }
 
 function parseStoredConfig(opaque: string): StoredSessionConfig {

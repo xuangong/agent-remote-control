@@ -82,3 +82,77 @@ it('offers a direct namespace from the first request', async () => {
   expect(calls).toEqual([{ role: 'code reviewer' }]);
   expect(JSON.stringify(outputs(bodies, 'function_call_output'))).toContain('CALL_ACCEPTED call-123');
 }, 60_000);
+
+/** A thread started without namespaces, as one started outside the Host, then resumed with them. */
+async function resumeLater(declaredAtStart: boolean) {
+  const executable = process.env.BORGEE_CODEX_TEST_EXECUTABLE ?? 'codex';
+  const home = mkdtempSync(path.join(os.tmpdir(), 'codex-bridge-home-'));
+  const cwd = realpathSync(mkdtempSync(path.join(os.tmpdir(), 'codex-bridge-workspace-')));
+  const bodies: Body[] = [];
+  let resumed = false;
+  const server = createServer((request, response) => {
+    const chunks: Buffer[] = [];
+    request.on('data', chunk => chunks.push(Buffer.from(chunk)));
+    request.on('end', () => {
+      const body = JSON.parse(Buffer.concat(chunks).toString()) as Body;
+      if (resumed) bodies.push(body);
+      const input = (body.input ?? []) as Array<{ type?: string; role?: string }>;
+      const latest = input.slice(input.findLastIndex(item => item.role === 'user') + 1);
+      const searched = latest.some(item => item.type === 'tool_search_output'), answered = latest.some(item => item.type === 'function_call_output');
+      // The model searches for the tool, then calls it in whichever namespace the search returned.
+      const found = JSON.stringify(latest.find(item => item.type === 'tool_search_output') ?? {}).match(/"name":"(mcp__agent_remote|agent_remote)"/)?.[1];
+      const item = !resumed || answered ? { type: 'message', role: 'assistant', id: 'final', content: [{ type: 'output_text', text: 'DONE' }] }
+        : !searched ? { type: 'tool_search_call', call_id: 'search', execution: 'client', arguments: { query: 'call for support reviewers', limit: 3 } }
+        : { type: 'function_call', call_id: 'call', namespace: found, name: 'call_for_support', arguments: JSON.stringify({ role: 'code reviewer' }) };
+      const events = [{ type: 'response.created', response: { id: 'r' } }, { type: 'response.output_item.done', item },
+        { type: 'response.completed', response: { id: 'r', usage: { input_tokens: 1, output_tokens: 1, total_tokens: 2 } } }];
+      response.writeHead(200, { 'content-type': 'text/event-stream' }).end(events.map(event => `event: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`).join(''));
+    });
+  });
+  server.listen(0, '127.0.0.1'); await once(server, 'listening');
+  writeFileSync(path.join(home, 'config.toml'), `model = "gpt-5.5"
+model_provider = "fixture"
+[model_providers.fixture]
+name = "Bridge fixture"
+base_url = "http://127.0.0.1:${(server.address() as { port: number }).port}/v1"
+wire_api = "responses"
+request_max_retries = 0
+stream_max_retries = 0
+`);
+  const calls: unknown[] = [];
+  const namespaces: AgentSessionToolNamespace[] = [{ name: 'agent_remote', description: 'Agent Remote Control: call for support from other sessions and models.', deferred: true,
+    tools: [{ name: 'call_for_support', description: 'Call for support from other sessions: reviewers, consultants, testers.', inputSchema: schema,
+      execute: async args => { calls.push(args); return 'CALL_ACCEPTED call-456'; } }] }];
+  const provider = () => new CodexAppServerProvider({ executable, env: { CODEX_HOME: home, OPENAI_API_KEY: 'local-bridge' }, requestTimeoutMs: 10_000 });
+  const turn = async (session: Awaited<ReturnType<CodexAppServerProvider['createSession']>>, text: string) => {
+    const stream = session.observe()[Symbol.asyncIterator]();
+    await session.sendMessage(text);
+    for (;;) {
+      const next = await stream.next();
+      if (next.done || next.value.type === 'observation' && ['turn_completed', 'turn_failed', 'turn_canceled'].includes(next.value.event.type)) break;
+    }
+  };
+  try {
+    const first = await provider().createSession({ sessionId: 'started-elsewhere', cwd, model: 'gpt-5.5', ...(declaredAtStart ? { toolNamespaces: namespaces } : {}) });
+    await turn(first, 'Hello.');
+    const handle = (await first.runtimeInfo()).persistence!;
+    await first.dispose();
+    resumed = true;
+    const session = await provider().resumeSession(handle, { toolNamespaces: namespaces });
+    try { await turn(session, 'Call for support.'); } finally { await session.dispose(); }
+    return { bodies, calls };
+  } finally { server.close(); rmSync(home, { recursive: true, force: true }); rmSync(cwd, { recursive: true, force: true }); }
+}
+
+it('offers a thread started without the namespace its tools on resume, found by search and run by this session', async () => {
+  const { bodies, calls } = await resumeLater(false);
+  expect(JSON.stringify(outputs(bodies, 'tool_search_output'))).toContain('mcp__agent_remote');
+  expect(calls).toEqual([{ role: 'code reviewer' }]);
+  expect(JSON.stringify(outputs(bodies, 'function_call_output'))).toContain('CALL_ACCEPTED call-456');
+}, 90_000);
+
+it('adds no MCP server to a thread that declared the namespace at its start', async () => {
+  const { bodies, calls } = await resumeLater(true);
+  expect(JSON.stringify(bodies)).not.toContain('mcp__agent_remote');
+  expect(calls).toEqual([{ role: 'code reviewer' }]);
+}, 90_000);

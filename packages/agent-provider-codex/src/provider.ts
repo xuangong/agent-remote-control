@@ -22,6 +22,7 @@ import { CodexAppServerSession } from './session.js';
 import { initializeCodexTransport } from './initialize.js';
 import { readCodexSessionPage, type CodexSessionListOptions, type CodexSessionPage } from './catalog.js';
 import type { CodexSharedRecoveryPlan, CodexSharedRecoverySettings } from './shared-recovery.js';
+import { CodexToolBridge } from './tool-bridge.js';
 import { windowsCodexSharedEndpoint } from './platform/windows/daemon.js';
 import { sessionLookupError } from './session-lookup-error.js';
 import { CodexProviderNativeEvidence, codexEvidenceAuthority, codexEvidenceJson } from './native-evidence.js';
@@ -66,6 +67,8 @@ export class CodexAppServerProvider implements AgentProviderAdapter {
 
   private readonly takeover: CodexSessionTakeover;
   private readonly sessions = new Set<CodexAppServerSession>();
+  /** Offers threads started without the Host's tool namespaces those namespaces on resume. */
+  private readonly toolBridge = new CodexToolBridge();
 
   constructor(private readonly options: CodexAppServerProviderOptions = {}) {
     this.options = { ...options };
@@ -166,7 +169,7 @@ export class CodexAppServerProvider implements AgentProviderAdapter {
     const transport = await this.createTransport(cwd);
     try {
       const session = await CodexAppServerSession.resume(transport, handle, this.options.collaborationMode, this.options.env?.CODEX_HOME, this.options.restrictedNative,
-        this.sharedRecoveryPlan(cwd), extensions);
+        this.sharedRecoveryPlan(cwd), extensions, this.toolBridge);
       this.sessions.add(session);
       session.onRuntimeClosed(() => this.sessions.delete(session));
       return session;

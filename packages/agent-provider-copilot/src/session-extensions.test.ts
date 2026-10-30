@@ -51,3 +51,15 @@ it('rejects invalid extension schemas before native Copilot creation', async () 
   await expect(instance.createSession({ sessionId: 'local', tools: [{ ...tool(), inputSchema: { type: 'invalid' } }] })).rejects.toThrow(/schema/i);
   expect(mock.client.createSession).not.toHaveBeenCalled(); await instance.dispose();
 }, 10000);
+
+it('gives a resumed session the tools of its namespaces, which Copilot has no grouping for, and refuses clashing names', async () => {
+  const execute = vi.fn(async () => 'CALL_ACCEPTED'), instance = provider();
+  const namespace = { name: 'agent_remote', description: 'Agent Remote Control', tools: [{ ...tool(execute), name: 'call_for_support' }] };
+  const session = await instance.resumeSession({ providerId: 'copilot', sessionId: 'started-elsewhere', opaque: JSON.stringify({ cwd: '/work' }) }, { tools: [tool()], toolNamespaces: [namespace] });
+  try {
+    expect(mock.config.tools.map((item: { name: string; skipPermission?: boolean }) => [item.name, item.skipPermission])).toEqual([['read_main_session', undefined], ['call_for_support', true]]);
+    expect(await mock.config.tools[1].handler({ limit: 1 }, {})).toBe('CALL_ACCEPTED');
+  } finally { await session.dispose(); }
+  await expect(instance.createSession({ sessionId: 'local', tools: [{ ...tool(), name: 'call_for_support' }], toolNamespaces: [namespace] })).rejects.toThrow('duplicate names');
+  await instance.dispose();
+}, 10000);

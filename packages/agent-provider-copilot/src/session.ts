@@ -60,12 +60,16 @@ export class CopilotAgentSession implements AgentSession {
   }
   static async open(client: CopilotClient, config: AgentSessionConfig, resume: boolean, options: CopilotAgentProviderOptions, onDispose: () => void, evidence:{authority:AgentNativeAuthorityScope;descriptor?:CopilotEmptyDescriptor}): Promise<CopilotAgentSession> {
     const self = new CopilotAgentSession(config, options, onDispose,evidence);
-    const tools = bindAgentSessionTools(config.tools, () => self.assertOpen());
+    // Copilot takes tools on every open but has no namespaces: a namespace's tools join the session's own, under their names,
+    // and run without a prompt, as they do on providers with namespaces.
+    const grouped = (config.toolNamespaces ?? []).flatMap(namespace => namespace.tools), declared = [...(config.tools ?? []), ...grouped];
+    if (new Set(declared.map(tool => tool.name)).size !== declared.length) throw new Error('Copilot session tools have duplicate names.');
+    const tools = bindAgentSessionTools(declared, () => self.assertOpen()), unprompted = new Set(grouped.map(tool => tool.name));
     const instructions = [config.systemPrompt, config.instructions].filter(Boolean).join('\n\n');
     const nativeConfig: SessionConfig = { ...options.nativeSessionConfig, sessionId: config.sessionId, workingDirectory: config.cwd, model: config.model, reasoningEffort: reasoningEffort(config.reasoningEffort), streaming: true, includeSubAgentStreamingEvents: true,
       ...(!resume&&evidence.descriptor?{agent:evidence.descriptor.selections.agent,contextTier:evidence.descriptor.selections.contextTier as SessionConfig['contextTier']}:{}),
       systemMessage: instructions ? {mode: 'append', content: instructions} : undefined,
-      ...(tools.length ? { tools: tools.map(({ name, description, inputSchema, execute }) => ({ name, description, parameters: inputSchema, handler: execute })) } : {}),
+      ...(tools.length ? { tools: tools.map(({ name, description, inputSchema, execute }) => ({ name, description, parameters: inputSchema, handler: execute, ...(unprompted.has(name) ? { skipPermission: true } : {}) })) } : {}),
       onPermissionRequest: async () => ({kind: 'no-result'}),
       onUserInputRequest: request => self.interactions.bindQuestion(request),
       onExitPlanModeRequest: request => self.interactions.bindPlan(request),

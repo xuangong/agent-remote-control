@@ -25,7 +25,7 @@ function nativeSessionMissing(error: unknown, sessionId: string): boolean {
     `Request session.resume failed with message: Failed to load session events: ${missing}`].includes(error.message);
 }
 export class CopilotAgentProvider implements AgentProviderAdapter {
-  readonly descriptor = { providerId: 'copilot', displayName: 'GitHub Copilot', sessionExtensions: { instructions: true, tools: true } };
+  readonly descriptor = { providerId: 'copilot', displayName: 'GitHub Copilot', sessionExtensions: { instructions: true, tools: true, toolNamespaces: 'attachment' as const } };
   /** Ordinary create supplies a nonempty UUID; this does not bound resume, fork, or history. */
   readonly createdSessionIdMaxLength = 36;
   readonly sessionRenameRequiresOpen = true;

@@ -91,7 +91,7 @@ Found in the release review (2026-10-29):
 
 - Read-only providers travel as `readOnlyProvider` query parameters with `callForSupport=1`, not in provider descriptors: Relays before Call For Support validate descriptors strictly and would refuse an updated Controller.
 - Idle release applies to support groups only. Ordinary Teams keep every member held, because the user drives those sessions and only a held runtime reports their presence.
-- An archived group can be restored: the worker's seat and the coordinator are provisioned again and resume their sessions, supporters stay released, a waiting roster is rejected and the open call is sent again; a worker has one active role per profile. A group without an open or queued call for a week is archived, and an archiving group takes no calls. At the 128-Team limit and while the Team state is above 1.5 MiB of its 2 MiB bound, groups are removed with their stored files: archived first, then idle, least recently used first, never one used within the last hour; a removal sweeps the files of every Team that no longer exists. Controllers learn about archived and removed groups with `support_group_states` and forget their seats, which keeps their local seat capacity.
+- Archiving keeps a group for reuse, since groups are archived automatically too: the worker's next call for the profile reopens its most recently used archived group, a call by `roleId` or the user's call reopens that group, and the user can restore one without a call. Reopening provisions the worker's seat and the coordinator again, which resume their sessions; supporters stay released, a waiting roster is rejected and the open call is sent again; a worker has one active role per profile. `fresh` starts a new group instead. To keep a group from being reopened, the user deletes it; only archived support groups can be deleted. A group without an open or queued call for a week is archived, and an archiving group takes no calls. At the 128-Team limit and while the Team state is above 1.5 MiB of its 2 MiB bound, groups are removed with their stored files: archived first, then idle, least recently used first, never one used within the last hour; a removal sweeps the files of every Team that no longer exists. Controllers learn about archived and removed groups with `support_group_states` and forget their seats, which keeps their local seat capacity.
 - Bundles and collected patches are not pinned; they expire like other unattached uploads. A report pins what it attaches.
 - A supporter's worktree is removed at once when its creation fails, and is reused or patched only where the path is its own git top level.
 
@@ -324,7 +324,7 @@ Idle runtimes are released by the Host. A delivery resumes the same native sessi
 The requester seat follows the worker's role succession, as members do. Reports go to the current worker session; its tools are re-injected on attach. Supporters are unchanged.
 
 ### Archive
-Archiving a group follows today's Team archive and removes its worktrees. `fresh` archives the previous group of the role. An archived group can be restored (see Refinements).
+Archiving a group follows today's Team archive and removes its worktrees. `fresh` archives the previous group of the role. A call reopens an archived group, and the user can restore or delete one (see Refinements).
 
 ## Failure modes
 

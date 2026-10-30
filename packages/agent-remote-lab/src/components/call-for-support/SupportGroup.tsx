@@ -69,9 +69,8 @@ export function SupportGroup({ team, hosts, busy, onChange, onOpenSession }: {
       </li>)}</ul></details> : null}
     <div className="lab-support-actions">
       {worker?.nativeSessionId ? <button type="button" disabled={busy} onClick={() => onOpenSession(team.source)}>Open worker session</button> : null}
-      {/* An archived group is history: calling for support again starts a new group. */}
-      {team.status === 'archived' ? <span>Archived</span>
-        : <button type="button" disabled={busy || team.status === 'archiving'} onClick={() => void onChange({ teamId: team.id, action: 'archive' })}>{team.status === 'archiving' ? 'Archiving…' : 'Archive'}</button>}
+      {/* Restoring resumes the worker's seat and the coordinator; supporters stay released. */}
+      <button type="button" disabled={busy || team.status === 'archiving'} onClick={() => void onChange({ teamId: team.id, action: team.status === 'archived' ? 'restore' : 'archive' })}>{team.status === 'archived' ? 'Restore' : team.status === 'archiving' ? 'Archiving…' : 'Archive'}</button>
     </div>
   </section>;
 }

@@ -84,6 +84,8 @@ export const CallForSupportGroup = Type.Object({
   status: enumOf('active', 'paused_budget'), pauseReason: Type.Optional(short),
   calls: Type.Array(CallForSupportCall, { maxItems: CALL_FOR_SUPPORT_CALL_LIMIT }), roster: Type.Optional(CallForSupportRoster),
   ledger: Type.Object({ text: Type.String({ maxLength: 16000 }), revision: Type.Integer({ minimum: 0 }) }, object), usage: CallForSupportUsage,
+  // When the user last restored the archived group; it counts as use.
+  restoredAt: Type.Optional(Type.Number({ minimum: 0 })),
 }, object);
 export type CallForSupportGroup = Static<typeof CallForSupportGroup>;
 

@@ -1,7 +1,7 @@
 import { assertTeamQueueCapacity, compactTeamDeliveries, unresolvedTeamDelivery, stripPrivateTeamEvidence, replayTeamDelivery, validSavedTeam, type SavedTeam } from './team-delivery.js';
 export { teamMessageBudgetBytes } from './team-delivery.js';
 import type { TeamResourceStore } from './team-resources.js';
-import { admitTeam, archiveIdleGroups, CallForSupportGroups, compactCallForSupport, pruneGroups, type CallForSupportPorts } from './call-for-support.js';
+import { admitTeam, archiveIdleGroups, CallForSupportGroups, compactCallForSupport, pruneGroups, restoreGroup, type CallForSupportPorts } from './call-for-support.js';
 import { createHash, randomUUID } from 'node:crypto';
 import { nativeSessionRefKey, type NativeSessionRef, isTeamMember, type Team, type TeamAction, type TeamCreate, type TeamHostCall, type TeamMember, type TeamMessage, type TeamSeat, type TeamResource } from '@orchardworks/agent-remote-protocol';
 
@@ -149,9 +149,9 @@ export class TeamBroker {
         if (team.status === 'active') { team.status = 'archiving'; for (const message of team.messages) if (message.status === 'queued') message.status = 'canceled'; touch(team, now); }
       } else if (input.action === 'restore') {
         if (team.status !== 'archived') fail('Finish archiving before restoring this Team.');
-        // Controllers forget an archived group's seats, and the Relay removes archived groups to make room.
-        if (team.callForSupport) fail('An archived support group cannot be restored. Call for support again to start a new group.');
-        team.status = 'active'; touch(team, now);
+        // Controllers forgot an archived group's seats; provisioning below binds them again.
+        if (team.callForSupport) { (this.ports.callForSupport ?? fail(unavailableGroups)).assertHost(team.source.hostId); restoreGroup(teams, team, this.ports.resolveSession, now); }
+        else { team.status = 'active'; touch(team, now); }
       }
       else if (input.action === 'rename') { team.title = input.title; touch(team, now); }
       else if (input.action === 'add_member') {
@@ -171,6 +171,7 @@ export class TeamBroker {
       } else if (input.action === 'retry_creation') { active(team); if (member(team, input.memberId).creation === 'abandoned') fail('Member was abandoned.'); }
       settleArchive(team, now); return team;
     });
+    if (input.action === 'restore' && result.callForSupport) return (this.groups ?? fail(unavailableGroups)).provision(result.id);
     return input.action === 'add_member' ? this.provision(result.id, input.operationId) : input.action === 'retry_creation' ? this.provision(result.id, input.memberId) : this.project(result);
   }
   async hostCall(hostId: string, call: TeamHostCall, assertCurrent: () => void = () => {}, recipientAware = true): Promise<unknown> {

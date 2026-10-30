@@ -176,9 +176,9 @@ export function compactCallForSupport(team: SavedTeam): void {
   }
 }
 
-/** Queues the open call's message from the worker's seat to the coordinator. */
-export function queueCall(team: SavedTeam, call: CallForSupportCall, now: number): void {
-  const message = { id: digest(['call-message', team.id, call.id]), from: requester(team).id, to: team.members[0]!.id, text: callMessageText(team, call),
+/** Queues the open call's message from the worker's seat to the coordinator; a restore sends it again under a new identity. */
+export function queueCall(team: SavedTeam, call: CallForSupportCall, now: number, restoredAt?: number): void {
+  const message = { id: digest(['call-message', team.id, call.id, ...(restoredAt === undefined ? [] : [restoredAt])]), from: requester(team).id, to: team.members[0]!.id, text: callMessageText(team, call),
     status: 'queued' as const, createdAt: now, callForSupportCallId: call.id };
   assertTeamQueueCapacity(team, message);
   team.messages.push(message);
@@ -202,7 +202,7 @@ export const CALL_FOR_SUPPORT_IDLE_ARCHIVE_MS = 7 * 24 * 60 * 60 * 1000;
 export const CALL_FOR_SUPPORT_RECENT_MS = 60 * 60 * 1000;
 
 /** When a group last received a call or a report. */
-const lastUsed = (team: SavedTeam) => Math.max(team.createdAt, ...group(team).calls.map(call => call.reportedAt ?? call.createdAt));
+const lastUsed = (team: SavedTeam) => Math.max(team.createdAt, group(team).restoredAt ?? 0, ...group(team).calls.map(call => call.reportedAt ?? call.createdAt));
 const idle = (team: SavedTeam) => !group(team).calls.some(call => call.status === 'open' || call.status === 'queued');
 
 /** The next group to remove for room: archived groups first, then idle ones, least recently used first, never one used recently. */
@@ -237,6 +237,27 @@ export function archiveIdleGroups(teams: SavedTeam[], now: number): void {
     for (const message of team.messages) if (message.status === 'queued') message.status = 'canceled';
     team.revision++; team.updatedAt = now;
   }
+}
+
+/**
+ * Reopens an archived group for its worker. The worker's seat and the coordinator rebind their own sessions when provisioned again;
+ * supporters stay released, since their worktrees went with the archive; a roster still waiting is rejected; and the open call
+ * reaches the coordinator again. A worker has one active role per profile.
+ */
+export function restoreGroup(teams: SavedTeam[], team: SavedTeam, resolve: TeamBrokerPorts['resolveSession'], now: number): void {
+  const support = group(team), worker = requester(team);
+  if (team.status !== 'archived') fail('Finish archiving before restoring this Team.');
+  if (support.profileId && worker.nativeSessionId && workerGroup(teams, resolve, worker.hostId, { providerId: worker.providerId, nativeSessionId: worker.nativeSessionId },
+    other => other !== team && other.status === 'active' && other.callForSupport?.profileId === support.profileId)) {
+    fail('The worker has another active role for this profile. Archive it before restoring this one.');
+  }
+  for (const member of team.members) if (member.role === 'member' && member.creation !== 'released' && member.creation !== 'abandoned') releaseSupporter(team, member.id, now);
+  for (const member of [team.members[0]!, worker]) if (member.creation === 'ready') Object.assign(member, { creation: 'reserved', activity: 'unknown', updatedAt: now });
+  if (support.roster?.status === 'pending' || support.roster?.status === 'approved') Object.assign(support.roster, { status: 'rejected', decidedAt: now, note: 'The group was archived.' });
+  support.restoredAt = now;
+  const open = support.calls.find(call => call.status === 'open');
+  if (open) queueCall(team, open, now, now);
+  team.status = 'active'; team.revision++; team.updatedAt = now;
 }
 
 /** A new group for a worker: the coordinator as Leader, then the worker's seat, then the first call. */

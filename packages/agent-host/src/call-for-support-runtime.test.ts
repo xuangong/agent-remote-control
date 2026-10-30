@@ -310,3 +310,63 @@ it('keeps an ended group\'s seat until its worktree is removed, and retries at t
     expect(await h.runtime.extensions(fixer)).toBeUndefined();
   } finally { vi.useRealTimers(); if (roleId) await chmod(teamDirectory(), 0o700).catch(() => undefined); await h.close(); }
 });
+
+/** A group with a coordinator that received the open call, archived and forgotten by the Controller. */
+async function archivedGroup(h: Awaited<ReturnType<typeof supportHarness>>) {
+  const profile = h.profile(); h.enable([profile.id]);
+  const { roleId, callId } = await h.call({ operationId: 'op-1', profileId: profile.id });
+  const coordinatorId = h.team(roleId).members[0]!.nativeSessionId!;
+  await h.runtime.tick();
+  expect(h.sessions.get(coordinatorId)!.deliveries).toHaveLength(1);
+  await h.broker.action({ teamId: roleId, action: 'archive' });
+  return { roleId, callId, coordinatorId, coordinator: h.ref('codex', coordinatorId) };
+}
+
+it('restores an archived group: the coordinator resumes its own session and receives the open call again', async () => {
+  const h = await supportHarness();
+  try {
+    const { roleId, callId, coordinatorId, coordinator } = await archivedGroup(h);
+    await h.runtime.tick(); await h.runtime.tick();
+    expect(await h.runtime.extensions(coordinator)).toBeUndefined();
+    const created = h.created.length;
+    await h.broker.action({ teamId: roleId, action: 'restore' });
+    expect(h.created).toHaveLength(created);
+    expect(h.team(roleId).members[0]).toMatchObject({ creation: 'ready', nativeSessionId: coordinatorId });
+    expect(await h.runtime.extensions(coordinator)).toMatchObject({ access: 'read_only' });
+    await h.runtime.tick();
+    expect(h.sessions.get(coordinatorId)!.deliveries).toHaveLength(2);
+    expect(h.sessions.get(coordinatorId)!.deliveries[1]!.text).toContain(`[Support call ${callId}`);
+  } finally { await h.close(); }
+});
+
+it('starts a new coordinator session when a restored group\'s own session can no longer be opened', async () => {
+  const h = await supportHarness();
+  try {
+    const { roleId, coordinatorId } = await archivedGroup(h);
+    await h.runtime.tick(); await h.runtime.tick();
+    h.sessions.delete(coordinatorId);
+    await h.broker.action({ teamId: roleId, action: 'restore' });
+    const replacement = h.team(roleId).members[0]!;
+    expect(replacement).toMatchObject({ creation: 'ready', nativeSessionId: h.created.at(-1)!.id });
+    expect(replacement.nativeSessionId).not.toBe(coordinatorId);
+    expect(h.created.at(-1)!.extensions).toMatchObject({ access: 'read_only' });
+  } finally { await h.close(); }
+});
+
+it('keeps the seats of a group restored while the Controller was confirming its archive', async () => {
+  let restore: (() => Promise<unknown>) | undefined;
+  const h = await supportHarness({ async intercept(call, forward) {
+    const answer = await forward(call);
+    if (call.action === 'support_group_states' && restore) { const pending = restore; restore = undefined; await pending(); }
+    return answer;
+  } });
+  try {
+    const { roleId, coordinator } = await archivedGroup(h);
+    // The Relay answers "archived", then the user restores the group before the Controller acts on that answer.
+    restore = () => h.broker.action({ teamId: roleId, action: 'restore' });
+    for (let tick = 0; tick < 3 && restore; tick++) await h.runtime.tick();
+    expect(restore).toBeUndefined();
+    expect(h.team(roleId).status).toBe('active');
+    expect(await h.runtime.extensions(coordinator)).toMatchObject({ access: 'read_only' });
+  } finally { await h.close(); }
+});

@@ -17,7 +17,9 @@ export const reviewProfile: CallForSupportProfileInput = { name: 'Cross review',
   enableByDefault: false, mandate: { supporters: [{ providerId: 'claude', model: 'opus' }], maxSupporters: 2, workspaces: ['shared'], remoteHosts: [], approval: 'within_mandate' } };
 
 /** A Relay Team broker with Call For Support and a Controller Team runtime over fake native sessions. */
-export async function supportHarness(options: { callForSupport?: boolean; failCreate?: (creation: SessionCreation) => boolean } = {}) {
+export async function supportHarness(options: { callForSupport?: boolean; failCreate?: (creation: SessionCreation) => boolean;
+  /** Sees each Relay call from the Controller, which forward completes. */
+  intercept?: (call: TeamHostCall, forward: (call: TeamHostCall) => Promise<unknown>) => Promise<unknown> } = {}) {
   const directory = await realpath(await mkdtemp(join(tmpdir(), 'call-for-support-'))), cache = createOperationCache();
   // The worker works in a git repository with one commit.
   const git = (...args: string[]) => execFileSync('git', ['-C', directory, '-c', 'user.email=t@t', '-c', 'user.name=t', ...args], { encoding: 'utf8' }).trim();
@@ -63,7 +65,8 @@ export async function supportHarness(options: { callForSupport?: boolean; failCr
     execute: createOperationExecutor(cache, 'call-for-support-test'),
   };
   const state = await realpath(await mkdtemp(join(tmpdir(), 'call-for-support-state-')));
-  runtime = new TeamRuntime(join(state, 'team'), access, call => broker.hostCall('host', call), 1_000_000);
+  const forward = (call: TeamHostCall) => broker.hostCall('host', call);
+  runtime = new TeamRuntime(join(state, 'team'), access, call => options.intercept ? options.intercept(call, forward) : forward(call), 1_000_000);
   const profile = (input: CallForSupportProfileInput = reviewProfile) => executeProfileCommand(support, { type: 'create', profile: input }, Date.now())!;
   const enable = (profileIds: string[]) => setEnablement(support, resolve, { hostId: 'host', providerId: 'codex', nativeSessionId: 'worker' }, profileIds, Date.now());
   return {

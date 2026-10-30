@@ -56,7 +56,7 @@ it('deletes files of Teams that no longer exist on the next removal, including t
   expect(await f.ports.resources!.getMetadata(`team:${kept}`, keptResource)).toMatchObject({ resourceId: keptResource });
 });
 
-it('tells a Host the status of groups it holds seats in, and never restores an archived group', async () => {
+it('tells a Host the status of groups it holds seats in', async () => {
   const f = supportFixture(); const profile = f.profile(); f.enable('worker', [profile.id]);
   const { roleId } = await f.call({ operationId: 'op', profileId: profile.id });
   const plain = await f.broker.create({ operationId: 'plain', source: { hostId: 'mac', providerId: 'codex', nativeSessionId: 'lead', title: 'Plain' } });
@@ -66,7 +66,6 @@ it('tells a Host the status of groups it holds seats in, and never restores an a
   expect(await states('linux', [roleId])).toEqual({ states: [{ teamId: roleId, status: 'missing' }] });
   await f.ports.change(teams => { teams.find(team => team.id === roleId)!.status = 'archived'; });
   expect(await states('mac', [roleId])).toEqual({ states: [{ teamId: roleId, status: 'archived' }] });
-  await expect(f.broker.action({ teamId: roleId, action: 'restore' })).rejects.toThrow('cannot be restored');
 });
 
 it('tells the coordinator to collect again when an unattached upload expired before its report', async () => {
@@ -118,4 +117,58 @@ it('makes room by removing the least recently used idle group, never one used wi
   const added = await group('w4');
   expect(f.teams().some(team => team.id === older)).toBe(false);
   expect(f.teams().map(team => team.id)).toEqual(expect.arrayContaining([newer, waiting, added]));
+});
+
+const archive = (f: ReturnType<typeof supportFixture>, teamId: string) => f.ports.change(teams => { teams.find(team => team.id === teamId)!.status = 'archived'; });
+
+it('restores an archived group: its seats rebind, supporters stay released, a waiting roster is rejected and the open call is sent again', async () => {
+  const f = supportFixture(); const profile = f.profile(); f.enable('worker', [profile.id]);
+  const { roleId, callId } = await f.call({ operationId: 'op', profileId: profile.id });
+  const coordinator = f.team(roleId).members[0]!;
+  await f.broker.hostCall('mac', { action: 'propose_roster', teamId: roleId, memberId: coordinator.id, operationId: 'r1', rationale: 'Review.',
+    members: [{ name: 'Reviewer', responsibility: 'Review.', providerId: 'claude', model: 'opus', workspace: 'shared' }] } as TeamHostCall);
+  expect(f.team(roleId).callForSupport!.roster!.status).toBe('pending');
+  await f.broker.action({ teamId: roleId, action: 'resolve_roster', rosterId: f.team(roleId).callForSupport!.roster!.id, decision: 'approve' });
+  await f.broker.hostCall('mac', { action: 'propose_roster', teamId: roleId, memberId: coordinator.id, operationId: 'r2', rationale: 'Another.',
+    members: [{ name: 'Second', responsibility: 'Review.', providerId: 'claude', model: 'opus', workspace: 'shared' }] } as TeamHostCall);
+  // One supporter is working and a second roster waits for the user.
+  expect(f.team(roleId).members.find(member => member.role === 'member')!.creation).toBe('ready');
+  expect(f.team(roleId).callForSupport!.roster!.status).toBe('pending');
+  await f.broker.action({ teamId: roleId, action: 'archive' });
+  await archive(f, roleId);
+  const seats = f.seats.length;
+
+  const restored = await f.broker.action({ teamId: roleId, action: 'restore' });
+  expect(restored.status).toBe('active');
+  const team = f.team(roleId);
+  expect(team.members.map(member => [member.role, member.creation])).toEqual([['leader', 'ready'], ['requester', 'ready'], ['member', 'released']]);
+  expect(team.members[0]!.nativeSessionId).toBe(coordinator.nativeSessionId);
+  // The worker's seat binds first, then the coordinator's, which names its own session to resume.
+  expect(f.seats.slice(seats).map(seat => [seat.member.role, seat.member.nativeSessionId])).toEqual([['requester', 'worker'], ['leader', coordinator.nativeSessionId]]);
+  expect(team.callForSupport!.roster).toMatchObject({ status: 'rejected', note: 'The group was archived.' });
+  expect(team.callForSupport!.restoredAt).toEqual(expect.any(Number));
+  expect(team.messages.filter(message => message.to === coordinator.id && message.callForSupportCallId === callId && message.status === 'queued')).toHaveLength(1);
+});
+
+it('refuses to restore a group while the worker has another active role for the profile', async () => {
+  const f = supportFixture(); const profile = f.profile(); f.enable('worker', [profile.id]);
+  const first = await f.call({ operationId: 'op-1', profileId: profile.id });
+  await archive(f, first.roleId);
+  const second = await f.call({ operationId: 'op-2', profileId: profile.id });
+  expect(second.roleId).not.toBe(first.roleId);
+  await expect(f.broker.action({ teamId: first.roleId, action: 'restore' })).rejects.toThrow('another active role for this profile');
+  await archive(f, second.roleId);
+  expect((await f.broker.action({ teamId: first.roleId, action: 'restore' })).status).toBe('active');
+});
+
+it('counts a restore as use, so a long idle group is not archived again at once', async () => {
+  const f = supportFixture(); const profile = f.profile(); f.enable('worker', [profile.id]);
+  const { roleId } = await f.call({ operationId: 'op', profileId: profile.id });
+  await reportOpenCall(f, roleId);
+  f.advance(2 * CALL_FOR_SUPPORT_IDLE_ARCHIVE_MS);
+  await archive(f, roleId);
+  await f.broker.action({ teamId: roleId, action: 'restore' });
+  f.enable('other', [profile.id]);
+  await f.call({ operationId: 'other', profileId: profile.id, worker: f.worker('other') });
+  expect(f.team(roleId).status).toBe('active');
 });

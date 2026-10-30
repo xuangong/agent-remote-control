@@ -74,6 +74,9 @@ export class TeamRuntime implements SessionRole {
   private readonly claiming = new Map<string, number>();
   /** When to ask again about a support group missing from the poll, which omits archived groups. */
   private readonly groupChecks = new Map<string, number>();
+  /** Counts seat bindings, so a group restored while its archive was being confirmed keeps its new seats. */
+  private bindings = 0;
+  private readonly boundAt = new Map<string, number>();
   private readonly timer: ReturnType<typeof setInterval>;
   constructor(private readonly directory: string, private readonly access: TeamRuntimeAccess, private readonly request: (call: TeamHostCall) => Promise<unknown>, tickMs = 3000) {
     this.resourceFiles = new TeamResourceFiles(directory, request);
@@ -154,11 +157,19 @@ export class TeamRuntime implements SessionRole {
       const previous = existing.seat;
       if (previous.member.providerId !== seat.member.providerId || previous.member.hostId !== seat.member.hostId || previous.member.role !== seat.member.role || JSON.stringify(previous.source) !== JSON.stringify(seat.source)) throw new Error('Team slot identity changed.');
       if (existing.creation !== 'ready') throw new Error('Native creation outcome is unknown. Inspect the Host and abandon this slot before creating another.');
+      this.boundAt.set(seat.teamId, ++this.bindings);
       return existing.seat.member;
     }
     if (this.records.length >= 384) throw new Error('Local Team session capacity reached.');
     seat = structuredClone(seat);
+    this.boundAt.set(seat.teamId, ++this.bindings);
     if (seat.member.role === 'requester') return this.bindWorker(seat);
+    // A restored group's coordinator resumes its own session, with the context it built; a new one starts only if that session is gone.
+    if (seat.callForSupport && seat.member.nativeSessionId) {
+      const resumed = await this.resume(seat);
+      if (resumed) return resumed;
+      delete seat.member.nativeSessionId;
+    }
     if (seat.member.role === 'leader') {
       const source = await this.access.acquire(seat.source.providerId, seat.source.nativeSessionId);
       try { seat.member.cwd = source.agent.snapshot().payload.runtimeInfo.cwd; } finally { source.release(); }
@@ -224,15 +235,33 @@ export class TeamRuntime implements SessionRole {
     try { await writeFile(file, patch); return await this.resourceFiles.upload(input.teamId, input.memberId, file, input.operationId); }
     finally { await rm(directory, { recursive: true, force: true }); }
   }
-  /** A support group's worker seat binds the existing worker session and reports where it works. */
+  /** A support group's worker seat binds the existing worker session, or the session that holds its role now, and reports where it works. */
   private async bindWorker(seat: TeamSeat): Promise<TeamMember> {
     if (seat.member.providerId !== seat.source.providerId || seat.member.nativeSessionId !== seat.source.nativeSessionId) throw new Error('The worker seat must name the worker session.');
-    const worker = await this.access.acquire(seat.source.providerId, seat.source.nativeSessionId);
+    const current = this.access.sessionRouting.resolve(this.anchor(seat)).target;
+    const worker = await this.access.acquire(current.providerId, current.nativeSessionId);
     try { seat.member.cwd = worker.agent.snapshot().payload.runtimeInfo.cwd; } finally { worker.release(); }
     if (!seat.member.cwd) throw new Error('The worker\'s working directory is unavailable.');
     seat.member.creation = 'ready'; seat.member.activity = 'unknown';
     this.records.push({ seat, creation: 'ready', receipts: Object.create(null) }); await this.save();
     return seat.member;
+  }
+  /** Binds a restored seat to its own session; undefined, with nothing recorded, when that session cannot be opened. */
+  private async resume(seat: TeamSeat): Promise<TeamMember | undefined> {
+    // A worktree supporter's worktree went with the archive.
+    if (seat.member.workspace?.kind === 'worktree' || seat.member.workspace?.kind === 'remote') return undefined;
+    seat.member.creation = 'ready'; seat.member.activity = 'unknown';
+    // Recorded first, so the session opens with its role's extensions.
+    const record: LocalSeat = { seat, creation: 'ready', receipts: Object.create(null) };
+    this.records.push(record); await this.save();
+    try {
+      const target = this.access.sessionRouting.resolve(this.anchor(seat)).target;
+      (await this.access.acquire(target.providerId, target.nativeSessionId)).release();
+      return seat.member;
+    } catch {
+      this.records.splice(this.records.indexOf(record), 1); seat.member.creation = 'reserved'; await this.save();
+      return undefined;
+    }
   }
   private tools(seat: TeamSeat, actual: () => NativeSessionRef | undefined = () => this.anchor(seat)): AgentSessionExtensions {
     const { member, teamId } = seat;
@@ -347,11 +376,13 @@ export class TeamRuntime implements SessionRole {
       .filter(id => (this.groupChecks.get(id) ?? 0) <= now).slice(0, 64);
     if (!due.length) return;
     for (const id of due) this.groupChecks.set(id, now + 600_000);
+    const asked = this.bindings;
     let states: unknown;
     try { states = (await this.request({ action: 'support_group_states', teamIds: due }) as { states?: unknown }).states; } catch { return; }
     if (!Array.isArray(states)) return;
+    // A group whose seats were bound while asking was restored meanwhile.
     const ended = new Set(states.filter(state => state && typeof state === 'object' && due.includes(state.teamId) && (state.status === 'archived' || state.status === 'missing'))
-      .map(state => state.teamId as string));
+      .map(state => state.teamId as string).filter(id => (this.boundAt.get(id) ?? 0) <= asked));
     if (!ended.size) return;
     const forgotten = new Set<LocalSeat>();
     for (const record of this.records.filter(item => ended.has(item.seat.teamId))) {
@@ -362,7 +393,7 @@ export class TeamRuntime implements SessionRole {
       if (!record.worktree || record.worktree.removed) forgotten.add(record);
     }
     this.records = this.records.filter(item => !forgotten.has(item));
-    for (const id of ended) if (!this.records.some(item => item.seat.teamId === id)) this.groupChecks.delete(id);
+    for (const id of ended) if (!this.records.some(item => item.seat.teamId === id)) { this.groupChecks.delete(id); this.boundAt.delete(id); }
     await this.save();
   }
   private async reconcileReceipts(record: LocalSeat, team?: Team): Promise<void> {

@@ -41,12 +41,14 @@ describe('App', () => {
       const letters = container.querySelector<HTMLInputElement>('[aria-label="Show letters"]');
       const content = container.querySelector<HTMLInputElement>('input[value="content"]')!;
       const simple = container.querySelector<HTMLInputElement>('input[value="simple"]')!;
+      const preview = container.querySelector<HTMLInputElement>('input[value="preview"]')!;
       expect(letters).not.toBeNull();
       expect(letters!.checked).toBe(true);
       expect(container.querySelector('.agent-communication-letter')).not.toBeNull();
-      for (const mode of ['preview', 'content', 'simple'] as const) {
+      // Simple conversation is the default mode.
+      for (const mode of ['simple', 'content', 'preview'] as const) {
         if (mode === 'content') await act(async () => content.click());
-        if (mode === 'simple') await act(async () => simple.click());
+        if (mode === 'preview') await act(async () => preview.click());
         await act(async () => letters!.click());
         expect(container.querySelector<HTMLInputElement>(`input[value="${mode}"]`)!.checked).toBe(true);
         expect(letters!.checked).toBe(false);
@@ -224,19 +226,21 @@ describe('App', () => {
       providerId: 'recorded', seqStart: 1, seqEnd: 1, timestamp: '2026-09-15T00:00:00Z', sourceSeqRanges: [], collapsed: [], resources: [], item: { type: 'reasoning' as const, text: 'Review the failing test first.' },
     }] } };
     try {
+      // Simple conversation is the default: no previews until the user chooses them.
       const container = await render(<App initialState={initialState} transport={labTransport()} />);
-      expect(container.querySelector('.agent-content-preview')?.textContent).toContain('Review the failing test');
-      await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="Session view options"]')!.click());
-      const simple = container.querySelector<HTMLInputElement>('input[value="simple"]');
-      expect(simple).not.toBeNull();
-      await act(async () => simple!.click());
       expect(container.querySelector('.agent-content-preview')).toBeNull();
-      await openSessionViewOptions(container);
+      await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="Session view options"]')!.click());
       expect(container.querySelector<HTMLInputElement>('input[value="simple"]')!.checked).toBe(true);
+      const preview = container.querySelector<HTMLInputElement>('input[value="preview"]');
+      expect(preview).not.toBeNull();
+      await act(async () => preview!.click());
+      expect(container.querySelector('.agent-content-preview')?.textContent).toContain('Review the failing test');
+      await openSessionViewOptions(container);
+      expect(container.querySelector<HTMLInputElement>('input[value="preview"]')!.checked).toBe(true);
       const restored = await render(<App initialState={initialState} transport={labTransport()} />);
-      expect(restored.querySelector('.agent-content-preview')).toBeNull();
-      await act(async () => container.querySelector<HTMLInputElement>('input[value="preview"]')!.click());
-      expect(container.querySelector('.agent-content-preview')).not.toBeNull();
+      expect(restored.querySelector('.agent-content-preview')?.textContent).toContain('Review the failing test');
+      await act(async () => container.querySelector<HTMLInputElement>('input[value="simple"]')!.click());
+      expect(container.querySelector('.agent-content-preview')).toBeNull();
     } finally { window.localStorage.removeItem(key); }
   });
 

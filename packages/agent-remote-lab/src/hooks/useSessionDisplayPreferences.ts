@@ -17,7 +17,7 @@ const storageKey = (binding: DisplayPreferenceBinding) => `agent-remote:recovery
 const valid = (value: unknown): value is SessionDisplayPreferences => !!value && typeof value === 'object' && 'mode' in value
   && ['preview', 'simple', 'content'].includes(String(value.mode)) && 'lettersVisible' in value && typeof value.lettersVisible === 'boolean';
 function defaults(defaultMode?: TimelineDisplayMode): SessionDisplayPreferences {
-  const preferences: SessionDisplayPreferences = { mode: defaultMode ?? 'preview', lettersVisible: true };
+  const preferences: SessionDisplayPreferences = { mode: defaultMode ?? 'simple', lettersVisible: true };
   try {
     const legacyMode = localStorage.getItem('agent-remote:timeline-display');
     if (!defaultMode && (legacyMode === 'simple' || legacyMode === 'content')) preferences.mode = legacyMode;

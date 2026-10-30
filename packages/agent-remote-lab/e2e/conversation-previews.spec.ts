@@ -7,11 +7,17 @@ async function openDisplayOptions(page: Page) {
 }
 
 for (const width of [320, 390, 844, 1440]) {
-  test(`shows previews and remembers simple mode at ${width}px`, async ({ page }, testInfo) => {
+  test(`starts in simple conversation, then shows and remembers previews at ${width}px`, async ({ page }, testInfo) => {
     await page.setViewportSize({ width, height: 850 });
     const errors: string[] = [];
     page.on('pageerror', error => errors.push(error.message));
     await page.goto('/e2e/fixtures/view-overflow.html?view=previews');
+    await expect(page.locator('.agent-tool')).toHaveCount(2);
+    await expect(page.locator('.agent-tool-preview')).toHaveCount(0);
+    await openDisplayOptions(page);
+    await expect(page.getByRole('radio', { name: 'Simple conversation', exact: true })).toBeChecked();
+    await page.getByRole('radio', { name: 'Preview', exact: true }).check();
+    await page.getByRole('button', { name: 'Session view options', exact: true }).click();
     await expect(page.locator('.agent-tool-preview')).toHaveCount(2);
     await expect(page.locator('.agent-file-preview')).toHaveCount(2);
     await expect(page.locator('.agent-reasoning .agent-content-preview')).toContainText('Check the existing event');
@@ -33,15 +39,8 @@ for (const width of [320, 390, 844, 1440]) {
     await page.getByTestId('timeline').dispatchEvent('wheel', { deltaY: -100 });
     await page.locator('.agent-reasoning').scrollIntoViewIfNeeded();
     await page.screenshot({ path: testInfo.outputPath(`previews-${width}.png`) });
-    await openDisplayOptions(page);
-    await page.getByRole('radio', { name: 'Simple conversation', exact: true }).check();
-    await expect(page.locator('.agent-tool-preview')).toHaveCount(0);
     // App replaces the fixture URL with the session URL; revisit the fixture to remount it.
     await page.goto('/e2e/fixtures/view-overflow.html?view=previews');
-    await expect(page.locator('.agent-tool-preview')).toHaveCount(0);
-    await openDisplayOptions(page);
-    await page.getByRole('radio', { name: 'Preview', exact: true }).check();
-    await page.getByRole('button', { name: 'Session view options', exact: true }).click();
     await expect(page.locator('.agent-tool-preview')).toHaveCount(2);
     const tool = page.locator('.agent-tool').first();
     await tool.getByRole('button', { name: 'Show full result' }).click();
@@ -49,6 +48,9 @@ for (const width of [320, 390, 844, 1440]) {
     await tool.locator('.agent-tool-toggle').click();
     await expect(tool.locator('.agent-tool-preview')).toHaveCount(0);
     await expect(tool.locator('.agent-tool-details')).toBeHidden();
+    await openDisplayOptions(page);
+    await page.getByRole('radio', { name: 'Simple conversation', exact: true }).check();
+    await expect(page.locator('.agent-tool-preview')).toHaveCount(0);
     expect(errors).toEqual([]);
   });
 }

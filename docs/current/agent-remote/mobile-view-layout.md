@@ -56,10 +56,12 @@ Opening the row still opens the tracked leader or member.
 
 Each Session View heading has a mode menu with mutually exclusive **Preview**, **Simple conversation** and **Content only** choices, plus an independent **Show letters** checkbox. Main, Side, Ask and ARDB use the same controls, with preferences scoped to their session or recording identity. Content only renders user messages and assistant text/Markdown, including inline Markdown images, links and associated message resources, and groups adjacent visible messages. It also retains plan/task-management tool calls, task boards with their live completion states, errors, and completed interactions including answered questions and approval decisions. Communication letters follow Show letters in every mode. Retained tools and answered questions use bounded previews with expandable details. Reasoning, other tools, runtime notices, compaction, unrelated resource cards, preview registration controls, renderer extensions, inline subagent lists and Trace shortcuts are hidden. The complete replica remains available to Trace and the other conversation modes. Pending interaction controls and outgoing message delivery feedback remain available. A loaded history page with no matching items shows an empty content state and retains older-history navigation. Explicitly choosing Show in Conversation for a hidden execution event in Trace switches only the destination view to Simple mode so the target can be revealed.
 
-The default conversation shows bounded previews before full disclosure. Selecting
-**Simple conversation** in that view's heading restores the title-oriented display
-for untouched items without changing other views. Individual expand/collapse choices
-survive content updates and changes to the default mode while the item is mounted.
+A session view starts in **Simple conversation**, the title-oriented display; Side
+and Ask views start in Content only. A view keeps the mode chosen for it. Selecting
+**Preview** in a view's heading shows bounded previews before full disclosure for
+untouched items without changing other views. A browser-wide mode saved by earlier
+versions still applies to views without their own choice. Individual expand/collapse
+choices survive content updates and changes to the default mode while the item is mounted.
 Tool descriptions are limited to three lines. In views up to 620px wide, command,
 path, search and URL summaries also wrap to at most three lines; wider views keep
 their single-line summaries. The existing disclosure opens the complete details.

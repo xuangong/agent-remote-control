@@ -42,7 +42,7 @@ it('changes one view without filtering its neighboring conversation or letters',
   expect(second.querySelector('[data-entry-key="epoch-1:recorded:2:reasoning"]')).not.toBeNull();
   expect(second.querySelector('[data-entry-key="epoch-1:recorded:3:letter"]')).not.toBeNull();
   await options(second);
-  expect(modeInput(second, 'preview').checked).toBe(true);
+  expect(modeInput(second, 'simple').checked).toBe(true);
   expect(lettersInput(second).checked).toBe(true);
 });
 
@@ -58,7 +58,7 @@ it('restores native-session preferences without carrying them into another sessi
   await act(async () => { modeInput(container, 'content').click(); lettersInput(container).click(); });
   await act(async () => switchView({ scope: 'relay-one', session: 'second' }));
   await options(container);
-  expect(modeInput(container, 'preview').checked).toBe(true);
+  expect(modeInput(container, 'simple').checked).toBe(true);
   expect(lettersInput(container).checked).toBe(true);
   await act(async () => switchView({ scope: 'relay-one', session: 'first', agentId: 'new-agent' }));
   await options(container);
@@ -66,7 +66,7 @@ it('restores native-session preferences without carrying them into another sessi
   expect(lettersInput(container).checked).toBe(false);
   await act(async () => switchView({ scope: 'relay-two', session: 'first' }));
   await options(container);
-  expect(modeInput(container, 'preview').checked).toBe(true);
+  expect(modeInput(container, 'simple').checked).toBe(true);
   await unmount(container);
   const restored = await render(<RecoveryScope.Provider value={new ReadingPositions('relay-one')}><LabWorkbench {...props} draftSessionKey="first" /></RecoveryScope.Provider>);
   await options(restored);
@@ -98,7 +98,7 @@ it('reveals filtered trace entries only in their owning view and preserves the l
   expect(first.querySelector('[data-entry-key="epoch-1:recorded:2:reasoning"]')).not.toBeNull();
   expect(modeInput(first, 'simple').checked).toBe(true);
   await options(second);
-  expect(modeInput(second, 'preview').checked).toBe(true);
+  expect(modeInput(second, 'simple').checked).toBe(true);
 });
 
 it('uses the same display controls in a standalone session view', async () => {
@@ -112,7 +112,7 @@ it('uses the same display controls in a standalone session view', async () => {
 });
 
 it('migrates existing display choices while honoring a new view default', async () => {
-  localStorage.setItem('agent-remote:timeline-display', 'simple');
+  localStorage.setItem('agent-remote:timeline-display', 'content');
   localStorage.setItem('agent-remote:show-letters', 'false');
   const container = await render(<RecoveryScope.Provider value={new ReadingPositions('relay')}>
     <section data-view="main"><LabWorkbench {...props} draftSessionKey="main" /></section>
@@ -121,7 +121,7 @@ it('migrates existing display choices while honoring a new view default', async 
   const main = container.querySelector('[data-view="main"]')!;
   const ask = container.querySelector('[data-view="ask"]')!;
   await options(main);
-  expect(modeInput(main, 'simple').checked).toBe(true);
+  expect(modeInput(main, 'content').checked).toBe(true);
   expect(lettersInput(main).checked).toBe(false);
   await options(ask);
   expect(modeInput(ask, 'content').checked).toBe(true);
@@ -165,8 +165,8 @@ it('treats damaged display storage as unknown and refuses stale retention', () =
 });
 
 
-it.each(['preview', 'simple'])('retains an unmounted absent Ask display without choosing its later content default over global %s', async legacy => {
-  if (legacy === 'simple') localStorage.setItem('agent-remote:timeline-display', legacy);
+it.each(['simple', 'content'])('retains an unmounted absent Ask display without choosing its later content default over global %s', async legacy => {
+  if (legacy === 'content') localStorage.setItem('agent-remote:timeline-display', legacy);
   const scope = `unmounted-display-${legacy}`, binding = { scope, key: 'ask-owner' };
   const { useAskConversations } = await import('../hooks/useAskConversations.js');
   const { sessionKey } = await import('../session-tree.js');

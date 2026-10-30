@@ -35,7 +35,7 @@ A session may call for the profiles of its explicit enablement entry (`POST …/
 2. The call reaches the coordinator as a framed Team message (`[Support call <id> · <role> · <deliverable> · from the worker]`).
 3. The coordinator proposes a roster. The Relay refuses what no approval can fix (unknown or incapable Host, provider missing, `shared` without native read-only, `worktree`/`remote` without the call's commit, remote Host outside the mandate, member capacity) and marks what leaves the mandate. With `within_mandate` approval a roster inside the mandate is provisioned at once; otherwise it waits for the user. Releases happen before additions.
 4. The coordinator briefs supporters through Team messages, collects their evidence and answers the call with one `report_support`. The Relay frames the report for the worker as advice (`[Support report · <role> · call <id> · <status>]`, summary, findings without evidence, resources, and how to read details or follow up) and opens the next waiting call.
-5. Follow-ups name the role and the earlier call; the same coordinator and supporters continue with their context and the coordinator's ledger (`write_ledger`, revision-checked).
+5. Follow-ups name the role and the earlier call; the same coordinator and supporters continue with their context and the coordinator's ledger (`write_ledger`, revision-checked). The coordinator keeps supporters across calls, since an idle supporter's runtime is released anyway; it releases one only when the role no longer needs it or to make room within the mandate. A released supporter receives nothing more, but its session stays listed in the group's view and layout and opens as an ordinary session.
 
 ### Workspaces and patches
 

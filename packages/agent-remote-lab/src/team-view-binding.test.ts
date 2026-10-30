@@ -31,3 +31,15 @@ it('reads legacy Team windows but refuses to guess missing member identity from 
   restored.slots[0]!.intent.kind = 'history';
   expect(teamViewTarget(restored, [missing], target, slot.id)).toBeUndefined();
 });
+
+it('keeps a released supporter reachable: listed in the layout of its group, opened as an ordinary session', () => {
+  const group: Team = { ...team, members: [team.members[0]!, { ...team.members[0]!, id: 'reviewer', role: 'member', name: 'Reviewer', nativeSessionId: 'R', creation: 'released' },
+    { ...team.members[0]!, id: 'pending', role: 'member', name: 'Pending', nativeSessionId: undefined, creation: 'reserved' }] };
+  const layout = teamLayoutTargets(group, false);
+  expect(layout.dock.map(target => target.teamMemberId)).toEqual(['leader', 'reviewer']);
+  expect(layout.groupRoot?.teamMemberId).toBe('leader');
+  const reviewer = layout.dock[1]!, slot = createCompositionSlot('reviewer-slot', reviewer, 'scope'), document = createCompositionDocument('scope', [slot]);
+  document.windows = [{ id: 'reviewer-view', slotId: slot.id, managed: true, groupId: group.id, teamMemberId: 'reviewer' }];
+  // No Team routing: its view follows the session itself.
+  expect(teamViewTarget(parseComposition(document, 'scope'), [group], reviewer, slot.id)).toBeUndefined();
+});

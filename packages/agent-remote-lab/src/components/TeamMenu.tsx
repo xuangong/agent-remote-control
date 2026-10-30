@@ -171,15 +171,18 @@ export function TeamMenu(props: Props) {
   </>;
 }
 
+const memberRole = (team: Team, member: Team['members'][number]) => member.role === 'requester' ? 'Worker'
+  : member.role === 'leader' ? (team.callForSupport ? 'Coordinator' : 'Leader') : team.callForSupport ? 'Supporter' : 'Member';
+
 function TeamSessionNavigation({ team, hosts, busy, currentSession, onOpen }: {
   team: Team; hosts: Host[]; busy: boolean; currentSession: Props['currentSession']; onOpen(target: TeamSource & { teamId?: string; teamMemberId?: string }): void;
 }) {
   return <nav className="lab-team-session-navigation" aria-label={`${team.title} sessions`}>
     {team.members.filter(member => member.creation !== 'abandoned').map(member => <button key={member.id} type="button"
-      disabled={busy || member.creation !== 'ready' || !member.nativeSessionId}
+      disabled={busy || member.creation !== 'ready' && member.creation !== 'released' || !member.nativeSessionId}
       aria-current={isCurrentMember(member, currentSession) ? 'page' : undefined}
       onClick={() => onOpen({ teamId: team.id, teamMemberId: member.id, hostId: member.hostId, providerId: member.providerId, nativeSessionId: member.nativeSessionId!, title: member.name })}>
-      <span>{member.name}</span><small>{member.role === 'leader' ? 'Leader' : 'Member'} · {hosts.find(host => host.id === member.hostId)?.name ?? member.hostId}{member.creation !== 'ready' ? ' · Not ready' : !member.nativeSessionId ? ' · Execution unavailable' : ''}</small>
+      <span>{member.name}</span><small>{memberRole(team, member)} · {hosts.find(host => host.id === member.hostId)?.name ?? member.hostId}{member.creation === 'released' ? ' · Released' : member.creation !== 'ready' ? ' · Not ready' : !member.nativeSessionId ? ' · Execution unavailable' : ''}</small>
     </button>)}
   </nav>;
 }

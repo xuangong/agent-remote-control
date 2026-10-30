@@ -17,7 +17,7 @@ export function SupportGroup({ team, hosts, busy, onChange, onDelete, onOpenSess
   const [note, setNote] = useState(''), [budget, setBudget] = useState<Budget>(support.mandate.budget ?? {}), [deleting, setDeleting] = useState(false);
   const hostName = (id: string) => hosts.find(host => host.id === id)?.name ?? id;
   const supporters = team.members.filter(member => member.role === 'member');
-  const worker = team.members.find(member => member.role === 'requester');
+  const worker = team.members.find(member => member.role === 'requester'), coordinator = team.members.find(member => member.role === 'leader');
   const name = (id: string) => team.members.find(member => member.id === id)?.name ?? id;
   // Deliveries whose outcome is uncertain hold the group until the user says what happened.
   const uncertain = [...team.messages.filter(message => message.status === 'unknown'), ...(team.unresolvedReceipts ?? [])];
@@ -60,7 +60,8 @@ export function SupportGroup({ team, hosts, busy, onChange, onDelete, onOpenSess
     </div> : null}
     {support.calls.length ? <details open={support.calls.some(call => call.status === 'open')}><summary>Calls ({support.calls.length})</summary>
       {[...support.calls].reverse().map(call => <SupportCall key={call.id} call={call} />)}</details> : null}
-    {supporters.length ? <details><summary>Supporters ({supporters.filter(member => member.creation !== 'released' && member.creation !== 'abandoned').length} active)</summary>
+    {/* Released supporters stay listed: their sessions remain open for reading. */}
+    {supporters.length ? <details open><summary>Supporters ({supporters.length}, {supporters.filter(member => member.creation !== 'released' && member.creation !== 'abandoned').length} active)</summary>
       <ul className="lab-team-members">{supporters.map(member => <li key={member.id}>
         <button type="button" disabled={busy || member.creation !== 'ready' && member.creation !== 'released' || !member.nativeSessionId}
           onClick={() => onOpenSession({ teamId: team.id, teamMemberId: member.id, hostId: member.hostId, providerId: member.providerId, nativeSessionId: member.nativeSessionId!, title: member.name })}>{member.name}</button>
@@ -71,6 +72,8 @@ export function SupportGroup({ team, hosts, busy, onChange, onDelete, onOpenSess
     {team.status === 'archived' ? <p className="lab-support-muted">Archived: a call reopens it with its coordinator and history. Delete it to keep it from being reopened.</p> : null}
     <div className="lab-support-actions">
       {worker?.nativeSessionId ? <button type="button" disabled={busy} onClick={() => onOpenSession(team.source)}>Open worker session</button> : null}
+      {coordinator?.nativeSessionId ? <button type="button" disabled={busy || coordinator.creation !== 'ready'}
+        onClick={() => onOpenSession({ teamId: team.id, teamMemberId: coordinator.id, hostId: coordinator.hostId, providerId: coordinator.providerId, nativeSessionId: coordinator.nativeSessionId!, title: coordinator.name })}>Open coordinator session</button> : null}
       {/* Restoring resumes the worker's seat and the coordinator; supporters stay released. */}
       <button type="button" disabled={busy || team.status === 'archiving'} onClick={() => void onChange({ teamId: team.id, action: team.status === 'archived' ? 'restore' : 'archive' })}>{team.status === 'archived' ? 'Restore' : team.status === 'archiving' ? 'Archiving…' : 'Archive'}</button>
       {team.status !== 'archived' ? null : deleting

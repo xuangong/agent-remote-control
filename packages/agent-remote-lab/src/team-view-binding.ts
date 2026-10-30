@@ -18,6 +18,8 @@ export function teamViewTarget(document: CompositionDocument, teams: readonly Te
     && sessionKey({ hostId: member.hostId, providerId: member.providerId, nativeSessionId: member.nativeSessionId }) === sessionKey(source));
   if (matches.length !== 1) throw new Error('The saved Team member identity is unavailable. Reopen this member from the Team list.');
   const member = matches[0]!;
+  // A released supporter takes no Team messages; its session stays open as an ordinary session.
+  if (member.creation === 'released') return;
   if (member.creation !== 'ready') throw new Error(member.error ?? 'This Team member session is not ready. Check creation in the Team list.');
   if (!member.nativeSessionId) throw new Error('This Team member has no current execution locator. Its history and draft are preserved.');
   return { ...source, teamId, teamMemberId: member.id, hostId: member.hostId, providerId: member.providerId, nativeSessionId: member.nativeSessionId, title: member.name };

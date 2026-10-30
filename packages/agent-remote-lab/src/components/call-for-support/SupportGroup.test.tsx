@@ -100,6 +100,20 @@ it('archives a role and restores an archived one', async () => {
   expect(changes).toEqual([{ teamId: 'group', action: 'archive' }, { teamId: 'group', action: 'restore' }]);
 });
 
+it('opens the coordinator and every supporter, released ones included', async () => {
+  const opened: unknown[] = [];
+  const team = supportTeam();
+  team.members[2] = { ...team.members[2]!, creation: 'released', activity: 'idle' };
+  const view = await render(<SupportGroup team={team} hosts={[]} busy={false} onChange={async () => true} onDelete={async () => true} onOpenSession={target => { opened.push(target); }} />);
+  expect(view.textContent).toContain('Supporters (1, 0 active)');
+  expect(view.querySelector('details:has(> summary) [type="button"]')).not.toBeNull();
+  await act(async () => button(view, 'Opus reviewer').click());
+  await act(async () => button(view, 'Open coordinator session').click());
+  expect(opened).toEqual([
+    { teamId: 'group', teamMemberId: 'reviewer', hostId: 'mac', providerId: 'claude', nativeSessionId: 'reviewer-native', title: 'Opus reviewer' },
+    { teamId: 'group', teamMemberId: 'coordinator', hostId: 'mac', providerId: 'codex', nativeSessionId: 'coordinator-native', title: 'Coordinator' }]);
+});
+
 it('deletes an archived role only after confirmation', async () => {
   let deleted = 0;
   const active = await render(<SupportGroup team={supportTeam()} hosts={[]} busy={false} onChange={async () => true} onDelete={async () => { deleted++; return true; }} onOpenSession={() => {}} />);

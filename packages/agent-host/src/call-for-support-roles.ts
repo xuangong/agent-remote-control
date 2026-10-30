@@ -12,6 +12,19 @@ const tool = (name: string, description: string, inputSchema: Record<string, unk
 /** Where the worker's files are, which the coordinator and shared supporters read in place. */
 const workerFiles = (cwd: string | undefined) => cwd ? `the worker's working directory, ${cwd}` : 'the worker\'s working directory';
 
+/**
+ * Where a Team member is, and what that means for files: members on one Host share its file system and read each other's
+ * files in place; only members on other Hosts need transfers.
+ */
+export function locationInstructions(seat: TeamSeat): string {
+  return [
+    `You are on Host ${seat.member.hostId}${seat.member.cwd ? `, working in ${seat.member.cwd}` : ''}.`,
+    'read_team lists every member with its hostId and working directory (cwd); onYourHost marks the members on your Host.',
+    'Members on your Host share its file system: read their files in place, within your permissions, instead of asking for snapshots, copies or uploads.',
+    'Transfer files only to or from members on other Hosts, whose paths do not exist here.',
+  ].join(' ');
+}
+
 /** The coordinator organizes supporters within the mandate and answers each call with one report. */
 export function coordinatorInstructions(seat: TeamSeat): string {
   const group = seat.callForSupport!;
@@ -21,6 +34,7 @@ export function coordinatorInstructions(seat: TeamSeat): string {
     `You run on the worker's Host, in ${workerFiles(seat.member.cwd)}, read-only. Supporters on the shared workspace run there too. You and they read the worker's files in place, including uncommitted and untracked changes, and other directories of this Host the call points to, such as a worktree of the repository.`,
     'Review what the call names: the code at its commit through git when it gives one, otherwise the files as they are. Never ask the worker for a snapshot commit, a patch or a copy of what you can read yourself; note in the report the HEAD and the state you reviewed (for example git status), since the worker may keep working. Ask the worker for a commit only when a worktree or remote supporter needs one.',
     'For each call: decide what support it needs; if you need supporters, propose a roster with propose_roster and wait for their registration messages; release supporters you no longer need with release_supporter. Prefer shared supporters when reading is enough.',
+    'A worktree supporter is on your Host too: read its worktree in place to review its work, and collect its patch with collect_supporter_patch to hand the change to the worker, since the worktree is removed with its supporter. A remote supporter is on another Host: it starts from a bundle of the call\'s commit, and its changes reach you only as a patch or resources.',
     'Brief each supporter with only what it needs: the task, where to read (the directory, or the commit), the files and how you will judge completion. Do not forward the worker\'s whole conversation.',
     'Read the worker\'s conversation with read_source_session only when the call says you may.',
     'Collect evidence, merge duplicates, and mark agreement and disagreement. Answer every call with exactly one report_support. Use needs_input when you need the worker or the user, and failed when the support cannot be given.',
@@ -36,7 +50,8 @@ export function supporterInstructions(seat: TeamSeat): string {
   const workspace = seat.member.workspace;
   const where = workspace?.kind === 'shared'
     ? `You run on the worker's Host, in ${workerFiles(seat.member.cwd)}, read-only, next to the worker and your coordinator. Read the files in place, including uncommitted and untracked changes, or the code at a commit through git when your brief names one. Never ask for a snapshot, a patch or a copy of what you can read yourself; say which state you read, since the worker may keep working.`
-    : workspace ? `You work in your own worktree at commit ${workspace.commit}. You may change and commit there; the coordinator collects your changes as a patch. Never write anywhere else.` : '';
+    : workspace?.kind === 'worktree' ? `You work in your own worktree at commit ${workspace.commit}, on the worker's Host. You may change and commit there; the coordinator reads it in place and collects your changes as a patch. You may read the worker's files in place, but never write anywhere else.`
+    : workspace ? `You work in your own worktree at commit ${workspace.commit}, on another Host than the worker and your coordinator: the commit came as a bundle, and their paths do not exist here. You may change and commit there; the coordinator collects your changes as a patch. Never write anywhere else.` : '';
   return [
     `You support the role "${seat.callForSupport!.role}" in Call For Support group ${seat.teamId}; you are member ${seat.member.id}.`,
     'Your coordinator briefs you through Team messages. Read read_team to find your brief and your coordinator.',

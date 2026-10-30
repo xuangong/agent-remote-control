@@ -40,8 +40,10 @@ export function teamInbox(value: unknown, memberId: string, afterMessageId?: str
   }
   const hasMore = messages.length < pending.length;
   const statuses = team.messages.filter(message => message.to !== memberId).sort(deliveryOrder);
+  // Members on the reader's Host share its file system, so their files are read in place rather than transferred.
+  const host = team.members.find(member => member.id === memberId)?.hostId;
   return { id: team.id, title: team.title, status: team.status, revision: team.revision, source: team.source,
-    members: team.members, createdAt: team.createdAt, updatedAt: team.updatedAt,
+    members: team.members.map(member => ({ ...member, onYourHost: member.hostId === host })), createdAt: team.createdAt, updatedAt: team.updatedAt,
     messages, inboxCount: incoming.length, hasMore, ...(hasMore ? { nextAfterMessageId: messages.at(-1)!.id } : {}),
     messageStatuses: statuses.slice(-statusLimit).map(deliveryStatus), messageStatusCount: statuses.length,
     receipts: receipts.slice(-statusLimit).map(deliveryStatus), receiptCount: receipts.length,

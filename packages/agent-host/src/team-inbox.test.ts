@@ -67,6 +67,20 @@ it('returns complete incoming pages while keeping outgoing bodies and upload inv
   } finally { await context.close(); }
 }, 5000);
 
+it('tells each member where the others are, so members on one Host read files in place', async () => {
+  const context = await fixture();
+  try {
+    context.team.members[0] = { ...context.team.members[0]!, cwd: '/repo' };
+    context.team.members.push({ ...context.team.members[1]!, id: 'remote', name: 'Remote', hostId: 'linux', cwd: '/srv/repo' });
+    const read = await context.call('read_team');
+    expect(read.members.map((member: TeamMember & { onYourHost: boolean }) => [member.id, member.hostId, member.cwd, member.onYourHost]))
+      .toEqual([['leader', 'host', '/repo', true], ['worker', 'host', undefined, true], ['remote', 'linux', '/srv/repo', false]]);
+    expect(context.extensions.instructions).toContain('You are on Host host.');
+    expect(context.extensions.instructions).toContain('Members on your Host share its file system: read their files in place');
+    expect(context.extensions.instructions).toContain('Do not assume the paths of members on other Hosts exist here.');
+  } finally { await context.close(); }
+}, 5000);
+
 it('limits inbox payload without truncating a body or losing the next page', async () => {
   const context = await fixture();
   try {

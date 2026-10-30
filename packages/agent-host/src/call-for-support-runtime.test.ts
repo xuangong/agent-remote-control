@@ -77,6 +77,9 @@ it('gives the coordinator coordination tools and the group state, and supporters
     // The coordinator and shared supporters run where the worker works, and read its uncommitted files in place.
     expect(coordinator!.instructions).toContain(`You run on the worker's Host, in the worker's working directory, ${h.directory}, read-only.`);
     expect(coordinator!.instructions).toContain('Never ask the worker for a snapshot commit');
+    expect(coordinator!.instructions).toContain(`You are on Host host, working in ${h.directory}.`);
+    expect((await run(coordinator, 'read_team')).members.map((member: { role: string; cwd?: string; onYourHost: boolean }) => [member.role, member.cwd, member.onYourHost]))
+      .toEqual([['leader', h.directory, true], ['requester', h.directory, true]]);
     expect((await run(coordinator, 'read_team')).callForSupport).toMatchObject({ role: 'Cross review', calls: [{ id: callId, status: 'open' }] });
     expect(await run(coordinator, 'write_ledger', { revision: 0, text: 'Reviewing abcdef1.' })).toEqual({ revision: 1 });
 

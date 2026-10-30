@@ -7,7 +7,7 @@ import { AgentOperationRejectedError, bindAgentSessionTools, type AgentInputAcce
 import type { SessionExecutionRouting } from './session-succession-service.js';
 import type { RoleSuccessionDecision, SessionRole } from './session-role-succession.js';
 import type { SessionCreation } from './role-session-creation.js';
-import { coordinatorInstructions, coordinatorTools, supporterInstructions } from './call-for-support-roles.js';
+import { coordinatorInstructions, coordinatorTools, locationInstructions, supporterInstructions } from './call-for-support-roles.js';
 import { collectPatch, createBundle, fetchBundle, prepareWorktree, removeWorktree, repositoryRoot, worktreePath } from './call-for-support-workspaces.js';
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { accountUsage, type SupportUsage } from './call-for-support-usage.js';
@@ -298,11 +298,12 @@ export class TeamRuntime implements SessionRole {
     }
     if (coordinator) tools.push(...coordinatorTools(input => call(input as Omit<TeamHostCall, 'teamId' | 'memberId'>)));
     const inboxInstructions = ' After completely reading incoming messages from read_team, acknowledge those IDs with acknowledge_team_messages before acting on them. This confirms receipt, not task completion. Never acknowledge unread or truncated message bodies. Follow hasMore with nextAfterMessageId to read additional pages. Retry acknowledgement with the same IDs after a lost response; no user confirmation is needed.';
-    if (group) return { instructions: (coordinator ? coordinatorInstructions(seat) : supporterInstructions(seat)) + inboxInstructions,
+    const location = ` ${locationInstructions(seat)}`;
+    if (group) return { instructions: (coordinator ? coordinatorInstructions(seat) : supporterInstructions(seat)) + location + inboxInstructions,
       tools: bindAgentSessionTools(tools, assertCurrent), ...(member.access ? { access: member.access } : {}) };
     return { instructions: (member.role === 'leader'
       ? `You are the executing Leader of Team ${teamId}, member ${member.id}. Discuss requirements with the user, analyze and implement directly, coordinate registered members, validate evidence and report delivery. Read the source session for necessary context, but do not ask its agent to do your work. Read read_team before delegating. Establish each member's responsibilities with the user and record them with describe_team_member. Remote paths and environments are independent. Shared working directories do not isolate file edits: coordinate changes with the user. Do not assume members remain available. Native permissions still apply. Await responses instead of repeatedly sending the same task.`
-      : `You are worker ${member.id} in Team ${teamId}. Read read_team to find your Leader and current responsibility. Directly investigate, implement and verify assigned tasks in your local environment. Return evidence or clarification questions to the Leader with send_team_message. Do not implement until a task is assigned. Do not assume the Leader's paths exist here. Do not delegate to other members or change your authority. Native permissions still apply.`) + inboxInstructions,
+      : `You are worker ${member.id} in Team ${teamId}. Read read_team to find your Leader and current responsibility. Directly investigate, implement and verify assigned tasks in your local environment. Return evidence or clarification questions to the Leader with send_team_message. Do not implement until a task is assigned. Do not assume the paths of members on other Hosts exist here. Do not delegate to other members or change your authority. Native permissions still apply.`) + location + inboxInstructions,
       tools: bindAgentSessionTools(tools, assertCurrent), ...(member.access ? { access: member.access } : {}) };
   }
   async tick(): Promise<void> {

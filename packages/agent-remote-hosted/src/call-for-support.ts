@@ -54,7 +54,10 @@ export function callMessageText(team: Team, call: CallForSupportCall): string {
   if (call.followUpOf) lines.push(`Follow-up of call ${call.followUpOf}. Continue from your ledger.`);
   lines.push('Task:', call.task);
   const facts = [context?.commit && `commit ${context.commit}`, context?.base && `base ${context.base}`].filter(Boolean).join(', ');
+  const cwd = team.members.find(member => member.role === 'requester')?.cwd;
   if (facts) lines.push(`Code: ${facts}.`);
+  // The coordinator runs on the worker's Host, in its directory: it reads uncommitted work in place rather than asking for a snapshot.
+  if (!context?.commit) lines.push(`No commit: read the files as they are in the worker's working directory${cwd ? ` (${cwd})` : ''}, uncommitted changes included.`);
   if (context?.files?.length) lines.push(clip(`Files: ${context.files.join(', ')}`, 2000));
   lines.push(context?.conversation ? 'You may read the worker\'s conversation with read_source_session.' : 'The worker did not share its conversation; do not read it.');
   lines.push(`Answer with report_support for call ${call.id}.`);

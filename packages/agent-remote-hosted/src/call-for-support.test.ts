@@ -18,7 +18,19 @@ it('creates a group from a worker call: the worker seat binds first, then a read
   expect(team.messages).toEqual([expect.objectContaining({ from: team.members[1]!.id, to: team.members[0]!.id, status: 'queued', callForSupportCallId: result.callId })]);
   expect(team.messages[0]!.text).toContain(`[Support call ${result.callId} · Cross review · findings · from the worker]`);
   expect(team.messages[0]!.text).toContain('Code: commit abcdef1.');
+  expect(team.messages[0]!.text).not.toContain('No commit');
   expect(team.messages[0]!.text).toContain('do not read it');
+});
+
+it('tells the coordinator to read uncommitted work in the worker\'s directory when a call names no commit', async () => {
+  const f = supportFixture(); const profile = f.profile(); f.enable('worker', [profile.id]);
+  const first = await f.call({ operationId: 'op-1', profileId: profile.id, context: undefined });
+  // The first call is queued before the worker's seat reports its directory; later calls name it.
+  expect(f.team(first.roleId).messages[0]!.text).toContain('No commit: read the files as they are in the worker\'s working directory, uncommitted changes included.');
+  const coordinator = f.team(first.roleId).members[0]!;
+  await f.broker.hostCall('mac', { action: 'report_support', teamId: first.roleId, memberId: coordinator.id, callId: first.callId, operationId: 'report', report: { status: 'reported', summary: 'Done.', findings: [] } });
+  const second = await f.call({ operationId: 'op-2', profileId: profile.id, context: undefined, task: 'Again.' });
+  expect(f.team(first.roleId).messages.find(message => message.callForSupportCallId === second.callId)!.text).toContain('in the worker\'s working directory (/repo), uncommitted changes included.');
 });
 
 it('reuses the worker\'s group for the profile, queues later calls behind the open one and replays an operation', async () => {

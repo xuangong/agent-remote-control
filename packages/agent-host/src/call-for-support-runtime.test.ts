@@ -74,6 +74,9 @@ it('gives the coordinator coordination tools and the group state, and supporters
       'release_supporter', 'report_support', 'report_team_progress', 'send_team_message', 'upload_team_resource', 'write_ledger']);
     expect(coordinator!.instructions).toContain('You coordinate Call For Support for the role "Cross review"');
     expect(coordinator!.instructions).toContain('Never edit the worker\'s workspace');
+    // The coordinator and shared supporters run where the worker works, and read its uncommitted files in place.
+    expect(coordinator!.instructions).toContain(`You run on the worker's Host, in the worker's working directory, ${h.directory}, read-only.`);
+    expect(coordinator!.instructions).toContain('Never ask the worker for a snapshot commit');
     expect((await run(coordinator, 'read_team')).callForSupport).toMatchObject({ role: 'Cross review', calls: [{ id: callId, status: 'open' }] });
     expect(await run(coordinator, 'write_ledger', { revision: 0, text: 'Reviewing abcdef1.' })).toEqual({ revision: 1 });
 
@@ -81,7 +84,8 @@ it('gives the coordinator coordination tools and the group state, and supporters
       members: [{ name: 'Opus reviewer', responsibility: 'Review for correctness.', providerId: 'claude', model: 'opus', workspace: 'shared' }] })).toMatchObject({ status: 'provisioned' });
     const created = h.created.at(-1)!;
     expect(created).toMatchObject({ provider: 'claude', creation: { cwd: h.directory, model: 'opus' }, extensions: { access: 'read_only' } });
-    expect(created.extensions.instructions).toContain('read-only for you');
+    expect(created.extensions.instructions).toContain(`You run on the worker's Host, in the worker's working directory, ${h.directory}, read-only, next to the worker and your coordinator.`);
+    expect(created.extensions.instructions).toContain('including uncommitted and untracked changes');
     expect(created.extensions.tools!.map(tool => tool.name)).not.toContain('report_support');
     expect(await run(created.extensions, 'read_team')).not.toHaveProperty('callForSupport');
 

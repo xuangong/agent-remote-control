@@ -277,7 +277,7 @@ The coordinator serves one role for one worker. It:
 - reads the call and, when needed and allowed (`context.conversation`), the worker's conversation;
 - proposes rosters with `propose_roster`, waits for registration messages, and releases supporters it no longer needs;
 - briefs supporters with only what they need: the task, the commit, the files, the completion criteria;
-- tells `shared` supporters to read code at the commit through git (`git diff <base>..<commit>`, `git show <commit>:<path>`), never the live working tree, because the worker may keep working;
+- tells the coordinator and `shared` supporters that they run on the worker's Host in its directory (with the path), so they read the worker's files in place, uncommitted and untracked changes included, or the code at a commit through git when the call names one, and never ask the worker for snapshot commits, patches or copies; they say which state they reviewed, since the worker may keep working (refined after the first use, in which the coordinator asked the worker for a snapshot commit of uncommitted work it could read itself);
 - collects evidence, merges duplicates, marks agreement and disagreement;
 - reports with `report_support`; uses `needs_input` when it needs the worker or the user;
 - keeps the ledger with `write_ledger` so it can continue after compaction or handoff;

@@ -365,8 +365,9 @@ export class TeamRuntime implements SessionRole {
     } finally { this.ticking = false; }
   }
   /**
-   * Forgets the seats of support groups that were archived or removed: an archived group is never restored, and the Relay removes
-   * archived groups to make room. The poll omits archived groups, so the Relay is asked about missing ones, each at most every ten minutes.
+   * Forgets the seats of support groups that were archived or removed: a reopened group provisions its seats again, and the Relay
+   * removes groups to make room or when the user deletes them. The poll omits archived groups, so the Relay is asked about missing
+   * ones, each at most every ten minutes.
    */
   private async forgetEndedGroups(listed: readonly Team[]): Promise<void> {
     if (this.access.callForSupport?.() !== true) return;

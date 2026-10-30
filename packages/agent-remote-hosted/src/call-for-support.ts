@@ -184,17 +184,18 @@ export function queueCall(team: SavedTeam, call: CallForSupportCall, now: number
   team.messages.push(message);
 }
 
-/** The worker's active group for a profile: the group whose worker seat holds the worker's role now. */
-export function workerGroup(teams: SavedTeam[], resolve: TeamBrokerPorts['resolveSession'], hostId: string, worker: { providerId: string; nativeSessionId: string }, select: (team: SavedTeam) => boolean): SavedTeam | undefined {
+/** The worker's groups that select accepts, archived ones included: the groups whose worker seat holds the worker's role now. */
+export function workerGroups(teams: SavedTeam[], resolve: TeamBrokerPorts['resolveSession'], hostId: string, worker: { providerId: string; nativeSessionId: string }, select: (team: SavedTeam) => boolean): SavedTeam[] {
   let target: string;
-  try { target = nativeSessionRefKey(resolve(hostId, worker.providerId, worker.nativeSessionId)); } catch { return undefined; }
-  return teams.find(team => {
-    if (!team.callForSupport || team.status === 'archived' || !select(team)) return false;
+  try { target = nativeSessionRefKey(resolve(hostId, worker.providerId, worker.nativeSessionId)); } catch { return []; }
+  return teams.filter(team => {
+    if (!team.callForSupport || !select(team)) return false;
     const seat = team.members.find(member => member.role === 'requester');
     if (!seat?.nativeSessionId || seat.hostId !== hostId) return false;
     try { return nativeSessionRefKey(resolve(seat.hostId, seat.providerId, seat.nativeSessionId)) === target; } catch { return false; }
   });
 }
+export const workerGroup = (...args: Parameters<typeof workerGroups>): SavedTeam | undefined => workerGroups(...args)[0];
 
 /** A group without an open or queued call is archived after this long, so it can be removed to make room. */
 export const CALL_FOR_SUPPORT_IDLE_ARCHIVE_MS = 7 * 24 * 60 * 60 * 1000;
@@ -239,6 +240,14 @@ export function archiveIdleGroups(teams: SavedTeam[], now: number): void {
   }
 }
 
+/** The worker's other active group for the profile of an archived group, which keeps it from being reopened. */
+export function activeRival(teams: SavedTeam[], team: SavedTeam, resolve: TeamBrokerPorts['resolveSession']): SavedTeam | undefined {
+  const support = group(team), worker = requester(team);
+  if (!support.profileId || !worker.nativeSessionId) return undefined;
+  return workerGroup(teams, resolve, worker.hostId, { providerId: worker.providerId, nativeSessionId: worker.nativeSessionId },
+    other => other !== team && other.status === 'active' && other.callForSupport?.profileId === support.profileId);
+}
+
 /**
  * Reopens an archived group for its worker. The worker's seat and the coordinator rebind their own sessions when provisioned again;
  * supporters stay released, since their worktrees went with the archive; a roster still waiting is rejected; and the open call
@@ -247,10 +256,7 @@ export function archiveIdleGroups(teams: SavedTeam[], now: number): void {
 export function restoreGroup(teams: SavedTeam[], team: SavedTeam, resolve: TeamBrokerPorts['resolveSession'], now: number): void {
   const support = group(team), worker = requester(team);
   if (team.status !== 'archived') fail('Finish archiving before restoring this Team.');
-  if (support.profileId && worker.nativeSessionId && workerGroup(teams, resolve, worker.hostId, { providerId: worker.providerId, nativeSessionId: worker.nativeSessionId },
-    other => other !== team && other.status === 'active' && other.callForSupport?.profileId === support.profileId)) {
-    fail('The worker has another active role for this profile. Archive it before restoring this one.');
-  }
+  if (activeRival(teams, team, resolve)) fail('The worker has another active role for this profile. Archive it before restoring this one.');
   for (const member of team.members) if (member.role === 'member' && member.creation !== 'released' && member.creation !== 'abandoned') releaseSupporter(team, member.id, now);
   for (const member of [team.members[0]!, worker]) if (member.creation === 'ready') Object.assign(member, { creation: 'reserved', activity: 'unknown', updatedAt: now });
   if (support.roster?.status === 'pending' || support.roster?.status === 'approved') Object.assign(support.roster, { status: 'rejected', decidedAt: now, note: 'The group was archived.' });
@@ -283,7 +289,10 @@ export class CallForSupportGroups {
   private profile(id: string): CallForSupportProfile {
     return this.ports.state()?.profiles.find(profile => profile.id === id) ?? fail('Support profile not found.');
   }
-  /** Creates a group, or adds the call to the worker's active group for the profile unless fresh. */
+  /**
+   * Adds the call to the worker's active group for the profile, else reopens its most recently used archived one that is not paused,
+   * else creates a group. Fresh archives the active group and creates one.
+   */
   async call(input: { operationId: string; source: TeamSource; profileId: string; call: CallForSupportCallInput & { followUpOf?: string }; origin: CallForSupportCall['origin']; fresh?: boolean }): Promise<{ team: Team; call: CallForSupportCall }> {
     const profile = this.profile(input.profileId);
     this.ports.assertHost(input.source.hostId);
@@ -291,23 +300,33 @@ export class CallForSupportGroups {
     this.broker.ports.assertHost(input.source.hostId, coordinatorProviderId);
     if (!this.ports.readOnly(input.source.hostId, coordinatorProviderId)) fail('The coordinator\'s provider cannot run read-only sessions on the worker\'s Host.');
     const result = await this.broker.change(teams => {
-      const now = this.broker.ports.now();
+      const now = this.broker.ports.now(), callOn = (team: SavedTeam) => ({ ...input.call, id: callForSupportCallId(team.id, input.operationId), origin: input.origin });
       const created = teams.find(team => team.operationId === input.operationId);
       if (created) {
         if (!created.callForSupport || JSON.stringify(created.source) !== JSON.stringify(input.source) || created.callForSupport.profileId !== profile.id) fail('Creation identity has different input.');
-        return { team: created, call: addCall(created, { ...input.call, id: callForSupportCallId(created.id, input.operationId), origin: input.origin }, now), created: true };
+        return { team: created, call: addCall(created, callOn(created), now), provision: true };
       }
       // An archiving group takes no calls: a call for its profile starts a new group.
-      const current = workerGroup(teams, this.broker.ports.resolveSession, input.source.hostId, input.source, team => team.callForSupport?.profileId === profile.id && team.status === 'active');
-      if (current && !input.fresh) return { team: current, call: addCall(current, { ...input.call, id: callForSupportCallId(current.id, input.operationId), origin: input.origin }, now), created: false };
+      const mine = (status: SavedTeam['status']) => workerGroups(teams, this.broker.ports.resolveSession, input.source.hostId, input.source, team => team.callForSupport?.profileId === profile.id && team.status === status);
+      const current = mine('active')[0];
+      if (current && !input.fresh) return { team: current, call: addCall(current, callOn(current), now), provision: false };
       if (current) { current.status = 'archiving'; for (const message of current.messages) if (message.status === 'queued') message.status = 'canceled'; current.revision++; current.updatedAt = now; }
+      // A group paused at its budget waits for the user's decision, which a new call does not wait for.
+      const archived = input.fresh ? undefined : mine('archived').filter(team => team.callForSupport!.status !== 'paused_budget').sort((a, b) => lastUsed(b) - lastUsed(a))[0];
+      if (archived) { const { call } = this.callGroup(teams, archived, callOn(archived), now); return { team: archived, call, provision: true }; }
       admitTeam(teams, now);
       const team = newGroup({ operationId: input.operationId, source: input.source, profile, coordinatorProviderId }, now);
       teams.push(team);
-      return { team, call: addCall(team, { ...input.call, id: callForSupportCallId(team.id, input.operationId), origin: input.origin }, now), created: true };
+      return { team, call: addCall(team, callOn(team), now), provision: true };
     });
-    if (!result.created) return { team: this.broker.project(result.team), call: result.call };
+    if (!result.provision) return { team: this.broker.project(result.team), call: result.call };
     return { team: await this.provision(result.team.id), call: result.call };
+  }
+  /** Adds a call to a group. An archived group is reopened for it, and its seats must be provisioned again. */
+  private callGroup(teams: SavedTeam[], team: SavedTeam, input: GroupCall, now: number): { call: CallForSupportCall; reopened: boolean } {
+    const reopened = team.status === 'archived' && !group(team).calls.some(call => call.id === input.id);
+    if (reopened) { this.ports.assertHost(team.source.hostId); restoreGroup(teams, team, this.broker.ports.resolveSession, now); }
+    return { call: addCall(team, input, now), reopened };
   }
   /** The worker's seat binds first and reports its directory; the coordinator starts there. */
   async provision(teamId: string): Promise<Team> {
@@ -547,16 +566,15 @@ export class CallForSupportGroups {
     if (result.provision) await this.provisionRoster(result.team.id, (input as { rosterId: string }).rosterId);
     return this.broker.project(this.broker.ports.read().find(team => team.id === input.teamId)!);
   }
-  /** A call from the user on an existing group. */
+  /** A call from the user on an existing group, which reopens it if archived. */
   async userCall(teamId: string, input: CallForSupportCallInput & { operationId: string; followUpOf?: string }): Promise<Team> {
-    const team = await this.broker.change(teams => {
+    const result = await this.broker.change(teams => {
       const current = teams.find(item => item.id === teamId) ?? fail('Team not found.');
       group(current);
-      addCall(current, { task: input.task, ...(input.context ? { context: input.context } : {}), deliverable: input.deliverable, ...(input.followUpOf ? { followUpOf: input.followUpOf } : {}),
-        id: callForSupportCallId(current.id, input.operationId), origin: 'user' }, this.broker.ports.now());
-      return current;
+      return { team: current, ...this.callGroup(teams, current, { task: input.task, ...(input.context ? { context: input.context } : {}), deliverable: input.deliverable,
+        ...(input.followUpOf ? { followUpOf: input.followUpOf } : {}), id: callForSupportCallId(current.id, input.operationId), origin: 'user' }, this.broker.ports.now()) };
     });
-    return this.broker.project(team);
+    return result.reopened ? this.provision(teamId) : this.broker.project(result.team);
   }
   /** Which of a Host's sessions may call: explicit entries, resolved to the sessions that hold them now, and the default for the rest. */
   enablement(hostId: string): { defaultEnabled: boolean; sessions: Array<{ providerId: string; nativeSessionId: string; enabled: boolean }> } {
@@ -570,7 +588,7 @@ export class CallForSupportGroups {
   }
   /**
    * The status of groups the Host holds seats in. A group that no longer exists, or in which the Host has no seat, is missing:
-   * the Host forgets its seats in archived and missing groups, which are never restored.
+   * the Host forgets its seats in archived and missing groups. A reopened group provisions its seats again.
    */
   groupStates(hostId: string, teamIds: string[]): { states: Array<{ teamId: string; status: SavedTeam['status'] | 'missing' }> } {
     this.ports.assertHost(hostId);
@@ -594,13 +612,16 @@ export class CallForSupportGroups {
       const target = workerGroup(teams, this.broker.ports.resolveSession, hostId, worker, team => team.id === call.roleId);
       if (!target) return unavailable('This session has no support role with that roleId. Read support_status for its roles.');
       if (target.callForSupport!.profileId && !profiles.some(profile => profile.id === target.callForSupport!.profileId)) return unavailable('This support role is no longer enabled for this session.');
-      if (target.status !== 'active') return unavailable('This support role is archived. Call with its profileId to start a new one.');
+      if (target.status === 'archiving') return unavailable('This support role is being archived. Call again shortly to reopen it, or call with its profileId to start a new role.');
+      const rival = target.status === 'archived' ? activeRival(teams, target, this.broker.ports.resolveSession) : undefined;
+      if (rival) return unavailable(`This support role is archived, and roleId ${rival.id} is this session's active role for its profile. Follow up there.`);
       if (target.callForSupport!.status === 'paused_budget') return unavailable(`This support role is paused: ${target.callForSupport!.pauseReason ?? 'its budget is reached'}. The user can raise the budget and resume it.`);
       const result = await this.broker.change(saved => {
-        const current = saved.find(item => item.id === target.id)!;
-        return addCall(current, { ...input, id: callForSupportCallId(current.id, call.operationId), origin: 'worker' }, this.broker.ports.now());
+        const current = saved.find(item => item.id === target.id) ?? fail('Support role not found.');
+        return this.callGroup(saved, current, { ...input, id: callForSupportCallId(current.id, call.operationId), origin: 'worker' }, this.broker.ports.now());
       });
-      return accepted(target.id, result);
+      if (result.reopened) await this.provision(target.id);
+      return accepted(target.id, result.call);
     }
     if (!call.profileId) return { status: 'needs_approval', message: 'Choose a profileId from support_status, or ask the user to call for support from the website.' } satisfies CallResult;
     if (!profiles.some(profile => profile.id === call.profileId)) return unavailable('This support profile is not enabled for this session. Read support_status for the enabled profiles.');
@@ -608,8 +629,7 @@ export class CallForSupportGroups {
     return accepted(result.team.id, result.call);
   }
   private status(teams: SavedTeam[], worker: { hostId: string; providerId: string; nativeSessionId: string }, profiles: CallForSupportProfile[], call: Extract<TeamHostCall, { action: 'support_status' }>) {
-    const groups: SavedTeam[] = [];
-    for (const team of teams) if (workerGroup([team], this.broker.ports.resolveSession, worker.hostId, worker, item => !call.roleId || item.id === call.roleId)) groups.push(team);
+    const groups = workerGroups(teams, this.broker.ports.resolveSession, worker.hostId, worker, item => !call.roleId || item.id === call.roleId);
     if (call.callId) {
       const owner = groups.find(team => team.callForSupport!.calls.some(item => item.id === call.callId));
       const found = owner?.callForSupport!.calls.find(item => item.id === call.callId);

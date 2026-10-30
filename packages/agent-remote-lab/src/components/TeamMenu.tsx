@@ -108,6 +108,10 @@ export function TeamMenu(props: Props) {
     setTeams(current => [...current.filter(value => value.id !== updated.id), updated]);
     setRosterClient(client);
   }
+  async function remove(teamId: string) {
+    await client.delete(teamId); if (currentClient.current !== client) return;
+    setTeams(current => current.filter(value => value.id !== teamId));
+  }
   async function create() {
     if (!source && !pendingCreate) return;
     const input = pendingCreate ?? { operationId: crypto.randomUUID(), source: structuredClone(source!), sourceViewId: props.sourceViewId,
@@ -140,7 +144,7 @@ export function TeamMenu(props: Props) {
           onOpen={() => void run(() => openTeam(item))} onRename={title => run(() => change({action:'rename',teamId:item.id,title}))}
           navigation={props.compact ? <TeamSessionNavigation team={item} hosts={hosts} busy={busy} currentSession={props.currentSession} onOpen={target => void run(() => openSession(target))} /> : undefined}
           management={item.callForSupport
-            ? <SupportGroup team={item} hosts={hosts} busy={busy} onChange={input => run(() => change(input))} onOpenSession={target => void run(() => openSession(target))} />
+            ? <SupportGroup team={item} hosts={hosts} busy={busy} onChange={input => run(() => change(input))} onDelete={() => run(() => remove(item.id))} onOpenSession={target => void run(() => openSession(target))} />
             : <TeamManagement baseUrl={baseUrl} team={item} hosts={hosts} busy={busy} failure={error} onChange={input => run(() => change(input))} onOpenSession={target => void run(() => openSession(target))} />} />)}</ul></section>;
     });
   }

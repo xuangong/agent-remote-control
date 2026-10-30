@@ -1,6 +1,6 @@
 import { expect, it } from 'vitest';
 import { decodeRemoteHostUplinkMessage, encodeRemoteHostUplinkMessage } from './remote-host-uplink.js';
-import { isTeam, isTeamAction, isTeamCreate, isTeamHostCall } from './team.js';
+import { isTeam, isTeamAction, isTeamCreate, isTeamDelete, isTeamHostCall } from './team.js';
 it('bounds explicit inbox acknowledgement and requires its exact recipient', () => {
   const call = { action: 'acknowledge', teamId: 'team', memberId: 'leader', messageIds: ['message'], expectedNativeSessionId: 'native' };
   expect(isTeamHostCall(call)).toBe(true);
@@ -114,6 +114,8 @@ it('admits Call For Support creation, actions and host calls', () => {
     { teamId: 't', action: 'update_mandate', mandate: groupTeam().callForSupport.mandate, profileRevision: 2 }, { teamId: 't', action: 'resume_group' }]) {
     expect(isTeamAction(action)).toBe(true);
   }
+  expect(isTeamDelete({ teamId: 't' })).toBe(true);
+  expect(isTeamDelete({ teamId: 't', action: 'delete' })).toBe(false);
   const seat = { teamId: 't', memberId: 'coordinator' };
   for (const call of [{ ...seat, action: 'propose_roster', operationId: 'op', members: [{ name: 'R', responsibility: '', providerId: 'claude', model: 'opus', workspace: 'shared' }], rationale: '' },
     { ...seat, action: 'report_support', callId: 'c1', operationId: 'op', report: { status: 'reported', summary: 'Done.', findings: [], resources: ['r1'] } },

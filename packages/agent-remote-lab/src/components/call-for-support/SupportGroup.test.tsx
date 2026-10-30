@@ -27,7 +27,7 @@ const button = (root: ParentNode, text: string) => [...root.querySelectorAll<HTM
 
 it('shows calls, reports, usage and supporters, and releases a supporter', async () => {
   const changes: TeamAction[] = [];
-  const view = await render(<SupportGroup team={supportTeam()} hosts={[{ id: 'mac', name: 'Mac' }]} busy={false} onChange={async input => { changes.push(input); return true; }} onOpenSession={() => {}} />);
+  const view = await render(<SupportGroup team={supportTeam()} hosts={[{ id: 'mac', name: 'Mac' }]} busy={false} onChange={async input => { changes.push(input); return true; }} onDelete={async () => true} onOpenSession={() => {}} />);
   expect(view.textContent).toContain('1,500 tokens · $0.25');
   expect(view.textContent).toContain('One blocking finding.');
   expect(view.textContent).toContain('blocking · src/login.ts:12: Unchecked input. → Validate it. (2 of 2)');
@@ -41,7 +41,7 @@ it('asks the user to decide a pending roster, with a note', async () => {
   const changes: TeamAction[] = [];
   const team = supportTeam({ roster: { id: 'roster', status: 'pending', withinMandate: false, createdAt: 1, rationale: 'A second model.',
     members: [{ name: 'Sonnet reviewer', responsibility: 'Review style.', providerId: 'claude', model: 'sonnet', workspace: 'shared' }] } });
-  const view = await render(<SupportGroup team={team} hosts={[]} busy={false} onChange={async input => { changes.push(input); return true; }} onOpenSession={() => {}} />);
+  const view = await render(<SupportGroup team={team} hosts={[]} busy={false} onChange={async input => { changes.push(input); return true; }} onDelete={async () => true} onOpenSession={() => {}} />);
   expect(view.textContent).toContain('Outside the profile');
   expect(view.textContent).toContain('Sonnet reviewer · claude · sonnet · shared');
   const note = view.querySelector<HTMLInputElement>('input[placeholder="Optional"]')!;
@@ -53,7 +53,7 @@ it('asks the user to decide a pending roster, with a note', async () => {
 it('raises the budget and resumes a paused role', async () => {
   const changes: TeamAction[] = [];
   const view = await render(<SupportGroup team={supportTeam({ status: 'paused_budget', pauseReason: 'This role used 1500 tokens of its 1000-token budget.' })} hosts={[]} busy={false}
-    onChange={async input => { changes.push(input); return true; }} onOpenSession={() => {}} />);
+    onChange={async input => { changes.push(input); return true; }} onDelete={async () => true} onOpenSession={() => {}} />);
   expect(view.textContent).toContain('Paused: budget reached');
   const total = [...view.querySelectorAll('label')].find(label => label.textContent?.startsWith('Tokens in total'))!.querySelector('input')!;
   await act(async () => { Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(total, '5000'); total.dispatchEvent(new Event('input', { bubbles: true })); });
@@ -63,8 +63,9 @@ it('raises the budget and resumes a paused role', async () => {
 
 it('finds a session\'s support roles and enabled profiles', () => {
   const team = supportTeam();
-  expect(workerGroups([team, { ...team, id: 'other', members: team.members.map(member => member.role === 'requester' ? { ...member, nativeSessionId: 'else' } : member) },
-    { ...team, id: 'archiving', status: 'archiving' }], source).map(item => item.id)).toEqual(['group']);
+  // Archived roles take calls, which reopen them, after the active ones; an archiving role takes none.
+  expect(workerGroups([{ ...team, id: 'archived', status: 'archived' }, team, { ...team, id: 'other', members: team.members.map(member => member.role === 'requester' ? { ...member, nativeSessionId: 'else' } : member) },
+    { ...team, id: 'archiving', status: 'archiving' }], source).map(item => item.id)).toEqual(['group', 'archived']);
   const profile = { id: 'p', name: 'P', description: '', coordinator: {}, enableByDefault: true, revision: 1, updatedAt: 1, mandate: team.callForSupport!.mandate };
   expect(enabledProfiles({ profiles: [profile], enablement: [] }, source)).toEqual({ profiles: [profile], explicit: false });
   expect(enabledProfiles({ profiles: [profile], enablement: [{ ...source, profileIds: [], updatedAt: 1 }] }, source)).toEqual({ profiles: [], explicit: true });
@@ -83,7 +84,7 @@ it('lets the user settle a delivery whose outcome is uncertain', async () => {
   const changes: TeamAction[] = [];
   const team = supportTeam();
   team.messages = [{ id: 'm1', from: 'reviewer', to: 'coordinator', text: 'Opus reviewer: input is unchecked.', status: 'unknown', createdAt: 1, error: 'The operation may have reached the native runtime.' }];
-  const view = await render(<SupportGroup team={team} hosts={[]} busy={false} onChange={async input => { changes.push(input); return true; }} onOpenSession={() => {}} />);
+  const view = await render(<SupportGroup team={team} hosts={[]} busy={false} onChange={async input => { changes.push(input); return true; }} onDelete={async () => true} onOpenSession={() => {}} />);
   expect(view.textContent).toContain('Opus reviewer → Coordinator: Opus reviewer: input is unchecked.');
   await act(async () => button(view, 'Confirm not received').click());
   expect(changes).toEqual([{ teamId: 'group', action: 'resolve_message', messageId: 'm1', outcome: 'rejected' }]);
@@ -91,10 +92,24 @@ it('lets the user settle a delivery whose outcome is uncertain', async () => {
 
 it('archives a role and restores an archived one', async () => {
   const changes: TeamAction[] = [];
-  const active = await render(<SupportGroup team={supportTeam()} hosts={[]} busy={false} onChange={async input => { changes.push(input); return true; }} onOpenSession={() => {}} />);
+  const active = await render(<SupportGroup team={supportTeam()} hosts={[]} busy={false} onChange={async input => { changes.push(input); return true; }} onDelete={async () => true} onOpenSession={() => {}} />);
   await act(async () => button(active, 'Archive').click());
   expect(changes).toEqual([{ teamId: 'group', action: 'archive' }]);
-  const archived = await render(<SupportGroup team={{ ...supportTeam(), status: 'archived' }} hosts={[]} busy={false} onChange={async input => { changes.push(input); return true; }} onOpenSession={() => {}} />);
+  const archived = await render(<SupportGroup team={{ ...supportTeam(), status: 'archived' }} hosts={[]} busy={false} onChange={async input => { changes.push(input); return true; }} onDelete={async () => true} onOpenSession={() => {}} />);
   await act(async () => button(archived, 'Restore').click());
   expect(changes).toEqual([{ teamId: 'group', action: 'archive' }, { teamId: 'group', action: 'restore' }]);
+});
+
+it('deletes an archived role only after confirmation', async () => {
+  let deleted = 0;
+  const active = await render(<SupportGroup team={supportTeam()} hosts={[]} busy={false} onChange={async () => true} onDelete={async () => { deleted++; return true; }} onOpenSession={() => {}} />);
+  expect(button(active, 'Delete')).toBeUndefined();
+  const archived = await render(<SupportGroup team={{ ...supportTeam(), status: 'archived' }} hosts={[]} busy={false} onChange={async () => true} onDelete={async () => { deleted++; return true; }} onOpenSession={() => {}} />);
+  expect(archived.textContent).toContain('a call reopens it');
+  await act(async () => button(archived, 'Delete').click());
+  await act(async () => button(archived, 'Keep').click());
+  expect(deleted).toBe(0);
+  await act(async () => button(archived, 'Delete').click());
+  await act(async () => button(archived, 'Confirm deletion').click());
+  expect(deleted).toBe(1);
 });

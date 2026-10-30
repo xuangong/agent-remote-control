@@ -133,3 +133,19 @@ test('removes the oldest archived groups when Team state nears its bound, so act
   expect(kept.map(team => team.id)).toEqual(expect.arrayContaining(['group-0', 'plain', `group-${teams.length - 2}`]));
   expect(kept.some(team => team.id === 'group-1')).toBe(false);
 }, 15000);
+
+test('deletes an archived support group through the Team route', async () => {
+  const archived = fullGroup('archived'), active = fullGroup('active'); archived.status = 'archived';
+  const broker = createHostBroker({ origin: 'https://relay.example', now: () => 100, initialState: { keys: [], bindings: [], creations: [], teams: [archived, active],
+    hosts: [{ id: 'host', installationId: 'controller', name: 'Host', legacyDsh: false, providers: [{ providerId: 'codex', displayName: 'Codex' }] }] } });
+  try {
+    const remove = async (teamId: string) => {
+      const response = (await broker.handleRequest(new Request('https://relay.example/v1/remote/teams/delete', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ teamId }) })))!;
+      return [response.status, await response.json()];
+    };
+    expect(await remove('active')).toEqual([409, { error: 'Archive the support group before deleting it.' }]);
+    expect(await remove('archived')).toEqual([200, { teamId: 'archived', deleted: true }]);
+    expect(broker.snapshot().teams!.map(team => team.id)).toEqual(['active']);
+    expect(await remove('archived')).toEqual([404, { error: 'Team not found.' }]);
+  } finally { await broker.close(); }
+});

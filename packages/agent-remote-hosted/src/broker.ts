@@ -3,7 +3,7 @@ import { CallForSupportProfileError, emptyCallForSupportState, executeProfileCom
   validCallForSupportState, type CallForSupportState } from './call-for-support-profiles.js';
 import { compactTeamDeliveries, trimTeamDeliveryReceipts, validSavedTeam, type SavedTeam } from './team-delivery.js';
 import type { TeamResourceStore } from './team-resources.js';
-import { isTeamCreate, isTeamAction } from '@orchardworks/agent-remote-protocol';
+import { isTeamCreate, isTeamAction, isTeamDelete } from '@orchardworks/agent-remote-protocol';
 import { sessionIdentityMessage } from './session-identity.js';
 import { isCreationSource, type CreationSource } from '@orchardworks/agent-remote-protocol';
 import { relationChangeKey, isRelationChangeReceipt, type RelationChangeReservation, type RelationChangeReceipt } from '@orchardworks/agent-remote-protocol';
@@ -1518,7 +1518,7 @@ export function createHostBroker(options: HostBrokerOptions) {
       requireOwner(principal(context)); requireAccess(providerSettings[1]!, principal(context));
       return new Response(result.body, { status: result.status, headers: { 'content-type': 'application/json', 'cache-control': 'no-store' } });
     }
-    if (url.pathname === '/v1/remote/teams' || url.pathname === '/v1/remote/teams/create' || url.pathname === '/v1/remote/teams/action') {
+    if (url.pathname === '/v1/remote/teams' || url.pathname === '/v1/remote/teams/create' || url.pathname === '/v1/remote/teams/action' || url.pathname === '/v1/remote/teams/delete') {
       requireOwner(subject);
       const recipientAware = request.headers.get('x-arc-team-recipients') === '1';
       if (url.pathname === '/v1/remote/teams' && request.method === 'GET') {
@@ -1543,6 +1543,13 @@ export function createHostBroker(options: HostBrokerOptions) {
           requireOwner(principal(context)); requireAccess(team.source.hostId, principal(context));
           if (input.action === 'add_member') requireAccess(input.hostId, principal(context));
           return json(200, teams.readForClient(result.id, recipientAware));
+        }
+        if (url.pathname.endsWith('/delete') && isTeamDelete(input)) {
+          const team = teamState.find(team => team.id === input.teamId);
+          if (!team) return json(404, { error: 'Team not found.' });
+          requireAccess(team.source.hostId, principal(context));
+          await teams.delete(input.teamId);
+          return json(200, { teamId: input.teamId, deleted: true });
         }
         return json(400, { error: 'Invalid Team request.' });
       } catch (error) { return json(409, { error: error instanceof Error ? error.message : 'Team request failed.' }); }

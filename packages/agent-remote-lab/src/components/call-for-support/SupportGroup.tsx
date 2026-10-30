@@ -9,11 +9,12 @@ const configuration = (value: { providerId: string; model?: string; reasoningEff
 export const usageText = (usage: { tokens: number; costUsd?: number }) => `${usage.tokens.toLocaleString('en-US')} tokens${usage.costUsd !== undefined ? ` · $${usage.costUsd.toFixed(2)}` : ''}`;
 
 /** A support group as the user sees it: what it is doing, what it used, and the decisions it waits for. */
-export function SupportGroup({ team, hosts, busy, onChange, onOpenSession }: {
-  team: Team; hosts: Host[]; busy: boolean; onChange(input: TeamAction): Promise<boolean>; onOpenSession(target: TeamSource & { teamId?: string; teamMemberId?: string }): void;
+export function SupportGroup({ team, hosts, busy, onChange, onDelete, onOpenSession }: {
+  team: Team; hosts: Host[]; busy: boolean; onChange(input: TeamAction): Promise<boolean>; onDelete(): Promise<boolean>;
+  onOpenSession(target: TeamSource & { teamId?: string; teamMemberId?: string }): void;
 }) {
   const support = team.callForSupport!, roster = support.roster;
-  const [note, setNote] = useState(''), [budget, setBudget] = useState<Budget>(support.mandate.budget ?? {});
+  const [note, setNote] = useState(''), [budget, setBudget] = useState<Budget>(support.mandate.budget ?? {}), [deleting, setDeleting] = useState(false);
   const hostName = (id: string) => hosts.find(host => host.id === id)?.name ?? id;
   const supporters = team.members.filter(member => member.role === 'member');
   const worker = team.members.find(member => member.role === 'requester');
@@ -67,10 +68,14 @@ export function SupportGroup({ team, hosts, busy, onChange, onOpenSession }: {
         {member.creation === 'ready' ? <button type="button" disabled={busy} onClick={() => void onChange({ teamId: team.id, action: 'release_member', memberId: member.id })}>Release</button> : null}
         {member.error && member.creation !== 'ready' ? <div><p>{member.error}</p></div> : null}
       </li>)}</ul></details> : null}
+    {team.status === 'archived' ? <p className="lab-support-muted">Archived: a call reopens it with its coordinator and history. Delete it to keep it from being reopened.</p> : null}
     <div className="lab-support-actions">
       {worker?.nativeSessionId ? <button type="button" disabled={busy} onClick={() => onOpenSession(team.source)}>Open worker session</button> : null}
       {/* Restoring resumes the worker's seat and the coordinator; supporters stay released. */}
       <button type="button" disabled={busy || team.status === 'archiving'} onClick={() => void onChange({ teamId: team.id, action: team.status === 'archived' ? 'restore' : 'archive' })}>{team.status === 'archived' ? 'Restore' : team.status === 'archiving' ? 'Archiving…' : 'Archive'}</button>
+      {team.status !== 'archived' ? null : deleting
+        ? <><button type="button" disabled={busy} onClick={() => void onDelete()}>Confirm deletion</button><button type="button" disabled={busy} onClick={() => setDeleting(false)}>Keep</button></>
+        : <button type="button" disabled={busy} onClick={() => setDeleting(true)}>Delete</button>}
     </div>
   </section>;
 }

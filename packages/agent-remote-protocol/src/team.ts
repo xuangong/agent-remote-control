@@ -76,6 +76,9 @@ export const TeamAction = Type.Union([
   Type.Object({ teamId: id, action: Type.Literal('resume_group') }, object),
 ]);
 export type TeamAction = Static<typeof TeamAction>;
+/** Removes an archived Call For Support group for good, so its worker's next call for the profile starts a new group. */
+export const TeamDelete = Type.Object({ teamId: id }, object);
+export type TeamDelete = Static<typeof TeamDelete>;
 export const TeamHostCall = Type.Union([
   Type.Object({ action: Type.Literal('poll') }, object),
   Type.Object({ action: Type.Literal('resource_begin'), teamId: id, memberId: id, operationId: id,
@@ -143,6 +146,7 @@ export const isTeam = (value: unknown): value is Team => Value.Check(Team, value
   && value.messages.every(message => value.members.some(member => member.id === message.from) && value.members.some(member => member.id === message.to));
 export const isTeamCreate = (value: unknown): value is TeamCreate => Value.Check(TeamCreate, value);
 export const isTeamAction = (value: unknown): value is TeamAction => Value.Check(TeamAction, value);
+export const isTeamDelete = (value: unknown): value is TeamDelete => Value.Check(TeamDelete, value);
 export const isTeamHostCall = (value: unknown): value is TeamHostCall => Value.Check(TeamHostCall, value);
 export const isTeamSeat = (value: unknown): value is TeamSeat => Value.Check(TeamSeat, value);
 

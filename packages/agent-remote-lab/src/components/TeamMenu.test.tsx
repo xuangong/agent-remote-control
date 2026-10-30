@@ -5,8 +5,8 @@ import { useState } from 'react';
 import type { Team, TeamSource } from '@orchardworks/agent-remote-protocol';
 import { AgentReplica, type RemoteAgentTransport } from '@orchardworks/agent-remote-web';
 import { ConversationConnections, ConversationConnectionScope } from '../conversation-connections.js';
-const fixture=vi.hoisted(()=>({teams:[] as any[],attached:[] as string[],actions:[] as any[],failure:'',listFailure:'',create:undefined as ((input:unknown)=>Promise<Team>)|undefined}));
-vi.mock('@orchardworks/agent-remote-web/headless',async importOriginal=>({...await importOriginal<typeof import('@orchardworks/agent-remote-web/headless')>(),RemoteTeamClient:class{async create(input:unknown){return fixture.create!(input);}async list(){if(fixture.listFailure)throw new Error(fixture.listFailure);return structuredClone(fixture.teams);}async action(input:unknown){fixture.actions.push(input);if(fixture.failure)throw new Error(fixture.failure);return fixture.teams[0];}}}));
+const fixture=vi.hoisted(()=>({teams:[] as any[],attached:[] as string[],actions:[] as any[],deleted:[] as string[],failure:'',listFailure:'',create:undefined as ((input:unknown)=>Promise<Team>)|undefined}));
+vi.mock('@orchardworks/agent-remote-web/headless',async importOriginal=>({...await importOriginal<typeof import('@orchardworks/agent-remote-web/headless')>(),RemoteTeamClient:class{async create(input:unknown){return fixture.create!(input);}async list(){if(fixture.listFailure)throw new Error(fixture.listFailure);return structuredClone(fixture.teams);}async action(input:unknown){fixture.actions.push(input);if(fixture.failure)throw new Error(fixture.failure);return fixture.teams[0];}async delete(teamId:string){fixture.deleted.push(teamId);}}}));
 vi.mock('../directory-client.js',()=>({SessionDirectoryClient:class{async attach(_:string,id:string){fixture.attached.push(id);return {agentId:id};}}}));
 vi.mock('../hooks/useConversationSession.js',()=>({useConversationSession:()=>({state:undefined,sessionState:undefined,status:'connected',actions:{},questions:{},setQuestions:()=>{}})}));
 vi.mock('./LabWorkbench.js',()=>({LabWorkbench:(props:any)=><div data-testid="standard-session-view">{props.conversationPath}<textarea aria-label="Message" /></div>}));
@@ -20,7 +20,7 @@ const team:Team={id:'team',operationId:'create',revision:1,title:'Cross-platform
   {id:'worker',hostId:'win',providerId:'fixture',nativeSessionId:'worker-session',role:'member',name:'Windows',responsibility:'Verify',creation:'ready',activity:'idle',summary:'',updatedAt:1},
 ],messages:[],createdAt:1,updatedAt:1};
 function App(){return <TeamMenu baseUrl="https://team.test" enabled hosts={[]} onOpen={async team=>{fixture.attached.push(team.id);return true;}} onOpenSession={async target=>{fixture.attached.push(target.nativeSessionId);return true;}}/>;}
-afterEach(()=>{localStorage.clear();sessionStorage.clear();fixture.attached=[];fixture.teams=[];fixture.actions=[];fixture.failure='';fixture.listFailure='';fixture.create=undefined;});
+afterEach(()=>{localStorage.clear();sessionStorage.clear();fixture.attached=[];fixture.teams=[];fixture.actions=[];fixture.deleted=[];fixture.failure='';fixture.listFailure='';fixture.create=undefined;});
 it('shares the loaded Team roster with Track even when the Team menu is hidden', async () => {
   fixture.teams = [structuredClone(team)];
   const sessions = [
@@ -55,6 +55,17 @@ it('keeps archived Team management in the grouped floating menu',async()=>{
   fixture.teams=[{...structuredClone(team),status:'archived'}];const view=await render(<App/>);await act(async()=>button(view,'Teams').click());
   expect(view.textContent).toContain('Archived');expect(view.textContent).toContain('Main project');
   await act(async()=>button(view,'Restore').click());expect(fixture.actions).toEqual([{teamId:'team',action:'restore'}]);expect(fixture.attached).toEqual([]);
+});
+it('deletes an archived support group and drops it from the menu', async () => {
+  const support: Team = { ...structuredClone(team), id: 'group', title: 'Cross review', status: 'archived',
+    members: [{ ...team.members[0]!, name: 'Coordinator', access: 'read_only', workspace: { kind: 'shared' } }, { ...team.members[1]!, id: 'requester', hostId: 'mac', nativeSessionId: 'source', role: 'requester', name: 'Worker' }],
+    callForSupport: { role: 'Cross review', description: '', coordinator: { providerId: 'fixture' }, status: 'active', ledger: { text: '', revision: 0 }, usage: { tokens: 0 }, calls: [],
+      mandate: { supporters: [{ providerId: 'fixture', model: 'm' }], maxSupporters: 1, workspaces: ['shared'], remoteHosts: [], approval: 'every_roster' } } };
+  fixture.teams = [support]; const view = await render(<App />); await act(async () => button(view, 'Teams').click());
+  await act(async () => button(view, 'Delete').click());
+  await act(async () => button(view, 'Confirm deletion').click());
+  expect(fixture.deleted).toEqual(['group']);
+  expect(view.querySelector('[aria-label="Support role Cross review"]')).toBeNull();
 });
 it('reveals an attribution target without opening sessions and accepts repeated requests', async () => {
   fixture.teams = [structuredClone(team)];

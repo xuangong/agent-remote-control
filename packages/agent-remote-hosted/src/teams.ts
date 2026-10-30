@@ -174,6 +174,18 @@ export class TeamBroker {
     if (input.action === 'restore' && result.callForSupport) return (this.groups ?? fail(unavailableGroups)).provision(result.id);
     return input.action === 'add_member' ? this.provision(result.id, input.operationId) : input.action === 'retry_creation' ? this.provision(result.id, input.memberId) : this.project(result);
   }
+  /**
+   * Removes an archived support group, which a call would otherwise reopen. Its Controllers find it missing and forget its seats.
+   * Ordinary Teams are archived, never removed.
+   */
+  async delete(teamId: string): Promise<void> {
+    await this.change(teams => {
+      const team = find(teams, teamId);
+      if (!team.callForSupport) fail('Only support groups can be deleted. Archive this Team instead.');
+      if (team.status !== 'archived') fail('Archive the support group before deleting it.');
+      teams.splice(teams.indexOf(team), 1);
+    });
+  }
   async hostCall(hostId: string, call: TeamHostCall, assertCurrent: () => void = () => {}, recipientAware = true): Promise<unknown> {
     assertCurrent();
     if (!recipientAware && (call.action === 'claim' && call.expectedNativeSessionId !== undefined || call.action === 'settle' && call.resolvedTarget)) fail(upgradeRequired);

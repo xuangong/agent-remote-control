@@ -1,4 +1,4 @@
-import { isTeam, type Team, type TeamAction, type TeamCreate } from '@orchardworks/agent-remote-protocol';
+import { isTeam, type Team, type TeamAction, type TeamCreate, type TeamDelete } from '@orchardworks/agent-remote-protocol';
 
 /** Mutations retain caller-owned identities and are never automatically retried. */
 export class RemoteTeamClient {
@@ -16,4 +16,9 @@ export class RemoteTeamClient {
   }
   async create(input: TeamCreate): Promise<Team> { const value = await this.request('/create', input); if (!isTeam(value)) throw new Error('Invalid Team creation response.'); return value; }
   async action(input: TeamAction): Promise<Team> { const value = await this.request('/action', input); if (!isTeam(value) || value.id !== input.teamId) throw new Error('Invalid Team action response.'); return value; }
+  /** Removes an archived support group for good. */
+  async delete(teamId: string): Promise<void> {
+    const value = await this.request('/delete', { teamId } satisfies TeamDelete) as { teamId?: unknown; deleted?: unknown };
+    if (value.teamId !== teamId || value.deleted !== true) throw new Error('Invalid Team deletion response.');
+  }
 }

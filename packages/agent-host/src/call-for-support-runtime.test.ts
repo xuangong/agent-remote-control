@@ -339,6 +339,22 @@ it('restores an archived group: the coordinator resumes its own session and rece
   } finally { await h.close(); }
 });
 
+it('reopens an archived group on the worker\'s next call: the coordinator resumes its own session, and the call waits behind the open one', async () => {
+  const h = await supportHarness();
+  try {
+    const { roleId, callId, coordinatorId, coordinator } = await archivedGroup(h);
+    await h.runtime.tick(); await h.runtime.tick();
+    expect(await h.runtime.extensions(coordinator)).toBeUndefined();
+    const created = h.created.length;
+    expect(await h.call({ operationId: 'op-2', profileId: h.team(roleId).callForSupport!.profileId, task: 'Look again.' })).toMatchObject({ status: 'accepted', roleId });
+    expect(h.created).toHaveLength(created);
+    expect(h.team(roleId).members[0]).toMatchObject({ creation: 'ready', nativeSessionId: coordinatorId });
+    expect(h.team(roleId).callForSupport!.calls.map(call => call.status)).toEqual(['open', 'queued']);
+    await h.runtime.tick();
+    expect(h.sessions.get(coordinatorId)!.deliveries.map(delivery => delivery.text.includes(`[Support call ${callId}`))).toEqual([true, true]);
+  } finally { await h.close(); }
+});
+
 it('starts a new coordinator session when a restored group\'s own session can no longer be opened', async () => {
   const h = await supportHarness();
   try {

@@ -62,7 +62,7 @@ The `agent_remote` namespace holds `call_for_support`, `support_status`, `read_s
 
 ### Retention
 
-- An archived group is final: the Relay refuses to restore it and the website shows it as history. Calling for support again starts a new group.
+- An archived group can be restored from its view. The worker's seat and the coordinator are provisioned again: the coordinator resumes its own session with its context, or a new session when that one can no longer be opened. Supporters stay released, since their worktrees went with the archive; a roster still waiting is rejected; the open call reaches the coordinator again. A worker has one active role per profile, so a restore waits until the other role is archived. A restore counts as use for idle archiving and removal. A removed group cannot be restored.
 - A group without an open or queued call for a week is archived automatically. A group that is archiving takes no calls: a call for its profile starts a new group, and the website offers only active roles.
 - Groups are created automatically, so groups are removed when a new Team would exceed the 128-Team limit, and on every Team change while the account's Team state is above 1.5 MiB (its bound is 2 MiB). Archived groups go first, then groups without an open or queued call, least recently used first (by their last call or report). A group used within the last hour is never removed, so an operation retried in that window finds its group. Ordinary Teams are never removed.
 - A removal sweeps stored files, keeping only those of Teams that still exist, so files an interrupted sweep left go with the next removal.

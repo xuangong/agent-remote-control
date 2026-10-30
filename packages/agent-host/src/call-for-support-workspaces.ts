@@ -10,10 +10,15 @@ const IDENTITY = /^[A-Za-z0-9][A-Za-z0-9-]{0,255}$/;
 const COMMIT = /^[0-9a-f]{7,64}$/;
 const EXCLUDE = '.agent-remote/';
 
-/** Runs git in a directory; its message is the error a coordinator or user reads. */
+/** Variables that choose a repository (`git rev-parse --local-env-vars`). A git hook sets GIT_DIR, for example. */
+const REPOSITORY_VARIABLES = new Set(['GIT_ALTERNATE_OBJECT_DIRECTORIES', 'GIT_CONFIG', 'GIT_CONFIG_PARAMETERS', 'GIT_CONFIG_COUNT', 'GIT_OBJECT_DIRECTORY', 'GIT_DIR',
+  'GIT_WORK_TREE', 'GIT_IMPLICIT_WORK_TREE', 'GIT_GRAFT_FILE', 'GIT_INDEX_FILE', 'GIT_NO_REPLACE_OBJECTS', 'GIT_REPLACE_REF_BASE', 'GIT_PREFIX', 'GIT_SHALLOW_FILE', 'GIT_COMMON_DIR']);
+
+/** Runs git in a directory, on the repository found from it; its message is the error a coordinator or user reads. */
 async function git(cwd: string, args: string[], options: { maxBuffer?: number } = {}): Promise<string> {
+  const env = { ...Object.fromEntries(Object.entries(process.env).filter(([name]) => !REPOSITORY_VARIABLES.has(name))), GIT_TERMINAL_PROMPT: '0' };
   try {
-    const { stdout } = await run('git', ['-C', cwd, ...args], { timeout: 120_000, maxBuffer: options.maxBuffer ?? 16 * 1024 * 1024, windowsHide: true, env: { ...process.env, GIT_TERMINAL_PROMPT: '0' } });
+    const { stdout } = await run('git', ['-C', cwd, ...args], { timeout: 120_000, maxBuffer: options.maxBuffer ?? 16 * 1024 * 1024, windowsHide: true, env });
     return stdout;
   } catch (error) {
     const stderr = error && typeof error === 'object' && 'stderr' in error ? String(error.stderr).trim() : '';

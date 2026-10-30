@@ -40,6 +40,20 @@ it('refuses a directory at a worktree path that is not its own worktree, and nev
   expect(repo.git('status', '--porcelain')).toContain('src/a.ts');
 });
 
+it('works on the repository of its directory when the environment names another, as a git hook\'s does', async () => {
+  const repo = await repository(), other = await repository();
+  const previous = process.env.GIT_DIR;
+  process.env.GIT_DIR = join(other.root, '.git');
+  try {
+    const prepared = await prepareWorktree(join(repo.root, 'src'), 'team', 'member', repo.second);
+    expect(prepared.root).toBe(repo.root);
+    await removeWorktree(repo.root, prepared.worktree);
+  } finally { if (previous === undefined) delete process.env.GIT_DIR; else process.env.GIT_DIR = previous; }
+  expect(other.git('worktree', 'list')).not.toContain('member');
+  expect(await readFile(join(other.root, '.git', 'info', 'exclude'), 'utf8')).not.toContain('.agent-remote/');
+  expect(await readFile(join(repo.root, '.git', 'info', 'exclude'), 'utf8')).toContain('.agent-remote/');
+});
+
 it('explains a missing commit and refuses unsafe identities', async () => {
   const repo = await repository();
   await expect(prepareWorktree(repo.root, 'team', 'member', 'abcdef1234567')).rejects.toThrow('Commit abcdef1234567 is not in the repository');

@@ -5,6 +5,7 @@ import { advanceFavorites, organizeFavorites } from './favorites.js';
 import { committedSuccessionRows, validSuccessionAuthorities } from './session-successions.js';
 import { StarError, starKey, type StarIdentity } from './session-star-schema.js';
 import type { HostedRelayState } from './state.js';
+import { plain } from './drafts.js';
 
 type Tenant = HostedRelayState['tenants'][number];
 type Row = ReturnType<typeof committedSuccessionRows>[number];
@@ -59,13 +60,18 @@ export function assertOrdinaryFavoriteAddress(state: HostedRelayState, subject: 
 }
 /** Stage only product progress; native commit evidence must survive favorite capacity failures. */
 export function projectSuccessionFavorites(draft: HostedRelayState, subject: string, authorized = true): boolean {
-  const tenant = draft.tenants.find(tenant => tenant.subject === subject);
-  if (!tenant) return false;
+  // Read the plain state; a draft is changed only where the projection changes it.
+  const view = plain(draft);
+  const index = view.tenants.findIndex(tenant => tenant.subject === subject);
+  if (index < 0) return false;
+  const tenant = view.tenants[index]!;
   const rows = committedSuccessionRows(tenant.broker);
   if (!rows.length) return false;
-  if (!validSuccessionAuthorities(draft)) throw new Error('Invalid succession authority.');
+  if (!validSuccessionAuthorities(view)) throw new Error('Invalid succession authority.');
   const progress = structuredClone(tenant.favoritesSuccession ?? { version: 1 as const, receipts: [] });
-  const scratch = { ...draft, sessionStars: structuredClone(draft.sessionStars), favoritesTrees: structuredClone(draft.favoritesTrees) };
+  // Stars and trees are copied only once a star has to move.
+  let scratch: HostedRelayState | undefined;
+  const working = () => scratch ??= { ...view, sessionStars: structuredClone(view.sessionStars), favoritesTrees: structuredClone(view.favoritesTrees) };
   const blocked = new Set<string>(); let changed = false;
   for (const row of rows) {
     let entry = progress.receipts.find(entry => entry.token === row.receipt.token);
@@ -74,29 +80,30 @@ export function projectSuccessionFavorites(draft: HostedRelayState, subject: str
     const roleId = row.projection!.role.id;
     if (blocked.has(roleId) || !authorized || !mapped(tenant, row)) { blocked.add(roleId); continue; }
     const from = address(row), to = address(row, true);
-    const old = scratch.sessionStars?.find(star => star.subject === subject && starKey(star) === starKey(from));
-    if (old) {
-      const tree = scratch.favoritesTrees?.find(tree => tree.subject === subject);
+    const source = (state: HostedRelayState) => state.sessionStars?.find(star => star.subject === subject && starKey(star) === starKey(from));
+    if (source(scratch ?? view)) {
+      const work = working(), old = source(work)!;
+      const tree = work.favoritesTrees?.find(tree => tree.subject === subject);
       if (tree?.revision === Number.MAX_SAFE_INTEGER) { blocked.add(roleId); continue; }
-      try { organizeFavorites(scratch, subject); }
+      try { organizeFavorites(work, subject); }
       catch (error) { if (!(error instanceof StarError) || error.status !== 409) throw error; blocked.add(roleId); continue; }
-      const duplicate = scratch.sessionStars!.find(star => star.subject === subject && starKey(star) === starKey(to));
-      const title = draft.sessionTitles?.find(title => starKey(title) === starKey(to))?.title ?? duplicate?.title ?? old.title;
+      const duplicate = work.sessionStars!.find(star => star.subject === subject && starKey(star) === starKey(to));
+      const title = view.sessionTitles?.find(title => starKey(title) === starKey(to))?.title ?? duplicate?.title ?? old.title;
       const workspace = duplicate?.workspace ?? old.workspace, parentNativeSessionId = duplicate?.parentNativeSessionId;
       Object.assign(old, to, { title });
       delete old.parentNativeSessionId;
       if (workspace !== undefined) old.workspace = workspace;
       if (parentNativeSessionId !== undefined) old.parentNativeSessionId = parentNativeSessionId;
-      if (duplicate) scratch.sessionStars = scratch.sessionStars!.filter(star => star !== duplicate);
+      if (duplicate) work.sessionStars = work.sessionStars!.filter(star => star !== duplicate);
       changed = true;
     }
     entry.status = 'applied';
   }
-  if (changed) advanceFavorites(scratch, scratch.favoritesTrees!.find(tree => tree.subject === subject)!);
+  if (changed) advanceFavorites(scratch!, scratch!.favoritesTrees!.find(tree => tree.subject === subject)!);
   const updated = changed || !isDeepStrictEqual(tenant.favoritesSuccession, progress);
   if (updated) {
-    if (changed) { draft.sessionStars = scratch.sessionStars; draft.favoritesTrees = scratch.favoritesTrees; }
-    tenant.favoritesSuccession = progress;
+    if (changed) { draft.sessionStars = scratch!.sessionStars; draft.favoritesTrees = scratch!.favoritesTrees; }
+    draft.tenants[index]!.favoritesSuccession = progress;
     if (draft.version < 7) draft.version = 7;
   }
   return updated;

@@ -410,6 +410,9 @@ importers:
       '@orchardworks/agent-remote-tunnel':
         specifier: workspace:*
         version: link:../agent-remote-tunnel
+      immer:
+        specifier: ^11.2.9
+        version: 11.2.9
       jose:
         specifier: ^6.2.12
         version: 6.2.12
@@ -2760,6 +2763,9 @@ packages:
     resolution: {integrity: sha512-QRUkFFsRV/6fuESxb9Vkq+a0LkSrgKXuc2NEqfikiXxxN/G3tjWt5EVUlMaImRBZRZK/jRBEbYvpPYZL8t08Zw==, tarball: https://ms-feed-25.pkgs.visualstudio.com/1es-public/_packaging/npm-public/npm/registry/image-size/-/image-size-2.0.4.tgz}
     engines: {node: '>=18'}
     hasBin: true
+
+  immer@11.2.9:
+    resolution: {integrity: sha512-IQ4UEtXjZjyefyWjtLEDXUSrF6T2hwjKPi6BIJl3bY/2XXW24d6cNGdXJSBOA/+KNnuiXkZY6DR0C3efolhitA==, tarball: https://ms-feed-25.pkgs.visualstudio.com/1es-public/_packaging/npm-public/npm/registry/immer/-/immer-11.2.9.tgz}
 
   inherits@2.0.4:
     resolution: {integrity: sha1-D6LGT5MpF8NDOg3tVTY6rjdBa3w=, tarball: https://ms-feed-25.pkgs.visualstudio.com/1es-public/_packaging/npm-public/npm/registry/inherits/-/inherits-2.0.4.tgz}
@@ -5636,6 +5642,8 @@ snapshots:
       safer-buffer: 2.1.2
 
   image-size@2.0.4: {}
+
+  immer@11.2.9: {}
 
   inherits@2.0.4: {}
 

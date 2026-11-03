@@ -1,7 +1,8 @@
-import { assertTeamQueueCapacity, compactTeamDeliveries, unresolvedTeamDelivery, stripPrivateTeamEvidence, replayTeamDelivery, validSavedTeam, type SavedTeam } from './team-delivery.js';
+import { assertTeamQueueCapacity, compactTeamDeliveries, teamNeedsCompaction, unresolvedTeamDelivery, stripPrivateTeamEvidence, replayTeamDelivery, validSavedTeam, type SavedTeam } from './team-delivery.js';
+import { plain } from './drafts.js';
 export { teamMessageBudgetBytes } from './team-delivery.js';
 import type { TeamResourceStore } from './team-resources.js';
-import { admitTeam, archiveIdleGroups, CallForSupportGroups, compactCallForSupport, pruneGroups, restoreGroup, type CallForSupportPorts } from './call-for-support.js';
+import { admitTeam, archiveIdleGroups, callForSupportNeedsCompaction, CallForSupportGroups, compactCallForSupport, pruneGroups, restoreGroup, type CallForSupportPorts } from './call-for-support.js';
 import { createHash, randomUUID } from 'node:crypto';
 import { nativeSessionRefKey, type NativeSessionRef, isTeamMember, type Team, type TeamAction, type TeamCreate, type TeamHostCall, type TeamMember, type TeamMessage, type TeamSeat, type TeamResource } from '@orchardworks/agent-remote-protocol';
 
@@ -51,19 +52,26 @@ export class TeamBroker {
   private async change<T>(update: (teams: SavedTeam[]) => T): Promise<T> {
     let removed = false;
     const value = await this.ports.change(teams => {
-      for (const team of teams) compactTeamDeliveries(team, this.ports.now());
-      const existing = teams.map(team => team.id);
+      // teams is a draft: compaction reads the plain Teams and drafts only those it changes.
+      const compact = (support: boolean) => plain(teams).forEach((team, index) => {
+        const now = this.ports.now();
+        if (teamNeedsCompaction(team, now)) compactTeamDeliveries(teams[index]!, now);
+        if (support && callForSupportNeedsCompaction(team)) compactCallForSupport(teams[index]!);
+      });
+      compact(false);
+      const existing = plain(teams).map(team => team.id);
       const result = update(teams);
-      for (const team of teams) { compactTeamDeliveries(team, this.ports.now()); compactCallForSupport(team); }
+      compact(true);
       archiveIdleGroups(teams, this.ports.now()); pruneGroups(teams, this.ports.now());
-      const remaining = new Set(teams.map(team => team.id));
+      const remaining = new Set(plain(teams).map(team => team.id));
       removed = existing.some(id => !remaining.has(id));
       return result;
     });
     if (removed) await this.retainResources();
     return value;
   }
-  private project(saved: SavedTeam, recipientAware = true): Team {
+  private project(source: SavedTeam, recipientAware = true): Team {
+    const saved = plain(source);
     const team: Team = structuredClone(stripPrivateTeamEvidence(saved));
     const unresolved = (saved.deliveryReceipts ?? []).flatMap(receipt => {
       if (receipt.status !== 'accepted' || receipt.acceptance !== undefined) return [];

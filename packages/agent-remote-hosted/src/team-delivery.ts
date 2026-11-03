@@ -12,8 +12,8 @@ export interface SavedTeam extends Omit<Team, 'unresolvedReceipts'> {
 }
 
 /**
- * Teams an account may hold. Each is stored as its own record, so their number barely adds to the cost of a change;
- * the account's Team state stays within 2 MiB, which bounds that cost (every commit still encodes the whole Relay).
+ * Teams an account may hold. Each is stored as its own record, and a commit encodes only the Teams it changed;
+ * the account's Team state stays within 2 MiB.
  */
 export const ACCOUNT_TEAM_LIMIT = 1024;
 const receiptLifetimeMs = 24 * 60 * 60 * 1000;
@@ -68,8 +68,8 @@ export function compactTeamDeliveries(team: SavedTeam, now: number): void {
 }
 
 /** Settled retry evidence is expendable; legacy unresolved effects remain authoritative. */
-export function trimTeamDeliveryReceipts(teams: SavedTeam[], maximumStateBytes: number): void {
-  let excess = Buffer.byteLength(JSON.stringify(teams)) - maximumStateBytes;
+export function trimTeamDeliveryReceipts(teams: SavedTeam[], maximumStateBytes: number, stateBytes = Buffer.byteLength(JSON.stringify(teams))): void {
+  let excess = stateBytes - maximumStateBytes;
   if (excess <= 0) return;
   const oldest = teams.flatMap(team => (team.deliveryReceipts ?? []).filter(receipt => !unresolvedTeamDelivery(receipt)).map(receipt => ({ team, receipt })))
     .sort((a, b) => a.receipt.settledAt - b.receipt.settledAt);
@@ -79,6 +79,37 @@ export function trimTeamDeliveryReceipts(teams: SavedTeam[], maximumStateBytes: 
     if (!team.deliveryReceipts.length) delete team.deliveryReceipts;
     if (excess <= 0) break;
   }
+}
+
+/** Bytes of a frozen value, which never changes. */
+const sizes = new WeakMap<object, number>();
+function frozenBytes(value: object): number {
+  let bytes = sizes.get(value);
+  if (bytes === undefined) {
+    bytes = Buffer.byteLength(JSON.stringify(value));
+    if (Object.isFrozen(value)) sizes.set(value, bytes);
+  }
+  return bytes;
+}
+/** Buffer.byteLength(JSON.stringify(teams)), measuring only the Teams not measured before. */
+export function teamStateBytes(teams: readonly SavedTeam[]): number {
+  let bytes = 2 + Math.max(0, teams.length - 1);
+  for (const team of teams) bytes += frozenBytes(team);
+  return bytes;
+}
+
+/**
+ * Whether compactTeamDeliveries would change the Team. It must agree with that function: a Team it reports unchanged is
+ * left as it is, so a change copies and measures only the Teams it touches.
+ */
+export function teamNeedsCompaction(team: SavedTeam, now: number): boolean {
+  if (team.messages.some(message => !pendingTeamMessage(message))) return true;
+  if (team.resourceGrants && new Set(team.resourceGrants.map(grant => grant.resourceId)).size !== team.resourceGrants.length) return true;
+  const receipts = team.deliveryReceipts;
+  if (!receipts) return false;
+  return !receipts.length || receipts.some(receipt => !unresolvedTeamDelivery(receipt) && receipt.settledAt + receiptLifetimeMs <= now)
+    || new Set(receipts.map(receipt => receipt.id)).size !== receipts.length
+    || receipts.length > receiptCount || frozenBytes(receipts) > receiptBytes;
 }
 
 export function validSavedTeam(value: unknown): value is SavedTeam {

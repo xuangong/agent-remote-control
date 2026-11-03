@@ -1,5 +1,6 @@
 import { AgentRuntimeError } from '../../agent-provider-sdk/dist/index.js';
 import { afterEach, expect, it } from 'vitest';
+import { freeze } from 'immer';
 import { acceptSessionChannel, PROTOCOL_VERSION } from '@orchardworks/agent-remote-protocol';
 import { createHostBroker, HostSharing, type RelaySocket, type RemoteHostBrokerState } from './index.js';
 import { createOperationCache, OperationCacheError } from '@orchardworks/agent-remote-relay';
@@ -945,3 +946,22 @@ it.each(['resource_upload_chunk', 'resource_download_request'])('allows bounded 
   await Promise.resolve();
   expect(browser.native.closeCode).toBe(1008);
 }, 10_000);
+
+it('commits keep unchanged entries as the committed objects and never commit the objects the broker keeps changing', async () => {
+  const states: RemoteHostBrokerState[] = [];
+  // As the Relay does, a committed state is frozen, so a broker that changed one in place would throw here.
+  const { broker } = await restoredFixture({ ownerSubject: 'alice', durable: true, onStateChange: state => { states.push(freeze(state, true)); } });
+  await broker.manageShares('alice', 'host', 'share', 'bob', 'Bob', 1);
+  await broker.manageShares('alice', 'host', 'share', 'carol', 'Carol', 2);
+  await broker.manageShares('alice', 'host', 'revoke-share', 'bob');
+  // Registration commits its own copy of the Host, which the next commit replaces with the broker's projection.
+  const [shared, second, revoked] = states.slice(-3) as [RemoteHostBrokerState, RemoteHostBrokerState, RemoteHostBrokerState];
+  expect(second.hosts).toBe(shared.hosts);
+  expect(second.bindings).toBe(shared.bindings);
+  expect(second.keys).toBe(shared.keys);
+  expect(revoked.hosts).toBe(shared.hosts);
+  expect(second.sharing!.grants[0]).toBe(shared.sharing!.grants[0]);
+  expect(revoked.sharing!.grants[0]).not.toBe(second.sharing!.grants[0]);
+  expect(revoked.sharing!.grants[1]).toBe(second.sharing!.grants[1]);
+  expect(revoked.sharing!.grants.map(grant => [grant.subject, grant.revoked])).toEqual([['bob', true], ['carol', false]]);
+});

@@ -1,7 +1,10 @@
 import { TeamBroker, teamMessageBudgetBytes } from './teams.js';
 import { CallForSupportProfileError, emptyCallForSupportState, executeProfileCommand, isCallForSupportProfileCommand, projectEnablement, setEnablement,
   validCallForSupportState, type CallForSupportState } from './call-for-support-profiles.js';
-import { compactTeamDeliveries, trimTeamDeliveryReceipts, validSavedTeam, type SavedTeam } from './team-delivery.js';
+import { compactTeamDeliveries, teamStateBytes, trimTeamDeliveryReceipts, validSavedTeam, type SavedTeam } from './team-delivery.js';
+import { committedBrokerState } from './broker-state.js';
+import { committed, detached } from './drafts.js';
+import { freeze } from 'immer';
 import type { TeamResourceStore } from './team-resources.js';
 import { isTeamCreate, isTeamAction, isTeamDelete } from '@orchardworks/agent-remote-protocol';
 import { sessionIdentityMessage } from './session-identity.js';
@@ -113,6 +116,8 @@ export interface HostBrokerOptions {
   now?(): number;
   scheduler?: BrokerScheduler;
 }
+/** The Team state of an account: settled delivery receipts go first when it is exceeded. */
+const TEAM_STATE_BYTES = 2 * 1024 * 1024;
 export function createHostBroker(options: HostBrokerOptions) {
   const accountBacked = options.accountBacked ?? options.durable ?? false;
   const origin = new URL(options.origin).origin;
@@ -155,18 +160,27 @@ export function createHostBroker(options: HostBrokerOptions) {
     if (binding) { completedCreations.set(key, value); creations.set(key, { fingerprint: value.fingerprint, result: Promise.resolve(binding) }); }
   }
   let associations = migrateBrokerAssociations(options.initialState?.associations ?? { version: 6, revision: 0, admissions: [], freezes: [], relationChanges: [], relationResets: [] });
-  let teamState = structuredClone(options.initialState?.teams ?? []);
+  let teamState: SavedTeam[] = structuredClone(options.initialState?.teams ?? []);
   let callForSupportState = options.initialState?.callForSupport && structuredClone(options.initialState.callForSupport);
   if (callForSupportState && !validCallForSupportState(callForSupportState)) throw new Error('Invalid saved Call For Support state.');
   if (!teamState.every(validSavedTeam)) throw new Error('Invalid saved Teams.');
   for (const team of teamState) compactTeamDeliveries(team, now());
-  trimTeamDeliveryReceipts(teamState, 2 * 1024 * 1024);
+  trimTeamDeliveryReceipts(teamState, TEAM_STATE_BYTES);
+  teamState = freeze(teamState, true);
+  /** Teams that passed validation; they are frozen, so they stay valid. */
+  const validTeams = new WeakSet<SavedTeam>();
+  /**
+   * The state to commit, which a commit changes as its draft. Teams, Call For Support and associations are the committed
+   * objects themselves: they are frozen, and changes replace them. Everything else is a copy of the runtime state.
+   */
   function snapshot(): RemoteHostBrokerState {
-    return { teams: structuredClone(teamState), ...(callForSupportState ? { callForSupport: structuredClone(callForSupportState) } : {}), ...(revokedHosts ? { revokedHosts: structuredClone(revokedHosts) } : {}), ...(options.successionEnrollment || options.initialState?.associations ? { associations: structuredClone(associations) } : {}), pairings: structuredClone(pairings), previews: previews.snapshot(), ...(options.ownerSubject ? { sharing: sharing.snapshot() } : {}), keys: [...keys].map(([key, value]) => [key, structuredClone(value)]),
-      hosts: [...hosts.values()].map(({ id, installationId, name, providers, legacyDsh, credentialRotation, gatewayKeyRequested, environment, pairingPurpose, controller, providerManagement, tpmManagement, teamManagement }) => ({ ...(teamManagement ? { teamManagement } : {}), ...(tpmManagement ? { tpmManagement } : {}), ...(providerManagement ? { providerManagement } : {}), ...(controller ? { controller } : {}), ...(pairingPurpose ? { pairingPurpose } : {}), ...(environment ? { environment } : {}), id, installationId, name, providers, legacyDsh, ...(credentialRotation ? {credentialRotation} : {}), ...(gatewayKeyRequested ? { gatewayKeyRequested } : {}) })),
-      bindings: [...bindings.values()].map(({ generation: _generation, recovery: _recovery, ...binding }) => binding),
-      creations: [...completedCreations] };
+    return { teams: teamState, ...(callForSupportState ? { callForSupport: callForSupportState } : {}), ...(revokedHosts ? { revokedHosts: structuredClone(revokedHosts) } : {}), ...(options.successionEnrollment || options.initialState?.associations ? { associations } : {}), pairings: structuredClone(pairings), previews: structuredClone(previews.snapshot()), ...(options.ownerSubject ? { sharing: sharing.snapshot() } : {}), keys: [...keys].map(([key, value]) => [key, structuredClone(value)]),
+      hosts: structuredClone([...hosts.values()].map(({ id, installationId, name, providers, legacyDsh, credentialRotation, gatewayKeyRequested, environment, pairingPurpose, controller, providerManagement, tpmManagement, teamManagement }) => ({ ...(teamManagement ? { teamManagement } : {}), ...(tpmManagement ? { tpmManagement } : {}), ...(providerManagement ? { providerManagement } : {}), ...(controller ? { controller } : {}), ...(pairingPurpose ? { pairingPurpose } : {}), ...(environment ? { environment } : {}), id, installationId, name, providers, legacyDsh, ...(credentialRotation ? {credentialRotation} : {}), ...(gatewayKeyRequested ? { gatewayKeyRequested } : {}) }))),
+      bindings: structuredClone([...bindings.values()].map(({ generation: _generation, recovery: _recovery, ...binding }) => binding)),
+      creations: structuredClone([...completedCreations]) };
   }
+  /** The state last committed, whose unchanged entries the next commit reuses. */
+  let committedState = options.initialState;
   let sharing = new HostSharing(options.initialState?.sharing, () => {});
   let unavailable = false;
   let commits: Promise<unknown> = Promise.resolve();
@@ -205,14 +219,16 @@ export function createHostBroker(options: HostBrokerOptions) {
   function commit<T>(stage: (draft: RemoteHostBrokerState) => { value: T; unchanged?: true; publish(): void }, preEffect = false): Promise<T> {
     const operation = commits.then(async () => {
       assertAvailable();
-      const draft = structuredClone(snapshot());
+      const draft = snapshot();
       const result = stage(draft);
       if (result.unchanged) return result.value;
-      try { await options.onStateChange?.(draft); }
+      const next = committedBrokerState(draft, committedState);
+      try { await options.onStateChange?.(next); }
       catch (error) {
         if (preEffect && isSuccessionCapacityError(error)) throw new BrokerError(error.status, error.code, error.message);
         failClosed(); throw error;
       }
+      committedState = next;
       assertAvailable();
       result.publish();
       return result.value;
@@ -245,10 +261,12 @@ export function createHostBroker(options: HostBrokerOptions) {
     resources: options.teamResources,
     now, read: () => teamState,
     change: update => commit(draft => {
-      const next = structuredClone(teamState), value = structuredClone(update(next));
-      trimTeamDeliveryReceipts(next, 2 * 1024 * 1024);
-      if (isDeepStrictEqual(next, teamState)) return { value, unchanged: true, publish() {} };
-      if (!next.every(team => validSavedTeam(team) && teamMessageBudgetBytes(team) <= 128 * 1024) || Buffer.byteLength(JSON.stringify(next)) > 2 * 1024 * 1024) throw new Error('Team storage capacity reached.');
+      // Only the Teams a change touches are copied, measured and validated; the others stay the committed objects.
+      let value!: ReturnType<typeof update>;
+      let next = committed.produce(teamState, teams => { value = structuredClone(detached(update(teams))); });
+      if (teamStateBytes(next) > TEAM_STATE_BYTES) next = committed.produce(next, teams => trimTeamDeliveryReceipts(teams, TEAM_STATE_BYTES, teamStateBytes(next)));
+      if (next === teamState || next.length === teamState.length && next.every((team, index) => team === teamState[index] || isDeepStrictEqual(team, teamState[index]))) return { value, unchanged: true, publish() {} };
+      if (!next.every(team => validTeams.has(team) || validSavedTeam(team) && teamMessageBudgetBytes(team) <= 128 * 1024 && validTeams.add(team)) || teamStateBytes(next) > TEAM_STATE_BYTES) throw new Error('Team storage capacity reached.');
       draft.teams = next; return { value, publish() { teamState = next; } };
     }),
     assertHost(hostId, providerId) { const host = requireHost(hostId); if (!host.teamManagement) throw new Error('Update the Controller to use Teams.'); if (!host.providers.some(provider => provider.providerId === providerId)) throw new Error('Provider is unavailable on this Host.'); },

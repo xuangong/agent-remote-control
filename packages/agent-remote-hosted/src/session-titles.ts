@@ -1,4 +1,5 @@
 import type { SessionTitleUpdate } from '@orchardworks/agent-remote-protocol';
+import { plain } from './drafts.js';
 import { updateFavoriteSessionTitles } from './favorites.js';
 import { StarError, starKey, validSessionStar, type StarIdentity } from './session-stars.js';
 import type { HostedRelayState, RelayState } from './state.js';
@@ -6,9 +7,12 @@ import type { HostedRelayState, RelayState } from './state.js';
 export const MAX_SESSION_TITLES = 16384;
 
 export function pruneSessionTitles(draft: HostedRelayState): void {
-  if (!draft.sessionTitles) return;
-  const hosts = new Set(draft.tenants.flatMap(tenant => tenant.broker.hosts.map(host => host.id)));
-  draft.sessionTitles = draft.sessionTitles.filter(session => hosts.has(session.hostId));
+  // Read the plain state; the titles are replaced only when one is removed.
+  const view = plain(draft);
+  if (!view.sessionTitles) return;
+  const hosts = new Set(view.tenants.flatMap(tenant => tenant.broker.hosts.map(host => host.id)));
+  if (view.sessionTitles.every(session => hosts.has(session.hostId))) return;
+  draft.sessionTitles = view.sessionTitles.filter(session => hosts.has(session.hostId));
 }
 
 /** Confirmed native names survive browser reconnects independently of favorites. */

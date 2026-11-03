@@ -1,6 +1,6 @@
 import { createHmac } from 'node:crypto';
 import { SQL_READABLE_SNAPSHOT_FORMATS, SQL_SNAPSHOT_FORMAT, decodeSqlSnapshot, encodeSqlSnapshot, type SqlManifest, type SqlChunk, type SqlEncodedRecord, type SqlSnapshotFormat } from './storage-codec.js';
-import { emptyRelayState, hostedAuthStateConfig, hostedAuthStorageIdentity, resolveHostedAuth, validateRelayState, type HostedAuthOptions, type HostedRelayState, type RelayStateStore } from '@orchardworks/agent-remote-hosted';
+import { emptyRelayState, hostedAuthStateConfig, hostedAuthStorageIdentity, HostedRecordCache, resolveHostedAuth, validateRelayState, type HostedAuthOptions, type HostedRecordCacheOptions, type HostedRelayState, type RelayStateCommitStats, type RelayStateStore } from '@orchardworks/agent-remote-hosted';
 
 type RecordKind = 'sessionTitle' | 'sessionTitleRevision' | 'favoritesTree' | 'sessionMigration' | 'sessionStar' | 'preview' | 'securityEvent' | 'session' | 'tenant' | 'deviceKey' | 'host' | 'binding' | 'creation' | 'share' | 'reservation' | 'loginChallenge' | 'consumedProof';
 type StoredRecord = { kind: RecordKind; owner: string; key: string; version: number; value: string };
@@ -12,10 +12,16 @@ const legacyTables = ['relay_records', 'relay_security_events', 'relay_previews'
 /** Complete chunked snapshot publication shares the existing atomic transaction and durability gate. */
 export class SqliteRelayStore implements RelayStateStore {
   readonly initial: HostedRelayState;
+  /** What reading the stored snapshot took, for diagnostics. */
+  readonly loaded: { records: number; bytes: number; durationMs: number };
   private records: Map<string, SqlEncodedRecord> = new Map();
   private format: number;
   private durabilityUnknown = false;
-  constructor(private readonly storage: DurableObjectStorage, private readonly auth: HostedAuthOptions) {
+  /** Encodings of the last snapshot encoded; a commit encodes only the records that changed since. */
+  private readonly cache: HostedRecordCache;
+  constructor(private readonly storage: DurableObjectStorage, private readonly auth: HostedAuthOptions, options: { cache?: HostedRecordCacheOptions } = {}) {
+    const started = performance.now();
+    this.cache = new HostedRecordCache(options.cache);
     auth = this.auth = resolveHostedAuth(auth);
     const config = hostedAuthStateConfig(auth);
     // Flatten the shared identity to retain the original Gateway fingerprint bytes.
@@ -69,14 +75,16 @@ export class SqliteRelayStore implements RelayStateStore {
       this.initial = validateRelayState(decode(legacyRows, auth), auth);
     } else {
       if (legacyRows.length) throw new Error(`Legacy records remain in SQL snapshot format ${this.format}.`);
-      this.initial = decodeSqlSnapshot(manifests, chunks, auth, this.format as SqlSnapshotFormat);
+      this.initial = decodeSqlSnapshot(manifests, chunks, auth, this.format as SqlSnapshotFormat, this.cache);
       // The rows as stored: an older format's are replaced on the next commit, which also marks the new format.
-      this.records = encodeSqlSnapshot(this.initial, auth, this.format as SqlSnapshotFormat).records;
+      this.records = encodeSqlSnapshot(this.initial, auth, this.format as SqlSnapshotFormat, this.cache).records;
     }
+    this.loaded = { records: manifests.length + legacyRows.length, bytes: manifests.reduce((total, row) => total + row.byte_length, 0), durationMs: performance.now() - started };
   }
-  async commit(state: HostedRelayState): Promise<void> {
+  async commit(state: HostedRelayState): Promise<RelayStateCommitStats> {
     if (this.durabilityUnknown) throw new Error('Relay SQL durability is unknown.');
-    const next = encodeSqlSnapshot(state, this.auth);
+    const next = encodeSqlSnapshot(state, this.auth, SQL_SNAPSHOT_FORMAT, this.cache);
+    let written = 0;
     this.storage.transactionSync(() => {
       for (const [id, record] of this.records) {
         if (next.records.has(id)) continue;
@@ -86,6 +94,7 @@ export class SqliteRelayStore implements RelayStateStore {
       for (const [id, record] of next.records) {
         const row = record.manifest; const previous = this.records.get(id)?.manifest;
         if (previous && previous.format === row.format && previous.digest === row.digest && previous.byte_length === row.byte_length && previous.chunk_count === row.chunk_count) continue;
+        written++;
         this.storage.sql.exec('DELETE FROM relay_snapshot_chunks WHERE kind = ? AND identity = ?', row.kind, row.identity);
         this.storage.sql.exec(`INSERT INTO relay_snapshot_manifests (kind, identity, format, byte_length, chunk_count, digest) VALUES (?, ?, ?, ?, ?, ?)
           ON CONFLICT (kind, identity) DO UPDATE SET format = excluded.format, byte_length = excluded.byte_length, chunk_count = excluded.chunk_count, digest = excluded.digest`,
@@ -102,6 +111,7 @@ export class SqliteRelayStore implements RelayStateStore {
     // A rejected sync does not prove rollback; the caller closes publication and restart revalidates exposed SQL.
     try { await this.storage.sync(); } catch (error) { this.durabilityUnknown = true; throw error; }
     this.records = next.records; this.format = SQL_SNAPSHOT_FORMAT;
+    return { records: next.records.size, bytes: next.costs.reduce((total, cost) => total + cost.byteLength, 0), encoded: next.encoded, written };
   }
 }
 

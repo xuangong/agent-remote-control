@@ -1,6 +1,6 @@
 # Incremental Relay state commits
 
-Status: proposed on 2026-11-03, after Teams moved to their own records (snapshot format 4, `306fc4cc`). For review before implementation.
+Status: proposed on 2026-11-03, after Teams moved to their own records (snapshot format 4, `306fc4cc`). Phases 0 to 2 implemented on 2026-11-03 with Immer; see [Implementation](#implementation). Phase 3 remains.
 
 ## Problem
 
@@ -107,7 +107,35 @@ Each phase is a separate website deployment. No phase changes the stored format,
 - **Memory.** Keeping committed trees and caches costs memory, at most about twice the snapshot, which matters only near the whole-Relay guard.
 - **Unknown production size.** If production is small, phases 1 and 2 matter mostly for growth; phase 0 decides how urgent they are.
 
-## Decisions needed
+## Decisions
 
-1. Immer as a dependency for phase 2, or an in-house copy-on-write proxy.
-2. Whether to implement phases 0 and 1 now, before deciding phase 2.
+1. Immer (11.2.9, MIT) for copy-on-write, approved on 2026-11-03.
+2. Phases 0, 1 and 2 implemented together.
+
+## Implementation
+
+What was built differs from the design above where noted.
+
+**Phase 0.** The per-commit measurements go to the Worker log (`wrangler tail`), not to the Relay diagnostic journal: they describe the whole Relay, which is not one Host's data, and delivering them to every Host would show each account the size of the others. Controllers also reject diagnostic events they do not know. `createRelayState` reports each commit (`RelayStateCommitMetrics`: durations of the change, capacity accounting and store, and the store's records, bytes, records encoded and written); the Cloudflare `RelayObject` aggregates them into one `relay_state_commits` line per minute with commits, the first also carrying what loading the snapshot took. The Workers clock advances only at I/O, so CPU steps may read as zero; the counts are exact.
+
+**Phase 1.** `HostedRecordCache` (`record-codec.ts`) keeps the encodings of the last snapshot encoded with it, keyed by `[kind, owner, key]`. A record whose payload is the same frozen object reuses its entry without serializing; otherwise the payload is serialized once and, when its digest matches, the cached bytes, chunks and cost are reused. Only frozen payloads are trusted by identity, so a caller passing objects it may still change gets correct, uncached results. The store keeps one cache, filled when it decodes the snapshot at start; `hostedRecordEncodingCosts` keeps one per measured view, and measures costs without producing bytes or digests. `payloadStringBytes` comes from the payload's JSON text. Each cache can check itself against a complete encoding every N uses (500 in production); a difference is reported and the complete encoding used.
+
+**Phase 2.**
+- `state.mutate` produces the next state with Immer. Immer freezes it deeply in production as well as in tests: an in-place change of committed state throws where it happens, instead of being written late, and frozen subtrees are what lets Immer and the cache skip them. Results computed from drafts are detached before the drafts are revoked.
+- Validation (`checkedRelayState`) remembers frozen entities and collections that passed, and returns the state itself when no migration applies, so unchanged objects keep their identity. `validateRelayState` keeps its complete check and copy for loading and verification.
+- Headers are compared field by field: their reference lists and nested objects are kept while equal, so a header whose records did not change membership is not serialized again.
+- `ordinaryView` copies only the tenants and brokers it strips, once per frozen tenant.
+- The broker keeps its runtime maps. Instead of a committed tree, each commit hands the Relay `committedBrokerState`: entries whose JSON equals the previously committed entry are that committed object, others are copies, so the runtime never shares an object with frozen state. Teams, Call For Support and associations, which the broker only ever replaces, are committed as they are.
+- Team changes are copy-on-write; compaction, archiving and pruning read the plain Teams and draft only those they change (`teamNeedsCompaction`, which must agree with `compactTeamDeliveries`), and the account's Team bytes are summed from per-Team sizes measured once.
+- `stageRelayState`, Favorites projection and title pruning read the plain state and change the draft only where needed.
+
+**Results** (Node 22, this Mac, a change of one Host's name, median of 30 commits):
+
+| Dataset | Before | After |
+|---|---|---|
+| M | 8.6 ms | 0.9 ms |
+| L | 132 ms | 2.2 ms |
+| O | 167 ms | 2.1 ms |
+
+The first commit after a start serializes every record once to compare it with the stored encodings (21 ms on L, 24 ms on O), since the state decoded at start is not yet the frozen state.
+A change to a record's membership in a Relay-wide collection (a new session, consumed proof, security event, star, title or migration) re-encodes the Relay header, which lists all of them: about 20 ms on O, whose header carries a 1 MiB test field. The cost of such changes therefore still grows with those collections; it is small at today's sizes and the phase 0 log will show production's.

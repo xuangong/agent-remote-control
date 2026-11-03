@@ -1,4 +1,5 @@
 import { createWindowWorkspaces } from './window-workspaces.js';
+import { committed } from './drafts.js';
 import { handleWindowRequest } from './window-routes.js';
 import { projectSuccessionFavorites } from './favorites-succession.js';
 import { createSuccessionReplay } from './session-successions.js';
@@ -26,7 +27,7 @@ import { createGoogleLogin } from './google-auth.js';
 import { authorityOutageGraceMs, localAuthorityLifetimeMs, resolveHostedAuth, hostedAuthMetadata, type HostedAuthOptions } from './hosted-auth.js';
 import { queryGatewayAuthority, type AuthorityDiagnostic } from './authority.js';
 import { provisionGatewayHostKey, revokeGatewayHostKey, validateBootstrapBody } from './host-bootstrap.js';
-import { createRelayState, stageRelayState, type HostedRelayState, type RelayStateStore } from './state.js';
+import { createRelayState, stageRelayState, type HostedRelayState, type RelayStateCommitMetrics, type RelayStateStore } from './state.js';
 import { assertSuccessionCapacity, isSuccessionCapacityError, type SuccessionEncodingCosts } from './succession-capacity.js';
 import { createTimerRelayScheduler, type RelayScheduler } from './scheduler.js';
 import { readJson } from './request.js';
@@ -65,6 +66,8 @@ export type HostedRelayOptions = HostedAuthOptions & {
   recentAuthentication?(grant: HostedGrant): boolean | undefined;
   /** How long access last confirmed by an unreachable account authority stays usable, from 0 to one hour. */
   authorityOutageGraceMs?: number;
+  /** Operator diagnostics of each Relay state commit; no account or content data. */
+  onStateCommit?(metrics: RelayStateCommitMetrics): void;
 }
 type Tenant = { subject: string; namespace: string; authorityUntil: number; authorityRefreshAt: number; authorityDenied: boolean; authorityConfirmedAt?: number;
   checking?: Promise<'active' | 'denied' | 'unavailable'>; broker: ReturnType<typeof createHostBroker>; expiresAt: number };
@@ -88,7 +91,7 @@ export function createHostedRelay(options: HostedRelayOptions) {
   let closing = false; let failed = false; let initialized = false; let refreshing: Promise<void> | undefined;
   let scheduling: Promise<unknown> = Promise.resolve();
   let renewalAt = Date.now() + 60_000;
-  const state = createRelayState(auth, options.storage, failClosed, published, options.successionEncodingCosts);
+  const state = createRelayState(auth, options.storage, failClosed, published, options.successionEncodingCosts, options.onStateCommit);
   const authentication = createAuthenticationProvider(auth, state);
   const outageGraceMs = options.authorityOutageGraceMs ?? authorityOutageGraceMs;
   if (!Number.isSafeInteger(outageGraceMs) || outageGraceMs < 0 || outageGraceMs > 3_600_000) throw new Error('Authority outage grace must be from 0 to 3600000 milliseconds.');
@@ -326,9 +329,10 @@ export function createHostedRelay(options: HostedRelayOptions) {
         let refusal: unknown;
         for (const ceiling of candidates) {
           if (!Number.isSafeInteger(ceiling) || ceiling < 1 || ceiling > 8388608) return 0;
-          const draft = structuredClone(state.read()), broker = structuredClone(context.broker);
+          const broker = structuredClone(context.broker);
           broker.associations!.freezes.push({ hostId: context.hostId, receipt: { ...context.freeze, maxProjectionBytes: ceiling } });
-          stageBroker(draft, broker); stageRelayState(draft, state.read().version, true);
+          // A disposable candidate that shares the committed state, so accounting measures only what it changes.
+          const draft = committed.produce(state.read(), draft => { stageBroker(draft, broker); stageRelayState(draft, state.read().version, true); });
           try { assertSuccessionCapacity(draft, options.successionEncodingCosts!); return ceiling; }
           catch (error) { if (!isSuccessionCapacityError(error)) throw error; refusal = error; }
         }
@@ -677,7 +681,9 @@ export function createHostedRelay(options: HostedRelayOptions) {
       if (pending) {
         const authority = await activeOwner(owned);
         if (authority !== 'active' || closing || failed || sessions.expiresAt(request, grant) <= Date.now()) return json(authority === 'denied' ? 403 : 503, { error: 'Favorites are unavailable.' });
-        if (projectSuccessionFavorites(structuredClone(state.read()), grant.subject)) await state.mutate(draft => { projectSuccessionFavorites(draft, grant.subject, owned.authorityUntil > Date.now()); });
+        let projected = false;
+        committed.produce(state.read(), draft => { projected = projectSuccessionFavorites(draft, grant.subject); });
+        if (projected) await state.mutate(draft => { projectSuccessionFavorites(draft, grant.subject, owned.authorityUntil > Date.now()); });
       }
     }
     if (path === '/v1/favorites') {

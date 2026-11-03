@@ -71,7 +71,7 @@ test('bounded allowance semantics fence association v4 and outer Relay v8 writer
 test('v11 preserves optional accounting provenance and rejects downgraded prefix state', async () => {
   const legacy = emptyRelayState(auth); legacy.version = 9; legacy.tenants.push(tenant());
   let saved: HostedRelayState | undefined;
-  const state = createRelayState(auth, { initial: legacy, commit: async value => { saved = value; } }, () => {}, () => {});
+  const state = createRelayState(auth, { initial: legacy, commit: async value => { saved = structuredClone(value); } }, () => {}, () => {});
   await state.mutate(() => {});
   expect(saved).toMatchObject({ version: 11 }); expect(saved).not.toHaveProperty('successionAccounting');
   expect(createRelayState(auth, { initial: saved, commit: async () => {} }, () => {}, () => {}).read()).toEqual(saved);

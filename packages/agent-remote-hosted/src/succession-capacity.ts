@@ -12,7 +12,8 @@ export interface SuccessionRecordCost {
   payloadStringBytes: number;
 }
 export interface SuccessionEncodingCosts {
-  measureSnapshot(state: Readonly<HostedRelayState>): {
+  /** view names the projection measured, so an implementation can keep what it reuses for each apart. */
+  measureSnapshot(state: Readonly<HostedRelayState>, view?: 'actual' | 'ordinary'): {
     snapshotFormat: number; recordFormat: number; chunkBytes: number; costs: readonly SuccessionRecordCost[];
   };
   quoteRecord(input: { kind: string; owner: string; key: string; payloadJsonBytesUpperBound: number }): Pick<SuccessionRecordCost, 'byteLength' | 'chunkCount' | 'manifestBytes'>;
@@ -22,9 +23,27 @@ export interface SuccessionEncodingCosts {
 export const SUCCESSION_FEATURE_BYTES = 8_388_608;
 const MAX = Number.MAX_SAFE_INTEGER;
 const bytes = (value: unknown) => Buffer.byteLength(JSON.stringify(value));
+/** bytes(value) of a frozen value, which never changes, measured once. */
+const sizes = new WeakMap<object, number>();
+function frozenBytes(value: object): number {
+  let size = sizes.get(value);
+  if (size === undefined) { size = bytes(value); if (Object.isFrozen(value)) sizes.set(value, size); }
+  return size;
+}
 const widest = (length: number) => '\ud800'.repeat(length);
 const jsonStringBound = (length: number) => sum(2, length * 6);
+/** recoveryHostBound depends only on its arguments; a Host keeps them for its lifetime. */
+const recoveryHostBounds = new Map<string, number>();
 function recoveryHostBound(hostId: string, installationId: string): number {
+  const key = JSON.stringify([hostId, installationId]);
+  let bound = recoveryHostBounds.get(key);
+  if (bound === undefined) {
+    if (recoveryHostBounds.size >= 4096) recoveryHostBounds.clear();
+    recoveryHostBounds.set(key, bound = widestRecoveryHost(hostId, installationId));
+  }
+  return bound;
+}
+function widestRecoveryHost(hostId: string, installationId: string): number {
   const label = widest(160);
   const tool = { id: label, name: label, status: 'not-found' };
   const environment = { detectedAt: null, os: { platform: label, name: label, arch: label, release: label }, wsl: false, container: false,
@@ -72,18 +91,37 @@ export interface SuccessionCapacity {
   tenants: SuccessionTenantCapacity[]; violations: string[];
 }
 
-/** Complete ordinary sizing view, preserving unrelated values, extras, presence and array order. Never persisted. */
+/** The ordinary view of a tenant, for as long as the tenant object lives: a frozen tenant never changes. */
+const ordinaryTenants = new WeakMap<object, HostedRelayState['tenants'][number]>();
+/**
+ * Complete ordinary sizing view, preserving unrelated values, extras, presence and array order. Never persisted.
+ * Only what it strips is copied, so the rest keeps its identity, and so do unchanged tenants across commits.
+ */
 function ordinaryView(state: Readonly<HostedRelayState>): HostedRelayState {
-  const ordinary = structuredClone(state);
-  for (const tenant of ordinary.tenants) {
-    const recoveryInstallations = retainedRecoveryInstallations(tenant.broker);
-    delete tenant.favoritesSuccession;
-    delete tenant.broker.associations;
-    delete tenant.broker.revokedHosts;
-    tenant.broker.keys = tenant.broker.keys.filter(([, key]) => key.recovery === undefined
-      && !(key.kind === 'device' && key.installationId && recoveryInstallations.has(key.installationId)));
-    if (tenant.broker.pairings !== undefined) tenant.broker.pairings = tenant.broker.pairings.filter(pairing => pairing.recovery === undefined);
-  }
+  return { ...state, tenants: state.tenants.map(tenant => {
+    const cached = ordinaryTenants.get(tenant);
+    if (cached) return cached;
+    const ordinary = ordinaryTenant(tenant);
+    if (Object.isFrozen(tenant)) {
+      for (const value of [ordinary, ordinary.broker, ordinary.broker.keys, ordinary.broker.pairings]) if (value) Object.freeze(value);
+      ordinaryTenants.set(tenant, ordinary);
+    }
+    return ordinary;
+  }) };
+}
+function ordinaryTenant(tenant: HostedRelayState['tenants'][number]): HostedRelayState['tenants'][number] {
+  const source = tenant.broker, recoveryInstallations = retainedRecoveryInstallations(source);
+  const keys = source.keys.filter(([, key]) => key.recovery === undefined && !(key.kind === 'device' && key.installationId && recoveryInstallations.has(key.installationId)));
+  const pairings = source.pairings?.filter(pairing => pairing.recovery === undefined);
+  if (tenant.favoritesSuccession === undefined && source.associations === undefined && source.revokedHosts === undefined
+    && keys.length === source.keys.length && pairings?.length === source.pairings?.length) return tenant;
+  const broker = { ...source };
+  delete broker.associations;
+  delete broker.revokedHosts;
+  if (keys.length !== source.keys.length) broker.keys = keys;
+  if (pairings && pairings.length !== source.pairings!.length) broker.pairings = pairings;
+  const ordinary = { ...tenant, broker };
+  delete ordinary.favoritesSuccession;
   return ordinary;
 }
 
@@ -108,8 +146,8 @@ function headerNumberGrowth(minimum: number, delta: number, chunkBytes: number):
 /** Derive every retained identity and remaining obligation from one authoritative complete snapshot. */
 export function deriveSuccessionCapacity(state: Readonly<HostedRelayState>, encoding: SuccessionEncodingCosts): SuccessionCapacity {
   requireSuccessionEncodingCosts(encoding);
-  const actual = encoding.measureSnapshot(state);
-  const ordinary = encoding.measureSnapshot(ordinaryView(state));
+  const actual = encoding.measureSnapshot(state, 'actual');
+  const ordinary = encoding.measureSnapshot(ordinaryView(state), 'ordinary');
   // Format 4 differs from 3 only in storing Teams as their own records, which this accounting counts as ordinary data either way.
   if (actual.snapshotFormat !== 4 || actual.recordFormat !== 1 || actual.chunkBytes !== 262144
     || actual.snapshotFormat !== ordinary.snapshotFormat || actual.recordFormat !== ordinary.recordFormat || actual.chunkBytes !== ordinary.chunkBytes) throw new Error('Unsupported succession encoding costs.');
@@ -196,7 +234,7 @@ export function deriveSuccessionCapacity(state: Readonly<HostedRelayState>, enco
           if (row.released === undefined) replacement('freeze', owner, row.receipt.token, bytes({ ...row, released: 'cancelled' }));
           continue;
         }
-        if (row.receipt.version !== 1 && row.projection && bytes(row.projection) > row.receipt.maxProjectionBytes) throw new Error('Succession projection bound invariant failed.');
+        if (row.receipt.version !== 1 && row.projection && frozenBytes(row.projection) > row.receipt.maxProjectionBytes) throw new Error('Succession projection bound invariant failed.');
         if (row.released === undefined) {
           if (row.receipt.version === 1) throw new Error('Unresolved legacy succession has no finite projection bound.');
           replacement('freeze', owner, row.receipt.token, Math.max(

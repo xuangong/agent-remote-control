@@ -2,7 +2,8 @@ import { createHash, randomUUID } from 'node:crypto';
 import { CALL_FOR_SUPPORT_CALL_LIMIT, CALL_FOR_SUPPORT_GROUP_BYTES, CALL_FOR_SUPPORT_REPORT_BYTES, callForSupportReportBytes, isTeamResource, nativeSessionRefKey, type CallForSupportCall,
   type CallForSupportCallInput, type CallForSupportGroup, type CallForSupportProfile, type CallForSupportReport, type CallForSupportRoster, type CallForSupportRosterMember, type Team,
   type TeamAction, type TeamHostCall, type TeamMember, type TeamResource, type TeamSource } from '@orchardworks/agent-remote-protocol';
-import { ACCOUNT_TEAM_LIMIT, assertTeamQueueCapacity, type SavedTeam } from './team-delivery.js';
+import { ACCOUNT_TEAM_LIMIT, assertTeamQueueCapacity, teamStateBytes, type SavedTeam } from './team-delivery.js';
+import { plain } from './drafts.js';
 import { effectiveProfiles, type CallForSupportState } from './call-for-support-profiles.js';
 import type { TeamBrokerPorts } from './teams.js';
 
@@ -159,7 +160,18 @@ function pauseForBudget(team: SavedTeam, reason: string, now: number): void {
   if (open) settleCall(team, open, { status: 'needs_input', summary: `Support paused: ${reason} The user can raise the budget and resume this role.`, findings: [] }, now);
 }
 
-const groupBytes = (support: CallForSupportGroup) => Buffer.byteLength(JSON.stringify(support));
+/** Bytes of a group; a frozen group never changes, so it is measured once. */
+const groupSizes = new WeakMap<CallForSupportGroup, number>();
+function groupBytes(support: CallForSupportGroup): number {
+  let bytes = groupSizes.get(support);
+  if (bytes === undefined) {
+    bytes = Buffer.byteLength(JSON.stringify(support));
+    if (Object.isFrozen(support)) groupSizes.set(support, bytes);
+  }
+  return bytes;
+}
+/** Whether compactCallForSupport would change the Team. */
+export const callForSupportNeedsCompaction = (team: SavedTeam) => !!team.callForSupport && groupBytes(team.callForSupport) > CALL_FOR_SUPPORT_GROUP_BYTES;
 /** Keeps a group within its storage bound: evidence of older reports first, then their findings, then the oldest reported calls. */
 export function compactCallForSupport(team: SavedTeam): void {
   const support = team.callForSupport;
@@ -221,21 +233,23 @@ function removableGroup(teams: SavedTeam[], now: number): SavedTeam | undefined 
  */
 export function admitTeam(teams: SavedTeam[], now: number): void {
   if (teams.length < ACCOUNT_TEAM_LIMIT) return;
-  const removed = removableGroup(teams, now) ?? fail('Team capacity reached.');
-  teams.splice(teams.indexOf(removed), 1);
+  const view = plain(teams), removed = removableGroup(view, now) ?? fail('Team capacity reached.');
+  teams.splice(view.indexOf(removed), 1);
 }
 
 /** Removes support groups (see removableGroup) while the Team state is larger than the retention bound. */
 export function pruneGroups(teams: SavedTeam[], now: number): void {
-  for (let removed = removableGroup(teams, now); removed && Buffer.byteLength(JSON.stringify(teams)) > CALL_FOR_SUPPORT_RETENTION_BYTES; removed = removableGroup(teams, now)) {
-    teams.splice(teams.indexOf(removed), 1);
+  // Read the plain Teams: a draft would draft every Team it reads.
+  for (let view = plain(teams), removed = removableGroup(view, now); removed && teamStateBytes(view) > CALL_FOR_SUPPORT_RETENTION_BYTES; view = plain(teams), removed = removableGroup(view, now)) {
+    teams.splice(view.indexOf(removed), 1);
   }
 }
 
 /** Archives groups that have had no open or queued call for a week; their members' Controllers complete the archive. */
 export function archiveIdleGroups(teams: SavedTeam[], now: number): void {
-  for (const team of teams) {
-    if (!team.callForSupport || team.status !== 'active' || !idle(team) || now - lastUsed(team) < CALL_FOR_SUPPORT_IDLE_ARCHIVE_MS) continue;
+  for (const [index, current] of plain(teams).entries()) {
+    if (!current.callForSupport || current.status !== 'active' || !idle(current) || now - lastUsed(current) < CALL_FOR_SUPPORT_IDLE_ARCHIVE_MS) continue;
+    const team = teams[index]!;
     team.status = 'archiving';
     for (const message of team.messages) if (message.status === 'queued') message.status = 'canceled';
     team.revision++; team.updatedAt = now;

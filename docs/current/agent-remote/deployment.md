@@ -247,6 +247,19 @@ cannot certify Workers behavior, and neither can certify provider-native SDKs.
 - Node snapshots remain signed and bound to the configured secret and origins.
   DO records also validate the configuration binding. Secret rotation or origin
   changes require an explicit migration/reset; neither silently starts empty.
+- The coordinator keeps the Relay state as one deeply frozen tree and changes it
+  copy-on-write, so a commit copies, validates, measures and encodes only the
+  records it changes and the headers that list them; every other record reuses
+  its encoding. A start still decodes, validates and encodes the complete
+  snapshot. Each record cache is checked against a complete encoding every 500
+  commits; a difference is logged as `relay_state_cache_mismatch` and the
+  complete encoding is used.
+- The Worker log (`wrangler tail`) receives one `relay_state_commits` line per
+  minute with commits: their number, the snapshot's records and bytes, the
+  records encoded and written, and durations; the first line also reports what
+  loading the snapshot took. The lines carry no account, session or content data.
+  The Workers clock advances only at I/O, so a commit's duration includes its
+  write but its CPU steps may read as zero.
 
 Cloud-only acceptance still includes DNS/TLS, actual account routing, deployment
 replacement/reconnect and realistic coordinator load. Record those results before

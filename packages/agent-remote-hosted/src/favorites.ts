@@ -1,4 +1,5 @@
 import { assertOrdinaryFavoriteAddress } from './favorites-succession.js';
+import { committed, detached } from './drafts.js';
 import { committedSuccessionRows } from './session-successions.js';
 import type { NativeSessionRef } from '@orchardworks/agent-remote-protocol';
 import { createHash, randomUUID } from 'node:crypto';
@@ -152,7 +153,12 @@ export function createFavorites(state: RelayState, access: Access,
     }) };
   }
   return {
-    list(subject: string): FavoritesSnapshot { return snapshot(structuredClone(state.read()), subject); },
+    list(subject: string): FavoritesSnapshot {
+      // organizeFavorites changes what it reads; draft the committed state instead of copying all of it, and discard the draft.
+      let result!: FavoritesSnapshot;
+      committed.produce(state.read(), draft => { result = detached(snapshot(draft, subject)); });
+      return result;
+    },
     async execute(subject: string, body: unknown): Promise<FavoritesSnapshot> {
       if (!validCommand(body)) fail(400, 'invalid_favorite', 'The favorites command is invalid.');
       const command = body as FavoriteCommand;

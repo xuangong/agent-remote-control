@@ -26,6 +26,7 @@
   "dependencies": {
     "@orchardworks/agent-remote-protocol": "workspace:*",
     "@orchardworks/agent-remote-tunnel": "workspace:*",
+    "immer": "^11.2.9",
     "jose": "^6.2.12",
     "parse5": "^7.3.0",
     "postcss": "^8.5.24"

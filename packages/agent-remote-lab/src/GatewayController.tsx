@@ -8,7 +8,7 @@ import { AccessPage } from './components/AccessPage.js';
 import { clearConversationRecovery } from './conversation-recovery.js';
 import { flushRecoveryWrites } from './recovery-writes.js';
 import { useRecoveryNotice } from './hooks/useRecoveryNotice.js';
-import { WorkspaceReady, retireWorkspace, workspaceSignedOut, previousWorkspacePath, parseAccess, readWorkspaceAccess, rememberWorkspaceAccess, forgetWorkspaceAccess, claimAutomaticSignIn, prepareManualSignIn, setWorkspaceReady, type WorkspaceAccess } from './workspace-access.js';
+import { WorkspaceReady, confirmWorkspaceAccess, retireWorkspace, workspaceSignedOut, previousWorkspacePath, parseAccess, readWorkspaceAccess, rememberWorkspaceAccess, forgetWorkspaceAccess, claimAutomaticSignIn, prepareManualSignIn, setWorkspaceReady, type WorkspaceAccess } from './workspace-access.js';
 
 const jsonPost = { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' };
 const navigateToLogin = (url: string) => window.location.replace(url);
@@ -44,9 +44,11 @@ export function GatewayController({ children, navigate = navigateToLogin, automa
       if (display.current) setWorkspaceReady(display.current.basePath, false);
       setReady(false);
     };
-    const pauseExpiredAccess = () => {
-      // A foreground refresh does not invalidate an already confirmed authority lease.
-      if (!current || current.expiresAt <= Date.now()) pause();
+    // The local expiry is a copy of the Relay's lease, which another page may have renewed, and the Relay closes the
+    // channels of a lease that really expired. So the page holds its traffic while it asks, instead of pausing: a pause
+    // closes every live channel and reattaches every session. It pauses only if it cannot confirm access (see unavailable).
+    const confirmExpiredAccess = () => {
+      if (current && current.expiresAt <= Date.now() && display.current) confirmWorkspaceAccess(display.current.basePath);
     };
     const stopRequests = () => {
       stopped = true; pending?.abort(); clearTimeout(expiry); clearTimeout(refresh); clearTimeout(deadline); pause();
@@ -54,7 +56,9 @@ export function GatewayController({ children, navigate = navigateToLogin, automa
     stop.current = stopRequests;
     const schedule = (delay: number, renew = true) => {
       clearTimeout(refresh);
-      // Background pages still own live session channels and must renew before their lease expires.
+      // Background pages still own live session channels and must renew before their lease expires. Browsers delay
+      // their timers, so a hidden page renews at a third of the remaining lease rather than at half of it.
+      if (document.visibilityState === 'hidden' && current) delay = Math.max(250, Math.min(delay, (current.expiresAt - Date.now()) / 3));
       refresh = setTimeout(() => { void request(renew); }, delay);
     };
     const unavailable = (renew: boolean) => {
@@ -108,7 +112,7 @@ export function GatewayController({ children, navigate = navigateToLogin, automa
         setWorkspaceReady(value.basePath, true);
         display.current = value; setAccess(value); setReady(true); setFailed(false); setNeedsSignIn(false);
         clearTimeout(expiry);
-        expiry = setTimeout(() => { pause(); void request(true); }, value.expiresAt - Date.now());
+        expiry = setTimeout(() => { confirmExpiredAccess(); void request(true); }, value.expiresAt - Date.now());
         schedule(Math.max(250, value.refreshAfterMs ?? Math.max(250, value.expiresAt - Date.now() - 1000)));
       } catch {
         if (!stopped && !controller.signal.aborted) unavailable(renew);
@@ -129,16 +133,17 @@ export function GatewayController({ children, navigate = navigateToLogin, automa
       }
     };
     window.addEventListener('storage', storageChanged);
-    const beforeShow = (event: PageTransitionEvent) => { if (event.persisted && !stopped) pauseExpiredAccess(); };
-    const beforeVisible = () => { if (document.visibilityState === 'visible' && !stopped) pauseExpiredAccess(); };
-    const beforeOnline = () => { if (document.visibilityState !== 'hidden' && !stopped) pauseExpiredAccess(); };
+    // Capture runs before the page's own resume listeners, which may send on their channels.
+    const beforeShow = (event: PageTransitionEvent) => { if (event.persisted && !stopped) confirmExpiredAccess(); };
+    const beforeVisible = () => { if (document.visibilityState === 'visible' && !stopped) confirmExpiredAccess(); };
+    const beforeOnline = () => { if (document.visibilityState !== 'hidden' && !stopped) confirmExpiredAccess(); };
     window.addEventListener('pageshow', beforeShow, true);
     document.addEventListener('visibilitychange', beforeVisible, true);
     window.addEventListener('online', beforeOnline, true);
     const unwatch = watchPageResume(() => {
       if (stopped) return;
       clearTimeout(refresh);
-      pauseExpiredAccess();
+      confirmExpiredAccess();
       // Frozen requests may never settle in Safari; replace them on foreground recovery.
       pending?.abort(); pending = undefined; clearTimeout(deadline);
       // The Relay may have renewed the lease while this page was suspended.

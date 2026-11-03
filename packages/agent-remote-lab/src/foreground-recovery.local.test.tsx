@@ -218,6 +218,37 @@ it('keeps a healthy authorized session usable while foreground access renewal is
     additionalSockets: 0, additionalControlRequests: 0, additionalHistoryRequests: 0 });
 }, 10_000);
 
+it('keeps the live channel when the page returns after its local access lease ran out, holding input until the Relay confirms access', async () => {
+  const app = await fixture();
+  const counts = {
+    sockets: app.sockets.length, subscriptions: app.subscriptions().length,
+    control: app.commands('session_control_request').length, history: app.commands('timeline_request').length,
+  };
+  app.statuses.length = 0;
+  await app.visibilityChange('hidden');
+  // The browser held the page's timers past its copy of the lease, which another page kept renewing at the Relay.
+  vi.useFakeTimers({ toFake: ['Date'] });
+  vi.setSystemTime(Date.now() + 121_000);
+  try {
+    await app.visibilityChange('visible');
+    await app.waitFor(() => expect(app.renewals).toHaveLength(1));
+    let sent = false;
+    await act(async () => { void app.current().actions.sendMessage!('Typed on return').then(() => { sent = true; }); });
+    await act(async () => { await new Promise(resolve => setTimeout(resolve, 300)); });
+    expect(app.sendMessage).not.toHaveBeenCalled();
+    expect(app.view.textContent).not.toContain('Reconnecting');
+    await app.completeRenewals();
+    await app.waitFor(() => expect(sent).toBe(true));
+    expect(app.sendMessage).toHaveBeenCalledOnce();
+    expect(app.statuses).toEqual([]);
+    expect(app.current().status).toBe('ready');
+    expect({
+      sockets: app.sockets.length, subscriptions: app.subscriptions().length,
+      control: app.commands('session_control_request').length, history: app.commands('timeline_request').length,
+    }).toEqual(counts);
+  } finally { vi.useRealTimers(); }
+}, 15_000);
+
 it('replaces a silent dead foreground channel, recovers its cursor and does not replay an uncertain input', async () => {
   const app = await fixture();
   const socket = app.sockets[0]!;

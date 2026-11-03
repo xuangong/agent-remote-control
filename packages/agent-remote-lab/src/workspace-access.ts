@@ -55,7 +55,11 @@ export function claimAutomaticSignIn(): boolean {
   } catch { return false; }
 }
 
-type Gate = { ready: boolean; retired?: boolean; listeners: Set<() => void> };
+/**
+ * ready: access is confirmed. confirming: the local copy of the lease ran out and the Relay is being asked; live
+ * sockets stay open but hold what they send, and requests wait, until the answer.
+ */
+type Gate = { ready: boolean; confirming?: boolean; retired?: boolean; listeners: Set<() => void> };
 const gates = new Map<string, Gate>();
 function scopeFor(input: string): string {
   const url = new URL(input, globalThis.location?.origin ?? 'http://localhost');
@@ -66,8 +70,15 @@ export function setWorkspaceReady(basePath: string, ready: boolean): void {
   const scope = scopeFor(basePath);
   const gate = gates.get(scope) ?? { ready: false, listeners: new Set() };
   gates.set(scope, gate);
-  gate.ready = ready;
+  gate.ready = ready; gate.confirming = false;
   if (ready) gate.retired = false;
+  for (const listener of [...gate.listeners]) listener();
+}
+/** Holds the workspace's traffic, without closing its live sockets, while the Relay confirms access. */
+export function confirmWorkspaceAccess(basePath: string): void {
+  const gate = gates.get(scopeFor(basePath));
+  if (!gate?.ready || gate.confirming) return;
+  gate.confirming = true;
   for (const listener of [...gate.listeners]) listener();
 }
 export function retireWorkspace(basePath: string): void {
@@ -84,11 +95,11 @@ export const workspaceFetch: typeof fetch = async (input, init) => {
   const method = (init?.method ?? (input instanceof Request ? input.method : 'GET')).toUpperCase();
   const signal = init?.signal ?? (input instanceof Request ? input.signal : undefined);
   if (gate?.retired) throw new Error('Workspace access was retired.');
-  while (gate && !gate.ready) {
-    if (method !== 'GET' && method !== 'HEAD') throw new Error('Workspace access is restoring. Try again when connected.');
+  while (gate && (!gate.ready || gate.confirming)) {
+    if (!gate.ready && method !== 'GET' && method !== 'HEAD') throw new Error('Workspace access is restoring. Try again when connected.');
     await new Promise<void>((resolve, reject) => {
       const cleanup = () => { gate.listeners.delete(check); signal?.removeEventListener('abort', cancel); };
-      const check = () => { if (gate.retired) { cleanup(); reject(new Error('Workspace access was retired.')); return; } if (gate.ready) { cleanup(); resolve(); } };
+      const check = () => { if (gate.retired) { cleanup(); reject(new Error('Workspace access was retired.')); return; } if (gate.ready && !gate.confirming) { cleanup(); resolve(); } };
       const cancel = () => { cleanup(); reject(signal?.reason ?? new Error('Request cancelled.')); };
       gate.listeners.add(check); signal?.addEventListener('abort', cancel, { once: true });
       if (signal?.aborted) cancel(); else check();
@@ -98,28 +109,52 @@ export const workspaceFetch: typeof fetch = async (input, init) => {
   return globalThis.fetch(input, init);
 };
 
-/** A suspended workspace cannot open sockets or send stale commands during recovery. */
+/** Frames a socket may hold while access is confirmed; beyond them it closes and its owner reconnects. */
+const HELD_FRAMES = 256, HELD_BYTES = 4 * 1024 * 1024;
+/**
+ * A suspended workspace cannot open sockets or send stale commands during recovery. While access is only being
+ * confirmed, a live socket stays open and sends what it held once the Relay confirms access.
+ */
 export function workspaceSocket(url: string) {
   const gate = gateFor(url);
   let socket: WebSocket | undefined;
   let closed = false;
+  let held: string[] = [], heldBytes = 0;
+  const end = (reason: string) => { wrapper.close(); wrapper.onclose?.({ code: 1000, reason }); };
   const wrapper = {
     get readyState() { return closed ? 3 : socket?.readyState ?? 0; },
     onopen: null as ((event: unknown) => void) | null,
     onmessage: null as ((event: { data: unknown }) => void) | null,
     onerror: null as ((event: unknown) => void) | null,
     onclose: null as ((event: unknown) => void) | null,
-    send(data: string) { if (closed || (gate && !gate.ready) || socket?.readyState !== 1) throw new Error('Workspace access is restoring.'); socket.send(data); },
-    close() { closed = true; gate?.listeners.delete(update); socket?.close(); },
+    send(data: string) {
+      if (closed || (gate && !gate.ready) || socket?.readyState !== 1) throw new Error('Workspace access is restoring.');
+      if (gate?.confirming || held.length) {
+        held.push(data); heldBytes += data.length;
+        if (held.length > HELD_FRAMES || heldBytes > HELD_BYTES) { end('Access confirmation took too long'); throw new Error('Workspace access is restoring.'); }
+        return;
+      }
+      socket.send(data);
+    },
+    close() { closed = true; held = []; heldBytes = 0; gate?.listeners.delete(update); socket?.close(); },
   };
   const update = () => {
     if (closed) return;
-    if (gate?.retired) { wrapper.close(); wrapper.onclose?.({ code: 1000, reason: 'Access retired' }); return; }
+    if (gate?.retired) { end('Access retired'); return; }
     if (gate && !gate.ready) {
-      if (socket) { wrapper.close(); wrapper.onclose?.({ code: 1000, reason: 'Access restoring' }); }
+      if (socket) end('Access restoring');
       return;
     }
-    if (socket) return;
+    if (gate?.confirming) return;
+    if (socket) {
+      // Access is confirmed: what was held goes out in order.
+      const frames = held; held = []; heldBytes = 0;
+      for (const frame of frames) {
+        if (closed || socket.readyState !== 1) return;
+        socket.send(frame);
+      }
+      return;
+    }
     socket = new WebSocket(url);
     socket.onopen = event => { if (!closed) wrapper.onopen?.(event); };
     socket.onmessage = event => { if (!closed) wrapper.onmessage?.(event); };

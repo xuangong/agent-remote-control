@@ -49,26 +49,87 @@ it.each<ResumeEvent>(['visibility', 'pageshow', 'online'])('keeps confirmed acce
   socket.close();
 });
 
-it('closes an expired socket before foreground listeners can send while renewal is pending', async () => {
+it('keeps a live socket open when the local lease ran out, holding what it sends until the Relay confirms access', async () => {
   const sockets = nativeSockets();
   let finish!: (response: Response) => void;
   vi.stubGlobal('fetch', vi.fn().mockResolvedValueOnce(Response.json(access()))
     .mockImplementation(() => new Promise<Response>(resolve => { finish = resolve; })));
   const view = await render(<GatewayController>{(_url, _account, ready) => <input aria-label={ready ? 'Live draft' : 'Cached draft'} />}</GatewayController>);
+  const draft = view.querySelector('input');
   const socket = workspaceSocket(new URL(basePath + 'v1/session-channel', location.origin).href);
   await Promise.resolve();
-  const send = vi.fn(() => { expect(() => socket.send('expired command')).toThrow(/access|restoring/i); });
+  // Foreground listeners may send at once; nothing reaches the Relay before it confirms access.
+  const errors: unknown[] = [];
+  const send = vi.fn(() => { try { socket.send('held command'); } catch (error) { errors.push(error); } });
   window.addEventListener('online', send);
   try {
     vi.setSystemTime(Date.now() + 120_001);
     await act(async () => resume('online'));
     expect(send).toHaveBeenCalledOnce();
-    expect(sockets[0]!.close).toHaveBeenCalledOnce();
-    expect(view.querySelector('input')?.getAttribute('aria-label')).toBe('Cached draft');
-    await expect(workspaceFetch(new URL(basePath + 'v1/command', location.origin), { method: 'POST' })).rejects.toThrow(/restoring/i);
+    expect(errors).toEqual([]);
+    expect(sockets[0]!.close).not.toHaveBeenCalled();
+    expect(sockets[0]!.send).not.toHaveBeenCalled();
+    expect(view.querySelector('input')).toBe(draft);
+    expect(draft?.getAttribute('aria-label')).toBe('Live draft');
+    const commands = () => vi.mocked(fetch).mock.calls.filter(([url]) => String(url).endsWith('v1/command')).length;
+    void workspaceFetch(new URL(basePath + 'v1/command', location.origin), { method: 'POST' }).catch(() => undefined);
+    await Promise.resolve();
+    expect(commands()).toBe(0);
     await act(async () => finish(Response.json(access())));
-    expect(view.querySelector('input')?.getAttribute('aria-label')).toBe('Live draft');
+    expect(commands()).toBe(1);
+    expect(sockets[0]!.send).toHaveBeenCalledWith('held command');
+    expect(sockets).toHaveLength(1);
+    socket.send('sent directly');
+    expect(sockets[0]!.send).toHaveBeenLastCalledWith('sent directly');
   } finally { window.removeEventListener('online', send); socket.close(); }
+});
+
+it('closes a socket and drops what it held when the Relay cannot confirm an expired lease', async () => {
+  const sockets = nativeSockets();
+  let fail!: () => void;
+  vi.stubGlobal('fetch', vi.fn().mockResolvedValueOnce(Response.json(access()))
+    .mockImplementation(() => new Promise<Response>((_resolve, reject) => { fail = () => reject(new TypeError('Network request failed')); })));
+  const view = await render(<GatewayController>{(_url, _account, ready) => <input aria-label={ready ? 'Live draft' : 'Cached draft'} />}</GatewayController>);
+  const socket = workspaceSocket(new URL(basePath + 'v1/session-channel', location.origin).href);
+  const closed = vi.fn(); socket.onclose = closed;
+  await Promise.resolve();
+  vi.setSystemTime(Date.now() + 120_001);
+  await act(async () => resume('visibility'));
+  socket.send('held command');
+  await act(async () => fail());
+  expect(sockets[0]!.close).toHaveBeenCalledOnce();
+  expect(sockets[0]!.send).not.toHaveBeenCalled();
+  expect(closed).toHaveBeenCalledWith(expect.objectContaining({ reason: 'Access restoring' }));
+  expect(view.querySelector('input')?.getAttribute('aria-label')).toBe('Cached draft');
+  await expect(workspaceFetch(new URL(basePath + 'v1/command', location.origin), { method: 'POST' })).rejects.toThrow(/restoring/i);
+});
+
+it('confirms access at local expiry without closing a hidden page\'s live socket', async () => {
+  const sockets = nativeSockets();
+  const requests: string[] = [];
+  let finish!: (response: Response) => void;
+  vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+    requests.push(url);
+    if (requests.length === 1) return Response.json(access());
+    return new Promise<Response>(resolve => { finish = resolve; });
+  }));
+  vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('hidden');
+  const view = await render(<GatewayController>{(_url, _account, ready) => <input aria-label={ready ? 'Live draft' : 'Cached draft'} />}</GatewayController>);
+  const socket = workspaceSocket(new URL(basePath + 'v1/session-channel', location.origin).href);
+  await Promise.resolve();
+  // A hidden page renews at a third of the remaining lease, so a delayed timer still renews in time.
+  await act(async () => { await vi.advanceTimersByTimeAsync(40_000); });
+  expect(requests).toEqual(['/auth/status', '/auth/refresh']);
+  // Its timers fired late: the lease ran out while the renewal is still in flight.
+  vi.setSystemTime(Date.now() + 80_001);
+  await act(async () => { await vi.advanceTimersByTimeAsync(1); });
+  expect(sockets[0]!.close).not.toHaveBeenCalled();
+  expect(view.querySelector('input')?.getAttribute('aria-label')).toBe('Live draft');
+  await act(async () => finish(Response.json(access())));
+  expect(sockets[0]!.close).not.toHaveBeenCalled();
+  expect(() => socket.send('still live')).not.toThrow();
+  expect(sockets[0]!.send).toHaveBeenCalledWith('still live');
+  socket.close();
 });
 
 it('replaces a frozen renewal without interrupting still valid access or accepting its late response', async () => {

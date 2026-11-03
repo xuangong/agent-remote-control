@@ -2,7 +2,7 @@ import { expect, it } from 'vitest';
 import type { Team, TeamSeat } from '@orchardworks/agent-remote-protocol';
 import { TeamBroker } from './teams.js';
 import { createHostBroker } from './broker.js';
-import { validSavedTeam, deliveryFingerprint, trimTeamDeliveryReceipts, teamMessageBudgetBytes, type SavedTeam } from './team-delivery.js';
+import { validSavedTeam, deliveryFingerprint, trimTeamDeliveryReceipts, teamMessageBudgetBytes, TEAM_RECORD_BYTES, type SavedTeam } from './team-delivery.js';
 import { isTeam } from '@orchardworks/agent-remote-protocol';
 import { PortableTeamResourceStore, type TeamResourceStorage } from './team-resources.js';
 import { createHash } from 'node:crypto';
@@ -217,25 +217,34 @@ it('compacts old settled bodies on broker restore before any client or Host requ
 });
 
 
-it('evicts retry receipts under shared storage pressure without discarding queued work',async()=>{
+it('evicts a Team\'s oldest retry receipts when it reaches its bound, without discarding queued work',async()=>{
   const {broker:mailbox,team,leader,worker,snapshot}=await group();
   const sent=await mailbox.hostCall('mac',{action:'send',teamId:team.id,memberId:leader.id,to:worker.id,operationId:'failure',text:'Inspect'}) as {id:string};
   const target={teamId:team.id,memberId:worker.id,messageId:sent.id};
   await mailbox.hostCall('win',{action:'claim',...target});
   await mailbox.hostCall('win',{action:'settle',...target,outcome:'rejected',error:'e'.repeat(2000)});
-  const teams=Array.from({length:32},(_,i)=>({...structuredClone(snapshot()[0]!),id:`team-${i}`,messages:Array.from({length:4},(_,j)=>({id:`pending-${j}`,from:leader.id,to:worker.id,text:'x',status:'queued' as const,createdAt:1}))}));
-  const maximum=2*1024*1024;
-  let remaining=maximum-32-Buffer.byteLength(JSON.stringify(teams));
-  for(const team of teams)for(const message of team.messages){const extra=Math.min(15999,remaining);message.text+='x'.repeat(extra);remaining-=extra;}
-  expect(remaining).toBe(0);
-  const broker=createHostBroker({origin:'https://relay.example',now:()=>1000,initialState:{keys:[],hosts:[{id:'mac',installationId:'mac',name:'Mac',providers:[{providerId:'codex',displayName:'Codex'}],legacyDsh:false}],bindings:[],creations:[],teams}});
+  const padded:SavedTeam={...structuredClone(snapshot()[0]!),messages:Array.from({length:4},(_,j)=>({id:`pending-${j}`,from:leader.id,to:worker.id,text:'x',status:'queued' as const,createdAt:1})),resourceUploads:[],resourceGrants:[]};
+  expect(padded.deliveryReceipts).toHaveLength(1);
+  // Uploads shared with every member bring the Team within 100 bytes of its bound.
+  const reserved=Array.from({length:10},(_,index)=>({...structuredClone(worker),id:`${index}-`.padEnd(200,'m'),creation:'reserved' as const}));
+  for(const member of reserved)delete member.nativeSessionId;
+  padded.members.push(...reserved);
+  const memberIds=padded.members.map(member=>member.id);
+  for(let index=0;Buffer.byteLength(JSON.stringify(padded))<TEAM_RECORD_BYTES-4000;index++){
+    const resourceId=`${index}-`.padEnd(200,'r');
+    padded.resourceUploads!.push({ownerMemberId:leader.id,expiresAt:Number.MAX_SAFE_INTEGER,resource:{resourceId,name:'n'.repeat(250),mediaType:'text/plain',byteLength:1,sha256:'a'.repeat(64)}});
+    padded.resourceGrants!.push({resourceId,memberIds});
+  }
+  padded.messages[0]!.text+='x'.repeat(TEAM_RECORD_BYTES-100-Buffer.byteLength(JSON.stringify(padded)));
+  expect(validSavedTeam(padded)).toBe(true);
+  const broker=createHostBroker({origin:'https://relay.example',now:()=>1000,initialState:{keys:[],hosts:[{id:'mac',installationId:'mac',name:'Mac',providers:[{providerId:'codex',displayName:'Codex'}],legacyDsh:false}],bindings:[],creations:[],teams:[padded]}});
   try {
-    const response=await broker.handleRequest(new Request('https://relay.example/v1/remote/teams/action',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({action:'rename',teamId:'team-0',title:'n'.repeat(256)})}));
+    const response=await broker.handleRequest(new Request('https://relay.example/v1/remote/teams/action',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({action:'rename',teamId:team.id,title:'n'.repeat(256)})}));
     expect(response?.status).toBe(200);
-    const stored=broker.snapshot().teams!;
-    expect(Buffer.byteLength(JSON.stringify(stored))).toBeLessThanOrEqual(maximum);
-    expect(stored.reduce((count,team)=>count+team.messages.length,0)).toBe(128);
-    expect(stored.reduce((count,team)=>count+(team.deliveryReceipts?.length??0),0)).toBeLessThan(32);
+    const stored=broker.snapshot().teams![0]!;
+    expect(Buffer.byteLength(JSON.stringify(stored))).toBeLessThanOrEqual(TEAM_RECORD_BYTES);
+    expect(stored.messages).toHaveLength(4);
+    expect(stored.deliveryReceipts).toBeUndefined();
   } finally { await broker.close(); }
 });
 
@@ -348,7 +357,7 @@ it('retains legacy compact uncertainty through expiry, count and shared storage 
   const saved = f.snapshot();
   expect(saved[0]!.deliveryReceipts!.find(item => item.id === receipt.id)).toEqual(receipt);
   expect(saved[0]!.deliveryReceipts!.length).toBeLessThan(200);
-  trimTeamDeliveryReceipts(saved, 1);
+  trimTeamDeliveryReceipts(saved[0]!, 1);
   expect(saved[0]!.deliveryReceipts).toEqual([receipt]);
   expect(validSavedTeam(saved[0])).toBe(true);
   expect(JSON.stringify(saved)).not.toContain('Original private body');

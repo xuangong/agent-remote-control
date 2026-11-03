@@ -254,6 +254,13 @@ cannot certify Workers behavior, and neither can certify provider-native SDKs.
   snapshot. Each record cache is checked against a complete encoding every 500
   commits; a difference is logged as `relay_state_cache_mismatch` and the
   complete encoding is used.
+- Every part of the Relay state has a bound of its own: counts for sessions,
+  credentials, Hosts, bindings, stars and the like, and for Teams their number
+  (1,024 per account) and size (2 MiB each). Team changes may also not grow the
+  whole state beyond 16 MiB of encoded records (`RELAY_STATE_BYTES`), which the
+  runtime holds about three times over in memory; above 12 MiB they remove the
+  account's idle support groups. The bound is shared: one account's Teams can
+  leave others less room, until accounts move to their own objects.
 - The Worker log (`wrangler tail`) receives one `relay_state_commits` line per
   minute with commits: their number, the snapshot's records and bytes, the
   records encoded and written, and durations; the first line also reports what

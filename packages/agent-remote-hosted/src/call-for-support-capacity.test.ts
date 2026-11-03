@@ -3,10 +3,10 @@ import { once } from 'node:events';
 import { afterEach, expect, test } from 'vitest';
 import { WebSocket, WebSocketServer } from 'ws';
 import { CALL_FOR_SUPPORT_GROUP_BYTES, type TeamHostCall } from '@orchardworks/agent-remote-protocol';
-import { CALL_FOR_SUPPORT_RECENT_MS, CALL_FOR_SUPPORT_RETENTION_BYTES } from './call-for-support.js';
+import { CALL_FOR_SUPPORT_RECENT_MS } from './call-for-support.js';
 import { relaySocket } from '../../agent-remote-lab/src/server/remote-host-broker.js';
 import { createHostBroker, type RemoteHostBrokerState } from './broker.js';
-import { validSavedTeam, type SavedTeam } from './team-delivery.js';
+import { TEAM_RECORD_BYTES, validSavedTeam, type SavedTeam } from './team-delivery.js';
 
 const close: Array<() => Promise<void>> = [];
 afterEach(async () => { for (const dispose of close.splice(0).reverse()) await dispose(); }, 5000);
@@ -27,7 +27,7 @@ function fullGroup(id: string, plain = false): SavedTeam {
   return team;
 }
 
-async function connectedBroker(teams: SavedTeam[], query: string, now = 100) {
+async function connectedBroker(teams: SavedTeam[], query: string, now = 100, stateRoom?: () => { growth: number; retention: number }) {
   const installationId = 'controller';
   let saved: RemoteHostBrokerState = {
     keys: [[createHash('sha256').update('key').digest('hex'), { kind: 'device', installationId, expires: Number.MAX_SAFE_INTEGER }]],
@@ -37,7 +37,7 @@ async function connectedBroker(teams: SavedTeam[], query: string, now = 100) {
   const server = new WebSocketServer({ host: '127.0.0.1', port: 0 });
   await once(server, 'listening', { signal: AbortSignal.timeout(3000) });
   const origin = `http://127.0.0.1:${(server.address() as { port: number }).port}`;
-  const broker = createHostBroker({ origin, initialState: saved, now: () => now, onStateChange(state) { saved = structuredClone(state); } });
+  const broker = createHostBroker({ origin, initialState: saved, now: () => now, ...(stateRoom ? { stateRoom } : {}), onStateChange(state) { saved = structuredClone(state); } });
   server.on('connection', (socket, request) => {
     void broker.prepareUpgrade(new Request(origin + request.url, { headers: { authorization: 'Bearer key' } })).then(upgrade => {
       if (!upgrade || upgrade instanceof Response) socket.close();
@@ -75,28 +75,47 @@ test('hides groups from Controllers that do not run them and serves them to thos
   expect((await current.call({ action: 'poll' })).value.map((team: { id: string }) => team.id).sort()).toEqual(['group', 'plain']);
 });
 
-test('keeps the account\'s Team state bound with full groups and leaves it unchanged when a change would exceed it', async () => {
-  const one = fullGroup('probe');
-  expect(Buffer.byteLength(JSON.stringify(one.callForSupport))).toBeLessThanOrEqual(CALL_FOR_SUPPORT_GROUP_BYTES);
-  const teams: SavedTeam[] = [];
-  while (Buffer.byteLength(JSON.stringify([...teams, fullGroup(`group-${teams.length}`)])) <= 2 * 1024 * 1024) teams.push(fullGroup(`group-${teams.length}`));
-  expect(teams.length).toBeGreaterThanOrEqual(24);
-  // Pad with an ordinary Team's pending messages to 100 bytes under the bound; then writing 200 more ledger characters crosses it.
-  teams[0]!.callForSupport!.ledger.text = 'l'.repeat(15800);
-  const padding = fullGroup('padding', true); teams.push(padding);
-  const message = (index: number, length: number) => ({ id: `pad-${index}`, from: 'coordinator', to: 'helper', text: 'x'.repeat(length), status: 'queued' as const, createdAt: 1 });
-  for (let index = 0; ; index++) {
-    const spare = 2 * 1024 * 1024 - 100 - Buffer.byteLength(JSON.stringify(teams)) - Buffer.byteLength(JSON.stringify(message(index, 0))) - 1;
-    if (spare <= 0) break;
-    padding.messages.push(message(index, Math.min(16000, spare)));
+/** An ordinary Team whose resource grants bring it within reach of its own bound. */
+function largeTeam(id: string, bytes: number): SavedTeam {
+  const team = fullGroup(id, true), ids = Array.from({ length: 12 }, (_, index) => `${index}-`.padEnd(200, 'm'));
+  team.members = ids.map((memberId, index) => ({ ...team.members[0]!, id: memberId, role: index ? 'member' as const : 'leader' as const, name: `member ${index}`, nativeSessionId: `${id}-${index}` }));
+  team.resourceUploads = []; team.resourceGrants = [];
+  for (let index = 0; Buffer.byteLength(JSON.stringify(team)) < bytes - 8000; index++) {
+    const resourceId = `${index}-`.padEnd(200, 'r');
+    team.resourceUploads.push({ ownerMemberId: ids[0]!, expiresAt: Number.MAX_SAFE_INTEGER, resource: { resourceId, name: 'n'.repeat(250), mediaType: 'text/plain', byteLength: 1, sha256: 'a'.repeat(64) } });
+    team.resourceGrants.push({ resourceId, memberIds: ids });
   }
-  expect(2 * 1024 * 1024 - Buffer.byteLength(JSON.stringify(teams))).toBeGreaterThan(0);
-  expect(2 * 1024 * 1024 - Buffer.byteLength(JSON.stringify(teams))).toBeLessThan(200);
+  // Responsibilities fill the rest, to 2000 bytes under the requested size.
+  for (const member of team.members) {
+    const missing = bytes - 2000 - Buffer.byteLength(JSON.stringify(team));
+    if (missing <= 0) break;
+    member.responsibility = 'x'.repeat(Math.min(2048, missing));
+  }
+  return team;
+}
+
+test('lets an account\'s Teams exceed what one Team may hold, while no change grows a Team beyond its own bound', async () => {
+  const teams: SavedTeam[] = [];
+  while (Buffer.byteLength(JSON.stringify(teams)) <= 3 * 1024 * 1024) teams.push(fullGroup(`group-${teams.length}`));
+  const large = largeTeam('large', TEAM_RECORD_BYTES); teams.push(large);
+  expect(teams.every(validSavedTeam)).toBe(true);
+  expect(TEAM_RECORD_BYTES - Buffer.byteLength(JSON.stringify(large))).toBe(2000);
   const f = await connectedBroker(teams, capable);
-  const result = await f.call({ action: 'write_ledger', teamId: 'group-0', memberId: 'coordinator', revision: 1, text: 'l'.repeat(16000) });
-  expect(result).toMatchObject({ status: 409, value: { error: expect.stringContaining('storage capacity') } });
-  expect(f.snapshot()[0]!.callForSupport!.ledger.revision).toBe(1);
-  expect((await f.call({ action: 'write_ledger', teamId: 'group-0', memberId: 'coordinator', revision: 1, text: 'short' })).value).toEqual({ revision: 2 });
+  expect((await f.call({ action: 'write_ledger', teamId: 'group-0', memberId: 'coordinator', revision: 1, text: 'l'.repeat(16000) })).value).toEqual({ revision: 2 });
+  const leader = large.members[0]!.id;
+  expect(await f.call({ action: 'report', teamId: 'large', memberId: leader, summary: 's'.repeat(2048) })).toMatchObject({ status: 409, value: { error: expect.stringContaining('storage capacity') } });
+  expect(f.snapshot().find(team => team.id === 'large')!.members[0]!.summary).toBe('');
+  expect((await f.call({ action: 'report', teamId: 'large', memberId: leader, summary: 'Checked.' })).status).toBe(200);
+  expect(Buffer.byteLength(JSON.stringify(f.snapshot()))).toBeGreaterThan(5 * 1024 * 1024);
+}, 15000);
+
+test('a Team already over its bound may still shrink, but not grow', async () => {
+  const large = largeTeam('large', TEAM_RECORD_BYTES + 4000);
+  large.members[0]!.summary = 's'.repeat(2048);
+  expect(Buffer.byteLength(JSON.stringify(large))).toBeGreaterThan(TEAM_RECORD_BYTES);
+  const f = await connectedBroker([large], capable), leader = large.members[0]!.id;
+  expect((await f.call({ action: 'report', teamId: 'large', memberId: leader, summary: 'Shorter.' })).status).toBe(200);
+  expect(await f.call({ action: 'report', teamId: 'large', memberId: leader, summary: 's'.repeat(2048) })).toMatchObject({ status: 409, value: { error: expect.stringContaining('storage capacity') } });
 }, 15000);
 
 test('takes read-only providers from the Call For Support request, not from provider descriptors', async () => {
@@ -108,30 +127,36 @@ test('takes read-only providers from the Call For Support request, not from prov
   expect(await propose(await connectedBroker([structuredClone(team)], `${capable}&readOnlyProvider=codex`))).toMatchObject({ status: 200 });
 });
 
-test('removes the oldest archived groups when Team state nears its bound, so active Teams keep growing', async () => {
-  const teams: SavedTeam[] = [];
-  while (Buffer.byteLength(JSON.stringify([...teams, fullGroup(`group-${teams.length}`)])) <= 2 * 1024 * 1024 - 64 * 1024) teams.push(fullGroup(`group-${teams.length}`));
+test('removes the oldest archived groups while the Relay is above what it retains, which also makes room at its bound', async () => {
+  const teams = Array.from({ length: 20 }, (_, index) => fullGroup(`group-${index}`));
   // All but the first group are archived history, oldest first.
   teams.forEach((team, index) => { if (index) Object.assign(team, { status: 'archived', updatedAt: index }); });
   teams[0]!.callForSupport!.ledger.text = 'short';
-  // An ordinary Team's pending messages bring the state within 1000 bytes of the bound; it is never removed.
   const plain = fullGroup('plain', true); teams.push(plain);
-  const message = (index: number, length: number) => ({ id: `pad-${index}`, from: 'coordinator', to: 'helper', text: 'x'.repeat(length), status: 'queued' as const, createdAt: 1 });
-  for (let index = 0; ; index++) {
-    const spare = 2 * 1024 * 1024 - 1000 - Buffer.byteLength(JSON.stringify(teams)) - Buffer.byteLength(JSON.stringify(message(index, 0))) - 1;
-    if (spare <= 0) break;
-    plain.messages.push(message(index, Math.min(16000, spare)));
-  }
-  // Without removing archived groups, a full ledger would cross the bound.
-  expect(Buffer.byteLength(JSON.stringify(teams))).toBeLessThanOrEqual(2 * 1024 * 1024);
-  expect(Buffer.byteLength(JSON.stringify(teams)) + 16000).toBeGreaterThan(2 * 1024 * 1024);
+  const group = Buffer.byteLength(JSON.stringify(teams[1]));
+  // The Relay is two groups over what it retains, and can still grow by two groups.
+  let room = { growth: 2 * group, retention: -2 * group };
   // The groups' last calls were reported long ago, so none is protected as recently used.
-  const f = await connectedBroker(teams, capable, 2 * CALL_FOR_SUPPORT_RECENT_MS);
-  expect((await f.call({ action: 'write_ledger', teamId: 'group-0', memberId: 'coordinator', revision: 1, text: 'l'.repeat(16000) })).value).toEqual({ revision: 2 });
-  const kept = f.snapshot();
-  expect(Buffer.byteLength(JSON.stringify(kept))).toBeLessThanOrEqual(CALL_FOR_SUPPORT_RETENTION_BYTES);
-  expect(kept.map(team => team.id)).toEqual(expect.arrayContaining(['group-0', 'plain', `group-${teams.length - 2}`]));
-  expect(kept.some(team => team.id === 'group-1')).toBe(false);
+  const f = await connectedBroker(teams, capable, 2 * CALL_FOR_SUPPORT_RECENT_MS, () => room);
+  expect((await f.call({ action: 'write_ledger', teamId: 'group-0', memberId: 'coordinator', revision: 1, text: 'l'.repeat(15000) })).value).toEqual({ revision: 2 });
+  const kept = () => f.snapshot().map(team => team.id);
+  expect(kept()).toEqual(expect.arrayContaining(['group-0', 'plain', 'group-19']));
+  expect(kept().filter(id => ['group-1', 'group-2', 'group-3'].includes(id))).toEqual([]);
+  expect(kept()).toHaveLength(teams.length - 3);
+  // At its bound, a change that grows the account's Teams removes the next oldest group to make room for it.
+  room = { growth: 0, retention: 0 };
+  expect((await f.call({ action: 'write_ledger', teamId: 'group-0', memberId: 'coordinator', revision: 2, text: 'l'.repeat(16000) })).value).toEqual({ revision: 3 });
+  expect(kept()).not.toContain('group-4');
+  expect(kept()).toHaveLength(teams.length - 4);
+}, 15000);
+
+test('refuses a change that would grow the Relay beyond its bound, and still applies one that shrinks a Team', async () => {
+  const team = fullGroup('plain', true); team.members[0]!.summary = 'Reviewed the storage layer.';
+  const f = await connectedBroker([team], capable, 100, () => ({ growth: 0, retention: 0 }));
+  expect(await f.call({ action: 'report', teamId: 'plain', memberId: 'coordinator', summary: 'Reviewed the storage layer and its tests.' }))
+    .toMatchObject({ status: 409, value: { error: expect.stringContaining('storage capacity') } });
+  expect(f.snapshot()[0]!.members[0]!.summary).toBe('Reviewed the storage layer.');
+  expect((await f.call({ action: 'report', teamId: 'plain', memberId: 'coordinator', summary: 'Done.' })).status).toBe(200);
 }, 15000);
 
 test('deletes an archived support group through the Team route', async () => {

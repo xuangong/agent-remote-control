@@ -1,6 +1,6 @@
 # Incremental Relay state commits
 
-Status: proposed on 2026-11-03, after Teams moved to their own records (snapshot format 4, `306fc4cc`). Phases 0 to 2 implemented on 2026-11-03 with Immer; see [Implementation](#implementation). Phase 3 remains.
+Status: proposed on 2026-11-03, after Teams moved to their own records (snapshot format 4, `306fc4cc`). Phases 0 to 2 implemented and deployed on 2026-11-03 with Immer (`6a4c128b`), phase 3 the same day; see [Implementation](#implementation).
 
 ## Problem
 
@@ -139,3 +139,10 @@ What was built differs from the design above where noted.
 
 The first commit after a start serializes every record once to compare it with the stored encodings (21 ms on L, 24 ms on O), since the state decoded at start is not yet the frozen state.
 A change to a record's membership in a Relay-wide collection (a new session, consumed proof, security event, star, title or migration) re-encodes the Relay header, which lists all of them: about 20 ms on O, whose header carries a 1 MiB test field. The cost of such changes therefore still grows with those collections; it is small at today's sizes and the phase 0 log will show production's.
+
+**Phase 3.**
+- Each Team is at most 2 MiB (`TEAM_RECORD_BYTES`), the bound the account's whole Team state had, so no Team has less room than before. A Team over it first loses its oldest settled receipts; a change that would still grow it is refused, and one that shrinks it applies, so a Team already over the bound can be cleaned up.
+- The account's 2 MiB bound is gone. The count of 1,024 Teams per account stays.
+- The guard on the whole Relay applies to Team changes, the only part of the state the account bound used to limit; every other part is bounded by counts, and refusing a session renewal or a sign-in because Teams filled the Relay would be worse than the growth. A Team change may not grow the account's Teams by more than the room left under 16 MiB of encoded records (`RELAY_STATE_BYTES`). Measured on Node, a 15 MB snapshot took 30 MB of heap (the copy the store loaded and the current objects) besides its 15 MB of cached encodings, so the bound stays well inside the Durable Object's 128 MB. Production held 420 KB when this was set.
+- Support groups are removed to protect that guard: on an account's Team change while the Relay is above three quarters of the bound, by the existing order (archived first, then idle, least recently used, never one used within the hour). Archiving after a week idle and removal at the 1,024-Team limit stay.
+- The bound is shared by all accounts: one account's Teams can leave the others less room. Isolating accounts needs one Durable Object per account, a separate design.

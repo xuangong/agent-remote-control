@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
 import { TEAM_DELIVERY_RECEIPT_LIMIT, isTeam, type Team, type TeamMessage } from '@orchardworks/agent-remote-protocol';
+import { plain } from './drafts.js';
 
 type DeliveryReceipt = Omit<TeamMessage, 'text' | 'resources'> & { fingerprint: string; settledAt: number };
 type ResourceGrant = { resourceId: string; memberIds: string[] };
@@ -11,11 +12,14 @@ export interface SavedTeam extends Omit<Team, 'unresolvedReceipts'> {
   resourceGrants?: ResourceGrant[];
 }
 
-/**
- * Teams an account may hold. Each is stored as its own record, and a commit encodes only the Teams it changed;
- * the account's Team state stays within 2 MiB.
- */
+/** Teams an account may hold. Each is stored as its own record, and a commit encodes only the Teams it changed. */
 export const ACCOUNT_TEAM_LIMIT = 1024;
+/**
+ * Bytes of one Team's record. Its parts have their own bounds (128 KiB of message input, 64 KiB of a support group,
+ * 32 KiB of receipts); this one bounds the rest, such as delivery evidence and uploads, as the account's Team state did
+ * before each Team had its own record, so no Team has less room than it had then.
+ */
+export const TEAM_RECORD_BYTES = 2 * 1024 * 1024;
 const receiptLifetimeMs = 24 * 60 * 60 * 1000;
 const receiptCount = TEAM_DELIVERY_RECEIPT_LIMIT;
 const receiptBytes = 32 * 1024;
@@ -67,18 +71,23 @@ export function compactTeamDeliveries(team: SavedTeam, now: number): void {
   else delete team.deliveryReceipts;
 }
 
-/** Settled retry evidence is expendable; legacy unresolved effects remain authoritative. */
-export function trimTeamDeliveryReceipts(teams: SavedTeam[], maximumStateBytes: number, stateBytes = Buffer.byteLength(JSON.stringify(teams))): void {
-  let excess = stateBytes - maximumStateBytes;
+/**
+ * Settled retry evidence is expendable; legacy unresolved effects remain authoritative. Drops the Team's oldest settled
+ * receipts until it is within maximumBytes, or none is left to drop.
+ */
+export function trimTeamDeliveryReceipts(team: SavedTeam, maximumBytes: number, bytes = Buffer.byteLength(JSON.stringify(team))): void {
+  let excess = bytes - maximumBytes;
   if (excess <= 0) return;
-  const oldest = teams.flatMap(team => (team.deliveryReceipts ?? []).filter(receipt => !unresolvedTeamDelivery(receipt)).map(receipt => ({ team, receipt })))
-    .sort((a, b) => a.receipt.settledAt - b.receipt.settledAt);
-  for (const { team, receipt } of oldest) {
-    team.deliveryReceipts = team.deliveryReceipts!.filter(item => item !== receipt);
-    excess -= Buffer.byteLength(JSON.stringify(receipt)) + 1;
-    if (!team.deliveryReceipts.length) delete team.deliveryReceipts;
+  // Read the plain receipts: team may be a draft.
+  const receipts = plain(team).deliveryReceipts ?? [], dropped = new Set<DeliveryReceipt>();
+  for (const receipt of receipts.filter(receipt => !unresolvedTeamDelivery(receipt)).sort((a, b) => a.settledAt - b.settledAt)) {
     if (excess <= 0) break;
+    dropped.add(receipt); excess -= Buffer.byteLength(JSON.stringify(receipt)) + 1;
   }
+  if (!dropped.size) return;
+  const kept = receipts.filter(receipt => !dropped.has(receipt));
+  if (kept.length) team.deliveryReceipts = kept;
+  else delete team.deliveryReceipts;
 }
 
 /** Bytes of a frozen value, which never changes. */
@@ -91,6 +100,8 @@ function frozenBytes(value: object): number {
   }
   return bytes;
 }
+/** Buffer.byteLength(JSON.stringify(team)), measured once for a frozen Team. */
+export const teamBytes = (team: SavedTeam) => frozenBytes(team);
 /** Buffer.byteLength(JSON.stringify(teams)), measuring only the Teams not measured before. */
 export function teamStateBytes(teams: readonly SavedTeam[]): number {
   let bytes = 2 + Math.max(0, teams.length - 1);

@@ -1,4 +1,5 @@
 import { createWindowWorkspaces } from './window-workspaces.js';
+import { HostedRecordCache, measureHostedSnapshot } from './record-codec.js';
 import { committed } from './drafts.js';
 import { handleWindowRequest } from './window-routes.js';
 import { projectSuccessionFavorites } from './favorites-succession.js';
@@ -68,7 +69,17 @@ export type HostedRelayOptions = HostedAuthOptions & {
   authorityOutageGraceMs?: number;
   /** Operator diagnostics of each Relay state commit; no account or content data. */
   onStateCommit?(metrics: RelayStateCommitMetrics): void;
+  /** Encoded bytes of the Relay state that Team changes may not grow beyond. Defaults to RELAY_STATE_BYTES with storage. */
+  maximumStateBytes?: number;
 }
+/**
+ * The Relay state Team changes may grow to, in encoded bytes. Its other parts are bounded by their counts; Teams by their
+ * number and each Team's own bound, which together allow far more. The runtime holds the state about three times over
+ * (the copy it loaded, the current objects and their encodings), so this stays well inside a Durable Object's 128 MB.
+ */
+export const RELAY_STATE_BYTES = 16 * 1024 * 1024;
+/** Above this share of the bound, a Team change removes the account's idle support groups to make room. */
+const RETAINED_STATE = 0.75;
 type Tenant = { subject: string; namespace: string; authorityUntil: number; authorityRefreshAt: number; authorityDenied: boolean; authorityConfirmedAt?: number;
   checking?: Promise<'active' | 'denied' | 'unavailable'>; broker: ReturnType<typeof createHostBroker>; expiresAt: number };
 export function createHostedRelay(options: HostedRelayOptions) {
@@ -92,6 +103,16 @@ export function createHostedRelay(options: HostedRelayOptions) {
   let scheduling: Promise<unknown> = Promise.resolve();
   let renewalAt = Date.now() + 60_000;
   const state = createRelayState(auth, options.storage, failClosed, published, options.successionEncodingCosts, options.onStateCommit);
+  const maximumStateBytes = options.maximumStateBytes ?? (options.storage ? RELAY_STATE_BYTES : undefined);
+  if (maximumStateBytes !== undefined && (!Number.isSafeInteger(maximumStateBytes) || maximumStateBytes < 1)) throw new Error('Relay state bound must be a positive integer.');
+  // The committed state's encoded bytes; accounting has just measured it, so this reuses its encodings.
+  const stateCache = new HostedRecordCache();
+  const stateBytes = () => (options.successionEncodingCosts?.measureSnapshot(state.read(), 'actual').costs ?? measureHostedSnapshot(state.read(), auth, stateCache))
+    .reduce((total, cost) => total + cost.byteLength, 0);
+  const stateRoom = maximumStateBytes === undefined ? undefined : () => {
+    const bytes = stateBytes();
+    return { growth: maximumStateBytes - bytes, retention: Math.floor(maximumStateBytes * RETAINED_STATE) - bytes };
+  };
   const authentication = createAuthenticationProvider(auth, state);
   const outageGraceMs = options.authorityOutageGraceMs ?? authorityOutageGraceMs;
   if (!Number.isSafeInteger(outageGraceMs) || outageGraceMs < 0 || outageGraceMs > 3_600_000) throw new Error('Authority outage grace must be from 0 to 3600000 milliseconds.');
@@ -342,7 +363,7 @@ export function createHostedRelay(options: HostedRelayOptions) {
         ownerSubject: grant.subject, durable, accountBacked, initialState, diagnostics, gatewaySetup: auth.provider === 'mainsite',
         teamResources: options.teamResources?.(grant.namespace),
         ...(options.successionEnrollment ? { successionEnrollment: { version: 1, origin: auth.origin, issuer: auth.issuer, namespace: grant.namespace, ownerSubject: grant.subject } as const, successionProjectionAllowance: allowance } : {}),
-        userStreamCount,
+        userStreamCount, ...(stateRoom ? { stateRoom } : {}),
         onSessionStates: () => publishAllStates(),
         onStateChange: async broker => { await state.mutate(draft => {
           stageBroker(draft, broker);

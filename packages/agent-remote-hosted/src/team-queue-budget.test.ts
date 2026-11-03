@@ -27,7 +27,7 @@ function pendingMessage(index: number, text = 'x'.repeat(16000)): TeamMessage {
   return { id: `pending-${index}`, from: 'leader', to: 'worker', text, status: 'queued', createdAt: 1 };
 }
 
-async function connectedBroker(teams: SavedTeam[] = [savedTeam()]) {
+async function connectedBroker(teams: SavedTeam[] = [savedTeam()], stateRoom?: () => { growth: number; retention: number }) {
   let saved: RemoteHostBrokerState = {
     keys: [[createHash('sha256').update('key').digest('hex'), { kind: 'device', installationId: controllerId, expires: Number.MAX_SAFE_INTEGER }]],
     hosts: [{ id: 'host', installationId: controllerId, name: 'Host', legacyDsh: false, teamManagement: true, providers: [{ providerId: 'codex', displayName: 'Codex' }] }],
@@ -36,7 +36,7 @@ async function connectedBroker(teams: SavedTeam[] = [savedTeam()]) {
   const server = new WebSocketServer({ host: '127.0.0.1', port: 0 });
   await once(server, 'listening', { signal: AbortSignal.timeout(3000) });
   const origin = `http://127.0.0.1:${(server.address() as { port: number }).port}`;
-  const broker = createHostBroker({ origin, initialState: saved, now: () => 100, onStateChange(state) { saved = structuredClone(state); } });
+  const broker = createHostBroker({ origin, initialState: saved, now: () => 100, ...(stateRoom ? { stateRoom } : {}), onStateChange(state) { saved = structuredClone(state); } });
   server.on('connection', (socket, request) => {
     void broker.prepareUpgrade(new Request(origin + request.url, { headers: { authorization: 'Bearer key' } })).then(upgrade => {
       if (!upgrade || upgrade instanceof Response) socket.close();
@@ -119,17 +119,10 @@ test('persists claim and uncertain settlement evidence when pending input nearly
   expect(validSavedTeam(stored)).toBe(true);
 }, 10000);
 
-test('keeps the full durable Team state limit when recipient evidence would exceed it', async () => {
-  const teams = Array.from({ length: 17 }, (_, index) => ({ ...savedTeam(`team-${index}`), messages: Array.from({ length: 8 }, (_, message) => pendingMessage(message)) }));
-  let excess = Buffer.byteLength(JSON.stringify(teams)) - (2 * 1024 * 1024 - 1);
-  for (const team of [...teams].reverse()) for (const message of team.messages) {
-    const removed = Math.min(excess, message.text.length - 1);
-    message.text = message.text.slice(removed);
-    excess -= removed;
-  }
-  expect(excess).toBe(0);
-  expect(Buffer.byteLength(JSON.stringify(teams))).toBe(2 * 1024 * 1024 - 1);
-  const f = await connectedBroker(teams);
+test('keeps the Relay within its bound when recipient evidence would exceed it', async () => {
+  const teams = Array.from({ length: 4 }, (_, index) => ({ ...savedTeam(`team-${index}`), messages: Array.from({ length: 8 }, (_, message) => pendingMessage(message)) }));
+  // The Relay can grow by less than the claim's recipient evidence.
+  const f = await connectedBroker(teams, () => ({ growth: 100, retention: 100 }));
   const result = await f.call({ action: 'claim', teamId: 'team-0', memberId: 'worker', messageId: 'pending-0', expectedNativeSessionId: nativeSessionId });
   expect(result.status).toBe(409);
   expect(result.value.error).toContain('storage capacity');

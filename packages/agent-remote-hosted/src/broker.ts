@@ -1,7 +1,7 @@
 import { TeamBroker, teamMessageBudgetBytes } from './teams.js';
 import { CallForSupportProfileError, emptyCallForSupportState, executeProfileCommand, isCallForSupportProfileCommand, projectEnablement, setEnablement,
   validCallForSupportState, type CallForSupportState } from './call-for-support-profiles.js';
-import { compactTeamDeliveries, teamStateBytes, trimTeamDeliveryReceipts, validSavedTeam, type SavedTeam } from './team-delivery.js';
+import { compactTeamDeliveries, TEAM_RECORD_BYTES, teamBytes, teamStateBytes, trimTeamDeliveryReceipts, validSavedTeam, type SavedTeam } from './team-delivery.js';
 import { committedBrokerState } from './broker-state.js';
 import { committed, detached } from './drafts.js';
 import { freeze } from 'immer';
@@ -111,13 +111,16 @@ export interface HostBrokerOptions {
   durable?: boolean;
   initialState?: RemoteHostBrokerState;
   onStateChange?(state: RemoteHostBrokerState): void | Promise<void>;
+  /**
+   * Bytes the Relay's state may still grow, and may grow before support groups are removed to make room; negative when it is
+   * over. A Team change may not grow the account's Teams by more than growth. Absent, only each Team's own bound applies.
+   */
+  stateRoom?(): { growth: number; retention: number };
   /** A Host's session states or connection changed. */
   onSessionStates?(): void;
   now?(): number;
   scheduler?: BrokerScheduler;
 }
-/** The Team state of an account: settled delivery receipts go first when it is exceeded. */
-const TEAM_STATE_BYTES = 2 * 1024 * 1024;
 export function createHostBroker(options: HostBrokerOptions) {
   const accountBacked = options.accountBacked ?? options.durable ?? false;
   const origin = new URL(options.origin).origin;
@@ -164,8 +167,7 @@ export function createHostBroker(options: HostBrokerOptions) {
   let callForSupportState = options.initialState?.callForSupport && structuredClone(options.initialState.callForSupport);
   if (callForSupportState && !validCallForSupportState(callForSupportState)) throw new Error('Invalid saved Call For Support state.');
   if (!teamState.every(validSavedTeam)) throw new Error('Invalid saved Teams.');
-  for (const team of teamState) compactTeamDeliveries(team, now());
-  trimTeamDeliveryReceipts(teamState, TEAM_STATE_BYTES);
+  for (const team of teamState) { compactTeamDeliveries(team, now()); trimTeamDeliveryReceipts(team, TEAM_RECORD_BYTES); }
   teamState = freeze(teamState, true);
   /** Teams that passed validation; they are frozen, so they stay valid. */
   const validTeams = new WeakSet<SavedTeam>();
@@ -260,13 +262,24 @@ export function createHostBroker(options: HostBrokerOptions) {
     },
     resources: options.teamResources,
     now, read: () => teamState,
+    ...(options.stateRoom ? { retention: () => options.stateRoom!().retention } : {}),
     change: update => commit(draft => {
       // Only the Teams a change touches are copied, measured and validated; the others stay the committed objects.
       let value!: ReturnType<typeof update>;
       let next = committed.produce(teamState, teams => { value = structuredClone(detached(update(teams))); });
-      if (teamStateBytes(next) > TEAM_STATE_BYTES) next = committed.produce(next, teams => trimTeamDeliveryReceipts(teams, TEAM_STATE_BYTES, teamStateBytes(next)));
+      const previous = new Map(teamState.map(team => [team.id, team]));
+      const changed = (team: SavedTeam) => team !== previous.get(team.id);
+      // A Team over its bound first loses its oldest settled receipts.
+      if (next.some(team => changed(team) && teamBytes(team) > TEAM_RECORD_BYTES)) next = committed.produce(next, teams => {
+        next.forEach((team, index) => { if (changed(team)) trimTeamDeliveryReceipts(teams[index]!, TEAM_RECORD_BYTES, teamBytes(team)); });
+      });
       if (next === teamState || next.length === teamState.length && next.every((team, index) => team === teamState[index] || isDeepStrictEqual(team, teamState[index]))) return { value, unchanged: true, publish() {} };
-      if (!next.every(team => validTeams.has(team) || validSavedTeam(team) && teamMessageBudgetBytes(team) <= 128 * 1024 && validTeams.add(team)) || teamStateBytes(next) > TEAM_STATE_BYTES) throw new Error('Team storage capacity reached.');
+      if (!next.every(team => validTeams.has(team) || validSavedTeam(team) && teamMessageBudgetBytes(team) <= 128 * 1024 && validTeams.add(team))) throw new Error('Team storage capacity reached.');
+      // A change may not grow a Team beyond its bound, nor the Relay beyond its own; it may still shrink either.
+      const grown = (team: SavedTeam) => teamBytes(team) > (previous.has(team.id) ? teamBytes(previous.get(team.id)!) : 0);
+      if (next.some(team => changed(team) && teamBytes(team) > TEAM_RECORD_BYTES && grown(team))) throw new Error('Team storage capacity reached.');
+      const growth = teamStateBytes(next) - teamStateBytes(teamState);
+      if (growth > 0 && options.stateRoom && growth > options.stateRoom().growth) throw new Error('Team storage capacity reached.');
       draft.teams = next; return { value, publish() { teamState = next; } };
     }),
     assertHost(hostId, providerId) { const host = requireHost(hostId); if (!host.teamManagement) throw new Error('Update the Controller to use Teams.'); if (!host.providers.some(provider => provider.providerId === providerId)) throw new Error('Provider is unavailable on this Host.'); },

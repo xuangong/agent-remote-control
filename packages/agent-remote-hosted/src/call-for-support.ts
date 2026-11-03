@@ -36,8 +36,6 @@ type WorkerCall = Extract<TeamHostCall, { action: 'call_for_support' }>;
 type CallResult = { status: 'accepted' | 'needs_approval' | 'unavailable'; message: string; callId?: string; roleId?: string };
 interface GroupCall extends CallForSupportCallInput { id: string; followUpOf?: string; origin: CallForSupportCall['origin'] }
 
-/** Archived groups are removed above this size of the account's Team state, which may not exceed 2 MiB, so active Teams keep room to grow. */
-export const CALL_FOR_SUPPORT_RETENTION_BYTES = 1536 * 1024;
 const TEAM_MEMBER_LIMIT = 12;
 const WAITING_CALL_LIMIT = 8;
 const fail = (message: string): never => { throw new Error(message); };
@@ -237,10 +235,13 @@ export function admitTeam(teams: SavedTeam[], now: number): void {
   teams.splice(view.indexOf(removed), 1);
 }
 
-/** Removes support groups (see removableGroup) while the Team state is larger than the retention bound. */
-export function pruneGroups(teams: SavedTeam[], now: number): void {
+/**
+ * Removes support groups (see removableGroup) while the account's Teams are larger than maximumBytes, which keeps the
+ * Relay's state within its bound. Ordinary Teams are never removed.
+ */
+export function pruneGroups(teams: SavedTeam[], now: number, maximumBytes: number): void {
   // Read the plain Teams: a draft would draft every Team it reads.
-  for (let view = plain(teams), removed = removableGroup(view, now); removed && teamStateBytes(view) > CALL_FOR_SUPPORT_RETENTION_BYTES; view = plain(teams), removed = removableGroup(view, now)) {
+  for (let view = plain(teams), removed = removableGroup(view, now); removed && teamStateBytes(view) > maximumBytes; view = plain(teams), removed = removableGroup(view, now)) {
     teams.splice(view.indexOf(removed), 1);
   }
 }

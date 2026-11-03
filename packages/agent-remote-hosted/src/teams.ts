@@ -1,4 +1,4 @@
-import { assertTeamQueueCapacity, compactTeamDeliveries, teamNeedsCompaction, unresolvedTeamDelivery, stripPrivateTeamEvidence, replayTeamDelivery, validSavedTeam, type SavedTeam } from './team-delivery.js';
+import { assertTeamQueueCapacity, compactTeamDeliveries, teamNeedsCompaction, teamStateBytes, unresolvedTeamDelivery, stripPrivateTeamEvidence, replayTeamDelivery, validSavedTeam, type SavedTeam } from './team-delivery.js';
 import { plain } from './drafts.js';
 export { teamMessageBudgetBytes } from './team-delivery.js';
 import type { TeamResourceStore } from './team-resources.js';
@@ -15,6 +15,8 @@ export interface TeamBrokerPorts {
   resourceDraftTtlMs?: number;
   read(): SavedTeam[];
   change<T>(update: (teams: SavedTeam[]) => T): Promise<T>;
+  /** Bytes the Relay's state may grow before support groups are removed to make room; negative when it is over. */
+  retention?(): number;
   createSeat(hostId: string, seat: TeamSeat): Promise<TeamMember>;
   assertHost(hostId: string, providerId: string): void;
   now(): number;
@@ -52,6 +54,7 @@ export class TeamBroker {
   private async change<T>(update: (teams: SavedTeam[]) => T): Promise<T> {
     let removed = false;
     const value = await this.ports.change(teams => {
+      const retention = this.ports.retention?.(), before = retention === undefined ? 0 : teamStateBytes(this.ports.read());
       // teams is a draft: compaction reads the plain Teams and drafts only those it changes.
       const compact = (support: boolean) => plain(teams).forEach((team, index) => {
         const now = this.ports.now();
@@ -62,7 +65,8 @@ export class TeamBroker {
       const existing = plain(teams).map(team => team.id);
       const result = update(teams);
       compact(true);
-      archiveIdleGroups(teams, this.ports.now()); pruneGroups(teams, this.ports.now());
+      archiveIdleGroups(teams, this.ports.now());
+      if (retention !== undefined) pruneGroups(teams, this.ports.now(), before + retention);
       const remaining = new Set(plain(teams).map(team => team.id));
       removed = existing.some(id => !remaining.has(id));
       return result;

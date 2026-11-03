@@ -7,6 +7,7 @@ import { WebSocket, WebSocketServer } from 'ws';
 import type { RelaySocket } from './transport.js';
 import { createHostedRelay } from './gateway.js';
 import { emptyRelayState, type HostedRelayState } from './state.js';
+import { encodeHostedSnapshot, hostedRecordEncodingCosts } from './record-codec.js';
 
 const origin = 'https://relay.example';
 const secret = 'local-google-relay-secret-01234567890123456789';
@@ -315,3 +316,55 @@ it('renders a safe retry with the saved target when a signed Google callback rea
   expect(f.saved().sessions).toHaveLength(1024);
   expect(f.saved().loginChallenges).toEqual([]);
 }, 10000);
+
+// The Google provider needs no external account authority, so this Relay serves Host Team calls end to end.
+it.each([false, true])('refuses Team changes that would grow the Relay state beyond its bound (accounting: %s)', async accounting => {
+  const maximumStateBytes = 96 * 1024;
+  const f = await fixture();
+  const relay = f.start(undefined, { ...f.auth, maximumStateBytes, ...(accounting ? { successionEncodingCosts: hostedRecordEncodingCosts(f.auth) } : {}) });
+  const callback = await f.finish(await f.begin(relay), relay);
+  const cookie = callback.headers.getSetCookie().filter(value => !value.includes('Max-Age=0')).map(value => value.split(';')[0]).join('; ');
+  const status = await (await relay.fetch(f.request('/auth/status', cookie)))!.json();
+  const pairing = await (await relay.fetch(f.request(status.basePath + 'v1/remote/pairings', cookie, { purpose: 'host-only' })))!.json();
+  const server = createServer(); const sockets = new WebSocketServer({ noServer: true });
+  server.on('upgrade', async (request, socket, head) => {
+    const prepared = await relay.prepareUpgrade(new Request(origin + request.url, { headers: { authorization: request.headers.authorization! } }));
+    if (!prepared || prepared instanceof Response) { socket.destroy(); return; }
+    sockets.handleUpgrade(request, socket, head, client => prepared.accept(relaySocket(client)));
+  });
+  await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
+  closers.push(async () => { for (const client of sockets.clients) client.terminate(); await new Promise<void>(resolve => sockets.close(() => resolve())); await new Promise<void>(resolve => server.close(() => resolve())); });
+  const host = new WebSocket(`ws://127.0.0.1:${(server.address() as AddressInfo).port}/ws/remote-host?team=1&teamRecipients=1`, { headers: { authorization: `Bearer ${pairing.key}` } });
+  closers.push(async () => { host.terminate(); });
+  const responses = new Map<string, (value: { status: number; body: string }) => void>();
+  const registered = new Promise<string>(resolve => host.on('message', data => {
+    const message = JSON.parse(data.toString());
+    const reply = (status: number, body: unknown) => host.send(JSON.stringify({ uplinkVersion: 2, type: 'rpc_response', requestId: message.requestId, status, body: JSON.stringify(body) }));
+    if (message.type === 'credential_issued') host.send(JSON.stringify({ uplinkVersion: 2, type: 'credential_saved' }));
+    if (message.type === 'heartbeat') host.send(JSON.stringify({ uplinkVersion: 2, type: 'heartbeat_ack', nonce: message.nonce }));
+    if (message.type === 'rpc_request') {
+      if (message.path !== '/remote/team/create-seat') reply(404, {});
+      else { const seat = JSON.parse(message.body); reply(200, { ...seat.member, nativeSessionId: `native-${seat.member.id}`, creation: 'ready', activity: 'idle' }); }
+    }
+    if (message.type === 'team_response') responses.get(message.requestId)?.({ status: message.status, body: message.body });
+    if (message.type === 'registered') resolve(message.hostId);
+  }));
+  host.on('open', () => host.send(JSON.stringify({ uplinkVersion: 2, type: 'register', installationId: 'bound-installation', name: 'Host', providers: [{ providerId: 'codex', displayName: 'Codex' }], credentialRotation: true })));
+  const hostId = await registered;
+  const teams = status.basePath + 'v1/remote/teams';
+  const team = await (await relay.fetch(f.request(teams + '/create', cookie, { operationId: 'bound-team', source: { hostId, providerId: 'codex', nativeSessionId: 'main', title: 'Project' } })))!.json();
+  const joined = await relay.fetch(f.request(teams + '/action', cookie, { teamId: team.id, action: 'add_member', operationId: 'helper', hostId, providerId: 'codex', name: 'Helper', cwd: '', responsibility: 'Help' }));
+  expect(joined!.status).toBe(200);
+  let requestId = 0;
+  const send = (index: number) => new Promise<{ status: number; body: string }>(resolve => {
+    const id = String(++requestId); responses.set(id, resolve);
+    host.send(JSON.stringify({ uplinkVersion: 2, type: 'team_request', requestId: id, call: { action: 'send', teamId: team.id, memberId: team.members[0].id, to: 'helper', operationId: `message-${index}`, text: 'x'.repeat(16000) } }));
+  });
+  const results: number[] = [];
+  for (let index = 0; index < 8 && !results.includes(409); index++) results.push((await send(index)).status);
+  expect(results[0]).toBe(200);
+  expect(results.at(-1)).toBe(409);
+  const stored = encodeHostedSnapshot(f.saved(), f.auth).costs.reduce((total, cost) => total + cost.byteLength, 0);
+  expect(stored).toBeLessThanOrEqual(maximumStateBytes);
+  expect(stored + 16000).toBeGreaterThan(maximumStateBytes);
+}, 15000);

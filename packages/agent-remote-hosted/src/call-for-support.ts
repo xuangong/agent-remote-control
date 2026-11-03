@@ -2,7 +2,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { CALL_FOR_SUPPORT_CALL_LIMIT, CALL_FOR_SUPPORT_GROUP_BYTES, CALL_FOR_SUPPORT_REPORT_BYTES, callForSupportReportBytes, isTeamResource, nativeSessionRefKey, type CallForSupportCall,
   type CallForSupportCallInput, type CallForSupportGroup, type CallForSupportProfile, type CallForSupportReport, type CallForSupportRoster, type CallForSupportRosterMember, type Team,
   type TeamAction, type TeamHostCall, type TeamMember, type TeamResource, type TeamSource } from '@orchardworks/agent-remote-protocol';
-import { assertTeamQueueCapacity, type SavedTeam } from './team-delivery.js';
+import { ACCOUNT_TEAM_LIMIT, assertTeamQueueCapacity, type SavedTeam } from './team-delivery.js';
 import { effectiveProfiles, type CallForSupportState } from './call-for-support-profiles.js';
 import type { TeamBrokerPorts } from './teams.js';
 
@@ -35,7 +35,6 @@ type WorkerCall = Extract<TeamHostCall, { action: 'call_for_support' }>;
 type CallResult = { status: 'accepted' | 'needs_approval' | 'unavailable'; message: string; callId?: string; roleId?: string };
 interface GroupCall extends CallForSupportCallInput { id: string; followUpOf?: string; origin: CallForSupportCall['origin'] }
 
-export const CALL_FOR_SUPPORT_TEAM_LIMIT = 128;
 /** Archived groups are removed above this size of the account's Team state, which may not exceed 2 MiB, so active Teams keep room to grow. */
 export const CALL_FOR_SUPPORT_RETENTION_BYTES = 1536 * 1024;
 const TEAM_MEMBER_LIMIT = 12;
@@ -221,7 +220,7 @@ function removableGroup(teams: SavedTeam[], now: number): SavedTeam | undefined 
  * automatically and nothing else would remove them. Ordinary Teams are never removed.
  */
 export function admitTeam(teams: SavedTeam[], now: number): void {
-  if (teams.length < CALL_FOR_SUPPORT_TEAM_LIMIT) return;
+  if (teams.length < ACCOUNT_TEAM_LIMIT) return;
   const removed = removableGroup(teams, now) ?? fail('Team capacity reached.');
   teams.splice(teams.indexOf(removed), 1);
 }

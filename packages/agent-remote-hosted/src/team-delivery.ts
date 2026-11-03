@@ -11,6 +11,11 @@ export interface SavedTeam extends Omit<Team, 'unresolvedReceipts'> {
   resourceGrants?: ResourceGrant[];
 }
 
+/**
+ * Teams an account may hold. Each is stored as its own record, so their number barely adds to the cost of a change;
+ * the account's Team state stays within 2 MiB, which bounds that cost (every commit still encodes the whole Relay).
+ */
+export const ACCOUNT_TEAM_LIMIT = 1024;
 const receiptLifetimeMs = 24 * 60 * 60 * 1000;
 const receiptCount = TEAM_DELIVERY_RECEIPT_LIMIT;
 const receiptBytes = 32 * 1024;

@@ -4,6 +4,8 @@ import { historyOverlapsNotifications, reconcileCodexHistoryNotifications } from
 import { isRecord, readString } from './native.js';
 import type { CodexDaemonCallbacks, CodexRawNotification, CodexThreadOrigin } from './types.js';
 
+const FOREIGN_LIMIT = 4096;
+
 /** Native discovery and buffering do not depend on how an application observes a thread. */
 export class CodexThreadRouter {
   readonly threads = new Set<string>();
@@ -16,13 +18,18 @@ export class CodexThreadRouter {
   private readonly origins = new Map<string, CodexThreadOrigin>();
   private readonly overflowed = new Set<string>();
   private readonly discoveryOrder = new Map<string, number>();
+  /**
+   * Threads whose ancestry was read to a root outside this family. A shared daemon sends every connection
+   * the notifications of other clients' threads; without this, each of their notifications read them again.
+   */
+  private readonly foreign = new Set<string>();
   private notificationSequence = 0;
   private generation = 0;
   private closed = false;
 
   constructor(private readonly transport: () => CodexAppServerTransport, private readonly callbacks: CodexDaemonCallbacks, private readonly paginatedHistory = false) {}
 
-  registerRoot(id: string): void { this.rootId = id; this.threads.add(id); }
+  registerRoot(id: string): void { this.rootId = id; this.threads.add(id); this.foreign.delete(id); }
   hasThread(id: string): boolean { return !this.closed && this.threads.has(id); }
   hasChild(parentId: string, id: string): boolean { return this.hasThread(parentId) && this.children.get(id) === parentId; }
 
@@ -52,7 +59,13 @@ export class CodexThreadRouter {
     this.overflowed.clear();
   }
 
-  close(): void { this.closed = true; this.invalidate(); }
+  close(): void { this.closed = true; this.invalidate(); this.foreign.clear(); }
+
+  /** A thread's parent never changes, so ancestry that ends outside the family stays outside it. */
+  private markForeign(id: string): void {
+    this.foreign.add(id);
+    if (this.foreign.size > FOREIGN_LIMIT) this.foreign.delete(this.foreign.values().next().value!);
+  }
 
   routeNotification(method: string, params: unknown): void {
     if (this.closed) return;
@@ -64,6 +77,7 @@ export class CodexThreadRouter {
       this.tentativeChildren.delete(id);
     }
     if (!id) { this.callbacks.onNotification?.(method, params); return; }
+    if (this.foreign.has(id) && !this.threads.has(id)) return;
     if (isRecord(params) && (method === 'item/started' || method === 'item/completed')) this.inspectItem(id, readString(params.turnId), params.item);
     if (this.threads.has(id)) { this.callbacks.onNotification?.(method, params); return; }
     // The root start response establishes its id; early notifications belong to bootstrap.
@@ -119,6 +133,7 @@ export class CodexThreadRouter {
   discover(id: string, ancestry: string[] = [], deadline?: number): Promise<boolean> {
     if (this.closed || ancestry.includes(id) || ancestry.length > 32) return Promise.resolve(false);
     if (this.threads.has(id)) return Promise.resolve(true);
+    if (this.foreign.has(id)) return Promise.resolve(false);
     const pending = this.discoveries.get(id);
     if (pending) return pending;
     if (!this.discoveryOrder.has(id)) this.discoveryOrder.set(id, this.discoveryOrder.size);
@@ -158,10 +173,14 @@ export class CodexThreadRouter {
       for (const unrelated of [id, ...ancestry]) {
         if (this.tentativeChildren.delete(unrelated)) this.unresolvedChildren.delete(unrelated);
       }
+      if (id !== this.rootId) this.markForeign(id);
       return false;
     }
     if (parentId === id) return false;
-    if (!this.threads.has(parentId) && !await this.discover(parentId, [...ancestry, id], deadline)) return false;
+    if (!this.threads.has(parentId) && !await this.discover(parentId, [...ancestry, id], deadline)) {
+      if (generation === this.generation && this.foreign.has(parentId)) this.markForeign(id);
+      return false;
+    }
     if (generation !== this.generation || this.closed) return false;
     this.unresolvedChildren.add(id);
     const previous = this.children.get(id);

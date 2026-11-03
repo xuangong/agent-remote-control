@@ -169,6 +169,8 @@ identity and native direct-input eligibility.
 
 The timeline cutoff applies only to timeline reconciliation. Generation-scoped `serverRequest/resolved` controls remain effective even when received during `thread/resume` or before a repeated snapshot read. Buffered spawn items retain native parent-turn and call identities, and notifications for unknown children enter normal discovery after the handoff. Snapshot histories are inspected for descendants of every restored session, including loaded children.
 
+The shared daemon also sends each connection the notifications of other clients' threads. Discovery reads an unknown thread's ancestry once: a thread whose ancestry ends at a root outside the connection's family is remembered as foreign (at most 4,096 per connection; a thread's parent never changes), and its later notifications are dropped without another read. Before this, every notification of a busy session in another client, such as a Codex CLI session running subagents, made every connection read that thread and its root again, thousands of times a minute.
+
 After replaying the post-snapshot notifications, the adapter publishes the actual active turn through `runtime_updated.activeTurnId`: a native ID identifies the surviving turn and `null` clears an obsolete one. This state correction does not invent a successful completion or user cancellation. The Relay and browser therefore agree on idle controls and the actual interrupt target after recovery.
 
 ## Verification

@@ -131,6 +131,28 @@ describe('Codex native children', () => {
     } finally { await h.parent.dispose(); }
   });
 
+  it('reads another client\'s threads once, however many of their notifications a shared daemon sends', async () => {
+    const h = await harness();
+    try {
+      // Another client's session and its subagent, whose ancestry ends at a root outside this family.
+      h.threads.set('other-root', { id: 'other-root', source: 'vscode', status: { type: 'active', activeFlags: [] } });
+      h.addChild('other-child', 'other-root', false);
+      const reads = () => h.requests.filter(({ method, params }) => method === 'thread/read' && ['other-root', 'other-child'].includes(String(params.threadId))).length;
+      for (let index = 0; index < 20; index++) {
+        h.notify('item/agentMessage/delta', { threadId: 'other-child', turnId: 'other-turn', itemId: 'message', delta: `${index}` });
+        h.notify('item/agentMessage/delta', { threadId: 'other-root', turnId: 'other-root-turn', itemId: 'message', delta: `${index}` });
+        await new Promise(resolve => setImmediate(resolve));
+      }
+      await new Promise(resolve => setImmediate(resolve));
+      expect(reads()).toBeLessThanOrEqual(3);
+      expect((await h.parent.runtimeInfo()).childSessions).toEqual([]);
+      // The family's own subagents are still found.
+      h.addChild('child');
+      h.spawn('child');
+      await expect.poll(async () => (await h.parent.runtimeInfo()).childSessions?.map(child => child.nativeSessionId)).toEqual(['child']);
+    } finally { await h.parent.dispose(); }
+  });
+
   it('opens the existing child with history and retains its creation origin after send calls', async () => {
     const h = await harness();
     try {

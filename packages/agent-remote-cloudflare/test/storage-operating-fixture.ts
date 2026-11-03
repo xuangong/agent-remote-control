@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import { validateRelayState, emptyRelayState, stageRelayState, type HostedRelayState } from '../../agent-remote-hosted/src/state.js';
 import { deriveSuccessionCapacity, SUCCESSION_FEATURE_BYTES } from '../../agent-remote-hosted/src/succession-capacity.js';
-import { encodeSqlSnapshot, decodeSqlSnapshot, quoteSqlRecord, SQL_CHUNK_BYTES } from '../src/storage-codec.js';
+import { encodeSqlSnapshot, decodeSqlSnapshot, quoteSqlRecord, SQL_CHUNK_BYTES, SQL_SNAPSHOT_FORMAT } from '../src/storage-codec.js';
 import { accountingAuth as auth } from './accounting-worker-fixture.js';
 import { codecState } from './storage-codec-fixture.js';
 import { retentionState } from './retention-consumption-fixture.js';
@@ -10,7 +10,7 @@ import { successionFreezeKey } from '../../agent-remote-protocol/src/index.js';
 export const operatingCases = ['S', 'M', 'B0', 'B1', 'L', 'O'] as const;
 export type OperatingCase = typeof operatingCases[number];
 export const operatingEncoding = {
-  measureSnapshot: (state: Readonly<HostedRelayState>) => ({ snapshotFormat: 3, recordFormat: 1, chunkBytes: SQL_CHUNK_BYTES, costs: encodeSqlSnapshot(state as HostedRelayState, auth).costs }),
+  measureSnapshot: (state: Readonly<HostedRelayState>) => ({ snapshotFormat: SQL_SNAPSHOT_FORMAT, recordFormat: 1, chunkBytes: SQL_CHUNK_BYTES, costs: encodeSqlSnapshot(state as HostedRelayState, auth).costs }),
   quoteRecord: quoteSqlRecord,
 };
 const namespace = (subject: string) => createHash('sha256').update(JSON.stringify([auth.issuer, subject])).digest('hex');

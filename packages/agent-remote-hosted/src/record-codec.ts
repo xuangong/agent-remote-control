@@ -3,13 +3,17 @@ import { validateRelayState, type HostedRelayState } from './state.js';
 import type { HostedAuthOptions } from './hosted-auth.js';
 import type { SuccessionEncodingCosts } from './succession-capacity.js';
 
-export const HOSTED_SNAPSHOT_FORMAT = 3;
+/** Format 4 stores each Team as its own record; format 3 kept every Team of an account inside its broker header. */
+export const HOSTED_SNAPSHOT_FORMAT = 4;
+/** Formats this codec reads; it writes only HOSTED_SNAPSHOT_FORMAT. */
+export const HOSTED_READABLE_SNAPSHOT_FORMATS = [3, 4] as const;
+export type HostedSnapshotFormat = typeof HOSTED_READABLE_SNAPSHOT_FORMATS[number];
 export const HOSTED_RECORD_FORMAT = 1;
 export const HOSTED_CHUNK_BYTES = 262144;
 export const HOSTED_RECORD_KINDS = ['relayHeader', 'tenant', 'brokerHeader', 'associationHeader', 'favoritesHeader',
   'session', 'loginChallenge', 'consumedProof', 'securityEvent', 'sessionStar', 'favoritesTree', 'sessionMigration',
   'sessionTitle', 'deviceKey', 'host', 'binding', 'creation', 'preview', 'pairing', 'share', 'reservation',
-  'workspaceWindow', 'revokedHost', 'admission', 'freeze', 'relationChange', 'relationReset', 'favoritesReceipt'] as const;
+  'workspaceWindow', 'revokedHost', 'admission', 'freeze', 'relationChange', 'relationReset', 'favoritesReceipt', 'team'] as const;
 export type HostedRecordKind = typeof HOSTED_RECORD_KINDS[number];
 type Identity<K extends HostedRecordKind = HostedRecordKind> = [K, string, string];
 type JsonObject = Record<string, unknown>;
@@ -25,10 +29,12 @@ type HostedFavoritesHeader = Omit<Favorites, 'receipts'> & { receipts: Identity<
 type HostedSharingHeader = Omit<NonNullable<Broker['sharing']>, 'grants' | 'reservations'> & {
   grants: Identity<'share'>[]; reservations: Identity<'reservation'>[];
 };
-type HostedBrokerHeader = Omit<Broker, 'keys' | 'hosts' | 'bindings' | 'creations' | 'previews' | 'pairings' | 'revokedHosts' | 'sharing' | 'associations'> & {
+type HostedBrokerHeader = Omit<Broker, 'keys' | 'hosts' | 'bindings' | 'creations' | 'previews' | 'pairings' | 'revokedHosts' | 'sharing' | 'associations' | 'teams'> & {
   keys: Identity<'deviceKey'>[]; hosts: Identity<'host'>[]; bindings: Identity<'binding'>[]; creations: Identity<'creation'>[];
   previews?: Identity<'preview'>[]; pairings?: Identity<'pairing'>[]; revokedHosts?: Identity<'revokedHost'>[];
   sharing?: HostedSharingHeader; associations?: Identity<'associationHeader'>;
+  /** Format 4: one record per Team, so a change to one Team rewrites only that Team. Format 3: the Teams themselves. */
+  teams?: Identity<'team'>[] | Broker['teams'];
 };
 type HostedTenantHeader = Omit<Tenant, 'broker' | 'favoritesSuccession'> & {
   broker: Identity<'brokerHeader'>; favoritesSuccession?: Identity<'favoritesHeader'>;
@@ -78,10 +84,14 @@ export function quoteHostedRecord(input: { kind: string; owner: string; key: str
 }
 
 /** Exact logical bytes and per-record chunks; manifestBytes measures its explicit JSON fields, not physical storage allocation. */
-export function encodeHostedSnapshot(input: HostedRelayState, auth: HostedAuthOptions): HostedSnapshot {
-  return encodeValidatedHostedSnapshot(validateRelayState(input, auth));
+export function encodeHostedSnapshot(input: HostedRelayState, auth: HostedAuthOptions, format: HostedSnapshotFormat = HOSTED_SNAPSHOT_FORMAT): HostedSnapshot {
+  return encodeValidatedHostedSnapshot(validateRelayState(input, auth), readableFormat(format));
 }
-function encodeValidatedHostedSnapshot(state: HostedRelayState): HostedSnapshot {
+function readableFormat(format: number): HostedSnapshotFormat {
+  if (!HOSTED_READABLE_SNAPSHOT_FORMATS.includes(format as HostedSnapshotFormat)) invalid('unsupported snapshot format');
+  return format as HostedSnapshotFormat;
+}
+function encodeValidatedHostedSnapshot(state: HostedRelayState, format: HostedSnapshotFormat): HostedSnapshot {
   const records = new Map<string, HostedEncodedRecord>();
   const tuples = new Set<string>(); const hashes = new Map<string, string>(); const costs: HostedRecordCost[] = [];
   function add<K extends HostedRecordKind>(kind: K, owner: string, key: string, payload: unknown): Identity<K> {
@@ -124,6 +134,7 @@ function encodeValidatedHostedSnapshot(state: HostedRelayState): HostedSnapshot 
         previews: references(source.previews, 'preview', owner, value => value.hostId),
         pairings: references(source.pairings, 'pairing', owner, value => value.id),
         revokedHosts: references(source.revokedHosts, 'revokedHost', owner, value => JSON.stringify([value.hostId, value.installationId])),
+        ...(format >= 4 ? { teams: references(source.teams, 'team', owner, value => value.id) } : {}),
         sharing: source.sharing === undefined ? undefined : { ...source.sharing,
           grants: references(source.sharing.grants, 'share', owner, value => JSON.stringify([value.hostId, value.subject])),
           reservations: references(source.sharing.reservations, 'reservation', owner, value => value.key),
@@ -208,7 +219,9 @@ function readHostedRecords(manifests: HostedManifest[], chunks: HostedChunk[]) {
   return records;
 }
 
-export function decodeHostedSnapshot(manifests: HostedManifest[], chunks: HostedChunk[], auth: HostedAuthOptions): HostedRelayState {
+/** Reads a snapshot written in format; a format 3 snapshot keeps its Teams inside the broker header. */
+export function decodeHostedSnapshot(manifests: HostedManifest[], chunks: HostedChunk[], auth: HostedAuthOptions, format: HostedSnapshotFormat = HOSTED_SNAPSHOT_FORMAT): HostedRelayState {
+  readableFormat(format);
   const records = readHostedRecords(manifests, chunks); const consumed = new Set<string>();
   function take(ref: unknown, kind: HostedRecordKind, owner: string, key?: string) {
     if (!Array.isArray(ref) || ref.length !== 3 || ref[0] !== kind || ref[1] !== owner || typeof ref[2] !== 'string' || key !== undefined && ref[2] !== key) invalid('header child identity');
@@ -252,6 +265,7 @@ export function decodeHostedSnapshot(manifests: HostedManifest[], chunks: Hosted
     collection(broker, 'previews', 'preview', owner);
     collection(broker, 'pairings', 'pairing', owner);
     collection(broker, 'revokedHosts', 'revokedHost', owner);
+    if (format >= 4) collection(broker, 'teams', 'team', owner);
     if (Object.hasOwn(broker, 'sharing')) {
       if (!object(broker.sharing)) invalid('sharing presence');
       collection(broker.sharing, 'grants', 'share', owner, true);
@@ -278,7 +292,7 @@ export function decodeHostedSnapshot(manifests: HostedManifest[], chunks: Hosted
   // Validate identities against the original Window bytes after their owning
   // validator has accepted them; normalization must not invalidate old digests.
   const expected = encodeValidatedHostedSnapshot({ ...state,
-    ...(relay.workspaceWindows === undefined ? {} : { workspaceWindows: relay.workspaceWindows as HostedRelayState['workspaceWindows'] }) }).records;
+    ...(relay.workspaceWindows === undefined ? {} : { workspaceWindows: relay.workspaceWindows as HostedRelayState['workspaceWindows'] }) }, format).records;
   if (expected.size !== manifests.length) invalid('identity coverage');
   for (const manifest of manifests) {
     const wanted = expected.get(physicalKey(manifest.kind, manifest.identity))?.manifest;

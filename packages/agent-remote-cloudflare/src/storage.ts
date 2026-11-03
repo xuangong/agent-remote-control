@@ -1,5 +1,5 @@
 import { createHmac } from 'node:crypto';
-import { SQL_SNAPSHOT_FORMAT, decodeSqlSnapshot, encodeSqlSnapshot, type SqlManifest, type SqlChunk, type SqlEncodedRecord } from './storage-codec.js';
+import { SQL_READABLE_SNAPSHOT_FORMATS, SQL_SNAPSHOT_FORMAT, decodeSqlSnapshot, encodeSqlSnapshot, type SqlManifest, type SqlChunk, type SqlEncodedRecord, type SqlSnapshotFormat } from './storage-codec.js';
 import { emptyRelayState, hostedAuthStateConfig, hostedAuthStorageIdentity, resolveHostedAuth, validateRelayState, type HostedAuthOptions, type HostedRelayState, type RelayStateStore } from '@orchardworks/agent-remote-hosted';
 
 type RecordKind = 'sessionTitle' | 'sessionTitleRevision' | 'favoritesTree' | 'sessionMigration' | 'sessionStar' | 'preview' | 'securityEvent' | 'session' | 'tenant' | 'deviceKey' | 'host' | 'binding' | 'creation' | 'share' | 'reservation' | 'loginChallenge' | 'consumedProof';
@@ -47,7 +47,7 @@ export class SqliteRelayStore implements RelayStateStore {
       )`);
       const metadata = storage.sql.exec('SELECT * FROM relay_metadata WHERE id = 1').toArray()[0];
       if (metadata) {
-        if (![2, SQL_SNAPSHOT_FORMAT].includes(metadata.version as number) || metadata.origin !== config.origin || metadata.issuer !== config.issuer || metadata.fingerprint !== fingerprint) {
+        if (![2, ...SQL_READABLE_SNAPSHOT_FORMATS].includes(metadata.version as number) || metadata.origin !== config.origin || metadata.issuer !== config.issuer || metadata.fingerprint !== fingerprint) {
           throw new Error('Relay configuration does not match persisted state.');
         }
       } else {
@@ -68,9 +68,10 @@ export class SqliteRelayStore implements RelayStateStore {
       if (new Set(legacyRows.map(recordId)).size !== legacyRows.length) throw new Error('Duplicate legacy Relay identity.');
       this.initial = validateRelayState(decode(legacyRows, auth), auth);
     } else {
-      if (legacyRows.length) throw new Error('Legacy records remain in SQL snapshot format 3.');
-      this.initial = decodeSqlSnapshot(manifests, chunks, auth);
-      this.records = encodeSqlSnapshot(this.initial, auth).records;
+      if (legacyRows.length) throw new Error(`Legacy records remain in SQL snapshot format ${this.format}.`);
+      this.initial = decodeSqlSnapshot(manifests, chunks, auth, this.format as SqlSnapshotFormat);
+      // The rows as stored: an older format's are replaced on the next commit, which also marks the new format.
+      this.records = encodeSqlSnapshot(this.initial, auth, this.format as SqlSnapshotFormat).records;
     }
   }
   async commit(state: HostedRelayState): Promise<void> {
@@ -94,10 +95,9 @@ export class SqliteRelayStore implements RelayStateStore {
           this.storage.sql.exec('INSERT INTO relay_snapshot_chunks (kind, identity, ordinal, bytes) VALUES (?, ?, ?, ?)', chunk.kind, chunk.identity, chunk.ordinal, bytes);
         }
       }
-      if (this.format === 2) {
-        for (const table of legacyTables) this.storage.sql.exec(`DELETE FROM ${table}`);
-        this.storage.sql.exec('UPDATE relay_metadata SET version = ? WHERE id = 1', SQL_SNAPSHOT_FORMAT);
-      }
+      if (this.format === 2) for (const table of legacyTables) this.storage.sql.exec(`DELETE FROM ${table}`);
+      // Older readers check this marker before reading any state, so they never read the new layout.
+      if (this.format !== SQL_SNAPSHOT_FORMAT) this.storage.sql.exec('UPDATE relay_metadata SET version = ? WHERE id = 1', SQL_SNAPSHOT_FORMAT);
     });
     // A rejected sync does not prove rollback; the caller closes publication and restart revalidates exposed SQL.
     try { await this.storage.sync(); } catch (error) { this.durabilityUnknown = true; throw error; }

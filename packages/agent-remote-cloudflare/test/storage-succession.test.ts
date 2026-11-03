@@ -4,7 +4,7 @@ import { createHash } from 'node:crypto';
 import { createRelayState } from '../../agent-remote-hosted/src/state.js';
 import { createHostBroker, emptyRelayState, type HostedRelayState } from '@orchardworks/agent-remote-hosted';
 import { SqliteRelayStore } from '../src/storage.js';
-import { decodeSqlSnapshot, encodeSqlSnapshot, quoteSqlRecord, SQL_CHUNK_BYTES, type SqlChunk, type SqlManifest } from '../src/storage-codec.js';
+import { decodeSqlSnapshot, encodeSqlSnapshot, quoteSqlRecord, SQL_CHUNK_BYTES, SQL_SNAPSHOT_FORMAT, type SqlChunk, type SqlManifest, type SqlSnapshotFormat } from '../src/storage-codec.js';
 import { codecState } from './storage-codec-fixture.js';
 
 const auth = { origin: 'https://relay.example', issuer: 'https://gateway.example', secret: 's'.repeat(32) };
@@ -129,7 +129,7 @@ test('migrates real format2 rows atomically, fences old readers and rejects unma
   f.db.exec("CREATE TRIGGER fail_upgrade BEFORE UPDATE ON relay_metadata BEGIN SELECT RAISE(ABORT, 'upgrade failure'); END");
   await expect(legacy.commit(legacy.initial)).rejects.toThrow(/upgrade failure/); expect(f.snapshot()).toBe(before);
   f.db.exec('DROP TRIGGER fail_upgrade'); await legacy.commit(legacy.initial);
-  expect(f.db.prepare('SELECT version FROM relay_metadata').get()!.version).toBe(3);
+  expect(f.db.prepare('SELECT version FROM relay_metadata').get()!.version).toBe(SQL_SNAPSHOT_FORMAT);
   expect(f.db.prepare('SELECT count(*) AS n FROM relay_records').get()!.n).toBe(0);
   // The released format2 reader checks this exact marker before reading any state.
   expect(f.db.prepare('SELECT version FROM relay_metadata').get()!.version === 2).toBe(false);
@@ -305,7 +305,7 @@ test('configured accounting fences SQL writes at eleven, holds publication on sy
   const unresolved: any = initial.tenants[0]!.broker.associations!.freezes.find(row => row.released === undefined)!;
   unresolved.receipt = { ...unresolved.receipt, version: 2, maxProjectionBytes: 65536 };
   await f.store.commit(initial);
-  const encoding = { measureSnapshot(value: Readonly<HostedRelayState>) { return { snapshotFormat: 3, recordFormat: 1, chunkBytes: SQL_CHUNK_BYTES, costs: encodeSqlSnapshot(value as HostedRelayState, auth).costs }; }, quoteRecord: quoteSqlRecord };
+  const encoding = { measureSnapshot(value: Readonly<HostedRelayState>) { return { snapshotFormat: SQL_SNAPSHOT_FORMAT, recordFormat: 1, chunkBytes: SQL_CHUNK_BYTES, costs: encodeSqlSnapshot(value as HostedRelayState, auth).costs }; }, quoteRecord: quoteSqlRecord };
   let publications = 0, failures = 0, replies = 0;
   const relay = createRelayState(auth, { initial, commit: value => f.store.commit(value) }, () => { failures++; }, () => { publications++; }, encoding);
   expect(reopen(f.storage).initial.version).toBe(9);
@@ -333,7 +333,7 @@ test('configured accounting fences SQL writes at eleven, holds publication on sy
 test('configured accounting rolls back a late SQL fault before format and runtime publication', async () => {
   const f = fixture(); const initial = emptyRelayState(auth); initial.version = 9;
   await f.store.commit(initial); const before = f.snapshot();
-  const encoding = { measureSnapshot(value: Readonly<HostedRelayState>) { return { snapshotFormat: 3, recordFormat: 1, chunkBytes: SQL_CHUNK_BYTES, costs: encodeSqlSnapshot(value as HostedRelayState, auth).costs }; }, quoteRecord: quoteSqlRecord };
+  const encoding = { measureSnapshot(value: Readonly<HostedRelayState>) { return { snapshotFormat: SQL_SNAPSHOT_FORMAT, recordFormat: 1, chunkBytes: SQL_CHUNK_BYTES, costs: encodeSqlSnapshot(value as HostedRelayState, auth).costs }; }, quoteRecord: quoteSqlRecord };
   let failures = 0, publications = 0;
   const relay = createRelayState(auth, { initial, commit: value => f.store.commit(value) }, () => { failures++; }, () => { publications++; }, encoding);
   f.db.exec("CREATE TRIGGER fail_accounting BEFORE UPDATE ON relay_snapshot_manifests WHEN NEW.kind = 'relayHeader' BEGIN SELECT RAISE(ABORT, 'accounting rollback'); END");
@@ -346,7 +346,7 @@ test('configured accounting rolls back a late SQL fault before format and runtim
 for (const failure of ['hold', 'rollback', 'unknown-sync'] as const) test(`atomic source completion preserves the Broker and SQL boundary on ${failure}`, async () => {
   const { sourceCompletionState, sourceCompletionBroker } = await import('./source-completion-fixture.js');
   const f = fixture(); const initial = sourceCompletionState(auth); await f.store.commit(initial);
-  const encoding = { measureSnapshot(value: Readonly<HostedRelayState>) { return { snapshotFormat: 3, recordFormat: 1, chunkBytes: SQL_CHUNK_BYTES, costs: encodeSqlSnapshot(value as HostedRelayState, auth).costs }; }, quoteRecord: quoteSqlRecord };
+  const encoding = { measureSnapshot(value: Readonly<HostedRelayState>) { return { snapshotFormat: SQL_SNAPSHOT_FORMAT, recordFormat: 1, chunkBytes: SQL_CHUNK_BYTES, costs: encodeSqlSnapshot(value as HostedRelayState, auth).costs }; }, quoteRecord: quoteSqlRecord };
   const relay = createRelayState(auth, { initial, commit: value => f.store.commit(value) }, () => {}, () => {}, encoding);
   let entered!: () => void, release!: () => void; const held = new Promise<void>(resolve => { entered = resolve; });
   let unresolved: HostedRelayState | undefined, physicalBefore: string | undefined;
@@ -380,7 +380,7 @@ for (const failure of ['hold', 'rollback', 'unknown-sync'] as const) test(`atomi
 for (const failure of ['hold', 'rollback', 'unknown-sync'] as const) test(`exact relation completion keeps its last durable phase on ${failure}`, async () => {
   const { relationCompletionState, sourceCompletionBroker } = await import('./source-completion-fixture.js');
   const f = fixture(), initial = relationCompletionState(auth); await f.store.commit(initial);
-  const encoding = { measureSnapshot(value: Readonly<HostedRelayState>) { return { snapshotFormat: 3, recordFormat: 1, chunkBytes: SQL_CHUNK_BYTES, costs: encodeSqlSnapshot(value as HostedRelayState, auth).costs }; }, quoteRecord: quoteSqlRecord };
+  const encoding = { measureSnapshot(value: Readonly<HostedRelayState>) { return { snapshotFormat: SQL_SNAPSHOT_FORMAT, recordFormat: 1, chunkBytes: SQL_CHUNK_BYTES, costs: encodeSqlSnapshot(value as HostedRelayState, auth).costs }; }, quoteRecord: quoteSqlRecord };
   const relay = createRelayState(auth, { initial, commit: value => f.store.commit(value) }, () => {}, () => {}, encoding);
   let enter!: () => void, release!: () => void; const held = new Promise<void>(resolve => { enter = resolve; });
   let before: HostedRelayState | undefined, physicalBefore: string | undefined;
@@ -416,7 +416,7 @@ for (const consumer of ['terminal', 'favorites', 'invitation', 'registration', '
       broker.revokedHosts![0]!.revocationId = '00000000-0000-4000-8000-000000000002';
     }
     const f = fixture(); await f.store.commit(initial);
-    const encoding = { measureSnapshot: (state: Readonly<HostedRelayState>) => ({ snapshotFormat: 3, recordFormat: 1, chunkBytes: SQL_CHUNK_BYTES, costs: encodeSqlSnapshot(state as HostedRelayState, auth).costs }), quoteRecord: quoteSqlRecord };
+    const encoding = { measureSnapshot: (state: Readonly<HostedRelayState>) => ({ snapshotFormat: SQL_SNAPSHOT_FORMAT, recordFormat: 1, chunkBytes: SQL_CHUNK_BYTES, costs: encodeSqlSnapshot(state as HostedRelayState, auth).costs }), quoteRecord: quoteSqlRecord };
     let publications = 0;
     const relay = createRelayState(auth, { initial, commit: value => f.store.commit(value) }, () => {}, () => { publications++; }, encoding);
     const peer = retentionPeer(relay, auth);
@@ -493,7 +493,7 @@ test('full recovery registration construction fits the saved claim and ends only
   const initial = retentionState(auth, true), broker = initial.tenants[0]!.broker;
   broker.hosts = []; broker.keys = []; broker.revokedHosts![0]!.revocationId = '00000000-0000-4000-8000-000000000002';
   const f = fixture(); await f.store.commit(initial);
-  const encoding = { measureSnapshot: (state: Readonly<HostedRelayState>) => ({ snapshotFormat: 3, recordFormat: 1, chunkBytes: SQL_CHUNK_BYTES, costs: encodeSqlSnapshot(state as HostedRelayState, auth).costs }), quoteRecord: quoteSqlRecord };
+  const encoding = { measureSnapshot: (state: Readonly<HostedRelayState>) => ({ snapshotFormat: SQL_SNAPSHOT_FORMAT, recordFormat: 1, chunkBytes: SQL_CHUNK_BYTES, costs: encodeSqlSnapshot(state as HostedRelayState, auth).costs }), quoteRecord: quoteSqlRecord };
   const relay = createRelayState(auth, { initial, commit: value => f.store.commit(value) }, () => {}, () => {}, encoding), peer = retentionPeer(relay, auth);
   try {
     const invitation = await (await peer.invitation())!.json(), before = structuredClone(relay.read()), capacity = deriveSuccessionCapacity(before, encoding);
@@ -514,3 +514,57 @@ test('full recovery registration construction fits the saved claim and ends only
     expect(reopen(f.storage).initial.tenants[0]!.broker.hosts[0]).toMatchObject(metadata);
   } finally { peer.close(); await relay.close(); }
 }, 15000);
+
+/** A Team of the size format 3 kept inline: its queued messages are most of its bytes. */
+function savedTeam(id: string, textBytes: number) {
+  const member = (memberId: string, role: 'leader' | 'member') => ({ id: memberId, hostId: 'host', providerId: 'codex', nativeSessionId: `${id}-${memberId}`,
+    role, name: memberId, responsibility: '', creation: 'ready' as const, activity: 'idle' as const, summary: '', updatedAt: 1 });
+  return { id, operationId: id, revision: 1, source: { hostId: 'host', providerId: 'codex', nativeSessionId: `${id}-source`, title: 'Source' }, title: 'Team',
+    status: 'active' as const, createdAt: 1, updatedAt: 1, members: [member('leader', 'leader'), member('helper', 'member')],
+    messages: Array.from({ length: 8 }, (_, index) => ({ id: `${id}-m${index}`, from: 'leader', to: 'helper', text: 'x'.repeat(Math.floor(textBytes / 8)), status: 'queued' as const, createdAt: 1 })) };
+}
+/** Writes state as a released Relay would have, in format, replacing every snapshot row. */
+function writeFormat(db: DatabaseSync, state: HostedRelayState, format: SqlSnapshotFormat) {
+  db.exec('DELETE FROM relay_snapshot_chunks'); db.exec('DELETE FROM relay_snapshot_manifests');
+  for (const { manifest, chunks } of encodeSqlSnapshot(state, auth, format).records.values()) {
+    db.prepare('INSERT INTO relay_snapshot_manifests (kind, identity, format, byte_length, chunk_count, digest) VALUES (?, ?, ?, ?, ?, ?)')
+      .run(manifest.kind, manifest.identity, manifest.format, manifest.byte_length, manifest.chunk_count, manifest.digest);
+    for (const chunk of chunks) db.prepare('INSERT INTO relay_snapshot_chunks (kind, identity, ordinal, bytes) VALUES (?, ?, ?, ?)')
+      .run(chunk.kind, chunk.identity, chunk.ordinal, chunk.bytes instanceof Uint8Array ? chunk.bytes : new Uint8Array(chunk.bytes));
+  }
+  db.prepare('UPDATE relay_metadata SET version = ?').run(format);
+}
+const kinds = (db: DatabaseSync) => db.prepare('SELECT kind, identity, byte_length, digest FROM relay_snapshot_manifests ORDER BY kind, identity').all() as Array<{ kind: string; identity: string; byte_length: number; digest: string }>;
+
+test('moves format 3 Teams out of the broker header into their own records atomically, and rewrites only the Team that changes', async () => {
+  const f = fixture(); const state = codecState(auth);
+  state.tenants[0]!.broker.teams = Array.from({ length: 6 }, (_, index) => savedTeam(`team-${index}`, 64 * 1024));
+  writeFormat(f.db, state, 3);
+  const released = new SqliteRelayStore(f.storage, auth);
+  expect(released.initial).toEqual(state);
+  expect(kinds(f.db).filter(row => row.kind === 'team')).toHaveLength(0);
+  expect(kinds(f.db).find(row => row.kind === 'brokerHeader' && row.byte_length > 6 * 64 * 1024)).toBeTruthy();
+  // The new layout and its marker are written together, or not at all.
+  const before = f.snapshot();
+  f.db.exec("CREATE TRIGGER fail_upgrade BEFORE UPDATE ON relay_metadata BEGIN SELECT RAISE(ABORT, 'upgrade failure'); END");
+  await expect(released.commit(released.initial)).rejects.toThrow(/upgrade failure/); expect(f.snapshot()).toBe(before);
+  f.db.exec('DROP TRIGGER fail_upgrade');
+  await released.commit(released.initial);
+  expect(f.db.prepare('SELECT version FROM relay_metadata').get()!.version).toBe(SQL_SNAPSHOT_FORMAT);
+  expect(kinds(f.db).filter(row => row.kind === 'team')).toHaveLength(6);
+  expect(Math.max(...kinds(f.db).filter(row => row.kind === 'brokerHeader').map(row => row.byte_length))).toBeLessThan(64 * 1024);
+  expect(reopen(f.storage).initial).toEqual(state);
+  // A change to one Team rewrites that Team's record only.
+  const store = reopen(f.storage), stored = kinds(f.db);
+  const next = structuredClone(state); next.tenants[0]!.broker.teams![2]!.messages[0]!.text += 'changed';
+  await store.commit(next);
+  const changed = kinds(f.db).filter(row => stored.find(old => old.kind === row.kind && old.identity === row.identity)?.digest !== row.digest);
+  expect(changed.map(row => row.kind)).toEqual(['team']);
+  expect(reopen(f.storage).initial).toEqual(next);
+  // Each format reads only its own layout.
+  const rows = physical(f.db);
+  expect(() => decodeSqlSnapshot(rows.manifests, rows.chunks, auth, 3)).toThrow(/Invalid hosted record snapshot/);
+  writeFormat(f.db, next, 3);
+  const legacyRows = physical(f.db);
+  expect(() => decodeSqlSnapshot(legacyRows.manifests, legacyRows.chunks, auth, 4)).toThrow(/Invalid hosted record snapshot/);
+}, 20000);

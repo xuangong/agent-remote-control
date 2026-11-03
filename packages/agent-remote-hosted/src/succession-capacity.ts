@@ -110,7 +110,8 @@ export function deriveSuccessionCapacity(state: Readonly<HostedRelayState>, enco
   requireSuccessionEncodingCosts(encoding);
   const actual = encoding.measureSnapshot(state);
   const ordinary = encoding.measureSnapshot(ordinaryView(state));
-  if (actual.snapshotFormat !== 3 || actual.recordFormat !== 1 || actual.chunkBytes !== 262144
+  // Format 4 differs from 3 only in storing Teams as their own records, which this accounting counts as ordinary data either way.
+  if (actual.snapshotFormat !== 4 || actual.recordFormat !== 1 || actual.chunkBytes !== 262144
     || actual.snapshotFormat !== ordinary.snapshotFormat || actual.recordFormat !== ordinary.recordFormat || actual.chunkBytes !== ordinary.chunkBytes) throw new Error('Unsupported succession encoding costs.');
   function index(costs: readonly SuccessionRecordCost[]) {
     const result = new Map<string, SuccessionRecordCost>();

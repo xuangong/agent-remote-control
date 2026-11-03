@@ -14,7 +14,7 @@ export async function accountingWorker() {
     import { sourceCompletionBroker } from './test/source-completion-fixture.ts';
     import { retentionPeer } from './test/retention-consumption-fixture.ts';
     import { SqliteRelayStore } from './src/storage.ts';
-    import { encodeSqlSnapshot, quoteSqlRecord, SQL_CHUNK_BYTES } from './src/storage-codec.ts';
+    import { encodeSqlSnapshot, quoteSqlRecord, SQL_CHUNK_BYTES, SQL_SNAPSHOT_FORMAT } from './src/storage-codec.ts';
     const auth = ${JSON.stringify(accountingAuth)};
     export class AccountingFixture {
       constructor(ctx) {
@@ -61,7 +61,7 @@ export async function accountingWorker() {
           finally { this.phase = 'inspection'; }
         };
         this.relay = createRelayState(auth, this.store, () => { this.failures++; }, () => { this.publications++; }, {
-          measureSnapshot: state => { this.observed.measureCalls++; return { snapshotFormat: 3, recordFormat: 1, chunkBytes: SQL_CHUNK_BYTES, costs: encodeSqlSnapshot(state, auth).costs }; },
+          measureSnapshot: state => { this.observed.measureCalls++; return { snapshotFormat: SQL_SNAPSHOT_FORMAT, recordFormat: 1, chunkBytes: SQL_CHUNK_BYTES, costs: encodeSqlSnapshot(state, auth).costs }; },
           quoteRecord: input => { this.observed.quoteCalls++; return quoteSqlRecord(input); }
         });
         this.phase = 'inspection';

@@ -1208,7 +1208,7 @@ function recoveredIdentity(state: HostedRelayState) {
   state.version = 9;
 }
 function fillFeatureBudget(state: HostedRelayState) {
-  const costs = { measureSnapshot: (value: Readonly<HostedRelayState>) => ({ snapshotFormat: 3, recordFormat: 1, chunkBytes: SQL_CHUNK_BYTES,
+  const costs = { measureSnapshot: (value: Readonly<HostedRelayState>) => ({ snapshotFormat: SQL_SNAPSHOT_FORMAT, recordFormat: 1, chunkBytes: SQL_CHUNK_BYTES,
     costs: encodeSqlSnapshot(value as HostedRelayState, { ...state.config, secret: 's'.repeat(32) }).costs }), quoteRecord: quoteSqlRecord };
   const associations = state.tenants[0]!.broker.associations as any; associations.padding = '';
   associations.padding = 'x'.repeat(8388608 - deriveSuccessionCapacity(state, costs).featureCharge);

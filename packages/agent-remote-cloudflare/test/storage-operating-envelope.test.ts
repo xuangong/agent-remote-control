@@ -11,7 +11,7 @@ import { finalizeOperatingSample } from './operating-sample-finalizer.js';
 import { operatingCases, operatingEncoding, operatingWarmUpdate, prepareOperatingDatasets, stateDigest, type OperatingCase } from './storage-operating-fixture.js';
 import { deriveSuccessionCapacity } from '../../agent-remote-hosted/src/succession-capacity.js';
 import { validateRelayState, type HostedRelayState } from '../../agent-remote-hosted/src/state.js';
-import { encodeSqlSnapshot } from '../src/storage-codec.js';
+import { encodeSqlSnapshot, SQL_SNAPSHOT_FORMAT } from '../src/storage-codec.js';
 
 let output: string;
 let ownedOutput: string | undefined;
@@ -91,7 +91,7 @@ function validatePhysical(snapshot: HostedRelayState, physical: any, cache?: any
   const chunks = [...encoded.records.values()].flatMap(record => record.chunks.map(chunk => ({ kind: chunk.kind, identity: chunk.identity, ordinal: chunk.ordinal,
     byteLength: chunk.bytes.byteLength, bytes: sha256(new Uint8Array(chunk.bytes as Uint8Array)) }))).sort((a, b) => (a.kind + a.identity).localeCompare(b.kind + b.identity) || a.ordinal - b.ordinal);
   identical(physical.chunks.map((row: any) => ({ kind: row.kind, identity: row.identity, ordinal: row.ordinal, byteLength: row.byteLength, bytes: row.bytes })), chunks, 'Complete chunk length/digest/order mismatch.');
-  check(physical.metadata.length === 1 && physical.metadata[0].version === 3, 'SQL metadata format mismatch.');
+  check(physical.metadata.length === 1 && physical.metadata[0].version === SQL_SNAPSHOT_FORMAT, 'SQL metadata format mismatch.');
   if (cache) identical(normalizeManifests(cache), expected, 'SQL store record cache mismatch.');
   return { snapshotSha256: stateDigest(snapshot), capacity: deriveSuccessionCapacity(snapshot, operatingEncoding),
     recordCount: expected.length, chunkCount: chunks.length, blobBytes: chunks.reduce((sum, row) => sum + row.byteLength, 0),

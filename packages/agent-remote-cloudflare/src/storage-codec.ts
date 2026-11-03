@@ -1,6 +1,7 @@
 /** Compatibility names for the existing SQLite record format and its storage tests. */
 export {
   HOSTED_SNAPSHOT_FORMAT as SQL_SNAPSHOT_FORMAT,
+  HOSTED_READABLE_SNAPSHOT_FORMATS as SQL_READABLE_SNAPSHOT_FORMATS,
   HOSTED_RECORD_FORMAT as SQL_RECORD_FORMAT,
   HOSTED_CHUNK_BYTES as SQL_CHUNK_BYTES,
   HOSTED_RECORD_KINDS as SQL_RECORD_KINDS,
@@ -14,4 +15,5 @@ export {
   type HostedEncodedRecord as SqlEncodedRecord,
   type HostedRecordCost as SqlRecordCost,
   type HostedSnapshot as SqlSnapshot,
+  type HostedSnapshotFormat as SqlSnapshotFormat,
 } from '@orchardworks/agent-remote-hosted';

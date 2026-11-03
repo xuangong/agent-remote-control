@@ -1,5 +1,6 @@
 import { expect, test } from 'vitest';
 import { codecState } from './storage-codec-fixture.js';
+import { SQL_SNAPSHOT_FORMAT } from '../src/storage-codec.js';
 import { sourceCompletionState, relationCompletionState } from './source-completion-fixture.js';
 import { retentionState } from './retention-consumption-fixture.js';
 import { accountingWorker, accountingAuth as auth } from './accounting-worker-fixture.js';
@@ -27,7 +28,7 @@ test('real Worker accounting migrates legacy state, holds sync, rolls back fault
     const released = await f.json('/status'); expect(released.publications).toBe(before.publications + 1);
     expect(released.current).toEqual(committed);
     const physical = await f.json('/physical');
-    expect(physical.metadata[0].version).toBe(3); expect(physical.manifests.every((row: any) => row.format === 1)).toBe(true);
+    expect(physical.metadata[0].version).toBe(SQL_SNAPSHOT_FORMAT); expect(physical.manifests.every((row: any) => row.format === 1)).toBe(true);
     await f.request('/fault?on=1');
     expect((await f.request('/mutate', { extraRelay: 'must roll back' })).status).toBe(500);
     expect(await f.json('/physical')).toEqual(physical);

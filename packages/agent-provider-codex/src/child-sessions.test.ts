@@ -150,6 +150,14 @@ describe('Codex native children', () => {
       h.addChild('child');
       h.spawn('child');
       await expect.poll(async () => (await h.parent.runtimeInfo()).childSessions?.map(child => child.nativeSessionId)).toEqual(['child']);
+      // A thread first read without a parent, as during its spawn, is found once a notification names its parent.
+      h.threads.set('late', { id: 'late', source: 'vscode', status: { type: 'active', activeFlags: [] } });
+      h.notify('item/agentMessage/delta', { threadId: 'late', turnId: 'late-turn', itemId: 'message', delta: 'x' });
+      await expect.poll(() => h.requests.filter(({ method, params }) => method === 'thread/read' && params.threadId === 'late').length).toBe(1);
+      await new Promise(resolve => setImmediate(resolve));
+      h.addChild('late');
+      h.notify('thread/started', { thread: h.threads.get('late') });
+      await expect.poll(async () => (await h.parent.runtimeInfo()).childSessions?.map(child => child.nativeSessionId).sort()).toEqual(['child', 'late']);
     } finally { await h.parent.dispose(); }
   });
 

@@ -77,6 +77,8 @@ export class CodexThreadRouter {
       this.tentativeChildren.delete(id);
     }
     if (!id) { this.callbacks.onNotification?.(method, params); return; }
+    // Metadata naming a parent that is not foreign contradicts the proof, which a read during a spawn can get wrong.
+    if (parent && !this.foreign.has(parent)) this.foreign.delete(id);
     if (this.foreign.has(id) && !this.threads.has(id)) return;
     if (isRecord(params) && (method === 'item/started' || method === 'item/completed')) this.inspectItem(id, readString(params.turnId), params.item);
     if (this.threads.has(id)) { this.callbacks.onNotification?.(method, params); return; }
@@ -173,7 +175,9 @@ export class CodexThreadRouter {
       for (const unrelated of [id, ...ancestry]) {
         if (this.tentativeChildren.delete(unrelated)) this.unresolvedChildren.delete(unrelated);
       }
-      if (id !== this.rootId) this.markForeign(id);
+      // Unless a notification that arrived meanwhile names a parent for it.
+      const contradicted = (this.buffered.get(id) ?? []).some(item => isRecord(item.params) && isRecord(item.params.thread) && parentThreadId(item.params.thread));
+      if (id !== this.rootId && !contradicted) this.markForeign(id);
       return false;
     }
     if (parentId === id) return false;

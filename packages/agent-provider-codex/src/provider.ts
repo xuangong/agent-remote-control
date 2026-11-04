@@ -1,6 +1,6 @@
 import { CodexSessionTakeover } from './session-takeover.js';
 import { preparePromptEdit, verifyPromptEditBranch, type CodexPromptEditTarget } from './prompt-edit.js';
-import type { AgentNativePrefixCapability, AgentSessionExtensions, AgentHistoryQuery, AgentHistoryPage } from '@orchardworks/agent-provider-sdk';
+import type { AgentNativePrefixCapability, AgentSessionExtensions, AgentSessionResumeOptions, AgentHistoryQuery, AgentHistoryPage } from '@orchardworks/agent-provider-sdk';
 import { readSessionHistoryPage } from './reference-history.js';
 import type { ChildProcessWithoutNullStreams } from 'node:child_process';
 import { homedir } from 'node:os';
@@ -19,6 +19,7 @@ import { AgentRuntimeError } from '@orchardworks/agent-provider-sdk';
 import { CodexAppServerTransport, CodexTransportUnavailableError, CodexRequestTimeoutError, CodexAppServerRpcError } from './app-server-transport.js';
 import { isRecord, readString, spawnCodexAppServer } from './native.js';
 import { CodexAppServerSession } from './session.js';
+import { installCodexSkills } from './host-access.js';
 import { initializeCodexTransport } from './initialize.js';
 import { readCodexSessionPage, type CodexSessionListOptions, type CodexSessionPage } from './catalog.js';
 import type { CodexSharedRecoveryPlan, CodexSharedRecoverySettings } from './shared-recovery.js';
@@ -61,6 +62,7 @@ export class CodexAppServerProvider implements AgentProviderAdapter {
   readonly descriptor: AgentProviderDescriptor = {
     sessionExtensions: { instructions: true, tools: true, toolNamespaces: 'creation' },
     sessionAccess: { readOnly: true },
+    sessionHostAccess: true,
     providerId: 'codex',
     displayName: 'Codex',
   };
@@ -69,6 +71,8 @@ export class CodexAppServerProvider implements AgentProviderAdapter {
   private readonly sessions = new Set<CodexAppServerSession>();
   /** Offers threads started without the Host's tool namespaces those namespaces on resume. */
   private readonly toolBridge = new CodexToolBridge();
+  private skillsInstalled?: Promise<void>;
+  private readonly skillsReloaded = new Set<string>();
 
   constructor(private readonly options: CodexAppServerProviderOptions = {}) {
     this.options = { ...options };
@@ -149,7 +153,7 @@ export class CodexAppServerProvider implements AgentProviderAdapter {
     const transport = await this.createTransport(config.cwd);
     try {
       const session = await CodexAppServerSession.create(transport, config, this.options.collaborationMode, this.options.env?.CODEX_HOME, this.options.restrictedNative,
-        this.sharedRecoveryPlan(config.cwd));
+        this.sharedRecoveryPlan(config.cwd), this.skillPreparation(config.hostAccess?.skills, config.cwd));
       this.sessions.add(session);
       session.onRuntimeClosed(() => this.sessions.delete(session));
       return session;
@@ -159,7 +163,7 @@ export class CodexAppServerProvider implements AgentProviderAdapter {
     }
   }
 
-  async resumeSession(handle: AgentPersistenceHandle, extensions: AgentSessionExtensions = {}): Promise<AgentSession> {
+  async resumeSession(handle: AgentPersistenceHandle, extensions: AgentSessionExtensions = {}, options: AgentSessionResumeOptions = {}): Promise<AgentSession> {
     const metadata: unknown = JSON.parse(handle.opaque);
     if (isRecord(metadata) && 'nativeEvidenceAuthority' in metadata && codexEvidenceJson(metadata.nativeEvidenceAuthority) !== codexEvidenceJson(
       codexEvidenceAuthority(this.options.env?.CODEX_HOME ?? process.env.CODEX_HOME ?? join(homedir(), '.codex')))) {
@@ -169,7 +173,7 @@ export class CodexAppServerProvider implements AgentProviderAdapter {
     const transport = await this.createTransport(cwd);
     try {
       const session = await CodexAppServerSession.resume(transport, handle, this.options.collaborationMode, this.options.env?.CODEX_HOME, this.options.restrictedNative,
-        this.sharedRecoveryPlan(cwd), extensions, this.toolBridge);
+        this.sharedRecoveryPlan(cwd), extensions, this.toolBridge, options.hostAccess, this.skillPreparation(options.hostAccess?.skills, cwd));
       this.sessions.add(session);
       session.onRuntimeClosed(() => this.sessions.delete(session));
       return session;
@@ -177,6 +181,22 @@ export class CodexAppServerProvider implements AgentProviderAdapter {
       await transport.dispose();
       throw runtimeError(error, this.options.connectionMode === 'shared');
     }
+  }
+
+  /**
+   * Installs the Host's skills once, then makes the runtime read its skills again once per workspace: Codex caches its
+   * skill list, so a skill installed while it runs, or before it last read that workspace, would stay invisible.
+   */
+  private skillPreparation(skills: string | undefined, cwd: string | undefined) {
+    if (!skills) return undefined;
+    return async (transport: CodexAppServerTransport) => {
+      await (this.skillsInstalled ??= installCodexSkills(skills, this.options.env?.CODEX_HOME ?? process.env.CODEX_HOME ?? join(homedir(), '.codex'))
+        .catch(error => { this.options.onDiagnostic?.(JSON.stringify({ event: 'codex_skills_unavailable', message: error instanceof Error ? error.message.slice(0, 200) : 'unknown' })); }));
+      const workspace = cwd ?? '';
+      if (this.skillsReloaded.has(workspace)) return;
+      this.skillsReloaded.add(workspace);
+      await transport.request('skills/list', { ...(cwd ? { cwds: [cwd] } : {}), forceReload: true }).catch(() => undefined);
+    };
   }
 
   async validatePromptEdit(target: CodexPromptEditTarget): Promise<void> {

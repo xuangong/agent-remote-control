@@ -1070,6 +1070,7 @@ export function createHostBroker(options: HostBrokerOptions) {
         const body = host.legacyDsh ? { nativeSessionId: binding.nativeSessionId } : {
           providerId: binding.providerId, nativeSessionId: binding.nativeSessionId,
           ...(binding.parentNativeSessionId ? { parentNativeSessionId: binding.parentNativeSessionId } : {}),
+          ...(binding.creatorSubject !== undefined && !owner(binding.creatorSubject) ? { shared: true } : {}),
         };
         const result = await rpc(host, 'POST', path, binding.agentId, JSON.stringify(body));
         assertHostCurrent(host, generation);
@@ -1169,12 +1170,14 @@ export function createHostBroker(options: HostBrokerOptions) {
         });
         const proposedAgentId = existingBinding?.agentId ?? randomUUID();
         const generation = host.generation;
+        // A share recipient's session is marked, so the Controller hides it from the owner's session commands.
+        const recipient = creatorSubject !== undefined && !owner(creatorSubject) ? { shared: true } : {};
         const request = host.legacyDsh
           ? { nativeSessionId, ...(body.workspaceId === undefined ? {} : { workspaceId: required(body.workspaceId, 'workspaceId') }) }
           : action === 'create'
             ? { providerId, operationId: required(body.operationId, 'operationId'),
-                ...optionalSettings(body, ['cwd', 'workspaceId', 'model', 'reasoningEffort', 'planning', 'creationSource', 'sourceNativeSessionId', 'editNativeSessionId', 'editTurnId', 'editMessageId']) }
-            : { providerId, nativeSessionId, ...(parentNativeSessionId ? { parentNativeSessionId } : {}), ...(body.takeOver === undefined ? {} : {takeOver: required(body.takeOver, 'takeOver')}) };
+                ...optionalSettings(body, ['cwd', 'workspaceId', 'model', 'reasoningEffort', 'planning', 'creationSource', 'sourceNativeSessionId', 'editNativeSessionId', 'editTurnId', 'editMessageId']), ...recipient }
+            : { providerId, nativeSessionId, ...(parentNativeSessionId ? { parentNativeSessionId } : {}), ...(body.takeOver === undefined ? {} : {takeOver: required(body.takeOver, 'takeOver')}), ...recipient };
         if (source) assertAssociationCreationOpen(source);
         let recoverSource = false;
         if (trackAssociation || shared) await commit(draft => {

@@ -34,6 +34,8 @@ try {
     banner: { js: 'import { createRequire as agentHostCreateRequire } from "node:module"; const require = agentHostCreateRequire(import.meta.url);' },
   });
   await cp(join(root, 'packages/agent-provider-opencode/dist/bridge-plugin.mjs'), join(stage, 'dist/bridge-plugin.mjs'));
+  // Session skills, in the Claude Code plugin layout, next to the bundle that locates them.
+  await cp(join(root, 'packages/agent-host/skills'), join(stage, 'dist/skills'), { recursive: true });
   await chmod(join(stage, 'dist/cli.js'), 0o755);
   const launcherSource = await readFile(join(root, 'scripts/controller-launcher.mjs'), 'utf8');
   const launcherStamp = '/* launcher-version */ undefined';

@@ -84,6 +84,7 @@ flowchart LR
 | [debugger.md](debugger.md) | Terminal presentation over the shared headless client. |
 | [lab.md](lab.md) | The workbench, temporary Host pairing, discovery, creation, and protocol validation. |
 | [call-for-support.md](call-for-support.md) | Support groups: profiles, enablement, calls, rosters, reports, workspaces, worker tools and usage. |
+| [session-commands.md](session-commands.md) | `agent-remote-controller session`: session credentials, the session socket, sandbox access, share recipients and the sessions skill. |
 | [host-vscode-tunnel.md](host-vscode-tunnel.md) | Host-owned VS Code process lifetime, device authorization, resource reclamation, and workspace links. |
 
 ## Implementation Anchors

@@ -34,6 +34,10 @@ test('packs the public Controller name with the unchanged command and npm regist
   assert.equal(manifest.dependencies['@opencode/client'], '2.0.25');
   const plugin = await exec('tar', ['-xOf', artifact, 'package/dist/bridge-plugin.mjs'], { timeout: 10000, maxBuffer: 2 * 1024 * 1024 });
   assert.ok(plugin.stdout.length > 1000);
+  const skill = await exec('tar', ['-xOf', artifact, 'package/dist/skills/agent-remote/skills/agent-remote-sessions/SKILL.md'], { timeout: 10000 });
+  assert.match(skill.stdout, /^---\nname: agent-remote-sessions\n/);
+  const skillPlugin = await exec('tar', ['-xOf', artifact, 'package/dist/skills/agent-remote/.claude-plugin/plugin.json'], { timeout: 10000 });
+  assert.equal(JSON.parse(skillPlugin.stdout).name, 'agent-remote');
 });
 
 test('installs the tarball independently and manages a paired daemon from a path containing spaces', { timeout: 180000 }, async t => {

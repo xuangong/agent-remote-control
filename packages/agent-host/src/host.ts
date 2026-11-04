@@ -39,6 +39,7 @@ import type { AgentProviderAdapter, AgentSession, AgentSessionConfig, AgentSessi
 import { AgentOperationRejectedError, AgentSessionInUseError, AgentRuntimeError, serializeAgentEmptyCreationResult, serializeAgentInputMaterialization } from '@orchardworks/agent-provider-sdk';
 import { PROTOCOL_VERSION, type HostEnvironment, type HostSessionState } from '@orchardworks/agent-remote-protocol';
 import { createSessionStatePublisher, liveSessionState, type SessionStatePublisher } from './session-state-publisher.js';
+import { sessionHostAccess, type SessionCallerCatalog, type SessionCallerEndpoint, type SessionCallerStore, type SessionHostAccessSource } from './session-callers.js';
 import { InputImageStore, type InputImageStoreOptions, InputResourceStore, type InputResourceStoreOptions, createAgentRemoteRelay, createRemoteHostUplinkClient, type AgentRemoteHttpResult, type AgentRemoteRelay,
   RemoteHostCatalog, RemoteHostCatalogError, UnsupportedAgentCapabilityError, type RemoteHostControlRequest, type RemoteHostUplinkClient, type RemoteHostUplinkDiagnostic, type RemoteSessionSummary,
   type RemoteHostSessionLease, type SessionWireAgent, type SessionWireOperationExecutor } from '@orchardworks/agent-remote-relay';
@@ -68,6 +69,8 @@ export interface AgentHostDirectory {
   sessionReleased?(nativeSessionId: string): Promise<void> | void;
   sessionWorkspace?(nativeSessionId: string, handle?: AgentPersistenceHandle): Promise<string | undefined>;
   setSourceAccessCheck?(check: (nativeSessionId: string) => Promise<void>): void;
+  /** What the sessions this directory creates and resumes may use of the Host; set only for adapters that apply it. */
+  setSessionHostAccess?(source: SessionHostAccessSource): void;
   setSourceBindingReader?(reader: import('./session-reference.js').SourceBindingReader): void;
   /** Host validates committed ancestry; exact saved prefix handles may reconstruct preparation attachments. */
   setSourceReferenceAncestors?(resolve: (nativeSessionId: string, preparationHandle?: AgentPersistenceHandle) => Promise<readonly string[]>): void;
@@ -126,6 +129,8 @@ export interface AgentHostRuntimeOptions {
   });
   inputImages?: InputImageStoreOptions;
   inputResources?: InputResourceStoreOptions;
+  /** Credentials through which sessions' shell commands reach this Controller as themselves. */
+  sessionCallers?: { store: SessionCallerStore; endpoint: SessionCallerEndpoint; skills?: string };
 }
 export interface AgentHostRequestDiagnostic {
   event: 'host_request_started' | 'host_request_completed';
@@ -152,6 +157,8 @@ export interface AgentHostRuntime {
   readonly relay: AgentRemoteRelay;
   /** Session states the Relay shares with the owner's pages. */
   readonly sessionStates: SessionStatePublisher;
+  /** The Host's sessions as session commands read them. */
+  readonly sessionCatalog: SessionCallerCatalog;
   addRegistration(registration: AgentHostProviderRegistration): void;
   control(request: RemoteHostControlRequest): Promise<AgentRemoteHttpResult>;
   enrollFromRelay(request: RemoteHostControlRequest, context: TrustedSuccessionContext): Promise<AgentRemoteHttpResult>;
@@ -185,6 +192,7 @@ export interface AgentHost {
   updateController(version: string, operationId: string, clean?: boolean): Promise<ControllerUpdateStatus>;
   shareContext(): Promise<{ hostId: string; providers: Array<{ providerId: string; displayName: string }> }>;
   shareCatalog(query: { hostId: string; providerId: string; nativeSessionId?: string; cursor?: string }): Promise<AgentRemoteHttpResult>;
+  readonly sessionCatalog: SessionCallerCatalog;
   readonly state: 'connecting' | 'registered' | 'disconnected' | 'rejected' | 'closed';
   replaceUplink(uplink: AgentHostOptions['uplink']): Promise<{ hostId: string }>;
   close(): Promise<void>;
@@ -263,6 +271,7 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
   return {
     ready,
     get state() { return state; },
+    sessionCatalog: runtime.sessionCatalog,
     shareContext,
     async controllerInfo() { return { identity: options.controller?.identity, status: await updater?.status() }; },
     async updateController(version, operationId, clean) {
@@ -553,7 +562,15 @@ export function createAgentHostRuntime(options: AgentHostRuntimeOptions): AgentH
       return successionService.bindings(directory.providerId).read(reader, source, query, legacyRead, canonicalReader);
     });
   }
-  for (const {directory} of registrations.values()) { bindHandoff(directory); bindSourceReader(directory); bindSourceReferenceAncestry(directory); }
+  for (const value of registrations.values()) { const {directory} = value; bindHandoff(directory); bindSourceReader(directory); bindSourceReferenceAncestry(directory); bindHostAccess(value); }
+  function bindHostAccess({ adapter, directory }: AgentHostProviderRegistration) {
+    const callers = options.sessionCallers;
+    if (callers && adapter.descriptor.sessionHostAccess) directory.setSessionHostAccess?.(sessionHostAccess(callers.store, directory.providerId, callers.endpoint, callers.skills));
+  }
+  /** A share recipient's session is hidden from session commands and holds no credential. */
+  async function markShared(payload: Record<string, unknown> | undefined, providerId: string, nativeSessionId: string) {
+    if (payload?.shared === true) await options.sessionCallers?.store.markShared({ providerId, nativeSessionId });
+  }
   function bindSourceReferenceAncestry(directory: AgentHostDirectory) {
     if (!successionService) return;
     directory.setSourceReferenceAncestors?.(async (id, preparationHandle) => {
@@ -972,6 +989,7 @@ export function createAgentHostRuntime(options: AgentHostRuntimeOptions): AgentH
       },
       maximumResultBytes,
     });
+    await markShared(payload, providerId, nativeSessionId);
     return json(200, publicBinding(await tracked(project(providerId, proposedAgentId, nativeSessionId, undefined, undefined, false, undefined, qualified && !savedCreation))));
   }
   const nativeStarts = createNativeStartBackoff();
@@ -1219,6 +1237,7 @@ export function createAgentHostRuntime(options: AgentHostRuntimeOptions): AgentH
           const parent = url.pathname === '/remote/child/attach' ? string(payload.parentNativeSessionId, 'parentNativeSessionId') : undefined;
           const takeOver = payload.takeOver === undefined ? undefined : string(payload.takeOver, 'takeOver');
           if (takeOver && (parent || !/^[a-f\d-]{36}$/i.test(takeOver))) throw new HostRequestError(400, 'invalid_request', 'A native owner generation is required for takeover.');
+          await markShared(payload, providerId, nativeSessionId);
           return json(200, publicBinding(await tracked(project(providerId, request.sessionId, nativeSessionId, parent, takeOver, false, operationScope(request)))));
         }
       }
@@ -1269,7 +1288,37 @@ export function createAgentHostRuntime(options: AgentHostRuntimeOptions): AgentH
     bindHandoff(registration.directory);
     bindSourceReader(registration.directory);
     bindSourceReferenceAncestry(registration.directory);
+    bindHostAccess(registration);
   }
+  const sessionCatalog: SessionCallerCatalog = {
+    providers: () => [...registrations.keys()].filter(id => options.providerEnabled?.(id) !== false),
+    async sessions(providerId) {
+      const catalog = catalogs.get(providerId);
+      if (!catalog || options.providerEnabled?.(providerId) === false) return [];
+      const sessions: RemoteSessionSummary[] = [];
+      let cursor: string | undefined;
+      do {
+        const page = await catalog.page({ limit: 100, ...(cursor ? { cursor } : {}) });
+        sessions.push(...page.items);
+        cursor = page.nextCursor;
+      } while (cursor);
+      return sessions;
+    },
+    async session(ref) {
+      if (options.providerEnabled?.(ref.providerId) === false) return undefined;
+      return catalogs.get(ref.providerId)?.session(ref.nativeSessionId);
+    },
+    async history(ref, query) {
+      if (options.providerEnabled?.(ref.providerId) === false) throw new AgentRuntimeError('native_session_unavailable', 'The provider is disabled.');
+      const adapter = registration(ref.providerId).adapter;
+      if (!adapter.readSessionHistory) throw new Error('Native history is unavailable for this provider.');
+      return adapter.readSessionHistory(ref.nativeSessionId, query);
+    },
+    liveState(ref) {
+      const binding = bindings.getByNative(ref.providerId, ref.nativeSessionId), live = binding && liveAgent(binding.agentId);
+      return live ? liveSessionState(live.handoffAdmissionState()) : undefined;
+    },
+  };
   const automationAccess: TpmSessionAccess = {
     controllerId: successionConfig?.controllerId ?? options.controllerId ?? 'local',
     sessionRouting: successionService?.executionRouting ?? {
@@ -1326,7 +1375,7 @@ export function createAgentHostRuntime(options: AgentHostRuntimeOptions): AgentH
     }
     return enrollment.control(request, context);
   };
-  return { relay, sessionStates, executionRouting: successionService?.executionRouting, roleRouting: successionService?.roleRouting, addRegistration, control: request => control(request), enrollFromRelay, executeOperation, acquireSession, setRelayConnected: idle.setConnected,
+  return { relay, sessionStates, sessionCatalog, executionRouting: successionService?.executionRouting, roleRouting: successionService?.roleRouting, addRegistration, control: request => control(request), enrollFromRelay, executeOperation, acquireSession, setRelayConnected: idle.setConnected,
     beginControllerRestart() {
       if (closed || draining) return false;
       // An owner-confirmed update closes admission immediately. Shutdown and the

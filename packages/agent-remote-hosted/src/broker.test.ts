@@ -965,3 +965,27 @@ it('commits keep unchanged entries as the committed objects and never commit the
   expect(revoked.sharing!.grants[1]).toBe(second.sharing!.grants[1]);
   expect(revoked.sharing!.grants.map(grant => [grant.subject, grant.revoked])).toEqual([['bob', true], ['carol', false]]);
 });
+
+it('marks the sessions a share recipient creates or reopens, and only those, for the Controller', async () => {
+  const { broker, native } = await restoredFixture({ ownerSubject: 'alice', initialState: { ...restoredState,
+    bindings: [...restoredState.bindings, { hostId: 'host', providerId: 'codex', nativeSessionId: 'bob-session', agentId: 'bob-agent', creatorSubject: 'bob' }],
+    sharing: { grants: [{ hostId: 'host', subject: 'bob', label: 'Bob', sessionLimit: 2, revoked: false }], reservations: [] } } });
+  const calls: Array<{ path: string; body: Record<string, unknown> }> = [];
+  native.onMessage(data => {
+    const message = JSON.parse(data);
+    if (message.type !== 'rpc_request') return;
+    const body = JSON.parse(message.body ?? '{}');
+    calls.push({ path: message.path, body });
+    native.send(JSON.stringify({ uplinkVersion: 2, type: 'rpc_response', requestId: message.requestId, status: 200,
+      body: JSON.stringify({ agentId: message.sessionId ?? 'agent', nativeSessionId: body.nativeSessionId ?? `created-${calls.length}` }) }));
+  });
+  const post = (path: string, body: unknown, subject: string) => broker.handleRequest(new Request(`https://relay.example/v1/remote/hosts/host/${path}`, {
+    method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) }), { principalSubject: () => subject });
+  expect((await post('create', { providerId: 'codex', operationId: operationOne }, 'bob'))?.status).toBe(200);
+  expect((await post('create', { providerId: 'codex', operationId: operationTwo }, 'alice'))?.status).toBe(200);
+  expect((await post('attach', { providerId: 'codex', nativeSessionId: 'bob-session' }, 'bob'))?.status).toBe(200);
+  expect((await post('attach', { providerId: 'codex', nativeSessionId: 'native-session' }, 'alice'))?.status).toBe(200);
+  expect(calls.map(call => [call.path, call.body.shared ?? false])).toEqual([
+    ['/remote/create', true], ['/remote/create', false], ['/remote/attach', true], ['/remote/attach', false],
+  ]);
+});

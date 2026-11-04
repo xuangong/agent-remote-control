@@ -1,0 +1,5 @@
+{
+  "name": "agent-remote",
+  "description": "Agent Remote Control: list and read the other agent sessions of this computer.",
+  "version": "1.0.0"
+}

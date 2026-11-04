@@ -38,6 +38,8 @@ export interface AgentProviderDescriptor {
   sessionExtensions?: { instructions: boolean; tools: boolean; toolNamespaces?: 'creation' | 'attachment' | 'live' };
   /** The adapter enforces AgentSessionExtensions.access natively on creation and reattachment. */
   sessionAccess?: { readOnly: true };
+  /** The adapter gives AgentSessionHostAccess to the shell commands of the sessions it creates and resumes. */
+  sessionHostAccess?: true;
 }
 
 export interface AgentPersistenceHandle {
@@ -119,12 +121,28 @@ export interface AgentHistoryPage {
   nextCursor?: string;
 }
 
+/**
+ * What the shell commands of a session may use of its Host: environment variables, and Unix sockets a native sandbox
+ * must still let them connect to. The Host decides it at each attachment and it carries a credential, so it is part
+ * of neither the session's extensions nor its persisted configuration.
+ */
+export interface AgentSessionHostAccess {
+  environment: Readonly<Record<string, string>>;
+  /** Absolute paths with every symbolic link resolved, as native sandboxes match them. */
+  unixSockets: readonly string[];
+  /** A directory in the Claude Code plugin layout whose skills/ the session may use. Adapters without per-session
+   * skills install them where the native agent finds its user's skills. */
+  skills?: string;
+}
+
 export interface AgentSessionConfig extends AgentSessionExtensions {
   sessionId: string;
   cwd?: string;
   model?: string;
   reasoningEffort?: string;
   planning?: boolean;
+  /** Applied by adapters with descriptor.sessionHostAccess; others ignore it. */
+  hostAccess?: AgentSessionHostAccess;
 }
 
 /** Explicit Host permission to initialize a prepared empty handle with its original identity.
@@ -132,6 +150,8 @@ export interface AgentSessionConfig extends AgentSessionExtensions {
  */
 export interface AgentSessionResumeOptions {
   initializeEmpty?: boolean;
+  /** Applied by adapters with descriptor.sessionHostAccess when they start the session's native runtime. */
+  hostAccess?: AgentSessionHostAccess;
 }
 
 /** A provider-native history boundary, independent of Host authority and roles. */

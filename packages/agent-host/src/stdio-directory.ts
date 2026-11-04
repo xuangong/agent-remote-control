@@ -8,6 +8,7 @@ import type { AgentHostDirectory, AgentHostWorkspace } from './host.js';
 import { requireSessionExtensionIdentity, sessionExtensionIdentity } from './session-extension-identity.js';
 import { SessionReferenceStore, disposeAfterSourceGrantFailure, sourceSessionExtensions, type SourceBindingReader } from './session-reference.js';
 import type { SessionCreationStore } from './session-creation-store.js';
+import type { SessionHostAccessSource } from './session-callers.js';
 
 export type ManagedStdioProvider = Pick<AgentProviderAdapter, 'createSession' | 'resumeSession' | 'readSessionHistory' | 'nativePrefix'> & {
     validatePromptEdit?(target: AgentNativePrefixTarget): Promise<void>;
@@ -47,6 +48,7 @@ export function createManagedStdioDirectory(
   const controllerTools = new Set<string>();
   let sourceAccessCheck: ((id: string) => Promise<void>) | undefined;
   let sourceBindingReader: SourceBindingReader | undefined;
+  let hostAccess: SessionHostAccessSource | undefined;
   let onHandoff: ((id: string, next: NativeOwnerIdentity) => Promise<void>) | undefined;
   let onHandoffAdmission: ((id: string, current: NativeOwnerIdentity, next: NativeOwnerIdentity) => NativeHandoffGrant) | undefined;
   const loading = new Map<string, Promise<AgentSession>>();
@@ -235,6 +237,7 @@ export function createManagedStdioDirectory(
     },
     setSourceAccessCheck(check) { sourceAccessCheck = check; },
     setSourceBindingReader(reader) { sourceBindingReader = reader; },
+    setSessionHostAccess(source) { hostAccess = source; },
     sourceReferences: () => references?.list() ?? Promise.resolve([]),
     requiresController: id => controllerTools.has(id),
     list() { if (closed) throw new Error(`${displayName} directory is closed.`); return discovery ??= discover().finally(() => { discovery = undefined; }); },
@@ -264,11 +267,14 @@ export function createManagedStdioDirectory(
       let readerId: string | undefined;
       let readerSession: AgentSession | undefined;
       const extensions = composeExtensions(inputConfig, sourceNativeSessionId ? sourceExtensions(sourceNativeSessionId, () => readerId, () => readerSession) : {});
-      const config = { ...inputConfig, ...extensions, sessionId: randomUUID(), ...(cwd ? { cwd } : {}) };
+      const access = hostAccess?.creation();
+      const config = { ...inputConfig, ...extensions, sessionId: randomUUID(), ...(cwd ? { cwd } : {}), ...(access ? { hostAccess: access.hostAccess } : {}) };
       const identity = sessionExtensionIdentity(config);
       const native = await provider.createSession(config);
       evidence?.completed();
       const id = await remember(native, undefined, identity);
+      // Without its credential saved, the session still works; its commands only cannot identify it.
+      await access?.bind(id).catch(() => undefined);
       const entry = opened.get(id)!;
       if (config.tools?.length) controllerTools.add(id);
       if (sourceNativeSessionId) {
@@ -376,10 +382,12 @@ export function createManagedStdioDirectory(
         // With history, native state wins as usual.
         const creation = handle || !provider.sessionWorkspace ? undefined : (await references?.get(nativeSessionId))?.handle ?? await creations?.get(nativeSessionId);
         const created = creation && !await provider.sessionWorkspace!(nativeSessionId) ? existing?.handle ?? creation : undefined;
+        const access = await hostAccess?.session(nativeSessionId);
+        const resumeWith = created ? { ...resumeOptions, initializeEmpty: true } : resumeOptions;
         let session: AgentSession;
         try {
           session = await provider.resumeSession(handle ?? created ?? existing?.handle ?? { providerId, sessionId: nativeSessionId, opaque: '{}' }, extensions,
-            created ? { ...resumeOptions, initializeEmpty: true } : resumeOptions);
+            access ? { ...resumeWith, hostAccess: access } : resumeWith);
         } catch (error) {
           if (owner) {
             unconfirmedStarts.add(nativeSessionId);

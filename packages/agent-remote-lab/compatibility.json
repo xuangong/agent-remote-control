@@ -15,6 +15,7 @@
         "scripts",
         "packages/agent-host/README.md",
         "packages/agent-host/package.json",
+        "packages/agent-host/skills",
         "packages/agent-host/src",
         "packages/agent-host/tests",
         "packages/agent-host/tsconfig.json",
@@ -127,7 +128,7 @@
         "packages/codex-daemon-client/tsconfig.json",
         "packages/codex-daemon-client/tsconfig.test.json"
       ],
-      "digest": "sha256:98ff3d31a2b50fcf50627826ab6a12559d9db13fa72aabafe79fb28d7f4e8172"
+      "digest": "sha256:3f7f005ace17d48405a12f83a0de0a197bf90e3a025ad59ea1e3bb660d683180"
     }
   },
   "providers": [

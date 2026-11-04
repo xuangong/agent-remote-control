@@ -5,7 +5,7 @@ import { claudeMessageContent } from './message-content.js';
 import { randomUUID } from 'node:crypto';
 import { query, type Options, type ModelInfo, type PermissionMode, type Query, type SDKMessage, type SDKUserMessage, type SessionMessage } from '@anthropic-ai/claude-agent-sdk';
 import type { AgentCapabilities, AgentInputAcceptance, AgentInputPart, AgentInteractionResponse, AgentMessageOptions, AgentRuntimeInfo, AgentSession, AgentSessionConfig,
-  AgentSessionToolNamespace, AgentStreamEvent, AgentNativeValidityToken, AgentPromptEditEvidence, ProviderStreamItem } from '@orchardworks/agent-provider-sdk';
+  AgentSessionHostAccess, AgentSessionToolNamespace, AgentStreamEvent, AgentNativeValidityToken, AgentPromptEditEvidence, ProviderStreamItem } from '@orchardworks/agent-provider-sdk';
 import { IMAGE_INPUT_CAPABILITIES, validateSessionSetting, type AgentSessionSetting } from '@orchardworks/agent-provider-sdk';
 import { Channel, deadline, DeadlineError } from './channel.js';
 import { ClaudeInteractions } from './interactions.js';
@@ -17,7 +17,7 @@ import { ClaudeChildren } from './children.js';
 import { createClaudeCatalog, type ClaudeCatalog, type ClaudeTimelineMessage } from './catalog.js';
 import { claudeToolDeclaration, createClaudeSessionTools, type ClaudeSessionTools } from './session-tools.js';
 import { ClaudeNativeEvidence, claudeEmptyHandle } from './native-evidence.js';
-import { CLAUDE_ALLOWS_BYPASS_PERMISSIONS, claudePermissionModeOptions, claudeReadOnlyOptions, claudeSandbox, isResumableClaudePermissionMode, type ResumableClaudePermissionMode } from './permission-modes.js';
+import { CLAUDE_ALLOWS_BYPASS_PERMISSIONS, claudeHostSandbox, claudePermissionModeOptions, claudeReadOnlyOptions, claudeSandbox, isResumableClaudePermissionMode, type ResumableClaudePermissionMode } from './permission-modes.js';
 
 export type ClaudeQuery = AsyncIterable<SDKMessage> & Pick<Query, 'initializationResult' | 'setPermissionMode' | 'close' | 'supportedCommands' | 'reloadSkills' | 'supportedModels' | 'setModel'> & Partial<Pick<Query, 'applyFlagSettings' | 'getContextUsage' | 'setMcpServers'>> & {
   /** The pinned SDK implements this control without declaring it on public Query. */
@@ -100,6 +100,8 @@ export class ClaudeAgentSession implements AgentSession {
   private permissionModeWrites = Promise.resolve();
   /** The sandbox flag setting the native process applies, as JSON; YOLO lifts it. */
   private sandbox = 'null';
+  /** Kept apart from the configuration, which persists in handles, because it carries a credential. */
+  private hostAccess?: AgentSessionHostAccess;
   private models: ModelInfo[] = [];
   private appliedEffort: string | null | undefined;
   private settingsRevision = 0;
@@ -168,9 +170,10 @@ export class ClaudeAgentSession implements AgentSession {
     });
   }
 
-  static async open(config: ClaudeSessionConfig, options: ClaudeSessionOptions = {}, messages: ClaudeTimelineMessage[] = [], resume = false): Promise<ClaudeAgentSession> {
+  static async open({ hostAccess, ...config }: ClaudeSessionConfig, options: ClaudeSessionOptions = {}, messages: ClaudeTimelineMessage[] = [], resume = false): Promise<ClaudeAgentSession> {
     if (config.reasoningEffort && !['low', 'medium', 'high', 'xhigh', 'max'].includes(config.reasoningEffort)) throw new Error('Unsupported Claude reasoning effort.');
     const session = new ClaudeAgentSession(config, options, messages);
+    session.hostAccess = hostAccess;
     try {
       if (config.tools?.length) session.hostTools = createClaudeSessionTools(config.tools, () => session.requireOpen());
       for (const namespace of bindAgentSessionToolNamespaces(config.toolNamespaces, () => session.requireOpen())) {
@@ -179,23 +182,24 @@ export class ClaudeAgentSession implements AgentSession {
       const servers = session.mcpServers(), allow = session.hostToolRules(session.namespaceServers.keys());
       if (resume) await session.children.restore();
       const readOnly = session.readOnly ? claudeReadOnlyOptions(config.cwd ?? process.cwd()) : undefined;
-      const sandbox = readOnly?.sandbox ?? claudeSandbox(session.permissionMode, !!options.restrictedNative);
+      const sandbox = claudeHostSandbox(readOnly?.sandbox ?? claudeSandbox(session.permissionMode, !!options.restrictedNative), hostAccess?.unixSockets ?? []);
       session.sandbox = JSON.stringify(sandbox);
       session.native = (options.query ?? query)({ prompt: session.input, options: {
         ...(resume ? { resume: config.sessionId } : { sessionId: config.sessionId }), cwd: config.cwd,
         model: config.model, ...(config.reasoningEffort ? { effort: config.reasoningEffort as Options['effort'] } : {}),
         // Stop hooks run only after a turn that ended normally; the session state event also ends a failed or interrupted one.
-        pathToClaudeCodeExecutable: options.executable ?? 'claude', env: { ...process.env, ...options.env, CLAUDE_CODE_EMIT_SESSION_STATE_EVENTS: '1' },
+        pathToClaudeCodeExecutable: options.executable ?? 'claude', env: { ...process.env, ...options.env, ...hostAccess?.environment, CLAUDE_CODE_EMIT_SESSION_STATE_EVENTS: '1' },
         includePartialMessages: true, forwardSubagentText: true, persistSession: true, settingSources: ['user', 'project', 'local'],
         systemPrompt: config.systemPrompt !== undefined ? [config.systemPrompt, config.instructions].filter(value => value !== undefined && value !== '').join('\n\n')
           : { type: 'preset', preset: 'claude_code', ...(config.instructions ? { append: config.instructions } : {}) },
         ...(Object.keys(servers).length ? { mcpServers: servers } : {}),
         ...(allow.length ? { settings: { permissions: { allow } } } : {}),
-        ...(sandbox ? { sandbox } : {}),
+        ...(hostAccess?.skills ? { plugins: [{ type: 'local' as const, path: hostAccess.skills, skipMcpDiscovery: true }] } : {}),
         permissionMode: session.permissionMode, allowDangerouslySkipPermissions: CLAUDE_ALLOWS_BYPASS_PERMISSIONS, canUseTool: session.interactions.request,
         hooks: { Stop: [{ hooks: [async input => { if (input.hook_event_name === 'Stop') session.nativeEvidence.noteStop(input); return {}; }] }] },
         stderr: options.onDiagnostic, spawnClaudeCodeProcess: session.process.spawn,
         ...readOnly,
+        ...(sandbox ? { sandbox } : {}),
       } });
       session.pump = session.consume();
       const initialized = await deadline(session.native.initializationResult(), session.timeout, 'Claude initialization');
@@ -437,7 +441,7 @@ export class ClaudeAgentSession implements AgentSession {
     if (mode === 'bypassPermissions') await this.applySandbox(mode);
   }
   private async applySandbox(mode: PermissionMode): Promise<void> {
-    const sandbox = claudeSandbox(mode, !!this.options.restrictedNative), applied = JSON.stringify(sandbox);
+    const sandbox = claudeHostSandbox(claudeSandbox(mode, !!this.options.restrictedNative), this.hostAccess?.unixSockets ?? []), applied = JSON.stringify(sandbox);
     if (applied === this.sandbox) return;
     if (!this.native.applyFlagSettings) {
       // Without a Host sandbox, the user's own settings keep governing a native process that cannot change it.

@@ -15,6 +15,7 @@ not make an unrestricted native agent safe for untrusted users or untrusted code
 | Host | Local canonical workspace admission, imported-session filtering, permission settings locked, management environment variables masked | A workspace boundary is not an OS filesystem sandbox; provider credentials and accessible credential files remain available to native tools |
 | Native provider | Codex workspace-write with escalation disabled; Claude command sandbox with unsandboxed fallback disabled, except in YOLO | Claude YOLO lifts the command sandbox and stays selected when the session reopens, so whoever may select it on a session has full Host access until it is changed; Copilot supplies no filesystem sandbox guarantee here; DSH/external Hosts require their own native execution policy |
 | Sharing | Host ACL plus creator-specific session access and cumulative creation allowance | Sharing does not provide OS user, process, filesystem or network isolation |
+| Session commands | A credential per managed session on a socket separate from local management; share recipients' sessions hold none and are hidden; reads stay on this Host and within its workspace policy | Any process in a session can use that session's credential to read the owner's other sessions on the Host; read-only Codex sessions get a network profile that allows only the session socket |
 
 An opaque continuation cannot reveal the original Gateway login token, even to a
 Relay that holds the shared service-signing secret. It is still an Agents renewal

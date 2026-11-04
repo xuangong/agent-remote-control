@@ -21,7 +21,8 @@ export interface ClaudeAgentProviderOptions extends ClaudeSessionOptions { catal
 export class ClaudeAgentProvider implements AgentProviderAdapter {
   /** Ordinary create supplies a nonempty UUID; this does not bound resume, fork, or history. */
   readonly createdSessionIdMaxLength: number = 36;
-  readonly descriptor = { providerId: 'claude', displayName: 'Claude Code', sessionExtensions: { instructions: true, tools: true, toolNamespaces: 'live' as const }, sessionAccess: { readOnly: true as const } };
+  readonly descriptor = { providerId: 'claude', displayName: 'Claude Code', sessionExtensions: { instructions: true, tools: true, toolNamespaces: 'live' as const }, sessionAccess: { readOnly: true as const },
+    sessionHostAccess: true as const };
   readonly nativeEvidence: AgentProviderNativeEvidence = {
     availability: () => ({ status: 'configured', version: 2 }),
     createEmpty: async config => {
@@ -151,7 +152,7 @@ export class ClaudeAgentProvider implements AgentProviderAdapter {
       const messages = info ? await (this.catalog.timelineMessages?.(sessionId) ?? this.catalog.messages(sessionId)) : [];
       // Read-only access persists: a session that was read-only stays so whatever its next attachment supplies.
       const access = extensions.access ?? stored.access;
-      session = await ClaudeAgentSession.open({ ...stored, ...extensions, ...(access ? { access } : {}), sessionId, cwd: await workspace(cwd) },
+      session = await ClaudeAgentSession.open({ ...stored, ...extensions, ...(access ? { access } : {}), ...(resumeOptions.hostAccess ? { hostAccess: resumeOptions.hostAccess } : {}), sessionId, cwd: await workspace(cwd) },
         { ...this.options, catalog: this.catalog, emptyDescriptor: Boolean(descriptor), restoreNativeModel: Boolean(descriptor && info), onDispose: () => {
           if (session && this.sessions.get(sessionId) === session) this.sessions.delete(sessionId);
         } }, messages, Boolean(info));

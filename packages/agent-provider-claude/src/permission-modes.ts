@@ -33,6 +33,15 @@ export function claudeSandbox(mode: PermissionMode, restricted: boolean): NonNul
 }
 
 /**
+ * A sandbox flag setting that also lets commands connect to the Host's Unix sockets. Flag settings merge with the
+ * user's: the sockets alone neither enable nor disable a sandbox. Sandboxes match real paths, without symbolic links.
+ */
+export function claudeHostSandbox(sandbox: NonNullable<Options['sandbox']> | null, unixSockets: readonly string[]): NonNullable<Options['sandbox']> | null {
+  if (!unixSockets.length) return sandbox;
+  return { ...sandbox, network: { ...sandbox?.network, allowUnixSockets: [...sandbox?.network?.allowUnixSockets ?? [], ...unixSockets] } };
+}
+
+/**
  * A read-only session: no edit or planning tools, and commands run in a required sandbox that denies writes to the
  * workspace. Nothing asks; reads and scratch writes outside the workspace work. Verified with Claude Code 2.1.247;
  * planning alone is not enough, because it relies on approvals rather than the sandbox.

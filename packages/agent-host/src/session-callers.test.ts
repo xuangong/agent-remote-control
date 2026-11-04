@@ -1,0 +1,245 @@
+import { randomUUID } from 'node:crypto';
+import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { afterEach, describe, expect, it } from 'vitest';
+import type { AgentCapabilities, AgentHistoryQuery, AgentPersistenceHandle, AgentProviderAdapter, AgentRuntimeInfo, AgentSession, AgentSessionConfig,
+  AgentSessionExtensions, AgentSessionResumeOptions, ProviderStreamItem } from '@orchardworks/agent-provider-sdk';
+import type { RemoteSessionSummary } from '@orchardworks/agent-remote-relay';
+import { createAgentHostRuntime, type AgentHostRuntime } from './host.js';
+import { createManagedStdioDirectory } from './stdio-directory.js';
+import { createCodexSessionDirectory } from './directory.js';
+import { handleSessionCall, listenSessionCalls, sessionCallerEndpoint, SessionCallerStore, SESSION_SOCKET_VARIABLE, SESSION_TOKEN_VARIABLE } from './session-callers.js';
+import { runSessionCommand } from './session-command.js';
+
+const capabilities: AgentCapabilities = { history: true, sendMessage: true, steer: false, cancel: false, readResource: false,
+  interactions: { question: false, planApproval: false, toolApproval: false } };
+
+class FakeSession implements AgentSession {
+  readonly capabilities = capabilities;
+  private closed = false;
+  private wake?: () => void;
+  constructor(readonly providerId: string, readonly nativeSessionId: string, readonly cwd?: string) {}
+  async *observe(): AsyncIterable<ProviderStreamItem> {
+    yield { type: 'history_boundary' };
+    while (!this.closed) await new Promise<void>(resolve => { this.wake = resolve; });
+  }
+  async runtimeInfo(): Promise<AgentRuntimeInfo> {
+    return { providerId: this.providerId, sessionId: this.nativeSessionId, status: this.closed ? 'closed' : 'idle', ...(this.cwd ? { cwd: this.cwd } : {}),
+      persistence: { providerId: this.providerId, sessionId: this.nativeSessionId, opaque: '{}' } };
+  }
+  async sendMessage(): Promise<void> {}
+  async dispose(): Promise<void> { this.closed = true; this.wake?.(); }
+}
+
+const cleanup: Array<() => Promise<unknown>> = [];
+afterEach(async () => { for (const close of cleanup.splice(0).reverse()) await close(); });
+
+async function temporary(prefix: string) {
+  const directory = await mkdtemp(join(tmpdir(), prefix));
+  cleanup.push(() => rm(directory, { recursive: true, force: true }));
+  return directory;
+}
+
+function provider(providerId: string, cwd: string, listed: RemoteSessionSummary[] = [], sessionHostAccess = true) {
+  const created: AgentSessionConfig[] = [], resumed: Array<AgentSessionResumeOptions | undefined> = [], histories: Array<[string, AgentHistoryQuery]> = [];
+  let next = 0;
+  const native = {
+    descriptor: { providerId, displayName: providerId, ...(sessionHostAccess ? { sessionHostAccess: true as const } : {}) },
+    async createSession(config: AgentSessionConfig) { created.push(config); return new FakeSession(providerId, `${providerId}-created-${++next}`, config.cwd); },
+    async resumeSession(handle: AgentPersistenceHandle, _extensions?: AgentSessionExtensions, options?: AgentSessionResumeOptions) {
+      resumed.push(options); return new FakeSession(providerId, handle.sessionId, cwd);
+    },
+    async listSessions() { return listed; },
+    async readSessionHistory(id: string, query: AgentHistoryQuery) {
+      histories.push([id, query]);
+      return { entries: [{ id: 'entry', turnId: 'turn', role: 'assistant', text: `history of ${id}`, textOffset: 0, totalChars: 11 + id.length }], nextCursor: 'older' };
+    },
+  };
+  const directory = createManagedStdioDirectory(providerId, providerId, native, [{ id: cwd, name: cwd, path: cwd }]);
+  return { registration: { adapter: native as AgentProviderAdapter, directory }, created, resumed, histories };
+}
+
+function summary(providerId: string, nativeSessionId: string, updatedAt: string, workspace = '/work'): RemoteSessionSummary {
+  return { providerId, nativeSessionId, title: `${nativeSessionId} title`, workspace, createdAt: updatedAt, updatedAt, state: 'idle' };
+}
+
+async function host(registrations: ReturnType<typeof provider>[]) {
+  const state = await temporary('session-callers-');
+  const store = new SessionCallerStore(join(state, 'session-callers.json'));
+  const endpoint = await sessionCallerEndpoint(state);
+  const runtime = createAgentHostRuntime({ registrations: registrations.map(item => item.registration),
+    sessionCallers: { store, endpoint, skills: '/controller/skills/agent-remote' } });
+  cleanup.push(() => runtime.close());
+  return { runtime, store, endpoint, state };
+}
+
+const create = (runtime: AgentHostRuntime, agentId: string, body: Record<string, unknown>) =>
+  runtime.control({ method: 'POST', path: '/remote/create', sessionId: agentId, body: JSON.stringify({ operationId: randomUUID(), ...body }) });
+const attach = (runtime: AgentHostRuntime, agentId: string, body: Record<string, unknown>) =>
+  runtime.control({ method: 'POST', path: '/remote/attach', sessionId: agentId, body: JSON.stringify(body) });
+
+describe('session credentials', () => {
+  it('keeps one credential per session across Controller restarts and identifies only bound credentials', async () => {
+    const path = join(await temporary('session-store-'), 'callers.json');
+    const store = new SessionCallerStore(path);
+    const token = await store.issue({ providerId: 'claude', nativeSessionId: 'one' });
+    expect(token).toMatch(/^[\w-]{43}$/);
+    expect(await store.issue({ providerId: 'claude', nativeSessionId: 'one' })).toBe(token);
+    const pending = store.prepare();
+    expect(store.identify(pending.token)).toBeUndefined();
+    await pending.bind({ providerId: 'codex', nativeSessionId: 'thread' });
+    const restarted = new SessionCallerStore(path);
+    await restarted.ready;
+    expect(restarted.identify(token)).toEqual({ providerId: 'claude', nativeSessionId: 'one' });
+    expect(restarted.identify(pending.token)).toEqual({ providerId: 'codex', nativeSessionId: 'thread' });
+    expect(restarted.identify('x'.repeat(43))).toBeUndefined();
+    expect(restarted.identify(undefined)).toBeUndefined();
+  });
+
+  it('revokes and never again issues a credential for a share recipient\'s session', async () => {
+    const path = join(await temporary('session-store-'), 'callers.json');
+    const store = new SessionCallerStore(path);
+    const token = await store.issue({ providerId: 'claude', nativeSessionId: 'shared' });
+    await store.markShared({ providerId: 'claude', nativeSessionId: 'shared' });
+    expect(store.identify(token)).toBeUndefined();
+    expect(await store.issue({ providerId: 'claude', nativeSessionId: 'shared' })).toBeUndefined();
+    const pending = store.prepare();
+    await pending.bind({ providerId: 'claude', nativeSessionId: 'shared' });
+    expect(store.identify(pending.token)).toBeUndefined();
+    const restarted = new SessionCallerStore(path);
+    await restarted.ready;
+    expect(restarted.isShared({ providerId: 'claude', nativeSessionId: 'shared' })).toBe(true);
+    expect(await readFile(path, 'utf8')).not.toContain(token!);
+  });
+});
+
+describe('Host access for managed sessions', () => {
+  it('gives a created session its credential, socket and skills, bound to its native identity', async () => {
+    const cwd = await temporary('session-work-');
+    const claude = provider('claude', cwd);
+    const { runtime, store, endpoint } = await host([claude]);
+    expect((await create(runtime, 'agent', { providerId: 'claude' })).status).toBe(200);
+    const access = claude.created[0]!.hostAccess!;
+    expect(access).toEqual({ environment: { [SESSION_TOKEN_VARIABLE]: expect.any(String), [SESSION_SOCKET_VARIABLE]: endpoint.access },
+      unixSockets: [endpoint.access], skills: '/controller/skills/agent-remote' });
+    expect(store.identify(access.environment[SESSION_TOKEN_VARIABLE])).toEqual({ providerId: 'claude', nativeSessionId: 'claude-created-1' });
+  });
+
+  it('gives a resumed session the same credential each time', async () => {
+    const cwd = await temporary('session-work-');
+    const claude = provider('claude', cwd);
+    const { runtime, store } = await host([claude]);
+    expect((await attach(runtime, 'first', { providerId: 'claude', nativeSessionId: 'existing' })).status).toBe(200);
+    const token = claude.resumed[0]?.hostAccess?.environment[SESSION_TOKEN_VARIABLE];
+    expect(store.identify(token)).toEqual({ providerId: 'claude', nativeSessionId: 'existing' });
+    expect(await store.issue({ providerId: 'claude', nativeSessionId: 'existing' })).toBe(token);
+  });
+
+  it('marks a share recipient\'s created and attached sessions, which keep no credential', async () => {
+    const cwd = await temporary('session-work-');
+    const claude = provider('claude', cwd);
+    const { runtime, store } = await host([claude]);
+    expect((await create(runtime, 'created', { providerId: 'claude', shared: true })).status).toBe(200);
+    expect(store.identify(claude.created[0]!.hostAccess!.environment[SESSION_TOKEN_VARIABLE])).toBeUndefined();
+    expect(store.isShared({ providerId: 'claude', nativeSessionId: 'claude-created-1' })).toBe(true);
+    expect((await attach(runtime, 'attached', { providerId: 'claude', nativeSessionId: 'recipient', shared: true })).status).toBe(200);
+    expect(claude.resumed[0]?.hostAccess).toBeUndefined();
+    expect(store.isShared({ providerId: 'claude', nativeSessionId: 'recipient' })).toBe(true);
+  });
+
+  it('passes Host access through the Codex directory on creation and resume', async () => {
+    const created: AgentSessionConfig[] = [], resumed: Array<AgentSessionResumeOptions | undefined> = [], bound: string[] = [];
+    const access = (name: string) => ({ environment: { [SESSION_TOKEN_VARIABLE]: name }, unixSockets: ['/private/tmp/sessions.sock'] });
+    const directory = createCodexSessionDirectory({ listSessions: async () => ({ sessions: [] }),
+      async createSession(config: AgentSessionConfig) { created.push(config); return new FakeSession('codex', 'thread-new', '/work'); },
+      async resumeSession(handle: AgentPersistenceHandle, _extensions?: AgentSessionExtensions, options?: AgentSessionResumeOptions) {
+        resumed.push(options); return new FakeSession('codex', handle.sessionId, '/work');
+      },
+      async openChildSession() { throw new Error('No children.'); } } as never, []);
+    cleanup.push(async () => directory.close());
+    directory.setSessionHostAccess!({ creation: () => ({ hostAccess: access('created'), bind: async id => { bound.push(id); } }), session: async id => access(id) });
+    expect(await directory.create({ cwd: '/work' })).toBe('thread-new');
+    expect(created[0]!.hostAccess).toEqual(access('created'));
+    expect(bound).toEqual(['thread-new']);
+    await directory.open('thread-old');
+    expect(resumed).toEqual([{ hostAccess: access('thread-old') }]);
+  });
+
+  it('gives nothing to sessions of adapters that do not apply Host access', async () => {
+    const cwd = await temporary('session-work-');
+    const copilot = provider('copilot', cwd, [], false);
+    const { runtime } = await host([copilot]);
+    expect((await create(runtime, 'agent', { providerId: 'copilot' })).status).toBe(200);
+    expect((await attach(runtime, 'other', { providerId: 'copilot', nativeSessionId: 'existing' })).status).toBe(200);
+    expect(copilot.created[0]!.hostAccess).toBeUndefined();
+    expect(copilot.resumed[0]?.hostAccess).toBeUndefined();
+  });
+});
+
+describe('session commands', () => {
+  async function commands() {
+    const cwd = await temporary('session-work-');
+    const claude = provider('claude', cwd, [summary('claude', 'old', '2026-11-01T00:00:00.000Z'), summary('claude', 'hidden', '2026-11-03T00:00:00.000Z')]);
+    const codex = provider('codex', cwd, [summary('codex', 'thread', '2026-11-02T00:00:00.000Z')]);
+    const context = await host([claude, codex]);
+    await context.store.markShared({ providerId: 'claude', nativeSessionId: 'hidden' });
+    expect((await attach(context.runtime, 'caller', { providerId: 'claude', nativeSessionId: 'old' })).status).toBe(200);
+    const token = claude.resumed[0]!.hostAccess!.environment[SESSION_TOKEN_VARIABLE]!;
+    const server = await listenSessionCalls(context.endpoint.listen, input => handleSessionCall(input,
+      { store: context.store, catalog: context.runtime.sessionCatalog, hostId: async () => 'host-1' }));
+    cleanup.push(() => server.close());
+    const run = async (args: string[], env: NodeJS.ProcessEnv = { [SESSION_TOKEN_VARIABLE]: token, [SESSION_SOCKET_VARIABLE]: context.endpoint.access }) => {
+      let output = '';
+      const code = await runSessionCommand(args, env, text => { output += text; });
+      return { code, output: JSON.parse(output) };
+    };
+    return { ...context, claude, codex, token, run };
+  }
+
+  it('reads its own session and lists the Host\'s sessions newest first, without share recipients\' sessions', async () => {
+    const { run, claude } = await commands();
+    const self = await run(['read', 'self']);
+    expect(self.code).toBe(0);
+    expect(self.output.session).toEqual({ address: 'host-1/claude/old', providerId: 'claude', title: 'old title', cwd: expect.any(String), state: 'idle', self: true });
+    expect(self.output.entries[0].text).toBe('history of old');
+    expect(self.output.nextCursor).toBe('older');
+    const listed = await run(['list']);
+    expect(listed.code).toBe(0);
+    expect(listed.output.sessions.map((session: { address: string }) => session.address)).toEqual(['host-1/codex/thread', 'host-1/claude/old']);
+    expect(listed.output.sessions[1]).toMatchObject({ state: 'idle', self: true });
+    expect(listed.output.sessions[0]).not.toHaveProperty('self');
+    const read = await run(['read', 'host-1/codex/thread', '--limit', '3', '--search', 'plan', '--cursor', 'c1']);
+    expect(read.output.session).toMatchObject({ address: 'host-1/codex/thread', title: 'thread title', state: 'idle' });
+    expect(claude.histories).toHaveLength(1);
+    const hidden = await run(['read', 'host-1/claude/hidden']);
+    expect(hidden).toEqual({ code: 6, output: { error: { code: 'session_not_found', message: 'No such session on this Host.' } } });
+  });
+
+  it('pages a listing and forwards history queries', async () => {
+    const { run, codex } = await commands();
+    const first = await run(['list', '--limit', '1']);
+    expect(first.output.sessions).toHaveLength(1);
+    const second = await run(['list', '--limit', '1', '--cursor', first.output.nextCursor]);
+    expect(second.output.sessions[0].address).toBe('host-1/claude/old');
+    expect(second.output).not.toHaveProperty('nextCursor');
+    expect((await run(['list', '--limit', '2', '--cursor', first.output.nextCursor])).code).toBe(2);
+    expect((await run(['list', '--provider', 'codex'])).output.sessions.map((session: { providerId: string }) => session.providerId)).toEqual(['codex']);
+    await run(['read', 'local/codex/thread', '--turn', 'turn', '--text-offset', '6000']);
+    expect(codex.histories.at(-1)).toEqual(['thread', { turnId: 'turn', textOffset: 6000 }]);
+  });
+
+  it('reports why a command cannot be answered, with distinct exit codes', async () => {
+    const { run, endpoint } = await commands();
+    expect(await run(['read', 'self'], {})).toMatchObject({ code: 3, output: { error: { code: 'no_session_identity' } } });
+    expect(await run(['read', 'self'], { [SESSION_TOKEN_VARIABLE]: 'y'.repeat(43), [SESSION_SOCKET_VARIABLE]: endpoint.access }))
+      .toMatchObject({ code: 3, output: { error: { code: 'no_session_identity' } } });
+    expect(await run(['read', 'other-host/codex/thread'])).toMatchObject({ code: 5, output: { error: { code: 'session_forbidden' } } });
+    expect(await run(['read', 'host-1/codex/missing'])).toMatchObject({ code: 6, output: { error: { code: 'session_not_found' } } });
+    expect(await run(['read', 'self', '--search', 'a', '--turn', 'b'])).toMatchObject({ code: 2, output: { error: { code: 'invalid_request' } } });
+    expect(await run(['list', '--search', 'a'])).toMatchObject({ code: 2, output: { error: { code: 'invalid_request' } } });
+    expect(await run(['read'])).toMatchObject({ code: 2, output: { error: { code: 'invalid_request' } } });
+    expect(await run(['read', 'self'], { [SESSION_TOKEN_VARIABLE]: 'z'.repeat(43), [SESSION_SOCKET_VARIABLE]: join(tmpdir(), 'arc-missing.sock') }))
+      .toMatchObject({ code: 4, output: { error: { code: 'controller_unreachable' } } });
+  });
+});

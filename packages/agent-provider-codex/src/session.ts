@@ -2,7 +2,7 @@ import { RESOURCE_INPUT_CAPABILITIES } from '@orchardworks/agent-provider-sdk';
 import { AgentOperationRejectedError, prepareAgentOperation, bindAgentSessionTools, bindAgentSessionToolNamespaces } from '@orchardworks/agent-provider-sdk';
 import { preparePromptEdit, type CodexPromptEditTarget } from './prompt-edit.js';
 import { prepareNativeFork } from './session-fork.js';
-import type { AgentSessionExtensions, AgentSessionTool, AgentSessionToolNamespace } from '@orchardworks/agent-provider-sdk';
+import type { AgentSessionExtensions, AgentSessionHostAccess, AgentSessionTool, AgentSessionToolNamespace } from '@orchardworks/agent-provider-sdk';
 import { codexMessageInput, type CodexInput } from './message-content.js';
 import { discoverCodexCommands, expandCodexPrompt, readCodexCommandDocumentation } from './commands.js';
 import { randomUUID } from 'node:crypto';
@@ -51,6 +51,7 @@ import { initializeCodexTransport } from './initialize.js';
 import { CodexSessionRuntime, historyOverlapsNotifications, type CodexRawNotification } from './runtime.js';
 import type { CodexSharedRecoveryPlan } from './shared-recovery.js';
 import { bridgeableNamespace, declaredToolNamespaces, type CodexToolBridge, type CodexToolBridgeRegistration } from './tool-bridge.js';
+import { codexHostAccess, sandboxParams } from './host-access.js';
 
 const PROVIDER_ID = 'codex';
 
@@ -86,11 +87,6 @@ interface StoredSessionConfig {
   access?: 'read_only';
 }
 
-/** Read-only sessions take the read-only sandbox; restricted Hosts otherwise confine writes to the workspace. */
-function sandboxParams(access: StoredSessionConfig['access'], restrictedNative: boolean) {
-  if (access === 'read_only') return { sandbox: 'read-only', approvalPolicy: 'never' } as const;
-  return restrictedNative ? { sandbox: 'workspace-write', approvalPolicy: 'never' } as const : {};
-}
 const READ_ONLY_PERMISSIONS = 'This session is read-only; its permissions cannot change.';
 const namespaceDeclaration = (namespaces: readonly AgentSessionToolNamespace[]) =>
   JSON.stringify(namespaces.map(namespace => [namespace.name, !!namespace.deferred, namespace.tools.map(tool => tool.name)]));
@@ -475,16 +471,18 @@ export class CodexAppServerSession implements AgentSession {
     codexHome?: string,
     restrictedNative = false,
     recoveryPlan?: CodexSharedRecoveryPlan,
+    prepare?: (transport: CodexAppServerTransport) => Promise<void>,
   ): Promise<CodexAppServerSession> {
     const stored = toStoredConfig(config, collaborationMode);
     const session = new CodexAppServerSession(transport, stored, codexHome, undefined, restrictedNative, recoveryPlan);
     session.tools = bindAgentSessionTools(config.tools, () => session.assertOpen());
     session.bindNamespaces(config.toolNamespaces);
-    await session.initialize();
+    const host = codexHostAccess(config.hostAccess, stored.access, restrictedNative, await session.initialize());
+    await prepare?.(transport);
     const response = await transport.request('thread/start', {
       ...(session.tools.length || session.toolNamespaces.length ? { dynamicTools: codexDynamicTools(session.tools, session.toolNamespaces) } : {}),
-      config: { 'features.default_mode_request_user_input': true },
-      ...sandboxParams(stored.access, restrictedNative),
+      config: { 'features.default_mode_request_user_input': true, ...host.config },
+      ...host.params,
       ...(stored.model ? { model: stored.model } : {}),
       ...(stored.cwd ? { cwd: stored.cwd } : {}),
       ...(sessionInstructions(stored) ? { developerInstructions: sessionInstructions(stored) } : {}),
@@ -594,9 +592,11 @@ export class CodexAppServerSession implements AgentSession {
     recoveryPlan?: CodexSharedRecoveryPlan,
     extensions: AgentSessionExtensions = {},
     toolBridge?: CodexToolBridge,
+    hostAccess?: AgentSessionHostAccess,
+    prepare?: (transport: CodexAppServerTransport) => Promise<void>,
   ): Promise<CodexAppServerSession> {
     const bridged: { registration?: CodexToolBridgeRegistration } = {};
-    try { return await CodexAppServerSession.resumeThread(transport, handle, collaborationMode, codexHome, restrictedNative, recoveryPlan, extensions, toolBridge, bridged); }
+    try { return await CodexAppServerSession.resumeThread(transport, handle, collaborationMode, codexHome, restrictedNative, recoveryPlan, extensions, toolBridge, bridged, hostAccess, prepare); }
     catch (error) { bridged.registration?.release(); throw error; }
   }
 
@@ -610,6 +610,8 @@ export class CodexAppServerSession implements AgentSession {
     extensions: AgentSessionExtensions,
     toolBridge: CodexToolBridge | undefined,
     bridged: { registration?: CodexToolBridgeRegistration },
+    hostAccess: AgentSessionHostAccess | undefined,
+    prepare: ((transport: CodexAppServerTransport) => Promise<void>) | undefined,
   ): Promise<CodexAppServerSession> {
     if (handle.providerId !== PROVIDER_ID) {
       throw new Error(`Cannot resume ${handle.providerId} with the Codex provider`);
@@ -622,7 +624,8 @@ export class CodexAppServerSession implements AgentSession {
     session.bindNamespaces(extensions.toolNamespaces);
     session.threadId = handle.sessionId;
     session.runtime.registerRoot(handle.sessionId);
-    await session.initialize();
+    const host = codexHostAccess(hostAccess, stored.access, restrictedNative, await session.initialize());
+    await prepare?.(transport);
     const expectedNativeSettings = stored.nativeSettings ? structuredClone(stored.nativeSettings) : undefined;
     const preparedCollaborationMode = stored.collaborationMode;
     let hydrateEmpty = false;
@@ -648,8 +651,8 @@ export class CodexAppServerSession implements AgentSession {
     const resumeThread = (servers?: Record<string, unknown>) => transport.request('thread/resume', {
       threadId: handle.sessionId,
       excludeTurns: !hydrateEmpty,
-      config: { 'features.default_mode_request_user_input': true, ...servers },
-      ...sandboxParams(stored.access, restrictedNative),
+      config: { 'features.default_mode_request_user_input': true, ...servers, ...host.config },
+      ...host.params,
       ...(stored.cwd ? { cwd: stored.cwd } : {}),
       ...(!expectedNativeSettings && stored.model ? { model: stored.model } : {}),
       ...(sessionInstructions(stored) ? { developerInstructions: sessionInstructions(stored) } : {}),

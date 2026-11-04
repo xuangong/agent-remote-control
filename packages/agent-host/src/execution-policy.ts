@@ -145,6 +145,7 @@ export function protectHostDirectory(directory: AgentHostDirectory, policy: Host
     setSessionHandoffAdmission: directory.setSessionHandoffAdmission?.bind(directory),
     setSourceBindingReader: directory.setSourceBindingReader?.bind(directory),
     setSourceReferenceAncestors: directory.setSourceReferenceAncestors?.bind(directory),
+    setSessionHostAccess: directory.setSessionHostAccess?.bind(directory),
     sourceReferences: directory.sourceReferences?.bind(directory),
     ...(directory.forkSession ? { async forkSession(nativeSessionId: string) {
       await checkSource(nativeSessionId);

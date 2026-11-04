@@ -111,6 +111,26 @@ The CLI uses the authenticated local management socket of the running daemon and
 its registered Host identity. If that daemon predates this command, update it and
 restart the Controller. There is no need to restart the native Codex daemon.
 
+## Session commands for agents
+
+Claude Code and Codex sessions that the Controller creates or resumes can list and
+read this Host's other sessions from their own shell:
+
+```sh
+agent-remote-controller session read self
+agent-remote-controller session list
+agent-remote-controller session read <hostId>/<providerId>/<nativeSessionId> --search "plan"
+```
+
+The commands print JSON and work only where `AGENT_REMOTE_SESSION_TOKEN` and
+`AGENT_REMOTE_SESSION_SOCKET` are set; the Controller gives every session it manages
+its own credential and a session socket separate from local management. Sessions a
+share recipient created are hidden and hold no credential. The Controller loads the
+`agent-remote-sessions` skill into Claude Code sessions and installs it into the
+Codex home. Read-only Codex sessions on macOS reach the socket through a permission
+profile; other Codex sessions follow your own Codex sandbox. See
+[session commands](../../docs/current/agent-remote/session-commands.md).
+
 ## Connect to a Relay
 
 The first pairing requires an explicit Relay URL in `AGENT_HOST_SERVER` and

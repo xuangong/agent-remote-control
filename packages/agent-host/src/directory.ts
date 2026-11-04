@@ -7,6 +7,7 @@ import type { CodexAppServerProvider, CodexSessionSummary } from '@orchardworks/
 import type { AgentProviderAdapter, AgentPersistenceHandle, AgentSession, AgentHistoryQuery } from '@orchardworks/agent-provider-sdk';
 import type { AgentHostDirectory, AgentHostWorkspace } from './host.js';
 import { requireSessionExtensionIdentity, sessionExtensionIdentity } from './session-extension-identity.js';
+import type { SessionHostAccessSource } from './session-callers.js';
 
 const codexProbeLimit = 10;
 const codexFullListingMaxAgeMs = 5 * 60_000;
@@ -24,6 +25,7 @@ export function createCodexSessionDirectory(
   let sourceAccessCheck: ((nativeSessionId: string) => Promise<void>) | undefined;
   let sourceBindingReader: SourceBindingReader | undefined;
   let sourceReferenceAncestors: ((id: string, preparationHandle?: AgentPersistenceHandle) => Promise<readonly string[]>) | undefined;
+  let hostAccess: SessionHostAccessSource | undefined;
   async function lookupSourceGrant(id: string, preparationHandle?: AgentPersistenceHandle) {
     return references?.resolve(sourceReferenceAncestors ? await sourceReferenceAncestors(id, preparationHandle) : [id]);
   }
@@ -174,6 +176,7 @@ export function createCodexSessionDirectory(
     setSourceAccessCheck(check) { sourceAccessCheck = check; },
     setSourceBindingReader(reader) { sourceBindingReader = reader; },
     setSourceReferenceAncestors(resolve) { sourceReferenceAncestors = resolve; },
+    setSessionHostAccess(source) { hostAccess = source; },
     sourceReferences: () => references?.list() ?? Promise.resolve([]),
     ...(provider.forkSession ? { async forkSession(nativeSessionId: string) {
       if (closed) throw new Error('Codex directory is closed.');
@@ -201,12 +204,15 @@ export function createCodexSessionDirectory(
       let readerId: string | undefined;
       const extensions = sourceNativeSessionId ? sourceExtensions(sourceNativeSessionId, () => readerId) : {};
       const systemPrompt = [config.systemPrompt, extensions.systemPrompt].filter(Boolean).join('\n\n');
+      const access = hostAccess?.creation();
       const nativeConfig = { ...config, ...extensions, sessionId: randomUUID(), ...(cwd ? { cwd } : {}),
-        ...(systemPrompt ? { systemPrompt } : {}) };
+        ...(systemPrompt ? { systemPrompt } : {}), ...(access ? { hostAccess: access.hostAccess } : {}) };
       const identity = sessionExtensionIdentity(nativeConfig);
       const session = await provider.createSession(nativeConfig);
       evidence?.completed();
       const id = await remember(session, identity);
+      // Without its credential saved, the session still works; its commands only cannot identify it.
+      await access?.bind(id).catch(() => undefined);
       if (extensions.tools?.length || config.tools?.length) controllerTools.add(id);
       if (sourceNativeSessionId) {
         try { await references!.set({ sourceNativeSessionId, systemPrompt, handle: opened.get(id)!.handle }); }
@@ -237,9 +243,12 @@ export function createCodexSessionDirectory(
         return existing.session;
       }
       const identity = sessionExtensionIdentity(resumedExtensions);
+      const access = await hostAccess?.session(nativeSessionId);
       // Let native saved settings win after a Host restart; only restore Host instructions and tools.
-      const resume = () => provider.resumeSession(handle ?? existing?.handle ?? { providerId: 'codex', sessionId: nativeSessionId, opaque: '{}' },
-        resumedExtensions);
+      const resume = () => {
+        const target = handle ?? existing?.handle ?? { providerId: 'codex', sessionId: nativeSessionId, opaque: '{}' };
+        return access ? provider.resumeSession(target, resumedExtensions, { hostAccess: access }) : provider.resumeSession(target, resumedExtensions);
+      };
       let session: AgentSession;
       try { session = await resume(); }
       catch (error) {

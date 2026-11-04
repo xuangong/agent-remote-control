@@ -2,6 +2,7 @@ import { AgentOperationRejectedError } from '@orchardworks/agent-provider-sdk';
 import { validateSessionSetting, type AgentSessionSetting, type AgentSessionSettingOption } from '@orchardworks/agent-provider-sdk';
 import type { CodexAppServerTransport } from './app-server-transport.js';
 import { isRecord, readString } from './native.js';
+import { HOST_ACCESS_PROFILE } from './host-access.js';
 
 interface NativeModel {
   value: string;
@@ -28,6 +29,8 @@ export class CodexSessionSettings {
   private requirements: Record<string, unknown> | undefined;
   private approval: unknown;
   private sandbox: Record<string, unknown> | undefined;
+  /** Whether the thread runs under the Host's profile, whose enabled network reaches only the Host's sockets. */
+  private hostProfile = false;
   private readonly sandboxPolicies = new Map<string, Record<string, unknown>>();
   private discoveryFailure: string | undefined;
 
@@ -74,6 +77,7 @@ export class CodexSessionSettings {
 
   apply(settings: Record<string, unknown>): void {
     if ('approvalPolicy' in settings) this.approval = settings.approvalPolicy;
+    if ('activePermissionProfile' in settings) this.hostProfile = isRecord(settings.activePermissionProfile) && settings.activePermissionProfile.id === HOST_ACCESS_PROFILE;
     if (isRecord(settings.sandboxPolicy) && readString(settings.sandboxPolicy.type)) {
       this.sandbox = structuredClone(settings.sandboxPolicy);
       this.sandboxPolicies.set(String(settings.sandboxPolicy.type), this.sandbox!);
@@ -104,7 +108,7 @@ export class CodexSessionSettings {
       id: 'sandbox', category: 'permissions', label: 'Sandbox', value: readString(this.sandbox?.type) ?? null,
       options: sandboxOptions.filter(({ value }) => !Array.isArray(allowedSandbox) || allowedSandbox.includes(sandboxModes[value])),
       mutable: this.requirements !== undefined && this.sandbox !== undefined, scope: 'session',
-      description: describeSandbox(this.sandbox),
+      description: describeSandbox(this.sandbox, this.hostProfile),
     });
     return settings;
   }
@@ -126,10 +130,11 @@ export class CodexSessionSettings {
   }
 }
 
-function describeSandbox(policy: Record<string, unknown> | undefined): string {
+function describeSandbox(policy: Record<string, unknown> | undefined, hostProfile: boolean): string {
   if (!policy) return 'Native sandbox state unavailable.';
   if (policy.type === 'dangerFullAccess') return 'Filesystem and network access are unrestricted.';
-  const network = policy.networkAccess === true || policy.networkAccess === 'enabled' ? 'Network access allowed.' : 'Network access blocked.';
+  const network = hostProfile ? 'Network access blocked, except the Controller session socket.'
+    : policy.networkAccess === true || policy.networkAccess === 'enabled' ? 'Network access allowed.' : 'Network access blocked.';
   if (policy.type === 'readOnly') return `Read-only filesystem. ${network}`;
   if (policy.type === 'externalSandbox') return `Sandbox enforcement is managed externally. ${network}`;
   const roots = Array.isArray(policy.writableRoots) ? policy.writableRoots.filter((root): root is string => typeof root === 'string') : [];

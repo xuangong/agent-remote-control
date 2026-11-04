@@ -38,7 +38,8 @@ export async function fixture(handler: (body: ModelRequest, res: ServerResponse,
  });
  server.listen(0, '127.0.0.1'); await once(server, 'listening');
  const address = server.address(); if (!address || typeof address === 'string') throw new Error('No fixture port');
- const provider = new CopilotAgentProvider({onDiagnostic: message => diagnostics.push(message), useLoggedInUser: false, requestTimeoutMs: 5000, env: {COPILOT_HOME: join(home, 'profile'), GITHUB_TOKEN: undefined, GH_TOKEN: undefined, COPILOT_GITHUB_TOKEN: undefined}, nativeSessionConfig: {...await configure?.(cwd), provider: {type: providerType, baseUrl: `http://127.0.0.1:${address.port}`, ...(providerType === 'openai' ? {wireApi: 'completions' as const} : {})}}});
+ // The production budget: the native runtime can take several seconds to start on a busy machine.
+ const provider = new CopilotAgentProvider({onDiagnostic: message => diagnostics.push(message), useLoggedInUser: false, requestTimeoutMs: 15000, env: {COPILOT_HOME: join(home, 'profile'), GITHUB_TOKEN: undefined, GH_TOKEN: undefined, COPILOT_GITHUB_TOKEN: undefined}, nativeSessionConfig: {...await configure?.(cwd), provider: {type: providerType, baseUrl: `http://127.0.0.1:${address.port}`, ...(providerType === 'openai' ? {wireApi: 'completions' as const} : {})}}});
  return {home, cwd, provider, baseUrl: `http://127.0.0.1:${address.port}`, requests, errors, diagnostics, async close() {
   try { await provider.dispose(); } finally { server.closeAllConnections(); await new Promise<void>(r => server.close(() => r())); await rm(home, {recursive: true, force: true}); }
  }};

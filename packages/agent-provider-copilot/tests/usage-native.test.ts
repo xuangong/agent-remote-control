@@ -40,7 +40,7 @@ it('reads native session totals across turns and saved resume without counting c
     expect(f.requests).toHaveLength(2);
     await resumed.dispose(); await history.done;
     await f.provider.dispose();
-    const restarted = new CopilotAgentProvider({useLoggedInUser: false, requestTimeoutMs: 5000, env: {COPILOT_HOME: join(f.home, 'profile'), GITHUB_TOKEN: undefined, GH_TOKEN: undefined, COPILOT_GITHUB_TOKEN: undefined}, nativeSessionConfig: {provider: {type: 'openai', baseUrl: f.baseUrl, wireApi: 'completions'}}});
+    const restarted = new CopilotAgentProvider({useLoggedInUser: false, requestTimeoutMs: 15000, env: {COPILOT_HOME: join(f.home, 'profile'), GITHUB_TOKEN: undefined, GH_TOKEN: undefined, COPILOT_GITHUB_TOKEN: undefined}, nativeSessionConfig: {provider: {type: 'openai', baseUrl: f.baseUrl, wireApi: 'completions'}}});
     try {
       const restored = await restarted.resumeSession(handle); const restoredHistory = observe(restored);
       await waitFor(() => restoredHistory.events().some(event => event.type === 'usage_updated' && event.usage.tokenScope === 'session' && event.usage.totalTokens === 44));

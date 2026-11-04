@@ -8,7 +8,7 @@ import { CopilotAgentProvider } from '../src/provider.js';
 import { fixture, observe, reply, waitFor, type ModelRequest } from './native-fixture.js';
 
 function coldProvider(f: Awaited<ReturnType<typeof fixture>>) {
-  return new CopilotAgentProvider({useLoggedInUser:false,requestTimeoutMs:5000,
+  return new CopilotAgentProvider({useLoggedInUser:false,requestTimeoutMs:15000,
     env:{COPILOT_HOME:join(f.home,'profile'),GITHUB_TOKEN:undefined,GH_TOKEN:undefined,COPILOT_GITHUB_TOKEN:undefined},
     nativeSessionConfig:{provider:{type:'openai',baseUrl:f.baseUrl,wireApi:'completions'}},
   });

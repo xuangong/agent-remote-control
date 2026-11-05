@@ -1,3 +1,5 @@
+import type { WindowOperation } from '@orchardworks/agent-remote-protocol';
+
 // Diagnostics are opt-in and page-local. Never read text, URLs, session IDs or storage.
 const limits = { maxSamples: 800, frameWindowMs: 3000, recordingMs: 600_000 };
 type StopReason = 'manual' | 'timeout' | 'pagehide' | 'unmount';
@@ -14,6 +16,27 @@ let environment: Record<string, unknown> | null = null;
 let cleanup: (() => void) | undefined;
 let safeAreaProbe: HTMLDivElement | undefined;
 let lastGeometry = '';
+let paneIds = new WeakMap<Element, number>();
+let windowIds = new WeakMap<object, number>();
+let nextPaneId = 0, nextWindowId = 0;
+const paneSelector = '.lab-session-family-pane, .lab-primary-conversation, .lab-side-conversation';
+type WindowSelectionDiagnostic = { source: 'local' | 'remote' | 'settled' | 'rejected' | 'discarded' | 'conflict'; previous: number; selected: number; revision: number; pending: number; operation?: WindowOperation['type'] };
+function paneId(pane: Element) {
+  let id = paneIds.get(pane);
+  if (id === undefined) { id = ++nextPaneId; paneIds.set(pane, id); }
+  return id;
+}
+function describeTarget(target: EventTarget | null) {
+  const element = target instanceof Element ? target : null;
+  if (!element) return null;
+  const pane = element.closest(paneSelector);
+  const action = element.closest('[data-action-id]')?.getAttribute('data-action-id');
+  const control = action && ['model', 'permissions', 'images', 'resources', 'commands'].includes(action) ? action
+    : element.matches('textarea, [contenteditable="true"], [contenteditable="plaintext-only"]') ? 'editor'
+    : element.matches('input[type="file"]') ? 'file' : element.closest('button') ? 'button' : 'other';
+  return { control, pane: pane ? paneId(pane) : null, hidden: !!element.closest('[hidden], [inert]') };
+}
+
 
 export function getLayoutDiagnosticsStatus() { return status; }
 export function subscribeLayoutDiagnostics(listener: () => void) {
@@ -29,7 +52,7 @@ function bounds(element: Element | null) {
   return { x: rounded(rect.x), y: rounded(rect.y), width: rounded(rect.width), height: rounded(rect.height) };
 }
 
-function capture(reason: string, decision?: ViewportDecision) {
+function capture(reason: string, decision?: ViewportDecision, event?: Event, selection?: WindowSelectionDiagnostic & { window?: number }) {
   if (!status.recording) return;
   const shell = document.querySelector<HTMLElement>('.lab-shell');
   const header = shell?.querySelector<HTMLElement>('.lab-mobile-navigation');
@@ -44,6 +67,10 @@ function capture(reason: string, decision?: ViewportDecision) {
     document: { width: root.clientWidth, height: root.clientHeight, scrollHeight: root.scrollHeight, scrollWidth: root.scrollWidth, scrollTop: rounded(document.scrollingElement?.scrollTop ?? 0) },
     viewport: viewport ? { width: rounded(viewport.width), height: rounded(viewport.height), offsetTop: rounded(viewport.offsetTop), offsetLeft: rounded(viewport.offsetLeft), pageTop: rounded(viewport.pageTop), pageLeft: rounded(viewport.pageLeft), scale: rounded(viewport.scale) } : null,
     shell: bounds(shell), header: bounds(header ?? null),
+    panes: [...document.querySelectorAll(paneSelector)].slice(0, 64).map(pane => ({
+      pane: paneId(pane), selected: pane.getAttribute('data-selected') === 'true', hidden: !!pane.closest('[hidden], [inert]'),
+    })),
+    activeTarget: describeTarget(active),
     composers: [...document.querySelectorAll('.lab-composer-dock')].slice(0, 4).map(bounds),
     shellStyle: shellStyle ? { top: shellStyle.top, height: shellStyle.height, position: shellStyle.position,
       viewportTop: shellStyle.getPropertyValue('--lab-viewport-top'), viewportHeight: shellStyle.getPropertyValue('--lab-viewport-height'), occluded: shell?.dataset.viewportOccluded ?? null } : null,
@@ -59,7 +86,8 @@ function capture(reason: string, decision?: ViewportDecision) {
   // Keep event boundaries, but do not fill the report with identical settled frames.
   if (reason === 'frame' && signature === lastGeometry) return;
   lastGeometry = signature;
-  samples.push({ at: rounded(performance.now() - origin), reason, ...geometry, decision: decision ?? null });
+  samples.push({ at: rounded(performance.now() - origin), reason, ...geometry, decision: decision ?? null, selection: selection ?? null,
+    interaction: event ? { target: describeTarget(event.target), relatedTarget: event instanceof FocusEvent ? describeTarget(event.relatedTarget) : null, trusted: event.isTrusted } : null });
   if (samples.length > limits.maxSamples) { samples.shift(); droppedSamples++; }
 }
 
@@ -72,9 +100,20 @@ export function recordKeyboardRefocus(trigger: 'focusin' | 'click') {
   capture(`refocus-${trigger}`);
 }
 
+/** Callers provide only layout indices and operation kinds, never bindings or request bodies. */
+export function recordWindowSelection(selection: WindowSelectionDiagnostic, owner?: object) {
+  if (!status.recording) return;
+  try {
+    let window = owner && windowIds.get(owner);
+    if (owner && window === undefined) { window = ++nextWindowId; windowIds.set(owner, window); }
+    capture('window-selection', undefined, undefined, { ...selection, ...(window === undefined ? {} : { window }) });
+  } catch { /* Optional DOM measurements must never interrupt Window mutation or settlement. */ }
+}
+
 export function startLayoutDiagnostics() {
   if (status.recording) return;
   samples = []; droppedSamples = 0; lastGeometry = '';
+  paneIds = new WeakMap(); windowIds = new WeakMap(); nextPaneId = 0; nextWindowId = 0;
   startedAt = new Date().toISOString(); stoppedAt = null; origin = performance.now();
   environment = {
     userAgent: navigator.userAgent, pixelRatio: devicePixelRatio,
@@ -98,19 +137,20 @@ export function startLayoutDiagnostics() {
     capture('frame');
     if (performance.now() < until) frame = requestAnimationFrame(tick);
   };
-  const transition = (reason: string) => {
-    capture(reason);
+  const transition = (reason: string, event?: Event) => {
+    capture(reason, undefined, event);
     if (document.hidden) { cancelAnimationFrame(frame); frame = 0; return; }
     until = performance.now() + limits.frameWindowMs;
     if (!frame) frame = requestAnimationFrame(tick);
   };
   const listen = (target: EventTarget, name: string, reason = name, capture = false) => {
-    const handler = () => transition(reason);
+    const handler = (event: Event) => transition(reason, event);
     target.addEventListener(name, handler, { passive: true, capture });
     removals.push(() => target.removeEventListener(name, handler, { capture }));
   };
   for (const name of ['orientationchange', 'resize', 'scroll', 'pageshow', 'focus']) listen(window, name, `window-${name}`);
-  for (const name of ['focusin', 'focusout', 'visibilitychange']) listen(document, name);
+  for (const name of ['focusin', 'focusout', 'pointerdown', 'click']) listen(document, name, name, true);
+  listen(document, 'visibilitychange');
   // The browser can focus an element again without focusin, as when the page itself gains focus.
   listen(document, 'focus', 'focus', true);
   if (window.visualViewport) for (const name of ['resize', 'scroll']) listen(window.visualViewport, name, `visualViewport-${name}`);

@@ -43,8 +43,8 @@ export function LayoutDiagnosticsSettings() {
       <button type="button" role="switch" aria-checked={state.recording} aria-labelledby={label} aria-describedby={description} disabled={copying} onClick={toggle}><span aria-hidden="true" /></button>
     </div>
     <p id={description}>{state.recording
-      ? 'Recording. Return to your conversation and rotate your device. Then come back here to copy the report. Stops after 10 minutes.'
-      : 'Capture screen, keyboard and layout positions to investigate jumps. No chat text, drafts or credentials are recorded.'}</p>
+      ? 'Recording. Return to your conversation and reproduce the jump. Then come back here to copy the report. Stops after 10 minutes.'
+      : 'Capture screen, keyboard, focus and session selection changes to investigate jumps. No chat text, drafts or credentials are recorded.'}</p>
     <p className="lab-layout-diagnostics-note">Kept only in this page. Refreshing loses the report. Starting again replaces it. Recording may briefly affect performance.</p>
     {state.stopReason === 'timeout' ? <p>Recording stopped after 10 minutes. Your report is ready.</p> : null}
     {state.hasRecording ? <div className="lab-layout-diagnostics-actions">

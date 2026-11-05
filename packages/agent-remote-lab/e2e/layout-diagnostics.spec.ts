@@ -24,6 +24,9 @@ test('records shell movement from Settings and exports a private, selectable rep
   await toggle.click();
   await expect(toggle).toBeChecked();
   await rail.locator('.lab-rail-close').click();
+  const model = page.locator('.lab-primary-conversation').getByRole('button', { name: 'Model', exact: true });
+  await model.tap();
+  await model.tap();
   await page.evaluate(() => {
     const privateText = document.createElement('span');
     privateText.textContent = 'PRIVATE SESSION TITLE';
@@ -55,6 +58,7 @@ test('records shell movement from Settings and exports a private, selectable rep
   expect(text).not.toContain('session-stars.html');
   let previous = {};
   const samples = report.samples.map((sample: Record<string, unknown>) => previous = { ...previous, ...sample });
+  expect(samples.some((sample: any) => sample.reason === 'pointerdown' && sample.interaction?.target?.control === 'model' && typeof sample.interaction.target.pane === 'number')).toBe(true);
   expect(samples.some((sample: any) => sample.reason === 'viewport-before' && sample.decision.occluded && sample.shellStyle.top === '0px')).toBe(true);
   expect(samples.some((sample: any) => sample.reason === 'viewport-after' && sample.shell.y === 44 && sample.shellStyle.top === '44px')).toBe(true);
   await output.focus();

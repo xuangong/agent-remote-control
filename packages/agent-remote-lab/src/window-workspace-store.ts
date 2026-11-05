@@ -1,3 +1,4 @@
+import { getLayoutDiagnosticsStatus, recordWindowSelection } from './layout-diagnostics.js';
 import { applyWindowOperation, isWindowMutation, isWindowOperation, isWorkspaceWindow, type WindowMutation, type WindowOperation, type WorkspaceWindow } from '@orchardworks/agent-remote-protocol';
 import { WindowRequestError, type WindowCommit, type WindowWorkspaceClient } from '@orchardworks/agent-remote-web';
 
@@ -84,9 +85,16 @@ export class WindowWorkspaceStore {
     }
     if (JSON.stringify(visible) !== JSON.stringify(this.snapshot)) this.snapshot = visible;
   }
+  private recordSelection(previous: WorkspaceWindow, source: Parameters<typeof recordWindowSelection>[0]['source'], operation?: WindowOperation) {
+    if (!getLayoutDiagnosticsStatus().recording || previous.selectedViewId === this.snapshot.selectedViewId) return;
+    recordWindowSelection({ source, previous: previous.views.findIndex(view => view.id === previous.selectedViewId),
+      selected: this.snapshot.views.findIndex(view => view.id === this.snapshot.selectedViewId), revision: this.snapshot.revision,
+      pending: this.edits.length, ...(operation ? { operation: operation.type } : {}) }, this);
+  }
   accept(window: WorkspaceWindow) {
     if (this.stopped || !isWorkspaceWindow(window) || window.id !== this.committed.id || window.revision < this.committed.revision) return;
-    this.committed = window; this.rebuild(); this.publish();
+    const previous = this.snapshot;
+    this.committed = window; this.rebuild(); this.recordSelection(previous, 'remote'); this.publish();
   }
   operate(operation: WindowOperation): Promise<void> {
     try {
@@ -95,7 +103,8 @@ export class WindowWorkspaceStore {
       if (equivalent(this.snapshot, next)) return this.edits.at(-1)?.done ?? Promise.resolve();
       const first = this.edits.length === 0;
       const edit = this.pending({ operation: copy(operation), revision: replacesLayout(operation) ? this.committed.revision : this.snapshot.revision });
-      this.edits.push(edit); this.snapshot = next; this.publish(first ? 'saving' : undefined);
+      const previous = this.snapshot;
+      this.edits.push(edit); this.snapshot = next; this.recordSelection(previous, 'local', operation); this.publish(first ? 'saving' : undefined);
       if (this.sync.state !== 'offline' && this.sync.state !== 'error') void this.retry();
       return edit.done;
     } catch (error) { return Promise.reject(error); }
@@ -135,7 +144,8 @@ export class WindowWorkspaceStore {
       if (snapshot.window.revision >= this.committed.revision) this.committed = snapshot.window;
       const discarded = this.edits.filter(edit => captured.has(edit));
       this.edits = this.edits.filter(edit => !captured.has(edit));
-      this.rebuild(); this.publish(this.edits.length ? 'saving' : 'saved');
+      const previous = this.snapshot;
+      this.rebuild(); this.recordSelection(previous, 'discarded'); this.publish(this.edits.length ? 'saving' : 'saved');
       for (const edit of discarded) edit.reject(new Error('Local Window changes were discarded in favor of the saved layout.'));
       restored = true;
     }).catch(error => {
@@ -153,8 +163,10 @@ export class WindowWorkspaceStore {
     this.retryTimer = setTimeout(() => { this.retryTimer = undefined; void this.retry(); }, Math.min(30000, 1000 * 2 ** Math.min(this.retryAttempt++, 5)));
   }
   private settle(edit: PendingEdit, error?: unknown) {
+    const previous = this.snapshot;
     this.edits = this.edits.filter(item => item !== edit);
-    this.rebuild(); this.publish(error ? 'error' : this.edits.length ? 'saving' : 'saved', error ? message(error) : undefined);
+    this.rebuild(); this.recordSelection(previous, error ? 'rejected' : 'settled', edit.operation);
+    this.publish(error ? 'error' : this.edits.length ? 'saving' : 'saved', error ? message(error) : undefined);
     if (error) edit.reject(error); else edit.resolve();
   }
   private ensureActive() {
@@ -216,7 +228,8 @@ export class WindowWorkspaceStore {
         if (commit.result.status === 'rejected') {
           if (commit.result.code === 'revision_conflict' && !replacesLayout(edit.operation)) {
             edit.mutation = undefined; edit.uncertain = false;
-            this.rebuild(); this.publish('saving');
+            const previous = this.snapshot;
+            this.rebuild(); this.recordSelection(previous, 'conflict', edit.operation); this.publish('saving');
             if (++conflicts >= 3) { this.publish('offline', 'The Window is changing on another page. Saving will retry.'); this.scheduleRetry(); return; }
             continue;
           }

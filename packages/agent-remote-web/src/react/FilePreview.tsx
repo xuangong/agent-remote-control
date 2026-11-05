@@ -1,5 +1,5 @@
 import { lazy, Suspense, useCallback, useContext, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { FILE_FRAME_MESSAGE, FILE_FRAME_PATH } from '@orchardworks/agent-remote-protocol';
+import { FILE_FRAME_MESSAGE, FILE_FRAME_PATH, FILE_FRAME_SANDBOX } from '@orchardworks/agent-remote-protocol';
 import { FilePreviewContext, type FilePreviewRequest } from './FilePreviewContext.js';
 import { createFilePreviewResourceContext } from './file-preview-resources.js';
 import { loadLocalResource } from './local-resource.js';
@@ -105,8 +105,8 @@ const FILE_FRAME_READY_MS = 1_000;
 
 /**
  * Renders an HTML file as a browser would, scripts included, in the file frame: an opaque origin that reaches neither
- * the website nor its storage, loads only its inlined local files and HTTPS resources, and fetches nothing. Where the
- * website does not serve the frame, a static copy without scripts is shown.
+ * the website nor its storage, and loads only its inlined local files and HTTPS resources. Where the website does not
+ * serve the frame, a static copy without scripts is shown.
  */
 function HtmlFileContent({ html, title, resourceContext, sourceLocator, fresh }: {
   readonly html: string; readonly title: string; readonly resourceContext: MarkdownResourceContext; readonly sourceLocator: string; readonly fresh: boolean;
@@ -155,7 +155,7 @@ function HtmlFileContent({ html, title, resourceContext, sourceLocator, fresh }:
   return <>
     {phase === 'loading' || !copy ? <p className="agent-file-message" role="status">Rendering HTML…</p> : null}
     <iframe ref={frame} className="agent-file-html" title={title} src={FILE_FRAME_PATH} referrerPolicy="no-referrer" hidden={phase === 'loading' || !copy}
-      sandbox="allow-scripts allow-popups allow-popups-to-escape-sandbox" onLoad={() => {
+      sandbox={FILE_FRAME_SANDBOX} onLoad={() => {
         window.setTimeout(() => setPhase(value => value === 'loading' ? 'static' : value), FILE_FRAME_READY_MS);
       }} />
   </>;

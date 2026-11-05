@@ -3,7 +3,7 @@ import { afterEach, expect, it, vi } from 'vitest';
 import { render, rerender } from '../test/setup.js';
 import { FilePreview } from './FilePreview.js';
 import { FilePreviewContext, type FilePreviewRequest } from './FilePreviewContext.js';
-import { FILE_FRAME_MESSAGE, FILE_FRAME_PATH } from '@orchardworks/agent-remote-protocol';
+import { FILE_FRAME_MESSAGE, FILE_FRAME_PATH, FILE_FRAME_SANDBOX } from '@orchardworks/agent-remote-protocol';
 import type { ResourceBinding, ResourceResponseState } from '@orchardworks/agent-remote-protocol';
 
 vi.mock('./usePreviewVisibility.js', () => ({ usePreviewVisibility: () => {} }));
@@ -68,7 +68,9 @@ it('runs an HTML file with its scripts in the file frame, and opens its local li
   await expect.poll(() => container.querySelector('iframe')).not.toBeNull();
   const frame = container.querySelector('iframe')!;
   expect(frame.getAttribute('src')).toBe(FILE_FRAME_PATH);
-  expect(frame.getAttribute('sandbox')).toBe('allow-scripts allow-popups allow-popups-to-escape-sandbox');
+  expect(frame.getAttribute('sandbox')).toBe(FILE_FRAME_SANDBOX);
+  expect(FILE_FRAME_SANDBOX).not.toContain('allow-same-origin');
+  expect(FILE_FRAME_SANDBOX).not.toContain('allow-top-navigation');
   expect(frame.hidden).toBe(true);
   const sent: unknown[] = [];
   frame.contentWindow!.postMessage = (message: unknown) => { sent.push(message); };

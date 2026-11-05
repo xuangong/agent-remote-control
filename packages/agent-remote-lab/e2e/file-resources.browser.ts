@@ -31,12 +31,17 @@ for (const engine of [chromium, webkit]) for (const width of [390, 1280]) {
     await writeFile(join(workspace, 'page.html'), '<!doctype html><link rel="stylesheet" href="./site/page.css"><script src="./site/page.js" defer></script>'
       + '<h1>Static heading</h1><ul id="items"></ul><img src="./wide.png" alt="Page image">'
       + '<a href="https://example.com/">External</a> <a href="./main.ts">Local</a>'
+      + '<form id="handled"><button>Handled submit</button></form><form id="plain"><button>Plain submit</button></form>'
+      + '<button id="greet" type="button">Greet</button>'
       + '<script>const body = document.body; body.dataset.executed = "yes";'
       + 'for (const name of ["One", "Two", "Three"]) document.getElementById("items").append(Object.assign(document.createElement("li"), { textContent: name }));'
       + 'try { parent.document; body.dataset.parent = "readable" } catch { body.dataset.parent = "isolated" }'
       + 'try { document.cookie; body.dataset.cookie = "readable" } catch { body.dataset.cookie = "isolated" }'
       + 'try { localStorage.length; body.dataset.storage = "readable" } catch { body.dataset.storage = "isolated" }'
       + 'fetch("/").then(() => { body.dataset.fetch = "allowed" }, () => { body.dataset.fetch = "blocked" });'
+      + 'document.getElementById("handled").addEventListener("submit", event => { event.preventDefault(); body.dataset.submitted = "handled"; });'
+      + 'document.getElementById("plain").addEventListener("submit", () => { body.dataset.plain = "submitted"; });'
+      + 'document.getElementById("greet").addEventListener("click", () => { body.dataset.greeted = String(confirm("Greetings from the file")); });'
       + 'try { window.parent.fileExecuted = true } catch {}</script>');
     const png = await readFile(new URL('./fixtures/markdown-wide.png', import.meta.url));
     await writeFile(join(workspace, 'wide.png'), png);
@@ -177,7 +182,20 @@ for (const engine of [chromium, webkit]) for (const width of [390, 1280]) {
     await expect.poll(() => rendered.locator('li').allTextContents()).toEqual(['One', 'Two', 'Three']);
     await expect.poll(() => rendered.locator('h1').evaluate(heading => getComputedStyle(heading).color)).toBe('rgb(12, 34, 56)');
     await expect.poll(() => rendered.getByRole('img', { name: 'Page image' }).evaluate(image => (image as HTMLImageElement).naturalWidth)).toBe(1200);
+    // Only HTTPS requests are allowed; this fixture serves plain HTTP.
     await expect.poll(() => rendered.locator('body').getAttribute('data-fetch')).toBe('blocked');
+    const dialogs: string[] = [];
+    page.once('dialog', dialog => { dialogs.push(dialog.message()); void dialog.accept(); });
+    await rendered.getByRole('button', { name: 'Greet' }).click();
+    await expect.poll(() => rendered.locator('body').getAttribute('data-greeted')).toBe('true');
+    expect(dialogs).toEqual(['Greetings from the file']);
+    await rendered.getByRole('button', { name: 'Handled submit' }).click();
+    await expect.poll(() => rendered.locator('body').getAttribute('data-submitted')).toBe('handled');
+    // A submission the page does not handle runs its handler, then never leaves the file.
+    await rendered.getByRole('button', { name: 'Plain submit' }).click();
+    await expect.poll(() => rendered.locator('body').getAttribute('data-plain')).toBe('submitted');
+    await page.waitForTimeout(300);
+    expect(await rendered.locator('h1').textContent()).toBe('Rendered page');
     const body = rendered.locator('body');
     expect([await body.getAttribute('data-parent'), await body.getAttribute('data-cookie'), await body.getAttribute('data-storage')]).toEqual(['isolated', 'isolated', 'isolated']);
     expect(await rendered.getByText('External').getAttribute('target')).toBe('_blank');

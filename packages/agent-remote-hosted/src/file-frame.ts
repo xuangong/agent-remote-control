@@ -1,4 +1,4 @@
-import { FILE_CONTENT_POLICY, FILE_FRAME_MESSAGE } from '@orchardworks/agent-remote-protocol';
+import { FILE_CONTENT_POLICY, FILE_FRAME_MESSAGE, FILE_FRAME_SANDBOX } from '@orchardworks/agent-remote-protocol';
 
 export { FILE_FRAME_PATH } from '@orchardworks/agent-remote-protocol';
 
@@ -17,6 +17,6 @@ parent.postMessage({ type: '${FILE_FRAME_MESSAGE}', state: 'ready' }, '*');
 
 export const fileFrameHeaders: Readonly<Record<string, string>> = {
   'content-type': 'text/html; charset=utf-8',
-  'content-security-policy': `${FILE_CONTENT_POLICY}; frame-ancestors 'self'; sandbox allow-scripts allow-popups allow-popups-to-escape-sandbox`,
+  'content-security-policy': `${FILE_CONTENT_POLICY}; frame-ancestors 'self'; sandbox ${FILE_FRAME_SANDBOX}`,
   'cache-control': 'no-cache', 'referrer-policy': 'no-referrer', 'x-content-type-options': 'nosniff',
 };

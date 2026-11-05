@@ -15,7 +15,7 @@ it('serves hosted assets and health, authenticates browser login, and transports
   const frame = await f.request('/file-frame');
   expect(frame.status).toBe(200);
   expect(await frame.text()).toContain("document.write(event.data.html)");
-  expect(frame.headers.get('content-security-policy')).toContain("frame-ancestors 'self'; sandbox allow-scripts allow-popups allow-popups-to-escape-sandbox");
+  expect(frame.headers.get('content-security-policy')).toContain("frame-ancestors 'self'; sandbox allow-scripts allow-modals allow-forms allow-popups allow-popups-to-escape-sandbox");
   expect(frame.headers.get('content-security-policy')).not.toContain('allow-same-origin');
   expect((await f.request('/assets/main.js')).status).toBe(200);
   for (const path of ['/install.sh', '/install.ps1', '/favicon.svg', '/app/manifest.webmanifest', '/app/icon-192.png', '/app/icon-512.png']) {

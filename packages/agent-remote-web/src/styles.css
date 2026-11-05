@@ -761,6 +761,7 @@ summary.agent-child-heading:focus-visible { outline: 2px solid var(--agent-signa
 .agent-file-heading small { color: var(--agent-muted); font-size: 11px; }
 .agent-file-body { flex: 1; min-height: 0; overflow: hidden; }
 .agent-file-body[data-rendered-markdown] { overflow: auto; overscroll-behavior: contain; }
+.agent-file-html { display: block; width: 100%; height: 100%; border: 0; background: #fff; color-scheme: light; }
 .agent-file-markdown { box-sizing: border-box; max-width: 76ch; margin-inline: auto; padding: 20px clamp(16px, 3vw, 32px) 32px; font-size: 15px; line-height: 1.65; }
 .agent-file-code { height: 100%; min-height: 0; -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }
 .agent-file-message { padding: 20px; color: var(--agent-muted); overflow-wrap: anywhere; }

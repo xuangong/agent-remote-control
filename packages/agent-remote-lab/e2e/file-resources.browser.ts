@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { chromium, webkit } from '@playwright/test';
 import { build } from 'esbuild';
 import { expect, it } from 'vitest';
+import { controllerContentSecurityPolicy } from '@orchardworks/agent-remote-hosted';
 import { onPreviewCleanup, previewFixture } from '../src/server/preview-tunnel-fixture.js';
 
 for (const engine of [chromium, webkit]) for (const width of [390, 1280]) {
@@ -24,7 +25,12 @@ for (const engine of [chromium, webkit]) for (const width of [390, 1280]) {
       '<script>window.fileExecuted = true</script>',
     ].join('\n\n'));
     await writeFile(join(workspace, 'appendix/notes.md'), '# Notes\n\n![Nested diagram](./nested.png)\n\n[Report](../docs/report.md)');
-    await writeFile(join(workspace, 'page.html'), '<!doctype html><script>window.fileExecuted = true</script>');
+    await mkdir(join(workspace, 'site'));
+    await writeFile(join(workspace, 'site/page.css'), 'h1 { color: rgb(12, 34, 56); }');
+    await writeFile(join(workspace, 'page.html'), '<!doctype html><link rel="stylesheet" href="./site/page.css"><h1>Rendered page</h1>'
+      + '<img src="./wide.png" alt="Page image"><img src="https://tracker.invalid/pixel.png" alt="Remote image">'
+      + '<a href="https://example.com/">External</a> <a href="./main.ts">Local</a>'
+      + '<script>window.fileExecuted = true; document.body.dataset.executed = "yes"</script>');
     const png = await readFile(new URL('./fixtures/markdown-wide.png', import.meta.url));
     await writeFile(join(workspace, 'wide.png'), png);
     await writeFile(join(workspace, 'docs/report.png'), png);
@@ -35,6 +41,8 @@ for (const engine of [chromium, webkit]) for (const width of [390, 1280]) {
       if (request.url === '/file-test.js') { response.setHeader('content-type', 'application/javascript; charset=utf-8'); response.end(browserScript); return true; }
       if (request.url === '/file-test') {
         response.setHeader('content-type', 'text/html');
+        // The website's policy, which the rendered HTML frame inherits.
+        response.setHeader('content-security-policy', controllerContentSecurityPolicy(fixture.url));
         response.end(`<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><style>${css} body { margin:0; --agent-preview-layer:146; } .test-stage { height:100dvh; } .test-chat { padding:16px; } .test-global { position:fixed; z-index:145; right:0; top:80px; width:min(440px,100vw); height:240px; background:white; }</style><div id="root"></div><script src="/file-test.js"></script>`);
         return true;
       }
@@ -156,6 +164,18 @@ for (const engine of [chromium, webkit]) for (const width of [390, 1280]) {
     await expect.poll(() => panel.locator('h1').textContent()).toBe('Report');
     await panel.getByRole('button', { name: 'Close file preview' }).click();
     await page.getByRole('button', { name: 'HTML', exact: true }).click();
+    const rendered = panel.frameLocator('iframe[title="Rendered HTML: page.html"]');
+    await expect.poll(() => rendered.locator('h1').textContent()).toBe('Rendered page');
+    await expect.poll(() => rendered.locator('h1').evaluate(heading => getComputedStyle(heading).color)).toBe('rgb(12, 34, 56)');
+    await expect.poll(() => rendered.getByRole('img', { name: 'Page image' }).evaluate(image => (image as HTMLImageElement).naturalWidth)).toBe(1200);
+    expect(await rendered.getByRole('img', { name: 'Remote image' }).evaluate(image => (image as HTMLImageElement).naturalWidth)).toBe(0);
+    expect(await rendered.locator('body').getAttribute('data-executed')).toBeNull();
+    expect(await rendered.getByText('External').getAttribute('target')).toBe('_blank');
+    expect(await rendered.getByText('Local').getAttribute('href')).toBeNull();
+    expect(await page.evaluate(() => (window as any).fileExecuted)).toBeUndefined();
+    expect((await panel.locator('iframe').boundingBox())!.height).toBeGreaterThan(200);
+    await page.screenshot({ path: join(tmpdir(), `arc-html-preview-${engine.name()}-${width}.png`) });
+    await panel.getByRole('button', { name: 'Show HTML source' }).click();
     await expect.poll(() => panel.locator('.cm-content').textContent()).toContain('<script>');
     expect(await page.evaluate(() => (window as any).fileExecuted)).toBeUndefined();
     await panel.getByRole('button', { name: 'Close file preview' }).click();

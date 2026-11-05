@@ -5,6 +5,8 @@ import { loadLocalResource } from './local-resource.js';
 import { MarkdownContent } from './MarkdownContent.js';
 import { canPreviewImage } from './ResourceCard.js';
 import { ImagePreview } from './ImagePreview.js';
+import { renderHtmlPreview } from './html-preview.js';
+import type { MarkdownResourceContext } from './local-resource.js';
 import { usePreviewVisibility } from './usePreviewVisibility.js';
 
 const ReadOnlyCode = lazy(() => import('./ReadOnlyCode.js'));
@@ -50,8 +52,11 @@ export function FilePreview({ request, onClose }: { readonly request: FilePrevie
   const isImage = available && canPreviewImage(available.mediaType);
   const mediaType = available?.mediaType.split(';', 1)[0]?.trim().toLowerCase();
   const isMarkdown = mediaType === 'text/markdown' || mediaType === 'text/x-markdown' || /\.(?:md|markdown)$/i.test(filename);
+  const isHtml = !isMarkdown && (mediaType === 'text/html' || /\.html?$/i.test(filename));
+  const format = isMarkdown ? 'Markdown' : isHtml ? 'HTML' : undefined;
   const source = mode?.request === request ? mode.source : target.line !== undefined;
   const renderedMarkdown = isMarkdown && !source;
+  const renderedHtml = isHtml && !source;
   usePreviewVisibility(dialog, !isImage, `file:${request.context.scopeKey}:${request.locator}`);
   let text: string | undefined;
   let error = failure ?? (detail?.status === 'unavailable' ? detail.reason : detail?.status === 'failed' ? detail.message
@@ -73,22 +78,42 @@ export function FilePreview({ request, onClose }: { readonly request: FilePrevie
     <div className="agent-preview-browser-layout">
       <header className="agent-preview-browser-toolbar">
         <div className="agent-file-heading"><strong>{filename}</strong><small title={request.locator}>{request.locator}</small></div>
-        {text !== undefined && isMarkdown ? <button type="button" className="agent-file-mode" aria-label={source ? 'Show rendered Markdown' : 'Show Markdown source'}
+        {text !== undefined && format ? <button type="button" className="agent-file-mode" aria-label={source ? `Show rendered ${format}` : `Show ${format} source`}
           onClick={() => setMode({ request, source: !source })}>{source ? 'Preview' : 'Source'}</button> : null}
-        {text !== undefined && !renderedMarkdown ? <button type="button" aria-label="Wrap lines" title="Wrap lines" aria-pressed={wrap} onClick={() => setWrap(value => !value)}>↵</button> : null}
+        {text !== undefined && !renderedMarkdown && !renderedHtml ? <button type="button" aria-label="Wrap lines" title="Wrap lines" aria-pressed={wrap} onClick={() => setWrap(value => !value)}>↵</button> : null}
         <button type="button" aria-label="Refresh file" title="Read file again" disabled={loading} onClick={() => retry(value => value + 1)}>↻</button>
         <button type="button" aria-label="Close file preview" title="Close file preview" onClick={onClose}>×</button>
       </header>
-      <div className="agent-file-body" data-rendered-markdown={renderedMarkdown || undefined} aria-busy={loading}>
+      <div className="agent-file-body" data-rendered-markdown={renderedMarkdown || undefined} data-rendered-html={renderedHtml || undefined} aria-busy={loading}>
         {loading ? <p className="agent-file-message" role="status">Loading file…</p>
           : error ? <div className="agent-file-message" role="alert"><p>{error}</p><button type="button" onClick={() => retry(value => value + 1)}>Retry</button></div>
           : text !== undefined ? renderedMarkdown
             ? <MarkdownContent markdown={text} className="agent-file-markdown" resourceContext={resourceContext} sourceLocator={target.locator} />
+            : renderedHtml ? <HtmlFileContent html={text} title={`Rendered HTML: ${filename}`} resourceContext={resourceContext} sourceLocator={target.locator} fresh={attempt > 0} />
             : <Suspense fallback={<p role="status" className="agent-file-message">Opening source…</p>}><ReadOnlyCode text={text} filename={filename} wrap={wrap} line={target.line} /></Suspense> : null}
       </div>
       <footer className="agent-file-footer"><span>Read only</span><span>{available ? `${available.byteLength.toLocaleString()} bytes` : 'Local resource'}</span></footer>
     </div>
   </dialog>;
+}
+
+/** Renders an HTML file in a frame without scripts, same-origin access or network, with its local images and stylesheets. */
+function HtmlFileContent({ html, title, resourceContext, sourceLocator, fresh }: {
+  readonly html: string; readonly title: string; readonly resourceContext: MarkdownResourceContext; readonly sourceLocator: string; readonly fresh: boolean;
+}) {
+  const [rendered, setRendered] = useState<{ html: string; document: string }>();
+  useEffect(() => {
+    let current = true;
+    void renderHtmlPreview(html, async locator => {
+      const { detail } = await loadLocalResource(resourceContext, locator, sourceLocator, undefined, fresh);
+      return detail?.status === 'available' && 'contentBase64' in detail && typeof detail.contentBase64 === 'string'
+        ? { mediaType: detail.mediaType, contentBase64: detail.contentBase64 } : undefined;
+    }).then(document => { if (current) setRendered({ html, document }); });
+    return () => { current = false; };
+  }, [html, resourceContext, sourceLocator, fresh]);
+  if (rendered?.html !== html) return <p className="agent-file-message" role="status">Rendering HTML…</p>;
+  return <iframe className="agent-file-html" title={title} srcDoc={rendered.document} referrerPolicy="no-referrer"
+    sandbox="allow-popups allow-popups-to-escape-sandbox" />;
 }
 
 function fileTarget(locator: string): { locator: string; line?: number } {

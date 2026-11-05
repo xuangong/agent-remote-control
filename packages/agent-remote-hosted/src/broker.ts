@@ -1967,7 +1967,9 @@ export function createHostBroker(options: HostBrokerOptions) {
           const bytes = Buffer.byteLength(raw.toString());
           imageChunkBytes += bytes;
           if (bytes > 48 * 1024 || ++imageChunkCount > 2048 || imageChunkBytes > 48 * 1024 * 1024) return client.close(1008, 'Image upload rate exceeded');
-        } else if (publicMessage?.type === 'resource_upload_chunk' || publicMessage?.type === 'resource_download_request') {
+        } else if (publicMessage?.type === 'resource_upload_chunk' || publicMessage?.type === 'resource_download_request'
+          // A conversation's images and a previewed file's local resources resolve and read one message each.
+          || publicMessage?.type === 'resource_resolve_request' || publicMessage?.type === 'resource_request') {
           const bytes = Buffer.byteLength(raw.toString()); resourceBytes += bytes;
           if (bytes > 48 * 1024 || ++resourceCount > 8192 || resourceBytes > 192 * 1024 * 1024) return client.close(1008, 'Resource transfer rate exceeded');
         } else if (++messageCount > 120) return client.close(1008, 'Control message rate exceeded');

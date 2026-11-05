@@ -1,4 +1,4 @@
-import { useContext, useEffect, useState } from 'react';
+import { useContext, useEffect, useRef, useState } from 'react';
 import type { ResourceBinding } from '@orchardworks/agent-remote-protocol';
 
 import { FilePreviewContext } from './FilePreviewContext.js';
@@ -64,6 +64,12 @@ export function MarkdownResourceImage({
     ? candidate : undefined;
   const key = JSON.stringify([context?.scopeKey, locator, sourceLocator]);
   const { ref: frameRef, near } = useNearViewport(key);
+  // The conversation rebuilds its resource context with every resource update, including this image's own responses,
+  // so loading follows the image's identity and what the replica holds for it, not the context object. Otherwise an
+  // unavailable image, whose resolution is never cached, would resolve again after each response.
+  const latestContext = useRef(context);
+  latestContext.current = context;
+  const live = !!context?.resolveResource && !!context.requestResource;
   const [result, setResult] = useState<{ key: string; binding?: ResourceBinding; failure?: string;
     detail?: Awaited<ReturnType<typeof loadLocalResource>>['detail']; resources?: MarkdownResourceContext['resources'] }>();
   const [openedKey, setOpenedKey] = useState<string>();
@@ -71,10 +77,15 @@ export function MarkdownResourceImage({
   const binding = (result?.key === key ? result.binding : undefined)
     ?? (context && locator ? cachedLocalResourceBinding(context, locator, sourceLocator) : undefined);
   const failure = result?.key === key ? result.failure : undefined;
+  const held = binding && context ? context.resources[binding.resourceId] : undefined;
+  // The bytes or a final reason are in the replica; loading starts again only if the replica loses them.
+  const settled = binding?.status === 'unavailable' || held?.status === 'unavailable' || held?.status === 'failed'
+    || held?.status === 'available' && 'contentBase64' in held;
 
   useEffect(() => {
     let current = true;
-    if (!near || !locator || !context) return () => { current = false; };
+    const context = latestContext.current;
+    if (!near || !locator || !context || settled) return () => { current = false; };
     void loadLocalResource(context, locator, sourceLocator, (resolved) => {
       if (current) setResult({ key, binding: resolved });
     }).then(({ binding, detail }) => {
@@ -84,7 +95,7 @@ export function MarkdownResourceImage({
         failure: error instanceof Error && error.message ? error.message : 'Image resource is unavailable.' }));
     });
     return () => { current = false; };
-  }, [context, key, locator, sourceLocator, near]);
+  }, [!!context, live, key, locator, sourceLocator, near, settled]);
 
   if (!locator || !context) return <span>{alt}</span>;
   const detail = result?.key === key && result.resources === context.resources && result.detail

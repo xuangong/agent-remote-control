@@ -1,4 +1,4 @@
-import { act } from 'react';
+import { act, useMemo, useState } from 'react';
 import { describe, expect, it, vi } from 'vitest';
 
 import { render, rerender } from '../test/setup.js';
@@ -195,6 +195,27 @@ describe('MarkdownContent', () => {
     expect(resolveResource).toHaveBeenCalledWith('./images/result.png', '/workspace/docs/report.md');
     expect(requestResource).toHaveBeenCalledTimes(1);
     expect(container.querySelector('img')?.getAttribute('src')).toBe(`data:image/png;base64,${png}`);
+  });
+
+  it('resolves a missing image once while the conversation receives resource updates', async () => {
+    // As in the timeline, every resource update gives the conversation a new resource context.
+    let update!: (resourceId: string, state: Record<string, unknown>) => void;
+    const missing = { status: 'unavailable', reason: 'Local resource does not exist.' };
+    // The client applies each response's state, which renders after the waiting request has settled.
+    const respond = <T,>(value: T, resourceId: string) => { setTimeout(() => update(resourceId, missing)); return value; };
+    const resolveResource = vi.fn(async (locator: string) => respond({ locator, resourceId: 'missing', status: 'unavailable' as const }, 'missing'));
+    const requestResource = vi.fn(async () => respond(undefined, 'missing'));
+    function Conversation() {
+      const [resources, setResources] = useState<Record<string, any>>({});
+      update = (resourceId, state) => setResources(current => ({ ...current, [resourceId]: state }));
+      const context = useMemo(() => ({ scopeKey: 'session-missing-loop', bindings: [], resources, resolveResource, requestResource }), [resources]);
+      return <MarkdownContent markdown="![Missing](./missing.png)" resourceContext={context} />;
+    }
+    const container = await render(<Conversation />);
+    await expect.poll(() => container.querySelector('[role="img"]')?.getAttribute('aria-label')).toBe('Missing: Local resource does not exist.');
+    await act(async () => { update('other-image', { status: 'unavailable', reason: 'Unrelated.' }); await new Promise(resolve => setTimeout(resolve, 500)); });
+    expect(resolveResource).toHaveBeenCalledTimes(1);
+    expect(requestResource).toHaveBeenCalledTimes(1);
   });
 
   it('shows the protocol reason when a local image resource is unavailable', async () => {

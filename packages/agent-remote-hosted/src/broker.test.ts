@@ -743,6 +743,34 @@ it('allows bounded image chunks without consuming the session control message bu
   expect(browser.native.closeCode).toBe(1008);
 }, 10_000);
 
+it('counts resource resolutions and reads in the resource budget, not the control message budget', async () => {
+  const { broker, native } = await restoredFixture();
+  let received = 0;
+  let opened!: () => void;
+  const ready = new Promise<void>(resolve => { opened = resolve; });
+  native.onMessage(data => {
+    const message = JSON.parse(data);
+    if (message.type === 'rpc_request') native.send(JSON.stringify({ uplinkVersion: 2, type: 'rpc_response', requestId: message.requestId, status: 200, body: '{"agentId":"agent","nativeSessionId":"native-session"}' }));
+    if (message.type === 'stream_open') { native.send(JSON.stringify({ uplinkVersion: 2, type: 'stream_opened', streamId: message.streamId })); queueMicrotask(opened); }
+    if (message.type === 'stream_message') received += 1;
+  });
+  const prepared = await broker.prepareUpgrade(new Request('https://relay.example/v1/sessions/agent/events', { headers: { origin: 'https://relay.example' } }));
+  if (!prepared || prepared instanceof Response) throw new Error('Session unavailable');
+  const browser = transportPair(); prepared.accept(browser.server); await ready;
+  for (let index = 0; index < 200; index += 1) {
+    browser.native.send(JSON.stringify({ protocolVersion: '1.8.0', type: 'resource_resolve_request', payload: { requestId: `resolve-${index}`, agentId: 'agent', locator: `./image-${index}.png` } }));
+    browser.native.send(JSON.stringify({ protocolVersion: '1.8.0', type: 'resource_request', payload: { requestId: `read-${index}`, agentId: 'agent', resourceId: `resource-${index}` } }));
+    await Promise.resolve();
+  }
+  for (let index = 0; index < 120; index += 1) browser.native.send(JSON.stringify({ protocolVersion: '1.8.0', type: 'cancel', payload: { requestId: `cancel-${index}`, agentId: 'agent', operationId: operationOne } }));
+  await Promise.resolve(); await Promise.resolve();
+  expect(browser.native.readyState).toBe(1);
+  expect(received).toBe(520);
+  browser.native.send(JSON.stringify({ protocolVersion: '1.8.0', type: 'cancel', payload: { requestId: 'cancel-over', agentId: 'agent', operationId: operationOne } }));
+  await Promise.resolve();
+  expect(browser.native.closeCode).toBe(1008);
+}, 10_000);
+
 it('authorizes source references before quota reservation and binds create identity to the source', async () => {
   const state = structuredClone(restoredState);
   state.bindings.push({ hostId: 'host', providerId: 'codex', nativeSessionId: 'bob-source', agentId: 'bob-agent', creatorSubject: 'bob' });

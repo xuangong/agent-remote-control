@@ -180,3 +180,22 @@ it('records a conflict snapshot that removes the optimistically selected Side', 
     expect(store.getSnapshot().selectedViewId).toBe('main');
   } finally { store.dispose(); }
 });
+
+
+it('records selected-view rebinding and rejection anonymously but ignores a title-only update', async () => {
+  const binding = { hostId: 'private-host', providerId: 'recorded', nativeSessionId: 'private-before', title: 'Private title' };
+  const initial: WorkspaceWindow = { schemaVersion: 3, id: 'private-window', title: 'Private window', revision: 0,
+    selectedPrimaryViewId: 'main', selectedViewId: 'main', views: [createWindowView('main', binding, 'primary')] };
+  const client = { mutate: async () => { throw new WindowRequestError('private rejection', 403); } } as unknown as WindowWorkspaceClient;
+  const store = new WindowWorkspaceStore(initial, client);
+  try {
+    startLayoutDiagnostics();
+    await expect(store.operate({ type: 'view.bind', viewId: 'main', binding: { ...binding, nativeSessionId: 'private-after' } })).rejects.toThrow();
+    store.accept(applyWindowOperation(initial, { type: 'view.bind', viewId: 'main', binding: { ...binding, title: 'Private renamed' } }));
+    const changes = readReport().samples.filter((sample: any) => sample.reason === 'window-selection').map((sample: any) => sample.selection);
+    expect(changes.map((change: any) => [change.source, change.previous, change.selected, change.bindingChanged])).toEqual([
+      ['local', 0, 0, true], ['rejected', 0, 0, true],
+    ]);
+    expect(exportLayoutDiagnostics()).not.toMatch(/private/i);
+  } finally { store.dispose(); }
+});

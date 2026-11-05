@@ -86,10 +86,16 @@ export class WindowWorkspaceStore {
     if (JSON.stringify(visible) !== JSON.stringify(this.snapshot)) this.snapshot = visible;
   }
   private recordSelection(previous: WorkspaceWindow, source: Parameters<typeof recordWindowSelection>[0]['source'], operation?: WindowOperation) {
-    if (!getLayoutDiagnosticsStatus().recording || previous.selectedViewId === this.snapshot.selectedViewId) return;
+    if (!getLayoutDiagnosticsStatus().recording) return;
+    const sameView = previous.selectedViewId === this.snapshot.selectedViewId;
+    const before = previous.views.find(view => view.id === previous.selectedViewId)?.binding;
+    const after = this.snapshot.views.find(view => view.id === this.snapshot.selectedViewId)?.binding;
+    const bindingChanged = sameView && (!!before !== !!after || (['hostId', 'providerId', 'nativeSessionId', 'sessionIntent'] as const)
+      .some(field => before?.[field] !== after?.[field]));
+    if (sameView && !bindingChanged) return;
     recordWindowSelection({ source, previous: previous.views.findIndex(view => view.id === previous.selectedViewId),
       selected: this.snapshot.views.findIndex(view => view.id === this.snapshot.selectedViewId), revision: this.snapshot.revision,
-      pending: this.edits.length, ...(operation ? { operation: operation.type } : {}) }, this);
+      pending: this.edits.length, ...(bindingChanged ? { bindingChanged: true as const } : {}), ...(operation ? { operation: operation.type } : {}) }, this);
   }
   accept(window: WorkspaceWindow) {
     if (this.stopped || !isWorkspaceWindow(window) || window.id !== this.committed.id || window.revision < this.committed.revision) return;

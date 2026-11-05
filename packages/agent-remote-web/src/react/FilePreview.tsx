@@ -1,5 +1,6 @@
-import { lazy, Suspense, useEffect, useId, useMemo, useRef, useState } from 'react';
-import type { FilePreviewRequest } from './FilePreviewContext.js';
+import { lazy, Suspense, useCallback, useContext, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { FILE_FRAME_MESSAGE, FILE_FRAME_PATH } from '@orchardworks/agent-remote-protocol';
+import { FilePreviewContext, type FilePreviewRequest } from './FilePreviewContext.js';
 import { createFilePreviewResourceContext } from './file-preview-resources.js';
 import { loadLocalResource } from './local-resource.js';
 import { MarkdownContent } from './MarkdownContent.js';
@@ -89,7 +90,7 @@ export function FilePreview({ request, onClose }: { readonly request: FilePrevie
           : error ? <div className="agent-file-message" role="alert"><p>{error}</p><button type="button" onClick={() => retry(value => value + 1)}>Retry</button></div>
           : text !== undefined ? renderedMarkdown
             ? <MarkdownContent markdown={text} className="agent-file-markdown" resourceContext={resourceContext} sourceLocator={target.locator} />
-            : renderedHtml ? <HtmlFileContent html={text} title={`Rendered HTML: ${filename}`} resourceContext={resourceContext} sourceLocator={target.locator} fresh={attempt > 0} />
+            : renderedHtml ? <HtmlFileContent key={attempt} html={text} title={`Rendered HTML: ${filename}`} resourceContext={resourceContext} sourceLocator={target.locator} fresh={attempt > 0} />
             : <Suspense fallback={<p role="status" className="agent-file-message">Opening source…</p>}><ReadOnlyCode text={text} filename={filename} wrap={wrap} line={target.line} /></Suspense> : null}
       </div>
       <footer className="agent-file-footer"><span>Read only</span><span>{available ? `${available.byteLength.toLocaleString()} bytes` : 'Local resource'}</span></footer>
@@ -97,23 +98,67 @@ export function FilePreview({ request, onClose }: { readonly request: FilePrevie
   </dialog>;
 }
 
-/** Renders an HTML file in a frame without scripts, same-origin access or network, with its local images and stylesheets. */
+/** How long the file frame may take to load before the preview shows a static copy instead. */
+const FILE_FRAME_LOAD_MS = 10_000;
+/** After the file frame loads, how long its ready message may follow. A Relay without the frame never sends one. */
+const FILE_FRAME_READY_MS = 1_000;
+
+/**
+ * Renders an HTML file as a browser would, scripts included, in the file frame: an opaque origin that reaches neither
+ * the website nor its storage, loads only its inlined local files and HTTPS resources, and fetches nothing. Where the
+ * website does not serve the frame, a static copy without scripts is shown.
+ */
 function HtmlFileContent({ html, title, resourceContext, sourceLocator, fresh }: {
   readonly html: string; readonly title: string; readonly resourceContext: MarkdownResourceContext; readonly sourceLocator: string; readonly fresh: boolean;
 }) {
-  const [rendered, setRendered] = useState<{ html: string; document: string }>();
+  const preview = useContext(FilePreviewContext);
+  const frame = useRef<HTMLIFrameElement>(null);
+  const [phase, setPhase] = useState<'loading' | 'ready' | 'static'>('loading');
+  const [prepared, setPrepared] = useState<{ scripts: boolean; copy: string }>();
+  const sent = useRef(false);
+  const load = useCallback(async (locator: string) => {
+    const { detail } = await loadLocalResource(resourceContext, locator, sourceLocator, undefined, fresh);
+    return detail?.status === 'available' && 'contentBase64' in detail && typeof detail.contentBase64 === 'string'
+      ? { mediaType: detail.mediaType, contentBase64: detail.contentBase64 } : undefined;
+  }, [resourceContext, sourceLocator, fresh]);
+  const scripts = phase !== 'static';
   useEffect(() => {
     let current = true;
-    void renderHtmlPreview(html, async locator => {
-      const { detail } = await loadLocalResource(resourceContext, locator, sourceLocator, undefined, fresh);
-      return detail?.status === 'available' && 'contentBase64' in detail && typeof detail.contentBase64 === 'string'
-        ? { mediaType: detail.mediaType, contentBase64: detail.contentBase64 } : undefined;
-    }).then(document => { if (current) setRendered({ html, document }); });
+    void renderHtmlPreview(html, load, { scripts }).then(copy => { if (current) setPrepared({ scripts, copy }); });
     return () => { current = false; };
-  }, [html, resourceContext, sourceLocator, fresh]);
-  if (rendered?.html !== html) return <p className="agent-file-message" role="status">Rendering HTML…</p>;
-  return <iframe className="agent-file-html" title={title} srcDoc={rendered.document} referrerPolicy="no-referrer"
-    sandbox="allow-popups allow-popups-to-escape-sandbox" />;
+  }, [html, load, scripts]);
+  // Registered before the frame can answer, so its ready message is never missed.
+  useLayoutEffect(() => {
+    const receive = (event: MessageEvent) => {
+      const data: unknown = event.data;
+      if (!frame.current || event.source !== frame.current.contentWindow || !data || typeof data !== 'object' || (data as { type?: unknown }).type !== FILE_FRAME_MESSAGE) return;
+      const { state, open } = data as { state?: unknown; open?: unknown };
+      if (state === 'ready') setPhase(value => value === 'loading' ? 'ready' : value);
+      else if (typeof open === 'string' && open && open.length <= 4096) preview?.open({ locator: open, sourceLocator, context: resourceContext });
+    };
+    window.addEventListener('message', receive);
+    return () => window.removeEventListener('message', receive);
+  }, [preview, sourceLocator, resourceContext]);
+  useEffect(() => {
+    if (phase !== 'loading') return;
+    const timer = window.setTimeout(() => setPhase(value => value === 'loading' ? 'static' : value), FILE_FRAME_LOAD_MS);
+    return () => window.clearTimeout(timer);
+  }, [phase]);
+  const copy = prepared?.scripts === scripts ? prepared.copy : undefined;
+  useEffect(() => {
+    if (phase !== 'ready' || !copy || sent.current) return;
+    sent.current = true;
+    frame.current?.contentWindow?.postMessage({ type: FILE_FRAME_MESSAGE, html: copy }, '*');
+  }, [phase, copy]);
+  if (phase === 'static') return copy === undefined ? <p className="agent-file-message" role="status">Rendering HTML…</p>
+    : <iframe className="agent-file-html" title={title} srcDoc={copy} referrerPolicy="no-referrer" sandbox="allow-popups allow-popups-to-escape-sandbox" />;
+  return <>
+    {phase === 'loading' || !copy ? <p className="agent-file-message" role="status">Rendering HTML…</p> : null}
+    <iframe ref={frame} className="agent-file-html" title={title} src={FILE_FRAME_PATH} referrerPolicy="no-referrer" hidden={phase === 'loading' || !copy}
+      sandbox="allow-scripts allow-popups allow-popups-to-escape-sandbox" onLoad={() => {
+        window.setTimeout(() => setPhase(value => value === 'loading' ? 'static' : value), FILE_FRAME_READY_MS);
+      }} />
+  </>;
 }
 
 function fileTarget(locator: string): { locator: string; line?: number } {

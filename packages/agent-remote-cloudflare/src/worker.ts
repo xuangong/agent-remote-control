@@ -1,4 +1,4 @@
-import { isPreviewDomain, controllerContentSecurityPolicy } from '@orchardworks/agent-remote-hosted';
+import { isPreviewDomain, controllerContentSecurityPolicy, FILE_FRAME_PATH, fileFrameDocument, fileFrameHeaders } from '@orchardworks/agent-remote-hosted';
 import type { RelayEnvironment } from './relay-object.js';
 export { RelayObject } from './relay-object.js';
 
@@ -13,6 +13,7 @@ export default {
       return new Response(null, { status: 403 });
     }
     if ((request.method === 'GET' || request.method === 'HEAD') && !request.headers.has('upgrade')) {
+      if (url.pathname === FILE_FRAME_PATH) return new Response(request.method === 'HEAD' ? null : fileFrameDocument, { headers: fileFrameHeaders });
       if ((url.pathname === '/' || url.pathname === '/index.html') && !url.searchParams.has('preview')) {
         url.pathname = '/index.html';
         const asset = await env.ASSETS.fetch(new Request(url, { method: 'GET' }));

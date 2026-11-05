@@ -1,4 +1,4 @@
-import { controllerContentSecurityPolicy } from '@orchardworks/agent-remote-hosted';
+import { controllerContentSecurityPolicy, FILE_FRAME_PATH, fileFrameDocument, fileFrameHeaders } from '@orchardworks/agent-remote-hosted';
 import { readFile, realpath, stat } from 'node:fs/promises';
 import { extname, resolve, sep } from 'node:path';
 import type { IncomingMessage, ServerResponse } from 'node:http';
@@ -14,6 +14,7 @@ export async function createGatewayStaticPages(directory: string, options?: { or
       response.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'content-security-policy': controllerContentSecurityPolicy(options?.origin ?? 'http://localhost', options?.previewDomain) });
       response.end(index); return true;
     }
+    if (path === FILE_FRAME_PATH) { response.writeHead(200, fileFrameHeaders); response.end(fileFrameDocument); return true; }
     if (!path.startsWith('/assets/') && !['/install.sh', '/install.ps1', '/favicon.svg', '/app/manifest.webmanifest', '/app/icon-192.png', '/app/icon-512.png'].includes(path)) return false;
     let file: string;
     try { file = await realpath(resolve(root, '.' + decodeURIComponent(path))); } catch { return false; }

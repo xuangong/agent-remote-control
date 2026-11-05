@@ -33,6 +33,10 @@ it('serves public install assets through the Docker static handler without expos
     expect(await asset.text()).toContain(file === 'install.sh' ? '--server URL' : '-Server URL');
   }
   expect((await fetch(base + '/other.sh')).status).toBe(404);
+  const frame = await fetch(base + '/file-frame');
+  expect(frame.status).toBe(200);
+  expect(frame.headers.get('content-security-policy')).toContain('sandbox allow-scripts');
+  expect(await frame.text()).toContain('document.write(event.data.html)');
   const manifest = await fetch(base + '/app/manifest.webmanifest');
   expect(manifest.headers.get('content-type')).toBe('application/manifest+json');
   const value = await manifest.json();

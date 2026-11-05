@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { chromium, webkit } from '@playwright/test';
 import { build } from 'esbuild';
 import { expect, it } from 'vitest';
-import { controllerContentSecurityPolicy } from '@orchardworks/agent-remote-hosted';
+import { controllerContentSecurityPolicy, FILE_FRAME_PATH, fileFrameDocument, fileFrameHeaders } from '@orchardworks/agent-remote-hosted';
 import { onPreviewCleanup, previewFixture } from '../src/server/preview-tunnel-fixture.js';
 
 for (const engine of [chromium, webkit]) for (const width of [390, 1280]) {
@@ -27,10 +27,17 @@ for (const engine of [chromium, webkit]) for (const width of [390, 1280]) {
     await writeFile(join(workspace, 'appendix/notes.md'), '# Notes\n\n![Nested diagram](./nested.png)\n\n[Report](../docs/report.md)');
     await mkdir(join(workspace, 'site'));
     await writeFile(join(workspace, 'site/page.css'), 'h1 { color: rgb(12, 34, 56); }');
-    await writeFile(join(workspace, 'page.html'), '<!doctype html><link rel="stylesheet" href="./site/page.css"><h1>Rendered page</h1>'
-      + '<img src="./wide.png" alt="Page image"><img src="https://tracker.invalid/pixel.png" alt="Remote image">'
+    await writeFile(join(workspace, 'site/page.js'), 'document.querySelector("h1").textContent = "Rendered page";');
+    await writeFile(join(workspace, 'page.html'), '<!doctype html><link rel="stylesheet" href="./site/page.css"><script src="./site/page.js" defer></script>'
+      + '<h1>Static heading</h1><ul id="items"></ul><img src="./wide.png" alt="Page image">'
       + '<a href="https://example.com/">External</a> <a href="./main.ts">Local</a>'
-      + '<script>window.fileExecuted = true; document.body.dataset.executed = "yes"</script>');
+      + '<script>const body = document.body; body.dataset.executed = "yes";'
+      + 'for (const name of ["One", "Two", "Three"]) document.getElementById("items").append(Object.assign(document.createElement("li"), { textContent: name }));'
+      + 'try { parent.document; body.dataset.parent = "readable" } catch { body.dataset.parent = "isolated" }'
+      + 'try { document.cookie; body.dataset.cookie = "readable" } catch { body.dataset.cookie = "isolated" }'
+      + 'try { localStorage.length; body.dataset.storage = "readable" } catch { body.dataset.storage = "isolated" }'
+      + 'fetch("/").then(() => { body.dataset.fetch = "allowed" }, () => { body.dataset.fetch = "blocked" });'
+      + 'try { window.parent.fileExecuted = true } catch {}</script>');
     const png = await readFile(new URL('./fixtures/markdown-wide.png', import.meta.url));
     await writeFile(join(workspace, 'wide.png'), png);
     await writeFile(join(workspace, 'docs/report.png'), png);
@@ -38,6 +45,7 @@ for (const engine of [chromium, webkit]) for (const width of [390, 1280]) {
     const css = await readFile(new URL('../../agent-remote-web/src/styles.css', import.meta.url), 'utf8');
     let browserScript = '';
     const fixture = await previewFixture({ workspace, servePage: async (request, response) => {
+      if (request.url === FILE_FRAME_PATH) { response.writeHead(200, fileFrameHeaders); response.end(fileFrameDocument); return true; }
       if (request.url === '/file-test.js') { response.setHeader('content-type', 'application/javascript; charset=utf-8'); response.end(browserScript); return true; }
       if (request.url === '/file-test') {
         response.setHeader('content-type', 'text/html');
@@ -166,15 +174,22 @@ for (const engine of [chromium, webkit]) for (const width of [390, 1280]) {
     await page.getByRole('button', { name: 'HTML', exact: true }).click();
     const rendered = panel.frameLocator('iframe[title="Rendered HTML: page.html"]');
     await expect.poll(() => rendered.locator('h1').textContent()).toBe('Rendered page');
+    await expect.poll(() => rendered.locator('li').allTextContents()).toEqual(['One', 'Two', 'Three']);
     await expect.poll(() => rendered.locator('h1').evaluate(heading => getComputedStyle(heading).color)).toBe('rgb(12, 34, 56)');
     await expect.poll(() => rendered.getByRole('img', { name: 'Page image' }).evaluate(image => (image as HTMLImageElement).naturalWidth)).toBe(1200);
-    expect(await rendered.getByRole('img', { name: 'Remote image' }).evaluate(image => (image as HTMLImageElement).naturalWidth)).toBe(0);
-    expect(await rendered.locator('body').getAttribute('data-executed')).toBeNull();
+    await expect.poll(() => rendered.locator('body').getAttribute('data-fetch')).toBe('blocked');
+    const body = rendered.locator('body');
+    expect([await body.getAttribute('data-parent'), await body.getAttribute('data-cookie'), await body.getAttribute('data-storage')]).toEqual(['isolated', 'isolated', 'isolated']);
     expect(await rendered.getByText('External').getAttribute('target')).toBe('_blank');
-    expect(await rendered.getByText('Local').getAttribute('href')).toBeNull();
     expect(await page.evaluate(() => (window as any).fileExecuted)).toBeUndefined();
     expect((await panel.locator('iframe').boundingBox())!.height).toBeGreaterThan(200);
     await page.screenshot({ path: join(tmpdir(), `arc-html-preview-${engine.name()}-${width}.png`) });
+    await rendered.getByText('Local').click();
+    await expect.poll(() => panel.locator('.agent-file-heading strong').textContent()).toBe('main.ts');
+    await expect.poll(() => panel.locator('.cm-content').textContent()).toContain('export const refreshed');
+    await panel.getByRole('button', { name: 'Close file preview' }).click();
+    await page.getByRole('button', { name: 'HTML', exact: true }).click();
+    await expect.poll(() => rendered.locator('h1').textContent()).toBe('Rendered page');
     await panel.getByRole('button', { name: 'Show HTML source' }).click();
     await expect.poll(() => panel.locator('.cm-content').textContent()).toContain('<script>');
     expect(await page.evaluate(() => (window as any).fileExecuted)).toBeUndefined();

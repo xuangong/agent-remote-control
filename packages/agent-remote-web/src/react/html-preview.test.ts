@@ -1,4 +1,5 @@
 import { expect, it } from 'vitest';
+import { FILE_CONTENT_POLICY } from '@orchardworks/agent-remote-protocol';
 import { renderHtmlPreview, type HtmlPreviewResource } from './html-preview.js';
 
 const resources: Record<string, HtmlPreviewResource> = {
@@ -8,7 +9,7 @@ const resources: Record<string, HtmlPreviewResource> = {
 };
 const parse = (html: string) => new DOMParser().parseFromString(html, 'text/html');
 
-it('inlines local images and stylesheets and blocks scripts, refreshes and every network request', async () => {
+it('inlines local images and stylesheets of a static copy and removes scripts, refreshes and base URLs', async () => {
   const requested: string[] = [];
   const rendered = parse(await renderHtmlPreview(`<!doctype html><html><head><title>Report</title>
     <meta http-equiv="refresh" content="0; url=https://example.com"><base href="https://example.com/">
@@ -16,12 +17,12 @@ it('inlines local images and stylesheets and blocks scripts, refreshes and every
     <script>window.parent.executed = true</script></head>
     <body onload="window.executed = true"><h1>Report</h1><img src="./chart.png" srcset="./chart@2x.png 2x" alt="Chart">
     <img src="https://tracker.example/pixel.png" alt="Remote"><img src="./report.html" alt="Not an image"><img src="./missing.png" alt="Missing"></body></html>`,
-    async locator => { requested.push(locator); if (locator === './missing.png') throw new Error('missing'); return resources[locator]; }));
+    async locator => { requested.push(locator); if (locator === './missing.png') throw new Error('missing'); return resources[locator]; }, { scripts: false }));
   expect(requested.sort()).toEqual(['./chart.png', './missing.png', './report.html', 'styles/site.css']);
   expect(rendered.querySelectorAll('script, base, meta[http-equiv="refresh"], link[rel="icon"]')).toHaveLength(0);
   const policy = rendered.head.firstElementChild!;
   expect(policy.getAttribute('http-equiv')).toBe('Content-Security-Policy');
-  expect(policy.getAttribute('content')).toBe("default-src 'none'; img-src data:; media-src data:; font-src data:; style-src 'unsafe-inline'");
+  expect(policy.getAttribute('content')).toBe(FILE_CONTENT_POLICY);
   expect(rendered.querySelector('style')!.textContent).toBe('h1 { color: rebeccapurple; }');
   expect(rendered.querySelector('style')!.getAttribute('media')).toBe('screen');
   expect(rendered.querySelector('link[href="https://cdn.example/a.css"]')).not.toBeNull();
@@ -33,10 +34,10 @@ it('inlines local images and stylesheets and blocks scripts, refreshes and every
   expect(image('Missing').hasAttribute('src')).toBe(false);
 });
 
-it('opens external links in a new tab, keeps fragment links and turns local links into text', async () => {
+it('opens external links of a static copy in a new tab, keeps fragment links and turns local links into text', async () => {
   const rendered = parse(await renderHtmlPreview(`<a href="#results">Results</a><a href="https://example.com/docs">Docs</a>
     <a href="mailto:team@example.com">Mail</a><a href="./other.html">Other</a><a href="file:///work/a.md" title="Kept">File</a>
-    <a href="javascript:alert(1)">Script</a><map><area href="./area.html" alt="Area"></map>`, async () => undefined));
+    <a href="javascript:alert(1)">Script</a><map><area href="./area.html" alt="Area"></map>`, async () => undefined, { scripts: false }));
   const link = (text: string) => Array.from(rendered.querySelectorAll('a')).find(element => element.textContent === text)!;
   expect(link('Results').getAttribute('href')).toBe('#results');
   expect(link('Results').hasAttribute('target')).toBe(false);
@@ -55,7 +56,7 @@ it('opens external links in a new tab, keeps fragment links and turns local link
 it('renders with the resources loaded by the deadline and ignores later ones', async () => {
   let finish!: (resource: HtmlPreviewResource) => void;
   const rendered = parse(await renderHtmlPreview('<img src="./slow.png" alt="Slow"><img src="./fast.png" alt="Fast">', locator =>
-    locator === './slow.png' ? new Promise(resolve => { finish = resolve; }) : Promise.resolve(resources['./chart.png']), 20));
+    locator === './slow.png' ? new Promise(resolve => { finish = resolve; }) : Promise.resolve(resources['./chart.png']), { scripts: false, deadlineMs: 20 }));
   expect(rendered.querySelector('img[alt="Fast"]')!.getAttribute('src')).toBe('data:image/png;base64,iVBORw0KGgo=');
   expect(rendered.querySelector('img[alt="Slow"]')!.hasAttribute('src')).toBe(false);
   finish(resources['./chart.png']!);
@@ -63,6 +64,28 @@ it('renders with the resources loaded by the deadline and ignores later ones', a
 
 it('reads at most 64 local resources', async () => {
   let reads = 0;
-  await renderHtmlPreview(Array.from({ length: 70 }, (_, index) => `<img src="./image-${index}.png">`).join(''), async () => { reads++; return undefined; });
+  await renderHtmlPreview(Array.from({ length: 70 }, (_, index) => `<img src="./image-${index}.png">`).join(''), async () => { reads++; return undefined; }, { scripts: false });
   expect(reads).toBe(64);
+});
+
+it('keeps scripts for the file frame, inlines local ones as data and lets local links open the file preview', async () => {
+  const code = 'document.body.dataset.ready = "yes";';
+  const rendered = parse(await renderHtmlPreview(`<head><script src="./app.js" defer></script><script type="module" src="./missing.js"></script>
+    <script src="https://cdn.example/lib.js"></script></head><body><script>window.inline = true</script>
+    <a href="./other.html">Other</a><a href="javascript:void(0)">Action</a><a href="https://example.com">Docs</a></body>`,
+    async locator => locator === './app.js' ? { mediaType: 'text/plain', contentBase64: btoa(code) } : undefined, { scripts: true }));
+  const [policy, opener] = Array.from(rendered.head.children);
+  expect(policy!.getAttribute('content')).toBe(FILE_CONTENT_POLICY);
+  expect(opener!.localName).toBe('script');
+  expect(opener!.textContent).toContain("closest('[data-agent-file-link]')");
+  const scripts = Array.from(rendered.querySelectorAll('script')).slice(1);
+  expect(scripts.map(script => script.getAttribute('src'))).toEqual([`data:text/javascript;base64,${btoa(code)}`, null, 'https://cdn.example/lib.js', null]);
+  expect(scripts[0]!.hasAttribute('defer')).toBe(true);
+  expect(scripts[1]!.getAttribute('type')).toBe('module');
+  expect(scripts[3]!.textContent).toBe('window.inline = true');
+  const link = (text: string) => Array.from(rendered.querySelectorAll('a')).find(element => element.textContent === text)!;
+  expect(link('Other').getAttribute('href')).toBe('./other.html');
+  expect(link('Other').getAttribute('data-agent-file-link')).toBe('./other.html');
+  expect(link('Action').getAttribute('href')).toBe('javascript:void(0)');
+  expect(link('Docs').getAttribute('target')).toBe('_blank');
 });

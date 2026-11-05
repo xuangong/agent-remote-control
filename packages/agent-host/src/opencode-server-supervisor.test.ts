@@ -320,6 +320,28 @@ it.runIf(process.platform === 'win32')('reclaims Windows native descendants when
   }), { timeout: 5000 }).toEqual([]);
 }, 20000);
 
+// macOS answers EPERM for a process group whose remaining members are zombies, until launchd reaps them; a busy
+// launchd stretches that window from microseconds to the next probe.
+it.skipIf(process.platform === 'win32')('confirms a stop while the killed process group still awaits reaping', async () => {
+  const f = await fixture('descendant');
+  const outcome = f.start();
+  const owner = await f.owner();
+  const native = JSON.parse(await readFile(join(f.directory, 'native.json'), 'utf8'));
+  const kill = process.kill.bind(process);
+  let killed = false, unreaped = 0;
+  vi.spyOn(process, 'kill').mockImplementation(((pid: number, signal?: string | number) => {
+    if (pid === -native.pid && signal === 'SIGKILL') killed = true;
+    else if (pid === -native.pid && signal === 0 && killed && unreaped < 3) {
+      unreaped += 1;
+      throw Object.assign(new Error('kill EPERM'), { code: 'EPERM' });
+    }
+    return kill(pid, signal);
+  }) as typeof process.kill);
+  expect(await (await control(owner, 'stop')).json()).toEqual({ running: false });
+  expect(unreaped).toBe(3);
+  await outcome;
+}, 30000);
+
 it.skipIf(process.platform === 'win32').each(['stop', 'native exit'])('reclaims the owned POSIX process group after %s even when descendants ignore SIGTERM', async action => {
   const f = await fixture('descendant');
   const outcome = f.start();

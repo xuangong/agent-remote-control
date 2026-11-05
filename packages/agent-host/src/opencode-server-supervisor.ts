@@ -93,7 +93,8 @@ export async function serveOpenCodeServerSupervisor(directory: string, environme
       if (process.platform !== 'win32') process.kill(-child.pid, signal);
       else if (!exited) child.kill(signal);
     } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== 'ESRCH') throw new Error('The managed OpenCode process could not be signalled.');
+      // EPERM: only zombies remain until they are reaped; the tree wait confirms the stop or times out.
+      if (!['ESRCH', 'EPERM'].includes((error as NodeJS.ErrnoException).code ?? '')) throw new Error('The managed OpenCode process could not be signalled.');
     }
   };
   const treeStopped = () => {
@@ -103,6 +104,8 @@ export async function serveOpenCodeServerSupervisor(directory: string, environme
     try { process.kill(-child.pid, 0); return false; }
     catch (error) {
       if ((error as NodeJS.ErrnoException).code === 'ESRCH') return true;
+      // macOS answers EPERM for a group whose remaining members are zombies awaiting reaping; keep waiting.
+      if ((error as NodeJS.ErrnoException).code === 'EPERM') return false;
       throw new Error('The managed OpenCode process group could not confirm that it stopped.');
     }
   };

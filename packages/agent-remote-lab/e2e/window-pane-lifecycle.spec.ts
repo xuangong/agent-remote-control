@@ -3,6 +3,7 @@ import { expect, test, type BrowserContext, type Page } from '@playwright/test';
 import { createWindowView, type WindowSessionBinding, type WindowView, type WorkspaceWindow } from '@orchardworks/agent-remote-protocol';
 import { sessionLinkFixture } from './session-link-fixture';
 import { showNewSession } from './session-navigation';
+import { revealComposerAction } from './composer-actions';
 
 test.setTimeout(90_000);
 
@@ -271,6 +272,66 @@ test('closing an attached pane or a linked leader removes only its dependent vie
     expect(workspace.errors).toEqual([]);
   } finally { await workspace.close(); }
 });
+
+for (const placement of ['primary', 'dock', 'float'] as const) {
+  test(`${placement} mobile Side retains its session when reopening composer controls after Close`, async ({ page, context, isMobile }) => {
+    test.skip(!isMobile);
+    // Exercise the resource chooser UI; the recorded provider does not upload resources.
+    await page.routeWebSocket(/session-channel/, route => {
+      const server = route.connectToServer();
+      server.onMessage(message => {
+        const envelope = JSON.parse(String(message));
+        const frame = envelope.type === 'message' ? envelope.message : envelope;
+        if (frame.type === 'agent_snapshot') frame.payload.capabilities.resourceInput = { maxResources: 8, maxResourceBytes: 52428800, maxMessageBytes: 104857600 };
+        route.send(JSON.stringify(envelope));
+      });
+    });
+    const workspace = await createWorkspace(page, context);
+    try {
+      const sourceId = 'source';
+      await workspace.apply([
+        ...(placement !== 'primary' ? [createWindowView('main', undefined, 'primary')] : []),
+        createWindowView(sourceId, workspace.binding, placement),
+      ], placement === 'primary' ? sourceId : 'main', sourceId);
+      const shell = page.locator(placement === 'primary' ? '[data-primary-group-id="source"]' : '.lab-bindable-session-window[data-view-id="source"]');
+      const source = shell.locator('.lab-session-family-pane').first();
+      await expect(source.getByTestId('prompt-input')).toBeEnabled();
+      await source.getByTestId('prompt-input').fill('/side Composer focus regression');
+      await source.getByTestId('prompt-input').press('Enter');
+      await expect.poll(async () => (await workspace.inspect()).views.find(view => view.attachedTo === sourceId)?.id).toBeTruthy();
+      const sideId = (await workspace.inspect()).views.find(view => view.attachedTo === sourceId)!.id;
+      await (await openWindows(page)).locator(`[data-window-view-id="${sourceId}"]`).click();
+      await closeWindows(page);
+      await source.getByRole('button', { name: /^Side 1 ·/ }).tap();
+      const side = shell.locator('.lab-session-family-pane').nth(1);
+      await expect(side.getByTestId('prompt-input')).toBeEnabled();
+      const title = await page.title();
+      const model = side.getByRole('button', { name: 'Model', exact: true });
+      await model.tap();
+      await side.getByRole('button', { name: 'Close session controls', exact: true }).tap();
+      await expect(model).toBeFocused();
+      await model.tap();
+      await expect(side).toBeVisible();
+      await expect(side.getByRole('region', { name: 'Model settings', exact: true })).toBeVisible();
+      await expect.poll(async () => (await workspace.inspect()).selectedViewId).toBe(sideId);
+      await expect(page).toHaveTitle(title);
+      for (const name of ['Add images', 'Add resources']) {
+        await side.getByRole('button', { name: 'Close session controls', exact: true }).tap();
+        await expect(model).toBeFocused();
+        const { action } = await revealComposerAction(side, name);
+        const chooser = page.waitForEvent('filechooser');
+        await action.tap();
+        await (await chooser).setFiles([]);
+        await expect(side).toBeVisible();
+        await expect.poll(async () => (await workspace.inspect()).selectedViewId).toBe(sideId);
+        await expect(page).toHaveTitle(title);
+        await model.tap();
+        await expect(side.getByRole('region', { name: 'Model settings', exact: true })).toBeVisible();
+      }
+      expect(workspace.errors).toEqual([]);
+    } finally { await workspace.close(); }
+  });
+}
 
 for (const placement of ['primary', 'dock'] as const) {
   test(`${placement} Side footer reopens the closed attached pane beside its own source`, async ({ page, context, isMobile }) => {

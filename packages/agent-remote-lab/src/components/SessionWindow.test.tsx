@@ -17,6 +17,30 @@ import * as conversationHooks from '../hooks/useConversationSession.js';
 const transport = { onDiagnostic: () => () => {}, onProtocolMessage: () => () => {}, connect: () => ({ close() {}, send() {} }) } as unknown as RemoteAgentTransport;
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 
+it.each([{ bound: true, selected: true }, { bound: true, selected: false }, { bound: false, selected: false }])('retains the active family on window-shell focus and can select other windows: %j', async ({ bound, selected }) => {
+  vi.stubGlobal('ResizeObserver', class { observe() {} disconnect() {} });
+  const target = { hostId: 'host', providerId: 'recorded', nativeSessionId: 'native', title: 'Session' };
+  const root = createWindowView('root', bound ? target : undefined);
+  const side = { ...createWindowView('side', { ...target, nativeSessionId: 'child' }, 'attached'), attachedTo: root.id };
+  const other = createWindowView('other');
+  const focus = vi.fn(), operate = vi.fn();
+  const view = await render(<WorkspaceReady.Provider value={false}><WindowLayoutContext.Provider value={{ window: {
+    schemaVersion: 3, id: 'window', title: 'Window', revision: 0, selectedPrimaryViewId: null,
+    selectedViewId: selected ? side.id : other.id, views: bound ? [root, side, other] : [root, other],
+  }, operate }}><SessionWindow entry={{ id: root.id, slotId: 'slot', target: bound ? target : undefined, managed: false }}
+    baseUrl="http://fixture" visible compact selected={selected} hostLabel="Host" offline transport={transport} draftStore={new DraftStore('shell-focus')}
+    navigation={() => ({ childrenFor: () => [], resolveSessionLink: () => undefined })} onFocus={focus} onClose={() => {}} />
+  </WindowLayoutContext.Provider></WorkspaceReady.Provider>);
+  const shell = view.querySelector<HTMLElement>('.lab-bindable-session-window')!;
+  await act(async () => shell.focus());
+  expect(document.activeElement).toBe(shell);
+  expect(focus).toHaveBeenCalledTimes(bound && selected ? 0 : 1);
+  expect(operate).not.toHaveBeenCalled();
+  focus.mockClear();
+  await act(async () => shell.dispatchEvent(new Event('pointerdown', { bubbles: true })));
+  expect(focus).toHaveBeenCalledOnce();
+});
+
 it.each([
   { placement: 'dock' as const, bound: true }, { placement: 'float' as const, bound: true },
   { placement: 'dock' as const, bound: false }, { placement: 'float' as const, bound: false },

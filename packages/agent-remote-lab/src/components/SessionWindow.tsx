@@ -60,7 +60,12 @@ function WindowBody({ entry, baseUrl, visible, compact, hostLabel, offline, tran
       <section ref={panel} className="lab-ask-window lab-bindable-session-window lab-session-pane-selection" aria-label={`Session: ${title}`}
         data-view-id={entry.id} data-active={selected || undefined} tabIndex={-1}
         data-selected={!target && selected || undefined} aria-current={!target && selected ? 'true' : undefined}
-        onPointerDownCapture={focusWindow} onFocusCapture={focusWindow}>
+        onPointerDownCapture={focusWindow} onFocusCapture={event => {
+          // Safari can focus this container when a focused child control is tapped.
+          // An already selected family's container must retain its selected Side.
+          if (shared && target && selected && event.target === event.currentTarget) return;
+          focusWindow(event);
+        }}>
         {target ? <SessionFamily storageScope={baseUrl} baseUrl={baseUrl} target={target} hostLabel={hostLabel} offline={offline}
           viewId={shared ? entry.id : entry.slotId} sessionIntent={shared?.window.views.find(view => view.id === entry.id)?.binding?.sessionIntent}
           onSessionBound={onSessionBound} onSessionUnavailable={onSessionUnavailable} sessionPresentation={sessionPresentation} renderSessionFooter={renderSessionFooter}

@@ -12,8 +12,8 @@ export async function runClaudeCommand(args: string[], stateDir: string, environ
  const boundary=args.indexOf('--');
  const isTakeover=(arg:string,index:number)=>arg==='--take-over' && (boundary<0 || index<boundary);
  const takeover=args.some(isTakeover);args=args.filter((arg,index)=>!isTakeover(arg,index));
- const target=args[1];
- const nativeArgs=args[0]==='resume' ? target==='--last' ? ['--continue',...args.slice(2)] : ['--resume',...args.slice(1)] : args;
+ if(args[0]==='resume') throw new Error('To open a session here, run agent-remote-controller session attach <address>.');
+ const nativeArgs=args;
  const nativeBoundary=nativeArgs.indexOf('--');
  const controlArgs=nativeBoundary<0 ? nativeArgs : nativeArgs.slice(0,nativeBoundary);
  const resume=controlArgs.find(arg=>arg.startsWith('--resume='))?.slice('--resume='.length)

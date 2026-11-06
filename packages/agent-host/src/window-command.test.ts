@@ -8,18 +8,23 @@ import { createWindowView, applyWindowOperation, type WorkspaceWindow } from '@o
 import { runWindowCommand } from './window-command.js';
 const servers: Server[] = [];
 afterEach(async () => { for (const server of servers.splice(0)) { server.closeAllConnections(); await new Promise<void>(resolve => server.close(() => resolve())); } });
+const token = 's'.repeat(43);
+let origin = '';
 async function fixture(wireVersion: 2 | 3 = 3) {
   let window: WorkspaceWindow = { schemaVersion: 3, id: 'w1', revision: 0, title: 'Project', selectedPrimaryViewId: 'main', selectedViewId: 'main', views: [createWindowView('main', undefined, 'primary')] };
   const snapshot = (value = window) => ({ ...value, schemaVersion: wireVersion });
   const receipts = new Map<string, { input: string; result: unknown; window: WorkspaceWindow }>(); const requests: string[] = [];
   const server = createServer(async (req, res) => {
     requests.push(req.url!); res.setHeader('content-type', 'application/json');
-    if (req.headers.authorization !== 'Bearer secret-grant') { res.writeHead(403).end(JSON.stringify({ code: 'window_access_denied' })); return; }
+    if (req.headers.cookie !== `arc_session=${token}` || req.headers.origin !== origin || !req.url?.startsWith('/u/alice/v1/windows')) { res.writeHead(401).end(JSON.stringify({ code: 'unauthorized' })); return; }
+    req.url = req.url.slice('/u/alice'.length);
     if (req.method === 'GET' && req.url === '/v1/windows/w1') { res.end(JSON.stringify({ window: snapshot() })); return; }
     if (req.method === 'GET' && req.url === '/v1/windows') { res.end(JSON.stringify({ windows: [snapshot()] })); return; }
+    if (req.method === 'POST' && req.url === '/v1/windows/w1/manager') { let raw = ''; for await (const chunk of req) raw += chunk; res.end(JSON.stringify({ generation: 1, ...(JSON.parse(raw).session ? { manager: { session: JSON.parse(raw).session, generation: 1 } } : {}) })); return; }
     if (req.method === 'GET' && req.url?.includes('/operations/')) { res.end(JSON.stringify({ result: receipts.get(req.url.split('/').at(-1)!)?.result })); return; }
     let raw = ''; for await (const chunk of req) raw += chunk;
     const input = JSON.parse(raw);
+    if (req.method === 'POST' && req.url === '/v1/windows') { res.end(JSON.stringify({ result: { operationId: input.operationId, status: 'committed', revision: 0, committedAt: Date.now(), expiresAt: Date.now() + 86400000 }, window: input.window })); return; }
     const previous = receipts.get(input.operationId);
     if (previous) {
       if (previous.input !== raw) { res.writeHead(409).end(JSON.stringify({ code: 'operation_conflict' })); return; }
@@ -32,7 +37,8 @@ async function fixture(wireVersion: 2 | 3 = 3) {
   });
   servers.push(server); server.listen(0, '127.0.0.1'); await once(server, 'listening');
   const address = server.address() as { port: number };
-  const env = { AGENT_WINDOW_SERVER: `http://127.0.0.1:${address.port}`, AGENT_WINDOW_ID: 'w1', AGENT_WINDOW_TOKEN: 'secret-grant' };
+  origin = `http://127.0.0.1:${address.port}`;
+  const env = async () => ({ serverUrl: origin, basePath: '/u/alice/', cookieName: 'arc_session', token, expiresAt: Date.now() + 3_600_000 });
   const run = async (args: string[]) => { let output = ''; const code = await runWindowCommand(args, env, text => { output += text; }); return { code, output: JSON.parse(output) }; };
   return { run, requests, get window() { return window; }, env };
 }
@@ -77,15 +83,25 @@ it('returns explicit conflicts and rejects malformed input without posting mutat
   expect((await f.run(['rename', 'w1', 'Renamed', '--base-revision', '99'])).code).toBe(1);
   const before = f.requests.length;
   expect((await f.run(['view', 'resize', 'w1', 'main', '--width', '0'])).code).toBe(2);
-  expect((await f.run(['view', 'select', 'another-window', 'main'])).code).toBe(1);
   expect(f.requests.length).toBe(before);
+  expect((await runWindowCommand(['list'], async () => undefined, () => {}))).toBe(1);
+});
+it('creates Windows and names the session that arranges one', async () => {
+  const f = await fixture();
+  const session = { hostId: 'mac', providerId: 'codex', nativeSessionId: 's1', title: 'Demo' };
+  expect((await f.run(['manager', 'w1', '--session', JSON.stringify(session)])).output).toEqual({ generation: 1, manager: { session, generation: 1 } });
+  expect((await f.run(['manager', 'w1', '--clear'])).output).toEqual({ generation: 1 });
+  expect((await f.run(['manager', 'w1'])).code).toBe(2);
+  const created = await f.run(['create', '--title', 'Review', '--window-id', 'w2']);
+  expect(created.code).toBe(0);
+  expect(created.output.window).toMatchObject({ id: 'w2', title: 'Review', views: [], revision: 0 });
 });
 it('treats missing mutation replies as unknown and exposes the operation identity for lookup', async () => {
   const f = await fixture(); let output = '';
   const code = await runWindowCommand(['rename', 'w1', 'Next', '--base-revision', '0'], f.env, text => { output += text; }, async () => { throw new Error('network unavailable'); });
   expect(code).toBe(3); const result = JSON.parse(output);
   expect(result.status).toBe('unknown'); expect(result.operationId).toBeTruthy();
-  expect(output).not.toContain('secret-grant');
+  expect(output).not.toContain(token);
 });
 it('does not follow redirects carrying management credentials', async () => {
   const f = await fixture(); let output = ''; let policy: RequestRedirect | undefined;

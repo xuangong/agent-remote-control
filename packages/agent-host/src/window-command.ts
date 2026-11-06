@@ -4,14 +4,15 @@ import { createWindowView, decodeWorkspaceWindow, isWindowOperation, isWindowOpe
   type WindowOperation, type WindowSessionBinding, type WorkspaceWindow } from '@orchardworks/agent-remote-protocol';
 
 import { CliError, printError } from './cli-output.js';
+import { relayRequest, type CliCredentials } from './relay-client.js';
 
 class CommandError extends Error {
   constructor(readonly code: string, message: string) { super(message); }
 }
-interface Grant { serverUrl: string; windowId: string; token: string }
-const help = `Usage: agent-remote-controller window <command> [--grant-file PATH] [--json]
+const help = `Usage: agent-remote-controller window <command>
   list | inspect <window-id> | export <window-id>
-  rename <window-id> <title> | delete <window-id>
+  create [--title TEXT] [--window-id ID] | rename <window-id> <title> | delete <window-id>
+  manager <window-id> (--session JSON | --clear)
   apply <window-id> --file LAYOUT.json
   operation <window-id> <operation-id>
   view create <window-id> [--view-id ID] [--session JSON] [--mode primary|dock|float]
@@ -24,10 +25,10 @@ const help = `Usage: agent-remote-controller window <command> [--grant-file PATH
   view display <window-id> <view-id> --mode preview|simple|content [--letters true|false]
   view geometry <window-id> <view-id> --geometry JSON
 Mutations: [--base-revision N] [--operation-id ID --issued-at EPOCH_MS]
-Credentials: private grant file or AGENT_WINDOW_SERVER, AGENT_WINDOW_ID, AGENT_WINDOW_TOKEN.
+Windows are yours: run agent-remote-controller login once on this computer.
+--session is {"hostId","providerId","nativeSessionId","title"}; manager names the session that arranges the Window.
 Timeout: --timeout-ms 100..60000 (default 15000). Output is JSON. Exit 0 committed, 1 failed or
 rejected (see error.code), 2 wrong usage, 3 uncertain mutation (query operation; do not resend).
-Create Windows in the website; an assigned Window grant cannot create unrelated Windows.
 `;
 function error(code: string, message: string): never { throw new CommandError(code, message); }
 function number(value: string | undefined, name: string): number {
@@ -47,31 +48,14 @@ async function boundedFile(path: string): Promise<string> {
   if (Buffer.byteLength(content) > 300000) error('file_too_large', 'The input file exceeds 300000 bytes.');
   return content;
 }
-async function grant(options: Map<string, string>, env: NodeJS.ProcessEnv): Promise<Grant> {
-  const path = options.get('grant-file') ?? env.AGENT_WINDOW_GRANT_FILE;
-  let value: unknown;
-  if (path) {
-    const info = await stat(path);
-    if (process.platform !== 'win32' && (info.mode & 0o077)) error('insecure_grant_file', 'Grant file must be private. Run chmod 600 on the file.');
-    value = json(await boundedFile(path), 'Grant file');
-  } else value = { serverUrl: env.AGENT_WINDOW_SERVER, windowId: env.AGENT_WINDOW_ID, token: env.AGENT_WINDOW_TOKEN };
-  const g = value as Grant | null;
-  if (!g || typeof g.serverUrl !== 'string' || typeof g.token !== 'string' || !g.token || g.token.length > 4096
-    || typeof g.windowId !== 'string' || !/^[A-Za-z0-9_.:-]{1,128}$/.test(g.windowId)) error('missing_grant', 'Provide a private Window management grant file or AGENT_WINDOW_SERVER, AGENT_WINDOW_ID, and AGENT_WINDOW_TOKEN.');
-  let url: URL;
-  try { url = new URL(g.serverUrl); } catch { return error('invalid_server', 'Grant serverUrl is invalid.'); }
-  if (url.username || url.password || url.search || url.hash || !['https:', 'http:'].includes(url.protocol)
-    || url.protocol === 'http:' && !['localhost', '127.0.0.1', '[::1]'].includes(url.hostname)) error('invalid_server', 'Use HTTPS, or HTTP on loopback, without URL credentials, query, or fragment.');
-  return { ...g, serverUrl: url.href.replace(/\/$/, '') };
-}
 function binding(value: string | undefined): WindowSessionBinding {
   const parsed = json(value ?? '', '--session');
   if (!isWindowSessionBinding(parsed)) error('invalid_binding', '--session must contain hostId, providerId, nativeSessionId, and title.');
   return parsed;
 }
 
-/** Window commands never use Host pairing credentials or touch native session execution. */
-export async function runWindowCommand(args: string[], env: NodeJS.ProcessEnv = process.env,
+/** Window commands act as the signed-in user; they never use Host pairing credentials or touch native session execution. */
+export async function runWindowCommand(args: string[], credentials: () => Promise<CliCredentials | undefined>,
   print: (value: string) => void = value => { process.stdout.write(value); }, fetcher: typeof fetch = fetch): Promise<number> {
   if (!args.length || args.includes('--help') || args[0] === 'help') { print(help); return 0; }
   let pending: { operationId: string; issuedAt: number; baseRevision: number; windowId: string } | undefined;
@@ -79,48 +63,64 @@ export async function runWindowCommand(args: string[], env: NodeJS.ProcessEnv = 
   const output = (value: unknown) => print(`${JSON.stringify(value)}\n`);
   try {
     const positional: string[] = []; const options = new Map<string, string>();
-    const allowed = new Set(['grant-file', 'timeout-ms', 'base-revision', 'operation-id', 'issued-at', 'file', 'view-id', 'session', 'mode', 'after', 'width', 'value', 'letters', 'geometry']);
+    const allowed = new Set(['timeout-ms', 'base-revision', 'operation-id', 'issued-at', 'file', 'view-id', 'session', 'mode', 'after', 'width', 'value', 'letters', 'geometry', 'title', 'window-id']);
     for (let i = 0; i < args.length; i++) {
       const arg = args[i]!;
       if (arg === '--json') continue;
       if (!arg.startsWith('--')) { positional.push(arg); continue; }
-      const name = arg.slice(2); const value = args[++i];
+      const name = arg.slice(2);
+      if (name === 'clear') { if (options.has(name)) error('invalid_argument', 'Repeated option: --clear.'); options.set(name, 'true'); continue; }
+      const value = args[++i];
       if (!allowed.has(name) || options.has(name) || !value || value.startsWith('--')) error('invalid_argument', `Invalid or repeated option: --${name}.`);
       options.set(name, value);
     }
-    const credentials = await grant(options, env); secret = credentials.token;
+    const signedIn = await credentials();
+    if (!signedIn) error('signed_out', 'Windows belong to your account: run agent-remote-controller login first.');
+    secret = signedIn!.token;
     const timeout = number(options.get('timeout-ms') ?? '15000', 'timeout-ms');
     if (timeout < 100 || timeout > 60000) error('invalid_argument', 'timeout-ms must be between 100 and 60000.');
-    const request = async (path: string, method = 'GET', body?: unknown): Promise<any> => {
-      const response = await fetcher(`${credentials.serverUrl}/v1/windows${path}`, { method, redirect: 'error',
-        headers: { authorization: `Bearer ${credentials.token}`, ...(body ? { 'content-type': 'application/json' } : {}) },
-        ...(body ? { body: JSON.stringify(body) } : {}), signal: AbortSignal.timeout(timeout) });
-      const raw = await response.text();
-      if (Buffer.byteLength(raw) > 1024 * 1024) error('invalid_response', 'Window response exceeded the size limit.');
-      let result: any; try { result = JSON.parse(raw); } catch { return error('invalid_response', 'Window service returned invalid JSON.'); }
-      if (!response.ok) {
-        if (response.status >= 500) error('service_unavailable', 'Window service could not confirm the request.');
+    const request = async (path: string, method: 'GET' | 'POST' | 'DELETE' = 'GET', body?: unknown): Promise<any> => {
+      const { status, data } = await relayRequest(signedIn!, method, `/v1/windows${path}`, body, fetcher, timeout);
+      if (!data || typeof data !== 'object') error('invalid_response', 'Window service returned invalid JSON.');
+      if (status < 200 || status >= 300) {
+        if (status >= 500) error('service_unavailable', 'Window service could not confirm the request.');
         pending = undefined;
-        error(typeof result.code === 'string' ? result.code : 'request_rejected', 'Window service rejected the request. Inspect the Window or refresh its management grant.');
+        error(typeof data.code === 'string' ? data.code : 'request_rejected', typeof data.error === 'string' ? data.error : 'Window service rejected the request. Inspect the Window.');
       }
-      return result;
+      return data;
     };
     const command = positional[0]; const isView = command === 'view'; const action = isView ? positional[1] : command;
-    const windowId = positional[isView ? 2 : 1] ?? credentials.windowId;
-    if (windowId !== credentials.windowId) error('window_scope_mismatch', 'This grant belongs to a different Window.');
+    if (command === 'list') {
+      const data = await request('');
+      const windows = Array.isArray(data.windows) ? data.windows.map(decodeWorkspaceWindow) : undefined;
+      if (!windows || windows.some((window: WorkspaceWindow | undefined) => !window)) error('invalid_response', 'Window list is invalid.');
+      output({ ...data, windows }); return 0;
+    }
+    if (command === 'create') {
+      const id = options.get('window-id') ?? randomUUID();
+      const operationId = options.get('operation-id') ?? randomUUID();
+      if (options.has('operation-id') !== options.has('issued-at')) error('invalid_argument', 'An explicit operation ID requires its original --issued-at timestamp, and vice versa.');
+      const issuedAt = options.has('issued-at') ? number(options.get('issued-at'), 'issued-at') : Date.now();
+      const window: WorkspaceWindow = { schemaVersion: 3, id, title: options.get('title') ?? 'Window', revision: 0, selectedPrimaryViewId: null, selectedViewId: null, views: [] };
+      pending = { operationId, issuedAt, baseRevision: 0, windowId: id };
+      const data = await request('', 'POST', { operationId, issuedAt, window });
+      const created = decodeWorkspaceWindow(data.window);
+      if (!isWindowOperationResult(data.result) || data.result.operationId !== operationId || data.window !== undefined && created?.id !== id) error('invalid_response', 'Window service returned an invalid creation result.');
+      pending = undefined; output({ ...data, ...(created ? { window: created } : {}) }); return data.result.status === 'committed' ? 0 : 1;
+    }
+    const windowId = positional[isView ? 2 : 1] ?? error('invalid_argument', 'Name the Window.');
+    if (!/^[A-Za-z0-9_.:-]{1,128}$/.test(windowId)) error('invalid_argument', 'The Window ID is invalid.');
     const path = `/${encodeURIComponent(windowId)}`;
+    if (command === 'manager') {
+      if (options.has('clear') === options.has('session')) error('invalid_argument', 'Give --session JSON or --clear.');
+      output(await request(`${path}/manager`, 'POST', { session: options.has('clear') ? null : binding(options.get('session')) })); return 0;
+    }
     const snapshot = async (): Promise<WorkspaceWindow> => {
       const data = await request(path);
       const window = decodeWorkspaceWindow(data.window);
       if (!window || window.id !== windowId) error('invalid_response', 'Window service returned an invalid or mismatched snapshot.');
       return window;
     };
-    if (command === 'list') {
-      const data = await request('');
-      const windows = Array.isArray(data.windows) ? data.windows.map(decodeWorkspaceWindow) : undefined;
-      if (!windows || windows.some((window: WorkspaceWindow | undefined) => !window || window.id !== windowId)) error('invalid_response', 'Window list is invalid.');
-      output({ ...data, windows }); return 0;
-    }
     if (command === 'inspect' || command === 'export') {
       const window = await snapshot();
       if (command === 'inspect') output({ window });
@@ -133,7 +133,6 @@ export async function runWindowCommand(args: string[], env: NodeJS.ProcessEnv = 
       if (!isWindowOperationResult(data.result) || data.result.operationId !== id) error('invalid_response', 'Operation result is invalid or mismatched.');
       output(data); return data.result.status === 'committed' ? 0 : 1;
     }
-    if (command === 'create') error('creation_not_authorized', 'An existing Window management grant cannot create another Window. Create and assign it in the website.');
     let operation: WindowOperation | { type: 'delete' };
     let observed: WorkspaceWindow | undefined;
     const viewId = positional[3] ?? '';

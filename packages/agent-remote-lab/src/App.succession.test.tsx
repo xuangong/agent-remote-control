@@ -367,7 +367,7 @@ it('retains a local resume command for a session that cannot be opened', async (
   await settleApp(() => expect(f.view.textContent).toContain('Session cannot be opened.'));
   await act(async () => f.view.querySelector<HTMLButtonElement>('[aria-label="Share session link"]')!.click());
   const command = document.querySelector<HTMLInputElement>('.lab-native-session-command input');
-  expect(command?.value).toBe(`agent-remote-controller codex resume ${id}`);
+  expect(command?.value).toBe(`agent-remote-controller session attach host/codex/${id}`);
 });
 
 it.each(['A', 'B'])('keeps native takeover visible from failed initial binding %s until explicit takeover is confirmed', async nativeSessionId => {

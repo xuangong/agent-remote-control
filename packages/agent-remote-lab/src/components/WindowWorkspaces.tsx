@@ -98,12 +98,6 @@ export function WindowWorkspaces({ workspace, current, active = true, sessionSta
     } catch (error) { report(error); }
     finally { setSaving(false); }
   }
-  function saveGrant() {
-    if (!manager.grant) return;
-    const blob = new Blob([JSON.stringify({ serverUrl: location.origin, ...manager.grant }, null, 2)], { type: 'application/json' });
-    const url = URL.createObjectURL(blob), link = document.createElement('a');
-    link.href = url; link.download = `window-${manager.grant.windowId}-grant.json`; link.click(); URL.revokeObjectURL(url);
-  }
   return <div ref={root} className="lab-window-workspaces">
     <div className="lab-window-section-heading"><span>Windows</span><button type="button" disabled={busy} onClick={() => void run(workspace.create)}>New Window</button></div>
     <nav className="lab-window-list" aria-label="Windows">{catalog.map(window => { const status = sessionStatus && windowStatus(window, sessionStatus); return <div key={window.id} className="lab-window-row" data-window-row={window.id} data-renaming={renaming?.id === window.id || undefined}>
@@ -163,17 +157,16 @@ export function WindowWorkspaces({ workspace, current, active = true, sessionSta
         </div>
         {workspace.client ? <details className="lab-window-agent" open={agentControl} onToggle={event => setAgentControl(event.currentTarget.open)}>
           <summary>Agent control</summary>
-          <p className="lab-window-note">Let one Agent session manage this Window through the CLI.</p>
+          <p className="lab-window-note">Name the session that arranges this Window. Agents arrange Windows with agent-remote-controller window, signed in as you.</p>
           {manager.status === 'loading' ? <p role="status">Checking manager…</p> : manager.status === 'error' ? <p role="alert">{manager.error} <button type="button" onClick={manager.refresh}>Retry</button></p>
             : <p className="lab-window-note">Manager: {manager.manager?.title || manager.manager?.nativeSessionId || 'Unassigned'}</p>}
           <div className="lab-window-actions">
             <button type="button" disabled={!current || manager.pending} onClick={() => void manager.assign(current!).catch(() => {})}>Use current session</button>
-            <button type="button" disabled={!manager.manager || manager.pending} onClick={() => void manager.assign(null).catch(() => {})}>Revoke manager</button>
+            <button type="button" disabled={!manager.manager || manager.pending} onClick={() => void manager.assign(null).catch(() => {})}>Clear manager</button>
           </div>
           {!current ? <p className="lab-window-note">Select a bound session view to assign its Agent.</p> : null}
           {manager.pending ? <p role="status">Updating manager…</p> : null}
           {manager.error && manager.status !== 'error' ? <p role="alert">{manager.error}</p> : null}
-          {manager.grant ? <div className="lab-window-grant"><button type="button" onClick={saveGrant}>Save private manager grant</button><p className="lab-window-note">Give this file to the assigned Agent. Keep it private.</p></div> : null}
         </details> : null}
       </details>
     </> : null}

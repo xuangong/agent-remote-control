@@ -1,8 +1,9 @@
 import { emitKeypressEvents, type Key } from 'node:readline';
-import type { ShareChoice } from './share-command.js';
+
+export interface TerminalChoice { value: string; label: string; description?: string[]; shortcut?: string }
 
 /** A shared keyboard selector for interactive CLI choices; text prompts use readline. */
-export async function selectTerminalChoice(prompt: string, choices: readonly ShareChoice[]): Promise<string | undefined> {
+export async function selectTerminalChoice(prompt: string, choices: readonly TerminalChoice[]): Promise<string | undefined> {
   if (!choices.length) return undefined;
   const input = process.stdin, output = process.stdout;
   const wasRaw = input.isRaw, wasFlowing = input.readableFlowing;

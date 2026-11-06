@@ -1,6 +1,7 @@
 import type { AgentHistoryPage, AgentHistoryQuery } from '@orchardworks/agent-provider-sdk';
 import { quotedSessionContextPrefix, type AgentInteractionRequest, type AgentInteractionResponse } from '@orchardworks/agent-remote-protocol';
 import type { RemoteSessionSummary } from '@orchardworks/agent-remote-relay';
+import { controllerPath } from '@orchardworks/agent-remote-hosted/controller-location';
 import { changeSessionRef, describeSessionRefs, SessionRefError, type SessionRefContext, type SessionRefs } from './session-refs.js';
 
 /** A session on this Host, by provider and native identity. */
@@ -59,6 +60,8 @@ export interface SessionRouteContext {
   refs?: SessionRefContext;
   actions?: SessionActions;
   isShared(ref: SessionCallerRef): boolean;
+  /** The website's origin, where a session's link opens it; undefined before the Host is paired. */
+  siteOrigin?(): string | undefined;
   /** Sends a request naming another Host there, through the Relay; without it only this Host is reachable. */
   forward?(hostId: string, request: Record<string, unknown>): Promise<SessionCallResult>;
 }
@@ -162,10 +165,12 @@ export async function handleSessionRequest(input: unknown, caller: SessionCaller
       case 'read': {
         const ref = target(request.target);
         if ('hostId' in ref) return await elsewhere(ref.hostId);
-        const query = historyQuery(request);
+        // A limit of 0 describes the session without reading its history.
+        const describeOnly = request.limit === 0;
+        const query = historyQuery(describeOnly ? { ...request, limit: undefined } : request);
         const summary = await exists(ref);
-        let page: AgentHistoryPage;
-        try { page = await context.catalog.history(ref, query); }
+        let page: AgentHistoryPage = { entries: [] };
+        if (!describeOnly) try { page = await context.catalog.history(ref, query); }
         catch (error) {
           if ((error as { code?: unknown }).code === 'native_session_unavailable') fail('session_not_found', 'No such session on this Host.');
           fail('history_unavailable', 'The session history could not be read.');
@@ -211,6 +216,14 @@ export async function handleSessionRequest(input: unknown, caller: SessionCaller
         await exists(ref);
         await actions().cancel(ref, operation());
         return { result: { canceled: true } };
+      }
+      case 'link': {
+        const ref = target(request.target);
+        if ('hostId' in ref) return await elsewhere(ref.hostId);
+        await exists(ref);
+        const site = context.siteOrigin?.() ?? fail('host_unregistered', 'This Host is not paired with a Relay, so its sessions have no link.');
+        const hostId = await context.hostId() ?? fail('host_unregistered', 'This Host is not registered with the Relay yet.');
+        return { result: { session: { address: address(ref) }, url: site + controllerPath({ hostId, providerId: ref.providerId, nativeSessionId: ref.nativeSessionId }) } };
       }
       case 'inspect': {
         const ref = target(request.target);

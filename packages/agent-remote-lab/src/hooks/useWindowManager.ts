@@ -7,7 +7,6 @@ interface ManagerState {
   status: 'loading' | 'ready' | 'error';
   error?: string;
   pending: boolean;
-  grant?: { windowId: string; token: string };
 }
 const empty: ManagerState = { status: 'ready', pending: false };
 const emptySnapshot = () => empty;
@@ -18,7 +17,6 @@ function managerEntry(client: WindowWorkspaceClient, windowId: string) {
   let state: ManagerState = { status: 'loading', pending: false };
   let readGeneration = 0;
   let readAbort: AbortController | undefined;
-  let grantGeneration: number | undefined;
   const listeners = new Set<() => void>();
   const update = (next: ManagerState) => { state = next; for (const listener of listeners) listener(); };
   const cancelRead = () => { readGeneration++; readAbort?.abort(); readAbort = undefined; };
@@ -33,30 +31,25 @@ function managerEntry(client: WindowWorkspaceClient, windowId: string) {
       update({ ...state, status: 'loading', error: undefined });
       void client.inspect(windowId, abort.signal).then(snapshot => {
         if (abort.signal.aborted || generation !== readGeneration) return;
-        const grant = snapshot.manager?.generation === grantGeneration ? state.grant : undefined;
-        if (!grant) grantGeneration = undefined;
-        update({ status: 'ready', pending: false, manager: snapshot.manager?.session, grant });
+        update({ status: 'ready', pending: false, manager: snapshot.manager?.session });
       }).catch(error => {
         if (!abort.signal.aborted && generation === readGeneration) update({ ...state, status: 'error', error: message(error) });
       });
     },
     async assign(session: WindowSessionBinding | null): Promise<void> {
       if (state.pending) throw new Error('A manager change is already pending for this Window.');
-      cancelRead(); grantGeneration = undefined;
-      // A failed response can follow a committed rotation; the previous token is no longer reliable.
-      update({ ...state, pending: true, error: undefined, grant: undefined });
+      cancelRead();
+      update({ ...state, pending: true, error: undefined });
       try {
         const value = await client.assign(windowId, session) as {
-          generation?: number; manager?: { session?: WindowSessionBinding; generation?: number }; token?: string;
+          generation?: number; manager?: { session?: WindowSessionBinding; generation?: number };
         } | null;
         if (!value || !Number.isSafeInteger(value.generation) || value.generation! < 0
           || (session ? !isWindowSessionBinding(value.manager?.session) || value.manager?.generation !== value.generation
             || value.manager.session.hostId !== session.hostId || value.manager.session.providerId !== session.providerId
-            || value.manager.session.nativeSessionId !== session.nativeSessionId || typeof value.token !== 'string' || !/^[A-Za-z0-9_-]{43}$/.test(value.token)
-            : value.manager !== undefined || value.token !== undefined)) throw new Error('The service returned an invalid manager result. Refresh this Window before retrying.');
-        grantGeneration = session ? value.generation : undefined;
-        update({ status: 'ready', pending: false, manager: value.manager?.session,
-          grant: session ? { windowId, token: value.token! } : undefined });
+            || value.manager.session.nativeSessionId !== session.nativeSessionId
+            : value.manager !== undefined)) throw new Error('The service returned an invalid manager result. Refresh this Window before retrying.');
+        update({ status: 'ready', pending: false, manager: value.manager?.session });
       } catch (error) {
         update({ ...state, pending: false, status: 'error', error: message(error) });
         throw error;
@@ -65,7 +58,7 @@ function managerEntry(client: WindowWorkspaceClient, windowId: string) {
   };
 }
 
-/** Grants stay in this mounted owner's memory, isolated by service client and Window identity. */
+/** The session named to arrange a Window, isolated by service client and Window identity. */
 export function useWindowManager(client: WindowWorkspaceClient | undefined, windowId: string | undefined, active: boolean) {
   const entries = useRef(new WeakMap<WindowWorkspaceClient, Map<string, ReturnType<typeof managerEntry>>>());
   const entry = useMemo(() => {

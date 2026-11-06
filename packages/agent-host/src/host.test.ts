@@ -137,25 +137,29 @@ describe('Agent Host runtime', () => {
       expect((await request({ ...input, editTurnId: 'another' })).status).toBe(409); expect(codex.createCount()).toBe(1);
     } finally { await host.close(); }
   });
-  it('shares only registered catalog identities and follows a replacement Host without opening sessions', async () => {
+  it('answers host commands about itself, links its sessions on the website, and follows a replacement Host', async () => {
     const first = await uplinkBroker('first'), second = await uplinkBroker('second');
     const registration = fixture('codex');
     registration.directory.list = async () => [summary('codex', 'native')];
+    const forwarded: unknown[] = [];
     const host = createAgentHost({ registrations: [registration], installationId: 'installation', name: 'Host',
-      uplink: { url: first.url, remoteKey: 'private-key' } });
+      uplink: { url: first.url, remoteKey: 'private-key' }, forwardCommand: async (scope, hostId, request) => { forwarded.push([scope, hostId, request]); return { result: { forwarded: true } }; } });
     try {
       await host.ready;
-      expect(await host.shareContext()).toEqual({ hostId: 'first', providers: [{ providerId: 'codex', displayName: 'CODEX' }] });
-      const found = await host.shareCatalog({ hostId: 'first', providerId: 'codex', nativeSessionId: 'native' });
-      expect(found.status).toBe(200); expect(JSON.parse(found.body).nativeSessionId).toBe('native');
-      expect((await host.shareCatalog({ hostId: 'first', providerId: 'codex', nativeSessionId: 'missing' })).status).toBe(404);
-      expect((await host.shareCatalog({ hostId: 'first', providerId: 'claude' })).status).toBe(400);
+      const owner = { kind: 'owner' as const };
+      expect(await host.command('host', { command: 'read' }, owner)).toMatchObject({ result: { host: { id: 'first', name: 'Host', online: true, providers: [{ providerId: 'codex', displayName: 'CODEX' }] } } });
+      expect(await host.command('host', { command: 'read', host: 'first' }, owner)).toMatchObject({ result: { host: { id: 'first' } } });
+      expect(await host.command('host', { command: 'list' }, owner)).toEqual({ result: { forwarded: true } });
+      expect(await host.command('host', { command: 'read', host: 'other' }, owner)).toEqual({ result: { forwarded: true } });
+      expect(forwarded).toEqual([['host', '', { command: 'list' }], ['host', 'other', { command: 'read', host: 'other' }]]);
+      expect(await host.command('host', { command: 'previews' }, owner)).toMatchObject({ error: { code: 'signed_out' } });
+      const site = new URL(first.url); site.protocol = site.protocol === 'wss:' ? 'https:' : 'http:';
+      expect(await host.command('session', { command: 'link', target: 'first/codex/native' }, owner))
+        .toEqual({ result: { session: { address: 'first/codex/native' }, url: `${site.origin}/?host=first&provider=codex&session=native` } });
+      expect(await host.command('session', { command: 'read', target: 'first/codex/native', limit: 0 }, owner)).toMatchObject({ result: { session: { address: 'first/codex/native' }, entries: [] } });
       await host.replaceUplink({ url: second.url, remoteKey: 'other-key' });
-      expect((await host.shareContext()).hostId).toBe('second');
-      await expect(host.shareCatalog({ hostId: 'first', providerId: 'codex' })).rejects.toThrow(/changed/);
+      expect(await host.command('host', { command: 'read' }, owner)).toMatchObject({ result: { host: { id: 'second' } } });
       expect(registration.sessions.size).toBe(0);
-      await host.close();
-      await expect(host.shareContext()).rejects.toThrow(/registered/);
     } finally { await host.close(); await first.close(); await second.close(); }
   });
 

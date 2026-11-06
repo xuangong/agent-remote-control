@@ -20,11 +20,10 @@ async function fixture(initial?: HostedRelayState) {
   const server = createServer(async (req, res) => {
     const chunks: Buffer[] = []; for await (const chunk of req) chunks.push(Buffer.from(chunk));
     const controller = new AbortController(); res.on('close', () => controller.abort());
-    const token = req.headers.authorization?.replace('Bearer ', '');
-    const principal = token ? service.resolveToken(token) : { subject: String(req.headers['x-user'] ?? 'alice'), authorize: () => req.headers['x-expire'] !== 'true' || allowed };
+    const principal = { subject: String(req.headers['x-user'] ?? 'alice'), authorize: () => req.headers['x-expire'] !== 'true' || allowed };
     try {
       const request = new Request('http://localhost' + req.url, { method: req.method, headers: { 'content-type': 'application/json' }, ...(chunks.length ? { body: Buffer.concat(chunks) } : {}), signal: controller.signal });
-      const response = principal ? await handleWindowRequest(service, request, principal) : new Response('{}', { status: 401 });
+      const response = await handleWindowRequest(service, request, principal);
       res.writeHead(response.status, Object.fromEntries(response.headers)); res.end(await response.text());
     } catch { res.writeHead(503); res.end('{}'); }
   }); servers.push(server); await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
@@ -78,19 +77,16 @@ it('shares committed state across HTTP clients, rejects stale revisions, and ded
   expect((await restarted.call('/window/operations/add')).body.result).toEqual(first.body.result);
   expect((await restarted.call('/window/operations', 'POST', input)).body).toEqual(first.body);
 });
-it('keeps grants scoped, hashes secrets, replaces and revokes managers, and orders queued mutations', async () => {
+it('records the session assigned to arrange a Window, which issues no credential of its own', async () => {
   const f = await fixture(); await f.create();
-  const assigned = await f.call('/window/manager', 'POST', { session: binding }); const old = { authorization: 'Bearer ' + assigned.body.token };
-  expect(JSON.stringify(f.saved())).not.toContain(assigned.body.token);
-  expect((await f.call('', 'GET', undefined, old)).body.windows.map((row: WorkspaceWindow) => row.id)).toEqual(['window']);
-  expect((await f.call('', 'POST', { operationId: 'other', issuedAt: Date.now(), window: { ...window(), id: 'other' } }, old)).status).toBe(403);
-  expect((await f.call('/window/manager', 'POST', { session: binding }, old)).status).toBe(403);
-  const next = await f.call('/window/manager', 'POST', { session: binding });
-  expect((await f.call('/window/operations', 'POST', f.mutation('old', 0, { type: 'rename', title: 'Denied' }), old)).status).toBe(401);
-  const current = { authorization: 'Bearer ' + next.body.token };
-  expect((await f.call('/window/operations', 'POST', f.mutation('current', 0, { type: 'rename', title: 'Managed' }), current)).body.result.status).toBe('committed');
+  const assigned = await f.call('/window/manager', 'POST', { session: binding });
+  expect(assigned.body).toEqual({ generation: 1, manager: { session: binding, generation: 1 } });
+  expect((await f.call('/window')).body.manager).toEqual({ session: binding, generation: 1 });
+  expect((await f.call('/window/manager', 'POST', { session: { ...binding, hostId: 'foreign' } })).status).toBe(403);
+  expect((await f.call('/window/manager', 'POST', { session: binding }, { 'x-user': 'bob' })).status).toBe(404);
   await f.call('/window/manager', 'POST', { session: null });
-  expect((await f.call('/window', 'GET', undefined, current)).status).toBe(401);
+  expect((await f.call('/window')).body).not.toHaveProperty('manager');
+  expect(f.saved().workspaceWindows![0]!.manager).toBeUndefined();
 });
 it('validates all bindings atomically, retains delete receipts and rejects resurrection and expired operations', async () => {
   const f = await fixture(); await f.create();
@@ -120,19 +116,6 @@ it('wakes bounded subscriptions, checks authorization at completion, and release
   const controller = new AbortController(); const canceled = f.service.changes({ subject: 'alice' }, 'window', 1, controller.signal); controller.abort(); await expect(canceled).rejects.toMatchObject({ status: 499 });
   const stopped = f.service.changes({ subject: 'alice' }, 'window', 1); f.service.close(); await expect(stopped).rejects.toMatchObject({ status: 401 });
 });
-it('serializes manager replacement and preserves scoped deletion result access', async () => {
-  const f = await fixture(); await f.create(); const assigned = await f.service.assign({ subject: 'alice' }, 'window', binding);
-  const manager = { subject: 'alice', token: assigned.token! };
-  const replace = f.service.assign({ subject: 'alice' }, 'window', binding);
-  const obsolete = f.service.mutate(manager, 'window', f.mutation('queued-old', 0, { type: 'rename', title: 'Forbidden' }) as any);
-  await replace; await expect(obsolete).rejects.toMatchObject({ code: 'manager_revoked' });
-  const deleted = f.mutation('manager-delete', 0, { type: 'delete' });
-  const current = await f.service.assign({ subject: 'alice' }, 'window', binding); const principal = { subject: 'alice', token: current.token! };
-  await f.service.mutate(principal, 'window', deleted as any);
-  expect(f.service.resolveToken(current.token!)).toMatchObject({ subject: 'alice' });
-  expect(f.service.operation(principal, 'window', 'manager-delete').result.status).toBe('committed');
-  expect((await f.service.mutate(principal, 'window', f.mutation('after-delete', 1, { type: 'rename', title: 'Forbidden' }) as any)).result.status).toBe('rejected');
-});
 it('bounds streamed HTTP bodies before allocating the JSON document', async () => {
   const f = await fixture(); let produced = 0;
   const body = new ReadableStream<Uint8Array>({ pull(controller) { produced++; controller.enqueue(new Uint8Array(100000)); } });
@@ -151,19 +134,14 @@ it('publishes the document and its result together only after storage commits', 
   expect(service.inspect({ subject: 'alice' }, 'window').window.id).toBe('window');
   expect(service.operation({ subject: 'alice' }, 'window', 'durable').result.status).toBe('committed');
 });
-it('routes scoped grants through the hosted gateway and rejects browser namespace and manager escalation', async () => {
-  const token = 't'.repeat(43); const initial = emptyRelayState(auth);
-  initial.workspaceWindows = [{ subject: 'alice', id: 'window', window: { ...window(), views: [createWindowView('primary', undefined, 'primary')] }, generation: 1, manager: { session: binding, generation: 1, hash: createHash('sha256').update(token).digest('hex') }, receipts: [] }];
+it('serves Windows only in the signed-in user\'s namespace, not to bearer credentials', async () => {
+  const initial = emptyRelayState(auth);
+  initial.workspaceWindows = [{ subject: 'alice', id: 'window', window: { ...window(), views: [createWindowView('primary', undefined, 'primary')] }, generation: 1, manager: { session: binding, generation: 1 }, receipts: [] }];
   const relay = createHostedRelay({ ...auth, storage: { initial, async commit() {} }, scheduler: { schedule() {}, cancel() {} } });
-  const headers = { authorization: 'Bearer ' + token, 'content-type': 'application/json' };
+  const headers = { authorization: 'Bearer ' + 't'.repeat(43), 'content-type': 'application/json' };
   try {
-    const get = await relay.fetch(new Request(auth.origin + '/v1/windows/window', { headers })); expect(get?.status).toBe(200);
-    const operation = { operationId: 'gateway-rename', issuedAt: Date.now(), baseRevision: 0, operation: { type: 'rename', title: 'Gateway' } };
-    const result = await relay.fetch(new Request(auth.origin + '/v1/windows/window/operations', { method: 'POST', headers, body: JSON.stringify(operation) }));
-    expect(await result?.json()).toMatchObject({ result: { status: 'committed', revision: 1 }, window: { title: 'Gateway' } });
-    expect((await relay.fetch(new Request(auth.origin + '/v1/windows/window/manager', { method: 'POST', headers, body: JSON.stringify({ session: null }) })))?.status).toBe(403);
+    expect((await relay.fetch(new Request(auth.origin + '/v1/windows/window', { headers })))?.status).toBe(401);
     expect((await relay.fetch(new Request(auth.origin + '/u/alice/v1/windows/window', { headers })))?.status).toBe(401);
-    expect((await relay.fetch(new Request(auth.origin + '/v1/windows/window', { headers: { ...headers, origin: 'https://foreign.example' } })))?.status).toBe(403);
   } finally { await relay.close(); }
 });
 it('retains only settlement metadata and returns the current layout alongside a retried result', async () => {
@@ -258,8 +236,8 @@ it.each([1, 2] as const)('migrates legacy persisted Windows while replaying orig
 
 it('retains an empty Window, its manager and close receipt across HTTP subscription and durable restart', async () => {
   const f = await fixture(); await f.create();
-  const assigned = await f.call('/window/manager', 'POST', { session: binding });
-  const headers = { authorization: 'Bearer ' + assigned.body.token };
+  await f.call('/window/manager', 'POST', { session: binding });
+  const headers = {};
   const close = f.mutation('close-last', 0, { type: 'view.close', viewId: 'primary' });
   const waiting = f.call('/window/changes?afterRevision=0', 'GET', undefined, headers);
   const closed = await f.call('/window/operations', 'POST', close, headers);

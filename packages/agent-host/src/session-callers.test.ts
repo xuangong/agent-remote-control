@@ -291,6 +291,25 @@ describe('session commands', () => {
     expect(await runtime.callSession({ command: 'read', target: 'self' }, { kind: 'owner' })).toMatchObject({ error: { code: 'invalid_request' } });
   });
 
+  it('opens a session of this Host in a native CLI and describes another without its history', async () => {
+    const { token, endpoint, claude } = await commands();
+    const env = { [SESSION_TOKEN_VARIABLE]: token, [SESSION_SOCKET_VARIABLE]: endpoint.access };
+    const attached: unknown[] = [];
+    const io = { attach: async (...args: unknown[]) => { attached.push(args); return 7; } };
+    let output = '';
+    expect(await runSessionCommand(['attach', 'host-1/codex/thread', '--take-over'], env, text => { output += text; }, io)).toBe(7);
+    // A local address needs no Controller at all.
+    expect(await runSessionCommand(['attach', 'local/claude/old'], {}, text => { output += text; }, io)).toBe(7);
+    expect(attached).toEqual([['codex', 'thread', true], ['claude', 'old', false]]);
+    expect(output).toBe('');
+    expect(await runSessionCommand(['attach', 'host-1/codex/missing'], env, text => { output += text; }, io)).toBe(1);
+    expect(JSON.parse(output).error.code).toBe('session_not_found');
+    output = '';
+    expect(await runSessionCommand(['read', 'host-1/codex/thread', '--limit', '0'], env, text => { output += text; })).toBe(0);
+    expect(JSON.parse(output)).toEqual({ session: expect.objectContaining({ address: 'host-1/codex/thread', title: 'thread title' }), entries: [] });
+    expect(claude.histories).toHaveLength(0);
+  });
+
   it('sends what names another Host there, where the calling session is named by its address', async () => {
     const { runtime } = await commands();
     const forwarded: Array<[string, Record<string, unknown>]> = [];

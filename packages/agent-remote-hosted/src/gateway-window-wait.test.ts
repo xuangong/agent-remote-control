@@ -10,21 +10,18 @@ const auth = { provider: 'google' as const, origin: 'https://relay.example', sec
 afterEach(() => vi.useRealTimers());
 
 it.each([
-  { access: 'manager', configured: undefined, expectedWaitMs: 25000 },
-  { access: 'browser', configured: undefined, expectedWaitMs: 25000 },
-  { access: 'manager', configured: 10, expectedWaitMs: 10 },
-  { access: 'browser', configured: 10, expectedWaitMs: 10 },
-  { access: 'manager', configured: 1, expectedWaitMs: 1 },
-  { access: 'browser', configured: 25000, expectedWaitMs: 25000 },
-])('returns unchanged Window state after $expectedWaitMs ms for $access access (configured: $configured)', async ({ access, configured, expectedWaitMs }) => {
-  const managerToken = 'm'.repeat(43), browserToken = 'b'.repeat(43);
+  { configured: undefined, expectedWaitMs: 25000 },
+  { configured: 10, expectedWaitMs: 10 },
+  { configured: 1, expectedWaitMs: 1 },
+  { configured: 25000, expectedWaitMs: 25000 },
+])('returns unchanged Window state after $expectedWaitMs ms (configured: $configured)', async ({ configured, expectedWaitMs }) => {
+  const browserToken = 'b'.repeat(43);
   const initial = emptyRelayState(auth);
   const namespace = hostedAuthNamespace(auth, 'alice');
   const document: WorkspaceWindow = { schemaVersion: 3, id: 'window', title: 'Window', revision: 0,
     selectedPrimaryViewId: 'primary', selectedViewId: 'primary', views: [createWindowView('primary', undefined, 'primary')] };
   initial.workspaceWindows = [{ subject: 'alice', id: 'window', window: document, generation: 1, receipts: [], manager: {
     session: { hostId: 'host', providerId: 'codex', nativeSessionId: 'native', title: 'Manager' }, generation: 1,
-    hash: createHash('sha256').update(managerToken).digest('hex'),
   } }];
   const expiresAt = Date.now() + 3_600_000;
   initial.googleIdentities = [{ subject: 'alice', email: 'alice@example.com' }];
@@ -32,8 +29,8 @@ it.each([
     grant: { provider: 'google', subject: 'alice', namespace, expiresAt, sessionExpiresAt: expiresAt, authenticatedAt: Date.now() } }];
   const relay = createHostedRelay({ ...auth, windowChangesWaitMs: configured,
     storage: { initial, async commit() {} }, scheduler: { schedule() {}, cancel() {} } });
-  const path = access === 'manager' ? '/v1/windows/window/changes?afterRevision=0' : `/u/${namespace}/v1/windows/window/changes?afterRevision=0`;
-  const headers = access === 'manager' ? { authorization: `Bearer ${managerToken}` } : { cookie: `__Host-arc_session=${browserToken}` };
+  const path = `/u/${namespace}/v1/windows/window/changes?afterRevision=0`;
+  const headers = { cookie: `__Host-arc_session=${browserToken}` };
   let response: Response | undefined;
   let pending: Promise<Response | undefined> | undefined;
   try {

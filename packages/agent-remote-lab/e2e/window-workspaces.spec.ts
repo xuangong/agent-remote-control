@@ -71,10 +71,12 @@ test('two pages share Window UI edits and external commands across narrow presen
     const manager = (await inspect()).views.find(view => view.placement === 'primary')!.binding!;
     const assigned = await context.request.post(endpoint + '/manager', { headers: { origin: fixture.url }, data: { session: manager } });
     expect(assigned.ok(), `${assigned.status()} ${await assigned.text()}`).toBe(true);
-    const grant = await assigned.json();
+    // The command line acts as the signed-in user, as agent-remote-controller login lets it.
+    const signedIn = (await context.cookies(fixture.url)).find(cookie => cookie.name.endsWith('_session'))!;
+    const credentials = { serverUrl: fixture.url, basePath: access.basePath, cookieName: signedIn.name, token: signedIn.value, expiresAt: Date.now() + 3_600_000 };
     const command = async (args: string[]) => {
       let output = '';
-      const code = await runWindowCommand(args, { AGENT_WINDOW_SERVER: fixture.url, AGENT_WINDOW_ID: windowId, AGENT_WINDOW_TOKEN: grant.token }, text => { output += text; });
+      const code = await runWindowCommand(args, async () => credentials, text => { output += text; });
       const result = JSON.parse(output);
       expect(code, result.code ?? result.result?.code).toBe(0);
       expect(result.result.status).toBe('committed');
@@ -96,7 +98,7 @@ test('two pages share Window UI edits and external commands across narrow presen
     await expect(pane).toBeVisible();
     await pane.getByRole('separator').press('ArrowRight');
     await expect(otherPane.getByRole('separator')).toHaveAttribute('aria-valuenow', '450');
-    // The real Controller command uses the explicitly assigned manager grant over HTTP.
+    // The real Controller command reaches the same Window over HTTP.
     const native = await context.request.post(`${fixture.url}${access.basePath}v1/remote/hosts/${encodeURIComponent(fixture.hostId)}/create`, {
       headers: { origin: fixture.url }, data: { providerId: 'recorded', operationId: crypto.randomUUID() },
     });

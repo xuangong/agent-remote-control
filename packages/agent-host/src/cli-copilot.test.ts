@@ -33,29 +33,35 @@ if (process.argv.includes('--stdio')) {
     AGENT_HOST_COPILOT: executable, AGENT_HOST_COPILOT_HOME: join(root, 'copilot home'), AGENT_HOST_WORKSPACE: '/saved/workspace',
   }}));
   const cli = resolve('dist/cli.js');
-  const run = (args: string[], env: NodeJS.ProcessEnv = {}, cwd = process.cwd()) => execute(process.execPath, [cli, 'copilot', ...args], {
+  const command = (args: string[], env: NodeJS.ProcessEnv = {}, cwd = process.cwd()) => execute(process.execPath, [cli, ...args], {
     cwd, timeout: 5000, env: {PATH: process.env.PATH, HOME: process.env.HOME, AGENT_HOST_STATE_DIR: root,
       AGENT_HOST_REMOTE_KEY: 'private-key', RELAY_SECRET: 'private-secret', ...env},
   });
-  return {root, executable, run};
+  const run = (args: string[], env: NodeJS.ProcessEnv = {}, cwd = process.cwd()) => command(['copilot', ...args], env, cwd);
+  const attach = (id: string, extra: string[] = [], env: NodeJS.ProcessEnv = {}) => command(['session', 'attach', `local/copilot/${id}`, ...extra], env);
+  return {root, executable, run, attach};
 }
 
 it('resumes through the saved Copilot executable and profile without exposing Relay credentials', async () => {
   const f = await fixture();
-  const result = JSON.parse((await f.run(['resume', '01a0ba06-321d-7600-9141-a1ad0779fc9f'])).stdout);
+  const result = JSON.parse((await f.attach('01a0ba06-321d-7600-9141-a1ad0779fc9f')).stdout);
   expect(result).toEqual({args: ['--resume=01a0ba06-321d-7600-9141-a1ad0779fc9f'], cwd: process.cwd(), home: join(f.root, 'copilot home')});
 });
 
 it.each([
-  [['resume'], ['--resume']],
-  [['resume', '--last'], ['--continue']],
-  [['resume', 'session name', '--model', 'model'], ['--resume=session name', '--model', 'model']],
+  [['--resume'], ['--resume']],
+  [['--continue'], ['--continue']],
   [['--resume=existing', '--plain-diff'], ['--resume=existing', '--plain-diff']],
   [['login'], ['login']], [['--help'], ['--help']],
-  [['resume', 'literal $(touch nope)', '--', 'literal; text'], ['--resume=literal $(touch nope)', '--', 'literal; text']],
-])('preserves native arguments while translating the resume shorthand: %j', async (args, expected) => {
+  [['--resume=literal $(touch nope)', '--', 'literal; text'], ['--resume=literal $(touch nope)', '--', 'literal; text']],
+])('preserves native arguments: %j', async (args, expected) => {
   const f = await fixture();
   expect(JSON.parse((await f.run(args)).stdout).args).toEqual(expected);
+});
+
+it('points the former resume shorthand at session attach', async () => {
+  const f = await fixture();
+  await expect(f.run(['resume', 'existing'])).rejects.toMatchObject({stderr: expect.stringContaining('session attach')});
 });
 
 it('starts a new session in the invoking shell directory and preserves explicit directory flags', async () => {
@@ -67,7 +73,7 @@ it('starts a new session in the invoking shell directory and preserves explicit 
 it('honors explicit configuration and runs locally without pairing', async () => {
   const f = await fixture();
   const env = {AGENT_HOST_COPILOT: f.executable, AGENT_HOST_COPILOT_HOME: join(f.root, 'override')};
-  expect(JSON.parse((await f.run(['resume', 'existing'], env)).stdout).home).toBe(env.AGENT_HOST_COPILOT_HOME);
+  expect(JSON.parse((await f.attach('existing', [], env)).stdout).home).toBe(env.AGENT_HOST_COPILOT_HOME);
   await rm(join(f.root, 'connection.json'));
   expect(JSON.parse((await f.run(['--version'], env)).stdout).args).toEqual(['--version']);
 });
@@ -81,10 +87,10 @@ it('resolves bare JavaScript entries from PATH and preserves failure exit codes'
 
 it('refuses an unmanaged native writer even for explicit takeover', async () => {
   const f=await fixture();
-  await expect(f.run(['resume','existing','--take-over'],{NATIVE_TEST_IN_USE:'1'})).rejects.toMatchObject({stderr:expect.stringContaining('unmanaged native client')});
+  await expect(f.attach('existing',['--take-over'],{NATIVE_TEST_IN_USE:'1'})).rejects.toMatchObject({code:1,stdout:expect.stringContaining('unmanaged native client')});
 });
 
 it('reports an unrequested native failure as unexpected and preserves its exit code', async () => {
   const f=await fixture();
-  await expect(f.run(['resume','existing'],{NATIVE_TEST_EXIT:'23'})).rejects.toMatchObject({code:23,stderr:expect.stringContaining('"outcome":"unexpected"')});
+  await expect(f.attach('existing',[],{NATIVE_TEST_EXIT:'23'})).rejects.toMatchObject({code:23,stderr:expect.stringContaining('"outcome":"unexpected"')});
 });

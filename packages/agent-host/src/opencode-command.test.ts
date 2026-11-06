@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createServer } from 'node:net';
 import { afterEach, expect, it, vi } from 'vitest';
-import { runOpenCodeCommand } from './opencode-command.js';
+import { attachOpenCodeSession, runOpenCodeCommand } from './opencode-command.js';
 import { ensureOpenCodeServerConfig, openCodeServerLocation } from './opencode-server-state.js';
 const roots: string[] = [];
 afterEach(async () => { await Promise.all(roots.splice(0).map(root => rm(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }))); });
@@ -14,20 +14,23 @@ async function fixture() {
   await writeFile(join(root, 'connection.json'), JSON.stringify({ serverUrl: 'https://relay.invalid', remoteKey: 'private-key', environment: {
     AGENT_HOST_OPENCODE: executable, AGENT_HOST_OPENCODE_URL: 'http://127.0.0.1:4899', AGENT_HOST_OPENCODE_USERNAME: 'opencode', AGENT_HOST_OPENCODE_PASSWORD: 'local-secret',
   } }));
+  const environment = (env: NodeJS.ProcessEnv) => ({ NATIVE_OUTPUT: output, AGENT_HOST_REMOTE_KEY: 'relay-secret', ...env });
   return { root, async run(args: string[], env: NodeJS.ProcessEnv = {}) {
-    const code = await runOpenCodeCommand(args, root, { NATIVE_OUTPUT: output, AGENT_HOST_REMOTE_KEY: 'relay-secret', ...env });
+    const code = await runOpenCodeCommand(args, root, environment(env));
+    return { code, ...JSON.parse(await readFile(output, 'utf8')) };
+  }, async attach(id: string, env: NodeJS.ProcessEnv = {}) {
+    const code = await attachOpenCodeSession(id, root, environment(env));
     return { code, ...JSON.parse(await readFile(output, 'utf8')) };
   } };
 }
 it('attaches an explicit native session to the saved server using environment credentials', async () => {
   const f = await fixture();
-  expect(await f.run(['resume', 'session name'])).toEqual({ code: 0, args: ['--server', 'http://127.0.0.1:4899', '--session', 'session name'], password: 'local-secret' });
+  expect(await f.attach('session name')).toEqual({ code: 0, args: ['--server', 'http://127.0.0.1:4899', '--session', 'session name'], password: 'local-secret' });
 }, 10000);
-it('attaches new and last sessions without native server ownership or takeover', async () => {
+it('attaches a new session in this directory without native server ownership, and points resume at session attach', async () => {
   const f = await fixture();
   expect((await f.run([])).args).toEqual(['--server', 'http://127.0.0.1:4899', process.cwd()]);
-  expect((await f.run(['resume', '--last'])).args).toEqual(['--server', 'http://127.0.0.1:4899', '--continue']);
-  await expect(f.run(['resume', 'session', '--take-over'])).rejects.toThrow(/shared|takeover/i);
+  await expect(f.run(['resume', 'session'])).rejects.toThrow(/session attach/);
 }, 10000);
 it('keeps native commands and explicit alternate attachments free of saved server credentials', async () => {
   const f = await fixture();
@@ -35,7 +38,7 @@ it('keeps native commands and explicit alternate attachments free of saved serve
   expect(await f.run(['--version'], { NATIVE_EXIT: '23' })).toEqual({ code: 23, args: ['--version'] });
 }, 10000);
 
-it('loads generated managed server credentials for resume without leaking them to alternate native commands', async () => {
+it('loads generated managed server credentials for attach without leaking them to alternate native commands', async () => {
   const f = await fixture();
   const env = { AGENT_HOST_OPENCODE_URL: 'http://127.0.0.1:4899' };
   const location = openCodeServerLocation(f.root, env);
@@ -44,7 +47,7 @@ it('loads generated managed server credentials for resume without leaking them t
   delete saved.environment.AGENT_HOST_OPENCODE_USERNAME;
   delete saved.environment.AGENT_HOST_OPENCODE_PASSWORD;
   await writeFile(join(f.root, 'connection.json'), JSON.stringify(saved));
-  expect(await f.run(['resume', 'session'])).toMatchObject({ password: 'local-secret' });
+  expect(await f.attach('session')).toMatchObject({ password: 'local-secret' });
   expect(await f.run(['--version'])).toEqual({ code: 0, args: ['--version'] });
 }, 10000);
 

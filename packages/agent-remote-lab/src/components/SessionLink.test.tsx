@@ -57,9 +57,9 @@ it('retries QR generation without closing the dialog or losing the session link'
 });
 
 it.each([
-  ['claude', '01a0ba06-321d-7600-9141-a1ad0779fc9f', `cd '/work/app' && agent-remote-controller claude resume 01a0ba06-321d-7600-9141-a1ad0779fc9f`],
-  ['claude', '01a0be55-d755-7d72-8463-5a04a193e20e', 'agent-remote-controller claude resume 01a0be55-d755-7d72-8463-5a04a193e20e'],
-  ['codex', '01a0ba06-321d-7600-9141-a1ad0779fc9f', 'agent-remote-controller codex resume 01a0ba06-321d-7600-9141-a1ad0779fc9f'],
+  ['claude', '01a0ba06-321d-7600-9141-a1ad0779fc9f', `cd '/work/app' && agent-remote-controller session attach host/claude/01a0ba06-321d-7600-9141-a1ad0779fc9f`],
+  ['claude', '01a0be55-d755-7d72-8463-5a04a193e20e', 'agent-remote-controller session attach host/claude/01a0be55-d755-7d72-8463-5a04a193e20e'],
+  ['codex', '01a0ba06-321d-7600-9141-a1ad0779fc9f', 'agent-remote-controller session attach host/codex/01a0ba06-321d-7600-9141-a1ad0779fc9f'],
 ])('uses the displayed working directory only for %s session %s', async (providerId, nativeSessionId, command) => {
   toDataURL.mockResolvedValue('data:image/png;base64,test');
   await render(<SessionWorkspaceContext.Provider value={{ providerId: 'claude', nativeSessionId: '01a0ba06-321d-7600-9141-a1ad0779fc9f', cwd: '/work/app' }}>

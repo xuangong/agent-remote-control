@@ -1,5 +1,6 @@
 import { createConnection } from 'node:net';
 import { CliError } from './cli-output.js';
+import { relayHostAccess, runHostRequest } from './host-command.js';
 import { relayError, relayRequest, type CliCredentials } from './relay-client.js';
 import { SESSION_SOCKET_VARIABLE, SESSION_TOKEN_VARIABLE } from './session-callers.js';
 
@@ -40,11 +41,15 @@ export function commandHost(request: Record<string, unknown>): string | undefine
   return undefined;
 }
 
-/** Sends a resource command to the Host that has its session, through the Relay. */
+/** Sends a resource command through the Relay to the Host it names. */
 export async function relayCall(credentials: CliCredentials, scope: string, request: Record<string, unknown>, fetcher: typeof fetch = fetch,
   hostId = commandHost(request)): Promise<CommandAnswer> {
-  if (scope !== 'session') return { error: { code: 'invalid_request', message: `Unknown command group: ${scope}.` } };
-  if (!hostId || hostId === 'local' || hostId === 'self') return { error: { code: 'invalid_request', message: 'Name the Host: give a full session address or --host.' } };
+  if (scope !== 'session' && scope !== 'host') return { error: { code: 'invalid_request', message: `Unknown command group: ${scope}.` } };
+  if (!hostId || hostId === 'local' || hostId === 'self') {
+    if (scope === 'host' && request.command === 'list') return runHostRequest(request, relayHostAccess(credentials, '', fetcher));
+    return { error: { code: 'invalid_request', message: `Without a running Controller here, name the Host: ${scope === 'host' ? 'give --host' : 'give a full session address or --host'}.` } };
+  }
+  if (scope === 'host') return runHostRequest(request, relayHostAccess(credentials, hostId, fetcher));
   const { status, data } = await relayRequest(credentials, 'POST', `/v1/remote/hosts/${encodeURIComponent(hostId)}/session/call`, { request }, fetcher);
   if (status !== 200) { const error = relayError(status, data); return { error: { code: error.code, message: error.message } }; }
   return answer(Promise.resolve(data));

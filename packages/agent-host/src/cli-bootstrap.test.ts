@@ -249,7 +249,7 @@ it('waits for a slow live pairing enrollment instead of timing out after the key
   expect(JSON.parse(await readFile(join(f.root, 'connection.json'), 'utf8')).remoteKey).toBe(f.deviceKey);
 }, 15000);
 
-it('exposes sharing identity only through the authenticated local socket without native session attachment', async () => {
+it('answers resource commands only through the authenticated local socket without native session attachment', async () => {
   const f = await fixture('host-only'); f.start({}, false, '_serve');
   let state: { token: string; socket: string };
   await vi.waitFor(async () => {
@@ -265,14 +265,11 @@ it('exposes sharing identity only through the authenticated local socket without
       socket.on('close', () => { try { resolve(JSON.parse(output)); } catch (error) { reject(error); } });
     });
   }
-  expect(await local({ action: 'share-context', token: 'wrong' })).toEqual({ error: 'Unauthorized local management request.' });
-  const context = await local({ action: 'share-context', token: state!.token });
-  expect(context).toMatchObject({ hostId: 'host-cli', serverUrl: f.serverUrl, providers: [{ providerId: 'codex' }] });
-  expect(Object.keys(context).sort()).toEqual(['hostId', 'providers', 'serverUrl']);
-  expect(await local({ action: 'share-catalog', token: state!.token, hostId: 'host-cli', providerId: 'codex', serverUrl: 'https://wrong.example' }))
-    .toEqual({ error: 'The Host connection changed. Run share again.' });
-  expect(await local({ action: 'share-catalog', token: state!.token, hostId: 'host-cli', providerId: 'disabled', serverUrl: f.serverUrl }))
-    .toMatchObject({ status: 403 });
+  expect(await local({ action: 'host', request: { command: 'read' }, token: 'wrong' })).toEqual({ error: 'Unauthorized local management request.' });
+  expect(await local({ action: 'host', request: { command: 'read' }, token: state!.token }))
+    .toMatchObject({ result: { host: { id: 'host-cli', online: true, providers: [{ providerId: 'codex' }] } } });
+  expect(await local({ action: 'session', request: { command: 'link', target: 'host-cli/disabled/native' }, token: state!.token }))
+    .toMatchObject({ error: { code: 'session_not_found' } });
   expect(f.registrations).toHaveLength(2);
 }, 10000);
 

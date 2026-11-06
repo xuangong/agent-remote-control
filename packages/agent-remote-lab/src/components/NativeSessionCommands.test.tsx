@@ -7,10 +7,10 @@ it('copies a native resume command and identifies the Host computer', async () =
   const writeText = vi.fn().mockResolvedValue(undefined);
   Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText } });
   const id = '01a0ba06-321d-7600-9141-a1ad0779fc9f';
-  const container = await render(<NativeSessionCommand providerId="codex" nativeSessionId={id} />);
+  const container = await render(<NativeSessionCommand hostId="host-1" providerId="codex" nativeSessionId={id} />);
   expect(container.textContent).toContain('Host computer');
   await act(async () => container.querySelector('button')!.click());
-  expect(writeText).toHaveBeenCalledWith(`agent-remote-controller codex resume ${id}`);
+  expect(writeText).toHaveBeenCalledWith(`agent-remote-controller session attach host-1/codex/${id}`);
   expect(container.textContent).toContain('Copied');
 });
 
@@ -21,7 +21,7 @@ it('copies the Copilot resume command using its Host profile', async () => {
   const container = await render(<NativeSessionCommand providerId="copilot" nativeSessionId={id} />);
   expect(container.textContent).toContain('Copilot profile');
   await act(async () => container.querySelector('button')!.click());
-  expect(writeText).toHaveBeenCalledWith(`agent-remote-controller copilot resume ${id}`);
+  expect(writeText).toHaveBeenCalledWith(`agent-remote-controller session attach local/copilot/${id}`);
   expect(container.textContent).not.toContain('socket');
 });
 
@@ -34,22 +34,22 @@ it('opens the session from its working directory on the Host', async () => {
   expect(container.textContent).toContain('asks before interrupting');
   expect(container.textContent).not.toContain('working directory');
   await act(async () => container.querySelector('button')!.click());
-  expect(writeText).toHaveBeenCalledWith(`cd '/Users/me/my project' && agent-remote-controller claude resume ${id}`);
+  expect(writeText).toHaveBeenCalledWith(`cd '/Users/me/my project' && agent-remote-controller session attach local/claude/${id}`);
 });
 
 it.each([
-  ['/tmp/it\'s $(touch x)', `cd '/tmp/it'\\''s $(touch x)' && agent-remote-controller codex resume 01a0ba06-321d-7600-9141-a1ad0779fc9f`],
-  ['C:\\Users\\me\\it\'s', `Set-Location -LiteralPath 'C:\\Users\\me\\it''s' -ErrorAction Stop; agent-remote-controller codex resume 01a0ba06-321d-7600-9141-a1ad0779fc9f`],
-  ['\\\\server\\share\\a\u2019b', `Set-Location -LiteralPath '\\\\server\\share\\a\u2019\u2019b' -ErrorAction Stop; agent-remote-controller codex resume 01a0ba06-321d-7600-9141-a1ad0779fc9f`],
-  ['relative/path', 'agent-remote-controller codex resume 01a0ba06-321d-7600-9141-a1ad0779fc9f'],
-  [`/tmp/a${String.fromCharCode(10)}rm -rf ~`, 'agent-remote-controller codex resume 01a0ba06-321d-7600-9141-a1ad0779fc9f'],
+  ['/tmp/it\'s $(touch x)', `cd '/tmp/it'\\''s $(touch x)' && agent-remote-controller session attach local/codex/01a0ba06-321d-7600-9141-a1ad0779fc9f`],
+  ['C:\\Users\\me\\it\'s', `Set-Location -LiteralPath 'C:\\Users\\me\\it''s' -ErrorAction Stop; agent-remote-controller session attach local/codex/01a0ba06-321d-7600-9141-a1ad0779fc9f`],
+  ['\\\\server\\share\\a\u2019b', `Set-Location -LiteralPath '\\\\server\\share\\a\u2019\u2019b' -ErrorAction Stop; agent-remote-controller session attach local/codex/01a0ba06-321d-7600-9141-a1ad0779fc9f`],
+  ['relative/path', 'agent-remote-controller session attach local/codex/01a0ba06-321d-7600-9141-a1ad0779fc9f'],
+  [`/tmp/a${String.fromCharCode(10)}rm -rf ~`, 'agent-remote-controller session attach local/codex/01a0ba06-321d-7600-9141-a1ad0779fc9f'],
 ])('quotes the working directory %j for the Host shell', (workspace, command) => {
-  expect(nativeOpenCommand('codex', '01a0ba06-321d-7600-9141-a1ad0779fc9f', workspace)).toBe(command);
+  expect(nativeOpenCommand({ providerId: 'codex', nativeSessionId: '01a0ba06-321d-7600-9141-a1ad0779fc9f' }, workspace)).toBe(command);
 });
 
 it('asks to run from the working directory when it is unknown', async () => {
   const container = await render(<NativeSessionCommand providerId="opencode" nativeSessionId="ses_0123456789abcdefghijklmnop" />);
-  expect(container.querySelector('input')?.value).toBe('agent-remote-controller opencode resume ses_0123456789abcdefghijklmnop');
+  expect(container.querySelector('input')?.value).toBe('agent-remote-controller session attach local/opencode/ses_0123456789abcdefghijklmnop');
   expect(container.textContent).toContain('Run it from the session’s working directory.');
 });
 
@@ -61,8 +61,9 @@ it.each([
   ['codex', '$(touch /tmp/unsafe)'],
   ['codex', '--help'],
   ['copilot', '$(touch /tmp/unsafe)'],
-])('does not suggest commands for unsupported or untrusted identities', async (providerId, nativeSessionId) => {
-  const container = await render(<NativeSessionCommand providerId={providerId} nativeSessionId={nativeSessionId} />);
+  ['codex', '01a0ba06-321d-7600-9141-a1ad0779fc9f', '$(touch)'],
+])('does not suggest commands for unsupported or untrusted identities', async (providerId, nativeSessionId, hostId?: string) => {
+  const container = await render(<NativeSessionCommand hostId={hostId} providerId={providerId} nativeSessionId={nativeSessionId} />);
   expect(container.textContent).toBe('');
 });
 

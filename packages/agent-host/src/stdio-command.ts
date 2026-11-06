@@ -19,7 +19,7 @@ export async function runManagedStdioCommand(options: {
     try {owner=await acquire(takeover?(await inspectNativeOwner(key))?.generation:undefined);}
     catch(error) {
       if (!(error instanceof NativeSessionOwnerError) || error.code!=='native_session_owned' || !error.owner) throw error;
-      if (!process.stdin.isTTY || !process.stdout.isTTY) throw new Error(`${error.message} Run ${providerId} resume ${JSON.stringify(resume)} --take-over to interrupt and take control.`);
+      if (!process.stdin.isTTY || !process.stdout.isTTY) throw new Error(`${error.message} Run agent-remote-controller session attach ${JSON.stringify(`local/${providerId}/${resume}`)} --take-over to interrupt and take control.`);
       const answer=await selectTerminalChoice(`${error.message} Takeover interrupts running work.`,[
         {value:'takeover',label:'Interrupt and take over'}, {value:'cancel',label:'Cancel'},
       ]);

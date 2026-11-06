@@ -1,14 +1,15 @@
-import { createHash, randomBytes } from 'node:crypto';
+import { createHash } from 'node:crypto';
 import { applyWindowOperation, decodeWorkspaceWindow, isWindowOperationResult, isWindowCreateRequest, isWindowMutation, isWindowDeleteRequest, isWindowSessionBinding, WINDOW_OPERATION_RETENTION_MS, type WorkspaceWindow, type WindowMutation, type WindowDeleteRequest, type WindowCreateRequest, type WindowSessionBinding, type WindowOperationResult } from '@orchardworks/agent-remote-protocol';
 import type { RelayState, HostedRelayState } from './state.js';
 
 export interface SavedWindowReceipt { fingerprint: string; result: WindowOperationResult }
 export interface SavedWorkspaceWindow {
   subject: string; id: string; window?: WorkspaceWindow; deleted?: true; generation: number;
-  manager?: { session: WindowSessionBinding; hash: string; generation: number };
+  /** The session the owner asked to arrange this Window; agents act on Windows as the owner, through the command line. */
+  manager?: { session: WindowSessionBinding; generation: number };
   receipts: SavedWindowReceipt[];
 }
-export type WindowPrincipal = { subject: string; token?: string; authorize?: () => boolean };
+export type WindowPrincipal = { subject: string; authorize?: () => boolean };
 export class WindowServiceError extends Error { constructor(public status: number, public code: string, message: string) { super(message); } }
 const hash = (value: string) => createHash('sha256').update(value).digest('hex');
 const fail = (status: number, code: string, message: string): never => { throw new WindowServiceError(status, code, message); };
@@ -41,7 +42,7 @@ export function validWindowState(value: unknown): value is SavedWorkspaceWindow[
       || (row.deleted !== true && !decodeWorkspaceWindow(row.window)) || (row.window && row.window.id !== row.id) || (row.deleted && row.window)
       || !Array.isArray(row.receipts) || row.receipts.length > 4096) return false;
     const key = JSON.stringify([row.subject, row.id]); if (ids.has(key)) return false; ids.add(key);
-    if (row.manager && (!/^[a-f0-9]{64}$/.test(row.manager.hash) || row.manager.generation !== row.generation || !isWindowSessionBinding(row.manager.session))) return false;
+    if (row.manager && (row.manager.generation !== row.generation || !isWindowSessionBinding(row.manager.session))) return false;
     const operations = new Set<string>();
     return row.receipts.every((receipt: SavedWindowReceipt) => {
       if (!/^[a-f0-9]{64}$/.test(receipt.fingerprint) || !isWindowOperationResult(receipt.result) || Object.keys(receipt).some(key => !['fingerprint', 'result'].includes(key)) || operations.has(receipt.result.operationId)) return false;
@@ -55,7 +56,6 @@ export function createWindowWorkspaces(state: RelayState, canReadSession: (subje
     if (closed || principal.authorize?.() === false) fail(401, 'unauthorized', 'Authorization is unavailable.');
     const row = snapshot.workspaceWindows?.find(row => row.id === id && row.subject === principal.subject);
     if (!row || (!allowDeleted && row.deleted)) fail(404, 'window_not_found', 'Window is unavailable.');
-    if (principal.token && (!row!.manager || row!.manager.hash !== hash(principal.token))) fail(403, 'manager_revoked', 'Window management grant is unavailable.');
     return row!;
   }
   function bindings(subject: string, window: WorkspaceWindow) {
@@ -92,16 +92,11 @@ export function createWindowWorkspaces(state: RelayState, canReadSession: (subje
     return { result: structuredClone(receipt!.result), ...(row.window ? { window: structuredClone(row.window) } : {}) };
   }
   return {
-    resolveToken(token: string): WindowPrincipal | undefined {
-      const row = state.read().workspaceWindows?.find(row => row.manager?.hash === hash(token));
-      return row ? { subject: row.subject, token } : undefined;
-    },
-    list(principal: WindowPrincipal) { if (principal.token) { const row = state.read().workspaceWindows?.find(row => row.subject === principal.subject && row.manager?.hash === hash(principal.token!)); if (!row) fail(403, 'manager_revoked', 'Window management grant is unavailable.'); rowFor(state.read(), principal, row!.id, true); return { windows: row!.window ? [structuredClone(row!.window)] : [] }; } if (principal.authorize?.() === false) fail(401, 'unauthorized', 'Authorization is unavailable.'); return { windows: state.read().workspaceWindows?.filter(row => row.subject === principal.subject && !row.deleted).map(row => structuredClone(row.window!)) ?? [] }; },
+    list(principal: WindowPrincipal) { if (principal.authorize?.() === false) fail(401, 'unauthorized', 'Authorization is unavailable.'); return { windows: state.read().workspaceWindows?.filter(row => row.subject === principal.subject && !row.deleted).map(row => structuredClone(row.window!)) ?? [] }; },
     inspect(principal: WindowPrincipal, id: string) { const row = rowFor(state.read(), principal, id); return { window: structuredClone(row.window!), ...(row.manager ? { manager: { session: structuredClone(row.manager.session), generation: row.manager.generation } } : {}) }; },
     async create(principal: WindowPrincipal, input: unknown) {
       assertInputSize(input);
       if (!isWindowCreateRequest(input)) return replayLegacy(principal, (input as { window?: { id?: string } })?.window?.id, input);
-      if (principal.token) fail(403, 'scope_forbidden', 'Management grants cannot create Windows.');
       const outcome = await state.mutate(draft => {
         if (principal.authorize?.() === false) fail(401, 'unauthorized', 'Authorization is unavailable.');
         const rows = draft.workspaceWindows ??= []; let row = rows.find(row => row.subject === principal.subject && row.id === input.window.id);
@@ -130,13 +125,11 @@ export function createWindowWorkspaces(state: RelayState, canReadSession: (subje
     async assign(principal: WindowPrincipal, id: string, session: WindowSessionBinding | null) {
       assertInputSize(session);
       if (session !== null && !isWindowSessionBinding(session)) fail(400, 'invalid_manager', 'A valid manager session is required.');
-      if (principal.token) fail(403, 'scope_forbidden', 'Only users assign managers.');
-      const token = randomBytes(32).toString('base64url');
       const outcome = await state.mutate(draft => {
         const row = rowFor(draft, principal, id);
         if (session && !canReadSession(principal.subject, session)) fail(403, 'session_forbidden', 'Manager session access is unavailable.');
-        row.generation++; if (session) row.manager = { session: structuredClone(session), hash: hash(token), generation: row.generation }; else delete row.manager;
-        return { generation: row.generation, ...(session ? { manager: { session, generation: row.generation }, token } : {}) };
+        row.generation++; if (session) row.manager = { session: structuredClone(session), generation: row.generation }; else delete row.manager;
+        return { generation: row.generation, ...(session ? { manager: { session, generation: row.generation } } : {}) };
       }); notify(principal.subject, id); return outcome;
     },
     async changes(principal: WindowPrincipal, id: string, afterRevision: number, signal?: AbortSignal, waitMs = 25000) {

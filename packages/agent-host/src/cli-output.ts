@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 
 /**
  * Exit codes every resource command (session, group, host, window, login) shares: 0 done, 1 failed (the error code says
@@ -37,6 +37,15 @@ export function operationId(value: string | undefined): string {
   if (value === undefined) return randomUUID();
   if (!/^[A-Za-z0-9_.:-]{1,128}$/.test(value)) usage('An operation ID has 1 to 128 letters, digits, and . _ : -.');
   return value;
+}
+
+/** The UUID a Controller's operation cache keys a command's operation identity by; a UUID stays itself. */
+export function operationUuid(id: string): string {
+  if (/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(id)) return id;
+  const bytes = createHash('sha256').update(JSON.stringify(['host:cli', id])).digest().subarray(0, 16);
+  bytes[6] = (bytes[6]! & 0x0f) | 0x80; bytes[8] = (bytes[8]! & 0x3f) | 0x80;
+  const hex = bytes.toString('hex');
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
 }
 
 /** Splits `--name value` options from positional arguments; flags take no value. */

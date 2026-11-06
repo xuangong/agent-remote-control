@@ -654,14 +654,6 @@ export function createHostedRelay(options: HostedRelayOptions) {
     }
     if (url.pathname === '/auth/callback' && request.method === 'GET') return authenticationCallback(auth.origin);
     if (request.method === 'GET' && !url.pathname.startsWith('/v1/') && !url.pathname.startsWith('/u/') && !url.pathname.startsWith('/auth/')) return undefined;
-    if (/^\/v1\/windows(?:\/|$)/.test(url.pathname)) {
-      if (request.headers.has('origin') && !originAllowed(request)) return json(403, { code: 'origin_forbidden' });
-      const token = /^Bearer ([A-Za-z0-9_-]{43})$/.exec(request.headers.get('authorization') ?? '')?.[1];
-      const principal = token && windows.resolveToken(token);
-      if (!principal) return json(401, { code: 'invalid_window_grant' });
-      if (request.method !== 'GET' && !security.allow('mutation:' + principal.subject, 60, 60_000)) return json(429, { code: 'rate_limited' });
-      return handleWindowRequest(windows, request, principal, windowChangesWaitMs);
-    }
     const grant = await authorize(request); if (grant instanceof Response) return grant;
     if (request.headers.has('origin') && !originAllowed(request)) return json(403, { error: 'Origin is not allowed.' });
     if (request.method !== 'GET') {

@@ -23,21 +23,30 @@ export async function runOpenCodeCommand(args: string[], stateDir: string, envir
     process.stdout.write(JSON.stringify({ ...paths, instruction: 'Start the independently managed native server with OPENCODE_CONFIG set to nativeConfigPath. Set AGENT_HOST_OPENCODE_CALLBACK_CONFIG to configPath for the Controller. Use the same loopback hostname and port for AGENT_HOST_OPENCODE_URL and opencode serve. Existing servers require an explicit operator restart to load the plugin.' }, null, 2) + '\n');
     return 0;
   }
-  if (!args.length || args[0] === 'resume') await loadOpenCodeServerCredentials(stateDir, configured);
+  if (args[0] === 'resume') throw new Error('To open a session here, run agent-remote-controller session attach <address>.');
+  // Without arguments the TUI attaches to the server in this directory.
+  return args.length ? runNative(args, configured) : attachOpenCode(undefined, stateDir, configured);
+}
+
+/** Attaches the native TUI to the shared server, at one of its sessions or in this directory; OpenCode shares control. */
+export async function attachOpenCodeSession(nativeSessionId: string, stateDir: string, environment: NodeJS.ProcessEnv): Promise<number> {
+  return attachOpenCode(nativeSessionId, stateDir, await resolveHostEnvironment(stateDir, environment));
+}
+
+async function attachOpenCode(nativeSessionId: string | undefined, stateDir: string, configured: NodeJS.ProcessEnv): Promise<number> {
+  await loadOpenCodeServerCredentials(stateDir, configured);
+  const endpoint = configured.AGENT_HOST_OPENCODE_URL ?? 'http://127.0.0.1:4096';
+  const url = new URL(endpoint);
+  if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password || url.search || url.hash) throw new Error('OpenCode server URL must be an HTTP endpoint without credentials, query or fragment.');
+  if (configured.AGENT_HOST_OPENCODE_USERNAME !== undefined && configured.AGENT_HOST_OPENCODE_USERNAME !== 'opencode') throw new Error('OpenCode 2.x requires the native username opencode.');
+  return runNative(['--server', endpoint, ...(nativeSessionId === undefined ? [process.cwd()] : ['--session', nativeSessionId])], configured,
+    configured.AGENT_HOST_OPENCODE_PASSWORD);
+}
+
+function runNative(nativeArgs: string[], configured: NodeJS.ProcessEnv, password?: string): Promise<number> {
   const env = sanitizeNativeEnvironment(configured);
+  if (password !== undefined) env.OPENCODE_PASSWORD = password;
   const executable = resolveOpenCodeExecutable({ ...env, AGENT_HOST_OPENCODE: configured.AGENT_HOST_OPENCODE });
-  let nativeArgs = args;
-  if (!args.length || args[0] === 'resume') {
-    if (args.includes('--take-over')) throw new Error('OpenCode uses shared control; takeover is unavailable.');
-    const target = args[1];
-    if (args.length && (!target || target.startsWith('-') && target !== '--last')) throw new Error('Use opencode resume <session-id> or opencode resume --last.');
-    const endpoint = configured.AGENT_HOST_OPENCODE_URL ?? 'http://127.0.0.1:4096';
-    const url = new URL(endpoint);
-    if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password || url.search || url.hash) throw new Error('OpenCode server URL must be an HTTP endpoint without credentials, query or fragment.');
-    nativeArgs = ['--server', endpoint, ...(!args.length ? [process.cwd()] : target === '--last' ? ['--continue', ...args.slice(2)] : ['--session', target!, ...args.slice(2)])];
-    if (configured.AGENT_HOST_OPENCODE_USERNAME !== undefined && configured.AGENT_HOST_OPENCODE_USERNAME !== 'opencode') throw new Error('OpenCode 2.x requires the native username opencode.');
-    if (configured.AGENT_HOST_OPENCODE_PASSWORD !== undefined) env.OPENCODE_PASSWORD = configured.AGENT_HOST_OPENCODE_PASSWORD;
-  }
   return new Promise<number>((resolve, reject) => {
     const child = spawn(...nativeInvocation(executable, nativeArgs), { env, stdio: 'inherit' });
     const interrupt = () => { child.kill('SIGINT'); };

@@ -43,6 +43,8 @@ import { sessionHostAccess, type SessionCallerCatalog, type SessionCallerEndpoin
 import { changeSessionRef, describeSessionRefs, pendingReferenceNote, SessionRefError, validTarget, type SessionRefContext, type SessionRefStore } from './session-refs.js';
 import { withReferenceNotes } from './session-reference-notes.js';
 import { handleSessionRequest, type SessionActions, type SessionCaller, type SessionCallerRef, type SessionCallResult } from './session-routes.js';
+import { CliError, operationUuid } from './cli-output.js';
+import { runHostRequest } from './host-command.js';
 import { InputImageStore, type InputImageStoreOptions, InputResourceStore, type InputResourceStoreOptions, createAgentRemoteRelay, createRemoteHostUplinkClient, type AgentRemoteHttpResult, type AgentRemoteRelay,
   RemoteHostCatalog, RemoteHostCatalogError, UnsupportedAgentCapabilityError, type RemoteHostControlRequest, type RemoteHostUplinkClient, type RemoteHostUplinkDiagnostic, type RemoteSessionSummary,
   type RemoteHostSessionLease, type SessionWireAgent, type SessionWireOperation, type SessionWireOperationExecutor } from '@orchardworks/agent-remote-relay';
@@ -142,6 +144,8 @@ export interface AgentHostRuntimeOptions {
   sessionRefs?: SessionRefStore;
   /** This Host's identity at the Relay, once registered; session addresses start with it. */
   hostId?: () => Promise<string | undefined>;
+  /** The website's origin, where session links open. */
+  siteOrigin?: () => string | undefined;
 }
 export interface AgentHostRequestDiagnostic {
   event: 'host_request_started' | 'host_request_completed';
@@ -201,14 +205,14 @@ export interface AgentHostOptions extends AgentHostRuntimeOptions {
   uplink: { url: string; remoteKey: string; onCredential?: (credential: string) => Promise<void> };
   /** Sends a command naming another Host there, through the Relay as the signed-in command line. */
   forwardCommand?(scope: string, hostId: string, request: Record<string, unknown>): Promise<SessionCallResult>;
+  /** A request to the Relay as the signed-in command line, for what only the Relay keeps. */
+  relayRequest?(method: 'GET' | 'POST', path: string, body?: unknown): Promise<{ status: number; data: any }>;
 }
 export interface AgentHostUplinkDiagnostic extends RemoteHostUplinkDiagnostic { uplinkGeneration: number }
 export interface AgentHost {
   readonly ready: Promise<{ hostId: string }>;
   controllerInfo(): Promise<{ identity: ControllerIdentity | undefined; status: ControllerUpdateStatus | undefined }>;
   updateController(version: string, operationId: string, clean?: boolean): Promise<ControllerUpdateStatus>;
-  shareContext(): Promise<{ hostId: string; providers: Array<{ providerId: string; displayName: string }> }>;
-  shareCatalog(query: { hostId: string; providerId: string; nativeSessionId?: string; cursor?: string }): Promise<AgentRemoteHttpResult>;
   readonly sessionCatalog: SessionCallerCatalog;
   readonly sessionRefs?: SessionRefContext;
   /** Answers one resource command (session, group, host) from this Host's sockets; requests naming other Hosts go through the Relay. */
@@ -221,7 +225,10 @@ export interface AgentHost {
 export function createAgentHost(options: AgentHostOptions): AgentHost {
   if (options.succession?.enrollment && options.succession.controllerId !== options.installationId) throw new Error('Succession Controller identity must match the installed Controller.');
   const stateDirectory = options.preview?.stateDirectory ?? options.vscodeTunnel?.stateDirectory;
-  const runtime = createAgentHostRuntime({ ...options, hostId: async () => closed || state !== 'registered' ? undefined : (await connection.client.ready).hostId, ...(options.team ? { team: { ...options.team, request: (call: TeamHostCall) => connection.client.teamRequest(call),
+  const registeredHostId = async () => closed || state !== 'registered' ? undefined : (await connection.client.ready).hostId;
+  let uplinkUrl = options.uplink.url;
+  const siteOrigin = () => { const url = new URL(uplinkUrl); url.protocol = url.protocol === 'ws:' ? 'http:' : 'https:'; return url.origin; };
+  const runtime = createAgentHostRuntime({ ...options, hostId: registeredHostId, siteOrigin, ...(options.team ? { team: { ...options.team, request: (call: TeamHostCall) => connection.client.teamRequest(call),
     genericSuccession: () => connection.client.teamSuccession, callForSupport: () => connection.client.callForSupport } } : {}), controllerId: options.installationId,
     ...(options.inputImages ? {} : stateDirectory ? { inputImages: { directory: join(stateDirectory, 'input-images') } } : {}),
     ...(options.inputResources ? {} : stateDirectory ? { inputResources: { directory: join(stateDirectory, 'input-resources') } } : {}) });
@@ -243,7 +250,24 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
     ...(options.sessionRefs ? { sessionReferences: true as const, referenceNotes: true as const } : {}),
     // Session commands reach this Host through the Relay too.
     sessionCommands: true as const }));
+  /** Every Host route, as the Relay and this computer's command line reach them. */
+  const hostControl = async (request: RemoteHostControlRequest): Promise<AgentRemoteHttpResult> => request.method === 'POST' && request.path === RELAY_DIAGNOSTIC_PATH ? receiveRelayDiagnostics(request.body, options.onRelayDiagnostics) : request.path === '/remote/controller-update' ? (async () => {
+        try {
+          if (request.method === 'GET') {
+            if (!updater && !options.onRelayDiagnostics) return { status: 404, body: '' };
+            // Health rides on the update status, which every Relay already forwards to the owner unchanged.
+            return { status: 200, body: JSON.stringify({ ...(await updater?.status()), ...(options.onRelayDiagnostics ? { diagnosticDelivery: 3 } : {}),
+              ...(options.health ? { health: options.health.snapshot() } : {}) }) };
+          }
+          if (!updater) return { status: 404, body: '' };
+          const body = JSON.parse(request.body ?? '{}');
+          return { status: 202, body: JSON.stringify(await updater.request(body.version, body.operationId)) };
+        } catch (error) { return { status: 409, body: JSON.stringify({ error: error instanceof Error ? error.message : 'Controller update failed.',
+          ...(request.method === 'GET' && options.onRelayDiagnostics ? { diagnosticDelivery: 3 } : {}) }) }; }
+      })() : request.path === '/remote/provider-settings' && options.providerDiscovery ? options.providerDiscovery.control(request) : request.path === '/remote/codex-daemon' && codexDaemon ? codexDaemon.control(request) : request.path.startsWith('/remote/vscode-tunnel') && vscodeTunnel ? vscodeTunnel.control(request)
+        : request.path.startsWith('/remote/previews') && previews ? previews.control(request) : runtime.control(request);
   const connect = (config: AgentHostOptions['uplink']): Connection => {
+    uplinkUrl = config.url;
     runtime.setRelayConnected(false);
     const current = ++generation;
     return { superseded: false, client: createRemoteHostUplinkClient({ relay: runtime.relay, installationId: options.installationId, name: options.name, environment: options.environment, controller: options.controller?.identity,
@@ -261,21 +285,7 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
         credentialPersistence = pending;
         return pending;
       } : undefined,
-      resolveSession: runtime.resolveSession, acquireSession: runtime.acquireSession, control: async request => request.method === 'POST' && request.path === RELAY_DIAGNOSTIC_PATH ? receiveRelayDiagnostics(request.body, options.onRelayDiagnostics) : request.path === '/remote/controller-update' ? (async () => {
-        try {
-          if (request.method === 'GET') {
-            if (!updater && !options.onRelayDiagnostics) return { status: 404, body: '' };
-            // Health rides on the update status, which every Relay already forwards to the owner unchanged.
-            return { status: 200, body: JSON.stringify({ ...(await updater?.status()), ...(options.onRelayDiagnostics ? { diagnosticDelivery: 3 } : {}),
-              ...(options.health ? { health: options.health.snapshot() } : {}) }) };
-          }
-          if (!updater) return { status: 404, body: '' };
-          const body = JSON.parse(request.body ?? '{}');
-          return { status: 202, body: JSON.stringify(await updater.request(body.version, body.operationId)) };
-        } catch (error) { return { status: 409, body: JSON.stringify({ error: error instanceof Error ? error.message : 'Controller update failed.',
-          ...(request.method === 'GET' && options.onRelayDiagnostics ? { diagnosticDelivery: 3 } : {}) }) }; }
-      })() : request.path === '/remote/provider-settings' && options.providerDiscovery ? options.providerDiscovery.control(request) : request.path === '/remote/codex-daemon' && codexDaemon ? codexDaemon.control(request) : request.path.startsWith('/remote/vscode-tunnel') && vscodeTunnel ? vscodeTunnel.control(request)
-        : request.path.startsWith('/remote/previews') && previews ? previews.control(request) : runtime.control(request),
+      resolveSession: runtime.resolveSession, acquireSession: runtime.acquireSession, control: hostControl,
       operationExecutor: scope => runtime.executeOperation(scope),
       previews: previews ? { snapshot: previews.snapshot, subscribe: previews.subscribe, disconnected: previews.disconnected,
         registered: info => previews.registered({ ...info, url: config.url }) } : undefined,
@@ -284,14 +294,6 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
   };
   connection = connect(options.uplink);
   const ready = connection.client.ready;
-  async function shareContext() {
-    if (closed || state !== 'registered') throw new Error('The Host is not registered. Wait for reconnection, then run share again.');
-    const current = connection;
-    const { hostId } = await current.client.ready;
-    if (current !== connection || closed || state !== 'registered') throw new Error('The Host connection changed. Run share again.');
-    return { hostId, providers: options.registrations.filter(item => options.providerEnabled?.(item.directory.providerId) !== false).map(({ adapter }) => ({
-      providerId: adapter.descriptor.providerId, displayName: adapter.descriptor.displayName })) };
-  }
   let closePromise: Promise<void> | undefined;
   return {
     ready,
@@ -300,24 +302,32 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
     ...(runtime.sessionRefs ? { sessionRefs: runtime.sessionRefs } : {}),
     async command(scope, request, caller) {
       if (scope === 'session') return runtime.callSession(request, caller, options.forwardCommand ? (hostId, forwarded) => options.forwardCommand!('session', hostId, forwarded) : undefined);
-      return { error: { code: 'invalid_request', message: `Unknown command group: ${scope}.` } };
+      if (scope !== 'host') return { error: { code: 'invalid_request', message: `Unknown command group: ${scope}.` } };
+      if (!request || typeof request !== 'object' || Array.isArray(request)) return { error: { code: 'invalid_request', message: 'The host command is invalid.' } };
+      const command = request as Record<string, unknown>, hostId = await registeredHostId();
+      const named = typeof command.host === 'string' && !['self', 'local', hostId].includes(command.host) ? command.host : undefined;
+      // Only the Relay keeps the account's Hosts; another Host is reached through it.
+      if (named || command.command === 'list') {
+        if (!options.forwardCommand) return { error: { code: 'host_unreachable', message: 'Other Hosts are reachable through the Relay only.' } };
+        return options.forwardCommand('host', named ?? '', command);
+      }
+      const parse = (result: AgentRemoteHttpResult) => { try { return { status: result.status, data: result.body ? JSON.parse(String(result.body)) : {} }; } catch { return { status: result.status, data: {} }; } };
+      return runHostRequest(command, {
+        id: async () => hostId,
+        host: async (method, path, body) => parse(await hostControl({ requestId: randomUUID(), method, path: `/remote/${path}`, ...(body !== undefined ? { body: JSON.stringify(body) } : {}) })),
+        describe: async () => ({ ...(hostId ? { id: hostId } : {}), name: options.name, online: state === 'registered', providers: describeProviders(),
+          ...(options.environment ? { environment: options.environment } : {}), ...(options.controller ? { controller: options.controller.identity } : {}),
+          ...(updater ? { update: await updater.status() } : {}) }),
+        relay: async (method, path, body) => {
+          if (!options.relayRequest) throw new CliError('signed_out', 'The Relay is reached as the signed-in owner: run agent-remote-controller login first.');
+          return options.relayRequest(method, path, body);
+        },
+      });
     },
-    shareContext,
     async controllerInfo() { return { identity: options.controller?.identity, status: await updater?.status() }; },
     async updateController(version, operationId, clean) {
       if (!updater || closed) throw new Error('Controller updates are unavailable.');
       return updater.request(version, operationId, clean);
-    },
-    async shareCatalog(query) {
-      const current = connection;
-      if ((await shareContext()).hostId !== query.hostId) throw new Error('The Host connection changed. Run share again.');
-      const params = new URLSearchParams({ providerId: query.providerId });
-      if (query.nativeSessionId !== undefined) params.set('nativeSessionId', query.nativeSessionId);
-      else { params.set('limit', '20'); if (query.cursor) params.set('cursor', query.cursor); }
-      const result = await runtime.control({ requestId: randomUUID(), method: 'GET',
-        path: `/remote/catalog${query.nativeSessionId !== undefined ? '/session' : ''}?${params}` });
-      if (current !== connection || closed || state !== 'registered') throw new Error('The Host connection changed. Run share again.');
-      return result;
     },
     async replaceUplink(config) {
       if (closed) throw new Error('Agent Host is closed.');
@@ -1380,13 +1390,7 @@ export function createAgentHostRuntime(options: AgentHostRuntimeOptions): AgentH
     },
   };
   /** A command line's operation identity as the operation cache takes it: a UUID, derived when the caller chose another form. */
-  const cliOperation = (id: string) => {
-    if (/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(id)) return id;
-    const bytes = createHash('sha256').update(JSON.stringify(['host:cli', id])).digest().subarray(0, 16);
-    bytes[6] = (bytes[6]! & 0x0f) | 0x80; bytes[8] = (bytes[8]! & 0x3f) | 0x80;
-    const hex = bytes.toString('hex');
-    return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
-  };
+  const cliOperation = operationUuid;
   async function holding<T>(ref: SessionCallerRef, work: (agent: SessionWireAgent) => Promise<T>): Promise<T> {
     const held = await automationAccess.acquire(ref.providerId, ref.nativeSessionId);
     try { return await work(held.agent); } finally { held.release(); }
@@ -1451,7 +1455,7 @@ export function createAgentHostRuntime(options: AgentHostRuntimeOptions): AgentH
   /** One session command; forward reaches other Hosts, for commands that came from this Host's own sockets. */
   function callSession(request: unknown, caller: SessionCaller, forward?: (hostId: string, request: Record<string, unknown>) => Promise<SessionCallResult>): Promise<SessionCallResult> {
     return handleSessionRequest(request, caller, { hostId: async () => options.hostId?.(), catalog: sessionCatalog, ...(sessionRefs ? { refs: sessionRefs } : {}), actions: sessionActions,
-      isShared: ref => options.sessionCallers?.store.isShared(ref) ?? false, ...(forward ? { forward } : {}) });
+      isShared: ref => options.sessionCallers?.store.isShared(ref) ?? false, siteOrigin: () => options.siteOrigin?.(), ...(forward ? { forward } : {}) });
   }
   const sessionRefs: SessionRefContext | undefined = options.sessionRefs ? {
     store: options.sessionRefs,

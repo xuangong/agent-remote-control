@@ -14,12 +14,8 @@ export async function runCopilotCommand(args: string[], stateDir: string, enviro
   const boundary = args.indexOf('--');
   const isTakeoverFlag = (arg: string, index: number) => arg === '--take-over' && (boundary < 0 || index < boundary);
   const takeover = args.some(isTakeoverFlag); args = args.filter((arg, index) => !isTakeoverFlag(arg, index));
-  let nativeArgs = args;
-  if (args[0] === 'resume') {
-    const target = args[1];
-    nativeArgs = target === '--last' ? ['--continue', ...args.slice(2)]
-      : target && !target.startsWith('-') ? [`--resume=${target}`, ...args.slice(2)] : ['--resume', ...args.slice(1)];
-  }
+  if (args[0] === 'resume') throw new Error('To open a session here, run agent-remote-controller session attach <address>.');
+  const nativeArgs = args;
   const resume = nativeArgs.find(arg=>arg.startsWith('--resume='))?.slice('--resume='.length)
     ?? (nativeArgs.includes('--resume') ? nativeArgs[nativeArgs.indexOf('--resume')+1] : undefined);
   async function verifyReleased(): Promise<void> {

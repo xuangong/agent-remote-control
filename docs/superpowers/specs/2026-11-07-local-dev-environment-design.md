@@ -125,24 +125,31 @@ for git over SSH in test sessions, and the proxy variables `HTTP_PROXY`,
 | `AGENT_HOST_ALLOWED_WORKSPACE_ROOTS` | `["<instance>/workspace"]` |
 | `AGENT_HOST_NAME` | `Dev · <worktree-name>` |
 | `AGENT_HOST_SERVER`, `AGENT_HOST_REMOTE_KEY` | Instance origin and invitation, first start only |
+| `AGENT_HOST_TRUSTED_FULL_CONTROL` | `0` |
 | `AGENT_HOST_CODEX_AUTO_START` | `0` |
 | `AGENT_HOST_OPENCODE_AUTO_START` | `0` |
 
 Inherited `AGENT_*`, `CLAUDECODE`, `CLAUDE_CODE_*` and similar session variables
 are not passed, so a launcher run from inside an agent session does not leak its
-grants or nested-session markers. `AGENT_HOST_TRUSTED_FULL_CONTROL` is never
-set: the Controller's execution policy (`execution-policy.ts`) then refuses to
-create, open or resume any session whose workspace is outside the allowed root,
-and locks permission settings. Native profile variables (`CLAUDE_CONFIG_DIR`,
-`CODEX_HOME`) are not set, so the shared default homes are used.
+grants or nested-session markers. `AGENT_HOST_TRUSTED_FULL_CONTROL` is set to
+`0` explicitly rather than left out: saved connection settings are merged under
+the environment, so only an explicit value overrides one persisted in the
+instance state. The Controller's execution policy (`execution-policy.ts`) then
+refuses to create, open or resume any session whose workspace is outside the
+allowed root, and locks permission settings. Native profile variables
+(`CLAUDE_CONFIG_DIR`, `CODEX_HOME`) are not set, so the shared default homes are
+used.
 
 `PATH` entries inside `node_modules` (pnpm script shims) are removed so they
-cannot shadow the native CLIs.
+cannot shadow the native CLIs. If no entry remains, `PATH` falls back to
+`/usr/bin:/bin:/usr/sbin:/sbin`.
 
-The development Controller reuses the Codex daemon and OpenCode server that the
-user's own Controller keeps running; with auto-start disabled it never starts,
-restarts or updates them on its own. If no Codex daemon is running, Codex is
-unavailable in the instance.
+The development Controller never starts, restarts or updates the Codex daemon or
+the OpenCode server on its own; auto-start is disabled for both. Codex sessions
+use the Codex daemon that the user's own Controller keeps running, and Codex is
+unavailable in the instance if none is running. OpenCode may be unavailable too,
+because its server credentials belong to the user's Controller state, not to the
+instance's.
 
 ## Safety model for shared native profiles
 
@@ -151,16 +158,21 @@ same native session stores and coordinates session ownership with the user's
 Controller through `<profile>/.arc-session-owners`. The guarantees and residual
 risks are:
 
-- Code-enforced: sessions can only be created or opened inside the instance
-  workspace; permission settings are locked to native defaults;
-  `pnpm local controller` refuses every subcommand except `status`,
-  `diagnostics`, `window`, `session` and `environment`.
+- Code-enforced for every provider: sessions are admitted only when their
+  working directory is inside the instance workspace, and permission settings
+  are locked. Claude Code additionally runs in its restricted native sandbox.
+  Codex sessions run with the shared daemon's own permissions and Copilot has no
+  enforced native sandbox, so for them only the working directory is checked,
+  not what the session touches. `pnpm local controller` refuses every
+  subcommand except `status`, `diagnostics`, `window`, `session` and
+  `environment`.
 - Not isolated: test sessions are written to the shared native histories (under
   paths inside `~/.agent-remote-control-dev`, so they are easy to recognise) and
   appear in the user's own Controller as ordinary sessions.
-- Not isolated: the Codex daemon and OpenCode server are shared processes.
-  OpenCode callbacks (Ask) go through the shared server's plugin, so only Claude
-  and Codex are covered end to end.
+- Not isolated: Codex sessions use the user's running Codex daemon. OpenCode may
+  be unavailable in the instance because its server credentials belong to the
+  user's Controller state; where it works, its callbacks (Ask) go through the
+  shared server's plugin, so only Claude and Codex are covered end to end.
 - Rule-enforced by the skill: agents operate only sessions they created in the
   instance workspace and never take over, stop or archive any other session.
 - Rule-enforced by the skill: the instance website's Controller update, Codex

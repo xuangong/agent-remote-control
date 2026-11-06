@@ -2,11 +2,12 @@ import { TeamViewCommand, TeamViewScope } from '../hooks/useTeamVisibility.js';
 import { TrackViewCommand, TrackViewScope } from '../hooks/useSessionAttention.js';
 import { TpmViewCommand, TpmViewScope } from '../hooks/useTpmVisibility.js';
 import { AskViewCommand, AskViewScope } from '../hooks/useAskVisibility.js';
-import { useContext, type ComponentProps } from 'react';
+import { useContext, useMemo, type ComponentProps } from 'react';
 import { SessionWorkbench } from './SessionWorkbench.js';
 import { RecoveryScope } from '../conversation-recovery.js';
 import { useBoundDraft, type DraftBinding } from '../draft-store.js';
 import { WorkspaceVscodeLink } from './HostVscodeTunnel.js';
+import { SessionWorkspaceContext } from './SessionLink.js';
 import { needsReauthentication } from '../security-client.js';
 import { ReauthenticationNotice } from './ReauthenticationNotice.js';
 import { useSessionDisplayPreferences, type DisplayPreferenceBinding } from '../hooks/useSessionDisplayPreferences.js';
@@ -37,7 +38,10 @@ export function LabWorkbench({ draftBinding, displayBinding, defaultDisplayMode,
   const draft = useBoundDraft(draftBinding);
   const [displayPreferences, onDisplayPreferencesChange] = useSessionDisplayPreferences(displayBinding?.scope ?? positions?.scope,
     displayBinding?.key ?? props.draftSessionKey ?? props.state?.agent?.runtimeInfo.sessionId ?? props.attachingAgentId, defaultDisplayMode);
-  return <SessionWorkbench {...props}
+  const agent = props.state?.agent;
+  const reportedSession = agent?.runtimeInfo.sessionId, cwd = agent?.cwd, providerId = agent?.providerId;
+  const workspace = useMemo(() => providerId && reportedSession && cwd ? { providerId, nativeSessionId: reportedSession, cwd } : undefined, [providerId, reportedSession, cwd]);
+  return <SessionWorkspaceContext.Provider value={workspace}><SessionWorkbench {...props}
     sessionDescription={sessionDescription} onNavigateAttribution={props.onNavigateAttribution ?? descriptions?.navigate}
     readOnly={props.readOnly || promptEdit.recoveringDraft}
     actions={{ ...props.actions, ...(promptEdit.editPrompt ? { editPrompt: promptEdit.editPrompt } : {}) }}
@@ -55,5 +59,5 @@ export function LabWorkbench({ draftBinding, displayBinding, defaultDisplayMode,
     workspaceLink={<WorkspaceVscodeLink workspace={props.state?.agent?.cwd} />}
     isAuthenticationError={needsReauthentication} authenticationNotice={<ReauthenticationNotice />}
     renderSessionSettingError={error => needsReauthentication(error) ? <ReauthenticationNotice purpose="permissions" /> : undefined}
-    renderCommandError={error => needsReauthentication(error) ? <ReauthenticationNotice purpose="command" /> : undefined} />;
+    renderCommandError={error => needsReauthentication(error) ? <ReauthenticationNotice purpose="command" /> : undefined} /></SessionWorkspaceContext.Provider>;
 }

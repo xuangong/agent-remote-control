@@ -14,14 +14,35 @@ function CopyCommand({ command, label, action }: { command: string; label: strin
   </div>;
 }
 
-export function NativeSessionCommand({ providerId, nativeSessionId }: { providerId: string; nativeSessionId: string }) {
-  // Native session IDs are UUIDs. Never interpolate arbitrary catalog text into shell commands.
-  if (!['codex', 'copilot'].includes(providerId) || !/^[\da-f]{8}-[\da-f]{4}-[\da-f]{4}-[\da-f]{4}-[\da-f]{12}$/i.test(nativeSessionId)) return null;
-  return <section className="lab-native-session-command" aria-label="Resume locally">
-    <h3>Resume locally</h3>
-    <p>{providerId === 'codex' ? 'Run on the Host computer using its Controller configuration. The Controller supplies the socket automatically.' : 'Run on the Host computer using the same Copilot profile. The native CLI prompts if this session is already in use; concurrent clients do not share live updates.'}</p>
-    <CopyCommand key={nativeSessionId} label="Terminal command" action="Copy resume command"
-      command={`agent-remote-controller ${providerId} resume ${nativeSessionId}`} />
+const uuid = /^[\da-f]{8}-[\da-f]{4}-[\da-f]{4}-[\da-f]{4}-[\da-f]{12}$/i;
+const resumableIds: Readonly<Record<string, RegExp>> = { codex: uuid, copilot: uuid, claude: uuid, opencode: /^ses_[A-Za-z\d]+$/ };
+const resumeNotes: Readonly<Record<string, string>> = {
+  codex: 'Run on the Host computer using its Controller configuration. The Controller supplies the socket automatically.',
+  copilot: 'Run on the Host computer using the same Copilot profile. The native CLI prompts if this session is already in use; concurrent clients do not share live updates.',
+  claude: 'Run on the Host computer using the same Claude profile. If this session is open here, the command asks before interrupting it and taking control.',
+  opencode: 'Run on the Host computer. It attaches to the shared OpenCode server; this session stays open here.',
+};
+
+/** Moves to the session's working directory, then resumes it through the Controller's native command. */
+export function nativeOpenCommand(providerId: string, nativeSessionId: string, workspace?: string): string | undefined {
+  // Never interpolate arbitrary catalog text into shell commands: IDs must match the native format, and paths are quoted.
+  if (!resumableIds[providerId]?.test(nativeSessionId)) return undefined;
+  const resume = `agent-remote-controller ${providerId} resume ${nativeSessionId}`;
+  if (!workspace || /[\u0000-\u001f\u007f-\u009f]/.test(workspace)) return resume;
+  if (workspace.startsWith('/')) return `cd '${workspace.replaceAll("'", `'\\''`)}' && ${resume}`;
+  // Windows terminals default to PowerShell, where every single-quote form ends a literal string unless doubled.
+  // Stop keeps a failed directory change from resuming elsewhere; Windows PowerShell has no &&.
+  if (/^([A-Za-z]:[\\/]|\\\\)/.test(workspace)) return `Set-Location -LiteralPath '${workspace.replace(/['\u2018-\u201b]/g, '$&$&')}' -ErrorAction Stop; ${resume}`;
+  return resume;
+}
+
+export function NativeSessionCommand({ providerId, nativeSessionId, workspace }: { providerId: string; nativeSessionId: string; workspace?: string }) {
+  const command = nativeOpenCommand(providerId, nativeSessionId, workspace);
+  if (!command) return null;
+  return <section className="lab-native-session-command" aria-label="Open on Host">
+    <h3>Open on Host</h3>
+    <p>{resumeNotes[providerId]}{command.startsWith('agent-remote-controller ') ? ' Run it from the session’s working directory.' : ''}</p>
+    <CopyCommand key={nativeSessionId} label="Terminal command" action="Copy command" command={command} />
   </section>;
 }
 

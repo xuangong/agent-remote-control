@@ -1,7 +1,7 @@
 import { act } from 'react';
 import { beforeEach, expect, it, vi } from 'vitest';
 import { render } from '../test/setup.js';
-import { SessionTransferDialog } from './SessionLink.js';
+import { SessionTransferDialog, SessionWorkspaceContext } from './SessionLink.js';
 
 const { toDataURL } = vi.hoisted(() => ({ toDataURL: vi.fn() }));
 vi.mock('qrcode', () => ({ toDataURL, default: { toDataURL } }));
@@ -54,4 +54,18 @@ it('retries QR generation without closing the dialog or losing the session link'
   expect(dialog.querySelector('img')?.getAttribute('src')).toBe('data:image/png;base64,test');
   expect(dialog.querySelector('input')!.value).toBe(url);
   expect(dialog.textContent).not.toContain(failure);
+});
+
+it.each([
+  ['claude', '01a0ba06-321d-7600-9141-a1ad0779fc9f', `cd '/work/app' && agent-remote-controller claude resume 01a0ba06-321d-7600-9141-a1ad0779fc9f`],
+  ['claude', '01a0be55-d755-7d72-8463-5a04a193e20e', 'agent-remote-controller claude resume 01a0be55-d755-7d72-8463-5a04a193e20e'],
+  ['codex', '01a0ba06-321d-7600-9141-a1ad0779fc9f', 'agent-remote-controller codex resume 01a0ba06-321d-7600-9141-a1ad0779fc9f'],
+])('uses the displayed working directory only for %s session %s', async (providerId, nativeSessionId, command) => {
+  toDataURL.mockResolvedValue('data:image/png;base64,test');
+  await render(<SessionWorkspaceContext.Provider value={{ providerId: 'claude', nativeSessionId: '01a0ba06-321d-7600-9141-a1ad0779fc9f', cwd: '/work/app' }}>
+    <SessionTransferDialog session={{ ...session, providerId, nativeSessionId }} onClose={() => {}} />
+  </SessionWorkspaceContext.Provider>);
+  const dialog = document.querySelector('dialog')!;
+  expect([...dialog.querySelectorAll('summary')].map(summary => summary.textContent)).toContain('Open on Host');
+  expect(dialog.querySelector<HTMLInputElement>('.lab-native-session-command input')?.value).toBe(command);
 });

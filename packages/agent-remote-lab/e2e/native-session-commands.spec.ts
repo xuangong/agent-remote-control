@@ -7,9 +7,10 @@ test('native commands fit the viewport and remain accessible in the session dial
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
   await page.getByRole('button', { name: 'Share session link' }).click();
   const dialog = page.getByRole('dialog');
+  await dialog.locator('summary', { hasText: 'Open on Host' }).click();
   const command = dialog.getByLabel('Terminal command');
   await command.scrollIntoViewIfNeeded();
-  await expect(command).toHaveValue('agent-remote-controller codex resume 01a0ba06-321d-7600-9141-a1ad0779fc9f');
+  await expect(command).toHaveValue("cd '/Users/developer/Projects/agent-remote-control/packages/agent-remote-lab' && agent-remote-controller codex resume 01a0ba06-321d-7600-9141-a1ad0779fc9f");
   expect(await dialog.evaluate(element => element.scrollWidth <= element.clientWidth)).toBe(true);
   await command.focus();
   expect(await command.evaluate((element: HTMLInputElement) => element.selectionEnd! - element.selectionStart!)).toBe((await command.inputValue()).length);

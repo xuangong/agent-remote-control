@@ -1,6 +1,6 @@
 import { createPortal } from 'react-dom';
-import { NativeSessionCommand } from './NativeSessionCommands.js';
-import { useEffect, useRef, useState } from 'react';
+import { NativeSessionCommand, nativeOpenCommand } from './NativeSessionCommands.js';
+import { createContext, useContext, useEffect, useRef, useState } from 'react';
 import QRCode from 'qrcode';
 import { controllerPath } from '@orchardworks/agent-remote-hosted/controller-location';
 import type { OpenedSession } from '../directory-client.js';
@@ -8,6 +8,9 @@ import { readSessionCode, type ScannedSession } from '../session-transfer.js';
 import { SessionScanner } from './SessionScanner.js';
 
 type SessionLinkTarget = Pick<OpenedSession, 'hostId' | 'providerId' | 'nativeSessionId' | 'title' | 'parentNativeSessionId'> & { agentId?: string };
+
+/** The working directory the displayed session reports, for opening that same session on its Host. */
+export const SessionWorkspaceContext = createContext<{ providerId: string; nativeSessionId: string; cwd: string } | undefined>(undefined);
 
 export function sessionUrl(session: SessionLinkTarget, sessionIntent?: 'history', keepOriginal?: boolean): string {
   return window.location.origin + controllerPath({ ...session, hostId: session.hostId ?? 'local', sessionIntent, keepOriginal });
@@ -41,6 +44,9 @@ export function SessionTransferDialog({ session, sessionIntent, keepOriginal, on
   const [opening, setOpening] = useState(false);
   const [pasted, setPasted] = useState('');
   const pending = useRef(false);
+  const reported = useContext(SessionWorkspaceContext);
+  // The displayed state can belong to another session while navigation or Handoff settles.
+  const workspace = reported && session && reported.providerId === session.providerId && reported.nativeSessionId === session.nativeSessionId ? reported.cwd : undefined;
   const url = session ? sessionUrl(session, sessionIntent, keepOriginal) : '';
   const title = session ? 'Share session' : 'Scan session';
   useEffect(() => { dialog.current?.showModal(); }, []);
@@ -81,7 +87,7 @@ export function SessionTransferDialog({ session, sessionIntent, keepOriginal, on
           <button type="button" className="lab-session-copy-link" onClick={() => void copyLink()}>{copied ? 'Copied' : 'Copy link'}</button>
           <p className="lab-session-transfer-note">Uses the receiving device’s sign-in. Access stays unchanged.</p>
           <details className="lab-session-transfer-details"><summary>Session link</summary><label className="agent-visually-hidden" htmlFor="session-transfer-url">Session URL</label><input id="session-transfer-url" readOnly value={url} onFocus={event => event.currentTarget.select()} /></details>
-          {['codex', 'copilot'].includes(session.providerId) ? <details className="lab-session-transfer-details"><summary>Resume locally</summary><NativeSessionCommand providerId={session.providerId} nativeSessionId={session.nativeSessionId} /></details> : null}
+          {nativeOpenCommand(session.providerId, session.nativeSessionId) ? <details className="lab-session-transfer-details"><summary>Open on Host</summary><NativeSessionCommand providerId={session.providerId} nativeSessionId={session.nativeSessionId} workspace={workspace} /></details> : null}
           {['localhost', '127.0.0.1', '[::1]'].includes(window.location.hostname) ? <p className="lab-control-note">This address is local to this computer. Use a site reachable from both devices.</p> : null}
         </> : <>
           {scanning && !opening ? <SessionScanner onRead={text => void receive(text)} /> : opening ? <div className="lab-session-scan-result" role="status">Opening session…</div> : <button type="button" onClick={() => { setFailure(undefined); setScanning(true); }}>Scan again</button>}

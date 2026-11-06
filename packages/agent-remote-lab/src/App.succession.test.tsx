@@ -351,7 +351,8 @@ it.each(['recovering', 'attach-failed', 'identity-mismatch'] as const)('keeps sh
   expect(url.searchParams.get('provider')).toBe('codex');
   expect(url.searchParams.get('session')).toBe('B');
   expect(url.searchParams.has('agent')).toBe(false);
-  expect(dialog.textContent).toContain('Resume locally');
+  // B is not a native Codex ID, so there is no command to offer.
+  expect(dialog.textContent).not.toContain('Open on Host');
 });
 
 it('retains a local resume command for a session that cannot be opened', async () => {

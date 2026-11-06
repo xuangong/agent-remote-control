@@ -82,8 +82,11 @@ printed.
 
 `up`:
 
-1. Builds with `pnpm build`, `pnpm build:relay` and `pnpm build:devbox` unless
-   `--no-build` is given. A failed build leaves a running instance untouched.
+1. Builds with
+   `pnpm --filter @orchardworks/agent-remote-controller... run build`,
+   `pnpm build:relay` and `scripts/build-devbox.mjs` (installing dependencies
+   first in a fresh worktree) unless `--no-build` is given. A failed build
+   leaves a running instance untouched.
 2. Allocates a free loopback port on first start and records it. The origin is
    `http://localhost:<port>`; the Devbox identity is bound to that origin, so a
    recorded port is reused and a change is refused. If another process holds the
@@ -101,7 +104,7 @@ printed.
 
 `down` sends SIGTERM to the runner, which stops the Controller (TERM, then
 process-group KILL after a deadline) and closes the site. Stale PIDs in
-`instance.json` are detected and reported rather than signalled.
+`runtime.json` are detected and reported rather than signalled.
 
 The runner never installs a launchd service, never uses the Controller's
 `start` daemon mode, and does not survive a reboot.

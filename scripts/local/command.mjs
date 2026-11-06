@@ -7,8 +7,15 @@ import { parseArgs, promisify } from 'node:util';
 import { controllerBuildProvenance } from '../lib/build-provenance.mjs';
 import { packageManager } from '../lib/package-manager.mjs';
 import { controllerEnvironment } from './environment.mjs';
-import { findInstance, listInstances, portAvailable, prepareInstance, processAlive, processCommand, readJson, runState, runsInstance, withLock } from './instance.mjs';
+import {
+  findInstance, listInstances, portAvailable, prepareInstance, processAlive, processCommand, readJson, runState, runsInstance, sandboxRefusal, withLock,
+} from './instance.mjs';
 import { screenshot, signedInUser, userApi } from './session.mjs';
+
+if (process.platform === 'win32') {
+  process.stderr.write('pnpm local supports macOS and Linux.\n');
+  process.exit(1);
+}
 
 const source = realpathSync(resolve(import.meta.dirname, '../..'));
 const controllerCli = join(source, 'packages/agent-host/dist/cli.js');
@@ -16,13 +23,14 @@ const controllerCommands = new Set(['status', 'diagnostics', 'window', 'session'
 const usage = `Usage: pnpm local <command>
   up [--no-build]        Build, then start or restart this checkout's instance
   down                   Stop this checkout's instance; its state is kept
-  status [--json]        URL, running build, local user and Controller registration
+  status [--json]        URL, running build, local user and Controller registration; exits 3 unless all are ready
   logs [--follow]        Runner and Controller output of the current run
   list [--json]          Every local instance on this machine
   remove --yes           Delete this checkout's stopped instance
   controller <args>      Controller CLI for this instance: status, diagnostics, window, session, environment
   api <v1/path> [--method M] [--data JSON]   Signed-in JSON request to the instance
   screenshot <path> --out FILE [--viewport WxH] [--wait-for CSS] [--full-page]
+Exit codes: 0 success, 1 failure, 3 status found no instance or one that is not ready.
 `;
 
 async function requireInstance() {
@@ -39,10 +47,18 @@ async function requireRunning() {
   return instance;
 }
 
+/** Runs a child on this terminal and resolves with its exit code; a child that cannot start rejects with the reason. */
+async function runAttached(file, args, options) {
+  const child = spawn(file, args, { stdio: 'inherit', ...options });
+  return await new Promise((resolveExit, reject) => {
+    child.once('error', error => reject(new Error(`Could not run ${file}: ${error.message}`)));
+    child.once('exit', code => resolveExit(code ?? 1));
+  });
+}
+
 async function runStep(command, args) {
   const [file, argv] = command === 'pnpm' ? packageManager('pnpm', args) : [command, args];
-  const child = spawn(file, argv, { cwd: source, stdio: 'inherit' });
-  const code = await new Promise((resolveExit, reject) => { child.once('error', reject); child.once('exit', resolveExit); });
+  const code = await runAttached(file, argv, { cwd: source });
   if (code !== 0) throw new Error(`Build step failed: ${[command, ...args].join(' ')}. A running instance was left unchanged.`);
 }
 
@@ -114,6 +130,7 @@ async function stopRunner(instance) {
   }
   if (state === 'running') await stopRunnerProcess(runtime.runnerPid, instance);
   await rm(instance.runtimeFile, { force: true });
+  return state === 'running';
 }
 
 async function startRunner(instance) {
@@ -123,26 +140,39 @@ async function startRunner(instance) {
   try {
     const child = spawn(process.execPath, [join(source, 'scripts/local/runner.mjs'), instance.directory],
       { cwd: instance.directory, env: process.env, stdio: ['ignore', log.fd, log.fd], detached: true });
-    await new Promise((resolveSpawn, reject) => { child.once('spawn', resolveSpawn); child.once('error', reject); });
+    try { await new Promise((resolveSpawn, reject) => { child.once('spawn', resolveSpawn); child.once('error', reject); }); }
+    catch (error) { throw sandboxRefusal(error, 'starting background processes') ?? error; }
     child.unref();
     return child.pid;
   } finally { await log.close(); }
 }
 
-async function waitUntilReady(instance, runnerPid) {
-  const timeoutMs = Number(process.env.ARC_LOCAL_READY_TIMEOUT_MS ?? 90_000);
+function readyTimeoutMs() {
+  const value = process.env.ARC_LOCAL_READY_TIMEOUT_MS;
+  if (value === undefined) return 90_000;
+  if (!/^[1-9]\d*$/.test(value)) throw new Error(`ARC_LOCAL_READY_TIMEOUT_MS must be a positive whole number of milliseconds, not "${value}".`);
+  return Number(value);
+}
+
+async function waitUntilReady(instance, runnerPid, timeoutMs) {
   const deadline = Date.now() + timeoutMs;
-  let waiting = 'the site';
+  let waiting;
+  const waitFor = phase => {
+    if (waiting === phase) return;
+    waiting = phase;
+    process.stdout.write(`Waiting for ${phase}…\n`);
+  };
+  waitFor('the site');
   while (Date.now() < deadline) {
     if (!processAlive(runnerPid)) throw new Error('The runner exited during startup.');
     // Polling avoids signing in: every sign-in counts against the instance's 30-per-minute limit.
     if (await siteAlive(instance.record.origin)) {
-      waiting = 'Controller registration';
+      waitFor('Controller registration');
       if (await controllerUplink(instance) === 'registered') {
         await signedInUser(instance.record.origin);
         return;
       }
-    }
+    } else waitFor('the site');
     await delay(500);
   }
   throw new Error(`The instance did not become ready within ${timeoutMs / 1000} seconds while waiting for ${waiting}.`);
@@ -184,6 +214,7 @@ async function printStatus(instance, json) {
 }
 
 async function up(options) {
+  const timeoutMs = readyTimeoutMs();
   const instance = await prepareInstance(source);
   await withLock(instance.directory, async () => {
     if (options['no-build']) assertBuilt();
@@ -193,10 +224,12 @@ async function up(options) {
       throw new Error(`Port ${instance.record.port} is in use by another process. The origin ${instance.record.origin} cannot change; free the port and run up again.`);
     }
     const runnerPid = await startRunner(instance);
-    try { await waitUntilReady(instance, runnerPid); }
+    try { await waitUntilReady(instance, runnerPid, timeoutMs); }
     catch (error) {
-      await stopRunnerProcess(runnerPid, instance).catch(() => undefined);
-      throw new Error(`${error.message}\n${await logTails(instance, 20)}`, { cause: error.cause });
+      let stopFailure;
+      try { await stopRunnerProcess(runnerPid, instance); } catch (stopError) { stopFailure = stopError; }
+      const tails = await logTails(instance, 20);
+      throw new Error(`${error.message}\n${tails}${stopFailure ? `\nThe runner could not be stopped: ${stopFailure.message}` : ''}`, { cause: error });
     }
   });
   await printStatus(instance, false);
@@ -204,14 +237,16 @@ async function up(options) {
 
 async function down() {
   const instance = await requireInstance();
-  await withLock(instance.directory, () => stopRunner(instance));
-  process.stdout.write(`Stopped ${instance.record.name}. Its state remains in ${instance.directory}.\n`);
+  const stopped = await withLock(instance.directory, () => stopRunner(instance));
+  process.stdout.write(stopped
+    ? `Stopped ${instance.record.name}. Its state remains in ${instance.directory}.\n`
+    : `${instance.record.name} was not running.\n`);
 }
 
 async function status(options) {
   const instance = await findInstance(source);
   if (!instance) {
-    process.stdout.write('This checkout has no local instance. Run pnpm local up.\n');
+    process.stdout.write(options.json ? '{"state":"none"}\n' : 'This checkout has no local instance. Run pnpm local up.\n');
     process.exitCode = 3;
     return;
   }
@@ -222,8 +257,7 @@ async function status(options) {
 async function logs(options) {
   const instance = await requireInstance();
   if (!options.follow) { process.stdout.write(await logTails(instance, 80) + '\n'); return; }
-  const child = spawn('tail', ['-n', '40', '-F', join(instance.logs, 'runner.log'), join(instance.logs, 'controller.log')], { stdio: 'inherit' });
-  await new Promise(resolveExit => child.once('exit', resolveExit));
+  await runAttached('tail', ['-n', '40', '-F', join(instance.logs, 'runner.log'), join(instance.logs, 'controller.log')]);
 }
 
 async function list(options) {
@@ -244,8 +278,8 @@ async function remove(options) {
   await withLock(instance.directory, async () => {
     const state = await runState(instance.directory, await readJson(instance.runtimeFile));
     if (state === 'running' || state === 'orphaned') throw new Error('Stop the instance with pnpm local down first.');
+    await rm(instance.directory, { recursive: true, force: true });
   });
-  await rm(instance.directory, { recursive: true, force: true });
   process.stdout.write(`Removed ${instance.directory}. Test sessions remain in the shared native histories.\n`);
 }
 
@@ -254,15 +288,17 @@ async function controller(args) {
   if (!controllerCommands.has(args[0] ?? '')) {
     throw new Error('pnpm local controller runs status, diagnostics, window, session or environment. The runner owns start, stop, pairing and updates, and native subcommands could take over shared sessions.');
   }
-  const child = spawn(process.execPath, [controllerCli, ...args], { env: controllerEnvironment(process.env, instance), cwd: instance.workspace, stdio: 'inherit' });
-  process.exitCode = await new Promise(resolveExit => child.once('exit', code => resolveExit(code ?? 1)));
+  process.exitCode = await runAttached(process.execPath, [controllerCli, ...args], { env: controllerEnvironment(process.env, instance), cwd: instance.workspace });
 }
 
 async function api(positionals, options) {
-  const instance = await requireRunning();
   const [path] = positionals;
   if (!path) throw new Error('Name an API path, for example: pnpm local api v1/remote/hosts');
-  if (options.data !== undefined) JSON.parse(options.data);
+  if (options.data !== undefined) {
+    try { JSON.parse(options.data); }
+    catch (error) { throw new Error(`--data must be JSON: ${error.message}`); }
+  }
+  const instance = await requireRunning();
   const result = await userApi(instance.record.origin, path, { method: options.method ?? (options.data === undefined ? 'GET' : 'POST'), data: options.data });
   process.stdout.write(result.body.endsWith('\n') ? result.body : result.body + '\n');
   if (result.status >= 400) { process.stderr.write(`HTTP ${result.status}\n`); process.exitCode = 1; }
@@ -294,12 +330,15 @@ try {
     else if (command === 'remove') await remove(values);
     else if (command === 'api') await api(positionals, values);
     else if (command === 'screenshot') await capture(positionals, values);
+    else if (!command || ['help', '--help', '-h'].includes(command)) process.stdout.write(usage);
     else {
-      process.stdout.write(usage);
-      if (command && command !== 'help') process.exitCode = 1;
+      process.stderr.write(usage);
+      process.exitCode = 1;
     }
   }
 } catch (error) {
-  process.stderr.write(`${error.message}${error.cause?.message ? `\nCause: ${error.cause.message}` : ''}\n`);
+  // A cause already quoted in the message is not repeated.
+  const cause = error.cause?.message && !error.message.includes(error.cause.message) ? `\nCause: ${error.cause.message}` : '';
+  process.stderr.write(`${error.message}${cause}\n`);
   process.exitCode = 1;
 }

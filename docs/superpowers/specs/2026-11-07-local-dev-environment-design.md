@@ -244,21 +244,29 @@ Hard rules in `SKILL.md`:
 
 ## Testing
 
-`pnpm test:local-env` (also part of `pnpm test:setup`), with per-test and outer
-process deadlines like every root test command:
+`pnpm test:local-env` runs the launcher unit tests and the integration test, with
+per-test and outer process deadlines like every root test command. The launcher
+unit tests are also part of `pnpm test:setup`; the integration test starts a real
+runner, Controller and browser, so it runs only in `pnpm test:local-env`:
 
 - Launcher unit tests (`node --test`, temporary `ARC_LOCAL_ROOT`, never the real
   HOME): stable instance naming from a worktree path; port allocation recorded and
   reused, an occupied recorded port refused; Controller environment allowlist
   and added variables, with `AGENT_*`, `CLAUDECODE` and
   `AGENT_HOST_TRUSTED_FULL_CONTROL` removed; stale PID detection; `down` and
-  `remove` scoped to the current instance.
+  `remove` scoped to the current instance; an operation lock released on
+  SIGINT, SIGTERM and SIGHUP, and a lock left by a killed command named with its
+  holder's pid; a refusal by the environment (EPERM, EACCES) told apart from a
+  port in use.
 - Integration test: real `createDevboxServer` and the real development
   Controller with a temporary HOME and a PATH without native CLIs. `up --no-build` signs
   `/auth/status` in without credentials; the Controller reports
   `uplink: registered`; `status` and `api v1/remote/hosts` show the Host; `down`
   stops both processes and keeps state; a second `up` reuses the port, identity
-  and device credential.
+  and device credential. Failure paths: an `up` that does not become ready stops
+  its runner and prints the log tails; an occupied recorded port is refused;
+  `down` on a stopped instance says so; `remove` needs `--yes`; `status --json`
+  without an instance prints `{"state":"none"}` and exits 3.
 
 Manual acceptance after implementation, in the feature worktree with the real
 shared profiles: headless screenshot of the signed-in page with

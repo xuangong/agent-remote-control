@@ -57,19 +57,34 @@ async function createJson(path, value) {
   finally { await rm(temporary, { force: true }); }
 }
 
+/** A sandbox answers EPERM or EACCES; that is the environment refusing, not a fact about the port or the process. */
+export function sandboxRefusal(error, action) {
+  if (!['EPERM', 'EACCES'].includes(error?.code)) return undefined;
+  return new Error(`This environment does not allow ${action} (${error.code}). Run pnpm local from a session without the sandbox (YOLO mode).`, { cause: error });
+}
+
 export async function freePort() {
   const server = createServer();
-  server.listen(0, '127.0.0.1');
-  await once(server, 'listening');
+  try {
+    server.listen(0, '127.0.0.1');
+    await once(server, 'listening');
+  } catch (error) { throw sandboxRefusal(error, 'listening on local ports') ?? error; }
   const { port } = server.address();
   await new Promise(resolve => server.close(resolve));
   return port;
 }
 
+/** Whether a failed listen means "taken" (false) or "nothing there to take" (true); anything else is not an answer. */
+export function listenOutcome(error, host) {
+  if (error.code === 'EADDRINUSE') return false;
+  if (host === '::1' && ['EADDRNOTAVAIL', 'EAFNOSUPPORT'].includes(error.code)) return true;
+  throw sandboxRefusal(error, 'listening on local ports') ?? error;
+}
+
 async function canListen(port, host) {
   const server = createServer();
   try { server.listen(port, host); await once(server, 'listening'); return true; }
-  catch (error) { return host === '::1' && ['EADDRNOTAVAIL', 'EAFNOSUPPORT'].includes(error.code); }
+  catch (error) { return listenOutcome(error, host); }
   finally { if (server.listening) await new Promise(resolve => server.close(resolve)); }
 }
 
@@ -144,22 +159,28 @@ export async function runState(directory, runtime) {
   return (await processCommand(runtime.controllerPid))?.includes('cli.js foreground') ? 'orphaned' : 'stale';
 }
 
+const lockSignals = ['SIGINT', 'SIGTERM', 'SIGHUP'];
+
 /** Operations on one instance run one at a time; a lock left by a killed command is reported, not taken over. */
 export async function withLock(directory, action) {
   const lock = join(directory, 'operation.lock');
   try { await mkdir(lock); }
   catch (error) {
     if (error.code !== 'EEXIST') throw error;
+    const owner = await readJson(join(lock, 'owner.json')).catch(() => undefined);
+    if (Number.isInteger(owner?.pid) && !processAlive(owner.pid)) {
+      throw new Error(`A previous local command (pid ${owner.pid}) was interrupted and left its lock. Remove ${lock} and retry.`);
+    }
     throw new Error(`Another local command is changing this instance. If none is running, remove ${lock}.`);
   }
   const release = () => rmSync(lock, { recursive: true, force: true });
   const interrupted = signal => { release(); process.kill(process.pid, signal); };
-  process.once('SIGINT', interrupted);
-  process.once('SIGTERM', interrupted);
-  try { return await action(); }
-  finally {
-    process.off('SIGINT', interrupted);
-    process.off('SIGTERM', interrupted);
+  for (const signal of lockSignals) process.once(signal, interrupted);
+  try {
+    await writeFile(join(lock, 'owner.json'), JSON.stringify({ pid: process.pid }) + '\n', { mode: 0o600 });
+    return await action();
+  } finally {
+    for (const signal of lockSignals) process.off(signal, interrupted);
     release();
   }
 }

@@ -7,7 +7,9 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { test } from 'node:test';
 import { pathToFileURL } from 'node:url';
-import { findInstance, instanceName, listInstances, localRoot, portAvailable, prepareInstance, runsInstance, runState, withLock, writeJson } from './instance.mjs';
+import {
+  findInstance, instanceName, listInstances, listenOutcome, localRoot, portAvailable, prepareInstance, readJson, runsInstance, runState, sandboxRefusal, withLock, writeJson,
+} from './instance.mjs';
 
 async function temporaryRoot(t) {
   const root = await mkdtemp(join(tmpdir(), 'arc-local-instance-'));
@@ -164,7 +166,7 @@ test('serializes operations on one instance', async t => {
   const finish = Promise.withResolvers();
   const first = withLock(directory, async () => { entered.resolve(); await finish.promise; });
   await entered.promise;
-  await assert.rejects(withLock(directory, async () => undefined), /Another local command/);
+  await assert.rejects(withLock(directory, async () => undefined), error => /Another local command/.test(error.message) && !/interrupted/.test(error.message));
   finish.resolve();
   await first;
   assert.equal(await withLock(directory, async () => 'ran'), 'ran');
@@ -172,24 +174,91 @@ test('serializes operations on one instance', async t => {
   assert.equal(await withLock(directory, async () => 'ran again'), 'ran again');
 });
 
-test('reports a lock left by a killed command instead of taking it over', async t => {
+test('records the holder of the lock while it runs', async t => {
+  const directory = await temporaryRoot(t);
+  await withLock(directory, async () => {
+    assert.deepEqual(await readJson(join(directory, 'operation.lock', 'owner.json')), { pid: process.pid });
+  });
+});
+
+test('reports a lock with no recorded holder without taking it over', async t => {
   const directory = await temporaryRoot(t);
   await mkdir(join(directory, 'operation.lock'));
-  await assert.rejects(withLock(directory, async () => 'ran'), /remove .*operation\.lock/);
+  await assert.rejects(withLock(directory, async () => 'ran'), /Another local command .*remove .*operation\.lock/);
   assert.ok((await stat(join(directory, 'operation.lock'))).isDirectory());
 });
 
-test('releases the lock when the command is terminated', async t => {
+test('names a lock left by a command that is no longer running', async t => {
   const directory = await temporaryRoot(t);
+  const pid = await exitedPid();
+  await mkdir(join(directory, 'operation.lock'));
+  await writeJson(join(directory, 'operation.lock', 'owner.json'), { pid });
+  await assert.rejects(
+    withLock(directory, async () => 'ran'),
+    error => error.message === `A previous local command (pid ${pid}) was interrupted and left its lock. Remove ${join(directory, 'operation.lock')} and retry.`);
+  assert.ok((await stat(join(directory, 'operation.lock'))).isDirectory());
+});
+
+/** Starts a process that holds the lock until it is signalled. */
+async function lockHolder(t, directory) {
   const module = pathToFileURL(join(import.meta.dirname, 'instance.mjs')).href;
   const script = `import { withLock } from ${JSON.stringify(module)};
 await withLock(process.argv[1], async () => { process.stdout.write('locked\\n'); await new Promise(() => setInterval(() => {}, 1000)); });`;
   const child = spawn(process.execPath, ['--input-type=module', '-e', script, directory], { stdio: ['ignore', 'pipe', 'inherit'] });
   t.after(() => child.kill('SIGKILL'));
   await once(child.stdout, 'data');
+  return child;
+}
+
+test('names the lock of a command that was killed while holding it', async t => {
+  const directory = await temporaryRoot(t);
+  const child = await lockHolder(t, directory);
   const exited = once(child, 'exit');
-  child.kill('SIGTERM');
-  const [, signal] = await exited;
-  assert.equal(signal, 'SIGTERM');
-  await assert.rejects(stat(join(directory, 'operation.lock')), { code: 'ENOENT' });
+  child.kill('SIGKILL');
+  await exited;
+  await assert.rejects(withLock(directory, async () => 'ran'), new RegExp(`previous local command \\(pid ${child.pid}\\) was interrupted and left its lock\\. Remove .*operation\\.lock and retry`));
+});
+
+for (const signal of ['SIGINT', 'SIGTERM', 'SIGHUP']) {
+  test(`releases the lock when the command receives ${signal}`, async t => {
+    const directory = await temporaryRoot(t);
+    const child = await lockHolder(t, directory);
+    const exited = once(child, 'exit');
+    child.kill(signal);
+    const [, received] = await exited;
+    assert.equal(received, signal);
+    await assert.rejects(stat(join(directory, 'operation.lock')), { code: 'ENOENT' });
+  });
+}
+
+test('tells a refused listen apart from a port in use', () => {
+  assert.equal(listenOutcome({ code: 'EADDRINUSE' }, '127.0.0.1'), false);
+  assert.equal(listenOutcome({ code: 'EADDRINUSE' }, '::1'), false);
+  assert.equal(listenOutcome({ code: 'EADDRNOTAVAIL' }, '::1'), true);
+  assert.equal(listenOutcome({ code: 'EAFNOSUPPORT' }, '::1'), true);
+  for (const code of ['EPERM', 'EACCES']) {
+    for (const host of ['127.0.0.1', '::1']) {
+      assert.throws(
+        () => listenOutcome({ code }, host),
+        error => error.message === `This environment does not allow listening on local ports (${code}). Run pnpm local from a session without the sandbox (YOLO mode).`);
+    }
+  }
+  const unexpected = Object.assign(new Error('boom'), { code: 'EADDRNOTAVAIL' });
+  assert.throws(() => listenOutcome(unexpected, '127.0.0.1'), error => error === unexpected);
+  const other = Object.assign(new Error('odd'), { code: 'EMFILE' });
+  assert.throws(() => listenOutcome(other, '::1'), error => error === other);
+});
+
+test('rethrows a listen failure that is not an answer about the port', async () => {
+  await assert.rejects(portAvailable(70000), { code: 'ERR_SOCKET_BAD_PORT' });
+});
+
+test('explains a refusal by the environment and leaves other errors alone', () => {
+  for (const code of ['EPERM', 'EACCES']) {
+    const refusal = sandboxRefusal(Object.assign(new Error('refused'), { code }), 'starting background processes');
+    assert.equal(refusal.message, `This environment does not allow starting background processes (${code}). Run pnpm local from a session without the sandbox (YOLO mode).`);
+    assert.equal(refusal.cause.code, code);
+  }
+  assert.equal(sandboxRefusal(Object.assign(new Error('missing'), { code: 'ENOENT' }), 'starting background processes'), undefined);
+  assert.equal(sandboxRefusal(new Error('plain'), 'starting background processes'), undefined);
 });

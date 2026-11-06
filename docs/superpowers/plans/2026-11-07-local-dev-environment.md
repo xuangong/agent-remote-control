@@ -122,7 +122,9 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { test } from 'node:test';
 import { pathToFileURL } from 'node:url';
-import { findInstance, instanceName, listInstances, localRoot, portAvailable, prepareInstance, runsInstance, runState, withLock, writeJson } from './instance.mjs';
+import {
+  findInstance, instanceName, listInstances, listenOutcome, localRoot, portAvailable, prepareInstance, readJson, runsInstance, runState, sandboxRefusal, withLock, writeJson,
+} from './instance.mjs';
 
 async function temporaryRoot(t) {
   const root = await mkdtemp(join(tmpdir(), 'arc-local-instance-'));
@@ -279,7 +281,7 @@ test('serializes operations on one instance', async t => {
   const finish = Promise.withResolvers();
   const first = withLock(directory, async () => { entered.resolve(); await finish.promise; });
   await entered.promise;
-  await assert.rejects(withLock(directory, async () => undefined), /Another local command/);
+  await assert.rejects(withLock(directory, async () => undefined), error => /Another local command/.test(error.message) && !/interrupted/.test(error.message));
   finish.resolve();
   await first;
   assert.equal(await withLock(directory, async () => 'ran'), 'ran');
@@ -287,26 +289,93 @@ test('serializes operations on one instance', async t => {
   assert.equal(await withLock(directory, async () => 'ran again'), 'ran again');
 });
 
-test('reports a lock left by a killed command instead of taking it over', async t => {
+test('records the holder of the lock while it runs', async t => {
+  const directory = await temporaryRoot(t);
+  await withLock(directory, async () => {
+    assert.deepEqual(await readJson(join(directory, 'operation.lock', 'owner.json')), { pid: process.pid });
+  });
+});
+
+test('reports a lock with no recorded holder without taking it over', async t => {
   const directory = await temporaryRoot(t);
   await mkdir(join(directory, 'operation.lock'));
-  await assert.rejects(withLock(directory, async () => 'ran'), /remove .*operation\.lock/);
+  await assert.rejects(withLock(directory, async () => 'ran'), /Another local command .*remove .*operation\.lock/);
   assert.ok((await stat(join(directory, 'operation.lock'))).isDirectory());
 });
 
-test('releases the lock when the command is terminated', async t => {
+test('names a lock left by a command that is no longer running', async t => {
   const directory = await temporaryRoot(t);
+  const pid = await exitedPid();
+  await mkdir(join(directory, 'operation.lock'));
+  await writeJson(join(directory, 'operation.lock', 'owner.json'), { pid });
+  await assert.rejects(
+    withLock(directory, async () => 'ran'),
+    error => error.message === `A previous local command (pid ${pid}) was interrupted and left its lock. Remove ${join(directory, 'operation.lock')} and retry.`);
+  assert.ok((await stat(join(directory, 'operation.lock'))).isDirectory());
+});
+
+/** Starts a process that holds the lock until it is signalled. */
+async function lockHolder(t, directory) {
   const module = pathToFileURL(join(import.meta.dirname, 'instance.mjs')).href;
   const script = `import { withLock } from ${JSON.stringify(module)};
 await withLock(process.argv[1], async () => { process.stdout.write('locked\\n'); await new Promise(() => setInterval(() => {}, 1000)); });`;
   const child = spawn(process.execPath, ['--input-type=module', '-e', script, directory], { stdio: ['ignore', 'pipe', 'inherit'] });
   t.after(() => child.kill('SIGKILL'));
   await once(child.stdout, 'data');
+  return child;
+}
+
+test('names the lock of a command that was killed while holding it', async t => {
+  const directory = await temporaryRoot(t);
+  const child = await lockHolder(t, directory);
   const exited = once(child, 'exit');
-  child.kill('SIGTERM');
-  const [, signal] = await exited;
-  assert.equal(signal, 'SIGTERM');
-  await assert.rejects(stat(join(directory, 'operation.lock')), { code: 'ENOENT' });
+  child.kill('SIGKILL');
+  await exited;
+  await assert.rejects(withLock(directory, async () => 'ran'), new RegExp(`previous local command \\(pid ${child.pid}\\) was interrupted and left its lock\\. Remove .*operation\\.lock and retry`));
+});
+
+for (const signal of ['SIGINT', 'SIGTERM', 'SIGHUP']) {
+  test(`releases the lock when the command receives ${signal}`, async t => {
+    const directory = await temporaryRoot(t);
+    const child = await lockHolder(t, directory);
+    const exited = once(child, 'exit');
+    child.kill(signal);
+    const [, received] = await exited;
+    assert.equal(received, signal);
+    await assert.rejects(stat(join(directory, 'operation.lock')), { code: 'ENOENT' });
+  });
+}
+
+test('tells a refused listen apart from a port in use', () => {
+  assert.equal(listenOutcome({ code: 'EADDRINUSE' }, '127.0.0.1'), false);
+  assert.equal(listenOutcome({ code: 'EADDRINUSE' }, '::1'), false);
+  assert.equal(listenOutcome({ code: 'EADDRNOTAVAIL' }, '::1'), true);
+  assert.equal(listenOutcome({ code: 'EAFNOSUPPORT' }, '::1'), true);
+  for (const code of ['EPERM', 'EACCES']) {
+    for (const host of ['127.0.0.1', '::1']) {
+      assert.throws(
+        () => listenOutcome({ code }, host),
+        error => error.message === `This environment does not allow listening on local ports (${code}). Run pnpm local from a session without the sandbox (YOLO mode).`);
+    }
+  }
+  const unexpected = Object.assign(new Error('boom'), { code: 'EADDRNOTAVAIL' });
+  assert.throws(() => listenOutcome(unexpected, '127.0.0.1'), error => error === unexpected);
+  const other = Object.assign(new Error('odd'), { code: 'EMFILE' });
+  assert.throws(() => listenOutcome(other, '::1'), error => error === other);
+});
+
+test('rethrows a listen failure that is not an answer about the port', async () => {
+  await assert.rejects(portAvailable(70000), { code: 'ERR_SOCKET_BAD_PORT' });
+});
+
+test('explains a refusal by the environment and leaves other errors alone', () => {
+  for (const code of ['EPERM', 'EACCES']) {
+    const refusal = sandboxRefusal(Object.assign(new Error('refused'), { code }), 'starting background processes');
+    assert.equal(refusal.message, `This environment does not allow starting background processes (${code}). Run pnpm local from a session without the sandbox (YOLO mode).`);
+    assert.equal(refusal.cause.code, code);
+  }
+  assert.equal(sandboxRefusal(Object.assign(new Error('missing'), { code: 'ENOENT' }), 'starting background processes'), undefined);
+  assert.equal(sandboxRefusal(new Error('plain'), 'starting background processes'), undefined);
 });
 ```
 
@@ -377,19 +446,34 @@ async function createJson(path, value) {
   finally { await rm(temporary, { force: true }); }
 }
 
+/** A sandbox answers EPERM or EACCES; that is the environment refusing, not a fact about the port or the process. */
+export function sandboxRefusal(error, action) {
+  if (!['EPERM', 'EACCES'].includes(error?.code)) return undefined;
+  return new Error(`This environment does not allow ${action} (${error.code}). Run pnpm local from a session without the sandbox (YOLO mode).`, { cause: error });
+}
+
 export async function freePort() {
   const server = createServer();
-  server.listen(0, '127.0.0.1');
-  await once(server, 'listening');
+  try {
+    server.listen(0, '127.0.0.1');
+    await once(server, 'listening');
+  } catch (error) { throw sandboxRefusal(error, 'listening on local ports') ?? error; }
   const { port } = server.address();
   await new Promise(resolve => server.close(resolve));
   return port;
 }
 
+/** Whether a failed listen means "taken" (false) or "nothing there to take" (true); anything else is not an answer. */
+export function listenOutcome(error, host) {
+  if (error.code === 'EADDRINUSE') return false;
+  if (host === '::1' && ['EADDRNOTAVAIL', 'EAFNOSUPPORT'].includes(error.code)) return true;
+  throw sandboxRefusal(error, 'listening on local ports') ?? error;
+}
+
 async function canListen(port, host) {
   const server = createServer();
   try { server.listen(port, host); await once(server, 'listening'); return true; }
-  catch (error) { return host === '::1' && ['EADDRNOTAVAIL', 'EAFNOSUPPORT'].includes(error.code); }
+  catch (error) { return listenOutcome(error, host); }
   finally { if (server.listening) await new Promise(resolve => server.close(resolve)); }
 }
 
@@ -464,22 +548,28 @@ export async function runState(directory, runtime) {
   return (await processCommand(runtime.controllerPid))?.includes('cli.js foreground') ? 'orphaned' : 'stale';
 }
 
+const lockSignals = ['SIGINT', 'SIGTERM', 'SIGHUP'];
+
 /** Operations on one instance run one at a time; a lock left by a killed command is reported, not taken over. */
 export async function withLock(directory, action) {
   const lock = join(directory, 'operation.lock');
   try { await mkdir(lock); }
   catch (error) {
     if (error.code !== 'EEXIST') throw error;
+    const owner = await readJson(join(lock, 'owner.json')).catch(() => undefined);
+    if (Number.isInteger(owner?.pid) && !processAlive(owner.pid)) {
+      throw new Error(`A previous local command (pid ${owner.pid}) was interrupted and left its lock. Remove ${lock} and retry.`);
+    }
     throw new Error(`Another local command is changing this instance. If none is running, remove ${lock}.`);
   }
   const release = () => rmSync(lock, { recursive: true, force: true });
   const interrupted = signal => { release(); process.kill(process.pid, signal); };
-  process.once('SIGINT', interrupted);
-  process.once('SIGTERM', interrupted);
-  try { return await action(); }
-  finally {
-    process.off('SIGINT', interrupted);
-    process.off('SIGTERM', interrupted);
+  for (const signal of lockSignals) process.once(signal, interrupted);
+  try {
+    await writeFile(join(lock, 'owner.json'), JSON.stringify({ pid: process.pid }) + '\n', { mode: 0o600 });
+    return await action();
+  } finally {
+    for (const signal of lockSignals) process.off(signal, interrupted);
     release();
   }
 }
@@ -488,7 +578,7 @@ export async function withLock(directory, action) {
 - [ ] **Step 4: Run the tests to verify they pass**
 
 Run: `node --test scripts/local/instance.test.mjs`
-Expected: PASS, 17 tests.
+Expected: PASS, 25 tests.
 
 - [ ] **Step 5: Commit**
 
@@ -1630,18 +1720,20 @@ Co-Authored-By: Claude <noreply@anthropic.com>"
 
 - [ ] **Step 1: Write the failing integration test**
 
-The test uses the real Devbox server and the real development Controller with a temporary HOME, a PATH without native CLIs and a fixture web page, so it never reads or writes the real native profiles. Create `scripts/local/command.test.mjs`:
+The test uses the real Devbox server and the real development Controller with a temporary HOME, a PATH without native CLIs and a fixture web page, so it never reads or writes the real native profiles. Further tests cover the failure paths: usage and exit codes, a missing instance, an unusable readiness deadline, a start that does not become ready, an occupied port, and `down` and `remove` on a stopped instance. Create `scripts/local/command.test.mjs`:
 
 ```javascript
 import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
+import { once } from 'node:events';
 import { existsSync } from 'node:fs';
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { createServer } from 'node:net';
 import { homedir, tmpdir } from 'node:os';
 import { basename, join, resolve } from 'node:path';
 import { promisify } from 'node:util';
 import { after, before, test } from 'node:test';
-import { processAlive } from './instance.mjs';
+import { listInstances, processAlive, processCommand, runsInstance } from './instance.mjs';
 
 const run = promisify(execFile);
 const source = resolve(import.meta.dirname, '../..');
@@ -1652,6 +1744,42 @@ const browsers = process.env.PLAYWRIGHT_BROWSERS_PATH
 let root;
 let environment;
 const local = (...args) => run(process.execPath, [command, ...args], { cwd: source, env: environment, timeout: 120_000, maxBuffer: 4 * 1024 * 1024 });
+
+/** Runs the command in an environment of its own and reports a non-zero exit as a result instead of throwing. */
+async function localResult(overrides, ...args) {
+  try {
+    const { stdout, stderr } = await run(process.execPath, [command, ...args], { cwd: source, env: { ...environment, ...overrides }, timeout: 120_000, maxBuffer: 4 * 1024 * 1024 });
+    return { code: 0, stdout, stderr };
+  } catch (error) {
+    if (typeof error.code !== 'number') throw error;
+    return { code: error.code, stdout: error.stdout, stderr: error.stderr };
+  }
+}
+
+/** A readiness deadline of 1 ms makes up fail at once, which also records the instance and its port. */
+const hurried = { ARC_LOCAL_READY_TIMEOUT_MS: '1' };
+
+async function instanceStatus(overrides = {}) {
+  return JSON.parse((await localResult(overrides, 'status', '--json')).stdout);
+}
+
+async function runnersOf(directory) {
+  const { stdout } = await run('ps', ['-ww', '-axo', 'pid=,command=']);
+  return stdout.split('\n').filter(line => runsInstance(line.replace(/^\s*\d+\s+/, ''), directory));
+}
+
+/** Kills the runner and Controller recorded for the test instance when a clean stop was not possible. */
+async function killLeftovers() {
+  for (const instance of await listInstances(environment)) {
+    const { runnerPid, controllerPid } = instance.runtime ?? {};
+    const runner = runsInstance(await processCommand(runnerPid).catch(() => undefined), instance.directory);
+    const controller = (await processCommand(controllerPid).catch(() => undefined))?.includes('cli.js foreground');
+    for (const [pid, ours] of [[runnerPid, runner], [controllerPid, controller]]) {
+      if (!ours) continue;
+      try { process.kill(-pid, 'SIGKILL'); } catch { try { process.kill(pid, 'SIGKILL'); } catch { /* already gone */ } }
+    }
+  }
+}
 
 before(async () => {
   if (!existsSync(join(source, 'packages/agent-host/dist/cli.js'))) {
@@ -1668,12 +1796,17 @@ before(async () => {
 });
 
 after(async () => {
-  if (environment) await local('down').catch(() => undefined);
+  if (environment) {
+    try { await local('down'); }
+    catch { await killLeftovers().catch(() => undefined); }
+  }
   if (root) await rm(root, { recursive: true, force: true });
 });
 
 test('serves a signed-in site with a registered development Controller and keeps its identity across restarts', { timeout: 240_000 }, async () => {
-  assert.match((await local('up', '--no-build')).stdout, /uplink registered/);
+  const started = (await local('up', '--no-build')).stdout;
+  assert.match(started, /Waiting for the site…\nWaiting for Controller registration…/);
+  assert.match(started, /uplink registered/);
   const report = JSON.parse((await local('status', '--json')).stdout);
   assert.equal(report.state, 'running');
   assert.equal(report.localUser, true);
@@ -1706,6 +1839,87 @@ test('serves a signed-in site with a registered development Controller and keeps
   await local('remove', '--yes');
   assert.equal(existsSync(report.directory), false);
 });
+
+test('prints usage for help and an unknown command and explains the exit codes', async () => {
+  for (const request of ['help', '--help', '-h']) {
+    const result = await localResult({}, request);
+    assert.equal(result.code, 0);
+    assert.match(result.stdout, /Usage: pnpm local <command>/);
+    assert.match(result.stdout, /Exit codes: 0 success, 1 failure, 3 /);
+  }
+  const unknown = await localResult({}, 'frobnicate');
+  assert.equal(unknown.code, 1);
+  assert.match(unknown.stderr, /Usage: pnpm local <command>/);
+  assert.equal(unknown.stdout, '');
+});
+
+test('reports a missing instance without creating one', async () => {
+  const empty = { ARC_LOCAL_ROOT: join(root, 'empty') };
+  const status = await localResult(empty, 'status', '--json');
+  assert.equal(status.code, 3);
+  assert.deepEqual(JSON.parse(status.stdout), { state: 'none' });
+  const text = await localResult(empty, 'status');
+  assert.equal(text.code, 3);
+  assert.match(text.stdout, /no local instance/);
+  for (const args of [['down'], ['remove', '--yes'], ['logs'], ['controller', 'status']]) {
+    const result = await localResult(empty, ...args);
+    assert.equal(result.code, 1, args.join(' '));
+    assert.match(result.stderr, /no local instance/, args.join(' '));
+  }
+  const invalid = await localResult(empty, 'api', 'v1/remote/hosts', '--data', '{not json');
+  assert.equal(invalid.code, 1);
+  assert.match(invalid.stderr, /--data must be JSON: /);
+  assert.equal(existsSync(join(root, 'empty', 'instances')), false);
+});
+
+test('rejects an unusable readiness deadline before building or starting anything', async () => {
+  for (const value of ['soon', '0', '-5', '1.5', '']) {
+    const result = await localResult({ ARC_LOCAL_ROOT: join(root, 'unused'), ARC_LOCAL_READY_TIMEOUT_MS: value }, 'up', '--no-build');
+    assert.equal(result.code, 1, value);
+    assert.match(result.stderr, /ARC_LOCAL_READY_TIMEOUT_MS must be a positive whole number of milliseconds/, value);
+  }
+  assert.equal(existsSync(join(root, 'unused', 'instances')), false);
+});
+
+test('stops the runner and shows the log tails when the instance does not become ready', { timeout: 120_000 }, async () => {
+  const failed = await localResult(hurried, 'up', '--no-build');
+  assert.equal(failed.code, 1);
+  assert.match(failed.stderr, /did not become ready within 0\.001 seconds while waiting for the site/);
+  assert.match(failed.stderr, /--- runner\.log \(last 20 lines\) ---/);
+  assert.match(failed.stderr, /--- controller\.log \(last 20 lines\) ---/);
+  assert.doesNotMatch(failed.stderr, /Cause:/);
+  const report = await instanceStatus();
+  assert.ok(['stopped', 'stale'].includes(report.state), report.state);
+  assert.deepEqual(await runnersOf(report.directory), []);
+  assert.equal(report.controllerUplink, null);
+});
+
+test('refuses to start while another process holds the recorded port', { timeout: 120_000 }, async () => {
+  await localResult(hurried, 'up', '--no-build');
+  const report = await instanceStatus();
+  const holder = createServer();
+  holder.listen(Number(new URL(report.origin).port), '127.0.0.1');
+  await once(holder, 'listening');
+  try {
+    const refused = await localResult({}, 'up', '--no-build');
+    assert.equal(refused.code, 1);
+    assert.match(refused.stderr, /Port \d+ is in use by another process/);
+    assert.deepEqual(await runnersOf(report.directory), []);
+    assert.ok(['stopped', 'stale'].includes((await instanceStatus()).state));
+  } finally { await new Promise(resolveClose => holder.close(resolveClose)); }
+});
+
+test('says so when there is nothing to stop and asks for --yes before removing', { timeout: 120_000 }, async () => {
+  await localResult(hurried, 'up', '--no-build');
+  const report = await instanceStatus();
+  const down = await localResult({}, 'down');
+  assert.equal(down.code, 0);
+  assert.equal(down.stdout, `${report.name} was not running.\n`);
+  const refused = await localResult({}, 'remove');
+  assert.equal(refused.code, 1);
+  assert.match(refused.stderr, /Repeat with --yes/);
+  assert.ok(existsSync(report.directory));
+});
 ```
 
 - [ ] **Step 2: Run the test to verify it fails**
@@ -1725,8 +1939,15 @@ import { parseArgs, promisify } from 'node:util';
 import { controllerBuildProvenance } from '../lib/build-provenance.mjs';
 import { packageManager } from '../lib/package-manager.mjs';
 import { controllerEnvironment } from './environment.mjs';
-import { findInstance, listInstances, portAvailable, prepareInstance, processAlive, processCommand, readJson, runState, runsInstance, withLock } from './instance.mjs';
+import {
+  findInstance, listInstances, portAvailable, prepareInstance, processAlive, processCommand, readJson, runState, runsInstance, sandboxRefusal, withLock,
+} from './instance.mjs';
 import { screenshot, signedInUser, userApi } from './session.mjs';
+
+if (process.platform === 'win32') {
+  process.stderr.write('pnpm local supports macOS and Linux.\n');
+  process.exit(1);
+}
 
 const source = realpathSync(resolve(import.meta.dirname, '../..'));
 const controllerCli = join(source, 'packages/agent-host/dist/cli.js');
@@ -1734,13 +1955,14 @@ const controllerCommands = new Set(['status', 'diagnostics', 'window', 'session'
 const usage = `Usage: pnpm local <command>
   up [--no-build]        Build, then start or restart this checkout's instance
   down                   Stop this checkout's instance; its state is kept
-  status [--json]        URL, running build, local user and Controller registration
+  status [--json]        URL, running build, local user and Controller registration; exits 3 unless all are ready
   logs [--follow]        Runner and Controller output of the current run
   list [--json]          Every local instance on this machine
   remove --yes           Delete this checkout's stopped instance
   controller <args>      Controller CLI for this instance: status, diagnostics, window, session, environment
   api <v1/path> [--method M] [--data JSON]   Signed-in JSON request to the instance
   screenshot <path> --out FILE [--viewport WxH] [--wait-for CSS] [--full-page]
+Exit codes: 0 success, 1 failure, 3 status found no instance or one that is not ready.
 `;
 
 async function requireInstance() {
@@ -1757,10 +1979,18 @@ async function requireRunning() {
   return instance;
 }
 
+/** Runs a child on this terminal and resolves with its exit code; a child that cannot start rejects with the reason. */
+async function runAttached(file, args, options) {
+  const child = spawn(file, args, { stdio: 'inherit', ...options });
+  return await new Promise((resolveExit, reject) => {
+    child.once('error', error => reject(new Error(`Could not run ${file}: ${error.message}`)));
+    child.once('exit', code => resolveExit(code ?? 1));
+  });
+}
+
 async function runStep(command, args) {
   const [file, argv] = command === 'pnpm' ? packageManager('pnpm', args) : [command, args];
-  const child = spawn(file, argv, { cwd: source, stdio: 'inherit' });
-  const code = await new Promise((resolveExit, reject) => { child.once('error', reject); child.once('exit', resolveExit); });
+  const code = await runAttached(file, argv, { cwd: source });
   if (code !== 0) throw new Error(`Build step failed: ${[command, ...args].join(' ')}. A running instance was left unchanged.`);
 }
 
@@ -1832,6 +2062,7 @@ async function stopRunner(instance) {
   }
   if (state === 'running') await stopRunnerProcess(runtime.runnerPid, instance);
   await rm(instance.runtimeFile, { force: true });
+  return state === 'running';
 }
 
 async function startRunner(instance) {
@@ -1841,26 +2072,39 @@ async function startRunner(instance) {
   try {
     const child = spawn(process.execPath, [join(source, 'scripts/local/runner.mjs'), instance.directory],
       { cwd: instance.directory, env: process.env, stdio: ['ignore', log.fd, log.fd], detached: true });
-    await new Promise((resolveSpawn, reject) => { child.once('spawn', resolveSpawn); child.once('error', reject); });
+    try { await new Promise((resolveSpawn, reject) => { child.once('spawn', resolveSpawn); child.once('error', reject); }); }
+    catch (error) { throw sandboxRefusal(error, 'starting background processes') ?? error; }
     child.unref();
     return child.pid;
   } finally { await log.close(); }
 }
 
-async function waitUntilReady(instance, runnerPid) {
-  const timeoutMs = Number(process.env.ARC_LOCAL_READY_TIMEOUT_MS ?? 90_000);
+function readyTimeoutMs() {
+  const value = process.env.ARC_LOCAL_READY_TIMEOUT_MS;
+  if (value === undefined) return 90_000;
+  if (!/^[1-9]\d*$/.test(value)) throw new Error(`ARC_LOCAL_READY_TIMEOUT_MS must be a positive whole number of milliseconds, not "${value}".`);
+  return Number(value);
+}
+
+async function waitUntilReady(instance, runnerPid, timeoutMs) {
   const deadline = Date.now() + timeoutMs;
-  let waiting = 'the site';
+  let waiting;
+  const waitFor = phase => {
+    if (waiting === phase) return;
+    waiting = phase;
+    process.stdout.write(`Waiting for ${phase}…\n`);
+  };
+  waitFor('the site');
   while (Date.now() < deadline) {
     if (!processAlive(runnerPid)) throw new Error('The runner exited during startup.');
     // Polling avoids signing in: every sign-in counts against the instance's 30-per-minute limit.
     if (await siteAlive(instance.record.origin)) {
-      waiting = 'Controller registration';
+      waitFor('Controller registration');
       if (await controllerUplink(instance) === 'registered') {
         await signedInUser(instance.record.origin);
         return;
       }
-    }
+    } else waitFor('the site');
     await delay(500);
   }
   throw new Error(`The instance did not become ready within ${timeoutMs / 1000} seconds while waiting for ${waiting}.`);
@@ -1902,6 +2146,7 @@ async function printStatus(instance, json) {
 }
 
 async function up(options) {
+  const timeoutMs = readyTimeoutMs();
   const instance = await prepareInstance(source);
   await withLock(instance.directory, async () => {
     if (options['no-build']) assertBuilt();
@@ -1911,10 +2156,12 @@ async function up(options) {
       throw new Error(`Port ${instance.record.port} is in use by another process. The origin ${instance.record.origin} cannot change; free the port and run up again.`);
     }
     const runnerPid = await startRunner(instance);
-    try { await waitUntilReady(instance, runnerPid); }
+    try { await waitUntilReady(instance, runnerPid, timeoutMs); }
     catch (error) {
-      await stopRunnerProcess(runnerPid, instance).catch(() => undefined);
-      throw new Error(`${error.message}\n${await logTails(instance, 20)}`, { cause: error.cause });
+      let stopFailure;
+      try { await stopRunnerProcess(runnerPid, instance); } catch (stopError) { stopFailure = stopError; }
+      const tails = await logTails(instance, 20);
+      throw new Error(`${error.message}\n${tails}${stopFailure ? `\nThe runner could not be stopped: ${stopFailure.message}` : ''}`, { cause: error });
     }
   });
   await printStatus(instance, false);
@@ -1922,14 +2169,16 @@ async function up(options) {
 
 async function down() {
   const instance = await requireInstance();
-  await withLock(instance.directory, () => stopRunner(instance));
-  process.stdout.write(`Stopped ${instance.record.name}. Its state remains in ${instance.directory}.\n`);
+  const stopped = await withLock(instance.directory, () => stopRunner(instance));
+  process.stdout.write(stopped
+    ? `Stopped ${instance.record.name}. Its state remains in ${instance.directory}.\n`
+    : `${instance.record.name} was not running.\n`);
 }
 
 async function status(options) {
   const instance = await findInstance(source);
   if (!instance) {
-    process.stdout.write('This checkout has no local instance. Run pnpm local up.\n');
+    process.stdout.write(options.json ? '{"state":"none"}\n' : 'This checkout has no local instance. Run pnpm local up.\n');
     process.exitCode = 3;
     return;
   }
@@ -1940,8 +2189,7 @@ async function status(options) {
 async function logs(options) {
   const instance = await requireInstance();
   if (!options.follow) { process.stdout.write(await logTails(instance, 80) + '\n'); return; }
-  const child = spawn('tail', ['-n', '40', '-F', join(instance.logs, 'runner.log'), join(instance.logs, 'controller.log')], { stdio: 'inherit' });
-  await new Promise(resolveExit => child.once('exit', resolveExit));
+  await runAttached('tail', ['-n', '40', '-F', join(instance.logs, 'runner.log'), join(instance.logs, 'controller.log')]);
 }
 
 async function list(options) {
@@ -1962,8 +2210,8 @@ async function remove(options) {
   await withLock(instance.directory, async () => {
     const state = await runState(instance.directory, await readJson(instance.runtimeFile));
     if (state === 'running' || state === 'orphaned') throw new Error('Stop the instance with pnpm local down first.');
+    await rm(instance.directory, { recursive: true, force: true });
   });
-  await rm(instance.directory, { recursive: true, force: true });
   process.stdout.write(`Removed ${instance.directory}. Test sessions remain in the shared native histories.\n`);
 }
 
@@ -1972,15 +2220,17 @@ async function controller(args) {
   if (!controllerCommands.has(args[0] ?? '')) {
     throw new Error('pnpm local controller runs status, diagnostics, window, session or environment. The runner owns start, stop, pairing and updates, and native subcommands could take over shared sessions.');
   }
-  const child = spawn(process.execPath, [controllerCli, ...args], { env: controllerEnvironment(process.env, instance), cwd: instance.workspace, stdio: 'inherit' });
-  process.exitCode = await new Promise(resolveExit => child.once('exit', code => resolveExit(code ?? 1)));
+  process.exitCode = await runAttached(process.execPath, [controllerCli, ...args], { env: controllerEnvironment(process.env, instance), cwd: instance.workspace });
 }
 
 async function api(positionals, options) {
-  const instance = await requireRunning();
   const [path] = positionals;
   if (!path) throw new Error('Name an API path, for example: pnpm local api v1/remote/hosts');
-  if (options.data !== undefined) JSON.parse(options.data);
+  if (options.data !== undefined) {
+    try { JSON.parse(options.data); }
+    catch (error) { throw new Error(`--data must be JSON: ${error.message}`); }
+  }
+  const instance = await requireRunning();
   const result = await userApi(instance.record.origin, path, { method: options.method ?? (options.data === undefined ? 'GET' : 'POST'), data: options.data });
   process.stdout.write(result.body.endsWith('\n') ? result.body : result.body + '\n');
   if (result.status >= 400) { process.stderr.write(`HTTP ${result.status}\n`); process.exitCode = 1; }
@@ -2012,13 +2262,16 @@ try {
     else if (command === 'remove') await remove(values);
     else if (command === 'api') await api(positionals, values);
     else if (command === 'screenshot') await capture(positionals, values);
+    else if (!command || ['help', '--help', '-h'].includes(command)) process.stdout.write(usage);
     else {
-      process.stdout.write(usage);
-      if (command && command !== 'help') process.exitCode = 1;
+      process.stderr.write(usage);
+      process.exitCode = 1;
     }
   }
 } catch (error) {
-  process.stderr.write(`${error.message}${error.cause?.message ? `\nCause: ${error.cause.message}` : ''}\n`);
+  // A cause already quoted in the message is not repeated.
+  const cause = error.cause?.message && !error.message.includes(error.cause.message) ? `\nCause: ${error.cause.message}` : '';
+  process.stderr.write(`${error.message}${cause}\n`);
   process.exitCode = 1;
 }
 ```
@@ -2045,17 +2298,17 @@ In the `commands` object, add after the `'devbox-server'` entry:
   'local-env': ['exec', 'node', '--test', '--test-timeout=240000', '--test-concurrency=1', 'scripts/local/instance.test.mjs', 'scripts/local/environment.test.mjs', 'scripts/local/session.test.mjs', 'scripts/local/runner.test.mjs', 'scripts/local/command.test.mjs'],
 ```
 
-Append the same five files to the end of the `setup` array (after `'scripts/controller/install.test.mjs'`). In `outerDeadlineMs`, add `mode === 'local-env' ? 300_000 :` right after `mode === 'devbox-server' ? 80_000 :`.
+Append the four unit-test files (`instance`, `environment`, `session` and `runner`) to the end of the `setup` array (after `'scripts/controller/install.test.mjs'`). `command.test.mjs` stays out of `setup`: it starts a real runner, Controller and browser, so it runs only in `local-env`. In `outerDeadlineMs`, add `mode === 'local-env' ? 300_000 :` right after `mode === 'devbox-server' ? 80_000 :`.
 
 - [ ] **Step 6: Run the integration test to verify it passes**
 
 Run: `node --test --test-timeout=240000 scripts/local/command.test.mjs`
-Expected: PASS, 1 test, in about ten seconds. If it times out waiting for Controller registration, read the tails of `logs/runner.log` and `logs/controller.log` that the error prints, and the Controller's `controller/agent-host.log` in the temporary instance, before changing code.
+Expected: PASS, 7 tests, in about twelve seconds. If it times out waiting for Controller registration, read the tails of `logs/runner.log` and `logs/controller.log` that the error prints, and the Controller's `controller/agent-host.log` in the temporary instance, before changing code.
 
 - [ ] **Step 7: Run the whole suite through the root runner**
 
 Run: `pnpm test:local-env`
-Expected: PASS, 61 tests, exit 0.
+Expected: PASS, 75 tests, exit 0.
 
 - [ ] **Step 8: Commit**
 

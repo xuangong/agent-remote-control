@@ -1,12 +1,14 @@
 import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
+import { once } from 'node:events';
 import { existsSync } from 'node:fs';
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { createServer } from 'node:net';
 import { homedir, tmpdir } from 'node:os';
 import { basename, join, resolve } from 'node:path';
 import { promisify } from 'node:util';
 import { after, before, test } from 'node:test';
-import { processAlive } from './instance.mjs';
+import { listInstances, processAlive, processCommand, runsInstance } from './instance.mjs';
 
 const run = promisify(execFile);
 const source = resolve(import.meta.dirname, '../..');
@@ -17,6 +19,42 @@ const browsers = process.env.PLAYWRIGHT_BROWSERS_PATH
 let root;
 let environment;
 const local = (...args) => run(process.execPath, [command, ...args], { cwd: source, env: environment, timeout: 120_000, maxBuffer: 4 * 1024 * 1024 });
+
+/** Runs the command in an environment of its own and reports a non-zero exit as a result instead of throwing. */
+async function localResult(overrides, ...args) {
+  try {
+    const { stdout, stderr } = await run(process.execPath, [command, ...args], { cwd: source, env: { ...environment, ...overrides }, timeout: 120_000, maxBuffer: 4 * 1024 * 1024 });
+    return { code: 0, stdout, stderr };
+  } catch (error) {
+    if (typeof error.code !== 'number') throw error;
+    return { code: error.code, stdout: error.stdout, stderr: error.stderr };
+  }
+}
+
+/** A readiness deadline of 1 ms makes up fail at once, which also records the instance and its port. */
+const hurried = { ARC_LOCAL_READY_TIMEOUT_MS: '1' };
+
+async function instanceStatus(overrides = {}) {
+  return JSON.parse((await localResult(overrides, 'status', '--json')).stdout);
+}
+
+async function runnersOf(directory) {
+  const { stdout } = await run('ps', ['-ww', '-axo', 'pid=,command=']);
+  return stdout.split('\n').filter(line => runsInstance(line.replace(/^\s*\d+\s+/, ''), directory));
+}
+
+/** Kills the runner and Controller recorded for the test instance when a clean stop was not possible. */
+async function killLeftovers() {
+  for (const instance of await listInstances(environment)) {
+    const { runnerPid, controllerPid } = instance.runtime ?? {};
+    const runner = runsInstance(await processCommand(runnerPid).catch(() => undefined), instance.directory);
+    const controller = (await processCommand(controllerPid).catch(() => undefined))?.includes('cli.js foreground');
+    for (const [pid, ours] of [[runnerPid, runner], [controllerPid, controller]]) {
+      if (!ours) continue;
+      try { process.kill(-pid, 'SIGKILL'); } catch { try { process.kill(pid, 'SIGKILL'); } catch { /* already gone */ } }
+    }
+  }
+}
 
 before(async () => {
   if (!existsSync(join(source, 'packages/agent-host/dist/cli.js'))) {
@@ -33,12 +71,17 @@ before(async () => {
 });
 
 after(async () => {
-  if (environment) await local('down').catch(() => undefined);
+  if (environment) {
+    try { await local('down'); }
+    catch { await killLeftovers().catch(() => undefined); }
+  }
   if (root) await rm(root, { recursive: true, force: true });
 });
 
 test('serves a signed-in site with a registered development Controller and keeps its identity across restarts', { timeout: 240_000 }, async () => {
-  assert.match((await local('up', '--no-build')).stdout, /uplink registered/);
+  const started = (await local('up', '--no-build')).stdout;
+  assert.match(started, /Waiting for the site…\nWaiting for Controller registration…/);
+  assert.match(started, /uplink registered/);
   const report = JSON.parse((await local('status', '--json')).stdout);
   assert.equal(report.state, 'running');
   assert.equal(report.localUser, true);
@@ -70,4 +113,85 @@ test('serves a signed-in site with a registered development Controller and keeps
   await local('down');
   await local('remove', '--yes');
   assert.equal(existsSync(report.directory), false);
+});
+
+test('prints usage for help and an unknown command and explains the exit codes', async () => {
+  for (const request of ['help', '--help', '-h']) {
+    const result = await localResult({}, request);
+    assert.equal(result.code, 0);
+    assert.match(result.stdout, /Usage: pnpm local <command>/);
+    assert.match(result.stdout, /Exit codes: 0 success, 1 failure, 3 /);
+  }
+  const unknown = await localResult({}, 'frobnicate');
+  assert.equal(unknown.code, 1);
+  assert.match(unknown.stderr, /Usage: pnpm local <command>/);
+  assert.equal(unknown.stdout, '');
+});
+
+test('reports a missing instance without creating one', async () => {
+  const empty = { ARC_LOCAL_ROOT: join(root, 'empty') };
+  const status = await localResult(empty, 'status', '--json');
+  assert.equal(status.code, 3);
+  assert.deepEqual(JSON.parse(status.stdout), { state: 'none' });
+  const text = await localResult(empty, 'status');
+  assert.equal(text.code, 3);
+  assert.match(text.stdout, /no local instance/);
+  for (const args of [['down'], ['remove', '--yes'], ['logs'], ['controller', 'status']]) {
+    const result = await localResult(empty, ...args);
+    assert.equal(result.code, 1, args.join(' '));
+    assert.match(result.stderr, /no local instance/, args.join(' '));
+  }
+  const invalid = await localResult(empty, 'api', 'v1/remote/hosts', '--data', '{not json');
+  assert.equal(invalid.code, 1);
+  assert.match(invalid.stderr, /--data must be JSON: /);
+  assert.equal(existsSync(join(root, 'empty', 'instances')), false);
+});
+
+test('rejects an unusable readiness deadline before building or starting anything', async () => {
+  for (const value of ['soon', '0', '-5', '1.5', '']) {
+    const result = await localResult({ ARC_LOCAL_ROOT: join(root, 'unused'), ARC_LOCAL_READY_TIMEOUT_MS: value }, 'up', '--no-build');
+    assert.equal(result.code, 1, value);
+    assert.match(result.stderr, /ARC_LOCAL_READY_TIMEOUT_MS must be a positive whole number of milliseconds/, value);
+  }
+  assert.equal(existsSync(join(root, 'unused', 'instances')), false);
+});
+
+test('stops the runner and shows the log tails when the instance does not become ready', { timeout: 120_000 }, async () => {
+  const failed = await localResult(hurried, 'up', '--no-build');
+  assert.equal(failed.code, 1);
+  assert.match(failed.stderr, /did not become ready within 0\.001 seconds while waiting for the site/);
+  assert.match(failed.stderr, /--- runner\.log \(last 20 lines\) ---/);
+  assert.match(failed.stderr, /--- controller\.log \(last 20 lines\) ---/);
+  assert.doesNotMatch(failed.stderr, /Cause:/);
+  const report = await instanceStatus();
+  assert.ok(['stopped', 'stale'].includes(report.state), report.state);
+  assert.deepEqual(await runnersOf(report.directory), []);
+  assert.equal(report.controllerUplink, null);
+});
+
+test('refuses to start while another process holds the recorded port', { timeout: 120_000 }, async () => {
+  await localResult(hurried, 'up', '--no-build');
+  const report = await instanceStatus();
+  const holder = createServer();
+  holder.listen(Number(new URL(report.origin).port), '127.0.0.1');
+  await once(holder, 'listening');
+  try {
+    const refused = await localResult({}, 'up', '--no-build');
+    assert.equal(refused.code, 1);
+    assert.match(refused.stderr, /Port \d+ is in use by another process/);
+    assert.deepEqual(await runnersOf(report.directory), []);
+    assert.ok(['stopped', 'stale'].includes((await instanceStatus()).state));
+  } finally { await new Promise(resolveClose => holder.close(resolveClose)); }
+});
+
+test('says so when there is nothing to stop and asks for --yes before removing', { timeout: 120_000 }, async () => {
+  await localResult(hurried, 'up', '--no-build');
+  const report = await instanceStatus();
+  const down = await localResult({}, 'down');
+  assert.equal(down.code, 0);
+  assert.equal(down.stdout, `${report.name} was not running.\n`);
+  const refused = await localResult({}, 'remove');
+  assert.equal(refused.code, 1);
+  assert.match(refused.stderr, /Repeat with --yes/);
+  assert.ok(existsSync(report.directory));
 });

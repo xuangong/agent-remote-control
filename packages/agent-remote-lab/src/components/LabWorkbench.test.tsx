@@ -93,6 +93,35 @@ it('offers sign-in inside the permission panel while preserving the session and 
   expect(setSessionSetting).toHaveBeenCalledTimes(3);
 });
 
+it.each(['console', 'native'] as const)('offers sign-in once beneath a %s command that needs a recent sign-in', async kind => {
+  window.history.replaceState(null, '', '/?host=studio&provider=claude&session=native-1');
+  const signIn = Object.assign(new Error('Sign in again before changing session permissions. Then retry the change.'), { code: 'reauthentication_required' });
+  const command = vi.fn().mockRejectedValue(signIn);
+  const fork = { id: 'console:fork', name: 'fork', kind: 'command' as const, description: 'Fork this conversation' };
+  const state = { ...replicaState, pendingInteractions: [], agent: { ...replicaState.agent!, status: 'idle' as const, activeTurn: null,
+    capabilities: { ...replicaState.agent!.capabilities, commands: true } } };
+  const listCommands = vi.fn(async () => [{ ...fork, id: 'native:fork' }]);
+  const container = await render(<ToastProvider><LabWorkbench state={state} sessionStatus="ready" messageDraft="/fork 继续"
+    actions={{ sendMessage: vi.fn(), ...(kind === 'native' ? { listCommands, executeCommand: command } : {}) }}
+    {...(kind === 'console' ? { consoleCommands: [fork], onExecuteConsoleCommand: command } : {})} /></ToastProvider>);
+  await vi.waitFor(async () => {
+    await act(async () => container.querySelector<HTMLButtonElement>('[data-testid="prompt-submit"]')!.click());
+    expect(command).toHaveBeenCalledTimes(1);
+  });
+  const notices = container.querySelectorAll('.lab-reauthentication');
+  expect(notices).toHaveLength(1);
+  expect(notices[0]!.closest('.agent-composer-note')).not.toBeNull();
+  expect(notices[0]!.textContent).toContain('Return to this session, then run it again.');
+  expect(container.textContent).not.toContain('Then retry the change.');
+  const link = notices[0]!.querySelector<HTMLAnchorElement>('a')!;
+  expect(link.getAttribute('href')).toBe('/auth/login?reauthenticate=1&host=studio&provider=claude&session=native-1');
+  link.addEventListener('click', event => event.preventDefault());
+  await act(async () => link.click());
+  expect(sessionStorage.getItem('agent-remote-sign-in-return')).toBe('/?host=studio&provider=claude&session=native-1');
+  sessionStorage.removeItem('agent-remote-sign-in-return');
+  expect(container.querySelector<HTMLTextAreaElement>('[data-testid="prompt-input"]')!.value).toBe('/fork 继续');
+});
+
 describe('LabWorkbench', () => {
   it.each([
     ['starting', 'connecting', 'Opening session'],

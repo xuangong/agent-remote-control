@@ -54,5 +54,6 @@ export function LabWorkbench({ draftBinding, displayBinding, defaultDisplayMode,
     messageDraft={draftBinding ? draft.text : props.messageDraft} onMessageDraftChange={draftBinding ? draft.set : props.onMessageDraftChange}
     workspaceLink={<WorkspaceVscodeLink workspace={props.state?.agent?.cwd} />}
     isAuthenticationError={needsReauthentication} authenticationNotice={<ReauthenticationNotice />}
-    renderSessionSettingError={error => needsReauthentication(error) ? <ReauthenticationNotice purpose="permissions" /> : undefined} />;
+    renderSessionSettingError={error => needsReauthentication(error) ? <ReauthenticationNotice purpose="permissions" /> : undefined}
+    renderCommandError={error => needsReauthentication(error) ? <ReauthenticationNotice purpose="command" /> : undefined} />;
 }

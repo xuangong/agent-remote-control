@@ -86,6 +86,29 @@ it('allows cached-session drafts while synchronizing but waits for readiness to 
   expect(input.disabled).toBe(true);
 });
 
+it('presents a failed command through its renderer and keeps the message for other failures', async () => {
+  const state: AgentReplicaState = { ...createReplicaState(), timeline: { ...createReplicaState().timeline, initialized: true }, agent: {
+    id: 'commands', providerId: 'test', createdAt: '2026-09-20T00:00:00Z', updatedAt: '2026-09-20T00:00:00Z', status: 'idle', activeTurn: null,
+    capabilities: { history: true, sendMessage: true, steer: false, cancel: false, readResource: false },
+    pendingInteractions: [], runtimeInfo: { providerId: 'test', status: 'idle' },
+  } };
+  const signIn = Object.assign(new Error('Sign in again before changing session permissions.'), { code: 'reauthentication_required' });
+  const command = vi.fn().mockRejectedValueOnce(signIn).mockRejectedValueOnce(new Error('The fork could not connect.'));
+  const renderCommandError = vi.fn((error: unknown) => (error as { code?: string }).code === 'reauthentication_required' ? <a href="/sign-in">Sign in again</a> : undefined);
+  const container = await render(<AgentComposer state={state} draft="/fork keep going" onSendMessage={vi.fn()} renderCommandError={renderCommandError}
+    consoleCommands={[{ id: 'fork', name: 'fork', kind: 'command', description: 'Fork' }]} onExecuteConsoleCommand={command} />);
+  const submit = () => act(async () => container.querySelector<HTMLButtonElement>('[data-testid="prompt-submit"]')!.click());
+  await submit();
+  expect(command).toHaveBeenLastCalledWith('fork', ' keep going');
+  expect(renderCommandError).toHaveBeenLastCalledWith(signIn);
+  expect(container.querySelector('.agent-composer-note a')?.textContent).toBe('Sign in again');
+  expect(container.textContent).not.toContain('Sign in again before changing session permissions.');
+  expect(container.querySelector<HTMLTextAreaElement>('[data-testid="prompt-input"]')!.value).toBe('/fork keep going');
+  await submit();
+  expect(container.querySelector('.agent-composer-note a')).toBeNull();
+  expect(container.querySelector('.agent-composer-note[role="alert"]')?.textContent).toBe('The fork could not connect.');
+});
+
 it('keeps image atoms through reconnect and sends ordered image-only content with digest identity', async () => {
   Range.prototype.getClientRects = () => [] as unknown as DOMRectList;
   Range.prototype.getBoundingClientRect = () => new DOMRect();

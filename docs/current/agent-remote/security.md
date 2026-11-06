@@ -45,7 +45,10 @@ these labels are user-agent descriptions, not verified device identities.
   request Stop work before revocation if native cancellation is wanted. Stop the
   local daemon and inspect remaining native processes when termination matters.
 
-If a sensitive action requires another login, use **Sign in again**. The client
+If a sensitive action requires another login, use **Sign in again**. It appears
+where the action failed: in the permission settings, or beneath the composer for
+a command such as `/fork` or `/side` that carries the source's permission
+settings to its new session. The client
 builds a local canonical return link and retains the session target. It never
 uses an arbitrary server-supplied redirect and never automatically repeats the
 sensitive operation after authentication. Signing out or revoking access does

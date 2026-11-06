@@ -43,6 +43,8 @@ export interface AgentComposerProps {
   state?: AgentReplicaState;
   sessionControls?: ReactNode;
   renderSessionSettingError?(error: unknown): ReactNode;
+  /** Presents a failed command in place of its message, such as a sign-in it needs; nothing keeps the message. */
+  renderCommandError?(error: unknown): ReactNode;
   attachments?: ReactNode;
   consoleCommands?: readonly (AgentCommand & { aliases?: readonly string[] })[];
   onExecuteConsoleCommand?(id: string, args: string): Promise<AgentCommandResult>;
@@ -89,10 +91,10 @@ interface Draft {
   commandsOpen?: boolean;
   commandsDismissed?: boolean;
   commandIndex?: number;
-  feedback?: { kind: 'success' | 'error'; message: string; delivery?: boolean };
+  feedback?: { kind: 'success' | 'error'; message: string; delivery?: boolean; commandError?: unknown };
 }
 
-export function AgentComposer({ keyboardDismissBoundaryRef, sessionState: suppliedSessionState, readOnly: forcedReadOnly = false, draftOnly = false, mutationBlocked = false, readOnlyLabel, readOnlyNotice, readOnlyCollapsed = false, state, sessionControls, renderSessionSettingError, sessionKey, disabled = false, disabledLabel, recovering = false, pendingFirstInputContext: firstInputContext, draft: controlledDraft, onDraftChange, onPendingInputChange, onSendMessage, onCancel, onSetSessionSetting, onListCommands, onExecuteCommand, onInspectCommand, onRequestResource, onResolveResource, attachments, consoleCommands = [], onExecuteConsoleCommand, visible = true, activityVisible = visible, draftScope, imageDraftBinding, imageRecipient, onUploadImage, onUploadResource, onSendMessageContent }: AgentComposerProps) {
+export function AgentComposer({ keyboardDismissBoundaryRef, sessionState: suppliedSessionState, readOnly: forcedReadOnly = false, draftOnly = false, mutationBlocked = false, readOnlyLabel, readOnlyNotice, readOnlyCollapsed = false, state, sessionControls, renderSessionSettingError, renderCommandError, sessionKey, disabled = false, disabledLabel, recovering = false, pendingFirstInputContext: firstInputContext, draft: controlledDraft, onDraftChange, onPendingInputChange, onSendMessage, onCancel, onSetSessionSetting, onListCommands, onExecuteCommand, onInspectCommand, onRequestResource, onResolveResource, attachments, consoleCommands = [], onExecuteConsoleCommand, visible = true, activityVisible = visible, draftScope, imageDraftBinding, imageRecipient, onUploadImage, onUploadResource, onSendMessageContent }: AgentComposerProps) {
   const pendingFirstInputContext = firstInputContext !== undefined;
   const controlId = `composer-${useId().replace(/:/gu, '')}`;
   const composerRef = useComposerKeyboardDismiss(keyboardDismissBoundaryRef);
@@ -121,6 +123,7 @@ export function AgentComposer({ keyboardDismissBoundaryRef, sessionState: suppli
   function setText(value: string): void { currentDraft.text = value; if (richEnabled) imageDraft.setText(value); else onDraftChange?.(value); }
   function focusInput(): void { if (richEnabled) editorRef.current?.focus(); else inputRef.current?.focus(); }
   const { text, pending, feedback } = currentDraft;
+  const commandRecovery = feedback && 'commandError' in feedback ? renderCommandError?.(feedback.commandError) : undefined;
   const pendingInputCount = waiting.items.length + (pending === 'send' || pending === 'queue' ? 1 : 0);
   const pendingInputObserver = useRef(onPendingInputChange); pendingInputObserver.current = onPendingInputChange;
   useLayoutEffect(() => { pendingInputObserver.current?.(pendingInputCount); }, [agentId, pendingInputCount]);
@@ -341,7 +344,7 @@ export function AgentComposer({ keyboardDismissBoundaryRef, sessionState: suppli
       }
       if (result.text) currentDraft.feedback = { kind: 'success', message: result.text };
     } catch (error) {
-      currentDraft.feedback = { kind: 'error', message: error instanceof Error ? error.message : 'Native command failed.' };
+      currentDraft.feedback = { kind: 'error', message: error instanceof Error ? error.message : 'Native command failed.', commandError: error };
     } finally {
       currentDraft.pending = undefined;
       if (mounted.current) refresh((value) => value + 1);
@@ -580,7 +583,8 @@ export function AgentComposer({ keyboardDismissBoundaryRef, sessionState: suppli
     {hasImages ? <ImageUploadStatus parts={imageDraft.parts} images={imageDraft.images} connected={ready} onOpen={imageId => editorRef.current?.openImage(imageId)} /> : null}
     {!ownershipReadOnly && runtimeUnavailable ? <p className="agent-composer-note" role="status">{runtimeUnavailable}</p>
       : !ownershipReadOnly && !draftOnly && !state?.agent ? <p className="agent-composer-note">Open or attach to an Agent first.</p> : null}
-    {feedback && !(feedback.delivery && state?.outgoingMessages !== undefined) ? <p className="agent-composer-note" role={feedback.kind === 'error' ? 'alert' : 'status'}>{feedback.message}</p> : null}
+    {feedback && !(feedback.delivery && state?.outgoingMessages !== undefined) ? commandRecovery != null ? <div className="agent-composer-note">{commandRecovery}</div>
+      : <p className="agent-composer-note" role={feedback.kind === 'error' ? 'alert' : 'status'}>{feedback.message}</p> : null}
     {!draftOnly && !onInspectCommand && currentDraft.inspectedSkill && state ? <AgentCommandDetails key={`${agentId}:${currentDraft.inspectedSkill.id}`}
       command={currentDraft.inspectedSkill} resources={state.resources} onRequestResource={onRequestResource}
       onResolveResource={onResolveResource} resourceScopeKey={JSON.stringify([agentId, state.timeline.epoch, currentDraft.inspectedSkill.id])}

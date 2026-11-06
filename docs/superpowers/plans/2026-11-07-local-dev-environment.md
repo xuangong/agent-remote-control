@@ -2698,19 +2698,34 @@ mechanism; this skill says how to use it safely and what counts as evidence.
 | Run a real session end to end | [test loop](references/test-loop.md) |
 
 Run every command from the checkout whose code you are verifying. An instance
-runs the build it was started with; `pnpm local status` shows that build next
-to the checkout's current commit. Rebuild with `pnpm local up` after changing
-code. A check against an older build is not a check of your change.
+runs the build it was started with. Rebuild with `pnpm local up` after every code
+change; a check against an older build is not a check of your change.
+
+## Machine use and the sign-in budget
+
+Read state with `pnpm --silent local status --json` (pnpm 10 rejects `-s`; plain
+`pnpm` prints a banner before the output). It exits 0 only when the instance is
+ready and 3 otherwise; `{"state":"none"}` means this checkout has no instance.
+
+The site allows 30 sign-ins per minute, shared with the user's own browser.
+Every `status`, `api` and `screenshot` call and every new browser context signs
+in once. Therefore:
+
+- Never poll these in a loop. To wait for readiness, run `pnpm local up`; it
+  polls `/health`, which does not sign in.
+- Use one browser context per script.
+- `list`, `logs` and `controller` never sign in.
 
 ## Hard rules
 
 The development Controller shares `~/.claude`, `~/.codex` and the other native
-profiles with the user's own Controller. Its workspace policy blocks sessions
-outside the instance workspace, and Claude Code runs sandboxed there, but Codex
-and Copilot sessions run with their own permissions; these rules still apply:
+profiles with the user's own Controller.
 
-1. Operate only sessions you created in the instance workspace. Never take over,
-   stop, archive or rename any other session, in the instance or elsewhere.
+1. Sessions run only in the instance `workspace/` and you operate only sessions
+   you created there. Never take over, stop, archive or rename any other
+   session. Claude Code sessions are sandboxed in the instance; Codex and Copilot
+   sessions run with their own permissions and are confined only by their working
+   directory, so keep their prompts inside the workspace.
 2. Never touch the user's own Controller — `~/.agent-remote-control/agents-cloud-cli`,
    its launchd service, the global `agent-remote-controller` command — or the
    production site. Operate the instance only through `pnpm local`.
@@ -2724,10 +2739,16 @@ and Copilot sessions run with their own permissions; these rules still apply:
    configuration files.
 6. Run `down` and `remove` only for the current checkout's instance. Other rows in
    `pnpm local list` may belong to other agents.
-7. Run `pnpm local down` before removing a worktree.
-8. A sandboxed session can be refused listening sockets or detached processes.
-   Report the refusal and say that the session needs YOLO mode; do not work
-   around the sandbox.
+7. Before removing a worktree, run `pnpm local down` and `pnpm local remove --yes`
+   in it.
+8. A sandboxed session is refused listening sockets and detached processes:
+   `This environment does not allow listening on local ports (EPERM)` or
+   `This environment does not allow starting background processes (EPERM)` (the
+   code can also be `EACCES`). Report the refusal and ask for YOLO mode; do not
+   work around the sandbox.
+9. Report a leftover-lock message. Remove `<instance>/operation.lock` only when the
+   message says the previous command was interrupted; when it says another
+   command is changing the instance, wait for that command instead.
 
 ## Report
 
@@ -2742,50 +2763,92 @@ the user may want to look at it, and say so; otherwise stop it.
 ````markdown
 # Instance lifecycle
 
-Run all commands from the checkout being verified.
+Run all commands from the checkout being verified. The
+[guide](../../../../docs/local-development.md) has the full command reference and
+the layout of the instance directory.
 
 | Command | Use |
 | --- | --- |
 | `pnpm local up` | Build this checkout, then start or restart its instance. Prints status when ready. |
-| `pnpm local up --no-build` | Restart with the existing build artifacts. |
-| `pnpm local status [--json]` | State, URL, local user, Controller uplink, running build and checkout commit. Exit 0 only when ready. |
-| `pnpm local logs [--follow]` | Runner (site) and Controller output of the current run. |
-| `pnpm local controller diagnostics --source controller --limit 60` | Controller diagnostics with secrets redacted. |
-| `pnpm local list [--json]` | Every instance on this machine; `*` marks this checkout. |
+| `pnpm local up --no-build` | Restart from the existing build output, for example after `down` or a startup failure that needed no code change. |
+| `pnpm --silent local status --json` | State, URL, local user, Controller uplink, running build and checkout commit. Exit 0 only when ready, 3 otherwise. |
+| `pnpm local logs` | Last 80 lines of the runner (site) and Controller logs of the current run. Do not use `--follow`: it never exits. |
+| `pnpm local controller diagnostics --source controller --limit 60` | Controller diagnostics. `controller status` shows the uplink. Its `session` and `window` subcommands act on sessions, so hard rule 1 applies. |
+| `pnpm local list` | Every instance on this machine; `*` marks this checkout. |
 | `pnpm local down` | Stop this checkout's instance; state is kept. |
-| `pnpm local remove --yes` | Delete this checkout's stopped instance. |
+| `pnpm local remove --yes` | Delete this checkout's stopped instance, including its site state and Controller pairing. |
 
 ## Start and refresh
 
-`up` builds with `pnpm --filter @orchardworks/agent-remote-controller... run build`,
-`pnpm build:relay` and `scripts/build-devbox.mjs`, installing dependencies first
-in a fresh worktree. A failed build leaves a running instance as it was. The
-first `up` chooses a free port and keeps it: the local identity is bound to the
-instance origin. If another process later takes that port, `up` stops with an
-error; free the port instead of trying to change it.
+After changing code, run `pnpm local up`: it builds the Controller, the website
+and the Devbox server bundle, then restarts the instance. Use `--no-build` only
+to restart the same build. In a worktree without `node_modules`, `up` installs
+dependencies first.
 
-Restarting interrupts the instance's running sessions. Their native history
-persists, but active turns and pending approvals are not restored.
+A build can take minutes: give the command a long timeout, and do not start a
+second `up` while one runs. `up` then prints `Waiting for the site…` and
+`Waiting for Controller registration…`, waits up to 90 seconds
+(`ARC_LOCAL_READY_TIMEOUT_MS` raises it on a slow machine), prints the status and
+exits 0.
 
-## When `up` fails
+A failed build, or `--no-build` without artifacts, leaves a running instance as
+it was. Restarting interrupts the instance's running sessions: native history
+persists, active turns and pending approvals do not. The first `up` picks a free
+port and keeps it, because the local identity is bound to the origin.
 
-`up` prints the last lines of both logs. Typical causes:
+## Read status
 
-| Symptom | Check |
+```
+Instance: <name> (running)
+Site: http://localhost:<port>  local user: signed in
+Controller: uplink registered (pid <pid>)
+Running build: <12-character commit>[ (dirty)] since <time>; checkout now <12-character commit>[ (dirty)]
+State: <instance directory>
+```
+
+The instance is ready when the state is `running`, the local user is signed in
+and the uplink is `registered`. The other states are `stopped` (run `up`),
+`stale` (the recorded processes are gone; `up` or `down` clears the record),
+`orphaned` (see below) and `unknown` (the reason is printed).
+
+`Running build` is the commit and dirty flag recorded when the instance started;
+`checkout now` is read at the time of the call. A different commit means the build
+is old. The dirty flag does not change after the start, so edits made after `up`
+are invisible to `status`: run `pnpm local up` after your last edit before you
+verify. `local user: unavailable` on a running instance can be the sign-in limit;
+wait a minute instead of calling `status` again.
+
+## When something fails
+
+`up` prints the last 20 lines of `runner.log` and `controller.log` after a
+startup failure; read them first. Causes and extra steps are in the guide's
+[troubleshooting table](../../../../docs/local-development.md#troubleshooting).
+
+| Message | Do |
 | --- | --- |
-| A build step failed | Fix the build; the old instance still runs its old build. |
-| `The runner exited during startup` | `pnpm local logs`; often missing artifacts after `--no-build`. |
-| Waiting for Controller registration | `pnpm local controller diagnostics --source controller --limit 60`. |
-| `listen EPERM` or spawn errors | The session is sandboxed; report it and ask for YOLO mode. |
-| `orphaned` state | The runner died but its Controller still runs. Confirm with `ps -ww -o command= -p PID` that the PID runs `packages/agent-host/dist/cli.js foreground` from this checkout, stop it, then run `up`. |
+| `Build step failed: <command>. A running instance was left unchanged.` | Fix the build error printed above it, then `up` again. |
+| `Build artifacts are missing (…). Run pnpm local up without --no-build.` | Run `pnpm local up`. |
+| `Port <port> is in use by another process. The origin <origin> cannot change; free the port and run up again.` | Find the holder with `lsof -nP -iTCP:<port> -sTCP:LISTEN`; stop it only when it is your own leftover, otherwise report it. As a last resort `pnpm local remove --yes` then `up` gives a new port and loses the site state and pairing. |
+| `The runner exited during startup.` | Read the log tails. `This instance's Controller state belongs to another site origin. Remove the instance with pnpm local remove --yes.` means exactly that. `The instance's saved Controller connection is unreadable (…)`: report it and do not print `controller/connection.json`. |
+| `The instance did not become ready within <n> seconds while waiting for the site.` (or `… for Controller registration.`) | `up` already stopped the runner it started. Read the tails and `pnpm local controller diagnostics --source controller --limit 60`. |
+| `The runner is gone but Controller pid <pid> still runs. Stop that process, then retry.` | State `orphaned`. `ps -ww -o command= -p <pid>` must show `<this checkout>/packages/agent-host/dist/cli.js foreground`; only then `kill <pid>`, then `up`. Any other command is not yours. |
+| `This environment does not allow listening on local ports (EPERM)` or `… starting background processes (EPERM)` | Hard rule 8: report it and ask for YOLO mode. |
+| `A previous local command (pid <pid>) was interrupted and left its lock. Remove <instance>/operation.lock and retry.` or `Another local command is changing this instance. If none is running, remove <instance>/operation.lock.` | Hard rule 9. |
+| `The instance's sign-in limit (30 per minute) is exhausted; retry within a minute.` | Wait a minute; do not retry in a loop. |
+
+A provider that never appears is not installed or detected on this Mac, or
+Codex has no running daemon: report it.
 
 ## Clean up
 
-Stop instances you no longer need with `pnpm local down`, and always before
-removing a worktree. `remove --yes` deletes the instance directory, including
-its site state and pairing. Test sessions stay in the shared native histories
-under paths inside `~/.agent-remote-control-dev`; the user's own Controller can
-list them like any other session.
+Stop instances you no longer need with `pnpm local down`. Before removing a
+worktree, run `pnpm local down` and `pnpm local remove --yes` in it; `remove`
+refuses a running instance (`Stop the instance with pnpm local down first.`).
+Neither command deletes test sessions: they stay in the shared native histories
+and the user's own Controller lists them. If a worktree you removed left its
+instance behind, follow the guide's
+[Cleaning up](../../../../docs/local-development.md#cleaning-up) for that
+instance only.
 ````
 
 - [ ] **Step 3: Write `references/verification.md`**
@@ -2798,19 +2861,24 @@ A lower layer passing says nothing about a higher one.
 
 | Layer | Evidence |
 | --- | --- |
-| Build | `pnpm local status` shows a running build commit equal to the checkout commit you changed, and its dirty state. |
+| Build | `up` finished after your last edit, and `status` shows a running build commit equal to the checkout commit, with its dirty state. |
 | Site | `status` reports `running` and `local user: signed in`. |
-| Controller | `status` reports `uplink registered`; `pnpm local api v1/remote/hosts` lists `Dev · <checkout>` with `"online": true` and the expected providers. |
+| Controller | `status` reports `uplink registered`; `pnpm --silent local api v1/remote/hosts` lists a Host named `Dev · <checkout directory name>` with `"online": true` and the expected `providers`. |
 | Page | A headless screenshot of the signed-in page taken after the change, showing the changed UI. See [browser](browser.md). |
 | Feature | The changed behaviour exercised through real page controls, with screenshots of each state the conclusion rests on. |
 | Model turn | A session created in the instance workspace completes a real reply. See [test loop](test-loop.md). |
 
-An HTTP response, a screenshot or a registered Controller is not evidence that
-a model turn works. An API write is not evidence that a page control works.
+The Build, Site and Controller rows come from one `status` and one `api` call;
+the sign-in limit makes repeating them a cost. An HTTP response, a screenshot or a
+registered Controller is not evidence that a model turn works. An API write is not
+evidence that a page control works.
 
-Claude Code and Codex are covered end to end. OpenCode and Copilot can appear,
-but their shared server and callbacks belong to the user's Controller; report
-their results as partial.
+Claude Code and Codex are covered end to end; Codex needs the user's running
+Codex daemon, which the instance never starts. Any other provider is not:
+OpenCode may be unavailable because its server credentials belong to the user's
+Controller, and its Ask callbacks go through the shared server. Say what you
+exercised for such a provider and do not claim end-to-end coverage. See
+[Shared native profiles](../../../../docs/local-development.md#shared-native-profiles).
 
 If a layer cannot run — no provider access, a sandbox refusal, no running Codex
 daemon — say which layer and why instead of substituting a weaker check.
@@ -2823,7 +2891,9 @@ daemon — say which layer and why instead of substituting a weaker check.
 
 The instance signs any local browser in as its local user on the first request.
 Use the repository's Playwright with its bundled Chromium, headless, in a new
-browser context. Never attach to or open the user's own browsers.
+browser context. Never attach to or open the user's own browsers. Every new
+context signs in once, so use one context per script (see the sign-in budget in
+the [skill](../SKILL.md#machine-use-and-the-sign-in-budget)).
 
 ## Quick screenshot
 
@@ -2833,16 +2903,25 @@ pnpm local screenshot / --out .tmp/local/phone.png --viewport 390x844
 pnpm local screenshot '/?host=HOST&provider=claude&session=ID' --out .tmp/local/session.png --full-page
 ```
 
-The command waits for the signed-in product shell (`main.lab-shell`), or for
-`--wait-for CSS`, then half a second more, and saves the image. Relative output
-paths are resolved from where you ran pnpm. Keep evidence under the checkout's
+Flags: `<path>` starts with `/` and defaults to `/`; `--out FILE` is required and
+a relative path resolves from where you ran pnpm; `--viewport WxH` defaults to
+`1440x900`; `--full-page` captures the whole page; `--wait-for CSS` replaces the
+default selector. The command waits up to 30 seconds for `main.lab-shell` (or the
+`--wait-for` selector) to be visible, then half a second more, saves the image and
+prints `Saved <path>`. It signs in once and out again. `HOST` is a Host `id` from
+`pnpm --silent local api v1/remote/hosts`. Keep evidence under the checkout's
 ignored `.tmp/`.
+
+`Playwright is not ready in <checkout>. …` means Chromium is not installed:
+run the `pnpm --filter @orchardworks/agent-remote-lab exec playwright install chromium`
+command the message names.
 
 ## Scripted interaction
 
-For clicks, typing and assertions, write a short script under the checkout's
-`.tmp/local/` and run it with `node` from the checkout root. Resolve Playwright
-from the Lab package:
+For clicks, typing and assertions, save a short script as
+`.tmp/local/<name>.mjs` and run it with `node` from the checkout root. It reads
+the origin from `status`, resolves Playwright from the Lab package, uses one
+context and signs it out before closing, as `pnpm local screenshot` does:
 
 ```javascript
 import { execFileSync } from 'node:child_process';
@@ -2854,12 +2933,18 @@ const { origin } = JSON.parse(execFileSync('pnpm', ['--silent', 'local', 'status
 const { chromium } = createRequire(join(root, 'packages/agent-remote-lab/package.json'))('@playwright/test');
 const browser = await chromium.launch({ headless: true });
 try {
-  const page = await (await browser.newContext({ viewport: { width: 1440, height: 900 } })).newPage();
-  await page.goto(origin + '/');
-  await page.locator('main.lab-shell').waitFor({ timeout: 30_000 });
-  // Act through what the user sees, for example:
-  // await page.getByRole('button', { name: 'New session' }).click();
-  await page.screenshot({ path: '.tmp/local/step-1.png' });
+  const context = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+  try {
+    const page = await context.newPage();
+    await page.goto(origin + '/', { waitUntil: 'domcontentloaded', timeout: 30_000 });
+    await page.locator('main.lab-shell').waitFor({ timeout: 30_000 });
+    // Act through what the user sees, for example:
+    // await page.getByRole('button', { name: 'New session' }).click();
+    await page.screenshot({ path: '.tmp/local/step-1.png' });
+  } finally {
+    // The page's session would otherwise stay open on the instance.
+    await context.request.post(origin + '/auth/logout', { headers: { origin, 'content-type': 'application/json' }, data: '{}', timeout: 10_000 }).catch(() => {});
+  }
 } finally {
   await browser.close();
 }
@@ -2868,9 +2953,8 @@ try {
 `status --json` exits 3 when the instance is not ready, which makes
 `execFileSync` throw; start the instance first. Prefer `getByRole`, `getByLabel`
 and visible text over CSS classes, and wait for the expected control or text
-instead of fixed sleeps. Every new browser context is a fresh sign-in of the
-same local user: Windows and other per-user state persist across contexts,
-browser storage does not.
+instead of fixed sleeps. Browser storage does not persist across contexts;
+Windows and other per-user state on the instance do.
 
 If page code fails only in automation, read the console (`page.on('console', …)`)
 and network before calling it a product defect.
@@ -2881,16 +2965,26 @@ and network before calling it a product defect.
 ````markdown
 # Reading the instance through its API
 
-`pnpm local api <path>` signs in as the local user, calls `/u/<user>/<path>` on
-the instance and signs out again. It prints the response body; a status of 400
-or more is also written to stderr and exits 1.
-
 ```bash
-pnpm local api v1/remote/hosts
+pnpm --silent local api v1/remote/hosts
+pnpm --silent local api <v1/path> [--method M] [--data JSON]
 ```
 
-Use it to read state the website reads: Hosts and their providers, and other
-`v1/` resources. Find a resource's path in the page's network requests or in
+The command signs in once as the local user, calls the instance's user API
+(`/u/<user>/<path>`) and signs out again. It needs a running instance. Behaviour:
+
+- The path must start with `v1/` (`API paths start with v1/, for example v1/remote/hosts.`).
+- The method is `GET`, or `POST` when `--data` is given without `--method`.
+  `--data` must be JSON (`--data must be JSON: …`), and a `GET` or `HEAD` request
+  cannot carry it.
+- It prints the response body. A status of 400 or more also prints `HTTP <status>`
+  to stderr and exits 1.
+- Use `--silent` when a script parses the output: without it pnpm prints a banner
+  first. Print only the fields you need.
+
+Use it to read state the website reads: Hosts and their providers
+(`hosts[].id`, `name`, `online`, `providers[].providerId`) and other `v1/`
+resources. Find a resource's path in the page's network requests or in
 `packages/agent-remote-hosted/src/`.
 
 Writes (`--method POST --data '{...}'`) are acceptable only to prepare fixtures
@@ -2898,6 +2992,9 @@ for a check that then uses the page — for example creating several items befor
 testing how the page lists them. An API write never counts as verifying the page
 control that performs the same action. Create and change only resources your
 test created.
+
+Each call is a sign-in against the 30-per-minute limit: read what you need in as
+few calls as possible and never poll.
 ````
 
 - [ ] **Step 6: Write `references/test-loop.md`**
@@ -2907,17 +3004,18 @@ test created.
 
 Use this when a change affects sessions, or when asked for a complete local test.
 
-1. `pnpm local up`, then `pnpm local status`. Continue only when the running build
-   equals your checkout commit, the local user is signed in and the Controller is
-   registered.
-2. `pnpm local api v1/remote/hosts`: the `Dev · <checkout>` Host is online and lists
-   the provider you will test (Claude Code or Codex). A missing provider means it
-   is not installed or detected on this Mac; report that.
-3. In a headless browser (see [browser](browser.md)), open the site, select the
-   `Dev · <checkout>` Host and the provider, and create a new session. The
-   instance workspace (`~/.agent-remote-control-dev/instances/<name>/workspace`)
-   is the only workspace the Controller offers; add files there only when the
-   test needs them.
+1. `pnpm local up`. Continue only when the status it prints shows a running build
+   equal to your checkout commit, `local user: signed in` and
+   `uplink registered`. Do not call `status` again: `up` already did.
+2. `pnpm --silent local api v1/remote/hosts`: the `Dev · <checkout directory name>`
+   Host is online and lists the provider you will test (Claude Code or Codex). A
+   missing provider is not installed or detected on this Mac, or Codex has no
+   running daemon; report that. Never start the daemon.
+3. In a headless browser (see [browser](browser.md)), open the site, select that
+   Host and the provider, and create a new session. The instance workspace —
+   the `State:` directory from `status`, plus `/workspace`
+   (`~/.agent-remote-control-dev/instances/<name>/workspace`) — is the only
+   workspace the Controller offers; add files there only when the test needs them.
 4. Send a short prompt with a recognisable answer, such as
    `Reply with the word LOCAL-OK and nothing else.` Wait for the reply in the page
    with a bounded wait of two minutes and take a screenshot.
@@ -2925,7 +3023,10 @@ Use this when a change affects sessions, or when asked for a complete local test
    Team, references and so on — and take a screenshot of each state your
    conclusion rests on.
 6. Report per [verification](verification.md). Leave your session idle; do not
-   archive or remove sessions you did not create.
+   archive or remove sessions you did not create. Test sessions stay in the
+   shared native histories and appear in the user's own Controller.
+
+Do steps 3 to 5 in one browser context, in one script when you can.
 
 Provider sign-in and model access come from the shared native profile. A failed
 turn caused by provider access is a provider result, not an instance failure;

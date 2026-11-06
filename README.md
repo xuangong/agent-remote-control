@@ -98,6 +98,9 @@ restarts and image rebuilds. This local entry does not change production login.
 See [Devbox setup and usage](docs/devbox.md) for provider login, alternate ports,
 workspace mounts, logs, rebuilds and data retention.
 
+To run the product from a checkout without Docker, see
+[local development](docs/local-development.md).
+
 ## Private deployment
 
 Host the website and Relay yourself, then install **Agent Remote Controller** on
@@ -739,7 +742,7 @@ services. Exercise sharing and key revocation too if you expose those features.
 
 Use Node 22 or later and pnpm 10.34.5. All commands run from this repository root.
 
-To try the complete product from a checkout or worktree on macOS — signed in automatically, with a development Controller that uses your installed agents — run `pnpm local up`. See [local development](docs/local-development.md).
+To try the complete product from a checkout or worktree on macOS or Linux — signed in automatically, with a development Controller that uses your installed agents — run `pnpm local up`. See [local development](docs/local-development.md).
 
 To build and start the complete controller with Codex, Claude, and DSH:
 

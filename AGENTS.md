@@ -10,7 +10,7 @@ Write code, comments, and documentation in English. Respond to the user in Chine
 - Use per-test and outer process deadlines for every test run. Root test commands already enforce both.
 - Test observable behavior rather than source text. Use real transports for changes to protocol, pairing, or reconnect behavior.
 - Preserve existing local services and untracked user material. Use configurable free ports for local validation.
-- Verify website, Relay and Controller changes in this checkout's local instance (`pnpm local up`); follow `.agents/skills/prepare-arc-local/SKILL.md`.
+- When a change affects the website, Relay or Controller, verify it in this checkout's local instance (`pnpm local up`); follow `.agents/skills/prepare-arc-local/SKILL.md`.
 - Keep readable conversation rendering primary; Trace and Replica Inspector support diagnosis.
 - Write large files in chunks. Name code by business meaning and keep process history out of comments.
 - Do not publish packages, push, or create a remote repository unless the user asks.

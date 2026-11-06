@@ -156,6 +156,19 @@ it('checks native workspace metadata before renaming even when the catalog omits
 });
 
 
+it('reports and removes a Side\'s source through workspace policy, within allowed workspaces only', async () => {
+  const f = await fixture(); let removed = false;
+  const directory = protectHostDirectory({ ...f.source, sessionWorkspace: async () => f.info.cwd,
+    async sourceReference() { return { holder: 'session', sourceNativeSessionId: 'source', removed }; },
+    async setSourceReferenceRemoved(_id, next) { const changed = removed !== next; removed = next; return changed; } }, f.policy!);
+  expect(await directory.sourceReference!('session')).toEqual({ holder: 'session', sourceNativeSessionId: 'source', removed: false });
+  expect(await directory.setSourceReferenceRemoved!('session', true)).toBe(true);
+  f.info.cwd = f.outside;
+  await expect(directory.sourceReference!('session')).rejects.toThrow(/workspace/i);
+  await expect(directory.setSourceReferenceRemoved!('session', false)).rejects.toThrow(/workspace/i);
+  expect(removed).toBe(true);
+});
+
 it('preserves Controller-dependent extension lifetime metadata through workspace policy', async () => {
   const f = await fixture();
   const directory = protectHostDirectory({ ...f.source, requiresController: id => id === 'with-tools' }, f.policy!);

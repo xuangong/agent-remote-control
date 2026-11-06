@@ -238,6 +238,9 @@ describe('session commands', () => {
     expect(added.output.refs).toEqual([{ address: 'host-1/codex/thread', providerId: 'codex', title: 'thread title', origin: 'added', addedAt: expect.any(String) }]);
     expect((await run(['ref', 'add', 'local/codex/thread'])).output.refs).toHaveLength(1);
     expect((await run(['read', 'self'])).output.session.refs).toEqual(added.output.refs);
+    const listed = (await run(['list'])).output.sessions as Array<{ self?: true; refs?: unknown }>;
+    expect(listed.find(session => session.self)?.refs).toEqual(added.output.refs);
+    expect(listed.filter(session => !session.self).every(session => !('refs' in session))).toBe(true);
     expect(await run(['ref', 'add', 'self'])).toMatchObject({ code: 2, output: { error: { code: 'invalid_request' } } });
     expect(await run(['ref', 'add', 'host-1/claude/hidden'])).toMatchObject({ code: 6, output: { error: { code: 'session_not_found' } } });
     expect(await run(['ref', 'add', 'host-1/codex/missing'])).toMatchObject({ code: 6, output: { error: { code: 'session_not_found' } } });

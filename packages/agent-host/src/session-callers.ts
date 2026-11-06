@@ -198,6 +198,10 @@ export async function handleSessionCall(input: unknown, context: { store: Sessio
     const self = (ref: SessionCallerRef) => refKey(ref) === refKey(caller) ? { self: true } : {};
     const state = (ref: SessionCallerRef, summary?: RemoteSessionSummary): SessionCallerState => context.catalog.liveState(ref)
       ?? (summary?.state === 'unavailable' ? 'failed' : summary?.state ?? 'unknown');
+    const described = (refs: SessionRefs) => refs.refs.map(ref => ({ address: address(ref), providerId: ref.providerId, ...(ref.title ? { title: ref.title } : {}),
+      origin: ref.origin, ...(ref.addedAt ? { addedAt: ref.addedAt } : {}) }));
+    /** A session's references, like its title, belong to its description; a Host that cannot tell lists none. */
+    const refsOf = async (ref: SessionCallerRef) => context.refs ? described(await describeSessionRefs(ref, context.refs).catch(() => ({ revision: 0, refs: [] }))) : [];
     if (request.command === 'list') {
       const providerId = optionalString(request.providerId, 'providerId', 64);
       const limit = optionalInteger(request.limit, 'limit', 1, LIST_LIMIT) ?? 20;
@@ -215,15 +219,15 @@ export async function handleSessionCall(input: unknown, context: { store: Sessio
       const summaries = listed.flat().filter(summary => !context.store.isShared(summary))
         .sort((left, right) => Date.parse(right.updatedAt) - Date.parse(left.updatedAt) || refKey(left).localeCompare(refKey(right)));
       const page = summaries.slice(offset, offset + limit);
+      const pageRefs = await Promise.all(page.map(summary => refsOf(summary)));
       return { result: {
-        sessions: page.map(summary => ({ address: address(summary), providerId: summary.providerId, title: summary.title,
-          ...(summary.workspace ? { cwd: summary.workspace } : {}), updatedAt: summary.updatedAt, state: state(summary, summary), ...self(summary) })),
+        sessions: page.map((summary, index) => ({ address: address(summary), providerId: summary.providerId, title: summary.title,
+          ...(summary.workspace ? { cwd: summary.workspace } : {}), updatedAt: summary.updatedAt, state: state(summary, summary), ...self(summary),
+          ...(pageRefs[index]!.length ? { refs: pageRefs[index] } : {}) })),
         ...(offset + limit < summaries.length ? { nextCursor: encodeCursor({ offset: offset + limit, limit, providerId: providerId ?? null }) } : {}),
         ...(unavailable.length ? { unavailableProviders: unavailable.sort() } : {}),
       } };
     }
-    const described = (refs: SessionRefs) => refs.refs.map(ref => ({ address: address(ref), providerId: ref.providerId, ...(ref.title ? { title: ref.title } : {}),
-      origin: ref.origin, ...(ref.addedAt ? { addedAt: ref.addedAt } : {}) }));
     if (request.command === 'ref') {
       if (!context.refs) throw new SessionCallError('unsupported_configuration', 'Session references are unavailable on this Controller.');
       if (request.action === 'list') return { result: { refs: described(await describeSessionRefs(caller, context.refs)) } };
@@ -248,7 +252,7 @@ export async function handleSessionCall(input: unknown, context: { store: Sessio
         if ((error as { code?: unknown }).code === 'native_session_unavailable') throw new SessionCallError('session_not_found', 'No such session on this Host.');
         throw new SessionCallError('history_unavailable', 'The session history could not be read.');
       }
-      const refs = context.refs ? described(await describeSessionRefs(target, context.refs).catch(() => ({ revision: 0, refs: [] }))) : [];
+      const refs = await refsOf(target);
       return { result: {
         session: { address: address(target), providerId: target.providerId, ...(summary ? { title: summary.title } : {}),
           ...(summary?.workspace ? { cwd: summary.workspace } : {}), ...(summary?.model ? { model: summary.model } : {}), state: state(target, summary), ...self(target),

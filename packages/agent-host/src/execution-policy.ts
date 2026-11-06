@@ -147,6 +147,10 @@ export function protectHostDirectory(directory: AgentHostDirectory, policy: Host
     setSourceReferenceAncestors: directory.setSourceReferenceAncestors?.bind(directory),
     setSessionHostAccess: directory.setSessionHostAccess?.bind(directory),
     sourceReferences: directory.sourceReferences?.bind(directory),
+    ...(directory.sourceReference ? { async sourceReference(id: string) { await checkSource(id); return directory.sourceReference!(id); } } : {}),
+    ...(directory.setSourceReferenceRemoved ? { async setSourceReferenceRemoved(id: string, removed: boolean) {
+      await checkSource(id); return directory.setSourceReferenceRemoved!(id, removed);
+    } } : {}),
     ...(directory.forkSession ? { async forkSession(nativeSessionId: string) {
       await checkSource(nativeSessionId);
       return directory.forkSession!(nativeSessionId);

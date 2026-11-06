@@ -2283,7 +2283,7 @@ function AppContent({
           ? bindDirectorySession({ ...session, sessionIntent: intent }, { windowId: sharedWindow.id, viewId: view.id, binding: JSON.stringify(view.binding ?? null) })
           : Promise.resolve(false)} />,
       composerContext: <>{referencing ? <SessionReferences scope={baseUrl} holder={refHolder} providers={host?.providers?.map(provider => provider.providerId) ?? [source.providerId]}
-          fallback={forkReference} picking={referencePicker === source.viewId} onPickingChange={picking => setReferencePicker(picking ? source.viewId : undefined)}
+          fallback={forkReference} snapshot={fork?.mode === 'reference' ? null : forkReference} picking={referencePicker === source.viewId} onPickingChange={picking => setReferencePicker(picking ? source.viewId : undefined)}
           onOpen={ref => void openExcerptSource({ hostId: source.hostId, providerId: ref.providerId, nativeSessionId: ref.nativeSessionId, title: ref.title ?? '' })}
           onRemoved={(ref, restore) => removedReference(ref, restore, fork)} onRestore={() => restoredReference(fork)} /> : forkReference}
         {quoteView ? <QuoteAttachments scope={baseUrl} viewId={quoteView} /> : null}</>,

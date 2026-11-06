@@ -11,10 +11,11 @@ const title = (ref: Pick<LabSessionRef, 'title'>) => ref.title || 'Untitled sess
 /**
  * The sessions a session references, above its composer: the source it was opened from and sessions the user added.
  * Removing one, the source included, is a change the agent hears about with the next message. Hosts that predate
- * references show the fallback, the source as it was shown before.
+ * references show the fallback, the source as it was shown before. snapshot: the context a fork copied, which is not a
+ * reference and stays shown beside them.
  */
-export function SessionReferences({ scope, holder, providers, fallback, picking, onPickingChange, onOpen, onRemoved, onRestore }: {
-  scope: string; holder: SessionRefHolder; providers: readonly string[]; fallback?: ReactNode;
+export function SessionReferences({ scope, holder, providers, fallback, snapshot, picking, onPickingChange, onOpen, onRemoved, onRestore }: {
+  scope: string; holder: SessionRefHolder; providers: readonly string[]; fallback?: ReactNode; snapshot?: ReactNode;
   picking: boolean; onPickingChange(picking: boolean): void;
   onOpen(ref: LabSessionRef): void;
   /** After the Host removed a reference; restore() adds it back. */
@@ -26,7 +27,7 @@ export function SessionReferences({ scope, holder, providers, fallback, picking,
   const [error, setError] = useState<string>();
   if (entry.unsupported || !entry.value) return entry.unsupported || !picking ? <>{fallback}</> : null;
   const refs = entry.value.refs;
-  if (!refs.length && !picking) return null;
+  if (!refs.length && !picking) return <>{snapshot}</>;
   const change = async (action: 'add' | 'remove', ref: Pick<LabSessionRef, 'providerId' | 'nativeSessionId'>, label: string) => {
     if (pending) return;
     setPending(label); setError(undefined);
@@ -38,7 +39,7 @@ export function SessionReferences({ scope, holder, providers, fallback, picking,
     if (!await change('remove', ref, `remove:${ref.providerId}/${ref.nativeSessionId}`)) return;
     await onRemoved?.(ref, async () => { await changeSessionRef(scope, holder, 'add', ref); await onRestore?.(ref); });
   };
-  return <div className="lab-session-refs" aria-label="Session references">
+  return <>{snapshot}<div className="lab-session-refs" aria-label="Session references">
     {refs.map(ref => <span key={`${ref.providerId}/${ref.nativeSessionId}`} className="lab-session-ref agent-skill-tag" data-origin={ref.origin}>
       <button type="button" className="lab-session-ref-open" title={`${ref.origin === 'source' ? 'Source' : 'Reference'}: ${title(ref)}`} onClick={() => onOpen(ref)}>
         {ref.origin === 'source' ? <span className="lab-fork-symbol" aria-hidden="true">&amp;<span><ForkIcon /></span></span> : <span className="lab-session-ref-symbol" aria-hidden="true">@</span>}
@@ -52,7 +53,7 @@ export function SessionReferences({ scope, holder, providers, fallback, picking,
     {picking ? <SessionRefPicker scope={scope} holder={holder} providers={providers} existing={refs} busy={!!pending}
       onCancel={() => onPickingChange(false)} onPick={session => void change('add', session, `add:${session.providerId}/${session.nativeSessionId}`).then(added => { if (added) onPickingChange(false); })} /> : null}
     {error ? <p className="lab-fork-action-error" role="alert">{error}</p> : null}
-  </div>;
+  </div></>;
 }
 
 /** The Host's recent sessions, filtered by title, to reference from this one. */

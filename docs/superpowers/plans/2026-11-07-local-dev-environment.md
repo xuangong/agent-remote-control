@@ -122,7 +122,7 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { test } from 'node:test';
 import { pathToFileURL } from 'node:url';
-import { findInstance, instanceName, listInstances, localRoot, portAvailable, prepareInstance, runState, withLock, writeJson } from './instance.mjs';
+import { findInstance, instanceName, listInstances, localRoot, portAvailable, prepareInstance, runsInstance, runState, withLock, writeJson } from './instance.mjs';
 
 async function temporaryRoot(t) {
   const root = await mkdtemp(join(tmpdir(), 'arc-local-instance-'));
@@ -253,6 +253,15 @@ test('recognizes this instance runner and an orphaned Controller', async t => {
   // The runner must be started for exactly this instance directory.
   assert.equal(await runState(`${directory}-other`, runtime), 'orphaned');
   assert.equal(await runState(directory.slice(0, -1), runtime), 'orphaned');
+});
+
+test('matches a runner command only for exactly its instance directory', () => {
+  const command = 'node /src/one/scripts/local/runner.mjs /state/instances/one';
+  assert.equal(runsInstance(command, '/state/instances/one'), true);
+  assert.equal(runsInstance(command, '/state/instances/on'), false);
+  assert.equal(runsInstance(command, '/other/state/instances/one-x'), false);
+  assert.equal(runsInstance('node /src/one/scripts/other.mjs /state/instances/one', '/state/instances/one'), false);
+  assert.equal(runsInstance(undefined, '/state/instances/one'), false);
 });
 
 test('does not mistake an unknown process state for a stopped instance', async t => {
@@ -443,11 +452,15 @@ export async function processCommand(pid) {
   }
 }
 
+/** The runner is started as `node <checkout>/scripts/local/runner.mjs <directory>`. */
+export function runsInstance(command, directory) {
+  return Boolean(command?.includes('scripts/local/runner.mjs') && command.endsWith(` ${directory}`));
+}
+
 /** A recorded PID counts only while it still runs the command this instance started. */
 export async function runState(directory, runtime) {
   if (!runtime) return 'stopped';
-  const runner = await processCommand(runtime.runnerPid);
-  if (runner?.includes('scripts/local/runner.mjs') && runner.endsWith(` ${directory}`)) return 'running';
+  if (runsInstance(await processCommand(runtime.runnerPid), directory)) return 'running';
   return (await processCommand(runtime.controllerPid))?.includes('cli.js foreground') ? 'orphaned' : 'stale';
 }
 
@@ -475,7 +488,7 @@ export async function withLock(directory, action) {
 - [ ] **Step 4: Run the tests to verify they pass**
 
 Run: `node --test scripts/local/instance.test.mjs`
-Expected: PASS, 16 tests.
+Expected: PASS, 17 tests.
 
 - [ ] **Step 5: Commit**
 
@@ -1712,7 +1725,7 @@ import { parseArgs, promisify } from 'node:util';
 import { controllerBuildProvenance } from '../lib/build-provenance.mjs';
 import { packageManager } from '../lib/package-manager.mjs';
 import { controllerEnvironment } from './environment.mjs';
-import { findInstance, listInstances, portAvailable, prepareInstance, processAlive, processCommand, readJson, runState, withLock } from './instance.mjs';
+import { findInstance, listInstances, portAvailable, prepareInstance, processAlive, processCommand, readJson, runState, runsInstance, withLock } from './instance.mjs';
 import { screenshot, signedInUser, userApi } from './session.mjs';
 
 const source = realpathSync(resolve(import.meta.dirname, '../..'));
@@ -1772,6 +1785,14 @@ async function controllerUplink(instance) {
   } catch { return undefined; }
 }
 
+async function siteAlive(origin) {
+  try {
+    const response = await fetch(origin + '/health', { signal: AbortSignal.timeout(3000) });
+    await response.body?.cancel();
+    return response.ok;
+  } catch { return false; }
+}
+
 async function logTails(instance, lines) {
   const parts = [];
   for (const name of ['runner.log', 'controller.log']) {
@@ -1781,14 +1802,26 @@ async function logTails(instance, lines) {
   return parts.join('\n');
 }
 
-async function stopProcess(pid, marker, timeoutMs = 30_000) {
-  if (!(await processCommand(pid))?.includes(marker)) return;
-  process.kill(pid, 'SIGTERM');
+async function exitedWithin(pid, timeoutMs) {
   const deadline = Date.now() + timeoutMs;
   while (processAlive(pid)) {
-    if (Date.now() > deadline) throw new Error(`Runner pid ${pid} did not stop within ${timeoutMs / 1000} seconds.`);
+    if (Date.now() > deadline) return false;
     await delay(200);
   }
+  return true;
+}
+
+async function stopRunnerProcess(pid, instance, timeoutMs = 30_000) {
+  if (!runsInstance(await processCommand(pid), instance.directory)) return;
+  try { process.kill(pid, 'SIGTERM'); } catch (error) { if (error.code !== 'ESRCH') throw error; }
+  if (await exitedWithin(pid, timeoutMs)) return;
+  const runtime = await readJson(instance.runtimeFile).catch(() => undefined);
+  // A runner that has not started its Controller holds nothing that needs a clean stop.
+  if (runtime?.controllerPid && processAlive(runtime.controllerPid)) {
+    throw new Error(`Runner pid ${pid} did not stop within ${timeoutMs / 1000} seconds; its Controller pid ${runtime.controllerPid} is still running.`);
+  }
+  try { process.kill(pid, 'SIGKILL'); } catch (error) { if (error.code !== 'ESRCH') throw error; }
+  if (!(await exitedWithin(pid, 5000))) throw new Error(`Runner pid ${pid} could not be stopped.`);
 }
 
 async function stopRunner(instance) {
@@ -1797,11 +1830,13 @@ async function stopRunner(instance) {
   if (state === 'orphaned') {
     throw new Error(`The runner is gone but Controller pid ${runtime.controllerPid} still runs. Stop that process, then retry.`);
   }
-  if (state === 'running') await stopProcess(runtime.runnerPid, instance.directory);
+  if (state === 'running') await stopRunnerProcess(runtime.runnerPid, instance);
   await rm(instance.runtimeFile, { force: true });
 }
 
 async function startRunner(instance) {
+  // A runner that fails before opening its Controller log must not leave the previous run's output looking current.
+  await rm(join(instance.logs, 'controller.log'), { force: true });
   const log = await open(join(instance.logs, 'runner.log'), 'w', 0o600);
   try {
     const child = spawn(process.execPath, [join(source, 'scripts/local/runner.mjs'), instance.directory],
@@ -1818,9 +1853,13 @@ async function waitUntilReady(instance, runnerPid) {
   let waiting = 'the site';
   while (Date.now() < deadline) {
     if (!processAlive(runnerPid)) throw new Error('The runner exited during startup.');
-    if (await signedInUser(instance.record.origin).catch(() => false)) {
+    // Polling avoids signing in: every sign-in counts against the instance's 30-per-minute limit.
+    if (await siteAlive(instance.record.origin)) {
       waiting = 'Controller registration';
-      if (await controllerUplink(instance) === 'registered') return;
+      if (await controllerUplink(instance) === 'registered') {
+        await signedInUser(instance.record.origin);
+        return;
+      }
     }
     await delay(500);
   }
@@ -1828,8 +1867,11 @@ async function waitUntilReady(instance, runnerPid) {
 }
 
 async function describe(instance) {
-  const runtime = await readJson(instance.runtimeFile);
-  const state = await runState(instance.directory, runtime);
+  const runtime = await readJson(instance.runtimeFile).catch(() => undefined);
+  let state;
+  let problem = null;
+  try { state = await runState(instance.directory, runtime); }
+  catch (error) { state = 'unknown'; problem = error.message; }
   const running = state === 'running';
   const [localUser, uplink, checkout] = await Promise.all([
     running ? signedInUser(instance.record.origin).catch(() => false) : false,
@@ -1838,21 +1880,21 @@ async function describe(instance) {
   ]);
   return {
     name: instance.record.name, source: instance.record.source, directory: instance.directory, origin: instance.record.origin,
-    state, localUser, controllerUplink: uplink ?? null,
-    build: runtime ? { revision: runtime.revision, dirty: runtime.dirty, startedAt: runtime.startedAt, runnerPid: runtime.runnerPid, controllerPid: runtime.controllerPid } : null,
+    state, problem, localUser, controllerUplink: uplink ?? null,
+    build: runtime ? { revision: runtime.revision ?? null, dirty: runtime.dirty ?? null, startedAt: runtime.startedAt, runnerPid: runtime.runnerPid, controllerPid: runtime.controllerPid ?? null } : null,
     checkout: checkout ?? null,
   };
 }
 
-const revision = value => value ? `${value.revision.slice(0, 12)}${value.dirty ? ' (dirty)' : ''}` : 'unknown';
+const revision = value => value?.revision ? `${value.revision.slice(0, 12)}${value.dirty ? ' (dirty)' : ''}` : 'unknown';
 
 async function printStatus(instance, json) {
   const report = await describe(instance);
   if (json) process.stdout.write(JSON.stringify(report, null, 2) + '\n');
   else process.stdout.write([
-    `Instance: ${report.name} (${report.state})`,
+    `Instance: ${report.name} (${report.state})${report.problem ? ` — ${report.problem}` : ''}`,
     `Site: ${report.origin}  local user: ${report.localUser ? 'signed in' : 'unavailable'}`,
-    `Controller: ${report.controllerUplink ? `uplink ${report.controllerUplink}` : 'not running'}${report.build ? ` (pid ${report.build.controllerPid})` : ''}`,
+    `Controller: ${report.controllerUplink ? `uplink ${report.controllerUplink}` : 'not running'}${report.build?.controllerPid ? ` (pid ${report.build.controllerPid})` : ''}`,
     `Running build: ${report.build ? `${revision(report.build)} since ${report.build.startedAt}` : 'none'}; checkout now ${revision(report.checkout)}`,
     `State: ${report.directory}`,
   ].join('\n') + '\n');
@@ -1871,8 +1913,8 @@ async function up(options) {
     const runnerPid = await startRunner(instance);
     try { await waitUntilReady(instance, runnerPid); }
     catch (error) {
-      await stopProcess(runnerPid, instance.directory).catch(() => undefined);
-      throw new Error(`${error.message}\n${await logTails(instance, 20)}`);
+      await stopRunnerProcess(runnerPid, instance).catch(() => undefined);
+      throw new Error(`${error.message}\n${await logTails(instance, 20)}`, { cause: error.cause });
     }
   });
   await printStatus(instance, false);
@@ -1906,8 +1948,8 @@ async function list(options) {
   const current = (await findInstance(source))?.directory;
   const rows = [];
   for (const instance of await listInstances()) {
-    rows.push({ name: instance.record.name, state: await runState(instance.directory, instance.runtime),
-      origin: instance.record.origin, source: instance.record.source, current: instance.directory === current });
+    const state = await runState(instance.directory, instance.runtime).catch(() => 'unknown');
+    rows.push({ name: instance.record.name, state, origin: instance.record.origin, source: instance.record.source, current: instance.directory === current });
   }
   if (options.json) process.stdout.write(JSON.stringify(rows, null, 2) + '\n');
   else if (!rows.length) process.stdout.write('No local instances.\n');
@@ -1976,7 +2018,7 @@ try {
     }
   }
 } catch (error) {
-  process.stderr.write(`${error.message}\n`);
+  process.stderr.write(`${error.message}${error.cause?.message ? `\nCause: ${error.cause.message}` : ''}\n`);
   process.exitCode = 1;
 }
 ```
@@ -2008,12 +2050,12 @@ Append the same five files to the end of the `setup` array (after `'scripts/cont
 - [ ] **Step 6: Run the integration test to verify it passes**
 
 Run: `node --test --test-timeout=240000 scripts/local/command.test.mjs`
-Expected: PASS, 1 test, in under two minutes. If it times out waiting for Controller registration, read the temporary instance's `logs/controller.log` (path in the error) before changing code.
+Expected: PASS, 1 test, in about ten seconds. If it times out waiting for Controller registration, read the tails of `logs/runner.log` and `logs/controller.log` that the error prints, and the Controller's `controller/agent-host.log` in the temporary instance, before changing code.
 
 - [ ] **Step 7: Run the whole suite through the root runner**
 
 Run: `pnpm test:local-env`
-Expected: PASS, 16 tests, exit 0.
+Expected: PASS, 61 tests, exit 0.
 
 - [ ] **Step 8: Commit**
 

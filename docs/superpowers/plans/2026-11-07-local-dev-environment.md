@@ -2668,6 +2668,7 @@ Co-Authored-By: Claude <noreply@anthropic.com>"
 - Create: `.agents/skills/prepare-arc-local/references/browser.md`
 - Create: `.agents/skills/prepare-arc-local/references/api.md`
 - Create: `.agents/skills/prepare-arc-local/references/test-loop.md`
+- Create: `.agents/skills/prepare-arc-local/scripts/session-turn.mjs`
 - Create: `.claude/skills` (symlink to `../.agents/skills`)
 
 - [ ] **Step 1: Write `SKILL.md`**
@@ -3069,7 +3070,9 @@ try {
 `execFileSync` throw; start the instance first. Prefer `getByRole`, `getByLabel`
 and visible text over CSS classes, and wait for the expected control or text
 instead of fixed sleeps. Browser storage does not persist across contexts; the
-product's Window layouts and other per-user state on the instance do.
+product's Window layouts and other per-user state on the instance do, so a Window
+can already hold several session views: scope locators to the view you act in, as
+the [test loop](test-loop.md) does.
 
 If page code fails only in automation, read the console (`page.on('console', …)`)
 and network before calling it a product defect.
@@ -3125,33 +3128,35 @@ Use this when a change affects sessions, or when asked for a complete local test
    missing provider is a stop condition: see
    [Stop and ask the user](../SKILL.md#stop-and-ask-the-user). Never start the
    daemon.
-3. In one headless browser context, in one script (see [browser](browser.md)), open
-   the site, select that Host and the provider, and create a new session. Take a
-   screenshot after each step. The instance workspace — the `State:` directory from
-   `status`, plus `/workspace` (`~/.agent-remote-control-dev/instances/<name>/workspace`)
-   — is the only workspace the Controller offers; add files there only when the
-   test needs them.
-4. Send a short prompt whose answer is not in the prompt:
-   `Reply with the words LOCAL and OK joined by a hyphen, and nothing else.` The
-   page also shows your own message, so the expected answer must not appear in the
-   prompt, or the check passes without a model. Assert `LOCAL-OK` only inside the
-   assistant's reply, which carries the class `.agent-message-assistant` (the Lab's
-   own tests use it; user messages carry `.agent-message-user`):
+3. Run one turn with the tested script, from the checkout root:
 
-   ```javascript
-   const reply = page.locator('.agent-message-assistant', { hasText: 'LOCAL-OK' });
-   try { await reply.first().waitFor({ timeout: 120_000 }); }
-   catch (error) { await page.screenshot({ path: '.tmp/local/turn-timeout.png' }); throw error; }
-   await page.screenshot({ path: '.tmp/local/reply.png' });
+   ```bash
+   node .agents/skills/prepare-arc-local/scripts/session-turn.mjs "Claude Code"   # or Codex
    ```
 
-   If no such reply appears within the two minutes, take the screenshot (the
-   snippet does), read `pnpm local controller diagnostics --source controller --limit 60`,
-   and note the Model turn as failed in the report, with what both show. Do not resend the
-   prompt or retry the turn. If the diagnostics or the page show a provider access
-   error (sign-in, quota or model access), it is not a failure: handle it as the
-   provider row of [Stop and ask the user](../SKILL.md#stop-and-ask-the-user)
-   (stop and ask; the Model turn is not exercised).
+   In one headless context it selects the `Dev · …` Host, adds an empty view,
+   opens a new session there with the chosen provider, sends
+   `Reply with the words LOCAL and OK joined by a hyphen, and nothing else.` and
+   waits up to two minutes for `LOCAL-OK` in an assistant message
+   (`.agent-message-assistant`) of that view only. It saves
+   `session-created.png` and `turn-reply.png` (or `turn-timeout.png`) under
+   `.tmp/local/`; read them. The session runs in the instance workspace
+   (`workspace/` in the `State:` directory from `status`), the only workspace the
+   Controller offers; add files there only when the test needs them.
+
+   If the script reports a timeout, it has already saved the screenshot: read it
+   and `pnpm local controller diagnostics --source controller --limit 60`, and note
+   the Model turn as failed in the report with what both show. Do not resend the
+   prompt or retry the turn. If either shows a provider access error (sign-in,
+   quota or model access), it is not a failure: handle it as the provider row of
+   [Stop and ask the user](../SKILL.md#stop-and-ask-the-user) (stop and ask; the
+   Model turn is not exercised).
+4. When you write your own steps (see [browser](browser.md)), keep the script's two
+   safeguards. A Window can hold several views, and another view may already show
+   the same text, so pin the view you created by its `data-view-id` and scope every
+   locator to it; a locator filtered on state you are about to change (such as "no
+   messages yet") stops matching once you act. And the expected answer must not
+   appear in the prompt, or your own message satisfies the check.
 5. Exercise the behaviour under change through the page controls — Window, Side,
    Team, references and so on — with a screenshot of each state your conclusion
    rests on and a DOM assertion for each text or state change.
@@ -3165,7 +3170,73 @@ provider result, not an instance failure, and a stop condition: see
 [Stop and ask the user](../SKILL.md#stop-and-ask-the-user).
 ````
 
-- [ ] **Step 7: Link the skills for Claude Code**
+- [ ] **Step 7: Write `scripts/session-turn.mjs`**
+
+The test loop runs this script for its model turn. It pins the view it creates by `data-view-id`: a Window can already show another session whose reply contains the same text.
+
+````javascript
+// Runs one real model turn in a new session on this checkout's local instance.
+// Usage, from the checkout root: node .agents/skills/prepare-arc-local/scripts/session-turn.mjs ["Claude Code"|Codex] [evidence directory]
+import { execFileSync } from 'node:child_process';
+import { mkdirSync } from 'node:fs';
+import { createRequire } from 'node:module';
+import { join } from 'node:path';
+
+const root = process.cwd();
+const providerName = process.argv[2] ?? 'Claude Code';
+const evidence = process.argv[3] ?? '.tmp/local';
+mkdirSync(evidence, { recursive: true });
+// Read the origin once: this status call signs in, so never repeat it per step.
+const { origin } = JSON.parse(execFileSync('pnpm', ['--silent', 'local', 'status', '--json'], { cwd: root, encoding: 'utf8' }));
+const { chromium } = createRequire(join(root, 'packages/agent-remote-lab/package.json'))('@playwright/test');
+const browser = await chromium.launch({ headless: true });
+try {
+  const context = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+  try {
+    const page = await context.newPage();
+    await page.goto(origin + '/', { waitUntil: 'domcontentloaded', timeout: 30_000 });
+    await page.locator('main.lab-shell').waitFor({ timeout: 30_000 });
+    // 1. Choose the development Host.
+    const host = page.getByRole('combobox').first();
+    const label = (await host.locator('option').allTextContents()).find(text => text.startsWith('Dev · '));
+    if (!label) throw new Error('The Host list has no Dev · Host; check pnpm local status.');
+    await host.selectOption({ label });
+    // 2. Add an empty view, select it, and open the new-session form for it.
+    await page.getByRole('button', { name: 'New session view' }).click();
+    await page.getByText('Choose a session from the sidebar').last().click();
+    await page.getByRole('button', { name: /New session/ }).first().click();
+    // 3. Remember which views already have a composer, then open the session.
+    const panes = '.lab-session-family-pane[data-view-id]';
+    const before = await page.locator(panes).evaluateAll(list => list.filter(pane => pane.querySelector('[data-testid="prompt-input"]')).map(pane => pane.dataset.viewId));
+    await page.locator('#provider-select').selectOption({ label: providerName });
+    await page.getByTestId('session-create').click();
+    // 4. The new session is the view that gained a composer. Pin it by id: other views may already show the same answer.
+    const created = await page.waitForFunction(([selector, ids]) => [...document.querySelectorAll(selector)]
+      .find(pane => !ids.includes(pane.dataset.viewId) && pane.querySelector('[data-testid="prompt-input"]'))?.dataset.viewId,
+    [panes, before], { timeout: 60_000 });
+    const view = page.locator(`${panes}[data-view-id="${await created.jsonValue()}"]`);
+    await page.screenshot({ path: join(evidence, 'session-created.png') });
+    // 5. The answer is not in the prompt, so the user's own message cannot satisfy the check.
+    await view.getByTestId('prompt-input').click();
+    await page.keyboard.type('Reply with the words LOCAL and OK joined by a hyphen, and nothing else.');
+    await view.getByTestId('prompt-submit').click();
+    const reply = view.locator('.agent-message-assistant', { hasText: 'LOCAL-OK' });
+    try { await reply.first().waitFor({ timeout: 120_000 }); }
+    catch (error) { await page.screenshot({ path: join(evidence, 'turn-timeout.png') }); throw error; }
+    await page.screenshot({ path: join(evidence, 'turn-reply.png') });
+    console.log(`${providerName} replied in view ${await view.getAttribute('data-view-id')}: ${(await reply.first().innerText()).replace(/\s+/g, ' ')}`);
+  } finally {
+    // Mirrors scripts/local/session.mjs: the page's session would otherwise stay open on the instance.
+    await context.request.post(origin + '/auth/logout', { headers: { origin, 'content-type': 'application/json' }, data: '{}', timeout: 10_000 }).catch(() => {});
+  }
+} finally {
+  await browser.close();
+}
+````
+
+Run `node --check .agents/skills/prepare-arc-local/scripts/session-turn.mjs`. Expected: exit 0.
+
+- [ ] **Step 8: Link the skills for Claude Code**
 
 ```bash
 mkdir -p .claude
@@ -3175,7 +3246,7 @@ ls .claude/skills/prepare-arc-local/SKILL.md
 
 Expected: the `ls` prints the path (the link resolves).
 
-- [ ] **Step 8: Commit**
+- [ ] **Step 9: Commit**
 
 ```bash
 git add .agents/skills/prepare-arc-local .claude/skills
@@ -3232,7 +3303,7 @@ mkdir -p .tmp/local && pnpm local screenshot / --out .tmp/local/home.png
 
 Expected: status reports `running`, `local user: signed in`, `uplink registered` and a running build equal to `git rev-parse HEAD`; the Hosts list contains `Dev · local-dev-env` online with Claude Code (and Codex if its daemon runs); the screenshot shows the signed-in product. Read the image to confirm.
 
-Then follow `.agents/skills/prepare-arc-local/references/test-loop.md` steps 3–4 with Claude Code: a session in the instance workspace answers `LOCAL-OK`. Confirm the policy boundary: in the instance website, the session list shows no sessions from other directories. Confirm the user's own Controller is unaffected:
+Then follow `.agents/skills/prepare-arc-local/references/test-loop.md` step 3 with Claude Code: a session in the instance workspace answers `LOCAL-OK`. Confirm the policy boundary: in the instance website, the session list shows no sessions from other directories. Confirm the user's own Controller is unaffected:
 
 ```bash
 agent-remote-controller status

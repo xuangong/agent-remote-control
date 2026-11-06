@@ -69,7 +69,9 @@ try {
 `execFileSync` throw; start the instance first. Prefer `getByRole`, `getByLabel`
 and visible text over CSS classes, and wait for the expected control or text
 instead of fixed sleeps. Browser storage does not persist across contexts; the
-product's Window layouts and other per-user state on the instance do.
+product's Window layouts and other per-user state on the instance do, so a Window
+can already hold several session views: scope locators to the view you act in, as
+the [test loop](test-loop.md) does.
 
 If page code fails only in automation, read the console (`page.on('console', …)`)
 and network before calling it a product defect.

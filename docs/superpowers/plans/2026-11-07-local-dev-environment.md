@@ -2363,7 +2363,7 @@ Co-Authored-By: Claude <noreply@anthropic.com>"
 
 **Files:**
 - Create: `docs/local-development.md`
-- Modify: `README.md:736` (section "Run locally")
+- Modify: `README.md:95` and `README.md:736` (sections "Local Devbox" and "Run locally")
 - Modify: `AGENTS.md:12`
 
 - [ ] **Step 1: Write `docs/local-development.md`**
@@ -2399,6 +2399,22 @@ pnpm local list          # every instance on this machine
 pnpm local remove --yes  # delete this checkout's stopped instance
 ```
 
+Before the first `up`, install Node 22 or later, pnpm 10.34.5 and at least one
+agent CLI, signed in natively as you normally use it. The instance reuses that
+sign-in, so it asks for no other. `up` picks a free port the first time and
+keeps it; `pnpm local status` shows the URL.
+
+Sessions in the instance start only inside its `workspace/` directory, not in
+the checkout. When a test needs files, copy or clone a test project into that
+directory. `status` prints the instance directory as `State:`; the workspace is
+its `workspace/` subdirectory (see [How it works](#how-it-works)).
+
+The instance shares your native agent profiles, so its test sessions also
+appear in your own Controller. In the instance website, do not use the
+Controller update, Codex daemon, OpenCode server or VS Code tunnel controls. Use
+the Docker [Devbox](devbox.md) when your native histories must stay untouched.
+See [Shared native profiles](#shared-native-profiles).
+
 `up` installs dependencies first when the checkout has no `node_modules`. A
 failed build leaves a running instance untouched. When the site answers
 `/health` and the Controller reports `uplink: registered`, `up` prints the
@@ -2411,7 +2427,17 @@ recorded); `stale` (the recorded processes are gone; `up` or `down` clears the
 record); `orphaned` (see [Troubleshooting](#troubleshooting)); or `unknown`
 (the processes could not be inspected; the reason is printed).
 
-Other commands:
+Every command except `up`, `status` and `list` needs an instance: `up` creates
+it, and `status` and `list` answer without one. Without an instance, a command
+prints `This checkout has no local instance. Run pnpm local up.` `api` and
+`screenshot` also need the instance to be running. When it exists but is
+stopped, they print `The instance is not running. Run pnpm local up.` `remove`
+also refuses an instance that still runs. It does not delete the test sessions
+from the shared native histories.
+
+### Inspecting the instance
+
+Three commands look into the instance:
 
 ```bash
 pnpm local controller status
@@ -2440,16 +2466,6 @@ pnpm local screenshot / --out page.png
 ```bash
 pnpm --filter @orchardworks/agent-remote-lab exec playwright install chromium
 ```
-
-Without an instance, `up` creates one, and `status` and `list` still answer.
-Every other command stops:
-
-- Without an instance, it prints
-  `This checkout has no local instance. Run pnpm local up.`
-- `api` and `screenshot` also need the instance to be running. When it exists
-  but is stopped, they print `The instance is not running. Run pnpm local up.`
-- `remove` also refuses an instance that still runs. It does not delete the test
-  sessions from the shared native histories.
 
 ### Machine-readable output
 
@@ -2483,6 +2499,32 @@ status it prints. `list`, `logs` and `controller` never sign in. Past the limit,
 [Troubleshooting](#troubleshooting)), and `status` reports the local user as
 unavailable. Do not call `status` or `api` in a tight loop.
 
+### Cleaning up
+
+Before you remove a worktree, stop and delete its instance from that worktree:
+
+```bash
+pnpm local down
+pnpm local remove --yes
+```
+
+Neither command deletes the test sessions; they remain in the shared native
+histories.
+
+If the worktree is already gone, its instance is still on the machine, and
+`pnpm local list` from any checkout shows it. Its directory is
+`<root>/instances/<name>`: `<name>` is the first column of `list`, and `<root>`
+is `~/.agent-remote-control-dev` unless `ARC_LOCAL_ROOT` names another
+directory (set it the same way for `list`).
+
+If that directory holds a `runtime.json`, its `runnerPid` and `controllerPid`
+may still run. Confirm each with `ps -ww -o command= -p PID`. The runner shows
+`node …/scripts/local/runner.mjs <directory>` and the Controller shows
+`…/packages/agent-host/dist/cli.js foreground`; leave any other process alone,
+because the PID may belong to something else by now. Stop the runner with
+`kill PID`, which stops its Controller and closes the site. If the Controller
+still runs, stop it the same way. Then delete the instance directory.
+
 ## How it works
 
 Each checkout has one instance, named after the checkout directory and an
@@ -2507,14 +2549,17 @@ The first start pairs it through the local identity; later starts reuse its
 device credential. The port is chosen on the first start and kept, because the
 local identity is bound to the origin. The site listens on the loopback
 interface only, and `up` refuses to start while either `127.0.0.1` or `::1`
-holds the port.
+holds the port. The instance signs in anyone who can reach its port, so never
+forward or publish it.
 
 `down`, and the stop that `up` performs before it restarts, ask the runner to
 stop; it stops the Controller and then closes the site. Commands that change an
 instance run one at a time, guarded by `operation.lock`.
 
 Nothing is installed as a login service and nothing survives a reboot. Your own
-Controller, its state and its launchd service are not touched.
+Controller, its state and its launchd service are not touched, but see
+[Shared native profiles](#shared-native-profiles) for what the instance does
+share.
 
 ## Environment variables
 
@@ -2555,7 +2600,7 @@ Messages print the absolute path of the instance directory. In this table,
 
 | Symptom | Check |
 | --- | --- |
-| `Port <port> is in use by another process` | Another program holds the instance's port on `127.0.0.1` or `::1`. Free it; the origin cannot change. |
+| `Port <port> is in use by another process` | Another program holds the instance's port on `127.0.0.1` or `::1`. Free it; the origin cannot change. Alternatively run `pnpm local remove --yes`, then `pnpm local up`: the new instance gets a new port, at the cost of the old instance's site state and Controller pairing. |
 | `Build artifacts are missing (…)` | `--no-build` found no earlier build. Run `pnpm local up` without it. |
 | `The runner exited during startup.` | The error ends with the last lines of `runner.log` and `controller.log`; `pnpm local logs` shows more. The log names the reason, for example `This instance's Controller state belongs to another site origin. Remove the instance with pnpm local remove --yes.` and `The instance's saved Controller connection is unreadable (…)`. For the second, check `<instance>/controller/connection.json` without pasting it anywhere: it holds the device key. |
 | `The instance did not become ready within 90 seconds while waiting for the site` (or `…for Controller registration`) | `up` stopped the runner it started and printed the log tails. Read them, or raise `ARC_LOCAL_READY_TIMEOUT_MS` on a slow machine. |
@@ -2566,7 +2611,9 @@ Messages print the absolute path of the instance directory. In this table,
 | `This environment does not allow listening on local ports (EPERM)` or `This environment does not allow starting background processes (EPERM)` | The session's sandbox refuses the local listener or the detached runner (the code can also be `EACCES`). Run `pnpm local` from a session without the sandbox (YOLO mode). |
 | `The instance's sign-in limit (30 per minute) is exhausted; retry within a minute.` | Too many sign-ins in the last minute, counting your browser. Wait a minute, then retry. |
 | `Playwright is not ready in <checkout>.` | Install dependencies in that checkout, then run the `playwright install chromium` command the message names. |
-| A provider is missing | It is not installed or detected on this machine, or Codex has no running daemon. |
+| A provider is missing | It is not installed or detected on this machine, or Codex has no running daemon. Install the provider or sign in to it natively, then run `pnpm local up` again. |
+
+## Testing the launcher
 
 `pnpm test:local-env` runs the launcher's unit and integration tests with a
 temporary home and instance root. It needs the Controller build and Playwright's
@@ -2578,7 +2625,14 @@ Chromium to exist first.
 In `README.md`, after line 736 (`Use Node 22 or later and pnpm 10.34.5. All commands run from this repository root.`) insert a blank line and:
 
 ```markdown
-To try the complete product from a checkout or worktree on macOS — signed in automatically, with a development Controller that uses your installed agents — run `pnpm local up`. See [local development](docs/local-development.md).
+To try the complete product from a checkout or worktree on macOS or Linux — signed in automatically, with a development Controller that uses your installed agents — run `pnpm local up`. See [local development](docs/local-development.md).
+```
+
+Then, in the "Local Devbox" section, after line 95 (`workspace mounts, logs, rebuilds and data retention.`, the last line of the section) insert a blank line and:
+
+```markdown
+To run the product from a checkout without Docker, see
+[local development](docs/local-development.md).
 ```
 
 - [ ] **Step 3: Point agents at the skill**
@@ -2586,7 +2640,7 @@ To try the complete product from a checkout or worktree on macOS — signed in a
 In `AGENTS.md`, after line 12 (`- Preserve existing local services and untracked user material. Use configurable free ports for local validation.`) insert:
 
 ```markdown
-- Verify website, Relay and Controller changes in this checkout's local instance (`pnpm local up`); follow `.agents/skills/prepare-arc-local/SKILL.md`.
+- When a change affects the website, Relay or Controller, verify it in this checkout's local instance (`pnpm local up`); follow `.agents/skills/prepare-arc-local/SKILL.md`.
 ```
 
 - [ ] **Step 4: Check the docs**

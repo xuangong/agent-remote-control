@@ -50,9 +50,9 @@ and the uplink is `registered`. The other states are `stopped` (run `up`),
 
 `Running build` is the commit and dirty flag recorded when the instance started;
 `checkout now` is read at the time of the call. A different commit means the build
-is old. The dirty flag does not change after the start, so edits made after `up`
-are invisible to `status`: run `pnpm local up` after your last edit before you
-verify. `local user: unavailable` on a running instance can be the sign-in limit;
+is old. `Running build` keeps the dirty flag from the start, so further edits to
+an already dirty checkout do not show in `status`: run `pnpm local up` after your
+last edit before you verify. `local user: unavailable` on a running instance can be the sign-in limit;
 wait a minute instead of calling `status` again.
 
 ## When something fails

@@ -72,8 +72,10 @@ profiles with the user's own Controller.
    code can also be `EACCES`). Report the refusal and ask for YOLO mode; do not
    work around the sandbox.
 9. Report a leftover-lock message. Remove `<instance>/operation.lock` only when the
-   message says the previous command was interrupted; when it says another
-   command is changing the instance, wait for that command instead.
+   message says the previous command was interrupted. When it says another
+   command is changing the instance, wait for that command; if after a few
+   minutes no `pnpm local` command is running (check with `ps`), report it to
+   the user before removing the lock.
 
 ## Report
 

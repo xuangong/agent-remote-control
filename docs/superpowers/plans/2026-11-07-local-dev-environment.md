@@ -2747,8 +2747,10 @@ profiles with the user's own Controller.
    code can also be `EACCES`). Report the refusal and ask for YOLO mode; do not
    work around the sandbox.
 9. Report a leftover-lock message. Remove `<instance>/operation.lock` only when the
-   message says the previous command was interrupted; when it says another
-   command is changing the instance, wait for that command instead.
+   message says the previous command was interrupted. When it says another
+   command is changing the instance, wait for that command; if after a few
+   minutes no `pnpm local` command is running (check with `ps`), report it to
+   the user before removing the lock.
 
 ## Report
 
@@ -2813,9 +2815,9 @@ and the uplink is `registered`. The other states are `stopped` (run `up`),
 
 `Running build` is the commit and dirty flag recorded when the instance started;
 `checkout now` is read at the time of the call. A different commit means the build
-is old. The dirty flag does not change after the start, so edits made after `up`
-are invisible to `status`: run `pnpm local up` after your last edit before you
-verify. `local user: unavailable` on a running instance can be the sign-in limit;
+is old. `Running build` keeps the dirty flag from the start, so further edits to
+an already dirty checkout do not show in `status`: run `pnpm local up` after your
+last edit before you verify. `local user: unavailable` on a running instance can be the sign-in limit;
 wait a minute instead of calling `status` again.
 
 ## When something fails
@@ -2912,8 +2914,8 @@ prints `Saved <path>`. It signs in once and out again. `HOST` is a Host `id` fro
 `pnpm --silent local api v1/remote/hosts`. Keep evidence under the checkout's
 ignored `.tmp/`.
 
-`Playwright is not ready in <checkout>. …` means Chromium is not installed:
-run the `pnpm --filter @orchardworks/agent-remote-lab exec playwright install chromium`
+`Playwright is not ready in <checkout>. …` means its dependencies or Chromium
+are missing: install dependencies in the checkout if needed, then run the `pnpm --filter @orchardworks/agent-remote-lab exec playwright install chromium`
 command the message names.
 
 ## Scripted interaction

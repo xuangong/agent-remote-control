@@ -23,8 +23,8 @@ prints `Saved <path>`. It signs in once and out again. `HOST` is a Host `id` fro
 `pnpm --silent local api v1/remote/hosts`. Keep evidence under the checkout's
 ignored `.tmp/`.
 
-`Playwright is not ready in <checkout>. …` means Chromium is not installed:
-run the `pnpm --filter @orchardworks/agent-remote-lab exec playwright install chromium`
+`Playwright is not ready in <checkout>. …` means its dependencies or Chromium
+are missing: install dependencies in the checkout if needed, then run the `pnpm --filter @orchardworks/agent-remote-lab exec playwright install chromium`
 command the message names.
 
 ## Scripted interaction

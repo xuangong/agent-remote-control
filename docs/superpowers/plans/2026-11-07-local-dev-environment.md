@@ -2695,10 +2695,11 @@ use it safely and what counts as evidence.
 processes, and Chromium for screenshots. If `up` prints `This environment does not
 allow listening on local ports` or `… starting background processes`, or Chromium
 cannot start, stop and ask the user to re-run the work in a session without those
-restrictions (Claude Code: bypass-permissions mode; Codex: full access). You cannot
-change this yourself; do not work around the sandbox. Meanwhile you can still run
-unit tests. Report the Page, Feature and Model turn layers as not exercised, and
-Site and Controller too when `up` itself was refused.
+restrictions (Claude Code: bypass-permissions mode; Codex: full access; the
+launcher's messages call this YOLO mode). You cannot change this yourself; do not
+work around the sandbox. Meanwhile you can still run unit tests; the
+[Stop and ask the user](#stop-and-ask-the-user) table says what to report as not
+exercised.
 
 ## Choose the reference
 
@@ -2712,7 +2713,10 @@ Site and Controller too when `up` itself was refused.
 
 Run every command from the checkout whose code you are verifying. An instance
 runs the build it was started with. Rebuild with `pnpm local up` after every code
-change; a check against an older build is not a check of your change.
+change; a check against an older build is not a check of your change. If the
+instance is already running, check first per
+[Before restarting a running instance](references/lifecycle.md#before-restarting-a-running-instance):
+`up` restarts it and interrupts its sessions.
 
 ## Machine use and the sign-in budget
 
@@ -2879,6 +2883,9 @@ lsof -nP -iTCP:<port> -sTCP:LISTEN
 ps -ww -o command= -p <pid>
 ```
 
+If `lsof` or `ps` is refused or shows nothing usable, the holder cannot be
+confirmed: stop and ask the user.
+
 - `node …/scripts/local/runner.mjs <instance>`, ending in this instance's own
   directory, is its leftover: `kill <pid>`, then `up`.
 - Another instance's runner (`scripts/local/runner.mjs <other instance directory>`,
@@ -2890,16 +2897,18 @@ ps -ww -o command= -p <pid>
 ### Locks
 
 A message naming `<instance>/operation.lock` means a `pnpm local` command holds,
-or left behind, that lock. Decide from `<instance>/operation.lock/owner.json`,
-which holds the owner's `pid`:
+or left behind, that lock. Read the owner's `pid` from
+`<instance>/operation.lock/owner.json` and check its command with
+`ps -ww -o command= -p <pid>`. The message does not decide it: `A previous local
+command (pid <pid>) was interrupted…` means the pid is not running, but
+`Another local command is changing this instance…` also appears when an unrelated
+program reused the pid.
 
-- The pid runs a `node scripts/local/command.mjs …` command
-  (`ps -ww -o command= -p <pid>`): another command is changing this instance. Do
-  not remove the lock. Wait for it when it is yours, such as your own background
-  `up`; otherwise, or when it still runs after a few minutes, stop and ask the
-  user.
-- The pid does not run (or `ps` shows an unrelated program that reused the pid):
-  the command is gone. The message then says it was interrupted; remove
+- The command is a `pnpm local` or `node …/scripts/local/command.mjs …` process for
+  this checkout: another command is changing this instance. Do not remove the
+  lock. Wait for it when it is yours, such as your own background `up`; otherwise,
+  or when it still runs after a few minutes, stop and ask the user.
+- The pid does not run, or runs an unrelated program: the command is gone. Remove
   `<instance>/operation.lock` and retry.
 - `owner.json` is missing or unreadable: the command may be starting. Retry once
   after a few seconds; if the message is unchanged, stop and ask the user.
@@ -3139,7 +3148,10 @@ Use this when a change affects sessions, or when asked for a complete local test
    If no such reply appears within the two minutes, take the screenshot (the
    snippet does), read `pnpm local controller diagnostics --source controller --limit 60`,
    and note the Model turn as failed in the report, with what both show. Do not resend the
-   prompt or retry the turn.
+   prompt or retry the turn. If the diagnostics or the page show a provider access
+   error (sign-in, quota or model access), it is not a failure: handle it as the
+   provider row of [Stop and ask the user](../SKILL.md#stop-and-ask-the-user)
+   (stop and ask; the Model turn is not exercised).
 5. Exercise the behaviour under change through the page controls — Window, Side,
    Team, references and so on — with a screenshot of each state your conclusion
    rests on and a DOM assertion for each text or state change.

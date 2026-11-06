@@ -78,6 +78,14 @@ test('names the file when an instance record is not valid JSON', async t => {
   await assert.rejects(prepareInstance('/src/one', environment), error => error.message === `${instance.recordFile} is not valid JSON.`);
 });
 
+test('leaves no temporary file behind when a JSON file cannot be replaced', async t => {
+  const directory = await temporaryRoot(t);
+  const target = join(directory, 'runtime.json');
+  await mkdir(target);
+  await assert.rejects(writeJson(target, { version: 1 }));
+  assert.deepEqual((await readdir(directory)).filter(name => name.endsWith('.tmp')), []);
+});
+
 test('reports whether a port is free', async t => {
   const server = createServer();
   t.after(() => server.close());

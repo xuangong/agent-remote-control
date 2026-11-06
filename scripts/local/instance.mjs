@@ -44,7 +44,8 @@ export async function readJson(path) {
 export async function writeJson(path, value) {
   const temporary = `${path}.${process.pid}.tmp`;
   await writeFile(temporary, JSON.stringify(value, null, 2) + '\n', { mode: 0o600 });
-  await rename(temporary, path);
+  try { await rename(temporary, path); }
+  catch (error) { await rm(temporary, { force: true }).catch(() => {}); throw error; }
 }
 
 /** Creates the file with its full content or leaves an existing one untouched; readers never see a partial file. */

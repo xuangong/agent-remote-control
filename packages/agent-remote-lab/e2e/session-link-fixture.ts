@@ -44,6 +44,13 @@ export async function sessionLinkFixture(options: { automaticSignIn?: boolean; l
   const invitation = await pairing.json();
   const relay = createAgentRemoteRelay({ providers: [createRecordedLabProvider().provider] });
   const natives = new Map<string, string>();
+  // Session references as a Controller keeps them: a Side's source, removable and restorable, and added sessions.
+  const references = new Map<string, { revision: number; source?: { nativeSessionId: string; removed: boolean }; added: string[] }>();
+  const describeReferences = (nativeSessionId: string) => {
+    const saved = references.get(nativeSessionId) ?? { revision: 0, added: [] };
+    const ref = (id: string, origin: 'source' | 'added') => ({ providerId: 'recorded', nativeSessionId: id, title: 'New session', origin });
+    return { revision: saved.revision, refs: [...(saved.source && !saved.source.removed ? [ref(saved.source.nativeSessionId, 'source')] : []), ...saved.added.map(id => ref(id, 'added'))] };
+  };
   // Shared session states as a Controller reports them; a test may hold a session in a state its recording never reaches.
   const heldStates = new Map<string, SessionActivityState>();
   const sessionStates = options.sessionStates ? createSessionStatePublisher({
@@ -55,12 +62,20 @@ export async function sessionLinkFixture(options: { automaticSignIn?: boolean; l
   }, { liveIntervalMs: 200 }) : undefined;
   const uplink = createRemoteHostUplinkClient({ relay, url: url.replace('http:', 'ws:') + '/ws/remote-host', remoteKey: invitation.key,
     ...(sessionStates ? { sessionStates } : {}),
-    installationId: randomUUID(), name: 'Cross-device Host', providers: [{ providerId: 'recorded', displayName: 'Recorded Provider' }],
+    installationId: randomUUID(), name: 'Cross-device Host', providers: [{ providerId: 'recorded', displayName: 'Recorded Provider', sessionReferences: true }],
     resolveSession: (id) => [...natives.values()].includes(id) ? relay.requireAgent(id) : undefined,
     async control(control) {
       if (control.path.startsWith('/remote/catalog')) return { status: 200, body: JSON.stringify({ items: options.listCreatedSessions ? [...natives.keys()].map(nativeSessionId => ({ nativeSessionId, providerId: 'recorded', title: 'New session', createdAt: '2026-10-16T00:00:00Z', updatedAt: '2026-10-16T00:00:00Z', state: 'idle' })) : [], hasMore: false, revision: String(natives.size) }) };
       if (control.path.startsWith('/remote/workspaces')) return { status: 200, body: JSON.stringify({ workspaces: [] }) };
+      if (control.path.startsWith('/remote/session/refs?')) return { status: 200, body: JSON.stringify(describeReferences(new URL(control.path, 'http://host').searchParams.get('nativeSessionId')!)) };
       const body = JSON.parse(control.body ?? '{}');
+      if (control.path === '/remote/session/refs') {
+        const saved = references.get(body.nativeSessionId) ?? { revision: 0, added: [] }, target = body.target.nativeSessionId as string;
+        if (saved.source?.nativeSessionId === target) saved.source.removed = body.action === 'remove';
+        else saved.added = body.action === 'add' ? [...saved.added.filter(id => id !== target), target] : saved.added.filter(id => id !== target);
+        references.set(body.nativeSessionId, { ...saved, revision: saved.revision + 1 });
+        return { status: 200, body: JSON.stringify(describeReferences(body.nativeSessionId)) };
+      }
       if (control.path === '/remote/attach' || control.path === '/remote/child/attach') {
         const agentId = natives.get(body.nativeSessionId);
         // A Controller reports a session its native agent does not have this way.
@@ -73,6 +88,7 @@ export async function sessionLinkFixture(options: { automaticSignIn?: boolean; l
         requestId: randomUUID(), operationId: body.operationId, agentId, providerId: 'recorded', config: { sessionId: nativeSessionId },
       } });
       natives.set(nativeSessionId, agentId);
+      if (body.sourceNativeSessionId) references.set(nativeSessionId, { revision: 0, source: { nativeSessionId: body.sourceNativeSessionId, removed: false }, added: [] });
       return { status: 200, body: JSON.stringify({ agentId, nativeSessionId }) };
     },
   });

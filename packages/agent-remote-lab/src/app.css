@@ -1549,3 +1549,23 @@ html[data-input-modality="pointer"] :focus { outline: none !important; }
 
 .lab-workbench-layout.lab-workbench-with-todo { grid-template-rows: auto auto minmax(0, 1fr) auto; }
 .lab-workbench-layout.lab-workbench-with-todo.lab-workbench-toolbar-heading { grid-template-rows: auto minmax(0, 1fr) auto; }
+/* References start where the composer starts, like the source reference. */
+.lab-session-refs { position: relative; display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 3px 0 5px max(0px, calc((100% - 900px) / 2)); max-width: min(100%, 900px); }
+.lab-session-ref { display: inline-flex; align-items: center; max-width: 100%; font-size: 12px; }
+.lab-session-ref button { display: flex; align-items: center; gap: 6px; min-width: 0; min-height: 30px; padding: 3px 6px 3px 5px; border: 0; border-radius: 0; background: transparent; color: var(--obs-text); font-size: 12px; }
+.lab-session-ref button:hover:not(:disabled) { background: var(--obs-surface-selected); }
+.lab-session-ref .lab-session-ref-open { max-width: 280px; }
+.lab-session-ref .lab-session-ref-remove { padding-inline: 8px; border-left: 1px solid var(--obs-border); color: var(--obs-text-secondary); }
+.lab-session-ref-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.lab-session-ref-symbol { display: inline-grid; place-items: center; width: 24px; height: 24px; flex-shrink: 0; font-size: 14px; }
+.lab-session-ref-add { min-width: 30px; min-height: 30px; padding: 0 8px; border: 1px dashed var(--obs-control-border); border-radius: 6px; background: transparent; color: var(--obs-text-secondary); }
+.lab-session-ref-add:hover, .lab-session-ref-add[aria-expanded="true"] { color: var(--obs-action); background: var(--obs-surface-selected); }
+.lab-session-ref-picker { position: absolute; z-index: 20; left: 0; bottom: calc(100% + 8px); display: grid; gap: 8px; width: min(420px, calc(100vw - 32px)); max-height: min(420px, 60vh); padding: 12px; overflow: hidden; border: 1px solid var(--obs-border); border-radius: 10px; background: var(--obs-surface); box-shadow: 0 6px 24px color-mix(in oklab, var(--obs-text) 12%, transparent); font-size: 12px; }
+.lab-session-ref-picker ul { display: grid; gap: 2px; margin: 0; padding: 0; overflow-y: auto; list-style: none; }
+.lab-session-ref-picker li button { display: grid; gap: 2px; width: 100%; padding: 6px 8px; border: 0; border-radius: 6px; background: transparent; color: var(--obs-text); text-align: left; }
+.lab-session-ref-picker li button:hover:not(:disabled) { background: var(--obs-surface-selected); }
+.lab-session-ref-picker small { color: var(--obs-text-secondary); }
+.lab-session-ref-picker > button { justify-self: start; }
+@media (pointer: coarse) {
+  .lab-session-ref button, .lab-session-ref-add, .lab-session-ref-picker li button { min-height: 44px; }
+}

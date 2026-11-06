@@ -21,7 +21,8 @@ export type RemoteHostHeartbeat = Static<typeof RemoteHostHeartbeat>;
 const heartbeatNonce = Type.String({ minLength: 1, maxLength: 128 });
 const rpc = { uplinkVersion: version, requestId: identity };
 const stream = { uplinkVersion: version, streamId: identity };
-const provider = Type.Object({ providerId: identity, displayName: identity, promptEditing: Type.Optional(Type.Literal(true)), sessionRename: Type.Optional(Type.Literal(true)), daemonControl: Type.Optional(Type.Literal(true)) }, object);
+const provider = Type.Object({ providerId: identity, displayName: identity, promptEditing: Type.Optional(Type.Literal(true)), sessionRename: Type.Optional(Type.Literal(true)),
+  sessionReferences: Type.Optional(Type.Literal(true)), daemonControl: Type.Optional(Type.Literal(true)) }, object);
 export const PreviewRegistrationSnapshot = Type.Object({
   epoch: identity, revision: Type.Integer({ minimum: 0 }),
   registrations: Type.Array(Type.Object({
@@ -40,7 +41,7 @@ const closeCode = Type.Union([
 
 const requestPath = Type.String({
   maxLength: 8192,
-  pattern: '^/(remote/(catalog(?:/(?:revision|session))?|workspaces|workspace-folders(?:/create)?(?=\\?|$)|models|succession/enrollment(?=$)|diagnostics/relay(?=$)|controller-update(?=$)|codex-daemon(?=$)|team/(?:create-seat|support-bundle|support-patch)(?=$)|tpm(?:/(?:work|create|action))?(?=\\?|$)|provider-settings(?=$)|session/rename(?=$)|child/attach|attach|create|stop|vscode-tunnel(?:/(?:start|stop))?(?=$)|previews(?:/unregister)?)|v1/(providers|sessions))(?:[/?][^#]*)?$',
+  pattern: '^/(remote/(catalog(?:/(?:revision|session))?|workspaces|workspace-folders(?:/create)?(?=\\?|$)|models|succession/enrollment(?=$)|diagnostics/relay(?=$)|controller-update(?=$)|codex-daemon(?=$)|team/(?:create-seat|support-bundle|support-patch)(?=$)|tpm(?:/(?:work|create|action))?(?=\\?|$)|provider-settings(?=$)|session/rename(?=$)|session/refs(?=\\?|$)|child/attach|attach|create|stop|vscode-tunnel(?:/(?:start|stop))?(?=$)|previews(?:/unregister)?)|v1/(providers|sessions))(?:[/?][^#]*)?$',
 });
 
 export const RemoteHostUplinkMessage = Type.Union([
@@ -107,7 +108,8 @@ function validRemoteHostUplinkMessage(value: unknown): value is RemoteHostUplink
     const sessionScoped = pathname === '/remote/attach' || pathname === '/remote/child/attach' || pathname === '/remote/create' || pathname === '/v1/providers'
       || /^\/v1\/sessions\/[^/]+\/(snapshot|timeline)$/.test(pathname);
     if (sessionScoped !== (value.sessionId !== undefined)) return false;
-    if (pathname === '/remote/previews' || pathname === '/remote/controller-update' || pathname === '/remote/codex-daemon' || pathname === '/remote/provider-settings') return value.method === 'GET' ? value.body === undefined : value.body !== undefined;
+    if (pathname === '/remote/previews' || pathname === '/remote/controller-update' || pathname === '/remote/codex-daemon' || pathname === '/remote/provider-settings'
+      || pathname === '/remote/session/refs') return value.method === 'GET' ? value.body === undefined : value.body !== undefined;
     if (pathname.startsWith('/remote/')) {
       const isRead = pathname === '/remote/tpm' || pathname === '/remote/tpm/work' || pathname === '/remote/catalog' || pathname === '/remote/catalog/revision'
         || pathname === '/remote/catalog/session' || pathname === '/remote/workspaces' || pathname === '/remote/workspace-folders' || pathname === '/remote/models' || pathname === '/remote/vscode-tunnel';

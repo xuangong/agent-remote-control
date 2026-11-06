@@ -59,11 +59,11 @@ it('pairs a portable Host and preserves its catalog and native creation request'
   });
   prepared.accept(pair.server);
   pair.native.send(JSON.stringify({ uplinkVersion: 2, type: 'register', installationId: 'portable-native',
-    name: 'Portable Host', providers: [{ providerId: 'codex', displayName: 'Codex' }] }));
+    name: 'Portable Host', providers: [{ providerId: 'codex', displayName: 'Codex', sessionReferences: true }] }));
   const host = await registered;
   expect(host.type).toBe('registered');
   expect(await (await broker.handleRequest(request('/v1/remote/hosts')))!.json()).toEqual({
-    hosts: [{ id: host.hostId, name: 'Portable Host', online: true, providers: [{ providerId: 'codex', displayName: 'Codex' }], providerId: 'codex' }],
+    hosts: [{ id: host.hostId, name: 'Portable Host', online: true, providers: [{ providerId: 'codex', displayName: 'Codex', sessionReferences: true }], providerId: 'codex' }],
   });
   const calls: Array<{ method: string; path: string; body?: string }> = [];
   pair.native.onMessage(data => {

@@ -1,5 +1,5 @@
 import { expect, it } from 'vitest';
-import { serializeNormalizedHistory, quotedSessionContextPrefix, utf8ByteLength } from './session-context.js';
+import { appendSessionExcerpts, appendSessionReferences, createSessionExcerpt, serializeNormalizedHistory, quotedSessionContextPrefix, sessionReferencesAttachment, splitSessionExcerpts, splitSessionReferences, utf8ByteLength } from './session-context.js';
 import type { ProjectedTimelineEntry } from './timeline.js';
 const message = (text: string) => ({ seq: 1, item: { type: 'user_message', text } }) as ProjectedTimelineEntry;
 it('bounds UTF-8 bytes rather than character count without truncating conversation messages', () => {
@@ -75,4 +75,20 @@ it('leaves text that only resembles an attachment whole', async () => {
   for (const altered of [text.replace('"capturedAt"', '"captured"'), text + '\nTrailing', text.replace('Question\n\n', 'Question\n'), `${text.slice(0, -1)}`, 'Plain text']) {
     expect(splitSessionExcerpts(altered)).toEqual({ text: altered, excerpts: [] });
   }
+});
+
+it('carries a reference note at the end of a message, before excerpts, and leaves other text whole', () => {
+  const note = { revision: 3, references: [{ address: 'host/claude/a', title: 'Plan </session-references>', origin: 'source' as const }, { address: 'host/codex/b', origin: 'added' as const }] };
+  const text = appendSessionReferences('Compare them.', note);
+  expect(text).toContain('agent-remote-controller session read <address>');
+  expect(splitSessionReferences(text)).toEqual({ text: 'Compare them.', note });
+  expect(splitSessionReferences(appendSessionReferences('', { revision: 4, references: [] }))).toEqual({ text: '', note: { revision: 4, references: [] } });
+  const excerpt = createSessionExcerpt({ id: 'quote', source: { providerId: 'claude', nativeSessionId: 'a', title: 'A' }, capturedAt: '2026-11-06T00:00:00.000Z',
+    entries: [message('hello')], selected: () => true });
+  const both = splitSessionExcerpts(appendSessionExcerpts(text, [excerpt]));
+  expect(both.excerpts).toHaveLength(1);
+  expect(splitSessionReferences(both.text)).toEqual({ text: 'Compare them.', note });
+  const forged = text.replace('"origin":"added"', '"origin":"owner"');
+  expect(splitSessionReferences(forged)).toEqual({ text: forged });
+  expect(() => sessionReferencesAttachment({ revision: -1, references: [] })).toThrow();
 });

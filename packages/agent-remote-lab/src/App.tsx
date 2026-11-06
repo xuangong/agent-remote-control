@@ -136,6 +136,8 @@ import { SideConversation } from './components/SideConversation.js';
 import { SessionAsk } from './components/SessionAsk.js';
 import { useAskConversations } from './hooks/useAskConversations.js';
 import { ForkEntries, ForkReference } from './components/ForkReference.js';
+import { refCommand, SessionReferences } from './components/SessionReferences.js';
+import { loadSessionRefs, sessionRefsEntry, withSessionReferences, type LabSessionRef } from './session-references.js';
 import { sideNavigationSource, sideNavigationTarget, sideLinkVisible, referenceForkContext, captureForkContext, forkDisplayState, ForkStore, type SessionFork } from './session-forks.js';
 import { CollapsedConversations } from './components/CollapsedConversations.js';
 import { MinimizeMainSession, SessionDockProvider, SessionDockRail } from './components/SessionDock.js';
@@ -305,6 +307,7 @@ function AppContent({
   // Messages being selected in one session view to quote into another; creationId keeps a retried new session single.
   const [quoteSelection, setQuoteSelection] = useState<{ viewId: string; epoch: string | null; keys: ReadonlySet<string>; creationId?: string; busy?: boolean; error?: string }>();
   const [quoteNotice, setQuoteNotice] = useState<{ viewId: string; message: string; open?(): Promise<void> }>();
+  const [referencePicker, setReferencePicker] = useState<string>();
   const [sessionOptions, setSessionOptions] = useState<CreateSessionOptions>({});
   const [directoryRevision, setDirectoryRevision] = useState(0);
   const creationReservation = useRef<{ operationId: string; options: CreateSessionOptions; providerId: string; destination?: { windowId: string; viewId: string; binding: string } }>();
@@ -1396,6 +1399,17 @@ function AppContent({
       label: 'Undo', onClick: async () => { await refreshRelations.setLinked(unlinked, true); },
     });
   }
+  /** A removed source also leaves its source's Sides, so the conversation stands on its own. */
+  async function removedReference(ref: LabSessionRef, restore: () => Promise<void>, fork: SessionFork | undefined): Promise<void> {
+    if (ref.origin === 'source' && fork && sideLinkVisible(fork)) await refreshRelations.setLinked(fork, false).catch(() => undefined);
+    toast?.show(`reference:${ref.providerId}/${ref.nativeSessionId}`, 'Reference removed', 'The agent hears about it with your next message.', 'info', {
+      label: 'Undo', onClick: async () => { await restore(); },
+    });
+  }
+  async function restoredReference(fork: SessionFork | undefined): Promise<void> {
+    const current = fork && forkStore.get(fork.id);
+    if (current && !sideLinkVisible(current)) await refreshRelations.setLinked(current, true).catch(() => undefined);
+  }
   function sourceCurrent(source: OpenedSession): boolean {
     return !sourceStale(source);
   }
@@ -2168,6 +2182,19 @@ function AppContent({
     if (!wrapped) byView.set(key, wrapped = withViewQuotes(base, baseUrl, viewId));
     return wrapped;
   }
+  const referencedActionCache = useRef(new WeakMap<LabWorkbenchActions, Map<string, LabWorkbenchActions>>());
+  const referencedStates = useRef(new Map<string, AgentReplicaState | undefined>());
+  /** The next message of a view carries the session's changed references; the wrapper stays stable while its session does. */
+  function referencedActions(base: LabWorkbenchActions, session: OpenedSession, state: AgentReplicaState | undefined): LabWorkbenchActions {
+    const holder = { hostId: session.hostId, providerId: session.providerId, nativeSessionId: session.nativeSessionId };
+    const key = JSON.stringify([baseUrl, holder.hostId ?? 'local', holder.providerId, holder.nativeSessionId]);
+    referencedStates.current.set(key, state);
+    let byHolder = referencedActionCache.current.get(base);
+    if (!byHolder) referencedActionCache.current.set(base, byHolder = new Map());
+    let wrapped = byHolder.get(key);
+    if (!wrapped) byHolder.set(key, wrapped = withSessionReferences(base, baseUrl, holder, () => referencedStates.current.get(key)));
+    return wrapped;
+  }
   /** Starting a selection in another view replaces the one in progress. */
   function quoteEntrySelection(viewId: string, epoch: string | null): TimelineEntrySelection {
     const selected = quoteSelection?.viewId === viewId && quoteSelection.epoch === epoch ? quoteSelection.keys : undefined;
@@ -2196,6 +2223,10 @@ function AppContent({
       && !context.sessionState.readOnly && !context.operationBinding.historical && host?.access !== 'shared' && host?.online === true;
     const mayRename = !team && userScoped && host?.online && host.access !== 'shared' && host.providers?.some(provider => provider.providerId === source.providerId && provider.sessionRename);
     const sourceForks = forkStore.linked().filter(item => item.target && sessionKey(sideNavigationSource(item)) === sessionKey(source));
+    // References live on the Host; a shared Host's sessions keep showing only their source.
+    const referencing = userScoped && !!directory && host?.access !== 'shared' && !!host?.providers?.some(provider => provider.providerId === source.providerId && provider.sessionReferences);
+    const refHolder = { hostId: source.hostId, providerId: source.providerId, nativeSessionId: source.nativeSessionId };
+    const forkReference = fork ? <ForkReference fork={fork} onOpen={revealSession} onUnlink={unlinkSide} onRecover={record => refreshRelations.reconcile(record)} /> : null;
     // Quoting happens between the session views of shared Windows.
     const quoteView = sharedWindow && context.windowViewId && !source.parentNativeSessionId ? context.windowViewId : undefined;
     return {
@@ -2215,11 +2246,19 @@ function AppContent({
       },
       revealEntry: letterReveals[source.agentId] ?? (traceRequest?.view === 'workbench' && context.state?.agent?.id === state?.agent?.id ? traceRequest : undefined),
       onPendingInputChange: (count: number) => setPendingGroupInputs(values => values[source.viewId] === count ? values : { ...values, [source.viewId]: count }),
-      actions: forkInputStatus?.pending && forkInputStatus.agentId === source.agentId ? { deleteMessage: commands.deleteMessage } : quoteView ? quotedActions(commands, quoteView) : commands,
+      actions: forkInputStatus?.pending && forkInputStatus.agentId === source.agentId ? { deleteMessage: commands.deleteMessage }
+        : referencing ? referencedActions(quoteView ? quotedActions(commands, quoteView) : commands, source, context.state) : quoteView ? quotedActions(commands, quoteView) : commands,
       ...(quoteView && context.state ? { entrySelection: quoteEntrySelection(quoteView, context.state.timeline.epoch) } : {}),
       ...(quoteView ? { receiveQuotes: (excerpts: readonly SessionExcerpt[]) => restoreQuotes(baseUrl, quoteView, excerpts) } : {}),
-      consoleCommands: [...(available && directory && context.state?.agent?.capabilities.sendMessage && context.state.agent.capabilities.history ? forkCommands : []), ...(handoffAvailable ? [handoffCommand] : [])],
+      consoleCommands: [...(available && directory && context.state?.agent?.capabilities.sendMessage && context.state.agent.capabilities.history ? forkCommands : []), ...(handoffAvailable ? [handoffCommand] : []),
+        ...(referencing && available ? [refCommand] : [])],
       onExecuteConsoleCommand: async (id: string, args: string): Promise<AgentCommandResult> => {
+        if (id === refCommand.id) {
+          await loadSessionRefs(baseUrl, refHolder);
+          if (sessionRefsEntry(baseUrl, refHolder).unsupported) throw new Error('Referencing sessions needs a newer Controller. Update the Controller in Settings.');
+          setReferencePicker(source.viewId);
+          return {};
+        }
         assertSourceCurrent(source);
         if (id === handoffCommand.id) {
           if (!handoffAvailable) throw new Error('Handoff requires a current writable conversation with authorized Host access.');
@@ -2239,7 +2278,10 @@ function AppContent({
         onOpen={(session, intent) => view && sharedWindow
           ? bindDirectorySession({ ...session, sessionIntent: intent }, { windowId: sharedWindow.id, viewId: view.id, binding: JSON.stringify(view.binding ?? null) })
           : Promise.resolve(false)} />,
-      composerContext: <>{fork ? <ForkReference fork={fork} onOpen={revealSession} onUnlink={unlinkSide} onRecover={record => refreshRelations.reconcile(record)} /> : null}
+      composerContext: <>{referencing ? <SessionReferences scope={baseUrl} holder={refHolder} providers={host?.providers?.map(provider => provider.providerId) ?? [source.providerId]}
+          fallback={forkReference} picking={referencePicker === source.viewId} onPickingChange={picking => setReferencePicker(picking ? source.viewId : undefined)}
+          onOpen={ref => void openExcerptSource({ hostId: source.hostId, providerId: ref.providerId, nativeSessionId: ref.nativeSessionId, title: ref.title ?? '' })}
+          onRemoved={(ref, restore) => removedReference(ref, restore, fork)} onRestore={() => restoredReference(fork)} /> : forkReference}
         {quoteView ? <QuoteAttachments scope={baseUrl} viewId={quoteView} /> : null}</>,
       composerNotice: <ForkEntries forks={sourceForks} openSides={openSideKeys(source.viewId)} onOpen={record => void openFork({ ...record, navigationSource: source })} onUnlink={unlinkSide} onRecover={record => refreshRelations.reconcile(record)} />,
       sessionManager: <>{context.controls}{isPrimary ? <button type="button" data-pane-selection-ignore aria-label={`Close primary group: ${source.title}`}

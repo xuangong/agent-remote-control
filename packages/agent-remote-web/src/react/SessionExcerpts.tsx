@@ -1,5 +1,5 @@
 import { createContext, useContext } from 'react';
-import { splitSessionExcerpts, type AgentTimelineItem, type SessionExcerpt } from '@orchardworks/agent-remote-protocol';
+import { splitSessionExcerpts, splitSessionReferences, type AgentTimelineItem, type SessionExcerpt, type SessionReferenceNote } from '@orchardworks/agent-remote-protocol';
 
 /** Opens the session an excerpt was quoted from; without it, an excerpt only names its source. */
 export const SessionExcerptNavigation = createContext<((source: SessionExcerpt['source']) => void | Promise<void>) | undefined>(undefined);
@@ -16,6 +16,36 @@ export function withoutSessionExcerpts(item: UserMessage): { item: UserMessage; 
   }
   const split = splitSessionExcerpts(item.text);
   return split.excerpts.length ? { item: { ...item, text: split.text }, excerpts: split.excerpts } : { item, excerpts: [] };
+}
+
+/** The user's message with the reference note at the end of its text, before any excerpts, taken out. */
+export function withoutSessionReferences(item: UserMessage): { item: UserMessage; note?: SessionReferenceNote } {
+  const last = item.content?.at(-1);
+  if (item.content && last?.type === 'text') {
+    const split = splitSessionReferences(last.text);
+    if (!split.note) return { item };
+    const content = split.text ? [...item.content.slice(0, -1), { ...last, text: split.text }] : item.content.slice(0, -1);
+    return { item: { ...item, text: splitSessionReferences(item.text).text, content }, note: split.note };
+  }
+  const split = splitSessionReferences(item.text);
+  return split.note ? { item: { ...item, text: split.text }, note: split.note } : { item };
+}
+
+/** The references a message told its agent about, each opening its session where the page can. */
+export function SessionReferenceNoteView({ note }: { note?: SessionReferenceNote }) {
+  const navigate = useContext(SessionExcerptNavigation);
+  if (!note) return null;
+  return <p className="agent-session-references" aria-label="Session references">
+    <span className="agent-session-excerpt-kicker">References</span>
+    {note.references.length ? note.references.map(reference => {
+      const [hostId, providerId, ...rest] = reference.address.split('/');
+      const title = reference.title || 'Untitled session';
+      const source = { ...(hostId && hostId !== 'local' ? { hostId } : {}), providerId: providerId ?? '', nativeSessionId: rest.join('/'), title };
+      return navigate && source.providerId && source.nativeSessionId
+        ? <button key={reference.address} type="button" title={reference.address} onClick={() => void navigate(source)}>{title}</button>
+        : <span key={reference.address} title={reference.address}>{title}</span>;
+    }) : <span>None</span>}
+  </p>;
 }
 
 export function excerptMessageCount(excerpt: SessionExcerpt): number {

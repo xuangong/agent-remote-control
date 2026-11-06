@@ -515,7 +515,7 @@ test('the source reference starts at the composer edge in narrow and wide panes'
     await expect.poll(async () => (await workspace.inspect()).views.some(view => view.attachedTo)).toBe(true);
     const side = (await workspace.inspect()).views.find(view => view.attachedTo)!;
     const offset = (pane: ReturnType<Page['locator']>) => async () => {
-      const reference = await pane.locator('.lab-fork-reference summary').boundingBox(), composer = await pane.locator('.agent-composer').boundingBox();
+      const reference = await pane.locator('.lab-session-refs > :first-child').boundingBox(), composer = await pane.locator('.agent-composer').boundingBox();
       return reference && composer ? Math.abs(reference.x - composer.x) : Number.POSITIVE_INFINITY;
     };
     const pane = page.locator(`.lab-session-family-pane[data-view-id="${side.id}"]`);
@@ -525,6 +525,42 @@ test('the source reference starts at the composer edge in narrow and wide panes'
     await pane.locator('.lab-composer-dock').evaluate(node => { (node as HTMLElement).style.width = '1300px'; });
     await expect.poll(async () => (await pane.locator('.agent-composer').boundingBox())!.x - (await pane.boundingBox())!.x).toBeGreaterThan(100);
     await expect.poll(offset(pane)).toBeLessThanOrEqual(1);
+    expect(workspace.errors).toEqual([]);
+  } finally { await workspace.close(); }
+});
+
+test('a Side removes its source reference, tells its agent with the next message, and references a session again with /ref', async ({ page, context }) => {
+  const workspace = await createWorkspace(page, context);
+  try {
+    const source = page.locator('.lab-session-family-pane').first();
+    await expect(source.getByTestId('prompt-input')).toBeEnabled();
+    await source.getByTestId('prompt-input').fill('/side Weigh the references');
+    await source.getByTestId('prompt-submit').click();
+    await expect.poll(async () => (await workspace.inspect()).views.some(view => view.attachedTo)).toBe(true);
+    const sideId = (await workspace.inspect()).views.find(view => view.attachedTo)!.id;
+    const side = page.locator(`.lab-session-family-pane[data-view-id="${sideId}"]`);
+    const references = side.locator('.lab-session-refs');
+    await expect(references.locator('.lab-session-ref[data-origin="source"]')).toHaveCount(1);
+    await references.getByRole('button', { name: 'Remove reference to New session' }).click();
+    await expect(references).toHaveCount(0);
+    await expect(page.getByText('Reference removed', { exact: true })).toBeVisible();
+    await expect.poll(async () => (await workspace.inspect()).views.find(view => view.id === sideId)?.attachedTo).toBeUndefined();
+    const input = side.getByTestId('prompt-input');
+    await input.fill('Continue without the source');
+    await side.getByTestId('prompt-submit').click();
+    const sent = side.locator('.agent-message-user').last();
+    await expect(sent.locator('.agent-markdown')).toHaveText('Continue without the source');
+    await expect(sent.getByLabel('Session references', { exact: true })).toHaveText('ReferencesNone');
+    await input.fill('/ref');
+    await side.getByTestId('prompt-submit').click();
+    const picker = side.getByRole('dialog', { name: 'Reference a session' });
+    await expect(picker.getByRole('button', { name: /^New session/ }).first()).toBeVisible();
+    await picker.getByRole('button', { name: /^New session/ }).first().click();
+    await expect(picker).toHaveCount(0);
+    await expect(references.locator('.lab-session-ref')).toHaveCount(1);
+    await input.fill('Use it again');
+    await side.getByTestId('prompt-submit').click();
+    await expect(side.locator('.agent-message-user').last().getByLabel('Session references', { exact: true })).toHaveText('ReferencesNew session');
     expect(workspace.errors).toEqual([]);
   } finally { await workspace.close(); }
 });

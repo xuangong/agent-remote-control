@@ -1,6 +1,6 @@
 import { act, useState } from 'react';
 import { expect, it, vi } from 'vitest';
-import { appendSessionExcerpts, createSessionExcerpt, type ProjectedTimelineEntry } from '@orchardworks/agent-remote-protocol';
+import { appendSessionExcerpts, appendSessionReferences, createSessionExcerpt, type ProjectedTimelineEntry } from '@orchardworks/agent-remote-protocol';
 import { createReplicaState } from '../replica/reducer.js';
 import { render } from '../test/setup.js';
 import { AgentTimeline } from './AgentTimeline.js';
@@ -63,4 +63,20 @@ it('shows excerpts quoted into a user message as attachments that can open their
   expect([...bubble.querySelectorAll('.agent-session-excerpt-text')].map(node => node.textContent)).toEqual(['Original question', 'Original answer', 'Later answer']);
   await act(async () => bubble.querySelector<HTMLButtonElement>('.agent-session-excerpt-open')!.click());
   expect(open).toHaveBeenCalledWith(quoted.source);
+});
+
+it('shows the references a message told its agent about, each opening its session, apart from the user\'s text', async () => {
+  const open = vi.fn();
+  const note = { revision: 2, references: [{ address: 'host/claude/source', title: 'Design review', origin: 'source' as const }, { address: 'local/codex/other', origin: 'added' as const }] };
+  const container = await render(<SessionExcerptNavigation.Provider value={open}>
+    <AgentTimeline state={state([entry(1, 'user_message', appendSessionReferences('Compare both.', note)), entry(2, 'user_message', appendSessionReferences('', { revision: 3, references: [] }))])} />
+  </SessionExcerptNavigation.Provider>);
+  const [first, second] = [...container.querySelectorAll('.agent-message-user')];
+  expect(first!.querySelector('.agent-markdown')?.textContent).toBe('Compare both.');
+  expect(first!.textContent).not.toContain('session-references');
+  expect(first!.querySelector('[aria-label="Session references"]')?.textContent).toBe('ReferencesDesign reviewUntitled session');
+  await act(async () => first!.querySelector<HTMLButtonElement>('[aria-label="Session references"] button')!.click());
+  expect(open).toHaveBeenCalledWith({ hostId: 'host', providerId: 'claude', nativeSessionId: 'source', title: 'Design review' });
+  expect(second!.querySelector('[aria-label="Session references"]')?.textContent).toBe('ReferencesNone');
+  expect(second!.querySelector('.agent-markdown')).toBeNull();
 });

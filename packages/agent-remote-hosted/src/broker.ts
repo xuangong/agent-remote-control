@@ -38,7 +38,7 @@ import { isSuccessionCapacityError, remainingAssociationRevisions, SUCCESSION_FE
 
 type SharedCreation = { subject: string; operationId: string; fingerprint: string; reservation: ReturnType<HostSharing['reserve']> };
 type RpcResponse = { status: number; body: string; requestId?: string };
-type ProviderDescriptor = { providerId: string; displayName: string; promptEditing?: true; sessionRename?: true; daemonControl?: true };
+type ProviderDescriptor = { providerId: string; displayName: string; promptEditing?: true; sessionRename?: true; sessionReferences?: true; daemonControl?: true };
 type DeviceCredential = { recovery?: HostRecoverySelection; pairingId?: string; purpose?: PairingPurpose; claimedAt?: number; expires: number; installationId?: string; kind?: 'device'; requiresRotation?: boolean };
 /** A Host's latest session states, kept in memory while it is connected. changedAt: when the state last changed. */
 type HostStates = { confirmedAt?: number; states: Map<string, HostSessionState & { changedAt: number }> };
@@ -1871,6 +1871,8 @@ export function createHostBroker(options: HostBrokerOptions) {
         return owner(subject) || !!binding && sessionAllowed(binding, subject);
       };
       if (!allowed(providerId, nativeSessionId)) throw new SharingError(403, 'session_forbidden', 'Session access is unavailable.');
+      // Older Controllers refuse the route and close their uplink, so only Controllers that declare references are asked.
+      if (!host.providers.some(provider => provider.providerId === providerId && provider.sessionReferences)) throw new BrokerError(400, 'unsupported_configuration', 'Session references are unavailable. Update the Controller.');
       if (request.method === 'GET') return rawJson(await rpc(host, 'GET', `/remote/session/refs?${new URLSearchParams({ providerId, nativeSessionId })}`));
       const target = input.target as { providerId?: unknown; nativeSessionId?: unknown } | undefined;
       if ((input.action !== 'add' && input.action !== 'remove') || typeof target?.providerId !== 'string' || typeof target.nativeSessionId !== 'string'

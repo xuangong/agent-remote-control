@@ -144,3 +144,34 @@ export function utf8ByteLength(text: string): number {
 function escapeContextAttribute(value: string): string {
   return value.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
+
+/** A session a conversation references, as the user's message tells its agent. */
+export interface SessionReferenceRow { address: string; title?: string; origin: 'source' | 'added' }
+/** The references a conversation has from this message on; revision is the Host's count of reference changes. */
+export interface SessionReferenceNote { revision: number; references: SessionReferenceRow[] }
+const SessionReferencePayload = Type.Object({ references: Type.Array(Type.Object({
+  address: Type.String({ minLength: 1, maxLength: 1100 }), title: Type.Optional(Type.String({ maxLength: 512 })),
+  origin: Type.Union([Type.Literal('source'), Type.Literal('added')]),
+}, { additionalProperties: false }), { maxItems: 64 }) }, { additionalProperties: false });
+const referencesIntroduction = 'The sessions this conversation references from now on, replacing any earlier list, including an earlier source session. Read one only when the task needs it, with `agent-remote-controller session read <address>`.';
+
+/** The text that tells the agent its references changed, at the end of a message before any excerpts. */
+export function sessionReferencesAttachment(note: SessionReferenceNote): string {
+  if (!Number.isSafeInteger(note.revision) || note.revision < 0) throw new Error('Invalid reference revision.');
+  const payload = { references: note.references.map(({ address, title, origin }) => ({ address, ...(title ? { title } : {}), origin })) };
+  if (!Value.Check(SessionReferencePayload, payload)) throw new Error('Invalid session references.');
+  return `\n\n<session-references revision="${note.revision}">\n${referencesIntroduction}\n${JSON.stringify(payload).replace(/</g, '\\u003c')}\n</session-references>`;
+}
+export function appendSessionReferences(text: string, note: SessionReferenceNote): string {
+  const attachment = sessionReferencesAttachment(note);
+  return text ? text + attachment : attachment.trimStart();
+}
+/** Separates a reference note at the end of a message from the user's text; text in any other form is left whole. */
+export function splitSessionReferences(text: string): { text: string; note?: SessionReferenceNote } {
+  const match = /(?:^|\n\n)<session-references revision="(\d{1,15})">\n([^\n]*)\n([^\n]*)\n<\/session-references>$/.exec(text);
+  if (!match || match[2] !== referencesIntroduction) return { text };
+  let payload: unknown;
+  try { payload = JSON.parse(match[3]!); } catch { return { text }; }
+  if (!Value.Check(SessionReferencePayload, payload)) return { text };
+  return { text: text.slice(0, match.index), note: { revision: Number(match[1]), references: (payload as { references: SessionReferenceRow[] }).references } };
+}

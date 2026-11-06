@@ -16,7 +16,7 @@ Keep an implementation conversation, a review, and another project's work open t
 
 Click a pane's title, conversation, or composer to select it. Choosing a session from the sidebar, Favorites, or Track, or creating a new session, replaces that pane's conversation. To keep the current conversation open, first use **Window → New session view** to add an empty pane and select its session afterward. Ask, Team, and TPM panes stay attached to their own conversations; use an ordinary or empty pane to open a different session.
 
-Use **Ask** for a separate contextual discussion and **/side** for a related working conversation. Show the Ask entry with **View → Ask view** or **/ask**. Both use the same Session View as other sessions. Ask can float above the workspace or **Dock** alongside it when there is enough room. On narrow screens, the foreground conversation is already selected; switch views through the Window list instead of navigating a horizontal canvas.
+Use **Ask** for a separate contextual discussion and **/side** for a related working conversation. A session's references sit above its composer: remove a Side's source to make it an independent session, or add other sessions of the Host with **+** or **/ref**; the agent reads them with `agent-remote-controller session read`. Show the Ask entry with **View → Ask view** or **/ask**. Both use the same Session View as other sessions. Ask can float above the workspace or **Dock** alongside it when there is enough room. On narrow screens, the foreground conversation is already selected; switch views through the Window list instead of navigating a horizontal canvas.
 
 *Screenshots show real working sessions. Click any image to view it at full size.*
 

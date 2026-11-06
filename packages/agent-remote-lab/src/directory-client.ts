@@ -57,6 +57,12 @@ export class SessionDirectoryClient {
     if (!isSuccessionActionResult(value)) throw new Error('The Handoff result could not be verified. Check this operation.');
     return value;
   }
+  sessionRefs(providerId: string, nativeSessionId: string): Promise<import('./session-references.js').LabSessionRefs> {
+    return this.request(`session/refs?${new URLSearchParams({ providerId, nativeSessionId })}`, undefined, AbortSignal.timeout(15000));
+  }
+  changeSessionRef(providerId: string, nativeSessionId: string, action: 'add' | 'remove', target: { providerId: string; nativeSessionId: string }): Promise<import('./session-references.js').LabSessionRefs> {
+    return this.request('session/refs', { providerId, nativeSessionId, action, target }, AbortSignal.timeout(20000));
+  }
   rename(providerId: string, nativeSessionId: string, title: string, operationId: string): Promise<{ title: string }> {
     return this.request('session/rename', { providerId, nativeSessionId, title, operationId }, AbortSignal.timeout(35000));
   }

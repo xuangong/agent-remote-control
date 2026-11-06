@@ -6,7 +6,7 @@ import { SessionStarsClient } from '../session-stars-client.js';
 import { FavoritesList, FavoritesMenu } from '../components/SessionFavorites.js';
 import type { SessionTracking } from './useSessionTracking.js';
 const star = { hostId: 'host', providerId: 'codex', nativeSessionId: 'native', title: 'Research', starredAt: 1, favoriteId: 's', folderId: null, order: 0, available: true, online: true };
-const tracking: SessionTracking = { refresh: vi.fn(() => ({ status: 'ready' as const, revision: 0, sessions: [] })), project: vi.fn(() => ({ status: 'saved' as const, retention: 'local' as const, sessions: [], revision: 1 })), editRevision: vi.fn(() => 0), reorder: vi.fn(), reconcileFavorites: vi.fn(), rename: vi.fn(), replace: vi.fn(), sessions: [], backgroundSessions: [], observations: {}, observers: [], error: undefined, toggle: vi.fn(), retry: vi.fn(), acknowledge: vi.fn() };
+const tracking: SessionTracking = { refresh: vi.fn(() => ({ status: 'ready' as const, revision: 0, sessions: [] })), project: vi.fn(() => ({ status: 'saved' as const, retention: 'local' as const, sessions: [], revision: 1 })), editRevision: vi.fn(() => 0), reorder: vi.fn(), reconcileFavorites: vi.fn(), rename: vi.fn(), replace: vi.fn(), sessions: [], backgroundSessions: [], observations: {}, liveObservations: {}, observers: [], error: undefined, toggle: vi.fn(), retry: vi.fn(), acknowledge: vi.fn() };
 afterEach(() => vi.restoreAllMocks());
 it('publishes succession progress at the same tree revision and rejects retired callbacks', async () => {
   const progress = { hostId: 'host', controllerId: 'controller', roleId: 'role', roleRevision: 2, operationId: 'operation', status: 'pending' as const };

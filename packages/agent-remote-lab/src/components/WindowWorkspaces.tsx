@@ -1,18 +1,28 @@
 import './window-workspaces.css';
 import { useEffect, useRef, useState } from 'react';
-import { createWindowView, type WindowOperation, type WindowSessionBinding, type WindowView } from '@orchardworks/agent-remote-protocol';
+import { createWindowView, type WindowOperation, type WindowSessionBinding, type WindowView, type WorkspaceWindow } from '@orchardworks/agent-remote-protocol';
 import type { useWindowWorkspace } from '../hooks/useWindowWorkspace.js';
 import { useWindowManager } from '../hooks/useWindowManager.js';
+import { activityLabel, windowActivity, type SessionActivityStatus } from '../session-activity-status.js';
 
 export function viewTitle(view: WindowView): string {
   return view.binding?.title || (view.feature ? `${view.feature.kind.toUpperCase()} view` : 'Empty view');
+}
+/** The status a Window shows: what its sessions most need, as Track ranks it. */
+function windowStatus(window: WorkspaceWindow, sessionStatus: (session: WindowSessionBinding) => SessionActivityStatus) {
+  return windowActivity(window.views.flatMap(view => view.binding ? [sessionStatus(view.binding)] : []));
+}
+function statusPrefix(status?: SessionActivityStatus): string {
+  return status && status !== 'unknown' ? `${activityLabel(status)} · ` : '';
 }
 function viewRole(view: WindowView): string {
   return view.attachedTo ? 'Attached' : view.placement === 'primary' ? 'Top-level' : view.placement === 'float' ? 'Floating' : 'Dock';
 }
 
-export function WindowWorkspaces({ workspace, current, active = true }: {
+export function WindowWorkspaces({ workspace, current, active = true, sessionStatus }: {
   workspace: ReturnType<typeof useWindowWorkspace>; current?: WindowSessionBinding; active?: boolean;
+  /** Each session's status, as Track shows it; without it rows show no status. */
+  sessionStatus?(session: WindowSessionBinding): SessionActivityStatus;
 }) {
   const [notice, setNotice] = useState<string>();
   // The Window whose title is being edited in the list, and the scope it belongs to.
@@ -96,7 +106,7 @@ export function WindowWorkspaces({ workspace, current, active = true }: {
   }
   return <div ref={root} className="lab-window-workspaces">
     <div className="lab-window-section-heading"><span>Windows</span><button type="button" disabled={busy} onClick={() => void run(workspace.create)}>New Window</button></div>
-    <nav className="lab-window-list" aria-label="Windows">{catalog.map(window => <div key={window.id} className="lab-window-row" data-window-row={window.id} data-renaming={renaming?.id === window.id || undefined}>
+    <nav className="lab-window-list" aria-label="Windows">{catalog.map(window => { const status = sessionStatus && windowStatus(window, sessionStatus); return <div key={window.id} className="lab-window-row" data-window-row={window.id} data-renaming={renaming?.id === window.id || undefined}>
       {renaming?.id === window.id ? <form className="lab-window-rename" aria-label={`Rename Window: ${window.title}`} onKeyDown={event => {
         if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); if (!saving) closeRename(); }
       }} onSubmit={event => { event.preventDefault(); void saveRename(window.id); }}>
@@ -107,7 +117,7 @@ export function WindowWorkspaces({ workspace, current, active = true }: {
       </form> : <>
       <button type="button" className="lab-window-open" data-window-id={window.id}
       aria-current={window.id === workspace.window?.id || undefined} aria-busy={openingId === window.id || undefined} onClick={() => void openWindow(window.id)}>
-      <span><strong>{window.title}</strong><small>{openingId === window.id ? 'Opening…' : `${window.views.length} ${window.views.length === 1 ? 'session view' : 'session views'}`}</small></span>
+      <span><strong className="agent-session-title" data-session-status={status}>{window.title}</strong><small className="agent-session-title" data-session-status={status}>{openingId === window.id ? 'Opening…' : `${statusPrefix(status)}${window.views.length} ${window.views.length === 1 ? 'session view' : 'session views'}`}</small></span>
       {window.id === workspace.window?.id ? <span className="lab-window-selected" aria-label="Current Window">✓</span> : null}
       </button>
       <button type="button" className="lab-window-rename-trigger" data-window-rename={window.id} aria-label={`Rename Window: ${window.title}`} title="Rename this Window"
@@ -119,7 +129,7 @@ export function WindowWorkspaces({ workspace, current, active = true }: {
         disabled={busy || !workspace.hasActiveWindow || window.id === workspace.window?.id} onClick={() => void run(() => workspace.remove(window.id))}>
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M3 6h18M9 6V4h6v2M5 6l1 14h12l1-14M10 10v6m4-6v6" /></svg>
       </button></>}
-    </div>)}</nav>
+    </div>; })}</nav>
     {catalog.length ? <p className="lab-window-note">{workspace.hasActiveWindow ? 'Switch to another Window before deleting the active one.' : 'Open or create a Window before deleting another one.'}</p> : null}
     {workspace.saveState?.state === 'saving' ? <p className="lab-window-note" role="status">Saving…</p>
       : workspace.saveState?.state === 'offline' || workspace.saveState?.state === 'error' ? <p className="lab-window-note" role="status">Changes are not saved. <button type="button" onClick={() => background(workspace.retrySave)}>Retry</button>
@@ -130,17 +140,17 @@ export function WindowWorkspaces({ workspace, current, active = true }: {
         const view = createWindowView(crypto.randomUUID());
         edit({ type: 'batch', operations: [{ type: 'view.create', view }, { type: 'view.select', viewId: view.id }] });
       }}>New session view</button></div>
-      <nav className="lab-window-list lab-window-views" aria-label="Session views">{workspace.window.views.map(view => <div key={view.id} className="lab-window-row" data-window-view-row={view.id} data-attached={!!view.attachedTo || undefined}>
+      <nav className="lab-window-list lab-window-views" aria-label="Session views">{workspace.window.views.map(view => { const status = view.binding && sessionStatus?.(view.binding); const shown = status !== 'unknown' ? status : undefined; return <div key={view.id} className="lab-window-row" data-window-view-row={view.id} data-attached={!!view.attachedTo || undefined}>
         <button type="button" className="lab-window-open" data-window-view-id={view.id} disabled={busy || workspace.unavailable}
         aria-current={view.id === workspace.window!.selectedViewId || undefined}
         onClick={() => edit({ type: 'view.select', viewId: view.id })}>
-        <span><strong>{viewTitle(view)}</strong><small>{viewRole(view)}</small></span>
+        <span><strong className="agent-session-title" data-session-status={shown}>{viewTitle(view)}</strong><small className="agent-session-title" data-session-status={shown}>{statusPrefix(status)}{viewRole(view)}</small></span>
         {view.id === workspace.window!.selectedViewId ? <span className="lab-window-selected" aria-label="Selected view">✓</span> : null}
         </button>
         <button type="button" className="lab-window-view-close" data-window-view-close={view.id} aria-label={`Close session view: ${viewTitle(view)}`}
           title="Close this session view. Agent sessions keep running." disabled={busy || workspace.unavailable}
           onClick={() => edit({ type: 'view.close', viewId: view.id })}>×</button>
-      </div>)}</nav>
+      </div>; })}</nav>
       {!workspace.window.views.length ? <p className="lab-window-note">No session views. Add one or open a session from the sidebar.</p> : null}
       <details ref={options} className="lab-window-options"><summary>Window options</summary>
         <div className="lab-window-actions">

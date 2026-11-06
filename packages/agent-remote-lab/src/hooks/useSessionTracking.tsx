@@ -265,9 +265,14 @@ export function useSessionTracking(baseUrl: string, transport: RemoteAgentTransp
     // Projection persists navigation intent. The later explicit consumer owns attachment.
     return patchTrackedSessions(baseUrl, patches, expectedRevision, isCurrent, retainedDuplicates);
   }
+  // An observer that stopped leaves its last value until favorites reconcile; only current ones describe a session now.
+  const liveObservations = useMemo(() => {
+    const keys = new Set(observedSessions.map(item => sessionKey(item.session)));
+    return Object.fromEntries(Object.entries(observations).filter(([key]) => keys.has(key)));
+  }, [observations, observedSessions]);
   const observers = useMemo(() => observedSessions.map(({ session, liveAgentId }) => <SessionObserver key={`${baseUrl}:${sessionKey(session)}:${retries[sessionKey(session)] ?? 0}`} session={session} liveAgentId={liveAgentId} baseUrl={baseUrl} transport={transport} connections={connections} update={update} enabled={enabled} />), [observedSessions, baseUrl, transport, connections, update, retries, enabled]);
   useFeedbackToast('Session tracking', error);
-  return { refresh, project, editRevision: () => trackingEditRevision(baseUrl), reorder, reconcileFavorites, rename, replace, sessions, backgroundSessions, observations, error, toggle, retry, acknowledge, observers };
+  return { refresh, project, editRevision: () => trackingEditRevision(baseUrl), reorder, reconcileFavorites, rename, replace, sessions, backgroundSessions, observations, liveObservations, error, toggle, retry, acknowledge, observers };
 }
 export type SessionTracking = ReturnType<typeof useSessionTracking>;
 

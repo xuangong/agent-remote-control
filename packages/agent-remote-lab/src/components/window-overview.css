@@ -63,8 +63,8 @@
   color: var(--obs-text-secondary); background: color-mix(in oklab, var(--obs-text-secondary) 12%, var(--obs-surface));
 }
 .lab-window-card-pane[data-state="running"] .lab-window-card-state { color: var(--obs-action); background: color-mix(in oklab, var(--obs-action) 12%, var(--obs-surface)); }
-.lab-window-card-pane[data-state="waiting"] { background: var(--obs-warning-soft); }
-.lab-window-card-pane[data-state="waiting"] .lab-window-card-state { color: var(--obs-surface); background: var(--obs-warning); }
+.lab-window-card-pane:is([data-state="waiting"], [data-state="starting"]) { background: var(--obs-warning-soft); }
+.lab-window-card-pane:is([data-state="waiting"], [data-state="starting"]) .lab-window-card-state { color: var(--obs-surface); background: var(--obs-warning); }
 .lab-window-card-pane[data-state="failed"] .lab-window-card-state { color: var(--obs-danger); background: var(--obs-danger-soft); }
 .lab-window-card-pane[data-state="offline"] { opacity: .7; }
 .lab-window-card[data-attention] { border-color: color-mix(in oklab, var(--obs-warning) 60%, var(--obs-border)); }

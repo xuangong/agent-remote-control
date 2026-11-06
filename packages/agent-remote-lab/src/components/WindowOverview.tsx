@@ -1,10 +1,11 @@
 import './window-overview.css';
 import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react';
 import type { WindowView, WorkspaceWindow } from '@orchardworks/agent-remote-protocol';
-import type { SharedSessionState, SessionStatesView } from '@orchardworks/agent-remote-web';
+import type { SessionStateRef } from '@orchardworks/agent-remote-web';
 import type { useWindowWorkspace } from '../hooks/useWindowWorkspace.js';
 import { navigationArrow } from '../hooks/useSessionViewMouseNavigation.js';
 import { byRecentUse } from '../window-recency.js';
+import { activityLabel, type SessionActivityStatus } from '../session-activity-status.js';
 import { viewTitle } from './WindowWorkspaces.js';
 
 /** Width a collapsed view keeps in the rail. */
@@ -34,22 +35,22 @@ export function windowThumbnail(window: WorkspaceWindow): { panes: WindowThumbna
   return { panes, floating: window.views.filter(view => view.placement === 'float').length };
 }
 
-/** Labels for the states worth showing; idle sessions and unknown ones stay quiet. */
-const STATE_LABEL: Partial<Record<SharedSessionState, string>> = { running: 'Running', waiting: 'Needs you', failed: 'Failed', offline: 'Host offline' };
+/** The states worth showing on a pane, labelled as Track labels them; idle, closed and unknown sessions stay quiet. */
+const LABELLED: readonly SessionActivityStatus[] = ['waiting', 'starting', 'failed', 'running', 'offline'];
 
 /** A Window's sessions that need attention or are working, most urgent first. */
-function stateSummary(states: SharedSessionState[]): string | undefined {
-  const count = (state: SharedSessionState) => states.filter(value => value === state).length;
-  const parts = [[count('waiting'), 'needs you', 'need you'], [count('failed'), 'failed', 'failed'], [count('running'), 'running', 'running']] as const;
-  const text = parts.filter(([n]) => n > 0).map(([n, one, many]) => `${n} ${n === 1 ? one : many}`).join(' · ');
+function stateSummary(states: SessionActivityStatus[]): string | undefined {
+  const count = (...matches: SessionActivityStatus[]) => states.filter(value => matches.includes(value)).length;
+  const parts = [[count('waiting', 'starting'), 'pending'], [count('failed'), 'failed'], [count('running'), 'working']] as const;
+  const text = parts.filter(([n]) => n > 0).map(([n, label]) => `${n} ${label}`).join(' · ');
   return text || undefined;
 }
 
-function WindowCard({ window, current, opening, states, onOpen }: { window: WorkspaceWindow; current: boolean; opening: boolean; states?: SessionStatesView; onOpen(): void }) {
+function WindowCard({ window, current, opening, sessionStatus, onOpen }: { window: WorkspaceWindow; current: boolean; opening: boolean; sessionStatus?(session: SessionStateRef): SessionActivityStatus; onOpen(): void }) {
   const { panes, floating } = windowThumbnail(window);
   const count = window.views.length;
-  const paneStates = panes.map(pane => pane.session && states ? states.state(pane.session).state : undefined);
-  const summary = stateSummary(paneStates.filter((state): state is SharedSessionState => !!state));
+  const paneStates = panes.map(pane => pane.session && sessionStatus ? sessionStatus(pane.session) : undefined);
+  const summary = stateSummary(paneStates.filter((state): state is SessionActivityStatus => !!state));
   const attention = paneStates.includes('waiting');
   return <button type="button" className="lab-window-card" data-window-card={window.id} aria-current={current || undefined} aria-busy={opening || undefined}
     data-attention={attention || undefined} aria-label={`${current ? 'Return to' : 'Open'} Window: ${window.title}${summary ? `, ${summary}` : ''}`} onClick={onOpen}>
@@ -57,7 +58,7 @@ function WindowCard({ window, current, opening, states, onOpen }: { window: Work
       {panes.length ? panes.map((pane, index) => <span key={pane.id} className="lab-window-card-pane" style={{ flexGrow: pane.width }}
         data-selected={pane.selected || undefined} data-collapsed={pane.collapsed || undefined} data-attached={pane.attached || undefined} data-state={paneStates[index]}>
         {pane.collapsed ? null : <>
-          {paneStates[index] && STATE_LABEL[paneStates[index]!] ? <span className="lab-window-card-state">{STATE_LABEL[paneStates[index]!]}</span> : null}
+          {paneStates[index] && LABELLED.includes(paneStates[index]!) ? <span className="lab-window-card-state">{activityLabel(paneStates[index]!)}</span> : null}
           <span className="lab-window-card-pane-title">{pane.title}</span>{pane.providerId ? <span className="lab-window-card-provider">{pane.providerId}</span> : null}
         </>}
       </span>) : <span className="lab-window-card-empty">No session views</span>}
@@ -75,10 +76,10 @@ function WindowCard({ window, current, opening, states, onOpen }: { window: Work
  * Every Window side by side, most recently used first, to switch between them. Ctrl+Shift+Up opens it on wide
  * screens; arrow keys move between Windows, Enter opens one, and Escape or Ctrl+Shift+Down returns.
  */
-export function WindowOverview({ workspace, scope, enabled, open, states, onOpenChange }: {
+export function WindowOverview({ workspace, scope, enabled, open, sessionStatus, onOpenChange }: {
   workspace: ReturnType<typeof useWindowWorkspace>; scope: string; enabled: boolean; open: boolean;
-  /** Shared session states; panes without a trusted state show none. */
-  states?: SessionStatesView;
+  /** Each session's status, as Track shows it; panes without a known status show none. */
+  sessionStatus?(session: SessionStateRef): SessionActivityStatus;
   onOpenChange(open: boolean): void;
 }) {
   const dialog = useRef<HTMLDialogElement>(null);
@@ -155,7 +156,7 @@ export function WindowOverview({ workspace, scope, enabled, open, states, onOpen
       {notice ? <p className="lab-window-overview-notice" role="alert">{notice}</p> : null}
       <div ref={grid} className="lab-window-overview-grid" role="group" aria-label="Windows, most recently used first" onKeyDown={move}>
         {windows.map(window => <WindowCard key={window.id} window={window} current={window.id === workspace.window?.id} opening={openingId === window.id}
-          states={states} onOpen={() => void choose(window.id)} />)}
+          sessionStatus={sessionStatus} onOpen={() => void choose(window.id)} />)}
       </div>
       {!windows.length ? <p className="lab-window-overview-notice">No Windows yet.</p> : null}
     </div>

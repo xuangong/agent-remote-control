@@ -7,17 +7,9 @@ import type { SessionTracking } from '../hooks/useSessionTracking.js';
 import type { SessionStar } from '../session-stars-client.js';
 import { sessionKey, type SessionEntry } from '../session-tree.js';
 import { observationLabel } from '../tracking-state.js';
+import { activityGroups } from '../session-activity-status.js';
 import { SessionPopover } from './SessionPopover.js';
 import { useTrackingPosition } from '../hooks/useTrackingPosition.js';
-
-const activityGroups = [
-  { status: 'running', label: 'Working', activities: ['running'] },
-  { status: 'waiting', label: 'Pending', activities: ['waiting', 'starting'] },
-  { status: 'idle', label: 'Idle', activities: ['idle'] },
-  { status: 'failed', label: 'Failed', activities: ['failed'] },
-  { status: 'closed', label: 'Closed', activities: ['closed'] },
-  { status: 'unknown', label: 'Status unavailable', activities: ['unknown'] },
-];
 
 export function SessionTrackingMenu({ tracking, catchUp, teams = [], knownSessions = [], busy, inert, onOpen }: { catchUp?: SessionCatchUp; tracking: SessionTracking; teams?: readonly Team[]; knownSessions?: readonly SessionEntry[]; busy: boolean; inert: boolean; onOpen(session: SessionStar): void }) {
   const { root, style, handlers, edge } = useTrackingPosition();

@@ -865,7 +865,7 @@ test('the Window overview shows every Window by recent use and switches with the
   } finally { await page.close(); await fixture.close(); }
 });
 
-test('the Window overview shows shared session states that the Controller reports, without opening sessions', async ({ page }) => {
+test('Windows show session states, from shared states for sessions this page does not observe', async ({ page }) => {
   const fixture = await sessionLinkFixture({ automaticSignIn: true, sessionStates: true });
   try {
     await page.setViewportSize({ width: 1680, height: 1000 });
@@ -876,21 +876,38 @@ test('the Window overview shows shared session states that the Controller report
     await expect(page.locator('.lab-primary-group[data-selected="true"]').getByTestId('prompt-input')).toBeEnabled();
     const [nativeSessionId] = fixture.nativeSessionIds();
     const panel = await openWindows(page);
-    const windowId = (await panel.locator('[data-window-id][aria-current="true"]').getAttribute('data-window-id'))!;
+    const currentWindow = panel.locator('[data-window-id][aria-current="true"]');
+    const windowId = (await currentWindow.getAttribute('data-window-id'))!;
+    const row = panel.locator(`[data-window-row="${windowId}"]`);
+    await expect(row.locator('small')).toHaveText('Idle · 1 session view');
+    await expect(panel.locator('[data-window-view-row] small').first()).toHaveText('Idle · Top-level');
+    await panel.getByRole('button', { name: 'New Window', exact: true }).click();
+    await expect(currentWindow).not.toHaveAttribute('data-window-id', windowId);
+    // A new Window starts with a copy of the current layout; close it so only the first Window holds the session.
+    await panel.locator('[data-window-view-close]').first().click();
+    await expect(panel.locator('[data-window-view-row]')).toHaveCount(0);
+    // This page no longer observes the session, so the state the Controller shares shows.
+    const floating = page.locator('.lab-window-floating');
+    await expect(floating).not.toHaveAttribute('data-attention', 'true');
+    fixture.holdSessionState(nativeSessionId!, 'waiting');
+    await expect(row.locator('small')).toHaveText('Pending · 1 session view');
+    await expect(row.locator('strong')).toHaveAttribute('data-session-status', 'waiting');
+    await expect(floating).toHaveAttribute('data-attention', 'true');
+    await page.screenshot({ path: test.info().outputPath('window-list-states.png') });
     await panel.getByRole('button', { name: 'Show all Windows', exact: true }).click();
     const card = page.getByRole('dialog', { name: 'All Windows' }).locator(`[data-window-card="${windowId}"]`);
     const pane = card.locator('.lab-window-card-pane').first();
-    // An idle session stays quiet.
-    await expect(pane).toHaveAttribute('data-state', 'idle');
-    await expect(pane.locator('.lab-window-card-state')).toHaveCount(0);
-    fixture.holdSessionState(nativeSessionId!, 'waiting');
-    await expect(pane.locator('.lab-window-card-state')).toHaveText('Needs you');
+    await expect(pane.locator('.lab-window-card-state')).toHaveText('Pending');
     await expect(card).toHaveAttribute('data-attention', 'true');
-    await expect(card.locator('.lab-window-card-summary')).toHaveText(' · 1 needs you');
+    await expect(card.locator('.lab-window-card-summary')).toHaveText(' · 1 pending');
     await page.screenshot({ path: test.info().outputPath('window-overview-states.png') });
     fixture.holdSessionState(nativeSessionId!, 'running');
-    await expect(pane.locator('.lab-window-card-state')).toHaveText('Running');
+    await expect(pane.locator('.lab-window-card-state')).toHaveText('Working');
     await expect(card).not.toHaveAttribute('data-attention', 'true');
+    fixture.holdSessionState(nativeSessionId!, 'idle');
+    // An idle session stays quiet on the overview.
+    await expect(pane).toHaveAttribute('data-state', 'idle');
+    await expect(pane.locator('.lab-window-card-state')).toHaveCount(0);
     await fixture.disconnectHost();
     await expect(pane.locator('.lab-window-card-state')).toHaveText('Host offline');
   } finally { await page.close(); await fixture.close(); }

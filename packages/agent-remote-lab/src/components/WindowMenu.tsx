@@ -2,13 +2,16 @@ import { useEffect, useId, useRef, useState } from 'react';
 import type { WindowSessionBinding } from '@orchardworks/agent-remote-protocol';
 import type { useWindowWorkspace } from '../hooks/useWindowWorkspace.js';
 import { useTrackingPosition } from '../hooks/useTrackingPosition.js';
+import type { SessionActivityStatus } from '../session-activity-status.js';
 import { WindowWorkspaces } from './WindowWorkspaces.js';
 
 /** The floating entry manages presentation; hiding it does not change the Window. */
-export function WindowMenu({ workspace, current, visible, inert = false, onOverview }: {
+export function WindowMenu({ workspace, current, visible, inert = false, onOverview, sessionStatus }: {
   workspace: ReturnType<typeof useWindowWorkspace>; current?: WindowSessionBinding; visible: boolean; inert?: boolean;
   /** Shows every Window side by side; offered where the overview is available. */
   onOverview?(): void;
+  /** Each session's status, as Track shows it. */
+  sessionStatus?(session: WindowSessionBinding): SessionActivityStatus;
 }) {
   const [open, setOpen] = useState(false);
   const { root, style, handlers, edge } = useTrackingPosition('agent-remote:window-position');
@@ -16,6 +19,9 @@ export function WindowMenu({ workspace, current, visible, inert = false, onOverv
   const panelId = useId();
   const expanded = open && visible && !inert;
   const count = new Set([...workspace.windows.map(window => window.id), ...(workspace.window ? [workspace.window.id] : [])]).size;
+  // The current Window shows its own sessions; like Track, the entry reminds only of sessions waiting for their owner.
+  const pendingElsewhere = !!sessionStatus && workspace.windows.some(window => window.id !== workspace.window?.id
+    && window.views.some(view => view.binding && sessionStatus(view.binding) === 'waiting'));
   useEffect(() => { if (!visible || inert) setOpen(false); }, [visible, inert]);
   useEffect(() => {
     if (!expanded) return;
@@ -27,19 +33,20 @@ export function WindowMenu({ workspace, current, visible, inert = false, onOverv
   }, [expanded, root]);
   function close() { setOpen(false); trigger.current?.focus({ preventScroll: true }); }
   return <div ref={root} className="lab-tracking-floating lab-window-floating" data-edge={edge} style={style} {...handlers}
-    data-hidden={!visible || undefined} data-open={expanded || undefined} aria-hidden={!visible || undefined}
+    data-hidden={!visible || undefined} data-open={expanded || undefined} data-attention={pendingElsewhere || undefined} aria-hidden={!visible || undefined}
     {...(!visible || inert ? { inert: '' } : {})}
     onKeyDown={event => { if (event.key === 'Escape' && expanded) { event.preventDefault(); event.stopPropagation(); close(); } }}>
     <button ref={trigger} type="button" className="lab-session-popover-trigger" aria-label="Windows" aria-expanded={expanded}
-      aria-controls={panelId} onClick={() => setOpen(value => !value)}>
-      <span>Window</span><span>{count}</span>
+      aria-controls={panelId} title={pendingElsewhere ? 'Another Window has pending sessions' : undefined} onClick={() => setOpen(value => !value)}>
+      <span>Window</span><span>{count}</span>{pendingElsewhere ? <span className="lab-tracking-attention" aria-hidden="true" /> : null}
     </button>
     <section id={panelId} className="lab-session-popover-panel lab-window-panel" aria-label="Windows" hidden={!expanded}>
       <div className="lab-directory-heading"><h2>Windows</h2>
         {onOverview ? <button type="button" className="lab-window-overview-trigger" aria-label="Show all Windows" title="Show all Windows (Ctrl+Shift+Up)" aria-keyshortcuts="Control+Shift+ArrowUp"
           onClick={() => { close(); onOverview(); }}>All Windows</button> : null}
         <button type="button" aria-label="Close Windows" onClick={close}>×</button></div>
-      <div className="lab-window-panel-scroll"><WindowWorkspaces workspace={workspace} current={current} active={expanded} /></div>
+      <div className="lab-window-panel-scroll"><WindowWorkspaces workspace={workspace} current={current} active={expanded} sessionStatus={sessionStatus} /></div>
     </section>
+    <span className="agent-visually-hidden" role="status">{pendingElsewhere ? 'Another Window has pending sessions.' : ''}</span>
   </div>;
 }

@@ -11,6 +11,7 @@ import { WindowMenu } from './components/WindowMenu.js';
 import { WindowOverview } from './components/WindowOverview.js';
 import { touchWindow } from './window-recency.js';
 import { useSessionStates } from './hooks/useSessionStates.js';
+import { sessionActivity } from './session-activity-status.js';
 import { useWindowVisibility } from './hooks/useWindowVisibility.js';
 import { teamViewTarget } from './team-view-binding.js';
 import { SessionViewOperationsContext } from './session-view-operations.js';
@@ -18,7 +19,7 @@ import { SessionDescriptionsContext } from './session-description-context.js';
 import { describeSession } from './session-description.js';
 import { attributionWindowOperation } from './session-attribution-navigation.js';
 import { sideWindowOperation } from './window-side-navigation.js';
-import type { SessionAttribution } from '@orchardworks/agent-remote-web';
+import type { SessionAttribution, SessionStateRef } from '@orchardworks/agent-remote-web';
 import { labSessionSuccessionDirectory, type SessionSuccessionDirectory } from './session-succession-directory.js';
 import { TeamViewScope, useTeamVisibility } from './hooks/useTeamVisibility.js';
 import { teamLayoutTargets } from './team-layout.js';
@@ -1035,7 +1036,6 @@ function AppContent({
   // Compact layouts keep only the floating Windows list.
   const [windowOverviewOpen, setWindowOverviewOpen] = useState(false);
   const windowOverviewAvailable = !compactLayout && !initialState && !windowWorkspace.unavailable && (windowWorkspace.windows.length > 0 || !!windowWorkspace.window);
-  const sessionStates = useSessionStates(transport, windowOverviewAvailable && windowOverviewOpen);
   const backgroundInert = supportingRailOpen ? { inert: '' } : {};
 
   const activeAgentId = state?.agent?.id ?? (succession.active ? undefined : attachingAgentId);
@@ -1191,6 +1191,9 @@ function AppContent({
   const teamView = useTeamVisibility();
   const [teamReveal, setTeamReveal] = useState<{ baseUrl: string; teamId: string; requestId: string }>();
   const windowView = useWindowVisibility();
+  // Windows and their floating entry show the states of their sessions whenever there is a Window to show.
+  const sessionStates = useSessionStates(transport, windowOverviewAvailable && windowOverviewOpen
+    || windowView.visible && !initialState && !windowWorkspace.unavailable && (windowWorkspace.windows.length > 0 || !!windowWorkspace.window));
   const updateTeamRoster = useCallback((baseUrl: string, teams: Team[]) => setTeamRoster({ baseUrl, teams }), []);
   const [tpmListOpen, setTpmListOpen] = useState(false);
   // Most recent use orders the Window overview; a page in front counts as using its Window.
@@ -1516,6 +1519,7 @@ function AppContent({
     attention.notifier.setDisplayed(attention.enabled ? [...openWindows, ...askActivitySessions.map(entry => entry.session)] : []);
   }, [attention.notifier, notificationTargets, attention.enabled]);
   const tracking = useSessionTracking(baseUrl, transport, addressSession ? sessionKey(addressSession) : undefined, openWindows, askActivitySessions, connections, accessReady && succession.observerReady, visibleWindows, attention.observe);
+  const windowSessionStatus = useCallback((session: SessionStateRef) => sessionActivity(session, tracking.liveObservations, sessionStates), [tracking.liveObservations, sessionStates]);
   useEffect(() => { if (succession.observerReady) trackedViews.retain(tracking.sessions.map(trackEntryId)); }, [trackedViews, tracking.sessions, succession.observerReady]);
   const applySessionTitle = useCallback((session: StarInput) => {
     setConfirmedTitleState(current => {
@@ -2332,8 +2336,8 @@ function AppContent({
     {scanOpen ? <SessionTransferDialog onOpen={openScannedSession} onClose={() => setScanOpen(false)} /> : null}
     {activated ? tracking.observers : null}
     <WindowMenu workspace={windowWorkspace} current={sharedWindow ? directoryView?.binding : currentSession ? windowSessionBinding(currentSession) : undefined}
-      visible={windowView.visible} inert={supportingRailOpen} onOverview={windowOverviewAvailable ? () => setWindowOverviewOpen(true) : undefined} />
-    <WindowOverview workspace={windowWorkspace} scope={baseUrl} enabled={windowOverviewAvailable} open={windowOverviewOpen} states={sessionStates} onOpenChange={setWindowOverviewOpen} />
+      visible={windowView.visible} inert={supportingRailOpen} onOverview={windowOverviewAvailable ? () => setWindowOverviewOpen(true) : undefined} sessionStatus={windowSessionStatus} />
+    <WindowOverview workspace={windowWorkspace} scope={baseUrl} enabled={windowOverviewAvailable} open={windowOverviewOpen} sessionStatus={windowSessionStatus} onOpenChange={setWindowOverviewOpen} />
     {userScoped && attention.trackVisible ? <SessionTrackingMenu catchUp={catchUp} tracking={tracking} teams={teamRoster?.baseUrl === baseUrl ? teamRoster.teams : []} knownSessions={[...favorites.stars, ...sessionEntries]} busy={transitioning} inert={supportingRailOpen} onOpen={item => void openTrackedSession(item)} /> : null}
     <TeamMenu visible={teamView.visible} baseUrl={baseUrl} enabled={accessReady && !!directory} hosts={remoteHosts} source={featureSource} sourceViewId={sharedWindow && presentedViewId ? `${sharedWindow.id}/${presentedViewId}` : undefined}
       compact={compactLayout} currentSession={focusedMenuSession} onTeamsChange={updateTeamRoster} reveal={teamReveal?.baseUrl === baseUrl ? teamReveal : undefined}

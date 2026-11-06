@@ -79,17 +79,26 @@ not focus changes. The title shows at once and saves in the background like othe
 layout edits. Less frequent actions are under **Window options**. On narrow
 screens the panel stays inside the viewport and its content scrolls.
 
+The panel marks every session view with its session's status as Track shows it:
+**Working**, **Pending** (waiting for an approval or answer, or starting),
+**Idle**, **Failed** or **Host offline**, in Track's colours. A session this page
+observes uses its live status; any other uses the state its Controller shares
+through the Relay, so no session connection is opened for it. Each Window row shows
+what its sessions most need: Pending, then Failed, then Working, then Idle; it
+shows nothing while none of its states is known. When a session in another Window
+is waiting for its owner, the floating **Window** button turns amber with a dot,
+like Track.
+
 On wide screens, Ctrl+Shift+Up or **All Windows** in the Window panel shows every
 Window as cards floating over the blurred page, the ones this device used most
 recently first. Each card
 draws the Window's panes in their rail order and relative widths, with each
 pane's session title and agent, and marks the selected pane; floating views are
-counted. Panes show the state their Controller shares through the Relay:
-**Running**, **Needs you** for a pending approval or question, **Failed**, or
-**Host offline**; idle sessions and sessions without a recently confirmed state
-show none, and a card lists how many of its sessions need you or are running.
-The overview reads saved layouts and shared states, so it opens no session
-connections. Arrow keys move between cards, Enter or a click opens a Window, and
+counted. Panes show the same status as the Window panel:
+**Working**, **Pending**, **Failed**, or **Host offline**; idle sessions and sessions
+without a known status show none, and a card lists how many of its sessions are
+pending, failed or working. The overview reads saved layouts, shared states and
+the statuses this page already observes, so it opens no session connections. Arrow keys move between cards, Enter or a click opens a Window, and
 Escape, Ctrl+Shift+Down or a click beside the cards returns to the current one. Outside macOS a text field
 keeps Ctrl+Shift+Up for selecting text. Narrow screens offer only the Window
 panel.

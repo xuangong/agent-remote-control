@@ -49,9 +49,10 @@ pnpm local screenshot / --out page.png
 ```
 
 - `controller <args>` runs the Controller CLI against the instance's state. It
-  accepts `status`, `diagnostics`, `window`, `session`, `environment` and
-  `--help`. It refuses everything else: the runner owns start, stop, pairing
-  and updates, and native subcommands could take over shared sessions.
+  accepts `status`, `diagnostics`, `window`, `session` and `environment`, and
+  the read-only `help`, `--help`, `-h` and `--version`. It refuses everything
+  else: the runner owns start, stop, pairing and updates, and native
+  subcommands could take over shared sessions.
 - `api <v1/path>` sends a signed-in JSON request to the instance's user API and
   prints the response body. Paths start with `v1/`. `--method M` selects the
   method, which is `GET`, or `POST` when `--data JSON` is given. A response
@@ -69,12 +70,13 @@ pnpm local screenshot / --out page.png
 pnpm --filter @orchardworks/agent-remote-lab exec playwright install chromium
 ```
 
-Without an instance, `status` and `list` still answer. The other commands stop:
+Without an instance, `up` creates one, and `status` and `list` still answer.
+Every other command stops:
 
-- `api` and `screenshot` need a running instance and otherwise print
-  `The instance is not running.`
-- `logs`, `down`, `remove` and `controller` need an existing instance and
-  otherwise print `This checkout has no local instance.`
+- Without an instance, it prints
+  `This checkout has no local instance. Run pnpm local up.`
+- `api` and `screenshot` also need the instance to be running. When it exists
+  but is stopped, they print `The instance is not running. Run pnpm local up.`
 - `remove` also refuses an instance that still runs. It does not delete the test
   sessions from the shared native histories.
 
@@ -127,8 +129,8 @@ eight-character hash of its real path:
 ```
 
 `up` builds the Controller, the website and the Devbox server bundle, then
-starts a detached runner. The runner serves the site on `http://localhost:<port>`
-and starts the Controller from the same checkout
+starts a detached runner. The runner serves the site on
+`http://localhost:<port>` and starts the Controller from the same checkout
 (`packages/agent-host/dist/cli.js foreground`) with its own state directory.
 The first start pairs it through the local identity; later starts reuse its
 device credential. The port is chosen on the first start and kept, because the
@@ -176,7 +178,8 @@ go through the shared server.
 
 ## Troubleshooting
 
-Errors quote the instance directory as `<instance>`, which is
+Messages print the absolute path of the instance directory. In this table,
+`<instance>` is a placeholder for that path, which has the form
 `<root>/instances/<checkout>-<hash>`.
 
 | Symptom | Check |

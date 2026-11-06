@@ -10,10 +10,11 @@ import { createOpenCodeSessionDirectory } from './opencode-directory.js';
 import { SessionReferenceStore } from './session-reference.js';
 import { SessionSuccessionStore } from './session-succession-store.js';
 import { createHostExecutionPolicy } from './execution-policy.js';
+import { createManagedStdioDirectory } from './stdio-directory.js';
 
 const cleanup: Array<() => Promise<void>> = [];
 afterEach(async () => { for (const close of cleanup.splice(0).reverse()) await close(); }, 5000);
-for (const providerId of ['codex', 'opencode'] as const) test.each(['side', 'ask'] as const)(`${providerId} default-policy Host preserves %s source tools, release fencing and restart`, async kind => {
+for (const providerId of ['codex', 'opencode', 'claude'] as const) test.each(['side', 'ask'] as const)(`${providerId} default-policy Host preserves %s source tools, release fencing and restart`, async kind => {
   const root = await realpath(await mkdtemp(join(tmpdir(), 'arc-prefix-source-runtime-')));
   const executionPolicy = await createHostExecutionPolicy({ AGENT_HOST_WORKSPACE: root });
   expect(executionPolicy).toBeDefined();
@@ -30,10 +31,12 @@ for (const providerId of ['codex', 'opencode'] as const) test.each(['side', 'ask
     async *observe(): AsyncIterable<ProviderStreamItem> { yield { type: 'history_boundary' }; await new Promise<void>(resolve => { this.stop = resolve; }); }
     async sendMessage() {} async respondToInteraction() {} async dispose() { this.stop?.(); }
   }
-  const provider = { nativePrefix: { createdSessionIdMaxLength: 36, validate: async () => {}, verify: async () => {}, create: async (_target: unknown, extensions: AgentSessionExtensions, checkpoint: (handle: AgentPersistenceHandle) => Promise<void>) => { forks++; const id = forks === 1 ? 'B' : 'source-prefix'; bound.set(id, extensions); await checkpoint({ providerId, sessionId: id, opaque: 'original' }); return new Native(id); } }, createSession: async () => new Native('unused'), openChildSession: async () => new Native('unused'), resumeSession: async (handle: { sessionId: string }, extensions: AgentSessionExtensions = {}) => { bound.set(handle.sessionId, extensions); return new Native(handle.sessionId); }, readSessionWorkspace: async (id: string) => id === 'source' ? sourceWorkspace : root, readSessionHistory: async () => ({ entries: [{ id: 'entry', turnId: 'turn', role: 'assistant', text: 'source history' }] }), getSession: async (id: string) => ({ id, cwd: id === 'source' ? sourceWorkspace : root, title: id }), renameSession: async () => {}, close: async () => {} };
+  const provider = { nativePrefix: { createdSessionIdMaxLength: 36, validate: async () => {}, verify: async () => {}, create: async (_target: unknown, extensions: AgentSessionExtensions, checkpoint: (handle: AgentPersistenceHandle) => Promise<void>) => { forks++; const id = forks === 1 ? 'B' : 'source-prefix'; bound.set(id, extensions); await checkpoint({ providerId, sessionId: id, opaque: 'original' }); return new Native(id); } }, createSession: async () => new Native('unused'), openChildSession: async () => new Native('unused'), resumeSession: async (handle: { sessionId: string }, extensions: AgentSessionExtensions = {}) => { bound.set(handle.sessionId, extensions); return new Native(handle.sessionId); }, readSessionWorkspace: async (id: string) => id === 'source' ? sourceWorkspace : root, sessionWorkspace: async (id: string) => id === 'source' ? sourceWorkspace : root, readSessionHistory: async () => ({ entries: [{ id: 'entry', turnId: 'turn', role: 'assistant', text: 'source history' }] }), getSession: async (id: string) => ({ id, cwd: id === 'source' ? sourceWorkspace : root, title: id }), renameSession: async () => {}, close: async () => {} };
   let latestDirectory: AgentHostDirectory;
   const make = () => {
-    const directory = providerId === 'codex' ? createCodexSessionDirectory({ ...provider, listSessions: async () => ({ sessions: [] }) }, [], references) : createOpenCodeSessionDirectory({ ...provider, listSessions: async () => [] }, [], references, true);
+    const directory = providerId === 'codex' ? createCodexSessionDirectory({ ...provider, listSessions: async () => ({ sessions: [] }) }, [], references)
+      : providerId === 'opencode' ? createOpenCodeSessionDirectory({ ...provider, listSessions: async () => [] }, [], references, true)
+      : createManagedStdioDirectory(providerId, 'Claude', { ...provider, renameSession: undefined, listSessions: async () => [] }, [], undefined, references);
     latestDirectory = directory;
     return createAgentHostRuntime({ executionPolicy, succession: { controllerId: 'host', stateDirectory: root, enrollment: true }, registrations: [{ directory, adapter: { descriptor: { providerId, displayName: providerId }, createSession: provider.createSession, resumeSession: provider.resumeSession, readSessionHistory: provider.readSessionHistory } }] });
   };
@@ -74,7 +77,8 @@ for (const providerId of ['codex', 'opencode'] as const) test.each(['side', 'ask
   await host.close(); host = make();
   expect((await post('/remote/attach', { providerId, nativeSessionId: 'B' }, 'B')).status).toBe(200);
   expect(JSON.parse(await bound.get('B')!.tools![0]!.execute({}))).toMatchObject({ sourceSessionId: 'source' });
-  await expect(stale.execute({})).rejects.toThrow(/current/);
+  // A managed stdio reader refuses once its own directory closed, before any routing.
+  await expect(stale.execute({})).rejects.toThrow(providerId === 'claude' ? /closed/ : /current/);
   sourceWorkspace = await realpath(tmpdir());
   await expect(bound.get('B')!.tools![0]!.execute({})).rejects.toThrow(/workspace|allowed roots/i);
   sourceWorkspace = root;

@@ -18,7 +18,7 @@ export interface SourceHistoryPage extends AgentHistoryPage {
 export type SourceBindingReader = (readerNativeSessionId: string, originalSource: string, query: SourceHistoryQuery,
   read: (nativeSessionId: string, query: AgentHistoryQuery) => Promise<AgentHistoryPage>, canonicalReader?: string) => Promise<SourceHistoryPage>;
 
-interface SourceGrant { sourceNativeSessionId: string; systemPrompt: string; systemPromptProvided?: boolean; instructions?: string; handle: AgentPersistenceHandle }
+export interface SourceGrant { sourceNativeSessionId: string; systemPrompt: string; systemPromptProvided?: boolean; instructions?: string; handle: AgentPersistenceHandle }
 
 /** Grant publication follows native creation; releasing local control cannot undo that effect. */
 export async function disposeAfterSourceGrantFailure(failure: unknown, dispose: () => Promise<void>): Promise<never> {

@@ -6,7 +6,7 @@ import type {RemoteSessionSummary} from '@orchardworks/agent-remote-relay';
 import type { AgentHistoryQuery, AgentPersistenceHandle, AgentProviderAdapter, AgentSession, AgentSessionExtensions } from '@orchardworks/agent-provider-sdk';
 import type { AgentHostDirectory, AgentHostWorkspace } from './host.js';
 import { requireSessionExtensionIdentity, sessionExtensionIdentity } from './session-extension-identity.js';
-import { SessionReferenceStore, disposeAfterSourceGrantFailure, sourceSessionExtensions, type SourceBindingReader } from './session-reference.js';
+import { SessionReferenceStore, disposeAfterSourceGrantFailure, sourceSessionExtensions, type SourceBindingReader, type SourceGrant } from './session-reference.js';
 import type { SessionCreationStore } from './session-creation-store.js';
 import type { SessionHostAccessSource } from './session-callers.js';
 
@@ -48,6 +48,7 @@ export function createManagedStdioDirectory(
   const controllerTools = new Set<string>();
   let sourceAccessCheck: ((id: string) => Promise<void>) | undefined;
   let sourceBindingReader: SourceBindingReader | undefined;
+  let sourceReferenceAncestors: ((id: string, preparationHandle?: AgentPersistenceHandle) => Promise<readonly string[]>) | undefined;
   let hostAccess: SessionHostAccessSource | undefined;
   let onHandoff: ((id: string, next: NativeOwnerIdentity) => Promise<void>) | undefined;
   let onHandoffAdmission: ((id: string, current: NativeOwnerIdentity, next: NativeOwnerIdentity) => NativeHandoffGrant) | undefined;
@@ -153,6 +154,9 @@ export function createManagedStdioDirectory(
       throw error;
     }
   }
+  async function lookupSourceGrant(id: string, preparationHandle?: AgentPersistenceHandle) {
+    return references?.resolve(sourceReferenceAncestors ? await sourceReferenceAncestors(id, preparationHandle) : [id]);
+  }
   async function readSource(id: string, query: AgentHistoryQuery) {
     await requireSourceAccess(id);
     if (!provider.readSessionHistory) throw new Error('Source history tools are unavailable on this Host.');
@@ -179,7 +183,7 @@ export function createManagedStdioDirectory(
     if (info.status === 'closed') throw new Error('Source reader is closed.');
     if (info.providerId !== providerId || info.sessionId !== id || info.persistence?.providerId !== providerId || info.persistence.sessionId !== id) throw new Error('Source reader identity does not match.');
   }
-  function sourceExtensions(source: string, reader: () => string | undefined, readerSession: () => AgentSession | undefined = () => undefined) {
+  function sourceExtensions(source: string, reader: () => string | undefined, readerSession: () => AgentSession | undefined = () => undefined, canonicalReader?: string) {
     const extensions = sourceSessionExtensions(source, readSource, async query => {
       if (closed) throw new Error(`${displayName} directory is closed.`);
       const id = reader();
@@ -194,7 +198,7 @@ export function createManagedStdioDirectory(
         return result;
       };
       let page;
-      if (sourceBindingReader) page = await sourceBindingReader(id, source, query, readLocal);
+      if (sourceBindingReader) page = await sourceBindingReader(id, source, query, readLocal, canonicalReader);
       else {
         if (query.sourceContext) throw new Error('Source context is unavailable on this Host.');
         page = { ...await readLocal(source, query), sourceSessionId: source };
@@ -220,12 +224,16 @@ export function createManagedStdioDirectory(
       ...(instructions ? { instructions } : {}), ...(tools.length ? { tools } : {}), ...(toolNamespaces.length ? { toolNamespaces } : {}),
       ...(base.access ?? additional.access ? { access: base.access ?? additional.access } : {}) };
   }
-  async function resumedExtensions(id: string, requested: AgentSessionExtensions | undefined, reader: () => string | undefined, readerSession?: () => AgentSession | undefined) {
-    const grant = await references?.get(id);
-    if (!grant) { composeExtensions(requested); return requested; }
+  /** A prompt-edit branch holds no grant of its own; it reads as the reader that holds one, so cursors and routing carry over. */
+  function grantExtensions(grant: SourceGrant, requested: AgentSessionExtensions | undefined, reader: () => string | undefined, readerSession?: () => AgentSession | undefined) {
     if (!provider.readSessionHistory) throw new Error('Source history tools are unavailable on this Host.');
     const base = { ...(grant.systemPromptProvided ?? !!grant.systemPrompt ? { systemPrompt: grant.systemPrompt } : {}), ...(grant.instructions ? { instructions: grant.instructions } : {}) };
-    return composeExtensions(composeExtensions(base, requested), sourceExtensions(grant.sourceNativeSessionId, reader, readerSession));
+    return composeExtensions(composeExtensions(base, requested), sourceExtensions(grant.sourceNativeSessionId, reader, readerSession, grant.handle.sessionId));
+  }
+  async function resumedExtensions(id: string, requested: AgentSessionExtensions | undefined, preparationHandle: AgentPersistenceHandle | undefined, reader: () => string | undefined, readerSession?: () => AgentSession | undefined) {
+    const grant = await lookupSourceGrant(id, preparationHandle);
+    if (!grant) { composeExtensions(requested); return requested; }
+    return grantExtensions(grant, requested, reader, readerSession);
   }
   const directory: AgentHostDirectory = {
     providerId,
@@ -237,6 +245,7 @@ export function createManagedStdioDirectory(
     },
     setSourceAccessCheck(check) { sourceAccessCheck = check; },
     setSourceBindingReader(reader) { sourceBindingReader = reader; },
+    setSourceReferenceAncestors(resolve) { sourceReferenceAncestors = resolve; },
     setSessionHostAccess(source) { hostAccess = source; },
     sourceReferences: () => references?.list() ?? Promise.resolve([]),
     requiresController: id => controllerTools.has(id),
@@ -300,7 +309,7 @@ export function createManagedStdioDirectory(
         const capability = resolveAgentNativePrefixCapability(provider);
         if (closed || !capability || capability.createdSessionIdMaxLength > 512) return false;
         await requireSourceAccess(target.nativeSessionId);
-        if (await references?.get(target.nativeSessionId)) return false;
+        if (await lookupSourceGrant(target.nativeSessionId) && (!sourceReferenceAncestors || !sourceBindingReader)) return false;
         await capability.validate(target); return true;
       },
       async createNativePrefix(target: AgentNativePrefixTarget, extensions: AgentSessionExtensions, evidence: { completed(): void } | undefined, candidateKnown: (handle: AgentPersistenceHandle) => Promise<void>) {
@@ -308,19 +317,26 @@ export function createManagedStdioDirectory(
         if (closed || !capability || capability.createdSessionIdMaxLength > 512) throw new Error('Native prefix preparation is unavailable.');
         if (typeof candidateKnown !== 'function') throw new Error('Native prefix creation requires a checkpoint.');
         await requireSourceAccess(target.nativeSessionId);
-        if (await references?.get(target.nativeSessionId)) throw new Error('Editing previous prompts is unavailable in side or Ask conversations.');
+        const grant = await lookupSourceGrant(target.nativeSessionId);
+        if (grant && (!sourceReferenceAncestors || !sourceBindingReader)) throw new Error('Source prefix routing is unavailable on this Host.');
         composeExtensions(extensions);
+        let readerId: string | undefined;
+        let readerSession: AgentSession | undefined;
+        const boundExtensions = grant ? grantExtensions(grant, extensions, () => readerId, () => readerSession) : extensions;
         let checkpoint: AgentPersistenceHandle | undefined;
-        const session = await capability.create(target, extensions, async handle => {
+        const session = await capability.create(target, boundExtensions, async handle => {
           checkpoint = nativePrefixResumeHandle(providerId, handle.sessionId, handle);
           await candidateKnown(checkpoint);
         });
         if (!checkpoint) { await session.dispose(); throw new Error('Native prefix creation did not checkpoint its handle.'); }
         evidence?.completed();
-        const id = await remember(session, undefined, sessionExtensionIdentity(extensions), checkpoint.sessionId);
+        const id = await remember(session, undefined, sessionExtensionIdentity(boundExtensions), checkpoint.sessionId);
         const handle = nativePrefixResumeHandle(providerId, id, checkpoint);
-        opened.get(id)!.nativePrefix = JSON.stringify(handle);
-        if (extensions.tools?.length) controllerTools.add(id);
+        const entry = opened.get(id)!;
+        entry.nativePrefix = JSON.stringify(handle);
+        if (boundExtensions.tools?.length) controllerTools.add(id);
+        readerId = id;
+        readerSession = entry.session;
         return handle;
       },
       async verifyNativePrefix(target: AgentNativePrefixTarget, handle: AgentPersistenceHandle) {
@@ -331,7 +347,7 @@ export function createManagedStdioDirectory(
       },
       async validatePromptEdit(target: AgentNativePrefixTarget) {
         await requireSourceAccess(target.nativeSessionId);
-        if (await references?.get(target.nativeSessionId)) throw new Error('Editing previous prompts is unavailable in side or Ask conversations.');
+        if (await lookupSourceGrant(target.nativeSessionId)) throw new Error('Editing previous prompts is unavailable in side or Ask conversations.');
         await resolveAgentNativePrefixCapability(provider)!.validate(target);
       },
     } : {}),
@@ -355,7 +371,7 @@ export function createManagedStdioDirectory(
       if (pending) {
         const session = await pending;
         assertCreation();
-        requireSessionExtensionIdentity(opened.get(nativeSessionId)?.extensionIdentity, options?.extensions === undefined ? undefined : await resumedExtensions(nativeSessionId, options.extensions, () => nativeSessionId));
+        requireSessionExtensionIdentity(opened.get(nativeSessionId)?.extensionIdentity, options?.extensions === undefined ? undefined : await resumedExtensions(nativeSessionId, options.extensions, prefixHandle, () => nativeSessionId));
         return session;
       }
       const opening = (async () => {
@@ -364,7 +380,7 @@ export function createManagedStdioDirectory(
         const existing = opened.get(nativeSessionId);
         if (existing && !yielded.has(nativeSessionId) && (await existing.session.runtimeInfo()).status !== 'closed') {
           assertCreation();
-          requireSessionExtensionIdentity(existing.extensionIdentity, options?.extensions === undefined ? undefined : await resumedExtensions(nativeSessionId, options.extensions, () => nativeSessionId));
+          requireSessionExtensionIdentity(existing.extensionIdentity, options?.extensions === undefined ? undefined : await resumedExtensions(nativeSessionId, options.extensions, prefixHandle, () => nativeSessionId));
           return existing.session;
         }
         if (existing && yielded.has(nativeSessionId)) {
@@ -374,7 +390,7 @@ export function createManagedStdioDirectory(
         }
         let readerReady = false;
         let readerSession: AgentSession | undefined;
-        const extensions = await resumedExtensions(nativeSessionId, options?.extensions, () => readerReady ? nativeSessionId : undefined, () => readerSession);
+        const extensions = await resumedExtensions(nativeSessionId, options?.extensions, prefixHandle, () => readerReady ? nativeSessionId : undefined, () => readerSession);
         const owner = await lease(nativeSessionId, options?.takeOver);
         const identity = sessionExtensionIdentity(extensions);
         // A session created here keeps its creation handle, a Side with its source reference. One that never received

@@ -8,6 +8,7 @@ import { createCodexSessionDirectory } from './directory.js';
 import { createOpenCodeSessionDirectory } from './opencode-directory.js';
 import { SessionReferenceStore } from './session-reference.js';
 import { SessionSuccessionService } from './session-succession-service.js';
+import { createManagedStdioDirectory } from './stdio-directory.js';
 
 const cleanup: Array<() => Promise<void>> = [];
 afterEach(async () => { for (const close of cleanup.splice(0).reverse()) await close(); }, 5000);
@@ -23,7 +24,7 @@ async function advance(service: SessionSuccessionService, from: string, to: stri
   if (commit) await service.store.commit(request.operationId);
 }
 
-test.each(['codex', 'opencode'] as const)('%s prefix readers reconstruct extensions without copying grants, keep cursors, and reject stale/precommit tools', async providerId => {
+test.each(['codex', 'opencode', 'claude'] as const)('%s prefix readers reconstruct extensions without copying grants, keep cursors, and reject stale/precommit tools', async providerId => {
   const root = await mkdtemp(join(tmpdir(), 'arc-prefix-source-'));
   const grants = new SessionReferenceStore(join(root, 'grants'), providerId);
   await grants.set({ sourceNativeSessionId: 'source', systemPrompt: 'saved source prompt', handle: { providerId, sessionId: 'A', opaque: '{}' } });
@@ -39,7 +40,9 @@ test.each(['codex', 'opencode'] as const)('%s prefix readers reconstruct extensi
   const session = (id: string): AgentSession => ({ capabilities: { history: true, sendMessage: true, steer: false, cancel: false, readResource: false, interactions: { question: false, toolApproval: false, planApproval: false } }, async runtimeInfo() { return { providerId, sessionId: id, cwd: '/work', status: 'idle', persistence: { providerId, sessionId: id, opaque: '{}' } }; }, async *observe() { yield { type: 'history_boundary' }; }, async sendMessage() {}, async respondToInteraction() {}, async dispose() {} });
   const provider = { nativePrefix: { createdSessionIdMaxLength: 36, validate: async () => {}, verify: async () => {}, create: async (_target: unknown, extensions: AgentSessionExtensions, checkpoint: (handle: AgentPersistenceHandle) => Promise<void>) => { bound.set(next, extensions); await checkpoint({ providerId, sessionId: next, opaque: '{}' }); return session(next); } }, createSession: async () => session('unused'), openChildSession: async () => session('unused'), resumeSession: async (handle: { sessionId: string }, extensions: AgentSessionExtensions = {}) => { bound.set(handle.sessionId, extensions); return session(handle.sessionId); }, readSessionHistory: async (id: string, query: { cursor?: string }) => read({ nativeSessionId: id }, query), getSession: async (id: string) => ({ id, cwd: '/work', title: id }), renameSession: async () => {}, close: async () => {} };
   const make = () => {
-    const directory = providerId === 'codex' ? createCodexSessionDirectory({ ...provider, listSessions: async () => ({ sessions: [] }) }, [], grants) : createOpenCodeSessionDirectory({ ...provider, listSessions: async () => [] }, [], grants, true);
+    const directory = providerId === 'codex' ? createCodexSessionDirectory({ ...provider, listSessions: async () => ({ sessions: [] }) }, [], grants)
+      : providerId === 'opencode' ? createOpenCodeSessionDirectory({ ...provider, listSessions: async () => [] }, [], grants, true)
+      : createManagedStdioDirectory(providerId, 'Claude', { ...provider, renameSession: undefined, listSessions: async () => [] }, [], undefined, grants);
     directory.setSourceReferenceAncestors?.(async id => nativePrefixSegmentAncestors(ref(id, providerId), service.store.all().flatMap(state => state.operations.filter(row => row.phase === 'committed'))).map(row => row.nativeSessionId));
     directory.setSourceBindingReader!((actual, source, query, legacy, anchor) => service.bindings(providerId).read(actual, source, query, legacy, anchor));
     cleanup.push(async () => { await directory.close(); }); return directory;
@@ -50,14 +53,16 @@ test.each(['codex', 'opencode'] as const)('%s prefix readers reconstruct extensi
   const old = JSON.parse(await stale.execute({}));
   const target = (id: string) => ({ nativeSessionId: id, turnId: 'turn', messageId: 'message' });
   expect(await directory.supportsNativePrefix!(target('A'))).toBe(true);
-  const extra = { systemPrompt: 'Additional prefix instructions' };
+  // Claude appends Host instructions to its saved prompt; a second system prompt would conflict with it.
+  const extra = providerId === 'claude' ? { instructions: 'Additional prefix instructions' } : { systemPrompt: 'Additional prefix instructions' };
   const handle = await directory.createNativePrefix!(target('A'), extra, undefined, async handle => { expect(handle).toEqual({ providerId, sessionId: 'B', opaque: '{}' }); });
   await expect(bound.get('B')!.tools![0]!.execute({})).rejects.toThrow(/current|reserved|admission/);
   await advance(service, 'A', 'B', providerId, 1, false);
   await expect(bound.get('B')!.tools![0]!.execute({})).rejects.toThrow(/current|reserved|admission/);
   await service.store.commit('prefix-1');
   await directory.open('B', { nativePrefix: handle, extensions: extra });
-  expect(bound.get('B')!.systemPrompt).toBe('saved source prompt\n\nAdditional prefix instructions');
+  if (providerId === 'claude') expect(bound.get('B')).toMatchObject({ systemPrompt: 'saved source prompt', instructions: expect.stringMatching(/^Additional prefix instructions\n\nThis is an independent side conversation/) });
+  else expect(bound.get('B')!.systemPrompt).toBe('saved source prompt\n\nAdditional prefix instructions');
   expect((await service.bindings(providerId).readRole({ kind: 'fixed', source: ref('A', providerId) }, {})).sourceRef).toEqual(ref('A', providerId));
   expect(JSON.parse(await bound.get('B')!.tools![0]!.execute({ cursor: old.nextCursor }))).toMatchObject({ sourceSessionId: 'source' });
   await expect(stale.execute({})).rejects.toThrow(/current/);

@@ -208,7 +208,7 @@ it('branches a Claude prompt through the native prefix capability and reopens on
   } finally {await directory.close();}
 });
 
-it('offers no Claude prompt edit without a complete capability or in a Side or Ask conversation', async () => {
+it('offers no Claude prompt edit without a complete capability, or in a Side or Ask conversation without source routing', async () => {
   const target = {nativeSessionId:'source', turnId:'prompt', messageId:'prompt'};
   const base = {listSessions:async()=>[], createSession:async()=>{throw new Error('unused');}, resumeSession:async()=>{throw new Error('unused');}};
   for (const nativePrefix of [undefined, {createdSessionIdMaxLength:36, async validate(){}, async create(){throw new Error('unused');}}]) {
@@ -216,12 +216,15 @@ it('offers no Claude prompt edit without a complete capability or in a Side or A
     try { expect(directory.supportsNativePrefix).toBeUndefined(); expect(directory.createNativePrefix).toBeUndefined(); } finally {await directory.close();}
   }
   let creates = 0;
-  const references = {get:async(id: string)=>id==='source'?{sourceNativeSessionId:'origin'}:undefined} as never;
+  const grant = {sourceNativeSessionId:'origin'};
+  const references = {get:async(id: string)=>id==='source'?grant:undefined, resolve:async(ids: string[])=>ids.includes('source')?grant:undefined} as never;
   const directory = createManagedStdioDirectory('claude','Claude',{...base, nativePrefix:{createdSessionIdMaxLength:36, async validate(){}, async verify(){},
     async create(){creates++; throw new Error('unexpected native create');}}},[],undefined,references);
   try {
+    // Without Host ancestry and binding routing, a branch could not read its source as the conversation it succeeds.
     expect(await directory.supportsNativePrefix!(target)).toBe(false);
-    await expect(directory.createNativePrefix!(target,{},undefined,async()=>{})).rejects.toThrow(/side or Ask/i);
+    await expect(directory.createNativePrefix!(target,{},undefined,async()=>{})).rejects.toThrow(/Source prefix routing is unavailable/);
+    // The direct prompt-edit fork has no succession to carry the source reference.
     await expect(directory.validatePromptEdit!(target)).rejects.toThrow(/side or Ask/i);
     expect(creates).toBe(0);
   } finally {await directory.close();}

@@ -2,6 +2,7 @@ import { readFile } from 'node:fs/promises';
 import { createConnection } from 'node:net';
 import { commandChannel, type ManagementAccess } from './cli-client.js';
 import { CliError, EXIT_OK, operationId, printError, printResult, usage } from './cli-output.js';
+import type { CliCredentials } from './relay-client.js';
 
 const help = `Usage: agent-remote-controller session <command>
 
@@ -131,11 +132,12 @@ export async function sessionRequest(args: readonly string[]): Promise<Record<st
 
 /** Session commands: from a session's shell as that session, from an ordinary terminal as the Host owner. */
 export async function runSessionCommand(args: readonly string[], env: NodeJS.ProcessEnv, write: (text: string) => void,
-  management: () => Promise<ManagementAccess | undefined> = async () => undefined, connect: typeof createConnection = createConnection): Promise<number> {
+  management: () => Promise<ManagementAccess | undefined> = async () => undefined, connect: typeof createConnection = createConnection,
+  credentials: () => Promise<CliCredentials | undefined> = async () => undefined): Promise<number> {
   if (!args.length || ['help', '--help', '-h'].includes(args[0]!)) { write(help); return args.length ? EXIT_OK : 2; }
   try {
     const request = await sessionRequest(args);
-    const channel = await commandChannel(env, management, connect);
+    const channel = await commandChannel(env, management, connect, credentials);
     const answer = await channel.call('session', request);
     if ('error' in answer) throw new CliError(answer.error.code, answer.error.message, answer.error.code === 'outcome_unknown' && typeof request.operationId === 'string' ? { operationId: request.operationId } : undefined);
     return printResult(write, answer.result);

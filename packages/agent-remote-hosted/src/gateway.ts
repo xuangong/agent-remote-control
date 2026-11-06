@@ -15,6 +15,7 @@ import { createSessionStars, StarError } from './session-stars.js';
 import { sessionSubscriptionRefusal, unavailableRoute } from './session-errors.js';
 import { createSecurityPolicy } from './security.js';
 import { authenticationFailure } from './auth-error.js';
+import { cliApprovalPage, createCliAuthorizations } from './cli-access.js';
 import { authenticationCallback } from './auth-callback.js';
 import { controllerPath, readControllerLocation } from './controller-location.js';
 import { createHash, randomBytes } from 'node:crypto';
@@ -263,6 +264,7 @@ export function createHostedRelay(options: HostedRelayOptions) {
   const domainOrigin = (broker: ReturnType<typeof createHostBroker>, hostId: string, id: string) => previewDomainOrigin(broker.previews.nameId(hostId, id), options.previewDomain!, auth.origin);
 
   const security = createSecurityPolicy(state);
+  const cliAuthorizations = createCliAuthorizations();
   const recentAuthentication = (grant: HostedGrant) => options.recentAuthentication?.(grant) ?? security.recent(grant.authenticatedAt);
   const verifyControl = auth.provider === 'mainsite' ? createGatewayControlVerifier(auth, state) : undefined;
   function failClosed() {
@@ -606,6 +608,49 @@ export function createHostedRelay(options: HostedRelayOptions) {
       const response = json(200, {ok:true,current});
       if (current) response.headers.set('set-cookie', `${gatewayCookieName(auth.origin, 'session', auth.cookiePrefix)}=; ${cookieFlags}; Max-Age=0`);
       return response;
+    }
+    // Command line sign-in: a code the signed-in user approves in this browser gives the command line its own session.
+    if (url.pathname === '/auth/cli/start' && request.method === 'POST') {
+      if (!security.allow('cli-start:' + (options.clientAddress?.(request) ?? 'unknown'), 10, 60_000) || !security.allow('cli-start:global', 120, 60_000)) return json(429, { error: 'Too many command line sign-ins. Try again shortly.' });
+      const body = await readJson(request);
+      const label = typeof body?.label === 'string' && body.label.trim() && body.label.length <= 100 ? `Command line · ${body.label.trim()}` : 'Command line';
+      const started = cliAuthorizations.start(label);
+      if (!started) return json(429, { error: 'Too many pending command line sign-ins.' });
+      return json(200, { ...started, verificationUrl: `${auth.origin}/auth/cli?code=${started.userCode}` });
+    }
+    if (url.pathname === '/auth/cli/token' && request.method === 'POST') {
+      const body = await readJson(request);
+      if (typeof body?.deviceCode !== 'string' || !body.deviceCode || body.deviceCode.length > 128) return json(400, { error: 'A sign-in code is required.' });
+      if (!security.allow('cli-token:' + hash(body.deviceCode), 120, 60_000)) return json(429, { error: 'Ask less often.' });
+      const claimed = cliAuthorizations.claim(body.deviceCode);
+      return claimed.status === 'approved' ? json(200, { status: 'approved', ...claimed.approval })
+        : json(claimed.status === 'pending' ? 202 : claimed.status === 'denied' ? 403 : 410, { status: claimed.status });
+    }
+    if (url.pathname === '/auth/cli' && request.method === 'GET') {
+      const code = url.searchParams.get('code') ?? '';
+      const described = /^[A-Z]{8}$/.test(code) ? cliAuthorizations.describe(code) : undefined;
+      if (!described || described.status !== 'pending') return cliApprovalPage(auth.origin, { state: 'unavailable' });
+      const signedIn = await sessions.authenticate(request);
+      if (!signedIn.grant) return cliApprovalPage(auth.origin, { state: 'signin' });
+      if (accountBacked && !recentAuthentication(signedIn.grant)) return cliApprovalPage(auth.origin, { state: 'reauthenticate' });
+      return cliApprovalPage(auth.origin, { state: 'approve', userCode: code, label: described.label });
+    }
+    if (url.pathname === '/auth/cli' && request.method === 'POST') {
+      if (!originAllowed(request)) return json(403, { error: 'Origin is not allowed.' });
+      if (request.headers.get('content-type')?.split(';')[0] !== 'application/json') return json(415, { error: 'JSON is required.' });
+      const grant = await authorize(request); if (grant instanceof Response) return grant;
+      const body = await readJson(request);
+      if (typeof body?.code !== 'string' || (body.decision !== 'approve' && body.decision !== 'deny')) return json(400, { error: 'A code and a decision are required.' });
+      if (body.decision === 'approve' && accountBacked && !recentAuthentication(grant)) return json(403, { code: 'reauthentication_required', error: 'Sign in again before allowing command line access.' });
+      const status = await cliAuthorizations.decide(body.code, body.decision, async label => {
+        const session = await sessions.clone(request, label);
+        return session && { ...session, basePath: browserState(grant).basePath, cookieName: gatewayCookieName(auth.origin, 'session', auth.cookiePrefix) };
+      });
+      if (status === 'approved' || status === 'denied') {
+        await security.record(grant.subject, status === 'approved' ? 'cli_access_allowed' : 'cli_access_refused', 'allowed');
+        return json(200, { status });
+      }
+      return json(status === 'failed' ? 409 : 410, { error: status === 'failed' ? 'Command line access needs a saved browser session. Sign in again.' : 'This sign-in expired or was already answered.' });
     }
     if (url.pathname === '/auth/callback' && request.method === 'GET') return authenticationCallback(auth.origin);
     if (request.method === 'GET' && !url.pathname.startsWith('/v1/') && !url.pathname.startsWith('/u/') && !url.pathname.startsWith('/auth/')) return undefined;

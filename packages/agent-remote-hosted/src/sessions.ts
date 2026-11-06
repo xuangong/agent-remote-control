@@ -121,6 +121,22 @@ export function createHostedSessions(auth: HostedAuthOptions, state: RelayState,
       });
     },
     async revokeAll(subject: string) { await state.mutate(draft => { draft.sessions = draft.sessions.filter(record => record.grant.subject !== subject); }); },
+    /**
+     * A separate session for a command line the signed-in user approved in this browser: the same account and lifetime,
+     * listed and revocable beside the browser's own sessions.
+     */
+    async clone(request: Request, label: string): Promise<{ token: string; expiresAt: number } | undefined> {
+      const record = recordFor(request);
+      if (!record || record.sessionExpiresAt <= Date.now()) return undefined;
+      const token = randomBytes(32).toString('base64url'), now = Date.now();
+      return state.mutate(draft => {
+        draft.sessions = draft.sessions.filter(value => value.sessionExpiresAt > now);
+        if (draft.sessions.length >= 1024) return undefined;
+        draft.sessions.push({ browserId: identity.create(), activity: [now], hash: hash(token), grant: structuredClone(record.grant), sessionExpiresAt: record.sessionExpiresAt,
+          ...(record.authorityConfirmedAt !== undefined ? { authorityConfirmedAt: record.authorityConfirmedAt } : {}), id: randomUUID(), createdAt: now, lastSeenAt: now, label });
+        return { token, expiresAt: record.sessionExpiresAt };
+      });
+    },
     async logout(request: Request) {
       const record = recordFor(request);
       if (record) await state.mutate(draft => { draft.sessions = draft.sessions.filter(value => value.hash !== record.hash); });

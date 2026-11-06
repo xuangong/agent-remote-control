@@ -8,11 +8,14 @@ export interface SessionCallerRef { providerId: string; nativeSessionId: string 
 export const refKey = (ref: SessionCallerRef) => JSON.stringify([ref.providerId, ref.nativeSessionId]);
 
 /**
- * Who asks: the Host owner (the local management socket, or the owner through the Relay), or a session, through its own
- * credential or, from another Host of the same owner, as the Relay names it. Every caller reaches every session of the
- * owner's Host; share recipients' sessions are neither visible nor reachable.
+ * Who asks: the Host owner (the local management socket, or the owner through the Relay), or one of this Host's sessions
+ * through its own credential. Every caller reaches every session of the owner's Hosts; share recipients' sessions are
+ * neither visible nor reachable.
  */
-export type SessionCaller = { kind: 'owner' } | { kind: 'session'; ref: SessionCallerRef; hostId?: string };
+export type SessionCaller = { kind: 'owner' } | { kind: 'session'; ref: SessionCallerRef };
+
+/** Settings that decide what a session may do unattended; the website asks for a recent sign-in before changing them. */
+export const PERMISSION_SETTINGS: readonly string[] = ['approval', 'sandbox', 'permissions'];
 
 export type SessionCallerState = 'running' | 'waiting' | 'idle' | 'failed' | 'unknown';
 /** The Host's sessions as the session commands see them. */
@@ -81,7 +84,7 @@ export async function handleSessionRequest(input: unknown, caller: SessionCaller
     const host = await context.hostId() ?? 'local';
     const here = (hostId: string) => hostId === host || hostId === 'local';
     const address = (ref: SessionCallerRef) => `${host}/${ref.providerId}/${ref.nativeSessionId}`;
-    const callerRef = caller.kind === 'session' && !caller.hostId ? caller.ref : undefined;
+    const callerRef = caller.kind === 'session' ? caller.ref : undefined;
     const self = (ref: SessionCallerRef) => callerRef && refKey(ref) === refKey(callerRef) ? { self: true } : {};
     const state = (ref: SessionCallerRef, summary?: RemoteSessionSummary): SessionCallerState => context.catalog.liveState(ref)
       ?? (summary?.state === 'unavailable' ? 'failed' : summary?.state ?? 'unknown');
@@ -112,7 +115,10 @@ export async function handleSessionRequest(input: unknown, caller: SessionCaller
     };
     const elsewhere = async (hostId: string): Promise<SessionCallResult> => {
       if (!context.forward) fail('host_unreachable', 'Sessions on other Hosts are reachable through the Relay only.');
-      return context.forward(hostId, request);
+      // The other Host answers the owner, so self becomes the calling session's address.
+      const named = (value: unknown) => value === 'self' && callerRef ? address(callerRef) : value;
+      return context.forward(hostId, { ...request, ...(request.from !== undefined ? { from: named(request.from) } : {}),
+        ...(Array.isArray(request.refs) ? { refs: request.refs.map(named) } : {}) });
     };
     const actions = () => context.actions ?? fail('unsupported_configuration', 'This Controller cannot change sessions.');
     const operation = () => {
@@ -231,6 +237,8 @@ export async function handleSessionRequest(input: unknown, caller: SessionCaller
         if (!settings || typeof settings !== 'object' || Array.isArray(settings) || Object.values(settings).some(value => typeof value !== 'string')) fail('invalid_request', 'Settings are id=value pairs.');
         const title = optionalString(request.title, 'title', 512);
         if (!Object.keys(settings).length && title === undefined && typeof request.planning !== 'boolean') fail('invalid_request', 'Give a setting, planning or a title to change.');
+        // Like answering its own requests, loosening its own permissions would grant a session what its user did not.
+        if (self(ref).self && Object.keys(settings).some(id => PERMISSION_SETTINGS.includes(id))) fail('session_forbidden', 'A session cannot change its own permission settings.');
         const operationId = operation();
         for (const [id, value] of Object.entries(settings as Record<string, string>)) await actions().setting(ref, id, value, `${operationId}:${id}`);
         if (typeof request.planning === 'boolean') await actions().planning(ref, request.planning, `${operationId}:planning`);

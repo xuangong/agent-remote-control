@@ -39,6 +39,9 @@ import { renderSessionQr } from './share-qr.js';
 import { handleSessionCall, listenSessionCalls, sessionCallerEndpoint, SessionCallerStore } from './session-callers.js';
 import { SessionRefStore } from './session-refs.js';
 import { runSessionCommand } from './session-command.js';
+import { runLoginCommand } from './login-command.js';
+import { readCredentials } from './relay-client.js';
+import { relayCall } from './cli-client.js';
 import { controllerSkills } from './session-skills.js';
 
 interface DaemonState { launcherPid?: number; pid: number; token: string; socket: string; startedAt: string; supervisor?: 'launchd' | 'systemd' | 'windows' }
@@ -86,7 +89,9 @@ async function main(): Promise<void> {
   else if (command === 'autostart') await autostart(args[1] ?? 'status');
   else if (command === 'pair') await pair();
   else if (command === 'share') await share();
-  else if (command === 'session') process.exitCode = await runSessionCommand(args.slice(1), process.env, text => { process.stdout.write(text); }, managementAccess);
+  else if (command === 'session') process.exitCode = await runSessionCommand(args.slice(1), process.env, text => { process.stdout.write(text); }, managementAccess, undefined, () => readCredentials(stateDir));
+  else if (command === 'login' || command === 'logout') process.exitCode = await runLoginCommand(command, args.slice(1), { stateDir, write: text => { process.stdout.write(text); },
+    pairedServer: async () => (await resolveHostConnection(stateDir, process.env).catch(() => undefined))?.serverUrl });
   else throw new Error(`Unknown command: ${command}. Run agent-remote-controller --help.`);
 }
 
@@ -180,7 +185,12 @@ async function serveConfigured(daemon: boolean, diagnosticLog: DiagnosticLog | u
   const registrations = providerDiscovery.registrations;
   const identity = await controllerIdentity(import.meta.url);
   const sessionCallers = await prepareSessionCallers(line => writeDiagnostic(line, diagnosticSecrets));
-  const host = createAgentHost({ ...(sessionCallers ? { sessionCallers } : {}), sessionRefs: new SessionRefStore(join(stateDir, 'session-refs.json')), succession: { controllerId: installationId, stateDirectory: join(stateDir, 'succession'), enrollment: true }, tpm: { stateDirectory: join(stateDir, 'tpm-v1') }, team: { stateDirectory: join(stateDir, 'teams-v1') }, ...(identity ? { controller: { identity, stateDir, restart: requestLauncherRestart } } : {}), registrations, providerDiscovery, providerEnabled: providerDiscovery.enabled, environment: hostEnvironment, installationId, name: environment.AGENT_HOST_NAME?.trim() || hostname(),
+  const host = createAgentHost({ ...(sessionCallers ? { sessionCallers } : {}),
+    async forwardCommand(scope, hostId, request) {
+      const credentials = await readCredentials(stateDir).catch(() => undefined);
+      if (!credentials) return { error: { code: 'signed_out', message: 'Other Hosts are reached through the Relay: run agent-remote-controller login on this computer first.' } };
+      return relayCall(credentials, scope, request, fetch, hostId);
+    }, sessionRefs: new SessionRefStore(join(stateDir, 'session-refs.json')), succession: { controllerId: installationId, stateDirectory: join(stateDir, 'succession'), enrollment: true }, tpm: { stateDirectory: join(stateDir, 'tpm-v1') }, team: { stateDirectory: join(stateDir, 'teams-v1') }, ...(identity ? { controller: { identity, stateDir, restart: requestLauncherRestart } } : {}), registrations, providerDiscovery, providerEnabled: providerDiscovery.enabled, environment: hostEnvironment, installationId, name: environment.AGENT_HOST_NAME?.trim() || hostname(),
     ...(supportsCodexDaemonControl(environment)
       ? { codexDaemon: { stateDir, restart: operationId => restartCodexDaemon({ stateDir, environment, operationId }) } } : {}),
     vscodeTunnel: { stateDirectory: stateDir, executable: environment.AGENT_HOST_VSCODE?.trim() || undefined,

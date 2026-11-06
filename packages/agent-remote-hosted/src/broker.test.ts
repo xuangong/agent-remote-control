@@ -96,6 +96,56 @@ it('pairs a portable Host and preserves its catalog and native creation request'
   ]);
 }, 10_000);
 
+it('sends session commands to a Host that takes them, for its owner only', async () => {
+  const broker = createHostBroker({ origin: 'https://relay.example', rpcTimeoutMs: 1000, ownerSubject: 'alice' });
+  close.push(() => broker.close());
+  const alice = { principalSubject: () => 'alice' };
+  const request = (path: string, body?: unknown) => new Request(`https://relay.example${path}`, {
+    ...(body === undefined ? {} : { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) }),
+  });
+  async function pair(installationId: string, sessionCommands: boolean) {
+    const credential = await (await broker.handleRequest(request('/v1/remote/pairings', {}), alice))!.json();
+    const prepared = await broker.prepareUpgrade(new Request('https://relay.example/ws/remote-host', { headers: { authorization: `Bearer ${credential.key}` } }));
+    if (!prepared || prepared instanceof Response) throw new Error('Host upgrade rejected');
+    const sockets = transportPair();
+    const registered = new Promise<{ hostId: string }>(resolve => {
+      sockets.native.onMessage(data => { const message = JSON.parse(data); if (message.type === 'registered') resolve(message); });
+    });
+    prepared.accept(sockets.server);
+    sockets.native.send(JSON.stringify({ uplinkVersion: 2, type: 'register', installationId, name: installationId,
+      providers: [{ providerId: 'codex', displayName: 'Codex', ...(sessionCommands ? { sessionCommands: true } : {}) }] }));
+    return { hostId: (await registered).hostId, native: sockets.native };
+  }
+  const current = await pair('current-host', true), old = await pair('old-host', false);
+  const calls: string[] = [];
+  current.native.onMessage(data => {
+    const message = JSON.parse(data);
+    if (message.type !== 'rpc_request') return;
+    calls.push(`${message.method} ${message.path} ${message.body}`);
+    current.native.send(JSON.stringify({ uplinkVersion: 2, type: 'rpc_response', requestId: message.requestId, status: 200, body: '{"result":{"sessions":[]}}' }));
+  });
+  const call = (hostId: string, body: unknown, context: Parameters<typeof broker.handleRequest>[1] = alice) =>
+    broker.handleRequest(request(`/v1/remote/hosts/${hostId}/session/call`, body), context);
+
+  const listed = await call(current.hostId, { request: { command: 'list', limit: 5 } });
+  expect(listed?.status).toBe(200);
+  expect(await listed!.json()).toEqual({ result: { sessions: [] } });
+  expect(calls).toEqual(['POST /remote/session/call {"request":{"command":"list","limit":5}}']);
+
+  expect((await call(current.hostId, { request: { command: 'list' } }, { principalSubject: () => 'bob' }))?.status).toBe(403);
+  expect((await call(old.hostId, { request: { command: 'list' } }))?.status).toBe(400);
+  expect((await call(current.hostId, { request: { command: 'list' }, extra: true }))?.status).toBe(400);
+  expect((await call(current.hostId, { request: 'list' }))?.status).toBe(400);
+
+  // Permission settings need a recent sign-in, as they do in the website; other settings do not.
+  const stale = { ...alice, authorizeMessage: (raw: string) => !['approval', 'sandbox', 'permissions'].includes(JSON.parse(raw).payload?.settingId) };
+  const refused = await call(current.hostId, { request: { command: 'set', target: 'h/codex/s', settings: { approval: 'never' } } }, stale);
+  expect(refused?.status).toBe(403);
+  expect(await refused!.json()).toMatchObject({ code: 'reauthentication_required' });
+  expect((await call(current.hostId, { request: { command: 'set', target: 'h/codex/s', settings: { model: 'gpt-6' } } }, stale))?.status).toBe(200);
+  expect(calls).toHaveLength(2);
+}, 10_000);
+
 const restoredState: RemoteHostBrokerState = {
   keys: [['7a8ce1c8927a74e75f9bc855677bd2cb361d6b19a58f85296a8777022d022a14', { expires: 20_000, installationId: 'restored-installation' }]],
   hosts: [{ id: 'host', installationId: 'restored-installation', name: 'Restored Host', providers: [{ providerId: 'codex', displayName: 'Codex' }], legacyDsh: false }],

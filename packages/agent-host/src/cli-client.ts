@@ -1,5 +1,6 @@
 import { createConnection } from 'node:net';
 import { CliError } from './cli-output.js';
+import { relayError, relayRequest, type CliCredentials } from './relay-client.js';
 import { SESSION_SOCKET_VARIABLE, SESSION_TOKEN_VARIABLE } from './session-callers.js';
 
 /** A command's answer: its result, or an error with a stable code. */
@@ -14,13 +15,39 @@ export interface ManagementAccess { socket: string; token: string }
  */
 export interface CommandChannel { readonly caller: 'session' | 'owner'; call(scope: string, request: Record<string, unknown>): Promise<CommandAnswer> }
 
+/**
+ * A session's shell asks its Controller; an ordinary terminal asks the local Controller as the Host owner; a computer
+ * without a running Controller asks the Relay directly with the command line's own session (agent-remote-controller login).
+ */
 export async function commandChannel(env: NodeJS.ProcessEnv, management: () => Promise<ManagementAccess | undefined>,
-  connect: typeof createConnection = createConnection): Promise<CommandChannel> {
+  connect: typeof createConnection = createConnection, credentials: () => Promise<CliCredentials | undefined> = async () => undefined, fetcher: typeof fetch = fetch): Promise<CommandChannel> {
   const token = env[SESSION_TOKEN_VARIABLE], socket = env[SESSION_SOCKET_VARIABLE];
   if (token && socket) return { caller: 'session', call: (scope, request) => answer(socketCall(socket, { scope, ...request, token }, connect)) };
   const access = await management().catch(() => undefined);
   if (access) return { caller: 'owner', call: (scope, request) => answer(socketCall(access.socket, { action: scope, request, token: access.token }, connect)) };
-  throw new CliError('no_identity', 'Run this in a session Agent Remote Control manages, or on a computer whose Controller is running.');
+  const signedIn = await credentials();
+  if (signedIn) return { caller: 'owner', call: (scope, request) => relayCall(signedIn, scope, request, fetcher) };
+  throw new CliError('no_identity', 'Run this in a session Agent Remote Control manages, on a computer whose Controller is running, or after agent-remote-controller login.');
+}
+
+/** The Host a command names: the --host option, or the Host of the session it names. */
+export function commandHost(request: Record<string, unknown>): string | undefined {
+  if (typeof request.host === 'string') return request.host;
+  for (const field of ['target', 'session'] as const) {
+    const value = request[field];
+    if (typeof value === 'string' && value.split('/').length >= 3) return value.split('/')[0];
+  }
+  return undefined;
+}
+
+/** Sends a resource command to the Host that has its session, through the Relay. */
+export async function relayCall(credentials: CliCredentials, scope: string, request: Record<string, unknown>, fetcher: typeof fetch = fetch,
+  hostId = commandHost(request)): Promise<CommandAnswer> {
+  if (scope !== 'session') return { error: { code: 'invalid_request', message: `Unknown command group: ${scope}.` } };
+  if (!hostId || hostId === 'local' || hostId === 'self') return { error: { code: 'invalid_request', message: 'Name the Host: give a full session address or --host.' } };
+  const { status, data } = await relayRequest(credentials, 'POST', `/v1/remote/hosts/${encodeURIComponent(hostId)}/session/call`, { request }, fetcher);
+  if (status !== 200) { const error = relayError(status, data); return { error: { code: error.code, message: error.message } }; }
+  return answer(Promise.resolve(data));
 }
 
 async function answer(pending: Promise<Record<string, unknown>>): Promise<CommandAnswer> {

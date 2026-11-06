@@ -284,9 +284,26 @@ describe('session commands', () => {
     const inspected = await run(['inspect', 'host-1/claude/claude-created-1']);
     expect(inspected.output).toMatchObject({ status: 'idle', pendingInteractions: [] });
     expect(await run(['answer', 'self', 'request', '--response', '{"kind":"tool_approval","decision":"deny"}'])).toMatchObject({ code: 1, output: { error: { code: 'session_forbidden' } } });
+    expect(await run(['set', 'self', '--setting', 'approval=never'])).toMatchObject({ code: 1, output: { error: { code: 'session_forbidden' } } });
     // The Host owner reaches the same sessions through the management socket.
     const owner = await runtime.callSession({ command: 'read', target: 'host-1/claude/claude-created-1' }, { kind: 'owner' });
     expect(owner).toMatchObject({ result: { session: { address: 'host-1/claude/claude-created-1' } } });
     expect(await runtime.callSession({ command: 'read', target: 'self' }, { kind: 'owner' })).toMatchObject({ error: { code: 'invalid_request' } });
+  });
+
+  it('sends what names another Host there, where the calling session is named by its address', async () => {
+    const { runtime } = await commands();
+    const forwarded: Array<[string, Record<string, unknown>]> = [];
+    const forward = async (hostId: string, request: Record<string, unknown>) => { forwarded.push([hostId, request]); return { result: { forwarded: true } }; };
+    const caller = { kind: 'session' as const, ref: { providerId: 'claude', nativeSessionId: 'old' } };
+    expect(await runtime.callSession({ command: 'read', target: 'host-2/codex/thread' }, caller, forward)).toEqual({ result: { forwarded: true } });
+    expect(await runtime.callSession({ command: 'create', host: 'host-2', providerId: 'codex', from: 'self', refs: ['self', 'host-2/codex/x'], operationId: 'op' }, caller, forward))
+      .toEqual({ result: { forwarded: true } });
+    expect(forwarded).toEqual([
+      ['host-2', { command: 'read', target: 'host-2/codex/thread' }],
+      ['host-2', { command: 'create', host: 'host-2', providerId: 'codex', from: 'host-1/claude/old', refs: ['host-1/claude/old', 'host-2/codex/x'], operationId: 'op' }],
+    ]);
+    const failing = async () => { throw Object.assign(new Error('The command line session ended.'), { code: 'signed_out' }); };
+    expect(await runtime.callSession({ command: 'list', host: 'host-2' }, caller, failing)).toEqual({ error: { code: 'signed_out', message: 'The command line session ended.' } });
   });
 });

@@ -199,6 +199,8 @@ export interface AgentHostOptions extends AgentHostRuntimeOptions {
   onRelayDiagnostics?: (entries: RelayDiagnostic[]) => void | Promise<void>;
   onDiagnostic?: (diagnostic: AgentHostUplinkDiagnostic) => void | Promise<void>;
   uplink: { url: string; remoteKey: string; onCredential?: (credential: string) => Promise<void> };
+  /** Sends a command naming another Host there, through the Relay as the signed-in command line. */
+  forwardCommand?(scope: string, hostId: string, request: Record<string, unknown>): Promise<SessionCallResult>;
 }
 export interface AgentHostUplinkDiagnostic extends RemoteHostUplinkDiagnostic { uplinkGeneration: number }
 export interface AgentHost {
@@ -297,7 +299,7 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
     sessionCatalog: runtime.sessionCatalog,
     ...(runtime.sessionRefs ? { sessionRefs: runtime.sessionRefs } : {}),
     async command(scope, request, caller) {
-      if (scope === 'session') return runtime.callSession(request, caller);
+      if (scope === 'session') return runtime.callSession(request, caller, options.forwardCommand ? (hostId, forwarded) => options.forwardCommand!('session', hostId, forwarded) : undefined);
       return { error: { code: 'invalid_request', message: `Unknown command group: ${scope}.` } };
     },
     shareContext,
@@ -1210,12 +1212,9 @@ export function createAgentHostRuntime(options: AgentHostRuntimeOptions): AgentH
       if (request.method === 'POST') {
         const payload = body(request.body);
         if (url.pathname === '/remote/session/call') {
-          // Through the Relay the owner asks, or a session of another of the owner's Hosts that the Relay names.
-          const caller = payload.caller === undefined ? { kind: 'owner' as const } : validCallerSession(payload.caller)
-            ? { kind: 'session' as const, ref: { providerId: payload.caller.providerId, nativeSessionId: payload.caller.nativeSessionId }, hostId: payload.caller.hostId }
-            : (() => { throw new HostRequestError(400, 'invalid_request', 'The calling session is invalid.'); })();
-          if (Object.keys(payload).some(key => key !== 'request' && key !== 'caller') || request.sessionId) throw new HostRequestError(400, 'invalid_request', 'A session command is required.');
-          return json(200, await callSession(payload.request, caller));
+          // Through the Relay only the owner asks: the website, the command line it signed in, or a Controller using it.
+          if (Object.keys(payload).some(key => key !== 'request') || request.sessionId) throw new HostRequestError(400, 'invalid_request', 'A session command is required.');
+          return json(200, await callSession(payload.request, { kind: 'owner' }));
         }
         if (url.pathname === '/remote/session/refs') {
           if (!sessionRefs) throw new HostRequestError(400, 'unsupported_configuration', 'Session references are unavailable. Update the Controller.');
@@ -1558,11 +1557,6 @@ export function createAgentHostRuntime(options: AgentHostRuntimeOptions): AgentH
 }
 
 class HostRequestError extends Error { constructor(readonly status: number, readonly code: string, message: string) { super(message); } }
-function validCallerSession(value: unknown): value is { hostId: string; providerId: string; nativeSessionId: string } {
-  const caller = value as { hostId?: unknown; providerId?: unknown; nativeSessionId?: unknown } | null;
-  return typeof caller?.hostId === 'string' && !!caller.hostId && caller.hostId.length <= 128 && typeof caller.providerId === 'string' && /^[a-z][a-z0-9-]{0,63}$/.test(caller.providerId)
-    && typeof caller.nativeSessionId === 'string' && !!caller.nativeSessionId && caller.nativeSessionId.length <= 512;
-}
 function publicBinding(binding: Binding): Omit<Binding, 'providerId'> {
   const { providerId: _providerId, ...value } = binding;
   return value;

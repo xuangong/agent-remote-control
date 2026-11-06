@@ -1881,6 +1881,22 @@ export function createHostBroker(options: HostBrokerOptions) {
       return rawJson(await rpc(host, 'POST', '/remote/session/refs', undefined, JSON.stringify({ providerId, nativeSessionId, action: input.action,
         target: { providerId: target.providerId, nativeSessionId: target.nativeSessionId } })));
     }
+    const call = /^\/v1\/remote\/hosts\/([^/]+)\/session\/call$/.exec(url.pathname);
+    if (call && request.method === 'POST') {
+      // Session commands reach every session of a Host, so only its owner sends them.
+      if (!owner(subject)) throw new SharingError(403, 'session_forbidden', 'Session commands are available to the Host owner.');
+      requireAccess(call[1]!, subject);
+      const host = requireHost(call[1]!);
+      if (!host.providers.some(provider => provider.sessionCommands)) throw new BrokerError(400, 'unsupported_configuration', 'Session commands are unavailable. Update the Controller.');
+      const input = await readBody(request);
+      const command = input.request as Record<string, unknown> | undefined;
+      if (!command || typeof command !== 'object' || Array.isArray(command) || Object.keys(input).some(key => key !== 'request')) throw new BrokerError(400, 'invalid_request', 'A session command is required.');
+      // Permission settings need a recent sign-in in the website; the same holds for commands.
+      const settings = command.command === 'set' && command.settings && typeof command.settings === 'object' ? Object.keys(command.settings) : [];      if (settings.some(settingId => context.authorizeMessage?.(JSON.stringify({ type: 'set_session_setting', payload: { settingId } })) === false)) {
+        throw new BrokerError(403, 'reauthentication_required', 'Sign in again in the website before changing permission settings.');
+      }
+      return rawJson(await rpc(host, 'POST', '/remote/session/call', undefined, JSON.stringify({ request: command })));
+    }
     const rename = /^\/v1\/remote\/hosts\/([^/]+)\/session\/rename$/.exec(url.pathname);
     if (rename && request.method === 'POST') {
       requireAccess(rename[1]!, subject);

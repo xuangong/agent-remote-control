@@ -116,13 +116,13 @@ Create `scripts/local/instance.test.mjs`:
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { once } from 'node:events';
-import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readdir, rm, stat, writeFile } from 'node:fs/promises';
 import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
-import { setTimeout as delay } from 'node:timers/promises';
+import { join, resolve } from 'node:path';
 import { test } from 'node:test';
-import { findInstance, instanceName, listInstances, portAvailable, prepareInstance, runState, withLock, writeJson } from './instance.mjs';
+import { pathToFileURL } from 'node:url';
+import { findInstance, instanceName, listInstances, localRoot, portAvailable, prepareInstance, runState, withLock, writeJson } from './instance.mjs';
 
 async function temporaryRoot(t) {
   const root = await mkdtemp(join(tmpdir(), 'arc-local-instance-'));
@@ -136,11 +136,23 @@ async function exitedPid() {
   return child.pid;
 }
 
+/** A live process whose command line ends with the given marker arguments. */
+async function idleProcess(t, ...marker) {
+  const child = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)', ...marker], { stdio: 'ignore' });
+  t.after(() => child.kill('SIGKILL'));
+  await once(child, 'spawn');
+  return child;
+}
+
 test('names an instance stably per checkout path', () => {
   assert.equal(instanceName('/work/.worktrees/feature'), instanceName('/work/.worktrees/feature'));
   assert.notEqual(instanceName('/work/.worktrees/feature'), instanceName('/other/feature'));
   assert.match(instanceName('/work/.worktrees/feature'), /^feature-[0-9a-f]{8}$/);
   assert.match(instanceName('/work/odd name!'), /^odd-name--[0-9a-f]{8}$/);
+});
+
+test('resolves a relative root so every command addresses the same instances', () => {
+  assert.equal(localRoot({ ARC_LOCAL_ROOT: 'relative-root' }), resolve('relative-root'));
 });
 
 test('records a port once and reuses it', async t => {
@@ -156,6 +168,16 @@ test('records a port once and reuses it', async t => {
   assert.equal(await findInstance('/src/two', environment), undefined);
 });
 
+test('agrees on one port when several commands start the same checkout together', async t => {
+  for (let round = 0; round < 20; round++) {
+    const environment = { ARC_LOCAL_ROOT: await temporaryRoot(t) };
+    const instances = await Promise.all(Array.from({ length: 4 }, () => prepareInstance('/src/one', environment)));
+    assert.equal(new Set(instances.map(instance => instance.record.port)).size, 1);
+    assert.deepEqual((await findInstance('/src/one', environment)).record, instances[0].record);
+    assert.deepEqual((await readdir(instances[0].directory)).filter(name => name.endsWith('.tmp')), []);
+  }
+});
+
 test('refuses an instance directory recorded for another checkout', async t => {
   const environment = { ARC_LOCAL_ROOT: await temporaryRoot(t) };
   const instance = await prepareInstance('/src/one', environment);
@@ -164,10 +186,30 @@ test('refuses an instance directory recorded for another checkout', async t => {
   assert.equal(await findInstance('/src/one', environment), undefined);
 });
 
-test('reports whether a port is free', async () => {
+test('names the file when an instance record is not valid JSON', async t => {
+  const environment = { ARC_LOCAL_ROOT: await temporaryRoot(t) };
+  const instance = await prepareInstance('/src/one', environment);
+  await writeFile(instance.recordFile, '{ truncated');
+  await assert.rejects(prepareInstance('/src/one', environment), error => error.message === `${instance.recordFile} is not valid JSON.`);
+});
+
+test('reports whether a port is free', async t => {
   const server = createServer();
+  t.after(() => server.close());
   server.listen(0, '127.0.0.1');
   await once(server, 'listening');
+  const { port } = server.address();
+  assert.equal(await portAvailable(port), false);
+  await new Promise(resolve => server.close(resolve));
+  assert.equal(await portAvailable(port), true);
+});
+
+test('reports a port held only on the IPv6 loopback as taken', async t => {
+  const server = createServer();
+  t.after(() => server.close());
+  server.listen(0, '::1');
+  try { await once(server, 'listening'); }
+  catch { t.skip('The IPv6 loopback address is unavailable.'); return; }
   const { port } = server.address();
   assert.equal(await portAvailable(port), false);
   await new Promise(resolve => server.close(resolve));
@@ -194,16 +236,60 @@ test('treats run records of exited processes as stale', async t => {
   assert.equal(await runState(directory, { runnerPid: process.pid, controllerPid: pid }), 'stale');
 });
 
-test('serializes operations and recovers a lock left by an exited process', async t => {
+test('recognizes this instance runner and an orphaned Controller', async t => {
   const directory = await temporaryRoot(t);
-  const first = withLock(directory, () => delay(200));
-  await delay(30);
+  const runner = await idleProcess(t, 'scripts/local/runner.mjs', directory);
+  const controller = await idleProcess(t, 'cli.js', 'foreground');
+  const runtime = { runnerPid: runner.pid, controllerPid: controller.pid };
+  assert.equal(await runState(directory, runtime), 'running');
+  // The runner must be started for exactly this instance directory.
+  assert.equal(await runState(`${directory}-other`, runtime), 'orphaned');
+  assert.equal(await runState(directory.slice(0, -1), runtime), 'orphaned');
+});
+
+test('does not mistake an unknown process state for a stopped instance', async t => {
+  const directory = await temporaryRoot(t);
+  const path = process.env.PATH;
+  process.env.PATH = '';
+  try {
+    await assert.rejects(runState(directory, { runnerPid: process.pid, controllerPid: process.pid }), /Could not inspect process/);
+  } finally { process.env.PATH = path; }
+});
+
+test('serializes operations on one instance', async t => {
+  const directory = await temporaryRoot(t);
+  const entered = Promise.withResolvers();
+  const finish = Promise.withResolvers();
+  const first = withLock(directory, async () => { entered.resolve(); await finish.promise; });
+  await entered.promise;
   await assert.rejects(withLock(directory, async () => undefined), /Another local command/);
+  finish.resolve();
   await first;
-  await mkdir(join(directory, 'operation.lock'));
-  await writeJson(join(directory, 'operation.lock', 'owner.json'), { pid: await exitedPid() });
   assert.equal(await withLock(directory, async () => 'ran'), 'ran');
-  await assert.rejects(readFile(join(directory, 'operation.lock', 'owner.json')), { code: 'ENOENT' });
+  await assert.rejects(withLock(directory, async () => { throw new Error('failed'); }), /failed/);
+  assert.equal(await withLock(directory, async () => 'ran again'), 'ran again');
+});
+
+test('reports a lock left by a killed command instead of taking it over', async t => {
+  const directory = await temporaryRoot(t);
+  await mkdir(join(directory, 'operation.lock'));
+  await assert.rejects(withLock(directory, async () => 'ran'), /remove .*operation\.lock/);
+  assert.ok((await stat(join(directory, 'operation.lock'))).isDirectory());
+});
+
+test('releases the lock when the command is terminated', async t => {
+  const directory = await temporaryRoot(t);
+  const module = pathToFileURL(join(import.meta.dirname, 'instance.mjs')).href;
+  const script = `import { withLock } from ${JSON.stringify(module)};
+await withLock(process.argv[1], async () => { process.stdout.write('locked\\n'); await new Promise(() => setInterval(() => {}, 1000)); });`;
+  const child = spawn(process.execPath, ['--input-type=module', '-e', script, directory], { stdio: ['ignore', 'pipe', 'inherit'] });
+  t.after(() => child.kill('SIGKILL'));
+  await once(child.stdout, 'data');
+  const exited = once(child, 'exit');
+  child.kill('SIGTERM');
+  const [, signal] = await exited;
+  assert.equal(signal, 'SIGTERM');
+  await assert.rejects(stat(join(directory, 'operation.lock')), { code: 'ENOENT' });
 });
 ```
 
@@ -216,17 +302,20 @@ Expected: FAIL with `Cannot find module '.../scripts/local/instance.mjs'`.
 
 ```javascript
 import { execFile } from 'node:child_process';
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { once } from 'node:events';
-import { mkdir, readFile, readdir, rename, rm, stat, writeFile } from 'node:fs/promises';
+import { rmSync } from 'node:fs';
+import { link, mkdir, readFile, readdir, rename, rm, writeFile } from 'node:fs/promises';
 import { createServer } from 'node:net';
 import { homedir } from 'node:os';
-import { basename, join } from 'node:path';
+import { basename, join, resolve } from 'node:path';
 import { promisify } from 'node:util';
+
+const exec = promisify(execFile);
 
 /** Instances live under one root outside every repository. */
 export function localRoot(environment = process.env) {
-  return environment.ARC_LOCAL_ROOT ?? join(homedir(), '.agent-remote-control-dev');
+  return environment.ARC_LOCAL_ROOT ? resolve(environment.ARC_LOCAL_ROOT) : join(homedir(), '.agent-remote-control-dev');
 }
 
 /** Stable for a checkout path and readable in listings. */
@@ -248,14 +337,26 @@ export function instanceFiles(directory) {
 }
 
 export async function readJson(path) {
-  try { return JSON.parse(await readFile(path, 'utf8')); }
+  let text;
+  try { text = await readFile(path, 'utf8'); }
   catch (error) { if (error.code === 'ENOENT') return undefined; throw error; }
+  try { return JSON.parse(text); }
+  catch { throw new Error(`${path} is not valid JSON.`); }
 }
 
 export async function writeJson(path, value) {
   const temporary = `${path}.${process.pid}.tmp`;
   await writeFile(temporary, JSON.stringify(value, null, 2) + '\n', { mode: 0o600 });
   await rename(temporary, path);
+}
+
+/** Creates the file with its full content or leaves an existing one untouched; readers never see a partial file. */
+async function createJson(path, value) {
+  const temporary = `${path}.${process.pid}.${randomUUID()}.tmp`;
+  await writeFile(temporary, JSON.stringify(value, null, 2) + '\n', { mode: 0o600 });
+  try { await link(temporary, path); return true; }
+  catch (error) { if (error.code === 'EEXIST') return false; throw error; }
+  finally { await rm(temporary, { force: true }); }
 }
 
 export async function freePort() {
@@ -267,14 +368,16 @@ export async function freePort() {
   return port;
 }
 
-export async function portAvailable(port) {
+async function canListen(port, host) {
   const server = createServer();
-  try {
-    server.listen(port, '127.0.0.1');
-    await once(server, 'listening');
-    return true;
-  } catch { return false; }
+  try { server.listen(port, host); await once(server, 'listening'); return true; }
+  catch (error) { return host === '::1' && ['EADDRNOTAVAIL', 'EAFNOSUPPORT'].includes(error.code); }
   finally { if (server.listening) await new Promise(resolve => server.close(resolve)); }
+}
+
+/** Browsers may resolve localhost to either loopback address, so both must be free. */
+export async function portAvailable(port) {
+  return await canListen(port, '127.0.0.1') && await canListen(port, '::1');
 }
 
 /** The port is chosen once: the local identity is bound to the instance origin. */
@@ -287,8 +390,8 @@ export async function prepareInstance(source, environment = process.env) {
   if (record && record.source !== source) throw new Error(`${files.directory} belongs to ${record.source}.`);
   if (!record) {
     const port = await freePort();
-    record = { version: 1, name: basename(files.directory), source, port, origin: `http://localhost:${port}`, createdAt: new Date().toISOString() };
-    await writeJson(files.recordFile, record);
+    const created = { version: 1, name: basename(files.directory), source, port, origin: `http://localhost:${port}`, createdAt: new Date().toISOString() };
+    record = await createJson(files.recordFile, created) ? created : await readJson(files.recordFile);
   }
   return { ...files, record };
 }
@@ -322,40 +425,48 @@ export function processAlive(pid) {
 export async function processCommand(pid) {
   if (!processAlive(pid)) return undefined;
   try {
-    const { stdout } = await promisify(execFile)('ps', ['-ww', '-o', 'command=', '-p', String(pid)], { timeout: 5000 });
+    const { stdout } = await exec('ps', ['-ww', '-o', 'command=', '-p', String(pid)], { timeout: 15_000 });
     return stdout.trim() || undefined;
-  } catch { return undefined; }
+  } catch (error) {
+    // ps exits 1 when the process is gone; anything else leaves the state unknown, not stopped.
+    if (error.code === 1) return undefined;
+    throw new Error(`Could not inspect process ${pid}: ${error.message}`);
+  }
 }
 
 /** A recorded PID counts only while it still runs the command this instance started. */
 export async function runState(directory, runtime) {
   if (!runtime) return 'stopped';
-  if ((await processCommand(runtime.runnerPid))?.includes(directory)) return 'running';
+  const runner = await processCommand(runtime.runnerPid);
+  if (runner?.includes('scripts/local/runner.mjs') && runner.endsWith(` ${directory}`)) return 'running';
   return (await processCommand(runtime.controllerPid))?.includes('cli.js foreground') ? 'orphaned' : 'stale';
 }
 
+/** Operations on one instance run one at a time; a lock left by a killed command is reported, not taken over. */
 export async function withLock(directory, action) {
   const lock = join(directory, 'operation.lock');
   try { await mkdir(lock); }
   catch (error) {
     if (error.code !== 'EEXIST') throw error;
-    const owner = await readJson(join(lock, 'owner.json')).catch(() => undefined);
-    // A lock without an owner is either being created now or was left before its owner was written.
-    const age = Date.now() - (await stat(lock).catch(() => ({ mtimeMs: 0 }))).mtimeMs;
-    if (owner ? processAlive(owner.pid) : age < 10_000) throw new Error('Another local command is changing this instance.');
-    await rm(lock, { recursive: true, force: true });
-    await mkdir(lock);
+    throw new Error(`Another local command is changing this instance. If none is running, remove ${lock}.`);
   }
-  await writeJson(join(lock, 'owner.json'), { pid: process.pid });
+  const release = () => rmSync(lock, { recursive: true, force: true });
+  const interrupted = signal => { release(); process.kill(process.pid, signal); };
+  process.once('SIGINT', interrupted);
+  process.once('SIGTERM', interrupted);
   try { return await action(); }
-  finally { await rm(lock, { recursive: true, force: true }); }
+  finally {
+    process.off('SIGINT', interrupted);
+    process.off('SIGTERM', interrupted);
+    release();
+  }
 }
 ```
 
 - [ ] **Step 4: Run the tests to verify they pass**
 
 Run: `node --test scripts/local/instance.test.mjs`
-Expected: PASS, 7 tests.
+Expected: PASS, 15 tests.
 
 - [ ] **Step 5: Commit**
 

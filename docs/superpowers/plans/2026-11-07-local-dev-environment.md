@@ -89,6 +89,8 @@ In "Hard rules in `SKILL.md`", insert after rule 2 a new rule and renumber the r
 
 In the "Command" table, change the `controller <args>` row's behaviour to: "Run the development Controller CLI with this instance's state directory; only `status`, `diagnostics`, `window`, `session` and `environment` are allowed."
 
+The spec's Lifecycle build step and stale-PID sentence (which now names `runtime.json`) are aligned with these decisions as well.
+
 - [ ] **Step 3: Commit**
 
 ```bash
@@ -1296,7 +1298,7 @@ of its path:
 ```
 ~/.agent-remote-control-dev/instances/<checkout>-<hash>/
   instance.json   checkout path, port and origin
-  runtime.json    current run: build commit, runner and Controller PIDs
+  runtime.json    current run: checkout commit and dirty flag at start, runner and Controller PIDs
   relay/          site state and local identity
   controller/     development Controller state, including its pairing
   workspace/      the Controller's only allowed workspace
@@ -1331,9 +1333,10 @@ similar variables are not passed on, and trusted full control is never enabled.
 | Per-session stores | Permission modes and references under `~/.agent-remote-control/session-*` are keyed by session, so test sessions add entries there. |
 
 In the instance website, do not use Controller update, Codex daemon restart,
-OpenCode server or VS Code tunnel controls: they act on processes your own
-Controller also uses. Claude Code and Codex are covered end to end; OpenCode
-Ask callbacks go through the shared server.
+OpenCode server or VS Code tunnel controls. Controller update would replace
+this checkout's build; the other controls act on processes your own Controller
+also uses. Claude Code and Codex are covered end to end; OpenCode Ask callbacks
+go through the shared server.
 
 ## Troubleshooting
 
@@ -1437,9 +1440,10 @@ outside the instance workspace; these rules still apply:
 2. Never touch the user's own Controller — `~/.agent-remote-control/agents-cloud-cli`,
    its launchd service, the global `agent-remote-controller` command — or the
    production site. Operate the instance only through `pnpm local`.
-3. In the instance website, do not use Controller update, Codex daemon restart,
-   OpenCode server or VS Code tunnel controls. They act on processes shared with
-   the user's Controller.
+3. Never use the instance website's Controller update, Codex daemon restart,
+   OpenCode server or VS Code tunnel controls. Controller update would replace
+   this checkout's build; the others act on processes shared with the user's
+   Controller.
 4. Never use the user's own browsers, profiles or windows. Use a headless browser
    as described in [browser](references/browser.md).
 5. Never print cookies, pairing keys, `controller/connection.json` or whole

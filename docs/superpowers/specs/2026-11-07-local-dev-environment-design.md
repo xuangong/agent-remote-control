@@ -64,7 +64,7 @@ instance's state:
 ```
 ~/.agent-remote-control-dev/instances/<worktree-name>-<path-hash>/
   instance.json   checkout path, port and origin (written once)
-  runtime.json    current run: build commit and dirty flag, runner and Controller PIDs (written by the runner)
+  runtime.json    current run: checkout commit and dirty flag at start, runner and Controller PIDs (written by the runner)
   relay/          Devbox server state (identity.json, relay/state.json)
   controller/     AGENT_HOST_STATE_DIR of the development Controller
   workspace/      test workspace; the Controller's only allowed workspace root
@@ -82,18 +82,20 @@ printed.
 
 `up`:
 
-1. Builds with
+1. Installs dependencies first in a fresh worktree (no `node_modules`), then
+   builds with
    `pnpm --filter @orchardworks/agent-remote-controller... run build`,
-   `pnpm build:relay` and `scripts/build-devbox.mjs` (installing dependencies
-   first in a fresh worktree) unless `--no-build` is given. A failed build
-   leaves a running instance untouched.
+   `pnpm build:relay` and `node scripts/build-devbox.mjs` unless `--no-build`
+   is given; it avoids `pnpm build`, which rewrites compatibility metadata. A
+   failed build leaves a running instance untouched.
 2. Allocates a free loopback port on first start and records it. The origin is
    `http://localhost:<port>`; the Devbox identity is bound to that origin, so a
-   recorded port is reused and a change is refused. If another process holds the
-   recorded port, `up` stops with an error instead of choosing a new one.
+   recorded port is reused and a change is refused.
 3. Stops a running instance of this worktree (runner first, which stops the
-   Controller and then the site), then starts a detached runner process with its
-   output in `logs/`.
+   Controller and then the site). If a process other than this instance's runner
+   still holds the recorded port, `up` stops with an error naming the port
+   instead of choosing a new one. Otherwise it starts a detached runner process
+   with its output in `logs/`.
 4. The runner starts `createDevboxServer` from `dist/devbox/server.mjs`, obtains
    a Host invitation through the server's local identity (first start only; later
    starts reuse the Controller's saved device credential), then starts
@@ -134,8 +136,8 @@ and locks permission settings. Native profile variables (`CLAUDE_CONFIG_DIR`,
 
 The development Controller reuses the Codex daemon and OpenCode server that the
 user's own Controller keeps running; with auto-start disabled it never starts,
-restarts or updates them. If no Codex daemon is running, Codex is unavailable in
-the instance.
+restarts or updates them on its own. If no Codex daemon is running, Codex is
+unavailable in the instance.
 
 ## Safety model for shared native profiles
 
@@ -145,7 +147,9 @@ Controller through `<profile>/.arc-session-owners`. The guarantees and residual
 risks are:
 
 - Code-enforced: sessions can only be created or opened inside the instance
-  workspace; permission settings are locked to native defaults.
+  workspace; permission settings are locked to native defaults;
+  `pnpm local controller` refuses every subcommand except `status`,
+  `diagnostics`, `window`, `session` and `environment`.
 - Not isolated: test sessions are written to the shared native histories (under
   paths inside `~/.agent-remote-control-dev`, so they are easy to recognise) and
   appear in the user's own Controller as ordinary sessions.
@@ -154,6 +158,8 @@ risks are:
   and Codex are covered end to end.
 - Rule-enforced by the skill: agents operate only sessions they created in the
   instance workspace and never take over, stop or archive any other session.
+- Rule-enforced by the skill: the instance website's Controller update, Codex
+  daemon restart, OpenCode server and VS Code tunnel controls are not used.
 
 ## Skill
 
@@ -206,9 +212,10 @@ Hard rules in `SKILL.md`:
 2. Never touch the user's Controller (`~/.agent-remote-control/agents-cloud-cli`,
    its launchd service, the global `agent-remote-controller`) or the production
    site. Operate the instance only through `pnpm local`.
-3. In the instance website, do not use Controller update, Codex daemon restart,
-   OpenCode server or VS Code tunnel controls; they act on processes shared with
-   the user's Controller.
+3. Never use the instance website's Controller update, Codex daemon restart,
+   OpenCode server or VS Code tunnel controls. Controller update would replace
+   this checkout's build; the other controls act on processes shared with the
+   user's Controller.
 4. Never use the user's own browsers, profiles or windows.
 5. Never print cookies, pairing keys, `connection.json` or whole configuration
    files.

@@ -115,7 +115,7 @@ Create `scripts/local/instance.test.mjs`:
 ```javascript
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
-import { once } from 'node:events';
+import { EventEmitter, once } from 'node:events';
 import { mkdir, mkdtemp, readdir, rm, stat, writeFile } from 'node:fs/promises';
 import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
@@ -123,7 +123,7 @@ import { join, resolve } from 'node:path';
 import { test } from 'node:test';
 import { pathToFileURL } from 'node:url';
 import {
-  findInstance, instanceName, listInstances, listenOutcome, localRoot, portAvailable, prepareInstance, readJson, runsInstance, runState, sandboxRefusal, withLock, writeJson,
+  findInstance, instanceName, listInstances, listenOutcome, localRoot, portAvailable, prepareInstance, readJson, runsInstance, runState, sandboxRefusal, spawnDetached, withLock, writeJson,
 } from './instance.mjs';
 
 async function temporaryRoot(t) {
@@ -377,6 +377,37 @@ test('explains a refusal by the environment and leaves other errors alone', () =
   assert.equal(sandboxRefusal(Object.assign(new Error('missing'), { code: 'ENOENT' }), 'starting background processes'), undefined);
   assert.equal(sandboxRefusal(new Error('plain'), 'starting background processes'), undefined);
 });
+
+const refusedStart = code => `This environment does not allow starting background processes (${code}). Run pnpm local from a session without the sandbox (YOLO mode).`;
+
+test('explains a spawn that the environment refuses by throwing', async () => {
+  // Node throws EPERM from spawn() itself, before any 'error' event exists.
+  for (const code of ['EPERM', 'EACCES']) {
+    const refuse = () => { throw Object.assign(new Error(`spawn ${code}`), { code }); };
+    await assert.rejects(spawnDetached(refuse, 'node', [], {}), error => error.message === refusedStart(code) && error.cause.code === code);
+  }
+});
+
+test('explains a spawn that the environment refuses through an error event', async () => {
+  const refuse = () => {
+    const child = new EventEmitter();
+    queueMicrotask(() => child.emit('error', Object.assign(new Error('spawn EPERM'), { code: 'EPERM' })));
+    return child;
+  };
+  await assert.rejects(spawnDetached(refuse, 'node', [], {}), error => error.message === refusedStart('EPERM'));
+});
+
+test('leaves other spawn failures unexplained and returns a child that started', async () => {
+  const missing = Object.assign(new Error('spawn nothing ENOENT'), { code: 'ENOENT' });
+  await assert.rejects(spawnDetached(() => { throw missing; }, 'nothing', [], {}), error => error === missing);
+  await assert.rejects(spawnDetached(spawn, '/nonexistent/arc-local-binary', [], { stdio: 'ignore' }), { code: 'ENOENT' });
+  const started = new EventEmitter();
+  queueMicrotask(() => started.emit('spawn'));
+  assert.equal(await spawnDetached(() => started, 'node', [], {}), started);
+  const child = await spawnDetached(spawn, process.execPath, ['-e', ''], { stdio: 'ignore' });
+  assert.ok(Number.isInteger(child.pid));
+  await once(child, 'exit');
+});
 ```
 
 - [ ] **Step 2: Run the tests to verify they fail**
@@ -387,7 +418,7 @@ Expected: FAIL with `Cannot find module '.../scripts/local/instance.mjs'`.
 - [ ] **Step 3: Implement `scripts/local/instance.mjs`**
 
 ```javascript
-import { execFile } from 'node:child_process';
+import { execFile, spawn } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
 import { once } from 'node:events';
 import { rmSync } from 'node:fs';
@@ -450,6 +481,15 @@ async function createJson(path, value) {
 export function sandboxRefusal(error, action) {
   if (!['EPERM', 'EACCES'].includes(error?.code)) return undefined;
   return new Error(`This environment does not allow ${action} (${error.code}). Run pnpm local from a session without the sandbox (YOLO mode).`, { cause: error });
+}
+
+/** Resolves with the child once it has started. Node reports a refused spawn by throwing or by an 'error' event; both are explained. */
+export async function spawnDetached(spawnProcess, file, args, options) {
+  try {
+    const child = spawnProcess(file, args, options);
+    await new Promise((resolveSpawn, reject) => { child.once('spawn', resolveSpawn); child.once('error', reject); });
+    return child;
+  } catch (error) { throw sandboxRefusal(error, 'starting background processes') ?? error; }
 }
 
 export async function freePort() {
@@ -578,7 +618,7 @@ export async function withLock(directory, action) {
 - [ ] **Step 4: Run the tests to verify they pass**
 
 Run: `node --test scripts/local/instance.test.mjs`
-Expected: PASS, 25 tests.
+Expected: PASS, 28 tests.
 
 - [ ] **Step 5: Commit**
 
@@ -1940,7 +1980,7 @@ import { controllerBuildProvenance } from '../lib/build-provenance.mjs';
 import { packageManager } from '../lib/package-manager.mjs';
 import { controllerEnvironment } from './environment.mjs';
 import {
-  findInstance, listInstances, portAvailable, prepareInstance, processAlive, processCommand, readJson, runState, runsInstance, sandboxRefusal, withLock,
+  findInstance, listInstances, portAvailable, prepareInstance, processAlive, processCommand, readJson, runState, runsInstance, spawnDetached, withLock,
 } from './instance.mjs';
 import { screenshot, signedInUser, userApi } from './session.mjs';
 
@@ -2070,10 +2110,8 @@ async function startRunner(instance) {
   await rm(join(instance.logs, 'controller.log'), { force: true });
   const log = await open(join(instance.logs, 'runner.log'), 'w', 0o600);
   try {
-    const child = spawn(process.execPath, [join(source, 'scripts/local/runner.mjs'), instance.directory],
+    const child = await spawnDetached(spawn, process.execPath, [join(source, 'scripts/local/runner.mjs'), instance.directory],
       { cwd: instance.directory, env: process.env, stdio: ['ignore', log.fd, log.fd], detached: true });
-    try { await new Promise((resolveSpawn, reject) => { child.once('spawn', resolveSpawn); child.once('error', reject); }); }
-    catch (error) { throw sandboxRefusal(error, 'starting background processes') ?? error; }
     child.unref();
     return child.pid;
   } finally { await log.close(); }
@@ -2308,7 +2346,7 @@ Expected: PASS, 7 tests, in about twelve seconds. If it times out waiting for Co
 - [ ] **Step 7: Run the whole suite through the root runner**
 
 Run: `pnpm test:local-env`
-Expected: PASS, 75 tests, exit 0.
+Expected: PASS, 78 tests, exit 0.
 
 - [ ] **Step 8: Commit**
 

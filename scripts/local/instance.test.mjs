@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
-import { once } from 'node:events';
+import { EventEmitter, once } from 'node:events';
 import { mkdir, mkdtemp, readdir, rm, stat, writeFile } from 'node:fs/promises';
 import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
@@ -8,7 +8,7 @@ import { join, resolve } from 'node:path';
 import { test } from 'node:test';
 import { pathToFileURL } from 'node:url';
 import {
-  findInstance, instanceName, listInstances, listenOutcome, localRoot, portAvailable, prepareInstance, readJson, runsInstance, runState, sandboxRefusal, withLock, writeJson,
+  findInstance, instanceName, listInstances, listenOutcome, localRoot, portAvailable, prepareInstance, readJson, runsInstance, runState, sandboxRefusal, spawnDetached, withLock, writeJson,
 } from './instance.mjs';
 
 async function temporaryRoot(t) {
@@ -261,4 +261,35 @@ test('explains a refusal by the environment and leaves other errors alone', () =
   }
   assert.equal(sandboxRefusal(Object.assign(new Error('missing'), { code: 'ENOENT' }), 'starting background processes'), undefined);
   assert.equal(sandboxRefusal(new Error('plain'), 'starting background processes'), undefined);
+});
+
+const refusedStart = code => `This environment does not allow starting background processes (${code}). Run pnpm local from a session without the sandbox (YOLO mode).`;
+
+test('explains a spawn that the environment refuses by throwing', async () => {
+  // Node throws EPERM from spawn() itself, before any 'error' event exists.
+  for (const code of ['EPERM', 'EACCES']) {
+    const refuse = () => { throw Object.assign(new Error(`spawn ${code}`), { code }); };
+    await assert.rejects(spawnDetached(refuse, 'node', [], {}), error => error.message === refusedStart(code) && error.cause.code === code);
+  }
+});
+
+test('explains a spawn that the environment refuses through an error event', async () => {
+  const refuse = () => {
+    const child = new EventEmitter();
+    queueMicrotask(() => child.emit('error', Object.assign(new Error('spawn EPERM'), { code: 'EPERM' })));
+    return child;
+  };
+  await assert.rejects(spawnDetached(refuse, 'node', [], {}), error => error.message === refusedStart('EPERM'));
+});
+
+test('leaves other spawn failures unexplained and returns a child that started', async () => {
+  const missing = Object.assign(new Error('spawn nothing ENOENT'), { code: 'ENOENT' });
+  await assert.rejects(spawnDetached(() => { throw missing; }, 'nothing', [], {}), error => error === missing);
+  await assert.rejects(spawnDetached(spawn, '/nonexistent/arc-local-binary', [], { stdio: 'ignore' }), { code: 'ENOENT' });
+  const started = new EventEmitter();
+  queueMicrotask(() => started.emit('spawn'));
+  assert.equal(await spawnDetached(() => started, 'node', [], {}), started);
+  const child = await spawnDetached(spawn, process.execPath, ['-e', ''], { stdio: 'ignore' });
+  assert.ok(Number.isInteger(child.pid));
+  await once(child, 'exit');
 });

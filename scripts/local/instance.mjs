@@ -1,4 +1,4 @@
-import { execFile } from 'node:child_process';
+import { execFile, spawn } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
 import { once } from 'node:events';
 import { rmSync } from 'node:fs';
@@ -61,6 +61,15 @@ async function createJson(path, value) {
 export function sandboxRefusal(error, action) {
   if (!['EPERM', 'EACCES'].includes(error?.code)) return undefined;
   return new Error(`This environment does not allow ${action} (${error.code}). Run pnpm local from a session without the sandbox (YOLO mode).`, { cause: error });
+}
+
+/** Resolves with the child once it has started. Node reports a refused spawn by throwing or by an 'error' event; both are explained. */
+export async function spawnDetached(spawnProcess, file, args, options) {
+  try {
+    const child = spawnProcess(file, args, options);
+    await new Promise((resolveSpawn, reject) => { child.once('spawn', resolveSpawn); child.once('error', reject); });
+    return child;
+  } catch (error) { throw sandboxRefusal(error, 'starting background processes') ?? error; }
 }
 
 export async function freePort() {

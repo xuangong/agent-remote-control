@@ -8,7 +8,7 @@ import { controllerBuildProvenance } from '../lib/build-provenance.mjs';
 import { packageManager } from '../lib/package-manager.mjs';
 import { controllerEnvironment } from './environment.mjs';
 import {
-  findInstance, listInstances, portAvailable, prepareInstance, processAlive, processCommand, readJson, runState, runsInstance, sandboxRefusal, withLock,
+  findInstance, listInstances, portAvailable, prepareInstance, processAlive, processCommand, readJson, runState, runsInstance, spawnDetached, withLock,
 } from './instance.mjs';
 import { screenshot, signedInUser, userApi } from './session.mjs';
 
@@ -138,10 +138,8 @@ async function startRunner(instance) {
   await rm(join(instance.logs, 'controller.log'), { force: true });
   const log = await open(join(instance.logs, 'runner.log'), 'w', 0o600);
   try {
-    const child = spawn(process.execPath, [join(source, 'scripts/local/runner.mjs'), instance.directory],
+    const child = await spawnDetached(spawn, process.execPath, [join(source, 'scripts/local/runner.mjs'), instance.directory],
       { cwd: instance.directory, env: process.env, stdio: ['ignore', log.fd, log.fd], detached: true });
-    try { await new Promise((resolveSpawn, reject) => { child.once('spawn', resolveSpawn); child.once('error', reject); }); }
-    catch (error) { throw sandboxRefusal(error, 'starting background processes') ?? error; }
     child.unref();
     return child.pid;
   } finally { await log.close(); }

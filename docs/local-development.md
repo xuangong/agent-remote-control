@@ -142,7 +142,7 @@ histories.
 
 If the worktree is already gone, its instance is still on the machine, and
 `pnpm local list` from any checkout shows it. Its directory is
-`<root>/instances/<name>`: `<name>` is the first column of `list`, and `<root>`
+`<root>/instances/<name>`: `<name>` is the name column of `list`, and `<root>`
 is `~/.agent-remote-control-dev` unless `ARC_LOCAL_ROOT` names another
 directory (set it the same way for `list`).
 

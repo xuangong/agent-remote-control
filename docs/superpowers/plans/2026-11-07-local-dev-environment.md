@@ -897,6 +897,25 @@ test('refuses Controller state saved for another site before serving or spawning
   assert.equal(await exists(join(f.instance.logs, 'controller.log')), false);
 });
 
+test('names an unusable saved Controller connection instead of blaming the origin', { timeout: 30000 }, async t => {
+  const f = await fixture(t);
+  const connection = join(f.instance.controller, 'connection.json');
+  for (const content of ['{}', 'not json', JSON.stringify({ serverUrl: 'http://localhost:1', remoteKey: '' })]) {
+    await writeFile(connection, content);
+    await assert.rejects(f.start(), error => {
+      assert.match(error.message, /^The instance's saved Controller connection is unreadable \(.+\)\. Check .*connection\.json\.$/);
+      assert.ok(error.message.includes(connection), error.message);
+      assert.doesNotMatch(error.message, /another site origin|pnpm local remove/);
+      assert.ok(error.cause instanceof Error);
+      return true;
+    });
+  }
+  assert.equal(f.listens(), 0);
+  assert.equal(f.invitations(), 0);
+  await assert.rejects(stat(f.instance.runtimeFile), { code: 'ENOENT' });
+  assert.equal(await exists(join(f.instance.logs, 'controller.log')), false);
+});
+
 test('an aborted start closes the site, removes the runtime file and never spawns the Controller', { timeout: 30000 }, async t => {
   const f = await fixture(t);
   const abort = new AbortController();
@@ -1065,7 +1084,10 @@ export async function startInstance({ directory, environment = process.env, crea
     let native;
     try { native = await containerEnvironment({ ...parentEnvironment, AGENT_HOST_SERVER: record.origin }); }
     catch (error) {
-      throw new Error("This instance's Controller state belongs to another site origin. Remove the instance with pnpm local remove --yes.", { cause: error });
+      // Only the origin mismatch is cured by removing the instance; an unreadable or invalid file needs a look, not a wipe.
+      throw new Error(/another Relay/.test(error.message)
+        ? "This instance's Controller state belongs to another site origin. Remove the instance with pnpm local remove --yes."
+        : `The instance's saved Controller connection is unreadable (${error.message}). Check ${join(files.controller, 'connection.json')}.`, { cause: error });
     }
     signal?.throwIfAborted();
     const factory = createServer ?? (await import(pathToFileURL(join(record.source, 'dist/devbox/server.mjs')).href)).createDevboxServer;
@@ -1166,7 +1188,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1]
 - [ ] **Step 4: Run the tests to verify they pass**
 
 Run: `node --test scripts/local/runner.test.mjs`
-Expected: PASS, 16 tests.
+Expected: PASS, 17 tests.
 
 - [ ] **Step 5: Commit**
 

@@ -259,6 +259,25 @@ test('refuses Controller state saved for another site before serving or spawning
   assert.equal(await exists(join(f.instance.logs, 'controller.log')), false);
 });
 
+test('names an unusable saved Controller connection instead of blaming the origin', { timeout: 30000 }, async t => {
+  const f = await fixture(t);
+  const connection = join(f.instance.controller, 'connection.json');
+  for (const content of ['{}', 'not json', JSON.stringify({ serverUrl: 'http://localhost:1', remoteKey: '' })]) {
+    await writeFile(connection, content);
+    await assert.rejects(f.start(), error => {
+      assert.match(error.message, /^The instance's saved Controller connection is unreadable \(.+\)\. Check .*connection\.json\.$/);
+      assert.ok(error.message.includes(connection), error.message);
+      assert.doesNotMatch(error.message, /another site origin|pnpm local remove/);
+      assert.ok(error.cause instanceof Error);
+      return true;
+    });
+  }
+  assert.equal(f.listens(), 0);
+  assert.equal(f.invitations(), 0);
+  await assert.rejects(stat(f.instance.runtimeFile), { code: 'ENOENT' });
+  assert.equal(await exists(join(f.instance.logs, 'controller.log')), false);
+});
+
 test('an aborted start closes the site, removes the runtime file and never spawns the Controller', { timeout: 30000 }, async t => {
   const f = await fixture(t);
   const abort = new AbortController();

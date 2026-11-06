@@ -41,7 +41,10 @@ export async function startInstance({ directory, environment = process.env, crea
     let native;
     try { native = await containerEnvironment({ ...parentEnvironment, AGENT_HOST_SERVER: record.origin }); }
     catch (error) {
-      throw new Error("This instance's Controller state belongs to another site origin. Remove the instance with pnpm local remove --yes.", { cause: error });
+      // Only the origin mismatch is cured by removing the instance; an unreadable or invalid file needs a look, not a wipe.
+      throw new Error(/another Relay/.test(error.message)
+        ? "This instance's Controller state belongs to another site origin. Remove the instance with pnpm local remove --yes."
+        : `The instance's saved Controller connection is unreadable (${error.message}). Check ${join(files.controller, 'connection.json')}.`, { cause: error });
     }
     signal?.throwIfAborted();
     const factory = createServer ?? (await import(pathToFileURL(join(record.source, 'dist/devbox/server.mjs')).href)).createDevboxServer;

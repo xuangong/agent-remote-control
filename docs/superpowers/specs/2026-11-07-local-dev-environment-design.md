@@ -47,7 +47,7 @@ Run from a worktree (or the main checkout) as `pnpm local <command>`:
 | `logs [--follow]` | Site and Controller logs. |
 | `list` | Every instance on this machine with its source, port and running state. Read-only for other instances. |
 | `remove --yes` | Delete this worktree's stopped instance directory. |
-| `controller <args>` | Run the development Controller CLI with this instance's state directory. |
+| `controller <args>` | Run the development Controller CLI with this instance's state directory; only `status`, `diagnostics`, `window`, `session` and `environment` are allowed. |
 | `api <path> [--method M --data JSON]` | Authenticated JSON request to the instance's user API, for example `v1/remote/hosts`. |
 | `screenshot <path> --out FILE [--viewport WxH]` | Headless screenshot of a signed-in page. |
 
@@ -63,7 +63,8 @@ instance's state:
 
 ```
 ~/.agent-remote-control-dev/instances/<worktree-name>-<path-hash>/
-  instance.json   source path, commit, dirty flag, port, origin, runner and Controller PIDs
+  instance.json   checkout path, port and origin (written once)
+  runtime.json    current run: build commit and dirty flag, runner and Controller PIDs (written by the runner)
   relay/          Devbox server state (identity.json, relay/state.json)
   controller/     AGENT_HOST_STATE_DIR of the development Controller
   workspace/      test workspace; the Controller's only allowed workspace root
@@ -73,8 +74,9 @@ instance's state:
 `<path-hash>` is derived from the worktree's real path, so the directory name
 is stable for a worktree and distinct across worktrees with the same name.
 `ARC_LOCAL_ROOT` overrides `~/.agent-remote-control-dev` (tests always set it).
-`instance.json` holds no credentials; the Controller's `connection.json` under
-`controller/` holds the device key and must never be printed.
+`instance.json` and `runtime.json` hold no credentials; the Controller's
+`connection.json` under `controller/` holds the device key and must never be
+printed.
 
 ## Lifecycle
 
@@ -84,7 +86,8 @@ is stable for a worktree and distinct across worktrees with the same name.
    `--no-build` is given. A failed build leaves a running instance untouched.
 2. Allocates a free loopback port on first start and records it. The origin is
    `http://localhost:<port>`; the Devbox identity is bound to that origin, so a
-   recorded port is reused and a change is refused.
+   recorded port is reused and a change is refused. If another process holds the
+   recorded port, `up` stops with an error instead of choosing a new one.
 3. Stops a running instance of this worktree (runner first, which stops the
    Controller and then the site), then starts a detached runner process with its
    output in `logs/`.
@@ -200,13 +203,16 @@ Hard rules in `SKILL.md`:
 2. Never touch the user's Controller (`~/.agent-remote-control/agents-cloud-cli`,
    its launchd service, the global `agent-remote-controller`) or the production
    site. Operate the instance only through `pnpm local`.
-3. Never use the user's own browsers, profiles or windows.
-4. Never print cookies, pairing keys, `connection.json` or whole configuration
+3. In the instance website, do not use Controller update, Codex daemon restart,
+   OpenCode server or VS Code tunnel controls; they act on processes shared with
+   the user's Controller.
+4. Never use the user's own browsers, profiles or windows.
+5. Never print cookies, pairing keys, `connection.json` or whole configuration
    files.
-5. Run `down` and `remove` only for your own worktree's instance; other
+6. Run `down` and `remove` only for your own worktree's instance; other
    instances in `list` may belong to other agents.
-6. Run `pnpm local down` before removing a worktree.
-7. In a sandboxed session, listening and spawning can be refused; report it and
+7. Run `pnpm local down` before removing a worktree.
+8. In a sandboxed session, listening and spawning can be refused; report it and
    say that YOLO mode is needed instead of working around the sandbox.
 
 ## Testing
@@ -216,10 +222,10 @@ process deadlines like every root test command:
 
 - Launcher unit tests (`node --test`, temporary `ARC_LOCAL_ROOT`, never the real
   HOME): stable instance naming from a worktree path; port allocation recorded and
-  reused, changed origin refused; Controller environment allowlist and added
-  variables, with `AGENT_*`, `CLAUDECODE` and `AGENT_HOST_TRUSTED_FULL_CONTROL`
-  removed; stale PID detection; `down` and `remove` scoped to the current
-  instance.
+  reused, an occupied recorded port refused; Controller environment allowlist
+  and added variables, with `AGENT_*`, `CLAUDECODE` and
+  `AGENT_HOST_TRUSTED_FULL_CONTROL` removed; stale PID detection; `down` and
+  `remove` scoped to the current instance.
 - Integration test: real `createDevboxServer` and the real development
   Controller with a temporary HOME and a PATH without native CLIs. `up --no-build` signs
   `/auth/status` in without credentials; the Controller reports

@@ -74,6 +74,13 @@ it('gives a command line its own session once the signed-in user allows its code
   const status = await send('/auth/status', { cookie: commandLine });
   expect(status.status).toBe(200);
   expect((await status.json()).user.id).toBe('alice');
+  // It acts as the user but never counts as recently signed in: sensitive changes stay with a browser.
+  const pairing = await send(`${credentials.basePath}v1/remote/pairings`, { cookie: commandLine, body: {} });
+  expect(pairing.status).toBe(403);
+  expect(await pairing.json()).toMatchObject({ code: 'reauthentication_required' });
+  expect((await (await send('/auth/sessions', { cookie: commandLine })).json()).recentAuthentication).toBe(false);
+  const another = await (await send('/auth/cli/start', { body: {}, origin: null })).json();
+  expect((await send('/auth/cli', { cookie: commandLine, body: { code: another.userCode, decision: 'approve' } })).status).toBe(403);
   // The command line's session is its own: listed beside the browser's, revocable alone.
   const listed = (await (await send('/auth/sessions', { cookie: browser })).json()).sessions as Array<{ id: string; label: string; current: boolean }>;
   expect(listed.map(row => row.label)).toContain('Command line · laptop');

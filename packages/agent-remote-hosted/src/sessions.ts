@@ -88,7 +88,8 @@ export function createHostedSessions(auth: HostedAuthOptions, state: RelayState,
         }
         if ((record.lastSeenAt ?? 0) < Date.now() - 60_000) await state.mutate(draft => { const current = draft.sessions.find(value => value.hash === record.hash); if (current) { current.lastSeenAt = Date.now(); current.activity = browserActivity([...(current.activity ?? []), current.lastSeenAt]); } });
         const current = recordFor(request);
-        return current && current.grant.expiresAt > Date.now() ? { grant: current.grant } : {};
+        // A command line never counts as recently signed in, so sensitive changes stay with a browser.
+        return current && current.grant.expiresAt > Date.now() ? { grant: current.commandLine ? { ...current.grant, authenticatedAt: 0 } : current.grant } : {};
       }
       const legacy = !durable ? provider.legacy(request) : undefined;
       return legacy && !legacy.continuation ? { grant: legacy } : {};
@@ -133,7 +134,7 @@ export function createHostedSessions(auth: HostedAuthOptions, state: RelayState,
         draft.sessions = draft.sessions.filter(value => value.sessionExpiresAt > now);
         if (draft.sessions.length >= 1024) return undefined;
         draft.sessions.push({ browserId: identity.create(), activity: [now], hash: hash(token), grant: structuredClone(record.grant), sessionExpiresAt: record.sessionExpiresAt,
-          ...(record.authorityConfirmedAt !== undefined ? { authorityConfirmedAt: record.authorityConfirmedAt } : {}), id: randomUUID(), createdAt: now, lastSeenAt: now, label });
+          ...(record.authorityConfirmedAt !== undefined ? { authorityConfirmedAt: record.authorityConfirmedAt } : {}), id: randomUUID(), createdAt: now, lastSeenAt: now, label, commandLine: true });
         return { token, expiresAt: record.sessionExpiresAt };
       });
     },

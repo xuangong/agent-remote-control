@@ -39,7 +39,7 @@ Share recipients' sessions are neither listed nor reachable by any caller. A ses
 
 ## Sign-in
 
-`agent-remote-controller login [--server URL] [--no-browser]` asks the Relay for a code (`POST /auth/cli/start`), opens `/auth/cli?code=XXXXXXXX`, and polls `POST /auth/cli/token` (202 while pending, 403 refused, 410 expired). The page asks the signed-in user to allow or refuse the code shown in the terminal; allowing needs a recent sign-in on account-backed Relays. On approval the Relay copies the browser's session record into a new one labelled "Command line · <computer>": the same account, grant and lifetime, listed and revocable with browser sessions in Settings. Pending codes live in memory for ten minutes; a Relay restart asks for a new sign-in. `login status` checks it, `logout` ends it at the Relay and deletes the file. `--server` defaults to the Relay the Controller is paired with.
+`agent-remote-controller login [--server URL] [--no-browser]` asks the Relay for a code (`POST /auth/cli/start`), opens `/auth/cli?code=XXXXXXXX`, and polls `POST /auth/cli/token` (202 while pending, 403 refused, 410 expired). The page asks the signed-in user to allow or refuse the code shown in the terminal; allowing needs a recent sign-in on account-backed Relays. On approval the Relay copies the browser's session record into a new one labelled "Command line · <computer>": the same account, grant and lifetime, listed and revocable with browser sessions in Settings. It never counts as recently signed in, so what needs a recent sign-in (pairing, device rotation, sharing, permission settings, allowing another command line) stays with a browser. Pending codes live in memory for ten minutes; a Relay restart asks for a new sign-in. `login status` checks it, `logout` ends it at the Relay and deletes the file. `--server` defaults to the Relay the Controller is paired with.
 
 The command line sends its session as a cookie with the Relay's own `origin`, as the page does, so every Relay check that applies to the page applies to it.
 
@@ -119,7 +119,7 @@ One implementation, `runHostRequest` (`host-command.ts`), runs over either the C
 
 ## The Relay route
 
-`POST /v1/remote/hosts/:hostId/session/call` with `{ request }` forwards a session command to the Host's `POST /remote/session/call`, for the Host owner only, and only to Controllers whose providers declare `sessionCommands` (older ones close their uplink on an unknown route). Changing `approval`, `sandbox` or `permissions` settings needs a recent sign-in, as in the website. Deploy the website before Controllers that declare it: older Relays reject the declaration.
+`POST /v1/remote/hosts/:hostId/session/call` with `{ request }` forwards a session command to the Host's `POST /remote/session/call`, for the Host owner only, and only to Controllers whose providers declare `sessionCommands` (older ones close their uplink on an unknown route). Changing `approval`, `sandbox` or `permissions` settings needs a recent sign-in, as in the website, so a command line changes them only on its own computer's Host, through the management socket. Deploy the website before Controllers that declare it: older Relays reject the declaration.
 
 ## Session credentials
 

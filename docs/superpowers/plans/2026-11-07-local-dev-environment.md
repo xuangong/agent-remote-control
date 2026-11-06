@@ -696,7 +696,7 @@ test('pairs once, then restarts with the saved device credential', { timeout: 15
     assert.equal(first.AGENT_HOST_REMOTE_KEY, 'one-time-invite');
     assert.equal(first.AGENT_HOST_SERVER, f.instance.record.origin);
     assert.equal(first.AGENT_HOST_ALLOWED_WORKSPACE_ROOTS, JSON.stringify([f.instance.workspace]));
-    assert.equal(first.AGENT_HOST_TRUSTED_FULL_CONTROL, undefined);
+    assert.equal(first.AGENT_HOST_TRUSTED_FULL_CONTROL, '0');
     assert.equal(first.CLAUDECODE, undefined);
     const runtime = JSON.parse(await readFile(f.instance.runtimeFile, 'utf8'));
     assert.equal(runtime.runnerPid, process.pid);

@@ -821,6 +821,82 @@ async function handoffCommandFixture(options: { nativeStatus?: 'idle' | 'running
   return { ...f, get primary() { return primary; } };
 }
 
+async function windowHandoffFixture(placement: 'primary' | 'dock' | 'float' | 'attached', restriction?: 'history' | 'shared') {
+  Object.defineProperty(HTMLDialogElement.prototype, 'showModal', { configurable: true, value() { this.open = true; } });
+  vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} });
+  const real = workbenchComponents.LabWorkbench;
+  let target!: ComponentProps<typeof real>;
+  vi.spyOn(workbenchComponents, 'LabWorkbench').mockImplementation(props => {
+    if (props.displayBinding?.key === 'target') target = props;
+    return real(props);
+  });
+  const binding = (id: string) => ({ hostId: 'host', providerId: 'recorded', nativeSessionId: id, title: `Session ${id}` });
+  const document: WorkspaceWindow = { schemaVersion: 3, id: 'handoff-views', title: 'Handoff views', revision: 0,
+    selectedPrimaryViewId: placement === 'primary' ? 'target' : 'main', selectedViewId: 'target', views: [
+      createWindowView('main', binding('A'), 'primary'),
+      { ...createWindowView('target', { ...binding('X'), ...(restriction === 'history' ? { sessionIntent: 'history' as const } : {}) }, placement),
+        ...(placement === 'attached' ? { attachedTo: 'main' } : {}) },
+      createWindowView('duplicate', binding('X'), 'dock'),
+      createWindowView('old-history', { ...binding('X'), sessionIntent: 'history' }, 'dock'),
+    ] };
+  const replay = committed('X', 'Y', 2, 'view-role');
+  const description: SuccessionDescription = { role: { ...replay.projection.role, revision: 1, current: native('X') },
+    targets: [{ providerId: 'recorded', displayName: 'Recorded' }], eligibility: { status: 'ready' } };
+  const setup = { chain: [] as SessionSuccessionReplay[], userScoped: true, windowDocument: document, successionDescription: description,
+    async successionPrepare(body: Record<string, unknown>): Promise<SuccessionActionResult> {
+      replay.projection.receipt.operationId = String(body.operationId);
+      replay.projection.receipt.prepared!.operationId = String(body.operationId);
+      return { role: description.role, record: { ...replay.projection.receipt, phase: 'ready', committedRevision: undefined } };
+    }, successionCommit(): SuccessionActionResult {
+      setup.chain.push(replay);
+      return { role: replay.projection.role, record: replay.projection.receipt, locator: replay.to };
+    }, successionStatus(): SuccessionActionResult {
+      return { role: replay.projection.role, record: replay.projection.receipt, locator: replay.to,
+        context: { operationId: replay.projection.receipt.operationId, target: native('Y'), state: 'pending' } };
+    }, ...(restriction === 'shared' ? { hostService: {
+      hosts: async () => ({ hosts: [{ id: 'host', name: 'Shared Host', online: true, access: 'shared' as const, providers: [] }] }),
+      pair: async () => { throw new Error('No pairing'); }, revoke: async () => {},
+    } } : {}),
+  };
+  const f = await failureFixture(false, 'A', false, `&window=${document.id}`, setup);
+  await settleApp(() => { expect(target?.sessionIdentity?.nativeSessionId).toBe('X'); expect(target.sessionStatus).toBe('ready'); });
+  return { ...f, setup, get target() { return target; } };
+}
+
+it.each(['primary', 'dock', 'float', 'attached'] as const)('hands off a current %s view with pending-input protection and advances every live binding', async placement => {
+  const f = await windowHandoffFixture(placement);
+  expect(f.target.consoleCommands?.some(command => command.id === 'console:handoff')).toBe(true);
+  await act(async () => f.target.onPendingInputChange!(1));
+  await act(async () => { await f.target.onExecuteConsoleCommand!('console:handoff', ''); });
+  const submit = () => document.querySelector<HTMLButtonElement>('dialog button[type="submit"]')!;
+  await settleApp(() => expect(submit()).not.toBeNull());
+  expect(submit().disabled).toBe(true);
+  expect(document.querySelector('dialog')?.textContent).toContain('Send or remove pending messages');
+  expect(f.requests.find(request => request.url.endsWith('/succession/describe'))?.body).toEqual({ providerId: 'recorded', nativeSessionId: 'X' });
+  await act(async () => document.querySelector('dialog form')!.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })));
+  expect(f.requests.some(request => request.url.endsWith('/succession/prepare'))).toBe(false);
+  await act(async () => f.target.onPendingInputChange!(0));
+  await settleApp(() => expect(submit().disabled).toBe(false));
+  await act(async () => document.querySelector('dialog form')!.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })));
+  await settleApp(() => expect(f.target.sessionIdentity?.nativeSessionId).toBe('Y'));
+  await settleApp(() => expect(f.target.pendingFirstInputContext?.state).toBe('pending'));
+  await settleApp(() => expect(f.setup.windowDocument.views.filter(view => ['target', 'duplicate'].includes(view.id)).map(view => view.binding?.nativeSessionId)).toEqual(['Y', 'Y']));
+  expect(f.setup.windowDocument.views.find(view => view.id === 'main')?.binding?.nativeSessionId).toBe('A');
+  expect(f.setup.windowDocument.views.find(view => view.id === 'old-history')?.binding?.nativeSessionId).toBe('X');
+  expect(f.setup.windowDocument.views.find(view => view.id === 'target')?.placement).toBe(placement);
+  expect(f.setup.windowDocument.selectedViewId).toBe('target');
+  expect(f.requests.filter(request => request.url.endsWith('/succession/prepare'))).toHaveLength(1);
+  expect(f.requests.filter(request => request.url.endsWith('/succession/commit'))).toHaveLength(1);
+  expect(f.frames.some(frame => ['send_message', 'execute_command'].includes(frame.message?.type ?? ''))).toBe(false);
+});
+
+it.each(['history', 'shared'] as const)('does not offer Handoff from an ordinary window restricted by %s', async restriction => {
+  const f = await windowHandoffFixture('dock', restriction);
+  expect(f.target.consoleCommands?.some(command => command.id === 'console:handoff')).toBe(false);
+  await act(async () => { await expect(f.target.onExecuteConsoleCommand!('console:handoff', '')).rejects.toThrow(); });
+  expect(f.requests.some(request => request.url.includes('/succession/'))).toBe(false);
+});
+
 it('opens the Handoff chooser from its command, resolves claude and sends no native input', async () => {
   const f = await handoffCommandFixture();
   expect(f.primary.consoleCommands?.some(command => command.id === 'console:handoff')).toBe(true);

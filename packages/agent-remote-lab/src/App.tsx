@@ -28,7 +28,6 @@ import type { Team } from '@orchardworks/agent-remote-protocol';
 import { useSessionWindows } from './hooks/useSessionWindows.js';
 import { SessionWindow } from './components/SessionWindow.js';
 import { SessionFamily, type FamilySessionPresentationContext } from './components/SessionFamily.js';
-import { PrimarySessionFamily } from './components/PrimarySessionFamily.js';
 import { AskButton } from './components/AskButton.js';
 import { AskViewScope, useAskVisibility } from './hooks/useAskVisibility.js';
 import { isAskSelected, resolveAskPresentation } from './ask-presentation.js';
@@ -2193,7 +2192,7 @@ function AppContent({
     const gated = successionGated && successionDialog?.scope === baseUrl && viewKey(successionDialog.source) === source.viewId;
     const host = remoteHosts.find(host => host.id === source.hostId);
     const available = accessReady && !context.offline && context.status === 'ready' && !context.pending && sourceCurrent(source);
-    const handoffAvailable = available && (isPrimary || team) && !successionDialog && userScoped && !!directory && !source.parentNativeSessionId
+    const handoffAvailable = available && !successionDialog && userScoped && !!directory && !source.parentNativeSessionId
       && !context.sessionState.readOnly && !context.operationBinding.historical && host?.access !== 'shared' && host?.online === true;
     const mayRename = !team && userScoped && host?.online && host.access !== 'shared' && host.providers?.some(provider => provider.providerId === source.providerId && provider.sessionRename);
     const sourceForks = forkStore.linked().filter(item => item.target && sessionKey(sideNavigationSource(item)) === sessionKey(source));
@@ -2215,7 +2214,7 @@ function AppContent({
         setActiveView('trace');
       },
       revealEntry: letterReveals[source.agentId] ?? (traceRequest?.view === 'workbench' && context.state?.agent?.id === state?.agent?.id ? traceRequest : undefined),
-      onPendingInputChange: isPrimary || team ? (count: number) => setPendingGroupInputs(values => values[source.viewId] === count ? values : { ...values, [source.viewId]: count }) : undefined,
+      onPendingInputChange: (count: number) => setPendingGroupInputs(values => values[source.viewId] === count ? values : { ...values, [source.viewId]: count }),
       actions: forkInputStatus?.pending && forkInputStatus.agentId === source.agentId ? { deleteMessage: commands.deleteMessage } : quoteView ? quotedActions(commands, quoteView) : commands,
       ...(quoteView && context.state ? { entrySelection: quoteEntrySelection(quoteView, context.state.timeline.epoch) } : {}),
       ...(quoteView ? { receiveQuotes: (excerpts: readonly SessionExcerpt[]) => restoreQuotes(baseUrl, quoteView, excerpts) } : {}),
@@ -2223,7 +2222,7 @@ function AppContent({
       onExecuteConsoleCommand: async (id: string, args: string): Promise<AgentCommandResult> => {
         assertSourceCurrent(source);
         if (id === handoffCommand.id) {
-          if (!handoffAvailable) throw new Error('Handoff is available on a current main conversation or Team member with authorized Host access.');
+          if (!handoffAvailable) throw new Error('Handoff requires a current writable conversation with authorized Host access.');
           setSuccessionDialog({ scope: baseUrl, source, visible: true, initialProvider: handoffProvider(args), directory: labSessionSuccessionDirectory(new SessionDirectoryClient(baseUrl, undefined, source.hostId)) });
           return {};
         }
@@ -2285,7 +2284,8 @@ function AppContent({
     const result = succession.resolveTarget(source, requested);
     if (member && sessionKey(member) !== sessionKey(result.target)) throw new Error('The Team execution locator is still synchronizing.');
     return { ...result, target: { ...result.target, ...(member ? { teamId: member.teamId, teamMemberId: member.teamMemberId } : {}) } };
-  }, directory: source => labSessionSuccessionDirectory(new SessionDirectoryClient(baseUrl, undefined, source.hostId)), refreshSettled: succession.refreshSettled }}><AskViewScope.Provider value={askView.execute}><WindowSessionBridgeContext.Provider value={windowWorkspace.sessionBridge}><WindowLayoutContext.Provider value={windowWorkspace.authority}><SessionDockProvider key={baseUrl} storageScope={baseUrl} enabled={!compactLayout && activeView === 'workbench'}
+  }, directory: source => labSessionSuccessionDirectory(new SessionDirectoryClient(baseUrl, undefined, source.hostId)), refreshSettled: succession.refreshSettled,
+    successionContextFor: succession.successionContextFor }}><AskViewScope.Provider value={askView.execute}><WindowSessionBridgeContext.Provider value={windowWorkspace.sessionBridge}><WindowLayoutContext.Provider value={windowWorkspace.authority}><SessionDockProvider key={baseUrl} storageScope={baseUrl} enabled={!compactLayout && activeView === 'workbench'}
     leadingControls={sharedWindow && !primaryGroups.length && !compactLayout ? <div ref={setDockViewTarget} data-pane-selection-ignore className="lab-global-view-slot" /> : undefined}><TeamViewScope.Provider value={teamView.execute}><TpmViewScope.Provider value={tpmView.execute}><TrackViewScope.Provider value={userScoped ? attention.executeTrack : undefined}><ConversationConnectionScope.Provider value={connections}><VscodeTunnelScope service={vscodeTunnelClient} host={previewHost} polling={compactLayout ? contextOpen : desktopContextVisible}><PreviewScope client={previewClient} host={previewHost} polling={compactLayout ? contextOpen : desktopContextVisible}><RecoveryScope.Provider value={readingPositions}><main ref={shellRef} onPointerDownCapture={focusManagedWindow} onFocusCapture={focusManagedWindow} style={sidebar.style} className={`lab-shell${headerHidden ? ' lab-header-hidden' : ''}${!compactLayout && !desktopContextVisible ? ' lab-context-hidden' : ''}${state?.agent ? ' lab-has-agent' : ''}${supportingRailOpen ? ' lab-supporting-open' : ''}${inspectorOpen ? ' lab-inspector-open' : ''}`}>
     {scanOpen ? <SessionTransferDialog onOpen={openScannedSession} onClose={() => setScanOpen(false)} /> : null}
     {activated ? tracking.observers : null}
@@ -2518,7 +2518,7 @@ function AppContent({
             const missing = !!view.binding && missingSessions.has(sessionKey(view.binding));
             return { id: view.id, title: view.binding && !missing ? view.binding.title : 'Select session', width: view.width, additionalWidth,
               selected: view.id === presentedPrimaryViewId, collapsed: view.collapsed,
-              content: view.binding && !missing ? <PrimarySessionFamily baseUrl={baseUrl} storageScope={baseUrl} target={view.binding} viewId={view.id}
+              content: view.binding && !missing ? <SessionFamily baseUrl={baseUrl} storageScope={baseUrl} target={view.binding} viewId={view.id}
                 sessionIntent={view.binding.sessionIntent}
                 successionContext={succession.successionContextFor(slot?.id)}
                 directoryFor={hostId => hostId === selectedHost.id ? directory : undefined}

@@ -4,8 +4,72 @@ import { createWindowView, type WindowSessionBinding, type WindowView, type Work
 import { sessionLinkFixture } from './session-link-fixture';
 import { showNewSession } from './session-navigation';
 import { revealComposerAction } from './composer-actions';
+import { joinedFixture } from './session-succession-joined-fixture';
 
 test.setTimeout(90_000);
+
+for (const placement of ['primary', 'dock', 'float', 'attached'] as const) {
+  test(`${placement} current session offers Handoff and sends its first continued input to the successor`, async ({ page, context }) => {
+    const fixture = await joinedFixture();
+    try {
+      await fixture.seed(context);
+      await page.goto(`${fixture.origin}/?host=${fixture.hostId}&provider=fixture&session=A`);
+      await expect(page.locator('.lab-primary-conversation').getByTestId('prompt-input')).toBeEnabled();
+      await expect.poll(() => new URL(page.url()).searchParams.get('window')).toBeTruthy();
+      const id = new URL(page.url()).searchParams.get('window');
+      expect(id).toBeTruthy();
+      const endpoint = `${fixture.scope}v1/windows/${id}`;
+      const inspect = async (): Promise<WorkspaceWindow> => {
+        const response = await context.request.get(endpoint);
+        expect(response.ok()).toBe(true);
+        return (await response.json()).window;
+      };
+      const current = await inspect();
+      const binding = (nativeSessionId: string) => ({ hostId: fixture.hostId, providerId: 'fixture', nativeSessionId, title: `Session ${nativeSessionId}` });
+      const response = await context.request.post(endpoint + '/operations', { headers: { origin: fixture.origin }, data: {
+        operationId: randomUUID(), issuedAt: Date.now(), baseRevision: current.revision, operation: { type: 'layout.apply', layout: {
+          title: current.title, selectedPrimaryViewId: placement === 'primary' ? 'target' : 'main', selectedViewId: 'target', views: [
+            createWindowView('main', binding('A'), 'primary'),
+            { ...createWindowView('target', binding('S'), placement), ...(placement === 'attached' ? { attachedTo: 'main' } : {}) },
+            createWindowView('duplicate', binding('S'), 'dock'),
+            createWindowView('history', { ...binding('S'), sessionIntent: 'history' }, 'dock'),
+          ],
+        } },
+      } });
+      expect(response.ok(), await response.text()).toBe(true);
+      await page.reload();
+      const source = page.locator('.lab-session-family-pane[data-view-id="target"]');
+      const input = source.getByTestId('prompt-input');
+      await expect(input).toBeEnabled();
+      const commands = source.getByRole('button', { name: 'Open chat commands', exact: true });
+      await expect(commands).toBeVisible();
+      await expect(commands).toBeEnabled();
+      await input.fill('Retained handoff request');
+      await commands.click();
+      const command = source.getByRole('option', { name: /^\/handoff/ });
+      await expect(command).toBeVisible();
+      await command.click();
+      const dialog = page.getByRole('dialog', { name: 'Hand off conversation', exact: true });
+      await expect(dialog.getByRole('button', { name: 'Hand off', exact: true })).toBeEnabled();
+      await dialog.getByRole('button', { name: 'Hand off', exact: true }).click();
+      await expect.poll(async () => (await inspect()).views.find(view => view.id === 'target')?.binding?.nativeSessionId).toBe('B');
+      await expect.poll(async () => (await inspect()).views.find(view => view.id === 'duplicate')?.binding?.nativeSessionId).toBe('B');
+      expect((await inspect()).views.find(view => view.id === 'history')?.binding?.nativeSessionId).toBe('S');
+      expect((await inspect()).views.find(view => view.id === 'main')?.binding?.nativeSessionId).toBe('A');
+      expect((await inspect()).selectedViewId).toBe('target');
+      await expect(source.getByText('History from the previous session will be included with your first message.', { exact: true })).toBeVisible();
+      await expect(input).toHaveText('Retained handoff request');
+      await expect(input).toBeEnabled();
+      expect(fixture.sessions.get('B')?.sent).toEqual([]);
+      await input.press('Enter');
+      await expect.poll(() => fixture.sessions.get('B')?.sent.length).toBe(1);
+      expect(fixture.sessions.get('B')!.sent[0]).toContain('Native history S');
+      expect(fixture.sessions.get('B')!.sent[0]).toContain('Retained handoff request');
+      expect(fixture.sessions.get('S')!.sent).toEqual([]);
+      await expect(source.getByText('History from the previous session will be included with your first message.', { exact: true })).toBeHidden();
+    } finally { await page.close(); await fixture.close(); }
+  });
+}
 
 async function openWindows(page: Page) {
   const trigger = page.getByRole('button', { name: 'Windows', exact: true });

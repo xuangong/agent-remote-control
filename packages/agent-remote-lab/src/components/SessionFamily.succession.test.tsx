@@ -3,7 +3,7 @@ import { act } from 'react';
 import { afterEach, expect, it, vi } from 'vitest';
 import type { RemoteAgentTransport } from '@orchardworks/agent-remote-web';
 import { AgentReplica } from '@orchardworks/agent-remote-web';
-import { PrimarySessionFamily } from './PrimarySessionFamily.js';
+import { SessionFamily } from './SessionFamily.js';
 import { DraftStore } from '../draft-store.js';
 import { render } from '../test/setup.js';
 import { replicaState } from '../test/fixtures.js';
@@ -27,7 +27,7 @@ it('keeps each group first-input context independent while preserving its presen
   const ready = vi.fn();
   const view = await render(<>{['A', 'B'].map(id => {
     const session = { hostId: 'host', providerId: 'recorded', nativeSessionId: id, agentId: id, title: id };
-    return <PrimarySessionFamily key={id} attachedSession={session} target={session} viewId={`slot-${id}`} storageScope="primary-context" baseUrl="http://fixture" hostLabel="Host" compact={false} active offline={false}
+    return <SessionFamily key={id} attachedSession={session} target={session} viewId={`slot-${id}`} storageScope="primary-context" baseUrl="http://fixture" hostLabel="Host" compact={false} active offline={false}
       transport={transport} draftStore={drafts} onSessionReady={ready}
       successionContext={{ operationId: id, target: { controllerId: 'controller', providerId: 'recorded', nativeSessionId: id } }}
       sessionPresentation={() => ({ composerNotice: <p>{id} product notice</p> })} renderSessionFooter={() => <footer>{id} footer</footer>} />;
@@ -47,7 +47,7 @@ it('refreshes a group context after its own timeline advances without asking App
   const replica = new AgentReplica();
   replica.applySnapshot({ protocolVersion: '1.8.0', type: 'agent_snapshot', payload: { ...replicaState.agent!, id: 'A', runtimeInfo: { ...replicaState.agent!.runtimeInfo, sessionId: 'A' } } });
   const session = { hostId: 'host', providerId: 'recorded', nativeSessionId: 'A', agentId: 'A', title: 'A' };
-  const view = await render(<PrimarySessionFamily attachedSession={session} target={session} viewId="slot-A" storageScope="primary-refresh" baseUrl="http://fixture" hostLabel="Host" compact={false} active offline={false}
+  const view = await render(<SessionFamily attachedSession={session} target={session} viewId="slot-A" storageScope="primary-refresh" baseUrl="http://fixture" hostLabel="Host" compact={false} active offline={false}
     transport={transport} draftStore={new DraftStore('primary-refresh')} replica={replica}
     successionContext={{ operationId: 'A', target: { controllerId: 'controller', providerId: 'recorded', nativeSessionId: 'A' } }} />);
   expect(view.textContent).toContain('History from the previous session will be included with your first message.');
@@ -65,7 +65,7 @@ it('applies root handoff context without replacing a descendant own presentation
   const root = createWindowView('primary', session, 'primary');
   const child = { ...createWindowView('child', { ...session, nativeSessionId: 'child', title: 'Child' }, 'attached'), attachedTo: root.id };
   const view = await render(<WindowLayoutContext.Provider value={{ window: { schemaVersion: 3, id: 'window', title: 'Window', revision: 0, selectedPrimaryViewId: root.id, selectedViewId: root.id, views: [root, child] }, operate() {} }}>
-    <PrimarySessionFamily attachedSession={session} target={session} viewId={root.id} storageScope="primary-child-context" baseUrl="http://fixture" hostLabel="Host" compact={false} active offline={false}
+    <SessionFamily attachedSession={session} target={session} viewId={root.id} storageScope="primary-child-context" baseUrl="http://fixture" hostLabel="Host" compact={false} active offline={false}
       transport={transport} draftStore={new DraftStore('primary-child-context')}
       successionContext={{ operationId: 'A', target: { controllerId: 'controller', providerId: 'recorded', nativeSessionId: 'A' } }}
       sessionPresentation={context => context.isRoot ? {} : { pendingFirstInputContext: { state: 'unavailable' } }} />
@@ -87,7 +87,7 @@ it('refreshes root first-input evidence after pending delivery settles without a
   vi.spyOn(workbenchComponents, 'LabWorkbench').mockImplementation(props => { pendingChanged = props.onPendingInputChange; return realWorkbench(props); });
   const forwarded = vi.fn();
   const session = { hostId: 'host', providerId: 'recorded', nativeSessionId: 'A', agentId: 'A', title: 'A' };
-  const view = await render(<PrimarySessionFamily attachedSession={session} target={session} viewId="slot-A" storageScope="primary-delivery" baseUrl="http://fixture" hostLabel="Host" compact={false} active offline={false}
+  const view = await render(<SessionFamily attachedSession={session} target={session} viewId="slot-A" storageScope="primary-delivery" baseUrl="http://fixture" hostLabel="Host" compact={false} active offline={false}
     transport={transport} draftStore={new DraftStore('primary-delivery')}
     successionContext={{ operationId: 'A', target: { controllerId: 'controller', providerId: 'recorded', nativeSessionId: 'A' } }}
     sessionPresentation={() => ({ onPendingInputChange: forwarded })} />);

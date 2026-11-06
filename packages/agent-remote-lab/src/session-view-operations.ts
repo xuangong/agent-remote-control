@@ -1,7 +1,7 @@
 import { createContext } from 'react';
 import type { RemoteAgentTransport } from '@orchardworks/agent-remote-web';
 import type { SessionViewOperationScope } from '@orchardworks/agent-remote-web/react';
-import type { SuccessionActionResult } from '@orchardworks/agent-remote-protocol';
+import type { NativeSessionRef, SuccessionActionResult } from '@orchardworks/agent-remote-protocol';
 import type { SessionSuccessionDirectory } from './session-succession-directory.js';
 import type { OpenedSession } from './directory-client.js';
 import type { SessionEntry } from './session-tree.js';
@@ -14,5 +14,6 @@ export interface SessionViewOperations {
   resolveTarget(source: SessionEntry, options?: { nativePrefixOnly?: boolean; viewId?: string }): FollowingTarget;
   directory(source: OpenedSession): SessionSuccessionDirectory;
   refreshSettled(result: SuccessionActionResult, source: OpenedSession): Promise<void>;
+  successionContextFor?(viewId?: string): { operationId: string; target: NativeSessionRef } | undefined;
 }
 export const SessionViewOperationsContext = createContext<SessionViewOperations | undefined>(undefined);

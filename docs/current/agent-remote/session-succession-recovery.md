@@ -25,8 +25,13 @@ but it cannot prove its complete historical system-instruction selection, and th
 experimental native event log is not persisted by default. See
 [OpenCode native boundaries](../../opencode-native-boundaries.md) for the exact gap.
 
-Enter `/handoff` in the primary Session View composer, or `/handoff <provider>`
-to request a target provider. The compact chooser defaults to the current provider
+Enter `/handoff` in a current writable ordinary Session View or Team member,
+or `/handoff <provider>` to request a target provider. Ordinary views include
+primary groups, docked and floating windows, and attached Side conversations;
+placement does not change eligibility. Native child sessions, concrete history,
+read-only access and shared-only Hosts do not offer the command. Ask and TPM's
+own conversations retain native-prefix routing and do not offer generic handoff.
+The compact chooser defaults to the current provider
 and shows the working directory. `claude` also matches an available Claude Code
 provider. An unavailable requested provider leaves the choice empty until the
 user selects an available target. Choose **Hand off** to prepare and commit;
@@ -65,7 +70,9 @@ still working, instead of the general provider-pair message.
 Preparation and commit send no model input. The first real successor input
 receives the captured normalized history once. That first input must be plain
 text with immediate delivery; image attachments and queued delivery are not
-supported until its context delivery is confirmed. Subsequent inputs follow the
+supported until its context delivery is confirmed. Every current Session View,
+including another view of the same session, observes this context restriction.
+Subsequent inputs follow the
 provider's ordinary capabilities. An uncertain first input keeps its actual
 recipient and operation identity and is never automatically resent.
 

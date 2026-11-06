@@ -42,7 +42,7 @@ The maintained native suite verifies queued versus steering interactions in live
 
 ## Controller and native CLI handoff
 
-`agent-remote-controller copilot resume <session-id>` coordinates the configured profile with the Controller. If another managed client owns it, choose **Interrupt and take over**, or pass `--take-over` for scripted use. Web takeover is in the read-only Chatbox. There is no safe-wait mode: current native work is interrupted, release is verified, and the same session ID resumes. Web-to-web takeover only transfers interaction authority and does not interrupt native work.
+`agent-remote-controller session attach <address>` for a Copilot session coordinates the configured profile with the Controller. If another managed client owns it, choose **Interrupt and take over**, or pass `--take-over` for scripted use. Web takeover is in the read-only Chatbox. There is no safe-wait mode: current native work is interrupted, release is verified, and the same session ID resumes. Web-to-web takeover only transfers interaction authority and does not interrupt native work.
 
 The Controller records requested handoff, forced exit, unexpected exit, and unconfirmed release separately. It never deletes native locks or replays interrupted input. Directly launched native clients and native selection menus do not register a managed handoff endpoint; close those clients yourself. An incomplete response or queued execution is not guaranteed to survive interruption. Native Windows takeover is not yet verified on a Windows machine.
 

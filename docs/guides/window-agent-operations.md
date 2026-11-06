@@ -236,43 +236,37 @@ backward compatibility. Any rollback build must retain the new record reader;
 do not directly roll back to a pre-Window Worker or clear durable state. Preserve
 the existing storage namespace, origins, and signing secret during deployment.
 
-## Obtain a scoped grant
+## Sign in
 
-In the hosted website, open the Window and select the session that will manage
-it. Open **Window options → Agent control → Use current session**, then **Save private manager
-grant**. Assignment does not automatically deliver a credential into an already
-running native session. Explicitly make the downloaded file available to the
-intended Agent through your local workflow.
-
-The file contains `serverUrl`, `windowId`, and `token`. Store it outside the
-repository, restrict access, and pass its path to the Controller:
+Window commands act as you, with the command line's own website sign-in. Run once
+on the computer where the Agent works:
 
 ```sh
-chmod 600 /private/path/window-grant.json
-agent-remote-controller window inspect WINDOW_ID --grant-file /private/path/window-grant.json
+agent-remote-controller login
 ```
 
-On Unix, the CLI rejects a grant file readable or writable by other users.
-Alternatively set `AGENT_WINDOW_GRANT_FILE`, or provide `AGENT_WINDOW_SERVER`,
-`AGENT_WINDOW_ID`, and `AGENT_WINDOW_TOKEN` in the intended process environment.
-Use HTTPS; HTTP is accepted only on loopback. Do not expose the token in prompts,
-logs, source files, or command arguments, and do not substitute Host pairing or
-broad website credentials.
+and allow the code in your browser. The sign-in is listed with your browser
+sessions in Settings, where you can revoke it. Agent sessions on that computer use
+it too, so any of them can arrange any of your Windows; Host pairing keys are never
+used.
 
-A grant permits access to one existing Window. It cannot create another Window
-or assign its manager. Use the website to create Windows. Reassignment or
-**Revoke manager** invalidates the previous grant for future requests, including
-requests queued after the reassignment. Previously committed changes remain.
-The grant is a bearer credential; session assignment does not provide an OS
-sandbox against other processes running as the same local user.
+To record which session arranges a Window, open **Window options → Agent control →
+Use current session** in the website, or:
+
+```sh
+agent-remote-controller window manager WINDOW_ID --session '{"hostId":"HOST_ID","providerId":"codex","nativeSessionId":"SESSION_ID","title":"Layout"}'
+agent-remote-controller window manager WINDOW_ID --clear
+```
+
+The manager names the session; it grants nothing of its own.
 
 ## Inspect, change, confirm
 
-Commands output JSON. Set `AGENT_WINDOW_GRANT_FILE` below, or add `--grant-file`
-to each command. Use stable IDs from inspection rather than titles or positions.
+Commands output JSON. Use stable IDs from inspection rather than titles or positions.
 
 ```sh
 agent-remote-controller window list
+agent-remote-controller window create --title 'Project review'
 agent-remote-controller window inspect WINDOW_ID
 agent-remote-controller window view create WINDOW_ID --view-id notes
 agent-remote-controller window view bind WINDOW_ID notes --session '{"hostId":"HOST_ID","providerId":"codex","nativeSessionId":"SESSION_ID","title":"Notes"}'
@@ -295,7 +289,7 @@ dock or float preserves the primary group used for family layout and history.
 This grouping metadata does not override the selected view as the operation target.
 Moving a primary moves
 its attached chain together. Closing a primary closes dependent views but keeps
-independent docks. An empty Window retains its identity, manager grant, revision,
+independent docks. An empty Window retains its identity, manager, revision,
 and operation receipts; it can be inspected, exported, or populated again using
 the same commands. Only `delete` deletes the Window. Closing a view or deleting a
 Window does not stop or archive native work.
@@ -318,9 +312,9 @@ layout intact; applying a layout never replays native messages or execution.
 
 ## Resolve an uncertain outcome
 
-Exit codes are `0` for a committed mutation or successful read, `1` for input or
-request errors, `2` for a settled rejected operation, and `3` for an uncertain
-mutation. `--timeout-ms` accepts 100–60000 milliseconds and defaults to 15000.
+Exit codes are `0` for a committed mutation or successful read, `1` for a failed
+request or a settled rejected operation (see `error.code` or `result.code`), `2` for
+wrong usage, and `3` for an uncertain mutation. `--timeout-ms` accepts 100–60000 milliseconds and defaults to 15000.
 A timeout or lost reply does not prove rejection.
 
 When a mutation returns `status: "unknown"`, preserve its `operationId`,
@@ -334,8 +328,8 @@ agent-remote-controller window inspect WINDOW_ID
 Do not issue a fresh mutation ID to retry an uncertain command. A missing result
 is `operation_unknown`; an expired result is `operation_expired`. Neither proves
 that the original command did not commit. Inspect and reconcile the desired
-state before further changes. If the grant was revoked, the user must resolve
-the outcome with current authorization.
+state before further changes. If the sign-in ended (`signed_out`), sign in again
+before resolving the outcome.
 
 Receipts are retained for 24 hours, survive service restart, and commit together
 with the document. Within retention, an identical operation ID and request

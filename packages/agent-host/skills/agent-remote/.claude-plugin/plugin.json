@@ -1,5 +1,5 @@
 {
   "name": "agent-remote",
-  "description": "Agent Remote Control: list and read the other agent sessions of this computer.",
+  "description": "Agent Remote Control: sessions, references, roles, Windows and Hosts from the command line.",
   "version": "1.0.0"
 }

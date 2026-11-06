@@ -63,6 +63,11 @@ if (process.argv[1] && realpathSync(resolve(process.argv[1])) === fileURLToPath(
 async function main(): Promise<void> {
   if (command === '--version') { const identity = await controllerIdentity(import.meta.url); if (!identity) throw new Error('Controller build identity is unavailable.'); process.stdout.write(`${identity.version} ${identity.revision}\n`); }
   else if (command === 'help' || command === '--help' || command === '-h') help();
+  else if (command === '--skill') {
+    const skills = await controllerSkills();
+    if (!skills) throw new Error('The agent-remote skill is missing from this installation.');
+    process.stdout.write(await readFile(join(skills, 'skills', 'agent-remote', 'SKILL.md'), 'utf8'));
+  }
   else if (command === 'codex') process.exitCode = await runCodexCommand(args.slice(1), stateDir, process.env);
   else if (command === 'claude') process.exitCode = await runClaudeCommand(args.slice(1), stateDir, process.env);
   else if (command === 'opencode') process.exitCode = await runOpenCodeCommand(args.slice(1), stateDir, process.env);

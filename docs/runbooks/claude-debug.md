@@ -107,9 +107,9 @@ The `claude-discovery.spec.ts` browser suite exercises the real Claude adapter a
 Use the same selected profile and configured executable as the Controller:
 
 ```bash
-agent-remote-controller claude resume NATIVE_SESSION_ID
+agent-remote-controller session attach local/claude/NATIVE_SESSION_ID
 # Explicitly interrupt the current managed owner and take over:
-agent-remote-controller claude resume NATIVE_SESSION_ID --take-over
+agent-remote-controller session attach local/claude/NATIVE_SESSION_ID --take-over
 ```
 
 The wrapper forwards native arguments and supports `resume --last`, but only an explicit ID participates in ownership. Claude has no public external lock probe: a directly launched native terminal or a picker/continue-selected session cannot be protected by ARC's lease. Browser-to-browser takeover only transfers connection control. Browser/CLI takeover waits for actual old-process exit; uncertain release refuses the new writer.

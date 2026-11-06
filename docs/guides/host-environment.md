@@ -17,13 +17,13 @@ snapshot after installing software. Hosts that do not report this metadata show
 ## Local inspection
 
 ```sh
-agent-remote-controller environment
+agent-remote-controller host read
 ```
 
-This prints JSON without requiring a Relay, pairing key, provider credentials, or a
-running daemon. It probes the invoking process environment; a supervised Controller
-uses its resolved service environment when registering, which may have a different
-PATH. No browsers, shells, or editors are launched by detection.
+This prints the Host's description as JSON, including `environment`: what the
+running Controller detected at startup in its resolved service environment, which
+is what it reports to the website. `--host ID` reads another Host's through the Relay.
+No browsers, shells, or editors are launched by detection.
 
 The report includes:
 

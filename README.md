@@ -28,7 +28,11 @@ A **Window** holds a layout of Session Views. Use the floating **Window** button
 
 Layouts restore on refresh and reopen. Pane changes appear locally first while saving and synchronization happen in the background. Opening the same Window link in another page shares its layout and selection. Closing panes changes the layout without stopping native sessions; dependent views close together, such as a Leader and its member panes. To delete a Window, switch to another valid Window first, then delete the inactive one from the list.
 
-An authorized agent can also inspect and arrange a Window through `agent-remote-controller window` commands. See [Shared Window workspaces](#shared-window-workspaces) and the [Window command guide](docs/guides/window-agent-operations.md).
+An agent can also inspect and arrange a Window through `agent-remote-controller window` commands. See [Shared Window workspaces](#shared-window-workspaces) and the [Window command guide](docs/guides/window-agent-operations.md).
+
+### Do it from the command line
+
+Everything the website does, `agent-remote-controller` does from a shell, for you and for your agents: list, read, create and drive sessions on any of your Hosts, answer their requests, hand them off, manage references, Windows and Hosts, and run a session's Team, support or TPM role. Agents learn the commands from the `agent-remote` skill the Controller gives them. On a computer without a running Controller, or for other Hosts and Windows, run `agent-remote-controller login` once and approve it in your browser. See [command line](docs/current/agent-remote/cli.md).
 
 ### Put a Team on work that spans machines
 
@@ -583,10 +587,10 @@ Other pages showing a deleted Window ask you to choose another without creating
 a replacement. Deletion requires a valid active Window on the current page;
 open or create one first if the current Window is unavailable.
 Rename any Window with the pencil on its list row. **Window options** contains
-copy link and Agent control. Assign
-one managing Agent session and download its private grant file to enable
-`agent-remote-controller window ...`. These commands use the same committed
-operations as the page; Host pairing credentials are not Window credentials.
+copy link and Agent control, which names the session that arranges the Window.
+`agent-remote-controller window ...` arranges Windows as you, after
+`agent-remote-controller login` on that computer. These commands use the same
+committed operations as the page; Host pairing credentials are not Window credentials.
 See [Window Agent operations](docs/guides/window-agent-operations.md) for commands,
 permission scope, explicit results, and recovery after a lost response.
 

@@ -29,7 +29,8 @@ it('gives commands the Host variables, socket and skills on a restricted Host, a
     expect(native.launched().sandbox).toEqual({ ...restricted, ...sockets });
     expect(native.launched().plugins).toEqual([{ type: 'local', path: hostAccess.skills, skipMcpDiscovery: true }]);
     expect(native.launched().settings.permissions.allow).toEqual(['Bash(agent-remote-controller session read:*)', 'Bash(agent-remote-controller session list:*)',
-      'Bash(agent-remote-controller session ref list)']);
+      'Bash(agent-remote-controller session ref list)', 'Bash(agent-remote-controller session inspect:*)', 'Bash(agent-remote-controller host read:*)',
+      'Bash(agent-remote-controller host list)', 'Bash(agent-remote-controller role:*)']);
     expect((await session.runtimeInfo()).persistence?.opaque).not.toContain('secret-token');
   } finally { await session.dispose(); }
 });

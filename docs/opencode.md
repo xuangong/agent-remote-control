@@ -69,10 +69,10 @@ OpenCode is a shared runtime. As with Codex shared, its native execution policy 
 ## CLI and web share the same runtime
 
 ```sh
-agent-remote-controller opencode resume <native-session-id>
+agent-remote-controller session attach <hostId>/opencode/<native-session-id>
 ```
 
-This wrapper reads the Controller's configured endpoint and credentials, including generated managed-server credentials, and runs native `opencode --server <endpoint> --session <id>`. `resume --last` attaches with native `--continue`. Running the wrapper without arguments opens the attached TUI for the current directory.
+This reads the Controller's configured endpoint and credentials, including generated managed-server credentials, and runs native `opencode --server <endpoint> --session <id>`; `local/opencode/<id>` works without a running Controller. Running `agent-remote-controller opencode` without arguments opens the attached TUI for the current directory.
 
 Direct native usage also works when you provide the configured server credentials:
 

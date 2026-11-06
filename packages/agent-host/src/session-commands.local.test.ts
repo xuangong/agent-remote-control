@@ -69,7 +69,7 @@ it.each([['restricted', false], ['read-only', true]] as const)('a %s Claude sess
   const provider = new ClaudeAgentProvider({ ...fixture.options, restrictedNative: true, requestTimeoutMs: 15_000 });
   const session = await provider.createSession({ sessionId: 'ignored', cwd: fixture.cwd, model: 'claude-sonnet-4-5-20250929', hostAccess, ...(readOnly ? { access: 'read_only' as const } : {}) });
   cleanup.push(() => session.dispose());
-  expect((await session.listCommands!()).map(entry => entry.name)).toContain('agent-remote:agent-remote-sessions');
+  expect((await session.listCommands!()).map(entry => entry.name)).toContain('agent-remote:agent-remote');
   const events = await runTurn(session, true);
   expect(events.some(event => event.type === 'turn_completed')).toBe(true);
   const outputs = JSON.stringify(toolResults(fixture.bodies.at(-1)));
@@ -120,7 +120,7 @@ it('a read-only Codex session reaches the Controller through its permission prof
   expect(output).not.toContain('controller_unreachable');
   expect(output).toMatch(/NETWORK_STATUS=000|blocked/);
   expect(output).not.toContain('NETWORK_STATUS=200');
-  expect(await readFile(join(home, 'skills', 'agent-remote-sessions', 'SKILL.md'), 'utf8')).toMatch(/^---\nname: agent-remote-sessions\n/);
+  expect(await readFile(join(home, 'skills', 'agent-remote', 'SKILL.md'), 'utf8')).toMatch(/^---\nname: agent-remote\n/);
 }, 90_000);
 
 it('a Codex session sandboxed by the user\'s own configuration reports the blocked socket', async () => {

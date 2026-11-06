@@ -19,8 +19,12 @@ import { claudeToolDeclaration, createClaudeSessionTools, type ClaudeSessionTool
 import { ClaudeNativeEvidence, claudeEmptyHandle } from './native-evidence.js';
 import { CLAUDE_ALLOWS_BYPASS_PERMISSIONS, claudeHostSandbox, claudePermissionModeOptions, claudeReadOnlyOptions, claudeSandbox, isResumableClaudePermissionMode, type ResumableClaudePermissionMode } from './permission-modes.js';
 
-/** The Controller's session commands that only read, which a session with Host access runs without asking. */
-const SESSION_READ_COMMANDS = ['Bash(agent-remote-controller session read:*)', 'Bash(agent-remote-controller session list:*)', 'Bash(agent-remote-controller session ref list)'];
+/**
+ * The Controller's commands a session with Host access runs without asking: those that only read, and its role's commands,
+ * which are the tools it runs without asking too.
+ */
+const SESSION_READ_COMMANDS = ['Bash(agent-remote-controller session read:*)', 'Bash(agent-remote-controller session list:*)', 'Bash(agent-remote-controller session ref list)',
+  'Bash(agent-remote-controller session inspect:*)', 'Bash(agent-remote-controller host read:*)', 'Bash(agent-remote-controller host list)', 'Bash(agent-remote-controller role:*)'];
 export type ClaudeQuery = AsyncIterable<SDKMessage> & Pick<Query, 'initializationResult' | 'setPermissionMode' | 'close' | 'supportedCommands' | 'reloadSkills' | 'supportedModels' | 'setModel'> & Partial<Pick<Query, 'applyFlagSettings' | 'getContextUsage' | 'setMcpServers'>> & {
   /** The pinned SDK implements this control without declaring it on public Query. */
   getSettings?: () => Promise<unknown>;

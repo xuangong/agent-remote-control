@@ -47,7 +47,7 @@ Child transcript reconciliation uses official SDK history to backfill late paren
 
 ## Managed stdio integration
 
-The Host and `agent-remote-controller claude resume <native-id> [--take-over]` share profile-scoped ownership. Browser takeover of another browser transfers only connection control; CLI/Host takeover interrupts the old managed native writer and requires confirmed process exit. Unmanaged native terminals cannot be detected through a public Claude lock API. Use an explicit native ID for coordinated handoff.
+The Host and `agent-remote-controller session attach <address> [--take-over]` share profile-scoped ownership. Browser takeover of another browser transfers only connection control; CLI/Host takeover interrupts the old managed native writer and requires confirmed process exit. Unmanaged native terminals cannot be detected through a public Claude lock API. Use an explicit native ID for coordinated handoff.
 
 Cold resume resolves cwd by native ID and refuses an unknown workspace. Successful native Write/Edit structured output uses shared file-diff rendering. Native catalog history omits that structured patch, so cold restore retains result text without inventing a diff. See the [normalized event inventory](../../docs/current/agent-remote/claude-normalized-events.md) for the full contract and validation boundaries.
 

@@ -1,4 +1,4 @@
-import { mkdir, readdir, readFile, rename, stat, writeFile } from 'node:fs/promises';
+import { mkdir, readdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import type { AgentSessionHostAccess } from '@orchardworks/agent-provider-sdk';
 
@@ -53,6 +53,8 @@ function socketProfileSupported(initialization: unknown): boolean {
   return true;
 }
 
+const RETIRED_SKILLS = ['agent-remote-sessions'];
+
 /**
  * Codex has no skills per thread, so Host skills go to the Codex home, where the user's own sessions see them too.
  * Each skill's SKILL.md is written only when it differs, through a temporary file. A missing Codex home is left alone.
@@ -60,6 +62,11 @@ function socketProfileSupported(initialization: unknown): boolean {
 export async function installCodexSkills(skills: string, codexHome: string): Promise<void> {
   try { if (!(await stat(codexHome)).isDirectory()) return; }
   catch { return; }
+  // A skill the Controller renamed goes, if the Controller wrote it.
+  for (const retired of RETIRED_SKILLS) {
+    const directory = join(codexHome, 'skills', retired);
+    if ((await readFile(join(directory, 'SKILL.md'), 'utf8').catch(() => '')).startsWith(`---\nname: ${retired}\n`)) await rm(directory, { recursive: true, force: true });
+  }
   for (const entry of await readdir(join(skills, 'skills'), { withFileTypes: true })) {
     if (!entry.isDirectory()) continue;
     const contents = await readFile(join(skills, 'skills', entry.name, 'SKILL.md'), 'utf8');

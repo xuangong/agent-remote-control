@@ -1,6 +1,6 @@
 # Session primitives in the Controller CLI
 
-Status: proposed on 2026-11-04. Milestone 1 (identity, discovery and read on the session's own Host) is implemented, see [session commands](../../current/agent-remote/session-commands.md); the later milestones are design only. The feasibility spike ran on 2026-11-04 (see [Evidence](#evidence)).
+Status: proposed on 2026-11-04. Implemented on 2026-11-07, see [command line](../../current/agent-remote/cli.md): identity, discovery and read; send, create, answer and settings; other Hosts through the Relay with the command line's own sign-in; role commands for Team, support and TPM roles. Role tools are still given to sessions, because a Codex session in the user's own sandbox cannot reach the session socket without approval. The feasibility spike ran on 2026-11-04 (see [Evidence](#evidence)).
 
 ## Problem
 

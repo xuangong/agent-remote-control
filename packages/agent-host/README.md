@@ -61,75 +61,37 @@ Set the connection environment below first. The first run installs the SDK
 dependencies into npm's cache. Replace `foreground` with `start`, `status`,
 `pair`, or `stop` for daemon management.
 
-## Share a session with another device
+## Command line
 
-With the Controller daemon running and registered on this Host:
-
-```sh
-agent-remote-controller share
-agent-remote-controller share list-sessions
-```
-
-`share` asks you to select one of this Host's enabled providers, then paste a
-native session ID. For Codex, run `/status` in the native CLI and copy the
-**Session** value. A missing ID can be corrected without restarting the command.
-
-`share list-sessions` offers two terminal browsing modes: **Recent sessions**
-across enabled providers, and **By folder** to choose a workspace before choosing
-a session. Folders are grouped by their full paths and ordered by their latest
-session activity. Each session shows its provider, title, native ID, directory,
-and update time. Sessions without a workspace appear under **(no directory)**.
-
-Press **/** or select **Search** to enter a query, then **Enter** to see matches.
-Folder searches match full paths; session searches match titles and native IDs.
-Search is case-insensitive; multiple space-separated terms must all match.
-Search inside a folder stays within that exact directory. Choose **Clear search**
-(or submit an empty query) to reset it, or **b** to return to folders/browsing modes.
-Folder browsing and session searches load metadata from all catalog pages, with
-progress displayed; results are cached for this invocation. No conversation
-content is loaded. Use Ctrl+C to interrupt metadata loading.
-
-In a terminal, provider, browsing mode, folder, and session choices use **↑/↓**
-to move and **Enter** to select. Choose **Older entries** or **Newer entries**
-(**n/p**) to browse pages of 20 entries. **Home/End** jump to the first/last choice; **Page Up/Down**
-move by ten choices. **Esc**, `q`, or Ctrl+C cancel a selection. Session IDs are
-still entered as text (`q`, Ctrl+C, or end of input cancel).
-
-Non-terminal input retains the recent-session numbered choices for scripts,
-with `n` for older sessions and `p` for newer sessions.
-
-Before displaying a link and terminal QR code, the Controller checks the selected
-identity against its current native catalog. Sharing does not resume a session,
-load conversation history, create a session, or establish another uplink. A session
-outside the provider's discoverable catalog cannot be shared through this command.
-On the phone, open the same site and use **Scan to open**. The code contains only
-the site, Host, provider, and native session ID; access uses the receiving device's
-own sign-in. Keep the full white border visible and widen the terminal if the QR
-code wraps.
-
-The CLI uses the authenticated local management socket of the running daemon and
-its registered Host identity. If that daemon predates this command, update it and
-restart the Controller. There is no need to restart the native Codex daemon.
-
-## Session commands for agents
-
-Claude Code and Codex sessions that the Controller creates or resumes can list and
-read this Host's other sessions from their own shell:
+`agent-remote-controller` does from a shell what the website does. Every resource
+command prints JSON and exits 0 done, 1 failed, 2 wrong usage, 3 outcome unknown:
 
 ```sh
-agent-remote-controller session read self
 agent-remote-controller session list
 agent-remote-controller session read <hostId>/<providerId>/<nativeSessionId> --search "plan"
+agent-remote-controller session send <address> "Please check the tests"
+agent-remote-controller session link <address> --qr     # open it on a phone with Scan to open
+agent-remote-controller session attach <address>        # open it in its native CLI here
+agent-remote-controller host read
+agent-remote-controller window list
 ```
 
-The commands print JSON and work only where `AGENT_REMOTE_SESSION_TOKEN` and
-`AGENT_REMOTE_SESSION_SOCKET` are set; the Controller gives every session it manages
-its own credential and a session socket separate from local management. Sessions a
-share recipient created are hidden and hold no credential. The Controller loads the
-`agent-remote-sessions` skill into Claude Code sessions and installs it into the
-Codex home. Read-only Codex sessions on macOS reach the socket through a permission
-profile; other Codex sessions follow your own Codex sandbox. See
-[session commands](../../docs/current/agent-remote/session-commands.md).
+In a session the Controller manages (`AGENT_REMOTE_SESSION_TOKEN` and
+`AGENT_REMOTE_SESSION_SOCKET` set), commands act as that session, and `role` runs
+the commands of its Team, support or TPM role. In an ordinary terminal they act as
+the Host owner through the running Controller. Other Hosts, Windows, stars and
+handoffs go through the Relay with the command line's own sign-in:
+
+```sh
+agent-remote-controller login      # approve the code in your browser
+agent-remote-controller login status
+agent-remote-controller logout
+```
+
+The sign-in is listed with your browser sessions in Settings, where you can revoke
+it. The Controller loads the `agent-remote` skill into Claude Code sessions and
+installs it into the Codex home; `agent-remote-controller --skill` prints it. See
+[command line](../../docs/current/agent-remote/cli.md).
 
 ## Connect to a Relay
 
@@ -643,7 +605,7 @@ Management never binds a public network address or silently changes the requeste
 port. Port conflicts, authentication failures and startup failures produce
 diagnostic reasons without killing an unrelated listener.
 
-`agent-remote-controller opencode resume <session-id>` attaches the native TUI to
+`agent-remote-controller session attach local/opencode/<session-id>` attaches the native TUI to
 that same server, using the configured or generated native credentials.
 Browser sessions use shared control and never require takeover. Disconnecting,
 releasing subscriptions, stopping or updating Controller does not stop its shared

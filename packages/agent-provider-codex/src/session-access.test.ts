@@ -117,15 +117,19 @@ it('never persists Host access in the session handle', async () => {
 it('installs the Host skills into the Codex home and makes Codex read its skills again once per workspace', async () => {
   const skills = await mkdtemp(path.join(os.tmpdir(), 'codex-skills-source-'));
   cleanup.push(() => rm(skills, { recursive: true, force: true }));
-  await mkdir(path.join(skills, 'skills', 'agent-remote-sessions'), { recursive: true });
-  await writeFile(path.join(skills, 'skills', 'agent-remote-sessions', 'SKILL.md'), '---\nname: agent-remote-sessions\n---\n');
+  await mkdir(path.join(skills, 'skills', 'agent-remote'), { recursive: true });
+  await writeFile(path.join(skills, 'skills', 'agent-remote', 'SKILL.md'), '---\nname: agent-remote\n---\n');
   const home = await mkdtemp(path.join(os.tmpdir(), 'codex-access-'));
+  // The skill this one replaced goes; a skill of the same name the user wrote stays.
+  await mkdir(path.join(home, 'skills', 'agent-remote-sessions'), { recursive: true });
+  await writeFile(path.join(home, 'skills', 'agent-remote-sessions', 'SKILL.md'), '---\nname: agent-remote-sessions\n---\nold');
   const { server, provider: codex } = await provider(verified, {}, home);
   for (const cwd of ['/work', '/work', '/other']) {
     const session = await codex.createSession({ sessionId: 'local', cwd, hostAccess: { ...hostAccess, skills } });
     cleanup.push(() => session.dispose());
   }
-  expect(await readFile(path.join(home, 'skills', 'agent-remote-sessions', 'SKILL.md'), 'utf8')).toBe('---\nname: agent-remote-sessions\n---\n');
+  expect(await readFile(path.join(home, 'skills', 'agent-remote', 'SKILL.md'), 'utf8')).toBe('---\nname: agent-remote\n---\n');
+  await expect(readFile(path.join(home, 'skills', 'agent-remote-sessions', 'SKILL.md'))).rejects.toThrow();
   const methods = server.requests.map(request => request.method).filter(method => method === 'skills/list' || method === 'thread/start');
   expect(methods).toEqual(['skills/list', 'thread/start', 'thread/start', 'skills/list', 'thread/start']);
   expect(server.requests.filter(request => request.method === 'skills/list').map(request => request.params)).toEqual([
@@ -135,11 +139,11 @@ it('installs the Host skills into the Codex home and makes Codex read its skills
 it('leaves a missing Codex home alone', async () => {
   const skills = await mkdtemp(path.join(os.tmpdir(), 'codex-skills-source-'));
   cleanup.push(() => rm(skills, { recursive: true, force: true }));
-  await mkdir(path.join(skills, 'skills', 'agent-remote-sessions'), { recursive: true });
-  await writeFile(path.join(skills, 'skills', 'agent-remote-sessions', 'SKILL.md'), 'skill');
+  await mkdir(path.join(skills, 'skills', 'agent-remote'), { recursive: true });
+  await writeFile(path.join(skills, 'skills', 'agent-remote', 'SKILL.md'), 'skill');
   const missing = path.join(skills, 'missing-home');
   const { provider: codex } = await provider(verified, {}, missing);
   const session = await codex.createSession({ sessionId: 'local', cwd: '/work', hostAccess: { ...hostAccess, skills } });
   cleanup.push(() => session.dispose());
-  await expect(readFile(path.join(missing, 'skills', 'agent-remote-sessions', 'SKILL.md'))).rejects.toThrow();
+  await expect(readFile(path.join(missing, 'skills', 'agent-remote', 'SKILL.md'))).rejects.toThrow();
 });

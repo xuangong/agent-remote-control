@@ -507,17 +507,27 @@ function AppContent({
   const ask = useAskConversations(succession.document, transport, directory, selectedHost.id, retryHosts, source => succession.resolveTarget(source, { nativePrefixOnly: true }).target, windowWorkspace.authority);
   const projectedLayout = succession.layoutView();
   const availableSides = projectedLayout ? [...storedSideSessions.filter(session => !projectedLayout.sides.some(side => viewKey(side) === viewKey(session))), ...projectedLayout.sides] : storedSideSessions;
-  const sideSessions = windowSession.empty ? [] : sharedWindow ? availableSides.filter(session => { const view = sharedViewForSlot(viewKey(session)); return view && sharedFamily?.has(view.id) && view.id !== sharedWindow.selectedPrimaryViewId; }) : availableSides;
+  const sideSessions = windowSession.empty ? [] : sharedWindow ? sharedFamilySides() : availableSides;
   const sideSelections = useMemo<SideSelections>(() => Object.fromEntries(succession.document.edges.filter(edge => edge.selected).map(edge => [edge.source, edge.target])), [succession.document, succession.document.editRevision]);
   const sideFocus = succession.document.focus, sideAnchor = succession.document.anchor;
-  function selectedChildKey(sourceId: string) {
+  /** Every view attached in the selected primary family, in Window order, once its session is known. */
+  function sharedFamilySides(): OpenedSession[] {
+    const known = new Map(availableSides.map(session => [viewKey(session), session]));
+    return (sharedWindow?.views ?? []).flatMap(view => {
+      const slot = view.attachedTo && sharedFamily?.has(view.id) ? sharedSlots?.get(view.id) : undefined;
+      const mounted = mountedViewSessions[view.id];
+      const session = slot && (known.get(slot.id) ?? (mounted?.viewId === slot.id ? mounted : compositionSession(slot)));
+      return session && view.binding && sessionKey(session) === sessionKey(view.binding) ? [session] : [];
+    });
+  }
+  /** Sessions shown beside a source: each view attached to it in a shared Window, otherwise its selected Side. */
+  function openSideKeys(sourceId: string): string[] {
     if (sharedWindow) {
       const source = sharedViewForSlot(sourceId);
-      const child = source && sharedWindow.views.find(view => view.attachedTo === source.id);
-      return child?.binding ? sessionKey(child.binding) : undefined;
+      return source ? sharedWindow.views.flatMap(view => view.attachedTo === source.id && view.binding ? [sessionKey(view.binding)] : []) : [];
     }
     const slot = succession.document.slots.find(slot => slot.id === sideSelections[sourceId]);
-    return slot ? sessionKey(compositionSelection(slot)) : undefined;
+    return slot ? [sessionKey(compositionSelection(slot))] : [];
   }
   function setSideSelections(change: SideSelections | ((current: SideSelections) => SideSelections)) {
     const current = Object.fromEntries(succession.document.edges.filter(edge => edge.selected).map(edge => [edge.source, edge.target]));
@@ -527,13 +537,12 @@ function AppContent({
       for (const [sourceId, targetId] of Object.entries(next)) {
         if (current[sourceId] === targetId) continue;
         const source = sharedViewForSlot(sourceId); if (!source) continue;
-        const previous = sharedWindow.views.find(view => view.attachedTo === source.id);
         const existing = targetId ? sharedViewForSlot(targetId) : undefined;
         if (existing?.attachedTo === source.id) {
           operations.push({ type: 'view.select', viewId: existing.id });
           continue;
         }
-        if (previous) operations.push({ type: 'view.close', viewId: previous.id });
+        // The source keeps the views already attached to it; the selection only adds or focuses one.
         const target = targetId && succession.document.slots.find(slot => slot.id === targetId);
         if (target) {
           const view = { ...createWindowView(crypto.randomUUID(), windowSessionBinding(compositionSelection(target)), 'attached'), attachedTo: source.id };
@@ -813,7 +822,7 @@ function AppContent({
     rememberTrackedView();
     const selection = { ...item, hostId: item.hostId ?? selectedHost.id };
     if (!targetPrimaryViewId && placement !== 'primary' && !primarySlot && sessionIntent !== 'history' && keepOriginal === undefined && !restoreView && !takeOver && !onRestoring) {
-      const visible = stackPath.find(entry => sessionKey(entry) === sessionKey(selection));
+      const visible = familyPath.find(entry => sessionKey(entry) === sessionKey(selection));
       if (visible && !replicaFor(visible.agentId).getState().sessionControl?.nativeOwner) {
         setSideFocus(viewKey(visible));
         if (!expandedKeys.has(viewKey(visible))) setSideAnchor(viewKey(visible));
@@ -1298,16 +1307,18 @@ function AppContent({
     document.title = pageTitle?.trim() ? `${pageTitle.trim()} · Agent Remote Control` : 'Agent Remote Control';
     return () => { document.title = 'Agent Remote Control'; };
   }, [pageTitle]);
-  const stackPath = sidePath(visibleStackRoot, sideSessions, sideSelections, viewKey).map((session) => ({
-    ...session, title: forkStore.find(session)?.firstInput?.trim().slice(0, 72) || session.title,
-  }));
+  const sideTitle = (session: OpenedSession) => ({ ...session, title: forkStore.find(session)?.firstInput?.trim().slice(0, 72) || session.title });
+  const stackPath = sidePath(visibleStackRoot, sideSessions, sideSelections, viewKey).map(sideTitle);
+  // A shared source can show several Sides, so its family is wider than the selected path.
+  const familyPath = sharedWindow ? (visibleStackRoot ? [visibleStackRoot, ...sideSessions] : []).map(sideTitle) : stackPath;
   const selectedPathIndex = stackPath.findIndex(session => viewKey(session) === sideFocus);
   const sharedDesktopAnchor = sharedWindow && !compactLayout && selectedPathIndex >= 0
     ? stackPath[Math.min(stackPath.length - 1, selectedPathIndex + 1)] : undefined;
   const stackRange = expandedSideRange(stackPath, compactLayout ? sideFocus : sharedDesktopAnchor ? viewKey(sharedDesktopAnchor) : sideAnchor, compactLayout ? 1 : 2, viewKey);
   const expandedKeys = new Set(stackPath.slice(stackRange.start, stackRange.end + 1).filter(session => !sharedViewForSlot(viewKey(session))?.collapsed).map(viewKey));
   const focusedWindow = stackPath.find(session => viewKey(session) === sideFocus) ?? stackPath[stackRange.end];
-  const focusedPathIndex = focusedWindow ? stackPath.indexOf(focusedWindow) : 0;
+  const focusedFamilyWindow = familyPath.find(session => viewKey(session) === sideFocus) ?? focusedWindow;
+  const focusedFamilyIndex = focusedFamilyWindow ? Math.max(0, familyPath.findIndex(session => viewKey(session) === viewKey(focusedFamilyWindow))) : 0;
   const primaryExpanded = detachedSideRoot ? !!stackRoot && expandedKeys.has(viewKey(stackRoot)) : stackRange.start === 0 && (!stackRoot || expandedKeys.has(viewKey(stackRoot)));
   const addressSession = stackPath.find((session) => viewKey(session) === sideFocus) ?? visibleStackRoot;
   const focusedBinding = directoryView?.binding;
@@ -1342,7 +1353,7 @@ function AppContent({
       const navigationSource = pendingSideSources.current.get(record.id) ?? sideNavigationSource(record);
       pendingSideSources.current.delete(record.id);
       const navigationTarget = sideNavigationTarget(record)!;
-      const sourceView = stackPath.find(session => sessionKey(session) === sessionKey(navigationSource)), targetView = sideSessions.find(session => sessionKey(session) === sessionKey(navigationTarget));
+      const sourceView = familyPath.find(session => sessionKey(session) === sessionKey(navigationSource)), targetView = sideSessions.find(session => sessionKey(session) === sessionKey(navigationTarget));
       if (!sourceView || !targetView) continue;
       appliedUnlinks.set(record.id, record.revision ?? 0);
       if (sharedWindow) {
@@ -1732,12 +1743,10 @@ function AppContent({
     let root = sharedViewForSlot(viewKey(source));
     while (root?.attachedTo) root = sharedWindow.views.find(view => view.id === root!.attachedTo);
     if (!root) return [];
-    const path = [root];
-    for (;;) {
-      const child = sharedWindow.views.find(view => view.attachedTo === path.at(-1)!.id);
-      if (!child) return path;
-      path.push(child);
-    }
+    // Attached views follow their source in Window order, including several per source.
+    const family = [root], ids = new Set([root.id]);
+    for (const view of sharedWindow.views) if (view.attachedTo && ids.has(view.attachedTo)) { ids.add(view.id); family.push(view); }
+    return family;
   }
   async function openCommunication(entry: ProjectedTimelineEntry, source: OpenedSession, sourceState?: AgentReplicaState): Promise<void> {
     if (!directory || entry.item.type !== 'agent_communication') throw new Error('Session navigation is unavailable in this view.');
@@ -1809,8 +1818,6 @@ function AppContent({
         const operations: WindowEdit[] = [];
         let destinationId = existing?.id;
         if (!destinationId) {
-          const previous = current.views.find(view => view.attachedTo === origin.id);
-          if (previous) operations.push({ type: 'view.close', viewId: previous.id });
           const child = { ...createWindowView(crypto.randomUUID(), windowSessionBinding(destination), 'attached'), attachedTo: origin.id };
           destinationId = child.id;
           operations.push({ type: 'view.create', view: child });
@@ -2235,7 +2242,7 @@ function AppContent({
           : Promise.resolve(false)} />,
       composerContext: <>{fork ? <ForkReference fork={fork} onOpen={revealSession} onUnlink={unlinkSide} onRecover={record => refreshRelations.reconcile(record)} /> : null}
         {quoteView ? <QuoteAttachments scope={baseUrl} viewId={quoteView} /> : null}</>,
-      composerNotice: <ForkEntries forks={sourceForks} selectedChild={selectedChildKey(source.viewId)} onOpen={record => void openFork({ ...record, navigationSource: source })} onUnlink={unlinkSide} onRecover={record => refreshRelations.reconcile(record)} />,
+      composerNotice: <ForkEntries forks={sourceForks} openSides={openSideKeys(source.viewId)} onOpen={record => void openFork({ ...record, navigationSource: source })} onUnlink={unlinkSide} onRecover={record => refreshRelations.reconcile(record)} />,
       sessionManager: <>{context.controls}{isPrimary ? <button type="button" data-pane-selection-ignore aria-label={`Close primary group: ${source.title}`}
         title="Close this session view. Agent sessions keep running."
         onClick={() => windowWorkspace.authority?.operate({ type: 'view.close', viewId: view.id })}>×</button> : null}
@@ -2316,13 +2323,13 @@ function AppContent({
     {compactLayout ? <nav className="lab-mobile-navigation" aria-label="Session navigation" {...backgroundInert}>
       <button ref={sessionsTriggerRef} type="button" aria-label="Open sessions" aria-haspopup="dialog" aria-expanded={contextOpen} aria-controls="lab-context" onClick={() => { openContext(true); }}>Sessions</button>
       <div ref={setMobileViewTarget} data-pane-selection-ignore className="lab-global-view-slot" />
-      {userScoped ? <FavoritesMenu onScan={directory ? () => setScanOpen(true) : undefined} status={focusedMenuStatus} currentSession={focusedMenuSession} title={focusedMenuSession?.title || (sharedWindow ? 'Select session' : 'Agent Remote')} favorites={favorites} tracking={tracking} activeKey={focusedSessionKey} busy={transitioning && !sidebarWindow} onOpen={item => void openDirectorySession(item)} /> : stackPath.length > 1 ? <select className="agent-session-title" data-session-status={sessionEntries.find(entry => entry.agentId === focusedWindow?.agentId)?.status} aria-label="Side path" value={focusedWindow ? sessionKey(focusedWindow) : ''} onChange={(event) => { const session = stackPath.find((entry) => sessionKey(entry) === event.target.value); if (session) revealSession(session); }}>
-        {stackPath.map((session, index) => <option className="agent-session-title" data-session-status={sessionEntries.find(entry => entry.agentId === session.agentId)?.status} key={sessionKey(session)} value={sessionKey(session)}>{index === 0 ? 'Root' : `Side ${index}`} · {session.title}</option>)}
+      {userScoped ? <FavoritesMenu onScan={directory ? () => setScanOpen(true) : undefined} status={focusedMenuStatus} currentSession={focusedMenuSession} title={focusedMenuSession?.title || (sharedWindow ? 'Select session' : 'Agent Remote')} favorites={favorites} tracking={tracking} activeKey={focusedSessionKey} busy={transitioning && !sidebarWindow} onOpen={item => void openDirectorySession(item)} /> : familyPath.length > 1 ? <select className="agent-session-title" data-session-status={sessionEntries.find(entry => entry.agentId === focusedFamilyWindow?.agentId)?.status} aria-label="Side path" value={focusedFamilyWindow ? viewKey(focusedFamilyWindow) : ''} onChange={(event) => { const session = familyPath.find((entry) => viewKey(entry) === event.target.value); if (session) revealSession(session); }}>
+        {familyPath.map((session, index) => <option className="agent-session-title" data-session-status={sessionEntries.find(entry => entry.agentId === session.agentId)?.status} key={viewKey(session)} value={viewKey(session)}>{index === 0 ? 'Root' : `Side ${index}`} · {session.title}</option>)}
       </select> : <span className="lab-mobile-session-title agent-session-title" data-session-status={sessionEntries.find(entry => entry.agentId === addressSession?.agentId)?.status}>{addressSession?.title || 'Agent Remote'}</span>}
-      {userScoped && stackPath.length > 1 ? <div className="lab-mobile-side-path">
-        <span aria-hidden="true">{focusedPathIndex === 0 ? 'Root' : `Side ${focusedPathIndex}`}</span><span className="lab-mobile-side-chevron" aria-hidden="true">▾</span>
-        <select aria-label="Side path" value={focusedWindow ? sessionKey(focusedWindow) : ''} onChange={event => { const session = stackPath.find(entry => sessionKey(entry) === event.target.value); if (session) revealSession(session); }}>
-          {stackPath.map((session, index) => <option key={sessionKey(session)} value={sessionKey(session)}>{index === 0 ? 'Root' : `Side ${index}`} · {session.title}</option>)}
+      {userScoped && familyPath.length > 1 ? <div className="lab-mobile-side-path">
+        <span aria-hidden="true">{focusedFamilyIndex === 0 ? 'Root' : `Side ${focusedFamilyIndex}`}</span><span className="lab-mobile-side-chevron" aria-hidden="true">▾</span>
+        <select aria-label="Side path" value={focusedFamilyWindow ? viewKey(focusedFamilyWindow) : ''} onChange={event => { const session = familyPath.find(entry => viewKey(entry) === event.target.value); if (session) revealSession(session); }}>
+          {familyPath.map((session, index) => <option key={viewKey(session)} value={viewKey(session)}>{index === 0 ? 'Root' : `Side ${index}`} · {session.title}</option>)}
         </select>
       </div> : null}
     </nav> : null}
@@ -2565,7 +2572,7 @@ function AppContent({
           onExecuteConsoleCommand={executePrimaryCommand}
           nativeTakeover={openingControlNotice}
           composerContext={boundFork ? <ForkReference fork={boundFork} onOpen={revealSession} onUnlink={unlinkSide} onRecover={record => refreshRelations.reconcile(record)} /> : undefined}
-          composerNotice={<ForkEntries forks={forkStore.linked().filter((fork) => fork.target && (sideNavigationSource(fork).agentId === activeAgentId || (activeOpened && sessionKey(sideNavigationSource(fork)) === sessionKey(activeOpened))))} selectedChild={stackRoot ? selectedChildKey(viewKey(stackRoot)) : undefined} onOpen={(fork) => void openFork(fork)} onUnlink={unlinkSide} onRecover={record => refreshRelations.reconcile(record)} />}
+          composerNotice={<ForkEntries forks={forkStore.linked().filter((fork) => fork.target && (sideNavigationSource(fork).agentId === activeAgentId || (activeOpened && sessionKey(sideNavigationSource(fork)) === sessionKey(activeOpened))))} openSides={stackRoot ? openSideKeys(viewKey(stackRoot)) : undefined} onOpen={(fork) => void openFork(fork)} onUnlink={unlinkSide} onRecover={record => refreshRelations.reconcile(record)} />}
           sessionManager={<><MinimizeMainSession />{!compactLayout && stackRoot ? <StarButton session={stackRoot} favorites={favorites} /> : null}<SessionHeadingActions sessionKey={stackRoot ? sessionKey(stackRoot) : activeAgentId}>{(!compactLayout || succession.localViews().length > 0) && directory && currentSession ? <ChatSessionManager current={currentSession} entries={sessionEntries} busy={transitioning || hostOffline} onOpen={(item) => void openSession(item)}
             localViews={succession.localViews()} activeSlot={succession.desired?.slot.id} onOpenView={view => void openLocalView(view.slotId)} /> : null}<nav className="lab-conversation-history" aria-label="Conversation history">
             <button type="button" aria-label="Back to previous conversation" title="Back" disabled={transitioning || !conversationHistory.canBack} onClick={conversationHistory.back}>←</button>
@@ -2595,7 +2602,7 @@ function AppContent({
           position={stackPath.findIndex((entry) => viewKey(entry) === viewKey(session))}
           expanded={expandedKeys.has(viewKey(session))}
           focused={!compositionProtected && focusedWindow !== undefined && viewKey(focusedWindow) === viewKey(session)}
-          selectedChild={selectedChildKey(viewKey(session))}
+          openSides={openSideKeys(viewKey(session))}
           initialInput={forkInputStatus?.agentId === session.agentId ? forkInputStatus : undefined}
           visible={activeView === 'workbench'} draftBinding={draftBindingFor(session)}
           imageDraftBinding={succession.document.slots.find(slot => slot.id === viewKey(session))!.owners.image}

@@ -135,10 +135,19 @@ it('validates shared dependency paths without repeatedly traversing their histor
     feature: { kind: 'opaque', id: `tag${i}`, metadata: { sourceViewId: 'missing-is-only-metadata' } } });
   expect(isWorkspaceWindow(w)).toBe(true);
 });
-it('rejects two selected attached branches at one source instead of accepting an unrenderable layout', () => {
-  const w = workspace();
-  w.views.push({ ...createWindowView('one', binding, 'attached'), attachedTo: 'dock' }, { ...createWindowView('two', binding, 'attached'), attachedTo: 'dock' });
-  expect(isWorkspaceWindow(w)).toBe(false);
+it('keeps several attached views of one source, each subtree contiguous after it', () => {
+  let w = workspace();
+  w = applyWindowOperation(w, { type: 'view.create', view: { ...createWindowView('one', binding, 'attached'), attachedTo: 'dock' } });
+  w = applyWindowOperation(w, { type: 'view.create', view: { ...createWindowView('one-child', binding, 'attached'), attachedTo: 'one' } });
+  w = applyWindowOperation(w, { type: 'view.create', view: { ...createWindowView('two', binding, 'attached'), attachedTo: 'dock' } });
+  expect(w.views.map(view => view.id)).toEqual(['main', 'dock', 'one', 'one-child', 'two']);
+  const interleaved = { ...w, views: [w.views[0]!, w.views[1]!, w.views[2]!, w.views[4]!, w.views[3]!] };
+  expect(isWorkspaceWindow(interleaved)).toBe(false);
+  const closed = applyWindowOperation({ ...w, selectedViewId: 'one-child' }, { type: 'view.close', viewId: 'one' });
+  expect(closed.views.map(view => view.id)).toEqual(['main', 'dock', 'two']);
+  expect(closed.selectedViewId).toBe('dock');
+  const moved = applyWindowOperation(applyWindowOperation(w, { type: 'view.create', view: createWindowView('other') }), { type: 'view.move', viewId: 'dock', afterId: 'other' });
+  expect(moved.views.map(view => view.id)).toEqual(['main', 'other', 'dock', 'one', 'one-child', 'two']);
 });
 
 it('retains optional stable Team member identity through layout serialization', () => {

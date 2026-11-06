@@ -37,14 +37,15 @@ export function ForkReference({ fork, onOpen, onUnlink, onRecover }: { fork: Ses
     </div>
   </details>;
 }
-export function ForkEntries({ forks, onOpen, onUnlink, onRecover, selectedChild }: { forks: readonly SessionFork[]; onOpen(fork: SessionFork): void; onUnlink?: UnlinkSide; onRecover?: UnlinkSide; selectedChild?: string | null }) {
+/** openSides: session keys of the Sides shown beside their source. */
+export function ForkEntries({ forks, onOpen, onUnlink, onRecover, openSides }: { forks: readonly SessionFork[]; onOpen(fork: SessionFork): void; onUnlink?: UnlinkSide; onRecover?: UnlinkSide; openSides?: readonly string[] }) {
   const linked = forks.filter(sideLinkVisible);
   if (!linked.length) return null;
   return <nav className="lab-fork-entries" aria-label="Forked sessions"><span className="lab-side-list-label">Sides · {linked.length}</span>{linked.map((fork, index) =>
-    <ForkEntry key={fork.id} fork={fork} index={index} selectedChild={selectedChild} onOpen={onOpen} onUnlink={onUnlink} onRecover={onRecover} />)}</nav>;
+    <ForkEntry key={fork.id} fork={fork} index={index} openSides={openSides} onOpen={onOpen} onUnlink={onUnlink} onRecover={onRecover} />)}</nav>;
 }
 
-function ForkEntry({ fork, index, selectedChild, onOpen, onUnlink, onRecover }: { fork: SessionFork; index: number; selectedChild?: string | null; onOpen(fork: SessionFork): void; onUnlink?: UnlinkSide; onRecover?: UnlinkSide }) {
+function ForkEntry({ fork, index, openSides, onOpen, onUnlink, onRecover }: { fork: SessionFork; index: number; openSides?: readonly string[]; onOpen(fork: SessionFork): void; onUnlink?: UnlinkSide; onRecover?: UnlinkSide }) {
   const [open, setOpen] = useState(false);
   const trigger = useRef<HTMLButtonElement>(null);
   const menuId = useId();
@@ -53,7 +54,7 @@ function ForkEntry({ fork, index, selectedChild, onOpen, onUnlink, onRecover }: 
   const close = useCallback(() => { setOpen(false); trigger.current?.focus({ preventScroll: true }); }, []);
   const dismiss = useCallback(() => setOpen(false), []);
   return <span className="lab-fork-entry">
-    <button type="button" aria-pressed={!!target && selectedChild === sessionKey(target)} title={label} onClick={() => onOpen(fork)}><ForkIcon /><span>{label}</span></button>
+    <button type="button" aria-pressed={!!target && !!openSides?.includes(sessionKey(target))} title={label} onClick={() => onOpen(fork)}><ForkIcon /><span>{label}</span></button>
     {onUnlink ? <>
       <button type="button" className="lab-fork-menu-trigger" ref={trigger} aria-label={`Actions for ${label}`} title={`Actions for ${label}`}
         aria-haspopup="menu" aria-expanded={open} aria-controls={open ? menuId : undefined} onClick={() => setOpen(value => !value)}>⋯</button>

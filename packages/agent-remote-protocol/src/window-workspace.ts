@@ -105,16 +105,13 @@ export function isWorkspaceWindow(value: unknown): value is WorkspaceWindow {
     if (![item.attachedTo, item.closeWith].every(parent => !parent || visit(parent))) return false;
     active.delete(current); visited.add(current); return true;
   };
-  // Each attachment subtree occupies one contiguous interval after its source.
+  // A source can hold several attached views; each attachment subtree occupies one contiguous interval after its source.
   const ancestry: string[] = [];
-  const attachedSources = new Set<string>();
   for (const view of window.views) {
     if ((view.placement === 'attached') !== (view.attachedTo !== undefined)) return false;
     if (view.placement === 'primary' && (view.attachedTo || view.closeWith)) return false;
     if (!visit(view.id)) return false;
     if (view.attachedTo) {
-      if (attachedSources.has(view.attachedTo)) return false;
-      attachedSources.add(view.attachedTo);
       const parent = ancestry.indexOf(view.attachedTo);
       if (parent < 0) return false;
       ancestry.length = parent + 1;

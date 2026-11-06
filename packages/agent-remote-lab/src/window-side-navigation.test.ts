@@ -19,12 +19,15 @@ it('opens a Side beside its source when another Pane already displays the target
   expect(selected).toEqual({ operation: { type: 'view.select', viewId: 'child' }, viewId: 'child' });
 });
 
-it('replaces only the source attached branch and keeps independent panes', () => {
+it('opens another Side beside the ones its source already shows and keeps independent panes', () => {
   const window = fixture();
   window.views.push({ ...createWindowView('previous', { ...target, nativeSessionId: 'previous' }, 'attached'), attachedTo: 'dock' },
     { ...createWindowView('leaf', target, 'attached'), attachedTo: 'previous' }, createWindowView('independent', target));
   const opened = applyWindowOperation(window, sideWindowOperation(window, source, target, 'child').operation);
-  expect(opened.views.map(view => view.id)).toEqual(['main', 'dock', 'child', 'independent']);
+  expect(opened.views.map(view => [view.id, view.attachedTo])).toEqual([['main', undefined], ['dock', undefined], ['previous', 'dock'], ['leaf', 'previous'], ['child', 'dock'], ['independent', undefined]]);
+  expect(opened.selectedViewId).toBe('child');
+  const reopened = sideWindowOperation(opened, source, { ...target, nativeSessionId: 'previous' }, 'duplicate');
+  expect(reopened).toEqual({ operation: { type: 'view.select', viewId: 'previous' }, viewId: 'previous' });
 });
 
 it.each(['closed', 'rebound', 'history', 'window', 'missing'] as const)('rejects an async Side result after its source is %s', change => {

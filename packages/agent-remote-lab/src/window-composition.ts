@@ -154,8 +154,14 @@ export function projectWindowComposition(document: CompositionDocument, window: 
     document.edges = []; document.collapsed = []; document.editRevision++; return true;
   }
   const selected = window.selectedViewId ? slots.get(window.selectedViewId) : undefined;
+  // A source can show several attached views; its selected edge leads toward the selected view, otherwise to its latest one.
+  const selectedPath = new Set<string>();
+  for (let view = window.views.find(view => view.id === window.selectedViewId); view && family.has(view.id) && !selectedPath.has(view.id);
+    view = window.views.find(parent => parent.id === view!.attachedTo)) selectedPath.add(view.id);
+  const selectedChild = new Map<string, string>();
+  for (const view of window.views) if (view.attachedTo && family.has(view.id) && !selectedPath.has(selectedChild.get(view.attachedTo) ?? '')) selectedChild.set(view.attachedTo, view.id);
   const edges = window.views.flatMap(view => view.attachedTo && family.has(view.id) && slots.has(view.id) && slots.has(view.attachedTo)
-    ? [{ source: slots.get(view.attachedTo)!.id, target: slots.get(view.id)!.id, selected: true }] : []);
+    ? [{ source: slots.get(view.attachedTo)!.id, target: slots.get(view.id)!.id, selected: selectedChild.get(view.attachedTo) === view.id }] : []);
   const focus = selected && window.selectedViewId && family.has(window.selectedViewId) ? selected.id : primary.id;
   const next = { primary: primary.id, address: focus, focus, anchor: focus, edges,
     collapsed: window.views.filter(view => family.has(view.id) && view.collapsed && slots.has(view.id)).map(view => slots.get(view.id)!.id) };

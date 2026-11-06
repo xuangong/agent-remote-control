@@ -56,7 +56,11 @@ Window schema version 3 supports multiple primary session groups, alongside
 independent floating and docked views. `selectedPrimaryViewId` identifies the
 active root; `selectedViewId` identifies focus, which may also be an independent
 view. A root View ID identifies its group, and only `attachedTo` ancestry defines
-membership. `closeWith` expresses a closure dependency, not group membership.
+membership. A source can hold several attached views: `view.create` places a new
+one after the source's existing attached views and their descendants, so every
+attachment subtree stays one contiguous interval after its source. Readers that
+predate this rule reject a Window whose source holds more than one attached view.
+`closeWith` expresses a closure dependency, not group membership.
 Selecting an attached view expands its entire ancestor chain and selects its
 primary root when present. Selecting an independent dock or float preserves the selected primary. Primary roots use
 `collapsed` for minimization through `view.collapse`; `main.minimize` is retired.

@@ -390,6 +390,58 @@ for (const placement of ['primary', 'dock'] as const) {
 }
 
 for (const placement of ['primary', 'dock'] as const) {
+  test(`${placement} source keeps its first Side open beside a second one`, async ({ page, context, isMobile }) => {
+    const workspace = await createWorkspace(page, context);
+    let phase = 'prepare';
+    try {
+      const dock = await workspace.createNative('Dock source');
+      const sourceId = placement === 'primary' ? 'main' : 'dock';
+      await workspace.apply([
+        createWindowView('main', { ...workspace.binding, title: 'Primary source' }, 'primary'),
+        createWindowView('dock', dock),
+      ], 'main', sourceId);
+      const shell = page.locator(placement === 'primary' ? '[data-primary-group-id="main"]' : '.lab-bindable-session-window[data-view-id="dock"]');
+      const source = shell.locator('.lab-session-family-pane').first();
+      const attached = async () => (await workspace.inspect()).views.filter(view => view.attachedTo === sourceId);
+      for (const [index, question] of ['Compare the first approach', 'Compare the second approach'].entries()) {
+        phase = `create side ${index + 1} from the source`;
+        if (index) {
+          await (await openWindows(page)).locator(`[data-window-view-id="${sourceId}"]`).click();
+          await closeWindows(page);
+        }
+        await expect(source.getByTestId('prompt-input')).toBeEnabled();
+        await source.getByTestId('prompt-input').fill(`/side ${question}`);
+        await expect(source.getByTestId('prompt-submit')).toBeEnabled();
+        await source.getByTestId('prompt-submit').click();
+        await expect.poll(async () => (await attached()).length).toBe(index + 1);
+      }
+      const sides = await attached();
+      expect(new Set(sides.map(view => view.binding?.nativeSessionId)).size).toBe(2);
+      await expect.poll(async () => (await workspace.inspect()).selectedViewId).toBe(sides[1]!.id);
+      phase = 'both sides stay in the source family';
+      if (!isMobile) {
+        await expect(shell.locator('.lab-session-family-pane')).toHaveCount(3);
+        for (const side of sides) await expect(shell.locator(`.lab-session-family-pane[data-view-id="${side.id}"]`).getByTestId('prompt-input')).toBeEnabled();
+      }
+      await (await openWindows(page)).locator(`[data-window-view-id="${sourceId}"]`).click();
+      await closeWindows(page);
+      const list = source.getByRole('navigation', { name: 'Forked sessions', exact: true });
+      await expect(list.getByRole('button', { name: /^Side 1 ·/ })).toHaveAttribute('aria-pressed', 'true');
+      await expect(list.getByRole('button', { name: /^Side 2 ·/ })).toHaveAttribute('aria-pressed', 'true');
+      phase = 'close the first side';
+      await closeListedView(page, sides[0]!.id);
+      await expect.poll(async () => (await attached()).map(view => view.id)).toEqual([sides[1]!.id]);
+      await expect(list.getByRole('button', { name: /^Side 1 ·/ })).toHaveAttribute('aria-pressed', 'false');
+      await expect(list.getByRole('button', { name: /^Side 2 ·/ })).toHaveAttribute('aria-pressed', 'true');
+      expect(workspace.errors).toEqual([]);
+    } catch (error) {
+      await test.info().attach('window-sides-state', { body: JSON.stringify({ phase, window: await workspace.inspect(), errors: workspace.errors }, null, 2), contentType: 'application/json' });
+      throw error;
+    } finally { await workspace.close(); }
+  });
+}
+
+for (const placement of ['primary', 'dock'] as const) {
   for (const savedTarget of ['missing pane', 'another session pane'] as const) {
     test(`${placement} Side footer survives refresh with a saved target pointing to ${savedTarget}`, async ({ page, context }) => {
       const workspace = await createWorkspace(page, context);

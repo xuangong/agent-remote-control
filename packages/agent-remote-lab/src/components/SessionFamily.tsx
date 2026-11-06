@@ -68,7 +68,7 @@ function restore(key: string, root: SessionWindowTarget): Layout {
   } catch { return { children: [], focus: 0 }; }
 }
 
-/** Each session window owns its visible descendant chain, independently of other participants. */
+/** Each session window owns its visible descendants, independently of other participants. */
 export function SessionFamily(props: Props) {
   const { target, compact, active } = props;
   const titleInteraction = useContext(SessionTitleInteractionContext);
@@ -80,13 +80,16 @@ export function SessionFamily(props: Props) {
   const sharedRootId = shared?.window.views.some(view => view.id === props.viewId) ? props.viewId
     : shared?.resolveViewId?.(props.displayBinding?.key ?? props.viewId ?? '') ?? props.viewId;
   const rootView = shared?.window.views.find(view => view.id === sharedRootId);
+  // Attached views follow their source in Window order, so one pass finds every descendant, including several per source.
   const attached = [] as NonNullable<typeof rootView>[];
   if (shared && rootView) {
-    let parent = rootView.id;
-    for (;;) { const child = shared.window.views.find(view => view.attachedTo === parent && view.binding); if (!child) break; attached.push(child); parent = child.id; }
+    const family = new Set([rootView.id]);
+    for (const view of shared.window.views) if (view.attachedTo && family.has(view.attachedTo) && view.binding) { family.add(view.id); attached.push(view); }
   }
+  const panes = rootView ? [rootView, ...attached] : [];
+  const currentPanes = useRef(panes); currentPanes.current = panes;
   const [localLayout, setLayout] = useState(() => restore(storageKey, target));
-  const layout: Layout = shared && rootView ? { children: attached.map(view => view.binding!), focus: Math.max(0, [rootView, ...attached].findIndex(view => view.id === presentedViewId)) } : localLayout;
+  const layout: Layout = shared && rootView ? { children: attached.map(view => view.binding!), focus: Math.max(0, panes.findIndex(view => view.id === presentedViewId)) } : localLayout;
   const [widths, setWidths] = useState<Record<string, number>>(() => {
     try { return JSON.parse(conversationSessionStorage.getItem(`${storageKey}:widths`) ?? '{}') ?? {}; } catch { return {}; }
   });
@@ -95,16 +98,16 @@ export function SessionFamily(props: Props) {
     setLayout(restore(storageKey, target));
     try { setWidths(JSON.parse(conversationSessionStorage.getItem(`${storageKey}:widths`) ?? '{}') ?? {}); } catch { setWidths({}); }
   }
-  const childWidth = (item: FamilyTarget) => {
-    const width = shared && rootView ? attached.find(view => view.binding?.nativeSessionId === item.nativeSessionId)?.width : widths[sessionKey(item)];
+  const childWidth = (item: FamilyTarget, index: number) => {
+    const width = shared && rootView ? attached[index - 1]?.width : widths[sessionKey(item)];
     return typeof width === 'number' && Number.isFinite(width) ? Math.max(shared ? 240 : 320, Math.min(1600, width)) : 440;
   };
-  const additionalWidth = layout.children.reduce((total, item, index) => total + (attached[index]?.collapsed ? 0 : childWidth(item)), 0);
+  const additionalWidth = layout.children.reduce((total, item, index) => total + (attached[index]?.collapsed ? 0 : childWidth(item, index + 1)), 0);
   // Commit the outer dock width before revealing a newly inserted descendant.
   useLayoutEffect(() => { props.onAdditionalWidthChange?.(compact ? 0 : additionalWidth); }, [props.onAdditionalWidthChange, compact, additionalWidth]);
   useEffect(() => { if (shared) return; try { conversationSessionStorage.setItem(`${storageKey}:widths`, JSON.stringify(widths)); } catch {} }, [storageKey, widths]);
   const [visited, setVisited] = useState(active || !compact);
-  const [reveal, setReveal] = useState<{ index: number }>();
+  const [reveal, setReveal] = useState<{ index: number } | { viewId: string }>();
   const container = useRef<HTMLDivElement>(null);
   const path: FamilyTarget[] = [target, ...layout.children];
   const currentPath = useRef(path); currentPath.current = path;
@@ -120,17 +123,26 @@ export function SessionFamily(props: Props) {
     if (shared) return;
     try { conversationSessionStorage.setItem(storageKey, JSON.stringify(layout)); } catch { /* Navigation remains available without storage. */ }
   }, [storageKey, layout]);
+  // A view revealed by its identity may render after the request; reveal it once it is shown.
+  const revealIndex = !reveal ? -1 : 'viewId' in reveal ? panes.findIndex(view => view.id === reveal.viewId) : reveal.index;
+  const revealShown = revealIndex >= 0;
   useEffect(() => {
-    if (compact || !active || !reveal) return;
-    const pane = container.current?.children[reveal.index];
+    if (compact || !active || !revealShown) return;
+    const pane = container.current?.children[revealIndex];
     let frame = requestAnimationFrame(() => { frame = requestAnimationFrame(() => {
       if (pane instanceof HTMLElement) pane.scrollIntoView({ block: 'nearest', inline: 'nearest', behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' });
     }); });
     return () => cancelAnimationFrame(frame);
-  }, [reveal, compact, active]);
+  }, [reveal, revealShown, compact, active]);
+  /** The pane of an attached view's own source; a local family is one chain. */
+  function parentIndex(index: number) {
+    const source = attached[index - 1]?.attachedTo;
+    const found = source ? panes.findIndex(view => view.id === source) : -1;
+    return found >= 0 ? found : index - 1;
+  }
   function focusPane(index: number) {
     if (shared && rootView) {
-      const view = [rootView, ...attached][index], window = shared.readWindow?.() ?? shared.window;
+      const view = panes[index], window = shared.readWindow?.() ?? shared.window;
       if (view && window.selectedViewId !== view.id) shared.operate({ type: 'view.select', viewId: view.id });
       return;
     }
@@ -138,13 +150,17 @@ export function SessionFamily(props: Props) {
   }
   function show(index: number) { if (shared && rootView) { focusPane(index); setReveal({ index }); return; } setLayout(current => ({ ...current, focus: index })); setReveal({ index }); }
   function close(index: number) {
-    if (shared && rootView) { const view = attached[index - 1]; if (view) shared.operate({ type: 'view.close', viewId: view.id }); setReveal({ index: index - 1 }); return; }
+    if (shared && rootView) { const view = attached[index - 1]; if (view) shared.operate({ type: 'view.close', viewId: view.id }); setReveal({ index: parentIndex(index) }); return; }
     setLayout(current => ({ children: current.children.slice(0, index - 1), focus: Math.min(current.focus, index - 1) }));
     setReveal({ index: index - 1 });
   }
   async function open(index: number, destination: SessionEntry | AgentChildSessionView, childrenFor: (id: string) => readonly AgentChildSessionView[], source: OpenedSession) {
     const parentIdentity = sessionKey(source);
-    const sourceCurrent = () => mounted.current && !!currentPath.current[index] && sessionKey(currentPath.current[index]!) === parentIdentity;
+    // A shared source is its pane, which keeps its identity while sibling panes open or close.
+    const sourceViewId = panes[index]?.id;
+    const sourceCurrent = () => mounted.current && (sourceViewId
+      ? currentPanes.current.some(view => view.id === sourceViewId && !!view.binding && sessionKey(view.binding) === parentIdentity)
+      : !!currentPath.current[index] && sessionKey(currentPath.current[index]!) === parentIdentity);
     if (!sourceCurrent()) throw new Error('The source session changed before its subagent could be opened.');
     if (('providerId' in destination && destination.providerId !== target.providerId)
       || ('hostId' in destination && (destination.hostId ?? 'local') !== target.hostId)) {
@@ -185,19 +201,26 @@ export function SessionFamily(props: Props) {
     if (!sourceCurrent()) throw new Error('The source session changed while its subagent was opening.');
     if (value.nativeSessionId && value.nativeSessionId !== destinationTarget.nativeSessionId) throw new Error('The Host returned a different child session.');
     setOpenedChildren(current => ({ ...current, [sessionKey(destinationTarget)]: { ...destinationTarget, agentId: value.agentId } }));
-    const children = [...path.slice(1, index + 1), ...descendants];
-    if (shared && rootView) {
+    if (shared && sourceViewId) {
+      // The source keeps the views it already shows; panes showing the start of the route are reused.
+      const window = shared.readWindow?.() ?? shared.window;
       const operations: import('@orchardworks/agent-remote-protocol').WindowEdit[] = [];
-      if (attached[index]) operations.push({ type: 'view.close', viewId: attached[index]!.id });
-      let parent = index === 0 ? rootView.id : attached[index - 1]!.id;
-      for (const binding of descendants) {
+      let parent = sourceViewId, remaining = descendants;
+      for (;;) {
+        const next = remaining[0];
+        const shown = next && window.views.find(view => view.attachedTo === parent && !!view.binding && sessionKey(view.binding) === sessionKey(next));
+        if (!shown) break;
+        parent = shown.id; remaining = remaining.slice(1);
+      }
+      for (const binding of remaining) {
         const id = `child-${crypto.randomUUID()}`;
         operations.push({ type: 'view.create', view: { id, binding, attachedTo: parent, placement: 'attached', width: 440, collapsed: false, display: { mode: 'content', lettersVisible: true } } });
         parent = id;
       }
       operations.push({ type: 'view.select', viewId: parent });
-      shared.operate({ type: 'batch', operations }); setReveal({ index: children.length }); return;
+      shared.operate({ type: 'batch', operations }); setReveal({ viewId: parent }); return;
     }
+    const children = [...path.slice(1, index + 1), ...descendants];
     setLayout({ children, focus: children.length }); setReveal({ index: children.length });
   }
   return <div className="lab-session-family" ref={container} data-compact={compact || undefined} hidden={!active} aria-label={`${target.title} session family`}>
@@ -205,11 +228,12 @@ export function SessionFamily(props: Props) {
       const paneView = index === 0 ? rootView : attached[index - 1];
       const selected = !!paneView && paneView.id === presentedViewId;
       const childSlot = index > 0 && attached[index - 1] ? sessionBridge?.slotForView(attached[index - 1]!.id) : undefined;
-      const controls = index === 0 ? props.controls : <button type="button" aria-label={compact ? `Back to ${path[index - 1]!.title}` : 'Close subagent'} title={compact ? 'Back to parent session' : 'Close subagent view'} onClick={() => compact ? show(index - 1) : close(index)}>{compact ? '←' : '×'}</button>;
-      return <section key={index === 0 ? "root" : sessionKey(item)} className={`lab-session-family-pane lab-session-pane-selection lab-session-composition${shared && rootView?.placement === 'primary' ? index === 0 ? ' lab-primary-conversation' : ' lab-side-conversation' : ''}`} aria-label={item.title} hidden={compact && focus !== index || index > 0 && attached[index - 1]?.collapsed}
+      const parent = index > 0 ? parentIndex(index) : 0;
+      const controls = index === 0 ? props.controls : <button type="button" aria-label={compact ? `Back to ${path[parent]!.title}` : 'Close subagent'} title={compact ? 'Back to parent session' : 'Close subagent view'} onClick={() => compact ? show(parent) : close(index)}>{compact ? '←' : '×'}</button>;
+      return <section key={index === 0 ? "root" : `${paneView?.id ?? ''}:${sessionKey(item)}`} className={`lab-session-family-pane lab-session-pane-selection lab-session-composition${shared && rootView?.placement === 'primary' ? index === 0 ? ' lab-primary-conversation' : ' lab-side-conversation' : ''}`} aria-label={item.title} hidden={compact && focus !== index || index > 0 && attached[index - 1]?.collapsed}
         data-view-id={paneView?.id} data-selected={selected || undefined} aria-current={selected ? 'true' : undefined}
         style={compact ? undefined : index === 0 ? rootView ? { width: rootView.placement === 'float' ? '100%' : rootView.width, minWidth: rootView.placement === 'float' ? 0 : 240,
-          flex: rootView.placement === 'float' ? 'none' : '0 0 var(--lab-session-family-root-width, auto)' } : undefined : { width: childWidth(item), minWidth: shared ? 240 : 320, flex: 'none' }}
+          flex: rootView.placement === 'float' ? 'none' : '0 0 var(--lab-session-family-root-width, auto)' } : undefined : { width: childWidth(item, index), minWidth: shared ? 240 : 320, flex: 'none' }}
         onPointerDownCapture={event => { if (!(event.target as Element).closest('[data-pane-selection-ignore],.lab-conversation-history,.lab-session-heading-actions-trigger,.lab-timeline-tools-toggle,.lab-session-main-minimize')) focusPane(index); }} onFocusCapture={event => { if (!(event.target as Element).closest('[data-pane-selection-ignore],.lab-conversation-history,.lab-session-heading-actions-trigger,.lab-timeline-tools-toggle,.lab-session-main-minimize')) focusPane(index); }}>
         {(visited || active || !compact) ? <SessionTitleInteractionContext.Provider value={index === 0 ? titleInteraction : undefined}><FamilySession {...props} familyRoot={index === 0} controls={controls} menuActions={index === 0 ? props.menuActions : undefined} target={item} entries={path}
           replica={index === 0 ? props.replica : undefined} onSessionReady={index === 0 ? props.onSessionReady : undefined}
@@ -222,7 +246,7 @@ export function SessionFamily(props: Props) {
           displayBinding={index > 0 && attached[index - 1] && props.displayBinding ? { ...props.displayBinding, key: attached[index - 1]!.id } : props.displayBinding}
           draftBinding={index === 0 ? props.draftBinding : childSlot ? { store: props.draftStore, key: childSlot.owners.text.key } : undefined} imageDraftBinding={index === 0 ? props.imageDraftBinding : childSlot?.owners.image}
           onNavigate={(destination, childrenFor, source) => open(index, destination, childrenFor, source)} /></SessionTitleInteractionContext.Provider> : null}
-        {!compact && index > 0 ? <DockResize title={item.title} width={childWidth(item)} onResize={width => { const view = attached[index - 1]; if (shared && view) shared.operate({ type: 'view.resize', viewId: view.id, width }); else setWidths(current => ({ ...current, [sessionKey(item)]: width })); }} /> : null}
+        {!compact && index > 0 ? <DockResize title={item.title} width={childWidth(item, index)} onResize={width => { const view = attached[index - 1]; if (shared && view) shared.operate({ type: 'view.resize', viewId: view.id, width }); else setWidths(current => ({ ...current, [sessionKey(item)]: width })); }} /> : null}
       </section>;
     })}
   </div>;

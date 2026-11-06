@@ -157,7 +157,7 @@ sessions; it does not rewind their execution or replay prior messages.
 Ask, Side, TPM, and Team remain business features that create or reference normal
 Session Views. Their presentation uses the same Window operations.
 
-- A Side/subagent stays attached immediately to its source view. The visible attachment is a selected descendant chain, with at most one directly attached child per source; opening a different child replaces that branch. Each source and
+- A Side/subagent stays attached immediately to its source view. A source keeps every attached view it opens: opening another child adds it after the source's existing attached views and their descendants, and opening one it already shows selects that view. Each source and
   its attached views form a layout group; moving a dock group preserves it.
 - Unlinking a Side removes its attachment relationship while keeping the same View
   as an independent dock. Its local session slot and drafts remain owned by that

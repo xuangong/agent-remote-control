@@ -12,7 +12,7 @@ Use a wide screen to work across several conversations, or open the same workspa
 
 [![Several Session Views arranged side by side, with Host and provider discovery in the sidebar.](docs/images/session-workspace.png)](docs/images/session-workspace.png)
 
-Keep an implementation conversation, a review, and another project's work open together. Each **Session View** has its own conversation, composer, runtime status, and display mode. On wide screens, resize panes and scroll the workspace horizontally; attached subagents stay beside their source view as a group.
+Keep an implementation conversation, a review, and another project's work open together. Each **Session View** has its own conversation, composer, runtime status, and display mode. On wide screens, resize panes and scroll the workspace horizontally; attached Sides and subagents stay beside their source view as a group, and opening another Side from the same source adds it beside the ones already open.
 
 Click a pane's title, conversation, or composer to select it. Choosing a session from the sidebar, Favorites, or Track, or creating a new session, replaces that pane's conversation. To keep the current conversation open, first use **Window → New session view** to add an empty pane and select its session afterward. Ask, Team, and TPM panes stay attached to their own conversations; use an ordinary or empty pane to open a different session.
 

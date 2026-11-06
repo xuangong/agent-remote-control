@@ -11,7 +11,8 @@ version supports multiple primary session groups plus independent docked and
 floating views. A primary View ID identifies its group; `attachedTo` ancestry
 determines its members. `closeWith` is a closure dependency, not membership.
 Rebinding a primary keeps the same Window and preserves independent docks.
-Attached Subagent views remain grouped with their source view.
+Attached Side and Subagent views remain grouped with their source view, and a
+source can hold several of them.
 
 The product restores an existing Window when opening or reopening the page.
 An explicit Window URL takes precedence. Otherwise it restores the page's last
@@ -152,6 +153,12 @@ screens, the foreground conversation is the selected view, with no additional
 selection control. The same shared selection and layout are used on every page.
 Opening a Side places it beside its source Pane even if another Pane already
 shows that Session. Reopening the same Side selects the existing attached Pane.
+A source keeps every Side it shows: opening another Side, a subagent, or the
+other end of a letter from it adds a Pane after its existing attached Panes,
+and a subagent reached through a Pane the source already shows opens beside that
+Pane. Closing one closes only it and the Panes attached to it. On narrow screens
+Back returns to the Pane's own source, and **Side path** lists every Pane of the
+family.
 If the source Pane closes or changes binding while opening, the delayed result
 cannot attach to its replacement.
 
@@ -197,6 +204,12 @@ can be upgraded before the service. Publish this compatible Controller before
 deploying version 3 website and Relay artifacts together. Reload open browser
 pages after deployment; an already running older page does not acquire the new
 decoder automatically. Existing Host daemons may continue serving native sessions.
+
+A source can hold several attached views. Browser assets, Window CLIs, and
+Relay builds that predate this rule reject a Window in which one source holds
+more than one, so reload open pages after deployment and upgrade the Window CLI.
+A Relay rollback below it cannot load state once such a Window exists; fix
+forward instead.
 
 Version 3 permits `views: []` and requires explicit `null` values for both
 selection fields in an empty Window. A nonempty Window always has a valid

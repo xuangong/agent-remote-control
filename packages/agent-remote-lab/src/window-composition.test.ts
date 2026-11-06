@@ -54,6 +54,23 @@ it('projects remote primary families without changing the Window and drops close
   projectWindowComposition(doc, { ...window, views: [window.views[0]!, window.views[2]!], selectedViewId: 'dock' });
   expect(doc.edges).toEqual([]); expect(doc.focus).toBe(doc.primary);
 });
+it('selects the edge of each source that leads toward the selected view among several attached views', () => {
+  const doc = createCompositionDocument('scope');
+  const window: WorkspaceWindow = { schemaVersion: 3, id: 'w', revision: 1, title: 'Project', selectedPrimaryViewId: 'main', selectedViewId: 'first',
+    views: [createWindowView('main', binding, 'primary'),
+      { ...createWindowView('first', { ...binding, nativeSessionId: 'first' }, 'attached'), attachedTo: 'main' },
+      { ...createWindowView('nested', { ...binding, nativeSessionId: 'nested' }, 'attached'), attachedTo: 'first' },
+      { ...createWindowView('second', { ...binding, nativeSessionId: 'second' }, 'attached'), attachedTo: 'main' }] };
+  const selected = (projected: WorkspaceWindow) => {
+    projectWindowComposition(doc, projected);
+    const ids = new Map(doc.slots.map(slot => [slot.id, slot.intent.target.native.nativeSessionId]));
+    return doc.edges.map(edge => [ids.get(edge.source), ids.get(edge.target), edge.selected]);
+  };
+  expect(selected(window)).toEqual([['s1', 'first', true], ['first', 'nested', true], ['s1', 'second', false]]);
+  expect(selected({ ...window, selectedViewId: 'second' })).toEqual([['s1', 'first', false], ['first', 'nested', true], ['s1', 'second', true]]);
+  expect(selected({ ...window, selectedViewId: 'main' })).toEqual([['s1', 'first', false], ['first', 'nested', true], ['s1', 'second', true]]);
+  expect(doc.focus).toBe(doc.primary);
+});
 it('does not alias colon-containing Window and View identity tuples', () => {
   const doc = createCompositionDocument('scope');
   const a = ensureWindowCompositionSlot(doc, 'w:a', 'b', binding);

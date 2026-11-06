@@ -205,6 +205,8 @@ The shared renderer consumes optional `CommunicationNavigationContext` actions; 
 
 ## Side conversation windows
 
+In a Window, a source keeps every Side it shows. Opening another Side from it adds a pane after the Sides already open there instead of replacing them, opening one that is already open selects it, and closing one keeps the others. Each open Side is marked in its source's list.
+
 Clicking a native subagent on desktop also opens it beside its direct parent using the same window stack. Compact layouts retain native child navigation within one visible conversation. Each Lab conversation lists its own direct sides above the composer. Fork source references also sit above the composer, keeping empty primary and side input boxes the same height; opening reference details does not resize the input box. `/side` can create multiple siblings, and each side supports the same command. Selecting a side expands that direct child beside its source on desktop. Remembered descendants remain in the right rail until explicitly expanded; choosing a route does not jump to its deepest window. Compact layouts retain their single expanded window. There is no separate tree-management surface. Initial questions distinguish sibling labels, and the selected side is marked in its parent's list.
 
 Desktop layouts expand the latest two windows; compact layouts expand one. Earlier windows collapse into bounded, scrollable rails on the left. Expanding an ancestor shifts the expanded range while retaining later windows in a right rail. Closing a side hides its incoming selection and returns to its parent. Its descendants, native work and saved fork reference remain available.

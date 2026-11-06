@@ -269,7 +269,7 @@ describe('Agent Host runtime', () => {
       uplink: { url: first.url, remoteKey: 'first-key' } });
     try {
       await host.ready;
-      expect(first.advertisedProviders()).toEqual([{ providerId: 'codex', displayName: 'CODEX' }, { providerId: 'claude', displayName: 'CLAUDE' }, { providerId: 'copilot', displayName: 'COPILOT' }]);
+      expect(first.advertisedProviders()).toEqual([{ providerId: 'codex', displayName: 'CODEX', sessionCommands: true }, { providerId: 'claude', displayName: 'CLAUDE', sessionCommands: true }, { providerId: 'copilot', displayName: 'COPILOT', sessionCommands: true }]);
       for (const providerId of ['codex', 'claude', 'copilot']) {
         const catalog = await first.rpc('GET', `/remote/catalog?providerId=${providerId}`);
         expect(JSON.parse(catalog.body).items).toEqual([summary(providerId, 'shared-native')]);
@@ -1746,7 +1746,7 @@ it('keeps daemon restart jobs alive across uplink replacement and reports the sa
     codexDaemon: { stateDir, restart: async () => { calls++; await new Promise<void>(resolve => { finish = resolve; }); } } });
   try {
     await host.ready;
-    expect(broker.advertisedProviders()).toEqual([{ providerId: 'codex', displayName: 'CODEX', daemonControl: true }]);
+    expect(broker.advertisedProviders()).toEqual([{ providerId: 'codex', displayName: 'CODEX', daemonControl: true, sessionCommands: true }]);
     const initial = await broker.rpc('GET', '/remote/codex-daemon');
     expect(initial.status).toBe(200);
     const input = { operationId: operationId('daemon-restart'), revision: JSON.parse(initial.body).revision };

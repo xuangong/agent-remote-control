@@ -6,7 +6,9 @@ import { DirectoryError, SessionDirectoryClient } from './directory-client.js';
 
 /** A session another session references, as its Host reports it. */
 export interface LabSessionRef { providerId: string; nativeSessionId: string; title?: string; origin: 'source' | 'added'; addedAt?: string }
-export interface LabSessionRefs { revision: number; refs: LabSessionRef[] }
+/** A session that references this one: a Side opened from it (source) or one that added it. */
+export interface LabSessionReferrer { providerId: string; nativeSessionId: string; title?: string; origin: 'source' | 'added' }
+export interface LabSessionRefs { revision: number; refs: LabSessionRef[]; referencedBy?: LabSessionReferrer[] }
 /** The session whose references are read or changed. */
 export interface SessionRefHolder { hostId?: string; providerId: string; nativeSessionId: string }
 

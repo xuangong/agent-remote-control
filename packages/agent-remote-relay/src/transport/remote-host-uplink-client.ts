@@ -59,7 +59,7 @@ export interface RemoteHostUplinkClientOptions {
    * They travel in the connection's query, which older Relays ignore, never in the provider descriptors they validate strictly.
    */
   readonly readOnlyProviders?: readonly string[];
-  readonly providers?: readonly { providerId: string; displayName: string; promptEditing?: true; sessionRename?: true; sessionReferences?: true; daemonControl?: true }[];
+  readonly providers?: readonly { providerId: string; displayName: string; promptEditing?: true; sessionRename?: true; sessionReferences?: true; referenceNotes?: true; sessionCommands?: true; daemonControl?: true }[];
   readonly providerChanges?: { current(): NonNullable<RemoteHostUplinkClientOptions['providers']>; subscribe(listener: () => void): () => void };
   readonly remoteKey: string;
   /** Must durably persist the offered credential before resolving. */

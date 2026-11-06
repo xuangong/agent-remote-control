@@ -175,3 +175,15 @@ export function splitSessionReferences(text: string): { text: string; note?: Ses
   if (!Value.Check(SessionReferencePayload, payload)) return { text };
   return { text: text.slice(0, match.index), note: { revision: Number(match[1]), references: (payload as { references: SessionReferenceRow[] }).references } };
 }
+/** Adds a reference note to a message the way a page does: after the user's text, before any excerpts it carries. */
+export function withSessionReferenceNote(text: string, note: SessionReferenceNote): string {
+  const quoted = splitSessionExcerpts(text);
+  return quoted.excerpts.length ? appendSessionExcerpts(appendSessionReferences(quoted.text, note), quoted.excerpts) : appendSessionReferences(text, note);
+}
+/** The message without its reference note, excerpts kept; what its sender wrote when a Host added the note. */
+export function withoutSessionReferenceNote(text: string): string {
+  const quoted = splitSessionExcerpts(text);
+  if (!quoted.excerpts.length) return splitSessionReferences(text).text;
+  const split = splitSessionReferences(quoted.text);
+  return split.note ? appendSessionExcerpts(split.text, quoted.excerpts) : text;
+}

@@ -86,7 +86,7 @@ async function main(): Promise<void> {
   else if (command === 'autostart') await autostart(args[1] ?? 'status');
   else if (command === 'pair') await pair();
   else if (command === 'share') await share();
-  else if (command === 'session') process.exitCode = await runSessionCommand(args.slice(1), process.env, text => { process.stdout.write(text); });
+  else if (command === 'session') process.exitCode = await runSessionCommand(args.slice(1), process.env, text => { process.stdout.write(text); }, managementAccess);
   else throw new Error(`Unknown command: ${command}. Run agent-remote-controller --help.`);
 }
 
@@ -233,8 +233,8 @@ async function serveConfigured(daemon: boolean, diagnosticLog: DiagnosticLog | u
   });
   await new Promise<void>((resolve, reject) => { management.once('error', reject); management.listen(socket, resolve); });
   if (process.platform !== 'win32') await chmod(socket, 0o600);
-  const sessionCalls = sessionCallers ? await listenSessionCalls(sessionCallers.endpoint.listen, input => handleSessionCall(input, { store: sessionCallers.store,
-    catalog: host.sessionCatalog, ...(host.sessionRefs ? { refs: host.sessionRefs } : {}), hostId: async () => (await host.shareContext().catch(() => undefined))?.hostId })).catch(error => {
+  const sessionCalls = sessionCallers ? await listenSessionCalls(sessionCallers.endpoint.listen, input => handleSessionCall(input, sessionCallers.store,
+    ({ scope, ...request }, caller) => host.command(typeof scope === 'string' ? scope : 'session', request, caller))).catch(error => {
     writeDiagnostic(JSON.stringify({ event: 'session_calls_unavailable', message: error instanceof Error ? error.message.slice(0, 200) : 'unknown', timestamp: new Date().toISOString() }), diagnosticSecrets);
     return undefined;
   }) : undefined;
@@ -326,6 +326,8 @@ async function handleManagement(input: string, token: string, host: AgentHost, c
     const request = JSON.parse(input) as { token?: string; action?: string; server?: string; key?: string; hostId?: string; providerId?: string; nativeSessionId?: string; cursor?: string; serverUrl?: string; version?: string; operationId?: string; clean?: boolean };
     if (request.token !== token) throw new Error('Unauthorized local management request.');
     if (request.action === 'status') connection.end(JSON.stringify({ running: true, uplink: host.state }));
+    // The local user is the Host owner: resource commands from an ordinary terminal.
+    else if (request.action === 'session' || request.action === 'group' || request.action === 'host') connection.end(JSON.stringify(await host.command(request.action, (request as { request?: unknown }).request, { kind: 'owner' })));
     else if (request.action === 'controller-info') connection.end(JSON.stringify({ ...await host.controllerInfo(), cleanInstall: process.env.AGENT_HOST_CLEAN_INSTALL === '1' }));
     else if (request.action === 'controller-update') {
       if (typeof request.version !== 'string' || typeof request.operationId !== 'string' || (request.clean !== undefined && typeof request.clean !== 'boolean')) throw new Error('Invalid Controller update request.');
@@ -576,6 +578,11 @@ async function request(state: DaemonState, payload: Record<string, unknown>): Pr
   });
 }
 async function requiredState(): Promise<DaemonState> { const state = await readState(); if (!state || !processAlive(state.pid)) throw new Error('Agent Host daemon is not running.'); return state; }
+/** The running Controller's management socket, for resource commands from an ordinary terminal. */
+async function managementAccess(): Promise<{ socket: string; token: string } | undefined> {
+  const state = await readState();
+  return state && processAlive(state.pid) ? { socket: state.socket, token: state.token } : undefined;
+}
 async function readState(): Promise<DaemonState | undefined> { try { return JSON.parse(await readFile(stateFile, 'utf8')) as DaemonState; } catch { return undefined; } }
 function processAlive(pid: number): boolean { try { process.kill(pid, 0); return true; } catch { return false; } }
 export async function authenticateSavedDaemon(state: DaemonState, call: typeof request = request): Promise<boolean> {

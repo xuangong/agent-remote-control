@@ -1,6 +1,6 @@
 import { useEffect, useId, useMemo, useRef, useState, type ReactNode } from 'react';
 import { SessionDirectoryClient, type SessionSummary } from '../directory-client.js';
-import { changeSessionRef, useSessionRefs, type LabSessionRef, type SessionRefHolder } from '../session-references.js';
+import { changeSessionRef, useSessionRefs, type LabSessionRef, type LabSessionReferrer, type SessionRefHolder } from '../session-references.js';
 import { ForkIcon } from './ForkReference.js';
 
 /** The `/ref` command: picks a session of the same Host for this session to reference. */
@@ -14,10 +14,12 @@ const title = (ref: Pick<LabSessionRef, 'title'>) => ref.title || 'Untitled sess
  * references show the fallback, the source as it was shown before. snapshot: the context a fork copied, which is not a
  * reference and stays shown beside them.
  */
-export function SessionReferences({ scope, holder, providers, fallback, snapshot, picking, onPickingChange, onOpen, onRemoved, onRestore }: {
+export function SessionReferences({ scope, holder, providers, fallback, snapshot, shown, picking, onPickingChange, onOpen, onRemoved, onRestore }: {
   scope: string; holder: SessionRefHolder; providers: readonly string[]; fallback?: ReactNode; snapshot?: ReactNode;
+  /** Sessions the page already lists beside this one, such as its Sides, as provider/native keys. */
+  shown?: ReadonlySet<string>;
   picking: boolean; onPickingChange(picking: boolean): void;
-  onOpen(ref: LabSessionRef): void;
+  onOpen(ref: Pick<LabSessionRef, 'providerId' | 'nativeSessionId' | 'title'>): void;
   /** After the Host removed a reference; restore() adds it back. */
   onRemoved?(ref: LabSessionRef, restore: () => Promise<void>): void | Promise<void>;
   onRestore?(ref: LabSessionRef): void | Promise<void>;
@@ -26,8 +28,9 @@ export function SessionReferences({ scope, holder, providers, fallback, snapshot
   const [pending, setPending] = useState<string>();
   const [error, setError] = useState<string>();
   if (entry.unsupported || !entry.value) return entry.unsupported || !picking ? <>{fallback}</> : null;
-  const refs = entry.value.refs;
-  if (!refs.length && !picking) return <>{snapshot}</>;
+  const refs = entry.value.refs, referrers = (entry.value.referencedBy ?? []).filter(ref => !shown?.has(`${ref.providerId}/${ref.nativeSessionId}`));
+  const referencedBy = referrers.length ? <ReferencedBy referrers={referrers} onOpen={onOpen} /> : null;
+  if (!refs.length && !picking) return <>{snapshot}{referencedBy}</>;
   const change = async (action: 'add' | 'remove', ref: Pick<LabSessionRef, 'providerId' | 'nativeSessionId'>, label: string) => {
     if (pending) return;
     setPending(label); setError(undefined);
@@ -53,7 +56,20 @@ export function SessionReferences({ scope, holder, providers, fallback, snapshot
     {picking ? <SessionRefPicker scope={scope} holder={holder} providers={providers} existing={refs} busy={!!pending}
       onCancel={() => onPickingChange(false)} onPick={session => void change('add', session, `add:${session.providerId}/${session.nativeSessionId}`).then(added => { if (added) onPickingChange(false); })} /> : null}
     {error ? <p className="lab-fork-action-error" role="alert">{error}</p> : null}
-  </div></>;
+  </div>{referencedBy}</>;
+}
+
+/** The sessions that reference this one; Sides opened from it first. */
+function ReferencedBy({ referrers, onOpen }: { referrers: readonly LabSessionReferrer[]; onOpen(ref: LabSessionReferrer): void }) {
+  const ordered = [...referrers].sort((left, right) => Number(right.origin === 'source') - Number(left.origin === 'source'));
+  return <div className="lab-session-refs lab-session-referrers" aria-label="Referenced by">
+    <span className="lab-session-referrers-label">Referenced by</span>
+    {ordered.map(ref => <button type="button" key={`${ref.providerId}/${ref.nativeSessionId}`} className="lab-session-ref lab-session-ref-open agent-skill-tag"
+      data-origin={ref.origin} title={`${ref.origin === 'source' ? 'Opened from this session' : 'References this session'}: ${title(ref)}`} onClick={() => onOpen(ref)}>
+      <span className="lab-session-ref-symbol" aria-hidden="true">{ref.origin === 'source' ? '↳' : '@'}</span>
+      <span className="lab-session-ref-title">{title(ref)}</span>
+    </button>)}
+  </div>;
 }
 
 /** The Host's recent sessions, filtered by title, to reference from this one. */

@@ -5,7 +5,7 @@ import { useState } from 'react';
 import { PairingKeys } from './PairingKeys.js';
 import { HostSecurityActions } from './HostSecurityActions.js';
 
-export interface HostProvider { providerId: string; displayName: string; daemonControl?: true; sessionRename?: true; sessionReferences?: true }
+export interface HostProvider { providerId: string; displayName: string; daemonControl?: true; sessionRename?: true; sessionReferences?: true; referenceNotes?: true; sessionCommands?: true }
 export interface RemoteHost {
   id: string; name: string; online: boolean; managed?: boolean; providers?: HostProvider[]; providerId?: string;
   controller?: ControllerIdentity;

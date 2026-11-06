@@ -1557,6 +1557,9 @@ html[data-input-modality="pointer"] :focus { outline: none !important; }
 .lab-session-ref .lab-session-ref-open { max-width: 280px; }
 .lab-session-ref .lab-session-ref-remove { padding-inline: 8px; border-left: 1px solid var(--obs-border); color: var(--obs-text-secondary); }
 .lab-session-ref-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.lab-session-referrers { gap: 4px; }
+.lab-session-referrers-label { color: var(--obs-text-secondary); font-size: 12px; }
+.lab-session-referrers .lab-session-ref-open { gap: 6px; min-height: 30px; max-width: 280px; padding: 3px 6px 3px 5px; border-radius: 0; color: var(--obs-text); }
 .lab-session-ref-symbol { display: inline-grid; place-items: center; width: 24px; height: 24px; flex-shrink: 0; font-size: 14px; }
 .lab-session-ref-add { min-width: 30px; min-height: 30px; padding: 0 8px; border: 1px dashed var(--obs-control-border); border-radius: 6px; background: transparent; color: var(--obs-text-secondary); }
 .lab-session-ref-add:hover, .lab-session-ref-add[aria-expanded="true"] { color: var(--obs-action); background: var(--obs-surface-selected); }

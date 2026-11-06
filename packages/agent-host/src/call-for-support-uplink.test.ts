@@ -31,6 +31,6 @@ it('names read-only providers with the Call For Support request and keeps them o
   const { url, register } = await connected;
   expect(url.searchParams.get('callForSupport')).toBe('1');
   expect(url.searchParams.getAll('readOnlyProvider')).toEqual(['codex']);
-  // Relays before Call For Support validate provider descriptors strictly, so they carry no new field.
-  expect(register.providers).toEqual([{ providerId: 'codex', displayName: 'codex' }, { providerId: 'opencode', displayName: 'opencode' }]);
+  // Read-only providers are named in the request, not in the provider descriptors.
+  expect(register.providers).toEqual([{ providerId: 'codex', displayName: 'codex', sessionCommands: true }, { providerId: 'opencode', displayName: 'opencode', sessionCommands: true }]);
 });

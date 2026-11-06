@@ -4,9 +4,10 @@ import { createServer, type Server, type Socket } from 'node:net';
 import { tmpdir } from 'node:os';
 import { basename, dirname, join } from 'node:path';
 import { atomicWriteFile } from '@orchardworks/agent-platform';
-import type { AgentHistoryPage, AgentHistoryQuery, AgentSessionHostAccess } from '@orchardworks/agent-provider-sdk';
-import type { RemoteSessionSummary } from '@orchardworks/agent-remote-relay';
-import { changeSessionRef, describeSessionRefs, SessionRefError, type SessionRefContext, type SessionRefs } from './session-refs.js';
+import type { AgentSessionHostAccess } from '@orchardworks/agent-provider-sdk';
+import { refKey, type SessionCaller, type SessionCallerRef, type SessionCallResult } from './session-routes.js';
+
+export type { SessionCallerCatalog, SessionCallerRef, SessionCallerState } from './session-routes.js';
 
 /** The variables through which a session's shell commands reach this Controller as that session. */
 export const SESSION_TOKEN_VARIABLE = 'AGENT_REMOTE_SESSION_TOKEN';
@@ -17,8 +18,6 @@ const TOKEN_LIMIT = 4096;
 const SHARED_LIMIT = 16_384;
 const REQUEST_BYTES = 64 * 1024;
 
-export interface SessionCallerRef { providerId: string; nativeSessionId: string }
-const refKey = (ref: SessionCallerRef) => JSON.stringify([ref.providerId, ref.nativeSessionId]);
 const digest = (token: string) => createHash('sha256').update(token).digest('hex');
 
 interface SavedCallers { version: 1; sessions: Array<SessionCallerRef & { token: string }>; shared: SessionCallerRef[] }
@@ -164,148 +163,14 @@ export function sessionHostAccess(store: SessionCallerStore, providerId: string,
   };
 }
 
-export type SessionCallerState = 'running' | 'waiting' | 'idle' | 'failed' | 'unknown';
-/** The Host's sessions as the session commands see them. */
-export interface SessionCallerCatalog {
-  /** The Host's enabled providers. */
-  providers(): readonly string[];
-  /** The sessions a provider's catalog lists, which follows the Host's workspace policy. */
-  sessions(providerId: string): Promise<readonly RemoteSessionSummary[]>;
-  session(ref: SessionCallerRef): Promise<RemoteSessionSummary | undefined>;
-  history(ref: SessionCallerRef, query: AgentHistoryQuery): Promise<AgentHistoryPage>;
-  /** The state of a session this Controller holds open. */
-  liveState(ref: SessionCallerRef): SessionCallerState | undefined;
-}
-
-export class SessionCallError extends Error {
-  constructor(readonly code: 'invalid_request' | 'no_session_identity' | 'session_forbidden' | 'session_not_found' | 'history_unavailable' | 'unsupported_configuration', message: string) { super(message); }
-}
-
-const LIST_LIMIT = 50;
-const HISTORY_LIMIT = 10;
-
 /** Answers one session command from a session's shell. The caller is the session its credential names. */
-export async function handleSessionCall(input: unknown, context: { store: SessionCallerStore; catalog: SessionCallerCatalog; refs?: SessionRefContext; hostId(): Promise<string | undefined> }): Promise<Record<string, unknown>> {
-  try {
-    if (!input || typeof input !== 'object' || Array.isArray(input)) throw new SessionCallError('invalid_request', 'The session command is invalid.');
-    const request = input as Record<string, unknown>;
-    await context.store.ready;
-    const caller = context.store.identify(request.token);
-    if (!caller || context.store.isShared(caller)) throw new SessionCallError('no_session_identity', 'This shell does not belong to a session this Controller manages.');
-    // Until the Relay registers the Host, its sessions are addressed as local.
-    const host = await context.hostId() ?? 'local';
-    const address = (ref: SessionCallerRef) => `${host}/${ref.providerId}/${ref.nativeSessionId}`;
-    const self = (ref: SessionCallerRef) => refKey(ref) === refKey(caller) ? { self: true } : {};
-    const state = (ref: SessionCallerRef, summary?: RemoteSessionSummary): SessionCallerState => context.catalog.liveState(ref)
-      ?? (summary?.state === 'unavailable' ? 'failed' : summary?.state ?? 'unknown');
-    const described = (refs: SessionRefs) => refs.refs.map(ref => ({ address: address(ref), providerId: ref.providerId, ...(ref.title ? { title: ref.title } : {}),
-      origin: ref.origin, ...(ref.addedAt ? { addedAt: ref.addedAt } : {}) }));
-    /** A session's references, like its title, belong to its description; a Host that cannot tell lists none. */
-    const refsOf = async (ref: SessionCallerRef) => context.refs ? described(await describeSessionRefs(ref, context.refs).catch(() => ({ revision: 0, refs: [] }))) : [];
-    if (request.command === 'list') {
-      const providerId = optionalString(request.providerId, 'providerId', 64);
-      const limit = optionalInteger(request.limit, 'limit', 1, LIST_LIMIT) ?? 20;
-      let offset = 0;
-      if (request.cursor !== undefined) {
-        const cursor = decodeCursor(request.cursor);
-        if (cursor.limit !== limit || cursor.providerId !== (providerId ?? null)) throw new SessionCallError('invalid_request', 'The cursor belongs to another listing.');
-        offset = cursor.offset;
-      }
-      const providers = context.catalog.providers();
-      if (providerId !== undefined && !providers.includes(providerId)) throw new SessionCallError('invalid_request', 'The provider is unavailable on this Host.');
-      const unavailable: string[] = [];
-      const listed = await Promise.all((providerId === undefined ? providers : [providerId]).map(id => context.catalog.sessions(id)
-        .catch(() => { unavailable.push(id); return []; })));
-      const summaries = listed.flat().filter(summary => !context.store.isShared(summary))
-        .sort((left, right) => Date.parse(right.updatedAt) - Date.parse(left.updatedAt) || refKey(left).localeCompare(refKey(right)));
-      const page = summaries.slice(offset, offset + limit);
-      const pageRefs = await Promise.all(page.map(summary => refsOf(summary)));
-      return { result: {
-        sessions: page.map((summary, index) => ({ address: address(summary), providerId: summary.providerId, title: summary.title,
-          ...(summary.workspace ? { cwd: summary.workspace } : {}), updatedAt: summary.updatedAt, state: state(summary, summary), ...self(summary),
-          ...(pageRefs[index]!.length ? { refs: pageRefs[index] } : {}) })),
-        ...(offset + limit < summaries.length ? { nextCursor: encodeCursor({ offset: offset + limit, limit, providerId: providerId ?? null }) } : {}),
-        ...(unavailable.length ? { unavailableProviders: unavailable.sort() } : {}),
-      } };
-    }
-    if (request.command === 'ref') {
-      if (!context.refs) throw new SessionCallError('unsupported_configuration', 'Session references are unavailable on this Controller.');
-      if (request.action === 'list') return { result: { refs: described(await describeSessionRefs(caller, context.refs)) } };
-      if (request.action !== 'add' && request.action !== 'remove') throw new SessionCallError('invalid_request', 'Use session ref list, add or remove.');
-      const target = parseTarget(request.target, caller, host);
-      if (request.action === 'add' && context.store.isShared(target)) throw new SessionCallError('session_not_found', 'No such session on this Host.');
-      try { return { result: { refs: described(await changeSessionRef(caller, request.action, target, context.refs)) } }; }
-      catch (error) {
-        if (error instanceof SessionRefError) throw new SessionCallError(error.code, error.message);
-        throw error;
-      }
-    }
-    if (request.command === 'read') {
-      const target = parseTarget(request.target, caller, host);
-      if (context.store.isShared(target)) throw new SessionCallError('session_not_found', 'No such session on this Host.');
-      const query = historyQuery(request);
-      const summary = await context.catalog.session(target);
-      if (!summary && refKey(target) !== refKey(caller)) throw new SessionCallError('session_not_found', 'No such session on this Host.');
-      let page: AgentHistoryPage;
-      try { page = await context.catalog.history(target, query); }
-      catch (error) {
-        if ((error as { code?: unknown }).code === 'native_session_unavailable') throw new SessionCallError('session_not_found', 'No such session on this Host.');
-        throw new SessionCallError('history_unavailable', 'The session history could not be read.');
-      }
-      const refs = await refsOf(target);
-      return { result: {
-        session: { address: address(target), providerId: target.providerId, ...(summary ? { title: summary.title } : {}),
-          ...(summary?.workspace ? { cwd: summary.workspace } : {}), ...(summary?.model ? { model: summary.model } : {}), state: state(target, summary), ...self(target),
-          ...(refs.length ? { refs } : {}) },
-        entries: page.entries, ...(page.nextCursor ? { nextCursor: page.nextCursor } : {}),
-      } };
-    }
-    throw new SessionCallError('invalid_request', 'Unknown session command.');
-  } catch (error) {
-    if (error instanceof SessionCallError) return { error: { code: error.code, message: error.message } };
-    return { error: { code: 'history_unavailable', message: 'The Controller could not answer the session command.' } };
-  }
-}
-
-function parseTarget(value: unknown, caller: SessionCallerRef, host: string): SessionCallerRef {
-  if (value === 'self') return caller;
-  if (typeof value !== 'string' || value.length > 1024) throw new SessionCallError('invalid_request', 'Name a session as self or <hostId>/<providerId>/<nativeSessionId>.');
-  const [hostId, providerId, ...rest] = value.split('/');
-  const nativeSessionId = rest.join('/');
-  if (!hostId || !providerId || !nativeSessionId) throw new SessionCallError('invalid_request', 'Name a session as self or <hostId>/<providerId>/<nativeSessionId>.');
-  if (hostId !== host && hostId !== 'local') throw new SessionCallError('session_forbidden', 'Only sessions on this Host can be read.');
-  return { providerId, nativeSessionId };
-}
-
-function historyQuery(request: Record<string, unknown>): AgentHistoryQuery {
-  const query = optionalString(request.search, 'search', 200), turnId = optionalString(request.turnId, 'turnId', 4096);
-  if (query !== undefined && turnId !== undefined) throw new SessionCallError('invalid_request', 'A search and a turn cannot be combined.');
-  const cursor = optionalString(request.cursor, 'cursor', 16_384), limit = optionalInteger(request.limit, 'limit', 1, HISTORY_LIMIT);
-  const textOffset = optionalInteger(request.textOffset, 'textOffset', 0, Number.MAX_SAFE_INTEGER);
-  return { ...(cursor !== undefined ? { cursor } : {}), ...(query !== undefined ? { query } : {}), ...(turnId !== undefined ? { turnId } : {}),
-    ...(limit !== undefined ? { limit } : {}), ...(textOffset !== undefined ? { textOffset } : {}) };
-}
-
-function optionalString(value: unknown, field: string, maximum: number): string | undefined {
-  if (value === undefined) return undefined;
-  if (typeof value !== 'string' || !value || value.length > maximum) throw new SessionCallError('invalid_request', `Invalid ${field}.`);
-  return value;
-}
-function optionalInteger(value: unknown, field: string, minimum: number, maximum: number): number | undefined {
-  if (value === undefined) return undefined;
-  if (!Number.isSafeInteger(value) || (value as number) < minimum || (value as number) > maximum) throw new SessionCallError('invalid_request', `${field} must be an integer from ${minimum} to ${maximum}.`);
-  return value as number;
-}
-function encodeCursor(cursor: { offset: number; limit: number; providerId: string | null }): string {
-  return Buffer.from(JSON.stringify(cursor)).toString('base64url');
-}
-function decodeCursor(value: unknown): { offset: number; limit: number; providerId: string | null } {
-  try {
-    const cursor = JSON.parse(Buffer.from(optionalString(value, 'cursor', 512)!, 'base64url').toString('utf8')) as { offset?: unknown; limit?: unknown; providerId?: unknown };
-    if (Number.isSafeInteger(cursor.offset) && (cursor.offset as number) >= 0 && Number.isSafeInteger(cursor.limit)
-      && (cursor.providerId === null || typeof cursor.providerId === 'string')) return cursor as { offset: number; limit: number; providerId: string | null };
-  } catch { /* Reported below. */ }
-  throw new SessionCallError('invalid_request', 'Invalid cursor.');
+export async function handleSessionCall(input: unknown, store: SessionCallerStore, call: (request: Record<string, unknown>, caller: SessionCaller) => Promise<SessionCallResult>): Promise<SessionCallResult> {
+  if (!input || typeof input !== 'object' || Array.isArray(input)) return { error: { code: 'invalid_request', message: 'The session command is invalid.' } };
+  await store.ready;
+  const { token, ...request } = input as Record<string, unknown>;
+  const caller = store.identify(token);
+  if (!caller || store.isShared(caller)) return { error: { code: 'no_session_identity', message: 'This shell does not belong to a session this Controller manages.' } };
+  return call(request, { kind: 'session', ref: caller });
 }
 
 /** Serves session commands, one JSON request per connection, on a socket separate from local management. */

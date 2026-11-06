@@ -49,7 +49,7 @@ function widestRecoveryHost(hostId: string, installationId: string): number {
   const environment = { detectedAt: null, os: { platform: label, name: label, arch: label, release: label }, wsl: false, container: false,
     shell: { name: label, source: 'environment' }, shells: Array(16).fill(tool), browsers: Array(16).fill(tool), vscode: { status: 'not-found' } };
   const controller = { version: '999999999.999999999.999999999', revision: 'f'.repeat(40), platform: widest(32), arch: widest(32), nodeMajor: 100, remoteUpdate: false };
-  const provider = { providerId: widest(512), displayName: widest(512), promptEditing: true, sessionRename: true, sessionReferences: true, daemonControl: true };
+  const provider = { providerId: widest(512), displayName: widest(512), promptEditing: true, sessionRename: true, sessionReferences: true, referenceNotes: true, sessionCommands: true, daemonControl: true };
   // HostEnvironment.detectedAt accepts non-safe finite integers. JSON numbers need up to 24 bytes.
   return sum(bytes({ id: hostId, installationId, name: widest(512), environment, controller, providers: Array(64).fill(provider),
     legacyDsh: false, pairingPurpose: 'host-only', credentialRotation: true, providerManagement: true, tpmManagement: true, teamManagement: true }) - 4, 24);

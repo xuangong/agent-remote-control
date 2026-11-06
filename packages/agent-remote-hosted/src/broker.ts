@@ -38,7 +38,7 @@ import { isSuccessionCapacityError, remainingAssociationRevisions, SUCCESSION_FE
 
 type SharedCreation = { subject: string; operationId: string; fingerprint: string; reservation: ReturnType<HostSharing['reserve']> };
 type RpcResponse = { status: number; body: string; requestId?: string };
-type ProviderDescriptor = { providerId: string; displayName: string; promptEditing?: true; sessionRename?: true; sessionReferences?: true; daemonControl?: true };
+type ProviderDescriptor = { providerId: string; displayName: string; promptEditing?: true; sessionRename?: true; sessionReferences?: true; referenceNotes?: true; sessionCommands?: true; daemonControl?: true };
 type DeviceCredential = { recovery?: HostRecoverySelection; pairingId?: string; purpose?: PairingPurpose; claimedAt?: number; expires: number; installationId?: string; kind?: 'device'; requiresRotation?: boolean };
 /** A Host's latest session states, kept in memory while it is connected. changedAt: when the state last changed. */
 type HostStates = { confirmedAt?: number; states: Map<string, HostSessionState & { changedAt: number }> };

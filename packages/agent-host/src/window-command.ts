@@ -3,6 +3,8 @@ import { readFile, stat } from 'node:fs/promises';
 import { createWindowView, decodeWorkspaceWindow, isWindowOperation, isWindowOperationResult, isWindowSessionBinding,
   type WindowOperation, type WindowSessionBinding, type WorkspaceWindow } from '@orchardworks/agent-remote-protocol';
 
+import { CliError, printError } from './cli-output.js';
+
 class CommandError extends Error {
   constructor(readonly code: string, message: string) { super(message); }
 }
@@ -23,8 +25,8 @@ const help = `Usage: agent-remote-controller window <command> [--grant-file PATH
   view geometry <window-id> <view-id> --geometry JSON
 Mutations: [--base-revision N] [--operation-id ID --issued-at EPOCH_MS]
 Credentials: private grant file or AGENT_WINDOW_SERVER, AGENT_WINDOW_ID, AGENT_WINDOW_TOKEN.
-Timeout: --timeout-ms 100..60000 (default 15000). Output is JSON. Exit 0 committed,
-1 input/transport error, 2 rejected, 3 uncertain mutation (query operation; do not resend).
+Timeout: --timeout-ms 100..60000 (default 15000). Output is JSON. Exit 0 committed, 1 failed or
+rejected (see error.code), 2 wrong usage, 3 uncertain mutation (query operation; do not resend).
 Create Windows in the website; an assigned Window grant cannot create unrelated Windows.
 `;
 function error(code: string, message: string): never { throw new CommandError(code, message); }
@@ -129,7 +131,7 @@ export async function runWindowCommand(args: string[], env: NodeJS.ProcessEnv = 
       const id = positional[2]; if (!id) error('invalid_argument', 'Provide an operation ID.');
       const data = await request(`${path}/operations/${encodeURIComponent(id)}`);
       if (!isWindowOperationResult(data.result) || data.result.operationId !== id) error('invalid_response', 'Operation result is invalid or mismatched.');
-      output(data); return data.result.status === 'committed' ? 0 : 2;
+      output(data); return data.result.status === 'committed' ? 0 : 1;
     }
     if (command === 'create') error('creation_not_authorized', 'An existing Window management grant cannot create another Window. Create and assign it in the website.');
     let operation: WindowOperation | { type: 'delete' };
@@ -174,11 +176,10 @@ export async function runWindowCommand(args: string[], env: NodeJS.ProcessEnv = 
     const window = data.window === undefined || data.window === null ? data.window : decodeWorkspaceWindow(data.window);
     if (!isWindowOperationResult(data.result) || data.result.operationId !== operationId
       || data.window !== undefined && data.window !== null && (!window || window.id !== windowId)) error('invalid_response', 'Window service returned an invalid or mismatched operation result.');
-    pending = undefined; output({ ...data, ...(data.window !== undefined ? { window } : {}) }); return data.result.status === 'committed' ? 0 : 2;
+    pending = undefined; output({ ...data, ...(data.window !== undefined ? { window } : {}) }); return data.result.status === 'committed' ? 0 : 1;
   } catch (cause) {
-    const code = cause instanceof CommandError ? cause.code : 'request_failed';
+    const code = pending ? 'outcome_unknown' : cause instanceof CommandError ? cause.code : 'request_failed';
     const message = cause instanceof CommandError ? cause.message : 'Could not communicate with the Window service.';
-    output({ ...(pending ? { status: 'unknown', ...pending } : { status: 'error' }), code, message: secret ? message.replaceAll(secret, '[redacted]') : message });
-    return pending ? 3 : 1;
+    return printError(print, new CliError(code, message, pending ? { status: 'unknown', ...pending } : undefined), [secret]);
   }
 }

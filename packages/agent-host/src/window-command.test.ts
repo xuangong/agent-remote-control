@@ -69,13 +69,14 @@ it('replays explicit view creation identities without generating another view or
   expect(replay).toEqual(first);
   expect(f.window.revision).toBe(1);
   expect(f.window.views).toHaveLength(2);
-  expect((await f.run([...args, '--mode', 'float'])).output.code).toBe('operation_conflict');
+  expect((await f.run([...args, '--mode', 'float'])).output.error.code).toBe('operation_conflict');
 });
 it('returns explicit conflicts and rejects malformed input without posting mutations', async () => {
   const f = await fixture();
-  expect((await f.run(['rename', 'w1', 'Renamed', '--base-revision', '99'])).code).toBe(2);
+  // A rejected change fails; a malformed one is wrong usage.
+  expect((await f.run(['rename', 'w1', 'Renamed', '--base-revision', '99'])).code).toBe(1);
   const before = f.requests.length;
-  expect((await f.run(['view', 'resize', 'w1', 'main', '--width', '0'])).code).toBe(1);
+  expect((await f.run(['view', 'resize', 'w1', 'main', '--width', '0'])).code).toBe(2);
   expect((await f.run(['view', 'select', 'another-window', 'main'])).code).toBe(1);
   expect(f.requests.length).toBe(before);
 });
@@ -89,7 +90,7 @@ it('treats missing mutation replies as unknown and exposes the operation identit
 it('does not follow redirects carrying management credentials', async () => {
   const f = await fixture(); let output = ''; let policy: RequestRedirect | undefined;
   const code = await runWindowCommand(['inspect', 'w1'], f.env, text => { output += text; }, async (_, init) => { policy = init?.redirect; return new Response(JSON.stringify({ window: { id: 'spoofed' } }), { status: 200 }); });
-  expect(policy).toBe('error'); expect(code).toBe(1); expect(JSON.parse(output).code).toBe('invalid_response');
+  expect(policy).toBe('error'); expect(code).toBe(1); expect(JSON.parse(output).error.code).toBe('invalid_response');
 });
 it('exports layout without document identity and leaves the current Window unchanged', async () => {
   const f = await fixture();
@@ -106,7 +107,7 @@ it('creates, selects, collapses, moves and closes primary roots through the same
   expect((await f.run(['view', 'collapse', 'w1', 'second', '--value', 'true'])).output.window.views[1].collapsed).toBe(true);
   expect((await f.run(['view', 'move', 'w1', 'second', '--after', 'main'])).code).toBe(0);
   expect((await f.run(['view', 'close', 'w1', 'main'])).output.window.views.map((view: any) => view.id)).toEqual(['second']);
-  expect((await f.run(['minimize', 'w1', '--value', 'true'])).code).toBe(1);
+  expect((await f.run(['minimize', 'w1', '--value', 'true'])).code).toBe(2);
 });
 
 it('closes, inspects, exports, applies and repopulates an empty Window over HTTP', async () => {

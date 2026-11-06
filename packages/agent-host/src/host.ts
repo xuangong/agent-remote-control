@@ -40,10 +40,12 @@ import { AgentOperationRejectedError, AgentSessionInUseError, AgentRuntimeError,
 import { PROTOCOL_VERSION, type HostEnvironment, type HostSessionState } from '@orchardworks/agent-remote-protocol';
 import { createSessionStatePublisher, liveSessionState, type SessionStatePublisher } from './session-state-publisher.js';
 import { sessionHostAccess, type SessionCallerCatalog, type SessionCallerEndpoint, type SessionCallerStore, type SessionHostAccessSource } from './session-callers.js';
-import { changeSessionRef, describeSessionRefs, SessionRefError, validTarget, type SessionRefContext, type SessionRefStore } from './session-refs.js';
+import { changeSessionRef, describeSessionRefs, pendingReferenceNote, SessionRefError, validTarget, type SessionRefContext, type SessionRefStore } from './session-refs.js';
+import { withReferenceNotes } from './session-reference-notes.js';
+import { handleSessionRequest, type SessionActions, type SessionCaller, type SessionCallerRef, type SessionCallResult } from './session-routes.js';
 import { InputImageStore, type InputImageStoreOptions, InputResourceStore, type InputResourceStoreOptions, createAgentRemoteRelay, createRemoteHostUplinkClient, type AgentRemoteHttpResult, type AgentRemoteRelay,
   RemoteHostCatalog, RemoteHostCatalogError, UnsupportedAgentCapabilityError, type RemoteHostControlRequest, type RemoteHostUplinkClient, type RemoteHostUplinkDiagnostic, type RemoteSessionSummary,
-  type RemoteHostSessionLease, type SessionWireAgent, type SessionWireOperationExecutor } from '@orchardworks/agent-remote-relay';
+  type RemoteHostSessionLease, type SessionWireAgent, type SessionWireOperation, type SessionWireOperationExecutor } from '@orchardworks/agent-remote-relay';
 
 export interface AgentHostWorkspace { id: string; name: string; path: string }
 export interface AgentHostDirectory {
@@ -138,6 +140,8 @@ export interface AgentHostRuntimeOptions {
   sessionCallers?: { store: SessionCallerStore; endpoint: SessionCallerEndpoint; skills?: string };
   /** The sessions each session refers to; without it, sessions have only their source. */
   sessionRefs?: SessionRefStore;
+  /** This Host's identity at the Relay, once registered; session addresses start with it. */
+  hostId?: () => Promise<string | undefined>;
 }
 export interface AgentHostRequestDiagnostic {
   event: 'host_request_started' | 'host_request_completed';
@@ -168,6 +172,8 @@ export interface AgentHostRuntime {
   readonly sessionCatalog: SessionCallerCatalog;
   /** The sessions each session refers to, for session commands; absent without a reference store. */
   readonly sessionRefs?: SessionRefContext;
+  /** Answers one session command; forward sends requests naming other Hosts to them. */
+  callSession(request: unknown, caller: SessionCaller, forward?: (hostId: string, request: Record<string, unknown>) => Promise<SessionCallResult>): Promise<SessionCallResult>;
   addRegistration(registration: AgentHostProviderRegistration): void;
   control(request: RemoteHostControlRequest): Promise<AgentRemoteHttpResult>;
   enrollFromRelay(request: RemoteHostControlRequest, context: TrustedSuccessionContext): Promise<AgentRemoteHttpResult>;
@@ -203,6 +209,8 @@ export interface AgentHost {
   shareCatalog(query: { hostId: string; providerId: string; nativeSessionId?: string; cursor?: string }): Promise<AgentRemoteHttpResult>;
   readonly sessionCatalog: SessionCallerCatalog;
   readonly sessionRefs?: SessionRefContext;
+  /** Answers one resource command (session, group, host) from this Host's sockets; requests naming other Hosts go through the Relay. */
+  command(scope: string, request: unknown, caller: SessionCaller): Promise<SessionCallResult>;
   readonly state: 'connecting' | 'registered' | 'disconnected' | 'rejected' | 'closed';
   replaceUplink(uplink: AgentHostOptions['uplink']): Promise<{ hostId: string }>;
   close(): Promise<void>;
@@ -211,7 +219,7 @@ export interface AgentHost {
 export function createAgentHost(options: AgentHostOptions): AgentHost {
   if (options.succession?.enrollment && options.succession.controllerId !== options.installationId) throw new Error('Succession Controller identity must match the installed Controller.');
   const stateDirectory = options.preview?.stateDirectory ?? options.vscodeTunnel?.stateDirectory;
-  const runtime = createAgentHostRuntime({ ...options, ...(options.team ? { team: { ...options.team, request: (call: TeamHostCall) => connection.client.teamRequest(call),
+  const runtime = createAgentHostRuntime({ ...options, hostId: async () => closed || state !== 'registered' ? undefined : (await connection.client.ready).hostId, ...(options.team ? { team: { ...options.team, request: (call: TeamHostCall) => connection.client.teamRequest(call),
     genericSuccession: () => connection.client.teamSuccession, callForSupport: () => connection.client.callForSupport } } : {}), controllerId: options.installationId,
     ...(options.inputImages ? {} : stateDirectory ? { inputImages: { directory: join(stateDirectory, 'input-images') } } : {}),
     ...(options.inputResources ? {} : stateDirectory ? { inputResources: { directory: join(stateDirectory, 'input-resources') } } : {}) });
@@ -228,8 +236,11 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
   let connection: Connection;
   let credentialPersistence: Promise<void> = Promise.resolve();
   const describeProviders = () => options.registrations.filter(item => options.providerEnabled?.(item.directory.providerId) !== false).map(({ adapter, directory }) => ({ providerId: adapter.descriptor.providerId, displayName: adapter.descriptor.displayName, ...(codexDaemon && adapter.descriptor.providerId === 'codex' ? { daemonControl: true as const } : {}), ...(directory.renameSession ? { sessionRename: true as const } : {}), ...(directory.supportsPromptEditing ? { promptEditing: true as const } : {}),
-    // References are an attribute of every session on a Host that keeps them, whatever created the session.
-    ...(options.sessionRefs ? { sessionReferences: true as const } : {}) }));
+    // References are an attribute of every session on a Host that keeps them, whatever created the session, and the
+    // Host tells each session's agent when they change.
+    ...(options.sessionRefs ? { sessionReferences: true as const, referenceNotes: true as const } : {}),
+    // Session commands reach this Host through the Relay too.
+    sessionCommands: true as const }));
   const connect = (config: AgentHostOptions['uplink']): Connection => {
     runtime.setRelayConnected(false);
     const current = ++generation;
@@ -285,6 +296,10 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
     get state() { return state; },
     sessionCatalog: runtime.sessionCatalog,
     ...(runtime.sessionRefs ? { sessionRefs: runtime.sessionRefs } : {}),
+    async command(scope, request, caller) {
+      if (scope === 'session') return runtime.callSession(request, caller);
+      return { error: { code: 'invalid_request', message: `Unknown command group: ${scope}.` } };
+    },
     shareContext,
     async controllerInfo() { return { identity: options.controller?.identity, status: await updater?.status() }; },
     async updateController(version, operationId, clean) {
@@ -892,7 +907,11 @@ export function createAgentHostRuntime(options: AgentHostRuntimeOptions): AgentH
           }) : open())
           : source.openChild ? await source.openChild(parentNativeSessionId, nativeSessionId)
           : (() => { throw new HostRequestError(400, 'child_attachment_unavailable', 'This provider does not support native child attachment.'); })();
-        const annotated = tpm ? await tpm.annotateSession(providerId, nativeSessionId, nativeSession) : nativeSession;
+        const noted = sessionRefs && parentNativeSessionId === undefined ? withReferenceNotes(nativeSession, {
+          pending: () => pendingReferenceNote({ providerId, nativeSessionId }, sessionRefs),
+          delivered: revision => sessionRefs.store.markDelivered({ providerId, nativeSessionId }, revision),
+        }) : nativeSession;
+        const annotated = tpm ? await tpm.annotateSession(providerId, nativeSessionId, noted) : noted;
         const session = successionBoundary ? successionBoundary.wrap(nativeRef(binding), annotated) : annotated;
         if (closed) {
           await session.dispose().catch(() => undefined);
@@ -1003,6 +1022,8 @@ export function createAgentHostRuntime(options: AgentHostRuntimeOptions): AgentH
       maximumResultBytes,
     });
     await markShared(payload, providerId, nativeSessionId);
+    // A Side's agent learns its source from the instructions it is created with.
+    if (settings.sourceNativeSessionId) await sessionRefs?.store.setSource({ providerId, nativeSessionId }, { providerId, nativeSessionId: settings.sourceNativeSessionId }, { tell: false }).catch(() => undefined);
     return json(200, publicBinding(await tracked(project(providerId, proposedAgentId, nativeSessionId, undefined, undefined, false, undefined, qualified && !savedCreation))));
   }
   const nativeStarts = createNativeStartBackoff();
@@ -1188,6 +1209,14 @@ export function createAgentHostRuntime(options: AgentHostRuntimeOptions): AgentH
       }
       if (request.method === 'POST') {
         const payload = body(request.body);
+        if (url.pathname === '/remote/session/call') {
+          // Through the Relay the owner asks, or a session of another of the owner's Hosts that the Relay names.
+          const caller = payload.caller === undefined ? { kind: 'owner' as const } : validCallerSession(payload.caller)
+            ? { kind: 'session' as const, ref: { providerId: payload.caller.providerId, nativeSessionId: payload.caller.nativeSessionId }, hostId: payload.caller.hostId }
+            : (() => { throw new HostRequestError(400, 'invalid_request', 'The calling session is invalid.'); })();
+          if (Object.keys(payload).some(key => key !== 'request' && key !== 'caller') || request.sessionId) throw new HostRequestError(400, 'invalid_request', 'A session command is required.');
+          return json(200, await callSession(payload.request, caller));
+        }
         if (url.pathname === '/remote/session/refs') {
           if (!sessionRefs) throw new HostRequestError(400, 'unsupported_configuration', 'Session references are unavailable. Update the Controller.');
           const holder = { providerId: string(payload.providerId, 'providerId'), nativeSessionId: string(payload.nativeSessionId, 'nativeSessionId') };
@@ -1351,16 +1380,91 @@ export function createAgentHostRuntime(options: AgentHostRuntimeOptions): AgentH
       return live ? liveSessionState(live.handoffAdmissionState()) : undefined;
     },
   };
+  /** A command line's operation identity as the operation cache takes it: a UUID, derived when the caller chose another form. */
+  const cliOperation = (id: string) => {
+    if (/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(id)) return id;
+    const bytes = createHash('sha256').update(JSON.stringify(['host:cli', id])).digest().subarray(0, 16);
+    bytes[6] = (bytes[6]! & 0x0f) | 0x80; bytes[8] = (bytes[8]! & 0x3f) | 0x80;
+    const hex = bytes.toString('hex');
+    return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+  };
+  async function holding<T>(ref: SessionCallerRef, work: (agent: SessionWireAgent) => Promise<T>): Promise<T> {
+    const held = await automationAccess.acquire(ref.providerId, ref.nativeSessionId);
+    try { return await work(held.agent); } finally { held.release(); }
+  }
+  const cliExecute = (agent: SessionWireAgent, operationId: string, kind: SessionWireOperation['kind'], parameters: unknown, dispatch: () => Promise<unknown>, validate?: () => Promise<void> | void) =>
+    executeOperation('host:cli')(agent, { operationId: cliOperation(operationId), kind, parameters, maximumResultBytes: 1024 }, { dispatch, ...(validate ? { validate } : {}) });
+  /** The session commands' changes, run like the website's: through the operation cache, once per operation identity. */
+  const sessionActions: SessionActions = {
+    async create(input, operationId) {
+      const result = await create({ requestId: randomUUID(), method: 'POST', path: '/remote/create', sessionId: randomUUID(), operationScope: 'host:cli',
+        body: JSON.stringify({ ...input, operationId: cliOperation(operationId) }) }, { ...input, operationId: cliOperation(operationId) });
+      const created = JSON.parse(result.body) as { nativeSessionId?: string };
+      if (result.status >= 400 || !created.nativeSessionId) throw new Error('The session could not be created.');
+      return { providerId: input.providerId, nativeSessionId: created.nativeSessionId };
+    },
+    send: (ref, input, operationId) => holding(ref, async agent => {
+      if (input.steer && !agent.steer) throw Object.assign(new Error('This session cannot be steered.'), { code: 'unsupported_configuration' });
+      const result = await cliExecute(agent, operationId, input.steer ? 'steer' : 'send_message', input.steer ? { text: input.text } : { text: input.text, delivery: null }, async () => {
+        const acceptance = input.steer ? await agent.steer!(input.text) : await agent.sendMessage(input.text);
+        return acceptance ? { disposition: acceptance.disposition } : {};
+      }) as { disposition?: string };
+      return result;
+    }),
+    cancel: (ref, operationId) => holding(ref, async agent => {
+      if (!agent.cancel) throw Object.assign(new Error('This session cannot be canceled.'), { code: 'unsupported_configuration' });
+      await cliExecute(agent, operationId, 'cancel', {}, async () => { await agent.cancel!(); return { accepted: true }; });
+    }),
+    inspect: ref => holding(ref, async agent => {
+      const payload = agent.snapshot().payload;
+      return { status: payload.status, ...(payload.runtimeInfo.planning ? { planning: payload.runtimeInfo.planning.active } : {}),
+        settings: (payload.runtimeInfo.settings ?? []).map(setting => ({ id: setting.id, label: setting.label, value: setting.value, ...(setting.mutable !== undefined ? { mutable: setting.mutable } : {}),
+          ...(setting.options ? { options: setting.options.map(option => ({ value: option.value, label: option.label })) } : {}) })),
+        pendingInteractions: payload.pendingInteractions };
+    }),
+    answer: (ref, requestId, response, operationId) => holding(ref, async agent => {
+      await cliExecute(agent, operationId, 'interaction_response', { requestId, response }, async () => { await agent.respondToInteraction(requestId, response); return { accepted: true }; },
+        agent.validateInteractionResponse ? () => agent.validateInteractionResponse!(requestId, response) : undefined);
+    }),
+    setting: (ref, id, value, operationId) => holding(ref, async agent => {
+      if (!agent.setSessionSetting) throw Object.assign(new Error('This session has no settings to change.'), { code: 'unsupported_configuration' });
+      await cliExecute(agent, operationId, 'set_session_setting', { settingId: id, value }, async () => { await agent.setSessionSetting!(id, value); return { accepted: true }; });
+    }),
+    planning: (ref, active, operationId) => holding(ref, async agent => {
+      if (!agent.setPlanning) throw Object.assign(new Error('This session has no planning mode.'), { code: 'unsupported_configuration' });
+      await cliExecute(agent, operationId, 'set_planning', { active }, async () => { await agent.setPlanning!(active); return { accepted: true }; });
+    }),
+    async rename(ref, title) {
+      const result = await controlRequest({ requestId: randomUUID(), method: 'POST', path: '/remote/session/rename', body: JSON.stringify({ ...ref, title }) });
+      const renamed = JSON.parse(result.body) as { title?: string; error?: string; code?: string };
+      if (result.status >= 400 || typeof renamed.title !== 'string') throw Object.assign(new Error(renamed.error ?? 'The session could not be renamed.'), { code: renamed.code ?? 'rename_failed' });
+      return renamed.title;
+    },
+    async release(ref) {
+      const binding = bindings.getByNative(ref.providerId, ref.nativeSessionId), agent = binding && liveAgent(binding.agentId);
+      if (!binding || !agent) return true;
+      if (idle.hasDemand(binding.agentId) || !registration(ref.providerId).directory.canReleaseSession?.(ref.nativeSessionId) || !agent.canReleaseIdle()) return false;
+      await relay.closeAgent(binding.agentId);
+      await registration(ref.providerId).directory.sessionReleased?.(ref.nativeSessionId);
+      return true;
+    },
+  };
+  /** One session command; forward reaches other Hosts, for commands that came from this Host's own sockets. */
+  function callSession(request: unknown, caller: SessionCaller, forward?: (hostId: string, request: Record<string, unknown>) => Promise<SessionCallResult>): Promise<SessionCallResult> {
+    return handleSessionRequest(request, caller, { hostId: async () => options.hostId?.(), catalog: sessionCatalog, ...(sessionRefs ? { refs: sessionRefs } : {}), actions: sessionActions,
+      isShared: ref => options.sessionCallers?.store.isShared(ref) ?? false, ...(forward ? { forward } : {}) });
+  }
   const sessionRefs: SessionRefContext | undefined = options.sessionRefs ? {
     store: options.sessionRefs,
-    async source(holder) {
+    hostId: async () => options.hostId?.(),
+    async grantedSource(holder) {
       if (options.providerEnabled?.(holder.providerId) === false) return undefined;
       return registrations.get(holder.providerId)?.directory.sourceReference?.(holder.nativeSessionId);
     },
-    async setSourceRemoved(holder, removed) {
-      const directory = registration(holder.providerId).directory;
-      if (!directory.setSourceReferenceRemoved) throw new SessionRefError('unsupported_configuration', 'This provider cannot remove a source reference.');
-      return directory.setSourceReferenceRemoved(holder.nativeSessionId, removed);
+    async setGrantRemoved(holder, removed) {
+      const directory = registrations.get(holder.providerId)?.directory;
+      if (!await directory?.sourceReference?.(holder.nativeSessionId).catch(() => undefined)) return;
+      await directory!.setSourceReferenceRemoved?.(holder.nativeSessionId, removed);
     },
     async title(target) {
       if (options.providerEnabled?.(target.providerId) === false) return undefined;
@@ -1424,7 +1528,7 @@ export function createAgentHostRuntime(options: AgentHostRuntimeOptions): AgentH
     }
     return enrollment.control(request, context);
   };
-  return { relay, sessionStates, sessionCatalog, ...(sessionRefs ? { sessionRefs } : {}), executionRouting: successionService?.executionRouting, roleRouting: successionService?.roleRouting, addRegistration, control: request => control(request), enrollFromRelay, executeOperation, acquireSession, setRelayConnected: idle.setConnected,
+  return { relay, sessionStates, sessionCatalog, callSession, ...(sessionRefs ? { sessionRefs } : {}), executionRouting: successionService?.executionRouting, roleRouting: successionService?.roleRouting, addRegistration, control: request => control(request), enrollFromRelay, executeOperation, acquireSession, setRelayConnected: idle.setConnected,
     beginControllerRestart() {
       if (closed || draining) return false;
       // An owner-confirmed update closes admission immediately. Shutdown and the
@@ -1454,6 +1558,11 @@ export function createAgentHostRuntime(options: AgentHostRuntimeOptions): AgentH
 }
 
 class HostRequestError extends Error { constructor(readonly status: number, readonly code: string, message: string) { super(message); } }
+function validCallerSession(value: unknown): value is { hostId: string; providerId: string; nativeSessionId: string } {
+  const caller = value as { hostId?: unknown; providerId?: unknown; nativeSessionId?: unknown } | null;
+  return typeof caller?.hostId === 'string' && !!caller.hostId && caller.hostId.length <= 128 && typeof caller.providerId === 'string' && /^[a-z][a-z0-9-]{0,63}$/.test(caller.providerId)
+    && typeof caller.nativeSessionId === 'string' && !!caller.nativeSessionId && caller.nativeSessionId.length <= 512;
+}
 function publicBinding(binding: Binding): Omit<Binding, 'providerId'> {
   const { providerId: _providerId, ...value } = binding;
   return value;

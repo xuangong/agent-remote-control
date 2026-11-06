@@ -1,4 +1,4 @@
-import type { ProjectedTimelineEntry, UserMessagePart } from '@orchardworks/agent-remote-protocol';
+import { withoutSessionReferenceNote, type ProjectedTimelineEntry, type UserMessagePart } from '@orchardworks/agent-remote-protocol';
 import type { AgentReplicaState, OutgoingMessage } from './types.js';
 
 /** A native echo can arrive before acknowledgement or later through history recovery. */
@@ -84,7 +84,8 @@ export class MessageOutbox {
   }
 }
 
-function normalize(text: string): string { return text.replace(/\r\n/g, '\n').trim(); }
+// A Host adds a reference note to the input it delivers; the echo is matched as its sender wrote it.
+function normalize(text: string): string { return withoutSessionReferenceNote(text.replace(/\r\n/g, '\n')).trim(); }
 
 function outgoingKey(message: OutgoingMessage): string | undefined {
   if (!message.content?.some(part => part.type !== 'text')) return `text:${normalize(message.text)}`;
@@ -107,5 +108,5 @@ function orderedKey(parts: readonly ({ type: 'text'; text: string } | { type: 'i
       else key.push(['text', text]);
     }
   }
-  return `content:${JSON.stringify(key)}`;
+  return `content:${JSON.stringify(key.map(([type, value]) => type === 'text' ? [type, withoutSessionReferenceNote(value)] : [type, value]))}`;
 }

@@ -12,6 +12,7 @@ import { createCodexSessionDirectory } from './directory.js';
 import { handleSessionCall, listenSessionCalls, sessionCallerEndpoint, SessionCallerStore, SESSION_SOCKET_VARIABLE, SESSION_TOKEN_VARIABLE } from './session-callers.js';
 import { runSessionCommand } from './session-command.js';
 import { SessionRefStore } from './session-refs.js';
+import { splitSessionReferences } from '@orchardworks/agent-remote-protocol';
 
 const capabilities: AgentCapabilities = { history: true, sendMessage: true, steer: false, cancel: false, readResource: false,
   interactions: { question: false, planApproval: false, toolApproval: false } };
@@ -29,7 +30,8 @@ class FakeSession implements AgentSession {
     return { providerId: this.providerId, sessionId: this.nativeSessionId, status: this.closed ? 'closed' : 'idle', ...(this.cwd ? { cwd: this.cwd } : {}),
       persistence: { providerId: this.providerId, sessionId: this.nativeSessionId, opaque: '{}' } };
   }
-  async sendMessage(): Promise<void> {}
+  readonly sent: string[] = [];
+  async sendMessage(text: string): Promise<void> { this.sent.push(text); }
   async dispose(): Promise<void> { this.closed = true; this.wake?.(); }
 }
 
@@ -44,21 +46,23 @@ async function temporary(prefix: string) {
 
 function provider(providerId: string, cwd: string, listed: RemoteSessionSummary[] = [], sessionHostAccess = true) {
   const created: AgentSessionConfig[] = [], resumed: Array<AgentSessionResumeOptions | undefined> = [], histories: Array<[string, AgentHistoryQuery]> = [];
+  const sessions = new Map<string, FakeSession>();
+  const track = (session: FakeSession) => { sessions.set(session.nativeSessionId, session); return session; };
   let next = 0;
   const native = {
     descriptor: { providerId, displayName: providerId, ...(sessionHostAccess ? { sessionHostAccess: true as const } : {}) },
-    async createSession(config: AgentSessionConfig) { created.push(config); return new FakeSession(providerId, `${providerId}-created-${++next}`, config.cwd); },
+    async createSession(config: AgentSessionConfig) { created.push(config); return track(new FakeSession(providerId, `${providerId}-created-${++next}`, config.cwd ?? cwd)); },
     async resumeSession(handle: AgentPersistenceHandle, _extensions?: AgentSessionExtensions, options?: AgentSessionResumeOptions) {
-      resumed.push(options); return new FakeSession(providerId, handle.sessionId, cwd);
+      resumed.push(options); return track(new FakeSession(providerId, handle.sessionId, cwd));
     },
-    async listSessions() { return listed; },
+    async listSessions() { return [...listed, ...[...sessions.keys()].filter(id => id.includes('-created-')).map(id => summary(providerId, id, '2026-11-04T00:00:00.000Z', cwd))]; },
     async readSessionHistory(id: string, query: AgentHistoryQuery) {
       histories.push([id, query]);
       return { entries: [{ id: 'entry', turnId: 'turn', role: 'assistant', text: `history of ${id}`, textOffset: 0, totalChars: 11 + id.length }], nextCursor: 'older' };
     },
   };
   const directory = createManagedStdioDirectory(providerId, providerId, native, [{ id: cwd, name: cwd, path: cwd }]);
-  return { registration: { adapter: native as AgentProviderAdapter, directory }, created, resumed, histories };
+  return { registration: { adapter: native as AgentProviderAdapter, directory }, created, resumed, histories, sessions };
 }
 
 function summary(providerId: string, nativeSessionId: string, updatedAt: string, workspace = '/work'): RemoteSessionSummary {
@@ -69,7 +73,7 @@ async function host(registrations: ReturnType<typeof provider>[]) {
   const state = await temporary('session-callers-');
   const store = new SessionCallerStore(join(state, 'session-callers.json'));
   const endpoint = await sessionCallerEndpoint(state);
-  const runtime = createAgentHostRuntime({ registrations: registrations.map(item => item.registration),
+  const runtime = createAgentHostRuntime({ registrations: registrations.map(item => item.registration), hostId: async () => 'host-1',
     sessionCallers: { store, endpoint, skills: '/controller/skills/agent-remote' }, sessionRefs: new SessionRefStore(join(state, 'session-refs.json')) });
   cleanup.push(() => runtime.close());
   return { runtime, store, endpoint, state };
@@ -187,8 +191,7 @@ describe('session commands', () => {
     await context.store.markShared({ providerId: 'claude', nativeSessionId: 'hidden' });
     expect((await attach(context.runtime, 'caller', { providerId: 'claude', nativeSessionId: 'old' })).status).toBe(200);
     const token = claude.resumed[0]!.hostAccess!.environment[SESSION_TOKEN_VARIABLE]!;
-    const server = await listenSessionCalls(context.endpoint.listen, input => handleSessionCall(input,
-      { store: context.store, catalog: context.runtime.sessionCatalog, refs: context.runtime.sessionRefs, hostId: async () => 'host-1' }));
+    const server = await listenSessionCalls(context.endpoint.listen, input => handleSessionCall(input, context.store, ({ scope: _scope, ...request }, caller) => context.runtime.callSession(request, caller)));
     cleanup.push(() => server.close());
     const run = async (args: string[], env: NodeJS.ProcessEnv = { [SESSION_TOKEN_VARIABLE]: token, [SESSION_SOCKET_VARIABLE]: context.endpoint.access }) => {
       let output = '';
@@ -214,7 +217,7 @@ describe('session commands', () => {
     expect(read.output.session).toMatchObject({ address: 'host-1/codex/thread', title: 'thread title', state: 'idle' });
     expect(claude.histories).toHaveLength(1);
     const hidden = await run(['read', 'host-1/claude/hidden']);
-    expect(hidden).toEqual({ code: 6, output: { error: { code: 'session_not_found', message: 'No such session on this Host.' } } });
+    expect(hidden).toEqual({ code: 1, output: { error: { code: 'session_not_found', message: 'No such session on this Host.' } } });
   });
 
   it('pages a listing and forwards history queries', async () => {
@@ -232,38 +235,58 @@ describe('session commands', () => {
 
   it('references other sessions of its Host, which reading itself reports and pages also see', async () => {
     const { run, runtime, state } = await commands();
-    expect((await run(['ref', 'list'])).output).toEqual({ refs: [] });
+    expect((await run(['ref', 'list'])).output).toEqual({ refs: [], referencedBy: [] });
     const added = await run(['ref', 'add', 'host-1/codex/thread']);
     expect(added.code).toBe(0);
     expect(added.output.refs).toEqual([{ address: 'host-1/codex/thread', providerId: 'codex', title: 'thread title', origin: 'added', addedAt: expect.any(String) }]);
     expect((await run(['ref', 'add', 'local/codex/thread'])).output.refs).toHaveLength(1);
     expect((await run(['read', 'self'])).output.session.refs).toEqual(added.output.refs);
+    expect((await run(['read', 'host-1/codex/thread'])).output.session.referencedBy).toEqual([{ address: 'host-1/claude/old', providerId: 'claude', title: 'old title', origin: 'added' }]);
     const listed = (await run(['list'])).output.sessions as Array<{ self?: true; refs?: unknown }>;
     expect(listed.find(session => session.self)?.refs).toEqual(added.output.refs);
-    expect(listed.filter(session => !session.self).every(session => !('refs' in session))).toBe(true);
     expect(await run(['ref', 'add', 'self'])).toMatchObject({ code: 2, output: { error: { code: 'invalid_request' } } });
-    expect(await run(['ref', 'add', 'host-1/claude/hidden'])).toMatchObject({ code: 6, output: { error: { code: 'session_not_found' } } });
-    expect(await run(['ref', 'add', 'host-1/codex/missing'])).toMatchObject({ code: 6, output: { error: { code: 'session_not_found' } } });
+    expect(await run(['ref', 'add', 'host-1/claude/hidden'])).toMatchObject({ code: 1, output: { error: { code: 'session_not_found' } } });
+    expect(await run(['ref', 'add', 'host-1/codex/missing'])).toMatchObject({ code: 1, output: { error: { code: 'session_not_found' } } });
     expect(await run(['ref', 'add'])).toMatchObject({ code: 2, output: { error: { code: 'invalid_request' } } });
     const page = await runtime.control({ method: 'GET', path: '/remote/session/refs?providerId=claude&nativeSessionId=old' });
-    expect(JSON.parse(page.body)).toEqual({ revision: 1, refs: [{ providerId: 'codex', nativeSessionId: 'thread', title: 'thread title', origin: 'added', addedAt: expect.any(String) }] });
+    expect(JSON.parse(page.body)).toMatchObject({ revision: 1, refs: [{ providerId: 'codex', nativeSessionId: 'thread', title: 'thread title', origin: 'added', addedAt: expect.any(String) }] });
     const removed = await runtime.control({ method: 'POST', path: '/remote/session/refs', body: JSON.stringify({ providerId: 'claude', nativeSessionId: 'old', action: 'remove', target: { providerId: 'codex', nativeSessionId: 'thread' } }) });
-    expect(JSON.parse(removed.body)).toEqual({ revision: 2, refs: [] });
+    expect(JSON.parse(removed.body)).toMatchObject({ revision: 2, refs: [] });
     expect((await run(['read', 'self'])).output.session).not.toHaveProperty('refs');
-    expect(await new SessionRefStore(join(state, 'session-refs.json')).read({ providerId: 'claude', nativeSessionId: 'old' })).toEqual({ revision: 2, refs: [] });
+    expect(await new SessionRefStore(join(state, 'session-refs.json')).read({ providerId: 'claude', nativeSessionId: 'old' })).toMatchObject({ revision: 2, refs: [] });
   });
 
-  it('reports why a command cannot be answered, with distinct exit codes', async () => {
+  it('reports why a command cannot be answered', async () => {
     const { run, endpoint } = await commands();
-    expect(await run(['read', 'self'], {})).toMatchObject({ code: 3, output: { error: { code: 'no_session_identity' } } });
+    expect(await run(['read', 'self'], {})).toMatchObject({ code: 1, output: { error: { code: 'no_identity' } } });
     expect(await run(['read', 'self'], { [SESSION_TOKEN_VARIABLE]: 'y'.repeat(43), [SESSION_SOCKET_VARIABLE]: endpoint.access }))
-      .toMatchObject({ code: 3, output: { error: { code: 'no_session_identity' } } });
-    expect(await run(['read', 'other-host/codex/thread'])).toMatchObject({ code: 5, output: { error: { code: 'session_forbidden' } } });
-    expect(await run(['read', 'host-1/codex/missing'])).toMatchObject({ code: 6, output: { error: { code: 'session_not_found' } } });
+      .toMatchObject({ code: 1, output: { error: { code: 'no_session_identity' } } });
+    expect(await run(['read', 'other-host/codex/thread'])).toMatchObject({ code: 1, output: { error: { code: 'host_unreachable' } } });
+    expect(await run(['read', 'host-1/codex/missing'])).toMatchObject({ code: 1, output: { error: { code: 'session_not_found' } } });
     expect(await run(['read', 'self', '--search', 'a', '--turn', 'b'])).toMatchObject({ code: 2, output: { error: { code: 'invalid_request' } } });
     expect(await run(['list', '--search', 'a'])).toMatchObject({ code: 2, output: { error: { code: 'invalid_request' } } });
     expect(await run(['read'])).toMatchObject({ code: 2, output: { error: { code: 'invalid_request' } } });
     expect(await run(['read', 'self'], { [SESSION_TOKEN_VARIABLE]: 'z'.repeat(43), [SESSION_SOCKET_VARIABLE]: join(tmpdir(), 'arc-missing.sock') }))
-      .toMatchObject({ code: 4, output: { error: { code: 'controller_unreachable' } } });
+      .toMatchObject({ code: 1, output: { error: { code: 'controller_unreachable' } } });
+  });
+
+  it('creates a session opened from another, whose agent hears its source with the first message, and drives it once per operation', async () => {
+    const { run, claude, runtime } = await commands();
+    const created = await run(['create', '--provider', 'claude', '--from', 'self', '--message', 'Check the plan', '--operation-id', 'new-side']);
+    expect(created.code).toBe(0);
+    expect(created.output.session).toMatchObject({ address: 'host-1/claude/claude-created-1', refs: [{ address: 'host-1/claude/old', origin: 'source' }] });
+    const first = claude.sessions.get('claude-created-1')!;
+    expect(splitSessionReferences(first.sent[0]!)).toEqual({ text: 'Check the plan', note: { revision: 1, references: [{ address: 'host-1/claude/old', title: 'old title', origin: 'source' }] } });
+    expect((await run(['send', 'host-1/claude/claude-created-1', 'And', 'again', '--operation-id', 'second'])).code).toBe(0);
+    expect((await run(['send', 'host-1/claude/claude-created-1', 'And', 'again', '--operation-id', 'second'])).code).toBe(0);
+    expect(first.sent).toEqual([expect.any(String), 'And again']);
+    expect(await run(['send', 'host-1/claude/claude-created-1', 'Steer', '--steer'])).toMatchObject({ code: 1, output: { error: { code: 'unsupported_command' } } });
+    const inspected = await run(['inspect', 'host-1/claude/claude-created-1']);
+    expect(inspected.output).toMatchObject({ status: 'idle', pendingInteractions: [] });
+    expect(await run(['answer', 'self', 'request', '--response', '{"kind":"tool_approval","decision":"deny"}'])).toMatchObject({ code: 1, output: { error: { code: 'session_forbidden' } } });
+    // The Host owner reaches the same sessions through the management socket.
+    const owner = await runtime.callSession({ command: 'read', target: 'host-1/claude/claude-created-1' }, { kind: 'owner' });
+    expect(owner).toMatchObject({ result: { session: { address: 'host-1/claude/claude-created-1' } } });
+    expect(await runtime.callSession({ command: 'read', target: 'self' }, { kind: 'owner' })).toMatchObject({ error: { code: 'invalid_request' } });
   });
 });

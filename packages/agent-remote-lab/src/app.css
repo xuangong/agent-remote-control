@@ -943,7 +943,8 @@ textarea {
   .lab-collapsed-window { flex-basis: 44px; width: 44px; }
   .lab-fork-entries button { min-height: 44px; }
 }
-.lab-fork-reference { position: relative; margin: 3px 5px 5px; max-width: 100%; width: fit-content; }
+/* Starts where the composer starts: the composer is centered at most 900px wide. */
+.lab-fork-reference { position: relative; margin: 3px 0 5px max(0px, calc((100% - 900px) / 2)); max-width: min(100%, 900px); width: fit-content; }
 .lab-fork-reference summary { cursor: pointer; display: flex; align-items: center; gap: 8px; list-style: none; padding: 3px 8px 3px 5px; font-size: 12px; max-width: 100%; }
 .lab-fork-reference summary::-webkit-details-marker { display: none; }
 .lab-fork-reference summary:focus-visible { outline: 2px solid var(--obs-action); outline-offset: 2px; }

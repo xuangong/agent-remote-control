@@ -505,6 +505,30 @@ for (const placement of ['primary', 'dock'] as const) {
   });
 }
 
+test('the source reference starts at the composer edge in narrow and wide panes', async ({ page, context, isMobile }) => {
+  const workspace = await createWorkspace(page, context);
+  try {
+    const source = page.locator('.lab-session-family-pane').first();
+    await expect(source.getByTestId('prompt-input')).toBeEnabled();
+    await source.getByTestId('prompt-input').fill('/side Aligned reference');
+    await source.getByTestId('prompt-submit').click();
+    await expect.poll(async () => (await workspace.inspect()).views.some(view => view.attachedTo)).toBe(true);
+    const side = (await workspace.inspect()).views.find(view => view.attachedTo)!;
+    const offset = (pane: ReturnType<Page['locator']>) => async () => {
+      const reference = await pane.locator('.lab-fork-reference summary').boundingBox(), composer = await pane.locator('.agent-composer').boundingBox();
+      return reference && composer ? Math.abs(reference.x - composer.x) : Number.POSITIVE_INFINITY;
+    };
+    const pane = page.locator(`.lab-session-family-pane[data-view-id="${side.id}"]`);
+    await expect.poll(offset(pane)).toBeLessThanOrEqual(1);
+    if (isMobile) return;
+    // A window wider than the composer centers it; widen the dock to cover that without depending on the window layout.
+    await pane.locator('.lab-composer-dock').evaluate(node => { (node as HTMLElement).style.width = '1300px'; });
+    await expect.poll(async () => (await pane.locator('.agent-composer').boundingBox())!.x - (await pane.boundingBox())!.x).toBeGreaterThan(100);
+    await expect.poll(offset(pane)).toBeLessThanOrEqual(1);
+    expect(workspace.errors).toEqual([]);
+  } finally { await workspace.close(); }
+});
+
 for (const placement of ['primary', 'dock'] as const) {
   for (const savedTarget of ['missing pane', 'another session pane'] as const) {
     test(`${placement} Side footer survives refresh with a saved target pointing to ${savedTarget}`, async ({ page, context }) => {

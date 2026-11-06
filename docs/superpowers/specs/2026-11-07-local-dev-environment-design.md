@@ -114,7 +114,9 @@ The runner never installs a launchd service, never uses the Controller's
 ## Development Controller environment
 
 The runner builds the Controller environment from an allowlist (`HOME`, `PATH`,
-`USER`, `LOGNAME`, `SHELL`, `LANG`, `LC_*`, `TMPDIR`, `TERM`) and adds:
+`USER`, `LOGNAME`, `SHELL`, `LANG`, `LC_*`, `TMPDIR`, `TERM`, `SSH_AUTH_SOCK`
+for git over SSH in test sessions, and the proxy variables `HTTP_PROXY`,
+`HTTPS_PROXY`, `NO_PROXY` and `ALL_PROXY` in both cases) and adds:
 
 | Variable | Value |
 | --- | --- |
@@ -133,6 +135,9 @@ set: the Controller's execution policy (`execution-policy.ts`) then refuses to
 create, open or resume any session whose workspace is outside the allowed root,
 and locks permission settings. Native profile variables (`CLAUDE_CONFIG_DIR`,
 `CODEX_HOME`) are not set, so the shared default homes are used.
+
+`PATH` entries inside `node_modules` (pnpm script shims) are removed so they
+cannot shadow the native CLIs.
 
 The development Controller reuses the Codex daemon and OpenCode server that the
 user's own Controller keeps running; with auto-start disabled it never starts,

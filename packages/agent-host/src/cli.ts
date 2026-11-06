@@ -37,6 +37,7 @@ import { selectTerminalChoice } from './terminal-select.js';
 import { createInterface } from 'node:readline';
 import { renderSessionQr } from './share-qr.js';
 import { handleSessionCall, listenSessionCalls, sessionCallerEndpoint, SessionCallerStore } from './session-callers.js';
+import { SessionRefStore } from './session-refs.js';
 import { runSessionCommand } from './session-command.js';
 import { controllerSkills } from './session-skills.js';
 
@@ -179,7 +180,7 @@ async function serveConfigured(daemon: boolean, diagnosticLog: DiagnosticLog | u
   const registrations = providerDiscovery.registrations;
   const identity = await controllerIdentity(import.meta.url);
   const sessionCallers = await prepareSessionCallers(line => writeDiagnostic(line, diagnosticSecrets));
-  const host = createAgentHost({ ...(sessionCallers ? { sessionCallers } : {}), succession: { controllerId: installationId, stateDirectory: join(stateDir, 'succession'), enrollment: true }, tpm: { stateDirectory: join(stateDir, 'tpm-v1') }, team: { stateDirectory: join(stateDir, 'teams-v1') }, ...(identity ? { controller: { identity, stateDir, restart: requestLauncherRestart } } : {}), registrations, providerDiscovery, providerEnabled: providerDiscovery.enabled, environment: hostEnvironment, installationId, name: environment.AGENT_HOST_NAME?.trim() || hostname(),
+  const host = createAgentHost({ ...(sessionCallers ? { sessionCallers } : {}), sessionRefs: new SessionRefStore(join(stateDir, 'session-refs.json')), succession: { controllerId: installationId, stateDirectory: join(stateDir, 'succession'), enrollment: true }, tpm: { stateDirectory: join(stateDir, 'tpm-v1') }, team: { stateDirectory: join(stateDir, 'teams-v1') }, ...(identity ? { controller: { identity, stateDir, restart: requestLauncherRestart } } : {}), registrations, providerDiscovery, providerEnabled: providerDiscovery.enabled, environment: hostEnvironment, installationId, name: environment.AGENT_HOST_NAME?.trim() || hostname(),
     ...(supportsCodexDaemonControl(environment)
       ? { codexDaemon: { stateDir, restart: operationId => restartCodexDaemon({ stateDir, environment, operationId }) } } : {}),
     vscodeTunnel: { stateDirectory: stateDir, executable: environment.AGENT_HOST_VSCODE?.trim() || undefined,
@@ -233,7 +234,7 @@ async function serveConfigured(daemon: boolean, diagnosticLog: DiagnosticLog | u
   await new Promise<void>((resolve, reject) => { management.once('error', reject); management.listen(socket, resolve); });
   if (process.platform !== 'win32') await chmod(socket, 0o600);
   const sessionCalls = sessionCallers ? await listenSessionCalls(sessionCallers.endpoint.listen, input => handleSessionCall(input, { store: sessionCallers.store,
-    catalog: host.sessionCatalog, hostId: async () => (await host.shareContext().catch(() => undefined))?.hostId })).catch(error => {
+    catalog: host.sessionCatalog, ...(host.sessionRefs ? { refs: host.sessionRefs } : {}), hostId: async () => (await host.shareContext().catch(() => undefined))?.hostId })).catch(error => {
     writeDiagnostic(JSON.stringify({ event: 'session_calls_unavailable', message: error instanceof Error ? error.message.slice(0, 200) : 'unknown', timestamp: new Date().toISOString() }), diagnosticSecrets);
     return undefined;
   }) : undefined;

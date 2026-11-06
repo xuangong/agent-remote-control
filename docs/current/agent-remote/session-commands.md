@@ -9,11 +9,24 @@ agent-remote-controller session read self
 agent-remote-controller session list [--provider P] [--limit 1..50] [--cursor C]
 agent-remote-controller session read <hostId>/<providerId>/<nativeSessionId> [--limit 1..10] [--cursor C]
                                      [--search TEXT] [--turn TURN_ID] [--text-offset N]
+agent-remote-controller session ref list
+agent-remote-controller session ref add <hostId>/<providerId>/<nativeSessionId>
+agent-remote-controller session ref remove <hostId>/<providerId>/<nativeSessionId>
 ```
 
 Every command prints one JSON object. `list` merges the enabled providers' catalogs, newest first; `state` comes from the open session when the Controller holds it, otherwise from the catalog. `read` uses the provider's native history (`readSessionHistory`), with the paging of `read_source_session`: newest first, at most 10 entries per page, long entries continued with `--turn` and `--text-offset`. A provider whose catalog fails is named in `unavailableProviders` instead of failing the listing.
 
-Errors print `{"error":{"code","message"}}` and exit with: `invalid_request` 2, `no_session_identity` 3, `controller_unreachable` 4, `session_forbidden` 5, `session_not_found` 6, others 1.
+Errors print `{"error":{"code","message"}}` and exit with: `invalid_request` 2, `no_session_identity` 3, `controller_unreachable` 4, `session_forbidden` 5, `session_not_found` 6, `unsupported_configuration` 7, others 1.
+
+## References
+
+A session references other sessions of its Host: the source a Side or Ask was opened from, and sessions added by the user or by the agent with `session ref add`. `ref list`, and `read` for a session that has references, report `refs: [{ address, providerId, title?, origin: "source" | "added", addedAt? }]`, the source first. References only name sessions: what a session may read is decided by `read`.
+
+The Controller keeps added references and a revision per session in `session-refs.json` in its state directory (the 4096 most recently changed sessions, at most 32 references each). The revision counts every change, including the removal and return of the source. Removing the source keeps the reader's grant record but marks it removed: `read_source_session` refuses to read until the source is added back. The tool stays declared in a running native process, so the website tells the agent about the change with its next message (see [web](web.md)).
+
+Pages use the same references through `GET /v1/remote/hosts/:hostId/session/refs?providerId&nativeSessionId` and `POST` with `{ providerId, nativeSessionId, action: "add" | "remove", target: { providerId, nativeSessionId } }`; both return `{ revision, refs }`. The Relay allows them for the Host owner and for users the session is shared with.
+
+Claude Code sessions with a credential run `session read`, `session list` and `session ref list` without asking; adding and removing references asks like other commands.
 
 Until the Relay registers the Host, addresses use `local` as the Host. Both `local` and the registered Host id are accepted.
 

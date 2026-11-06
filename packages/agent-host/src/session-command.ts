@@ -9,9 +9,12 @@ Run from the shell of a session that Agent Remote Control manages. Every command
   session list [--provider P] [--limit 1..50] [--cursor C]
   session read <hostId>/<providerId>/<nativeSessionId> [--limit 1..10] [--cursor C]
                [--search TEXT] [--turn TURN_ID] [--text-offset N]
+  session ref list
+  session ref add <hostId>/<providerId>/<nativeSessionId>
+  session ref remove <hostId>/<providerId>/<nativeSessionId>
 `;
 
-const exitCodes: Record<string, number> = { invalid_request: 2, no_session_identity: 3, controller_unreachable: 4, session_forbidden: 5, session_not_found: 6 };
+const exitCodes: Record<string, number> = { invalid_request: 2, no_session_identity: 3, controller_unreachable: 4, session_forbidden: 5, session_not_found: 6, unsupported_configuration: 7 };
 const options: Record<string, { field: string; integer?: true; commands: string[] }> = {
   '--provider': { field: 'providerId', commands: ['list'] },
   '--limit': { field: 'limit', integer: true, commands: ['list', 'read'] },
@@ -47,6 +50,12 @@ export async function runSessionCommand(args: readonly string[], env: NodeJS.Pro
 
 function parseArguments(args: readonly string[]): Record<string, unknown> {
   const [command, ...rest] = args;
+  if (command === 'ref') {
+    const [action, target, ...extra] = rest;
+    if (action === 'list' && target === undefined) return { command, action };
+    if ((action === 'add' || action === 'remove') && target && !target.startsWith('--') && !extra.length) return { command, action, target };
+    throw new SessionCommandError('invalid_request', 'Use session ref list, or session ref add|remove <hostId>/<providerId>/<nativeSessionId>.');
+  }
   if (command !== 'list' && command !== 'read') throw new SessionCommandError('invalid_request', `Unknown session command: ${command}. Run agent-remote-controller session --help.`);
   const request: Record<string, unknown> = { command };
   if (command === 'read') {

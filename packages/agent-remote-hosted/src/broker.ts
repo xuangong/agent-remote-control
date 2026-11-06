@@ -1859,6 +1859,26 @@ export function createHostBroker(options: HostBrokerOptions) {
       });
       return json(200, { ok: true });
     }
+    const refs = /^\/v1\/remote\/hosts\/([^/]+)\/session\/refs$/.exec(url.pathname);
+    if (refs && (request.method === 'GET' || request.method === 'POST')) {
+      requireAccess(refs[1]!, subject);
+      const host = requireHost(refs[1]!);
+      const input = request.method === 'POST' ? await readBody(request) : { providerId: url.searchParams.get('providerId'), nativeSessionId: url.searchParams.get('nativeSessionId') };
+      const providerId = required(input.providerId, 'providerId'), nativeSessionId = required(input.nativeSessionId, 'nativeSessionId');
+      // References name other sessions, so a page may change them only where it may open both sessions.
+      const allowed = (provider: string, session: string) => {
+        const binding = nativeBindings.get(JSON.stringify([host.id, provider, session]));
+        return owner(subject) || !!binding && sessionAllowed(binding, subject);
+      };
+      if (!allowed(providerId, nativeSessionId)) throw new SharingError(403, 'session_forbidden', 'Session access is unavailable.');
+      if (request.method === 'GET') return rawJson(await rpc(host, 'GET', `/remote/session/refs?${new URLSearchParams({ providerId, nativeSessionId })}`));
+      const target = input.target as { providerId?: unknown; nativeSessionId?: unknown } | undefined;
+      if ((input.action !== 'add' && input.action !== 'remove') || typeof target?.providerId !== 'string' || typeof target.nativeSessionId !== 'string'
+        || Object.keys(input).some(key => !['providerId', 'nativeSessionId', 'action', 'target'].includes(key))) throw new BrokerError(400, 'invalid_request', 'Name the reference to add or remove.');
+      if (input.action === 'add' && !allowed(target.providerId, target.nativeSessionId)) throw new SharingError(403, 'session_forbidden', 'Session access is unavailable.');
+      return rawJson(await rpc(host, 'POST', '/remote/session/refs', undefined, JSON.stringify({ providerId, nativeSessionId, action: input.action,
+        target: { providerId: target.providerId, nativeSessionId: target.nativeSessionId } })));
+    }
     const rename = /^\/v1\/remote\/hosts\/([^/]+)\/session\/rename$/.exec(url.pathname);
     if (rename && request.method === 'POST') {
       requireAccess(rename[1]!, subject);

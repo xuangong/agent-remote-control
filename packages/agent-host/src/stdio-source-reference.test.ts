@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { expect, it } from 'vitest';
 import { AgentOperationRejectedError, type AgentSession, type AgentSessionConfig, type AgentSessionExtensions, type AgentSessionTool } from '@orchardworks/agent-provider-sdk';
 import { createManagedStdioDirectory, type ManagedStdioProvider } from './stdio-directory.js';
-import { SessionReferenceStore } from './session-reference.js';
+import { SessionReferenceStore, SOURCE_REFERENCE_REMOVED } from './session-reference.js';
 import { acquireNativeSession, inspectNativeOwner } from './native-session-owner.js';
 
 const userTool: AgentSessionTool = { name: 'user_tool', description: 'User tool', inputSchema: { type: 'object' }, execute: async () => 'user result' };
@@ -91,6 +91,30 @@ it('composes user tools and instructions, dynamically routes source reads, and r
     expect(recovered.systemPrompt).toBe('User native base'); expect(recovered.tools!.map(tool => tool.name)).toEqual(['user_tool', 'read_source_session']);
     expect(JSON.parse(await recovered.tools!.find(tool => tool.name === 'read_source_session')!.execute({}))).toMatchObject({ sourceSessionId: 'A' });
     await expect(read.execute({})).rejects.toThrow(/closed|ready/i);
+  } finally { await directory.close(); await rm(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }); }
+}, 10000);
+
+it('refuses source reads once the source is removed, across reopening, until it is restored', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'arc-stdio-source-removal-')); const f = fixture();
+  let directory = createManagedStdioDirectory('claude', 'Claude', f.provider, [], undefined, new SessionReferenceStore(root, 'claude'));
+  try {
+    const id = await directory.create({ sourceNativeSessionId: 'A' });
+    const read = f.configurations[0]!.tools!.find(tool => tool.name === 'read_source_session')!;
+    expect(JSON.parse(await read.execute({}))).toMatchObject({ sourceSessionId: 'A' });
+    expect(await directory.sourceReference!(id)).toEqual({ holder: id, sourceNativeSessionId: 'A', removed: false });
+    expect(await directory.setSourceReferenceRemoved!(id, true)).toBe(true);
+    expect(await directory.setSourceReferenceRemoved!(id, true)).toBe(false);
+    await expect(read.execute({})).rejects.toThrow(SOURCE_REFERENCE_REMOVED);
+    await directory.close();
+    directory = createManagedStdioDirectory('claude', 'Claude', f.provider, [], undefined, new SessionReferenceStore(root, 'claude'));
+    await directory.open(id, {});
+    const reopened = f.configurations.at(-1)!.tools!.find(tool => tool.name === 'read_source_session')!;
+    await expect(reopened.execute({})).rejects.toThrow(SOURCE_REFERENCE_REMOVED);
+    expect(await directory.sourceReference!(id)).toEqual({ holder: id, sourceNativeSessionId: 'A', removed: true });
+    expect(await directory.setSourceReferenceRemoved!(id, false)).toBe(true);
+    expect(JSON.parse(await reopened.execute({}))).toMatchObject({ sourceSessionId: 'A' });
+    expect(f.reads).toEqual(['A', 'A']);
+    await expect(directory.setSourceReferenceRemoved!('unrelated', true)).rejects.toThrow(/no source reference/);
   } finally { await directory.close(); await rm(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }); }
 }, 10000);
 

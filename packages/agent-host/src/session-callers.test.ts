@@ -11,6 +11,7 @@ import { createManagedStdioDirectory } from './stdio-directory.js';
 import { createCodexSessionDirectory } from './directory.js';
 import { handleSessionCall, listenSessionCalls, sessionCallerEndpoint, SessionCallerStore, SESSION_SOCKET_VARIABLE, SESSION_TOKEN_VARIABLE } from './session-callers.js';
 import { runSessionCommand } from './session-command.js';
+import { SessionRefStore } from './session-refs.js';
 
 const capabilities: AgentCapabilities = { history: true, sendMessage: true, steer: false, cancel: false, readResource: false,
   interactions: { question: false, planApproval: false, toolApproval: false } };
@@ -69,7 +70,7 @@ async function host(registrations: ReturnType<typeof provider>[]) {
   const store = new SessionCallerStore(join(state, 'session-callers.json'));
   const endpoint = await sessionCallerEndpoint(state);
   const runtime = createAgentHostRuntime({ registrations: registrations.map(item => item.registration),
-    sessionCallers: { store, endpoint, skills: '/controller/skills/agent-remote' } });
+    sessionCallers: { store, endpoint, skills: '/controller/skills/agent-remote' }, sessionRefs: new SessionRefStore(join(state, 'session-refs.json')) });
   cleanup.push(() => runtime.close());
   return { runtime, store, endpoint, state };
 }
@@ -187,7 +188,7 @@ describe('session commands', () => {
     expect((await attach(context.runtime, 'caller', { providerId: 'claude', nativeSessionId: 'old' })).status).toBe(200);
     const token = claude.resumed[0]!.hostAccess!.environment[SESSION_TOKEN_VARIABLE]!;
     const server = await listenSessionCalls(context.endpoint.listen, input => handleSessionCall(input,
-      { store: context.store, catalog: context.runtime.sessionCatalog, hostId: async () => 'host-1' }));
+      { store: context.store, catalog: context.runtime.sessionCatalog, refs: context.runtime.sessionRefs, hostId: async () => 'host-1' }));
     cleanup.push(() => server.close());
     const run = async (args: string[], env: NodeJS.ProcessEnv = { [SESSION_TOKEN_VARIABLE]: token, [SESSION_SOCKET_VARIABLE]: context.endpoint.access }) => {
       let output = '';
@@ -227,6 +228,26 @@ describe('session commands', () => {
     expect((await run(['list', '--provider', 'codex'])).output.sessions.map((session: { providerId: string }) => session.providerId)).toEqual(['codex']);
     await run(['read', 'local/codex/thread', '--turn', 'turn', '--text-offset', '6000']);
     expect(codex.histories.at(-1)).toEqual(['thread', { turnId: 'turn', textOffset: 6000 }]);
+  });
+
+  it('references other sessions of its Host, which reading itself reports and pages also see', async () => {
+    const { run, runtime, state } = await commands();
+    expect((await run(['ref', 'list'])).output).toEqual({ refs: [] });
+    const added = await run(['ref', 'add', 'host-1/codex/thread']);
+    expect(added.code).toBe(0);
+    expect(added.output.refs).toEqual([{ address: 'host-1/codex/thread', providerId: 'codex', title: 'thread title', origin: 'added', addedAt: expect.any(String) }]);
+    expect((await run(['ref', 'add', 'local/codex/thread'])).output.refs).toHaveLength(1);
+    expect((await run(['read', 'self'])).output.session.refs).toEqual(added.output.refs);
+    expect(await run(['ref', 'add', 'self'])).toMatchObject({ code: 2, output: { error: { code: 'invalid_request' } } });
+    expect(await run(['ref', 'add', 'host-1/claude/hidden'])).toMatchObject({ code: 6, output: { error: { code: 'session_not_found' } } });
+    expect(await run(['ref', 'add', 'host-1/codex/missing'])).toMatchObject({ code: 6, output: { error: { code: 'session_not_found' } } });
+    expect(await run(['ref', 'add'])).toMatchObject({ code: 2, output: { error: { code: 'invalid_request' } } });
+    const page = await runtime.control({ method: 'GET', path: '/remote/session/refs?providerId=claude&nativeSessionId=old' });
+    expect(JSON.parse(page.body)).toEqual({ revision: 1, refs: [{ providerId: 'codex', nativeSessionId: 'thread', title: 'thread title', origin: 'added', addedAt: expect.any(String) }] });
+    const removed = await runtime.control({ method: 'POST', path: '/remote/session/refs', body: JSON.stringify({ providerId: 'claude', nativeSessionId: 'old', action: 'remove', target: { providerId: 'codex', nativeSessionId: 'thread' } }) });
+    expect(JSON.parse(removed.body)).toEqual({ revision: 2, refs: [] });
+    expect((await run(['read', 'self'])).output.session).not.toHaveProperty('refs');
+    expect(await new SessionRefStore(join(state, 'session-refs.json')).read({ providerId: 'claude', nativeSessionId: 'old' })).toEqual({ revision: 2, refs: [] });
   });
 
   it('reports why a command cannot be answered, with distinct exit codes', async () => {

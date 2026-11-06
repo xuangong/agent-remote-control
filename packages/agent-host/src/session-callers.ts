@@ -6,6 +6,7 @@ import { basename, dirname, join } from 'node:path';
 import { atomicWriteFile } from '@orchardworks/agent-platform';
 import type { AgentHistoryPage, AgentHistoryQuery, AgentSessionHostAccess } from '@orchardworks/agent-provider-sdk';
 import type { RemoteSessionSummary } from '@orchardworks/agent-remote-relay';
+import { changeSessionRef, describeSessionRefs, SessionRefError, type SessionRefContext, type SessionRefs } from './session-refs.js';
 
 /** The variables through which a session's shell commands reach this Controller as that session. */
 export const SESSION_TOKEN_VARIABLE = 'AGENT_REMOTE_SESSION_TOKEN';
@@ -177,14 +178,14 @@ export interface SessionCallerCatalog {
 }
 
 export class SessionCallError extends Error {
-  constructor(readonly code: 'invalid_request' | 'no_session_identity' | 'session_forbidden' | 'session_not_found' | 'history_unavailable', message: string) { super(message); }
+  constructor(readonly code: 'invalid_request' | 'no_session_identity' | 'session_forbidden' | 'session_not_found' | 'history_unavailable' | 'unsupported_configuration', message: string) { super(message); }
 }
 
 const LIST_LIMIT = 50;
 const HISTORY_LIMIT = 10;
 
 /** Answers one session command from a session's shell. The caller is the session its credential names. */
-export async function handleSessionCall(input: unknown, context: { store: SessionCallerStore; catalog: SessionCallerCatalog; hostId(): Promise<string | undefined> }): Promise<Record<string, unknown>> {
+export async function handleSessionCall(input: unknown, context: { store: SessionCallerStore; catalog: SessionCallerCatalog; refs?: SessionRefContext; hostId(): Promise<string | undefined> }): Promise<Record<string, unknown>> {
   try {
     if (!input || typeof input !== 'object' || Array.isArray(input)) throw new SessionCallError('invalid_request', 'The session command is invalid.');
     const request = input as Record<string, unknown>;
@@ -221,6 +222,20 @@ export async function handleSessionCall(input: unknown, context: { store: Sessio
         ...(unavailable.length ? { unavailableProviders: unavailable.sort() } : {}),
       } };
     }
+    const described = (refs: SessionRefs) => refs.refs.map(ref => ({ address: address(ref), providerId: ref.providerId, ...(ref.title ? { title: ref.title } : {}),
+      origin: ref.origin, ...(ref.addedAt ? { addedAt: ref.addedAt } : {}) }));
+    if (request.command === 'ref') {
+      if (!context.refs) throw new SessionCallError('unsupported_configuration', 'Session references are unavailable on this Controller.');
+      if (request.action === 'list') return { result: { refs: described(await describeSessionRefs(caller, context.refs)) } };
+      if (request.action !== 'add' && request.action !== 'remove') throw new SessionCallError('invalid_request', 'Use session ref list, add or remove.');
+      const target = parseTarget(request.target, caller, host);
+      if (request.action === 'add' && context.store.isShared(target)) throw new SessionCallError('session_not_found', 'No such session on this Host.');
+      try { return { result: { refs: described(await changeSessionRef(caller, request.action, target, context.refs)) } }; }
+      catch (error) {
+        if (error instanceof SessionRefError) throw new SessionCallError(error.code, error.message);
+        throw error;
+      }
+    }
     if (request.command === 'read') {
       const target = parseTarget(request.target, caller, host);
       if (context.store.isShared(target)) throw new SessionCallError('session_not_found', 'No such session on this Host.');
@@ -233,9 +248,11 @@ export async function handleSessionCall(input: unknown, context: { store: Sessio
         if ((error as { code?: unknown }).code === 'native_session_unavailable') throw new SessionCallError('session_not_found', 'No such session on this Host.');
         throw new SessionCallError('history_unavailable', 'The session history could not be read.');
       }
+      const refs = context.refs ? described(await describeSessionRefs(target, context.refs).catch(() => ({ revision: 0, refs: [] }))) : [];
       return { result: {
         session: { address: address(target), providerId: target.providerId, ...(summary ? { title: summary.title } : {}),
-          ...(summary?.workspace ? { cwd: summary.workspace } : {}), ...(summary?.model ? { model: summary.model } : {}), state: state(target, summary), ...self(target) },
+          ...(summary?.workspace ? { cwd: summary.workspace } : {}), ...(summary?.model ? { model: summary.model } : {}), state: state(target, summary), ...self(target),
+          ...(refs.length ? { refs } : {}) },
         entries: page.entries, ...(page.nextCursor ? { nextCursor: page.nextCursor } : {}),
       } };
     }

@@ -25,11 +25,19 @@ Every command prints one JSON object.
 agent-remote-controller session read self
 agent-remote-controller session list [--provider PROVIDER] [--limit N] [--cursor CURSOR]
 agent-remote-controller session read ADDRESS [--limit N] [--cursor CURSOR] [--search TEXT] [--turn TURN_ID] [--text-offset N]
+agent-remote-controller session ref list
+agent-remote-controller session ref add ADDRESS
+agent-remote-controller session ref remove ADDRESS
 ```
 
 - `read self` shows your own session: its address, provider, title, workspace, model and state.
 - `list` shows this computer's sessions, newest first, up to 50 per page (20 by default): `address`, `providerId`, `title`, `cwd`, `updatedAt`, `state` (`running`, `waiting`, `idle`, `failed` or `unknown`), and `self: true` on yours. Pass `nextCursor` back with `--cursor`, keeping the same `--limit` and `--provider`.
 - `read ADDRESS` shows a session's header and conversation entries. An address is `<hostId>/<providerId>/<nativeSessionId>`, exactly as `list` prints it.
+- `ref list` shows the sessions yours references; `ref add` and `ref remove` change them. Change references only when the user asks.
+
+## References
+
+Your session can reference other sessions: the source a Side or Ask was opened from (`origin: "source"`) and sessions the user added (`origin: "added"`). `read self` lists them under `refs`. A `<session-references>` block in a user message lists your references at that point and replaces any earlier list, including an earlier source; a referenced session no longer listed is no longer part of this conversation. Read a referenced session when the task needs it, with `read ADDRESS`.
 
 ## Reading a conversation
 
@@ -53,3 +61,4 @@ A failed command prints `{"error":{"code":...,"message":...}}` and exits non-zer
 | `session_not_found` | No such session on this computer. | Run `list` again and copy the address. |
 | `history_unavailable` | The session's conversation could not be read. | Retry later, or tell the user. |
 | `invalid_request` | The arguments are invalid. | Fix them as the message says. |
+| `unsupported_configuration` | This Controller does not support the command. | Tell the user to update the Controller. |

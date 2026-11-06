@@ -40,6 +40,7 @@ import { AgentOperationRejectedError, AgentSessionInUseError, AgentRuntimeError,
 import { PROTOCOL_VERSION, type HostEnvironment, type HostSessionState } from '@orchardworks/agent-remote-protocol';
 import { createSessionStatePublisher, liveSessionState, type SessionStatePublisher } from './session-state-publisher.js';
 import { sessionHostAccess, type SessionCallerCatalog, type SessionCallerEndpoint, type SessionCallerStore, type SessionHostAccessSource } from './session-callers.js';
+import { changeSessionRef, describeSessionRefs, SessionRefError, validTarget, type SessionRefContext, type SessionRefStore } from './session-refs.js';
 import { InputImageStore, type InputImageStoreOptions, InputResourceStore, type InputResourceStoreOptions, createAgentRemoteRelay, createRemoteHostUplinkClient, type AgentRemoteHttpResult, type AgentRemoteRelay,
   RemoteHostCatalog, RemoteHostCatalogError, UnsupportedAgentCapabilityError, type RemoteHostControlRequest, type RemoteHostUplinkClient, type RemoteHostUplinkDiagnostic, type RemoteSessionSummary,
   type RemoteHostSessionLease, type SessionWireAgent, type SessionWireOperationExecutor } from '@orchardworks/agent-remote-relay';
@@ -75,6 +76,10 @@ export interface AgentHostDirectory {
   /** Host validates committed ancestry; exact saved prefix handles may reconstruct preparation attachments. */
   setSourceReferenceAncestors?(resolve: (nativeSessionId: string, preparationHandle?: AgentPersistenceHandle) => Promise<readonly string[]>): void;
   sourceReferences?(): Promise<Array<{ nativeSessionId: string; sourceNativeSessionId: string }>>;
+  /** The source a session references through the grant it holds or inherits; none for a session without one. */
+  sourceReference?(nativeSessionId: string): Promise<import('./session-reference.js').SourceReferenceState | undefined>;
+  /** Removes or restores a session's source reference; true when that changed it. */
+  setSourceReferenceRemoved?(nativeSessionId: string, removed: boolean): Promise<boolean>;
   /** Native history copy only; role succession and task ownership are separate. */
   forkSession?(nativeSessionId: string): Promise<string>;
   list(): Promise<readonly RemoteSessionSummary[]> | readonly RemoteSessionSummary[];
@@ -131,6 +136,8 @@ export interface AgentHostRuntimeOptions {
   inputResources?: InputResourceStoreOptions;
   /** Credentials through which sessions' shell commands reach this Controller as themselves. */
   sessionCallers?: { store: SessionCallerStore; endpoint: SessionCallerEndpoint; skills?: string };
+  /** The sessions each session refers to; without it, sessions have only their source. */
+  sessionRefs?: SessionRefStore;
 }
 export interface AgentHostRequestDiagnostic {
   event: 'host_request_started' | 'host_request_completed';
@@ -159,6 +166,8 @@ export interface AgentHostRuntime {
   readonly sessionStates: SessionStatePublisher;
   /** The Host's sessions as session commands read them. */
   readonly sessionCatalog: SessionCallerCatalog;
+  /** The sessions each session refers to, for session commands; absent without a reference store. */
+  readonly sessionRefs?: SessionRefContext;
   addRegistration(registration: AgentHostProviderRegistration): void;
   control(request: RemoteHostControlRequest): Promise<AgentRemoteHttpResult>;
   enrollFromRelay(request: RemoteHostControlRequest, context: TrustedSuccessionContext): Promise<AgentRemoteHttpResult>;
@@ -193,6 +202,7 @@ export interface AgentHost {
   shareContext(): Promise<{ hostId: string; providers: Array<{ providerId: string; displayName: string }> }>;
   shareCatalog(query: { hostId: string; providerId: string; nativeSessionId?: string; cursor?: string }): Promise<AgentRemoteHttpResult>;
   readonly sessionCatalog: SessionCallerCatalog;
+  readonly sessionRefs?: SessionRefContext;
   readonly state: 'connecting' | 'registered' | 'disconnected' | 'rejected' | 'closed';
   replaceUplink(uplink: AgentHostOptions['uplink']): Promise<{ hostId: string }>;
   close(): Promise<void>;
@@ -272,6 +282,7 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
     ready,
     get state() { return state; },
     sessionCatalog: runtime.sessionCatalog,
+    ...(runtime.sessionRefs ? { sessionRefs: runtime.sessionRefs } : {}),
     shareContext,
     async controllerInfo() { return { identity: options.controller?.identity, status: await updater?.status() }; },
     async updateController(version, operationId, clean) {
@@ -1158,6 +1169,10 @@ export function createAgentHostRuntime(options: AgentHostRuntimeOptions): AgentH
         if (url.pathname === '/remote/workspace-folders') return json(200, await browseWorkspaceFolders(url.searchParams, options.executionPolicy, (await directory.workspaces())[0]?.path));
         if (url.pathname === '/remote/workspaces') return json(200, { workspaces: await directory.workspaces() });
         if (url.pathname === '/remote/models') return json(200, await (directory.models?.() ?? { models: [] }));
+        if (url.pathname === '/remote/session/refs') {
+          if (!sessionRefs) throw new HostRequestError(400, 'unsupported_configuration', 'Session references are unavailable. Update the Controller.');
+          return json(200, await describeSessionRefs({ providerId, nativeSessionId: string(url.searchParams.get('nativeSessionId'), 'nativeSessionId') }, sessionRefs));
+        }
         const catalog = catalogs.get(providerId)!;
         if (url.pathname === '/remote/catalog') return json(200, await catalog.page({ cursor: url.searchParams.get('cursor') ?? undefined,
           limit: url.searchParams.has('limit') ? Number(url.searchParams.get('limit')) : undefined }));
@@ -1171,6 +1186,21 @@ export function createAgentHostRuntime(options: AgentHostRuntimeOptions): AgentH
       }
       if (request.method === 'POST') {
         const payload = body(request.body);
+        if (url.pathname === '/remote/session/refs') {
+          if (!sessionRefs) throw new HostRequestError(400, 'unsupported_configuration', 'Session references are unavailable. Update the Controller.');
+          const holder = { providerId: string(payload.providerId, 'providerId'), nativeSessionId: string(payload.nativeSessionId, 'nativeSessionId') };
+          const target = payload.target as unknown;
+          if ((payload.action !== 'add' && payload.action !== 'remove') || !validTarget(target) || request.sessionId
+            || Object.keys(payload).some(key => !['providerId', 'nativeSessionId', 'action', 'target'].includes(key))) {
+            throw new HostRequestError(400, 'invalid_request', 'Name the reference to add or remove.');
+          }
+          registration(holder.providerId);
+          try { return json(200, await changeSessionRef(holder, payload.action, { providerId: target.providerId, nativeSessionId: target.nativeSessionId }, sessionRefs)); }
+          catch (error) {
+            if (error instanceof SessionRefError) throw new HostRequestError(error.code === 'session_not_found' ? 404 : 400, error.code, error.message);
+            throw error;
+          }
+        }
         if (url.pathname === '/remote/session/rename') {
           const providerId = string(payload.providerId, 'providerId');
           const nativeSessionId = string(payload.nativeSessionId, 'nativeSessionId');
@@ -1319,6 +1349,23 @@ export function createAgentHostRuntime(options: AgentHostRuntimeOptions): AgentH
       return live ? liveSessionState(live.handoffAdmissionState()) : undefined;
     },
   };
+  const sessionRefs: SessionRefContext | undefined = options.sessionRefs ? {
+    store: options.sessionRefs,
+    async source(holder) {
+      if (options.providerEnabled?.(holder.providerId) === false) return undefined;
+      return registrations.get(holder.providerId)?.directory.sourceReference?.(holder.nativeSessionId);
+    },
+    async setSourceRemoved(holder, removed) {
+      const directory = registration(holder.providerId).directory;
+      if (!directory.setSourceReferenceRemoved) throw new SessionRefError('unsupported_configuration', 'This provider cannot remove a source reference.');
+      return directory.setSourceReferenceRemoved(holder.nativeSessionId, removed);
+    },
+    async title(target) {
+      if (options.providerEnabled?.(target.providerId) === false) return undefined;
+      const summary = await catalogs.get(target.providerId)?.session(target.nativeSessionId);
+      return summary ? summary.title ?? '' : undefined;
+    },
+  } : undefined;
   const automationAccess: TpmSessionAccess = {
     controllerId: successionConfig?.controllerId ?? options.controllerId ?? 'local',
     sessionRouting: successionService?.executionRouting ?? {
@@ -1375,7 +1422,7 @@ export function createAgentHostRuntime(options: AgentHostRuntimeOptions): AgentH
     }
     return enrollment.control(request, context);
   };
-  return { relay, sessionStates, sessionCatalog, executionRouting: successionService?.executionRouting, roleRouting: successionService?.roleRouting, addRegistration, control: request => control(request), enrollFromRelay, executeOperation, acquireSession, setRelayConnected: idle.setConnected,
+  return { relay, sessionStates, sessionCatalog, ...(sessionRefs ? { sessionRefs } : {}), executionRouting: successionService?.executionRouting, roleRouting: successionService?.roleRouting, addRegistration, control: request => control(request), enrollFromRelay, executeOperation, acquireSession, setRelayConnected: idle.setConnected,
     beginControllerRestart() {
       if (closed || draining) return false;
       // An owner-confirmed update closes admission immediately. Shutdown and the

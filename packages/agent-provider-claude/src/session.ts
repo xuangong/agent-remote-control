@@ -19,6 +19,8 @@ import { claudeToolDeclaration, createClaudeSessionTools, type ClaudeSessionTool
 import { ClaudeNativeEvidence, claudeEmptyHandle } from './native-evidence.js';
 import { CLAUDE_ALLOWS_BYPASS_PERMISSIONS, claudeHostSandbox, claudePermissionModeOptions, claudeReadOnlyOptions, claudeSandbox, isResumableClaudePermissionMode, type ResumableClaudePermissionMode } from './permission-modes.js';
 
+/** The Controller's session commands that only read, which a session with Host access runs without asking. */
+const SESSION_READ_COMMANDS = ['Bash(agent-remote-controller session read:*)', 'Bash(agent-remote-controller session list:*)', 'Bash(agent-remote-controller session ref list)'];
 export type ClaudeQuery = AsyncIterable<SDKMessage> & Pick<Query, 'initializationResult' | 'setPermissionMode' | 'close' | 'supportedCommands' | 'reloadSkills' | 'supportedModels' | 'setModel'> & Partial<Pick<Query, 'applyFlagSettings' | 'getContextUsage' | 'setMcpServers'>> & {
   /** The pinned SDK implements this control without declaring it on public Query. */
   getSettings?: () => Promise<unknown>;
@@ -491,9 +493,13 @@ export class ClaudeAgentSession implements AgentSession {
   private mcpServers(namespaces: ReadonlyMap<string, ClaudeSessionTools> = this.namespaceServers) {
     return { ...(this.hostTools ? { agent_host: this.hostTools.server } : {}), ...Object.fromEntries([...namespaces].map(([name, tools]) => [name, tools.server])) };
   }
-  /** Namespace tools belong to the Host, which governs what they do. A read-only session cannot ask, so its Host tools are allowed too. */
+  /**
+   * Namespace tools belong to the Host, which governs what they do. A read-only session cannot ask, so its Host tools are allowed too.
+   * A session the Host gave access reads sessions through the Controller's session commands, which only read.
+   */
   private hostToolRules(namespaces: Iterable<string>): string[] {
-    return [...(this.readOnly && this.hostTools ? ['mcp__agent_host'] : []), ...[...namespaces].map(name => `mcp__${name}`)];
+    return [...(this.readOnly && this.hostTools ? ['mcp__agent_host'] : []), ...[...namespaces].map(name => `mcp__${name}`),
+      ...(this.hostAccess ? SESSION_READ_COMMANDS : [])];
   }
   private confirmPermissionMode(mode: PermissionMode): void {
     this.settingsRevision++;

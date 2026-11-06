@@ -6,7 +6,7 @@ import type {RemoteSessionSummary} from '@orchardworks/agent-remote-relay';
 import type { AgentHistoryQuery, AgentPersistenceHandle, AgentProviderAdapter, AgentSession, AgentSessionExtensions } from '@orchardworks/agent-provider-sdk';
 import type { AgentHostDirectory, AgentHostWorkspace } from './host.js';
 import { requireSessionExtensionIdentity, sessionExtensionIdentity } from './session-extension-identity.js';
-import { SessionReferenceStore, disposeAfterSourceGrantFailure, sourceSessionExtensions, type SourceBindingReader, type SourceGrant } from './session-reference.js';
+import { SessionReferenceStore, disposeAfterSourceGrantFailure, setSourceReferenceRemoved, sourceReferenceGuard, sourceReferenceState, sourceSessionExtensions, type SourceBindingReader, type SourceGrant } from './session-reference.js';
 import type { SessionCreationStore } from './session-creation-store.js';
 import type { SessionHostAccessSource } from './session-callers.js';
 
@@ -210,7 +210,7 @@ export function createManagedStdioDirectory(
       }
       requireSourceReader(id, session);
       return page;
-    });
+    }, sourceReferenceGuard(references, () => canonicalReader ?? reader()));
     return { instructions: extensions.systemPrompt, tools: extensions.tools };
   }
   function composeExtensions(base: AgentSessionExtensions = {}, additional: AgentSessionExtensions = {}): AgentSessionExtensions {
@@ -248,6 +248,8 @@ export function createManagedStdioDirectory(
     setSourceReferenceAncestors(resolve) { sourceReferenceAncestors = resolve; },
     setSessionHostAccess(source) { hostAccess = source; },
     sourceReferences: () => references?.list() ?? Promise.resolve([]),
+    async sourceReference(id) { return sourceReferenceState(await lookupSourceGrant(id)); },
+    async setSourceReferenceRemoved(id, removed) { return setSourceReferenceRemoved(references, await lookupSourceGrant(id), removed); },
     requiresController: id => controllerTools.has(id),
     list() { if (closed) throw new Error(`${displayName} directory is closed.`); return discovery ??= discover().finally(() => { discovery = undefined; }); },
     workspaces: () => [...workspaces],

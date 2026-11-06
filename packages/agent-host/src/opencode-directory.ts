@@ -1,5 +1,5 @@
 import { sessionExtensionIdentity, requireSessionExtensionIdentity } from './session-extension-identity.js';
-import { SessionReferenceStore, disposeAfterSourceGrantFailure, sourceSessionExtensions, type SourceBindingReader } from './session-reference.js';
+import { SessionReferenceStore, disposeAfterSourceGrantFailure, setSourceReferenceRemoved, sourceReferenceGuard, sourceReferenceState, sourceSessionExtensions, type SourceBindingReader } from './session-reference.js';
 import { randomUUID } from 'node:crypto';
 import type { OpenCodeAgentProvider, OpenCodeSessionSummary } from '@orchardworks/agent-provider-opencode';
 import type { AgentProviderAdapter, AgentSession, AgentHistoryQuery, AgentPersistenceHandle } from '@orchardworks/agent-provider-sdk';
@@ -36,7 +36,7 @@ export function createOpenCodeSessionDirectory(provider: OpenCodeDirectoryProvid
       }
       if (query.sourceContext) throw new Error('Source context is unavailable on this Host.');
       return { ...await readSource(source, query), sourceSessionId: source };
-    });
+    }, sourceReferenceGuard(references, () => canonicalReader ?? reader()));
   }
   async function summary(id: string): Promise<OpenCodeSessionSummary | undefined> { assertOpen(); return provider.getSession(id); }
   async function remember(session: AgentSession): Promise<string> {
@@ -65,6 +65,8 @@ export function createOpenCodeSessionDirectory(provider: OpenCodeDirectoryProvid
     setSourceBindingReader(reader) { sourceBindingReader = reader; },
     setSourceReferenceAncestors(resolve) { sourceReferenceAncestors = resolve; },
     sourceReferences: () => references?.list() ?? Promise.resolve([]),
+    async sourceReference(id) { return sourceReferenceState(await lookupSourceGrant(id)); },
+    async setSourceReferenceRemoved(id, removed) { return setSourceReferenceRemoved(references, await lookupSourceGrant(id), removed); },
     async supportsNativePrefix(target) {
       const capability = resolveAgentNativePrefixCapability(provider);
       if (closed || !capability || capability.createdSessionIdMaxLength > 512) return false;

@@ -1,7 +1,7 @@
 import { successionResumeHandle, nativePrefixResumeHandle } from './local-succession-preparation.js';
 import { AgentSessionInUseError, serializeAgentEmptyCreationResult, resolveAgentNativePrefixCapability } from '@orchardworks/agent-provider-sdk';
 import { NativeSessionOwnerError } from './native-session-owner.js';
-import { SessionReferenceStore, disposeAfterSourceGrantFailure, sourceSessionExtensions, type SourceBindingReader } from './session-reference.js';
+import { SessionReferenceStore, disposeAfterSourceGrantFailure, setSourceReferenceRemoved, sourceReferenceGuard, sourceReferenceState, sourceSessionExtensions, type SourceBindingReader } from './session-reference.js';
 import { randomUUID } from 'node:crypto';
 import type { CodexAppServerProvider, CodexSessionSummary } from '@orchardworks/agent-provider-codex';
 import type { AgentProviderAdapter, AgentPersistenceHandle, AgentSession, AgentHistoryQuery } from '@orchardworks/agent-provider-sdk';
@@ -42,7 +42,7 @@ export function createCodexSessionDirectory(
       }
       if (query.sourceContext) throw new Error('Source context is unavailable on this Host.');
       return { ...await readSource(source, query), sourceSessionId: source };
-    });
+    }, sourceReferenceGuard(references, () => canonicalReader ?? reader()));
   }
   let listing: { sessions: CodexSessionSummary[]; completedAt: number } | undefined;
   let listingGeneration = 0;
@@ -178,6 +178,8 @@ export function createCodexSessionDirectory(
     setSourceReferenceAncestors(resolve) { sourceReferenceAncestors = resolve; },
     setSessionHostAccess(source) { hostAccess = source; },
     sourceReferences: () => references?.list() ?? Promise.resolve([]),
+    async sourceReference(id) { return sourceReferenceState(await lookupSourceGrant(id)); },
+    async setSourceReferenceRemoved(id, removed) { return setSourceReferenceRemoved(references, await lookupSourceGrant(id), removed); },
     ...(provider.forkSession ? { async forkSession(nativeSessionId: string) {
       if (closed) throw new Error('Codex directory is closed.');
       await sourceAccessCheck?.(nativeSessionId);

@@ -28,6 +28,8 @@ it('gives commands the Host variables, socket and skills on a restricted Host, a
     expect(native.launched().env).toMatchObject(hostAccess.environment);
     expect(native.launched().sandbox).toEqual({ ...restricted, ...sockets });
     expect(native.launched().plugins).toEqual([{ type: 'local', path: hostAccess.skills, skipMcpDiscovery: true }]);
+    expect(native.launched().settings.permissions.allow).toEqual(['Bash(agent-remote-controller session read:*)', 'Bash(agent-remote-controller session list:*)',
+      'Bash(agent-remote-controller session ref list)']);
     expect((await session.runtimeInfo()).persistence?.opaque).not.toContain('secret-token');
   } finally { await session.dispose(); }
 });
@@ -49,6 +51,12 @@ it('allows the socket without enabling a sandbox the user did not choose, and ke
     await session.setSessionSetting!('permissions', 'default');
     expect(native.sandboxes).toEqual([{ enabled: false, ...sockets }, sockets]);
   } finally { await session.dispose(); }
+});
+
+it('asks before session commands in a session without Host access', async () => {
+  const native = fixture();
+  const session = await ClaudeAgentSession.open({ sessionId: 'native' }, { query: native.factory });
+  try { expect(native.launched().settings).toBeUndefined(); } finally { await session.dispose(); }
 });
 
 it('passes Host access from resume options and declares support', async () => {

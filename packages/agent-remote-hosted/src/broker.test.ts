@@ -81,9 +81,18 @@ it('pairs a portable Host and preserves its catalog and native creation request'
   expect(await (await broker.handleRequest(request(`/v1/remote/hosts/${host.hostId}/create`, {
     providerId: 'codex', operationId: operationOne, cwd: '/work/project', model: 'gpt-6', reasoningEffort: 'high', planning: true,
   })))!.json()).toEqual({ agentId: 'native-agent-7', nativeSessionId: 'native-session-9' });
+  expect((await broker.handleRequest(request(`/v1/remote/hosts/${host.hostId}/session/refs?providerId=codex&nativeSessionId=native-session-9`)))!.status).toBe(200);
+  expect((await broker.handleRequest(request(`/v1/remote/hosts/${host.hostId}/session/refs`, {
+    providerId: 'codex', nativeSessionId: 'native-session-9', action: 'add', target: { providerId: 'codex', nativeSessionId: 'catalog-session' },
+  })))!.status).toBe(200);
+  expect((await broker.handleRequest(request(`/v1/remote/hosts/${host.hostId}/session/refs`, {
+    providerId: 'codex', nativeSessionId: 'native-session-9', action: 'replace', target: { providerId: 'codex', nativeSessionId: 'catalog-session' },
+  })))!.status).toBe(400);
   expect(calls).toEqual([
     { method: 'GET', path: '/remote/catalog?providerId=codex&limit=2' },
     { method: 'POST', path: '/remote/create', body: `{"providerId":"codex","operationId":"${operationOne}","cwd":"/work/project","model":"gpt-6","reasoningEffort":"high","planning":true}` },
+    { method: 'GET', path: '/remote/session/refs?providerId=codex&nativeSessionId=native-session-9' },
+    { method: 'POST', path: '/remote/session/refs', body: '{"providerId":"codex","nativeSessionId":"native-session-9","action":"add","target":{"providerId":"codex","nativeSessionId":"catalog-session"}}' },
   ]);
 }, 10_000);
 

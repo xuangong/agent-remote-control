@@ -119,6 +119,15 @@ it.each([false, true])('creates a scoped TPM over the real Host uplink and keeps
     expect(configurations[0]?.instructions).toContain(workId);
     const tools = configurations[0]!.tools!; const read = tools.find(tool => tool.name === 'read_work')!; const update = tools.find(tool => tool.name === 'update_work')!;
     const current = JSON.parse(await read.execute({}));
+    // The TPM's shell runs the same tools as role commands; other sessions hold no role, and the owner holds none.
+    const tpmSession = { kind: 'session' as const, ref: { providerId: 'codex', nativeSessionId: 'tpm-1' } };
+    const roleCommands = await host.command('role', { command: 'list' }, tpmSession) as { result: { commands: Array<{ command: string }> } };
+    expect(roleCommands.result.commands.map(entry => entry.command)).toEqual(expect.arrayContaining(['read-work', 'update-work', 'send-main-message', 'write-work-document']));
+    expect(await host.command('role', { command: 'run', name: 'read-work' }, tpmSession)).toMatchObject({ result: { id: workId, revision: current.revision } });
+    expect(await host.command('role', { command: 'run', name: 'update-work', input: { revision: current.revision, waiting: 'none', summary: 's', nextAction: 'n' }, options: [['phase', 'unknown-phase']] }, tpmSession))
+      .toMatchObject({ error: { code: 'invalid_request' } });
+    expect(await host.command('role', { command: 'list' }, { kind: 'session', ref: { providerId: 'codex', nativeSessionId: 'main' } })).toEqual({ result: { commands: [] } });
+    expect(await host.command('role', { command: 'list' }, { kind: 'owner' })).toMatchObject({ error: { code: 'invalid_request' } });
     await update.execute({ revision: current.revision, phase: 'implementing', waiting: 'main_session', summary: 'Waiting for implementation evidence', nextAction: 'Check main evidence' });
     await native.finish();
     await broker.close(); await expect.poll(() => host.state).toBe('disconnected');

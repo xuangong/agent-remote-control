@@ -35,8 +35,8 @@ import { createVscodeTunnelManager, type VscodeTunnelOptions } from './vscode-tu
 import { createOperationCache, OperationCacheError, type OperationCacheOptions } from '@orchardworks/agent-remote-relay';
 import { join } from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
-import type { AgentProviderAdapter, AgentSession, AgentSessionConfig, AgentSessionExtensions, AgentEmptyCreationResult, AgentNativeValidityToken, AgentPersistenceHandle, AgentSessionResumeOptions } from '@orchardworks/agent-provider-sdk';
-import { AgentOperationRejectedError, AgentSessionInUseError, AgentRuntimeError, serializeAgentEmptyCreationResult, serializeAgentInputMaterialization } from '@orchardworks/agent-provider-sdk';
+import type { AgentProviderAdapter, AgentSession, AgentSessionConfig, AgentSessionExtensions, AgentEmptyCreationResult, AgentNativeValidityToken, AgentPersistenceHandle, AgentSessionResumeOptions, AgentSessionTool } from '@orchardworks/agent-provider-sdk';
+import { AgentOperationRejectedError, bindAgentSessionTools, AgentSessionInUseError, AgentRuntimeError, serializeAgentEmptyCreationResult, serializeAgentInputMaterialization } from '@orchardworks/agent-provider-sdk';
 import { PROTOCOL_VERSION, type HostEnvironment, type HostSessionState } from '@orchardworks/agent-remote-protocol';
 import { createSessionStatePublisher, liveSessionState, type SessionStatePublisher } from './session-state-publisher.js';
 import { sessionHostAccess, type SessionCallerCatalog, type SessionCallerEndpoint, type SessionCallerStore, type SessionHostAccessSource } from './session-callers.js';
@@ -45,6 +45,7 @@ import { withReferenceNotes } from './session-reference-notes.js';
 import { handleSessionRequest, type SessionActions, type SessionCaller, type SessionCallerRef, type SessionCallResult } from './session-routes.js';
 import { CliError, operationUuid } from './cli-output.js';
 import { runHostRequest } from './host-command.js';
+import { handleRoleRequest } from './role-routes.js';
 import { InputImageStore, type InputImageStoreOptions, InputResourceStore, type InputResourceStoreOptions, createAgentRemoteRelay, createRemoteHostUplinkClient, type AgentRemoteHttpResult, type AgentRemoteRelay,
   RemoteHostCatalog, RemoteHostCatalogError, UnsupportedAgentCapabilityError, type RemoteHostControlRequest, type RemoteHostUplinkClient, type RemoteHostUplinkDiagnostic, type RemoteSessionSummary,
   type RemoteHostSessionLease, type SessionWireAgent, type SessionWireOperation, type SessionWireOperationExecutor } from '@orchardworks/agent-remote-relay';
@@ -178,6 +179,8 @@ export interface AgentHostRuntime {
   readonly sessionRefs?: SessionRefContext;
   /** Answers one session command; forward sends requests naming other Hosts to them. */
   callSession(request: unknown, caller: SessionCaller, forward?: (hostId: string, request: Record<string, unknown>) => Promise<SessionCallResult>): Promise<SessionCallResult>;
+  /** Answers one role command of the session that asks. */
+  callRole(request: unknown, caller: SessionCaller): Promise<SessionCallResult>;
   addRegistration(registration: AgentHostProviderRegistration): void;
   control(request: RemoteHostControlRequest): Promise<AgentRemoteHttpResult>;
   enrollFromRelay(request: RemoteHostControlRequest, context: TrustedSuccessionContext): Promise<AgentRemoteHttpResult>;
@@ -302,6 +305,7 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
     ...(runtime.sessionRefs ? { sessionRefs: runtime.sessionRefs } : {}),
     async command(scope, request, caller) {
       if (scope === 'session') return runtime.callSession(request, caller, options.forwardCommand ? (hostId, forwarded) => options.forwardCommand!('session', hostId, forwarded) : undefined);
+      if (scope === 'role') return runtime.callRole(request, caller);
       if (scope !== 'host') return { error: { code: 'invalid_request', message: `Unknown command group: ${scope}.` } };
       if (!request || typeof request !== 'object' || Array.isArray(request)) return { error: { code: 'invalid_request', message: 'The host command is invalid.' } };
       const command = request as Record<string, unknown>, hostId = await registeredHostId();
@@ -1453,6 +1457,16 @@ export function createAgentHostRuntime(options: AgentHostRuntimeOptions): AgentH
     },
   };
   /** One session command; forward reaches other Hosts, for commands that came from this Host's own sockets. */
+  /** The tools of the role a session holds, or its worker tools, which role commands run from its shell. */
+  async function roleTools(ref: SessionCallerRef): Promise<readonly AgentSessionTool[]> {
+    const holder = nativeRef(ref);
+    const extensions = await roles.extensions(genericSuccessionSource(holder) ?? holder, () => holder);
+    const worker = !extensions && workerSupport?.enabled(holder) ? [workerSupport.namespace(() => holder, false)] : [];
+    return bindAgentSessionTools([...(extensions?.tools ?? []), ...[...(extensions?.toolNamespaces ?? []), ...worker].flatMap(namespace => namespace.tools)]);
+  }
+  function callRole(request: unknown, caller: SessionCaller): Promise<SessionCallResult> {
+    return handleRoleRequest(request, caller, session => roleTools(session.ref));
+  }
   function callSession(request: unknown, caller: SessionCaller, forward?: (hostId: string, request: Record<string, unknown>) => Promise<SessionCallResult>): Promise<SessionCallResult> {
     return handleSessionRequest(request, caller, { hostId: async () => options.hostId?.(), catalog: sessionCatalog, ...(sessionRefs ? { refs: sessionRefs } : {}), actions: sessionActions,
       isShared: ref => options.sessionCallers?.store.isShared(ref) ?? false, siteOrigin: () => options.siteOrigin?.(), ...(forward ? { forward } : {}) });
@@ -1531,7 +1545,7 @@ export function createAgentHostRuntime(options: AgentHostRuntimeOptions): AgentH
     }
     return enrollment.control(request, context);
   };
-  return { relay, sessionStates, sessionCatalog, callSession, ...(sessionRefs ? { sessionRefs } : {}), executionRouting: successionService?.executionRouting, roleRouting: successionService?.roleRouting, addRegistration, control: request => control(request), enrollFromRelay, executeOperation, acquireSession, setRelayConnected: idle.setConnected,
+  return { relay, sessionStates, sessionCatalog, callSession, callRole, ...(sessionRefs ? { sessionRefs } : {}), executionRouting: successionService?.executionRouting, roleRouting: successionService?.roleRouting, addRegistration, control: request => control(request), enrollFromRelay, executeOperation, acquireSession, setRelayConnected: idle.setConnected,
     beginControllerRestart() {
       if (closed || draining) return false;
       // An owner-confirmed update closes admission immediately. Shutdown and the

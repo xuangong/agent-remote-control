@@ -109,3 +109,24 @@ it('reaches a session through the Relay when no Controller runs here, and names 
   expect(calls.at(-1)!.url).toBe('https://relay.example/u/alice-ns/v1/remote/hosts/host-b/session/call');
   await expect(commandChannel({}, async () => undefined, undefined, async () => undefined, fetcher)).rejects.toMatchObject({ code: 'no_identity' });
 });
+
+it('sends any website request as the signed-in user', async () => {
+  const { calls, fetcher } = relay(call => call.url.endsWith('/v1/remote/teams') ? { status: 200, body: { teams: [] } } : { status: 403, body: { code: 'forbidden_here', error: 'No.' } });
+  const { runApiCommand } = await import('./api-command.js');
+  let output = '';
+  const write = (text: string) => { output += text; };
+  expect(await runApiCommand(['GET', '/v1/remote/teams'], async () => credentials, write, fetcher)).toBe(0);
+  expect(JSON.parse(output)).toEqual({ teams: [] });
+  expect(calls[0]).toMatchObject({ url: 'https://relay.example/u/alice-ns/v1/remote/teams', method: 'GET' });
+  output = '';
+  expect(await runApiCommand(['POST', '/v1/remote/teams/action', '--body', '{"x":1}'], async () => credentials, write, fetcher)).toBe(1);
+  expect(JSON.parse(output).error.code).toBe('forbidden_here');
+  expect(calls[1]).toMatchObject({ method: 'POST', body: { x: 1 } });
+  for (const args of [['PATCH', '/v1/x'], ['GET', 'v1/x'], ['GET', '/v1/../auth'], ['GET', '/v1/x', '--body', '{}'], ['POST', '/v1/x', '--body', '{']]) {
+    output = '';
+    expect(await runApiCommand(args, async () => credentials, write, fetcher)).toBe(2);
+  }
+  output = '';
+  expect(await runApiCommand(['GET', '/v1/x'], async () => undefined, write, fetcher)).toBe(1);
+  expect(JSON.parse(output).error.code).toBe('signed_out');
+});

@@ -1,16 +1,29 @@
 ---
 name: prepare-arc-local
-description: Use when verifying Agent Remote Control website, Relay or Controller changes in a local instance — preparing, refreshing or inspecting the per-checkout `pnpm local` environment, driving its signed-in site with a headless browser, reading its API, or running a real session through its development Controller. Excludes releases, Worker deployment and the user's own Controller.
+description: Use for requests such as "run the site locally", "check this UI change in a browser" or "take a screenshot of the local site", and to verify website, Relay or Controller changes in this checkout's `pnpm local` instance with a headless browser or a real session. Do not use for documentation-only or unit-test-only changes, releases or deployment, or the user's own Controller.
 ---
 
 # Prepare and operate the local instance
 
-`pnpm local` runs this checkout's complete product on macOS: the website and
-Relay with a built-in local user (no sign-in) and a development Controller
-paired to it. Each checkout or worktree has its own instance, port and state
-under `~/.agent-remote-control-dev/instances/`. The
-[local development guide](../../../docs/local-development.md) owns the
-mechanism; this skill says how to use it safely and what counts as evidence.
+`pnpm local` runs this checkout's complete product: the website and Relay with a
+built-in local user (no sign-in) and a development Controller paired to it. Each
+checkout or worktree has its own instance, port and state under
+`~/.agent-remote-control-dev/instances/`. macOS is the primary platform and Linux
+is supported; Windows is not. The
+[local development guide](../../../docs/local-development.md) owns the mechanism,
+commands, environment variables and troubleshooting table; this skill says how to
+use it safely and what counts as evidence.
+
+## Before you start
+
+`pnpm local` needs a session that may listen on local ports and start background
+processes, and Chromium for screenshots. If `up` prints `This environment does not
+allow listening on local ports` or `… starting background processes`, or Chromium
+cannot start, stop and ask the user to re-run the work in a session without those
+restrictions (Claude Code: bypass-permissions mode; Codex: full access). You cannot
+change this yourself; do not work around the sandbox. Meanwhile you can still run
+unit tests. Report the Page, Feature and Model turn layers as not exercised, and
+Site and Controller too when `up` itself was refused.
 
 ## Choose the reference
 
@@ -41,45 +54,68 @@ in once. Therefore:
 - Use one browser context per script.
 - `list`, `logs` and `controller` never sign in.
 
-## Hard rules
+## Safety rules
 
 The development Controller shares `~/.claude`, `~/.codex` and the other native
 profiles with the user's own Controller.
 
-1. Sessions run only in the instance `workspace/` and you operate only sessions
-   you created there. Never take over, stop, archive or rename any other
-   session. Claude Code sessions are sandboxed in the instance; Codex and Copilot
-   sessions run with their own permissions and are confined only by their working
-   directory, so keep their prompts inside the workspace.
-2. Never touch the user's own Controller — `~/.agent-remote-control/agents-cloud-cli`,
-   its launchd service, the global `agent-remote-controller` command — or the
-   production site. Operate the instance only through `pnpm local`.
-3. Never use the instance website's Controller update, Codex daemon restart,
-   OpenCode server or VS Code tunnel controls. Controller update would replace
-   this checkout's build; the others act on processes shared with the user's
-   Controller.
-4. Never use the user's own browsers, profiles or windows. Use a headless browser
-   as described in [browser](references/browser.md).
-5. Never print cookies, pairing keys, `controller/connection.json` or whole
-   configuration files.
-6. Run `down` and `remove` only for the current checkout's instance. Other rows in
-   `pnpm local list` may belong to other agents.
-7. Before removing a worktree, run `pnpm local down` and `pnpm local remove --yes`
-   in it.
-8. A sandboxed session is refused listening sockets and detached processes:
-   `This environment does not allow listening on local ports (EPERM)` or
-   `This environment does not allow starting background processes (EPERM)` (the
-   code can also be `EACCES`). Report the refusal and ask for YOLO mode; do not
-   work around the sandbox.
-9. Report a leftover-lock message. Remove `<instance>/operation.lock` only when the
-   message says the previous command was interrupted. When it says another
-   command is changing the instance, wait for that command; if after a few
-   minutes no `pnpm local` command is running (check with `ps`), report it to
-   the user before removing the lock.
+- **Own sessions only.** Sessions run only in the instance `workspace/` and you
+  operate only sessions you created there. Never take over, stop, archive or
+  rename any other session. Claude Code sessions are sandboxed in the instance;
+  Codex and Copilot sessions run with their own permissions and are confined only
+  by their working directory, so keep their prompts inside the workspace.
+- **The user's own Controller.** Never stop, update, re-pair or reconfigure it
+  (`~/.agent-remote-control/agents-cloud-cli`, its launchd service), and never
+  touch the production site. Operate this instance only through `pnpm local`; do
+  not use the global `agent-remote-controller` command for it. (The
+  `agent-remote-sessions` skill uses that command legitimately to read the user's
+  own sessions; that is a different task.)
+- **Instance website controls.** Never use the instance website's Controller
+  update, Codex daemon restart, OpenCode server or VS Code tunnel controls.
+  Controller update would replace this checkout's build; the others act on
+  processes shared with the user's own Controller.
+- **Headless browser only.** Never use the user's own browsers, profiles or
+  windows, or tools that drive them (DevTools-attached browsers, computer use).
+  Use the headless script in [browser](references/browser.md).
+- **No secrets in output.** Never print cookies, pairing keys,
+  `controller/connection.json` or whole configuration files.
+- **Own instance only.** Run `down` and `remove` only for the current checkout's
+  instance. Other rows in `pnpm local list` may belong to other agents.
+- **Clean up before removing a worktree.** Run `pnpm local down` and
+  `pnpm local remove --yes` in it first.
+
+## Stop and ask the user
+
+These conditions end your work on the instance until the user answers. Stop and
+ask the user; do not work around them.
+
+| Condition | Ask for | If it stays open, report as not exercised |
+| --- | --- | --- |
+| The environment refuses local servers or background processes, or Chromium cannot start ([Before you start](#before-you-start)) | A session without those restrictions | Page, Feature, Model turn (Site and Controller too when `up` was refused) |
+| The instance was not started by this task and may be in use, before `up` restarts it ([lifecycle](references/lifecycle.md#before-restarting-a-running-instance)) | Permission to restart: it interrupts running sessions | Every layer |
+| A lock whose holder still runs a `pnpm local` command for this instance ([lifecycle](references/lifecycle.md#locks)) | Who runs it, and whether to wait | Every layer |
+| Something that is not this instance holds the port or the recorded Controller pid ([lifecycle](references/lifecycle.md#port-held-by-another-process)) | Whether to free it | Every layer |
+| Removing an instance with `pnpm local remove --yes`, which deletes its site state and pairing and gives it a new port. No question when the user just asked you to remove this checkout or its worktree | Confirmation | Every layer |
+| A provider the check needs is missing from the Host or has no access (not signed in, no model access, Codex without its running daemon) | The user to install it or sign in natively; never start the Codex daemon | Model turn, and Feature when it needs a session |
+
+Anything else that goes wrong — a failed check, a timed-out turn, a sign-in limit
+you waited out, an unexpected page — is a result: note it in the report and
+continue with the remaining layers. Layers verified before you stopped stay
+verified; say why each other layer was not exercised.
 
 ## Report
 
-State the instance origin, the running build's commit and dirty state, and for
-each [verification layer](references/verification.md) whether it was verified,
-failed or not exercised, with the observation. Leave the instance running when
-the user may want to look at it, and say so; otherwise stop it.
+```
+Origin: http://localhost:<port>
+Build: running <commit>[ (dirty)]; checkout <commit>[ (dirty)]
+<layer>: verified | failed | not exercised — <what you observed, or why not>
+  (one line each for Build, Site, Controller, Page, Feature, Model turn)
+Screenshots: <path> — <what it shows>
+Instance: left running at <origin> | stopped
+```
+
+Leave an instance you started running when the user may want to look at it, and
+say so with its origin. A later `up` restarts it and interrupts its sessions, so
+whoever restarts it must check `status` first. Stop an instance you started with
+`pnpm local down` when nobody needs it. An instance you found running stays
+running, restarted or not.

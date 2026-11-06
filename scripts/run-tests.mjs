@@ -42,6 +42,7 @@ const commands = {
   'live-cache-browser': ['--filter', '@orchardworks/agent-remote-lab', 'exec', 'playwright', 'test', '--config=e2e/session-live-cache.playwright.config.ts'],
   devbox: ['exec', 'node', '--test', '--test-timeout=18000', 'scripts/devbox/start.test.mjs', 'scripts/devbox/codex-profile.test.mjs', 'scripts/lib/build-provenance.test.mjs', 'scripts/controller/entrypoint.test.mjs'],
   'devbox-server': ['--filter', '@orchardworks/agent-remote-lab', 'exec', 'vitest', 'run', 'src/server/devbox.test.ts', 'src/server/devbox-preview.test.ts', 'src/server/gateway-relay.test.ts', '--testTimeout=15000', '--hookTimeout=15000'],
+  'local-env': ['exec', 'node', '--test', '--test-timeout=240000', '--test-concurrency=1', 'scripts/local/instance.test.mjs', 'scripts/local/environment.test.mjs', 'scripts/local/session.test.mjs', 'scripts/local/runner.test.mjs', 'scripts/local/command.test.mjs'],
   'opencode-server-native': ['exec', 'node', '--test', '--test-timeout=60000', '--test-concurrency=1', 'scripts/opencode-managed-server-native.test.mjs'],
   'opencode-server': ['--filter', '@orchardworks/agent-remote-controller', 'exec', 'vitest', 'run', 'src/opencode-server.test.ts', 'src/opencode-server-supervisor.test.ts', 'src/provider-discovery.test.ts', 'src/registrations.test.ts', 'src/opencode-command.test.ts', 'src/opencode-executable.test.ts', 'src/connection-config.test.ts', 'src/host.test.ts', 'src/cli-bootstrap.test.ts', '--testTimeout=15000', '--hookTimeout=15000', '--maxWorkers=1'],
   'opencode-succession-adapter': ['exec', 'node', '--test', '--test-timeout=115000', '--test-concurrency=1', '--test-name-pattern=actual adapter', 'scripts/opencode-native-succession-evidence.test.mjs'],
@@ -63,7 +64,7 @@ const commands = {
   claude: ['--filter', '@orchardworks/agent-provider-claude', 'exec', 'vitest', 'run', '--testTimeout=10000', '--hookTimeout=15000', '--maxWorkers=1'],
   'claude-succession-evidence': ['--filter', '@orchardworks/agent-provider-claude', 'exec', 'vitest', 'run', 'src/native-succession-evidence.local.test.ts', '--testTimeout=30000', '--hookTimeout=10000', '--maxWorkers=1'],
   copilot: ['--filter', '@orchardworks/agent-provider-copilot', 'run', 'test', '--hookTimeout=30000'],
-  setup: ['exec', 'node', '--test', '--test-timeout=60000', 'scripts/native-test-versions.test.mjs', 'scripts/dsh-debug.test.mjs', 'scripts/start.test.mjs', 'scripts/relay-local.test.mjs', 'scripts/prepare-relay-docker-lock.test.mjs', 'scripts/controller/entrypoint.test.mjs', 'scripts/controller/create-host.test.mjs', 'scripts/controller/install.test.mjs'],
+  setup: ['exec', 'node', '--test', '--test-timeout=60000', 'scripts/native-test-versions.test.mjs', 'scripts/dsh-debug.test.mjs', 'scripts/start.test.mjs', 'scripts/relay-local.test.mjs', 'scripts/prepare-relay-docker-lock.test.mjs', 'scripts/controller/entrypoint.test.mjs', 'scripts/controller/create-host.test.mjs', 'scripts/controller/install.test.mjs', 'scripts/local/instance.test.mjs', 'scripts/local/environment.test.mjs', 'scripts/local/session.test.mjs', 'scripts/local/runner.test.mjs', 'scripts/local/command.test.mjs'],
   // Each package's Vitest already uses every core; running packages one at a time avoids load-induced timeouts.
   unit: ['-r', '--workspace-concurrency=1', 'run', 'test'],
   // The packages changed since a commit and the packages that depend on them; the workspace root runs everything.
@@ -87,7 +88,7 @@ function stop(signal) {
     if (error.code !== 'ESRCH') throw error;
   }
 }
-const outerDeadlineMs = mode === 'live-cache-browser' ? 150_000 : mode === 'devbox' ? 30_000 : mode === 'devbox-server' ? 80_000 : mode === 'opencode-server-native' ? 90_000 : successionEvidence || opencodeSuccessionEvidence ? 120_000 : 540_000;
+const outerDeadlineMs = mode === 'live-cache-browser' ? 150_000 : mode === 'devbox' ? 30_000 : mode === 'devbox-server' ? 80_000 : mode === 'local-env' ? 300_000 : mode === 'opencode-server-native' ? 90_000 : successionEvidence || opencodeSuccessionEvidence ? 120_000 : 540_000;
 const deadline = setTimeout(() => {
   process.stderr.write(`${mode} suite exceeded its ${outerDeadlineMs / 1000} second deadline.\n`);
   stop('SIGKILL');

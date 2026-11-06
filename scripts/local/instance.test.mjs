@@ -7,7 +7,7 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { test } from 'node:test';
 import { pathToFileURL } from 'node:url';
-import { findInstance, instanceName, listInstances, localRoot, portAvailable, prepareInstance, runState, withLock, writeJson } from './instance.mjs';
+import { findInstance, instanceName, listInstances, localRoot, portAvailable, prepareInstance, runsInstance, runState, withLock, writeJson } from './instance.mjs';
 
 async function temporaryRoot(t) {
   const root = await mkdtemp(join(tmpdir(), 'arc-local-instance-'));
@@ -138,6 +138,15 @@ test('recognizes this instance runner and an orphaned Controller', async t => {
   // The runner must be started for exactly this instance directory.
   assert.equal(await runState(`${directory}-other`, runtime), 'orphaned');
   assert.equal(await runState(directory.slice(0, -1), runtime), 'orphaned');
+});
+
+test('matches a runner command only for exactly its instance directory', () => {
+  const command = 'node /src/one/scripts/local/runner.mjs /state/instances/one';
+  assert.equal(runsInstance(command, '/state/instances/one'), true);
+  assert.equal(runsInstance(command, '/state/instances/on'), false);
+  assert.equal(runsInstance(command, '/other/state/instances/one-x'), false);
+  assert.equal(runsInstance('node /src/one/scripts/other.mjs /state/instances/one', '/state/instances/one'), false);
+  assert.equal(runsInstance(undefined, '/state/instances/one'), false);
 });
 
 test('does not mistake an unknown process state for a stopped instance', async t => {

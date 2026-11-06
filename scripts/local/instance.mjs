@@ -132,11 +132,15 @@ export async function processCommand(pid) {
   }
 }
 
+/** The runner is started as `node <checkout>/scripts/local/runner.mjs <directory>`. */
+export function runsInstance(command, directory) {
+  return Boolean(command?.includes('scripts/local/runner.mjs') && command.endsWith(` ${directory}`));
+}
+
 /** A recorded PID counts only while it still runs the command this instance started. */
 export async function runState(directory, runtime) {
   if (!runtime) return 'stopped';
-  const runner = await processCommand(runtime.runnerPid);
-  if (runner?.includes('scripts/local/runner.mjs') && runner.endsWith(` ${directory}`)) return 'running';
+  if (runsInstance(await processCommand(runtime.runnerPid), directory)) return 'running';
   return (await processCommand(runtime.controllerPid))?.includes('cli.js foreground') ? 'orphaned' : 'stale';
 }
 

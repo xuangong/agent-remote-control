@@ -78,6 +78,9 @@ lsof -nP -iTCP:<port> -sTCP:LISTEN
 ps -ww -o command= -p <pid>
 ```
 
+If `lsof` or `ps` is refused or shows nothing usable, the holder cannot be
+confirmed: stop and ask the user.
+
 - `node …/scripts/local/runner.mjs <instance>`, ending in this instance's own
   directory, is its leftover: `kill <pid>`, then `up`.
 - Another instance's runner (`scripts/local/runner.mjs <other instance directory>`,
@@ -89,16 +92,18 @@ ps -ww -o command= -p <pid>
 ### Locks
 
 A message naming `<instance>/operation.lock` means a `pnpm local` command holds,
-or left behind, that lock. Decide from `<instance>/operation.lock/owner.json`,
-which holds the owner's `pid`:
+or left behind, that lock. Read the owner's `pid` from
+`<instance>/operation.lock/owner.json` and check its command with
+`ps -ww -o command= -p <pid>`. The message does not decide it: `A previous local
+command (pid <pid>) was interrupted…` means the pid is not running, but
+`Another local command is changing this instance…` also appears when an unrelated
+program reused the pid.
 
-- The pid runs a `node scripts/local/command.mjs …` command
-  (`ps -ww -o command= -p <pid>`): another command is changing this instance. Do
-  not remove the lock. Wait for it when it is yours, such as your own background
-  `up`; otherwise, or when it still runs after a few minutes, stop and ask the
-  user.
-- The pid does not run (or `ps` shows an unrelated program that reused the pid):
-  the command is gone. The message then says it was interrupted; remove
+- The command is a `pnpm local` or `node …/scripts/local/command.mjs …` process for
+  this checkout: another command is changing this instance. Do not remove the
+  lock. Wait for it when it is yours, such as your own background `up`; otherwise,
+  or when it still runs after a few minutes, stop and ask the user.
+- The pid does not run, or runs an unrelated program: the command is gone. Remove
   `<instance>/operation.lock` and retry.
 - `owner.json` is missing or unreadable: the command may be starting. Retry once
   after a few seconds; if the message is unchanged, stop and ask the user.

@@ -20,10 +20,11 @@ use it safely and what counts as evidence.
 processes, and Chromium for screenshots. If `up` prints `This environment does not
 allow listening on local ports` or `… starting background processes`, or Chromium
 cannot start, stop and ask the user to re-run the work in a session without those
-restrictions (Claude Code: bypass-permissions mode; Codex: full access). You cannot
-change this yourself; do not work around the sandbox. Meanwhile you can still run
-unit tests. Report the Page, Feature and Model turn layers as not exercised, and
-Site and Controller too when `up` itself was refused.
+restrictions (Claude Code: bypass-permissions mode; Codex: full access; the
+launcher's messages call this YOLO mode). You cannot change this yourself; do not
+work around the sandbox. Meanwhile you can still run unit tests; the
+[Stop and ask the user](#stop-and-ask-the-user) table says what to report as not
+exercised.
 
 ## Choose the reference
 
@@ -37,7 +38,10 @@ Site and Controller too when `up` itself was refused.
 
 Run every command from the checkout whose code you are verifying. An instance
 runs the build it was started with. Rebuild with `pnpm local up` after every code
-change; a check against an older build is not a check of your change.
+change; a check against an older build is not a check of your change. If the
+instance is already running, check first per
+[Before restarting a running instance](references/lifecycle.md#before-restarting-a-running-instance):
+`up` restarts it and interrupts its sessions.
 
 ## Machine use and the sign-in budget
 

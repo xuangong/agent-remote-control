@@ -35,7 +35,10 @@ Use this when a change affects sessions, or when asked for a complete local test
    If no such reply appears within the two minutes, take the screenshot (the
    snippet does), read `pnpm local controller diagnostics --source controller --limit 60`,
    and note the Model turn as failed in the report, with what both show. Do not resend the
-   prompt or retry the turn.
+   prompt or retry the turn. If the diagnostics or the page show a provider access
+   error (sign-in, quota or model access), it is not a failure: handle it as the
+   provider row of [Stop and ask the user](../SKILL.md#stop-and-ask-the-user)
+   (stop and ask; the Model turn is not exercised).
 5. Exercise the behaviour under change through the page controls — Window, Side,
    Team, references and so on — with a screenshot of each state your conclusion
    rests on and a DOM assertion for each text or state change.

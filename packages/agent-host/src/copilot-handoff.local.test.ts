@@ -15,7 +15,7 @@ async function controllerEnvironment(f: Fixture) {
     COPILOT_PROVIDER_BASE_URL: f.baseUrl, COPILOT_MODEL: 'native-fixture'};
 }
 function cliArgs(id: string) {
-  return [resolve('dist/cli.js'), 'copilot', 'resume', id, '--no-auto-update', '--no-auto-login', '--disable-builtin-mcps', '--allow-all-tools'];
+  return [resolve('dist/cli.js'), 'copilot', `--resume=${id}`, '--no-auto-update', '--no-auto-login', '--disable-builtin-mcps', '--allow-all-tools'];
 }
 async function locks(f: Fixture, id: string) {
   return (await readdir(join(f.home, 'profile', 'session-state', id))).filter(name => /^inuse\..*\.lock$/.test(name));

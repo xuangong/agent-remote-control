@@ -12,6 +12,7 @@ import { nativeFixture, nativeReply } from '../../agent-provider-claude/src/test
 import { handleSessionCall, listenSessionCalls, sessionCallerEndpoint, SessionCallerStore, SESSION_SOCKET_VARIABLE, SESSION_TOKEN_VARIABLE,
   type SessionCallerCatalog, type SessionCallerRef } from './session-callers.js';
 import { controllerSkills } from './session-skills.js';
+import { handleSessionRequest } from './session-routes.js';
 
 // The built CLI, run by the session's own shell inside its native sandbox.
 const command = `"${process.execPath}" "${resolve('dist/cli.js')}" session`;
@@ -31,7 +32,8 @@ async function controller(ref: SessionCallerRef): Promise<AgentSessionHostAccess
     session: async target => target.nativeSessionId === ref.nativeSessionId ? summary : undefined,
     history: async () => ({ entries: [{ id: 'entry', turnId: 'turn', role: 'user', text: 'NATIVE_HISTORY', textOffset: 0, totalChars: 14 }] }),
     liveState: () => 'running' };
-  const server = await listenSessionCalls(endpoint.listen, input => handleSessionCall(input, { store, catalog, hostId: async () => 'local-host' }));
+  const server = await listenSessionCalls(endpoint.listen, input => handleSessionCall(input, store, ({ scope: _scope, ...request }, caller) =>
+    handleSessionRequest(request, caller, { hostId: async () => 'local-host', catalog, isShared: () => false })));
   cleanup.push(() => server.close());
   return { environment: { [SESSION_TOKEN_VARIABLE]: token, [SESSION_SOCKET_VARIABLE]: endpoint.access }, unixSockets: [endpoint.access] };
 }

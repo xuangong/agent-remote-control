@@ -16,7 +16,7 @@ it('continues SDK history through the real native CLI and resumes that same sess
     await session.dispose();
     const state = join(f.home, 'controller'); await mkdir(state);
     await writeFile(join(state, 'connection.json'), JSON.stringify({serverUrl: 'https://relay.invalid', remoteKey: 'fixture-only', environment: {AGENT_HOST_COPILOT_HOME: join(f.home, 'profile')}}));
-    const {stdout} = await promisify(execFile)(process.execPath, [resolve('dist/cli.js'), 'copilot', 'resume', info.sessionId!,
+    const {stdout} = await promisify(execFile)(process.execPath, [resolve('dist/cli.js'), 'copilot', `--resume=${info.sessionId!}`,
       '--no-auto-update', '--no-auto-login', '--disable-builtin-mcps', '-p', 'TERMINAL_CONTINUATION', '--allow-all-tools'], {
       cwd: f.home, timeout: 20000, env: {...process.env, AGENT_HOST_STATE_DIR: state, AGENT_HOST_COPILOT: undefined, AGENT_HOST_COPILOT_HOME: undefined,
         GITHUB_TOKEN: undefined, GH_TOKEN: undefined, COPILOT_GITHUB_TOKEN: undefined,

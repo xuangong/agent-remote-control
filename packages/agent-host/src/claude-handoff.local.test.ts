@@ -20,7 +20,7 @@ it('transfers a running Claude Query to native CLI and back, preserving the nati
   await session.sendMessage('SDK_PENDING');await expect.poll(()=>calls,{timeout:10000}).toBe(2);
   const state=join(f.home,'controller');await mkdir(state);
   await writeFile(join(state,'connection.json'),JSON.stringify({serverUrl:'https://relay.invalid',remoteKey:'fixture',environment:{AGENT_HOST_CLAUDE_HOME:f.home,AGENT_HOST_CLAUDE:f.options.executable}}));
-  cli=spawn(process.execPath,[resolve('dist/cli.js'),'claude','resume',id,'--take-over','--model','claude-sonnet-4-5-20250929','--print','CLI_PENDING'],{cwd:f.cwd,
+  cli=spawn(process.execPath,[resolve('dist/cli.js'),'claude','--resume',id,'--take-over','--model','claude-sonnet-4-5-20250929','--print','CLI_PENDING'],{cwd:f.cwd,
    env:{...process.env,...f.options.env,AGENT_HOST_STATE_DIR:state,AGENT_HOST_CLAUDE:undefined,AGENT_HOST_CLAUDE_HOME:undefined},stdio:['ignore','pipe','pipe']});
   let stderr='';cli.stderr!.on('data',chunk=>stderr+=chunk);cli.stdout!.resume();
   const exited=new Promise<number|null>((resolve,reject)=>{cli!.once('exit',resolve);cli!.once('error',reject);});

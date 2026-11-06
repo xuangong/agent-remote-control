@@ -18,7 +18,7 @@ it('interrupts a real SDK turn for CLI resume, then interrupts that CLI turn to 
     await session.sendMessage('SDK_PENDING');await waitFor(()=>sdkStarted);
     const state=join(f.home,'controller');await mkdir(state);
     await writeFile(join(state,'connection.json'),JSON.stringify({serverUrl:'https://relay.invalid',remoteKey:'fixture',environment:{AGENT_HOST_COPILOT_HOME:join(f.home,'profile')}}));
-    child=spawn(process.execPath,[resolve('dist/cli.js'),'copilot','resume',id,'--take-over','--no-auto-update','--no-auto-login','--disable-builtin-mcps','--allow-all-tools','-p','CLI_PENDING'],{
+    child=spawn(process.execPath,[resolve('dist/cli.js'),'copilot',`--resume=${id}`,'--take-over','--no-auto-update','--no-auto-login','--disable-builtin-mcps','--allow-all-tools','-p','CLI_PENDING'],{
       cwd:f.cwd,env:{...process.env,AGENT_HOST_STATE_DIR:state,AGENT_HOST_COPILOT:undefined,AGENT_HOST_COPILOT_HOME:undefined,
         GITHUB_TOKEN:undefined,GH_TOKEN:undefined,COPILOT_GITHUB_TOKEN:undefined,COPILOT_PROVIDER_BASE_URL:f.baseUrl,COPILOT_MODEL:'native-fixture'},stdio:['ignore','pipe','pipe'],
     });
@@ -48,7 +48,7 @@ it.skipIf(process.platform==='win32')('automatically stops the interactive termi
     await waitFor(()=>seen.events().some(event=>event.type==='turn_completed'));
     const state=join(f.home,'controller');await mkdir(state);
     await writeFile(join(state,'connection.json'),JSON.stringify({serverUrl:'https://relay.invalid',remoteKey:'fixture',environment:{AGENT_HOST_COPILOT_HOME:join(f.home,'profile')}}));
-    terminal=spawn('python3',[resolve('tests/copilot-pty.py'),process.execPath,resolve('dist/cli.js'),'copilot','resume',id,'--take-over','--no-auto-update','--no-auto-login','--disable-builtin-mcps','--allow-all-tools'],{
+    terminal=spawn('python3',[resolve('tests/copilot-pty.py'),process.execPath,resolve('dist/cli.js'),'copilot',`--resume=${id}`,'--take-over','--no-auto-update','--no-auto-login','--disable-builtin-mcps','--allow-all-tools'],{
       cwd:f.cwd,env:{...process.env,TERM:'xterm-256color',AGENT_HOST_STATE_DIR:state,AGENT_HOST_COPILOT:undefined,AGENT_HOST_COPILOT_HOME:undefined,GITHUB_TOKEN:undefined,GH_TOKEN:undefined,COPILOT_GITHUB_TOKEN:undefined,COPILOT_PROVIDER_BASE_URL:f.baseUrl,COPILOT_MODEL:'native-fixture'},stdio:['pipe','pipe','pipe'],
     });
     let text='',buffer='',exit:unknown;

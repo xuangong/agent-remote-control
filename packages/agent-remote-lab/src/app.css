@@ -1550,26 +1550,43 @@ html[data-input-modality="pointer"] :focus { outline: none !important; }
 
 .lab-workbench-layout.lab-workbench-with-todo { grid-template-rows: auto auto minmax(0, 1fr) auto; }
 .lab-workbench-layout.lab-workbench-with-todo.lab-workbench-toolbar-heading { grid-template-rows: auto minmax(0, 1fr) auto; }
-/* References start where the composer starts, like the source reference. */
-.lab-session-refs { position: relative; display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 3px 0 5px max(0px, calc((100% - 900px) / 2)); max-width: min(100%, 900px); }
-.lab-session-ref { display: inline-flex; align-items: center; max-width: 100%; font-size: 12px; }
-.lab-session-ref button { display: flex; align-items: center; gap: 6px; min-width: 0; min-height: 30px; padding: 3px 6px 3px 5px; border: 0; border-radius: 0; background: transparent; color: var(--obs-text); font-size: 12px; }
-.lab-session-ref button:hover:not(:disabled) { background: var(--obs-surface-selected); }
-.lab-session-ref .lab-session-ref-open { max-width: 280px; }
-.lab-session-ref .lab-session-ref-remove { padding-inline: 8px; border-left: 1px solid var(--obs-border); color: var(--obs-text-secondary); }
+/* References belong to the next message: one compact row on the composer, like its pending queue, starting where the
+   composer starts and clear of its collapse tab. Their row is the last thing above the composer. */
+.lab-composer-context:not([hidden]):has(> .lab-session-refs) { display: flex; flex-direction: column; }
+.lab-composer-context > .lab-session-refs:not(.lab-session-referrers) { order: 1; }
+.lab-session-refs { position: relative; display: flex; flex-wrap: wrap; align-items: flex-end; gap: 0 6px; box-sizing: border-box; min-width: 0; max-width: min(100%, 900px); margin: 0 0 0 max(0px, calc((100% - 900px) / 2)); padding-right: 46px; }
+.lab-session-refs > .lab-fork-action-error { order: -1; flex-basis: 100%; margin: 2px 0; color: var(--obs-danger); font-size: 12px; overflow-wrap: anywhere; }
+.lab-session-ref-list, .lab-session-referrers { overflow-x: auto; overflow-y: hidden; overscroll-behavior-x: contain; scrollbar-width: thin; }
+.lab-session-ref-list { display: flex; flex: 0 1 auto; align-items: flex-end; gap: 10px; min-width: 0; max-width: calc(100% - 34px); }
+.lab-session-referrers { flex-wrap: nowrap; gap: 10px; }
+.lab-session-ref { display: inline-flex; flex: 0 0 auto; align-items: flex-end; max-width: 240px; min-width: 0; color: var(--obs-text-secondary); font-size: 11px; }
+:is(.lab-session-ref button, button.lab-session-ref) { display: flex; align-items: flex-end; gap: 4px; min-width: 0; min-height: 28px; padding: 0 2px 4px; border: 0; border-radius: 0; background: transparent; color: inherit; font-size: 11px; line-height: 16px; }
+:is(.lab-session-ref button, button.lab-session-ref):hover:not(:disabled) { background: transparent; color: var(--obs-text); }
+:is(.lab-session-ref button, button.lab-session-ref):focus-visible { outline-offset: -2px; }
+.lab-session-ref .lab-session-ref-open { flex: 0 1 auto; }
+.lab-session-refs .lab-session-ref-open { color: var(--obs-text); }
+.lab-session-ref-open:hover .lab-session-ref-title { text-decoration: underline; text-underline-offset: 3px; }
+.lab-session-ref .lab-session-ref-remove { flex: none; justify-content: center; min-width: 20px; }
 .lab-session-ref-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.lab-session-referrers { gap: 4px; }
-.lab-session-referrers-label { color: var(--obs-text-secondary); font-size: 12px; }
-.lab-session-referrers .lab-session-ref-open { gap: 6px; min-height: 30px; max-width: 280px; padding: 3px 6px 3px 5px; border-radius: 0; color: var(--obs-text); }
-.lab-session-ref-symbol { display: inline-grid; place-items: center; width: 24px; height: 24px; flex-shrink: 0; font-size: 14px; }
-.lab-session-ref-add { min-width: 30px; min-height: 30px; padding: 0 8px; border: 1px dashed var(--obs-control-border); border-radius: 6px; background: transparent; color: var(--obs-text-secondary); }
+.lab-session-referrers-label { flex: none; padding-bottom: 4px; color: var(--obs-text-secondary); font-size: 11px; line-height: 16px; }
+.lab-session-refs .lab-fork-symbol { width: 16px; height: 16px; font-size: 13px; }
+.lab-session-refs .lab-fork-symbol svg { width: 8px; height: 8px; }
+.lab-session-ref-symbol { display: inline-grid; place-items: center; width: 12px; height: 16px; flex-shrink: 0; font-size: 12px; }
+.lab-session-ref-add { position: relative; flex: none; min-width: 24px; height: 18px; min-height: 18px; margin-bottom: 4px; padding: 0 6px; border: 1px dashed var(--obs-control-border); border-radius: 5px; background: transparent; color: var(--obs-text-secondary); font-size: 13px; line-height: 1; }
 .lab-session-ref-add:hover, .lab-session-ref-add[aria-expanded="true"] { color: var(--obs-action); background: var(--obs-surface-selected); }
-.lab-session-ref-picker { position: absolute; z-index: 20; left: 0; bottom: calc(100% + 8px); display: grid; gap: 8px; width: min(420px, calc(100vw - 32px)); max-height: min(420px, 60vh); padding: 12px; overflow: hidden; border: 1px solid var(--obs-border); border-radius: 10px; background: var(--obs-surface); box-shadow: 0 6px 24px color-mix(in oklab, var(--obs-text) 12%, transparent); font-size: 12px; }
-.lab-session-ref-picker ul { display: grid; gap: 2px; margin: 0; padding: 0; overflow-y: auto; list-style: none; }
+/* The list takes the room left, so the title, filter and Cancel stay in view and the sessions scroll. */
+.lab-session-ref-picker { position: absolute; z-index: 20; left: 0; bottom: calc(100% + 8px); display: flex; flex-direction: column; gap: 8px; width: min(420px, calc(100vw - 32px)); max-height: min(420px, 60vh); padding: 12px; overflow: hidden; border: 1px solid var(--obs-border); border-radius: 10px; background: var(--obs-surface); box-shadow: 0 6px 24px color-mix(in oklab, var(--obs-text) 12%, transparent); font-size: 12px; }
+.lab-session-ref-picker > * { flex: none; }
+.lab-session-ref-picker ul { display: grid; flex: 0 1 auto; align-content: start; gap: 2px; min-height: 0; margin: 0; padding: 0; overflow-y: auto; overscroll-behavior: contain; list-style: none; }
 .lab-session-ref-picker li button { display: grid; gap: 2px; width: 100%; padding: 6px 8px; border: 0; border-radius: 6px; background: transparent; color: var(--obs-text); text-align: left; }
 .lab-session-ref-picker li button:hover:not(:disabled) { background: var(--obs-surface-selected); }
 .lab-session-ref-picker small { color: var(--obs-text-secondary); }
-.lab-session-ref-picker > button { justify-self: start; }
+.lab-session-ref-picker > button { align-self: flex-start; }
 @media (pointer: coarse) {
-  .lab-session-ref button, .lab-session-ref-add, .lab-session-ref-picker li button { min-height: 44px; }
+  /* Above the generic 44px touch size, like the pending queue; the add button keeps its size and widens its target. */
+  .lab-composer-dock .lab-session-refs :is(.lab-session-ref button, button.lab-session-ref) { min-width: 0; min-height: 36px; }
+  .lab-composer-dock .lab-session-refs .lab-session-ref .lab-session-ref-remove { min-width: 28px; }
+  .lab-composer-dock .lab-session-refs .lab-session-ref-add { min-width: 24px; min-height: 18px; }
+  .lab-session-ref-add::after { content: ''; position: absolute; inset: -12px -8px -4px; }
+  .lab-session-ref-picker li button { min-height: 44px; }
 }

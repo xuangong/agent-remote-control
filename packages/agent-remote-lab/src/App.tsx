@@ -1,5 +1,6 @@
 import { WindowSessionBridgeContext } from './window-session-bridge-context.js';
 import { parseWindowFeature } from './window-feature-views.js';
+import { windowTitleEdits } from './window-titles.js';
 import { useWindowSessionBridge } from './hooks/useWindowSessionBridge.js';
 import { createWindowView, primaryWindowViews, windowPrimaryViewId, type WindowEdit } from '@orchardworks/agent-remote-protocol';
 import { windowSessionBinding } from './window-workspace.js';
@@ -1538,16 +1539,13 @@ function AppContent({
   useEffect(() => {
     if (!sharedWindow || !confirmedTitles?.size || titleProjection.current === confirmedTitles) return;
     titleProjection.current = confirmedTitles;
-    let changed = false;
-    const views = sharedWindow.views.map(view => {
-      const title = view.binding && confirmedTitles.get(sessionKey(view.binding));
-      if (title === undefined || title === view.binding!.title) return view;
-      changed = true; return { ...view, binding: { ...view.binding!, title } };
-    });
-    if (!changed) return;
-    const { schemaVersion: _, id: __, revision: ___, ...layout } = sharedWindow;
-    try { editWindow({ type: 'layout.apply', layout: { ...layout, views } }); }
-    catch (error) { setSessionNotice(sessionConnectionFailure(error, false)); }
+    try {
+      for (const edit of windowTitleEdits(sharedWindow, confirmedTitles)) {
+        // A view given another session meanwhile keeps it; that is not a failure to report.
+        if (edit.type === 'view.bind') void windowWorkspace.operate(edit).catch(() => {});
+        else editWindow(edit);
+      }
+    } catch (error) { setSessionNotice(sessionConnectionFailure(error, false)); }
   }, [sharedWindow?.id, sharedWindow?.revision, confirmedTitles]);
   useEffect(() => {
     let timer: ReturnType<typeof setTimeout> | undefined;

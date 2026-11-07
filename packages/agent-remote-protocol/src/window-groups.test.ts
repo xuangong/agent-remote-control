@@ -73,6 +73,11 @@ it('adds and removes appearances, always keeping one', () => {
   expect(refusal(() => applyGroupOperation(both, { type: 'bots.add', rank: 'n' }))).toBe('section_exists');
   expect(applyGroupOperation(sectionOnly, { type: 'window.add' }).presentation).toBeUndefined();
   expect(applyGroupOperation(both, { type: 'section.rank', rank: 'n' }).bots?.rank).toBe('n');
+  expect(refusal(() => applyGroupOperation(group, { type: 'bots.remove' }))).toBe('section_missing');
+  expect(refusal(() => applyGroupOperation(group, { type: 'window.add' }))).toBe('window_exists');
+  expect(refusal(() => applyGroupOperation(sectionOnly, { type: 'window.remove' }))).toBe('window_missing');
+  expect(refusal(() => applyGroupOperation({ ...both, window: { ...both.window, revision: Number.MAX_SAFE_INTEGER } }, { type: 'section.rank', rank: 'n' })))
+    .toBe('other:The Window revision limit has been reached.');
 });
 
 it('keeps details only for views that are still bots', () => {
@@ -83,6 +88,14 @@ it('keeps details only for views that are still bots', () => {
   ] });
   expect(group.window.revision).toBe(1);
   expect(group.bots?.members.main).toEqual({ label: 'Writes the release notes', picture: { shape: 'hexagon', color: '#2f6fed' }, pinned: true });
+  // A view id reused within one batch starts without the details of the bot that held it.
+  expect(applyGroupOperation(group, { type: 'batch', operations: [
+    { type: 'view.close', viewId: 'dock' }, { type: 'view.create', view: createWindowView('dock', session('z')) },
+  ] }).bots?.members.dock).toBeUndefined();
+  // A batch of several layout edits advances the revision once.
+  expect(applyGroupOperation(section(window), { type: 'batch', operations: [
+    { type: 'rename', title: 'First' }, { type: 'view.collapse', viewId: 'dock', collapsed: true }, { type: 'rename', title: 'Second' },
+  ] }).window.revision).toBe(1);
   group = applyGroupOperation(group, { type: 'view.close', viewId: 'dock' });
   expect(Object.keys(group.bots?.members ?? {})).toEqual(['main']);
   expect(refusal(() => applyGroupOperation(group, { type: 'bot.update', viewId: 'dock', details: {} }))).toBe('bot_not_found');
@@ -95,6 +108,13 @@ it('lets a bot change its title but not its conversation', () => {
   expect(refusal(() => applyGroupOperation(group, { type: 'view.bind', viewId: 'main', binding: { ...session('a'), sessionIntent: 'history' } }))).toBe('bot_view');
   // Without a section the same view is an ordinary Window view and may show another session.
   expect(applyGroupOperation({ window: group.window }, { type: 'view.bind', viewId: 'main', binding: session('b') }).window.views[0]?.binding?.nativeSessionId).toBe('b');
+  // Rule 1 follows the state within a batch.
+  expect(refusal(() => applyGroupOperation({ window: group.window }, { type: 'batch', operations: [
+    { type: 'bots.add', rank: 'm' }, { type: 'view.bind', viewId: 'main', binding: session('b') },
+  ] }))).toBe('bot_view');
+  expect(applyGroupOperation({ window: group.window }, { type: 'batch', operations: [
+    { type: 'view.bind', viewId: 'main', binding: session('b') }, { type: 'bots.add', rank: 'm' },
+  ] }).window.views[0]?.binding?.nativeSessionId).toBe('b');
   // Succession rebinds through the layout, which stays allowed.
   const { schemaVersion: _version, id: _id, revision: _revision, ...layout } = group.window;
   const succeeded = applyGroupOperation(group, { type: 'layout.apply', layout: { ...layout, views: [{ ...layout.views[0]!, binding: session('c') }] } });
@@ -103,7 +123,7 @@ it('lets a bot change its title but not its conversation', () => {
 
 it('refuses an invalid group or operation and leaves a refused batch without effect', () => {
   const group = section(windowOf('w', createWindowView('main', session('a'), 'primary')));
-  expect(refusal(() => applyGroupOperation({ window: group.window, presentation: { window: false } }, { type: 'window.add' }))).toBe('invalid_window_operation');
+  expect(refusal(() => applyGroupOperation({ window: group.window, presentation: { window: false } }, { type: 'window.add' }))).toBe('other:The group or operation is invalid.');
   const before = JSON.stringify(group);
   expect(refusal(() => applyGroupOperation(group, { type: 'batch', operations: [{ type: 'rename', title: 'Changed' }, { type: 'bots.add', rank: 'n' }] }))).toBe('section_exists');
   expect(JSON.stringify(group)).toBe(before);

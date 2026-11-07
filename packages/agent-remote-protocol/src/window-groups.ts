@@ -141,17 +141,20 @@ function edit(group: WindowGroup, item: WindowGroupEdit): WindowGroup {
           fail('bot_view', 'A bot keeps its conversation. Open the other session beside it.');
         }
       }
-      return { ...group, window: applyWindowOperation(group.window, item) };
+      // A batch advances the revision once, at the end; the delegated edit must not advance it as well.
+      return { ...group, window: { ...applyWindowOperation(group.window, item), revision: group.window.revision } };
     }
   }
 }
 
 /** Applies one explicit command atomically and advances the Window revision once, as applyWindowOperation does. */
 export function applyGroupOperation(source: WindowGroup, operation: WindowGroupOperation): WindowGroup {
-  if (!isWindowGroup(source) || !Value.Check(WindowGroupOperation, operation)) fail('invalid_window_operation', 'The group or operation is invalid.');
+  if (!isWindowGroup(source) || !Value.Check(WindowGroupOperation, operation)) throw new WindowLayoutError('invalid_window_operation', 'The group or operation is invalid.');
+  if (source.window.revision >= Number.MAX_SAFE_INTEGER) throw new WindowLayoutError('window_revision_limit', 'The Window revision limit has been reached.');
   let result = clone(source);
-  for (const item of operation.type === 'batch' ? operation.operations : [operation]) result = edit(result, item);
-  result = pruned({ ...result, window: { ...result.window, revision: source.window.revision + 1 } });
-  if (!isWindowGroup(result)) fail('invalid_window_group', 'The resulting group is invalid.');
+  // Prune after every edit so details never pass to a different bot that reuses a closed bot's view id.
+  for (const item of operation.type === 'batch' ? operation.operations : [operation]) result = pruned(edit(result, item));
+  result = { ...result, window: { ...result.window, revision: source.window.revision + 1 } };
+  if (!isWindowGroup(result)) throw new WindowLayoutError('invalid_window_group', 'The resulting group is invalid.');
   return result;
 }

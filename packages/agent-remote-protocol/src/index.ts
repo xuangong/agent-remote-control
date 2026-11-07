@@ -57,3 +57,4 @@ export * from './resource-input.js';
 
 export * from './window-workspace.js';
 export * from './window-workspace-operations.js';
+export * from './window-groups.js';

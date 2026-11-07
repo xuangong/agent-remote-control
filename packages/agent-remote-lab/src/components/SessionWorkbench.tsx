@@ -292,8 +292,32 @@ const WorkbenchTimeline = memo(function WorkbenchTimeline({ nativeTakeover, read
     const request = JSON.stringify([state?.agent?.id, state?.timeline.epoch, revealEntry.requestId]);
     if (consumedReveal.current !== request && scroll.revealEntry(revealEntry.key, revealEntry.align)) consumedReveal.current = request;
   }, [visible, revealEntry, state?.agent?.id, state?.timeline.epoch, state?.timeline.entries, display, lettersVisible]);
+  // The search panel floats over the top of the timeline. While it shows a chosen result, the timeline gets that much room
+  // above its oldest entry, so that the result is revealed below the panel, the first one included. Opening the panel and
+  // searching leave the reading position alone.
+  const stage = useRef<HTMLDivElement>(null);
+  const searchInset = () => {
+    const panel = stage.current?.querySelector<HTMLElement>('.lab-timeline-controls > .agent-session-search');
+    const timeline = scroll.viewportRef.current;
+    if (!panel || !timeline) return 0;
+    return Math.max(0, Math.ceil(panel.getBoundingClientRect().bottom - timeline.getBoundingClientRect().top));
+  };
+  const applySearchInset = () => {
+    const inset = searchOpen && selectedSearchKey ? searchInset() : 0;
+    if (inset) stage.current?.style.setProperty('--lab-search-inset', `${inset}px`);
+    else stage.current?.style.removeProperty('--lab-search-inset');
+    return inset;
+  };
   useLayoutEffect(() => {
-    if (visible && selectedSearchKey) scroll.revealEntry(selectedSearchKey);
+    applySearchInset();
+    const panel = stage.current?.querySelector('.lab-timeline-controls > .agent-session-search');
+    if (!searchOpen || !selectedSearchKey || !panel || typeof ResizeObserver === 'undefined') return;
+    const observer = new ResizeObserver(() => { applySearchInset(); });
+    observer.observe(panel);
+    return () => observer.disconnect();
+  }, [searchOpen, selectedSearchKey]);
+  useLayoutEffect(() => {
+    if (visible && selectedSearchKey) scroll.revealEntry(selectedSearchKey, 'center', applySearchInset());
   }, [visible, selectedSearchKey, searchSelection?.request]);
   const hasReplica = state !== undefined;
   const isAttaching = !hasReplica && attachingAgentId !== undefined;
@@ -302,7 +326,7 @@ const WorkbenchTimeline = memo(function WorkbenchTimeline({ nativeTakeover, read
     onClick={() => { if (searchOpen) closeSearch(); else setOpenSearchScope(searchScope); }}>
     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5" /><path d="m16 16 5 5" /></svg>
   </button> : null;
-  return <div className="lab-timeline-stage" onKeyDownCapture={event => {
+  return <div ref={stage} className="lab-timeline-stage" onKeyDownCapture={event => {
       if (event.target instanceof Node && !event.currentTarget.contains(event.target)) return;
       if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'f' && state?.timeline.initialized) {
         event.preventDefault(); event.stopPropagation(); setOpenSearchScope(searchScope);

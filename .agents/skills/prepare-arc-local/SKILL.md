@@ -1,6 +1,6 @@
 ---
 name: prepare-arc-local
-description: Use for requests such as "run the site locally", "check this UI change in a browser" or "take a screenshot of the local site", and to verify website, Relay or Controller changes in this checkout's `pnpm local` instance with a headless browser or a real session. Do not use for documentation-only or unit-test-only changes, releases or deployment, or the user's own Controller.
+description: Use when asked to run Agent Remote Control locally, to test or verify a website, Relay, Controller or command line change end to end on this machine, to reproduce a bug against a real session, to take a screenshot of the local site, or to use agent-remote-controller-dev. Not for documentation-only or unit-test-only changes, releases, deployment, or the user's own Controller.
 ---
 
 # Prepare and operate the local instance
@@ -66,6 +66,9 @@ exercised.
 | Create, drive and read sessions; Hosts, Windows | [command line](references/cli.md) |
 | Read state or prepare fixtures through the API | [api](references/api.md) |
 | Run a real session end to end | [test loop](references/test-loop.md) |
+
+Read only the rows your task needs; the references link each other where a step
+needs another.
 
 Run every command from the checkout whose code you are verifying. An instance
 runs the build it was started with. Rebuild with `pnpm local up` after every code

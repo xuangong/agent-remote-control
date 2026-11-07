@@ -9,7 +9,7 @@ A lower layer passing says nothing about a higher one.
 | Site | `status` reports `running` and `local user: signed in`. |
 | Controller | `status` reports `uplink registered`; `agent-remote-controller-dev host providers` shows the expected providers `enabled`. |
 | Page | A headless screenshot of the signed-in page taken after the change, which you opened and read, showing the changed UI. See [browser](browser.md). |
-| Feature | The changed behaviour exercised through real page controls, with a read screenshot of each state the conclusion rests on and a DOM assertion for each text or state change. |
+| Feature | The changed behaviour exercised through the surface it changes. Page: real page controls, with a read screenshot of each state the conclusion rests on and a DOM assertion for each text or state change. Command line: the changed command run as its users run it, by a test session when sessions use it ([command line](cli.md#commands-the-sessions-run)), with its JSON output checked. |
 | Model turn | A session created in the instance workspace completes a real reply, read back with `session read` or in the page. See [test loop](test-loop.md). |
 
 The Build, Site and Controller rows come from the `status` that `up` prints and

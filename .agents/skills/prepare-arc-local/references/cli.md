@@ -24,9 +24,10 @@ agent-remote-controller-dev api GET /v1/remote/hosts
 agent-remote-controller-dev --skill
 ```
 
-Every command prints one JSON object. Exit codes: 0 done, 1 failed (see
-`error.code`), 2 wrong usage, 3 a change may or may not have happened (inspect
-before you repeat it with the same `--operation-id`). A session's address is
+`session read` returns at most 10 entries per call (`--limit 0..10`, newest
+first; `--cursor` pages back). Every command prints one JSON object. Exit codes:
+0 done, 1 failed (see `error.code`), 2 wrong usage, 3 a change may or may not
+have happened (inspect before you repeat it with the same `--operation-id`). A session's address is
 `<hostId>/<providerId>/<nativeSessionId>`; the instance has one Host,
 `Dev · <checkout directory name>`. `--skill` prints the `agent-remote` skill that
 this checkout's Controller gives its sessions: read it for every command and

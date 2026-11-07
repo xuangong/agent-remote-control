@@ -28,6 +28,22 @@ lists the flags. `--out` is required. `HOST` is a Host `id` from
 ignored `.tmp/`. The file is only a capture: open it and say what it shows
 ([screenshot evidence](verification.md#screenshot-evidence)).
 
+## Find the controls first
+
+Before writing locators, print the page's roles and accessible names instead of
+searching the source:
+
+```bash
+node .agents/skills/prepare-arc-local/scripts/page-map.mjs '/?host=…&provider=…&session=…' '.agent-message-assistant'
+```
+
+The second argument is a CSS selector to wait for (default `main.lab-shell`).
+Each line reads `role "name"`; select it with
+`getByRole(role, { name, exact: true })` inside the region that contains it, since
+names such as `View options` repeat across regions. A session link opens the
+session alone; panels such as the sidebar open from `View options`. Run the map
+again after a step that changes the page, such as opening a dialog.
+
 ## Scripted interaction
 
 For clicks, typing and assertions, save a short script as

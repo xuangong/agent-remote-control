@@ -2,11 +2,11 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { controllerEnvironment } from './environment.mjs';
 
-const instance = { controller: '/dev/i/controller', workspace: '/dev/i/workspace', record: { source: '/src/.worktrees/feature-x' } };
+const instance = { controller: '/dev/i/controller', workspace: '/dev/i/workspace', bin: '/dev/i/bin', record: { source: '/src/.worktrees/feature-x' } };
 const allowedParentVariables = ['HOME', 'USER', 'LOGNAME', 'SHELL', 'LANG', 'LC_ALL', 'LC_CTYPE', 'TMPDIR', 'TERM', 'SSH_AUTH_SOCK',
   'HTTP_PROXY', 'HTTPS_PROXY', 'NO_PROXY', 'ALL_PROXY', 'http_proxy', 'https_proxy', 'no_proxy', 'all_proxy', 'PATH'];
 const instanceVariables = ['AGENT_HOST_STATE_DIR', 'AGENT_HOST_WORKSPACE', 'AGENT_HOST_ALLOWED_WORKSPACE_ROOTS', 'AGENT_HOST_NAME',
-  'AGENT_HOST_TRUSTED_FULL_CONTROL', 'AGENT_HOST_CODEX_AUTO_START', 'AGENT_HOST_OPENCODE_AUTO_START'];
+  'AGENT_HOST_TRUSTED_FULL_CONTROL', 'AGENT_HOST_CODEX_AUTO_START', 'AGENT_HOST_OPENCODE_AUTO_START', 'AGENT_HOST_SESSION_BIN', 'AGENT_HOST_CODEX_USER_SKILLS'];
 const defaultPath = '/usr/bin:/bin:/usr/sbin:/sbin';
 
 test('passes only the allowlisted parent environment', () => {
@@ -60,4 +60,10 @@ test('confines the Controller to the instance', () => {
   assert.equal(environment.AGENT_HOST_NAME, 'Dev · feature-x');
   assert.equal(environment.AGENT_HOST_CODEX_AUTO_START, '0');
   assert.equal(environment.AGENT_HOST_OPENCODE_AUTO_START, '0');
+});
+
+test('gives sessions the instance command directory and leaves the Codex home skills alone', () => {
+  const environment = controllerEnvironment({ AGENT_HOST_CODEX_USER_SKILLS: '1' }, instance);
+  assert.equal(environment.AGENT_HOST_SESSION_BIN, '/dev/i/bin');
+  assert.equal(environment.AGENT_HOST_CODEX_USER_SKILLS, '0');
 });

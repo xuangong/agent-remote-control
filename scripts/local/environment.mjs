@@ -29,5 +29,9 @@ export function controllerEnvironment(parent, instance) {
     // The instance never starts, restarts or updates the Codex daemon or OpenCode server; they belong to the user's Controller.
     AGENT_HOST_CODEX_AUTO_START: '0',
     AGENT_HOST_OPENCODE_AUTO_START: '0',
+    // In the instance's sessions, agent-remote-controller is this instance's development command (bin/ holds it),
+    // and the skill they read stays the one installed for the user: nothing is written to the Codex home.
+    AGENT_HOST_SESSION_BIN: instance.bin,
+    AGENT_HOST_CODEX_USER_SKILLS: '0',
   };
 }

@@ -4,6 +4,7 @@ import { once } from 'node:events';
 import { existsSync } from 'node:fs';
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { createServer } from 'node:net';
+import { createHash } from 'node:crypto';
 import { homedir, tmpdir } from 'node:os';
 import { basename, join, resolve } from 'node:path';
 import { promisify } from 'node:util';
@@ -95,6 +96,41 @@ test('serves a signed-in site with a registered development Controller and keeps
   assert.deepEqual(JSON.parse((await local('controller', 'host', 'list')).stdout).hosts.map(host => host.name), [`Dev · ${basename(source)}`]);
   assert.equal(JSON.parse((await local('controller', 'login', 'status')).stdout).signedIn, true);
   assert.match((await local('controller', 'login')).stdout, /command line is signed in to http:\/\/localhost:\d+/);
+
+  // agent-remote-controller-dev is installed beside the user's commands and chooses the instance by directory.
+  const dev = join(environment.HOME, '.local', 'bin', 'agent-remote-controller-dev');
+  const devResult = async (cwd, args, env = {}) => {
+    try { const { stdout, stderr } = await run(dev, args, { cwd, env: { ...environment, ...env }, timeout: 60_000 }); return { code: 0, stdout, stderr }; }
+    catch (error) { if (typeof error.code !== 'number') throw error; return { code: error.code, stdout: error.stdout, stderr: error.stderr }; }
+  };
+  const info = JSON.parse((await devResult(source, ['--build-info'])).stdout);
+  assert.deepEqual([info.origin, info.source, info.state], [report.origin, source, 'running']);
+  for (const cwd of [source, join(report.directory, 'workspace'), root]) {
+    const listed = await devResult(cwd, ['session', 'list']);
+    assert.equal(listed.code, 0, cwd);
+    assert.ok(Array.isArray(JSON.parse(listed.stdout).sessions), cwd);
+  }
+  const update = await devResult(source, ['update', '--check']);
+  assert.equal(update.code, 1);
+  assert.match(update.stderr, /pnpm local up there; your installed agent-remote-controller was not changed/);
+  const elsewhere = join(root, 'other-checkout');
+  await mkdir(join(elsewhere, 'scripts', 'local'), { recursive: true });
+  await mkdir(join(elsewhere, '.git'));
+  await writeFile(join(elsewhere, 'scripts', 'local', 'dev-command.mjs'), '');
+  assert.match((await devResult(elsewhere, ['session', 'list'])).stderr, /other-checkout has no local instance\. Run pnpm local up there\./);
+
+  // In the instance's sessions, agent-remote-controller is the development command for this instance, wherever they run it.
+  const shim = join(report.directory, 'bin', 'agent-remote-controller');
+  // Outside every checkout, the instance pnpm local up started last.
+  assert.equal(JSON.parse((await devResult('/', ['--build-info'])).stdout).origin, report.origin);
+  assert.equal(JSON.parse((await run(shim, ['--build-info'], { cwd: '/', env: environment })).stdout).origin, report.origin);
+  // A session credential of another Controller is dropped; one of this instance's sessions is used.
+  const other = await run(shim, ['session', 'list'], { cwd: '/', env: { ...environment, AGENT_REMOTE_SESSION_TOKEN: 'x', AGENT_REMOTE_SESSION_SOCKET: '/tmp/arc-sessions-0000000000000000.sock' } });
+  assert.ok(Array.isArray(JSON.parse(other.stdout).sessions));
+  const own = await devResult('/', ['session', 'list'], { ARC_LOCAL_INSTANCE: report.directory, AGENT_REMOTE_SESSION_TOKEN: 'not-a-session',
+    AGENT_REMOTE_SESSION_SOCKET: join(tmpdir(), `arc-sessions-${createHash('sha256').update(join(report.directory, 'controller')).digest('hex').slice(0, 16)}.sock`) });
+  assert.notEqual(own.code, 0);
+  assert.ok(JSON.parse(own.stdout).error, own.stdout);
   for (const [args, refusal] of [[['session', 'attach', 'local/claude/x'], /session attach runs a native CLI/], [['host', 'update'], /run pnpm local up instead/],
     [['host', 'tunnel', 'start', '--accept-license'], /only reports its status/], [['login', '--server', 'http://elsewhere'], /takes no options/]]) {
     const refused = await localResult({}, 'controller', ...args);

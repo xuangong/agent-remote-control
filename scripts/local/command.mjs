@@ -1,16 +1,17 @@
-import { execFile, spawn } from 'node:child_process';
+import { spawn } from 'node:child_process';
 import { existsSync, realpathSync } from 'node:fs';
 import { open, readFile, rm } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
-import { parseArgs, promisify } from 'node:util';
+import { parseArgs } from 'node:util';
 import { controllerBuildProvenance } from '../lib/build-provenance.mjs';
 import { packageManager } from '../lib/package-manager.mjs';
-import { controllerEnvironment } from './environment.mjs';
+import { commandLineSignedIn, controllerCli as cliOf, controllerCommand, controllerUplink as uplinkOf, runAttached, signInCommandLine as signIn } from './controller.mjs';
 import {
   findInstance, listInstances, portAvailable, prepareInstance, processAlive, processCommand, readJson, runState, runsInstance, spawnDetached, withLock,
 } from './instance.mjs';
-import { approveCommandLine, screenshot, signedInUser, userApi } from './session.mjs';
+import { DEV_COMMAND, forgetDefaultInstance, installDevCommand } from './dev-install.mjs';
+import { screenshot, signedInUser, userApi } from './session.mjs';
 
 if (process.platform === 'win32') {
   process.stderr.write('pnpm local supports macOS and Linux.\n');
@@ -18,8 +19,9 @@ if (process.platform === 'win32') {
 }
 
 const source = realpathSync(resolve(import.meta.dirname, '../..'));
-const controllerCli = join(source, 'packages/agent-host/dist/cli.js');
-const controllerCommands = new Set(['status', 'diagnostics', 'session', 'host', 'window', 'api', 'login', 'logout', '--skill', 'help', '--help', '-h', '--version']);
+const controllerCli = cliOf(source);
+const controllerUplink = instance => uplinkOf(source, instance);
+const signInCommandLine = instance => signIn(source, instance);
 const usage = `Usage: pnpm local <command>
   up [--no-build]        Build, then start or restart this checkout's instance
   down                   Stop this checkout's instance; its state is kept
@@ -27,7 +29,7 @@ const usage = `Usage: pnpm local <command>
   logs [--follow]        Runner and Controller output of the current run
   list [--json]          Every local instance on this machine
   remove --yes           Delete this checkout's stopped instance
-  controller <args>      Controller CLI for this instance: session, host, window, api, login, status, diagnostics, --skill
+  controller <args>      Controller CLI for this instance, as ${DEV_COMMAND} <args>: session, host, window, api, login, status, --skill
   api <v1/path> [--method M] [--data JSON]   Signed-in JSON request to the instance
   screenshot <path> --out FILE [--viewport WxH] [--wait-for CSS] [--full-page]
 Exit codes: 0 success, 1 failure, 3 status found no instance or one that is not ready.
@@ -47,15 +49,6 @@ async function requireRunning() {
   return instance;
 }
 
-/** Runs a child on this terminal and resolves with its exit code; a child that cannot start rejects with the reason. */
-async function runAttached(file, args, options) {
-  const child = spawn(file, args, { stdio: 'inherit', ...options });
-  return await new Promise((resolveExit, reject) => {
-    child.once('error', error => reject(new Error(`Could not run ${file}: ${error.message}`)));
-    child.once('exit', code => resolveExit(code ?? 1));
-  });
-}
-
 async function runStep(command, args) {
   const [file, argv] = command === 'pnpm' ? packageManager('pnpm', args) : [command, args];
   const code = await runAttached(file, argv, { cwd: source });
@@ -73,61 +66,6 @@ function assertBuilt() {
   const web = process.env.ARC_LOCAL_WEB_DIST ?? join(source, 'dist/relay/web');
   const missing = [controllerCli, join(source, 'dist/devbox/server.mjs'), join(web, 'index.html')].filter(path => !existsSync(path));
   if (missing.length) throw new Error(`Build artifacts are missing (${missing.join(', ')}). Run pnpm local up without --no-build.`);
-}
-
-async function controllerUplink(instance) {
-  try {
-    const { stdout } = await promisify(execFile)(process.execPath, [controllerCli, 'status'],
-      { env: controllerEnvironment(process.env, instance), cwd: instance.workspace, timeout: 10_000, maxBuffer: 65536 });
-    return /uplink: ([a-z_-]+)/.exec(stdout)?.[1];
-  } catch { return undefined; }
-}
-
-function controllerOutput(instance, args) {
-  return promisify(execFile)(process.execPath, [controllerCli, ...args],
-    { env: controllerEnvironment(process.env, instance), cwd: instance.workspace, timeout: 15_000, maxBuffer: 65536 });
-}
-
-/** Whether the instance's Controller command line holds a sign-in the site still accepts. */
-async function commandLineSignedIn(instance) {
-  try { return JSON.parse((await controllerOutput(instance, ['login', 'status'])).stdout).signedIn === true; }
-  catch { return false; }
-}
-
-/**
- * Signs the instance's Controller command line in as the local user, so that window, api and the commands the
- * Relay answers work: it starts the product's own login and allows its code as the approval page would.
- */
-async function signInCommandLine(instance) {
-  if (await commandLineSignedIn(instance)) return;
-  const child = spawn(process.execPath, [controllerCli, 'login', '--server', instance.record.origin, '--no-browser'],
-    { env: controllerEnvironment(process.env, instance), cwd: instance.workspace, stdio: ['ignore', 'pipe', 'pipe'] });
-  const exited = new Promise(resolveExit => {
-    child.once('error', () => resolveExit(1));
-    child.once('close', code => resolveExit(code ?? 1));
-  });
-  const timer = setTimeout(() => child.kill('SIGTERM'), 30_000);
-  let output = '';
-  let approval;
-  child.stderr.resume();
-  child.stdout.setEncoding('utf8');
-  child.stdout.on('data', chunk => {
-    output += chunk;
-    const code = /allow code ([A-Z]{8})\./.exec(output)?.[1];
-    // A failed approval ends the login at once instead of letting it poll until the code expires.
-    if (code && !approval) approval = approveCommandLine(instance.record.origin, code).then(() => undefined, error => { child.kill('SIGTERM'); return error; });
-  });
-  try {
-    const code = await exited;
-    const failure = await approval;
-    if (failure) throw failure;
-    let result;
-    // The login prints its code on one line, then one JSON result over several lines.
-    try { result = JSON.parse(output.replace(/^Open .*\n/, '')); } catch { result = undefined; }
-    if (code !== 0 || result?.signedIn !== true) {
-      throw new Error(result?.error?.message ?? `The Controller command line did not sign in (exit ${code}).`);
-    }
-  } finally { clearTimeout(timer); }
 }
 
 async function siteAlive(origin) {
@@ -235,7 +173,7 @@ async function describe(instance) {
   const [localUser, uplink, commandLine, checkout] = await Promise.all([
     running ? signedInUser(instance.record.origin).catch(() => false) : false,
     running ? controllerUplink(instance) : undefined,
-    running ? commandLineSignedIn(instance) : false,
+    running ? commandLineSignedIn(source, instance) : false,
     controllerBuildProvenance(instance.record.source, {}).catch(() => undefined),
   ]);
   return {
@@ -264,9 +202,12 @@ async function printStatus(instance, json) {
 async function up(options) {
   const timeoutMs = readyTimeoutMs();
   const instance = await prepareInstance(source);
+  let devCommand;
   await withLock(instance.directory, async () => {
     if (options['no-build']) assertBuilt();
     else await build();
+    // The instance's sessions find agent-remote-controller in its bin/ from their start, so it exists first.
+    devCommand = await installDevCommand({ source, instance });
     await stopRunner(instance);
     if (!(await portAvailable(instance.record.port))) {
       throw new Error(`Port ${instance.record.port} is in use by another process. The origin ${instance.record.origin} cannot change; free the port and run up again.`);
@@ -280,9 +221,12 @@ async function up(options) {
       throw new Error(`${error.message}\n${tails}${stopFailure ? `\nThe runner could not be stopped: ${stopFailure.message}` : ''}`, { cause: error });
     }
     try { await signInCommandLine(instance); }
-    catch (error) { process.stderr.write(`The Controller command line is not signed in: ${error.message} Run pnpm local controller login to retry.\n`); }
+    catch (error) { process.stderr.write(`The Controller command line is not signed in: ${error.message} Run ${DEV_COMMAND} login to retry.\n`); }
   });
   await printStatus(instance, false);
+  process.stdout.write(!devCommand.installed ? `Command: ${devCommand.reason} Use pnpm local controller instead.\n`
+    : devCommand.onPath ? `Command: ${DEV_COMMAND} (in this checkout, and in the instance's sessions as agent-remote-controller)\n`
+    : `Command: ${devCommand.command}; add its directory to PATH to run it as ${DEV_COMMAND}.\n`);
 }
 
 async function down() {
@@ -329,33 +273,14 @@ async function remove(options) {
     const state = await runState(instance.directory, await readJson(instance.runtimeFile));
     if (state === 'running' || state === 'orphaned') throw new Error('Stop the instance with pnpm local down first.');
     await rm(instance.directory, { recursive: true, force: true });
+    await forgetDefaultInstance(instance);
   });
   process.stdout.write(`Removed ${instance.directory}. Test sessions remain in the shared native histories.\n`);
 }
 
-/** Why a Controller command is not run for the instance, or undefined when it is. */
-function controllerRefusal([group, action, detail]) {
-  if (!controllerCommands.has(group ?? '')) {
-    return 'pnpm local controller runs session, host, window, api, login, logout, status, diagnostics and --skill. The runner owns start, stop, pairing and updates, and the native CLIs could take over shared sessions.';
-  }
-  if (group === 'session' && action === 'attach') return 'session attach runs a native CLI on the shared profiles and can take a session over from its other clients; open the session in the instance website instead.';
-  if (group === 'host' && action === 'update') return "The runner owns the instance's build: run pnpm local up instead of host update.";
-  if (group === 'host' && action === 'tunnel' && detail !== undefined && detail !== 'status') return 'The VS Code tunnel is shared with your own Controller; here host tunnel only reports its status.';
-  if (group === 'login' && action !== undefined && action !== 'status' && action !== '--help') return 'pnpm local controller login signs in as the local user by itself and takes no options; login status reports the sign-in.';
-  return undefined;
-}
-
 async function controller(args) {
   const instance = await requireInstance();
-  const refusal = controllerRefusal(args);
-  if (refusal) throw new Error(refusal);
-  if (args[0] === 'login' && args.length === 1) {
-    await requireRunning();
-    await withLock(instance.directory, () => signInCommandLine(instance));
-    process.stdout.write(`The Controller command line is signed in to ${instance.record.origin}.\n`);
-    return;
-  }
-  process.exitCode = await runAttached(process.execPath, [controllerCli, ...args], { env: controllerEnvironment(process.env, instance), cwd: instance.workspace });
+  process.exitCode = await controllerCommand({ source, instance, args });
 }
 
 async function api(positionals, options) {

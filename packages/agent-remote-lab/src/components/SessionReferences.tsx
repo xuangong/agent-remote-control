@@ -42,21 +42,22 @@ export function SessionReferences({ scope, holder, providers, fallback, snapshot
     if (!await change('remove', ref, `remove:${ref.providerId}/${ref.nativeSessionId}`)) return;
     await onRemoved?.(ref, async () => { await changeSessionRef(scope, holder, 'add', ref); await onRestore?.(ref); });
   };
-  return <>{snapshot}<div className="lab-session-refs" aria-label="Session references">
-    {refs.map(ref => <span key={`${ref.providerId}/${ref.nativeSessionId}`} className="lab-session-ref agent-skill-tag" data-origin={ref.origin}>
+  // The references belong to the next message, so they sit on the composer, below who references this session.
+  return <>{snapshot}{referencedBy}<div className="lab-session-refs" aria-label="Session references">
+    <div className="lab-session-ref-list">{refs.map(ref => <span key={`${ref.providerId}/${ref.nativeSessionId}`} className="lab-session-ref" data-origin={ref.origin}>
       <button type="button" className="lab-session-ref-open" title={`${ref.origin === 'source' ? 'Source' : 'Reference'}: ${title(ref)}`} onClick={() => onOpen(ref)}>
         {ref.origin === 'source' ? <span className="lab-fork-symbol" aria-hidden="true">&amp;<span><ForkIcon /></span></span> : <span className="lab-session-ref-symbol" aria-hidden="true">@</span>}
         <span className="lab-session-ref-title">{title(ref)}</span>
       </button>
       <button type="button" className="lab-session-ref-remove" aria-label={`Remove reference to ${title(ref)}`} title="Remove reference"
         disabled={!!pending} onClick={() => void remove(ref)}>×</button>
-    </span>)}
+    </span>)}</div>
     <button type="button" className="lab-session-ref-add" aria-label="Reference another session" title="Reference another session" aria-expanded={picking}
       onClick={() => onPickingChange(!picking)}>+</button>
     {picking ? <SessionRefPicker scope={scope} holder={holder} providers={providers} existing={refs} busy={!!pending}
       onCancel={() => onPickingChange(false)} onPick={session => void change('add', session, `add:${session.providerId}/${session.nativeSessionId}`).then(added => { if (added) onPickingChange(false); })} /> : null}
     {error ? <p className="lab-fork-action-error" role="alert">{error}</p> : null}
-  </div>{referencedBy}</>;
+  </div></>;
 }
 
 /** The sessions that reference this one; Sides opened from it first. */
@@ -64,7 +65,7 @@ function ReferencedBy({ referrers, onOpen }: { referrers: readonly LabSessionRef
   const ordered = [...referrers].sort((left, right) => Number(right.origin === 'source') - Number(left.origin === 'source'));
   return <div className="lab-session-refs lab-session-referrers" aria-label="Referenced by">
     <span className="lab-session-referrers-label">Referenced by</span>
-    {ordered.map(ref => <button type="button" key={`${ref.providerId}/${ref.nativeSessionId}`} className="lab-session-ref lab-session-ref-open agent-skill-tag"
+    {ordered.map(ref => <button type="button" key={`${ref.providerId}/${ref.nativeSessionId}`} className="lab-session-ref lab-session-ref-open"
       data-origin={ref.origin} title={`${ref.origin === 'source' ? 'Opened from this session' : 'References this session'}: ${title(ref)}`} onClick={() => onOpen(ref)}>
       <span className="lab-session-ref-symbol" aria-hidden="true">{ref.origin === 'source' ? '↳' : '@'}</span>
       <span className="lab-session-ref-title">{title(ref)}</span>

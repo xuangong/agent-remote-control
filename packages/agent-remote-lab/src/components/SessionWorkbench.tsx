@@ -161,7 +161,7 @@ export function SessionWorkbench({ sessionDescription, onNavigateAttribution, to
     <div className="lab-composer-region">
     {composerStatus}
     <div ref={toastAnchor} className="lab-composer-dock" hidden={!state?.agent && !nativeTakeover && !draftOnly} data-collapsed={composerHidden || undefined}>
-      <div hidden={composerHidden}>
+      <div className="lab-composer-context" hidden={composerHidden}>
         {composerContext}
         {composerNotice}
         {reauthenticate ? authenticationNotice : null}

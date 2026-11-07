@@ -520,6 +520,13 @@ test('the source reference starts at the composer edge in narrow and wide panes'
     };
     const pane = page.locator(`.lab-session-family-pane[data-view-id="${side.id}"]`);
     await expect.poll(offset(pane)).toBeLessThanOrEqual(1);
+    // The references sit on the composer as one compact line, clear of its collapse tab.
+    const row = (await pane.locator('.lab-session-refs').boundingBox())!, composer = (await pane.locator('.agent-composer').boundingBox())!;
+    const add = (await pane.locator('.lab-session-ref-add').boundingBox())!, tab = (await pane.locator('.lab-composer-toggle').boundingBox())!;
+    expect(Math.abs(row.y + row.height - composer.y)).toBeLessThanOrEqual(1);
+    expect(row.height).toBeLessThanOrEqual(isMobile ? 36 : 28);
+    expect(add.x + add.width).toBeLessThanOrEqual(tab.x);
+    await page.screenshot({ path: test.info().outputPath('session-references.png') });
     if (isMobile) return;
     // A window wider than the composer centers it; widen the dock to cover that without depending on the window layout.
     await pane.locator('.lab-composer-dock').evaluate(node => { (node as HTMLElement).style.width = '1300px'; });

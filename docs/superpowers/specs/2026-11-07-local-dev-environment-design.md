@@ -47,13 +47,29 @@ Run from a worktree (or the main checkout) as `pnpm local <command>`:
 | `logs [--follow]` | Site and Controller logs. |
 | `list` | Every instance on this machine with its source, port and running state. Read-only for other instances. |
 | `remove --yes` | Delete this worktree's stopped instance directory. |
-| `controller <args>` | Run the development Controller CLI with this instance's state directory; only `status`, `diagnostics`, `window`, `session` and `environment` are allowed. |
+| `controller <args>` | Run the development Controller CLI with this instance's state directory: `session`, `host`, `window`, `api`, `login` (signed in as the local user without a browser), `logout`, `status`, `diagnostics` and `--skill`. `session attach`, `host update` and tunnel changes are refused. See [Command line](#command-line). |
 | `api <path> [--method M --data JSON]` | Authenticated JSON request to the instance's user API, for example `v1/remote/hosts`. |
 | `screenshot <path> --out FILE [--viewport WxH]` | Headless screenshot of a signed-in page. |
 
 The script name `local` must be checked against pnpm built-in commands during
 implementation; if pnpm intercepts it, use `pnpm local-env` with the same
 subcommands.
+
+### Command line
+
+Added after main replaced the Controller's command line (session, host, window,
+api, login): the closed loop for agents runs through it. `session` and `host`
+reach the development Controller through its management socket, as the Host
+owner. `up` runs the product's `login` for the instance and allows its code
+through `POST /auth/cli` as the local user, so `window`, `api` and the
+commands the site answers use the command line's own session and sign in no
+further. `status` reports that sign-in but readiness does not depend on it.
+The environment allowlist already drops the calling shell's session variables,
+so the commands address the instance from inside a session too. The skill's
+test loop runs its model turn with `scripts/cli-turn.mjs` and checks the page
+through the session's link; a restart checks the instance's sessions for
+`running` or `waiting` instead of asking whenever the task did not start the
+instance.
 
 ## Instance layout
 

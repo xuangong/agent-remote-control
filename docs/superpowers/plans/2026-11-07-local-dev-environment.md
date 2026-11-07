@@ -3316,3 +3316,16 @@ Finish with `pnpm local down` and confirm `pnpm local status` reports `stopped`.
 - [ ] **Step 4: Report**
 
 Report to the user: commits on `feat/local-dev-env`, test results, each acceptance observation and anything not exercised. Do not push or merge.
+
+---
+
+### Task 10: Follow main's command line
+
+Done after rebasing onto main, which replaced the Controller CLI. The files are the record for this task; the code blocks of Tasks 2–8 show the state before it.
+
+- `scripts/local/command.mjs`: the `controller` allowlist becomes `session`, `host`, `window`, `api`, `login`, `logout`, `status`, `diagnostics`, `--skill`, `help`, `--version`; `session attach`, `host update`, `host tunnel start|stop` and `login` with options are refused. `up` signs the command line in (`signInCommandLine`: `login --no-browser`, then `approveCommandLine` from `scripts/local/session.mjs`); `controller login` repeats it; `status` reports `commandLine`. A corrupt `runtime.json` makes `status` report `unknown`.
+- `scripts/local/runner.mjs` records `controllerScript`; `runState` counts a Controller as orphaned only when it runs that script.
+- Skill: `references/cli.md` and `scripts/cli-turn.mjs`; the test loop, lifecycle, api and verification references use the command line.
+- Tests: `command.test.mjs` checks `session list`, `host list`, `login status`, `controller login`, the refusals and that the sign-in survives a restart; `session.test.mjs` covers `approveCommandLine`; `instance.test.mjs` the recorded script.
+
+Acceptance: `pnpm local up` printed `command line: signed in`; `cli-turn.mjs` answered `LOCAL-OK` with Claude Code and Codex; `session link` opened the Codex session in a screenshot; the user's own Controller stayed `uplink: registered`.

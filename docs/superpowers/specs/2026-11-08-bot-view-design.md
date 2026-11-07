@@ -1,21 +1,21 @@
-# Bot view: one session grouping, two ways to manage it
+# Bot mode: one session grouping, two ways to manage it
 
-Status: proposed on 2026-11-08. The direction (one grouping, a Window view and a Bot view, usable alone or side by side) was agreed with the owner in conversation; this document turns it into rules, data and milestones for review before implementation.
+Status: proposed on 2026-11-08. The direction (one grouping, Window mode and Bot mode over the same groups, switched rather than shown together) was agreed with the owner in conversation; this document turns it into rules, data and milestones for review before implementation.
 
 ## Problem
 
 A Window arranges several sessions: primary groups, docks, floats, and the Sides and Asks attached to them. It is the right place to follow details, but it does not feel like working with teammates. The common way bots are organized today, as in Grok Bot (xAI, beta since 2026-08-11), is a chat roster: sections in a sidebar, and under each section a list of long-lived bots, each with a name, a picture, a job, one continuing conversation, and a status that says whether it needs you, has a new result or is working.
 
-Our sessions already form groups (the views of a Window), and a Window view already behaves like a long-lived identity: when a session is handed off, the view is rebound to the session that continues it (`windowSuccessionLayout` in `packages/agent-remote-lab/src/window-composition.ts`). What is missing is a second way to look at and manage the same grouping.
+Our sessions already form groups (the views of a Window), and a view of a Window already behaves like a long-lived identity: when a session is handed off, the view is rebound to the session that continues it (`windowSuccessionLayout` in `packages/agent-remote-lab/src/window-composition.ts`). What is missing is a second way to look at and manage the same grouping.
 
 ## Principles
 
-The two views serve two mental models over one set of data.
+The two modes serve two mental models over one set of data.
 
-- **Window view: details.** Follow the work, compare sessions side by side, open Sides and Asks, quote messages, see tool calls and reasoning, adjust settings. It stays as it is.
-- **Bot view: requirements and results.** Say what you need, see what came back, and answer what needs you. Process is collapsed unless asked for.
+- **Window mode: details.** Follow the work, compare sessions side by side, open Sides and Asks, quote messages, see tool calls and reasoning, adjust settings. It stays as it is.
+- **Bot mode: requirements and results.** Say what you need, see what came back, and answer what needs you. Process is collapsed unless asked for.
 
-A grouping can be used in only one of them, or in both. Neither view is the source of the other: they read and change the same grouping. The two views are not exclusive modes: on a wide screen they are open side by side, so a bot's results and its details can be followed at the same time, and either can be closed to use the other alone.
+The page is in one mode at a time, chosen with a switch: Bot mode gives the Grok Bot experience, Window mode the current one. The modes are compatible rather than combined: both work on the same groups, so switching shows the same groups in the other form, and a group can be used in only one of them or in both. Neither mode is the source of the other, and neither follows what the other has open.
 
 ## Model
 
@@ -23,7 +23,7 @@ A **group** is today's Window document (its views and their session bindings) pl
 
 | | Window appearance | Bot appearance |
 |---|---|---|
-| Shown as | a Window in the Window view | a section in the Bot view |
+| Shown as | a Window in Window mode | a section in Bot mode |
 | Holds | layout: placement, width, geometry, collapsed, display mode, selection (the existing Window document) | section rank; per bot: label, picture, pinned, hidden; later the read position |
 | Members | every view | the group's **bots**: ordinary views (below) |
 
@@ -31,7 +31,7 @@ Every existing Window is a group with only the Window appearance. Nothing change
 
 A **bot** is an ordinary view of a group with the Bot appearance: placement `primary`, `dock` or `float` (not `attached`), a session binding that is not a history view (`sessionIntent` absent), no `feature`, and a binding policy other than `managed`. Its name is its session's title (native titles since 2026-11-07, or a rename). Empty views, history views, Subagent views and Ask, Team and TPM views are not bots.
 
-| Bot view | Group data |
+| Bot mode | Group data |
 |---|---|
 | Section | the group (its title is the section name) |
 | Bot | an ordinary view |
@@ -42,32 +42,33 @@ A **bot** is an ordinary view of a group with the Bot appearance: placement `pri
 
 ## Rules
 
-1. **A bot keeps its conversation.** A bot's view changes session only when the session is handed off. Opening another session "here" on a bot's view in the Window view opens it beside, as a new view. The Relay refuses a `view.bind` that changes the target session of a bot's view (`bot_view`); updates that keep the target, such as titles, are allowed, and succession keeps using `layout.apply`.
-2. **Closing a bot's view in the Window view only puts it away.** The page sends `view.collapse` instead of `view.close`, so the bot stays in its section. Removing a bot is an explicit action in either view and sends `view.close`. Clients that do not know about bots still send `view.close`, which removes the bot; that is consistent with what they show.
+1. **A bot keeps its conversation.** A bot's view changes session only when the session is handed off. Opening another session "here" on a bot's view in Window mode opens it beside, as a new view. The Relay refuses a `view.bind` that changes the target session of a bot's view (`bot_view`); updates that keep the target, such as titles, are allowed, and succession keeps using `layout.apply`.
+2. **Closing a bot's view in Window mode only puts it away.** The page sends `view.collapse` instead of `view.close`, so the bot stays in its section. Removing a bot is an explicit action in either mode and sends `view.close`. Clients that do not know about bots still send `view.close`, which removes the bot; that is consistent with what they show.
 3. **Only ordinary views are bots** (definition above). Sides and Asks are threads of the bot they are attached to.
-4. **A Window appearance added to a section** keeps the existing layout. Groups created in the Bot view are laid out as they are built: their first bot is the primary view, the others are collapsed docks, so the Window starts tidy however many bots there are.
-5. **A session is at most one bot.** Across all of a user's groups with the Bot appearance, no two bots bind the same session (`hostId`, `providerId`, `nativeSessionId`). The Relay checks this after every change and refuses one that would break it (`bot_session_taken`). Views of groups without the Bot appearance may reference any session, as today. A Window view that would create a second bot is refused with a pointer to the section that has it.
-6. **The two views coexist and follow each other.** The Bot view and the Window view can be open at the same time. Choosing a bot shows its section's Window in the Window view with the bot's view selected; selecting a bot's view in the Window view opens that bot in the Bot view. A section without a Window appearance leaves the Window view showing what it showed, and offers **Show as Window**, which adds the appearance. The same session may then be open in both views: they share one live connection, the Bot view shows its results and the Window view its details, and each keeps its own draft.
+4. **A Window appearance added to a section** keeps the existing layout. Groups created in Bot mode are laid out as they are built: their first bot is the primary view, the others are collapsed docks, so the Window starts tidy however many bots there are.
+5. **A session is at most one bot.** Across all of a user's groups with the Bot appearance, no two bots bind the same session (`hostId`, `providerId`, `nativeSessionId`). The Relay checks this after every change and refuses one that would break it (`bot_session_taken`). Views of groups without the Bot appearance may reference any session, as today. A view in Window mode that would create a second bot is refused with a pointer to the section that has it.
+6. **One mode at a time, each with its own place.** The page shows Bot mode or Window mode, never both. Each mode remembers what it had open (a bot, a Window) and returns to it; neither follows the other. A bot's draft is its view's draft, so text typed to a bot is still there when the same session is opened in Window mode, and the other way round.
 
-## Bot view
+## Bot mode
 
-**Layout.** On a wide screen the Bot view is a panel on one side of the page, a roster column and the open bot's conversation, and the Window workbench takes the rest. The panel can be resized, and either side can be closed: Bot view only (the panel takes the page), Window view only (today's page), or both. Which views are open, and the panel's width, are remembered per browser (local storage).
+**Mode switch.** A switch between Bot mode and Window mode, remembered per browser (local storage). In Bot mode the page is a chat app: the roster on the left, the open bot's conversation in the rest of the page.
 
 **Sidebar.**
 - **+**: New bot (creates a session in the current section, as **New session** does), Add existing session (the session directory, choosing a session that is not yet a bot), New section.
 - Sections in rank order, each with its bots: pinned first, then by rank. A section shows the most urgent status of its bots (`windowActivity` in `session-activity-status.ts`).
 - Each bot: picture, name, label, and one status: **Needs you** (the session is `waiting` or `starting`: a question, an approval), **Working** (`running`), **Failed** (`failed`), otherwise nothing. **New result** is added with the read position in milestone 5.
 - **Hidden bots** at the bottom.
-- Bot menu: Rename, Edit label and picture, Pin, Hide, Move to section, Show in Window, Remove bot.
+- Bot menu: Rename, Edit label and picture, Pin, Hide, Move to section, Remove bot.
+- Section menu: Rename, Show as Window (adds the Window appearance), Separate (below), Delete section.
 
 **A bot's page.**
-- Header: picture, name, label, status; Threads (its Sides and Asks); Show in Window (opens the Window view beside it when it is closed).
-- The conversation in Content only display: requests, plans and progress, decisions, results, errors (`isContentOnlyItem` in `packages/agent-remote-web/src/react/TimelineDisplay.ts`). Tool calls and reasoning stay collapsed. This presentation is fixed for the Bot view and does not change the view's own display setting, which belongs to the Window view.
+- Header: picture, name, label, status; Threads (its Sides and Asks).
+- The conversation in Content only display: requests, plans and progress, decisions, results, errors (`isContentOnlyItem` in `packages/agent-remote-web/src/react/TimelineDisplay.ts`). Tool calls and reasoning stay collapsed. This presentation is fixed for Bot mode and does not change the view's own display setting, which belongs to Window mode.
 - Interactions (questions, approvals) and the composer work as in any Session View; model, effort and permission settings stay in the session's settings menu.
 
-**Compact screens.** There is room for one view at a time, so the two are switched rather than shown together, and keep following each other (rule 6). In the Bot view the roster is the home screen and a bot opens full screen with Back; Show in Window switches to the section's Window with the bot's view selected, as the compact workbench shows it today.
+**Compact screens.** The roster is the home screen; a bot opens full screen with Back.
 
-## Window view changes
+## Window mode changes
 
 - Groups without a Window appearance are not listed.
 - Rule 1: on a bot's view, opening a session from the directory opens it beside.
@@ -124,22 +125,21 @@ Why beside and not inside: `WindowWorkspaceClient.list()` (`packages/agent-remot
 ## Milestones
 
 1. **Data.** Protocol types and `applyGroupOperation`; Relay storage, responses, edits, `merge`, `split`, `transfer`, rules 1 and 5; web client and store. No visible change. Deploy the Worker.
-2. **Bot view.** The Bot view panel beside the Window workbench, each closable; roster of sections and bots with status; a bot's page in Content only; Show as section on a Window; New section; the two views following each other (rule 6); compact layout.
-3. **Managing bots.** New bot, Add existing session, rename, label and picture, pin, hide and Hidden bots, ordering, Move to section, Remove bot; Window view rules 1, 2 and 5.
-4. **Linking.** Add and remove appearances, merge, split, the layout of groups built in the Bot view; command line and skill.
+2. **Bot mode.** The mode switch; roster of sections and bots with status; a bot's page in Content only; Show as section on a Window; New section; each mode returning to what it had open (rule 6); compact layout.
+3. **Managing bots.** New bot, Add existing session, rename, label and picture, pin, hide and Hidden bots, ordering, Move to section, Remove bot; Window mode rules 1, 2 and 5.
+4. **Linking.** Add and remove appearances, merge, split, the layout of groups built in Bot mode; command line and skill.
 5. **Teammates.** Read position and New result (stored per user without advancing the Window revision, so opening a bot does not wake every page), per-bot notifications, threads, the lead bot, Team as a group chat, a bot's results (files, previews and links it produced).
 
 ## Testing
 
 - Protocol: every edit type, pruning of member details, rule 1 and rule 5 checks, merge, split and transfer on documents.
 - Relay: responses for older and newer clients (an older `decodeWorkspaceWindow` still lists every Window with a Window appearance), cross-row atomicity and receipts, refusals and their codes.
-- Lab: roster, statuses, bot page display, opening and closing each view, rule 6 in both directions, the same session open in both views (one connection, separate drafts), Window view rules; browser tests on desktop and compact sizes.
-- End to end on a local instance (`pnpm local`, the `prepare-arc-local` skill): build a section in the Bot view, open its Window, hand a session off and see the bot keep its place, link and split, and list Windows with the 0.2.77 `window` command against the new Relay.
+- Lab: roster, statuses, bot page display, the mode switch and each mode returning to what it had open, a draft kept across modes, Window mode rules; browser tests on desktop and compact sizes.
+- End to end on a local instance (`pnpm local`, the `prepare-arc-local` skill): build a section in Bot mode, open its Window, hand a session off and see the bot keep its place, link and split, and list Windows with the 0.2.77 `window` command against the new Relay.
 
 ## Open questions
 
-- Which views are open by default: both on wide screens, and the Bot view on compact screens, once milestone 2 ships?
-- Which side of the page does the Bot view panel take (left, beside today's session sidebar, or right)?
+- Which mode is the default once milestone 2 ships: Window mode everywhere, or Bot mode on compact screens?
 - Pictures: shape and color only, or also generated and uploaded images (which need storage)?
 - Should hidden bots still notify, as in Grok Bot, where hiding keeps a bot's routines running?
 - Should sessions that are not in any group (for example started in a terminal) appear as an "Unsorted" section, or stay in the session directory?

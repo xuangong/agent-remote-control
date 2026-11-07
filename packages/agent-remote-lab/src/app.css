@@ -1573,12 +1573,14 @@ html[data-input-modality="pointer"] :focus { outline: none !important; }
 .lab-session-ref-symbol { display: inline-grid; place-items: center; width: 12px; height: 16px; flex-shrink: 0; font-size: 12px; }
 .lab-session-ref-add { position: relative; flex: none; min-width: 24px; height: 18px; min-height: 18px; margin-bottom: 4px; padding: 0 6px; border: 1px dashed var(--obs-control-border); border-radius: 5px; background: transparent; color: var(--obs-text-secondary); font-size: 13px; line-height: 1; }
 .lab-session-ref-add:hover, .lab-session-ref-add[aria-expanded="true"] { color: var(--obs-action); background: var(--obs-surface-selected); }
-.lab-session-ref-picker { position: absolute; z-index: 20; left: 0; bottom: calc(100% + 8px); display: grid; gap: 8px; width: min(420px, calc(100vw - 32px)); max-height: min(420px, 60vh); padding: 12px; overflow: hidden; border: 1px solid var(--obs-border); border-radius: 10px; background: var(--obs-surface); box-shadow: 0 6px 24px color-mix(in oklab, var(--obs-text) 12%, transparent); font-size: 12px; }
-.lab-session-ref-picker ul { display: grid; gap: 2px; margin: 0; padding: 0; overflow-y: auto; list-style: none; }
+/* The list takes the room left, so the title, filter and Cancel stay in view and the sessions scroll. */
+.lab-session-ref-picker { position: absolute; z-index: 20; left: 0; bottom: calc(100% + 8px); display: flex; flex-direction: column; gap: 8px; width: min(420px, calc(100vw - 32px)); max-height: min(420px, 60vh); padding: 12px; overflow: hidden; border: 1px solid var(--obs-border); border-radius: 10px; background: var(--obs-surface); box-shadow: 0 6px 24px color-mix(in oklab, var(--obs-text) 12%, transparent); font-size: 12px; }
+.lab-session-ref-picker > * { flex: none; }
+.lab-session-ref-picker ul { display: grid; flex: 0 1 auto; align-content: start; gap: 2px; min-height: 0; margin: 0; padding: 0; overflow-y: auto; overscroll-behavior: contain; list-style: none; }
 .lab-session-ref-picker li button { display: grid; gap: 2px; width: 100%; padding: 6px 8px; border: 0; border-radius: 6px; background: transparent; color: var(--obs-text); text-align: left; }
 .lab-session-ref-picker li button:hover:not(:disabled) { background: var(--obs-surface-selected); }
 .lab-session-ref-picker small { color: var(--obs-text-secondary); }
-.lab-session-ref-picker > button { justify-self: start; }
+.lab-session-ref-picker > button { align-self: flex-start; }
 @media (pointer: coarse) {
   /* Above the generic 44px touch size, like the pending queue; the add button keeps its size and widens its target. */
   .lab-composer-dock .lab-session-refs :is(.lab-session-ref button, button.lab-session-ref) { min-width: 0; min-height: 36px; }

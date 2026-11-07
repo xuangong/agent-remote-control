@@ -536,7 +536,7 @@ test('the source reference starts at the composer edge in narrow and wide panes'
   } finally { await workspace.close(); }
 });
 
-test('a Side removes its source reference, tells its agent with the next message, and references a session again with /ref', async ({ page, context }) => {
+test('a Side removes its source reference, tells its agent with the next message, and references a session again with /ref', async ({ page, context, isMobile }) => {
   const workspace = await createWorkspace(page, context);
   try {
     const source = page.locator('.lab-session-family-pane').first();
@@ -562,6 +562,23 @@ test('a Side removes its source reference, tells its agent with the next message
     await side.getByTestId('prompt-submit').click();
     const picker = side.getByRole('dialog', { name: 'Reference a session' });
     await expect(picker.getByRole('button', { name: /^New session/ }).first()).toBeVisible();
+    // A touch keyboard leaves little room above the composer; the open picker fits again.
+    const viewport = page.viewportSize()!;
+    if (isMobile) await page.setViewportSize({ width: viewport.width, height: 460 });
+    // The picker stays inside the session, above its row, with the title, filter and Cancel in view and the sessions scrolling.
+    const top = async () => (await picker.boundingBox())!.y - (await side.locator('.lab-workbench-layout').first().boundingBox())!.y;
+    await expect.poll(top).toBeGreaterThanOrEqual(0);
+    const box = (await picker.boundingBox())!;
+    expect(box.y + box.height).toBeLessThanOrEqual((await references.boundingBox())!.y);
+    for (const control of [picker.getByText('Reference a session', { exact: true }), picker.getByRole('searchbox'), picker.getByRole('button', { name: 'Cancel', exact: true })]) await expect(control).toBeInViewport({ ratio: 1 });
+    expect(await picker.locator('ul').evaluate(list => { list.scrollTop = list.scrollHeight; return list.scrollTop === list.scrollHeight - list.clientHeight; })).toBe(true);
+    await page.screenshot({ path: test.info().outputPath('reference-picker.png') });
+    // Touching the composer gives up the choice.
+    await input.click();
+    await expect(picker).toHaveCount(0);
+    await page.setViewportSize(viewport);
+    await input.fill('/ref');
+    await side.getByTestId('prompt-submit').click();
     await picker.getByRole('button', { name: /^New session/ }).first().click();
     await expect(picker).toHaveCount(0);
     await expect(references.locator('.lab-session-ref')).toHaveCount(1);

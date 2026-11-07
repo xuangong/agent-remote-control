@@ -1,4 +1,4 @@
-import { useEffect, useId, useMemo, useRef, useState, type ReactNode } from 'react';
+import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { SessionDirectoryClient, type SessionSummary } from '../directory-client.js';
 import { changeSessionRef, useSessionRefs, type LabSessionRef, type LabSessionReferrer, type SessionRefHolder } from '../session-references.js';
 import { ForkIcon } from './ForkReference.js';
@@ -82,6 +82,8 @@ function SessionRefPicker({ scope, holder, providers, existing, busy, onPick, on
   const [failure, setFailure] = useState<string>();
   const [filter, setFilter] = useState('');
   const input = useRef<HTMLInputElement>(null);
+  const root = useRef<HTMLDivElement>(null);
+  const cancel = useRef(onCancel); cancel.current = onCancel;
   const label = useId();
   const providerKey = providers.join('\n');
   useEffect(() => {
@@ -96,10 +98,35 @@ function SessionRefPicker({ scope, holder, providers, existing, busy, onPick, on
     return () => controller.abort();
   }, [scope, holder.hostId, providerKey]);
   useEffect(() => { input.current?.focus({ preventScroll: true }); }, []);
+  // Touching anything else gives up the choice; the add button toggles the picker itself.
+  useEffect(() => {
+    const dismiss = (event: PointerEvent) => {
+      const target = event.target, picker = root.current;
+      if (!(target instanceof Element) || !picker || picker.contains(target) || picker.parentElement?.contains(target) && target.closest('.lab-session-ref-add')) return;
+      cancel.current();
+    };
+    document.addEventListener('pointerdown', dismiss);
+    return () => document.removeEventListener('pointerdown', dismiss);
+  }, []);
+  // It opens upward from the composer, so it fits between the top of the session and its row, above a touch keyboard too.
+  useLayoutEffect(() => {
+    const picker = root.current, row = picker?.parentElement, viewport = window.visualViewport;
+    if (!picker || !row) return;
+    const fit = () => {
+      const top = Math.max(picker.closest('.lab-workbench-layout')?.getBoundingClientRect().top ?? 0, viewport?.offsetTop ?? 0);
+      picker.style.maxHeight = `${Math.max(120, Math.min(420, row.getBoundingClientRect().top - top - 16))}px`;
+    };
+    // The page follows the viewport after the event, so measure again once it has moved.
+    let frame = 0;
+    const refit = () => { fit(); cancelAnimationFrame(frame); frame = requestAnimationFrame(fit); };
+    fit();
+    viewport?.addEventListener('resize', refit); viewport?.addEventListener('scroll', refit); window.addEventListener('resize', refit);
+    return () => { cancelAnimationFrame(frame); viewport?.removeEventListener('resize', refit); viewport?.removeEventListener('scroll', refit); window.removeEventListener('resize', refit); };
+  }, []);
   const visible = useMemo(() => (sessions ?? []).filter(session => !(session.providerId === holder.providerId && session.nativeSessionId === holder.nativeSessionId)
     && !existing.some(ref => ref.providerId === session.providerId && ref.nativeSessionId === session.nativeSessionId)
     && (session.title || '').toLowerCase().includes(filter.trim().toLowerCase())).slice(0, 30), [sessions, existing, filter, holder.providerId, holder.nativeSessionId]);
-  return <div className="lab-session-ref-picker" role="dialog" aria-labelledby={label} onKeyDown={event => { if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); onCancel(); } }}>
+  return <div ref={root} className="lab-session-ref-picker" role="dialog" aria-labelledby={label} onKeyDown={event => { if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); onCancel(); } }}>
     <strong id={label}>Reference a session</strong>
     <input ref={input} type="search" value={filter} placeholder="Filter by title" aria-label="Filter sessions by title" onChange={event => setFilter(event.target.value)} />
     {sessions === undefined ? <p className="lab-control-note" role="status">Loading sessions…</p> : null}

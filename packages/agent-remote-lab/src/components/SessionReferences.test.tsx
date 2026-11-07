@@ -30,3 +30,18 @@ it('shows a Side\'s source from its Host, and a fork\'s copied context beside th
   expect(both.textContent).toContain('Snapshot context');
   expect(both.querySelector('[aria-label="Session references"]')?.textContent).toContain('Other');
 });
+
+it('gives up a pending choice when anything outside the picker is touched, but not the add button', async () => {
+  vi.stubGlobal('fetch', vi.fn(async (url: string | URL) => new Response(JSON.stringify(String(url).includes('/catalog') ? { items: [], hasMore: false, revision: '1' }
+    : { revision: 1, refs: [{ providerId: 'claude', nativeSessionId: 'source', title: 'Source', origin: 'source' }] }), { status: 200, headers: { 'content-type': 'application/json' } })));
+  const picking = vi.fn();
+  const container = await render(<><button type="button">Outside</button><SessionReferences scope="https://relay.example/u/test/" holder={{ hostId: 'host', providerId: 'claude', nativeSessionId: 'side' }}
+    providers={['claude']} picking onPickingChange={picking} onOpen={() => {}} /></>);
+  await act(async () => { await new Promise(resolve => setTimeout(resolve, 0)); });
+  const touch = (element: Element) => act(async () => { element.dispatchEvent(new Event('pointerdown', { bubbles: true })); });
+  await touch(container.querySelector('.lab-session-ref-picker input')!);
+  await touch(container.querySelector('.lab-session-ref-add')!);
+  expect(picking).not.toHaveBeenCalled();
+  await touch(container.querySelector('button')!);
+  expect(picking).toHaveBeenCalledWith(false);
+});

@@ -53,7 +53,7 @@ async function waitForReply(previous) {
       return;
     }
     if (Date.now() > deadline) {
-      throw new Error(`No reply within two minutes in ${address} (state ${state}, newest entry ${newest?.role ?? 'none'}). Read pnpm local controller diagnostics --source controller --limit 60.`);
+      throw new Error(`No reply within two minutes in ${address} (state ${state}, newest entry ${newest?.role ?? 'none'}). Read agent-remote-controller-dev diagnostics --source controller --limit 60.`);
     }
     await delay(2000);
   }

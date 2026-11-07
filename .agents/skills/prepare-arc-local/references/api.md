@@ -1,8 +1,8 @@
 # Reading the instance through its API
 
 ```bash
-pnpm --silent local controller api GET /v1/remote/hosts
-pnpm --silent local controller api POST /v1/<path> --body '{…}'
+agent-remote-controller-dev api GET /v1/remote/hosts
+agent-remote-controller-dev api POST /v1/<path> --body '{…}'
 ```
 
 The Controller command line sends the request with its own sign-in (see

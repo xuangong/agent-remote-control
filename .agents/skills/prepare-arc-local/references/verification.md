@@ -7,7 +7,7 @@ A lower layer passing says nothing about a higher one.
 | --- | --- |
 | Build | `up` finished after your last edit, and `status` shows a running build commit equal to the checkout commit, with its dirty state. |
 | Site | `status` reports `running` and `local user: signed in`. |
-| Controller | `status` reports `uplink registered`; `pnpm --silent local controller host providers` shows the expected providers `enabled`. |
+| Controller | `status` reports `uplink registered`; `agent-remote-controller-dev host providers` shows the expected providers `enabled`. |
 | Page | A headless screenshot of the signed-in page taken after the change, which you opened and read, showing the changed UI. See [browser](browser.md). |
 | Feature | The changed behaviour exercised through real page controls, with a read screenshot of each state the conclusion rests on and a DOM assertion for each text or state change. |
 | Model turn | A session created in the instance workspace completes a real reply, read back with `session read` or in the page. See [test loop](test-loop.md). |

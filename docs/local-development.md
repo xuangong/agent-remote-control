@@ -26,7 +26,7 @@ pnpm local logs --follow # keep following both logs
 pnpm local down          # stop; state is kept
 pnpm local list          # every instance on this machine
 pnpm local remove --yes  # delete this checkout's stopped instance
-pnpm local controller session list  # drive the instance's sessions, Hosts and Windows
+agent-remote-controller-dev session list  # drive the instance's sessions, Hosts and Windows
 ```
 
 Before the first `up`, install Node 22 or later, pnpm 10.34.5 and at least one
@@ -52,8 +52,8 @@ status, including the `http://localhost:<port>` URL. Open that URL in any local
 browser; it is signed in automatically, and the development Controller appears
 as the Host `Dev · <checkout directory name>`. `up` also signs the development
 Controller's command line in as the local user, so
-`pnpm local controller session|host|window|api …` drives the instance like the
-website does (see [Command line](#command-line)).
+`agent-remote-controller-dev session|host|window|api …` drives the instance like
+the website does (see [Development command](#development-command)).
 
 `status` reports one of these states: `running`; `stopped` (no run is
 recorded); `stale` (the recorded processes are gone; `up` or `down` clears the
@@ -73,13 +73,14 @@ from the shared native histories.
 Three commands look into the instance:
 
 ```bash
-pnpm local controller session list
+agent-remote-controller-dev session list
 pnpm local api v1/remote/hosts
 pnpm local screenshot / --out page.png
 ```
 
-- `controller <args>` runs this checkout's Controller CLI against the instance;
-  see [Command line](#command-line).
+- `agent-remote-controller-dev <args>` runs this checkout's Controller CLI against
+  the instance (`pnpm local controller <args>` does the same from the checkout);
+  see [Development command](#development-command).
 - `api <v1/path>` sends a signed-in JSON request to the instance's user API and
   prints the response body. Paths start with `v1/`. `--method M` selects the
   method, which is `GET`, or `POST` when `--data JSON` is given. A response
@@ -97,34 +98,74 @@ pnpm local screenshot / --out page.png
 pnpm --filter @orchardworks/agent-remote-lab exec playwright install chromium
 ```
 
-### Command line
+### Development command
 
-`pnpm local controller` runs `packages/agent-host/dist/cli.js` with the
-instance's Controller state. It accepts the resource commands `session`,
-`host`, `window` and `api`, the sign-in commands `login`, `login status` and
-`logout`, and `status`, `diagnostics`, `--skill`, `help` and `--version`.
-`session` and `host` reach the instance's Controller through its management
-socket, as the Host owner. `window`, `api`, `host list` and other commands the
-site answers use the command line's own sign-in, which `up` creates by running
-`login` and allowing its code as the local user. `pnpm local controller login`
-does the same again when `status` shows `command line: signed out`; it takes no
-options and opens no browser. The calling shell's session variables are not
-passed on, so the commands address the instance even from inside a session.
-The [command line reference](current/agent-remote/cli.md) describes the
-commands; `pnpm local controller --skill` prints the agents' manual.
+`up` installs `agent-remote-controller-dev` beside your `agent-remote-controller`,
+in `~/.local/bin` (`ARC_LOCAL_BIN_DIR` names another directory). It is the
+Controller command line built from a checkout, run against that checkout's
+instance, so local tests never use your installed command, its state or its
+service. `update` is refused: `pnpm local up` rebuilds and restarts the instance.
+A file of that name that `pnpm local` did not write is left alone; `up` says so,
+and `pnpm local controller <args>` runs the same command from the checkout.
 
-It refuses `start`, `stop`, `foreground`, `pair`, `autostart`, `update` and
-the native CLIs, because the runner owns the Controller and the native CLIs act
-on the shared profiles. It also refuses `session attach`, which can take a
-session over from its other clients, `host update` (run `pnpm local up`), and
-`host tunnel start|stop`, because the VS Code tunnel is shared with your own
-Controller.
+It chooses the instance by the current directory:
+
+| Current directory | Instance |
+| --- | --- |
+| Inside an instance directory, such as its `workspace/` | That instance |
+| Inside a checkout or worktree | Its instance; without one the command stops with `The checkout … has no local instance. Run pnpm local up there.` |
+| Anywhere else | The instance `pnpm local up` started last |
+
+`agent-remote-controller-dev --build-info` prints the instance, its URL, the
+checkout, the running build and the checkout's commit now, without signing in.
+
+It accepts the resource commands `session`, `host`, `window`, `api` and `role`,
+the sign-in commands `login`, `login status` and `logout`, and `status`,
+`diagnostics`, `--skill`, `help` and `--version`. `session` and `host` reach the
+instance's Controller through its management socket, as the Host owner.
+`window`, `api`, `host list` and other commands the site answers use the command
+line's own sign-in, which `up` creates by running `login` and allowing its code
+as the local user. `agent-remote-controller-dev login` does the same again when
+`status` shows `command line: signed out`; it takes no options and opens no
+browser. The [command line reference](current/agent-remote/cli.md) describes the
+commands; `agent-remote-controller-dev --skill` prints the agents' manual.
+
+It refuses `start`, `stop`, `foreground`, `pair`, `autostart` and the native
+CLIs, because the runner owns the Controller and the native CLIs act on the
+shared profiles. It also refuses `session attach`, which can take a session over
+from its other clients, `host update`, and `host tunnel start|stop`, because the
+VS Code tunnel is shared with your own Controller.
 
 ```bash
-pnpm --silent local controller session create --provider claude --message "Say hello."
-pnpm --silent local controller session read <address> --limit 2
-pnpm --silent local controller session link <address>
+agent-remote-controller-dev session create --provider claude --message "Say hello."
+agent-remote-controller-dev session read <address> --limit 2
+agent-remote-controller-dev session link <address>
 ```
+
+### The test directory and its command mapping
+
+The instance workspace is the test directory: the instance's sessions run only
+there. In those sessions, Claude Code and Codex alike, `agent-remote-controller`
+is `agent-remote-controller-dev` for that instance. The development Controller
+starts with `AGENT_HOST_SESSION_BIN=<instance>/bin`, which puts the instance's
+`bin/` first on the PATH of every session command, and `bin/agent-remote-controller`
+runs the development command pinned to the instance. So the `agent-remote` skill
+those sessions read is unchanged, and its commands reach the build under test:
+`command -v agent-remote-controller` in a session prints
+`<instance>/bin/agent-remote-controller`, and `--build-info` names the instance.
+
+A session keeps its own identity (`self`, `role`) because its credential belongs
+to the instance's Controller. The development command drops any other session's
+credential, so running it in a session of your own Controller acts as the
+instance's Host owner, never as that session.
+
+The development Controller also starts with `AGENT_HOST_CODEX_USER_SKILLS=0`: it
+writes no skill into `~/.codex` or the workspace. Its Claude Code sessions load
+the `agent-remote` skill of the checkout's build, as sessions of any Controller
+do; its Codex sessions read the skill your own Controller installed in
+`~/.codex/skills`. Each session therefore sees one `agent-remote` skill, and a
+change to that skill's text is visible to Codex sessions only once your own
+Controller runs a release with it.
 
 ### Machine-readable output
 
@@ -156,11 +197,10 @@ The site allows 30 sign-ins per minute, shared with your browser. `status`,
 (`status` only while the instance is running). `up` polls `/health` while it
 waits, then signs in to confirm the local user, once more to allow the command
 line's sign-in when it has none, and once for the status it prints. `list`,
-`logs` and `controller` never sign in, except `controller login` when the
-command line is signed out. Past the limit,
-`api` and `up` fail with an explicit message (see
-[Troubleshooting](#troubleshooting)), and `status` reports the local user as
-unavailable. Do not call `status` or `api` in a tight loop.
+`logs` and `agent-remote-controller-dev` never sign in, except its `login` when
+the command line is signed out. Past the limit, `api` and `up` fail with an
+explicit message (see [Troubleshooting](#troubleshooting)), and `status` reports
+the local user as unavailable. Do not call `status` or `api` in a tight loop.
 
 ### Cleaning up
 
@@ -188,6 +228,10 @@ because the PID may belong to something else by now. Stop the runner with
 `kill PID`, which stops its Controller and closes the site. If the Controller
 still runs, stop it the same way. Then delete the instance directory.
 
+`agent-remote-controller-dev` stays installed for the other instances. When no
+instance is left, delete it from `~/.local/bin` (or `ARC_LOCAL_BIN_DIR`) and
+`<root>/bin/`; `up` installs both again.
+
 ## How it works
 
 Each checkout has one instance, named after the checkout directory and an
@@ -199,9 +243,12 @@ eight-character hash of its real path:
   runtime.json    current run: checkout commit and dirty flag at start, runner and Controller PIDs
   relay/          site state and local identity
   controller/     development Controller state, including its pairing and command line sign-in
-  workspace/      the Controller's only allowed workspace
+  workspace/      the Controller's only allowed workspace: the test directory
+  bin/            agent-remote-controller for the instance's sessions
   logs/           runner.log and controller.log of the current run
   operation.lock/ present only while a command is changing the instance
+~/.agent-remote-control-dev/bin/dev-launcher.mjs   what agent-remote-controller-dev runs; it chooses the instance
+~/.agent-remote-control-dev/default.json           the instance pnpm local up started last
 ```
 
 `up` builds the Controller, the website and the Devbox server bundle, then
@@ -232,6 +279,7 @@ Set these in the shell that runs `pnpm local`.
 | --- | --- | --- |
 | `ARC_LOCAL_ROOT` | Directory that holds `instances/`. Set it for every command: instances under another root are not seen. The tests use a temporary directory. | `~/.agent-remote-control-dev` |
 | `ARC_LOCAL_READY_TIMEOUT_MS` | How long `up` waits for the site and the Controller registration, as a positive whole number of milliseconds. | `90000` |
+| `ARC_LOCAL_BIN_DIR` | Directory where `up` installs `agent-remote-controller-dev`. | `~/.local/bin` |
 | `ARC_LOCAL_WEB_DIST` | Absolute path of the website build the instance serves; `up --no-build` checks it for `index.html`. `up` does not build into it. The tests use it. | `dist/relay/web` in the checkout |
 
 ## Shared native profiles
@@ -248,7 +296,7 @@ disabled.
 | Session ownership | Recorded in the profile (`.arc-session-owners`), so both Controllers see which one owns a session. |
 | Codex daemon, OpenCode server | Never started, restarted or updated by the instance (`AGENT_HOST_CODEX_AUTO_START=0`, `AGENT_HOST_OPENCODE_AUTO_START=0`). Codex sessions use your running Codex daemon; without it, Codex is unavailable. OpenCode may be unavailable, because its server credentials belong to your own Controller's state. |
 | Per-session stores | Permission modes, references and creation records under `~/.agent-remote-control/session-*` are keyed by session, so test sessions add entries there. |
-| Codex skill | The first Codex session a Controller creates or resumes writes its `agent-remote` skill to `~/.codex/skills/agent-remote/SKILL.md` when the file differs. The instance writes this checkout's version; your own Controller writes its version back with its next Codex session. |
+| Codex skill | Not shared: the instance writes no skill into `~/.codex`, and its Codex sessions read the one your own Controller installed (see [the test directory](#the-test-directory-and-its-command-mapping)). |
 
 In the instance website, do not use Controller update, Codex daemon restart,
 OpenCode server or VS Code tunnel controls. Controller update would replace
@@ -268,14 +316,17 @@ Messages print the absolute path of the instance directory. In this table,
 | `Build artifacts are missing (…)` | `--no-build` found no earlier build. Run `pnpm local up` without it. |
 | `The runner exited during startup.` | The error ends with the last lines of `runner.log` and `controller.log`; `pnpm local logs` shows more. The log names the reason, for example `This instance's Controller state belongs to another site origin. Remove the instance with pnpm local remove --yes.` and `The instance's saved Controller connection is unreadable (…)`. For the second, check `<instance>/controller/connection.json` without pasting it anywhere: it holds the device key. |
 | `The instance did not become ready within 90 seconds while waiting for the site` (or `…for Controller registration`) | `up` stopped the runner it started and printed the log tails. Read them, or raise `ARC_LOCAL_READY_TIMEOUT_MS` on a slow machine. |
-| The Controller never registers | `pnpm local controller diagnostics --source controller --limit 60`. |
+| The Controller never registers | `agent-remote-controller-dev diagnostics --source controller --limit 60`. |
 | `orphaned` in `status`; `The runner is gone but Controller pid <pid> still runs. Stop that process, then retry.` | The runner died while its Controller kept running. Stop that Controller (`ps -ww -o command= -p PID` shows `…/packages/agent-host/dist/cli.js foreground`), then `up`. |
 | `A previous local command (pid <pid>) was interrupted and left its lock. Remove <instance>/operation.lock and retry.` | A `pnpm local` command was killed before it could release its lock. Remove that directory, then retry. |
 | `Another local command is changing this instance. If none is running, remove <instance>/operation.lock.` | Wait for the running `pnpm local` command to finish. If none is running, remove that directory. |
 | `This environment does not allow listening on local ports (EPERM)` or `This environment does not allow starting background processes (EPERM)` | The session's sandbox refuses the local listener or the detached runner (the code can also be `EACCES`). Run `pnpm local` from a session without the sandbox (YOLO mode). |
 | `The instance's sign-in limit (30 per minute) is exhausted; retry within a minute.` | Too many sign-ins in the last minute, counting your browser. Wait a minute, then retry. |
 | `Playwright is not ready in <checkout>.` | Install dependencies in that checkout, then run the `playwright install chromium` command the message names. |
-| `The Controller command line is not signed in: …` after `up` | The instance is ready, but `window`, `api` and `host list` through the command line fail. The message names the cause; run `pnpm local controller login` to retry. |
+| `The Controller command line is not signed in: …` after `up` | The instance is ready, but `window`, `api` and `host list` through the command line fail. The message names the cause; run `agent-remote-controller-dev login` to retry. |
+| `… exists and was not installed by pnpm local, so it was left alone.` after `up` | Another program owns `agent-remote-controller-dev` in that directory. Move it, or set `ARC_LOCAL_BIN_DIR`; meanwhile `pnpm local controller <args>` runs the same command. |
+| `The checkout … has no local instance. Run pnpm local up there.` | `agent-remote-controller-dev` ran in a checkout without an instance. Run `pnpm local up` there, or run the command from the checkout whose instance you mean. |
+| `The checkout … of the local instance … is gone.` | The instance outlived its worktree. Remove it as [Cleaning up](#cleaning-up) describes. |
 | A provider is missing | It is not installed or detected on this machine, or Codex has no running daemon. Install the provider or sign in to it natively, then run `pnpm local up` again. |
 
 ## Testing the launcher

@@ -26,6 +26,7 @@ pnpm local logs --follow # keep following both logs
 pnpm local down          # stop; state is kept
 pnpm local list          # every instance on this machine
 pnpm local remove --yes  # delete this checkout's stopped instance
+pnpm local controller session list  # drive the instance's sessions, Hosts and Windows
 ```
 
 Before the first `up`, install Node 22 or later, pnpm 10.34.5 and at least one
@@ -49,7 +50,10 @@ failed build leaves a running instance untouched. When the site answers
 `/health` and the Controller reports `uplink: registered`, `up` prints the
 status, including the `http://localhost:<port>` URL. Open that URL in any local
 browser; it is signed in automatically, and the development Controller appears
-as the Host `Dev · <checkout directory name>`.
+as the Host `Dev · <checkout directory name>`. `up` also signs the development
+Controller's command line in as the local user, so
+`pnpm local controller session|host|window|api …` drives the instance like the
+website does (see [Command line](#command-line)).
 
 `status` reports one of these states: `running`; `stopped` (no run is
 recorded); `stale` (the recorded processes are gone; `up` or `down` clears the
@@ -69,16 +73,13 @@ from the shared native histories.
 Three commands look into the instance:
 
 ```bash
-pnpm local controller status
+pnpm local controller session list
 pnpm local api v1/remote/hosts
 pnpm local screenshot / --out page.png
 ```
 
-- `controller <args>` runs the Controller CLI against the instance's state. It
-  accepts `status`, `diagnostics`, `window`, `session` and `environment`, and
-  the read-only `help`, `--help`, `-h` and `--version`. It refuses everything
-  else: the runner owns start, stop, pairing and updates, and native
-  subcommands could take over shared sessions.
+- `controller <args>` runs this checkout's Controller CLI against the instance;
+  see [Command line](#command-line).
 - `api <v1/path>` sends a signed-in JSON request to the instance's user API and
   prints the response body. Paths start with `v1/`. `--method M` selects the
   method, which is `GET`, or `POST` when `--data JSON` is given. A response
@@ -96,13 +97,44 @@ pnpm local screenshot / --out page.png
 pnpm --filter @orchardworks/agent-remote-lab exec playwright install chromium
 ```
 
+### Command line
+
+`pnpm local controller` runs `packages/agent-host/dist/cli.js` with the
+instance's Controller state. It accepts the resource commands `session`,
+`host`, `window` and `api`, the sign-in commands `login`, `login status` and
+`logout`, and `status`, `diagnostics`, `--skill`, `help` and `--version`.
+`session` and `host` reach the instance's Controller through its management
+socket, as the Host owner. `window`, `api`, `host list` and other commands the
+site answers use the command line's own sign-in, which `up` creates by running
+`login` and allowing its code as the local user. `pnpm local controller login`
+does the same again when `status` shows `command line: signed out`; it takes no
+options and opens no browser. The calling shell's session variables are not
+passed on, so the commands address the instance even from inside a session.
+The [command line reference](current/agent-remote/cli.md) describes the
+commands; `pnpm local controller --skill` prints the agents' manual.
+
+It refuses `start`, `stop`, `foreground`, `pair`, `autostart`, `update` and
+the native CLIs, because the runner owns the Controller and the native CLIs act
+on the shared profiles. It also refuses `session attach`, which can take a
+session over from its other clients, `host update` (run `pnpm local up`), and
+`host tunnel start|stop`, because the VS Code tunnel is shared with your own
+Controller.
+
+```bash
+pnpm --silent local controller session create --provider claude --message "Say hello."
+pnpm --silent local controller session read <address> --limit 2
+pnpm --silent local controller session link <address>
+```
+
 ### Machine-readable output
 
 `status --json` prints one JSON report. Like plain `status`, it exits 0 only
 when the instance is ready: running, the local user signed in, and the
 Controller registered. It exits 3 in every other case. With no instance for this
 checkout it prints `{"state":"none"}` and exits 3. The report includes `state`,
-`origin`, `localUser`, `controllerUplink` (`registered` when ready), `build`
+`origin`, `localUser`, `controllerUplink` (`registered` when ready),
+`commandLine` (whether the command line is signed in; not part of readiness),
+`build`
 (revision, dirty flag, start time and PIDs of the running build) and `checkout`
 (the checkout's revision and dirty flag now, to compare with `build`).
 `list --json` prints an array with one object per instance.
@@ -122,8 +154,10 @@ pnpm 10 rejects the short form `-s`. Exit codes: 0 success, 1 failure, 3
 The site allows 30 sign-ins per minute, shared with your browser. `status`,
 `api` and `screenshot` each sign in once as the local user and sign out again
 (`status` only while the instance is running). `up` polls `/health` while it
-waits, then signs in twice: once to confirm the local user and once for the
-status it prints. `list`, `logs` and `controller` never sign in. Past the limit,
+waits, then signs in to confirm the local user, once more to allow the command
+line's sign-in when it has none, and once for the status it prints. `list`,
+`logs` and `controller` never sign in, except `controller login` when the
+command line is signed out. Past the limit,
 `api` and `up` fail with an explicit message (see
 [Troubleshooting](#troubleshooting)), and `status` reports the local user as
 unavailable. Do not call `status` or `api` in a tight loop.
@@ -164,7 +198,7 @@ eight-character hash of its real path:
   instance.json   checkout path, port and origin
   runtime.json    current run: checkout commit and dirty flag at start, runner and Controller PIDs
   relay/          site state and local identity
-  controller/     development Controller state, including its pairing
+  controller/     development Controller state, including its pairing and command line sign-in
   workspace/      the Controller's only allowed workspace
   logs/           runner.log and controller.log of the current run
   operation.lock/ present only while a command is changing the instance
@@ -214,6 +248,7 @@ disabled.
 | Session ownership | Recorded in the profile (`.arc-session-owners`), so both Controllers see which one owns a session. |
 | Codex daemon, OpenCode server | Never started, restarted or updated by the instance (`AGENT_HOST_CODEX_AUTO_START=0`, `AGENT_HOST_OPENCODE_AUTO_START=0`). Codex sessions use your running Codex daemon; without it, Codex is unavailable. OpenCode may be unavailable, because its server credentials belong to your own Controller's state. |
 | Per-session stores | Permission modes, references and creation records under `~/.agent-remote-control/session-*` are keyed by session, so test sessions add entries there. |
+| Codex skill | The first Codex session a Controller creates or resumes writes its `agent-remote` skill to `~/.codex/skills/agent-remote/SKILL.md` when the file differs. The instance writes this checkout's version; your own Controller writes its version back with its next Codex session. |
 
 In the instance website, do not use Controller update, Codex daemon restart,
 OpenCode server or VS Code tunnel controls. Controller update would replace
@@ -240,6 +275,7 @@ Messages print the absolute path of the instance directory. In this table,
 | `This environment does not allow listening on local ports (EPERM)` or `This environment does not allow starting background processes (EPERM)` | The session's sandbox refuses the local listener or the detached runner (the code can also be `EACCES`). Run `pnpm local` from a session without the sandbox (YOLO mode). |
 | `The instance's sign-in limit (30 per minute) is exhausted; retry within a minute.` | Too many sign-ins in the last minute, counting your browser. Wait a minute, then retry. |
 | `Playwright is not ready in <checkout>.` | Install dependencies in that checkout, then run the `playwright install chromium` command the message names. |
+| `The Controller command line is not signed in: …` after `up` | The instance is ready, but `window`, `api` and `host list` through the command line fail. The message names the cause; run `pnpm local controller login` to retry. |
 | A provider is missing | It is not installed or detected on this machine, or Codex has no running daemon. Install the provider or sign in to it natively, then run `pnpm local up` again. |
 
 ## Testing the launcher

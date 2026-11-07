@@ -73,5 +73,8 @@ product's Window layouts and other per-user state on the instance do, so a Windo
 can already hold several session views: scope locators to the view you act in, as
 the [test loop](test-loop.md) does.
 
+To start from a session with history, create and drive it with the
+[command line](cli.md) and open its `session link` URL with `page.goto`.
+
 If page code fails only in automation, read the console (`page.on('console', …)`)
 and network before calling it a product defect.

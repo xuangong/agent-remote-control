@@ -9,9 +9,9 @@ layout of the instance directory.
 | --- | --- |
 | `pnpm local up` | Build this checkout, then start or restart its instance. Prints status when ready. Read [Before restarting](#before-restarting-a-running-instance) and [Run `up` to completion](#run-up-to-completion) first. |
 | `pnpm local up --no-build` | Restart from the existing build output, only when no code changed. |
-| `pnpm --silent local status --json` | State, URL, local user, Controller uplink, running build and checkout commit. Exit 0 only when ready, 3 otherwise. |
+| `pnpm --silent local status --json` | State, URL, local user, Controller uplink, command line sign-in, running build and checkout commit. Exit 0 only when ready, 3 otherwise. |
 | `pnpm local logs` | Last 80 lines of the runner (site) and Controller logs of the current run. Do not use `--follow`: it never exits. |
-| `pnpm local controller diagnostics --source controller --limit 60` | Controller diagnostics. `controller status` shows the uplink. Its `session` and `window` subcommands act on sessions, so [Own sessions only](../SKILL.md#safety-rules) applies. |
+| `pnpm local controller diagnostics --source controller --limit 60` | Controller diagnostics. `controller status` shows the uplink. The other `controller` commands drive sessions, Hosts and Windows: see [command line](cli.md). |
 | `pnpm local list` | Every instance on this machine; `*` marks this checkout. |
 | `pnpm local down` | Stop this checkout's instance; state is kept. |
 | `pnpm local remove --yes` | Delete this checkout's stopped instance with its site state and Controller pairing. Stop and ask the user first ([when](../SKILL.md#stop-and-ask-the-user)). |
@@ -20,17 +20,25 @@ layout of the instance directory.
 
 `up` stops a running instance before it starts it again. That interrupts its
 running sessions: native history persists, active turns and pending approvals do
-not. Before `up` on an instance that may already be running, read
-`pnpm --silent local status --json`. When `state` is `running` and this task did
-not start it, or someone may be watching it, stop and ask the user. An instance
-this task started or already restarted counts as yours. A `stopped`, `stale` or
-`{"state":"none"}` instance needs no question.
+not. Before `up` on an instance that may already be running, list its sessions:
+
+```bash
+pnpm --silent local controller session list --limit 50
+```
+
+It never signs in. Restart when no session shows `"state": "running"` or
+`"waiting"`, or when every such session is one this task started. Otherwise
+someone is using the instance: stop and ask the user. When the command fails,
+`pnpm local list` shows the instance's state (it does not sign in either); an
+instance that is not `running` has nothing to interrupt.
 
 ## Run `up` to completion
 
 A build can take minutes. Give `up` a tool timeout of at least 10 minutes, or run
-it in the background and wait for it to exit: an interrupted `up` leaves
-`operation.lock` (see [Locks](#locks)). Do not start a second `up` while one runs.
+it in the background and wait for it to exit. An `up` killed outright (a tool
+timeout can do that) leaves `operation.lock` (see [Locks](#locks)); one
+interrupted while it waits for readiness may leave the runner running, which
+`pnpm local down` stops. Do not start a second `up` while one runs.
 
 After changing code, run `pnpm local up`; use `--no-build` only to restart the same
 build. `up` waits for readiness (90 seconds by default; the guide's
@@ -43,13 +51,15 @@ cover a slow machine), prints the status and exits 0. A failed build, or
 ```
 Instance: <name> (running)
 Site: http://localhost:<port>  local user: signed in
-Controller: uplink registered (pid <pid>)
+Controller: uplink registered (pid <pid>)  command line: signed in
 Running build: <12-character commit>[ (dirty)] since <time>; checkout now <12-character commit>[ (dirty)]
 State: <instance directory>
 ```
 
 The instance is ready when the state is `running`, the local user is signed in
-and the uplink is `registered`. The guide lists the
+and the uplink is `registered`. `up` also signs the instance's Controller command
+line in as the local user; `command line: signed out` only affects the commands
+that go through the site (see [command line](cli.md#sign-in)). The guide lists the
 [other states](../../../../docs/local-development.md#commands) and what clears
 them.
 

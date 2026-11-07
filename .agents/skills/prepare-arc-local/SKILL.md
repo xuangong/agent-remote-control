@@ -14,6 +14,12 @@ is supported; Windows is not. The
 commands, environment variables and troubleshooting table; this skill says how to
 use it safely and what counts as evidence.
 
+The loop is: change the code, `pnpm local up`, drive a real session through the
+instance's command line, check the page, fix, repeat. The command line
+(`pnpm local controller session …`) does not need a browser and does not sign in,
+so use it for sessions and state, and the headless browser for what the page
+shows.
+
 ## Before you start
 
 `pnpm local` needs a session that may listen on local ports and start background
@@ -33,6 +39,7 @@ exercised.
 | Start, refresh, stop, inspect or clean up an instance | [lifecycle](references/lifecycle.md) |
 | Decide what has been verified and report it | [verification](references/verification.md) |
 | Look at or operate the website | [browser](references/browser.md) |
+| Create, drive and read sessions; Hosts, Windows | [command line](references/cli.md) |
 | Read state or prepare fixtures through the API | [api](references/api.md) |
 | Run a real session end to end | [test loop](references/test-loop.md) |
 
@@ -56,7 +63,9 @@ in once. Therefore:
 - Never poll these in a loop. To wait for readiness, run `pnpm local up`; it
   polls `/health`, which does not sign in.
 - Use one browser context per script.
-- `list`, `logs` and `controller` never sign in.
+- `list`, `logs` and `controller` never sign in (`controller login` signs in
+  once, only when the command line is signed out), so poll sessions with
+  `pnpm --silent local controller session read`.
 
 ## Safety rules
 
@@ -72,8 +81,8 @@ profiles with the user's own Controller.
   (`~/.agent-remote-control/agents-cloud-cli`, its launchd service), and never
   touch the production site. Operate this instance only through `pnpm local`; do
   not use the global `agent-remote-controller` command for it. (The
-  `agent-remote-sessions` skill uses that command legitimately to read the user's
-  own sessions; that is a different task.)
+  `agent-remote` skill uses that command legitimately for the user's own
+  sessions and Hosts; that is a different task.)
 - **Instance website controls.** Never use the instance website's Controller
   update, Codex daemon restart, OpenCode server or VS Code tunnel controls.
   Controller update would replace this checkout's build; the others act on
@@ -96,7 +105,7 @@ ask the user; do not work around them.
 | Condition | Ask for | If it stays open, report as not exercised |
 | --- | --- | --- |
 | The environment refuses local servers or background processes, or Chromium cannot start ([Before you start](#before-you-start)) | A session without those restrictions | Page, Feature, Model turn (Site and Controller too when `up` was refused) |
-| The instance was not started by this task and may be in use, before `up` restarts it ([lifecycle](references/lifecycle.md#before-restarting-a-running-instance)) | Permission to restart: it interrupts running sessions | Every layer |
+| Before `up` restarts it, the instance runs or waits on a session this task did not start ([lifecycle](references/lifecycle.md#before-restarting-a-running-instance)) | Permission to restart: it interrupts running sessions | Every layer |
 | A lock whose holder still runs a `pnpm local` command for this instance ([lifecycle](references/lifecycle.md#locks)) | Who runs it, and whether to wait | Every layer |
 | Something that is not this instance holds the port or the recorded Controller pid ([lifecycle](references/lifecycle.md#port-held-by-another-process)) | Whether to free it | Every layer |
 | Removing an instance with `pnpm local remove --yes`, which deletes its site state and pairing and gives it a new port. No question when the user just asked you to remove this checkout or its worktree | Confirmation | Every layer |
@@ -120,6 +129,6 @@ Instance: left running at <origin> | stopped
 
 Leave an instance you started running when the user may want to look at it, and
 say so with its origin. A later `up` restarts it and interrupts its sessions, so
-whoever restarts it must check `status` first. Stop an instance you started with
+whoever restarts it checks its sessions first. Stop an instance you started with
 `pnpm local down` when nobody needs it. An instance you found running stays
 running, restarted or not.

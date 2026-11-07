@@ -1,7 +1,7 @@
 import { Type, type Static } from '@sinclair/typebox';
 import { Value } from '@sinclair/typebox/value';
 import { WINDOW_VIEW_LIMIT, WindowEdit, WorkspaceWindow, isWorkspaceWindow, type WindowSessionBinding, type WindowView } from './window-workspace.js';
-import { WindowLayoutError } from './window-workspace-operations.js';
+import { WindowLayoutError, applyWindowOperation } from './window-workspace-operations.js';
 
 const strict = { additionalProperties: false } as const;
 const id = Type.String({ minLength: 1, maxLength: 128, pattern: '^[A-Za-z0-9_.:-]+$' });
@@ -93,3 +93,65 @@ export const isWindowGroupCreateRequest = (value: unknown): value is WindowGroup
 export const isWindowMergeRequest = (value: unknown): value is WindowMergeRequest => Value.Check(WindowMergeRequest, value);
 export const isWindowSplitRequest = (value: unknown): value is WindowSplitRequest => Value.Check(WindowSplitRequest, value);
 export const isWindowTransferRequest = (value: unknown): value is WindowTransferRequest => Value.Check(WindowTransferRequest, value);
+
+function fail(code: string, message: string): never { throw new WindowGroupError(code, message); }
+const clone = <T>(value: T): T => JSON.parse(JSON.stringify(value));
+
+/** Drops the details of views that are no longer bots, such as a closed view or one now showing history. */
+function pruned(group: WindowGroup): WindowGroup {
+  if (!group.bots) return group;
+  const bots = new Set(groupBotViews(group).map(view => view.id));
+  return { ...group, bots: { ...group.bots, members: Object.fromEntries(Object.entries(group.bots.members).filter(([viewId]) => bots.has(viewId))) } };
+}
+
+function edit(group: WindowGroup, item: WindowGroupEdit): WindowGroup {
+  switch (item.type) {
+    case 'bots.add':
+      if (group.bots) fail('section_exists', 'This group is already a section.');
+      return { ...group, bots: { rank: item.rank, members: {} } };
+    case 'bots.remove': {
+      if (!group.bots) fail('section_missing', 'This group is not a section.');
+      if (!hasWindowAppearance(group)) fail('last_appearance', 'A group stays a Window or a section; add the other first.');
+      const { bots: _bots, ...rest } = group;
+      return rest;
+    }
+    case 'window.add': {
+      if (hasWindowAppearance(group)) fail('window_exists', 'This group is already a Window.');
+      const { presentation: _presentation, ...rest } = group;
+      return rest;
+    }
+    case 'window.remove':
+      if (!hasWindowAppearance(group)) fail('window_missing', 'This group is not a Window.');
+      if (!group.bots) fail('last_appearance', 'A group stays a Window or a section; add the other first.');
+      return { ...group, presentation: { window: false } };
+    case 'bot.update': {
+      const view = group.window.views.find(candidate => candidate.id === item.viewId);
+      if (!group.bots || !view || !isBotView(view)) fail('bot_not_found', 'This bot no longer exists.');
+      return { ...group, bots: { ...group.bots, members: { ...group.bots.members, [item.viewId]: clone(item.details) } } };
+    }
+    case 'section.rank':
+      if (!group.bots) fail('section_missing', 'This group is not a section.');
+      return { ...group, bots: { ...group.bots, rank: item.rank } };
+    default: {
+      if (item.type === 'view.bind' && group.bots) {
+        const view = group.window.views.find(candidate => candidate.id === item.viewId);
+        // Rule 1: a bot keeps its conversation; the title and role details of that session may change.
+        if (view && isBotView(view) && (!isBotView({ ...view, binding: item.binding })
+          || windowSessionIdentity(view.binding) !== windowSessionIdentity(item.binding))) {
+          fail('bot_view', 'A bot keeps its conversation. Open the other session beside it.');
+        }
+      }
+      return { ...group, window: applyWindowOperation(group.window, item) };
+    }
+  }
+}
+
+/** Applies one explicit command atomically and advances the Window revision once, as applyWindowOperation does. */
+export function applyGroupOperation(source: WindowGroup, operation: WindowGroupOperation): WindowGroup {
+  if (!isWindowGroup(source) || !Value.Check(WindowGroupOperation, operation)) fail('invalid_window_operation', 'The group or operation is invalid.');
+  let result = clone(source);
+  for (const item of operation.type === 'batch' ? operation.operations : [operation]) result = edit(result, item);
+  result = pruned({ ...result, window: { ...result.window, revision: source.window.revision + 1 } });
+  if (!isWindowGroup(result)) fail('invalid_window_group', 'The resulting group is invalid.');
+  return result;
+}

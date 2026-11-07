@@ -2,8 +2,8 @@ import { expect, it } from 'vitest';
 import type { WorkspaceWindow } from './window-workspace.js';
 import { WindowLayoutError, createWindowView } from './window-workspace-operations.js';
 import {
-  WindowGroupError, isBotView, isWindowGroup, isWindowGroupCreateRequest, isWindowGroupMutation, isWindowMergeRequest, isWindowSplitRequest,
-  isWindowTransferRequest, type WindowGroup,
+  WindowGroupError, applyGroupOperation, isBotView, isWindowGroup, isWindowGroupCreateRequest, isWindowGroupMutation, isWindowMergeRequest,
+  isWindowSplitRequest, isWindowTransferRequest, type WindowGroup,
 } from './window-groups.js';
 
 const session = (nativeSessionId: string, title = nativeSessionId) => ({ hostId: 'mac', providerId: 'claude', nativeSessionId, title });
@@ -59,4 +59,52 @@ it('accepts plain Window requests as group requests and checks group creation', 
   expect(isWindowTransferRequest({ operationId: 'op', issuedAt: 1, baseRevision: 0, viewId: 'main', target: 'other', targetRevision: 0 })).toBe(true);
   expect(isWindowTransferRequest({ operationId: 'op', issuedAt: 1, baseRevision: 0, viewId: 'main', target: 'other' })).toBe(false);
   expect(new WindowGroupError('bot_view', 'x')).toBeInstanceOf(WindowLayoutError);
+});
+
+it('adds and removes appearances, always keeping one', () => {
+  const group: WindowGroup = { window: windowOf('w', createWindowView('main', session('a'), 'primary')) };
+  const both = applyGroupOperation(group, { type: 'bots.add', rank: 'm' });
+  expect(both.bots).toEqual({ rank: 'm', members: {} });
+  expect(both.window.revision).toBe(1);
+  const sectionOnly = applyGroupOperation(both, { type: 'window.remove' });
+  expect(sectionOnly.presentation).toEqual({ window: false });
+  expect(refusal(() => applyGroupOperation(sectionOnly, { type: 'bots.remove' }))).toBe('last_appearance');
+  expect(refusal(() => applyGroupOperation(group, { type: 'window.remove' }))).toBe('last_appearance');
+  expect(refusal(() => applyGroupOperation(both, { type: 'bots.add', rank: 'n' }))).toBe('section_exists');
+  expect(applyGroupOperation(sectionOnly, { type: 'window.add' }).presentation).toBeUndefined();
+  expect(applyGroupOperation(both, { type: 'section.rank', rank: 'n' }).bots?.rank).toBe('n');
+});
+
+it('keeps details only for views that are still bots', () => {
+  const window = windowOf('w', createWindowView('main', session('a'), 'primary'), createWindowView('dock', session('b')));
+  let group = applyGroupOperation(section(window), { type: 'batch', operations: [
+    { type: 'bot.update', viewId: 'main', details: { label: 'Writes the release notes', picture: { shape: 'hexagon', color: '#2f6fed' }, pinned: true } },
+    { type: 'bot.update', viewId: 'dock', details: { label: 'Reviews' } },
+  ] });
+  expect(group.window.revision).toBe(1);
+  expect(group.bots?.members.main).toEqual({ label: 'Writes the release notes', picture: { shape: 'hexagon', color: '#2f6fed' }, pinned: true });
+  group = applyGroupOperation(group, { type: 'view.close', viewId: 'dock' });
+  expect(Object.keys(group.bots?.members ?? {})).toEqual(['main']);
+  expect(refusal(() => applyGroupOperation(group, { type: 'bot.update', viewId: 'dock', details: {} }))).toBe('bot_not_found');
+});
+
+it('lets a bot change its title but not its conversation', () => {
+  const group = section(windowOf('w', createWindowView('main', session('a'), 'primary')));
+  expect(applyGroupOperation(group, { type: 'view.bind', viewId: 'main', binding: session('a', 'Renamed') }).window.views[0]?.binding?.title).toBe('Renamed');
+  expect(refusal(() => applyGroupOperation(group, { type: 'view.bind', viewId: 'main', binding: session('b') }))).toBe('bot_view');
+  expect(refusal(() => applyGroupOperation(group, { type: 'view.bind', viewId: 'main', binding: { ...session('a'), sessionIntent: 'history' } }))).toBe('bot_view');
+  // Without a section the same view is an ordinary Window view and may show another session.
+  expect(applyGroupOperation({ window: group.window }, { type: 'view.bind', viewId: 'main', binding: session('b') }).window.views[0]?.binding?.nativeSessionId).toBe('b');
+  // Succession rebinds through the layout, which stays allowed.
+  const { schemaVersion: _version, id: _id, revision: _revision, ...layout } = group.window;
+  const succeeded = applyGroupOperation(group, { type: 'layout.apply', layout: { ...layout, views: [{ ...layout.views[0]!, binding: session('c') }] } });
+  expect(succeeded.window.views[0]?.binding?.nativeSessionId).toBe('c');
+});
+
+it('refuses an invalid group or operation and leaves a refused batch without effect', () => {
+  const group = section(windowOf('w', createWindowView('main', session('a'), 'primary')));
+  expect(refusal(() => applyGroupOperation({ window: group.window, presentation: { window: false } }, { type: 'window.add' }))).toBe('invalid_window_operation');
+  const before = JSON.stringify(group);
+  expect(refusal(() => applyGroupOperation(group, { type: 'batch', operations: [{ type: 'rename', title: 'Changed' }, { type: 'bots.add', rank: 'n' }] }))).toBe('section_exists');
+  expect(JSON.stringify(group)).toBe(before);
 });

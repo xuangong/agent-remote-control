@@ -49,6 +49,8 @@ try {
     await page.screenshot({ path: join(evidence, 'turn-reply.png') });
     console.log(`${providerName} replied in view ${await view.getAttribute('data-view-id')}: ${(await reply.first().innerText()).replace(/\s+/g, ' ')}`);
   } finally {
+    // Close the page first: an open page keeps polling and gets 401s once its session ends.
+    for (const open of context.pages()) await open.close().catch(() => {});
     // Mirrors scripts/local/session.mjs: the page's session would otherwise stay open on the instance.
     await context.request.post(origin + '/auth/logout', { headers: { origin, 'content-type': 'application/json' }, data: '{}', timeout: 10_000 }).catch(() => {});
   }

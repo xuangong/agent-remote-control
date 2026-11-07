@@ -59,6 +59,31 @@ describe('Claude event projection', () => {
       .toEqual(second.map(({ sourceKey, delivery, event }) => ({ sourceKey, delivery, event })));
     expect(first[0]).toMatchObject({ delivery: 'history', event: { type: 'timeline', item: { text: 'Saved answer' } } });
   });
+
+  it('dates messages when they were written, not when they are read again', () => {
+    const projector = new ClaudeEventProjector('session', 'history');
+    projector.project(assistant('tool', [{ type: 'tool_use', id: 'call', name: 'Bash', input: { command: 'true' } }]));
+    const frames = [
+      { ...envelope, type: 'user', uuid: 'asked', timestamp: '2026-11-07T15:15:47.931Z', message: { content: 'Print the integers' } },
+      { ...assistant('answered', [{ type: 'text', text: '1\n2' }]), timestamp: '2026-11-07T15:15:51.974Z' },
+      { ...envelope, type: 'user', uuid: 'result', timestamp: '2026-11-07T15:15:52.500Z', message: { content: [{ type: 'tool_result', tool_use_id: 'call', content: 'ok' }] } },
+      { ...envelope, type: 'system', subtype: 'compact_boundary', uuid: 'compacted', timestamp: '2026-11-07T15:16:00.000Z' },
+    ];
+    expect(frames.flatMap(frame => projector.project(frame)).map(({ occurredAt }) => new Date(occurredAt).toISOString())).toEqual([
+      '2026-11-07T15:15:47.931Z', '2026-11-07T15:15:51.974Z', '2026-11-07T15:15:52.500Z', '2026-11-07T15:16:00.000Z',
+    ]);
+  });
+
+  it('dates messages and streamed text without a usable native time when they arrive', () => {
+    const projector = new ClaudeEventProjector('session');
+    const before = Date.now();
+    const events = [assistant('undated', [{ type: 'text', text: 'Older emitters omit the time.' }]),
+      { ...assistant('invalid', [{ type: 'text', text: 'Unreadable time.' }]), timestamp: 'yesterday' },
+      stream({ type: 'message_start', message: { id: 'streamed' } }),
+      stream({ type: 'content_block_start', index: 0, content_block: { type: 'text', text: 'Live' } })].flatMap(frame => projector.project(frame));
+    expect(events).toHaveLength(3);
+    for (const { occurredAt } of events) expect(occurredAt).toBeGreaterThanOrEqual(before);
+  });
 });
 
 it('keeps native structured tool output bounded, correlated, and deduplicated alongside readable text', () => {

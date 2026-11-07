@@ -33,6 +33,13 @@ export class ClaudeEventProjector {
   project(value: unknown): ProviderObservation[] {
     if (!record(value) || value.parent_tool_use_id || value.session_id && value.session_id !== this.sessionId) return [];
     if (value.type === 'stream_event') return this.stream(value.event);
+    // A native record says when it was written, so history read again keeps that time; older emitters omit it.
+    const written = typeof value.timestamp === 'string' ? Date.parse(value.timestamp) : NaN;
+    const observations = this.projectRecord(value);
+    return Number.isFinite(written) ? observations.map(observation => ({ ...observation, occurredAt: written })) : observations;
+  }
+
+  private projectRecord(value: Record<string, any>): ProviderObservation[] {
     if (typeof value.uuid === 'string') {
       if (this.seen.has(value.uuid)) return [];
       this.seen.add(value.uuid);

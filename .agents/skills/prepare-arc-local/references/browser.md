@@ -73,6 +73,8 @@ try {
     // await page.getByRole('dialog').waitFor();
     await page.screenshot({ path: '.tmp/local/step-1.png' });
   } finally {
+    // Close the page first: an open page keeps polling and gets 401s once its session ends.
+    for (const open of context.pages()) await open.close().catch(() => {});
     // Mirrors scripts/local/session.mjs: the page's session would otherwise stay open on the instance.
     await context.request.post(origin + '/auth/logout', { headers: { origin, 'content-type': 'application/json' }, data: '{}', timeout: 10_000 }).catch(() => {});
   }
@@ -93,4 +95,6 @@ To start from a session with history, create and drive it with the
 [command line](cli.md) and open its `session link` URL with `page.goto`.
 
 If page code fails only in automation, read the console (`page.on('console', …)`)
-and network before calling it a product defect.
+and network before calling it a product defect. A script that signs out while its page
+is still open makes the page's next requests fail with 401: close the page first,
+as the template does, and do not count errors after the sign-out against the page.

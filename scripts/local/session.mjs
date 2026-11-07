@@ -89,8 +89,9 @@ export async function screenshot({ source, origin, path = '/', output, viewport 
   }
   try {
     const context = await browser.newContext({ viewport: { width, height } });
+    let page;
     try {
-      const page = await context.newPage();
+      page = await context.newPage();
       try {
         await page.goto(origin + path, { waitUntil: 'domcontentloaded', timeout: 30_000 });
         await page.locator(waitFor).first().waitFor({ state: 'visible', timeout: 30_000 });
@@ -100,6 +101,8 @@ export async function screenshot({ source, origin, path = '/', output, viewport 
       await page.waitForTimeout(500);
       await page.screenshot({ path: output, fullPage });
     } finally {
+      // Closed first: an open page keeps polling and would receive 401s once its session ends.
+      await page?.close().catch(() => {});
       // The page's session would otherwise stay open on the instance; the context's request client shares its cookies.
       await context.request.post(origin + '/auth/logout', { headers: { origin, 'content-type': 'application/json' }, data: '{}', timeout: 10_000 }).catch(() => {});
     }

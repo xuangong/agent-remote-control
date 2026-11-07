@@ -107,9 +107,13 @@ for (const engine of [chromium, webkit]) for (const width of [402, 1280]) {
       await browserExpect(view.locator('.agent-session-search-results')).toHaveCount(0);
       const geometry = await selected.evaluate(element => {
         const box = element.getBoundingClientRect(), viewport = element.closest('.lab-timeline-scroll')!.getBoundingClientRect();
-        return { visible: box.bottom > viewport.top && box.top < viewport.bottom, overflow: document.documentElement.scrollWidth > innerWidth };
+        // The open search panel floats over the timeline; the revealed result must not be under it.
+        const panel = element.closest('.lab-timeline-stage')!.querySelector('.agent-session-search')!.getBoundingClientRect();
+        const text = [...element.querySelectorAll('p')].find(paragraph => paragraph.textContent!.includes('first request'))!.getBoundingClientRect();
+        const covered = text.left < panel.right && text.right > panel.left && text.top < panel.bottom && text.bottom > panel.top;
+        return { visible: box.bottom > viewport.top && box.top < viewport.bottom, covered, overflow: document.documentElement.scrollWidth > innerWidth };
       });
-      expect(geometry).toEqual({ visible: true, overflow: false });
+      expect(geometry).toEqual({ visible: true, covered: false, overflow: false });
       await view.getByLabel('Search scope').selectOption('reasoning');
       await browserExpect(view.getByRole('status')).toContainText('All available history searched');
       await browserExpect(view.locator('.agent-session-search-results li')).toHaveCount(1);

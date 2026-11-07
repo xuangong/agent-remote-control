@@ -1,5 +1,6 @@
 import { WindowSessionBridgeContext } from './window-session-bridge-context.js';
 import { parseWindowFeature } from './window-feature-views.js';
+import { windowTitleEdits } from './window-titles.js';
 import { useWindowSessionBridge } from './hooks/useWindowSessionBridge.js';
 import { createWindowView, primaryWindowViews, windowPrimaryViewId, type WindowEdit } from '@orchardworks/agent-remote-protocol';
 import { windowSessionBinding } from './window-workspace.js';
@@ -127,6 +128,7 @@ import { HostPairing, type HostPairingService, type RemoteHost } from './compone
 import { DirectoryError, nativeSessionMissing, RemoteHostClient, SessionDirectoryClient, type CreateSessionOptions, type OpenedSession, type SessionSummary } from './directory-client.js';
 import { SessionConfiguration, SessionDirectory } from './components/SessionDirectory.js';
 import { useSessionEntries } from './hooks/useSessionEntries.js';
+import { useNativeTitles } from './hooks/useNativeTitles.js';
 import { readCurrentConversationLayout, useConversationHistory } from './hooks/useConversationHistory.js';
 import { sessionKey, sessionRootKey } from './session-tree.js';
 import { ViewOptions } from './components/ViewOptions.js';
@@ -1534,20 +1536,25 @@ function AppContent({
     succession.updateTitles([session]);
     setOpenedSessions(update); setSideSessions(update); tracking.rename(session);
   }, [baseUrl, tracking.rename, succession.document]);
+  // Window views name sessions that need not be open on this page; Ask, Team and TPM views name their own.
+  const titledSessions = useMemo(() => [...sessionEntries, ...(sharedWindow?.views ?? []).flatMap(({ binding, bindingPolicy }) => binding && bindingPolicy !== 'managed'
+    ? [{ hostId: binding.hostId, providerId: binding.providerId, nativeSessionId: binding.nativeSessionId, title: binding.title }] : [])],
+    [sessionEntries, sharedWindow?.views]);
+  useNativeTitles({ entries: titledSessions, confirmed: confirmedTitles, apply: applySessionTitle,
+    // A session's native title can appear once a turn ends, so a change in the sessions' activity asks again.
+    trigger: `${state?.agent?.status ?? ''}|${Object.values(sideActivity).join(',')}`,
+    describe: (hostId, providerId, nativeSessionId, signal) => new SessionDirectoryClient(baseUrl, undefined, hostId).nativeTitle(providerId, nativeSessionId, signal) });
   const titleProjection = useRef<ReadonlyMap<string, string>>();
   useEffect(() => {
     if (!sharedWindow || !confirmedTitles?.size || titleProjection.current === confirmedTitles) return;
     titleProjection.current = confirmedTitles;
-    let changed = false;
-    const views = sharedWindow.views.map(view => {
-      const title = view.binding && confirmedTitles.get(sessionKey(view.binding));
-      if (title === undefined || title === view.binding!.title) return view;
-      changed = true; return { ...view, binding: { ...view.binding!, title } };
-    });
-    if (!changed) return;
-    const { schemaVersion: _, id: __, revision: ___, ...layout } = sharedWindow;
-    try { editWindow({ type: 'layout.apply', layout: { ...layout, views } }); }
-    catch (error) { setSessionNotice(sessionConnectionFailure(error, false)); }
+    try {
+      for (const edit of windowTitleEdits(sharedWindow, confirmedTitles)) {
+        // A view given another session meanwhile keeps it; that is not a failure to report.
+        if (edit.type === 'view.bind') void windowWorkspace.operate(edit).catch(() => {});
+        else editWindow(edit);
+      }
+    } catch (error) { setSessionNotice(sessionConnectionFailure(error, false)); }
   }, [sharedWindow?.id, sharedWindow?.revision, confirmedTitles]);
   useEffect(() => {
     let timer: ReturnType<typeof setTimeout> | undefined;

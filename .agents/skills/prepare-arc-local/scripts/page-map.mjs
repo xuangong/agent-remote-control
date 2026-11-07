@@ -21,6 +21,8 @@ try {
     // The ARIA snapshot lists each control as role "name", which getByRole(role, { name, exact: true }) selects.
     process.stdout.write(await page.locator('body').ariaSnapshot() + '\n');
   } finally {
+    // Close the page first: an open page keeps polling and gets 401s once its session ends.
+    for (const open of context.pages()) await open.close().catch(() => {});
     await context.request.post(origin + '/auth/logout', { headers: { origin, 'content-type': 'application/json' }, data: '{}', timeout: 10_000 }).catch(() => {});
   }
 } finally {

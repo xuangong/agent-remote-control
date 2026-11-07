@@ -196,6 +196,7 @@ exports.chromium = {
               locator(selector) { return { first: () => ({ async waitFor(options) { record('wait', selector, options); } }) }; },
               async waitForTimeout(milliseconds) { record('pause', milliseconds); },
               async screenshot(options) { record('screenshot', options); },
+              async close() { record('close-page'); },
             };
           },
         };
@@ -246,12 +247,13 @@ test('says how to get Playwright ready when its browser is missing', async t => 
   assert.deepEqual(names(events), ['launch']);
 });
 
-test('captures the page, then signs its session out and closes the browser', async t => {
+test('captures the page, closes it, then signs its session out and closes the browser', async t => {
   const events = [];
   const source = await sourceWithFakePlaywright(t, { events });
   const origin = 'http://127.0.0.1:4100';
   await screenshot({ source, origin, path: '/?host=a', output: '/tmp/page.png', viewport: '800x600', fullPage: true });
-  assert.deepEqual(names(events), ['launch', 'context', 'goto', 'wait', 'pause', 'screenshot', 'logout', 'close']);
+  // The page is closed first: it would otherwise keep polling and receive 401s once the session ends.
+  assert.deepEqual(names(events), ['launch', 'context', 'goto', 'wait', 'pause', 'screenshot', 'close-page', 'logout', 'close']);
   const byName = Object.fromEntries(events.map(([name, ...details]) => [name, details]));
   assert.deepEqual(byName.context[0].viewport, { width: 800, height: 600 });
   assert.equal(byName.goto[0], `${origin}/?host=a`);
@@ -279,12 +281,12 @@ test('names the page that did not show up and still signs out and closes', async
   const error = await screenshot({ source, origin: 'http://127.0.0.1:4100', path: '/sessions', output: '/tmp/page.png', waitFor: 'main.lab-shell' }).catch(caught => caught);
   assert.equal(error.message, 'The page http://127.0.0.1:4100/sessions did not show main.lab-shell within 30 seconds.');
   assert.equal(error.cause.message, 'net::ERR_CONNECTION_REFUSED');
-  assert.deepEqual(names(events), ['launch', 'context', 'goto', 'logout', 'close']);
+  assert.deepEqual(names(events), ['launch', 'context', 'goto', 'close-page', 'logout', 'close']);
 });
 
 test('does not fail the screenshot when the page session cannot be signed out', async t => {
   const events = [];
   const source = await sourceWithFakePlaywright(t, { events, logoutError: 'socket hang up' });
   await screenshot({ source, origin: 'http://127.0.0.1:4100', output: '/tmp/page.png' });
-  assert.deepEqual(names(events).slice(-3), ['screenshot', 'logout', 'close']);
+  assert.deepEqual(names(events).slice(-4), ['screenshot', 'close-page', 'logout', 'close']);
 });

@@ -211,14 +211,17 @@ export function useTimelineScroll(identity: string, visible = true, positions?: 
     updatePosition();
   }
 
-  function revealEntry(key: string, align: 'center' | 'start' = 'center'): boolean {
+  /** Scrolls an entry into view; topInset is the height of what floats over the top of the timeline, such as an open search panel. */
+  function revealEntry(key: string, align: 'center' | 'start' = 'center', topInset = 0): boolean {
     const viewport = viewportRef.current;
     const entry = viewport ? entryIndex.current.refresh(viewport).get(key) : undefined;
     if (!viewport || !entry || !isVisible.current) return false;
     pauseFollowing();
     historyIntent.current = false;
     const bounds = entry.getBoundingClientRect();
-    viewport.scrollTop += bounds.top - viewport.getBoundingClientRect().top - (align === 'start' ? 12 : Math.max(0, (viewport.clientHeight - (bounds.bottom - bounds.top)) / 2));
+    const inset = Math.max(0, Math.min(topInset, viewport.clientHeight / 2));
+    viewport.scrollTop += bounds.top - viewport.getBoundingClientRect().top - inset
+      - (align === 'start' ? 12 : Math.max(0, (viewport.clientHeight - inset - (bounds.bottom - bounds.top)) / 2));
     lastScrollTop.current = viewport.scrollTop;
     expectedScroll.current = viewport.scrollTop;
     captureAnchor();

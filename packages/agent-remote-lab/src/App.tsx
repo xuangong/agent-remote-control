@@ -128,6 +128,7 @@ import { HostPairing, type HostPairingService, type RemoteHost } from './compone
 import { DirectoryError, nativeSessionMissing, RemoteHostClient, SessionDirectoryClient, type CreateSessionOptions, type OpenedSession, type SessionSummary } from './directory-client.js';
 import { SessionConfiguration, SessionDirectory } from './components/SessionDirectory.js';
 import { useSessionEntries } from './hooks/useSessionEntries.js';
+import { useNativeTitles } from './hooks/useNativeTitles.js';
 import { readCurrentConversationLayout, useConversationHistory } from './hooks/useConversationHistory.js';
 import { sessionKey, sessionRootKey } from './session-tree.js';
 import { ViewOptions } from './components/ViewOptions.js';
@@ -1535,6 +1536,14 @@ function AppContent({
     succession.updateTitles([session]);
     setOpenedSessions(update); setSideSessions(update); tracking.rename(session);
   }, [baseUrl, tracking.rename, succession.document]);
+  // Window views name sessions that need not be open on this page; Ask, Team and TPM views name their own.
+  const titledSessions = useMemo(() => [...sessionEntries, ...(sharedWindow?.views ?? []).flatMap(({ binding, bindingPolicy }) => binding && bindingPolicy !== 'managed'
+    ? [{ hostId: binding.hostId, providerId: binding.providerId, nativeSessionId: binding.nativeSessionId, title: binding.title }] : [])],
+    [sessionEntries, sharedWindow?.views]);
+  useNativeTitles({ entries: titledSessions, confirmed: confirmedTitles, apply: applySessionTitle,
+    // A session's native title can appear once a turn ends, so a change in the sessions' activity asks again.
+    trigger: `${state?.agent?.status ?? ''}|${Object.values(sideActivity).join(',')}`,
+    describe: (hostId, providerId, nativeSessionId, signal) => new SessionDirectoryClient(baseUrl, undefined, hostId).nativeTitle(providerId, nativeSessionId, signal) });
   const titleProjection = useRef<ReadonlyMap<string, string>>();
   useEffect(() => {
     if (!sharedWindow || !confirmedTitles?.size || titleProjection.current === confirmedTitles) return;

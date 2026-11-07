@@ -63,6 +63,13 @@ export class SessionDirectoryClient {
   changeSessionRef(providerId: string, nativeSessionId: string, action: 'add' | 'remove', target: { providerId: string; nativeSessionId: string }): Promise<import('./session-references.js').LabSessionRefs> {
     return this.request('session/refs', { providerId, nativeSessionId, action, target }, AbortSignal.timeout(20000));
   }
+  /** The session's native title as its Host reports it (through the Host owner's session commands); undefined while it has none. */
+  async nativeTitle(providerId: string, nativeSessionId: string, signal?: AbortSignal): Promise<string | undefined> {
+    const value = await this.request<{ result?: { session?: { title?: unknown } } }>('session/call',
+      { request: { command: 'read', target: `${this.hostId}/${providerId}/${nativeSessionId}`, limit: 0 } }, signal);
+    const title = value.result?.session?.title;
+    return typeof title === 'string' ? title : undefined;
+  }
   rename(providerId: string, nativeSessionId: string, title: string, operationId: string): Promise<{ title: string }> {
     return this.request('session/rename', { providerId, nativeSessionId, title, operationId }, AbortSignal.timeout(35000));
   }

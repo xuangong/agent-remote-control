@@ -246,16 +246,23 @@ describe('App', () => {
 
   it('opens a native child link without cached sessions and ignores a stale runtime Agent ID', async () => {
     window.history.replaceState(null, '', '/?host=desk&agent=stale&provider=codex&session=child&parent=parent');
-    const request = vi.fn(async () => Response.json({ agentId: 'current-child', nativeSessionId: 'child' }));
+    // The link names no title, so the page also asks the Host for the session's native title.
+    const request = vi.fn(async (url: URL, _options?: RequestInit) => url.pathname.endsWith('/session/call')
+      ? Response.json({ result: { session: { title: 'Split the parser' } } })
+      : Response.json({ agentId: 'current-child', nativeSessionId: 'child' }));
     vi.stubGlobal('fetch', request);
     const connect = vi.fn(() => ({ send: () => undefined, close: () => undefined }));
     try {
-      await render(<App baseUrl="http://localhost/tenant/" transport={labTransport({ connect })} />);
-      expect(request).toHaveBeenCalledOnce();
-      const [url, options] = request.mock.calls[0] as unknown as [URL, RequestInit];
+      const container = await render(<App baseUrl="http://localhost/tenant/" transport={labTransport({ connect })} />);
+      const [attach, ...others] = request.mock.calls.filter(([url]) => !url.pathname.endsWith('/session/call'));
+      expect(others).toEqual([]);
+      const [url, options] = attach!;
       expect(url.pathname).toBe('/tenant/v1/remote/hosts/desk/child/attach');
-      expect(JSON.parse(options.body as string)).toEqual({ providerId: 'codex', nativeSessionId: 'child', parentNativeSessionId: 'parent' });
+      expect(JSON.parse(options!.body as string)).toEqual({ providerId: 'codex', nativeSessionId: 'child', parentNativeSessionId: 'parent' });
       expect(connect).toHaveBeenCalledWith('current-child', expect.any(Object));
+      const titles = request.mock.calls.filter(([url]) => url.pathname === '/tenant/v1/remote/hosts/desk/session/call');
+      expect(titles.map(([, options]) => JSON.parse(options!.body as string))).toEqual([{ request: { command: 'read', target: 'desk/codex/child', limit: 0 } }]);
+      await vi.waitFor(() => expect(container.querySelector('.lab-primary-title')?.textContent).toBe('Split the parser'));
     } finally { vi.unstubAllGlobals(); }
   });
 
@@ -991,8 +998,13 @@ it('keeps a confirmed title when an older session attachment finishes afterward'
 it('shows recovery waiting without a failure alert and clears it after a successful retry', async () => {
   vi.useFakeTimers();
   window.history.replaceState(null, '', '/?host=desk&agent=stale&provider=codex&session=native');
-  const request = vi.fn().mockResolvedValueOnce(Response.json({ code: 'session_attach_timeout', error: 'Timeout', requestId: 'rpc-1' }, { status: 504 }))
-    .mockResolvedValue(Response.json({ agentId: 'restored', nativeSessionId: 'native' }));
+  let attaches = 0;
+  const request = vi.fn(async (url: URL) => {
+    // The page's native title request is refused by an older Controller and not repeated.
+    if (url.pathname.endsWith('/session/call')) return Response.json({ error: 'Not found.' }, { status: 404 });
+    return attaches++ === 0 ? Response.json({ code: 'session_attach_timeout', error: 'Timeout', requestId: 'rpc-1' }, { status: 504 })
+      : Response.json({ agentId: 'restored', nativeSessionId: 'native' });
+  });
   vi.stubGlobal('fetch', request);
   const connect = vi.fn((agentId: string, listener: RemoteTransportListener) => readyConnection(agentId, listener, 'native', 'codex'));
   try {
@@ -1003,7 +1015,8 @@ it('shows recovery waiting without a failure alert and clears it after a success
     await act(async () => vi.advanceTimersByTimeAsync(5000));
     expect(connect).toHaveBeenCalledWith('restored', expect.any(Object));
     expect(container.querySelector('.lab-session-notice')).toBeNull();
-    expect(request).toHaveBeenCalledTimes(2);
+    expect(attaches).toBe(2);
+    expect(request.mock.calls.filter(([url]) => url.pathname.endsWith('/session/call'))).toHaveLength(1);
   } finally { vi.useRealTimers(); vi.unstubAllGlobals(); }
 });
 

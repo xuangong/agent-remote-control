@@ -141,6 +141,7 @@ test('pairs once, then restarts with the saved device credential', { timeout: 30
   assert.equal(runtime.version, 1);
   assert.equal(runtime.runnerPid, process.pid);
   assert.equal(runtime.controllerPid, running.controllerPid);
+  assert.equal(runtime.controllerScript, join(f.root, 'controller.mjs'));
   // The stand-in checkout is not a git repository, so its build identity is unknown.
   assert.equal(runtime.revision, 'unknown');
   assert.equal(runtime.dirty, true);

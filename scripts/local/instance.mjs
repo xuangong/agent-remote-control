@@ -165,7 +165,8 @@ export function runsInstance(command, directory) {
 export async function runState(directory, runtime) {
   if (!runtime) return 'stopped';
   if (runsInstance(await processCommand(runtime.runnerPid), directory)) return 'running';
-  return (await processCommand(runtime.controllerPid))?.includes('cli.js foreground') ? 'orphaned' : 'stale';
+  // Runs record the Controller script they started; an older record only names it as cli.js.
+  return (await processCommand(runtime.controllerPid))?.includes(`${runtime.controllerScript ?? 'cli.js'} foreground`) ? 'orphaned' : 'stale';
 }
 
 const lockSignals = ['SIGINT', 'SIGTERM', 'SIGHUP'];

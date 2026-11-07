@@ -28,6 +28,7 @@ export async function startInstance({ directory, environment = process.env, crea
   const files = instanceFiles(directory);
   const record = await readJson(files.recordFile);
   if (!record) throw new Error(`${directory} has no instance record.`);
+  const script = controllerScript ?? join(record.source, 'packages/agent-host/dist/cli.js');
   signal?.throwIfAborted();
   const startedAt = new Date().toISOString();
   await writeJson(files.runtimeFile, { version: 1, runnerPid: process.pid, startedAt });
@@ -67,7 +68,7 @@ export async function startInstance({ directory, environment = process.env, crea
     try {
       // The last check and the spawn are adjacent, so an aborted start never spawns the Controller.
       signal?.throwIfAborted();
-      child = spawn(process.execPath, [controllerScript ?? join(record.source, 'packages/agent-host/dist/cli.js'), 'foreground'],
+      child = spawn(process.execPath, [script, 'foreground'],
         { env: native, cwd: files.workspace, stdio: ['ignore', log.fd, log.fd], detached: true });
       // Listen before any await: a Controller that fails to spawn or exits at once must still end the runner,
       // and an 'error' event without a listener would crash it.
@@ -75,7 +76,7 @@ export async function startInstance({ directory, environment = process.env, crea
       exited = new Promise(resolveExit => child.once('close', code => resolveExit(spawnError ? 1 : code ?? 1)));
     } finally { await log.close(); }
     if (child.pid === undefined) { await exited; throw spawnError; }
-    await writeJson(files.runtimeFile, { version: 1, runnerPid: process.pid, controllerPid: child.pid,
+    await writeJson(files.runtimeFile, { version: 1, runnerPid: process.pid, controllerPid: child.pid, controllerScript: script,
       revision: provenance.revision, dirty: provenance.dirty, startedAt });
   } catch (error) {
     if (child?.pid) try { process.kill(-child.pid, 'SIGKILL'); } catch {}

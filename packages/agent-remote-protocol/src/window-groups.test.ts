@@ -1,7 +1,10 @@
 import { expect, it } from 'vitest';
 import type { WorkspaceWindow } from './window-workspace.js';
-import { createWindowView } from './window-workspace-operations.js';
-import { WindowGroupError, isBotView, isWindowGroup, isWindowGroupCreateRequest, isWindowGroupMutation, type WindowGroup } from './window-groups.js';
+import { WindowLayoutError, createWindowView } from './window-workspace-operations.js';
+import {
+  WindowGroupError, isBotView, isWindowGroup, isWindowGroupCreateRequest, isWindowGroupMutation, isWindowMergeRequest, isWindowSplitRequest,
+  isWindowTransferRequest, type WindowGroup,
+} from './window-groups.js';
 
 const session = (nativeSessionId: string, title = nativeSessionId) => ({ hostId: 'mac', providerId: 'claude', nativeSessionId, title });
 function windowOf(id: string, ...views: WorkspaceWindow['views']): WorkspaceWindow {
@@ -23,6 +26,7 @@ it('counts only ordinary views with a current session as bots', () => {
   expect(isBotView({ ...createWindowView('side', session('d'), 'attached'), attachedTo: 'main' })).toBe(false);
   expect(isBotView({ ...createWindowView('ask', session('e'), 'float'), bindingPolicy: 'managed' })).toBe(false);
   expect(isBotView({ ...createWindowView('team', session('f')), feature: { kind: 'team', id: 'release' } })).toBe(false);
+  expect(isBotView(createWindowView('child', { ...session('g'), parentNativeSessionId: 'a' }))).toBe(false);
 });
 
 it('requires a Window or a section, and bot details only for bots', () => {
@@ -33,6 +37,7 @@ it('requires a Window or a section, and bot details only for bots', () => {
   expect(isWindowGroup({ window, bots: { rank: 'm', members: { main: { label: 'Release notes' } } } })).toBe(true);
   expect(isWindowGroup({ window, bots: { rank: 'm', members: { empty: { label: 'Nobody' } } } })).toBe(false);
   expect(isWindowGroup({ window, bots: { rank: 'M', members: {} } })).toBe(false);
+  expect(isWindowGroup({ window, bots: { rank: 'a0', members: {} } })).toBe(false);
   expect(isWindowGroup({ window, bots: { rank: 'm', members: { main: { picture: { shape: 'star', color: '#ff0000' } } } } })).toBe(false);
   expect(isWindowGroup({ window, bots: { rank: 'm', members: { main: { picture: { shape: 'circle', color: 'red' } } } } })).toBe(false);
 });
@@ -46,4 +51,12 @@ it('accepts plain Window requests as group requests and checks group creation', 
   expect(isWindowGroupCreateRequest({ operationId: 'op', issuedAt: 1, window, presentation: { window: false } })).toBe(false);
   expect(isWindowGroupCreateRequest({ operationId: 'op', issuedAt: 1, window, bots: { rank: 'm', members: {} }, presentation: { window: false } })).toBe(true);
   expect(refusal(() => { throw new WindowGroupError('bot_view', 'x'); })).toBe('bot_view');
+  expect(isWindowGroupMutation({ operationId: 'op', issuedAt: 1, baseRevision: 0, operation: { type: 'bot.update', viewId: 'main' } })).toBe(false);
+  expect(isWindowMergeRequest({ operationId: 'op', issuedAt: 1, baseRevision: 0, source: 'other', sourceRevision: 2 })).toBe(true);
+  expect(isWindowMergeRequest({ operationId: 'op', issuedAt: 1, baseRevision: 0, source: 'other' })).toBe(false);
+  expect(isWindowSplitRequest({ operationId: 'op', issuedAt: 1, baseRevision: 0, newId: 'section' })).toBe(true);
+  expect(isWindowSplitRequest({ operationId: 'op', issuedAt: 1, baseRevision: 0, newId: 'section', extra: 1 })).toBe(false);
+  expect(isWindowTransferRequest({ operationId: 'op', issuedAt: 1, baseRevision: 0, viewId: 'main', target: 'other', targetRevision: 0 })).toBe(true);
+  expect(isWindowTransferRequest({ operationId: 'op', issuedAt: 1, baseRevision: 0, viewId: 'main', target: 'other' })).toBe(false);
+  expect(new WindowGroupError('bot_view', 'x')).toBeInstanceOf(WindowLayoutError);
 });

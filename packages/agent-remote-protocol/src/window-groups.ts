@@ -6,8 +6,8 @@ import { WindowLayoutError } from './window-workspace-operations.js';
 const strict = { additionalProperties: false } as const;
 const id = Type.String({ minLength: 1, maxLength: 128, pattern: '^[A-Za-z0-9_.:-]+$' });
 const counter = Type.Integer({ minimum: 0, maximum: Number.MAX_SAFE_INTEGER });
-/** A fractional index: ranks compare as strings, so a new one always fits between two others. */
-const rank = Type.String({ minLength: 1, maxLength: 64, pattern: '^[0-9a-z]+$' });
+/** A fractional index: ranks compare as strings and never end in 0, so a new one fits between any two others until the length limit. */
+const rank = Type.String({ minLength: 1, maxLength: 64, pattern: '^[0-9a-z]*[1-9a-z]$' });
 
 /** What Bot mode shows for one bot beyond its session's title. */
 export const WindowBotDetails = Type.Object({
@@ -68,15 +68,15 @@ export class WindowGroupError extends WindowLayoutError {
   constructor(code: string, message: string) { super(code, message); this.name = 'WindowGroupError'; }
 }
 
-/** A bot is an ordinary view showing a current session: not attached, not history, not an Ask, Team or TPM view. */
-export function isBotView(view: WindowView): boolean {
+/** A bot is an ordinary view showing a current session: not attached, not history, not a subagent's, not an Ask, Team or TPM view. */
+export function isBotView(view: WindowView): view is WindowView & { binding: WindowSessionBinding } {
   return view.placement !== 'attached' && view.binding !== undefined && view.binding.sessionIntent === undefined
-    && view.feature === undefined && view.bindingPolicy !== 'managed';
+    && view.binding.parentNativeSessionId === undefined && view.feature === undefined && view.bindingPolicy !== 'managed';
 }
 export const windowSessionIdentity = (binding: Pick<WindowSessionBinding, 'hostId' | 'providerId' | 'nativeSessionId'>) =>
   JSON.stringify([binding.hostId, binding.providerId, binding.nativeSessionId]);
 /** The views Bot mode shows as bots: none for a group that is not a section. */
-export function groupBotViews(group: WindowGroup): WindowView[] {
+export function groupBotViews(group: WindowGroup): Array<WindowView & { binding: WindowSessionBinding }> {
   return group.bots ? group.window.views.filter(isBotView) : [];
 }
 export const hasWindowAppearance = (group: WindowGroup): boolean => group.presentation?.window !== false;

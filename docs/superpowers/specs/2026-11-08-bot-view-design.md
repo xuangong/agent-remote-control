@@ -29,6 +29,8 @@ A **group** is today's Window document (its views and their session bindings) pl
 
 Every existing Window is a group with only the Window appearance. Nothing changes for it until its owner adds the Bot appearance.
 
+**The fallback group.** Every session belongs to a group: a session in no Window belongs to a built-in fallback group, which cannot be renamed or deleted. Its members are derived, not stored: the sessions the session directory lists on the user's Hosts (such as sessions started in a terminal) that are in no other group, most recent first. A session leaves it as soon as it is added to a group and returns when it is removed from every group. Its members are not bots: they have no label, picture, pin or notifications, and Move to section or Add to Window takes one into a real group. Bot mode shows the fallback group as the last section, **Other sessions**; Window mode shows it as the session directory it already has, since a layout of every session would not be usable.
+
 A **bot** is an ordinary view of a group with the Bot appearance: placement `primary`, `dock` or `float` (not `attached`), a session binding that is not a history view (`sessionIntent` absent), no `feature`, and a binding policy other than `managed`. Its name is its session's title (native titles since 2026-11-07, or a rename). Empty views, history views, Subagent views and Ask, Team and TPM views are not bots.
 
 | Bot mode | Group data |
@@ -51,13 +53,15 @@ A **bot** is an ordinary view of a group with the Bot appearance: placement `pri
 
 ## Bot mode
 
-**Mode switch.** A switch between Bot mode and Window mode, remembered per browser (local storage). In Bot mode the page is a chat app: the roster on the left, the open bot's conversation in the rest of the page.
+**Mode switch.** A switch between Bot mode and Window mode, remembered per browser (local storage). Window mode is the default. In Bot mode the page is a chat app: the roster on the left, the open bot's conversation in the rest of the page.
+
+**Notifications follow the mode.** Each mode reminds only of what it manages. In Bot mode, the page observes and notifies for the bots in its sections (needs you, finished), not for hidden bots or the fallback group. In Window mode, notifications keep today's scope: the sessions of the open Window, tracked sessions and Asks (`setDisplayed` in `App.tsx` and `session-notifications.ts`).
 
 **Sidebar.**
 - **+**: New bot (creates a session in the current section, as **New session** does), Add existing session (the session directory, choosing a session that is not yet a bot), New section.
 - Sections in rank order, each with its bots: pinned first, then by rank. A section shows the most urgent status of its bots (`windowActivity` in `session-activity-status.ts`).
 - Each bot: picture, name, label, and one status: **Needs you** (the session is `waiting` or `starting`: a question, an approval), **Working** (`running`), **Failed** (`failed`), otherwise nothing. **New result** is added with the read position in milestone 5.
-- **Hidden bots** at the bottom.
+- **Other sessions**, the fallback group, after the sections; **Hidden bots** at the bottom.
 - Bot menu: Rename, Edit label and picture, Pin, Hide, Move to section, Remove bot.
 - Section menu: Rename, Show as Window (adds the Window appearance), Separate (below), Delete section.
 
@@ -125,10 +129,10 @@ Why beside and not inside: `WindowWorkspaceClient.list()` (`packages/agent-remot
 ## Milestones
 
 1. **Data.** Protocol types and `applyGroupOperation`; Relay storage, responses, edits, `merge`, `split`, `transfer`, rules 1 and 5; web client and store. No visible change. Deploy the Worker.
-2. **Bot mode.** The mode switch; roster of sections and bots with status; a bot's page in Content only; Show as section on a Window; New section; each mode returning to what it had open (rule 6); compact layout.
+2. **Bot mode.** The mode switch (Window mode by default); roster of sections and bots with status; the fallback group; a bot's page in Content only; Show as section on a Window; New section; each mode returning to what it had open (rule 6); notifications following the mode; compact layout.
 3. **Managing bots.** New bot, Add existing session, rename, label and picture, pin, hide and Hidden bots, ordering, Move to section, Remove bot; Window mode rules 1, 2 and 5.
 4. **Linking.** Add and remove appearances, merge, split, the layout of groups built in Bot mode; command line and skill.
-5. **Teammates.** Read position and New result (stored per user without advancing the Window revision, so opening a bot does not wake every page), per-bot notifications, threads, the lead bot, Team as a group chat, a bot's results (files, previews and links it produced).
+5. **Teammates.** Read position and New result (stored per user without advancing the Window revision, so opening a bot does not wake every page), a per-bot notification switch, threads, the lead bot, Team as a group chat, a bot's results (files, previews and links it produced).
 
 ## Testing
 
@@ -137,12 +141,14 @@ Why beside and not inside: `WindowWorkspaceClient.list()` (`packages/agent-remot
 - Lab: roster, statuses, bot page display, the mode switch and each mode returning to what it had open, a draft kept across modes, Window mode rules; browser tests on desktop and compact sizes.
 - End to end on a local instance (`pnpm local`, the `prepare-arc-local` skill): build a section in Bot mode, open its Window, hand a session off and see the bot keep its place, link and split, and list Windows with the 0.2.77 `window` command against the new Relay.
 
-## Open questions
+## Decisions
 
-- Which mode is the default once milestone 2 ships: Window mode everywhere, or Bot mode on compact screens?
-- Pictures: shape and color only, or also generated and uploaded images (which need storage)?
-- Should hidden bots still notify, as in Grok Bot, where hiding keeps a bot's routines running?
-- Should sessions that are not in any group (for example started in a terminal) appear as an "Unsorted" section, or stay in the session directory?
+Settled with the owner on 2026-11-08:
+
+- Window mode stays the default.
+- Pictures are a shape and a color; no generated or uploaded images.
+- Notifications follow the mode: each mode reminds only of what it manages (see Bot mode).
+- A session in no Window belongs to the fallback group, so every session has a group.
 
 ## References
 

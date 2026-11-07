@@ -50,7 +50,7 @@ export async function createHostRegistrations(env: NodeJS.ProcessEnv, onDiagnost
       }
       registrations.push(provider === 'codex'
         ? await factories.codex({ ...common, env: nativeEnv, executable: env.AGENT_HOST_CODEX ?? env.AGENT_REMOTE_CODEX_EXECUTABLE, codexHome: env.AGENT_REMOTE_CODEX_HOME,
-          connectionMode, socketPath: env.AGENT_HOST_CODEX_SOCKET,
+          connectionMode, socketPath: env.AGENT_HOST_CODEX_SOCKET, userSkills: env.AGENT_HOST_CODEX_USER_SKILLS !== '0',
           restrictedNative: (env.AGENT_HOST_CODEX_TRUST_SHARED ?? '1') === '1' ? false : common.restrictedNative })
         : provider === 'opencode'
         ? await factories.opencode({ workspaces: common.workspaces, restrictedNative: (env.AGENT_HOST_OPENCODE_TRUST_SHARED ?? '1') === '1' ? false : common.restrictedNative, onDiagnostic,

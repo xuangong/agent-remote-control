@@ -1,6 +1,6 @@
 ---
 name: prepare-arc-local
-description: Use for requests such as "run the site locally", "check this UI change in a browser" or "take a screenshot of the local site", and to verify website, Relay or Controller changes in this checkout's `pnpm local` instance with a headless browser or a real session. Do not use for documentation-only or unit-test-only changes, releases or deployment, or the user's own Controller.
+description: Use when asked to run Agent Remote Control locally, to test or verify a website, Relay, Controller or command line change end to end on this machine, to reproduce a bug against a real session, to take a screenshot of the local site, or to use agent-remote-controller-dev. Not for documentation-only or unit-test-only changes, releases, deployment, or the user's own Controller.
 ---
 
 # Prepare and operate the local instance
@@ -14,11 +14,35 @@ is supported; Windows is not. The
 commands, environment variables and troubleshooting table; this skill says how to
 use it safely and what counts as evidence.
 
-The loop is: change the code, `pnpm local up`, drive a real session through the
-instance's command line, check the page, fix, repeat. The command line
-(`pnpm local controller session …`) does not need a browser and does not sign in,
-so use it for sessions and state, and the headless browser for what the page
-shows.
+The loop is: change the code, `pnpm local up`, drive a real session with
+`agent-remote-controller-dev`, check the page, fix, repeat. The command line does
+not need a browser and does not sign in, so use it for sessions and state, and
+the headless browser for what the page shows.
+
+## The development command and the test directory
+
+Local tests never use the user's installed `agent-remote-controller`:
+
+- **`agent-remote-controller-dev`** is the development command. `pnpm local up`
+  installs it beside the installed command (`~/.local/bin`); it runs the Controller
+  command line of a checkout's build against that checkout's instance. It picks the
+  instance by the current directory: inside a checkout or worktree, that
+  checkout's instance; inside an instance directory, that instance; elsewhere, the
+  instance `up` started last. `agent-remote-controller-dev --build-info` shows
+  which instance, checkout and build it uses; run it when in doubt.
+- **The test directory** is the instance `workspace/`, the only place its sessions
+  run. In those sessions, Claude Code and Codex alike, `agent-remote-controller` is
+  mapped to `agent-remote-controller-dev` for that instance: the instance's `bin/`
+  comes first on their PATH. The `agent-remote` skill they read is unchanged, and
+  its commands reach the build under test.
+- **One skill per session.** The instance writes no skill copy: its Claude Code
+  sessions load the skill of the checkout's build, its Codex sessions read the one
+  the user's own Controller installed in `~/.codex/skills`.
+
+So in your own shell use `agent-remote-controller-dev`, never
+`agent-remote-controller`; inside a test session, plain `agent-remote-controller` is
+already the development command. The [command line](references/cli.md) reference
+lists the commands.
 
 ## Before you start
 
@@ -43,6 +67,9 @@ exercised.
 | Read state or prepare fixtures through the API | [api](references/api.md) |
 | Run a real session end to end | [test loop](references/test-loop.md) |
 
+Read only the rows your task needs; the references link each other where a step
+needs another.
+
 Run every command from the checkout whose code you are verifying. An instance
 runs the build it was started with. Rebuild with `pnpm local up` after every code
 change; a check against an older build is not a check of your change. If the
@@ -63,9 +90,9 @@ in once. Therefore:
 - Never poll these in a loop. To wait for readiness, run `pnpm local up`; it
   polls `/health`, which does not sign in.
 - Use one browser context per script.
-- `list`, `logs` and `controller` never sign in (`controller login` signs in
-  once, only when the command line is signed out), so poll sessions with
-  `pnpm --silent local controller session read`.
+- `list`, `logs` and `agent-remote-controller-dev` never sign in (its `login` signs
+  in once, only when the command line is signed out), so poll sessions with
+  `agent-remote-controller-dev session read`.
 
 ## Safety rules
 
@@ -79,10 +106,10 @@ profiles with the user's own Controller.
   by their working directory, so keep their prompts inside the workspace.
 - **The user's own Controller.** Never stop, update, re-pair or reconfigure it
   (`~/.agent-remote-control/agents-cloud-cli`, its launchd service), and never
-  touch the production site. Operate this instance only through `pnpm local`; do
-  not use the global `agent-remote-controller` command for it. (The
-  `agent-remote` skill uses that command legitimately for the user's own
-  sessions and Hosts; that is a different task.)
+  touch the production site. Operate this instance only through `pnpm local` and
+  `agent-remote-controller-dev`; in your own shell, `agent-remote-controller` is
+  the user's installed command. (The `agent-remote` skill uses it legitimately
+  for the user's own sessions and Hosts; that is a different task.)
 - **Instance website controls.** Never use the instance website's Controller
   update, Codex daemon restart, OpenCode server or VS Code tunnel controls.
   Controller update would replace this checkout's build; the others act on

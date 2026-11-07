@@ -8,7 +8,7 @@ Repeat it after every fix: change, `up`, check, until the check passes.
    equal to your checkout commit, `local user: signed in` and `uplink registered`.
    Do not call `status` again: `up` already did. If `up` fails, follow
    [lifecycle](lifecycle.md#when-something-fails).
-2. `pnpm --silent local controller host providers`: the provider you will test
+2. `agent-remote-controller-dev host providers`: the provider you will test
    (Claude Code or Codex) is `enabled`. A missing or unavailable provider is a stop
    condition: see [Stop and ask the user](../SKILL.md#stop-and-ask-the-user). Never
    start the daemon.
@@ -21,14 +21,14 @@ Repeat it after every fix: change, `up`, check, until the check passes.
    It creates a session in the instance workspace, the only workspace the
    Controller offers, asks for `LOCAL-OK` and checks the reply. Drive further
    turns with `--session <address> "<prompt>"`, and read the history with
-   `pnpm --silent local controller session read <address>`. Add files to the
+   `agent-remote-controller-dev session read <address>`. Add files to the
    instance workspace (`workspace/` in the `State:` directory from `status`) only
    when the test needs them.
 
    If the script reports a timeout or a failed session, read
-   `pnpm local controller diagnostics --source controller --limit 60` and note the
-   Model turn as failed in the report with what it shows. Do not resend the prompt
-   or retry the turn. If it shows a provider access error (sign-in, quota or model
+   `agent-remote-controller-dev diagnostics --source controller --limit 60` and
+   note the Model turn as failed in the report with what it shows. Do not resend
+   the prompt or retry the turn. If it shows a provider access error (sign-in, quota or model
    access), it is not a failure: handle it as the provider row of
    [Stop and ask the user](../SKILL.md#stop-and-ask-the-user) (stop and ask; the
    Model turn is not exercised).

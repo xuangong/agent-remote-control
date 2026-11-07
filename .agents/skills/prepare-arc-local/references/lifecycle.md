@@ -11,7 +11,7 @@ layout of the instance directory.
 | `pnpm local up --no-build` | Restart from the existing build output, only when no code changed. |
 | `pnpm --silent local status --json` | State, URL, local user, Controller uplink, command line sign-in, running build and checkout commit. Exit 0 only when ready, 3 otherwise. |
 | `pnpm local logs` | Last 80 lines of the runner (site) and Controller logs of the current run. Do not use `--follow`: it never exits. |
-| `pnpm local controller diagnostics --source controller --limit 60` | Controller diagnostics. `controller status` shows the uplink. The other `controller` commands drive sessions, Hosts and Windows: see [command line](cli.md). |
+| `agent-remote-controller-dev diagnostics --source controller --limit 60` | Controller diagnostics. `agent-remote-controller-dev status` shows the uplink, `--build-info` the instance and build; its other commands drive sessions, Hosts and Windows: see [command line](cli.md). |
 | `pnpm local list` | Every instance on this machine; `*` marks this checkout. |
 | `pnpm local down` | Stop this checkout's instance; state is kept. |
 | `pnpm local remove --yes` | Delete this checkout's stopped instance with its site state and Controller pairing. Stop and ask the user first ([when](../SKILL.md#stop-and-ask-the-user)). |
@@ -23,7 +23,7 @@ running sessions: native history persists, active turns and pending approvals do
 not. Before `up` on an instance that may already be running, list its sessions:
 
 ```bash
-pnpm --silent local controller session list --limit 50
+agent-remote-controller-dev session list --limit 50
 ```
 
 It never signs in. Restart when no session shows `"state": "running"` or
@@ -136,7 +136,7 @@ stop and ask the user.
 - A sign-in limit message: wait a minute, then run the command once; never retry in
   a loop. The limit is in the [sign-in budget](../SKILL.md#machine-use-and-the-sign-in-budget).
 - The instance did not become ready: `up` already stopped the runner it started.
-  Read the log tails and `pnpm local controller diagnostics --source controller --limit 60`.
+  Read the log tails and `agent-remote-controller-dev diagnostics --source controller --limit 60`.
 - A provider that never appears is not installed or detected on this Mac, or Codex
   has no running daemon: stop and ask the user, as the provider row of
   [Stop and ask the user](../SKILL.md#stop-and-ask-the-user) says.

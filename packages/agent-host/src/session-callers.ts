@@ -2,7 +2,7 @@ import { createHash, randomBytes } from 'node:crypto';
 import { chmod, mkdir, readFile, realpath, rm } from 'node:fs/promises';
 import { createServer, type Server, type Socket } from 'node:net';
 import { tmpdir } from 'node:os';
-import { basename, dirname, join } from 'node:path';
+import { basename, delimiter, dirname, join } from 'node:path';
 import { atomicWriteFile } from '@orchardworks/agent-platform';
 import type { AgentSessionHostAccess } from '@orchardworks/agent-provider-sdk';
 import { refKey, type SessionCaller, type SessionCallerRef, type SessionCallResult } from './session-routes.js';
@@ -148,8 +148,14 @@ export interface SessionHostAccessSource {
   /** Access for an existing session; none for a session a share recipient created. */
   session(nativeSessionId: string): Promise<AgentSessionHostAccess | undefined>;
 }
-export function sessionHostAccess(store: SessionCallerStore, providerId: string, endpoint: SessionCallerEndpoint, skills?: string): SessionHostAccessSource {
-  const access = (token: string): AgentSessionHostAccess => ({ environment: { [SESSION_TOKEN_VARIABLE]: token, [SESSION_SOCKET_VARIABLE]: endpoint.access },
+/**
+ * sessionBin, when given, goes first on the PATH of the sessions' shell commands, so that they run the commands it holds
+ * instead of the installed ones (a local development Controller gives its sessions its own agent-remote-controller).
+ */
+export function sessionHostAccess(store: SessionCallerStore, providerId: string, endpoint: SessionCallerEndpoint, skills?: string,
+  sessionBin?: string, path = process.env.PATH ?? ''): SessionHostAccessSource {
+  const commands: Record<string, string> = sessionBin ? { PATH: path ? `${sessionBin}${delimiter}${path}` : sessionBin } : {};
+  const access = (token: string): AgentSessionHostAccess => ({ environment: { ...commands, [SESSION_TOKEN_VARIABLE]: token, [SESSION_SOCKET_VARIABLE]: endpoint.access },
     unixSockets: process.platform === 'win32' ? [] : [endpoint.access], ...(skills ? { skills } : {}) });
   return {
     creation() {

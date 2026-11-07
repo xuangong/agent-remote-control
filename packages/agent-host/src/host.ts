@@ -140,7 +140,7 @@ export interface AgentHostRuntimeOptions {
   inputImages?: InputImageStoreOptions;
   inputResources?: InputResourceStoreOptions;
   /** Credentials through which sessions' shell commands reach this Controller as themselves. */
-  sessionCallers?: { store: SessionCallerStore; endpoint: SessionCallerEndpoint; skills?: string };
+  sessionCallers?: { store: SessionCallerStore; endpoint: SessionCallerEndpoint; skills?: string; sessionBin?: string };
   /** The sessions each session refers to; without it, sessions have only their source. */
   sessionRefs?: SessionRefStore;
   /** This Host's identity at the Relay, once registered; session addresses start with it. */
@@ -609,7 +609,7 @@ export function createAgentHostRuntime(options: AgentHostRuntimeOptions): AgentH
   for (const value of registrations.values()) { const {directory} = value; bindHandoff(directory); bindSourceReader(directory); bindSourceReferenceAncestry(directory); bindHostAccess(value); }
   function bindHostAccess({ adapter, directory }: AgentHostProviderRegistration) {
     const callers = options.sessionCallers;
-    if (callers && adapter.descriptor.sessionHostAccess) directory.setSessionHostAccess?.(sessionHostAccess(callers.store, directory.providerId, callers.endpoint, callers.skills));
+    if (callers && adapter.descriptor.sessionHostAccess) directory.setSessionHostAccess?.(sessionHostAccess(callers.store, directory.providerId, callers.endpoint, callers.skills, callers.sessionBin));
   }
   /** A share recipient's session is hidden from session commands and holds no credential. */
   async function markShared(payload: Record<string, unknown> | undefined, providerId: string, nativeSessionId: string) {

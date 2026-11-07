@@ -142,7 +142,9 @@ Sessions the Controller did not start or resume, such as a native terminal sessi
 | Codex, read-only sessions | A thread permission profile replaces the `sandbox` parameter: `agent-remote`, extending `:read-only`, with the managed network proxy and only the session socket allowed. Codex 0.166.0 or newer on macOS; elsewhere the read-only sandbox is unchanged and the socket unreachable. |
 | Codex, other sessions | The user's own configuration decides. With `:danger-full-access` the socket is reachable; with a sandbox, the command fails with `controller_unreachable` until the agent reruns it with approved escalation. |
 
-The variables reach Codex commands through `shell_environment_policy.set`, which Codex applies after its default exclusions. Claude Code sessions with a credential run these without asking: `session read`, `session list`, `session ref list`, `session inspect`, `host read`, `host list`, and `role` commands, which are the tools they run without asking too.
+The variables reach Codex commands through `shell_environment_policy.set`, which Codex applies after its default exclusions.
+
+`AGENT_HOST_SESSION_BIN`, an absolute directory, adds a third variable: `PATH`, with that directory before the Controller's own `PATH`, so the sessions' commands run the commands it holds. A [local development instance](../../local-development.md#the-test-directory-and-its-command-mapping) uses it to make `agent-remote-controller` in its sessions the development build. Claude Code sessions with a credential run these without asking: `session read`, `session list`, `session ref list`, `session inspect`, `host read`, `host list`, and `role` commands, which are the tools they run without asking too.
 
 ### Share recipients
 
@@ -153,7 +155,7 @@ The Relay adds `shared: true` to the creation and attachment requests of a share
 The Controller package contains the `agent-remote` skill in the Claude Code plugin layout (`dist/skills/agent-remote`, from `packages/agent-host/skills`). `--skill` prints it.
 
 - Claude Code sessions with a credential load it as a local SDK plugin: `agent-remote:agent-remote`.
-- Codex has no per-thread skills. The first time the Controller creates or resumes a Codex session with a credential, the Codex adapter writes `$CODEX_HOME/skills/agent-remote/SKILL.md` if that Codex home exists and the file differs, and removes the skill it replaced, `agent-remote-sessions`, if the Controller wrote it. Codex caches its skill list, so the adapter then makes Codex read its skills again once per workspace. The user's own Codex sessions see the skill too.
+- Codex has no per-thread skills. The first time the Controller creates or resumes a Codex session with a credential, the Codex adapter writes `$CODEX_HOME/skills/agent-remote/SKILL.md` if that Codex home exists and the file differs, and removes the skill it replaced, `agent-remote-sessions`, if the Controller wrote it. Codex caches its skill list, so the adapter then makes Codex read its skills again once per workspace. The user's own Codex sessions see the skill too. `AGENT_HOST_CODEX_USER_SKILLS=0` leaves the Codex home alone, so the Controller's Codex sessions read the skill another Controller installed there; local development instances set it.
 
 ## Diagnostics
 

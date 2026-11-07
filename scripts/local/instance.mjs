@@ -30,6 +30,7 @@ export function instanceFiles(directory) {
     controller: join(directory, 'controller'),
     workspace: join(directory, 'workspace'),
     logs: join(directory, 'logs'),
+    bin: join(directory, 'bin'),
   };
 }
 

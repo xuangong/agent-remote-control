@@ -69,6 +69,16 @@ it('passes the locally configured shared Codex connection to its provider', asyn
   expect(seen).toMatchObject({ connectionMode: 'shared', socketPath: '/tmp/codex.sock', restrictedNative: false });
 });
 
+it('installs Host skills into the Codex home unless AGENT_HOST_CODEX_USER_SKILLS is 0', async () => {
+  const seen: Array<{ userSkills?: boolean }> = [];
+  const codex = async (options: { userSkills?: boolean }) => { seen.push(options); return registration(); };
+  const other = async () => registration();
+  for (const env of [{}, { AGENT_HOST_CODEX_USER_SKILLS: '0' }]) {
+    await createHostRegistrations({ AGENT_HOST_PROVIDERS: 'codex', ...env }, undefined, { codex, claude: other, copilot: other, opencode: other });
+  }
+  expect(seen.map(options => options.userSkills)).toEqual([true, false]);
+});
+
 it('rejects an invalid Codex connection mode before starting providers', async () => {
   const factory = async () => { throw new Error('unexpected startup'); };
   await expect(createHostRegistrations({ AGENT_HOST_CODEX_CONNECTION: 'typo' }, undefined,

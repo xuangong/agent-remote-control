@@ -8,7 +8,7 @@ import { createScriptedAppServer } from './test-utils/scripted-app-server.js';
 const cleanup: Array<() => Promise<unknown>> = [];
 afterEach(async () => { for (const close of cleanup.splice(0).reverse()) await close(); });
 
-async function provider(initialize: unknown = {}, started: Record<string, unknown> = {}, codexHome?: string) {
+async function provider(initialize: unknown = {}, started: Record<string, unknown> = {}, codexHome?: string, options: { userSkills?: boolean } = {}) {
   const home = codexHome ?? await mkdtemp(path.join(os.tmpdir(), 'codex-access-'));
   cleanup.push(() => rm(home, { recursive: true, force: true }));
   const sandbox = { type: 'readOnly', networkAccess: false };
@@ -21,7 +21,7 @@ async function provider(initialize: unknown = {}, started: Record<string, unknow
     'skills/list': () => ({ data: [] }),
     'configRequirements/read': () => ({ requirements: { allowedApprovalPolicies: ['on-request', 'never'], allowedSandboxModes: ['read-only', 'workspace-write'] } }),
   });
-  const provider = new CodexAppServerProvider({ spawn: () => server.child, env: { CODEX_HOME: home }, requestTimeoutMs: 2000 });
+  const provider = new CodexAppServerProvider({ spawn: () => server.child, env: { CODEX_HOME: home }, requestTimeoutMs: 2000, ...options });
   return { server, provider };
 }
 
@@ -134,6 +134,24 @@ it('installs the Host skills into the Codex home and makes Codex read its skills
   expect(methods).toEqual(['skills/list', 'thread/start', 'thread/start', 'skills/list', 'thread/start']);
   expect(server.requests.filter(request => request.method === 'skills/list').map(request => request.params)).toEqual([
     { cwds: ['/work'], forceReload: true }, { cwds: ['/other'], forceReload: true }]);
+});
+
+it('leaves the Codex home skills alone when user skills are off', async () => {
+  const skills = await mkdtemp(path.join(os.tmpdir(), 'codex-skills-source-'));
+  cleanup.push(() => rm(skills, { recursive: true, force: true }));
+  await mkdir(path.join(skills, 'skills', 'agent-remote'), { recursive: true });
+  await writeFile(path.join(skills, 'skills', 'agent-remote', 'SKILL.md'), '---\nname: agent-remote\n---\ndevelopment');
+  const home = await mkdtemp(path.join(os.tmpdir(), 'codex-access-'));
+  await mkdir(path.join(home, 'skills', 'agent-remote'), { recursive: true });
+  await writeFile(path.join(home, 'skills', 'agent-remote', 'SKILL.md'), '---\nname: agent-remote\n---\ninstalled');
+  const { server, provider: codex } = await provider(verified, {}, home, { userSkills: false });
+  const session = await codex.createSession({ sessionId: 'local', cwd: '/work', hostAccess: { ...hostAccess, skills } });
+  cleanup.push(() => session.dispose());
+  expect(await readFile(path.join(home, 'skills', 'agent-remote', 'SKILL.md'), 'utf8')).toBe('---\nname: agent-remote\n---\ninstalled');
+  expect(server.requests.some(request => request.method === 'skills/list')).toBe(false);
+  // The session's commands still reach the Host.
+  const params = server.requests.find(request => request.method === 'thread/start')?.params as { config: Record<string, unknown> };
+  expect(params.config['shell_environment_policy.set.AGENT_REMOTE_SESSION_TOKEN']).toBe('token');
 });
 
 it('leaves a missing Codex home alone', async () => {

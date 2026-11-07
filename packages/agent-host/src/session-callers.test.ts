@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { delimiter, join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import type { AgentCapabilities, AgentHistoryQuery, AgentPersistenceHandle, AgentProviderAdapter, AgentRuntimeInfo, AgentSession, AgentSessionConfig,
   AgentSessionExtensions, AgentSessionResumeOptions, ProviderStreamItem } from '@orchardworks/agent-provider-sdk';
@@ -69,12 +69,12 @@ function summary(providerId: string, nativeSessionId: string, updatedAt: string,
   return { providerId, nativeSessionId, title: `${nativeSessionId} title`, workspace, createdAt: updatedAt, updatedAt, state: 'idle' };
 }
 
-async function host(registrations: ReturnType<typeof provider>[]) {
+async function host(registrations: ReturnType<typeof provider>[], sessionBin?: string) {
   const state = await temporary('session-callers-');
   const store = new SessionCallerStore(join(state, 'session-callers.json'));
   const endpoint = await sessionCallerEndpoint(state);
   const runtime = createAgentHostRuntime({ registrations: registrations.map(item => item.registration), hostId: async () => 'host-1',
-    sessionCallers: { store, endpoint, skills: '/controller/skills/agent-remote' }, sessionRefs: new SessionRefStore(join(state, 'session-refs.json')) });
+    sessionCallers: { store, endpoint, skills: '/controller/skills/agent-remote', ...(sessionBin ? { sessionBin } : {}) }, sessionRefs: new SessionRefStore(join(state, 'session-refs.json')) });
   cleanup.push(() => runtime.close());
   return { runtime, store, endpoint, state };
 }
@@ -129,6 +129,14 @@ describe('Host access for managed sessions', () => {
     expect(access).toEqual({ environment: { [SESSION_TOKEN_VARIABLE]: expect.any(String), [SESSION_SOCKET_VARIABLE]: endpoint.access },
       unixSockets: [endpoint.access], skills: '/controller/skills/agent-remote' });
     expect(store.identify(access.environment[SESSION_TOKEN_VARIABLE])).toEqual({ providerId: 'claude', nativeSessionId: 'claude-created-1' });
+  });
+
+  it('puts the session command directory first on the PATH of its commands', async () => {
+    const cwd = await temporary('session-work-');
+    const claude = provider('claude', cwd);
+    const { runtime } = await host([claude], '/instance/bin');
+    expect((await create(runtime, 'agent', { providerId: 'claude' })).status).toBe(200);
+    expect(claude.created[0]!.hostAccess!.environment.PATH).toBe(`/instance/bin${delimiter}${process.env.PATH}`);
   });
 
   it('gives a resumed session the same credential each time', async () => {

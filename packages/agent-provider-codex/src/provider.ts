@@ -40,6 +40,8 @@ export interface CodexAppServerProviderOptions {
   onDiagnostic?: (line: string) => void;
   sharedRecovery?: CodexSharedRecoverySettings;
   spawn?: (context: { cwd?: string }) => ChildProcessWithoutNullStreams | Promise<ChildProcessWithoutNullStreams>;
+  /** False leaves the Codex home's skills alone: sessions then see only the skills the user installed. */
+  userSkills?: boolean;
 }
 
 export class CodexAppServerProvider implements AgentProviderAdapter {
@@ -188,7 +190,7 @@ export class CodexAppServerProvider implements AgentProviderAdapter {
    * skill list, so a skill installed while it runs, or before it last read that workspace, would stay invisible.
    */
   private skillPreparation(skills: string | undefined, cwd: string | undefined) {
-    if (!skills) return undefined;
+    if (!skills || this.options.userSkills === false) return undefined;
     return async (transport: CodexAppServerTransport) => {
       await (this.skillsInstalled ??= installCodexSkills(skills, this.options.env?.CODEX_HOME ?? process.env.CODEX_HOME ?? join(homedir(), '.codex'))
         .catch(error => { this.options.onDiagnostic?.(JSON.stringify({ event: 'codex_skills_unavailable', message: error instanceof Error ? error.message.slice(0, 200) : 'unknown' })); }));

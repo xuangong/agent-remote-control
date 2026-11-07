@@ -46,6 +46,18 @@ export function signedInUser(origin) {
   return withUserSession(origin, async () => true);
 }
 
+/** Allows a pending command line sign-in as the local user, as the Allow button of the approval page does. */
+export async function approveCommandLine(origin, code) {
+  return withUserSession(origin, async ({ headers }) => {
+    const response = await fetch(origin + '/auth/cli', { method: 'POST', headers: { ...headers, 'content-type': 'application/json' },
+      body: JSON.stringify({ code, decision: 'approve' }), signal: AbortSignal.timeout(10_000) });
+    const result = await response.json().catch(() => ({}));
+    if (!response.ok || result.status !== 'approved') {
+      throw new Error(`The instance did not allow the command line sign-in (HTTP ${response.status}${result.error ? `: ${result.error}` : ''}).`);
+    }
+  });
+}
+
 export async function userApi(origin, path, { method = 'GET', data } = {}) {
   if (!/^v1\/\S*$/.test(path)) throw new Error(API_PATH_RULE);
   const verb = method.toUpperCase();

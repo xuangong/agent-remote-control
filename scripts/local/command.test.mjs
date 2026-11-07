@@ -86,7 +86,21 @@ test('serves a signed-in site with a registered development Controller and keeps
   assert.equal(report.state, 'running');
   assert.equal(report.localUser, true);
   assert.equal(report.controllerUplink, 'registered');
+  assert.equal(report.commandLine, true);
   assert.equal((await (await fetch(report.origin + '/auth/status')).json()).user.id, 'devbox');
+
+  // The Controller command line works against the instance: as the Host owner through the management socket,
+  // and as the signed-in local user through the instance's Relay.
+  assert.ok(Array.isArray(JSON.parse((await local('controller', 'session', 'list')).stdout).sessions));
+  assert.deepEqual(JSON.parse((await local('controller', 'host', 'list')).stdout).hosts.map(host => host.name), [`Dev · ${basename(source)}`]);
+  assert.equal(JSON.parse((await local('controller', 'login', 'status')).stdout).signedIn, true);
+  assert.match((await local('controller', 'login')).stdout, /command line is signed in to http:\/\/localhost:\d+/);
+  for (const [args, refusal] of [[['session', 'attach', 'local/claude/x'], /session attach runs a native CLI/], [['host', 'update'], /run pnpm local up instead/],
+    [['host', 'tunnel', 'start', '--accept-license'], /only reports its status/], [['login', '--server', 'http://elsewhere'], /takes no options/]]) {
+    const refused = await localResult({}, 'controller', ...args);
+    assert.equal(refused.code, 1, args.join(' '));
+    assert.match(refused.stderr, refusal, args.join(' '));
+  }
 
   const hosts = JSON.parse((await local('api', 'v1/remote/hosts')).stdout).hosts;
   assert.deepEqual(hosts.map(host => [host.name, host.online]), [[`Dev · ${basename(source)}`, true]]);
@@ -108,6 +122,8 @@ test('serves a signed-in site with a registered development Controller and keeps
   const restarted = JSON.parse((await local('status', '--json')).stdout);
   assert.equal(restarted.origin, report.origin);
   assert.equal(restarted.controllerUplink, 'registered');
+  // The command line's sign-in is kept by the instance's site state across restarts.
+  assert.equal(restarted.commandLine, true);
   assert.equal(JSON.parse((await local('api', 'v1/remote/hosts')).stdout).hosts.length, 1);
 
   await local('down');

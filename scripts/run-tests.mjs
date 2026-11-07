@@ -88,7 +88,7 @@ function stop(signal) {
     if (error.code !== 'ESRCH') throw error;
   }
 }
-const outerDeadlineMs = mode === 'live-cache-browser' ? 150_000 : mode === 'devbox' ? 30_000 : mode === 'devbox-server' ? 80_000 : mode === 'local-env' ? 300_000 : mode === 'opencode-server-native' ? 90_000 : successionEvidence || opencodeSuccessionEvidence ? 120_000 : 540_000;
+const outerDeadlineMs = mode === 'live-cache-browser' ? 150_000 : mode === 'devbox' ? 30_000 : mode === 'devbox-server' ? 80_000 : mode === 'opencode-server-native' ? 90_000 : successionEvidence || opencodeSuccessionEvidence ? 120_000 : 540_000;
 const deadline = setTimeout(() => {
   process.stderr.write(`${mode} suite exceeded its ${outerDeadlineMs / 1000} second deadline.\n`);
   stop('SIGKILL');

@@ -6,13 +6,14 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { text } from 'node:stream/consumers';
 import { test } from 'node:test';
-import { screenshot, signedInUser, userApi, withUserSession } from './session.mjs';
+import { approveCommandLine, screenshot, signedInUser, userApi, withUserSession } from './session.mjs';
 
 const LOCAL_USER = JSON.stringify({ user: { id: 'devbox' }, basePath: '/u/abc/' });
 // What a real instance sets: the session, the browser identity and a login cookie it clears again.
 const SIGNED_IN_COOKIES = ['devbox_session=s1; Path=/; HttpOnly', 'devbox_browser=b1; Path=/', 'devbox_login=; Path=/; Max-Age=0'];
 
-async function fakeInstance(t, { statusCode = 200, statusBody = LOCAL_USER, cookies = SIGNED_IN_COOKIES, logoutStatus = 204 } = {}) {
+async function fakeInstance(t, { statusCode = 200, statusBody = LOCAL_USER, cookies = SIGNED_IN_COOKIES, logoutStatus = 204,
+  cliAnswer = [200, '{"status":"approved"}'] } = {}) {
   const calls = [];
   const server = createServer(async (request, response) => {
     calls.push({ method: request.method, url: request.url, cookie: request.headers.cookie, origin: request.headers.origin,
@@ -27,6 +28,7 @@ async function fakeInstance(t, { statusCode = 200, statusBody = LOCAL_USER, cook
     }
     if (request.url?.startsWith('/u/abc/v1/')) { response.writeHead(204); return response.end(); }
     if (request.url === '/auth/logout') { response.writeHead(logoutStatus); return response.end(); }
+    if (request.url === '/auth/cli') { response.writeHead(cliAnswer[0], { 'content-type': 'application/json' }); return response.end(cliAnswer[1]); }
     response.writeHead(404);
     response.end();
   });
@@ -79,6 +81,26 @@ test('forwards a POST body with its content type', async t => {
   assert.equal(api.contentType, 'application/json');
   assert.equal(api.body, '{"purpose":"host-only"}');
   assert.equal(api.origin, f.origin);
+});
+
+test('allows a command line sign-in as the local user and signs out', async t => {
+  const f = await fakeInstance(t);
+  await approveCommandLine(f.origin, 'BCDFGHJK');
+  assert.deepEqual(requests(f.calls), ['GET /auth/status', 'POST /auth/cli', 'POST /auth/logout']);
+  const approval = f.calls[1];
+  assert.equal(approval.cookie, 'devbox_session=s1; devbox_browser=b1');
+  assert.equal(approval.origin, f.origin);
+  assert.equal(approval.contentType, 'application/json');
+  assert.deepEqual(JSON.parse(approval.body), { code: 'BCDFGHJK', decision: 'approve' });
+});
+
+test('reports a command line sign-in the instance did not allow', async t => {
+  const expired = await fakeInstance(t, { cliAnswer: [410, '{"error":"This sign-in expired or was already answered."}'] });
+  await assert.rejects(approveCommandLine(expired.origin, 'BCDFGHJK'),
+    /did not allow the command line sign-in \(HTTP 410: This sign-in expired or was already answered\.\)/);
+  assert.deepEqual(requests(expired.calls), ['GET /auth/status', 'POST /auth/cli', 'POST /auth/logout']);
+  const refused = await fakeInstance(t, { cliAnswer: [200, '{"status":"denied"}'] });
+  await assert.rejects(approveCommandLine(refused.origin, 'BCDFGHJK'), /did not allow the command line sign-in \(HTTP 200\)/);
 });
 
 test('rejects paths outside the user API before signing in', async () => {

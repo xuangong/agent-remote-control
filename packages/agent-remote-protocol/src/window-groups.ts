@@ -158,3 +158,78 @@ export function applyGroupOperation(source: WindowGroup, operation: WindowGroupO
   if (!isWindowGroup(result)) throw new WindowLayoutError('invalid_window_group', 'The resulting group is invalid.');
   return result;
 }
+
+/** Rule 5: a session is at most one bot across a user's groups. Names the first group that already has a session claimed again. */
+export function duplicateBot(groups: readonly WindowGroup[]): { session: WindowSessionBinding; group: WindowGroup } | undefined {
+  const owners = new Map<string, WindowGroup>();
+  for (const group of groups) for (const view of groupBotViews(group)) {
+    const key = windowSessionIdentity(view.binding);
+    const owner = owners.get(key);
+    if (owner) return { session: view.binding, group: owner };
+    owners.set(key, group);
+  }
+  return undefined;
+}
+
+/** A view and the views attached to it or closing with it. */
+function family(window: WorkspaceWindow, root: string): Set<string> {
+  const ids = new Set([root]);
+  for (let changed = true; changed;) {
+    changed = false;
+    for (const view of window.views) if (!ids.has(view.id) && (view.attachedTo && ids.has(view.attachedTo) || view.closeWith && ids.has(view.closeWith))) {
+      ids.add(view.id); changed = true;
+    }
+  }
+  return ids;
+}
+/** Adds views in order, as one Window edit; their attached views follow their sources. */
+function appendViews(window: WorkspaceWindow, views: WindowView[]): WorkspaceWindow {
+  if (!views.length) return { ...window, revision: window.revision + 1 };
+  return applyWindowOperation(window, { type: 'batch', operations: views.map(view => ({ type: 'view.create' as const, view })) });
+}
+function checked(group: WindowGroup): WindowGroup {
+  const result = pruned(group);
+  if (!isWindowGroup(result)) throw new WindowLayoutError('invalid_window_group', 'The resulting group is invalid.');
+  return result;
+}
+
+/** The target keeps its identity, title and selection, gains the source's views and bot details, and has every appearance either had. */
+export function mergeGroups(targetGroup: WindowGroup, sourceGroup: WindowGroup): WindowGroup {
+  const target = clone(targetGroup), source = clone(sourceGroup);
+  const window = appendViews(target.window, source.window.views);
+  const rankOf = target.bots?.rank ?? source.bots?.rank;
+  const bots = rankOf === undefined ? undefined : { rank: rankOf, members: { ...source.bots?.members, ...target.bots?.members } };
+  const shown = hasWindowAppearance(target) || hasWindowAppearance(source);
+  return checked({ window, ...(bots ? { bots } : {}), ...(shown ? {} : { presentation: { window: false as const } }) });
+}
+
+/** The group keeps the Window; a new group with the same views becomes the section. */
+export function splitGroup(group: WindowGroup, newId: string): { kept: WindowGroup; created: WindowGroup } {
+  if (!group.bots || !hasWindowAppearance(group)) fail('not_linked', 'Only a group that is both a Window and a section can be separated.');
+  if (newId === group.window.id) fail('window_exists', 'Window identity is already used.');
+  const kept = checked({ window: { ...clone(group.window), revision: group.window.revision + 1 } });
+  const created = checked({ window: { ...clone(group.window), id: newId, revision: 0 }, bots: clone(group.bots), presentation: { window: false } });
+  return { kept, created };
+}
+
+/** Moves a bot, its attached views and its details to another section. */
+export function transferBot(sourceGroup: WindowGroup, targetGroup: WindowGroup, viewId: string): { source: WindowGroup; target: WindowGroup } {
+  const source = clone(sourceGroup), target = clone(targetGroup);
+  const view = source.window.views.find(candidate => candidate.id === viewId);
+  if (!source.bots || !view || !isBotView(view)) fail('bot_not_found', 'This bot no longer exists.');
+  if (!target.bots) fail('section_missing', 'A bot moves only to a section.');
+  if (source.window.id === target.window.id) fail('same_group', 'The bot is already in this section.');
+  const ids = family(source.window, viewId);
+  // A view that closed with something left behind no longer depends on it.
+  const moved = source.window.views.filter(candidate => ids.has(candidate.id)).map(candidate => {
+    if (!candidate.closeWith || ids.has(candidate.closeWith)) return candidate;
+    const { closeWith: _closeWith, ...rest } = candidate;
+    return rest;
+  });
+  const details = source.bots.members[viewId];
+  return {
+    source: checked({ ...source, window: applyWindowOperation(source.window, { type: 'view.close', viewId }) }),
+    target: checked({ ...target, window: appendViews(target.window, moved),
+      bots: { ...target.bots, members: { ...target.bots.members, ...(details ? { [viewId]: details } : {}) } } }),
+  };
+}

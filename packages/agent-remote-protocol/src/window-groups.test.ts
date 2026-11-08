@@ -2,8 +2,8 @@ import { expect, it } from 'vitest';
 import type { WorkspaceWindow } from './window-workspace.js';
 import { WindowLayoutError, createWindowView } from './window-workspace-operations.js';
 import {
-  WindowGroupError, applyGroupOperation, isBotView, isWindowGroup, isWindowGroupCreateRequest, isWindowGroupMutation, isWindowMergeRequest,
-  isWindowSplitRequest, isWindowTransferRequest, type WindowGroup,
+  WindowGroupError, applyGroupOperation, duplicateBot, isBotView, isWindowGroup, isWindowGroupCreateRequest, isWindowGroupMutation, isWindowMergeRequest,
+  isWindowSplitRequest, isWindowTransferRequest, mergeGroups, splitGroup, transferBot, type WindowGroup,
 } from './window-groups.js';
 
 const session = (nativeSessionId: string, title = nativeSessionId) => ({ hostId: 'mac', providerId: 'claude', nativeSessionId, title });
@@ -127,4 +127,52 @@ it('refuses an invalid group or operation and leaves a refused batch without eff
   const before = JSON.stringify(group);
   expect(refusal(() => applyGroupOperation(group, { type: 'batch', operations: [{ type: 'rename', title: 'Changed' }, { type: 'bots.add', rank: 'n' }] }))).toBe('section_exists');
   expect(JSON.stringify(group)).toBe(before);
+});
+
+it('finds a session that is a bot in two places', () => {
+  const first = section(windowOf('one', createWindowView('main', session('a'), 'primary')));
+  const second = section(windowOf('two', createWindowView('main', session('a'), 'primary')));
+  expect(duplicateBot([first, second])?.group.window.id).toBe('one');
+  expect(duplicateBot([first, { window: second.window }])).toBeUndefined();
+  const twice = section(windowOf('three', createWindowView('main', session('b'), 'primary'), createWindowView('dock', session('b'))));
+  expect(duplicateBot([twice])?.session.nativeSessionId).toBe('b');
+});
+
+it('merges a Window into a section, keeping both appearances and the section identity', () => {
+  const target: WindowGroup = { window: windowOf('section', createWindowView('writer', session('a'), 'primary')),
+    bots: { rank: 'm', members: { writer: { label: 'Writer' } } }, presentation: { window: false } };
+  const source: WindowGroup = { window: windowOf('window', createWindowView('main', session('b'), 'primary'),
+    { ...createWindowView('side', session('c'), 'attached'), attachedTo: 'main' }) };
+  const merged = mergeGroups(target, source);
+  expect(merged.window.id).toBe('section');
+  expect(merged.window.views.map(view => view.id)).toEqual(['writer', 'main', 'side']);
+  expect(merged.window.revision).toBe(1);
+  expect(merged.presentation).toBeUndefined();
+  expect(merged.bots?.members).toEqual({ writer: { label: 'Writer' } });
+  expect(refusal(() => mergeGroups(target, { window: windowOf('clash', createWindowView('writer', session('d'), 'primary')) })))
+    .toBe('other:This view identity already exists.');
+});
+
+it('separates a linked group into a Window and a section', () => {
+  const linked = applyGroupOperation(section(windowOf('w', createWindowView('main', session('a'), 'primary'))),
+    { type: 'bot.update', viewId: 'main', details: { label: 'Writer' } });
+  const { kept, created } = splitGroup(linked, 'w-section');
+  expect(kept).toEqual({ window: { ...linked.window, revision: 2 } });
+  expect(created).toEqual({ window: { ...linked.window, id: 'w-section', revision: 0 }, bots: linked.bots, presentation: { window: false } });
+  expect(refusal(() => splitGroup(kept, 'again'))).toBe('not_linked');
+  expect(refusal(() => splitGroup(linked, 'w'))).toBe('window_exists');
+});
+
+it('moves a bot with its attached views to another section', () => {
+  const source = applyGroupOperation(section(windowOf('one', createWindowView('main', session('a'), 'primary'), createWindowView('dock', session('b')),
+    { ...createWindowView('side', session('c'), 'attached'), attachedTo: 'dock' })), { type: 'bot.update', viewId: 'dock', details: { label: 'Reviewer' } });
+  const target = section(windowOf('two', createWindowView('lead', session('d'), 'primary')));
+  const moved = transferBot(source, target, 'dock');
+  expect(moved.source.window.views.map(view => view.id)).toEqual(['main']);
+  expect(moved.source.bots?.members).toEqual({});
+  expect(moved.target.window.views.map(view => view.id)).toEqual(['lead', 'dock', 'side']);
+  expect(moved.target.bots?.members).toEqual({ dock: { label: 'Reviewer' } });
+  expect(refusal(() => transferBot(source, { window: target.window }, 'dock'))).toBe('section_missing');
+  expect(refusal(() => transferBot(source, target, 'side'))).toBe('bot_not_found');
+  expect(refusal(() => transferBot(source, source, 'dock'))).toBe('same_group');
 });

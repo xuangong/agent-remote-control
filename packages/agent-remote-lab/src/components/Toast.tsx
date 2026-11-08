@@ -10,6 +10,7 @@ interface ToastService {
   registerAnchor(element: HTMLElement): () => void;
 }
 const ToastContext = createContext<ToastService | undefined>(undefined);
+export const ToastActivity = createContext(true);
 
 /** Transient notifications supplement persistent, actionable feedback at its source. */
 export function ToastProvider({ children }: { children: ReactNode }) {
@@ -36,11 +37,28 @@ export function ToastProvider({ children }: { children: ReactNode }) {
   </ToastContext.Provider>;
 }
 
-export function useToast() { return useContext(ToastContext); }
+export function useToast(enabled = true) {
+  const service = useContext(ToastContext), active = useContext(ToastActivity) && enabled;
+  const source = useId(), current = useRef(active), owned = useRef(new Set<string>());
+  current.current = active;
+  const scoped = useMemo(() => service ? {
+    show(id: string, title: string, message: string, tone: ToastTone, action?: ToastAction) {
+      if (!current.current) return;
+      const key = `${source}:${id}`; owned.current.add(key); service.show(key, title, message, tone, action);
+    },
+    dismiss(id: string) { const key = `${source}:${id}`; owned.current.delete(key); service.dismiss(key); },
+    registerAnchor: service.registerAnchor,
+  } : undefined, [service, source]);
+  useEffect(() => {
+    current.current = active;
+    return () => { current.current = false; for (const id of owned.current) service?.dismiss(id); owned.current.clear(); };
+  }, [service, active]);
+  return active ? scoped : undefined;
+}
 
 /** Visible composers reserve their input area without changing conversation layout. */
 export function useToastAnchor<T extends HTMLElement = HTMLDivElement>(enabled: boolean) {
-  const service = useContext(ToastContext);
+  const service = useToast();
   const ref = useRef<T>(null);
   useLayoutEffect(() => {
     if (enabled && ref.current) return service?.registerAnchor(ref.current);
@@ -50,7 +68,7 @@ export function useToastAnchor<T extends HTMLElement = HTMLDivElement>(enabled: 
 
 /** A stable source updates one toast; polling the same failure never restarts its timer. */
 export function useFeedbackToast(title: string, message: string | undefined, tone: ToastTone = 'error'): void {
-  const service = useContext(ToastContext);
+  const service = useToast();
   const id = useId();
   useEffect(() => {
     if (message) service?.show(id, title, message, tone);

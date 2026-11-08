@@ -1,5 +1,5 @@
 import { useEffect, useId, useRef, useState } from 'react';
-import type { WindowSessionBinding } from '@orchardworks/agent-remote-protocol';
+import { hasWindowAppearance, type WindowSessionBinding } from '@orchardworks/agent-remote-protocol';
 import type { useWindowWorkspace } from '../hooks/useWindowWorkspace.js';
 import { useTrackingPosition } from '../hooks/useTrackingPosition.js';
 import type { SessionActivityStatus } from '../session-activity-status.js';
@@ -18,7 +18,8 @@ export function WindowMenu({ workspace, current, visible, inert = false, onOverv
   const trigger = useRef<HTMLButtonElement>(null);
   const panelId = useId();
   const expanded = open && visible && !inert;
-  const count = new Set([...workspace.windows.map(window => window.id), ...(workspace.window ? [workspace.window.id] : [])]).size;
+  const selectedGroup = workspace.window && workspace.readGroup?.(workspace.window.id);
+  const count = new Set([...workspace.windows.map(window => window.id), ...(workspace.window && (!selectedGroup || hasWindowAppearance(selectedGroup)) ? [workspace.window.id] : [])]).size;
   // The current Window shows its own sessions; like Track, the entry reminds only of sessions waiting for their owner.
   const pendingElsewhere = !!sessionStatus && workspace.windows.some(window => window.id !== workspace.window?.id
     && window.views.some(view => view.binding && sessionStatus(view.binding) === 'waiting'));

@@ -4,8 +4,39 @@ import { applyWindowOperation, createWindowView, type WindowOperation, type Work
 import type { useWindowWorkspace } from '../hooks/useWindowWorkspace.js';
 import { render } from '../test/setup.js';
 import { WindowWorkspaces } from './WindowWorkspaces.js';
+import { WindowWorkspaceClient } from '@orchardworks/agent-remote-web';
+import { botGroup, mountBotApp, seedGroup, until } from '../test/bot-mode-fixtures.js';
 
-afterEach(() => vi.restoreAllMocks());
+afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); });
+
+it('does not append a selected section-only group to the Window catalog', async () => {
+  const group = botGroup('section'); group.presentation = { window: false };
+  const workspace = { window: group.window, group, windows: [], groups: [group], readGroup: () => group, hasActiveWindow: false } as unknown as ReturnType<typeof useWindowWorkspace>;
+  const container = await render(<WindowWorkspaces workspace={workspace} />);
+  expect(container.querySelector('[data-window-id="section"]')).toBeNull();
+});
+
+it('copies a Window link without Bot route fields and surfaces section conflicts without changing selection', async () => {
+  const scope = 'http://localhost/window-section-options/'; seedGroup(scope, botGroup('A', false)); history.replaceState(null, '', '/?window=A');
+  const app = await mountBotApp(scope, { hosted: true });
+  await until(() => expect(app.workspace().hasActiveWindow).toBe(true));
+  await act(async () => app.button('Windows').click());
+  let copied = '';
+  Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText: async (value: string) => { copied = value; } } });
+  history.replaceState(null, '', '/?window=A&mode=bot&section=B&bot=B1');
+  await act(async () => app.button('Copy link').click());
+  const url = new URL(copied); expect(url.searchParams.get('window')).toBe('A');
+  expect(['mode', 'section', 'bot'].some(key => url.searchParams.has(key))).toBe(false);
+  const before = structuredClone(app.workspace().window);
+  vi.spyOn(WindowWorkspaceClient.prototype, 'mutate').mockImplementation(async (id, mutation) => ({ ...app.hostedGroups.get(id)!, result: {
+    operationId: mutation.operationId, status: 'rejected', revision: before!.revision, code: 'bot_session_taken',
+    message: 'This session is already a bot in "Release".', committedAt: Date.now(), expiresAt: Date.now() + 86400000,
+  } }));
+  await act(async () => app.button('Show as section').click());
+  expect(app.container.textContent).toContain('This session is already a bot in "Release".');
+  expect(app.workspace().window).toEqual(before); expect(app.workspace().readGroup('A')?.bots).toBeUndefined();
+  await app.close(); localStorage.clear(); sessionStorage.clear();
+});
 
 async function fixture() {
   let window: WorkspaceWindow = { schemaVersion: 3, id: 'window', title: 'Project', revision: 0, selectedPrimaryViewId: 'main', selectedViewId: 'main', views: [createWindowView('main', undefined, 'primary')] };

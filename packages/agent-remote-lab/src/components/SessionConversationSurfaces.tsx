@@ -14,6 +14,7 @@ import { sessionKey } from '../session-tree.js';
 import { SessionTitleInteractionContext } from './SessionTitleInteraction.js';
 import { moveSessionHost, useSessionDockHeadingStart } from './SessionDock.js';
 import { SessionConversation, type SessionConversationProps } from './SessionConversation.js';
+import { ToastActivity } from './Toast.js';
 
 interface ConversationPresentation {
   visible: boolean; fixedDisplayMode?: TimelineDisplayMode; dockHeadingStart?: ReactNode;
@@ -93,26 +94,26 @@ class ConversationSurfaces {
     });
   }
 }
-const SurfaceScope = createContext<{ registry: ConversationSurfaces; enabled: boolean } | undefined>(undefined);
+const SurfaceScope = createContext<{ registry: ConversationSurfaces } | undefined>(undefined);
 
 export function SessionConversationSurfaces({ scope, transport, mode, children }: SessionConversationSurfacesProps) {
   const enabled = useContext(WorkspaceReady);
   const registry = useMemo(() => new ConversationSurfaces(mode), [scope, transport]);
-  const context = useMemo(() => ({ registry, enabled }), [registry, enabled]);
+  const context = useMemo(() => ({ registry }), [registry]);
   useSyncExternalStore(registry.subscribe, registry.snapshot, registry.snapshot);
   // Child layout effects publish destinations first; select their mode from that same committed registration set.
   useLayoutEffect(() => registry.selectMode(mode), [registry, mode]);
   useLayoutEffect(() => {
-    if (enabled) registry.activate(); else registry.deactivate();
+    registry.activate();
     return () => registry.deactivate();
-  }, [registry, enabled]);
+  }, [registry]);
   return <SurfaceScope.Provider value={context}>{children}
     <div hidden aria-hidden="true" ref={element => { element?.setAttribute('inert', ''); registry.parking = element ?? undefined; }} />
-    {enabled ? [...registry.entries.values()].map(entry => <ConversationSurface key={entry.slotId} registry={registry} entry={entry} mode={registry.mode} />) : null}
+    {[...registry.entries.values()].map(entry => <ConversationSurface key={entry.slotId} registry={registry} entry={entry} mode={registry.mode} enabled={enabled} />)}
   </SurfaceScope.Provider>;
 }
 
-function ConversationSurface({ registry, entry, mode }: { registry: ConversationSurfaces; entry: SurfaceEntry; mode: WorkbenchMode }) {
+function ConversationSurface({ registry, entry, mode, enabled }: { registry: ConversationSurfaces; entry: SurfaceEntry; mode: WorkbenchMode; enabled: boolean }) {
   const registrations = [...entry.registrations.values()];
   const selected = registrations.find(item => item.mode === mode && item.active);
   const chosen = selected ?? registrations.find(item => item.mode === mode) ?? registrations[0] ?? entry.last;
@@ -129,13 +130,13 @@ function ConversationSurface({ registry, entry, mode }: { registry: Conversation
   });
   const props: SessionConversationProps = { ...descriptor.props,
     attachmentManaged: attachment.attachmentManaged, attachedSession: attachment.attachedSession, attachmentNotice: attachment.attachmentNotice,
-    visible: shown, mutationBlocked: !shown || descriptor.props.mutationBlocked,
-    attachmentEnabled: shown && descriptor.props.attachmentEnabled !== false,
+    visible: shown, mutationBlocked: !enabled || !shown || descriptor.props.mutationBlocked,
+    attachmentEnabled: enabled && shown && descriptor.props.attachmentEnabled !== false,
     onPendingInputChange(count) {
       if (registry.reportPending(entry, count)) descriptor.props.onPendingInputChange?.(count);
     },
   };
-  return createPortal(<WindowLayoutContext.Provider value={descriptor.layout}>
+  return createPortal(<ToastActivity.Provider value={shown}><WindowLayoutContext.Provider value={descriptor.layout}>
     <WindowSessionBridgeContext.Provider value={descriptor.bridge}><WindowPresentationContext.Provider value={descriptor.presentedViewId}>
       <SessionTitleInteractionContext.Provider value={descriptor.titleInteraction}>
         <TrackViewScope.Provider value={descriptor.track}><AskViewScope.Provider value={descriptor.ask}>
@@ -145,7 +146,7 @@ function ConversationSurface({ registry, entry, mode }: { registry: Conversation
         </AskViewScope.Provider></TrackViewScope.Provider>
       </SessionTitleInteractionContext.Provider>
     </WindowPresentationContext.Provider></WindowSessionBridgeContext.Provider>
-  </WindowLayoutContext.Provider>, entry.host, entry.slotId);
+  </WindowLayoutContext.Provider></ToastActivity.Provider>, entry.host, entry.slotId);
 }
 
 export function SessionConversationMount({ mode, descriptor, active }: { mode: WorkbenchMode; descriptor: SessionSurfaceDescriptor; active: boolean }) {
@@ -164,12 +165,12 @@ export function SessionConversationMount({ mode, descriptor, active }: { mode: W
     props: { ...descriptor.props, familyRoot: false, dockHeadingStart: undefined },
   };
   useLayoutEffect(() => {
-    if (scope?.enabled && destination.current) scope.registry.register(token.current, { mode, descriptor: captured, active, destination: destination.current });
+    if (scope && destination.current) scope.registry.register(token.current, { mode, descriptor: captured, active, destination: destination.current });
   });
   useLayoutEffect(() => {
     const owner = token.current;
     return () => scope?.registry.unregister(descriptor.slotId, owner);
-  }, [scope?.registry, scope?.enabled, descriptor.slotId]);
+  }, [scope?.registry, descriptor.slotId]);
   if (!scope) return <SessionConversation {...descriptor.props} dockHeadingStart={captured.props.dockHeadingStart} visible={active && descriptor.props.visible} />;
   return <div ref={destination} className="lab-session-conversation-destination" style={{ display: 'flex', flex: 1, flexDirection: 'column', minHeight: 0, minWidth: 0, height: '100%' }} />;
 }

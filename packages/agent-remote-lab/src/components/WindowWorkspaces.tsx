@@ -1,6 +1,6 @@
 import './window-workspaces.css';
 import { useEffect, useRef, useState } from 'react';
-import { createWindowView, type WindowOperation, type WindowSessionBinding, type WindowView, type WorkspaceWindow } from '@orchardworks/agent-remote-protocol';
+import { createWindowView, hasWindowAppearance, type WindowOperation, type WindowSessionBinding, type WindowView, type WorkspaceWindow } from '@orchardworks/agent-remote-protocol';
 import type { useWindowWorkspace } from '../hooks/useWindowWorkspace.js';
 import { useWindowManager } from '../hooks/useWindowManager.js';
 import { activityLabel, windowActivity, type SessionActivityStatus } from '../session-activity-status.js';
@@ -65,7 +65,8 @@ export function WindowWorkspaces({ workspace, current, active = true, sessionSta
     catch (error) { failed(error); return false; }
   }
   function edit(operation: WindowOperation): boolean { return background(() => workspace.operate(operation)); }
-  const catalog = [...new Map([...(workspace.windows ?? []), ...(workspace.window ? [workspace.window] : [])].map(window => [window.id, window])).values()];
+  const catalog = [...new Map([...(workspace.windows ?? []), ...(workspace.window ? [workspace.window] : [])].map(window => [window.id, window])).values()]
+    .filter(window => { const group = workspace.readGroup?.(window.id); return !group || hasWindowAppearance(group); });
   async function openWindow(id: string) {
     const client = workspace.client, generation = ++navigation.current;
     setOpeningId(id); setNotice(undefined);
@@ -151,9 +152,16 @@ export function WindowWorkspaces({ workspace, current, active = true, sessionSta
           <button type="button" onClick={() => void run(async () => {
             const id = workspace.window!.id, client = workspace.client;
             const url = new URL(location.href); url.searchParams.set('window', id);
+            for (const key of ['mode', 'section', 'bot']) url.searchParams.delete(key);
             await navigator.clipboard.writeText(url.href);
             if (currentScope.current.id === id && currentScope.current.client === client) setNotice('Window link copied.');
           })}>Copy link</button>
+          {!workspace.group?.bots ? <button type="button" disabled={busy || workspace.unavailable} onClick={() => void run(async () => {
+            const id = workspace.window!.id, client = workspace.client;
+            const rank = workspace.groups.flatMap(group => group.bots ? [group.bots.rank] : []).sort().at(-1);
+            await workspace.operateGroup(id, { type: 'bots.add', rank: !rank ? 'm' : rank.length < 64 ? `${rank}m` : rank });
+            if (currentScope.current.id === id && currentScope.current.client === client) setNotice('Shown as a section in Bot mode.');
+          })}>Show as section</button> : null}
         </div>
         {workspace.client ? <details className="lab-window-agent" open={agentControl} onToggle={event => setAgentControl(event.currentTarget.open)}>
           <summary>Agent control</summary>

@@ -1,7 +1,7 @@
 import { act, useState } from 'react';
 import { afterEach, expect, it, vi } from 'vitest';
 import { render } from '../test/setup.js';
-import { ToastProvider, useFeedbackToast, useToast } from './Toast.js';
+import { ToastActivity, ToastProvider, useFeedbackToast, useToast } from './Toast.js';
 
 afterEach(() => vi.useRealTimers());
 function Feedback({ message = 'The Host did not answer.' }: { message?: string }) {
@@ -145,4 +145,55 @@ it('does not dismiss a newer notification when an older action completes', async
   expect(container.querySelector('.lab-toast')?.textContent).toContain('Another unlink');
   await act(async () => finish());
   expect(container.querySelector('.lab-toast')?.textContent).toContain('Another unlink');
+});
+
+it('clears only a hidden source and rejects its late feedback while a visible Bot can still notify', async () => {
+  let windowToast: ReturnType<typeof useToast>, botToast: ReturnType<typeof useToast>;
+  let hideWindow!: () => void;
+  function Source({ kind }: { kind: 'window' | 'bot' }) {
+    const toast = useToast();
+    if (kind === 'window') windowToast = toast;
+    else botToast = toast;
+    return null;
+  }
+  function Harness() {
+    const [active, setActive] = useState(true); hideWindow = () => setActive(false);
+    return <ToastProvider>
+      <ToastActivity.Provider value={active}><Source kind="window" /></ToastActivity.Provider>
+      <ToastActivity.Provider value><Source kind="bot" /></ToastActivity.Provider>
+    </ToastProvider>;
+  }
+  const container = await render(<Harness />);
+  const pendingWindowFeedback = windowToast;
+  await act(async () => {
+    windowToast?.show('connection', 'Window connection', 'Window failed', 'error');
+    botToast?.show('connection', 'Bot connection', 'Bot is ready', 'info');
+  });
+  expect(container.querySelectorAll('.lab-toast')).toHaveLength(2);
+  await act(async () => hideWindow());
+  expect(windowToast).toBeUndefined();
+  expect(container.querySelectorAll('.lab-toast')).toHaveLength(1);
+  expect(container.querySelector('.lab-toast')?.textContent).toContain('Bot is ready');
+  await act(async () => {
+    pendingWindowFeedback?.show('connection', 'Window connection', 'Late Window failure', 'error');
+    botToast?.show('connection', 'Bot connection', 'Bot changed', 'info');
+  });
+  expect(container.querySelectorAll('.lab-toast')).toHaveLength(1);
+  expect(container.querySelector('.lab-toast')?.textContent).toContain('Bot changed');
+  expect(container.querySelector('.lab-toast-region')?.textContent).not.toContain('Window');
+});
+
+it('rejects retained toast callbacks after their source unmounts', async () => {
+  let source: ReturnType<typeof useToast>, remove!: () => void;
+  function Source() { source = useToast(); return null; }
+  function Harness() {
+    const [visible, setVisible] = useState(true); remove = () => setVisible(false);
+    return <ToastProvider>{visible ? <Source /> : null}</ToastProvider>;
+  }
+  const container = await render(<Harness />);
+  await act(async () => source?.show('late', 'Source', 'Before removal', 'info'));
+  expect(container.querySelector('.lab-toast')).not.toBeNull();
+  await act(async () => remove());
+  await act(async () => source?.show('late', 'Source', 'After removal', 'error'));
+  expect(container.querySelector('.lab-toast')).toBeNull();
 });

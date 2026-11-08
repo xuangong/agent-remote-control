@@ -628,6 +628,52 @@ it('aborts native restoration on leaf teardown and ignores a late attachment res
   expect(connections.agentIds).toEqual([]);
 });
 
+it('retains the editor during Access suspension, aborts native restoration and rejects its late result', async () => {
+  const { SessionDirectoryClient, DirectoryError } = await import('../directory-client.js');
+  const { ConversationConnections, ConversationConnectionScope } = await import('../conversation-connections.js');
+  const { SessionConversationMount, SessionConversationSurfaces } = await import('./SessionConversationSurfaces.js');
+  const target = { hostId: 'host', providerId: 'recorded', nativeSessionId: 'paused-takeover', title: 'Takeover' };
+  const directory = new SessionDirectoryClient('http://fixture');
+  const owner = { kind: 'native_cli' as const, generation: 'paused-owner' };
+  let finish!: (value: { agentId: string; nativeSessionId: string }) => void;
+  const attach = vi.spyOn(directory, 'attach').mockRejectedValueOnce(new DirectoryError('Native CLI owns this session', 'native_owned', 409, undefined, owner))
+    .mockImplementationOnce(() => new Promise(resolve => { finish = resolve; }))
+    .mockImplementation(() => new Promise(() => {}));
+  const connect = vi.fn(() => ({ close() {}, send() {} }));
+  const transport = { onDiagnostic: () => () => {}, onProtocolMessage: () => () => {}, connect } as unknown as RemoteAgentTransport;
+  const connections = new ConversationConnections(transport), drafts = new DraftStore('paused-takeover');
+  let setReady!: (ready: boolean) => void;
+  function Harness() {
+    const [ready, set] = useState(true); setReady = set;
+    return <WorkspaceReady.Provider value={ready}><ConversationConnectionScope.Provider value={connections}>
+      <SessionConversationSurfaces scope="paused-takeover" transport={transport} mode="bot">
+        <SessionConversationMount mode="bot" active descriptor={{ slotId: 'slot', titleInteraction: undefined, props: {
+          target, entries: [target], familyRoot: false, onNavigate: async () => {}, directoryFor: () => directory,
+          storageScope: 'paused-takeover', baseUrl: 'http://fixture', hostLabel: 'Host', compact: false, active: true, offline: false,
+          transport, draftStore: drafts, viewId: 'slot', visible: true,
+        } }} />
+      </SessionConversationSurfaces>
+    </ConversationConnectionScope.Provider></WorkspaceReady.Provider>;
+  }
+  const container = await render(<Harness />);
+  const editor = container.querySelector('[data-testid="prompt-input"]');
+  await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="Interrupt and take control"]')!.click());
+  const signal = attach.mock.calls[1]?.[2];
+  expect(signal?.aborted).toBe(false);
+  await act(async () => setReady(false));
+  expect(signal?.aborted).toBe(true);
+  expect(container.querySelector('[data-testid="prompt-input"]')).toBe(editor);
+  expect(editor?.closest('.lab-session-conversation-host')?.closest('[hidden]')).toBeNull();
+  expect(container.querySelector('[data-testid="prompt-submit"]:enabled')).toBeNull();
+  await act(async () => finish({ agentId: 'late-agent', nativeSessionId: target.nativeSessionId }));
+  expect(connect).not.toHaveBeenCalled();
+  expect(connections.agentIds).toEqual([]);
+  expect(attach).toHaveBeenCalledTimes(2);
+  await act(async () => setReady(true));
+  expect(attach).toHaveBeenCalledTimes(3);
+  expect(container.querySelector('[data-testid="prompt-input"]')).toBe(editor);
+});
+
 it.each(['attach', 'native restoration'] as const)('preserves one pending %s request when its surface switches modes', async operation => {
   const { SessionDirectoryClient, DirectoryError } = await import('../directory-client.js');
   const { SessionConversationMount, SessionConversationSurfaces } = await import('./SessionConversationSurfaces.js');

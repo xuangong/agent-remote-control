@@ -92,20 +92,29 @@ it('does not let stale unregister or pending callbacks collect a newer registrat
   expect(container.querySelector('input')).toBe(input);
   expect(lifecycle.unmounts).toBe(0);
 });
-it.each(['scope', 'transport', 'ready'] as const)('releases old hosts and ignores delayed callbacks on %s replacement', async field => {
+it.each(['scope', 'transport'] as const)('releases old hosts and ignores delayed callbacks on %s replacement', async field => {
   const container = await render(<Harness />), oldHost = container.querySelector('.lab-session-conversation-host');
   const oldPending = lifecycle.pending!;
   await act(async () => oldPending(1));
-  await act(async () => update(field === 'scope' ? { scope: 'next' } : field === 'transport' ? { transport: secondTransport } : { ready: false }));
+  await act(async () => update(field === 'scope' ? { scope: 'next' } : { transport: secondTransport }));
   expect(oldHost?.isConnected).toBe(false);
   const current = container.querySelector('input');
   await act(async () => oldPending(0));
   expect(container.querySelector('input')).toBe(current);
-  if (field === 'ready') {
-    expect(current).toBeNull();
-    await act(async () => update({ ready: true }));
-    expect(container.querySelector('input')).not.toBeNull();
-  }
+});
+it('retains the editor visibly while access recovery fences attachment and mutation', async () => {
+  const container = await render(<Harness />), input = container.querySelector<HTMLInputElement>('input')!;
+  input.value = 'Retain during access recovery';
+  await act(async () => update({ ready: false }));
+  expect(container.querySelector('input')).toBe(input);
+  expect(input.closest('[hidden]')).toBeNull();
+  expect(container.querySelector('output')?.dataset).toMatchObject({ visible: 'true', blocked: 'true', attach: 'false' });
+  await act(async () => update({ ready: true }));
+  expect(container.querySelector('input')).toBe(input);
+  expect(input.value).toBe('Retain during access recovery');
+  expect(container.querySelector('output')?.dataset).toMatchObject({ visible: 'true', attach: 'true' });
+  expect(container.querySelector('output')?.dataset.blocked).not.toBe('true');
+  expect(lifecycle.mounts).toBe(1); expect(lifecycle.unmounts).toBe(0);
 });
 it('survives StrictMode replay and destination replacement after the initial baseline', async () => {
   const container = await render(<StrictMode><Harness /></StrictMode>);

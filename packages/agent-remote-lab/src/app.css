@@ -154,6 +154,8 @@ textarea {
 }
 
 .lab-shell.lab-inspector-open { grid-template-columns: var(--lab-sidebar-width, 320px) minmax(0, 1fr) 320px; }
+.lab-window-mode[hidden] { display: none !important; }
+.lab-window-mode .lab-window-recovery { grid-column: 1 / -1; grid-row: 1 / -1; }
 
 :is(.lab-shell, .lab-session-view) .agent-remote-surface button,
 :is(.lab-shell, .lab-session-view) .agent-remote-surface input,

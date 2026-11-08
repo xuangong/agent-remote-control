@@ -177,7 +177,7 @@ it('reuses the same Session client and replica across Windows and releases a del
   }
 }, 10000);
 
-it('starts the cached Window native Session before Window inspection settles without treating cached state as ready', async () => {
+it('waits for Window inspection before attaching a cached binding and keeps timeline readiness gated', async () => {
   const scope = 'http://localhost/window-native-before-inspect/';
   const cached = windowFixture('cached', 'one');
   localStorage.setItem(`agent-remote:recovery:${scope}:shared-window:${cached.id}`, JSON.stringify(cached));
@@ -209,6 +209,10 @@ it('starts the cached Window native Session before Window inspection settles wit
     await until(() => expect(inspect).toHaveBeenCalledWith(cached.id));
     expect(workspace.window?.id).toBe(cached.id);
     expect(workspace.hasActiveWindow).toBe(false);
+    expect(attach).not.toHaveBeenCalled();
+    expect(fixture.channels).toEqual([]);
+    await act(async () => completeInspection({ window: cached }));
+    await until(() => expect(workspace.hasActiveWindow).toBe(true));
     await until(() => expect(attach).toHaveBeenCalled());
     expect(attach.mock.calls.map(([, nativeSessionId]) => nativeSessionId)).toEqual(['native-one']);
     await until(() => expect(fixture.channels.filter(channel => channel.observation === 'session')).toHaveLength(1));
@@ -218,9 +222,7 @@ it('starts the cached Window native Session before Window inspection settles wit
     await act(async () => completeTimeline());
     await until(() => expect(succession.binding?.session.nativeSessionId).toBe('native-one'));
     expect(succession.sessionState.synchronized).toBe(true);
-    expect(workspace.hasActiveWindow).toBe(false);
-    await act(async () => completeInspection({ window: cached }));
-    await until(() => expect(workspace.hasActiveWindow).toBe(true));
+    expect(workspace.hasActiveWindow).toBe(true);
     expect(fixture.channels.filter(channel => channel.observation === 'session')).toHaveLength(1);
   } finally {
     completeTimeline(); completeInspection({ window: cached });

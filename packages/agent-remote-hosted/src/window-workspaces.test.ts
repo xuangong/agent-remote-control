@@ -2,7 +2,7 @@ import { afterEach, expect, it } from 'vitest';
 import { createHash } from 'node:crypto';
 import { createHostedRelay } from './gateway.js';
 import { createServer, type Server } from 'node:http';
-import { createWindowView, type WorkspaceWindow } from '@orchardworks/agent-remote-protocol';
+import { createWindowView, decodeWorkspaceWindow, type WorkspaceWindow } from '@orchardworks/agent-remote-protocol';
 import { createRelayState, emptyRelayState, validateRelayState, type HostedRelayState } from './state.js';
 import { createWindowWorkspaces } from './window-workspaces.js';
 import { handleWindowRequest } from './window-routes.js';
@@ -266,4 +266,181 @@ it('creates an empty Window through HTTP without synthesizing a primary pane', a
   const created = await f.call('', 'POST', { operationId: 'empty-create', issuedAt: Date.now(), window: empty });
   expect(created.body).toMatchObject({ result: { status: 'committed' }, window: empty });
   expect((await f.call('/window')).body.window).toEqual(empty);
+});
+
+const sectionWindow = (id: string, nativeSessionId: string, title = 'Release'): WorkspaceWindow => ({ schemaVersion: 3, id, title, revision: 0,
+  selectedPrimaryViewId: 'writer', selectedViewId: 'writer', views: [createWindowView('writer', { ...binding, nativeSessionId }, 'primary')] });
+
+it('lists every group, keeping sections without a Window out of the list older pages read', async () => {
+  const f = await fixture(); await f.create();
+  const created = await f.call('', 'POST', { operationId: 'create-section', issuedAt: Date.now(), window: sectionWindow('section', 'writer'),
+    bots: { rank: 'm', members: { writer: { label: 'Writer' } } }, presentation: { window: false } });
+  expect(created.body).toMatchObject({ result: { status: 'committed' }, bots: { rank: 'm' }, presentation: { window: false } });
+  const listed = await f.call();
+  expect(listed.body.windows.map((window: WorkspaceWindow) => window.id)).toEqual(['window']);
+  expect(listed.body.groups.map((group: { window: WorkspaceWindow }) => group.window.id)).toEqual(['window', 'section']);
+  // An older page decodes every Window it is given.
+  expect(listed.body.windows.every((window: unknown) => decodeWorkspaceWindow(window))).toBe(true);
+  expect((await f.call('/section')).body).toMatchObject({ bots: { members: { writer: { label: 'Writer' } } }, presentation: { window: false } });
+  const restarted = await fixture(f.saved());
+  expect((await restarted.call('/section')).body.presentation).toEqual({ window: false });
+});
+
+it('refuses malformed stored groups and ignores what an older Worker leaves behind', async () => {
+  const f = await fixture(); await f.create();
+  const saved = structuredClone(f.saved());
+  const row = saved.workspaceWindows![0]!;
+  expect(validateRelayState({ ...saved, workspaceWindows: [{ ...row, bots: { rank: 'm', members: {} } }] }, auth).workspaceWindows![0]!.bots).toEqual({ rank: 'm', members: {} });
+  expect(() => validateRelayState({ ...saved, workspaceWindows: [{ ...row, presentation: { window: false } }] }, auth)).toThrow();
+  expect(() => validateRelayState({ ...saved, workspaceWindows: [{ ...row, bots: { rank: 'M', members: {} } }] }, auth)).toThrow();
+  // An older Worker keeps details for a view it closed, and keeps the section of a group it deleted.
+  const left = { ...saved, workspaceWindows: [
+    { ...row, bots: { rank: 'm', members: { missing: { label: 'Gone' } } } },
+    { subject: 'alice', id: 'gone', deleted: true as const, generation: 0, receipts: [], bots: { rank: 'n', members: {} } },
+  ] };
+  const restarted = await fixture(left);
+  expect((await restarted.call('/window')).body).toMatchObject({ window: { id: 'window' }, bots: { rank: 'm', members: {} } });
+  expect((await restarted.call('')).body.groups.map((group: { window: WorkspaceWindow }) => group.window.id)).toEqual(['window']);
+  expect((await restarted.call('/gone')).status).toBe(404);
+  // The next write drops what was left.
+  await restarted.call('/window/operations', 'POST', restarted.mutation('rename-window', 0, { type: 'rename', title: 'Renamed' }));
+  expect(restarted.saved().workspaceWindows![0]!.bots).toEqual({ rank: 'm', members: {} });
+});
+
+it('keeps a section through layout edits and drops it with the group', async () => {
+  const f = await fixture();
+  const created = await f.call('', 'POST', { operationId: 'create-linked', issuedAt: Date.now(), window: sectionWindow('linked', 'writer'),
+    bots: { rank: 'm', members: { writer: { label: 'Writer' } } } });
+  expect(created.body.result.status).toBe('committed');
+  const renamed = await f.call('/linked/operations', 'POST', f.mutation('rename-linked', 0, { type: 'rename', title: 'Renamed' }));
+  expect(renamed.body).toMatchObject({ result: { status: 'committed' }, window: { title: 'Renamed' }, bots: { rank: 'm', members: { writer: { label: 'Writer' } } } });
+  expect(f.saved().workspaceWindows![0]!.bots).toEqual({ rank: 'm', members: { writer: { label: 'Writer' } } });
+  const deleted = await f.call('/linked', 'DELETE', f.mutation('delete-linked', 1, { type: 'delete' }));
+  expect(deleted.body.result.status).toBe('committed');
+  expect(deleted.body).not.toHaveProperty('bots');
+  const row = f.saved().workspaceWindows![0]!;
+  expect(row.deleted).toBe(true);
+  expect(row).not.toHaveProperty('bots');
+  expect(row).not.toHaveProperty('presentation');
+  expect((await f.call()).body.groups).toEqual([]);
+});
+
+it('refuses to make a session a bot in a second section, naming the section that has it', async () => {
+  const f = await fixture(); await f.create();
+  expect((await f.call('/window/operations', 'POST', f.mutation('as-section', 0, { type: 'bots.add', rank: 'm' }))).body.result.status).toBe('committed');
+  // A plain Window may still show the same session.
+  const second = { ...sectionWindow('second', 'native', 'Second'), views: [createWindowView('writer', binding, 'primary')] };
+  expect((await f.call('', 'POST', { operationId: 'second', issuedAt: Date.now(), window: second })).body.result.status).toBe('committed');
+  const refused = await f.call('/second/operations', 'POST', f.mutation('second-as-section', 0, { type: 'bots.add', rank: 'n' }));
+  expect(refused.body.result).toMatchObject({ status: 'rejected', code: 'bot_session_taken', message: 'This session is already a bot in "Window".' });
+  expect(refused.body.bots).toBeUndefined();
+  const created = await f.call('', 'POST', { operationId: 'third', issuedAt: Date.now(), window: { ...second, id: 'third' }, bots: { rank: 'o', members: {} } });
+  expect(created.status).toBe(409);
+  expect((await f.call()).body.groups.map((group: { window: WorkspaceWindow }) => group.window.id)).toEqual(['window', 'second']);
+});
+
+it('keeps a bot on its conversation whichever client changes it', async () => {
+  const f = await fixture(); await f.create();
+  await f.call('/window/operations', 'POST', f.mutation('as-section', 0, { type: 'bots.add', rank: 'm' }));
+  const rebind = await f.call('/window/operations', 'POST', f.mutation('rebind', 1, { type: 'view.bind', viewId: 'primary', binding: { ...binding, nativeSessionId: 'other' } }));
+  expect(rebind.body.result).toMatchObject({ status: 'rejected', code: 'bot_view', revision: 1 });
+  const retitle = await f.call('/window/operations', 'POST', f.mutation('retitle', 1, { type: 'view.bind', viewId: 'primary', binding: { ...binding, title: 'Renamed' } }));
+  expect(retitle.body.result.status).toBe('committed');
+  const details = await f.call('/window/operations', 'POST', f.mutation('label', 2, { type: 'bot.update', viewId: 'primary', details: { label: 'Writer', pinned: true } }));
+  expect(details.body).toMatchObject({ result: { status: 'committed', revision: 3 }, bots: { members: { primary: { label: 'Writer', pinned: true } } } });
+  // Layout errors keep their generic code.
+  const missing = await f.call('/window/operations', 'POST', f.mutation('missing', 3, { type: 'view.close', viewId: 'nowhere' }));
+  expect(missing.body.result).toMatchObject({ status: 'rejected', code: 'invalid_operation' });
+});
+
+it('lets other edits through when an older Worker left a session as a bot twice', async () => {
+  const f = await fixture(); await f.create();
+  const saved = structuredClone(f.saved());
+  const subject = saved.workspaceWindows![0]!.subject;
+  const twin = (id: string, title: string) => ({ subject, id, window: sectionWindow(id, 'twin', title), bots: { rank: 'm', members: {} }, generation: 0, receipts: [] });
+  const restarted = await fixture({ ...saved, workspaceWindows: [...saved.workspaceWindows!, twin('one', 'One'), twin('two', 'Two')] });
+  expect((await restarted.call('/window/operations', 'POST', restarted.mutation('elsewhere', 0, { type: 'bots.add', rank: 'o' }))).body.result.status).toBe('committed');
+  const renamed = await restarted.call('/one/operations', 'POST', restarted.mutation('rename-one', 0, { type: 'rename', title: 'Renamed' }));
+  expect(renamed.body.result).toMatchObject({ status: 'rejected', code: 'bot_session_taken', message: 'This session is already a bot in "Two".' });
+  expect((await restarted.call('/one/operations', 'POST', restarted.mutation('unsection-one', 0, { type: 'bots.remove' }))).body.result.status).toBe('committed');
+});
+
+it('checks bots only among one user\'s groups', async () => {
+  const f = await fixture(); await f.create();
+  const saved = structuredClone(f.saved());
+  const others = { subject: 'someone-else', id: 'theirs', window: sectionWindow('theirs', 'native', 'Theirs'), bots: { rank: 'm', members: {} }, generation: 0, receipts: [] };
+  const restarted = await fixture({ ...saved, workspaceWindows: [...saved.workspaceWindows!, others] });
+  expect((await restarted.call('/window/operations', 'POST', restarted.mutation('mine', 0, { type: 'bots.add', rank: 'n' }))).body.result.status).toBe('committed');
+});
+
+it('merges, separates and moves bots between groups in one step each, with a receipt on every group', async () => {
+  const f = await fixture(); await f.create();
+  await f.call('', 'POST', { operationId: 'create-section', issuedAt: Date.now(), window: sectionWindow('section', 'writer'), bots: { rank: 'm', members: {} }, presentation: { window: false } });
+  const merge = { operationId: 'merge', issuedAt: Date.now(), baseRevision: 0, source: 'window', sourceRevision: 0 };
+  const merged = await f.call('/section/merge', 'POST', merge);
+  expect(merged.body.result.status).toBe('committed');
+  expect(merged.body.groups.window).toBeNull();
+  expect(merged.body.groups.section).toMatchObject({ window: { revision: 1, views: [{ id: 'writer' }, { id: 'primary' }] }, bots: { rank: 'm' } });
+  expect(merged.body.groups.section.presentation).toBeUndefined();
+  // The same request is answered from its receipt, found on either group.
+  expect((await f.call('/section/merge', 'POST', merge)).body.result).toEqual(merged.body.result);
+  expect((await f.call('/window/operations/merge')).body.result).toEqual(merged.body.result);
+  // A group named twice gets one receipt.
+  const itself = await f.call('/section/merge', 'POST', { operationId: 'itself', issuedAt: Date.now(), baseRevision: 1, source: 'section', sourceRevision: 1 });
+  expect(itself.body.result).toMatchObject({ status: 'rejected', code: 'same_group' });
+
+  const split = await f.call('/section/split', 'POST', { operationId: 'split', issuedAt: Date.now(), baseRevision: 1, newId: 'section-bots' });
+  expect(split.body.groups.section.bots).toBeUndefined();
+  expect(split.body.groups['section-bots']).toMatchObject({ presentation: { window: false }, window: { revision: 0 } });
+  const onto = await f.call('/section/split', 'POST', { operationId: 'onto', issuedAt: Date.now(), baseRevision: 2, newId: 'section' });
+  expect(onto.body.result).toMatchObject({ status: 'rejected', code: 'window_exists' });
+
+  await f.call('', 'POST', { operationId: 'create-third', issuedAt: Date.now(), bots: { rank: 'n', members: {} }, presentation: { window: false },
+    window: { schemaVersion: 3, id: 'third', title: 'Third', revision: 0, selectedPrimaryViewId: null, selectedViewId: null, views: [] } });
+  const transfer = await f.call('/section-bots/transfer', 'POST', { operationId: 'transfer', issuedAt: Date.now(), baseRevision: 0, viewId: 'primary', target: 'third', targetRevision: 0 });
+  expect(transfer.body.groups['section-bots'].window.views.map((view: { id: string }) => view.id)).toEqual(['writer']);
+  expect(transfer.body.groups.third.window.views.map((view: { id: string }) => view.id)).toEqual(['primary']);
+
+  const stale = await f.call('/section/split', 'POST', { operationId: 'stale', issuedAt: Date.now(), baseRevision: 0, newId: 'again' });
+  expect(stale.body.result).toMatchObject({ status: 'rejected', code: 'revision_conflict' });
+  expect(stale.body.groups.again).toBeUndefined();
+
+  // The stored state, receipts included, is still valid.
+  const restarted = await fixture(f.saved());
+  expect((await restarted.call()).body.groups.map((group: { window: WorkspaceWindow }) => group.window.id)).toEqual(['section', 'section-bots', 'third']);
+});
+
+it('refuses cross-group operations without changing any group', async () => {
+  const f = await fixture(); await f.create();
+  await f.call('', 'POST', { operationId: 'create-section', issuedAt: Date.now(), window: sectionWindow('section', 'writer'), bots: { rank: 'm', members: {} }, presentation: { window: false } });
+  await f.call('', 'POST', { operationId: 'create-other', issuedAt: Date.now(), window: sectionWindow('other', 'native', 'Other'), bots: { rank: 'n', members: {} }, presentation: { window: false } });
+
+  // The merged section would hold a session that is already a bot in another section.
+  const clash = { operationId: 'clash', issuedAt: Date.now(), baseRevision: 0, source: 'window', sourceRevision: 0 };
+  const refused = await f.call('/section/merge', 'POST', clash);
+  expect(refused.body.result).toMatchObject({ status: 'rejected', code: 'bot_session_taken', message: 'This session is already a bot in "Other".' });
+  expect(refused.body.groups.window.window.revision).toBe(0);
+  expect(refused.body.groups.section.window.views.map((view: { id: string }) => view.id)).toEqual(['writer']);
+  expect((await f.call('/window/operations/clash')).body.result).toEqual(refused.body.result);
+  expect((await f.call('/section/operations/clash')).body.result).toEqual(refused.body.result);
+
+  // A receipt answers only the request it was written for.
+  const misaddressed = await f.call('/other/merge', 'POST', clash);
+  expect(misaddressed.status).toBe(409);
+  expect(misaddressed.body.code).toBe('operation_conflict');
+
+  // A group that does not exist leaves no receipt.
+  const unknown = await f.call('/section/merge', 'POST', { operationId: 'unknown', issuedAt: Date.now(), baseRevision: 0, source: 'nowhere', sourceRevision: 0 });
+  expect(unknown.status).toBe(404);
+  expect(unknown.body.code).toBe('window_not_found');
+  expect((await f.call('/section/operations/unknown')).status).toBe(404);
+
+  // A deleted group keeps its identity, so a split cannot reuse it.
+  expect((await f.call('/other', 'DELETE', f.mutation('delete-other', 0, { type: 'delete' }))).body.result.status).toBe('committed');
+  const onto = await f.call('/section/split', 'POST', { operationId: 'onto-deleted', issuedAt: Date.now(), baseRevision: 0, newId: 'other' });
+  expect(onto.body.result).toMatchObject({ status: 'rejected', code: 'window_exists' });
+
+  // The stored state, rejected receipts included, is still valid.
+  const restarted = await fixture(f.saved());
+  expect((await restarted.call()).body.groups.map((group: { window: WorkspaceWindow }) => group.window.id)).toEqual(['window', 'section']);
 });

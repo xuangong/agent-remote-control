@@ -1,4 +1,9 @@
-import { decodeWorkspaceWindow, isWindowOperationResult, isWindowSessionBinding, type WorkspaceWindow, type WindowCreateRequest, type WindowDeleteRequest, type WindowMutation, type WindowOperationResult, type WindowSessionBinding } from '@orchardworks/agent-remote-protocol';
+import {
+  decodeWorkspaceWindow, isWindowGroup, isWindowOperationResult, isWindowSessionBinding,
+  type WindowBots, type WindowCreateRequest, type WindowDeleteRequest, type WindowGroup, type WindowGroupCreateRequest, type WindowGroupMutation,
+  type WindowMergeRequest, type WindowMutation, type WindowOperationResult, type WindowPresentation, type WindowSessionBinding,
+  type WindowSplitRequest, type WindowTransferRequest, type WorkspaceWindow,
+} from '@orchardworks/agent-remote-protocol';
 
 export class WindowRequestError extends Error {
   constructor(message: string, readonly status: number, readonly code?: string, readonly result?: WindowOperationResult) { super(message); this.name = 'WindowRequestError'; }
@@ -14,9 +19,22 @@ export class WindowMutationUnknownError extends Error {
   }
 }
 const identity = (): WindowOperationIdentity => ({ operationId: crypto.randomUUID(), issuedAt: Date.now() });
-const rejected = (error: unknown) => error instanceof WindowRequestError && (error.result?.status === 'rejected' || error.status >= 400 && error.status < 500);
-export interface WindowSnapshot { window: WorkspaceWindow; manager?: { session: WindowSessionBinding; generation: number } }
-export interface WindowCommit { window: WorkspaceWindow; result: WindowOperationResult }
+/**
+ * True when a WindowRequestError is a refusal: a request the Relay settled as rejected (HTTP 200 with a rejected `result`) or answered with a 4xx status.
+ * It says nothing about whether the request was applied. `false` does not mean the error is not a WindowRequestError: a 5xx answer and
+ * `invalid_window_receipt` are WindowRequestErrors too, and neither is a refusal.
+ */
+export const isWindowRejection = (error: unknown): boolean => error instanceof WindowRequestError && (error.result?.status === 'rejected' || error.status >= 400 && error.status < 500);
+/** A group as a Relay sends it, with its Window decoded from any schema this client accepts. */
+function decodeGroup(value: any): WindowGroup | undefined {
+  const window = decodeWorkspaceWindow(value?.window);
+  const group = window && { window, ...(value.bots === undefined ? {} : { bots: value.bots }), ...(value.presentation === undefined ? {} : { presentation: value.presentation }) };
+  return group && isWindowGroup(group) ? group : undefined;
+}
+export interface WindowSnapshot { window: WorkspaceWindow; manager?: { session: WindowSessionBinding; generation: number }; bots?: WindowBots; presentation?: WindowPresentation }
+export interface WindowCommit { window: WorkspaceWindow; result: WindowOperationResult; bots?: WindowBots; presentation?: WindowPresentation }
+/** The groups a cross-group operation changed; null for a group it deleted. */
+export interface WindowGroupsCommit { result: WindowOperationResult; groups: Record<string, WindowGroup | null> }
 interface WindowResponse { value: any; status: number }
 /** Layout transport never resumes sessions and never automatically retries mutations. */
 export class WindowWorkspaceClient {
@@ -31,8 +49,23 @@ export class WindowWorkspaceClient {
     return { value, status: response.status };
   }
   async list(): Promise<WorkspaceWindow[]> { const { value } = await this.request(''); if (!Array.isArray(value.windows)) throw new Error('Invalid Window list.'); const windows = value.windows.map(decodeWorkspaceWindow); if (windows.some((window: WorkspaceWindow | undefined) => !window)) throw new Error('Invalid Window list.'); return windows as WorkspaceWindow[]; }
+  /** Every group with its appearances; a Relay without groups answers with Windows only. */
+  async listGroups(): Promise<WindowGroup[]> {
+    const { value } = await this.request('');
+    const raw = value.groups ?? (Array.isArray(value.windows) ? value.windows.map((window: unknown) => ({ window })) : undefined);
+    if (!Array.isArray(raw)) throw new Error('Invalid Window list.');
+    const groups = raw.map(decodeGroup);
+    if (groups.includes(undefined)) throw new Error('Invalid Window list.');
+    return groups as WindowGroup[];
+  }
   async inspect(id: string, signal?: AbortSignal): Promise<WindowSnapshot> { const { value } = await this.request(`/${encodeURIComponent(id)}`, 'GET', undefined, signal); this.validate(value, id); return value; }
-  private validate(value: any, id: string): void { const window = decodeWorkspaceWindow(value.window); if (!window || window.id !== id || value.manager !== undefined && (!isWindowSessionBinding(value.manager?.session) || !Number.isSafeInteger(value.manager?.generation) || value.manager.generation < 0)) throw new Error('Invalid Window snapshot.'); value.window = window; }
+  private validate(value: any, id: string): void {
+    const window = decodeWorkspaceWindow(value.window);
+    const appearances = value.bots !== undefined || value.presentation !== undefined;
+    if (!window || window.id !== id || value.manager !== undefined && (!isWindowSessionBinding(value.manager?.session) || !Number.isSafeInteger(value.manager?.generation) || value.manager.generation < 0)
+      || appearances && !isWindowGroup({ window, ...(value.bots === undefined ? {} : { bots: value.bots }), ...(value.presentation === undefined ? {} : { presentation: value.presentation }) })) throw new Error('Invalid Window snapshot.');
+    value.window = window;
+  }
   private receipt({ value, status }: WindowResponse, operationId: string): WindowOperationResult {
     if (!isWindowOperationResult(value?.result) || value.result.operationId !== operationId) throw new WindowRequestError('Invalid Window receipt.', status, 'invalid_window_receipt');
     return value.result;
@@ -68,12 +101,21 @@ export class WindowWorkspaceClient {
       this.committed(result, response.status);
       return this.commit(response, window.id, result);
     } catch (error) {
-      if (rejected(error)) throw error;
+      if (isWindowRejection(error)) throw error;
       return this.recoverCreate(input.window, input);
     }
   }
+  /** Creates a group with its appearances. Unlike create, an unknown outcome is left to the caller, who can read it with recoverCreate. */
+  async createGroup(group: WindowGroup, operation: WindowOperationIdentity = identity()): Promise<WindowSnapshot> {
+    const input: WindowGroupCreateRequest = { operationId: operation.operationId, issuedAt: operation.issuedAt, window: structuredClone(group.window),
+      ...(group.bots ? { bots: structuredClone(group.bots) } : {}), ...(group.presentation ? { presentation: structuredClone(group.presentation) } : {}) };
+    const response = await this.request('', 'POST', input);
+    const result = this.receipt(response, input.operationId);
+    this.committed(result, response.status);
+    return this.commit(response, group.window.id, result);
+  }
   /** Rejected settlements remain structured so callers can adopt the current snapshot. */
-  async mutate(id: string, mutation: WindowMutation): Promise<WindowCommit> {
+  async mutate(id: string, mutation: WindowMutation | WindowGroupMutation): Promise<WindowCommit> {
     const response = await this.request(`/${encodeURIComponent(id)}/operations`, 'POST', mutation);
     return this.commit(response, id, this.receipt(response, mutation.operationId));
   }
@@ -89,9 +131,48 @@ export class WindowWorkspaceClient {
       const response = await this.request(`/${encodeURIComponent(window.id)}`, 'DELETE', input);
       this.committed(this.receipt(response, input.operationId), response.status);
     } catch (error) {
-      if (rejected(error)) throw error;
+      if (isWindowRejection(error)) throw error;
       await this.recoverDelete(window, input);
     }
   }
   async assign(id: string, session: WindowSessionBinding | null): Promise<unknown> { return (await this.request(`/${encodeURIComponent(id)}/manager`, 'POST', { session })).value; }
+  /**
+   * merge, split and transfer are cross-group operations. Each one is sent to a single group and answers with the groups it changed.
+   * - An unknown outcome, such as a lost reply, is left to the caller. Resend the identical request (same operationId) to the same group,
+   *   because the Relay answers from a receipt only for the same operation sent to the same group, or read the receipt with `operation(id, operationId)`.
+   * - A refusal throws a WindowRequestError whose `code` names the reason. Its `result` is present only when the operation was settled as rejected
+   *   (HTTP 200). Service refusals such as `window_not_found`, `operation_conflict` or `receipt_capacity` are 4xx errors without `result`.
+   *   `isWindowRejection` is true for both. Before a retry, remember that `operation_conflict` (409) and `operation_expired` (410) do not prove
+   *   the first request was not applied: read the receipt with `operation(id, operationId)`, or both groups, before deciding.
+   * - After a refusal, read both groups again before retrying with new revisions.
+   * - `invalid_window_receipt` (status 200) means the operation was settled but the answer cannot be trusted. Resending only replays it, so read both groups.
+   * - `result.revision` is the revision of the group the request was sent to.
+   */
+  merge(targetId: string, request: WindowMergeRequest): Promise<WindowGroupsCommit> { return this.across(targetId, 'merge', request.source, request); }
+  /** Same contract as merge. */
+  split(id: string, request: WindowSplitRequest): Promise<WindowGroupsCommit> { return this.across(id, 'split', request.newId, request); }
+  /** Same contract as merge. */
+  transfer(sourceId: string, request: WindowTransferRequest): Promise<WindowGroupsCommit> { return this.across(sourceId, 'transfer', request.target, request); }
+  /**
+   * Sends a cross-group request to `id` and checks that the reply holds exactly `id` and `other`, each decoded and keyed by its own Window id.
+   * A stray entry could make a store drop an unrelated group. A merge deletes its source, so the Relay answers that group as null.
+   */
+  private async across(id: string, action: 'merge' | 'split' | 'transfer', other: string, request: WindowMergeRequest | WindowSplitRequest | WindowTransferRequest): Promise<WindowGroupsCommit> {
+    const response = await this.request(`/${encodeURIComponent(id)}/${action}`, 'POST', request);
+    const result = this.receipt(response, request.operationId);
+    this.committed(result, response.status);
+    const invalid = () => new WindowRequestError('Invalid Window groups.', response.status, 'invalid_window_receipt');
+    const raw = response.value.groups;
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw) || !Object.hasOwn(raw, id) || !Object.hasOwn(raw, other)
+      || Object.keys(raw).some(key => key !== id && key !== other) || action === 'merge' && raw[other] !== null) throw invalid();
+    const groups: Record<string, WindowGroup | null> = Object.fromEntries(Object.entries(raw).map(([key, value]) => {
+      if (value === null) return [key, null];
+      const group = decodeGroup(value);
+      if (!group || group.window.id !== key) throw invalid();
+      return [key, group];
+    }));
+    // As for a single group, a retained receipt may describe an earlier revision, but never a later one than the group holds.
+    if (groups[id] && result.revision > groups[id].window.revision) throw invalid();
+    return { result, groups };
+  }
 }

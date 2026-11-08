@@ -2,7 +2,7 @@ import { WindowSessionBridgeContext } from './window-session-bridge-context.js';
 import { parseWindowFeature } from './window-feature-views.js';
 import { windowTitleEdits } from './window-titles.js';
 import { useWindowSessionBridge } from './hooks/useWindowSessionBridge.js';
-import { createWindowView, primaryWindowViews, windowPrimaryViewId, type WindowEdit } from '@orchardworks/agent-remote-protocol';
+import { createWindowView, nativeSessionRefKey, primaryWindowViews, windowPrimaryViewId, type WindowEdit } from '@orchardworks/agent-remote-protocol';
 import { windowSessionBinding } from './window-workspace.js';
 import { useWorkbenchMode } from './hooks/useWorkbenchMode.js';
 import { useBotWorkspace } from './hooks/useBotWorkspace.js';
@@ -130,7 +130,7 @@ import {
   type RemoteSessionStatus,
 } from '@orchardworks/agent-remote-web';
 import { ReadingPositions, RecoveryScope, readLastSession, saveLastSession } from './conversation-recovery.js';
-import { compositionSession, compositionSelection, type StoreOwner } from './session-composition.js';
+import { compositionRoleKey, compositionSession, compositionSelection, type StoreOwner } from './session-composition.js';
 import { useRemoteHosts } from './hooks/useRemoteHosts.js';
 import { useVisualViewport } from './hooks/useVisualViewport.js';
 import { arrangeFloatingEntries } from './hooks/useTrackingPosition.js';
@@ -446,6 +446,19 @@ function AppContent({
     ...(initialState ? { window: undefined, authority: undefined, sessionBridge: undefined, unavailable: false } : {}),
   };
   const selectedBot = useBotWorkspace(windowWorkspace, succession, navigation.place, activated && accessReady && !windowMode);
+  const botPresentation = useMemo(() => ({ recovering: false, confirmed: undefined as { groupId: string; viewId: string; slotId: string; bindingKey: string } | undefined }), [baseUrl, transport]);
+  if (!accessReady) botPresentation.recovering = true;
+  if (selectedBot.group && selectedBot.view && selectedBot.slot) {
+    botPresentation.recovering = false;
+    botPresentation.confirmed = { groupId: selectedBot.group.window.id, viewId: selectedBot.view.id, slotId: selectedBot.slot.id, bindingKey: windowBindingKey(selectedBot.view.binding) };
+  }
+  const confirmedBot = botPresentation.confirmed;
+  if (confirmedBot) {
+    const place = navigation.place, group = windowWorkspace.readGroup(confirmedBot.groupId), view = group?.window.views.find(view => view.id === confirmedBot.viewId);
+    if (place?.kind !== 'bot' || place.groupId !== confirmedBot.groupId || place.viewId !== confirmedBot.viewId
+      || windowWorkspace.deletedWindowIds.includes(confirmedBot.groupId)
+      || group && (!group.bots || !view?.binding || group.bots.members[confirmedBot.viewId]?.hidden || windowBindingKey(view.binding) !== confirmedBot.bindingKey)) botPresentation.confirmed = undefined;
+  }
   const primaryGroups = sharedWindow ? primaryWindowViews(sharedWindow) : [];
   const [mountedViewSessions, setMountedViewSessions] = useState<Record<string, OpenedSession & { viewId: string }>>({});
   function receiveViewSession(bound: OpenedSession, slotId?: string, windowViewId?: string) {
@@ -2104,10 +2117,35 @@ function AppContent({
       setSuccessionDialog(current => current ? { ...current, resume: operation, cancelRequested } : current);
     }}
     assertAccess={assertSuccessionAccess} assertSource={() => { assertSuccessionAccess(); assertSourceCurrent(successionDialog.source); }}
-    onSettled={async result => { assertSuccessionAccess();
-      const mapped = currentGroupBinding(viewKey(successionDialog.source));
-      if (mapped && sessionKey(mapped.binding) !== sessionKey(successionDialog.source)) throw new Error('The Handoff source view changed before completion.');
-      await succession.refreshSettled(result, successionDialog.source); }}
+    onSettled={async result => {
+      const source = successionDialog.source, slotId = viewKey(source);
+      const assertCompletionView = (requireVerified = false) => {
+        assertSuccessionAccess();
+        const mapped = currentGroupBinding(slotId);
+        if (!mapped || sessionKey(mapped.binding) === sessionKey(source)) return;
+        const slot = succession.document.slots.find(slot => slot.id === slotId);
+        const verified = succession.successionContextFor(slotId), receipt = result.record, pending = successionDialog.resume;
+        const roleKey = slot?.intent.kind === 'role' ? slot.intent.roleKey : undefined;
+        const checkpoint = succession.document.roles.find(role => compositionRoleKey(role) === roleKey);
+        if (receipt.phase !== 'committed' || !receipt.to || !checkpoint || !pending
+          || pending.operationId !== receipt.operationId || pending.expectedRevision !== receipt.expectedRevision
+          || checkpoint.desired.operationId !== receipt.operationId || checkpoint.roleId !== receipt.roleId || result.role.id !== receipt.roleId
+          || checkpoint.desired.expectedRevision !== receipt.expectedRevision || checkpoint.desired.committedRevision !== receipt.committedRevision
+          || result.role.revision !== receipt.committedRevision
+          || nativeSessionRefKey(checkpoint.desired.from) !== nativeSessionRefKey(receipt.from)
+          || sessionKey({ hostId: source.hostId, ...receipt.from }) !== sessionKey(source)
+          || nativeSessionRefKey(checkpoint.desired.to) !== nativeSessionRefKey(receipt.to)
+          || nativeSessionRefKey(result.role.current) !== nativeSessionRefKey(receipt.to)
+          || sessionKey({ hostId: source.hostId, ...receipt.to }) !== sessionKey(mapped.binding)
+          || requireVerified && (!verified || verified.operationId !== receipt.operationId || checkpoint.appliedRevision !== receipt.committedRevision
+            || nativeSessionRefKey(verified.target) !== nativeSessionRefKey(receipt.to))) {
+          throw new Error('The Handoff source view changed before completion.');
+        }
+      };
+      assertCompletionView();
+      await succession.refreshSettled(result, source);
+      assertCompletionView(true);
+    }}
     onClose={retain => {
       if (retain) setSuccessionDialog(current => current ? { ...current, visible: false } : current);
       else { clearSuccessionIntent(successionDialog.scope); setSuccessionGated(false); setSuccessionDialog(undefined); }
@@ -2388,14 +2426,18 @@ function AppContent({
     const group = place.kind === 'bot' ? windowWorkspace.readGroup(place.groupId) : undefined;
     const view = place.kind === 'bot' ? group?.window.views.find(view => view.id === place.viewId) : undefined;
     const target = capturedSource ? { ...capturedSource, hostId: capturedSource.hostId ?? 'local' } : place.kind === 'session' ? { ...place.session, hostId: place.session.hostId ?? 'local' } : view?.binding;
-    if (!target || !capturedSource && place.kind === 'bot' && (!group?.bots || group.bots.members[place.viewId]?.hidden || selectedBot.group?.window.id !== place.groupId || selectedBot.view?.id !== place.viewId || !selectedBot.slot)) return;
+    const confirmed = place.kind !== 'bot' || selectedBot.group?.window.id === place.groupId && selectedBot.view?.id === place.viewId && !!selectedBot.slot;
+    const retained = botPresentation.recovering && place.kind === 'bot' && botPresentation.confirmed?.groupId === place.groupId && botPresentation.confirmed.viewId === place.viewId
+      ? botPresentation.confirmed : undefined;
+    if (!target || !capturedSource && place.kind === 'bot' && (!group?.bots || group.bots.members[place.viewId]?.hidden || !confirmed && !retained)) return;
     const mappedSlot = capturedSource ? viewKey(capturedSource) : place.kind === 'bot' && view?.binding ? succession.document.windowBindings?.find(entry => entry.windowId === place.groupId && entry.viewId === place.viewId && entry.bindingKey === windowBindingKey(view.binding!))?.slotId : undefined;
     const slot = place.kind === 'bot' ? succession.document.slots.find(slot => slot.id === mappedSlot) : succession.ensureView(target);
-    if (!slot) return;
+    if (!slot || retained && !confirmed && retained.slotId !== slot.id) return;
     const host = remoteHosts.find(host => host.id === target.hostId);
     return { slotId: slot.id, titleInteraction: undefined, props: {
       storageScope: baseUrl, baseUrl, target, viewId: slot.id, windowViewId: view?.id,
       hostLabel: host?.name ?? target.hostId, compact: compactLayout, active: !windowMode, visible: !windowMode,
+      attachmentEnabled: accessReady && confirmed, mutationBlocked: !accessReady || !confirmed,
       offline: host?.online === false, familyRoot: false, entries: [target], transport, replicaFor,
       directoryFor: hostId => hostId === selectedHost.id ? directory : undefined,
       draftStore: messageDrafts, draftBinding: draftOwnerBinding(slot.owners.text), imageDraftBinding: slot.owners.image,

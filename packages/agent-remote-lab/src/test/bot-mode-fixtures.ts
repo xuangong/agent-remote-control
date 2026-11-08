@@ -1,7 +1,7 @@
 import 'fake-indexeddb/auto';
-import { act, createElement } from 'react';
+import { act, createElement, useContext, useState } from 'react';
 import { vi } from 'vitest';
-import { PROTOCOL_VERSION, applyGroupOperation, createWindowView, type WindowGroup, type SessionSuccessionReplay } from '@orchardworks/agent-remote-protocol';
+import { PROTOCOL_VERSION, applyGroupOperation, createWindowView, type WindowGroup, type SessionSuccessionReplay, type ProjectedTimelineEntry } from '@orchardworks/agent-remote-protocol';
 import { WindowWorkspaceClient, type RemoteTransportListener } from '@orchardworks/agent-remote-web';
 import { App, type LabTransport } from '../App.js';
 import { SessionDirectoryClient } from '../directory-client.js';
@@ -9,6 +9,7 @@ import * as workspaceHooks from '../hooks/useWindowWorkspace.js';
 import * as successionHooks from '../hooks/useSessionSuccession.js';
 import { replicaState } from './fixtures.js';
 import { render, unmount } from './setup.js';
+import { WorkspaceReady } from '../workspace-access.js';
 
 export const botTarget = (id: string) => ({ hostId: 'local', providerId: 'recorded', nativeSessionId: id, title: id });
 export function botGroup(id: string, section = true): WindowGroup {
@@ -26,7 +27,7 @@ export function visibleButton(container: ParentNode, label: string) {
   return [...container.querySelectorAll<HTMLButtonElement>('button')].find(button =>
     (button.getAttribute('aria-label') ?? button.textContent?.trim()) === label && !button.closest('[hidden]'))!;
 }
-export async function mountBotApp(scope: string, options: { hosted?: boolean; holdMessages?: boolean } = {}) {
+export async function mountBotApp(scope: string, options: { hosted?: boolean; holdMessages?: boolean; timeline?: ProjectedTimelineEntry[] } = {}) {
   let workspace!: ReturnType<typeof workspaceHooks.useWindowWorkspace>;
   let succession!: ReturnType<typeof successionHooks.useSessionSuccession>;
   const useWorkspace = workspaceHooks.useWindowWorkspace, useSuccession = successionHooks.useSessionSuccession;
@@ -48,7 +49,7 @@ export async function mountBotApp(scope: string, options: { hosted?: boolean; ho
     runtimeInfo: { ...replicaState.agent!.runtimeInfo, sessionId: agentId.slice(6), connection: { state: 'connected' as const } } });
   const timeline = (agentId: string, requestId = 'timeline'): Awaited<ReturnType<LabTransport['fetchTimeline']>> => ({ protocolVersion: PROTOCOL_VERSION, type: 'timeline_page' as const, payload: {
     requestId, agentId, epoch: `epoch-${agentId}`, direction: 'tail' as const, reset: false, staleCursor: false, gap: false,
-    window: { minSeq: 1, maxSeq: 0, nextSeq: 1 }, startCursor: null, endCursor: null, entries: [], hasOlder: false, hasNewer: false, error: null,
+    window: { minSeq: 1, maxSeq: options.timeline?.at(-1)?.seqEnd ?? 0, nextSeq: (options.timeline?.at(-1)?.seqEnd ?? 0) + 1 }, startCursor: null, endCursor: null, entries: options.timeline ?? [], hasOlder: false, hasNewer: false, error: null,
   } });
   const transport: LabTransport = {
     listProviders: async () => options.hosted ? [] : [{ providerId: 'recorded', displayName: 'Recorded Provider' }],
@@ -84,9 +85,15 @@ export async function mountBotApp(scope: string, options: { hosted?: boolean; ho
   vi.spyOn(directory, 'list').mockResolvedValue({ items: [{ ...botTarget('Other'), createdAt: '2026-11-08', updatedAt: '2026-11-08', state: 'idle' }], hasMore: false, revision: '1' });
   vi.spyOn(directory, 'workspaces').mockResolvedValue({ workspaces: [] });
   vi.spyOn(directory, 'attach').mockImplementation(async (_provider, nativeSessionId) => { attachments.push(nativeSessionId); return { agentId: `agent-${nativeSessionId}`, nativeSessionId }; });
-  const container = await render(createElement(App, { baseUrl: scope, directory, transport, userScoped: options.hosted,
-    hostService: { hosts: async () => ({ hosts: options.hosted ? [{ id: 'local', name: 'Test Host', online: true, access: 'owner' as const, providers: [{ providerId: 'recorded', displayName: 'Recorded Provider' }] }] : [] }), pair: async () => { throw new Error('No pairing.'); } } }));
-  return { container, workspace: () => workspace, succession: () => succession, sendMessages, attachments, transport, hostedGroups, setReplays(value: SessionSuccessionReplay[]) { replays = value; },
+  let setAccessReady!: (ready: boolean) => void, setScope!: (scope: string) => void;
+  const hostService = { hosts: async () => ({ hosts: options.hosted ? [{ id: 'local', name: 'Test Host', online: true, access: 'owner' as const, providers: [{ providerId: 'recorded', displayName: 'Recorded Provider' }] }] : [] }), pair: async () => { throw new Error('No pairing.'); } };
+  function Access() {
+    const inheritedReady = useContext(WorkspaceReady);
+    const [ready, setReady] = useState(true), [baseUrl, changeScope] = useState(scope); setAccessReady = setReady; setScope = changeScope;
+    return createElement(WorkspaceReady.Provider, { value: inheritedReady && ready }, createElement(App, { baseUrl, directory, transport, userScoped: options.hosted, hostService }));
+  }
+  const container = await render(createElement(Access));
+  return { container, workspace: () => workspace, succession: () => succession, sendMessages, attachments, transport, hostedGroups, setAccessReady: (ready: boolean) => setAccessReady(ready), setScope: (scope: string) => setScope(scope), setReplays(value: SessionSuccessionReplay[]) { replays = value; },
     releaseMessages() { for (const acknowledge of acknowledgements.splice(0)) acknowledge(); },
     button: (label: string) => visibleButton(container, label),
     async switchMode(mode: 'window' | 'bot') {

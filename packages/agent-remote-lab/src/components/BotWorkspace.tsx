@@ -75,7 +75,7 @@ export function BotWorkspace({ visible, compact, scope, workspace, navigation, s
     <section className="lab-bot-conversation" aria-label="Bot conversation" hidden={compact && !showConversation}>
       <header className="lab-bot-conversation-toolbar">
         {compact ? <button type="button" aria-label="Back to bots" onClick={back}>Back</button> : null}
-        <h2 ref={heading} tabIndex={-1}>{place?.kind === 'session' ? place.session.title : selected.view?.binding.title ?? selected.group?.window.title ?? 'Choose a bot'}</h2>
+        <h2 ref={heading} tabIndex={-1}>{place?.kind === 'session' ? place.session.title : selected.view?.binding.title ?? descriptor?.props.target.title ?? selected.group?.window.title ?? 'Choose a bot'}</h2>
         {compact ? <WorkbenchModeSwitch mode={navigation.mode} onChange={navigation.setMode} /> : null}
       </header>
       {selected.loading ? <p role="status">Opening bot…</p> : selected.error && place?.kind !== 'session' ? <p role="alert">{selected.error} <button type="button" onClick={() => void selected.retry()}>Retry</button></p> : null}

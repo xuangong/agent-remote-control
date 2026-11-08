@@ -2,6 +2,8 @@ import { act, useContext, type ComponentProps } from 'react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import type { SessionSuccessionReplay } from '@orchardworks/agent-remote-protocol';
 import * as workbench from './components/LabWorkbench.js';
+import * as dialogs from './components/SessionSuccessionDialog.js';
+import { loadSuccessionIntent } from './session-succession-intent.js';
 import { SessionDirectoryClient, type SuccessionActionResult, type SuccessionDescription } from './directory-client.js';
 import { SessionViewOperationsContext, type SessionViewOperations } from './session-view-operations.js';
 import { botGroup, botTarget, mountBotApp, seedGroup, until, visibleButton } from './test/bot-mode-fixtures.js';
@@ -10,8 +12,8 @@ import { setPromptText } from './test/setup.js';
 const native = (nativeSessionId: string) => ({ controllerId: 'installation', providerId: 'recorded', nativeSessionId });
 const description: SuccessionDescription = { role: { id: 'B-role', revision: 1, origin: native('B1'), current: native('B1'), workspace: { controllerId: 'installation', canonicalCwd: '/fixture' } }, targets: [{ providerId: 'recorded', displayName: 'Recorded Provider' }], eligibility: { status: 'ready' } };
 const response = (operationId: string, phase: SuccessionActionResult['record']['phase']): SuccessionActionResult => ({ role: description.role, record: { operationId, roleId: 'B-role', expectedRevision: 1, from: native('B1'), targetProviderId: 'recorded', phase, startedAt: 'now', updatedAt: 'now' } });
-function replay(): SessionSuccessionReplay {
-  const request = { operationId: 'B-to-C', roleId: 'B-role', expectedRevision: 1, from: native('B1') }, workspace = description.role.workspace;
+function replay(operationId = 'B-to-C'): SessionSuccessionReplay {
+  const request = { operationId, roleId: 'B-role', expectedRevision: 1, from: native('B1') }, workspace = description.role.workspace;
   return { version: 1, from: { hostId: 'local', providerId: 'recorded', nativeSessionId: 'B1' }, to: { hostId: 'local', providerId: 'recorded', nativeSessionId: 'C' }, projection: { version: 1,
     role: { ...description.role, revision: 2, current: native('C') }, receipt: { ...request, to: native('C'), phase: 'committed', committedRevision: 2, startedAt: 'now', updatedAt: 'now',
       prepared: { ...request, to: native('C'), workspace, associationRevision: 1, participants: [], capture: { epoch: 'epoch', seq: 1, capturedAt: 'now' } } } } };
@@ -139,4 +141,47 @@ it.each(['deleted', 'rebound'] as const)('fences a %s hidden leaf while its orig
   await until(() => expect(input.isConnected).toBe(false));
   expect(app.sendMessages.map(item => item.agentId)).toEqual(['agent-B1']);
   await app.close();
+});
+
+it.each(['same successor', 'unrelated rebind', 'deleted view', 'wrong operation', 'wrong role', 'wrong revision'] as const)('validates %s when verified projection precedes the Handoff terminal response', async outcome => {
+  vi.spyOn(SessionDirectoryClient.prototype, 'describeSuccession').mockResolvedValue(description);
+  let settle!: ComponentProps<typeof dialogs.SessionSuccessionDialog>['onSettled'];
+  const Dialog = dialogs.SessionSuccessionDialog;
+  vi.spyOn(dialogs, 'SessionSuccessionDialog').mockImplementation(props => { settle = props.onSettled; return <Dialog {...props} />; });
+  let operationId = '', finish!: (value: SuccessionActionResult) => void;
+  vi.spyOn(SessionDirectoryClient.prototype, 'prepareSuccession').mockImplementation(async input => {
+    operationId = input.operationId; return new Promise(resolve => { finish = resolve; });
+  });
+  const app = await setup(`bot-projection-before-response-${outcome.replaceAll(' ', '-')}`);
+  try {
+    const beforeWindow = structuredClone(app.workspace().window);
+    const slotId = app.succession().document.windowBindings!.find(entry => entry.windowId === 'B' && entry.viewId === 'B1')!.slotId;
+    const owners = structuredClone(app.succession().document.slots.find(slot => slot.id === slotId)!.owners);
+    await openHandoff();
+    await act(async () => visibleButton(document, 'Hand off').click());
+    expect(operationId).not.toBe('');
+    const evidence = replay(operationId), completed: SuccessionActionResult = { role: evidence.projection.role, record: { ...evidence.projection.receipt, targetProviderId: 'recorded' } };
+    app.setReplays([evidence]);
+    await act(async () => app.succession().refresh());
+    await until(() => expect(app.workspace().readGroup('B')!.window.views[0]!.binding?.nativeSessionId).toBe('C'));
+    if (outcome === 'unrelated rebind' || outcome === 'deleted view') {
+      const group = structuredClone(app.hostedGroups.get('B')!); group.window.revision++;
+      if (outcome === 'deleted view') group.window.views = group.window.views.filter(view => view.id !== 'B1');
+      else group.window.views[0]!.binding = botTarget('unrelated');
+      app.hostedGroups.set('B', group);
+      await act(async () => app.workspace().refreshGroups());
+    }
+    const receipt = structuredClone(completed);
+    if (outcome === 'wrong operation') receipt.record.operationId = 'unrelated-operation';
+    if (outcome === 'wrong role') receipt.record.roleId = 'unrelated-role';
+    if (outcome === 'wrong revision') receipt.record.committedRevision = 3;
+    if (outcome === 'same successor') {
+      await act(async () => finish(receipt));
+      await until(() => expect(loadSuccessionIntent(`http://localhost/bot-projection-before-response-${outcome.replaceAll(' ', '-')}/`)).toBeUndefined());
+      expect(app.container.querySelector('.lab-bot-conversation')?.textContent).not.toContain('source view changed');
+      expect(app.workspace().readGroup('B')!.window.views[0]!.binding?.nativeSessionId).toBe('C');
+    } else await act(async () => { await expect(settle(receipt)).rejects.toThrow(/changed|removed|rebound|confirm/); });
+    expect(app.succession().document.slots.find(slot => slot.id === slotId)!.owners).toEqual(owners);
+    expect(app.workspace().window).toEqual(beforeWindow); expect(app.sendMessages).toEqual([]);
+  } finally { await app.close(); }
 });

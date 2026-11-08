@@ -1,9 +1,9 @@
 import { act } from 'react';
 import { afterEach, expect, it, vi } from 'vitest';
-import { botGroup, mountBotApp, seedGroup, until } from './test/bot-mode-fixtures.js';
+import { botGroup, botTarget, mountBotApp, seedGroup, until } from './test/bot-mode-fixtures.js';
 import { promptText, setPromptText } from './test/setup.js';
 
-afterEach(() => { vi.restoreAllMocks(); localStorage.clear(); sessionStorage.clear(); });
+afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); localStorage.clear(); sessionStorage.clear(); });
 
 it('keeps Window A/A2 and both display settings while Bot B1 shares its exact view draft', async () => {
   const scope = 'http://localhost/bot-place/';
@@ -74,4 +74,53 @@ it('opens section-only routes without restoring stale session query parameters',
   expect(app.attachments).not.toContain('stale');
   expect(app.container.querySelector('[data-window-id="B"]')).toBeNull();
   await app.close();
+});
+
+it('keeps the same visible Bot editor and content while Access suspends and resumes its live operations', async () => {
+  const scope = 'http://localhost/bot-access/'; seedGroup(scope, botGroup('B')); history.replaceState(null, '', '/?mode=bot&section=B&bot=B1');
+  const app = await mountBotApp(scope, { hosted: true, timeline: [{ providerId: 'recorded', seqStart: 1, seqEnd: 1, timestamp: 'now', turnId: 'B1-turn',
+    resources: [], collapsed: [], sourceSeqRanges: [{ startSeq: 1, endSeq: 1 }], item: { type: 'assistant_message', text: 'Readable Bot content' } }] });
+  const pane = () => app.container.querySelector('.lab-bot-conversation')!;
+  try {
+    await until(() => expect(pane().querySelector('[role="textbox"]')).not.toBeNull());
+    const editor = pane().querySelector<HTMLElement>('[role="textbox"]')!;
+    await act(async () => { setPromptText(editor, 'retain Bot draft'); editor.dispatchEvent(new Event('input', { bubbles: true })); });
+    await until(() => expect(pane().textContent).toContain('Readable Bot content'));
+    const attachments = [...app.attachments], connect = vi.spyOn(app.transport, 'connect');
+    await act(async () => app.setAccessReady(false));
+    expect(editor.isConnected).toBe(true); expect(editor.closest('[hidden]')).toBeNull();
+    expect(pane().querySelector('[role="textbox"]')).toBe(editor);
+    expect(pane().textContent).toContain('Readable Bot content'); expect(promptText(editor)).toBe('retain Bot draft');
+    expect(pane().querySelector('[data-testid="prompt-submit"]:enabled')).toBeNull();
+    await act(async () => { pane().querySelector<HTMLButtonElement>('[data-testid="prompt-submit"]')?.click(); });
+    expect(app.sendMessages).toEqual([]); expect(app.attachments).toEqual(attachments); expect(connect).not.toHaveBeenCalled();
+    await expect(app.workspace().operateGroup('B', { type: 'rename', title: 'Forbidden' })).rejects.toThrow(/access|scope/);
+    await act(async () => app.setAccessReady(true));
+    await until(() => expect(pane().querySelector('[data-testid="prompt-submit"]:enabled')).not.toBeNull());
+    expect(pane().querySelector('[role="textbox"]')).toBe(editor); expect(editor.closest('[hidden]')).toBeNull();
+    expect(promptText(editor)).toBe('retain Bot draft'); expect(pane().textContent).toContain('Readable Bot content');
+    expect(app.sendMessages).toEqual([]);
+  } finally { await app.close(); }
+});
+
+it.each(['deleted', 'rebound', 'scope'] as const)('does not retain an Access-suspended Bot presentation after %s replacement', async change => {
+  const scope = `http://localhost/bot-access-${change}/`; seedGroup(scope, botGroup('B')); history.replaceState(null, '', '/?mode=bot&section=B&bot=B1');
+  const app = await mountBotApp(scope, { hosted: true });
+  try {
+    await until(() => expect(app.container.querySelector('.lab-bot-conversation [role="textbox"]')).not.toBeNull());
+    const editor = app.container.querySelector('.lab-bot-conversation [role="textbox"]')!;
+    await act(async () => app.setAccessReady(false));
+    expect(editor.isConnected).toBe(true);
+    if (change === 'scope') await act(async () => app.setScope(`${scope}other/`));
+    else {
+      const group = structuredClone(app.hostedGroups.get('B')!); group.window.revision++;
+      if (change === 'deleted') group.window.views = group.window.views.filter(view => view.id !== 'B1');
+      else group.window.views[0]!.binding = botTarget('replacement');
+      app.hostedGroups.set('B', group);
+      await act(async () => app.setAccessReady(true));
+      await act(async () => app.workspace().refreshGroups());
+    }
+    await until(() => expect(editor.isConnected).toBe(false));
+    expect(app.sendMessages).toEqual([]);
+  } finally { await app.close(); }
 });

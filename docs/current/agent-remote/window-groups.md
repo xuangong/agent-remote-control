@@ -35,3 +35,9 @@ Cross-group requests change every group they name in one step, answer with `grou
 ## Compatibility
 
 Older pages and Controllers read only `windows`, so they never see a group that is only a section. Older Workers load rows with `bots` and `presentation` (their state check ignores unknown row fields) and keep them, but list sections as Windows, and their edits do not know the rules: they can delete a group without clearing its section, close or rebind a bot's view, or make a session a bot twice. The current Relay ignores what they leave behind (a deleted row's section, details of views that are no longer bots) and drops it on the next write, so the Worker can be rolled back and forward again.
+
+## In the browser
+
+`WindowWorkspaceStore` (`packages/agent-remote-lab/src/window-workspace-store.ts`) holds a group. It reads a Window, a group or a Relay snapshot as one group, because every Window is a group with only the Window appearance, and keeps its Window-shaped readers: `getSnapshot()` and `getCommittedSnapshot()` answer the Window, `getGroup()` and `getCommittedGroup()` the group. Group edits are applied at once and saved in the background like layout edits, through the same receipts and revisions. Its recovery journal is version 2 and holds the group; a version 1 journal, written before groups, is read as a Window.
+
+`useWindowWorkspace` keeps a catalog of groups (`listGroups`) and offers `windows`, the groups with a Window appearance, to the Window workbench: a group that is only a section is in `groups` but not in `windows`, and is never restored as the open Window. The local-first Lab mode stores each group whole under `agent-remote:recovery:<scope>:shared-window:<id>`; a Window stored there before groups still loads, as the group with only the Window appearance.

@@ -579,3 +579,51 @@ it.each([false, true])('keeps the first draft editable between attachment and it
   expect(drafts.get(key)).toBe('/ask');
   expect(document.activeElement).toBe(editor);
 });
+
+it('keeps an unclaimed leaf from attaching a changed live locator until its destination returns', async () => {
+  const { SessionConversation } = await import('./SessionConversation.js');
+  const { SessionViewOperationsContext } = await import('../session-view-operations.js');
+  const directory = new (await import('../directory-client.js')).SessionDirectoryClient('http://fixture');
+  const attach = vi.spyOn(directory, 'attach').mockResolvedValue({ agentId: 'new-agent', nativeSessionId: 'new' });
+  const target = { hostId: 'host', providerId: 'recorded', nativeSessionId: 'old', title: 'Old', agentId: 'old-agent' };
+  const transport = { onDiagnostic: () => () => {}, onProtocolMessage: () => () => {}, connect: () => ({ close() {}, send() {} }) } as unknown as RemoteAgentTransport;
+  const drafts = new DraftStore('parked-attachment');
+  let resume!: () => void;
+  function Harness() {
+    const [claimed, set] = useState(false); resume = () => set(true);
+    return <SessionViewOperationsContext.Provider value={{ storageScope: 'http://fixture', transport, enabled: true,
+      resolveTarget: () => ({ target: { ...target, nativeSessionId: 'new' } }), directory: () => { throw new Error('Unused'); }, refreshSettled: async () => {} }}>
+      <SessionConversation target={target} attachedSession={target} viewId="slot" familyRoot={false} entries={[target]} onNavigate={async () => {}}
+        directoryFor={() => directory} baseUrl="http://fixture" storageScope="parked-attachment" hostLabel="Host" compact={false} active offline={false}
+        transport={transport} draftStore={drafts} attachmentEnabled={claimed} visible={claimed} mutationBlocked={!claimed} />
+    </SessionViewOperationsContext.Provider>;
+  }
+  await render(<Harness />);
+  expect(attach).not.toHaveBeenCalled();
+  await act(async () => resume());
+  expect(attach).toHaveBeenCalledExactlyOnceWith('recorded', 'new', expect.any(AbortSignal));
+});
+
+it('aborts native restoration on leaf teardown and ignores a late attachment result', async () => {
+  const { SessionDirectoryClient, DirectoryError } = await import('../directory-client.js');
+  const { unmount } = await import('../test/setup.js');
+  const { ConversationConnections, ConversationConnectionScope } = await import('../conversation-connections.js');
+  const target = { hostId: 'host', providerId: 'recorded', nativeSessionId: 'retired-takeover', title: 'Takeover' };
+  const directory = new SessionDirectoryClient('http://fixture');
+  const owner = { kind: 'native_cli' as const, generation: 'retired-owner' };
+  let finish!: (value: { agentId: string; nativeSessionId: string }) => void;
+  const attach = vi.spyOn(directory, 'attach').mockRejectedValueOnce(new DirectoryError('Native CLI owns this session', 'native_owned', 409, undefined, owner))
+    .mockImplementationOnce(() => new Promise(resolve => { finish = resolve; }));
+  const connect = vi.fn(() => ({ close() {}, send() {} }));
+  const transport = { onDiagnostic: () => () => {}, onProtocolMessage: () => () => {}, connect } as unknown as RemoteAgentTransport;
+  const connections = new ConversationConnections(transport);
+  const view = await render(<ConversationConnectionScope.Provider value={connections}><SessionFamily target={target} directoryFor={() => directory}
+    storageScope="retired-takeover" baseUrl="http://fixture" hostLabel="Host" compact={false} active offline={false} transport={transport} draftStore={new DraftStore('retired-takeover')} /></ConversationConnectionScope.Provider>);
+  await act(async () => view.querySelector<HTMLButtonElement>('[aria-label="Interrupt and take control"]')!.click());
+  const signal = attach.mock.calls[1]?.[2];
+  await unmount(view);
+  expect(signal?.aborted).toBe(true);
+  await act(async () => finish({ agentId: 'late-agent', nativeSessionId: target.nativeSessionId }));
+  expect(connect).not.toHaveBeenCalled();
+  expect(connections.agentIds).toEqual([]);
+});

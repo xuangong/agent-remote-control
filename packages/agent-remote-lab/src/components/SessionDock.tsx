@@ -27,8 +27,9 @@ const Context = createContext<DockContext | undefined>(undefined);
 const HeadingStartContext = createContext<ReactNode>(undefined);
 
 /** Layout controls belong to the first visible dock's root heading. */
+export function useSessionDockHeadingStart(): ReactNode { return useContext(HeadingStartContext); }
 export function SessionDockHeadingStart() {
-  return <>{useContext(HeadingStartContext)}</>;
+  return <>{useSessionDockHeadingStart()}</>;
 }
 const clampWidth = (width: number, minimum = minimumWidth) => Math.max(minimum, Math.min(maximumWidth, width));
 function readLayout(key?: string): DockLayout {

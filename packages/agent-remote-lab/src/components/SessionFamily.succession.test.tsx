@@ -103,3 +103,20 @@ it('refreshes root first-input evidence after pending delivery settles without a
   expect(fetcher.mock.calls.length).toBeGreaterThan(initialReads);
   expect(view.textContent).not.toContain('History from the previous session will be included with your first message.');
 });
+
+it.each([false, true])('composes the leaf pending observer once with product and succession observers (succession: %s)', async succession => {
+  vi.stubGlobal('fetch', async () => Response.json(result('A', 'pending')));
+  const session = { hostId: 'host', providerId: 'recorded', nativeSessionId: 'A', agentId: 'A', title: 'A' };
+  const realWorkbench = workbenchComponents.LabWorkbench;
+  let pendingChanged!: (count: number) => void;
+  vi.spyOn(workbenchComponents, 'LabWorkbench').mockImplementation(props => { pendingChanged = props.onPendingInputChange!; return realWorkbench(props); });
+  const leaf = vi.fn(), product = vi.fn();
+  await render(<SessionFamily attachedSession={session} target={session} viewId="slot" storageScope="pending-observers" baseUrl="http://fixture" hostLabel="Host"
+    compact={false} active offline={false} transport={transport} draftStore={new DraftStore('pending-observers')}
+    successionContext={succession ? { operationId: 'A', target: { controllerId: 'controller', providerId: 'recorded', nativeSessionId: 'A' } } : undefined}
+    onPendingInputChange={leaf} sessionPresentation={() => ({ onPendingInputChange: product })} />);
+  leaf.mockClear(); product.mockClear();
+  await act(async () => { pendingChanged(1); pendingChanged(0); });
+  expect(leaf.mock.calls.map(call => call[0])).toEqual([1, 0]);
+  expect(product.mock.calls.map(call => call[0])).toEqual([1, 0]);
+});

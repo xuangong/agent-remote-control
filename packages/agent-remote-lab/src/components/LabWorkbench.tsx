@@ -21,7 +21,7 @@ import type { SessionExcerpt } from '@orchardworks/agent-remote-protocol';
 export type { SessionViewActions as LabWorkbenchActions } from '@orchardworks/agent-remote-web/react';
 
 /** Product policy is supplied around the same session renderer used by ARDB. */
-export function LabWorkbench({ draftBinding, displayBinding, defaultDisplayMode, operationBinding, sessionIdentity, showAttributions = true, receiveQuotes, ...props }: ComponentProps<typeof SessionWorkbench> & { draftBinding?: DraftBinding; displayBinding?: DisplayPreferenceBinding; operationBinding?: SessionOperationBinding; sessionIdentity?: SessionEntry; showAttributions?: boolean; receiveQuotes?(excerpts: readonly SessionExcerpt[]): void }) {
+export function LabWorkbench({ draftBinding, displayBinding, defaultDisplayMode, fixedDisplayMode, operationBinding, sessionIdentity, showAttributions = true, receiveQuotes, ...props }: ComponentProps<typeof SessionWorkbench> & { draftBinding?: DraftBinding; displayBinding?: DisplayPreferenceBinding; operationBinding?: SessionOperationBinding; sessionIdentity?: SessionEntry; showAttributions?: boolean; receiveQuotes?(excerpts: readonly SessionExcerpt[]): void }) {
   const descriptions = useContext(SessionDescriptionsContext);
   const source = sessionIdentity ?? operationBinding?.source;
   const sessionDescription = showAttributions ? props.sessionDescription ?? (source ? descriptions?.describe(source) ?? describeSession({ session: source }) : undefined) : undefined;
@@ -38,6 +38,7 @@ export function LabWorkbench({ draftBinding, displayBinding, defaultDisplayMode,
   const draft = useBoundDraft(draftBinding);
   const [displayPreferences, onDisplayPreferencesChange] = useSessionDisplayPreferences(displayBinding?.scope ?? positions?.scope,
     displayBinding?.key ?? props.draftSessionKey ?? props.state?.agent?.runtimeInfo.sessionId ?? props.attachingAgentId, defaultDisplayMode);
+  const effectiveDisplay = fixedDisplayMode ? { ...displayPreferences, mode: fixedDisplayMode } : displayPreferences;
   const agent = props.state?.agent;
   const reportedSession = agent?.runtimeInfo.sessionId, cwd = agent?.cwd, providerId = agent?.providerId;
   const workspace = useMemo(() => providerId && reportedSession && cwd ? { providerId, nativeSessionId: reportedSession, cwd } : undefined, [providerId, reportedSession, cwd]);
@@ -52,7 +53,7 @@ export function LabWorkbench({ draftBinding, displayBinding, defaultDisplayMode,
       : id === TeamViewCommand.id && teamCommand ? teamCommand(args)
       : id === AskViewCommand.id && askVisibility && (!sourceAskCommand || ['', 'on', 'off', 'enable', 'disable'].includes(args.trim().toLowerCase())) ? askVisibility(args)
       : props.onExecuteConsoleCommand ? props.onExecuteConsoleCommand(id, args) : Promise.reject(new Error('Unknown console command.')) : props.onExecuteConsoleCommand}
-    displayPreferences={displayPreferences} onDisplayPreferencesChange={onDisplayPreferencesChange}
+    fixedDisplayMode={fixedDisplayMode} displayPreferences={effectiveDisplay} onDisplayPreferencesChange={onDisplayPreferencesChange}
     readingPositions={positions} draftScope={draftScope}
     composerNotice={<>{props.composerNotice}{promptEdit.notice}{draftBinding ? <DraftRecoveryNotice binding={draftBinding} /> : null}</>}
     messageDraft={draftBinding ? draft.text : props.messageDraft} onMessageDraftChange={draftBinding ? draft.set : props.onMessageDraftChange}

@@ -34,6 +34,10 @@ export async function handleWindowRequest(service: ReturnType<typeof createWindo
       if (!Number.isSafeInteger(revision) || revision < 0) return json(400, { code: 'invalid_revision' });
       return json(200, await service.changes(principal, id, revision, request.signal, changesWaitMs));
     }
+    const across = parts[3];
+    if (id && parts.length === 4 && method === 'POST' && (across === 'merge' || across === 'split' || across === 'transfer')) {
+      const input = await body(); return json(200, await service[across](principal, id, input));
+    }
     return json(405, { code: 'method_not_allowed' });
   } catch (error) { if (error instanceof WindowServiceError) return json(error.status, { code: error.code, error: error.message }); throw error; }
 }

@@ -372,3 +372,40 @@ it('checks bots only among one user\'s groups', async () => {
   const restarted = await fixture({ ...saved, workspaceWindows: [...saved.workspaceWindows!, others] });
   expect((await restarted.call('/window/operations', 'POST', restarted.mutation('mine', 0, { type: 'bots.add', rank: 'n' }))).body.result.status).toBe('committed');
 });
+
+it('merges, separates and moves bots between groups in one step each, with a receipt on every group', async () => {
+  const f = await fixture(); await f.create();
+  await f.call('', 'POST', { operationId: 'create-section', issuedAt: Date.now(), window: sectionWindow('section', 'writer'), bots: { rank: 'm', members: {} }, presentation: { window: false } });
+  const merge = { operationId: 'merge', issuedAt: Date.now(), baseRevision: 0, source: 'window', sourceRevision: 0 };
+  const merged = await f.call('/section/merge', 'POST', merge);
+  expect(merged.body.result.status).toBe('committed');
+  expect(merged.body.groups.window).toBeNull();
+  expect(merged.body.groups.section).toMatchObject({ window: { revision: 1, views: [{ id: 'writer' }, { id: 'primary' }] }, bots: { rank: 'm' } });
+  expect(merged.body.groups.section.presentation).toBeUndefined();
+  // The same request is answered from its receipt, found on either group.
+  expect((await f.call('/section/merge', 'POST', merge)).body.result).toEqual(merged.body.result);
+  expect((await f.call('/window/operations/merge')).body.result).toEqual(merged.body.result);
+  // A group named twice gets one receipt.
+  const itself = await f.call('/section/merge', 'POST', { operationId: 'itself', issuedAt: Date.now(), baseRevision: 1, source: 'section', sourceRevision: 1 });
+  expect(itself.body.result).toMatchObject({ status: 'rejected', code: 'same_group' });
+
+  const split = await f.call('/section/split', 'POST', { operationId: 'split', issuedAt: Date.now(), baseRevision: 1, newId: 'section-bots' });
+  expect(split.body.groups.section.bots).toBeUndefined();
+  expect(split.body.groups['section-bots']).toMatchObject({ presentation: { window: false }, window: { revision: 0 } });
+  const onto = await f.call('/section/split', 'POST', { operationId: 'onto', issuedAt: Date.now(), baseRevision: 2, newId: 'section' });
+  expect(onto.body.result).toMatchObject({ status: 'rejected', code: 'window_exists' });
+
+  await f.call('', 'POST', { operationId: 'create-third', issuedAt: Date.now(), bots: { rank: 'n', members: {} }, presentation: { window: false },
+    window: { schemaVersion: 3, id: 'third', title: 'Third', revision: 0, selectedPrimaryViewId: null, selectedViewId: null, views: [] } });
+  const transfer = await f.call('/section-bots/transfer', 'POST', { operationId: 'transfer', issuedAt: Date.now(), baseRevision: 0, viewId: 'primary', target: 'third', targetRevision: 0 });
+  expect(transfer.body.groups['section-bots'].window.views.map((view: { id: string }) => view.id)).toEqual(['writer']);
+  expect(transfer.body.groups.third.window.views.map((view: { id: string }) => view.id)).toEqual(['primary']);
+
+  const stale = await f.call('/section/split', 'POST', { operationId: 'stale', issuedAt: Date.now(), baseRevision: 0, newId: 'again' });
+  expect(stale.body.result).toMatchObject({ status: 'rejected', code: 'revision_conflict' });
+  expect(stale.body.groups.again).toBeUndefined();
+
+  // The stored state, receipts included, is still valid.
+  const restarted = await fixture(f.saved());
+  expect((await restarted.call()).body.groups.map((group: { window: WorkspaceWindow }) => group.window.id)).toEqual(['section', 'section-bots', 'third']);
+});

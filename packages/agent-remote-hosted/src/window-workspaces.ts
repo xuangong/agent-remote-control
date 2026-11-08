@@ -1,7 +1,8 @@
 import { createHash } from 'node:crypto';
 import {
   decodeWorkspaceWindow, hasWindowAppearance, isWindowBots, isWindowDeleteRequest, isWindowGroup, isWindowGroupCreateRequest, isWindowGroupMutation,
-  isWindowOperationResult, isWindowPresentation, isWindowSessionBinding, applyGroupOperation, duplicateBot, groupBotViews, pruneBotDetails, WindowGroupError,
+  isWindowMergeRequest, isWindowOperationResult, isWindowPresentation, isWindowSessionBinding, isWindowSplitRequest, isWindowTransferRequest,
+  applyGroupOperation, duplicateBot, groupBotViews, mergeGroups, pruneBotDetails, splitGroup, transferBot, WindowGroupError,
   WINDOW_OPERATION_RETENTION_MS,
   type WindowBots, type WindowDeleteRequest, type WindowGroup, type WindowGroupCreateRequest, type WindowGroupMutation,
   type WindowOperationResult, type WindowPresentation, type WindowSessionBinding, type WorkspaceWindow,
@@ -122,6 +123,31 @@ export function createWindowWorkspaces(state: RelayState, canReadSession: (subje
     row.receipts.push({ fingerprint, result });
     return { result, ...described(row) };
   }
+  const groupsOf = (rows: SavedWorkspaceWindow[]) => Object.fromEntries(rows.map(row => [row.id, row.window ? windowGroup(row) : null]));
+  /** Settles one operation that changes several groups and leaves the same receipt on each; `list` is read again after the change. */
+  function settleAcross(list: () => SavedWorkspaceWindow[], input: { operationId: string; issuedAt: number }, apply: () => void) {
+    // A request may name one group twice; it still gets one receipt.
+    const rows = () => [...new Set(list())];
+    const fingerprint = hash(canonical(input));
+    const previous = rows().flatMap(row => row.receipts).find(item => item.result.operationId === input.operationId);
+    if (previous && previous.result.expiresAt > now()) {
+      if (previous.fingerprint !== fingerprint) fail(409, 'operation_conflict', 'Operation ID was used with different input.');
+      return { result: previous.result, groups: groupsOf(rows()) };
+    }
+    time(input.issuedAt);
+    if (previous) fail(410, 'operation_expired', 'Operation result expired.');
+    for (const row of rows()) {
+      row.receipts = row.receipts.filter(item => item.result.expiresAt > now());
+      if (row.receipts.length >= 4096) fail(429, 'receipt_capacity', 'Window operation retention capacity reached.');
+    }
+    let code: string | undefined; let message: string | undefined;
+    // `apply` checks everything before it changes any row, so a refusal leaves every group as it was.
+    try { apply(); } catch (error) { ({ code, message } = failure(error)); }
+    const result: WindowOperationResult = { operationId: input.operationId, status: code ? 'rejected' : 'committed', revision: rows()[0]?.window?.revision ?? 0,
+      committedAt: now(), expiresAt: now() + WINDOW_OPERATION_RETENTION_MS, ...(code ? { code, message } : {}) };
+    for (const row of rows()) row.receipts.push({ fingerprint, result });
+    return { result, groups: groupsOf(rows()) };
+  }
   function replayLegacy(principal: WindowPrincipal, id: string | undefined, input: unknown) {
     if (!id || !input || typeof input !== 'object' || typeof (input as { operationId?: unknown }).operationId !== 'string') fail(400, 'invalid_operation', 'A valid Window operation is required.');
     const row = rowFor(state.read(), principal, id!, true);
@@ -172,6 +198,56 @@ export function createWindowWorkspaces(state: RelayState, canReadSession: (subje
       const row = rowFor(state.read(), principal, id!, true); const receipt = row.receipts.find(item => item.result.operationId === operationId);
       if (!receipt) fail(404, 'operation_unknown', 'Operation result is unknown; inspect before taking further action.');
       if (receipt!.result.expiresAt <= now()) fail(410, 'operation_expired', 'Operation result expired.'); return { result: structuredClone(receipt!.result) };
+    },
+    async merge(principal: WindowPrincipal, id: string, input: unknown) {
+      assertInputSize(input);
+      if (!isWindowMergeRequest(input)) throw new WindowServiceError(400, 'invalid_operation', 'A valid merge request is required.');
+      const outcome = await state.mutate(draft => {
+        const target = rowFor(draft, principal, id, true), source = rowFor(draft, principal, input.source, true);
+        return settleAcross(() => [target, source], input, () => {
+          if (target.deleted || source.deleted) fail(404, 'window_not_found', 'Window was deleted.');
+          if (target.window!.revision !== input.baseRevision || source.window!.revision !== input.sourceRevision) fail(409, 'revision_conflict', 'Read the current Window revisions.');
+          const merged = mergeGroups(windowGroup(target), windowGroup(source));
+          bindings(principal.subject, merged.window);
+          uniqueBots(principal.subject, new Map([[target.id, merged], [source.id, null]]));
+          store(target, merged); deleteRow(source);
+        });
+      }); notify(principal.subject, id); notify(principal.subject, input.source); return outcome;
+    },
+    async split(principal: WindowPrincipal, id: string, input: unknown) {
+      assertInputSize(input);
+      if (!isWindowSplitRequest(input)) throw new WindowServiceError(400, 'invalid_operation', 'A valid split request is required.');
+      const outcome = await state.mutate(draft => {
+        const rows = draft.workspaceWindows ??= [];
+        const original = rowFor(draft, principal, id, true);
+        // A deleted row keeps its identity, so it refuses the new group just as a live one does.
+        let created = rows.find(row => row.subject === principal.subject && row.id === input.newId);
+        return settleAcross(() => created ? [original, created] : [original], input, () => {
+          if (original.deleted) fail(404, 'window_not_found', 'Window was deleted.');
+          if (original.window!.revision !== input.baseRevision) fail(409, 'revision_conflict', 'Read the current Window revision.');
+          if (created) fail(409, 'window_exists', 'Window identity is already used.');
+          if (rows.length >= 10000) fail(429, 'window_capacity', 'Window capacity reached.');
+          const parts = splitGroup(windowGroup(original), input.newId);
+          store(original, parts.kept);
+          created = { subject: principal.subject, id: input.newId, generation: 0, receipts: [] };
+          store(created, parts.created); rows.push(created);
+        });
+      }); notify(principal.subject, id); notify(principal.subject, input.newId); return outcome;
+    },
+    async transfer(principal: WindowPrincipal, id: string, input: unknown) {
+      assertInputSize(input);
+      if (!isWindowTransferRequest(input)) throw new WindowServiceError(400, 'invalid_operation', 'A valid transfer request is required.');
+      const outcome = await state.mutate(draft => {
+        const source = rowFor(draft, principal, id, true), target = rowFor(draft, principal, input.target, true);
+        return settleAcross(() => [source, target], input, () => {
+          if (source.deleted || target.deleted) fail(404, 'window_not_found', 'Window was deleted.');
+          if (source.window!.revision !== input.baseRevision || target.window!.revision !== input.targetRevision) fail(409, 'revision_conflict', 'Read the current Window revisions.');
+          const moved = transferBot(windowGroup(source), windowGroup(target), input.viewId);
+          bindings(principal.subject, moved.target.window);
+          uniqueBots(principal.subject, new Map([[source.id, moved.source], [target.id, moved.target]]));
+          store(source, moved.source); store(target, moved.target);
+        });
+      }); notify(principal.subject, id); notify(principal.subject, input.target); return outcome;
     },
     async assign(principal: WindowPrincipal, id: string, session: WindowSessionBinding | null) {
       assertInputSize(session);

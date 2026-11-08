@@ -12,10 +12,10 @@ const window: WorkspaceWindow = {
 const mutation: WindowMutation = { operationId: 'rename-one', issuedAt: 100, baseRevision: 0, operation: { type: 'rename', title: 'Renamed' } };
 const receipt = (operationId: string, revision = 1) => ({ operationId, revision, status: 'committed' as const, committedAt: 101, expiresAt: 1000 });
 
-async function withWindowServer(reply: (input: { operationId: string }) => { body: unknown; status?: number }, run: (client: WindowWorkspaceClient) => Promise<void>) {
+async function withWindowServer(reply: (input: { operationId: string }, url: string) => { body: unknown; status?: number }, run: (client: WindowWorkspaceClient) => Promise<void>) {
   const server = createServer(async (request, response) => {
     let body = ''; for await (const part of request) body += String(part);
-    const next = reply(body ? JSON.parse(body) : {});
+    const next = reply(body ? JSON.parse(body) : {}, request.url ?? '');
     response.writeHead(next.status ?? 200, { 'content-type': 'application/json' });
     response.end(JSON.stringify(next.body));
   });
@@ -184,3 +184,52 @@ it('creates an explicitly empty Window and migrates valid v2 server snapshots to
     expect((await client.inspect(window.id)).window).toEqual(window);
   });
 }, 10000);
+
+it('lists groups with their appearances, and Windows as groups from an older Relay', async () => {
+  const bots = { rank: 'm', members: {} };
+  await withWindowServer(() => ({ body: { windows: [], groups: [{ window, bots, presentation: { window: false } }] } }), async client => {
+    expect(await client.listGroups()).toEqual([{ window, bots, presentation: { window: false } }]);
+  });
+  await withWindowServer(() => ({ body: { windows: [window] } }), async client => {
+    expect(await client.listGroups()).toEqual([{ window }]);
+  });
+  await withWindowServer(() => ({ body: { groups: [{ window, presentation: { window: false } }] } }), async client => {
+    await expect(client.listGroups()).rejects.toThrow('Invalid Window list.');
+  });
+});
+
+it('returns and checks the section of a snapshot', async () => {
+  const bots = { rank: 'm', members: {} };
+  await withWindowServer(() => ({ body: { window, bots } }), async client => {
+    expect(await client.inspect(window.id)).toEqual({ window, bots });
+  });
+  await withWindowServer(() => ({ body: { window, bots: { rank: 'm', members: { main: { label: 'Not a bot' } } } } }), async client => {
+    await expect(client.inspect(window.id)).rejects.toThrow('Invalid Window snapshot.');
+  });
+});
+
+it('creates a group with its appearances', async () => {
+  const bots = { rank: 'm', members: {} };
+  let sent: unknown;
+  await withWindowServer(input => { sent = input; return { body: { result: receipt(input.operationId, 0), window, bots, presentation: { window: false } } }; }, async client => {
+    expect(await client.createGroup({ window, bots, presentation: { window: false } }, { operationId: 'create-section', issuedAt: 100 }))
+      .toMatchObject({ window, bots, presentation: { window: false } });
+  });
+  expect(sent).toEqual({ operationId: 'create-section', issuedAt: 100, window, bots, presentation: { window: false } });
+});
+
+it('sends merges, splits and transfers to their group and returns the groups they changed', async () => {
+  const urls: string[] = [];
+  const section = { window: { ...window, revision: 1 }, bots: { rank: 'm', members: {} } };
+  await withWindowServer((input, url) => { urls.push(url); return { body: { result: receipt(input.operationId), groups: { 'window-one': section, other: null } } }; }, async client => {
+    expect(await client.merge('window-one', { operationId: 'merge', issuedAt: 100, baseRevision: 0, source: 'other', sourceRevision: 0 }))
+      .toEqual({ result: receipt('merge'), groups: { 'window-one': section, other: null } });
+    await client.split('window-one', { operationId: 'split', issuedAt: 100, baseRevision: 1, newId: 'other' });
+    await client.transfer('window-one', { operationId: 'transfer', issuedAt: 100, baseRevision: 1, viewId: 'main', target: 'other', targetRevision: 0 });
+  });
+  expect(urls).toEqual(['/u/account/v1/windows/window-one/merge', '/u/account/v1/windows/window-one/split', '/u/account/v1/windows/window-one/transfer']);
+  await withWindowServer(input => ({ body: { result: { ...receipt(input.operationId), status: 'rejected', code: 'bot_session_taken', message: 'This session is already a bot in "Release".' }, groups: {} } }), async client => {
+    await expect(client.merge('window-one', { operationId: 'merge', issuedAt: 100, baseRevision: 0, source: 'other', sourceRevision: 0 }))
+      .rejects.toMatchObject({ code: 'bot_session_taken', message: 'This session is already a bot in "Release".' });
+  });
+});

@@ -4,7 +4,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, expect, it, vi } from 'vitest';
 import { createCompositionDocument, createCompositionSlot, createAskOwner, type CompositionDocument } from '../session-composition.js';
 import { conversationLocalStorage } from '../conversation-storage.js';
-import { applyWindowOperation, createWindowView, type WorkspaceWindow } from '@orchardworks/agent-remote-protocol';
+import { applyWindowOperation, createWindowView, type WindowMutation, type WorkspaceWindow } from '@orchardworks/agent-remote-protocol';
 import { useWindowWorkspace } from './useWindowWorkspace.js';
 import { WindowWorkspaces } from '../components/WindowWorkspaces.js';
 import { createServer } from 'node:http';
@@ -728,7 +728,7 @@ it.each(['matching-view', 'ordinary-view', 'managed-view'] as const)('reuses the
   if (destination === 'matching-view') existing.views.push(createWindowView('matching-dock', binding('target'), 'dock'));
   const fixture = hostedWindows(existing);
   const mutate = vi.spyOn(WindowWorkspaceClient.prototype, 'mutate').mockImplementation(async (id, mutation) => {
-    const window = applyWindowOperation(fixture.documents.get(id)!, mutation.operation);
+    const window = applyWindowOperation(fixture.documents.get(id)!, (mutation as WindowMutation).operation);
     fixture.documents.set(id, window);
     return { window, result: { operationId: mutation.operationId, status: 'committed', revision: window.revision, committedAt: Date.now(), expiresAt: Date.now() + 86400000 } };
   });
@@ -778,7 +778,7 @@ it('renders and edits the last cached layout while reopen inspection waits for c
   const fixture = hostedWindows(cached);
   let save!: () => void;
   vi.spyOn(WindowWorkspaceClient.prototype, 'mutate').mockImplementation((_id, mutation) => new Promise(resolve => {
-    save = () => { const window = applyWindowOperation(cached, mutation.operation); resolve({ window, result: { operationId: mutation.operationId,
+    save = () => { const window = applyWindowOperation(cached, (mutation as WindowMutation).operation); resolve({ window, result: { operationId: mutation.operationId,
       status: 'committed', revision: window.revision, committedAt: Date.now(), expiresAt: Date.now() + 86400000 } }); };
   }));
   let list!: () => void, inspect!: () => void;
@@ -807,7 +807,7 @@ it('retains a legacy deep-link target while hosted access changes from disabled 
   localStorage.setItem(`${key}:${existing.id}`, JSON.stringify(existing));
   const fixture = hostedWindows(existing);
   const mutate = vi.spyOn(WindowWorkspaceClient.prototype, 'mutate').mockImplementation(async (id, mutation) => {
-    const window = applyWindowOperation(fixture.documents.get(id)!, mutation.operation); fixture.documents.set(id, window);
+    const window = applyWindowOperation(fixture.documents.get(id)!, (mutation as WindowMutation).operation); fixture.documents.set(id, window);
     return { window, result: { operationId: mutation.operationId, status: 'committed', revision: window.revision, committedAt: Date.now(), expiresAt: Date.now() + 86400000 } };
   });
   history.replaceState(null, '', '/?host=host&provider=recorded&session=target');
@@ -832,7 +832,7 @@ it.each([undefined, 'history'] as const)('applies a new legacy deep link after s
   const fixture = hostedWindows(original);
   const recover = vi.spyOn(WindowWorkspaceClient.prototype, 'recoverCreate').mockResolvedValue({ window: original });
   vi.spyOn(WindowWorkspaceClient.prototype, 'mutate').mockImplementation(async (id, mutation) => {
-    const window = applyWindowOperation(fixture.documents.get(id)!, mutation.operation); fixture.documents.set(id, window);
+    const window = applyWindowOperation(fixture.documents.get(id)!, (mutation as WindowMutation).operation); fixture.documents.set(id, window);
     return { window, result: { operationId: mutation.operationId, status: 'committed', revision: window.revision, committedAt: Date.now(), expiresAt: Date.now() + 86400000 } };
   });
   history.replaceState(null, '', `/?host=host&provider=recorded&session=Y${sessionIntent ? '&intent=history' : ''}`);
@@ -874,7 +874,7 @@ it('renames a hosted Window that is not open without switching to it, and forget
   const scope = 'https://rename-other-window.example/';
   const fixture = hostedWindows(windowFixture('current'), windowFixture('other'), windowFixture('gone'));
   const mutate = vi.spyOn(WindowWorkspaceClient.prototype, 'mutate').mockImplementation(async (id, mutation) => {
-    const window = applyWindowOperation(fixture.documents.get(id)!, mutation.operation);
+    const window = applyWindowOperation(fixture.documents.get(id)!, (mutation as WindowMutation).operation);
     fixture.documents.set(id, window);
     return { window, result: { operationId: mutation.operationId, status: 'committed', revision: window.revision, committedAt: Date.now(), expiresAt: Date.now() + 86400000 } };
   });

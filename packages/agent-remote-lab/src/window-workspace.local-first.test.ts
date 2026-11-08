@@ -253,7 +253,8 @@ describe('Window local-first operations', () => {
     expect(store.getCommittedSnapshot()).toEqual(current);
     expect(store.getSyncState().pending).toBe(1);
     const savedIdentity = server.requests[0]!.mutation;
-    server.client.mutate = async (_id, mutation) => {
+    server.client.mutate = async (_id, sent) => {
+      const mutation = sent as WindowMutation;
       server.requests.push({ mutation: structuredClone(mutation), response: deferred<WindowCommit>() });
       if (!online) throw new Error('Offline');
       if (mutation.baseRevision !== current.revision) return { window: current, result: receipt(mutation, current, 'revision_conflict') };

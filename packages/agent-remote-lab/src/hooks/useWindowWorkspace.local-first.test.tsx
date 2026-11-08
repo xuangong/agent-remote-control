@@ -49,7 +49,7 @@ function hostedWindows(...windows: WorkspaceWindow[]) {
   }));
   const mutation = vi.spyOn(WindowWorkspaceClient.prototype, 'mutate').mockImplementation((id, mutation) => {
     const response = deferred<WindowCommit>();
-    requests.push({ id, mutation: structuredClone(mutation), response });
+    requests.push({ id, mutation: structuredClone(mutation) as WindowMutation, response });
     return response.promise;
   });
   const operation = vi.spyOn(WindowWorkspaceClient.prototype, 'operation').mockRejectedValue(new WindowRequestError('Receipt not found', 404, 'operation_unknown'));

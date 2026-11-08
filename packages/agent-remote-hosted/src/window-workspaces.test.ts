@@ -409,3 +409,38 @@ it('merges, separates and moves bots between groups in one step each, with a rec
   const restarted = await fixture(f.saved());
   expect((await restarted.call()).body.groups.map((group: { window: WorkspaceWindow }) => group.window.id)).toEqual(['section', 'section-bots', 'third']);
 });
+
+it('refuses cross-group operations without changing any group', async () => {
+  const f = await fixture(); await f.create();
+  await f.call('', 'POST', { operationId: 'create-section', issuedAt: Date.now(), window: sectionWindow('section', 'writer'), bots: { rank: 'm', members: {} }, presentation: { window: false } });
+  await f.call('', 'POST', { operationId: 'create-other', issuedAt: Date.now(), window: sectionWindow('other', 'native', 'Other'), bots: { rank: 'n', members: {} }, presentation: { window: false } });
+
+  // The merged section would hold a session that is already a bot in another section.
+  const clash = { operationId: 'clash', issuedAt: Date.now(), baseRevision: 0, source: 'window', sourceRevision: 0 };
+  const refused = await f.call('/section/merge', 'POST', clash);
+  expect(refused.body.result).toMatchObject({ status: 'rejected', code: 'bot_session_taken', message: 'This session is already a bot in "Other".' });
+  expect(refused.body.groups.window.window.revision).toBe(0);
+  expect(refused.body.groups.section.window.views.map((view: { id: string }) => view.id)).toEqual(['writer']);
+  expect((await f.call('/window/operations/clash')).body.result).toEqual(refused.body.result);
+  expect((await f.call('/section/operations/clash')).body.result).toEqual(refused.body.result);
+
+  // A receipt answers only the request it was written for.
+  const misaddressed = await f.call('/other/merge', 'POST', clash);
+  expect(misaddressed.status).toBe(409);
+  expect(misaddressed.body.code).toBe('operation_conflict');
+
+  // A group that does not exist leaves no receipt.
+  const unknown = await f.call('/section/merge', 'POST', { operationId: 'unknown', issuedAt: Date.now(), baseRevision: 0, source: 'nowhere', sourceRevision: 0 });
+  expect(unknown.status).toBe(404);
+  expect(unknown.body.code).toBe('window_not_found');
+  expect((await f.call('/section/operations/unknown')).status).toBe(404);
+
+  // A deleted group keeps its identity, so a split cannot reuse it.
+  expect((await f.call('/other', 'DELETE', f.mutation('delete-other', 0, { type: 'delete' }))).body.result.status).toBe('committed');
+  const onto = await f.call('/section/split', 'POST', { operationId: 'onto-deleted', issuedAt: Date.now(), baseRevision: 0, newId: 'other' });
+  expect(onto.body.result).toMatchObject({ status: 'rejected', code: 'window_exists' });
+
+  // The stored state, rejected receipts included, is still valid.
+  const restarted = await fixture(f.saved());
+  expect((await restarted.call()).body.groups.map((group: { window: WorkspaceWindow }) => group.window.id)).toEqual(['window', 'section']);
+});

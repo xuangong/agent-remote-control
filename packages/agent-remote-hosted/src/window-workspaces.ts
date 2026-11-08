@@ -125,10 +125,11 @@ export function createWindowWorkspaces(state: RelayState, canReadSession: (subje
   }
   const groupsOf = (rows: SavedWorkspaceWindow[]) => Object.fromEntries(rows.map(row => [row.id, row.window ? windowGroup(row) : null]));
   /** Settles one operation that changes several groups and leaves the same receipt on each; `list` is read again after the change. */
-  function settleAcross(list: () => SavedWorkspaceWindow[], input: { operationId: string; issuedAt: number }, apply: () => void) {
+  function settleAcross(kind: 'merge' | 'split' | 'transfer', id: string, list: () => SavedWorkspaceWindow[], input: { operationId: string; issuedAt: number }, apply: () => void) {
     // A request may name one group twice; it still gets one receipt.
     const rows = () => [...new Set(list())];
-    const fingerprint = hash(canonical(input));
+    // A receipt answers only the same request: the same operation, sent to the same group, with the same body.
+    const fingerprint = hash(canonical({ kind, id, input }));
     const previous = rows().flatMap(row => row.receipts).find(item => item.result.operationId === input.operationId);
     if (previous && previous.result.expiresAt > now()) {
       if (previous.fingerprint !== fingerprint) fail(409, 'operation_conflict', 'Operation ID was used with different input.');
@@ -143,6 +144,7 @@ export function createWindowWorkspaces(state: RelayState, canReadSession: (subje
     let code: string | undefined; let message: string | undefined;
     // `apply` checks everything before it changes any row, so a refusal leaves every group as it was.
     try { apply(); } catch (error) { ({ code, message } = failure(error)); }
+    // The revision is that of the group the request was sent to, which is listed first.
     const result: WindowOperationResult = { operationId: input.operationId, status: code ? 'rejected' : 'committed', revision: rows()[0]?.window?.revision ?? 0,
       committedAt: now(), expiresAt: now() + WINDOW_OPERATION_RETENTION_MS, ...(code ? { code, message } : {}) };
     for (const row of rows()) row.receipts.push({ fingerprint, result });
@@ -204,7 +206,7 @@ export function createWindowWorkspaces(state: RelayState, canReadSession: (subje
       if (!isWindowMergeRequest(input)) throw new WindowServiceError(400, 'invalid_operation', 'A valid merge request is required.');
       const outcome = await state.mutate(draft => {
         const target = rowFor(draft, principal, id, true), source = rowFor(draft, principal, input.source, true);
-        return settleAcross(() => [target, source], input, () => {
+        return settleAcross('merge', id, () => [target, source], input, () => {
           if (target.deleted || source.deleted) fail(404, 'window_not_found', 'Window was deleted.');
           if (target.window!.revision !== input.baseRevision || source.window!.revision !== input.sourceRevision) fail(409, 'revision_conflict', 'Read the current Window revisions.');
           const merged = mergeGroups(windowGroup(target), windowGroup(source));
@@ -222,7 +224,7 @@ export function createWindowWorkspaces(state: RelayState, canReadSession: (subje
         const original = rowFor(draft, principal, id, true);
         // A deleted row keeps its identity, so it refuses the new group just as a live one does.
         let created = rows.find(row => row.subject === principal.subject && row.id === input.newId);
-        return settleAcross(() => created ? [original, created] : [original], input, () => {
+        return settleAcross('split', id, () => created ? [original, created] : [original], input, () => {
           if (original.deleted) fail(404, 'window_not_found', 'Window was deleted.');
           if (original.window!.revision !== input.baseRevision) fail(409, 'revision_conflict', 'Read the current Window revision.');
           if (created) fail(409, 'window_exists', 'Window identity is already used.');
@@ -239,7 +241,7 @@ export function createWindowWorkspaces(state: RelayState, canReadSession: (subje
       if (!isWindowTransferRequest(input)) throw new WindowServiceError(400, 'invalid_operation', 'A valid transfer request is required.');
       const outcome = await state.mutate(draft => {
         const source = rowFor(draft, principal, id, true), target = rowFor(draft, principal, input.target, true);
-        return settleAcross(() => [source, target], input, () => {
+        return settleAcross('transfer', id, () => [source, target], input, () => {
           if (source.deleted || target.deleted) fail(404, 'window_not_found', 'Window was deleted.');
           if (source.window!.revision !== input.baseRevision || target.window!.revision !== input.targetRevision) fail(409, 'revision_conflict', 'Read the current Window revisions.');
           const moved = transferBot(windowGroup(source), windowGroup(target), input.viewId);

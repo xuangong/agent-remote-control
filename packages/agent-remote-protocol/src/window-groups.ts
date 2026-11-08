@@ -1,6 +1,6 @@
 import { Type, type Static } from '@sinclair/typebox';
 import { Value } from '@sinclair/typebox/value';
-import { WINDOW_VIEW_LIMIT, WindowEdit, WorkspaceWindow, isWorkspaceWindow, type WindowSessionBinding, type WindowView } from './window-workspace.js';
+import { WINDOW_VIEW_LIMIT, WindowEdit, WorkspaceWindow, decodeWorkspaceWindow, isWorkspaceWindow, type WindowSessionBinding, type WindowView } from './window-workspace.js';
 import { WindowLayoutError, applyWindowOperation } from './window-workspace-operations.js';
 
 const strict = { additionalProperties: false } as const;
@@ -82,6 +82,19 @@ export function groupBotViews(group: WindowGroup): Array<WindowView & { binding:
 export const isWindowBots = (value: unknown): value is WindowBots => Value.Check(WindowBots, value);
 export const isWindowPresentation = (value: unknown): value is WindowPresentation => Value.Check(WindowPresentation, value);
 export const hasWindowAppearance = (group: WindowGroup): boolean => group.presentation?.window !== false;
+/** The group a Window, a group or a Relay snapshot describes: every Window is a group with only the Window appearance. */
+export function toWindowGroup(value: WorkspaceWindow | { window: WorkspaceWindow; bots?: WindowBots; presentation?: WindowPresentation }): WindowGroup {
+  if (!('window' in value)) return { window: value };
+  return { window: value.window, ...(value.bots ? { bots: value.bots } : {}), ...(value.presentation ? { presentation: value.presentation } : {}) };
+}
+/** A group from storage or a Relay, its Window decoded from any schema this build reads; a bare Window predates groups. */
+export function decodeWindowGroup(value: unknown): WindowGroup | undefined {
+  const source = (value && typeof value === 'object' && 'window' in value ? value : { window: value }) as { window: unknown; bots?: unknown; presentation?: unknown };
+  const window = decodeWorkspaceWindow(source.window);
+  if (!window) return undefined;
+  const group = { window, ...(source.bots === undefined ? {} : { bots: source.bots }), ...(source.presentation === undefined ? {} : { presentation: source.presentation }) };
+  return isWindowGroup(group) ? group : undefined;
+}
 
 export function isWindowGroup(value: unknown): value is WindowGroup {
   if (!Value.Check(WindowGroup, value) || !isWorkspaceWindow(value.window)) return false;
@@ -89,6 +102,7 @@ export function isWindowGroup(value: unknown): value is WindowGroup {
   const bots = new Set(groupBotViews(value).map(view => view.id));
   return Object.keys(value.bots?.members ?? {}).every(viewId => bots.has(viewId));
 }
+export const isWindowGroupOperation = (value: unknown): value is WindowGroupOperation => Value.Check(WindowGroupOperation, value);
 export const isWindowGroupMutation = (value: unknown): value is WindowGroupMutation => Value.Check(WindowGroupMutation, value);
 export const isWindowGroupCreateRequest = (value: unknown): value is WindowGroupCreateRequest => Value.Check(WindowGroupCreateRequest, value)
   && isWindowGroup({ window: value.window, ...(value.bots ? { bots: value.bots } : {}), ...(value.presentation ? { presentation: value.presentation } : {}) });

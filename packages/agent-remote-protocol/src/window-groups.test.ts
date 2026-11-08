@@ -2,8 +2,8 @@ import { expect, it } from 'vitest';
 import type { WorkspaceWindow } from './window-workspace.js';
 import { WindowLayoutError, createWindowView } from './window-workspace-operations.js';
 import {
-  WindowGroupError, applyGroupOperation, duplicateBot, isBotView, isWindowGroup, isWindowGroupCreateRequest, isWindowGroupMutation, isWindowMergeRequest,
-  isWindowSplitRequest, isWindowTransferRequest, mergeGroups, splitGroup, transferBot, type WindowGroup,
+  WindowGroupError, applyGroupOperation, decodeWindowGroup, duplicateBot, isBotView, isWindowGroup, isWindowGroupCreateRequest, isWindowGroupMutation,
+  isWindowGroupOperation, isWindowMergeRequest, isWindowSplitRequest, isWindowTransferRequest, mergeGroups, splitGroup, toWindowGroup, transferBot, type WindowGroup,
 } from './window-groups.js';
 
 const session = (nativeSessionId: string, title = nativeSessionId) => ({ hostId: 'mac', providerId: 'claude', nativeSessionId, title });
@@ -193,4 +193,34 @@ it('moves a bot with its attached views to another section', () => {
   const tangled = section(windowOf('four', createWindowView('dock', session('b')), createWindowView('main', session('a'), 'primary'),
     { ...createWindowView('x', session('f'), 'attached'), attachedTo: 'main', closeWith: 'dock' }));
   expect(refusal(() => transferBot(tangled, target, 'dock'))).toBe('bot_attached_elsewhere');
+});
+
+it('reads the group a Window, a snapshot or a group describes', () => {
+  const window = windowOf('w', createWindowView('main', session('a'), 'primary'));
+  expect(toWindowGroup(window)).toEqual({ window });
+  expect(toWindowGroup({ window, manager: { session: session('a'), generation: 1 } })).toEqual({ window });
+  const group = section(window);
+  expect(toWindowGroup(group)).toEqual(group);
+  expect(toWindowGroup({ window, bots: group.bots, presentation: { window: false } })).toEqual({ ...group, presentation: { window: false } });
+});
+
+it('decodes a stored or transported group, including a Window saved before groups', () => {
+  const window = windowOf('w', createWindowView('main', session('a'), 'primary'));
+  const group = { ...section(window), presentation: { window: false } as const };
+  expect(decodeWindowGroup(JSON.parse(JSON.stringify(window)))).toEqual({ window });
+  expect(decodeWindowGroup(JSON.parse(JSON.stringify(group)))).toEqual(group);
+  expect(decodeWindowGroup({ window, manager: { session: session('a'), generation: 1 } })).toEqual({ window });
+  expect(decodeWindowGroup({ window, bots: { rank: '', members: {} } })).toBeUndefined();
+  expect(decodeWindowGroup({ window, bots: { rank: 'm', members: { missing: {} } } })).toBeUndefined();
+  expect(decodeWindowGroup({ window: { ...window, views: [] } })).toBeUndefined();
+  expect(decodeWindowGroup(undefined)).toBeUndefined();
+});
+
+it('accepts every group operation and refuses anything else', () => {
+  expect(isWindowGroupOperation({ type: 'bots.add', rank: 'm' })).toBe(true);
+  expect(isWindowGroupOperation({ type: 'rename', title: 'Release' })).toBe(true);
+  expect(isWindowGroupOperation({ type: 'batch', operations: [{ type: 'bots.add', rank: 'm' }, { type: 'rename', title: 'Release' }] })).toBe(true);
+  expect(isWindowGroupOperation({ type: 'bots.add' })).toBe(false);
+  expect(isWindowGroupOperation({ type: 'delete' })).toBe(false);
+  expect(isWindowGroupOperation(undefined)).toBe(false);
 });

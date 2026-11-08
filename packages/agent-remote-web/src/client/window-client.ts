@@ -1,5 +1,5 @@
 import {
-  decodeWorkspaceWindow, isWindowGroup, isWindowOperationResult, isWindowSessionBinding,
+  decodeWindowGroup, decodeWorkspaceWindow, isWindowGroup, isWindowOperationResult, isWindowSessionBinding,
   type WindowBots, type WindowCreateRequest, type WindowDeleteRequest, type WindowGroup, type WindowGroupCreateRequest, type WindowGroupMutation,
   type WindowMergeRequest, type WindowMutation, type WindowOperationResult, type WindowPresentation, type WindowSessionBinding,
   type WindowSplitRequest, type WindowTransferRequest, type WorkspaceWindow,
@@ -25,12 +25,6 @@ const identity = (): WindowOperationIdentity => ({ operationId: crypto.randomUUI
  * `invalid_window_receipt` are WindowRequestErrors too, and neither is a refusal.
  */
 export const isWindowRejection = (error: unknown): boolean => error instanceof WindowRequestError && (error.result?.status === 'rejected' || error.status >= 400 && error.status < 500);
-/** A group as a Relay sends it, with its Window decoded from any schema this client accepts. */
-function decodeGroup(value: any): WindowGroup | undefined {
-  const window = decodeWorkspaceWindow(value?.window);
-  const group = window && { window, ...(value.bots === undefined ? {} : { bots: value.bots }), ...(value.presentation === undefined ? {} : { presentation: value.presentation }) };
-  return group && isWindowGroup(group) ? group : undefined;
-}
 export interface WindowSnapshot { window: WorkspaceWindow; manager?: { session: WindowSessionBinding; generation: number }; bots?: WindowBots; presentation?: WindowPresentation }
 export interface WindowCommit { window: WorkspaceWindow; result: WindowOperationResult; bots?: WindowBots; presentation?: WindowPresentation }
 /** The groups a cross-group operation changed; null for a group it deleted. */
@@ -54,7 +48,7 @@ export class WindowWorkspaceClient {
     const { value } = await this.request('');
     const raw = value.groups ?? (Array.isArray(value.windows) ? value.windows.map((window: unknown) => ({ window })) : undefined);
     if (!Array.isArray(raw)) throw new Error('Invalid Window list.');
-    const groups = raw.map(decodeGroup);
+    const groups = raw.map(decodeWindowGroup);
     if (groups.includes(undefined)) throw new Error('Invalid Window list.');
     return groups as WindowGroup[];
   }
@@ -167,7 +161,7 @@ export class WindowWorkspaceClient {
       || Object.keys(raw).some(key => key !== id && key !== other) || action === 'merge' && raw[other] !== null) throw invalid();
     const groups: Record<string, WindowGroup | null> = Object.fromEntries(Object.entries(raw).map(([key, value]) => {
       if (value === null) return [key, null];
-      const group = decodeGroup(value);
+      const group = decodeWindowGroup(value);
       if (!group || group.window.id !== key) throw invalid();
       return [key, group];
     }));

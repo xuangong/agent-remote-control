@@ -1,9 +1,9 @@
 # Bot mode page acceptance
 
-This document records Task 4's implementation and controlled browser evidence on
-the `bot-mode-ui` worktree. Final integration review, compatibility, repository
-checks and the real local instance belong to the parent acceptance pass; those
-layers remain unverified until their evidence is appended below.
+This document records the Bot mode milestones 2a and 2b implementation, review,
+controlled browser evidence and final local-instance acceptance. Earlier child
+results below are point-in-time records; the final integration section records
+the reviewed delivery snapshot and supersedes their pending parent-owned gates.
 
 ## Revision and evidence boundary
 
@@ -238,3 +238,149 @@ the inspected final roots `arc-joined-browser-9RLzPn` and
 `arc-joined-browser-vVjAtz` were also absent. All child test processes and the
 bounded artifact-preservation process have exited. Parent-started integration
 services and resources are outside this cleanup scope.
+
+## Final integration acceptance (2026-11-09)
+
+The reviewed product snapshot is `460885ae6f24cace1a9f36cbf39cb9d7920e374a`.
+The final source fix is `ce82a9ca79ea7273f8076672728bfb43caa797fd`; the next commit
+refreshes compatibility metadata. Final documentation commits do not change product code.
+The branch remains `feat/bot-mode-ui` in the dedicated worktree. No push, merge,
+package publication or deployment belongs to this Bot milestone delivery.
+
+The independent final review found four Important issues: Bot observation lifetime
+when the remembered Window disappears, concrete-history clicks on delivered Window
+notifications, stale public catalog state across scopes, and a pending local draft
+blocking an explicitly selected new attachment target. The combined fix addressed
+all four; its scoped re-review found no new breakage. The conservative draft-clearing
+limitation above remains deferred Minor M1.
+
+| Final check | Observed result and local artifact |
+| --- | --- |
+| Recursive build | Passed, including debugger; `.tmp/bot-mode/2b-final-build.log` |
+| Repository typecheck | Passed, including Lab E2E and debugger web types; `2b-final-typecheck.log` |
+| Full `pnpm test` | Exit 0; 7,842 passed / 22 skipped across 18 packages, debugger included; `2b-final-unit.log` |
+| Final fix regression suite | 20 files, 515 passed / 6 skipped; `final-fix-focused-final.log` |
+| Compatibility update and check | Passed; digest `sha256:4b35d0dccc8299514bb52f0123546fe8965ef67f41d1cb9fd8264dde2f4582fa` |
+| Chromium desktop Bot matrix | 15 passed; 31.5 s; ports 51459/51460 |
+| Chromium mobile Bot matrix | 15 passed; 31.0 s; ports 52430/52431 |
+| WebKit desktop Bot matrix | 15 passed; 35.2 s; ports 54438/54439 |
+| WebKit mobile Bot matrix | 15 passed; 34.2 s; ports 55664/55665 |
+
+All final browser fixture ports were read back closed. Browser logs are
+`.tmp/local/bot-mode/post-fix-<project>.log`. These 60 passes do not erase the
+legacy failures and differing compact-primary failure boundary documented above.
+The isolated baseline comparison worktree was removed only after its task-owned
+probe diff and evidence were archived; the main checkout and other worktrees remain intact.
+
+### Real local-instance observations
+
+Origin: `http://localhost:58578`, instance `bot-mode-ui-986bb6c2`.
+The final product validation ran with clean running and checkout commit `460885ae6f24`.
+`pnpm local up` completed with signed-in local user and registered Controller uplink;
+Claude and Codex were enabled. The native fixtures belong to this instance's workspace.
+No physical iPhone test or production verification was performed.
+
+The actual Bot B displayed the Codex reply `LOCAL-OK`. Text and a Ready image draft
+survived mode changes; the same B editor DOM was retained when moving that same
+view directly between Window and Bot. Opening unrelated Window A retained its
+independent location and draft. At 390 by 844, Back displayed the roster, only one
+composer was visible, and the page had no horizontal overflow. New section created
+a real section-only group and its empty-state explanation. The actual ungrouped
+Codex session displayed `FALLBACK-READY` in Other sessions.
+
+The first actual Handoff committed operation `14b08539-7b7e-4328-b34a-362486e5b62b`
+from native `01a1bc84-ffa5-7da0-8f8f-2cea536435ff` to
+`01a1bc9c-b35c-7742-b059-05dec30d2d69`. It did not send a prompt. The harness then
+switched to Window A and timed out after 120 seconds waiting for background B's
+saved binding. This is a recorded failed harness execution, not a passed acceptance.
+
+The selected active Bot consumer owns `windowSuccessionLayout` reconciliation;
+Window mode suspends it. Plan Task 1 Step 5 explicitly subscribes and reconciles
+selected groups while Bot mode is active. Waiting longer in Window A does not
+activate B's consumer. The follow-up opened Bot B without replaying Handoff:
+it resolved the exact committed successor and saved revision 2 to 3, preserving
+B's group/view and unrelated A. One subsequent UI send through a mode round trip
+produced the real reply `BOT-VERIFIED`, with one observed send and no uncaught page
+error. The first context had closed, so that recovery alone does not establish
+its original draft continuity. Evidence: `local-acceptance.*`, `native-successions.json`,
+`native-handoff-diagnostics.json`, `local-continuation.*` under `.tmp/local/bot-mode/`;
+read-only diagnosis: `.tmp/bot-mode/handoff-projection-diagnosis.md`.
+
+The preparatory Claude request returned ordinary provider failure
+`API Error: 422 The request was blocked by the content safety policy.` It was not
+retried or relabeled as success. Codex has real reply evidence; Claude does not
+have a successful model turn for this acceptance. OpenCode was not exercised.
+
+| Opened image under `.tmp/local/bot-mode/` | Observed state, paired with script DOM assertions |
+| --- | --- |
+| `local-final-desktop-draft.png` | Native B reply, roster and text plus Ready image draft |
+| `local-final-compact-conversation.png` | Compact Back, single conversation and retained draft |
+| `local-final-compact-empty-section.png` | Newly created empty section and Other sessions |
+| `local-final-handoff-dialog.png` | B's actual Codex Handoff chooser and existing draft |
+| `local-acceptance-failure.png` | Window A and its independent draft during the background-binding timeout |
+| `continuation-committed-handoff-reopened.png` | Same B opens its verified successor with pending first-input context |
+| `continuation-native-reply.png` | Actual successor reply BOT-VERIFIED and one visible editor |
+| `continuation-fallback.png` | Ungrouped native history FALLBACK-READY in Other sessions |
+
+### Remaining native acceptance boundary
+
+A separate same-context attempt on the already committed successor reached an
+explicit terminal rejection during prepare: operation
+`088af8b5-efa2-40eb-be09-39fe7252b256`, `succession_preparation_failed`.
+The supported `succession/status` read confirms role revision 2 and its current
+native identity remain unchanged. Candidate `01a1bca3-9c25-7231-98a4-cf6cb5654e68`
+was created but was not committed; a read shows an idle empty session. No commit
+request or user send occurred. This failed record was not replayed or reconciled,
+and the candidate was not adopted as a replacement.
+
+`native-draft-before.png` was opened and shows the actual BOT-VERIFIED history,
+text and Ready image. `native-draft-failure.png` was opened and shows that same
+history and draft with the visible "Handoff could not be completed" progress
+notice. Artifacts: `native-draft-handoff.mjs`, `.log`, `.json`, and
+`native-draft-rejected-status.json`. This is a failure of the real preparation
+path, not evidence that the Bot draft survives a successful same-context Handoff.
+The underlying exception is not present in the generic failure code; do not
+attribute it to credentials, the environment or Bot presentation without evidence.
+
+| Final local layer | State | Evidence boundary |
+| --- | --- | --- |
+| Build | verified | Clean 460885ae running build matched checkout after local up |
+| Site | verified | Running local site and signed-in local user |
+| Controller | verified | Registered uplink; Claude/Codex enabled |
+| Page | verified | Opened desktop/compact images and corresponding DOM assertions |
+| Feature | partial | Mode, drafts, section creation, fallback and committed-successor recovery verified; successful same-context native Handoff draft continuity remains unverified |
+| Model turn | verified for Codex; failed for Claude | Actual LOCAL-OK, BOT-VERIFIED and FALLBACK-READY; Claude returned provider API 422 |
+
+Implementation and independent review are complete. Full native acceptance is
+not claimed complete. The retained-ack draft limitation, legacy browser failures,
+and preparation rejection remain explicit delivery concerns. The worktree and
+local instance are retained for inspection and further native diagnosis.
+
+## Decisions and costs
+
+The following is the exhaustive chronological `Ruling:` record from this plan's
+execution ledger. Each decision includes its reason and cost or evidence limit.
+
+1. Retain /handoff for ordinary writable Bot views through existing source-scoped guards and chooser — earlier user request in this session opens it wherever logically supported — cost is additional Bot Handoff integration tests.
+
+2. Use existing stable portal-host pattern to keep one composer per view across mode presentation — mount-local pending state cannot safely be duplicated or discarded — cost is a small explicit surface ownership component.
+
+3. Implement milestone 2b only after 2a, leaving milestone 3–5 management/linking/team features for their own plans — matches accepted staged specification — cost is empty new sections until management is delivered; useful existing Window conversion remains available.
+
+4. Enable section-only URL redirection only when the new optional WorkspaceNavigation contract is supplied; retain 2a explicit section URL behavior for legacy callers — plan promises old callers unchanged, App will opt into the new path — cost is maintaining both caller contracts until legacy callers migrate. Confirmed section-only must never attach stale native query state or rewrite last-Window.
+
+5. Give section creation explicit sectionCreationState/retrySection instead of reusing Window retrySave/error — independent operations must not intercept each other and Task3 needs reload-visible uncertainty — cost is two small public controller fields and a dual-pending regression.
+
+6. Add an explicit no-new-attach gate for parked leaves and validate mapped views against current group data in App before succession resolution — existing missing-slot fallback is not deletion/rebinding proof — cost is one leaf gate and group-locator regression coverage.
+
+7. Preserve the new-navigation contract that cached Window targets cannot attach before remote inspection confirms Window appearance; update the legacy App retention test to verify no pre-inspection attach, then one attachment/stream with unchanged timeline gates — an old ordinary cache may now be a section-only group and cannot establish current authority — cost if wrong is extra cold-start attachment latency until inspection; legacy callers without the navigation contract retain their old hook behavior. Do not weaken the existing cached-section regression to satisfy the old App timing assertion.
+
+8. During temporary WorkspaceReady=false recovery, preserve the current surface host/editor and read-only content while revoking attachment/mutation/connection admission and aborting native recovery; retire the registry only on scope/transport/unmount — existing App recovery regressions and the product reading/draft continuity contract override Task2 brief conflating access suspension with scope disposal — cost if wrong is stale read-only content during recovery, bounded by existing access gates; source/scope changes must still retire it. Task3 implementer owns this narrow surface fix plus lifecycle/access regressions, and Task3 review must include it.
+
+9. Retain the existing rich-draft ownership fence when a successful in-flight acknowledgement arrives after mode transitions invalidated its captured edit owner; do not weaken useImageDraft/AgentComposer clearing authority in this milestone — one acknowledged send, pending release, no replay and no lost draft are verified; text equality alone cannot authorize clearing a potentially newer edit — cost if wrong is sent text remaining in the editor after switching modes, requiring manual editing/clearing. Browser tests/report must explicitly assert and disclose this behavior plus a Window-only control; final review must triage the limitation. A future automatic-clear optimization needs proven document-owner continuity.
+
+10. Migrate the delayed Side restoration browser assertion from DOM absence to existing shared-Window selection semantics: selected view/URL stay chosen after late response, Side membership is unchanged and unselected, correct draft persists, no create/send replay — implementer statically compared baselinea0648327 SessionFamily and found the same attached-view retention and Close/Back semantics; selecting another pane does not close it — cost if wrong is an undetected legacy-only removal regression; report static baseline evidence only, not a baseline browser pass. Explicit Close still must remove the view and not reattach after reload. Task4 review includes migrated assertions.
+
+11. Preserve the existing same-scope Window-mode delivered notification contract: after A succeeds to B/C, its already-delivered notification still opens concrete A history. Continue gating new observations and deliveries by eligibility, and gate Bot-mode notification clicks by the current roster — the plan simultaneously required removal-time closure and unchanged Window click behavior; the established history locator guarantee and Window preservation requirement take precedence — cost if wrong is older Window notifications remaining actionable after succession, while current-mode/scope/disposal authorization must still apply. Do not satisfy the regression by deleting its history assertions.
+
+12. Treat saved Bot succession layout as active-consumer projection, not an eager background rewrite while another Window is displayed; verify the exact committed successor when returning to the same Bot — Task1 Step5 explicitly activates selected-group reconciliation and leases only in Bot mode, and actual committed-operation readback plus reopening confirms recovery — cost is a stale persisted Bot binding until that group is activated; no promise of instantaneous rewriting of all saved groups. The first120s assertion remains recorded as failed; it cannot prove same-context draft continuity after its context was closed.

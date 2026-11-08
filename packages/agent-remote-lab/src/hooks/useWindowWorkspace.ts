@@ -36,6 +36,7 @@ export function useWindowWorkspace(scope: string, hosted: boolean, enabled: bool
   const deletions = useMemo(() => new Map<string, { window?: WorkspaceWindow; identity: WindowOperationIdentity; dispatched: boolean; running?: Promise<void> }>(), [key, client]);
   const selection = useMemo(() => ({ generation: 0, active: true, deleted: new Set<string>() }), [key, client]);
   const stores = useMemo(() => new Map<string, WindowWorkspaceStore>(), [key, client]);
+  const catalogSubscriptions = useMemo(() => new Map<string, () => void>(), [stores]);
   const access = useRef(enabled && participating); access.current = enabled && participating;
   const currentSelection = useRef(selection); currentSelection.current = selection;
   const inScope = () => selection.active && currentSelection.current === selection;
@@ -48,9 +49,12 @@ export function useWindowWorkspace(scope: string, hosted: boolean, enabled: bool
       selection.active = false; selection.generation++; currentStore.current = undefined;
       for (const saved of stores.values()) saved.setEnabled(false);
       // React may immediately replay effects; only a departed scope owns disposal.
-      queueMicrotask(() => { if (!selection.active) { for (const saved of stores.values()) saved.dispose(); stores.clear(); } });
+      queueMicrotask(() => { if (!selection.active) {
+        for (const unsubscribe of catalogSubscriptions.values()) unsubscribe(); catalogSubscriptions.clear();
+        for (const saved of stores.values()) saved.dispose(); stores.clear();
+      } });
     };
-  }, [selection, stores]);
+  }, [selection, stores, catalogSubscriptions]);
   useEffect(() => { for (const saved of stores.values()) saved.setEnabled(enabled && participating); }, [stores, enabled, participating]);
   const confirmedStores = useMemo(() => new WeakSet<WindowWorkspaceStore>(), [key, client]);
   const [unavailable, setUnavailable] = useState(false);
@@ -121,6 +125,8 @@ export function useWindowWorkspace(scope: string, hosted: boolean, enabled: bool
       },
     });
     stores.set(window.id, next);
+    catalogSubscriptions.set(window.id, next.subscribe(() => updateCatalog(next.getGroup())));
+    updateCatalog(next.getGroup());
     next.setEnabled(access.current);
     return next;
   };
@@ -182,6 +188,7 @@ export function useWindowWorkspace(scope: string, hosted: boolean, enabled: bool
     ? current.map(item => item.window.id === group.window.id ? group : item) : [...current, group]); };
   const forgetDeletedWindow = (id: string) => {
     selection.deleted.add(id);
+    catalogSubscriptions.get(id)?.(); catalogSubscriptions.delete(id);
     stores.get(id)?.dispose(); stores.delete(id);
     try { conversationSessionStorage.removeItem(`${key}:pending:${id}`); } catch { /* A deleted Window never replays its pending edits. */ }
     try { conversationLocalStorage.removeItem(`${key}:${id}`); } catch { /* A failed cache cleanup cannot undo a confirmed deletion. */ }
@@ -226,7 +233,7 @@ export function useWindowWorkspace(scope: string, hosted: boolean, enabled: bool
     };
     let cached: WindowGroup | undefined;
     for (const id of requested ? [requested] : preferredIds()) {
-      const value = readCached(id); if (value) { cached = value; break; }
+      const value = readCached(id); if (value && (requested || hasWindowAppearance(value))) { cached = value; break; }
     }
     // A deep link is applied to the authoritative layout before it becomes the selected Window.
     if (client && cached && !target) choose(cached, false, false);
@@ -246,7 +253,7 @@ export function useWindowWorkspace(scope: string, hosted: boolean, enabled: bool
       setGroups(local);
       if (requested && !cached) { setError('This Window is unavailable in the local workbench.'); setUnavailable(true); }
       else {
-        const existing = cached ?? local[0];
+        const existing = cached ?? local.find(hasWindowAppearance);
         try {
           if (existing && !target) choose(existing);
           else if (existing) void Promise.resolve().then(() => restore(existing)).catch(error => { if (live()) setError(String(error.message ?? error)); });
@@ -258,7 +265,12 @@ export function useWindowWorkspace(scope: string, hosted: boolean, enabled: bool
     const restoreHosted = async () => {
       if (!live()) return;
       const all = (await client.listGroups()).filter(group => !selection.deleted.has(group.window.id)); if (!current || generation !== selection.generation) return;
-      setGroups(all.map(group => stores.get(group.window.id)?.getGroup() ?? group));
+      setGroups(all.map(group => {
+        const retained = stores.get(group.window.id);
+        if (!retained) return group;
+        retained.accept(group);
+        return retained.getGroup();
+      }));
       const list = all.filter(hasWindowAppearance);
       // A background journal may outlive a Window deleted on another page.
       // Catalog omission alone is insufficient proof, and its inspection must not delay opening the selected Window.
@@ -299,10 +311,6 @@ export function useWindowWorkspace(scope: string, hosted: boolean, enabled: bool
   const window = useSyncExternalStore(store?.subscribe ?? (() => () => {}), store?.getSnapshot ?? (() => undefined));
   const group = useSyncExternalStore(store?.subscribe ?? (() => () => {}), store?.getGroup ?? (() => undefined));
   const saveState = useSyncExternalStore(store?.subscribe ?? (() => () => {}), store?.getSyncState ?? (() => undefined));
-  useEffect(() => {
-    if (!group) return;
-    updateCatalog(group);
-  }, [group]);
   const confirmed = !!store && confirmedStores.has(store);
   useEffect(() => {
     if (!store || !enabled || !client || !participating || !confirmed) return;

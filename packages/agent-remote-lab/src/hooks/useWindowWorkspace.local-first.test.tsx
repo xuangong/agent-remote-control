@@ -2,7 +2,7 @@ import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, expect, it, vi } from 'vitest';
 import { WindowWorkspaceClient, WindowRequestError, type WindowCommit, type WindowSnapshot } from '@orchardworks/agent-remote-web';
-import { applyWindowOperation, createWindowView, type WindowMutation, type WindowOperation, type WorkspaceWindow } from '@orchardworks/agent-remote-protocol';
+import { applyWindowOperation, createWindowView, type WindowGroup, type WindowMutation, type WindowOperation, type WorkspaceWindow } from '@orchardworks/agent-remote-protocol';
 import { createCompositionDocument } from '../session-composition.js';
 import { useWindowWorkspace } from './useWindowWorkspace.js';
 import { createServer } from 'node:http';
@@ -68,6 +68,159 @@ function hostedWindows(...windows: WorkspaceWindow[]) {
 async function until(check: () => void) {
   await vi.waitFor(async () => { await act(async () => {}); check(); }, { timeout: 1000, interval: 1 });
 }
+
+it('retains a local section-only catalog without restoring it as the default Window', async () => {
+  const scope = 'local-section-only-default', section: WindowGroup = {
+    window: windowFixture('section'), bots: { rank: 'm', members: {} }, presentation: { window: false },
+  };
+  const key = saveCache(scope, section.window);
+  localStorage.setItem(`${key}:${section.window.id}`, JSON.stringify(section));
+  const read = await mount(scope, false);
+  expect(read().window?.id).not.toBe(section.window.id);
+  expect(read().hasActiveWindow).toBe(true);
+  expect(read().groups.find(group => group.window.id === section.window.id)).toEqual(section);
+  expect(read().windows.map(window => window.id)).not.toContain(section.window.id);
+});
+
+it.each(['session', 'local'] as const)('skips a saved section-only %s preference when restoring a local Window', async preference => {
+  const scope = `local-section-preference-${preference}`, section: WindowGroup = {
+    window: windowFixture('section'), bots: { rank: 'm', members: {} }, presentation: { window: false },
+  }, window = windowFixture('window');
+  const key = saveCache(scope, section.window); saveCache(scope, window);
+  localStorage.setItem(`${key}:${section.window.id}`, JSON.stringify(section));
+  if (preference === 'session') sessionStorage.setItem(key, section.window.id);
+  else localStorage.setItem(`${key}:last-window`, section.window.id);
+  const read = await mount(scope, false);
+  expect(read().window?.id).toBe(window.id);
+  expect(read().groups.map(group => group.window.id).sort()).toEqual(['section', 'window']);
+  expect(read().windows.map(window => window.id)).toEqual(['window']);
+});
+
+it('skips a hosted section-only cache before and after the catalog responds', async () => {
+  const scope = 'https://section-cache-default.example/', section: WindowGroup = {
+    window: windowFixture('section'), bots: { rank: 'm', members: {} }, presentation: { window: false },
+  }, window = windowFixture('window');
+  const key = saveCache(scope, section.window);
+  localStorage.setItem(`${key}:${section.window.id}`, JSON.stringify(section));
+  localStorage.setItem(`${key}:last-window`, section.window.id);
+  hostedWindows(window);
+  const catalog = deferred<WindowGroup[]>();
+  vi.spyOn(WindowWorkspaceClient.prototype, 'listGroups').mockReturnValue(catalog.promise);
+  const read = await mount(scope);
+  expect(read().window).toBeUndefined();
+  expect(new URL(location.href).searchParams.get('window')).toBeNull();
+  await act(async () => catalog.resolve([section, { window }]));
+  await until(() => expect(read().window?.id).toBe(window.id));
+  expect(read().groups.map(group => group.window.id).sort()).toEqual(['section', 'window']);
+  expect(read().windows.map(window => window.id)).toEqual(['window']);
+});
+
+it('keeps a section-only preference closed when hosted catalog recovery fails', async () => {
+  const scope = 'https://section-cache-offline.example/', section: WindowGroup = {
+    window: windowFixture('section'), bots: { rank: 'm', members: {} }, presentation: { window: false },
+  };
+  const key = saveCache(scope, section.window);
+  localStorage.setItem(`${key}:${section.window.id}`, JSON.stringify(section));
+  sessionStorage.setItem(key, section.window.id);
+  const catalog = deferred<WindowGroup[]>();
+  vi.spyOn(WindowWorkspaceClient.prototype, 'listGroups').mockReturnValue(catalog.promise);
+  const read = await mount(scope);
+  expect(read().window).toBeUndefined();
+  await act(async () => catalog.reject(new Error('Catalog offline')));
+  expect(read().window).toBeUndefined();
+  expect(read().error).toBe('Catalog offline');
+  expect(localStorage.getItem(`${key}:${section.window.id}`)).not.toBeNull();
+});
+
+it.each([false, true])('preserves explicit section-only Window routes (hosted: %s)', async hosted => {
+  const scope = `explicit-section-${hosted}`, section: WindowGroup = {
+    window: windowFixture('section'), bots: { rank: 'm', members: {} }, presentation: { window: false },
+  };
+  const key = saveCache(scope, section.window);
+  localStorage.setItem(`${key}:${section.window.id}`, JSON.stringify(section));
+  history.replaceState(null, '', `/?window=${section.window.id}`);
+  if (hosted) {
+    hostedWindows(section.window);
+    vi.spyOn(WindowWorkspaceClient.prototype, 'listGroups').mockResolvedValue([section]);
+    vi.spyOn(WindowWorkspaceClient.prototype, 'inspect').mockResolvedValue(section);
+  }
+  const read = await mount(scope, hosted);
+  expect(read().group).toEqual(section);
+  expect(read().window?.id).toBe(section.window.id);
+  expect(read().windows).toEqual([]);
+});
+
+it('accepts a fresher catalog appearance without discarding a background v1 journal edit', async () => {
+  const scope = 'https://background-fresh-catalog.example/', selected = windowFixture('selected'), background = windowFixture('background');
+  const key = saveCache(scope, selected); saveCache(scope, background);
+  const operation = { type: 'rename', title: 'Unconfirmed title' };
+  const mutation = { operationId: 'original-rename', issuedAt: Date.now(), baseRevision: 0, operation };
+  sessionStorage.setItem(`${key}:pending:${background.id}`, JSON.stringify({ version: 1, committed: background,
+    edits: [{ operation, revision: 0, mutation, uncertain: true }] }));
+  const section: WindowGroup = { window: { ...background, revision: 2, title: 'Server section' },
+    bots: { rank: 'm', members: {} }, presentation: { window: false } };
+  history.replaceState(null, '', `/?window=${selected.id}`);
+  hostedWindows(selected, background);
+  vi.spyOn(WindowWorkspaceClient.prototype, 'listGroups').mockResolvedValue([{ window: selected }, section]);
+  const receipt = deferred<Awaited<ReturnType<WindowWorkspaceClient['operation']>>>();
+  vi.spyOn(WindowWorkspaceClient.prototype, 'operation').mockReturnValue(receipt.promise);
+  const read = await mount(scope);
+  expect(read().window?.id).toBe(selected.id);
+  expect(read().groups.find(group => group.window.id === background.id)).toMatchObject({
+    window: { revision: 3, title: 'Unconfirmed title' }, presentation: { window: false }, bots: { rank: 'm' },
+  });
+  expect(read().windows.map(window => window.id)).toEqual(['selected']);
+  const journal = JSON.parse(sessionStorage.getItem(`${key}:pending:${background.id}`)!);
+  expect(journal.committed).toEqual(section);
+  expect(journal.edits[0].mutation).toEqual(mutation);
+  expect(journal.edits[0].uncertain).toBe(true);
+});
+
+it('updates the catalog when a background v1 journal recovers a section-only group', async () => {
+  const scope = 'https://background-recovered-appearance.example/', selected = windowFixture('selected'), background = windowFixture('background');
+  const key = saveCache(scope, selected); saveCache(scope, background);
+  const operation = { type: 'rename', title: 'Unconfirmed title' };
+  sessionStorage.setItem(`${key}:pending:${background.id}`, JSON.stringify({ version: 1, committed: background,
+    edits: [{ operation, revision: 0, mutation: { operationId: 'original-rename', issuedAt: Date.now(), baseRevision: 0, operation }, uncertain: true }] }));
+  history.replaceState(null, '', `/?window=${selected.id}`);
+  const server = hostedWindows(selected, background);
+  const section: WindowGroup = { window: { ...background, revision: 2, title: 'Recovered section' },
+    bots: { rank: 'm', members: {} }, presentation: { window: false } };
+  server.inspect.mockImplementation(async id => id === background.id ? section : { window: selected });
+  const receipt = deferred<Awaited<ReturnType<WindowWorkspaceClient['operation']>>>();
+  server.operation.mockReturnValue(receipt.promise);
+  const read = await mount(scope);
+  expect(read().windows.map(window => window.id).sort()).toEqual(['background', 'selected']);
+  await act(async () => receipt.resolve({ operationId: 'original-rename', status: 'committed', revision: 1, committedAt: 1, expiresAt: Date.now() + 86400000 }));
+  await until(() => expect(sessionStorage.getItem(`${key}:pending:${background.id}`)).toBeNull());
+  expect(read().window?.id).toBe(selected.id);
+  expect(read().groups.find(group => group.window.id === background.id)).toEqual(section);
+  expect(read().windows.map(window => window.id)).toEqual(['selected']);
+  expect(JSON.parse(localStorage.getItem(`${key}:${background.id}`)!)).toEqual(section);
+});
+
+it('restores a Window to the catalog when its appearance removal is refused after switching away', async () => {
+  const scope = 'https://background-refused-appearance.example/', first = windowFixture('first'), second = windowFixture('second');
+  const group: WindowGroup = { window: first, bots: { rank: 'm', members: {} } };
+  history.replaceState(null, '', `/?window=${first.id}`);
+  const server = hostedWindows(first, second);
+  vi.spyOn(WindowWorkspaceClient.prototype, 'listGroups').mockResolvedValue([group, { window: second }]);
+  server.inspect.mockImplementation(async id => id === first.id ? group : { window: second });
+  const read = await mount(scope);
+  let pending!: Promise<void>;
+  await act(async () => { pending = read().operate({ type: 'window.remove' }); void pending.catch(() => {}); });
+  expect(read().windows.map(window => window.id)).toEqual(['second']);
+  await act(async () => read().open(second.id));
+  const request = server.requests[0]!;
+  await act(async () => {
+    request.response.resolve({ ...group, result: { operationId: request.mutation.operationId, status: 'rejected', revision: first.revision,
+      code: 'last_appearance', message: 'Appearance removal refused', committedAt: 1, expiresAt: Date.now() + 86400000 } });
+    await expect(pending).rejects.toThrow('Appearance removal refused');
+  });
+  expect(read().window?.id).toBe(second.id);
+  expect(read().groups.find(item => item.window.id === first.id)).toEqual(group);
+  expect(read().windows.map(window => window.id).sort()).toEqual(['first', 'second']);
+});
 
 it('edits a cached Window while hosted inspection remains pending', async () => {
   const scope = 'https://local-first-cache.example/';

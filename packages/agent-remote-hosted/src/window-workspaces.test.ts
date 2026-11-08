@@ -343,7 +343,7 @@ it('keeps a bot on its conversation whichever client changes it', async () => {
   const f = await fixture(); await f.create();
   await f.call('/window/operations', 'POST', f.mutation('as-section', 0, { type: 'bots.add', rank: 'm' }));
   const rebind = await f.call('/window/operations', 'POST', f.mutation('rebind', 1, { type: 'view.bind', viewId: 'primary', binding: { ...binding, nativeSessionId: 'other' } }));
-  expect(rebind.body.result).toMatchObject({ status: 'rejected', code: 'bot_view' });
+  expect(rebind.body.result).toMatchObject({ status: 'rejected', code: 'bot_view', revision: 1 });
   const retitle = await f.call('/window/operations', 'POST', f.mutation('retitle', 1, { type: 'view.bind', viewId: 'primary', binding: { ...binding, title: 'Renamed' } }));
   expect(retitle.body.result.status).toBe('committed');
   const details = await f.call('/window/operations', 'POST', f.mutation('label', 2, { type: 'bot.update', viewId: 'primary', details: { label: 'Writer', pinned: true } }));
@@ -363,4 +363,12 @@ it('lets other edits through when an older Worker left a session as a bot twice'
   const renamed = await restarted.call('/one/operations', 'POST', restarted.mutation('rename-one', 0, { type: 'rename', title: 'Renamed' }));
   expect(renamed.body.result).toMatchObject({ status: 'rejected', code: 'bot_session_taken', message: 'This session is already a bot in "Two".' });
   expect((await restarted.call('/one/operations', 'POST', restarted.mutation('unsection-one', 0, { type: 'bots.remove' }))).body.result.status).toBe('committed');
+});
+
+it('checks bots only among one user\'s groups', async () => {
+  const f = await fixture(); await f.create();
+  const saved = structuredClone(f.saved());
+  const others = { subject: 'someone-else', id: 'theirs', window: sectionWindow('theirs', 'native', 'Theirs'), bots: { rank: 'm', members: {} }, generation: 0, receipts: [] };
+  const restarted = await fixture({ ...saved, workspaceWindows: [...saved.workspaceWindows!, others] });
+  expect((await restarted.call('/window/operations', 'POST', restarted.mutation('mine', 0, { type: 'bots.add', rank: 'n' }))).body.result.status).toBe('committed');
 });

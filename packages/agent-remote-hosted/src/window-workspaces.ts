@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import {
   decodeWorkspaceWindow, hasWindowAppearance, isWindowBots, isWindowDeleteRequest, isWindowGroup, isWindowGroupCreateRequest, isWindowGroupMutation,
-  isWindowOperationResult, isWindowPresentation, isWindowSessionBinding, applyGroupOperation, duplicateBot, pruneBotDetails, WindowGroupError,
+  isWindowOperationResult, isWindowPresentation, isWindowSessionBinding, applyGroupOperation, duplicateBot, groupBotViews, pruneBotDetails, WindowGroupError,
   WINDOW_OPERATION_RETENTION_MS,
   type WindowBots, type WindowDeleteRequest, type WindowGroup, type WindowGroupCreateRequest, type WindowGroupMutation,
   type WindowOperationResult, type WindowPresentation, type WindowSessionBinding, type WorkspaceWindow,
@@ -91,9 +91,12 @@ export function createWindowWorkspaces(state: RelayState, canReadSession: (subje
     if (window.views.some(view => view.binding && !canReadSession(subject, view.binding))) fail(403, 'session_forbidden', 'A referenced session is unavailable.');
   }
   /** Rule 5 for the groups a change replaces (by ID; null removes one): none of their bots may be a bot elsewhere. */
-  function uniqueBots(rows: readonly SavedWorkspaceWindow[], subject: string, changed: ReadonlyMap<string, WindowGroup | null>) {
-    const unchanged = rows.filter(row => row.subject === subject && !row.deleted && !changed.has(row.id)).map(windowGroup);
-    const duplicate = duplicateBot(unchanged, [...changed.values()].filter((group): group is WindowGroup => group !== null));
+  function uniqueBots(subject: string, changed: ReadonlyMap<string, WindowGroup | null>) {
+    const groups = [...changed.values()].filter((group): group is WindowGroup => group !== null);
+    if (!groups.some(group => groupBotViews(group).length)) return;
+    // The committed rows: the ones this change replaces are left out by ID, so the draft is not needed.
+    const unchanged = (state.read().workspaceWindows ?? []).filter(row => row.subject === subject && !row.deleted && !changed.has(row.id)).map(windowGroup);
+    const duplicate = duplicateBot(unchanged, groups);
     if (duplicate) fail(409, 'bot_session_taken', `This session is already a bot in "${duplicate.group.window.title}".`);
   }
   /** A refusal's code: service and group rules name theirs; other layout errors stay generic, as before. */
@@ -144,7 +147,7 @@ export function createWindowWorkspaces(state: RelayState, canReadSession: (subje
       const outcome = await state.mutate(draft => {
         if (principal.authorize?.() === false) fail(401, 'unauthorized', 'Authorization is unavailable.');
         const rows = draft.workspaceWindows ??= []; let row = rows.find(row => row.subject === principal.subject && row.id === input.window.id);
-        if (!row) { time(input.issuedAt); bindings(principal.subject, input.window); if (input.window.revision !== 0) fail(400, 'invalid_revision', 'New Windows start at revision zero.'); if (rows.length >= 10000) fail(429, 'window_capacity', 'Window capacity reached.'); uniqueBots(rows, principal.subject, new Map([[input.window.id, group]])); row = { subject: principal.subject, id: input.window.id, generation: 0, receipts: [] }; rows.push(row); }
+        if (!row) { time(input.issuedAt); bindings(principal.subject, input.window); if (input.window.revision !== 0) fail(400, 'invalid_revision', 'New Windows start at revision zero.'); if (rows.length >= 10000) fail(429, 'window_capacity', 'Window capacity reached.'); uniqueBots(principal.subject, new Map([[input.window.id, group]])); row = { subject: principal.subject, id: input.window.id, generation: 0, receipts: [] }; rows.push(row); }
         return settle(row, input, () => { if (row!.window || row!.deleted) fail(409, 'window_exists', 'Window identity is already used.'); store(row!, structuredClone(group)); });
       }); notify(principal.subject, input.window.id); return outcome;
     },
@@ -160,7 +163,7 @@ export function createWindowWorkspaces(state: RelayState, canReadSession: (subje
           if (input.operation.type === 'delete') { deleteRow(row); return; }
           const next = applyGroupOperation(windowGroup(row), input.operation);
           bindings(principal.subject, next.window);
-          uniqueBots(draft.workspaceWindows!, principal.subject, new Map([[id, next]]));
+          uniqueBots(principal.subject, new Map([[id, next]]));
           store(row, next);
         });
       }); notify(principal.subject, id); return outcome;

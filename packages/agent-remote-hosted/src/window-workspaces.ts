@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import {
-  decodeWorkspaceWindow, hasWindowAppearance, isWindowDeleteRequest, isWindowGroup, isWindowGroupCreateRequest, isWindowMutation,
-  isWindowOperationResult, isWindowSessionBinding, applyWindowOperation, WINDOW_OPERATION_RETENTION_MS,
+  decodeWorkspaceWindow, hasWindowAppearance, isWindowBots, isWindowDeleteRequest, isWindowGroup, isWindowGroupCreateRequest, isWindowMutation,
+  isWindowOperationResult, isWindowPresentation, isWindowSessionBinding, applyWindowOperation, pruneBotDetails, WINDOW_OPERATION_RETENTION_MS,
   type WindowBots, type WindowDeleteRequest, type WindowGroup, type WindowGroupCreateRequest, type WindowMutation,
   type WindowOperationResult, type WindowPresentation, type WindowSessionBinding, type WorkspaceWindow,
 } from '@orchardworks/agent-remote-protocol';
@@ -43,17 +43,19 @@ function canonical(value: unknown): string {
   if (value && typeof value === 'object') return '{' + Object.keys(value).sort().map(key => JSON.stringify(key) + ':' + canonical((value as Record<string, unknown>)[key])).join(',') + '}';
   return JSON.stringify(value);
 }
-/** The group a stored row holds; only for rows that are not deleted. */
+/** The group a stored row holds, without details left for views that are no longer bots; only for rows that are not deleted. */
 export function windowGroup(row: SavedWorkspaceWindow): WindowGroup {
-  return { window: row.window!, ...(row.bots ? { bots: row.bots } : {}), ...(row.presentation ? { presentation: row.presentation } : {}) };
+  return pruneBotDetails({ window: row.window!, ...(row.bots ? { bots: row.bots } : {}), ...(row.presentation ? { presentation: row.presentation } : {}) });
 }
 function store(row: SavedWorkspaceWindow, group: WindowGroup) {
   row.window = group.window;
   if (group.bots) row.bots = group.bots; else delete row.bots;
   if (group.presentation) row.presentation = group.presentation; else delete row.presentation;
 }
+/** A deleted row keeps only its identity, generation and receipts. */
+function deleteRow(row: SavedWorkspaceWindow) { delete row.window; delete row.bots; delete row.presentation; row.deleted = true; }
 /** What a response says about one stored group: nothing once it is deleted. */
-const snapshot = (row: SavedWorkspaceWindow) => row.window ? windowGroup(row) : {};
+const described = (row: SavedWorkspaceWindow) => row.window ? windowGroup(row) : {};
 export function validWindowState(value: unknown): value is SavedWorkspaceWindow[] {
   if (!Array.isArray(value) || value.length > 10000) return false;
   const ids = new Set<string>();
@@ -63,9 +65,12 @@ export function validWindowState(value: unknown): value is SavedWorkspaceWindow[
       || !Array.isArray(row.receipts) || row.receipts.length > 4096) return false;
     const key = JSON.stringify([row.subject, row.id]); if (ids.has(key)) return false; ids.add(key);
     if (row.manager && (row.manager.generation !== row.generation || !isWindowSessionBinding(row.manager.session))) return false;
-    const appearances = row.bots !== undefined || row.presentation !== undefined;
-    if (row.deleted ? appearances : appearances && !isWindowGroup({ window: decodeWorkspaceWindow(row.window),
-      ...(row.bots === undefined ? {} : { bots: row.bots }), ...(row.presentation === undefined ? {} : { presentation: row.presentation }) })) return false;
+    // An older Worker keeps these fields without knowing them: a row it deleted may still carry them, and its edits may leave details
+    // for views that are no longer bots. Both are inert, so only a live row's group is checked, without such details.
+    // The shape checks come first because pruning assumes a well-formed `bots`.
+    if (!row.deleted && (row.bots !== undefined || row.presentation !== undefined)
+      && ((row.bots !== undefined && !isWindowBots(row.bots)) || (row.presentation !== undefined && !isWindowPresentation(row.presentation))
+        || !isWindowGroup(windowGroup({ ...row, window: decodeWorkspaceWindow(row.window) })))) return false;
     const operations = new Set<string>();
     return row.receipts.every((receipt: SavedWindowReceipt) => {
       if (!/^[a-f0-9]{64}$/.test(receipt.fingerprint) || !isWindowOperationResult(receipt.result) || Object.keys(receipt).some(key => !['fingerprint', 'result'].includes(key)) || operations.has(receipt.result.operationId)) return false;
@@ -90,7 +95,7 @@ export function createWindowWorkspaces(state: RelayState, canReadSession: (subje
     const fingerprint = hash(canonical(input)); const previous = row.receipts.find(item => item.result.operationId === input.operationId);
     if (previous && previous.result.expiresAt > now()) {
       if (previous.fingerprint !== fingerprint) fail(409, 'operation_conflict', 'Operation ID was used with different input.');
-      return { result: previous.result, ...snapshot(row) };
+      return { result: previous.result, ...described(row) };
     }
     time(input.issuedAt);
     if (previous) fail(410, 'operation_expired', 'Operation result expired.');
@@ -103,7 +108,7 @@ export function createWindowWorkspaces(state: RelayState, canReadSession: (subje
     }
     const result: WindowOperationResult = { operationId: input.operationId, status: code ? 'rejected' : 'committed', revision: row.window?.revision ?? ('baseRevision' in input ? input.baseRevision + (code ? 0 : 1) : 0), committedAt: now(), expiresAt: now() + WINDOW_OPERATION_RETENTION_MS, ...(code ? { code, message } : {}) };
     row.receipts.push({ fingerprint, result });
-    return { result, ...snapshot(row) };
+    return { result, ...described(row) };
   }
   function replayLegacy(principal: WindowPrincipal, id: string | undefined, input: unknown) {
     if (!id || !input || typeof input !== 'object' || typeof (input as { operationId?: unknown }).operationId !== 'string') fail(400, 'invalid_operation', 'A valid Window operation is required.');
@@ -142,8 +147,8 @@ export function createWindowWorkspaces(state: RelayState, canReadSession: (subje
         return settle(row, input, () => {
           if (row.deleted) fail(404, 'window_not_found', 'Window was deleted.');
           if (row.window!.revision !== input.baseRevision) fail(409, 'revision_conflict', 'Read the current Window revision.');
-          if (input.operation.type === 'delete') { delete row.window; delete row.bots; delete row.presentation; row.deleted = true; }
-          else { const next = applyWindowOperation(row.window!, input.operation); bindings(principal.subject, next); store(row, { ...windowGroup(row), window: next }); }
+          if (input.operation.type === 'delete') deleteRow(row);
+          else { const next = applyWindowOperation(row.window!, input.operation); bindings(principal.subject, next); store(row, pruneBotDetails({ ...windowGroup(row), window: next })); }
         });
       }); notify(principal.subject, id); return outcome;
     },

@@ -79,6 +79,8 @@ export const windowSessionIdentity = (binding: Pick<WindowSessionBinding, 'hostI
 export function groupBotViews(group: WindowGroup): Array<WindowView & { binding: WindowSessionBinding }> {
   return group.bots ? group.window.views.filter(isBotView) : [];
 }
+export const isWindowBots = (value: unknown): value is WindowBots => Value.Check(WindowBots, value);
+export const isWindowPresentation = (value: unknown): value is WindowPresentation => Value.Check(WindowPresentation, value);
 export const hasWindowAppearance = (group: WindowGroup): boolean => group.presentation?.window !== false;
 
 export function isWindowGroup(value: unknown): value is WindowGroup {
@@ -98,7 +100,7 @@ function fail(code: string, message: string): never { throw new WindowGroupError
 const clone = <T>(value: T): T => JSON.parse(JSON.stringify(value));
 
 /** Drops the details of views that are no longer bots, such as a closed view or one now showing history. */
-function pruned(group: WindowGroup): WindowGroup {
+export function pruneBotDetails(group: WindowGroup): WindowGroup {
   if (!group.bots) return group;
   const bots = new Set(groupBotViews(group).map(view => view.id));
   return { ...group, bots: { ...group.bots, members: Object.fromEntries(Object.entries(group.bots.members).filter(([viewId]) => bots.has(viewId))) } };
@@ -153,7 +155,7 @@ export function applyGroupOperation(source: WindowGroup, operation: WindowGroupO
   if (source.window.revision >= Number.MAX_SAFE_INTEGER) throw new WindowLayoutError('window_revision_limit', 'The Window revision limit has been reached.');
   let result = clone(source);
   // Prune after every edit so details never pass to a different bot that reuses a closed bot's view id.
-  for (const item of operation.type === 'batch' ? operation.operations : [operation]) result = pruned(edit(result, item));
+  for (const item of operation.type === 'batch' ? operation.operations : [operation]) result = pruneBotDetails(edit(result, item));
   result = { ...result, window: { ...result.window, revision: source.window.revision + 1 } };
   if (!isWindowGroup(result)) throw new WindowLayoutError('invalid_window_group', 'The resulting group is invalid.');
   return result;
@@ -190,7 +192,7 @@ function nextRevision(window: WorkspaceWindow): number {
   return window.revision + 1;
 }
 function checked(group: WindowGroup): WindowGroup {
-  const result = pruned(group);
+  const result = pruneBotDetails(group);
   if (!isWindowGroup(result)) throw new WindowLayoutError('invalid_window_group', 'The resulting group is invalid.');
   return result;
 }

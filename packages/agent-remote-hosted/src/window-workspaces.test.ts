@@ -286,11 +286,41 @@ it('lists every group, keeping sections without a Window out of the list older p
   expect((await restarted.call('/section')).body.presentation).toEqual({ window: false });
 });
 
-it('refuses stored groups whose appearances or bot details are invalid', async () => {
+it('refuses malformed stored groups and ignores what an older Worker leaves behind', async () => {
   const f = await fixture(); await f.create();
   const saved = structuredClone(f.saved());
   const row = saved.workspaceWindows![0]!;
   expect(validateRelayState({ ...saved, workspaceWindows: [{ ...row, bots: { rank: 'm', members: {} } }] }, auth).workspaceWindows![0]!.bots).toEqual({ rank: 'm', members: {} });
   expect(() => validateRelayState({ ...saved, workspaceWindows: [{ ...row, presentation: { window: false } }] }, auth)).toThrow();
-  expect(() => validateRelayState({ ...saved, workspaceWindows: [{ ...row, bots: { rank: 'm', members: { missing: {} } } }] }, auth)).toThrow();
+  expect(() => validateRelayState({ ...saved, workspaceWindows: [{ ...row, bots: { rank: 'M', members: {} } }] }, auth)).toThrow();
+  // An older Worker keeps details for a view it closed, and keeps the section of a group it deleted.
+  const left = { ...saved, workspaceWindows: [
+    { ...row, bots: { rank: 'm', members: { missing: { label: 'Gone' } } } },
+    { subject: 'alice', id: 'gone', deleted: true as const, generation: 0, receipts: [], bots: { rank: 'n', members: {} } },
+  ] };
+  const restarted = await fixture(left);
+  expect((await restarted.call('/window')).body).toMatchObject({ window: { id: 'window' }, bots: { rank: 'm', members: {} } });
+  expect((await restarted.call('')).body.groups.map((group: { window: WorkspaceWindow }) => group.window.id)).toEqual(['window']);
+  expect((await restarted.call('/gone')).status).toBe(404);
+  // The next write drops what was left.
+  await restarted.call('/window/operations', 'POST', restarted.mutation('rename-window', 0, { type: 'rename', title: 'Renamed' }));
+  expect(restarted.saved().workspaceWindows![0]!.bots).toEqual({ rank: 'm', members: {} });
+});
+
+it('keeps a section through layout edits and drops it with the group', async () => {
+  const f = await fixture();
+  const created = await f.call('', 'POST', { operationId: 'create-linked', issuedAt: Date.now(), window: sectionWindow('linked', 'writer'),
+    bots: { rank: 'm', members: { writer: { label: 'Writer' } } } });
+  expect(created.body.result.status).toBe('committed');
+  const renamed = await f.call('/linked/operations', 'POST', f.mutation('rename-linked', 0, { type: 'rename', title: 'Renamed' }));
+  expect(renamed.body).toMatchObject({ result: { status: 'committed' }, window: { title: 'Renamed' }, bots: { rank: 'm', members: { writer: { label: 'Writer' } } } });
+  expect(f.saved().workspaceWindows![0]!.bots).toEqual({ rank: 'm', members: { writer: { label: 'Writer' } } });
+  const deleted = await f.call('/linked', 'DELETE', f.mutation('delete-linked', 1, { type: 'delete' }));
+  expect(deleted.body.result.status).toBe('committed');
+  expect(deleted.body).not.toHaveProperty('bots');
+  const row = f.saved().workspaceWindows![0]!;
+  expect(row.deleted).toBe(true);
+  expect(row).not.toHaveProperty('bots');
+  expect(row).not.toHaveProperty('presentation');
+  expect((await f.call()).body.groups).toEqual([]);
 });

@@ -171,21 +171,23 @@ export function duplicateBot(groups: readonly WindowGroup[]): { session: WindowS
   return undefined;
 }
 
-/** A view and the views attached to it or closing with it. */
-function family(window: WorkspaceWindow, root: string): Set<string> {
-  const ids = new Set([root]);
-  for (let changed = true; changed;) {
-    changed = false;
-    for (const view of window.views) if (!ids.has(view.id) && (view.attachedTo && ids.has(view.attachedTo) || view.closeWith && ids.has(view.closeWith))) {
-      ids.add(view.id); changed = true;
-    }
-  }
-  return ids;
-}
-/** Adds views in order, as one Window edit; their attached views follow their sources. */
+/** Adds views as one Window edit, each after the view it is attached to or closes with, so the Window stays valid at every step. */
 function appendViews(window: WorkspaceWindow, views: WindowView[]): WorkspaceWindow {
-  if (!views.length) return { ...window, revision: window.revision + 1 };
-  return applyWindowOperation(window, { type: 'batch', operations: views.map(view => ({ type: 'view.create' as const, view })) });
+  if (views.some(view => window.views.some(existing => existing.id === view.id))) fail('view_exists', 'The other group already has a view with this identity.');
+  if (window.views.length + views.length > WINDOW_VIEW_LIMIT) fail('view_limit', `A group holds at most ${WINDOW_VIEW_LIMIT} views.`);
+  if (!views.length) return { ...window, revision: nextRevision(window) };
+  const incoming = new Set(views.map(view => view.id)), created = new Set<string>(), pending = [...views], ordered: WindowView[] = [];
+  while (pending.length) {
+    const index = pending.findIndex(view => [view.attachedTo, view.closeWith].every(parent => !parent || !incoming.has(parent) || created.has(parent)));
+    if (index < 0) throw new WindowLayoutError('invalid_window_layout', 'The views refer to each other in a cycle.');
+    const [view] = pending.splice(index, 1);
+    created.add(view!.id); ordered.push(view!);
+  }
+  return applyWindowOperation(window, { type: 'batch', operations: ordered.map(view => ({ type: 'view.create' as const, view })) });
+}
+function nextRevision(window: WorkspaceWindow): number {
+  if (window.revision >= Number.MAX_SAFE_INTEGER) throw new WindowLayoutError('window_revision_limit', 'The Window revision limit has been reached.');
+  return window.revision + 1;
 }
 function checked(group: WindowGroup): WindowGroup {
   const result = pruned(group);
@@ -196,6 +198,7 @@ function checked(group: WindowGroup): WindowGroup {
 /** The target keeps its identity, title and selection, gains the source's views and bot details, and has every appearance either had. */
 export function mergeGroups(targetGroup: WindowGroup, sourceGroup: WindowGroup): WindowGroup {
   const target = clone(targetGroup), source = clone(sourceGroup);
+  if (target.window.id === source.window.id) fail('same_group', 'A group cannot be merged into itself.');
   const window = appendViews(target.window, source.window.views);
   const rankOf = target.bots?.rank ?? source.bots?.rank;
   const bots = rankOf === undefined ? undefined : { rank: rankOf, members: { ...source.bots?.members, ...target.bots?.members } };
@@ -207,7 +210,7 @@ export function mergeGroups(targetGroup: WindowGroup, sourceGroup: WindowGroup):
 export function splitGroup(group: WindowGroup, newId: string): { kept: WindowGroup; created: WindowGroup } {
   if (!group.bots || !hasWindowAppearance(group)) fail('not_linked', 'Only a group that is both a Window and a section can be separated.');
   if (newId === group.window.id) fail('window_exists', 'Window identity is already used.');
-  const kept = checked({ window: { ...clone(group.window), revision: group.window.revision + 1 } });
+  const kept = checked({ window: { ...clone(group.window), revision: nextRevision(group.window) } });
   const created = checked({ window: { ...clone(group.window), id: newId, revision: 0 }, bots: clone(group.bots), presentation: { window: false } });
   return { kept, created };
 }
@@ -219,17 +222,20 @@ export function transferBot(sourceGroup: WindowGroup, targetGroup: WindowGroup, 
   if (!source.bots || !view || !isBotView(view)) fail('bot_not_found', 'This bot no longer exists.');
   if (!target.bots) fail('section_missing', 'A bot moves only to a section.');
   if (source.window.id === target.window.id) fail('same_group', 'The bot is already in this section.');
-  const ids = family(source.window, viewId);
+  // The views that close with the bot leave with it.
+  const closed = applyWindowOperation(source.window, { type: 'view.close', viewId });
+  const staying = new Set(closed.views.map(candidate => candidate.id));
+  const leaving = source.window.views.filter(candidate => !staying.has(candidate.id));
+  if (leaving.some(candidate => candidate.attachedTo && staying.has(candidate.attachedTo))) fail('bot_attached_elsewhere', 'A view that closes with this bot is attached to a view that stays.');
   // A view that closed with something left behind no longer depends on it.
-  const moved = source.window.views.filter(candidate => ids.has(candidate.id)).map(candidate => {
-    if (!candidate.closeWith || ids.has(candidate.closeWith)) return candidate;
+  const moved = leaving.map(candidate => {
+    if (!candidate.closeWith || !staying.has(candidate.closeWith)) return candidate;
     const { closeWith: _closeWith, ...rest } = candidate;
     return rest;
   });
-  const details = source.bots.members[viewId];
+  const details = Object.fromEntries(moved.filter(candidate => Object.hasOwn(source.bots!.members, candidate.id)).map(candidate => [candidate.id, source.bots!.members[candidate.id]!]));
   return {
-    source: checked({ ...source, window: applyWindowOperation(source.window, { type: 'view.close', viewId }) }),
-    target: checked({ ...target, window: appendViews(target.window, moved),
-      bots: { ...target.bots, members: { ...target.bots.members, ...(details ? { [viewId]: details } : {}) } } }),
+    source: checked({ ...source, window: closed }),
+    target: checked({ ...target, window: appendViews(target.window, moved), bots: { ...target.bots, members: { ...target.bots.members, ...details } } }),
   };
 }

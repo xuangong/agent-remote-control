@@ -150,7 +150,8 @@ it('merges a Window into a section, keeping both appearances and the section ide
   expect(merged.presentation).toBeUndefined();
   expect(merged.bots?.members).toEqual({ writer: { label: 'Writer' } });
   expect(refusal(() => mergeGroups(target, { window: windowOf('clash', createWindowView('writer', session('d'), 'primary')) })))
-    .toBe('other:This view identity already exists.');
+    .toBe('view_exists');
+  expect(refusal(() => mergeGroups(target, target))).toBe('same_group');
 });
 
 it('separates a linked group into a Window and a section', () => {
@@ -175,4 +176,17 @@ it('moves a bot with its attached views to another section', () => {
   expect(refusal(() => transferBot(source, { window: target.window }, 'dock'))).toBe('section_missing');
   expect(refusal(() => transferBot(source, target, 'side'))).toBe('bot_not_found');
   expect(refusal(() => transferBot(source, source, 'dock'))).toBe('same_group');
+  expect(moved.source.window.revision).toBe(source.window.revision + 1);
+  expect(moved.target.window.revision).toBe(1);
+  const asking = applyGroupOperation(section(windowOf('three', createWindowView('main', session('a'), 'primary'),
+    { ...createWindowView('ask', session('e'), 'float'), closeWith: 'dock' }, createWindowView('dock', session('b')),
+    { ...createWindowView('side', session('c'), 'attached'), attachedTo: 'dock' })),
+    { type: 'batch', operations: [{ type: 'bot.update', viewId: 'dock', details: { label: 'Reviewer' } }, { type: 'bot.update', viewId: 'ask', details: { label: 'Asks' } }] });
+  const carried = transferBot(asking, target, 'dock');
+  expect(carried.source.window.views.map(view => view.id)).toEqual(['main']);
+  expect(carried.target.window.views.map(view => view.id)).toEqual(['lead', 'dock', 'side', 'ask']);
+  expect(carried.target.bots?.members).toEqual({ dock: { label: 'Reviewer' }, ask: { label: 'Asks' } });
+  const tangled = section(windowOf('four', createWindowView('dock', session('b')), createWindowView('main', session('a'), 'primary'),
+    { ...createWindowView('x', session('f'), 'attached'), attachedTo: 'main', closeWith: 'dock' }));
+  expect(refusal(() => transferBot(tangled, target, 'dock'))).toBe('bot_attached_elsewhere');
 });

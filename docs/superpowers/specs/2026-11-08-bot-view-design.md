@@ -118,9 +118,9 @@ Why beside and not inside: `WindowWorkspaceClient.list()` (`packages/agent-remot
 
 **Across groups.** `merge`, `split` and `transfer` change two rows. Each runs in one `state.mutate` (the whole deployment is one Durable Object), carries an operation ID and the base revisions of both groups, and leaves a receipt on both rows.
 
-**Checks.** After every edit the Relay checks rule 5 across the subject's rows, and rule 1 for `view.bind`. Bot details are bounded (labels, at most `WINDOW_VIEW_LIMIT` members); the group stays within the existing input size limit.
+**Checks.** After every edit the Relay checks rule 5 for the bots of the groups the edit changes (so a duplicate an older Worker left elsewhere does not block unrelated edits), and rule 1 for `view.bind`. Bot details are bounded (labels, at most `WINDOW_VIEW_LIMIT` members); the group stays within the existing input size limit.
 
-**Compatibility and deployment.** The Worker is deployed first; it changes nothing visible until a client adds a Bot appearance. Before that deployment, check whether an older Worker accepts a stored state with the new row fields (`validWindowState` ignores unknown row keys, but the Relay snapshot format may not); if not, record the version below which the Worker can no longer be rolled back, as earlier Window changes did.
+**Compatibility and deployment.** The Worker is deployed first; it changes nothing visible until a client adds a Bot appearance. Older Workers accept a stored state with the new row fields: `validWindowState` ignores unknown row keys and the record codec stores each row whole. What an older Worker can leave behind after a rollback (a deleted row that keeps its section, details of views that are no longer bots) is ignored by the new Relay and dropped on the next write, so the Worker can still be rolled back and forward.
 
 ## Command line
 

@@ -12,6 +12,21 @@
 
 ---
 
+## Changes during execution
+
+Reviews changed the code in these ways; the task text below keeps the original plan.
+
+- Task 2: a view bound to a subagent's session (`parentNativeSessionId`) is not a bot; ranks never end in `0`; `isBotView` and `groupBotViews` narrow `binding`.
+- Task 3: failures that are not rule refusals (an invalid group or operation, the revision limit) throw `WindowLayoutError`, so only rule codes reach clients; a batch advances the revision once; details are pruned after every edit.
+- Task 4: `appendViews` creates each view after the view it is attached to or closes with, and refuses `view_exists` and `view_limit`; `transferBot` moves exactly what `view.close` removes, carries every moved bot's details and refuses `bot_attached_elsewhere`; `mergeGroups` refuses `same_group`.
+- Task 5: stored rows tolerate what an older Worker leaves (a deleted row's section, details of views that are no longer bots); `windowGroup(row)` prunes; `pruneBotDetails`, `isWindowBots` and `isWindowPresentation` are exported; `deleteRow` clears a row.
+- Task 6: `duplicateBot(unchanged, changed)` checks only the changed groups' bots; `uniqueBots(subject, changed)` reads committed rows and returns early when no changed group has a bot.
+- Task 7: `settleAcross` writes one receipt per distinct row and fingerprints `{ kind, id, input }`, so a receipt answers only the same request sent to the same group.
+- Task 8: `across` accepts only the groups the request names (a merged source must be null) and checks the receipt revision; `isWindowRejection` is exported and the recovery contract is documented on `merge`.
+- Task 9: the document also covers compatibility with older Workers.
+
+---
+
 ## File structure
 
 | File | Responsibility |

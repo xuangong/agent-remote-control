@@ -13,6 +13,34 @@ import { ConversationConnections } from '../conversation-connections.js';
 const star = { hostId: 'host', providerId: 'codex', nativeSessionId: 'native', title: 'Research', starredAt: 1 };
 afterEach(() => { vi.restoreAllMocks(); localStorage.clear(); });
 
+it('removes Track observers in Bot scope without changing saved membership, and observes additional native bindings', async () => {
+  const scope = 'http://localhost/u/mode-scope/'; saveTrackedSessions(scope, [star]);
+  const bot = { hostId: 'host', providerId: 'codex', nativeSessionId: 'bot', title: 'Bot' };
+  const attach = vi.spyOn(SessionDirectoryClient.prototype, 'attach').mockImplementation(async (_provider, nativeSessionId) => ({ agentId: `agent-${nativeSessionId}` }));
+  const closed: string[] = [], connected: string[] = [];
+  const transport = { connect: (agentId: string, listener: Parameters<RemoteAgentTransport['connect']>[1]) => {
+    connected.push(agentId); queueMicrotask(() => listener.onOpen());
+    return { send() {}, close() { closed.push(agentId); } };
+  }, onDiagnostic: () => () => {}, onProtocolMessage: () => () => {} } as unknown as RemoteAgentTransport;
+  let tracking!: SessionTracking, change!: (botMode: boolean) => void;
+  function Fixture() {
+    const [botMode, setBotMode] = useState(false); change = setBotMode;
+    tracking = useSessionTracking(scope, transport, undefined, [], [], undefined, true, [], undefined,
+      botMode ? { includeTracked: false, additionalSessions: [bot] } : {});
+    return <>{tracking.observers}</>;
+  }
+  await render(<Fixture />);
+  await vi.waitFor(() => expect(connected).toEqual(['agent-native']));
+  await act(async () => change(true));
+  await vi.waitFor(() => expect(connected).toEqual(['agent-native', 'agent-bot']));
+  expect(closed).toEqual(['agent-native']); expect(tracking.sessions).toEqual([star]);
+  expect(readTrackedSessions(scope)).toEqual([star]);
+  expect(attach.mock.calls.map(([, id]) => id)).toEqual(['native', 'bot']);
+  await act(async () => change(false));
+  await vi.waitFor(() => expect(connected).toEqual(['agent-native', 'agent-bot', 'agent-native']));
+  expect(closed).toEqual(['agent-native', 'agent-bot']); expect(readTrackedSessions(scope)).toEqual([star]);
+});
+
 it.each(['toggle', 'rename', 'reconcile'] as const)('uses only the new scope for a %s before passive effects', async operation => {
   const transport = {} as RemoteAgentTransport;
   const next = { ...star, nativeSessionId: 'new-scope' };

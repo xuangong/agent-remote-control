@@ -10,10 +10,59 @@ import { ForkStore, referenceForkContext } from './session-forks.js';
 import { replicaState } from './test/fixtures.js';
 import { render, setPromptText, promptText } from './test/setup.js';
 import { WorkspaceReady } from './workspace-access.js';
+import * as trackingHooks from './hooks/useSessionTracking.js';
+import { botGroup, botTarget, mountBotApp, seedGroup, until } from './test/bot-mode-fixtures.js';
+import type { SessionObservation } from './tracking-state.js';
+import type { SessionEntry } from './session-tree.js';
 
 const baseUrl = 'http://localhost/u/alice/';
 const star: SessionStar = { hostId: 'host', providerId: 'recorded', nativeSessionId: 'tracked', title: 'Tracked research', starredAt: 1 };
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); localStorage.clear(); window.history.replaceState(null, '', '/'); });
+
+it('scopes App reminders to the current Bot roster and routes clicks by its current group/view identity', async () => {
+  const scope = 'http://localhost/u/bot-attention/';
+  const a = botGroup('A'), b = botGroup('B'); b.bots!.members.B2 = { hidden: true };
+  seedGroup(scope, a); seedGroup(scope, b); history.replaceState(null, '', '/?window=A');
+  const tracked = { ...botTarget('Tracked'), starredAt: 1 }; saveTrackedSessions(scope, [tracked]);
+  vi.spyOn(SessionStarsClient.prototype, 'snapshot').mockResolvedValue({ revision: 0, folders: [], stars: [{ ...tracked, favoriteId: 'Tracked', folderId: null, order: 0, available: true, online: true }] });
+  const notices: { title: string; options: NotificationOptions; onclick?: () => void; close: ReturnType<typeof vi.fn> }[] = [];
+  vi.stubGlobal('Notification', class { static permission = 'granted'; close = vi.fn(); constructor(readonly title: string, readonly options: NotificationOptions) { notices.push(this); } });
+  vi.spyOn(window, 'focus').mockImplementation(() => {});
+  let report!: (session: SessionEntry, value: SessionObservation) => void;
+  const useTracking = trackingHooks.useSessionTracking;
+  vi.spyOn(trackingHooks, 'useSessionTracking').mockImplementation((...args) => { report = args[8]!; return useTracking(...args); });
+  const app = await mountBotApp(scope, { hosted: true });
+  const emit = async (target: SessionEntry, activity: 'running' | 'idle' | 'waiting', seq: number) => {
+    await act(async () => report(target, { connection: 'ready', activity, cursor: { epoch: target.nativeSessionId, seq } }));
+    await act(async () => {});
+  };
+  try {
+    await until(() => expect(app.workspace().window?.id).toBe('A'));
+    await emit(tracked, 'running', 1); await emit(tracked, 'idle', 2);
+    await until(() => expect(notices).toHaveLength(1));
+    await app.switchMode('bot'); await act(async () => app.button('A1').click());
+    await until(() => expect(app.container.querySelector('.lab-bot-conversation [role="textbox"]')).not.toBeNull());
+    expect(notices[0]!.close).toHaveBeenCalledOnce();
+    for (const target of [tracked, botTarget('B2'), botTarget('Other'), botTarget('Ask')]) {
+      await emit(target, 'running', 3); await emit(target, 'idle', 4); await emit(target, 'waiting', 5);
+    }
+    expect(notices).toHaveLength(1);
+    await emit(botTarget('B1'), 'running', 1); await emit(botTarget('B1'), 'idle', 2); await emit(botTarget('B1'), 'waiting', 3);
+    await until(() => expect(notices).toHaveLength(3));
+    const windowBefore = structuredClone(app.workspace().window);
+    await act(async () => notices[1]!.onclick!());
+    await until(() => expect(app.container.querySelector('[aria-label="Bots"] [aria-current="true"]')?.getAttribute('aria-label')).toBe('B1'));
+    expect(app.workspace().window).toEqual(windowBefore);
+    await act(async () => app.workspace().operateGroup('B', { type: 'bot.update', viewId: 'B1', details: { hidden: true } }));
+    await act(async () => notices[2]!.onclick!());
+    expect(app.container.querySelector('[aria-label="Bots"] [aria-current="true"]')).toBeNull();
+    expect(app.workspace().window).toEqual(windowBefore); expect(readTrackedSessions(scope)).toEqual([tracked]);
+    await app.switchMode('window');
+    await emit(tracked, 'idle', 6); expect(notices).toHaveLength(3);
+    await emit(tracked, 'running', 7); await emit(tracked, 'waiting', 8);
+    await until(() => expect(notices).toHaveLength(4));
+  } finally { await app.close(); }
+});
 
 async function fixture(target: SessionStar, activityReady = true, other?: SessionStar, savedFavorites?: SessionStar[], navigation?: { compact: boolean }, initiallyAuthorized = true, showTrack = true) {
   if (showTrack) localStorage.setItem('agent-remote:track-view', 'true');

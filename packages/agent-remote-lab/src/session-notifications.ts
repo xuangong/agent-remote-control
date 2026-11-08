@@ -15,10 +15,26 @@ export class SessionAttentionNotifications {
   private readonly observations = new Map<string, SessionObservation>();
   private readonly displayed = new Set<string>();
   private readonly routes = new Map<string, () => void>();
-  private readonly notifications = new Set<Notification>();
+  private readonly notifications = new Map<Notification, string>();
+  private eligible: Map<string, symbol> | undefined;
   private disposed = false;
   constructor(private readonly scope: string, private readonly enabled: () => boolean,
     private readonly open: (session: SessionEntry) => void) {}
+
+  setEligible(sessions: readonly SessionEntry[]): void {
+    const keys = new Set(sessions.map(sessionKey));
+    const next = new Map<string, symbol>();
+    for (const key of keys) next.set(key, this.eligible?.get(key) ?? Symbol(key));
+    this.eligible = next;
+    for (const key of this.observations.keys()) if (!keys.has(key)) this.observations.delete(key);
+    for (const [notification, key] of this.notifications) if (!keys.has(key)) {
+      notification.close(); this.notifications.delete(notification);
+    }
+  }
+
+  private accepts(key: string, admission?: symbol): boolean {
+    return !this.disposed && (!this.eligible || this.eligible.has(key) && (!admission || this.eligible.get(key) === admission));
+  }
 
   setDisplayed(sessions: readonly SessionEntry[]): void {
     const keys = new Set(sessions.map(sessionKey));
@@ -41,7 +57,10 @@ export class SessionAttentionNotifications {
 
   async observe(session: SessionEntry, next: SessionObservation): Promise<void> {
     const key = sessionKey(session), previous = this.observations.get(key);
-    if (this.disposed || next.connection !== 'ready' || !next.activity) return;
+    if (!this.accepts(key)) return;
+    if (!this.enabled()) { this.observations.delete(key); return; }
+    if (next.connection !== 'ready' || !next.activity) return;
+    const admission = this.eligible?.get(key);
     this.observations.set(key, next);
     const visibleResult = next.background?.status === 'visible' && (next.background.id !== previous?.background?.id || previous?.background?.status !== 'visible');
     if (!previous?.activity || next.activity === previous.activity && !visibleResult) return;
@@ -55,7 +74,7 @@ export class SessionAttentionNotifications {
     try {
       const id = crypto.subtle ? await fingerprint(identity) : identity;
       const deliver = () => {
-        if (this.disposed || !this.enabled() || Notification.permission !== 'granted') return;
+        if (!this.accepts(key, admission) || !this.enabled() || Notification.permission !== 'granted') return;
         let receipts: string[] = [];
         try {
           const stored: unknown = JSON.parse(localStorage.getItem(ledgerKey) ?? '[]');
@@ -65,9 +84,12 @@ export class SessionAttentionNotifications {
         const notification = new Notification(reminder === 'waiting' ? 'Session needs your input' : 'Session completed', {
           body: session.title, tag: `arc:${id}`,
         });
-        this.notifications.add(notification);
+        this.notifications.set(notification, key);
         notification.onclose = () => this.notifications.delete(notification);
-        notification.onclick = () => { window.focus(); this.open(session); notification.close(); };
+        notification.onclick = () => {
+          if (this.accepts(key, admission) && this.enabled()) { window.focus(); this.open(session); }
+          notification.close();
+        };
         // Only opaque, bounded deduplication receipts are persisted; never message contents.
         if (next.cursor && crypto.subtle) try { localStorage.setItem(ledgerKey, JSON.stringify([...receipts, id].slice(-256))); } catch { /* Tag fallback. */ }
       };
@@ -84,7 +106,7 @@ export class SessionAttentionNotifications {
     this.disposed = true;
     for (const release of this.routes.values()) release();
     this.routes.clear(); this.observations.clear();
-    for (const notification of this.notifications) notification.close();
+    for (const notification of this.notifications.keys()) notification.close();
     this.notifications.clear();
   }
 }

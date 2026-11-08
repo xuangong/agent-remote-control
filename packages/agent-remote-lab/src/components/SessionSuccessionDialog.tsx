@@ -18,10 +18,11 @@ function preferredTarget(description: SuccessionDescription, initialProvider?: s
 }
 
 /** Retains one operation until both its outcome and the current conversation are confirmed. */
-export function SessionSuccessionDialog({ source, directory, assertAccess, assertSource, resume, resumeCancellation, initialProvider, blockedReason, visible = true, onIntent, onSettled, onClose, onOpen, onGatedChange, preparation, autoPrepare = false, onPreparing }: {
+export function SessionSuccessionDialog({ source, directory, assertAccess, assertSource, resume, resumeCancellation, initialProvider, blockedReason, visible = true, progressPortal = false, onIntent, onSettled, onClose, onOpen, onGatedChange, preparation, autoPrepare = false, onPreparing }: {
   source: OpenedSession; directory: SessionSuccessionDirectory; assertAccess(): void; assertSource(): void;
   preparation?: NativePrefixSelection; autoPrepare?: boolean; onPreparing?(operation: SuccessionPrepareInput): Promise<void>;
   resume?: SuccessionPrepareInput; resumeCancellation?: boolean; initialProvider?: string; blockedReason?: string; visible?: boolean;
+  progressPortal?: boolean;
   onIntent(operation: SuccessionPrepareInput, cancelRequested: boolean): void;
   onSettled(result: SuccessionActionResult): Promise<void>; onClose(retain?: boolean): void | Promise<void>; onOpen?(): void; onGatedChange?(gated: boolean): void;
 }) {
@@ -273,7 +274,7 @@ export function SessionSuccessionDialog({ source, directory, assertAccess, asser
     {error && !busy ? <button type="button" onClick={cleanupRequested.current ? close : () => void run('prepare')}>{cleanupRequested.current ? 'Retry cleanup' : 'Retry preparation'}</button> : null}
     <button type="button" onClick={close}>Close</button>
   </section> : null;
-  return <section className="lab-handoff-notice" aria-label="Handoff">
+  const progressView = <section className={`lab-handoff-notice${progressPortal ? ' lab-bot-handoff-notice' : ''}`} aria-label="Handoff">
     <div className="lab-handoff-summary">
       <div className="lab-handoff-message"><p role="status" aria-live="polite" title={progress}>{progress}</p></div>
       <div className="lab-handoff-quick-actions">
@@ -303,4 +304,5 @@ export function SessionSuccessionDialog({ source, directory, assertAccess, asser
       </div>
     </div> : null}
   </section>;
+  return progressPortal ? createPortal(progressView, document.body) : progressView;
 }

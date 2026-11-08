@@ -2,7 +2,7 @@ import { WindowSessionBridgeContext } from './window-session-bridge-context.js';
 import { parseWindowFeature } from './window-feature-views.js';
 import { windowTitleEdits } from './window-titles.js';
 import { useWindowSessionBridge } from './hooks/useWindowSessionBridge.js';
-import { createWindowView, nativeSessionRefKey, primaryWindowViews, windowPrimaryViewId, type WindowEdit } from '@orchardworks/agent-remote-protocol';
+import { createWindowView, isBotView, nativeSessionRefKey, primaryWindowViews, windowPrimaryViewId, type WindowEdit } from '@orchardworks/agent-remote-protocol';
 import { windowSessionBinding } from './window-workspace.js';
 import { useWorkbenchMode } from './hooks/useWorkbenchMode.js';
 import { useBotWorkspace } from './hooks/useBotWorkspace.js';
@@ -457,7 +457,7 @@ function AppContent({
     const place = navigation.place, group = windowWorkspace.readGroup(confirmedBot.groupId), view = group?.window.views.find(view => view.id === confirmedBot.viewId);
     if (place?.kind !== 'bot' || place.groupId !== confirmedBot.groupId || place.viewId !== confirmedBot.viewId
       || windowWorkspace.deletedWindowIds.includes(confirmedBot.groupId)
-      || group && (!group.bots || !view?.binding || group.bots.members[confirmedBot.viewId]?.hidden || windowBindingKey(view.binding) !== confirmedBot.bindingKey)) botPresentation.confirmed = undefined;
+      || group && (!group.bots || !view || !isBotView(view) || group.bots.members[confirmedBot.viewId]?.hidden || windowBindingKey(view.binding) !== confirmedBot.bindingKey)) botPresentation.confirmed = undefined;
   }
   const primaryGroups = sharedWindow ? primaryWindowViews(sharedWindow) : [];
   const [mountedViewSessions, setMountedViewSessions] = useState<Record<string, OpenedSession & { viewId: string }>>({});
@@ -1223,8 +1223,8 @@ function AppContent({
   const [teamReveal, setTeamReveal] = useState<{ baseUrl: string; teamId: string; requestId: string }>();
   const windowView = useWindowVisibility();
   // Windows and their floating entry show the states of their sessions whenever there is a Window to show.
-  const sessionStates = useSessionStates(transport, windowOverviewAvailable && windowOverviewOpen
-    || windowView.visible && !initialState && !windowWorkspace.unavailable && (windowWorkspace.windows.length > 0 || !!windowWorkspace.window));
+  const sessionStates = useSessionStates(transport, !windowMode && activated && accessReady || windowOverviewAvailable && windowOverviewOpen
+    || windowMode && windowView.visible && !initialState && !windowWorkspace.unavailable && (windowWorkspace.windows.length > 0 || !!windowWorkspace.window));
   const updateTeamRoster = useCallback((baseUrl: string, teams: Team[]) => setTeamRoster({ baseUrl, teams }), []);
   const [tpmListOpen, setTpmListOpen] = useState(false);
   // Most recent use orders the Window overview; a page in front counts as using its Window.
@@ -1555,7 +1555,25 @@ function AppContent({
     ]);
   });
   const visibleWindows = openWindows.filter(session => windowMode && activeView === 'workbench' && !supportingRailOpen && isViewVisible(viewKey(session)));
+  const botTargets = !windowMode && activated && accessReady
+    ? projectBotRoster(windowWorkspace.groups, [], () => 'unknown').sections.flatMap(section => section.rows.map(({ binding }) => {
+      const { role: _role, ...session } = binding;
+      return session;
+    })) : [];
+  const botBinding = selectedBot.view?.binding;
+  const botConnection = botBinding && connections.find(botBinding);
+  const displayedBot = botBinding && botTargets.find(session => sessionKey(session) === sessionKey(botBinding));
+  const visibleBots = !windowMode && accessReady && selectedBot.slot && botBinding && displayedBot && botConnection
+    && (!compactLayout || !navigation.rosterVisible) && connections.shown(botBinding, botConnection.agentId) ? [displayedBot] : [];
+  const latestEligible = useRef(new Set<string>());
   const attention = useSessionAttention(baseUrl, userScoped && accessReady, item => {
+    if (!latestEligible.current.has(sessionKey(item))) return;
+    if (!windowMode) {
+      const row = projectBotRoster(windowWorkspace.groups, [], () => 'unknown').sections
+        .flatMap(section => section.rows).find(row => sessionKey(row.binding) === sessionKey(item));
+      if (row) navigation.select({ kind: 'bot', groupId: row.groupId, viewId: row.viewId });
+      return;
+    }
     setActiveView('workbench'); closeContext(); setInspectorOpen(false);
     const target = openWindows.find(session => sessionKey(session) === sessionKey(item));
     if (target) { revealSession(target); return; }
@@ -1566,11 +1584,21 @@ function AppContent({
     if (source) { revealSession(source); openAsk(source, sourceStateFor(source)); }
     else void openSession(item, undefined, undefined, false, undefined, 'history');
   });
-  const notificationTargets = JSON.stringify([...openWindows, ...askActivitySessions.map(entry => entry.session)].map(sessionKey).sort());
-  useEffect(() => {
-    attention.notifier.setDisplayed(attention.enabled ? [...openWindows, ...askActivitySessions.map(entry => entry.session)] : []);
-  }, [attention.notifier, notificationTargets, attention.enabled]);
-  const tracking = useSessionTracking(baseUrl, transport, addressSession ? sessionKey(addressSession) : undefined, openWindows, askActivitySessions, connections, accessReady && succession.observerReady, visibleWindows, attention.observe);
+  const observeAttention = useCallback((session: SessionEntry, value: import('./tracking-state.js').SessionObservation) => {
+    if (latestEligible.current.has(sessionKey(session))) attention.observe(session, value);
+  }, [attention.observe]);
+  const tracking = useSessionTracking(baseUrl, transport, windowMode && addressSession ? sessionKey(addressSession) : undefined,
+    windowMode ? openWindows : [], windowMode ? askActivitySessions : [], connections, accessReady && succession.observerReady,
+    windowMode ? visibleWindows : visibleBots, observeAttention, windowMode ? {} : { includeTracked: false, additionalSessions: botTargets });
+  const eligible = attention.enabled ? windowMode ? [...tracking.sessions, ...openWindows, ...askActivitySessions.map(entry => entry.session)] : botTargets : [];
+  latestEligible.current = new Set(eligible.map(sessionKey));
+  const displayed = attention.enabled ? windowMode ? [...openWindows, ...askActivitySessions.map(entry => entry.session)] : botTargets : [];
+  const eligibleKeys = JSON.stringify([...latestEligible.current].sort());
+  const displayedKeys = JSON.stringify([...new Set(displayed.map(sessionKey))].sort());
+  useLayoutEffect(() => {
+    attention.notifier.setEligible(eligible);
+    attention.notifier.setDisplayed(displayed);
+  }, [attention.notifier, eligibleKeys, displayedKeys, attention.enabled]);
   const windowSessionStatus = useCallback((session: SessionStateRef) => sessionActivity(session, tracking.liveObservations, sessionStates), [tracking.liveObservations, sessionStates]);
   const botDirectorySources = useMemo<OtherSessionSource[]>(() => {
     const sources: OtherSessionSource[] = [];
@@ -2106,6 +2134,7 @@ function AppContent({
   });
   const successionProgress = successionDialog ? <SessionSuccessionDialog
     source={successionDialog.source} directory={successionDialog.directory}
+    progressPortal={!!(successionDialog.source as OpenedSession & { bot?: unknown; fallback?: boolean }).bot || !!(successionDialog.source as OpenedSession & { fallback?: boolean }).fallback}
     blockedReason={successionInputReason}
     initialProvider={successionDialog.initialProvider} visible={successionDialog.visible}
     resume={successionDialog.resume} resumeCancellation={successionDialog.cancelRequested}

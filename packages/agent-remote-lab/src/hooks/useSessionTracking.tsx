@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { RemoteActivityClient, type RemoteActivityState, type RemoteAgentTransport } from '@orchardworks/agent-remote-web';
 import { observeConversation } from '../conversation-activity.js';
 import { SessionDirectoryClient, type OpenedSession } from '../directory-client.js';
-import { sessionKey } from '../session-tree.js';
+import { sessionKey, type SessionEntry } from '../session-tree.js';
 import type { SessionStar } from '../session-stars-client.js';
 import { MAX_TRACKED_SESSIONS, nextObservation, readTrackedSessionsChecked, readTrackedSessions, saveTrackedSessions, type SessionObservation, patchTrackedSessions, trackingEditRevision, type TrackedSessionPatch, type LocalTrackedSession } from '../tracking-state.js';
 import { useFeedbackToast } from '../components/Toast.js';
@@ -18,8 +18,13 @@ export type TrackRefreshResult =
 const noOpenSessions: readonly OpenedSession[] = [];
 export interface AuxiliarySession { session: OpenedSession; liveAgentId?: string; visible: boolean }
 const noAuxiliarySessions: readonly AuxiliarySession[] = [];
+export interface SessionTrackingScope {
+  includeTracked?: boolean;
+  additionalSessions?: readonly SessionEntry[];
+}
+const defaultScope: SessionTrackingScope = {};
 
-export function useSessionTracking(baseUrl: string, transport: RemoteAgentTransport, currentSessionKey?: string, openSessions: readonly OpenedSession[] = noOpenSessions, auxiliarySessions: readonly AuxiliarySession[] = noAuxiliarySessions, connections?: ConversationConnections, enabled = true, visibleSessions?: readonly OpenedSession[], onObservation?: (session: SessionStar | OpenedSession, value: SessionObservation) => void) {
+export function useSessionTracking(baseUrl: string, transport: RemoteAgentTransport, currentSessionKey?: string, openSessions: readonly OpenedSession[] = noOpenSessions, auxiliarySessions: readonly AuxiliarySession[] = noAuxiliarySessions, connections?: ConversationConnections, enabled = true, visibleSessions?: readonly SessionEntry[], onObservation?: (session: SessionEntry, value: SessionObservation) => void, scope: SessionTrackingScope = defaultScope) {
   const [selection, setSelection] = useState(() => ({ scope: baseUrl, sessions: readTrackedSessions(baseUrl) }));
   const sessions = useMemo(() => selection.scope === baseUrl ? selection.sessions : [], [selection, baseUrl]);
   const [observationState, setObservationState] = useState<{ scope: string; transport: RemoteAgentTransport; values: Record<string, SessionObservation> }>(() => ({ scope: baseUrl, transport, values: {} }));
@@ -44,12 +49,13 @@ export function useSessionTracking(baseUrl: string, transport: RemoteAgentTransp
   const auxiliaryKeys = useMemo(() => new Set(auxiliarySessions.map(item => sessionKey(item.session))), [auxiliarySessions]);
   const backgroundSessions = useMemo(() => sessions.filter(session => !visibleKeys.has(sessionKey(session)) && !auxiliaryKeys.has(sessionKey(session))), [sessions, visibleKeys, auxiliaryKeys]);
   const observedSessions = useMemo(() => {
-    const union = new Map<string, { session: SessionStar | OpenedSession; liveAgentId?: string }>();
-    for (const session of sessions) union.set(sessionKey(session), { session });
+    const union = new Map<string, { session: SessionEntry; liveAgentId?: string }>();
+    if (scope.includeTracked !== false) for (const session of sessions) union.set(sessionKey(session), { session });
+    for (const session of scope.additionalSessions ?? []) union.set(sessionKey(session), { session });
     for (const session of openSessions) union.set(sessionKey(session), { session, liveAgentId: session.agentId });
     for (const { session, liveAgentId } of auxiliarySessions) union.set(sessionKey(session), { session, liveAgentId: liveAgentId ?? union.get(sessionKey(session))?.liveAgentId });
     return [...union.values()];
-  }, [sessions, openSessions, auxiliarySessions]);
+  }, [sessions, openSessions, auxiliarySessions, scope.includeTracked, scope.additionalSessions]);
   const current = useRef(sessions);
   const currentScope = useRef(baseUrl);
   const lifetime = useMemo(() => ({ mounted: true }), [baseUrl, transport]);
@@ -256,7 +262,7 @@ export function useSessionTracking(baseUrl: string, transport: RemoteAgentTransp
     setObservations(values => {
       const next = { ...values };
       for (const key of Object.keys(next)) {
-        if (!allowed.has(key) && !visible.current.has(key) && !auxiliaryKeys.has(key)) { delete next[key]; readCursors.delete(key); }
+        if (!allowed.has(key) && !visible.current.has(key) && !auxiliaryKeys.has(key) && !observed.current.some(item => sessionKey(item.session) === key)) { delete next[key]; readCursors.delete(key); }
       }
       return next;
     });
@@ -276,7 +282,7 @@ export function useSessionTracking(baseUrl: string, transport: RemoteAgentTransp
 }
 export type SessionTracking = ReturnType<typeof useSessionTracking>;
 
-function SessionObserver({ session, liveAgentId, baseUrl, transport, connections, update, enabled }: { session: SessionStar | OpenedSession; liveAgentId?: string; baseUrl: string; transport: RemoteAgentTransport; connections?: ConversationConnections; update(key: string, value: SessionObservation): void; enabled: boolean }) {
+function SessionObserver({ session, liveAgentId, baseUrl, transport, connections, update, enabled }: { session: SessionEntry; liveAgentId?: string; baseUrl: string; transport: RemoteAgentTransport; connections?: ConversationConnections; update(key: string, value: SessionObservation): void; enabled: boolean }) {
   const key = sessionKey(session);
   const binding = useRef<(agentId: string) => void>();
   const attachment = useRef<(enabled: boolean) => void>();

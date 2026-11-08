@@ -17,6 +17,54 @@ function setup() {
   const notifier = new SessionAttentionNotifications('workspace', () => true, open);
   return { notifier, open, instances, FakeNotification };
 }
+it('authorizes only eligible native identities while displayed identities remain routing hints', async () => {
+  const { notifier, instances } = setup();
+  const excluded = ['hidden', 'fallback', 'tracked', 'ask'].map(nativeSessionId => ({ ...session, nativeSessionId }));
+  notifier.setEligible([session]); notifier.setDisplayed(excluded);
+  for (const target of [session, ...excluded]) {
+    await notifier.observe(target, value('running', 1));
+    await notifier.observe(target, value('idle', 2));
+    await notifier.observe(target, value('waiting', 3));
+  }
+  expect(instances).toHaveLength(2);
+  expect(instances.map(item => item.options.body)).toEqual(['Research', 'Research']);
+  notifier.dispose();
+});
+
+it('starts fresh after leaving and reentering eligibility and closes stale notifications', async () => {
+  const { notifier, instances, open } = setup();
+  vi.spyOn(window, 'focus').mockImplementation(() => {});
+  notifier.setEligible([session]);
+  await notifier.observe(session, value('running', 1));
+  await notifier.observe(session, value('waiting', 2));
+  notifier.setEligible([]);
+  expect(instances[0]!.close).toHaveBeenCalledOnce();
+  instances[0]!.onclick!(); expect(open).not.toHaveBeenCalled();
+  await notifier.observe(session, value('running', 3));
+  notifier.setEligible([session]);
+  await notifier.observe(session, value('idle', 4));
+  expect(instances).toHaveLength(1);
+  await notifier.observe(session, value('running', 5));
+  await notifier.observe(session, value('idle', 6));
+  expect(instances).toHaveLength(2);
+  notifier.dispose();
+});
+
+it.each([false, true])('fences async fingerprinting after eligibility changes (reenter: %s)', async reenter => {
+  const { notifier, instances } = setup();
+  let finish!: (buffer: ArrayBuffer) => void;
+  vi.stubGlobal('crypto', { subtle: { digest: vi.fn(() => new Promise<ArrayBuffer>(resolve => { finish = resolve; })) } });
+  notifier.setEligible([session]);
+  await notifier.observe(session, value('running', 1));
+  const pending = notifier.observe(session, value('idle', 2));
+  notifier.setEligible([]);
+  if (reenter) notifier.setEligible([session]);
+  finish(new Uint8Array([1, 2, 3]).buffer);
+  await pending;
+  expect(instances).toHaveLength(0);
+  notifier.dispose();
+});
+
 it('notifies once after observed work, not for initial idle or repeated snapshots; clicking focuses the owner', async () => {
   const { notifier, open, instances } = setup();
   const focus = vi.spyOn(window, 'focus').mockImplementation(() => {});

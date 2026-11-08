@@ -1,7 +1,7 @@
 import { expect, test, type Locator, type Page } from '@playwright/test';
 import { showNewSession } from './session-navigation';
 
-const sourceView = (owner: Locator) => owner.locator(':scope > .lab-session-view');
+const sourceView = (owner: Locator) => owner.locator('.lab-session-view');
 const sourceIdentities = new WeakMap<Locator, string>();
 const askTrigger = (page: Page) => page.getByRole('button', { name: 'Ask about this session', exact: true });
 function askView(owner: Locator) {
@@ -50,7 +50,7 @@ async function openComposition(page: Page, isMobile: boolean) {
   const primaryCreated = createdSession(page);
   await page.getByTestId('session-create').click();
   const primaryIdentity = await primaryCreated;
-  const primary = page.locator('.lab-primary-conversation');
+  const primary = page.locator('[data-workbench-mode="window"] .lab-primary-conversation');
   sourceIdentities.set(primary, primaryIdentity.key);
   await expect(sourceView(primary).getByTestId('prompt-input')).toBeEnabled();
   await expect(page).toHaveTitle('New session · Agent Remote Control');
@@ -58,7 +58,7 @@ async function openComposition(page: Page, isMobile: boolean) {
   const sideCreated = createdSession(page);
   await send(sourceView(primary), '/side A separately focused side conversation');
   const sideIdentity = await sideCreated;
-  const side = page.locator('.lab-side-conversation');
+  const side = page.locator('[data-workbench-mode="window"] .lab-side-conversation');
   sourceIdentities.set(side, sideIdentity.key);
   await expect(sourceView(side).locator('.agent-message-assistant').last()).toContainText('A separately focused side conversation');
   const takeControl = sourceView(side).getByRole('button', { name: 'Take control', exact: true });
@@ -161,7 +161,7 @@ async function openAccountFixture(page: Page) {
   await page.route('**/v1/remote/hosts/host/vscode-tunnel', route => route.fulfill({ json: { status: 'stopped', processAlive: false, revision: 0 } }));
   await page.route('**/v1/remote/hosts/host/previews', route => route.fulfill({ json: { revision: 1, registrations: [] } }));
   await page.goto('/e2e/fixtures/session-stars.html?gateway=1');
-  await expect(page.locator('.lab-primary-conversation')).toBeVisible();
+  await expect(page.locator('[data-workbench-mode="window"] .lab-primary-conversation')).toBeVisible();
   const close = page.getByRole('button', { name: 'Close Context', exact: true });
   if (await close.isVisible()) await close.click();
 }
@@ -170,7 +170,7 @@ test('view menu labels apply their selection before focus leaves the trigger', a
   await page.goto('/');
   await showNewSession(page);
   await page.getByTestId('session-create').click();
-  const view = sourceView(page.locator('.lab-primary-conversation'));
+  const view = sourceView(page.locator('[data-workbench-mode="window"] .lab-primary-conversation'));
   await expect(view.getByTestId('prompt-input')).toBeEnabled();
   await expandSessionActions(view);
   const trigger = view.getByRole('button', { name: 'Session view options', exact: true });
@@ -360,7 +360,7 @@ test('browser tab title identifies the business primary session while Side and A
 test('account actions belong to the Header and View follows the visible owning title', async ({ page, isMobile }, testInfo) => {
   if (!isMobile) await page.setViewportSize({ width: 1400, height: 900 });
   await openAccountFixture(page);
-  const primary = page.locator('.lab-primary-conversation');
+  const primary = page.locator('[data-workbench-mode="window"] .lab-primary-conversation');
   const draft = sourceView(primary).getByTestId('prompt-input');
   await draft.fill('Preserve this draft while moving the shell controls');
   const header = page.locator('.lab-app-bar');
@@ -537,7 +537,7 @@ test('mobile session actions start collapsed and toggle without moving the readi
   await page.goto('/');
   await showNewSession(page);
   await page.getByTestId('session-create').click();
-  const primary = page.locator('.lab-primary-conversation');
+  const primary = page.locator('[data-workbench-mode="window"] .lab-primary-conversation');
   const view = sourceView(primary);
   const input = view.getByTestId('prompt-input');
   await expect(input).toBeEnabled();
@@ -637,7 +637,7 @@ test('mobile action taps settle to a neutral appearance with normal motion', asy
   await page.goto('/');
   await showNewSession(page);
   await page.getByTestId('session-create').click();
-  const primary = page.locator('.lab-primary-conversation');
+  const primary = page.locator('[data-workbench-mode="window"] .lab-primary-conversation');
   const view = sourceView(primary);
   await expect(view.getByTestId('prompt-input')).toBeEnabled();
   const timeline = view.getByTestId('timeline');
@@ -737,7 +737,7 @@ test('desktop standalone search does not gain the mobile action toggle', async (
   await page.goto('/');
   await showNewSession(page);
   await page.getByTestId('session-create').click();
-  const view = sourceView(page.locator('.lab-primary-conversation'));
+  const view = sourceView(page.locator('[data-workbench-mode="window"] .lab-primary-conversation'));
   await expect(view.getByTestId('prompt-input')).toBeEnabled();
   await expect(view.getByRole('button', { name: 'Collapse session actions', exact: true })).toHaveCount(0);
   await expect(view.getByRole('button', { name: 'Expand session actions', exact: true })).toHaveCount(0);

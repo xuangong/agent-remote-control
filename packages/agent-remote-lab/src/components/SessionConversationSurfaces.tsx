@@ -25,6 +25,10 @@ export interface SessionSurfaceDescriptor {
   props: SessionConversationProps & ConversationPresentation;
   layout?: WindowLayoutAuthority; bridge?: WindowSessionBridge; presentedViewId?: string;
   titleInteraction: ContextType<typeof SessionTitleInteractionContext>;
+  onSelectWindowPane?(): void;
+}
+export function allowsWindowPaneSelection(target: EventTarget | null): boolean {
+  return target instanceof Element && !target.closest('[data-pane-selection-ignore],.lab-conversation-history,.lab-session-heading-actions-trigger,.lab-timeline-tools-toggle,.lab-session-main-minimize');
 }
 export interface SessionConversationSurfacesProps {
   scope: string; transport: RemoteAgentTransport; mode: WorkbenchMode; children: ReactNode;
@@ -128,6 +132,16 @@ function ConversationSurface({ registry, entry, mode, enabled }: { registry: Con
     const destination = shown ? chosen.destination : registry.parking;
     if (destination) moveSessionHost(entry.host, destination);
   });
+  useLayoutEffect(() => {
+    if (chosen.mode !== 'window' || !shown || !enabled || !descriptor.onSelectWindowPane) return;
+    const select = (event: Event) => { if (allowsWindowPaneSelection(event.target)) descriptor.onSelectWindowPane?.(); };
+    entry.host.addEventListener('pointerdown', select, true);
+    entry.host.addEventListener('focusin', select, true);
+    return () => {
+      entry.host.removeEventListener('pointerdown', select, true);
+      entry.host.removeEventListener('focusin', select, true);
+    };
+  }, [entry.host, chosen.mode, shown, enabled, descriptor.onSelectWindowPane]);
   const props: SessionConversationProps = { ...descriptor.props,
     attachmentManaged: attachment.attachmentManaged, attachedSession: attachment.attachedSession, attachmentNotice: attachment.attachmentNotice,
     visible: shown, mutationBlocked: !enabled || !shown || descriptor.props.mutationBlocked,

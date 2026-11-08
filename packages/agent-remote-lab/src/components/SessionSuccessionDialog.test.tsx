@@ -24,6 +24,20 @@ async function setup(options: { description?: SuccessionDescription; initialProv
   const container = await render(<SessionSuccessionDialog source={source} directory={labSessionSuccessionDirectory(directory)} initialProvider={options.initialProvider} blockedReason={options.blockedReason} assertAccess={() => {}} assertSource={() => {}} onIntent={intent} onSettled={settled} onClose={close} onGatedChange={gated} />);
   await flush(); return { directory, describe, prepare, action, settled, close, intent, gated, container };
 }
+
+it('keeps a portaled retained operation accessible outside a hidden source and removes it on unmount', async () => {
+  const retained: SuccessionPrepareInput = { operationId: 'portal-original', providerId: 'opencode', nativeSessionId: 'A', expectedRevision: 4 };
+  const actOnSuccession = vi.fn(async (action: string, original: Readonly<SuccessionPrepareInput>) => response(original.operationId, action === 'cancel' ? 'cancelled' : 'preparing'));
+  const directory = { describeSuccession: vi.fn(), prepareSuccession: vi.fn(), actOnSuccession };
+  const container = await render(<div hidden><SessionSuccessionDialog source={source} directory={directory} resume={retained} progressPortal
+    assertAccess={() => {}} assertSource={() => {}} onIntent={() => {}} onSettled={async () => {}} onClose={() => {}} /></div>);
+  await flush(); const progress = document.querySelector('.lab-handoff-notice')!;
+  expect(progress.closest('[hidden]')).toBeNull(); expect(container.contains(progress)).toBe(false);
+  await details(); await act(async () => button('Cancel Handoff').click());
+  expect(actOnSuccession.mock.calls).toEqual([['status', retained], ['cancel', retained]]);
+  expect(progress.textContent).toContain('Handoff cancelled');
+  await unmount(container); expect(document.querySelector('.lab-handoff-notice')).toBeNull();
+});
 it.each(['commit', 'reconcile', 'cancel'] as const)('passes the retained request to automatic status and manual %s', async action => {
   const retained: SuccessionPrepareInput = { operationId: 'explicit-retained', providerId: 'opencode', nativeSessionId: 'A', expectedRevision: 4,
     preparation: { kind: 'native_prefix', turnId: 'turn', messageId: 'message' } };

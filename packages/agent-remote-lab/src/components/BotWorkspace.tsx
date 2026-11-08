@@ -25,8 +25,11 @@ export function BotWorkspace({ visible, compact, scope, workspace, navigation, s
   const currentScope = useRef(scope); currentScope.current = scope;
   const place = navigation.place, key = place && botPlaceKey(place);
   const conversation = !!place && place.kind !== 'section';
-  const showConversation = conversation && (!compact || !navigation.rosterVisible);
   const descriptor = conversation ? describeConversation(place) : undefined;
+  const unavailable = compact && !!selected.error && !descriptor;
+  const showConversation = conversation && !unavailable && (!compact || !navigation.rosterVisible);
+  const availabilityNotice = selected.loading ? <p role="status">Opening bot…</p> : selected.error && place?.kind !== 'session'
+    ? <p role="alert">{selected.error} <button type="button" onClick={() => void selected.retry()}>Retry</button></p> : null;
   const creation = workspace.sectionCreationState, saving = creation.state === 'saving';
   useEffect(() => { setCreating(false); setTitle(''); setError(undefined); }, [scope]);
   useEffect(() => {
@@ -54,6 +57,7 @@ export function BotWorkspace({ visible, compact, scope, workspace, navigation, s
     }}>
     <aside className="lab-bot-roster" hidden={compact && showConversation}>
       <header className="lab-bot-roster-heading"><h1>Bots</h1><WorkbenchModeSwitch mode={navigation.mode} onChange={navigation.setMode} /></header>
+      {unavailable ? availabilityNotice : null}
       {creating ? <form className="lab-bot-new-section" aria-label="New section" onSubmit={event => { event.preventDefault(); void save(); }}
         onKeyDown={event => { if (!event.nativeEvent.isComposing && event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); setCreating(false); } }}>
         <label>Section title<input autoFocus required maxLength={256} aria-label="Section title" disabled={saving || creation.state === 'unknown'} value={title} onChange={event => setTitle(event.target.value)} /></label>
@@ -78,7 +82,7 @@ export function BotWorkspace({ visible, compact, scope, workspace, navigation, s
         <h2 ref={heading} tabIndex={-1}>{place?.kind === 'session' ? place.session.title : selected.view?.binding.title ?? descriptor?.props.target.title ?? selected.group?.window.title ?? 'Choose a bot'}</h2>
         {compact ? <WorkbenchModeSwitch mode={navigation.mode} onChange={navigation.setMode} /> : null}
       </header>
-      {selected.loading ? <p role="status">Opening bot…</p> : selected.error && place?.kind !== 'session' ? <p role="alert">{selected.error} <button type="button" onClick={() => void selected.retry()}>Retry</button></p> : null}
+      {!unavailable ? availabilityNotice : null}
       {descriptor ? <SessionConversationMount mode="bot" active={visible && showConversation} descriptor={{ ...descriptor, props: { ...descriptor.props, visible: visible && showConversation, active: visible && showConversation, fixedDisplayMode: 'content' } }} />
         : !selected.loading && !selected.error ? <p className="lab-bot-empty">{place?.kind === 'section' ? 'No bot selected. Choose a bot from this section.' : 'Choose a bot to continue its conversation.'}</p> : null}
     </section>

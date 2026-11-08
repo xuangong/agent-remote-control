@@ -4,6 +4,7 @@
 .lab-handoff-chooser .lab-handoff-context { max-width: 65ch; color: var(--obs-text-secondary); line-height: 1.5; }
 .lab-handoff-chooser [role="alert"], .lab-handoff-details [role="alert"] { color: var(--obs-danger); }
 .lab-handoff-notice { color: var(--obs-text); background: var(--obs-surface); border: 1px solid var(--obs-border); border-radius: var(--obs-radius-sm); padding: 10px 12px; font-size: 12px; line-height: 1.5; }
+.lab-bot-handoff-notice { position: fixed; z-index: 40; right: 12px; bottom: max(12px, env(safe-area-inset-bottom)); width: min(600px, calc(100vw - 24px)); max-height: calc(100dvh - 24px); overflow: auto; box-sizing: border-box; box-shadow: var(--obs-overlay-shadow); }
 .lab-handoff-summary { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .lab-handoff-message { min-width: 0; }
 .lab-handoff-message p { margin: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

@@ -7,6 +7,43 @@ import { promptText, setPromptText } from '../test/setup.js';
 
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); localStorage.clear(); sessionStorage.clear(); });
 
+it.each(['deleted', 'hidden', 'ineligible'] as const)('shows the compact roster and unavailable notice immediately after the selected Bot becomes %s', async change => {
+  vi.stubGlobal('matchMedia', (query: string) => ({ matches: query === '(max-width: 1180px)', addEventListener() {}, removeEventListener() {} }));
+  const scope = `http://localhost/bot-compact-${change}/`; seedGroup(scope, botGroup('A'));
+  history.replaceState(null, '', '/?mode=bot&section=A&bot=A1');
+  const app = await mountBotApp(scope, { hosted: true });
+  try {
+    await until(() => expect(app.container.querySelector('.lab-bot-conversation [role="textbox"]')).not.toBeNull());
+    const beforeUrl = location.href, editor = app.container.querySelector('.lab-bot-conversation [role="textbox"]')!;
+    const group = structuredClone(app.hostedGroups.get('A')!); group.window.revision++;
+    if (change === 'deleted') group.window.views = group.window.views.filter(view => view.id !== 'A1');
+    else if (change === 'hidden') group.bots!.members.A1 = { hidden: true };
+    else group.window.views[0]!.bindingPolicy = 'managed';
+    app.hostedGroups.set('A', group); await act(async () => app.workspace().refreshGroups());
+    await until(() => expect(editor.isConnected).toBe(false));
+    expect(app.container.querySelector<HTMLElement>('.lab-bot-roster')!.hidden).toBe(false);
+    expect(app.container.querySelector('.lab-bot-roster [role="alert"]')?.textContent).toContain('unavailable');
+    expect(app.button('New section')).toBeDefined(); expect(app.button('Retry')).toBeDefined();
+    expect(location.href).toBe(beforeUrl); expect(app.sendMessages).toEqual([]);
+  } finally { await app.close(); }
+});
+
+it('keeps the compact retained editor when access pauses a valid Bot', async () => {
+  vi.stubGlobal('matchMedia', (query: string) => ({ matches: query === '(max-width: 1180px)', addEventListener() {}, removeEventListener() {} }));
+  const scope = 'http://localhost/bot-compact-access/'; seedGroup(scope, botGroup('A'));
+  history.replaceState(null, '', '/?mode=bot&section=A&bot=A1');
+  const app = await mountBotApp(scope, { hosted: true });
+  try {
+    await until(() => expect(app.container.querySelector('.lab-bot-conversation [role="textbox"]')).not.toBeNull());
+    const editor = app.container.querySelector<HTMLElement>('.lab-bot-conversation [role="textbox"]')!;
+    await act(async () => app.setAccessReady(false));
+    expect(editor.isConnected).toBe(true); expect(editor.closest('[hidden]')).toBeNull();
+    expect(app.container.querySelector<HTMLElement>('.lab-bot-roster')!.hidden).toBe(true);
+    await act(async () => app.setAccessReady(true));
+    expect(app.container.querySelector('.lab-bot-conversation [role="textbox"]')).toBe(editor);
+  } finally { await app.close(); }
+});
+
 it('compact Back restores the roster row and preserves the same editor without focusing it', async () => {
   vi.stubGlobal('matchMedia', (query: string) => ({ matches: query === '(max-width: 1180px)', addEventListener() {}, removeEventListener() {} }));
   const scope = 'http://localhost/bot-compact/'; seedGroup(scope, botGroup('A')); history.replaceState(null, '', '/?mode=bot&section=A');

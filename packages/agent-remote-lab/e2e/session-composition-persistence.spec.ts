@@ -1,6 +1,7 @@
 import { expect, test, type Locator, type Page } from '@playwright/test';
 import { showNewSession, showSessions } from './session-navigation';
 import { sessionLinkFixture } from './session-link-fixture';
+import type { WorkspaceWindow } from '@orchardworks/agent-remote-protocol';
 
 const primaryHistory = 'Keep the primary composition history';
 const sideHistory = 'Keep the side composition history';
@@ -11,8 +12,25 @@ const askDraft = 'Unsent Ask composition draft';
 
 async function send(pane: Locator, text: string) {
   await pane.getByTestId('prompt-input').fill(text);
+  await expect(pane.getByTestId('prompt-submit')).toBeEnabled();
   await pane.getByTestId('prompt-input').press('Enter');
 }
+
+async function expectDraft(input: Locator, text: string) {
+  await expect(input).toHaveCount(1);
+  if (await input.evaluate(element => element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement)) await expect(input).toHaveValue(text);
+  else await expect(input).toHaveText(text);
+}
+
+async function savedWindow(page: Page): Promise<WorkspaceWindow> {
+  return page.evaluate(() => {
+    const id = new URL(location.href).searchParams.get('window');
+    const key = Object.keys(localStorage).find(key => key.includes(':shared-window:') && key.endsWith(`:${id}`));
+    if (!key) throw new Error('The selected Window must have a saved group document.');
+    return JSON.parse(localStorage.getItem(key)!).window;
+  });
+}
+const memberships = (window: WorkspaceWindow) => window.views.map(view => ({ id: view.id, attachedTo: view.attachedTo, binding: view.binding }));
 
 async function selectSource(page: Page, pane: Locator, index: number, isMobile: boolean) {
   if (isMobile) await page.getByRole('combobox', { name: 'Side path' }).selectOption({ index });
@@ -43,7 +61,7 @@ for (const source of ['primary', 'side'] as const) {
     const primaryCreated = createdSession();
     await page.getByTestId('session-create').click();
     const primaryIdentity = await primaryCreated;
-    const primary = page.locator('.lab-primary-conversation > .lab-session-view');
+    const primary = page.locator('[data-workbench-mode="window"] .lab-primary-conversation .lab-session-view');
     await expect(primary.getByTestId('prompt-input')).toBeEnabled();
     await send(primary, primaryHistory);
     await expect(primary.locator('.agent-message-assistant').last()).toContainText(primaryHistory);
@@ -51,7 +69,7 @@ for (const source of ['primary', 'side'] as const) {
     const sideCreated = createdSession();
     await send(primary, `/side ${sideHistory}`);
     const sideIdentity = await sideCreated;
-    const side = page.locator('.lab-side-conversation > .lab-session-view');
+    const side = page.locator('[data-workbench-mode="window"] .lab-side-conversation .lab-session-view');
     await expect(side.locator('.agent-message-assistant').last()).toContainText(sideHistory);
     const takeControl = side.getByRole('button', { name: 'Take control', exact: true });
     if (await takeControl.isVisible()) await takeControl.click();
@@ -79,9 +97,9 @@ for (const source of ['primary', 'side'] as const) {
     await expect(ask).toBeVisible();
     await expect(ask.getByTestId('prompt-input')).toBeEnabled();
     await expect(side).toHaveCount(1);
-    await expect(primary.getByTestId('prompt-input')).toHaveValue(primaryDraft);
-    await expect(side.getByTestId('prompt-input')).toHaveValue(sideDraft);
-    await expect(ask.getByTestId('prompt-input')).toHaveValue(askDraft);
+    await expectDraft(primary.getByTestId('prompt-input'), primaryDraft);
+    await expectDraft(side.getByTestId('prompt-input'), sideDraft);
+    await expectDraft(ask.getByTestId('prompt-input'), askDraft);
     await expect(primary.locator('.agent-message-assistant').last()).toContainText(primaryHistory);
     await expect(side.locator('.agent-message-assistant').last()).toContainText(sideHistory);
     await expect(ask.locator('.agent-message-assistant').last()).toContainText(askHistory);
@@ -115,14 +133,14 @@ async function openSideFixture(page: Page, isMobile: boolean) {
   const creation = createdSession();
   await page.getByTestId('session-create').click();
   const primaryIdentity = await creation;
-  const primary = page.locator('.lab-primary-conversation > .lab-session-view');
+  const primary = page.locator('[data-workbench-mode="window"] .lab-primary-conversation .lab-session-view');
   await expect(primary.getByTestId('prompt-input')).toBeEnabled();
   await send(primary, primaryHistory);
   await expect(primary.locator('.agent-message-assistant').last()).toContainText(primaryHistory);
   const sideCreation = createdSession();
   await send(primary, `/side ${sideHistory}`);
   const sideIdentity = await sideCreation;
-  const side = page.locator('.lab-side-conversation > .lab-session-view');
+  const side = page.locator('[data-workbench-mode="window"] .lab-side-conversation .lab-session-view');
   await expect(side.locator('.agent-message-assistant').last()).toContainText(sideHistory);
   const takeControl = side.getByRole('button', { name: 'Take control', exact: true });
   if (await takeControl.isVisible()) await takeControl.click();
@@ -167,12 +185,13 @@ test('a delayed Side snapshot does not block restoring its saved Ask native sess
     await page.reload();
     await snapshotHeld;
     await expect.poll(() => fixture.attachments.filter(id => id === askIdentity.nativeSessionId)).toHaveLength(1);
+    await ask.getByRole('button', { name: 'More session actions', exact: true }).click();
     await expect(ask.getByRole('button', { name: 'Clean Ask', exact: true })).toBeEnabled();
     release();
     await expect(fixture.side.locator('.agent-message-assistant').last()).toContainText(sideHistory);
     await expect(ask.locator('.agent-message-assistant').last()).toContainText(askHistory);
-    await expect(fixture.side.getByTestId('prompt-input')).toHaveValue(sideDraft);
-    await expect(ask.getByTestId('prompt-input')).toHaveValue(askDraft);
+    await expectDraft(fixture.side.getByTestId('prompt-input'), sideDraft);
+    await expectDraft(ask.getByTestId('prompt-input'), askDraft);
     await expect(page).toHaveURL(location);
     expect(fixture.creates).toHaveLength(3);
     expect(fixture.sends).toEqual(sentBeforeReload);
@@ -181,16 +200,16 @@ test('a delayed Side snapshot does not block restoring its saved Ask native sess
 
 test('reload does not reopen a Side that was closed before leaving the page', async ({ page, isMobile }) => {
   const fixture = await openSideFixture(page, isMobile);
-  if (isMobile) {
-    const viewOptions = page.getByRole('button', { name: 'View options', exact: true });
-    await viewOptions.click();
-    await page.getByRole('region', { name: 'View options', exact: true }).getByRole('checkbox', { name: 'Header', exact: true }).click();
-    await viewOptions.click();
-  }
-  await fixture.side.getByRole('button', { name: 'Close side conversation, back to source' }).click();
+  const sideId = (await savedWindow(page)).views.find(view => view.binding?.nativeSessionId === fixture.sideIdentity.nativeSessionId)!.id;
+  const windowMode = page.locator('[data-workbench-mode="window"]');
+  await windowMode.getByRole('button', { name: 'Windows', exact: true }).click();
+  const menu = windowMode.getByRole('region', { name: 'Windows', exact: true });
+  await menu.locator(`[data-window-view-close=${JSON.stringify(sideId)}]`).click();
+  await expect.poll(async () => (await savedWindow(page)).views.some(view => view.id === sideId)).toBe(false);
+  await menu.getByRole('button', { name: 'Close Windows', exact: true }).click();
   await expect(fixture.side).toBeHidden();
   await page.reload();
-  await expect(fixture.primary.getByTestId('prompt-input')).toHaveValue(primaryDraft);
+  await expectDraft(fixture.primary.getByTestId('prompt-input'), primaryDraft);
   await expect(fixture.primary.locator('.agent-message-assistant').last()).toContainText(primaryHistory);
   await expect(fixture.side).toHaveCount(0);
   await expect(page).toHaveURL(url => url.searchParams.get('session') === fixture.primaryIdentity.nativeSessionId);
@@ -240,12 +259,20 @@ for (const choice of ['primary', 'another session'] as const) {
       await expect(fixture.primary.getByTestId('timeline')).not.toContainText(primaryHistory);
     }
     const chosenUrl = page.url();
+    const chosenWindow = await savedWindow(page);
+    const selectedSide = chosenWindow.views.find(view => view.binding?.nativeSessionId === fixture.sideIdentity.nativeSessionId);
+    expect(chosenWindow.selectedViewId).not.toBe(selectedSide?.id);
     release();
     await requestFinished;
     await page.evaluate(() => new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
     await expect(page).toHaveURL(chosenUrl);
-    await expect(fixture.side).toHaveCount(0);
-    if (choice === 'primary') await expect(fixture.primary.getByTestId('prompt-input')).toHaveValue(primaryDraft);
+    await expect.poll(async () => {
+      const current = await savedWindow(page);
+      return { selectedViewId: current.selectedViewId, selectedPrimaryViewId: current.selectedPrimaryViewId, memberships: memberships(current) };
+    }).toEqual({ selectedViewId: chosenWindow.selectedViewId, selectedPrimaryViewId: chosenWindow.selectedPrimaryViewId, memberships: memberships(chosenWindow) });
+    if (choice === 'primary' && isMobile) await expect(fixture.side).toBeHidden();
+    if (choice === 'primary' && !isMobile) await expect(fixture.side).toBeVisible();
+    if (choice === 'primary') await expectDraft(fixture.primary.getByTestId('prompt-input'), primaryDraft);
     else await expect(fixture.primary.getByTestId('timeline')).not.toContainText(primaryHistory);
     expect(fixture.creates).toHaveLength(2);
     expect(fixture.sends).toEqual(fixture.sentBeforeReload);
@@ -263,14 +290,14 @@ test('refresh during an unavailable Side restoration retains its composition and
   });
   await page.reload();
   await expect(page.getByRole('alert')).toContainText('Recorded Side temporarily unavailable');
-  await expect(fixture.primary.getByTestId('prompt-input')).toHaveValue(primaryDraft);
+  await expectDraft(fixture.primary.getByTestId('prompt-input'), primaryDraft);
   await expect(fixture.side).toHaveCount(0);
   expect(fixture.attachments.filter(id => id === fixture.sideIdentity.nativeSessionId)).toHaveLength(1);
   unavailable = false;
   await page.reload();
   await expect(fixture.side).toBeVisible();
-  await expect(fixture.side.getByTestId('prompt-input')).toHaveValue(sideDraft);
-  await expect(fixture.primary.getByTestId('prompt-input')).toHaveValue(primaryDraft);
+  await expectDraft(fixture.side.getByTestId('prompt-input'), sideDraft);
+  await expectDraft(fixture.primary.getByTestId('prompt-input'), primaryDraft);
   await expect(fixture.side.locator('.agent-message-assistant').last()).toContainText(sideHistory);
   await expect(page).toHaveURL(location);
   expect(fixture.attachments.filter(id => id === fixture.sideIdentity.nativeSessionId)).toHaveLength(2);
@@ -284,8 +311,8 @@ test('a terminal nested Side failure preserves the saved path without moving foc
   const nestedCreated = page.waitForResponse(response => new URL(response.url()).pathname.endsWith('/create'));
   await send(fixture.side, `/side ${nestedHistory}`);
   const identity = await (await nestedCreated).json() as { nativeSessionId: string };
-  const middle = page.locator('.lab-side-conversation > .lab-session-view').filter({ has: page.locator('.agent-message-assistant').filter({ hasText: sideHistory }) });
-  const nested = page.locator('.lab-side-conversation > .lab-session-view').filter({ has: page.locator('.agent-message-assistant').filter({ hasText: nestedHistory }) });
+  const middle = page.locator('[data-workbench-mode="window"] .lab-side-conversation .lab-session-view').filter({ has: page.locator('.agent-message-assistant').filter({ hasText: sideHistory }) });
+  const nested = page.locator('[data-workbench-mode="window"] .lab-side-conversation .lab-session-view').filter({ has: page.locator('.agent-message-assistant').filter({ hasText: nestedHistory }) });
   await expect(nested.locator('.agent-message-assistant').last()).toContainText(nestedHistory);
   const location = page.url();
   const sentBeforeReload = [...fixture.sends];
@@ -303,7 +330,7 @@ test('a terminal nested Side failure preserves the saved path without moving foc
   unavailable = false;
   await page.reload();
   await expect(nested).toBeVisible();
-  await expect(middle.getByTestId('prompt-input')).toHaveValue('');
+  await expectDraft(middle.getByTestId('prompt-input'), '');
   await expect(page).toHaveURL(location);
   expect(fixture.creates).toHaveLength(3);
   expect(fixture.sends).toEqual(sentBeforeReload);
@@ -338,8 +365,8 @@ for (const keepOpened of [false, true]) {
     }, keepOpened);
     await page.reload();
     await expect(fixture.side).toBeVisible();
-    await expect(fixture.primary.getByTestId('prompt-input')).toHaveValue(primaryDraft);
-    await expect(fixture.side.getByTestId('prompt-input')).toHaveValue(sideDraft);
+    await expectDraft(fixture.primary.getByTestId('prompt-input'), primaryDraft);
+    await expectDraft(fixture.side.getByTestId('prompt-input'), sideDraft);
     await expect(fixture.primary.locator('.agent-message-assistant').last()).toContainText(primaryHistory);
     await expect(fixture.side.locator('.agent-message-assistant').last()).toContainText(sideHistory);
     expect(new Set(fixture.attachments)).toEqual(new Set([fixture.primaryIdentity.nativeSessionId, fixture.sideIdentity.nativeSessionId]));
@@ -360,7 +387,7 @@ for (const action of ['focus', 'Ask'] as const) {
       const created = page.waitForResponse(response => new URL(response.url()).pathname.endsWith('/create'));
       await page.getByTestId('session-create').click();
       const identity = await (await created).json() as { nativeSessionId: string };
-      const primary = page.locator('.lab-primary-conversation > .lab-session-view');
+      const primary = page.locator('[data-workbench-mode="window"] .lab-primary-conversation .lab-session-view');
       await expect(primary.getByTestId('prompt-input')).toBeEnabled();
       await send(primary, primaryHistory);
       await expect(primary.locator('.agent-message-assistant').last()).toContainText(primaryHistory);
@@ -382,7 +409,7 @@ for (const action of ['focus', 'Ask'] as const) {
       await page.reload();
       await requestStarted;
       await expect(primary.locator('.agent-message-assistant').last()).toContainText(primaryHistory);
-      await expect(primary.getByTestId('prompt-input')).toHaveValue(primaryDraft);
+      await expectDraft(primary.getByTestId('prompt-input'), primaryDraft);
       if (action === 'focus') await primary.locator('.agent-message-assistant').last().click();
       else await page.getByRole('button', { name: 'Ask about this session', exact: true }).click();
       release!();

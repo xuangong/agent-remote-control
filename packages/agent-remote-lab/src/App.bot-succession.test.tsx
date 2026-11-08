@@ -55,9 +55,15 @@ it('captures Bot B while Window A stays selected and changing bots cannot retarg
   await act(async () => visibleButton(document, 'Hand off').click());
   expect(prepared).toEqual(['B1']); expect(described).toEqual(['B1']);
   expect(app.sendMessages).toHaveLength(0); expect(app.workspace().window).toEqual(before);
+  const progress = document.querySelector('.lab-handoff-notice')!;
+  expect(progress.closest('[hidden]')).toBeNull();
+  await app.switchMode('window'); expect(progress.closest('[hidden]')).toBeNull();
+  expect(document.querySelectorAll('.lab-handoff-notice')).toHaveLength(1);
+  await app.switchMode('bot');
   await act(async () => app.button('B1').click());
-  expect(app.container.querySelector('.lab-bot-conversation')?.textContent).toMatch(/unknown|Check|Handoff/);
+  expect(progress.textContent).toMatch(/unknown|Check|Handoff/);
   await app.close();
+  expect(document.querySelector('.lab-handoff-notice')).toBeNull();
 });
 
 it('blocks Handoff on the exact pending Bot slot even on a section-only page', async () => {

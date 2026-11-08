@@ -10,7 +10,7 @@ import { SessionDirectoryClient, type OpenedSession } from '../directory-client.
 import { conversationSessionStorage } from '../conversation-storage.js';
 import { sessionKey, type SessionEntry } from '../session-tree.js';
 import { SessionConversation, type SessionConversationProps } from './SessionConversation.js';
-import { SessionConversationMount } from './SessionConversationSurfaces.js';
+import { allowsWindowPaneSelection, SessionConversationMount } from './SessionConversationSurfaces.js';
 import './session-family.css';
 export type { FamilySessionPresentationContext } from './SessionConversation.js';
 
@@ -202,9 +202,10 @@ export function SessionFamily(props: Props) {
         data-view-id={paneView?.id} data-selected={selected || undefined} aria-current={selected ? 'true' : undefined}
         style={compact ? undefined : index === 0 ? rootView ? { width: rootView.placement === 'float' ? '100%' : rootView.width, minWidth: rootView.placement === 'float' ? 0 : 240,
           flex: rootView.placement === 'float' ? 'none' : '0 0 var(--lab-session-family-root-width, auto)' } : undefined : { width: childWidth(item, index), minWidth: shared ? 240 : 320, flex: 'none' }}
-        onPointerDownCapture={event => { if (!(event.target as Element).closest('[data-pane-selection-ignore],.lab-conversation-history,.lab-session-heading-actions-trigger,.lab-timeline-tools-toggle,.lab-session-main-minimize')) focusPane(index); }} onFocusCapture={event => { if (!(event.target as Element).closest('[data-pane-selection-ignore],.lab-conversation-history,.lab-session-heading-actions-trigger,.lab-timeline-tools-toggle,.lab-session-main-minimize')) focusPane(index); }}>
+        onPointerDownCapture={event => { if (allowsWindowPaneSelection(event.target)) focusPane(index); }} onFocusCapture={event => { if (allowsWindowPaneSelection(event.target)) focusPane(index); }}>
         {(visited || active || !compact) ? <SessionTitleInteractionContext.Provider value={index === 0 ? titleInteraction : undefined}><FamilyConversation {...props}
           slotId={index === 0 && rootView && isBotView(rootView) ? sessionBridge?.slotForView(rootView.id)?.id : undefined}
+          onSelectWindowPane={() => focusPane(index)}
           visible={active && (!compact || focus === index) && !(index > 0 && attached[index - 1]?.collapsed)}
           dockHeadingStart={index === 0 ? dockHeadingStart : undefined} familyRoot={index === 0} controls={controls} menuActions={index === 0 ? props.menuActions : undefined} target={item} entries={path}
           replica={index === 0 ? props.replica : undefined} onSessionReady={index === 0 ? props.onSessionReady : undefined}
@@ -224,7 +225,7 @@ export function SessionFamily(props: Props) {
   </div>;
 }
 
-function FamilyConversation({ slotId, ...props }: SessionConversationProps & { slotId?: string }) {
+function FamilyConversation({ slotId, onSelectWindowPane, ...props }: SessionConversationProps & { slotId?: string; onSelectWindowPane(): void }) {
   return slotId ? <SessionConversationMount mode="window" active={props.visible !== false}
-    descriptor={{ slotId, titleInteraction: undefined, props: { ...props, visible: props.visible !== false } }} /> : <SessionConversation {...props} />;
+    descriptor={{ slotId, titleInteraction: undefined, onSelectWindowPane, props: { ...props, visible: props.visible !== false } }} /> : <SessionConversation {...props} />;
 }

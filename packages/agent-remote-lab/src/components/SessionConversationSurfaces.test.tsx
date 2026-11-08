@@ -10,7 +10,7 @@ import { TrackViewScope } from '../hooks/useSessionAttention.js';
 import { SessionConversationMount, SessionConversationSurfaces, type SessionSurfaceDescriptor } from './SessionConversationSurfaces.js';
 import type { SessionConversationProps } from './SessionConversation.js';
 
-const lifecycle = vi.hoisted(() => ({ mounts: 0, unmounts: 0, attachmentEffects: [] as Array<boolean | undefined>, pending: undefined as ((count: number) => void) | undefined }));
+const lifecycle = vi.hoisted(() => ({ mounts: 0, unmounts: 0, attachmentEffects: [] as Array<boolean | undefined>, pending: undefined as ((count: number) => void) | undefined, selectWindowPane: vi.fn() }));
 vi.mock('./SessionConversation.js', async () => {
   const { useEffect, useContext } = await import('react');
   const { WindowLayoutContext } = await import('../window-workspace-context.js');
@@ -20,14 +20,14 @@ vi.mock('./SessionConversation.js', async () => {
     useEffect(() => { lifecycle.attachmentEffects.push(props.attachmentEnabled); }, [props.attachmentEnabled]);
     lifecycle.pending = props.onPendingInputChange;
     const layout = useContext(WindowLayoutContext), track = useContext(TrackViewScope);
-    return <><input aria-label="Owned draft" defaultValue="draft" /><output data-visible={props.visible} data-attach={props.attachmentEnabled}
+    return <><input aria-label="Owned draft" defaultValue="draft" /><button data-pane-selection-ignore>Ignored action</button><output data-visible={props.visible} data-attach={props.attachmentEnabled}
       data-blocked={props.mutationBlocked} data-layout={layout?.window.id} data-track={!!track} data-managed={!!props.attachmentManaged}
       data-agent={props.attachedSession?.agentId} /></>;
   } };
 });
 const target = { hostId: 'host', providerId: 'recorded', nativeSessionId: 'one', title: 'One' };
 function descriptor(transport: RemoteAgentTransport, mode: WorkbenchMode): SessionSurfaceDescriptor {
-  return { slotId: 'slot-one', titleInteraction: undefined, props: {
+  return { slotId: 'slot-one', titleInteraction: undefined, onSelectWindowPane: lifecycle.selectWindowPane, props: {
     storageScope: 'scope', baseUrl: '/scope', target, hostLabel: 'Host', compact: false, active: true,
     offline: false, transport, draftStore: new DraftStore('scope'), viewId: 'slot-one', familyRoot: true,
     entries: [target], visible: true, onNavigate: async () => {},
@@ -47,7 +47,23 @@ function Harness() {
     </section>)}
   </SessionConversationSurfaces></WorkspaceReady.Provider>;
 }
-beforeEach(() => { lifecycle.mounts = 0; lifecycle.unmounts = 0; lifecycle.pending = undefined; lifecycle.attachmentEffects.length = 0; });
+beforeEach(() => { lifecycle.mounts = 0; lifecycle.unmounts = 0; lifecycle.pending = undefined; lifecycle.attachmentEffects.length = 0; lifecycle.selectWindowPane.mockClear(); });
+
+it.each(['pointerdown', 'focusin'])('routes %s to the shown Window pane and fences ignored, Bot, paused and parked interactions', async type => {
+  const container = await render(<Harness />), input = container.querySelector('input')!;
+  const interact = async (target: Element) => act(async () => { target.dispatchEvent(new Event(type, { bubbles: true })); });
+  await interact(input); expect(lifecycle.selectWindowPane).toHaveBeenCalledTimes(1);
+  await interact(container.querySelector('[data-pane-selection-ignore]')!);
+  expect(lifecycle.selectWindowPane).toHaveBeenCalledTimes(1);
+  await act(async () => update({ mode: 'bot' })); await interact(input);
+  expect(lifecycle.selectWindowPane).toHaveBeenCalledTimes(1);
+  await act(async () => update({ mode: 'window', ready: false })); await interact(input);
+  expect(lifecycle.selectWindowPane).toHaveBeenCalledTimes(1);
+  await act(async () => update({ ready: true })); await interact(input);
+  expect(lifecycle.selectWindowPane).toHaveBeenCalledTimes(2);
+  await act(async () => { lifecycle.pending!(1); update({ window: false, bot: false }); }); await interact(input);
+  expect(lifecycle.selectWindowPane).toHaveBeenCalledTimes(2);
+});
 it('moves one leaf between mode destinations without losing its input node or focus', async () => {
   const container = await render(<Harness />);
   const input = container.querySelector<HTMLInputElement>('input')!;

@@ -233,3 +233,34 @@ it('sends merges, splits and transfers to their group and returns the groups the
       .rejects.toMatchObject({ code: 'bot_session_taken', message: 'This session is already a bot in "Release".' });
   });
 });
+
+it('rejects a committed cross-group result whose groups are not the ones it names', async () => {
+  const section = { window: { ...window, revision: 1 }, bots: { rank: 'm', members: {} } };
+  const requests = {
+    merge: (client: WindowWorkspaceClient) => client.merge('window-one', { operationId: 'op', issuedAt: 100, baseRevision: 0, source: 'other', sourceRevision: 0 }),
+    split: (client: WindowWorkspaceClient) => client.split('window-one', { operationId: 'op', issuedAt: 100, baseRevision: 1, newId: 'other' }),
+    transfer: (client: WindowWorkspaceClient) => client.transfer('window-one', { operationId: 'op', issuedAt: 100, baseRevision: 1, viewId: 'main', target: 'other', targetRevision: 0 }),
+  };
+  const bad: Record<string, { groups: unknown; revision?: number }> = {
+    'an array': { groups: [] },
+    'an empty object': { groups: {} },
+    'an array of nulls': { groups: [null, null] },
+    'unrelated keys': { groups: { unrelated: null } },
+    'no entry for the group it was sent to': { groups: { other: null } },
+    'no entry for the other group': { groups: { 'window-one': section } },
+    'a group under another Window id': { groups: { 'window-one': section, other: section } },
+    'a group that is not a group': { groups: { 'window-one': { window: { id: 'window-one' } }, other: null } },
+    'a revision the group has not reached': { groups: { 'window-one': section, other: null }, revision: 2 },
+  };
+  for (const [name, { groups, revision }] of Object.entries(bad)) {
+    for (const [action, send] of Object.entries(requests)) {
+      await withWindowServer(input => ({ body: { result: receipt(input.operationId, revision), groups } }), async client => {
+        await expect(send(client), `${action} with ${name}`).rejects.toMatchObject({ name: 'WindowRequestError', code: 'invalid_window_receipt', message: 'Invalid Window groups.' });
+      });
+    }
+  }
+  // A retained receipt may describe an earlier revision than the group holds now.
+  await withWindowServer(input => ({ body: { result: receipt(input.operationId, 0), groups: { 'window-one': section, other: null } } }), async client => {
+    expect((await requests.merge(client)).groups).toEqual({ 'window-one': section, other: null });
+  });
+});

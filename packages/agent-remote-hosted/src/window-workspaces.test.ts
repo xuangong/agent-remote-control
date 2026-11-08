@@ -2,7 +2,7 @@ import { afterEach, expect, it } from 'vitest';
 import { createHash } from 'node:crypto';
 import { createHostedRelay } from './gateway.js';
 import { createServer, type Server } from 'node:http';
-import { createWindowView, type WorkspaceWindow } from '@orchardworks/agent-remote-protocol';
+import { createWindowView, decodeWorkspaceWindow, type WorkspaceWindow } from '@orchardworks/agent-remote-protocol';
 import { createRelayState, emptyRelayState, validateRelayState, type HostedRelayState } from './state.js';
 import { createWindowWorkspaces } from './window-workspaces.js';
 import { handleWindowRequest } from './window-routes.js';
@@ -266,4 +266,31 @@ it('creates an empty Window through HTTP without synthesizing a primary pane', a
   const created = await f.call('', 'POST', { operationId: 'empty-create', issuedAt: Date.now(), window: empty });
   expect(created.body).toMatchObject({ result: { status: 'committed' }, window: empty });
   expect((await f.call('/window')).body.window).toEqual(empty);
+});
+
+const sectionWindow = (id: string, nativeSessionId: string, title = 'Release'): WorkspaceWindow => ({ schemaVersion: 3, id, title, revision: 0,
+  selectedPrimaryViewId: 'writer', selectedViewId: 'writer', views: [createWindowView('writer', { ...binding, nativeSessionId }, 'primary')] });
+
+it('lists every group, keeping sections without a Window out of the list older pages read', async () => {
+  const f = await fixture(); await f.create();
+  const created = await f.call('', 'POST', { operationId: 'create-section', issuedAt: Date.now(), window: sectionWindow('section', 'writer'),
+    bots: { rank: 'm', members: { writer: { label: 'Writer' } } }, presentation: { window: false } });
+  expect(created.body).toMatchObject({ result: { status: 'committed' }, bots: { rank: 'm' }, presentation: { window: false } });
+  const listed = await f.call();
+  expect(listed.body.windows.map((window: WorkspaceWindow) => window.id)).toEqual(['window']);
+  expect(listed.body.groups.map((group: { window: WorkspaceWindow }) => group.window.id)).toEqual(['window', 'section']);
+  // An older page decodes every Window it is given.
+  expect(listed.body.windows.every((window: unknown) => decodeWorkspaceWindow(window))).toBe(true);
+  expect((await f.call('/section')).body).toMatchObject({ bots: { members: { writer: { label: 'Writer' } } }, presentation: { window: false } });
+  const restarted = await fixture(f.saved());
+  expect((await restarted.call('/section')).body.presentation).toEqual({ window: false });
+});
+
+it('refuses stored groups whose appearances or bot details are invalid', async () => {
+  const f = await fixture(); await f.create();
+  const saved = structuredClone(f.saved());
+  const row = saved.workspaceWindows![0]!;
+  expect(validateRelayState({ ...saved, workspaceWindows: [{ ...row, bots: { rank: 'm', members: {} } }] }, auth).workspaceWindows![0]!.bots).toEqual({ rank: 'm', members: {} });
+  expect(() => validateRelayState({ ...saved, workspaceWindows: [{ ...row, presentation: { window: false } }] }, auth)).toThrow();
+  expect(() => validateRelayState({ ...saved, workspaceWindows: [{ ...row, bots: { rank: 'm', members: { missing: {} } } }] }, auth)).toThrow();
 });

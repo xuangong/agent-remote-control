@@ -324,3 +324,43 @@ it('keeps a section through layout edits and drops it with the group', async () 
   expect(row).not.toHaveProperty('presentation');
   expect((await f.call()).body.groups).toEqual([]);
 });
+
+it('refuses to make a session a bot in a second section, naming the section that has it', async () => {
+  const f = await fixture(); await f.create();
+  expect((await f.call('/window/operations', 'POST', f.mutation('as-section', 0, { type: 'bots.add', rank: 'm' }))).body.result.status).toBe('committed');
+  // A plain Window may still show the same session.
+  const second = { ...sectionWindow('second', 'native', 'Second'), views: [createWindowView('writer', binding, 'primary')] };
+  expect((await f.call('', 'POST', { operationId: 'second', issuedAt: Date.now(), window: second })).body.result.status).toBe('committed');
+  const refused = await f.call('/second/operations', 'POST', f.mutation('second-as-section', 0, { type: 'bots.add', rank: 'n' }));
+  expect(refused.body.result).toMatchObject({ status: 'rejected', code: 'bot_session_taken', message: 'This session is already a bot in "Window".' });
+  expect(refused.body.bots).toBeUndefined();
+  const created = await f.call('', 'POST', { operationId: 'third', issuedAt: Date.now(), window: { ...second, id: 'third' }, bots: { rank: 'o', members: {} } });
+  expect(created.status).toBe(409);
+  expect((await f.call()).body.groups.map((group: { window: WorkspaceWindow }) => group.window.id)).toEqual(['window', 'second']);
+});
+
+it('keeps a bot on its conversation whichever client changes it', async () => {
+  const f = await fixture(); await f.create();
+  await f.call('/window/operations', 'POST', f.mutation('as-section', 0, { type: 'bots.add', rank: 'm' }));
+  const rebind = await f.call('/window/operations', 'POST', f.mutation('rebind', 1, { type: 'view.bind', viewId: 'primary', binding: { ...binding, nativeSessionId: 'other' } }));
+  expect(rebind.body.result).toMatchObject({ status: 'rejected', code: 'bot_view' });
+  const retitle = await f.call('/window/operations', 'POST', f.mutation('retitle', 1, { type: 'view.bind', viewId: 'primary', binding: { ...binding, title: 'Renamed' } }));
+  expect(retitle.body.result.status).toBe('committed');
+  const details = await f.call('/window/operations', 'POST', f.mutation('label', 2, { type: 'bot.update', viewId: 'primary', details: { label: 'Writer', pinned: true } }));
+  expect(details.body).toMatchObject({ result: { status: 'committed', revision: 3 }, bots: { members: { primary: { label: 'Writer', pinned: true } } } });
+  // Layout errors keep their generic code.
+  const missing = await f.call('/window/operations', 'POST', f.mutation('missing', 3, { type: 'view.close', viewId: 'nowhere' }));
+  expect(missing.body.result).toMatchObject({ status: 'rejected', code: 'invalid_operation' });
+});
+
+it('lets other edits through when an older Worker left a session as a bot twice', async () => {
+  const f = await fixture(); await f.create();
+  const saved = structuredClone(f.saved());
+  const subject = saved.workspaceWindows![0]!.subject;
+  const twin = (id: string, title: string) => ({ subject, id, window: sectionWindow(id, 'twin', title), bots: { rank: 'm', members: {} }, generation: 0, receipts: [] });
+  const restarted = await fixture({ ...saved, workspaceWindows: [...saved.workspaceWindows!, twin('one', 'One'), twin('two', 'Two')] });
+  expect((await restarted.call('/window/operations', 'POST', restarted.mutation('elsewhere', 0, { type: 'bots.add', rank: 'o' }))).body.result.status).toBe('committed');
+  const renamed = await restarted.call('/one/operations', 'POST', restarted.mutation('rename-one', 0, { type: 'rename', title: 'Renamed' }));
+  expect(renamed.body.result).toMatchObject({ status: 'rejected', code: 'bot_session_taken', message: 'This session is already a bot in "Two".' });
+  expect((await restarted.call('/one/operations', 'POST', restarted.mutation('unsection-one', 0, { type: 'bots.remove' }))).body.result.status).toBe('committed');
+});

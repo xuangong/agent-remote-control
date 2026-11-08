@@ -161,10 +161,14 @@ export function applyGroupOperation(source: WindowGroup, operation: WindowGroupO
   return result;
 }
 
-/** Rule 5: a session is at most one bot across a user's groups. Names the first group that already has a session claimed again. */
-export function duplicateBot(groups: readonly WindowGroup[]): { session: WindowSessionBinding; group: WindowGroup } | undefined {
+/**
+ * Rule 5: a session is at most one bot across a user's groups. Finds a bot of the changed groups whose session is already a bot
+ * in another group, or twice among the changed groups, and names the group that has it. Duplicates among unchanged groups are left alone.
+ */
+export function duplicateBot(unchanged: readonly WindowGroup[], changed: readonly WindowGroup[]): { session: WindowSessionBinding; group: WindowGroup } | undefined {
   const owners = new Map<string, WindowGroup>();
-  for (const group of groups) for (const view of groupBotViews(group)) {
+  for (const group of unchanged) for (const view of groupBotViews(group)) owners.set(windowSessionIdentity(view.binding), group);
+  for (const group of changed) for (const view of groupBotViews(group)) {
     const key = windowSessionIdentity(view.binding);
     const owner = owners.get(key);
     if (owner) return { session: view.binding, group: owner };

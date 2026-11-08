@@ -1,8 +1,9 @@
 import { createHash } from 'node:crypto';
 import {
-  decodeWorkspaceWindow, hasWindowAppearance, isWindowBots, isWindowDeleteRequest, isWindowGroup, isWindowGroupCreateRequest, isWindowMutation,
-  isWindowOperationResult, isWindowPresentation, isWindowSessionBinding, applyWindowOperation, pruneBotDetails, WINDOW_OPERATION_RETENTION_MS,
-  type WindowBots, type WindowDeleteRequest, type WindowGroup, type WindowGroupCreateRequest, type WindowMutation,
+  decodeWorkspaceWindow, hasWindowAppearance, isWindowBots, isWindowDeleteRequest, isWindowGroup, isWindowGroupCreateRequest, isWindowGroupMutation,
+  isWindowOperationResult, isWindowPresentation, isWindowSessionBinding, applyGroupOperation, duplicateBot, pruneBotDetails, WindowGroupError,
+  WINDOW_OPERATION_RETENTION_MS,
+  type WindowBots, type WindowDeleteRequest, type WindowGroup, type WindowGroupCreateRequest, type WindowGroupMutation,
   type WindowOperationResult, type WindowPresentation, type WindowSessionBinding, type WorkspaceWindow,
 } from '@orchardworks/agent-remote-protocol';
 import type { RelayState, HostedRelayState } from './state.js';
@@ -89,9 +90,20 @@ export function createWindowWorkspaces(state: RelayState, canReadSession: (subje
   function bindings(subject: string, window: WorkspaceWindow) {
     if (window.views.some(view => view.binding && !canReadSession(subject, view.binding))) fail(403, 'session_forbidden', 'A referenced session is unavailable.');
   }
+  /** Rule 5 for the groups a change replaces (by ID; null removes one): none of their bots may be a bot elsewhere. */
+  function uniqueBots(rows: readonly SavedWorkspaceWindow[], subject: string, changed: ReadonlyMap<string, WindowGroup | null>) {
+    const unchanged = rows.filter(row => row.subject === subject && !row.deleted && !changed.has(row.id)).map(windowGroup);
+    const duplicate = duplicateBot(unchanged, [...changed.values()].filter((group): group is WindowGroup => group !== null));
+    if (duplicate) fail(409, 'bot_session_taken', `This session is already a bot in "${duplicate.group.window.title}".`);
+  }
+  /** A refusal's code: service and group rules name theirs; other layout errors stay generic, as before. */
+  function failure(error: unknown): { code: string; message: string } {
+    if (!(error instanceof Error)) throw error;
+    return { code: error instanceof WindowServiceError || error instanceof WindowGroupError ? error.code : 'invalid_operation', message: error.message };
+  }
   function notify(subject: string, id: string) { for (const wake of waiters.get(JSON.stringify([subject, id])) ?? []) wake(); }
   function time(issuedAt: number) { if (issuedAt <= now() - WINDOW_OPERATION_RETENTION_MS || issuedAt > now() + 60_000) fail(410, 'operation_expired', 'Operation issuance time is outside retention.'); }
-  function settle(row: SavedWorkspaceWindow, input: WindowGroupCreateRequest | WindowMutation | WindowDeleteRequest, apply: () => void) {
+  function settle(row: SavedWorkspaceWindow, input: WindowGroupCreateRequest | WindowGroupMutation | WindowDeleteRequest, apply: () => void) {
     const fingerprint = hash(canonical(input)); const previous = row.receipts.find(item => item.result.operationId === input.operationId);
     if (previous && previous.result.expiresAt > now()) {
       if (previous.fingerprint !== fingerprint) fail(409, 'operation_conflict', 'Operation ID was used with different input.');
@@ -102,10 +114,7 @@ export function createWindowWorkspaces(state: RelayState, canReadSession: (subje
     row.receipts = row.receipts.filter(item => item.result.expiresAt > now());
     if (row.receipts.length >= 4096) fail(429, 'receipt_capacity', 'Window operation retention capacity reached.');
     let code: string | undefined; let message: string | undefined;
-    try { apply(); } catch (error) {
-      if (!(error instanceof WindowServiceError) && !(error instanceof Error)) throw error;
-      code = error instanceof WindowServiceError ? error.code : 'invalid_operation'; message = error.message;
-    }
+    try { apply(); } catch (error) { ({ code, message } = failure(error)); }
     const result: WindowOperationResult = { operationId: input.operationId, status: code ? 'rejected' : 'committed', revision: row.window?.revision ?? ('baseRevision' in input ? input.baseRevision + (code ? 0 : 1) : 0), committedAt: now(), expiresAt: now() + WINDOW_OPERATION_RETENTION_MS, ...(code ? { code, message } : {}) };
     row.receipts.push({ fingerprint, result });
     return { result, ...described(row) };
@@ -135,20 +144,24 @@ export function createWindowWorkspaces(state: RelayState, canReadSession: (subje
       const outcome = await state.mutate(draft => {
         if (principal.authorize?.() === false) fail(401, 'unauthorized', 'Authorization is unavailable.');
         const rows = draft.workspaceWindows ??= []; let row = rows.find(row => row.subject === principal.subject && row.id === input.window.id);
-        if (!row) { time(input.issuedAt); bindings(principal.subject, input.window); if (input.window.revision !== 0) fail(400, 'invalid_revision', 'New Windows start at revision zero.'); if (rows.length >= 10000) fail(429, 'window_capacity', 'Window capacity reached.'); row = { subject: principal.subject, id: input.window.id, generation: 0, receipts: [] }; rows.push(row); }
+        if (!row) { time(input.issuedAt); bindings(principal.subject, input.window); if (input.window.revision !== 0) fail(400, 'invalid_revision', 'New Windows start at revision zero.'); if (rows.length >= 10000) fail(429, 'window_capacity', 'Window capacity reached.'); uniqueBots(rows, principal.subject, new Map([[input.window.id, group]])); row = { subject: principal.subject, id: input.window.id, generation: 0, receipts: [] }; rows.push(row); }
         return settle(row, input, () => { if (row!.window || row!.deleted) fail(409, 'window_exists', 'Window identity is already used.'); store(row!, structuredClone(group)); });
       }); notify(principal.subject, input.window.id); return outcome;
     },
     async mutate(principal: WindowPrincipal, id: string, input: unknown) {
       assertInputSize(input);
-      if (!isWindowMutation(input) && !isWindowDeleteRequest(input)) return replayLegacy(principal, id, input);
+      // A plain Window mutation is a group mutation without section edits.
+      if (!isWindowGroupMutation(input) && !isWindowDeleteRequest(input)) return replayLegacy(principal, id, input);
       const outcome = await state.mutate(draft => {
         const row = rowFor(draft, principal, id, true);
         return settle(row, input, () => {
           if (row.deleted) fail(404, 'window_not_found', 'Window was deleted.');
           if (row.window!.revision !== input.baseRevision) fail(409, 'revision_conflict', 'Read the current Window revision.');
-          if (input.operation.type === 'delete') deleteRow(row);
-          else { const next = applyWindowOperation(row.window!, input.operation); bindings(principal.subject, next); store(row, pruneBotDetails({ ...windowGroup(row), window: next })); }
+          if (input.operation.type === 'delete') { deleteRow(row); return; }
+          const next = applyGroupOperation(windowGroup(row), input.operation);
+          bindings(principal.subject, next.window);
+          uniqueBots(draft.workspaceWindows!, principal.subject, new Map([[id, next]]));
+          store(row, next);
         });
       }); notify(principal.subject, id); return outcome;
     },

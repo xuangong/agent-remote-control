@@ -132,10 +132,14 @@ it('refuses an invalid group or operation and leaves a refused batch without eff
 it('finds a session that is a bot in two places', () => {
   const first = section(windowOf('one', createWindowView('main', session('a'), 'primary')));
   const second = section(windowOf('two', createWindowView('main', session('a'), 'primary')));
-  expect(duplicateBot([first, second])?.group.window.id).toBe('one');
-  expect(duplicateBot([first, { window: second.window }])).toBeUndefined();
+  expect(duplicateBot([first], [second])?.group.window.id).toBe('one');
+  expect(duplicateBot([second], [first])?.group.window.id).toBe('two');
+  expect(duplicateBot([], [first, second])?.group.window.id).toBe('one');
+  expect(duplicateBot([first], [{ window: second.window }])).toBeUndefined();
   const twice = section(windowOf('three', createWindowView('main', session('b'), 'primary'), createWindowView('dock', session('b'))));
-  expect(duplicateBot([twice])?.session.nativeSessionId).toBe('b');
+  expect(duplicateBot([], [twice])?.session.nativeSessionId).toBe('b');
+  // A duplicate among unchanged groups, such as one an older Worker left, does not block a change elsewhere.
+  expect(duplicateBot([first, second], [section(windowOf('four', createWindowView('main', session('c'), 'primary')))])).toBeUndefined();
 });
 
 it('merges a Window into a section, keeping both appearances and the section identity', () => {

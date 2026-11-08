@@ -100,7 +100,7 @@ export function useWindowWorkspace(scope: string, hosted: boolean, enabled: bool
   const windows = useMemo(() => groups.filter(hasWindowAppearance).map(group => group.window), [groups]);
   const [error, setError] = useState<string>();
   const [route, setRoute] = useState(() => globalThis.location.href);
-  const navigation = useMemo(() => ({ url: globalThis.location.href }), [route, key]);
+  const navigation = useMemo(() => ({ url: globalThis.location.href }), [route, key, workspaceNavigation?.mode]);
   useEffect(() => { const navigate = () => setRoute(globalThis.location.href); globalThis.addEventListener('popstate', navigate); return () => globalThis.removeEventListener('popstate', navigate); }, []);
   const cache = (group: WindowGroup) => {
     if (selection.deleted.has(group.window.id)) return;
@@ -297,11 +297,17 @@ export function useWindowWorkspace(scope: string, hosted: boolean, enabled: bool
       release: () => { if (released) return; released = true; releaseWatch(); },
     };
   }, [stores, admission]);
-  const operateGroup = useCallback(async (id: string, operation: WindowGroupOperation) => {
-    const handle = await acquireGroup(id);
-    try { await handle.operate(operation); } finally { handle.release(); }
-  }, [acquireGroup]);
   const readGroup = useCallback((id: string) => selection.deleted.has(id) ? undefined : stores.get(id)?.getGroup() ?? catalog.groups.find(group => group.window.id === id), [stores, catalog, selection]);
+  const operateGroup = useCallback(async (id: string, operation: WindowGroupOperation) => {
+    const replacesLayout = operation.type === 'layout.apply' || operation.type === 'batch' && operation.operations.some(edit => edit.type === 'layout.apply');
+    const expectedRevision = replacesLayout ? readGroup(id)?.window.revision : undefined;
+    if (replacesLayout && expectedRevision === undefined) throw new Error('Read an available group before applying its layout.');
+    const handle = await acquireGroup(id);
+    try {
+      if (replacesLayout && handle.getGroup().window.revision !== expectedRevision) throw new Error('The group changed before applying this layout. Refresh and retry.');
+      await handle.operate(operation);
+    } finally { handle.release(); }
+  }, [acquireGroup, readGroup]);
   const refreshGroups = useCallback(async () => {
     const ticket = admission, generation = ++catalog.generation;
     const live = () => inScope() && access.current && currentAdmission.current === ticket && catalog.generation === generation;
@@ -386,8 +392,9 @@ export function useWindowWorkspace(scope: string, hosted: boolean, enabled: bool
     }
     if (!participating) return;
     const query = new URL(navigation.url).searchParams;
-    const requested = foreground.current ? query.get('window') : null;
-    const explicitSession = foreground.current && !requested && !!query.get('host') && !!query.get('provider') && !!query.get('session');
+    const windowRoute = foreground.current && query.get('mode') !== 'bot';
+    const requested = windowRoute ? query.get('window') : null;
+    const explicitSession = windowRoute && !requested && !!query.get('host') && !!query.get('provider') && !!query.get('session');
     const target: WindowSessionBinding | undefined = explicitSession ? {
         hostId: query.get('host')!, providerId: query.get('provider')!, nativeSessionId: query.get('session')!,
         title: composition.slots.find(slot => slot.intent.target.hostId === query.get('host')

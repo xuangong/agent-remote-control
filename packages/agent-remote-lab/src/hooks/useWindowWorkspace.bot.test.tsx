@@ -101,6 +101,18 @@ it('rejects an older layout if the group changes while its operation acquires a 
   const stale = read().operateGroup(sectionId, { type: 'layout.apply', layout: { ...layout, title: 'Stale layout' } }); const rejected = expect(stale).rejects.toThrow('changed');
   await act(async () => { await handle.operate({ type: 'rename', title: 'Fresh' }); await rejected; }); expect(read().readGroup(sectionId)?.window.title).toBe('Fresh'); handle.release();
 });
+it('rejects a complete layout when acquisition accepts a newer authoritative revision before enqueue', async () => {
+  const original = group('a'), fresh = applyGroupOperation(original, { type: 'rename', title: 'Fresh' });
+  const backend = server(original); backend.groups.set('a', fresh); vi.spyOn(WindowWorkspaceClient.prototype, 'listGroups').mockResolvedValue([original]);
+  const mutation = vi.spyOn(WindowWorkspaceClient.prototype, 'mutate'); history.replaceState(null, '', '/?mode=bot'); const { read } = await mount('https://acquisition-layout/', true, 'bot');
+  const source = read().readGroup('a')!, { schemaVersion: _, id: __, revision: ___, ...layout } = source.window;
+  expect(source.window.revision).toBe(0);
+  await act(async () => { await expect(read().operateGroup('a', { type: 'layout.apply', layout: { ...layout, title: 'Stale' } })).rejects.toThrow('changed'); });
+  expect(mutation).not.toHaveBeenCalled(); expect(read().readGroup('a')?.window).toEqual(fresh.window);
+  const current = read().readGroup('a')!, { schemaVersion: _version, id: _id, revision: _revision, ...currentLayout } = current.window;
+  await act(async () => read().operateGroup('a', { type: 'layout.apply', layout: { ...currentLayout, title: 'Recomputed' } }));
+  expect(read().readGroup('a')?.window.title).toBe('Recomputed'); expect(mutation.mock.calls[0]?.[1].baseRevision).toBe(1);
+});
 it('does not retire a section on catalog omission until inspect confirms deletion', async () => {
   const backend = server(group('a'), group('b', true)); history.replaceState(null, '', '/?window=a'); const { read } = await mount('https://catalog/', true);
   vi.spyOn(WindowWorkspaceClient.prototype, 'listGroups').mockResolvedValue([group('a')]); await act(async () => read().refreshGroups()); expect(read().groups.some(g => g.window.id === 'b')).toBe(true);

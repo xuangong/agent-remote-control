@@ -3,6 +3,10 @@ import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, expect, it, vi } from 'vitest';
 import { conversationSessionStorage } from '../conversation-storage.js';
 import { useWorkbenchMode } from './useWorkbenchMode.js';
+import { useWindowWorkspace } from './useWindowWorkspace.js';
+import { createCompositionDocument } from '../session-composition.js';
+import { createWindowView, type WindowGroup } from '@orchardworks/agent-remote-protocol';
+import { WindowWorkspaceStore } from '../window-workspace-store.js';
 let root: Root | undefined;
 afterEach(async () => { if (root) await act(async () => root!.unmount()); root = undefined; vi.restoreAllMocks(); localStorage.clear(); sessionStorage.clear(); history.replaceState(null, '', '/'); });
 async function mount(scope = 'scope') { let value!: ReturnType<typeof useWorkbenchMode>; const node = document.createElement('div'); root = createRoot(node); function Harness() { value = useWorkbenchMode(scope); return null; } await act(async () => root!.render(<Harness />)); return () => value; }
@@ -28,4 +32,23 @@ it('persists only fallback locator/title and retains page-local operation on sto
   const saved = sessionStorage.getItem('agent-remote:recovery:scope:bot-place')!; expect(saved).not.toContain('credential'); expect(saved).not.toContain('attachment');
   vi.spyOn(conversationSessionStorage, 'setItem').mockImplementation(() => { throw new Error('full'); });
   await act(async () => read().acceptSectionRoute('another')); expect(read().place).toEqual({ kind: 'section', groupId: 'another' }); expect(read().rosterVisible).toBe(true);
+});
+it.each([
+  '/?mode=bot&host=h&provider=p&session=bot-native&debug=1',
+  '/?mode=bot&section=section&bot=main&debug=1',
+  '/?window=section&host=stale&provider=p&session=old&debug=1',
+])('restores the saved Window without consuming the previous Bot route: %s', async route => {
+  const scope = 'combined-route', key = `agent-remote:recovery:${scope}:shared-window`;
+  const binding = (id: string) => ({ hostId: 'h', providerId: 'p', nativeSessionId: id, title: id });
+  const saved: WindowGroup = { window: { schemaVersion: 3, id: 'a', revision: 0, title: 'A', views: [createWindowView('main', binding('a'), 'primary'), createWindowView('dock', binding('other'), 'dock')], selectedPrimaryViewId: 'main', selectedViewId: 'dock' } };
+  const section: WindowGroup = { window: { ...saved.window, id: 'section', title: 'Section' }, bots: { rank: 'm', members: {} }, presentation: { window: false } };
+  localStorage.setItem(`${key}:a`, JSON.stringify(saved)); localStorage.setItem(`${key}:section`, JSON.stringify(section)); localStorage.setItem(`${key}:last-window`, 'a'); sessionStorage.setItem(key, 'a'); history.replaceState(null, '', route);
+  const composition = createCompositionDocument(scope); let mode!: ReturnType<typeof useWorkbenchMode>, workspace!: ReturnType<typeof useWindowWorkspace>;
+  function Harness() { mode = useWorkbenchMode(scope); workspace = useWindowWorkspace(scope, false, true, composition, true, { mode: mode.mode, onSectionRoute: mode.acceptSectionRoute }); return null; }
+  root = createRoot(document.createElement('div')); await act(async () => root!.render(<Harness />));
+  expect(mode.mode).toBe('bot'); expect(workspace.window).toBeUndefined(); expect(sessionStorage.getItem(key)).toBe('a'); expect(localStorage.getItem(`${key}:last-window`)).toBe('a');
+  const operations = vi.spyOn(WindowWorkspaceStore.prototype, 'operate');
+  await act(async () => mode.setMode('window'));
+  expect(mode.mode).toBe('window'); expect(workspace.window).toEqual(saved.window); expect(location.search).toBe('?debug=1&window=a'); expect(operations).not.toHaveBeenCalled();
+  expect(sessionStorage.getItem(key)).toBe('a'); expect(localStorage.getItem(`${key}:last-window`)).toBe('a');
 });

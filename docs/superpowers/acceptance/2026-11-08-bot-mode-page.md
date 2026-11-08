@@ -9,6 +9,8 @@ layers remain unverified until their evidence is appended below.
 
 - Worktree: `/Volumes/Projects/agent-remote-control/.worktrees/bot-mode-ui`.
 - Reviewed Task 3 baseline: `66f704326512a17037b551f36e8c929eeb1d48c4`.
+- Task 4 implementation snapshot: `190b737a199e70bd5cddcb1f6ac0c104be007f87`.
+  A subsequent test-only change adds the Window-only acknowledgement control.
 - Latest Task 4 static Lab build: `App-DAosOQAX.js`, `App-CM4f-pJK.css`;
   Vite built 1,129 modules in 2.85 seconds. The existing large-chunk warning remains.
 - Node: `v24.22.1`, with `NODE_OPTIONS=--no-experimental-webstorage` and the
@@ -84,7 +86,8 @@ visibility without a manual Back click.
 | Chromium mobile, Bot mode | 14 passed, 30.0 s; ports 50810/50811 |
 | WebKit desktop, Bot mode | 14 passed, 31.0 s; ports 51420/51421 |
 | WebKit mobile, Bot mode | 14 passed, 31.5 s; ports 52248/52249 |
-| Legacy ownership/composition suites | Remaining cases pending; original failures independently confirmed on branch baseline `1c2f9fef` |
+| Window-only acknowledgement control | 4/4 passed; draft clears in all four projects; Lab source/E2E typecheck passed again |
+| Legacy ownership/composition suites | 45 passed, 12 platform skips, 23 failed across 80 remaining cases; see comparison below |
 | Compatibility update/check | Not exercised by Task 4 child; parent owns the reviewed refresh |
 | Repository typecheck/unit suite | Not exercised by Task 4 child; parent owns integration checks |
 
@@ -97,7 +100,8 @@ fresh free Relay/web ports; no existing listener is stopped or reused.
 
 Browser command: `pnpm test:e2e bot-mode.spec.ts --project=<project> --max-failures=3`.
 The four projects are `chromium-desktop`, `chromium-mobile`, `webkit-ask-desktop`
-and `webkit-ask-mobile`. Final remaining totals and ports are appended below.
+and `webkit-ask-mobile`. The added control uses the same command with
+`--grep='staying in Window mode'` and no max-failures option.
 Early fixture/locator corrections are not
 product defects: duplicate empty-section headings needed a region scope,
 remote-created Windows needed their actual selected route, duplicate native
@@ -116,6 +120,47 @@ before selecting another Bot, then expands the same progress section in Window
 for the source, cancellation and viewport-bound assertions. No forced clicks
 or direct scroll-position assignment are used in these cases.
 
+## Legacy Window comparison
+
+Each legacy file/project ran separately with
+`--grep-invert='another session|refresh during an unavailable|a terminal nested'`.
+The three excluded cases retain their assertions and were independently
+reproduced by the parent on the actual branch baseline `1c2f9fef`.
+
+| Project | Ownership: pass / skip / fail | Composition: pass / fail | Ownership ports | Composition ports |
+| --- | --- | --- | --- | --- |
+| Chromium desktop | 8 / 3 / 0; 19.2 s | 7 / 2; 41.0 s | 53072/53073 | 53624/53625 |
+| Chromium mobile | 5 / 3 / 3; 1.4 min | 3 / 6; 2.2 min | 54617/54618 | 55407/55408 |
+| WebKit desktop | 8 / 3 / 0; 22.0 s | 7 / 2; 42.4 s | 56503/56504 | 57316/57317 |
+| WebKit mobile | 5 / 3 / 3; 1.4 min | 2 / 7; 2.4 min | 58254/58255 | 59392/59393 |
+
+The parent independently built baseline `1c2f9fef` and compared the failures.
+The child read those logs under `.tmp/bot-mode/`:
+
+- `branch-base-three.log`: selecting another session leaves the old primary
+  history; unavailable/nested Side alerts match multiple notices.
+- `branch-base-remaining.log` and `branch-base-cache-adapted.log`: both
+  opened-list variants read the removed legacy `composition.path` cache as null.
+  Adapting the baseline-only cache reader to `saved.window ?? saved` makes the
+  Close/primary cases pass; its initial shape mismatch is not product evidence.
+- `branch-base-mobile-ownership.log`: the same mobile containment assertion and
+  Search control intercepted by the action toggle fail on the baseline.
+- `branch-base-mobile-composition.log`: both source-bound Ask cases and the
+  delayed Side snapshot case cannot fill their hidden source editor before
+  reload, with the same setup failure on the baseline.
+- `branch-base-mobile-primary.log`: the baseline reaches its primary history
+  assertion, then cannot click that hidden pane. The current compact case fails
+  earlier because its primary history is not mounted yet. These are different
+  failure points; this scenario does not prove that user-selection behavior.
+- `branch-base-webkit-mobile-cached-ask.log`: the same visible Ask control timeout
+  at line 414 also occurs on baseline WebKit mobile. The current cached Ask
+  cases pass on both Chromium projects and WebKit desktop.
+
+The legacy suites are not fully green. Their assertions remain intact, and no
+unrelated product behavior was changed to make them pass. Failed-case logs are
+stored as `<project>-<legacy-spec>-final.log` under `.tmp/local/bot-mode/`;
+later traces and error contexts are retained in its `legacy-artifacts/` folder.
+
 ## Known draft limitation
 
 With a held successful acknowledgement, switching Window → Bot → Window can
@@ -128,6 +173,23 @@ The sent text may need manual editing or clearing. No uncertain input is
 replayed, and this task does not weaken the image/composer ownership guards.
 Automatically clearing in this case requires separate evidence of continuous
 document ownership.
+
+The explicit Window-only control uses the same fixture, successful-ack gate and
+held native echo, without changing modes. It observes an empty editor after
+`Sent — waiting for conversation…`; Send is disabled because the draft is empty.
+Filling a later draft enables Send again, proving the pending state was released.
+All four controls record `sends:1`, `pending:false`, `draftAfterAck:""` and
+`laterDraftEnabled:true` in `<project>-window-only-ack-control.json`.
+
+| Control project | Result | Relay/web ports |
+| --- | --- | --- |
+| Chromium desktop | 1 passed, 7.0 s | 61011/61012 |
+| Chromium mobile | 1 passed, 5.1 s | 61124/61125 |
+| WebKit desktop | 1 passed, 5.7 s | 61218/61219 |
+| WebKit mobile | 1 passed, 6.2 s | 61346/61347 |
+
+WebKit's two control runs logged Vite socket `ECONNRESET` during disconnection;
+both test processes exited successfully. No fixture cleanup exception occurred.
 
 ## Complete local instance layers
 
@@ -149,5 +211,30 @@ temporary authority servers in `finally`; the root runner owns its two fixture
 services. The child has not started or stopped a complete local instance, used
 the user's browser/Controller, pushed or deployed.
 
-Final inspected screenshots and listener readback will be appended after the
-remaining browser passes.
+The following final-run images were opened and inspected. Paths are relative to
+`.tmp/local/bot-mode/`; the screenshots support visual presentation, while tests
+and fresh group/operation reads establish identity and no-replay behavior.
+
+| Image | Observed presentation |
+| --- | --- |
+| `chromium-desktop-conversation-1440.png` | Roster beside content and one shared draft editor |
+| `chromium-desktop-long-label-roster.png` | Wrapped label, hexagon/color and pin marker; long titles remain bounded |
+| `chromium-desktop-offline-queue-return.png` | One queued reply and the later editable draft |
+| `webkit-ask-mobile-conversation-320.png` | Compact Back/mode controls, readable content and one bounded composer |
+| `webkit-ask-mobile-compact-hidden-roster.png` | Automatic roster with unavailable, Retry and New section |
+| `webkit-ask-mobile-compact-ineligible-roster.png` | Same automatic roster after ordinary Bot eligibility is removed |
+| `webkit-ask-mobile-long-label-independent-scroll.png` | Scrolled roster while the original conversation remains selected |
+| `webkit-ask-mobile-handoff-window-progress.png` | Same Bot source progress, reachable controls and viewport bounds in Window |
+| `webkit-ask-mobile-handoff-complete.png` | Confirmed successor history and retained source draft |
+| `chromium-desktop-acknowledged-retained-draft.png` | Successful acknowledgement with already-sent text retained after mode switches |
+| `chromium-desktop-window-only-ack-control.png` | Successful acknowledgement with an empty Window-only editor |
+| `webkit-ask-mobile-window-only-ack-control.png` | The same empty-editor acknowledgement control on compact WebKit |
+
+`listener-readback.json` records 57 selected fixture/validation ports, all closed
+by `connect_ex`. The failed mobile joined fixture initially left only
+`roles/state.json` after an `ENOTEMPTY` cleanup exception. Its task-owned root
+`arc-joined-browser-HXxNTo` was removed after services exited and read back absent;
+the inspected final roots `arc-joined-browser-9RLzPn` and
+`arc-joined-browser-vVjAtz` were also absent. All child test processes and the
+bounded artifact-preservation process have exited. Parent-started integration
+services and resources are outside this cleanup scope.

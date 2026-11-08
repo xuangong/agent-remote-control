@@ -1,5 +1,5 @@
 import { expect, test, type BrowserContext, type Locator, type Page } from '@playwright/test';
-import { mkdir } from 'node:fs/promises';
+import { mkdir, writeFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { createWindowView, type WindowGroup, type WindowGroupOperation } from '@orchardworks/agent-remote-protocol';
@@ -21,6 +21,47 @@ async function showWindowConversation(page: Page) {
   if (await close.isVisible()) await close.click();
   await expect(composer(page, 'window').first()).toBeEnabled();
 }
+
+test('clears one successful held send while staying in Window mode', async ({ page }) => {
+  const { captured } = await openRecordedBot(page);
+  const text = 'One Window-only held send';
+  let holding = true, release!: () => void, releaseEcho!: () => void, held!: () => void;
+  const waiting = new Promise<void>(resolve => { held = resolve; });
+  const gate = new Promise<void>(resolve => { release = resolve; });
+  const echoGate = new Promise<void>(resolve => { releaseEcho = resolve; });
+  await page.routeWebSocket(/session-channel/, route => {
+    const server = route.connectToServer();
+    server.onMessage(async message => {
+      const envelope = JSON.parse(String(message)), frame = envelope.type === 'message' ? envelope.message : envelope;
+      if (holding && frame.type === 'command_acknowledged' && frame.payload.command === 'send_message') { held(); await gate; }
+      else if (String(message).includes(text)) await echoGate;
+      route.send(message);
+    });
+  });
+  await page.reload(); await expect(composer(page, 'window')).toBeEnabled();
+  const sendsBefore = captured.sends.length;
+  try {
+    await composer(page, 'window').fill(text);
+    await expect(modeRegion(page, 'window').getByTestId('prompt-submit')).toBeEnabled();
+    await composer(page, 'window').press('Enter'); await waiting;
+    await expectDraft(composer(page, 'window'), text);
+    await expect(modeRegion(page, 'window').getByTestId('prompt-submit')).toBeDisabled();
+    expect(captured.sends).toHaveLength(sendsBefore + 1);
+    holding = false; release();
+    await expect(modeRegion(page, 'window').locator('.agent-outgoing-message')).toContainText('Sent — waiting for conversation…');
+    await expectDraft(composer(page, 'window'), '');
+    await expect(modeRegion(page, 'window').getByTestId('prompt-submit')).toBeDisabled();
+    const draftAfterAck = await composer(page, 'window').evaluate(element => element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement ? element.value : element.textContent ?? '');
+    const directory = resolve('../../.tmp/local/bot-mode'); await mkdir(directory, { recursive: true });
+    await expect(modeRegion(page, 'bot')).toBeHidden();
+    await screenshot(page, 'window-only-ack-control'); releaseEcho();
+    await composer(page, 'window').fill('Later Window-only draft');
+    await expectDraft(composer(page, 'window'), 'Later Window-only draft');
+    await expect(modeRegion(page, 'window').getByTestId('prompt-submit')).toBeEnabled();
+    expect(captured.sends).toHaveLength(sendsBefore + 1); expect(captured.creates).toHaveLength(1);
+    await writeFile(resolve(directory, `${test.info().project.name}-window-only-ack-control.json`), JSON.stringify({ mode: 'window', sends: captured.sends.length - sendsBefore, pending: false, nativeEchoHeldAtAck: true, draftAfterAck, laterDraftEnabled: true }, null, 2));
+  } finally { holding = false; release(); releaseEcho(); }
+});
 
 test('retains an in-flight send and a later draft through mode switches without replay', async ({ page }) => {
   const { captured } = await openRecordedBot(page);

@@ -41,7 +41,7 @@ async function mount(scope: string, hosted = true) {
 function hostedWindows(...windows: WorkspaceWindow[]) {
   const documents = new Map(windows.map(window => [window.id, window]));
   const requests: Array<{ id: string; mutation: WindowMutation; response: ReturnType<typeof deferred<WindowCommit>> }> = [];
-  vi.spyOn(WindowWorkspaceClient.prototype, 'list').mockImplementation(async () => [...documents.values()]);
+  vi.spyOn(WindowWorkspaceClient.prototype, 'listGroups').mockImplementation(async () => [...documents.values()].map(window => ({ window })));
   const inspect = vi.spyOn(WindowWorkspaceClient.prototype, 'inspect').mockImplementation(async id => ({ window: documents.get(id)! }));
   const changes = vi.spyOn(WindowWorkspaceClient.prototype, 'changes').mockImplementation((_id, _revision, signal) => new Promise((_resolve, reject) => {
     if (signal.aborted) { reject(signal.reason); return; }
@@ -187,7 +187,7 @@ it('keeps the selected cached Window when another Window finishes saving in the 
   expect(read().window?.id).toBe(second.id);
   expect(new URL(location.href).searchParams.get('window')).toBe(second.id);
   expect(sessionStorage.getItem(key)).toBe(second.id);
-  expect(JSON.parse(localStorage.getItem(`${key}:${first.id}`)!)).toMatchObject({ title: 'Background title', revision: 1 });
+  expect(JSON.parse(localStorage.getItem(`${key}:${first.id}`)!)).toMatchObject({ window: { title: 'Background title', revision: 1 } });
   await act(async () => { inspection.resolve({ window: second }); await open; });
   expect(read().window?.id).toBe(second.id);
   expect(read().window?.title).toBe(second.title);
@@ -211,7 +211,7 @@ it('resumes a different Window pending journal after reload without selecting th
   expect(read().window?.id).toBe(second.id);
   expect(new URL(location.href).searchParams.get('window')).toBe(second.id);
   await act(async () => { server.commit(0); });
-  await until(() => expect(JSON.parse(localStorage.getItem(`${key}:${first.id}`)!)).toMatchObject({ title: 'Recovered background title', revision: 1 }));
+  await until(() => expect(JSON.parse(localStorage.getItem(`${key}:${first.id}`)!)).toMatchObject({ window: { title: 'Recovered background title', revision: 1 } }));
   expect(read().window?.id).toBe(second.id);
   expect(sessionStorage.getItem(key)).toBe(second.id);
   expect(JSON.parse(sessionStorage.getItem(`${key}:pending:${first.id}`) ?? 'null')?.edits ?? []).toEqual([]);
@@ -232,6 +232,7 @@ it('does not promote a pending local snapshot to a committed revision when switc
     await act(async () => read().open(second.id));
     await act(async () => read().open(first.id));
     expect(read().window).toMatchObject({ revision: 1, title: 'Pending local title' });
+    // The local workbench never re-caches this Window, so it keeps the bare layout saveCache wrote before groups.
     expect(JSON.parse(localStorage.getItem(`${key}:${first.id}`)!)).toMatchObject({ revision: 0, title: first.title });
   } finally {
     await act(async () => { release.resolve(); await pending; });

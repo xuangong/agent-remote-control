@@ -4,7 +4,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, expect, it, vi } from 'vitest';
 import { createCompositionDocument, createCompositionSlot, createAskOwner, type CompositionDocument } from '../session-composition.js';
 import { conversationLocalStorage } from '../conversation-storage.js';
-import { applyWindowOperation, createWindowView, type WindowMutation, type WorkspaceWindow } from '@orchardworks/agent-remote-protocol';
+import { applyGroupOperation, applyWindowOperation, createWindowView, type WindowMutation, type WorkspaceWindow } from '@orchardworks/agent-remote-protocol';
 import { useWindowWorkspace } from './useWindowWorkspace.js';
 import { WindowWorkspaces } from '../components/WindowWorkspaces.js';
 import { createServer } from 'node:http';
@@ -22,9 +22,10 @@ async function mount(scope: string, hosted = false, initialComposition?: Composi
 function windowFixture(id: string): WorkspaceWindow {
   return { schemaVersion: 3, id, revision: 0, title: id, selectedPrimaryViewId: 'main', selectedViewId: 'main', views: [createWindowView('main', undefined, 'primary')] };
 }
+const groupsOf = (...windows: WorkspaceWindow[]) => windows.map(window => ({ window }));
 function hostedWindows(...windows: WorkspaceWindow[]) {
   const documents = new Map(windows.map(window => [window.id, window]));
-  const list = vi.spyOn(WindowWorkspaceClient.prototype, 'list').mockImplementation(async () => [...documents.values()]);
+  const list = vi.spyOn(WindowWorkspaceClient.prototype, 'listGroups').mockImplementation(async () => [...documents.values()].map(window => ({ window })));
   const inspect = vi.spyOn(WindowWorkspaceClient.prototype, 'inspect').mockImplementation(async id => {
     const window = documents.get(id); if (!window) throw new WindowRequestError('Window deleted', 404);
     return { window };
@@ -133,7 +134,7 @@ it('keeps the chosen Window when an older Window operation completes', async () 
 });
 
 it('does not select an uncommitted hosted Window when creation fails', async () => {
-  vi.spyOn(WindowWorkspaceClient.prototype, 'list').mockResolvedValue([]);
+  vi.spyOn(WindowWorkspaceClient.prototype, 'listGroups').mockResolvedValue([]);
   vi.spyOn(WindowWorkspaceClient.prototype, 'create').mockRejectedValue(new Error('Service unavailable'));
   const read = await mount('https://example.test/', true);
   expect(read().window).toBeUndefined();
@@ -157,7 +158,7 @@ it('preserves a newer selection when deletion of the previous Window finishes', 
   const first: WorkspaceWindow = { schemaVersion: 3, id: 'first', revision: 0, title: 'First', selectedPrimaryViewId: 'main', selectedViewId: 'main', views: [createWindowView('main', undefined, 'primary')] };
   const second = { ...first, id: 'second', title: 'Second' }, third = { ...first, id: 'third', title: 'Third' };
   history.replaceState(null, '', '/?window=second');
-  vi.spyOn(WindowWorkspaceClient.prototype, 'list').mockResolvedValue([first, second, third]);
+  vi.spyOn(WindowWorkspaceClient.prototype, 'listGroups').mockResolvedValue(groupsOf(first, second, third));
   vi.spyOn(WindowWorkspaceClient.prototype, 'inspect').mockImplementation(async id => ({ window: id === first.id ? first : id === second.id ? second : third }));
   vi.spyOn(WindowWorkspaceClient.prototype, 'changes').mockImplementation((_id, _revision, signal) => new Promise((_resolve, reject) => {
     signal!.addEventListener('abort', () => reject(signal!.reason), { once: true });
@@ -220,7 +221,7 @@ it('retains one exact create request across lost replies, explicit retry and pag
 }, 10000);
 
 it('does not submit a creation unless its recovery identity can be retained', async () => {
-  vi.spyOn(WindowWorkspaceClient.prototype, 'list').mockResolvedValue([]);
+  vi.spyOn(WindowWorkspaceClient.prototype, 'listGroups').mockResolvedValue([]);
   const create = vi.spyOn(WindowWorkspaceClient.prototype, 'create').mockRejectedValue(new Error('Unretained request'));
   vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => { throw new DOMException('Storage full', 'QuotaExceededError'); });
   const read = await mount('https://save-pending.example/', true);
@@ -235,7 +236,7 @@ it('retains an uncertain creation when a replay is refused after its receipt exp
   const window: WorkspaceWindow = { schemaVersion: 3, id: 'uncertain', revision: 0, title: 'Uncertain', selectedPrimaryViewId: 'main', selectedViewId: 'main', views: [createWindowView('main', undefined, 'primary')] };
   const request = { operationId: 'retained-operation', issuedAt: 1, window };
   sessionStorage.setItem(key, JSON.stringify({ request, bindings: [] }));
-  vi.spyOn(WindowWorkspaceClient.prototype, 'list').mockResolvedValue([]);
+  vi.spyOn(WindowWorkspaceClient.prototype, 'listGroups').mockResolvedValue([]);
   vi.spyOn(WindowWorkspaceClient.prototype, 'recoverCreate').mockRejectedValue(new WindowMutationUnknownError(window.id, request, new WindowRequestError('Expired', 410, 'operation_expired')));
   vi.spyOn(WindowWorkspaceClient.prototype, 'create').mockRejectedValue(new WindowRequestError('Expired', 410, 'operation_expired'));
   const read = await mount(scope, true);
@@ -248,7 +249,7 @@ it('retains the original delete identity until its receipt can be settled', asyn
   const window: WorkspaceWindow = { schemaVersion: 3, id: 'pending-delete', revision: 2, title: 'Pending delete', selectedPrimaryViewId: 'main', selectedViewId: 'main', views: [createWindowView('main', undefined, 'primary')] };
   const active = { ...window, id: 'active-window' };
   history.replaceState(null, '', `/?window=${active.id}`);
-  vi.spyOn(WindowWorkspaceClient.prototype, 'list').mockResolvedValue([window, active]);
+  vi.spyOn(WindowWorkspaceClient.prototype, 'listGroups').mockResolvedValue(groupsOf(window, active));
   vi.spyOn(WindowWorkspaceClient.prototype, 'inspect').mockImplementation(async id => ({ window: id === window.id ? window : active }));
   vi.spyOn(WindowWorkspaceClient.prototype, 'changes').mockImplementation((_id, _revision, signal) => new Promise((_resolve, reject) => {
     signal.addEventListener('abort', () => reject(signal.reason), { once: true });
@@ -280,7 +281,7 @@ it('keeps the latest requested Window when an earlier open returns later', async
   const first: WorkspaceWindow = { schemaVersion: 3, id: 'first-choice', revision: 0, title: 'First', selectedPrimaryViewId: 'main', selectedViewId: 'main', views: [createWindowView('main', undefined, 'primary')] };
   const second = { ...first, id: 'second-choice' }, third = { ...first, id: 'third-choice' };
   history.replaceState(null, '', `/?window=${first.id}`);
-  vi.spyOn(WindowWorkspaceClient.prototype, 'list').mockResolvedValue([first, second, third]);
+  vi.spyOn(WindowWorkspaceClient.prototype, 'listGroups').mockResolvedValue(groupsOf(first, second, third));
   let finishSecond!: () => void;
   vi.spyOn(WindowWorkspaceClient.prototype, 'inspect').mockImplementation(async id => id === second.id
     ? new Promise(resolve => { finishSecond = () => resolve({ window: second }); }) : { window: id === third.id ? third : first });
@@ -299,7 +300,7 @@ it('does not let initialization replace a Window explicitly opened while its rea
   const first: WorkspaceWindow = { schemaVersion: 3, id: 'initial-choice', revision: 0, title: 'Initial', selectedPrimaryViewId: 'main', selectedViewId: 'main', views: [createWindowView('main', undefined, 'primary')] };
   const second = { ...first, id: 'manual-choice' };
   history.replaceState(null, '', `/?window=${first.id}`);
-  vi.spyOn(WindowWorkspaceClient.prototype, 'list').mockResolvedValue([first, second]);
+  vi.spyOn(WindowWorkspaceClient.prototype, 'listGroups').mockResolvedValue(groupsOf(first, second));
   let finishInitial!: () => void;
   vi.spyOn(WindowWorkspaceClient.prototype, 'inspect').mockImplementation(async id => id === first.id
     ? new Promise(resolve => { finishInitial = () => resolve({ window: first }); }) : { window: second });
@@ -568,7 +569,7 @@ it('does not replace a missing explicit hosted Window even when its cache exists
   const cached: WorkspaceWindow = { schemaVersion: 3, id: 'cached-missing', revision: 0, title: 'Cached', selectedPrimaryViewId: 'main', selectedViewId: 'main', views: [createWindowView('main', undefined, 'primary')] };
   localStorage.setItem(`agent-remote:recovery:${scope}:shared-window:${cached.id}`, JSON.stringify(cached));
   history.replaceState(null, '', `/?window=${cached.id}`);
-  vi.spyOn(WindowWorkspaceClient.prototype, 'list').mockResolvedValue([]);
+  vi.spyOn(WindowWorkspaceClient.prototype, 'listGroups').mockResolvedValue([]);
   vi.spyOn(WindowWorkspaceClient.prototype, 'inspect').mockRejectedValue(new WindowRequestError('Missing Window', 404));
   vi.spyOn(WindowWorkspaceClient.prototype, 'changes').mockRejectedValue(new WindowRequestError('Missing Window', 404));
   const create = vi.spyOn(WindowWorkspaceClient.prototype, 'create').mockImplementation(async window => ({ window }));
@@ -614,7 +615,7 @@ it('keeps an already requested navigation valid when the current Window is exter
   const first: WorkspaceWindow = { schemaVersion: 3, id: 'deleted-before-navigation', revision: 0, title: 'First', selectedPrimaryViewId: 'main', selectedViewId: 'main', views: [createWindowView('main', undefined, 'primary')] };
   const second = { ...first, id: 'pending-destination', title: 'Second' };
   history.replaceState(null, '', `/?window=${first.id}`);
-  vi.spyOn(WindowWorkspaceClient.prototype, 'list').mockResolvedValue([first, second]);
+  vi.spyOn(WindowWorkspaceClient.prototype, 'listGroups').mockResolvedValue(groupsOf(first, second));
   let openSecond!: () => void, deleteFirst!: () => void;
   const committed = new Map([[first.id, first]]);
   vi.spyOn(WindowWorkspaceClient.prototype, 'inspect').mockImplementation(id => id === second.id ? new Promise(resolve => { openSecond = () => resolve({ window: second }); }) : Promise.resolve({ window: committed.get(id)! }));
@@ -638,7 +639,7 @@ it('renders cached Window before hosted inspection completes without starting sy
   const cached: WorkspaceWindow = { schemaVersion: 3, id: 'early-cache', revision: 0, title: 'Cached', selectedPrimaryViewId: 'main', selectedViewId: 'main', views: [createWindowView('main', undefined, 'primary')] };
   localStorage.setItem(`agent-remote:recovery:${scope}:shared-window:${cached.id}`, JSON.stringify(cached));
   history.replaceState(null, '', `/?window=${cached.id}`);
-  vi.spyOn(WindowWorkspaceClient.prototype, 'list').mockResolvedValue([cached]);
+  vi.spyOn(WindowWorkspaceClient.prototype, 'listGroups').mockResolvedValue(groupsOf(cached));
   let inspected!: () => void;
   vi.spyOn(WindowWorkspaceClient.prototype, 'inspect').mockResolvedValue({ window: cached }).mockImplementationOnce(() => new Promise(resolve => { inspected = () => resolve({ window: cached }); }));
   const changes = vi.spyOn(WindowWorkspaceClient.prototype, 'changes').mockImplementation((_id, _revision, signal) => new Promise((_resolve, reject) => { signal.addEventListener('abort', () => reject(signal.reason), { once: true }); }));
@@ -782,7 +783,7 @@ it('renders and edits the last cached layout while reopen inspection waits for c
       status: 'committed', revision: window.revision, committedAt: Date.now(), expiresAt: Date.now() + 86400000 } }); };
   }));
   let list!: () => void, inspect!: () => void;
-  fixture.list.mockImplementationOnce(() => new Promise(resolve => { list = () => resolve([cached]); }));
+  fixture.list.mockImplementationOnce(() => new Promise(resolve => { list = () => resolve(groupsOf(cached)); }));
   fixture.inspect.mockImplementationOnce(() => new Promise(resolve => { inspect = () => resolve({ window: cached }); }));
   const read = await mount(scope, true);
   expect(read().window).toEqual(cached);
@@ -905,4 +906,61 @@ it('renames a local Window that is not open in this browser storage', async () =
   expect(read().window!.id).toBe(second);
   expect(read().windows.find(window => window.id === first)?.title).toBe('Local research');
   expect(JSON.parse(localStorage.getItem(`agent-remote:recovery:local-rename-other:shared-window:${first}`)!)).toMatchObject({ window: { title: 'Local research' } });
+});
+
+it('lists every group but offers only the Windows, and opens a group with its section', async () => {
+  const plain = windowFixture('plain'), both = windowFixture('both'), only = windowFixture('section-only');
+  vi.spyOn(WindowWorkspaceClient.prototype, 'listGroups').mockResolvedValue([
+    { window: plain },
+    { window: both, bots: { rank: 'm', members: {} } },
+    { window: only, bots: { rank: 'n', members: {} }, presentation: { window: false } },
+  ]);
+  vi.spyOn(WindowWorkspaceClient.prototype, 'inspect').mockImplementation(async id => id === both.id
+    ? { window: both, bots: { rank: 'm', members: {} } } : { window: id === plain.id ? plain : only });
+  vi.spyOn(WindowWorkspaceClient.prototype, 'changes').mockImplementation((_id, _revision, signal) => new Promise((_resolve, reject) => {
+    signal.addEventListener('abort', () => reject(signal.reason), { once: true });
+  }));
+  history.replaceState(null, '', `/?window=${both.id}`);
+  const read = await mount('catalog-groups', true);
+  await act(async () => { await new Promise(resolve => setTimeout(resolve, 10)); });
+  expect(read().groups.map(group => group.window.id).sort()).toEqual(['both', 'plain', 'section-only']);
+  expect(read().windows.map(window => window.id).sort()).toEqual(['both', 'plain']);
+  expect(read().group?.bots).toEqual({ rank: 'm', members: {} });
+});
+
+it('saves a section added to the open Window and keeps it in the catalog', async () => {
+  const window = windowFixture('becomes-section');
+  const hosted = hostedWindows(window);
+  const mutate = vi.spyOn(WindowWorkspaceClient.prototype, 'mutate').mockImplementation(async (id, mutation) => {
+    const group = applyGroupOperation({ window: hosted.documents.get(id)! }, mutation.operation);
+    hosted.documents.set(id, group.window);
+    return { ...group, result: { operationId: mutation.operationId, status: 'committed' as const, revision: group.window.revision, committedAt: 1, expiresAt: 100 } };
+  });
+  history.replaceState(null, '', `/?window=${window.id}`);
+  const read = await mount('add-section', true);
+  await act(async () => { await new Promise(resolve => setTimeout(resolve, 10)); });
+  await act(async () => { await read().operate({ type: 'bots.add', rank: 'm' }); });
+  expect(mutate.mock.calls[0]?.[1].operation).toEqual({ type: 'bots.add', rank: 'm' });
+  expect(read().group?.bots).toEqual({ rank: 'm', members: {} });
+  expect(read().groups.find(group => group.window.id === window.id)?.bots).toEqual({ rank: 'm', members: {} });
+});
+
+it('keeps a local section across a reload and still opens a Window stored before groups', async () => {
+  const read = await mount('local-section');
+  const id = read().window!.id;
+  await act(async () => { await read().operate({ type: 'bots.add', rank: 'm' }); });
+  expect(read().group?.bots).toEqual({ rank: 'm', members: {} });
+  const stored = JSON.parse(conversationLocalStorage.getItem(`agent-remote:recovery:local-section:shared-window:${id}`)!);
+  expect(stored).toMatchObject({ window: { id }, bots: { rank: 'm' } });
+  await act(async () => root!.unmount()); root = undefined;
+  const again = await mount('local-section');
+  expect(again().groups.find(group => group.window.id === id)?.bots).toEqual({ rank: 'm', members: {} });
+
+  const legacy = { schemaVersion: 3, id: 'legacy', revision: 0, title: 'Legacy', selectedPrimaryViewId: 'main', selectedViewId: 'main',
+    views: [createWindowView('main', undefined, 'primary')] };
+  conversationLocalStorage.setItem('agent-remote:recovery:local-legacy:shared-window:legacy', JSON.stringify(legacy));
+  const stale = await mount('local-legacy');
+  await act(async () => stale().open('legacy'));
+  expect(stale().window?.id).toBe('legacy');
+  expect(stale().group?.bots).toBeUndefined();
 });

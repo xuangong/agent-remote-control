@@ -28,7 +28,7 @@ function deferred<T>() {
   return { promise, resolve, reject };
 }
 function remote(selected: WorkspaceWindow) {
-  const list = vi.spyOn(WindowWorkspaceClient.prototype, 'list').mockResolvedValue([selected]);
+  const list = vi.spyOn(WindowWorkspaceClient.prototype, 'listGroups').mockResolvedValue([{ window: selected }]);
   const inspect = vi.spyOn(WindowWorkspaceClient.prototype, 'inspect').mockResolvedValue({ window: selected });
   const operation = vi.spyOn(WindowWorkspaceClient.prototype, 'operation').mockRejectedValue(new WindowRequestError('Receipt expired.', 410, 'operation_expired'));
   const mutate = vi.spyOn(WindowWorkspaceClient.prototype, 'mutate');
@@ -104,7 +104,7 @@ it('ignores a background deletion result from a previous scope', async () => {
   server.inspect.mockImplementation(id => id === backgroundWindow.id ? background.promise : Promise.resolve({ window: id === first.id ? first : second }));
   const page = await mount(firstScope);
   await until(() => expect(server.inspect).toHaveBeenCalledWith(backgroundWindow.id));
-  server.list.mockResolvedValue([second, backgroundWindow]);
+  server.list.mockResolvedValue([{ window: second }, { window: backgroundWindow }]);
   history.replaceState(null, '', `/?window=${second.id}`);
   await page.changeScope(secondScope);
   expect(page.read().window?.id).toBe(second.id);

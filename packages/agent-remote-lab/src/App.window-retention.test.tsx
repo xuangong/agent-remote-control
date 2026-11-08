@@ -185,7 +185,7 @@ it('starts the cached Window native Session before Window inspection settles wit
   let completeInspection!: (snapshot: WindowSnapshot) => void, completeTimeline!: () => void;
   const inspection = new Promise<WindowSnapshot>(resolve => { completeInspection = resolve; });
   const timeline = new Promise<void>(resolve => { completeTimeline = resolve; });
-  vi.spyOn(WindowWorkspaceClient.prototype, 'list').mockResolvedValue([cached]);
+  vi.spyOn(WindowWorkspaceClient.prototype, 'listGroups').mockResolvedValue([{ window: cached }]);
   const inspect = vi.spyOn(WindowWorkspaceClient.prototype, 'inspect').mockReturnValue(inspection);
   vi.spyOn(WindowWorkspaceClient.prototype, 'changes').mockImplementation((_id, _revision, signal) => new Promise((_resolve, reject) => {
     if (signal.aborted) reject(signal.reason);

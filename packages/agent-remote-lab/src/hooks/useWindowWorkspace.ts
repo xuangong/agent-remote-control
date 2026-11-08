@@ -5,7 +5,7 @@ import type { WindowCreateRequest, WindowOperation, WindowSessionBinding, Worksp
 import { conversationLocalStorage, conversationSessionStorage } from '../conversation-storage.js';
 import { captureImportedWindowComposition, restoreImportedWindowComposition, commitImportedWindowComposition, importCompositionWindow, WindowWorkspaceStore } from '../window-workspace.js';
 import type { CompositionDocument } from '../session-composition.js';
-import { applyGroupOperation, applyWindowOperation, createWindowView, decodeWindowGroup, decodeWorkspaceWindow, isWindowCreateRequest, windowPrimaryViewId, type WindowGroup, type WindowGroupOperation } from '@orchardworks/agent-remote-protocol';
+import { applyGroupOperation, applyWindowOperation, createWindowView, decodeWindowGroup, decodeWorkspaceWindow, hasWindowAppearance, isWindowCreateRequest, toWindowGroup, windowPrimaryViewId, type WindowGroup, type WindowGroupOperation } from '@orchardworks/agent-remote-protocol';
 
 interface PendingCreation { request: WindowCreateRequest; candidate: WorkspaceWindow; bindings: Array<[string, string]> }
 interface CreatedWindow { candidate: WorkspaceWindow; snapshot: WindowSnapshot }
@@ -58,25 +58,28 @@ export function useWindowWorkspace(scope: string, hosted: boolean, enabled: bool
   const readWindow = useCallback(() => currentlyUnavailable.current ? undefined : currentStore.current?.getSnapshot(), []);
   const [deleted, setDeleted] = useState(false);
   const selectStore = (next: WindowWorkspaceStore | undefined) => { currentStore.current = next; setStore(next); };
-  const [windows, setWindows] = useState<WorkspaceWindow[]>([]);
+  const [groups, setGroups] = useState<WindowGroup[]>([]);
+  // Only a group shown as a Window can be opened in the workbench; a section alone belongs to Bot mode.
+  const windows = useMemo(() => groups.filter(hasWindowAppearance).map(group => group.window), [groups]);
   const [error, setError] = useState<string>();
   const [route, setRoute] = useState(() => globalThis.location.href);
   const navigation = useMemo(() => ({ url: globalThis.location.href }), [route, key]);
   useEffect(() => { const navigate = () => setRoute(globalThis.location.href); globalThis.addEventListener('popstate', navigate); return () => globalThis.removeEventListener('popstate', navigate); }, []);
-  const cache = (window: WorkspaceWindow) => {
-    if (selection.deleted.has(window.id)) return;
+  const cache = (group: WindowGroup) => {
+    if (selection.deleted.has(group.window.id)) return;
     try {
-      const previous = decodeWindowGroup(JSON.parse(conversationLocalStorage.getItem(`${key}:${window.id}`) ?? 'null'))?.window;
-      if (!previous || previous.revision <= window.revision) conversationLocalStorage.setItem(`${key}:${window.id}`, JSON.stringify(window));
+      const previous = decodeWindowGroup(JSON.parse(conversationLocalStorage.getItem(`${key}:${group.window.id}`) ?? 'null'))?.window;
+      if (!previous || previous.revision <= group.window.revision) persistLocal(group);
     } catch { /* The service remains authoritative when cache storage is unavailable. */ }
   };
   const persistLocal = (group: WindowGroup) => conversationLocalStorage.setItem(`${key}:${group.window.id}`, JSON.stringify(group));
-  const choose = (window: WorkspaceWindow, created = false, confirmed = true) => {
+  const choose = (group: WindowGroup, created = false, confirmed = true) => {
+    const window = group.window;
     if (!inScope() || selection.deleted.has(window.id) || deletions.get(window.id)?.dispatched) return;
-    if (created && !client) persistLocal({ window });
-    const next = makeStore(window);
-    if (confirmed) { next.accept(window); confirmedStores.add(next); }
-    if (client) cache(next.getCommittedSnapshot());
+    if (created && !client) persistLocal(group);
+    const next = makeStore(group);
+    if (confirmed) { next.accept(group); confirmedStores.add(next); }
+    if (client) cache(next.getCommittedGroup());
     if (confirmed) commitImportedWindowComposition(composition, window);
     try { conversationSessionStorage.setItem(key, window.id); } catch { /* The URL still identifies the chosen Window. */ }
     try { conversationLocalStorage.setItem(`${key}:last-window`, window.id); } catch { /* The catalog can restore a Window without this preference. */ }
@@ -85,21 +88,22 @@ export function useWindowWorkspace(scope: string, hosted: boolean, enabled: bool
     navigation.url = url.href;
     selectStore(next); currentlyUnavailable.current = false; setUnavailable(false); setDeleted(false);
   };
-  const readCached = (id: string): WorkspaceWindow | undefined => {
-    const existing = stores.get(id); if (existing) return existing.getCommittedSnapshot();
+  const readCached = (id: string): WindowGroup | undefined => {
+    const existing = stores.get(id); if (existing) return existing.getCommittedGroup();
     try {
       const journal = JSON.parse(conversationSessionStorage.getItem(`${key}:pending:${id}`) ?? 'null');
-      const committed = decodeWindowGroup(journal?.committed)?.window;
-      if (committed?.id === id) return committed;
+      const committed = decodeWindowGroup(journal?.committed);
+      if (committed?.window.id === id) return committed;
     } catch { /* Fall back to the last confirmed layout. */ }
-    try { const value = decodeWindowGroup(JSON.parse(conversationLocalStorage.getItem(`${key}:${id}`) ?? 'null'))?.window; return value?.id === id ? value : undefined; }
+    try { const value = decodeWindowGroup(JSON.parse(conversationLocalStorage.getItem(`${key}:${id}`) ?? 'null')); return value?.window.id === id ? value : undefined; }
     catch { return undefined; }
   };
-  const makeStore = (window: WorkspaceWindow) => {
+  const makeStore = (group: WindowGroup) => {
+    const window = group.window;
     const existing = stores.get(window.id); if (existing) return existing;
     let recovery: unknown;
     try { recovery = JSON.parse(conversationSessionStorage.getItem(`${key}:pending:${window.id}`) ?? 'null'); } catch { /* Invalid journals do not replace a confirmed layout. */ }
-    const next = new WindowWorkspaceStore(window, client, client ? () => cache(next.getCommittedSnapshot()) : undefined, client ? undefined : async (source, operation) => {
+    const next = new WindowWorkspaceStore(group, client, client ? () => cache(next.getCommittedGroup()) : undefined, client ? undefined : async (source, operation) => {
       const commit = async () => {
         const value = decodeWindowGroup(JSON.parse(conversationLocalStorage.getItem(`${key}:${source.window.id}`) ?? 'null'));
         if (!value) throw new Error('The local Window is unavailable.');
@@ -174,15 +178,15 @@ export function useWindowWorkspace(scope: string, hosted: boolean, enabled: bool
     void result.finally(() => { if (creation.running === result) creation.running = undefined; }).catch(() => {});
     return result;
   };
-  const updateCatalog = (window: WorkspaceWindow) => { if (inScope() && !selection.deleted.has(window.id)) setWindows(current => current.some(item => item.id === window.id)
-    ? current.map(item => item.id === window.id ? window : item) : [...current, window]); };
+  const updateCatalog = (group: WindowGroup) => { if (inScope() && !selection.deleted.has(group.window.id)) setGroups(current => current.some(item => item.window.id === group.window.id)
+    ? current.map(item => item.window.id === group.window.id ? group : item) : [...current, group]); };
   const forgetDeletedWindow = (id: string) => {
     selection.deleted.add(id);
     stores.get(id)?.dispose(); stores.delete(id);
     try { conversationSessionStorage.removeItem(`${key}:pending:${id}`); } catch { /* A deleted Window never replays its pending edits. */ }
     try { conversationLocalStorage.removeItem(`${key}:${id}`); } catch { /* A failed cache cleanup cannot undo a confirmed deletion. */ }
     if (!inScope()) return;
-    setWindows(current => current.filter(item => item.id !== id));
+    setGroups(current => current.filter(item => item.window.id !== id));
     if (currentStore.current?.getSnapshot().id !== id) return;
     selectStore(undefined); currentlyUnavailable.current = true; setUnavailable(true); setDeleted(true); setError(undefined);
   };
@@ -220,7 +224,7 @@ export function useWindowWorkspace(scope: string, hosted: boolean, enabled: bool
       }
       return ids;
     };
-    let cached: WorkspaceWindow | undefined;
+    let cached: WindowGroup | undefined;
     for (const id of requested ? [requested] : preferredIds()) {
       const value = readCached(id); if (value) { cached = value; break; }
     }
@@ -228,44 +232,46 @@ export function useWindowWorkspace(scope: string, hosted: boolean, enabled: bool
     if (client && cached && !target) choose(cached, false, false);
     let current = true;
     const live = () => current && inScope() && generation === selection.generation;
-    const restore = async (window: WorkspaceWindow) => {
+    const restore = async (group: WindowGroup) => {
       if (!live()) return;
-      const operation = target && sessionLinkOperation(window, target);
-      choose(window);
-      if (operation) { const pending = makeStore(window).operate(operation); void pending.catch(error => { if (live()) setError(String(error.message ?? error)); }); }
+      const operation = target && sessionLinkOperation(group.window, target);
+      choose(group);
+      if (operation) { const pending = makeStore(group).operate(operation); void pending.catch(error => { if (live()) setError(String(error.message ?? error)); }); }
     };
     if (!client) {
-      const local: WorkspaceWindow[] = [];
+      const local: WindowGroup[] = [];
       for (const entry of conversationLocalStorage.keys().filter(entry => entry.startsWith(`${key}:`))) {
-        try { const value = decodeWindowGroup(JSON.parse(conversationLocalStorage.getItem(entry) ?? 'null'))?.window; if (value) local.push(value); } catch { /* A corrupt cache is not a usable Window. */ }
+        try { const value = decodeWindowGroup(JSON.parse(conversationLocalStorage.getItem(entry) ?? 'null')); if (value) local.push(value); } catch { /* A corrupt cache is not a usable Window. */ }
       }
-      setWindows(local);
+      setGroups(local);
       if (requested && !cached) { setError('This Window is unavailable in the local workbench.'); setUnavailable(true); }
       else {
         const existing = cached ?? local[0];
         try {
           if (existing && !target) choose(existing);
           else if (existing) void Promise.resolve().then(() => restore(existing)).catch(error => { if (live()) setError(String(error.message ?? error)); });
-          else { const imported = initialWindow(); choose(imported, true); }
+          else { const imported = initialWindow(); choose({ window: imported }, true); }
         } catch (error) { setError(String(error instanceof Error ? error.message : error)); }
       }
     }
     if (!enabled || !client) return () => { current = false; };
     const restoreHosted = async () => {
       if (!live()) return;
-      const list = (await client.list()).filter(window => !selection.deleted.has(window.id)); if (!current || generation !== selection.generation) return; setWindows(list.map(window => stores.get(window.id)?.getSnapshot() ?? window));
+      const all = (await client.listGroups()).filter(group => !selection.deleted.has(group.window.id)); if (!current || generation !== selection.generation) return;
+      setGroups(all.map(group => stores.get(group.window.id)?.getGroup() ?? group));
+      const list = all.filter(hasWindowAppearance);
       // A background journal may outlive a Window deleted on another page.
       // Catalog omission alone is insufficient proof, and its inspection must not delay opening the selected Window.
-      const listed = new Set(list.map(window => window.id));
+      const listed = new Set(all.map(group => group.window.id));
       for (const [id, pending] of stores) {
         if (listed.has(id) || id === currentStore.current?.getSnapshot().id || !pending.getSyncState().pending) continue;
         void client.inspect(id).catch(error => {
           if (live() && stores.get(id) === pending && error instanceof WindowRequestError && error.status === 404) forgetDeletedWindow(id);
         });
       }
-      if (requested) { const next = await client.inspect(requested); if (live()) choose(next.window); return; }
+      if (requested) { const next = await client.inspect(requested); if (live()) choose(toWindowGroup(next)); return; }
       if (!pendingCreation()) {
-        const ids = [...new Set([...preferredIds(), ...list.map(window => window.id)])].filter(id => list.some(window => window.id === id));
+        const ids = [...new Set([...preferredIds(), ...list.map(group => group.window.id)])].filter(id => list.some(group => group.window.id === id));
         for (const id of ids) {
           let next: WindowSnapshot;
           try { next = await client.inspect(id); }
@@ -275,12 +281,12 @@ export function useWindowWorkspace(scope: string, hosted: boolean, enabled: bool
             forgetDeletedWindow(id);
             continue;
           }
-          await restore(next.window); return;
+          await restore(toWindowGroup(next)); return;
         }
       }
       if (!live()) return;
       const { candidate, snapshot: next } = await createHosted(initialWindow, false);
-      if (live()) { commitImportedWindowComposition(composition, candidate, next.window); await restore(next.window); }
+      if (live()) { commitImportedWindowComposition(composition, candidate, next.window); await restore(toWindowGroup(next)); }
     };
     const restored = !requested && globalThis.navigator.locks ? globalThis.navigator.locks.request(`${key}:restore`, restoreHosted) : restoreHosted();
     void restored.catch(error => {
@@ -291,11 +297,12 @@ export function useWindowWorkspace(scope: string, hosted: boolean, enabled: bool
     return () => { current = false; };
   }, [scope, client, enabled, route, participating]);
   const window = useSyncExternalStore(store?.subscribe ?? (() => () => {}), store?.getSnapshot ?? (() => undefined));
+  const group = useSyncExternalStore(store?.subscribe ?? (() => () => {}), store?.getGroup ?? (() => undefined));
   const saveState = useSyncExternalStore(store?.subscribe ?? (() => () => {}), store?.getSyncState ?? (() => undefined));
   useEffect(() => {
-    if (!window) return;
-    updateCatalog(window);
-  }, [window]);
+    if (!group) return;
+    updateCatalog(group);
+  }, [group]);
   const confirmed = !!store && confirmedStores.has(store);
   useEffect(() => {
     if (!store || !enabled || !client || !participating || !confirmed) return;
@@ -332,7 +339,7 @@ export function useWindowWorkspace(scope: string, hosted: boolean, enabled: bool
   };
   const hasActiveWindow = confirmed && !unavailable;
   const deletedWindowIds = useMemo(() => [...selection.deleted] as readonly string[], [selection, selection.deleted.size]);
-  return { window, windows, error, client, deleted, deletedWindowIds, hasActiveWindow, saveState, retrySave: () => currentStore.current?.retry() ?? Promise.resolve(),
+  return { window, group, windows, groups, error, client, deleted, deletedWindowIds, hasActiveWindow, saveState, retrySave: () => currentStore.current?.retry() ?? Promise.resolve(),
     discardLocalChanges: () => currentStore.current?.discardPendingChanges() ?? Promise.resolve(), unavailable: participating && enabled && unavailable, operate, readWindow,
     authority: window && !unavailable ? {
       window, readWindow,
@@ -345,10 +352,10 @@ export function useWindowWorkspace(scope: string, hosted: boolean, enabled: bool
       const generation = ++selection.generation;
       const cached = readCached(id);
       if (cached) { choose(cached, false, !client); setError(undefined); }
-      let next: WorkspaceWindow;
+      let next: WindowGroup;
       try {
-        if (client) next = (await client.inspect(id)).window;
-        else { const cached = decodeWindowGroup(JSON.parse(conversationLocalStorage.getItem(`${key}:${id}`) ?? 'null'))?.window; if (!cached || cached.id !== id) throw new Error('This local Window is unavailable.'); next = cached; }
+        if (client) next = toWindowGroup(await client.inspect(id));
+        else { const cached = decodeWindowGroup(JSON.parse(conversationLocalStorage.getItem(`${key}:${id}`) ?? 'null')); if (!cached || cached.window.id !== id) throw new Error('This local Window is unavailable.'); next = cached; }
       } catch (error) {
         if (generation !== selection.generation) return;
         if (error instanceof WindowRequestError && error.status === 404) forgetDeletedWindow(id);
@@ -359,11 +366,11 @@ export function useWindowWorkspace(scope: string, hosted: boolean, enabled: bool
     },
     async create() {
       const generation = ++selection.generation;
-      let created: WorkspaceWindow;
+      let created: WindowGroup;
       const candidate = () => unavailable ? emptyWindow() : importCompositionWindow(composition);
-      if (client) { const { candidate: original, snapshot } = await createHosted(candidate, true); if (generation !== selection.generation) return; created = snapshot.window; commitImportedWindowComposition(composition, original, created); }
-      else created = candidate();
-      choose(created, true); setError(undefined); setWindows(current => [...current.filter(window => window.id !== created.id), created]);
+      if (client) { const { candidate: original, snapshot } = await createHosted(candidate, true); if (generation !== selection.generation) return; created = toWindowGroup(snapshot); commitImportedWindowComposition(composition, original, created.window); }
+      else created = { window: candidate() };
+      choose(created, true); setError(undefined); setGroups(current => [...current.filter(group => group.window.id !== created.window.id), created]);
     },
     /**
      * Renames any Window in the catalog, resolving once the title is applied locally; `saved` settles with the
@@ -376,19 +383,19 @@ export function useWindowWorkspace(scope: string, hosted: boolean, enabled: bool
       if (selection.deleted.has(id) || deletions.has(id)) throw new Error('This Window is being deleted.');
       let target = stores.get(id);
       if (!target) {
-        let window: WorkspaceWindow | undefined;
-        try { window = client ? (await client.inspect(id)).window : readCached(id); }
+        let group: WindowGroup | undefined;
+        try { group = client ? toWindowGroup(await client.inspect(id)) : readCached(id); }
         catch (error) {
           if (error instanceof WindowRequestError && error.status === 404) forgetDeletedWindow(id);
           throw error;
         }
-        if (!window || window.id !== id) throw new Error('This Window is unavailable.');
+        if (!group || group.window.id !== id) throw new Error('This Window is unavailable.');
         if (!inScope() || selection.deleted.has(id)) throw new Error('The Window scope changed before renaming.');
-        target = stores.get(id) ?? makeStore(window);
+        target = stores.get(id) ?? makeStore(group);
       }
       const store = target, saved = store.operate(operation);
-      updateCatalog(store.getSnapshot());
-      void saved.finally(() => updateCatalog(store.getSnapshot())).catch(() => {});
+      updateCatalog(store.getGroup());
+      void saved.finally(() => updateCatalog(store.getGroup())).catch(() => {});
       return { saved };
     },
     async remove(id: string) {

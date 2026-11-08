@@ -627,3 +627,49 @@ it('aborts native restoration on leaf teardown and ignores a late attachment res
   expect(connect).not.toHaveBeenCalled();
   expect(connections.agentIds).toEqual([]);
 });
+
+it.each(['attach', 'native restoration'] as const)('preserves one pending %s request when its surface switches modes', async operation => {
+  const { SessionDirectoryClient, DirectoryError } = await import('../directory-client.js');
+  const { SessionConversationMount, SessionConversationSurfaces } = await import('./SessionConversationSurfaces.js');
+  const { unmount } = await import('../test/setup.js');
+  const target = { hostId: 'host', providerId: 'recorded', nativeSessionId: `mode-${operation}`, title: 'Switching session' };
+  const directory = new SessionDirectoryClient('http://fixture');
+  const owner = { kind: 'native_cli' as const, generation: 'switching-owner' };
+  const attach = vi.spyOn(directory, 'attach');
+  if (operation === 'native restoration') attach.mockRejectedValueOnce(new DirectoryError('Native CLI owns this session', 'native_owned', 409, undefined, owner));
+  let finish!: (value: { agentId: string; nativeSessionId: string }) => void;
+  attach.mockImplementation(() => new Promise(resolve => { finish = resolve; }));
+  const transport = { onDiagnostic: () => () => {}, onProtocolMessage: () => () => {}, connect: () => ({ close() {}, send() {} }) } as unknown as RemoteAgentTransport;
+  const drafts = new DraftStore(`mode-${operation}`);
+  let switchMode!: (mode: 'window' | 'bot') => void;
+  const presented = vi.fn();
+  function Harness() {
+    const [mode, setMode] = useState<'window' | 'bot'>('window'); switchMode = setMode;
+    return <SessionConversationSurfaces scope="mode-attachment" transport={transport} mode={mode}>
+      {(['window', 'bot'] as const).map(destination => <section key={destination} data-destination={destination}>
+        <SessionConversationMount mode={destination} active={mode === destination} descriptor={{ slotId: 'slot', titleInteraction: undefined, props: {
+          target, entries: [target], familyRoot: true, onNavigate: async () => {}, directoryFor: () => directory,
+          storageScope: 'mode-attachment', baseUrl: 'http://fixture', hostLabel: 'Host', compact: false, active: true, offline: false,
+          transport, draftStore: drafts, viewId: 'slot', visible: true, onSessionReady: presented,
+        } }} />
+      </section>)}
+    </SessionConversationSurfaces>;
+  }
+  const container = await render(<Harness />);
+  if (operation === 'native restoration') await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="Interrupt and take control"]')!.click());
+  const expectedCalls = operation === 'native restoration' ? 2 : 1;
+  const signal = attach.mock.calls.at(-1)?.[2];
+  expect(signal?.aborted).toBe(false);
+  const prompt = container.querySelector('[data-testid="prompt-input"]');
+  await act(async () => switchMode('bot'));
+  expect(signal?.aborted).toBe(false);
+  expect(attach).toHaveBeenCalledTimes(expectedCalls);
+  expect(container.querySelector('[data-destination="bot"] [data-testid="prompt-input"]')).toBe(prompt);
+  await act(async () => switchMode('window'));
+  expect(signal?.aborted).toBe(false);
+  expect(attach).toHaveBeenCalledTimes(expectedCalls);
+  await act(async () => finish({ agentId: 'attached-agent', nativeSessionId: target.nativeSessionId }));
+  expect(presented.mock.calls.some(call => call[0]?.operationBinding.source.agentId === 'attached-agent')).toBe(true);
+  expect(attach).toHaveBeenCalledTimes(expectedCalls);
+  await unmount(container);
+});

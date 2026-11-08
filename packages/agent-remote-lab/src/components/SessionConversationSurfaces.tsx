@@ -45,6 +45,11 @@ class ConversationSurfaces {
   private revision = 0;
   private generation = 0;
   private live = true;
+  constructor(public mode: WorkbenchMode) {}
+  selectMode(mode: WorkbenchMode) {
+    if (this.mode === mode) return;
+    this.mode = mode; this.publish();
+  }
   subscribe = (listener: () => void) => { this.listeners.add(listener); return () => { this.listeners.delete(listener); }; };
   snapshot = () => this.revision;
   private publish() { this.revision++; for (const listener of this.listeners) listener(); }
@@ -92,16 +97,18 @@ const SurfaceScope = createContext<{ registry: ConversationSurfaces; enabled: bo
 
 export function SessionConversationSurfaces({ scope, transport, mode, children }: SessionConversationSurfacesProps) {
   const enabled = useContext(WorkspaceReady);
-  const registry = useMemo(() => new ConversationSurfaces(), [scope, transport]);
+  const registry = useMemo(() => new ConversationSurfaces(mode), [scope, transport]);
   const context = useMemo(() => ({ registry, enabled }), [registry, enabled]);
   useSyncExternalStore(registry.subscribe, registry.snapshot, registry.snapshot);
+  // Child layout effects publish destinations first; select their mode from that same committed registration set.
+  useLayoutEffect(() => registry.selectMode(mode), [registry, mode]);
   useLayoutEffect(() => {
     if (enabled) registry.activate(); else registry.deactivate();
     return () => registry.deactivate();
   }, [registry, enabled]);
   return <SurfaceScope.Provider value={context}>{children}
     <div hidden aria-hidden="true" ref={element => { element?.setAttribute('inert', ''); registry.parking = element ?? undefined; }} />
-    {enabled ? [...registry.entries.values()].map(entry => <ConversationSurface key={entry.slotId} registry={registry} entry={entry} mode={mode} />) : null}
+    {enabled ? [...registry.entries.values()].map(entry => <ConversationSurface key={entry.slotId} registry={registry} entry={entry} mode={registry.mode} />) : null}
   </SurfaceScope.Provider>;
 }
 

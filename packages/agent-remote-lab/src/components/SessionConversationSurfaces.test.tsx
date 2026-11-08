@@ -10,13 +10,14 @@ import { TrackViewScope } from '../hooks/useSessionAttention.js';
 import { SessionConversationMount, SessionConversationSurfaces, type SessionSurfaceDescriptor } from './SessionConversationSurfaces.js';
 import type { SessionConversationProps } from './SessionConversation.js';
 
-const lifecycle = vi.hoisted(() => ({ mounts: 0, unmounts: 0, pending: undefined as ((count: number) => void) | undefined }));
+const lifecycle = vi.hoisted(() => ({ mounts: 0, unmounts: 0, attachmentEffects: [] as Array<boolean | undefined>, pending: undefined as ((count: number) => void) | undefined }));
 vi.mock('./SessionConversation.js', async () => {
   const { useEffect, useContext } = await import('react');
   const { WindowLayoutContext } = await import('../window-workspace-context.js');
   const { TrackViewScope } = await import('../hooks/useSessionAttention.js');
   return { SessionConversation(props: SessionConversationProps) {
     useEffect(() => { lifecycle.mounts++; return () => { lifecycle.unmounts++; }; }, []);
+    useEffect(() => { lifecycle.attachmentEffects.push(props.attachmentEnabled); }, [props.attachmentEnabled]);
     lifecycle.pending = props.onPendingInputChange;
     const layout = useContext(WindowLayoutContext), track = useContext(TrackViewScope);
     return <><input aria-label="Owned draft" defaultValue="draft" /><output data-visible={props.visible} data-attach={props.attachmentEnabled}
@@ -46,7 +47,7 @@ function Harness() {
     </section>)}
   </SessionConversationSurfaces></WorkspaceReady.Provider>;
 }
-beforeEach(() => { lifecycle.mounts = 0; lifecycle.unmounts = 0; lifecycle.pending = undefined; });
+beforeEach(() => { lifecycle.mounts = 0; lifecycle.unmounts = 0; lifecycle.pending = undefined; lifecycle.attachmentEffects.length = 0; });
 it('moves one leaf between mode destinations without losing its input node or focus', async () => {
   const container = await render(<Harness />);
   const input = container.querySelector<HTMLInputElement>('input')!;
@@ -138,4 +139,23 @@ it('keeps distinct view slots separate even when they reference the same native 
   inputs[0]!.value = 'First view only';
   expect(inputs[1]!.value).toBe('draft');
   expect(lifecycle.mounts).toBe(2);
+});
+
+
+it('keeps attachment authority through same-slot mode switches', async () => {
+  await render(<Harness />);
+  lifecycle.attachmentEffects.length = 0;
+  await act(async () => update({ mode: 'bot' }));
+  expect(lifecycle.attachmentEffects).not.toContain(false);
+  await act(async () => update({ mode: 'window' }));
+  expect(lifecycle.attachmentEffects).not.toContain(false);
+});
+
+it('disables attachment when the selected mode has no active destination', async () => {
+  const container = await render(<Harness />);
+  lifecycle.attachmentEffects.length = 0;
+  await act(async () => update({ mode: 'bot', bot: false }));
+  expect(lifecycle.attachmentEffects).toContain(false);
+  expect(container.querySelector('output')?.dataset).toMatchObject({ visible: 'false', blocked: 'true', attach: 'false' });
+  expect(container.querySelector('input')?.closest('[inert]')).not.toBeNull();
 });

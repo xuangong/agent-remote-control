@@ -3,7 +3,7 @@ import { createServer } from 'node:http';
 import { once } from 'node:events';
 import { expect, it, vi } from 'vitest';
 import type { WindowMutation, WorkspaceWindow } from '@orchardworks/agent-remote-protocol';
-import { WindowRequestError, WindowWorkspaceClient } from './window-client.js';
+import { WindowRequestError, WindowWorkspaceClient, isWindowRejection } from './window-client.js';
 
 const window: WorkspaceWindow = {
   schemaVersion: 3, id: 'window-one', revision: 0, title: 'One', selectedPrimaryViewId: 'main', selectedViewId: 'main',
@@ -234,33 +234,61 @@ it('sends merges, splits and transfers to their group and returns the groups the
   });
 });
 
-it('rejects a committed cross-group result whose groups are not the ones it names', async () => {
+type Action = 'merge' | 'split' | 'transfer';
+it('accepts only the groups a committed cross-group result names', async () => {
   const section = { window: { ...window, revision: 1 }, bots: { rank: 'm', members: {} } };
-  const requests = {
-    merge: (client: WindowWorkspaceClient) => client.merge('window-one', { operationId: 'op', issuedAt: 100, baseRevision: 0, source: 'other', sourceRevision: 0 }),
-    split: (client: WindowWorkspaceClient) => client.split('window-one', { operationId: 'op', issuedAt: 100, baseRevision: 1, newId: 'other' }),
-    transfer: (client: WindowWorkspaceClient) => client.transfer('window-one', { operationId: 'op', issuedAt: 100, baseRevision: 1, viewId: 'main', target: 'other', targetRevision: 0 }),
+  const other = { window: { ...window, id: 'other', revision: 1 } };
+  const requests: Record<Action, (client: WindowWorkspaceClient) => Promise<{ groups: unknown }>> = {
+    merge: client => client.merge('window-one', { operationId: 'op', issuedAt: 100, baseRevision: 0, source: 'other', sourceRevision: 0 }),
+    split: client => client.split('window-one', { operationId: 'op', issuedAt: 100, baseRevision: 1, newId: 'other' }),
+    transfer: client => client.transfer('window-one', { operationId: 'op', issuedAt: 100, baseRevision: 1, viewId: 'main', target: 'other', targetRevision: 0 }),
   };
-  const bad: Record<string, { groups: unknown; revision?: number }> = {
+  // `only` limits a case to the actions for which it is the fault; a merge, for one, must answer its source as null.
+  const bad: Record<string, { groups: unknown; revision?: number; only?: Action[] }> = {
+    'groups missing': { groups: undefined },
+    'groups null': { groups: null },
+    'groups a string': { groups: 'window-one' },
     'an array': { groups: [] },
     'an empty object': { groups: {} },
     'an array of nulls': { groups: [null, null] },
     'unrelated keys': { groups: { unrelated: null } },
     'no entry for the group it was sent to': { groups: { other: null } },
     'no entry for the other group': { groups: { 'window-one': section } },
-    'a group under another Window id': { groups: { 'window-one': section, other: section } },
+    'an extra key': { groups: { 'window-one': section, other: null, victim: null } },
+    'a group under another Window id on the group it was sent to': { groups: { 'window-one': { ...section, window: { ...section.window, id: 'another' } }, other: null } },
+    'a group under another Window id on the other group': { groups: { 'window-one': section, other: section }, only: ['split', 'transfer'] },
     'a group that is not a group': { groups: { 'window-one': { window: { id: 'window-one' } }, other: null } },
     'a revision the group has not reached': { groups: { 'window-one': section, other: null }, revision: 2 },
+    'a merge source that is a group instead of null': { groups: { 'window-one': section, other }, only: ['merge'] },
   };
-  for (const [name, { groups, revision }] of Object.entries(bad)) {
-    for (const [action, send] of Object.entries(requests)) {
+  for (const [name, { groups, revision, only }] of Object.entries(bad)) {
+    for (const action of (only ?? ['merge', 'split', 'transfer']) as Action[]) {
       await withWindowServer(input => ({ body: { result: receipt(input.operationId, revision), groups } }), async client => {
-        await expect(send(client), `${action} with ${name}`).rejects.toMatchObject({ name: 'WindowRequestError', code: 'invalid_window_receipt', message: 'Invalid Window groups.' });
+        await expect(requests[action](client), `${action} with ${name}`).rejects.toMatchObject({ name: 'WindowRequestError', code: 'invalid_window_receipt', message: 'Invalid Window groups.' });
       });
     }
   }
-  // A retained receipt may describe an earlier revision than the group holds now.
-  await withWindowServer(input => ({ body: { result: receipt(input.operationId, 0), groups: { 'window-one': section, other: null } } }), async client => {
-    expect((await requests.merge(client)).groups).toEqual({ 'window-one': section, other: null });
-  });
+  const good: Record<string, { groups: unknown; revision?: number; only?: Action[] }> = {
+    // A retained receipt may describe an earlier revision than the group holds now.
+    'a receipt for an earlier revision': { groups: { 'window-one': section, other: null }, revision: 0 },
+    // A replay can reach a target that was deleted later.
+    'both groups null': { groups: { 'window-one': null, other: null } },
+    'a second group that a split or transfer keeps': { groups: { 'window-one': section, other }, only: ['split', 'transfer'] },
+  };
+  for (const [name, { groups, revision, only }] of Object.entries(good)) {
+    for (const action of (only ?? ['merge', 'split', 'transfer']) as Action[]) {
+      await withWindowServer(input => ({ body: { result: receipt(input.operationId, revision), groups } }), async client => {
+        expect((await requests[action](client)).groups, `${action} with ${name}`).toEqual(groups);
+      });
+    }
+  }
+});
+
+it('tells a refusal from other failures with isWindowRejection', () => {
+  const rejected = { ...receipt('op', 0), status: 'rejected' as const, code: 'stale_revision', message: 'Stale.' };
+  expect(isWindowRejection(new WindowRequestError('Stale.', 200, 'stale_revision', rejected))).toBe(true);
+  expect(isWindowRejection(new WindowRequestError('Not found.', 404, 'window_not_found'))).toBe(true);
+  expect(isWindowRejection(new WindowRequestError('Failed.', 500))).toBe(false);
+  expect(isWindowRejection(new WindowRequestError('Invalid Window groups.', 200, 'invalid_window_receipt'))).toBe(false);
+  expect(isWindowRejection(new Error('Network down.'))).toBe(false);
 });
